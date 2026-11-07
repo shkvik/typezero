@@ -6,7 +6,7 @@ namespace tz {
 
 class BytesNewChecker {
 public:
-  explicit BytesNewChecker(Checker &checker);
+  explicit BytesNewChecker(Checker &owner);
 
   Expr *checkBytesNew(NewExpr *expr, const Type *type);
   Expr *checkTextDecoderParse(CallExpr *call, MemberExpr *member);
@@ -14,8 +14,13 @@ public:
   bool checkBytesSource(Expr *source, const Type *target);
 
 private:
-  Checker &checker_;
-  bool parsing_ = false;
+  static std::string utf8(const std::u16string &text);
+  static std::optional<std::u16string> literalText(const Expr *e);
+  static std::string rangeText(int64_t lo, int64_t hi);
+  static bool mayBeFatal(const Expr *options);
+
+  Checker &checker;
+  bool parsing = false;
 };
 
 }

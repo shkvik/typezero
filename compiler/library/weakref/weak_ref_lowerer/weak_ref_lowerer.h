@@ -6,12 +6,12 @@ namespace tz {
 
 class WeakRefLowerer {
 public:
-  explicit WeakRefLowerer(Lowering &lowering);
+  explicit WeakRefLowerer(Lowering &owner);
 
   llvm::Value *emitWeakRefCall(CallExpr *call);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

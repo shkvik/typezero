@@ -6,7 +6,7 @@ namespace tz {
 
 class StreamPipeline {
 public:
-  explicit StreamPipeline(Checker &checker);
+  explicit StreamPipeline(Checker &owner);
 
   Expr *checkStreamFunction(CallExpr *call, FunctionDecl *decl, llvm::SMLoc loc);
   Expr *checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *func);
@@ -16,7 +16,9 @@ public:
   Expr *valuesIteratorOf(Expr *collection);
 
 private:
-  Checker &checker_;
+  static bool inModule(const std::string &place, llvm::StringRef module);
+
+  Checker &checker;
 };
 
 }

@@ -32,7 +32,7 @@ std::string GenericWidening::writerOf(const ClassDecl *generic, llvm::StringRef 
     }
     for (const Param &param : fn->params) {
       if (param.type && GenericWidening::mentions(*param.type, name)) {
-        return "its public method '" + fn->name.str() + "' takes " + name.str();
+        return ErrorTextVariance::takes(fn->name, name);
       }
     }
   }
@@ -41,7 +41,7 @@ std::string GenericWidening::writerOf(const ClassDecl *generic, llvm::StringRef 
       continue;
     }
     if (field.type && GenericWidening::mentions(*field.type, name)) {
-      return "its public field '" + field.name.str() + "' can be set";
+      return ErrorTextVariance::settable(field.name);
     }
   }
 
@@ -201,21 +201,17 @@ std::string GenericWidening::whyNot(const Type *from, const Type *to) {
       std::string ownName = own->name().str();
       std::string wideName = wide->name().str();
       bool named = !ownName.empty() && ownName.front() != '{' && !own->isUnion();
-      std::string example = named ? ownName : "MyError";
+      std::string example = named ? ownName : ErrorTextVariance::sampleName();
 
-      return "; '" + ownName + "' does not extend '" + wideName +
-             "': a type goes where a wider one is wanted only when it says so, e.g. "
-             "'interface " +
-             example + " extends " + wideName + " { ... }'";
+      return ErrorTextVariance::noExtends(ownName, wideName, example);
     }
     llvm::StringRef name = target->generic()->typeParams[i].name;
     std::string writer = GenericWidening::writerOf(target->generic(), name);
     if (writer.empty()) {
-      writer = "its base class takes " + name.str() + " in";
+      writer = ErrorTextVariance::baseTakes(name);
     }
 
-    return "; '" + target->generic()->name.str() + "' with a wider " + name.str() +
-           " would let a value of another type into it: " + writer;
+    return ErrorTextVariance::wider(target->generic()->name, name, writer);
   }
 
   return "";

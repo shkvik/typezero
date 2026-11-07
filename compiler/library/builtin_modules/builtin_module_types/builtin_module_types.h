@@ -9,7 +9,7 @@ namespace tz {
 
 class BuiltinModuleTypes {
 public:
-  explicit BuiltinModuleTypes(Checker &checker);
+  explicit BuiltinModuleTypes(Checker &owner);
 
   void declare(llvm::ArrayRef<llvm::StringLiteral> pieces, llvm::StringRef bufferName);
   void exportFrom(NodeModule module, llvm::StringRef name);
@@ -19,9 +19,9 @@ public:
   const Type *named(llvm::StringRef name);
 
 private:
-  Checker &checker_;
-  llvm::StringMap<TypeAliasDecl *> aliases_;
-  std::set<std::pair<NodeModule, std::string>> exports_;
+  Checker &checker;
+  llvm::StringMap<TypeAliasDecl *> aliases;
+  std::set<std::pair<NodeModule, std::string>> exports;
 };
 
 }

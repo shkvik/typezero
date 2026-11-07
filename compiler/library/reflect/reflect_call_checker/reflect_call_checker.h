@@ -6,7 +6,7 @@ namespace tz {
 
 class ReflectCallChecker {
 public:
-  explicit ReflectCallChecker(Checker &checker);
+  explicit ReflectCallChecker(Checker &owner);
 
   Expr *checkReflectArgs(Expr *args);
   FunctionDecl *knownReflectMethod(ClassDecl *cls, llvm::StringRef name, bool &several);
@@ -16,7 +16,11 @@ public:
   static bool reflectAccepts(const Type *arg, const Type *param);
 
 private:
-  Checker &checker_;
+  static const Type *designType(const Expr *key);
+  static bool isDesignKey(const Expr *key);
+  static Expr *stripImplicit(Expr *expr);
+
+  Checker &checker;
 };
 
 }

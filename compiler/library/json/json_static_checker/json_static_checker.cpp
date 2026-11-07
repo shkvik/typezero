@@ -17,16 +17,12 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::string toUtf8(const std::u16string &text) {
+std::string JsonStaticChecker::toUtf8(const std::u16string &text) {
   std::string utf8;
   llvm::convertUTF16ToUTF8String(
       llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
@@ -35,7 +31,7 @@ std::string toUtf8(const std::u16string &text) {
   return utf8;
 }
 
-bool mayHoldItself(const Type *type, std::vector<const Type *> &open) {
+bool JsonStaticChecker::mayHoldItself(const Type *type, std::vector<const Type *> &open) {
   type = type->nonOptional();
   if (type->isParam() || type->isAnyObject()) {
     return false;
@@ -47,7 +43,9 @@ bool mayHoldItself(const Type *type, std::vector<const Type *> &open) {
   open.push_back(type);
   bool may = false;
   auto fieldsHold = [&](const Type *t) {
-    return llvm::any_of(t->fields(), [&](const Field &f) { return mayHoldItself(f.type, open); });
+    return llvm::any_of(t->fields(), [&](const Field &f) {
+      return JsonStaticChecker::mayHoldItself(f.type, open);
+    });
   };
   if (const ClassDecl *cls = type->classDecl()) {
     std::vector<const ClassDecl *> family{cls};
@@ -58,33 +56,36 @@ bool mayHoldItself(const Type *type, std::vector<const Type *> &open) {
       family.insert(family.end(), family[i]->children.begin(), family[i]->children.end());
     }
   } else if (type->isArray()) {
-    may = mayHoldItself(type->inner(), open);
+    may = JsonStaticChecker::mayHoldItself(type->inner(), open);
   } else if (type->isResult()) {
-    may = mayHoldItself(type->okType(), open) || mayHoldItself(type->errType(), open);
+    may = JsonStaticChecker::mayHoldItself(type->okType(), open) ||
+          JsonStaticChecker::mayHoldItself(type->errType(), open);
   } else if (type->isDict()) {
-    may = mayHoldItself(type->valueType(), open);
+    may = JsonStaticChecker::mayHoldItself(type->valueType(), open);
   } else if (type->isObject()) {
     may = fieldsHold(type);
   } else if (type->isUnion()) {
-    may = llvm::any_of(type->members(), [&](const Type *m) { return mayHoldItself(m, open); });
+    may = llvm::any_of(type->members(),
+                       [&](const Type *m) { return JsonStaticChecker::mayHoldItself(m, open); });
   }
   open.pop_back();
 
   return may;
 }
 
-const ClassDecl *classWithToJson(const Type *type, llvm::SmallPtrSetImpl<const Type *> &seen) {
+const ClassDecl *JsonStaticChecker::classWithToJson(const Type *type,
+                                                    llvm::SmallPtrSetImpl<const Type *> &seen) {
   while (type->isOptional() || type->isArray()) {
     type = type->inner();
   }
   if (type->isResult()) {
-    if (const ClassDecl *cls = classWithToJson(type->okType(), seen)) {
+    if (const ClassDecl *cls = JsonStaticChecker::classWithToJson(type->okType(), seen)) {
       return cls;
     }
-    return classWithToJson(type->errType(), seen);
+    return JsonStaticChecker::classWithToJson(type->errType(), seen);
   }
   if (type->isRecord()) {
-    return classWithToJson(type->valueType(), seen);
+    return JsonStaticChecker::classWithToJson(type->valueType(), seen);
   }
   if (!type->isObject() || !seen.insert(type).second) {
     return nullptr;
@@ -97,7 +98,7 @@ const ClassDecl *classWithToJson(const Type *type, llvm::SmallPtrSetImpl<const T
     }
   }
   for (const Field &f : type->fields()) {
-    if (const ClassDecl *cls = classWithToJson(f.type, seen)) {
+    if (const ClassDecl *cls = JsonStaticChecker::classWithToJson(f.type, seen)) {
       return cls;
     }
   }
@@ -105,88 +106,90 @@ const ClassDecl *classWithToJson(const Type *type, llvm::SmallPtrSetImpl<const T
   return nullptr;
 }
 
-bool mayStringifyToUndefined(const Type *type) {
+bool JsonStaticChecker::mayStringifyToUndefined(const Type *type) {
   return type->isUndefined() || type->isOptional() || type->isFunction() || type->isNever() ||
          type->isUnknown();
 }
 
-}
-
-JsonStaticChecker::JsonStaticChecker(Checker &checker) : checker_(checker) {}
+JsonStaticChecker::JsonStaticChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
       if (!JsonChecker::isNullName(arg)) {
-        arg = checker_.exprChecker().checkExpr(arg);
+        arg = this->checker.exprChecker().checkExpr(arg);
       }
     }
   };
-  if (checker_.callChecker().rejectSpread(call)) {
+  if (this->checker.callChecker().rejectSpread(call)) {
     return call;
   }
   llvm::StringRef fn = member->name;
   if (fn == "parse") {
     if (call->args.size() == 2) {
-      checker_.diags_.error(call->args[1]->loc(), "the reviver of JSON.parse is not supported");
+      this->checker.diags_.error(call->args[1]->loc(),
+                                 "the reviver of JSON.parse is not supported");
       checkArgsLoosely();
       return call;
     }
     if (!member->typeArgs.empty()) {
-      checker_.diags_.error(member->loc(), "JSON.parse takes no type arguments");
+      this->checker.diags_.error(member->loc(), "JSON.parse takes no type arguments");
       checkArgsLoosely();
       return call;
     }
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 1, 1);
     if (arity.isErr()) {
-      checker_.diags_.error(member->loc(), arity.error().message);
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
-    call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
-    checkConstantJson(call->args[0]);
+    call->args[0] = this->checker.argumentChecker().checkArg(call->args[0], Type::string());
+    this->checkConstantJson(call->args[0]);
     call->target = BuiltinCall{.builtin = Builtin::JsonParse};
-    call->type = Type::result(Type::json(), checker_.prelude().builtinType("JsonError"));
+    call->type = Type::result(Type::json(), this->checker.prelude().builtinType("JsonError"));
     return call;
   }
   if (!member->typeArgs.empty()) {
-    checker_.diags_.error(member->loc(), "'JSON." + fn + "' takes no type arguments");
+    this->checker.diags_.error(member->loc(), "'JSON." + fn + "' takes no type arguments");
   }
   if (fn != "stringify") {
-    checker_.diags_.error(member->loc(),
-                          "'JSON." + fn + "' does not exist; JSON has parse and stringify");
+    this->checker.diags_.error(member->loc(),
+                               "'JSON." + fn + "' does not exist; JSON has parse and stringify");
     checkArgsLoosely();
     return call;
   }
-  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 3);
+  ArgumentChecker::ResultArityMatches arity =
+      this->checker.argumentChecker().checkArity(call, 1, 3);
   if (arity.isErr()) {
-    checker_.diags_.error(member->loc(), arity.error().message);
+    this->checker.diags_.error(member->loc(), arity.error().message);
     return call;
   }
-  Expr *value = call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
+  Expr *value = call->args[0] = this->checker.exprChecker().checkExpr(call->args[0]);
   bool ok = !value->type->isError();
   if (value->type->isVoid()) {
-    checker_.diags_.error(value->loc(),
-                          "an expression of type 'void' has no value to write as JSON");
+    this->checker.diags_.error(value->loc(),
+                               "an expression of type 'void' has no value to write as JSON");
     ok = false;
   }
   llvm::SmallPtrSet<const Type *, 8> seen;
-  if (const ClassDecl *cls = ok ? classWithToJson(value->type, seen) : nullptr) {
-    checker_.diags_.error(value->loc(),
-                          "JSON.stringify does not call the method toJSON of class '" + cls->name +
-                              "': tz calls no code by itself; call it, e.g. "
-                              "'JSON.stringify(x.toJSON())'");
+  if (const ClassDecl *cls = ok ? JsonStaticChecker::classWithToJson(value->type, seen) : nullptr) {
+    this->checker.diags_.error(
+        value->loc(), "JSON.stringify does not call the method toJSON of class '" + cls->name +
+                          "': tz calls no code by itself; call it, e.g. "
+                          "'JSON.stringify(x.toJSON())'");
     ok = false;
   }
   std::vector<Expr *> args{value};
   if (call->args.size() >= 2) {
     Expr *replacer = call->args[1];
     if (!JsonChecker::isNullName(replacer) && !isa<UndefinedExpr>(replacer)) {
-      replacer = checker_.exprChecker().checkExpr(replacer);
+      replacer = this->checker.exprChecker().checkExpr(replacer);
       if (!replacer->type->isError()) {
-        checker_.diags_.error(replacer->loc(),
-                              "a replacer is not supported: tz calls no code by itself; "
-                              "build the value to write first, and pass 'null' here");
+        this->checker.diags_.error(replacer->loc(),
+                                   "a replacer is not supported: tz calls no code by itself; "
+                                   "build the value to write first, and pass 'null' here");
       }
       ok = false;
     }
@@ -194,17 +197,17 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
   if (call->args.size() == 3) {
     Expr *space = call->args[2];
     if (!JsonChecker::isNullName(space) && !isa<UndefinedExpr>(space)) {
-      space = checker_.exprChecker().checkExpr(space);
+      space = this->checker.exprChecker().checkExpr(space);
       const Type *type = space->type;
       if (type->isNumeric()) {
-        args.push_back(checker_.typeRelations().convert(space, Type::doubleTy()));
+        args.push_back(this->checker.typeRelations().convert(space, Type::doubleTy()));
       } else if (type->isString()) {
         args.push_back(space);
       } else if (!type->isError()) {
-        checker_.diags_.error(space->loc(),
-                              "the space of JSON.stringify is a number of spaces or a "
-                              "string, found '" +
-                                  type->name() + "'");
+        this->checker.diags_.error(space->loc(),
+                                   "the space of JSON.stringify is a number of spaces or a "
+                                   "string, found '" +
+                                       type->name() + "'");
         ok = false;
       }
     }
@@ -214,11 +217,13 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
   }
   call->args = std::move(args);
   call->target = BuiltinCall{.builtin = Builtin::JsonStringify};
-  call->type =
-      mayStringifyToUndefined(value->type) ? Type::optional(Type::string()) : Type::string();
+  call->type = JsonStaticChecker::mayStringifyToUndefined(value->type)
+                   ? Type::optional(Type::string())
+                   : Type::string();
   std::vector<const Type *> open;
-  if (!checker_.libraryCalls().inLibrary(call->loc()) && mayHoldItself(value->type, open)) {
-    call->type = Type::result(call->type, checker_.prelude().builtinType("JsonError"));
+  if (!this->checker.libraryCalls().inLibrary(call->loc()) &&
+      JsonStaticChecker::mayHoldItself(value->type, open)) {
+    call->type = Type::result(call->type, this->checker.prelude().builtinType("JsonError"));
   }
 
   return call;
@@ -235,26 +240,26 @@ bool JsonStaticChecker::readEmbedded(CallExpr *call, llvm::StringRef fn, std::st
   } else if (auto *tmpl = dyn_cast<TemplateExpr>(arg); tmpl && tmpl->exprs.empty()) {
     path = tmpl->quasis[0];
   } else {
-    call->args[0] = checker_.exprChecker().checkExpr(arg);
-    checker_.diags_.error(arg->loc(), "the path of " + fn +
-                                          " must be a string literal: the file is read "
-                                          "when the program is compiled, e.g. '" +
-                                          example + "'");
+    call->args[0] = this->checker.exprChecker().checkExpr(arg);
+    this->checker.diags_.error(arg->loc(), "the path of " + fn +
+                                               " must be a string literal: the file is read "
+                                               "when the program is compiled, e.g. '" +
+                                               example + "'");
     return false;
   }
-  shown = toUtf8(path);
+  shown = JsonStaticChecker::toUtf8(path);
   if (llvm::StringRef(shown).contains('\\')) {
-    checker_.diags_.error(arg->loc(), "write '/' in the path, not '\\', as on every system");
+    this->checker.diags_.error(arg->loc(), "write '/' in the path, not '\\', as on every system");
     return false;
   }
   if (shown.empty() || llvm::sys::path::is_absolute(shown) || shown[0] == '/') {
-    checker_.diags_.error(arg->loc(), "the path of " + fn +
-                                          " is relative to the file it is written in, "
-                                          "e.g. '" +
-                                          example + "'");
+    this->checker.diags_.error(arg->loc(), "the path of " + fn +
+                                               " is relative to the file it is written in, "
+                                               "e.g. '" +
+                                               example + "'");
     return false;
   }
-  llvm::SourceMgr &sources = checker_.diags_.sourceMgr();
+  llvm::SourceMgr &sources = this->checker.diags_.sourceMgr();
   unsigned id = sources.FindBufferContainingLoc(call->loc());
   llvm::StringRef source = id ? sources.getMemoryBuffer(id)->getBufferIdentifier() : "";
   llvm::SmallString<256> path8(llvm::sys::path::parent_path(source));
@@ -264,8 +269,8 @@ bool JsonStaticChecker::readEmbedded(CallExpr *call, llvm::StringRef fn, std::st
   full = std::string(path8);
   auto buffer = llvm::MemoryBuffer::getFile(full, false, false);
   if (!buffer) {
-    checker_.diags_.error(arg->loc(),
-                          "cannot read '" + shown + "': " + buffer.getError().message());
+    this->checker.diags_.error(arg->loc(),
+                               "cannot read '" + shown + "': " + buffer.getError().message());
     return false;
   }
   bytes = (*buffer)->getBuffer().str();
@@ -290,15 +295,17 @@ void JsonStaticChecker::checkConstantJson(const Expr *arg) {
                                   lit->value.size()),
       text);
   if (llvm::StringRef(text).starts_with("\xEF\xBB\xBF")) {
-    checker_.diags_.error(lit->loc(), "this text is not JSON, so JSON.parse would always fail: it "
-                                      "starts with a byte order mark (BOM)");
+    this->checker.diags_.error(lit->loc(),
+                               "this text is not JSON, so JSON.parse would always fail: it "
+                               "starts with a byte order mark (BOM)");
     return;
   }
   pkg::JsonProblem problem = pkg::checkJsonText(text);
   if (problem.message.empty()) {
     return;
   }
-  size_t line = 1, column = 1;
+  size_t line = 1;
+  size_t column = 1;
   for (size_t i = 0; i < problem.offset && i < text.size(); ++i) {
     if (text[i] == '\n') {
       ++line;
@@ -307,53 +314,56 @@ void JsonStaticChecker::checkConstantJson(const Expr *arg) {
       ++column;
     }
   }
-  checker_.diags_.error(lit->loc(), "this text is not JSON, so JSON.parse would always fail: " +
-                                        problem.message + " (line " + std::to_string(line) +
-                                        ", column " + std::to_string(column) + ")");
+  this->checker.diags_.error(
+      lit->loc(), "this text is not JSON, so JSON.parse would always fail: " + problem.message +
+                      " (line " + std::to_string(line) + ", column " + std::to_string(column) +
+                      ")");
 }
 
 Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
   static const llvm::StringLiteral names[] = {"embedText", "embedBytes"};
-  if (!llvm::any_of(
-          names, [&](llvm::StringRef n) { return checker_.callChecker().isGlobalName(name, n); })) {
+  if (!llvm::any_of(names, [&](llvm::StringRef n) {
+        return this->checker.callChecker().isGlobalName(name, n);
+      })) {
     return nullptr;
   }
   llvm::StringRef fn = name->name;
   call->type = Type::error();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
   };
-  if (checker_.callChecker().rejectSpread(call)) {
+  if (this->checker.callChecker().rejectSpread(call)) {
     return call;
   }
 
   if (!name->typeArgs.empty()) {
-    checker_.diags_.error(name->loc(), "'" + fn + "' takes no type arguments");
+    this->checker.diags_.error(name->loc(), "'" + fn + "' takes no type arguments");
   }
 
   if (fn == "embedBytes") {
-    return checker_.bufferStaticChecker().checkEmbedBytes(call, name);
+    return this->checker.bufferStaticChecker().checkEmbedBytes(call, name);
   }
-  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+  ArgumentChecker::ResultArityMatches arity =
+      this->checker.argumentChecker().checkArity(call, 1, 1);
   if (arity.isErr()) {
-    checker_.diags_.error(name->loc(), arity.error().message);
+    this->checker.diags_.error(name->loc(), arity.error().message);
     return call;
   }
   std::string bytes, shown, full;
-  if (!readEmbedded(call, fn, bytes, shown, full)) {
+  if (!this->readEmbedded(call, fn, bytes, shown, full)) {
     return call;
   }
   llvm::StringRef text(bytes);
   llvm::SmallVector<llvm::UTF16, 64> units;
   if (!llvm::convertUTF8ToUTF16String(text, units)) {
-    checker_.diags_.error(call->args[0]->loc(), "'" + shown + "' is not text in UTF-8");
+    this->checker.diags_.error(call->args[0]->loc(), "'" + shown + "' is not text in UTF-8");
     return call;
   }
   std::u16string content(units.begin(), units.end());
 
-  auto *lit = checker_.ctx_.make<StringLitExpr>(call->loc(), std::move(content));
+  auto *lit = this->checker.ctx_.make<StringLitExpr>(call->loc(), std::move(content));
   lit->type = Type::string();
 
   return lit;

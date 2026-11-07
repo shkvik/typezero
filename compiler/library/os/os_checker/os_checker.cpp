@@ -5,16 +5,10 @@
 #include "compiler/library/builtin_modules/node_check_helpers/node_check_helpers.h"
 #include "llvm/ADT/STLExtras.h"
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-const Type *cpuInfoType() {
+const Type *OsChecker::cpuInfoType() {
   const Type *d = Type::doubleTy();
   const Type *times = Type::object({{"user", d, false},
                                     {"nice", d, false},
@@ -26,7 +20,7 @@ const Type *cpuInfoType() {
       {{"model", Type::string(), false}, {"speed", d, false}, {"times", times, false}}, "CpuInfo");
 }
 
-const Type *userInfoType() {
+const Type *OsChecker::userInfoType() {
   return Type::object({{"uid", Type::intTy(), false},
                        {"gid", Type::intTy(), false},
                        {"username", Type::string(), false},
@@ -35,16 +29,16 @@ const Type *userInfoType() {
                       "UserInfo");
 }
 
-}
 
-OsChecker::OsChecker(Checker &checker) : checker_(checker) {}
+OsChecker::OsChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *OsChecker::checkOsValue(llvm::StringRef name, Expr *expr) {
   if (name == "EOL") {
-    return stringLiteral(checker_.ctx_, expr->loc(), targetIsWindows() ? "\r\n" : "\n");
+    return stringLiteral(this->checker.ctx_, expr->loc(), targetIsWindows() ? "\r\n" : "\n");
   }
   if (name == "devNull") {
-    return stringLiteral(checker_.ctx_, expr->loc(),
+    return stringLiteral(this->checker.ctx_, expr->loc(),
                          targetIsWindows() ? "\\\\.\\nul" : "/dev/null");
   }
 
@@ -54,23 +48,23 @@ Expr *OsChecker::checkOsValue(llvm::StringRef name, Expr *expr) {
 Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   call->type = Type::error();
   if (fn == "EOL" || fn == "devNull") {
-    checker_.diags_.error(loc, "'" + fn + "' is a string, not a function");
+    this->checker.diags_.error(loc, "'" + fn + "' is a string, not a function");
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     return call;
   }
-  bool rejected = checker_.callChecker().rejectSpread(call);
+  bool rejected = this->checker.callChecker().rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 0, 0);
+      rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 0, 0);
   if (arity.isErr()) {
-    checker_.diags_.error(loc, arity.error().message);
+    this->checker.diags_.error(loc, arity.error().message);
   }
   if (rejected || arity.isErr()) {
     return call;
   }
   auto which = [&](int value) {
-    auto *lit = checker_.ctx_.make<IntLitExpr>(loc, uint64_t(value));
+    auto *lit = this->checker.ctx_.make<IntLitExpr>(loc, uint64_t(value));
     lit->type = Type::intTy();
     call->args = {lit};
   };
@@ -95,7 +89,7 @@ Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     return call;
   }
   if (fn == "endianness") {
-    auto *lit = checker_.ctx_.make<StringLitExpr>(loc, u"LE");
+    auto *lit = this->checker.ctx_.make<StringLitExpr>(loc, u"LE");
     lit->type = Type::string();
     return lit;
   }
@@ -106,7 +100,7 @@ Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
   }
   if (fn == "cpus") {
     call->target = BuiltinCall{.builtin = Builtin::OsCpus};
-    call->type = Type::array(cpuInfoType());
+    call->type = Type::array(OsChecker::cpuInfoType());
     return call;
   }
   if (fn == "loadavg") {
@@ -116,10 +110,10 @@ Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
   }
   if (fn == "userInfo") {
     call->target = BuiltinCall{.builtin = Builtin::OsUserInfo};
-    call->type = userInfoType();
+    call->type = OsChecker::userInfoType();
     return call;
   }
-  checker_.diags_.error(loc, "'" + fn + "' of 'node:os' is not supported yet");
+  this->checker.diags_.error(loc, "'" + fn + "' of 'node:os' is not supported yet");
 
   return call;
 }

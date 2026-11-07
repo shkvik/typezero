@@ -251,7 +251,7 @@ void LateClasses::checkStaticFields(ClassDecl *cls) {
     f.init = this->checker.exprChecker().checkExpr(f.init, expected);
     this->checker.staticsSet_.insert(f.var());
     if (declared) {
-      std::string label = "static field '" + f.name.str() + "'";
+      std::string label = ErrorTextStaticType::fieldLabel(f.name);
       f.init = this->checker.typeRelations().coerce(f.init, declared, label);
       continue;
     }
@@ -286,12 +286,7 @@ void LateClasses::checkLateClasses() {
       this->checker.diags_.setCapture(&this->checker.lateErrors_[owner]);
     }
     this->checker.flow_ = Checker::Flow();
-    ClassChecker::ResultBodiesChecked bodies = this->checker.classChecker().checkClassBodies(cls);
-    if (bodies.isErr()) {
-      for (const ClassCheckerCheckClassBodiesError &error : bodies.error()) {
-        this->checker.diags_.error(error.loc, error.message);
-      }
-    }
+    this->checker.classChecker().checkClassBodies(cls);
     this->checker.checkingInstance_ = outerInstance;
     this->checker.diags_.setCapture(outerCapture);
   }

@@ -7,32 +7,30 @@
 #include "compiler/check/types/type_resolver/type_resolver.h"
 #include "compiler/library/process/process_checker/process_checker.h"
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-WeakRefChecker::WeakRefChecker(Checker &checker) : checker_(checker) {}
+WeakRefChecker::WeakRefChecker(Checker &owner)
+    : checker(owner) {}
 
 const Type *WeakRefChecker::resolveWeakRefType(const TypeRef &ref) {
   if (ref.kind() != TypeRefKind::GENERIC_REF || ref.args.size() != 1) {
-    checker_.diags_.error(ref.loc, "'WeakRef' needs the type of its object, e.g. 'WeakRef<Node>'");
+    this->checker.diags_.error(ref.loc,
+                               "'WeakRef' needs the type of its object, e.g. 'WeakRef<Node>'");
     return Type::error();
   }
-  const Type *target = checker_.typeResolver().resolveType(ref.args[0], false);
+  const Type *target = this->checker.typeResolver().resolveType(ref.args[0], false);
   if (target->isError()) {
     return target;
   }
 
-  return checkWeakTarget(target, ref.args[0].loc) ? Type::weakRef(target) : Type::error();
+  return this->checkWeakTarget(target, ref.args[0].loc) ? Type::weakRef(target) : Type::error();
 }
 
 bool WeakRefChecker::checkWeakTarget(const Type *target, llvm::SMLoc loc) {
   if (target->isRegExp() || target->isMatch() || target->isDate() || target->isDateFormat() ||
       target->isBytes() || target->isTimer()) {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         loc, "a WeakRef of '" + target->name().str() +
                  "' is not supported yet; it refers to objects of the program's types");
     return false;
@@ -47,73 +45,73 @@ bool WeakRefChecker::checkWeakTarget(const Type *target, llvm::SMLoc loc) {
   } else {
     message += "; hold the value itself";
   }
-  checker_.diags_.error(loc, message);
+  this->checker.diags_.error(loc, message);
 
   return false;
 }
 
 Expr *WeakRefChecker::checkWeakRefNew(NewExpr *expr, const Type *expected) {
   llvm::SMLoc loc = expr->loc();
-  auto *callee = checker_.ctx_.make<NameExpr>(loc, "WeakRef");
+  auto *callee = this->checker.ctx_.make<NameExpr>(loc, "WeakRef");
   auto failed = [&] {
     for (Expr *&arg : expr->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
-    auto *error = checker_.ctx_.make<UndefinedExpr>(loc);
+    auto *error = this->checker.ctx_.make<UndefinedExpr>(loc);
     error->type = Type::error();
 
     return error;
   };
   if (expr->args.size() != 1) {
-    checker_.diags_.error(loc,
-                          "'new WeakRef' takes the object it refers to, e.g. 'new WeakRef(node)'");
+    this->checker.diags_.error(
+        loc, "'new WeakRef' takes the object it refers to, e.g. 'new WeakRef(node)'");
     return failed();
   }
   const Type *target = nullptr;
   if (expr->typeArgs.size() == 1) {
-    target = checker_.typeResolver().resolveType(expr->typeArgs[0], false);
+    target = this->checker.typeResolver().resolveType(expr->typeArgs[0], false);
   } else if (!expr->typeArgs.empty()) {
-    checker_.diags_.error(loc, "'WeakRef' takes one type argument, the type of its object");
+    this->checker.diags_.error(loc, "'WeakRef' takes one type argument, the type of its object");
   } else if (expected && expected->nonOptional()->isWeakRef()) {
     target = expected->nonOptional()->weakTarget();
   }
   if (target && target->isError()) {
     return failed();
   }
-  Expr *arg =
-      checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(expr->args[0], target));
+  Expr *arg = this->checker.genericChecker().apparent(
+      this->checker.exprChecker().checkExpr(expr->args[0], target));
   if (arg->type->isError()) {
     return arg;
   }
   if (!target) {
     target = arg->type;
   }
-  if (!checkWeakTarget(target, arg->loc())) {
+  if (!this->checkWeakTarget(target, arg->loc())) {
     return arg;
   }
-  arg = checker_.typeRelations().coerce(arg, target);
+  arg = this->checker.typeRelations().coerce(arg, target);
 
-  return checker_.processChecker().builtinCall(loc, callee, Builtin::WeakRefNew, {arg},
-                                               Type::weakRef(target));
+  return this->checker.processChecker().builtinCall(loc, callee, Builtin::WeakRefNew, {arg},
+                                                    Type::weakRef(target));
 }
 
 Expr *WeakRefChecker::checkWeakRefMethod(CallExpr *call, MemberExpr *member) {
   const Type *type = member->object->type;
   call->type = Type::error();
   if (member->name != "deref") {
-    checker_.diags_.error(member->loc(), "property '" + member->name +
-                                             "' does not exist on type '" + type->name() +
-                                             "'; it has 'deref()'");
+    this->checker.diags_.error(member->loc(), "property '" + member->name +
+                                                  "' does not exist on type '" + type->name() +
+                                                  "'; it has 'deref()'");
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     return call;
   }
-  bool rejected = checker_.callChecker().rejectSpread(call);
+  bool rejected = this->checker.callChecker().rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 0, 0);
+      rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 0, 0);
   if (arity.isErr()) {
-    checker_.diags_.error(member->loc(), arity.error().message);
+    this->checker.diags_.error(member->loc(), arity.error().message);
   }
   if (rejected || arity.isErr()) {
     return call;

@@ -91,6 +91,7 @@ class ErrorTextNewArray {
 public:
   static std::string oneArg();
   static std::string needs();
+  static std::string length();
 };
 
 enum class NewCheckerArrayArgsErrorCode {
@@ -119,6 +120,11 @@ struct NewCheckerZeroValueError {
 class ErrorTextZeroValue {
 public:
   static std::string none(llvm::StringRef element);
+};
+
+class ErrorTextUnsupported {
+public:
+  static std::string why(llvm::StringRef name);
 };
 
 }

@@ -11,16 +11,20 @@
 #include "llvm/Support/ConvertUTF.h"
 #include <cstring>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
 namespace {
 
-std::string utf8(const std::u16string &text) {
+const char kUnknownRegex[] =
+    "the regex is known only when the program runs (it is not a literal, nor a variable that "
+    "holds one all along)";
+
+}
+
+std::string StringRegexChecker::utf8(const std::u16string &text) {
   std::string out;
   llvm::convertUTF16ToUTF8String(
       llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
@@ -29,7 +33,7 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-std::u16string units(const uint32_t *program, uint32_t start, uint32_t length) {
+std::u16string StringRegexChecker::units(const uint32_t *program, uint32_t start, uint32_t length) {
   std::u16string text;
   for (uint32_t i = 0; i < length; ++i) {
     text += static_cast<char16_t>(tz_re_name_unit(program, start, i));
@@ -38,7 +42,7 @@ std::u16string units(const uint32_t *program, uint32_t start, uint32_t length) {
   return text;
 }
 
-std::string escapedLiteral(const std::u16string &text) {
+std::string StringRegexChecker::escapedLiteral(const std::u16string &text) {
   std::u16string escaped;
   for (char16_t c : text) {
     if (c < 128 && std::strchr("^$\\.*+?()[]{}|/", static_cast<int>(c))) {
@@ -47,12 +51,12 @@ std::string escapedLiteral(const std::u16string &text) {
     escaped += c;
   }
 
-  return "/" + utf8(escaped) + "/";
+  return "/" + StringRegexChecker::utf8(escaped) + "/";
 }
 
-std::string argumentText(const Expr *arg) {
+std::string StringRegexChecker::argumentText(const Expr *arg) {
   if (auto *lit = dyn_cast<StringLitExpr>(arg)) {
-    std::string text = utf8(lit->value);
+    std::string text = StringRegexChecker::utf8(lit->value);
     if (llvm::all_of(text, [](char c) { return c >= 0x20 && c != '"' && c != '\\'; })) {
       return "\"" + text + "\"";
     }
@@ -64,13 +68,8 @@ std::string argumentText(const Expr *arg) {
   return "s";
 }
 
-const char kUnknownRegex[] =
-    "the regex is known only when the program runs (it is not a literal, nor a variable that "
-    "holds one all along)";
-
-}
-
-StringRegexChecker::StringRegexChecker(Checker &checker) : checker_(checker) {}
+StringRegexChecker::StringRegexChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
@@ -81,21 +80,23 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
   }
   call->type = Type::error();
   bool replace = name == "replace" || name == "replaceAll";
-  unsigned min = replace ? 2 : name == "split" ? 0 : 1, max = name == "split" ? 2 : replace ? 2 : 1;
-  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, min, max);
+  unsigned min = replace ? 2 : name == "split" ? 0 : 1;
+  unsigned max = name == "split" ? 2 : replace ? 2 : 1;
+  ArgumentChecker::ResultArityMatches arity =
+      this->checker.argumentChecker().checkArity(call, min, max);
   if (arity.isErr()) {
-    checker_.diags_.error(member->loc(), arity.error().message);
+    this->checker.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   auto restLoosely = [&] {
     for (size_t i = 1; i < call->args.size(); ++i) {
-      call->args[i] = checker_.exprChecker().checkExpr(call->args[i]);
+      call->args[i] = this->checker.exprChecker().checkExpr(call->args[i]);
     }
 
     return call;
   };
   Expr *&pattern = call->args[0];
-  pattern = checker_.exprChecker().checkExpr(pattern);
+  pattern = this->checker.exprChecker().checkExpr(pattern);
   const Type *type = pattern->type;
   if (type->isError()) {
     return restLoosely();
@@ -111,7 +112,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
     bool global = flags && (*flags & TZ_RE_GLOBAL);
     if (name == "match") {
       if (!flags) {
-        checker_.diags_.error(
+        this->checker.diags_.error(
             member->loc(),
             std::string("what 'match' gives depends on the g flag (all the texts that "
                         "match, or one match with its groups), and ") +
@@ -122,22 +123,23 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
       }
       call->target = BuiltinCall{.builtin = global ? Builtin::StrMatchGlobal : Builtin::StrMatch};
       call->type = Type::optional(global ? Type::array(Type::string())
-                                         : checker_.regexChecker().matchType(regex));
+                                         : this->checker.regexChecker().matchType(regex));
       return call;
     }
     if (name == "matchAll" || name == "replaceAll") {
       if (flags && !global) {
-        std::string source = "/" + utf8(regex->pattern) + "/" + utf8(regex->flags) + "g";
-        checker_.diags_.error(pattern->loc(),
-                              "'" + name +
-                                  "' needs a regex with the g flag (JavaScript throws a "
-                                  "TypeError without it), e.g. '" +
-                                  source + "'");
+        std::string source = "/" + StringRegexChecker::utf8(regex->pattern) + "/" +
+                             StringRegexChecker::utf8(regex->flags) + "g";
+        this->checker.diags_.error(pattern->loc(),
+                                   "'" + name +
+                                       "' needs a regex with the g flag (JavaScript throws a "
+                                       "TypeError without it), e.g. '" +
+                                       source + "'");
         return restLoosely();
       }
       if (name == "matchAll") {
         call->target = BuiltinCall{.builtin = Builtin::StrMatchAll};
-        call->type = Type::iterator(checker_.regexChecker().matchType(regex));
+        call->type = Type::iterator(this->checker.regexChecker().matchType(regex));
         return call;
       }
     }
@@ -148,7 +150,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
     }
     if (name == "split") {
       if (call->args.size() == 2) {
-        call->args[1] = checker_.memberChecker().checkPosition(call->args[1]);
+        call->args[1] = this->checker.memberChecker().checkPosition(call->args[1]);
       }
       bool undefinedGroups = !regex;
       for (uint32_t k = 1; regex && k < tz_re_captures(regex->program.data()); ++k) {
@@ -158,17 +160,17 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
       call->type = Type::array(undefinedGroups ? Type::optional(Type::string()) : Type::string());
       return call;
     }
-    return checkReplacement(call, member, regex);
+    return this->checkReplacement(call, member, regex);
   }
 
   if (type->isString()) {
-    std::string text = argumentText(pattern);
+    std::string text = StringRegexChecker::argumentText(pattern);
     auto *lit = dyn_cast<StringLitExpr>(pattern);
-    std::string regexText =
-        lit ? escapedLiteral(lit->value) : "new RegExp(RegExp.escape(" + text + "))";
+    std::string regexText = lit ? StringRegexChecker::escapedLiteral(lit->value)
+                                : "new RegExp(RegExp.escape(" + text + "))";
     if (name == "split") {
       if (call->args.size() == 2) {
-        call->args[1] = checker_.memberChecker().checkPosition(call->args[1]);
+        call->args[1] = this->checker.memberChecker().checkPosition(call->args[1]);
       }
       call->target = BuiltinCall{.builtin = Builtin::StrSplit};
       call->type = Type::array(Type::string());
@@ -177,33 +179,33 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
     if (name == "replaceAll") {
       Expr *&replacement = call->args[1];
       if (isa<FunctionExpr>(replacement)) {
-        checker_.diags_.error(replacement->loc(),
-                              "a function as the replacement needs a regex: 'replaceAll(" +
-                                  (lit ? escapedLiteral(lit->value) + "g"
-                                       : "new RegExp(RegExp.escape(" + text + "), \"g\")") +
-                                  ", ...)'");
+        this->checker.diags_.error(replacement->loc(),
+                                   "a function as the replacement needs a regex: 'replaceAll(" +
+                                       (lit ? StringRegexChecker::escapedLiteral(lit->value) + "g"
+                                            : "new RegExp(RegExp.escape(" + text + "), \"g\")") +
+                                       ", ...)'");
         return restLoosely();
       }
-      replacement = checker_.argumentChecker().checkArg(replacement, Type::string());
+      replacement = this->checker.argumentChecker().checkArg(replacement, Type::string());
       call->target = BuiltinCall{.builtin = Builtin::StrReplaceAll};
       call->type = Type::string();
       return call;
     }
     if (name == "replace") {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           member->loc(),
           "'replace' with a string replaces only the first occurrence (\"a-b-c\".replace(\"-\", "
           "\"+\") is \"a+b-c\" in JavaScript); to replace all of them write 'replaceAll(" +
               text + ", ...)', for only the first one a regex: 'replace(" + regexText + ", ...)'");
     } else if (name == "search") {
-      checker_.diags_.error(member->loc(),
-                            "'search' takes a regex, and JavaScript makes one of a string, "
-                            "where '.' matches any character; to find the text write "
-                            "'indexOf(" +
-                                text + ")', for a regex '" +
-                                (lit ? regexText : "search(" + regexText + ")") + "'");
+      this->checker.diags_.error(member->loc(),
+                                 "'search' takes a regex, and JavaScript makes one of a string, "
+                                 "where '.' matches any character; to find the text write "
+                                 "'indexOf(" +
+                                     text + ")', for a regex '" +
+                                     (lit ? regexText : "search(" + regexText + ")") + "'");
     } else {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           member->loc(),
           "'" + name +
               "' takes a regex, and JavaScript makes one of a string, where "
@@ -215,10 +217,10 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
     }
     return restLoosely();
   }
-  checker_.diags_.error(pattern->loc(),
-                        "'" + name + "' takes a regex" +
-                            (name == "split" || name == "replaceAll" ? " or a string" : "") +
-                            ", found '" + type->name() + "'");
+  this->checker.diags_.error(pattern->loc(),
+                             "'" + name + "' takes a regex" +
+                                 (name == "split" || name == "replaceAll" ? " or a string" : "") +
+                                 ", found '" + type->name() + "'");
 
   return restLoosely();
 }
@@ -228,12 +230,12 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
   Expr *&replacement = call->args[1];
   bool function = isa<FunctionExpr>(replacement);
   if (auto *name = dyn_cast<NameExpr>(replacement)) {
-    ScopeEntry entry = checker_.scopes().lookup(name->name);
+    ScopeEntry entry = this->checker.scopes().lookup(name->name);
     function = entry.func() ||
                (entry.var() && entry.var()->type && entry.var()->type->nonOptional()->isFunction());
   }
   if (!function) {
-    replacement = checker_.argumentChecker().checkArg(replacement, Type::string());
+    replacement = this->checker.argumentChecker().checkArg(replacement, Type::string());
     call->target = BuiltinCall{.builtin = Builtin::StrReplaceRegex};
     call->type = Type::string();
     auto *text = dyn_cast<StringLitExpr>(replacement);
@@ -262,25 +264,27 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
         if ((two && two <= groups) || one <= groups) {
           continue;
         }
-        checker_.diags_.error(text->loc(),
-                              "the regex has " + std::to_string(groups) + " group" +
-                                  (groups == 1 ? "" : "s") + ", so there is no group " +
-                                  std::to_string(one) + " for '$" + std::to_string(one) +
-                                  "' (JavaScript would insert it as it is); write '$$' for '$'");
+        this->checker.diags_.error(
+            text->loc(), "the regex has " + std::to_string(groups) + " group" +
+                             (groups == 1 ? "" : "s") + ", so there is no group " +
+                             std::to_string(one) + " for '$" + std::to_string(one) +
+                             "' (JavaScript would insert it as it is); write '$$' for '$'");
         return call;
       } else if (c == u'<') {
         size_t close = value.find(u'>', i + 2);
-        std::string groupName =
-            close == std::u16string::npos ? "" : utf8(value.substr(i + 2, close - i - 2));
+        std::string groupName = close == std::u16string::npos
+                                    ? ""
+                                    : StringRegexChecker::utf8(value.substr(i + 2, close - i - 2));
         bool found = false;
         for (uint32_t k = 1; k <= groups && !found; ++k) {
           uint32_t start, length = tz_re_name(program, k, &start);
-          found = length && utf8(units(program, start, length)) == groupName;
+          found = length && StringRegexChecker::utf8(
+                                StringRegexChecker::units(program, start, length)) == groupName;
         }
         if (found) {
           continue;
         }
-        checker_.diags_.error(
+        this->checker.diags_.error(
             text->loc(),
             named ? "the regex has no group named '" + groupName + "' for '$<" + groupName + ">'"
                   : "the regex has no named groups, so JavaScript would insert '$<" + groupName +
@@ -295,7 +299,7 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
   sig.pad = false;
   sig.ret = Type::string();
   sig.params.push_back(Type::string());
-  const Type *match = checker_.regexChecker().matchType(regex);
+  const Type *match = this->checker.regexChecker().matchType(regex);
   if (regex) {
     for (int k = 1; k <= match->matchGroups(); ++k) {
       sig.params.push_back(match->captureMandatory(unsigned(k)) ? Type::string()
@@ -310,32 +314,32 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
   if (auto *fe = dyn_cast<FunctionExpr>(replacement);
       fe && fe->fn->params.size() > sig.params.size()) {
     if (!regex) {
-      checker_.diags_.error(fe->fn->params[1].loc,
-                            std::string("the function gets only the match: ") + kUnknownRegex +
-                                ", so its groups are not known when compiling");
+      this->checker.diags_.error(fe->fn->params[1].loc,
+                                 std::string("the function gets only the match: ") + kUnknownRegex +
+                                     ", so its groups are not known when compiling");
     } else {
-      checker_.diags_.error(fe->fn->params[sig.params.size()].loc,
-                            "'" + member->name + "' passes " + std::to_string(sig.params.size()) +
-                                " arguments: the match, " + std::to_string(match->matchGroups()) +
-                                " group" + (match->matchGroups() == 1 ? "" : "s") +
-                                ", the offset and the string" +
-                                (sig.params.back()->isObject() ? ", and the named groups" : ""));
+      this->checker.diags_.error(
+          fe->fn->params[sig.params.size()].loc,
+          "'" + member->name + "' passes " + std::to_string(sig.params.size()) +
+              " arguments: the match, " + std::to_string(match->matchGroups()) + " group" +
+              (match->matchGroups() == 1 ? "" : "s") + ", the offset and the string" +
+              (sig.params.back()->isObject() ? ", and the named groups" : ""));
     }
     while (sig.params.size() < fe->fn->params.size()) {
       sig.params.push_back(Type::string());
     }
-    replacement = checker_.callbackChecker().checkFunctionArg(
+    replacement = this->checker.callbackChecker().checkFunctionArg(
         replacement, sig, unsigned(sig.params.size()), member->name);
     return call;
   }
-  replacement = checker_.callbackChecker().checkFunctionArg(
+  replacement = this->checker.callbackChecker().checkFunctionArg(
       replacement, sig, unsigned(sig.params.size()), member->name);
   if (!replacement->type->isFunction()) {
     return call;
   }
   call->target = BuiltinCall{.builtin = Builtin::StrReplaceRegexFn};
   call->type = Type::string();
-  checker_.flowChecker().calledFunction();
+  this->checker.flowChecker().calledFunction();
 
   return call;
 }

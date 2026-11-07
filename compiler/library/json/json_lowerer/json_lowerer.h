@@ -6,7 +6,7 @@ namespace tz {
 
 class JsonLowerer {
 public:
-  explicit JsonLowerer(Lowering &lowering);
+  explicit JsonLowerer(Lowering &owner);
 
   llvm::FunctionCallee jsonFunction(llvm::StringRef name, llvm::Type *ret,
                                     llvm::ArrayRef<llvm::Type *> params);
@@ -27,7 +27,11 @@ public:
   void useErrors(const Type *errorType);
 
 private:
-  Lowering &lowering_;
+  static std::u16string utf16(llvm::StringRef text);
+  static bool isNullLiteral(const Expr *expr);
+  static bool isJsonish(const Type *type);
+
+  Lowering &lowering;
 };
 
 }

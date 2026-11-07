@@ -16,6 +16,7 @@ enum class KeyedFieldCheckerCheckKeyedFieldErrorCode {
   KEY_NOT_CONSTANT,
   KEY_NOT_STRING,
   NO_SUCH_FIELD,
+  FIELD_NOT_FOUND,
   TUPLE_ELEMENT_BY_NUMBER,
   FIELD_KEY_NOT_LITERAL,
 };

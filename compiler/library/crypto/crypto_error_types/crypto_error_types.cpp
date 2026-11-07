@@ -216,18 +216,19 @@ const llvm::StringLiteral kCryptoTypeNames[] = {"CreateHashError",
                                                 "GeneratePrimeError",
                                                 "CheckPrimeError"};
 
-bool flag(llvm::ArrayRef<Expr *> args, size_t i) {
+}
+
+bool CryptoErrorTypes::flag(llvm::ArrayRef<Expr *> args, size_t i) {
   auto *lit = i < args.size() ? dyn_cast<BoolLitExpr>(args[i]) : nullptr;
 
   return lit && lit->value;
 }
 
-}
-
-CryptoErrorTypes::CryptoErrorTypes(Checker &checker) : checker_(checker) {}
+CryptoErrorTypes::CryptoErrorTypes(Checker &owner)
+    : checker(owner) {}
 
 void CryptoErrorTypes::declare() {
-  BuiltinModuleTypes &types = checker_.builtinModuleTypes();
+  BuiltinModuleTypes &types = this->checker.builtinModuleTypes();
   if (types.declared("CreateHashError")) {
     return;
   }
@@ -242,89 +243,91 @@ bool CryptoErrorTypes::isCryptoError(const Type *type) {
 }
 
 const Type *CryptoErrorTypes::named(llvm::StringRef name) {
-  return checker_.builtinModuleTypes().named(name);
+  return this->checker.builtinModuleTypes().named(name);
 }
 
 const Type *CryptoErrorTypes::ofCall(CryptoFn fn, llvm::ArrayRef<Expr *> args) {
   switch (fn) {
   case CryptoFn::HashNew:
-    return named("CreateHashError");
+    return this->named("CreateHashError");
   case CryptoFn::HashOnce:
   case CryptoFn::HashOnceText:
-    return named("HashError");
+    return this->named("HashError");
   case CryptoFn::HashCopy:
-    return named("HashCopyError");
+    return this->named("HashCopyError");
   case CryptoFn::HmacNew:
-    return named("CreateHmacError");
+    return this->named("CreateHmacError");
   case CryptoFn::Pbkdf2:
   case CryptoFn::Pbkdf2Async:
-    return named("Pbkdf2Error");
+    return this->named("Pbkdf2Error");
   case CryptoFn::Hkdf:
   case CryptoFn::HkdfAsync:
-    return named("HkdfError");
+    return this->named("HkdfError");
   case CryptoFn::Scrypt:
   case CryptoFn::ScryptAsync:
-    return named("ScryptError");
+    return this->named("ScryptError");
   case CryptoFn::Argon2:
   case CryptoFn::Argon2Async:
-    return named("Argon2Error");
+    return this->named("Argon2Error");
   case CryptoFn::GeneratePrime:
   case CryptoFn::GeneratePrimeAsync:
-    return named("GeneratePrimeError");
+    return this->named("GeneratePrimeError");
   case CryptoFn::CheckPrime:
   case CryptoFn::CheckPrimeAsync:
-    return named("CheckPrimeError");
+    return this->named("CheckPrimeError");
   case CryptoFn::CipherNew:
-    return named(flag(args, 4) ? "CreateDecipherError" : "CreateCipherError");
+    return this->named(CryptoErrorTypes::flag(args, 4) ? "CreateDecipherError"
+                                                       : "CreateCipherError");
   case CryptoFn::CipherFinal: {
     const Type *self = args.empty() ? nullptr : args[0]->type;
     bool decipher = self && self->crypto() == Type::Crypto::Decipheriv;
-    return named(decipher ? "DecipherFinalError" : "CipherFinalError");
+    return this->named(decipher ? "DecipherFinalError" : "CipherFinalError");
   }
   case CryptoFn::CipherGetAuthTag:
-    return named("GetAuthTagError");
+    return this->named("GetAuthTagError");
   case CryptoFn::CreateKey:
-    return named(flag(args, 0) ? "CreatePrivateKeyError" : "CreatePublicKeyError");
+    return this->named(CryptoErrorTypes::flag(args, 0) ? "CreatePrivateKeyError"
+                                                       : "CreatePublicKeyError");
   case CryptoFn::GenerateKeyPair:
-    return named("GenerateKeyPairError");
+    return this->named("GenerateKeyPairError");
   case CryptoFn::KeyExportSecret:
   case CryptoFn::KeyExportPem:
   case CryptoFn::KeyExportDer:
   case CryptoFn::KeyExportJwk:
-    return named("KeyExportError");
+    return this->named("KeyExportError");
   case CryptoFn::Sign:
   case CryptoFn::SignAsync:
-    return named("SignError");
+    return this->named("SignError");
   case CryptoFn::Verify:
   case CryptoFn::VerifyAsync:
-    return named("VerifyError");
+    return this->named("VerifyError");
   case CryptoFn::SignNew:
-    return named(flag(args, 1) ? "CreateVerifyError" : "CreateSignError");
+    return this->named(CryptoErrorTypes::flag(args, 1) ? "CreateVerifyError" : "CreateSignError");
   case CryptoFn::SignFinal:
-    return named("SignerSignError");
+    return this->named("SignerSignError");
   case CryptoFn::VerifyFinal:
-    return named("VerifierVerifyError");
+    return this->named("VerifierVerifyError");
   case CryptoFn::EcdhNew:
-    return named("CreateEcdhError");
+    return this->named("CreateEcdhError");
   case CryptoFn::EcdhGetPublicKey:
-    return named("EcdhGetPublicKeyError");
+    return this->named("EcdhGetPublicKeyError");
   case CryptoFn::EcdhGetPrivateKey:
-    return named("EcdhGetPrivateKeyError");
+    return this->named("EcdhGetPrivateKeyError");
   case CryptoFn::EcdhSetPrivateKey:
-    return named("EcdhSetPrivateKeyError");
+    return this->named("EcdhSetPrivateKeyError");
   case CryptoFn::EcdhComputeSecret:
-    return named("EcdhComputeSecretError");
+    return this->named("EcdhComputeSecretError");
   case CryptoFn::DiffieHellman:
   case CryptoFn::DiffieHellmanAsync:
-    return named("DiffieHellmanError");
+    return this->named("DiffieHellmanError");
   case CryptoFn::X509New:
-    return named("ParseCertificateError");
+    return this->named("ParseCertificateError");
   case CryptoFn::X509CheckPrivateKey:
-    return named("CertificateCheckPrivateKeyError");
+    return this->named("CertificateCheckPrivateKeyError");
   case CryptoFn::X509Verify:
-    return named("CertificateVerifyError");
+    return this->named("CertificateVerifyError");
   default:
-    return named("CreateHashError");
+    return this->named("CreateHashError");
   }
 }
 

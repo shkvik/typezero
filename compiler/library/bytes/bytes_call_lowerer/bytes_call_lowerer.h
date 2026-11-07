@@ -6,15 +6,15 @@ namespace tz {
 
 class BytesCallLowerer {
 public:
-  explicit BytesCallLowerer(Lowering &lowering);
+  explicit BytesCallLowerer(Lowering &owner);
 
   llvm::Value *emitBytesCall(CallExpr *call);
 
 private:
   llvm::Value *emitEmbedBytes(CallExpr *call);
 
-  Lowering &lowering_;
-  std::map<std::u16string, llvm::Constant *> embeddedBytes_;
+  Lowering &lowering;
+  std::map<std::u16string, llvm::Constant *> embeddedBytes;
 };
 
 }

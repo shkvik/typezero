@@ -11,20 +11,17 @@
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
 
-using llvm::BasicBlock;
 using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-MathLowerer::MathLowerer(Lowering &lowering) : lowering_(lowering) {}
+MathLowerer::MathLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::FunctionCallee MathLowerer::mathFunction(llvm::StringRef name, unsigned params) {
-  llvm::Type *f64 = lowering_.builder_.getDoubleTy();
+  llvm::Type *f64 = this->lowering.builder_.getDoubleTy();
   std::vector<llvm::Type *> types(params, f64);
-  llvm::FunctionCallee callee = lowering_.module_->getOrInsertFunction(
+  llvm::FunctionCallee callee = this->lowering.module_->getOrInsertFunction(
       ("tz_math_" + name).str(), llvm::FunctionType::get(f64, types, false));
   cast<llvm::Function>(callee.getCallee())->addFnAttr(llvm::Attribute::NoUnwind);
 
@@ -33,10 +30,11 @@ llvm::FunctionCallee MathLowerer::mathFunction(llvm::StringRef name, unsigned pa
 
 llvm::Value *MathLowerer::spillArray(llvm::ArrayRef<llvm::Value *> values, llvm::Type *element) {
   auto *arrayTy = llvm::ArrayType::get(element, values.size());
-  llvm::AllocaInst *array = lowering_.functionFrame().createStackSlot(arrayTy, "args");
+  llvm::AllocaInst *array = this->lowering.functionFrame().createStackSlot(arrayTy, "args");
   for (size_t i = 0; i < values.size(); ++i) {
-    lowering_.builder_.CreateStore(values[i], lowering_.builder_.CreateConstInBoundsGEP2_32(
-                                                  arrayTy, array, 0, static_cast<unsigned>(i)));
+    this->lowering.builder_.CreateStore(
+        values[i], this->lowering.builder_.CreateConstInBoundsGEP2_32(arrayTy, array, 0,
+                                                                      static_cast<unsigned>(i)));
   }
 
   return array;
@@ -45,10 +43,10 @@ llvm::Value *MathLowerer::spillArray(llvm::ArrayRef<llvm::Value *> values, llvm:
 llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
   std::vector<llvm::Value *> args;
   for (Expr *arg : call->args) {
-    args.push_back(lowering_.exprLowerer().emitExpr(arg));
+    args.push_back(this->lowering.exprLowerer().emitExpr(arg));
   }
   const Type *type = call->type;
-  llvm::Type *f64 = lowering_.builder_.getDoubleTy();
+  llvm::Type *f64 = this->lowering.builder_.getDoubleTy();
   llvm::Value *x = args.empty() ? nullptr : args[0];
 
   if (isRoundingBuiltin(call->builtin())) {
@@ -56,16 +54,16 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
     if (from->isFloat()) {
       switch (call->builtin()) {
         case Builtin::MathFloor:
-          x = lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::floor, x);
+          x = this->lowering.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::floor, x);
           break;
         case Builtin::MathCeil:
-          x = lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::ceil, x);
+          x = this->lowering.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::ceil, x);
           break;
         case Builtin::MathTrunc:
-          x = lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::trunc, x);
+          x = this->lowering.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::trunc, x);
           break;
         default:
-          x = lowering_.builder_.CreateCall(lowering_.rt_.mathRound, {x});
+          x = this->lowering.builder_.CreateCall(this->lowering.rt_.mathRound, {x});
           break;
       }
     }
@@ -73,39 +71,40 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
       return x;
     }
     if (from->isFloat()) {
-      return lowering_.numberLowerer().emitCheckedInteger(x, type);
+      return this->lowering.numberLowerer().emitCheckedInteger(x, type);
     }
-    return lowering_.numberLowerer().emitCheckedIntCast(x, from, type);
+    return this->lowering.numberLowerer().emitCheckedIntCast(x, from, type);
   }
 
   switch (call->builtin()) {
     case Builtin::MathAbs:
       if (type->isFloat()) {
-        return lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::fabs, x);
+        return this->lowering.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::fabs, x);
       }
       if (type->isUnsigned()) {
         return x;
       }
-      return lowering_.builder_.CreateBinaryIntrinsic(llvm::Intrinsic::abs, x,
-                                                      lowering_.builder_.getFalse());
+      return this->lowering.builder_.CreateBinaryIntrinsic(llvm::Intrinsic::abs, x,
+                                                           this->lowering.builder_.getFalse());
     case Builtin::MathSign: {
       llvm::Type *t = x->getType();
       if (type->isFloat()) {
-        llvm::Value *sign = lowering_.builder_.CreateSelect(
-            lowering_.builder_.CreateFCmpOLT(x, llvm::ConstantFP::get(t, 0.0)),
+        llvm::Value *sign = this->lowering.builder_.CreateSelect(
+            this->lowering.builder_.CreateFCmpOLT(x, llvm::ConstantFP::get(t, 0.0)),
             llvm::ConstantFP::get(t, -1.0), x);
-        return lowering_.builder_.CreateSelect(
-            lowering_.builder_.CreateFCmpOGT(x, llvm::ConstantFP::get(t, 0.0)),
+        return this->lowering.builder_.CreateSelect(
+            this->lowering.builder_.CreateFCmpOGT(x, llvm::ConstantFP::get(t, 0.0)),
             llvm::ConstantFP::get(t, 1.0), sign);
       }
       llvm::Value *zero = llvm::ConstantInt::get(t, 0);
       if (type->isUnsigned()) {
-        return lowering_.builder_.CreateZExt(lowering_.builder_.CreateICmpNE(x, zero), t);
+        return this->lowering.builder_.CreateZExt(this->lowering.builder_.CreateICmpNE(x, zero), t);
       }
-      llvm::Value *sign = lowering_.builder_.CreateSelect(
-          lowering_.builder_.CreateICmpSLT(x, zero), llvm::ConstantInt::getSigned(t, -1), zero);
-      return lowering_.builder_.CreateSelect(lowering_.builder_.CreateICmpSGT(x, zero),
-                                             llvm::ConstantInt::get(t, 1), sign);
+      llvm::Value *sign =
+          this->lowering.builder_.CreateSelect(this->lowering.builder_.CreateICmpSLT(x, zero),
+                                               llvm::ConstantInt::getSigned(t, -1), zero);
+      return this->lowering.builder_.CreateSelect(this->lowering.builder_.CreateICmpSGT(x, zero),
+                                                  llvm::ConstantInt::get(t, 1), sign);
     }
     case Builtin::MathClamp: {
       llvm::Intrinsic::ID up = type->isFloat()      ? llvm::Intrinsic::maxnum
@@ -114,8 +113,8 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
       llvm::Intrinsic::ID down = type->isFloat()      ? llvm::Intrinsic::minnum
                                  : type->isUnsigned() ? llvm::Intrinsic::umin
                                                       : llvm::Intrinsic::smin;
-      return lowering_.builder_.CreateBinaryIntrinsic(
-          down, lowering_.builder_.CreateBinaryIntrinsic(up, args[0], args[1]), args[2]);
+      return this->lowering.builder_.CreateBinaryIntrinsic(
+          down, this->lowering.builder_.CreateBinaryIntrinsic(up, args[0], args[1]), args[2]);
     }
     case Builtin::MathMin:
     case Builtin::MathMax: {
@@ -129,11 +128,11 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
       if (!call->hasSpread()) {
         llvm::Value *result = args[0];
         for (size_t i = 1; i < args.size(); ++i) {
-          result = lowering_.builder_.CreateBinaryIntrinsic(id, result, args[i]);
+          result = this->lowering.builder_.CreateBinaryIntrinsic(id, result, args[i]);
         }
         return result;
       }
-      llvm::Value *result, *has = lowering_.builder_.getFalse();
+      llvm::Value *result, *has = this->lowering.builder_.getFalse();
       if (type->isFloat()) {
         result = llvm::ConstantFP::getInfinity(f64, !isMin);
       } else {
@@ -142,64 +141,68 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
                                 ? (isMin ? llvm::APInt::getMaxValue(bits) : llvm::APInt(bits, 0))
                                 : (isMin ? llvm::APInt::getSignedMaxValue(bits)
                                          : llvm::APInt::getSignedMinValue(bits));
-        result = llvm::ConstantInt::get(lowering_.moduleBuilder().lower(type), start);
+        result = llvm::ConstantInt::get(this->lowering.moduleBuilder().lower(type), start);
       }
       for (size_t i = 0; i < args.size(); ++i) {
         if (!call->spreads(i)) {
-          result = lowering_.builder_.CreateBinaryIntrinsic(id, result, args[i]);
+          result = this->lowering.builder_.CreateBinaryIntrinsic(id, result, args[i]);
           continue;
         }
-        const Type *arrayType = call->args[i]->type, *element = arrayType->inner();
-        has = lowering_.builder_.CreateOr(
-            has, lowering_.builder_.CreateICmpNE(lowering_.arrayLowerer().arrayLength(args[i]),
-                                                 lowering_.builder_.getInt64(0)));
-        result = lowering_.arrayLowerer().emitArrayFold(
+        const Type *arrayType = call->args[i]->type;
+        const Type *element = arrayType->inner();
+        has = this->lowering.builder_.CreateOr(
+            has,
+            this->lowering.builder_.CreateICmpNE(this->lowering.arrayLowerer().arrayLength(args[i]),
+                                                 this->lowering.builder_.getInt64(0)));
+        result = this->lowering.arrayLowerer().emitArrayFold(
             args[i], element, result, [&](llvm::Value *acc, llvm::Value *value) {
-              return lowering_.builder_.CreateBinaryIntrinsic(
-                  id, acc, lowering_.exprLowerer().emitConversion(value, element, type));
+              return this->lowering.builder_.CreateBinaryIntrinsic(
+                  id, acc, this->lowering.exprLowerer().emitConversion(value, element, type));
             });
-        lowering_.refCounts().releaseValue(args[i], arrayType);
+        this->lowering.refCounts().releaseValue(args[i], arrayType);
       }
       if (optional) {
-        return lowering_.optionalLowerer().makeOptional(result, has, optional);
+        return this->lowering.optionalLowerer().makeOptional(result, has, optional);
       }
       return result;
     }
     case Builtin::MathSqrt:
-      return lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::sqrt, x);
+      return this->lowering.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::sqrt, x);
     case Builtin::MathFround:
-      return lowering_.builder_.CreateFPExt(
-          lowering_.builder_.CreateFPTrunc(x, lowering_.builder_.getFloatTy()), f64);
+      return this->lowering.builder_.CreateFPExt(
+          this->lowering.builder_.CreateFPTrunc(x, this->lowering.builder_.getFloatTy()), f64);
     case Builtin::MathClz32:
     case Builtin::BitLeadingZeros:
-      return lowering_.builder_.CreateZExtOrTrunc(
-          lowering_.builder_.CreateBinaryIntrinsic(llvm::Intrinsic::ctlz, x,
-                                                   lowering_.builder_.getFalse()),
-          lowering_.builder_.getInt64Ty());
+      return this->lowering.builder_.CreateZExtOrTrunc(
+          this->lowering.builder_.CreateBinaryIntrinsic(llvm::Intrinsic::ctlz, x,
+                                                        this->lowering.builder_.getFalse()),
+          this->lowering.builder_.getInt64Ty());
     case Builtin::BitTrailingZeros:
-      return lowering_.builder_.CreateZExtOrTrunc(
-          lowering_.builder_.CreateBinaryIntrinsic(llvm::Intrinsic::cttz, x,
-                                                   lowering_.builder_.getFalse()),
-          lowering_.builder_.getInt64Ty());
+      return this->lowering.builder_.CreateZExtOrTrunc(
+          this->lowering.builder_.CreateBinaryIntrinsic(llvm::Intrinsic::cttz, x,
+                                                        this->lowering.builder_.getFalse()),
+          this->lowering.builder_.getInt64Ty());
     case Builtin::BitOnesCount:
-      return lowering_.builder_.CreateZExtOrTrunc(
-          lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::ctpop, x),
-          lowering_.builder_.getInt64Ty());
+      return this->lowering.builder_.CreateZExtOrTrunc(
+          this->lowering.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::ctpop, x),
+          this->lowering.builder_.getInt64Ty());
     case Builtin::BitReverseBytes:
-      return lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::bswap, x);
+      return this->lowering.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::bswap, x);
     case Builtin::BitRotateLeft:
     case Builtin::BitRotateRight:
-      return lowering_.builder_.CreateIntrinsic(
+      return this->lowering.builder_.CreateIntrinsic(
           call->builtin() == Builtin::BitRotateLeft ? llvm::Intrinsic::fshl : llvm::Intrinsic::fshr,
           {x->getType()}, {x, x, args[1]});
     case Builtin::BitWrapFrom:
-      return lowering_.numberLowerer().intCast(x, call->args[0]->type, type);
+      return this->lowering.numberLowerer().intCast(x, call->args[0]->type, type);
     case Builtin::BitMul64:
     case Builtin::BitAdd64:
     case Builtin::BitSub64: {
-      llvm::IRBuilder<> &b = lowering_.builder_;
-      llvm::Type *i128 = b.getInt128Ty(), *i64 = b.getInt64Ty();
-      llvm::Value *a = b.CreateZExt(args[0], i128), *c = b.CreateZExt(args[1], i128);
+      llvm::IRBuilder<> &b = this->lowering.builder_;
+      llvm::Type *i128 = b.getInt128Ty();
+      llvm::Type *i64 = b.getInt64Ty();
+      llvm::Value *a = b.CreateZExt(args[0], i128);
+      llvm::Value *c = b.CreateZExt(args[1], i128);
       llvm::Value *first, *second;
       if (call->builtin() == Builtin::BitMul64) {
         llvm::Value *product = b.CreateMul(a, c);
@@ -213,24 +216,24 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
         first = b.CreateTrunc(wide, i64);
         second = b.CreateAnd(b.CreateTrunc(b.CreateLShr(wide, 64), i64), b.getInt64(1));
       }
-      llvm::Value *object = lowering_.objectLayouts().allocObject(type, {0, 1});
-      b.CreateStore(first,
-                    lowering_.objectLayouts().fieldAddress(object, type, type->fields()[0].name));
-      b.CreateStore(second,
-                    lowering_.objectLayouts().fieldAddress(object, type, type->fields()[1].name));
+      llvm::Value *object = this->lowering.objectLayouts().allocObject(type, {0, 1});
+      b.CreateStore(
+          first, this->lowering.objectLayouts().fieldAddress(object, type, type->fields()[0].name));
+      b.CreateStore(second, this->lowering.objectLayouts().fieldAddress(object, type,
+                                                                        type->fields()[1].name));
       return object;
     }
     case Builtin::MathImul:
-      return lowering_.builder_.CreateMul(args[0], args[1]);
+      return this->lowering.builder_.CreateMul(args[0], args[1]);
     case Builtin::MathRandom:
-      return lowering_.builder_.CreateCall(lowering_.rt_.mathRandom, {});
+      return this->lowering.builder_.CreateCall(this->lowering.rt_.mathRandom, {});
     case Builtin::MathHypot:
       if (args.empty()) {
         return llvm::ConstantFP::get(f64, 0.0);
       }
-      return lowering_.builder_.CreateCall(
-          lowering_.rt_.mathHypot,
-          {spillArray(args, f64), lowering_.builder_.getInt64(args.size())});
+      return this->lowering.builder_.CreateCall(
+          this->lowering.rt_.mathHypot,
+          {this->spillArray(args, f64), this->lowering.builder_.getInt64(args.size())});
     default:
       break;
   }
@@ -246,8 +249,8 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
   };
   for (const auto &[builtin, name] : runtime) {
     if (builtin == call->builtin()) {
-      return lowering_.builder_.CreateCall(mathFunction(name, static_cast<unsigned>(args.size())),
-                                           args);
+      return this->lowering.builder_.CreateCall(
+          this->mathFunction(name, static_cast<unsigned>(args.size())), args);
     }
   }
   llvm_unreachable("not a function of Math");

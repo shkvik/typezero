@@ -19,11 +19,9 @@
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/Support/ErrorHandling.h"
 
-using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -45,7 +43,9 @@ enum PartsSlot : unsigned {
   SlotOpenssl,
 };
 
-std::string asciiOf(const Type *literal) {
+}
+
+std::string CryptoLowerer::asciiOf(const Type *literal) {
   std::string text;
   for (char16_t unit : literal->literalText()) {
     text.push_back(char(unit));
@@ -54,7 +54,7 @@ std::string asciiOf(const Type *literal) {
   return text;
 }
 
-std::vector<const Type *> literalsOf(const Type *type) {
+std::vector<const Type *> CryptoLowerer::literalsOf(const Type *type) {
   if (type->isStringLiteral()) {
     return {type};
   }
@@ -62,52 +62,54 @@ std::vector<const Type *> literalsOf(const Type *type) {
   return std::vector<const Type *>(type->members().begin(), type->members().end());
 }
 
-}
-
-CryptoLowerer::CryptoLowerer(Lowering &lowering) : lowering_(lowering) {}
+CryptoLowerer::CryptoLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::StructType *CryptoLowerer::partsType() {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty();
-  llvm::Type *str = lowering_.strTy_;
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+  llvm::Type *str = this->lowering.strTy_;
 
-  return llvm::StructType::get(lowering_.ctx_, {str, str, ptr, str, i64, i64, ptr, ptr, str,
-                                                lowering_.builder_.getDoubleTy(), str, ptr, str});
+  return llvm::StructType::get(this->lowering.ctx_,
+                               {str, str, ptr, str, i64, i64, ptr, ptr, str,
+                                this->lowering.builder_.getDoubleTy(), str, ptr, str});
 }
 
 llvm::Function *CryptoLowerer::variantMaker(const Type *variant) {
-  llvm::Function *&made = makers_[variant];
+  llvm::Function *&made = this->makers[variant];
   if (made) {
     return made;
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
   made = llvm::Function::Create(llvm::FunctionType::get(ptr, {ptr}, false),
                                 llvm::GlobalValue::InternalLinkage, "tz.make.crypto",
-                                lowering_.module_.get());
+                                this->lowering.module_.get());
   llvm::Function *function = made;
-  lowering_.functionBuilder().setFunctionAttributes(function);
-  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
-  llvm::Function *outer = std::exchange(lowering_.function_, function);
-  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", function));
+  this->lowering.functionBuilder().setFunctionAttributes(function);
+  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
+  llvm::Function *outer = std::exchange(this->lowering.function_, function);
+  this->lowering.builder_.SetInsertPoint(
+      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", function));
   llvm::Value *parts = function->getArg(0);
-  llvm::StructType *layout = partsType();
+  llvm::StructType *layout = this->partsType();
   auto load = [&](unsigned slot) {
-    return lowering_.builder_.CreateLoad(layout->getElementType(slot),
-                                         lowering_.builder_.CreateStructGEP(layout, parts, slot));
+    return this->lowering.builder_.CreateLoad(
+        layout->getElementType(slot), this->lowering.builder_.CreateStructGEP(layout, parts, slot));
   };
   std::vector<unsigned> keys;
   for (const Field &field : variant->fields()) {
     keys.push_back(ObjectLayouts::fieldIndex(variant, field.name));
   }
-  llvm::Value *object = lowering_.objectLayouts().allocObject(variant, keys);
+  llvm::Value *object = this->lowering.objectLayouts().allocObject(variant, keys);
   for (const Field &field : variant->fields()) {
     llvm::StringRef name = field.name;
     const Type *t = field.type;
     bool atomic = UnionLayout::isAtomType(t);
     llvm::Value *value = nullptr;
     if (t->isStringLiteral()) {
-      value = lowering_.builder_.getInt32(t->atom());
+      value = this->lowering.builder_.getInt32(t->atom());
     } else if (name == "code") {
-      value = lowering_.objectMaker().atomOf(t, load(SlotCode));
+      value = this->lowering.objectMaker().atomOf(t, load(SlotCode));
     } else if (name == "message") {
       value = load(SlotMessage);
     } else if (name == "algorithm") {
@@ -115,10 +117,10 @@ llvm::Function *CryptoLowerer::variantMaker(const Type *variant) {
     } else if (name == "length") {
       value = load(SlotLength);
     } else if (name == "expected") {
-      value =
-          atomic ? lowering_.objectMaker().atomOf(t, load(SlotExpectedKind)) : load(SlotExpected);
+      value = atomic ? this->lowering.objectMaker().atomOf(t, load(SlotExpectedKind))
+                     : load(SlotExpected);
     } else if (name == "got") {
-      value = lowering_.objectMaker().atomOf(t, load(SlotGot));
+      value = this->lowering.objectMaker().atomOf(t, load(SlotGot));
     } else if (name == "parameter") {
       value = load(SlotParameter);
     } else if (name == "value") {
@@ -126,14 +128,14 @@ llvm::Function *CryptoLowerer::variantMaker(const Type *variant) {
     } else if (name == "field") {
       value = load(SlotField);
     } else if (name == "format") {
-      value = lowering_.objectMaker().atomOf(t, load(SlotFormat));
+      value = this->lowering.objectMaker().atomOf(t, load(SlotFormat));
     } else if (name == "openssl") {
       value = load(SlotOpenssl);
     } else {
       continue;
     }
-    lowering_.builder_.CreateStore(
-        value, lowering_.objectLayouts().fieldAddress(object, variant, name, true));
+    this->lowering.builder_.CreateStore(
+        value, this->lowering.objectLayouts().fieldAddress(object, variant, name, true));
   }
   const std::pair<unsigned, llvm::StringRef> texts[] = {{SlotAlgorithm, "algorithm"},
                                                         {SlotParameter, "parameter"},
@@ -141,32 +143,33 @@ llvm::Function *CryptoLowerer::variantMaker(const Type *variant) {
                                                         {SlotOpenssl, "openssl"}};
   for (const auto &[slot, name] : texts) {
     if (!variant->field(name)) {
-      lowering_.refCounts().releaseValue(load(slot), Type::string());
+      this->lowering.refCounts().releaseValue(load(slot), Type::string());
     }
   }
-  lowering_.builder_.CreateRet(object);
-  lowering_.function_ = outer;
-  lowering_.builder_.restoreIP(point);
+  this->lowering.builder_.CreateRet(object);
+  this->lowering.function_ = outer;
+  this->lowering.builder_.restoreIP(point);
 
   return function;
 }
 
 llvm::Function *CryptoLowerer::errorMaker(const Type *error) {
-  llvm::Function *&made = makers_[error];
+  llvm::Function *&made = this->makers[error];
   if (made) {
     return made;
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
   std::vector<const Type *> variants =
       error->isUnion() ? std::vector<const Type *>(error->members().begin(), error->members().end())
                        : std::vector<const Type *>{error};
-  std::vector<llvm::Function *> makers;
+  std::vector<llvm::Function *> variantMakers;
   unsigned system = 0;
   bool unknownCode = false;
   for (size_t v = 0; v < variants.size(); ++v) {
-    makers.push_back(variantMaker(variants[v]));
-    for (const Type *literal : literalsOf(variants[v]->field("code")->type)) {
-      if (asciiOf(literal) == "UNKNOWN") {
+    variantMakers.push_back(this->variantMaker(variants[v]));
+    for (const Type *literal : CryptoLowerer::literalsOf(variants[v]->field("code")->type)) {
+      if (CryptoLowerer::asciiOf(literal) == "UNKNOWN") {
         system = unsigned(v);
         unknownCode = true;
       }
@@ -174,76 +177,84 @@ llvm::Function *CryptoLowerer::errorMaker(const Type *error) {
   }
   made = llvm::Function::Create(llvm::FunctionType::get(ptr, {ptr}, false),
                                 llvm::GlobalValue::InternalLinkage,
-                                "tz.make." + error->name().str(), lowering_.module_.get());
+                                "tz.make." + error->name().str(), this->lowering.module_.get());
   llvm::Function *function = made;
-  lowering_.functionBuilder().setFunctionAttributes(function);
-  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
-  llvm::Function *outer = std::exchange(lowering_.function_, function);
-  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", function));
+  this->lowering.functionBuilder().setFunctionAttributes(function);
+  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
+  llvm::Function *outer = std::exchange(this->lowering.function_, function);
+  this->lowering.builder_.SetInsertPoint(
+      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", function));
   llvm::Value *parts = function->getArg(0);
-  llvm::StructType *layout = partsType();
-  llvm::Value *codeAt = lowering_.builder_.CreateStructGEP(layout, parts, SlotCode);
-  llvm::Value *code = lowering_.builder_.CreateLoad(ptr, codeAt, "code");
-  lowering_.refCounts().releaseValue(
-      lowering_.builder_.CreateLoad(
-          lowering_.strTy_, lowering_.builder_.CreateStructGEP(layout, parts, SlotCodeText)),
+  llvm::StructType *layout = this->partsType();
+  llvm::Value *codeAt = this->lowering.builder_.CreateStructGEP(layout, parts, SlotCode);
+  llvm::Value *code = this->lowering.builder_.CreateLoad(ptr, codeAt, "code");
+  this->lowering.refCounts().releaseValue(
+      this->lowering.builder_.CreateLoad(
+          this->lowering.strTy_,
+          this->lowering.builder_.CreateStructGEP(layout, parts, SlotCodeText)),
       Type::string());
-  llvm::FunctionCallee compare = lowering_.module_->getOrInsertFunction(
+  llvm::FunctionCallee compare = this->lowering.module_->getOrInsertFunction(
       "strcmp", llvm::FunctionType::get(i32, {ptr, ptr}, false));
   llvm::Value *index = llvm::ConstantInt::getSigned(i32, -1);
   for (size_t v = 0; v < variants.size(); ++v) {
-    for (const Type *literal : literalsOf(variants[v]->field("code")->type)) {
-      llvm::Value *same = lowering_.builder_.CreateICmpEQ(
-          lowering_.builder_.CreateCall(
-              compare, {code, lowering_.stringLowerer().utf8Constant(asciiOf(literal))}),
-          lowering_.builder_.getInt32(0));
-      index =
-          lowering_.builder_.CreateSelect(same, lowering_.builder_.getInt32(unsigned(v)), index);
+    for (const Type *literal : CryptoLowerer::literalsOf(variants[v]->field("code")->type)) {
+      llvm::Value *same = this->lowering.builder_.CreateICmpEQ(
+          this->lowering.builder_.CreateCall(
+              compare,
+              {code, this->lowering.stringLowerer().utf8Constant(CryptoLowerer::asciiOf(literal))}),
+          this->lowering.builder_.getInt32(0));
+      index = this->lowering.builder_.CreateSelect(
+          same, this->lowering.builder_.getInt32(unsigned(v)), index);
     }
   }
-  llvm::BasicBlock *unknown = llvm::BasicBlock::Create(lowering_.ctx_, "unknown", function);
+  llvm::BasicBlock *unknown = llvm::BasicBlock::Create(this->lowering.ctx_, "unknown", function);
   llvm::SwitchInst *pick =
-      lowering_.builder_.CreateSwitch(index, unknown, unsigned(variants.size()));
+      this->lowering.builder_.CreateSwitch(index, unknown, unsigned(variants.size()));
   for (size_t v = 0; v < variants.size(); ++v) {
-    llvm::BasicBlock *block = llvm::BasicBlock::Create(lowering_.ctx_, "variant", function);
-    pick->addCase(lowering_.builder_.getInt32(unsigned(v)), block);
-    lowering_.builder_.SetInsertPoint(block);
-    lowering_.builder_.CreateRet(lowering_.builder_.CreateCall(makers[v], {parts}));
+    llvm::BasicBlock *block = llvm::BasicBlock::Create(this->lowering.ctx_, "variant", function);
+    pick->addCase(this->lowering.builder_.getInt32(unsigned(v)), block);
+    this->lowering.builder_.SetInsertPoint(block);
+    this->lowering.builder_.CreateRet(
+        this->lowering.builder_.CreateCall(variantMakers[v], {parts}));
   }
-  lowering_.builder_.SetInsertPoint(unknown);
+  this->lowering.builder_.SetInsertPoint(unknown);
   if (unknownCode) {
-    lowering_.builder_.CreateStore(lowering_.stringLowerer().utf8Constant("UNKNOWN"), codeAt);
+    this->lowering.builder_.CreateStore(this->lowering.stringLowerer().utf8Constant("UNKNOWN"),
+                                        codeAt);
   }
-  lowering_.builder_.CreateRet(lowering_.builder_.CreateCall(makers[system], {parts}));
-  lowering_.function_ = outer;
-  lowering_.builder_.restoreIP(point);
+  this->lowering.builder_.CreateRet(
+      this->lowering.builder_.CreateCall(variantMakers[system], {parts}));
+  this->lowering.function_ = outer;
+  this->lowering.builder_.restoreIP(point);
 
   return function;
 }
 
 void CryptoLowerer::useErrors(const Type *errorType) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  llvm::Value *maker = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Value *maker = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
   if (errorType && CryptoErrorTypes::isCryptoError(errorType)) {
-    maker = errorMaker(errorType);
+    maker = this->errorMaker(errorType);
   } else if (errorType) {
-    maker = lowering_.resultLowerer().failureMaker(errorType);
+    maker = this->lowering.resultLowerer().failureMaker(errorType);
   }
-  lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-                                    "tz_crypto_errors", lowering_.builder_.getVoidTy(), {ptr}),
-                                {maker});
+  this->lowering.builder_.CreateCall(
+      this->lowering.processLowerer().processFunction("tz_crypto_errors",
+                                                      this->lowering.builder_.getVoidTy(), {ptr}),
+      {maker});
 }
 
 llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
   if (call->builtin() == Builtin::CryptoKeyPair) {
-    return emitCryptoKeyPair(call);
+    return this->emitCryptoKeyPair(call);
   }
   if (call->builtin() == Builtin::CryptoKeyPairAsync) {
-    return emitCryptoKeyPairAsync(call);
+    return this->emitCryptoKeyPairAsync(call);
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty(),
-             *i64 = lowering_.builder_.getInt64Ty();
-  llvm::Type *f64 = lowering_.builder_.getDoubleTy(), *voidTy = lowering_.builder_.getVoidTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy(), *i32 = this->lowering.builder_.getInt32Ty(),
+             *i64 = this->lowering.builder_.getInt64Ty();
+  llvm::Type *f64 = this->lowering.builder_.getDoubleTy();
+  llvm::Type *voidTy = this->lowering.builder_.getVoidTy();
   const CryptoFunction &fn = kCryptoFunctions[cast<IntLitExpr>(call->args[0])->value];
   std::vector<Expr *> exprs(call->args.begin() + 1, call->args.end());
   llvm::StringRef kinds = fn.params;
@@ -264,7 +275,7 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
       evaluated.push_back(exprs[i]);
     }
   }
-  std::vector<llvm::Value *> owned = lowering_.exprLowerer().emitExprs(evaluated);
+  std::vector<llvm::Value *> owned = this->lowering.exprLowerer().emitExprs(evaluated);
   std::vector<llvm::Value *> values(exprs.size(), nullptr);
   for (size_t i = 0, k = 0; i < exprs.size(); ++i) {
     if (k < evaluated.size() && evaluated[k] == exprs[i]) {
@@ -276,7 +287,7 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
   std::vector<llvm::Value *> args;
   llvm::AllocaInst *out = nullptr;
   if (fn.result == 's' || fn.result == 'q') {
-    out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "crypto.text");
+    out = this->lowering.functionFrame().createStackSlot(this->lowering.strTy_, "crypto.text");
     params.push_back(ptr);
     args.push_back(out);
   }
@@ -284,17 +295,17 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
   const Type *settled = fn.result == 'P' ? call->type->promised() : nullptr;
   bool settlesResult = settled && settled->isResult();
   if (fn.result == 'P') {
-    promise = lowering_.promiseLowerer().newPromise(settled);
+    promise = this->lowering.promiseLowerer().newPromise(settled);
     params.push_back(ptr);
     args.push_back(promise);
   }
   if (fallible) {
-    useErrors(call->type->errType());
+    this->useErrors(call->type->errType());
   }
   if (settlesResult) {
-    useErrors(settled->errType());
+    this->useErrors(settled->errType());
   }
-  llvm::Value *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+  llvm::Value *null = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
   for (size_t i = 0; i < exprs.size(); ++i) {
     llvm::Value *v = values[i];
     const Type *type = exprs[i]->type;
@@ -304,22 +315,22 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
       if (!v) {
         args.insert(args.end(), {null, null});
       } else {
-        args.insert(args.end(), {lowering_.typeDescriptors().typeDescriptor(type),
-                                 lowering_.functionFrame().spill(v, "crypto.data")});
+        args.insert(args.end(), {this->lowering.typeDescriptors().typeDescriptor(type),
+                                 this->lowering.functionFrame().spill(v, "crypto.data")});
       }
       break;
     case 's':
       params.insert(params.end(), {ptr, i64});
-      args.insert(args.end(), {lowering_.stringLowerer().stringObj(v),
-                               lowering_.stringLowerer().stringMeta(v)});
+      args.insert(args.end(), {this->lowering.stringLowerer().stringObj(v),
+                               this->lowering.stringLowerer().stringMeta(v)});
       break;
     case 'i':
       params.push_back(i32);
-      args.push_back(v->getType() == i32 ? v : lowering_.builder_.CreateTrunc(v, i32));
+      args.push_back(v->getType() == i32 ? v : this->lowering.builder_.CreateTrunc(v, i32));
       break;
     case 'b':
       params.push_back(i32);
-      args.push_back(lowering_.builder_.CreateZExt(v, i32));
+      args.push_back(this->lowering.builder_.CreateZExt(v, i32));
       break;
     case 'f':
       params.push_back(f64);
@@ -337,19 +348,21 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
       bool md = kinds[i] != 'c';
       if (auto *lit = dyn_cast<IntLitExpr>(exprs[i])) {
         const DirectAlgorithm &alg = md ? kDirectMds[lit->value] : kDirectCiphers[lit->value];
-        args.push_back(
-            lowering_.module_->getOrInsertGlobal(alg.symbol, lowering_.builder_.getInt8Ty()));
+        args.push_back(this->lowering.module_->getOrInsertGlobal(
+            alg.symbol, this->lowering.builder_.getInt8Ty()));
       } else if (md) {
         int caller = kinds[i] == 'm' ? 0 : kinds[i] == 'n' ? 1 : 2;
-        args.push_back(lowering_.builder_.CreateCall(
-            lowering_.processLowerer().processFunction("tz_openssl_md", ptr, {ptr, i64, i32}),
-            {lowering_.stringLowerer().stringObj(v), lowering_.stringLowerer().stringMeta(v),
-             lowering_.builder_.getInt32(caller)},
+        args.push_back(this->lowering.builder_.CreateCall(
+            this->lowering.processLowerer().processFunction("tz_openssl_md", ptr, {ptr, i64, i32}),
+            {this->lowering.stringLowerer().stringObj(v),
+             this->lowering.stringLowerer().stringMeta(v),
+             this->lowering.builder_.getInt32(caller)},
             "md"));
       } else {
-        args.push_back(lowering_.builder_.CreateCall(
-            lowering_.processLowerer().processFunction("tz_openssl_cipher", ptr, {ptr, i64}),
-            {lowering_.stringLowerer().stringObj(v), lowering_.stringLowerer().stringMeta(v)},
+        args.push_back(this->lowering.builder_.CreateCall(
+            this->lowering.processLowerer().processFunction("tz_openssl_cipher", ptr, {ptr, i64}),
+            {this->lowering.stringLowerer().stringObj(v),
+             this->lowering.stringLowerer().stringMeta(v)},
             "cipher"));
       }
       break;
@@ -361,19 +374,19 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
 
   llvm::Type *ret = fn.result == 'o' || fn.result == 'p' ? ptr
                     : fn.result == 'f'                   ? f64
-                    : fn.result == 't'                   ? lowering_.builder_.getInt64Ty()
+                    : fn.result == 't'                   ? this->lowering.builder_.getInt64Ty()
                     : fn.result == 'v' || fn.result == 's' || fn.result == 'S' || fn.result == 'P'
                         ? voidTy
                         : i32;
-  llvm::Value *result = lowering_.builder_.CreateCall(
-      lowering_.processLowerer().processFunction(fn.name, ret, params), args);
+  llvm::Value *result = this->lowering.builder_.CreateCall(
+      this->lowering.processLowerer().processFunction(fn.name, ret, params), args);
   if (fallible || settlesResult) {
-    useErrors(nullptr);
+    this->useErrors(nullptr);
   }
   if (promise) {
     for (size_t i = 0; i < exprs.size(); ++i) {
       if (values[i]) {
-        lowering_.refCounts().releaseValue(values[i], exprs[i]->type);
+        this->lowering.refCounts().releaseValue(values[i], exprs[i]->type);
       }
     }
     return promise;
@@ -387,7 +400,7 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
   }
   for (size_t i = 0; i < exprs.size(); ++i) {
     if (values[i]) {
-      lowering_.refCounts().releaseValue(values[i], exprs[i]->type);
+      this->lowering.refCounts().releaseValue(values[i], exprs[i]->type);
     }
   }
   if (self && !values[0]) {
@@ -401,27 +414,29 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
     case 'S':
       return self;
     case 'i':
-      return lowering_.builder_.CreateSExt(result, lowering_.builder_.getInt64Ty());
+      return this->lowering.builder_.CreateSExt(result, this->lowering.builder_.getInt64Ty());
     case 'o':
     case 'f':
       return result;
     case 'p':
-      return lowering_.optionalLowerer().makeOptional(
-          result, lowering_.builder_.CreateIsNotNull(result), valueType);
+      return this->lowering.optionalLowerer().makeOptional(
+          result, this->lowering.builder_.CreateIsNotNull(result), valueType);
     case 'b':
-      return lowering_.builder_.CreateICmpNE(result, lowering_.builder_.getInt32(0));
+      return this->lowering.builder_.CreateICmpNE(result, this->lowering.builder_.getInt32(0));
     case 'j':
-      return lowering_.optionalLowerer().makeOptional(
-          lowering_.builder_.CreateSExt(result, lowering_.builder_.getInt64Ty()),
-          lowering_.builder_.CreateICmpSGE(result, lowering_.builder_.getInt32(0)), valueType);
+      return this->lowering.optionalLowerer().makeOptional(
+          this->lowering.builder_.CreateSExt(result, this->lowering.builder_.getInt64Ty()),
+          this->lowering.builder_.CreateICmpSGE(result, this->lowering.builder_.getInt32(0)),
+          valueType);
     case 's':
-      return lowering_.builder_.CreateLoad(lowering_.strTy_, out);
+      return this->lowering.builder_.CreateLoad(this->lowering.strTy_, out);
     case 'q':
-      return lowering_.optionalLowerer().makeOptional(
-          lowering_.builder_.CreateLoad(lowering_.strTy_, out),
-          lowering_.builder_.CreateICmpNE(result, lowering_.builder_.getInt32(0)), valueType);
+      return this->lowering.optionalLowerer().makeOptional(
+          this->lowering.builder_.CreateLoad(this->lowering.strTy_, out),
+          this->lowering.builder_.CreateICmpNE(result, this->lowering.builder_.getInt32(0)),
+          valueType);
     case 't':
-      return lowering_.dateLowerer().newDate(result);
+      return this->lowering.dateLowerer().newDate(result);
     default:
       llvm_unreachable("a result of an unknown kind");
     }
@@ -430,74 +445,76 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
     return plain();
   }
 
-  return lowering_.resultLowerer().catchFailure(call->type, call->loc(), [&]() -> llvm::Value * {
-    llvm::Value *value = plain();
-    if (!textEncoding) {
-      return value;
-    }
-    const Type *bytes = Type::bytesType(Type::Bytes::Buffer);
-    llvm::Value *text = lowering_.stringLowerer().callReturningString(
-        lowering_.processLowerer().processFunction("tz_buffer_to_string", voidTy,
-                                                   {ptr, ptr, i32, i64, i64, i32}),
-        {value, lowering_.builder_.getInt32(int32_t(textEncoding->value)),
-         lowering_.builder_.getInt64(0), lowering_.builder_.getInt64(0),
-         lowering_.builder_.getInt32(0)});
-    lowering_.refCounts().releaseValue(value, bytes);
+  return this->lowering.resultLowerer().catchFailure(
+      call->type, call->loc(), [&]() -> llvm::Value * {
+        llvm::Value *value = plain();
+        if (!textEncoding) {
+          return value;
+        }
+        const Type *bytes = Type::bytesType(Type::Bytes::Buffer);
+        llvm::Value *text = this->lowering.stringLowerer().callReturningString(
+            this->lowering.processLowerer().processFunction("tz_buffer_to_string", voidTy,
+                                                            {ptr, ptr, i32, i64, i64, i32}),
+            {value, this->lowering.builder_.getInt32(int32_t(textEncoding->value)),
+             this->lowering.builder_.getInt64(0), this->lowering.builder_.getInt64(0),
+             this->lowering.builder_.getInt32(0)});
+        this->lowering.refCounts().releaseValue(value, bytes);
 
-    return text;
-  });
+        return text;
+      });
 }
 
 llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty(),
-             *i64 = lowering_.builder_.getInt64Ty();
-  llvm::Value *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy(), *i32 = this->lowering.builder_.getInt32Ty(),
+             *i64 = this->lowering.builder_.getInt64Ty();
+  llvm::Value *null = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
 
   const Type *passTypes[2] = {nullptr, nullptr};
   llvm::Value *passSlots[2] = {nullptr, nullptr};
   for (int k = 0; k < 2; ++k) {
     if (Expr *p = call->args[1 + 5 * k + 4]; !p->type->isUndefined()) {
       passTypes[k] = p->type;
-      passSlots[k] = lowering_.functionFrame().createManagedSlot(p->type, "passphrase.held");
-      lowering_.builder_.CreateStore(lowering_.exprLowerer().emitExpr(p), passSlots[k]);
+      passSlots[k] = this->lowering.functionFrame().createManagedSlot(p->type, "passphrase.held");
+      this->lowering.builder_.CreateStore(this->lowering.exprLowerer().emitExpr(p), passSlots[k]);
     }
   }
   auto takePassphrase = [&](int k) {
-    llvm::Type *lowered = lowering_.moduleBuilder().lower(passTypes[k]);
-    llvm::Value *value = lowering_.builder_.CreateLoad(lowered, passSlots[k]);
-    lowering_.builder_.CreateStore(llvm::Constant::getNullValue(lowered), passSlots[k]);
+    llvm::Type *lowered = this->lowering.moduleBuilder().lower(passTypes[k]);
+    llvm::Value *value = this->lowering.builder_.CreateLoad(lowered, passSlots[k]);
+    this->lowering.builder_.CreateStore(llvm::Constant::getNullValue(lowered), passSlots[k]);
 
     return value;
   };
   const Type *resultType = call->type;
   const Type *pairType = resultType->okType();
-  llvm::BasicBlock *failBlock = lowering_.functionFrame().newBlock("keypair.failed");
+  llvm::BasicBlock *failBlock = this->lowering.functionFrame().newBlock("keypair.failed");
   bool failing = false;
   auto failWith = [&](llvm::function_ref<void()> release) {
-    llvm::Value *failure =
-        lowering_.builder_.CreateLoad(ptr, lowering_.resultLowerer().failedSlot(), "failure");
-    llvm::BasicBlock *bad = lowering_.functionFrame().newBlock("keypair.bad");
-    llvm::BasicBlock *good = lowering_.functionFrame().newBlock("keypair.good");
-    lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(failure), bad, good);
-    lowering_.functionFrame().switchTo(bad);
+    llvm::Value *failure = this->lowering.builder_.CreateLoad(
+        ptr, this->lowering.resultLowerer().failedSlot(), "failure");
+    llvm::BasicBlock *bad = this->lowering.functionFrame().newBlock("keypair.bad");
+    llvm::BasicBlock *good = this->lowering.functionFrame().newBlock("keypair.good");
+    this->lowering.builder_.CreateCondBr(this->lowering.builder_.CreateIsNotNull(failure), bad,
+                                         good);
+    this->lowering.functionFrame().switchTo(bad);
     for (int k = 0; k < 2; ++k) {
       if (passSlots[k]) {
-        lowering_.refCounts().releaseValue(takePassphrase(k), passTypes[k]);
+        this->lowering.refCounts().releaseValue(takePassphrase(k), passTypes[k]);
       }
     }
     release();
-    lowering_.builder_.CreateBr(failBlock);
+    this->lowering.builder_.CreateBr(failBlock);
     failing = true;
-    lowering_.functionFrame().switchTo(good);
+    this->lowering.functionFrame().switchTo(good);
   };
-  useErrors(resultType->errType());
-  llvm::Value *priv = lowering_.exprLowerer().emitExpr(call->args[0]);
+  this->useErrors(resultType->errType());
+  llvm::Value *priv = this->lowering.exprLowerer().emitExpr(call->args[0]);
   const Type *keyType = call->args[0]->type;
   failWith([] {});
-  llvm::Value *pub = lowering_.builder_.CreateCall(
-      lowering_.processLowerer().processFunction("tz_openssl_public_of", ptr, {ptr}), {priv},
+  llvm::Value *pub = this->lowering.builder_.CreateCall(
+      this->lowering.processLowerer().processFunction("tz_openssl_public_of", ptr, {ptr}), {priv},
       "public");
-  failWith([&] { lowering_.refCounts().releaseValue(priv, keyType); });
+  failWith([&] { this->lowering.refCounts().releaseValue(priv, keyType); });
   llvm::Value *values[2] = {pub, priv};
   const Type *types[2] = {keyType, keyType};
   for (int k = 0; k < 2; ++k) {
@@ -506,97 +523,101 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
     if (format < 0) {
       continue;
     }
-    llvm::Value *has = lowering_.builder_.CreateTrunc(lowering_.exprLowerer().emitExpr(part[1]),
-                                                      lowering_.builder_.getInt32Ty());
-    llvm::Value *keyTypeName = lowering_.exprLowerer().emitExpr(part[2]),
-                *cipher = lowering_.exprLowerer().emitExpr(part[3]);
-    llvm::Value *passType = null, *passValue = null;
+    llvm::Value *has = this->lowering.builder_.CreateTrunc(
+        this->lowering.exprLowerer().emitExpr(part[1]), this->lowering.builder_.getInt32Ty());
+    llvm::Value *keyTypeName = this->lowering.exprLowerer().emitExpr(part[2]),
+                *cipher = this->lowering.exprLowerer().emitExpr(part[3]);
+    llvm::Value *passType = null;
+    llvm::Value *passValue = null;
     if (passTypes[k]) {
-      passType = lowering_.typeDescriptors().typeDescriptor(passTypes[k]);
-      passValue = lowering_.functionFrame().spill(takePassphrase(k), "passphrase");
+      passType = this->lowering.typeDescriptors().typeDescriptor(passTypes[k]);
+      passValue = this->lowering.functionFrame().spill(takePassphrase(k), "passphrase");
       passSlots[k] = nullptr;
     }
     std::vector<llvm::Value *> rest = {has,
-                                       lowering_.stringLowerer().stringObj(keyTypeName),
-                                       lowering_.stringLowerer().stringMeta(keyTypeName),
-                                       lowering_.stringLowerer().stringObj(cipher),
-                                       lowering_.stringLowerer().stringMeta(cipher),
+                                       this->lowering.stringLowerer().stringObj(keyTypeName),
+                                       this->lowering.stringLowerer().stringMeta(keyTypeName),
+                                       this->lowering.stringLowerer().stringObj(cipher),
+                                       this->lowering.stringLowerer().stringMeta(cipher),
                                        passType,
                                        passValue};
     llvm::Value *key = values[k];
     if (format == 0) {
-      llvm::AllocaInst *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "pem");
+      llvm::AllocaInst *out =
+          this->lowering.functionFrame().createStackSlot(this->lowering.strTy_, "pem");
       std::vector<llvm::Value *> args = {out, key};
       args.insert(args.end(), rest.begin(), rest.end());
-      lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-                                        "tz_crypto_key_export_pem", lowering_.builder_.getVoidTy(),
-                                        {ptr, ptr, i32, ptr, i64, ptr, i64, ptr, ptr}),
-                                    args);
-      values[k] = lowering_.builder_.CreateLoad(lowering_.strTy_, out);
+      this->lowering.builder_.CreateCall(this->lowering.processLowerer().processFunction(
+                                             "tz_crypto_key_export_pem",
+                                             this->lowering.builder_.getVoidTy(),
+                                             {ptr, ptr, i32, ptr, i64, ptr, i64, ptr, ptr}),
+                                         args);
+      values[k] = this->lowering.builder_.CreateLoad(this->lowering.strTy_, out);
     } else if (format == 1) {
       std::vector<llvm::Value *> args = {key};
       args.insert(args.end(), rest.begin(), rest.end());
-      values[k] = lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction("tz_crypto_key_export_der", ptr,
-                                                     {ptr, i32, ptr, i64, ptr, i64, ptr, ptr}),
+      values[k] = this->lowering.builder_.CreateCall(
+          this->lowering.processLowerer().processFunction("tz_crypto_key_export_der", ptr,
+                                                          {ptr, i32, ptr, i64, ptr, i64, ptr, ptr}),
           args);
     } else {
-      values[k] = lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction("tz_crypto_key_export_jwk", ptr, {ptr}),
+      values[k] = this->lowering.builder_.CreateCall(
+          this->lowering.processLowerer().processFunction("tz_crypto_key_export_jwk", ptr, {ptr}),
           {key});
     }
     types[k] = pairType->field(k == 0 ? "publicKey" : "privateKey")->type;
-    lowering_.refCounts().releaseValue(keyTypeName, Type::string());
-    lowering_.refCounts().releaseValue(cipher, Type::string());
+    this->lowering.refCounts().releaseValue(keyTypeName, Type::string());
+    this->lowering.refCounts().releaseValue(cipher, Type::string());
     if (passTypes[k]) {
-      lowering_.refCounts().releaseValue(
-          lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(passTypes[k]), passValue),
+      this->lowering.refCounts().releaseValue(
+          this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(passTypes[k]),
+                                             passValue),
           passTypes[k]);
     }
-    lowering_.refCounts().releaseValue(key, keyType);
+    this->lowering.refCounts().releaseValue(key, keyType);
     failWith([&] {
       for (int i = 0; i < 2; ++i) {
-        lowering_.refCounts().releaseValue(values[i], types[i]);
+        this->lowering.refCounts().releaseValue(values[i], types[i]);
       }
     });
   }
   for (int k = 0; k < 2; ++k) {
     if (passSlots[k]) {
-      lowering_.refCounts().releaseValue(takePassphrase(k), passTypes[k]);
+      this->lowering.refCounts().releaseValue(takePassphrase(k), passTypes[k]);
     }
   }
-  useErrors(nullptr);
+  this->useErrors(nullptr);
   const Type *type = pairType;
-  llvm::Value *object = lowering_.objectLayouts().allocObject(type, {0, 1});
-  lowering_.builder_.CreateStore(
-      values[0], lowering_.objectLayouts().fieldAddress(object, type, "publicKey", true));
-  lowering_.builder_.CreateStore(
-      values[1], lowering_.objectLayouts().fieldAddress(object, type, "privateKey", true));
-  llvm::Value *made = lowering_.resultLowerer().makeResult(resultType, lowering_.builder_.getTrue(),
-                                                           object, nullptr);
-  llvm::BasicBlock *madeEnd = lowering_.builder_.GetInsertBlock();
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("keypair.end");
-  lowering_.builder_.CreateBr(endBlock);
-  lowering_.functionFrame().switchTo(failBlock);
+  llvm::Value *object = this->lowering.objectLayouts().allocObject(type, {0, 1});
+  this->lowering.builder_.CreateStore(
+      values[0], this->lowering.objectLayouts().fieldAddress(object, type, "publicKey", true));
+  this->lowering.builder_.CreateStore(
+      values[1], this->lowering.objectLayouts().fieldAddress(object, type, "privateKey", true));
+  llvm::Value *made = this->lowering.resultLowerer().makeResult(
+      resultType, this->lowering.builder_.getTrue(), object, nullptr);
+  llvm::BasicBlock *madeEnd = this->lowering.builder_.GetInsertBlock();
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("keypair.end");
+  this->lowering.builder_.CreateBr(endBlock);
+  this->lowering.functionFrame().switchTo(failBlock);
   llvm::PHINode *phi = nullptr;
   llvm::Value *failed = nullptr;
   llvm::BasicBlock *failEnd = nullptr;
   if (failing) {
-    useErrors(nullptr);
-    llvm::Value *slot = lowering_.resultLowerer().failedSlot();
-    llvm::Value *failure = lowering_.builder_.CreateLoad(ptr, slot, "failure");
-    lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
-                                   slot);
-    failed =
-        lowering_.resultLowerer().makeResult(resultType, lowering_.builder_.getFalse(), nullptr,
-                                             failure, lowering_.errSites().site(call->loc()));
-    failEnd = lowering_.builder_.GetInsertBlock();
-    lowering_.builder_.CreateBr(endBlock);
+    this->useErrors(nullptr);
+    llvm::Value *slot = this->lowering.resultLowerer().failedSlot();
+    llvm::Value *failure = this->lowering.builder_.CreateLoad(ptr, slot, "failure");
+    this->lowering.builder_.CreateStore(
+        llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()), slot);
+    failed = this->lowering.resultLowerer().makeResult(
+        resultType, this->lowering.builder_.getFalse(), nullptr, failure,
+        this->lowering.errSites().site(call->loc()));
+    failEnd = this->lowering.builder_.GetInsertBlock();
+    this->lowering.builder_.CreateBr(endBlock);
   } else {
-    lowering_.builder_.CreateUnreachable();
+    this->lowering.builder_.CreateUnreachable();
   }
-  lowering_.functionFrame().switchTo(endBlock);
-  phi = lowering_.builder_.CreatePHI(made->getType(), failing ? 2 : 1, "keypair");
+  this->lowering.functionFrame().switchTo(endBlock);
+  phi = this->lowering.builder_.CreatePHI(made->getType(), failing ? 2 : 1, "keypair");
   phi->addIncoming(made, madeEnd);
   if (failing) {
     phi->addIncoming(failed, failEnd);
@@ -606,91 +627,96 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
 }
 
 llvm::Function *CryptoLowerer::pairMaker(const Type *pair) {
-  llvm::Function *&made = makers_[pair];
+  llvm::Function *&made = this->makers[pair];
   if (made) {
     return made;
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
   made = llvm::Function::Create(llvm::FunctionType::get(ptr, {ptr}, false),
                                 llvm::GlobalValue::InternalLinkage, "tz.make.keypair",
-                                lowering_.module_.get());
+                                this->lowering.module_.get());
   llvm::Function *function = made;
-  lowering_.functionBuilder().setFunctionAttributes(function);
-  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
-  llvm::Function *outer = std::exchange(lowering_.function_, function);
-  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", function));
-  llvm::StructType *layout =
-      llvm::StructType::get(lowering_.ctx_, {lowering_.strTy_, lowering_.strTy_, ptr, ptr});
+  this->lowering.functionBuilder().setFunctionAttributes(function);
+  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
+  llvm::Function *outer = std::exchange(this->lowering.function_, function);
+  this->lowering.builder_.SetInsertPoint(
+      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", function));
+  llvm::StructType *layout = llvm::StructType::get(
+      this->lowering.ctx_, {this->lowering.strTy_, this->lowering.strTy_, ptr, ptr});
   llvm::Value *values = function->getArg(0);
-  llvm::Value *object = lowering_.objectLayouts().allocObject(pair, {0, 1});
+  llvm::Value *object = this->lowering.objectLayouts().allocObject(pair, {0, 1});
   const char *names[2] = {"publicKey", "privateKey"};
   for (unsigned k = 0; k < 2; ++k) {
     bool text = pair->field(names[k])->type->isString();
-    llvm::Value *value = lowering_.builder_.CreateLoad(
-        text ? static_cast<llvm::Type *>(lowering_.strTy_) : ptr,
-        lowering_.builder_.CreateStructGEP(layout, values, text ? k : 2 + k));
-    lowering_.builder_.CreateStore(
-        value, lowering_.objectLayouts().fieldAddress(object, pair, names[k], true));
+    llvm::Value *value = this->lowering.builder_.CreateLoad(
+        text ? static_cast<llvm::Type *>(this->lowering.strTy_) : ptr,
+        this->lowering.builder_.CreateStructGEP(layout, values, text ? k : 2 + k));
+    this->lowering.builder_.CreateStore(
+        value, this->lowering.objectLayouts().fieldAddress(object, pair, names[k], true));
   }
-  lowering_.builder_.CreateRet(object);
-  lowering_.function_ = outer;
-  lowering_.builder_.restoreIP(point);
+  this->lowering.builder_.CreateRet(object);
+  this->lowering.function_ = outer;
+  this->lowering.builder_.restoreIP(point);
 
   return function;
 }
 
 llvm::Value *CryptoLowerer::emitCryptoKeyPairAsync(CallExpr *call) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty(),
-             *i64 = lowering_.builder_.getInt64Ty(), *f64 = lowering_.builder_.getDoubleTy();
-  llvm::Value *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy(), *i32 = this->lowering.builder_.getInt32Ty(),
+             *i64 = this->lowering.builder_.getInt64Ty(),
+             *f64 = this->lowering.builder_.getDoubleTy();
+  llvm::Value *null = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
   auto *generate = cast<CallExpr>(call->args[0]);
   auto int32Of = [&](Expr *e) {
-    return lowering_.builder_.getInt32(uint32_t(cast<IntLitExpr>(e)->value));
+    return this->lowering.builder_.getInt32(uint32_t(cast<IntLitExpr>(e)->value));
   };
-  llvm::Value *name = lowering_.exprLowerer().emitExpr(generate->args[2]);
-  llvm::Value *modulus = lowering_.exprLowerer().emitExpr(generate->args[3]);
-  llvm::Value *exponent = lowering_.exprLowerer().emitExpr(generate->args[4]);
-  llvm::Value *curve = lowering_.exprLowerer().emitExpr(generate->args[6]);
+  llvm::Value *name = this->lowering.exprLowerer().emitExpr(generate->args[2]);
+  llvm::Value *modulus = this->lowering.exprLowerer().emitExpr(generate->args[3]);
+  llvm::Value *exponent = this->lowering.exprLowerer().emitExpr(generate->args[4]);
+  llvm::Value *curve = this->lowering.exprLowerer().emitExpr(generate->args[6]);
   std::vector<llvm::Type *> params = {ptr, ptr, i32, ptr, i64, f64, f64, i32, ptr, i64};
   std::vector<llvm::Value *> args;
   const Type *settled = call->type->promised();
-  llvm::Value *promise = lowering_.promiseLowerer().newPromise(settled);
+  llvm::Value *promise = this->lowering.promiseLowerer().newPromise(settled);
   args.insert(args.end(),
-              {promise, pairMaker(settled->okType()), int32Of(generate->args[1]),
-               lowering_.stringLowerer().stringObj(name), lowering_.stringLowerer().stringMeta(name),
-               modulus, exponent, int32Of(generate->args[5]),
-               lowering_.stringLowerer().stringObj(curve),
-               lowering_.stringLowerer().stringMeta(curve)});
+              {promise, this->pairMaker(settled->okType()), int32Of(generate->args[1]),
+               this->lowering.stringLowerer().stringObj(name),
+               this->lowering.stringLowerer().stringMeta(name), modulus, exponent,
+               int32Of(generate->args[5]), this->lowering.stringLowerer().stringObj(curve),
+               this->lowering.stringLowerer().stringMeta(curve)});
   std::vector<std::pair<llvm::Value *, const Type *>> owned = {{name, Type::string()},
                                                                {curve, Type::string()}};
   for (int k = 0; k < 2; ++k) {
     Expr **part = &call->args[1 + 5 * k];
-    llvm::Value *flags = lowering_.builder_.CreateTrunc(lowering_.exprLowerer().emitExpr(part[1]), i32);
-    llvm::Value *keyType = lowering_.exprLowerer().emitExpr(part[2]);
-    llvm::Value *cipher = lowering_.exprLowerer().emitExpr(part[3]);
-    llvm::Value *passType = null, *passValue = null;
+    llvm::Value *flags =
+        this->lowering.builder_.CreateTrunc(this->lowering.exprLowerer().emitExpr(part[1]), i32);
+    llvm::Value *keyType = this->lowering.exprLowerer().emitExpr(part[2]);
+    llvm::Value *cipher = this->lowering.exprLowerer().emitExpr(part[3]);
+    llvm::Value *passType = null;
+    llvm::Value *passValue = null;
     if (!part[4]->type->isUndefined()) {
-      llvm::Value *pass = lowering_.exprLowerer().emitExpr(part[4]);
-      passType = lowering_.typeDescriptors().typeDescriptor(part[4]->type);
-      passValue = lowering_.functionFrame().spill(pass, "passphrase");
+      llvm::Value *pass = this->lowering.exprLowerer().emitExpr(part[4]);
+      passType = this->lowering.typeDescriptors().typeDescriptor(part[4]->type);
+      passValue = this->lowering.functionFrame().spill(pass, "passphrase");
       owned.push_back({pass, part[4]->type});
     }
     params.insert(params.end(), {i32, i32, ptr, i64, ptr, i64, ptr, ptr});
-    args.insert(args.end(), {int32Of(part[0]), flags, lowering_.stringLowerer().stringObj(keyType),
-                             lowering_.stringLowerer().stringMeta(keyType),
-                             lowering_.stringLowerer().stringObj(cipher),
-                             lowering_.stringLowerer().stringMeta(cipher), passType, passValue});
+    args.insert(args.end(),
+                {int32Of(part[0]), flags, this->lowering.stringLowerer().stringObj(keyType),
+                 this->lowering.stringLowerer().stringMeta(keyType),
+                 this->lowering.stringLowerer().stringObj(cipher),
+                 this->lowering.stringLowerer().stringMeta(cipher), passType, passValue});
     owned.push_back({keyType, Type::string()});
     owned.push_back({cipher, Type::string()});
   }
-  useErrors(settled->errType());
-  lowering_.builder_.CreateCall(
-      lowering_.processLowerer().processFunction("tz_openssl_generate_key_pair_async",
-                                                 lowering_.builder_.getVoidTy(), params),
+  this->useErrors(settled->errType());
+  this->lowering.builder_.CreateCall(
+      this->lowering.processLowerer().processFunction("tz_openssl_generate_key_pair_async",
+                                                      this->lowering.builder_.getVoidTy(), params),
       args);
-  useErrors(nullptr);
+  this->useErrors(nullptr);
   for (const auto &[value, type] : owned) {
-    lowering_.refCounts().releaseValue(value, type);
+    this->lowering.refCounts().releaseValue(value, type);
   }
 
   return promise;

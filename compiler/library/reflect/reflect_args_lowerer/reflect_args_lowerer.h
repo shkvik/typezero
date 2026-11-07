@@ -6,7 +6,7 @@ namespace tz {
 
 class ReflectArgsLowerer {
 public:
-  explicit ReflectArgsLowerer(Lowering &lowering);
+  explicit ReflectArgsLowerer(Lowering &owner);
 
   llvm::Value *emitChooseVariant(llvm::ArrayRef<const FunctionDecl *> variants, llvm::Value *selfId,
                                  llvm::Value *args, llvm::Value *count);
@@ -19,7 +19,9 @@ public:
   void emitReflectFail(llvm::StringRef code, const std::string &message);
 
 private:
-  Lowering &lowering_;
+  static bool narrower(const Type *a, const Type *b);
+
+  Lowering &lowering;
 };
 
 }

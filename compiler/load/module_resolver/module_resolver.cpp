@@ -1,5 +1,6 @@
 #include "compiler/load/module_resolver/module_resolver.h"
 #include "compiler/check/checker/checker.h"
+#include "compiler/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
 #include "compiler/load/lexer/lexer.h"
 #include "compiler/load/library_modules/library_modules.h"
 #include "compiler/load/parser/parser.h"
@@ -99,7 +100,7 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
     return loader_.library().libraryModule("string_decoder.tz", "node:string_decoder", loc);
   }
   if (isBuiltinModule(spec)) {
-    if (std::string problem = builtinModuleProblem(spec); !problem.empty()) {
+    if (std::string problem = BuiltinModuleChecker::moduleProblem(spec); !problem.empty()) {
       loader_.diags_.error(loc, problem);
     }
     return nullptr;

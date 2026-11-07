@@ -7,14 +7,12 @@
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "llvm/ADT/STLExtras.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-MetadataChecker::MetadataChecker(Checker &checker) : checker_(checker) {}
+MetadataChecker::MetadataChecker(Checker &owner)
+    : checker(owner) {}
 
 ClassDecl *MetadataChecker::builtinConstructor(llvm::StringRef name) {
   static const llvm::StringLiteral names[] = {"Number",       "String",
@@ -34,9 +32,9 @@ ClassDecl *MetadataChecker::builtinConstructor(llvm::StringRef name) {
   if (found == std::end(names)) {
     return nullptr;
   }
-  ClassDecl *&cls = builtinConstructors_[name];
+  ClassDecl *&cls = this->builtinConstructors[name];
   if (!cls) {
-    cls = checker_.ctx_.make<ClassDecl>(llvm::SMLoc(), *found);
+    cls = this->checker.ctx_.make<ClassDecl>(llvm::SMLoc(), *found);
     cls->origin = ClassOrigin::BUILTIN;
     cls->stage = ClassStage::RESOLVED;
     cls->declared = true;
@@ -50,7 +48,7 @@ const void *MetadataChecker::metadataKey(const Expr *key, std::string &label) {
   if (!name) {
     return nullptr;
   }
-  ScopeEntry entry = checker_.scopes().lookup(name->name);
+  ScopeEntry entry = this->checker.scopes().lookup(name->name);
   label = name->name.str();
   if (entry.var()) {
     return entry.var()->isConst && entry.var()->type && !entry.var()->type->isString() ? entry.var()
@@ -82,7 +80,7 @@ void MetadataChecker::findMetadataWriters(SourceFile &program) {
             return;
           }
           if (auto *key = dyn_cast<NameExpr>(call->args[0])) {
-            std::vector<FunctionDecl *> &writers = metaWriters_[key->name];
+            std::vector<FunctionDecl *> &writers = this->metaWriters[key->name];
             if (!llvm::is_contained(writers, fn)) {
               writers.push_back(fn);
             }
@@ -95,43 +93,44 @@ void MetadataChecker::findMetadataWriters(SourceFile &program) {
 
 void MetadataChecker::checkBodyEarly(FunctionDecl *fn) {
   if (!fn->sym || fn->checked || fn->sym->isGeneric() ||
-      llvm::is_contained(checker_.functions_, fn)) {
+      llvm::is_contained(this->checker.functions_, fn)) {
     return;
   }
   if (!fn->sym->ret) {
-    checker_.returnInferrer().inferReturnType(fn->sym);
+    this->checker.returnInferrer().inferReturnType(fn->sym);
     return;
   }
   if (fn->cls()) {
     return;
   }
-  Checker::BodyState saved = checker_.returnInferrer().enterBody(fn);
-  if (!checker_.topLevelDone_) {
-    checker_.early_ = fn->sym;
+  Checker::BodyState saved = this->checker.returnInferrer().enterBody(fn);
+  if (!this->checker.topLevelDone_) {
+    this->checker.early_ = fn->sym;
   }
-  checker_.flow_ = Checker::Flow();
-  checker_.functionChecker().checkFunctionBody(fn);
-  checker_.returnInferrer().leaveBody(saved);
+  this->checker.flow_ = Checker::Flow();
+  this->checker.functionChecker().checkFunctionBody(fn);
+  this->checker.returnInferrer().leaveBody(saved);
 }
 
 const Type *MetadataChecker::metadataType(const void *key, llvm::StringRef label, llvm::SMLoc loc,
                                           const Type *expected) {
-  if (auto found = checker_.metaTypes_.find(key); found != checker_.metaTypes_.end()) {
+  if (auto found = this->checker.metaTypes_.find(key); found != this->checker.metaTypes_.end()) {
     return found->second.type;
   }
-  if (auto writers = metaWriters_.find(label); writers != metaWriters_.end()) {
+  if (auto writers = this->metaWriters.find(label); writers != this->metaWriters.end()) {
     for (FunctionDecl *fn : std::vector<FunctionDecl *>(writers->second)) {
-      checkBodyEarly(fn);
-      if (auto found = checker_.metaTypes_.find(key); found != checker_.metaTypes_.end()) {
+      this->checkBodyEarly(fn);
+      if (auto found = this->checker.metaTypes_.find(key);
+          found != this->checker.metaTypes_.end()) {
         return found->second.type;
       }
     }
   }
   if (expected && !expected->nonOptional()->isUnknown() && !mentionsParam(expected)) {
-    checker_.metaTypes_[key] = {expected->nonOptional(), loc};
+    this->checker.metaTypes_[key] = {expected->nonOptional(), loc};
     return expected->nonOptional();
   }
-  checker_.diags_.error(
+  this->checker.diags_.error(
       loc, "the records of '" + label +
                "' have the type of the first one written, "
                "'Reflect.defineMetadata(" +
@@ -144,7 +143,7 @@ const Type *MetadataChecker::metadataType(const void *key, llvm::StringRef label
 }
 
 Expr *MetadataChecker::designClass(const Type *type, llvm::SMLoc loc) {
-  return checker_.classValueChecker().classValueAt(designConstructor(type), loc);
+  return this->checker.classValueChecker().classValueAt(this->designConstructor(type), loc);
 }
 
 ClassDecl *MetadataChecker::designConstructor(const Type *type) {
@@ -153,16 +152,16 @@ ClassDecl *MetadataChecker::designConstructor(const Type *type) {
     type = type->literalBase();
   }
   if (type->isUnion()) {
-    ClassDecl *common = designConstructor(type->members().front());
+    ClassDecl *common = this->designConstructor(type->members().front());
     for (const Type *m : type->members()) {
-      if (designConstructor(m) != common) {
-        return builtinConstructor("Object");
+      if (this->designConstructor(m) != common) {
+        return this->builtinConstructor("Object");
       }
     }
     return common;
   }
   if (type->isBytes()) {
-    return builtinConstructor(type->name());
+    return this->builtinConstructor(type->name());
   }
   llvm::StringRef name = "Object";
   if (type->isPromise()) {
@@ -189,48 +188,49 @@ ClassDecl *MetadataChecker::designConstructor(const Type *type) {
     return cls;
   }
 
-  return builtinConstructor(name);
+  return this->builtinConstructor(name);
 }
 
 void MetadataChecker::writeDesignRecord(ClassDecl *cls, const char16_t *key, Expr *value,
                                         llvm::StringRef member, llvm::SMLoc loc) {
-  auto *callee = checker_.ctx_.make<NameExpr>(loc, "Reflect");
+  auto *callee = this->checker.ctx_.make<NameExpr>(loc, "Reflect");
   callee->type = Type::error();
-  auto *keyLit = checker_.ctx_.make<StringLitExpr>(loc, key);
+  auto *keyLit = this->checker.ctx_.make<StringLitExpr>(loc, key);
   keyLit->type = Type::string();
   Expr *property;
   if (member.empty()) {
-    property = checker_.ctx_.make<UndefinedExpr>(loc);
+    property = this->checker.ctx_.make<UndefinedExpr>(loc);
     property->type = Type::undefinedTy();
   } else {
-    property = checker_.ctx_.make<StringLitExpr>(loc, std::u16string(member.begin(), member.end()));
+    property =
+        this->checker.ctx_.make<StringLitExpr>(loc, std::u16string(member.begin(), member.end()));
     property->type = Type::string();
   }
   if (value->type->isClassRef()) {
-    value = checker_.typeRelations().convert(value, Type::constructorOf(Type::anyObject()));
+    value = this->checker.typeRelations().convert(value, Type::constructorOf(Type::anyObject()));
   }
   std::vector<Expr *> args{
-      keyLit, checker_.typeRelations().convert(value, Type::unknown()),
-      checker_.typeRelations().convert(checker_.classValueChecker().classValueAt(cls, loc),
-                                       Type::anyObject()),
-      checker_.typeRelations().convert(property, Type::optional(Type::string()))};
-  auto *call = checker_.ctx_.make<CallExpr>(loc, callee, std::move(args));
+      keyLit, this->checker.typeRelations().convert(value, Type::unknown()),
+      this->checker.typeRelations().convert(
+          this->checker.classValueChecker().classValueAt(cls, loc), Type::anyObject()),
+      this->checker.typeRelations().convert(property, Type::optional(Type::string()))};
+  auto *call = this->checker.ctx_.make<CallExpr>(loc, callee, std::move(args));
   call->target = BuiltinCall{.builtin = Builtin::MetaDefine};
   call->designRecord = true;
   call->type = Type::voidTy();
-  cls->decorations.push_back(checker_.ctx_.make<ExprStmt>(loc, call));
+  cls->decorations.push_back(this->checker.ctx_.make<ExprStmt>(loc, call));
 }
 
 void MetadataChecker::writeDesignRecords(ClassDecl *cls, ClassField *field, FunctionDecl *method,
                                          const FunctionDecl *ctor, llvm::SMLoc loc) {
   auto paramTypes = [&](const FunctionDecl *fn) {
-    auto *list = checker_.ctx_.make<ArrayLitExpr>(loc);
-    checker_.returnInferrer().resolveParams(fn->sym);
+    auto *list = this->checker.ctx_.make<ArrayLitExpr>(loc);
+    this->checker.returnInferrer().resolveParams(fn->sym);
     const Type *any = Type::constructorOf(Type::anyObject());
     for (const Type *param : fn->sym->params) {
       if (param) {
         list->elements.push_back(
-            {checker_.typeRelations().convert(designClass(param, loc), any), false});
+            {this->checker.typeRelations().convert(this->designClass(param, loc), any), false});
       }
     }
     list->type = Type::array(any);
@@ -238,26 +238,28 @@ void MetadataChecker::writeDesignRecords(ClassDecl *cls, ClassField *field, Func
     return list;
   };
   if (field) {
-    checker_.classDeclarer().completeClass(cls);
+    this->checker.classDeclarer().completeClass(cls);
     if (field->resolved && !field->resolved->isError()) {
-      writeDesignRecord(cls, u"design:type", designClass(field->resolved, loc), field->name, loc);
+      this->writeDesignRecord(cls, u"design:type", this->designClass(field->resolved, loc),
+                              field->name, loc);
     }
     return;
   }
   if (method) {
-    const Type *ret = checker_.returnInferrer().returnType(method->sym);
+    const Type *ret = this->checker.returnInferrer().returnType(method->sym);
     if (ret && !ret->isVoid() && !ret->isError()) {
-      writeDesignRecord(cls, u"design:returntype", designClass(ret, loc), method->name, loc);
+      this->writeDesignRecord(cls, u"design:returntype", this->designClass(ret, loc), method->name,
+                              loc);
     }
-    writeDesignRecord(cls, u"design:paramtypes", paramTypes(method), method->name, loc);
-    writeDesignRecord(
+    this->writeDesignRecord(cls, u"design:paramtypes", paramTypes(method), method->name, loc);
+    this->writeDesignRecord(
         cls, u"design:type",
-        checker_.classValueChecker().classValueAt(builtinConstructor("Function"), loc),
+        this->checker.classValueChecker().classValueAt(this->builtinConstructor("Function"), loc),
         method->name, loc);
     return;
   }
   if (ctor) {
-    writeDesignRecord(cls, u"design:paramtypes", paramTypes(ctor), {}, loc);
+    this->writeDesignRecord(cls, u"design:paramtypes", paramTypes(ctor), {}, loc);
   }
 }
 

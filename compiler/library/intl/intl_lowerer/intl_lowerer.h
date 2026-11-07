@@ -6,7 +6,7 @@ namespace tz {
 
 class IntlLowerer {
 public:
-  explicit IntlLowerer(Lowering &lowering);
+  explicit IntlLowerer(Lowering &owner);
 
   llvm::Value *emitIntlOptions(Expr *locale, Expr *options, std::vector<Lowering::Operand> &held);
   Lowering::IntlNumber emitIntlNumber(Expr *arg);
@@ -16,9 +16,11 @@ public:
   llvm::Value *emitLocaleArray(Expr *arg);
 
 private:
-  Lowering &lowering_;
-  llvm::DenseMap<const Type *, llvm::Constant *> intlShapes_;
-  std::map<std::pair<IntlKind, const Type *>, llvm::Constant *> intlBound_;
+  static int optionIndex(llvm::StringRef name);
+
+  Lowering &lowering;
+  llvm::DenseMap<const Type *, llvm::Constant *> intlShapes;
+  std::map<std::pair<IntlKind, const Type *>, llvm::Constant *> intlBound;
 };
 
 }

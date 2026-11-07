@@ -6,7 +6,7 @@ namespace tz {
 
 class CryptoChecker {
 public:
-  explicit CryptoChecker(Checker &checker);
+  explicit CryptoChecker(Checker &owner);
 
   Expr *checkCryptoMember(MemberExpr *member);
   Expr *checkCryptoNew(NewExpr *expr, llvm::StringRef cls);
@@ -20,7 +20,7 @@ public:
   const Type *cryptoTypeNamed(llvm::StringRef name) const;
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

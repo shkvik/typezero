@@ -7,16 +7,10 @@
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-const Type *parsedPathType() {
+const Type *PathChecker::parsedPathType() {
   const Type *s = Type::string();
 
   return Type::object({{"root", s, false},
@@ -27,7 +21,7 @@ const Type *parsedPathType() {
                       "ParsedPath");
 }
 
-const Type *formatInputType() {
+const Type *PathChecker::formatInputType() {
   const Type *s = Type::optional(Type::string());
 
   return Type::object({{"root", s, false},
@@ -38,22 +32,21 @@ const Type *formatInputType() {
                       "FormatInputPathObject");
 }
 
-}
-
-PathChecker::PathChecker(Checker &checker) : checker_(checker) {}
+PathChecker::PathChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *PathChecker::checkPathValue(NodeModule module, llvm::StringRef name, Expr *expr) {
   bool win32 = module == NodeModule::PathWin32 || (module == NodeModule::Path && targetIsWindows());
   if (name == "sep") {
-    return stringLiteral(checker_.ctx_, expr->loc(), win32 ? "\\" : "/");
+    return stringLiteral(this->checker.ctx_, expr->loc(), win32 ? "\\" : "/");
   }
   if (name == "delimiter") {
-    return stringLiteral(checker_.ctx_, expr->loc(), win32 ? ";" : ":");
+    return stringLiteral(this->checker.ctx_, expr->loc(), win32 ? ";" : ":");
   }
   if (name == "posix" || name == "win32") {
-    checker_.diags_.error(expr->loc(), "'" + name + "' of '" + moduleLabel(module) +
-                                           "' is used through its functions, e.g. '" + name +
-                                           ".join(a, b)'");
+    this->checker.diags_.error(expr->loc(), "'" + name + "' of '" + moduleLabel(module) +
+                                                "' is used through its functions, e.g. '" + name +
+                                                ".join(a, b)'");
     return expr;
   }
 
@@ -65,38 +58,39 @@ Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::String
   call->type = Type::error();
   auto loosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
 
     return call;
   };
   if (fn == "sep" || fn == "delimiter") {
-    checker_.diags_.error(loc, "'" + fn + "' is a string, not a function");
+    this->checker.diags_.error(loc, "'" + fn + "' is a string, not a function");
     return loosely();
   }
   if (fn == "posix" || fn == "win32") {
-    checker_.diags_.error(loc, "'" + fn + "' is not a function: call its functions, e.g. '" + fn +
-                                   ".join(a, b)'");
+    this->checker.diags_.error(loc, "'" + fn + "' is not a function: call its functions, e.g. '" +
+                                        fn + ".join(a, b)'");
     return loosely();
   }
   bool win32 = module == NodeModule::PathWin32 || (module == NodeModule::Path && targetIsWindows());
-  auto *style = checker_.ctx_.make<IntLitExpr>(loc, win32 ? 1 : 0);
+  auto *style = this->checker.ctx_.make<IntLitExpr>(loc, win32 ? 1 : 0);
   style->type = Type::intTy();
   const Type *string = Type::string();
 
   if (fn == "join" || fn == "resolve") {
-    auto *paths = checker_.ctx_.make<ArrayLitExpr>(call->args.empty() ? loc : call->args[0]->loc());
+    auto *paths =
+        this->checker.ctx_.make<ArrayLitExpr>(call->args.empty() ? loc : call->args[0]->loc());
     for (size_t i = 0; i < call->args.size(); ++i) {
       paths->elements.push_back({call->args[i], call->spreads(i)});
     }
-    Expr *array = checker_.argumentChecker().checkArg(paths, Type::array(string));
+    Expr *array = this->checker.argumentChecker().checkArg(paths, Type::array(string));
     call->args = {style, array};
     call->spread.clear();
     call->target = BuiltinCall{.builtin = fn == "join" ? Builtin::PathJoin : Builtin::PathResolve};
     call->type = string;
     return call;
   }
-  if (checker_.callChecker().rejectSpread(call)) {
+  if (this->checker.callChecker().rejectSpread(call)) {
     return call;
   }
   struct Shape {
@@ -117,26 +111,27 @@ Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::String
   };
   const Shape *shape = llvm::find_if(shapes, [&](const Shape &s) { return s.name == fn; });
   if (shape == std::end(shapes)) {
-    checker_.diags_.error(loc,
-                          "'" + fn + "' of '" + moduleLabel(module) + "' is not supported yet");
+    this->checker.diags_.error(loc, "'" + fn + "' of '" + moduleLabel(module) +
+                                        "' is not supported yet");
     return loosely();
   }
   ArgumentChecker::ResultArityMatches arity =
-      checker_.argumentChecker().checkArity(call, shape->min, shape->max);
+      this->checker.argumentChecker().checkArity(call, shape->min, shape->max);
   if (arity.isErr()) {
-    checker_.diags_.error(loc, arity.error().message);
+    this->checker.diags_.error(loc, arity.error().message);
     return call;
   }
   if (shape->builtin == Builtin::PathFormat) {
-    Expr *arg = checker_.exprChecker().checkExpr(call->args[0], formatInputType());
+    Expr *arg =
+        this->checker.exprChecker().checkExpr(call->args[0], PathChecker::formatInputType());
     const Type *type = arg->type;
     bool fits = type->isObject() && !type->isClass() && !type->isTuple() &&
                 llvm::all_of(type->fields(), [&](const Field &f) {
-                  return formatInputType()->field(f.name) &&
+                  return PathChecker::formatInputType()->field(f.name) &&
                          (f.type == string || f.type == Type::optional(string));
                 });
     if (!fits && !type->isError()) {
-      arg = checker_.typeRelations().coerce(arg, formatInputType());
+      arg = this->checker.typeRelations().coerce(arg, PathChecker::formatInputType());
     }
     call->args = {style, arg};
     call->target = BuiltinCall{.builtin = Builtin::PathFormat};
@@ -144,12 +139,12 @@ Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::String
     return call;
   }
   for (Expr *&arg : call->args) {
-    arg = checker_.argumentChecker().checkArg(arg, string);
+    arg = this->checker.argumentChecker().checkArg(arg, string);
   }
   call->args.insert(call->args.begin(), style);
   call->target = BuiltinCall{.builtin = shape->builtin};
   call->type = shape->builtin == Builtin::PathIsAbsolute ? Type::boolTy()
-               : shape->builtin == Builtin::PathParse    ? parsedPathType()
+               : shape->builtin == Builtin::PathParse    ? PathChecker::parsedPathType()
                                                          : string;
 
   return call;

@@ -5,24 +5,18 @@
 #include "runtime/library/bytes/encodings/encodings.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/MathExtras.h"
-#include <limits>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::string rangeText(int64_t lo, int64_t hi) {
+std::string ByteProofs::rangeText(int64_t lo, int64_t hi) {
   return std::to_string(lo) + " to " + std::to_string(hi);
 }
 
-int64_t wrapped(Bytes kind, int64_t v) {
+int64_t ByteProofs::wrapped(Bytes kind, int64_t v) {
   switch (kind) {
   case Bytes::Int8:
     return int8_t(uint8_t(v));
@@ -39,11 +33,15 @@ int64_t wrapped(Bytes kind, int64_t v) {
   }
 }
 
-Range exact(int64_t v) { return {v, v}; }
+Range ByteProofs::exact(int64_t v) {
+  return {v, v};
+}
 
-bool known(const Range &r) { return r.lo && r.hi; }
+bool ByteProofs::known(const Range &r) {
+  return r.lo && r.hi;
+}
 
-Range unite(const Range &a, const Range &b) {
+Range ByteProofs::unite(const Range &a, const Range &b) {
   Range r;
   if (a.lo && b.lo) {
     r.lo = std::min(*a.lo, *b.lo);
@@ -55,7 +53,7 @@ Range unite(const Range &a, const Range &b) {
   return r;
 }
 
-int64_t allOnes(int64_t v) {
+int64_t ByteProofs::allOnes(int64_t v) {
   int64_t m = 0;
   while (m < v) {
     m = m * 2 + 1;
@@ -64,16 +62,15 @@ int64_t allOnes(int64_t v) {
   return m;
 }
 
-int64_t floorShift(int64_t v, int64_t n) {
+int64_t ByteProofs::floorShift(int64_t v, int64_t n) {
   return v >= 0 ? v >> n : -((-v + (int64_t(1) << n) - 1) >> n);
 }
 
-}
-
-ByteProofs::ByteProofs(Checker &checker) : checker_(checker) {}
+ByteProofs::ByteProofs(Checker &owner)
+    : checker(owner) {}
 
 ValueRange ByteProofs::valueRange(const Expr *e) const {
-  Range r = computedRange(e);
+  Range r = this->computedRange(e);
   if (!e->type || !e->type->nonOptional()->isInteger()) {
     return r;
   }
@@ -92,8 +89,8 @@ ValueRange ByteProofs::computedRange(const Expr *e) const {
   if (!e->type || !e->type->nonOptional()->isInteger()) {
     return {};
   }
-  if (std::optional<int64_t> c = checker_.constantFolder().intConstant(e)) {
-    return exact(*c);
+  if (std::optional<int64_t> c = this->checker.constantFolder().intConstant(e)) {
+    return ByteProofs::exact(*c);
   }
   switch (e->kind()) {
   case Expr::Kind::Cast: {
@@ -101,10 +98,11 @@ ValueRange ByteProofs::computedRange(const Expr *e) const {
     if (!conv->isImplicit() || !conv->operand->type || !conv->operand->type->isInteger()) {
       return {};
     }
-    Range r = valueRange(conv->operand);
+    Range r = this->valueRange(conv->operand);
     const Type *to = conv->type->nonOptional();
     if (!to->holds(conv->operand->type->nonOptional()) &&
-        !(known(r) && *r.lo >= to->intMin() && (*r.hi < 0 || uint64_t(*r.hi) <= to->intMax()))) {
+        !(ByteProofs::known(r) && *r.lo >= to->intMin() &&
+          (*r.hi < 0 || uint64_t(*r.hi) <= to->intMax()))) {
       return {};
     }
     return r;
@@ -116,10 +114,10 @@ ValueRange ByteProofs::computedRange(const Expr *e) const {
     }
     Range r;
     Term self = Term::of(var);
-    if (std::optional<int64_t> above = checker_.flow_.facts.bound(self, Term::zero())) {
+    if (std::optional<int64_t> above = this->checker.flow_.facts.bound(self, Term::zero())) {
       r.hi = std::min(*above - 1, kIntMax);
     }
-    if (std::optional<int64_t> below = checker_.flow_.facts.bound(Term::zero(), self)) {
+    if (std::optional<int64_t> below = this->checker.flow_.facts.bound(Term::zero(), self)) {
       r.lo = std::max(1 - *below, kIntMin);
     }
     return r;
@@ -153,7 +151,7 @@ ValueRange ByteProofs::computedRange(const Expr *e) const {
         }
         return {};
       case Builtin::NumConvert:
-        return valueRange(cast<MemberExpr>(call->callee)->object);
+        return this->valueRange(cast<MemberExpr>(call->callee)->object);
       case Builtin::DataViewGet:
       case Builtin::BufferRead:
         if (Type::bytesType(Bytes(cast<IntLitExpr>(call->args[0])->value))->elementRange(lo, hi)) {
@@ -166,9 +164,9 @@ ValueRange ByteProofs::computedRange(const Expr *e) const {
           return {};
         }
         bool min = call->builtin() == Builtin::MathMin;
-        Range r = valueRange(call->args[0]);
+        Range r = this->valueRange(call->args[0]);
         for (size_t i = 1; i < call->args.size(); ++i) {
-          Range next = valueRange(call->args[i]);
+          Range next = this->valueRange(call->args[i]);
           Range both;
           if (min) {
             if (r.hi || next.hi) {
@@ -195,15 +193,15 @@ ValueRange ByteProofs::computedRange(const Expr *e) const {
   }
   case Expr::Kind::Unary: {
     auto *unary = cast<UnaryExpr>(e);
-    Range r = valueRange(unary->operand);
+    Range r = this->valueRange(unary->operand);
     if (unary->op == UnaryOp::Plus) {
       return r;
     }
-    if (!known(r)) {
+    if (!ByteProofs::known(r)) {
       return {};
     }
     if (unary->op == UnaryOp::Neg) {
-      return operate(BinaryOp::Sub, exact(0), r, false);
+      return operate(BinaryOp::Sub, ByteProofs::exact(0), r, false);
     }
     if (unary->op == UnaryOp::BitNot) {
       return {-*r.hi - 1, -*r.lo - 1};
@@ -213,23 +211,23 @@ ValueRange ByteProofs::computedRange(const Expr *e) const {
   case Expr::Kind::Binary: {
     auto *bin = cast<BinaryExpr>(e);
     if (bin->op == BinaryOp::Nullish) {
-      return unite(valueRange(bin->lhs), valueRange(bin->rhs));
+      return ByteProofs::unite(this->valueRange(bin->lhs), this->valueRange(bin->rhs));
     }
-    return operate(bin->op, valueRange(bin->lhs), valueRange(bin->rhs), false);
+    return operate(bin->op, this->valueRange(bin->lhs), this->valueRange(bin->rhs), false);
   }
   case Expr::Kind::Conditional: {
     auto *cond = cast<ConditionalExpr>(e);
-    return unite(valueRange(cond->thenExpr), valueRange(cond->elseExpr));
+    return ByteProofs::unite(this->valueRange(cond->thenExpr), this->valueRange(cond->elseExpr));
   }
   case Expr::Kind::Sequence:
-    return valueRange(cast<SequenceExpr>(e)->exprs.back());
+    return this->valueRange(cast<SequenceExpr>(e)->exprs.back());
   default:
     return {};
   }
 }
 
 bool ByteProofs::provesFits(const Expr *expr, int64_t lo, int64_t hi) const {
-  return checker_.indexProofs().provesBetween(expr, lo, hi);
+  return this->checker.indexProofs().provesBetween(expr, lo, hi);
 }
 
 void ByteProofs::checkFits(const Expr *value, const Type *target, llvm::StringRef what) {
@@ -238,23 +236,23 @@ void ByteProofs::checkFits(const Expr *value, const Type *target, llvm::StringRe
     return;
   }
   Bytes kind = target->bytes();
-  if (kind == Bytes::Uint8Clamped || provesFits(value, lo, hi) ||
+  if (kind == Bytes::Uint8Clamped || this->provesFits(value, lo, hi) ||
       (lo >= value->type->intMin() && uint64_t(hi) >= value->type->intMax())) {
     return;
   }
   std::string text = valueText(value);
-  if (std::optional<int64_t> c = checker_.constantFolder().intConstant(value)) {
-    checker_.diags_.error(value->loc(), std::to_string(*c) + " does not fit in " + what.str() +
-                                            " (" + rangeText(lo, hi) +
-                                            "): JavaScript would store " +
-                                            std::to_string(wrapped(kind, *c)) +
-                                            "; write a value that fits, or cut it explicitly: '" +
-                                            wrapHint(kind, std::to_string(*c)) + "'");
+  if (std::optional<int64_t> c = this->checker.constantFolder().intConstant(value)) {
+    this->checker.diags_.error(value->loc(),
+                               std::to_string(*c) + " does not fit in " + what.str() + " (" +
+                                   ByteProofs::rangeText(lo, hi) + "): JavaScript would store " +
+                                   std::to_string(ByteProofs::wrapped(kind, *c)) +
+                                   "; write a value that fits, or cut it explicitly: '" +
+                                   wrapHint(kind, std::to_string(*c)) + "'");
     return;
   }
-  checker_.diags_.error(
+  this->checker.diags_.error(
       value->loc(),
-      "cannot prove that the value fits in " + what.str() + " (" + rangeText(lo, hi) +
+      "cannot prove that the value fits in " + what.str() + " (" + ByteProofs::rangeText(lo, hi) +
           "), and JavaScript would cut it without a word; check it first, e.g. 'if (" + text +
           " >= " + std::to_string(lo) + " && " + text + " <= " + std::to_string(hi) +
           ")', or cut it explicitly: '" + wrapHint(kind, text) + "'");
@@ -319,44 +317,44 @@ static bool sameView(const Expr *buffer, const Expr *offset, const Expr *length,
 void ByteProofs::checkView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size,
                            llvm::StringRef what) {
   if (sameView(buffer, offset, length, size) ||
-      checker_.indexProofs().exempt(buffer->loc(), buffer)) {
+      this->checker.indexProofs().exempt(buffer->loc(), buffer)) {
     return;
   }
-  IndexProofs &proofs = checker_.indexProofs();
+  IndexProofs &proofs = this->checker.indexProofs();
   if (offset) {
     IndexProofs::ResultUpToWasProven upTo =
         proofs.requireUpTo(offset, buffer, 0, "the offset of " + what.str());
     if (upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT) {
-      checker_.diags_.error(offset->loc(), upTo.error().message);
+      this->checker.diags_.error(offset->loc(), upTo.error().message);
     }
     if (upTo.isErr()) {
       return;
     }
   }
   std::optional<int64_t> start =
-      offset ? checker_.constantFolder().intConstant(offset) : std::optional<int64_t>(0);
+      offset ? this->checker.constantFolder().intConstant(offset) : std::optional<int64_t>(0);
   if (size > 1 && (!start || *start % size != 0)) {
-    checker_.diags_.error(offset->loc(), "the offset of " + what.str() + " must be a multiple of " +
-                                             std::to_string(size) +
-                                             ", written as a number; JavaScript throws a "
-                                             "RangeError otherwise");
+    this->checker.diags_.error(offset->loc(), "the offset of " + what.str() +
+                                                  " must be a multiple of " + std::to_string(size) +
+                                                  ", written as a number; JavaScript throws a "
+                                                  "RangeError otherwise");
     return;
   }
   if (!length) {
     std::optional<int64_t> whole = proofs.exactLength(buffer);
     if (size > 1 && (!whole || *whole % size != 0)) {
-      checker_.diags_.error(buffer->loc(),
-                            "cannot prove that the size of the buffer is a multiple of " +
-                                std::to_string(size) + " for " + what.str() +
-                                ", and JavaScript would throw a RangeError; give the length: "
-                                "'new X(buffer, offset, length)'");
+      this->checker.diags_.error(buffer->loc(),
+                                 "cannot prove that the size of the buffer is a multiple of " +
+                                     std::to_string(size) + " for " + what.str() +
+                                     ", and JavaScript would throw a RangeError; give the length: "
+                                     "'new X(buffer, offset, length)'");
     }
     return;
   }
   IndexProofs::ResultBetweenProven between =
       proofs.requireBetween(length, 0, std::nullopt, "the length of " + what.str());
   if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
-    checker_.diags_.error(length->loc(), between.error().message);
+    this->checker.diags_.error(length->loc(), between.error().message);
   }
   if (between.isErr()) {
     return;
@@ -371,30 +369,30 @@ void ByteProofs::checkView(const Expr *buffer, const Expr *offset, const Expr *l
   if (!proofs.provesSumUpTo(from, count, buffer)) {
     std::string end = (offset ? valueText(offset) + " + " : std::string()) + valueText(length) +
                       (size > 1 ? " * " + std::to_string(size) : "");
-    checker_.diags_.error(length->loc(),
-                          "cannot prove that " + what.str() + " fits in the buffer, '" + end +
-                              " <= " + valueText(buffer) +
-                              ".byteLength', and JavaScript would throw a RangeError; check it "
-                              "first, with the offset or the length written as a number");
+    this->checker.diags_.error(
+        length->loc(), "cannot prove that " + what.str() + " fits in the buffer, '" + end +
+                           " <= " + valueText(buffer) +
+                           ".byteLength', and JavaScript would throw a RangeError; check it "
+                           "first, with the offset or the length written as a number");
   }
 }
 
 bool ByteProofs::provesWithin(const Expr *object, const Expr *offset, int64_t size) const {
   std::optional<Linear> at =
-      offset ? checker_.indexProofs().linear(offset) : Linear{Term::zero(), 0};
-  std::optional<Linear> length = checker_.indexProofs().lengthOf(object);
+      offset ? this->checker.indexProofs().linear(offset) : Linear{Term::zero(), 0};
+  std::optional<Linear> length = this->checker.indexProofs().lengthOf(object);
   if (!at || !length) {
     return false;
   }
 
-  return checker_.flow_.facts.proves(Term::zero(), at->term, at->offset + 1) &&
-         checker_.flow_.facts.proves(at->term, length->term,
-                                     length->offset - size + 1 - at->offset);
+  return this->checker.flow_.facts.proves(Term::zero(), at->term, at->offset + 1) &&
+         this->checker.flow_.facts.proves(at->term, length->term,
+                                          length->offset - size + 1 - at->offset);
 }
 
 void ByteProofs::addByteCallbackFacts(const FunctionDecl *fn) {
-  auto it = checker_.byteCallbacks_.find(fn);
-  if (it == checker_.byteCallbacks_.end() || it->second.param >= fn->params.size()) {
+  auto it = this->checker.byteCallbacks_.find(fn);
+  if (it == this->checker.byteCallbacks_.end() || it->second.param >= fn->params.size()) {
     return;
   }
   const Checker::ByteCallback &info = it->second;
@@ -402,16 +400,17 @@ void ByteProofs::addByteCallbackFacts(const FunctionDecl *fn) {
   if (!var || !var->type->isInt() || (info.lo <= kIntMin && info.hi >= kIntMax)) {
     return;
   }
-  checker_.flow_.facts.add(Term::zero(), Term::of(var), saturatingSub(1, info.lo));
-  checker_.flow_.facts.add(Term::of(var), Term::zero(), saturatingAdd(info.hi, 1));
+  this->checker.flow_.facts.add(Term::zero(), Term::of(var), saturatingSub(1, info.lo));
+  this->checker.flow_.facts.add(Term::of(var), Term::zero(), saturatingAdd(info.hi, 1));
 }
 
 void ByteProofs::checkByteCallbackResult(const FunctionDecl *fn, const Expr *value) {
-  auto it = checker_.byteCallbacks_.find(fn);
-  if (it == checker_.byteCallbacks_.end() || !it->second.target) {
+  auto it = this->checker.byteCallbacks_.find(fn);
+  if (it == this->checker.byteCallbacks_.end() || !it->second.target) {
     return;
   }
-  checkFits(value, it->second.target, "an element of '" + it->second.target->name().str() + "'");
+  this->checkFits(value, it->second.target,
+                  "an element of '" + it->second.target->name().str() + "'");
 }
 
 }

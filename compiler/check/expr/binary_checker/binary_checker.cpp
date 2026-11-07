@@ -54,15 +54,26 @@ const Type *BinaryChecker::integerHint(const Expr *literal, const Expr *other, c
 BinaryChecker::BinaryChecker(Checker &owner)
     : checker(owner) {}
 
-void BinaryChecker::reportOperandTypes(llvm::SMLoc loc, const char *op, const Type *lhs,
-                                       const Type *rhs) {
-  std::string message = (llvm::Twine("operator '") + op + "' cannot be applied to types '" +
-                         lhs->name() + "' and '" + rhs->name() + "'")
-                            .str();
-  if (lhs->isOptional() || rhs->isOptional() || lhs->isUndefined() || rhs->isUndefined()) {
-    message += "; a value may be undefined: check it first or give a default with '??'";
+std::string BinaryChecker::operandTypesText(llvm::StringRef op, const Type *lhs, const Type *rhs) {
+  bool undefined =
+      lhs->isOptional() || rhs->isOptional() || lhs->isUndefined() || rhs->isUndefined();
+
+  return ErrorTextOperands::types(op, lhs->name(), rhs->name(), undefined);
+}
+
+BinaryChecker::ResultExponentIsValid BinaryChecker::powerExponent(const Expr *rhs,
+                                                                  const Type *common) const {
+  std::optional<int64_t> exponent = this->checker.constantFolder().intConstant(rhs);
+  if (exponent && *exponent < 0) {
+    std::string message = ErrorTextPower::negative(common->name());
+
+    return err(BinaryCheckerPowerExponentError{
+        .code = BinaryCheckerPowerExponentErrorCode::NEGATIVE_POWER,
+        .message = message,
+    });
   }
-  this->checker.diags_.error(loc, message);
+
+  return ok(rhs);
 }
 
 Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wraps) {
@@ -71,11 +82,69 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     expected = expected->nonOptional();
   }
   switch (bin->op) {
-  case BinaryOp::In:
-    return this->checker.unaryChecker().checkIn(bin);
+    case BinaryOp::In: {
+      UnaryChecker::ResultInOperatorSuited in = this->checker.unaryChecker().checkIn(bin);
+      if (in.isOk()) {
+        return in.value();
+      }
+      llvm::SMLoc at = bin->loc();
+      switch (in.error().code) {
+        case UnaryCheckerCheckInErrorCode::DICT_UNDEFINED:
+        case UnaryCheckerCheckInErrorCode::UNION_UNDEFINED:
+          at = bin->rhs->loc();
+          break;
+        case UnaryCheckerCheckInErrorCode::DICT_NUMBER_KEY:
+          at = bin->lhs->loc();
+          break;
+        case UnaryCheckerCheckInErrorCode::DICT_NOT_RECORD:
+        case UnaryCheckerCheckInErrorCode::UNION_NO_KEY:
+        case UnaryCheckerCheckInErrorCode::OPTIONAL_FIELD:
+        case UnaryCheckerCheckInErrorCode::ALWAYS_SAME:
+        case UnaryCheckerCheckInErrorCode::TUPLE_IN:
+        case UnaryCheckerCheckInErrorCode::OBJECT_OPTIONAL:
+        case UnaryCheckerCheckInErrorCode::OBJECT_ALWAYS_TRUE:
+        case UnaryCheckerCheckInErrorCode::OBJECT_ALWAYS_FALSE:
+        case UnaryCheckerCheckInErrorCode::OBJECT_IN:
+        case UnaryCheckerCheckInErrorCode::OPERAND_TYPES:
+        case UnaryCheckerCheckInErrorCode::ARRAY_IN:
+          break;
+      }
+      this->checker.diags_.error(at, in.error().message);
+      return bin;
+    }
 
-  case BinaryOp::InstanceOf:
-    return this->checker.instanceOfChecker().checkInstanceOf(bin);
+    case BinaryOp::InstanceOf: {
+      InstanceOfChecker::ResultInstanceTested tested =
+          this->checker.instanceOfChecker().checkInstanceOf(bin);
+      if (tested.isOk()) {
+        return tested.value();
+      }
+      llvm::SMLoc at = bin->loc();
+      switch (tested.error().code) {
+        case InstanceOfCheckerCheckInstanceOfErrorCode::NOT_AN_OBJECT:
+          at = bin->lhs->loc();
+          break;
+        case InstanceOfCheckerCheckInstanceOfErrorCode::NOT_A_CLASS:
+          at = bin->rhs->loc();
+          break;
+        case InstanceOfCheckerCheckInstanceOfErrorCode::UNTYPED_COLLECTION:
+        case InstanceOfCheckerCheckInstanceOfErrorCode::NONE_MATCHES:
+        case InstanceOfCheckerCheckInstanceOfErrorCode::ALL_MATCH:
+        case InstanceOfCheckerCheckInstanceOfErrorCode::ALWAYS_TRUE:
+        case InstanceOfCheckerCheckInstanceOfErrorCode::TEST_UNDEFINED:
+        case InstanceOfCheckerCheckInstanceOfErrorCode::ALWAYS_FALSE:
+        case InstanceOfCheckerCheckInstanceOfErrorCode::BYTES_INSTANCE:
+        case InstanceOfCheckerCheckInstanceOfErrorCode::GENERIC_UNKNOWN:
+        case InstanceOfCheckerCheckInstanceOfErrorCode::NEVER_GENERIC:
+        case InstanceOfCheckerCheckInstanceOfErrorCode::NEVER_IN_UNION:
+        case InstanceOfCheckerCheckInstanceOfErrorCode::NEVER_CLASS:
+        case InstanceOfCheckerCheckInstanceOfErrorCode::NOT_IMPLEMENTED:
+        case InstanceOfCheckerCheckInstanceOfErrorCode::NEVER_CREATED:
+          break;
+      }
+      this->checker.diags_.error(at, tested.error().message);
+      return bin;
+    }
 
   case BinaryOp::LogAnd:
   case BinaryOp::LogOr: {
@@ -87,8 +156,14 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     return bin;
   }
 
-  case BinaryOp::Nullish:
-    return this->checkNullish(bin, expected);
+  case BinaryOp::Nullish: {
+    ResultNullishResolved nullish = this->checkNullish(bin, expected);
+    if (nullish.isErr()) {
+      this->checker.diags_.error(bin->loc(), nullish.error().message);
+      return bin;
+    }
+    return nullish.value();
+  }
 
   case BinaryOp::Eq:
   case BinaryOp::Ne:
@@ -127,10 +202,12 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       if (l == r || (l->isInteger() && r->isInteger())) {
         return bin;
       }
-      this->reportMixedNumbers(bin);
+      std::string message = BinaryChecker::mixedNumbersText(bin);
+      this->checker.diags_.error(bin->loc(), message);
       return bin;
     }
-    this->reportOperandTypes(bin->loc(), op, l, r);
+    std::string message = BinaryChecker::operandTypesText(op, l, r);
+    this->checker.diags_.error(bin->loc(), message);
     return bin;
   }
 
@@ -143,7 +220,14 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
         bin->lhs, BinaryChecker::onlyIntLiterals(bin->lhs) ? hint : nullptr));
     bin->rhs =
         this->checker.genericChecker().apparent(this->checker.exprChecker().checkExpr(bin->rhs));
-    return this->checkBits(bin);
+    ResultBitwiseResolved bits = this->checkBits(bin);
+    if (bits.isErr()) {
+      bool divisor = bits.error().code == BinaryCheckerCheckBitsErrorCode::DIVISOR_ZERO;
+      llvm::SMLoc at = divisor ? bin->rhs->loc() : bin->loc();
+      this->checker.diags_.error(at, bits.error().message);
+      return bin;
+    }
+    return bits.value();
   }
 
   default: {
@@ -204,7 +288,8 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       }
       if (chainEnd) {
         if (this->checker.mixedConcat_) {
-          this->checker.concatChecker().reportMixedConcat(bin, this->checker.mixedConcat_);
+          std::string mixed = ConcatChecker::mixedConcatText(bin, this->checker.mixedConcat_);
+          this->checker.diags_.error(this->checker.mixedConcat_->loc(), mixed);
         }
         this->checker.mixedConcat_ = outerMixed;
       }
@@ -223,13 +308,27 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       return dates;
     }
     if (bitwise) {
-      return this->checkBits(bin);
+      ResultBitwiseResolved bits = this->checkBits(bin);
+      if (bits.isErr()) {
+        bool divisor = bits.error().code == BinaryCheckerCheckBitsErrorCode::DIVISOR_ZERO;
+        llvm::SMLoc at = divisor ? bin->rhs->loc() : bin->loc();
+        this->checker.diags_.error(at, bits.error().message);
+        return bin;
+      }
+      return bits.value();
     }
     if (l->isDecimal() || r->isDecimal()) {
       return this->checker.decimalChecker().checkDecimalArithmetic(bin);
     }
     if ((l->isWrapping() || r->isWrapping()) && l->isInteger() && r->isInteger()) {
-      return this->checkWrapping(bin);
+      ResultWrappingChecked wrapped = this->checkWrapping(bin);
+      if (wrapped.isErr()) {
+        bool divisor = wrapped.error().code == BinaryCheckerCheckWrappingErrorCode::DIVISOR_ZERO;
+        llvm::SMLoc at = divisor ? bin->rhs->loc() : bin->loc();
+        this->checker.diags_.error(at, wrapped.error().message);
+        return bin;
+      }
+      return wrapped.value();
     }
     if (bin->op == BinaryOp::Pow && l->isFloat() && r->isInteger()) {
       bin->rhs = this->checker.typeRelations().convert(bin->rhs, l);
@@ -238,11 +337,13 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     bool operandsOk = bitwise ? l->isInteger() && r->isInteger() : l->isNumeric() && r->isNumeric();
     const Type *common = operandsOk ? TypeRelations::commonNumericType(l, r) : nullptr;
     if (!common && operandsOk) {
-      this->reportMixedNumbers(bin);
+      std::string message = BinaryChecker::mixedNumbersText(bin);
+      this->checker.diags_.error(bin->loc(), message);
       return bin;
     }
     if (!common) {
-      this->reportOperandTypes(bin->loc(), op, l, r);
+      std::string message = BinaryChecker::operandTypesText(op, l, r);
+      this->checker.diags_.error(bin->loc(), message);
       return bin;
     }
     bin->lhs = this->checker.typeRelations().convert(bin->lhs, common);
@@ -252,12 +353,9 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       return bin;
     }
     if (bin->op == BinaryOp::Pow) {
-      if (std::optional<int64_t> exponent = this->checker.constantFolder().intConstant(bin->rhs);
-          exponent && *exponent < 0) {
-        this->checker.diags_.error(bin->rhs->loc(),
-                                   "'" + common->name() +
-                                       "' raised to a negative power is a fraction, which an "
-                                       "integer cannot hold; use a double, e.g. '2.0 ** -1'");
+      ResultExponentIsValid power = this->powerExponent(bin->rhs, common);
+      if (power.isErr()) {
+        this->checker.diags_.error(bin->rhs->loc(), power.error().message);
         return bin;
       }
     }
@@ -272,12 +370,16 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
   }
 }
 
-Expr *BinaryChecker::checkWrapping(BinaryExpr *bin) {
+BinaryChecker::ResultWrappingChecked BinaryChecker::checkWrapping(BinaryExpr *bin) {
   const Type *l = bin->lhs->type;
   const Type *r = bin->rhs->type;
   if (l->isWrapping() && r->isWrapping() && l != r) {
-    this->reportMixedNumbers(bin);
-    return bin;
+    std::string message = BinaryChecker::mixedNumbersText(bin);
+
+    return err(BinaryCheckerCheckWrappingError{
+        .code = BinaryCheckerCheckWrappingErrorCode::MIXED_NUMBERS,
+        .message = message,
+    });
   }
   const Type *wrap = l->isWrapping() ? l : r;
   bin->lhs = this->checker.typeRelations().convert(bin->lhs, wrap);
@@ -286,13 +388,16 @@ Expr *BinaryChecker::checkWrapping(BinaryExpr *bin) {
   ConstantFolder::ResultDivisorNotZero divisor =
       this->checker.constantFolder().checkDivisor(bin->op, bin->rhs);
   if (divisor.isErr()) {
-    this->checker.diags_.error(bin->rhs->loc(), divisor.error().message);
+    return err(BinaryCheckerCheckWrappingError{
+        .code = BinaryCheckerCheckWrappingErrorCode::DIVISOR_ZERO,
+        .message = divisor.error().message,
+    });
   }
 
-  return bin;
+  return ok(bin);
 }
 
-Expr *BinaryChecker::checkBits(BinaryExpr *bin) {
+BinaryChecker::ResultBitwiseResolved BinaryChecker::checkBits(BinaryExpr *bin) {
   const char *op = opSpelling(bin->op);
   bool shift = bin->op == BinaryOp::Shl || bin->op == BinaryOp::Shr || bin->op == BinaryOp::UShr;
   this->adaptLiterals(bin);
@@ -300,7 +405,7 @@ Expr *BinaryChecker::checkBits(BinaryExpr *bin) {
   const Type *r = bin->rhs->type;
   bin->type = Type::error();
   if (l->isError() || r->isError()) {
-    return bin;
+    return ok(bin);
   }
   auto zero = [](const Expr *e) {
     auto *lit = dyn_cast<IntLitExpr>(e);
@@ -309,66 +414,84 @@ Expr *BinaryChecker::checkBits(BinaryExpr *bin) {
   };
   auto [lhsText, rhsText] = DecimalChecker::sidesOf(bin);
   std::string text = lhsText.empty() ? "x" : TypeRelations::operandText(lhsText);
-  if (l->isNumeric() && !l->isWrapping() && zero(bin->rhs) &&
-      (bin->op == BinaryOp::BitOr || bin->op == BinaryOp::UShr)) {
-    std::string message =
-        "'" + std::string(lhsText.empty() ? "x" : lhsText.str()) + " " + op +
-        " 0' changes nothing in tz: integers are exact, and nothing wraps around here";
+  bool orZero = l->isNumeric() && !l->isWrapping() && zero(bin->rhs) &&
+                (bin->op == BinaryOp::BitOr || bin->op == BinaryOp::UShr);
+  if (orZero) {
+    std::string lhsName = lhsText.empty() ? "x" : lhsText.str();
     auto *rounded = dyn_cast<CallExpr>(bin->lhs);
-    if (l->isFloat() && rounded && isRoundingBuiltin(rounded->builtin())) {
-      message += "; to make it an int, write '" + std::string(lhsText.str()) + ".toInt()'";
-    } else if (l->isFloat()) {
-      message +=
-          "; to drop the fraction, write 'Math.trunc(" + std::string(lhsText.str()) + ").toInt()'";
-    } else {
-      message += "; to make it an int32, write '" + text + ".toInt32()'" +
-                 (bin->op == BinaryOp::UShr ? ", a uint32 '" + text + ".toUint32()'" : "") +
-                 ", and to count modulo 2^32, use 'Bit.Wrap32'";
-    }
-    this->checker.diags_.error(bin->loc(), message);
-    return bin;
+    bool roundedFloat = l->isFloat() && rounded && isRoundingBuiltin(rounded->builtin());
+    std::string hint = roundedFloat   ? ErrorTextNoOpBits::toInt(lhsText)
+                       : l->isFloat() ? ErrorTextNoOpBits::trunc(lhsText)
+                                      : ErrorTextNoOpBits::wrap(text, bin->op == BinaryOp::UShr);
+    std::string message = ErrorTextNoOpBits::nothing(lhsName, op, hint);
+
+    return err(BinaryCheckerCheckBitsError{
+        .code = BinaryCheckerCheckBitsErrorCode::NOTHING_CHANGES,
+        .message = message,
+    });
   }
   if (l->isFloat() || r->isFloat()) {
     std::string side = l->isFloat()      ? text
                        : rhsText.empty() ? "x"
                                          : TypeRelations::operandText(rhsText);
-    this->checker.diags_.error(
-        bin->loc(), llvm::Twine("operator '") + op +
-                        "' works on the bits of integers, and this is a double; drop the "
-                        "fraction first, e.g. 'Math.trunc(" +
-                        side + ").toInt()'");
-    return bin;
+    std::string message = ErrorTextBitsDouble::fraction(op, side);
+
+    return err(BinaryCheckerCheckBitsError{
+        .code = BinaryCheckerCheckBitsErrorCode::DOUBLE_OPERAND,
+        .message = message,
+    });
   }
   if (!l->isInteger() || !r->isInteger()) {
-    this->reportOperandTypes(bin->loc(), op, l, r);
-    return bin;
+    std::string message = BinaryChecker::operandTypesText(op, l, r);
+
+    return err(BinaryCheckerCheckBitsError{
+        .code = BinaryCheckerCheckBitsErrorCode::OPERAND_TYPES,
+        .message = message,
+    });
+  }
+  bool signedShift = shift && bin->op == BinaryOp::UShr && !l->isUnsigned();
+  if (signedShift) {
+    std::string count = rhsText.empty() ? "n" : rhsText.str();
+    const Type *unsignedType = Type::integer(l->bitWidth(), true);
+    std::string method = TypeRelations::conversionMethod(unsignedType);
+    std::string message = ErrorTextShift::isSigned(l->name(), text, method, count);
+
+    return err(BinaryCheckerCheckBitsError{
+        .code = BinaryCheckerCheckBitsErrorCode::SIGNED_SHIFT,
+        .message = message,
+    });
   }
   if (shift) {
-    if (bin->op == BinaryOp::UShr && !l->isUnsigned()) {
-      std::string count = rhsText.empty() ? "n" : rhsText.str();
-      this->checker.diags_.error(
-          bin->loc(), "'>>>' shifts in zeros, as a shift of an unsigned type does; '" + l->name() +
-                          "' is signed: use '>>', or convert it, e.g. '" + text + "." +
-                          TypeRelations::conversionMethod(Type::integer(l->bitWidth(), true)) +
-                          "() >>> " + count + "'");
-      return bin;
-    }
     bin->rhs = this->checker.typeRelations().convert(bin->rhs, l);
     bin->type = l;
     this->checker.constantFolder().foldBinary(bin, false);
-    return bin;
+    return ok(bin);
   }
   if (l->isWrapping() || r->isWrapping()) {
-    return this->checkWrapping(bin);
+    ResultWrappingChecked wrapped = this->checkWrapping(bin);
+    if (wrapped.isOk()) {
+      return ok(wrapped.value());
+    }
+    bool divisor = wrapped.error().code == BinaryCheckerCheckWrappingErrorCode::DIVISOR_ZERO;
+
+    return err(BinaryCheckerCheckBitsError{
+        .code = divisor ? BinaryCheckerCheckBitsErrorCode::DIVISOR_ZERO
+                        : BinaryCheckerCheckBitsErrorCode::MIXED_NUMBERS,
+        .message = wrapped.error().message,
+    });
   }
   if (l != r) {
-    this->reportMixedNumbers(bin);
-    return bin;
+    std::string message = BinaryChecker::mixedNumbersText(bin);
+
+    return err(BinaryCheckerCheckBitsError{
+        .code = BinaryCheckerCheckBitsErrorCode::MIXED_NUMBERS,
+        .message = message,
+    });
   }
   bin->type = l;
   this->checker.constantFolder().foldBinary(bin, false);
 
-  return bin;
+  return ok(bin);
 }
 
 void BinaryChecker::adaptLiterals(BinaryExpr *bin) {
@@ -393,13 +516,10 @@ void BinaryChecker::adaptLiterals(BinaryExpr *bin) {
   }
 }
 
-void BinaryChecker::reportMixedNumbers(const BinaryExpr *bin) {
+std::string BinaryChecker::mixedNumbersText(const BinaryExpr *bin) {
   const Type *l = bin->lhs->type;
   const Type *r = bin->rhs->type;
   const char *op = opSpelling(bin->op);
-  std::string message = (llvm::Twine("operator '") + op + "' cannot be applied to types '" +
-                         l->name() + "' and '" + r->name() + "'")
-                            .str();
   const Type *target = nullptr;
   bool convertLeft = false;
   if (l->isFloat() || r->isFloat()) {
@@ -414,36 +534,46 @@ void BinaryChecker::reportMixedNumbers(const BinaryExpr *bin) {
     target = Type::intTy();
     convertLeft = !l->isInt();
   }
-  message += ": a number changes its type only explicitly";
   auto [lhs, rhs] = DecimalChecker::sidesOf(bin);
   std::string method = TypeRelations::conversionMethod(target);
+  std::string example;
   if (!lhs.empty() && !rhs.empty()) {
     std::string left =
         convertLeft ? TypeRelations::operandText(lhs) + "." + method + "()" : lhs.str();
     std::string right =
         convertLeft ? rhs.str() : TypeRelations::operandText(rhs) + "." + method + "()";
-    message += ", e.g. '" + left + " " + op + " " + right + "'";
+    example = ErrorTextMixedNumbers::example(left, op, right);
   } else {
-    message += " with '." + method + "()'";
+    example = ErrorTextMixedNumbers::method(method);
   }
-  this->checker.diags_.error(bin->loc(), message);
+
+  return ErrorTextMixedNumbers::mixed(op, l->name(), r->name(), example);
 }
 
-bool BinaryChecker::checkTypeOfName(const Expr *operand, const StringLitExpr *text) {
+std::string BinaryChecker::quotedNames(llvm::ArrayRef<llvm::StringRef> names) {
+  std::string list;
+  for (size_t i = 0; i < names.size(); ++i) {
+    list += (i == 0 ? "" : i + 1 == names.size() ? " or " : ", ") + ("\"" + names[i].str() + "\"");
+  }
+
+  return list;
+}
+
+BinaryChecker::ResultTypeOfNameKnown BinaryChecker::checkTypeOfName(const Expr *operand,
+                                                                    const StringLitExpr *text) {
   std::string name = toUtf8(text->value);
-  auto quoted = [](llvm::ArrayRef<llvm::StringRef> names) {
-    std::string list;
-    for (size_t i = 0; i < names.size(); ++i) {
-      list += (i == 0 ? "" : i + 1 == names.size() ? " or " : ", ") + ("\"" + names[i].str() + "\"");
-    }
-    return list;
-  };
   if (name == "bigint") {
-    this->checker.decimalChecker().reportBigInt(text->loc(), "'typeof x == \"bigint\"'");
-    return false;
+    std::string what = ErrorTextTypeOfName::bigint();
+    this->checker.decimalChecker().reportBigInt(text->loc(), what);
+
+    return err(BinaryCheckerCheckTypeOfNameError{
+        .code = BinaryCheckerCheckTypeOfNameErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
   }
   if (!isTypeOfName(name)) {
     std::vector<llvm::StringRef> all(std::begin(kTypeOfNames), std::end(kTypeOfNames));
+    std::string list = BinaryChecker::quotedNames(all);
     if (name == "number") {
       std::vector<llvm::StringRef> numbers;
       if (operand->type && !operand->type->isError()) {
@@ -456,33 +586,64 @@ bool BinaryChecker::checkTypeOfName(const Expr *operand, const StringLitExpr *te
       }
       std::string here = numbers.empty() || numbers.size() > 3
                              ? std::string()
-                             : "; for a value of type '" + operand->type->name().str() +
-                                   "' it is " + quoted(numbers);
-      this->checker.diags_.error(
-          text->loc(), "typeof gives no \"number\": each number type has its own name, "
-                       "\"int\", \"double\", \"decimal\", \"int32\"...; the type 'number' is "
-                       "'double', and its typeof is \"double\"" +
-                           here);
-      return false;
+                             : ErrorTextTypeOfName::forType(operand->type->name(),
+                                                            BinaryChecker::quotedNames(numbers));
+      std::string message = ErrorTextTypeOfName::noNumber(here);
+
+      return err(BinaryCheckerCheckTypeOfNameError{
+          .code = BinaryCheckerCheckTypeOfNameErrorCode::NO_NUMBER,
+          .message = message,
+      });
     }
-    std::string why = name == "symbol" ? "typeof gives no \"symbol\": tz has no symbols as values"
-                                       : "'" + name + "' is not a name that typeof gives";
-    this->checker.diags_.error(text->loc(), why + "; the names are " + quoted(all));
-    return false;
+    if (name == "symbol") {
+      std::string message = ErrorTextTypeOfName::noSymbol(list);
+
+      return err(BinaryCheckerCheckTypeOfNameError{
+          .code = BinaryCheckerCheckTypeOfNameErrorCode::NO_SYMBOL,
+          .message = message,
+      });
+    }
+    std::string message = ErrorTextTypeOfName::notName(name, list);
+
+    return err(BinaryCheckerCheckTypeOfNameError{
+        .code = BinaryCheckerCheckTypeOfNameErrorCode::NOT_A_NAME,
+        .message = message,
+    });
   }
   const Type *type = operand->type;
-  if (!type || type->isError() || this->checker.checkingInstance_ ||
-      type->nonOptional()->isParam()) {
-    return true;
+  bool unchecked =
+      !type || type->isError() || this->checker.checkingInstance_ || type->nonOptional()->isParam();
+  if (unchecked) {
+    return ok(text);
   }
   std::vector<llvm::StringRef> names = typeOfNames(type);
-  if (names.empty() || llvm::is_contained(names, llvm::StringRef(name))) {
-    return true;
-  }
-  this->checker.diags_.error(text->loc(), "typeof of a value of type '" + type->name() + "' is " +
-                                              quoted(names) + ", never \"" + name + "\"");
+  bool matches = names.empty() || llvm::is_contained(names, llvm::StringRef(name));
+  if (!matches) {
+    std::string quoted = BinaryChecker::quotedNames(names);
+    std::string message = ErrorTextTypeOfName::never(type->name(), quoted, name);
 
-  return false;
+    return err(BinaryCheckerCheckTypeOfNameError{
+        .code = BinaryCheckerCheckTypeOfNameErrorCode::NEVER_MATCHES,
+        .message = message,
+    });
+  }
+
+  return ok(text);
+}
+
+BinaryChecker::ResultNoResultOperand BinaryChecker::noResults(const BinaryExpr *bin) {
+  const Type *l = bin->lhs->type;
+  const Type *r = bin->rhs->type;
+  if (l->nonOptional()->isResult() || r->nonOptional()->isResult()) {
+    std::string message = ErrorTextResultEquality::compared(opSpelling(bin->op));
+
+    return err(BinaryCheckerNoResultsError{
+        .code = BinaryCheckerNoResultsErrorCode::RESULTS_COMPARED,
+        .message = message,
+    });
+  }
+
+  return ok(bin);
 }
 
 Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
@@ -497,14 +658,19 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
     auto *typeOf = dyn_cast<UnaryExpr>(side);
     auto *text = dyn_cast<StringLitExpr>(other);
     if (typeOf && typeOf->op == UnaryOp::TypeOf && text) {
-      this->checkTypeOfName(typeOf->operand, text);
+      ResultTypeOfNameKnown known = this->checkTypeOfName(typeOf->operand, text);
+      if (known.isErr() &&
+          known.error().code != BinaryCheckerCheckTypeOfNameErrorCode::ALREADY_REPORTED) {
+        this->checker.diags_.error(text->loc(), known.error().message);
+      }
     }
   }
   if (l->isError() || r->isError()) {
     return bin;
   }
   if (l->isVoid() || r->isVoid()) {
-    this->reportOperandTypes(bin->loc(), opSpelling(bin->op), l, r);
+    std::string message = BinaryChecker::operandTypesText(opSpelling(bin->op), l, r);
+    this->checker.diags_.error(bin->loc(), message);
     return bin;
   }
   if (l->isUndefined() || r->isUndefined()) {
@@ -513,12 +679,9 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
   if (l->nonOptional()->isJson() || r->nonOptional()->isJson()) {
     return this->checker.jsonChecker().checkJsonEquality(bin);
   }
-  if (l->nonOptional()->isResult() || r->nonOptional()->isResult()) {
-    this->checker.diags_.error(
-        bin->loc(), llvm::Twine("Results cannot be compared with '") + opSpelling(bin->op) +
-                        "': in JavaScript 'ok(1) == ok(1)' is false, as they are two "
-                        "objects; compare what they hold, with 'isOk()', 'match' or "
-                        "'value'");
+  ResultNoResultOperand plain = BinaryChecker::noResults(bin);
+  if (plain.isErr()) {
+    this->checker.diags_.error(bin->loc(), plain.error().message);
     return bin;
   }
   if (l->nonOptional()->isParam() || r->nonOptional()->isParam()) {
@@ -537,9 +700,11 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
       this->checker.decimalChecker().reportDecimalMix(bin);
     } else if (l->nonOptional()->isNumeric() && r->nonOptional()->isNumeric() && !l->isOptional() &&
                !r->isOptional()) {
-      this->reportMixedNumbers(bin);
+      std::string message = BinaryChecker::mixedNumbersText(bin);
+      this->checker.diags_.error(bin->loc(), message);
     } else {
-      this->reportOperandTypes(bin->loc(), opSpelling(bin->op), l, r);
+      std::string message = BinaryChecker::operandTypesText(opSpelling(bin->op), l, r);
+      this->checker.diags_.error(bin->loc(), message);
     }
     return bin;
   }
@@ -552,7 +717,8 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
   return bin;
 }
 
-Expr *BinaryChecker::checkNullish(BinaryExpr *bin, const Type *expected) {
+BinaryChecker::ResultNullishResolved BinaryChecker::checkNullish(BinaryExpr *bin,
+                                                                 const Type *expected) {
   bin->lhs = this->checker.exprChecker().checkExpr(bin->lhs, expected);
   if (bin->lhs->type->nonOptional()->isMatch() && isa<ArrayLitExpr>(bin->rhs)) {
     bin->lhs = this->checker.matchChecker().matchItems(bin->lhs);
@@ -568,22 +734,30 @@ Expr *BinaryChecker::checkNullish(BinaryExpr *bin, const Type *expected) {
     if (this->checker.trial_ && l->isError() != r->isError()) {
       bin->type = l->isError() ? r : l->nonOptional();
     }
-    return bin;
+    return ok(bin);
   }
   if (l->isVoid() || r->isVoid()) {
-    this->reportOperandTypes(bin->loc(), "??", l, r);
-    return bin;
+    std::string message = BinaryChecker::operandTypesText("??", l, r);
+
+    return err(BinaryCheckerCheckNullishError{
+        .code = BinaryCheckerCheckNullishErrorCode::VOID_OPERAND,
+        .message = message,
+    });
   }
   if (l->isUndefined()) {
     bin->type = r;
-    return bin;
+    return ok(bin);
   }
   const Type *base = r->isUndefined()
                          ? l->nonOptional()
                          : LiteralTypes::unionUnify(l->nonOptional(), r->nonOptional());
   if (!base || base->isError()) {
-    this->reportOperandTypes(bin->loc(), "??", l, r);
-    return bin;
+    std::string message = BinaryChecker::operandTypesText("??", l, r);
+
+    return err(BinaryCheckerCheckNullishError{
+        .code = BinaryCheckerCheckNullishErrorCode::NO_COMMON_TYPE,
+        .message = message,
+    });
   }
   const Type *result = r->isOptional() || r->isUndefined() ? Type::optional(base) : base;
   bin->lhs = this->checker.typeRelations().convert(bin->lhs,
@@ -591,7 +765,7 @@ Expr *BinaryChecker::checkNullish(BinaryExpr *bin, const Type *expected) {
   bin->rhs = this->checker.typeRelations().convert(bin->rhs, result);
   bin->type = result;
 
-  return bin;
+  return ok(bin);
 }
 
 Expr *BinaryChecker::toInt32(Expr *expr) {

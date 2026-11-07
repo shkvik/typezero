@@ -6,7 +6,7 @@ namespace tz {
 
 class ResultLowerer {
 public:
-  explicit ResultLowerer(Lowering &lowering);
+  explicit ResultLowerer(Lowering &owner);
 
   Lowering::ResultLayout resultLayout(const Type *type);
   llvm::Type *lowerHalf(const Type *half);
@@ -30,9 +30,11 @@ public:
   llvm::Value *emitResultMember(MemberExpr *member);
 
 private:
-  Lowering &lowering_;
-  llvm::DenseMap<const Type *, Lowering::ResultLayout> resultLayouts_;
-  llvm::GlobalVariable *thread_ = nullptr;
+  static bool argGetsError(Builtin method, size_t i);
+
+  Lowering &lowering;
+  llvm::DenseMap<const Type *, Lowering::ResultLayout> resultLayouts;
+  llvm::GlobalVariable *thread = nullptr;
 };
 
 }

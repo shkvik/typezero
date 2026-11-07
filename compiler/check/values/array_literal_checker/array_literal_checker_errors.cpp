@@ -57,4 +57,8 @@ std::string ErrorTextSpreadFits::into(llvm::StringRef from, llvm::StringRef to) 
   return (llvm::Twine("cannot spread '") + from + "' into '" + to + "'").str();
 }
 
+std::string ErrorTextSpreadable::spread() {
+  return "a spread";
+}
+
 }

@@ -27,6 +27,91 @@ namespace tz {
 MethodCallChecker::MethodCallChecker(Checker &owner)
     : checker(owner) {}
 
+MethodCallChecker::ResultFieldIsCallable MethodCallChecker::fieldCallable(const Type *type,
+                                                                          llvm::StringRef name) {
+  bool optional = type->isOptional() && type->inner()->isFunction();
+  if (optional) {
+    std::string message = ErrorTextFieldCall::undefined();
+
+    return err(MethodCallCheckerFieldCallableError{
+        .code = MethodCallCheckerFieldCallableErrorCode::MAY_BE_UNDEFINED,
+        .message = message,
+    });
+  }
+  if (type->isError()) {
+    return err(MethodCallCheckerFieldCallableError{
+        .code = MethodCallCheckerFieldCallableErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
+  }
+  if (!type->isFunction()) {
+    std::string message = ErrorTextFieldCall::notFunc(name, type->name());
+
+    return err(MethodCallCheckerFieldCallableError{
+        .code = MethodCallCheckerFieldCallableErrorCode::NOT_A_FUNCTION,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+MethodCallChecker::ResultMethodsAreFound MethodCallChecker::instanceMethods(const ClassDecl *cls,
+                                                                            llvm::StringRef name) {
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
+  bool isStatic = methods.empty() && !ClassDeclarer::methodsNamed(cls, name, true).empty();
+  if (isStatic) {
+    std::string message = ErrorTextMethodLookup::isStatic(name, cls->name);
+
+    return err(MethodCallCheckerInstanceMethodsError{
+        .code = MethodCallCheckerInstanceMethodsErrorCode::STATIC_METHOD,
+        .message = message,
+    });
+  }
+  if (methods.empty()) {
+    std::string message = ErrorTextMethodLookup::noProperty(name, cls->type->name());
+
+    return err(MethodCallCheckerInstanceMethodsError{
+        .code = MethodCallCheckerInstanceMethodsErrorCode::NO_SUCH_PROPERTY,
+        .message = message,
+    });
+  }
+
+  return ok(methods);
+}
+
+MethodCallChecker::ResultFieldsAreAllSet
+MethodCallChecker::fieldsSet(const MemberExpr *member) const {
+  bool early = this->checker.classChecker().isInitThis(member->object).isOk() &&
+               !this->checker.flow_.beforeSuper &&
+               this->checker.classChecker().thisReady(this->checker.flow_).isErr();
+  if (early) {
+    std::string field = this->checker.classChecker().firstUnset(this->checker.flow_).value();
+    std::string message = ErrorTextUnsetCall::beforeSet(member->name, field);
+
+    return err(MethodCallCheckerFieldsSetError{
+        .code = MethodCallCheckerFieldsSetErrorCode::CALLED_BEFORE_SET,
+        .message = message,
+    });
+  }
+
+  return ok(member);
+}
+
+MethodCallChecker::ResultTypeArgsAllowed
+MethodCallChecker::methodTypeArgs(const FuncSymbol *sym, const MemberExpr *member) {
+  if (!sym->isGeneric() && !member->typeArgs.empty()) {
+    std::string message = ErrorTextMethodTypeArgs::notGeneric(member->name);
+
+    return err(MethodCallCheckerMethodTypeArgsError{
+        .code = MethodCallCheckerMethodTypeArgsErrorCode::NOT_GENERIC,
+        .message = message,
+    });
+  }
+
+  return ok(sym);
+}
+
 Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, const Type *expected) {
   ClassDecl *cls = ClassDeclarer::classOf(member->object->type);
   this->checker.classDeclarer().completeClass(cls);
@@ -34,11 +119,6 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   call->type = Type::error();
   member->type = Type::error();
   llvm::StringRef name = member->name;
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->checker.exprChecker().checkExpr(arg);
-    }
-  };
   if (Expr *checked = this->checker.fsDeclarer().checkFsClassMethod(call, member, cls)) {
     return checked;
   }
@@ -60,46 +140,40 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   const ClassField *field = ClassBases::findField(cls, name);
   if (field && !field->method()) {
     call->callee = this->checker.classMemberChecker().checkClassMember(member, nullptr);
-    const Type *type = call->callee->type;
-    if (type->isFunction()) {
-      return this->checker.callChecker().checkValueCall(call, type);
+    ResultFieldIsCallable callable = MethodCallChecker::fieldCallable(call->callee->type, name);
+    if (callable.isOk()) {
+      CallChecker::ResultValueCallTyped valued =
+          this->checker.callChecker().checkValueCall(call, callable.value());
+      if (valued.isErr()) {
+        this->checker.diags_.error(call->callee->loc(), valued.error().message);
+        return call;
+      }
+      return valued.value();
     }
-    if (type->isOptional() && type->inner()->isFunction()) {
-      this->checker.diags_.error(member->loc(),
-                                 "the function may be undefined; check it first, or call it with "
-                                 "'?.()', which gives undefined then");
-    } else if (!type->isError()) {
-      this->checker.diags_.error(member->loc(), "field '" + name +
-                                                    "' is not a function; it has type '" +
-                                                    type->name() + "'");
+    if (callable.error().code != MethodCallCheckerFieldCallableErrorCode::ALREADY_REPORTED) {
+      this->checker.diags_.error(member->loc(), callable.error().message);
     }
-    checkArgsLoosely();
+    this->checker.argumentChecker().checkArgsLoosely(call);
     return call;
   }
-  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
-  if (methods.empty()) {
-    if (!ClassDeclarer::methodsNamed(cls, name, true).empty()) {
-      this->checker.diags_.error(member->loc(), "'" + name + "' is a static method of '" +
-                                                    cls->name + "': call it through the class, '" +
-                                                    cls->name + "." + name + "(...)'");
-    } else {
-      this->checker.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
-                                                    cls->type->name() + "'");
-    }
-    checkArgsLoosely();
+  ResultMethodsAreFound found = MethodCallChecker::instanceMethods(cls, name);
+  if (found.isErr()) {
+    this->checker.diags_.error(member->loc(), found.error().message);
+    this->checker.argumentChecker().checkArgsLoosely(call);
     return call;
   }
+  std::vector<FunctionDecl *> methods = found.value();
   if (methods.size() == 1) {
-    this->checker.classMemberChecker().checkAccess(methods[0]->cls(), methods[0]->access(), name,
-                                                   member->loc(), member->object);
+    ClassMemberChecker::ResultMemberAccessible accessible =
+        this->checker.classMemberChecker().checkAccess(methods[0]->cls(), methods[0]->access(),
+                                                       name, member->object);
+    if (accessible.isErr()) {
+      this->checker.diags_.error(member->loc(), accessible.error().message);
+    }
   }
-  if (this->checker.classChecker().isInitThis(member->object).isOk() &&
-      !this->checker.flow_.beforeSuper &&
-      this->checker.classChecker().thisReady(this->checker.flow_).isErr()) {
-    this->checker.diags_.error(
-        member->loc(), "'this." + name + "()' is called before every field is set: field '" +
-                           this->checker.classChecker().firstUnset(this->checker.flow_).value() +
-                           "' is not set yet, and the method may read it");
+  ResultFieldsAreAllSet ready = this->fieldsSet(member);
+  if (ready.isErr()) {
+    this->checker.diags_.error(member->loc(), ready.error().message);
   }
   bool checked = false;
   std::vector<const Type *> bound;
@@ -114,13 +188,17 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   }
   FuncSymbol *sym = picked.value();
   if (methods.size() > 1 && sym->decl) {
-    this->checker.classMemberChecker().checkAccess(sym->decl->cls(), sym->decl->access(), name,
-                                                   member->loc(), member->object);
+    ClassMemberChecker::ResultMemberAccessible accessible =
+        this->checker.classMemberChecker().checkAccess(sym->decl->cls(), sym->decl->access(), name,
+                                                       member->object);
+    if (accessible.isErr()) {
+      this->checker.diags_.error(member->loc(), accessible.error().message);
+    }
   }
   this->checker.returnInferrer().resolveParams(sym);
-  if (!sym->isGeneric() && !member->typeArgs.empty()) {
-    this->checker.diags_.error(member->loc(),
-                               "'" + name + "' is not a generic method; remove the type arguments");
+  ResultTypeArgsAllowed allowed = MethodCallChecker::methodTypeArgs(sym, member);
+  if (allowed.isErr()) {
+    this->checker.diags_.error(member->loc(), allowed.error().message);
   }
   if (sym->isGeneric() && checked) {
     return this->checker.overloadResolver().callGenericVariant(call, sym, bound, member->loc(),
@@ -148,35 +226,101 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
                                                         sym->hasRest, member->loc(), &given);
 }
 
+MethodCallChecker::ResultClassNotRuntime MethodCallChecker::notRuntime(const ClassDecl *cls) const {
+  if (this->checker.fsDeclarer().isRuntimeClass(cls)) {
+    std::string message = ErrorTextRuntimeNew::onlyFs(cls->name);
+
+    return err(MethodCallCheckerNotRuntimeError{
+        .code = MethodCallCheckerNotRuntimeErrorCode::RUNTIME_CLASS,
+        .message = message,
+    });
+  }
+
+  return ok(cls);
+}
+
+MethodCallChecker::ResultNoTypeArguments MethodCallChecker::classTypeArgs(const NewExpr *expr,
+                                                                          const ClassDecl *cls) {
+  if (!expr->typeArgs.empty()) {
+    std::string message = ErrorTextClassTypeArgs::notGeneric(cls->name);
+
+    return err(MethodCallCheckerClassTypeArgsError{
+        .code = MethodCallCheckerClassTypeArgsErrorCode::NOT_GENERIC,
+        .message = message,
+    });
+  }
+
+  return ok(expr);
+}
+
+MethodCallChecker::ResultClassIsDeclared
+MethodCallChecker::classDeclared(const ClassDecl *cls) const {
+  bool early = !cls->staticOwner()->declared && this->checker.loading_ &&
+               this->checker.functions_.empty() &&
+               this->checker.declModules_.lookup(cls) == this->checker.loading_;
+  if (early) {
+    std::string message = ErrorTextClassOrder::usedEarly(cls->name);
+
+    return err(MethodCallCheckerClassDeclaredError{
+        .code = MethodCallCheckerClassDeclaredErrorCode::USED_BEFORE_DECLARATION,
+        .message = message,
+    });
+  }
+
+  return ok(cls);
+}
+
+MethodCallChecker::ResultClassIsConcrete MethodCallChecker::classConcrete(const ClassDecl *cls) {
+  if (cls->isAbstract) {
+    std::string message = ErrorTextAbstractNew::abstract(cls->name);
+
+    return err(MethodCallCheckerClassConcreteError{
+        .code = MethodCallCheckerClassConcreteErrorCode::ABSTRACT_CLASS,
+        .message = message,
+    });
+  }
+
+  return ok(cls);
+}
+
+MethodCallChecker::ResultArgumentsAbsent MethodCallChecker::argumentsAbsent(const CallExpr *call,
+                                                                            const ClassDecl *cls) {
+  if (!call->args.empty()) {
+    std::string message = ErrorTextNoConstructor::noArgs(cls->name);
+
+    return err(MethodCallCheckerArgumentsAbsentError{
+        .code = MethodCallCheckerArgumentsAbsentErrorCode::NO_CONSTRUCTOR,
+        .message = message,
+    });
+  }
+
+  return ok(call);
+}
+
 Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type *expected) {
   expr->type = Type::error();
   if (cls->isGeneric()) {
     return this->checker.genericClassChecker().checkGenericNew(expr, cls, expected);
   }
-  if (this->checker.fsDeclarer().isRuntimeClass(cls)) {
-    this->checker.diags_.error(
-        expr->loc(),
-        "'new " + cls->name + "' is not possible: only the functions of node:fs make " + cls->name);
+  ResultClassNotRuntime possible = this->notRuntime(cls);
+  if (possible.isErr()) {
+    this->checker.diags_.error(expr->loc(), possible.error().message);
     for (Expr *&arg : expr->args) {
       arg = this->checker.exprChecker().checkExpr(arg);
     }
     return expr;
   }
-  if (!expr->typeArgs.empty()) {
-    this->checker.diags_.error(expr->loc(), "class '" + cls->name +
-                                                "' is not generic; remove the type arguments");
+  ResultNoTypeArguments plain = MethodCallChecker::classTypeArgs(expr, cls);
+  if (plain.isErr()) {
+    this->checker.diags_.error(expr->loc(), plain.error().message);
   }
-  if (!cls->staticOwner()->declared && this->checker.loading_ && this->checker.functions_.empty() &&
-      this->checker.declModules_.lookup(cls) == this->checker.loading_) {
-    this->checker.diags_.error(expr->loc(),
-                               "class '" + cls->name +
-                                   "' is used before its declaration, which JavaScript has not run "
-                                   "yet here (a ReferenceError); move the class up");
+  ResultClassIsDeclared declared = this->classDeclared(cls);
+  if (declared.isErr()) {
+    this->checker.diags_.error(expr->loc(), declared.error().message);
   }
-  if (cls->isAbstract) {
-    this->checker.diags_.error(expr->loc(), "class '" + cls->name +
-                                                "' is abstract and cannot be created: create "
-                                                "an object of a class that extends it");
+  ResultClassIsConcrete concrete = MethodCallChecker::classConcrete(cls);
+  if (concrete.isErr()) {
+    this->checker.diags_.error(expr->loc(), concrete.error().message);
   }
   this->checker.classDeclarer().completeClass(cls);
   auto *call = this->checker.ctx_.make<CallExpr>(expr->loc(), nullptr, std::move(expr->args));
@@ -184,13 +328,10 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
   call->type = Type::voidTy();
   std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(cls);
   if (ctors.empty()) {
-    if (!call->args.empty()) {
-      this->checker.diags_.error(expr->loc(), "class '" + cls->name +
-                                                  "' has no constructor, so 'new " + cls->name +
-                                                  "()' takes no arguments");
-      for (Expr *&arg : call->args) {
-        arg = this->checker.exprChecker().checkExpr(arg);
-      }
+    ResultArgumentsAbsent absent = MethodCallChecker::argumentsAbsent(call, cls);
+    if (absent.isErr()) {
+      this->checker.diags_.error(expr->loc(), absent.error().message);
+      this->checker.argumentChecker().checkArgsLoosely(call);
       return expr;
     }
   } else {
@@ -206,8 +347,12 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
     }
     FuncSymbol *sym = picked.value();
     const FunctionDecl *chosen = sym->decl ? sym->decl : ctors[0];
-    this->checker.classMemberChecker().checkAccess(chosen->cls(), chosen->access(), "constructor",
-                                                   expr->loc());
+    ClassMemberChecker::ResultMemberAccessible accessible =
+        this->checker.classMemberChecker().checkAccess(chosen->cls(), chosen->access(),
+                                                       "constructor");
+    if (accessible.isErr()) {
+      this->checker.diags_.error(expr->loc(), accessible.error().message);
+    }
     this->checker.returnInferrer().resolveParams(sym);
     call->target = FunctionCall{.func = sym};
     std::vector<bool> given(checked ? call->args.size() : 0, true);

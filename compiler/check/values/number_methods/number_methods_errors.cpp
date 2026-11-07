@@ -29,4 +29,16 @@ std::string ErrorTextNumberMethod::noProperty(llvm::StringRef name, llvm::String
   return (llvm::Twine("property '") + name + "' does not exist on type '" + type + "'").str();
 }
 
+std::string ErrorTextNumberMethod::codePoint() {
+  return "a code point";
+}
+
+std::string ErrorTextNumberMethod::radix() {
+  return "the radix of 'toString'";
+}
+
+std::string ErrorTextNumberMethod::digits() {
+  return "the number of digits of 'toFixed'";
+}
+
 }

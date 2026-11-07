@@ -40,6 +40,7 @@ struct LateClassesStaticTypeError {
 class ErrorTextStaticType {
 public:
   static std::string unknown(llvm::StringRef field);
+  static std::string fieldLabel(llvm::StringRef name);
 };
 
 enum class LateClassesOldObjectErrorCode {

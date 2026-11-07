@@ -13,19 +13,13 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/ErrorHandling.h"
-#include <array>
 
-using llvm::BasicBlock;
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-ConsoleLowerer::ConsoleLowerer(Lowering &lowering) : lowering_(lowering) {}
+ConsoleLowerer::ConsoleLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 void ConsoleLowerer::emitConsoleLog(CallExpr *call) {
   size_t count = call->args.size();
@@ -37,53 +31,53 @@ void ConsoleLowerer::emitConsoleLog(CallExpr *call) {
   std::vector<Lowering::Operand> values;
   for (size_t i = 0; i < count; ++i) {
     if (call->args[i]->type->isUndefined()) {
-      lowering_.stmtLowerer().emitDiscarded(call->args[i]);
+      this->lowering.stmtLowerer().emitDiscarded(call->args[i]);
       values.push_back({nullptr, false, call->args[i]->type});
     } else {
-      values.push_back(lowering_.refCounts().emitOperand(call->args[i], laterCannotAssign[i]));
+      values.push_back(this->lowering.refCounts().emitOperand(call->args[i], laterCannotAssign[i]));
     }
   }
 
   bool toStderr = call->builtin() == Builtin::ConsoleError;
   if (toStderr) {
-    lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-        "tz_err_begin", lowering_.builder_.getVoidTy(), {}));
+    this->lowering.builder_.CreateCall(this->lowering.processLowerer().processFunction(
+        "tz_err_begin", this->lowering.builder_.getVoidTy(), {}));
   }
   auto print = [&](llvm::Value *value, const Type *type) {
     if (type->isUndefined() || type->isNever()) {
-      llvm::Value *text = lowering_.stringLowerer().stringLiteral(u"undefined");
-      lowering_.builder_.CreateCall(
-          lowering_.rt_.printString,
-          {lowering_.stringLowerer().stringObj(text), lowering_.stringLowerer().stringMeta(text)});
+      llvm::Value *text = this->lowering.stringLowerer().stringLiteral(u"undefined");
+      this->lowering.builder_.CreateCall(this->lowering.rt_.printString,
+                                         {this->lowering.stringLowerer().stringObj(text),
+                                          this->lowering.stringLowerer().stringMeta(text)});
       return;
     }
     switch (type->kind()) {
     case Type::Kind::String:
-      lowering_.builder_.CreateCall(lowering_.rt_.printString,
-                                    {lowering_.stringLowerer().stringObj(value),
-                                     lowering_.stringLowerer().stringMeta(value)});
+      this->lowering.builder_.CreateCall(this->lowering.rt_.printString,
+                                         {this->lowering.stringLowerer().stringObj(value),
+                                          this->lowering.stringLowerer().stringMeta(value)});
       break;
     case Type::Kind::Int:
-      lowering_.builder_.CreateCall(type->isUnsigned() && type->bitWidth() == 64
-                                        ? lowering_.rt_.printU64
-                                        : lowering_.rt_.printI64,
-                                    {lowering_.numberLowerer().toI64(value, type)});
+      this->lowering.builder_.CreateCall(type->isUnsigned() && type->bitWidth() == 64
+                                             ? this->lowering.rt_.printU64
+                                             : this->lowering.rt_.printI64,
+                                         {this->lowering.numberLowerer().toI64(value, type)});
       break;
     case Type::Kind::Double:
-      lowering_.builder_.CreateCall(lowering_.rt_.printF64, {value});
+      this->lowering.builder_.CreateCall(this->lowering.rt_.printF64, {value});
       break;
     case Type::Kind::Bool:
-      lowering_.builder_.CreateCall(
-          lowering_.rt_.printBool,
-          {lowering_.builder_.CreateZExt(value, lowering_.builder_.getInt32Ty())});
+      this->lowering.builder_.CreateCall(
+          this->lowering.rt_.printBool,
+          {this->lowering.builder_.CreateZExt(value, this->lowering.builder_.getInt32Ty())});
       break;
     case Type::Kind::Decimal: {
-      llvm::Type *i64 = lowering_.builder_.getInt64Ty();
-      lowering_.builder_.CreateCall(
-          lowering_.decimalLowerer().decimalFunction("tz_print_decimal",
-                                                     lowering_.builder_.getVoidTy(), {i64, i64}),
-          {lowering_.decimalLowerer().decimalCoef(value),
-           lowering_.decimalLowerer().decimalMeta(value)});
+      llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+      this->lowering.builder_.CreateCall(
+          this->lowering.decimalLowerer().decimalFunction(
+              "tz_print_decimal", this->lowering.builder_.getVoidTy(), {i64, i64}),
+          {this->lowering.decimalLowerer().decimalCoef(value),
+           this->lowering.decimalLowerer().decimalMeta(value)});
       break;
     }
     case Type::Kind::Array:
@@ -99,9 +93,10 @@ void ConsoleLowerer::emitConsoleLog(CallExpr *call) {
     case Type::Kind::Promise:
     case Type::Kind::Unknown:
     case Type::Kind::ClassRef:
-      lowering_.builder_.CreateCall(lowering_.rt_.printValue,
-                                    {lowering_.typeDescriptors().typeDescriptor(type),
-                                     lowering_.functionFrame().spill(value, "print.value")});
+      this->lowering.builder_.CreateCall(
+          this->lowering.rt_.printValue,
+          {this->lowering.typeDescriptors().typeDescriptor(type),
+           this->lowering.functionFrame().spill(value, "print.value")});
       break;
     default:
       llvm_unreachable("Checker rejects other argument types");
@@ -109,69 +104,73 @@ void ConsoleLowerer::emitConsoleLog(CallExpr *call) {
   };
   llvm::Value *first = nullptr;
   if (call->hasSpread()) {
-    first =
-        lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt1Ty(), "print.first");
-    lowering_.builder_.CreateStore(lowering_.builder_.getTrue(), first);
+    first = this->lowering.functionFrame().createStackSlot(this->lowering.builder_.getInt1Ty(),
+                                                           "print.first");
+    this->lowering.builder_.CreateStore(this->lowering.builder_.getTrue(), first);
   }
   auto separate = [&](size_t i) {
     if (!first) {
       if (i > 0) {
-        lowering_.builder_.CreateCall(lowering_.rt_.printChar, {lowering_.builder_.getInt32(' ')});
+        this->lowering.builder_.CreateCall(this->lowering.rt_.printChar,
+                                           {this->lowering.builder_.getInt32(' ')});
       }
       return;
     }
-    llvm::BasicBlock *spaceBlock = lowering_.functionFrame().newBlock("print.space");
-    llvm::BasicBlock *valueBlock = lowering_.functionFrame().newBlock("print.value");
-    lowering_.builder_.CreateCondBr(
-        lowering_.builder_.CreateLoad(lowering_.builder_.getInt1Ty(), first), valueBlock,
+    llvm::BasicBlock *spaceBlock = this->lowering.functionFrame().newBlock("print.space");
+    llvm::BasicBlock *valueBlock = this->lowering.functionFrame().newBlock("print.value");
+    this->lowering.builder_.CreateCondBr(
+        this->lowering.builder_.CreateLoad(this->lowering.builder_.getInt1Ty(), first), valueBlock,
         spaceBlock);
-    lowering_.functionFrame().switchTo(spaceBlock);
-    lowering_.builder_.CreateCall(lowering_.rt_.printChar, {lowering_.builder_.getInt32(' ')});
-    lowering_.builder_.CreateBr(valueBlock);
-    lowering_.functionFrame().switchTo(valueBlock);
-    lowering_.builder_.CreateStore(lowering_.builder_.getFalse(), first);
+    this->lowering.functionFrame().switchTo(spaceBlock);
+    this->lowering.builder_.CreateCall(this->lowering.rt_.printChar,
+                                       {this->lowering.builder_.getInt32(' ')});
+    this->lowering.builder_.CreateBr(valueBlock);
+    this->lowering.functionFrame().switchTo(valueBlock);
+    this->lowering.builder_.CreateStore(this->lowering.builder_.getFalse(), first);
   };
   for (size_t i = 0; i < count; ++i) {
     const Lowering::Operand &value = values[i];
     if (call->spreads(i) && value.type->isArray()) {
       const Type *element = value.type->inner();
-      llvm::Value *length = lowering_.arrayLowerer().arrayLength(value.value);
-      llvm::Value *indexSlot =
-          lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt64Ty(), "print.index");
-      lowering_.builder_.CreateStore(lowering_.builder_.getInt64(0), indexSlot);
-      llvm::BasicBlock *condBlock = lowering_.functionFrame().newBlock("print.cond");
-      llvm::BasicBlock *bodyBlock = lowering_.functionFrame().newBlock("print.body");
-      llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("print.end");
-      lowering_.builder_.CreateBr(condBlock);
-      lowering_.functionFrame().switchTo(condBlock);
+      llvm::Value *length = this->lowering.arrayLowerer().arrayLength(value.value);
+      llvm::Value *indexSlot = this->lowering.functionFrame().createStackSlot(
+          this->lowering.builder_.getInt64Ty(), "print.index");
+      this->lowering.builder_.CreateStore(this->lowering.builder_.getInt64(0), indexSlot);
+      llvm::BasicBlock *condBlock = this->lowering.functionFrame().newBlock("print.cond");
+      llvm::BasicBlock *bodyBlock = this->lowering.functionFrame().newBlock("print.body");
+      llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("print.end");
+      this->lowering.builder_.CreateBr(condBlock);
+      this->lowering.functionFrame().switchTo(condBlock);
       llvm::Value *index =
-          lowering_.builder_.CreateLoad(lowering_.builder_.getInt64Ty(), indexSlot);
-      lowering_.builder_.CreateCondBr(lowering_.builder_.CreateICmpULT(index, length), bodyBlock,
-                                      endBlock);
-      lowering_.functionFrame().switchTo(bodyBlock);
+          this->lowering.builder_.CreateLoad(this->lowering.builder_.getInt64Ty(), indexSlot);
+      this->lowering.builder_.CreateCondBr(this->lowering.builder_.CreateICmpULT(index, length),
+                                           bodyBlock, endBlock);
+      this->lowering.functionFrame().switchTo(bodyBlock);
       separate(i);
-      llvm::Value *at = lowering_.builder_.CreateLoad(lowering_.builder_.getInt64Ty(), indexSlot);
-      llvm::Value *item = lowering_.builder_.CreateLoad(
-          lowering_.moduleBuilder().lower(element),
-          lowering_.arrayLowerer().elementAddress(lowering_.arrayLowerer().arrayData(value.value),
-                                                  element, at),
+      llvm::Value *at =
+          this->lowering.builder_.CreateLoad(this->lowering.builder_.getInt64Ty(), indexSlot);
+      llvm::Value *item = this->lowering.builder_.CreateLoad(
+          this->lowering.moduleBuilder().lower(element),
+          this->lowering.arrayLowerer().elementAddress(
+              this->lowering.arrayLowerer().arrayData(value.value), element, at),
           "item");
       print(item, element);
-      lowering_.builder_.CreateStore(
-          lowering_.builder_.CreateAdd(at, lowering_.builder_.getInt64(1)), indexSlot);
-      lowering_.builder_.CreateBr(condBlock);
-      lowering_.functionFrame().switchTo(endBlock);
-      lowering_.refCounts().dropOperand(value);
+      this->lowering.builder_.CreateStore(
+          this->lowering.builder_.CreateAdd(at, this->lowering.builder_.getInt64(1)), indexSlot);
+      this->lowering.builder_.CreateBr(condBlock);
+      this->lowering.functionFrame().switchTo(endBlock);
+      this->lowering.refCounts().dropOperand(value);
       continue;
     }
     separate(i);
     print(value.value, value.type);
-    lowering_.refCounts().dropOperand(value);
+    this->lowering.refCounts().dropOperand(value);
   }
-  lowering_.builder_.CreateCall(lowering_.rt_.printChar, {lowering_.builder_.getInt32('\n')});
+  this->lowering.builder_.CreateCall(this->lowering.rt_.printChar,
+                                     {this->lowering.builder_.getInt32('\n')});
   if (toStderr) {
-    lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-        "tz_err_end", lowering_.builder_.getVoidTy(), {}));
+    this->lowering.builder_.CreateCall(this->lowering.processLowerer().processFunction(
+        "tz_err_end", this->lowering.builder_.getVoidTy(), {}));
   }
 }
 

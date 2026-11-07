@@ -6,7 +6,7 @@ namespace tz {
 
 class ChunkTypes {
 public:
-  explicit ChunkTypes(Checker &checker);
+  explicit ChunkTypes(Checker &owner);
 
   bool isStreamClass(const ClassDecl *cls) const;
   Checker::StreamChunks streamChunksOf(const ClassDecl *cls) const;
@@ -19,7 +19,7 @@ public:
   void noteStreamCallback(CallExpr *call, const VarSymbol *var);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

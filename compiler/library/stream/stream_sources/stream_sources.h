@@ -6,7 +6,7 @@ namespace tz {
 
 class StreamSources {
 public:
-  explicit StreamSources(Checker &checker);
+  explicit StreamSources(Checker &owner);
 
   Expr *checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, llvm::SMLoc loc);
   Expr *processStream(MemberExpr *member);
@@ -15,8 +15,8 @@ public:
   Expr *checkStreamFrom(CallExpr *call, MemberExpr *member);
 
 private:
-  Checker &checker_;
-  VarSymbol *processStdin_ = nullptr;
+  Checker &checker;
+  VarSymbol *processStdin = nullptr;
 };
 
 }

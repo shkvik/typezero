@@ -1,5 +1,6 @@
 #include "compiler/check/functions/function_value_checker/function_value_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/functions/callback_checker/callback_checker_errors.h"
 #include "compiler/check/functions/nested_functions/nested_functions.h"
 #include "compiler/library/result/result_types/result_types.h"
 #include "llvm/ADT/STLExtras.h"
@@ -8,32 +9,6 @@ using llvm::cast;
 using llvm::dyn_cast;
 
 namespace tz {
-
-const char *FunctionValueChecker::callbackArgs(llvm::StringRef method) {
-  if (method == "reduce" || method == "reduceRight") {
-    return "(accumulator, value, index, array)";
-  }
-  if (method == "sort") {
-    return "(a, b)";
-  }
-
-  return "(value, index, array)";
-}
-
-const char *FunctionValueChecker::ordinal(size_t i) {
-  static const char *const names[] = {"first", "second", "third", "fourth", "fifth"};
-
-  return i < 5 ? names[i] : "next";
-}
-
-const char *FunctionValueChecker::callbackArgName(llvm::StringRef method, size_t i) {
-  bool reduce = method == "reduce" || method == "reduceRight";
-  if (reduce) {
-    return i == 0 ? "accumulator" : i == 1 ? "value" : i == 2 ? "index" : "array";
-  }
-
-  return i == 0 ? "value" : i == 1 ? "index" : "array";
-}
 
 FunctionValueChecker::FunctionValueChecker(Checker &owner)
     : checker(owner) {}
@@ -173,9 +148,9 @@ FunctionValueChecker::extraArguments(const Expr *arg, llvm::StringRef name, llvm
     if (m) {
       qualified = cast<NameExpr>(m->object)->name.str() + "." + qualified;
     }
-    const char *argument = FunctionValueChecker::callbackArgName(method, primary);
-    const char *ordinal = FunctionValueChecker::ordinal(primary);
-    const char *passes = FunctionValueChecker::callbackArgs(method);
+    std::string argument = ErrorTextCallbackArg::argName(method, primary);
+    std::string ordinal = ErrorTextCallbackArg::position(primary);
+    std::string passes = ErrorTextCallbackArg::argsShape(method);
     std::string message =
         ErrorTextExtraArguments::passed(qualified, argument, ordinal, method, passes);
 

@@ -1,4 +1,5 @@
 #include "compiler/check/functions/callback_checker/callback_checker.h"
+#include "compiler/check/expr/argument_checker/argument_checker_errors.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/condition_facts/condition_facts.h"
@@ -21,34 +22,126 @@ using llvm::isa;
 
 namespace tz {
 
-const char *CallbackChecker::callbackArgs(llvm::StringRef method) {
-  if (method == "reduce" || method == "reduceRight") {
-    return "(accumulator, value, index, array)";
-  }
-  if (method == "sort") {
-    return "(a, b)";
-  }
-
-  return "(value, index, array)";
-}
-
-const char *CallbackChecker::ordinal(size_t i) {
-  static const char *const names[] = {"first", "second", "third", "fourth", "fifth"};
-
-  return i < 5 ? names[i] : "next";
-}
-
-const char *CallbackChecker::callbackArgName(llvm::StringRef method, size_t i) {
-  bool reduce = method == "reduce" || method == "reduceRight";
-  if (reduce) {
-    return i == 0 ? "accumulator" : i == 1 ? "value" : i == 2 ? "index" : "array";
-  }
-
-  return i == 0 ? "value" : i == 1 ? "index" : "array";
-}
-
 CallbackChecker::CallbackChecker(Checker &owner)
     : checker(owner) {}
+
+CallbackChecker::ResultFunctionIsPassed CallbackChecker::functionGiven(const Type *type,
+                                                                       llvm::StringRef method) {
+  if (!type->isFunction()) {
+    std::string message = ErrorTextCallbackArg::notFunc(method, type->name());
+
+    return err(CallbackCheckerFunctionGivenError{
+        .code = CallbackCheckerFunctionGivenErrorCode::NOT_A_FUNCTION,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+CallbackChecker::ResultWithoutRestParam CallbackChecker::fixedParams(const Type *type,
+                                                                     llvm::StringRef name) {
+  if (type->hasRest()) {
+    std::string message = ErrorTextCallbackArg::rest(name);
+
+    return err(CallbackCheckerFixedParamsError{
+        .code = CallbackCheckerFixedParamsErrorCode::REST_PARAMETER,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+CallbackChecker::ResultParameterMatches
+CallbackChecker::callbackParam(const Type *type, const Checker::Signature &expected, size_t i,
+                               unsigned primary, const FunctionDecl *known, llvm::StringRef name,
+                               llvm::StringRef method) {
+  const Type *param = type->params()[i];
+  const Type *given = expected.params[i];
+  bool fits = param == given || (param->isOptional() && param->inner() == given);
+  if (!fits) {
+    std::string position = ErrorTextCallbackArg::position(i);
+    std::string message =
+        ErrorTextCallbackArg::paramType(name, param->name(), position, method, given->name());
+
+    return err(CallbackCheckerCallbackParamError{
+        .code = CallbackCheckerCallbackParamErrorCode::PARAM_TYPE,
+        .message = message,
+    });
+  }
+  if (i >= primary && i >= type->minArgs()) {
+    bool named = known && i < known->params.size();
+    std::string paramName = named ? ErrorTextCallbackArg::paramName(known->params[i].name) : "";
+    std::string argName = ErrorTextCallbackArg::argName(method, i);
+    std::string args = ErrorTextCallbackArg::argsShape(method);
+    std::string message = ErrorTextCallbackArg::extraParam(name, argName, paramName, method, args);
+
+    return err(CallbackCheckerCallbackParamError{
+        .code = CallbackCheckerCallbackParamErrorCode::EXTRA_OPTIONAL,
+        .message = message,
+    });
+  }
+
+  return ok(param);
+}
+
+CallbackChecker::ResultArgumentsSuffice
+CallbackChecker::argumentsEnough(const Type *type, const Checker::Signature &expected,
+                                 llvm::StringRef name, llvm::StringRef method) {
+  if (type->minArgs() > expected.params.size()) {
+    unsigned count = unsigned(expected.params.size());
+    std::string passes = ErrorTextArity::wanted(count, count);
+    std::string needs = std::to_string(type->minArgs());
+    std::string message = ErrorTextCallbackArg::tooFew(method, passes, name, needs);
+
+    return err(CallbackCheckerArgumentsEnoughError{
+        .code = CallbackCheckerArgumentsEnoughErrorCode::TOO_FEW_PASSED,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+CallbackChecker::ResultReturnedTypeFits
+CallbackChecker::returnMatches(const Type *type, const Checker::Signature &expected,
+                               llvm::StringRef name, llvm::StringRef method) {
+  if (expected.ret && type->ret() != expected.ret && !expected.voidResult) {
+    std::string message =
+        ErrorTextCallbackArg::badReturn(method, expected.ret->name(), name, type->ret()->name());
+
+    return err(CallbackCheckerReturnMatchesError{
+        .code = CallbackCheckerReturnMatchesErrorCode::WRONG_RETURN,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+CallbackChecker::ResultNothingIsDropped
+CallbackChecker::resultKept(const Type *type, const Checker::Signature &expected,
+                            llvm::StringRef name, llvm::StringRef method) {
+  if (expected.voidResult && type->ret()->isResult()) {
+    std::string message = ErrorTextCallbackArg::noCheck(name, method);
+
+    return err(CallbackCheckerResultKeptError{
+        .code = CallbackCheckerResultKeptErrorCode::RESULT_DROPPED,
+        .message = message,
+    });
+  }
+  if (expected.voidResult && !expected.asyncVoid && type->ret()->isPromise()) {
+    std::string message = ErrorTextCallbackArg::noWait(name, method);
+
+    return err(CallbackCheckerResultKeptError{
+        .code = CallbackCheckerResultKeptErrorCode::PROMISE_DROPPED,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
 
 Expr *CallbackChecker::checkFunctionArg(Expr *arg, const Checker::Signature &expected,
                                         unsigned primary, llvm::StringRef method) {
@@ -81,46 +174,31 @@ Expr *CallbackChecker::checkFunctionArg(Expr *arg, const Checker::Signature &exp
   if (type->isError()) {
     return arg;
   }
-  if (!type->isFunction()) {
-    this->checker.diags_.error(arg->loc(),
-                               "'" + method + "' needs a function, found '" + type->name() + "'");
+  ResultFunctionIsPassed given = CallbackChecker::functionGiven(type, method);
+  if (given.isErr()) {
+    this->checker.diags_.error(arg->loc(), given.error().message);
     return arg;
   }
   FunctionDecl *known = this->checker.nestedFunctions().namedFunction(arg);
-  std::string name = known && !known->name.empty() ? "'" + known->name.str() + "'" : "the function";
-  if (type->hasRest()) {
-    this->checker.diags_.error(
-        arg->loc(), name + " takes a rest parameter; pass an arrow that calls it instead");
+  llvm::StringRef knownName = known ? known->name : llvm::StringRef();
+  std::string name = quotedName(knownName);
+  ResultWithoutRestParam fixed = CallbackChecker::fixedParams(type, name);
+  if (fixed.isErr()) {
+    this->checker.diags_.error(arg->loc(), fixed.error().message);
     return arg;
   }
-  llvm::ArrayRef<const Type *> params = type->params();
-  size_t passed = std::min(params.size(), expected.params.size());
+  size_t passed = std::min(type->params().size(), expected.params.size());
   for (size_t i = 0; i < passed; ++i) {
-    const Type *param = params[i];
-    const Type *given = expected.params[i];
-    if (param != given && !(param->isOptional() && param->inner() == given)) {
-      this->checker.diags_.error(arg->loc(), name + " takes '" + param->name() + "' as its " +
-                                                 CallbackChecker::ordinal(i) + " argument, but '" +
-                                                 method + "' passes '" + given->name() + "'");
-      return arg;
-    }
-    if (i >= primary && i >= type->minArgs()) {
-      std::string paramName =
-          known && i < known->params.size() ? " '" + known->params[i].name.str() + "'" : "";
-      this->checker.diags_.error(
-          arg->loc(), name + " would also get the " + CallbackChecker::callbackArgName(method, i) +
-                          " in its optional parameter" + paramName + ": '" + method +
-                          "' calls it with " + CallbackChecker::callbackArgs(method) +
-                          "; pass an arrow that gives it only what it needs");
+    ResultParameterMatches param =
+        CallbackChecker::callbackParam(type, expected, i, primary, known, name, method);
+    if (param.isErr()) {
+      this->checker.diags_.error(arg->loc(), param.error().message);
       return arg;
     }
   }
-  if (type->minArgs() > expected.params.size()) {
-    this->checker.diags_.error(arg->loc(), "'" + method + "' passes " +
-                                               argumentCount(unsigned(expected.params.size()),
-                                                             unsigned(expected.params.size())) +
-                                               ", but " + name + " needs " +
-                                               std::to_string(type->minArgs()));
+  ResultArgumentsSuffice enough = CallbackChecker::argumentsEnough(type, expected, name, method);
+  if (enough.isErr()) {
+    this->checker.diags_.error(arg->loc(), enough.error().message);
     return arg;
   }
   FunctionValueChecker::ResultAsyncCallbackOk awaited =
@@ -130,24 +208,14 @@ Expr *CallbackChecker::checkFunctionArg(Expr *arg, const Checker::Signature &exp
     arg->type = Type::error();
     return arg;
   }
-  if (expected.ret && type->ret() != expected.ret && !expected.voidResult) {
-    this->checker.diags_.error(arg->loc(), "'" + method + "' needs a function that returns '" +
-                                               expected.ret->name() + "', but " + name +
-                                               " returns '" + type->ret()->name() + "'");
+  ResultReturnedTypeFits returns = CallbackChecker::returnMatches(type, expected, name, method);
+  if (returns.isErr()) {
+    this->checker.diags_.error(arg->loc(), returns.error().message);
     return arg;
   }
-  if (expected.voidResult && type->ret()->isResult()) {
-    this->checker.diags_.error(arg->loc(),
-                               name + " returns a Result that '" + method +
-                                   "' drops, so an error in it would go unchecked; pass an arrow "
-                                   "that handles it, e.g. with '.match(...)'");
-  }
-  if (expected.voidResult && !expected.asyncVoid && type->ret()->isPromise()) {
-    this->checker.diags_.error(arg->loc(),
-                               name + " returns a Promise that '" + method +
-                                   "' drops, so nothing waits for it to finish; loop with 'for "
-                                   "(const x of xs) await f(x)', or wait for all with 'await "
-                                   "Promise.all(xs.map(...))'");
+  ResultNothingIsDropped kept = CallbackChecker::resultKept(type, expected, name, method);
+  if (kept.isErr()) {
+    this->checker.diags_.error(arg->loc(), kept.error().message);
   }
 
   return arg;
@@ -195,6 +263,83 @@ bool CallbackChecker::keepsDefined(const Expr *callback) const {
   return defined(ret->value, true).contains(fe->fn->params[0].sym);
 }
 
+CallbackChecker::ResultCallbackIsPassed CallbackChecker::callbackGiven(size_t count,
+                                                                       llvm::StringRef name) {
+  if (count == 0) {
+    std::string message = ErrorTextCallbackMethod::noFunction(name);
+
+    return err(CallbackCheckerCallbackGivenError{
+        .code = CallbackCheckerCallbackGivenErrorCode::NO_FUNCTION,
+        .message = message,
+    });
+  }
+
+  return ok(count);
+}
+
+CallbackChecker::ResultNoExtraArguments
+CallbackChecker::extraArguments(size_t count, size_t maxArgs, llvm::StringRef name, bool reduce) {
+  if (count > maxArgs && count == 2 && !reduce) {
+    std::string message = ErrorTextCallbackMethod::thisArg(name);
+
+    return err(CallbackCheckerExtraArgumentsError{
+        .code = CallbackCheckerExtraArgumentsErrorCode::THIS_ARGUMENT,
+        .message = message,
+    });
+  }
+  if (count > maxArgs) {
+    std::string message = ErrorTextArity::count(1, unsigned(maxArgs), count);
+
+    return err(CallbackCheckerExtraArgumentsError{
+        .code = CallbackCheckerExtraArgumentsErrorCode::TOO_MANY_ARGUMENTS,
+        .message = message,
+    });
+  }
+
+  return ok(count);
+}
+
+CallbackChecker::ResultInitialValueType CallbackChecker::initialValue(const Type *accumulator,
+                                                                      llvm::StringRef name) {
+  if (accumulator->isUndefined() || accumulator->isVoid()) {
+    std::string message = ErrorTextCallbackMethod::untyped(name);
+
+    return err(CallbackCheckerInitialValueError{
+        .code = CallbackCheckerInitialValueErrorCode::UNTYPED_INITIAL,
+        .message = message,
+    });
+  }
+
+  return ok(accumulator);
+}
+
+CallbackChecker::ResultCallbackHasValue CallbackChecker::mappedValue(const Type *result,
+                                                                     llvm::StringRef name) {
+  if (result->isVoid() || result->isUndefined()) {
+    std::string message = ErrorTextCallbackMethod::noValue(name);
+
+    return err(CallbackCheckerMappedValueError{
+        .code = CallbackCheckerMappedValueErrorCode::NO_VALUE,
+        .message = message,
+    });
+  }
+
+  return ok(result);
+}
+
+CallbackChecker::ResultComparisonNumber CallbackChecker::comparison(const Type *result) {
+  if (!result->isNumeric() && !result->isDecimal()) {
+    std::string message = ErrorTextCallbackMethod::notNumber(result->name());
+
+    return err(CallbackCheckerComparisonError{
+        .code = CallbackCheckerComparisonErrorCode::NOT_A_NUMBER,
+        .message = message,
+    });
+  }
+
+  return ok(result);
+}
+
 Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
                                            const Type *expected) {
   enum Kind { ForEach, Map, FlatMap, Filter, Reduce, Find, FindIndex, Test, Sort };
@@ -229,25 +374,18 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
   }
   Kind kind = method ? method->kind : Sort;
   size_t count = call->args.size();
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->checker.exprChecker().checkExpr(arg);
-    }
-  };
   size_t maxArgs = kind == Reduce ? 2 : 1;
-  if (count == 0) {
-    this->checker.diags_.error(member->loc(), "'" + name + "' needs a function");
+  ResultCallbackIsPassed passed = CallbackChecker::callbackGiven(count, name);
+  if (passed.isErr()) {
+    this->checker.diags_.error(member->loc(), passed.error().message);
     return call;
   }
-  if (count > maxArgs) {
-    if (count == 2 && kind != Reduce) {
-      this->checker.diags_.error(call->args[1]->loc(),
-                                 "the second argument of '" + name +
-                                     "' sets 'this' for the callback, which is not supported");
-    } else {
-      this->checker.diags_.error(member->loc(), "expected " + argumentCount(1, unsigned(maxArgs)) +
-                                                    ", but got " + llvm::Twine(count));
-    }
+  ResultNoExtraArguments extra =
+      CallbackChecker::extraArguments(count, maxArgs, name, kind == Reduce);
+  if (extra.isErr()) {
+    bool thisArg = extra.error().code == CallbackCheckerExtraArgumentsErrorCode::THIS_ARGUMENT;
+    llvm::SMLoc at = thisArg ? call->args[1]->loc() : member->loc();
+    this->checker.diags_.error(at, extra.error().message);
     for (size_t i = maxArgs; i < count; ++i) {
       call->args[i] = this->checker.exprChecker().checkExpr(call->args[i]);
     }
@@ -296,11 +434,9 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
       init = this->checker.exprChecker().checkExpr(
           init, decimalStart || (literal && wide) ? elementType : nullptr);
       accumulator = init->type;
-      if (accumulator->isUndefined() || accumulator->isVoid()) {
-        this->checker.diags_.error(
-            init->loc(), "the initial value of '" + name +
-                             "' needs a type; declare it in a "
-                             "variable first, e.g. 'const start: int | undefined = undefined'");
+      ResultInitialValueType initial = CallbackChecker::initialValue(accumulator, name);
+      if (initial.isErr()) {
+        this->checker.diags_.error(init->loc(), initial.error().message);
         accumulator = Type::error();
       }
     }
@@ -364,10 +500,10 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
     call->type = Type::voidTy();
     break;
   case Map:
-  case FlatMap:
-    if (result->isVoid() || result->isUndefined()) {
-      this->checker.diags_.error(call->args[0]->loc(),
-                                 "the callback of '" + name + "' must return a value");
+  case FlatMap: {
+    ResultCallbackHasValue value = CallbackChecker::mappedValue(result, name);
+    if (value.isErr()) {
+      this->checker.diags_.error(call->args[0]->loc(), value.error().message);
       return call;
     }
     if (typed) {
@@ -376,6 +512,7 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
     }
     call->type = kind == FlatMap && result->isArray() ? result : Type::array(result);
     break;
+  }
   case Filter:
     if (const Type *kept = this->checker.predicateChecker().filteredType(call->args[0], element)) {
       call->type = Type::array(kept);
@@ -401,16 +538,15 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
   case Test:
     call->type = Type::boolTy();
     break;
-  case Sort:
-    if (!result->isNumeric() && !result->isDecimal()) {
-      this->checker.diags_.error(call->args[0]->loc(),
-                                 "a comparison function must return a number (negative, zero "
-                                 "or positive), found '" +
-                                     result->name() + "'");
+  case Sort: {
+    ResultComparisonNumber number = CallbackChecker::comparison(result);
+    if (number.isErr()) {
+      this->checker.diags_.error(call->args[0]->loc(), number.error().message);
       return call;
     }
     call->type = arrayType;
     break;
+  }
   }
 
   return call;

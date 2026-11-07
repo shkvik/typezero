@@ -6,12 +6,12 @@ namespace tz {
 
 class FsPromisesChecker {
 public:
-  explicit FsPromisesChecker(Checker &checker);
+  explicit FsPromisesChecker(Checker &owner);
 
   Expr *checkFsPromisesCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

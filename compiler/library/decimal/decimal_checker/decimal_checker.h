@@ -6,7 +6,7 @@ namespace tz {
 
 class DecimalChecker {
 public:
-  explicit DecimalChecker(Checker &checker);
+  explicit DecimalChecker(Checker &owner);
 
   static bool isLiteralTree(const Expr *expr);
   static std::pair<llvm::StringRef, llvm::StringRef> sidesOf(const BinaryExpr *bin);
@@ -28,7 +28,10 @@ public:
   void reportBigInt(llvm::SMLoc loc, llvm::StringRef what);
 
 private:
-  Checker &checker_;
+  static std::string exponentMessage(const Type *found);
+  static std::string utf8(const std::u16string &text);
+
+  Checker &checker;
 };
 
 }

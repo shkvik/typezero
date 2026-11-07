@@ -1,12 +1,13 @@
 #pragma once
 
 #include "compiler/lower/lowering/lowering.h"
+#include "compiler/lower/objects/object_maker/object_maker.h"
 
 namespace tz {
 
 class ClassInfoLowerer {
 public:
-  explicit ClassInfoLowerer(Lowering &lowering);
+  explicit ClassInfoLowerer(Lowering &owner);
 
   std::vector<const FunctionDecl *> reflectVariants(const ClassDecl *cls, llvm::StringRef name);
   llvm::StructType *classInfoType();
@@ -22,6 +23,10 @@ public:
   llvm::Constant *reflectAdapterInfo(const FunctionDecl *fn, const Type *&type);
 
 private:
+  static std::string className(const ClassDecl *cls);
+  static const std::vector<MakerFields> &fillOrders();
+  static std::vector<FunctionDecl *> constructorsOf(const ClassDecl *cls);
+
   struct FillSite {
     llvm::Value *cls;
     llvm::Value *clsLength;
@@ -35,12 +40,12 @@ private:
   llvm::Constant *fillNames(llvm::ArrayRef<std::string> names, llvm::StringRef label);
   void emitFillElements();
 
-  Lowering &lowering_;
-  llvm::DenseMap<const Type *, llvm::Function *> fillElements_;
-  std::vector<std::pair<llvm::Function *, const Type *>> pendingElements_;
-  std::vector<FillSite> pendingSites_;
-  llvm::DenseMap<const FunctionDecl *, llvm::Constant *> reflectAdapters_;
-  llvm::StructType *classInfoTy_ = nullptr;
+  Lowering &lowering;
+  llvm::DenseMap<const Type *, llvm::Function *> fillElements;
+  std::vector<std::pair<llvm::Function *, const Type *>> pendingElements;
+  std::vector<FillSite> pendingSites;
+  llvm::DenseMap<const FunctionDecl *, llvm::Constant *> reflectAdapters;
+  llvm::StructType *classInfoTy = nullptr;
 };
 
 }

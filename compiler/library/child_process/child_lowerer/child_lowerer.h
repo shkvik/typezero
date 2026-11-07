@@ -6,7 +6,7 @@ namespace tz {
 
 class ChildLowerer {
 public:
-  explicit ChildLowerer(Lowering &lowering);
+  explicit ChildLowerer(Lowering &owner);
 
   llvm::Value *emitChildBuiltin(CallExpr *call);
   llvm::Function *spawnMaker(const Type *type);
@@ -15,8 +15,11 @@ public:
   llvm::Value *spawnStream(llvm::Value *parts, unsigned stream, const Type *to, bool retain);
 
 private:
-  Lowering &lowering_;
-  std::map<const Type *, llvm::Function *> spawnMakers_;
+  static const Type *bufferType();
+  static bool holds(const Type *type, const Type *member);
+
+  Lowering &lowering;
+  std::map<const Type *, llvm::Function *> spawnMakers;
 };
 
 }

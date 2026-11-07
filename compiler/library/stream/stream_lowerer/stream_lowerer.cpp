@@ -13,114 +13,110 @@
 #include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 
-using llvm::BasicBlock;
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-namespace {
-
-bool isPlainObject(const Type *type) {
+bool StreamLowerer::isPlainObject(const Type *type) {
   return type->isObject() && !type->isClass() && !type->isAnyObject() && !type->isBytes() &&
          !type->isDate() && !type->isRegExp() && !type->isMatch() && !type->isIntl() &&
          !type->isCrypto() && !type->isRuntimeObject() && !type->isTimer() && type->bases().empty();
 }
 
-}
-
-StreamLowerer::StreamLowerer(Lowering &lowering) : lowering_(lowering) {}
+StreamLowerer::StreamLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Value *StreamLowerer::emitChunkAs(llvm::Value *u, const Type *to, llvm::BasicBlock *fail) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
   auto test = [&](llvm::Value *ok) {
-    llvm::BasicBlock *next = lowering_.functionFrame().newBlock("chunk.fits");
-    lowering_.builder_.CreateCondBr(ok, next, fail);
-    lowering_.functionFrame().switchTo(next);
+    llvm::BasicBlock *next = this->lowering.functionFrame().newBlock("chunk.fits");
+    this->lowering.builder_.CreateCondBr(ok, next, fail);
+    this->lowering.functionFrame().switchTo(next);
   };
   if (to->isBytes()) {
-    llvm::Value *ok = lowering_.builder_.CreateCall(
-        lowering_.unknownLowerer().unknownFunction("tz_lib_is_bytes", i32, {ptr, i32}),
-        {u, lowering_.builder_.getInt32(uint32_t(to->bytes()))});
-    test(lowering_.builder_.CreateICmpNE(ok, lowering_.builder_.getInt32(0)));
-    lowering_.refCounts().retainValue(u, to);
+    llvm::Value *ok = this->lowering.builder_.CreateCall(
+        this->lowering.unknownLowerer().unknownFunction("tz_lib_is_bytes", i32, {ptr, i32}),
+        {u, this->lowering.builder_.getInt32(uint32_t(to->bytes()))});
+    test(this->lowering.builder_.CreateICmpNE(ok, this->lowering.builder_.getInt32(0)));
+    this->lowering.refCounts().retainValue(u, to);
     return u;
   }
-  if (isPlainObject(to)) {
-    llvm::Value *layout = lowering_.builder_.CreateCall(
-        lowering_.unknownLowerer().unknownFunction("tz_unknown_layout", ptr, {ptr}), {u}, "layout");
-    test(lowering_.builder_.CreateIsNotNull(layout));
-    llvm::Value *drop = lowering_.builder_.CreateLoad(ptr, layout, "drop");
-    test(lowering_.builder_.CreateICmpEQ(drop, lowering_.objectLayouts().objectLayout(to).drop));
-    lowering_.refCounts().retainValue(u, to);
+  if (StreamLowerer::isPlainObject(to)) {
+    llvm::Value *layout = this->lowering.builder_.CreateCall(
+        this->lowering.unknownLowerer().unknownFunction("tz_unknown_layout", ptr, {ptr}), {u},
+        "layout");
+    test(this->lowering.builder_.CreateIsNotNull(layout));
+    llvm::Value *drop = this->lowering.builder_.CreateLoad(ptr, layout, "drop");
+    test(this->lowering.builder_.CreateICmpEQ(
+        drop, this->lowering.objectLayouts().objectLayout(to).drop));
+    this->lowering.refCounts().retainValue(u, to);
     return u;
   }
 
-  return lowering_.unknownCastLowerer().emitUnknownAs(u, to, fail);
+  return this->lowering.unknownCastLowerer().emitUnknownAs(u, to, fail);
 }
 
 llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
   switch (call->builtin()) {
     case Builtin::LibChunk: {
       const Type *to = call->type;
-      Lowering::Operand u = lowering_.refCounts().emitOperand(call->args[0], true);
+      Lowering::Operand u = this->lowering.refCounts().emitOperand(call->args[0], true);
       if (to->isUnknown()) {
-        lowering_.refCounts().retainValue(u.value, to);
+        this->lowering.refCounts().retainValue(u.value, to);
         llvm::Value *value = u.value;
-        lowering_.refCounts().dropOperand(u);
+        this->lowering.refCounts().dropOperand(u);
         return value;
       }
-      llvm::BasicBlock *fail = lowering_.functionFrame().newBlock("chunk.bad");
-      llvm::Value *value = emitChunkAs(u.value, to, fail);
-      llvm::BasicBlock *here = lowering_.builder_.GetInsertBlock();
-      lowering_.functionFrame().switchTo(fail);
+      llvm::BasicBlock *fail = this->lowering.functionFrame().newBlock("chunk.bad");
+      llvm::Value *value = this->emitChunkAs(u.value, to, fail);
+      llvm::BasicBlock *here = this->lowering.builder_.GetInsertBlock();
+      this->lowering.functionFrame().switchTo(fail);
       llvm::StringRef name = to->name();
-      lowering_.builder_.CreateCall(
-          lowering_.unknownLowerer().unknownFunction(
-              "tz_lib_bad_chunk", lowering_.builder_.getVoidTy(), {ptr, ptr, i32}),
-          {u.value, lowering_.stringLowerer().utf8Constant(name),
-           lowering_.builder_.getInt32(uint32_t(name.size()))});
-      lowering_.builder_.CreateUnreachable();
-      lowering_.builder_.SetInsertPoint(here);
-      lowering_.refCounts().dropOperand(u);
+      this->lowering.builder_.CreateCall(
+          this->lowering.unknownLowerer().unknownFunction(
+              "tz_lib_bad_chunk", this->lowering.builder_.getVoidTy(), {ptr, ptr, i32}),
+          {u.value, this->lowering.stringLowerer().utf8Constant(name),
+           this->lowering.builder_.getInt32(uint32_t(name.size()))});
+      this->lowering.builder_.CreateUnreachable();
+      this->lowering.builder_.SetInsertPoint(here);
+      this->lowering.refCounts().dropOperand(u);
       return value;
     }
     case Builtin::LibIsChunk: {
       const Type *wanted = call->args[1]->type;
-      Lowering::Operand u = lowering_.refCounts().emitOperand(call->args[0], true);
+      Lowering::Operand u = this->lowering.refCounts().emitOperand(call->args[0], true);
       if (wanted->isUnknown()) {
-        lowering_.refCounts().dropOperand(u);
-        return lowering_.builder_.getTrue();
+        this->lowering.refCounts().dropOperand(u);
+        return this->lowering.builder_.getTrue();
       }
-      llvm::BasicBlock *fail = lowering_.functionFrame().newBlock("chunk.not");
-      llvm::BasicBlock *end = lowering_.functionFrame().newBlock("chunk.end");
-      llvm::Value *value = emitChunkAs(u.value, wanted, fail);
-      lowering_.refCounts().releaseValue(value, wanted);
-      llvm::BasicBlock *fits = lowering_.builder_.GetInsertBlock();
-      lowering_.builder_.CreateBr(end);
-      lowering_.functionFrame().switchTo(fail);
-      lowering_.builder_.CreateBr(end);
-      lowering_.functionFrame().switchTo(end);
+      llvm::BasicBlock *fail = this->lowering.functionFrame().newBlock("chunk.not");
+      llvm::BasicBlock *end = this->lowering.functionFrame().newBlock("chunk.end");
+      llvm::Value *value = this->emitChunkAs(u.value, wanted, fail);
+      this->lowering.refCounts().releaseValue(value, wanted);
+      llvm::BasicBlock *fits = this->lowering.builder_.GetInsertBlock();
+      this->lowering.builder_.CreateBr(end);
+      this->lowering.functionFrame().switchTo(fail);
+      this->lowering.builder_.CreateBr(end);
+      this->lowering.functionFrame().switchTo(end);
       llvm::PHINode *phi =
-          lowering_.builder_.CreatePHI(lowering_.builder_.getInt1Ty(), 2, "is.chunk");
-      phi->addIncoming(lowering_.builder_.getTrue(), fits);
-      phi->addIncoming(lowering_.builder_.getFalse(), fail);
-      lowering_.refCounts().dropOperand(u);
+          this->lowering.builder_.CreatePHI(this->lowering.builder_.getInt1Ty(), 2, "is.chunk");
+      phi->addIncoming(this->lowering.builder_.getTrue(), fits);
+      phi->addIncoming(this->lowering.builder_.getFalse(), fail);
+      this->lowering.refCounts().dropOperand(u);
       return phi;
     }
     case Builtin::LibOverrides: {
       const FunctionDecl *method = call->method() ? call->method()->decl : nullptr;
-      Lowering::Operand object = lowering_.refCounts().emitOperand(call->args[0], true);
-      llvm::Value *result = lowering_.builder_.getFalse();
+      Lowering::Operand object = this->lowering.refCounts().emitOperand(call->args[0], true);
+      llvm::Value *result = this->lowering.builder_.getFalse();
       if (method && method->slot() >= 0 && method->body) {
-        result = lowering_.builder_.CreateICmpNE(
-            lowering_.inheritLowerer().vtableEntry(object.value, method->slot(), false),
-            lowering_.classDescriptors().methodCode(method), "overrides");
+        result = this->lowering.builder_.CreateICmpNE(
+            this->lowering.inheritLowerer().vtableEntry(object.value, method->slot(), false),
+            this->lowering.classDescriptors().methodCode(method), "overrides");
       }
-      lowering_.refCounts().dropOperand(object);
+      this->lowering.refCounts().dropOperand(object);
       return result;
     }
     case Builtin::LibFsOpen:
@@ -128,28 +124,29 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
     case Builtin::LibFsWrite:
     case Builtin::LibFsClose:
     case Builtin::LibStdinChunk: {
-      llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i64 = lowering_.builder_.getInt64Ty();
-      llvm::Type *f64 = lowering_.builder_.getDoubleTy();
-      std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
-      llvm::Value *promise = lowering_.promiseLowerer().newPromise(call->type->promised());
+      llvm::Type *voidTy = this->lowering.builder_.getVoidTy();
+      llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+      llvm::Type *f64 = this->lowering.builder_.getDoubleTy();
+      std::vector<llvm::Value *> values = this->lowering.exprLowerer().emitExprs(call->args);
+      llvm::Value *promise = this->lowering.promiseLowerer().newPromise(call->type->promised());
       auto run = [&](llvm::StringRef name, std::vector<llvm::Type *> params,
                      std::vector<llvm::Value *> args, bool maker) {
         params.insert(params.begin(), ptr);
         args.insert(args.begin(), promise);
         if (maker) {
           params.push_back(ptr);
-          args.push_back(lowering_.fsLowerer().errorMaker(call->type->promised()->errType()));
+          args.push_back(this->lowering.fsLowerer().errorMaker(call->type->promised()->errType()));
         }
-        lowering_.builder_.CreateCall(
-            lowering_.processLowerer().processFunction(name, voidTy, params), args);
+        this->lowering.builder_.CreateCall(
+            this->lowering.processLowerer().processFunction(name, voidTy, params), args);
       };
       switch (call->builtin()) {
         case Builtin::LibFsOpen:
           run("tz_fss_open", {ptr, i64, ptr, i64, i64},
-              {lowering_.stringLowerer().stringObj(values[0]),
-               lowering_.stringLowerer().stringMeta(values[0]),
-               lowering_.stringLowerer().stringObj(values[1]),
-               lowering_.stringLowerer().stringMeta(values[1]), values[2]},
+              {this->lowering.stringLowerer().stringObj(values[0]),
+               this->lowering.stringLowerer().stringMeta(values[0]),
+               this->lowering.stringLowerer().stringObj(values[1]),
+               this->lowering.stringLowerer().stringMeta(values[1]), values[2]},
               true);
           break;
         case Builtin::LibFsRead:
@@ -160,32 +157,32 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
           break;
         case Builtin::LibFsClose:
           run("tz_fss_close", {i64, i32},
-              {values[0], lowering_.builder_.CreateZExt(values[1], i32)}, true);
+              {values[0], this->lowering.builder_.CreateZExt(values[1], i32)}, true);
           break;
         default:
           run("tz_stdin_chunk", {i64}, {values[0]}, false);
           break;
       }
       for (size_t i = 0; i < values.size(); ++i) {
-        lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
+        this->lowering.refCounts().releaseValue(values[i], call->args[i]->type);
       }
       return promise;
     }
     case Builtin::LibStdWrite: {
-      std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
-      llvm::Value *gone = lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction("tz_lib_std_write_checked",
-                                                     lowering_.builder_.getInt64Ty(),
-                                                     {lowering_.builder_.getInt64Ty(), ptr}),
+      std::vector<llvm::Value *> values = this->lowering.exprLowerer().emitExprs(call->args);
+      llvm::Value *gone = this->lowering.builder_.CreateCall(
+          this->lowering.processLowerer().processFunction(
+              "tz_lib_std_write_checked", this->lowering.builder_.getInt64Ty(),
+              {this->lowering.builder_.getInt64Ty(), ptr}),
           {values[0], values[1]});
-      lowering_.refCounts().releaseValue(values[1], call->args[1]->type);
+      this->lowering.refCounts().releaseValue(values[1], call->args[1]->type);
       return gone;
     }
     case Builtin::LibStdinFailed: {
       llvm::Value *failed =
-          lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-              "tz_stdin_failed", lowering_.builder_.getInt32Ty(), {}));
-      return lowering_.builder_.CreateICmpNE(failed, lowering_.builder_.getInt32(0));
+          this->lowering.builder_.CreateCall(this->lowering.processLowerer().processFunction(
+              "tz_stdin_failed", this->lowering.builder_.getInt32Ty(), {}));
+      return this->lowering.builder_.CreateICmpNE(failed, this->lowering.builder_.getInt32(0));
     }
     default:
       return nullptr;

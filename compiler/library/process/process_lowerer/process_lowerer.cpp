@@ -7,97 +7,99 @@
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/Support/ErrorHandling.h"
 
-using llvm::BasicBlock;
 using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-ProcessLowerer::ProcessLowerer(Lowering &lowering) : lowering_(lowering) {}
+ProcessLowerer::ProcessLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::FunctionCallee ProcessLowerer::processFunction(llvm::StringRef name, llvm::Type *ret,
                                                      llvm::ArrayRef<llvm::Type *> params) {
-  llvm::FunctionCallee callee =
-      lowering_.module_->getOrInsertFunction(name, llvm::FunctionType::get(ret, params, false));
+  llvm::FunctionCallee callee = this->lowering.module_->getOrInsertFunction(
+      name, llvm::FunctionType::get(ret, params, false));
   cast<llvm::Function>(callee.getCallee())->addFnAttr(llvm::Attribute::NoUnwind);
 
   return callee;
 }
 
 void ProcessLowerer::emitPanic(llvm::StringRef message) {
-  llvm::Value *text = lowering_.stringLowerer().utf8Constant(message.str());
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty();
+  llvm::Value *text = this->lowering.stringLowerer().utf8Constant(message.str());
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
   auto *fn = cast<llvm::Function>(
-      processFunction("tz_panic", lowering_.builder_.getVoidTy(), {ptr, i64}).getCallee());
+      this->processFunction("tz_panic", this->lowering.builder_.getVoidTy(), {ptr, i64})
+          .getCallee());
   fn->addFnAttr(llvm::Attribute::Cold);
   fn->addFnAttr(llvm::Attribute::NoReturn);
-  lowering_.builder_.CreateCall(fn, {text, lowering_.builder_.getInt64(message.size())});
-  lowering_.builder_.CreateUnreachable();
+  this->lowering.builder_.CreateCall(fn, {text, this->lowering.builder_.getInt64(message.size())});
+  this->lowering.builder_.CreateUnreachable();
 }
 
 llvm::Value *ProcessLowerer::emitProcessBuiltin(CallExpr *call) {
-  llvm::Type *voidTy = lowering_.builder_.getVoidTy();
-  llvm::Type *i32 = lowering_.builder_.getInt32Ty();
-  llvm::Type *i64 = lowering_.builder_.getInt64Ty();
-  llvm::Type *f64 = lowering_.builder_.getDoubleTy();
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  llvm::Value *zero = lowering_.builder_.getInt32(0);
+  llvm::Type *voidTy = this->lowering.builder_.getVoidTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+  llvm::Type *f64 = this->lowering.builder_.getDoubleTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Value *zero = this->lowering.builder_.getInt32(0);
   auto stringResult = [&](llvm::StringRef name) {
-    return lowering_.stringLowerer().callReturningString(processFunction(name, voidTy, {ptr}), {});
+    return this->lowering.stringLowerer().callReturningString(
+        this->processFunction(name, voidTy, {ptr}), {});
   };
   auto exitCode = [&]() -> std::pair<llvm::Value *, llvm::Value *> {
     if (call->args.empty()) {
-      return {lowering_.builder_.getInt64(0), zero};
+      return {this->lowering.builder_.getInt64(0), zero};
     }
-    llvm::Value *code = lowering_.exprLowerer().emitExpr(call->args[0]);
+    llvm::Value *code = this->lowering.exprLowerer().emitExpr(call->args[0]);
 
-    return {lowering_.builder_.CreateExtractValue(code, 0),
-            lowering_.builder_.CreateZExt(lowering_.builder_.CreateExtractValue(code, 1), i32)};
+    return {this->lowering.builder_.CreateExtractValue(code, 0),
+            this->lowering.builder_.CreateZExt(this->lowering.builder_.CreateExtractValue(code, 1),
+                                               i32)};
   };
 
   switch (call->builtin()) {
     case Builtin::ProcessArgv:
-      return lowering_.builder_.CreateCall(
-          processFunction("tz_process_argv", ptr, {ptr}),
-          {lowering_.typeDescriptors().typeDescriptor(Type::string())});
+      return this->lowering.builder_.CreateCall(
+          this->processFunction("tz_process_argv", ptr, {ptr}),
+          {this->lowering.typeDescriptors().typeDescriptor(Type::string())});
     case Builtin::ProcessEnv: {
-      Lowering::Operand name = lowering_.refCounts().emitOperand(call->args[0], true);
+      Lowering::Operand name = this->lowering.refCounts().emitOperand(call->args[0], true);
       llvm::AllocaInst *value =
-          lowering_.functionFrame().createStackSlot(lowering_.strTy_, "env.value");
-      llvm::Value *found =
-          lowering_.builder_.CreateCall(processFunction("tz_process_env", i32, {ptr, ptr, i64}),
-                                        {value, lowering_.stringLowerer().stringObj(name.value),
-                                         lowering_.stringLowerer().stringMeta(name.value)});
-      lowering_.refCounts().dropOperand(name);
-      return lowering_.optionalLowerer().makeOptional(
-          lowering_.builder_.CreateLoad(lowering_.strTy_, value),
-          lowering_.builder_.CreateICmpNE(found, zero), call->type);
+          this->lowering.functionFrame().createStackSlot(this->lowering.strTy_, "env.value");
+      llvm::Value *found = this->lowering.builder_.CreateCall(
+          this->processFunction("tz_process_env", i32, {ptr, ptr, i64}),
+          {value, this->lowering.stringLowerer().stringObj(name.value),
+           this->lowering.stringLowerer().stringMeta(name.value)});
+      this->lowering.refCounts().dropOperand(name);
+      return this->lowering.optionalLowerer().makeOptional(
+          this->lowering.builder_.CreateLoad(this->lowering.strTy_, value),
+          this->lowering.builder_.CreateICmpNE(found, zero), call->type);
     }
     case Builtin::ProcessExit: {
       auto [code, has] = exitCode();
-      llvm::FunctionCallee exit = processFunction("tz_process_exit", voidTy, {i64, i32});
+      llvm::FunctionCallee exit = this->processFunction("tz_process_exit", voidTy, {i64, i32});
       cast<llvm::Function>(exit.getCallee())->addFnAttr(llvm::Attribute::NoReturn);
-      lowering_.builder_.CreateCall(exit, {code, has})->setDoesNotReturn();
-      lowering_.builder_.CreateUnreachable();
-      lowering_.functionFrame().startDeadBlock();
+      this->lowering.builder_.CreateCall(exit, {code, has})->setDoesNotReturn();
+      this->lowering.builder_.CreateUnreachable();
+      this->lowering.functionFrame().startDeadBlock();
       return nullptr;
     }
     case Builtin::ProcessExitCode: {
-      llvm::AllocaInst *has = lowering_.functionFrame().createStackSlot(i32, "exit.has");
-      llvm::Value *code = lowering_.builder_.CreateSExt(
-          lowering_.builder_.CreateCall(processFunction("tz_process_get_exit_code", i32, {ptr}),
-                                        {has}),
-          lowering_.builder_.getInt64Ty());
-      return lowering_.optionalLowerer().makeOptional(
-          code, lowering_.builder_.CreateICmpNE(lowering_.builder_.CreateLoad(i32, has), zero),
+      llvm::AllocaInst *has = this->lowering.functionFrame().createStackSlot(i32, "exit.has");
+      llvm::Value *code = this->lowering.builder_.CreateSExt(
+          this->lowering.builder_.CreateCall(
+              this->processFunction("tz_process_get_exit_code", i32, {ptr}), {has}),
+          this->lowering.builder_.getInt64Ty());
+      return this->lowering.optionalLowerer().makeOptional(
+          code,
+          this->lowering.builder_.CreateICmpNE(this->lowering.builder_.CreateLoad(i32, has), zero),
           call->type);
     }
     case Builtin::ProcessSetExitCode: {
       auto [code, has] = exitCode();
-      lowering_.builder_.CreateCall(processFunction("tz_process_set_exit_code", voidTy, {i64, i32}),
-                                    {code, has});
+      this->lowering.builder_.CreateCall(
+          this->processFunction("tz_process_set_exit_code", voidTy, {i64, i32}), {code, has});
       return nullptr;
     }
     case Builtin::ProcessCwd:
@@ -110,39 +112,42 @@ llvm::Value *ProcessLowerer::emitProcessBuiltin(CallExpr *call) {
     case Builtin::ProcessStderrWrite: {
       bool toStdout = call->builtin() == Builtin::ProcessStdoutWrite;
       if (const Type *type = call->args[0]->type; type->isBuffer() || type->isBytes()) {
-        Lowering::Operand bytes = lowering_.refCounts().emitOperand(call->args[0], true);
-        lowering_.builder_.CreateCall(
-            processFunction("tz_lib_std_write", lowering_.builder_.getVoidTy(),
-                            {lowering_.builder_.getInt64Ty(), lowering_.builder_.getPtrTy()}),
-            {lowering_.builder_.getInt64(toStdout ? 1 : 2), bytes.value});
-        lowering_.refCounts().dropOperand(bytes);
-        return lowering_.builder_.getTrue();
+        Lowering::Operand bytes = this->lowering.refCounts().emitOperand(call->args[0], true);
+        this->lowering.builder_.CreateCall(
+            this->processFunction(
+                "tz_lib_std_write", this->lowering.builder_.getVoidTy(),
+                {this->lowering.builder_.getInt64Ty(), this->lowering.builder_.getPtrTy()}),
+            {this->lowering.builder_.getInt64(toStdout ? 1 : 2), bytes.value});
+        this->lowering.refCounts().dropOperand(bytes);
+        return this->lowering.builder_.getTrue();
       }
-      Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
-      llvm::Value *written = lowering_.builder_.CreateCall(
-          processFunction(toStdout ? "tz_stdout_write" : "tz_stderr_write", i32, {ptr, i64}),
-          {lowering_.stringLowerer().stringObj(text.value),
-           lowering_.stringLowerer().stringMeta(text.value)});
-      lowering_.refCounts().dropOperand(text);
-      return lowering_.builder_.CreateICmpNE(written, zero);
+      Lowering::Operand text = this->lowering.refCounts().emitOperand(call->args[0], true);
+      llvm::Value *written = this->lowering.builder_.CreateCall(
+          this->processFunction(toStdout ? "tz_stdout_write" : "tz_stderr_write", i32, {ptr, i64}),
+          {this->lowering.stringLowerer().stringObj(text.value),
+           this->lowering.stringLowerer().stringMeta(text.value)});
+      this->lowering.refCounts().dropOperand(text);
+      return this->lowering.builder_.CreateICmpNE(written, zero);
     }
     case Builtin::ProcessIsTTY:
-      return lowering_.builder_.CreateICmpNE(
-          lowering_.builder_.CreateCall(
-              processFunction("tz_is_tty", i32, {lowering_.builder_.getInt64Ty()}),
-              {lowering_.exprLowerer().emitExpr(call->args[0])}),
+      return this->lowering.builder_.CreateICmpNE(
+          this->lowering.builder_.CreateCall(
+              this->processFunction("tz_is_tty", i32, {this->lowering.builder_.getInt64Ty()}),
+              {this->lowering.exprLowerer().emitExpr(call->args[0])}),
           zero);
     case Builtin::DateNow:
-      return lowering_.builder_.CreateCall(
-          processFunction("tz_date_now", lowering_.builder_.getInt64Ty(), {}));
+      return this->lowering.builder_.CreateCall(
+          this->processFunction("tz_date_now", this->lowering.builder_.getInt64Ty(), {}));
     case Builtin::PerformanceNow:
-      return lowering_.builder_.CreateCall(processFunction("tz_performance_now", f64, {}));
+      return this->lowering.builder_.CreateCall(
+          this->processFunction("tz_performance_now", f64, {}));
     case Builtin::ProcessPid:
-      return lowering_.builder_.CreateSExt(
-          lowering_.builder_.CreateCall(processFunction("tz_process_pid", i32, {})), i64);
+      return this->lowering.builder_.CreateSExt(
+          this->lowering.builder_.CreateCall(this->processFunction("tz_process_pid", i32, {})),
+          i64);
     case Builtin::ProcessUptime:
-      return lowering_.builder_.CreateFDiv(
-          lowering_.builder_.CreateCall(processFunction("tz_performance_now", f64, {})),
+      return this->lowering.builder_.CreateFDiv(
+          this->lowering.builder_.CreateCall(this->processFunction("tz_performance_now", f64, {})),
           llvm::ConstantFP::get(f64, 1000.0), "uptime");
     default:
       llvm_unreachable("not a built-in of process");

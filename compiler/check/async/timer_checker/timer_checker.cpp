@@ -243,7 +243,7 @@ const Type *TimerChecker::timerCallType(const Expr *init) const {
   return nullptr;
 }
 
-TimerChecker::ResultNextTickQueued TimerChecker::checkNextTick(CallExpr *call, MemberExpr *member) {
+TimerChecker::ResultNextTickQueued TimerChecker::checkNextTick(CallExpr *call) {
   this->checker.file_->usesAsync = true;
   call->type = Type::error();
   if (call->args.size() > 1) {

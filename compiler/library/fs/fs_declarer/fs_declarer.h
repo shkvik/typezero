@@ -6,7 +6,7 @@ namespace tz {
 
 class FsDeclarer {
 public:
-  explicit FsDeclarer(Checker &checker);
+  explicit FsDeclarer(Checker &owner);
 
   void declareFsClasses();
   Expr *checkFsClassMethod(CallExpr *call, MemberExpr *member, ClassDecl *cls);
@@ -14,7 +14,9 @@ public:
   bool isRuntimeClass(const ClassDecl *cls) const;
 
 private:
-  Checker &checker_;
+  static std::optional<int> fileKind(llvm::StringRef method);
+
+  Checker &checker;
 };
 
 }

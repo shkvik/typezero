@@ -6,14 +6,14 @@ namespace tz {
 
 class MathLowerer {
 public:
-  explicit MathLowerer(Lowering &lowering);
+  explicit MathLowerer(Lowering &owner);
 
   llvm::Value *emitMathCall(CallExpr *call);
   llvm::Value *spillArray(llvm::ArrayRef<llvm::Value *> values, llvm::Type *element);
   llvm::FunctionCallee mathFunction(llvm::StringRef name, unsigned params);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

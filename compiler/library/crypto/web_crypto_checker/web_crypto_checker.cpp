@@ -7,12 +7,7 @@
 #include "compiler/library/crypto/crypto_args/crypto_args.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/Support/ConvertUTF.h"
-#include <functional>
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -43,7 +38,8 @@ const SubtleIntrinsic kSubtleIntrinsics[] = {
 
 }
 
-WebCryptoChecker::WebCryptoChecker(Checker &checker) : checker_(checker) {}
+WebCryptoChecker::WebCryptoChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name,
                                              llvm::StringRef intrinsicName) {
@@ -52,10 +48,10 @@ Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name,
       kSubtleIntrinsics, [&](const SubtleIntrinsic &i) { return i.name == intrinsicName; });
   if (intrinsic == std::end(kSubtleIntrinsics) || call->args.size() != intrinsic->params.size() ||
       call->hasSpread()) {
-    checker_.diags_.error(name->loc(),
-                          "'" + intrinsicName + "' is no intrinsic of tz, or is called wrongly");
+    this->checker.diags_.error(name->loc(), "'" + intrinsicName +
+                                                "' is no intrinsic of tz, or is called wrongly");
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     return call;
   }
@@ -66,34 +62,34 @@ Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name,
     Expr *checked = nullptr;
     switch (intrinsic->params[i]) {
     case 'm':
-      checked = checker_.cryptoArgs().cryptoMd(arg, true);
+      checked = this->checker.cryptoArgs().cryptoMd(arg, true);
       break;
     case 'c':
-      checked = checker_.cryptoArgs().cryptoCipher(arg);
+      checked = this->checker.cryptoArgs().cryptoCipher(arg);
       break;
     case 'd':
-      checked = checker_.cryptoArgs().cryptoData(arg, "data", false, true, true);
+      checked = this->checker.cryptoArgs().cryptoData(arg, "data", false, true, true);
       break;
     case 'o':
-      checked = checker_.cryptoArgs().cryptoKeyObject(arg, "key");
+      checked = this->checker.cryptoArgs().cryptoKeyObject(arg, "key");
       break;
     case 'b':
-      checked = checker_.argumentChecker().checkArg(arg, Type::boolTy());
+      checked = this->checker.argumentChecker().checkArg(arg, Type::boolTy());
       break;
     case 'i':
-      checked = checker_.argumentChecker().checkArg(arg, Type::intTy());
+      checked = this->checker.argumentChecker().checkArg(arg, Type::intTy());
       break;
     case 'f':
-      checked = checker_.argumentChecker().checkArg(arg, Type::doubleTy());
+      checked = this->checker.argumentChecker().checkArg(arg, Type::doubleTy());
       break;
     default:
-      checked = checker_.argumentChecker().checkArg(arg, Type::string());
+      checked = this->checker.argumentChecker().checkArg(arg, Type::string());
       break;
     }
     char kind = intrinsic->params[i];
     if (checked && (kind == 'm' || kind == 'c') && !isa<IntLitExpr>(checked)) {
-      checker_.diags_.error(arg->loc(), "the hash or the cipher of '" + intrinsicName +
-                                            "' is a literal of the direct layer");
+      this->checker.diags_.error(arg->loc(), "the hash or the cipher of '" + intrinsicName +
+                                                 "' is a literal of the direct layer");
       checked = nullptr;
     }
     if (!checked || checked->type->isError()) {
@@ -112,25 +108,25 @@ Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name,
                           ? Type::intTy()
                           : Type::optional(Type::cryptoType(Type::Crypto::KeyObject));
 
-  return checker_.cryptoArgs().cryptoCall(call, intrinsic->fn, std::move(args),
-                                          Type::promise(value));
+  return this->checker.cryptoArgs().cryptoCall(call, intrinsic->fn, std::move(args),
+                                               Type::promise(value));
 }
 
 bool WebCryptoChecker::isSubtleClass(const Type *type, llvm::StringRef name) const {
   const ClassDecl *cls = type ? ClassDeclarer::classOf(type) : nullptr;
 
-  return cls && cls->library() && cls->name == name && cls == checker_.libraryClass(name);
+  return cls && cls->library() && cls->name == name && cls == this->checker.libraryClass(name);
 }
 
 Expr *WebCryptoChecker::subtleObject(MemberExpr *member) {
-  if (!checker_.scopes().lookup(kSubtleName).var()) {
-    checker_.diags_.error(member->loc(), "'crypto.subtle' is not available here");
+  if (!this->checker.scopes().lookup(kSubtleName).var()) {
+    this->checker.diags_.error(member->loc(), "'crypto.subtle' is not available here");
     member->type = Type::error();
     return member;
   }
-  auto *name = checker_.ctx_.make<NameExpr>(member->loc(), kSubtleName);
+  auto *name = this->checker.ctx_.make<NameExpr>(member->loc(), kSubtleName);
 
-  return checker_.exprChecker().checkExpr(name);
+  return this->checker.exprChecker().checkExpr(name);
 }
 
 }

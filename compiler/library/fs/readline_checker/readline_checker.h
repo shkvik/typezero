@@ -6,12 +6,12 @@ namespace tz {
 
 class ReadlineChecker {
 public:
-  explicit ReadlineChecker(Checker &checker);
+  explicit ReadlineChecker(Checker &owner);
 
   Expr *checkReadlineCall(CallExpr *call, NodeModule module, llvm::StringRef fn, llvm::SMLoc loc);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

@@ -72,13 +72,58 @@ namespace tz {
 CallChecker::CallChecker(Checker &owner)
     : checker(owner) {}
 
+CallChecker::ResultTypeArgsAbsent CallChecker::noTypeArgs(const MemberExpr *member) {
+  if (!member->typeArgs.empty()) {
+    std::string message = ErrorTextCallTypeArgs::forGeneric();
+
+    return err(CallCheckerNoTypeArgsError{
+        .code = CallCheckerNoTypeArgsErrorCode::TYPE_ARGUMENTS_GIVEN,
+        .message = message,
+    });
+  }
+
+  return ok(member);
+}
+
+CallChecker::ResultCalleeCallable CallChecker::calleeCallable(const Type *type,
+                                                              const NameExpr *calleeName) {
+  bool optional = type->isOptional() && type->inner()->isFunction();
+  if (optional) {
+    std::string message = ErrorTextCallee::undefined();
+
+    return err(CallCheckerCalleeCallableError{
+        .code = CallCheckerCalleeCallableErrorCode::MAY_BE_UNDEFINED,
+        .message = message,
+    });
+  }
+  if (type->isError()) {
+    return err(CallCheckerCalleeCallableError{
+        .code = CallCheckerCalleeCallableErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
+  }
+  if (!type->isFunction() && calleeName) {
+    std::string message = ErrorTextCallee::notFunc(calleeName->name, type->name());
+
+    return err(CallCheckerCalleeCallableError{
+        .code = CallCheckerCalleeCallableErrorCode::NOT_A_FUNCTION,
+        .message = message,
+    });
+  }
+  if (!type->isFunction()) {
+    std::string message = ErrorTextCallee::uncallable(type->name());
+
+    return err(CallCheckerCalleeCallableError{
+        .code = CallCheckerCalleeCallableErrorCode::NOT_CALLABLE,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
 Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
   call->type = Type::error();
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->checker.exprChecker().checkExpr(arg);
-    }
-  };
   this->checker.argListChecker().expandListSpreads(call->args, call->spread);
   if (auto *index = dyn_cast<IndexExpr>(call->callee); index && !index->optional) {
     if (auto *key = dyn_cast<MemberExpr>(index->index);
@@ -103,12 +148,11 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return this->checker.promiseStaticChecker().checkPromiseStatic(call, member, expected);
     }
     auto rejectTypeArgs = [&] {
-      if (member->typeArgs.empty()) {
-        return;
+      ResultTypeArgsAbsent absent = CallChecker::noTypeArgs(member);
+      if (absent.isErr()) {
+        this->checker.diags_.error(member->loc(), absent.error().message);
+        member->typeArgs.clear();
       }
-      this->checker.diags_.error(member->loc(),
-                                 "type arguments can be given only to a generic function");
-      member->typeArgs.clear();
     };
     if (auto *object = dyn_cast<NameExpr>(member->object);
         !object || !this->checker.scopes().lookup(object->name).cls()) {
@@ -145,7 +189,37 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return made.isOk() ? made.value() : call;
     }
     if (this->isGlobalName(member->object, "Object")) {
-      return this->checker.objectChecker().checkObjectCall(call, member, expected);
+      ObjectChecker::ResultObjectStaticCall objectCall =
+          this->checker.objectChecker().checkObjectCall(call, member, expected);
+      if (objectCall.isOk()) {
+        return objectCall.value();
+      }
+      llvm::SMLoc at = call->args.empty() ? member->loc() : call->args[0]->loc();
+      switch (objectCall.error().code) {
+        case ObjectCheckerCheckObjectCallErrorCode::ALREADY_REPORTED:
+          return call;
+        case ObjectCheckerCheckObjectCallErrorCode::GROUP_BY_ARITY:
+        case ObjectCheckerCheckObjectCallErrorCode::FROM_ENTRIES_ARITY:
+        case ObjectCheckerCheckObjectCallErrorCode::NOT_SUPPORTED:
+        case ObjectCheckerCheckObjectCallErrorCode::WRONG_ARITY:
+          at = member->loc();
+          break;
+        case ObjectCheckerCheckObjectCallErrorCode::GROUP_BY_KEY:
+          at = call->args[1]->loc();
+          break;
+        case ObjectCheckerCheckObjectCallErrorCode::FROM_ENTRIES_PAIRS:
+        case ObjectCheckerCheckObjectCallErrorCode::MAY_BE_UNDEFINED:
+        case ObjectCheckerCheckObjectCallErrorCode::DICT_ALWAYS_EMPTY:
+        case ObjectCheckerCheckObjectCallErrorCode::NOT_AN_OBJECT:
+        case ObjectCheckerCheckObjectCallErrorCode::EMITTER_FIELDS:
+        case ObjectCheckerCheckObjectCallErrorCode::METHOD_FIELDS:
+        case ObjectCheckerCheckObjectCallErrorCode::NO_COMMON_TYPE:
+        case ObjectCheckerCheckObjectCallErrorCode::NO_FIELDS:
+        case ObjectCheckerCheckObjectCallErrorCode::NUMERIC_ENUM:
+          break;
+      }
+      this->checker.diags_.error(at, objectCall.error().message);
+      return call;
     }
     auto *object = dyn_cast<NameExpr>(member->object);
     if (ClassDecl *cls = object ? this->checker.scopes().lookup(object->name).cls() : nullptr) {
@@ -155,13 +229,47 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       this->checker.thisMember_ = member->name;
     }
     if (this->isGlobalName(member->object, "Iterator")) {
-      return this->checker.iteratorMethods().checkIteratorFrom(call, member);
+      IteratorMethods::ResultIteratorFromCall from =
+          this->checker.iteratorMethods().checkIteratorFrom(call, member);
+      if (from.isOk()) {
+        return from.value();
+      }
+      llvm::SMLoc at = member->loc();
+      switch (from.error().code) {
+        case IteratorMethodsCheckIteratorFromErrorCode::ALREADY_REPORTED:
+          return call;
+        case IteratorMethodsCheckIteratorFromErrorCode::NOT_ITERABLE:
+          at = call->args[0]->loc();
+          break;
+        case IteratorMethodsCheckIteratorFromErrorCode::NOT_SUPPORTED:
+        case IteratorMethodsCheckIteratorFromErrorCode::WRONG_ARITY:
+          break;
+      }
+      this->checker.diags_.error(at, from.error().message);
+      return call;
     }
     if (this->isGlobalName(member->object, "Array")) {
       return this->checker.iteratorMethods().checkArrayFrom(call, member);
     }
     if (this->isGlobalName(member->object, "Map")) {
-      return this->checker.dictMethods().checkMapStatic(call, member);
+      DictMethods::ResultMapFunctionTyped mapped =
+          this->checker.dictMethods().checkMapStatic(call, member);
+      if (mapped.isOk()) {
+        return mapped.value();
+      }
+      llvm::SMLoc at = member->loc();
+      switch (mapped.error().code) {
+        case DictMethodsCheckMapStaticErrorCode::ALREADY_REPORTED:
+          return call;
+        case DictMethodsCheckMapStaticErrorCode::WRONG_GROUP_KEY:
+          at = call->args[1]->loc();
+          break;
+        case DictMethodsCheckMapStaticErrorCode::WRONG_ARITY:
+        case DictMethodsCheckMapStaticErrorCode::NOT_SUPPORTED:
+          break;
+      }
+      this->checker.diags_.error(at, mapped.error().message);
+      return call;
     }
     static const llvm::StringLiteral consumers[] = {"toArray", "forEach", "reduce",
                                                     "some",    "every",   "find"};
@@ -263,7 +371,12 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       const Type *common = this->checker.unionChecker().commonBaseWith(receiver, member->name);
       if (!common) {
         rejectTypeArgs();
-        return this->checker.unionChecker().checkUnionMethodCall(call, member);
+        UnionChecker::ResultUnionMethodTyped unionCall =
+            this->checker.unionChecker().checkUnionMethodCall(call, member);
+        if (unionCall.isErr()) {
+          this->checker.diags_.error(member->loc(), unionCall.error().message);
+        }
+        return unionCall.isOk() ? unionCall.value() : call;
       }
       member->object = this->checker.typeRelations().convert(member->object, common);
       receiver = common;
@@ -306,7 +419,15 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       receiver = copy->type;
     }
     if (receiver->isObject()) {
-      return this->checker.objectChecker().checkFieldCall(call, member);
+      ObjectChecker::ResultFieldCallIsTyped fieldCall =
+          this->checker.objectChecker().checkFieldCall(call, member);
+      if (fieldCall.isOk()) {
+        return fieldCall.value();
+      }
+      bool takesThis = fieldCall.error().code == ObjectCheckerCheckFieldCallErrorCode::TAKES_THIS;
+      llvm::SMLoc at = takesThis ? call->callee->loc() : member->loc();
+      this->checker.diags_.error(at, fieldCall.error().message);
+      return call;
     }
     if (!(receiver->isArray() && member->name == "push") && this->rejectSpread(call)) {
       return call;
@@ -320,13 +441,42 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return this->checker.iteratorMethods().checkIteratorMethod(call, member);
     }
     if (receiver->isDict()) {
-      return this->checker.dictMethods().checkDictMethod(call, member);
+      DictMethods::ResultDictMethodCalled method =
+          this->checker.dictMethods().checkDictMethod(call, member);
+      if (method.isOk()) {
+        return method.value();
+      }
+      llvm::SMLoc at = member->loc();
+      switch (method.error().code) {
+        case DictMethodsCheckDictMethodErrorCode::ALREADY_REPORTED:
+          return call;
+        case DictMethodsCheckDictMethodErrorCode::FOR_EACH_THIS:
+          at = call->args[1]->loc();
+          break;
+        case DictMethodsCheckDictMethodErrorCode::NOT_A_SET:
+          at = call->args[0]->loc();
+          break;
+        case DictMethodsCheckDictMethodErrorCode::HAS_OWN_PROPERTY:
+        case DictMethodsCheckDictMethodErrorCode::MAY_BE_UNDEFINED:
+        case DictMethodsCheckDictMethodErrorCode::NO_RECORD_METHODS:
+        case DictMethodsCheckDictMethodErrorCode::WRONG_ARITY:
+        case DictMethodsCheckDictMethodErrorCode::NO_SUCH_PROPERTY:
+          break;
+      }
+      this->checker.diags_.error(at, method.error().message);
+      return call;
     }
     if (receiver->isString()) {
       return this->checker.stringMethods().checkStringMethod(call, member);
     }
     if (receiver->isArray()) {
-      return this->checker.arrayMethods().checkArrayMethod(call, member, expected);
+      ArrayMethods::ResultArrayMethodCall arrayCall =
+          this->checker.arrayMethods().checkArrayMethod(call, member, expected);
+      if (arrayCall.isErr()) {
+        this->checker.diags_.error(member->loc(), arrayCall.error().message);
+        return call;
+      }
+      return arrayCall.value();
     }
     if (receiver->isNumeric()) {
       NumberMethods::ResultMethodCallMade made =
@@ -343,23 +493,18 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       call->type = Type::string();
       return call;
     }
+    bool setsThis = member->name == "call" || member->name == "apply" || member->name == "bind";
     if (receiver->isOptional()) {
-      this->checker.diags_.error(member->object->loc(),
-                                 "the value may be undefined; check it before calling '" +
-                                     member->name + "'");
-    } else if (receiver->isFunction() &&
-               (member->name == "call" || member->name == "apply" || member->name == "bind")) {
-      this->checker.diags_.error(member->loc(), "'" + member->name +
-                                                    "' is not supported: it sets 'this', and a "
-                                                    "method taken as a value is bound to its "
-                                                    "object already; call the function "
-                                                    "directly");
+      std::string message = ErrorTextCallMethod::undefined(member->name);
+      this->checker.diags_.error(member->object->loc(), message);
+    } else if (receiver->isFunction() && setsThis) {
+      std::string message = ErrorTextCallMethod::setsThis(member->name);
+      this->checker.diags_.error(member->loc(), message);
     } else if (!receiver->isError()) {
-      this->checker.diags_.error(member->loc(), "property '" + member->name +
-                                                    "' does not exist on type '" +
-                                                    receiver->name() + "'");
+      std::string message = ErrorTextCallMethod::noProperty(member->name, receiver->name());
+      this->checker.diags_.error(member->loc(), message);
     }
-    checkArgsLoosely();
+    this->checker.argumentChecker().checkArgsLoosely(call);
     return call;
   }
 
@@ -438,12 +583,15 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return this->checker.newChecker().checkNew(made, expected);
     }
     if (!entry.var() && !entry.func()) {
-      if (const char *why = !entry.cls() ? whyUnsupported(name->name) : nullptr) {
-        this->checker.diags_.error(name->loc(), "'" + name->name + "' is not supported: " + why);
+      std::string why = !entry.cls() ? ErrorTextUnsupported::why(name->name) : std::string();
+      if (!why.empty()) {
+        std::string message = ErrorTextCallName::noSupport(name->name, why);
+        this->checker.diags_.error(name->loc(), message);
       } else if (!this->checker.nameChecker().checkName(name)->type->isError()) {
-        this->checker.diags_.error(name->loc(), "'" + name->name + "' is not a function");
+        std::string message = ErrorTextCallName::notFunc(name->name);
+        this->checker.diags_.error(name->loc(), message);
       }
-      checkArgsLoosely();
+      this->checker.argumentChecker().checkArgsLoosely(call);
       return call;
     }
   }
@@ -453,29 +601,37 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
   if (call->optional) {
     call->callee = this->checker.exprChecker().chainLink(call->callee);
   }
-  const Type *type = call->callee->type;
-  if (type->isFunction()) {
-    Expr *checked = this->checkValueCall(call, type);
+  ResultCalleeCallable callable = CallChecker::calleeCallable(call->callee->type, calleeName);
+  if (callable.isOk()) {
+    ResultValueCallTyped valued = this->checkValueCall(call, callable.value());
+    if (valued.isErr()) {
+      this->checker.diags_.error(call->callee->loc(), valued.error().message);
+    }
     if (calleeName && calleeName->var() && !this->checker.streamCallbacks_.empty()) {
       this->checker.chunkTypes().noteStreamCallback(call, calleeName->var());
     }
-    return checked;
+    return valued.isOk() ? valued.value() : call;
   }
-  if (type->isOptional() && type->inner()->isFunction()) {
-    this->checker.diags_.error(call->callee->loc(),
-                               "the function may be undefined; check it first, or call it with "
-                               "'?.()', which gives undefined then");
-  } else if (calleeName && !type->isError()) {
-    this->checker.diags_.error(call->callee->loc(), "'" + calleeName->name +
-                                                        "' is not a function; it has type '" +
-                                                        type->name() + "'");
-  } else if (!type->isError()) {
-    this->checker.diags_.error(call->callee->loc(),
-                               "a value of type '" + type->name() + "' cannot be called");
+  if (callable.error().code != CallCheckerCalleeCallableErrorCode::ALREADY_REPORTED) {
+    this->checker.diags_.error(call->callee->loc(), callable.error().message);
   }
-  checkArgsLoosely();
+  this->checker.argumentChecker().checkArgsLoosely(call);
 
   return call;
+}
+
+CallChecker::ResultTypeArgsUsable CallChecker::directTypeArgs(const FuncSymbol *func,
+                                                              llvm::ArrayRef<TypeRef> typeArgs) {
+  if (!typeArgs.empty()) {
+    std::string message = ErrorTextCallTypeArgs::notGeneric(func->name);
+
+    return err(CallCheckerDirectTypeArgsError{
+        .code = CallCheckerDirectTypeArgsErrorCode::NOT_GENERIC,
+        .message = message,
+    });
+  }
+
+  return ok(func);
 }
 
 Expr *CallChecker::checkDirectCall(CallExpr *call, FuncSymbol *func, llvm::SMLoc loc,
@@ -486,9 +642,9 @@ Expr *CallChecker::checkDirectCall(CallExpr *call, FuncSymbol *func, llvm::SMLoc
   if (func->isGeneric()) {
     return this->checker.typeArgInferrer().checkGenericCall(call, func, loc, expected, typeArgs);
   }
-  if (!typeArgs.empty()) {
-    this->checker.diags_.error(loc, "'" + func->name +
-                                        "' is not a generic function; remove the type arguments");
+  ResultTypeArgsUsable usable = CallChecker::directTypeArgs(func, typeArgs);
+  if (usable.isErr()) {
+    this->checker.diags_.error(loc, usable.error().message);
   }
   this->checker.returnInferrer().resolveParams(func);
   call->target = FunctionCall{.func = func};
@@ -498,34 +654,44 @@ Expr *CallChecker::checkDirectCall(CallExpr *call, FuncSymbol *func, llvm::SMLoc
                                                         func->hasRest, loc);
 }
 
-Expr *CallChecker::checkValueCall(CallExpr *call, const Type *type) {
+CallChecker::ResultValueCallTyped CallChecker::checkValueCall(CallExpr *call, const Type *type) {
   call->type = type->ret();
   if (type->hasThis()) {
-    this->checker.diags_.error(call->callee->loc(),
-                               "the function takes its 'this' first, which a plain call "
-                               "does not pass; call it with '.call(obj, ...)' or "
-                               "'.apply(obj, args)'");
-    for (Expr *&arg : call->args) {
-      arg = this->checker.exprChecker().checkExpr(arg);
-    }
-    return call;
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    std::string message = ErrorTextValueCall::takesThis();
+
+    return err(CallCheckerCheckValueCallError{
+        .code = CallCheckerCheckValueCallErrorCode::TAKES_THIS,
+        .message = message,
+    });
+  }
+  Expr *checked = this->checker.argumentChecker().checkArguments(
+      call, type->params(), type->minArgs(), type->hasRest(), call->callee->loc());
+
+  return ok(checked);
+}
+
+CallChecker::ResultNoSpreadPassed CallChecker::spreadFree(const CallExpr *call, size_t i) {
+  if (call->spreads(i)) {
+    std::string message = ErrorTextSpread::notRest();
+
+    return err(CallCheckerSpreadFreeError{
+        .code = CallCheckerSpreadFreeErrorCode::SPREAD_ARGUMENT,
+        .message = message,
+    });
   }
 
-  return this->checker.argumentChecker().checkArguments(call, type->params(), type->minArgs(),
-                                                        type->hasRest(), call->callee->loc());
+  return ok(call);
 }
 
 bool CallChecker::rejectSpread(CallExpr *call) {
   for (size_t i = 0; i < call->args.size(); ++i) {
-    if (!call->spreads(i)) {
+    ResultNoSpreadPassed plain = CallChecker::spreadFree(call, i);
+    if (plain.isOk()) {
       continue;
     }
-    this->checker.diags_.error(call->args[i]->loc(),
-                               "a spread argument can only be passed to a rest parameter, "
-                               "Math.min, Math.max or push");
-    for (Expr *&arg : call->args) {
-      arg = this->checker.exprChecker().checkExpr(arg);
-    }
+    this->checker.diags_.error(call->args[i]->loc(), plain.error().message);
+    this->checker.argumentChecker().checkArgsLoosely(call);
     call->type = Type::error();
 
     return true;

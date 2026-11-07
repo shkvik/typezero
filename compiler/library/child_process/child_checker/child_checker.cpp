@@ -17,9 +17,7 @@ using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::string utf8(const std::u16string &text) {
+std::string ChildChecker::utf8(const std::u16string &text) {
   std::string out;
   llvm::convertUTF16ToUTF8String(
       llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
@@ -28,9 +26,11 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-const Type *bufferType() { return Type::bytesType(Type::Bytes::Buffer); }
+const Type *ChildChecker::bufferType() {
+  return Type::bytesType(Type::Bytes::Buffer);
+}
 
-bool knownSignal(llvm::StringRef name) {
+bool ChildChecker::knownSignal(llvm::StringRef name) {
   static const llvm::StringLiteral windows[] = {"SIGHUP",  "SIGINT",   "SIGQUIT", "SIGILL",
                                                 "SIGABRT", "SIGFPE",   "SIGKILL", "SIGSEGV",
                                                 "SIGTERM", "SIGBREAK", "SIGWINCH"};
@@ -47,59 +47,59 @@ bool knownSignal(llvm::StringRef name) {
   return llvm::is_contained(posix, name);
 }
 
-bool hasZero(const Expr *expr) {
+bool ChildChecker::hasZero(const Expr *expr) {
   auto *lit = llvm::dyn_cast_or_null<StringLitExpr>(expr);
 
   return lit && lit->value.find(u'\0') != std::u16string::npos;
 }
 
-}
-
-ChildChecker::ChildChecker(Checker &checker) : checker_(checker) {}
+ChildChecker::ChildChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   call->type = Type::error();
   if (fn != "spawnSync" && fn != "execFileSync" && fn != "execSync") {
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     return call;
   }
   bool exec = fn == "execSync";
-  bool rejected = checker_.callChecker().rejectSpread(call);
+  bool rejected = this->checker.callChecker().rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 1, exec ? 2 : 3);
+      rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 1, exec ? 2 : 3);
   if (arity.isErr()) {
-    checker_.diags_.error(loc, arity.error().message);
+    this->checker.diags_.error(loc, arity.error().message);
   }
   if (rejected || arity.isErr()) {
     return call;
   }
   const Type *string = Type::string();
   auto intLit = [&](uint64_t value) {
-    auto *lit = checker_.ctx_.make<IntLitExpr>(loc, value);
+    auto *lit = this->checker.ctx_.make<IntLitExpr>(loc, value);
     lit->type = Type::intTy();
 
     return lit;
   };
   auto absent = [&](const Type *type) {
-    auto *none = checker_.ctx_.make<UndefinedExpr>(loc);
+    auto *none = this->checker.ctx_.make<UndefinedExpr>(loc);
     none->type = Type::undefinedTy();
 
-    return checker_.typeRelations().convert(none, Type::optional(type));
+    return this->checker.typeRelations().convert(none, Type::optional(type));
   };
 
   std::vector<Expr *> args(ChildArgCount, nullptr);
-  args[ChildFile] = call->args[0] = checker_.argumentChecker().checkArg(call->args[0], string);
+  args[ChildFile] = call->args[0] = this->checker.argumentChecker().checkArg(call->args[0], string);
   bool failed = false;
-  if (hasZero(call->args[0])) {
-    checker_.diags_.error(call->args[0]->loc(), "could not run it: the " +
-                                                    std::string(exec ? "command" : "program name") +
-                                                    " has a zero character in it");
+  if (ChildChecker::hasZero(call->args[0])) {
+    this->checker.diags_.error(call->args[0]->loc(),
+                               "could not run it: the " +
+                                   std::string(exec ? "command" : "program name") +
+                                   " has a zero character in it");
     failed = true;
   } else if (auto *lit = dyn_cast<StringLitExpr>(call->args[0]);
              lit && lit->value.empty() && !exec) {
-    checker_.diags_.error(call->args[0]->loc(), "could not run a program: its name is empty");
+    this->checker.diags_.error(call->args[0]->loc(), "could not run a program: its name is empty");
     failed = true;
   }
   size_t optionsAt = 1;
@@ -107,26 +107,26 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     if (!isa<UndefinedExpr>(call->args[1])) {
       if (auto *list = dyn_cast<ArrayLitExpr>(call->args[1])) {
         for (size_t i = 0; i < list->elements.size(); ++i) {
-          if (!list->elements[i].spread && hasZero(list->elements[i].expr)) {
-            checker_.diags_.error(list->elements[i].expr->loc(),
-                                  "could not run it: args[" + std::to_string(i) +
-                                      "] has a zero character in it");
+          if (!list->elements[i].spread && ChildChecker::hasZero(list->elements[i].expr)) {
+            this->checker.diags_.error(list->elements[i].expr->loc(),
+                                       "could not run it: args[" + std::to_string(i) +
+                                           "] has a zero character in it");
             failed = true;
           }
         }
       }
       args[ChildArgs] = call->args[1] =
-          checker_.argumentChecker().checkArg(call->args[1], Type::array(string));
+          this->checker.argumentChecker().checkArg(call->args[1], Type::array(string));
     }
     optionsAt = 2;
   } else if (!exec && call->args.size() > 2) {
-    checker_.diags_.error(call->args[2]->loc(), "the options of '" + fn +
-                                                    "' come after its arguments, e.g. '" + fn +
-                                                    "(file, [\"--version\"], { cwd })'");
+    this->checker.diags_.error(call->args[2]->loc(), "the options of '" + fn +
+                                                         "' come after its arguments, e.g. '" + fn +
+                                                         "(file, [\"--version\"], { cwd })'");
     return call;
   }
   if (!args[ChildArgs]) {
-    auto *none = checker_.ctx_.make<ArrayLitExpr>(loc);
+    auto *none = this->checker.ctx_.make<ArrayLitExpr>(loc);
     none->type = Type::array(string);
     args[ChildArgs] = none;
   }
@@ -147,7 +147,7 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
                                             "argv0",
                                             "uid",
                                             "gid"};
-  if (!checker_.fsChecker().nodeOptions(call, optionsAt, fn, allowed, options)) {
+  if (!this->checker.fsChecker().nodeOptions(call, optionsAt, fn, allowed, options)) {
     return call;
   }
 
@@ -155,15 +155,15 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   if (Expr *value = options.lookup("encoding"); value && !isa<UndefinedExpr>(value)) {
     auto *lit = dyn_cast<StringLitExpr>(value);
     if (!lit) {
-      checker_.diags_.error(value->loc(),
-                            "the option 'encoding' of '" + fn +
-                                "' is written as a literal, e.g. 'utf8': it decides whether "
-                                "the output is a string or a Buffer");
-      checker_.exprChecker().checkExpr(value);
+      this->checker.diags_.error(value->loc(),
+                                 "the option 'encoding' of '" + fn +
+                                     "' is written as a literal, e.g. 'utf8': it decides whether "
+                                     "the output is a string or a Buffer");
+      this->checker.exprChecker().checkExpr(value);
       failed = true;
     } else if (lit->value != u"buffer") {
       lit->type = string;
-      Expr *number = checker_.bytesChecker().checkBufferEncoding(lit);
+      Expr *number = this->checker.bytesChecker().checkBufferEncoding(lit);
       if (number->type->isError()) {
         failed = true;
       } else {
@@ -182,21 +182,22 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
       if (auto *n = dyn_cast<IntLitExpr>(e)) {
         n->type = Type::intTy();
         if (n->value > 0x7fffffff) {
-          checker_.diags_.error(e->loc(),
-                                "there is no file descriptor " + std::to_string(n->value));
+          this->checker.diags_.error(e->loc(),
+                                     "there is no file descriptor " + std::to_string(n->value));
           return std::nullopt;
         }
         return ChildInherit + unsigned(n->value);
       }
       auto *lit = dyn_cast<StringLitExpr>(e);
       if (!lit) {
-        checker_.diags_.error(e->loc(), "each stream of 'stdio' is written as a literal: \"pipe\", "
-                                        "\"inherit\", \"ignore\" or a file descriptor such as 2");
-        checker_.exprChecker().checkExpr(e);
+        this->checker.diags_.error(e->loc(),
+                                   "each stream of 'stdio' is written as a literal: \"pipe\", "
+                                   "\"inherit\", \"ignore\" or a file descriptor such as 2");
+        this->checker.exprChecker().checkExpr(e);
         return std::nullopt;
       }
       lit->type = string;
-      std::string text = utf8(lit->value);
+      std::string text = ChildChecker::utf8(lit->value);
       if (text == "pipe" || text == "overlapped") {
         return ChildPipe;
       }
@@ -207,21 +208,21 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
         return ChildIgnore;
       }
       if (text == "ipc") {
-        checker_.diags_.error(e->loc(),
-                              "'ipc' is the channel to another Node that fork starts, which tz "
-                              "does not have (docs/process.md, section 4)");
+        this->checker.diags_.error(
+            e->loc(), "'ipc' is the channel to another Node that fork starts, which tz "
+                      "does not have (docs/process.md, section 4)");
       } else {
-        checker_.diags_.error(e->loc(),
-                              "unknown stdio '" + text +
-                                  "'; a stream is \"pipe\", \"inherit\", \"ignore\" or a file "
-                                  "descriptor such as 2");
+        this->checker.diags_.error(e->loc(),
+                                   "unknown stdio '" + text +
+                                       "'; a stream is \"pipe\", \"inherit\", \"ignore\" or a file "
+                                       "descriptor such as 2");
       }
 
       return std::nullopt;
     };
     if (auto *list = dyn_cast<ArrayLitExpr>(value)) {
       if (list->elements.size() > 3) {
-        checker_.diags_.error(
+        this->checker.diags_.error(
             list->elements[3].expr->loc(),
             "only stdin, stdout and stderr are supported in 'stdio'; more streams come "
             "with the async functions (docs/process.md, step 2)");
@@ -231,7 +232,8 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
         const ArrayLitExpr::Element &element = list->elements[i];
         std::optional<unsigned> k = element.spread ? std::nullopt : kind(element.expr, unsigned(i));
         if (element.spread) {
-          checker_.diags_.error(element.expr->loc(), "write each stream of 'stdio' in the literal");
+          this->checker.diags_.error(element.expr->loc(),
+                                     "write each stream of 'stdio' in the literal");
         }
         if (!k) {
           failed = true;
@@ -249,12 +251,12 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
         stdio[i] = *k;
       }
     } else {
-      checker_.diags_.error(value->loc(),
-                            "the option 'stdio' of '" + fn +
-                                "' is written as a literal, e.g. \"inherit\" or [\"pipe\", "
-                                "\"inherit\", \"pipe\"]: whether there is output depends "
-                                "on it");
-      checker_.exprChecker().checkExpr(value);
+      this->checker.diags_.error(value->loc(),
+                                 "the option 'stdio' of '" + fn +
+                                     "' is written as a literal, e.g. \"inherit\" or [\"pipe\", "
+                                     "\"inherit\", \"pipe\"]: whether there is output depends "
+                                     "on it");
+      this->checker.exprChecker().checkExpr(value);
       failed = true;
     }
   }
@@ -262,11 +264,12 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   auto option = [&](llvm::StringRef name, const Type *type) {
     Expr *value = options.lookup(name);
 
-    return value ? checker_.argumentChecker().checkArg(value, Type::optional(type)) : absent(type);
+    return value ? this->checker.argumentChecker().checkArg(value, Type::optional(type))
+                 : absent(type);
   };
-  if (hasZero(options.lookup("cwd"))) {
-    checker_.diags_.error(options.lookup("cwd")->loc(),
-                          "could not run it: cwd has a zero character in it");
+  if (ChildChecker::hasZero(options.lookup("cwd"))) {
+    this->checker.diags_.error(options.lookup("cwd")->loc(),
+                               "could not run it: cwd has a zero character in it");
     failed = true;
   }
   for (llvm::StringRef limit : {"timeout", "maxBuffer"}) {
@@ -274,25 +277,25 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     auto *unary = value ? dyn_cast<UnaryExpr>(value) : nullptr;
     if (unary && unary->op == UnaryOp::Neg &&
         (isa<IntLitExpr>(unary->operand) || isa<FloatLitExpr>(unary->operand))) {
-      checker_.diags_.error(value->loc(),
-                            "could not run it: " + limit.str() + " must be 0 or more");
+      this->checker.diags_.error(value->loc(),
+                                 "could not run it: " + limit.str() + " must be 0 or more");
       failed = true;
     }
   }
   if (targetIsWindows()) {
     for (llvm::StringRef id : {"uid", "gid"}) {
       if (Expr *value = options.lookup(id); value && !isa<UndefinedExpr>(value)) {
-        checker_.diags_.error(value->loc(), "'" + id.str() +
-                                                "' works only on Linux and macOS: Windows has "
-                                                "no user and group numbers");
+        this->checker.diags_.error(value->loc(), "'" + id.str() +
+                                                     "' works only on Linux and macOS: Windows has "
+                                                     "no user and group numbers");
         failed = true;
       }
     }
   }
   if (auto *lit = dyn_cast_or_null<StringLitExpr>(options.lookup("killSignal"));
-      lit && !knownSignal(utf8(lit->value))) {
-    checker_.diags_.error(lit->loc(), "could not run it: there is no signal " + utf8(lit->value) +
-                                          " (killSignal)");
+      lit && !ChildChecker::knownSignal(ChildChecker::utf8(lit->value))) {
+    this->checker.diags_.error(lit->loc(), "could not run it: there is no signal " +
+                                               ChildChecker::utf8(lit->value) + " (killSignal)");
     failed = true;
   }
   args[ChildCwd] = option("cwd", string);
@@ -307,28 +310,28 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   args[ChildGid] = option("gid", Type::intTy());
 
   if (Expr *value = options.lookup("input")) {
-    Expr *input = checker_.exprChecker().checkExpr(value, string);
+    Expr *input = this->checker.exprChecker().checkExpr(value, string);
     const Type *t = input->type->nonOptional();
     if (t->isStringLiteral()) {
-      input = checker_.typeRelations().coerce(input, string);
+      input = this->checker.typeRelations().coerce(input, string);
     }
     t = input->type->nonOptional();
     if (t->isString() || t->isByteView()) {
-      args[ChildInput] = checker_.typeRelations().coerce(input, Type::optional(t));
+      args[ChildInput] = this->checker.typeRelations().coerce(input, Type::optional(t));
       if (t->isString() && encoding == ChildBytes && options.lookup("encoding") &&
           !isa<UndefinedExpr>(options.lookup("encoding"))) {
-        checker_.diags_.error(input->loc(),
-                              "text input with the encoding 'buffer' is a TypeError in Node "
-                              "(Unknown encoding: buffer); pass its bytes, "
-                              "'Buffer.from(text)', or drop the encoding");
+        this->checker.diags_.error(input->loc(),
+                                   "text input with the encoding 'buffer' is a TypeError in Node "
+                                   "(Unknown encoding: buffer); pass its bytes, "
+                                   "'Buffer.from(text)', or drop the encoding");
         failed = true;
       }
     } else if (!t->isError()) {
-      checker_.diags_.error(input->loc(),
-                            "'input' of '" + fn +
-                                "' is the text or the bytes the program reads (a string, a "
-                                "Buffer or a Uint8Array); found '" +
-                                input->type->name() + "'");
+      this->checker.diags_.error(input->loc(),
+                                 "'input' of '" + fn +
+                                     "' is the text or the bytes the program reads (a string, a "
+                                     "Buffer or a Uint8Array); found '" +
+                                     input->type->name() + "'");
       failed = true;
     } else {
       failed = true;
@@ -337,19 +340,19 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     args[ChildInput] = absent(string);
   }
   if (Expr *value = options.lookup("killSignal")) {
-    Expr *signal = checker_.exprChecker().checkExpr(value, string);
+    Expr *signal = this->checker.exprChecker().checkExpr(value, string);
     const Type *t = signal->type->nonOptional();
     if (t->isStringLiteral() || t->isString()) {
-      args[ChildKillSignal] = checker_.typeRelations().coerce(signal, Type::optional(string));
+      args[ChildKillSignal] = this->checker.typeRelations().coerce(signal, Type::optional(string));
     } else if (t->isInt() || (t->isLiteral() && t->literalBase()->isInt())) {
       args[ChildKillSignal] =
-          checker_.typeRelations().coerce(signal, Type::optional(Type::intTy()));
+          this->checker.typeRelations().coerce(signal, Type::optional(Type::intTy()));
     } else {
       if (!t->isError()) {
-        checker_.diags_.error(signal->loc(),
-                              "'killSignal' is the name of a signal, e.g. \"SIGKILL\", or "
-                              "its number; found '" +
-                                  signal->type->name() + "'");
+        this->checker.diags_.error(signal->loc(),
+                                   "'killSignal' is the name of a signal, e.g. \"SIGKILL\", or "
+                                   "its number; found '" +
+                                       signal->type->name() + "'");
       }
       failed = true;
     }
@@ -361,35 +364,36 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     if (auto *lit = dyn_cast<BoolLitExpr>(value)) {
       viaShell = viaShell || lit->value;
     }
-    Expr *shell = checker_.exprChecker().checkExpr(value, string);
+    Expr *shell = this->checker.exprChecker().checkExpr(value, string);
     const Type *t = shell->type->nonOptional();
     bool isBool = t->isBool() || (t->isLiteral() && t->literalBase()->isBool());
     if (t->isStringLiteral() || t->isString()) {
       viaShell = true;
-      args[ChildShell] = checker_.typeRelations().coerce(shell, Type::optional(string));
+      args[ChildShell] = this->checker.typeRelations().coerce(shell, Type::optional(string));
     } else if (isBool && exec) {
       if (auto *lit = dyn_cast<BoolLitExpr>(shell); lit && lit->value) {
         args[ChildShell] = absent(string);
       } else {
-        checker_.diags_.error(shell->loc(),
-                              "'execSync' always runs the command through a shell; "
-                              "'shell' may name another one, e.g. shell: \"powershell.exe\", "
-                              "and to run a program without one, use 'execFileSync'");
+        this->checker.diags_.error(shell->loc(),
+                                   "'execSync' always runs the command through a shell; "
+                                   "'shell' may name another one, e.g. shell: \"powershell.exe\", "
+                                   "and to run a program without one, use 'execFileSync'");
         failed = true;
       }
     } else if (isBool && !isa<BoolLitExpr>(value)) {
-      checker_.diags_.error(shell->loc(),
-                            "the option 'shell' of '" + fn +
-                                "' is written as a literal, true or false: what can go wrong, "
-                                "and so the type of the error, depends on it");
+      this->checker.diags_.error(shell->loc(),
+                                 "the option 'shell' of '" + fn +
+                                     "' is written as a literal, true or false: what can go wrong, "
+                                     "and so the type of the error, depends on it");
       failed = true;
     } else if (isBool) {
-      args[ChildShell] = checker_.typeRelations().coerce(shell, Type::optional(Type::boolTy()));
+      args[ChildShell] =
+          this->checker.typeRelations().coerce(shell, Type::optional(Type::boolTy()));
     } else {
       if (!t->isError()) {
-        checker_.diags_.error(shell->loc(),
-                              "'shell' is true, false or the path of a shell; found '" +
-                                  shell->type->name() + "'");
+        this->checker.diags_.error(shell->loc(),
+                                   "'shell' is true, false or the path of a shell; found '" +
+                                       shell->type->name() + "'");
       }
       failed = true;
     }
@@ -409,12 +413,12 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   call->spread.clear();
 
   bool textOutput = encoding != ChildBytes;
-  const Type *text = textOutput ? string : bufferType();
-  const Type *failure = checker_.childErrorTypes().errorOf(fn, textOutput, viaShell);
+  const Type *text = textOutput ? string : ChildChecker::bufferType();
+  const Type *failure = this->checker.childErrorTypes().errorOf(fn, textOutput, viaShell);
   auto output = [&](unsigned i) { return stdio[i] == ChildPipe ? text : Type::optional(text); };
   if (fn == "spawnSync") {
     call->target = BuiltinCall{.builtin = Builtin::ChildSpawnSync};
-    call->type = Type::result(checker_.childErrorTypes().spawnResult(textOutput), failure);
+    call->type = Type::result(this->checker.childErrorTypes().spawnResult(textOutput), failure);
   } else {
     call->target =
         BuiltinCall{.builtin = exec ? Builtin::ChildExecSync : Builtin::ChildExecFileSync};

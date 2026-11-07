@@ -114,7 +114,12 @@ void SwitchChecker::checkSwitch(SwitchStmt *stmt) {
     c.test = this->checker.exprChecker().checkExpr(c.test, hint);
     if (auto *typeOf = dyn_cast<UnaryExpr>(stmt->discriminant);
         typeOf && typeOf->op == UnaryOp::TypeOf && isa<StringLitExpr>(c.test)) {
-      this->checker.binaryChecker().checkTypeOfName(typeOf->operand, cast<StringLitExpr>(c.test));
+      BinaryChecker::ResultTypeOfNameKnown known = this->checker.binaryChecker().checkTypeOfName(
+          typeOf->operand, cast<StringLitExpr>(c.test));
+      if (known.isErr() &&
+          known.error().code != BinaryCheckerCheckTypeOfNameErrorCode::ALREADY_REPORTED) {
+        this->checker.diags_.error(c.test->loc(), known.error().message);
+      }
     }
     const Type *testType = c.test->type;
     Checker::Flow whenTrue = this->checker.flow_;

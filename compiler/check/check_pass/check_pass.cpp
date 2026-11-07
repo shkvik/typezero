@@ -49,12 +49,7 @@ Errors CheckPass::run(Program &program) const {
     for (Stmt *item : module->file.items) {
       if (auto *cls = dyn_cast<ClassDecl>(item); cls && cls->type) {
         if (!cls->baseExpr) {
-          ClassChecker::ResultBodiesChecked bodies = checker.classChecker().checkClassBodies(cls);
-          if (bodies.isErr()) {
-            for (const ClassCheckerCheckClassBodiesError &error : bodies.error()) {
-              checker.diags_.error(error.loc, error.message);
-            }
-          }
+          checker.classChecker().checkClassBodies(cls);
         }
         continue;
       }

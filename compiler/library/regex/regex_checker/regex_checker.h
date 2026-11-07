@@ -6,7 +6,7 @@ namespace tz {
 
 class RegexChecker {
 public:
-  explicit RegexChecker(Checker &checker);
+  explicit RegexChecker(Checker &owner);
 
   Expr *checkRegexLit(RegexLitExpr *lit);
   static const RegexLitExpr *knownRegex(const Expr *expr);
@@ -21,7 +21,11 @@ public:
   Expr *regexToString(Expr *regex);
 
 private:
-  Checker &checker_;
+  static std::string utf8(const std::u16string &text);
+  static std::u16string units(const uint32_t *program, uint32_t start, uint32_t length);
+  static bool isFlag(llvm::StringRef name, uint32_t &flag);
+
+  Checker &checker;
 };
 
 }

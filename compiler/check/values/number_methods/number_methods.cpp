@@ -50,8 +50,9 @@ NumberMethods::ResultStaticCallMade NumberMethods::checkStaticCall(CallExpr *cal
     for (Expr *&arg : call->args) {
       arg = this->checker.mathChecker().numericArg(arg);
       if (!codeUnits && arg->type->isNumeric()) {
+        std::string what = ErrorTextNumberMethod::codePoint();
         IndexProofs::ResultBetweenProven between =
-            this->checker.indexProofs().requireBetween(arg, 0, 0x10FFFF, "a code point");
+            this->checker.indexProofs().requireBetween(arg, 0, 0x10FFFF, what);
         if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
           this->checker.diags_.error(arg->loc(), between.error().message);
         }
@@ -193,8 +194,9 @@ NumberMethods::ResultMethodCallMade NumberMethods::checkNumberMethod(CallExpr *c
   if (member->name == "toString" && call->args.size() == 1) {
     member->object = this->checker.typeRelations().convert(member->object, Type::doubleTy());
     call->args[0] = this->checker.memberChecker().checkPosition(call->args[0]);
+    std::string what = ErrorTextNumberMethod::radix();
     IndexProofs::ResultBetweenProven between =
-        this->checker.indexProofs().requireBetween(call->args[0], 2, 36, "the radix of 'toString'");
+        this->checker.indexProofs().requireBetween(call->args[0], 2, 36, what);
     if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
       this->checker.diags_.error(call->args[0]->loc(), between.error().message);
     }
@@ -228,8 +230,9 @@ NumberMethods::ResultMethodCallMade NumberMethods::checkNumberMethod(CallExpr *c
     member->object = this->checker.typeRelations().convert(member->object, Type::doubleTy());
     if (!call->args.empty()) {
       call->args[0] = this->checker.memberChecker().checkPosition(call->args[0]);
-      IndexProofs::ResultBetweenProven between = this->checker.indexProofs().requireBetween(
-          call->args[0], 0, 100, "the number of digits of 'toFixed'");
+      std::string what = ErrorTextNumberMethod::digits();
+      IndexProofs::ResultBetweenProven between =
+          this->checker.indexProofs().requireBetween(call->args[0], 0, 100, what);
       if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
         this->checker.diags_.error(call->args[0]->loc(), between.error().message);
       }

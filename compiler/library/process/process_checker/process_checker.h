@@ -6,7 +6,7 @@ namespace tz {
 
 class ProcessChecker {
 public:
-  explicit ProcessChecker(Checker &checker);
+  explicit ProcessChecker(Checker &owner);
 
   Expr *checkProcessCall(CallExpr *call, MemberExpr *member);
   Expr *checkProcessMember(MemberExpr *member);
@@ -18,9 +18,11 @@ public:
                     const Type *type);
 
 private:
+  static std::u16string toUtf16(llvm::StringRef text);
+
   Expr *checkSignalCall(CallExpr *call, MemberExpr *member);
 
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

@@ -288,18 +288,18 @@ std::string TypeRelations::conversionHint(const Expr *expr, const Type *to) {
     text = cast<NameExpr>(member->object)->name.str() + "." + member->name.str();
   }
   if (from->isInteger() && target->isInteger()) {
-    return "; convert it explicitly: '" + text + "." + TypeRelations::conversionMethod(target) +
-           "()'";
+    std::string method = TypeRelations::conversionMethod(target);
+    return ErrorTextConvert::direct(text, method);
   }
   if (from->isInteger() && target->isFloat()) {
-    return "; convert it explicitly: '" + text + ".toDouble()'";
+    return ErrorTextConvert::direct(text, "toDouble");
   }
   if (from->isInteger() && target->isDecimal()) {
-    return "; convert it explicitly: '" + text + ".toDecimal()'";
+    return ErrorTextConvert::direct(text, "toDecimal");
   }
   if (from->isFloat() && target->isInteger()) {
-    return "; round it first, then convert: 'Math.trunc(" + text + ")." +
-           TypeRelations::conversionMethod(target) + "()' (or Math.round, Math.floor, Math.ceil)";
+    std::string method = TypeRelations::conversionMethod(target);
+    return ErrorTextConvert::rounded(text, method);
   }
 
   return "";

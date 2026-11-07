@@ -20,11 +20,8 @@
 #include <cmath>
 #include <numeric>
 
-using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -38,131 +35,140 @@ const llvm::StringLiteral kOptionNames[TZ_DTO_COUNT] = {
 
 }
 
-DateLowerer::DateLowerer(Lowering &lowering) : lowering_(lowering) {}
+DateLowerer::DateLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Value *DateLowerer::dateTimeAddress(llvm::Value *date) {
-  return lowering_.objectLayouts().fieldAddress(date, Type::date(), "%time");
+  return this->lowering.objectLayouts().fieldAddress(date, Type::date(), "%time");
 }
 
 llvm::Value *DateLowerer::newDate(llvm::Value *time) {
-  llvm::Value *date = lowering_.objectLayouts().allocObject(Type::date(), {});
-  lowering_.builder_.CreateStore(time, dateTimeAddress(date));
+  llvm::Value *date = this->lowering.objectLayouts().allocObject(Type::date(), {});
+  this->lowering.builder_.CreateStore(time, this->dateTimeAddress(date));
 
   return date;
 }
 
 llvm::Value *DateLowerer::emitDateOptions(llvm::ArrayRef<Expr *> args,
                                           std::vector<Lowering::Operand> &held) {
-  llvm::Type *i32 = lowering_.builder_.getInt32Ty(), *f64 = lowering_.builder_.getDoubleTy();
-  auto *valuesTy = llvm::ArrayType::get(lowering_.strTy_, TZ_DTO_COUNT);
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+  llvm::Type *f64 = this->lowering.builder_.getDoubleTy();
+  auto *valuesTy = llvm::ArrayType::get(this->lowering.strTy_, TZ_DTO_COUNT);
   auto *optionsTy =
-      llvm::StructType::get(lowering_.ctx_, {lowering_.strTy_, valuesTy, i32, i32, f64});
-  llvm::AllocaInst *options = lowering_.functionFrame().createStackSlot(optionsTy, "date.options");
-  lowering_.builder_.CreateStore(llvm::Constant::getNullValue(optionsTy), options);
-  llvm::Value *present = lowering_.builder_.getInt32(0);
+      llvm::StructType::get(this->lowering.ctx_, {this->lowering.strTy_, valuesTy, i32, i32, f64});
+  llvm::AllocaInst *options =
+      this->lowering.functionFrame().createStackSlot(optionsTy, "date.options");
+  this->lowering.builder_.CreateStore(llvm::Constant::getNullValue(optionsTy), options);
+  llvm::Value *present = this->lowering.builder_.getInt32(0);
   llvm::Value *hour12 = llvm::ConstantInt::getSigned(i32, -1);
   llvm::Value *fractional = llvm::ConstantFP::getNaN(f64);
   auto split = [&](llvm::Value *value,
                    const Type *type) -> std::pair<llvm::Value *, llvm::Value *> {
     if (!type->isOptional()) {
-      return {value, lowering_.builder_.getTrue()};
+      return {value, this->lowering.builder_.getTrue()};
     }
 
-    return {lowering_.optionalLowerer().optionalValue(value, type),
-            lowering_.optionalLowerer().optionalHas(value, type)};
+    return {this->lowering.optionalLowerer().optionalValue(value, type),
+            this->lowering.optionalLowerer().optionalHas(value, type)};
   };
   auto mark = [&](llvm::Value *has, unsigned bit) {
-    present = lowering_.builder_.CreateOr(
-        present, lowering_.builder_.CreateShl(lowering_.builder_.CreateZExt(has, i32),
-                                              lowering_.builder_.getInt32(bit)));
+    present = this->lowering.builder_.CreateOr(
+        present, this->lowering.builder_.CreateShl(this->lowering.builder_.CreateZExt(has, i32),
+                                                   this->lowering.builder_.getInt32(bit)));
   };
   if (!args.empty()) {
     if (args[0]->type->isUndefined()) {
-      lowering_.stmtLowerer().emitDiscarded(args[0]);
+      this->lowering.stmtLowerer().emitDiscarded(args[0]);
     } else {
-      Lowering::Operand locale = lowering_.refCounts().emitOperand(
+      Lowering::Operand locale = this->lowering.refCounts().emitOperand(
           args[0], args.size() < 2 || AssignLowerer::cannotAssign(args[1]));
       held.push_back(locale);
       auto [value, has] = split(locale.value, locale.type);
-      lowering_.builder_.CreateStore(value,
-                                     lowering_.builder_.CreateStructGEP(optionsTy, options, 0));
+      this->lowering.builder_.CreateStore(
+          value, this->lowering.builder_.CreateStructGEP(optionsTy, options, 0));
       mark(has, 31);
     }
   }
   if (args.size() > 1) {
     if (args[1]->type->isUndefined()) {
-      lowering_.stmtLowerer().emitDiscarded(args[1]);
+      this->lowering.stmtLowerer().emitDiscarded(args[1]);
     } else {
-      Lowering::Operand object = lowering_.refCounts().emitOperand(args[1], true);
+      Lowering::Operand object = this->lowering.refCounts().emitOperand(args[1], true);
       held.push_back(object);
       for (const Field &field : object.type->fields()) {
-        llvm::Value *loaded = lowering_.builder_.CreateLoad(
-            lowering_.moduleBuilder().lower(field.type),
-            lowering_.objectLayouts().fieldAddress(object.value, object.type, field.name),
+        llvm::Value *loaded = this->lowering.builder_.CreateLoad(
+            this->lowering.moduleBuilder().lower(field.type),
+            this->lowering.objectLayouts().fieldAddress(object.value, object.type, field.name),
             field.name);
         auto [value, has] = split(loaded, field.type);
         const Type *type = field.type->nonOptional();
         if (field.name == "hour12") {
-          hour12 = lowering_.builder_.CreateSelect(has, lowering_.builder_.CreateZExt(value, i32),
-                                                   hour12);
+          hour12 = this->lowering.builder_.CreateSelect(
+              has, this->lowering.builder_.CreateZExt(value, i32), hour12);
         } else if (field.name == "fractionalSecondDigits") {
           llvm::Value *digits =
-              type->isFloat() ? value : lowering_.builder_.CreateSIToFP(value, f64);
-          fractional = lowering_.builder_.CreateSelect(has, digits, fractional);
+              type->isFloat() ? value : this->lowering.builder_.CreateSIToFP(value, f64);
+          fractional = this->lowering.builder_.CreateSelect(has, digits, fractional);
         } else {
           unsigned index =
               unsigned(llvm::find(kOptionNames, field.name) - std::begin(kOptionNames));
           if (!type->isString()) {
-            value = lowering_.exprLowerer().emitConversion(value, type, Type::string());
+            value = this->lowering.exprLowerer().emitConversion(value, type, Type::string());
           }
-          lowering_.builder_.CreateStore(
-              value,
-              lowering_.builder_.CreateConstGEP2_32(
-                  valuesTy, lowering_.builder_.CreateStructGEP(optionsTy, options, 1), 0, index));
+          this->lowering.builder_.CreateStore(
+              value, this->lowering.builder_.CreateConstGEP2_32(
+                         valuesTy, this->lowering.builder_.CreateStructGEP(optionsTy, options, 1),
+                         0, index));
           mark(has, index);
         }
       }
     }
   }
-  lowering_.builder_.CreateStore(present,
-                                 lowering_.builder_.CreateStructGEP(optionsTy, options, 2));
-  lowering_.builder_.CreateStore(hour12, lowering_.builder_.CreateStructGEP(optionsTy, options, 3));
-  lowering_.builder_.CreateStore(fractional,
-                                 lowering_.builder_.CreateStructGEP(optionsTy, options, 4));
+  this->lowering.builder_.CreateStore(
+      present, this->lowering.builder_.CreateStructGEP(optionsTy, options, 2));
+  this->lowering.builder_.CreateStore(
+      hour12, this->lowering.builder_.CreateStructGEP(optionsTy, options, 3));
+  this->lowering.builder_.CreateStore(
+      fractional, this->lowering.builder_.CreateStructGEP(optionsTy, options, 4));
 
   return options;
 }
 
 llvm::Value *DateLowerer::parseResult(llvm::Value *time, llvm::Value *text, CallExpr *call) {
   static const std::vector<MakerFields> orders = {{nullptr, {"code", "message", "text"}}};
-  const Type *type = call->type, *errorType = type->errType();
-  llvm::BasicBlock *badBlock = lowering_.functionFrame().newBlock("date.bad");
-  llvm::BasicBlock *goodBlock = lowering_.functionFrame().newBlock("date.good");
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("date.parsed");
-  lowering_.builder_.CreateCondBr(lowering_.builder_.CreateFCmpUNO(time, time), badBlock,
-                                  goodBlock);
-  lowering_.functionFrame().switchTo(badBlock);
-  llvm::StructType *partsType = llvm::StructType::get(
-      lowering_.ctx_, {lowering_.builder_.getPtrTy(), lowering_.strTy_, lowering_.strTy_});
-  llvm::Value *parts = lowering_.functionFrame().createStackSlot(partsType, "date.error");
-  lowering_.builder_.CreateStore(lowering_.stringLowerer().utf8Constant("ERR_INVALID_DATE"),
-                                 lowering_.builder_.CreateStructGEP(partsType, parts, 0));
-  lowering_.builder_.CreateStore(lowering_.stringLowerer().stringLiteral(u"Invalid Date"),
-                                 lowering_.builder_.CreateStructGEP(partsType, parts, 1));
-  lowering_.refCounts().retainValue(text, Type::string());
-  lowering_.builder_.CreateStore(text, lowering_.builder_.CreateStructGEP(partsType, parts, 2));
-  llvm::Value *error =
-      lowering_.builder_.CreateCall(lowering_.objectMaker().maker(errorType, orders), {parts});
-  llvm::Value *bad = lowering_.resultLowerer().makeResult(
-      type, lowering_.builder_.getFalse(), nullptr, error, lowering_.errSites().site(call->loc()));
-  llvm::BasicBlock *badEnd = lowering_.builder_.GetInsertBlock();
-  lowering_.builder_.CreateBr(endBlock);
-  lowering_.functionFrame().switchTo(goodBlock);
-  llvm::Value *good = lowering_.resultLowerer().makeResult(type, lowering_.builder_.getTrue(),
-                                                           wholeTime(time), nullptr);
-  lowering_.builder_.CreateBr(endBlock);
-  lowering_.functionFrame().switchTo(endBlock);
-  llvm::PHINode *phi = lowering_.builder_.CreatePHI(good->getType(), 2, "date.result");
+  const Type *type = call->type;
+  const Type *errorType = type->errType();
+  llvm::BasicBlock *badBlock = this->lowering.functionFrame().newBlock("date.bad");
+  llvm::BasicBlock *goodBlock = this->lowering.functionFrame().newBlock("date.good");
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("date.parsed");
+  this->lowering.builder_.CreateCondBr(this->lowering.builder_.CreateFCmpUNO(time, time), badBlock,
+                                       goodBlock);
+  this->lowering.functionFrame().switchTo(badBlock);
+  llvm::StructType *partsType =
+      llvm::StructType::get(this->lowering.ctx_, {this->lowering.builder_.getPtrTy(),
+                                                  this->lowering.strTy_, this->lowering.strTy_});
+  llvm::Value *parts = this->lowering.functionFrame().createStackSlot(partsType, "date.error");
+  this->lowering.builder_.CreateStore(
+      this->lowering.stringLowerer().utf8Constant("ERR_INVALID_DATE"),
+      this->lowering.builder_.CreateStructGEP(partsType, parts, 0));
+  this->lowering.builder_.CreateStore(this->lowering.stringLowerer().stringLiteral(u"Invalid Date"),
+                                      this->lowering.builder_.CreateStructGEP(partsType, parts, 1));
+  this->lowering.refCounts().retainValue(text, Type::string());
+  this->lowering.builder_.CreateStore(text,
+                                      this->lowering.builder_.CreateStructGEP(partsType, parts, 2));
+  llvm::Value *error = this->lowering.builder_.CreateCall(
+      this->lowering.objectMaker().maker(errorType, orders), {parts});
+  llvm::Value *bad =
+      this->lowering.resultLowerer().makeResult(type, this->lowering.builder_.getFalse(), nullptr,
+                                                error, this->lowering.errSites().site(call->loc()));
+  llvm::BasicBlock *badEnd = this->lowering.builder_.GetInsertBlock();
+  this->lowering.builder_.CreateBr(endBlock);
+  this->lowering.functionFrame().switchTo(goodBlock);
+  llvm::Value *good = this->lowering.resultLowerer().makeResult(
+      type, this->lowering.builder_.getTrue(), this->wholeTime(time), nullptr);
+  this->lowering.builder_.CreateBr(endBlock);
+  this->lowering.functionFrame().switchTo(endBlock);
+  llvm::PHINode *phi = this->lowering.builder_.CreatePHI(good->getType(), 2, "date.result");
   phi->addIncoming(bad, badEnd);
   phi->addIncoming(good, goodBlock);
 
@@ -170,30 +176,32 @@ llvm::Value *DateLowerer::parseResult(llvm::Value *time, llvm::Value *text, Call
 }
 
 llvm::Value *DateLowerer::wholeTime(llvm::Value *time) {
-  llvm::Type *i64 = lowering_.builder_.getInt64Ty();
+  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
 
-  return lowering_.builder_.CreateIntrinsic(llvm::Intrinsic::fptosi_sat, {i64, time->getType()},
-                                            {time});
+  return this->lowering.builder_.CreateIntrinsic(llvm::Intrinsic::fptosi_sat,
+                                                 {i64, time->getType()}, {time});
 }
 
 llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
-  llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i32 = lowering_.builder_.getInt32Ty(),
-             *i64 = lowering_.builder_.getInt64Ty();
-  llvm::Type *f64 = lowering_.builder_.getDoubleTy(), *ptr = lowering_.builder_.getPtrTy();
+  llvm::Type *voidTy = this->lowering.builder_.getVoidTy(),
+             *i32 = this->lowering.builder_.getInt32Ty(),
+             *i64 = this->lowering.builder_.getInt64Ty();
+  llvm::Type *f64 = this->lowering.builder_.getDoubleTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
   auto *member = dyn_cast<MemberExpr>(call->callee);
   auto constant = [&](size_t i) {
-    return lowering_.builder_.getInt32(uint32_t(cast<IntLitExpr>(call->args[i])->value));
+    return this->lowering.builder_.getInt32(uint32_t(cast<IntLitExpr>(call->args[i])->value));
   };
   auto timeOf = [&](llvm::Value *date) {
-    return lowering_.builder_.CreateLoad(i64, dateTimeAddress(date), "time");
+    return this->lowering.builder_.CreateLoad(i64, this->dateTimeAddress(date), "time");
   };
   auto now = [&] {
-    return lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction("tz_date_now", i64, {}));
+    return this->lowering.builder_.CreateCall(
+        this->lowering.processLowerer().processFunction("tz_date_now", i64, {}));
   };
   auto receiver = [&](size_t from) {
     auto rest = llvm::ArrayRef<Expr *>(call->args).drop_front(std::min(from, call->args.size()));
-    Lowering::Operand self = lowering_.refCounts().emitOperand(
+    Lowering::Operand self = this->lowering.refCounts().emitOperand(
         member->object, llvm::all_of(rest, AssignLowerer::cannotAssign));
 
     return self;
@@ -202,36 +210,36 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
                       std::vector<llvm::Type *> params) {
     params.insert(params.begin(), ptr);
 
-    return lowering_.stringLowerer().callReturningString(
-        lowering_.processLowerer().processFunction(name, voidTy, params), args);
+    return this->lowering.stringLowerer().callReturningString(
+        this->lowering.processLowerer().processFunction(name, voidTy, params), args);
   };
   auto number = [&](Expr *arg) {
-    llvm::Value *value = lowering_.exprLowerer().emitExpr(arg);
+    llvm::Value *value = this->lowering.exprLowerer().emitExpr(arg);
 
-    return arg->type->isFloat() ? wholeTime(value) : value;
+    return arg->type->isFloat() ? this->wholeTime(value) : value;
   };
 
   switch (call->builtin()) {
     case Builtin::DateNew: {
-      return newDate(call->args.empty() ? now() : number(call->args[0]));
+      return this->newDate(call->args.empty() ? now() : number(call->args[0]));
     }
     case Builtin::DateCopy: {
-      Lowering::Operand date = lowering_.refCounts().emitOperand(call->args[0], true);
+      Lowering::Operand date = this->lowering.refCounts().emitOperand(call->args[0], true);
       llvm::Value *time = timeOf(date.value);
-      lowering_.refCounts().dropOperand(date);
-      return newDate(time);
+      this->lowering.refCounts().dropOperand(date);
+      return this->newDate(time);
     }
     case Builtin::DateFromString:
     case Builtin::DateParse: {
-      Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
+      Lowering::Operand text = this->lowering.refCounts().emitOperand(call->args[0], true);
       bool parse = call->builtin() == Builtin::DateParse;
-      llvm::Value *time = lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction(parse ? "tz_date_parse" : "tz_date_from_text",
-                                                     parse ? f64 : i64, {ptr, i64}),
-          {lowering_.stringLowerer().stringObj(text.value),
-           lowering_.stringLowerer().stringMeta(text.value)});
-      llvm::Value *result = parse ? parseResult(time, text.value, call) : newDate(time);
-      lowering_.refCounts().dropOperand(text);
+      llvm::Value *time = this->lowering.builder_.CreateCall(
+          this->lowering.processLowerer().processFunction(
+              parse ? "tz_date_parse" : "tz_date_from_text", parse ? f64 : i64, {ptr, i64}),
+          {this->lowering.stringLowerer().stringObj(text.value),
+           this->lowering.stringLowerer().stringMeta(text.value)});
+      llvm::Value *result = parse ? this->parseResult(time, text.value, call) : this->newDate(time);
+      this->lowering.refCounts().dropOperand(text);
       return result;
     }
     case Builtin::DateFromFields:
@@ -241,30 +249,31 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
         values.push_back(number(arg));
       }
       for (size_t i = values.size(); i < 7; ++i) {
-        values.push_back(lowering_.builder_.getInt64(i == 2 ? 1 : 0));
+        values.push_back(this->lowering.builder_.getInt64(i == 2 ? 1 : 0));
       }
-      values.push_back(lowering_.builder_.getInt32(call->builtin() == Builtin::DateFromFields));
-      llvm::Value *time = lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction("tz_date_from_fields", i64,
-                                                     {i64, i64, i64, i64, i64, i64, i64, i32}),
+      values.push_back(
+          this->lowering.builder_.getInt32(call->builtin() == Builtin::DateFromFields));
+      llvm::Value *time = this->lowering.builder_.CreateCall(
+          this->lowering.processLowerer().processFunction("tz_date_from_fields", i64,
+                                                          {i64, i64, i64, i64, i64, i64, i64, i32}),
           values);
-      return call->builtin() == Builtin::DateUTC ? time : newDate(time);
+      return call->builtin() == Builtin::DateUTC ? time : this->newDate(time);
     }
     case Builtin::DateText:
       return stringOf("tz_date_local_string",
-                      {now(), lowering_.builder_.getInt32(TZ_DATE_TEXT_FULL)}, {i64, i32});
+                      {now(), this->lowering.builder_.getInt32(TZ_DATE_TEXT_FULL)}, {i64, i32});
     case Builtin::DateGetTime:
     case Builtin::DateGetUTC:
     case Builtin::DateGetLocal: {
       Lowering::Operand date = receiver(call->args.size());
       llvm::Value *time = timeOf(date.value);
-      lowering_.refCounts().dropOperand(date);
+      this->lowering.refCounts().dropOperand(date);
       if (call->builtin() == Builtin::DateGetTime) {
         return time;
       }
       bool utc = call->builtin() == Builtin::DateGetUTC;
-      return lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction(
+      return this->lowering.builder_.CreateCall(
+          this->lowering.processLowerer().processFunction(
               utc ? "tz_date_utc_field" : "tz_date_local_field", i64, {i64, i32}),
           {time, constant(0)});
     }
@@ -277,24 +286,24 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
       for (size_t i = setTime ? 0 : 1; i < call->args.size(); ++i) {
         values.push_back(number(call->args[i]));
       }
-      llvm::Value *address = dateTimeAddress(date.value);
+      llvm::Value *address = this->dateTimeAddress(date.value);
       llvm::Value *time;
       if (setTime) {
         time = values[0];
       } else {
-        llvm::Value *count = lowering_.builder_.getInt32(uint32_t(values.size()));
+        llvm::Value *count = this->lowering.builder_.getInt32(uint32_t(values.size()));
         while (values.size() < 4) {
-          values.push_back(lowering_.builder_.getInt64(0));
+          values.push_back(this->lowering.builder_.getInt64(0));
         }
-        time = lowering_.builder_.CreateCall(
-            lowering_.processLowerer().processFunction("tz_date_set", i64,
-                                                       {i64, i32, i32, i32, i64, i64, i64, i64}),
-            {lowering_.builder_.CreateLoad(i64, address, "time"), constant(0),
-             lowering_.builder_.getInt32(call->builtin() == Builtin::DateSetLocal), count,
+        time = this->lowering.builder_.CreateCall(
+            this->lowering.processLowerer().processFunction(
+                "tz_date_set", i64, {i64, i32, i32, i32, i64, i64, i64, i64}),
+            {this->lowering.builder_.CreateLoad(i64, address, "time"), constant(0),
+             this->lowering.builder_.getInt32(call->builtin() == Builtin::DateSetLocal), count,
              values[0], values[1], values[2], values[3]});
       }
-      lowering_.builder_.CreateStore(time, address);
-      lowering_.refCounts().dropOperand(date);
+      this->lowering.builder_.CreateStore(time, address);
+      this->lowering.refCounts().dropOperand(date);
       return time;
     }
     case Builtin::DateToISOString:
@@ -303,10 +312,10 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     case Builtin::DateToJSON: {
       Lowering::Operand date = receiver(0);
       if (call->builtin() == Builtin::DateToJSON && !call->args.empty()) {
-        lowering_.stmtLowerer().emitDiscarded(call->args[0]);
+        this->lowering.stmtLowerer().emitDiscarded(call->args[0]);
       }
       llvm::Value *time = timeOf(date.value);
-      lowering_.refCounts().dropOperand(date);
+      this->lowering.refCounts().dropOperand(date);
       if (call->builtin() == Builtin::DateToUTCString) {
         return stringOf("tz_date_utc_string", {time}, {i64});
       }
@@ -319,22 +328,22 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
       Lowering::Operand date = receiver(1);
       std::vector<Lowering::Operand> held;
       llvm::ArrayRef<Expr *> args = llvm::ArrayRef<Expr *>(call->args).drop_front();
-      llvm::Value *options = emitDateOptions(args, held);
+      llvm::Value *options = this->emitDateOptions(args, held);
       llvm::Value *time = timeOf(date.value);
       llvm::Value *text = stringOf("tz_date_locale", {time, constant(0), options}, {i64, i32, ptr});
       for (const Lowering::Operand &operand : held) {
-        lowering_.refCounts().dropOperand(operand);
+        this->lowering.refCounts().dropOperand(operand);
       }
-      lowering_.refCounts().dropOperand(date);
+      this->lowering.refCounts().dropOperand(date);
       return text;
     }
     case Builtin::DtfNew: {
       std::vector<Lowering::Operand> held;
-      llvm::Value *options = emitDateOptions(call->args, held);
-      llvm::Value *format = lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction("tz_dtf_new", ptr, {ptr}), {options});
+      llvm::Value *options = this->emitDateOptions(call->args, held);
+      llvm::Value *format = this->lowering.builder_.CreateCall(
+          this->lowering.processLowerer().processFunction("tz_dtf_new", ptr, {ptr}), {options});
       for (const Lowering::Operand &operand : held) {
-        lowering_.refCounts().dropOperand(operand);
+        this->lowering.refCounts().dropOperand(operand);
       }
       return format;
     }
@@ -345,9 +354,9 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
       if (call->args.empty()) {
         time = now();
       } else if (call->args[0]->type->isDate()) {
-        Lowering::Operand date = lowering_.refCounts().emitOperand(call->args[0], true);
+        Lowering::Operand date = this->lowering.refCounts().emitOperand(call->args[0], true);
         time = timeOf(date.value);
-        lowering_.refCounts().dropOperand(date);
+        this->lowering.refCounts().dropOperand(date);
       } else {
         time = number(call->args[0]);
       }
@@ -356,24 +365,24 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
         result = stringOf("tz_dtf_format", {format.value, time}, {ptr, i64});
       } else {
         const Type *part = call->type->inner();
-        const Lowering::ObjectLayout &layout = lowering_.objectLayouts().objectLayout(part);
+        const Lowering::ObjectLayout &layout = this->lowering.objectLayouts().objectLayout(part);
         const llvm::StructLayout *offsets =
-            lowering_.module_->getDataLayout().getStructLayout(layout.type);
+            this->lowering.module_->getDataLayout().getStructLayout(layout.type);
         auto offsetOf = [&](llvm::StringRef name) {
-          return lowering_.builder_.getInt32(uint32_t(
+          return this->lowering.builder_.getInt32(uint32_t(
               offsets->getElementOffset(layout.elements[ObjectLayouts::fieldIndex(part, name)])));
         };
-        result = lowering_.builder_.CreateCall(
-            lowering_.processLowerer().processFunction("tz_dtf_format_to_parts", ptr,
-                                                       {ptr, i64, ptr, ptr, i64, i32, i32}),
-            {format.value, time, lowering_.typeDescriptors().typeDescriptor(part),
-             lowering_.objectLayouts().layoutDescriptor(part, {0, 1}),
-             lowering_.builder_.getInt64(
-                 lowering_.module_->getDataLayout().getTypeAllocSize(layout.type)),
+        result = this->lowering.builder_.CreateCall(
+            this->lowering.processLowerer().processFunction("tz_dtf_format_to_parts", ptr,
+                                                            {ptr, i64, ptr, ptr, i64, i32, i32}),
+            {format.value, time, this->lowering.typeDescriptors().typeDescriptor(part),
+             this->lowering.objectLayouts().layoutDescriptor(part, {0, 1}),
+             this->lowering.builder_.getInt64(
+                 this->lowering.module_->getDataLayout().getTypeAllocSize(layout.type)),
              offsetOf("type"), offsetOf("value")},
             "parts");
       }
-      lowering_.refCounts().dropOperand(format);
+      this->lowering.refCounts().dropOperand(format);
       return result;
     }
     case Builtin::DtfResolvedOptions: {
@@ -381,43 +390,47 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
       const Type *type = call->type;
       std::vector<unsigned> keys(type->fields().size());
       std::iota(keys.begin(), keys.end(), 0u);
-      llvm::Value *object = lowering_.objectLayouts().allocObject(type, keys);
+      llvm::Value *object = this->lowering.objectLayouts().allocObject(type, keys);
       for (const Field &field : type->fields()) {
-        llvm::Value *address = lowering_.objectLayouts().fieldAddress(object, type, field.name);
+        llvm::Value *address =
+            this->lowering.objectLayouts().fieldAddress(object, type, field.name);
         llvm::Value *value;
         if (field.name == "hour12") {
-          llvm::Value *v = lowering_.builder_.CreateCall(
-              lowering_.processLowerer().processFunction("tz_dtf_hour12", i32, {ptr}),
+          llvm::Value *v = this->lowering.builder_.CreateCall(
+              this->lowering.processLowerer().processFunction("tz_dtf_hour12", i32, {ptr}),
               {format.value});
-          value = lowering_.optionalLowerer().makeOptional(
-              lowering_.builder_.CreateICmpEQ(v, lowering_.builder_.getInt32(1)),
-              lowering_.builder_.CreateICmpSGE(v, lowering_.builder_.getInt32(0)), field.type);
+          value = this->lowering.optionalLowerer().makeOptional(
+              this->lowering.builder_.CreateICmpEQ(v, this->lowering.builder_.getInt32(1)),
+              this->lowering.builder_.CreateICmpSGE(v, this->lowering.builder_.getInt32(0)),
+              field.type);
         } else if (field.name == "fractionalSecondDigits") {
-          llvm::Value *v = lowering_.builder_.CreateCall(
-              lowering_.processLowerer().processFunction("tz_dtf_fractional", i32, {ptr}),
+          llvm::Value *v = this->lowering.builder_.CreateCall(
+              this->lowering.processLowerer().processFunction("tz_dtf_fractional", i32, {ptr}),
               {format.value});
-          value = lowering_.optionalLowerer().makeOptional(
-              lowering_.builder_.CreateSExt(v, lowering_.builder_.getInt64Ty()),
-              lowering_.builder_.CreateICmpSGT(v, lowering_.builder_.getInt32(0)), field.type);
+          value = this->lowering.optionalLowerer().makeOptional(
+              this->lowering.builder_.CreateSExt(v, this->lowering.builder_.getInt64Ty()),
+              this->lowering.builder_.CreateICmpSGT(v, this->lowering.builder_.getInt32(0)),
+              field.type);
         } else {
           auto at = llvm::find(kOptionNames, field.name);
           int which = at == std::end(kOptionNames) ? -1 : int(at - std::begin(kOptionNames));
           llvm::AllocaInst *out =
-              lowering_.functionFrame().createStackSlot(lowering_.strTy_, "option.out");
-          llvm::Value *has = lowering_.builder_.CreateCall(
-              lowering_.processLowerer().processFunction("tz_dtf_option", i32, {ptr, ptr, i32}),
-              {out, format.value, lowering_.builder_.getInt32(uint32_t(which))});
-          llvm::Value *text = lowering_.builder_.CreateLoad(lowering_.strTy_, out);
-          value =
-              field.type->isOptional()
-                  ? lowering_.optionalLowerer().makeOptional(
-                        text, lowering_.builder_.CreateICmpNE(has, lowering_.builder_.getInt32(0)),
-                        field.type)
-                  : text;
+              this->lowering.functionFrame().createStackSlot(this->lowering.strTy_, "option.out");
+          llvm::Value *has = this->lowering.builder_.CreateCall(
+              this->lowering.processLowerer().processFunction("tz_dtf_option", i32,
+                                                              {ptr, ptr, i32}),
+              {out, format.value, this->lowering.builder_.getInt32(uint32_t(which))});
+          llvm::Value *text = this->lowering.builder_.CreateLoad(this->lowering.strTy_, out);
+          value = field.type->isOptional() ? this->lowering.optionalLowerer().makeOptional(
+                                                 text,
+                                                 this->lowering.builder_.CreateICmpNE(
+                                                     has, this->lowering.builder_.getInt32(0)),
+                                                 field.type)
+                                           : text;
         }
-        lowering_.builder_.CreateStore(value, address);
+        this->lowering.builder_.CreateStore(value, address);
       }
-      lowering_.refCounts().dropOperand(format);
+      this->lowering.refCounts().dropOperand(format);
       return object;
     }
     default:

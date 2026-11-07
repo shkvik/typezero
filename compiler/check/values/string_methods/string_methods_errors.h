@@ -17,6 +17,7 @@ struct StringMethodsStringMethodError {
 class ErrorTextStringMethod {
 public:
   static std::string missing(llvm::StringRef name);
+  static std::string repeatOf();
 };
 
 }

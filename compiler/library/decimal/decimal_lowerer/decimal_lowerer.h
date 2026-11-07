@@ -6,7 +6,7 @@ namespace tz {
 
 class DecimalLowerer {
 public:
-  explicit DecimalLowerer(Lowering &lowering);
+  explicit DecimalLowerer(Lowering &owner);
 
   llvm::FunctionCallee decimalFunction(llvm::StringRef name, llvm::Type *ret,
                                        llvm::ArrayRef<llvm::Type *> params);
@@ -26,9 +26,9 @@ public:
   llvm::Function *decimalRefCount(bool retain);
 
 private:
-  Lowering &lowering_;
-  llvm::Function *decRetainFn_ = nullptr;
-  llvm::Function *decReleaseFn_ = nullptr;
+  Lowering &lowering;
+  llvm::Function *decRetainFn = nullptr;
+  llvm::Function *decReleaseFn = nullptr;
 };
 
 }

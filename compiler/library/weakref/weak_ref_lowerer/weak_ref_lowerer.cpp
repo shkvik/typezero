@@ -5,37 +5,31 @@
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
-#include <functional>
-#include <map>
-#include <set>
 
-using llvm::BasicBlock;
 using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-WeakRefLowerer::WeakRefLowerer(Lowering &lowering) : lowering_(lowering) {}
+WeakRefLowerer::WeakRefLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Value *WeakRefLowerer::emitWeakRefCall(CallExpr *call) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
   if (call->builtin() == Builtin::WeakRefNew) {
     Expr *arg = call->args[0];
-    llvm::Value *target = lowering_.exprLowerer().emitExpr(arg);
-    llvm::Value *weak = lowering_.builder_.CreateCall(
-        lowering_.groupLowerer().groupFunction("tz_weak_new", ptr, {ptr, ptr}),
-        {lowering_.objectLayouts().layoutDescriptor(call->type, {}), target}, "weak");
-    lowering_.refCounts().releaseValue(target, arg->type);
+    llvm::Value *target = this->lowering.exprLowerer().emitExpr(arg);
+    llvm::Value *weak = this->lowering.builder_.CreateCall(
+        this->lowering.groupLowerer().groupFunction("tz_weak_new", ptr, {ptr, ptr}),
+        {this->lowering.objectLayouts().layoutDescriptor(call->type, {}), target}, "weak");
+    this->lowering.refCounts().releaseValue(target, arg->type);
     return weak;
   }
   Lowering::Operand weak =
-      lowering_.refCounts().emitOperand(cast<MemberExpr>(call->callee)->object, true);
-  llvm::Value *target = lowering_.builder_.CreateCall(
-      lowering_.groupLowerer().groupFunction("tz_weak_deref", ptr, {ptr}), {weak.value}, "target");
-  lowering_.refCounts().dropOperand(weak);
+      this->lowering.refCounts().emitOperand(cast<MemberExpr>(call->callee)->object, true);
+  llvm::Value *target = this->lowering.builder_.CreateCall(
+      this->lowering.groupLowerer().groupFunction("tz_weak_deref", ptr, {ptr}), {weak.value},
+      "target");
+  this->lowering.refCounts().dropOperand(weak);
 
   return target;
 }

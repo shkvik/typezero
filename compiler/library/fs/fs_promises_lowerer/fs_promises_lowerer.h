@@ -6,14 +6,14 @@ namespace tz {
 
 class FsPromisesLowerer {
 public:
-  explicit FsPromisesLowerer(Lowering &lowering);
+  explicit FsPromisesLowerer(Lowering &owner);
 
   llvm::Value *emitFsPromise(CallExpr *call);
   llvm::Value *emitReadlineBuiltin(CallExpr *call);
   llvm::Value *emitAsyncIoBuiltin(CallExpr *call);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

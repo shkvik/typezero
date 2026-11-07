@@ -6,7 +6,7 @@ namespace tz {
 
 class RuntimeObjectChecker {
 public:
-  explicit RuntimeObjectChecker(Checker &checker);
+  explicit RuntimeObjectChecker(Checker &owner);
 
   Expr *checkRuntimeMember(MemberExpr *member);
   Expr *checkRuntimeMethod(CallExpr *call, MemberExpr *member, const Type *expected);
@@ -14,7 +14,7 @@ public:
   static std::string runtimeMembers(const Type *type);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

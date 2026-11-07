@@ -12,16 +12,17 @@
 #include "llvm/Support/ConvertUTF.h"
 #include <cmath>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
 namespace {
 
-std::string utf8(const std::u16string &text) {
+const IntlService kSupported = {IntlKind::None, "supportedLocalesOf", 0, {kMatcher}, true};
+
+}
+
+std::string IntlOptionsChecker::utf8(const std::u16string &text) {
   std::string out;
   llvm::convertUTF16ToUTF8String(
       llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
@@ -30,7 +31,7 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-std::optional<std::u16string> literalText(const Expr *e) {
+std::optional<std::u16string> IntlOptionsChecker::literalText(const Expr *e) {
   if (auto *lit = dyn_cast<StringLitExpr>(e)) {
     return lit->value;
   }
@@ -41,7 +42,7 @@ std::optional<std::u16string> literalText(const Expr *e) {
   return std::nullopt;
 }
 
-std::optional<double> literalNumber(const Expr *e) {
+std::optional<double> IntlOptionsChecker::literalNumber(const Expr *e) {
   if (auto *lit = dyn_cast<IntLitExpr>(e)) {
     return double(lit->value);
   }
@@ -49,7 +50,7 @@ std::optional<double> literalNumber(const Expr *e) {
     return lit->value;
   }
   if (auto *unary = dyn_cast<UnaryExpr>(e); unary && unary->op == UnaryOp::Neg) {
-    if (std::optional<double> value = literalNumber(unary->operand)) {
+    if (std::optional<double> value = IntlOptionsChecker::literalNumber(unary->operand)) {
       return -*value;
     }
   }
@@ -57,7 +58,7 @@ std::optional<double> literalNumber(const Expr *e) {
   return std::nullopt;
 }
 
-const IntlService *serviceOf(IntlKind kind) {
+const IntlService *IntlOptionsChecker::serviceOf(IntlKind kind) {
   for (const IntlService &s : services()) {
     if (s.kind == kind) {
       return &s;
@@ -67,9 +68,7 @@ const IntlService *serviceOf(IntlKind kind) {
   return nullptr;
 }
 
-const IntlService kSupported = {IntlKind::None, "supportedLocalesOf", 0, {kMatcher}, true};
-
-bool isSanctionedUnit(llvm::StringRef unit) {
+bool IntlOptionsChecker::isSanctionedUnit(llvm::StringRef unit) {
   static const llvm::StringLiteral units[] = {
       "acre",        "bit",         "byte",        "celsius",
       "centimeter",  "day",         "degree",      "fahrenheit",
@@ -87,16 +86,17 @@ bool isSanctionedUnit(llvm::StringRef unit) {
   return llvm::is_contained(units, unit);
 }
 
-bool isWellFormedUnit(llvm::StringRef unit) {
-  if (isSanctionedUnit(unit)) {
+bool IntlOptionsChecker::isWellFormedUnit(llvm::StringRef unit) {
+  if (IntlOptionsChecker::isSanctionedUnit(unit)) {
     return true;
   }
   auto [numerator, denominator] = unit.split("-per-");
 
-  return !denominator.empty() && isSanctionedUnit(numerator) && isSanctionedUnit(denominator);
+  return !denominator.empty() && IntlOptionsChecker::isSanctionedUnit(numerator) &&
+         IntlOptionsChecker::isSanctionedUnit(denominator);
 }
 
-bool isKeywordType(llvm::StringRef text) {
+bool IntlOptionsChecker::isKeywordType(llvm::StringRef text) {
   llvm::SmallVector<llvm::StringRef, 4> parts;
   text.split(parts, '-');
 
@@ -105,7 +105,7 @@ bool isKeywordType(llvm::StringRef text) {
   });
 }
 
-std::string valueList(const std::vector<llvm::StringLiteral> &values) {
+std::string IntlOptionsChecker::valueList(const std::vector<llvm::StringLiteral> &values) {
   std::string out;
   for (size_t i = 0; i < values.size(); ++i) {
     out += (i == 0 ? "'" : i + 1 == values.size() ? " or '" : ", '") + values[i].str() + "'";
@@ -114,25 +114,26 @@ std::string valueList(const std::vector<llvm::StringLiteral> &values) {
   return out;
 }
 
-std::optional<std::string> knownText(const Expr *value, const Type *type) {
-  if (std::optional<std::u16string> text = value ? literalText(value) : std::nullopt) {
-    return utf8(*text);
+std::optional<std::string> IntlOptionsChecker::knownText(const Expr *value, const Type *type) {
+  if (std::optional<std::u16string> text =
+          value ? IntlOptionsChecker::literalText(value) : std::nullopt) {
+    return IntlOptionsChecker::utf8(*text);
   }
   if (type && type->isStringLiteral()) {
-    return utf8(type->literalText());
+    return IntlOptionsChecker::utf8(type->literalText());
   }
 
   return std::nullopt;
 }
 
-std::vector<std::string> literalTexts(const Type *type, bool &open) {
+std::vector<std::string> IntlOptionsChecker::literalTexts(const Type *type, bool &open) {
   std::vector<std::string> texts;
   type = type->nonOptional();
   llvm::ArrayRef<const Type *> members =
       type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
   for (const Type *m : members) {
     if (m->isStringLiteral()) {
-      texts.push_back(utf8(m->literalText()));
+      texts.push_back(IntlOptionsChecker::utf8(m->literalText()));
     } else if (!m->isBool() && !(m->isLiteral() && m->literalBase()->isBool())) {
       open = true;
     }
@@ -141,7 +142,7 @@ std::vector<std::string> literalTexts(const Type *type, bool &open) {
   return texts;
 }
 
-std::string orList(llvm::ArrayRef<std::string> values) {
+std::string IntlOptionsChecker::orList(llvm::ArrayRef<std::string> values) {
   std::string out;
   for (size_t i = 0; i < values.size(); ++i) {
     out += (i == 0 ? "'" : i + 1 == values.size() ? " or '" : ", '") + values[i] + "'";
@@ -150,7 +151,7 @@ std::string orList(llvm::ArrayRef<std::string> values) {
   return out;
 }
 
-const Expr *unconverted(const Expr *expr) {
+const Expr *IntlOptionsChecker::unconverted(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
       break;
@@ -161,51 +162,51 @@ const Expr *unconverted(const Expr *expr) {
   return expr;
 }
 
-bool isStringLike(const Type *type) {
+bool IntlOptionsChecker::isStringLike(const Type *type) {
   return type->isString() || type->isStringLiteral() ||
          (type->isUnion() &&
           llvm::all_of(type->members(), [](const Type *m) { return m->isStringLiteral(); }));
 }
 
-}
-
-IntlOptionsChecker::IntlOptionsChecker(Checker &checker) : checker_(checker) {}
+IntlOptionsChecker::IntlOptionsChecker(Checker &owner)
+    : checker(owner) {}
 
 bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, IntlKind kind,
                                        llvm::StringRef what) {
-  const IntlService *service = kind == IntlKind::None ? &kSupported : serviceOf(kind);
+  const IntlService *service =
+      kind == IntlKind::None ? &kSupported : IntlOptionsChecker::serviceOf(kind);
   bool ok = true;
   if (args.size() > from) {
     Expr *&locale = args[from];
-    locale = checker_.exprChecker().checkExpr(locale);
-    ok = checker_.intlChecker().checkLocaleArg(locale, what);
+    locale = this->checker.exprChecker().checkExpr(locale);
+    ok = this->checker.intlChecker().checkLocaleArg(locale, what);
   }
   if (args.size() <= from + 1) {
     return ok;
   }
   Expr *&options = args[from + 1];
-  options = checker_.exprChecker().checkExpr(options);
+  options = this->checker.exprChecker().checkExpr(options);
   const Type *type = options->type;
   if (type->isError()) {
     return false;
   }
   if (type->isUndefined()) {
     if (kind == IntlKind::DisplayNames) {
-      checker_.diags_.error(options->loc(),
-                            "Intl.DisplayNames needs the option 'type', e.g. '{ type: "
-                            "\"region\" }', which JavaScript would throw a TypeError "
-                            "without");
+      this->checker.diags_.error(options->loc(),
+                                 "Intl.DisplayNames needs the option 'type', e.g. '{ type: "
+                                 "\"region\" }', which JavaScript would throw a TypeError "
+                                 "without");
       return false;
     }
     return ok;
   }
   if (!type->isObject() || type->isTuple() || type->isClass() || type->isRegExp() ||
       type->isMatch() || type->isDate() || type->isIntl() || type->isCrypto() || type->isBytes()) {
-    checker_.diags_.error(options->loc(),
-                          what.str() +
-                              " takes its options as an object, e.g. '{ style: \"percent\" "
-                              "}', found '" +
-                              type->name().str() + "'");
+    this->checker.diags_.error(options->loc(),
+                               what.str() +
+                                   " takes its options as an object, e.g. '{ style: \"percent\" "
+                                   "}', found '" +
+                                   type->name().str() + "'");
     return false;
   }
   auto *literal = dyn_cast<ObjectLitExpr>(options);
@@ -224,16 +225,17 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
   auto textOf = [&](llvm::StringRef name) -> std::optional<std::string> {
     const Field *field = type->field(name);
 
-    return field ? knownText(valueOf(name), field->type->nonOptional()) : std::nullopt;
+    return field ? IntlOptionsChecker::knownText(valueOf(name), field->type->nonOptional())
+                 : std::nullopt;
   };
   auto numberOf = [&](llvm::StringRef name) -> std::optional<double> {
     Expr *value = valueOf(name);
 
-    return value ? literalNumber(value) : std::nullopt;
+    return value ? IntlOptionsChecker::literalNumber(value) : std::nullopt;
   };
   auto report = [&](llvm::StringRef name, const std::string &message) {
     Expr *value = valueOf(name);
-    checker_.diags_.error(value ? value->loc() : options->loc(), message);
+    this->checker.diags_.error(value ? value->loc() : options->loc(), message);
     ok = false;
   };
 
@@ -262,14 +264,14 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
     auto isNumber = [](const Type *t) {
       return t->isNumeric() || (t->isLiteral() && t->literalBase()->isNumeric());
     };
-    bool fits = found->kind == 's'   ? isStringLike(value)
+    bool fits = found->kind == 's'   ? IntlOptionsChecker::isStringLike(value)
                 : found->kind == 'n' ? isNumber(value) || (value->isUnion() &&
                                                            llvm::all_of(value->members(), isNumber))
                 : found->kind == 'b'
                     ? isBoolean(value)
-                    : isStringLike(value) || isBoolean(value) ||
+                    : IntlOptionsChecker::isStringLike(value) || isBoolean(value) ||
                           (value->isUnion() && llvm::all_of(value->members(), [&](const Type *m) {
-                             return isStringLike(m) || isBoolean(m);
+                             return IntlOptionsChecker::isStringLike(m) || isBoolean(m);
                            }));
     if (!fits) {
       report(field.name, "the option '" + field.name + "' is " +
@@ -285,15 +287,15 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
         !(found->kind == 'g' && text->empty())) {
       report(field.name, "'" + *text + "' is not a value of the option '" + field.name +
                              "', and JavaScript would throw a RangeError; it is " +
-                             valueList(found->values));
+                             IntlOptionsChecker::valueList(found->values));
       continue;
     }
     if (!textOf(field.name) && !found->values.empty() && found->kind != 'n' && found->kind != 'b') {
       bool open = false;
-      std::vector<std::string> texts = literalTexts(value, open);
+      std::vector<std::string> texts = IntlOptionsChecker::literalTexts(value, open);
       if (Expr *given = valueOf(field.name)) {
         if (std::optional<std::vector<std::string>> known =
-                checker_.literalTypes().knownTexts(given)) {
+                this->checker.literalTypes().knownTexts(given)) {
           texts = *known;
           open = false;
         }
@@ -304,7 +306,7 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
       if (wrong != texts.end()) {
         report(field.name, "'" + *wrong + "' is not a value of the option '" + field.name +
                                "', and JavaScript would throw a RangeError; it is " +
-                               valueList(found->values));
+                               IntlOptionsChecker::valueList(found->values));
       } else if (open) {
         std::vector<std::string> first(found->values.begin(),
                                        found->values.begin() +
@@ -313,7 +315,8 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
         for (const std::string &v : first) {
           example += (example.empty() ? "" : " || ") + std::string("x == \"") + v + "\"";
         }
-        report(field.name, "the option '" + field.name + "' is " + valueList(found->values) +
+        report(field.name, "the option '" + field.name + "' is " +
+                               IntlOptionsChecker::valueList(found->values) +
                                ", and a string known only when the program runs may be another, "
                                "which JavaScript would throw a RangeError for; compare it with "
                                "them first, e.g. 'if (" +
@@ -332,14 +335,16 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
                            "' is not a currency code, and JavaScript would throw a RangeError; "
                            "a code is three letters, e.g. 'RUB' or 'USD'");
   }
-  if (std::optional<std::string> unit = textOf("unit"); unit && !isWellFormedUnit(*unit)) {
+  if (std::optional<std::string> unit = textOf("unit");
+      unit && !IntlOptionsChecker::isWellFormedUnit(*unit)) {
     report("unit", "'" + *unit +
                        "' is not a unit of Intl, and JavaScript would throw a RangeError; the "
                        "units are those like 'kilometer', 'liter', 'percent' or 'megabyte', and "
                        "two joined by '-per-', e.g. 'kilometer-per-hour'");
   }
   for (const char *name : {"numberingSystem", "collation"}) {
-    if (std::optional<std::string> value = textOf(name); value && !isKeywordType(*value)) {
+    if (std::optional<std::string> value = textOf(name);
+        value && !IntlOptionsChecker::isKeywordType(*value)) {
       report(name, "'" + *value + "' is not a " + name +
                        ", and JavaScript would throw a RangeError; it is 3 to 8 letters or "
                        "digits, e.g. '" +
@@ -348,7 +353,7 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
   }
   if (const Field *style = type->field("style"); style && kind == IntlKind::NumberFormat) {
     bool open = false;
-    std::vector<std::string> styles = literalTexts(style->type, open);
+    std::vector<std::string> styles = IntlOptionsChecker::literalTexts(style->type, open);
     if (std::optional<std::string> text = textOf("style")) {
       styles = {*text};
     }
@@ -389,7 +394,7 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
   auto valueExpr = [&](llvm::StringRef name) -> const Expr * {
     Expr *value = valueOf(name);
 
-    return value ? unconverted(value) : nullptr;
+    return value ? IntlOptionsChecker::unconverted(value) : nullptr;
   };
   for (const auto &range : ranges) {
     if (!type->field(range.name)) {
@@ -410,10 +415,11 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
     }
     const Expr *value = valueExpr(range.name);
     if (value && value->type->isInt() &&
-        checker_.byteProofs().provesFits(value, range.min, range.max)) {
+        this->checker.byteProofs().provesFits(value, range.min, range.max)) {
       continue;
     }
-    std::string lo = std::to_string(range.min), hi = std::to_string(range.max);
+    std::string lo = std::to_string(range.min);
+    std::string hi = std::to_string(range.max);
     report(range.name, std::string(range.name) + " is from " + lo + " to " + hi +
                            ", and a number known only when the program runs may be outside, "
                            "which JavaScript would throw a RangeError for; give an int and "
@@ -421,13 +427,15 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
                            lo + " && n <= " + hi + ")'");
   }
   auto notAbove = [&](llvm::StringRef low, llvm::StringRef high) {
-    std::optional<double> a = constantOf(low), b = constantOf(high);
+    std::optional<double> a = constantOf(low);
+    std::optional<double> b = constantOf(high);
     if (a && b) {
       return std::floor(*a) <= std::floor(*b);
     }
-    const Expr *x = valueExpr(low), *y = valueExpr(high);
-    std::optional<Linear> lx = x ? checker_.indexProofs().linear(x) : std::nullopt;
-    std::optional<Linear> ly = y ? checker_.indexProofs().linear(y) : std::nullopt;
+    const Expr *x = valueExpr(low);
+    const Expr *y = valueExpr(high);
+    std::optional<Linear> lx = x ? this->checker.indexProofs().linear(x) : std::nullopt;
+    std::optional<Linear> ly = y ? this->checker.indexProofs().linear(y) : std::nullopt;
     if (!lx && a && *a == std::floor(*a)) {
       lx = Linear{Term::zero(), int64_t(*a)};
     }
@@ -441,14 +449,16 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
       return lx->offset <= ly->offset;
     }
 
-    return checker_.flow_.facts.proves(lx->term, ly->term, ly->offset - lx->offset + 1);
+    return this->checker.flow_.facts.proves(lx->term, ly->term, ly->offset - lx->offset + 1);
   };
   for (const char *pair : {"FractionDigits", "SignificantDigits"}) {
-    std::string min = std::string("minimum") + pair, max = std::string("maximum") + pair;
+    std::string min = std::string("minimum") + pair;
+    std::string max = std::string("maximum") + pair;
     if (!literal || !type->field(min) || !type->field(max) || notAbove(min, max)) {
       continue;
     }
-    std::optional<double> low = constantOf(min), high = constantOf(max);
+    std::optional<double> low = constantOf(min);
+    std::optional<double> high = constantOf(max);
     report(max, low && high ? min + " is above " + max + ", and JavaScript would throw a RangeError"
                             : min + " may be above " + max +
                                   ", which JavaScript would throw a RangeError for; check it "

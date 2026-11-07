@@ -1,6 +1,8 @@
 #include "compiler/check/expr/name_checker/name_checker.h"
 #include "compiler/check/classes/class_checker/class_checker.h"
 #include "compiler/check/classes/class_value_checker/class_value_checker.h"
+#include "compiler/check/expr/call_checker/call_checker_errors.h"
+#include "compiler/check/expr/new_checker/new_checker_errors.h"
 #include "compiler/check/functions/nested_functions/nested_functions.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
 #include "compiler/check/scopes/scopes.h"
@@ -17,11 +19,240 @@
 #include "llvm/ADT/STLExtras.h"
 #include <cmath>
 
-
 namespace tz {
 
 NameChecker::NameChecker(Checker &owner)
     : checker(owner) {}
+
+NameChecker::ResultNoTypeArguments NameChecker::typeArgsAbsent(const NameExpr *name,
+                                                               const ScopeEntry &entry) {
+  if (!name->typeArgs.empty() && (entry.var() || entry.func())) {
+    std::string message = ErrorTextCallTypeArgs::notGeneric(name->name);
+
+    return err(NameCheckerTypeArgsAbsentError{
+        .code = NameCheckerTypeArgsAbsentErrorCode::NOT_GENERIC,
+        .message = message,
+    });
+  }
+
+  return ok(name);
+}
+
+NameChecker::ResultVariableVisible NameChecker::notCaptured(const NameExpr *name,
+                                                            const ScopeEntry &entry) const {
+  const ClassDecl *current = this->checker.currentClass_;
+  bool captured = this->checker.staticInit_ && current && current->expression() &&
+                  !entry.var()->isGlobal() && llvm::is_contained(current->locals, name->name);
+  if (captured) {
+    std::string message = ErrorTextNameUse::staticUse(name->name);
+
+    return err(NameCheckerNotCapturedError{
+        .code = NameCheckerNotCapturedErrorCode::CAPTURED_LOCAL,
+        .message = message,
+    });
+  }
+
+  return ok(name);
+}
+
+NameChecker::ResultResolvedNameUse NameChecker::unknownName(NameExpr *name,
+                                                            const ScopeEntry &entry) {
+  static const llvm::StringLiteral builtins[] = {"String", "Number", "parseInt", "parseFloat",
+                                                 "Boolean"};
+  static const llvm::StringLiteral uris[] = {"encodeURIComponent", "encodeURI",
+                                             "decodeURIComponent", "decodeURI"};
+  static const std::pair<llvm::StringLiteral, llvm::StringLiteral> objects[] = {
+      {"process", "process.argv"},
+      {"console", "console.log(x)"},
+      {"Date", "Date.now()"},
+      {"performance", "performance.now()"},
+      {"RegExp", "new RegExp(pattern)"},
+      {"JSON", "JSON.parse(text)"}};
+  auto object = llvm::find_if(objects, [&](const auto &o) { return o.first == name->name; });
+  llvm::StringRef result =
+      entry.enumDecl() ? llvm::StringRef() : this->checker.resultTypes().resultName(name->name);
+  if (result == "ok" || result == "err") {
+    std::string message = ErrorTextNameUse::okValue(name->name);
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::OK_AS_VALUE,
+        .message = message,
+    });
+  }
+  if (result == "Result") {
+    std::string message = ErrorTextNameUse::resultUse(name->name);
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::RESULT_VALUE,
+        .message = message,
+    });
+  }
+  if (result == "Ok" || result == "Err") {
+    llvm::StringRef make = result == "Ok" ? "ok(value)" : "err(error)";
+    llvm::StringRef test = result == "Ok" ? "isOk()" : "isErr()";
+    std::string message = ErrorTextNameUse::typeOnly(name->name, make, test);
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::TYPE_ONLY,
+        .message = message,
+    });
+  }
+  if (name->name == "this") {
+    std::string message = ErrorTextNameUse::noThis();
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::THIS_OUTSIDE,
+        .message = message,
+    });
+  }
+  bool uri = llvm::is_contained(uris, name->name);
+  if (llvm::is_contained(builtins, name->name) || uri) {
+    llvm::StringRef returns = uri ? "string" : "double";
+    std::string message = ErrorTextNameUse::builtin(name->name, returns);
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::BUILTIN_VALUE,
+        .message = message,
+    });
+  }
+  if (name->name == "super") {
+    std::string message = ErrorTextNameUse::superUse();
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::SUPER_VALUE,
+        .message = message,
+    });
+  }
+  if (name->name == "arguments") {
+    std::string message = ErrorTextNameUse::arguments();
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::ARGUMENTS,
+        .message = message,
+    });
+  }
+  if (name->name == "BigInt") {
+    this->checker.decimalChecker().reportBigInt(name->loc(), "'BigInt'");
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
+  }
+  if (name->name == "decimal") {
+    std::string message = ErrorTextNameUse::decimal();
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::DECIMAL_VALUE,
+        .message = message,
+    });
+  }
+  if (name->name == "null") {
+    std::string message = ErrorTextNameUse::nullUse();
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::NULL_VALUE,
+        .message = message,
+    });
+  }
+  std::string why = ErrorTextUnsupported::why(name->name);
+  if (!why.empty()) {
+    std::string message = ErrorTextCallName::noSupport(name->name, why);
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::UNSUPPORTED,
+        .message = message,
+    });
+  }
+  if (entry.enumDecl()) {
+    std::string message = ErrorTextNameUse::enumUse(name->name);
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::ENUM_VALUE,
+        .message = message,
+    });
+  }
+  if (entry.cls()) {
+    Expr *value = this->checker.classValueChecker().checkClassValue(name, entry.cls());
+
+    return ok(value);
+  }
+  ClassDecl *current = this->checker.currentClass_;
+  bool expression = current && current->expression();
+  if (expression && !current->name.empty() && current->name == name->name) {
+    Expr *value = this->checker.classValueChecker().checkClassValue(name, current);
+
+    return ok(value);
+  }
+  if (expression && llvm::is_contained(current->locals, name->name)) {
+    std::string message = ErrorTextNameUse::laterUse(name->name);
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::CAPTURED_LOCAL,
+        .message = message,
+    });
+  }
+  TopLevelChecker::ResultSourceIsLoaded loaded = this->checker.topLevelChecker().checkLoaded(name);
+  if (loaded.isErr()) {
+    bool reported = loaded.error().code == TopLevelCheckerCheckLoadedErrorCode::ALREADY_REPORTED;
+
+    return err(NameCheckerUnknownNameError{
+        .code = reported ? NameCheckerUnknownNameErrorCode::ALREADY_REPORTED
+                         : NameCheckerUnknownNameErrorCode::NOT_LOADED,
+        .message = loaded.error().message,
+    });
+  }
+  bool earlyCall = this->checker.early_ &&
+                   (this->checker.state(this->checker.module_).topLevelNames.contains(name->name) ||
+                    this->checker.declaredLater(name->name));
+  if (earlyCall) {
+    std::string message = ErrorTextNameUse::afterCall(name->name, this->checker.early_->name);
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::DECLARED_AFTER_CALL,
+        .message = message,
+    });
+  }
+  const Checker::BlockNames *later = this->checker.declaredLater(name->name);
+  if (later && this->checker.functions_.size() > later->functions) {
+    std::string message = ErrorTextNameUse::laterBlock(name->name);
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::DECLARED_LATER_IN_BLOCK,
+        .message = message,
+    });
+  }
+  if (later) {
+    std::string message = ErrorTextNameUse::beforeDecl(name->name);
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::USED_BEFORE_DECLARED,
+        .message = message,
+    });
+  }
+  if (llvm::is_contained(this->checker.initializing_, name->name)) {
+    std::string message = ErrorTextNameUse::ownInit(name->name);
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::OWN_INITIALIZER,
+        .message = message,
+    });
+  }
+  if (object != std::end(objects)) {
+    std::string message = ErrorTextNameUse::objectUse(name->name, object->second);
+
+    return err(NameCheckerUnknownNameError{
+        .code = NameCheckerUnknownNameErrorCode::OBJECT_VALUE,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextNameUse::notFound(name->name);
+
+  return err(NameCheckerUnknownNameError{
+      .code = NameCheckerUnknownNameErrorCode::UNKNOWN_NAME,
+      .message = message,
+  });
+}
 
 Expr *NameChecker::checkName(NameExpr *name) {
   if (name->name == "this") {
@@ -39,20 +270,14 @@ Expr *NameChecker::checkName(NameExpr *name) {
     return node;
   }
   ScopeEntry entry = this->checker.topLevelChecker().lookupValue(name->name);
-  if (!name->typeArgs.empty() && (entry.var() || entry.func())) {
-    this->checker.diags_.error(
-        name->loc(), "'" + name->name + "' is not a generic function; remove the type arguments");
+  ResultNoTypeArguments plain = NameChecker::typeArgsAbsent(name, entry);
+  if (plain.isErr()) {
+    this->checker.diags_.error(name->loc(), plain.error().message);
   }
   if (entry.var()) {
-    if (this->checker.staticInit_ && this->checker.currentClass_ &&
-        this->checker.currentClass_->expression() && !entry.var()->isGlobal() &&
-        llvm::is_contained(this->checker.currentClass_->locals, name->name)) {
-      this->checker.diags_.error(name->loc(),
-                                 "a class expression cannot use '" + name->name +
-                                     "', a variable of the function around it: the class is made "
-                                     "once, not at each call, and its static fields get their "
-                                     "values the first time; pass the value to its constructor, "
-                                     "or keep it in a global");
+    ResultVariableVisible visibleHere = this->notCaptured(name, entry);
+    if (visibleHere.isErr()) {
+      this->checker.diags_.error(name->loc(), visibleHere.error().message);
     }
     name->binding = NamedVar{.var = entry.var()};
     entry.var()->read = true;
@@ -109,112 +334,12 @@ Expr *NameChecker::checkName(NameExpr *name) {
       return this->checker.classValueChecker().checkClassValue(name, cls);
     }
   }
-  static const llvm::StringLiteral builtins[] = {"String", "Number", "parseInt", "parseFloat",
-                                                 "Boolean"};
-  static const llvm::StringLiteral uris[] = {"encodeURIComponent", "encodeURI",
-                                             "decodeURIComponent", "decodeURI"};
-  static const std::pair<llvm::StringLiteral, llvm::StringLiteral> objects[] = {
-      {"process", "process.argv"},
-      {"console", "console.log(x)"},
-      {"Date", "Date.now()"},
-      {"performance", "performance.now()"},
-      {"RegExp", "new RegExp(pattern)"},
-      {"JSON", "JSON.parse(text)"}};
-  auto object = llvm::find_if(objects, [&](const auto &o) { return o.first == name->name; });
-  llvm::StringRef result =
-      entry.enumDecl() ? llvm::StringRef() : this->checker.resultTypes().resultName(name->name);
-  if (result == "ok" || result == "err") {
-    this->checker.diags_.error(name->loc(), "'" + name->name +
-                                                "' can be used as a value only where a function "
-                                                "type is expected, e.g. 'xs.map(" +
-                                                name->name + ")'");
-  } else if (result == "Result") {
-    this->checker.diags_.error(name->loc(), "'" + name->name +
-                                                "' can only be used through its functions, e.g. '" +
-                                                name->name + ".combine(results)'");
-  } else if (result == "Ok" || result == "Err") {
-    this->checker.diags_.error(
-        name->loc(), "'" + name->name + "' can be used only as a type; make a Result with '" +
-                         (result == "Ok" ? "ok(value)" : "err(error)") + "', and test one with '" +
-                         (result == "Ok" ? "isOk()" : "isErr()") + "'");
-  } else if (name->name == "this") {
-    this->checker.diags_.error(
-        name->loc(), "'this' exists only in the methods of classes, which are not supported yet");
-  } else if (llvm::is_contained(builtins, name->name) || llvm::is_contained(uris, name->name)) {
-    this->checker.diags_.error(name->loc(),
-                               "'" + name->name +
-                                   "' can be used as a value only where a function type "
-                                   "is expected, e.g. 'const f: (s: string) => " +
-                                   (llvm::is_contained(uris, name->name) ? "string" : "double") +
-                                   " = " + name->name + "'");
-  } else if (name->name == "super") {
-    this->checker.diags_.error(name->loc(),
-                               "'super' is not a value: call the constructor of the class "
-                               "extended, 'super(...)', or a method of it, 'super.m(...)'");
-  } else if (name->name == "arguments") {
-    this->checker.diags_.error(
-        name->loc(), "'arguments' is not supported; use a rest parameter, e.g. '...args: int[]'");
-  } else if (name->name == "BigInt") {
-    this->checker.decimalChecker().reportBigInt(name->loc(), "'BigInt'");
-  } else if (name->name == "decimal") {
-    this->checker.diags_.error(name->loc(),
-                               "'decimal' is used as 'decimal(x)', which makes a decimal of x, or "
-                               "through its functions, e.g. 'decimal.max(a, b)'");
-  } else if (name->name == "null") {
-    this->checker.diags_.error(
-        name->loc(), "'null' is not supported: the only value for nothing is 'undefined'; "
-                     "write 'undefined' (null exists only in Json values)");
-  } else if (const char *why = whyUnsupported(name->name)) {
-    this->checker.diags_.error(name->loc(), "'" + name->name + "' is not supported: " + why);
-  } else if (entry.enumDecl()) {
-    this->checker.diags_.error(name->loc(), "enum '" + name->name + "' can only be used as '" +
-                                                name->name + ".Member' or '" + name->name +
-                                                "[value]'");
-  } else if (entry.cls()) {
-    return this->checker.classValueChecker().checkClassValue(name, entry.cls());
-  } else if (this->checker.currentClass_ && this->checker.currentClass_->expression() &&
-             !this->checker.currentClass_->name.empty() &&
-             this->checker.currentClass_->name == name->name) {
-    return this->checker.classValueChecker().checkClassValue(name, this->checker.currentClass_);
-  } else if (this->checker.currentClass_ && this->checker.currentClass_->expression() &&
-             llvm::is_contained(this->checker.currentClass_->locals, name->name)) {
-    this->checker.diags_.error(name->loc(),
-                               "a class expression cannot use '" + name->name +
-                                   "', a variable of the function around it: the class is made "
-                                   "once, not at each call, and its code runs later; pass the "
-                                   "value to its constructor, or keep it in a global");
-  } else if (TopLevelChecker::ResultSourceIsLoaded loaded =
-                 this->checker.topLevelChecker().checkLoaded(name);
-             loaded.isErr()) {
-    if (loaded.error().code != TopLevelCheckerCheckLoadedErrorCode::ALREADY_REPORTED) {
-      this->checker.diags_.error(name->loc(), loaded.error().message);
-    }
-  } else if (this->checker.early_ &&
-             (this->checker.state(this->checker.module_).topLevelNames.contains(name->name) ||
-              this->checker.declaredLater(name->name))) {
-    this->checker.diags_.error(
-        name->loc(), "'" + name->name + "' is declared after the code that first calls '" +
-                         this->checker.early_->name + "', which needs to know what '" +
-                         this->checker.early_->name +
-                         "' returns; move the declaration up, or declare the return type");
-  } else if (const Checker::BlockNames *later = this->checker.declaredLater(name->name);
-             later && this->checker.functions_.size() > later->functions) {
-    this->checker.diags_.error(name->loc(),
-                               "'" + name->name +
-                                   "' is declared later in the block, after this function "
-                                   "is created; move the declaration up, or declare the "
-                                   "function with 'function', which can use it");
-  } else if (later) {
-    this->checker.diags_.error(name->loc(), "'" + name->name + "' is used before it is declared");
-  } else if (llvm::is_contained(this->checker.initializing_, name->name)) {
-    this->checker.diags_.error(
-        name->loc(), "'" + name->name + "' is used in its own initializer, before it has a value");
-  } else if (object != std::end(objects)) {
-    this->checker.diags_.error(
-        name->loc(), "'" + name->name + "' can only be used through its properties, e.g. '" +
-                         object->second + "'");
-  } else {
-    this->checker.diags_.error(name->loc(), "cannot find name '" + name->name + "'");
+  ResultResolvedNameUse resolved = this->unknownName(name, entry);
+  if (resolved.isOk()) {
+    return resolved.value();
+  }
+  if (resolved.error().code != NameCheckerUnknownNameErrorCode::ALREADY_REPORTED) {
+    this->checker.diags_.error(name->loc(), resolved.error().message);
   }
   name->type = Type::error();
 

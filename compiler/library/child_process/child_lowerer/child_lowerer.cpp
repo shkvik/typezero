@@ -14,13 +14,8 @@
 #include "compiler/lower/types/union_layout/union_layout.h"
 #include "compiler/lower/values/array_lowerer/array_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
-#include "llvm/Support/ErrorHandling.h"
 
-using llvm::BasicBlock;
 using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -93,136 +88,143 @@ enum : uint32_t {
   HasStdio = 256,
 };
 
-const Type *bufferType() { return Type::bytesType(Type::Bytes::Buffer); }
+}
 
-bool holds(const Type *type, const Type *member) {
+const Type *ChildLowerer::bufferType() {
+  return Type::bytesType(Type::Bytes::Buffer);
+}
+
+bool ChildLowerer::holds(const Type *type, const Type *member) {
   type = type->nonOptional();
 
   return type == member || llvm::is_contained(type->members(), member);
 }
 
-}
-
-ChildLowerer::ChildLowerer(Lowering &lowering) : lowering_(lowering) {}
+ChildLowerer::ChildLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::StructType *ChildLowerer::spawnPartsType() {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
 
-  return llvm::StructType::get(lowering_.ctx_, {lowering_.strTy_,
-                                                lowering_.strTy_,
-                                                lowering_.strTy_,
-                                                lowering_.strTy_,
-                                                ptr,
-                                                lowering_.strTy_,
-                                                llvm::ArrayType::get(lowering_.strTy_, 3),
-                                                llvm::ArrayType::get(ptr, 3),
-                                                i32,
-                                                i32,
-                                                i32,
-                                                i32,
-                                                i32,
-                                                i32,
-                                                i32,
-                                                llvm::ArrayType::get(i32, 3),
-                                                ptr,
-                                                ptr,
-                                                ptr,
-                                                lowering_.strTy_,
-                                                lowering_.strTy_,
-                                                lowering_.strTy_,
-                                                lowering_.strTy_,
-                                                lowering_.builder_.getInt64Ty(),
-                                                lowering_.builder_.getDoubleTy()});
+  return llvm::StructType::get(this->lowering.ctx_, {this->lowering.strTy_,
+                                                     this->lowering.strTy_,
+                                                     this->lowering.strTy_,
+                                                     this->lowering.strTy_,
+                                                     ptr,
+                                                     this->lowering.strTy_,
+                                                     llvm::ArrayType::get(this->lowering.strTy_, 3),
+                                                     llvm::ArrayType::get(ptr, 3),
+                                                     i32,
+                                                     i32,
+                                                     i32,
+                                                     i32,
+                                                     i32,
+                                                     i32,
+                                                     i32,
+                                                     llvm::ArrayType::get(i32, 3),
+                                                     ptr,
+                                                     ptr,
+                                                     ptr,
+                                                     this->lowering.strTy_,
+                                                     this->lowering.strTy_,
+                                                     this->lowering.strTy_,
+                                                     this->lowering.strTy_,
+                                                     this->lowering.builder_.getInt64Ty(),
+                                                     this->lowering.builder_.getDoubleTy()});
 }
 
 llvm::Value *ChildLowerer::spawnStream(llvm::Value *parts, unsigned stream, const Type *to,
                                        bool retain) {
-  llvm::StructType *partsType = spawnPartsType();
-  llvm::Type *i32 = lowering_.builder_.getInt32Ty();
+  llvm::StructType *partsType = this->spawnPartsType();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
   auto field = [&](unsigned f, unsigned i) {
-    return lowering_.builder_.CreateConstInBoundsGEP2_32(
-        partsType->getElementType(f), lowering_.builder_.CreateStructGEP(partsType, parts, f), 0,
-        i);
+    return this->lowering.builder_.CreateConstInBoundsGEP2_32(
+        partsType->getElementType(f), this->lowering.builder_.CreateStructGEP(partsType, parts, f),
+        0, i);
   };
-  llvm::Value *piped = lowering_.builder_.CreateICmpNE(
-      lowering_.builder_.CreateLoad(i32, field(PtPiped, stream)), lowering_.builder_.getInt32(0));
+  llvm::Value *piped = this->lowering.builder_.CreateICmpNE(
+      this->lowering.builder_.CreateLoad(i32, field(PtPiped, stream)),
+      this->lowering.builder_.getInt32(0));
   auto part = [&](const Type *member) {
     llvm::Value *raw =
-        lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(member),
-                                      field(member->isString() ? PtText : PtBytes, stream));
+        this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(member),
+                                           field(member->isString() ? PtText : PtBytes, stream));
     if (retain) {
-      lowering_.refCounts().retainValue(raw, member);
+      this->lowering.refCounts().retainValue(raw, member);
     }
 
     return raw;
   };
-  bool text = holds(to, Type::string()), bytes = holds(to, bufferType());
+  bool text = ChildLowerer::holds(to, Type::string());
+  bool bytes = ChildLowerer::holds(to, ChildLowerer::bufferType());
   if (!to->isOptional() && !to->isUnion()) {
     return part(to);
   }
   if (to->isOptional() && !to->inner()->isUnion()) {
-    return lowering_.optionalLowerer().makeOptional(part(to->inner()), piped, to);
+    return this->lowering.optionalLowerer().makeOptional(part(to->inner()), piped, to);
   }
   llvm::Value *value;
   if (text && bytes) {
-    llvm::Value *mode = lowering_.builder_.CreateICmpNE(
-        lowering_.builder_.CreateLoad(
-            i32, lowering_.builder_.CreateStructGEP(partsType, parts, PtTextMode)),
-        lowering_.builder_.getInt32(0));
+    llvm::Value *mode = this->lowering.builder_.CreateICmpNE(
+        this->lowering.builder_.CreateLoad(
+            i32, this->lowering.builder_.CreateStructGEP(partsType, parts, PtTextMode)),
+        this->lowering.builder_.getInt32(0));
     llvm::Value *fromText =
-        lowering_.exprLowerer().emitConversion(part(Type::string()), Type::string(), to);
-    llvm::Value *fromBytes =
-        lowering_.exprLowerer().emitConversion(part(bufferType()), bufferType(), to);
-    value = lowering_.builder_.CreateSelect(mode, fromText, fromBytes);
+        this->lowering.exprLowerer().emitConversion(part(Type::string()), Type::string(), to);
+    llvm::Value *fromBytes = this->lowering.exprLowerer().emitConversion(
+        part(ChildLowerer::bufferType()), ChildLowerer::bufferType(), to);
+    value = this->lowering.builder_.CreateSelect(mode, fromText, fromBytes);
   } else {
-    const Type *member = text ? Type::string() : bufferType();
-    value = lowering_.exprLowerer().emitConversion(part(member), member, to);
+    const Type *member = text ? Type::string() : ChildLowerer::bufferType();
+    value = this->lowering.exprLowerer().emitConversion(part(member), member, to);
   }
 
-  return to->isOptional() ? lowering_.builder_.CreateSelect(
-                                piped, value, lowering_.optionalLowerer().undefinedValue(to))
+  return to->isOptional() ? this->lowering.builder_.CreateSelect(
+                                piped, value, this->lowering.optionalLowerer().undefinedValue(to))
                           : value;
 }
 
 llvm::Function *ChildLowerer::spawnMaker(const Type *type) {
-  llvm::Function *&maker = spawnMakers_[type];
+  llvm::Function *&maker = this->spawnMakers[type];
   if (maker) {
     return maker;
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
   const ClassDecl *cls = type->classDecl();
   maker = llvm::Function::Create(
       llvm::FunctionType::get(ptr, {ptr}, false), llvm::GlobalValue::InternalLinkage,
-      cls ? "tz.make." + cls->name.str() : "tz.make.spawn", lowering_.module_.get());
-  lowering_.functionBuilder().setFunctionAttributes(maker);
-  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
-  llvm::Function *outer = std::exchange(lowering_.function_, maker);
-  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", maker));
+      cls ? "tz.make." + cls->name.str() : "tz.make.spawn", this->lowering.module_.get());
+  this->lowering.functionBuilder().setFunctionAttributes(maker);
+  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
+  llvm::Function *outer = std::exchange(this->lowering.function_, maker);
+  this->lowering.builder_.SetInsertPoint(
+      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", maker));
 
   llvm::Value *parts = maker->getArg(0);
-  llvm::StructType *partsType = spawnPartsType();
+  llvm::StructType *partsType = this->spawnPartsType();
   llvm::Value *object;
   if (cls) {
-    object = lowering_.classLowerer().allocInstance(cls);
+    object = this->lowering.classLowerer().allocInstance(cls);
   } else {
     std::vector<unsigned> keys;
     for (const Field &f : type->fields()) {
       keys.push_back(ObjectLayouts::fieldIndex(type, f.name));
     }
-    object = lowering_.objectLayouts().allocObject(type, keys);
+    object = this->lowering.objectLayouts().allocObject(type, keys);
   }
   auto load = [&](unsigned f) {
-    return lowering_.builder_.CreateLoad(partsType->getElementType(f),
-                                         lowering_.builder_.CreateStructGEP(partsType, parts, f));
+    return this->lowering.builder_.CreateLoad(
+        partsType->getElementType(f), this->lowering.builder_.CreateStructGEP(partsType, parts, f));
   };
   auto flag = [&](unsigned f) {
-    return lowering_.builder_.CreateICmpNE(load(f), lowering_.builder_.getInt32(0));
+    return this->lowering.builder_.CreateICmpNE(load(f), this->lowering.builder_.getInt32(0));
   };
   auto number = [&](unsigned f) {
-    return lowering_.builder_.CreateSExt(load(f), lowering_.builder_.getInt64Ty());
+    return this->lowering.builder_.CreateSExt(load(f), this->lowering.builder_.getInt64Ty());
   };
   auto atom = [&](const Type *t, unsigned part) {
-    return lowering_.objectMaker().atomOf(t, load(part));
+    return this->lowering.objectMaker().atomOf(t, load(part));
   };
   for (const Field &f : type->fields()) {
     llvm::StringRef name = f.name;
@@ -230,12 +232,13 @@ llvm::Function *ChildLowerer::spawnMaker(const Type *type) {
     auto maybe = [&](unsigned part, unsigned has) {
       llvm::Value *raw = t->nonOptional()->isInteger() ? number(part) : load(part);
 
-      return t->isOptional() ? lowering_.optionalLowerer().makeOptional(raw, flag(has), t) : raw;
+      return t->isOptional() ? this->lowering.optionalLowerer().makeOptional(raw, flag(has), t)
+                             : raw;
     };
     bool atomic = UnionLayout::isAtomType(t);
     llvm::Value *value;
     if (t->isStringLiteral()) {
-      value = lowering_.builder_.getInt32(t->atom());
+      value = this->lowering.builder_.getInt32(t->atom());
     } else if (name == "message") {
       value = load(PtMessage);
     } else if (name == "code") {
@@ -267,47 +270,49 @@ llvm::Function *ChildLowerer::spawnMaker(const Type *type) {
     } else if (name == "pid") {
       value = number(PtPid);
     } else if (name == "stdout" || name == "stderr") {
-      value = spawnStream(parts, name == "stdout" ? 1 : 2, t, false);
+      value = this->spawnStream(parts, name == "stdout" ? 1 : 2, t, false);
     } else if (name == "output") {
       const Type *element = t->inner();
-      llvm::Value *count = lowering_.builder_.getInt64(3);
-      value = lowering_.builder_.CreateCall(
-          lowering_.rt_.arrNew, {lowering_.typeDescriptors().typeDescriptor(element), count, count},
-          "output");
-      llvm::Value *data = lowering_.arrayLowerer().arrayData(value);
+      llvm::Value *count = this->lowering.builder_.getInt64(3);
+      value = this->lowering.builder_.CreateCall(
+          this->lowering.rt_.arrNew,
+          {this->lowering.typeDescriptors().typeDescriptor(element), count, count}, "output");
+      llvm::Value *data = this->lowering.arrayLowerer().arrayData(value);
       for (unsigned i = 0; i < 3; ++i) {
-        lowering_.builder_.CreateStore(
-            spawnStream(parts, i, element, true),
-            lowering_.arrayLowerer().elementAddress(data, element, lowering_.builder_.getInt64(i)));
+        this->lowering.builder_.CreateStore(
+            this->spawnStream(parts, i, element, true),
+            this->lowering.arrayLowerer().elementAddress(data, element,
+                                                         this->lowering.builder_.getInt64(i)));
       }
     } else {
       continue;
     }
-    lowering_.builder_.CreateStore(
-        value, lowering_.objectLayouts().fieldAddress(object, type, name, true));
+    this->lowering.builder_.CreateStore(
+        value, this->lowering.objectLayouts().fieldAddress(object, type, name, true));
   }
-  lowering_.builder_.CreateRet(object);
-  lowering_.function_ = outer;
-  lowering_.builder_.restoreIP(point);
+  this->lowering.builder_.CreateRet(object);
+  this->lowering.function_ = outer;
+  this->lowering.builder_.restoreIP(point);
 
   return maker;
 }
 
 llvm::Function *ChildLowerer::errorMaker(const Type *type) {
   if (!type->isUnion()) {
-    return spawnMaker(type);
+    return this->spawnMaker(type);
   }
-  llvm::Function *&made = spawnMakers_[type];
+  llvm::Function *&made = this->spawnMakers[type];
   if (made) {
     return made;
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
   std::vector<const Type *> variants(type->members().begin(), type->members().end());
   std::vector<llvm::Function *> makers;
   std::vector<std::string> reasons;
   unsigned system = 0;
   for (const Type *variant : variants) {
-    makers.push_back(spawnMaker(variant));
+    makers.push_back(this->spawnMaker(variant));
     std::string kind;
     for (char16_t unit : variant->field("kind")->type->literalText()) {
       kind.push_back(char(unit));
@@ -320,82 +325,86 @@ llvm::Function *ChildLowerer::errorMaker(const Type *type) {
   }
   made = llvm::Function::Create(llvm::FunctionType::get(ptr, {ptr}, false),
                                 llvm::GlobalValue::InternalLinkage, "tz.make." + type->name().str(),
-                                lowering_.module_.get());
+                                this->lowering.module_.get());
   llvm::Function *function = made;
-  lowering_.functionBuilder().setFunctionAttributes(function);
-  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
-  llvm::Function *outer = std::exchange(lowering_.function_, function);
-  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", function));
+  this->lowering.functionBuilder().setFunctionAttributes(function);
+  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
+  llvm::Function *outer = std::exchange(this->lowering.function_, function);
+  this->lowering.builder_.SetInsertPoint(
+      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", function));
   llvm::Value *parts = function->getArg(0);
-  llvm::StructType *partsType = spawnPartsType();
-  llvm::Value *reason = lowering_.builder_.CreateLoad(
-      ptr, lowering_.builder_.CreateStructGEP(partsType, parts, PtReason));
-  llvm::FunctionCallee compare = lowering_.module_->getOrInsertFunction(
+  llvm::StructType *partsType = this->spawnPartsType();
+  llvm::Value *reason = this->lowering.builder_.CreateLoad(
+      ptr, this->lowering.builder_.CreateStructGEP(partsType, parts, PtReason));
+  llvm::FunctionCallee compare = this->lowering.module_->getOrInsertFunction(
       "strcmp", llvm::FunctionType::get(i32, {ptr, ptr}, false));
   llvm::Value *none = llvm::ConstantInt::getSigned(i32, -1);
   llvm::Value *index = none;
   for (size_t v = 0; v < variants.size(); ++v) {
-    llvm::Value *same = lowering_.builder_.CreateICmpEQ(
-        lowering_.builder_.CreateCall(compare,
-                                      {reason, lowering_.stringLowerer().utf8Constant(reasons[v])}),
-        lowering_.builder_.getInt32(0));
-    index = lowering_.builder_.CreateSelect(same, lowering_.builder_.getInt32(unsigned(v)), index);
+    llvm::Value *same = this->lowering.builder_.CreateICmpEQ(
+        this->lowering.builder_.CreateCall(
+            compare, {reason, this->lowering.stringLowerer().utf8Constant(reasons[v])}),
+        this->lowering.builder_.getInt32(0));
+    index = this->lowering.builder_.CreateSelect(
+        same, this->lowering.builder_.getInt32(unsigned(v)), index);
   }
-  llvm::BasicBlock *unknown = llvm::BasicBlock::Create(lowering_.ctx_, "unknown", function);
+  llvm::BasicBlock *unknown = llvm::BasicBlock::Create(this->lowering.ctx_, "unknown", function);
   llvm::SwitchInst *pick =
-      lowering_.builder_.CreateSwitch(index, unknown, unsigned(variants.size()));
+      this->lowering.builder_.CreateSwitch(index, unknown, unsigned(variants.size()));
   for (size_t v = 0; v < variants.size(); ++v) {
-    llvm::BasicBlock *block = llvm::BasicBlock::Create(lowering_.ctx_, "variant", function);
-    pick->addCase(lowering_.builder_.getInt32(unsigned(v)), block);
-    lowering_.builder_.SetInsertPoint(block);
-    lowering_.builder_.CreateRet(lowering_.builder_.CreateCall(makers[v], {parts}));
+    llvm::BasicBlock *block = llvm::BasicBlock::Create(this->lowering.ctx_, "variant", function);
+    pick->addCase(this->lowering.builder_.getInt32(unsigned(v)), block);
+    this->lowering.builder_.SetInsertPoint(block);
+    this->lowering.builder_.CreateRet(this->lowering.builder_.CreateCall(makers[v], {parts}));
   }
-  lowering_.builder_.SetInsertPoint(unknown);
-  lowering_.builder_.CreateStore(lowering_.stringLowerer().utf8Constant("UNKNOWN"),
-                                 lowering_.builder_.CreateStructGEP(partsType, parts, PtCodeName));
-  lowering_.builder_.CreateRet(lowering_.builder_.CreateCall(makers[system], {parts}));
-  lowering_.function_ = outer;
-  lowering_.builder_.restoreIP(point);
+  this->lowering.builder_.SetInsertPoint(unknown);
+  this->lowering.builder_.CreateStore(
+      this->lowering.stringLowerer().utf8Constant("UNKNOWN"),
+      this->lowering.builder_.CreateStructGEP(partsType, parts, PtCodeName));
+  this->lowering.builder_.CreateRet(this->lowering.builder_.CreateCall(makers[system], {parts}));
+  this->lowering.function_ = outer;
+  this->lowering.builder_.restoreIP(point);
 
   return function;
 }
 
 llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
-  llvm::Type *f64 = lowering_.builder_.getDoubleTy();
-  std::vector<llvm::Type *> fields(RqEnv, lowering_.strTy_);
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+  llvm::Type *f64 = this->lowering.builder_.getDoubleTy();
+  std::vector<llvm::Type *> fields(RqEnv, this->lowering.strTy_);
   fields[RqArgs] = ptr;
   fields.insert(fields.end(), {ptr, ptr, ptr, f64, f64});
   fields.insert(fields.end(), RqStdio - RqMode, i32);
   fields.push_back(llvm::ArrayType::get(i32, 3));
   fields.push_back(i32);
-  llvm::StructType *requestType = llvm::StructType::get(lowering_.ctx_, fields);
+  llvm::StructType *requestType = llvm::StructType::get(this->lowering.ctx_, fields);
 
-  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
+  std::vector<llvm::Value *> values = this->lowering.exprLowerer().emitExprs(call->args);
   llvm::AllocaInst *request =
-      lowering_.functionFrame().createStackSlot(requestType, "spawn.request");
-  lowering_.builder_.CreateStore(llvm::Constant::getNullValue(requestType), request);
+      this->lowering.functionFrame().createStackSlot(requestType, "spawn.request");
+  this->lowering.builder_.CreateStore(llvm::Constant::getNullValue(requestType), request);
   auto set = [&](unsigned f, llvm::Value *value) {
-    lowering_.builder_.CreateStore(value,
-                                   lowering_.builder_.CreateStructGEP(requestType, request, f));
+    this->lowering.builder_.CreateStore(
+        value, this->lowering.builder_.CreateStructGEP(requestType, request, f));
   };
   auto literal = [&](unsigned arg) { return unsigned(cast<IntLitExpr>(call->args[arg])->value); };
-  llvm::Value *has = lowering_.builder_.getInt32(literal(ChildStdioGiven) ? HasStdio : 0);
+  llvm::Value *has = this->lowering.builder_.getInt32(literal(ChildStdioGiven) ? HasStdio : 0);
   auto given = [&](unsigned arg) -> std::pair<llvm::Value *, llvm::Value *> {
     const Type *type = call->args[arg]->type;
     if (!type->isOptional()) {
-      return {lowering_.builder_.getTrue(), values[arg]};
+      return {this->lowering.builder_.getTrue(), values[arg]};
     }
 
-    return {lowering_.optionalLowerer().optionalHas(values[arg], type),
-            lowering_.optionalLowerer().optionalValue(values[arg], type)};
+    return {this->lowering.optionalLowerer().optionalHas(values[arg], type),
+            this->lowering.optionalLowerer().optionalValue(values[arg], type)};
   };
   auto option = [&](unsigned arg, unsigned f, uint32_t bit) {
     auto [present, value] = given(arg);
     if (bit) {
-      has = lowering_.builder_.CreateOr(
-          has, lowering_.builder_.CreateSelect(present, lowering_.builder_.getInt32(bit),
-                                               lowering_.builder_.getInt32(0)));
+      has = this->lowering.builder_.CreateOr(
+          has, this->lowering.builder_.CreateSelect(present, this->lowering.builder_.getInt32(bit),
+                                                    this->lowering.builder_.getInt32(0)));
     }
     set(f, value);
 
@@ -403,7 +412,8 @@ llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
   };
   auto boolean = [&](unsigned arg, unsigned f) {
     auto [present, value] = given(arg);
-    set(f, lowering_.builder_.CreateZExt(lowering_.builder_.CreateAnd(present, value), i32));
+    set(f,
+        this->lowering.builder_.CreateZExt(this->lowering.builder_.CreateAnd(present, value), i32));
   };
 
   set(RqFile, values[ChildFile]);
@@ -414,8 +424,9 @@ llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
     const Type *input = call->args[ChildInput]->type->nonOptional();
     bool text = input->isString();
     llvm::Value *present = option(ChildInput, text ? RqInputText : RqInputBytes, 0);
-    set(RqInput, lowering_.builder_.CreateSelect(present, lowering_.builder_.getInt32(text ? 1 : 2),
-                                                 lowering_.builder_.getInt32(0)));
+    set(RqInput, this->lowering.builder_.CreateSelect(
+                     present, this->lowering.builder_.getInt32(text ? 1 : 2),
+                     this->lowering.builder_.getInt32(0)));
   }
   option(ChildTimeout, RqTimeout, HasTimeout);
   option(ChildMaxBuffer, RqMaxBuffer, HasMaxBuffer);
@@ -426,8 +437,9 @@ llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
   }
   if (call->args[ChildShell]->type->nonOptional()->isString()) {
     llvm::Value *present = option(ChildShell, RqShell, 0);
-    set(RqShellKind, lowering_.builder_.CreateSelect(present, lowering_.builder_.getInt32(2),
-                                                     lowering_.builder_.getInt32(0)));
+    set(RqShellKind,
+        this->lowering.builder_.CreateSelect(present, this->lowering.builder_.getInt32(2),
+                                             this->lowering.builder_.getInt32(0)));
   } else {
     boolean(ChildShell, RqShellKind);
   }
@@ -438,36 +450,37 @@ llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
   option(ChildUid, RqUid, HasUid);
   option(ChildGid, RqGid, HasGid);
   set(RqHas, has);
-  set(RqStringType, lowering_.typeDescriptors().typeDescriptor(Type::string()));
-  set(RqMode, lowering_.builder_.getInt32(call->builtin() == Builtin::ChildSpawnSync      ? 0
-                                          : call->builtin() == Builtin::ChildExecFileSync ? 1
-                                                                                          : 2));
+  set(RqStringType, this->lowering.typeDescriptors().typeDescriptor(Type::string()));
+  set(RqMode,
+      this->lowering.builder_.getInt32(call->builtin() == Builtin::ChildSpawnSync      ? 0
+                                       : call->builtin() == Builtin::ChildExecFileSync ? 1
+                                                                                       : 2));
   for (unsigned i = 0; i < 3; ++i) {
-    lowering_.builder_.CreateStore(
-        lowering_.builder_.getInt32(literal(ChildStdin + i)),
-        lowering_.builder_.CreateConstInBoundsGEP2_32(
+    this->lowering.builder_.CreateStore(
+        this->lowering.builder_.getInt32(literal(ChildStdin + i)),
+        this->lowering.builder_.CreateConstInBoundsGEP2_32(
             requestType->getElementType(RqStdio),
-            lowering_.builder_.CreateStructGEP(requestType, request, RqStdio), 0, i));
+            this->lowering.builder_.CreateStructGEP(requestType, request, RqStdio), 0, i));
   }
-  set(RqEncoding, lowering_.builder_.getInt32(literal(ChildEncoding)));
+  set(RqEncoding, this->lowering.builder_.getInt32(literal(ChildEncoding)));
 
   bool spawn = call->builtin() == Builtin::ChildSpawnSync;
   const Type *value = call->type->okType();
-  llvm::Value *resultMaker = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+  llvm::Value *resultMaker = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
   if (spawn) {
-    resultMaker = spawnMaker(value);
+    resultMaker = this->spawnMaker(value);
   }
   llvm::AllocaInst *parts =
-      lowering_.functionFrame().createStackSlot(spawnPartsType(), "spawn.parts");
-  llvm::Value *result = lowering_.builder_.CreateCall(
-      lowering_.processLowerer().processFunction("tz_child_run", ptr, {ptr, ptr, ptr, ptr}),
-      {request, parts, errorMaker(call->type->errType()), resultMaker});
+      this->lowering.functionFrame().createStackSlot(this->spawnPartsType(), "spawn.parts");
+  llvm::Value *result = this->lowering.builder_.CreateCall(
+      this->lowering.processLowerer().processFunction("tz_child_run", ptr, {ptr, ptr, ptr, ptr}),
+      {request, parts, this->errorMaker(call->type->errType()), resultMaker});
   for (size_t i = 0; i < values.size(); ++i) {
-    lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
+    this->lowering.refCounts().releaseValue(values[i], call->args[i]->type);
   }
 
-  return lowering_.resultLowerer().catchFailure(
-      spawn ? result : spawnStream(parts, 1, value, false), call->type, call->loc());
+  return this->lowering.resultLowerer().catchFailure(
+      spawn ? result : this->spawnStream(parts, 1, value, false), call->type, call->loc());
 }
 
 }

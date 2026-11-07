@@ -10,7 +10,9 @@ namespace {
 
 namespace path = llvm::sys::path;
 
-std::string absolute(llvm::StringRef file) {
+}
+
+std::string ErrSites::absolute(llvm::StringRef file) {
   llvm::SmallString<256> full(file);
   llvm::sys::fs::make_absolute(full);
   path::remove_dots(full, true);
@@ -19,18 +21,19 @@ std::string absolute(llvm::StringRef file) {
   return std::string(full);
 }
 
+ErrSites::ErrSites(Lowering &owner)
+    : lowering(owner) {}
+
+llvm::Type *ErrSites::type() {
+  return this->lowering.builder_.getPtrTy();
 }
 
-ErrSites::ErrSites(Lowering &lowering) : lowering_(lowering) {}
-
-llvm::Type *ErrSites::type() { return lowering_.builder_.getPtrTy(); }
-
 llvm::Constant *ErrSites::none() {
-  return llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+  return llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
 }
 
 std::string ErrSites::functionName() const {
-  const FunctionDecl *fn = lowering_.currentFn_;
+  const FunctionDecl *fn = this->lowering.currentFn_;
   while (fn && fn->isExpression() && fn->source.empty()) {
     fn = fn->parent;
   }
@@ -48,15 +51,16 @@ std::string ErrSites::functionName() const {
 }
 
 std::string ErrSites::fileName(unsigned buffer) {
-  if (auto found = files_.find(buffer); found != files_.end()) {
+  if (auto found = this->files.find(buffer); found != this->files.end()) {
     return found->second;
   }
-  const llvm::SourceMgr &sources = *lowering_.sourceMgr_;
-  if (!entryKnown_) {
-    entryKnown_ = true;
+  const llvm::SourceMgr &sources = *this->lowering.sourceMgr_;
+  if (!this->entryKnown) {
+    this->entryKnown = true;
     if (sources.getNumBuffers() > 0) {
-      entryDir_ =
-          path::parent_path(absolute(sources.getMemoryBuffer(1)->getBufferIdentifier())).str();
+      this->entryDir =
+          path::parent_path(ErrSites::absolute(sources.getMemoryBuffer(1)->getBufferIdentifier()))
+              .str();
     }
   }
   llvm::StringRef id = sources.getMemoryBuffer(buffer)->getBufferIdentifier();
@@ -64,27 +68,27 @@ std::string ErrSites::fileName(unsigned buffer) {
   if (id.starts_with("tz:") || id.starts_with("node:")) {
     name = id.str();
   } else {
-    name = absolute(id);
+    name = ErrSites::absolute(id);
     llvm::StringRef rest = name;
-    if (!entryDir_.empty() && rest.consume_front(entryDir_) && !rest.empty() &&
+    if (!this->entryDir.empty() && rest.consume_front(this->entryDir) && !rest.empty() &&
         path::is_separator(rest.front())) {
       name = path::convert_to_slash(rest.drop_front());
     }
   }
-  files_[buffer] = name;
+  this->files[buffer] = name;
 
   return name;
 }
 
 bool ErrSites::inLibrary(llvm::SMLoc loc) {
-  if (!lowering_.sourceMgr_ || !loc.isValid()) {
+  if (!this->lowering.sourceMgr_ || !loc.isValid()) {
     return false;
   }
-  unsigned buffer = lowering_.sourceMgr_->FindBufferContainingLoc(loc);
+  unsigned buffer = this->lowering.sourceMgr_->FindBufferContainingLoc(loc);
   if (!buffer) {
     return false;
   }
-  llvm::StringRef id = lowering_.sourceMgr_->getMemoryBuffer(buffer)->getBufferIdentifier();
+  llvm::StringRef id = this->lowering.sourceMgr_->getMemoryBuffer(buffer)->getBufferIdentifier();
 
   return id.starts_with("tz:") || id.starts_with("node:");
 }
@@ -93,36 +97,37 @@ llvm::Value *ErrSites::stamp(llvm::Value *result, const Type *type, llvm::SMLoc 
   if (type->errType()->isNever()) {
     return result;
   }
-  Lowering::ResultLayout layout = lowering_.resultLowerer().resultLayout(type);
-  llvm::Value *old = lowering_.builder_.CreateExtractValue(result, layout.site, "site");
-  llvm::Value *site = lowering_.builder_.CreateSelect(lowering_.builder_.CreateIsNull(old),
-                                                      this->site(loc), old, "site");
+  Lowering::ResultLayout layout = this->lowering.resultLowerer().resultLayout(type);
+  llvm::Value *old = this->lowering.builder_.CreateExtractValue(result, layout.site, "site");
+  llvm::Value *site = this->lowering.builder_.CreateSelect(
+      this->lowering.builder_.CreateIsNull(old), this->site(loc), old, "site");
 
-  return lowering_.builder_.CreateInsertValue(result, site, layout.site);
+  return this->lowering.builder_.CreateInsertValue(result, site, layout.site);
 }
 
 llvm::Constant *ErrSites::site(llvm::SMLoc loc) {
-  if (!lowering_.sourceMgr_ || !loc.isValid() || inLibrary(loc)) {
-    return none();
+  if (!this->lowering.sourceMgr_ || !loc.isValid() || this->inLibrary(loc)) {
+    return this->none();
   }
-  unsigned buffer = lowering_.sourceMgr_->FindBufferContainingLoc(loc);
+  unsigned buffer = this->lowering.sourceMgr_->FindBufferContainingLoc(loc);
   if (!buffer) {
-    return none();
+    return this->none();
   }
-  unsigned line = lowering_.sourceMgr_->getLineAndColumn(loc, buffer).first;
-  std::string place = fileName(buffer) + ":" + std::to_string(line);
-  std::string function = functionName();
+  unsigned line = this->lowering.sourceMgr_->getLineAndColumn(loc, buffer).first;
+  std::string place = this->fileName(buffer) + ":" + std::to_string(line);
+  std::string function = this->functionName();
   std::string text = function.empty() ? place : function + " (" + place + ")";
-  llvm::Constant *&global = sites_[text];
+  llvm::Constant *&global = this->sites[text];
   if (global) {
     return global;
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
-  auto *structType = llvm::StructType::get(lowering_.ctx_, {ptr, i32});
-  llvm::Constant *init =
-      llvm::ConstantStruct::get(structType, {lowering_.stringLowerer().utf8Constant(text),
-                                             lowering_.builder_.getInt32(uint32_t(text.size()))});
-  auto *variable = new llvm::GlobalVariable(*lowering_.module_, structType, true,
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+  auto *structType = llvm::StructType::get(this->lowering.ctx_, {ptr, i32});
+  llvm::Constant *init = llvm::ConstantStruct::get(
+      structType, {this->lowering.stringLowerer().utf8Constant(text),
+                   this->lowering.builder_.getInt32(uint32_t(text.size()))});
+  auto *variable = new llvm::GlobalVariable(*this->lowering.module_, structType, true,
                                             llvm::GlobalValue::PrivateLinkage, init, "tz.site");
   variable->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   global = variable;

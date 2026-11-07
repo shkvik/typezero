@@ -167,4 +167,14 @@ std::string ErrorTextAssignable::alsoHere(llvm::StringRef other) {
   return (llvm::Twine("the object also goes here, as '") + other + "'").str();
 }
 
+std::string ErrorTextConvert::direct(llvm::StringRef text, llvm::StringRef method) {
+  return (llvm::Twine("; convert it explicitly: '") + text + "." + method + "()'").str();
+}
+
+std::string ErrorTextConvert::rounded(llvm::StringRef text, llvm::StringRef method) {
+  return (llvm::Twine("; round it first, then convert: 'Math.trunc(") + text + ")." + method +
+          "()' (or Math.round, Math.floor, Math.ceil)")
+      .str();
+}
+
 }

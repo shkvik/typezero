@@ -14,16 +14,13 @@
 #include "llvm/Support/ConvertUTF.h"
 #include <functional>
 
-using llvm::cast;
 using llvm::dyn_cast;
 using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::string utf8(const std::u16string &text) {
+std::string SubtleCallChecker::utf8(const std::u16string &text) {
   std::string out;
   llvm::convertUTF16ToUTF8String(
       llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
@@ -32,7 +29,7 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-std::optional<double> numberLiteral(const Expr *e) {
+std::optional<double> SubtleCallChecker::numberLiteral(const Expr *e) {
   if (auto *lit = dyn_cast_or_null<IntLitExpr>(e)) {
     return double(lit->value);
   }
@@ -43,7 +40,8 @@ std::optional<double> numberLiteral(const Expr *e) {
   return std::nullopt;
 }
 
-const ObjectLitExpr::Property *property(const ObjectLitExpr *lit, llvm::StringRef name) {
+const ObjectLitExpr::Property *SubtleCallChecker::property(const ObjectLitExpr *lit,
+                                                           llvm::StringRef name) {
   for (const ObjectLitExpr::Property &prop : lit->props) {
     if (!prop.spread() && !prop.key() && prop.name == name) {
       return &prop;
@@ -53,9 +51,8 @@ const ObjectLitExpr::Property *property(const ObjectLitExpr *lit, llvm::StringRe
   return nullptr;
 }
 
-}
-
-SubtleCallChecker::SubtleCallChecker(Checker &checker) : checker_(checker) {}
+SubtleCallChecker::SubtleCallChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, const Type *expected) {
   llvm::StringRef method = member->name;
@@ -67,8 +64,8 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
   auto algorithm = [&](size_t i) -> const Expr * {
     Expr *e = arg(i);
     if (auto *name = dyn_cast_or_null<NameExpr>(e)) {
-      if (VarSymbol *var = checker_.scopes().lookup(name->name).var()) {
-        if (const Expr *lit = checker_.constLiterals_.lookup(var)) {
+      if (VarSymbol *var = this->checker.scopes().lookup(name->name).var()) {
+        if (const Expr *lit = this->checker.constLiterals_.lookup(var)) {
           return lit;
         }
       }
@@ -86,8 +83,8 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     static const llvm::StringLiteral formats[] = {"raw", "pkcs8", "spki", "jwk"};
     if (!llvm::is_contained(formats, *f)) {
       bad = true;
-      checker_.diags_.error(arg(i)->loc(), "unknown key format '" + *f +
-                                               "'; it is 'raw', 'pkcs8', 'spki' or 'jwk'");
+      this->checker.diags_.error(arg(i)->loc(), "unknown key format '" + *f +
+                                                    "'; it is 'raw', 'pkcs8', 'spki' or 'jwk'");
       return "";
     }
 
@@ -119,8 +116,9 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
       }
       if (!llvm::is_contained(kUsages, *u)) {
         bad = true;
-        checker_.diags_.error(e.expr->loc(), "usage '" + *u + "' does not exist; the usages are " +
-                                                 quotedList(kUsages, "and"));
+        this->checker.diags_.error(e.expr->loc(), "usage '" + *u +
+                                                      "' does not exist; the usages are " +
+                                                      quotedList(kUsages, "and"));
         return;
       }
       if (!name.empty() && !llvm::is_contained(allowed, *u)) {
@@ -131,10 +129,10 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
             : isPublic == 0 && name != "HMAC" && familyOf(name) != "Aes" && familyOf(name) != "Kdf"
                 ? "a private " + name.str() + " key"
                 : an + name.str() + " key";
-        checker_.diags_.error(e.expr->loc(),
-                              "'" + *u + "' is no usage of " + what + "; " +
-                                  (allowed.empty() ? std::string("it takes none: pass []")
-                                                   : "it takes " + quotedList(allowed, "and")));
+        this->checker.diags_.error(
+            e.expr->loc(), "'" + *u + "' is no usage of " + what + "; " +
+                               (allowed.empty() ? std::string("it takes none: pass []")
+                                                : "it takes " + quotedList(allowed, "and")));
         return;
       }
     }
@@ -151,14 +149,15 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     }
     bad = true;
     if (lit->elements.empty() || isPublic == 0) {
-      checker_.diags_.error(lit->loc(), "a key without usages can do nothing, and node rejects it "
-                                        "('Usages cannot be empty'); give its usages, e.g. " +
-                                            quotedList(own, "and"));
+      this->checker.diags_.error(lit->loc(),
+                                 "a key without usages can do nothing, and node rejects it "
+                                 "('Usages cannot be empty'); give its usages, e.g. " +
+                                     quotedList(own, "and"));
     } else {
-      checker_.diags_.error(lit->loc(),
-                            "the private key of the pair would have no usages, which node "
-                            "rejects ('Usages cannot be empty'); add " +
-                                quotedList(own, "or"));
+      this->checker.diags_.error(lit->loc(),
+                                 "the private key of the pair would have no usages, which node "
+                                 "rejects ('Usages cannot be empty'); add " +
+                                     quotedList(own, "or"));
     }
   };
 
@@ -184,14 +183,14 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     bool jwk = !type->isBytes() && type->isObject() && !ClassDeclarer::classOf(type) &&
                !type->isArray() && !type->isTuple();
     if (keyFormat == "jwk" && bytes) {
-      checker_.diags_.error(data->loc(), "the key data of 'jwk' is a JsonWebKey; found '" +
-                                             type->name().str() + "'");
+      this->checker.diags_.error(data->loc(), "the key data of 'jwk' is a JsonWebKey; found '" +
+                                                  type->name().str() + "'");
       return false;
     }
     if (keyFormat != "jwk" && jwk) {
-      checker_.diags_.error(data->loc(), "the key data of '" + keyFormat +
-                                             "' is bytes (a BufferSource); found '" +
-                                             type->name().str() + "'");
+      this->checker.diags_.error(data->loc(), "the key data of '" + keyFormat +
+                                                  "' is bytes (a BufferSource); found '" +
+                                                  type->name().str() + "'");
       return false;
     }
 
@@ -202,7 +201,7 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
   std::vector<bool> checkedArgs(args.size(), false);
   std::function<bool(const Expr *)> isJsonValue = [&](const Expr *e) -> bool {
     if (auto *name = dyn_cast_or_null<NameExpr>(e)) {
-      VarSymbol *var = checker_.scopes().lookup(name->name).var();
+      VarSymbol *var = this->checker.scopes().lookup(name->name).var();
       return var && var->type && var->type->nonOptional()->isJson();
     }
     if (auto *m = dyn_cast_or_null<MemberExpr>(e)) {
@@ -214,16 +213,16 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     if (auto *c = dyn_cast_or_null<CallExpr>(e)) {
       if (auto *m = dyn_cast<MemberExpr>(c->callee)) {
         return m->name == "parse" && m->typeArgs.empty() &&
-               checker_.callChecker().isGlobalName(m->object, "JSON");
+               this->checker.callChecker().isGlobalName(m->object, "JSON");
       }
     }
 
     return false;
   };
   if (method == "digest") {
-    literalAlgorithm(checker_.diags_, algorithm(0), "digest", "", bad);
+    literalAlgorithm(this->checker.diags_, algorithm(0), "digest", "", bad);
   } else if (method == "generateKey") {
-    std::string name = literalAlgorithm(checker_.diags_, algorithm(0), "generateKey", "", bad);
+    std::string name = literalAlgorithm(this->checker.diags_, algorithm(0), "generateKey", "", bad);
     llvm::StringRef family = familyOf(name);
     usages(2, name, family == "Hmac" || family == "Aes" ? 0 : -1, true);
     if (!name.empty()) {
@@ -231,15 +230,15 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     }
   } else if (method == "importKey") {
     std::string f = format(0);
-    std::string name = literalAlgorithm(checker_.diags_, algorithm(2), "importKey", "", bad);
+    std::string name = literalAlgorithm(this->checker.diags_, algorithm(2), "importKey", "", bad);
     if (!f.empty() && !name.empty()) {
       std::vector<llvm::StringLiteral> formats = formatsOf(familyOf(name));
       if (!llvm::is_contained(formats, f)) {
         bad = true;
-        checker_.diags_.error(arg(0)->loc(), "'" + name + "' keys are not imported as '" + f +
-                                                 "' (node: 'Unable to import " + name + " using " +
-                                                 f + " format'); it takes " +
-                                                 quotedList(formats, "or"));
+        this->checker.diags_.error(arg(0)->loc(), "'" + name + "' keys are not imported as '" + f +
+                                                      "' (node: 'Unable to import " + name +
+                                                      " using " + f + " format'); it takes " +
+                                                      quotedList(formats, "or"));
       }
     }
     int isPublic = f == "spki" || f == "raw" ? 1 : f == "pkcs8" ? 0 : -1;
@@ -252,12 +251,13 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
       target = "subtleImport" + familyOf(name).str();
     }
     if ((f.empty() || f == "jwk") && isJsonValue(arg(1)) && isa<NameExpr>(member->object) &&
-        checker_.libFunctions_.lookup("subtleJwkOf")) {
-      Expr *json = checker_.exprChecker().checkExpr(arg(1));
-      auto *callee = checker_.ctx_.make<NameExpr>(json->loc(), "subtleJwkOf");
-      auto *wrap = checker_.ctx_.make<CallExpr>(json->loc(), callee, std::vector<Expr *>{json});
-      args[1] = checker_.eventTargetChecker().callLibraryFunction(wrap, "subtleJwkOf", {}, {true},
-                                                                  json->loc());
+        this->checker.libFunctions_.lookup("subtleJwkOf")) {
+      Expr *json = this->checker.exprChecker().checkExpr(arg(1));
+      auto *callee = this->checker.ctx_.make<NameExpr>(json->loc(), "subtleJwkOf");
+      auto *wrap =
+          this->checker.ctx_.make<CallExpr>(json->loc(), callee, std::vector<Expr *>{json});
+      args[1] = this->checker.eventTargetChecker().callLibraryFunction(wrap, "subtleJwkOf", {},
+                                                                       {true}, json->loc());
       checkedArgs[1] = true;
       if (target.empty()) {
         target = "subtleImportAny";
@@ -270,38 +270,38 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     }
   } else if (method == "sign" || method == "verify" || method == "encrypt" || method == "decrypt" ||
              method == "deriveBits") {
-    literalAlgorithm(checker_.diags_, algorithm(0), method, "", bad);
+    literalAlgorithm(this->checker.diags_, algorithm(0), method, "", bad);
   } else if (method == "deriveKey") {
-    literalAlgorithm(checker_.diags_, algorithm(0), "deriveBits", "", bad);
-    std::string name = literalAlgorithm(checker_.diags_, algorithm(2), "importKey", "", bad);
+    literalAlgorithm(this->checker.diags_, algorithm(0), "deriveBits", "", bad);
+    std::string name = literalAlgorithm(this->checker.diags_, algorithm(2), "importKey", "", bad);
     if (!name.empty()) {
       llvm::StringRef family = familyOf(name);
       if (family != "Hmac" && family != "Aes" && family != "Kdf") {
         bad = true;
-        checker_.diags_.error(arg(2)->loc(),
-                              "deriveKey makes secret keys: AES, HMAC, HKDF or PBKDF2, "
-                              "not '" +
-                                  name + "'");
+        this->checker.diags_.error(arg(2)->loc(),
+                                   "deriveKey makes secret keys: AES, HMAC, HKDF or PBKDF2, "
+                                   "not '" +
+                                       name + "'");
       } else {
         if (family != "Kdf") {
-          literalAlgorithm(checker_.diags_, algorithm(2), "get key length", "", bad);
+          literalAlgorithm(this->checker.diags_, algorithm(2), "get key length", "", bad);
         }
         usages(4, name, 0, true);
       }
     }
   } else if (method == "wrapKey") {
     format(0);
-    literalAlgorithm(checker_.diags_, algorithm(3), "wrapKey", "encrypt", bad);
+    literalAlgorithm(this->checker.diags_, algorithm(3), "wrapKey", "encrypt", bad);
   } else if (method == "unwrapKey") {
     std::string f = format(0);
-    literalAlgorithm(checker_.diags_, algorithm(3), "unwrapKey", "decrypt", bad);
-    std::string name = literalAlgorithm(checker_.diags_, algorithm(4), "importKey", "", bad);
+    literalAlgorithm(this->checker.diags_, algorithm(3), "unwrapKey", "decrypt", bad);
+    std::string name = literalAlgorithm(this->checker.diags_, algorithm(4), "importKey", "", bad);
     if (!f.empty() && !name.empty()) {
       std::vector<llvm::StringLiteral> formats = formatsOf(familyOf(name));
       if (!llvm::is_contained(formats, f)) {
         bad = true;
-        checker_.diags_.error(arg(0)->loc(), "'" + name + "' keys are not imported as '" + f +
-                                                 "'; it takes " + quotedList(formats, "or"));
+        this->checker.diags_.error(arg(0)->loc(), "'" + name + "' keys are not imported as '" + f +
+                                                      "'; it takes " + quotedList(formats, "or"));
       }
     }
     int isPublic = f == "spki" || f == "raw" ? 1 : f == "pkcs8" ? 0 : -1;
@@ -319,26 +319,27 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
   if (bad) {
     call->type = Type::error();
     std::vector<FunctionDecl *> methods =
-        ClassDeclarer::methodsNamed(checker_.libraryClass("SubtleCrypto"), method, false);
+        ClassDeclarer::methodsNamed(this->checker.libraryClass("SubtleCrypto"), method, false);
     FuncSymbol *sym = methods.size() == 1 ? methods[0]->sym : nullptr;
     if (sym) {
-      checker_.returnInferrer().resolveParams(sym);
+      this->checker.returnInferrer().resolveParams(sym);
     }
     for (size_t i = 0; i < args.size(); ++i) {
       if (!checkedArgs[i]) {
         args[i] = sym && i < sym->params.size()
-                      ? checker_.argumentChecker().checkArg(args[i], sym->params[i])
-                      : checker_.exprChecker().checkExpr(args[i]);
+                      ? this->checker.argumentChecker().checkArg(args[i], sym->params[i])
+                      : this->checker.exprChecker().checkExpr(args[i]);
       }
     }
     return call;
   }
   Expr *checked;
-  if (!target.empty() && checker_.libFunctions_.lookup(target) && isa<NameExpr>(member->object)) {
-    checked = checker_.eventTargetChecker().callLibraryFunction(call, target, {}, checkedArgs,
-                                                                member->loc());
+  if (!target.empty() && this->checker.libFunctions_.lookup(target) &&
+      isa<NameExpr>(member->object)) {
+    checked = this->checker.eventTargetChecker().callLibraryFunction(call, target, {}, checkedArgs,
+                                                                     member->loc());
   } else {
-    checked = checker_.methodCallChecker().checkMethodCall(call, member, expected);
+    checked = this->checker.methodCallChecker().checkMethodCall(call, member, expected);
   }
   if (!keyDataFits()) {
     checked->type = Type::error();

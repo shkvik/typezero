@@ -6,7 +6,7 @@ namespace tz {
 
 class TzModulesChecker {
 public:
-  explicit TzModulesChecker(Checker &checker);
+  explicit TzModulesChecker(Checker &owner);
 
   Expr *adaptResult(Expr *expr, const Type *to);
   void checkExternal(FunctionDecl *fn);
@@ -18,7 +18,11 @@ public:
   std::string knownPrefix(const Expr *expr) const;
 
 private:
-  Checker &checker_;
+  static bool isExternalReference(const Type *type);
+  static bool isExternalCallback(const Type *type);
+  static bool isExternalValue(const Type *type);
+
+  Checker &checker;
 };
 
 }

@@ -82,4 +82,10 @@ public:
   static std::string alsoHere(llvm::StringRef other);
 };
 
+class ErrorTextConvert {
+public:
+  static std::string direct(llvm::StringRef text, llvm::StringRef method);
+  static std::string rounded(llvm::StringRef text, llvm::StringRef method);
+};
+
 }

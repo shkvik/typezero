@@ -131,7 +131,7 @@ std::vector<FunctionDecl *> ModuleDeclarer::declareModules(SourceFile &program) 
   return functions;
 }
 
-ModuleDeclarer::ResultSourceIsLocal ModuleDeclarer::exportSource(const ExportSource *source) {
+ModuleDeclarer::ResultSourceUsable ModuleDeclarer::exportSource(const ExportSource *source) {
   if (source && source->path == "neverthrow") {
     std::string message = ErrorTextExportSource::neverthrow();
 
@@ -208,7 +208,7 @@ void ModuleDeclarer::exportName(Checker::ModuleState &here, Module *module,
   }
   std::optional<Checker::Binding> target;
   if (source) {
-    ResultExportFound found = this->findExport(source->from, source->path, name);
+    ResultExportTarget found = this->findExport(source->from, source->path, name);
     if (found.isErr()) {
       this->checker.diags_.error(name.loc, found.error().message);
       return;
@@ -264,7 +264,7 @@ const llvm::StringMap<Checker::Export> &ModuleDeclarer::exportsOf(Module *module
 
   for (const ExportDecl &decl : module->file.exports) {
     const ExportSource *source = decl.source();
-    ResultSourceIsLocal local = ModuleDeclarer::exportSource(source);
+    ResultSourceUsable local = ModuleDeclarer::exportSource(source);
     if (local.isErr()) {
       this->checker.diags_.error(source->pathLoc, local.error().message);
       continue;
@@ -297,8 +297,8 @@ const llvm::StringMap<Checker::Export> &ModuleDeclarer::exportsOf(Module *module
   return here.exports;
 }
 
-ModuleDeclarer::ResultExportFound ModuleDeclarer::findExport(Module *from, llvm::StringRef path,
-                                                             const ModuleName &name) {
+ModuleDeclarer::ResultExportTarget ModuleDeclarer::findExport(Module *from, llvm::StringRef path,
+                                                              const ModuleName &name) {
   const llvm::StringMap<Checker::Export> &theirs = this->exportsOf(from);
   auto found = theirs.find(name.name);
   bool missing = found == theirs.end();

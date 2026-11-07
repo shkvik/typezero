@@ -6,14 +6,14 @@ namespace tz {
 
 class WebCryptoChecker {
 public:
-  explicit WebCryptoChecker(Checker &checker);
+  explicit WebCryptoChecker(Checker &owner);
 
   Expr *checkSubtleIntrinsic(CallExpr *call, NameExpr *name, llvm::StringRef intrinsicName);
   Expr *subtleObject(MemberExpr *member);
   bool isSubtleClass(const Type *type, llvm::StringRef name) const;
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

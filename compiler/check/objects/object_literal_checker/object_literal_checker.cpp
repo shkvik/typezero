@@ -17,9 +17,7 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-namespace {
-
-bool hasMethodFields(const ClassDecl *cls) {
+bool ObjectLiteralChecker::hasMethodFields(const ClassDecl *cls) {
   if (cls->literal()) {
     return true;
   }
@@ -32,14 +30,205 @@ bool hasMethodFields(const ClassDecl *cls) {
   return false;
 }
 
-const char kRuntimeKeys[] =
-    "keys computed when the program runs need a dictionary: declare it as one, e.g. "
-    "'const d: Record<string, int> = {}'";
-
-}
-
 ObjectLiteralChecker::ObjectLiteralChecker(Checker &owner)
     : checker(owner) {}
+
+ObjectLiteralChecker::ResultPropertyHasValue
+ObjectLiteralChecker::propertyPlain(const ObjectLitExpr::Property &prop) {
+  if (prop.defaulted()) {
+    std::string message = ErrorTextObjectLiteral::defaulted(prop.name);
+
+    return err(ObjectLiteralCheckerPropertyPlainError{
+        .code = ObjectLiteralCheckerPropertyPlainErrorCode::DEFAULT_VALUE,
+        .message = message,
+    });
+  }
+
+  return ok(&prop);
+}
+
+ObjectLiteralChecker::ResultComputedKeyKnown
+ObjectLiteralChecker::computedKey(const Type *keyType) {
+  if (keyType->nonOptional()->isNumeric()) {
+    std::string message = ErrorTextObjectLiteral::numberKey();
+
+    return err(ObjectLiteralCheckerComputedKeyError{
+        .code = ObjectLiteralCheckerComputedKeyErrorCode::NUMBER_KEY,
+        .message = message,
+    });
+  }
+  if (keyType->isString()) {
+    std::string message = ErrorTextObjectLiteral::runtimeKey();
+
+    return err(ObjectLiteralCheckerComputedKeyError{
+        .code = ObjectLiteralCheckerComputedKeyErrorCode::RUNTIME_KEY,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextObjectLiteral::keyType(keyType->name());
+
+  return err(ObjectLiteralCheckerComputedKeyError{
+      .code = ObjectLiteralCheckerComputedKeyErrorCode::NOT_A_STRING,
+      .message = message,
+  });
+}
+
+ObjectLiteralChecker::ResultFieldNameIsFresh
+ObjectLiteralChecker::uniqueName(const ObjectLitExpr *lit, size_t i, llvm::ArrayRef<bool> named) {
+  for (size_t j = 0; j < i && named[i]; ++j) {
+    if (named[j] && lit->props[j].name == lit->props[i].name) {
+      std::string message = ErrorTextObjectLiteral::duplicate(lit->props[i].name);
+
+      return err(ObjectLiteralCheckerUniqueNameError{
+          .code = ObjectLiteralCheckerUniqueNameErrorCode::DUPLICATE_FIELD,
+          .message = message,
+      });
+    }
+  }
+
+  return ok(&lit->props[i]);
+}
+
+ObjectLiteralChecker::ResultValueTypeIsKnown
+ObjectLiteralChecker::inferredValue(const Type *value) {
+  if (value->isVoid() || value->isUndefined()) {
+    std::string message = ErrorTextObjectLiteral::inferFrom(value->name());
+
+    return err(ObjectLiteralCheckerInferredValueError{
+        .code = ObjectLiteralCheckerInferredValueErrorCode::CANNOT_INFER,
+        .message = message,
+    });
+  }
+
+  return ok(value);
+}
+
+ObjectLiteralChecker::ResultKeyedValuesAgree
+ObjectLiteralChecker::sameKeyedType(llvm::StringRef name, const Field &same, const Type *value) {
+  if (same.type != Type::optional(value)) {
+    std::string message = ErrorTextObjectLiteral::keyTypes(name);
+
+    return err(ObjectLiteralCheckerSameKeyedTypeError{
+        .code = ObjectLiteralCheckerSameKeyedTypeErrorCode::FIELD_TYPES_DIFFER,
+        .message = message,
+    });
+  }
+
+  return ok(value);
+}
+
+ObjectLiteralChecker::ResultKeyWithoutSpread
+ObjectLiteralChecker::keyedPlacement(const ObjectLitExpr *lit, const Type *keyType) {
+  bool methods =
+      llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.method(); });
+  if (lit->hasSpread() || methods) {
+    std::string message = ErrorTextObjectLiteral::keySpread(keyType->name());
+
+    return err(ObjectLiteralCheckerKeyedPlacementError{
+        .code = ObjectLiteralCheckerKeyedPlacementErrorCode::KEY_WITH_SPREAD,
+        .message = message,
+    });
+  }
+
+  return ok(keyType);
+}
+
+ObjectLiteralChecker::ResultKeyedObjectTyped
+ObjectLiteralChecker::keyedTarget(const Type *target, const Type *keyType) {
+  if (!target) {
+    std::string message = ErrorTextObjectLiteral::keyNoType(keyType->name());
+
+    return err(ObjectLiteralCheckerKeyedTargetError{
+        .code = ObjectLiteralCheckerKeyedTargetErrorCode::NO_OBJECT_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok(target);
+}
+
+ObjectLiteralChecker::ResultKeyedFieldsAgree ObjectLiteralChecker::keyedField(const Type *target,
+                                                                              const Type *keyType) {
+  const Type *field = KeyedFieldChecker::keyedFieldType(target, keyType);
+  if (!field) {
+    std::string message = ErrorTextObjectLiteral::keyFields(keyType->name(), target->name());
+
+    return err(ObjectLiteralCheckerKeyedFieldError{
+        .code = ObjectLiteralCheckerKeyedFieldErrorCode::FIELDS_DIFFER,
+        .message = message,
+    });
+  }
+  if (!field->isOptional()) {
+    std::string message = ErrorTextObjectLiteral::keyedOpt(keyType->name(), field->name());
+
+    return err(ObjectLiteralCheckerKeyedFieldError{
+        .code = ObjectLiteralCheckerKeyedFieldErrorCode::NOT_OPTIONAL,
+        .message = message,
+    });
+  }
+
+  return ok(field);
+}
+
+ObjectLiteralChecker::ResultTargetFieldFound
+ObjectLiteralChecker::targetField(const Type *target, llvm::StringRef name) {
+  const Field *field = target->field(name);
+  if (!field && target->overload(name)) {
+    return err(ObjectLiteralCheckerTargetFieldError{
+        .code = ObjectLiteralCheckerTargetFieldErrorCode::OVERLOAD_NAME,
+        .message = "",
+    });
+  }
+  if (!field) {
+    bool stream = target->name() == "StreamError";
+    std::string message = ErrorTextObjectLiteral::noField(target->name(), name, stream);
+
+    return err(ObjectLiteralCheckerTargetFieldError{
+        .code = ObjectLiteralCheckerTargetFieldErrorCode::NO_SUCH_FIELD,
+        .message = message,
+    });
+  }
+
+  return ok(field);
+}
+
+ObjectLiteralChecker::ResultUsableFieldValue
+ObjectLiteralChecker::valueTyped(const Type *type, llvm::StringRef what, llvm::StringRef name) {
+  if (type->isVoid()) {
+    std::string message = ErrorTextObjectLiteral::voidValue(what);
+
+    return err(ObjectLiteralCheckerValueTypedError{
+        .code = ObjectLiteralCheckerValueTypedErrorCode::VOID_VALUE,
+        .message = message,
+    });
+  }
+  if (type->isUndefined()) {
+    std::string message = ErrorTextObjectLiteral::undefOf(what, name);
+
+    return err(ObjectLiteralCheckerValueTypedError{
+        .code = ObjectLiteralCheckerValueTypedErrorCode::UNDEFINED_VALUE,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+ObjectLiteralChecker::ResultRequiredFieldSet
+ObjectLiteralChecker::fieldGiven(const ObjectLitExpr *lit, const Field &field, const Type *target) {
+  bool given = llvm::any_of(lit->props,
+                            [&](const ObjectLitExpr::Property &p) { return p.name == field.name; });
+  if (!given && !field.type->isOptional()) {
+    std::string message = ErrorTextObjectLiteral::missing(field.name, target->name());
+
+    return err(ObjectLiteralCheckerFieldGivenError{
+        .code = ObjectLiteralCheckerFieldGivenErrorCode::MISSING_FIELD,
+        .message = message,
+    });
+  }
+
+  return ok(&field);
+}
 
 Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expected) {
   if (expected && expected->nonOptional()->isJson()) {
@@ -58,22 +247,18 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
   if (!usable(target)) {
     target = nullptr;
   }
-  bool ok = true;
+  bool typed = true;
 
   llvm::SmallVector<bool, 8> named(lit->props.size(), true);
   for (size_t i = 0; i < lit->props.size(); ++i) {
     ObjectLitExpr::Property &prop = lit->props[i];
     named[i] = !prop.spread();
-    if (prop.defaulted()) {
-      this->checker.diags_.error(prop.loc,
-                                 "'" + prop.name +
-                                     " = ...' gives a default value, which only a destructuring "
-                                     "pattern such as '({ " +
-                                     prop.name + " = 1 } = o)' has; in an object literal write '" +
-                                     prop.name + ": ...'");
+    ResultPropertyHasValue plain = ObjectLiteralChecker::propertyPlain(prop);
+    if (plain.isErr()) {
+      this->checker.diags_.error(prop.loc, plain.error().message);
       prop.value = cast<AssignExpr>(prop.value)->value;
       prop.form = ValueProperty{};
-      ok = false;
+      typed = false;
     }
     ComputedProperty *computed = prop.form.as<ComputedProperty>();
     if (!computed) {
@@ -94,35 +279,21 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
       computed->keyed = true;
       continue;
     }
-    ok = false;
+    typed = false;
     if (keyType->isError()) {
       continue;
     }
-    if (keyType->nonOptional()->isNumeric()) {
-      this->checker.diags_.error(
-          prop.key()->loc(),
-          "a number cannot name a field; an object with numbered entries is an array");
-    } else if (keyType->isString()) {
-      this->checker.diags_.error(
-          prop.key()->loc(),
-          std::string("a key in brackets must be known when compiling: a string "
-                      "literal, or a constant declared with one, such as 'const key = "
-                      "\"name\"'; ") +
-              kRuntimeKeys);
-    } else {
-      this->checker.diags_.error(prop.key()->loc(),
-                                 "a key must be a string, found '" + keyType->name() + "'");
+    ResultComputedKeyKnown key = ObjectLiteralChecker::computedKey(keyType);
+    if (key.isErr()) {
+      this->checker.diags_.error(prop.key()->loc(), key.error().message);
     }
   }
 
   for (size_t i = 0; i < lit->props.size(); ++i) {
-    for (size_t j = 0; j < i && named[i]; ++j) {
-      if (named[j] && lit->props[j].name == lit->props[i].name) {
-        this->checker.diags_.error(lit->props[i].loc, "duplicate field '" + lit->props[i].name +
-                                                          "' in the object literal");
-        ok = false;
-        break;
-      }
+    ResultFieldNameIsFresh fresh = ObjectLiteralChecker::uniqueName(lit, i, named);
+    if (fresh.isErr()) {
+      this->checker.diags_.error(lit->props[i].loc, fresh.error().message);
+      typed = false;
     }
   }
   if (expectedUnion) {
@@ -158,11 +329,9 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
         lit->type = Type::error();
         return lit;
       }
-      if (value->isVoid() || value->isUndefined()) {
-        this->checker.diags_.error(
-            prop.value->loc(), "cannot infer the type of the fields from '" + value->name() +
-                                   "'; declare the type of the object, e.g. 'const o: { a?: int "
-                                   "} = ...'");
+      ResultValueTypeIsKnown known = ObjectLiteralChecker::inferredValue(value);
+      if (known.isErr()) {
+        this->checker.diags_.error(prop.value->loc(), known.error().message);
         lit->type = Type::error();
         return lit;
       }
@@ -178,11 +347,11 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
         auto same = llvm::find_if(fields, [&](const Field &f) { return f.name == name; });
         if (same == fields.end()) {
           fields.push_back({name, Type::optional(value), false});
-        } else if (same->type != Type::optional(value)) {
-          this->checker.diags_.error(prop.key()->loc(),
-                                     "field '" + name +
-                                         "' gets values of different types; declare "
-                                         "the type of the object");
+          continue;
+        }
+        ResultKeyedValuesAgree agree = ObjectLiteralChecker::sameKeyedType(name, *same, value);
+        if (agree.isErr()) {
+          this->checker.diags_.error(prop.key()->loc(), agree.error().message);
           lit->type = Type::error();
           return lit;
         }
@@ -196,44 +365,27 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
       continue;
     }
     const Type *keyType = prop.key()->type;
-    if (lit->hasSpread() ||
-        llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.method(); })) {
-      this->checker.diags_.error(prop.key()->loc(),
-                                 "a key of type '" + keyType->name() +
-                                     "' in brackets works in an object literal without '...' "
-                                     "and methods; assign it after: 'o[key] = value'");
+    ResultKeyWithoutSpread placed = ObjectLiteralChecker::keyedPlacement(lit, keyType);
+    if (placed.isErr()) {
+      this->checker.diags_.error(prop.key()->loc(), placed.error().message);
       return lit;
     }
-    if (!target) {
-      this->checker.diags_.error(
-          prop.key()->loc(), "a key of type '" + keyType->name() +
-                                 "' in brackets needs the type of the object, which says "
-                                 "the fields it may name; write it, e.g. 'const o: T = { [key]: "
-                                 "value }'");
+    ResultKeyedObjectTyped object = ObjectLiteralChecker::keyedTarget(target, keyType);
+    if (object.isErr()) {
+      this->checker.diags_.error(prop.key()->loc(), object.error().message);
       prop.value = this->checker.exprChecker().checkExpr(prop.value);
       lit->type = Type::error();
       return lit;
     }
-    const Type *field = KeyedFieldChecker::keyedFieldType(target, keyType);
-    if (!field) {
-      this->checker.diags_.error(prop.key()->loc(), "the fields that '" + keyType->name() +
-                                                        "' names must all be in '" +
-                                                        target->name() + "' and have one type");
+    ResultKeyedFieldsAgree agree = ObjectLiteralChecker::keyedField(target, keyType);
+    if (agree.isErr()) {
+      this->checker.diags_.error(prop.key()->loc(), agree.error().message);
       prop.value = this->checker.exprChecker().checkExpr(prop.value);
       lit->type = Type::error();
       return lit;
     }
-    if (!field->isOptional()) {
-      this->checker.diags_.error(prop.key()->loc(),
-                                 "the fields that '" + keyType->name() + "' names are of type '" +
-                                     field->name() +
-                                     "', not optional; the object gets only one of them, so the "
-                                     "others would be missing");
-      prop.value = this->checker.exprChecker().checkExpr(prop.value);
-      lit->type = Type::error();
-      return lit;
-    }
-    std::string what = "the field that '" + keyType->name().str() + "' names";
+    const Type *field = agree.value();
+    std::string what = ErrorTextObjectLiteral::keyedName(keyType->name());
     prop.value = this->checker.typeRelations().coerce(
         inferred ? prop.value : this->checker.exprChecker().checkExpr(prop.value, field), field,
         what);
@@ -242,7 +394,7 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     return this->checker.methodLiteralChecker().checkMethodLiteral(lit, target);
   }
   if (lit->hasSpread()) {
-    return this->checkSpreadLit(lit, target, named, ok);
+    return this->checkSpreadLit(lit, target, named, typed);
   }
 
   std::vector<Field> fields;
@@ -258,27 +410,19 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     if (auto *fe = dyn_cast<FunctionExpr>(prop.value); fe && fe->fn->name.empty()) {
       fe->fn->name = prop.name;
     }
-    std::string what = ("field '" + prop.name + "'").str();
+    std::string what = ErrorTextObjectLiteral::fieldName(prop.name);
     if (target) {
-      const Field *field = target->field(prop.name);
-      if (!field) {
+      ResultTargetFieldFound found = ObjectLiteralChecker::targetField(target, prop.name);
+      if (found.isErr()) {
         if (!this->checker.prechecked_.erase(prop.value)) {
           prop.value = this->checker.exprChecker().checkExpr(prop.value);
         }
-        if (!target->overload(prop.name)) {
-          std::string message = "type '" + target->name().str() + "' has no field '" +
-                                prop.name.str() +
-                                "'; an object must have exactly the fields of its type";
-          if (target->name() == "StreamError") {
-            message += "; an error with fields of its own has a type of its own, e.g. 'interface "
-                       "MyError extends StreamError { ... }', and the stream names it: "
-                       "'new ReadableStream<int, MyError>(...)', 'class Lines extends "
-                       "Readable<string, MyError>'";
-          }
-          this->checker.diags_.error(prop.loc, message);
+        if (found.error().code != ObjectLiteralCheckerTargetFieldErrorCode::OVERLOAD_NAME) {
+          this->checker.diags_.error(prop.loc, found.error().message);
         }
         continue;
       }
+      const Field *field = found.value();
       Expr *value = this->checker.prechecked_.erase(prop.value)
                         ? prop.value
                         : this->checker.exprChecker().checkExpr(prop.value, field->type);
@@ -290,48 +434,98 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     }
     const Type *type = prop.value->type;
     if (type->isError()) {
-      ok = false;
-    } else if (type->isVoid()) {
-      this->checker.diags_.error(prop.value->loc(),
-                                 "an expression of type 'void' cannot be the value of " + what);
-      ok = false;
-    } else if (type->isUndefined()) {
-      this->checker.diags_.error(prop.value->loc(),
-                                 "cannot infer the type of " + what +
-                                     " from 'undefined'; declare the type of the object, e.g. "
-                                     "'const o: { " +
-                                     prop.name + "?: int } = ...'");
-      ok = false;
+      typed = false;
+    } else {
+      ResultUsableFieldValue usableValue = ObjectLiteralChecker::valueTyped(type, what, prop.name);
+      if (usableValue.isErr()) {
+        this->checker.diags_.error(prop.value->loc(), usableValue.error().message);
+        typed = false;
+      }
     }
     fields.push_back({prop.name.str(), type, false});
   }
 
   if (target) {
     for (const Field &f : target->fields()) {
-      bool given = llvm::any_of(lit->props,
-                                [&](const ObjectLitExpr::Property &p) { return p.name == f.name; });
-      if (!given && !f.type->isOptional()) {
-        this->checker.diags_.error(lit->loc(), "field '" + f.name + "' is missing; type '" +
-                                                   target->name() + "' requires it");
+      ResultRequiredFieldSet given = ObjectLiteralChecker::fieldGiven(lit, f, target);
+      if (given.isErr()) {
+        this->checker.diags_.error(lit->loc(), given.error().message);
       }
     }
     for (const Overload &o : target->overloads()) {
-      this->checker.diags_.error(lit->loc(),
-                                 "an object literal cannot be of type '" + target->name() +
-                                     "': its method '" + o.name +
-                                     "' has several signatures, and only a class implements "
-                                     "those, each with a variant of its own");
+      std::string message = ErrorTextObjectLiteral::overloads(target->name(), o.name);
+      this->checker.diags_.error(lit->loc(), message);
     }
     lit->type = target;
     return lit;
   }
-  lit->type = ok ? Type::object(std::move(fields)) : Type::error();
+  lit->type = typed ? Type::object(std::move(fields)) : Type::error();
 
   return lit;
 }
 
+ObjectLiteralChecker::ResultDefinedSpreading ObjectLiteralChecker::spreadDefined(const Type *type) {
+  if (type->isOptional() && type->inner()->isObject() && !type->inner()->isTuple()) {
+    std::string message = ErrorTextSpreadLiteral::undefined();
+
+    return err(ObjectLiteralCheckerSpreadDefinedError{
+        .code = ObjectLiteralCheckerSpreadDefinedErrorCode::MAY_BE_UNDEFINED,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+ObjectLiteralChecker::ResultSpreadIsAnObject ObjectLiteralChecker::spreadObject(const Type *type) {
+  bool object = type->isObject() && !type->isTuple() && !type->isRegExp() && !type->isMatch() &&
+                !type->isDate() && !type->isIntl() && !type->isBytes() && !type->isCrypto();
+  if (!object) {
+    bool indices =
+        type->nonOptional()->isArray() || type->nonOptional()->isTuple() || type->isString();
+    std::string message = ErrorTextSpreadLiteral::notObject(type->name(), indices);
+
+    return err(ObjectLiteralCheckerSpreadObjectError{
+        .code = ObjectLiteralCheckerSpreadObjectErrorCode::NOT_AN_OBJECT,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+ObjectLiteralChecker::ResultPlainSpreadClass
+ObjectLiteralChecker::spreadFields(const ClassDecl *cls) {
+  if (ObjectLiteralChecker::hasMethodFields(cls)) {
+    std::string message = ErrorTextSpreadLiteral::methods();
+
+    return err(ObjectLiteralCheckerSpreadFieldsError{
+        .code = ObjectLiteralCheckerSpreadFieldsErrorCode::METHOD_FIELDS,
+        .message = message,
+    });
+  }
+
+  return ok(cls);
+}
+
+ObjectLiteralChecker::ResultSpreadFieldJoins
+ObjectLiteralChecker::spreadJoin(const Field &spread, const Field &field, const Type *type) {
+  const Type *base = TypeRelations::unify(field.type->nonOptional(), spread.type->inner());
+  if (!base || base->isError()) {
+    std::string message = ErrorTextSpreadLiteral::twoTypes(spread.name, field.type->name(),
+                                                           spread.type->name(), type->name());
+
+    return err(ObjectLiteralCheckerSpreadJoinError{
+        .code = ObjectLiteralCheckerSpreadJoinErrorCode::TYPES_DIFFER,
+        .message = message,
+    });
+  }
+
+  return ok(base);
+}
+
 Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *target,
-                                           llvm::ArrayRef<bool> named, bool ok) {
+                                           llvm::ArrayRef<bool> named, bool typed) {
   bool records = false;
   std::vector<Field> fields;
   auto slot = [&](llvm::StringRef name) -> Field * {
@@ -358,27 +552,21 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
           this->checker.exprChecker().checkExpr(prop.value, wanted ? wanted->type : nullptr);
       const Type *type = prop.value->type;
       Field *field = slot(prop.name);
-      std::string what = ("field '" + prop.name + "'").str();
+      std::string what = ErrorTextObjectLiteral::fieldName(prop.name);
       if (type->isError()) {
-        ok = false;
+        typed = false;
         continue;
       }
-      if (type->isVoid()) {
-        this->checker.diags_.error(prop.value->loc(),
-                                   "an expression of type 'void' cannot be the value of " + what);
-        ok = false;
+      bool filled = type->isUndefined() && field;
+      ResultUsableFieldValue usableValue =
+          filled ? ResultUsableFieldValue(ok(type))
+                 : ObjectLiteralChecker::valueTyped(type, what, prop.name);
+      if (usableValue.isErr()) {
+        this->checker.diags_.error(prop.value->loc(), usableValue.error().message);
+        typed = false;
         continue;
       }
-      if (type->isUndefined()) {
-        if (!field) {
-          this->checker.diags_.error(prop.value->loc(),
-                                     "cannot infer the type of " + what +
-                                         " from 'undefined'; declare the type of the object, e.g. "
-                                         "'const o: { " +
-                                         prop.name + "?: int } = ...'");
-          ok = false;
-          continue;
-        }
+      if (filled) {
         type = Type::optional(field->type);
       }
       if (field) {
@@ -392,28 +580,23 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
     prop.value = this->checker.exprChecker().checkExpr(prop.value);
     const Type *type = prop.value->type;
     if (type->isError()) {
-      ok = false;
+      typed = false;
       continue;
     }
     if (type->isRecord() && !target) {
       records = true;
       continue;
     }
-    if (type->isOptional() && type->inner()->isObject() && !type->inner()->isTuple()) {
-      this->checker.diags_.error(prop.value->loc(),
-                                 "the object may be undefined; check it before spreading it");
-      ok = false;
+    ResultDefinedSpreading defined = ObjectLiteralChecker::spreadDefined(type);
+    if (defined.isErr()) {
+      this->checker.diags_.error(prop.value->loc(), defined.error().message);
+      typed = false;
       continue;
     }
-    if (!type->isObject() || type->isTuple() || type->isRegExp() || type->isMatch() ||
-        type->isDate() || type->isIntl() || type->isBytes() || type->isCrypto()) {
-      std::string message =
-          "only objects can be spread into an object literal, found '" + type->name().str() + "'";
-      if (type->nonOptional()->isArray() || type->nonOptional()->isTuple() || type->isString()) {
-        message += "; JavaScript would make its indices the keys";
-      }
-      this->checker.diags_.error(prop.value->loc(), message);
-      ok = false;
+    ResultSpreadIsAnObject object = ObjectLiteralChecker::spreadObject(type);
+    if (object.isErr()) {
+      this->checker.diags_.error(prop.value->loc(), object.error().message);
+      typed = false;
       continue;
     }
     SpreadProperty *spread = prop.form.as<SpreadProperty>();
@@ -425,11 +608,10 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
     spread->omitKeys.clear();
     if (ClassDecl *cls = ClassDeclarer::classOf(type)) {
       this->checker.classDeclarer().completeClass(cls);
-      if (hasMethodFields(cls)) {
-        this->checker.diags_.error(prop.value->loc(),
-                                   "an object with methods cannot be spread into an object "
-                                   "literal yet; copy the fields by name");
-        ok = false;
+      ResultPlainSpreadClass plain = ObjectLiteralChecker::spreadFields(cls);
+      if (plain.isErr()) {
+        this->checker.diags_.error(prop.value->loc(), plain.error().message);
+        typed = false;
         continue;
       }
     }
@@ -446,22 +628,20 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
         field->type = f.type;
         continue;
       }
-      const Type *base = TypeRelations::unify(field->type->nonOptional(), f.type->inner());
-      if (!base || base->isError()) {
-        this->checker.diags_.error(prop.loc, "field '" + f.name + "' is '" + field->type->name() +
-                                                 "' before the spread and '" + f.type->name() +
-                                                 "' in '" + type->name() +
-                                                 "'; a field has one type");
-        ok = false;
+      ResultSpreadFieldJoins joined = ObjectLiteralChecker::spreadJoin(f, *field, type);
+      if (joined.isErr()) {
+        this->checker.diags_.error(prop.loc, joined.error().message);
+        typed = false;
         continue;
       }
+      const Type *base = joined.value();
       field->type = field->type->isOptional() ? Type::optional(base) : base;
     }
   }
-  if (records && ok) {
+  if (records && typed) {
     return this->checker.recordLiteralChecker().recordFromSpreads(lit);
   }
-  if (!ok) {
+  if (!typed) {
     lit->type = Type::error();
     return lit;
   }

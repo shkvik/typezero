@@ -26,15 +26,12 @@
 #include "llvm/Support/ErrorHandling.h"
 #include <numeric>
 
-using llvm::BasicBlock;
 using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-BytesCallLowerer::BytesCallLowerer(Lowering &lowering) : lowering_(lowering) {}
+BytesCallLowerer::BytesCallLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Value *BytesCallLowerer::emitBytesCall(CallExpr *call) {
   switch (call->builtin()) {
@@ -45,7 +42,7 @@ llvm::Value *BytesCallLowerer::emitBytesCall(CallExpr *call) {
     case Builtin::BytesOf:
     case Builtin::BytesView:
     case Builtin::DataViewNew:
-      return BytesMakeCalls(lowering_, call).emit();
+      return BytesMakeCalls(this->lowering, call).emit();
     case Builtin::BytesByteLength:
     case Builtin::BytesByteOffset:
     case Builtin::BytesBuffer:
@@ -64,14 +61,14 @@ llvm::Value *BytesCallLowerer::emitBytesCall(CallExpr *call) {
     case Builtin::BytesToSorted:
     case Builtin::BytesWith:
     case Builtin::ArrayBufferIsView:
-      return TypedArrayCalls(lowering_, call).emit();
+      return TypedArrayCalls(this->lowering, call).emit();
     case Builtin::DataViewGet:
     case Builtin::DataViewSet:
     case Builtin::BufferRead:
     case Builtin::BufferWriteNumber:
     case Builtin::BufferReadVar:
     case Builtin::BufferWriteVar:
-      return NumberAccessCalls(lowering_, call).emit();
+      return NumberAccessCalls(this->lowering, call).emit();
     case Builtin::BufferFromString:
     case Builtin::BufferAllocFill:
     case Builtin::BufferConcat:
@@ -88,7 +85,7 @@ llvm::Value *BytesCallLowerer::emitBytesCall(CallExpr *call) {
     case Builtin::BufferCopy:
     case Builtin::BufferSwap:
     case Builtin::BufferToJSON:
-      return BufferCalls(lowering_, call).emit();
+      return BufferCalls(this->lowering, call).emit();
     case Builtin::TextEncoderNew:
     case Builtin::TextEncode:
     case Builtin::TextEncodeInto:
@@ -96,19 +93,19 @@ llvm::Value *BytesCallLowerer::emitBytesCall(CallExpr *call) {
     case Builtin::TextDecoderParse:
     case Builtin::TextDecode:
     case Builtin::TextDecoderInfo:
-      return TextCodecCalls(lowering_, call).emit();
+      return TextCodecCalls(this->lowering, call).emit();
     case Builtin::EmbedBytes:
-      return emitEmbedBytes(call);
+      return this->emitEmbedBytes(call);
     default:
       llvm_unreachable("not a built-in of binary data");
   }
 }
 
 llvm::Value *BytesCallLowerer::emitEmbedBytes(CallExpr *call) {
-  llvm::Type *i32 = lowering_.builder_.getInt32Ty(), *i64 = lowering_.builder_.getInt64Ty(),
-             *ptr = lowering_.builder_.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty(),
+             *i64 = this->lowering.builder_.getInt64Ty(), *ptr = this->lowering.builder_.getPtrTy();
   const std::u16string &path = cast<StringLitExpr>(call->args[1])->value;
-  llvm::Constant *&global = embeddedBytes_[path];
+  llvm::Constant *&global = this->embeddedBytes[path];
   if (!global) {
     const std::u16string &units = cast<StringLitExpr>(call->args[0])->value;
     std::vector<uint8_t> bytes;
@@ -116,35 +113,36 @@ llvm::Value *BytesCallLowerer::emitEmbedBytes(CallExpr *call) {
     for (char16_t unit : units) {
       bytes.push_back(uint8_t(unit));
     }
-    llvm::Constant *init = llvm::ConstantDataArray::get(lowering_.ctx_, bytes);
+    llvm::Constant *init = llvm::ConstantDataArray::get(this->lowering.ctx_, bytes);
     auto *data =
-        new llvm::GlobalVariable(*lowering_.module_, init->getType(), false,
+        new llvm::GlobalVariable(*this->lowering.module_, init->getType(), false,
                                  llvm::GlobalValue::PrivateLinkage, init, "tz.embedded.data");
     data->setAlignment(llvm::Align(16));
-    auto *layoutsTy = llvm::ArrayType::get(lowering_.layoutDescTy_, 16);
+    auto *layoutsTy = llvm::ArrayType::get(this->lowering.layoutDescTy_, 16);
     auto *layouts = cast<llvm::GlobalVariable>(
-        lowering_.module_->getOrInsertGlobal("tz_bytes_layouts", layoutsTy));
+        this->lowering.module_->getOrInsertGlobal("tz_bytes_layouts", layoutsTy));
     auto layout = [&](Bytes kind) {
       return llvm::ConstantExpr::getInBoundsGetElementPtr(
           layoutsTy, layouts,
-          llvm::ArrayRef<llvm::Constant *>{lowering_.builder_.getInt32(0),
-                                           lowering_.builder_.getInt32(uint32_t(kind))});
+          llvm::ArrayRef<llvm::Constant *>{this->lowering.builder_.getInt32(0),
+                                           this->lowering.builder_.getInt32(uint32_t(kind))});
     };
-    llvm::Constant *count = lowering_.builder_.getInt64(uint64_t(1) << 62);
-    llvm::Constant *length = lowering_.builder_.getInt32(uint32_t(bytes.size()));
-    auto *abufTy = llvm::StructType::get(lowering_.ctx_, {i64, ptr, ptr, i32, i32});
+    llvm::Constant *count = this->lowering.builder_.getInt64(uint64_t(1) << 62);
+    llvm::Constant *length = this->lowering.builder_.getInt32(uint32_t(bytes.size()));
+    auto *abufTy = llvm::StructType::get(this->lowering.ctx_, {i64, ptr, ptr, i32, i32});
     auto *abuf = new llvm::GlobalVariable(
-        *lowering_.module_, abufTy, false, llvm::GlobalValue::PrivateLinkage,
+        *this->lowering.module_, abufTy, false, llvm::GlobalValue::PrivateLinkage,
         llvm::ConstantStruct::get(abufTy, {count, layout(Bytes::ArrayBuffer), data, length,
-                                           lowering_.builder_.getInt32(1)}),
+                                           this->lowering.builder_.getInt32(1)}),
         "tz.embedded.buffer");
-    if (!lowering_.bytesTy_) {
-      lowering_.bytesTy_ = bytesStruct(lowering_.ctx_);
+    if (!this->lowering.bytesTy_) {
+      this->lowering.bytesTy_ = bytesStruct(this->lowering.ctx_);
     }
     global = new llvm::GlobalVariable(
-        *lowering_.module_, lowering_.bytesTy_, false, llvm::GlobalValue::PrivateLinkage,
-        llvm::ConstantStruct::get(lowering_.bytesTy_, {count, layout(Bytes::Uint8), data, length,
-                                                       lowering_.builder_.getInt32(0), abuf}),
+        *this->lowering.module_, this->lowering.bytesTy_, false, llvm::GlobalValue::PrivateLinkage,
+        llvm::ConstantStruct::get(
+            this->lowering.bytesTy_,
+            {count, layout(Bytes::Uint8), data, length, this->lowering.builder_.getInt32(0), abuf}),
         "tz.embedded");
   }
 

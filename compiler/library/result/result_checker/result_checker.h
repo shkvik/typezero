@@ -6,7 +6,7 @@ namespace tz {
 
 class ResultChecker {
 public:
-  explicit ResultChecker(Checker &checker);
+  explicit ResultChecker(Checker &owner);
 
   Expr *checkResultCall(CallExpr *call, NameExpr *name, const Type *expected);
   Expr *checkResultStatic(CallExpr *call, MemberExpr *member);
@@ -18,7 +18,12 @@ public:
   void checkArgsLoosely(CallExpr *call);
 
 private:
-  Checker &checker_;
+  static const Type *halfParam(const Type *half);
+  static bool givesType(const Type *half);
+  static std::string receiverText(const Expr *expr);
+  static const Expr *unconverted(const Expr *expr);
+
+  Checker &checker;
 };
 
 }

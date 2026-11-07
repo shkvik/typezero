@@ -18,42 +18,41 @@
 #include "llvm/ADT/StringExtras.h"
 #include <string>
 
-using llvm::BasicBlock;
 using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-TzModulesLowerer::TzModulesLowerer(Lowering &lowering) : lowering_(lowering) {}
+TzModulesLowerer::TzModulesLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 void TzModulesLowerer::emitExternal(FunctionDecl *fn) {
-  llvm::Function *function = lowering_.functions_.lookup(fn->sym);
-  lowering_.functionBuilder().beginFunction(function, fn);
+  llvm::Function *function = this->lowering.functions_.lookup(fn->sym);
+  this->lowering.functionBuilder().beginFunction(function, fn);
   const FuncSymbol *sym = fn->sym;
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
-  llvm::Type *i64 = lowering_.builder_.getInt64Ty();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
   std::vector<llvm::Type *> params;
   std::vector<llvm::Value *> args;
   const Type *ret = sym->ret;
-  llvm::Value *promise = nullptr, *text = nullptr;
-  llvm::Type *cret = lowering_.builder_.getVoidTy();
+  llvm::Value *promise = nullptr;
+  llvm::Value *text = nullptr;
+  llvm::Type *cret = this->lowering.builder_.getVoidTy();
   if (ret->isPromise()) {
-    promise = lowering_.promiseLowerer().newPromise(ret->promised());
+    promise = this->lowering.promiseLowerer().newPromise(ret->promised());
     params.push_back(ptr);
     args.push_back(promise);
   } else if (ret->isString()) {
-    text = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "text.out");
-    lowering_.builder_.CreateStore(llvm::Constant::getNullValue(lowering_.strTy_), text);
+    text = this->lowering.functionFrame().createStackSlot(this->lowering.strTy_, "text.out");
+    this->lowering.builder_.CreateStore(llvm::Constant::getNullValue(this->lowering.strTy_), text);
     params.push_back(ptr);
     args.push_back(text);
   } else if (ret->isBool()) {
     cret = i32;
   } else if (ret->isResult()) {
-    cret = lowering_.moduleBuilder().lower(ret->okType());
+    cret = this->lowering.moduleBuilder().lower(ret->okType());
   } else if (!ret->isVoid()) {
-    cret = lowering_.moduleBuilder().lower(ret);
+    cret = this->lowering.moduleBuilder().lower(ret);
   }
   for (size_t i = 0; i < sym->params.size(); ++i) {
     llvm::Value *value = function->getArg(unsigned(i));
@@ -61,24 +60,24 @@ void TzModulesLowerer::emitExternal(FunctionDecl *fn) {
     if (type->isString()) {
       params.push_back(ptr);
       params.push_back(i64);
-      args.push_back(lowering_.stringLowerer().stringObj(value));
-      args.push_back(lowering_.stringLowerer().stringMeta(value));
+      args.push_back(this->lowering.stringLowerer().stringObj(value));
+      args.push_back(this->lowering.stringLowerer().stringMeta(value));
     } else if (type->isBool()) {
       params.push_back(i32);
-      args.push_back(lowering_.builder_.CreateZExt(value, i32));
+      args.push_back(this->lowering.builder_.CreateZExt(value, i32));
     } else if (type->isFunction()) {
       params.push_back(ptr);
       params.push_back(ptr);
-      args.push_back(lowering_.builder_.CreateExtractValue(value, 0));
-      args.push_back(lowering_.builder_.CreateExtractValue(value, 1));
+      args.push_back(this->lowering.builder_.CreateExtractValue(value, 0));
+      args.push_back(this->lowering.builder_.CreateExtractValue(value, 1));
     } else {
       params.push_back(value->getType());
       args.push_back(value);
     }
   }
   params.push_back(ptr);
-  if (lowering_.nativeError_) {
-    args.push_back(lowering_.fsLowerer().nativeErrorMaker());
+  if (this->lowering.nativeError_) {
+    args.push_back(this->lowering.fsLowerer().nativeErrorMaker());
   } else {
     args.push_back(llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr)));
   }
@@ -90,82 +89,89 @@ void TzModulesLowerer::emitExternal(FunctionDecl *fn) {
     name += llvm::toLower(c);
   }
   llvm::Value *result;
-  if (llvm::StringRef(name).starts_with("tz_tls_") && !lowering_.usesTls_) {
-    lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction("tz_net_no_tls", lowering_.builder_.getVoidTy(),
-                                                   {ptr, ptr}),
+  if (llvm::StringRef(name).starts_with("tz_tls_") && !this->lowering.usesTls_) {
+    this->lowering.builder_.CreateCall(
+        this->lowering.processLowerer().processFunction(
+            "tz_net_no_tls", this->lowering.builder_.getVoidTy(), {ptr, ptr}),
         {promise ? promise : llvm::Constant::getNullValue(ptr), args.back()});
     result = cret->isVoidTy() ? nullptr : llvm::Constant::getNullValue(cret);
   } else {
-    result = lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction(name, cret, params), args);
+    result = this->lowering.builder_.CreateCall(
+        this->lowering.processLowerer().processFunction(name, cret, params), args);
   }
   for (size_t i = 0; i < sym->params.size(); ++i) {
-    lowering_.refCounts().releaseValue(function->getArg(unsigned(i)), sym->params[i]);
+    this->lowering.refCounts().releaseValue(function->getArg(unsigned(i)), sym->params[i]);
   }
   if (promise) {
-    lowering_.builder_.CreateRet(promise);
+    this->lowering.builder_.CreateRet(promise);
   } else if (text) {
-    lowering_.builder_.CreateRet(lowering_.builder_.CreateLoad(lowering_.strTy_, text));
+    this->lowering.builder_.CreateRet(
+        this->lowering.builder_.CreateLoad(this->lowering.strTy_, text));
   } else if (ret->isBool()) {
-    lowering_.builder_.CreateRet(
-        lowering_.builder_.CreateICmpNE(result, lowering_.builder_.getInt32(0)));
+    this->lowering.builder_.CreateRet(
+        this->lowering.builder_.CreateICmpNE(result, this->lowering.builder_.getInt32(0)));
   } else if (ret->isResult()) {
-    lowering_.builder_.CreateRet(lowering_.resultLowerer().catchFailure(result, ret, fn->loc()));
+    this->lowering.builder_.CreateRet(
+        this->lowering.resultLowerer().catchFailure(result, ret, fn->loc()));
   } else if (ret->isVoid()) {
-    lowering_.builder_.CreateRetVoid();
+    this->lowering.builder_.CreateRetVoid();
   } else {
-    lowering_.builder_.CreateRet(result);
+    this->lowering.builder_.CreateRet(result);
   }
-  lowering_.functionBuilder().finishFunction();
+  this->lowering.functionBuilder().finishFunction();
 }
 
 llvm::Value *TzModulesLowerer::emitResultAdapter(CastExpr *cast) {
-  const Type *from = cast->operand->type, *to = cast->type;
-  llvm::Value *value = lowering_.exprLowerer().emitExpr(cast->operand);
-  llvm::Constant *&info = resultAdapters_[{from, to}];
+  const Type *from = cast->operand->type;
+  const Type *to = cast->type;
+  llvm::Value *value = this->lowering.exprLowerer().emitExpr(cast->operand);
+  llvm::Constant *&info = this->resultAdapters[{from, to}];
   if (!info) {
-    auto *code = llvm::Function::Create(lowering_.closureLowerer().closureFnType(to),
+    auto *code = llvm::Function::Create(this->lowering.closureLowerer().closureFnType(to),
                                         llvm::GlobalValue::InternalLinkage, "tz.adapt.result",
-                                        lowering_.module_.get());
-    lowering_.functionBuilder().setFunctionAttributes(code);
-    llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
-    llvm::Function *outer = std::exchange(lowering_.function_, code);
-    lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", code));
-    llvm::Value *inner =
-        lowering_.builder_.CreateLoad(lowering_.fnTy_,
-                                      lowering_.builder_.CreateStructGEP(
-                                          lowering_.envLowerer().boxType(from), code->getArg(0), 2),
-                                      "wrapped");
+                                        this->lowering.module_.get());
+    this->lowering.functionBuilder().setFunctionAttributes(code);
+    llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
+    llvm::Function *outer = std::exchange(this->lowering.function_, code);
+    this->lowering.builder_.SetInsertPoint(
+        llvm::BasicBlock::Create(this->lowering.ctx_, "entry", code));
+    llvm::Value *inner = this->lowering.builder_.CreateLoad(
+        this->lowering.fnTy_,
+        this->lowering.builder_.CreateStructGEP(this->lowering.envLowerer().boxType(from),
+                                                code->getArg(0), 2),
+        "wrapped");
     std::vector<llvm::Value *> args;
-    llvm::ArrayRef<const Type *> mine = from->params(), given = to->params();
+    llvm::ArrayRef<const Type *> mine = from->params();
+    llvm::ArrayRef<const Type *> given = to->params();
     for (unsigned i = 1; i < code->arg_size(); ++i) {
       llvm::Value *arg = code->getArg(i);
-      args.push_back(mine[i - 1] == given[i - 1]
-                         ? arg
-                         : lowering_.exprLowerer().emitConversion(arg, given[i - 1], mine[i - 1]));
+      args.push_back(mine[i - 1] == given[i - 1] ? arg
+                                                 : this->lowering.exprLowerer().emitConversion(
+                                                       arg, given[i - 1], mine[i - 1]));
     }
-    llvm::Value *result = lowering_.closureLowerer().callFunctionValue(inner, from, args);
-    lowering_.builder_.CreateRet(from->ret() == to->ret() ? result
-                                                          : lowering_.exprLowerer().emitConversion(
-                                                                result, from->ret(), to->ret()));
-    lowering_.function_ = outer;
-    lowering_.builder_.restoreIP(point);
+    llvm::Value *result = this->lowering.closureLowerer().callFunctionValue(inner, from, args);
+    this->lowering.builder_.CreateRet(
+        from->ret() == to->ret()
+            ? result
+            : this->lowering.exprLowerer().emitConversion(result, from->ret(), to->ret()));
+    this->lowering.function_ = outer;
+    this->lowering.builder_.restoreIP(point);
     info = new llvm::GlobalVariable(
-        *lowering_.module_, lowering_.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
-        llvm::ConstantStruct::get(lowering_.fnInfoTy_,
-                                  {code, lowering_.stringLowerer().stringLiteral(u"")}),
+        *this->lowering.module_, this->lowering.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
+        llvm::ConstantStruct::get(this->lowering.fnInfoTy_,
+                                  {code, this->lowering.stringLowerer().stringLiteral(u"")}),
         "tz.fninfo.adapt");
   }
-  bool member = lowering_.memory().mayHoldMember(from);
-  llvm::Value *box = lowering_.envLowerer().newBox(from, member);
-  lowering_.builder_.CreateStore(
-      value, lowering_.builder_.CreateStructGEP(lowering_.envLowerer().boxType(from), box, 2));
+  bool member = this->lowering.memory().mayHoldMember(from);
+  llvm::Value *box = this->lowering.envLowerer().newBox(from, member);
+  this->lowering.builder_.CreateStore(
+      value,
+      this->lowering.builder_.CreateStructGEP(this->lowering.envLowerer().boxType(from), box, 2));
   if (member) {
-    lowering_.storeLowerer().groupStore(box, value, from);
+    this->lowering.storeLowerer().groupStore(box, value, from);
   }
 
-  return lowering_.closureLowerer().makeFunctionValue(info, box);
+  return this->lowering.closureLowerer().makeFunctionValue(info, box);
 }
 
 void TzModulesLowerer::appendPrintHooks(llvm::ArrayRef<const ClassDecl *> chain,
@@ -184,35 +190,36 @@ void TzModulesLowerer::appendPrintHooks(llvm::ArrayRef<const ClassDecl *> chain,
       }
     }
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  auto *getterTy = llvm::StructType::get(lowering_.ctx_, {lowering_.typeDescTy_, ptr, ptr});
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  auto *getterTy =
+      llvm::StructType::get(this->lowering.ctx_, {this->lowering.typeDescTy_, ptr, ptr});
   for (const FunctionDecl *fn : getters) {
-    llvm::Function *code = fn->sym ? lowering_.functions_.lookup(fn->sym) : nullptr;
+    llvm::Function *code = fn->sym ? this->lowering.functions_.lookup(fn->sym) : nullptr;
     if (!code) {
       continue;
     }
     std::string name = (fn->cls()->name + "." + fn->name).str();
     auto *get = llvm::Function::Create(
-        llvm::FunctionType::get(lowering_.builder_.getVoidTy(), {ptr, ptr}, false),
-        llvm::GlobalValue::InternalLinkage, "tz.get." + name, lowering_.module_.get());
-    lowering_.functionBuilder().setFunctionAttributes(get);
-    llvm::IRBuilder<> b(llvm::BasicBlock::Create(lowering_.ctx_, "entry", get));
+        llvm::FunctionType::get(this->lowering.builder_.getVoidTy(), {ptr, ptr}, false),
+        llvm::GlobalValue::InternalLinkage, "tz.get." + name, this->lowering.module_.get());
+    this->lowering.functionBuilder().setFunctionAttributes(get);
+    llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx_, "entry", get));
     llvm::Value *value = b.CreateCall(code, {get->getArg(0)});
     b.CreateStore(value, get->getArg(1));
     b.CreateRetVoid();
     llvm::Constant *base = llvm::ConstantStruct::get(
-        lowering_.typeDescTy_,
-        {lowering_.builder_.getInt32(17), lowering_.builder_.getInt32(0),
+        this->lowering.typeDescTy_,
+        {this->lowering.builder_.getInt32(17), this->lowering.builder_.getInt32(0),
          llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr))});
     auto *type = new llvm::GlobalVariable(
-        *lowering_.module_, getterTy, true, llvm::GlobalValue::PrivateLinkage,
+        *this->lowering.module_, getterTy, true, llvm::GlobalValue::PrivateLinkage,
         llvm::ConstantStruct::get(
-            getterTy, {base, lowering_.typeDescriptors().typeDescriptor(fn->sym->ret), get}),
+            getterTy, {base, this->lowering.typeDescriptors().typeDescriptor(fn->sym->ret), get}),
         "tz.getter." + name);
     entries.push_back(llvm::ConstantStruct::get(
-        lowering_.fieldDescTy_, {lowering_.stringLowerer().utf8Constant(fn->name),
-                                 lowering_.builder_.getInt32(uint32_t(fn->name.size())),
-                                 lowering_.builder_.getInt32(0xFFFFFFFEu), type}));
+        this->lowering.fieldDescTy_, {this->lowering.stringLowerer().utf8Constant(fn->name),
+                                      this->lowering.builder_.getInt32(uint32_t(fn->name.size())),
+                                      this->lowering.builder_.getInt32(0xFFFFFFFEu), type}));
   }
 }
 

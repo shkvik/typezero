@@ -24,6 +24,7 @@ public:
 };
 
 enum class UnknownCheckerCheckUnknownMemberErrorCode {
+  CLASS_MEMBER,
   NO_CONSTRUCTOR,
   NOT_NARROWED,
 };

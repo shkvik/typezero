@@ -3,7 +3,6 @@
 #include "compiler/check/checker/checker.h"
 #include "compiler/check/classes/class_checker/class_checker_errors.h"
 #include "compiler/result/result/result.h"
-#include <vector>
 
 namespace tz {
 
@@ -17,15 +16,14 @@ public:
   using ResultObjectIsReady = Result<const Checker::Flow *, ClassCheckerThisReadyError>;
   using ResultHasDecorators = Result<const ClassDecl *, ClassCheckerHasDecoratorsError>;
   using ResultEveryFieldSet = Result<const FunctionDecl *, ClassCheckerCheckFieldsSetError>;
-  using ResultBodiesChecked = Result<ClassDecl *, std::vector<ClassCheckerCheckClassBodiesError>>;
 
   explicit ClassChecker(Checker &owner);
 
+  void checkClassBodies(ClassDecl *cls);
   ResultEveryFieldSet checkFieldsSet() const;
   ResultThisReference checkThis(NameExpr *name);
   ResultNewThisSymbol declareThis(FunctionDecl *fn);
   ResultClassDeclared checkClassStmt(ClassDecl *cls);
-  ResultBodiesChecked checkClassBodies(ClassDecl *cls);
   ResultInitThisFound isInitThis(const Expr *expr) const;
   ResultHasDecorators hasDecorators(const ClassDecl *cls) const;
   ResultObjectIsReady thisReady(const Checker::Flow &flow) const;

@@ -6,12 +6,12 @@ namespace tz {
 
 class LibraryCallLowerer {
 public:
-  explicit LibraryCallLowerer(Lowering &lowering);
+  explicit LibraryCallLowerer(Lowering &owner);
 
   llvm::Value *emitLibBuiltin(CallExpr *call);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

@@ -68,7 +68,7 @@ void ClassDeclarer::declareClass(ClassDecl *cls) {
   cls->type = Type::classType(cls->name, cls);
   this->checker.classes_.push_back(cls);
   Scopes::ResultEntryDeclared added =
-      this->checker.scopes().declare(cls->name, cls->loc(), {ClassEntry{.cls = cls}});
+      this->checker.scopes().declare(cls->name, {ClassEntry{.cls = cls}});
   if (added.isErr()) {
     this->checker.diags_.error(cls->loc(), added.error().message);
   }

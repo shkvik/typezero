@@ -7,19 +7,17 @@
 #include "compiler/library/events/event_map_inference/event_map_inference.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-ChunkTypes::ChunkTypes(Checker &checker) : checker_(checker) {}
+ChunkTypes::ChunkTypes(Checker &owner)
+    : checker(owner) {}
 
 bool ChunkTypes::isStreamClass(const ClassDecl *cls) const {
-  ClassDecl *stream = checker_.libraryClass("Stream");
+  ClassDecl *stream = this->checker.libraryClass("Stream");
 
   return cls && stream && cls->derivesFrom(stream);
 }
@@ -45,13 +43,13 @@ Checker::StreamChunks ChunkTypes::streamChunksOf(const ClassDecl *cls) const {
 
 void ChunkTypes::addStreamBases(ClassDecl *inst, llvm::SMLoc loc) {
   ClassDecl *generic = inst->generic();
-  ClassDecl *writable = checker_.libraryClass("Writable");
+  ClassDecl *writable = this->checker.libraryClass("Writable");
   if (!generic || !generic->library() || generic->name != "Duplex" || !writable ||
       inst->typeArgs.size() != 3) {
     return;
   }
   GenericClassInstantiator::ResultClassMade side =
-      checker_.genericClassInstantiator().instantiateClass(
+      this->checker.genericClassInstantiator().instantiateClass(
           writable, {inst->typeArgs[0], inst->typeArgs[2]}, loc);
   if (side.isErr() &&
       side.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
@@ -59,18 +57,18 @@ void ChunkTypes::addStreamBases(ClassDecl *inst, llvm::SMLoc loc) {
         side.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
             ? writable->loc()
             : (loc.isValid() ? loc : writable->loc());
-    checker_.diags_.error(at, side.error().message);
+    this->checker.diags_.error(at, side.error().message);
   }
   if (side.isOk()) {
-    checker_.classBases().addBase(inst->type, side.value()->type);
-    if (inst->isEmitted() && !llvm::is_contained(checker_.file_->subtypes, inst->type)) {
-      checker_.file_->subtypes.push_back(inst->type);
+    this->checker.classBases().addBase(inst->type, side.value()->type);
+    if (inst->isEmitted() && !llvm::is_contained(this->checker.file_->subtypes, inst->type)) {
+      this->checker.file_->subtypes.push_back(inst->type);
     }
   }
 }
 
 std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const FunctionDecl *fn) {
-  if (!isStreamHook(fn, false)) {
+  if (!this->isStreamHook(fn, false)) {
     return std::nullopt;
   }
   const ClassDecl *lib = fn->cls()->parent;
@@ -82,8 +80,9 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
   }
   llvm::StringRef kind = lib->generic()->name;
   bool transform = kind == "Transform" || kind == "PassThrough";
-  const Type *readable = nullptr, *writable = nullptr;
-  const Type *error = checker_.prelude().builtinType("StreamError");
+  const Type *readable = nullptr;
+  const Type *writable = nullptr;
+  const Type *error = this->checker.prelude().builtinType("StreamError");
   if (kind == "Readable" && lib->typeArgs.size() == 2) {
     readable = lib->typeArgs[0];
     error = lib->typeArgs[1];
@@ -101,14 +100,15 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
     return std::nullopt;
   }
   auto alias = [&](llvm::StringRef name) -> const Type * {
-    TypeAliasDecl *decl = checker_.libTypes_.lookup(name);
+    TypeAliasDecl *decl = this->checker.libTypes_.lookup(name);
 
     return decl ? decl->resolved : nullptr;
   };
   auto generic = [&](llvm::StringRef name, const Type *arg) -> const Type * {
-    TypeAliasDecl *decl = checker_.libTypes_.lookup(name);
+    TypeAliasDecl *decl = this->checker.libTypes_.lookup(name);
 
-    return decl ? checker_.aliasInstantiator().instantiateAlias(decl, {arg}, fn->loc()) : nullptr;
+    return decl ? this->checker.aliasInstantiator().instantiateAlias(decl, {arg}, fn->loc())
+                : nullptr;
   };
   const Type *callback = generic("HookCallback", error);
   const Type *transformCallback = generic("TransformHookCallback", error);
@@ -119,7 +119,7 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
   } else if (name == "onFinal" || name == "onConstruct") {
     params = {callback};
   } else if (name == "onDestroy") {
-    params = {Type::optional(checker_.prelude().builtinType("StreamError")),
+    params = {Type::optional(this->checker.prelude().builtinType("StreamError")),
               alias("StreamCallback")};
   } else if (name == "onFlush" && transform) {
     params = {transformCallback};
@@ -145,7 +145,7 @@ bool ChunkTypes::isStreamHook(const FunctionDecl *fn, bool linked) const {
   const ClassDecl *cls = fn->cls();
 
   return cls && !fn->isStatic() && !cls->library() && !cls->literal() && cls->parent &&
-         llvm::is_contained(hooks, fn->name) && (!linked || isStreamClass(cls->parent));
+         llvm::is_contained(hooks, fn->name) && (!linked || this->isStreamClass(cls->parent));
 }
 
 void ChunkTypes::reportStreamHook(const FunctionDecl *fn,
@@ -178,7 +178,7 @@ void ChunkTypes::reportStreamHook(const FunctionDecl *fn,
     chunks = "; for chunks of another type, give the class it extends type arguments, e.g. "
              "'extends Writable<string>'";
   }
-  checker_.diags_.error(
+  this->checker.diags_.error(
       fn->loc(), "'" + fn->name + "' is what node:stream calls, as '" + fn->name + "(" + params +
                      ")', and a method with other parameters is another "
                      "variant of the name, which it never calls; take those parameters, "
@@ -187,11 +187,11 @@ void ChunkTypes::reportStreamHook(const FunctionDecl *fn,
 }
 
 const Type *ChunkTypes::inferredChunkType(const std::string &site, llvm::SMLoc loc) {
-  const Type *map = checker_.eventMapInference().inferredEventMap(site);
+  const Type *map = this->checker.eventMapInference().inferredEventMap(site);
   if (!map) {
     return nullptr;
   }
-  if (checker_.openMaps_.count(map)) {
+  if (this->checker.openMaps_.count(map)) {
     return map;
   }
   const Field *chunk = map->field("chunk");
@@ -204,7 +204,7 @@ const Type *ChunkTypes::inferredChunkType(const std::string &site, llvm::SMLoc l
 }
 
 void ChunkTypes::noteStreamCallback(CallExpr *call, const VarSymbol *var) {
-  for (const Checker::StreamCallbackSite &site : checker_.streamCallbacks_) {
+  for (const Checker::StreamCallbackSite &site : this->checker.streamCallbacks_) {
     if (site.fn != var->owner() || site.param != var->name || call->args.size() < 2) {
       continue;
     }
@@ -216,14 +216,14 @@ void ChunkTypes::noteStreamCallback(CallExpr *call, const VarSymbol *var) {
       data = conv->operand;
     }
     if (!isa<UndefinedExpr>(data)) {
-      recordStreamChunk(site.chunk, data->type, data->loc());
+      this->recordStreamChunk(site.chunk, data->type, data->loc());
     }
   }
 }
 
 bool ChunkTypes::recordStreamChunk(const Type *chunk, const Type *value, llvm::SMLoc loc) {
-  auto open = checker_.openMaps_.find(chunk);
-  if (open == checker_.openMaps_.end()) {
+  auto open = this->checker.openMaps_.find(chunk);
+  if (open == this->checker.openMaps_.end()) {
     return false;
   }
   if (value->isError() || value->isVoid() || value->isUndefined() || mentionsParam(value)) {
@@ -234,12 +234,12 @@ bool ChunkTypes::recordStreamChunk(const Type *chunk, const Type *value, llvm::S
   }
   value = value->nonOptional();
   const Type *found = Type::tuple({value});
-  std::vector<EventInference::Event> &events = checker_.inference_->maps[open->second];
+  std::vector<EventInference::Event> &events = this->checker.inference_->maps[open->second];
   for (EventInference::Event &e : events) {
     if (e.name != "chunk") {
       continue;
     }
-    const Type *before = checker_.eventMapInference().fromPortable(e.args, loc);
+    const Type *before = this->checker.eventMapInference().fromPortable(e.args, loc);
     if (!before || before == found || before->fields().size() != 1) {
       return true;
     }
@@ -249,15 +249,15 @@ bool ChunkTypes::recordStreamChunk(const Type *chunk, const Type *value, llvm::S
     }
     if (const Type *now = Type::tuple({both}); now != before) {
       llvm::SmallPtrSet<const Type *, 8> seen;
-      e.args = checker_.eventMapInference().portable(now, seen);
-      checker_.inference_->changed = true;
+      e.args = this->checker.eventMapInference().portable(now, seen);
+      this->checker.inference_->changed = true;
     }
     return true;
   }
   llvm::SmallPtrSet<const Type *, 8> seen;
-  events.push_back({"chunk", checker_.eventMapInference().portable(found, seen),
-                    checker_.eventMapInference().placeOf(loc)});
-  checker_.inference_->changed = true;
+  events.push_back({"chunk", this->checker.eventMapInference().portable(found, seen),
+                    this->checker.eventMapInference().placeOf(loc)});
+  this->checker.inference_->changed = true;
 
   return true;
 }

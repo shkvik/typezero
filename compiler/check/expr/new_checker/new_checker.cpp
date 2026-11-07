@@ -30,36 +30,6 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-const char *whyUnsupported(llvm::StringRef name) {
-  if (name == "eval") {
-    return "a compiled program cannot run code from a string";
-  }
-  if (name == "Function") {
-    return "a compiled program cannot run code from a string; write the function itself, e.g. "
-           "'(a: int) => a'";
-  }
-  if (name == "Proxy") {
-    return "the fields of an object are read and written straight in memory, so nothing can "
-           "intercept that";
-  }
-  if (name == "require") {
-    return "files are imported by name: 'import { a } from \"./x\"'";
-  }
-  if (name == "module" || name == "exports") {
-    return "files export by name: 'export function f() {...}', or 'export { a, b }'";
-  }
-  if (name == "escape") {
-    return "it is a legacy function whose '%uXXXX' escapes nothing decodes but 'unescape'; "
-           "encode with 'encodeURIComponent(s)'";
-  }
-  if (name == "unescape") {
-    return "it is a legacy function that decodes the '%uXXXX' escapes of 'escape'; decode with "
-           "'decodeURIComponent(s)'";
-  }
-
-  return nullptr;
-}
-
 NewChecker::NewChecker(Checker &owner)
     : checker(owner) {}
 
@@ -102,8 +72,8 @@ NewChecker::ResultCryptoMadeOk NewChecker::cryptoNew(const NewExpr *expr,
 }
 
 NewChecker::ResultSupportedNew NewChecker::supportedNew(const NewExpr *expr) {
-  const char *why = whyUnsupported(expr->name);
-  if (why) {
+  std::string why = ErrorTextUnsupported::why(expr->name);
+  if (!why.empty()) {
     std::string message = ErrorTextSupportedNew::unsupported(expr->name, why);
 
     return err(NewCheckerSupportedNewError{
@@ -302,7 +272,8 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
     return this->checker.bytesNewChecker().checkBytesNew(expr, bytes);
   }
   if (expr->name == "BigInt64Array" || expr->name == "BigUint64Array") {
-    this->checker.decimalChecker().reportBigInt(expr->loc(), "'" + expr->name.str() + "'");
+    std::string what = quotedName(expr->name);
+    this->checker.decimalChecker().reportBigInt(expr->loc(), what);
     checkArgsLoosely();
     return expr;
   }
@@ -331,8 +302,9 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
     if (zero.isErr()) {
       this->checker.diags_.error(expr->loc(), zero.error().message);
     }
-    IndexProofs::ResultBetweenProven between = this->checker.indexProofs().requireBetween(
-        expr->args[0], 0, std::nullopt, "an array length");
+    std::string what = ErrorTextNewArray::length();
+    IndexProofs::ResultBetweenProven between =
+        this->checker.indexProofs().requireBetween(expr->args[0], 0, std::nullopt, what);
     if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
       this->checker.diags_.error(expr->args[0]->loc(), between.error().message);
     }

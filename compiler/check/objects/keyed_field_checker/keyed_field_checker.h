@@ -16,8 +16,7 @@ public:
   void keyNames(const Expr *key, llvm::function_ref<void(llvm::StringRef)> each) const;
   ResultKeyedFieldRead checkKeyedField(IndexExpr *index, bool write);
   static const Type *keyedFieldType(const Type *type, const Type *keyType);
-  static llvm::SMLoc keyedPlace(const IndexExpr *index,
-                                KeyedFieldCheckerCheckKeyedFieldErrorCode code);
+  static bool wrongKey(KeyedFieldCheckerCheckKeyedFieldErrorCode code);
 
 private:
   static bool isInherited(llvm::StringRef name);

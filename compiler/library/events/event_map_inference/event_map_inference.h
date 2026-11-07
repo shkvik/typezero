@@ -6,7 +6,7 @@ namespace tz {
 
 class EventMapInference {
 public:
-  explicit EventMapInference(Checker &checker);
+  explicit EventMapInference(Checker &owner);
 
   const Type *inferredEventMap(const std::string &site);
   std::string placeOf(llvm::SMLoc loc) const;
@@ -14,10 +14,13 @@ public:
   const Type *fromPortable(const EventInference::Portable &p, llvm::SMLoc loc);
 
 private:
+  static std::string fileOfPlace(const std::string &place);
+  static bool sameInEveryRound(const Type *type, llvm::SmallPtrSetImpl<const Type *> &seen);
+
   ClassDecl *portableClass(const std::string &file, const std::string &name);
 
-  Checker &checker_;
-  std::map<std::string, const Type *> siteMaps_;
+  Checker &checker;
+  std::map<std::string, const Type *> siteMaps;
 };
 
 }

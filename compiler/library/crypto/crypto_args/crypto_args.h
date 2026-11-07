@@ -6,7 +6,7 @@ namespace tz {
 
 class CryptoArgs {
 public:
-  explicit CryptoArgs(Checker &checker);
+  explicit CryptoArgs(Checker &owner);
 
   Expr *cryptoCall(CallExpr *call, CryptoFn fn, std::vector<Expr *> args, const Type *type);
   Expr *cryptoResult(CallExpr *call, CryptoFn fn, std::vector<Expr *> args, const Type *type);
@@ -34,7 +34,11 @@ public:
   bool rejectCryptoCallback(CallExpr *call, size_t index, llvm::StringRef fn, llvm::StringRef hint);
 
 private:
-  Checker &checker_;
+  static std::string utf8Of(const std::u16string &text);
+  static std::u16string utf16Of(llvm::StringRef text);
+  static std::optional<std::string> literalOf(const Expr *e);
+
+  Checker &checker;
 };
 
 }

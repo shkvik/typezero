@@ -6,7 +6,7 @@ namespace tz {
 
 class DateLowerer {
 public:
-  explicit DateLowerer(Lowering &lowering);
+  explicit DateLowerer(Lowering &owner);
 
   llvm::Value *emitDateCall(CallExpr *call);
   llvm::Value *wholeTime(llvm::Value *time);
@@ -16,7 +16,7 @@ public:
   llvm::Value *emitDateOptions(llvm::ArrayRef<Expr *> args, std::vector<Lowering::Operand> &held);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

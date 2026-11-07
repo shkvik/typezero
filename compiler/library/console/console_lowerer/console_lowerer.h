@@ -6,12 +6,12 @@ namespace tz {
 
 class ConsoleLowerer {
 public:
-  explicit ConsoleLowerer(Lowering &lowering);
+  explicit ConsoleLowerer(Lowering &owner);
 
   void emitConsoleLog(CallExpr *call);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

@@ -6,7 +6,7 @@ namespace tz {
 
 class UrlChecker {
 public:
-  explicit UrlChecker(Checker &checker);
+  explicit UrlChecker(Checker &owner);
 
   void checkUrlNew(NewExpr *expr);
   bool checkUrlSetter(MemberExpr *member, const CallExpr *call);
@@ -16,7 +16,11 @@ public:
   bool knownAbsolute(const Expr *expr) const;
 
 private:
-  Checker &checker_;
+  static bool validHost(llvm::StringRef host);
+
+  static bool isLibraryClass(const Type *type, llvm::StringRef name);
+
+  Checker &checker;
 };
 
 }

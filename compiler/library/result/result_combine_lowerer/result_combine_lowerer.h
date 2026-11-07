@@ -6,13 +6,13 @@ namespace tz {
 
 class ResultCombineLowerer {
 public:
-  explicit ResultCombineLowerer(Lowering &lowering);
+  explicit ResultCombineLowerer(Lowering &owner);
 
   llvm::Value *emitCombine(CallExpr *call);
   llvm::Value *emitCombineTuple(CallExpr *call);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

@@ -21,89 +21,98 @@ using llvm::isa;
 
 namespace tz {
 
-static bool isTrueLiteral(const Expr *expr) {
-  auto *lit = llvm::dyn_cast_or_null<BoolLitExpr>(expr);
-
-  return lit && lit->value;
-}
-
 namespace {
 
 class Exits {
 public:
-  Exits(bool isLoop, llvm::ArrayRef<llvm::StringRef> labels) : isLoop_(isLoop), labels_(labels) {}
+  Exits(bool forLoop, llvm::ArrayRef<llvm::StringRef> ownLabels);
 
-  bool any(llvm::ArrayRef<Stmt *> stmts) {
-    return llvm::any_of(stmts, [&](const Stmt *s) { return in(s); });
-  }
+  bool any(llvm::ArrayRef<Stmt *> stmts);
+  bool in(const Stmt *stmt);
 
-  bool in(const Stmt *stmt) {
-    switch (stmt->kind()) {
+private:
+  bool inLoop(const Stmt *body);
+
+  bool isLoop;
+  llvm::ArrayRef<llvm::StringRef> labels;
+  llvm::SmallVector<llvm::StringRef, 4> inner;
+  unsigned loops = 0;
+  unsigned breakables = 0;
+};
+
+Exits::Exits(bool forLoop, llvm::ArrayRef<llvm::StringRef> ownLabels)
+    : isLoop(forLoop),
+      labels(ownLabels) {}
+
+bool Exits::any(llvm::ArrayRef<Stmt *> stmts) {
+  return llvm::any_of(stmts, [&](const Stmt *s) { return this->in(s); });
+}
+
+bool Exits::in(const Stmt *stmt) {
+  switch (stmt->kind()) {
     case Stmt::Kind::Break: {
       llvm::StringRef label = cast<BreakStmt>(stmt)->label;
-      return label.empty() ? breakables_ == 0 : !llvm::is_contained(inner_, label);
+      return label.empty() ? this->breakables == 0 : !llvm::is_contained(this->inner, label);
     }
     case Stmt::Kind::Continue: {
       llvm::StringRef label = cast<ContinueStmt>(stmt)->label;
       if (label.empty()) {
-        return loops_ == 0 && !isLoop_;
+        return this->loops == 0 && !this->isLoop;
       }
-      if (llvm::is_contained(inner_, label)) {
+      if (llvm::is_contained(this->inner, label)) {
         return false;
       }
-      return !(isLoop_ && llvm::is_contained(labels_, label));
+      return !(this->isLoop && llvm::is_contained(this->labels, label));
     }
     case Stmt::Kind::Block:
-      return any(cast<BlockStmt>(stmt)->body);
+      return this->any(cast<BlockStmt>(stmt)->body);
     case Stmt::Kind::If: {
       auto *s = cast<IfStmt>(stmt);
-      return in(s->thenStmt) || (s->elseStmt && in(s->elseStmt));
+      return this->in(s->thenStmt) || (s->elseStmt && this->in(s->elseStmt));
     }
     case Stmt::Kind::While:
-      return inLoop(cast<WhileStmt>(stmt)->body);
+      return this->inLoop(cast<WhileStmt>(stmt)->body);
     case Stmt::Kind::DoWhile:
-      return inLoop(cast<DoWhileStmt>(stmt)->body);
+      return this->inLoop(cast<DoWhileStmt>(stmt)->body);
     case Stmt::Kind::For:
-      return inLoop(cast<ForStmt>(stmt)->body);
+      return this->inLoop(cast<ForStmt>(stmt)->body);
     case Stmt::Kind::ForOf:
-      return inLoop(cast<ForOfStmt>(stmt)->body);
+      return this->inLoop(cast<ForOfStmt>(stmt)->body);
     case Stmt::Kind::Switch: {
-      ++breakables_;
+      ++this->breakables;
       bool found = llvm::any_of(cast<SwitchStmt>(stmt)->cases,
-                                [&](const SwitchCase &c) { return any(c.body); });
-      --breakables_;
+                                [&](const SwitchCase &c) { return this->any(c.body); });
+      --this->breakables;
       return found;
     }
     case Stmt::Kind::Labeled: {
       auto *s = cast<LabeledStmt>(stmt);
-      inner_.push_back(s->label);
-      bool found = in(s->body);
-      inner_.pop_back();
+      this->inner.push_back(s->label);
+      bool found = this->in(s->body);
+      this->inner.pop_back();
       return found;
     }
     default:
       return false;
-    }
   }
+}
 
-private:
-  bool inLoop(const Stmt *body) {
-    ++loops_;
-    ++breakables_;
-    bool found = in(body);
-    --loops_;
-    --breakables_;
+bool Exits::inLoop(const Stmt *body) {
+  ++this->loops;
+  ++this->breakables;
+  bool found = this->in(body);
+  --this->loops;
+  --this->breakables;
 
-    return found;
-  }
+  return found;
+}
 
-  bool isLoop_;
-  llvm::ArrayRef<llvm::StringRef> labels_;
-  llvm::SmallVector<llvm::StringRef, 4> inner_;
-  unsigned loops_ = 0;
-  unsigned breakables_ = 0;
-};
+}
 
+bool ReturnChecker::isTrueLiteral(const Expr *expr) {
+  auto *lit = llvm::dyn_cast_or_null<BoolLitExpr>(expr);
+
+  return lit && lit->value;
 }
 
 bool ReturnChecker::breaksTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels) {
@@ -174,9 +183,141 @@ Expr *ReturnChecker::checkReturnValue(ReturnStmt *ret, const Type *hint, bool te
   return value;
 }
 
-void ReturnChecker::checkReturn(ReturnStmt *ret) {
+ReturnChecker::ResultInsideOfFunction ReturnChecker::enclosingFunction() const {
   if (!this->checker.currentFunction_) {
-    this->checker.diags_.error(ret->loc(), "'return' can only be used inside a function");
+    std::string message = ErrorTextReturnPlace::outside();
+
+    return err(ReturnCheckerEnclosingFunctionError{
+        .code = ReturnCheckerEnclosingFunctionErrorCode::OUTSIDE_FUNCTION,
+        .message = message,
+    });
+  }
+
+  return ok(this->checker.currentFunction_);
+}
+
+ReturnChecker::ResultConstructorExits ReturnChecker::constructorReturn(const ReturnStmt *ret,
+                                                                       const FuncSymbol *fn) const {
+  if (ret->value) {
+    std::string message = ErrorTextConstructorReturn::value();
+
+    return err(ReturnCheckerConstructorReturnError{
+        .code = ReturnCheckerConstructorReturnErrorCode::VALUE_RETURNED,
+        .message = message,
+    });
+  }
+  bool initializer = this->checker.initFn_ == fn->decl;
+  if (initializer && this->checker.flow_.beforeSuper) {
+    std::string message = ErrorTextConstructorReturn::early();
+
+    return err(ReturnCheckerConstructorReturnError{
+        .code = ReturnCheckerConstructorReturnErrorCode::BEFORE_SUPER,
+        .message = message,
+    });
+  }
+  if (initializer) {
+    ClassChecker::ResultEveryFieldSet fieldsSet = this->checker.classChecker().checkFieldsSet();
+    if (fieldsSet.isErr()) {
+      return err(ReturnCheckerConstructorReturnError{
+          .code = ReturnCheckerConstructorReturnErrorCode::FIELDS_UNSET,
+          .message = fieldsSet.error().message,
+      });
+    }
+  }
+
+  return ok(fn);
+}
+
+ReturnChecker::ResultAwaitNotReturned ReturnChecker::awaitReturned(const ReturnStmt *ret,
+                                                                   const FuncSymbol *fn) {
+  bool awaited = fn->decl && fn->decl->isAsync && !fn->decl->isGenerator && ret->value &&
+                 isa<AwaitExpr>(ret->value);
+  if (awaited && fn->decl->concise()) {
+    std::string message = ErrorTextReturnAwait::concise();
+
+    return err(ReturnCheckerAwaitReturnedError{
+        .code = ReturnCheckerAwaitReturnedErrorCode::CONCISE_AWAIT,
+        .message = message,
+    });
+  }
+  if (awaited) {
+    std::string message = ErrorTextReturnAwait::returned();
+
+    return err(ReturnCheckerAwaitReturnedError{
+        .code = ReturnCheckerAwaitReturnedErrorCode::RETURN_AWAIT,
+        .message = message,
+    });
+  }
+
+  return ok(ret);
+}
+
+ReturnChecker::ResultValueNotRequired ReturnChecker::valueRequired(const Type *returned,
+                                                                   const FuncSymbol *fn) {
+  if (!returned->isVoid() && !returned->isError() && !returned->isOptional()) {
+    std::string label = functionLabel(fn->name);
+    std::string message = ErrorTextReturnValue::missing(label, returned->name());
+
+    return err(ReturnCheckerValueRequiredError{
+        .code = ReturnCheckerValueRequiredErrorCode::MISSING_VALUE,
+        .message = message,
+    });
+  }
+
+  return ok(returned);
+}
+
+ReturnChecker::ResultGeneratorReturns
+ReturnChecker::generatorReturn(const Type *given, const Type *returned, const FuncSymbol *fn) {
+  bool wrong = given && !given->isUndefined() && !given->isVoid() &&
+               (returned->isVoid() || !TypeRelations::isImplicitlyConvertible(given, returned));
+  if (wrong) {
+    std::string label = functionLabel(fn->name);
+    std::string message = ErrorTextReturnValue::wrong(label, returned->name(), given->name());
+
+    return err(ReturnCheckerGeneratorReturnError{
+        .code = ReturnCheckerGeneratorReturnErrorCode::WRONG_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok(returned);
+}
+
+ReturnChecker::ResultPromiseTypeMatch
+ReturnChecker::promiseReturn(const Type *given, const Type *returned, const FuncSymbol *fn) {
+  if (given != returned && !given->isNever()) {
+    std::string label = functionLabel(fn->name);
+    std::string message = ErrorTextReturnValue::promise(given->name(), label, returned->name());
+
+    return err(ReturnCheckerPromiseReturnError{
+        .code = ReturnCheckerPromiseReturnErrorCode::OTHER_PROMISE_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok(given);
+}
+
+ReturnChecker::ResultVoidReturnsEmpty ReturnChecker::voidReturn(const Type *type,
+                                                                const FuncSymbol *fn) {
+  if (!type->isVoid() && !type->isError() && !type->isUndefined() && !fn->discardsResult) {
+    std::string label = functionLabel(fn->name);
+    std::string message = ErrorTextReturnValue::notVoid(label, type->name());
+
+    return err(ReturnCheckerVoidReturnError{
+        .code = ReturnCheckerVoidReturnErrorCode::VALUE_FROM_VOID,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+void ReturnChecker::checkReturn(ReturnStmt *ret) {
+  ResultInsideOfFunction inside = this->enclosingFunction();
+  if (inside.isErr()) {
+    this->checker.diags_.error(ret->loc(), inside.error().message);
     if (ret->value) {
       ret->value = this->checker.exprChecker().checkExpr(ret->value);
     }
@@ -184,32 +325,22 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
   }
 
   this->checker.emitterChecker().reportUnlistenedErrors();
-  const FuncSymbol *fn = this->checker.currentFunction_;
+  const FuncSymbol *fn = inside.value();
   if (fn->decl && fn->decl->isConstructor()) {
     if (ret->value) {
       ret->value = this->checker.exprChecker().checkExpr(ret->value);
-      this->checker.diags_.error(ret->value->loc(),
-                                 "a constructor cannot return a value: 'new' gives the object");
-    } else if (this->checker.initFn_ == fn->decl && this->checker.flow_.beforeSuper) {
-      this->checker.diags_.error(ret->loc(),
-                                 "the constructor returns before 'super(...)', which makes the "
-                                 "object (JavaScript throws a ReferenceError there)");
-    } else if (this->checker.initFn_ == fn->decl) {
-      ClassChecker::ResultEveryFieldSet fieldsSet = this->checker.classChecker().checkFieldsSet();
-      if (fieldsSet.isErr()) {
-        this->checker.diags_.error(ret->loc(), fieldsSet.error().message);
-      }
+    }
+    ResultConstructorExits exits = this->constructorReturn(ret, fn);
+    if (exits.isErr()) {
+      bool valued = exits.error().code == ReturnCheckerConstructorReturnErrorCode::VALUE_RETURNED;
+      llvm::SMLoc at = valued ? ret->value->loc() : ret->loc();
+      this->checker.diags_.error(at, exits.error().message);
     }
     return;
   }
-  if (fn->decl && fn->decl->isAsync && !fn->decl->isGenerator && ret->value &&
-      isa<AwaitExpr>(ret->value)) {
-    this->checker.diags_.error(
-        ret->value->loc(), fn->decl->concise()
-                               ? "'await' here changes nothing: an async function waits for the "
-                                 "Promise it returns; leave out 'await'"
-                               : "'return await' changes nothing: an async function waits for the "
-                                 "Promise it returns; write 'return' without 'await'");
+  ResultAwaitNotReturned awaited = ReturnChecker::awaitReturned(ret, fn);
+  if (awaited.isErr()) {
+    this->checker.diags_.error(ret->value->loc(), awaited.error().message);
   }
   const Type *returned = fn->ret && fn->decl && fn->decl->isGenerator &&
                                  (fn->ret->isIterator() || fn->ret->isAsyncIterator())
@@ -235,10 +366,9 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
     return;
   }
   if (!ret->value) {
-    if (!returned->isVoid() && !returned->isError() && !returned->isOptional()) {
-      this->checker.diags_.error(ret->loc(), functionLabel(fn->name) +
-                                                 " must return a value of type '" +
-                                                 returned->name() + "'");
+    ResultValueNotRequired bare = ReturnChecker::valueRequired(returned, fn);
+    if (bare.isErr()) {
+      this->checker.diags_.error(ret->loc(), bare.error().message);
     }
     return;
   }
@@ -248,11 +378,9 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
         this->checker.exprChecker().checkExpr(ret->value, returned->isVoid() ? nullptr : returned);
     const Type *given =
         ret->value->type->isError() ? nullptr : AsyncChecker::awaitedType(ret->value->type);
-    if (given && !given->isUndefined() && !given->isVoid() &&
-        (returned->isVoid() || !TypeRelations::isImplicitlyConvertible(given, returned))) {
-      this->checker.diags_.error(ret->value->loc(), functionLabel(fn->name) + " returns '" +
-                                                        returned->name() + "', found '" +
-                                                        given->name() + "'");
+    ResultGeneratorReturns gives = ReturnChecker::generatorReturn(given, returned, fn);
+    if (gives.isErr()) {
+      this->checker.diags_.error(ret->value->loc(), gives.error().message);
     }
     return;
   }
@@ -260,21 +388,16 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
       this->checkReturnValue(ret, returned->isVoid() ? nullptr : returned, returned->isBool());
   if (fn->decl && fn->decl->isAsync && fn->ret->isPromise() && ret->value->type->isPromise()) {
     const Type *given = ret->value->type->promised();
-    if (given != returned && !given->isNever()) {
-      this->checker.diags_.error(ret->value->loc(), "this Promise gives '" + given->name() +
-                                                        "', but " + functionLabel(fn->name) +
-                                                        " gives '" + returned->name() +
-                                                        "'; await it and convert the value");
+    ResultPromiseTypeMatch match = ReturnChecker::promiseReturn(given, returned, fn);
+    if (match.isErr()) {
+      this->checker.diags_.error(ret->value->loc(), match.error().message);
     }
     return;
   }
   if (returned->isVoid()) {
-    const Type *type = ret->value->type;
-    if (!type->isVoid() && !type->isError() && !type->isUndefined() && !fn->discardsResult) {
-      this->checker.diags_.error(ret->value->loc(), functionLabel(fn->name) +
-                                                        " is declared to return 'void', "
-                                                        "but returns '" +
-                                                        type->name() + "'");
+    ResultVoidReturnsEmpty empty = ReturnChecker::voidReturn(ret->value->type, fn);
+    if (empty.isErr()) {
+      this->checker.diags_.error(ret->value->loc(), empty.error().message);
       this->checker.classLinks().noteInheritedReturn(fn->decl);
     } else if (fn->discardsResult) {
       this->checker.resultChecker().checkDiscarded(ret->value, true);
@@ -323,15 +446,15 @@ bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringR
   }
   case Stmt::Kind::While: {
     auto *s = cast<WhileStmt>(stmt);
-    return isTrueLiteral(s->cond) && !Exits(true, labels).in(s->body);
+    return ReturnChecker::isTrueLiteral(s->cond) && !Exits(true, labels).in(s->body);
   }
   case Stmt::Kind::DoWhile: {
     auto *s = cast<DoWhileStmt>(stmt);
-    return isTrueLiteral(s->cond) && !Exits(true, labels).in(s->body);
+    return ReturnChecker::isTrueLiteral(s->cond) && !Exits(true, labels).in(s->body);
   }
   case Stmt::Kind::For: {
     auto *s = cast<ForStmt>(stmt);
-    return (!s->cond || isTrueLiteral(s->cond)) && !Exits(true, labels).in(s->body);
+    return (!s->cond || ReturnChecker::isTrueLiteral(s->cond)) && !Exits(true, labels).in(s->body);
   }
   case Stmt::Kind::Switch: {
     auto *s = cast<SwitchStmt>(stmt);

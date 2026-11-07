@@ -6,7 +6,7 @@ namespace tz {
 
 class ReflectDispatchLowerer {
 public:
-  explicit ReflectDispatchLowerer(Lowering &lowering);
+  explicit ReflectDispatchLowerer(Lowering &owner);
 
   llvm::Constant *reflectDispatchInfo(const ClassDecl *cls,
                                       llvm::ArrayRef<const FunctionDecl *> variants,
@@ -14,9 +14,11 @@ public:
   llvm::Function *invokerFor(const Type *fnType);
 
 private:
-  Lowering &lowering_;
-  std::map<std::pair<const ClassDecl *, std::string>, llvm::Constant *> reflectDispatchers_;
-  llvm::DenseMap<const Type *, llvm::Function *> invokers_;
+  static std::string className(const ClassDecl *cls);
+
+  Lowering &lowering;
+  std::map<std::pair<const ClassDecl *, std::string>, llvm::Constant *> reflectDispatchers;
+  llvm::DenseMap<const Type *, llvm::Function *> invokers;
 };
 
 }

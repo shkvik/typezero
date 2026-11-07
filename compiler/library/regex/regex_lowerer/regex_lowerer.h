@@ -6,7 +6,7 @@ namespace tz {
 
 class RegexLowerer {
 public:
-  explicit RegexLowerer(Lowering &lowering);
+  explicit RegexLowerer(Lowering &owner);
 
   Lowering::Producer matchAllProducer(llvm::Value *textSlot, llvm::Value *regexSlot,
                                       llvm::Value *lastSlot, llvm::Value *shape);
@@ -19,9 +19,9 @@ public:
   llvm::Value *emitReplaceWith(CallExpr *call);
 
 private:
-  Lowering &lowering_;
-  std::map<std::vector<uint32_t>, llvm::Constant *> regexPrograms_;
-  std::map<std::pair<const Type *, std::vector<uint32_t>>, llvm::Constant *> matchShapes_;
+  Lowering &lowering;
+  std::map<std::vector<uint32_t>, llvm::Constant *> regexPrograms;
+  std::map<std::pair<const Type *, std::vector<uint32_t>>, llvm::Constant *> matchShapes;
 };
 
 }

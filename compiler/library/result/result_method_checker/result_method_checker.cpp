@@ -10,19 +10,17 @@
 #include "compiler/library/result/result_types/result_types.h"
 #include "llvm/ADT/STLExtras.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
+const Type *ResultMethodChecker::halfParam(const Type *half) {
+  return half->isVoid() ? Type::undefinedTy() : half;
+}
 
-const Type *halfParam(const Type *half) { return half->isVoid() ? Type::undefinedTy() : half; }
-
-bool givesType(const Type *half) { return !half->isNever() && !half->isVoid(); }
-
+bool ResultMethodChecker::givesType(const Type *half) {
+  return !half->isNever() && !half->isVoid();
 }
 
 static std::string noUnion(const Type *a, const Type *b) {
@@ -34,12 +32,14 @@ static std::string noUnion(const Type *a, const Type *b) {
   return problem.empty() ? "" : ": " + problem;
 }
 
-ResultMethodChecker::ResultMethodChecker(Checker &checker) : checker_(checker) {}
+ResultMethodChecker::ResultMethodChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
                                              const Type *expected) {
   const Type *type = member->object->type;
-  const Type *value = type->okType(), *error = type->errType();
+  const Type *value = type->okType();
+  const Type *error = type->errType();
   if (auto *conv = dyn_cast<CastExpr>(member->object);
       conv && conv->isImplicit() && conv->operand->type->isResult()) {
     if (value->isNever()) {
@@ -52,10 +52,10 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
   llvm::StringRef name = member->name;
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
   };
-  if (checker_.callChecker().rejectSpread(call)) {
+  if (this->checker.callChecker().rejectSpread(call)) {
     return call;
   }
   struct Method {
@@ -83,15 +83,15 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     }
   }
   if (!method) {
-    checker_.diags_.error(member->loc(),
-                          "property '" + name + "' does not exist on type '" + type->name() + "'");
+    this->checker.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
+                                                  type->name() + "'");
     checkArgsLoosely();
     return call;
   }
   ArgumentChecker::ResultArityMatches arity =
-      checker_.argumentChecker().checkArity(call, method->args, method->args);
+      this->checker.argumentChecker().checkArity(call, method->args, method->args);
   if (arity.isErr()) {
-    checker_.diags_.error(member->loc(), arity.error().message);
+    this->checker.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   Builtin builtin = method->builtin;
@@ -104,19 +104,20 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
 
   if (builtin == Builtin::ResultUnwrapOr) {
     Expr *&arg = call->args[0];
-    arg = checker_.exprChecker().checkExpr(arg, givesType(value) ? value : nullptr);
+    arg = this->checker.exprChecker().checkExpr(
+        arg, ResultMethodChecker::givesType(value) ? value : nullptr);
     const Type *other = arg->type;
     if (other->isError()) {
       return call;
     }
     const Type *result = other->isVoid() ? nullptr : LiteralTypes::unionUnify(value, other);
     if (!result || result->isError()) {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           arg->loc(), "'unwrapOr' gives '" + value->name() + "' for an Ok and '" + other->name() +
                           "' otherwise, and no type holds both; say what each gives with 'match'");
       return call;
     }
-    arg = checker_.typeRelations().convert(arg, result);
+    arg = this->checker.typeRelations().convert(arg, result);
     call->type = result;
     return call;
   }
@@ -129,24 +130,24 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
   }
   auto check = [&](Expr *&arg, const Type *half, const Type *ret) -> const Type * {
     if (half->isNever() && !isa<FunctionExpr>(arg)) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
       if (arg->type->isFunction()) {
         return arg->type->ret();
       }
       if (!arg->type->isError()) {
-        checker_.diags_.error(arg->loc(),
-                              "'" + name + "' needs a function, found '" + arg->type->name() + "'");
+        this->checker.diags_.error(arg->loc(), "'" + name + "' needs a function, found '" +
+                                                   arg->type->name() + "'");
       }
       return nullptr;
     }
     Checker::Signature sig;
     sig.pad = false;
-    sig.params = {halfParam(half)};
+    sig.params = {ResultMethodChecker::halfParam(half)};
     sig.voidResult = builtin == Builtin::ResultAndTee || builtin == Builtin::ResultOrTee;
     if (isa<FunctionExpr>(arg) && !sig.voidResult) {
       sig.ret = ret;
     }
-    arg = checker_.callbackChecker().checkFunctionArg(arg, sig, 1, name);
+    arg = this->checker.callbackChecker().checkFunctionArg(arg, sig, 1, name);
 
     return arg->type->isFunction() ? arg->type->ret() : nullptr;
   };
@@ -170,7 +171,7 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     const Type *both = wanted && !wanted->isVoid() ? wanted : nullptr;
     const Type *a = check(call->args[0], value, both);
     const Type *b = check(call->args[1], error, both);
-    checker_.flowChecker().calledFunction();
+    this->checker.flowChecker().calledFunction();
     if (!a || !b) {
       return call;
     }
@@ -180,8 +181,9 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     }
     const Type *result = a->isVoid() || b->isVoid() ? nullptr : LiteralTypes::unionUnify(a, b);
     if (!result || result->isError()) {
-      checker_.diags_.error(member->loc(), "the functions given to 'match' return '" + a->name() +
-                                               "' and '" + b->name() + "', and no type holds both");
+      this->checker.diags_.error(member->loc(), "the functions given to 'match' return '" +
+                                                    a->name() + "' and '" + b->name() +
+                                                    "', and no type holds both");
       return call;
     }
     call->type = result;
@@ -191,7 +193,7 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     ret = check(call->args[0], onError ? error : value, nullptr);
     break;
   }
-  checker_.flowChecker().calledFunction();
+  this->checker.flowChecker().calledFunction();
   if (!ret) {
     return call;
   }
@@ -200,7 +202,7 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     if (ret->isResult()) {
       return true;
     }
-    checker_.diags_.error(
+    this->checker.diags_.error(
         call->args[0]->loc(),
         "the function given to '" + name +
             "' must return a Result, 'ok(...)' or 'err(...)', found '" + ret->name() + "'" +
@@ -211,11 +213,11 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
   auto oneError = [&](const Type *a, const Type *b) {
     const Type *common = ResultTypes::unifyHalf(a, b);
     if (!common) {
-      checker_.diags_.error(call->args[0]->loc(), "the Result has errors of '" + a->name() +
-                                                      "' and the function given to '" + name +
-                                                      "' returns errors of '" + b->name() +
-                                                      "', which no union holds" + noUnion(a, b) +
-                                                      "; convert one with 'mapErr'");
+      this->checker.diags_.error(
+          call->args[0]->loc(),
+          "the Result has errors of '" + a->name() + "' and the function given to '" + name +
+              "' returns errors of '" + b->name() + "', which no union holds" + noUnion(a, b) +
+              "; convert one with 'mapErr'");
     }
 
     return common;
@@ -249,11 +251,11 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     }
     const Type *common = ResultTypes::unifyHalf(value, ret->okType());
     if (!common) {
-      checker_.diags_.error(call->args[0]->loc(),
-                            "the Result has values of '" + value->name() +
-                                "' and the function given to 'orElse' returns values of '" +
-                                ret->okType()->name() + "', which no union holds" +
-                                noUnion(value, ret->okType()));
+      this->checker.diags_.error(call->args[0]->loc(),
+                                 "the Result has values of '" + value->name() +
+                                     "' and the function given to 'orElse' returns values of '" +
+                                     ret->okType()->name() + "', which no union holds" +
+                                     noUnion(value, ret->okType()));
       return call;
     }
     call->type = Type::result(common, ret->errType());

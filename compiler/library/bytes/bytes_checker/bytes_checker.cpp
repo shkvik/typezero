@@ -16,11 +16,8 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/MathExtras.h"
-#include <limits>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -46,7 +43,16 @@ const std::pair<llvm::StringLiteral, Bytes> kNames[] = {
     {"FatalTextDecoder", Bytes::FatalTextDecoder},
 };
 
-std::string utf8(const std::u16string &text) {
+const llvm::StringLiteral kTypedMethods[] = {
+    "at",          "copyWithin", "entries",  "every",         "fill",    "filter",
+    "find",        "findIndex",  "findLast", "findLastIndex", "forEach", "includes",
+    "indexOf",     "join",       "keys",     "lastIndexOf",   "map",     "reduce",
+    "reduceRight", "reverse",    "set",      "slice",         "some",    "sort",
+    "subarray",    "toReversed", "toSorted", "toString",      "values",  "with"};
+
+}
+
+std::string BytesChecker::utf8(const std::u16string &text) {
   std::string out;
   llvm::convertUTF16ToUTF8String(
       llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
@@ -55,7 +61,7 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-std::optional<std::u16string> literalText(const Expr *e) {
+std::optional<std::u16string> BytesChecker::literalText(const Expr *e) {
   if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
     e = conv->operand;
   }
@@ -69,15 +75,19 @@ std::optional<std::u16string> literalText(const Expr *e) {
   return std::nullopt;
 }
 
-std::string rangeText(int64_t lo, int64_t hi) {
+std::string BytesChecker::rangeText(int64_t lo, int64_t hi) {
   return std::to_string(lo) + " to " + std::to_string(hi);
 }
 
-Range exact(int64_t v) { return {v, v}; }
+Range BytesChecker::exact(int64_t v) {
+  return {v, v};
+}
 
-bool known(const Range &r) { return r.lo && r.hi; }
+bool BytesChecker::known(const Range &r) {
+  return r.lo && r.hi;
+}
 
-int64_t allOnes(int64_t v) {
+int64_t BytesChecker::allOnes(int64_t v) {
   int64_t m = 0;
   while (m < v) {
     m = m * 2 + 1;
@@ -86,20 +96,12 @@ int64_t allOnes(int64_t v) {
   return m;
 }
 
-int64_t floorShift(int64_t v, int64_t n) {
+int64_t BytesChecker::floorShift(int64_t v, int64_t n) {
   return v >= 0 ? v >> n : -((-v + (int64_t(1) << n) - 1) >> n);
 }
 
-const llvm::StringLiteral kTypedMethods[] = {
-    "at",          "copyWithin", "entries",  "every",         "fill",    "filter",
-    "find",        "findIndex",  "findLast", "findLastIndex", "forEach", "includes",
-    "indexOf",     "join",       "keys",     "lastIndexOf",   "map",     "reduce",
-    "reduceRight", "reverse",    "set",      "slice",         "some",    "sort",
-    "subarray",    "toReversed", "toSorted", "toString",      "values",  "with"};
-
-}
-
-BytesChecker::BytesChecker(Checker &checker) : checker_(checker) {}
+BytesChecker::BytesChecker(Checker &owner)
+    : checker(owner) {}
 
 const Type *BytesChecker::bytesTypeNamed(llvm::StringRef name) {
   for (const auto &[n, kind] : kNames) {
@@ -113,21 +115,21 @@ const Type *BytesChecker::bytesTypeNamed(llvm::StringRef name) {
 
 Expr *BytesChecker::checkBytesIndex(IndexExpr *index) {
   const Type *type = index->object->type;
-  index->index = checker_.memberChecker().checkPosition(index->index);
+  index->index = this->checker.memberChecker().checkPosition(index->index);
   if (!type->isTypedArray()) {
-    checker_.diags_.error(index->loc(), "type '" + type->name() + "' cannot be indexed; " +
-                                            (type->bytes() == Bytes::DataView
-                                                 ? "read its bytes with getUint8(i) and the like"
-                                             : type->bytes() == Bytes::ArrayBuffer
-                                                 ? "read its bytes through a view, e.g. 'new "
-                                                   "Uint8Array(buffer)[i]'"
-                                                 : "it holds no elements"));
+    this->checker.diags_.error(
+        index->loc(),
+        "type '" + type->name() + "' cannot be indexed; " +
+            (type->bytes() == Bytes::DataView      ? "read its bytes with getUint8(i) and the like"
+             : type->bytes() == Bytes::ArrayBuffer ? "read its bytes through a view, e.g. 'new "
+                                                     "Uint8Array(buffer)[i]'"
+                                                   : "it holds no elements"));
     return index;
   }
   if (index->index->type->isError()) {
     return index;
   }
-  bool inRange = checker_.indexProofs().provesInBounds(index->object, index->index, false);
+  bool inRange = this->checker.indexProofs().provesInBounds(index->object, index->index, false);
   if (ElementIndex *element = index->form.as<ElementIndex>()) {
     element->mayBeOutOfRange = !inRange;
   }
@@ -141,16 +143,17 @@ void BytesChecker::checkBytesStore(IndexExpr *index, const Expr *value) {
   if (index->index->type->isError() || (value && value->type->isError())) {
     return;
   }
-  std::string object = valueText(index->object), position = valueText(index->index);
-  if (!checker_.indexProofs().provesInBounds(index->object, index->index, false)) {
-    std::optional<int64_t> at = checker_.constantFolder().intConstant(index->index);
+  std::string object = valueText(index->object);
+  std::string position = valueText(index->index);
+  if (!this->checker.indexProofs().provesInBounds(index->object, index->index, false)) {
+    std::optional<int64_t> at = this->checker.constantFolder().intConstant(index->index);
     std::string check = at ? object + ".length > " + std::to_string(*at)
                            : position + " >= 0 && " + position + " < " + object + ".length";
-    checker_.diags_.error(index->loc(),
-                          "cannot prove that the index is within the " + target->name() +
-                              " (0 <= index < length): it never grows, and JavaScript would "
-                              "drop the write; check the index first, e.g. 'if (" +
-                              check + ")'");
+    this->checker.diags_.error(index->loc(),
+                               "cannot prove that the index is within the " + target->name() +
+                                   " (0 <= index < length): it never grows, and JavaScript would "
+                                   "drop the write; check the index first, e.g. 'if (" +
+                                   check + ")'");
     return;
   }
 }
@@ -159,27 +162,27 @@ Expr *BytesChecker::checkBytesMember(MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
   auto read = [&](Builtin builtin, const Type *result, std::vector<Expr *> args = {}) {
-    return checker_.processChecker().builtinCall(member->loc(), member, builtin, std::move(args),
-                                                 result);
+    return this->checker.processChecker().builtinCall(member->loc(), member, builtin,
+                                                      std::move(args), result);
   };
   auto constant = [&](Expr *value) -> Expr * {
     if (isa<NameExpr>(member->object)) {
       return value;
     }
-    auto *seq =
-        checker_.ctx_.make<SequenceExpr>(member->loc(), std::vector<Expr *>{member->object, value});
+    auto *seq = this->checker.ctx_.make<SequenceExpr>(member->loc(),
+                                                      std::vector<Expr *>{member->object, value});
     seq->type = value->type;
 
     return seq;
   };
   auto intLit = [&](int64_t v) {
-    auto *lit = checker_.ctx_.make<IntLitExpr>(member->loc(), uint64_t(v));
+    auto *lit = this->checker.ctx_.make<IntLitExpr>(member->loc(), uint64_t(v));
     lit->type = Type::intTy();
 
     return lit;
   };
   auto boolLit = [&](bool v) {
-    auto *lit = checker_.ctx_.make<BoolLitExpr>(member->loc(), v);
+    auto *lit = this->checker.ctx_.make<BoolLitExpr>(member->loc(), v);
     lit->type = Type::boolTy();
 
     return lit;
@@ -211,7 +214,7 @@ Expr *BytesChecker::checkBytesMember(MemberExpr *member) {
     break;
   case Bytes::TextEncoder:
     if (name == "encoding") {
-      auto *lit = checker_.ctx_.make<StringLitExpr>(member->loc(), u"utf-8");
+      auto *lit = this->checker.ctx_.make<StringLitExpr>(member->loc(), u"utf-8");
       lit->type = Type::string();
       return constant(lit);
     }
@@ -243,21 +246,22 @@ Expr *BytesChecker::checkBytesMember(MemberExpr *member) {
       return constant(intLit(type->elementSize()));
     }
     if (type->isBuffer() && (name == "parent" || name == "offset")) {
-      checker_.diags_.error(member->loc(), "'" + name +
-                                               "' of a Buffer is deprecated in node and not "
-                                               "supported; use '" +
-                                               (name == "parent" ? "buffer" : "byteOffset") + "'");
+      this->checker.diags_.error(member->loc(), "'" + name +
+                                                    "' of a Buffer is deprecated in node and not "
+                                                    "supported; use '" +
+                                                    (name == "parent" ? "buffer" : "byteOffset") +
+                                                    "'");
       return member;
     }
     if (llvm::is_contained(kTypedMethods, name)) {
-      checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
-                                               type->name() + "'; methods must be called");
+      this->checker.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
+                                                    type->name() + "'; methods must be called");
       return member;
     }
     break;
   }
-  checker_.diags_.error(member->loc(),
-                        "property '" + name + "' does not exist on type '" + type->name() + "'");
+  this->checker.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
+                                                type->name() + "'");
 
   return member;
 }
@@ -279,8 +283,8 @@ Expr *BytesChecker::checkBytesUnionMember(MemberExpr *member) {
                                                "detached",          "encoding",      "fatal",
                                                "ignoreBOM"};
   if (llvm::is_contained(others, name)) {
-    checker_.diags_.error(member->loc(), "property '" + name + "' of '" + type->name() +
-                                             "' is not supported yet; narrow it first");
+    this->checker.diags_.error(member->loc(), "property '" + name + "' of '" + type->name() +
+                                                  "' is not supported yet; narrow it first");
     return member;
   }
   llvm::ArrayRef<const Type *> members = type->members();
@@ -291,7 +295,7 @@ Expr *BytesChecker::checkBytesUnionMember(MemberExpr *member) {
     if (const Type *const *with = llvm::find_if(members, has); with != members.end()) {
       message += ", e.g. 'if (x instanceof " + (*with)->name().str() + ")'";
     }
-    checker_.diags_.error(member->loc(), message);
+    this->checker.diags_.error(member->loc(), message);
     return member;
   }
   if (name == "length") {
@@ -299,39 +303,39 @@ Expr *BytesChecker::checkBytesUnionMember(MemberExpr *member) {
     return member;
   }
   if (name == "buffer") {
-    return checker_.processChecker().builtinCall(member->loc(), member, Builtin::BytesBuffer, {},
-                                                 Type::bytesType(Bytes::ArrayBuffer));
+    return this->checker.processChecker().builtinCall(member->loc(), member, Builtin::BytesBuffer,
+                                                      {}, Type::bytesType(Bytes::ArrayBuffer));
   }
 
-  return checker_.processChecker().builtinCall(member->loc(), member,
-                                               name == "byteLength" ? Builtin::BytesByteLength
-                                                                    : Builtin::BytesByteOffset,
-                                               {}, Type::intTy());
+  return this->checker.processChecker().builtinCall(member->loc(), member,
+                                                    name == "byteLength" ? Builtin::BytesByteLength
+                                                                         : Builtin::BytesByteOffset,
+                                                    {}, Type::intTy());
 }
 
 Expr *BytesChecker::checkBytesStaticMember(MemberExpr *member) {
   auto *object = dyn_cast<NameExpr>(member->object);
-  if (!object || !checker_.callChecker().isGlobalName(object, object->name)) {
+  if (!object || !this->checker.callChecker().isGlobalName(object, object->name)) {
     return nullptr;
   }
-  const Type *type = bytesTypeNamed(object->name);
+  const Type *type = BytesChecker::bytesTypeNamed(object->name);
   if (!type) {
     return nullptr;
   }
   member->type = Type::error();
   if (type->isTypedArray() && member->name == "BYTES_PER_ELEMENT") {
-    auto *lit = checker_.ctx_.make<IntLitExpr>(member->loc(), type->elementSize());
+    auto *lit = this->checker.ctx_.make<IntLitExpr>(member->loc(), type->elementSize());
     lit->type = Type::intTy();
     return lit;
   }
   if (type->isBuffer() && member->name == "poolSize") {
-    auto *lit = checker_.ctx_.make<IntLitExpr>(member->loc(), 8192);
+    auto *lit = this->checker.ctx_.make<IntLitExpr>(member->loc(), 8192);
     lit->type = Type::intTy();
     return lit;
   }
-  checker_.diags_.error(member->loc(), "'" + object->name + "." + member->name +
-                                           "' can be used only in a call, e.g. '" + object->name +
-                                           "." + member->name + "(...)'");
+  this->checker.diags_.error(member->loc(), "'" + object->name + "." + member->name +
+                                                "' can be used only in a call, e.g. '" +
+                                                object->name + "." + member->name + "(...)'");
 
   return member;
 }
@@ -339,17 +343,17 @@ Expr *BytesChecker::checkBytesStaticMember(MemberExpr *member) {
 Expr *BytesChecker::bytesToString(Expr *expr) {
   const Type *type = expr->type;
   if (type->isTypedArray()) {
-    auto *callee = checker_.ctx_.make<MemberExpr>(expr->loc(), expr, "toString");
+    auto *callee = this->checker.ctx_.make<MemberExpr>(expr->loc(), expr, "toString");
     if (type->isBuffer()) {
-      auto *encoding = checker_.ctx_.make<IntLitExpr>(expr->loc(), Utf8);
+      auto *encoding = this->checker.ctx_.make<IntLitExpr>(expr->loc(), Utf8);
       encoding->type = Type::intTy();
-      return checker_.processChecker().builtinCall(expr->loc(), callee, Builtin::BufferToString,
-                                                   {encoding}, Type::string());
+      return this->checker.processChecker().builtinCall(
+          expr->loc(), callee, Builtin::BufferToString, {encoding}, Type::string());
     }
-    return checker_.processChecker().builtinCall(expr->loc(), callee, Builtin::BytesJoin, {},
-                                                 Type::string());
+    return this->checker.processChecker().builtinCall(expr->loc(), callee, Builtin::BytesJoin, {},
+                                                      Type::string());
   }
-  checker_.diags_.error(
+  this->checker.diags_.error(
       expr->loc(), "a value of type '" + type->name() +
                        "' cannot be converted to a string: JavaScript would give '[object " +
                        type->name() + "]'; print it with console.log" +
@@ -361,39 +365,39 @@ Expr *BytesChecker::bytesToString(Expr *expr) {
 }
 
 Expr *BytesChecker::checkBufferEncoding(Expr *arg) {
-  if (std::optional<std::u16string> text = literalText(arg)) {
-    std::optional<int> encoding = encodingNamed(utf8(*text));
+  if (std::optional<std::u16string> text = BytesChecker::literalText(arg)) {
+    std::optional<int> encoding = encodingNamed(BytesChecker::utf8(*text));
     if (!encoding) {
-      checker_.diags_.error(arg->loc(),
-                            "unknown encoding '" + utf8(*text) +
-                                "' (node throws a TypeError); Buffer knows utf8, utf16le, "
-                                "latin1, ascii, base64, base64url and hex");
+      this->checker.diags_.error(arg->loc(),
+                                 "unknown encoding '" + BytesChecker::utf8(*text) +
+                                     "' (node throws a TypeError); Buffer knows utf8, utf16le, "
+                                     "latin1, ascii, base64, base64url and hex");
       arg->type = Type::error();
       return arg;
     }
-    auto *lit = checker_.ctx_.make<IntLitExpr>(arg->loc(), uint64_t(*encoding));
+    auto *lit = this->checker.ctx_.make<IntLitExpr>(arg->loc(), uint64_t(*encoding));
     lit->type = Type::intTy();
     return lit;
   }
-  arg = checker_.argumentChecker().checkArg(arg, Type::string());
-  if (arg->type->isError() || checker_.indexProofs().exempt(arg->loc())) {
+  arg = this->checker.argumentChecker().checkArg(arg, Type::string());
+  if (arg->type->isError() || this->checker.indexProofs().exempt(arg->loc())) {
     return arg;
   }
-  std::optional<std::vector<std::string>> names = checker_.literalTypes().knownTexts(arg);
+  std::optional<std::vector<std::string>> names = this->checker.literalTypes().knownTexts(arg);
   if (!names) {
-    checker_.diags_.error(arg->loc(),
-                          "an encoding known only when the program runs may be one Buffer does "
-                          "not know, which node would throw a TypeError for; check it first, "
-                          "e.g. 'if (enc == \"hex\" || enc == \"base64\")', or give it the type "
-                          "'BufferEncoding'");
+    this->checker.diags_.error(
+        arg->loc(), "an encoding known only when the program runs may be one Buffer does "
+                    "not know, which node would throw a TypeError for; check it first, "
+                    "e.g. 'if (enc == \"hex\" || enc == \"base64\")', or give it the type "
+                    "'BufferEncoding'");
     return arg;
   }
   for (const std::string &name : *names) {
     if (!encodingNamed(name)) {
-      checker_.diags_.error(arg->loc(),
-                            "unknown encoding '" + name +
-                                "' (node throws a TypeError); Buffer knows utf8, utf16le, "
-                                "latin1, ascii, base64, base64url and hex");
+      this->checker.diags_.error(arg->loc(),
+                                 "unknown encoding '" + name +
+                                     "' (node throws a TypeError); Buffer knows utf8, utf16le, "
+                                     "latin1, ascii, base64, base64url and hex");
       break;
     }
   }
@@ -404,54 +408,56 @@ Expr *BytesChecker::checkBufferEncoding(Expr *arg) {
 Expr *BytesChecker::checkBytesMethod(CallExpr *call, MemberExpr *member, const Type *expected) {
   const Type *type = member->object->type;
   call->type = Type::error();
-  if (checker_.callChecker().rejectSpread(call)) {
+  if (this->checker.callChecker().rejectSpread(call)) {
     return call;
   }
   switch (type->bytes()) {
   case Bytes::ArrayBuffer: {
     llvm::StringRef name = member->name;
     if (name == "slice") {
-      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 2);
+      ArgumentChecker::ResultArityMatches arity =
+          this->checker.argumentChecker().checkArity(call, 0, 2);
       if (arity.isErr()) {
-        checker_.diags_.error(member->loc(), arity.error().message);
+        this->checker.diags_.error(member->loc(), arity.error().message);
         return call;
       }
       for (Expr *&arg : call->args) {
-        arg = checker_.memberChecker().checkPosition(arg);
+        arg = this->checker.memberChecker().checkPosition(arg);
       }
       call->target = BuiltinCall{.builtin = Builtin::ArrayBufferSlice};
       call->type = type;
       return call;
     }
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     if (name == "resize" || name == "transfer" || name == "transferToFixedLength") {
-      checker_.diags_.error(member->loc(), "'" + name +
-                                               "' is not supported yet: an ArrayBuffer keeps its "
-                                               "size and its memory (docs/bytes.md, section 7)");
+      this->checker.diags_.error(member->loc(),
+                                 "'" + name +
+                                     "' is not supported yet: an ArrayBuffer keeps its "
+                                     "size and its memory (docs/bytes.md, section 7)");
     } else {
-      checker_.diags_.error(member->loc(),
-                            "property '" + name + "' does not exist on type 'ArrayBuffer'");
+      this->checker.diags_.error(member->loc(),
+                                 "property '" + name + "' does not exist on type 'ArrayBuffer'");
     }
     return call;
   }
   case Bytes::DataView:
-    return checker_.typedArrayChecker().checkDataViewMethod(call, member);
+    return this->checker.typedArrayChecker().checkDataViewMethod(call, member);
   case Bytes::TextEncoder:
   case Bytes::TextDecoder:
   case Bytes::FatalTextDecoder:
-    return checker_.bufferChecker().checkTextMethod(call, member);
+    return this->checker.bufferChecker().checkTextMethod(call, member);
   default:
     break;
   }
   if (type->isBuffer()) {
-    if (Expr *result = checker_.bufferChecker().checkBufferMethod(call, member)) {
+    if (Expr *result = this->checker.bufferChecker().checkBufferMethod(call, member)) {
       return result;
     }
   }
 
-  return checker_.typedArrayChecker().checkTypedArrayMethod(call, member, expected);
+  return this->checker.typedArrayChecker().checkTypedArrayMethod(call, member, expected);
 }
 
 }

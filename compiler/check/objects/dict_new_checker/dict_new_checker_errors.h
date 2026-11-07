@@ -51,6 +51,7 @@ public:
   static std::string notPairs(llvm::StringRef what, llvm::StringRef wanted, llvm::StringRef given,
                               bool array);
   static std::string values(llvm::StringRef what, llvm::StringRef wanted, llvm::StringRef given);
+  static std::string newName(llvm::StringRef name);
 };
 
 enum class DictNewCheckerArgumentCountErrorCode {

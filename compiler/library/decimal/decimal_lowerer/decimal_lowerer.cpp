@@ -14,11 +14,8 @@
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 
-using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -36,61 +33,66 @@ enum Fold : int32_t { kFoldSum, kFoldMax, kFoldMin };
 
 }
 
-DecimalLowerer::DecimalLowerer(Lowering &lowering) : lowering_(lowering) {}
+DecimalLowerer::DecimalLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::FunctionCallee DecimalLowerer::decimalFunction(llvm::StringRef name, llvm::Type *ret,
                                                      llvm::ArrayRef<llvm::Type *> params) {
-  llvm::FunctionCallee callee =
-      lowering_.module_->getOrInsertFunction(name, llvm::FunctionType::get(ret, params, false));
+  llvm::FunctionCallee callee = this->lowering.module_->getOrInsertFunction(
+      name, llvm::FunctionType::get(ret, params, false));
   cast<llvm::Function>(callee.getCallee())->addFnAttr(llvm::Attribute::NoUnwind);
 
   return callee;
 }
 
 llvm::Value *DecimalLowerer::decimalCoef(llvm::Value *value) {
-  return lowering_.builder_.CreateExtractValue(value, 0);
+  return this->lowering.builder_.CreateExtractValue(value, 0);
 }
 
 llvm::Value *DecimalLowerer::decimalMeta(llvm::Value *value) {
-  return lowering_.builder_.CreateExtractValue(value, 1);
+  return this->lowering.builder_.CreateExtractValue(value, 1);
 }
 
 llvm::Value *DecimalLowerer::callReturningDecimal(llvm::StringRef name,
                                                   llvm::ArrayRef<llvm::Value *> args) {
-  std::vector<llvm::Type *> params{lowering_.builder_.getPtrTy()};
+  std::vector<llvm::Type *> params{this->lowering.builder_.getPtrTy()};
   for (llvm::Value *arg : args) {
     params.push_back(arg->getType());
   }
-  llvm::AllocaInst *out = lowering_.functionFrame().createStackSlot(lowering_.decTy_, "dec.out");
+  llvm::AllocaInst *out =
+      this->lowering.functionFrame().createStackSlot(this->lowering.decTy_, "dec.out");
   std::vector<llvm::Value *> all{out};
   all.insert(all.end(), args.begin(), args.end());
-  lowering_.builder_.CreateCall(decimalFunction(name, lowering_.builder_.getVoidTy(), params), all);
+  this->lowering.builder_.CreateCall(
+      this->decimalFunction(name, this->lowering.builder_.getVoidTy(), params), all);
 
-  return lowering_.builder_.CreateLoad(lowering_.decTy_, out);
+  return this->lowering.builder_.CreateLoad(this->lowering.decTy_, out);
 }
 
 llvm::Function *DecimalLowerer::decimalRefCount(bool retain) {
-  llvm::Function *&fn = retain ? decRetainFn_ : decReleaseFn_;
+  llvm::Function *&fn = retain ? this->decRetainFn : this->decReleaseFn;
   if (fn) {
     return fn;
   }
-  auto *type = llvm::FunctionType::get(lowering_.builder_.getVoidTy(), {lowering_.decTy_}, false);
+  auto *type =
+      llvm::FunctionType::get(this->lowering.builder_.getVoidTy(), {this->lowering.decTy_}, false);
   fn = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage,
-                              retain ? "tz.dec.retain" : "tz.dec.release", lowering_.module_.get());
+                              retain ? "tz.dec.retain" : "tz.dec.release",
+                              this->lowering.module_.get());
   fn->addFnAttr(llvm::Attribute::AlwaysInline);
   fn->addFnAttr(llvm::Attribute::NoUnwind);
-  llvm::IRBuilder<> b(llvm::BasicBlock::Create(lowering_.ctx_, "entry", fn));
-  auto *countedBlock = llvm::BasicBlock::Create(lowering_.ctx_, "counted", fn);
-  auto *doneBlock = llvm::BasicBlock::Create(lowering_.ctx_, "done", fn);
+  llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx_, "entry", fn));
+  auto *countedBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "counted", fn);
+  auto *doneBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "done", fn);
   llvm::Value *value = fn->getArg(0);
   llvm::Value *counted = b.CreateICmpSLT(b.CreateExtractValue(value, 1, "meta"), b.getInt64(0));
   b.CreateCondBr(counted, countedBlock, doneBlock);
   b.SetInsertPoint(countedBlock);
   llvm::Value *obj = b.CreateIntToPtr(b.CreateExtractValue(value, 0, "coef"), b.getPtrTy(), "obj");
   llvm::Value *count = b.CreateLoad(b.getInt64Ty(), obj, "rc");
-  auto *freeBlock = retain ? nullptr : llvm::BasicBlock::Create(lowering_.ctx_, "free", fn);
-  if (lowering_.parallel_) {
-    lowering_.runtimeFunctions().countShared(b, obj, count, retain, freeBlock, doneBlock);
+  auto *freeBlock = retain ? nullptr : llvm::BasicBlock::Create(this->lowering.ctx_, "free", fn);
+  if (this->lowering.parallel_) {
+    this->lowering.runtimeFunctions().countShared(b, obj, count, retain, freeBlock, doneBlock);
   }
   if (retain) {
     b.CreateStore(b.CreateAdd(count, b.getInt64(1)), obj);
@@ -100,7 +102,7 @@ llvm::Function *DecimalLowerer::decimalRefCount(bool retain) {
     b.CreateStore(left, obj);
     b.CreateCondBr(b.CreateICmpEQ(left, b.getInt64(0)), freeBlock, doneBlock);
     b.SetInsertPoint(freeBlock);
-    b.CreateCall(decimalFunction("tz_dec_free", b.getVoidTy(), {b.getPtrTy()}), {obj});
+    b.CreateCall(this->decimalFunction("tz_dec_free", b.getVoidTy(), {b.getPtrTy()}), {obj});
     b.CreateBr(doneBlock);
   }
   b.SetInsertPoint(doneBlock);
@@ -122,12 +124,12 @@ llvm::Constant *DecimalLowerer::emitDecimalLiteral(const Expr *expr) {
   } else {
     value = readDecimalLiteral(cast<FloatLitExpr>(expr)->text).value_or(value);
   }
-  llvm::Type *i64 = lowering_.builder_.getInt64Ty();
+  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
   auto shortValue = [&](uint64_t magnitude, int64_t scale) {
     uint64_t coef = negative ? 0 - magnitude : magnitude;
 
     return llvm::ConstantStruct::get(
-        lowering_.decTy_,
+        this->lowering.decTy_,
         {llvm::ConstantInt::get(i64, coef), llvm::ConstantInt::get(i64, uint64_t(scale))});
   };
   if (value.isZero() || value.top() < kDecimalMinExp) {
@@ -156,54 +158,57 @@ llvm::Constant *DecimalLowerer::emitDecimalLiteral(const Expr *expr) {
     limbs.push_back(static_cast<uint32_t>(std::stoul(digits.substr(start, end - start))));
     end = start;
   }
-  llvm::Type *i32 = lowering_.builder_.getInt32Ty();
-  llvm::Constant *data = llvm::ConstantDataArray::get(lowering_.ctx_, limbs);
-  auto *layout = llvm::StructType::get(lowering_.ctx_, {i64, i64, i32, i32, data->getType()});
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+  llvm::Constant *data = llvm::ConstantDataArray::get(this->lowering.ctx_, limbs);
+  auto *layout = llvm::StructType::get(this->lowering.ctx_, {i64, i64, i32, i32, data->getType()});
   llvm::Constant *init = llvm::ConstantStruct::get(
       layout,
-      {lowering_.builder_.getInt64(kLiteralRefCount),
-       llvm::ConstantInt::get(i64, uint64_t(exponent)), lowering_.builder_.getInt32(negative),
-       lowering_.builder_.getInt32(static_cast<uint32_t>(limbs.size())), data});
-  auto *global = new llvm::GlobalVariable(*lowering_.module_, layout, true,
+      {this->lowering.builder_.getInt64(kLiteralRefCount),
+       llvm::ConstantInt::get(i64, uint64_t(exponent)), this->lowering.builder_.getInt32(negative),
+       this->lowering.builder_.getInt32(static_cast<uint32_t>(limbs.size())), data});
+  auto *global = new llvm::GlobalVariable(*this->lowering.module_, layout, true,
                                           llvm::GlobalValue::PrivateLinkage, init, ".decimal");
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   global->setAlignment(llvm::Align(8));
 
-  return llvm::ConstantStruct::get(lowering_.decTy_, {llvm::ConstantExpr::getPtrToInt(global, i64),
-                                                      lowering_.builder_.getInt64(kDecLong)});
+  return llvm::ConstantStruct::get(
+      this->lowering.decTy_,
+      {llvm::ConstantExpr::getPtrToInt(global, i64), this->lowering.builder_.getInt64(kDecLong)});
 }
 
 llvm::Value *DecimalLowerer::decimalFromInteger(llvm::Value *value, const Type *from) {
   if (from->isUnsigned() && from->bitWidth() == 64) {
-    return callReturningDecimal("tz_dec_from_u64", {value});
+    return this->callReturningDecimal("tz_dec_from_u64", {value});
   }
-  llvm::Value *coef = lowering_.numberLowerer().toI64(value, from);
-  llvm::Value *result =
-      lowering_.builder_.CreateInsertValue(llvm::UndefValue::get(lowering_.decTy_), coef, 0);
+  llvm::Value *coef = this->lowering.numberLowerer().toI64(value, from);
+  llvm::Value *result = this->lowering.builder_.CreateInsertValue(
+      llvm::UndefValue::get(this->lowering.decTy_), coef, 0);
 
-  return lowering_.builder_.CreateInsertValue(result, lowering_.builder_.getInt64(0), 1);
+  return this->lowering.builder_.CreateInsertValue(result, this->lowering.builder_.getInt64(0), 1);
 }
 
 llvm::Value *DecimalLowerer::emitDecimalArithmetic(BinaryOp op, llvm::Value *lhs,
                                                    llvm::Value *rhs) {
-  llvm::Value *a = decimalCoef(lhs), *am = decimalMeta(lhs);
+  llvm::Value *a = this->decimalCoef(lhs);
+  llvm::Value *am = this->decimalMeta(lhs);
   if (op == BinaryOp::Pow) {
-    return callReturningDecimal("tz_dec_pow", {a, am, rhs});
+    return this->callReturningDecimal("tz_dec_pow", {a, am, rhs});
   }
-  llvm::Value *b = decimalCoef(rhs), *bm = decimalMeta(rhs);
+  llvm::Value *b = this->decimalCoef(rhs);
+  llvm::Value *bm = this->decimalMeta(rhs);
   switch (op) {
   case BinaryOp::Add:
-    return callReturningDecimal("tz_dec_add", {a, am, b, bm});
+    return this->callReturningDecimal("tz_dec_add", {a, am, b, bm});
   case BinaryOp::Sub:
-    return callReturningDecimal("tz_dec_sub", {a, am, b, bm});
+    return this->callReturningDecimal("tz_dec_sub", {a, am, b, bm});
   case BinaryOp::Mul:
-    return callReturningDecimal("tz_dec_mul", {a, am, b, bm});
+    return this->callReturningDecimal("tz_dec_mul", {a, am, b, bm});
   case BinaryOp::Div:
-    return callReturningDecimal("tz_dec_div",
-                                {a, am, b, bm, lowering_.builder_.getInt64(kDivisionPlaces),
-                                 lowering_.builder_.getInt32(kRoundHalfUp)});
+    return this->callReturningDecimal(
+        "tz_dec_div", {a, am, b, bm, this->lowering.builder_.getInt64(kDivisionPlaces),
+                       this->lowering.builder_.getInt32(kRoundHalfUp)});
   case BinaryOp::Rem:
-    return callReturningDecimal("tz_dec_rem", {a, am, b, bm});
+    return this->callReturningDecimal("tz_dec_rem", {a, am, b, bm});
   default:
     llvm_unreachable("not an operator of decimals");
   }
@@ -211,8 +216,8 @@ llvm::Value *DecimalLowerer::emitDecimalArithmetic(BinaryOp op, llvm::Value *lhs
 
 llvm::Value *DecimalLowerer::emitDecimalBinary(BinaryExpr *bin) {
   Lowering::Operand a =
-      lowering_.refCounts().emitOperand(bin->lhs, AssignLowerer::cannotAssign(bin->rhs));
-  Lowering::Operand b = lowering_.refCounts().emitOperand(bin->rhs, true);
+      this->lowering.refCounts().emitOperand(bin->lhs, AssignLowerer::cannotAssign(bin->rhs));
+  Lowering::Operand b = this->lowering.refCounts().emitOperand(bin->rhs, true);
   bool arithmetic = false;
   llvm::Value *result;
   switch (bin->op) {
@@ -220,72 +225,76 @@ llvm::Value *DecimalLowerer::emitDecimalBinary(BinaryExpr *bin) {
   case BinaryOp::Le:
   case BinaryOp::Gt:
   case BinaryOp::Ge: {
-    llvm::Type *i64 = lowering_.builder_.getInt64Ty();
-    llvm::Value *order = lowering_.builder_.CreateCall(
-        decimalFunction("tz_dec_cmp", lowering_.builder_.getInt32Ty(), {i64, i64, i64, i64}),
-        {decimalCoef(a.value), decimalMeta(a.value), decimalCoef(b.value), decimalMeta(b.value)});
-    result = lowering_.binaryLowerer().emitComparison(
-        bin->op, order, lowering_.builder_.getInt32(0), Type::intTy());
+    llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+    llvm::Value *order = this->lowering.builder_.CreateCall(
+        this->decimalFunction("tz_dec_cmp", this->lowering.builder_.getInt32Ty(),
+                              {i64, i64, i64, i64}),
+        {this->decimalCoef(a.value), this->decimalMeta(a.value), this->decimalCoef(b.value),
+         this->decimalMeta(b.value)});
+    result = this->lowering.binaryLowerer().emitComparison(
+        bin->op, order, this->lowering.builder_.getInt32(0), Type::intTy());
     break;
   }
   default:
-    result = emitDecimalArithmetic(bin->op, a.value, b.value);
+    result = this->emitDecimalArithmetic(bin->op, a.value, b.value);
     arithmetic = true;
     break;
   }
-  lowering_.refCounts().dropOperand(a);
-  lowering_.refCounts().dropOperand(b);
+  this->lowering.refCounts().dropOperand(a);
+  this->lowering.refCounts().dropOperand(b);
 
   return result;
 }
 
 llvm::Value *DecimalLowerer::emitDecimalCompound(BinaryOp op, llvm::Value *old, Expr *value) {
-  Lowering::Operand rhs = lowering_.refCounts().emitOperand(value, true);
-  llvm::Value *result = emitDecimalArithmetic(op, old, rhs.value);
-  lowering_.refCounts().dropOperand(rhs);
+  Lowering::Operand rhs = this->lowering.refCounts().emitOperand(value, true);
+  llvm::Value *result = this->emitDecimalArithmetic(op, old, rhs.value);
+  this->lowering.refCounts().dropOperand(rhs);
 
   return result;
 }
 
 llvm::Value *DecimalLowerer::emitDecimalUpdate(UpdateExpr *update, llvm::Value *address) {
-  llvm::Value *old = lowering_.builder_.CreateLoad(lowering_.decTy_, address);
-  llvm::Constant *one = llvm::ConstantStruct::get(
-      lowering_.decTy_, {lowering_.builder_.getInt64(1), lowering_.builder_.getInt64(0)});
+  llvm::Value *old = this->lowering.builder_.CreateLoad(this->lowering.decTy_, address);
+  llvm::Constant *one =
+      llvm::ConstantStruct::get(this->lowering.decTy_, {this->lowering.builder_.getInt64(1),
+                                                        this->lowering.builder_.getInt64(0)});
   llvm::Value *updated =
-      emitDecimalArithmetic(update->increment ? BinaryOp::Add : BinaryOp::Sub, old, one);
-  lowering_.builder_.CreateStore(updated, address);
+      this->emitDecimalArithmetic(update->increment ? BinaryOp::Add : BinaryOp::Sub, old, one);
+  this->lowering.builder_.CreateStore(updated, address);
   if (!update->prefix) {
     return old;
   }
-  lowering_.refCounts().releaseValue(old, Type::decimalTy());
-  lowering_.refCounts().retainValue(updated, Type::decimalTy());
+  this->lowering.refCounts().releaseValue(old, Type::decimalTy());
+  this->lowering.refCounts().retainValue(updated, Type::decimalTy());
 
   return updated;
 }
 
 llvm::Value *DecimalLowerer::decimalSign(llvm::Value *value) {
-  llvm::Type *i64 = lowering_.builder_.getInt64Ty();
+  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
 
-  return lowering_.builder_.CreateCall(
-      decimalFunction("tz_dec_sign", lowering_.builder_.getInt32Ty(), {i64, i64}),
-      {decimalCoef(value), decimalMeta(value)});
+  return this->lowering.builder_.CreateCall(
+      this->decimalFunction("tz_dec_sign", this->lowering.builder_.getInt32Ty(), {i64, i64}),
+      {this->decimalCoef(value), this->decimalMeta(value)});
 }
 
 llvm::Value *DecimalLowerer::emitRoundingMode(CallExpr *call, size_t index) {
   if (index >= call->args.size()) {
-    return lowering_.builder_.getInt32(kRoundHalfUp);
+    return this->lowering.builder_.getInt32(kRoundHalfUp);
   }
   Expr *arg = call->args[index];
   if (auto *lit = dyn_cast<StringLitExpr>(arg)) {
-    return lowering_.builder_.getInt32(static_cast<uint32_t>(decimalRoundingMode(lit->value)));
+    return this->lowering.builder_.getInt32(static_cast<uint32_t>(decimalRoundingMode(lit->value)));
   }
-  Lowering::Operand mode = lowering_.refCounts().emitOperand(arg, true);
-  llvm::Value *result = lowering_.builder_.CreateCall(
-      decimalFunction("tz_dec_rounding_mode", lowering_.builder_.getInt32Ty(),
-                      {lowering_.builder_.getPtrTy(), lowering_.builder_.getInt64Ty()}),
-      {lowering_.stringLowerer().stringObj(mode.value),
-       lowering_.stringLowerer().stringMeta(mode.value)});
-  lowering_.refCounts().dropOperand(mode);
+  Lowering::Operand mode = this->lowering.refCounts().emitOperand(arg, true);
+  llvm::Value *result = this->lowering.builder_.CreateCall(
+      this->decimalFunction(
+          "tz_dec_rounding_mode", this->lowering.builder_.getInt32Ty(),
+          {this->lowering.builder_.getPtrTy(), this->lowering.builder_.getInt64Ty()}),
+      {this->lowering.stringLowerer().stringObj(mode.value),
+       this->lowering.stringLowerer().stringMeta(mode.value)});
+  this->lowering.refCounts().dropOperand(mode);
 
   return result;
 }
@@ -294,94 +303,98 @@ llvm::Value *DecimalLowerer::emitDecimalFold(CallExpr *call) {
   int32_t op = call->builtin() == Builtin::DecSum   ? kFoldSum
                : call->builtin() == Builtin::DecMax ? kFoldMax
                                                     : kFoldMin;
-  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
+  std::vector<llvm::Value *> values = this->lowering.exprLowerer().emitExprs(call->args);
   std::vector<Lowering::Operand> args;
   for (size_t i = 0; i < values.size(); ++i) {
     args.push_back({values[i], true, call->args[i]->type});
   }
-  llvm::Type *i32 = lowering_.builder_.getInt32Ty(), *ptr = lowering_.builder_.getPtrTy();
-  llvm::Value *acc = lowering_.functionFrame().createStackSlot(lowering_.decTy_, "fold.acc");
-  lowering_.builder_.CreateStore(llvm::Constant::getNullValue(lowering_.decTy_), acc);
-  llvm::Value *has = lowering_.functionFrame().createStackSlot(i32, "fold.has");
-  lowering_.builder_.CreateStore(lowering_.builder_.getInt32(op == kFoldSum), has);
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Value *acc =
+      this->lowering.functionFrame().createStackSlot(this->lowering.decTy_, "fold.acc");
+  this->lowering.builder_.CreateStore(llvm::Constant::getNullValue(this->lowering.decTy_), acc);
+  llvm::Value *has = this->lowering.functionFrame().createStackSlot(i32, "fold.has");
+  this->lowering.builder_.CreateStore(this->lowering.builder_.getInt32(op == kFoldSum), has);
   for (size_t i = 0; i < args.size(); ++i) {
     if (call->spreads(i)) {
-      lowering_.builder_.CreateCall(decimalFunction("tz_dec_fold_array",
-                                                    lowering_.builder_.getVoidTy(),
-                                                    {ptr, ptr, ptr, i32}),
-                                    {acc, has, args[i].value, lowering_.builder_.getInt32(op)});
+      this->lowering.builder_.CreateCall(
+          this->decimalFunction("tz_dec_fold_array", this->lowering.builder_.getVoidTy(),
+                                {ptr, ptr, ptr, i32}),
+          {acc, has, args[i].value, this->lowering.builder_.getInt32(op)});
     } else {
-      lowering_.builder_.CreateCall(
-          decimalFunction("tz_dec_fold", lowering_.builder_.getVoidTy(),
-                          {ptr, ptr, ptr, lowering_.builder_.getInt64Ty(), i32}),
-          {acc, has, lowering_.functionFrame().spill(args[i].value, "fold.value"),
-           lowering_.builder_.getInt64(1), lowering_.builder_.getInt32(op)});
+      this->lowering.builder_.CreateCall(
+          this->decimalFunction("tz_dec_fold", this->lowering.builder_.getVoidTy(),
+                                {ptr, ptr, ptr, this->lowering.builder_.getInt64Ty(), i32}),
+          {acc, has, this->lowering.functionFrame().spill(args[i].value, "fold.value"),
+           this->lowering.builder_.getInt64(1), this->lowering.builder_.getInt32(op)});
     }
   }
   for (const Lowering::Operand &arg : args) {
-    lowering_.refCounts().dropOperand(arg);
+    this->lowering.refCounts().dropOperand(arg);
   }
-  llvm::Value *result = lowering_.builder_.CreateLoad(lowering_.decTy_, acc);
+  llvm::Value *result = this->lowering.builder_.CreateLoad(this->lowering.decTy_, acc);
   if (!call->type->isOptional()) {
     return result;
   }
 
-  return lowering_.optionalLowerer().makeOptional(
+  return this->lowering.optionalLowerer().makeOptional(
       result,
-      lowering_.builder_.CreateICmpNE(lowering_.builder_.CreateLoad(i32, has),
-                                      lowering_.builder_.getInt32(0)),
+      this->lowering.builder_.CreateICmpNE(this->lowering.builder_.CreateLoad(i32, has),
+                                           this->lowering.builder_.getInt32(0)),
       call->type);
 }
 
 llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
-  llvm::Type *i32 = lowering_.builder_.getInt32Ty(), *i64 = lowering_.builder_.getInt64Ty(),
-             *ptr = lowering_.builder_.getPtrTy();
-  llvm::Type *voidTy = lowering_.builder_.getVoidTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty(),
+             *i64 = this->lowering.builder_.getInt64Ty(), *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *voidTy = this->lowering.builder_.getVoidTy();
   switch (call->builtin()) {
     case Builtin::DecimalOf: {
       Expr *arg = call->args[0];
       if (arg->type->isDecimal()) {
-        return lowering_.exprLowerer().emitExpr(arg);
+        return this->lowering.exprLowerer().emitExpr(arg);
       }
       if (arg->type->isFloat()) {
-        llvm::Value *result =
-            callReturningDecimal("tz_dec_from_f64", {lowering_.exprLowerer().emitExpr(arg)});
+        llvm::Value *result = this->callReturningDecimal(
+            "tz_dec_from_f64", {this->lowering.exprLowerer().emitExpr(arg)});
         return result;
       }
       static const std::vector<MakerFields> orders = {{nullptr, {"code", "message", "text"}}};
       bool checked = call->type->isResult();
       llvm::Value *make = llvm::ConstantPointerNull::get(ptr);
       if (checked) {
-        make = lowering_.objectMaker().maker(call->type->errType(), orders);
+        make = this->lowering.objectMaker().maker(call->type->errType(), orders);
       }
-      Lowering::Operand text = lowering_.refCounts().emitOperand(arg, true);
-      llvm::Value *result = callReturningDecimal(
-          "tz_dec_from_string", {lowering_.stringLowerer().stringObj(text.value),
-                                 lowering_.stringLowerer().stringMeta(text.value), make});
-      lowering_.refCounts().dropOperand(text);
+      Lowering::Operand text = this->lowering.refCounts().emitOperand(arg, true);
+      llvm::Value *result = this->callReturningDecimal(
+          "tz_dec_from_string", {this->lowering.stringLowerer().stringObj(text.value),
+                                 this->lowering.stringLowerer().stringMeta(text.value), make});
+      this->lowering.refCounts().dropOperand(text);
       if (checked) {
-        return lowering_.resultLowerer().catchFailure(result, call->type, call->loc());
+        return this->lowering.resultLowerer().catchFailure(result, call->type, call->loc());
       }
       return result;
     }
     case Builtin::DecMax:
     case Builtin::DecMin:
     case Builtin::DecSum:
-      return emitDecimalFold(call);
+      return this->emitDecimalFold(call);
     default:
       break;
   }
 
   auto *member = cast<MemberExpr>(call->callee);
-  Lowering::Operand self = lowering_.refCounts().emitOperand(
+  Lowering::Operand self = this->lowering.refCounts().emitOperand(
       member->object, llvm::all_of(call->args, AssignLowerer::cannotAssign));
-  llvm::Value *a = decimalCoef(self.value), *am = decimalMeta(self.value);
+  llvm::Value *a = this->decimalCoef(self.value);
+  llvm::Value *am = this->decimalMeta(self.value);
   auto count = [&](size_t i, int64_t absent) -> std::pair<llvm::Value *, llvm::Value *> {
     if (i < call->args.size()) {
-      return {lowering_.exprLowerer().emitExpr(call->args[i]), lowering_.builder_.getInt32(1)};
+      return {this->lowering.exprLowerer().emitExpr(call->args[i]),
+              this->lowering.builder_.getInt32(1)};
     }
 
-    return {lowering_.builder_.getInt64(absent), lowering_.builder_.getInt32(0)};
+    return {this->lowering.builder_.getInt64(absent), this->lowering.builder_.getInt32(0)};
   };
   auto text = [&](llvm::StringRef name, llvm::ArrayRef<llvm::Value *> args) {
     std::vector<llvm::Type *> params{ptr};
@@ -389,25 +402,27 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
       params.push_back(arg->getType());
     }
 
-    return lowering_.stringLowerer().callReturningString(decimalFunction(name, voidTy, params),
-                                                         args);
+    return this->lowering.stringLowerer().callReturningString(
+        this->decimalFunction(name, voidTy, params), args);
   };
   llvm::Value *result = nullptr;
   switch (call->builtin()) {
     case Builtin::DecDiv: {
       bool later =
           std::all_of(call->args.begin() + 1, call->args.end(), AssignLowerer::cannotAssign);
-      Lowering::Operand divisor = lowering_.refCounts().emitOperand(call->args[0], later);
+      Lowering::Operand divisor = this->lowering.refCounts().emitOperand(call->args[0], later);
       llvm::Value *dp = count(1, kDivisionPlaces).first;
-      llvm::Value *mode = emitRoundingMode(call, 2);
-      result = callReturningDecimal(
-          "tz_dec_div", {a, am, decimalCoef(divisor.value), decimalMeta(divisor.value), dp, mode});
-      lowering_.refCounts().dropOperand(divisor);
+      llvm::Value *mode = this->emitRoundingMode(call, 2);
+      result =
+          this->callReturningDecimal("tz_dec_div", {a, am, this->decimalCoef(divisor.value),
+                                                    this->decimalMeta(divisor.value), dp, mode});
+      this->lowering.refCounts().dropOperand(divisor);
       break;
     }
     case Builtin::DecRound: {
       llvm::Value *dp = count(0, 0).first;
-      result = callReturningDecimal("tz_dec_round", {a, am, dp, emitRoundingMode(call, 1)});
+      result =
+          this->callReturningDecimal("tz_dec_round", {a, am, dp, this->emitRoundingMode(call, 1)});
       break;
     }
     case Builtin::DecToFixed:
@@ -415,7 +430,7 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
     case Builtin::DecToExponential:
     case Builtin::DecToPrecision: {
       auto [n, given] = count(0, 0);
-      llvm::Value *mode = emitRoundingMode(call, 1);
+      llvm::Value *mode = this->emitRoundingMode(call, 1);
       llvm::StringRef name = call->builtin() == Builtin::DecToFixed    ? "tz_dec_to_fixed"
                              : call->builtin() == Builtin::DecToFormat ? "tz_dec_to_format"
                              : call->builtin() == Builtin::DecToExponential
@@ -428,55 +443,55 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
       if (call->args.empty()) {
         result = text("tz_dec_to_string", {a, am});
       } else {
-        result =
-            text("tz_dec_to_string_base", {a, am, lowering_.exprLowerer().emitExpr(call->args[0])});
+        result = text("tz_dec_to_string_base",
+                      {a, am, this->lowering.exprLowerer().emitExpr(call->args[0])});
       }
       break;
     case Builtin::DecSqrt:
-      result = callReturningDecimal("tz_dec_sqrt", {a, am});
+      result = this->callReturningDecimal("tz_dec_sqrt", {a, am});
       break;
     case Builtin::DecAbs:
-      result = callReturningDecimal("tz_dec_abs", {a, am});
+      result = this->callReturningDecimal("tz_dec_abs", {a, am});
       break;
     case Builtin::DecIsInteger:
-      result = lowering_.builder_.CreateICmpNE(
-          lowering_.builder_.CreateCall(decimalFunction("tz_dec_is_integer", i32, {i64, i64}),
-                                        {a, am}),
-          lowering_.builder_.getInt32(0));
+      result = this->lowering.builder_.CreateICmpNE(
+          this->lowering.builder_.CreateCall(
+              this->decimalFunction("tz_dec_is_integer", i32, {i64, i64}), {a, am}),
+          this->lowering.builder_.getInt32(0));
       break;
     case Builtin::DecDecimalPlaces:
-      result = lowering_.builder_.CreateSExt(
-          lowering_.builder_.CreateCall(decimalFunction("tz_dec_decimal_places", i32, {i64, i64}),
-                                        {a, am}),
+      result = this->lowering.builder_.CreateSExt(
+          this->lowering.builder_.CreateCall(
+              this->decimalFunction("tz_dec_decimal_places", i32, {i64, i64}), {a, am}),
           i64);
       break;
     case Builtin::DecShiftedBy:
-      result = callReturningDecimal("tz_dec_shifted_by",
-                                    {a, am, lowering_.exprLowerer().emitExpr(call->args[0])});
+      result = this->callReturningDecimal(
+          "tz_dec_shifted_by", {a, am, this->lowering.exprLowerer().emitExpr(call->args[0])});
       break;
     case Builtin::DecToFraction: {
-      llvm::Value *maxCoef = lowering_.builder_.getInt64(0),
-                  *maxMeta = lowering_.builder_.getInt64(0);
+      llvm::Value *maxCoef = this->lowering.builder_.getInt64(0),
+                  *maxMeta = this->lowering.builder_.getInt64(0);
       Lowering::Operand limit{nullptr, false, nullptr};
       if (!call->args.empty()) {
-        limit = lowering_.refCounts().emitOperand(call->args[0], true);
-        maxCoef = decimalCoef(limit.value);
-        maxMeta = decimalMeta(limit.value);
+        limit = this->lowering.refCounts().emitOperand(call->args[0], true);
+        maxCoef = this->decimalCoef(limit.value);
+        maxMeta = this->decimalMeta(limit.value);
       }
-      result = lowering_.builder_.CreateCall(
-          decimalFunction("tz_dec_to_fraction", ptr, {ptr, i64, i64, i64, i64, i32}),
-          {lowering_.typeDescriptors().typeDescriptor(Type::decimalTy()), a, am, maxCoef, maxMeta,
-           lowering_.builder_.getInt32(!call->args.empty())},
+      result = this->lowering.builder_.CreateCall(
+          this->decimalFunction("tz_dec_to_fraction", ptr, {ptr, i64, i64, i64, i64, i32}),
+          {this->lowering.typeDescriptors().typeDescriptor(Type::decimalTy()), a, am, maxCoef,
+           maxMeta, this->lowering.builder_.getInt32(!call->args.empty())},
           "fraction");
       if (limit.value) {
-        lowering_.refCounts().dropOperand(limit);
+        this->lowering.refCounts().dropOperand(limit);
       }
       break;
     }
     default:
       llvm_unreachable("not a method of decimals");
   }
-  lowering_.refCounts().dropOperand(self);
+  this->lowering.refCounts().dropOperand(self);
 
   return result;
 }

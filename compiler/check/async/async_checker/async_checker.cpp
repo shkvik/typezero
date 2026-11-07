@@ -53,31 +53,66 @@ std::string AsyncChecker::statementText(llvm::SMLoc at) {
 AsyncChecker::AsyncChecker(Checker &owner)
     : checker(owner) {}
 
-const Type *AsyncChecker::resolvePromiseType(const TypeRef &ref) {
+AsyncChecker::ResultPromiseTypeRef AsyncChecker::resolvePromiseType(const TypeRef &ref) {
   if (ref.name != "Promise" && ref.name != "PromiseLike") {
-    return nullptr;
+    return err(AsyncCheckerResolvePromiseTypeError{
+        .code = AsyncCheckerResolvePromiseTypeErrorCode::NOT_A_PROMISE,
+        .message = "",
+    });
   }
   if (ref.args.size() != 1) {
-    this->checker.diags_.error(
-        ref.loc, "'" + ref.name + "' takes one type argument, the type of its value, e.g. '" +
-                     ref.name + "<int>'");
-    return Type::error();
+    std::string message = ErrorTextPromiseType::typeArgs(ref.name);
+
+    return err(AsyncCheckerResolvePromiseTypeError{
+        .code = AsyncCheckerResolvePromiseTypeErrorCode::WRONG_TYPE_ARGUMENTS,
+        .message = message,
+    });
   }
   const Type *value = this->checker.typeResolver().resolveType(ref.args[0], true);
+  const Type *promise = Type::promise(AsyncChecker::awaited(value));
 
-  return Type::promise(AsyncChecker::awaited(value));
+  return ok(promise);
+}
+
+AsyncChecker::ResultReturnsPromise AsyncChecker::promiseDeclared(const FunctionDecl *fn,
+                                                                 const Type *declared) {
+  bool plain = fn->isAsync && !fn->isGenerator && !declared->isError() && !declared->isPromise();
+  if (plain) {
+    std::string message = ErrorTextPromiseType::notPromise(declared->name());
+
+    return err(AsyncCheckerPromiseDeclaredError{
+        .code = AsyncCheckerPromiseDeclaredErrorCode::NOT_A_PROMISE,
+        .message = message,
+    });
+  }
+
+  return ok(declared);
 }
 
 const Type *AsyncChecker::asyncReturnType(const FunctionDecl *fn, const Type *declared) {
-  if (!fn->isAsync || fn->isGenerator || declared->isError() || declared->isPromise()) {
+  ResultReturnsPromise promise = AsyncChecker::promiseDeclared(fn, declared);
+  if (promise.isOk()) {
     return declared;
   }
-  this->checker.diags_.error(fn->returnType->loc,
-                             "an async function returns a Promise: declare its type as "
-                             "'Promise<" +
-                                 declared->name().str() + ">'");
+  this->checker.diags_.error(fn->returnType->loc, promise.error().message);
 
   return Type::promise(declared);
+}
+
+AsyncChecker::ResultReturnsOneType AsyncChecker::returnsJoin(const Type *type, const Type *t,
+                                                             const FuncSymbol *fn) {
+  const Type *common = type ? TypeRelations::unify(type, t) : t;
+  if (!common || common->isError()) {
+    std::string name = quotedName(fn->name);
+    std::string message = ErrorTextAsyncReturns::differ(name, t->name(), type->name());
+
+    return err(AsyncCheckerReturnsJoinError{
+        .code = AsyncCheckerReturnsJoinErrorCode::TYPES_DIFFER,
+        .message = message,
+    });
+  }
+
+  return ok(common);
 }
 
 const Type *AsyncChecker::inferAsyncType(const FuncSymbol *fn, llvm::ArrayRef<ReturnStmt *> returns,
@@ -99,17 +134,14 @@ const Type *AsyncChecker::inferAsyncType(const FuncSymbol *fn, llvm::ArrayRef<Re
       undefined = true;
       continue;
     }
-    const Type *common = type ? TypeRelations::unify(type, t) : t;
-    if (!common || common->isError()) {
+    ResultReturnsOneType joined = AsyncChecker::returnsJoin(type, t, fn);
+    if (joined.isErr()) {
       if (report) {
-        this->checker.diags_.error(ret->value->loc(),
-                                   quotedName(fn->name) + " returns '" + t->name() +
-                                       "' here and '" + type->name() +
-                                       "' elsewhere; a function returns values of one type");
+        this->checker.diags_.error(ret->value->loc(), joined.error().message);
       }
       return Type::error();
     }
-    type = common;
+    type = joined.value();
   }
   if (!type) {
     if (unknown) {
@@ -124,6 +156,21 @@ const Type *AsyncChecker::inferAsyncType(const FuncSymbol *fn, llvm::ArrayRef<Re
   return Type::promise(type);
 }
 
+AsyncChecker::ResultPromiseMatches
+AsyncChecker::promiseMatches(const Type *given, const Type *value, const FuncSymbol *fn) {
+  if (given != value && !given->isNever()) {
+    std::string name = quotedName(fn->name);
+    std::string message = ErrorTextAsyncReturns::promise(given->name(), name, value->name());
+
+    return err(AsyncCheckerPromiseMatchesError{
+        .code = AsyncCheckerPromiseMatchesErrorCode::OTHER_PROMISE_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok(given);
+}
+
 void AsyncChecker::finishAsyncReturns(FuncSymbol *fn, llvm::ArrayRef<ReturnStmt *> returns) {
   const Type *value = fn->ret->isPromise() ? fn->ret->promised() : nullptr;
   if (!value || value->isError()) {
@@ -135,11 +182,9 @@ void AsyncChecker::finishAsyncReturns(FuncSymbol *fn, llvm::ArrayRef<ReturnStmt 
     }
     const Type *t = ret->value->type;
     if (t->isPromise()) {
-      if (t->promised() != value && !t->promised()->isNever()) {
-        this->checker.diags_.error(ret->value->loc(),
-                                   "this Promise gives '" + t->promised()->name() + "', but " +
-                                       quotedName(fn->name) + " gives '" + value->name() +
-                                       "'; await it and convert the value");
+      ResultPromiseMatches matches = AsyncChecker::promiseMatches(t->promised(), value, fn);
+      if (matches.isErr()) {
+        this->checker.diags_.error(ret->value->loc(), matches.error().message);
       }
       continue;
     }
@@ -149,21 +194,55 @@ void AsyncChecker::finishAsyncReturns(FuncSymbol *fn, llvm::ArrayRef<ReturnStmt 
   }
 }
 
+AsyncChecker::ResultInAsyncContext AsyncChecker::asyncContext(bool loop) const {
+  FuncSymbol *fn = this->checker.currentFunction_;
+  bool plain = fn && !(fn->decl && fn->decl->isAsync);
+  if (plain && loop) {
+    std::string message = ErrorTextAsyncContext::forAwait();
+
+    return err(AsyncCheckerAsyncContextError{
+        .code = AsyncCheckerAsyncContextErrorCode::FOR_AWAIT_NOT_ASYNC,
+        .message = message,
+    });
+  }
+  if (plain) {
+    FunctionDecl *decl = fn->decl;
+    std::string hint = decl && decl->isArrow()       ? ErrorTextAsyncContext::arrowHint()
+                       : decl && decl->cls()         ? ErrorTextAsyncContext::methodHint(decl->name)
+                       : decl && !decl->name.empty() ? ErrorTextAsyncContext::namedHint(decl->name)
+                                                     : ErrorTextAsyncContext::plainHint();
+    std::string message = ErrorTextAsyncContext::await(hint);
+
+    return err(AsyncCheckerAsyncContextError{
+        .code = AsyncCheckerAsyncContextErrorCode::AWAIT_NOT_ASYNC,
+        .message = message,
+    });
+  }
+
+  return ok(fn);
+}
+
+AsyncChecker::ResultAwaitedOneType AsyncChecker::awaitable(const Type *type) {
+  const Type *result = AsyncChecker::awaitedType(type);
+  if (!result) {
+    std::string message = ErrorTextAwaited::mixed(type->name());
+
+    return err(AsyncCheckerAwaitableError{
+        .code = AsyncCheckerAwaitableErrorCode::MIXED_PROMISE,
+        .message = message,
+    });
+  }
+
+  return ok(result);
+}
+
 Expr *AsyncChecker::checkAwait(AwaitExpr *await, const Type *expected) {
   await->type = Type::error();
   this->checker.file_->usesAsync = true;
-  FuncSymbol *fn = this->checker.currentFunction_;
-  if (fn && !(fn->decl && fn->decl->isAsync)) {
-    FunctionDecl *decl = fn->decl;
-    std::string hint = decl && decl->isArrow()       ? "'async (...) => ...'"
-                       : decl && decl->cls()         ? "'async " + decl->name.str() + "() { ... }'"
-                       : decl && !decl->name.empty() ? "'async function " + decl->name.str() + "'"
-                                                     : "'async function'";
-    this->checker.diags_.error(await->loc(),
-                               "'await' can only be used in an async function or in top-level "
-                               "code; make the function async: " +
-                                   hint);
-  } else if (!fn) {
+  ResultInAsyncContext context = this->asyncContext(false);
+  if (context.isErr()) {
+    this->checker.diags_.error(await->loc(), context.error().message);
+  } else if (!context.value()) {
     this->checker.file_->topLevelAwait = true;
   }
   const Type *hint = nullptr;
@@ -177,16 +256,12 @@ Expr *AsyncChecker::checkAwait(AwaitExpr *await, const Type *expected) {
   if (type->isError()) {
     return await;
   }
-  const Type *result = AsyncChecker::awaitedType(type);
-  if (!result) {
-    this->checker.diags_.error(
-        await->value->loc(),
-        "'await' of '" + type->name() +
-            "' gives the value of the Promise or the value itself, which make no one "
-            "type; check what it holds first");
+  ResultAwaitedOneType result = AsyncChecker::awaitable(type);
+  if (result.isErr()) {
+    this->checker.diags_.error(await->value->loc(), result.error().message);
     return await;
   }
-  await->type = result;
+  await->type = result.value();
 
   return await;
 }
@@ -218,14 +293,79 @@ const Type *AsyncChecker::awaitedType(const Type *type) {
   return result;
 }
 
+AsyncChecker::ResultAwaitedElement AsyncChecker::awaitedElement(const Type *type) const {
+  const Type *element = this->checker.generatorChecker().asyncIteratedType(type);
+  bool optional = !element && type->isOptional() &&
+                  this->checker.generatorChecker().asyncIteratedType(type->inner()) != nullptr;
+  if (optional) {
+    std::string message = ErrorTextAwaitedElement::undefined(type->name());
+
+    return err(AsyncCheckerAwaitedElementError{
+        .code = AsyncCheckerAwaitedElementErrorCode::MAY_BE_UNDEFINED,
+        .message = message,
+    });
+  }
+  if (!element && type->isRecord()) {
+    std::string message = ErrorTextAwaitedElement::record();
+
+    return err(AsyncCheckerAwaitedElementError{
+        .code = AsyncCheckerAwaitedElementErrorCode::RECORD_NOT_ITERABLE,
+        .message = message,
+    });
+  }
+  if (!element && !type->isError()) {
+    std::string message = ErrorTextAwaitedElement::notAsync(type->name());
+
+    return err(AsyncCheckerAwaitedElementError{
+        .code = AsyncCheckerAwaitedElementErrorCode::NOT_ASYNC_ITERABLE,
+        .message = message,
+    });
+  }
+  if (!element) {
+    return err(AsyncCheckerAwaitedElementError{
+        .code = AsyncCheckerAwaitedElementErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
+  }
+
+  return ok(element);
+}
+
+AsyncChecker::ResultBindingUntyped AsyncChecker::bindingType(const VarDeclarator &binding) {
+  if (binding.typeAnn) {
+    std::string message = ErrorTextBindingType::annotated();
+
+    return err(AsyncCheckerBindingTypeError{
+        .code = AsyncCheckerBindingTypeErrorCode::HAS_TYPE_ANNOTATION,
+        .message = message,
+    });
+  }
+
+  return ok(&binding);
+}
+
+AsyncChecker::ResultBindingPattern AsyncChecker::bindingShape(const VarDeclarator &binding,
+                                                              const Type *element) {
+  bool fits = !binding.destructured() || binding.objectPattern() || element->isArray() ||
+              element->isTuple() || element->isMatch() || element->isError();
+  if (!fits) {
+    std::string message = ErrorTextBindingShape::notArray(element->name());
+
+    return err(AsyncCheckerBindingShapeError{
+        .code = AsyncCheckerBindingShapeErrorCode::NOT_AN_ARRAY,
+        .message = message,
+    });
+  }
+
+  return ok(element);
+}
+
 void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
   this->checker.file_->usesAsync = true;
-  FuncSymbol *fn = this->checker.currentFunction_;
-  if (fn && !(fn->decl && fn->decl->isAsync)) {
-    this->checker.diags_.error(stmt->loc(),
-                               "'for await' can only be used in an async function or in top-level "
-                               "code; make the function async");
-  } else if (!fn) {
+  ResultInAsyncContext context = this->asyncContext(true);
+  if (context.isErr()) {
+    this->checker.diags_.error(stmt->loc(), context.error().message);
+  } else if (!context.value()) {
     this->checker.file_->topLevelAwait = true;
   }
   this->checker.iteratorMethods().markFused(stmt->iterable);
@@ -241,37 +381,30 @@ void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
     stmt->iterable = this->checker.matchChecker().matchItems(stmt->iterable);
   }
   const Type *type = stmt->iterable->type;
-  const Type *element = this->checker.generatorChecker().asyncIteratedType(type);
-  if (!element) {
-    if (type->isOptional() && this->checker.generatorChecker().asyncIteratedType(type->inner())) {
-      this->checker.diags_.error(stmt->iterable->loc(),
-                                 "'" + type->name() +
-                                     "' may be undefined; check it before iterating");
-    } else if (type->isRecord()) {
-      this->checker.diags_.error(
-          stmt->iterable->loc(),
-          "a Record is not iterable, as an object is not in JavaScript; walk its keys "
-          "with 'for...in', or its entries with 'for (const [k, v] of "
-          "Object.entries(r))'");
-    } else if (!type->isError()) {
-      this->checker.diags_.error(stmt->iterable->loc(),
-                                 "'for await' needs an async iterator, an array or an "
-                                 "iterator, found '" +
-                                     type->name() + "'");
+  const Type *element = Type::error();
+  ResultAwaitedElement awaited = this->awaitedElement(type);
+  bool reported = awaited.isErr() &&
+                  awaited.error().code == AsyncCheckerAwaitedElementErrorCode::ALREADY_REPORTED;
+  if (awaited.isOk()) {
+    element = awaited.value();
+  } else if (!reported) {
+    this->checker.diags_.error(stmt->iterable->loc(), awaited.error().message);
+  }
+  if (awaited.isOk() && type->isIterator()) {
+    std::string label = ErrorTextAsyncContext::awaitLoop();
+    GeneratorChecker::ResultNextNeedsNoValue nothing =
+        this->checker.generatorChecker().checkSendsNothing(type, label);
+    if (nothing.isErr()) {
+      this->checker.diags_.error(stmt->iterable->loc(), nothing.error().message);
     }
-    element = Type::error();
-  } else if (type->isIterator()) {
-    this->checker.generatorChecker().checkSendsNothing(type, stmt->iterable->loc(), "'for await'");
   }
-  if (stmt->binding.typeAnn) {
-    this->checker.diags_.error(stmt->binding.typeAnn->loc,
-                               "a 'for await' variable cannot have a type annotation");
+  ResultBindingUntyped typed = AsyncChecker::bindingType(stmt->binding);
+  if (typed.isErr()) {
+    this->checker.diags_.error(stmt->binding.typeAnn->loc, typed.error().message);
   }
-  if (stmt->binding.destructured() && !stmt->binding.objectPattern() && !element->isArray() &&
-      !element->isTuple() && !element->isMatch() && !element->isError()) {
-    this->checker.diags_.error(stmt->binding.loc,
-                               "only arrays can be destructured; the elements are '" +
-                                   element->name() + "'");
+  ResultBindingPattern shape = AsyncChecker::bindingShape(stmt->binding, element);
+  if (shape.isErr()) {
+    this->checker.diags_.error(stmt->binding.loc, shape.error().message);
     element = Type::error();
   }
   this->checker.flowChecker().calledFunction();
@@ -289,49 +422,55 @@ void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
   this->checker.flowChecker().calledFunction();
 }
 
-void AsyncChecker::checkDiscardedPromise(const Expr *expr, bool callback, llvm::SMLoc at) {
+AsyncChecker::ResultPromiseHandled
+AsyncChecker::checkDiscardedPromise(const Expr *expr, bool callback, llvm::SMLoc at) {
   const Type *type = expr->type;
   if (isa<AssignExpr>(expr)) {
-    return;
+    return ok(expr);
   }
   auto *call = dyn_cast<CallExpr>(expr);
   if (call && (call->builtin() == Builtin::ArrPop || call->builtin() == Builtin::ArrShift ||
                call->builtin() == Builtin::ArrSplice)) {
-    return;
+    return ok(expr);
+  }
+  bool mapped =
+      call && (call->builtin() == Builtin::ArrMap || call->builtin() == Builtin::ArrFlatMap);
+  if (!type->nonOptional()->isPromise() && mapped) {
+    std::string message = ErrorTextDiscarded::mapped();
+
+    return err(AsyncCheckerCheckDiscardedPromiseError{
+        .code = AsyncCheckerCheckDiscardedPromiseErrorCode::PROMISES_DROPPED,
+        .message = message,
+    });
   }
   if (!type->nonOptional()->isPromise()) {
-    if (call && (call->builtin() == Builtin::ArrMap || call->builtin() == Builtin::ArrFlatMap)) {
-      this->checker.diags_.error(expr->loc(),
-                                 "the Promises are not awaited, so nothing waits for them and an "
-                                 "error in one would end the program; wait for all of them with "
-                                 "'await Promise.all(...)', or keep them in a variable");
-    }
-    return;
+    return ok(expr);
   }
   if (callback) {
-    this->checker.diags_.error(expr->loc(),
-                               "the function returns a Promise that its caller drops, so nothing "
-                               "waits for it to finish; loop with 'for (const x of xs) await "
-                               "f(x)', or wait for all with 'await Promise.all(xs.map(...))'");
-    return;
+    std::string message = ErrorTextDiscarded::callback();
+
+    return err(AsyncCheckerCheckDiscardedPromiseError{
+        .code = AsyncCheckerCheckDiscardedPromiseErrorCode::CALLBACK_DROPS,
+        .message = message,
+    });
   }
   std::string text = AsyncChecker::statementText(at);
   if (expr->type && expr->type->isPromise() && Checker::holdsResults(expr->type->promised())) {
-    this->checker.diags_.error(expr->loc(),
-                               "the Promise is not awaited, and the Result it gives would go "
-                               "unchecked; await it and handle the Result, e.g. 'const r = await " +
-                                   (text.empty() ? std::string("p") : text) + "'");
-  } else if (text.empty()) {
-    this->checker.diags_.error(
-        expr->loc(), "the Promise is not awaited, so nothing waits for it and an error in "
-                     "it would end the program later; write 'await' before it, or "
-                     "'void' to let it run on its own");
-  } else {
-    this->checker.diags_.error(
-        expr->loc(), "the Promise is not awaited, so nothing waits for it and an error in "
-                     "it would end the program later; write 'await " +
-                         text + "', or 'void " + text + "' to let it run on its own");
+    std::string shown = text.empty() ? std::string("p") : text;
+    std::string message = ErrorTextDiscarded::result(shown);
+
+    return err(AsyncCheckerCheckDiscardedPromiseError{
+        .code = AsyncCheckerCheckDiscardedPromiseErrorCode::RESULT_UNCHECKED,
+        .message = message,
+    });
   }
+  std::string message =
+      text.empty() ? ErrorTextDiscarded::plain() : ErrorTextDiscarded::withText(text);
+
+  return err(AsyncCheckerCheckDiscardedPromiseError{
+      .code = AsyncCheckerCheckDiscardedPromiseErrorCode::NOT_AWAITED,
+      .message = message,
+  });
 }
 
 }

@@ -350,7 +350,8 @@ void ConstantFolder::foldUnary(UnaryExpr *unary, bool wraps) {
                                 : ConstantFolder::wideText(0, *value, BinaryOp::Sub);
       int64_t negated = static_cast<int64_t>(0 - static_cast<uint64_t>(*value));
       int64_t wrapped = ConstantFolder::wrapTo(type, negated);
-      this->reportOverflow(unary, unary->type, shown, wrapped, wraps);
+      std::string message = ConstantFolder::overflowText(unary->type, shown, wrapped, wraps);
+      this->checker.diags_.error(unary->loc(), message);
       return;
     }
     default:
@@ -391,7 +392,9 @@ void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
                                                     : x * y;
       llvm::SmallString<48> digits;
       wide.toString(digits, 10, true);
-      this->reportOverflow(bin, type, std::string(digits), 0, wraps);
+      std::string shown(digits);
+      std::string message = ConstantFolder::overflowText(type, shown, 0, wraps);
+      this->checker.diags_.error(bin->loc(), message);
     } else if (*result <= uint64_t(std::numeric_limits<int64_t>::max())) {
       this->constants[bin] = static_cast<int64_t>(*result);
     } else {
@@ -484,7 +487,9 @@ void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
         if (!fits && !shifted->isWrapping()) {
           llvm::SmallString<48> digits;
           wide.toString(digits, 10, true);
-          this->reportOverflow(bin, bin->type, std::string(digits), 0, false);
+          std::string shown(digits);
+          std::string message = ConstantFolder::overflowText(bin->type, shown, 0, false);
+          this->checker.diags_.error(bin->loc(), message);
           return;
         }
         exact = ConstantFolder::wrapTo(shifted, static_cast<int64_t>(pattern << count));
@@ -506,7 +511,8 @@ void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
   }
   std::string shown = text.empty() ? ConstantFolder::constantText(exact, value) : text;
   int64_t wrappedValue = ConstantFolder::wrapTo(type, wrapped);
-  this->reportOverflow(bin, bin->type, shown, wrappedValue, wraps);
+  std::string message = ConstantFolder::overflowText(bin->type, shown, wrappedValue, wraps);
+  this->checker.diags_.error(bin->loc(), message);
 }
 
 ConstantFolder::ResultDivisorNotZero ConstantFolder::checkDivisor(BinaryOp op,
@@ -540,17 +546,16 @@ ConstantFolder::ResultShiftCountFits ConstantFolder::shiftCount(const Type *shif
   return ok(shifted);
 }
 
-void ConstantFolder::reportOverflow(const Expr *expr, const Type *type, const std::string &value,
-                                    int64_t wrapped, bool wraps) {
-  std::string message;
+std::string ConstantFolder::overflowText(const Type *type, const std::string &value,
+                                         int64_t wrapped, bool wraps) {
   if (wraps) {
-    message = ErrorTextOverflow::pastExact(value);
-  } else if (type->bitWidth() < 64) {
-    message = ErrorTextOverflow::inInt(value, type->name(), wrapped);
-  } else {
-    message = ErrorTextOverflow::inDouble(value, type->name(), wrapped);
+    return ErrorTextOverflow::pastExact(value);
   }
-  this->checker.diags_.error(expr->loc(), message);
+  if (type->bitWidth() < 64) {
+    return ErrorTextOverflow::inInt(value, type->name(), wrapped);
+  }
+
+  return ErrorTextOverflow::inDouble(value, type->name(), wrapped);
 }
 
 Expr *ConstantFolder::globalConstant(llvm::StringRef object, llvm::StringRef name,

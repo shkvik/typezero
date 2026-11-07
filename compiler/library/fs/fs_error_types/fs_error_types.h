@@ -6,7 +6,7 @@ namespace tz {
 
 class FsErrorTypes {
 public:
-  explicit FsErrorTypes(Checker &checker);
+  explicit FsErrorTypes(Checker &owner);
 
   void declare();
   const Type *named(llvm::StringRef name);
@@ -14,7 +14,10 @@ public:
   static llvm::StringRef verbOf(llvm::StringRef name);
 
 private:
-  Checker &checker_;
+  static std::string textOf(const Expr *expr);
+  static bool literalTrue(const Expr *expr);
+
+  Checker &checker;
 };
 
 }

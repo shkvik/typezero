@@ -10,14 +10,9 @@
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "runtime/library/bytes/encodings/encodings.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ErrorHandling.h"
 #include <numeric>
 
-using llvm::BasicBlock;
 using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -36,14 +31,17 @@ const EncodingTable kEncodingTables[] = {TZ_ENCODING_TABLES(TZ_ENCODING_TABLE)};
 
 #undef TZ_ENCODING_TABLE
 
-llvm::StructType *bytesStruct(llvm::LLVMContext &ctx) {
+}
+
+llvm::StructType *BytesLowerer::bytesStruct(llvm::LLVMContext &ctx) {
   llvm::Type *ptr = llvm::PointerType::getUnqual(ctx);
-  llvm::Type *i32 = llvm::Type::getInt32Ty(ctx), *i64 = llvm::Type::getInt64Ty(ctx);
+  llvm::Type *i32 = llvm::Type::getInt32Ty(ctx);
+  llvm::Type *i64 = llvm::Type::getInt64Ty(ctx);
 
   return llvm::StructType::get(ctx, {i64, ptr, ptr, i32, i32, ptr});
 }
 
-llvm::Type *storageType(llvm::IRBuilder<> &b, Bytes kind) {
+llvm::Type *BytesLowerer::storageType(llvm::IRBuilder<> &b, Bytes kind) {
   switch (kind) {
   case Bytes::Int16:
   case Bytes::Uint16:
@@ -61,13 +59,13 @@ llvm::Type *storageType(llvm::IRBuilder<> &b, Bytes kind) {
   }
 }
 
-bool isSignedKind(Bytes kind) {
+bool BytesLowerer::isSignedKind(Bytes kind) {
   return kind == Bytes::Int8 || kind == Bytes::Int16 || kind == Bytes::Int32;
 }
 
-llvm::Value *toStorage(Lowering &, llvm::IRBuilder<> &b, Bytes kind, llvm::Value *value,
-                       llvm::FunctionCallee f16) {
-  llvm::Type *storage = storageType(b, kind);
+llvm::Value *BytesLowerer::toStorage(Lowering &, llvm::IRBuilder<> &b, Bytes kind,
+                                     llvm::Value *value, llvm::FunctionCallee f16) {
+  llvm::Type *storage = BytesLowerer::storageType(b, kind);
   switch (kind) {
   case Bytes::Uint8Clamped: {
     llvm::Value *zero = llvm::ConstantInt::get(value->getType(), 0);
@@ -94,64 +92,65 @@ llvm::Value *toStorage(Lowering &, llvm::IRBuilder<> &b, Bytes kind, llvm::Value
   }
 }
 
-}
-
-BytesLowerer::BytesLowerer(Lowering &lowering) : lowering_(lowering) {}
+BytesLowerer::BytesLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::MDNode *BytesLowerer::bytesTbaa(bool header) {
-  if (!lowering_.tbaaHeader_) {
-    llvm::MDBuilder md(lowering_.ctx_);
+  if (!this->lowering.tbaaHeader_) {
+    llvm::MDBuilder md(this->lowering.ctx_);
     llvm::MDNode *root = md.createTBAARoot("tz bytes");
     llvm::MDNode *headerType = md.createTBAAScalarTypeNode("tz bytes header", root);
     llvm::MDNode *dataType = md.createTBAAScalarTypeNode("tz bytes data", root);
-    lowering_.tbaaHeader_ = md.createTBAAStructTagNode(headerType, headerType, 0);
-    lowering_.tbaaData_ = md.createTBAAStructTagNode(dataType, dataType, 0);
+    this->lowering.tbaaHeader_ = md.createTBAAStructTagNode(headerType, headerType, 0);
+    this->lowering.tbaaData_ = md.createTBAAStructTagNode(dataType, dataType, 0);
   }
 
-  return header ? lowering_.tbaaHeader_ : lowering_.tbaaData_;
+  return header ? this->lowering.tbaaHeader_ : this->lowering.tbaaData_;
 }
 
 llvm::Value *BytesLowerer::bytesData(llvm::Value *bytes) {
-  if (!lowering_.bytesTy_) {
-    lowering_.bytesTy_ = bytesStruct(lowering_.ctx_);
+  if (!this->lowering.bytesTy_) {
+    this->lowering.bytesTy_ = BytesLowerer::bytesStruct(this->lowering.ctx_);
   }
-  llvm::LoadInst *data = lowering_.builder_.CreateLoad(
-      lowering_.builder_.getPtrTy(),
-      lowering_.builder_.CreateStructGEP(lowering_.bytesTy_, bytes, kData), "bytes.data");
-  data->setMetadata(llvm::LLVMContext::MD_tbaa, bytesTbaa(true));
+  llvm::LoadInst *data = this->lowering.builder_.CreateLoad(
+      this->lowering.builder_.getPtrTy(),
+      this->lowering.builder_.CreateStructGEP(this->lowering.bytesTy_, bytes, kData), "bytes.data");
+  data->setMetadata(llvm::LLVMContext::MD_tbaa, this->bytesTbaa(true));
 
   return data;
 }
 
 llvm::Value *BytesLowerer::bytesLength(llvm::Value *bytes) {
-  if (!lowering_.bytesTy_) {
-    lowering_.bytesTy_ = bytesStruct(lowering_.ctx_);
+  if (!this->lowering.bytesTy_) {
+    this->lowering.bytesTy_ = BytesLowerer::bytesStruct(this->lowering.ctx_);
   }
-  llvm::LoadInst *length = lowering_.builder_.CreateLoad(
-      lowering_.builder_.getInt32Ty(),
-      lowering_.builder_.CreateStructGEP(lowering_.bytesTy_, bytes, kLength), "bytes.length");
-  length->setMetadata(llvm::LLVMContext::MD_tbaa, bytesTbaa(true));
+  llvm::LoadInst *length = this->lowering.builder_.CreateLoad(
+      this->lowering.builder_.getInt32Ty(),
+      this->lowering.builder_.CreateStructGEP(this->lowering.bytesTy_, bytes, kLength),
+      "bytes.length");
+  length->setMetadata(llvm::LLVMContext::MD_tbaa, this->bytesTbaa(true));
 
-  return lowering_.builder_.CreateZExt(length, lowering_.builder_.getInt64Ty());
+  return this->lowering.builder_.CreateZExt(length, this->lowering.builder_.getInt64Ty());
 }
 
 llvm::Value *BytesLowerer::loadElement(llvm::Value *data, const Type *type, llvm::Value *index) {
   Bytes kind = type->bytes();
-  llvm::Type *storage = storageType(lowering_.builder_, kind);
-  llvm::LoadInst *raw = lowering_.builder_.CreateAlignedLoad(
-      storage, lowering_.builder_.CreateInBoundsGEP(storage, data, index),
+  llvm::Type *storage = BytesLowerer::storageType(this->lowering.builder_, kind);
+  llvm::LoadInst *raw = this->lowering.builder_.CreateAlignedLoad(
+      storage, this->lowering.builder_.CreateInBoundsGEP(storage, data, index),
       llvm::Align(type->elementSize()), "element");
-  raw->setMetadata(llvm::LLVMContext::MD_tbaa, bytesTbaa(false));
+  raw->setMetadata(llvm::LLVMContext::MD_tbaa, this->bytesTbaa(false));
   switch (kind) {
   case Bytes::Float64:
     return raw;
   case Bytes::Float32:
-    return lowering_.builder_.CreateFPExt(raw, lowering_.builder_.getDoubleTy());
+    return this->lowering.builder_.CreateFPExt(raw, this->lowering.builder_.getDoubleTy());
   case Bytes::Float16:
-    return lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction(
-            "tz_f16_to_f64", lowering_.builder_.getDoubleTy(), {lowering_.builder_.getInt32Ty()}),
-        {lowering_.builder_.CreateZExt(raw, lowering_.builder_.getInt32Ty())});
+    return this->lowering.builder_.CreateCall(
+        this->lowering.processLowerer().processFunction("tz_f16_to_f64",
+                                                        this->lowering.builder_.getDoubleTy(),
+                                                        {this->lowering.builder_.getInt32Ty()}),
+        {this->lowering.builder_.CreateZExt(raw, this->lowering.builder_.getInt32Ty())});
   default:
     return raw;
   }
@@ -160,32 +159,34 @@ llvm::Value *BytesLowerer::loadElement(llvm::Value *data, const Type *type, llvm
 void BytesLowerer::storeElement(llvm::Value *data, const Type *type, llvm::Value *index,
                                 llvm::Value *value) {
   Bytes kind = type->bytes();
-  llvm::Type *storage = storageType(lowering_.builder_, kind);
+  llvm::Type *storage = BytesLowerer::storageType(this->lowering.builder_, kind);
   llvm::FunctionCallee f16 = kind == Bytes::Float16
-                                 ? lowering_.processLowerer().processFunction(
-                                       "tz_f16_from_f64", lowering_.builder_.getInt32Ty(),
-                                       {lowering_.builder_.getDoubleTy()})
+                                 ? this->lowering.processLowerer().processFunction(
+                                       "tz_f16_from_f64", this->lowering.builder_.getInt32Ty(),
+                                       {this->lowering.builder_.getDoubleTy()})
                                  : llvm::FunctionCallee();
-  llvm::StoreInst *store = lowering_.builder_.CreateAlignedStore(
-      toStorage(lowering_, lowering_.builder_, kind, value, f16),
-      lowering_.builder_.CreateInBoundsGEP(storage, data, index), llvm::Align(type->elementSize()));
-  store->setMetadata(llvm::LLVMContext::MD_tbaa, bytesTbaa(false));
+  llvm::StoreInst *store = this->lowering.builder_.CreateAlignedStore(
+      BytesLowerer::toStorage(this->lowering, this->lowering.builder_, kind, value, f16),
+      this->lowering.builder_.CreateInBoundsGEP(storage, data, index),
+      llvm::Align(type->elementSize()));
+  store->setMetadata(llvm::LLVMContext::MD_tbaa, this->bytesTbaa(false));
 }
 
 llvm::Value *BytesLowerer::emitBytesIndex(IndexExpr *index) {
   const Type *type = index->object->type;
-  Lowering::Operand bytes =
-      lowering_.refCounts().emitOperand(index->object, AssignLowerer::cannotAssign(index->index));
-  llvm::Value *position = lowering_.exprLowerer().emitExpr(index->index);
-  auto read = [&] { return loadElement(bytesData(bytes.value), type, position); };
+  Lowering::Operand bytes = this->lowering.refCounts().emitOperand(
+      index->object, AssignLowerer::cannotAssign(index->index));
+  llvm::Value *position = this->lowering.exprLowerer().emitExpr(index->index);
+  auto read = [&] { return this->loadElement(this->bytesData(bytes.value), type, position); };
   llvm::Value *result;
   if (!index->mayBeOutOfRange()) {
     result = read();
   } else {
-    result = lowering_.arrayLowerer().emitCheckedRead(
-        lowering_.builder_.CreateICmpULT(position, bytesLength(bytes.value)), index->type, read);
+    result = this->lowering.arrayLowerer().emitCheckedRead(
+        this->lowering.builder_.CreateICmpULT(position, this->bytesLength(bytes.value)),
+        index->type, read);
   }
-  lowering_.refCounts().dropOperand(bytes);
+  this->lowering.refCounts().dropOperand(bytes);
 
   return result;
 }
@@ -194,21 +195,21 @@ llvm::Value *BytesLowerer::emitBytesElementAssign(AssignExpr *assign, bool needR
   auto *index = cast<IndexExpr>(assign->target);
   const Type *type = index->object->type;
   const Type *element = index->type;
-  Lowering::Operand bytes = lowering_.refCounts().emitOperand(
+  Lowering::Operand bytes = this->lowering.refCounts().emitOperand(
       index->object,
       AssignLowerer::cannotAssign(index->index) && AssignLowerer::cannotAssign(assign->value));
-  llvm::Value *position = lowering_.exprLowerer().emitExpr(index->index);
+  llvm::Value *position = this->lowering.exprLowerer().emitExpr(index->index);
   llvm::Value *value;
   if (!assign->op) {
-    value = lowering_.exprLowerer().emitExpr(assign->value);
+    value = this->lowering.exprLowerer().emitExpr(assign->value);
   } else {
-    llvm::Value *old = loadElement(bytesData(bytes.value), type, position);
-    value = lowering_.binaryLowerer().emitArithmetic(
-        *assign->op, old, lowering_.exprLowerer().emitExpr(assign->value), element,
+    llvm::Value *old = this->loadElement(this->bytesData(bytes.value), type, position);
+    value = this->lowering.binaryLowerer().emitArithmetic(
+        *assign->op, old, this->lowering.exprLowerer().emitExpr(assign->value), element,
         assign->rangeProven);
   }
-  storeElement(bytesData(bytes.value), type, position, value);
-  lowering_.refCounts().dropOperand(bytes);
+  this->storeElement(this->bytesData(bytes.value), type, position, value);
+  this->lowering.refCounts().dropOperand(bytes);
 
   return needResult ? value : nullptr;
 }
@@ -216,31 +217,31 @@ llvm::Value *BytesLowerer::emitBytesElementAssign(AssignExpr *assign, bool needR
 llvm::Value *BytesLowerer::emitBytesUpdate(UpdateExpr *update) {
   auto *index = cast<IndexExpr>(update->target);
   const Type *type = index->object->type;
-  Lowering::Operand bytes =
-      lowering_.refCounts().emitOperand(index->object, AssignLowerer::cannotAssign(index->index));
-  llvm::Value *position = lowering_.exprLowerer().emitExpr(index->index);
-  llvm::Value *data = bytesData(bytes.value);
-  llvm::Value *old = loadElement(data, type, position);
+  Lowering::Operand bytes = this->lowering.refCounts().emitOperand(
+      index->object, AssignLowerer::cannotAssign(index->index));
+  llvm::Value *position = this->lowering.exprLowerer().emitExpr(index->index);
+  llvm::Value *data = this->bytesData(bytes.value);
+  llvm::Value *old = this->loadElement(data, type, position);
   llvm::Value *updated;
   if (old->getType()->isDoubleTy()) {
     llvm::Value *one = llvm::ConstantFP::get(old->getType(), 1.0);
-    updated = update->increment ? lowering_.builder_.CreateFAdd(old, one)
-                                : lowering_.builder_.CreateFSub(old, one);
+    updated = update->increment ? this->lowering.builder_.CreateFAdd(old, one)
+                                : this->lowering.builder_.CreateFSub(old, one);
   } else {
     llvm::Value *one = llvm::ConstantInt::get(old->getType(), 1);
-    updated = update->increment ? lowering_.builder_.CreateAdd(old, one)
-                                : lowering_.builder_.CreateSub(old, one);
+    updated = update->increment ? this->lowering.builder_.CreateAdd(old, one)
+                                : this->lowering.builder_.CreateSub(old, one);
   }
-  storeElement(data, type, position, updated);
-  lowering_.refCounts().dropOperand(bytes);
+  this->storeElement(data, type, position, updated);
+  this->lowering.refCounts().dropOperand(bytes);
 
   return update->prefix ? updated : old;
 }
 
 llvm::Value *BytesLowerer::emitBytesMember(MemberExpr *member) {
-  Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, true);
-  llvm::Value *length = bytesLength(object.value);
-  lowering_.refCounts().dropOperand(object);
+  Lowering::Operand object = this->lowering.refCounts().emitOperand(member->object, true);
+  llvm::Value *length = this->bytesLength(object.value);
+  this->lowering.refCounts().dropOperand(object);
 
   return length;
 }
@@ -248,34 +249,35 @@ llvm::Value *BytesLowerer::emitBytesMember(MemberExpr *member) {
 Lowering::Producer BytesLowerer::bytesProducer(llvm::Value *slot, const Type *type) {
   Lowering::Producer producer;
   producer.run = [this, slot, type](const Lowering::Consumer &consumer) {
-    llvm::Type *i64 = lowering_.builder_.getInt64Ty();
-    llvm::Value *indexSlot = lowering_.functionFrame().createStackSlot(i64, "index");
-    lowering_.builder_.CreateStore(lowering_.builder_.getInt64(0), indexSlot);
-    llvm::BasicBlock *headBlock = lowering_.functionFrame().newBlock("iter.bytes");
-    llvm::BasicBlock *bodyBlock = lowering_.functionFrame().newBlock("iter.bytes.body");
-    llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("iter.bytes.end");
-    lowering_.functionFrame().emitBlock(headBlock);
+    llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+    llvm::Value *indexSlot = this->lowering.functionFrame().createStackSlot(i64, "index");
+    this->lowering.builder_.CreateStore(this->lowering.builder_.getInt64(0), indexSlot);
+    llvm::BasicBlock *headBlock = this->lowering.functionFrame().newBlock("iter.bytes");
+    llvm::BasicBlock *bodyBlock = this->lowering.functionFrame().newBlock("iter.bytes.body");
+    llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("iter.bytes.end");
+    this->lowering.functionFrame().emitBlock(headBlock);
     llvm::Value *bytes =
-        lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), slot, "bytes");
-    llvm::Value *index = lowering_.builder_.CreateLoad(i64, indexSlot, "index");
-    lowering_.builder_.CreateCondBr(lowering_.builder_.CreateICmpULT(index, bytesLength(bytes)),
-                                    bodyBlock, endBlock);
-    lowering_.functionFrame().switchTo(bodyBlock);
-    llvm::Value *value = loadElement(bytesData(bytes), type, index);
-    lowering_.builder_.CreateStore(
-        lowering_.builder_.CreateAdd(index, lowering_.builder_.getInt64(1)), indexSlot);
+        this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(), slot, "bytes");
+    llvm::Value *index = this->lowering.builder_.CreateLoad(i64, indexSlot, "index");
+    this->lowering.builder_.CreateCondBr(
+        this->lowering.builder_.CreateICmpULT(index, this->bytesLength(bytes)), bodyBlock,
+        endBlock);
+    this->lowering.functionFrame().switchTo(bodyBlock);
+    llvm::Value *value = this->loadElement(this->bytesData(bytes), type, index);
+    this->lowering.builder_.CreateStore(
+        this->lowering.builder_.CreateAdd(index, this->lowering.builder_.getInt64(1)), indexSlot);
     if (llvm::Value *sent = consumer.each(value)) {
-      lowering_.refCounts().releaseValue(sent, consumer.sent);
+      this->lowering.refCounts().releaseValue(sent, consumer.sent);
     }
-    lowering_.functionFrame().branchTo(headBlock);
-    lowering_.functionFrame().switchTo(endBlock);
+    this->lowering.functionFrame().branchTo(headBlock);
+    this->lowering.functionFrame().switchTo(endBlock);
   };
 
   return producer;
 }
 
 llvm::Constant *BytesLowerer::encodingTable(llvm::StringRef name) {
-  llvm::Constant *&table = encodingTables_[name];
+  llvm::Constant *&table = this->encodingTables[name];
   if (table) {
     return table;
   }
@@ -286,16 +288,16 @@ llvm::Constant *BytesLowerer::encodingTable(llvm::StringRef name) {
     }
   }
   assert(found && "Checker checked the encoding");
-  auto *highTy = llvm::ArrayType::get(lowering_.builder_.getInt16Ty(), 128);
+  auto *highTy = llvm::ArrayType::get(this->lowering.builder_.getInt16Ty(), 128);
   std::vector<llvm::Constant *> high;
   for (uint16_t unit : found->high) {
-    high.push_back(lowering_.builder_.getInt16(unit));
+    high.push_back(this->lowering.builder_.getInt16(unit));
   }
   llvm::Constant *init =
-      llvm::ConstantStruct::getAnon({lowering_.stringLowerer().utf8Constant(found->name),
+      llvm::ConstantStruct::getAnon({this->lowering.stringLowerer().utf8Constant(found->name),
                                      llvm::ConstantArray::get(highTy, high)});
   auto *global =
-      new llvm::GlobalVariable(*lowering_.module_, init->getType(), true,
+      new llvm::GlobalVariable(*this->lowering.module_, init->getType(), true,
                                llvm::GlobalValue::PrivateLinkage, init, "tz.encoding." + name);
   table = global;
 

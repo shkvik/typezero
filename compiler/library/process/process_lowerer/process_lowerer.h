@@ -6,7 +6,7 @@ namespace tz {
 
 class ProcessLowerer {
 public:
-  explicit ProcessLowerer(Lowering &lowering);
+  explicit ProcessLowerer(Lowering &owner);
 
   llvm::Value *emitProcessBuiltin(CallExpr *call);
   llvm::FunctionCallee processFunction(llvm::StringRef name, llvm::Type *ret,
@@ -14,7 +14,7 @@ public:
   void emitPanic(llvm::StringRef message);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

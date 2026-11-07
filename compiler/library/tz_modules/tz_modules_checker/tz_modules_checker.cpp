@@ -7,56 +7,52 @@
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-bool isExternalReference(const Type *type) {
+bool TzModulesChecker::isExternalReference(const Type *type) {
   return type->isObject() || type->isArray() || type->isIterator() || type->isJson() ||
          type->isDict() || type->isPromise() || type->isUnknown();
 }
 
-bool isExternalCallback(const Type *type) {
+bool TzModulesChecker::isExternalCallback(const Type *type) {
   return type->isFunction() && !type->hasRest() && type->ret()->isVoid() &&
          llvm::all_of(type->params(), [](const Type *param) {
            return param->isInteger() || param->isFloat() || param->isBool();
          });
 }
 
-bool isExternalValue(const Type *type) {
+bool TzModulesChecker::isExternalValue(const Type *type) {
   if (type->isInteger() || type->isFloat() || type->isBool() || type->isString() ||
-      isExternalCallback(type)) {
+      TzModulesChecker::isExternalCallback(type)) {
     return true;
   }
   if (type->isOptional()) {
-    return isExternalReference(type->inner()) && !type->inner()->isArray();
+    return TzModulesChecker::isExternalReference(type->inner()) && !type->inner()->isArray();
   }
 
-  return isExternalReference(type);
+  return TzModulesChecker::isExternalReference(type);
 }
 
-}
-
-TzModulesChecker::TzModulesChecker(Checker &checker) : checker_(checker) {}
+TzModulesChecker::TzModulesChecker(Checker &owner)
+    : checker(owner) {}
 
 void TzModulesChecker::checkExternal(FunctionDecl *fn) {
   FuncSymbol *sym = fn->sym;
-  checker_.returnInferrer().resolveParams(sym);
+  this->checker.returnInferrer().resolveParams(sym);
   fn->checked = true;
   if (!fn->typeParams.empty() || sym->hasRest) {
-    checker_.diags_.error(fn->loc(),
-                          "an intrinsic takes plain parameters: no type parameters, no rest");
+    this->checker.diags_.error(fn->loc(),
+                               "an intrinsic takes plain parameters: no type parameters, no rest");
     return;
   }
   for (size_t i = 0; i < fn->params.size(); ++i) {
     const Type *type = sym->params[i];
     if (fn->params[i].defaultValue() || fn->params[i].optional()) {
-      checker_.diags_.error(fn->params[i].loc, "an intrinsic has no optional parameters");
-    } else if (!type->isError() && !isExternalValue(type)) {
-      checker_.diags_.error(fn->params[i].loc,
-                            "an intrinsic cannot take a value of type '" + type->name() + "'");
+      this->checker.diags_.error(fn->params[i].loc, "an intrinsic has no optional parameters");
+    } else if (!type->isError() && !TzModulesChecker::isExternalValue(type)) {
+      this->checker.diags_.error(fn->params[i].loc,
+                                 "an intrinsic cannot take a value of type '" + type->name() + "'");
     }
   }
   const Type *ret = sym->ret;
@@ -64,21 +60,22 @@ void TzModulesChecker::checkExternal(FunctionDecl *fn) {
     return;
   }
   if (ret->isPromise()) {
-    checker_.file_->usesAsync = true;
+    this->checker.file_->usesAsync = true;
     ret = ret->promised();
   }
   if (ret->isResult()) {
     ret = ret->okType();
   }
-  if (!ret->isVoid() && !ret->isError() && !isExternalValue(ret)) {
-    checker_.diags_.error(fn->loc(),
-                          "an intrinsic cannot give a value of type '" + sym->ret->name() + "'");
+  if (!ret->isVoid() && !ret->isError() && !TzModulesChecker::isExternalValue(ret)) {
+    this->checker.diags_.error(fn->loc(), "an intrinsic cannot give a value of type '" +
+                                              sym->ret->name() + "'");
   }
 }
 
 Expr *TzModulesChecker::adaptResult(Expr *expr, const Type *to) {
   const Type *from = expr->type;
-  llvm::ArrayRef<const Type *> mine = from->params(), given = to->params();
+  llvm::ArrayRef<const Type *> mine = from->params();
+  llvm::ArrayRef<const Type *> given = to->params();
   if (mine.size() < given.size() || from->minArgs() > given.size() || from->hasRest() ||
       to->hasRest() || from->hasThis() != to->hasThis() || (given.size() < to->minArgs())) {
     return nullptr;
@@ -94,13 +91,14 @@ Expr *TzModulesChecker::adaptResult(Expr *expr, const Type *to) {
     converts = true;
   }
   bool fewer = mine.size() > given.size();
-  const Type *got = from->ret(), *wanted = to->ret();
+  const Type *got = from->ret();
+  const Type *wanted = to->ret();
   if ((got == wanted && !fewer && !converts) || got->isVoid() || wanted->isVoid() ||
       got->isError() || wanted->isError() ||
       (got != wanted && !TypeRelations::isImplicitlyConvertible(got, wanted))) {
     return nullptr;
   }
-  auto *cast = checker_.ctx_.make<CastExpr>(expr->loc(), expr, std::nullopt);
+  auto *cast = this->checker.ctx_.make<CastExpr>(expr->loc(), expr, std::nullopt);
   cast->type = to;
   cast->adaptsResult = true;
 
@@ -127,23 +125,23 @@ std::string TzModulesChecker::knownPrefix(const Expr *expr) const {
   }
   if (auto *tmpl = dyn_cast<TemplateExpr>(expr)) {
     if (tmpl->quasis[0].empty() && !tmpl->exprs.empty()) {
-      return knownPrefix(tmpl->exprs[0]);
+      return this->knownPrefix(tmpl->exprs[0]);
     }
     return ascii(tmpl->quasis[0]);
   }
   if (auto *bin = dyn_cast<BinaryExpr>(expr); bin && bin->op == BinaryOp::Add) {
-    return knownPrefix(bin->lhs);
+    return this->knownPrefix(bin->lhs);
   }
   if (auto *name = dyn_cast<NameExpr>(expr); name && name->var()) {
-    auto it = checker_.constPrefixes_.find(name->var());
-    return it == checker_.constPrefixes_.end() ? std::string() : it->second;
+    auto it = this->checker.constPrefixes_.find(name->var());
+    return it == this->checker.constPrefixes_.end() ? std::string() : it->second;
   }
   if (auto *made = dyn_cast<NewExpr>(expr);
       made && made->cls() && made->cls()->library() &&
       (made->cls()->name == "URL" || made->cls()->name == "Request")) {
     const std::vector<Expr *> &args = made->ctor() ? made->ctor()->args : made->args;
     if (!args.empty() && (made->cls()->name == "Request" || args.size() == 1)) {
-      return knownPrefix(args[0]);
+      return this->knownPrefix(args[0]);
     }
   }
 
@@ -151,25 +149,26 @@ std::string TzModulesChecker::knownPrefix(const Expr *expr) const {
 }
 
 void TzModulesChecker::noteHttpsCall(CallExpr *call, const FunctionDecl *fn) {
-  if (!fn || checker_.file_->usesTls || call->args.empty() ||
-      checker_.libraryCalls().inLibrary(call->loc())) {
+  if (!fn || this->checker.file_->usesTls || call->args.empty() ||
+      this->checker.libraryCalls().inLibrary(call->loc())) {
     return;
   }
-  if (fn == checker_.libFunctions_.lookup("fetch")) {
-    std::string prefix = llvm::StringRef(knownPrefix(call->args[0])).lower();
+  if (fn == this->checker.libFunctions_.lookup("fetch")) {
+    std::string prefix = llvm::StringRef(this->knownPrefix(call->args[0])).lower();
     if (!llvm::StringRef(prefix).starts_with("http://") &&
         !llvm::StringRef(prefix).starts_with("data:")) {
-      checker_.file_->usesTls = true;
+      this->checker.file_->usesTls = true;
     }
   }
 }
 
 void TzModulesChecker::noteServer(const NewExpr *made) {
   const std::vector<Expr *> &args = made->ctor() ? made->ctor()->args : made->args;
-  if (checker_.file_->usesTls || args.empty() || checker_.libraryCalls().inLibrary(made->loc())) {
+  if (this->checker.file_->usesTls || args.empty() ||
+      this->checker.libraryCalls().inLibrary(made->loc())) {
     return;
   }
-  noteServeOptions(args[0]);
+  this->noteServeOptions(args[0]);
 }
 
 static const Expr *uncast(const Expr *expr) {
@@ -201,32 +200,32 @@ static bool plainTransport(const Expr *transport) {
 void TzModulesChecker::noteServeOptions(const Expr *options) {
   options = uncast(options);
   if (auto *lit = dyn_cast<ObjectLitExpr>(options)) {
-    checker_.file_->usesTls = llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) {
+    this->checker.file_->usesTls = llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) {
       return p.spread() || (p.name == "transport" && !plainTransport(p.value));
     });
   } else {
-    checker_.file_->usesTls = !options->type || !options->type->isObject() ||
-                              options->type->field("transport") != nullptr;
+    this->checker.file_->usesTls = !options->type || !options->type->isObject() ||
+                                   options->type->field("transport") != nullptr;
   }
 }
 
 void TzModulesChecker::noteTlsMethod(const MemberExpr *member, const ClassDecl *cls) {
-  if (checker_.file_->usesTls || member->name != "startTls" ||
-      checker_.libraryCalls().inLibrary(member->loc())) {
+  if (this->checker.file_->usesTls || member->name != "startTls" ||
+      this->checker.libraryCalls().inLibrary(member->loc())) {
     return;
   }
   for (; cls; cls = cls->parent) {
     if (cls->library() && cls->name == "Socket") {
-      checker_.file_->usesTls = true;
+      this->checker.file_->usesTls = true;
       return;
     }
   }
 }
 
 void TzModulesChecker::noteHttpsValue(const FunctionDecl *fn, llvm::SMLoc loc) {
-  if (fn && !checker_.libraryCalls().inLibrary(loc) &&
-      fn == checker_.libFunctions_.lookup("fetch")) {
-    checker_.file_->usesTls = true;
+  if (fn && !this->checker.libraryCalls().inLibrary(loc) &&
+      fn == this->checker.libFunctions_.lookup("fetch")) {
+    this->checker.file_->usesTls = true;
   }
 }
 

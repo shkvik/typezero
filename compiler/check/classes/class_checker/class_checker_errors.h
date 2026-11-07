@@ -50,17 +50,6 @@ public:
   static std::string pathUnset(llvm::StringRef className, llvm::StringRef field);
 };
 
-enum class ClassCheckerCheckClassBodiesErrorCode {
-  FIELD_WITHOUT_VALUE,
-  OVERRIDE_RETURNS_OTHER_TYPE,
-};
-
-struct ClassCheckerCheckClassBodiesError {
-  ClassCheckerCheckClassBodiesErrorCode code;
-  std::string message;
-  llvm::SMLoc loc;
-};
-
 enum class ClassCheckerIsInitThisErrorCode {
   NOT_IN_CONSTRUCTOR,
   NOT_THIS,

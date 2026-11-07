@@ -7,7 +7,7 @@ namespace tz {
 
 class CryptoErrorTypes {
 public:
-  explicit CryptoErrorTypes(Checker &checker);
+  explicit CryptoErrorTypes(Checker &owner);
 
   void declare();
   const Type *named(llvm::StringRef name);
@@ -15,7 +15,9 @@ public:
   static bool isCryptoError(const Type *type);
 
 private:
-  Checker &checker_;
+  static bool flag(llvm::ArrayRef<Expr *> args, size_t i);
+
+  Checker &checker;
 };
 
 }

@@ -48,75 +48,84 @@ llvm::Value *NumberAccessCalls::emit() {
       const Type *kindType = Type::bytesType(Bytes(constantOf(call->args[0])));
       Bytes kind = kindType->bytes();
       unsigned size = kindType->elementSize();
-      Lowering::Operand self = receiver(1);
+      Lowering::Operand self = this->receiver(1);
       llvm::Value *offset = nullptr, *value = nullptr, *little = nullptr;
       if (dataView) {
-        offset = lowering_.exprLowerer().emitExpr(call->args[1]);
+        offset = this->lowering.exprLowerer().emitExpr(call->args[1]);
         if (write) {
-          value = lowering_.exprLowerer().emitExpr(call->args[2]);
+          value = this->lowering.exprLowerer().emitExpr(call->args[2]);
         }
         size_t at = write ? 3 : 2;
-        little = call->args.size() > at ? lowering_.exprLowerer().emitExpr(call->args[at])
-                                        : lowering_.builder_.getFalse();
+        little = call->args.size() > at ? this->lowering.exprLowerer().emitExpr(call->args[at])
+                                        : this->lowering.builder_.getFalse();
       } else {
-        little = lowering_.builder_.getInt1(!cast<BoolLitExpr>(call->args[1])->value);
+        little = this->lowering.builder_.getInt1(!cast<BoolLitExpr>(call->args[1])->value);
         size_t at = 2;
         if (write) {
-          value = lowering_.exprLowerer().emitExpr(call->args[at++]);
+          value = this->lowering.exprLowerer().emitExpr(call->args[at++]);
         }
-        offset = call->args.size() > at ? lowering_.exprLowerer().emitExpr(call->args[at])
-                                        : lowering_.builder_.getInt64(0);
+        offset = call->args.size() > at ? this->lowering.exprLowerer().emitExpr(call->args[at])
+                                        : this->lowering.builder_.getInt64(0);
       }
       if (call->mayBeOutOfRange) {
-        llvm::Value *length = lowering_.bytesLowerer().bytesLength(self.value);
-        llvm::Value *ok = lowering_.builder_.CreateAnd(
-            lowering_.builder_.CreateICmpULT(offset, length),
-            lowering_.builder_.CreateICmpULE(lowering_.builder_.getInt64(size),
-                                             lowering_.builder_.CreateSub(length, offset)));
-        llvm::BasicBlock *badBlock = lowering_.functionFrame().newBlock("bytes.out.of.range");
-        llvm::BasicBlock *okBlock = lowering_.functionFrame().newBlock("bytes.in.range");
-        lowering_.builder_.CreateCondBr(
-            ok, okBlock, badBlock, llvm::MDBuilder(lowering_.ctx_).createLikelyBranchWeights());
-        lowering_.functionFrame().switchTo(badBlock);
-        lowering_.builder_.CreateCall(fn("tz_bytes_out_of_range", voidTy, {i64, i64, i64}),
-                                      {offset, lowering_.builder_.getInt64(size), length});
-        lowering_.builder_.CreateUnreachable();
-        lowering_.functionFrame().switchTo(okBlock);
+        llvm::Value *length = this->lowering.bytesLowerer().bytesLength(self.value);
+        llvm::Value *ok = this->lowering.builder_.CreateAnd(
+            this->lowering.builder_.CreateICmpULT(offset, length),
+            this->lowering.builder_.CreateICmpULE(
+                this->lowering.builder_.getInt64(size),
+                this->lowering.builder_.CreateSub(length, offset)));
+        llvm::BasicBlock *badBlock = this->lowering.functionFrame().newBlock("bytes.out.of.range");
+        llvm::BasicBlock *okBlock = this->lowering.functionFrame().newBlock("bytes.in.range");
+        this->lowering.builder_.CreateCondBr(
+            ok, okBlock, badBlock,
+            llvm::MDBuilder(this->lowering.ctx_).createLikelyBranchWeights());
+        this->lowering.functionFrame().switchTo(badBlock);
+        this->lowering.builder_.CreateCall(
+            this->fn("tz_bytes_out_of_range", voidTy, {i64, i64, i64}),
+            {offset, this->lowering.builder_.getInt64(size), length});
+        this->lowering.builder_.CreateUnreachable();
+        this->lowering.functionFrame().switchTo(okBlock);
       }
-      llvm::Value *address = lowering_.builder_.CreateInBoundsGEP(
-          lowering_.builder_.getInt8Ty(), lowering_.bytesLowerer().bytesData(self.value), offset);
-      llvm::Type *bits = lowering_.builder_.getIntNTy(size * 8);
+      llvm::Value *address = this->lowering.builder_.CreateInBoundsGEP(
+          this->lowering.builder_.getInt8Ty(), this->lowering.bytesLowerer().bytesData(self.value),
+          offset);
+      llvm::Type *bits = this->lowering.builder_.getIntNTy(size * 8);
       auto swapped = [&](llvm::Value *raw) -> llvm::Value * {
         if (size == 1) {
           return raw;
         }
-        llvm::Value *swap = lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::bswap, raw);
+        llvm::Value *swap =
+            this->lowering.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::bswap, raw);
         if (auto *constant = dyn_cast<llvm::ConstantInt>(little)) {
           return constant->isOne() ? raw : swap;
         }
 
-        return lowering_.builder_.CreateSelect(little, raw, swap);
+        return this->lowering.builder_.CreateSelect(little, raw, swap);
       };
       llvm::Value *result;
       if (!write) {
-        llvm::LoadInst *raw = lowering_.builder_.CreateAlignedLoad(bits, address, llvm::Align(1));
-        raw->setMetadata(llvm::LLVMContext::MD_tbaa, lowering_.bytesLowerer().bytesTbaa(false));
+        llvm::LoadInst *raw =
+            this->lowering.builder_.CreateAlignedLoad(bits, address, llvm::Align(1));
+        raw->setMetadata(llvm::LLVMContext::MD_tbaa,
+                         this->lowering.bytesLowerer().bytesTbaa(false));
         llvm::Value *v = swapped(raw);
         switch (kind) {
           case Bytes::Float32:
-            result = lowering_.builder_.CreateFPExt(
-                lowering_.builder_.CreateBitCast(v, lowering_.builder_.getFloatTy()), f64);
+            result = this->lowering.builder_.CreateFPExt(
+                this->lowering.builder_.CreateBitCast(v, this->lowering.builder_.getFloatTy()),
+                f64);
             break;
           case Bytes::Float64:
-            result = lowering_.builder_.CreateBitCast(v, f64);
+            result = this->lowering.builder_.CreateBitCast(v, f64);
             break;
           case Bytes::Float16:
-            result = lowering_.builder_.CreateCall(fn("tz_f16_to_f64", f64, {i32}),
-                                                   {lowering_.builder_.CreateZExt(v, i32)});
+            result =
+                this->lowering.builder_.CreateCall(this->fn("tz_f16_to_f64", f64, {i32}),
+                                                   {this->lowering.builder_.CreateZExt(v, i32)});
             break;
           default:
-            result = isSignedKind(kind) ? lowering_.builder_.CreateSExt(v, i64)
-                                        : lowering_.builder_.CreateZExt(v, i64);
+            result = isSignedKind(kind) ? this->lowering.builder_.CreateSExt(v, i64)
+                                        : this->lowering.builder_.CreateZExt(v, i64);
             break;
         }
       } else {
@@ -124,62 +133,68 @@ llvm::Value *NumberAccessCalls::emit() {
         switch (kind) {
           case Bytes::Float32: {
             llvm::Value *top = llvm::ConstantFP::get(f64, kFloatTop);
-            llvm::Value *within = lowering_.builder_.CreateBinaryIntrinsic(
+            llvm::Value *within = this->lowering.builder_.CreateBinaryIntrinsic(
                 llvm::Intrinsic::minnum,
-                lowering_.builder_.CreateBinaryIntrinsic(llvm::Intrinsic::maxnum, value,
-                                                         llvm::ConstantFP::get(f64, -kFloatTop)),
+                this->lowering.builder_.CreateBinaryIntrinsic(
+                    llvm::Intrinsic::maxnum, value, llvm::ConstantFP::get(f64, -kFloatTop)),
                 top);
-            v = lowering_.builder_.CreateBitCast(
-                lowering_.builder_.CreateFPTrunc(within, lowering_.builder_.getFloatTy()), bits);
+            v = this->lowering.builder_.CreateBitCast(
+                this->lowering.builder_.CreateFPTrunc(within, this->lowering.builder_.getFloatTy()),
+                bits);
             break;
           }
           case Bytes::Float64:
-            v = lowering_.builder_.CreateBitCast(value, bits);
+            v = this->lowering.builder_.CreateBitCast(value, bits);
             break;
           case Bytes::Float16:
-            v = lowering_.builder_.CreateTrunc(
-                lowering_.builder_.CreateCall(fn("tz_f16_from_f64", i32, {f64}), {value}), bits);
+            v = this->lowering.builder_.CreateTrunc(
+                this->lowering.builder_.CreateCall(this->fn("tz_f16_from_f64", i32, {f64}),
+                                                   {value}),
+                bits);
             break;
           default:
-            v = value->getType() == bits ? value : lowering_.builder_.CreateTrunc(value, bits);
+            v = value->getType() == bits ? value : this->lowering.builder_.CreateTrunc(value, bits);
             break;
         }
         llvm::StoreInst *store =
-            lowering_.builder_.CreateAlignedStore(swapped(v), address, llvm::Align(1));
-        store->setMetadata(llvm::LLVMContext::MD_tbaa, lowering_.bytesLowerer().bytesTbaa(false));
-        result = dataView ? nullptr
-                          : lowering_.builder_.CreateAdd(offset, lowering_.builder_.getInt64(size));
+            this->lowering.builder_.CreateAlignedStore(swapped(v), address, llvm::Align(1));
+        store->setMetadata(llvm::LLVMContext::MD_tbaa,
+                           this->lowering.bytesLowerer().bytesTbaa(false));
+        result =
+            dataView
+                ? nullptr
+                : this->lowering.builder_.CreateAdd(offset, this->lowering.builder_.getInt64(size));
       }
-      lowering_.refCounts().dropOperand(self);
+      this->lowering.refCounts().dropOperand(self);
       if (!write && call->type->isResult()) {
-        llvm::Value *checked = lowering_.builder_.CreateCall(
-            fn("tz_finite_r", f64, {f64, lowering_.builder_.getPtrTy()}),
-            {result, lowering_.resultLowerer().failureMaker(call->type->errType())});
-        return lowering_.resultLowerer().catchFailure(checked, call->type, call->loc());
+        llvm::Value *checked = this->lowering.builder_.CreateCall(
+            this->fn("tz_finite_r", f64, {f64, this->lowering.builder_.getPtrTy()}),
+            {result, this->lowering.resultLowerer().failureMaker(call->type->errType())});
+        return this->lowering.resultLowerer().catchFailure(checked, call->type, call->loc());
       }
       return result;
     }
     case Builtin::BufferReadVar:
     case Builtin::BufferWriteVar: {
       bool write = call->builtin() == Builtin::BufferWriteVar;
-      Lowering::Operand self = receiver(2);
+      Lowering::Operand self = this->receiver(2);
       std::vector<llvm::Value *> values;
       for (size_t i = 2; i < call->args.size(); ++i) {
-        values.push_back(lowering_.exprLowerer().emitExpr(call->args[i]));
+        values.push_back(this->lowering.exprLowerer().emitExpr(call->args[i]));
       }
       uint32_t flags = uint32_t(cast<BoolLitExpr>(call->args[0])->value) |
                        uint32_t(cast<BoolLitExpr>(call->args[1])->value) << 1;
       llvm::Value *result;
       if (write) {
-        result = lowering_.builder_.CreateCall(
-            fn("tz_buffer_write_var", i64, {ptr, i64, i64, i64, i32}),
-            {self.value, values[0], values[1], values[2], lowering_.builder_.getInt32(flags)});
+        result = this->lowering.builder_.CreateCall(
+            this->fn("tz_buffer_write_var", i64, {ptr, i64, i64, i64, i32}),
+            {self.value, values[0], values[1], values[2], this->lowering.builder_.getInt32(flags)});
       } else {
-        result = lowering_.builder_.CreateCall(
-            fn("tz_buffer_read_var", i64, {ptr, i64, i64, i32}),
-            {self.value, values[0], values[1], lowering_.builder_.getInt32(flags)});
+        result = this->lowering.builder_.CreateCall(
+            this->fn("tz_buffer_read_var", i64, {ptr, i64, i64, i32}),
+            {self.value, values[0], values[1], this->lowering.builder_.getInt32(flags)});
       }
-      lowering_.refCounts().dropOperand(self);
+      this->lowering.refCounts().dropOperand(self);
       return result;
     }
     default:

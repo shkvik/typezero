@@ -351,8 +351,11 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
     if (size_t(at) < mine.size()) {
       call->target = FunctionCall{.func = mine[size_t(at)]->sym};
     }
-    this->checker.classMemberChecker().checkAccess(ctor->cls(), ctor->access(), "constructor",
-                                                   expr->loc());
+    ClassMemberChecker::ResultMemberAccessible accessible =
+        this->checker.classMemberChecker().checkAccess(ctor->cls(), ctor->access(), "constructor");
+    if (accessible.isErr()) {
+      this->checker.diags_.error(expr->loc(), accessible.error().message);
+    }
   }
   for (const ClassDecl *c = inst; c; c = c->parent) {
     if (c->init || !c->constructors.empty()) {

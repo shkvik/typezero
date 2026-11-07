@@ -17,41 +17,36 @@
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-bool inModule(const std::string &place, llvm::StringRef module) {
+bool StreamPipeline::inModule(const std::string &place, llvm::StringRef module) {
   llvm::StringRef at(place);
 
   return at.consume_front(module) && at.consume_front(":");
 }
 
-}
-
-StreamPipeline::StreamPipeline(Checker &checker) : checker_(checker) {}
+StreamPipeline::StreamPipeline(Checker &owner)
+    : checker(owner) {}
 
 Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bool last,
                                   bool &stream, const Type **sinkValue) {
   llvm::SMLoc loc = arg->loc();
-  ClassDecl *stageClass = checker_.libraryClass("PipelineStage");
+  ClassDecl *stageClass = this->checker.libraryClass("PipelineStage");
   const Type *stageType = stageClass ? stageClass->type : Type::error();
   stream = false;
   auto stageCall = [&](llvm::StringRef fn, std::vector<const Type *> bound, Expr *value) -> Expr * {
-    auto *callee = checker_.ctx_.make<NameExpr>(loc, fn);
-    auto *call = checker_.ctx_.make<CallExpr>(loc, callee, std::vector<Expr *>{value});
+    auto *callee = this->checker.ctx_.make<NameExpr>(loc, fn);
+    auto *call = this->checker.ctx_.make<CallExpr>(loc, callee, std::vector<Expr *>{value});
     call->type = Type::error();
     std::vector<bool> given{true};
-    Expr *made = checker_.eventTargetChecker().callLibraryFunction(call, fn, bound, given, loc);
+    Expr *made =
+        this->checker.eventTargetChecker().callLibraryFunction(call, fn, bound, given, loc);
 
-    return made->type->isError() ? made : checker_.typeRelations().convert(made, stageType);
+    return made->type->isError() ? made : this->checker.typeRelations().convert(made, stageType);
   };
   if (auto *fe = dyn_cast<FunctionExpr>(arg)) {
     Checker::Signature sig;
@@ -62,51 +57,51 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
       sig.params = {Type::asyncIterator(chunk)};
       sig.minArgs = 1;
     }
-    arg = checker_.closureChecker().checkFunctionExpr(fe, &sig);
+    arg = this->checker.closureChecker().checkFunctionExpr(fe, &sig);
   } else {
-    arg = checker_.exprChecker().checkExpr(arg);
+    arg = this->checker.exprChecker().checkExpr(arg);
   }
   const Type *type = arg->type;
   if (type->isError()) {
     return arg;
   }
   if (ClassDecl *cls = ClassDeclarer::classOf(type);
-      cls && checker_.chunkTypes().isStreamClass(cls) && !type->isOptional()) {
+      cls && this->checker.chunkTypes().isStreamClass(cls) && !type->isOptional()) {
     stream = true;
-    Checker::StreamChunks chunks = checker_.chunkTypes().streamChunksOf(cls);
+    Checker::StreamChunks chunks = this->checker.chunkTypes().streamChunksOf(cls);
     if (!first) {
       if (!chunks.writable) {
-        checker_.diags_.error(
+        this->checker.diags_.error(
             loc, "pipeline() writes the chunks before it to each stream after the first, "
                  "but '" +
                      type->name() + "' is not writable");
         return arg;
       }
-      if (chunk && checker_.chunkTypes().recordStreamChunk(chunks.writable, chunk, loc)) {
-      } else if (chunk && !checker_.openMaps_.count(chunk) &&
-                 !streamTakes(chunks.writable, chunk)) {
-        checker_.diags_.error(loc, "pipeline() writes chunks of " + chunk->name().str() + " to '" +
-                                       type->name().str() + "', which takes " +
-                                       chunks.writable->name().str());
+      if (chunk && this->checker.chunkTypes().recordStreamChunk(chunks.writable, chunk, loc)) {
+      } else if (chunk && !this->checker.openMaps_.count(chunk) &&
+                 !this->streamTakes(chunks.writable, chunk)) {
+        this->checker.diags_.error(loc, "pipeline() writes chunks of " + chunk->name().str() +
+                                            " to '" + type->name().str() + "', which takes " +
+                                            chunks.writable->name().str());
         return arg;
       }
     }
     if (!last) {
       if (!chunks.readable) {
-        checker_.diags_.error(loc, "pipeline() reads each stream but the last, and '" +
-                                       type->name() + "' is not readable");
+        this->checker.diags_.error(loc, "pipeline() reads each stream but the last, and '" +
+                                            type->name() + "' is not readable");
         return arg;
       }
       chunk = chunks.readable;
     }
-    return checker_.typeRelations().convert(
-        arg, Type::unionOf({checker_.libraryClass("Stream")->type, stageType}));
+    return this->checker.typeRelations().convert(
+        arg, Type::unionOf({this->checker.libraryClass("Stream")->type, stageType}));
   }
   if (type->isFunction()) {
     const Type *ret = type->ret();
     if (first) {
       if (!ret->isAsyncIterator()) {
-        checker_.diags_.error(
+        this->checker.diags_.error(
             loc, "the first function of pipeline() is the source of the chunks: an async "
                  "generator, e.g. 'async function* () { yield \"a\" }'");
         return arg;
@@ -114,22 +109,24 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
       chunk = ret->yielded();
       Expr *stage =
           stageCall("streamSourceStage", {chunk},
-                    checker_.typeRelations().coerce(arg, Type::function({}, 0, false, ret)));
+                    this->checker.typeRelations().coerce(arg, Type::function({}, 0, false, ret)));
       return stage->type->isError()
                  ? stage
-                 : checker_.typeRelations().convert(
-                       stage, Type::unionOf({checker_.libraryClass("Stream")->type, stageType}));
+                 : this->checker.typeRelations().convert(
+                       stage,
+                       Type::unionOf({this->checker.libraryClass("Stream")->type, stageType}));
     }
     const Type *source = Type::asyncIterator(chunk);
     if (ret->isAsyncIterator()) {
       const Type *fn = Type::function({source}, 1, false, ret);
       Expr *stage = stageCall("streamTransformStage", {chunk, ret->yielded()},
-                              checker_.typeRelations().coerce(arg, fn));
+                              this->checker.typeRelations().coerce(arg, fn));
       chunk = ret->yielded();
       return stage->type->isError()
                  ? stage
-                 : checker_.typeRelations().convert(
-                       stage, Type::unionOf({checker_.libraryClass("Stream")->type, stageType}));
+                 : this->checker.typeRelations().convert(
+                       stage,
+                       Type::unionOf({this->checker.libraryClass("Stream")->type, stageType}));
     }
     if (ret->isPromise() && last) {
       const Type *fn = Type::function({source}, 1, false, ret);
@@ -138,15 +135,16 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
         *sinkValue = value;
       }
       Expr *stage = value->isVoid() ? stageCall("streamVoidSinkStage", {chunk},
-                                                checker_.typeRelations().coerce(arg, fn))
+                                                this->checker.typeRelations().coerce(arg, fn))
                                     : stageCall("streamSinkStage", {chunk, value},
-                                                checker_.typeRelations().coerce(arg, fn));
+                                                this->checker.typeRelations().coerce(arg, fn));
       return stage->type->isError()
                  ? stage
-                 : checker_.typeRelations().convert(
-                       stage, Type::unionOf({checker_.libraryClass("Stream")->type, stageType}));
+                 : this->checker.typeRelations().convert(
+                       stage,
+                       Type::unionOf({this->checker.libraryClass("Stream")->type, stageType}));
     }
-    checker_.diags_.error(
+    this->checker.diags_.error(
         loc, last ? "the last function of pipeline() is an async generator over the "
                     "chunks before it, or an async function that takes them and gives a "
                     "Promise"
@@ -161,22 +159,24 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
       Expr *stage = stageCall("streamAsyncIterableStage", {chunk}, arg);
       return stage->type->isError()
                  ? stage
-                 : checker_.typeRelations().convert(
-                       stage, Type::unionOf({checker_.libraryClass("Stream")->type, stageType}));
+                 : this->checker.typeRelations().convert(
+                       stage,
+                       Type::unionOf({this->checker.libraryClass("Stream")->type, stageType}));
     }
-    if (Expr *iterator = valuesIteratorOf(arg)) {
+    if (Expr *iterator = this->valuesIteratorOf(arg)) {
       chunk = iterator->type->yielded();
       Expr *stage = stageCall("streamIterableStage", {chunk}, iterator);
       return stage->type->isError()
                  ? stage
-                 : checker_.typeRelations().convert(
-                       stage, Type::unionOf({checker_.libraryClass("Stream")->type, stageType}));
+                 : this->checker.typeRelations().convert(
+                       stage,
+                       Type::unionOf({this->checker.libraryClass("Stream")->type, stageType}));
     }
   }
-  checker_.diags_.error(loc,
-                        "pipeline() takes streams, async generator functions over the chunks and, "
-                        "first, an iterable; this is '" +
-                            type->name() + "'");
+  this->checker.diags_.error(
+      loc, "pipeline() takes streams, async generator functions over the chunks and, "
+           "first, an iterable; this is '" +
+               type->name() + "'");
   arg->type = Type::error();
 
   return arg;
@@ -190,11 +190,12 @@ Expr *StreamPipeline::valuesIteratorOf(Expr *collection) {
   llvm::SMLoc loc = collection->loc();
   if (type->isArray()) {
     const Type *iterator = Type::iterator(type->inner());
-    auto *member = checker_.ctx_.make<MemberExpr>(loc, collection, "values");
+    auto *member = this->checker.ctx_.make<MemberExpr>(loc, collection, "values");
     member->type = Type::function({}, 0, false, iterator);
-    return checker_.processChecker().builtinCall(loc, member, Builtin::ArrValues, {}, iterator);
+    return this->checker.processChecker().builtinCall(loc, member, Builtin::ArrValues, {},
+                                                      iterator);
   }
-  Expr *iterator = checker_.dictChecker().iterableOf(collection);
+  Expr *iterator = this->checker.dictChecker().iterableOf(collection);
 
   return iterator != collection && iterator->type->isIterator() ? iterator : nullptr;
 }
@@ -211,12 +212,12 @@ bool StreamPipeline::streamTakes(const Type *writable, const Type *chunk) {
 }
 
 Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, llvm::SMLoc loc) {
-  std::string place = checker_.eventMapInference().placeOf(decl->loc());
-  if (inModule(place, "node:internal/fs/streams")) {
-    return checker_.streamSources().checkFsStreamFunction(call, decl, loc);
+  std::string place = this->checker.eventMapInference().placeOf(decl->loc());
+  if (StreamPipeline::inModule(place, "node:internal/fs/streams")) {
+    return this->checker.streamSources().checkFsStreamFunction(call, decl, loc);
   }
-  bool promises = inModule(place, "node:stream/promises");
-  if (!promises && !inModule(place, "node:stream")) {
+  bool promises = StreamPipeline::inModule(place, "node:stream/promises");
+  if (!promises && !StreamPipeline::inModule(place, "node:stream")) {
     return nullptr;
   }
   llvm::StringRef fn = decl->name;
@@ -224,55 +225,55 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
     return nullptr;
   }
   call->type = Type::error();
-  if (checker_.callChecker().rejectSpread(call)) {
+  if (this->checker.callChecker().rejectSpread(call)) {
     return call;
   }
   auto checkArgsLoosely = [&](size_t from) {
     for (size_t i = from; i < call->args.size(); ++i) {
-      call->args[i] = checker_.exprChecker().checkExpr(call->args[i]);
+      call->args[i] = this->checker.exprChecker().checkExpr(call->args[i]);
     }
   };
-  ClassDecl *streamClass = checker_.libraryClass("Stream");
+  ClassDecl *streamClass = this->checker.libraryClass("Stream");
   if (!streamClass) {
     return nullptr;
   }
   const Type *streamType = streamClass->type;
-  const Type *callback = checker_.streamChecker().streamCallbackType();
+  const Type *callback = this->checker.streamChecker().streamCallbackType();
   auto undefinedOf = [&](const Type *type) {
-    return checker_.typeRelations().convert(
-        checker_.exprChecker().checkExpr(checker_.ctx_.make<UndefinedExpr>(loc)), type);
+    return this->checker.typeRelations().convert(
+        this->checker.exprChecker().checkExpr(this->checker.ctx_.make<UndefinedExpr>(loc)), type);
   };
   if (fn == "finished") {
     unsigned most = promises ? 2 : 3;
     ArgumentChecker::ResultArityMatches arity =
-        checker_.argumentChecker().checkArity(call, most - 1, most);
+        this->checker.argumentChecker().checkArity(call, most - 1, most);
     if (arity.isErr()) {
-      checker_.diags_.error(loc, arity.error().message);
+      this->checker.diags_.error(loc, arity.error().message);
       return call;
     }
-    TypeAliasDecl *alias = checker_.libTypes_.lookup("FinishedOptions");
+    TypeAliasDecl *alias = this->checker.libTypes_.lookup("FinishedOptions");
     const Type *options =
-        alias ? Type::optional(checker_.typeDeclarer().resolveAlias(alias)) : Type::error();
-    Expr *stream = checker_.argumentChecker().checkArg(call->args[0], streamType);
-    checker_.emitterChecker().noteErrorsHandled(stream);
+        alias ? Type::optional(this->checker.typeDeclarer().resolveAlias(alias)) : Type::error();
+    Expr *stream = this->checker.argumentChecker().checkArg(call->args[0], streamType);
+    this->checker.emitterChecker().noteErrorsHandled(stream);
     Expr *opts = call->args.size() == most
-                     ? checker_.argumentChecker().checkArg(call->args[1], options)
+                     ? this->checker.argumentChecker().checkArg(call->args[1], options)
                      : undefinedOf(options);
     if (promises) {
       call->args = {stream, opts};
       std::vector<bool> given(2, true);
-      return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "finishedResult",
-                                                             {}, given, loc);
+      return this->checker.eventTargetChecker().callLibraryStatic(call, streamClass,
+                                                                  "finishedResult", {}, given, loc);
     }
-    Expr *cb = checker_.argumentChecker().checkArg(call->args.back(), callback);
+    Expr *cb = this->checker.argumentChecker().checkArg(call->args.back(), callback);
     call->args = {stream, opts, cb};
     std::vector<bool> given(3, true);
-    return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "eosFor", {}, given,
-                                                           loc);
+    return this->checker.eventTargetChecker().callLibraryStatic(call, streamClass, "eosFor", {},
+                                                                given, loc);
   }
   if (fn == "compose") {
     if (call->args.empty()) {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           loc, "compose() takes the streams to make one Duplex of, e.g. 'compose(a, b)'");
       return call;
     }
@@ -280,35 +281,36 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
     const Type *chunk = nullptr;
     Checker::StreamChunks head, tail;
     for (size_t i = 0; i < call->args.size(); ++i) {
-      Expr *arg = checker_.exprChecker().checkExpr(call->args[i]);
+      Expr *arg = this->checker.exprChecker().checkExpr(call->args[i]);
       ClassDecl *cls = ClassDeclarer::classOf(arg->type);
       if (arg->type->isError()) {
         return call;
       }
-      if (!cls || !checker_.chunkTypes().isStreamClass(cls) || arg->type->isOptional()) {
-        checker_.diags_.error(arg->loc(), "compose() takes streams, and this is '" +
-                                              arg->type->name() +
-                                              "'; to put a function between them, use pipeline()");
+      if (!cls || !this->checker.chunkTypes().isStreamClass(cls) || arg->type->isOptional()) {
+        this->checker.diags_.error(arg->loc(),
+                                   "compose() takes streams, and this is '" + arg->type->name() +
+                                       "'; to put a function between them, use pipeline()");
         checkArgsLoosely(i + 1);
         return call;
       }
-      Checker::StreamChunks chunks = checker_.chunkTypes().streamChunksOf(cls);
+      Checker::StreamChunks chunks = this->checker.chunkTypes().streamChunksOf(cls);
       if (i == 0) {
         head = chunks;
       }
       if (i + 1 == call->args.size()) {
         tail = chunks;
       }
-      if (i > 0 && chunk && chunks.writable && !streamTakes(chunks.writable, chunk)) {
-        checker_.diags_.error(arg->loc(), "compose() writes chunks of " + chunk->name().str() +
-                                              " to '" + arg->type->name().str() +
-                                              "', which takes " + chunks.writable->name().str());
+      if (i > 0 && chunk && chunks.writable && !this->streamTakes(chunks.writable, chunk)) {
+        this->checker.diags_.error(arg->loc(), "compose() writes chunks of " + chunk->name().str() +
+                                                   " to '" + arg->type->name().str() +
+                                                   "', which takes " +
+                                                   chunks.writable->name().str());
         return call;
       }
       chunk = chunks.readable;
-      streams.push_back(checker_.typeRelations().convert(arg, streamType));
+      streams.push_back(this->checker.typeRelations().convert(arg, streamType));
     }
-    auto *list = checker_.ctx_.make<ArrayLitExpr>(loc);
+    auto *list = this->checker.ctx_.make<ArrayLitExpr>(loc);
     for (Expr *s : streams) {
       list->elements.push_back({s, false});
     }
@@ -317,16 +319,16 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
     const Type *r = tail.readable ? tail.readable : Type::bytesType(Type::Bytes::Buffer);
     call->args = {list};
     std::vector<bool> given{true};
-    return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "composeAll", {w, r},
-                                                           given, loc);
+    return this->checker.eventTargetChecker().callLibraryStatic(call, streamClass, "composeAll",
+                                                                {w, r}, given, loc);
   }
   size_t count = call->args.size();
   Expr *callbackArg = nullptr;
   Expr *optionsArg = nullptr;
   if (!promises) {
     if (count < 3) {
-      checker_.diags_.error(loc, "pipeline() takes two streams or more and a callback, e.g. "
-                                 "'pipeline(source, destination, (err) => ...)'");
+      this->checker.diags_.error(loc, "pipeline() takes two streams or more and a callback, e.g. "
+                                      "'pipeline(source, destination, (err) => ...)'");
       checkArgsLoosely(0);
       return call;
     }
@@ -337,7 +339,7 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
     --count;
   }
   if (count < 2) {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         loc, "pipeline() takes two streams or more, e.g. 'pipeline(source, destination)'");
     checkArgsLoosely(0);
     return call;
@@ -348,22 +350,23 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
   bool lastIsStream = false;
   for (size_t i = 0; i < count; ++i) {
     bool stream = false;
-    Expr *stage = streamStage(call->args[i], chunk, i == 0, i + 1 == count, stream, &sinkValue);
+    Expr *stage =
+        this->streamStage(call->args[i], chunk, i == 0, i + 1 == count, stream, &sinkValue);
     if (stage->type->isError()) {
       checkArgsLoosely(i + 1);
       return call;
     }
     stages.push_back(stage);
     if (stream) {
-      checker_.emitterChecker().noteErrorsHandled(stage);
+      this->checker.emitterChecker().noteErrorsHandled(stage);
     }
     if (i + 1 == count) {
       lastIsStream = stream;
     }
   }
-  ClassDecl *stageClass = checker_.libraryClass("PipelineStage");
+  ClassDecl *stageClass = this->checker.libraryClass("PipelineStage");
   const Type *element = Type::unionOf({streamType, stageClass->type});
-  auto *list = checker_.ctx_.make<ArrayLitExpr>(loc);
+  auto *list = this->checker.ctx_.make<ArrayLitExpr>(loc);
   Expr *lastStream = nullptr;
   for (size_t i = 0; i < stages.size(); ++i) {
     if (i + 1 == stages.size() && lastIsStream && !promises) {
@@ -375,7 +378,7 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
   }
   list->type = Type::array(element);
   if (!promises) {
-    Expr *cb = checker_.argumentChecker().checkArg(callbackArg, callback);
+    Expr *cb = this->checker.argumentChecker().checkArg(callbackArg, callback);
     if (cb->type->isError()) {
       return call;
     }
@@ -383,17 +386,17 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
     if (lastStream) {
       call->args = {list, lastStream, cb};
       given.assign(3, true);
-      return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "pipelineTo",
-                                                             {lastStream->type}, given, loc);
+      return this->checker.eventTargetChecker().callLibraryStatic(call, streamClass, "pipelineTo",
+                                                                  {lastStream->type}, given, loc);
     }
     call->args = {list, cb};
     given.assign(2, true);
-    return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "pipelineOut", {},
-                                                           given, loc);
+    return this->checker.eventTargetChecker().callLibraryStatic(call, streamClass, "pipelineOut",
+                                                                {}, given, loc);
   }
   const Type *optionsType =
       Type::optional(Type::object({Field{"end", Type::optional(Type::boolTy()), false}}));
-  Expr *options = optionsArg ? checker_.argumentChecker().checkArg(optionsArg, optionsType)
+  Expr *options = optionsArg ? this->checker.argumentChecker().checkArg(optionsArg, optionsType)
                              : undefinedOf(optionsType);
   if (options->type->isError()) {
     return call;
@@ -401,12 +404,12 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
   call->args = {list, options};
   std::vector<bool> given(2, true);
   if (sinkValue && !sinkValue->isVoid()) {
-    return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "pipelineValue",
-                                                           {sinkValue}, given, loc);
+    return this->checker.eventTargetChecker().callLibraryStatic(call, streamClass, "pipelineValue",
+                                                                {sinkValue}, given, loc);
   }
 
-  return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "pipelineResult", {},
-                                                         given, loc);
+  return this->checker.eventTargetChecker().callLibraryStatic(call, streamClass, "pipelineResult",
+                                                              {}, given, loc);
 }
 
 Expr *StreamPipeline::checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *func) {
@@ -414,7 +417,7 @@ Expr *StreamPipeline::checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbo
     return nullptr;
   }
 
-  return checkStreamFunction(call, func->decl, name->loc());
+  return this->checkStreamFunction(call, func->decl, name->loc());
 }
 
 }

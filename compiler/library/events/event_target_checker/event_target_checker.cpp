@@ -15,43 +15,42 @@
 #include "compiler/library/events/event_maps/event_maps.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/Path.h"
 #include <cassert>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-EventTargetChecker::EventTargetChecker(Checker &checker) : checker_(checker) {}
+EventTargetChecker::EventTargetChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *member, ClassDecl *cls) {
   bool add = member->name == "addEventListener";
   if (!add && member->name != "removeEventListener") {
     return nullptr;
   }
-  ClassDecl *eventClass = checker_.libraryClass("Event");
-  TypeAliasDecl *objectListener = checker_.libTypes_.lookup("EventListenerObject");
+  ClassDecl *eventClass = this->checker.libraryClass("Event");
+  TypeAliasDecl *objectListener = this->checker.libTypes_.lookup("EventListenerObject");
   if (!eventClass || !objectListener) {
     return nullptr;
   }
   call->type = Type::error();
   member->type = Type::error();
-  bool rejected = checker_.callChecker().rejectSpread(call);
+  bool rejected = this->checker.callChecker().rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 2, 3);
+      rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 2, 3);
   if (arity.isErr()) {
-    checker_.diags_.error(member->loc(), arity.error().message);
+    this->checker.diags_.error(member->loc(), arity.error().message);
   }
   if (rejected || arity.isErr()) {
     return call;
   }
-  call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
+  call->args[0] = this->checker.argumentChecker().checkArg(call->args[0], Type::string());
   const Type *event = eventClass->type;
-  const Type *object = checker_.typeDeclarer().resolveAlias(objectListener);
+  const Type *object = this->checker.typeDeclarer().resolveAlias(objectListener);
   auto eventKind = [&](const Type *type, llvm::SMLoc loc) -> const Type * {
     if (type->isError()) {
       return nullptr;
@@ -60,10 +59,10 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
         c && c->derivesFrom(eventClass) && !type->isOptional()) {
       return type;
     }
-    checker_.diags_.error(loc,
-                          "a listener of an EventTarget takes an Event, or a kind of it such as "
-                          "'CustomEvent<int>', but this one takes '" +
-                              type->name() + "'");
+    this->checker.diags_.error(
+        loc, "a listener of an EventTarget takes an Event, or a kind of it such as "
+             "'CustomEvent<int>', but this one takes '" +
+                 type->name() + "'");
 
     return nullptr;
   };
@@ -72,11 +71,11 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
   if (auto *fe = dyn_cast<FunctionExpr>(listener)) {
     kind = event;
     if (!fe->fn->params.empty() && fe->fn->params[0].type && !fe->fn->params[0].rest()) {
-      kind = eventKind(checker_.typeResolver().resolveType(*fe->fn->params[0].type, false),
+      kind = eventKind(this->checker.typeResolver().resolveType(*fe->fn->params[0].type, false),
                        fe->fn->params[0].loc);
     }
     if (!kind) {
-      listener = checker_.exprChecker().checkExpr(listener);
+      listener = this->checker.exprChecker().checkExpr(listener);
       return call;
     }
     Checker::Signature sig;
@@ -85,23 +84,23 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
     sig.ret = Type::voidTy();
     sig.voidResult = true;
     sig.asyncVoid = true;
-    listener = checker_.closureChecker().checkFunctionExpr(fe, &sig);
+    listener = this->checker.closureChecker().checkFunctionExpr(fe, &sig);
   } else if (isa<ObjectLitExpr>(listener)) {
-    listener = checker_.argumentChecker().checkArg(listener, object);
+    listener = this->checker.argumentChecker().checkArg(listener, object);
   } else {
-    listener = checker_.exprChecker().checkExpr(listener);
+    listener = this->checker.exprChecker().checkExpr(listener);
     const Type *type = listener->type;
     if (type->isFunction()) {
       kind = type->params().empty() ? event : eventKind(type->params()[0], listener->loc());
       if (kind && type->params().empty()) {
-        listener = checker_.typeRelations().coerce(
+        listener = this->checker.typeRelations().coerce(
             listener, Type::function({event}, 1, false, Type::voidTy()));
       } else if (kind) {
-        listener = checker_.typeRelations().coerce(
+        listener = this->checker.typeRelations().coerce(
             listener, Type::function({kind}, 1, false, Type::voidTy()));
       }
     } else {
-      listener = checker_.typeRelations().coerce(listener, object, "the listener");
+      listener = this->checker.typeRelations().coerce(listener, object, "the listener");
     }
   }
   if (listener->type->isError()) {
@@ -110,27 +109,27 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
   std::vector<bool> given(call->args.size(), false);
   given[0] = given[1] = true;
   if (!add) {
-    listener = checker_.typeRelations().convert(listener, Type::unknown());
-    checker_.file_->comparesFunctions = true;
-    return checker_.emitterChecker().callLibraryMethod(call, member, cls, "removeListenerWith", {},
-                                                       &given, false);
+    listener = this->checker.typeRelations().convert(listener, Type::unknown());
+    this->checker.file_->comparesFunctions = true;
+    return this->checker.emitterChecker().callLibraryMethod(call, member, cls, "removeListenerWith",
+                                                            {}, &given, false);
   }
   if (kind) {
-    return checker_.emitterChecker().callLibraryMethod(call, member, cls, "addFunctionListener",
-                                                       {kind}, &given, false);
+    return this->checker.emitterChecker().callLibraryMethod(
+        call, member, cls, "addFunctionListener", {kind}, &given, false);
   }
 
-  return checker_.emitterChecker().callLibraryMethod(call, member, cls, "addObjectListener", {},
-                                                     &given, false);
+  return this->checker.emitterChecker().callLibraryMethod(call, member, cls, "addObjectListener",
+                                                          {}, &given, false);
 }
 
 Expr *EventTargetChecker::callLibraryFunction(CallExpr *call, llvm::StringRef name,
                                               llvm::ArrayRef<const Type *> bound,
                                               const std::vector<bool> &given, llvm::SMLoc loc) {
-  FunctionDecl *fn = checker_.libFunctions_.lookup(name);
+  FunctionDecl *fn = this->checker.libFunctions_.lookup(name);
   assert(fn && fn->sym && "a function of the emitter's code");
 
-  return callLibrarySymbol(call, fn->sym, bound, given, loc);
+  return this->callLibrarySymbol(call, fn->sym, bound, given, loc);
 }
 
 Expr *EventTargetChecker::callLibraryStatic(CallExpr *call, ClassDecl *cls, llvm::StringRef name,
@@ -139,73 +138,74 @@ Expr *EventTargetChecker::callLibraryStatic(CallExpr *call, ClassDecl *cls, llvm
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, true);
   assert(!methods.empty() && methods[0]->sym && "a static method of the library");
 
-  return callLibrarySymbol(call, methods[0]->sym, bound, given, loc);
+  return this->callLibrarySymbol(call, methods[0]->sym, bound, given, loc);
 }
 
 Expr *EventTargetChecker::callLibrarySymbol(CallExpr *call, FuncSymbol *sym,
                                             llvm::ArrayRef<const Type *> bound,
                                             const std::vector<bool> &given, llvm::SMLoc loc) {
-  checker_.returnInferrer().resolveParams(sym);
-  const Type *ret = checker_.returnInferrer().returnType(sym);
+  this->checker.returnInferrer().resolveParams(sym);
+  const Type *ret = this->checker.returnInferrer().returnType(sym);
   FuncSymbol *callee = sym;
-  if (sym->isGeneric() && !checker_.trial_ &&
+  if (sym->isGeneric() && !this->checker.trial_ &&
       llvm::none_of(bound, [](const Type *t) { return mentionsParam(t); })) {
-    if (FuncSymbol *instance = checker_.genericInstantiator().instantiate(sym, bound, loc)) {
+    if (FuncSymbol *instance = this->checker.genericInstantiator().instantiate(sym, bound, loc)) {
       callee = instance;
     }
   }
-  checker_.returnInferrer().resolveParams(callee);
+  this->checker.returnInferrer().resolveParams(callee);
   call->target = FunctionCall{.func = callee};
-  call->type = ret ? checker_.typeParams().substitute(ret, sym->typeParams, bound) : Type::error();
+  call->type =
+      ret ? this->checker.typeParams().substitute(ret, sym->typeParams, bound) : Type::error();
   std::vector<const Type *> params = callee->params;
   if (callee == sym) {
     for (const Type *&p : params) {
-      p = checker_.typeParams().substitute(p, sym->typeParams, bound);
+      p = this->checker.typeParams().substitute(p, sym->typeParams, bound);
     }
   }
 
-  return checker_.argumentChecker().checkArguments(call, params, callee->minArgs, callee->hasRest,
-                                                   loc, &given);
+  return this->checker.argumentChecker().checkArguments(call, params, callee->minArgs,
+                                                        callee->hasRest, loc, &given);
 }
 
 Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
-  if (checker_.libraryCalls().inLibrary(call->loc())) {
+  if (this->checker.libraryCalls().inLibrary(call->loc())) {
     return nullptr;
   }
   call->type = Type::error();
   auto checkArgsLoosely = [&](size_t from) {
     for (size_t i = from; i < call->args.size(); ++i) {
-      call->args[i] = checker_.exprChecker().checkExpr(call->args[i]);
+      call->args[i] = this->checker.exprChecker().checkExpr(call->args[i]);
     }
   };
   if (fn == "getEventListeners" || fn == "listenerCount") {
-    bool rejected = checker_.callChecker().rejectSpread(call);
+    bool rejected = this->checker.callChecker().rejectSpread(call);
     ArgumentChecker::ResultArityMatches arity =
-        rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 2, 2);
+        rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 2, 2);
     if (arity.isErr()) {
-      checker_.diags_.error(loc, arity.error().message);
+      this->checker.diags_.error(loc, arity.error().message);
     }
     if (rejected || arity.isErr()) {
       return call;
     }
-    Expr *object = checker_.exprChecker().checkExpr(call->args[0]);
-    if (ClassDecl *target = checker_.libraryClass("EventTarget");
+    Expr *object = this->checker.exprChecker().checkExpr(call->args[0]);
+    if (ClassDecl *target = this->checker.libraryClass("EventTarget");
         fn == "getEventListeners" && target && ClassDeclarer::classOf(object->type) &&
         ClassDeclarer::classOf(object->type)->derivesFrom(target)) {
-      auto *member = checker_.ctx_.make<MemberExpr>(call->loc(), object, "listenersOf");
-      auto *method =
-          checker_.ctx_.make<CallExpr>(call->loc(), member, std::vector<Expr *>{call->args[1]});
+      auto *member = this->checker.ctx_.make<MemberExpr>(call->loc(), object, "listenersOf");
+      auto *method = this->checker.ctx_.make<CallExpr>(call->loc(), member,
+                                                       std::vector<Expr *>{call->args[1]});
       method->type = Type::error();
       std::vector<bool> given{false};
-      checker_.emitterChecker().callLibraryMethod(
+      this->checker.emitterChecker().callLibraryMethod(
           method, member, ClassDeclarer::classOf(object->type), "listenersOf", {}, &given, false);
       return method;
     }
-    if (!object->type->isError() && !checker_.eventMaps().eventMapOf(object->type)) {
-      checker_.diags_.error(object->loc(),
-                            "'" + fn.str() + "' takes an emitter of node:events" +
-                                (fn == "getEventListeners" ? " or an EventTarget" : "") +
-                                ", but this is '" + object->type->name().str() + "'");
+    if (!object->type->isError() && !this->checker.eventMaps().eventMapOf(object->type)) {
+      this->checker.diags_.error(object->loc(),
+                                 "'" + fn.str() + "' takes an emitter of node:events" +
+                                     (fn == "getEventListeners" ? " or an EventTarget" : "") +
+                                     ", but this is '" + object->type->name().str() + "'");
       checkArgsLoosely(1);
       return call;
     }
@@ -213,12 +213,12 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
       checkArgsLoosely(1);
       return call;
     }
-    auto *member = checker_.ctx_.make<MemberExpr>(
+    auto *member = this->checker.ctx_.make<MemberExpr>(
         call->loc(), object, fn == "getEventListeners" ? "listeners" : "listenerCount");
     member->type = Type::error();
     auto *method =
-        checker_.ctx_.make<CallExpr>(call->loc(), member, std::vector<Expr *>{call->args[1]});
-    Expr *checked = checker_.emitterChecker().checkEmitterCall(
+        this->checker.ctx_.make<CallExpr>(call->loc(), member, std::vector<Expr *>{call->args[1]});
+    Expr *checked = this->checker.emitterChecker().checkEmitterCall(
         method, member, ClassDeclarer::classOf(object->type), false);
     return checked ? checked : method;
   }
@@ -234,16 +234,16 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
       });
     }
   }
-  bool rejected = checker_.callChecker().rejectSpread(call);
+  bool rejected = this->checker.callChecker().rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 2, most);
+      rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 2, most);
   if (arity.isErr()) {
-    checker_.diags_.error(loc, arity.error().message);
+    this->checker.diags_.error(loc, arity.error().message);
   }
   if (rejected || arity.isErr()) {
     return call;
   }
-  call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
+  call->args[0] = this->checker.exprChecker().checkExpr(call->args[0]);
   const Type *type = call->args[0]->type;
   if (type->isError()) {
     checkArgsLoosely(1);
@@ -251,31 +251,31 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
   }
   std::vector<bool> given(call->args.size(), false);
   given[0] = given[1] = true;
-  if (ClassDecl *target = checker_.libraryClass("EventTarget");
+  if (ClassDecl *target = this->checker.libraryClass("EventTarget");
       target && ClassDeclarer::classOf(type) && ClassDeclarer::classOf(type)->derivesFrom(target)) {
     if (fn == "on") {
-      checker_.diags_.error(call->args[0]->loc(),
-                            "'on' of node:events takes an emitter of node:events; "
-                            "the events of an EventTarget are not supported yet: "
-                            "listen with 'addEventListener', or wait for one with "
-                            "'await once(target, name)'");
+      this->checker.diags_.error(call->args[0]->loc(),
+                                 "'on' of node:events takes an emitter of node:events; "
+                                 "the events of an EventTarget are not supported yet: "
+                                 "listen with 'addEventListener', or wait for one with "
+                                 "'await once(target, name)'");
       checkArgsLoosely(1);
       return call;
     }
-    call->args[1] = checker_.argumentChecker().checkArg(call->args[1], Type::string());
+    call->args[1] = this->checker.argumentChecker().checkArg(call->args[1], Type::string());
 
-    return callLibraryFunction(call, "onceTarget", {}, given, loc);
+    return this->callLibraryFunction(call, "onceTarget", {}, given, loc);
   }
-  const Type *events = checker_.eventMaps().eventMapOf(type);
+  const Type *events = this->checker.eventMaps().eventMapOf(type);
   if (!events) {
-    checker_.diags_.error(call->args[0]->loc(), "'" + fn.str() +
-                                                    "' takes an emitter of node:events" +
-                                                    (fn == "once" ? " or an EventTarget" : "") +
-                                                    ", but this is '" + type->name().str() + "'");
+    this->checker.diags_.error(call->args[0]->loc(),
+                               "'" + fn.str() + "' takes an emitter of node:events" +
+                                   (fn == "once" ? " or an EventTarget" : "") + ", but this is '" +
+                                   type->name().str() + "'");
     checkArgsLoosely(1);
     return call;
   }
-  const Type *args = checker_.eventMaps().eventArgs(events, call->args[1], fn);
+  const Type *args = this->checker.eventMaps().eventArgs(events, call->args[1], fn);
   if (!args) {
     checkArgsLoosely(2);
     return call;
@@ -287,79 +287,83 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
   const ClassDecl *root = source && source->generic() ? source->generic() : source;
   bool ends =
       root && root->library() && root->name != "EventEmitter" && root->name != "EventEmitterBase";
-  bool runsOnce = (!checker_.currentDecl() && !checker_.awaitLoops_) ||
-              checker_.emitterChecker().ownsEmitter(call->args[0]);
+  bool runsOnce = (!this->checker.currentDecl() && !this->checker.awaitLoops_) ||
+                  this->checker.emitterChecker().ownsEmitter(call->args[0]);
   if (!ends && !timed && !runsOnce) {
     std::string name = isa<NameExpr>(call->args[0])
                            ? "'" + cast<NameExpr>(call->args[0])->name.str() + "'"
                            : "this emitter";
-    checker_.diags_.error(call->args[0]->loc(),
-                          name + " may never emit this event, so the wait may never end; give "
-                                 "it a time limit, e.g. '" +
-                              fn.str() + "(emitter, \"done\", { timeout: 5000 })' (docs/events.md, "
-                                         "section 6)");
+    this->checker.diags_.error(call->args[0]->loc(),
+                               name +
+                                   " may never emit this event, so the wait may never end; give "
+                                   "it a time limit, e.g. '" +
+                                   fn.str() +
+                                   "(emitter, \"done\", { timeout: 5000 })' (docs/events.md, "
+                                   "section 6)");
     checkArgsLoosely(2);
     return call;
   }
   if (fn == "once" && call->args.size() == 3 && !timed) {
-    checker_.diags_.error(call->args[2]->loc(),
-                          "the options of 'once' have only 'timeout', e.g. '{ timeout: 5000 }'");
+    this->checker.diags_.error(
+        call->args[2]->loc(),
+        "the options of 'once' have only 'timeout', e.g. '{ timeout: 5000 }'");
     checkArgsLoosely(2);
     return call;
   }
   if (timed) {
     const Type *failure = Type::never();
     if (errors) {
-      checker_.errorListenedMaps_.insert(events);
+      this->checker.errorListenedMaps_.insert(events);
       if (!errors->isTuple() || errors->fields().size() != 1) {
-        checker_.diags_.error(call->args[1]->loc(),
-                              "'" + fn.str() +
-                                  "' gives the error of the emitter as the Err, so its 'error' "
-                                  "event carries one value; this one carries '" +
-                                  errors->name().str() + "'");
+        this->checker.diags_.error(
+            call->args[1]->loc(), "'" + fn.str() +
+                                      "' gives the error of the emitter as the Err, so its 'error' "
+                                      "event carries one value; this one carries '" +
+                                      errors->name().str() + "'");
         return call;
       }
       failure = errors->fields().front().type;
     }
-    call->args.push_back(checker_.exprChecker().checkExpr(
-        checker_.ctx_.make<BoolLitExpr>(call->loc(), errors != nullptr)));
+    call->args.push_back(this->checker.exprChecker().checkExpr(
+        this->checker.ctx_.make<BoolLitExpr>(call->loc(), errors != nullptr)));
     given.resize(call->args.size(), false);
     given.back() = true;
-    return callLibraryFunction(call, fn.str() + "Within", {args, failure}, given, loc);
+    return this->callLibraryFunction(call, fn.str() + "Within", {args, failure}, given, loc);
   }
   if (fn == "once") {
     most = 2;
   }
   while (call->args.size() < most) {
-    call->args.push_back(checker_.ctx_.make<UndefinedExpr>(call->loc()));
+    call->args.push_back(this->checker.ctx_.make<UndefinedExpr>(call->loc()));
   }
-  call->args.push_back(checker_.exprChecker().checkExpr(
-      checker_.ctx_.make<BoolLitExpr>(call->loc(), errors != nullptr)));
+  call->args.push_back(this->checker.exprChecker().checkExpr(
+      this->checker.ctx_.make<BoolLitExpr>(call->loc(), errors != nullptr)));
   given.resize(call->args.size(), false);
   given.back() = true;
   if (!errors) {
-    return callLibraryFunction(call, fn, {args, Type::tuple({})}, given, loc);
+    return this->callLibraryFunction(call, fn, {args, Type::tuple({})}, given, loc);
   }
-  checker_.errorListenedMaps_.insert(events);
+  this->checker.errorListenedMaps_.insert(events);
   if (!errors->isTuple() || errors->fields().size() != 1) {
-    checker_.diags_.error(call->args[1]->loc(),
-                          "'" + fn.str() +
-                              "' gives the error of the emitter as the Err, so its 'error' "
-                              "event carries one value; this one carries '" +
-                              errors->name().str() + "'");
+    this->checker.diags_.error(call->args[1]->loc(),
+                               "'" + fn.str() +
+                                   "' gives the error of the emitter as the Err, so its 'error' "
+                                   "event carries one value; this one carries '" +
+                                   errors->name().str() + "'");
     return call;
   }
   std::string variant = fn.str() + "Result";
 
-  return callLibraryFunction(call, variant, {args, errors->fields().front().type}, given, loc);
+  return this->callLibraryFunction(call, variant, {args, errors->fields().front().type}, given,
+                                   loc);
 }
 
 Expr *EventTargetChecker::checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *func) {
-  if (!func->decl || checker_.libFunctions_.lookup(func->decl->name) != func->decl) {
+  if (!func->decl || this->checker.libFunctions_.lookup(func->decl->name) != func->decl) {
     return nullptr;
   }
 
-  return checkEventsFunction(call, func->decl->name, name->loc());
+  return this->checkEventsFunction(call, func->decl->name, name->loc());
 }
 
 }

@@ -24,9 +24,6 @@ private:
   static ResultArgumentsMatch extraArguments(const Expr *arg, llvm::StringRef name,
                                              llvm::StringRef method, size_t count,
                                              unsigned primary);
-  static const char *callbackArgs(llvm::StringRef method);
-  static const char *ordinal(size_t i);
-  static const char *callbackArgName(llvm::StringRef method, size_t i);
 
   Checker &checker;
 };

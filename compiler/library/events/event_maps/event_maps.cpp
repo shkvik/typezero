@@ -14,18 +14,12 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/Path.h"
-#include <cassert>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::string utf8(const std::u16string &text) {
+std::string EventMaps::utf8(const std::u16string &text) {
   std::string out;
   llvm::convertUTF16ToUTF8String(
       llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
@@ -34,16 +28,16 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-bool isServiceEvent(llvm::StringRef name) {
+bool EventMaps::isServiceEvent(llvm::StringRef name) {
   return name == "newListener" || name == "removeListener";
 }
 
-const Type *serviceEventArgs() {
+const Type *EventMaps::serviceEventArgs() {
   return Type::tuple(
       {Type::object({{"event", Type::string(), false}, {"listener", Type::unknown(), false}})});
 }
 
-std::string eventList(const Type *events) {
+std::string EventMaps::eventList(const Type *events) {
   std::string out;
   llvm::ArrayRef<Field> fields = events->fields();
   for (size_t i = 0; i < fields.size(); ++i) {
@@ -53,7 +47,7 @@ std::string eventList(const Type *events) {
   return out;
 }
 
-std::string nearestEvent(const Type *events, llvm::StringRef name) {
+std::string EventMaps::nearestEvent(const Type *events, llvm::StringRef name) {
   std::string best;
   unsigned bestDistance = ~0u;
   for (const Field &f : events->fields()) {
@@ -67,22 +61,21 @@ std::string nearestEvent(const Type *events, llvm::StringRef name) {
   return bestDistance <= std::max<size_t>(2, name.size() / 3) ? best : std::string();
 }
 
-}
-
-EventMaps::EventMaps(Checker &checker) : checker_(checker) {}
+EventMaps::EventMaps(Checker &owner)
+    : checker(owner) {}
 
 bool EventMaps::isEmitterClass(const ClassDecl *cls) const {
-  ClassDecl *base = checker_.libraryClass("EventEmitterBase");
+  ClassDecl *base = this->checker.libraryClass("EventEmitterBase");
 
   return cls && base && cls->derivesFrom(base);
 }
 
 const Type *EventMaps::eventMapOf(const Type *type) const {
-  const ClassDecl *emitter = checker_.libraryClass("EventEmitter");
+  const ClassDecl *emitter = this->checker.libraryClass("EventEmitter");
   if (!emitter) {
     return nullptr;
   }
-  const ClassDecl *streams = checker_.libraryClass("StreamEmitter");
+  const ClassDecl *streams = this->checker.libraryClass("StreamEmitter");
   for (const ClassDecl *c = ClassDeclarer::classOf(type); c; c = c->parent) {
     if (c->generic() && (c->generic() == emitter || c->generic() == streams) &&
         !c->typeArgs.empty()) {
@@ -98,7 +91,7 @@ bool EventMaps::checkEventMap(const Type *events, llvm::SMLoc loc) {
     return true;
   }
   auto bad = [&](const std::string &why) {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         loc, "the type argument of 'EventEmitter' is its event map: each event with the "
              "arguments its listeners get, as a tuple, e.g. 'EventEmitter<{ data: "
              "[chunk: string]; end: [] }>'; " +
@@ -110,7 +103,8 @@ bool EventMaps::checkEventMap(const Type *events, llvm::SMLoc loc) {
     if (args->fields().size() <= 1 && !args->tupleRest()) {
       return true;
     }
-    checker_.diags_.error(loc, event + " carries '" + args->name().str() +
+    this->checker.diags_.error(loc,
+                               event + " carries '" + args->name().str() +
                                    "', but an event carries one value: give it an object, e.g. "
                                    "'message: [message: { from: User; text: string }]' "
                                    "(docs/events.md, section 2)");
@@ -134,11 +128,11 @@ bool EventMaps::checkEventMap(const Type *events, llvm::SMLoc loc) {
     if (!f.type->isTuple()) {
       return bad("event '" + f.name + "' has '" + f.type->name().str() + "', which is not a tuple");
     }
-    if (!isServiceEvent(f.name) && !oneValue("event '" + f.name + "'", f.type)) {
+    if (!EventMaps::isServiceEvent(f.name) && !oneValue("event '" + f.name + "'", f.type)) {
       return false;
     }
-    if (isServiceEvent(f.name) && f.type != serviceEventArgs()) {
-      checker_.diags_.error(
+    if (EventMaps::isServiceEvent(f.name) && f.type != EventMaps::serviceEventArgs()) {
+      this->checker.diags_.error(
           loc, "every emitter has the event '" + f.name +
                    "', whose listeners get the name of the event and the listener, "
                    "'[change: { event: string; listener: unknown }]', but the event map gives "
@@ -155,23 +149,23 @@ const Type *EventMaps::eventArgs(const Type *events, Expr *&name, llvm::StringRe
                                  std::string *label) {
   if (events->isRecord()) {
     if (auto *lit = dyn_cast<StringLitExpr>(name); lit && label) {
-      *label = utf8(lit->value);
+      *label = EventMaps::utf8(lit->value);
     }
-    name = checker_.argumentChecker().checkArg(name, Type::string());
+    name = this->checker.argumentChecker().checkArg(name, Type::string());
     return name->type->isError() ? nullptr : events->valueType();
   }
-  name = checker_.argumentChecker().checkArg(name, Type::string());
-  std::optional<std::string> key = checker_.keyedFieldChecker().constantKey(name);
+  name = this->checker.argumentChecker().checkArg(name, Type::string());
+  std::optional<std::string> key = this->checker.keyedFieldChecker().constantKey(name);
   if (!key) {
     if (!name->type->isError()) {
-      checker_.diags_.error(name->loc(),
-                            "the name of the event must be known when compiling, as a "
-                            "string literal, e.g. '" +
-                                method.str() +
-                                "(\"data\", ...)'; to "
-                                "name events known only when the program runs, give the "
-                                "emitter a map that takes any name, e.g. 'new EventEmitter<{ "
-                                "[name: string]: [msg: string] }>()'");
+      this->checker.diags_.error(name->loc(),
+                                 "the name of the event must be known when compiling, as a "
+                                 "string literal, e.g. '" +
+                                     method.str() +
+                                     "(\"data\", ...)'; to "
+                                     "name events known only when the program runs, give the "
+                                     "emitter a map that takes any name, e.g. 'new EventEmitter<{ "
+                                     "[name: string]: [msg: string] }>()'");
     }
     return nullptr;
   }
@@ -179,13 +173,13 @@ const Type *EventMaps::eventArgs(const Type *events, Expr *&name, llvm::StringRe
     *label = *key;
   }
   llvm::SMLoc loc = name->loc();
-  if (isServiceEvent(*key)) {
-    return serviceEventArgs();
+  if (EventMaps::isServiceEvent(*key)) {
+    return EventMaps::serviceEventArgs();
   }
-  if (auto open = checker_.openMaps_.find(events); open != checker_.openMaps_.end()) {
-    for (const EventInference::Event &e : checker_.inference_->maps[open->second]) {
+  if (auto open = this->checker.openMaps_.find(events); open != this->checker.openMaps_.end()) {
+    for (const EventInference::Event &e : this->checker.inference_->maps[open->second]) {
       if (e.name == *key) {
-        return checker_.eventMapInference().fromPortable(e.args, loc);
+        return this->checker.eventMapInference().fromPortable(e.args, loc);
       }
     }
     return nullptr;
@@ -194,27 +188,27 @@ const Type *EventMaps::eventArgs(const Type *events, Expr *&name, llvm::StringRe
     return f->type;
   }
   std::string message;
-  if (checker_.inferredMaps_.count(events)) {
+  if (this->checker.inferredMaps_.count(events)) {
     message = "no code of the program emits '" + *key + "' on this emitter";
     if (events->fields().empty()) {
       message += ", nor any other event: an emitter without an event map has the events that "
                  "emit() calls give it, e.g. 'bus.emit(\"" +
                  *key + "\", ...)'";
     } else {
-      message += "; it emits " + eventList(events);
+      message += "; it emits " + EventMaps::eventList(events);
     }
   } else {
     message = "the emitter has no event '" + *key + "'";
     if (events->fields().empty()) {
       message += ": its event map has none";
     } else {
-      message += ": its event map has " + eventList(events);
+      message += ": its event map has " + EventMaps::eventList(events);
     }
   }
-  if (std::string near = nearestEvent(events, *key); !near.empty()) {
+  if (std::string near = EventMaps::nearestEvent(events, *key); !near.empty()) {
     message += "; did you mean '" + near + "'?";
   }
-  checker_.diags_.error(loc, message);
+  this->checker.diags_.error(loc, message);
 
   return nullptr;
 }
@@ -234,8 +228,8 @@ const Type *EventMaps::listenerType(const Type *args, const Type *ret) {
 
 Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef event,
                                const Type *receiver, Checker::ListenerKind &kind) {
-  const Type *sync = listenerType(args, Type::voidTy());
-  const Type *async = listenerType(args, Type::promise(Type::voidTy()));
+  const Type *sync = EventMaps::listenerType(args, Type::voidTy());
+  const Type *async = EventMaps::listenerType(args, Type::promise(Type::voidTy()));
   kind = Checker::ListenerKind::Plain;
   auto takesThis = [&](const Type *self, llvm::SMLoc loc) {
     if (self->isError()) {
@@ -244,9 +238,9 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
     if (self->isUnknown() || receiver->isSubtypeOf(self)) {
       return true;
     }
-    checker_.diags_.error(loc, "the listener takes 'this' of type '" + self->name() +
-                                   "', but it gets the emitter, of type '" + receiver->name() +
-                                   "'");
+    this->checker.diags_.error(loc, "the listener takes 'this' of type '" + self->name() +
+                                        "', but it gets the emitter, of type '" + receiver->name() +
+                                        "'");
 
     return false;
   };
@@ -259,48 +253,48 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
   if (auto *fe = dyn_cast<FunctionExpr>(arg)) {
     FunctionDecl *fn = fe->fn;
     if (!fn->params.empty() && fn->params[0].name == "this" && fn->params[0].type) {
-      const Type *self = checker_.typeResolver().resolveType(*fn->params[0].type, false);
+      const Type *self = this->checker.typeResolver().resolveType(*fn->params[0].type, false);
       if (!takesThis(self, fn->params[0].loc)) {
-        arg = checker_.exprChecker().checkExpr(arg);
+        arg = this->checker.exprChecker().checkExpr(arg);
         return arg;
       }
       if (fn->isAsync) {
-        checker_.diags_.error(fe->loc(),
-                              "an async listener cannot take 'this'; use the emitter by name");
-        arg = checker_.exprChecker().checkExpr(arg);
+        this->checker.diags_.error(fe->loc(),
+                                   "an async listener cannot take 'this'; use the emitter by name");
+        arg = this->checker.exprChecker().checkExpr(arg);
         return arg;
       }
       kind = Checker::ListenerKind::This;
       const Type *wanted = withThis(self);
       Checker::Signature sig = ClosureChecker::signatureOf(wanted);
       sig.voidResult = true;
-      arg = checker_.closureChecker().checkFunctionExpr(fe, &sig);
+      arg = this->checker.closureChecker().checkFunctionExpr(fe, &sig);
       if (arg->type->isError()) {
         return arg;
       }
-      return checker_.typeRelations().convert(checker_.typeRelations().coerce(arg, wanted),
-                                              Type::unknown());
+      return this->checker.typeRelations().convert(
+          this->checker.typeRelations().coerce(arg, wanted), Type::unknown());
     }
     if (fn->isAsync) {
       kind = Checker::ListenerKind::Async;
     }
     Checker::Signature sig = ClosureChecker::signatureOf(fn->isAsync ? async : sync);
     sig.voidResult = !fn->isAsync;
-    arg = checker_.closureChecker().checkFunctionExpr(fe, &sig);
+    arg = this->checker.closureChecker().checkFunctionExpr(fe, &sig);
     if (arg->type->isError()) {
       return arg;
     }
-    return checker_.typeRelations().convert(
-        checker_.typeRelations().coerce(arg, fn->isAsync ? async : sync), Type::unknown());
+    return this->checker.typeRelations().convert(
+        this->checker.typeRelations().coerce(arg, fn->isAsync ? async : sync), Type::unknown());
   }
-  arg = checker_.exprChecker().checkExpr(arg);
+  arg = this->checker.exprChecker().checkExpr(arg);
   const Type *type = arg->type;
   if (type->isError()) {
     return arg;
   }
   if (!type->isFunction()) {
-    checker_.diags_.error(arg->loc(),
-                          "a listener is a function, but this is '" + type->name() + "'");
+    this->checker.diags_.error(arg->loc(),
+                               "a listener is a function, but this is '" + type->name() + "'");
     return arg;
   }
   if (type->hasThis()) {
@@ -309,11 +303,11 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
     }
     kind = Checker::ListenerKind::This;
     if (type == withThis(type->params()[0])) {
-      return checker_.typeRelations().convert(arg, Type::unknown());
+      return this->checker.typeRelations().convert(arg, Type::unknown());
     }
-    checker_.diags_.error(arg->loc(), "the listeners of '" + event.str() + "' get '" +
-                                          args->name().str() + "', but this function is '" +
-                                          type->name().str() + "'");
+    this->checker.diags_.error(arg->loc(), "the listeners of '" + event.str() + "' get '" +
+                                               args->name().str() + "', but this function is '" +
+                                               type->name().str() + "'");
     return arg;
   }
   bool isAsync = type->ret()->isPromise();
@@ -322,23 +316,23 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
   }
   const Type *wanted = isAsync ? async : sync;
   if (type == wanted) {
-    return checker_.typeRelations().convert(arg, Type::unknown());
+    return this->checker.typeRelations().convert(arg, Type::unknown());
   }
   if (isAsync && type->ret() != async->ret()) {
-    checker_.diags_.error(arg->loc(),
-                          "an async listener returns 'Promise<void>', but this one returns '" +
-                              type->ret()->name() +
-                              "', which the emitter would drop; wrap it, "
-                              "e.g. 'async (...) => { await f(...) }'");
+    this->checker.diags_.error(arg->loc(),
+                               "an async listener returns 'Promise<void>', but this one returns '" +
+                                   type->ret()->name() +
+                                   "', which the emitter would drop; wrap it, "
+                                   "e.g. 'async (...) => { await f(...) }'");
     return arg;
   }
-  if (Expr *adapted = checker_.functionValueChecker().adaptFunction(arg, wanted)) {
-    return checker_.typeRelations().convert(adapted, Type::unknown());
+  if (Expr *adapted = this->checker.functionValueChecker().adaptFunction(arg, wanted)) {
+    return this->checker.typeRelations().convert(adapted, Type::unknown());
   }
-  checker_.diags_.error(arg->loc(), "the listeners of '" + event.str() + "' get '" +
-                                        args->name().str() + "', but this function is '" +
-                                        type->name().str() +
-                                        "'; pass an arrow that calls it with what it needs");
+  this->checker.diags_.error(arg->loc(), "the listeners of '" + event.str() + "' get '" +
+                                             args->name().str() + "', but this function is '" +
+                                             type->name().str() +
+                                             "'; pass an arrow that calls it with what it needs");
 
   return arg;
 }
@@ -347,7 +341,8 @@ const Type *EventMaps::createdType(const NewExpr *create) {
   if (!create->member.empty()) {
     return nullptr;
   }
-  auto *cls = llvm::dyn_cast_or_null<ClassDecl>(checker_.typeDeclarer().lookupType(create->name));
+  auto *cls =
+      llvm::dyn_cast_or_null<ClassDecl>(this->checker.typeDeclarer().lookupType(create->name));
   if (!cls) {
     return nullptr;
   }
@@ -356,14 +351,14 @@ const Type *EventMaps::createdType(const NewExpr *create) {
   }
   std::vector<const Type *> args;
   for (const TypeRef &ref : create->typeArgs) {
-    args.push_back(checker_.typeResolver().resolveType(ref, false));
+    args.push_back(this->checker.typeResolver().resolveType(ref, false));
     if (args.back()->isError()) {
       return nullptr;
     }
   }
   if (args.empty() && cls->library() && cls->name == "EventEmitter") {
-    if (const Type *events = checker_.eventMapInference().inferredEventMap(
-            "new " + checker_.eventMapInference().placeOf(create->loc()))) {
+    if (const Type *events = this->checker.eventMapInference().inferredEventMap(
+            "new " + this->checker.eventMapInference().placeOf(create->loc()))) {
       args.push_back(events);
     }
   }
@@ -371,14 +366,15 @@ const Type *EventMaps::createdType(const NewExpr *create) {
     return nullptr;
   }
   GenericClassInstantiator::ResultClassMade made =
-      checker_.genericClassInstantiator().instantiateClass(cls, std::move(args), create->loc());
+      this->checker.genericClassInstantiator().instantiateClass(cls, std::move(args),
+                                                                create->loc());
   if (made.isErr() &&
       made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
     llvm::SMLoc at =
         made.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
             ? cls->loc()
             : create->loc();
-    checker_.diags_.error(at, made.error().message);
+    this->checker.diags_.error(at, made.error().message);
   }
 
   return made.isOk() ? made.value()->type : nullptr;

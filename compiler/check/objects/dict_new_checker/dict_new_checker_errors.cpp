@@ -72,4 +72,8 @@ std::string ErrorTextDictElements::undefined(llvm::StringRef name) {
       .str();
 }
 
+std::string ErrorTextDictSource::newName(llvm::StringRef name) {
+  return (llvm::Twine("'new ") + name + "'").str();
+}
+
 }

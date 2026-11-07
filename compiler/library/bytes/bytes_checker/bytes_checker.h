@@ -6,7 +6,7 @@ namespace tz {
 
 class BytesChecker {
 public:
-  explicit BytesChecker(Checker &checker);
+  explicit BytesChecker(Checker &owner);
 
   static const Type *bytesTypeNamed(llvm::StringRef name);
   Expr *checkBufferEncoding(Expr *arg);
@@ -19,7 +19,15 @@ public:
   Expr *bytesToString(Expr *expr);
 
 private:
-  Checker &checker_;
+  static std::string utf8(const std::u16string &text);
+  static std::optional<std::u16string> literalText(const Expr *e);
+  static std::string rangeText(int64_t lo, int64_t hi);
+  static ValueRange exact(int64_t v);
+  static bool known(const ValueRange &r);
+  static int64_t allOnes(int64_t v);
+  static int64_t floorShift(int64_t v, int64_t n);
+
+  Checker &checker;
 };
 
 }

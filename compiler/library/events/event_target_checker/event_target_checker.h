@@ -6,7 +6,7 @@ namespace tz {
 
 class EventTargetChecker {
 public:
-  explicit EventTargetChecker(Checker &checker);
+  explicit EventTargetChecker(Checker &owner);
 
   Expr *checkEventTargetCall(CallExpr *call, MemberExpr *member, ClassDecl *cls);
   Expr *checkEventsFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
@@ -21,7 +21,7 @@ public:
 private:
   Expr *callLibrarySymbol(CallExpr *call, FuncSymbol *sym, llvm::ArrayRef<const Type *> bound,
                           const std::vector<bool> &given, llvm::SMLoc loc);
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

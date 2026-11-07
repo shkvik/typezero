@@ -8,20 +8,19 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/SaveAndRestore.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-RuntimeObjectChecker::RuntimeObjectChecker(Checker &checker) : checker_(checker) {}
+RuntimeObjectChecker::RuntimeObjectChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *RuntimeObjectChecker::checkRuntimeMember(MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
-  checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
-                                           type->name() + "'" + runtimeMembers(type));
+  this->checker.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
+                                                type->name() + "'" +
+                                                RuntimeObjectChecker::runtimeMembers(type));
 
   return member;
 }
@@ -47,12 +46,12 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
   call->type = Type::error();
   auto loosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
 
     return call;
   };
-  if (checker_.callChecker().rejectSpread(call)) {
+  if (this->checker.callChecker().rejectSpread(call)) {
     return call;
   }
   static const llvm::StringLiteral events[] = {"on",
@@ -74,9 +73,10 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
   case Type::Runtime::ReadlinePromises: {
     bool promises = type->runtimeKind() == Type::Runtime::ReadlinePromises;
     if (name == "close") {
-      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+      ArgumentChecker::ResultArityMatches arity =
+          this->checker.argumentChecker().checkArity(call, 0, 0);
       if (arity.isErr()) {
-        checker_.diags_.error(member->loc(), arity.error().message);
+        this->checker.diags_.error(member->loc(), arity.error().message);
         return call;
       }
       call->target = BuiltinCall{.builtin = Builtin::RlClose};
@@ -85,30 +85,30 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
     }
     if (name == "question") {
       ArgumentChecker::ResultArityMatches arity =
-          checker_.argumentChecker().checkArity(call, 1, promises ? 1 : 3);
+          this->checker.argumentChecker().checkArity(call, 1, promises ? 1 : 3);
       if (arity.isErr()) {
-        checker_.diags_.error(member->loc(), arity.error().message);
+        this->checker.diags_.error(member->loc(), arity.error().message);
         return call;
       }
-      Expr *query = checker_.argumentChecker().checkArg(call->args[0], Type::string());
+      Expr *query = this->checker.argumentChecker().checkArg(call->args[0], Type::string());
       if (promises) {
         call->args = {query};
         call->target = BuiltinCall{.builtin = Builtin::RlQuestion};
         call->type = Type::promise(
-            Type::result(Type::string(), checker_.prelude().builtinType("QuestionError")));
+            Type::result(Type::string(), this->checker.prelude().builtinType("QuestionError")));
         return call;
       }
       if (call->args.size() < 2) {
-        checker_.diags_.error(member->loc(),
-                              "'question' of node:readline takes a callback for the answer, "
-                              "'rl.question(query, answer => ...)'; for a Promise, import "
-                              "'createInterface' from \"node:readline/promises\"");
+        this->checker.diags_.error(member->loc(),
+                                   "'question' of node:readline takes a callback for the answer, "
+                                   "'rl.question(query, answer => ...)'; for a Promise, import "
+                                   "'createInterface' from \"node:readline/promises\"");
         return call;
       }
       if (call->args.size() == 3) {
-        checker_.diags_.error(call->args[1]->loc(),
-                              "the options of 'question' with a callback are not "
-                              "supported yet");
+        this->checker.diags_.error(call->args[1]->loc(),
+                                   "the options of 'question' with a callback are not "
+                                   "supported yet");
         return loosely();
       }
       Checker::Signature sig;
@@ -117,7 +117,7 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
       sig.voidResult = true;
       sig.asyncVoid = true;
       Expr *callback =
-          checker_.callbackChecker().checkFunctionArg(call->args[1], sig, 1, "question");
+          this->checker.callbackChecker().checkFunctionArg(call->args[1], sig, 1, "question");
       if (!callback->type->isFunction()) {
         return call;
       }
@@ -130,33 +130,35 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
       return call;
     }
     if (llvm::is_contained(events, name)) {
-      checker_.diags_.error(member->loc(),
-                            "'" + name +
-                                "' of readline is not supported yet: its Interface is no "
-                                "EventEmitter yet (docs/events.md); read the lines with "
-                                "'for await (const line of rl)' or ask with 'question()'");
+      this->checker.diags_.error(member->loc(),
+                                 "'" + name +
+                                     "' of readline is not supported yet: its Interface is no "
+                                     "EventEmitter yet (docs/events.md); read the lines with "
+                                     "'for await (const line of rl)' or ask with 'question()'");
       return loosely();
     }
     break;
   }
   case Type::Runtime::AsyncIterator:
     if (name == "throw") {
-      checker_.diags_.error(member->loc(), "an iterator has no 'throw()' in tz: an error is a "
-                                           "value, not something thrown into a generator");
+      this->checker.diags_.error(member->loc(), "an iterator has no 'throw()' in tz: an error is a "
+                                                "value, not something thrown into a generator");
       return loosely();
     }
     if (name == "next" || name == "return") {
-      checker_.diags_.error(member->loc(), "'" + name +
-                                               "()' of an async iterator is not supported yet; "
-                                               "iterate it with 'for await'");
+      this->checker.diags_.error(member->loc(),
+                                 "'" + name +
+                                     "()' of an async iterator is not supported yet; "
+                                     "iterate it with 'for await'");
       return loosely();
     }
     break;
   default:
     break;
   }
-  checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
-                                           type->name() + "'" + runtimeMembers(type));
+  this->checker.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
+                                                type->name() + "'" +
+                                                RuntimeObjectChecker::runtimeMembers(type));
 
   return loosely();
 }
@@ -164,8 +166,9 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
 const Type *RuntimeObjectChecker::checkRuntimeTarget(MemberExpr *member, bool compound) {
   (void)compound;
   const Type *type = member->object->type;
-  checker_.diags_.error(member->loc(), "property '" + member->name + "' of type '" + type->name() +
-                                           "' cannot be assigned to" + runtimeMembers(type));
+  this->checker.diags_.error(member->loc(), "property '" + member->name + "' of type '" +
+                                                type->name() + "' cannot be assigned to" +
+                                                RuntimeObjectChecker::runtimeMembers(type));
 
   return Type::error();
 }

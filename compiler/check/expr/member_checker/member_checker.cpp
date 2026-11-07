@@ -41,10 +41,11 @@ namespace tz {
 MemberChecker::MemberChecker(Checker &owner)
     : checker(owner) {}
 
-Expr *MemberChecker::checkMember(MemberExpr *member, const Type *expected) {
+MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *member,
+                                                               const Type *expected) {
   member->type = Type::error();
   if (Expr *part = this->checker.argListChecker().listPart(member)) {
-    return part;
+    return ok(part);
   }
   if (auto *name = dyn_cast<NameExpr>(member->object)) {
     ScopeEntry entry = this->checker.scopes().lookup(name->name);
@@ -52,74 +53,86 @@ Expr *MemberChecker::checkMember(MemberExpr *member, const Type *expected) {
       TypeDeclarer::ResultEnumMemberRead read =
           this->checker.typeDeclarer().checkEnumMember(entry.enumDecl(), member, expected);
       if (read.isOk()) {
-        return read.value();
+        return ok(read.value());
       }
-      this->checker.diags_.error(member->loc(), read.error().message);
       member->type = Type::error();
-      return member;
+      return err(MemberCheckerCheckMemberError{
+          .code = MemberCheckerCheckMemberErrorCode::ENUM_MEMBER,
+          .message = read.error().message,
+      });
     }
     if (entry.cls()) {
-      return this->checker.staticChecker().checkStaticMember(member, entry.cls(), expected);
+      Expr *read = this->checker.staticChecker().checkStaticMember(member, entry.cls(), expected);
+
+      return ok(read);
     }
   }
   if (Expr *node = this->checker.builtinModuleChecker().checkNodeMember(member)) {
-    return node;
+    return ok(node);
   }
   if (Expr *io = this->checker.processChecker().checkProcessMember(member)) {
-    return io;
+    return ok(io);
   }
   if (this->checker.callChecker().isGlobalName(member->object, "decimal")) {
-    this->checker.diags_.error(member->loc(),
-                               "'decimal." + member->name +
-                                   "' can only be called, e.g. 'decimal.max(a, b)'; decimal "
-                                   "has the functions max, min and sum");
-    return member;
+    std::string message = ErrorTextMemberRead::decimal(member->name);
+
+    return err(MemberCheckerCheckMemberError{
+        .code = MemberCheckerCheckMemberErrorCode::DECIMAL_FUNCTION,
+        .message = message,
+    });
   }
   if (this->checker.callChecker().isGlobalName(member->object, "RegExp")) {
-    return this->checker.regexChecker().checkRegExpStaticMember(member);
+    Expr *regex = this->checker.regexChecker().checkRegExpStaticMember(member);
+
+    return ok(regex);
   }
   if (this->checker.callChecker().isGlobalName(member->object, "crypto")) {
-    return this->checker.cryptoChecker().checkWebCryptoMember(member);
+    Expr *crypto = this->checker.cryptoChecker().checkWebCryptoMember(member);
+
+    return ok(crypto);
   }
   if (this->checker.callChecker().isGlobalName(member->object, "globalThis")) {
-    this->checker.diags_.error(member->loc(),
-                               member->name == "crypto"
-                                   ? std::string("'globalThis.crypto' is used as "
-                                                 "'globalThis.crypto.subtle' and the like")
-                                   : "'globalThis." + member->name +
-                                         "' is not supported: tz has only 'globalThis.crypto'; "
-                                         "write '" +
-                                         member->name + "'");
-    return member;
+    std::string message = member->name == "crypto" ? ErrorTextMemberRead::crypto()
+                                                   : ErrorTextMemberRead::globalThis(member->name);
+
+    return err(MemberCheckerCheckMemberError{
+        .code = MemberCheckerCheckMemberErrorCode::GLOBAL_THIS,
+        .message = message,
+    });
   }
   if (Expr *bytes = this->checker.bytesChecker().checkBytesStaticMember(member)) {
-    return bytes;
+    return ok(bytes);
   }
   if (this->checker.callChecker().isGlobalName(member->object, "Intl")) {
-    this->checker.diags_.error(member->loc(),
-                               "'Intl." + member->name +
-                                   "' can only be called or made with 'new', e.g. 'new "
-                                   "Intl.DateTimeFormat(\"ru\")'");
-    return member;
+    std::string message = ErrorTextMemberRead::intl(member->name);
+
+    return err(MemberCheckerCheckMemberError{
+        .code = MemberCheckerCheckMemberErrorCode::INTL_VALUE,
+        .message = message,
+    });
   }
   for (llvm::StringRef global : {"console", "Math", "String", "Number"}) {
     if (this->checker.callChecker().isGlobalName(member->object, global)) {
       if (Expr *constant =
               this->checker.constantFolder().globalConstant(global, member->name, member->loc())) {
-        return constant;
+        return ok(constant);
       }
       static const llvm::StringLiteral numberFunctions[] = {"parseInt", "parseFloat", "isInteger",
                                                             "isSafeInteger"};
       if (global == "Number" && !llvm::is_contained(numberFunctions, member->name)) {
-        this->checker.diags_.error(member->loc(),
-                                   "property '" + member->name + "' does not exist on 'Number'");
-        return member;
+        std::string message = ErrorTextMemberRead::numberProp(member->name);
+
+        return err(MemberCheckerCheckMemberError{
+            .code = MemberCheckerCheckMemberErrorCode::NUMBER_PROPERTY,
+            .message = message,
+        });
       }
-      this->checker.diags_.error(member->loc(),
-                                 "'" + global + "." + member->name +
-                                     "' can be used as a value only where a function type is "
-                                     "expected, e.g. as a callback");
-      return member;
+      std::string message = ErrorTextMemberRead::asValue(global, member->name);
+
+      return err(MemberCheckerCheckMemberError{
+          .code = MemberCheckerCheckMemberErrorCode::GLOBAL_FUNCTION,
+          .message = message,
+      });
     }
   }
   auto *object = dyn_cast<NameExpr>(member->object);
@@ -127,12 +140,12 @@ Expr *MemberChecker::checkMember(MemberExpr *member, const Type *expected) {
     this->checker.thisMember_ = member->name;
   }
   if (object && object->name == "super") {
-    this->checker.diags_.error(member->loc(), "'super." + member->name +
-                                                  "' can only be called, 'super." + member->name +
-                                                  "(...)'; to read the field or the method, use "
-                                                  "'this." +
-                                                  member->name + "'");
-    return member;
+    std::string message = ErrorTextMemberRead::superField(member->name);
+
+    return err(MemberCheckerCheckMemberError{
+        .code = MemberCheckerCheckMemberErrorCode::SUPER_MEMBER,
+        .message = message,
+    });
   }
   member->object = this->checker.genericChecker().apparent(
       this->checker.exprChecker().checkExpr(member->object));
@@ -142,114 +155,187 @@ Expr *MemberChecker::checkMember(MemberExpr *member, const Type *expected) {
   }
   const Type *type = member->object->type;
   if (type->isError()) {
-    return member;
+    return ok(member);
   }
   if (type->nonOptional()->isJson()) {
-    return this->checker.jsonChecker().checkJsonMember(member);
+    Expr *json = this->checker.jsonChecker().checkJsonMember(member);
+
+    return ok(json);
   }
   if (type->isUnknown() || type->isAnyObject() || type->isClassRef()) {
     UnknownChecker::ResultMemberChecked checked =
         this->checker.unknownChecker().checkUnknownMember(member);
     if (checked.isOk()) {
-      return checked.value();
+      return ok(checked.value());
     }
-    llvm::SMLoc at = member->loc();
-    switch (checked.error().code) {
-      case UnknownCheckerCheckUnknownMemberErrorCode::NO_CONSTRUCTOR:
-        break;
-      case UnknownCheckerCheckUnknownMemberErrorCode::NOT_NARROWED:
-        at = member->object->loc();
-        break;
-    }
-    this->checker.diags_.error(at, checked.error().message);
-    return member;
+    bool narrow = checked.error().code == UnknownCheckerCheckUnknownMemberErrorCode::NOT_NARROWED;
+
+    return err(MemberCheckerCheckMemberError{
+        .code = narrow ? MemberCheckerCheckMemberErrorCode::UNKNOWN_NOT_NARROWED
+                       : MemberCheckerCheckMemberErrorCode::UNKNOWN_MEMBER,
+        .message = checked.error().message,
+    });
   }
   if (type->isUnion()) {
     const Type *common = this->checker.unionChecker().commonBaseWith(type, member->name);
     if (!common) {
-      return this->checker.unionChecker().checkUnionMember(member);
+      UnionChecker::ResultUnionMemberTyped fieldRead =
+          this->checker.unionChecker().checkUnionMember(member);
+      if (fieldRead.isOk()) {
+        return ok(fieldRead.value());
+      }
+      member->type = Type::error();
+      return err(MemberCheckerCheckMemberError{
+          .code = MemberCheckerCheckMemberErrorCode::UNION_MEMBER,
+          .message = fieldRead.error().message,
+      });
     }
     member->object = this->checker.typeRelations().convert(member->object, common);
     type = common;
   }
   if (type->isResult()) {
-    return this->checker.resultChecker().checkResultMember(member);
+    Expr *result = this->checker.resultChecker().checkResultMember(member);
+
+    return ok(result);
   }
   if (type->isTuple()) {
     TupleChecker::ResultTupleMember tupleMember =
         this->checker.tupleChecker().checkTupleMember(member);
     if (tupleMember.isErr()) {
-      this->checker.diags_.error(member->loc(), tupleMember.error().message);
-      return member;
+      return err(MemberCheckerCheckMemberError{
+          .code = MemberCheckerCheckMemberErrorCode::TUPLE_MEMBER,
+          .message = tupleMember.error().message,
+      });
     }
-    return tupleMember.value();
+    return ok(tupleMember.value());
   }
   if (type->isClass()) {
-    return this->checker.classMemberChecker().checkClassMember(member, expected);
+    Expr *field = this->checker.classMemberChecker().checkClassMember(member, expected);
+
+    return ok(field);
   }
   if (type->isRegExp()) {
-    return this->checker.regexChecker().checkRegexMember(member);
+    Expr *regex = this->checker.regexChecker().checkRegexMember(member);
+
+    return ok(regex);
   }
   if (type->isMatch()) {
-    return this->checker.matchChecker().checkMatchMember(member);
+    Expr *match = this->checker.matchChecker().checkMatchMember(member);
+
+    return ok(match);
   }
   if (type->isDate()) {
-    return this->checker.dateChecker().checkDateMember(member);
+    Expr *date = this->checker.dateChecker().checkDateMember(member);
+
+    return ok(date);
   }
   if (type->isBytes()) {
-    return this->checker.bytesChecker().checkBytesMember(member);
+    Expr *bytes = this->checker.bytesChecker().checkBytesMember(member);
+
+    return ok(bytes);
   }
   if (type->isCrypto()) {
-    return this->checker.cryptoChecker().checkCryptoMember(member);
+    Expr *crypto = this->checker.cryptoChecker().checkCryptoMember(member);
+
+    return ok(crypto);
   }
   if (type->isIntl()) {
-    return this->checker.intlChecker().checkIntlMember(member, expected);
+    Expr *intl = this->checker.intlChecker().checkIntlMember(member, expected);
+
+    return ok(intl);
   }
   if (type->isWeakRef()) {
-    this->checker.diags_.error(member->loc(), "property '" + member->name +
-                                                  "' of a WeakRef can only be " +
-                                                  "called: 'deref()'");
-    return member;
+    std::string message = ErrorTextMemberRead::weakRef(member->name);
+
+    return err(MemberCheckerCheckMemberError{
+        .code = MemberCheckerCheckMemberErrorCode::WEAK_REF_MEMBER,
+        .message = message,
+    });
   }
   if (type->isDict()) {
-    return this->checker.dictChecker().checkDictMember(member);
+    DictChecker::ResultDictMemberAccess dict = this->checker.dictChecker().checkDictMember(member);
+    if (dict.isErr()) {
+      return err(MemberCheckerCheckMemberError{
+          .code = MemberCheckerCheckMemberErrorCode::DICT_MEMBER,
+          .message = dict.error().message,
+      });
+    }
+    return ok(dict.value());
   }
   if (type->isRuntimeObject()) {
-    return this->checker.runtimeObjectChecker().checkRuntimeMember(member);
+    Expr *runtime = this->checker.runtimeObjectChecker().checkRuntimeMember(member);
+
+    return ok(runtime);
   }
   if (type->isObject() && type->overload(member->name)) {
-    return this->checker.overloadResolver().checkOverloadMember(member, expected);
+    Expr *overload = this->checker.overloadResolver().checkOverloadMember(member, expected);
+
+    return ok(overload);
   }
   if (type->isObject()) {
-    return this->checker.objectChecker().checkField(member);
+    ObjectChecker::ResultObjectFieldValue field = this->checker.objectChecker().checkField(member);
+    if (field.isErr()) {
+      return err(MemberCheckerCheckMemberError{
+          .code = MemberCheckerCheckMemberErrorCode::OBJECT_FIELD,
+          .message = field.error().message,
+      });
+    }
+    return ok(field.value());
   }
   if ((type->isString() || type->isArray() || type->isListParam()) && member->name == "length") {
     member->type = Type::intTy();
-    return member;
+    return ok(member);
   }
   if (type->isInteger() && type->isWrapping() && member->name == "value") {
-    return this->checker.typeRelations().convert(member->object,
-                                                 Type::integer(type->bitWidth(), true));
+    Expr *value = this->checker.typeRelations().convert(member->object,
+                                                        Type::integer(type->bitWidth(), true));
+
+    return ok(value);
   }
   if (type->isOptional()) {
-    this->checker.diags_.error(member->object->loc(),
-                               "the value may be undefined; check it before reading '" +
-                                   member->name + "'");
-  } else if (type == Type::array(Type::string()) && member->name == "raw") {
-    this->checker.diags_.error(member->loc(),
-                               "'raw' is not supported: a tag gets the texts of its template as a "
-                               "plain 'string[]', with the escapes already applied");
-  } else if (type->isArray() || type->isString() || type->isIterator()) {
-    this->checker.diags_.error(member->loc(), "property '" + member->name +
-                                                  "' does not exist on type '" + type->name() +
-                                                  "'; methods must be called");
-  } else {
-    this->checker.diags_.error(member->loc(), "property '" + member->name +
-                                                  "' does not exist on type '" + type->name() +
-                                                  "'");
+    std::string message = ErrorTextMemberRead::undefined(member->name);
+
+    return err(MemberCheckerCheckMemberError{
+        .code = MemberCheckerCheckMemberErrorCode::MAY_BE_UNDEFINED,
+        .message = message,
+    });
+  }
+  if (type == Type::array(Type::string()) && member->name == "raw") {
+    std::string message = ErrorTextMemberRead::raw();
+
+    return err(MemberCheckerCheckMemberError{
+        .code = MemberCheckerCheckMemberErrorCode::RAW_TEXTS,
+        .message = message,
+    });
+  }
+  if (type->isArray() || type->isString() || type->isIterator()) {
+    std::string message = ErrorTextMemberRead::mustCall(member->name, type->name());
+
+    return err(MemberCheckerCheckMemberError{
+        .code = MemberCheckerCheckMemberErrorCode::METHOD_NOT_CALLED,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextMemberRead::noProperty(member->name, type->name());
+
+  return err(MemberCheckerCheckMemberError{
+      .code = MemberCheckerCheckMemberErrorCode::NO_SUCH_PROPERTY,
+      .message = message,
+  });
+}
+
+MemberChecker::ResultIndexIsInteger MemberChecker::positionType(const Type *type) {
+  if (!type->isInteger()) {
+    std::string message =
+        ErrorTextPosition::notInt(type->name(), type->isFloat(), type->isOptional());
+
+    return err(MemberCheckerPositionTypeError{
+        .code = MemberCheckerPositionTypeErrorCode::NOT_AN_INTEGER,
+        .message = message,
+    });
   }
 
-  return member;
+  return ok(type);
 }
 
 Expr *MemberChecker::checkPosition(Expr *expr) {
@@ -259,50 +345,48 @@ Expr *MemberChecker::checkPosition(Expr *expr) {
   if (type->isError()) {
     return expr;
   }
-  if (!type->isInteger()) {
-    std::string message =
-        "an index or position must be an integer, found '" + type->name().str() + "'";
-    if (type->isFloat()) {
-      message += "; round it with Math.floor(x) or drop the fraction with 'x | 0'";
-    } else if (type->isOptional()) {
-      message += "; the value may be undefined: check it first or give a default with '??'";
-    }
-    this->checker.diags_.error(expr->loc(), message);
+  ResultIndexIsInteger integer = MemberChecker::positionType(type);
+  if (integer.isErr()) {
+    this->checker.diags_.error(expr->loc(), integer.error().message);
     return expr;
   }
 
   return this->checker.typeRelations().convert(expr, Type::intTy());
 }
 
-Expr *MemberChecker::checkIndex(IndexExpr *index) {
+MemberChecker::ResultIndexedElement MemberChecker::checkIndex(IndexExpr *index) {
   if (Expr *part = this->checker.argListChecker().listPart(index)) {
-    return part;
+    return ok(part);
   }
   if (auto *name = dyn_cast<NameExpr>(index->object)) {
     if (EnumDecl *decl = this->checker.scopes().lookup(name->name).enumDecl()) {
       TypeDeclarer::ResultEnumIndexValue read =
           this->checker.typeDeclarer().checkEnumIndex(decl, index);
       if (read.isOk()) {
-        return read.value();
+        return ok(read.value());
       }
-      llvm::SMLoc at;
+      MemberCheckerCheckIndexErrorCode code = MemberCheckerCheckIndexErrorCode::ALREADY_REPORTED;
       switch (read.error().code) {
         case TypeDeclarerCheckEnumIndexErrorCode::ALREADY_REPORTED:
-          return index;
+          code = MemberCheckerCheckIndexErrorCode::ALREADY_REPORTED;
+          break;
         case TypeDeclarerCheckEnumIndexErrorCode::STRING_ENUM:
-          at = index->loc();
+          code = MemberCheckerCheckIndexErrorCode::ENUM_STRING;
           break;
         case TypeDeclarerCheckEnumIndexErrorCode::NOT_AN_INTEGER:
-          at = index->index->loc();
+          code = MemberCheckerCheckIndexErrorCode::ENUM_NOT_INTEGER;
           break;
       }
-      this->checker.diags_.error(at, read.error().message);
-      return index;
+
+      return err(MemberCheckerCheckIndexError{
+          .code = code,
+          .message = read.error().message,
+      });
     }
   }
   index->object = this->checker.builtinModuleChecker().processAlias(index->object);
   if (Expr *variable = this->checker.processChecker().checkProcessEnvIndex(index)) {
-    return variable;
+    return ok(variable);
   }
   index->object =
       this->checker.genericChecker().apparent(this->checker.exprChecker().checkExpr(index->object));
@@ -316,52 +400,81 @@ Expr *MemberChecker::checkIndex(IndexExpr *index) {
       generic.isOk() ||
       generic.error().code != UtilityTypesCheckGenericIndexErrorCode::NOT_A_GENERIC_INDEX;
   if (generic.isErr() && genericIndex) {
-    this->checker.diags_.error(index->index->loc(), generic.error().message);
-    return index;
+    return err(MemberCheckerCheckIndexError{
+        .code = MemberCheckerCheckIndexErrorCode::GENERIC_INDEX,
+        .message = generic.error().message,
+    });
   }
   if (genericIndex) {
-    return generic.value();
+    return ok(generic.value());
   }
   if (index->object->type->isMatch()) {
-    return this->checker.matchChecker().checkMatchIndex(index);
+    Expr *match = this->checker.matchChecker().checkMatchIndex(index);
+
+    return ok(match);
   }
   if (index->object->type->nonOptional()->isJson()) {
-    return this->checker.jsonChecker().checkJsonIndex(index);
+    Expr *json = this->checker.jsonChecker().checkJsonIndex(index);
+
+    return ok(json);
   }
   if (index->object->type->isBytes()) {
-    return this->checker.bytesChecker().checkBytesIndex(index);
+    Expr *bytes = this->checker.bytesChecker().checkBytesIndex(index);
+
+    return ok(bytes);
   }
   if (const Type *type = index->object->type; type->isUnknown() || type->isAnyObject()) {
     index->index = this->checker.exprChecker().checkExpr(index->index);
     UnknownChecker::ResultValueNarrowed narrowed = UnknownChecker::unknownUse(index->object, "");
     if (narrowed.isErr()) {
-      this->checker.diags_.error(index->object->loc(), narrowed.error().message);
+      return err(MemberCheckerCheckIndexError{
+          .code = MemberCheckerCheckIndexErrorCode::UNKNOWN_NOT_NARROWED,
+          .message = narrowed.error().message,
+      });
     }
-    return index;
+    return ok(index);
   }
   if (index->object->type->isObject()) {
-    KeyedFieldChecker::ResultKeyedFieldRead read =
+    KeyedFieldChecker::ResultKeyedFieldRead keyed =
         this->checker.keyedFieldChecker().checkKeyedField(index, false);
-    if (read.isErr() &&
-        read.error().code != KeyedFieldCheckerCheckKeyedFieldErrorCode::ALREADY_REPORTED) {
-      llvm::SMLoc at = KeyedFieldChecker::keyedPlace(index, read.error().code);
-      this->checker.diags_.error(at, read.error().message);
+    if (keyed.isOk()) {
+      return ok(keyed.value());
     }
-    return read.isOk() ? read.value() : index;
+    KeyedFieldCheckerCheckKeyedFieldErrorCode keyedCode = keyed.error().code;
+    bool reported = keyedCode == KeyedFieldCheckerCheckKeyedFieldErrorCode::ALREADY_REPORTED;
+    MemberCheckerCheckIndexErrorCode code =
+        reported ? MemberCheckerCheckIndexErrorCode::ALREADY_REPORTED
+        : KeyedFieldChecker::wrongKey(keyedCode) ? MemberCheckerCheckIndexErrorCode::KEY_REJECTED
+                                                 : MemberCheckerCheckIndexErrorCode::FIELD_REJECTED;
+
+    return err(MemberCheckerCheckIndexError{
+        .code = code,
+        .message = keyed.error().message,
+    });
   }
   if (index->object->type->isDict()) {
-    return this->checker.dictChecker().checkDictIndex(index);
+    DictChecker::ResultDictIndexedValue dict = this->checker.dictChecker().checkDictIndex(index);
+    if (dict.isErr()) {
+      return err(MemberCheckerCheckIndexError{
+          .code = MemberCheckerCheckIndexErrorCode::DICT_INDEX,
+          .message = dict.error().message,
+      });
+    }
+    return ok(dict.value());
   }
   if (index->object->type->isOptional() && index->object->type->inner()->isObject()) {
     index->index = this->checker.exprChecker().checkExpr(index->index);
-    this->checker.diags_.error(index->object->loc(),
-                               "the value may be undefined; check it before indexing");
-    return index;
+    std::string message = ErrorTextIndexRead::undefined();
+
+    return err(MemberCheckerCheckIndexError{
+        .code = MemberCheckerCheckIndexErrorCode::VALUE_MAY_BE_UNDEFINED,
+        .message = message,
+    });
   }
   index->index = this->checkPosition(index->index);
   const Type *type = index->object->type;
   if (type->isError() || index->index->type->isError()) {
-    return index;
+    return ok(index);
   }
   if (type->isListParam()) {
     const Expr *at = index->index;
@@ -374,17 +487,25 @@ Expr *MemberChecker::checkIndex(IndexExpr *index) {
     } else {
       index->type = Type::optional(this->checker.argListChecker().listElement(type));
     }
-    return index;
+    return ok(index);
   }
   const Type *element = type->isString() ? type : type->isArray() ? type->inner() : nullptr;
+  bool optionalList = type->isOptional() && (type->inner()->isArray() || type->inner()->isString());
+  if (!element && optionalList) {
+    std::string message = ErrorTextIndexRead::undefined();
+
+    return err(MemberCheckerCheckIndexError{
+        .code = MemberCheckerCheckIndexErrorCode::VALUE_MAY_BE_UNDEFINED,
+        .message = message,
+    });
+  }
   if (!element) {
-    if (type->isOptional() && (type->inner()->isArray() || type->inner()->isString())) {
-      this->checker.diags_.error(index->object->loc(),
-                                 "the value may be undefined; check it before indexing");
-    } else {
-      this->checker.diags_.error(index->loc(), "type '" + type->name() + "' cannot be indexed");
-    }
-    return index;
+    std::string message = ErrorTextIndexRead::notIndexed(type->name());
+
+    return err(MemberCheckerCheckIndexError{
+        .code = MemberCheckerCheckIndexErrorCode::NOT_INDEXABLE,
+        .message = message,
+    });
   }
   bool inRange = this->checker.indexProofs().provesInBounds(index->object, index->index, false);
   if (ElementIndex *access = index->form.as<ElementIndex>()) {
@@ -392,7 +513,7 @@ Expr *MemberChecker::checkIndex(IndexExpr *index) {
   }
   index->type = inRange ? element : Type::optional(element);
 
-  return index;
+  return ok(index);
 }
 
 }

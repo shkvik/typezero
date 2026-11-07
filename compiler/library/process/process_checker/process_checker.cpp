@@ -13,34 +13,29 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::u16string toUtf16(llvm::StringRef text) {
+std::u16string ProcessChecker::toUtf16(llvm::StringRef text) {
   llvm::SmallVector<llvm::UTF16, 32> units;
   llvm::convertUTF8ToUTF16String(text, units);
 
   return std::u16string(units.begin(), units.end());
 }
 
-}
-
-ProcessChecker::ProcessChecker(Checker &checker) : checker_(checker) {}
+ProcessChecker::ProcessChecker(Checker &owner)
+    : checker(owner) {}
 
 bool ProcessChecker::isProcessMember(const Expr *expr, llvm::StringRef name) const {
   auto *member = dyn_cast<MemberExpr>(expr);
 
   return member && !member->optional && member->name == name &&
-         checker_.callChecker().isGlobalName(member->object, "process");
+         this->checker.callChecker().isGlobalName(member->object, "process");
 }
 
 Expr *ProcessChecker::builtinCall(llvm::SMLoc loc, Expr *callee, Builtin builtin,
                                   std::vector<Expr *> args, const Type *type) {
-  auto *call = checker_.ctx_.make<CallExpr>(loc, callee, std::move(args));
+  auto *call = this->checker.ctx_.make<CallExpr>(loc, callee, std::move(args));
   call->target = BuiltinCall{.builtin = builtin};
   call->type = type;
 
@@ -49,41 +44,41 @@ Expr *ProcessChecker::builtinCall(llvm::SMLoc loc, Expr *callee, Builtin builtin
 
 Expr *ProcessChecker::checkExitCode(Expr *code) {
   const Type *optionalInt = Type::optional(Type::intTy());
-  code = checker_.exprChecker().checkExpr(code, Type::intTy());
+  code = this->checker.exprChecker().checkExpr(code, Type::intTy());
   if (code->type->isOptional() || code->type->isUndefined()) {
-    return checker_.typeRelations().coerce(code, optionalInt);
+    return this->checker.typeRelations().coerce(code, optionalInt);
   }
 
-  return checker_.typeRelations().convert(checker_.typeRelations().coerce(code, Type::intTy()),
-                                          optionalInt);
+  return this->checker.typeRelations().convert(
+      this->checker.typeRelations().coerce(code, Type::intTy()), optionalInt);
 }
 
 Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
   };
   llvm::StringRef name = member->name;
 
-  bool isDate = checker_.callChecker().isGlobalName(member->object, "Date");
+  bool isDate = this->checker.callChecker().isGlobalName(member->object, "Date");
   if (isDate && name != "now") {
-    return checker_.dateChecker().checkDateStatic(call, member);
+    return this->checker.dateChecker().checkDateStatic(call, member);
   }
-  if (isDate || checker_.callChecker().isGlobalName(member->object, "performance")) {
+  if (isDate || this->checker.callChecker().isGlobalName(member->object, "performance")) {
     llvm::StringRef object = isDate ? "Date" : "performance";
     if (name != "now") {
-      checker_.diags_.error(member->loc(), "'" + object + "." + name +
-                                               "' is not supported yet; only '" + object +
-                                               ".now()' is");
+      this->checker.diags_.error(member->loc(), "'" + object + "." + name +
+                                                    "' is not supported yet; only '" + object +
+                                                    ".now()' is");
       checkArgsLoosely();
       return call;
     }
-    bool rejected = checker_.callChecker().rejectSpread(call);
+    bool rejected = this->checker.callChecker().rejectSpread(call);
     ArgumentChecker::ResultArityMatches arity =
-        rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 0, 0);
+        rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 0, 0);
     if (arity.isErr()) {
-      checker_.diags_.error(member->loc(), arity.error().message);
+      this->checker.diags_.error(member->loc(), arity.error().message);
     }
     if (rejected || arity.isErr()) {
       return call;
@@ -93,36 +88,37 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
 
-  bool isStdout = isProcessMember(member->object, "stdout");
-  if (isStdout || isProcessMember(member->object, "stderr")) {
+  bool isStdout = this->isProcessMember(member->object, "stdout");
+  if (isStdout || this->isProcessMember(member->object, "stderr")) {
     std::string stream = isStdout ? "process.stdout" : "process.stderr";
-    if (name != "isTTY" && checker_.libFunctions_.lookup("processStdout")) {
+    if (name != "isTTY" && this->checker.libFunctions_.lookup("processStdout")) {
       return nullptr;
     }
     if (name != "write") {
       if (name == "isTTY") {
-        checker_.diags_.error(member->loc(), "'" + stream + ".isTTY' is a boolean, not a function");
+        this->checker.diags_.error(member->loc(),
+                                   "'" + stream + ".isTTY' is a boolean, not a function");
       } else {
-        checker_.diags_.error(member->loc(),
-                              "'" + stream + "." + name +
-                                  "' is not supported yet; only 'write(text)' and 'isTTY' are");
+        this->checker.diags_.error(
+            member->loc(), "'" + stream + "." + name +
+                               "' is not supported yet; only 'write(text)' and 'isTTY' are");
       }
       checkArgsLoosely();
       return call;
     }
-    bool rejected = checker_.callChecker().rejectSpread(call);
+    bool rejected = this->checker.callChecker().rejectSpread(call);
     ArgumentChecker::ResultArityMatches arity =
-        rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 1, 1);
+        rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 1, 1);
     if (arity.isErr()) {
-      checker_.diags_.error(member->loc(), arity.error().message);
+      this->checker.diags_.error(member->loc(), arity.error().message);
     }
     if (rejected || arity.isErr()) {
       return call;
     }
-    Expr *chunk = checker_.exprChecker().checkExpr(call->args[0], Type::string());
+    Expr *chunk = this->checker.exprChecker().checkExpr(call->args[0], Type::string());
     const Type *type = chunk->type;
     if (!type->isBuffer() && type->bytes() != Type::Bytes::Uint8) {
-      chunk = checker_.typeRelations().coerce(chunk, Type::string());
+      chunk = this->checker.typeRelations().coerce(chunk, Type::string());
     }
     call->args[0] = chunk;
     call->target = BuiltinCall{.builtin = isStdout ? Builtin::ProcessStdoutWrite
@@ -131,14 +127,14 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
 
-  if (!checker_.callChecker().isGlobalName(member->object, "process")) {
+  if (!this->checker.callChecker().isGlobalName(member->object, "process")) {
     return nullptr;
   }
-  if (checker_.callChecker().rejectSpread(call)) {
+  if (this->checker.callChecker().rejectSpread(call)) {
     return call;
   }
   if (name == "nextTick") {
-    TimerChecker::ResultNextTickQueued queued = checker_.timerChecker().checkNextTick(call, member);
+    TimerChecker::ResultNextTickQueued queued = this->checker.timerChecker().checkNextTick(call);
     if (queued.isOk()) {
       return queued.value();
     }
@@ -150,26 +146,28 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
       case TimerCheckerCheckNextTickErrorCode::WRONG_ARITY:
         break;
     }
-    checker_.diags_.error(at, queued.error().message);
+    this->checker.diags_.error(at, queued.error().message);
     return call;
   }
   if (name == "exit") {
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 1);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 0, 1);
     if (arity.isErr()) {
-      checker_.diags_.error(member->loc(), arity.error().message);
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     if (!call->args.empty()) {
-      call->args[0] = checkExitCode(call->args[0]);
+      call->args[0] = this->checkExitCode(call->args[0]);
     }
     call->target = BuiltinCall{.builtin = Builtin::ProcessExit};
     call->type = Type::voidTy();
     return call;
   }
   if (name == "cwd") {
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 0, 0);
     if (arity.isErr()) {
-      checker_.diags_.error(member->loc(), arity.error().message);
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->target = BuiltinCall{.builtin = Builtin::ProcessCwd};
@@ -177,9 +175,10 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "uptime") {
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 0, 0);
     if (arity.isErr()) {
-      checker_.diags_.error(member->loc(), arity.error().message);
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->target = BuiltinCall{.builtin = Builtin::ProcessUptime};
@@ -191,19 +190,19 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
   auto *event = call->args.empty() ? nullptr : dyn_cast<StringLitExpr>(call->args[0]);
   if (event && (event->value == u"uncaughtException" || event->value == u"unhandledRejection") &&
       (name == "on" || name == "once" || name == "addListener" || name == "prependListener")) {
-    return checker_.resultChecker().reject(
+    return this->checker.resultChecker().reject(
         call, call->args[0]->loc(),
         "there is nothing to catch: nothing is thrown or rejected in tz, an error is a Result "
         "that the code which gets it handles (docs/errors.md, section 4)");
   }
   if ((name == "on" || name == "once" || name == "off") &&
-      checker_.libFunctions_.lookup("processOn")) {
-    return checkSignalCall(call, member);
+      this->checker.libFunctions_.lookup("processOn")) {
+    return this->checkSignalCall(call, member);
   }
   if (llvm::is_contained(properties, name)) {
-    checker_.diags_.error(member->loc(), "'process." + name + "' is not a function");
+    this->checker.diags_.error(member->loc(), "'process." + name + "' is not a function");
   } else {
-    checker_.diags_.error(member->loc(), "'process." + name + "' is not supported yet");
+    this->checker.diags_.error(member->loc(), "'process." + name + "' is not supported yet");
   }
   checkArgsLoosely();
 
@@ -213,22 +212,24 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
 Expr *ProcessChecker::checkSignalCall(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
   call->type = Type::error();
-  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 2);
+  ArgumentChecker::ResultArityMatches arity =
+      this->checker.argumentChecker().checkArity(call, 2, 2);
   if (arity.isErr()) {
-    checker_.diags_.error(member->loc(), arity.error().message);
+    this->checker.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   static const char16_t *const signals[] = {u"SIGINT", u"SIGTERM", u"SIGHUP", u"SIGBREAK"};
   auto *event = dyn_cast<StringLitExpr>(call->args[0]);
   if (event && llvm::none_of(signals, [&](const char16_t *s) { return event->value == s; })) {
-    checker_.diags_.error(event->loc(), "'process." + name +
-                                            "' listens only to the signals 'SIGINT', 'SIGTERM', "
-                                            "'SIGHUP' and 'SIGBREAK', not to '" +
-                                            toUtf8(event->value) + "'");
-    call->args[1] = checker_.exprChecker().checkExpr(call->args[1]);
+    this->checker.diags_.error(event->loc(),
+                               "'process." + name +
+                                   "' listens only to the signals 'SIGINT', 'SIGTERM', "
+                                   "'SIGHUP' and 'SIGBREAK', not to '" +
+                                   toUtf8(event->value) + "'");
+    call->args[1] = this->checker.exprChecker().checkExpr(call->args[1]);
     return call;
   }
-  Expr *listener = checker_.exprChecker().checkExpr(call->args[1]);
+  Expr *listener = this->checker.exprChecker().checkExpr(call->args[1]);
   call->args[1] = listener;
   if (listener->type->isError()) {
     return call;
@@ -237,118 +238,120 @@ Expr *ProcessChecker::checkSignalCall(CallExpr *call, MemberExpr *member) {
   llvm::StringRef fn = name == "off" ? (waits ? "processOffAsync" : "processOff")
                                      : (waits ? "processOnAsync" : "processOn");
   if (name != "off") {
-    auto *once = checker_.ctx_.make<BoolLitExpr>(call->loc(), name == "once");
+    auto *once = this->checker.ctx_.make<BoolLitExpr>(call->loc(), name == "once");
     once->type = Type::boolTy();
     call->args.push_back(once);
   }
   std::vector<bool> given(call->args.size(), true);
   given[0] = false;
 
-  return checker_.eventTargetChecker().callLibraryFunction(call, fn, {}, given, member->loc());
+  return this->checker.eventTargetChecker().callLibraryFunction(call, fn, {}, given, member->loc());
 }
 
 Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
   llvm::StringRef name = member->name;
-  if (isProcessMember(member->object, "env")) {
-    auto *key = checker_.ctx_.make<StringLitExpr>(member->loc(), toUtf16(name));
+  if (this->isProcessMember(member->object, "env")) {
+    auto *key =
+        this->checker.ctx_.make<StringLitExpr>(member->loc(), ProcessChecker::toUtf16(name));
     key->type = Type::string();
-    return builtinCall(member->loc(), member, Builtin::ProcessEnv, {key},
-                       Type::optional(Type::string()));
+    return this->builtinCall(member->loc(), member, Builtin::ProcessEnv, {key},
+                             Type::optional(Type::string()));
   }
 
-  bool isStdout = isProcessMember(member->object, "stdout");
-  if (isStdout || isProcessMember(member->object, "stderr")) {
+  bool isStdout = this->isProcessMember(member->object, "stdout");
+  if (isStdout || this->isProcessMember(member->object, "stderr")) {
     std::string stream = isStdout ? "process.stdout" : "process.stderr";
     if (name != "isTTY" && name != "columns" && name != "rows" &&
-        checker_.libFunctions_.lookup("processStdout")) {
+        this->checker.libFunctions_.lookup("processStdout")) {
       return nullptr;
     }
     if (name == "isTTY") {
-      auto *fd = checker_.ctx_.make<IntLitExpr>(member->loc(), isStdout ? 1 : 2);
+      auto *fd = this->checker.ctx_.make<IntLitExpr>(member->loc(), isStdout ? 1 : 2);
       fd->type = Type::intTy();
-      return builtinCall(member->loc(), member, Builtin::ProcessIsTTY, {fd}, Type::boolTy());
+      return this->builtinCall(member->loc(), member, Builtin::ProcessIsTTY, {fd}, Type::boolTy());
     }
     if (name == "write") {
-      checker_.diags_.error(member->loc(), "'" + stream + ".write' can only be called: '" + stream +
-                                               ".write(text)'");
+      this->checker.diags_.error(member->loc(), "'" + stream + ".write' can only be called: '" +
+                                                    stream + ".write(text)'");
     } else {
-      checker_.diags_.error(member->loc(), "'" + stream + "." + name +
-                                               "' is not supported yet; only " +
-                                               "'isTTY', 'write()' and the rest of a Writable of " +
-                                               "node:stream are");
+      this->checker.diags_.error(member->loc(),
+                                 "'" + stream + "." + name + "' is not supported yet; only " +
+                                     "'isTTY', 'write()' and the rest of a Writable of " +
+                                     "node:stream are");
     }
     member->type = Type::error();
     return member;
   }
 
-  if (checker_.callChecker().isGlobalName(member->object, "Date")) {
-    return checker_.dateChecker().checkDateStaticMember(member);
+  if (this->checker.callChecker().isGlobalName(member->object, "Date")) {
+    return this->checker.dateChecker().checkDateStaticMember(member);
   }
-  if (checker_.callChecker().isGlobalName(member->object, "performance")) {
+  if (this->checker.callChecker().isGlobalName(member->object, "performance")) {
     if (name == "now") {
-      checker_.diags_.error(member->loc(),
-                            "'performance.now' can only be called: 'performance.now()'");
+      this->checker.diags_.error(member->loc(),
+                                 "'performance.now' can only be called: 'performance.now()'");
     } else {
-      checker_.diags_.error(member->loc(),
-                            "'performance." + name +
-                                "' is not supported yet; only 'performance.now()' is");
+      this->checker.diags_.error(member->loc(),
+                                 "'performance." + name +
+                                     "' is not supported yet; only 'performance.now()' is");
     }
     member->type = Type::error();
     return member;
   }
 
-  if (!checker_.callChecker().isGlobalName(member->object, "process")) {
+  if (!this->checker.callChecker().isGlobalName(member->object, "process")) {
     return nullptr;
   }
   if (name == "stdin" || name == "stdout" || name == "stderr") {
-    if (Expr *stream = checker_.streamSources().processStream(member)) {
+    if (Expr *stream = this->checker.streamSources().processStream(member)) {
       return stream;
     }
   }
   if (name == "argv") {
-    return builtinCall(member->loc(), member, Builtin::ProcessArgv, {},
-                       Type::array(Type::string()));
+    return this->builtinCall(member->loc(), member, Builtin::ProcessArgv, {},
+                             Type::array(Type::string()));
   }
   if (name == "exitCode") {
-    return builtinCall(member->loc(), member, Builtin::ProcessExitCode, {},
-                       Type::optional(Type::intTy()));
+    return this->builtinCall(member->loc(), member, Builtin::ProcessExitCode, {},
+                             Type::optional(Type::intTy()));
   }
   if (name == "execPath") {
-    return builtinCall(member->loc(), member, Builtin::ProcessExecPath, {}, Type::string());
+    return this->builtinCall(member->loc(), member, Builtin::ProcessExecPath, {}, Type::string());
   }
   if (name == "platform") {
-    return builtinCall(member->loc(), member, Builtin::ProcessPlatform, {}, Type::string());
+    return this->builtinCall(member->loc(), member, Builtin::ProcessPlatform, {}, Type::string());
   }
   if (name == "pid") {
-    return builtinCall(member->loc(), member, Builtin::ProcessPid, {}, Type::intTy());
+    return this->builtinCall(member->loc(), member, Builtin::ProcessPid, {}, Type::intTy());
   }
   if (name == "env") {
-    return builtinCall(member->loc(), member, Builtin::EnvMap, {},
-                       Type::dict(Type::DictKind::Record, Type::string(), Type::string()));
+    return this->builtinCall(member->loc(), member, Builtin::EnvMap, {},
+                             Type::dict(Type::DictKind::Record, Type::string(), Type::string()));
   }
   member->type = Type::error();
   if (name == "exit" || name == "cwd" || name == "uptime") {
-    checker_.diags_.error(member->loc(), "'process." + name + "' can only be called: 'process." +
-                                             name + (name == "exit" ? "(code)'" : "()'"));
+    this->checker.diags_.error(member->loc(), "'process." + name +
+                                                  "' can only be called: 'process." + name +
+                                                  (name == "exit" ? "(code)'" : "()'"));
   } else if (name == "stdout" || name == "stderr") {
-    checker_.diags_.error(member->loc(), "'process." + name + "' can only be used as 'process." +
-                                             name + ".write(text)' or 'process." + name +
-                                             ".isTTY'");
+    this->checker.diags_.error(member->loc(), "'process." + name +
+                                                  "' can only be used as 'process." + name +
+                                                  ".write(text)' or 'process." + name + ".isTTY'");
   } else {
-    checker_.diags_.error(member->loc(), "'process." + name + "' is not supported yet");
+    this->checker.diags_.error(member->loc(), "'process." + name + "' is not supported yet");
   }
 
   return member;
 }
 
 Expr *ProcessChecker::checkProcessEnvIndex(IndexExpr *index) {
-  if (!isProcessMember(index->object, "env")) {
+  if (!this->isProcessMember(index->object, "env")) {
     return nullptr;
   }
-  Expr *key = checker_.argumentChecker().checkArg(index->index, Type::string());
+  Expr *key = this->checker.argumentChecker().checkArg(index->index, Type::string());
 
-  return builtinCall(index->loc(), index->object, Builtin::ProcessEnv, {key},
-                     Type::optional(Type::string()));
+  return this->builtinCall(index->loc(), index->object, Builtin::ProcessEnv, {key},
+                           Type::optional(Type::string()));
 }
 
 Expr *ProcessChecker::checkProcessAssign(AssignExpr *assign) {
@@ -363,30 +366,32 @@ Expr *ProcessChecker::checkProcessAssign(AssignExpr *assign) {
   if (!object) {
     return nullptr;
   }
-  bool isEnv = isProcessMember(object, "env");
-  bool isProcess = checker_.callChecker().isGlobalName(object, "process") && !name.empty();
-  bool isStream = isProcessMember(object, "stdout") || isProcessMember(object, "stderr");
+  bool isEnv = this->isProcessMember(object, "env");
+  bool isProcess = this->checker.callChecker().isGlobalName(object, "process") && !name.empty();
+  bool isStream =
+      this->isProcessMember(object, "stdout") || this->isProcessMember(object, "stderr");
   if (!isEnv && !isProcess && !isStream) {
     return nullptr;
   }
 
   if (isProcess && name == "exitCode" && !assign->op) {
-    Expr *code = checkExitCode(assign->value);
-    return builtinCall(assign->loc(), assign->target, Builtin::ProcessSetExitCode, {code},
-                       Type::voidTy());
+    Expr *code = this->checkExitCode(assign->value);
+    return this->builtinCall(assign->loc(), assign->target, Builtin::ProcessSetExitCode, {code},
+                             Type::voidTy());
   }
   if (isEnv) {
     return nullptr;
   }
   if (isProcess && name == "exitCode") {
-    checker_.diags_.error(assign->loc(), "only '=' can set 'process.exitCode'");
+    this->checker.diags_.error(assign->loc(), "only '=' can set 'process.exitCode'");
   } else if (isProcess) {
-    checker_.diags_.error(assign->target->loc(), "'process." + name + "' cannot be assigned to");
+    this->checker.diags_.error(assign->target->loc(),
+                               "'process." + name + "' cannot be assigned to");
   } else {
-    checker_.diags_.error(assign->target->loc(),
-                          "'process." + cast<MemberExpr>(object)->name + "' cannot be changed");
+    this->checker.diags_.error(assign->target->loc(), "'process." + cast<MemberExpr>(object)->name +
+                                                          "' cannot be changed");
   }
-  assign->value = checker_.exprChecker().checkExpr(assign->value);
+  assign->value = this->checker.exprChecker().checkExpr(assign->value);
   assign->type = Type::error();
 
   return assign;

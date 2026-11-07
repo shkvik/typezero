@@ -15,7 +15,7 @@ namespace tz {
 InstanceOfChecker::InstanceOfChecker(Checker &owner)
     : checker(owner) {}
 
-Expr *InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
+InstanceOfChecker::ResultInstanceTested InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
   bin->lhs = this->checker.exprChecker().checkExpr(bin->lhs);
   bin->type = Type::boolTy();
   auto *name = dyn_cast<NameExpr>(bin->rhs);
@@ -29,19 +29,20 @@ Expr *InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
     };
     const Type *type = bin->lhs->type;
     const Type *base = type->nonOptional();
-    std::string what = "'" + builtin.str() + "'";
-    if (base->isUnknown() || base->isAnyObject()) {
-      if (builtin == "Date") {
-        bin->rhs->type = Type::date();
-      } else {
-        this->checker.diags_.error(
-            bin->loc(), "'instanceof " + builtin.str() +
-                            "' cannot tell the types of the keys and values, which "
-                            "tz needs to use a " +
-                            builtin.str() + "; keep it in a variable of its type, e.g. '" +
-                            (builtin == "Map" ? "Map<string, int>" : "Set<string>") + "'");
-      }
-      return bin;
+    std::string what = quotedName(builtin);
+    bool opaque = base->isUnknown() || base->isAnyObject();
+    if (opaque && builtin != "Date") {
+      llvm::StringRef example = builtin == "Map" ? "Map<string, int>" : "Set<string>";
+      std::string message = ErrorTextInstanceOf::untypedMap(builtin, example);
+
+      return err(InstanceOfCheckerCheckInstanceOfError{
+          .code = InstanceOfCheckerCheckInstanceOfErrorCode::UNTYPED_COLLECTION,
+          .message = message,
+      });
+    }
+    if (opaque) {
+      bin->rhs->type = Type::date();
+      return ok(bin);
     }
     if (base->isUnion()) {
       std::vector<const Type *> matching;
@@ -51,64 +52,97 @@ Expr *InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
         }
       }
       if (matching.empty()) {
-        this->checker.diags_.error(bin->loc(),
-                                   "a '" + base->name() + "' is never a " + what +
-                                       ": none of its members is one, so this is always false");
-      } else if (matching.size() == base->members().size() && !type->isOptional()) {
-        this->checker.diags_.error(bin->loc(), "every member of '" + base->name() + "' is a " +
-                                                   what + ", so 'instanceof " + builtin.str() +
-                                                   "' is always true");
-      } else {
-        bin->rhs->type = Type::unionOf(matching);
+        std::string message = ErrorTextInstanceOf::noneIs(base->name(), what);
+
+        return err(InstanceOfCheckerCheckInstanceOfError{
+            .code = InstanceOfCheckerCheckInstanceOfErrorCode::NONE_MATCHES,
+            .message = message,
+        });
       }
-      return bin;
+      if (matching.size() == base->members().size() && !type->isOptional()) {
+        std::string message = ErrorTextInstanceOf::allAre(base->name(), what, builtin);
+
+        return err(InstanceOfCheckerCheckInstanceOfError{
+            .code = InstanceOfCheckerCheckInstanceOfErrorCode::ALL_MATCH,
+            .message = message,
+        });
+      }
+      bin->rhs->type = Type::unionOf(matching);
+      return ok(bin);
     }
     if (is(type)) {
-      this->checker.diags_.error(bin->loc(), "the value is a '" + type->name() +
-                                                 "', so 'instanceof " + builtin.str() +
-                                                 "' is always true");
-    } else if (type->isOptional() && is(type->inner())) {
-      this->checker.diags_.error(bin->loc(), "the value is a '" + type->inner()->name() +
-                                                 "' or undefined; test it with '!= undefined'");
-    } else if (!type->isError()) {
-      this->checker.diags_.error(bin->loc(), "a '" + type->name() + "' is never a " + what +
-                                                 ", so 'instanceof " + builtin.str() +
-                                                 "' is always false");
+      std::string message = ErrorTextInstanceOf::alwaysTrue(type->name(), builtin);
+
+      return err(InstanceOfCheckerCheckInstanceOfError{
+          .code = InstanceOfCheckerCheckInstanceOfErrorCode::ALWAYS_TRUE,
+          .message = message,
+      });
     }
-    return bin;
+    if (type->isOptional() && is(type->inner())) {
+      std::string message = ErrorTextInstanceOf::orUndef(type->inner()->name());
+
+      return err(InstanceOfCheckerCheckInstanceOfError{
+          .code = InstanceOfCheckerCheckInstanceOfErrorCode::TEST_UNDEFINED,
+          .message = message,
+      });
+    }
+    if (!type->isError()) {
+      std::string message = ErrorTextInstanceOf::neverIs(type->name(), what, builtin);
+
+      return err(InstanceOfCheckerCheckInstanceOfError{
+          .code = InstanceOfCheckerCheckInstanceOfErrorCode::ALWAYS_FALSE,
+          .message = message,
+      });
+    }
+    return ok(bin);
   }
   if (const Type *bytes = !cls && name && !this->checker.scopes().lookup(name->name).var() &&
                                   !this->checker.scopes().lookup(name->name).func()
                               ? BytesChecker::bytesTypeNamed(name->name)
                               : nullptr) {
-    return this->checkBytesInstanceOf(bin, bytes);
+    ResultBytesKindTested tested = this->checkBytesInstanceOf(bin, bytes);
+    if (tested.isErr()) {
+      return err(InstanceOfCheckerCheckInstanceOfError{
+          .code = InstanceOfCheckerCheckInstanceOfErrorCode::BYTES_INSTANCE,
+          .message = tested.error().message,
+      });
+    }
+    return ok(tested.value());
   }
   if (!cls) {
     bin->rhs = this->checker.exprChecker().checkExpr(bin->rhs);
     const Type *rhs = bin->rhs->type;
-    if (ClassDecl *known = const_cast<ClassDecl *>(rhs->classRef()); known && known->type) {
+    ClassDecl *known = const_cast<ClassDecl *>(rhs->classRef());
+    if (known && known->type) {
       cls = known;
     } else if (rhs->isConstructor()) {
       const Type *base = bin->lhs->type->nonOptional();
-      if (!base->isError() && !base->isUnknown() && !UnknownChecker::isObjectReference(base)) {
-        this->checker.diags_.error(bin->lhs->loc(), "'instanceof' tests an object, found '" +
-                                                        bin->lhs->type->name() +
-                                                        "', which is never an instance of a class");
+      bool object = base->isError() || base->isUnknown() || UnknownChecker::isObjectReference(base);
+      if (!object) {
+        std::string message = ErrorTextInstanceOf::notObject(bin->lhs->type->name());
+
+        return err(InstanceOfCheckerCheckInstanceOfError{
+            .code = InstanceOfCheckerCheckInstanceOfErrorCode::NOT_AN_OBJECT,
+            .message = message,
+        });
       }
-      return bin;
+      return ok(bin);
+    } else if (!rhs->isError()) {
+      std::string message = ErrorTextInstanceOf::notClass();
+
+      return err(InstanceOfCheckerCheckInstanceOfError{
+          .code = InstanceOfCheckerCheckInstanceOfErrorCode::NOT_A_CLASS,
+          .message = message,
+      });
     } else {
-      if (!rhs->isError()) {
-        this->checker.diags_.error(bin->rhs->loc(),
-                                   "the right side of 'instanceof' must be a class");
-      }
-      return bin;
+      return ok(bin);
     }
   }
   if (cls->isGeneric()) {
     const Type *type = bin->lhs->type;
     bin->rhs->type = Type::error();
     if (type->isError()) {
-      return bin;
+      return ok(bin);
     }
     const Type *base = type->nonOptional();
     llvm::ArrayRef<const Type *> members =
@@ -127,85 +161,93 @@ Expr *InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
       }
       if (related) {
         std::string generic = cls->name.str();
-        std::string hint;
-        if (cls->library()) {
-          hint = "test for a class that extends it, e.g. 'x instanceof Bus' with 'class Bus "
-                 "extends " +
-                 generic + " {}'";
-        } else {
-          hint = "keep the value in a variable of a union of the classes it may be, e.g. '" +
-                 generic + "<int> | " +
-                 (base->isUnknown() || base->isAnyObject() ? generic + "<string>"
-                                                           : base->name().str()) +
-                 "'";
-        }
-        this->checker.diags_.error(bin->loc(), "'instanceof " + generic + "' cannot tell which '" +
-                                                   generic + "' a '" + base->name() +
-                                                   "' would be: each list of type "
-                                                   "arguments of '" +
-                                                   generic + "' makes a class of its own; " + hint);
-      } else {
-        this->checker.diags_.error(bin->loc(), "a '" + base->name() + "' is never a '" + cls->name +
-                                                   "', so this is always false");
+        std::string other =
+            base->isUnknown() || base->isAnyObject() ? generic + "<string>" : base->name().str();
+        std::string hint = cls->library() ? ErrorTextInstanceOf::extendHint(generic)
+                                          : ErrorTextInstanceOf::unionHint(generic, other);
+        std::string message = ErrorTextInstanceOf::cantTell(generic, base->name(), hint);
+
+        return err(InstanceOfCheckerCheckInstanceOfError{
+            .code = InstanceOfCheckerCheckInstanceOfErrorCode::GENERIC_UNKNOWN,
+            .message = message,
+        });
       }
-      return bin;
+      std::string message = ErrorTextInstanceOf::neverThat(base->name(), cls->name);
+
+      return err(InstanceOfCheckerCheckInstanceOfError{
+          .code = InstanceOfCheckerCheckInstanceOfErrorCode::NEVER_GENERIC,
+          .message = message,
+      });
     }
     if (base->isUnion()) {
       bin->rhs->type = matching.size() == 1 ? matching[0] : Type::unionOf(matching);
     } else {
       bin->rhs->type = genericInstanceOf(base, cls)->type;
     }
-    return bin;
+    return ok(bin);
   }
   bin->rhs->type = cls->type;
   const Type *type = bin->lhs->type;
   if (type->isError()) {
-    return bin;
+    return ok(bin);
   }
   const Type *base = type->nonOptional();
   if (base->isUnknown() || base->isAnyObject()) {
-    return bin;
+    return ok(bin);
   }
   if (base->isUnion()) {
     bool may = llvm::any_of(base->members(), [&](const Type *m) {
       return m->isObject() && (cls->type->isSubtypeOf(m) || m->isSubtypeOf(cls->type));
     });
     if (!may) {
-      this->checker.diags_.error(bin->loc(),
-                                 "a '" + base->name() + "' is never a '" + cls->name +
-                                     "': none of its members is or extends it, so this is always "
-                                     "false");
+      std::string message = ErrorTextInstanceOf::neverUnion(base->name(), cls->name);
+
+      return err(InstanceOfCheckerCheckInstanceOfError{
+          .code = InstanceOfCheckerCheckInstanceOfErrorCode::NEVER_IN_UNION,
+          .message = message,
+      });
     }
-    return bin;
+    return ok(bin);
   }
   if (!base->isObject()) {
-    this->checker.diags_.error(bin->lhs->loc(), "'instanceof' tests an object, found '" +
-                                                    type->name() +
-                                                    "', which is never an instance of a class");
-    return bin;
+    std::string message = ErrorTextInstanceOf::notObject(type->name());
+
+    return err(InstanceOfCheckerCheckInstanceOfError{
+        .code = InstanceOfCheckerCheckInstanceOfErrorCode::NOT_AN_OBJECT,
+        .message = message,
+    });
   }
-  if (!cls->type->isSubtypeOf(base) && !base->isSubtypeOf(cls->type)) {
-    if (base->isClass()) {
-      this->checker.diags_.error(
-          bin->loc(), "a '" + base->name() + "' is never a '" + cls->name +
-                          "': classes are told apart by their names, and neither extends "
-                          "the other, so this is always false");
-    } else if (!base->bases().empty() || base->isBase()) {
-      this->checker.diags_.error(
-          bin->loc(), "a '" + base->name() + "' is never a '" + cls->name + "': '" + cls->name +
-                          "' does not implement it, so this is always false");
-    } else {
-      this->checker.diags_.error(bin->loc(), "an object of type '" + base->name() +
-                                                 "' is never a '" + cls->name + "': only 'new " +
-                                                 cls->name +
-                                                 "(...)' creates one, so this is always false");
-    }
+  bool related = cls->type->isSubtypeOf(base) || base->isSubtypeOf(cls->type);
+  if (!related && base->isClass()) {
+    std::string message = ErrorTextInstanceOf::neverClass(base->name(), cls->name);
+
+    return err(InstanceOfCheckerCheckInstanceOfError{
+        .code = InstanceOfCheckerCheckInstanceOfErrorCode::NEVER_CLASS,
+        .message = message,
+    });
+  }
+  if (!related && (!base->bases().empty() || base->isBase())) {
+    std::string message = ErrorTextInstanceOf::notImpl(base->name(), cls->name);
+
+    return err(InstanceOfCheckerCheckInstanceOfError{
+        .code = InstanceOfCheckerCheckInstanceOfErrorCode::NOT_IMPLEMENTED,
+        .message = message,
+    });
+  }
+  if (!related) {
+    std::string message = ErrorTextInstanceOf::neverMade(base->name(), cls->name);
+
+    return err(InstanceOfCheckerCheckInstanceOfError{
+        .code = InstanceOfCheckerCheckInstanceOfErrorCode::NEVER_CREATED,
+        .message = message,
+    });
   }
 
-  return bin;
+  return ok(bin);
 }
 
-Expr *InstanceOfChecker::checkBytesInstanceOf(BinaryExpr *bin, const Type *bytes) {
+InstanceOfChecker::ResultBytesKindTested
+InstanceOfChecker::checkBytesInstanceOf(BinaryExpr *bin, const Type *bytes) {
   using Bytes = Type::Bytes;
   auto is = [&](const Type *t) {
     return t->isBytes() &&
@@ -214,13 +256,13 @@ Expr *InstanceOfChecker::checkBytesInstanceOf(BinaryExpr *bin, const Type *bytes
   auto may = [&](const Type *t) { return bytes->isBuffer() && t->bytes() == Bytes::Uint8; };
   const Type *type = bin->lhs->type;
   if (type->isError()) {
-    return bin;
+    return ok(bin);
   }
   const Type *base = type->nonOptional();
-  std::string what = "'" + bytes->name().str() + "'";
+  std::string what = quotedName(bytes->name());
   bin->rhs->type = bytes;
   if (base->isUnknown() || base->isAnyObject()) {
-    return bin;
+    return ok(bin);
   }
   if (base->isUnion()) {
     std::vector<const Type *> matching;
@@ -232,32 +274,52 @@ Expr *InstanceOfChecker::checkBytesInstanceOf(BinaryExpr *bin, const Type *bytes
       maybe |= may(m);
     }
     if (matching.empty() && !maybe) {
-      this->checker.diags_.error(bin->loc(),
-                                 "a '" + base->name() + "' is never a " + what +
-                                     ": none of its members is one, so this is always false");
-    } else if (matching.size() == base->members().size() && !type->isOptional()) {
-      this->checker.diags_.error(bin->loc(), "every member of '" + base->name() + "' is a " + what +
-                                                 ", so 'instanceof " + bytes->name() +
-                                                 "' is always true");
-    } else if (!bytes->isBuffer()) {
+      std::string message = ErrorTextInstanceOf::noneIs(base->name(), what);
+
+      return err(InstanceOfCheckerCheckBytesInstanceOfError{
+          .code = InstanceOfCheckerCheckBytesInstanceOfErrorCode::NONE_MATCHES,
+          .message = message,
+      });
+    }
+    if (matching.size() == base->members().size() && !type->isOptional()) {
+      std::string message = ErrorTextInstanceOf::allAre(base->name(), what, bytes->name());
+
+      return err(InstanceOfCheckerCheckBytesInstanceOfError{
+          .code = InstanceOfCheckerCheckBytesInstanceOfErrorCode::ALL_MATCH,
+          .message = message,
+      });
+    }
+    if (!bytes->isBuffer()) {
       bin->rhs->type = Type::unionOf(matching);
     }
-    return bin;
+    return ok(bin);
   }
   if (is(type)) {
-    this->checker.diags_.error(bin->loc(), "the value is a '" + type->name() +
-                                               "', so 'instanceof " + bytes->name() +
-                                               "' is always true");
-  } else if (type->isOptional() && is(type->inner())) {
-    this->checker.diags_.error(bin->loc(), "the value is a '" + type->inner()->name() +
-                                               "' or undefined; test it with '!= undefined'");
-  } else if (!may(base)) {
-    this->checker.diags_.error(bin->loc(), "a '" + type->name() + "' is never a " + what +
-                                               ", so 'instanceof " + bytes->name() +
-                                               "' is always false");
+    std::string message = ErrorTextInstanceOf::alwaysTrue(type->name(), bytes->name());
+
+    return err(InstanceOfCheckerCheckBytesInstanceOfError{
+        .code = InstanceOfCheckerCheckBytesInstanceOfErrorCode::ALWAYS_TRUE,
+        .message = message,
+    });
+  }
+  if (type->isOptional() && is(type->inner())) {
+    std::string message = ErrorTextInstanceOf::orUndef(type->inner()->name());
+
+    return err(InstanceOfCheckerCheckBytesInstanceOfError{
+        .code = InstanceOfCheckerCheckBytesInstanceOfErrorCode::TEST_UNDEFINED,
+        .message = message,
+    });
+  }
+  if (!may(base)) {
+    std::string message = ErrorTextInstanceOf::neverIs(type->name(), what, bytes->name());
+
+    return err(InstanceOfCheckerCheckBytesInstanceOfError{
+        .code = InstanceOfCheckerCheckBytesInstanceOfErrorCode::ALWAYS_FALSE,
+        .message = message,
+    });
   }
 
-  return bin;
+  return ok(bin);
 }
 
 }

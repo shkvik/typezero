@@ -89,7 +89,7 @@ void ImportBinder::importName(Checker::ModuleState &here, const ImportDecl &decl
     here.badImports.insert(name.as);
     return;
   }
-  ModuleDeclarer::ResultExportFound target =
+  ModuleDeclarer::ResultExportTarget target =
       this->checker.moduleDeclarer().findExport(decl.from, decl.path, name);
   if (target.isErr()) {
     this->checker.diags_.error(name.loc, target.error().message);

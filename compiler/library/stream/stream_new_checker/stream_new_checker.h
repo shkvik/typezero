@@ -6,12 +6,12 @@ namespace tz {
 
 class StreamNewChecker {
 public:
-  explicit StreamNewChecker(Checker &checker);
+  explicit StreamNewChecker(Checker &owner);
 
   Expr *checkStreamNew(NewExpr *expr, ClassDecl *generic, const Type *expected);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

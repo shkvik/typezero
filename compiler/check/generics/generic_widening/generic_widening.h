@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/check/checker/checker.h"
+#include "compiler/check/generics/generic_widening/generic_widening_errors.h"
 
 namespace tz {
 

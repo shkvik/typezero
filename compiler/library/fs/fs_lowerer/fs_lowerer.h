@@ -1,13 +1,14 @@
 #pragma once
 
 #include "compiler/lower/lowering/lowering.h"
+#include "compiler/lower/objects/object_maker/object_maker.h"
 #include <map>
 
 namespace tz {
 
 class FsLowerer {
 public:
-  explicit FsLowerer(Lowering &lowering);
+  explicit FsLowerer(Lowering &owner);
 
   llvm::Value *emitFsCall(CallExpr *call);
   llvm::Value *emitFsResult(CallExpr *call);
@@ -16,8 +17,10 @@ public:
   llvm::Function *errorMaker(const Type *error);
 
 private:
-  Lowering &lowering_;
-  std::map<const Type *, llvm::Function *> errorMakers_;
+  static const std::vector<MakerFields> &fsObjects();
+
+  Lowering &lowering;
+  std::map<const Type *, llvm::Function *> errorMakers;
 };
 
 }

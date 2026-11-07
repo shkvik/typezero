@@ -4,20 +4,13 @@
 #include "compiler/library/process/process_checker/process_checker.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::optional<int> fileKind(llvm::StringRef method) {
+std::optional<int> FsDeclarer::fileKind(llvm::StringRef method) {
   if (method == "isFile") {
     return 0100000;
   }
@@ -43,19 +36,18 @@ std::optional<int> fileKind(llvm::StringRef method) {
   return std::nullopt;
 }
 
-}
-
-FsDeclarer::FsDeclarer(Checker &checker) : checker_(checker) {}
+FsDeclarer::FsDeclarer(Checker &owner)
+    : checker(owner) {}
 
 void FsDeclarer::declareFsClasses() {
   auto declare = [&](llvm::StringRef name,
                      llvm::ArrayRef<std::pair<llvm::StringRef, const Type *>> fields,
                      size_t privateFrom) {
-    auto *cls = checker_.ctx_.make<ClassDecl>(llvm::SMLoc(), name);
+    auto *cls = this->checker.ctx_.make<ClassDecl>(llvm::SMLoc(), name);
     cls->origin = ClassOrigin::BUILTIN;
     cls->stage = ClassStage::RESOLVED;
     cls->declared = true;
-    checker_.classes_.push_back(cls);
+    this->checker.classes_.push_back(cls);
     Type *type = Type::classType(name, cls);
     cls->type = type;
     std::vector<Field> typeFields;
@@ -71,24 +63,25 @@ void FsDeclarer::declareFsClasses() {
 
     return cls;
   };
-  const Type *d = Type::doubleTy(), *i = Type::intTy();
-  checker_.statsClass_ = declare("Stats",
-                                 {{"dev", i},
-                                  {"mode", i},
-                                  {"nlink", i},
-                                  {"uid", i},
-                                  {"gid", i},
-                                  {"rdev", i},
-                                  {"blksize", i},
-                                  {"ino", i},
-                                  {"size", i},
-                                  {"blocks", i},
-                                  {"atimeMs", d},
-                                  {"mtimeMs", d},
-                                  {"ctimeMs", d},
-                                  {"birthtimeMs", d}},
-                                 14);
-  checker_.direntClass_ = declare(
+  const Type *d = Type::doubleTy();
+  const Type *i = Type::intTy();
+  this->checker.statsClass_ = declare("Stats",
+                                      {{"dev", i},
+                                       {"mode", i},
+                                       {"nlink", i},
+                                       {"uid", i},
+                                       {"gid", i},
+                                       {"rdev", i},
+                                       {"blksize", i},
+                                       {"ino", i},
+                                       {"size", i},
+                                       {"blocks", i},
+                                       {"atimeMs", d},
+                                       {"mtimeMs", d},
+                                       {"ctimeMs", d},
+                                       {"birthtimeMs", d}},
+                                      14);
+  this->checker.direntClass_ = declare(
       "Dirent",
       {{"name", Type::string()}, {"parentPath", Type::string()}, {"Symbol(type)", Type::intTy()}},
       2);
@@ -96,36 +89,36 @@ void FsDeclarer::declareFsClasses() {
 
 Expr *FsDeclarer::checkStatsDate(MemberExpr *member, ClassDecl *cls) {
   static const llvm::StringLiteral dates[] = {"atime", "mtime", "ctime", "birthtime"};
-  if (cls != checker_.statsClass_ || !llvm::is_contained(dates, member->name)) {
+  if (cls != this->checker.statsClass_ || !llvm::is_contained(dates, member->name)) {
     return nullptr;
   }
 
-  return checker_.processChecker().builtinCall(member->loc(), member, Builtin::FsStatsDate, {},
-                                               Type::date());
+  return this->checker.processChecker().builtinCall(member->loc(), member, Builtin::FsStatsDate, {},
+                                                    Type::date());
 }
 
 bool FsDeclarer::isRuntimeClass(const ClassDecl *cls) const {
-  return cls && (cls == checker_.statsClass_ || cls == checker_.direntClass_);
+  return cls && (cls == this->checker.statsClass_ || cls == this->checker.direntClass_);
 }
 
 Expr *FsDeclarer::checkFsClassMethod(CallExpr *call, MemberExpr *member, ClassDecl *cls) {
-  if (cls != checker_.statsClass_ && cls != checker_.direntClass_) {
+  if (cls != this->checker.statsClass_ && cls != this->checker.direntClass_) {
     return nullptr;
   }
-  std::optional<int> kind = fileKind(member->name);
+  std::optional<int> kind = FsDeclarer::fileKind(member->name);
   if (!kind) {
     return nullptr;
   }
-  bool rejected = checker_.callChecker().rejectSpread(call);
+  bool rejected = this->checker.callChecker().rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 0, 0);
+      rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 0, 0);
   if (arity.isErr()) {
-    checker_.diags_.error(member->loc(), arity.error().message);
+    this->checker.diags_.error(member->loc(), arity.error().message);
   }
   if (rejected || arity.isErr()) {
     return call;
   }
-  auto *lit = checker_.ctx_.make<IntLitExpr>(member->loc(), uint64_t(*kind));
+  auto *lit = this->checker.ctx_.make<IntLitExpr>(member->loc(), uint64_t(*kind));
   lit->type = Type::intTy();
   call->args = {lit};
   call->target = BuiltinCall{.builtin = Builtin::FsIsKind};

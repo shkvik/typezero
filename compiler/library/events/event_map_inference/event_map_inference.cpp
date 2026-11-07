@@ -2,20 +2,13 @@
 #include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/Path.h"
-#include <cassert>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::string fileOfPlace(const std::string &place) {
+std::string EventMapInference::fileOfPlace(const std::string &place) {
   size_t column = place.rfind(':');
   size_t line =
       column == std::string::npos || column == 0 ? std::string::npos : place.rfind(':', column - 1);
@@ -23,7 +16,8 @@ std::string fileOfPlace(const std::string &place) {
   return line == std::string::npos ? place : place.substr(0, line);
 }
 
-bool sameInEveryRound(const Type *type, llvm::SmallPtrSetImpl<const Type *> &seen) {
+bool EventMapInference::sameInEveryRound(const Type *type,
+                                         llvm::SmallPtrSetImpl<const Type *> &seen) {
   if (!seen.insert(type).second) {
     return true;
   }
@@ -39,15 +33,16 @@ bool sameInEveryRound(const Type *type, llvm::SmallPtrSetImpl<const Type *> &see
     return false;
   }
   auto all = [&](llvm::ArrayRef<const Type *> types) {
-    return llvm::all_of(types, [&](const Type *t) { return !t || sameInEveryRound(t, seen); });
+    return llvm::all_of(
+        types, [&](const Type *t) { return !t || EventMapInference::sameInEveryRound(t, seen); });
   };
   switch (type->kind()) {
   case Type::Kind::Optional:
   case Type::Kind::Array:
   case Type::Kind::Promise:
-    return sameInEveryRound(type->inner(), seen);
+    return EventMapInference::sameInEveryRound(type->inner(), seen);
   case Type::Kind::Function:
-    return all(type->params()) && sameInEveryRound(type->ret(), seen);
+    return all(type->params()) && EventMapInference::sameInEveryRound(type->ret(), seen);
   case Type::Kind::Union:
     return all(type->members());
   case Type::Kind::Dict:
@@ -58,22 +53,21 @@ bool sameInEveryRound(const Type *type, llvm::SmallPtrSetImpl<const Type *> &see
     return all({type->okType(), type->errType()});
   case Type::Kind::Object:
     for (const Field &f : type->fields()) {
-      if (!sameInEveryRound(f.type, seen)) {
+      if (!EventMapInference::sameInEveryRound(f.type, seen)) {
         return false;
       }
     }
-    return !type->tupleRest() || sameInEveryRound(type->tupleRest(), seen);
+    return !type->tupleRest() || EventMapInference::sameInEveryRound(type->tupleRest(), seen);
   default:
     return true;
   }
 }
 
-}
-
-EventMapInference::EventMapInference(Checker &checker) : checker_(checker) {}
+EventMapInference::EventMapInference(Checker &owner)
+    : checker(owner) {}
 
 std::string EventMapInference::placeOf(llvm::SMLoc loc) const {
-  llvm::SourceMgr &sm = checker_.diags_.sourceMgr();
+  llvm::SourceMgr &sm = this->checker.diags_.sourceMgr();
   unsigned id = loc.isValid() ? sm.FindBufferContainingLoc(loc) : 0;
   if (!id) {
     return "?";
@@ -88,7 +82,7 @@ EventInference::Portable EventMapInference::portable(const Type *type,
                                                      llvm::SmallPtrSetImpl<const Type *> &seen) {
   EventInference::Portable p;
   llvm::SmallPtrSet<const Type *, 8> visited;
-  if (sameInEveryRound(type, visited)) {
+  if (EventMapInference::sameInEveryRound(type, visited)) {
     p.form = PortableSame{.type = type};
     return p;
   }
@@ -96,7 +90,7 @@ EventInference::Portable EventMapInference::portable(const Type *type,
     p.form = PortableBad{};
     return p;
   }
-  auto part = [&](const Type *t) { p.parts.push_back(portable(t, seen)); };
+  auto part = [&](const Type *t) { p.parts.push_back(this->portable(t, seen)); };
   if (type->isClass() || type->isClassRef()) {
     const ClassDecl *cls = type->isClass() ? type->classDecl() : type->classRef();
     if (cls->literal() || cls->name.empty()) {
@@ -105,7 +99,9 @@ EventInference::Portable EventMapInference::portable(const Type *type,
     }
     const ClassDecl *declared = cls->generic() ? cls->generic() : cls;
     std::string name = declared->name.str();
-    std::string file = declared->builtin() ? std::string() : fileOfPlace(placeOf(declared->loc()));
+    std::string file = declared->builtin()
+                           ? std::string()
+                           : EventMapInference::fileOfPlace(this->placeOf(declared->loc()));
     if (type->isClassRef()) {
       p.form = PortableClassRef{.file = std::move(file), .name = std::move(name)};
       return p;
@@ -198,17 +194,18 @@ EventInference::Portable EventMapInference::portable(const Type *type,
 ClassDecl *EventMapInference::portableClass(const std::string &file, const std::string &name) {
   ClassDecl *cls = nullptr;
   if (file.empty()) {
-    if (checker_.statsClass_ && name == checker_.statsClass_->name) {
-      cls = checker_.statsClass_;
+    if (this->checker.statsClass_ && name == this->checker.statsClass_->name) {
+      cls = this->checker.statsClass_;
     }
-    if (!cls && checker_.direntClass_ && name == checker_.direntClass_->name) {
-      cls = checker_.direntClass_;
+    if (!cls && this->checker.direntClass_ && name == this->checker.direntClass_->name) {
+      cls = this->checker.direntClass_;
     }
   } else {
-    for (Module *module : checker_.file_->modules) {
+    for (Module *module : this->checker.file_->modules) {
       for (Stmt *item : module->file.items) {
         if (auto *c = dyn_cast<ClassDecl>(item);
-            c && !cls && c->name == name && fileOfPlace(placeOf(c->loc())) == file) {
+            c && !cls && c->name == name &&
+            EventMapInference::fileOfPlace(this->placeOf(c->loc())) == file) {
           cls = c;
         }
       }
@@ -221,7 +218,7 @@ ClassDecl *EventMapInference::portableClass(const std::string &file, const std::
 const Type *EventMapInference::fromPortable(const EventInference::Portable &p, llvm::SMLoc loc) {
   std::vector<const Type *> parts;
   for (const EventInference::Portable &q : p.parts) {
-    parts.push_back(fromPortable(q, loc));
+    parts.push_back(this->fromPortable(q, loc));
     if (!parts.back()) {
       return nullptr;
     }
@@ -235,7 +232,7 @@ const Type *EventMapInference::fromPortable(const EventInference::Portable &p, l
       break;
     case PortableKind::CLASS_TYPE: {
       const PortableClass *named = p.form.as<PortableClass>();
-      ClassDecl *cls = portableClass(named->file, named->name);
+      ClassDecl *cls = this->portableClass(named->file, named->name);
       if (!cls) {
         break;
       }
@@ -244,7 +241,7 @@ const Type *EventMapInference::fromPortable(const EventInference::Portable &p, l
         break;
       }
       GenericClassInstantiator::ResultClassMade made =
-          checker_.genericClassInstantiator().instantiateClass(cls, parts, loc);
+          this->checker.genericClassInstantiator().instantiateClass(cls, parts, loc);
       if (made.isErr() && made.error().code !=
                               GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
         llvm::SMLoc at =
@@ -252,14 +249,14 @@ const Type *EventMapInference::fromPortable(const EventInference::Portable &p, l
                     GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
                 ? cls->loc()
                 : (loc.isValid() ? loc : cls->loc());
-        checker_.diags_.error(at, made.error().message);
+        this->checker.diags_.error(at, made.error().message);
       }
       type = made.isOk() ? made.value()->type : nullptr;
       break;
     }
     case PortableKind::CLASS_REF_TYPE: {
       const PortableClassRef *named = p.form.as<PortableClassRef>();
-      ClassDecl *cls = portableClass(named->file, named->name);
+      ClassDecl *cls = this->portableClass(named->file, named->name);
       type = cls ? Type::classRef(cls, cls->name) : nullptr;
       break;
     }
@@ -318,30 +315,30 @@ const Type *EventMapInference::fromPortable(const EventInference::Portable &p, l
 }
 
 const Type *EventMapInference::inferredEventMap(const std::string &site) {
-  if (auto found = siteMaps_.find(site); found != siteMaps_.end()) {
+  if (auto found = this->siteMaps.find(site); found != this->siteMaps.end()) {
     return found->second;
   }
-  if (!checker_.inference_) {
+  if (!this->checker.inference_) {
     return nullptr;
   }
-  checker_.inference_->open = true;
+  this->checker.inference_->open = true;
   const Type *map;
-  if (!checker_.inference_->final) {
+  if (!this->checker.inference_->final) {
     Type *opaque = Type::declareObject("the events of " + site);
     opaque->defineFields({});
-    checker_.openMaps_[opaque] = site;
+    this->checker.openMaps_[opaque] = site;
     map = opaque;
   } else {
     std::vector<Field> fields;
-    for (const EventInference::Event &e : checker_.inference_->maps[site]) {
-      if (const Type *args = fromPortable(e.args, llvm::SMLoc())) {
+    for (const EventInference::Event &e : this->checker.inference_->maps[site]) {
+      if (const Type *args = this->fromPortable(e.args, llvm::SMLoc())) {
         fields.push_back({e.name, args, false});
       }
     }
     map = Type::object(std::move(fields));
-    checker_.inferredMaps_[map] = site;
+    this->checker.inferredMaps_[map] = site;
   }
-  siteMaps_[site] = map;
+  this->siteMaps[site] = map;
 
   return map;
 }

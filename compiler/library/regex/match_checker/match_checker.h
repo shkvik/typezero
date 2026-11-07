@@ -6,14 +6,14 @@ namespace tz {
 
 class MatchChecker {
 public:
-  explicit MatchChecker(Checker &checker);
+  explicit MatchChecker(Checker &owner);
 
   Expr *checkMatchMember(MemberExpr *member);
   Expr *checkMatchIndex(IndexExpr *index);
   Expr *matchItems(Expr *match);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

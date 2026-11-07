@@ -44,8 +44,6 @@ std::string cryptoExportProblem(llvm::StringRef name, llvm::StringRef path);
 inline constexpr llvm::StringLiteral kSubtleName = "%subtle";
 inline constexpr llvm::StringLiteral kIntlLocaleName = "%IntlLocale";
 
-std::string builtinModuleProblem(llvm::StringRef path);
-
 struct ValueRange {
   std::optional<int64_t> lo, hi;
 };
@@ -1156,11 +1154,7 @@ bool typeMentions(const Type *type, llvm::ArrayRef<const Type *> params);
 
 const ClassDecl *genericInstanceOf(const Type *type, const ClassDecl *generic);
 
-std::string argumentCount(unsigned min, unsigned max);
-
 bool isLanguageTag(const std::string &tag);
-
-const char *whyUnsupported(llvm::StringRef name);
 
 inline std::string quotedName(llvm::StringRef name) {
   return name.empty() ? "the function" : "'" + name.str() + "'";

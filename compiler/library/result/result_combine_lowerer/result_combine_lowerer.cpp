@@ -9,216 +9,222 @@
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/values/array_lowerer/array_lowerer.h"
 #include "llvm/IR/MDBuilder.h"
-#include <functional>
 
-using llvm::BasicBlock;
 using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-ResultCombineLowerer::ResultCombineLowerer(Lowering &lowering) : lowering_(lowering) {}
+ResultCombineLowerer::ResultCombineLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Value *ResultCombineLowerer::emitCombine(CallExpr *call) {
   if (call->args[0]->type->isTuple()) {
-    return emitCombineTuple(call);
+    return this->emitCombineTuple(call);
   }
   bool all = call->builtin() == Builtin::ResultCombineWithAllErrors;
-  const Type *arrayType = call->args[0]->type, *element = arrayType->inner();
-  const Type *valueType = element->okType(), *errorType = element->errType();
+  const Type *arrayType = call->args[0]->type;
+  const Type *element = arrayType->inner();
+  const Type *valueType = element->okType();
+  const Type *errorType = element->errType();
   const Type *resultType = call->type;
-  llvm::Type *i64 = lowering_.builder_.getInt64Ty();
+  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
 
-  Lowering::Operand array = lowering_.refCounts().emitOperand(call->args[0], true);
-  llvm::Value *length = lowering_.arrayLowerer().arrayLength(array.value);
-  llvm::Value *values = lowering_.groupLowerer().newArray(
-      Type::array(valueType), lowering_.builder_.getInt64(0), length, "values");
+  Lowering::Operand array = this->lowering.refCounts().emitOperand(call->args[0], true);
+  llvm::Value *length = this->lowering.arrayLowerer().arrayLength(array.value);
+  llvm::Value *values = this->lowering.groupLowerer().newArray(
+      Type::array(valueType), this->lowering.builder_.getInt64(0), length, "values");
   bool collects = all && !errorType->isNever();
-  llvm::Value *errors = collects ? lowering_.groupLowerer().newArray(
-                                       Type::array(errorType), lowering_.builder_.getInt64(0),
-                                       lowering_.builder_.getInt64(0), "errors")
+  llvm::Value *errors = collects ? this->lowering.groupLowerer().newArray(
+                                       Type::array(errorType), this->lowering.builder_.getInt64(0),
+                                       this->lowering.builder_.getInt64(0), "errors")
                                  : nullptr;
-  llvm::Value *resultSlot = lowering_.functionFrame().createStackSlot(
-      lowering_.moduleBuilder().lower(resultType), "combined");
+  llvm::Value *resultSlot = this->lowering.functionFrame().createStackSlot(
+      this->lowering.moduleBuilder().lower(resultType), "combined");
 
-  llvm::Value *indexSlot = lowering_.functionFrame().createStackSlot(i64, "index");
-  lowering_.builder_.CreateStore(lowering_.builder_.getInt64(0), indexSlot);
-  llvm::BasicBlock *headBlock = lowering_.functionFrame().newBlock("combine");
-  llvm::BasicBlock *bodyBlock = lowering_.functionFrame().newBlock("combine.body");
-  llvm::BasicBlock *okBlock = lowering_.functionFrame().newBlock("combine.ok");
-  llvm::BasicBlock *errBlock = lowering_.functionFrame().newBlock("combine.err");
-  llvm::BasicBlock *nextBlock = lowering_.functionFrame().newBlock("combine.next");
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("combine.end");
-  llvm::BasicBlock *doneBlock = lowering_.functionFrame().newBlock("combine.done");
-  lowering_.functionFrame().emitBlock(headBlock);
-  llvm::Value *i = lowering_.builder_.CreateLoad(i64, indexSlot, "i");
-  lowering_.builder_.CreateCondBr(lowering_.builder_.CreateICmpULT(i, length), bodyBlock, endBlock);
+  llvm::Value *indexSlot = this->lowering.functionFrame().createStackSlot(i64, "index");
+  this->lowering.builder_.CreateStore(this->lowering.builder_.getInt64(0), indexSlot);
+  llvm::BasicBlock *headBlock = this->lowering.functionFrame().newBlock("combine");
+  llvm::BasicBlock *bodyBlock = this->lowering.functionFrame().newBlock("combine.body");
+  llvm::BasicBlock *okBlock = this->lowering.functionFrame().newBlock("combine.ok");
+  llvm::BasicBlock *errBlock = this->lowering.functionFrame().newBlock("combine.err");
+  llvm::BasicBlock *nextBlock = this->lowering.functionFrame().newBlock("combine.next");
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("combine.end");
+  llvm::BasicBlock *doneBlock = this->lowering.functionFrame().newBlock("combine.done");
+  this->lowering.functionFrame().emitBlock(headBlock);
+  llvm::Value *i = this->lowering.builder_.CreateLoad(i64, indexSlot, "i");
+  this->lowering.builder_.CreateCondBr(this->lowering.builder_.CreateICmpULT(i, length), bodyBlock,
+                                       endBlock);
 
-  lowering_.functionFrame().switchTo(bodyBlock);
-  llvm::Value *result = lowering_.builder_.CreateLoad(
-      lowering_.moduleBuilder().lower(element),
-      lowering_.arrayLowerer().elementAddress(lowering_.arrayLowerer().arrayData(array.value),
-                                              element, i),
+  this->lowering.functionFrame().switchTo(bodyBlock);
+  llvm::Value *result = this->lowering.builder_.CreateLoad(
+      this->lowering.moduleBuilder().lower(element),
+      this->lowering.arrayLowerer().elementAddress(
+          this->lowering.arrayLowerer().arrayData(array.value), element, i),
       "result");
-  lowering_.builder_.CreateCondBr(lowering_.resultLowerer().resultIsOk(result, element), okBlock,
-                                  errBlock);
+  this->lowering.builder_.CreateCondBr(this->lowering.resultLowerer().resultIsOk(result, element),
+                                       okBlock, errBlock);
 
-  lowering_.functionFrame().switchTo(okBlock);
-  llvm::Value *value = lowering_.resultLowerer().resultHalf(result, element, false);
-  lowering_.refCounts().retainValue(value, valueType);
-  lowering_.arrayLowerer().emitPush(values, {value}, valueType);
-  lowering_.builder_.CreateBr(nextBlock);
+  this->lowering.functionFrame().switchTo(okBlock);
+  llvm::Value *value = this->lowering.resultLowerer().resultHalf(result, element, false);
+  this->lowering.refCounts().retainValue(value, valueType);
+  this->lowering.arrayLowerer().emitPush(values, {value}, valueType);
+  this->lowering.builder_.CreateBr(nextBlock);
 
-  lowering_.functionFrame().switchTo(errBlock);
-  llvm::Value *error = lowering_.resultLowerer().resultHalf(result, element, true);
-  lowering_.refCounts().retainValue(error, errorType);
+  this->lowering.functionFrame().switchTo(errBlock);
+  llvm::Value *error = this->lowering.resultLowerer().resultHalf(result, element, true);
+  this->lowering.refCounts().retainValue(error, errorType);
   if (all) {
     if (collects) {
-      lowering_.arrayLowerer().emitPush(errors, {error}, errorType);
+      this->lowering.arrayLowerer().emitPush(errors, {error}, errorType);
     }
-    lowering_.builder_.CreateBr(nextBlock);
+    this->lowering.builder_.CreateBr(nextBlock);
   } else {
-    lowering_.refCounts().releaseValue(values, Type::array(valueType));
-    lowering_.builder_.CreateStore(lowering_.resultLowerer().makeResult(
-                                       resultType, lowering_.builder_.getFalse(), nullptr, error,
-                                       lowering_.resultLowerer().resultSite(result, element)),
-                                   resultSlot);
-    lowering_.builder_.CreateBr(doneBlock);
+    this->lowering.refCounts().releaseValue(values, Type::array(valueType));
+    this->lowering.builder_.CreateStore(
+        this->lowering.resultLowerer().makeResult(
+            resultType, this->lowering.builder_.getFalse(), nullptr, error,
+            this->lowering.resultLowerer().resultSite(result, element)),
+        resultSlot);
+    this->lowering.builder_.CreateBr(doneBlock);
   }
 
-  lowering_.functionFrame().switchTo(nextBlock);
-  lowering_.builder_.CreateStore(lowering_.builder_.CreateAdd(i, lowering_.builder_.getInt64(1)),
-                                 indexSlot);
-  lowering_.builder_.CreateBr(headBlock);
+  this->lowering.functionFrame().switchTo(nextBlock);
+  this->lowering.builder_.CreateStore(
+      this->lowering.builder_.CreateAdd(i, this->lowering.builder_.getInt64(1)), indexSlot);
+  this->lowering.builder_.CreateBr(headBlock);
 
-  lowering_.functionFrame().switchTo(endBlock);
+  this->lowering.functionFrame().switchTo(endBlock);
   if (!collects) {
-    lowering_.builder_.CreateStore(lowering_.resultLowerer().makeResult(
-                                       resultType, lowering_.builder_.getTrue(), values, nullptr),
-                                   resultSlot);
+    this->lowering.builder_.CreateStore(
+        this->lowering.resultLowerer().makeResult(resultType, this->lowering.builder_.getTrue(),
+                                                  values, nullptr),
+        resultSlot);
   } else {
-    llvm::Value *failed = lowering_.builder_.CreateICmpNE(
-        lowering_.arrayLowerer().arrayLength(errors), lowering_.builder_.getInt64(0));
-    llvm::Value *okResult = lowering_.resultLowerer().makeResult(
-        resultType, lowering_.builder_.getTrue(), values, nullptr);
-    llvm::Value *errResult =
-        lowering_.resultLowerer().makeResult(resultType, lowering_.builder_.getFalse(), nullptr,
-                                             errors, lowering_.errSites().site(call->loc()));
-    llvm::BasicBlock *failBlock = lowering_.functionFrame().newBlock("combine.failed");
-    llvm::BasicBlock *passBlock = lowering_.functionFrame().newBlock("combine.passed");
-    lowering_.builder_.CreateCondBr(failed, failBlock, passBlock);
-    lowering_.functionFrame().switchTo(failBlock);
-    lowering_.refCounts().releaseValue(values, Type::array(valueType));
-    lowering_.builder_.CreateStore(errResult, resultSlot);
-    lowering_.builder_.CreateBr(doneBlock);
-    lowering_.functionFrame().switchTo(passBlock);
-    lowering_.refCounts().releaseValue(errors, resultType->errType());
-    lowering_.builder_.CreateStore(okResult, resultSlot);
+    llvm::Value *failed = this->lowering.builder_.CreateICmpNE(
+        this->lowering.arrayLowerer().arrayLength(errors), this->lowering.builder_.getInt64(0));
+    llvm::Value *okResult = this->lowering.resultLowerer().makeResult(
+        resultType, this->lowering.builder_.getTrue(), values, nullptr);
+    llvm::Value *errResult = this->lowering.resultLowerer().makeResult(
+        resultType, this->lowering.builder_.getFalse(), nullptr, errors,
+        this->lowering.errSites().site(call->loc()));
+    llvm::BasicBlock *failBlock = this->lowering.functionFrame().newBlock("combine.failed");
+    llvm::BasicBlock *passBlock = this->lowering.functionFrame().newBlock("combine.passed");
+    this->lowering.builder_.CreateCondBr(failed, failBlock, passBlock);
+    this->lowering.functionFrame().switchTo(failBlock);
+    this->lowering.refCounts().releaseValue(values, Type::array(valueType));
+    this->lowering.builder_.CreateStore(errResult, resultSlot);
+    this->lowering.builder_.CreateBr(doneBlock);
+    this->lowering.functionFrame().switchTo(passBlock);
+    this->lowering.refCounts().releaseValue(errors, resultType->errType());
+    this->lowering.builder_.CreateStore(okResult, resultSlot);
   }
-  lowering_.functionFrame().emitBlock(doneBlock);
-  lowering_.refCounts().dropOperand(array);
+  this->lowering.functionFrame().emitBlock(doneBlock);
+  this->lowering.refCounts().dropOperand(array);
 
-  return lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(resultType), resultSlot);
+  return this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(resultType),
+                                            resultSlot);
 }
 
 llvm::Value *ResultCombineLowerer::emitCombineTuple(CallExpr *call) {
   bool all = call->builtin() == Builtin::ResultCombineWithAllErrors;
   auto *list = cast<ArrayLitExpr>(call->args[0]);
-  const Type *resultType = call->type, *tupleType = resultType->okType();
+  const Type *resultType = call->type;
+  const Type *tupleType = resultType->okType();
   const Type *errorType = all && resultType->errType()->isArray() ? resultType->errType()->inner()
                                                                   : resultType->errType();
   std::vector<llvm::Value *> results;
   std::vector<const Type *> types;
   for (const ArrayLitExpr::Element &e : list->elements) {
-    results.push_back(lowering_.exprLowerer().emitExpr(e.expr));
+    results.push_back(this->lowering.exprLowerer().emitExpr(e.expr));
     types.push_back(e.expr->type);
   }
-  llvm::Value *resultSlot = lowering_.functionFrame().createStackSlot(
-      lowering_.moduleBuilder().lower(resultType), "combined");
-  llvm::BasicBlock *doneBlock = lowering_.functionFrame().newBlock("combine.done");
+  llvm::Value *resultSlot = this->lowering.functionFrame().createStackSlot(
+      this->lowering.moduleBuilder().lower(resultType), "combined");
+  llvm::BasicBlock *doneBlock = this->lowering.functionFrame().newBlock("combine.done");
   llvm::Value *errors = all && !errorType->isNever()
-                            ? lowering_.groupLowerer().newArray(
-                                  Type::array(errorType), lowering_.builder_.getInt64(0),
-                                  lowering_.builder_.getInt64(0), "errors")
+                            ? this->lowering.groupLowerer().newArray(
+                                  Type::array(errorType), this->lowering.builder_.getInt64(0),
+                                  this->lowering.builder_.getInt64(0), "errors")
                             : nullptr;
 
   for (size_t i = 0; i < results.size(); ++i) {
     if (types[i]->errType()->isNever()) {
       continue;
     }
-    llvm::BasicBlock *errBlock = lowering_.functionFrame().newBlock("combine.err");
-    llvm::BasicBlock *nextBlock = lowering_.functionFrame().newBlock("combine.next");
-    lowering_.builder_.CreateCondBr(lowering_.resultLowerer().resultIsOk(results[i], types[i]),
-                                    nextBlock, errBlock);
-    lowering_.functionFrame().switchTo(errBlock);
-    llvm::Value *error = lowering_.resultLowerer().convertHalf(
-        lowering_.resultLowerer().resultHalf(results[i], types[i], true), types[i]->errType(),
+    llvm::BasicBlock *errBlock = this->lowering.functionFrame().newBlock("combine.err");
+    llvm::BasicBlock *nextBlock = this->lowering.functionFrame().newBlock("combine.next");
+    this->lowering.builder_.CreateCondBr(
+        this->lowering.resultLowerer().resultIsOk(results[i], types[i]), nextBlock, errBlock);
+    this->lowering.functionFrame().switchTo(errBlock);
+    llvm::Value *error = this->lowering.resultLowerer().convertHalf(
+        this->lowering.resultLowerer().resultHalf(results[i], types[i], true), types[i]->errType(),
         errorType);
     if (errors) {
-      lowering_.arrayLowerer().emitPush(errors, {error}, errorType);
+      this->lowering.arrayLowerer().emitPush(errors, {error}, errorType);
     } else {
       for (size_t j = 0; j < results.size(); ++j) {
         if (j != i) {
-          lowering_.refCounts().releaseValue(results[j], types[j]);
+          this->lowering.refCounts().releaseValue(results[j], types[j]);
         }
       }
-      lowering_.builder_.CreateStore(
-          lowering_.resultLowerer().makeResult(
-              resultType, lowering_.builder_.getFalse(), nullptr, error,
-              lowering_.resultLowerer().resultSite(results[i], types[i])),
+      this->lowering.builder_.CreateStore(
+          this->lowering.resultLowerer().makeResult(
+              resultType, this->lowering.builder_.getFalse(), nullptr, error,
+              this->lowering.resultLowerer().resultSite(results[i], types[i])),
           resultSlot);
-      lowering_.builder_.CreateBr(doneBlock);
-      lowering_.functionFrame().switchTo(nextBlock);
+      this->lowering.builder_.CreateBr(doneBlock);
+      this->lowering.functionFrame().switchTo(nextBlock);
       continue;
     }
-    lowering_.functionFrame().emitBlock(nextBlock);
+    this->lowering.functionFrame().emitBlock(nextBlock);
   }
 
   auto makeTuple = [&] {
-    const Lowering::ObjectLayout &layout = lowering_.objectLayouts().objectLayout(tupleType);
+    const Lowering::ObjectLayout &layout = this->lowering.objectLayouts().objectLayout(tupleType);
     std::vector<unsigned> keys;
     for (unsigned i = 0; i < results.size(); ++i) {
       keys.push_back(i);
     }
-    llvm::Value *tuple = lowering_.objectLayouts().allocObject(tupleType, keys);
+    llvm::Value *tuple = this->lowering.objectLayouts().allocObject(tupleType, keys);
     for (unsigned i = 0; i < results.size(); ++i) {
-      lowering_.builder_.CreateStore(
-          lowering_.resultLowerer().resultHalf(results[i], types[i], false),
-          lowering_.builder_.CreateStructGEP(layout.type, tuple, layout.elements[i]));
+      this->lowering.builder_.CreateStore(
+          this->lowering.resultLowerer().resultHalf(results[i], types[i], false),
+          this->lowering.builder_.CreateStructGEP(layout.type, tuple, layout.elements[i]));
     }
-    lowering_.groupLowerer().adoptFields(tuple, tupleType);
-    lowering_.builder_.CreateStore(lowering_.resultLowerer().makeResult(
-                                       resultType, lowering_.builder_.getTrue(), tuple, nullptr),
-                                   resultSlot);
+    this->lowering.groupLowerer().adoptFields(tuple, tupleType);
+    this->lowering.builder_.CreateStore(
+        this->lowering.resultLowerer().makeResult(resultType, this->lowering.builder_.getTrue(),
+                                                  tuple, nullptr),
+        resultSlot);
   };
   if (!errors) {
     makeTuple();
   } else {
-    llvm::BasicBlock *failBlock = lowering_.functionFrame().newBlock("combine.failed");
-    llvm::BasicBlock *passBlock = lowering_.functionFrame().newBlock("combine.passed");
-    lowering_.builder_.CreateCondBr(
-        lowering_.builder_.CreateICmpNE(lowering_.arrayLowerer().arrayLength(errors),
-                                        lowering_.builder_.getInt64(0)),
+    llvm::BasicBlock *failBlock = this->lowering.functionFrame().newBlock("combine.failed");
+    llvm::BasicBlock *passBlock = this->lowering.functionFrame().newBlock("combine.passed");
+    this->lowering.builder_.CreateCondBr(
+        this->lowering.builder_.CreateICmpNE(this->lowering.arrayLowerer().arrayLength(errors),
+                                             this->lowering.builder_.getInt64(0)),
         failBlock, passBlock);
-    lowering_.functionFrame().switchTo(failBlock);
+    this->lowering.functionFrame().switchTo(failBlock);
     for (size_t i = 0; i < results.size(); ++i) {
-      lowering_.refCounts().releaseValue(
-          lowering_.resultLowerer().resultHalf(results[i], types[i], false), types[i]->okType());
+      this->lowering.refCounts().releaseValue(
+          this->lowering.resultLowerer().resultHalf(results[i], types[i], false),
+          types[i]->okType());
     }
-    lowering_.builder_.CreateStore(
-        lowering_.resultLowerer().makeResult(resultType, lowering_.builder_.getFalse(), nullptr,
-                                             errors, lowering_.errSites().site(call->loc())),
-        resultSlot);
-    lowering_.builder_.CreateBr(doneBlock);
-    lowering_.functionFrame().switchTo(passBlock);
-    lowering_.refCounts().releaseValue(errors, resultType->errType());
+    this->lowering.builder_.CreateStore(this->lowering.resultLowerer().makeResult(
+                                            resultType, this->lowering.builder_.getFalse(), nullptr,
+                                            errors, this->lowering.errSites().site(call->loc())),
+                                        resultSlot);
+    this->lowering.builder_.CreateBr(doneBlock);
+    this->lowering.functionFrame().switchTo(passBlock);
+    this->lowering.refCounts().releaseValue(errors, resultType->errType());
     makeTuple();
   }
-  lowering_.functionFrame().emitBlock(doneBlock);
+  this->lowering.functionFrame().emitBlock(doneBlock);
 
-  return lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(resultType), resultSlot);
+  return this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(resultType),
+                                            resultSlot);
 }
 
 }

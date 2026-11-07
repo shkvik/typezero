@@ -5,38 +5,35 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/SaveAndRestore.h"
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-FsPromisesChecker::FsPromisesChecker(Checker &checker) : checker_(checker) {}
+FsPromisesChecker::FsPromisesChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
-  checker_.file_->usesAsync = true;
+  this->checker.file_->usesAsync = true;
   call->type = Type::error();
   if (fn == "constants") {
-    checker_.diags_.error(loc, "'constants' of 'node:fs/promises' is not a function");
+    this->checker.diags_.error(loc, "'constants' of 'node:fs/promises' is not a function");
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     return call;
   }
   if (fn == "open") {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         loc, "'open' of 'node:fs/promises' is not supported yet: there is no FileHandle; "
              "use 'readFile', 'writeFile' or 'appendFile', which read and write "
              "Buffers too");
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     return call;
   }
   {
-    llvm::SaveAndRestore<bool> async(checker_.fsAsync_, true);
-    checker_.fsChecker().checkFsCall(call, fn, loc);
+    llvm::SaveAndRestore<bool> async(this->checker.fsAsync_, true);
+    this->checker.fsChecker().checkFsCall(call, fn, loc);
   }
   if (call->type->isError()) {
     return call;
@@ -52,13 +49,13 @@ Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef fn,
       {Builtin::FsReplace, Builtin::FspReplace},   {Builtin::FsRealpath, Builtin::FspRealpath}};
   for (const auto &[sync, async] : waiting) {
     if (call->builtin() == sync) {
-      const Type *error = checker_.fsErrorTypes().ofCall(call);
+      const Type *error = this->checker.fsErrorTypes().ofCall(call);
       call->target = BuiltinCall{.builtin = async};
       call->type = Type::promise(Type::result(call->type, error));
       return call;
     }
   }
-  checker_.diags_.error(loc, "'" + fn + "' of 'node:fs/promises' is not supported yet");
+  this->checker.diags_.error(loc, "'" + fn + "' of 'node:fs/promises' is not supported yet");
   call->type = Type::error();
 
   return call;

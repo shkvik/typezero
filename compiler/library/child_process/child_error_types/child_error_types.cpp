@@ -250,10 +250,11 @@ const llvm::StringLiteral kChildTypeNames[] = {
 
 }
 
-ChildErrorTypes::ChildErrorTypes(Checker &checker) : checker_(checker) {}
+ChildErrorTypes::ChildErrorTypes(Checker &owner)
+    : checker(owner) {}
 
 void ChildErrorTypes::declare() {
-  BuiltinModuleTypes &types = checker_.builtinModuleTypes();
+  BuiltinModuleTypes &types = this->checker.builtinModuleTypes();
   if (types.declared("ExecTextError")) {
     return;
   }
@@ -269,11 +270,11 @@ const Type *ChildErrorTypes::errorOf(llvm::StringRef fn, bool text, bool shell) 
                                             : (shell ? "SpawnShell" : "Spawn");
   name += text ? "TextError" : "BytesError";
 
-  return checker_.builtinModuleTypes().named(name);
+  return this->checker.builtinModuleTypes().named(name);
 }
 
 const Type *ChildErrorTypes::spawnResult(bool text) {
-  return checker_.builtinModuleTypes().named(text ? "SpawnTextResult" : "SpawnBytesResult");
+  return this->checker.builtinModuleTypes().named(text ? "SpawnTextResult" : "SpawnBytesResult");
 }
 
 }

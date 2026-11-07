@@ -6,7 +6,7 @@ namespace tz {
 
 class MathChecker {
 public:
-  explicit MathChecker(Checker &checker);
+  explicit MathChecker(Checker &owner);
 
   Expr *checkMathCall(CallExpr *call, MemberExpr *member, const Type *expected);
   Expr *checkMinMaxSpread(CallExpr *call, const Type *hint);
@@ -17,7 +17,7 @@ public:
   Expr *numericArg(Expr *arg, const Type *hint = nullptr);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

@@ -6,12 +6,14 @@ namespace tz {
 
 class IntlCallLowerer {
 public:
-  explicit IntlCallLowerer(Lowering &lowering);
+  explicit IntlCallLowerer(Lowering &owner);
 
   llvm::Value *emitIntlCall(CallExpr *call);
 
 private:
-  Lowering &lowering_;
+  static int optionIndex(llvm::StringRef name);
+
+  Lowering &lowering;
 };
 
 }

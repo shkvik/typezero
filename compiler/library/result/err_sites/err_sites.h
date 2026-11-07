@@ -6,7 +6,7 @@ namespace tz {
 
 class ErrSites {
 public:
-  explicit ErrSites(Lowering &lowering);
+  explicit ErrSites(Lowering &owner);
 
   llvm::Constant *site(llvm::SMLoc loc);
   llvm::Constant *none();
@@ -15,14 +15,16 @@ public:
   llvm::Type *type();
 
 private:
+  static std::string absolute(llvm::StringRef file);
+
   std::string functionName() const;
   std::string fileName(unsigned buffer);
 
-  Lowering &lowering_;
-  llvm::StringMap<llvm::Constant *> sites_;
-  llvm::DenseMap<unsigned, std::string> files_;
-  std::string entryDir_;
-  bool entryKnown_ = false;
+  Lowering &lowering;
+  llvm::StringMap<llvm::Constant *> sites;
+  llvm::DenseMap<unsigned, std::string> files;
+  std::string entryDir;
+  bool entryKnown = false;
 };
 
 }

@@ -171,7 +171,11 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
     element = type->elementType();
   } else if (type->isIterator()) {
     element = type->yielded();
-    this->checker.generatorChecker().checkSendsNothing(type, stmt->iterable->loc(), "'for...of'");
+    GeneratorChecker::ResultNextNeedsNoValue nothing =
+        this->checker.generatorChecker().checkSendsNothing(type, "'for...of'");
+    if (nothing.isErr()) {
+      this->checker.diags_.error(stmt->iterable->loc(), nothing.error().message);
+    }
   } else if (Expr *copy = this->checker.tupleChecker().arrayCopy(stmt->iterable)) {
     stmt->iterable = copy;
     element = copy->type->inner();

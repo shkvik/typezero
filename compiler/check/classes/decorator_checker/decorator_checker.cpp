@@ -18,11 +18,7 @@ using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-enum class Place { Class, Field, Method, Parameter };
-
-size_t argumentsOf(Place place) {
+size_t DecoratorChecker::argumentsOf(Place place) {
   switch (place) {
   case Place::Class:
     return 1;
@@ -33,33 +29,30 @@ size_t argumentsOf(Place place) {
   }
 }
 
-const char *placeText(Place place) {
+std::string DecoratorChecker::placeText(Place place) {
   switch (place) {
   case Place::Class:
-    return "a class";
+    return ErrorTextDecoratorPlace::aClass();
   case Place::Field:
-    return "a field";
+    return ErrorTextDecoratorPlace::aField();
   case Place::Method:
-    return "a method";
+    return ErrorTextDecoratorPlace::aMethod();
   default:
-    return "a parameter";
+    return ErrorTextDecoratorPlace::aParameter();
   }
 }
 
-const char *argumentsText(Place place) {
+std::string DecoratorChecker::argumentsText(Place place) {
   switch (place) {
   case Place::Class:
-    return "the class";
+    return ErrorTextDecoratorPlace::classArgs();
   case Place::Field:
-    return "the class and the name of the field";
+    return ErrorTextDecoratorPlace::fieldArgs();
   case Place::Method:
-    return "the class, the name of the method and its descriptor";
+    return ErrorTextDecoratorPlace::methodArgs();
   default:
-    return "the class, the name of the method (undefined for a constructor) and the position of "
-           "the parameter";
+    return ErrorTextDecoratorPlace::paramArgs();
   }
-}
-
 }
 
 std::string DecoratorChecker::decoratorName(const Expr *expr) {
@@ -146,17 +139,50 @@ bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &
   return true;
 }
 
+DecoratorChecker::ResultNamesAreDistinct DecoratorChecker::namesDistinct(const DecoratedName &a,
+                                                                         const DecoratedName &b,
+                                                                         llvm::StringRef cls) {
+  if (a.name == b.name) {
+    std::string what = a.isStatic != b.isStatic ? ErrorTextDecoratedNames::bothKinds(a.name)
+                                                : ErrorTextDecoratedNames::variants(a.name);
+    std::string shared;
+    for (const std::string &d : b.decorators) {
+      if (!d.empty() && llvm::is_contained(a.decorators, d)) {
+        shared = d;
+      }
+    }
+    std::string records = shared.empty() ? ErrorTextDecoratedNames::design()
+                                         : ErrorTextDecoratedNames::recordsOf(shared);
+    std::string message = ErrorTextDecoratedNames::shared(what, cls, records);
+
+    return err(DecoratorCheckerNamesDistinctError{
+        .code = DecoratorCheckerNamesDistinctErrorCode::SAME_NAME,
+        .message = message,
+    });
+  }
+
+  return ok(&b);
+}
+
+DecoratorChecker::ResultFirstConstructor
+DecoratorChecker::secondConstructor(const ClassDecl *cls, const FunctionDecl *first) {
+  if (first) {
+    std::string message = ErrorTextDecoratedNames::sameRecord(cls->name);
+
+    return err(DecoratorCheckerSecondConstructorError{
+        .code = DecoratorCheckerSecondConstructorErrorCode::TWO_DECORATED_CONSTRUCTORS,
+        .message = message,
+    });
+  }
+
+  return ok(cls);
+}
+
 void DecoratorChecker::checkDecoratedNames(ClassDecl *cls) {
-  struct Member {
-    llvm::StringRef name;
-    llvm::SMLoc loc;
-    bool isStatic;
-    std::vector<std::string> decorators;
-  };
-  std::vector<Member> members;
+  std::vector<DecoratedName> members;
   auto add = [&](llvm::StringRef name, llvm::SMLoc loc, bool isStatic,
                  llvm::ArrayRef<Decorator> decorators, const FunctionDecl *fn) {
-    Member m{name, loc, isStatic, {}};
+    DecoratedName m{name, loc, isStatic, {}};
     for (const Decorator &d : decorators) {
       m.decorators.push_back(DecoratorChecker::decoratorName(d.expr));
     }
@@ -179,28 +205,15 @@ void DecoratorChecker::checkDecoratedNames(ClassDecl *cls) {
   }
   for (size_t i = 0; i < members.size(); ++i) {
     for (size_t j = 0; j < i; ++j) {
-      const Member &a = members[j];
-      const Member &b = members[i];
-      if (a.name != b.name) {
+      const DecoratedName &a = members[j];
+      const DecoratedName &b = members[i];
+      ResultNamesAreDistinct distinct = DecoratorChecker::namesDistinct(a, b, cls->name);
+      if (distinct.isOk()) {
         continue;
       }
-      std::string what = a.isStatic != b.isStatic ? "both the static member '" + a.name.str() +
-                                                        "' and the member '" + a.name.str() + "'"
-                                                  : "two variants of '" + a.name.str() + "'";
-      std::string shared;
-      for (const std::string &d : b.decorators) {
-        if (!d.empty() && llvm::is_contained(a.decorators, d)) {
-          shared = d;
-        }
-      }
-      std::string records = shared.empty() ? "the records 'design:*' the compiler writes"
-                                           : "the records of '@" + shared + "'";
-      this->checker.diags_.error(
-          b.loc, what + " of '" + cls->name.str() + "' are decorated, and " + records +
-                     " for both would be one: metadata is kept on the class "
-                     "itself, by the member's name (docs/decorators.md, section 3); "
-                     "give one of them another name");
-      this->checker.diags_.note(a.loc, "the other one is here");
+      this->checker.diags_.error(b.loc, distinct.error().message);
+      std::string other = ErrorTextDecoratedNames::other();
+      this->checker.diags_.note(a.loc, other);
       break;
     }
   }
@@ -209,17 +222,14 @@ void DecoratorChecker::checkDecoratedNames(ClassDecl *cls) {
     if (!DecoratorChecker::decoratedParams(ctor)) {
       continue;
     }
-    if (!first) {
+    ResultFirstConstructor only = DecoratorChecker::secondConstructor(cls, first);
+    if (only.isOk()) {
       first = ctor;
       continue;
     }
-    this->checker.diags_.error(ctor->loc(),
-                               "two constructors of '" + cls->name.str() +
-                                   "' have decorated parameters, and the record "
-                                   "'design:paramtypes' the compiler writes for the class would be "
-                                   "one: metadata is kept on the class itself (docs/decorators.md, "
-                                   "section 3); decorate the parameters of one of them");
-    this->checker.diags_.note(first->loc(), "the other one is here");
+    this->checker.diags_.error(ctor->loc(), only.error().message);
+    std::string other = ErrorTextDecoratedNames::other();
+    this->checker.diags_.note(first->loc(), other);
     break;
   }
 }
@@ -274,6 +284,132 @@ void DecoratorChecker::decorateClass(ClassDecl *cls) {
   this->decorate(cls, nullptr, nullptr, uses);
 }
 
+DecoratorChecker::ResultPlainMemberFound
+DecoratorChecker::memberDecoratable(const ClassField *field, const FunctionDecl *method) {
+  if (field && field->accessor) {
+    std::string message = ErrorTextDecorate::accessor();
+
+    return err(DecoratorCheckerMemberDecoratableError{
+        .code = DecoratorCheckerMemberDecoratableErrorCode::ACCESSOR_FIELD,
+        .message = message,
+    });
+  }
+  if (method && method->isAbstract()) {
+    std::string message = ErrorTextDecorate::abstract();
+
+    return err(DecoratorCheckerMemberDecoratableError{
+        .code = DecoratorCheckerMemberDecoratableErrorCode::ABSTRACT_METHOD,
+        .message = message,
+    });
+  }
+
+  return ok(method);
+}
+
+DecoratorChecker::ResultDecoratorArgsFit DecoratorChecker::decoratorFits(llvm::StringRef label,
+                                                                         Place place, size_t needs,
+                                                                         size_t given,
+                                                                         const Type *third) {
+  if (needs > given) {
+    std::string needed = std::to_string(needs);
+    std::string gets = std::to_string(given);
+    std::string where = DecoratorChecker::placeText(place);
+    std::string args = DecoratorChecker::argumentsText(place);
+    std::string message = ErrorTextDecorate::arguments(label, where, needed, gets, args);
+
+    return err(DecoratorCheckerDecoratorFitsError{
+        .code = DecoratorCheckerDecoratorFitsErrorCode::TOO_MANY_ARGUMENTS,
+        .message = message,
+    });
+  }
+  if (third && place == Place::Parameter && third->isObject() && third->field("value")) {
+    std::string message = ErrorTextDecorate::descriptor(label);
+
+    return err(DecoratorCheckerDecoratorFitsError{
+        .code = DecoratorCheckerDecoratorFitsErrorCode::DESCRIPTOR_FOR_PARAMETER,
+        .message = message,
+    });
+  }
+  if (third && place == Place::Method && third->isNumeric()) {
+    std::string message = ErrorTextDecorate::position(label);
+
+    return err(DecoratorCheckerDecoratorFitsError{
+        .code = DecoratorCheckerDecoratorFitsErrorCode::POSITION_FOR_METHOD,
+        .message = message,
+    });
+  }
+
+  return ok(needs);
+}
+
+DecoratorChecker::ResultDescriptorUsable DecoratorChecker::genericDescriptor(const ClassDecl *cls,
+                                                                             bool descriptor) {
+  if (descriptor && cls->isGeneric()) {
+    std::string message = ErrorTextDecorate::generic(cls->name);
+
+    return err(DecoratorCheckerGenericDescriptorError{
+        .code = DecoratorCheckerGenericDescriptorErrorCode::GENERIC_CLASS_DESCRIPTOR,
+        .message = message,
+    });
+  }
+
+  return ok(cls);
+}
+
+DecoratorChecker::ResultMetadataArgsPair DecoratorChecker::metadataArgs(const CallExpr *metadata) {
+  if (metadata->args.size() != 2 || metadata->hasSpread()) {
+    std::string message = ErrorTextDecorate::metadata();
+
+    return err(DecoratorCheckerMetadataArgsError{
+        .code = DecoratorCheckerMetadataArgsErrorCode::WRONG_METADATA_ARGUMENTS,
+        .message = message,
+    });
+  }
+
+  return ok(metadata);
+}
+
+DecoratorChecker::ResultDecoratorReturns
+DecoratorChecker::decoratorResult(llvm::StringRef label, const Type *result, Place place,
+                                  bool descriptor, const ClassDecl *current) {
+  bool nothing = result->isVoid() || result->isUndefined() || result->isError();
+  if (!nothing && place == Place::Class && result->isConstructor()) {
+    std::string message = ErrorTextDecoratorResult::runtime(label, result->name(), current->name);
+
+    return err(DecoratorCheckerDecoratorResultError{
+        .code = DecoratorCheckerDecoratorResultErrorCode::RUNTIME_CLASS,
+        .message = message,
+    });
+  }
+  if (!nothing && place == Place::Class) {
+    std::string message = ErrorTextDecoratorResult::forClass(label, result->name());
+
+    return err(DecoratorCheckerDecoratorResultError{
+        .code = DecoratorCheckerDecoratorResultErrorCode::CLASS_RESULT,
+        .message = message,
+    });
+  }
+  if (!nothing && place == Place::Method && descriptor) {
+    std::string message = ErrorTextDecoratorResult::forMethod(label, result->name());
+
+    return err(DecoratorCheckerDecoratorResultError{
+        .code = DecoratorCheckerDecoratorResultErrorCode::METHOD_RESULT,
+        .message = message,
+    });
+  }
+  if (!nothing) {
+    std::string where = DecoratorChecker::placeText(place);
+    std::string message = ErrorTextDecoratorResult::other(label, result->name(), where);
+
+    return err(DecoratorCheckerDecoratorResultError{
+        .code = DecoratorCheckerDecoratorResultErrorCode::OTHER_RESULT,
+        .message = message,
+    });
+  }
+
+  return ok(result);
+}
+
 void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl *method,
                                 llvm::ArrayRef<Checker::DecoratorUse> uses) {
   if (uses.empty()) {
@@ -283,16 +419,9 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
   Place own = field ? Place::Field : method ? Place::Method : Place::Class;
   llvm::StringRef memberName = field ? field->name : method ? method->name : llvm::StringRef();
   llvm::SMLoc at = uses[0].decorator->loc;
-  if (field && field->accessor) {
-    this->checker.diags_.error(
-        at, "a decorator cannot decorate an 'accessor' field: in tz it is an ordinary "
-            "field, and reading or writing it never runs code");
-    return;
-  }
-  if (method && method->isAbstract()) {
-    this->checker.diags_.error(
-        at, "a decorator cannot decorate an abstract method, which has no code; decorate "
-            "the methods that implement it");
+  ResultPlainMemberFound plain = DecoratorChecker::memberDecoratable(field, method);
+  if (plain.isErr()) {
+    this->checker.diags_.error(at, plain.error().message);
     return;
   }
 
@@ -366,10 +495,10 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
 
   std::vector<size_t> takes;
   bool descriptor = false;
-  bool ok = true;
+  bool fitting = true;
   for (size_t i = 0; i < uses.size(); ++i) {
     Place place = uses[i].param >= 0 ? Place::Parameter : own;
-    size_t given = argumentsOf(place);
+    size_t given = DecoratorChecker::argumentsOf(place);
     if (!callees[i]) {
       takes.push_back(0);
       continue;
@@ -380,39 +509,24 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     size_t count = known ? params.size() : given;
     size_t needs = known ? std::min(required, count) : given;
     std::string name = DecoratorChecker::decoratorName(uses[i].decorator->expr);
-    std::string label = name.empty() ? "the decorator" : "'" + name + "'";
+    std::string label = ErrorTextDecoratorPlace::label(name);
     llvm::SMLoc loc = uses[i].decorator->loc;
     const Type *third = known && params.size() >= 3 ? params[2]->nonOptional() : nullptr;
-    if (needs > given) {
-      this->checker.diags_.error(
-          loc, label + " cannot decorate " + placeText(place) + ": it takes " +
-                   std::to_string(needs) + " arguments, and a decorator of " + placeText(place) +
-                   " gets " + std::to_string(given) + ", " + argumentsText(place));
-      ok = false;
-    } else if (third && place == Place::Parameter && third->isObject() && third->field("value")) {
-      this->checker.diags_.error(
-          loc, label + " takes the descriptor of a method: it decorates methods, not "
-                       "parameters");
-      ok = false;
-    } else if (third && place == Place::Method && third->isNumeric()) {
-      this->checker.diags_.error(
-          loc, label + " takes the position of a parameter: it decorates parameters, not "
-                       "methods");
-      ok = false;
+    ResultDecoratorArgsFit fits =
+        DecoratorChecker::decoratorFits(label, place, needs, given, third);
+    if (fits.isErr()) {
+      this->checker.diags_.error(loc, fits.error().message);
+      fitting = false;
     }
     takes.push_back(std::min(count, given));
     descriptor |= place == Place::Method && count >= 3;
   }
-  if (!ok) {
+  if (!fitting) {
     return;
   }
-  if (descriptor && cls->isGeneric()) {
-    this->checker.diags_.error(
-        at, "a decorator that takes the descriptor of a method of a generic class is not "
-            "supported yet: each instance of '" +
-                cls->name +
-                "' has a method of its own; decorate a method of a class "
-                "that is not generic, or take only the class and the name");
+  ResultDescriptorUsable usable = DecoratorChecker::genericDescriptor(cls, descriptor);
+  if (usable.isErr()) {
+    this->checker.diags_.error(at, usable.error().message);
     return;
   }
 
@@ -435,7 +549,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     impl->place = GlobalVar{.usedInFunction = true};
     impl->reassigned = true;
     Scopes::ResultEntryDeclared added =
-        this->checker.scopes().declare(impl->name, impl->loc, {VarEntry{.var = impl}});
+        this->checker.scopes().declare(impl->name, {VarEntry{.var = impl}});
     if (added.isErr()) {
       this->checker.diags_.error(impl->loc, added.error().message);
     }
@@ -489,10 +603,9 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     Place place = use.param >= 0 ? Place::Parameter : own;
     if (!callees[i]) {
       auto *metadata = cast<CallExpr>(use.decorator->expr);
-      if (metadata->args.size() != 2 || metadata->hasSpread()) {
-        this->checker.diags_.error(
-            loc, "'Reflect.metadata' takes the key and the value of the record, e.g. "
-                 "'@Reflect.metadata(Role, \"admin\")'");
+      ResultMetadataArgsPair pair = DecoratorChecker::metadataArgs(metadata);
+      if (pair.isErr()) {
+        this->checker.diags_.error(loc, pair.error().message);
         continue;
       }
       auto *callee = this->checker.ctx_.make<MemberExpr>(
@@ -542,32 +655,13 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
         this->checker.lateClasses().replaceClass(current, given, loc);
         current = given;
       }
-    } else if (!result->isVoid() && !result->isUndefined() && !result->isError()) {
+    } else {
       std::string name = DecoratorChecker::decoratorName(use.decorator->expr);
-      std::string label = name.empty() ? "the decorator" : "'" + name + "'";
-      if (place == Place::Class && result->isConstructor()) {
-        this->checker.diags_.error(
-            loc, label + " returns '" + result->name().str() +
-                     "', some class known only when the program runs, and the class it "
-                     "gives in place of '" +
-                     current->name.str() +
-                     "' must be known when compiling: make the decorator generic, "
-                     "'<T extends Constructor>(cls: T)', and return 'cls' or a class "
-                     "that extends it");
-      } else if (place == Place::Class) {
-        this->checker.diags_.error(
-            loc, label + " returns '" + result->name().str() +
-                     "': a class decorator gives back nothing, the class it got, or a "
-                     "class that extends it, which then replaces it");
-      } else if (place == Place::Method && descVar) {
-        this->checker.diags_.error(
-            loc, label + " returns '" + result->name().str() +
-                     "': a decorator of a method returns nothing, or the descriptor "
-                     "it got");
-      } else {
-        this->checker.diags_.error(loc, label + " returns '" + result->name().str() +
-                                            "', which a decorator of " + placeText(place) +
-                                            " cannot give back; return nothing");
+      std::string label = ErrorTextDecoratorPlace::label(name);
+      ResultDecoratorReturns returned =
+          DecoratorChecker::decoratorResult(label, result, place, descVar != nullptr, current);
+      if (returned.isErr()) {
+        this->checker.diags_.error(loc, returned.error().message);
       }
     }
     out.push_back(this->checker.ctx_.make<ExprStmt>(loc, applied));

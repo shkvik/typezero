@@ -16,7 +16,6 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -65,7 +64,9 @@ const Replacement kReplacements[] = {
     {"toJSON", "'String(a)'"},
 };
 
-std::string exponentMessage(const Type *found) {
+}
+
+std::string DecimalChecker::exponentMessage(const Type *found) {
   std::string message = "the exponent of a decimal power must be an integer ('int'), found '" +
                         found->name().str() + "'";
   if (found->isFloat() || found->isDecimal()) {
@@ -75,7 +76,7 @@ std::string exponentMessage(const Type *found) {
   return message;
 }
 
-std::string utf8(const std::u16string &text) {
+std::string DecimalChecker::utf8(const std::u16string &text) {
   std::string result;
   llvm::convertUTF16ToUTF8String(
       llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
@@ -84,9 +85,8 @@ std::string utf8(const std::u16string &text) {
   return result;
 }
 
-}
-
-DecimalChecker::DecimalChecker(Checker &checker) : checker_(checker) {}
+DecimalChecker::DecimalChecker(Checker &owner)
+    : checker(owner) {}
 
 std::pair<llvm::StringRef, llvm::StringRef> DecimalChecker::sidesOf(const BinaryExpr *bin) {
   llvm::StringRef source = bin->source;
@@ -108,7 +108,7 @@ bool DecimalChecker::isLiteralTree(const Expr *expr) {
   case Expr::Kind::Unary: {
     auto *unary = cast<UnaryExpr>(expr);
     return (unary->op == UnaryOp::Neg || unary->op == UnaryOp::Plus) &&
-           isLiteralTree(unary->operand);
+           DecimalChecker::isLiteralTree(unary->operand);
   }
   case Expr::Kind::Binary: {
     auto *bin = cast<BinaryExpr>(expr);
@@ -119,7 +119,7 @@ bool DecimalChecker::isLiteralTree(const Expr *expr) {
     case BinaryOp::Div:
     case BinaryOp::Rem:
     case BinaryOp::Pow:
-      return isLiteralTree(bin->lhs) && isLiteralTree(bin->rhs);
+      return DecimalChecker::isLiteralTree(bin->lhs) && DecimalChecker::isLiteralTree(bin->rhs);
     default:
       return false;
     }
@@ -160,28 +160,28 @@ void DecimalChecker::checkComparisonOperands(BinaryExpr *bin) {
     auto *member = dyn_cast<MemberExpr>(e);
     auto *owner = member ? dyn_cast<NameExpr>(member->object) : nullptr;
 
-    return isLiteralTree(e) || isa<StringLitExpr>(e) || isa<BoolLitExpr>(e) ||
-           (owner && checker_.scopes().lookup(owner->name).enumDecl());
+    return DecimalChecker::isLiteralTree(e) || isa<StringLitExpr>(e) || isa<BoolLitExpr>(e) ||
+           (owner && this->checker.scopes().lookup(owner->name).enumDecl());
   };
   auto hint = [&](const Expr *other, const Expr *self) {
     const Type *type = other->type ? other->type->nonOptional() : nullptr;
     if (type && (type->isLiteral() || type->isUnion())) {
       return other->type;
     }
-    if (type && type->isNumeric() && (type->isFloat() || fitsLiteral(self, type))) {
+    if (type && type->isNumeric() && (type->isFloat() || DecimalChecker::fitsLiteral(self, type))) {
       return type;
     }
 
-    return literalHint(other, nullptr);
+    return DecimalChecker::literalHint(other, nullptr);
   };
   if (literal(bin->lhs) && !literal(bin->rhs)) {
-    bin->rhs = checker_.exprChecker().checkExpr(bin->rhs);
-    bin->lhs = checker_.exprChecker().checkExpr(bin->lhs, hint(bin->rhs, bin->lhs));
+    bin->rhs = this->checker.exprChecker().checkExpr(bin->rhs);
+    bin->lhs = this->checker.exprChecker().checkExpr(bin->lhs, hint(bin->rhs, bin->lhs));
     return;
   }
-  bin->lhs = checker_.exprChecker().checkExpr(bin->lhs);
-  bin->rhs = checker_.exprChecker().checkExpr(bin->rhs, literal(bin->rhs) ? hint(bin->lhs, bin->rhs)
-                                                                          : nullptr);
+  bin->lhs = this->checker.exprChecker().checkExpr(bin->lhs);
+  bin->rhs = this->checker.exprChecker().checkExpr(
+      bin->rhs, literal(bin->rhs) ? hint(bin->lhs, bin->rhs) : nullptr);
 }
 
 std::optional<DecimalLiteral> DecimalChecker::decimalLiteral(const Expr *expr) {
@@ -199,20 +199,21 @@ std::optional<DecimalLiteral> DecimalChecker::decimalLiteral(const Expr *expr) {
 }
 
 void DecimalChecker::checkDecimalLiteralRange(const Expr *lit) {
-  std::optional<DecimalLiteral> value = decimalLiteral(lit);
+  std::optional<DecimalLiteral> value = DecimalChecker::decimalLiteral(lit);
   if (!value) {
-    checker_.diags_.error(lit->loc(), "this number cannot be read as a decimal");
+    this->checker.diags_.error(lit->loc(), "this number cannot be read as a decimal");
     return;
   }
   if (!value->isZero() && value->top() > kDecimalMaxExp) {
-    checker_.diags_.error(lit->loc(), "this decimal is out of range: a decimal has at most " +
-                                          std::to_string(kDecimalMaxExp + 1) +
-                                          " digits before the point");
+    this->checker.diags_.error(lit->loc(), "this decimal is out of range: a decimal has at most " +
+                                               std::to_string(kDecimalMaxExp + 1) +
+                                               " digits before the point");
   }
 }
 
 void DecimalChecker::reportDecimalMix(const BinaryExpr *bin) {
-  const Type *l = bin->lhs->type, *r = bin->rhs->type;
+  const Type *l = bin->lhs->type;
+  const Type *r = bin->rhs->type;
   bool leftDecimal = l->nonOptional()->isDecimal();
   const Type *other = leftDecimal ? r : l;
   if (other->isInteger()) {
@@ -220,7 +221,7 @@ void DecimalChecker::reportDecimalMix(const BinaryExpr *bin) {
         (llvm::Twine("operator '") + opSpelling(bin->op) + "' cannot be applied to types '" +
          l->name() + "' and '" + r->name() + "': a number changes its type only explicitly")
             .str();
-    auto [lhs, rhs] = sidesOf(bin);
+    auto [lhs, rhs] = DecimalChecker::sidesOf(bin);
     auto wrap = [](llvm::StringRef text) { return TypeRelations::operandText(text); };
     if (!lhs.empty() && !rhs.empty()) {
       message +=
@@ -232,11 +233,12 @@ void DecimalChecker::reportDecimalMix(const BinaryExpr *bin) {
     } else {
       message += " with '.toDecimal()'";
     }
-    checker_.diags_.error(bin->loc(), message);
+    this->checker.diags_.error(bin->loc(), message);
     return;
   }
   if (!other->nonOptional()->isFloat()) {
-    checker_.binaryChecker().reportOperandTypes(bin->loc(), opSpelling(bin->op), l, r);
+    std::string mismatch = BinaryChecker::operandTypesText(opSpelling(bin->op), l, r);
+    this->checker.diags_.error(bin->loc(), mismatch);
     return;
   }
   std::string message = (llvm::Twine("operator '") + opSpelling(bin->op) +
@@ -244,7 +246,7 @@ void DecimalChecker::reportDecimalMix(const BinaryExpr *bin) {
                          "': a double is inexact already, and a decimal would take that on "
                          "silently; convert it explicitly")
                             .str();
-  auto [lhs, rhs] = sidesOf(bin);
+  auto [lhs, rhs] = DecimalChecker::sidesOf(bin);
   if (other->isFloat() && !lhs.empty() && !rhs.empty()) {
     message += leftDecimal
                    ? (": '" + lhs + " " + opSpelling(bin->op) + " decimal(" + rhs + ")'").str()
@@ -252,23 +254,25 @@ void DecimalChecker::reportDecimalMix(const BinaryExpr *bin) {
   } else {
     message += " with 'decimal(x)'";
   }
-  checker_.diags_.error(bin->loc(), message);
+  this->checker.diags_.error(bin->loc(), message);
 }
 
 Expr *DecimalChecker::checkDecimalArithmetic(BinaryExpr *bin) {
   const Type *decimal = Type::decimalTy();
-  const Type *l = bin->lhs->type, *r = bin->rhs->type;
+  const Type *l = bin->lhs->type;
+  const Type *r = bin->rhs->type;
   bin->type = Type::error();
   if (bin->op == BinaryOp::Pow) {
     if (!l->isDecimal()) {
-      checker_.binaryChecker().reportOperandTypes(bin->loc(), "**", l, r);
+      std::string mismatch = BinaryChecker::operandTypesText("**", l, r);
+      this->checker.diags_.error(bin->loc(), mismatch);
       return bin;
     }
     if (!r->isInteger()) {
-      checker_.diags_.error(bin->rhs->loc(), exponentMessage(r));
+      this->checker.diags_.error(bin->rhs->loc(), DecimalChecker::exponentMessage(r));
       return bin;
     }
-    bin->rhs = checker_.typeRelations().convert(bin->rhs, Type::intTy());
+    bin->rhs = this->checker.typeRelations().convert(bin->rhs, Type::intTy());
     bin->type = decimal;
     return bin;
   }
@@ -278,12 +282,12 @@ Expr *DecimalChecker::checkDecimalArithmetic(BinaryExpr *bin) {
       continue;
     }
     if (!type->isInteger() || !TypeRelations::isIntLiteralTree(*side)) {
-      reportDecimalMix(bin);
+      this->reportDecimalMix(bin);
       return bin;
     }
-    *side = checker_.typeRelations().convert(*side, decimal);
+    *side = this->checker.typeRelations().convert(*side, decimal);
   }
-  checkDecimalDivisor(bin->op, bin->rhs);
+  this->checkDecimalDivisor(bin->op, bin->rhs);
   bin->type = decimal;
 
   return bin;
@@ -297,10 +301,10 @@ Expr *DecimalChecker::checkDecimalComparison(BinaryExpr *bin) {
       continue;
     }
     if (!type->isInteger() || !TypeRelations::isIntLiteralTree(*side)) {
-      reportDecimalMix(bin);
+      this->reportDecimalMix(bin);
       return bin;
     }
-    *side = checker_.typeRelations().convert(*side, Type::decimalTy());
+    *side = this->checker.typeRelations().convert(*side, Type::decimalTy());
   }
 
   return bin;
@@ -310,21 +314,22 @@ void DecimalChecker::checkDecimalAssign(AssignExpr *assign, BinaryOp op) {
   const Type *valueType = assign->value->type;
   if (op == BinaryOp::Pow) {
     if (!valueType->isInteger()) {
-      checker_.diags_.error(assign->value->loc(), exponentMessage(valueType));
+      this->checker.diags_.error(assign->value->loc(), DecimalChecker::exponentMessage(valueType));
       return;
     }
-    assign->value = checker_.typeRelations().convert(assign->value, Type::intTy());
+    assign->value = this->checker.typeRelations().convert(assign->value, Type::intTy());
     return;
   }
   bool arithmetic = op == BinaryOp::Add || op == BinaryOp::Sub || op == BinaryOp::Mul ||
                     op == BinaryOp::Div || op == BinaryOp::Rem;
   if (!arithmetic) {
-    checker_.binaryChecker().reportOperandTypes(
-        assign->loc(), (std::string(opSpelling(op)) + "=").c_str(), assign->type, valueType);
+    std::string spelling = std::string(opSpelling(op)) + "=";
+    std::string mismatch = BinaryChecker::operandTypesText(spelling, assign->type, valueType);
+    this->checker.diags_.error(assign->loc(), mismatch);
     return;
   }
-  assign->value = checker_.typeRelations().coerce(assign->value, Type::decimalTy());
-  checkDecimalDivisor(op, assign->value);
+  assign->value = this->checker.typeRelations().coerce(assign->value, Type::decimalTy());
+  this->checkDecimalDivisor(op, assign->value);
 }
 
 void DecimalChecker::checkDecimalDivisor(BinaryOp op, const Expr *divisor) {
@@ -336,24 +341,25 @@ void DecimalChecker::checkDecimalDivisor(BinaryOp op, const Expr *divisor) {
        conv = dyn_cast<CastExpr>(value)) {
     value = conv->operand;
   }
-  std::optional<DecimalLiteral> literal = decimalLiteral(value);
-  bool zero = literal ? literal->isZero() : checker_.constantFolder().intConstant(value) == 0;
+  std::optional<DecimalLiteral> literal = DecimalChecker::decimalLiteral(value);
+  bool zero = literal ? literal->isZero() : this->checker.constantFolder().intConstant(value) == 0;
   if (zero) {
-    checker_.diags_.error(divisor->loc(),
-                          "decimal division by zero; a decimal has no Infinity or NaN");
+    this->checker.diags_.error(divisor->loc(),
+                               "decimal division by zero; a decimal has no Infinity or NaN");
   }
 }
 
 Expr *DecimalChecker::checkDecimalCall(CallExpr *call, llvm::SMLoc loc) {
   call->type = Type::error();
-  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+  ArgumentChecker::ResultArityMatches arity =
+      this->checker.argumentChecker().checkArity(call, 1, 1);
   if (arity.isErr()) {
-    checker_.diags_.error(loc, arity.error().message);
+    this->checker.diags_.error(loc, arity.error().message);
     return call;
   }
   Expr *&arg = call->args[0];
-  bool literal = decimalLiteral(arg).has_value();
-  arg = checker_.exprChecker().checkExpr(arg, literal ? Type::decimalTy() : nullptr);
+  bool literal = DecimalChecker::decimalLiteral(arg).has_value();
+  arg = this->checker.exprChecker().checkExpr(arg, literal ? Type::decimalTy() : nullptr);
   const Type *type = arg->type;
   if (type->isError()) {
     return call;
@@ -365,26 +371,26 @@ Expr *DecimalChecker::checkDecimalCall(CallExpr *call, llvm::SMLoc loc) {
                                  return m->isStringLiteral();
                                })));
   if (type->isInteger() || type->isDecimal()) {
-    arg = checker_.typeRelations().convert(arg, Type::decimalTy());
+    arg = this->checker.typeRelations().convert(arg, Type::decimalTy());
   } else if (textual) {
-    std::optional<std::vector<std::string>> texts = checker_.literalTypes().knownTexts(arg);
+    std::optional<std::vector<std::string>> texts = this->checker.literalTypes().knownTexts(arg);
     for (const std::string &t : texts ? *texts : std::vector<std::string>()) {
       llvm::SmallVector<llvm::UTF16, 32> units;
       llvm::convertUTF8ToUTF16String(t, units);
       if (!tz_decimal_text_ok(reinterpret_cast<const uint16_t *>(units.data()), units.size())) {
-        checker_.diags_.error(arg->loc(), "'" + t +
-                                              "' is no decimal number; write it as one, e.g. "
-                                              "'12.50', '-1e3' or '0x1f'");
+        this->checker.diags_.error(arg->loc(), "'" + t +
+                                                   "' is no decimal number; write it as one, e.g. "
+                                                   "'12.50', '-1e3' or '0x1f'");
         return call;
       }
     }
     if (!text->isString()) {
-      arg = checker_.typeRelations().convert(arg, Type::string());
+      arg = this->checker.typeRelations().convert(arg, Type::string());
     }
     call->target = BuiltinCall{.builtin = Builtin::DecimalOf};
-    call->type =
-        texts ? Type::decimalTy()
-              : Type::result(Type::decimalTy(), checker_.prelude().builtinType("DecimalError"));
+    call->type = texts ? Type::decimalTy()
+                       : Type::result(Type::decimalTy(),
+                                      this->checker.prelude().builtinType("DecimalError"));
     return call;
   } else if (!type->isFloat()) {
     std::string message =
@@ -392,7 +398,7 @@ Expr *DecimalChecker::checkDecimalCall(CallExpr *call, llvm::SMLoc loc) {
     if (type->isOptional()) {
       message += "; the value may be undefined: check it first or give a default with '??'";
     }
-    checker_.diags_.error(arg->loc(), message);
+    this->checker.diags_.error(arg->loc(), message);
     return call;
   }
   call->target = BuiltinCall{.builtin = Builtin::DecimalOf};
@@ -416,34 +422,37 @@ Expr *DecimalChecker::checkDecimalStatic(CallExpr *call, MemberExpr *member) {
       message += ": there are no settings for all decimals; division takes its places and "
                  "rounding as arguments, 'a.div(b, places, mode)'";
     }
-    checker_.diags_.error(member->loc(), message);
+    this->checker.diags_.error(member->loc(), message);
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     return call;
   }
-  const Type *decimal = Type::decimalTy(), *array = Type::array(decimal);
-  bool someValue = false, ok = true;
+  const Type *decimal = Type::decimalTy();
+  const Type *array = Type::array(decimal);
+  bool someValue = false;
+  bool ok = true;
   for (size_t i = 0; i < call->args.size(); ++i) {
     Expr *&arg = call->args[i];
     if (!call->spreads(i)) {
-      arg = checker_.argumentChecker().checkArg(arg, decimal);
+      arg = this->checker.argumentChecker().checkArg(arg, decimal);
       someValue = true;
       continue;
     }
-    arg = checker_.exprChecker().checkExpr(arg, array);
+    arg = this->checker.exprChecker().checkExpr(arg, array);
     if (arg->type != array && !arg->type->isError()) {
-      checker_.diags_.error(arg->loc(), "only an array of decimals can be spread here, found '" +
-                                            arg->type->name() + "'");
+      this->checker.diags_.error(arg->loc(),
+                                 "only an array of decimals can be spread here, found '" +
+                                     arg->type->name() + "'");
       ok = false;
     }
-    someValue |= checker_.indexProofs().provesNotEmpty(arg);
+    someValue |= this->checker.indexProofs().provesNotEmpty(arg);
   }
   if (!ok) {
     return call;
   }
   if (call->args.empty() && builtin != Builtin::DecSum) {
-    checker_.diags_.error(member->loc(), "decimal." + name + "() needs at least one value");
+    this->checker.diags_.error(member->loc(), "decimal." + name + "() needs at least one value");
     return call;
   }
   call->target = BuiltinCall{.builtin = builtin};
@@ -453,31 +462,33 @@ Expr *DecimalChecker::checkDecimalStatic(CallExpr *call, MemberExpr *member) {
 }
 
 Expr *DecimalChecker::checkRoundingMode(Expr *arg) {
-  arg = checker_.argumentChecker().checkArg(arg, Type::string());
+  arg = this->checker.argumentChecker().checkArg(arg, Type::string());
   if (arg->type->isError()) {
     return arg;
   }
   if (auto *lit = dyn_cast<StringLitExpr>(arg)) {
     if (decimalRoundingMode(lit->value) < 0) {
-      checker_.diags_.error(arg->loc(), "unknown rounding mode '" + utf8(lit->value) +
-                                            "'; the modes are " + kRoundingModes);
+      this->checker.diags_.error(arg->loc(), "unknown rounding mode '" +
+                                                 DecimalChecker::utf8(lit->value) +
+                                                 "'; the modes are " + kRoundingModes);
     }
     return arg;
   }
-  std::optional<std::vector<std::string>> modes = checker_.literalTypes().knownTexts(arg);
+  std::optional<std::vector<std::string>> modes = this->checker.literalTypes().knownTexts(arg);
   if (!modes) {
-    checker_.diags_.error(arg->loc(), std::string("a rounding mode known only when the program "
-                                                  "runs may be no mode; check it first, e.g. "
-                                                  "'if (mode == \"up\" || mode == \"down\")'; the "
-                                                  "modes are ") +
-                                          kRoundingModes);
+    this->checker.diags_.error(arg->loc(),
+                               std::string("a rounding mode known only when the program "
+                                           "runs may be no mode; check it first, e.g. "
+                                           "'if (mode == \"up\" || mode == \"down\")'; the "
+                                           "modes are ") +
+                                   kRoundingModes);
     return arg;
   }
   for (const std::string &mode : *modes) {
     std::u16string text(mode.begin(), mode.end());
     if (decimalRoundingMode(text) < 0) {
-      checker_.diags_.error(arg->loc(), "unknown rounding mode '" + mode + "'; the modes are " +
-                                            kRoundingModes);
+      this->checker.diags_.error(arg->loc(), "unknown rounding mode '" + mode +
+                                                 "'; the modes are " + kRoundingModes);
       break;
     }
   }
@@ -486,7 +497,7 @@ Expr *DecimalChecker::checkRoundingMode(Expr *arg) {
 }
 
 Expr *DecimalChecker::checkDecimalCount(Expr *arg, const char *what, int64_t lo, int64_t hi) {
-  arg = checker_.exprChecker().checkExpr(arg, Type::intTy());
+  arg = this->checker.exprChecker().checkExpr(arg, Type::intTy());
   const Type *type = arg->type;
   if (type->isError()) {
     return arg;
@@ -497,16 +508,16 @@ Expr *DecimalChecker::checkDecimalCount(Expr *arg, const char *what, int64_t lo,
     if (type->isOptional()) {
       message += "; the value may be undefined: check it first or give a default with '??'";
     }
-    checker_.diags_.error(arg->loc(), message);
+    this->checker.diags_.error(arg->loc(), message);
     return arg;
   }
   IndexProofs::ResultBetweenProven between =
-      checker_.indexProofs().requireBetween(arg, lo, hi, what);
+      this->checker.indexProofs().requireBetween(arg, lo, hi, what);
   if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
-    checker_.diags_.error(arg->loc(), between.error().message);
+    this->checker.diags_.error(arg->loc(), between.error().message);
   }
 
-  return checker_.typeRelations().convert(arg, Type::intTy());
+  return this->checker.typeRelations().convert(arg, Type::intTy());
 }
 
 Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
@@ -542,7 +553,7 @@ Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
   }
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
   };
   if (!method) {
@@ -555,51 +566,52 @@ Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
     if (name == "isNaN" || name == "isFinite") {
       message += "; a decimal is never NaN or infinite";
     }
-    checker_.diags_.error(member->loc(), message);
+    this->checker.diags_.error(member->loc(), message);
     checkArgsLoosely();
     return call;
   }
   if (method->builtin == Builtin::DecDecimalPlaces && !call->args.empty()) {
-    checker_.diags_.error(member->loc(), "decimalPlaces() only counts the places; to round, use "
-                                         "'x.round(places, mode)'");
+    this->checker.diags_.error(member->loc(),
+                               "decimalPlaces() only counts the places; to round, use "
+                               "'x.round(places, mode)'");
     checkArgsLoosely();
     return call;
   }
   ArgumentChecker::ResultArityMatches arity =
-      checker_.argumentChecker().checkArity(call, method->minArgs, method->maxArgs);
+      this->checker.argumentChecker().checkArity(call, method->minArgs, method->maxArgs);
   if (arity.isErr()) {
-    checker_.diags_.error(member->loc(), arity.error().message);
+    this->checker.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   for (size_t i = 0; i < call->args.size(); ++i) {
     Expr *&arg = call->args[i];
     switch (method->args[i]) {
     case 'd':
-      arg = checker_.argumentChecker().checkArg(arg, decimal);
+      arg = this->checker.argumentChecker().checkArg(arg, decimal);
       break;
     case 'p': {
       bool positive =
           method->builtin == Builtin::DecDiv || method->builtin == Builtin::DecToExponential;
-      arg = checkDecimalCount(arg, "the number of decimal places", positive ? 0 : -1000000000,
-                              1000000000);
+      arg = this->checkDecimalCount(arg, "the number of decimal places", positive ? 0 : -1000000000,
+                                    1000000000);
       break;
     }
     case 's':
-      arg = checkDecimalCount(arg, "the number of significant digits", 1, 1000000000);
+      arg = this->checkDecimalCount(arg, "the number of significant digits", 1, 1000000000);
       break;
     case 'b':
-      arg = checkDecimalCount(arg, "the base", 2, 36);
+      arg = this->checkDecimalCount(arg, "the base", 2, 36);
       break;
     case 'k':
-      arg = checkDecimalCount(arg, "the power of ten", -9007199254740991, 9007199254740991);
+      arg = this->checkDecimalCount(arg, "the power of ten", -9007199254740991, 9007199254740991);
       break;
     default:
-      arg = checkRoundingMode(arg);
+      arg = this->checkRoundingMode(arg);
       break;
     }
   }
   if (method->builtin == Builtin::DecDiv) {
-    checkDecimalDivisor(BinaryOp::Div, call->args[0]);
+    this->checkDecimalDivisor(BinaryOp::Div, call->args[0]);
   }
   call->target = BuiltinCall{.builtin = method->builtin};
   call->type = method->ret;
@@ -608,7 +620,7 @@ Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
 }
 
 void DecimalChecker::reportBigInt(llvm::SMLoc loc, llvm::StringRef what) {
-  checker_.diags_.error(
+  this->checker.diags_.error(
       loc, what + " is not supported, as there is no bigint: integers up to 9.2e18 fit in "
                   "'int', longer ones in 'decimal' (e.g. 'decimal(2) ** 100')");
 }

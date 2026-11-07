@@ -9,72 +9,72 @@
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 
-using llvm::BasicBlock;
 using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-LibraryCallLowerer::LibraryCallLowerer(Lowering &lowering) : lowering_(lowering) {}
+LibraryCallLowerer::LibraryCallLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Value *LibraryCallLowerer::emitLibBuiltin(CallExpr *call) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
   switch (call->builtin()) {
     case Builtin::LibListener: {
-      Lowering::Operand box = lowering_.refCounts().emitOperand(call->args[0], true);
-      llvm::Value *value =
-          lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(call->type),
-                                        lowering_.builder_.CreateConstInBoundsGEP1_64(
-                                            lowering_.builder_.getInt8Ty(), box.value, 24),
-                                        "listener");
-      lowering_.refCounts().retainValue(value, call->type);
-      lowering_.refCounts().dropOperand(box);
+      Lowering::Operand box = this->lowering.refCounts().emitOperand(call->args[0], true);
+      llvm::Value *value = this->lowering.builder_.CreateLoad(
+          this->lowering.moduleBuilder().lower(call->type),
+          this->lowering.builder_.CreateConstInBoundsGEP1_64(this->lowering.builder_.getInt8Ty(),
+                                                             box.value, 24),
+          "listener");
+      this->lowering.refCounts().retainValue(value, call->type);
+      this->lowering.refCounts().dropOperand(box);
       return value;
     }
     case Builtin::LibBoundListener: {
-      Lowering::Operand box = lowering_.refCounts().emitOperand(call->args[0], true);
-      llvm::Value *value =
-          lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(call->type),
-                                        lowering_.builder_.CreateConstInBoundsGEP1_64(
-                                            lowering_.builder_.getInt8Ty(), box.value, 24),
-                                        "listener");
-      lowering_.refCounts().dropOperand(box);
-      llvm::Value *receiver = lowering_.exprLowerer().emitExpr(call->args[1]);
-      return lowering_.builder_.CreateInsertValue(value, receiver, 1);
+      Lowering::Operand box = this->lowering.refCounts().emitOperand(call->args[0], true);
+      llvm::Value *value = this->lowering.builder_.CreateLoad(
+          this->lowering.moduleBuilder().lower(call->type),
+          this->lowering.builder_.CreateConstInBoundsGEP1_64(this->lowering.builder_.getInt8Ty(),
+                                                             box.value, 24),
+          "listener");
+      this->lowering.refCounts().dropOperand(box);
+      llvm::Value *receiver = this->lowering.exprLowerer().emitExpr(call->args[1]);
+      return this->lowering.builder_.CreateInsertValue(value, receiver, 1);
     }
     case Builtin::LibAs: {
       const Type *from = call->args[0]->type;
       const Type *wanted = call->type->nonOptional();
-      llvm::Value *object = lowering_.exprLowerer().emitExpr(call->args[0]);
+      llvm::Value *object = this->lowering.exprLowerer().emitExpr(call->args[0]);
       if (from->isSubtypeOf(wanted)) {
         return object;
       }
       const ClassDecl *cls = wanted->classDecl();
-      llvm::Value *descriptor = lowering_.builder_.CreateLoad(
-          ptr,
-          lowering_.builder_.CreateConstInBoundsGEP1_64(lowering_.builder_.getInt8Ty(), object, 8),
-          "descriptor");
-      llvm::Value *id = lowering_.builder_.CreateLoad(
-          lowering_.builder_.getInt32Ty(),
-          lowering_.builder_.CreateStructGEP(lowering_.layoutDescTy_, descriptor, 6), "class");
+      llvm::Value *descriptor =
+          this->lowering.builder_.CreateLoad(ptr,
+                                             this->lowering.builder_.CreateConstInBoundsGEP1_64(
+                                                 this->lowering.builder_.getInt8Ty(), object, 8),
+                                             "descriptor");
+      llvm::Value *id = this->lowering.builder_.CreateLoad(
+          this->lowering.builder_.getInt32Ty(),
+          this->lowering.builder_.CreateStructGEP(this->lowering.layoutDescTy_, descriptor, 6),
+          "class");
       llvm::Value *matches =
           cls->lastId <= cls->id
-              ? lowering_.builder_.CreateICmpEQ(id, lowering_.builder_.getInt32(cls->id))
-              : lowering_.builder_.CreateICmpULE(
-                    lowering_.builder_.CreateSub(id, lowering_.builder_.getInt32(cls->id)),
-                    lowering_.builder_.getInt32(cls->lastId - cls->id));
-      llvm::BasicBlock *dropBlock = lowering_.functionFrame().newBlock("as.drop");
-      llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("as.end");
-      lowering_.builder_.CreateCondBr(matches, endBlock, dropBlock);
-      llvm::BasicBlock *entry = lowering_.builder_.GetInsertBlock();
-      lowering_.functionFrame().switchTo(dropBlock);
-      lowering_.refCounts().releaseValue(object, from);
-      llvm::BasicBlock *dropEnd = lowering_.builder_.GetInsertBlock();
-      lowering_.builder_.CreateBr(endBlock);
-      lowering_.functionFrame().switchTo(endBlock);
-      llvm::PHINode *phi = lowering_.builder_.CreatePHI(ptr, 2, "as");
+              ? this->lowering.builder_.CreateICmpEQ(id, this->lowering.builder_.getInt32(cls->id))
+              : this->lowering.builder_.CreateICmpULE(
+                    this->lowering.builder_.CreateSub(id,
+                                                      this->lowering.builder_.getInt32(cls->id)),
+                    this->lowering.builder_.getInt32(cls->lastId - cls->id));
+      llvm::BasicBlock *dropBlock = this->lowering.functionFrame().newBlock("as.drop");
+      llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("as.end");
+      this->lowering.builder_.CreateCondBr(matches, endBlock, dropBlock);
+      llvm::BasicBlock *entry = this->lowering.builder_.GetInsertBlock();
+      this->lowering.functionFrame().switchTo(dropBlock);
+      this->lowering.refCounts().releaseValue(object, from);
+      llvm::BasicBlock *dropEnd = this->lowering.builder_.GetInsertBlock();
+      this->lowering.builder_.CreateBr(endBlock);
+      this->lowering.functionFrame().switchTo(endBlock);
+      llvm::PHINode *phi = this->lowering.builder_.CreatePHI(ptr, 2, "as");
       phi->addIncoming(object, entry);
       phi->addIncoming(llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr)), dropEnd);
       return phi;
@@ -89,50 +89,52 @@ llvm::Value *LibraryCallLowerer::emitLibBuiltin(CallExpr *call) {
     case Builtin::LibStdinChunk:
     case Builtin::LibStdinFailed:
     case Builtin::LibStdWrite:
-      return lowering_.streamLowerer().emitStreamBuiltin(call);
+      return this->lowering.streamLowerer().emitStreamBuiltin(call);
     case Builtin::LibAhead:
     case Builtin::LibAheadMovable:
-      return lowering_.exprLowerer().emitExpr(call->args[0]);
+      return this->lowering.exprLowerer().emitExpr(call->args[0]);
     case Builtin::LibPanic: {
-      llvm::Value *text = lowering_.exprLowerer().emitExpr(call->args[0]);
-      llvm::FunctionCallee panic = lowering_.processLowerer().processFunction(
-          "tz_panic_str", lowering_.builder_.getVoidTy(), {ptr, lowering_.builder_.getInt64Ty()});
+      llvm::Value *text = this->lowering.exprLowerer().emitExpr(call->args[0]);
+      llvm::FunctionCallee panic = this->lowering.processLowerer().processFunction(
+          "tz_panic_str", this->lowering.builder_.getVoidTy(),
+          {ptr, this->lowering.builder_.getInt64Ty()});
       cast<llvm::Function>(panic.getCallee())->addFnAttr(llvm::Attribute::NoReturn);
-      lowering_.builder_
-          .CreateCall(panic, {lowering_.stringLowerer().stringObj(text),
-                              lowering_.stringLowerer().stringMeta(text)})
+      this->lowering.builder_
+          .CreateCall(panic, {this->lowering.stringLowerer().stringObj(text),
+                              this->lowering.stringLowerer().stringMeta(text)})
           ->setDoesNotReturn();
-      lowering_.builder_.CreateUnreachable();
-      lowering_.functionFrame().startDeadBlock();
+      this->lowering.builder_.CreateUnreachable();
+      this->lowering.functionFrame().startDeadBlock();
       return nullptr;
     }
     case Builtin::LibDefer: {
-      llvm::Value *run = lowering_.exprLowerer().emitExpr(call->args[0]);
-      return lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction("tz_defer_new", ptr, {ptr, ptr}),
-          {lowering_.builder_.CreateExtractValue(run, 0),
-           lowering_.builder_.CreateExtractValue(run, 1)},
+      llvm::Value *run = this->lowering.exprLowerer().emitExpr(call->args[0]);
+      return this->lowering.builder_.CreateCall(
+          this->lowering.processLowerer().processFunction("tz_defer_new", ptr, {ptr, ptr}),
+          {this->lowering.builder_.CreateExtractValue(run, 0),
+           this->lowering.builder_.CreateExtractValue(run, 1)},
           "defer");
     }
     case Builtin::LibWithContext: {
-      Lowering::Operand frame = lowering_.refCounts().emitOperand(call->args[0], true);
-      Lowering::Operand callback = lowering_.refCounts().emitOperand(call->args[1], true);
-      llvm::Value *outer = lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction("tz_context_enter", ptr, {ptr}), {frame.value},
-          "outer");
-      llvm::Value *result =
-          lowering_.closureLowerer().callFunctionValue(callback.value, call->args[1]->type, {});
-      lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-                                        "tz_context_leave", lowering_.builder_.getVoidTy(), {ptr}),
-                                    {outer});
-      lowering_.refCounts().dropOperand(callback);
-      lowering_.refCounts().dropOperand(frame);
+      Lowering::Operand frame = this->lowering.refCounts().emitOperand(call->args[0], true);
+      Lowering::Operand callback = this->lowering.refCounts().emitOperand(call->args[1], true);
+      llvm::Value *outer = this->lowering.builder_.CreateCall(
+          this->lowering.processLowerer().processFunction("tz_context_enter", ptr, {ptr}),
+          {frame.value}, "outer");
+      llvm::Value *result = this->lowering.closureLowerer().callFunctionValue(
+          callback.value, call->args[1]->type, {});
+      this->lowering.builder_.CreateCall(
+          this->lowering.processLowerer().processFunction(
+              "tz_context_leave", this->lowering.builder_.getVoidTy(), {ptr}),
+          {outer});
+      this->lowering.refCounts().dropOperand(callback);
+      this->lowering.refCounts().dropOperand(frame);
       return result;
     }
     case Builtin::LibOrder:
-      if (lowering_.parallel_) {
-        lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-            "tz_order_enter", lowering_.builder_.getVoidTy(), {}));
+      if (this->lowering.parallel_) {
+        this->lowering.builder_.CreateCall(this->lowering.processLowerer().processFunction(
+            "tz_order_enter", this->lowering.builder_.getVoidTy(), {}));
       }
       return nullptr;
     default:

@@ -6,7 +6,7 @@ namespace tz {
 
 class JsonWriters {
 public:
-  explicit JsonWriters(Lowering &lowering);
+  explicit JsonWriters(Lowering &owner);
 
   bool writable(const Type *type);
   llvm::Value *emitStringify(llvm::Value *value, const Type *type);
@@ -34,11 +34,11 @@ private:
   void emitFields(const Type *type, llvm::ArrayRef<unsigned> keys, llvm::Value *out,
                   llvm::Value *object, llvm::Value *written);
 
-  Lowering &lowering_;
-  llvm::DenseMap<const Type *, bool> writable_;
-  llvm::DenseMap<const Type *, llvm::Function *> objects_;
-  llvm::DenseMap<const Type *, llvm::Function *> arrays_;
-  std::vector<Pending> pending_;
+  Lowering &lowering;
+  llvm::DenseMap<const Type *, bool> writableTypes;
+  llvm::DenseMap<const Type *, llvm::Function *> objects;
+  llvm::DenseMap<const Type *, llvm::Function *> arrays;
+  std::vector<Pending> pending;
 };
 
 }

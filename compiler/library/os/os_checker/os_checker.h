@@ -6,13 +6,16 @@ namespace tz {
 
 class OsChecker {
 public:
-  explicit OsChecker(Checker &checker);
+  explicit OsChecker(Checker &owner);
 
   Expr *checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
   Expr *checkOsValue(llvm::StringRef name, Expr *expr);
 
 private:
-  Checker &checker_;
+  static const Type *cpuInfoType();
+  static const Type *userInfoType();
+
+  Checker &checker;
 };
 
 }

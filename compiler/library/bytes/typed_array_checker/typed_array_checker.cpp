@@ -15,26 +15,19 @@
 #include "runtime/library/bytes/encodings/encodings.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/MathExtras.h"
-#include <limits>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::string rangeText(int64_t lo, int64_t hi) {
+std::string TypedArrayChecker::rangeText(int64_t lo, int64_t hi) {
   return std::to_string(lo) + " to " + std::to_string(hi);
 }
 
-}
-
-TypedArrayChecker::TypedArrayChecker(Checker &checker) : checker_(checker) {}
+TypedArrayChecker::TypedArrayChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *member,
                                                const Type *expected) {
@@ -51,11 +44,11 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
   };
   auto positions = [&](size_t from) {
     for (size_t i = from; i < call->args.size(); ++i) {
-      call->args[i] = checker_.memberChecker().checkPosition(call->args[i]);
+      call->args[i] = this->checker.memberChecker().checkPosition(call->args[i]);
     }
   };
   auto mode = [&](int value) {
-    auto *lit = checker_.ctx_.make<IntLitExpr>(call->loc(), uint64_t(value));
+    auto *lit = this->checker.ctx_.make<IntLitExpr>(call->loc(), uint64_t(value));
     lit->type = Type::intTy();
 
     return lit;
@@ -67,13 +60,14 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
   if (llvm::is_contained(callbacks, name) ||
       ((name == "sort" || name == "toSorted") && !call->args.empty())) {
     bool arrow = !call->args.empty() && isa<FunctionExpr>(call->args[0]);
-    Expr *result = checker_.callbackChecker().checkCallbackMethod(call, member, expected);
+    Expr *result = this->checker.callbackChecker().checkCallbackMethod(call, member, expected);
     int64_t lo, hi;
     if (name == "map" && !call->args.empty() && !arrow && call->args[0]->type->isFunction() &&
         type->elementRange(lo, hi) && type->bytes() != Bytes::Uint8Clamped) {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           call->args[0]->loc(),
-          "cannot prove that what the function returns fits in " + what + " (" + rangeText(lo, hi) +
+          "cannot prove that what the function returns fits in " + what + " (" +
+              TypedArrayChecker::rangeText(lo, hi) +
               "), and JavaScript would cut it without a word; pass an arrow that cuts it "
               "explicitly, e.g. 'x => " +
               wrapHint(type->bytes(), "f(x)") + "'");
@@ -84,61 +78,64 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     return result;
   }
   if (name == "flatMap") {
-    checker_.diags_.error(member->loc(),
-                          "typed arrays have no 'flatMap'; spread the elements into an "
-                          "array first, e.g. '[...u].flatMap(f)'");
+    this->checker.diags_.error(member->loc(),
+                               "typed arrays have no 'flatMap'; spread the elements into an "
+                               "array first, e.g. '[...u].flatMap(f)'");
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     return call;
   }
   if (name == "at") {
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 1, 1);
     if (arity.isErr()) {
-      checker_.diags_.error(member->loc(), arity.error().message);
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     positions(0);
-    bool inRange = checker_.indexProofs().provesAtInBounds(member->object, call->args[0]);
+    bool inRange = this->checker.indexProofs().provesAtInBounds(member->object, call->args[0]);
     call->mayBeOutOfRange = !inRange;
     return made(Builtin::BytesAt, inRange ? element : Type::optional(element));
   }
   if (name == "indexOf" || name == "lastIndexOf" || name == "includes") {
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 1, 2);
     if (arity.isErr()) {
-      checker_.diags_.error(member->loc(), arity.error().message);
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
-    Expr *value = checker_.mathChecker().numericArg(call->args[0], element);
+    Expr *value = this->checker.mathChecker().numericArg(call->args[0], element);
     if (!value->type->isNumeric()) {
       return call;
     }
     std::vector<Expr *> args{mode(name == "indexOf"       ? 0
                                   : name == "lastIndexOf" ? 1
                                                           : 2),
-                             checker_.typeRelations().convert(value, Type::doubleTy())};
+                             this->checker.typeRelations().convert(value, Type::doubleTy())};
     if (call->args.size() == 2) {
-      args.push_back(checker_.memberChecker().checkPosition(call->args[1]));
+      args.push_back(this->checker.memberChecker().checkPosition(call->args[1]));
     }
     call->args = std::move(args);
     return made(Builtin::BytesIndexOf, name == "includes" ? Type::boolTy() : Type::intTy());
   }
   if (name == "join" || name == "toString") {
     ArgumentChecker::ResultArityMatches arity =
-        checker_.argumentChecker().checkArity(call, 0, name == "join" ? 1 : 0);
+        this->checker.argumentChecker().checkArity(call, 0, name == "join" ? 1 : 0);
     if (arity.isErr()) {
-      checker_.diags_.error(member->loc(), arity.error().message);
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     if (!call->args.empty()) {
-      call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
+      call->args[0] = this->checker.argumentChecker().checkArg(call->args[0], Type::string());
     }
     return made(Builtin::BytesJoin, Type::string());
   }
   if (name == "reverse" || name == "sort" || name == "toReversed" || name == "toSorted") {
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 0, 0);
     if (arity.isErr()) {
-      checker_.diags_.error(member->loc(), arity.error().message);
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     if (name == "reverse") {
@@ -150,116 +147,130 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     return made(name == "toReversed" ? Builtin::BytesToReversed : Builtin::BytesToSorted, copy);
   }
   if (name == "fill") {
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 3);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 1, 3);
     if (arity.isErr()) {
-      checker_.diags_.error(member->loc(), arity.error().message);
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
-    call->args[0] = checker_.argumentChecker().checkArg(call->args[0], element);
-    checker_.byteProofs().checkFits(call->args[0], type, what);
-    call->args[0] = checker_.typeRelations().convert(call->args[0], Type::doubleTy());
+    call->args[0] = this->checker.argumentChecker().checkArg(call->args[0], element);
+    this->checker.byteProofs().checkFits(call->args[0], type, what);
+    call->args[0] = this->checker.typeRelations().convert(call->args[0], Type::doubleTy());
     positions(1);
     return made(Builtin::BytesFill, type);
   }
   if (name == "set") {
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 1, 2);
     if (arity.isErr()) {
-      checker_.diags_.error(member->loc(), arity.error().message);
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     Expr *&source = call->args[0];
     if (auto *lit = dyn_cast<ArrayLitExpr>(source)) {
-      source = checker_.exprChecker().checkExpr(lit, Type::array(element));
+      source = this->checker.exprChecker().checkExpr(lit, Type::array(element));
       if (source->type->isError()) {
         return call;
       }
       for (const ArrayLitExpr::Element &e : lit->elements) {
         if (!e.spread) {
-          checker_.byteProofs().checkFits(e.expr, type, what);
-        } else if (!checker_.bytesNewChecker().checkBytesSource(e.expr, type)) {
+          this->checker.byteProofs().checkFits(e.expr, type, what);
+        } else if (!this->checker.bytesNewChecker().checkBytesSource(e.expr, type)) {
           return call;
         }
       }
     } else {
-      source = checker_.exprChecker().checkExpr(source);
+      source = this->checker.exprChecker().checkExpr(source);
       if (source->type->isIterator()) {
-        checker_.diags_.error(source->loc(),
-                              "'set' takes an array or a typed array; collect the values "
-                              "of the iterator first, e.g. '[...it]'");
+        this->checker.diags_.error(source->loc(),
+                                   "'set' takes an array or a typed array; collect the values "
+                                   "of the iterator first, e.g. '[...it]'");
         return call;
       }
-      if (!checker_.bytesNewChecker().checkBytesSource(source, type)) {
+      if (!this->checker.bytesNewChecker().checkBytesSource(source, type)) {
         return call;
       }
     }
     positions(1);
-    checkSetRange(member->object, source, call->args.size() > 1 ? call->args[1] : nullptr);
+    this->checkSetRange(member->object, source, call->args.size() > 1 ? call->args[1] : nullptr);
     return made(Builtin::BytesSet, Type::voidTy());
   }
   if (name == "subarray" || name == "slice") {
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 2);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 0, 2);
     if (arity.isErr()) {
-      checker_.diags_.error(member->loc(), arity.error().message);
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     positions(0);
     return made(name == "subarray" ? Builtin::BytesSubarray : Builtin::BytesSlice, type);
   }
   if (name == "copyWithin") {
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 3);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 2, 3);
     if (arity.isErr()) {
-      checker_.diags_.error(member->loc(), arity.error().message);
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     positions(0);
     return made(Builtin::BytesCopyWithin, type);
   }
   if (name == "with") {
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 2);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 2, 2);
     if (arity.isErr()) {
-      checker_.diags_.error(member->loc(), arity.error().message);
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
-    call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
+    call->args[0] = this->checker.memberChecker().checkPosition(call->args[0]);
     if (!call->args[0]->type->isError() &&
-        !checker_.indexProofs().provesAtInBounds(member->object, call->args[0]) &&
-        !checker_.indexProofs().exempt(call->args[0]->loc(), member->object)) {
-      checker_.diags_.error(call->args[0]->loc(),
-                            "cannot prove that the index is within the array, and JavaScript "
-                            "would throw a RangeError; check it first, e.g. 'if (i >= 0 && i < " +
-                                valueText(member->object) + ".length)'");
+        !this->checker.indexProofs().provesAtInBounds(member->object, call->args[0]) &&
+        !this->checker.indexProofs().exempt(call->args[0]->loc(), member->object)) {
+      this->checker.diags_.error(
+          call->args[0]->loc(),
+          "cannot prove that the index is within the array, and JavaScript "
+          "would throw a RangeError; check it first, e.g. 'if (i >= 0 && i < " +
+              valueText(member->object) + ".length)'");
     }
-    call->args[1] = checker_.argumentChecker().checkArg(call->args[1], element);
-    checker_.byteProofs().checkFits(call->args[1], type, what);
-    call->args[1] = checker_.typeRelations().convert(call->args[1], Type::doubleTy());
+    call->args[1] = this->checker.argumentChecker().checkArg(call->args[1], element);
+    this->checker.byteProofs().checkFits(call->args[1], type, what);
+    call->args[1] = this->checker.typeRelations().convert(call->args[1], Type::doubleTy());
     return made(Builtin::BytesWith, copy);
   }
   if (name == "keys" || name == "values" || name == "entries") {
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 0, 0);
     if (arity.isErr()) {
-      checker_.diags_.error(member->loc(), arity.error().message);
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
-    auto *arrayName = checker_.ctx_.make<NameExpr>(member->loc(), "Array");
-    auto *from = checker_.ctx_.make<CallExpr>(
-        member->loc(), checker_.ctx_.make<MemberExpr>(member->loc(), arrayName, "from"),
+    auto *arrayName = this->checker.ctx_.make<NameExpr>(member->loc(), "Array");
+    auto *from = this->checker.ctx_.make<CallExpr>(
+        member->loc(), this->checker.ctx_.make<MemberExpr>(member->loc(), arrayName, "from"),
         std::vector<Expr *>{member->object});
     from->target = BuiltinCall{.builtin = Builtin::ArrayFrom};
     from->type = Type::array(element);
-    auto *iterated = checker_.ctx_.make<MemberExpr>(member->loc(), from, name);
-    auto *iterator = checker_.ctx_.make<CallExpr>(call->loc(), iterated, std::vector<Expr *>{});
-    return checker_.iteratorMethods().checkArrayIterator(iterator, iterated);
+    auto *iterated = this->checker.ctx_.make<MemberExpr>(member->loc(), from, name);
+    auto *iterator =
+        this->checker.ctx_.make<CallExpr>(call->loc(), iterated, std::vector<Expr *>{});
+    IteratorMethods::ResultArrayIterateCall iterate =
+        this->checker.iteratorMethods().checkArrayIterator(iterator, iterated);
+    if (iterate.isErr()) {
+      this->checker.diags_.error(iterated->loc(), iterate.error().message);
+      return iterator;
+    }
+    return iterate.value();
   }
   for (Expr *&arg : call->args) {
-    arg = checker_.exprChecker().checkExpr(arg);
+    arg = this->checker.exprChecker().checkExpr(arg);
   }
   if (name == "toLocaleString") {
-    checker_.diags_.error(member->loc(),
-                          "'toLocaleString' of a typed array is not supported; join the "
-                          "elements with 'join()', or format each with toLocaleString");
+    this->checker.diags_.error(member->loc(),
+                               "'toLocaleString' of a typed array is not supported; join the "
+                               "elements with 'join()', or format each with toLocaleString");
   } else {
-    checker_.diags_.error(member->loc(),
-                          "property '" + name + "' does not exist on type '" + type->name() + "'");
+    this->checker.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
+                                                  type->name() + "'");
   }
 
   return call;
@@ -270,78 +281,81 @@ Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member)
   NumberMethod m;
   if (!numberMethod(name, true, m)) {
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
-    checker_.diags_.error(member->loc(),
-                          "property '" + name + "' does not exist on type 'DataView'");
+    this->checker.diags_.error(member->loc(),
+                               "property '" + name + "' does not exist on type 'DataView'");
     return call;
   }
   if (m.bigint) {
-    checker_.decimalChecker().reportBigInt(member->loc(), "'" + name.str() + "'");
+    this->checker.decimalChecker().reportBigInt(member->loc(), "'" + name.str() + "'");
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     return call;
   }
   const Type *kindType = Type::bytesType(m.kind);
   const Type *element = kindType->accessType();
   bool oneByte = kindType->elementSize() == 1;
-  unsigned min = m.write ? 2 : 1, max = min + (oneByte ? 0 : 1);
-  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, min, max);
+  unsigned min = m.write ? 2 : 1;
+  unsigned max = min + (oneByte ? 0 : 1);
+  ArgumentChecker::ResultArityMatches arity =
+      this->checker.argumentChecker().checkArity(call, min, max);
   if (arity.isErr()) {
-    checker_.diags_.error(member->loc(), arity.error().message);
+    this->checker.diags_.error(member->loc(), arity.error().message);
     return call;
   }
-  auto *kind = checker_.ctx_.make<IntLitExpr>(call->loc(), uint64_t(m.kind));
+  auto *kind = this->checker.ctx_.make<IntLitExpr>(call->loc(), uint64_t(m.kind));
   kind->type = Type::intTy();
-  std::vector<Expr *> args{kind, checker_.memberChecker().checkPosition(call->args[0])};
+  std::vector<Expr *> args{kind, this->checker.memberChecker().checkPosition(call->args[0])};
   if (m.write) {
-    Expr *value = checker_.argumentChecker().checkArg(call->args[1], element);
-    checker_.byteProofs().checkFits(value, kindType, numberWhat(m.kind));
+    Expr *value = this->checker.argumentChecker().checkArg(call->args[1], element);
+    this->checker.byteProofs().checkFits(value, kindType, numberWhat(m.kind));
     args.push_back(value);
   }
   if (call->args.size() > min) {
-    args.push_back(checker_.argumentChecker().checkArg(call->args[min], Type::boolTy()));
+    args.push_back(this->checker.argumentChecker().checkArg(call->args[min], Type::boolTy()));
   }
   IndexProofs::ResultUpToWasProven upTo =
-      checker_.indexProofs().requireUpTo(args[1], member->object, kindType->elementSize(),
-                                         "the offset of '" + member->name.str() + "'");
+      this->checker.indexProofs().requireUpTo(args[1], member->object, kindType->elementSize(),
+                                              "the offset of '" + member->name.str() + "'");
   if (upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT) {
-    checker_.diags_.error(args[1]->loc(), upTo.error().message);
+    this->checker.diags_.error(args[1]->loc(), upTo.error().message);
   }
   call->mayBeOutOfRange = upTo.isErr();
   call->args = std::move(args);
   call->target = BuiltinCall{.builtin = m.write ? Builtin::DataViewSet : Builtin::DataViewGet};
-  call->type = m.write ? Type::voidTy()
-               : element->isFloat()
-                   ? Type::result(Type::doubleTy(), checker_.prelude().builtinType("NumberError"))
-                   : element;
+  call->type =
+      m.write ? Type::voidTy()
+      : element->isFloat()
+          ? Type::result(Type::doubleTy(), this->checker.prelude().builtinType("NumberError"))
+          : element;
 
   return call;
 }
 
 void TypedArrayChecker::checkSetRange(const Expr *target, const Expr *source, const Expr *offset) {
-  IndexProofs &proofs = checker_.indexProofs();
+  IndexProofs &proofs = this->checker.indexProofs();
   bool offsetUnproven = false;
   if (offset) {
     IndexProofs::ResultBetweenProven between =
         proofs.requireBetween(offset, 0, std::nullopt, "the offset of 'set'");
     if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
-      checker_.diags_.error(offset->loc(), between.error().message);
+      this->checker.diags_.error(offset->loc(), between.error().message);
     }
     offsetUnproven = between.isErr();
   }
-  if (offsetUnproven || checker_.indexProofs().exempt(source->loc(), target)) {
+  if (offsetUnproven || this->checker.indexProofs().exempt(source->loc(), target)) {
     return;
   }
   std::optional<Linear> at = offset ? proofs.linear(offset) : Linear{Term::zero(), 0};
   if (!proofs.provesSumUpTo(at, proofs.lengthAtMost(source), target)) {
     std::string end =
         (offset ? valueText(offset) + " + " : std::string()) + valueText(source) + ".length";
-    checker_.diags_.error(source->loc(), "cannot prove that the values fit, '" + end +
-                                             " <= " + valueText(target) +
-                                             ".length', and JavaScript would throw a RangeError; "
-                                             "check it first, with the offset written as a number");
+    this->checker.diags_.error(
+        source->loc(), "cannot prove that the values fit, '" + end + " <= " + valueText(target) +
+                           ".length', and JavaScript would throw a RangeError; "
+                           "check it first, with the offset written as a number");
   }
 }
 

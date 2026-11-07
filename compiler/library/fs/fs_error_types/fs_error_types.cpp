@@ -273,7 +273,9 @@ const ErrorVerb kVerbs[] = {
     {"WriteNewStreamError", "write"},
 };
 
-std::string textOf(const Expr *expr) {
+}
+
+std::string FsErrorTypes::textOf(const Expr *expr) {
   auto *lit = expr ? dyn_cast<StringLitExpr>(expr) : nullptr;
   if (!lit) {
     return "";
@@ -287,18 +289,18 @@ std::string textOf(const Expr *expr) {
   return out;
 }
 
-bool literalTrue(const Expr *expr) {
+bool FsErrorTypes::literalTrue(const Expr *expr) {
   auto *lit = expr ? dyn_cast<BoolLitExpr>(expr) : nullptr;
 
   return lit && lit->value;
 }
 
-}
 
-FsErrorTypes::FsErrorTypes(Checker &checker) : checker_(checker) {}
+FsErrorTypes::FsErrorTypes(Checker &owner)
+    : checker(owner) {}
 
 void FsErrorTypes::declare() {
-  BuiltinModuleTypes &types = checker_.builtinModuleTypes();
+  BuiltinModuleTypes &types = this->checker.builtinModuleTypes();
   if (types.declared("ReadFileError")) {
     return;
   }
@@ -323,7 +325,7 @@ void FsErrorTypes::declare() {
 }
 
 const Type *FsErrorTypes::named(llvm::StringRef name) {
-  return checker_.builtinModuleTypes().named(name);
+  return this->checker.builtinModuleTypes().named(name);
 }
 
 const Type *FsErrorTypes::ofCall(const CallExpr *call) {
@@ -332,50 +334,50 @@ const Type *FsErrorTypes::ofCall(const CallExpr *call) {
   };
   switch (call->builtin()) {
     case Builtin::FsReadFile:
-      return named("ReadFileError");
+      return this->named("ReadFileError");
     case Builtin::FsWriteFile: {
-      std::string flag = textOf(arg(2));
+      std::string flag = FsErrorTypes::textOf(arg(2));
       bool append = flag.find('a') != std::string::npos;
       bool fresh = flag.find('x') != std::string::npos;
       if (append) {
-        return named(fresh ? "AppendNewFileError" : "AppendFileError");
+        return this->named(fresh ? "AppendNewFileError" : "AppendFileError");
       }
-      return named(fresh ? "WriteNewFileError" : "WriteFileError");
+      return this->named(fresh ? "WriteNewFileError" : "WriteFileError");
     }
     case Builtin::FsAccess:
-      return named("AccessError");
+      return this->named("AccessError");
     case Builtin::FsChmod:
-      return named("ChangeModeError");
+      return this->named("ChangeModeError");
     case Builtin::FsTruncate:
-      return named("TruncateError");
+      return this->named("TruncateError");
     case Builtin::FsStat: {
-      bool follow = literalTrue(arg(1));
-      bool throwIfMissing = literalTrue(arg(2));
+      bool follow = FsErrorTypes::literalTrue(arg(1));
+      bool throwIfMissing = FsErrorTypes::literalTrue(arg(2));
       if (follow) {
-        return named(throwIfMissing ? "StatusError" : "StatusIfExistsError");
+        return this->named(throwIfMissing ? "StatusError" : "StatusIfExistsError");
       }
-      return named(throwIfMissing ? "LinkStatusError" : "LinkStatusIfExistsError");
+      return this->named(throwIfMissing ? "LinkStatusError" : "LinkStatusIfExistsError");
     }
     case Builtin::FsReaddir:
-      return named("ReadDirectoryError");
+      return this->named("ReadDirectoryError");
     case Builtin::FsMkdir:
-      return named("MakeDirectoryError");
+      return this->named("MakeDirectoryError");
     case Builtin::FsMkdtemp:
-      return named("MakeTemporaryDirectoryError");
+      return this->named("MakeTemporaryDirectoryError");
     case Builtin::FsRmdir:
-      return named("RemoveDirectoryError");
+      return this->named("RemoveDirectoryError");
     case Builtin::FsUnlink:
-      return named("UnlinkError");
+      return this->named("UnlinkError");
     case Builtin::FsRm:
-      return named(literalTrue(arg(2)) ? "ForceRemoveError" : "RemoveError");
+      return this->named(FsErrorTypes::literalTrue(arg(2)) ? "ForceRemoveError" : "RemoveError");
     case Builtin::FsRename:
-      return named("RenameError");
+      return this->named("RenameError");
     case Builtin::FsReplace:
-      return named("ReplaceError");
+      return this->named("ReplaceError");
     case Builtin::FsCopyFile:
-      return named("CopyFileError");
+      return this->named("CopyFileError");
     case Builtin::FsRealpath:
-      return named("RealPathError");
+      return this->named("RealPathError");
     default:
       return Type::error();
   }

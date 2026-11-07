@@ -32,19 +32,20 @@ llvm::Value *BytesMakeCalls::emit() {
   switch (call->builtin()) {
     case Builtin::BytesNew:
     case Builtin::ArrayBufferNew: {
-      llvm::Value *length = lowering_.exprLowerer().emitExpr(call->args[0]);
+      llvm::Value *length = this->lowering.exprLowerer().emitExpr(call->args[0]);
       llvm::Value *made;
       if (call->builtin() == Builtin::ArrayBufferNew) {
-        made = lowering_.builder_.CreateCall(fn("tz_abuf_new", ptr, {i64}), {length}, "buffer");
+        made = this->lowering.builder_.CreateCall(this->fn("tz_abuf_new", ptr, {i64}), {length},
+                                                  "buffer");
       } else if (type->isBuffer()) {
-        made = lowering_.builder_.CreateCall(
-            fn("tz_buffer_alloc", ptr, {i64, i32}),
-            {length, lowering_.builder_.getInt32(call->args.size() < 2 ||
-                                                 cast<BoolLitExpr>(call->args[1])->value)},
+        made = this->lowering.builder_.CreateCall(
+            this->fn("tz_buffer_alloc", ptr, {i64, i32}),
+            {length, this->lowering.builder_.getInt32(call->args.size() < 2 ||
+                                                      cast<BoolLitExpr>(call->args[1])->value)},
             "buffer");
       } else {
-        made = lowering_.builder_.CreateCall(fn("tz_bytes_new", ptr, {i32, i64}),
-                                             {kindOf(type), length}, "bytes");
+        made = this->lowering.builder_.CreateCall(this->fn("tz_bytes_new", ptr, {i32, i64}),
+                                                  {this->kindOf(type), length}, "bytes");
       }
       return made;
     }
@@ -53,64 +54,68 @@ llvm::Value *BytesMakeCalls::emit() {
       llvm::Value *made;
       if (source->type->isIterator()) {
         const Type *element = source->type->yielded();
-        llvm::Value *values = lowering_.builder_.CreateCall(
-            lowering_.rt_.arrNew,
-            {lowering_.typeDescriptors().typeDescriptor(element), lowering_.builder_.getInt64(0),
-             lowering_.builder_.getInt64(0)},
+        llvm::Value *values = this->lowering.builder_.CreateCall(
+            this->lowering.rt_.arrNew,
+            {this->lowering.typeDescriptors().typeDescriptor(element),
+             this->lowering.builder_.getInt64(0), this->lowering.builder_.getInt64(0)},
             "values");
-        lowering_.iteratorLowerer().emitIteratorSpread(values, source, element);
-        made = lowering_.builder_.CreateCall(fn("tz_bytes_from_array", ptr, {i32, ptr}),
-                                             {kindOf(type), values}, "bytes");
-        lowering_.refCounts().releaseValue(values, Type::array(element));
+        this->lowering.iteratorLowerer().emitIteratorSpread(values, source, element);
+        made = this->lowering.builder_.CreateCall(this->fn("tz_bytes_from_array", ptr, {i32, ptr}),
+                                                  {this->kindOf(type), values}, "bytes");
+        this->lowering.refCounts().releaseValue(values, Type::array(element));
         return made;
       }
-      Lowering::Operand array = lowering_.refCounts().emitOperand(source, true);
-      made = lowering_.builder_.CreateCall(fn("tz_bytes_from_array", ptr, {i32, ptr}),
-                                           {kindOf(type), array.value}, "bytes");
-      lowering_.refCounts().dropOperand(array);
+      Lowering::Operand array = this->lowering.refCounts().emitOperand(source, true);
+      made = this->lowering.builder_.CreateCall(this->fn("tz_bytes_from_array", ptr, {i32, ptr}),
+                                                {this->kindOf(type), array.value}, "bytes");
+      this->lowering.refCounts().dropOperand(array);
       return made;
     }
     case Builtin::BytesFromBytes: {
-      Lowering::Operand source = lowering_.refCounts().emitOperand(call->args[0], true);
-      llvm::Value *made = lowering_.builder_.CreateCall(fn("tz_bytes_from_bytes", ptr, {i32, ptr}),
-                                                        {kindOf(type), source.value}, "bytes");
-      lowering_.refCounts().dropOperand(source);
+      Lowering::Operand source = this->lowering.refCounts().emitOperand(call->args[0], true);
+      llvm::Value *made =
+          this->lowering.builder_.CreateCall(this->fn("tz_bytes_from_bytes", ptr, {i32, ptr}),
+                                             {this->kindOf(type), source.value}, "bytes");
+      this->lowering.refCounts().dropOperand(source);
       return made;
     }
     case Builtin::BytesOf: {
-      llvm::Value *made = lowering_.builder_.CreateCall(
-          fn("tz_bytes_new_unset", ptr, {i32, i64}),
-          {kindOf(type), lowering_.builder_.getInt64(call->args.size())}, "bytes");
+      llvm::Value *made = this->lowering.builder_.CreateCall(
+          this->fn("tz_bytes_new_unset", ptr, {i32, i64}),
+          {this->kindOf(type), this->lowering.builder_.getInt64(call->args.size())}, "bytes");
       if (call->args.empty()) {
         return made;
       }
       for (size_t i = 0; i < call->args.size(); ++i) {
-        lowering_.bytesLowerer().storeElement(lowering_.bytesLowerer().bytesData(made), type,
-                                              lowering_.builder_.getInt64(i),
-                                              lowering_.exprLowerer().emitExpr(call->args[i]));
+        this->lowering.bytesLowerer().storeElement(
+            this->lowering.bytesLowerer().bytesData(made), type,
+            this->lowering.builder_.getInt64(i),
+            this->lowering.exprLowerer().emitExpr(call->args[i]));
       }
       return made;
     }
     case Builtin::BytesView:
     case Builtin::DataViewNew: {
-      Lowering::Operand buffer = lowering_.refCounts().emitOperand(
+      Lowering::Operand buffer = this->lowering.refCounts().emitOperand(
           call->args[0], llvm::all_of(llvm::ArrayRef<Expr *>(call->args).drop_front(),
                                       AssignLowerer::cannotAssign));
       std::vector<llvm::Value *> values;
-      llvm::Value *has = positions(1, 2, values);
+      llvm::Value *has = this->positions(1, 2, values);
       llvm::Value *made;
       if (call->builtin() == Builtin::DataViewNew) {
-        made = lowering_.builder_.CreateCall(fn("tz_dataview_new", ptr, {ptr, i64, i64, i32}),
-                                             {buffer.value, values[0], values[1], has}, "view");
+        made = this->lowering.builder_.CreateCall(
+            this->fn("tz_dataview_new", ptr, {ptr, i64, i64, i32}),
+            {buffer.value, values[0], values[1], has}, "view");
       } else if (type->isBuffer()) {
-        made = lowering_.builder_.CreateCall(fn("tz_buffer_view", ptr, {ptr, i64, i64, i32}),
-                                             {buffer.value, values[0], values[1], has}, "view");
+        made = this->lowering.builder_.CreateCall(
+            this->fn("tz_buffer_view", ptr, {ptr, i64, i64, i32}),
+            {buffer.value, values[0], values[1], has}, "view");
       } else {
-        made = lowering_.builder_.CreateCall(
-            fn("tz_bytes_view", ptr, {i32, ptr, i64, i64, i32}),
-            {kindOf(type), buffer.value, values[0], values[1], has}, "view");
+        made = this->lowering.builder_.CreateCall(
+            this->fn("tz_bytes_view", ptr, {i32, ptr, i64, i64, i32}),
+            {this->kindOf(type), buffer.value, values[0], values[1], has}, "view");
       }
-      lowering_.refCounts().dropOperand(buffer);
+      this->lowering.refCounts().dropOperand(buffer);
       return made;
     }
     default:

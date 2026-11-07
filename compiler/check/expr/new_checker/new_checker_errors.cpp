@@ -50,4 +50,38 @@ std::string ErrorTextZeroValue::none(llvm::StringRef element) {
       .str();
 }
 
+std::string ErrorTextNewArray::length() {
+  return "an array length";
+}
+
+std::string ErrorTextUnsupported::why(llvm::StringRef name) {
+  if (name == "eval") {
+    return "a compiled program cannot run code from a string";
+  }
+  if (name == "Function") {
+    return "a compiled program cannot run code from a string; write the function itself, e.g. "
+           "'(a: int) => a'";
+  }
+  if (name == "Proxy") {
+    return "the fields of an object are read and written straight in memory, so nothing can "
+           "intercept that";
+  }
+  if (name == "require") {
+    return "files are imported by name: 'import { a } from \"./x\"'";
+  }
+  if (name == "module" || name == "exports") {
+    return "files export by name: 'export function f() {...}', or 'export { a, b }'";
+  }
+  if (name == "escape") {
+    return "it is a legacy function whose '%uXXXX' escapes nothing decodes but 'unescape'; "
+           "encode with 'encodeURIComponent(s)'";
+  }
+  if (name == "unescape") {
+    return "it is a legacy function that decodes the '%uXXXX' escapes of 'escape'; decode with "
+           "'decodeURIComponent(s)'";
+  }
+
+  return "";
+}
+
 }

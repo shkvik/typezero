@@ -19,16 +19,9 @@
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "runtime/library/intl/intl/intl.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
-#include "llvm/Support/ErrorHandling.h"
 #include <cmath>
 #include <numeric>
 
-using llvm::BasicBlock;
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -40,108 +33,113 @@ const llvm::StringLiteral kOptionNames[TZ_IO_COUNT] = {
 #undef TZ_INTL_OPTION_NAME
 };
 
-int optionIndex(llvm::StringRef name) {
+}
+
+int IntlLowerer::optionIndex(llvm::StringRef name) {
   auto at = llvm::find(kOptionNames, name);
 
   return at == std::end(kOptionNames) ? -1 : int(at - std::begin(kOptionNames));
 }
 
-}
-
-IntlLowerer::IntlLowerer(Lowering &lowering) : lowering_(lowering) {}
+IntlLowerer::IntlLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Value *IntlLowerer::emitIntlOptions(Expr *locale, Expr *options,
                                           std::vector<Lowering::Operand> &held) {
-  llvm::Type *i32 = lowering_.builder_.getInt32Ty(), *i64 = lowering_.builder_.getInt64Ty(),
-             *f64 = lowering_.builder_.getDoubleTy();
-  auto *textTy = llvm::ArrayType::get(lowering_.strTy_, TZ_IO_COUNT);
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty(),
+             *i64 = this->lowering.builder_.getInt64Ty(),
+             *f64 = this->lowering.builder_.getDoubleTy();
+  auto *textTy = llvm::ArrayType::get(this->lowering.strTy_, TZ_IO_COUNT);
   auto *numberTy = llvm::ArrayType::get(f64, TZ_IO_COUNT);
-  auto *optionsTy =
-      llvm::StructType::get(lowering_.ctx_, {lowering_.strTy_, textTy, numberTy, i64, i64, i32});
-  llvm::AllocaInst *slot = lowering_.functionFrame().createStackSlot(optionsTy, "intl.options");
-  lowering_.builder_.CreateStore(llvm::Constant::getNullValue(optionsTy), slot);
-  llvm::Value *hasText = lowering_.builder_.getInt64(0),
-              *hasNumber = lowering_.builder_.getInt64(0);
+  auto *optionsTy = llvm::StructType::get(this->lowering.ctx_,
+                                          {this->lowering.strTy_, textTy, numberTy, i64, i64, i32});
+  llvm::AllocaInst *slot =
+      this->lowering.functionFrame().createStackSlot(optionsTy, "intl.options");
+  this->lowering.builder_.CreateStore(llvm::Constant::getNullValue(optionsTy), slot);
+  llvm::Value *hasText = this->lowering.builder_.getInt64(0),
+              *hasNumber = this->lowering.builder_.getInt64(0);
   auto mark = [&](llvm::Value *&mask, llvm::Value *has, unsigned bit) {
-    mask = lowering_.builder_.CreateOr(
-        mask, lowering_.builder_.CreateShl(lowering_.builder_.CreateZExt(has, i64),
-                                           lowering_.builder_.getInt64(bit)));
+    mask = this->lowering.builder_.CreateOr(
+        mask, this->lowering.builder_.CreateShl(this->lowering.builder_.CreateZExt(has, i64),
+                                                this->lowering.builder_.getInt64(bit)));
   };
   auto split = [&](llvm::Value *value,
                    const Type *type) -> std::pair<llvm::Value *, llvm::Value *> {
     const Type *inner = type->nonOptional();
     if (UnionLayout::isAtomType(inner)) {
-      llvm::Value *has =
-          type->isOptional()
-              ? lowering_.builder_.CreateICmpNE(value, llvm::ConstantInt::get(value->getType(), 0))
-              : lowering_.builder_.getTrue();
-      return {lowering_.unionLayout().atomString(value), has};
+      llvm::Value *has = type->isOptional()
+                             ? this->lowering.builder_.CreateICmpNE(
+                                   value, llvm::ConstantInt::get(value->getType(), 0))
+                             : this->lowering.builder_.getTrue();
+      return {this->lowering.unionLayout().atomString(value), has};
     }
     if (!type->isOptional()) {
-      return {value, lowering_.builder_.getTrue()};
+      return {value, this->lowering.builder_.getTrue()};
     }
 
-    return {lowering_.optionalLowerer().optionalValue(value, type),
-            lowering_.optionalLowerer().optionalHas(value, type)};
+    return {this->lowering.optionalLowerer().optionalValue(value, type),
+            this->lowering.optionalLowerer().optionalHas(value, type)};
   };
   if (locale) {
     if (locale->type->isUndefined()) {
-      lowering_.stmtLowerer().emitDiscarded(locale);
+      this->lowering.stmtLowerer().emitDiscarded(locale);
     } else {
-      Lowering::Operand operand = lowering_.refCounts().emitOperand(
+      Lowering::Operand operand = this->lowering.refCounts().emitOperand(
           locale, !options || AssignLowerer::cannotAssign(options));
       held.push_back(operand);
       auto [value, has] = split(operand.value, operand.type);
-      lowering_.builder_.CreateStore(value, lowering_.builder_.CreateStructGEP(optionsTy, slot, 0));
-      lowering_.builder_.CreateStore(lowering_.builder_.CreateZExt(has, i32),
-                                     lowering_.builder_.CreateStructGEP(optionsTy, slot, 5));
+      this->lowering.builder_.CreateStore(
+          value, this->lowering.builder_.CreateStructGEP(optionsTy, slot, 0));
+      this->lowering.builder_.CreateStore(
+          this->lowering.builder_.CreateZExt(has, i32),
+          this->lowering.builder_.CreateStructGEP(optionsTy, slot, 5));
     }
   }
   if (options) {
     if (options->type->isUndefined()) {
-      lowering_.stmtLowerer().emitDiscarded(options);
+      this->lowering.stmtLowerer().emitDiscarded(options);
     } else {
-      Lowering::Operand object = lowering_.refCounts().emitOperand(options, true);
+      Lowering::Operand object = this->lowering.refCounts().emitOperand(options, true);
       held.push_back(object);
       for (const Field &field : object.type->fields()) {
-        int index = optionIndex(field.name);
+        int index = IntlLowerer::optionIndex(field.name);
         if (index < 0 || field.type->isUndefined()) {
           continue;
         }
-        llvm::Value *loaded = lowering_.builder_.CreateLoad(
-            lowering_.moduleBuilder().lower(field.type),
-            lowering_.objectLayouts().fieldAddress(object.value, object.type, field.name),
+        llvm::Value *loaded = this->lowering.builder_.CreateLoad(
+            this->lowering.moduleBuilder().lower(field.type),
+            this->lowering.objectLayouts().fieldAddress(object.value, object.type, field.name),
             field.name);
         if (const Type *u = field.type->nonOptional(); u->isTagged()) {
-          llvm::Value *tag = lowering_.unionLayout().unionTag(loaded);
+          llvm::Value *tag = this->lowering.unionLayout().unionTag(loaded);
           bool atoms = u->slotPart(UnionSlot::Atom) != nullptr;
-          llvm::Value *isText = lowering_.builder_.CreateICmpEQ(
-              tag,
-              lowering_.builder_.getInt32(unsigned(atoms ? UnionSlot::Atom : UnionSlot::String)));
-          llvm::Value *isFlag = lowering_.builder_.CreateICmpEQ(
-              tag, lowering_.builder_.getInt32(unsigned(UnionSlot::Bool)));
+          llvm::Value *isText = this->lowering.builder_.CreateICmpEQ(
+              tag, this->lowering.builder_.getInt32(
+                       unsigned(atoms ? UnionSlot::Atom : UnionSlot::String)));
+          llvm::Value *isFlag = this->lowering.builder_.CreateICmpEQ(
+              tag, this->lowering.builder_.getInt32(unsigned(UnionSlot::Bool)));
           llvm::Value *text = nullptr;
           if (atoms) {
-            llvm::Value *atom = lowering_.unionLayout().taggedPart(loaded, u, UnionSlot::Atom);
-            text = lowering_.unionLayout().atomString(lowering_.builder_.CreateSelect(
+            llvm::Value *atom = this->lowering.unionLayout().taggedPart(loaded, u, UnionSlot::Atom);
+            text = this->lowering.unionLayout().atomString(this->lowering.builder_.CreateSelect(
                 isText, atom, llvm::ConstantInt::get(atom->getType(), 0)));
           } else {
-            text = lowering_.builder_.CreateSelect(
-                isText, lowering_.unionLayout().taggedPart(loaded, u, UnionSlot::String),
-                llvm::Constant::getNullValue(lowering_.strTy_));
+            text = this->lowering.builder_.CreateSelect(
+                isText, this->lowering.unionLayout().taggedPart(loaded, u, UnionSlot::String),
+                llvm::Constant::getNullValue(this->lowering.strTy_));
           }
-          lowering_.builder_.CreateStore(
-              text, lowering_.builder_.CreateConstGEP2_32(
-                        textTy, lowering_.builder_.CreateStructGEP(optionsTy, slot, 1), 0,
+          this->lowering.builder_.CreateStore(
+              text, this->lowering.builder_.CreateConstGEP2_32(
+                        textTy, this->lowering.builder_.CreateStructGEP(optionsTy, slot, 1), 0,
                         unsigned(index)));
           mark(hasText, isText, unsigned(index));
-          llvm::Value *flag = lowering_.builder_.CreateUIToFP(
-              lowering_.builder_.CreateAnd(
-                  isFlag, lowering_.unionLayout().taggedPart(loaded, u, UnionSlot::Bool)),
+          llvm::Value *flag = this->lowering.builder_.CreateUIToFP(
+              this->lowering.builder_.CreateAnd(
+                  isFlag, this->lowering.unionLayout().taggedPart(loaded, u, UnionSlot::Bool)),
               f64);
-          lowering_.builder_.CreateStore(
-              flag, lowering_.builder_.CreateConstGEP2_32(
-                        numberTy, lowering_.builder_.CreateStructGEP(optionsTy, slot, 2), 0,
+          this->lowering.builder_.CreateStore(
+              flag, this->lowering.builder_.CreateConstGEP2_32(
+                        numberTy, this->lowering.builder_.CreateStructGEP(optionsTy, slot, 2), 0,
                         unsigned(index)));
           mark(hasNumber, isFlag, unsigned(index));
           continue;
@@ -149,44 +147,47 @@ llvm::Value *IntlLowerer::emitIntlOptions(Expr *locale, Expr *options,
         auto [value, has] = split(loaded, field.type);
         const Type *base = UnionLayout::storedType(field.type->nonOptional());
         if (UnionLayout::isAtomType(field.type->nonOptional()) || base->isString()) {
-          lowering_.builder_.CreateStore(
-              value, lowering_.builder_.CreateConstGEP2_32(
-                         textTy, lowering_.builder_.CreateStructGEP(optionsTy, slot, 1), 0,
+          this->lowering.builder_.CreateStore(
+              value, this->lowering.builder_.CreateConstGEP2_32(
+                         textTy, this->lowering.builder_.CreateStructGEP(optionsTy, slot, 1), 0,
                          unsigned(index)));
           mark(hasText, has, unsigned(index));
           continue;
         }
-        llvm::Value *number = base->isFloat()     ? value
-                              : base->isInteger() ? lowering_.builder_.CreateSIToFP(value, f64)
-                                                  : lowering_.builder_.CreateUIToFP(value, f64);
-        lowering_.builder_.CreateStore(
-            number, lowering_.builder_.CreateConstGEP2_32(
-                        numberTy, lowering_.builder_.CreateStructGEP(optionsTy, slot, 2), 0,
+        llvm::Value *number = base->isFloat() ? value
+                              : base->isInteger()
+                                  ? this->lowering.builder_.CreateSIToFP(value, f64)
+                                  : this->lowering.builder_.CreateUIToFP(value, f64);
+        this->lowering.builder_.CreateStore(
+            number, this->lowering.builder_.CreateConstGEP2_32(
+                        numberTy, this->lowering.builder_.CreateStructGEP(optionsTy, slot, 2), 0,
                         unsigned(index)));
         mark(hasNumber, has, unsigned(index));
       }
     }
   }
-  lowering_.builder_.CreateStore(hasText, lowering_.builder_.CreateStructGEP(optionsTy, slot, 3));
-  lowering_.builder_.CreateStore(hasNumber, lowering_.builder_.CreateStructGEP(optionsTy, slot, 4));
+  this->lowering.builder_.CreateStore(hasText,
+                                      this->lowering.builder_.CreateStructGEP(optionsTy, slot, 3));
+  this->lowering.builder_.CreateStore(hasNumber,
+                                      this->lowering.builder_.CreateStructGEP(optionsTy, slot, 4));
 
   return slot;
 }
 
 Lowering::IntlNumber IntlLowerer::emitIntlNumber(Expr *arg) {
   Lowering::IntlNumber n;
-  n.operand = lowering_.refCounts().emitOperand(arg, true);
+  n.operand = this->lowering.refCounts().emitOperand(arg, true);
   llvm::Value *value = n.operand.value;
   const Type *type = n.operand.type;
-  n.d = llvm::ConstantFP::get(lowering_.builder_.getDoubleTy(), 0.0);
-  n.integer = n.meta = lowering_.builder_.getInt64(0);
+  n.d = llvm::ConstantFP::get(this->lowering.builder_.getDoubleTy(), 0.0);
+  n.integer = n.meta = this->lowering.builder_.getInt64(0);
   if (type->isDecimal()) {
     n.kind = TZ_IN_DECIMAL;
-    n.integer = lowering_.decimalLowerer().decimalCoef(value);
-    n.meta = lowering_.decimalLowerer().decimalMeta(value);
+    n.integer = this->lowering.decimalLowerer().decimalCoef(value);
+    n.meta = this->lowering.decimalLowerer().decimalMeta(value);
   } else if (type->isInteger()) {
     n.kind = TZ_IN_INTEGER;
-    n.integer = lowering_.numberLowerer().toI64(value, type);
+    n.integer = this->lowering.numberLowerer().toI64(value, type);
   } else {
     n.kind = TZ_IN_DOUBLE;
     n.d = value;
@@ -196,18 +197,18 @@ Lowering::IntlNumber IntlLowerer::emitIntlNumber(Expr *arg) {
 }
 
 std::vector<llvm::Value *> IntlLowerer::intlNumberArgs(const Lowering::IntlNumber &n) {
-  return {lowering_.builder_.getInt32(uint32_t(n.kind)), n.d, n.integer, n.meta};
+  return {this->lowering.builder_.getInt32(uint32_t(n.kind)), n.d, n.integer, n.meta};
 }
 
 llvm::Constant *IntlLowerer::intlShape(const Type *type) {
-  if (llvm::Constant *shape = intlShapes_.lookup(type)) {
+  if (llvm::Constant *shape = this->intlShapes.lookup(type)) {
     return shape;
   }
   static const llvm::StringLiteral fields[TZ_IF_COUNT] = {"type",  "value", "unit",      "segment",
                                                           "index", "input", "isWordLike"};
-  const Lowering::ObjectLayout &layout = lowering_.objectLayouts().objectLayout(type);
+  const Lowering::ObjectLayout &layout = this->lowering.objectLayouts().objectLayout(type);
   const llvm::StructLayout *offsets =
-      lowering_.module_->getDataLayout().getStructLayout(layout.type);
+      this->lowering.module_->getDataLayout().getStructLayout(layout.type);
   std::vector<llvm::Constant *> at;
   for (llvm::StringRef name : fields) {
     int32_t offset = -1;
@@ -215,94 +216,101 @@ llvm::Constant *IntlLowerer::intlShape(const Type *type) {
       offset = int32_t(
           offsets->getElementOffset(layout.elements[ObjectLayouts::fieldIndex(type, name)]));
     }
-    at.push_back(lowering_.builder_.getInt32(uint32_t(offset)));
+    at.push_back(this->lowering.builder_.getInt32(uint32_t(offset)));
   }
   std::vector<unsigned> keys(type->fields().size());
   std::iota(keys.begin(), keys.end(), 0u);
-  auto *offsetsTy = llvm::ArrayType::get(lowering_.builder_.getInt32Ty(), TZ_IF_COUNT);
+  auto *offsetsTy = llvm::ArrayType::get(this->lowering.builder_.getInt32Ty(), TZ_IF_COUNT);
   llvm::Constant *value = llvm::ConstantStruct::getAnon(
-      {lowering_.typeDescriptors().typeDescriptor(type),
-       lowering_.objectLayouts().layoutDescriptor(type, keys),
-       lowering_.builder_.getInt64(
-           lowering_.module_->getDataLayout().getTypeAllocSize(layout.type)),
+      {this->lowering.typeDescriptors().typeDescriptor(type),
+       this->lowering.objectLayouts().layoutDescriptor(type, keys),
+       this->lowering.builder_.getInt64(
+           this->lowering.module_->getDataLayout().getTypeAllocSize(layout.type)),
        llvm::ConstantArray::get(offsetsTy, at)});
   auto *global =
-      new llvm::GlobalVariable(*lowering_.module_, value->getType(), true,
+      new llvm::GlobalVariable(*this->lowering.module_, value->getType(), true,
                                llvm::GlobalValue::PrivateLinkage, value, "tz.intl.shape");
-  intlShapes_[type] = global;
+  this->intlShapes[type] = global;
 
   return global;
 }
 
 llvm::Constant *IntlLowerer::intlBoundInfo(IntlKind kind, const Type *fnType) {
-  llvm::Constant *&info = intlBound_[{kind, fnType}];
+  llvm::Constant *&info = this->intlBound[{kind, fnType}];
   if (info) {
     return info;
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *voidTy = lowering_.builder_.getVoidTy(),
-             *i32 = lowering_.builder_.getInt32Ty(), *i64 = lowering_.builder_.getInt64Ty(),
-             *f64 = lowering_.builder_.getDoubleTy();
-  auto *code = llvm::Function::Create(lowering_.closureLowerer().closureFnType(fnType),
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy(),
+             *voidTy = this->lowering.builder_.getVoidTy(),
+             *i32 = this->lowering.builder_.getInt32Ty(),
+             *i64 = this->lowering.builder_.getInt64Ty(),
+             *f64 = this->lowering.builder_.getDoubleTy();
+  auto *code = llvm::Function::Create(this->lowering.closureLowerer().closureFnType(fnType),
                                       llvm::GlobalValue::InternalLinkage, "tz.intl.bound",
-                                      lowering_.module_.get());
-  lowering_.functionBuilder().setFunctionAttributes(code);
-  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
-  llvm::Function *outer = lowering_.function_;
-  lowering_.function_ = code;
-  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", code));
+                                      this->lowering.module_.get());
+  this->lowering.functionBuilder().setFunctionAttributes(code);
+  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
+  llvm::Function *outer = this->lowering.function_;
+  this->lowering.function_ = code;
+  this->lowering.builder_.SetInsertPoint(
+      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", code));
   llvm::Value *self = code->getArg(0);
   const Type *param = fnType->params()[0];
   llvm::Value *result;
   if (kind == IntlKind::Collator) {
-    llvm::Value *a = code->getArg(1), *b = code->getArg(2);
-    result = lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction("tz_collator_compare", i32,
-                                                   {ptr, ptr, i64, ptr, i64}),
-        {self, lowering_.stringLowerer().stringObj(a), lowering_.stringLowerer().stringMeta(a),
-         lowering_.stringLowerer().stringObj(b), lowering_.stringLowerer().stringMeta(b)});
-    lowering_.refCounts().releaseValue(a, Type::string());
-    lowering_.refCounts().releaseValue(b, Type::string());
-    result = fnType->ret()->isFloat() ? lowering_.builder_.CreateSIToFP(result, f64)
-                                      : lowering_.builder_.CreateSExt(result, i64);
+    llvm::Value *a = code->getArg(1);
+    llvm::Value *b = code->getArg(2);
+    result = this->lowering.builder_.CreateCall(
+        this->lowering.processLowerer().processFunction("tz_collator_compare", i32,
+                                                        {ptr, ptr, i64, ptr, i64}),
+        {self, this->lowering.stringLowerer().stringObj(a),
+         this->lowering.stringLowerer().stringMeta(a), this->lowering.stringLowerer().stringObj(b),
+         this->lowering.stringLowerer().stringMeta(b)});
+    this->lowering.refCounts().releaseValue(a, Type::string());
+    this->lowering.refCounts().releaseValue(b, Type::string());
+    result = fnType->ret()->isFloat() ? this->lowering.builder_.CreateSIToFP(result, f64)
+                                      : this->lowering.builder_.CreateSExt(result, i64);
   } else if (kind == IntlKind::DateTimeFormat) {
     llvm::Value *date = code->getArg(1);
     llvm::Value *time;
     if (param->isDate()) {
-      time = lowering_.builder_.CreateLoad(lowering_.builder_.getInt64Ty(),
-                                           lowering_.dateLowerer().dateTimeAddress(date), "time");
+      time = this->lowering.builder_.CreateLoad(this->lowering.builder_.getInt64Ty(),
+                                                this->lowering.dateLowerer().dateTimeAddress(date),
+                                                "time");
     } else {
-      time = param->isFloat() ? lowering_.dateLowerer().wholeTime(date)
-                              : lowering_.numberLowerer().toI64(date, param);
+      time = param->isFloat() ? this->lowering.dateLowerer().wholeTime(date)
+                              : this->lowering.numberLowerer().toI64(date, param);
     }
-    result = lowering_.stringLowerer().callReturningString(
-        lowering_.processLowerer().processFunction("tz_dtf_format", voidTy,
-                                                   {ptr, ptr, lowering_.builder_.getInt64Ty()}),
+    result = this->lowering.stringLowerer().callReturningString(
+        this->lowering.processLowerer().processFunction(
+            "tz_dtf_format", voidTy, {ptr, ptr, this->lowering.builder_.getInt64Ty()}),
         {self, time});
-    lowering_.refCounts().releaseValue(date, param);
+    this->lowering.refCounts().releaseValue(date, param);
   } else {
     llvm::Value *x = code->getArg(1);
     int numberKind = param->isDecimal()   ? TZ_IN_DECIMAL
                      : param->isInteger() ? TZ_IN_INTEGER
                                           : TZ_IN_DOUBLE;
     llvm::Value *d = numberKind == TZ_IN_DOUBLE ? x : llvm::ConstantFP::get(f64, 0.0);
-    llvm::Value *integer = numberKind == TZ_IN_DECIMAL   ? lowering_.decimalLowerer().decimalCoef(x)
-                           : numberKind == TZ_IN_INTEGER ? lowering_.numberLowerer().toI64(x, param)
-                                                         : lowering_.builder_.getInt64(0);
-    llvm::Value *meta = numberKind == TZ_IN_DECIMAL ? lowering_.decimalLowerer().decimalMeta(x)
-                                                    : lowering_.builder_.getInt64(0);
-    result = lowering_.stringLowerer().callReturningString(
-        lowering_.processLowerer().processFunction("tz_nf_format", voidTy,
-                                                   {ptr, ptr, i32, f64, i64, i64}),
-        {self, lowering_.builder_.getInt32(uint32_t(numberKind)), d, integer, meta});
-    lowering_.refCounts().releaseValue(x, param);
+    llvm::Value *integer =
+        numberKind == TZ_IN_DECIMAL   ? this->lowering.decimalLowerer().decimalCoef(x)
+        : numberKind == TZ_IN_INTEGER ? this->lowering.numberLowerer().toI64(x, param)
+                                      : this->lowering.builder_.getInt64(0);
+    llvm::Value *meta = numberKind == TZ_IN_DECIMAL ? this->lowering.decimalLowerer().decimalMeta(x)
+                                                    : this->lowering.builder_.getInt64(0);
+    result = this->lowering.stringLowerer().callReturningString(
+        this->lowering.processLowerer().processFunction("tz_nf_format", voidTy,
+                                                        {ptr, ptr, i32, f64, i64, i64}),
+        {self, this->lowering.builder_.getInt32(uint32_t(numberKind)), d, integer, meta});
+    this->lowering.refCounts().releaseValue(x, param);
   }
-  lowering_.builder_.CreateRet(result);
-  lowering_.function_ = outer;
-  lowering_.builder_.restoreIP(point);
+  this->lowering.builder_.CreateRet(result);
+  this->lowering.function_ = outer;
+  this->lowering.builder_.restoreIP(point);
   info = new llvm::GlobalVariable(
-      *lowering_.module_, lowering_.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
-      llvm::ConstantStruct::get(lowering_.fnInfoTy_,
-                                {code, lowering_.stringLowerer().stringLiteral(u"")}),
+      *this->lowering.module_, this->lowering.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
+      llvm::ConstantStruct::get(this->lowering.fnInfoTy_,
+                                {code, this->lowering.stringLowerer().stringLiteral(u"")}),
       "tz.fninfo.intl");
 
   return info;
@@ -311,20 +319,21 @@ llvm::Constant *IntlLowerer::intlBoundInfo(IntlKind kind, const Type *fnType) {
 llvm::Value *IntlLowerer::emitLocaleArray(Expr *arg) {
   const Type *element = Type::string();
   if (arg && arg->type == Type::array(element)) {
-    return lowering_.exprLowerer().emitExpr(arg);
+    return this->lowering.exprLowerer().emitExpr(arg);
   }
-  llvm::Value *array = lowering_.builder_.CreateCall(
-      lowering_.rt_.arrNew,
-      {lowering_.typeDescriptors().typeDescriptor(element), lowering_.builder_.getInt64(0),
-       lowering_.builder_.getInt64(1)},
+  llvm::Value *array = this->lowering.builder_.CreateCall(
+      this->lowering.rt_.arrNew,
+      {this->lowering.typeDescriptors().typeDescriptor(element),
+       this->lowering.builder_.getInt64(0), this->lowering.builder_.getInt64(1)},
       "locales");
   if (!arg || arg->type->isUndefined()) {
     if (arg) {
-      lowering_.stmtLowerer().emitDiscarded(arg);
+      this->lowering.stmtLowerer().emitDiscarded(arg);
     }
     return array;
   }
-  lowering_.arrayLowerer().emitPush(array, {lowering_.exprLowerer().emitExpr(arg)}, element);
+  this->lowering.arrayLowerer().emitPush(array, {this->lowering.exprLowerer().emitExpr(arg)},
+                                         element);
 
   return array;
 }

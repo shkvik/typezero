@@ -33,15 +33,14 @@ std::string KeyedFieldChecker::toUtf8(const std::u16string &text) {
   return utf8;
 }
 
-llvm::SMLoc KeyedFieldChecker::keyedPlace(const IndexExpr *index,
-                                          KeyedFieldCheckerCheckKeyedFieldErrorCode code) {
+bool KeyedFieldChecker::wrongKey(KeyedFieldCheckerCheckKeyedFieldErrorCode code) {
   switch (code) {
     case KeyedFieldCheckerCheckKeyedFieldErrorCode::TUPLE_KEY_NOT_NUMBER:
     case KeyedFieldCheckerCheckKeyedFieldErrorCode::TUPLE_KEY_OUT_OF_RANGE:
     case KeyedFieldCheckerCheckKeyedFieldErrorCode::KEY_NOT_STRING:
     case KeyedFieldCheckerCheckKeyedFieldErrorCode::TUPLE_ELEMENT_BY_NUMBER:
     case KeyedFieldCheckerCheckKeyedFieldErrorCode::FIELD_KEY_NOT_LITERAL:
-      return index->index->loc();
+      return true;
     case KeyedFieldCheckerCheckKeyedFieldErrorCode::ALREADY_REPORTED:
     case KeyedFieldCheckerCheckKeyedFieldErrorCode::TUPLE_KEY_NOT_CONSTANT:
     case KeyedFieldCheckerCheckKeyedFieldErrorCode::READONLY_THROUGH_KEY:
@@ -49,10 +48,11 @@ llvm::SMLoc KeyedFieldChecker::keyedPlace(const IndexExpr *index,
     case KeyedFieldCheckerCheckKeyedFieldErrorCode::NO_NUMBERED_FIELDS:
     case KeyedFieldCheckerCheckKeyedFieldErrorCode::KEY_NOT_CONSTANT:
     case KeyedFieldCheckerCheckKeyedFieldErrorCode::NO_SUCH_FIELD:
-      return index->loc();
+    case KeyedFieldCheckerCheckKeyedFieldErrorCode::FIELD_NOT_FOUND:
+      return false;
   }
 
-  return index->loc();
+  return false;
 }
 
 KeyedFieldChecker::KeyedFieldChecker(Checker &owner)
@@ -288,9 +288,15 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkKeyedField(Index
     return ok(member);
   }
 
-  Expr *read = this->checker.objectChecker().checkField(member);
+  ObjectChecker::ResultObjectFieldValue read = this->checker.objectChecker().checkField(member);
+  if (read.isErr()) {
+    return err(KeyedFieldCheckerCheckKeyedFieldError{
+        .code = KeyedFieldCheckerCheckKeyedFieldErrorCode::FIELD_NOT_FOUND,
+        .message = read.error().message,
+    });
+  }
 
-  return ok(read);
+  return ok(read.value());
 }
 
 }

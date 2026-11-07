@@ -6,7 +6,7 @@ namespace tz {
 
 class FsChecker {
 public:
-  explicit FsChecker(Checker &checker);
+  explicit FsChecker(Checker &owner);
 
   Expr *checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
   Expr *checkTzIoCall(CallExpr *call, llvm::SMLoc loc);
@@ -18,7 +18,10 @@ public:
   const Type *nativeError() const;
 
 private:
-  Checker &checker_;
+  static std::u16string utf16(llvm::StringRef text);
+  static std::string utf8(const std::u16string &text);
+
+  Checker &checker;
 };
 
 }

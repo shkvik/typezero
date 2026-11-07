@@ -28,10 +28,12 @@ const char *ClassMemberChecker::accessWord(Access access) {
 ClassMemberChecker::ClassMemberChecker(Checker &owner)
     : checker(owner) {}
 
-bool ClassMemberChecker::checkAccess(const ClassDecl *cls, Access access, llvm::StringRef name,
-                                     llvm::SMLoc loc, const Expr *receiver) {
+ClassMemberChecker::ResultMemberAccessible ClassMemberChecker::checkAccess(const ClassDecl *cls,
+                                                                           Access access,
+                                                                           llvm::StringRef name,
+                                                                           const Expr *receiver) {
   if (access == Access::Public || Checker::sameClass(this->checker.currentClass_, cls)) {
-    return true;
+    return ok(cls);
   }
   auto derives = [](const ClassDecl *from, const ClassDecl *base) {
     for (const ClassDecl *c = from; c; c = c->parent) {
@@ -51,23 +53,119 @@ bool ClassMemberChecker::checkAccess(const ClassDecl *cls, Access access, llvm::
         receiver && receiver->type ? ClassDeclarer::classOf(receiver->type) : nullptr;
     if (!receiver || (self && (self->name == "this" || self->name == "super")) || !other ||
         derives(other, this->checker.currentClass_)) {
-      return true;
+      return ok(cls);
     }
-    this->checker.diags_.error(
-        loc, "'" + name.str() + "' is protected in class '" + cls->name.str() + "'; '" +
-                 this->checker.currentClass_->name.str() +
-                 "' may use it only on its own objects, and this one is of class '" +
-                 other->name.str() + "'");
-    return false;
-  }
-  std::string message = "'" + name.str() + "' is " + ClassMemberChecker::accessWord(access) +
-                        " in class '" + cls->name.str() + "'";
-  if (access == Access::Protected) {
-    message += "; only '" + cls->name.str() + "' and the classes that extend it can use it";
-  }
-  this->checker.diags_.error(loc, message);
+    std::string message =
+        ErrorTextAccess::elsewhere(name, cls->name, this->checker.currentClass_->name, other->name);
 
-  return false;
+    return err(ClassMemberCheckerCheckAccessError{
+        .code = ClassMemberCheckerCheckAccessErrorCode::PROTECTED_ELSEWHERE,
+        .message = message,
+    });
+  }
+  const char *word = ClassMemberChecker::accessWord(access);
+  if (access == Access::Protected) {
+    std::string message = ErrorTextAccess::hidden(name, word, cls->name, true);
+
+    return err(ClassMemberCheckerCheckAccessError{
+        .code = ClassMemberCheckerCheckAccessErrorCode::PROTECTED_MEMBER,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextAccess::hidden(name, word, cls->name, false);
+
+  return err(ClassMemberCheckerCheckAccessError{
+      .code = ClassMemberCheckerCheckAccessErrorCode::PRIVATE_MEMBER,
+      .message = message,
+  });
+}
+
+ClassMemberChecker::ResultFieldIsSetBefore
+ClassMemberChecker::fieldSet(const ClassDecl *owner, llvm::StringRef name, bool viaThis) const {
+  bool unset = viaThis && owner == this->checker.initFn_->cls() &&
+               !llvm::is_contained(this->checker.flow_.setFields, name);
+  if (unset) {
+    std::string message = ErrorTextClassField::readEarly(name);
+
+    return err(ClassMemberCheckerFieldSetError{
+        .code = ClassMemberCheckerFieldSetErrorCode::READ_BEFORE_SET,
+        .message = message,
+    });
+  }
+
+  return ok(name);
+}
+
+ClassMemberChecker::ResultFieldTypeIsKnown ClassMemberChecker::fieldTyped(const ClassField *field,
+                                                                          llvm::StringRef name) {
+  if (!field->resolved) {
+    std::string message = ErrorTextClassField::laterType(name);
+
+    return err(ClassMemberCheckerFieldTypedError{
+        .code = ClassMemberCheckerFieldTypedErrorCode::TYPE_FROM_INITIALIZER,
+        .message = message,
+    });
+  }
+
+  return ok(field->resolved);
+}
+
+ClassMemberChecker::ResultMethodsOfObjects
+ClassMemberChecker::instanceMethods(const ClassDecl *cls, llvm::StringRef name) {
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
+  bool staticMember = !ClassDeclarer::methodsNamed(cls, name, true).empty() ||
+                      llvm::any_of(cls->fields, [&](const ClassField &f) {
+                        return f.isStatic() && f.name == name;
+                      });
+  if (methods.empty() && staticMember) {
+    std::string message = ErrorTextClassField::isStatic(name, cls->name);
+
+    return err(ClassMemberCheckerInstanceMethodsError{
+        .code = ClassMemberCheckerInstanceMethodsErrorCode::STATIC_MEMBER,
+        .message = message,
+    });
+  }
+  if (methods.empty()) {
+    std::string message = ErrorTextClassField::noProperty(name, cls->type->name());
+
+    return err(ClassMemberCheckerInstanceMethodsError{
+        .code = ClassMemberCheckerInstanceMethodsErrorCode::NO_SUCH_PROPERTY,
+        .message = message,
+    });
+  }
+
+  return ok(methods);
+}
+
+ClassMemberChecker::ResultObjectReadyToUse
+ClassMemberChecker::objectReady(bool viaThis, llvm::StringRef name) const {
+  bool early = viaThis && !this->checker.flow_.beforeSuper &&
+               this->checker.classChecker().thisReady(this->checker.flow_).isErr();
+  if (early) {
+    std::string field = this->checker.classChecker().firstUnset(this->checker.flow_).value();
+    std::string message = ErrorTextClassField::earlyThis(name, field);
+
+    return err(ClassMemberCheckerObjectReadyError{
+        .code = ClassMemberCheckerObjectReadyErrorCode::USED_BEFORE_SET,
+        .message = message,
+    });
+  }
+
+  return ok(name);
+}
+
+ClassMemberChecker::ResultPlainMethodValue ClassMemberChecker::methodValue(const FuncSymbol *sym,
+                                                                           llvm::StringRef name) {
+  if (sym->isGeneric()) {
+    std::string message = ErrorTextClassField::genericVal(name);
+
+    return err(ClassMemberCheckerMethodValueError{
+        .code = ClassMemberCheckerMethodValueErrorCode::GENERIC_METHOD,
+        .message = message,
+    });
+  }
+
+  return ok(sym);
 }
 
 Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expected) {
@@ -83,21 +181,22 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
   const ClassDecl *owner = nullptr;
   const ClassField *field = ClassBases::findField(cls, name, &owner);
   if (field && !field->method()) {
-    this->checkAccess(owner, field->access, name, member->loc(), member->object);
-    if (viaThis && owner == this->checker.initFn_->cls() &&
-        !llvm::is_contained(this->checker.flow_.setFields, name)) {
-      this->checker.diags_.error(member->loc(), "field '" + name + "' is read before it is set");
+    ResultMemberAccessible accessible =
+        this->checkAccess(owner, field->access, name, member->object);
+    if (accessible.isErr()) {
+      this->checker.diags_.error(member->loc(), accessible.error().message);
+    }
+    ResultFieldIsSetBefore set = this->fieldSet(owner, name, viaThis);
+    if (set.isErr()) {
+      this->checker.diags_.error(member->loc(), set.error().message);
       return member;
     }
-    if (!field->resolved) {
-      this->checker.diags_.error(member->loc(),
-                                 "the type of field '" + name +
-                                     "' comes from its initializer, which runs later; declare "
-                                     "it: '" +
-                                     name + ": T = ...'");
+    ResultFieldTypeIsKnown typed = ClassMemberChecker::fieldTyped(field, name);
+    if (typed.isErr()) {
+      this->checker.diags_.error(member->loc(), typed.error().message);
       return member;
     }
-    member->type = field->resolved;
+    member->type = typed.value();
     if (Expr *narrowed = this->checker.fieldFacts().narrowedField(member); narrowed != member) {
       return narrowed;
     }
@@ -109,33 +208,26 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
     }
     return member;
   }
-  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
-  if (methods.empty()) {
-    if (!ClassDeclarer::methodsNamed(cls, name, true).empty() ||
-        llvm::any_of(cls->fields,
-                     [&](const ClassField &f) { return f.isStatic() && f.name == name; })) {
-      this->checker.diags_.error(member->loc(), "'" + name + "' is a static member of '" +
-                                                    cls->name + "': use it through the class, '" +
-                                                    cls->name + "." + name + "'");
-    } else {
-      this->checker.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
-                                                    cls->type->name() + "'");
-    }
+  ResultMethodsOfObjects found = ClassMemberChecker::instanceMethods(cls, name);
+  if (found.isErr()) {
+    this->checker.diags_.error(member->loc(), found.error().message);
     return member;
   }
-  this->checkAccess(methods[0]->cls(), methods[0]->access(), name, member->loc(), member->object);
+  std::vector<FunctionDecl *> methods = found.value();
+  ResultMemberAccessible accessible =
+      this->checkAccess(methods[0]->cls(), methods[0]->access(), name, member->object);
+  if (accessible.isErr()) {
+    this->checker.diags_.error(member->loc(), accessible.error().message);
+  }
   if (methods[0]->cls()->library() && this->checker.eventMaps().isEmitterClass(cls) &&
       !this->checker.libraryCalls().inLibrary(member->loc()) && name != "eventNames") {
     this->checker.emitterChecker().reportEmitterMethodValue(member);
 
     return member;
   }
-  if (viaThis && !this->checker.flow_.beforeSuper &&
-      this->checker.classChecker().thisReady(this->checker.flow_).isErr()) {
-    this->checker.diags_.error(
-        member->loc(), "'this." + name + "' is used before every field is set: field '" +
-                           this->checker.classChecker().firstUnset(this->checker.flow_).value() +
-                           "' is not set yet");
+  ResultObjectReadyToUse ready = this->objectReady(viaThis, name);
+  if (ready.isErr()) {
+    this->checker.diags_.error(member->loc(), ready.error().message);
   }
   OverloadResolver::ResultVariantOfType variant =
       this->checker.overloadResolver().variantForType(methods, expected, member);
@@ -144,13 +236,9 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
     return member;
   }
   FuncSymbol *sym = variant.value();
-  if (sym->isGeneric()) {
-    this->checker.diags_.error(
-        member->loc(), "'" + name +
-                           "' is a generic method, so it can only be called: each "
-                           "call runs a copy of it made for its types; wrap it in an arrow, e.g. "
-                           "'(x) => o." +
-                           name + "(x)'");
+  ResultPlainMethodValue plain = ClassMemberChecker::methodValue(sym, name);
+  if (plain.isErr()) {
+    this->checker.diags_.error(member->loc(), plain.error().message);
     return member;
   }
   if (FunctionDecl *impl = ClassLinks::soleImplementation(cls, sym->decl)) {
@@ -163,6 +251,81 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
   return member;
 }
 
+ClassMemberChecker::ResultStoredFieldValue ClassMemberChecker::statsDate(ClassDecl *cls,
+                                                                         MemberExpr *member) {
+  bool derived =
+      cls == this->checker.statsClass_ && this->checker.fsDeclarer().checkStatsDate(member, cls);
+  if (derived) {
+    std::string message = ErrorTextFieldTarget::statsDate(member->name);
+
+    return err(ClassMemberCheckerStatsDateError{
+        .code = ClassMemberCheckerStatsDateErrorCode::DERIVED_DATE,
+        .message = message,
+    });
+  }
+
+  return ok(cls);
+}
+
+ClassMemberChecker::ResultAssignableMember
+ClassMemberChecker::assignableField(const ClassField *field, const ClassDecl *cls,
+                                    llvm::StringRef name, const Type *type) {
+  bool assignable = field && !field->method();
+  if (!assignable) {
+    std::string setter = "set" + std::string(1, llvm::toUpper(name[0])) + name.drop_front().str();
+    bool method = field || !ClassDeclarer::methodsNamed(cls, name, false).empty();
+    bool hasSetter = !ClassDeclarer::methodsNamed(cls, setter, false).empty();
+    if (method && cls->library() && hasSetter) {
+      std::string message = ErrorTextFieldTarget::setter(name, type->name(), setter);
+
+      return err(ClassMemberCheckerAssignableFieldError{
+          .code = ClassMemberCheckerAssignableFieldErrorCode::SETTER_METHOD,
+          .message = message,
+      });
+    }
+    if (method && cls->library()) {
+      std::string message = ErrorTextFieldTarget::library(name, type->name());
+
+      return err(ClassMemberCheckerAssignableFieldError{
+          .code = ClassMemberCheckerAssignableFieldErrorCode::LIBRARY_METHOD,
+          .message = message,
+      });
+    }
+    if (method) {
+      std::string message = ErrorTextFieldTarget::method(name, type->name());
+
+      return err(ClassMemberCheckerAssignableFieldError{
+          .code = ClassMemberCheckerAssignableFieldErrorCode::CLASS_METHOD,
+          .message = message,
+      });
+    }
+    std::string message = ErrorTextClassField::noProperty(name, type->name());
+
+    return err(ClassMemberCheckerAssignableFieldError{
+        .code = ClassMemberCheckerAssignableFieldErrorCode::NO_SUCH_PROPERTY,
+        .message = message,
+    });
+  }
+
+  return ok(field);
+}
+
+ClassMemberChecker::ResultFieldNotReadOnly
+ClassMemberChecker::fieldWritable(const ClassField *field, const ClassDecl *owner, bool viaThis,
+                                  const Type *type) const {
+  bool initializing = viaThis && owner == this->checker.initFn_->cls();
+  if (field->readonly && !initializing) {
+    std::string message = ErrorTextFieldTarget::readOnly(field->name, type->name());
+
+    return err(ClassMemberCheckerFieldWritableError{
+        .code = ClassMemberCheckerFieldWritableErrorCode::READ_ONLY,
+        .message = message,
+    });
+  }
+
+  return ok(field);
+}
+
 const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compound) {
   const Type *type = member->object->type;
   ClassDecl *cls = ClassDeclarer::classOf(type);
@@ -173,62 +336,45 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
   llvm::StringRef name = member->name;
   const ClassDecl *owner = nullptr;
   const ClassField *field = ClassBases::findField(cls, name, &owner);
-  if (cls == this->checker.statsClass_ && this->checker.fsDeclarer().checkStatsDate(member, cls)) {
-    this->checker.diags_.error(member->loc(),
-                               "'" + name + "' cannot be assigned: it is made from '" + name +
-                                   "Ms' when it is read; keep the date in a variable of its own");
+  ResultStoredFieldValue stored = this->statsDate(cls, member);
+  if (stored.isErr()) {
+    this->checker.diags_.error(member->loc(), stored.error().message);
     return Type::error();
   }
-  if (!field || field->method()) {
-    std::string setter = "set" + std::string(1, llvm::toUpper(name[0])) + name.drop_front().str();
-    bool method = field || !ClassDeclarer::methodsNamed(cls, name, false).empty();
-    if (method && cls->library() && !ClassDeclarer::methodsNamed(cls, setter, false).empty()) {
-      this->checker.diags_.error(member->loc(), "'" + name + "' is a method of '" + type->name() +
-                                                    "'; change it with '" + setter + "(...)'");
-    } else if (method && cls->library()) {
-      this->checker.diags_.error(member->loc(), "'" + name + "' is a method of '" + type->name() +
-                                                    "' and cannot be assigned: the object changes "
-                                                    "what it gives itself");
-    } else if (method) {
-      this->checker.diags_.error(member->loc(),
-                                 "'" + name + "' is a method of '" + type->name() +
-                                     "' and cannot be replaced: a method belongs to the class, "
-                                     "not to the object; to change what it does, declare a "
-                                     "field that holds a function: '" +
-                                     name + ": () => void = () => { ... }'");
-    } else {
-      this->checker.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
-                                                    type->name() + "'");
-    }
+  ResultAssignableMember assignable = ClassMemberChecker::assignableField(field, cls, name, type);
+  if (assignable.isErr()) {
+    this->checker.diags_.error(member->loc(), assignable.error().message);
     return Type::error();
   }
-  this->checkAccess(owner, field->access, name, member->loc(), member->object);
+  ResultMemberAccessible accessible = this->checkAccess(owner, field->access, name, member->object);
+  if (accessible.isErr()) {
+    this->checker.diags_.error(member->loc(), accessible.error().message);
+  }
   bool viaThis = this->checker.classChecker().isInitThis(member->object).isOk();
-  if (compound && viaThis && owner == this->checker.initFn_->cls() &&
-      !llvm::is_contained(this->checker.flow_.setFields, name)) {
-    this->checker.diags_.error(member->loc(), "field '" + name + "' is read before it is set");
-    return Type::error();
-  }
-  if (field->readonly && !(viaThis && owner == this->checker.initFn_->cls())) {
-    this->checker.diags_.error(
-        member->loc(), "cannot assign to '" + name + "' because it is a read-only field of '" +
-                           type->name() + "'; only its constructor can set it");
-  }
-  if (!field->resolved) {
-    if (viaThis && this->checker.initFn_ == cls->init && owner == cls && !compound) {
-      member->type = nullptr;
-      return nullptr;
+  if (compound) {
+    ResultFieldIsSetBefore set = this->fieldSet(owner, name, viaThis);
+    if (set.isErr()) {
+      this->checker.diags_.error(member->loc(), set.error().message);
+      return Type::error();
     }
-    this->checker.diags_.error(member->loc(),
-                               "the type of field '" + name +
-                                   "' comes from its initializer, which runs later; declare "
-                                   "it: '" +
-                                   name + ": T = ...'");
+  }
+  ResultFieldNotReadOnly writable = this->fieldWritable(field, owner, viaThis, type);
+  if (writable.isErr()) {
+    this->checker.diags_.error(member->loc(), writable.error().message);
+  }
+  if (!field->resolved && viaThis && this->checker.initFn_ == cls->init && owner == cls &&
+      !compound) {
+    member->type = nullptr;
+    return nullptr;
+  }
+  ResultFieldTypeIsKnown typed = ClassMemberChecker::fieldTyped(field, name);
+  if (typed.isErr()) {
+    this->checker.diags_.error(member->loc(), typed.error().message);
     return Type::error();
   }
-  member->type = field->resolved;
+  member->type = typed.value();
 
-  return field->resolved;
+  return typed.value();
 }
 
 }

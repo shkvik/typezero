@@ -275,7 +275,11 @@ Expr *DictNewChecker::checkDictSource(Expr *arg, bool pairs, const Type *&elemen
   }
   const Type *given = GeneratorChecker::iteratedType(type);
   if (given && type->isIterator()) {
-    this->checker.generatorChecker().checkSendsNothing(type, arg->loc(), what);
+    GeneratorChecker::ResultNextNeedsNoValue nothing =
+        this->checker.generatorChecker().checkSendsNothing(type, what);
+    if (nothing.isErr()) {
+      this->checker.diags_.error(arg->loc(), nothing.error().message);
+    }
     this->checker.flowChecker().calledFunction();
   }
   ResultSourceShape shaped = DictNewChecker::sourceShape(type, given, wanted, pairs, what);
@@ -295,7 +299,10 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
     TypeRef ref;
     ref.name = expr->name;
     ref.loc = loc;
-    this->checker.dictChecker().resolveDictType(ref);
+    DictChecker::ResultDictTypeResolved weak = this->checker.dictChecker().resolveDictType(ref);
+    if (weak.isErr()) {
+      this->checker.diags_.error(loc, weak.error().message);
+    }
     for (Expr *&arg : expr->args) {
       arg = this->checker.exprChecker().checkExpr(arg);
     }
@@ -328,7 +335,14 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
     ref.name = expr->name;
     ref.loc = loc;
     ref.args = expr->typeArgs;
-    type = this->checker.dictChecker().resolveDictType(ref);
+    DictChecker::ResultDictTypeResolved given = this->checker.dictChecker().resolveDictType(ref);
+    if (given.isErr()) {
+      bool onKey = DictChecker::keyArgument(given.error().code);
+      llvm::SMLoc at = onKey ? ref.args[0].loc : ref.loc;
+      this->checker.diags_.error(at, given.error().message);
+      return fail();
+    }
+    type = given.value();
     if (type->isError()) {
       return fail();
     }
@@ -353,7 +367,13 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
     const Type *key = nullptr;
     const Type *value = nullptr;
     if (!type && isMap && this->inferPairs(arg, key, value)) {
-      if (key->isError() || !this->checker.dictChecker().checkKeyType(key, arg->loc())) {
+      if (key->isError()) {
+        expr->type = Type::error();
+        return expr;
+      }
+      DictChecker::ResultKeyTypeIsAllowed allowed = this->checker.dictChecker().checkKeyType(key);
+      if (allowed.isErr()) {
+        this->checker.diags_.error(arg->loc(), allowed.error().message);
         expr->type = Type::error();
         return expr;
       }
@@ -363,7 +383,8 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
       const Type *element =
           type ? (isMap ? Type::tuple({type->keyType(), type->valueType()}) : type->keyType())
                : nullptr;
-      arg = this->checkDictSource(arg, isMap, element, "'new " + expr->name.str() + "'");
+      std::string what = ErrorTextDictSource::newName(expr->name);
+      arg = this->checkDictSource(arg, isMap, element, what);
       if (element->isError()) {
         expr->type = Type::error();
         return expr;
@@ -376,7 +397,9 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
           return expr;
         }
         const Type *k = isMap ? element->fields()[0].type : element;
-        if (!this->checker.dictChecker().checkKeyType(k, arg->loc())) {
+        DictChecker::ResultKeyTypeIsAllowed allowed = this->checker.dictChecker().checkKeyType(k);
+        if (allowed.isErr()) {
+          this->checker.diags_.error(arg->loc(), allowed.error().message);
           expr->type = Type::error();
           return expr;
         }
@@ -392,7 +415,10 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
       args.push_back(arg);
     }
   }
-  if (!this->checker.dictChecker().checkKeyType(type->keyType(), loc)) {
+  DictChecker::ResultKeyTypeIsAllowed keyAllowed =
+      this->checker.dictChecker().checkKeyType(type->keyType());
+  if (keyAllowed.isErr()) {
+    this->checker.diags_.error(loc, keyAllowed.error().message);
     return fail();
   }
   auto *call = this->checker.ctx_.make<CallExpr>(

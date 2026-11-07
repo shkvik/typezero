@@ -20,9 +20,7 @@ using llvm::cast;
 
 namespace tz {
 
-namespace {
-
-const std::vector<MakerFields> &fsObjects() {
+const std::vector<MakerFields> &FsLowerer::fsObjects() {
   static const std::vector<MakerFields> table = {
       {nullptr, {"message", "errno", "code", "syscall", "path", "dest"}},
       {nullptr, {"code", "message", "syscall", "path"}},
@@ -38,41 +36,44 @@ const std::vector<MakerFields> &fsObjects() {
   return table;
 }
 
-}
-
-FsLowerer::FsLowerer(Lowering &lowering) : lowering_(lowering) {}
+FsLowerer::FsLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Function *FsLowerer::objectMaker(const Type *type) {
-  return lowering_.objectMaker().maker(type, fsObjects());
+  return this->lowering.objectMaker().maker(type, FsLowerer::fsObjects());
 }
 
-llvm::Function *FsLowerer::nativeErrorMaker() { return objectMaker(lowering_.nativeError_); }
+llvm::Function *FsLowerer::nativeErrorMaker() {
+  return this->objectMaker(this->lowering.nativeError_);
+}
 
 llvm::Function *FsLowerer::errorMaker(const Type *error) {
-  if (error == lowering_.nativeError_) {
-    return nativeErrorMaker();
+  if (error == this->lowering.nativeError_) {
+    return this->nativeErrorMaker();
   }
-  llvm::Function *&made = errorMakers_[error];
+  llvm::Function *&made = this->errorMakers[error];
   if (made) {
     return made;
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
   std::vector<const Type *> variants(error->members().begin(), error->members().end());
   std::vector<llvm::Function *> makers;
   for (const Type *variant : variants) {
-    makers.push_back(objectMaker(variant));
+    makers.push_back(this->objectMaker(variant));
   }
   made = llvm::Function::Create(llvm::FunctionType::get(ptr, {ptr}, false),
                                 llvm::GlobalValue::InternalLinkage,
-                                "tz.make." + error->name().str(), lowering_.module_.get());
+                                "tz.make." + error->name().str(), this->lowering.module_.get());
   llvm::Function *function = made;
-  lowering_.functionBuilder().setFunctionAttributes(function);
-  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
-  llvm::Function *outer = std::exchange(lowering_.function_, function);
-  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", function));
+  this->lowering.functionBuilder().setFunctionAttributes(function);
+  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
+  llvm::Function *outer = std::exchange(this->lowering.function_, function);
+  this->lowering.builder_.SetInsertPoint(
+      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", function));
   llvm::Value *parts = function->getArg(0);
-  llvm::Value *code = lowering_.builder_.CreateLoad(ptr, parts, "code");
-  llvm::FunctionCallee compare = lowering_.module_->getOrInsertFunction(
+  llvm::Value *code = this->lowering.builder_.CreateLoad(ptr, parts, "code");
+  llvm::FunctionCallee compare = this->lowering.module_->getOrInsertFunction(
       "strcmp", llvm::FunctionType::get(i32, {ptr, ptr}, false));
   llvm::Value *none = llvm::ConstantInt::getSigned(i32, -1);
   llvm::Value *index = none;
@@ -91,125 +92,132 @@ llvm::Function *FsLowerer::errorMaker(const Type *error) {
       if (ascii == "UNKNOWN") {
         unknown = unsigned(v);
       }
-      llvm::Value *same = lowering_.builder_.CreateICmpEQ(
-          lowering_.builder_.CreateCall(compare,
-                                        {code, lowering_.stringLowerer().utf8Constant(ascii)}),
-          lowering_.builder_.getInt32(0));
-      index =
-          lowering_.builder_.CreateSelect(same, lowering_.builder_.getInt32(unsigned(v)), index);
+      llvm::Value *same = this->lowering.builder_.CreateICmpEQ(
+          this->lowering.builder_.CreateCall(
+              compare, {code, this->lowering.stringLowerer().utf8Constant(ascii)}),
+          this->lowering.builder_.getInt32(0));
+      index = this->lowering.builder_.CreateSelect(
+          same, this->lowering.builder_.getInt32(unsigned(v)), index);
     }
   }
-  llvm::Value *known = lowering_.builder_.CreateICmpNE(index, none);
-  lowering_.builder_.CreateCall(
-      lowering_.processLowerer().processFunction("tz_fs_compose", lowering_.builder_.getVoidTy(),
-                                                 {ptr, ptr, i32}),
-      {parts, lowering_.stringLowerer().utf8Constant(FsErrorTypes::verbOf(error->name())),
-       lowering_.builder_.CreateZExt(known, i32)});
+  llvm::Value *known = this->lowering.builder_.CreateICmpNE(index, none);
+  this->lowering.builder_.CreateCall(
+      this->lowering.processLowerer().processFunction(
+          "tz_fs_compose", this->lowering.builder_.getVoidTy(), {ptr, ptr, i32}),
+      {parts, this->lowering.stringLowerer().utf8Constant(FsErrorTypes::verbOf(error->name())),
+       this->lowering.builder_.CreateZExt(known, i32)});
   llvm::Value *chosen =
-      lowering_.builder_.CreateSelect(known, index, lowering_.builder_.getInt32(unknown));
-  llvm::BasicBlock *fallback = llvm::BasicBlock::Create(lowering_.ctx_, "unknown", function);
+      this->lowering.builder_.CreateSelect(known, index, this->lowering.builder_.getInt32(unknown));
+  llvm::BasicBlock *fallback = llvm::BasicBlock::Create(this->lowering.ctx_, "unknown", function);
   llvm::SwitchInst *pick =
-      lowering_.builder_.CreateSwitch(chosen, fallback, unsigned(variants.size()));
+      this->lowering.builder_.CreateSwitch(chosen, fallback, unsigned(variants.size()));
   for (size_t v = 0; v < variants.size(); ++v) {
-    llvm::BasicBlock *block = llvm::BasicBlock::Create(lowering_.ctx_, "variant", function);
-    pick->addCase(lowering_.builder_.getInt32(unsigned(v)), block);
-    lowering_.builder_.SetInsertPoint(block);
-    lowering_.builder_.CreateRet(lowering_.builder_.CreateCall(makers[v], {parts}));
+    llvm::BasicBlock *block = llvm::BasicBlock::Create(this->lowering.ctx_, "variant", function);
+    pick->addCase(this->lowering.builder_.getInt32(unsigned(v)), block);
+    this->lowering.builder_.SetInsertPoint(block);
+    this->lowering.builder_.CreateRet(this->lowering.builder_.CreateCall(makers[v], {parts}));
   }
-  lowering_.builder_.SetInsertPoint(fallback);
-  lowering_.builder_.CreateRet(lowering_.builder_.CreateCall(makers[unknown], {parts}));
-  lowering_.function_ = outer;
-  lowering_.builder_.restoreIP(point);
+  this->lowering.builder_.SetInsertPoint(fallback);
+  this->lowering.builder_.CreateRet(this->lowering.builder_.CreateCall(makers[unknown], {parts}));
+  this->lowering.function_ = outer;
+  this->lowering.builder_.restoreIP(point);
 
   return function;
 }
 
 llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
   if (isFspBuiltin(call->builtin())) {
-    return lowering_.fsPromisesLowerer().emitFsPromise(call);
+    return this->lowering.fsPromisesLowerer().emitFsPromise(call);
   }
   if (call->builtin() >= Builtin::RlCreate && call->builtin() <= Builtin::RlClose) {
-    return lowering_.fsPromisesLowerer().emitReadlineBuiltin(call);
+    return this->lowering.fsPromisesLowerer().emitReadlineBuiltin(call);
   }
-  llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i32 = lowering_.builder_.getInt32Ty();
-  llvm::Type *i64 = lowering_.builder_.getInt64Ty(), *f64 = lowering_.builder_.getDoubleTy(),
-             *ptr = lowering_.builder_.getPtrTy();
+  llvm::Type *voidTy = this->lowering.builder_.getVoidTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+  llvm::Type *i64 = this->lowering.builder_.getInt64Ty(),
+             *f64 = this->lowering.builder_.getDoubleTy(),
+             *ptr = this->lowering.builder_.getPtrTy();
 
   if (call->builtin() == Builtin::FsStatsDate) {
     auto *member = cast<MemberExpr>(call->callee);
-    Lowering::Operand stats = lowering_.refCounts().emitOperand(member->object, true);
-    llvm::Value *ms =
-        lowering_.builder_.CreateLoad(f64,
-                                      lowering_.objectLayouts().fieldAddress(
-                                          stats.value, stats.type, (member->name + "Ms").str()),
-                                      "ms");
-    lowering_.refCounts().dropOperand(stats);
-    llvm::Value *rounded = lowering_.builder_.CreateUnaryIntrinsic(
-        llvm::Intrinsic::floor, lowering_.builder_.CreateFAdd(ms, llvm::ConstantFP::get(f64, 0.5)));
-    return lowering_.dateLowerer().newDate(lowering_.dateLowerer().wholeTime(rounded));
+    Lowering::Operand stats = this->lowering.refCounts().emitOperand(member->object, true);
+    llvm::Value *ms = this->lowering.builder_.CreateLoad(
+        f64,
+        this->lowering.objectLayouts().fieldAddress(stats.value, stats.type,
+                                                    (member->name + "Ms").str()),
+        "ms");
+    this->lowering.refCounts().dropOperand(stats);
+    llvm::Value *rounded = this->lowering.builder_.CreateUnaryIntrinsic(
+        llvm::Intrinsic::floor,
+        this->lowering.builder_.CreateFAdd(ms, llvm::ConstantFP::get(f64, 0.5)));
+    return this->lowering.dateLowerer().newDate(this->lowering.dateLowerer().wholeTime(rounded));
   }
 
   if (call->builtin() == Builtin::FsIsKind) {
     auto *member = cast<MemberExpr>(call->callee);
-    Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, true);
+    Lowering::Operand object = this->lowering.refCounts().emitOperand(member->object, true);
     const Type *type = object.type;
     bool stats = type->field("mode") != nullptr;
     llvm::StringRef field = stats ? "mode" : "Symbol(type)";
-    llvm::Value *bits = lowering_.builder_.CreateLoad(
-        i64, lowering_.objectLayouts().fieldAddress(object.value, type, field));
-    lowering_.refCounts().dropOperand(object);
-    llvm::Value *kind = lowering_.exprLowerer().emitExpr(call->args[0]);
-    return lowering_.builder_.CreateICmpEQ(
-        lowering_.builder_.CreateAnd(bits, lowering_.builder_.getInt64(0170000)), kind);
+    llvm::Value *bits = this->lowering.builder_.CreateLoad(
+        i64, this->lowering.objectLayouts().fieldAddress(object.value, type, field));
+    this->lowering.refCounts().dropOperand(object);
+    llvm::Value *kind = this->lowering.exprLowerer().emitExpr(call->args[0]);
+    return this->lowering.builder_.CreateICmpEQ(
+        this->lowering.builder_.CreateAnd(bits, this->lowering.builder_.getInt64(0170000)), kind);
   }
 
   const Type *valueType = call->type->isResult() ? call->type->okType() : call->type;
-  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
+  std::vector<llvm::Value *> values = this->lowering.exprLowerer().emitExprs(call->args);
   auto release = [&] {
     for (size_t i = 0; i < values.size(); ++i) {
-      lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
+      this->lowering.refCounts().releaseValue(values[i], call->args[i]->type);
     }
   };
-  auto obj = [&](size_t i) { return lowering_.stringLowerer().stringObj(values[i]); };
-  auto meta = [&](size_t i) { return lowering_.stringLowerer().stringMeta(values[i]); };
-  auto flag = [&](size_t i) { return lowering_.builder_.CreateZExt(values[i], i32); };
+  auto obj = [&](size_t i) { return this->lowering.stringLowerer().stringObj(values[i]); };
+  auto meta = [&](size_t i) { return this->lowering.stringLowerer().stringMeta(values[i]); };
+  auto flag = [&](size_t i) { return this->lowering.builder_.CreateZExt(values[i], i32); };
   auto fn = [&](llvm::StringRef name, llvm::Type *ret, llvm::ArrayRef<llvm::Type *> params) {
-    return lowering_.processLowerer().processFunction(name, ret, params);
+    return this->lowering.processLowerer().processFunction(name, ret, params);
   };
   auto fsCall = [&](llvm::StringRef name, llvm::Type *ret, std::vector<llvm::Type *> params,
                     std::vector<llvm::Value *> args) -> llvm::Value * {
     params.push_back(ptr);
-    args.push_back(errorMaker(call->type->errType()));
-    llvm::Value *result = lowering_.builder_.CreateCall(fn(name, ret, params), args);
+    args.push_back(this->errorMaker(call->type->errType()));
+    llvm::Value *result = this->lowering.builder_.CreateCall(fn(name, ret, params), args);
     release();
 
     return result;
   };
   auto fsString = [&](llvm::StringRef name, std::vector<llvm::Type *> params,
                       std::vector<llvm::Value *> args) {
-    llvm::AllocaInst *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "fs.out");
+    llvm::AllocaInst *out =
+        this->lowering.functionFrame().createStackSlot(this->lowering.strTy_, "fs.out");
     params.insert(params.begin(), ptr);
     args.insert(args.begin(), out);
     fsCall(name, voidTy, params, args);
 
-    return lowering_.builder_.CreateLoad(lowering_.strTy_, out);
+    return this->lowering.builder_.CreateLoad(this->lowering.strTy_, out);
   };
   auto optionalString = [&](llvm::Value *out, llvm::Value *found) {
-    return lowering_.optionalLowerer().makeOptional(
-        lowering_.builder_.CreateLoad(lowering_.strTy_, out),
-        lowering_.builder_.CreateICmpNE(found, lowering_.builder_.getInt32(0)), valueType);
+    return this->lowering.optionalLowerer().makeOptional(
+        this->lowering.builder_.CreateLoad(this->lowering.strTy_, out),
+        this->lowering.builder_.CreateICmpNE(found, this->lowering.builder_.getInt32(0)),
+        valueType);
   };
 
   llvm::Value *result = nullptr;
   switch (call->builtin()) {
     case Builtin::ReadLine: {
       bool question = !values.empty();
-      llvm::AllocaInst *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "line");
-      llvm::Value *found = lowering_.builder_.CreateCall(
+      llvm::AllocaInst *out =
+          this->lowering.functionFrame().createStackSlot(this->lowering.strTy_, "line");
+      llvm::Value *found = this->lowering.builder_.CreateCall(
           fn("tz_io_read_line", i32, {ptr, ptr, i64, i32}),
-          {out, question ? obj(0) : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
-           question ? meta(0) : lowering_.builder_.getInt64(0),
-           lowering_.builder_.getInt32(question ? 1 : 0)});
+          {out,
+           question ? obj(0) : llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()),
+           question ? meta(0) : this->lowering.builder_.getInt64(0),
+           this->lowering.builder_.getInt32(question ? 1 : 0)});
       release();
       return optionalString(out, found);
     }
@@ -243,9 +251,10 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
       }
       return nullptr;
     case Builtin::FsExists:
-      result = lowering_.builder_.CreateICmpNE(
-          lowering_.builder_.CreateCall(fn("tz_fs_exists", i32, {ptr, i64}), {obj(0), meta(0)}),
-          lowering_.builder_.getInt32(0));
+      result = this->lowering.builder_.CreateICmpNE(
+          this->lowering.builder_.CreateCall(fn("tz_fs_exists", i32, {ptr, i64}),
+                                             {obj(0), meta(0)}),
+          this->lowering.builder_.getInt32(0));
       break;
     case Builtin::FsAccess:
     case Builtin::FsChmod:
@@ -256,20 +265,21 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
       fsCall("tz_fs_truncate", voidTy, {ptr, i64, i64}, {obj(0), meta(0), values[1]});
       return nullptr;
     case Builtin::FsStat:
-      return fsCall("tz_fs_stat", ptr, {ptr, i64, i32, i32, ptr},
-                    {obj(0), meta(0), flag(1), flag(2), objectMaker(valueType->nonOptional())});
+      return fsCall(
+          "tz_fs_stat", ptr, {ptr, i64, i32, i32, ptr},
+          {obj(0), meta(0), flag(1), flag(2), this->objectMaker(valueType->nonOptional())});
     case Builtin::FsReaddir: {
       const Type *element = valueType->inner();
-      llvm::Value *dirent = element->isClass()
-                                ? static_cast<llvm::Value *>(objectMaker(element))
-                                : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-      return fsCall(
-          "tz_fs_readdir", ptr, {ptr, i64, i32, ptr, ptr},
-          {obj(0), meta(0), flag(1), lowering_.typeDescriptors().typeDescriptor(element), dirent});
+      llvm::Value *dirent =
+          element->isClass() ? static_cast<llvm::Value *>(this->objectMaker(element))
+                             : llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+      return fsCall("tz_fs_readdir", ptr, {ptr, i64, i32, ptr, ptr},
+                    {obj(0), meta(0), flag(1),
+                     this->lowering.typeDescriptors().typeDescriptor(element), dirent});
     }
     case Builtin::FsMkdir: {
       llvm::AllocaInst *out =
-          lowering_.functionFrame().createStackSlot(lowering_.strTy_, "mkdir.first");
+          this->lowering.functionFrame().createStackSlot(this->lowering.strTy_, "mkdir.first");
       llvm::Value *made = fsCall("tz_fs_mkdir", i32, {ptr, ptr, i64, i32, i64},
                                  {out, obj(0), meta(0), flag(1), values[2]});
       return optionalString(out, made);
@@ -303,12 +313,12 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
 }
 
 llvm::Value *FsLowerer::emitFsResult(CallExpr *call) {
-  llvm::Value *value = emitFsCall(call);
+  llvm::Value *value = this->emitFsCall(call);
   if (!call->type->isResult()) {
     return value;
   }
 
-  return lowering_.resultLowerer().catchFailure(value, call->type, call->loc());
+  return this->lowering.resultLowerer().catchFailure(value, call->type, call->loc());
 }
 
 }

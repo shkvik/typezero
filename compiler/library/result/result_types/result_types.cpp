@@ -6,10 +6,6 @@
 #include "compiler/declare/type_declarer/type_declarer.h"
 #include "llvm/ADT/STLExtras.h"
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
@@ -19,7 +15,10 @@ const llvm::StringLiteral kResultNames[] = {"ok", "err", "Result", "Ok", "Err"};
 
 const llvm::StringLiteral kResultTypes[] = {"Result", "Ok", "Err"};
 
-llvm::StringRef findName(llvm::ArrayRef<llvm::StringLiteral> names, llvm::StringRef name) {
+}
+
+llvm::StringRef ResultTypes::findName(llvm::ArrayRef<llvm::StringLiteral> names,
+                                      llvm::StringRef name) {
   for (llvm::StringLiteral n : names) {
     if (n == name) {
       return n;
@@ -29,35 +28,34 @@ llvm::StringRef findName(llvm::ArrayRef<llvm::StringLiteral> names, llvm::String
   return {};
 }
 
-}
-
-ResultTypes::ResultTypes(Checker &checker) : checker_(checker) {}
+ResultTypes::ResultTypes(Checker &owner)
+    : checker(owner) {}
 
 llvm::StringRef ResultTypes::resultName(llvm::StringRef name) const {
-  ScopeEntry entry = checker_.scopes().lookup(name);
+  ScopeEntry entry = this->checker.scopes().lookup(name);
   if (entry.found()) {
     return {};
   }
 
-  return findName(kResultNames, name);
+  return ResultTypes::findName(kResultNames, name);
 }
 
 llvm::StringRef ResultTypes::resultTypeName(llvm::StringRef name) const {
-  if (checker_.typeDeclarer().lookupType(name)) {
+  if (this->checker.typeDeclarer().lookupType(name)) {
     return {};
   }
 
-  return findName(kResultTypes, name);
+  return ResultTypes::findName(kResultTypes, name);
 }
 
 void ResultTypes::rejectNeverthrowImport(const ImportDecl &decl) {
-  checker_.diags_.error(decl.pathLoc,
-                        "Result, ok and err are built in: remove the import from 'neverthrow'");
+  this->checker.diags_.error(
+      decl.pathLoc, "Result, ok and err are built in: remove the import from 'neverthrow'");
 }
 
 const Type *ResultTypes::resolveResultType(const TypeRef &ref, llvm::StringRef name) {
   if (ref.args.size() != 2) {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         ref.loc, "'" + ref.name + "' takes two type arguments, the value and the error, e.g. '" +
                      ref.name + "<int, string>'");
     return Type::error();
@@ -67,9 +65,10 @@ const Type *ResultTypes::resolveResultType(const TypeRef &ref, llvm::StringRef n
       return Type::never();
     }
 
-    return checker_.typeResolver().resolveTypeInner(arg);
+    return this->checker.typeResolver().resolveTypeInner(arg);
   };
-  const Type *value = half(ref.args[0]), *error = half(ref.args[1]);
+  const Type *value = half(ref.args[0]);
+  const Type *error = half(ref.args[1]);
   if (name == "Ok") {
     error = Type::never();
   } else if (name == "Err") {
@@ -94,14 +93,15 @@ const Type *ResultTypes::unifyHalf(const Type *a, const Type *b) {
 }
 
 void ResultTypes::neverOperands(BinaryExpr *bin) {
-  const Type *l = bin->lhs->type, *r = bin->rhs->type;
+  const Type *l = bin->lhs->type;
+  const Type *r = bin->rhs->type;
   if (l->isNever() && r->isNever()) {
-    bin->lhs = checker_.typeRelations().convert(bin->lhs, Type::doubleTy());
-    bin->rhs = checker_.typeRelations().convert(bin->rhs, Type::doubleTy());
+    bin->lhs = this->checker.typeRelations().convert(bin->lhs, Type::doubleTy());
+    bin->rhs = this->checker.typeRelations().convert(bin->rhs, Type::doubleTy());
   } else if (l->isNever() && !r->isError() && !r->isVoid()) {
-    bin->lhs = checker_.typeRelations().convert(bin->lhs, r);
+    bin->lhs = this->checker.typeRelations().convert(bin->lhs, r);
   } else if (r->isNever() && !l->isError() && !l->isVoid()) {
-    bin->rhs = checker_.typeRelations().convert(bin->rhs, l);
+    bin->rhs = this->checker.typeRelations().convert(bin->rhs, l);
   }
 }
 

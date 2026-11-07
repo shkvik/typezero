@@ -1,4 +1,5 @@
 #include "compiler/check/values/array_methods/array_methods.h"
+#include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/member_checker/member_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
@@ -29,39 +30,142 @@ const VarSymbol *ArrayMethods::arrayVariable(const Expr *object) {
   return name->var();
 }
 
-std::string argumentCount(unsigned min, unsigned max) {
-  std::string text = std::to_string(min);
-  if (max != min) {
-    text += max == ~0u ? " or more" : "-" + std::to_string(max);
-  }
-
-  return text + (max == 1 && min == 1 ? " argument" : " arguments");
-}
-
 ArrayMethods::ArrayMethods(Checker &owner)
     : checker(owner) {}
 
-Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *expected) {
+ArrayMethods::ResultElementsAreText ArrayMethods::textElements(const Type *element,
+                                                               llvm::StringRef name) {
+  if (Checker::holdsFunctions(element)) {
+    std::string message = ErrorTextArrayText::functions();
+
+    return err(ArrayMethodsTextElementsError{
+        .code = ArrayMethodsTextElementsErrorCode::FUNCTIONS,
+        .message = message,
+    });
+  }
+  if (Checker::holdsResults(element)) {
+    std::string message = ErrorTextArrayText::results(name);
+
+    return err(ArrayMethodsTextElementsError{
+        .code = ArrayMethodsTextElementsErrorCode::RESULTS,
+        .message = message,
+    });
+  }
+  if (UnknownChecker::holdsUnknown(element)) {
+    std::string message = ErrorTextArrayText::unknown(name);
+
+    return err(ArrayMethodsTextElementsError{
+        .code = ArrayMethodsTextElementsErrorCode::UNKNOWN,
+        .message = message,
+    });
+  }
+  if (JsonChecker::holdsJson(element)) {
+    std::string message = ErrorTextArrayText::json(name);
+
+    return err(ArrayMethodsTextElementsError{
+        .code = ArrayMethodsTextElementsErrorCode::JSON,
+        .message = message,
+    });
+  }
+  if (Checker::holdsObjects(element) && !Checker::holdsDates(element)) {
+    std::string message = ErrorTextArrayText::objects(name);
+
+    return err(ArrayMethodsTextElementsError{
+        .code = ArrayMethodsTextElementsErrorCode::OBJECTS,
+        .message = message,
+    });
+  }
+
+  return ok(element);
+}
+
+ArrayMethods::ResultSortableElement ArrayMethods::sortable(const Type *element) {
+  if (Checker::holdsFunctions(element)) {
+    std::string message = ErrorTextArraySort::functions();
+
+    return err(ArrayMethodsSortableError{
+        .code = ArrayMethodsSortableErrorCode::FUNCTIONS,
+        .message = message,
+    });
+  }
+  if (UnknownChecker::holdsUnknown(element)) {
+    std::string message = ErrorTextArraySort::unknown();
+
+    return err(ArrayMethodsSortableError{
+        .code = ArrayMethodsSortableErrorCode::UNKNOWN,
+        .message = message,
+    });
+  }
+  if (JsonChecker::holdsJson(element)) {
+    std::string message = ErrorTextArraySort::json();
+
+    return err(ArrayMethodsSortableError{
+        .code = ArrayMethodsSortableErrorCode::JSON,
+        .message = message,
+    });
+  }
+  if (Checker::holdsDates(element)) {
+    std::string message = ErrorTextArraySort::dates();
+
+    return err(ArrayMethodsSortableError{
+        .code = ArrayMethodsSortableErrorCode::DATES,
+        .message = message,
+    });
+  }
+  if (Checker::holdsObjects(element) || Checker::holdsResults(element)) {
+    std::string message = ErrorTextArraySort::objects();
+
+    return err(ArrayMethodsSortableError{
+        .code = ArrayMethodsSortableErrorCode::OBJECTS,
+        .message = message,
+    });
+  }
+  auto textual = [](const Type *m) {
+    const Type *b = m->isLiteral() ? m->literalBase() : m;
+
+    return b->isString() || b->isBool();
+  };
+  const Type *u = element->nonOptional();
+  if (u->isUnion() && !llvm::all_of(u->members(), textual)) {
+    std::string message = ErrorTextArraySort::mixed(u->name());
+
+    return err(ArrayMethodsSortableError{
+        .code = ArrayMethodsSortableErrorCode::MIXED_UNION,
+        .message = message,
+    });
+  }
+  bool numbers = u->isNumeric() || u->isDecimal() || GenericChecker::apparentType(u)->isNumeric();
+  if (numbers) {
+    std::string message = ErrorTextArraySort::numbers(element->isOptional());
+
+    return err(ArrayMethodsSortableError{
+        .code = ArrayMethodsSortableErrorCode::NUMBERS,
+        .message = message,
+    });
+  }
+
+  return ok(element);
+}
+
+ArrayMethods::ResultArrayMethodCall
+ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *expected) {
   const Type *arrayType = member->object->type;
   const Type *element = arrayType->inner();
   const VarSymbol *self = ArrayMethods::arrayVariable(member->object);
   llvm::StringRef name = member->name;
   size_t count = call->args.size();
 
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->checker.exprChecker().checkExpr(arg);
-    }
-  };
-  auto arity = [&](unsigned min, unsigned max) {
+  auto arity = [&](unsigned min, unsigned max) -> ResultArrayMethodCall {
     if (count >= min && count <= max) {
-      return true;
+      return ok(call);
     }
-    this->checker.diags_.error(member->loc(), "expected " + argumentCount(min, max) + ", but got " +
-                                                  llvm::Twine(count));
-    checkArgsLoosely();
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    std::string message = ErrorTextArity::count(min, max, count);
 
-    return false;
+    return err(ArrayMethodsCheckArrayMethodError{
+        .code = ArrayMethodsCheckArrayMethodErrorCode::WRONG_ARITY,
+        .message = message,
+    });
   };
   auto elementArg = [&](size_t i) {
     call->args[i] = this->checker.typeRelations().coerce(
@@ -77,10 +181,20 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
                                           "reduceRight", "find",    "findIndex", "some",
                                           "every",       "flatMap", "findLast",  "findLastIndex"};
   if (llvm::is_contained(callbacks, name) || (name == "sort" && count != 0)) {
-    return this->checker.callbackChecker().checkCallbackMethod(call, member, expected);
+    Expr *checked = this->checker.callbackChecker().checkCallbackMethod(call, member, expected);
+
+    return ok(checked);
   }
   if (name == "keys" || name == "values" || name == "entries") {
-    return this->checker.iteratorMethods().checkArrayIterator(call, member);
+    IteratorMethods::ResultArrayIterateCall iterated =
+        this->checker.iteratorMethods().checkArrayIterator(call, member);
+    if (iterated.isErr()) {
+      return err(ArrayMethodsCheckArrayMethodError{
+          .code = ArrayMethodsCheckArrayMethodErrorCode::WRONG_ARITY,
+          .message = iterated.error().message,
+      });
+    }
+    return ok(iterated.value());
   }
 
   if (name == "push" || name == "unshift") {
@@ -99,12 +213,13 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
       this->checker.flow_.facts.shift(Term::lengthOf(self), static_cast<int64_t>(count));
     }
     this->checker.flowChecker().arrayResized(arrayType, true, false, spreads ? nullptr : self);
-    return call;
+    return ok(call);
   }
 
   if (name == "pop" || name == "shift") {
-    if (!arity(0, 0)) {
-      return call;
+    ResultArrayMethodCall counted = arity(0, 0);
+    if (counted.isErr()) {
+      return counted;
     }
     call->target = BuiltinCall{.builtin = name == "pop" ? Builtin::ArrPop : Builtin::ArrShift};
     bool notEmpty = this->checker.indexProofs().provesNotEmpty(member->object);
@@ -119,29 +234,31 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
       }
     }
     this->checker.flowChecker().arrayResized(arrayType, false, true, self);
-    return call;
+    return ok(call);
   }
 
   if (name == "at") {
-    if (!arity(1, 1)) {
-      return call;
+    ResultArrayMethodCall counted = arity(1, 1);
+    if (counted.isErr()) {
+      return counted;
     }
     positionArgs(0);
     call->target = BuiltinCall{.builtin = Builtin::ArrAt};
     call->mayBeOutOfRange =
         !this->checker.indexProofs().provesAtInBounds(member->object, call->args[0]);
     call->type = call->mayBeOutOfRange ? Type::optional(element) : element;
-    return call;
+    return ok(call);
   }
 
   if (name == "slice") {
-    if (!arity(0, 2)) {
-      return call;
+    ResultArrayMethodCall counted = arity(0, 2);
+    if (counted.isErr()) {
+      return counted;
     }
     positionArgs(0);
     call->target = BuiltinCall{.builtin = Builtin::ArrSlice};
     call->type = arrayType;
-    return call;
+    return ok(call);
   }
 
   if (name == "concat") {
@@ -153,21 +270,22 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     }
     call->target = BuiltinCall{.builtin = Builtin::ArrConcat};
     call->type = arrayType;
-    return call;
+    return ok(call);
   }
 
   if (name == "indexOf" || name == "lastIndexOf" || name == "includes") {
-    if (!arity(1, 2)) {
-      return call;
+    ResultArrayMethodCall counted = arity(1, 2);
+    if (counted.isErr()) {
+      return counted;
     }
     if (Checker::holdsResults(element)) {
-      this->checker.diags_.error(member->loc(),
-                                 "'" + name +
-                                     "' cannot compare Results: in JavaScript each Result is an "
-                                     "object of its own, equal to no other; search with a "
-                                     "function, e.g. 'some' or 'findIndex'");
-      checkArgsLoosely();
-      return call;
+      this->checker.argumentChecker().checkArgsLoosely(call);
+      std::string message = ErrorTextArrayMethod::results(name);
+
+      return err(ArrayMethodsCheckArrayMethodError{
+          .code = ArrayMethodsCheckArrayMethodErrorCode::RESULTS_COMPARED,
+          .message = message,
+      });
     }
     if (element->nonOptional()->isFunction()) {
       this->checker.file_->comparesFunctions = true;
@@ -178,53 +296,23 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
                                           : name == "lastIndexOf" ? Builtin::ArrLastIndexOf
                                                                   : Builtin::ArrIncludes};
     call->type = name == "includes" ? Type::boolTy() : Type::intTy();
-    return call;
+    return ok(call);
   }
 
-  if ((name == "join" || name == "toString") && Checker::holdsFunctions(element)) {
-    this->checker.diags_.error(member->loc(), "functions cannot be converted to strings");
-    checkArgsLoosely();
-    return call;
-  }
-  if ((name == "join" || name == "toString") && Checker::holdsResults(element)) {
-    this->checker.diags_.error(member->loc(),
-                               "Results cannot be converted to strings: JavaScript would give "
-                               "'[object Object]'; make the text of each first, e.g. 'a.map(r => "
-                               "r.match(...))." +
-                                   name + "()'");
-    checkArgsLoosely();
-    return call;
-  }
-  if ((name == "join" || name == "toString") && UnknownChecker::holdsUnknown(element)) {
-    this->checker.diags_.error(member->loc(),
-                               "unknown values cannot be converted to strings: one may hold an "
-                               "object; map them to text first, e.g. 'a.map(x => typeof x == "
-                               "\"string\" ? x : \"?\")." +
-                                   name + "()'");
-    checkArgsLoosely();
-    return call;
-  }
-  if ((name == "join" || name == "toString") && JsonChecker::holdsJson(element)) {
-    this->checker.diags_.error(member->loc(),
-                               "Json values cannot be converted to strings: an object would be "
-                               "'[object Object]'; map them to text first, e.g. 'a.map(x => "
-                               "JSON.stringify(x))." +
-                                   name + "()'");
-    checkArgsLoosely();
-    return call;
-  }
-  if ((name == "join" || name == "toString") && Checker::holdsObjects(element) &&
-      !Checker::holdsDates(element)) {
-    this->checker.diags_.error(
-        member->loc(), "objects cannot be converted to strings: JavaScript would give "
-                       "'[object Object]'; map them to text first, e.g. 'a.map(o => o.name)." +
-                           name + "()'");
-    checkArgsLoosely();
-    return call;
+  if (name == "join" || name == "toString") {
+    ResultElementsAreText text = ArrayMethods::textElements(element, name);
+    if (text.isErr()) {
+      this->checker.argumentChecker().checkArgsLoosely(call);
+      return err(ArrayMethodsCheckArrayMethodError{
+          .code = ArrayMethodsCheckArrayMethodErrorCode::ELEMENTS_NOT_TEXT,
+          .message = text.error().message,
+      });
+    }
   }
   if (name == "join") {
-    if (!arity(0, 1)) {
-      return call;
+    ResultArrayMethodCall counted = arity(0, 1);
+    if (counted.isErr()) {
+      return counted;
     }
     if (count == 1) {
       call->args[0] = this->checker.typeRelations().coerce(
@@ -232,98 +320,49 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     }
     call->target = BuiltinCall{.builtin = Builtin::ArrJoin};
     call->type = Type::string();
-    return call;
+    return ok(call);
   }
 
   if (name == "reverse" || name == "toString") {
-    if (!arity(0, 0)) {
-      return call;
+    ResultArrayMethodCall counted = arity(0, 0);
+    if (counted.isErr()) {
+      return counted;
     }
     call->target =
         BuiltinCall{.builtin = name == "reverse" ? Builtin::ArrReverse : Builtin::ArrToString};
     call->type = name == "reverse" ? arrayType : Type::string();
-    return call;
+    return ok(call);
   }
 
   if (name == "fill") {
-    if (!arity(1, 3)) {
-      return call;
+    ResultArrayMethodCall counted = arity(1, 3);
+    if (counted.isErr()) {
+      return counted;
     }
     elementArg(0);
     positionArgs(1);
     call->target = BuiltinCall{.builtin = Builtin::ArrFill};
     call->type = arrayType;
-    return call;
+    return ok(call);
   }
 
   if (name == "sort") {
-    if (Checker::holdsFunctions(element)) {
-      this->checker.diags_.error(member->loc(),
-                                 "sorting functions needs a comparison function: 'sort()' "
-                                 "without one compares their source code");
-      return call;
-    }
-    if (UnknownChecker::holdsUnknown(element)) {
-      this->checker.diags_.error(member->loc(),
-                                 "sorting unknown values needs a comparison function: 'sort()' "
-                                 "without one compares them as strings, objects as '[object "
-                                 "Object]'; pass one, e.g. 'sort((a, b) => ...)'");
-      return call;
-    }
-    if (JsonChecker::holdsJson(element)) {
-      this->checker.diags_.error(member->loc(),
-                                 "sorting Json values needs a comparison function: 'sort()' "
-                                 "without one compares them as strings, objects as '[object "
-                                 "Object]'; pass one, e.g. 'sort((a, b) => ...)'");
-      return call;
-    }
-    if (Checker::holdsDates(element)) {
-      this->checker.diags_.error(member->loc(),
-                                 "sorting dates needs a comparison function: 'sort()' without one "
-                                 "compares the texts of toString(), 'Thu Feb 29 2024 ...', which "
-                                 "puts them in the order of the names of the days; pass one: "
-                                 "'sort((a, b) => a.getTime() - b.getTime())'");
-      return call;
-    }
-    if (Checker::holdsObjects(element) || Checker::holdsResults(element)) {
-      this->checker.diags_.error(
-          member->loc(), "sorting objects needs a comparison function: 'sort()' without one "
-                         "compares them all as '[object Object]'; pass one, e.g. 'sort((a, b) "
-                         "=> a.x - b.x)'");
-      return call;
-    }
-    auto textual = [](const Type *m) {
-      const Type *b = m->isLiteral() ? m->literalBase() : m;
-
-      return b->isString() || b->isBool();
-    };
-    if (const Type *u = element->nonOptional();
-        u->isUnion() && !llvm::all_of(u->members(), textual)) {
-      this->checker.diags_.error(member->loc(),
-                                 "'sort()' without a comparison function compares the values "
-                                 "of '" +
-                                     u->name() +
-                                     "' as strings, numbers and objects among "
-                                     "them; pass one, e.g. 'sort((a, b) => ...)'");
-      return call;
-    }
-    if (element->nonOptional()->isNumeric() || element->nonOptional()->isDecimal() ||
-        GenericChecker::apparentType(element->nonOptional())->isNumeric()) {
-      this->checker.diags_.error(
-          member->loc(), llvm::Twine("'sort()' without a comparison function compares "
-                                     "numbers as strings, as in JavaScript: [2, 10, 1] "
-                                     "becomes [1, 10, 2]; pass one: 'sort((x, y) => ") +
-                             (element->isOptional() ? "(x ?? 0) - (y ?? 0)" : "x - y") + ")'");
-      return call;
+    ResultSortableElement ordered = ArrayMethods::sortable(element);
+    if (ordered.isErr()) {
+      return err(ArrayMethodsCheckArrayMethodError{
+          .code = ArrayMethodsCheckArrayMethodErrorCode::NEEDS_COMPARISON,
+          .message = ordered.error().message,
+      });
     }
     call->target = BuiltinCall{.builtin = Builtin::ArrSort};
     call->type = arrayType;
-    return call;
+    return ok(call);
   }
 
   if (name == "splice") {
-    if (!arity(1, ~0u)) {
-      return call;
+    ResultArrayMethodCall counted = arity(1, ~0u);
+    if (counted.isErr()) {
+      return counted;
     }
     for (size_t i = 0; i < count; ++i) {
       if (i < 2) {
@@ -335,13 +374,15 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     call->target = BuiltinCall{.builtin = Builtin::ArrSplice};
     call->type = arrayType;
     this->checker.flowChecker().arrayResized(arrayType, true, true);
-    return call;
+    return ok(call);
   }
-  this->checker.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
-                                                arrayType->name() + "'");
-  checkArgsLoosely();
+  this->checker.argumentChecker().checkArgsLoosely(call);
+  std::string message = ErrorTextArrayMethod::noProperty(name, arrayType->name());
 
-  return call;
+  return err(ArrayMethodsCheckArrayMethodError{
+      .code = ArrayMethodsCheckArrayMethodErrorCode::NO_SUCH_PROPERTY,
+      .message = message,
+  });
 }
 
 }

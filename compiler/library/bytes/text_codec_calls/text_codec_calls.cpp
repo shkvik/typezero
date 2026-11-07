@@ -63,49 +63,51 @@ llvm::Constant *cjkEncodingOf(llvm::Module &module, llvm::StringRef name) {
 llvm::Value *TextCodecCalls::emit() {
   switch (call->builtin()) {
     case Builtin::TextEncoderNew:
-      return lowering_.builder_.CreateCall(fn("tz_text_encoder_new", ptr, {}), {}, "encoder");
+      return this->lowering.builder_.CreateCall(this->fn("tz_text_encoder_new", ptr, {}), {},
+                                                "encoder");
     case Builtin::TextEncode: {
-      Lowering::Operand self = receiver(0);
+      Lowering::Operand self = this->receiver(0);
       if (call->args.empty()) {
-        llvm::Value *empty = lowering_.stringLowerer().stringLiteral(u"");
-        lowering_.refCounts().dropOperand(self);
-        return lowering_.builder_.CreateCall(fn("tz_text_encode", ptr, {ptr, i64}),
-                                             {lowering_.stringLowerer().stringObj(empty),
-                                              lowering_.stringLowerer().stringMeta(empty)},
-                                             "bytes");
+        llvm::Value *empty = this->lowering.stringLowerer().stringLiteral(u"");
+        this->lowering.refCounts().dropOperand(self);
+        return this->lowering.builder_.CreateCall(
+            this->fn("tz_text_encode", ptr, {ptr, i64}),
+            {this->lowering.stringLowerer().stringObj(empty),
+             this->lowering.stringLowerer().stringMeta(empty)},
+            "bytes");
       }
-      Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
-      llvm::Value *made =
-          lowering_.builder_.CreateCall(fn("tz_text_encode", ptr, {ptr, i64}),
-                                        {lowering_.stringLowerer().stringObj(text.value),
-                                         lowering_.stringLowerer().stringMeta(text.value)},
-                                        "bytes");
-      lowering_.refCounts().dropOperand(text);
-      lowering_.refCounts().dropOperand(self);
+      Lowering::Operand text = this->lowering.refCounts().emitOperand(call->args[0], true);
+      llvm::Value *made = this->lowering.builder_.CreateCall(
+          this->fn("tz_text_encode", ptr, {ptr, i64}),
+          {this->lowering.stringLowerer().stringObj(text.value),
+           this->lowering.stringLowerer().stringMeta(text.value)},
+          "bytes");
+      this->lowering.refCounts().dropOperand(text);
+      this->lowering.refCounts().dropOperand(self);
       return made;
     }
     case Builtin::TextEncodeInto: {
-      Lowering::Operand self = receiver(0);
-      Lowering::Operand text = lowering_.refCounts().emitOperand(
+      Lowering::Operand self = this->receiver(0);
+      Lowering::Operand text = this->lowering.refCounts().emitOperand(
           call->args[0], AssignLowerer::cannotAssign(call->args[1]));
-      Lowering::Operand target = lowering_.refCounts().emitOperand(call->args[1], true);
+      Lowering::Operand target = this->lowering.refCounts().emitOperand(call->args[1], true);
       auto *pairTy = llvm::ArrayType::get(i32, 2);
-      llvm::AllocaInst *out = lowering_.functionFrame().createStackSlot(pairTy, "encoded");
-      lowering_.builder_.CreateCall(fn("tz_text_encode_into", voidTy, {ptr, i64, ptr, ptr}),
-                                    {lowering_.stringLowerer().stringObj(text.value),
-                                     lowering_.stringLowerer().stringMeta(text.value), target.value,
-                                     out});
-      lowering_.refCounts().dropOperand(target);
-      lowering_.refCounts().dropOperand(text);
-      lowering_.refCounts().dropOperand(self);
-      llvm::Value *object = lowering_.objectLayouts().allocObject(type, {0, 1});
+      llvm::AllocaInst *out = this->lowering.functionFrame().createStackSlot(pairTy, "encoded");
+      this->lowering.builder_.CreateCall(
+          this->fn("tz_text_encode_into", voidTy, {ptr, i64, ptr, ptr}),
+          {this->lowering.stringLowerer().stringObj(text.value),
+           this->lowering.stringLowerer().stringMeta(text.value), target.value, out});
+      this->lowering.refCounts().dropOperand(target);
+      this->lowering.refCounts().dropOperand(text);
+      this->lowering.refCounts().dropOperand(self);
+      llvm::Value *object = this->lowering.objectLayouts().allocObject(type, {0, 1});
       for (unsigned k = 0; k < 2; ++k) {
-        lowering_.builder_.CreateStore(
-            lowering_.builder_.CreateSExt(
-                lowering_.builder_.CreateLoad(
-                    i32, lowering_.builder_.CreateConstInBoundsGEP2_32(pairTy, out, 0, k)),
+        this->lowering.builder_.CreateStore(
+            this->lowering.builder_.CreateSExt(
+                this->lowering.builder_.CreateLoad(
+                    i32, this->lowering.builder_.CreateConstInBoundsGEP2_32(pairTy, out, 0, k)),
                 i64),
-            lowering_.objectLayouts().fieldAddress(object, type, k == 0 ? "read" : "written"));
+            this->lowering.objectLayouts().fieldAddress(object, type, k == 0 ? "read" : "written"));
       }
       return object;
     }
@@ -115,27 +117,28 @@ llvm::Value *TextCodecCalls::emit() {
       bool resolved = constantOf(call->args[0]) != 0;
       Lowering::Operand label{nullptr, false, nullptr};
       if (!resolved) {
-        label = lowering_.refCounts().emitOperand(
+        label = this->lowering.refCounts().emitOperand(
             call->args[1], call->args.size() < 3 || AssignLowerer::cannotAssign(call->args[2]));
       }
-      llvm::Value *fatal = lowering_.builder_.getInt32(0), *ignore = lowering_.builder_.getInt32(0);
+      llvm::Value *fatal = this->lowering.builder_.getInt32(0),
+                  *ignore = this->lowering.builder_.getInt32(0);
       if (call->args.size() > 2) {
-        Lowering::Operand options = lowering_.refCounts().emitOperand(call->args[2], true);
+        Lowering::Operand options = this->lowering.refCounts().emitOperand(call->args[2], true);
         const Type *optionsType = options.type;
         auto flag = [&](llvm::StringRef name) -> llvm::Value * {
           const Type *t = optionsType->field(name)->type;
-          llvm::Value *loaded = lowering_.builder_.CreateLoad(
-              lowering_.moduleBuilder().lower(t),
-              lowering_.objectLayouts().fieldAddress(options.value, optionsType, name));
-          llvm::Value *value =
-              lowering_.builder_.CreateAnd(lowering_.optionalLowerer().optionalHas(loaded, t),
-                                           lowering_.optionalLowerer().optionalValue(loaded, t));
+          llvm::Value *loaded = this->lowering.builder_.CreateLoad(
+              this->lowering.moduleBuilder().lower(t),
+              this->lowering.objectLayouts().fieldAddress(options.value, optionsType, name));
+          llvm::Value *value = this->lowering.builder_.CreateAnd(
+              this->lowering.optionalLowerer().optionalHas(loaded, t),
+              this->lowering.optionalLowerer().optionalValue(loaded, t));
 
-          return lowering_.builder_.CreateZExt(value, i32);
+          return this->lowering.builder_.CreateZExt(value, i32);
         };
         fatal = flag("fatal");
         ignore = flag("ignoreBOM");
-        lowering_.refCounts().dropOperand(options);
+        this->lowering.refCounts().dropOperand(options);
       }
       if (resolved) {
         std::string name;
@@ -148,104 +151,106 @@ llvm::Value *TextCodecCalls::emit() {
                     : name == "utf-16be" ? kTextUtf16be
                     : multi              ? kTextCjk
                                          : kTextSingleByte;
-        llvm::Value *table = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+        llvm::Value *table = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
         if (which == kTextSingleByte) {
-          table = lowering_.bytesLowerer().encodingTable(name);
+          table = this->lowering.bytesLowerer().encodingTable(name);
         } else if (which == kTextCjk) {
-          table = cjkEncodingOf(*lowering_.module_, name);
+          table = cjkEncodingOf(*this->lowering.module_, name);
         }
-        llvm::Value *made = lowering_.builder_.CreateCall(
-            fn("tz_text_decoder_make", ptr, {i32, ptr, i32, i32}),
-            {lowering_.builder_.getInt32(uint32_t(which)), table, fatal, ignore}, "decoder");
-        return parsing ? lowering_.resultLowerer().catchFailure(made, call->type, call->loc())
+        llvm::Value *made = this->lowering.builder_.CreateCall(
+            this->fn("tz_text_decoder_make", ptr, {i32, ptr, i32, i32}),
+            {this->lowering.builder_.getInt32(uint32_t(which)), table, fatal, ignore}, "decoder");
+        return parsing ? this->lowering.resultLowerer().catchFailure(made, call->type, call->loc())
                        : made;
       }
       std::vector<llvm::Constant *> tables, cjk;
       for (const EncodingTable &t : kEncodingTables) {
-        tables.push_back(lowering_.bytesLowerer().encodingTable(t.name));
+        tables.push_back(this->lowering.bytesLowerer().encodingTable(t.name));
       }
       for (const char *name : kCjkEncodings) {
-        cjk.push_back(cjkEncodingOf(*lowering_.module_, name));
+        cjk.push_back(cjkEncodingOf(*this->lowering.module_, name));
       }
       auto list = [&](std::vector<llvm::Constant *> &items, const char *name) {
-        auto *type = llvm::ArrayType::get(lowering_.builder_.getPtrTy(), items.size());
+        auto *type = llvm::ArrayType::get(this->lowering.builder_.getPtrTy(), items.size());
 
-        return new llvm::GlobalVariable(*lowering_.module_, type, true,
+        return new llvm::GlobalVariable(*this->lowering.module_, type, true,
                                         llvm::GlobalValue::PrivateLinkage,
                                         llvm::ConstantArray::get(type, items), name);
       };
       llvm::Value *all = list(tables, "tz.encodings"), *allCjk = list(cjk, "tz.encodings.cjk");
-      llvm::Value *maker = parsing
-                               ? static_cast<llvm::Value *>(
-                                     lowering_.resultLowerer().failureMaker(call->type->errType()))
-                               : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-      llvm::Value *made = lowering_.builder_.CreateCall(
-          fn("tz_text_decoder_new", ptr, {ptr, i64, ptr, i32, ptr, i32, i32, i32, ptr}),
-          {lowering_.stringLowerer().stringObj(label.value),
-           lowering_.stringLowerer().stringMeta(label.value), all,
-           lowering_.builder_.getInt32(uint32_t(tables.size())), allCjk,
-           lowering_.builder_.getInt32(uint32_t(cjk.size())), fatal, ignore, maker},
+      llvm::Value *maker =
+          parsing ? static_cast<llvm::Value *>(
+                        this->lowering.resultLowerer().failureMaker(call->type->errType()))
+                  : llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+      llvm::Value *made = this->lowering.builder_.CreateCall(
+          this->fn("tz_text_decoder_new", ptr, {ptr, i64, ptr, i32, ptr, i32, i32, i32, ptr}),
+          {this->lowering.stringLowerer().stringObj(label.value),
+           this->lowering.stringLowerer().stringMeta(label.value), all,
+           this->lowering.builder_.getInt32(uint32_t(tables.size())), allCjk,
+           this->lowering.builder_.getInt32(uint32_t(cjk.size())), fatal, ignore, maker},
           "decoder");
-      lowering_.refCounts().dropOperand(label);
-      return parsing ? lowering_.resultLowerer().catchFailure(made, call->type, call->loc()) : made;
+      this->lowering.refCounts().dropOperand(label);
+      return parsing ? this->lowering.resultLowerer().catchFailure(made, call->type, call->loc())
+                     : made;
     }
     case Builtin::TextDecode: {
-      Lowering::Operand self = receiver(0);
-      llvm::Value *data = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-      llvm::Value *length = lowering_.builder_.getInt64(0);
+      Lowering::Operand self = this->receiver(0);
+      llvm::Value *data = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+      llvm::Value *length = this->lowering.builder_.getInt64(0);
       Lowering::Operand input{nullptr, false, nullptr};
       if (!call->args.empty() && !call->args[0]->type->isUndefined()) {
-        input = lowering_.refCounts().emitOperand(call->args[0], true);
-        data = lowering_.bytesLowerer().bytesData(input.value);
-        length = lowering_.bytesLowerer().bytesLength(input.value);
+        input = this->lowering.refCounts().emitOperand(call->args[0], true);
+        data = this->lowering.bytesLowerer().bytesData(input.value);
+        length = this->lowering.bytesLowerer().bytesLength(input.value);
         if (input.type->isTypedArray()) {
-          length = lowering_.builder_.CreateMul(
-              length, lowering_.builder_.getInt64(input.type->elementSize()));
+          length = this->lowering.builder_.CreateMul(
+              length, this->lowering.builder_.getInt64(input.type->elementSize()));
         }
       }
-      llvm::Value *stream = lowering_.builder_.getInt32(0);
+      llvm::Value *stream = this->lowering.builder_.getInt32(0);
       if (call->args.size() > 1) {
-        Lowering::Operand options = lowering_.refCounts().emitOperand(call->args[1], true);
+        Lowering::Operand options = this->lowering.refCounts().emitOperand(call->args[1], true);
         const Type *t = options.type->field("stream")->type;
-        llvm::Value *loaded = lowering_.builder_.CreateLoad(
-            lowering_.moduleBuilder().lower(t),
-            lowering_.objectLayouts().fieldAddress(options.value, options.type, "stream"));
-        llvm::Value *given =
-            lowering_.builder_.CreateAnd(lowering_.optionalLowerer().optionalHas(loaded, t),
-                                         lowering_.optionalLowerer().optionalValue(loaded, t));
-        stream = lowering_.builder_.CreateZExt(given, i32);
-        lowering_.refCounts().dropOperand(options);
+        llvm::Value *loaded = this->lowering.builder_.CreateLoad(
+            this->lowering.moduleBuilder().lower(t),
+            this->lowering.objectLayouts().fieldAddress(options.value, options.type, "stream"));
+        llvm::Value *given = this->lowering.builder_.CreateAnd(
+            this->lowering.optionalLowerer().optionalHas(loaded, t),
+            this->lowering.optionalLowerer().optionalValue(loaded, t));
+        stream = this->lowering.builder_.CreateZExt(given, i32);
+        this->lowering.refCounts().dropOperand(options);
       }
       bool checked = call->type->isResult();
       llvm::Value *make = llvm::ConstantPointerNull::get(ptr);
       if (checked) {
-        make = lowering_.resultLowerer().failureMaker(call->type->errType());
+        make = this->lowering.resultLowerer().failureMaker(call->type->errType());
       }
-      llvm::Value *text = lowering_.stringLowerer().callReturningString(
-          fn("tz_text_decode", voidTy, {ptr, ptr, ptr, i64, i32, ptr}),
+      llvm::Value *text = this->lowering.stringLowerer().callReturningString(
+          this->fn("tz_text_decode", voidTy, {ptr, ptr, ptr, i64, i32, ptr}),
           {self.value, data, length, stream, make});
       if (input.value) {
-        lowering_.refCounts().dropOperand(input);
+        this->lowering.refCounts().dropOperand(input);
       }
-      lowering_.refCounts().dropOperand(self);
+      this->lowering.refCounts().dropOperand(self);
 
-      return checked ? lowering_.resultLowerer().catchFailure(text, call->type, call->loc()) : text;
+      return checked ? this->lowering.resultLowerer().catchFailure(text, call->type, call->loc())
+                     : text;
     }
     case Builtin::TextDecoderInfo: {
-      Lowering::Operand self = receiver(0);
+      Lowering::Operand self = this->receiver(0);
       int64_t which = constantOf(call->args[0]);
       llvm::Value *result;
       if (which == 0) {
-        result = lowering_.stringLowerer().callReturningString(
-            fn("tz_text_decoder_encoding", voidTy, {ptr, ptr}), {self.value});
+        result = this->lowering.stringLowerer().callReturningString(
+            this->fn("tz_text_decoder_encoding", voidTy, {ptr, ptr}), {self.value});
       } else {
-        result = lowering_.builder_.CreateICmpNE(
-            lowering_.builder_.CreateCall(
-                fn("tz_text_decoder_flag", i32, {ptr, i32}),
-                {self.value, lowering_.builder_.getInt32(uint32_t(which - 1))}),
-            lowering_.builder_.getInt32(0));
+        result = this->lowering.builder_.CreateICmpNE(
+            this->lowering.builder_.CreateCall(
+                this->fn("tz_text_decoder_flag", i32, {ptr, i32}),
+                {self.value, this->lowering.builder_.getInt32(uint32_t(which - 1))}),
+            this->lowering.builder_.getInt32(0));
       }
-      lowering_.refCounts().dropOperand(self);
+      this->lowering.refCounts().dropOperand(self);
       return result;
     }
     default:

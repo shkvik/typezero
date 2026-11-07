@@ -6,14 +6,14 @@ namespace tz {
 
 class ChildErrorTypes {
 public:
-  explicit ChildErrorTypes(Checker &checker);
+  explicit ChildErrorTypes(Checker &owner);
 
   void declare();
   const Type *errorOf(llvm::StringRef fn, bool text, bool shell);
   const Type *spawnResult(bool text);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

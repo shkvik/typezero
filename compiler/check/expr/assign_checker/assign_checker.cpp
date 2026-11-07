@@ -43,23 +43,19 @@ AssignChecker::operandTexts(llvm::StringRef source, llvm::SMLoc op, size_t lengt
           llvm::StringRef(at + length, static_cast<size_t>(source.end() - at - length)).trim()};
 }
 
-static const char kWriteOutOfRange[] =
-    "cannot prove that the index is within the array (0 <= index <= length); writing further "
-    "would leave holes. Check the index first, e.g. 'if (i < a.length)', or use push()";
-
-static Expr *copyChain(AstContext &ctx, const Expr *e) {
+Expr *AssignChecker::copyChain(const Expr *e) {
   if (auto *name = dyn_cast<NameExpr>(e)) {
-    return ctx.make<NameExpr>(name->loc(), name->name);
+    return this->checker.ctx_.make<NameExpr>(name->loc(), name->name);
   }
   if (auto *lit = dyn_cast<IntLitExpr>(e)) {
-    return ctx.make<IntLitExpr>(lit->loc(), lit->value);
+    return this->checker.ctx_.make<IntLitExpr>(lit->loc(), lit->value);
   }
   if (auto *lit = dyn_cast<StringLitExpr>(e)) {
-    return ctx.make<StringLitExpr>(lit->loc(), lit->value);
+    return this->checker.ctx_.make<StringLitExpr>(lit->loc(), lit->value);
   }
   if (auto *member = dyn_cast<MemberExpr>(e); member && !member->optional) {
-    if (Expr *object = copyChain(ctx, member->object)) {
-      return ctx.make<MemberExpr>(member->loc(), object, member->name);
+    if (Expr *object = this->copyChain(member->object)) {
+      return this->checker.ctx_.make<MemberExpr>(member->loc(), object, member->name);
     }
   }
 
@@ -69,19 +65,206 @@ static Expr *copyChain(AstContext &ctx, const Expr *e) {
 AssignChecker::AssignChecker(Checker &owner)
     : checker(owner) {}
 
+AssignChecker::ResultNameIsAssignable AssignChecker::notImported(const NameExpr *name) {
+  if (this->checker.builtinModuleChecker().nodeName(name->name)) {
+    std::string message = ErrorTextAssign::imported(name->name);
+
+    return err(AssignCheckerNotImportedError{
+        .code = AssignCheckerNotImportedErrorCode::IMPORTED,
+        .message = message,
+    });
+  }
+
+  return ok(name);
+}
+
+AssignChecker::ResultTargetIsVariable AssignChecker::variableTarget(const Expr *target) {
+  if (!isa<NameExpr>(target)) {
+    std::string message = ErrorTextAssign::nullishVar();
+
+    return err(AssignCheckerVariableTargetError{
+        .code = AssignCheckerVariableTargetErrorCode::NOT_A_VARIABLE,
+        .message = message,
+    });
+  }
+
+  return ok(target);
+}
+
+AssignChecker::ResultVariableOptional AssignChecker::nullishOptional(const NameExpr *name,
+                                                                     const Type *type) {
+  if (!type->isOptional() && !type->isError()) {
+    std::string message = ErrorTextAssign::notOptional(name->name, type->name());
+
+    return err(AssignCheckerNullishOptionalError{
+        .code = AssignCheckerNullishOptionalErrorCode::NOT_OPTIONAL,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+AssignChecker::ResultIndexWithinArray AssignChecker::indexProven(const IndexExpr *index) const {
+  if (!this->checker.indexProofs().provesInBounds(index->object, index->index, false)) {
+    std::string message = ErrorTextAssign::indexRange();
+
+    return err(AssignCheckerIndexProvenError{
+        .code = AssignCheckerIndexProvenErrorCode::INDEX_NOT_PROVEN,
+        .message = message,
+    });
+  }
+
+  return ok(index);
+}
+
+AssignChecker::ResultFieldTypeIsFound AssignChecker::fieldTypeFrom(const MemberExpr *member,
+                                                                   const Type *type) {
+  if (type->isVoid() || type->isUndefined()) {
+    std::string message = ErrorTextAssign::untyped(member->name);
+
+    return err(AssignCheckerFieldTypeFromError{
+        .code = AssignCheckerFieldTypeFromErrorCode::UNTYPED_VALUE,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+AssignChecker::ResultStringAssignable AssignChecker::stringAssign(BinaryOp op,
+                                                                  llvm::StringRef spelling,
+                                                                  const Type *type,
+                                                                  const AssignExpr *assign) {
+  const Type *valueType = assign->value->type;
+  if (op != BinaryOp::Add && !valueType->isError()) {
+    std::string message = BinaryChecker::operandTypesText(spelling, type, valueType);
+
+    return err(AssignCheckerStringAssignError{
+        .code = AssignCheckerStringAssignErrorCode::OPERAND_TYPES,
+        .message = message,
+    });
+  }
+  bool joins = valueType->nonOptional()->isNumeric() || valueType->nonOptional()->isBool();
+  if (op == BinaryOp::Add && joins) {
+    auto [target, value] = AssignChecker::operandTexts(assign->source, assign->loc(), 2);
+    std::string hint = target.empty() ? ErrorTextCompound::convertTo()
+                                      : ErrorTextCompound::writeAs(target, withoutParens(value));
+    std::string message = ErrorTextCompound::joinsText(valueType->name(), hint);
+
+    return err(AssignCheckerStringAssignError{
+        .code = AssignCheckerStringAssignErrorCode::JOINS_AS_TEXT,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+AssignChecker::ResultCompoundOperands
+AssignChecker::compoundOperands(BinaryOp op, llvm::StringRef spelling, const Type *type,
+                                const Expr *value, bool settled) {
+  const Type *valueType = value->type;
+  bool shift = op == BinaryOp::Shl || op == BinaryOp::Shr || op == BinaryOp::UShr;
+  bool bitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor;
+  bool integerOnly = shift || bitwise;
+  auto *zero = dyn_cast<IntLitExpr>(value);
+  if (integerOnly && (type->isFloat() || valueType->isFloat())) {
+    std::string message = ErrorTextCompound::bitsDouble(spelling);
+
+    return err(AssignCheckerCompoundOperandsError{
+        .code = AssignCheckerCompoundOperandsErrorCode::DOUBLE_BITS,
+        .message = message,
+    });
+  }
+  if (integerOnly ? !type->isInteger() : !type->isNumeric()) {
+    std::string message = BinaryChecker::operandTypesText(spelling, type, valueType);
+
+    return err(AssignCheckerCompoundOperandsError{
+        .code = AssignCheckerCompoundOperandsErrorCode::OPERAND_TYPES,
+        .message = message,
+    });
+  }
+  bool orZero = (op == BinaryOp::BitOr || op == BinaryOp::UShr) && zero && zero->value == 0 &&
+                !type->isWrapping();
+  if (orZero) {
+    std::string message = ErrorTextCompound::nothing(spelling);
+
+    return err(AssignCheckerCompoundOperandsError{
+        .code = AssignCheckerCompoundOperandsErrorCode::NOTHING_CHANGES,
+        .message = message,
+    });
+  }
+  if (op == BinaryOp::UShr && !type->isUnsigned()) {
+    std::string message = ErrorTextCompound::signedTo(type->name());
+
+    return err(AssignCheckerCompoundOperandsError{
+        .code = AssignCheckerCompoundOperandsErrorCode::SIGNED_SHIFT,
+        .message = message,
+    });
+  }
+  if (!settled && bitwise && valueType->isInteger() && valueType != type) {
+    std::string hint = TypeRelations::conversionHint(value, type);
+    std::string message = ErrorTextCompound::mixed(spelling, type->name(), valueType->name(), hint);
+
+    return err(AssignCheckerCompoundOperandsError{
+        .code = AssignCheckerCompoundOperandsErrorCode::MIXED_NUMBERS,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+AssignChecker::ResultElementWriteSafe
+AssignChecker::elementWritable(const IndexExpr *index, bool inRange, bool compound) const {
+  bool unsafe =
+      !inRange &&
+      (compound || !this->checker.indexProofs().provesInBounds(index->object, index->index, true));
+  if (unsafe) {
+    std::string message = ErrorTextAssign::outOfRange();
+
+    return err(AssignCheckerElementWritableError{
+        .code = AssignCheckerElementWritableErrorCode::OUT_OF_RANGE,
+        .message = message,
+    });
+  }
+
+  return ok(index);
+}
+
+AssignChecker::ResultLengthIsInBounds AssignChecker::lengthProven(const MemberExpr *member,
+                                                                  const Expr *value) const {
+  bool proven = this->checker.indexProofs().provesInBounds(member->object, value, true) ||
+                this->checker.indexProofs().exempt(value->loc(), member->object);
+  if (!proven) {
+    std::string array = valueText(member->object);
+    std::string message =
+        ErrorTextAssign::lengthRange(member->object->type->inner()->name(), array);
+
+    return err(AssignCheckerLengthProvenError{
+        .code = AssignCheckerLengthProvenErrorCode::LENGTH_NOT_PROVEN,
+        .message = message,
+    });
+  }
+
+  return ok(value);
+}
+
 Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   this->logicalAssign = false;
   if (auto *member = dyn_cast<MemberExpr>(assign->target)) {
     member->object = this->checker.builtinModuleChecker().processAlias(member->object);
   } else if (auto *index = dyn_cast<IndexExpr>(assign->target)) {
     index->object = this->checker.builtinModuleChecker().processAlias(index->object);
-  } else if (auto *name = dyn_cast<NameExpr>(assign->target);
-             name && this->checker.builtinModuleChecker().nodeName(name->name)) {
-    this->checker.diags_.error(name->loc(),
-                               "cannot assign to '" + name->name + "' because it is imported");
-    assign->value = this->checker.exprChecker().checkExpr(assign->value);
-    assign->type = Type::error();
-    return assign;
+  } else if (auto *name = dyn_cast<NameExpr>(assign->target)) {
+    ResultNameIsAssignable assignable = this->notImported(name);
+    if (assignable.isErr()) {
+      this->checker.diags_.error(name->loc(), assignable.error().message);
+      assign->value = this->checker.exprChecker().checkExpr(assign->value);
+      assign->type = Type::error();
+      return assign;
+    }
   }
   if (Expr *exitCode = this->checker.processChecker().checkProcessAssign(assign)) {
     return exitCode;
@@ -90,7 +273,12 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   BinaryOp op = compound ? *assign->op : BinaryOp::Add;
 
   if (compound && (op == BinaryOp::LogOr || op == BinaryOp::LogAnd)) {
-    return this->checkLogicalAssign(assign);
+    ResultLogicalTargetSet logical = this->checkLogicalAssign(assign);
+    if (logical.isErr()) {
+      this->checker.diags_.error(assign->target->loc(), logical.error().message);
+      return assign;
+    }
+    return logical.value();
   }
 
   if (compound && op == BinaryOp::Nullish) {
@@ -118,16 +306,15 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
     }
     auto *name = dyn_cast<NameExpr>(assign->target);
     VarSymbol *var = name ? this->checker.targetChecker().checkVarTarget(name) : nullptr;
-    if (!name) {
-      this->checker.diags_.error(assign->target->loc(),
-                                 "only variables can be the target of '??='");
+    ResultTargetIsVariable variable = AssignChecker::variableTarget(assign->target);
+    if (variable.isErr()) {
+      this->checker.diags_.error(assign->target->loc(), variable.error().message);
     }
     const Type *type = var ? var->type : Type::error();
     assign->type = type;
-    if (!type->isOptional() && !type->isError()) {
-      this->checker.diags_.error(assign->loc(), "'??=' needs a variable that may be undefined; '" +
-                                                    name->name + "' has type '" + type->name() +
-                                                    "'");
+    ResultVariableOptional optional = AssignChecker::nullishOptional(name, type);
+    if (optional.isErr()) {
+      this->checker.diags_.error(assign->loc(), optional.error().message);
       type = Type::error();
     }
     Checker::Flow before = this->checker.flow_;
@@ -168,22 +355,21 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   auto *name = dyn_cast<NameExpr>(assign->target);
   const VarSymbol *var = name ? name->var() : nullptr;
   bool reportedRange = false;
-  if (index && compound && index->object->type->isArray() &&
-      !this->checker.indexProofs().provesInBounds(index->object, index->index, false)) {
-    this->checker.diags_.error(index->loc(),
-                               "cannot prove that the index is within the array; check it first, "
-                               "e.g. 'if (i < a.length)'");
-    reportedRange = true;
+  if (index && compound && index->object->type->isArray()) {
+    ResultIndexWithinArray within = this->indexProven(index);
+    if (within.isErr()) {
+      this->checker.diags_.error(index->loc(), within.error().message);
+      reportedRange = true;
+    }
   }
 
   bool definite = false;
   if (!type) {
     Expr *value = this->checker.exprChecker().checkExpr(assign->value);
     type = value->type;
-    if (type->isVoid() || type->isUndefined()) {
-      this->checker.diags_.error(value->loc(), "cannot infer the type of field '" + member->name +
-                                                   "' from this value; declare it, e.g. '" +
-                                                   member->name + ": int | undefined = undefined'");
+    ResultFieldTypeIsFound found = AssignChecker::fieldTypeFrom(member, type);
+    if (found.isErr()) {
+      this->checker.diags_.error(value->loc(), found.error().message);
       type = Type::error();
     }
     ClassDecl *cls = ClassDeclarer::classOf(member->object->type);
@@ -213,23 +399,10 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
     std::string spelling = std::string(opSpelling(op)) + "=";
     if (type->isString()) {
       assign->value = this->checker.exprChecker().checkExpr(assign->value);
-      const Type *valueType = assign->value->type;
-      if (op != BinaryOp::Add) {
-        if (!valueType->isError()) {
-          this->checker.binaryChecker().reportOperandTypes(assign->loc(), spelling.c_str(), type,
-                                                           valueType);
-        }
-      } else if (valueType->nonOptional()->isNumeric() || valueType->nonOptional()->isBool()) {
-        std::string message = "operator '+=' cannot be applied to types 'string' and '" +
-                              valueType->name().str() + "' (JavaScript would join them as text)";
-        auto [target, value] = AssignChecker::operandTexts(assign->source, assign->loc(), 2);
-        if (target.empty()) {
-          message += "; convert the value with String()";
-        } else {
-          message += ("; write '" + target + " += String(" + withoutParens(value) + ")'").str();
-        }
-        this->checker.diags_.error(assign->loc(), message);
-      } else {
+      ResultStringAssignable text = AssignChecker::stringAssign(op, spelling, type, assign);
+      if (text.isErr()) {
+        this->checker.diags_.error(assign->loc(), text.error().message);
+      } else if (op == BinaryOp::Add) {
         assign->value = this->checker.concatChecker().toStringOperand(assign->value);
       }
       if (var) {
@@ -248,46 +421,26 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
           assign->value,
           shift && !TypeRelations::isIntLiteralTree(assign->value) ? nullptr : valueHint);
       const Type *valueType = assign->value->type;
-      auto *zero = dyn_cast<IntLitExpr>(assign->value);
       if (type->isDecimal() && !integerOnly && !valueType->isError()) {
         this->checker.decimalChecker().checkDecimalAssign(assign, op);
       } else if (!type->isError() && !valueType->isError()) {
-        if (integerOnly && (type->isFloat() || valueType->isFloat())) {
-          this->checker.diags_.error(assign->loc(),
-                                     "operator '" + spelling +
-                                         "' works on the bits of integers, and this is a double; "
-                                         "drop the fraction first, e.g. 'Math.trunc(x).toInt()'");
-        } else if (integerOnly ? !type->isInteger() : !type->isNumeric()) {
-          this->checker.binaryChecker().reportOperandTypes(assign->loc(), spelling.c_str(), type,
-                                                           valueType);
-        } else if ((op == BinaryOp::BitOr || op == BinaryOp::UShr) && zero && zero->value == 0 &&
-                   !type->isWrapping()) {
-          this->checker.diags_.error(assign->loc(), "'" + spelling +
-                                                        " 0' changes nothing in tz: integers are "
-                                                        "exact, and nothing wraps around here; to "
-                                                        "count modulo 2^32, use 'Bit.Wrap32'");
-        } else if (op == BinaryOp::UShr && !type->isUnsigned()) {
-          this->checker.diags_.error(assign->loc(),
-                                     "'>>>=' shifts in zeros, as a shift of an unsigned "
-                                     "type does; '" +
-                                         type->name().str() + "' is signed: use '>>='");
-        } else if (!shift && valueType->isInteger() && valueType != type &&
-                   this->checker.typeRelations().literalAdapts(assign->value, type)) {
+        bool adapts = !shift && valueType->isInteger() && valueType != type &&
+                      this->checker.typeRelations().literalAdapts(assign->value, type);
+        bool wraps = !shift && type->isWrapping() && valueType->isInteger() &&
+                     (!valueType->isWrapping() || valueType == type);
+        ResultCompoundOperands operands =
+            AssignChecker::compoundOperands(op, spelling, type, assign->value, adapts || wraps);
+        if (operands.isErr()) {
+          this->checker.diags_.error(assign->loc(), operands.error().message);
+        } else if (adapts) {
           assign->value = this->checker.typeRelations().adaptLiteral(assign->value, type);
-        } else if (!shift && type->isWrapping() && valueType->isInteger() &&
-                   (!valueType->isWrapping() || valueType == type)) {
+        } else if (wraps) {
           assign->value = this->checker.typeRelations().convert(assign->value, type);
           ConstantFolder::ResultDivisorNotZero divisor =
               this->checker.constantFolder().checkDivisor(op, assign->value);
           if (divisor.isErr()) {
             this->checker.diags_.error(assign->value->loc(), divisor.error().message);
           }
-        } else if (bitwise && valueType->isInteger() && valueType != type) {
-          this->checker.diags_.error(assign->loc(),
-                                     "operator '" + spelling + "' cannot be applied to types '" +
-                                         type->name().str() + "' and '" + valueType->name().str() +
-                                         "': a number changes its type only explicitly" +
-                                         TypeRelations::conversionHint(assign->value, type));
         } else {
           assign->value = shift ? this->checker.typeRelations().convert(assign->value, type)
                                 : this->checker.typeRelations().coerce(assign->value, type);
@@ -320,10 +473,9 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   }
   if (index && index->object->type->isArray()) {
     bool inRange = this->checker.indexProofs().provesInBounds(index->object, index->index, false);
-    if (!inRange && !reportedRange &&
-        (compound ||
-         !this->checker.indexProofs().provesInBounds(index->object, index->index, true))) {
-      this->checker.diags_.error(index->loc(), kWriteOutOfRange);
+    ResultElementWriteSafe safe = this->elementWritable(index, inRange, compound);
+    if (safe.isErr() && !reportedRange) {
+      this->checker.diags_.error(index->loc(), safe.error().message);
     }
     if (ElementIndex *element = index->form.as<ElementIndex>()) {
       element->mayAppend = !inRange;
@@ -335,21 +487,17 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   if (member && member->object->type->isArray() && !assign->value->type->isError()) {
     const Type *element = member->object->type->inner();
     if (element->hasZeroValue()) {
-      IndexProofs::ResultBetweenProven between = this->checker.indexProofs().requireBetween(
-          assign->value, 0, std::nullopt, "an array length");
+      std::string what = ErrorTextAssign::length();
+      IndexProofs::ResultBetweenProven between =
+          this->checker.indexProofs().requireBetween(assign->value, 0, std::nullopt, what);
       if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
         this->checker.diags_.error(assign->value->loc(), between.error().message);
       }
-    } else if (!this->checker.indexProofs().provesInBounds(member->object, assign->value, true) &&
-               !this->checker.indexProofs().exempt(assign->value->loc(), member->object)) {
-      this->checker.diags_.error(
-          assign->value->loc(),
-          "cannot prove that the new length is from 0 to the old one: an array "
-          "of '" +
-              element->name() +
-              "' cannot grow by setting its length, which would leave elements "
-              "without a value; check it first, e.g. 'if (n >= 0 && n <= " +
-              valueText(member->object) + ".length)', or use push()");
+    } else {
+      ResultLengthIsInBounds length = this->lengthProven(member, assign->value);
+      if (length.isErr()) {
+        this->checker.diags_.error(assign->value->loc(), length.error().message);
+      }
     }
     this->checker.flowChecker().arrayResized(member->object->type, true, true);
     if (std::optional<Linear> self = this->checker.indexProofs().lengthOf(member->object);
@@ -374,26 +522,27 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   return assign;
 }
 
-Expr *AssignChecker::checkLogicalAssign(AssignExpr *assign) {
+AssignChecker::ResultLogicalTargetSet AssignChecker::checkLogicalAssign(AssignExpr *assign) {
   const char *op = assign->op == BinaryOp::LogOr ? "||=" : "&&=";
   Expr *read = nullptr;
   if (isa<NameExpr>(assign->target) || isa<MemberExpr>(assign->target)) {
-    read = copyChain(this->checker.ctx_, assign->target);
+    read = this->copyChain(assign->target);
   } else if (auto *index = dyn_cast<IndexExpr>(assign->target); index && !index->optional) {
-    Expr *object = copyChain(this->checker.ctx_, index->object),
-         *position = copyChain(this->checker.ctx_, index->index);
+    Expr *object = this->copyChain(index->object);
+    Expr *position = this->copyChain(index->index);
     if (object && position) {
       read = this->checker.ctx_.make<IndexExpr>(index->loc(), object, position);
     }
   }
   if (!read) {
-    this->checker.diags_.error(assign->target->loc(),
-                               llvm::Twine("'") + op +
-                                   "' needs a variable, a field or an array element at a "
-                                   "simple index, such as 'a[i]'");
     assign->value = this->checker.exprChecker().checkExpr(assign->value);
     assign->type = Type::error();
-    return assign;
+    std::string message = ErrorTextLogicalAssign::simple(op);
+
+    return err(AssignCheckerCheckLogicalAssignError{
+        .code = AssignCheckerCheckLogicalAssignErrorCode::NOT_A_SIMPLE_TARGET,
+        .message = message,
+    });
   }
   auto *set = this->checker.ctx_.make<AssignExpr>(assign->loc(), std::nullopt, assign->target,
                                                   assign->value);
@@ -406,30 +555,60 @@ Expr *AssignChecker::checkLogicalAssign(AssignExpr *assign) {
   this->logicalAssign = outer;
   this->checker.flow_ = FlowChecker::join(whenTrue, whenFalse);
 
-  return bin;
+  return ok(bin);
+}
+
+AssignChecker::ResultFieldChainCopied AssignChecker::fieldChain(Expr *read) {
+  if (!read) {
+    std::string message = ErrorTextLogicalAssign::field();
+
+    return err(AssignCheckerFieldChainError{
+        .code = AssignCheckerFieldChainErrorCode::NOT_A_FIELD_CHAIN,
+        .message = message,
+    });
+  }
+
+  return ok(read);
+}
+
+AssignChecker::ResultFieldMayBeAbsent AssignChecker::fieldOptional(const MemberExpr *member,
+                                                                   const Type *type) {
+  if (type && !type->isOptional() && !type->isError()) {
+    std::string message = ErrorTextLogicalAssign::fieldOpt(member->name, type->name());
+
+    return err(AssignCheckerFieldOptionalError{
+        .code = AssignCheckerFieldOptionalErrorCode::NOT_OPTIONAL,
+        .message = message,
+    });
+  }
+
+  return ok(type);
 }
 
 Expr *AssignChecker::checkFieldLogicalAssign(AssignExpr *assign) {
-  Expr *read = copyChain(this->checker.ctx_, assign->target);
-  if (!read) {
-    this->checker.diags_.error(assign->target->loc(),
-                               "'??=' needs a variable or a field of one, such as 'o.x'");
+  ResultFieldChainCopied chain = AssignChecker::fieldChain(this->copyChain(assign->target));
+  if (chain.isErr()) {
+    this->checker.diags_.error(assign->target->loc(), chain.error().message);
     assign->value = this->checker.exprChecker().checkExpr(assign->value);
     assign->type = Type::error();
     return assign;
   }
+  Expr *read = chain.value();
   auto *set = this->checker.ctx_.make<AssignExpr>(assign->loc(), std::nullopt, assign->target,
                                                   assign->value);
   auto *bin = this->checker.ctx_.make<BinaryExpr>(assign->loc(), BinaryOp::Nullish, read, set);
   bool outer = std::exchange(this->logicalAssign, true);
-  Expr *result = this->checker.binaryChecker().checkNullish(bin, nullptr);
+  BinaryChecker::ResultNullishResolved nullish =
+      this->checker.binaryChecker().checkNullish(bin, nullptr);
+  if (nullish.isErr()) {
+    this->checker.diags_.error(bin->loc(), nullish.error().message);
+  }
+  Expr *result = nullish.isOk() ? nullish.value() : bin;
   this->logicalAssign = outer;
   auto *member = cast<MemberExpr>(set->target);
-  const Type *type = member->type;
-  if (type && !type->isOptional() && !type->isError()) {
-    this->checker.diags_.error(assign->loc(), "'??=' needs a field that may be undefined; '" +
-                                                  member->name + "' has type '" + type->name() +
-                                                  "'");
+  ResultFieldMayBeAbsent absent = AssignChecker::fieldOptional(member, member->type);
+  if (absent.isErr()) {
+    this->checker.diags_.error(assign->loc(), absent.error().message);
     return result;
   }
   const Type *valueType = set->value->type;
@@ -445,16 +624,30 @@ Expr *AssignChecker::checkFieldLogicalAssign(AssignExpr *assign) {
   return result;
 }
 
+AssignChecker::ResultIncrementedValue AssignChecker::updatable(const UpdateExpr *update,
+                                                               const Type *type) {
+  if (!type->isNumeric() && !type->isDecimal()) {
+    const char *op = update->increment ? "++" : "--";
+    std::string message = ErrorTextUpdate::notNumber(op, type->name());
+
+    return err(AssignCheckerUpdatableError{
+        .code = AssignCheckerUpdatableErrorCode::NOT_NUMERIC,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
 Expr *AssignChecker::checkUpdate(UpdateExpr *update) {
   update->type = Type::error();
   const Type *type = this->checker.targetChecker().checkAssignTarget(update->target, true);
   if (type->isError()) {
     return update;
   }
-  if (!type->isNumeric() && !type->isDecimal()) {
-    this->checker.diags_.error(update->loc(),
-                               llvm::Twine("operator '") + (update->increment ? "++" : "--") +
-                                   "' cannot be applied to type '" + type->name() + "'");
+  ResultIncrementedValue numeric = AssignChecker::updatable(update, type);
+  if (numeric.isErr()) {
+    this->checker.diags_.error(update->loc(), numeric.error().message);
     return update;
   }
   update->type = type;
@@ -465,10 +658,11 @@ Expr *AssignChecker::checkUpdate(UpdateExpr *update) {
   } else if (auto *index = dyn_cast<IndexExpr>(update->target); index && !index->keyed()) {
     if (index->object->type->isTypedArray()) {
       this->checker.bytesChecker().checkBytesStore(index, nullptr);
-    } else if (!this->checker.indexProofs().provesInBounds(index->object, index->index, false)) {
-      this->checker.diags_.error(index->loc(),
-                                 "cannot prove that the index is within the array; check it "
-                                 "first, e.g. 'if (i < a.length)'");
+    } else {
+      ResultIndexWithinArray within = this->indexProven(index);
+      if (within.isErr()) {
+        this->checker.diags_.error(index->loc(), within.error().message);
+      }
     }
   } else if (auto *member = dyn_cast<MemberExpr>(update->target)) {
     this->checker.fieldFacts().fieldsAssigned(member->name);

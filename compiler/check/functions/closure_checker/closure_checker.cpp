@@ -258,8 +258,13 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
 
   if (fn->isGenerator) {
     if (fn->returnType) {
-      sym->ret = this->checker.generatorChecker().generatorReturnType(
-          fn, this->checker.typeResolver().resolveType(*fn->returnType, true));
+      const Type *declared = this->checker.typeResolver().resolveType(*fn->returnType, true);
+      GeneratorChecker::ResultGeneratorReturns generator =
+          this->checker.generatorChecker().generatorReturnType(fn, declared);
+      if (generator.isErr()) {
+        this->checker.diags_.error(fn->returnType->loc, generator.error().message);
+      }
+      sym->ret = generator.isOk() ? generator.value() : Type::error();
     } else if (sig && sig->ret &&
                (fn->isAsync ? sig->ret->isAsyncIterator() : sig->ret->isIterator())) {
       sym->ret = sig->ret;
@@ -339,7 +344,7 @@ void ClosureChecker::declareOwnName(FunctionDecl *fn) {
   unsigned declSeq = ++this->checker.seq_;
   self->place = FunctionLocalVar{.owner = fn, .state = {.declSeq = declSeq}};
   Scopes::ResultEntryDeclared added =
-      this->checker.scopes().declare(fn->ownName(), fn->loc(), {VarEntry{.var = self}});
+      this->checker.scopes().declare(fn->ownName(), {VarEntry{.var = self}});
   if (added.isErr()) {
     this->checker.diags_.error(fn->loc(), added.error().message);
   }

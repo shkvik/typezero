@@ -6,13 +6,15 @@ namespace tz {
 
 class StreamLowerer {
 public:
-  explicit StreamLowerer(Lowering &lowering);
+  explicit StreamLowerer(Lowering &owner);
 
   llvm::Value *emitStreamBuiltin(CallExpr *call);
   llvm::Value *emitChunkAs(llvm::Value *u, const Type *to, llvm::BasicBlock *fail);
 
 private:
-  Lowering &lowering_;
+  static bool isPlainObject(const Type *type);
+
+  Lowering &lowering;
 };
 
 }

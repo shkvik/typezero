@@ -39,38 +39,46 @@ std::u16string DictChecker::toUtf16(llvm::StringRef text) {
 DictChecker::DictChecker(Checker &owner)
     : checker(owner) {}
 
-const Type *DictChecker::resolveDictType(const TypeRef &ref) {
+DictChecker::ResultDictTypeResolved DictChecker::resolveDictType(const TypeRef &ref) {
   llvm::StringRef name = ref.name;
   if (name == "WeakRef") {
-    return this->checker.weakRefChecker().resolveWeakRefType(ref);
+    const Type *weak = this->checker.weakRefChecker().resolveWeakRefType(ref);
+
+    return ok(weak);
   }
   if (name == "WeakMap" || name == "WeakSet") {
-    this->checker.diags_.error(ref.loc, "'" + name + "' is not supported yet; a '" +
-                                            name.drop_front(4).str() +
-                                            "' holds its keys, and frees them with itself");
-    return Type::error();
+    std::string message = ErrorTextDictType::weak(name, name.drop_front(4));
+
+    return err(DictCheckerResolveDictTypeError{
+        .code = DictCheckerResolveDictTypeErrorCode::WEAK_COLLECTION,
+        .message = message,
+    });
   }
   bool record = name == "Record";
   bool map = name == "Map" || name == "ReadonlyMap";
   bool set = name == "Set" || name == "ReadonlySet";
   if (!record && !map && !set) {
-    return nullptr;
+    return err(DictCheckerResolveDictTypeError{
+        .code = DictCheckerResolveDictTypeErrorCode::NOT_A_DICT,
+        .message = "",
+    });
   }
   size_t wanted = set ? 1 : 2;
   if (ref.kind() != TypeRefKind::GENERIC_REF || ref.args.size() != wanted) {
-    this->checker.diags_.error(
-        ref.loc, set   ? "'" + name + "' needs the type of its elements, e.g. '" + name + "<int>'"
-                 : map ? "'" + name + "' needs the types of its keys and values, e.g. '" + name +
-                             "<string, int>'"
-                       : std::string("'Record' needs the types of its keys and values, "
-                                     "e.g. 'Record<string, int>'"));
-    return Type::error();
+    std::string message = set   ? ErrorTextDictType::setArgs(name)
+                          : map ? ErrorTextDictType::mapArgs(name)
+                                : ErrorTextDictType::recordArgs();
+
+    return err(DictCheckerResolveDictTypeError{
+        .code = DictCheckerResolveDictTypeErrorCode::WRONG_TYPE_ARGUMENTS,
+        .message = message,
+    });
   }
   const Type *key = this->checker.typeResolver().resolveType(ref.args[0], false);
   const Type *value =
       set ? Type::voidTy() : this->checker.typeResolver().resolveType(ref.args[1], false);
   if (key->isError() || value->isError()) {
-    return Type::error();
+    return ok(Type::error());
   }
   if (record) {
     llvm::ArrayRef<const Type *> literals =
@@ -88,49 +96,76 @@ const Type *DictChecker::resolveDictType(const TypeRef &ref) {
             text);
         fields.push_back({text, value, false});
       }
-      return Type::object(std::move(fields));
+      const Type *object = Type::object(std::move(fields));
+
+      return ok(object);
+    }
+    if (!key->isString() && key->nonOptional()->isNumeric()) {
+      std::string message = ErrorTextDictType::numberKeys(key->name(), value->name());
+
+      return err(DictCheckerResolveDictTypeError{
+          .code = DictCheckerResolveDictTypeErrorCode::NUMBER_KEYS,
+          .message = message,
+      });
     }
     if (!key->isString()) {
-      if (key->nonOptional()->isNumeric()) {
-        this->checker.diags_.error(
-            ref.args[0].loc,
-            "the keys of a Record are strings: JavaScript would turn a number key into a "
-            "string, so 'r[1]' and 'r[\"1\"]' would be one; for numbers use a Map, e.g. "
-            "'Map<" +
-                key->name() + ", " + value->name() + ">'");
-      } else {
-        this->checker.diags_.error(ref.args[0].loc, "the keys of a Record are strings, found '" +
-                                                        key->name() +
-                                                        "'; for other keys use a Map, e.g. 'Map<" +
-                                                        key->name() + ", " + value->name() + ">'");
-      }
-      return Type::error();
-    }
-    return Type::dict(Type::DictKind::Record, key, value);
-  }
-  if (!this->checkKeyType(key, ref.args[0].loc)) {
-    return Type::error();
-  }
+      std::string message = ErrorTextDictType::otherKeys(key->name(), value->name());
 
-  return Type::dict(map ? Type::DictKind::Map : Type::DictKind::Set, key, value);
+      return err(DictCheckerResolveDictTypeError{
+          .code = DictCheckerResolveDictTypeErrorCode::OTHER_KEYS,
+          .message = message,
+      });
+    }
+    const Type *dict = Type::dict(Type::DictKind::Record, key, value);
+
+    return ok(dict);
+  }
+  ResultKeyTypeIsAllowed allowed = this->checkKeyType(key);
+  if (allowed.isErr()) {
+    return err(DictCheckerResolveDictTypeError{
+        .code = DictCheckerResolveDictTypeErrorCode::BAD_KEY_TYPE,
+        .message = allowed.error().message,
+    });
+  }
+  const Type *dict = Type::dict(map ? Type::DictKind::Map : Type::DictKind::Set, key, value);
+
+  return ok(dict);
 }
 
-bool DictChecker::checkKeyType(const Type *type, llvm::SMLoc loc) {
-  if (type->isUnknown()) {
-    this->checker.diags_.error(
-        loc, "an unknown cannot be a key: a key is found by its value, and what an "
-             "unknown holds is known only when the program runs; use keys of one type, "
-             "e.g. 'Map<string, unknown>'");
-    return false;
-  }
-  if (type->nonOptional()->isResult()) {
-    this->checker.diags_.error(
-        loc, "a Result cannot be a key: Results are not compared, as in JavaScript each "
-             "is an object of its own, equal to no other; use what it holds");
-    return false;
+bool DictChecker::keyArgument(DictCheckerResolveDictTypeErrorCode code) {
+  switch (code) {
+    case DictCheckerResolveDictTypeErrorCode::NUMBER_KEYS:
+    case DictCheckerResolveDictTypeErrorCode::OTHER_KEYS:
+    case DictCheckerResolveDictTypeErrorCode::BAD_KEY_TYPE:
+      return true;
+    case DictCheckerResolveDictTypeErrorCode::NOT_A_DICT:
+    case DictCheckerResolveDictTypeErrorCode::WEAK_COLLECTION:
+    case DictCheckerResolveDictTypeErrorCode::WRONG_TYPE_ARGUMENTS:
+      return false;
   }
 
-  return true;
+  return false;
+}
+
+DictChecker::ResultKeyTypeIsAllowed DictChecker::checkKeyType(const Type *type) {
+  if (type->isUnknown()) {
+    std::string message = ErrorTextKeyType::unknown();
+
+    return err(DictCheckerCheckKeyTypeError{
+        .code = DictCheckerCheckKeyTypeErrorCode::UNKNOWN_KEY,
+        .message = message,
+    });
+  }
+  if (type->nonOptional()->isResult()) {
+    std::string message = ErrorTextKeyType::result();
+
+    return err(DictCheckerCheckKeyTypeError{
+        .code = DictCheckerCheckKeyTypeErrorCode::RESULT_KEY,
+        .message = message,
+    });
+  }
+
+  return ok(type);
 }
 
 Expr *DictChecker::dictCall(llvm::SMLoc loc, Expr *receiver, llvm::StringRef name, Builtin builtin,
@@ -178,103 +213,129 @@ Expr *DictChecker::keyLiteral(llvm::SMLoc loc, llvm::StringRef name) {
   return key;
 }
 
+DictChecker::ResultTextKeyForRecord DictChecker::stringKey(const Type *type) {
+  if (type->nonOptional()->isNumeric()) {
+    std::string message = ErrorTextRecordKey::number(type->name());
+
+    return err(DictCheckerStringKeyError{
+        .code = DictCheckerStringKeyErrorCode::NUMBER_KEY,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
 Expr *DictChecker::checkRecordKey(Expr *key) {
   key = this->checker.exprChecker().checkExpr(key, Type::string());
-  const Type *type = key->type;
-  if (type->nonOptional()->isNumeric()) {
-    this->checker.diags_.error(
-        key->loc(), "the keys of a Record are strings, and JavaScript would turn this '" +
-                        type->name() +
-                        "' into one, so 1 and \"1\" would be one key; convert it, "
-                        "'String(i)', or use a Map, whose keys may be numbers");
+  ResultTextKeyForRecord text = DictChecker::stringKey(key->type);
+  if (text.isErr()) {
+    this->checker.diags_.error(key->loc(), text.error().message);
     return key;
   }
 
-  return this->checker.typeRelations().coerce(key, Type::string(), "the key");
+  std::string what = ErrorTextKeyType::keyLabel();
+
+  return this->checker.typeRelations().coerce(key, Type::string(), what);
 }
 
-Expr *DictChecker::checkDictMember(MemberExpr *member) {
+DictChecker::ResultDictMemberAccess DictChecker::checkDictMember(MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::SMLoc loc = member->loc();
   if (type->isRecord()) {
     Expr *key = this->keyLiteral(loc, member->name);
-    return this->dictCall(loc, member->object, "get", Builtin::MapGet, {key},
-                          Type::optional(type->valueType()));
+    Expr *read = this->dictCall(loc, member->object, "get", Builtin::MapGet, {key},
+                                Type::optional(type->valueType()));
+
+    return ok(read);
   }
   if (member->name == "size") {
-    return this->dictCall(loc, member->object, "size", Builtin::MapSize, {}, Type::intTy());
+    Expr *size = this->dictCall(loc, member->object, "size", Builtin::MapSize, {}, Type::intTy());
+
+    return ok(size);
   }
   std::string text = dictText(member->object, type);
   bool method = type->isMap() ? llvm::is_contained(kMapMethods, member->name)
                               : llvm::is_contained(kSetMethods, member->name);
-  if (method) {
-    this->checker.diags_.error(loc, "'" + text + "." + member->name +
-                                        "' can only be called, e.g. '" + text + "." + member->name +
-                                        "(...)'; pass an arrow that calls it where a function is "
-                                        "expected");
-  } else {
-    this->checker.diags_.error(
-        loc, "property '" + member->name + "' does not exist on type '" + type->name() + "'" +
-                 (member->name == "length" ? "; the number of entries is '" + text + ".size'"
-                                           : std::string()));
-  }
   member->type = Type::error();
+  if (method) {
+    std::string message = ErrorTextDictMember::callOnly(text, member->name);
 
-  return member;
+    return err(DictCheckerCheckDictMemberError{
+        .code = DictCheckerCheckDictMemberErrorCode::METHOD_VALUE,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextDictMember::noProperty(member->name, type->name(), text);
+
+  return err(DictCheckerCheckDictMemberError{
+      .code = DictCheckerCheckDictMemberErrorCode::NO_SUCH_PROPERTY,
+      .message = message,
+  });
 }
 
-Expr *DictChecker::checkDictIndex(IndexExpr *index) {
+DictChecker::ResultDictIndexedValue DictChecker::checkDictIndex(IndexExpr *index) {
   const Type *type = index->object->type;
   if (type->isRecord()) {
     Expr *key = this->checkRecordKey(index->index);
-    return this->dictCall(index->loc(), index->object, "get", Builtin::MapGet, {key},
-                          Type::optional(type->valueType()));
+    Expr *read = this->dictCall(index->loc(), index->object, "get", Builtin::MapGet, {key},
+                                Type::optional(type->valueType()));
+
+    return ok(read);
   }
   index->index = this->checker.exprChecker().checkExpr(index->index);
   std::string text = dictText(index->object, type);
-  if (type->isMap()) {
-    this->checker.diags_.error(index->loc(),
-                               "'" + text +
-                                   "[key]' reads a property of the Map object in "
-                                   "JavaScript, not one of its entries; read an entry with '" +
-                                   text + ".get(key)'");
-  } else {
-    this->checker.diags_.error(index->loc(),
-                               "a Set has no elements by position; check one with '" + text +
-                                   ".has(value)', or copy them into an array, '[..." + text + "]'");
-  }
   index->type = Type::error();
+  if (type->isMap()) {
+    std::string message = ErrorTextDictIndex::mapIndex(text);
 
-  return index;
+    return err(DictCheckerCheckDictIndexError{
+        .code = DictCheckerCheckDictIndexErrorCode::MAP_INDEX,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextDictIndex::setIndex(text);
+
+  return err(DictCheckerCheckDictIndexError{
+      .code = DictCheckerCheckDictIndexErrorCode::SET_INDEX,
+      .message = message,
+  });
 }
 
-const Type *DictChecker::checkDictTarget(Expr *target, bool compound) {
+DictChecker::ResultRecordTargetType DictChecker::checkDictTarget(Expr *target, bool compound) {
   auto *index = dyn_cast<IndexExpr>(target);
   auto *member = dyn_cast<MemberExpr>(target);
   Expr *object = index ? index->object : member->object;
   const Type *type = object->type;
   target->type = Type::error();
   std::string text = dictText(object, type);
+  if (!type->isRecord() && index) {
+    index->index = this->checker.exprChecker().checkExpr(index->index);
+  }
+  if (type->isMap()) {
+    std::string access = index ? std::string("[key]") : "." + member->name.str();
+    std::string message = ErrorTextDictTarget::mapSet(text, access);
+
+    return err(DictCheckerCheckDictTargetError{
+        .code = DictCheckerCheckDictTargetErrorCode::MAP_TARGET,
+        .message = message,
+    });
+  }
+  if (!type->isRecord() && member && member->name == "size") {
+    std::string message = ErrorTextDictTarget::setSize(text);
+
+    return err(DictCheckerCheckDictTargetError{
+        .code = DictCheckerCheckDictTargetErrorCode::SET_SIZE,
+        .message = message,
+    });
+  }
   if (!type->isRecord()) {
-    if (index) {
-      index->index = this->checker.exprChecker().checkExpr(index->index);
-    }
-    if (type->isMap()) {
-      this->checker.diags_.error(target->loc(),
-                                 "'" + text + (index ? "[key]" : "." + member->name.str()) +
-                                     " = ...' sets a property of the Map object in JavaScript, "
-                                     "not one of its entries; set an entry with '" +
-                                     text + ".set(key, value)'");
-    } else if (member && member->name == "size") {
-      this->checker.diags_.error(target->loc(),
-                                 "the size of a Set cannot be assigned to; add elements with '" +
-                                     text + ".add(value)'");
-    } else {
-      this->checker.diags_.error(target->loc(),
-                                 "a Set has no elements by position; add one with '" + text +
-                                     ".add(value)'");
-    }
-    return Type::error();
+    std::string message = ErrorTextDictTarget::setIndex(text);
+
+    return err(DictCheckerCheckDictTargetError{
+        .code = DictCheckerCheckDictTargetErrorCode::SET_INDEX,
+        .message = message,
+    });
   }
   if (index) {
     index->index = this->checkRecordKey(index->index);
@@ -283,19 +344,19 @@ const Type *DictChecker::checkDictTarget(Expr *target, bool compound) {
     std::string key = index ? text + "[k]" : text + "." + member->name.str();
     const Type *value = type->valueType();
     std::string hint = value->isNumeric() || value->isDecimal()
-                           ? ", e.g. '" + key + " = (" + key + " ?? 0) + 1'"
-                       : value->isString() ? ", e.g. '" + key + " = (" + key + " ?? \"\") + s'"
+                           ? ErrorTextDictTarget::numberHint(key)
+                       : value->isString() ? ErrorTextDictTarget::textHint(key)
                                            : "";
-    this->checker.diags_.error(target->loc(),
-                               "'" + key +
-                                   "' may be undefined, as a key may be missing: give it a "
-                                   "default with '??'" +
-                                   hint);
-    return Type::error();
+    std::string message = ErrorTextDictTarget::missing(key, hint);
+
+    return err(DictCheckerCheckDictTargetError{
+        .code = DictCheckerCheckDictTargetErrorCode::MAY_BE_MISSING,
+        .message = message,
+    });
   }
   target->type = type->valueType();
 
-  return type->valueType();
+  return ok(type->valueType());
 }
 
 Expr *DictChecker::recordAssign(AssignExpr *assign) {
@@ -332,8 +393,8 @@ Expr *DictChecker::checkRecordNullishAssign(AssignExpr *assign, IndexExpr *index
                         {key, value}, definite ? valueType->nonOptional() : valueType);
 }
 
-Expr *DictChecker::checkDictDelete(UnaryExpr *unary, Expr *object, Expr *keyExpr,
-                                   llvm::StringRef name) {
+DictChecker::ResultRecordKeyDeleted
+DictChecker::checkDictDelete(UnaryExpr *unary, Expr *object, Expr *keyExpr, llvm::StringRef name) {
   const Type *type = object->type;
   unary->type = Type::boolTy();
   if (!type->isRecord()) {
@@ -341,12 +402,14 @@ Expr *DictChecker::checkDictDelete(UnaryExpr *unary, Expr *object, Expr *keyExpr
     if (keyExpr) {
       keyExpr = this->checker.exprChecker().checkExpr(keyExpr);
     }
-    this->checker.diags_.error(unary->loc(),
-                               "'delete' removes a property of the " +
-                                   std::string(type->isMap() ? "Map" : "Set") +
-                                   " object in JavaScript, not an entry; remove one with '" + text +
-                                   ".delete(" + (type->isMap() ? "key" : "value") + ")'");
-    return unary;
+    const char *kind = type->isMap() ? "Map" : "Set";
+    const char *what = type->isMap() ? "key" : "value";
+    std::string message = ErrorTextDictDelete::property(kind, text, what);
+
+    return err(DictCheckerCheckDictDeleteError{
+        .code = DictCheckerCheckDictDeleteErrorCode::NOT_A_RECORD,
+        .message = message,
+    });
   }
   Expr *key = keyExpr ? this->checkRecordKey(keyExpr) : this->keyLiteral(unary->loc(), name);
   auto *yes = this->checker.ctx_.make<BoolLitExpr>(unary->loc(), true);
@@ -357,34 +420,44 @@ Expr *DictChecker::checkDictDelete(UnaryExpr *unary, Expr *object, Expr *keyExpr
                                         yes});
   seq->type = Type::boolTy();
 
-  return seq;
+  return ok(seq);
 }
 
-Expr *DictChecker::checkDictIn(BinaryExpr *bin) {
+DictChecker::ResultRecordKeyChecked DictChecker::checkDictIn(BinaryExpr *bin) {
   const Type *type = bin->rhs->type->nonOptional();
   if (bin->rhs->type->isOptional()) {
-    this->checker.diags_.error(bin->rhs->loc(), "the dictionary may be undefined; check it first");
-    return bin;
+    std::string message = ErrorTextDictIn::undefined();
+
+    return err(DictCheckerCheckDictInError{
+        .code = DictCheckerCheckDictInErrorCode::MAY_BE_UNDEFINED,
+        .message = message,
+    });
   }
   if (!type->isRecord()) {
     std::string text = dictText(bin->rhs, type);
-    this->checker.diags_.error(bin->loc(),
-                               "'in' asks for a property of the " +
-                                   std::string(type->isMap() ? "Map" : "Set") +
-                                   " object in JavaScript, not for an entry; ask with '" + text +
-                                   ".has(" + (type->isMap() ? "key" : "value") + ")'");
-    return bin;
+    const char *kind = type->isMap() ? "Map" : "Set";
+    const char *what = type->isMap() ? "key" : "value";
+    std::string message = ErrorTextDictIn::property(kind, text, what);
+
+    return err(DictCheckerCheckDictInError{
+        .code = DictCheckerCheckDictInErrorCode::NOT_A_RECORD,
+        .message = message,
+    });
   }
   Expr *key = bin->lhs;
   if (key->type->nonOptional()->isNumeric()) {
-    this->checker.diags_.error(
-        key->loc(), "the keys of a Record are strings, and JavaScript would turn this '" +
-                        key->type->name() + "' into one; convert it, 'String(i)'");
-    return bin;
-  }
-  key = this->checker.typeRelations().coerce(key, Type::string(), "the key");
+    std::string message = ErrorTextRecordKey::numberIn(key->type->name());
 
-  return this->dictCall(bin->loc(), bin->rhs, "has", Builtin::MapHas, {key}, Type::boolTy());
+    return err(DictCheckerCheckDictInError{
+        .code = DictCheckerCheckDictInErrorCode::NUMBER_KEY,
+        .message = message,
+    });
+  }
+  std::string what = ErrorTextKeyType::keyLabel();
+  key = this->checker.typeRelations().coerce(key, Type::string(), what);
+  Expr *has = this->dictCall(bin->loc(), bin->rhs, "has", Builtin::MapHas, {key}, Type::boolTy());
+
+  return ok(has);
 }
 
 }

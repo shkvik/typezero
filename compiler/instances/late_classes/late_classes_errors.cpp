@@ -61,4 +61,8 @@ std::string ErrorTextReplacedField::clash(llvm::StringRef child, llvm::StringRef
       .str();
 }
 
+std::string ErrorTextStaticType::fieldLabel(llvm::StringRef name) {
+  return (llvm::Twine("static field '") + name + "'").str();
+}
+
 }

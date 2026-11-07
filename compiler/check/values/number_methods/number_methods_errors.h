@@ -56,6 +56,9 @@ struct NumberMethodsCheckNumberMethodError {
 class ErrorTextNumberMethod {
 public:
   static std::string noProperty(llvm::StringRef name, llvm::StringRef type);
+  static std::string codePoint();
+  static std::string radix();
+  static std::string digits();
 };
 
 }

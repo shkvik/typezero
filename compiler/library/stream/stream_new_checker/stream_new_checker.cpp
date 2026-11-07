@@ -8,11 +8,8 @@
 #include "compiler/library/stream/chunk_types/chunk_types.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -53,7 +50,8 @@ struct StreamOptionFlags {
 
 }
 
-StreamNewChecker::StreamNewChecker(Checker &checker) : checker_(checker) {}
+StreamNewChecker::StreamNewChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const Type *expected) {
   llvm::StringRef name = generic->name;
@@ -63,7 +61,7 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
   if (!readable && !writable && !duplex) {
     return nullptr;
   }
-  if (checker_.libraryCalls().inLibrary(expr->loc())) {
+  if (this->checker.libraryCalls().inLibrary(expr->loc())) {
     return nullptr;
   }
   if (name != "PassThrough") {
@@ -76,17 +74,17 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
                           : writable ? "class Sink extends Writable<string> { protected "
                                        "onWrite(chunk, encoding, callback) { ... } }"
                                      : "class Upper extends " + name.str() + "<string> { ... }";
-    checker_.diags_.error(expr->loc(),
-                          "'" + name.str() +
-                              "' is abstract: write a class that extends it and "
-                              "puts its work in '" +
-                              hook.str() + "', e.g. '" + example + "'" +
-                              (readable ? "; for a stream of values you already have, use "
-                                          "'Readable.from(values)'"
-                                        : ""));
+    this->checker.diags_.error(expr->loc(),
+                               "'" + name.str() +
+                                   "' is abstract: write a class that extends it and "
+                                   "puts its work in '" +
+                                   hook.str() + "', e.g. '" + example + "'" +
+                                   (readable ? "; for a stream of values you already have, use "
+                                               "'Readable.from(values)'"
+                                             : ""));
     expr->type = Type::error();
     for (Expr *&arg : expr->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
 
     return expr;
@@ -103,20 +101,20 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
     options.lit = dyn_cast<ObjectLitExpr>(expr->args[0]);
   }
   const Type *buffer = Type::bytesType(Type::Bytes::Buffer);
-  std::string site = "stream " + checker_.eventMapInference().placeOf(expr->loc());
+  std::string site = "stream " + this->checker.eventMapInference().placeOf(expr->loc());
   auto side = [&](bool objectMode, bool text, llvm::StringRef key, const Type *fallback,
                   llvm::StringRef what) -> const Type * {
     if (!objectMode) {
       return text ? Type::string() : buffer;
     }
     if (const Type *found =
-            checker_.chunkTypes().inferredChunkType(site + " " + key.str(), expr->loc())) {
+            this->checker.chunkTypes().inferredChunkType(site + " " + key.str(), expr->loc())) {
       return found;
     }
     if (fallback) {
       return fallback;
     }
-    checker_.diags_.error(
+    this->checker.diags_.error(
         expr->loc(),
         "cannot infer the type of the " + what.str() + " of this object-mode " + name.str() +
             ": no code of the program " + (key == "R" ? "pushes into it" : "writes to it") +
@@ -128,7 +126,7 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
   auto failed = [&] {
     expr->type = Type::error();
     for (Expr *&arg : expr->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
 
     return expr;
@@ -147,20 +145,21 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
   }
   std::vector<const Type *> args = {w, r};
   GenericClassInstantiator::ResultClassMade made =
-      checker_.genericClassInstantiator().instantiateClass(generic, std::move(args), expr->loc());
+      this->checker.genericClassInstantiator().instantiateClass(generic, std::move(args),
+                                                                expr->loc());
   if (made.isErr() &&
       made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
     llvm::SMLoc at =
         made.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
             ? generic->loc()
             : expr->loc();
-    checker_.diags_.error(at, made.error().message);
+    this->checker.diags_.error(at, made.error().message);
   }
   if (made.isErr()) {
     return nullptr;
   }
 
-  return checker_.methodCallChecker().checkClassNew(expr, made.value(), expected);
+  return this->checker.methodCallChecker().checkClassNew(expr, made.value(), expected);
 }
 
 }

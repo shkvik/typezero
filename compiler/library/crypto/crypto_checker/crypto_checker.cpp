@@ -9,27 +9,25 @@
 #include "compiler/library/crypto/web_crypto_checker/web_crypto_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-CryptoChecker::CryptoChecker(Checker &checker) : checker_(checker) {}
+CryptoChecker::CryptoChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *CryptoChecker::checkCryptoValue(llvm::StringRef name, Expr *expr) {
   if (name == "constants") {
-    checker_.diags_.error(expr->loc(), "'constants' of 'node:crypto' is used as "
-                                       "'constants.RSA_PKCS1_PSS_PADDING' and the like");
+    this->checker.diags_.error(expr->loc(), "'constants' of 'node:crypto' is used as "
+                                            "'constants.RSA_PKCS1_PSS_PADDING' and the like");
     return expr;
   }
-  if (cryptoTypeNamed(name)) {
-    checker_.diags_.error(expr->loc(), "'" + name +
-                                           "' of 'node:crypto' is a type: its objects come from "
-                                           "the functions of 'node:crypto'");
+  if (this->cryptoTypeNamed(name)) {
+    this->checker.diags_.error(expr->loc(),
+                               "'" + name +
+                                   "' of 'node:crypto' is a type: its objects come from "
+                                   "the functions of 'node:crypto'");
     return expr;
   }
 
@@ -39,16 +37,16 @@ Expr *CryptoChecker::checkCryptoValue(llvm::StringRef name, Expr *expr) {
 Expr *CryptoChecker::checkCryptoModuleMember(MemberExpr *member) {
   auto *object = dyn_cast<NameExpr>(member->object);
   const Checker::NodeName *n =
-      object ? checker_.builtinModuleChecker().nodeName(object->name) : nullptr;
+      object ? this->checker.builtinModuleChecker().nodeName(object->name) : nullptr;
   if (!n || n->module != NodeModule::Crypto || n->name != "constants") {
     return nullptr;
   }
 
-  return cryptoConstant(member);
+  return this->cryptoConstant(member);
 }
 
 const Type *CryptoChecker::cryptoTypeNamed(llvm::StringRef name) const {
-  const Checker::NodeName *n = checker_.builtinModuleChecker().nodeName(name);
+  const Checker::NodeName *n = this->checker.builtinModuleChecker().nodeName(name);
   if (!n || n->module != NodeModule::Crypto) {
     return nullptr;
   }
@@ -78,19 +76,19 @@ Expr *CryptoChecker::cryptoConstant(MemberExpr *member) {
   for (const auto &[name, value] : constants) {
     if (name == member->name) {
       Expr *lit =
-          checker_.ctx_.make<IntLitExpr>(member->loc(), uint64_t(value < 0 ? -value : value));
+          this->checker.ctx_.make<IntLitExpr>(member->loc(), uint64_t(value < 0 ? -value : value));
       lit->type = Type::intTy();
       if (value >= 0) {
         return lit;
       }
-      auto *negated = checker_.ctx_.make<UnaryExpr>(member->loc(), UnaryOp::Neg, lit);
-      return checker_.exprChecker().checkExpr(negated);
+      auto *negated = this->checker.ctx_.make<UnaryExpr>(member->loc(), UnaryOp::Neg, lit);
+      return this->checker.exprChecker().checkExpr(negated);
     }
   }
-  checker_.diags_.error(member->loc(),
-                        "'constants." + member->name +
-                            "' of 'node:crypto' is not supported yet; tz has the RSA_ and "
-                            "POINT_CONVERSION_ ones");
+  this->checker.diags_.error(member->loc(),
+                             "'constants." + member->name +
+                                 "' of 'node:crypto' is not supported yet; tz has the RSA_ and "
+                                 "POINT_CONVERSION_ ones");
   member->type = Type::error();
 
   return member;
@@ -103,8 +101,8 @@ Expr *CryptoChecker::checkCryptoMember(MemberExpr *member) {
   llvm::SMLoc loc = member->loc();
   auto read = [&](CryptoFn fn, const Type *result, std::vector<Expr *> args = {}) {
     args.insert(args.begin(), member->object);
-    auto *call = checker_.ctx_.make<CallExpr>(loc, member, std::vector<Expr *>{});
-    return checker_.cryptoArgs().cryptoCall(call, fn, std::move(args), result);
+    auto *call = this->checker.ctx_.make<CallExpr>(loc, member, std::vector<Expr *>{});
+    return this->checker.cryptoArgs().cryptoCall(call, fn, std::move(args), result);
   };
   if (kind == Crypto::KeyObject) {
     if (name == "type") {
@@ -117,7 +115,7 @@ Expr *CryptoChecker::checkCryptoMember(MemberExpr *member) {
       return read(CryptoFn::KeySymmetricSize, Type::optional(Type::intTy()));
     }
     if (name == "asymmetricKeyDetails") {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           loc, "'asymmetricKeyDetails' is not supported yet: node gives the exponent of "
                "RSA as a bigint, which tz has not");
       member->type = Type::error();
@@ -162,18 +160,18 @@ Expr *CryptoChecker::checkCryptoMember(MemberExpr *member) {
           : p.fn == CryptoFn::X509PublicKey ? Type::cryptoType(Crypto::KeyObject)
                                             : Type::string();
       if (p.bits) {
-        return read(p.fn, result, {checker_.cryptoArgs().cryptoInt(loc, p.bits)});
+        return read(p.fn, result, {this->checker.cryptoArgs().cryptoInt(loc, p.bits)});
       }
       return read(p.fn, result);
     }
     if (name == "issuerCertificate") {
-      checker_.diags_.error(loc, "'issuerCertificate' comes only with TLS (docs/net.md)");
+      this->checker.diags_.error(loc, "'issuerCertificate' comes only with TLS (docs/net.md)");
       member->type = Type::error();
       return member;
     }
   }
-  checker_.diags_.error(loc, "property '" + name + "' of " + type->name() +
-                                 " can only be called; it has " + methodsOf(kind));
+  this->checker.diags_.error(loc, "property '" + name + "' of " + type->name() +
+                                      " can only be called; it has " + methodsOf(kind));
   member->type = Type::error();
 
   return member;
@@ -182,27 +180,27 @@ Expr *CryptoChecker::checkCryptoMember(MemberExpr *member) {
 Expr *CryptoChecker::checkCryptoNew(NewExpr *expr, llvm::StringRef cls) {
   expr->type = Type::error();
   if (cls != "X509Certificate") {
-    checker_.diags_.error(expr->loc(),
-                          "'new " + cls + "' is not how node makes one: " +
-                              (cls == "KeyObject" ? "use 'createSecretKey', 'createPublicKey' "
-                                                    "or 'createPrivateKey'"
-                               : cls == "ECDH"    ? "use 'createECDH(curve)'"
-                               : cls == "Sign" || cls == "Verify"
-                                   ? "use 'create" + cls.str() + "(algorithm)'"
-                               : cls == "Hash" || cls == "Hmac"
-                                   ? "use 'create" + cls.str() + "(algorithm)'"
-                                   : "use 'create" + cls.str() + "(algorithm, key, iv)'"));
+    this->checker.diags_.error(expr->loc(),
+                               "'new " + cls + "' is not how node makes one: " +
+                                   (cls == "KeyObject" ? "use 'createSecretKey', 'createPublicKey' "
+                                                         "or 'createPrivateKey'"
+                                    : cls == "ECDH"    ? "use 'createECDH(curve)'"
+                                    : cls == "Sign" || cls == "Verify"
+                                        ? "use 'create" + cls.str() + "(algorithm)'"
+                                    : cls == "Hash" || cls == "Hmac"
+                                        ? "use 'create" + cls.str() + "(algorithm)'"
+                                        : "use 'create" + cls.str() + "(algorithm, key, iv)'"));
     for (Expr *&arg : expr->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     return expr;
   }
-  checker_.diags_.error(expr->loc(),
-                        "'new X509Certificate' may fail on the data it reads, and 'new' gives no "
-                        "Result; write 'X509Certificate.parse(pem)', which gives a "
-                        "Result<X509Certificate, ParseCertificateError>");
+  this->checker.diags_.error(
+      expr->loc(), "'new X509Certificate' may fail on the data it reads, and 'new' gives no "
+                   "Result; write 'X509Certificate.parse(pem)', which gives a "
+                   "Result<X509Certificate, ParseCertificateError>");
   for (Expr *&arg : expr->args) {
-    arg = checker_.exprChecker().checkExpr(arg);
+    arg = this->checker.exprChecker().checkExpr(arg);
   }
 
   return expr;
@@ -211,34 +209,36 @@ Expr *CryptoChecker::checkCryptoNew(NewExpr *expr, llvm::StringRef cls) {
 Expr *CryptoChecker::checkX509Parse(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   if (member->name != "parse") {
-    checker_.diags_.error(member->loc(), "'X509Certificate." + member->name +
-                                             "' does not exist; read a certificate with "
-                                             "'X509Certificate.parse(pem)'");
+    this->checker.diags_.error(member->loc(), "'X509Certificate." + member->name +
+                                                  "' does not exist; read a certificate with "
+                                                  "'X509Certificate.parse(pem)'");
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     return call;
   }
   if (call->args.size() != 1) {
-    checker_.diags_.error(call->loc(), "'X509Certificate.parse' takes the certificate, PEM or DER");
+    this->checker.diags_.error(call->loc(),
+                               "'X509Certificate.parse' takes the certificate, PEM or DER");
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     return call;
   }
-  Expr *data = checker_.cryptoArgs().cryptoData(call->args[0], "certificate", true, false, true);
+  Expr *data =
+      this->checker.cryptoArgs().cryptoData(call->args[0], "certificate", true, false, true);
   if (data->type->isError()) {
     return call;
   }
 
-  return checker_.cryptoArgs().cryptoResult(call, CryptoFn::X509New, {data},
-                                            Type::cryptoType(Crypto::X509));
+  return this->checker.cryptoArgs().cryptoResult(call, CryptoFn::X509New, {data},
+                                                 Type::cryptoType(Crypto::X509));
 }
 
 bool CryptoChecker::isX509Class(Expr *object) const {
   auto *name = dyn_cast<NameExpr>(object);
   const Checker::NodeName *n =
-      name ? checker_.builtinModuleChecker().nodeName(name->name) : nullptr;
+      name ? this->checker.builtinModuleChecker().nodeName(name->name) : nullptr;
 
   return n && n->module == NodeModule::Crypto && n->name == "X509Certificate";
 }
@@ -246,19 +246,19 @@ bool CryptoChecker::isX509Class(Expr *object) const {
 Expr *CryptoChecker::checkWebCryptoCall(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
   if (name == "randomUUID" || name == "getRandomValues") {
-    return checker_.cryptoFunctionChecker().checkCryptoCall(call, name, member->loc());
+    return this->checker.cryptoFunctionChecker().checkCryptoCall(call, name, member->loc());
   }
   call->type = Type::error();
   for (Expr *&arg : call->args) {
-    arg = checker_.exprChecker().checkExpr(arg);
+    arg = this->checker.exprChecker().checkExpr(arg);
   }
   if (name == "subtle") {
-    checker_.diags_.error(member->loc(), "'crypto.subtle' is an object, not a function");
+    this->checker.diags_.error(member->loc(), "'crypto.subtle' is an object, not a function");
   } else {
-    checker_.diags_.error(member->loc(), "'crypto." + name +
-                                             "' does not exist; the global crypto has "
-                                             "'randomUUID', 'getRandomValues' and "
-                                             "'subtle'");
+    this->checker.diags_.error(member->loc(), "'crypto." + name +
+                                                  "' does not exist; the global crypto has "
+                                                  "'randomUUID', 'getRandomValues' and "
+                                                  "'subtle'");
   }
 
   return call;
@@ -267,15 +267,15 @@ Expr *CryptoChecker::checkWebCryptoCall(CallExpr *call, MemberExpr *member) {
 Expr *CryptoChecker::checkWebCryptoMember(MemberExpr *member) {
   member->type = Type::error();
   if (member->name == "subtle") {
-    return checker_.webCryptoChecker().subtleObject(member);
+    return this->checker.webCryptoChecker().subtleObject(member);
   }
   if (member->name == "randomUUID" || member->name == "getRandomValues") {
-    checker_.diags_.error(member->loc(), "'crypto." + member->name + "' can only be called");
+    this->checker.diags_.error(member->loc(), "'crypto." + member->name + "' can only be called");
   } else {
-    checker_.diags_.error(member->loc(), "'crypto." + member->name +
-                                             "' does not exist; the global crypto "
-                                             "has 'randomUUID', 'getRandomValues' "
-                                             "and 'subtle'");
+    this->checker.diags_.error(member->loc(), "'crypto." + member->name +
+                                                  "' does not exist; the global crypto "
+                                                  "has 'randomUUID', 'getRandomValues' "
+                                                  "and 'subtle'");
   }
 
   return member;

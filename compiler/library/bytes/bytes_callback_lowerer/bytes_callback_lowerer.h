@@ -6,12 +6,12 @@ namespace tz {
 
 class BytesCallbackLowerer {
 public:
-  explicit BytesCallbackLowerer(Lowering &lowering);
+  explicit BytesCallbackLowerer(Lowering &owner);
 
   llvm::Value *emitBytesCallbackMethod(CallExpr *call);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

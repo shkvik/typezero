@@ -45,6 +45,7 @@ struct ArrayLiteralCheckerSpreadableError {
 class ErrorTextSpreadable {
 public:
   static std::string notSpread(llvm::StringRef type, bool record);
+  static std::string spread();
 };
 
 enum class ArrayLiteralCheckerNotEmptyErrorCode {

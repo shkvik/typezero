@@ -6,12 +6,15 @@ namespace tz {
 
 class ResultMethodChecker {
 public:
-  explicit ResultMethodChecker(Checker &checker);
+  explicit ResultMethodChecker(Checker &owner);
 
   Expr *checkResultMethod(CallExpr *call, MemberExpr *member, const Type *expected);
 
 private:
-  Checker &checker_;
+  static const Type *halfParam(const Type *half);
+  static bool givesType(const Type *half);
+
+  Checker &checker;
 };
 
 }

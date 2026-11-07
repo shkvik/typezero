@@ -11,16 +11,15 @@
 #include "compiler/library/stream/stream_pipeline/stream_pipeline.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-StreamSources::StreamSources(Checker &checker) : checker_(checker) {}
+StreamSources::StreamSources(Checker &owner)
+    : checker(owner) {}
 
 Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, llvm::SMLoc loc) {
   llvm::StringRef fn = decl->name;
@@ -28,31 +27,31 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, l
   if (!reading && fn != "createWriteStream") {
     return nullptr;
   }
-  if (checker_.libraryCalls().inLibrary(call->loc())) {
+  if (this->checker.libraryCalls().inLibrary(call->loc())) {
     return nullptr;
   }
   call->type = Type::error();
-  bool rejected = checker_.callChecker().rejectSpread(call);
+  bool rejected = this->checker.callChecker().rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 1, 2);
+      rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 1, 2);
   if (arity.isErr()) {
-    checker_.diags_.error(loc, arity.error().message);
+    this->checker.diags_.error(loc, arity.error().message);
   }
   if (rejected || arity.isErr()) {
     return call;
   }
   TypeAliasDecl *alias =
-      checker_.libTypes_.lookup(reading ? "ReadStreamOptions" : "WriteStreamOptions");
+      this->checker.libTypes_.lookup(reading ? "ReadStreamOptions" : "WriteStreamOptions");
   if (!alias) {
     return call;
   }
-  const Type *options = Type::optional(checker_.typeDeclarer().resolveAlias(alias));
-  const Type *encodingType = Type::optional(checker_.prelude().builtinType("BufferEncoding"));
+  const Type *options = Type::optional(this->checker.typeDeclarer().resolveAlias(alias));
+  const Type *encodingType = Type::optional(this->checker.prelude().builtinType("BufferEncoding"));
   auto undefinedOf = [&](const Type *type) {
-    return checker_.typeRelations().convert(
-        checker_.exprChecker().checkExpr(checker_.ctx_.make<UndefinedExpr>(loc)), type);
+    return this->checker.typeRelations().convert(
+        this->checker.exprChecker().checkExpr(this->checker.ctx_.make<UndefinedExpr>(loc)), type);
   };
-  Expr *path = checker_.argumentChecker().checkArg(call->args[0], Type::string());
+  Expr *path = this->checker.argumentChecker().checkArg(call->args[0], Type::string());
   Expr *opts = nullptr;
   Expr *encoding = nullptr;
   bool text = false;
@@ -71,17 +70,17 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, l
           fresh = true;
         }
       }
-      opts = checker_.argumentChecker().checkArg(arg, options);
+      opts = this->checker.argumentChecker().checkArg(arg, options);
     } else if (isa<StringLitExpr>(arg)) {
-      encoding = checker_.argumentChecker().checkArg(arg, encodingType);
+      encoding = this->checker.argumentChecker().checkArg(arg, encodingType);
       text = true;
     } else {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
       if (arg->type->isSubtypeOf(Type::string())) {
-        encoding = checker_.typeRelations().coerce(arg, encodingType);
+        encoding = this->checker.typeRelations().coerce(arg, encodingType);
         text = true;
       } else {
-        opts = checker_.typeRelations().coerce(arg, options);
+        opts = this->checker.typeRelations().coerce(arg, options);
       }
     }
   }
@@ -97,38 +96,38 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, l
   call->args = {path, opts, encoding};
   std::vector<bool> given(3, true);
   if (!reading) {
-    return checker_.eventTargetChecker().callLibraryFunction(
+    return this->checker.eventTargetChecker().callLibraryFunction(
         call, fresh ? "streamWriteNewFile" : "streamWriteFile", {}, given, loc);
   }
   const Type *chunk = text ? Type::string() : Type::bytesType(Type::Bytes::Buffer);
 
-  return checker_.eventTargetChecker().callLibraryFunction(call, "streamReadFile", {chunk}, given,
-                                                           loc);
+  return this->checker.eventTargetChecker().callLibraryFunction(call, "streamReadFile", {chunk},
+                                                                given, loc);
 }
 
 Expr *StreamSources::processStream(MemberExpr *member) {
   llvm::StringRef name = member->name;
   bool in = name == "stdin";
   llvm::StringRef fn = in ? "processStdin" : "processStdout";
-  if (!checker_.libFunctions_.lookup(fn)) {
+  if (!this->checker.libFunctions_.lookup(fn)) {
     return nullptr;
   }
   llvm::SMLoc loc = member->loc();
   std::vector<Expr *> args;
   if (!in) {
-    args.push_back(checker_.exprChecker().checkExpr(
-        checker_.ctx_.make<IntLitExpr>(loc, name == "stdout" ? 1 : 2), Type::intTy()));
+    args.push_back(this->checker.exprChecker().checkExpr(
+        this->checker.ctx_.make<IntLitExpr>(loc, name == "stdout" ? 1 : 2), Type::intTy()));
   }
-  auto *callee = checker_.ctx_.make<NameExpr>(loc, fn);
-  auto *call = checker_.ctx_.make<CallExpr>(loc, callee, std::move(args));
+  auto *callee = this->checker.ctx_.make<NameExpr>(loc, fn);
+  auto *call = this->checker.ctx_.make<CallExpr>(loc, callee, std::move(args));
   call->type = Type::error();
   std::vector<bool> given(call->args.size(), true);
-  Expr *stream = checker_.eventTargetChecker().callLibraryFunction(call, fn, {}, given, loc);
-  if (in && !checker_.streamViews_.empty()) {
+  Expr *stream = this->checker.eventTargetChecker().callLibraryFunction(call, fn, {}, given, loc);
+  if (in && !this->checker.streamViews_.empty()) {
     Checker::FieldPath path;
-    path.var = processStdinVar();
-    if (const Type *view = checker_.setEncodingChecker().streamViewOf(path, loc)) {
-      return checker_.typeRelations().convert(stream, view);
+    path.var = this->processStdinVar();
+    if (const Type *view = this->checker.setEncodingChecker().streamViewOf(path, loc)) {
+      return this->checker.typeRelations().convert(stream, view);
     }
   }
 
@@ -136,47 +135,47 @@ Expr *StreamSources::processStream(MemberExpr *member) {
 }
 
 VarSymbol *StreamSources::processStdinVar() {
-  if (!processStdin_) {
-    processStdin_ = checker_.ctx_.newVar();
-    processStdin_->name = "process.stdin";
-    processStdin_->isConst = true;
+  if (!this->processStdin) {
+    this->processStdin = this->checker.ctx_.newVar();
+    this->processStdin->name = "process.stdin";
+    this->processStdin->isConst = true;
   }
 
-  return processStdin_;
+  return this->processStdin;
 }
 
 const Type *StreamSources::streamFromOptionsType() {
-  TypeAliasDecl *alias = checker_.libTypes_.lookup("ReadableFromOptions");
+  TypeAliasDecl *alias = this->checker.libTypes_.lookup("ReadableFromOptions");
 
-  return alias ? checker_.typeDeclarer().resolveAlias(alias) : nullptr;
+  return alias ? this->checker.typeDeclarer().resolveAlias(alias) : nullptr;
 }
 
 Expr *StreamSources::checkStreamFrom(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  bool rejected = checker_.callChecker().rejectSpread(call);
+  bool rejected = this->checker.callChecker().rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 1, 2);
+      rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 1, 2);
   if (arity.isErr()) {
-    checker_.diags_.error(member->loc(), arity.error().message);
+    this->checker.diags_.error(member->loc(), arity.error().message);
   }
   if (rejected || arity.isErr()) {
     return call;
   }
   llvm::SMLoc loc = member->loc();
-  Expr *source = checker_.exprChecker().checkExpr(call->args[0]);
+  Expr *source = this->checker.exprChecker().checkExpr(call->args[0]);
   const Type *type = source->type;
   if (type->isError()) {
     return call;
   }
-  const Type *optionsType = streamFromOptionsType();
+  const Type *optionsType = this->streamFromOptionsType();
   if (!optionsType) {
     return call;
   }
   Expr *options =
       call->args.size() > 1
-          ? checker_.argumentChecker().checkArg(call->args[1], Type::optional(optionsType))
-          : checker_.typeRelations().convert(
-                checker_.exprChecker().checkExpr(checker_.ctx_.make<UndefinedExpr>(loc)),
+          ? this->checker.argumentChecker().checkArg(call->args[1], Type::optional(optionsType))
+          : this->checker.typeRelations().convert(
+                this->checker.exprChecker().checkExpr(this->checker.ctx_.make<UndefinedExpr>(loc)),
                 Type::optional(optionsType));
   if (options->type->isError()) {
     return call;
@@ -184,33 +183,33 @@ Expr *StreamSources::checkStreamFrom(CallExpr *call, MemberExpr *member) {
   std::vector<bool> given{true, true};
   if (type->isString() || type->isStringLiteral() || type->isBuffer()) {
     const Type *chunk = type->isBuffer() ? type : Type::string();
-    call->args = {checker_.typeRelations().coerce(source, chunk), options};
-    return checker_.eventTargetChecker().callLibraryFunction(call, "streamFromValue", {chunk},
-                                                             given, loc);
+    call->args = {this->checker.typeRelations().coerce(source, chunk), options};
+    return this->checker.eventTargetChecker().callLibraryFunction(call, "streamFromValue", {chunk},
+                                                                  given, loc);
   }
   if (type->isAsyncIterator()) {
     call->args = {source, options};
-    return checker_.eventTargetChecker().callLibraryFunction(call, "streamFromAsyncIterator",
-                                                             {type->yielded()}, given, loc);
+    return this->checker.eventTargetChecker().callLibraryFunction(call, "streamFromAsyncIterator",
+                                                                  {type->yielded()}, given, loc);
   }
-  if (Expr *async = checker_.iterableChecker().asyncUserIterator(source);
+  if (Expr *async = this->checker.iterableChecker().asyncUserIterator(source);
       async && async->type->isAsyncIterator()) {
     call->args = {async, options};
-    return checker_.eventTargetChecker().callLibraryFunction(call, "streamFromAsyncIterator",
-                                                             {async->type->yielded()}, given, loc);
+    return this->checker.eventTargetChecker().callLibraryFunction(
+        call, "streamFromAsyncIterator", {async->type->yielded()}, given, loc);
   }
-  Expr *iterator = checker_.streamPipeline().valuesIteratorOf(source);
+  Expr *iterator = this->checker.streamPipeline().valuesIteratorOf(source);
   if (!iterator) {
-    checker_.diags_.error(source->loc(),
-                          "'Readable.from' takes an iterable, an async iterable, a string "
-                          "or a Buffer, but this is '" +
-                              type->name() + "'");
+    this->checker.diags_.error(source->loc(),
+                               "'Readable.from' takes an iterable, an async iterable, a string "
+                               "or a Buffer, but this is '" +
+                                   type->name() + "'");
     return call;
   }
   call->args = {iterator, options};
 
-  return checker_.eventTargetChecker().callLibraryFunction(call, "streamFromIterator",
-                                                           {iterator->type->yielded()}, given, loc);
+  return this->checker.eventTargetChecker().callLibraryFunction(
+      call, "streamFromIterator", {iterator->type->yielded()}, given, loc);
 }
 
 }

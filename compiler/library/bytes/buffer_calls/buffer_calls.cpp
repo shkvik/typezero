@@ -31,247 +31,254 @@ namespace tz {
 llvm::Value *BufferCalls::emit() {
   switch (call->builtin()) {
     case Builtin::BufferFromString: {
-      Lowering::Operand text = lowering_.refCounts().emitOperand(
+      Lowering::Operand text = this->lowering.refCounts().emitOperand(
           call->args[0], AssignLowerer::cannotAssign(call->args[1]));
-      llvm::Value *enc = encoding(call->args[1]);
-      llvm::Value *made =
-          lowering_.builder_.CreateCall(fn("tz_buffer_from_string", ptr, {ptr, i64, i32}),
-                                        {lowering_.stringLowerer().stringObj(text.value),
-                                         lowering_.stringLowerer().stringMeta(text.value), enc},
-                                        "buffer");
-      lowering_.refCounts().dropOperand(text);
+      llvm::Value *enc = this->encoding(call->args[1]);
+      llvm::Value *made = this->lowering.builder_.CreateCall(
+          this->fn("tz_buffer_from_string", ptr, {ptr, i64, i32}),
+          {this->lowering.stringLowerer().stringObj(text.value),
+           this->lowering.stringLowerer().stringMeta(text.value), enc},
+          "buffer");
+      this->lowering.refCounts().dropOperand(text);
       return made;
     }
     case Builtin::BufferAllocFill: {
-      llvm::Value *size = lowering_.exprLowerer().emitExpr(call->args[0]);
+      llvm::Value *size = this->lowering.exprLowerer().emitExpr(call->args[0]);
       Expr *fillExpr = call->args[1];
-      Lowering::Operand fill =
-          lowering_.refCounts().emitOperand(fillExpr, AssignLowerer::cannotAssign(call->args[2]));
-      llvm::Value *enc = encoding(call->args[2]);
-      llvm::Value *made = lowering_.builder_.CreateCall(
-          fn("tz_buffer_alloc", ptr, {i64, i32}), {size, lowering_.builder_.getInt32(1)}, "buffer");
-      llvm::Value *zero = lowering_.builder_.getInt64(0), *none = lowering_.builder_.getInt32(0);
-      llvm::BasicBlock *fillBlock = lowering_.functionFrame().newBlock("alloc.fill");
-      llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("alloc.end");
-      lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(made), fillBlock,
-                                      endBlock);
-      lowering_.functionFrame().switchTo(fillBlock);
+      Lowering::Operand fill = this->lowering.refCounts().emitOperand(
+          fillExpr, AssignLowerer::cannotAssign(call->args[2]));
+      llvm::Value *enc = this->encoding(call->args[2]);
+      llvm::Value *made =
+          this->lowering.builder_.CreateCall(this->fn("tz_buffer_alloc", ptr, {i64, i32}),
+                                             {size, this->lowering.builder_.getInt32(1)}, "buffer");
+      llvm::Value *zero = this->lowering.builder_.getInt64(0),
+                  *none = this->lowering.builder_.getInt32(0);
+      llvm::BasicBlock *fillBlock = this->lowering.functionFrame().newBlock("alloc.fill");
+      llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("alloc.end");
+      this->lowering.builder_.CreateCondBr(this->lowering.builder_.CreateIsNotNull(made), fillBlock,
+                                           endBlock);
+      this->lowering.functionFrame().switchTo(fillBlock);
       if (fillExpr->type->isString()) {
-        lowering_.builder_.CreateCall(
-            fn("tz_buffer_fill_string", voidTy, {ptr, ptr, i64, i64, i64, i32, i32}),
-            {made, lowering_.stringLowerer().stringObj(fill.value),
-             lowering_.stringLowerer().stringMeta(fill.value), zero, zero, none, enc});
+        this->lowering.builder_.CreateCall(
+            this->fn("tz_buffer_fill_string", voidTy, {ptr, ptr, i64, i64, i64, i32, i32}),
+            {made, this->lowering.stringLowerer().stringObj(fill.value),
+             this->lowering.stringLowerer().stringMeta(fill.value), zero, zero, none, enc});
       } else if (fillExpr->type->isInteger()) {
-        lowering_.builder_.CreateCall(
-            fn("tz_buffer_fill_byte", voidTy, {ptr, i32, i64, i64, i32}),
-            {made, lowering_.builder_.CreateTrunc(fill.value, i32), zero, zero, none});
+        this->lowering.builder_.CreateCall(
+            this->fn("tz_buffer_fill_byte", voidTy, {ptr, i32, i64, i64, i32}),
+            {made, this->lowering.builder_.CreateTrunc(fill.value, i32), zero, zero, none});
       } else {
-        lowering_.builder_.CreateCall(fn("tz_buffer_fill_bytes", voidTy, {ptr, ptr, i64, i64, i32}),
-                                      {made, fill.value, zero, zero, none});
+        this->lowering.builder_.CreateCall(
+            this->fn("tz_buffer_fill_bytes", voidTy, {ptr, ptr, i64, i64, i32}),
+            {made, fill.value, zero, zero, none});
       }
-      lowering_.builder_.CreateBr(endBlock);
-      lowering_.functionFrame().switchTo(endBlock);
-      lowering_.refCounts().dropOperand(fill);
+      this->lowering.builder_.CreateBr(endBlock);
+      this->lowering.functionFrame().switchTo(endBlock);
+      this->lowering.refCounts().dropOperand(fill);
       return made;
     }
     case Builtin::BufferConcat: {
-      Lowering::Operand list = lowering_.refCounts().emitOperand(
+      Lowering::Operand list = this->lowering.refCounts().emitOperand(
           call->args[0], call->args.size() < 2 || AssignLowerer::cannotAssign(call->args[1]));
       std::vector<llvm::Value *> values;
-      llvm::Value *has = positions(1, 1, values);
-      llvm::Value *made = lowering_.builder_.CreateCall(
-          fn("tz_buffer_concat", ptr, {ptr, i64, i32}), {list.value, values[0], has}, "buffer");
-      lowering_.refCounts().dropOperand(list);
+      llvm::Value *has = this->positions(1, 1, values);
+      llvm::Value *made =
+          this->lowering.builder_.CreateCall(this->fn("tz_buffer_concat", ptr, {ptr, i64, i32}),
+                                             {list.value, values[0], has}, "buffer");
+      this->lowering.refCounts().dropOperand(list);
       return made;
     }
     case Builtin::BufferByteLength: {
       Expr *source = call->args[0];
       if (source->type->isString()) {
-        Lowering::Operand text =
-            lowering_.refCounts().emitOperand(source, AssignLowerer::cannotAssign(call->args[1]));
-        llvm::Value *enc = encoding(call->args[1]);
-        llvm::Value *length =
-            lowering_.builder_.CreateCall(fn("tz_buffer_byte_length", i32, {ptr, i64, i32}),
-                                          {lowering_.stringLowerer().stringObj(text.value),
-                                           lowering_.stringLowerer().stringMeta(text.value), enc});
-        lowering_.refCounts().dropOperand(text);
-        return lowering_.builder_.CreateSExt(length, i64);
+        Lowering::Operand text = this->lowering.refCounts().emitOperand(
+            source, AssignLowerer::cannotAssign(call->args[1]));
+        llvm::Value *enc = this->encoding(call->args[1]);
+        llvm::Value *length = this->lowering.builder_.CreateCall(
+            this->fn("tz_buffer_byte_length", i32, {ptr, i64, i32}),
+            {this->lowering.stringLowerer().stringObj(text.value),
+             this->lowering.stringLowerer().stringMeta(text.value), enc});
+        this->lowering.refCounts().dropOperand(text);
+        return this->lowering.builder_.CreateSExt(length, i64);
       }
-      Lowering::Operand bytes = lowering_.refCounts().emitOperand(source, true);
-      llvm::Value *length = lowering_.bytesLowerer().bytesLength(bytes.value);
-      lowering_.refCounts().dropOperand(bytes);
+      Lowering::Operand bytes = this->lowering.refCounts().emitOperand(source, true);
+      llvm::Value *length = this->lowering.bytesLowerer().bytesLength(bytes.value);
+      this->lowering.refCounts().dropOperand(bytes);
       unsigned size = source->type->isTypedArray() ? source->type->elementSize() : 1;
-      return lowering_.builder_.CreateMul(length, lowering_.builder_.getInt64(size));
+      return this->lowering.builder_.CreateMul(length, this->lowering.builder_.getInt64(size));
     }
     case Builtin::BufferCompare:
     case Builtin::BufferEquals: {
       Expr *first = call->builtin() == Builtin::BufferCompare ? call->args[0] : member->object;
       Expr *second = call->builtin() == Builtin::BufferCompare ? call->args[1] : call->args[0];
       Lowering::Operand a =
-          lowering_.refCounts().emitOperand(first, AssignLowerer::cannotAssign(second));
-      Lowering::Operand b = lowering_.refCounts().emitOperand(second, true);
+          this->lowering.refCounts().emitOperand(first, AssignLowerer::cannotAssign(second));
+      Lowering::Operand b = this->lowering.refCounts().emitOperand(second, true);
       llvm::Value *result =
           call->builtin() == Builtin::BufferCompare
-              ? lowering_.builder_.CreateSExt(
-                    lowering_.builder_.CreateCall(fn("tz_bytes_compare", i32, {ptr, ptr}),
-                                                  {a.value, b.value}),
+              ? this->lowering.builder_.CreateSExt(
+                    this->lowering.builder_.CreateCall(
+                        this->fn("tz_bytes_compare", i32, {ptr, ptr}), {a.value, b.value}),
                     i64)
-              : lowering_.builder_.CreateICmpNE(
-                    lowering_.builder_.CreateCall(fn("tz_bytes_equal", i32, {ptr, ptr}),
-                                                  {a.value, b.value}),
-                    lowering_.builder_.getInt32(0));
-      lowering_.refCounts().dropOperand(b);
-      lowering_.refCounts().dropOperand(a);
+              : this->lowering.builder_.CreateICmpNE(
+                    this->lowering.builder_.CreateCall(this->fn("tz_bytes_equal", i32, {ptr, ptr}),
+                                                       {a.value, b.value}),
+                    this->lowering.builder_.getInt32(0));
+      this->lowering.refCounts().dropOperand(b);
+      this->lowering.refCounts().dropOperand(a);
       return result;
     }
     case Builtin::BufferCompareTo: {
-      Lowering::Operand self = receiver(0);
-      Lowering::Operand target = lowering_.refCounts().emitOperand(
+      Lowering::Operand self = this->receiver(0);
+      Lowering::Operand target = this->lowering.refCounts().emitOperand(
           call->args[0], llvm::all_of(llvm::ArrayRef<Expr *>(call->args).drop_front(),
                                       AssignLowerer::cannotAssign));
       std::vector<llvm::Value *> values;
-      llvm::Value *has = positions(1, 4, values);
-      llvm::Value *result = lowering_.builder_.CreateCall(
-          fn("tz_buffer_compare_range", i32, {ptr, ptr, i64, i64, i64, i64, i32}),
+      llvm::Value *has = this->positions(1, 4, values);
+      llvm::Value *result = this->lowering.builder_.CreateCall(
+          this->fn("tz_buffer_compare_range", i32, {ptr, ptr, i64, i64, i64, i64, i32}),
           {self.value, target.value, values[0], values[1], values[2], values[3], has});
-      lowering_.refCounts().dropOperand(target);
-      lowering_.refCounts().dropOperand(self);
-      return lowering_.builder_.CreateSExt(result, i64);
+      this->lowering.refCounts().dropOperand(target);
+      this->lowering.refCounts().dropOperand(self);
+      return this->lowering.builder_.CreateSExt(result, i64);
     }
     case Builtin::BufferIsBuffer: {
       const Type *t = call->args[0]->type;
       if (!t->nonOptional()->isTypedArray() || t->nonOptional()->bytes() != Bytes::Uint8 ||
           t->isOptional()) {
-        lowering_.stmtLowerer().emitDiscarded(call->args[0]);
-        return lowering_.builder_.getInt1(t->isBuffer());
+        this->lowering.stmtLowerer().emitDiscarded(call->args[0]);
+        return this->lowering.builder_.getInt1(t->isBuffer());
       }
-      Lowering::Operand bytes = lowering_.refCounts().emitOperand(call->args[0], true);
-      llvm::Value *is =
-          lowering_.builder_.CreateCall(fn("tz_bytes_is_buffer", i32, {ptr}), {bytes.value});
-      lowering_.refCounts().dropOperand(bytes);
-      return lowering_.builder_.CreateICmpNE(is, lowering_.builder_.getInt32(0));
+      Lowering::Operand bytes = this->lowering.refCounts().emitOperand(call->args[0], true);
+      llvm::Value *is = this->lowering.builder_.CreateCall(
+          this->fn("tz_bytes_is_buffer", i32, {ptr}), {bytes.value});
+      this->lowering.refCounts().dropOperand(bytes);
+      return this->lowering.builder_.CreateICmpNE(is, this->lowering.builder_.getInt32(0));
     }
     case Builtin::BufferIsEncoding: {
-      Lowering::Operand name = lowering_.refCounts().emitOperand(call->args[0], true);
-      llvm::Value *found =
-          lowering_.builder_.CreateCall(fn("tz_buffer_encoding", i32, {ptr, i64}),
-                                        {lowering_.stringLowerer().stringObj(name.value),
-                                         lowering_.stringLowerer().stringMeta(name.value)});
-      lowering_.refCounts().dropOperand(name);
-      return lowering_.builder_.CreateICmpSGE(found, lowering_.builder_.getInt32(0));
+      Lowering::Operand name = this->lowering.refCounts().emitOperand(call->args[0], true);
+      llvm::Value *found = this->lowering.builder_.CreateCall(
+          this->fn("tz_buffer_encoding", i32, {ptr, i64}),
+          {this->lowering.stringLowerer().stringObj(name.value),
+           this->lowering.stringLowerer().stringMeta(name.value)});
+      this->lowering.refCounts().dropOperand(name);
+      return this->lowering.builder_.CreateICmpSGE(found, this->lowering.builder_.getInt32(0));
     }
     case Builtin::BufferToString: {
-      Lowering::Operand self = receiver(0);
-      llvm::Value *enc = encoding(call->args[0]);
+      Lowering::Operand self = this->receiver(0);
+      llvm::Value *enc = this->encoding(call->args[0]);
       std::vector<llvm::Value *> values;
-      llvm::Value *has = positions(1, 2, values);
-      llvm::Value *text = lowering_.stringLowerer().callReturningString(
-          fn("tz_buffer_to_string", voidTy, {ptr, ptr, i32, i64, i64, i32}),
+      llvm::Value *has = this->positions(1, 2, values);
+      llvm::Value *text = this->lowering.stringLowerer().callReturningString(
+          this->fn("tz_buffer_to_string", voidTy, {ptr, ptr, i32, i64, i64, i32}),
           {self.value, enc, values[0], values[1], has});
-      lowering_.refCounts().dropOperand(self);
+      this->lowering.refCounts().dropOperand(self);
       return text;
     }
     case Builtin::BufferWrite: {
-      Lowering::Operand self = receiver(0);
-      Lowering::Operand text = lowering_.refCounts().emitOperand(
+      Lowering::Operand self = this->receiver(0);
+      Lowering::Operand text = this->lowering.refCounts().emitOperand(
           call->args[0], llvm::all_of(llvm::ArrayRef<Expr *>(call->args).drop_front(),
                                       AssignLowerer::cannotAssign));
-      llvm::Value *enc = encoding(call->args[1]);
+      llvm::Value *enc = this->encoding(call->args[1]);
       std::vector<llvm::Value *> values;
-      llvm::Value *has = positions(2, 2, values);
-      llvm::Value *written = lowering_.builder_.CreateCall(
-          fn("tz_buffer_write_string", i32, {ptr, ptr, i64, i64, i64, i32, i32}),
-          {self.value, lowering_.stringLowerer().stringObj(text.value),
-           lowering_.stringLowerer().stringMeta(text.value), values[0], values[1], has, enc});
-      lowering_.refCounts().dropOperand(text);
-      lowering_.refCounts().dropOperand(self);
-      return lowering_.builder_.CreateSExt(written, i64);
+      llvm::Value *has = this->positions(2, 2, values);
+      llvm::Value *written = this->lowering.builder_.CreateCall(
+          this->fn("tz_buffer_write_string", i32, {ptr, ptr, i64, i64, i64, i32, i32}),
+          {self.value, this->lowering.stringLowerer().stringObj(text.value),
+           this->lowering.stringLowerer().stringMeta(text.value), values[0], values[1], has, enc});
+      this->lowering.refCounts().dropOperand(text);
+      this->lowering.refCounts().dropOperand(self);
+      return this->lowering.builder_.CreateSExt(written, i64);
     }
     case Builtin::BufferIndexOf:
     case Builtin::BufferFill: {
       bool fill = call->builtin() == Builtin::BufferFill;
       size_t valueAt = fill ? 0 : 1;
       Expr *valueExpr = call->args[valueAt];
-      Lowering::Operand self = receiver(valueAt);
-      Lowering::Operand value = lowering_.refCounts().emitOperand(
+      Lowering::Operand self = this->receiver(valueAt);
+      Lowering::Operand value = this->lowering.refCounts().emitOperand(
           valueExpr, llvm::all_of(llvm::ArrayRef<Expr *>(call->args).drop_front(valueAt + 1),
                                   AssignLowerer::cannotAssign));
-      llvm::Value *enc = encoding(call->args[valueAt + 1]);
+      llvm::Value *enc = this->encoding(call->args[valueAt + 1]);
       std::vector<llvm::Value *> values;
-      llvm::Value *has = positions(valueAt + 2, fill ? 2 : 1, values);
+      llvm::Value *has = this->positions(valueAt + 2, fill ? 2 : 1, values);
       llvm::Value *result = nullptr;
       if (fill) {
         if (valueExpr->type->isString()) {
-          lowering_.builder_.CreateCall(
-              fn("tz_buffer_fill_string", voidTy, {ptr, ptr, i64, i64, i64, i32, i32}),
-              {self.value, lowering_.stringLowerer().stringObj(value.value),
-               lowering_.stringLowerer().stringMeta(value.value), values[0], values[1], has, enc});
+          this->lowering.builder_.CreateCall(
+              this->fn("tz_buffer_fill_string", voidTy, {ptr, ptr, i64, i64, i64, i32, i32}),
+              {self.value, this->lowering.stringLowerer().stringObj(value.value),
+               this->lowering.stringLowerer().stringMeta(value.value), values[0], values[1], has,
+               enc});
         } else if (valueExpr->type->isInteger()) {
-          lowering_.builder_.CreateCall(
-              fn("tz_buffer_fill_byte", voidTy, {ptr, i32, i64, i64, i32}),
-              {self.value, lowering_.builder_.CreateTrunc(value.value, i32), values[0], values[1],
-               has});
+          this->lowering.builder_.CreateCall(
+              this->fn("tz_buffer_fill_byte", voidTy, {ptr, i32, i64, i64, i32}),
+              {self.value, this->lowering.builder_.CreateTrunc(value.value, i32), values[0],
+               values[1], has});
         } else {
-          lowering_.builder_.CreateCall(
-              fn("tz_buffer_fill_bytes", voidTy, {ptr, ptr, i64, i64, i32}),
+          this->lowering.builder_.CreateCall(
+              this->fn("tz_buffer_fill_bytes", voidTy, {ptr, ptr, i64, i64, i32}),
               {self.value, value.value, values[0], values[1], has});
         }
-        lowering_.refCounts().dropOperand(value);
-        return returnSelf(self);
+        this->lowering.refCounts().dropOperand(value);
+        return this->returnSelf(self);
       }
-      llvm::Value *mode = lowering_.builder_.getInt32(uint32_t(constantOf(call->args[0])));
+      llvm::Value *mode = this->lowering.builder_.getInt32(uint32_t(constantOf(call->args[0])));
       if (valueExpr->type->isString()) {
-        result = lowering_.builder_.CreateCall(
-            fn("tz_buffer_index_of_string", i32, {ptr, ptr, i64, i64, i32, i32, i32}),
-            {self.value, lowering_.stringLowerer().stringObj(value.value),
-             lowering_.stringLowerer().stringMeta(value.value), values[0], has, enc, mode});
+        result = this->lowering.builder_.CreateCall(
+            this->fn("tz_buffer_index_of_string", i32, {ptr, ptr, i64, i64, i32, i32, i32}),
+            {self.value, this->lowering.stringLowerer().stringObj(value.value),
+             this->lowering.stringLowerer().stringMeta(value.value), values[0], has, enc, mode});
       } else if (valueExpr->type->isInteger()) {
-        result = lowering_.builder_.CreateCall(
-            fn("tz_buffer_index_of_byte", i32, {ptr, i32, i64, i32, i32}),
-            {self.value, lowering_.builder_.CreateTrunc(value.value, i32), values[0], has, mode});
+        result = this->lowering.builder_.CreateCall(
+            this->fn("tz_buffer_index_of_byte", i32, {ptr, i32, i64, i32, i32}),
+            {self.value, this->lowering.builder_.CreateTrunc(value.value, i32), values[0], has,
+             mode});
       } else {
-        result = lowering_.builder_.CreateCall(
-            fn("tz_buffer_index_of_bytes", i32, {ptr, ptr, i64, i32, i32}),
+        result = this->lowering.builder_.CreateCall(
+            this->fn("tz_buffer_index_of_bytes", i32, {ptr, ptr, i64, i32, i32}),
             {self.value, value.value, values[0], has, mode});
       }
-      lowering_.refCounts().dropOperand(value);
-      lowering_.refCounts().dropOperand(self);
+      this->lowering.refCounts().dropOperand(value);
+      this->lowering.refCounts().dropOperand(self);
       return constantOf(call->args[0]) == 2
-                 ? lowering_.builder_.CreateICmpNE(result, lowering_.builder_.getInt32(0))
-                 : lowering_.builder_.CreateSExt(result, i64);
+                 ? this->lowering.builder_.CreateICmpNE(result, this->lowering.builder_.getInt32(0))
+                 : this->lowering.builder_.CreateSExt(result, i64);
     }
     case Builtin::BufferCopy: {
-      Lowering::Operand self = receiver(0);
-      Lowering::Operand target = lowering_.refCounts().emitOperand(
+      Lowering::Operand self = this->receiver(0);
+      Lowering::Operand target = this->lowering.refCounts().emitOperand(
           call->args[0], llvm::all_of(llvm::ArrayRef<Expr *>(call->args).drop_front(),
                                       AssignLowerer::cannotAssign));
       std::vector<llvm::Value *> values;
-      llvm::Value *has = positions(1, 3, values);
-      llvm::Value *copied = lowering_.builder_.CreateCall(
-          fn("tz_buffer_copy", i32, {ptr, ptr, i64, i64, i64, i32}),
+      llvm::Value *has = this->positions(1, 3, values);
+      llvm::Value *copied = this->lowering.builder_.CreateCall(
+          this->fn("tz_buffer_copy", i32, {ptr, ptr, i64, i64, i64, i32}),
           {self.value, target.value, values[0], values[1], values[2], has});
-      lowering_.refCounts().dropOperand(target);
-      lowering_.refCounts().dropOperand(self);
-      return lowering_.builder_.CreateSExt(copied, i64);
+      this->lowering.refCounts().dropOperand(target);
+      this->lowering.refCounts().dropOperand(self);
+      return this->lowering.builder_.CreateSExt(copied, i64);
     }
     case Builtin::BufferSwap: {
-      Lowering::Operand self = receiver(0);
-      lowering_.builder_.CreateCall(
-          fn("tz_buffer_swap", voidTy, {ptr, i32}),
-          {self.value, lowering_.builder_.getInt32(uint32_t(constantOf(call->args[0])))});
-      return returnSelf(self);
+      Lowering::Operand self = this->receiver(0);
+      this->lowering.builder_.CreateCall(
+          this->fn("tz_buffer_swap", voidTy, {ptr, i32}),
+          {self.value, this->lowering.builder_.getInt32(uint32_t(constantOf(call->args[0])))});
+      return this->returnSelf(self);
     }
     case Builtin::BufferToJSON: {
-      Lowering::Operand self = receiver(0);
-      llvm::Value *object = lowering_.objectLayouts().allocObject(type, {0, 1});
-      lowering_.builder_.CreateStore(lowering_.stringLowerer().stringLiteral(u"Buffer"),
-                                     lowering_.objectLayouts().fieldAddress(object, type, "type"));
-      llvm::Value *data = lowering_.builder_.CreateCall(
-          fn("tz_bytes_to_array", ptr, {ptr, ptr}),
-          {self.value, lowering_.typeDescriptors().typeDescriptor(Type::intTy())});
-      lowering_.builder_.CreateStore(data,
-                                     lowering_.objectLayouts().fieldAddress(object, type, "data"));
-      lowering_.refCounts().dropOperand(self);
+      Lowering::Operand self = this->receiver(0);
+      llvm::Value *object = this->lowering.objectLayouts().allocObject(type, {0, 1});
+      this->lowering.builder_.CreateStore(
+          this->lowering.stringLowerer().stringLiteral(u"Buffer"),
+          this->lowering.objectLayouts().fieldAddress(object, type, "type"));
+      llvm::Value *data = this->lowering.builder_.CreateCall(
+          this->fn("tz_bytes_to_array", ptr, {ptr, ptr}),
+          {self.value, this->lowering.typeDescriptors().typeDescriptor(Type::intTy())});
+      this->lowering.builder_.CreateStore(
+          data, this->lowering.objectLayouts().fieldAddress(object, type, "data"));
+      this->lowering.refCounts().dropOperand(self);
       return object;
     }
     default:

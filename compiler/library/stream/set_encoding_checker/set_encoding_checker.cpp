@@ -11,11 +11,8 @@
 #include "compiler/library/stream/stream_sources/stream_sources.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -29,11 +26,13 @@ struct StreamEscape {
 
 }
 
-SetEncodingChecker::SetEncodingChecker(Checker &checker) : checker_(checker) {}
+SetEncodingChecker::SetEncodingChecker(Checker &owner)
+    : checker(owner) {}
 
 const Type *SetEncodingChecker::streamViewOf(const Checker::FieldPath &path,
                                              llvm::SMLoc loc) const {
-  for (auto it = checker_.streamViews_.rbegin(); it != checker_.streamViews_.rend(); ++it) {
+  for (auto it = this->checker.streamViews_.rbegin(); it != this->checker.streamViews_.rend();
+       ++it) {
     if (it->path == path && it->from.getPointer() < loc.getPointer()) {
       return it->type;
     }
@@ -63,14 +62,14 @@ const Type *SetEncodingChecker::encodedStreamType(ClassDecl *cls, llvm::SMLoc lo
       return nullptr;
     }
     GenericClassInstantiator::ResultClassMade made =
-        checker_.genericClassInstantiator().instantiateClass(generic, args, loc);
+        this->checker.genericClassInstantiator().instantiateClass(generic, args, loc);
     if (made.isErr() &&
         made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
       llvm::SMLoc at =
           made.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
               ? generic->loc()
               : (loc.isValid() ? loc : generic->loc());
-      checker_.diags_.error(at, made.error().message);
+      this->checker.diags_.error(at, made.error().message);
     }
     return made.isOk() ? made.value()->type : nullptr;
   }
@@ -80,11 +79,11 @@ const Type *SetEncodingChecker::encodedStreamType(ClassDecl *cls, llvm::SMLoc lo
 
 Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, ClassDecl *cls) {
   const Type *receiver = member->object->type;
-  Checker::StreamChunks chunks = checker_.chunkTypes().streamChunksOf(cls);
+  Checker::StreamChunks chunks = this->checker.chunkTypes().streamChunksOf(cls);
   llvm::SMLoc loc = member->loc();
   auto plainCall = [&]() -> Expr * {
-    checker_.emitterChecker().callLibraryMethod(call, member, cls, "setEncoding", {}, nullptr,
-                                                false);
+    this->checker.emitterChecker().callLibraryMethod(call, member, cls, "setEncoding", {}, nullptr,
+                                                     false);
     if (!call->type->isError()) {
       call->type = receiver;
     }
@@ -92,18 +91,18 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
     return call;
   };
   if (!chunks.readable) {
-    checker_.diags_.error(loc,
-                          "'" + receiver->name() + "' has no setEncoding(): it is not readable");
+    this->checker.diags_.error(loc, "'" + receiver->name() +
+                                        "' has no setEncoding(): it is not readable");
     return call;
   }
   if (chunks.readable->isString()) {
     return plainCall();
   }
   if (!chunks.readable->isBuffer()) {
-    checker_.diags_.error(loc,
-                          "setEncoding() decodes the Buffers of a stream of bytes, and this is an "
-                          "object-mode stream of " +
-                              chunks.readable->name().str() + "; push strings into it instead");
+    this->checker.diags_.error(
+        loc, "setEncoding() decodes the Buffers of a stream of bytes, and this is an "
+             "object-mode stream of " +
+                 chunks.readable->name().str() + "; push strings into it instead");
     return call;
   }
   std::optional<Checker::FieldPath> path;
@@ -116,9 +115,9 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
   }
   bool stdinStream = false;
   if (auto *c = dyn_cast<CallExpr>(object); c && c->func() && c->func()->name == "processStdin") {
-    if (!checker_.module_ || !checker_.module_->isEntry || !checker_.functions_.empty() ||
-        checker_.scopes_.size() != 1) {
-      checker_.diags_.error(
+    if (!this->checker.module_ || !this->checker.module_->isEntry ||
+        !this->checker.functions_.empty() || this->checker.scopes_.size() != 1) {
+      this->checker.diags_.error(
           loc, "'process.stdin.setEncoding()' changes the type of the chunks of stdin for "
                "the code after it, so it goes in the top-level code of the program's "
                "main file, before any other use of process.stdin");
@@ -126,15 +125,15 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
     }
     stdinStream = true;
     path = Checker::FieldPath{};
-    path->var = checker_.streamSources().processStdinVar();
+    path->var = this->checker.streamSources().processStdinVar();
   } else if (auto *name = dyn_cast<NameExpr>(object); name && name->var()) {
     path = Checker::FieldPath{};
     path->var = name->var();
   } else {
-    path = checker_.fieldFacts().fieldPath(object);
+    path = this->checker.fieldFacts().fieldPath(object);
   }
   auto reject = [&](const std::string &why) {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         loc, "setEncoding() makes the chunks of the stream strings from here on, so its "
              "type changes here; " +
                  why +
@@ -162,18 +161,19 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
       at = f->type;
     }
   }
-  size_t declared = stdinStream ? 0 : checker_.scopes_.size();
-  for (size_t i = checker_.scopes_.size(); i-- > 0 && !stdinStream;) {
-    auto found = checker_.scopes_[i].find(root->name);
-    if (found != checker_.scopes_[i].end() && found->second.var() == root) {
+  size_t declared = stdinStream ? 0 : this->checker.scopes_.size();
+  for (size_t i = this->checker.scopes_.size(); i-- > 0 && !stdinStream;) {
+    auto found = this->checker.scopes_[i].find(root->name);
+    if (found != this->checker.scopes_[i].end() && found->second.var() == root) {
       declared = i;
       break;
     }
   }
-  bool branched = stdinStream ? checker_.branchDepth_ != 0
-                              : declared < checker_.scopeBranches_.size() &&
-                                    checker_.scopeBranches_[declared] != checker_.branchDepth_;
-  if (declared + 1 != checker_.scopes_.size() || branched) {
+  bool branched = stdinStream
+                      ? this->checker.branchDepth_ != 0
+                      : declared < this->checker.scopeBranches_.size() &&
+                            this->checker.scopeBranches_[declared] != this->checker.branchDepth_;
+  if (declared + 1 != this->checker.scopes_.size() || branched) {
     return reject("but this setEncoding() is in a block of its own (an if, a loop, a function) "
                   "and '" +
                   root->name.str() +
@@ -209,13 +209,13 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
       if (auto *c = dyn_cast<CallExpr>(e)) {
         return c->func() && c->func()->name == "processStdin";
       }
-      return checker_.processChecker().isProcessMember(e, "stdin");
+      return this->checker.processChecker().isProcessMember(e, "stdin");
     }
     if (path->names.empty()) {
       auto *name = dyn_cast<NameExpr>(e);
       return name && (name->var() == root || (!name->var() && name->name == root->name));
     }
-    std::optional<Checker::FieldPath> p = checker_.fieldFacts().fieldPath(e);
+    std::optional<Checker::FieldPath> p = this->checker.fieldFacts().fieldPath(e);
 
     return p && *p == *path;
   };
@@ -254,8 +254,8 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
   std::vector<const Stmt *> body;
   if (FunctionDecl *owner = stdinStream ? nullptr : root->owner(); owner && owner->body) {
     body.push_back(owner->body);
-  } else if (checker_.module_) {
-    for (const Stmt *item : checker_.module_->file.items) {
+  } else if (this->checker.module_) {
+    for (const Stmt *item : this->checker.module_->file.items) {
       body.push_back(item);
     }
   }
@@ -285,22 +285,22 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
         first = &e;
       }
     }
-    checker_.diags_.error(
+    this->checker.diags_.error(
         loc, "setEncoding() on a stream that is used elsewhere already, which sees its "
              "chunks as Buffers, but strings would come: " +
                  first->how +
                  " before this; give the stream its encoding where it is created, e.g. "
                  "'createReadStream(path, \"utf8\")', or call setEncoding() first");
-    checker_.diags_.note(first->loc, "the stream is used here");
+    this->checker.diags_.note(first->loc, "the stream is used here");
     return call;
   }
-  const Type *view = encodedStreamType(cls, loc);
+  const Type *view = this->encodedStreamType(cls, loc);
   plainCall();
   if (!view || call->type->isError()) {
     return call;
   }
   call->type = view;
-  checker_.streamViews_.push_back({*path, llvm::SMLoc::getFromPointer(here), view});
+  this->checker.streamViews_.push_back({*path, llvm::SMLoc::getFromPointer(here), view});
 
   return call;
 }

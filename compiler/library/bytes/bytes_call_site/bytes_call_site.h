@@ -26,7 +26,7 @@ protected:
   llvm::Value *positions(size_t from, size_t count, std::vector<llvm::Value *> &values);
   llvm::Value *encoding(Expr *arg);
 
-  Lowering &lowering_;
+  Lowering &lowering;
   CallExpr *call;
   MemberExpr *member;
   const Type *type;

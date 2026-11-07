@@ -17,10 +17,8 @@ using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::pair<llvm::StringRef, llvm::StringRef> operandTexts(llvm::StringRef source, llvm::SMLoc op,
-                                                         size_t length) {
+std::pair<llvm::StringRef, llvm::StringRef>
+ConcatChecker::operandTexts(llvm::StringRef source, llvm::SMLoc op, size_t length) {
   const char *at = op.getPointer();
   if (source.empty() || at < source.begin() || at + length > source.end()) {
     return {};
@@ -30,26 +28,24 @@ std::pair<llvm::StringRef, llvm::StringRef> operandTexts(llvm::StringRef source,
           llvm::StringRef(at + length, static_cast<size_t>(source.end() - at - length)).trim()};
 }
 
-const Expr *unconverted(const Expr *expr) {
+const Expr *ConcatChecker::unconverted(const Expr *expr) {
   auto *cast = dyn_cast<CastExpr>(expr);
 
   return cast && cast->isImplicit() && cast->type->isString() ? cast->operand : expr;
 }
 
-void concatParts(const BinaryExpr *bin,
-                 std::vector<std::pair<const Expr *, llvm::StringRef>> &parts) {
-  auto [lhs, rhs] = operandTexts(bin->source, bin->loc(), 1);
-  auto *left = dyn_cast<BinaryExpr>(unconverted(bin->lhs));
+void ConcatChecker::concatParts(const BinaryExpr *bin, Parts &parts) {
+  auto [lhs, rhs] = ConcatChecker::operandTexts(bin->source, bin->loc(), 1);
+  auto *left = dyn_cast<BinaryExpr>(ConcatChecker::unconverted(bin->lhs));
   if (left && left->op == BinaryOp::Add && left->type && left->type->isString()) {
-    concatParts(left, parts);
+    ConcatChecker::concatParts(left, parts);
   } else {
-    parts.push_back({unconverted(bin->lhs), lhs});
+    parts.push_back({ConcatChecker::unconverted(bin->lhs), lhs});
   }
-  parts.push_back({unconverted(bin->rhs), rhs});
+  parts.push_back({ConcatChecker::unconverted(bin->rhs), rhs});
 }
 
-std::string concatTemplate(llvm::ArrayRef<std::pair<const Expr *, llvm::StringRef>> parts,
-                           llvm::StringRef &only) {
+std::string ConcatChecker::concatTemplate(const Parts &parts, llvm::StringRef &only) {
   std::string result = "`";
   unsigned values = 0;
   for (auto [expr, text] : parts) {
@@ -85,19 +81,118 @@ std::string concatTemplate(llvm::ArrayRef<std::pair<const Expr *, llvm::StringRe
   return result + "`";
 }
 
-}
-
 ConcatChecker::ConcatChecker(Checker &owner)
     : checker(owner) {}
+
+ConcatChecker::ResultConvertsToText ConcatChecker::convertible(const Expr *expr) {
+  const Type *type = expr->type;
+  const Type *base = type->nonOptional();
+  if (type->isVoid()) {
+    std::string message = ErrorTextToString::voidValue();
+
+    return err(ConcatCheckerConvertibleError{
+        .code = ConcatCheckerConvertibleErrorCode::VOID_VALUE,
+        .message = message,
+    });
+  }
+  if (Checker::holdsFunctions(type)) {
+    std::string message = ErrorTextToString::function();
+
+    return err(ConcatCheckerConvertibleError{
+        .code = ConcatCheckerConvertibleErrorCode::FUNCTION_VALUE,
+        .message = message,
+    });
+  }
+  if (base->isTuple()) {
+    std::string message = ErrorTextToString::tuple();
+
+    return err(ConcatCheckerConvertibleError{
+        .code = ConcatCheckerConvertibleErrorCode::TUPLE_VALUE,
+        .message = message,
+    });
+  }
+  if (Checker::holdsResults(type)) {
+    std::string message = ErrorTextToString::result();
+
+    return err(ConcatCheckerConvertibleError{
+        .code = ConcatCheckerConvertibleErrorCode::RESULT_VALUE,
+        .message = message,
+    });
+  }
+  ClassDecl *cls = ClassDeclarer::classOf(base);
+  bool ownToString = cls && !ClassDeclarer::methodsNamed(cls, "toString", false).empty();
+  if (ownToString) {
+    auto *name = dyn_cast<NameExpr>(expr);
+    std::string text = name ? name->name.str() : "o";
+    std::string message = ErrorTextToString::ownString(text);
+
+    return err(ConcatCheckerConvertibleError{
+        .code = ConcatCheckerConvertibleErrorCode::OBJECT_TO_STRING,
+        .message = message,
+    });
+  }
+  if (base->isDict()) {
+    const char *kind = base->isRecord() ? "Record" : base->isMap() ? "Map" : "Set";
+    const char *shown = base->isRecord() ? "Object" : kind;
+    std::string message = ErrorTextToString::dict(kind, shown);
+
+    return err(ConcatCheckerConvertibleError{
+        .code = ConcatCheckerConvertibleErrorCode::DICT_VALUE,
+        .message = message,
+    });
+  }
+  if (base->isIterator()) {
+    std::string message = ErrorTextToString::iterator();
+
+    return err(ConcatCheckerConvertibleError{
+        .code = ConcatCheckerConvertibleErrorCode::ITERATOR_VALUE,
+        .message = message,
+    });
+  }
+  if (UnknownChecker::holdsUnknown(type)) {
+    std::string message = ErrorTextToString::unknown();
+
+    return err(ConcatCheckerConvertibleError{
+        .code = ConcatCheckerConvertibleErrorCode::UNKNOWN_VALUE,
+        .message = message,
+    });
+  }
+  if (JsonChecker::holdsJson(type)) {
+    std::string message = ErrorTextToString::json();
+
+    return err(ConcatCheckerConvertibleError{
+        .code = ConcatCheckerConvertibleErrorCode::JSON_VALUE,
+        .message = message,
+    });
+  }
+  if (Checker::holdsObjects(type)) {
+    std::string message = ErrorTextToString::object();
+
+    return err(ConcatCheckerConvertibleError{
+        .code = ConcatCheckerConvertibleErrorCode::OBJECT_VALUE,
+        .message = message,
+    });
+  }
+  bool tagged = base->isUnion() && base->isTagged();
+  for (const Type *m : tagged ? base->members() : llvm::ArrayRef<const Type *>()) {
+    bool held = (m->isObject() && !m->isDate() && !m->isRegExp()) || m->isDict() ||
+                m->isFunction() || m->isIterator();
+    if (held) {
+      std::string message = ErrorTextToString::member(type->name(), m->name());
+
+      return err(ConcatCheckerConvertibleError{
+          .code = ConcatCheckerConvertibleErrorCode::UNION_MEMBER,
+          .message = message,
+      });
+    }
+  }
+
+  return ok(expr);
+}
 
 Expr *ConcatChecker::toStringOperand(Expr *expr) {
   const Type *type = expr->type;
   if (type->isString() || type->isError()) {
-    return expr;
-  }
-  if (type->isVoid()) {
-    this->checker.diags_.error(expr->loc(),
-                               "an expression of type 'void' cannot be converted to a string");
     return expr;
   }
   if (type->isRegExp()) {
@@ -113,85 +208,12 @@ Expr *ConcatChecker::toStringOperand(Expr *expr) {
     this->checker.genericChecker().noteForced(expr, Type::string());
     return this->checker.typeRelations().convert(expr, Type::string());
   }
-  if (Checker::holdsFunctions(type)) {
-    this->checker.diags_.error(expr->loc(),
-                               "a function cannot be converted to a string; print it with "
-                               "console.log, or use its name");
-    return expr;
-  }
-  if (type->nonOptional()->isTuple()) {
-    this->checker.diags_.error(
-        expr->loc(), "a tuple cannot be converted to a string; print it with console.log, or build "
-                     "the text from its elements");
-    return expr;
-  }
-  if (Checker::holdsResults(type)) {
-    this->checker.diags_.error(
-        expr->loc(), "a Result cannot be converted to a string: JavaScript would give "
-                     "'[object Object]'; print it with console.log, or make the text with "
-                     "'match'");
-    return expr;
-  }
-  if (ClassDecl *cls = ClassDeclarer::classOf(type->nonOptional());
-      cls && !ClassDeclarer::methodsNamed(cls, "toString", false).empty()) {
-    auto *name = dyn_cast<NameExpr>(expr);
-    std::string text = name ? name->name.str() : "o";
-    this->checker.diags_.error(expr->loc(),
-                               "an object is not converted to a string by calling its toString(): "
-                               "tz calls no code by itself; call it, e.g. '${" +
-                                   text + ".toString()}'");
-    return expr;
-  }
-  if (const Type *dict = type->nonOptional(); dict->isDict()) {
-    const char *kind = dict->isRecord() ? "Record" : dict->isMap() ? "Map" : "Set";
-    this->checker.diags_.error(expr->loc(),
-                               std::string("a ") + kind +
-                                   " cannot be converted to a string: JavaScript would give "
-                                   "'[object " +
-                                   (dict->isRecord() ? "Object" : kind) +
-                                   "]'; print it with console.log, or build the text from its "
-                                   "entries");
-    return expr;
-  }
-  if (type->nonOptional()->isIterator()) {
-    this->checker.diags_.error(expr->loc(),
-                               "an iterator cannot be converted to a string: JavaScript would give "
-                               "'[object Generator]'; collect its values first, e.g. "
-                               "'[...it].join()'");
-    return expr;
-  }
-  if (UnknownChecker::holdsUnknown(type)) {
-    this->checker.diags_.error(expr->loc(),
-                               "an unknown value cannot be converted to a string: it may hold an "
-                               "object or a function; check what it holds first, e.g. 'typeof x == "
-                               "\"string\"'");
-    return expr;
-  }
-  if (JsonChecker::holdsJson(type)) {
-    this->checker.diags_.error(
-        expr->loc(), "a Json cannot be converted to a string: it may hold an object; check what it "
-                     "holds first (e.g. 'typeof x == \"string\"'), or write it as JSON with "
-                     "'JSON.stringify(x)'");
-    return expr;
-  }
-  if (Checker::holdsObjects(type)) {
-    this->checker.diags_.error(
-        expr->loc(), "an object cannot be converted to a string: JavaScript would give "
-                     "'[object Object]'; print it with console.log, or build the text from "
-                     "its fields");
+  ResultConvertsToText convertible = ConcatChecker::convertible(expr);
+  if (convertible.isErr()) {
+    this->checker.diags_.error(expr->loc(), convertible.error().message);
     return expr;
   }
   if (const Type *u = type->nonOptional(); u->isUnion() && u->isTagged()) {
-    for (const Type *m : u->members()) {
-      if ((m->isObject() && !m->isDate() && !m->isRegExp()) || m->isDict() || m->isFunction() ||
-          m->isIterator()) {
-        this->checker.diags_.error(expr->loc(),
-                                   "a value of type '" + type->name() +
-                                       "' cannot be converted to a string: it may hold '" +
-                                       m->name() + "'; check what it holds first");
-        return expr;
-      }
-    }
     auto *cast = dyn_cast<CastExpr>(this->checker.typeRelations().convert(expr, Type::string()));
     if (cast) {
       cast->text = true;
@@ -202,23 +224,19 @@ Expr *ConcatChecker::toStringOperand(Expr *expr) {
   return this->checker.typeRelations().convert(expr, Type::string());
 }
 
-void ConcatChecker::reportMixedConcat(const BinaryExpr *root, const BinaryExpr *mixed) {
-  const Type *l = unconverted(mixed->lhs)->type;
-  const Type *r = unconverted(mixed->rhs)->type;
-  std::string message = ("operator '+' cannot be applied to types '" + l->name() + "' and '" +
-                         r->name() + "' (JavaScript would join them as text)")
-                            .str();
-  std::vector<std::pair<const Expr *, llvm::StringRef>> parts;
-  concatParts(root, parts);
+std::string ConcatChecker::mixedConcatText(const BinaryExpr *root, const BinaryExpr *mixed) {
+  const Type *l = ConcatChecker::unconverted(mixed->lhs)->type;
+  const Type *r = ConcatChecker::unconverted(mixed->rhs)->type;
+  std::string operands = ErrorTextMixedConcat::operands(l->name(), r->name());
+  Parts parts;
+  ConcatChecker::concatParts(root, parts);
   llvm::StringRef only;
-  std::string joined = concatTemplate(parts, only);
+  std::string joined = ConcatChecker::concatTemplate(parts, only);
   if (joined.empty()) {
-    this->checker.diags_.error(mixed->loc(), message + "; use a template literal instead");
-    return;
+    return operands + ErrorTextMixedConcat::literal();
   }
   if (!only.empty()) {
-    this->checker.diags_.error(mixed->loc(), message + "; convert it with 'String(" + only + ")'");
-    return;
+    return operands + ErrorTextMixedConcat::convert(only);
   }
   if (parts.size() == 2) {
     auto [first, firstText] = parts[0];
@@ -228,17 +246,16 @@ void ConcatChecker::reportMixedConcat(const BinaryExpr *root, const BinaryExpr *
     };
     std::string sum;
     if (first->type->isNumeric() && isText(second)) {
-      sum = (firstText + " + Number(" + secondText + ")").str();
+      sum = ErrorTextMixedConcat::addRight(firstText, secondText);
     } else if (isText(first) && second->type->isNumeric()) {
-      sum = ("Number(" + firstText + ") + " + secondText).str();
+      sum = ErrorTextMixedConcat::addLeft(firstText, secondText);
     }
     if (!sum.empty()) {
-      this->checker.diags_.error(mixed->loc(), message + "; to add, convert the string: '" + sum +
-                                                   "'; to join, use a template: '" + joined + "'");
-      return;
+      return operands + ErrorTextMixedConcat::addOrJoin(sum, joined);
     }
   }
-  this->checker.diags_.error(mixed->loc(), message + "; use a template: '" + joined + "'");
+
+  return operands + ErrorTextMixedConcat::asTemplate(joined);
 }
 
 }

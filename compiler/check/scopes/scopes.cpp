@@ -9,8 +9,7 @@ namespace tz {
 Scopes::Scopes(Checker &owner)
     : checker(owner) {}
 
-Scopes::ResultEntryDeclared Scopes::declare(llvm::StringRef name, llvm::SMLoc loc,
-                                            ScopeEntry entry) {
+Scopes::ResultEntryDeclared Scopes::declare(llvm::StringRef name, ScopeEntry entry) {
   if (name == "undefined") {
     std::string message = ErrorTextDeclare::undefined();
 
@@ -67,7 +66,7 @@ VarSymbol *Scopes::declareVar(llvm::StringRef name, llvm::SMLoc loc, const Type 
     unsigned declSeq = ++this->checker.seq_;
     var->place = VarSymbol::localPlace(this->checker.currentDecl(), declSeq);
   }
-  ResultEntryDeclared added = this->declare(name, loc, {VarEntry{.var = var}});
+  ResultEntryDeclared added = this->declare(name, {VarEntry{.var = var}});
   if (added.isErr()) {
     this->checker.diags_.error(loc, added.error().message);
   }

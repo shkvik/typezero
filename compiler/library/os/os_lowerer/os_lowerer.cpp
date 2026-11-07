@@ -10,9 +10,7 @@
 
 namespace tz {
 
-namespace {
-
-const std::vector<MakerFields> &osObjects() {
+const std::vector<MakerFields> &OsLowerer::osObjects() {
   static const std::vector<MakerFields> table = {
       {nullptr, {"model", "speed", "times"}},
       {nullptr, {"user", "nice", "sys", "idle", "irq"}},
@@ -22,55 +20,58 @@ const std::vector<MakerFields> &osObjects() {
   return table;
 }
 
-}
-
-OsLowerer::OsLowerer(Lowering &lowering) : lowering_(lowering) {}
+OsLowerer::OsLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Value *OsLowerer::emitOsCall(CallExpr *call) {
-  llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i32 = lowering_.builder_.getInt32Ty();
-  llvm::Type *f64 = lowering_.builder_.getDoubleTy(), *ptr = lowering_.builder_.getPtrTy();
-  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
+  llvm::Type *voidTy = this->lowering.builder_.getVoidTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+  llvm::Type *f64 = this->lowering.builder_.getDoubleTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  std::vector<llvm::Value *> values = this->lowering.exprLowerer().emitExprs(call->args);
   auto fn = [&](llvm::StringRef name, llvm::Type *ret, llvm::ArrayRef<llvm::Type *> params) {
-    return lowering_.processLowerer().processFunction(name, ret, params);
+    return this->lowering.processLowerer().processFunction(name, ret, params);
   };
-  auto maker = [&](const Type *type) { return lowering_.objectMaker().maker(type, osObjects()); };
+  auto maker = [&](const Type *type) {
+    return this->lowering.objectMaker().maker(type, OsLowerer::osObjects());
+  };
 
   llvm::Value *result = nullptr;
   switch (call->builtin()) {
     case Builtin::OsString:
-      result = lowering_.stringLowerer().callReturningString(
-          fn("tz_os_string", voidTy, {ptr, lowering_.builder_.getInt64Ty()}), {values[0]});
+      result = this->lowering.stringLowerer().callReturningString(
+          fn("tz_os_string", voidTy, {ptr, this->lowering.builder_.getInt64Ty()}), {values[0]});
       break;
     case Builtin::OsNumber:
-      result = lowering_.builder_.CreateCall(
-          fn("tz_os_number", f64, {lowering_.builder_.getInt64Ty()}), {values[0]});
+      result = this->lowering.builder_.CreateCall(
+          fn("tz_os_number", f64, {this->lowering.builder_.getInt64Ty()}), {values[0]});
       break;
     case Builtin::OsAvailableParallelism:
-      result = lowering_.builder_.CreateSExt(
-          lowering_.builder_.CreateCall(fn("tz_os_available_parallelism", i32, {})),
-          lowering_.builder_.getInt64Ty());
+      result = this->lowering.builder_.CreateSExt(
+          this->lowering.builder_.CreateCall(fn("tz_os_available_parallelism", i32, {})),
+          this->lowering.builder_.getInt64Ty());
       break;
     case Builtin::OsCpus: {
       const Type *element = call->type->inner();
-      result = lowering_.builder_.CreateCall(
+      result = this->lowering.builder_.CreateCall(
           fn("tz_os_cpus", ptr, {ptr, ptr}),
-          {lowering_.typeDescriptors().typeDescriptor(element), maker(element)});
+          {this->lowering.typeDescriptors().typeDescriptor(element), maker(element)});
       break;
     }
     case Builtin::OsLoadavg:
-      result = lowering_.builder_.CreateCall(
+      result = this->lowering.builder_.CreateCall(
           fn("tz_os_loadavg", ptr, {ptr}),
-          {lowering_.typeDescriptors().typeDescriptor(Type::doubleTy())});
+          {this->lowering.typeDescriptors().typeDescriptor(Type::doubleTy())});
       break;
     case Builtin::OsUserInfo:
-      result =
-          lowering_.builder_.CreateCall(fn("tz_os_user_info", ptr, {ptr}), {maker(call->type)});
+      result = this->lowering.builder_.CreateCall(fn("tz_os_user_info", ptr, {ptr}),
+                                                  {maker(call->type)});
       break;
     default:
       llvm_unreachable("not a built-in of node:os");
   }
   for (size_t i = 0; i < values.size(); ++i) {
-    lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
+    this->lowering.refCounts().releaseValue(values[i], call->args[i]->type);
   }
 
   return result;

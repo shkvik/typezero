@@ -129,9 +129,8 @@ std::string TopLevelChecker::loadChain(const Module *reader, const Module *sourc
     chain += (chain.empty() ? "" : " -> ") + module->name;
   }
   if (source != reader) {
-    chain +=
-        " -> (" + source->name +
-        (llvm::is_contained(reader->loadPath, source) ? " already started)" : " not loaded yet)");
+    bool started = llvm::is_contained(reader->loadPath, source);
+    chain += ErrorTextNotLoaded::pending(source->name, started);
   }
 
   return chain;

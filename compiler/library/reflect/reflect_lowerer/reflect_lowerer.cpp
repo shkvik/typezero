@@ -19,11 +19,8 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 
-using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -31,11 +28,13 @@ namespace {
 
 constexpr int64_t kStaticRefCount = int64_t(1) << 62;
 
-std::string className(const ClassDecl *cls) {
+}
+
+std::string ReflectLowerer::className(const ClassDecl *cls) {
   return cls->name.empty() && cls->type ? cls->type->name().str() : cls->name.str();
 }
 
-std::vector<FunctionDecl *> constructorsOf(const ClassDecl *cls) {
+std::vector<FunctionDecl *> ReflectLowerer::constructorsOf(const ClassDecl *cls) {
   for (const ClassDecl *c = cls; c; c = c->parent) {
     if (!c->constructors.empty()) {
       return c->constructors;
@@ -45,36 +44,36 @@ std::vector<FunctionDecl *> constructorsOf(const ClassDecl *cls) {
   return {};
 }
 
-}
-
-ReflectLowerer::ReflectLowerer(Lowering &lowering) : lowering_(lowering) {}
+ReflectLowerer::ReflectLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Function *ReflectLowerer::constructFunction(const ClassDecl *cls) {
-  if (llvm::Function *found = constructFunctions_.lookup(cls)) {
+  if (llvm::Function *found = this->constructFunctions.lookup(cls)) {
     return found;
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
   auto *fn = llvm::Function::Create(
-      llvm::FunctionType::get(ptr, {ptr, lowering_.builder_.getInt32Ty()}, false),
+      llvm::FunctionType::get(ptr, {ptr, this->lowering.builder_.getInt32Ty()}, false),
       llvm::GlobalValue::InternalLinkage,
-      "tz.construct." + lowering_.symbolPrefixes_.lookup(cls) + className(cls),
-      lowering_.module_.get());
-  lowering_.functionBuilder().setFunctionAttributes(fn);
-  constructFunctions_[cls] = fn;
+      "tz.construct." + this->lowering.symbolPrefixes_.lookup(cls) + ReflectLowerer::className(cls),
+      this->lowering.module_.get());
+  this->lowering.functionBuilder().setFunctionAttributes(fn);
+  this->constructFunctions[cls] = fn;
 
   return fn;
 }
 
 llvm::Function *ReflectLowerer::fillFunction(const ClassDecl *cls) {
-  if (llvm::Function *found = fillFunctions_.lookup(cls)) {
+  if (llvm::Function *found = this->fillFunctions.lookup(cls)) {
     return found;
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
   auto *fn = llvm::Function::Create(
       llvm::FunctionType::get(ptr, {ptr}, false), llvm::GlobalValue::InternalLinkage,
-      "tz.fill." + lowering_.symbolPrefixes_.lookup(cls) + className(cls), lowering_.module_.get());
-  lowering_.functionBuilder().setFunctionAttributes(fn);
-  fillFunctions_[cls] = fn;
+      "tz.fill." + this->lowering.symbolPrefixes_.lookup(cls) + ReflectLowerer::className(cls),
+      this->lowering.module_.get());
+  this->lowering.functionBuilder().setFunctionAttributes(fn);
+  this->fillFunctions[cls] = fn;
 
   return fn;
 }
@@ -93,11 +92,11 @@ void ReflectLowerer::noteFillErrors(const Type *errorType) {
     }
     const std::u16string &text = kind->type->literalText();
     if (text == u"REFLECT_FILL_ERROR_TYPE") {
-      fillTypeError_ = variant;
+      this->fillTypeError = variant;
     } else if (text == u"REFLECT_FILL_ERROR_UNKNOWN_FIELD") {
-      fillUnknownError_ = variant;
+      this->fillUnknownError = variant;
     } else if (text == u"REFLECT_FILL_ERROR_CLASS") {
-      fillClassError_ = variant;
+      this->fillClassError = variant;
     }
   }
 }
@@ -105,8 +104,9 @@ void ReflectLowerer::noteFillErrors(const Type *errorType) {
 void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init) {
   auto described = [&](const ClassDecl *cls) {
     return cls->isEmitted() && !cls->literal() && !cls->builtin() &&
-           ((lowering_.reflectsNew_ && cls->reflectNew) ||
-            (lowering_.reflectsGet_ && cls->reflectMethods) || (usesFillAny_ && cls->reflectFill));
+           ((this->lowering.reflectsNew_ && cls->reflectNew) ||
+            (this->lowering.reflectsGet_ && cls->reflectMethods) ||
+            (this->usesFillAny && cls->reflectFill));
   };
   auto fillProblem = [&](const ClassDecl *cls) -> uint32_t {
     if (cls->isAbstract) {
@@ -119,8 +119,9 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
     }
     return 0;
   };
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
-  llvm::Constant *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+  llvm::Constant *null = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
   std::vector<const ClassDecl *> classes;
   unsigned count = 1;
   for (Stmt *item : file.items) {
@@ -134,12 +135,12 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
   std::vector<const Type *> invoked;
   for (const ClassDecl *cls : classes) {
     llvm::Constant *construct = null;
-    if (lowering_.reflectsNew_ && cls->reflectNew && !cls->isAbstract) {
-      construct = constructFunction(cls);
+    if (this->lowering.reflectsNew_ && cls->reflectNew && !cls->isAbstract) {
+      construct = this->constructFunction(cls);
     }
     std::vector<llvm::Constant *> methods;
     llvm::StringSet<> named;
-    for (const ClassDecl *c = cls; c && lowering_.reflectsGet_ && cls->reflectMethods;
+    for (const ClassDecl *c = cls; c && this->lowering.reflectsGet_ && cls->reflectMethods;
          c = c->parent) {
       std::vector<FunctionDecl *> own;
       for (FunctionDecl *fn : c->methods) {
@@ -155,7 +156,7 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
           continue;
         }
         std::vector<const FunctionDecl *> variants =
-            lowering_.classInfoLowerer().reflectVariants(cls, fn->name);
+            this->lowering.classInfoLowerer().reflectVariants(cls, fn->name);
         if (variants.empty()) {
           continue;
         }
@@ -163,243 +164,255 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
         const Type *type = nullptr;
         llvm::Constant *info =
             variants.size() == 1
-                ? lowering_.classInfoLowerer().reflectAdapterInfo(variants[0], type)
-                : lowering_.reflectDispatchLowerer().reflectDispatchInfo(cls, variants, type);
+                ? this->lowering.classInfoLowerer().reflectAdapterInfo(variants[0], type)
+                : this->lowering.reflectDispatchLowerer().reflectDispatchInfo(cls, variants, type);
         invoked.push_back(type);
         methods.push_back(llvm::ConstantStruct::get(
-            reflectMethodTy(), {lowering_.stringLowerer().utf8Constant(fn->name),
-                                lowering_.builder_.getInt32(uint32_t(fn->name.size())),
-                                lowering_.typeDescriptors().typeDescriptor(type), info}));
+            this->reflectMethodTy(),
+            {this->lowering.stringLowerer().utf8Constant(fn->name),
+             this->lowering.builder_.getInt32(uint32_t(fn->name.size())),
+             this->lowering.typeDescriptors().typeDescriptor(type), info}));
       }
     }
     llvm::Constant *table = null;
     if (!methods.empty()) {
-      auto *type = llvm::ArrayType::get(reflectMethodTy(), methods.size());
+      auto *type = llvm::ArrayType::get(this->reflectMethodTy(), methods.size());
       auto *global = new llvm::GlobalVariable(
-          *lowering_.module_, type, true, llvm::GlobalValue::PrivateLinkage,
-          llvm::ConstantArray::get(type, methods), "tz.methods." + className(cls));
+          *this->lowering.module_, type, true, llvm::GlobalValue::PrivateLinkage,
+          llvm::ConstantArray::get(type, methods), "tz.methods." + ReflectLowerer::className(cls));
       global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
       table = global;
     }
     llvm::Constant *fill = null;
     uint32_t problem = fillProblem(cls);
-    if (usesFillAny_ && cls->reflectFill && problem == 0) {
-      fill = fillFunction(cls);
+    if (this->usesFillAny && cls->reflectFill && problem == 0) {
+      fill = this->fillFunction(cls);
     }
-    auto *info = cast<llvm::GlobalVariable>(lowering_.classInfoLowerer().classInfoGlobal(cls));
+    auto *info = cast<llvm::GlobalVariable>(this->lowering.classInfoLowerer().classInfoGlobal(cls));
     info->setInitializer(llvm::ConstantStruct::get(
-        lowering_.classInfoLowerer().classInfoType(),
-        {construct, table, lowering_.builder_.getInt32(uint32_t(methods.size())), fill,
-         lowering_.builder_.getInt32(problem)}));
+        this->lowering.classInfoLowerer().classInfoType(),
+        {construct, table, this->lowering.builder_.getInt32(uint32_t(methods.size())), fill,
+         this->lowering.builder_.getInt32(problem)}));
   }
-  for (size_t i = 0; i < constructFunctions_.size(); ++i) {
-    auto [cls, fn] = *(constructFunctions_.begin() + i);
+  for (size_t i = 0; i < this->constructFunctions.size(); ++i) {
+    auto [cls, fn] = *(this->constructFunctions.begin() + i);
     if (fn->empty()) {
-      lowering_.classInfoLowerer().emitConstructThunk(cls, fn);
+      this->lowering.classInfoLowerer().emitConstructThunk(cls, fn);
     }
   }
-  ClassInfoLowerer::FillErrors fillErrors{fillTypeError_, fillUnknownError_, fillClassError_};
-  for (size_t i = 0; i < fillFunctions_.size(); ++i) {
-    auto [cls, fn] = *(fillFunctions_.begin() + i);
+  ClassInfoLowerer::FillErrors fillErrors{this->fillTypeError, this->fillUnknownError,
+                                          this->fillClassError};
+  for (size_t i = 0; i < this->fillFunctions.size(); ++i) {
+    auto [cls, fn] = *(this->fillFunctions.begin() + i);
     if (fn->empty()) {
-      lowering_.classInfoLowerer().emitFillThunk(cls, fn, fillErrors);
+      this->lowering.classInfoLowerer().emitFillThunk(cls, fn, fillErrors);
     }
   }
-  for (auto &[cls, global] : lowering_.classInfos_) {
+  for (auto &[cls, global] : this->lowering.classInfos_) {
     if (global && !llvm::is_contained(classes, cls)) {
       global->replaceAllUsesWith(null);
       global->eraseFromParent();
       global = nullptr;
     }
   }
-  if (!lowering_.reflectsNew_ && !lowering_.reflectsGet_ && !usesApply_ && !usesFillAny_) {
+  if (!this->lowering.reflectsNew_ && !this->lowering.reflectsGet_ && !this->usesApply &&
+      !this->usesFillAny) {
     return;
   }
 
   std::vector<llvm::Constant *> byId(count, null);
   for (const ClassDecl *cls : classes) {
-    byId[cls->id] = lowering_.unknownLowerer().classObject(cls);
+    byId[cls->id] = this->lowering.unknownLowerer().classObject(cls);
   }
   auto *classesType = llvm::ArrayType::get(ptr, count);
   auto *classTable = new llvm::GlobalVariable(
-      *lowering_.module_, classesType, true, llvm::GlobalValue::PrivateLinkage,
+      *this->lowering.module_, classesType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantArray::get(classesType, byId), "tz.reflect.classes");
   std::vector<llvm::Constant *> entries;
-  if (usesApply_) {
-    invoked.insert(invoked.end(), lowering_.unknownFunctionTypes_.begin(),
-                   lowering_.unknownFunctionTypes_.end());
+  if (this->usesApply) {
+    invoked.insert(invoked.end(), this->lowering.unknownFunctionTypes_.begin(),
+                   this->lowering.unknownFunctionTypes_.end());
     llvm::SmallPtrSet<const Type *, 8> seen;
-    auto *entryType = llvm::StructType::get(lowering_.ctx_, {ptr, ptr});
+    auto *entryType = llvm::StructType::get(this->lowering.ctx_, {ptr, ptr});
     for (const Type *type : invoked) {
       if (seen.insert(type).second) {
         entries.push_back(llvm::ConstantStruct::get(
-            entryType, {lowering_.typeDescriptors().typeDescriptor(type),
-                        lowering_.reflectDispatchLowerer().invokerFor(type)}));
+            entryType, {this->lowering.typeDescriptors().typeDescriptor(type),
+                        this->lowering.reflectDispatchLowerer().invokerFor(type)}));
       }
     }
   }
   llvm::Constant *invokers = null;
   if (!entries.empty()) {
     auto *type = llvm::ArrayType::get(entries.front()->getType(), entries.size());
-    invokers =
-        new llvm::GlobalVariable(*lowering_.module_, type, true, llvm::GlobalValue::PrivateLinkage,
-                                 llvm::ConstantArray::get(type, entries), "tz.invokers");
+    invokers = new llvm::GlobalVariable(*this->lowering.module_, type, true,
+                                        llvm::GlobalValue::PrivateLinkage,
+                                        llvm::ConstantArray::get(type, entries), "tz.invokers");
   }
   llvm::IRBuilder<> b(init->getNextNode());
-  b.CreateCall(lowering_.unknownLowerer().unknownFunction(
-                   "tz_reflect_init", lowering_.builder_.getVoidTy(), {ptr, i32, ptr, i32}),
+  b.CreateCall(this->lowering.unknownLowerer().unknownFunction(
+                   "tz_reflect_init", this->lowering.builder_.getVoidTy(), {ptr, i32, ptr, i32}),
                {classTable, b.getInt32(count), invokers, b.getInt32(uint32_t(entries.size()))});
 }
 
 llvm::StructType *ReflectLowerer::reflectMethodTy() {
-  if (!reflectMethodTy_) {
-    llvm::Type *ptr = lowering_.builder_.getPtrTy();
-    reflectMethodTy_ = llvm::StructType::create(
-        lowering_.ctx_, {ptr, lowering_.builder_.getInt32Ty(), ptr, ptr}, "tz.reflectmethod");
+  if (!this->reflectMethodType) {
+    llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+    this->reflectMethodType = llvm::StructType::create(
+        this->lowering.ctx_, {ptr, this->lowering.builder_.getInt32Ty(), ptr, ptr},
+        "tz.reflectmethod");
   }
 
-  return reflectMethodTy_;
+  return this->reflectMethodType;
 }
 
 llvm::Value *ReflectLowerer::emitReflectNew(NewExpr *expr) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
-  lowering_.reflectsNew_ = true;
-  llvm::Value *cls = lowering_.exprLowerer().emitExpr(expr->callee);
-  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(expr->args);
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+  this->lowering.reflectsNew_ = true;
+  llvm::Value *cls = this->lowering.exprLowerer().emitExpr(expr->callee);
+  std::vector<llvm::Value *> values = this->lowering.exprLowerer().emitExprs(expr->args);
   auto *arrayType = llvm::ArrayType::get(ptr, std::max<size_t>(values.size(), 1));
-  llvm::Value *args = lowering_.functionFrame().createStackSlot(arrayType, "reflect.args");
+  llvm::Value *args = this->lowering.functionFrame().createStackSlot(arrayType, "reflect.args");
   for (size_t i = 0; i < values.size(); ++i) {
-    lowering_.builder_.CreateStore(
-        values[i], lowering_.builder_.CreateConstInBoundsGEP2_32(arrayType, args, 0, unsigned(i)));
+    this->lowering.builder_.CreateStore(
+        values[i],
+        this->lowering.builder_.CreateConstInBoundsGEP2_32(arrayType, args, 0, unsigned(i)));
   }
-  llvm::Value *object = lowering_.builder_.CreateCall(
-      lowering_.unknownLowerer().unknownFunction("tz_reflect_new", ptr, {ptr, ptr, i32}),
-      {cls, args, lowering_.builder_.getInt32(uint32_t(values.size()))}, "object");
+  llvm::Value *object = this->lowering.builder_.CreateCall(
+      this->lowering.unknownLowerer().unknownFunction("tz_reflect_new", ptr, {ptr, ptr, i32}),
+      {cls, args, this->lowering.builder_.getInt32(uint32_t(values.size()))}, "object");
   for (llvm::Value *value : values) {
-    lowering_.refCounts().releaseValue(value, Type::unknown());
+    this->lowering.refCounts().releaseValue(value, Type::unknown());
   }
 
   return object;
 }
 
 void ReflectLowerer::useErrors(const Type *errorType) {
-  lowering_.builder_.CreateCall(
-      lowering_.unknownLowerer().unknownFunction(
-          "tz_reflect_errors", lowering_.builder_.getVoidTy(), {lowering_.builder_.getPtrTy()}),
-      {lowering_.resultLowerer().failureMaker(errorType)});
+  this->lowering.builder_.CreateCall(this->lowering.unknownLowerer().unknownFunction(
+                                         "tz_reflect_errors", this->lowering.builder_.getVoidTy(),
+                                         {this->lowering.builder_.getPtrTy()}),
+                                     {this->lowering.resultLowerer().failureMaker(errorType)});
 }
 
 llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
   switch (call->builtin()) {
     case Builtin::ClassName: {
-      llvm::Value *cls = lowering_.exprLowerer().emitExpr(call->args[0]);
-      return lowering_.stringLowerer().callReturningString(
-          lowering_.unknownLowerer().unknownFunction("tz_class_name",
-                                                     lowering_.builder_.getVoidTy(), {ptr, ptr}),
+      llvm::Value *cls = this->lowering.exprLowerer().emitExpr(call->args[0]);
+      return this->lowering.stringLowerer().callReturningString(
+          this->lowering.unknownLowerer().unknownFunction(
+              "tz_class_name", this->lowering.builder_.getVoidTy(), {ptr, ptr}),
           {cls});
     }
     case Builtin::ReflectGet: {
-      lowering_.reflectsGet_ = true;
-      std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
-      llvm::Value *result = lowering_.builder_.CreateCall(
-          lowering_.unknownLowerer().unknownFunction("tz_reflect_get", ptr, {ptr, ptr, i64}),
-          {values[0], lowering_.stringLowerer().stringObj(values[1]),
-           lowering_.stringLowerer().stringMeta(values[1])},
+      this->lowering.reflectsGet_ = true;
+      std::vector<llvm::Value *> values = this->lowering.exprLowerer().emitExprs(call->args);
+      llvm::Value *result = this->lowering.builder_.CreateCall(
+          this->lowering.unknownLowerer().unknownFunction("tz_reflect_get", ptr, {ptr, ptr, i64}),
+          {values[0], this->lowering.stringLowerer().stringObj(values[1]),
+           this->lowering.stringLowerer().stringMeta(values[1])},
           "got");
-      lowering_.refCounts().releaseValue(values[0], call->args[0]->type);
-      lowering_.refCounts().releaseValue(values[1], Type::string());
+      this->lowering.refCounts().releaseValue(values[0], call->args[0]->type);
+      this->lowering.refCounts().releaseValue(values[1], Type::string());
       return result;
     }
     case Builtin::ReflectApply: {
-      usesApply_ = true;
-      std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
-      useErrors(call->type->errType());
-      llvm::Value *result = lowering_.builder_.CreateCall(
-          lowering_.unknownLowerer().unknownFunction("tz_reflect_apply", ptr, {ptr, ptr, ptr}),
+      this->usesApply = true;
+      std::vector<llvm::Value *> values = this->lowering.exprLowerer().emitExprs(call->args);
+      this->useErrors(call->type->errType());
+      llvm::Value *result = this->lowering.builder_.CreateCall(
+          this->lowering.unknownLowerer().unknownFunction("tz_reflect_apply", ptr, {ptr, ptr, ptr}),
           {values[0], values[1], values[2]}, "result");
       for (size_t i = 0; i < values.size(); ++i) {
-        lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
+        this->lowering.refCounts().releaseValue(values[i], call->args[i]->type);
       }
       const Type *gives = call->type->okType();
       if (gives->isUnknown()) {
-        return lowering_.resultLowerer().catchFailure(result, call->type, call->loc());
+        return this->lowering.resultLowerer().catchFailure(result, call->type, call->loc());
       }
-      return lowering_.resultLowerer().catchFailure(
+      return this->lowering.resultLowerer().catchFailure(
           call->type, call->loc(), [&]() -> llvm::Value * {
             if (gives->isVoid()) {
-              lowering_.refCounts().releaseValue(result, Type::unknown());
+              this->lowering.refCounts().releaseValue(result, Type::unknown());
               return nullptr;
             }
             llvm::BasicBlock *mismatch =
-                lowering_.functionFrame().newBlock("reflect.result.mismatch");
+                this->lowering.functionFrame().newBlock("reflect.result.mismatch");
             llvm::Value *value =
-                lowering_.unknownCastLowerer().emitUnknownAs(result, gives, mismatch);
-            lowering_.refCounts().releaseValue(result, Type::unknown());
-            llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
-            lowering_.functionFrame().switchTo(mismatch);
-            lowering_.processLowerer().emitPanic("internal error: Reflect.apply gave a value of "
-                                                 "another type than the function returns");
-            lowering_.builder_.restoreIP(point);
+                this->lowering.unknownCastLowerer().emitUnknownAs(result, gives, mismatch);
+            this->lowering.refCounts().releaseValue(result, Type::unknown());
+            llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
+            this->lowering.functionFrame().switchTo(mismatch);
+            this->lowering.processLowerer().emitPanic(
+                "internal error: Reflect.apply gave a value of "
+                "another type than the function returns");
+            this->lowering.builder_.restoreIP(point);
             return value;
           });
     }
     case Builtin::ReflectFill: {
-      std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
-      noteFillErrors(call->type->errType());
+      std::vector<llvm::Value *> values = this->lowering.exprLowerer().emitExprs(call->args);
+      this->noteFillErrors(call->type->errType());
       llvm::Value *object;
       if (const ClassDecl *known = call->args[0]->type->classRef()) {
-        object = lowering_.builder_.CreateCall(fillFunction(known), {values[1]}, "filled");
+        object =
+            this->lowering.builder_.CreateCall(this->fillFunction(known), {values[1]}, "filled");
       } else {
-        usesFillAny_ = true;
-        object = lowering_.builder_.CreateCall(
-            lowering_.unknownLowerer().unknownFunction("tz_reflect_fill", ptr, {ptr, ptr, ptr}),
-            {values[0], values[1], lowering_.classInfoLowerer().fillMaker(fillClassError_)},
+        this->usesFillAny = true;
+        object = this->lowering.builder_.CreateCall(
+            this->lowering.unknownLowerer().unknownFunction("tz_reflect_fill", ptr,
+                                                            {ptr, ptr, ptr}),
+            {values[0], values[1],
+             this->lowering.classInfoLowerer().fillMaker(this->fillClassError)},
             "filled");
       }
-      lowering_.refCounts().releaseValue(values[0], call->args[0]->type);
-      lowering_.refCounts().releaseValue(values[1], call->args[1]->type);
-      return lowering_.resultLowerer().catchFailure(object, call->type, call->loc());
+      this->lowering.refCounts().releaseValue(values[0], call->args[0]->type);
+      this->lowering.refCounts().releaseValue(values[1], call->args[1]->type);
+      return this->lowering.resultLowerer().catchFailure(object, call->type, call->loc());
     }
     case Builtin::ReflectConstruct: {
-      std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
-      useErrors(call->type->errType());
+      std::vector<llvm::Value *> values = this->lowering.exprLowerer().emitExprs(call->args);
+      this->useErrors(call->type->errType());
       llvm::Value *object;
       if (const ClassDecl *known = call->args[0]->type->classRef()) {
-        object = lowering_.builder_.CreateCall(
-            lowering_.unknownLowerer().unknownFunction("tz_reflect_make", ptr, {ptr, ptr}),
-            {constructFunction(known), values[1]}, "object");
+        object = this->lowering.builder_.CreateCall(
+            this->lowering.unknownLowerer().unknownFunction("tz_reflect_make", ptr, {ptr, ptr}),
+            {this->constructFunction(known), values[1]}, "object");
       } else {
-        lowering_.reflectsNew_ = true;
-        object = lowering_.builder_.CreateCall(
-            lowering_.unknownLowerer().unknownFunction("tz_reflect_construct", ptr, {ptr, ptr}),
-            {values[0], values[1]}, "object");
+        this->lowering.reflectsNew_ = true;
+        object = this->lowering.builder_.CreateCall(this->lowering.unknownLowerer().unknownFunction(
+                                                        "tz_reflect_construct", ptr, {ptr, ptr}),
+                                                    {values[0], values[1]}, "object");
       }
-      lowering_.refCounts().releaseValue(values[1], call->args[1]->type);
-      return lowering_.resultLowerer().catchFailure(object, call->type, call->loc());
+      this->lowering.refCounts().releaseValue(values[1], call->args[1]->type);
+      return this->lowering.resultLowerer().catchFailure(object, call->type, call->loc());
     }
     case Builtin::ReflectMethod: {
-      Lowering::Operand object = lowering_.refCounts().emitOperand(call->args[0], true);
-      lowering_.refCounts().dropOperand(object);
+      Lowering::Operand object = this->lowering.refCounts().emitOperand(call->args[0], true);
+      this->lowering.refCounts().dropOperand(object);
       const FunctionDecl *method = call->method()->decl;
       const ClassDecl *cls = call->args[0]->type->classDecl();
       std::vector<const FunctionDecl *> variants =
-          lowering_.classInfoLowerer().reflectVariants(cls, method->name);
+          this->lowering.classInfoLowerer().reflectVariants(cls, method->name);
       const Type *type = nullptr;
       llvm::Constant *info =
           variants.size() > 1
-              ? lowering_.reflectDispatchLowerer().reflectDispatchInfo(cls, variants, type)
-              : lowering_.classInfoLowerer().reflectAdapterInfo(method, type);
-      lowering_.unknownFunctionTypes_.insert(type);
-      llvm::GlobalVariable *&box = reflectBoxes_[info];
+              ? this->lowering.reflectDispatchLowerer().reflectDispatchInfo(cls, variants, type)
+              : this->lowering.classInfoLowerer().reflectAdapterInfo(method, type);
+      this->lowering.unknownFunctionTypes_.insert(type);
+      llvm::GlobalVariable *&box = this->reflectBoxes[info];
       if (!box) {
         llvm::Constant *init = llvm::ConstantStruct::getAnon(
-            {lowering_.builder_.getInt64(kStaticRefCount),
-             lowering_.module_->getOrInsertGlobal("tz_box_layout", lowering_.builder_.getInt8Ty()),
-             lowering_.typeDescriptors().typeDescriptor(type),
-             llvm::ConstantStruct::get(lowering_.fnTy_,
+            {this->lowering.builder_.getInt64(kStaticRefCount),
+             this->lowering.module_->getOrInsertGlobal("tz_box_layout",
+                                                       this->lowering.builder_.getInt8Ty()),
+             this->lowering.typeDescriptors().typeDescriptor(type),
+             llvm::ConstantStruct::get(this->lowering.fnTy_,
                                        {info, llvm::ConstantPointerNull::get(ptr)})});
-        box = new llvm::GlobalVariable(*lowering_.module_, init->getType(), false,
+        box = new llvm::GlobalVariable(*this->lowering.module_, init->getType(), false,
                                        llvm::GlobalValue::InternalLinkage, init,
                                        info->getName() + ".box");
       }

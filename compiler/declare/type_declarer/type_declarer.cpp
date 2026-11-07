@@ -108,7 +108,7 @@ std::vector<Stmt *> TypeDeclarer::declareTypes(llvm::ArrayRef<Stmt *> stmts, boo
     } else if (decl) {
       name = decl->name;
       Scopes::ResultEntryDeclared added =
-          this->checker.scopes().declare(name, decl->loc(), {EnumEntry{.enumDecl = decl}});
+          this->checker.scopes().declare(name, {EnumEntry{.enumDecl = decl}});
       if (added.isErr()) {
         this->checker.diags_.error(decl->loc(), added.error().message);
       }

@@ -25,6 +25,160 @@ namespace tz {
 TargetChecker::TargetChecker(Checker &owner)
     : checker(owner) {}
 
+TargetChecker::ResultIndexIsNotBytes TargetChecker::indexNotBytes(const Type *type) {
+  if (type->isBytes()) {
+    bool dataView = type->bytes() == Type::Bytes::DataView;
+    std::string message = ErrorTextIndexTarget::bytes(type->name(), dataView);
+
+    return err(TargetCheckerIndexNotBytesError{
+        .code = TargetCheckerIndexNotBytesErrorCode::BYTES_INDEXED,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+TargetChecker::ResultObjectIsDefined TargetChecker::objectDefined(const Type *type) {
+  if (type->isOptional() && (type->inner()->isObject() || type->inner()->isDict())) {
+    std::string message = ErrorTextIndexTarget::undefined();
+
+    return err(TargetCheckerObjectDefinedError{
+        .code = TargetCheckerObjectDefinedErrorCode::MAY_BE_UNDEFINED,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+TargetChecker::ResultIndexIsWritable TargetChecker::indexWritable(const Type *type) {
+  if (type->isString()) {
+    std::string message = ErrorTextIndexTarget::immutable();
+
+    return err(TargetCheckerIndexWritableError{
+        .code = TargetCheckerIndexWritableErrorCode::STRING_IMMUTABLE,
+        .message = message,
+    });
+  }
+  if (type->isOptional() && type->inner()->isArray()) {
+    std::string message = ErrorTextIndexTarget::arrayUndef();
+
+    return err(TargetCheckerIndexWritableError{
+        .code = TargetCheckerIndexWritableErrorCode::ARRAY_MAY_BE_UNDEFINED,
+        .message = message,
+    });
+  }
+  if (!type->isArray()) {
+    std::string message = ErrorTextIndexTarget::notIndexed(type->name());
+
+    return err(TargetCheckerIndexWritableError{
+        .code = TargetCheckerIndexWritableErrorCode::NOT_INDEXABLE,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+TargetChecker::ResultDefinedDictType TargetChecker::dictDefined(const Type *type,
+                                                                const MemberExpr *member) {
+  if (type->isOptional() && type->inner()->isDict()) {
+    std::string message = ErrorTextMemberTarget::undefined(member->name);
+
+    return err(TargetCheckerDictDefinedError{
+        .code = TargetCheckerDictDefinedErrorCode::MAY_BE_UNDEFINED,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+TargetChecker::ResultNoBytesProperty TargetChecker::bytesMember(const Type *type,
+                                                                const MemberExpr *member) {
+  const Type *bytes = type->nonOptional();
+  bool length = member->name == "length" || member->name == "byteLength";
+  if (bytes->isBytes() && length) {
+    std::string message = ErrorTextMemberTarget::fixedSize(bytes->name());
+
+    return err(TargetCheckerBytesMemberError{
+        .code = TargetCheckerBytesMemberErrorCode::LENGTH_FIXED,
+        .message = message,
+    });
+  }
+  if (bytes->isBytes()) {
+    std::string message = ErrorTextMemberTarget::noAssign(member->name, bytes->name());
+
+    return err(TargetCheckerBytesMemberError{
+        .code = TargetCheckerBytesMemberErrorCode::NOT_WRITABLE,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+TargetChecker::ResultFieldIsWritable
+TargetChecker::memberWritable(const Type *type, const MemberExpr *member, bool compound) {
+  bool length = member->name == "length";
+  bool arrayLength = type->isArray() && length;
+  if (arrayLength && compound) {
+    std::string message = ErrorTextMemberTarget::onlyAssign();
+
+    return err(TargetCheckerMemberWritableError{
+        .code = TargetCheckerMemberWritableErrorCode::COMPOUND_LENGTH,
+        .message = message,
+    });
+  }
+  if (type->isString() && length) {
+    std::string message = ErrorTextMemberTarget::textLength();
+
+    return err(TargetCheckerMemberWritableError{
+        .code = TargetCheckerMemberWritableErrorCode::STRING_LENGTH,
+        .message = message,
+    });
+  }
+  if (!arrayLength) {
+    std::string message = ErrorTextMemberTarget::noAssign(member->name, type->name());
+
+    return err(TargetCheckerMemberWritableError{
+        .code = TargetCheckerMemberWritableErrorCode::NOT_WRITABLE,
+        .message = message,
+    });
+  }
+
+  return ok(Type::intTy());
+}
+
+TargetChecker::ResultTargetIsNotThis TargetChecker::notThis(const NameExpr *name) {
+  if (name->name == "this") {
+    std::string message = ErrorTextVarTarget::toThis();
+
+    return err(TargetCheckerNotThisError{
+        .code = TargetCheckerNotThisErrorCode::ASSIGN_TO_THIS,
+        .message = message,
+    });
+  }
+
+  return ok(name);
+}
+
+TargetChecker::ResultVariableMutable TargetChecker::variableMutable(const NameExpr *name,
+                                                                    const VarSymbol *var) {
+  if (var->isConst) {
+    bool function = var->function() != nullptr;
+    std::string message = ErrorTextVarTarget::constant(name->name, function);
+
+    return err(TargetCheckerVariableMutableError{
+        .code = TargetCheckerVariableMutableErrorCode::CONSTANT,
+        .message = message,
+    });
+  }
+
+  return ok(var);
+}
+
 const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
   if (auto *name = dyn_cast<NameExpr>(target)) {
     VarSymbol *var = this->checkVarTarget(name);
@@ -50,7 +204,13 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
       return this->checker.jsonChecker().checkJsonTarget(index);
     }
     if (type->isDict()) {
-      return this->checker.dictChecker().checkDictTarget(index, compound);
+      DictChecker::ResultRecordTargetType value =
+          this->checker.dictChecker().checkDictTarget(index, compound);
+      if (value.isErr()) {
+        this->checker.diags_.error(index->loc(), value.error().message);
+        return Type::error();
+      }
+      return value.value();
     }
     if (type->isTypedArray()) {
       index->index = this->checker.memberChecker().checkPosition(index->index);
@@ -58,14 +218,10 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
           type->bytes() == Type::Bytes::Uint8Clamped ? Type::intTy() : type->elementType();
       return index->type;
     }
-    if (type->isBytes()) {
+    ResultIndexIsNotBytes notBytes = TargetChecker::indexNotBytes(type);
+    if (notBytes.isErr()) {
       index->index = this->checker.exprChecker().checkExpr(index->index);
-      this->checker.diags_.error(index->loc(),
-                                 "type '" + type->name() + "' cannot be indexed; " +
-                                     (type->bytes() == Type::Bytes::DataView
-                                          ? "write its bytes with setUint8(i, value) and the like"
-                                          : "write its bytes through a view, e.g. 'new "
-                                            "Uint8Array(buffer)[i] = value'"));
+      this->checker.diags_.error(index->loc(), notBytes.error().message);
       return Type::error();
     }
     if (type->isObject()) {
@@ -73,7 +229,8 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
           this->checker.keyedFieldChecker().checkKeyedField(index, true);
       if (written.isErr() &&
           written.error().code != KeyedFieldCheckerCheckKeyedFieldErrorCode::ALREADY_REPORTED) {
-        llvm::SMLoc at = KeyedFieldChecker::keyedPlace(index, written.error().code);
+        bool wrongKey = KeyedFieldChecker::wrongKey(written.error().code);
+        llvm::SMLoc at = wrongKey ? index->index->loc() : index->loc();
         this->checker.diags_.error(at, written.error().message);
       }
       Expr *checked = written.isOk() ? written.value() : index;
@@ -87,30 +244,26 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
       target = member;
       return this->checker.classMemberChecker().checkFieldTarget(member, compound);
     }
-    if (type->isOptional() && (type->inner()->isObject() || type->inner()->isDict())) {
+    ResultObjectIsDefined defined = TargetChecker::objectDefined(type);
+    if (defined.isErr()) {
       index->index = this->checker.exprChecker().checkExpr(index->index);
-      this->checker.diags_.error(index->object->loc(),
-                                 "the value may be undefined; check it before assigning to it");
+      this->checker.diags_.error(index->object->loc(), defined.error().message);
       return Type::error();
     }
     index->index = this->checker.memberChecker().checkPosition(index->index);
     if (type->isError()) {
       return type;
     }
-    if (type->isArray()) {
-      index->type = type->inner();
-      return index->type;
+    ResultIndexIsWritable writable = TargetChecker::indexWritable(type);
+    if (writable.isErr()) {
+      bool arrayUndefined =
+          writable.error().code == TargetCheckerIndexWritableErrorCode::ARRAY_MAY_BE_UNDEFINED;
+      llvm::SMLoc at = arrayUndefined ? index->object->loc() : index->loc();
+      this->checker.diags_.error(at, writable.error().message);
+      return Type::error();
     }
-    if (type->isString()) {
-      this->checker.diags_.error(index->loc(),
-                                 "strings are immutable; a character cannot be assigned to");
-    } else if (type->isOptional() && type->inner()->isArray()) {
-      this->checker.diags_.error(index->object->loc(),
-                                 "the array may be undefined; check it first");
-    } else {
-      this->checker.diags_.error(index->loc(), "type '" + type->name() + "' cannot be indexed");
-    }
-    return Type::error();
+    index->type = type->inner();
+    return index->type;
   }
 
   if (auto *member = dyn_cast<MemberExpr>(target)) {
@@ -136,13 +289,17 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
       return this->checker.staticChecker().checkStaticTarget(target, cls);
     }
     if (type->isDict()) {
-      return this->checker.dictChecker().checkDictTarget(member, compound);
+      DictChecker::ResultRecordTargetType value =
+          this->checker.dictChecker().checkDictTarget(member, compound);
+      if (value.isErr()) {
+        this->checker.diags_.error(member->loc(), value.error().message);
+        return Type::error();
+      }
+      return value.value();
     }
-    if (type->isOptional() && type->inner()->isDict()) {
-      this->checker.diags_.error(member->object->loc(),
-                                 "the value may be undefined; check it before assigning "
-                                 "to '" +
-                                     member->name + "'");
+    ResultDefinedDictType dict = TargetChecker::dictDefined(type, member);
+    if (dict.isErr()) {
+      this->checker.diags_.error(member->object->loc(), dict.error().message);
       return Type::error();
     }
     if (type->isUnion()) {
@@ -150,15 +307,16 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
         member->object = this->checker.typeRelations().convert(member->object, common);
         return this->checker.classMemberChecker().checkFieldTarget(member, compound);
       }
-      return this->checker.unionChecker().checkUnionFieldTarget(member);
+      UnionChecker::ResultUnionFieldTarget unionField =
+          this->checker.unionChecker().checkUnionFieldTarget(member);
+      if (unionField.isErr()) {
+        this->checker.diags_.error(member->loc(), unionField.error().message);
+      }
+      return unionField.isOk() ? unionField.value() : Type::error();
     }
-    if (type->nonOptional()->isBytes()) {
-      this->checker.diags_.error(
-          member->loc(), member->name == "length" || member->name == "byteLength"
-                             ? "the length of '" + type->nonOptional()->name().str() +
-                                   "' cannot change; make a new one of the length wanted"
-                             : "property '" + member->name.str() + "' of type '" +
-                                   type->nonOptional()->name().str() + "' cannot be assigned to");
+    ResultNoBytesProperty notBytes = TargetChecker::bytesMember(type, member);
+    if (notBytes.isErr()) {
+      this->checker.diags_.error(member->loc(), notBytes.error().message);
       return Type::error();
     }
     if (type->isRuntimeObject()) {
@@ -167,40 +325,27 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
     if (type->isObject() || (type->isOptional() && type->inner()->isObject())) {
       return this->checker.classMemberChecker().checkFieldTarget(member, compound);
     }
-    if (type->isArray() && member->name == "length") {
-      if (compound) {
-        this->checker.diags_.error(member->loc(), "only '=' can change the length of an array");
-        return Type::error();
-      }
-      member->type = Type::intTy();
-      return Type::intTy();
+    ResultFieldIsWritable writable = TargetChecker::memberWritable(type, member, compound);
+    if (writable.isErr()) {
+      this->checker.diags_.error(member->loc(), writable.error().message);
+      return Type::error();
     }
-    if (type->isString() && member->name == "length") {
-      this->checker.diags_.error(member->loc(), "the length of a string cannot be changed");
-    } else {
-      this->checker.diags_.error(member->loc(), "property '" + member->name + "' of type '" +
-                                                    type->name() + "' cannot be assigned to");
-    }
-    return Type::error();
+    member->type = writable.value();
+    return writable.value();
   }
 
-  if (isa<ArrayLitExpr>(target)) {
-    this->checker.diags_.error(
-        target->loc(), "destructuring assignment can only be a statement, e.g. '[a, b] = [b, a]'");
-  } else if (isa<ObjectLitExpr>(target)) {
-    this->checker.diags_.error(
-        target->loc(), "destructuring assignment can only be a statement, e.g. '({ a, b } = o)'");
-  } else {
-    this->checker.diags_.error(
-        target->loc(), "only variables, fields, array elements and 'length' can be assigned to");
-  }
+  std::string message = isa<ArrayLitExpr>(target)    ? ErrorTextAssignTarget::arrayForm()
+                        : isa<ObjectLitExpr>(target) ? ErrorTextAssignTarget::objectForm()
+                                                     : ErrorTextAssignTarget::notTarget();
+  this->checker.diags_.error(target->loc(), message);
 
   return Type::error();
 }
 
 VarSymbol *TargetChecker::checkVarTarget(NameExpr *name) {
-  if (name->name == "this") {
-    this->checker.diags_.error(name->loc(), "cannot assign to 'this'");
+  ResultTargetIsNotThis thisTarget = TargetChecker::notThis(name);
+  if (thisTarget.isErr()) {
+    this->checker.diags_.error(name->loc(), thisTarget.error().message);
     return nullptr;
   }
   ScopeEntry entry = this->checker.topLevelChecker().lookupValue(name->name);
@@ -214,10 +359,9 @@ VarSymbol *TargetChecker::checkVarTarget(NameExpr *name) {
   if (visible.isErr()) {
     this->checker.diags_.error(name->loc(), visible.error().message);
   }
-  if (entry.var()->isConst) {
-    this->checker.diags_.error(name->loc(),
-                               "cannot assign to '" + name->name + "' because it is a " +
-                                   (entry.var()->function() ? "function" : "constant"));
+  ResultVariableMutable mutableVar = TargetChecker::variableMutable(name, entry.var());
+  if (mutableVar.isErr()) {
+    this->checker.diags_.error(name->loc(), mutableVar.error().message);
   } else {
     TopLevelChecker::ResultVarNotImported writable =
         this->checker.topLevelChecker().checkImportAssign(name, entry.var());

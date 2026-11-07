@@ -7,16 +7,11 @@
 #include "compiler/library/feature_registry/feature_registry.h"
 #include "llvm/ADT/STLExtras.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::optional<NodeModule> moduleOf(llvm::StringRef path) {
+std::optional<NodeModule> BuiltinModuleChecker::moduleOf(llvm::StringRef path) {
   if (path == "tz:io") {
     return NodeModule::TzIo;
   }
@@ -71,7 +66,7 @@ std::optional<NodeModule> moduleOf(llvm::StringRef path) {
   return std::nullopt;
 }
 
-std::string missingModule(llvm::StringRef path) {
+std::string BuiltinModuleChecker::missingModule(llvm::StringRef path) {
   std::string quoted = "'" + path.str() + "'";
   if (path.starts_with("tz:")) {
     if (path == "tz:string") {
@@ -112,7 +107,7 @@ std::string missingModule(llvm::StringRef path) {
   return message;
 }
 
-llvm::StringRef typicalName(NodeModule module) {
+llvm::StringRef BuiltinModuleChecker::typicalName(NodeModule module) {
   switch (module) {
   case NodeModule::Fs:
     return "readFileSync";
@@ -148,35 +143,35 @@ llvm::StringRef typicalName(NodeModule module) {
   return "x";
 }
 
-bool isPathModule(NodeModule module) {
+bool BuiltinModuleChecker::isPathModule(NodeModule module) {
   return module == NodeModule::Path || module == NodeModule::PathPosix ||
          module == NodeModule::PathWin32;
 }
 
+std::string BuiltinModuleChecker::moduleProblem(llvm::StringRef path) {
+  if (BuiltinModuleChecker::moduleOf(path)) {
+    return "";
+  }
+
+  return BuiltinModuleChecker::missingModule(path);
 }
 
-std::string builtinModuleProblem(llvm::StringRef path) {
-  return moduleOf(path) ? std::string() : missingModule(path);
-}
-
-namespace {
-
-MemberExpr *processMember(AstContext &ctx, llvm::SMLoc loc, llvm::StringRef name) {
+MemberExpr *BuiltinModuleChecker::processMember(AstContext &ctx, llvm::SMLoc loc,
+                                                llvm::StringRef name) {
   auto *process = ctx.make<NameExpr>(loc, "process");
 
   return ctx.make<MemberExpr>(loc, process, name);
 }
 
-}
-
-BuiltinModuleChecker::BuiltinModuleChecker(Checker &checker) : checker_(checker) {}
+BuiltinModuleChecker::BuiltinModuleChecker(Checker &owner)
+    : checker(owner) {}
 
 std::string BuiltinModuleChecker::exportProblem(NodeModule module, llvm::StringRef name,
                                                 llvm::StringRef path) const {
-  if (checker_.builtinModuleTypes().exported(module, name)) {
+  if (this->checker.builtinModuleTypes().exported(module, name)) {
     return "";
   }
-  for (const Feature *feature : checker_.features_->all()) {
+  for (const Feature *feature : this->checker.features_->all()) {
     if (std::optional<std::string> problem = feature->exportProblem(module, name, path)) {
       return *problem;
     }
@@ -186,8 +181,8 @@ std::string BuiltinModuleChecker::exportProblem(NodeModule module, llvm::StringR
 }
 
 void BuiltinModuleChecker::importBuiltinModule(Module *module, const ImportDecl &decl) {
-  Checker::ModuleState &here = checker_.state(module);
-  std::optional<NodeModule> which = moduleOf(decl.path);
+  Checker::ModuleState &here = this->checker.state(module);
+  std::optional<NodeModule> which = BuiltinModuleChecker::moduleOf(decl.path);
   if (!which) {
     for (const ModuleName &name : decl.names) {
       here.badImports.insert(name.as);
@@ -200,15 +195,15 @@ void BuiltinModuleChecker::importBuiltinModule(Module *module, const ImportDecl 
   auto bind = [&](llvm::StringRef alias, llvm::SMLoc loc, Checker::NodeName n,
                   llvm::StringRef name) {
     if (auto own = here.declared.find(alias); own != here.declared.end()) {
-      checker_.diags_.error(loc,
-                            "import '" + alias + "' conflicts with the declaration of '" + alias +
-                                "' in this file; import it under another name, e.g. 'import { " +
-                                name + " as " + name + "2 } from \"" + decl.path + "\"'");
-      checker_.diags_.note(own->second, "'" + alias + "' is declared here");
+      this->checker.diags_.error(
+          loc, "import '" + alias + "' conflicts with the declaration of '" + alias +
+                   "' in this file; import it under another name, e.g. 'import { " + name + " as " +
+                   name + "2 } from \"" + decl.path + "\"'");
+      this->checker.diags_.note(own->second, "'" + alias + "' is declared here");
       return;
     }
     if (here.imports.count(alias) || !here.nodeNames.try_emplace(alias, n).second) {
-      checker_.diags_.error(loc, "duplicate import of '" + alias + "'");
+      this->checker.diags_.error(loc, "duplicate import of '" + alias + "'");
       return;
     }
   };
@@ -232,34 +227,39 @@ void BuiltinModuleChecker::importBuiltinModule(Module *module, const ImportDecl 
                            ? "default imports are not supported: there is no 'export default'"
                            : "'import * as' is not supported";
     if (*which == NodeModule::Process && decl.whole == "process") {
-      checker_.diags_.error(decl.wholeLoc,
-                            form + "; 'process' is global, as in Node, so the import is "
-                                   "not needed: drop it");
+      this->checker.diags_.error(decl.wholeLoc,
+                                 form + "; 'process' is global, as in Node, so the import is "
+                                        "not needed: drop it");
     } else if (*which == NodeModule::Buffer) {
-      checker_.diags_.error(decl.wholeLoc, form +
-                                               "; 'Buffer' is global, as in Node: import it as "
-                                               "'import { Buffer } from \"" +
-                                               decl.path + "\"', or drop the import");
+      this->checker.diags_.error(decl.wholeLoc,
+                                 form +
+                                     "; 'Buffer' is global, as in Node: import it as "
+                                     "'import { Buffer } from \"" +
+                                     decl.path + "\"', or drop the import");
     } else if (!names.empty()) {
-      checker_.diags_.error(decl.wholeLoc, form + "; import the names this file uses: 'import { " +
-                                               names + " } from \"" + decl.path + "\"'");
+      this->checker.diags_.error(decl.wholeLoc,
+                                 form + "; import the names this file uses: 'import { " + names +
+                                     " } from \"" + decl.path + "\"'");
     } else {
-      checker_.diags_.error(decl.wholeLoc, form + "; import the names you need, e.g. 'import { " +
-                                               typicalName(*which).str() + " } from \"" +
-                                               decl.path + "\"'");
+      this->checker.diags_.error(decl.wholeLoc,
+                                 form + "; import the names you need, e.g. 'import { " +
+                                     BuiltinModuleChecker::typicalName(*which).str() +
+                                     " } from \"" + decl.path + "\"'");
     }
-    bind(decl.whole, decl.wholeLoc, Checker::NodeName{*which, {}}, typicalName(*which));
+    bind(decl.whole, decl.wholeLoc, Checker::NodeName{*which, {}},
+         BuiltinModuleChecker::typicalName(*which));
   }
 
   for (const ModuleName &name : decl.names) {
-    std::string problem = exportProblem(*which, name.name, decl.path);
+    std::string problem = this->exportProblem(*which, name.name, decl.path);
     if (!problem.empty()) {
-      checker_.diags_.error(name.loc, problem);
+      this->checker.diags_.error(name.loc, problem);
       here.badImports.insert(name.as);
       continue;
     }
     Checker::NodeName n{*which, name.name};
-    if (isPathModule(*which) && (name.name == "posix" || name.name == "win32")) {
+    if (BuiltinModuleChecker::isPathModule(*which) &&
+        (name.name == "posix" || name.name == "win32")) {
       n = Checker::NodeName{name.name == "posix" ? NodeModule::PathPosix : NodeModule::PathWin32,
                             {}};
     }
@@ -271,11 +271,12 @@ void BuiltinModuleChecker::importBuiltinModule(Module *module, const ImportDecl 
 }
 
 const Checker::NodeName *BuiltinModuleChecker::nodeName(llvm::StringRef name) const {
-  if (!checker_.module_ || checker_.module_->order >= checker_.moduleStates_.size()) {
+  if (!this->checker.module_ ||
+      this->checker.module_->order >= this->checker.moduleStates_.size()) {
     return nullptr;
   }
   const llvm::StringMap<Checker::NodeName> &names =
-      checker_.moduleStates_[checker_.module_->order].nodeNames;
+      this->checker.moduleStates_[this->checker.module_->order].nodeNames;
   auto found = names.find(name);
   if (found == names.end()) {
     return nullptr;
@@ -283,7 +284,7 @@ const Checker::NodeName *BuiltinModuleChecker::nodeName(llvm::StringRef name) co
   if (found->second.module == NodeModule::Buffer && name == "Buffer") {
     return nullptr;
   }
-  ScopeEntry entry = checker_.scopes().lookup(name);
+  ScopeEntry entry = this->checker.scopes().lookup(name);
   if (entry.found()) {
     return nullptr;
   }
@@ -293,90 +294,92 @@ const Checker::NodeName *BuiltinModuleChecker::nodeName(llvm::StringRef name) co
 
 Expr *BuiltinModuleChecker::processAlias(Expr *expr) {
   auto *name = dyn_cast<NameExpr>(expr);
-  const Checker::NodeName *n = name ? nodeName(name->name) : nullptr;
+  const Checker::NodeName *n = name ? this->nodeName(name->name) : nullptr;
   if (n && n->module == NodeModule::Buffer && n->name == "Buffer") {
-    return checker_.ctx_.make<NameExpr>(name->loc(), "Buffer");
+    return this->checker.ctx_.make<NameExpr>(name->loc(), "Buffer");
   }
   if (!n || n->module != NodeModule::Process) {
     return expr;
   }
   if (n->name.empty()) {
-    return checker_.ctx_.make<NameExpr>(name->loc(), "process");
+    return this->checker.ctx_.make<NameExpr>(name->loc(), "process");
   }
 
-  return processMember(checker_.ctx_, name->loc(), n->name);
+  return BuiltinModuleChecker::processMember(this->checker.ctx_, name->loc(), n->name);
 }
 
 Expr *BuiltinModuleChecker::nodeValue(const Checker::NodeName &n, Expr *expr) {
   expr->type = Type::error();
   std::string label = moduleLabel(n.module);
   if (n.name.empty()) {
-    checker_.diags_.error(expr->loc(),
-                          "this is not a value: the functions of '" + label +
-                              "' are used by their names, e.g. '" +
-                              (isPathModule(n.module) ? "posix.join(a, b)'"
-                                                      : typicalName(n.module).str() + "(...)'"));
+    this->checker.diags_.error(
+        expr->loc(), "this is not a value: the functions of '" + label +
+                         "' are used by their names, e.g. '" +
+                         (BuiltinModuleChecker::isPathModule(n.module)
+                              ? "posix.join(a, b)'"
+                              : BuiltinModuleChecker::typicalName(n.module).str() + "(...)'"));
     return expr;
   }
-  for (const Feature *feature : checker_.features_->all()) {
-    if (Expr *value = feature->checkModuleValue(checker_, n.module, n.name, expr)) {
+  for (const Feature *feature : this->checker.features_->all()) {
+    if (Expr *value = feature->checkModuleValue(this->checker, n.module, n.name, expr)) {
       return value;
     }
   }
-  checker_.diags_.error(expr->loc(),
-                        "'" + n.name + "' of '" + label +
-                            "' can only be called; where a function is expected, pass an "
-                            "arrow that calls it, e.g. 'x => " +
-                            n.name + "(x)'");
+  this->checker.diags_.error(expr->loc(),
+                             "'" + n.name + "' of '" + label +
+                                 "' can only be called; where a function is expected, pass an "
+                                 "arrow that calls it, e.g. 'x => " +
+                                 n.name + "(x)'");
 
   return expr;
 }
 
 Expr *BuiltinModuleChecker::checkNodeName(NameExpr *name) {
-  const Checker::NodeName *n = nodeName(name->name);
+  const Checker::NodeName *n = this->nodeName(name->name);
   if (!n) {
     return nullptr;
   }
   if (n->module == NodeModule::Process || (n->module == NodeModule::Buffer && !n->name.empty())) {
-    return checker_.exprChecker().checkExpr(processAlias(name));
+    return this->checker.exprChecker().checkExpr(this->processAlias(name));
   }
 
-  return nodeValue(*n, name);
+  return this->nodeValue(*n, name);
 }
 
 Expr *BuiltinModuleChecker::checkNodeMember(MemberExpr *member) {
-  for (const Feature *feature : checker_.features_->all()) {
-    if (Expr *checked = feature->checkModuleMember(checker_, member)) {
+  for (const Feature *feature : this->checker.features_->all()) {
+    if (Expr *checked = feature->checkModuleMember(this->checker, member)) {
       return checked;
     }
   }
   auto *object = dyn_cast<NameExpr>(member->object);
-  const Checker::NodeName *n = object ? nodeName(object->name) : nullptr;
+  const Checker::NodeName *n = object ? this->nodeName(object->name) : nullptr;
   if (!n) {
     return nullptr;
   }
   if (n->module == NodeModule::Process || (n->module == NodeModule::Buffer && !n->name.empty())) {
-    member->object = processAlias(object);
+    member->object = this->processAlias(object);
     return nullptr;
   }
   if (!n->name.empty()) {
     return nullptr;
   }
-  std::string problem = exportProblem(n->module, member->name, moduleLabel(n->module));
+  std::string problem = this->exportProblem(n->module, member->name, moduleLabel(n->module));
   if (!problem.empty()) {
-    checker_.diags_.error(member->loc(), problem);
+    this->checker.diags_.error(member->loc(), problem);
     member->type = Type::error();
     return member;
   }
   Checker::NodeName inner{n->module, member->name};
-  if (isPathModule(n->module) && (member->name == "posix" || member->name == "win32")) {
+  if (BuiltinModuleChecker::isPathModule(n->module) &&
+      (member->name == "posix" || member->name == "win32")) {
     inner = {member->name == "posix" ? NodeModule::PathPosix : NodeModule::PathWin32, {}};
   }
   if (n->module == NodeModule::Fs && member->name == "promises") {
     inner = {NodeModule::FsPromises, {}};
   }
 
-  return nodeValue(inner, member);
+  return this->nodeValue(inner, member);
 }
 
 Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) {
@@ -386,20 +389,20 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
   Checker::NodeName target{NodeModule::Fs, {}};
   llvm::SMLoc loc;
   if (auto *name = dyn_cast<NameExpr>(call->callee)) {
-    const Checker::NodeName *n = nodeName(name->name);
+    const Checker::NodeName *n = this->nodeName(name->name);
     if (!n) {
       return nullptr;
     }
     if (n->module == NodeModule::Process || (n->module == NodeModule::Buffer && !n->name.empty())) {
-      call->callee = processAlias(name);
+      call->callee = this->processAlias(name);
       return nullptr;
     }
     if (n->name.empty()) {
-      checker_.diags_.error(name->loc(), "'" + name->name +
-                                             "' is not a function: call the functions of '" +
-                                             moduleLabel(n->module) + "' by their names");
+      this->checker.diags_.error(name->loc(), "'" + name->name +
+                                                  "' is not a function: call the functions of '" +
+                                                  moduleLabel(n->module) + "' by their names");
       for (Expr *&arg : call->args) {
-        arg = checker_.exprChecker().checkExpr(arg);
+        arg = this->checker.exprChecker().checkExpr(arg);
       }
       call->type = Type::error();
       return call;
@@ -408,33 +411,33 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
     loc = name->loc();
   } else if (auto *member = dyn_cast<MemberExpr>(call->callee); member && !member->optional) {
     auto *object = dyn_cast<NameExpr>(member->object);
-    const Checker::NodeName *n = object ? nodeName(object->name) : nullptr;
+    const Checker::NodeName *n = object ? this->nodeName(object->name) : nullptr;
     if (!n) {
       return nullptr;
     }
     if (n->module == NodeModule::Process || (n->module == NodeModule::Buffer && !n->name.empty())) {
-      member->object = processAlias(object);
+      member->object = this->processAlias(object);
       return nullptr;
     }
     if (n->module == NodeModule::TimersPromises && n->name == "scheduler") {
       TimerChecker::ResultSchedulerAwait awaited =
-          checker_.timerChecker().checkSchedulerCall(call, member);
+          this->checker.timerChecker().checkSchedulerCall(call, member);
       bool reported =
           awaited.isErr() &&
           awaited.error().code == TimerCheckerCheckSchedulerCallErrorCode::ALREADY_REPORTED;
       if (awaited.isErr() && !reported) {
-        checker_.diags_.error(member->loc(), awaited.error().message);
+        this->checker.diags_.error(member->loc(), awaited.error().message);
       }
       return awaited.isOk() ? awaited.value() : call;
     }
     if (!n->name.empty()) {
       return nullptr;
     }
-    std::string problem = exportProblem(n->module, member->name, moduleLabel(n->module));
+    std::string problem = this->exportProblem(n->module, member->name, moduleLabel(n->module));
     if (!problem.empty()) {
-      checker_.diags_.error(member->loc(), problem);
+      this->checker.diags_.error(member->loc(), problem);
       for (Expr *&arg : call->args) {
-        arg = checker_.exprChecker().checkExpr(arg);
+        arg = this->checker.exprChecker().checkExpr(arg);
       }
       call->type = Type::error();
       return call;
@@ -445,9 +448,9 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
     return nullptr;
   }
 
-  for (const Feature *feature : checker_.features_->all()) {
-    if (Expr *checked =
-            feature->checkModuleCall(checker_, call, target.module, target.name, loc, expected)) {
+  for (const Feature *feature : this->checker.features_->all()) {
+    if (Expr *checked = feature->checkModuleCall(this->checker, call, target.module, target.name,
+                                                 loc, expected)) {
       return checked;
     }
   }
@@ -458,7 +461,7 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
 Expr *BuiltinModuleChecker::checkTimersPromises(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
                                                 const Type *expected) {
   TimerChecker::ResultPromiseOfTimer promised =
-      checker_.timerChecker().checkTimersPromisesCall(call, fn, loc, expected);
+      this->checker.timerChecker().checkTimersPromisesCall(call, fn, loc, expected);
   if (promised.isOk()) {
     return promised.value();
   }
@@ -466,12 +469,12 @@ Expr *BuiltinModuleChecker::checkTimersPromises(CallExpr *call, llvm::StringRef 
     case TimerCheckerCheckTimersPromisesCallErrorCode::ALREADY_REPORTED:
       break;
     case TimerCheckerCheckTimersPromisesCallErrorCode::VOID_VALUE:
-      checker_.diags_.error(call->args[fn == "setImmediate" ? 0 : 1]->loc(),
-                            promised.error().message);
+      this->checker.diags_.error(call->args[fn == "setImmediate" ? 0 : 1]->loc(),
+                                 promised.error().message);
       break;
     case TimerCheckerCheckTimersPromisesCallErrorCode::SCHEDULER_ITSELF:
     case TimerCheckerCheckTimersPromisesCallErrorCode::WRONG_ARITY:
-      checker_.diags_.error(loc, promised.error().message);
+      this->checker.diags_.error(loc, promised.error().message);
       break;
   }
 

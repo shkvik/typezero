@@ -244,7 +244,12 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
       continue;
     }
     if (type->isIterator()) {
-      this->checker.generatorChecker().checkSendsNothing(type, e.expr->loc(), "a spread");
+      std::string what = ErrorTextSpreadable::spread();
+      GeneratorChecker::ResultNextNeedsNoValue nothing =
+          this->checker.generatorChecker().checkSendsNothing(type, what);
+      if (nothing.isErr()) {
+        this->checker.diags_.error(e.expr->loc(), nothing.error().message);
+      }
       this->checker.flowChecker().calledFunction();
       types[i] = type->yielded();
       someDecimal |= types[i]->nonOptional()->isDecimal();

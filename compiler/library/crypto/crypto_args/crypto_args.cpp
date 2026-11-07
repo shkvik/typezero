@@ -19,14 +19,11 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::string utf8Of(const std::u16string &text) {
+std::string CryptoArgs::utf8Of(const std::u16string &text) {
   std::string out;
   llvm::convertUTF16ToUTF8String(
       llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
@@ -35,34 +32,33 @@ std::string utf8Of(const std::u16string &text) {
   return out;
 }
 
-std::u16string utf16Of(llvm::StringRef text) {
+std::u16string CryptoArgs::utf16Of(llvm::StringRef text) {
   llvm::SmallVector<llvm::UTF16, 32> units;
   llvm::convertUTF8ToUTF16String(text, units);
 
   return std::u16string(units.begin(), units.end());
 }
 
-std::optional<std::string> literalOf(const Expr *e) {
+std::optional<std::string> CryptoArgs::literalOf(const Expr *e) {
   if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
     e = conv->operand;
   }
   if (auto *lit = dyn_cast<StringLitExpr>(e)) {
-    return utf8Of(lit->value);
+    return CryptoArgs::utf8Of(lit->value);
   }
   if (auto *tmpl = dyn_cast<TemplateExpr>(e); tmpl && tmpl->exprs.empty()) {
-    return utf8Of(tmpl->quasis[0]);
+    return CryptoArgs::utf8Of(tmpl->quasis[0]);
   }
 
   return std::nullopt;
 }
 
-}
-
-CryptoArgs::CryptoArgs(Checker &checker) : checker_(checker) {}
+CryptoArgs::CryptoArgs(Checker &owner)
+    : checker(owner) {}
 
 Expr *CryptoArgs::cryptoCall(CallExpr *call, CryptoFn fn, std::vector<Expr *> args,
                              const Type *type) {
-  auto *index = checker_.ctx_.make<IntLitExpr>(call->loc(), uint64_t(fn));
+  auto *index = this->checker.ctx_.make<IntLitExpr>(call->loc(), uint64_t(fn));
   index->type = Type::intTy();
   args.insert(args.begin(), index);
   call->args = std::move(args);
@@ -75,41 +71,41 @@ Expr *CryptoArgs::cryptoCall(CallExpr *call, CryptoFn fn, std::vector<Expr *> ar
 
 Expr *CryptoArgs::cryptoResult(CallExpr *call, CryptoFn fn, std::vector<Expr *> args,
                                const Type *type) {
-  const Type *error = checker_.cryptoErrorTypes().ofCall(fn, args);
+  const Type *error = this->checker.cryptoErrorTypes().ofCall(fn, args);
 
-  return cryptoCall(call, fn, std::move(args), Type::result(type, error));
+  return this->cryptoCall(call, fn, std::move(args), Type::result(type, error));
 }
 
 Expr *CryptoArgs::cryptoInt(llvm::SMLoc loc, int64_t value) {
-  auto *lit = checker_.ctx_.make<IntLitExpr>(loc, uint64_t(value));
+  auto *lit = this->checker.ctx_.make<IntLitExpr>(loc, uint64_t(value));
   lit->type = Type::intTy();
 
   return lit;
 }
 
 Expr *CryptoArgs::cryptoDouble(llvm::SMLoc loc, double value) {
-  auto *lit = checker_.ctx_.make<FloatLitExpr>(loc, value);
+  auto *lit = this->checker.ctx_.make<FloatLitExpr>(loc, value);
   lit->type = Type::doubleTy();
 
   return lit;
 }
 
 Expr *CryptoArgs::cryptoBool(llvm::SMLoc loc, bool value) {
-  auto *lit = checker_.ctx_.make<BoolLitExpr>(loc, value);
+  auto *lit = this->checker.ctx_.make<BoolLitExpr>(loc, value);
   lit->type = Type::boolTy();
 
   return lit;
 }
 
 Expr *CryptoArgs::cryptoString(llvm::SMLoc loc, llvm::StringRef text) {
-  auto *lit = checker_.ctx_.make<StringLitExpr>(loc, utf16Of(text));
+  auto *lit = this->checker.ctx_.make<StringLitExpr>(loc, CryptoArgs::utf16Of(text));
   lit->type = Type::string();
 
   return lit;
 }
 
 Expr *CryptoArgs::cryptoUndefined(llvm::SMLoc loc) {
-  auto *undef = checker_.ctx_.make<UndefinedExpr>(loc);
+  auto *undef = this->checker.ctx_.make<UndefinedExpr>(loc);
   undef->type = Type::undefinedTy();
 
   return undef;
@@ -117,7 +113,7 @@ Expr *CryptoArgs::cryptoUndefined(llvm::SMLoc loc) {
 
 Expr *CryptoArgs::cryptoData(Expr *arg, llvm::StringRef what, bool strings, bool keys,
                              bool buffers) {
-  arg = checker_.exprChecker().checkExpr(arg, Type::string());
+  arg = this->checker.exprChecker().checkExpr(arg, Type::string());
   auto fits = [&](const Type *t) {
     return (strings && (t->isString() || t->isStringLiteral())) || t->isByteView() ||
            (buffers && t->bytes() == Type::Bytes::ArrayBuffer) ||
@@ -130,16 +126,16 @@ Expr *CryptoArgs::cryptoData(Expr *arg, llvm::StringRef what, bool strings, bool
   bool ok = fits(type) || (type->isUnion() && llvm::all_of(type->members(), fits));
   if (!ok) {
     std::string kinds = strings ? "a string or bytes" : "bytes";
-    checker_.diags_.error(arg->loc(),
-                          "the " + what.str() + " is " + kinds +
-                              " (a Buffer, a typed array or a DataView" +
-                              (buffers ? ", an ArrayBuffer" : "") + (keys ? ", a KeyObject" : "") +
-                              "); found '" + type->name().str() + "'" +
-                              (type->isNumeric() ? "; make text of it with 'String(x)'" : ""));
+    this->checker.diags_.error(
+        arg->loc(), "the " + what.str() + " is " + kinds +
+                        " (a Buffer, a typed array or a DataView" +
+                        (buffers ? ", an ArrayBuffer" : "") + (keys ? ", a KeyObject" : "") +
+                        "); found '" + type->name().str() + "'" +
+                        (type->isNumeric() ? "; make text of it with 'String(x)'" : ""));
     arg->type = Type::error();
   }
   if (type->isStringLiteral()) {
-    return checker_.typeRelations().coerce(arg, Type::string());
+    return this->checker.typeRelations().coerce(arg, Type::string());
   }
 
   return arg;
@@ -147,21 +143,21 @@ Expr *CryptoArgs::cryptoData(Expr *arg, llvm::StringRef what, bool strings, bool
 
 Expr *CryptoArgs::cryptoEncoding(CallExpr *call, size_t index, llvm::StringRef fn, int fallback) {
   if (index >= call->args.size() || isa<UndefinedExpr>(call->args[index])) {
-    return cryptoInt(call->loc(), fallback);
+    return this->cryptoInt(call->loc(), fallback);
   }
   Expr *arg = call->args[index];
-  std::optional<std::string> text = literalOf(arg);
+  std::optional<std::string> text = CryptoArgs::literalOf(arg);
   if (!text) {
-    checker_.exprChecker().checkExpr(arg);
-    checker_.diags_.error(arg->loc(), "the encoding of '" + fn +
-                                          "' is written as a literal, e.g. 'hex': "
-                                          "the type of what it gives depends on it");
+    this->checker.exprChecker().checkExpr(arg);
+    this->checker.diags_.error(arg->loc(), "the encoding of '" + fn +
+                                               "' is written as a literal, e.g. 'hex': "
+                                               "the type of what it gives depends on it");
     return nullptr;
   }
   if (*text == "buffer") {
-    return cryptoInt(call->loc(), -1);
+    return this->cryptoInt(call->loc(), -1);
   }
-  Expr *number = checker_.bytesChecker().checkBufferEncoding(arg);
+  Expr *number = this->checker.bytesChecker().checkBufferEncoding(arg);
   if (number->type->isError()) {
     return nullptr;
   }
@@ -180,10 +176,10 @@ Expr *CryptoArgs::cryptoText(Expr *made, Expr *encoding) {
 
     return crypto;
   }
-  auto *member = checker_.ctx_.make<MemberExpr>(made->loc(), made, "toString");
+  auto *member = this->checker.ctx_.make<MemberExpr>(made->loc(), made, "toString");
 
-  return checker_.processChecker().builtinCall(made->loc(), member, Builtin::BufferToString,
-                                               {encoding}, Type::string());
+  return this->checker.processChecker().builtinCall(made->loc(), member, Builtin::BufferToString,
+                                                    {encoding}, Type::string());
 }
 
 bool CryptoArgs::cryptoOptions(Expr *arg, llvm::StringRef fn,
@@ -191,11 +187,11 @@ bool CryptoArgs::cryptoOptions(Expr *arg, llvm::StringRef fn,
                                llvm::StringMap<Expr *> &options) {
   auto *lit = dyn_cast<ObjectLitExpr>(arg);
   if (!lit) {
-    checker_.exprChecker().checkExpr(arg);
-    checker_.diags_.error(arg->loc(),
-                          "the options of '" + fn +
-                              "' are written in the call, as an object literal, e.g. '{ " +
-                              allowed[0].str() + ": ... }'");
+    this->checker.exprChecker().checkExpr(arg);
+    this->checker.diags_.error(arg->loc(),
+                               "the options of '" + fn +
+                                   "' are written in the call, as an object literal, e.g. '{ " +
+                                   allowed[0].str() + ": ... }'");
     return false;
   }
   std::string list;
@@ -204,13 +200,14 @@ bool CryptoArgs::cryptoOptions(Expr *arg, llvm::StringRef fn,
   }
   for (const ObjectLitExpr::Property &prop : lit->props) {
     if (prop.spread() || prop.key() || prop.method() || prop.name.empty()) {
-      checker_.diags_.error(prop.loc, "write each option of '" + fn + "' by its name, e.g. '{ " +
-                                          allowed[0].str() + ": ... }'");
+      this->checker.diags_.error(prop.loc, "write each option of '" + fn +
+                                               "' by its name, e.g. '{ " + allowed[0].str() +
+                                               ": ... }'");
       return false;
     }
     if (!llvm::is_contained(allowed, prop.name)) {
-      checker_.diags_.error(prop.loc,
-                            "'" + fn + "' has no option '" + prop.name + "'; it takes " + list);
+      this->checker.diags_.error(prop.loc, "'" + fn + "' has no option '" + prop.name +
+                                               "'; it takes " + list);
       return false;
     }
     options[prop.name] = prop.value;
@@ -221,15 +218,15 @@ bool CryptoArgs::cryptoOptions(Expr *arg, llvm::StringRef fn,
 
 int CryptoArgs::cryptoChoice(Expr *arg, llvm::StringRef what,
                              llvm::ArrayRef<llvm::StringRef> values) {
-  std::optional<std::string> text = literalOf(arg);
+  std::optional<std::string> text = CryptoArgs::literalOf(arg);
   std::string list;
   for (size_t i = 0; i < values.size(); ++i) {
     list += (i == 0 ? "'" : i + 1 == values.size() ? "' or '" : "', '") + values[i].str();
   }
   list += "'";
   if (!text) {
-    checker_.exprChecker().checkExpr(arg);
-    checker_.diags_.error(arg->loc(), "the " + what + " is written as a literal: " + list);
+    this->checker.exprChecker().checkExpr(arg);
+    this->checker.diags_.error(arg->loc(), "the " + what + " is written as a literal: " + list);
     return -1;
   }
   for (size_t i = 0; i < values.size(); ++i) {
@@ -237,15 +234,15 @@ int CryptoArgs::cryptoChoice(Expr *arg, llvm::StringRef what,
       return int(i);
     }
   }
-  checker_.diags_.error(arg->loc(), "unknown " + what + " '" + *text + "'; it is " + list);
+  this->checker.diags_.error(arg->loc(), "unknown " + what + " '" + *text + "'; it is " + list);
 
   return -1;
 }
 
 Expr *CryptoArgs::cryptoMd(Expr *arg, bool hmac) {
-  std::optional<std::string> text = literalOf(arg);
+  std::optional<std::string> text = CryptoArgs::literalOf(arg);
   if (!text) {
-    return checker_.argumentChecker().checkArg(arg, Type::string());
+    return this->checker.argumentChecker().checkArg(arg, Type::string());
   }
   std::string name = llvm::StringRef(*text).lower();
   for (const HashNames &h : hashNames()) {
@@ -253,34 +250,34 @@ Expr *CryptoArgs::cryptoMd(Expr *arg, bool hmac) {
       continue;
     }
     if (hmac && (h.name == "shake128" || h.name == "shake256")) {
-      checker_.diags_.error(arg->loc(), "'" + *text +
-                                            "' gives output of any length, which HMAC and the "
-                                            "KDFs cannot use; use a hash such as 'sha256'");
+      this->checker.diags_.error(arg->loc(), "'" + *text +
+                                                 "' gives output of any length, which HMAC and the "
+                                                 "KDFs cannot use; use a hash such as 'sha256'");
       return nullptr;
     }
     for (size_t i = 0; i < std::size(kDirectMds); ++i) {
       if (kDirectMds[i].name == h.name) {
-        return cryptoInt(arg->loc(), int64_t(i));
+        return this->cryptoInt(arg->loc(), int64_t(i));
       }
     }
   }
   if (turnedOffHash(name)) {
-    checker_.diags_.error(arg->loc(), "'" + *text +
-                                          "' is turned off in node 24 (it throws "
-                                          "ERR_OSSL_EVP_UNSUPPORTED) and in tz; use 'sha256'");
+    this->checker.diags_.error(arg->loc(), "'" + *text +
+                                               "' is turned off in node 24 (it throws "
+                                               "ERR_OSSL_EVP_UNSUPPORTED) and in tz; use 'sha256'");
     return nullptr;
   }
-  checker_.diags_.error(arg->loc(), "unknown hash '" + *text +
-                                        "'; node has those getHashes() lists, e.g. "
-                                        "'sha256', 'sha512', 'sha3-256', 'md5'");
+  this->checker.diags_.error(arg->loc(), "unknown hash '" + *text +
+                                             "'; node has those getHashes() lists, e.g. "
+                                             "'sha256', 'sha512', 'sha3-256', 'md5'");
 
   return nullptr;
 }
 
 Expr *CryptoArgs::cryptoCipher(Expr *arg) {
-  std::optional<std::string> text = literalOf(arg);
+  std::optional<std::string> text = CryptoArgs::literalOf(arg);
   if (!text) {
-    return checker_.argumentChecker().checkArg(arg, Type::string());
+    return this->checker.argumentChecker().checkArg(arg, Type::string());
   }
   std::string name = llvm::StringRef(*text).lower();
   std::string canonical = name == "aes128"          ? "aes-128-cbc"
@@ -292,34 +289,34 @@ Expr *CryptoArgs::cryptoCipher(Expr *arg) {
                                                     : name;
   for (size_t i = 0; i < std::size(kDirectCiphers); ++i) {
     if (kDirectCiphers[i].name == canonical) {
-      return cryptoInt(arg->loc(), int64_t(i));
+      return this->cryptoInt(arg->loc(), int64_t(i));
     }
   }
   if (llvm::is_contained(kCipherNames, name)) {
-    return cryptoString(arg->loc(), name);
+    return this->cryptoString(arg->loc(), name);
   }
   if (turnedOffCipher(name)) {
-    checker_.diags_.error(arg->loc(), "'" + *text +
-                                          "' is turned off in node 24 (it throws "
-                                          "ERR_OSSL_EVP_UNSUPPORTED) and in tz; use "
-                                          "'aes-256-gcm'");
+    this->checker.diags_.error(arg->loc(), "'" + *text +
+                                               "' is turned off in node 24 (it throws "
+                                               "ERR_OSSL_EVP_UNSUPPORTED) and in tz; use "
+                                               "'aes-256-gcm'");
     return nullptr;
   }
-  checker_.diags_.error(arg->loc(), "unknown cipher '" + *text +
-                                        "'; node has those getCiphers() lists, "
-                                        "e.g. 'aes-256-gcm', 'aes-256-cbc', "
-                                        "'chacha20-poly1305'");
+  this->checker.diags_.error(arg->loc(), "unknown cipher '" + *text +
+                                             "'; node has those getCiphers() lists, "
+                                             "e.g. 'aes-256-gcm', 'aes-256-cbc', "
+                                             "'chacha20-poly1305'");
 
   return nullptr;
 }
 
 Expr *CryptoArgs::cryptoNumber(Expr *arg) {
-  Expr *checked = checker_.argumentChecker().checkArg(arg, Type::intTy());
+  Expr *checked = this->checker.argumentChecker().checkArg(arg, Type::intTy());
   if (!checked || checked->type->isError() || checked->type->isFloat()) {
     return checked;
   }
 
-  return checker_.typeRelations().convert(checked, Type::doubleTy());
+  return this->checker.typeRelations().convert(checked, Type::doubleTy());
 }
 
 std::string CryptoArgs::numberText(double value) {
@@ -338,17 +335,18 @@ std::optional<double> CryptoArgs::knownNumber(const Expr *arg) const {
     return double(lit->value);
   }
   if (auto *unary = dyn_cast<UnaryExpr>(arg); unary && unary->op == UnaryOp::Neg) {
-    std::optional<double> inner = knownNumber(unary->operand);
+    std::optional<double> inner = this->knownNumber(unary->operand);
     if (inner) {
       return -*inner;
     }
   }
   if (auto *conversion = dyn_cast<CastExpr>(arg)) {
-    if (std::optional<int64_t> value = checker_.constantFolder().intConstant(conversion->operand)) {
+    if (std::optional<int64_t> value =
+            this->checker.constantFolder().intConstant(conversion->operand)) {
       return double(*value);
     }
   }
-  std::optional<int64_t> value = checker_.constantFolder().intConstant(arg);
+  std::optional<int64_t> value = this->checker.constantFolder().intConstant(arg);
   if (!value) {
     return std::nullopt;
   }
@@ -357,12 +355,13 @@ std::optional<double> CryptoArgs::knownNumber(const Expr *arg) const {
 }
 
 bool CryptoArgs::checkWhole(const Expr *arg, llvm::StringRef name, double least) {
-  std::optional<double> value = knownNumber(arg);
+  std::optional<double> value = this->knownNumber(arg);
   if (!value || (*value == std::floor(*value) && *value >= least)) {
     return true;
   }
-  checker_.diags_.error(arg->loc(), name + " must be a whole number of " + numberText(least) +
-                                        " or more, not " + numberText(*value));
+  this->checker.diags_.error(arg->loc(), name + " must be a whole number of " +
+                                             CryptoArgs::numberText(least) + " or more, not " +
+                                             CryptoArgs::numberText(*value));
 
   return false;
 }
@@ -382,23 +381,23 @@ bool CryptoArgs::checkCipherLengths(const Expr *cipher, const Expr *key, const E
       return std::nullopt;
     }
 
-    return checker_.indexProofs().exactLength(e);
+    return this->checker.indexProofs().exactLength(e);
   };
   bool ok = true;
   if (std::optional<int64_t> have = bytesOf(key); have && *have != keyBytes) {
-    checker_.diags_.error(key->loc(), name + " needs a " + std::to_string(keyBytes) +
-                                          "-byte key, but this one has " + std::to_string(*have) +
-                                          " bytes");
+    this->checker.diags_.error(key->loc(), name + " needs a " + std::to_string(keyBytes) +
+                                               "-byte key, but this one has " +
+                                               std::to_string(*have) + " bytes");
     ok = false;
   }
   std::optional<int64_t> ivHave = bytesOf(iv);
   if (ivHave && anyIv && *ivHave == 0) {
-    checker_.diags_.error(iv->loc(), name + " needs an IV of 1 byte or more, but it is empty");
+    this->checker.diags_.error(iv->loc(), name + " needs an IV of 1 byte or more, but it is empty");
     ok = false;
   } else if (ivHave && !anyIv && *ivHave != ivBytes) {
-    checker_.diags_.error(iv->loc(), name + " needs a " + std::to_string(ivBytes) +
-                                         "-byte IV, but this one has " + std::to_string(*ivHave) +
-                                         " bytes");
+    this->checker.diags_.error(iv->loc(), name + " needs a " + std::to_string(ivBytes) +
+                                              "-byte IV, but this one has " +
+                                              std::to_string(*ivHave) + " bytes");
     ok = false;
   }
 
@@ -406,14 +405,14 @@ bool CryptoArgs::checkCipherLengths(const Expr *cipher, const Expr *key, const E
 }
 
 Expr *CryptoArgs::cryptoKey(Expr *arg, llvm::StringRef what) {
-  return cryptoData(arg, what, true, true, true);
+  return this->cryptoData(arg, what, true, true, true);
 }
 
 Expr *CryptoArgs::cryptoKeyObject(Expr *arg, llvm::StringRef what) {
-  arg = checker_.exprChecker().checkExpr(arg);
+  arg = this->checker.exprChecker().checkExpr(arg);
   if (!arg->type->isError() && arg->type->crypto() != Crypto::KeyObject) {
-    checker_.diags_.error(arg->loc(),
-                          "the " + what + " is a KeyObject; found '" + arg->type->name() + "'");
+    this->checker.diags_.error(arg->loc(), "the " + what + " is a KeyObject; found '" +
+                                               arg->type->name() + "'");
     arg->type = Type::error();
   }
 
@@ -425,20 +424,20 @@ bool CryptoArgs::rejectCryptoCallback(CallExpr *call, size_t index, llvm::String
   if (index >= call->args.size()) {
     return false;
   }
-  Expr *arg = checker_.exprChecker().checkExpr(call->args[index]);
+  Expr *arg = this->checker.exprChecker().checkExpr(call->args[index]);
   if (!arg->type->nonOptional()->isFunction()) {
     return false;
   }
-  checker_.diags_.error(arg->loc(),
-                        "'" + fn +
-                            "' with a callback is not supported: tz has no callback forms "
-                            "of node:crypto (docs/crypto.md, section 5); call it without one "
-                            "and use what it returns: " +
-                            hint + ", or run it on the thread pool with '" + fn +
-                            "Async' of \"tz:crypto\": 'await " + fn + "Async(...)'");
+  this->checker.diags_.error(arg->loc(),
+                             "'" + fn +
+                                 "' with a callback is not supported: tz has no callback forms "
+                                 "of node:crypto (docs/crypto.md, section 5); call it without one "
+                                 "and use what it returns: " +
+                                 hint + ", or run it on the thread pool with '" + fn +
+                                 "Async' of \"tz:crypto\": 'await " + fn + "Async(...)'");
   for (Expr *&a : call->args) {
     if (a != call->args[index]) {
-      a = checker_.exprChecker().checkExpr(a);
+      a = this->checker.exprChecker().checkExpr(a);
     }
   }
   call->type = Type::error();
@@ -449,41 +448,44 @@ bool CryptoArgs::rejectCryptoCallback(CallExpr *call, size_t index, llvm::String
 bool CryptoArgs::cryptoSignKey(Expr *arg, llvm::StringRef fn, bool priv,
                                std::vector<Expr *> &args) {
   llvm::SMLoc loc = arg->loc();
-  Expr *padding = cryptoInt(loc, 0), *salt = cryptoInt(loc, 0);
-  int p1363 = 0, has = 0;
+  Expr *padding = this->cryptoInt(loc, 0);
+  Expr *salt = this->cryptoInt(loc, 0);
+  int p1363 = 0;
+  int has = 0;
   Expr *key;
   if (isa<ObjectLitExpr>(arg)) {
     llvm::StringMap<Expr *> options;
-    if (!cryptoOptions(arg, fn, {"key", "padding", "saltLength", "dsaEncoding"}, options)) {
+    if (!this->cryptoOptions(arg, fn, {"key", "padding", "saltLength", "dsaEncoding"}, options)) {
       return false;
     }
     if (!options.lookup("key")) {
-      checker_.diags_.error(arg->loc(), "the options of '" + fn + "' need 'key'");
+      this->checker.diags_.error(arg->loc(), "the options of '" + fn + "' need 'key'");
       return false;
     }
-    key = cryptoKey(options["key"], "key");
+    key = this->cryptoKey(options["key"], "key");
     if (Expr *p = options.lookup("padding")) {
-      padding = checker_.argumentChecker().checkArg(p, Type::intTy());
+      padding = this->checker.argumentChecker().checkArg(p, Type::intTy());
       has |= 1;
     }
     if (Expr *s = options.lookup("saltLength")) {
-      salt = checker_.argumentChecker().checkArg(s, Type::intTy());
+      salt = this->checker.argumentChecker().checkArg(s, Type::intTy());
       has |= 2;
     }
     if (Expr *d = options.lookup("dsaEncoding")) {
-      int which = cryptoChoice(d, "encoding of the signature", {"der", "ieee-p1363"});
+      int which = this->cryptoChoice(d, "encoding of the signature", {"der", "ieee-p1363"});
       if (which < 0) {
         return false;
       }
       p1363 = which;
     }
   } else {
-    key = cryptoKey(arg, priv ? "private key" : "key");
+    key = this->cryptoKey(arg, priv ? "private key" : "key");
   }
   if (key->type->isError()) {
     return false;
   }
-  args.insert(args.end(), {key, padding, salt, cryptoInt(loc, p1363), cryptoInt(loc, has)});
+  args.insert(args.end(),
+              {key, padding, salt, this->cryptoInt(loc, p1363), this->cryptoInt(loc, has)});
 
   return true;
 }

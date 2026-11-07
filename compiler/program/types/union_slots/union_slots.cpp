@@ -20,6 +20,11 @@
 
 namespace tz {
 
+bool hasParamMember(const Type *type) {
+  return type->isUnion() &&
+         llvm::any_of(type->members(), [](const Type *m) { return m->isParam(); });
+}
+
 UnionSlot unionSlot(const Type *type) {
   switch (type->kind()) {
   case Type::Kind::String:

@@ -136,8 +136,15 @@ UnknownChecker::ResultValueNarrowed UnknownChecker::unknownUse(const Expr *objec
 UnknownChecker::ResultMemberChecked UnknownChecker::checkUnknownMember(MemberExpr *member) {
   member->type = Type::error();
   if (member->object->type->isClassRef()) {
-    Expr *classMember = this->checker.classValueChecker().checkClassRefMember(member);
-    return ok(classMember);
+    ClassValueChecker::ResultClassMemberRead classMember =
+        this->checker.classValueChecker().checkClassRefMember(member);
+    if (classMember.isErr()) {
+      return err(UnknownCheckerCheckUnknownMemberError{
+          .code = UnknownCheckerCheckUnknownMemberErrorCode::CLASS_MEMBER,
+          .message = classMember.error().message,
+      });
+    }
+    return ok(classMember.value());
   }
   if (member->name == "constructor") {
     std::string message = ErrorTextUnknownMember::noCtor();

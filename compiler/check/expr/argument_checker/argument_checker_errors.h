@@ -19,6 +19,7 @@ class ErrorTextArity {
 public:
   static std::string count(unsigned min, unsigned max, size_t got);
   static std::string tagged(unsigned min, unsigned max, size_t got);
+  static std::string wanted(unsigned min, unsigned max);
 };
 
 enum class ArgumentCheckerSpreadRestErrorCode {

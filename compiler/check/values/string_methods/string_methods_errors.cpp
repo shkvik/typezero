@@ -7,4 +7,8 @@ std::string ErrorTextStringMethod::missing(llvm::StringRef name) {
   return (llvm::Twine("property '") + name + "' does not exist on type 'string'").str();
 }
 
+std::string ErrorTextStringMethod::repeatOf() {
+  return "the count of 'repeat'";
+}
+
 }

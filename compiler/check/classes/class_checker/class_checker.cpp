@@ -128,8 +128,7 @@ ClassChecker::ResultReturnMatches ClassChecker::overrideReturn(const ClassDecl *
   return ok(method);
 }
 
-ClassChecker::ResultBodiesChecked ClassChecker::checkClassBodies(ClassDecl *cls) {
-  std::vector<ClassCheckerCheckClassBodiesError> errors;
+void ClassChecker::checkClassBodies(ClassDecl *cls) {
   this->checker.classDeclarer().completeClass(cls);
   if (cls->init && !cls->init->checked) {
     this->checker.flow_ = Checker::Flow();
@@ -139,11 +138,7 @@ ClassChecker::ResultBodiesChecked ClassChecker::checkClassBodies(ClassDecl *cls)
     for (const ClassField &f : cls->fields) {
       ResultFieldHasValue started = this->fieldStartValue(cls, f);
       if (started.isErr()) {
-        errors.push_back(ClassCheckerCheckClassBodiesError{
-            .code = ClassCheckerCheckClassBodiesErrorCode::FIELD_WITHOUT_VALUE,
-            .message = started.error().message,
-            .loc = f.loc,
-        });
+        this->checker.diags_.error(f.loc, started.error().message);
       }
     }
   }
@@ -177,18 +172,9 @@ ClassChecker::ResultBodiesChecked ClassChecker::checkClassBodies(ClassDecl *cls)
   for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
     ResultReturnMatches returned = this->overrideReturn(cls, fn);
     if (returned.isErr()) {
-      errors.push_back(ClassCheckerCheckClassBodiesError{
-          .code = ClassCheckerCheckClassBodiesErrorCode::OVERRIDE_RETURNS_OTHER_TYPE,
-          .message = returned.error().message,
-          .loc = fn->loc(),
-      });
+      this->checker.diags_.error(fn->loc(), returned.error().message);
     }
   }
-  if (!errors.empty()) {
-    return err(std::move(errors));
-  }
-
-  return ok(cls);
 }
 
 ClassChecker::ResultNewThisSymbol ClassChecker::declareThis(FunctionDecl *fn) {

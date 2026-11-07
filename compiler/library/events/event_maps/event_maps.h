@@ -6,7 +6,7 @@ namespace tz {
 
 class EventMaps {
 public:
-  explicit EventMaps(Checker &checker);
+  explicit EventMaps(Checker &owner);
 
   bool isEmitterClass(const ClassDecl *cls) const;
   const Type *eventMapOf(const Type *type) const;
@@ -19,7 +19,13 @@ public:
   const Type *createdType(const NewExpr *create);
 
 private:
-  Checker &checker_;
+  static std::string utf8(const std::u16string &text);
+  static bool isServiceEvent(llvm::StringRef name);
+  static const Type *serviceEventArgs();
+  static std::string eventList(const Type *events);
+  static std::string nearestEvent(const Type *events, llvm::StringRef name);
+
+  Checker &checker;
 };
 
 }

@@ -132,10 +132,47 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
     }
     return this->checker.literalTypes().constText(
         this->checker.nameChecker().checkName(cast<NameExpr>(expr)), expected);
-  case Expr::Kind::Member:
-    return this->checker.memberChecker().checkMember(cast<MemberExpr>(expr), expected);
-  case Expr::Kind::Index:
-    return this->checker.memberChecker().checkIndex(cast<IndexExpr>(expr));
+  case Expr::Kind::Member: {
+    auto *member = cast<MemberExpr>(expr);
+    MemberChecker::ResultMemberReadable read =
+        this->checker.memberChecker().checkMember(member, expected);
+    if (read.isOk()) {
+      return read.value();
+    }
+    bool onObject = read.error().code == MemberCheckerCheckMemberErrorCode::MAY_BE_UNDEFINED ||
+                    read.error().code == MemberCheckerCheckMemberErrorCode::UNKNOWN_NOT_NARROWED;
+    llvm::SMLoc at = onObject ? member->object->loc() : member->loc();
+    this->checker.diags_.error(at, read.error().message);
+    return member;
+  }
+  case Expr::Kind::Index: {
+    auto *index = cast<IndexExpr>(expr);
+    MemberChecker::ResultIndexedElement element = this->checker.memberChecker().checkIndex(index);
+    if (element.isOk()) {
+      return element.value();
+    }
+    llvm::SMLoc at = index->loc();
+    switch (element.error().code) {
+      case MemberCheckerCheckIndexErrorCode::ALREADY_REPORTED:
+        return index;
+      case MemberCheckerCheckIndexErrorCode::ENUM_NOT_INTEGER:
+      case MemberCheckerCheckIndexErrorCode::GENERIC_INDEX:
+      case MemberCheckerCheckIndexErrorCode::KEY_REJECTED:
+        at = index->index->loc();
+        break;
+      case MemberCheckerCheckIndexErrorCode::UNKNOWN_NOT_NARROWED:
+      case MemberCheckerCheckIndexErrorCode::VALUE_MAY_BE_UNDEFINED:
+        at = index->object->loc();
+        break;
+      case MemberCheckerCheckIndexErrorCode::ENUM_STRING:
+      case MemberCheckerCheckIndexErrorCode::FIELD_REJECTED:
+      case MemberCheckerCheckIndexErrorCode::DICT_INDEX:
+      case MemberCheckerCheckIndexErrorCode::NOT_INDEXABLE:
+        break;
+    }
+    this->checker.diags_.error(at, element.error().message);
+    return index;
+  }
   case Expr::Kind::Unary:
     return this->checker.unaryChecker().checkUnary(cast<UnaryExpr>(expr), expected, wraps);
   case Expr::Kind::Binary:

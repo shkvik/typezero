@@ -6,7 +6,7 @@ namespace tz {
 
 class WeakRefChecker {
 public:
-  explicit WeakRefChecker(Checker &checker);
+  explicit WeakRefChecker(Checker &owner);
 
   const Type *resolveWeakRefType(const TypeRef &ref);
   bool checkWeakTarget(const Type *target, llvm::SMLoc loc);
@@ -14,7 +14,7 @@ public:
   Expr *checkWeakRefMethod(CallExpr *call, MemberExpr *member);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

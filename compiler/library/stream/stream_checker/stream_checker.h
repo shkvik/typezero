@@ -6,7 +6,7 @@ namespace tz {
 
 class StreamChecker {
 public:
-  explicit StreamChecker(Checker &checker);
+  explicit StreamChecker(Checker &owner);
 
   Expr *checkStreamIntrinsic(CallExpr *call, NameExpr *name, const Type *typeArg);
   const Type *streamCallbackType();
@@ -15,7 +15,10 @@ public:
   Expr *checkStreamCall(CallExpr *call, MemberExpr *member, ClassDecl *cls);
 
 private:
-  Checker &checker_;
+  static std::string utf8(const std::u16string &text);
+  static bool isByteChunk(const Type *type);
+
+  Checker &checker;
 };
 
 }

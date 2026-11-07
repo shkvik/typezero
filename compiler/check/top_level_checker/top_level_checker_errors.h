@@ -28,6 +28,7 @@ public:
   static std::string label(llvm::StringRef name, llvm::StringRef declared, llvm::StringRef file);
   static std::string labelOf(llvm::StringRef name, llvm::StringRef file);
   static std::string quoted(llvm::StringRef name);
+  static std::string pending(llvm::StringRef name, bool started);
 };
 
 enum class TopLevelCheckerCheckImportAssignErrorCode {

@@ -6,13 +6,16 @@ namespace tz {
 
 class PathChecker {
 public:
-  explicit PathChecker(Checker &checker);
+  explicit PathChecker(Checker &owner);
 
   Expr *checkPathCall(CallExpr *call, NodeModule module, llvm::StringRef fn, llvm::SMLoc loc);
   Expr *checkPathValue(NodeModule module, llvm::StringRef name, Expr *expr);
 
 private:
-  Checker &checker_;
+  static const Type *parsedPathType();
+  static const Type *formatInputType();
+
+  Checker &checker;
 };
 
 }

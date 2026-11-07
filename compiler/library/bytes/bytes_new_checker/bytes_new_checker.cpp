@@ -15,18 +15,13 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/MathExtras.h"
-#include <limits>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::string utf8(const std::u16string &text) {
+std::string BytesNewChecker::utf8(const std::u16string &text) {
   std::string out;
   llvm::convertUTF16ToUTF8String(
       llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
@@ -35,7 +30,7 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-std::optional<std::u16string> literalText(const Expr *e) {
+std::optional<std::u16string> BytesNewChecker::literalText(const Expr *e) {
   if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
     e = conv->operand;
   }
@@ -49,11 +44,11 @@ std::optional<std::u16string> literalText(const Expr *e) {
   return std::nullopt;
 }
 
-std::string rangeText(int64_t lo, int64_t hi) {
+std::string BytesNewChecker::rangeText(int64_t lo, int64_t hi) {
   return std::to_string(lo) + " to " + std::to_string(hi);
 }
 
-bool mayBeFatal(const Expr *options) {
+bool BytesNewChecker::mayBeFatal(const Expr *options) {
   if (options->type->isError()) {
     return false;
   }
@@ -65,7 +60,7 @@ bool mayBeFatal(const Expr *options) {
   bool fatal = false;
   for (const ObjectLitExpr::Property &prop : literal->props) {
     if (prop.spread()) {
-      fatal = fatal || mayBeFatal(prop.value);
+      fatal = fatal || BytesNewChecker::mayBeFatal(prop.value);
       continue;
     }
     if (prop.name != "fatal") {
@@ -85,23 +80,22 @@ bool mayBeFatal(const Expr *options) {
   return fatal;
 }
 
-}
-
-BytesNewChecker::BytesNewChecker(Checker &checker) : checker_(checker) {}
+BytesNewChecker::BytesNewChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *BytesNewChecker::checkTextDecoderParse(CallExpr *call, MemberExpr *member) {
-  auto *expr =
-      checker_.ctx_.make<NewExpr>(call->loc(), "TextDecoder", std::vector<TypeRef>{}, call->args);
-  parsing_ = true;
-  Expr *made = checkBytesNew(expr, Type::bytesType(Bytes::TextDecoder));
-  parsing_ = false;
+  auto *expr = this->checker.ctx_.make<NewExpr>(call->loc(), "TextDecoder", std::vector<TypeRef>{},
+                                                call->args);
+  this->parsing = true;
+  Expr *made = this->checkBytesNew(expr, Type::bytesType(Bytes::TextDecoder));
+  this->parsing = false;
   auto *result = dyn_cast<CallExpr>(made);
   if (!result || result->builtin() != Builtin::TextDecoderNew) {
     return made;
   }
   result->callee = member;
   result->target = BuiltinCall{.builtin = Builtin::TextDecoderParse};
-  result->type = Type::result(result->type, checker_.prelude().builtinType("EncodingError"));
+  result->type = Type::result(result->type, this->checker.prelude().builtinType("EncodingError"));
 
   return result;
 }
@@ -111,13 +105,13 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
   std::vector<Expr *> &args = expr->args;
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
   };
-  auto *callee = checker_.ctx_.make<NameExpr>(loc, type->name());
-  auto *call = checker_.ctx_.make<CallExpr>(loc, callee, args);
+  auto *callee = this->checker.ctx_.make<NameExpr>(loc, type->name());
+  auto *call = this->checker.ctx_.make<CallExpr>(loc, callee, args);
   if (!expr->typeArgs.empty()) {
-    checker_.diags_.error(loc, "'new " + type->name() + "' takes no type arguments");
+    this->checker.diags_.error(loc, "'new " + type->name() + "' takes no type arguments");
   }
   auto made = [&](Builtin builtin, const Type *result) {
     call->target = BuiltinCall{.builtin = builtin};
@@ -128,42 +122,44 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
   call->type = Type::error();
   switch (type->bytes()) {
   case Bytes::Buffer:
-    checker_.diags_.error(loc,
-                          "'new Buffer(...)' is not supported, as in node, where it is deprecated: "
-                          "make one with 'Buffer.from(values)' or 'Buffer.alloc(size)'");
+    this->checker.diags_.error(
+        loc, "'new Buffer(...)' is not supported, as in node, where it is deprecated: "
+             "make one with 'Buffer.from(values)' or 'Buffer.alloc(size)'");
     checkArgsLoosely();
     return expr;
   case Bytes::ArrayBuffer: {
     if (args.size() == 2) {
-      checker_.diags_.error(args[1]->loc(),
-                            "an ArrayBuffer that can change its size is not supported yet "
-                            "(docs/bytes.md, section 7); make a new one of the size wanted");
+      this->checker.diags_.error(args[1]->loc(),
+                                 "an ArrayBuffer that can change its size is not supported yet "
+                                 "(docs/bytes.md, section 7); make a new one of the size wanted");
       checkArgsLoosely();
       return expr;
     }
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 1, 1);
     if (arity.isErr()) {
-      checker_.diags_.error(loc, arity.error().message);
+      this->checker.diags_.error(loc, arity.error().message);
       return call;
     }
-    call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
-    IndexProofs::ResultBetweenProven between = checker_.indexProofs().requireBetween(
+    call->args[0] = this->checker.memberChecker().checkPosition(call->args[0]);
+    IndexProofs::ResultBetweenProven between = this->checker.indexProofs().requireBetween(
         call->args[0], 0, std::nullopt, "the length of an ArrayBuffer");
     if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
-      checker_.diags_.error(call->args[0]->loc(), between.error().message);
+      this->checker.diags_.error(call->args[0]->loc(), between.error().message);
     }
     return made(Builtin::ArrayBufferNew, type);
   }
   case Bytes::DataView: {
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 3);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 1, 3);
     if (arity.isErr()) {
-      checker_.diags_.error(loc, arity.error().message);
+      this->checker.diags_.error(loc, arity.error().message);
       return call;
     }
-    call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
+    call->args[0] = this->checker.exprChecker().checkExpr(call->args[0]);
     const Type *buffer = call->args[0]->type;
     if (buffer->bytes() != Bytes::ArrayBuffer && !buffer->isError()) {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           call->args[0]->loc(),
           "a DataView is made over an ArrayBuffer, found '" + buffer->name() + "'" +
               (buffer->isTypedArray() ? "; give its buffer: 'new DataView(u.buffer, "
@@ -172,80 +168,82 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
       return call;
     }
     for (size_t i = 1; i < call->args.size(); ++i) {
-      call->args[i] = checker_.memberChecker().checkPosition(call->args[i]);
+      call->args[i] = this->checker.memberChecker().checkPosition(call->args[i]);
     }
-    checker_.byteProofs().checkView(call->args[0], call->args.size() > 1 ? call->args[1] : nullptr,
-                                    call->args.size() > 2 ? call->args[2] : nullptr, 1,
-                                    "the DataView");
+    this->checker.byteProofs().checkView(
+        call->args[0], call->args.size() > 1 ? call->args[1] : nullptr,
+        call->args.size() > 2 ? call->args[2] : nullptr, 1, "the DataView");
     return made(Builtin::DataViewNew, type);
   }
   case Bytes::TextEncoder: {
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 0, 0);
     if (arity.isErr()) {
-      checker_.diags_.error(loc, arity.error().message);
+      this->checker.diags_.error(loc, arity.error().message);
       return call;
     }
     return made(Builtin::TextEncoderNew, type);
   }
   case Bytes::TextDecoder: {
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 2);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 0, 2);
     if (arity.isErr()) {
-      checker_.diags_.error(loc, arity.error().message);
+      this->checker.diags_.error(loc, arity.error().message);
       return call;
     }
-    auto *resolved = checker_.ctx_.make<IntLitExpr>(loc, 1);
+    auto *resolved = this->checker.ctx_.make<IntLitExpr>(loc, 1);
     resolved->type = Type::intTy();
     std::u16string name = u"utf-8";
     std::vector<Expr *> checked{resolved, nullptr};
     if (!call->args.empty() && !isa<UndefinedExpr>(call->args[0])) {
       Expr *label = call->args[0];
-      if (std::optional<std::u16string> text = literalText(label)) {
-        std::string lower = llvm::StringRef(utf8(*text)).trim(" \t\n\f\r").lower();
+      if (std::optional<std::u16string> text = BytesNewChecker::literalText(label)) {
+        std::string lower = llvm::StringRef(BytesNewChecker::utf8(*text)).trim(" \t\n\f\r").lower();
         const char *found = tz_encoding_name(lower.c_str());
         if (!found) {
-          checker_.diags_.error(label->loc(),
-                                "'" + utf8(*text) +
-                                    "' is not an encoding TextDecoder knows (JavaScript "
-                                    "throws a RangeError); e.g. 'utf-8', 'utf-16le', "
-                                    "'windows-1251', 'latin1'");
+          this->checker.diags_.error(label->loc(),
+                                     "'" + BytesNewChecker::utf8(*text) +
+                                         "' is not an encoding TextDecoder knows (JavaScript "
+                                         "throws a RangeError); e.g. 'utf-8', 'utf-16le', "
+                                         "'windows-1251', 'latin1'");
           return call;
         }
         name = std::u16string(found, found + strlen(found));
       } else {
-        call->args[0] = checker_.argumentChecker().checkArg(label, Type::string());
+        call->args[0] = this->checker.argumentChecker().checkArg(label, Type::string());
         resolved->value = 0;
         checked[1] = call->args[0];
-        if (!parsing_ && !call->args[0]->type->isError() &&
-            !checker_.indexProofs().exempt(label->loc())) {
+        if (!this->parsing && !call->args[0]->type->isError() &&
+            !this->checker.indexProofs().exempt(label->loc())) {
           std::optional<std::vector<std::string>> labels =
-              checker_.literalTypes().knownTexts(call->args[0]);
+              this->checker.literalTypes().knownTexts(call->args[0]);
           if (!labels) {
-            checker_.diags_.error(label->loc(),
-                                  "a label known only when the program runs may name no "
-                                  "encoding, which JavaScript would throw a RangeError for; "
-                                  "parse it with 'TextDecoder.parse(label)', which gives a "
-                                  "Result, or check it first, e.g. 'if (label == \"utf-8\" || "
-                                  "label == \"windows-1251\")'");
+            this->checker.diags_.error(label->loc(),
+                                       "a label known only when the program runs may name no "
+                                       "encoding, which JavaScript would throw a RangeError for; "
+                                       "parse it with 'TextDecoder.parse(label)', which gives a "
+                                       "Result, or check it first, e.g. 'if (label == \"utf-8\" || "
+                                       "label == \"windows-1251\")'");
             return call;
           }
           for (const std::string &each : *labels) {
             std::string lower = llvm::StringRef(each).trim(" \t\n\f\r").lower();
             if (!tz_encoding_name(lower.c_str())) {
-              checker_.diags_.error(label->loc(),
-                                    "'" + each +
-                                        "' is not an encoding TextDecoder knows (JavaScript "
-                                        "throws a RangeError); e.g. 'utf-8', 'utf-16le', "
-                                        "'windows-1251', 'latin1'");
+              this->checker.diags_.error(label->loc(),
+                                         "'" + each +
+                                             "' is not an encoding TextDecoder knows (JavaScript "
+                                             "throws a RangeError); e.g. 'utf-8', 'utf-16le', "
+                                             "'windows-1251', 'latin1'");
               return call;
             }
           }
         }
       }
     } else if (!call->args.empty()) {
-      call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
+      call->args[0] = this->checker.exprChecker().checkExpr(call->args[0]);
     }
     if (!checked[1]) {
-      auto *lit = checker_.ctx_.make<StringLitExpr>(loc, name);
+      auto *lit = this->checker.ctx_.make<StringLitExpr>(loc, name);
       lit->type = Type::string();
       checked[1] = lit;
     }
@@ -253,16 +251,17 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
     if (call->args.size() == 2) {
       const Type *options = Type::object({{"fatal", Type::optional(Type::boolTy()), false},
                                           {"ignoreBOM", Type::optional(Type::boolTy()), false}});
-      Expr *given = checker_.exprChecker().checkExpr(call->args[1], options);
-      fatal = mayBeFatal(given);
+      Expr *given = this->checker.exprChecker().checkExpr(call->args[1], options);
+      fatal = BytesNewChecker::mayBeFatal(given);
       checked.push_back(
-          checker_.typeRelations().coerce(given, options, "the options of TextDecoder"));
+          this->checker.typeRelations().coerce(given, options, "the options of TextDecoder"));
     }
     call->args = checked;
     return made(Builtin::TextDecoderNew, fatal ? Type::bytesType(Bytes::FatalTextDecoder) : type);
   }
   case Bytes::FatalTextDecoder:
-    checker_.diags_.error(loc, "a FatalTextDecoder is made by 'new TextDecoder(label, { fatal: "
+    this->checker.diags_.error(loc,
+                               "a FatalTextDecoder is made by 'new TextDecoder(label, { fatal: "
                                "true })'");
     checkArgsLoosely();
     return expr;
@@ -271,63 +270,65 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
   }
 
   if (args.empty()) {
-    auto *zero = checker_.ctx_.make<IntLitExpr>(loc, 0);
+    auto *zero = this->checker.ctx_.make<IntLitExpr>(loc, 0);
     zero->type = Type::intTy();
     call->args = {zero};
     return made(Builtin::BytesNew, type);
   }
   if (args.size() > 3) {
-    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 3);
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 0, 3);
     if (arity.isErr()) {
-      checker_.diags_.error(loc, arity.error().message);
+      this->checker.diags_.error(loc, arity.error().message);
     }
     return call;
   }
   Expr *&source = call->args[0];
   if (auto *lit = dyn_cast<ArrayLitExpr>(source); lit && args.size() == 1) {
-    return checkBytesValues(call, lit, type);
+    return this->checkBytesValues(call, lit, type);
   }
-  checker_.iteratorMethods().markFused(source);
-  source = checker_.exprChecker().checkExpr(source);
+  this->checker.iteratorMethods().markFused(source);
+  source = this->checker.exprChecker().checkExpr(source);
   const Type *from = source->type;
   if (from->isError()) {
     return call;
   }
   if (from->bytes() == Bytes::ArrayBuffer) {
     for (size_t i = 1; i < call->args.size(); ++i) {
-      call->args[i] = checker_.memberChecker().checkPosition(call->args[i]);
+      call->args[i] = this->checker.memberChecker().checkPosition(call->args[i]);
     }
-    checker_.byteProofs().checkView(source, call->args.size() > 1 ? call->args[1] : nullptr,
-                                    call->args.size() > 2 ? call->args[2] : nullptr,
-                                    type->elementSize(), "the " + type->name().str());
+    this->checker.byteProofs().checkView(source, call->args.size() > 1 ? call->args[1] : nullptr,
+                                         call->args.size() > 2 ? call->args[2] : nullptr,
+                                         type->elementSize(), "the " + type->name().str());
     return made(Builtin::BytesView, type);
   }
   if (call->args.size() > 1) {
-    checker_.diags_.error(call->args[1]->loc(), "'new " + type->name() +
-                                                    "' takes an offset and a length only with an "
-                                                    "ArrayBuffer, found '" +
-                                                    from->name() + "'");
+    this->checker.diags_.error(call->args[1]->loc(),
+                               "'new " + type->name() +
+                                   "' takes an offset and a length only with an "
+                                   "ArrayBuffer, found '" +
+                                   from->name() + "'");
     return call;
   }
   if (from->isInteger()) {
-    source = checker_.typeRelations().convert(source, Type::intTy());
-    IndexProofs::ResultBetweenProven between = checker_.indexProofs().requireBetween(
+    source = this->checker.typeRelations().convert(source, Type::intTy());
+    IndexProofs::ResultBetweenProven between = this->checker.indexProofs().requireBetween(
         source, 0, std::nullopt, "the length of a " + type->name().str());
     if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
-      checker_.diags_.error(source->loc(), between.error().message);
+      this->checker.diags_.error(source->loc(), between.error().message);
     }
-    auto *zeroed = checker_.ctx_.make<BoolLitExpr>(loc, true);
+    auto *zeroed = this->checker.ctx_.make<BoolLitExpr>(loc, true);
     zeroed->type = Type::boolTy();
     call->args.push_back(zeroed);
     return made(Builtin::BytesNew, type);
   }
   if (from->isFloat()) {
-    checker_.diags_.error(source->loc(),
-                          "the length of a typed array must be an integer, found 'double'; "
-                          "round it with Math.floor(x) or drop the fraction with 'x | 0'");
+    this->checker.diags_.error(source->loc(),
+                               "the length of a typed array must be an integer, found 'double'; "
+                               "round it with Math.floor(x) or drop the fraction with 'x | 0'");
     return call;
   }
-  if (!checkBytesSource(source, type)) {
+  if (!this->checkBytesSource(source, type)) {
     return call;
   }
 
@@ -345,12 +346,12 @@ Expr *BytesNewChecker::checkBytesValues(CallExpr *call, ArrayLitExpr *lit, const
     std::vector<Expr *> values;
     for (ArrayLitExpr::Element &e : lit->elements) {
       if (e.hole) {
-        checker_.diags_.error(e.expr->loc(),
-                              "arrays cannot have holes; write the element explicitly");
+        this->checker.diags_.error(e.expr->loc(),
+                                   "arrays cannot have holes; write the element explicitly");
         return call;
       }
-      Expr *value = checker_.argumentChecker().checkArg(e.expr, element);
-      checker_.byteProofs().checkFits(value, type, what);
+      Expr *value = this->checker.argumentChecker().checkArg(e.expr, element);
+      this->checker.byteProofs().checkFits(value, type, what);
       values.push_back(value);
     }
     call->args = std::move(values);
@@ -358,16 +359,16 @@ Expr *BytesNewChecker::checkBytesValues(CallExpr *call, ArrayLitExpr *lit, const
     call->type = type;
     return call;
   }
-  Expr *array = checker_.exprChecker().checkExpr(lit, Type::array(element));
+  Expr *array = this->checker.exprChecker().checkExpr(lit, Type::array(element));
   if (array->type->isError()) {
     return call;
   }
   bool ok = true;
   for (const ArrayLitExpr::Element &e : lit->elements) {
     if (!e.spread) {
-      checker_.byteProofs().checkFits(e.expr, type, what);
+      this->checker.byteProofs().checkFits(e.expr, type, what);
     } else {
-      ok &= checkBytesSource(e.expr, type);
+      ok &= this->checkBytesSource(e.expr, type);
     }
   }
   if (!ok) {
@@ -390,25 +391,28 @@ bool BytesNewChecker::checkBytesSource(Expr *source, const Type *target) {
                         : from->isIterator() ? from->yielded()
                                              : nullptr;
   if (!element) {
-    checker_.diags_.error(source->loc(),
-                          "a " + target->name() +
-                              " is made from a length, an array or an iterator of numbers, "
-                              "another typed array or an ArrayBuffer, found '" +
-                              from->name() + "'" +
-                              (from->isString() ? "; for the bytes of a string, use 'new "
-                                                  "TextEncoder().encode(s)' or "
-                                                  "'Buffer.from(s)'"
-                                                : ""));
+    this->checker.diags_.error(source->loc(),
+                               "a " + target->name() +
+                                   " is made from a length, an array or an iterator of numbers, "
+                                   "another typed array or an ArrayBuffer, found '" +
+                                   from->name() + "'" +
+                                   (from->isString() ? "; for the bytes of a string, use 'new "
+                                                       "TextEncoder().encode(s)' or "
+                                                       "'Buffer.from(s)'"
+                                                     : ""));
     return false;
   }
   if (from->isIterator()) {
-    checker_.generatorChecker().checkSendsNothing(from, source->loc(),
-                                                  "'" + target->name().str() + "'");
+    GeneratorChecker::ResultNextNeedsNoValue nothing =
+        this->checker.generatorChecker().checkSendsNothing(from, "'" + target->name().str() + "'");
+    if (nothing.isErr()) {
+      this->checker.diags_.error(source->loc(), nothing.error().message);
+    }
   }
   if (!element->isNumeric()) {
-    checker_.diags_.error(source->loc(), "the elements of '" + from->name() +
-                                             "' are not numbers, which a " + target->name() +
-                                             " holds");
+    this->checker.diags_.error(source->loc(), "the elements of '" + from->name() +
+                                                  "' are not numbers, which a " + target->name() +
+                                                  " holds");
     return false;
   }
   int64_t lo, hi;
@@ -419,14 +423,14 @@ bool BytesNewChecker::checkBytesSource(Expr *source, const Type *target) {
   std::string text = valueText(source);
   std::string hint = target->name().str() + ".from(" + text + ", x => " + wrapHint(kind, "x") + ")";
   if (element->isFloat()) {
-    checker_.diags_.error(source->loc(),
-                          "the elements of '" + from->name() +
-                              "' are doubles, which an "
-                              "element of '" +
-                              target->name() +
-                              "' cannot hold without an explicit conversion; convert them, "
-                              "e.g. '" +
-                              target->name() + ".from(" + text + ", x => Math.round(x) & 0xff)'");
+    this->checker.diags_.error(
+        source->loc(), "the elements of '" + from->name() +
+                           "' are doubles, which an "
+                           "element of '" +
+                           target->name() +
+                           "' cannot hold without an explicit conversion; convert them, "
+                           "e.g. '" +
+                           target->name() + ".from(" + text + ", x => Math.round(x) & 0xff)'");
     return false;
   }
   if (kind == Bytes::Uint8Clamped) {
@@ -437,21 +441,23 @@ bool BytesNewChecker::checkBytesSource(Expr *source, const Type *target) {
     if (slo >= lo && shi <= hi) {
       return true;
     }
-    checker_.diags_.error(source->loc(),
-                          "the elements of '" + from->name() + "' (" + rangeText(slo, shi) +
-                              ") may not fit in an element of '" + target->name() + "' (" +
-                              rangeText(lo, hi) +
-                              "), and JavaScript would cut them without a word; convert "
-                              "them explicitly, e.g. '" +
-                              hint + "'");
+    this->checker.diags_.error(source->loc(),
+                               "the elements of '" + from->name() + "' (" +
+                                   BytesNewChecker::rangeText(slo, shi) +
+                                   ") may not fit in an element of '" + target->name() + "' (" +
+                                   BytesNewChecker::rangeText(lo, hi) +
+                                   "), and JavaScript would cut them without a word; convert "
+                                   "them explicitly, e.g. '" +
+                                   hint + "'");
     return false;
   }
-  checker_.diags_.error(source->loc(),
-                        "cannot prove that the elements of '" + from->name() + "' fit in " +
-                            "an element of '" + target->name() + "' (" + rangeText(lo, hi) +
-                            "), and JavaScript would cut them without a word; write the "
-                            "values in the literal, or convert them explicitly, e.g. '" +
-                            hint + "'");
+  this->checker.diags_.error(source->loc(),
+                             "cannot prove that the elements of '" + from->name() + "' fit in " +
+                                 "an element of '" + target->name() + "' (" +
+                                 BytesNewChecker::rangeText(lo, hi) +
+                                 "), and JavaScript would cut them without a word; write the "
+                                 "values in the literal, or convert them explicitly, e.g. '" +
+                                 hint + "'");
 
   return false;
 }

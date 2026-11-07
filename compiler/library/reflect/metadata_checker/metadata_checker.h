@@ -6,7 +6,7 @@ namespace tz {
 
 class MetadataChecker {
 public:
-  explicit MetadataChecker(Checker &checker);
+  explicit MetadataChecker(Checker &owner);
 
   const void *metadataKey(const Expr *key, std::string &label);
   const Type *metadataType(const void *key, llvm::StringRef label, llvm::SMLoc loc,
@@ -22,9 +22,9 @@ public:
                          llvm::SMLoc loc);
 
 private:
-  Checker &checker_;
-  llvm::StringMap<std::vector<FunctionDecl *>> metaWriters_;
-  llvm::StringMap<ClassDecl *> builtinConstructors_;
+  Checker &checker;
+  llvm::StringMap<std::vector<FunctionDecl *>> metaWriters;
+  llvm::StringMap<ClassDecl *> builtinConstructors;
 };
 
 }

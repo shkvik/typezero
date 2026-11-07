@@ -6,14 +6,14 @@ namespace tz {
 
 class SetEncodingChecker {
 public:
-  explicit SetEncodingChecker(Checker &checker);
+  explicit SetEncodingChecker(Checker &owner);
 
   Expr *checkSetEncoding(CallExpr *call, MemberExpr *member, ClassDecl *cls);
   const Type *encodedStreamType(ClassDecl *cls, llvm::SMLoc loc);
   const Type *streamViewOf(const Checker::FieldPath &path, llvm::SMLoc loc) const;
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

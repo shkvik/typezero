@@ -5,7 +5,6 @@
 #include "compiler/declare/module_declarer/module_declarer.h"
 #include "compiler/declare/type_declarer/type_declarer.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
-#include "llvm/ADT/StringSet.h"
 #include "llvm/Support/Path.h"
 
 using llvm::dyn_cast;
@@ -17,6 +16,43 @@ const char *DeclarationChecker::accessWord(Access access) {
   return access == Access::Public      ? "public"
          : access == Access::Protected ? "protected"
                                        : "private";
+}
+
+bool DeclarationChecker::typesAgree(const Type *here, const Type *there) {
+  return !here || !there || here == there || here->isError() || there->isError();
+}
+
+bool DeclarationChecker::typesAgreeWidened(const Type *here, const Type *there) {
+  return DeclarationChecker::typesAgree(here, there) || Type::optional(here) == there;
+}
+
+std::string DeclarationChecker::memberKey(llvm::StringRef name, bool isStatic) {
+  return (isStatic ? "static " : "") + name.str();
+}
+
+const ClassField *DeclarationChecker::classField(const ClassDecl *cls,
+                                                 const DeclaredMember &member) {
+  const ClassField *field = nullptr;
+  for (const ClassField &candidate : cls->fields) {
+    if (candidate.name == member.name && candidate.isStatic() == member.isStatic &&
+        !candidate.method()) {
+      field = &candidate;
+    }
+  }
+
+  return field;
+}
+
+const FunctionDecl *DeclarationChecker::classMethod(const ClassDecl *cls,
+                                                    const DeclaredMember &member) {
+  const FunctionDecl *method = nullptr;
+  for (const FunctionDecl *candidate : cls->methods) {
+    if (candidate->name == member.name && candidate->isStatic() == member.isStatic) {
+      method = candidate;
+    }
+  }
+
+  return method;
 }
 
 DeclarationChecker::DeclarationChecker(Checker &owner)
@@ -34,10 +70,34 @@ const Type *DeclarationChecker::resolve(const std::optional<TypeRef> &ref, bool 
   return this->checker.typeResolver().resolveType(*ref, allowVoid);
 }
 
-void DeclarationChecker::mismatch(llvm::SMLoc loc, const std::string &what, const Type *here,
-                                  const Type *there) {
-  this->checker.diags_.error(loc, what + " is '" + here->name().str() + "' here, and '" +
-                                      there->name().str() + "' in '" + this->fileName() + "'");
+DeclarationChecker::ResultModuleExportsName
+DeclarationChecker::exportFound(llvm::StringRef name) const {
+  auto found = this->exportedNames.find(name);
+  if (found == this->exportedNames.end()) {
+    std::string message = ErrorTextExports::unexported(name, this->fileName());
+
+    return err(DeclarationCheckerExportFoundError{
+        .code = DeclarationCheckerExportFoundErrorCode::NOT_EXPORTED,
+        .message = message,
+    });
+  }
+
+  return ok(&found->second);
+}
+
+DeclarationChecker::ResultExportWasDeclared
+DeclarationChecker::exportDeclared(llvm::StringRef name, const llvm::StringSet<> &declared,
+                                   llvm::StringRef declarations) {
+  if (!declared.contains(name)) {
+    std::string message = ErrorTextExports::undeclared(name, declarations);
+
+    return err(DeclarationCheckerExportDeclaredError{
+        .code = DeclarationCheckerExportDeclaredErrorCode::NOT_DECLARED,
+        .message = message,
+    });
+  }
+
+  return ok(name);
 }
 
 void DeclarationChecker::check(Module *module) {
@@ -56,40 +116,43 @@ void DeclarationChecker::check(Module *module) {
   }
   llvm::StringSet<> declared;
   const DeclarationFile &file = *module->declaration;
-  auto lookup = [&](llvm::StringRef name, llvm::SMLoc loc) -> const Exported * {
-    declared.insert(name);
-    auto found = this->exportedNames.find(name);
-    if (found == this->exportedNames.end()) {
-      this->checker.diags_.error(loc, "'" + name + "' is declared here, but '" + this->fileName() +
-                                          "' does not export it");
-      return nullptr;
-    }
-
-    return &found->second;
-  };
   for (Stmt *item : file.items) {
     if (auto *alias = dyn_cast<TypeAliasDecl>(item)) {
-      if (const Exported *exported = lookup(alias->name, alias->loc())) {
-        this->checkAlias(alias, *exported);
+      declared.insert(alias->name);
+      ResultModuleExportsName exported = this->exportFound(alias->name);
+      if (exported.isErr()) {
+        this->checker.diags_.error(alias->loc(), exported.error().message);
+        continue;
+      }
+      ResultAliasTypesAreSame same = this->checkAlias(alias, *exported.value());
+      if (same.isErr()) {
+        this->checker.diags_.error(alias->loc(), same.error().message);
       }
     } else if (auto *fn = dyn_cast<FunctionDecl>(item)) {
-      if (const Exported *exported = lookup(fn->name, fn->loc())) {
-        this->checkFunction(fn, *exported);
+      declared.insert(fn->name);
+      ResultModuleExportsName exported = this->exportFound(fn->name);
+      if (exported.isErr()) {
+        this->checker.diags_.error(fn->loc(), exported.error().message);
+        continue;
       }
+      this->checkFunction(fn, *exported.value());
     }
   }
   for (const DeclaredClass &cls : file.classes) {
-    if (const Exported *exported = lookup(cls.name, cls.loc)) {
-      this->checkClass(cls, *exported);
+    declared.insert(cls.name);
+    ResultModuleExportsName exported = this->exportFound(cls.name);
+    if (exported.isErr()) {
+      this->checker.diags_.error(cls.loc, exported.error().message);
+      continue;
     }
+    this->checkClass(cls, *exported.value());
   }
   std::string declarations = llvm::sys::path::filename(file.path).str();
   for (const auto &entry : this->exportedNames) {
-    if (!declared.contains(entry.getKey())) {
-      this->checker.diags_.error(
-          entry.second.loc, "'" + entry.getKey() + "' is exported, but '" + declarations +
-                                "' does not declare it: a declaration file declares all that its "
-                                "module exports");
+    ResultExportWasDeclared listed =
+        DeclarationChecker::exportDeclared(entry.getKey(), declared, declarations);
+    if (listed.isErr()) {
+      this->checker.diags_.error(entry.second.loc, listed.error().message);
     }
   }
   if (outer) {
@@ -97,91 +160,154 @@ void DeclarationChecker::check(Module *module) {
   }
 }
 
-void DeclarationChecker::checkAlias(TypeAliasDecl *declared, const Exported &exported) {
-  auto *impl =
+DeclarationChecker::ResultAliasTypesAreSame
+DeclarationChecker::checkAlias(TypeAliasDecl *declared, const Exported &exported) const {
+  auto *implemented =
       dyn_cast_or_null<TypeAliasDecl>(this->checker.typeDeclarer().lookupType(exported.local));
-  if (!impl) {
-    this->checker.diags_.error(declared->loc(), "'" + declared->name + "' is not a type in '" +
-                                                    this->fileName() + "'");
-    return;
+  std::string file = this->fileName();
+  if (!implemented) {
+    std::string message = ErrorTextDeclaration::notType(declared->name, file);
+
+    return err(DeclarationCheckerCheckAliasError{
+        .code = DeclarationCheckerCheckAliasErrorCode::NOT_A_TYPE,
+        .message = message,
+    });
   }
-  if (declared->typeParams.size() != impl->typeParams.size()) {
-    this->checker.diags_.error(declared->loc(), "'" + declared->name + "' takes " +
-                                                    std::to_string(declared->typeParams.size()) +
-                                                    " type parameters here, and " +
-                                                    std::to_string(impl->typeParams.size()) +
-                                                    " in '" + this->fileName() + "'");
-    return;
+  size_t count = declared->typeParams.size();
+  size_t implementedCount = implemented->typeParams.size();
+  if (count != implementedCount) {
+    std::string message =
+        ErrorTextDeclaration::typeParams(declared->name, count, implementedCount, file);
+
+    return err(DeclarationCheckerCheckAliasError{
+        .code = DeclarationCheckerCheckAliasErrorCode::TYPE_PARAMS_DIFFER,
+        .message = message,
+    });
   }
-  if (!impl->typeParams.empty()) {
-    return;
+  if (!implemented->typeParams.empty()) {
+    return ok(implemented);
   }
-  const Type *there = this->checker.typeDeclarer().resolveAlias(impl);
+  const Type *there = this->checker.typeDeclarer().resolveAlias(implemented);
   const Type *here = this->checker.typeDeclarer().resolveAlias(declared);
-  if (!here || !there || here == there || here->isError() || there->isError()) {
-    return;
+  if (DeclarationChecker::typesAgree(here, there)) {
+    return ok(implemented);
   }
-  std::string what = "'" + declared->name.str() + "'";
+  std::string what = ErrorTextDeclaration::quoted(declared->name);
   if (here->isObject() && there->isObject() && !here->isClass() && !there->isClass()) {
     for (const Field &mine : here->fields()) {
       const Field *theirs = there->field(mine.name);
       if (!theirs) {
-        this->checker.diags_.error(declared->loc(), what + " has field '" + mine.name +
-                                                        "' here, and not in '" + this->fileName() +
-                                                        "'");
-        return;
+        std::string message = ErrorTextDeclaration::extraField(what, mine.name, file);
+
+        return err(DeclarationCheckerCheckAliasError{
+            .code = DeclarationCheckerCheckAliasErrorCode::FIELD_ONLY_HERE,
+            .message = message,
+        });
       }
+      std::string field = ErrorTextDeclaration::fieldOf(mine.name, what);
       if (mine.type != theirs->type) {
-        this->mismatch(declared->loc(), "field '" + mine.name + "' of " + what, mine.type,
-                       theirs->type);
-        return;
+        std::string message =
+            ErrorTextDeclaration::mismatch(field, mine.type->name(), theirs->type->name(), file);
+
+        return err(DeclarationCheckerCheckAliasError{
+            .code = DeclarationCheckerCheckAliasErrorCode::FIELD_TYPE_DIFFERS,
+            .message = message,
+        });
       }
       if (mine.readonly != theirs->readonly) {
-        this->checker.diags_.error(declared->loc(),
-                                   "field '" + mine.name + "' of " + what + " is " +
-                                       (theirs->readonly ? "readonly" : "not readonly") + " in '" +
-                                       this->fileName() + "'");
-        return;
+        std::string message = ErrorTextDeclaration::readonly(field, theirs->readonly, file);
+
+        return err(DeclarationCheckerCheckAliasError{
+            .code = DeclarationCheckerCheckAliasErrorCode::READONLY_DIFFERS,
+            .message = message,
+        });
       }
     }
     for (const Field &theirs : there->fields()) {
       if (!here->field(theirs.name)) {
-        this->checker.diags_.error(declared->loc(), what + " has field '" + theirs.name + "' in '" +
-                                                        this->fileName() +
-                                                        "', which is not declared here");
-        return;
+        std::string message = ErrorTextDeclaration::absentHere(what, theirs.name, file);
+
+        return err(DeclarationCheckerCheckAliasError{
+            .code = DeclarationCheckerCheckAliasErrorCode::FIELD_ONLY_THERE,
+            .message = message,
+        });
       }
     }
   }
-  this->mismatch(declared->loc(), what, here, there);
+  std::string message = ErrorTextDeclaration::mismatch(what, here->name(), there->name(), file);
+
+  return err(DeclarationCheckerCheckAliasError{
+      .code = DeclarationCheckerCheckAliasErrorCode::TYPES_DIFFER,
+      .message = message,
+  });
+}
+
+DeclarationChecker::ResultParamCountMatches
+DeclarationChecker::paramCount(size_t here, size_t there, const std::string &what) const {
+  if (here != there) {
+    std::string message = ErrorTextDeclaration::paramCount(what, here, there, this->fileName());
+
+    return err(DeclarationCheckerParamCountError{
+        .code = DeclarationCheckerParamCountErrorCode::COUNTS_DIFFER,
+        .message = message,
+    });
+  }
+
+  return ok(here);
+}
+
+DeclarationChecker::ResultParamShapeMatches
+DeclarationChecker::paramShape(const Param &mine, const Param &theirs,
+                               const std::string &param) const {
+  bool optionalThere = theirs.optional() || theirs.defaultValue();
+  if (mine.optional() != optionalThere || mine.rest() != theirs.rest()) {
+    std::string message = ErrorTextDeclaration::paramKind(param, mine.optional(), this->fileName());
+
+    return err(DeclarationCheckerParamShapeError{
+        .code = DeclarationCheckerParamShapeErrorCode::SHAPE_DIFFERS,
+        .message = message,
+    });
+  }
+
+  return ok(&mine);
+}
+
+DeclarationChecker::ResultStoredTypeMatches
+DeclarationChecker::storedType(const Type *here, const Type *there, const std::string &what) const {
+  if (!DeclarationChecker::typesAgreeWidened(here, there)) {
+    std::string message =
+        ErrorTextDeclaration::mismatch(what, here->name(), there->name(), this->fileName());
+
+    return err(DeclarationCheckerStoredTypeError{
+        .code = DeclarationCheckerStoredTypeErrorCode::TYPES_DIFFER,
+        .message = message,
+    });
+  }
+
+  return ok(there);
 }
 
 bool DeclarationChecker::sameParams(const std::vector<Param> &declared, const FunctionDecl *fn,
                                     llvm::SMLoc loc, const std::string &what) {
-  if (declared.size() != fn->params.size()) {
-    this->checker.diags_.error(
-        loc, what + " takes " + std::to_string(declared.size()) + " parameters here, and " +
-                 std::to_string(fn->params.size()) + " in '" + this->fileName() + "'");
+  ResultParamCountMatches counted = this->paramCount(declared.size(), fn->params.size(), what);
+  if (counted.isErr()) {
+    this->checker.diags_.error(loc, counted.error().message);
     return false;
   }
-  for (size_t i = 0; i < declared.size(); ++i) {
-    const Param &mine = declared[i];
-    const Param &theirs = fn->params[i];
-    std::string param = "parameter '" + mine.name.str() + "' of " + what;
-    if (mine.optional() != (theirs.optional() || theirs.defaultValue()) ||
-        mine.rest() != theirs.rest()) {
-      this->checker.diags_.error(mine.loc, param + " is " +
-                                               (mine.optional() ? "optional" : "required") +
-                                               " here, and not in '" + this->fileName() + "'");
+  for (size_t index = 0; index < declared.size(); ++index) {
+    const Param &mine = declared[index];
+    const Param &theirs = fn->params[index];
+    std::string param = ErrorTextDeclaration::paramOf(mine.name, what);
+    ResultParamShapeMatches shaped = this->paramShape(mine, theirs, param);
+    if (shaped.isErr()) {
+      this->checker.diags_.error(mine.loc, shaped.error().message);
       return false;
     }
     const Type *here = this->resolve(mine.type, false);
-    const Type *there = theirs.declaredType;
-    if (!here || !there || here->isError() || there->isError()) {
-      continue;
-    }
-    if (here != there && Type::optional(here) != there) {
-      this->mismatch(mine.loc, "the type of " + param, here, there);
+    std::string typed = ErrorTextDeclaration::typeOf(param);
+    ResultStoredTypeMatches stored = this->storedType(here, theirs.declaredType, typed);
+    if (stored.isErr()) {
+      this->checker.diags_.error(mine.loc, stored.error().message);
       return false;
     }
   }
@@ -189,20 +315,78 @@ bool DeclarationChecker::sameParams(const std::vector<Param> &declared, const Fu
   return true;
 }
 
+DeclarationChecker::ResultModuleHasFunction
+DeclarationChecker::functionFound(const ScopeEntry &entry, llvm::StringRef name) const {
+  if (!entry.func() || !entry.func()->decl) {
+    std::string message = ErrorTextDeclaration::noFunction(name, this->fileName());
+
+    return err(DeclarationCheckerFunctionFoundError{
+        .code = DeclarationCheckerFunctionFoundErrorCode::NOT_A_FUNCTION,
+        .message = message,
+    });
+  }
+
+  return ok(entry.func()->decl);
+}
+
+DeclarationChecker::ResultTypeParamsMatched
+DeclarationChecker::typeParamCount(size_t here, size_t there, const std::string &what) const {
+  if (here != there) {
+    std::string message = ErrorTextDeclaration::otherCount(what, this->fileName());
+
+    return err(DeclarationCheckerTypeParamCountError{
+        .code = DeclarationCheckerTypeParamCountErrorCode::COUNTS_DIFFER,
+        .message = message,
+    });
+  }
+
+  return ok(here);
+}
+
+DeclarationChecker::ResultReturnTypeWritten
+DeclarationChecker::returnWritten(const std::optional<TypeRef> &ref, const std::string &what) {
+  if (!ref) {
+    std::string message = ErrorTextDeclaration::returnType(what);
+
+    return err(DeclarationCheckerReturnWrittenError{
+        .code = DeclarationCheckerReturnWrittenErrorCode::NOT_WRITTEN,
+        .message = message,
+    });
+  }
+
+  return ok(&*ref);
+}
+
+DeclarationChecker::ResultReturnTypeMatches
+DeclarationChecker::sameReturn(const Type *here, const Type *there, const std::string &what) const {
+  if (!DeclarationChecker::typesAgree(here, there)) {
+    std::string gives = ErrorTextDeclaration::gives(what);
+    std::string message =
+        ErrorTextDeclaration::mismatch(gives, here->name(), there->name(), this->fileName());
+
+    return err(DeclarationCheckerSameReturnError{
+        .code = DeclarationCheckerSameReturnErrorCode::TYPES_DIFFER,
+        .message = message,
+    });
+  }
+
+  return ok(there);
+}
+
 void DeclarationChecker::checkFunction(FunctionDecl *declared, const Exported &exported) {
   ScopeEntry entry = this->checker.topLevelChecker().lookupValue(exported.local);
-  if (!entry.func() || !entry.func()->decl) {
-    this->checker.diags_.error(declared->loc(), "'" + declared->name + "' is not a function in '" +
-                                                    this->fileName() + "'");
+  ResultModuleHasFunction found = this->functionFound(entry, declared->name);
+  if (found.isErr()) {
+    this->checker.diags_.error(declared->loc(), found.error().message);
     return;
   }
-  const FunctionDecl *fn = entry.func()->decl;
-  std::string what = "'" + declared->name.str() + "'";
+  const FunctionDecl *fn = found.value();
+  std::string what = ErrorTextDeclaration::quoted(declared->name);
   if (!declared->typeParams.empty() || !fn->typeParams.empty()) {
-    if (declared->typeParams.size() != fn->typeParams.size()) {
-      this->checker.diags_.error(declared->loc(),
-                                 what + " takes another number of type parameters in '" +
-                                     this->fileName() + "'");
+    ResultTypeParamsMatched matched =
+        this->typeParamCount(declared->typeParams.size(), fn->typeParams.size(), what);
+    if (matched.isErr()) {
+      this->checker.diags_.error(declared->loc(), matched.error().message);
     }
     return;
   }
@@ -210,16 +394,16 @@ void DeclarationChecker::checkFunction(FunctionDecl *declared, const Exported &e
   if (!this->sameParams(declared->params, fn, declared->loc(), what)) {
     return;
   }
-  if (!declared->returnType) {
-    this->checker.diags_.error(declared->loc(), "write what " + what +
-                                                    " gives: ': T' after its "
-                                                    "parameters");
+  ResultReturnTypeWritten written = DeclarationChecker::returnWritten(declared->returnType, what);
+  if (written.isErr()) {
+    this->checker.diags_.error(declared->loc(), written.error().message);
     return;
   }
   const Type *here = this->resolve(declared->returnType, true);
   const Type *there = this->checker.returnInferrer().returnType(entry.func());
-  if (here && there && here != there && !here->isError() && !there->isError()) {
-    this->mismatch(declared->loc(), "what " + what + " gives", here, there);
+  ResultReturnTypeMatches matches = this->sameReturn(here, there, what);
+  if (matches.isErr()) {
+    this->checker.diags_.error(declared->loc(), matches.error().message);
   }
 }
 
@@ -244,35 +428,78 @@ bool DeclarationChecker::mentionsHidden(const FunctionDecl *fn) const {
   return false;
 }
 
-void DeclarationChecker::checkField(const DeclaredMember &member, const ClassField &field,
-                                    const ClassDecl *cls) {
-  std::string what = "'" + member.name.str() + "' of '" + cls->name.str() + "'";
+DeclarationChecker::ResultDeclaredFieldForm
+DeclarationChecker::declaredField(const DeclaredMember &member, const std::string &what) const {
   const DeclaredField *declared = member.form.as<DeclaredField>();
   if (!declared) {
-    this->checker.diags_.error(member.loc, what + " is a field in '" + this->fileName() + "'");
+    std::string message = ErrorTextDeclaredClass::isField(what, this->fileName());
+
+    return err(DeclarationCheckerDeclaredFieldError{
+        .code = DeclarationCheckerDeclaredFieldErrorCode::IS_A_FIELD,
+        .message = message,
+    });
+  }
+
+  return ok(declared);
+}
+
+DeclarationChecker::ResultReadonlyFlagsSame
+DeclarationChecker::readonlyAgrees(const DeclaredField &declared, const ClassField &field,
+                                   const std::string &what) const {
+  if (declared.readonly != field.readonly) {
+    std::string message = ErrorTextDeclaration::readonly(what, field.readonly, this->fileName());
+
+    return err(DeclarationCheckerReadonlyAgreesError{
+        .code = DeclarationCheckerReadonlyAgreesErrorCode::READONLY_DIFFERS,
+        .message = message,
+    });
+  }
+
+  return ok(&field);
+}
+
+DeclarationChecker::ResultOptionalFlagsSame
+DeclarationChecker::optionalAgrees(const DeclaredField &declared, const ClassField &field,
+                                   const std::string &what) const {
+  if (declared.optional != field.optional()) {
+    std::string message = ErrorTextDeclaration::optional(what, field.optional(), this->fileName());
+
+    return err(DeclarationCheckerOptionalAgreesError{
+        .code = DeclarationCheckerOptionalAgreesErrorCode::OPTIONAL_DIFFERS,
+        .message = message,
+    });
+  }
+
+  return ok(&field);
+}
+
+void DeclarationChecker::checkField(const DeclaredMember &member, const ClassField &field,
+                                    const ClassDecl *cls) {
+  std::string what = ErrorTextDeclaration::memberOf(member.name, cls->name);
+  ResultDeclaredFieldForm form = this->declaredField(member, what);
+  if (form.isErr()) {
+    this->checker.diags_.error(member.loc, form.error().message);
     return;
   }
-  if (declared->readonly != field.readonly) {
-    this->checker.diags_.error(member.loc,
-                               what + (field.readonly ? " is readonly" : " is not readonly") +
-                                   " in '" + this->fileName() + "'");
+  const DeclaredField *declared = form.value();
+  ResultReadonlyFlagsSame readonlyKept = this->readonlyAgrees(*declared, field, what);
+  if (readonlyKept.isErr()) {
+    this->checker.diags_.error(member.loc, readonlyKept.error().message);
   }
-  if (declared->optional != field.optional()) {
-    this->checker.diags_.error(member.loc,
-                               what + (field.optional() ? " is optional" : " is not optional") +
-                                   " in '" + this->fileName() + "'");
+  ResultOptionalFlagsSame optionalKept = this->optionalAgrees(*declared, field, what);
+  if (optionalKept.isErr()) {
+    this->checker.diags_.error(member.loc, optionalKept.error().message);
   }
   const Type *here = this->resolve(member.type, false);
-  const Type *there = field.resolved;
-  if (here && there && !here->isError() && !there->isError() && here != there &&
-      Type::optional(here) != there) {
-    this->mismatch(member.loc, "the type of " + what, here, there);
+  std::string typed = ErrorTextDeclaration::typeOf(what);
+  ResultStoredTypeMatches stored = this->storedType(here, field.resolved, typed);
+  if (stored.isErr()) {
+    this->checker.diags_.error(member.loc, stored.error().message);
   }
 }
 
-void DeclarationChecker::checkMethod(const DeclaredMember &member, const FunctionDecl *fn,
-                                     const ClassDecl *cls) {
-  std::string what = "'" + member.name.str() + "' of '" + cls->name.str() + "'";
+DeclarationChecker::ResultDeclaredSignature
+DeclarationChecker::methodSignature(const DeclaredMember &member, const std::string &what) const {
   const DeclaredSignature *signature = nullptr;
   switch (member.form.kind()) {
     case DeclaredMemberKind::DECLARED_FIELD:
@@ -285,46 +512,273 @@ void DeclarationChecker::checkMethod(const DeclaredMember &member, const Functio
       break;
   }
   if (!signature) {
-    this->checker.diags_.error(member.loc, what + " is a method in '" + this->fileName() + "'");
+    std::string message = ErrorTextDeclaredClass::isMethod(what, this->fileName());
+
+    return err(DeclarationCheckerMethodSignatureError{
+        .code = DeclarationCheckerMethodSignatureErrorCode::IS_A_METHOD,
+        .message = message,
+    });
+  }
+
+  return ok(signature);
+}
+
+void DeclarationChecker::checkMethod(const DeclaredMember &member, const FunctionDecl *fn,
+                                     const ClassDecl *cls) {
+  std::string what = ErrorTextDeclaration::memberOf(member.name, cls->name);
+  ResultDeclaredSignature signature = this->methodSignature(member, what);
+  if (signature.isErr()) {
+    this->checker.diags_.error(member.loc, signature.error().message);
     return;
   }
-  if (!signature->typeParams.empty() || !fn->typeParams.empty()) {
-    if (signature->typeParams.size() != fn->typeParams.size()) {
-      this->checker.diags_.error(member.loc, what +
-                                                 " takes another number of type parameters in '" +
-                                                 this->fileName() + "'");
+  const DeclaredSignature *declared = signature.value();
+  if (!declared->typeParams.empty() || !fn->typeParams.empty()) {
+    ResultTypeParamsMatched matched =
+        this->typeParamCount(declared->typeParams.size(), fn->typeParams.size(), what);
+    if (matched.isErr()) {
+      this->checker.diags_.error(member.loc, matched.error().message);
     }
     return;
   }
   this->checker.returnInferrer().resolveParams(fn->sym);
   bool constructor = member.form.is<DeclaredConstructor>();
-  if (!this->sameParams(signature->params, fn, member.loc, what) || constructor) {
+  if (!this->sameParams(declared->params, fn, member.loc, what) || constructor) {
     return;
   }
-  if (!member.type) {
-    this->checker.diags_.error(member.loc, "write what " + what +
-                                               " gives: ': T' after its "
-                                               "parameters");
+  ResultReturnTypeWritten written = DeclarationChecker::returnWritten(member.type, what);
+  if (written.isErr()) {
+    this->checker.diags_.error(member.loc, written.error().message);
     return;
   }
   const Type *here = this->resolve(member.type, true);
   const Type *there = this->checker.returnInferrer().returnType(fn->sym);
-  if (here && there && here != there && !here->isError() && !there->isError()) {
-    this->mismatch(member.loc, "what " + what + " gives", here, there);
+  ResultReturnTypeMatches matches = this->sameReturn(here, there, what);
+  if (matches.isErr()) {
+    this->checker.diags_.error(member.loc, matches.error().message);
+  }
+}
+
+DeclarationChecker::ResultModuleHasTheClass
+DeclarationChecker::classFound(const DeclaredClass &declared, const Exported &exported) const {
+  auto *cls = dyn_cast_or_null<ClassDecl>(this->checker.typeDeclarer().lookupType(exported.local));
+  if (!cls) {
+    std::string message = ErrorTextDeclaredClass::notClass(declared.name, this->fileName());
+
+    return err(DeclarationCheckerClassFoundError{
+        .code = DeclarationCheckerClassFoundErrorCode::NOT_A_CLASS,
+        .message = message,
+    });
+  }
+
+  return ok(cls);
+}
+
+DeclarationChecker::ResultAccessWordWritten
+DeclarationChecker::accessWritten(const DeclaredMember &member, const std::string &what) {
+  if (!member.accessWritten) {
+    std::string message = ErrorTextDeclaredClass::noAccess(what);
+
+    return err(DeclarationCheckerAccessWrittenError{
+        .code = DeclarationCheckerAccessWrittenErrorCode::NOT_WRITTEN,
+        .message = message,
+    });
+  }
+
+  return ok(&member);
+}
+
+DeclarationChecker::ResultConstructorExists
+DeclarationChecker::callableConstructor(const ClassDecl *cls) const {
+  const FunctionDecl *callable = nullptr;
+  for (const FunctionDecl *constructor : cls->constructors) {
+    if (constructor->access() != Access::Private) {
+      callable = constructor;
+    }
+  }
+  if (!callable) {
+    std::string message = ErrorTextDeclaredClass::noCallable(cls->name, this->fileName());
+
+    return err(DeclarationCheckerCallableConstructorError{
+        .code = DeclarationCheckerCallableConstructorErrorCode::NO_CONSTRUCTOR,
+        .message = message,
+    });
+  }
+
+  return ok(callable);
+}
+
+DeclarationChecker::ResultConstructorAccess
+DeclarationChecker::constructorAccess(const DeclaredMember &member, const FunctionDecl *constructor,
+                                      const ClassDecl *cls) const {
+  if (member.access != constructor->access()) {
+    const char *word = DeclarationChecker::accessWord(constructor->access());
+    std::string message = ErrorTextDeclaredClass::newAccess(cls->name, word, this->fileName());
+
+    return err(DeclarationCheckerConstructorAccessError{
+        .code = DeclarationCheckerConstructorAccessErrorCode::ACCESS_DIFFERS,
+        .message = message,
+    });
+  }
+
+  return ok(constructor);
+}
+
+DeclarationChecker::ResultClassHasTheMember
+DeclarationChecker::memberFound(const DeclaredMember &member, const ClassDecl *cls,
+                                const ClassField *field, const FunctionDecl *method) const {
+  if (!field && !method) {
+    std::string message =
+        ErrorTextDeclaredClass::noMember(cls->name, member.name, member.isStatic, this->fileName());
+
+    return err(DeclarationCheckerMemberFoundError{
+        .code = DeclarationCheckerMemberFoundErrorCode::NO_MEMBER,
+        .message = message,
+    });
+  }
+
+  return ok(&member);
+}
+
+DeclarationChecker::ResultPublicOrProtected
+DeclarationChecker::memberVisible(Access access, const std::string &what) const {
+  if (access == Access::Private) {
+    std::string message = ErrorTextDeclaredClass::isPrivate(what, this->fileName());
+
+    return err(DeclarationCheckerMemberVisibleError{
+        .code = DeclarationCheckerMemberVisibleErrorCode::PRIVATE_MEMBER,
+        .message = message,
+    });
+  }
+
+  return ok(access);
+}
+
+DeclarationChecker::ResultAccessWordMatches
+DeclarationChecker::accessAgrees(const DeclaredMember &member, Access access,
+                                 const std::string &what) const {
+  if (member.accessWritten && member.access != access) {
+    const char *word = DeclarationChecker::accessWord(access);
+    std::string message = ErrorTextDeclaredClass::accessIs(what, word, this->fileName());
+
+    return err(DeclarationCheckerAccessAgreesError{
+        .code = DeclarationCheckerAccessAgreesErrorCode::ACCESS_DIFFERS,
+        .message = message,
+    });
+  }
+
+  return ok(access);
+}
+
+DeclarationChecker::ResultMemberWasDeclared
+DeclarationChecker::memberListed(const llvm::StringSet<> &seen, llvm::StringRef name, bool isStatic,
+                                 const ClassDecl *cls) const {
+  std::string key = DeclarationChecker::memberKey(name, isStatic);
+  if (!seen.contains(key)) {
+    std::string declarations =
+        llvm::sys::path::filename(this->checkedModule->declaration->path).str();
+    std::string message =
+        ErrorTextDeclaredClass::undeclared(name, cls->name, isStatic, declarations);
+
+    return err(DeclarationCheckerMemberListedError{
+        .code = DeclarationCheckerMemberListedErrorCode::NOT_DECLARED,
+        .message = message,
+    });
+  }
+
+  return ok(cls);
+}
+
+void DeclarationChecker::checkConstructor(const DeclaredMember &member, const ClassDecl *cls) {
+  ResultConstructorExists exists = this->callableConstructor(cls);
+  if (exists.isErr()) {
+    this->checker.diags_.error(member.loc, exists.error().message);
+    return;
+  }
+  const FunctionDecl *constructor = exists.value();
+  ResultConstructorAccess kept = this->constructorAccess(member, constructor, cls);
+  if (kept.isErr()) {
+    this->checker.diags_.error(member.loc, kept.error().message);
+  }
+  this->checkMethod(member, constructor, cls);
+}
+
+void DeclarationChecker::checkMember(const DeclaredMember &member, const ClassDecl *cls) {
+  std::string what = ErrorTextDeclaration::memberOf(member.name, cls->name);
+  ResultAccessWordWritten written = DeclarationChecker::accessWritten(member, what);
+  if (written.isErr()) {
+    this->checker.diags_.error(member.loc, written.error().message);
+  }
+  if (member.form.is<DeclaredConstructor>()) {
+    this->checkConstructor(member, cls);
+    return;
+  }
+  const ClassField *field = DeclarationChecker::classField(cls, member);
+  const FunctionDecl *method = DeclarationChecker::classMethod(cls, member);
+  ResultClassHasTheMember found = this->memberFound(member, cls, field, method);
+  if (found.isErr()) {
+    this->checker.diags_.error(member.loc, found.error().message);
+    return;
+  }
+  Access access = field ? field->access : method->access();
+  ResultPublicOrProtected visible = this->memberVisible(access, what);
+  if (visible.isErr()) {
+    this->checker.diags_.error(member.loc, visible.error().message);
+    return;
+  }
+  ResultAccessWordMatches matches = this->accessAgrees(member, access, what);
+  if (matches.isErr()) {
+    this->checker.diags_.error(member.loc, matches.error().message);
+  }
+  if (field) {
+    this->checkField(member, *field, cls);
+  } else {
+    this->checkMethod(member, method, cls);
+  }
+}
+
+void DeclarationChecker::checkListed(const ClassDecl *cls, const llvm::StringSet<> &seen) {
+  for (const ClassField &field : cls->fields) {
+    if (field.method() || field.access == Access::Private) {
+      continue;
+    }
+    ResultMemberWasDeclared listed = this->memberListed(seen, field.name, field.isStatic(), cls);
+    if (listed.isErr()) {
+      this->checker.diags_.error(field.loc, listed.error().message);
+    }
+  }
+  for (const FunctionDecl *method : cls->methods) {
+    if (method->access() == Access::Private) {
+      continue;
+    }
+    ResultMemberWasDeclared listed =
+        this->memberListed(seen, method->name, method->isStatic(), cls);
+    if (listed.isErr()) {
+      this->checker.diags_.error(method->loc(), listed.error().message);
+    }
+  }
+  for (const FunctionDecl *constructor : cls->constructors) {
+    if (constructor->access() == Access::Private || this->mentionsHidden(constructor)) {
+      continue;
+    }
+    ResultMemberWasDeclared listed = this->memberListed(seen, "constructor", false, cls);
+    if (listed.isErr()) {
+      this->checker.diags_.error(constructor->loc(), listed.error().message);
+    }
   }
 }
 
 void DeclarationChecker::checkClass(const DeclaredClass &declared, const Exported &exported) {
-  auto *cls = dyn_cast_or_null<ClassDecl>(this->checker.typeDeclarer().lookupType(exported.local));
-  if (!cls) {
-    this->checker.diags_.error(declared.loc, "'" + declared.name + "' is not a class in '" +
-                                                 this->fileName() + "'");
+  ResultModuleHasTheClass found = this->classFound(declared, exported);
+  if (found.isErr()) {
+    this->checker.diags_.error(declared.loc, found.error().message);
     return;
   }
-  if (declared.typeParams.size() != cls->typeParams.size()) {
-    this->checker.diags_.error(declared.loc, "'" + declared.name +
-                                                 "' takes another number of type parameters in '" +
-                                                 this->fileName() + "'");
+  ClassDecl *cls = found.value();
+  std::string name = ErrorTextDeclaration::quoted(declared.name);
+  ResultTypeParamsMatched matched =
+      this->typeParamCount(declared.typeParams.size(), cls->typeParams.size(), name);
+  if (matched.isErr()) {
+    this->checker.diags_.error(declared.loc, matched.error().message);
     return;
   }
   if (!cls->typeParams.empty()) {
@@ -333,99 +787,11 @@ void DeclarationChecker::checkClass(const DeclaredClass &declared, const Exporte
   this->checker.classDeclarer().completeClass(cls);
   llvm::StringSet<> seen;
   for (const DeclaredMember &member : declared.members) {
-    std::string key = (member.isStatic ? "static " : "") + member.name.str();
+    std::string key = DeclarationChecker::memberKey(member.name, member.isStatic);
     seen.insert(key);
-    std::string what = "'" + member.name.str() + "' of '" + cls->name.str() + "'";
-    if (!member.accessWritten) {
-      this->checker.diags_.error(member.loc,
-                                 "write the access of " + what + ": public, protected or private");
-    }
-    if (member.form.is<DeclaredConstructor>()) {
-      const FunctionDecl *ctor = nullptr;
-      for (const FunctionDecl *c : cls->constructors) {
-        if (c->access() != Access::Private) {
-          ctor = c;
-        }
-      }
-      if (!ctor) {
-        this->checker.diags_.error(member.loc, "'" + cls->name +
-                                                   "' has no constructor that programs "
-                                                   "can call in '" +
-                                                   this->fileName() + "'");
-        continue;
-      }
-      if (member.access != ctor->access()) {
-        this->checker.diags_.error(member.loc, "the constructor of '" + cls->name + "' is " +
-                                                   DeclarationChecker::accessWord(ctor->access()) +
-                                                   " in '" + this->fileName() + "'");
-      }
-      this->checkMethod(member, ctor, cls);
-      continue;
-    }
-    const ClassField *field = nullptr;
-    for (const ClassField &f : cls->fields) {
-      if (f.name == member.name && f.isStatic() == member.isStatic && !f.method()) {
-        field = &f;
-      }
-    }
-    const FunctionDecl *method = nullptr;
-    for (const FunctionDecl *fn : cls->methods) {
-      if (fn->name == member.name && fn->isStatic() == member.isStatic) {
-        method = fn;
-      }
-    }
-    Access access = field ? field->access : method ? method->access() : Access::Public;
-    if (!field && !method) {
-      this->checker.diags_.error(member.loc,
-                                 "'" + cls->name + "' has no " +
-                                     (member.isStatic ? "static member '" : "member '") +
-                                     member.name + "' in '" + this->fileName() + "'");
-      continue;
-    }
-    if (access == Access::Private) {
-      this->checker.diags_.error(member.loc,
-                                 what + " is private in '" + this->fileName() +
-                                     "': a declaration file declares only what programs "
-                                     "can use");
-      continue;
-    }
-    if (member.accessWritten && member.access != access) {
-      this->checker.diags_.error(member.loc, what + " is " +
-                                                 DeclarationChecker::accessWord(access) + " in '" +
-                                                 this->fileName() + "'");
-    }
-    if (field) {
-      this->checkField(member, *field, cls);
-    } else {
-      this->checkMethod(member, method, cls);
-    }
+    this->checkMember(member, cls);
   }
-  std::string declarations =
-      llvm::sys::path::filename(this->checkedModule->declaration->path).str();
-  auto missing = [&](llvm::SMLoc loc, llvm::StringRef name, bool isStatic) {
-    this->checker.diags_.error(loc, "'" + name + "' of '" + cls->name + "' is " +
-                                        (isStatic ? "a static member" : "a member") +
-                                        " that programs can use, but '" + declarations +
-                                        "' does not declare it");
-  };
-  for (const ClassField &f : cls->fields) {
-    std::string key = (f.isStatic() ? "static " : "") + f.name.str();
-    if (!f.method() && f.access != Access::Private && !seen.contains(key)) {
-      missing(f.loc, f.name, f.isStatic());
-    }
-  }
-  for (const FunctionDecl *fn : cls->methods) {
-    std::string key = (fn->isStatic() ? "static " : "") + fn->name.str();
-    if (fn->access() != Access::Private && !seen.contains(key)) {
-      missing(fn->loc(), fn->name, fn->isStatic());
-    }
-  }
-  for (const FunctionDecl *ctor : cls->constructors) {
-    if (ctor->access() != Access::Private && !seen.contains("constructor") &&
-        !this->mentionsHidden(ctor)) {
-      missing(ctor->loc(), "constructor", false);
-    }
-  }
+  this->checkListed(cls, seen);
 }
 
 }

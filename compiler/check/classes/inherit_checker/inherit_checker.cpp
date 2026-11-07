@@ -54,23 +54,48 @@ void InheritChecker::interfacesOf(const ClassDecl *cls, std::vector<const Type *
 InheritChecker::InheritChecker(Checker &owner)
     : checker(owner) {}
 
+InheritChecker::ResultAbstractHasClass InheritChecker::abstractNeedsClass(const ClassDecl *cls,
+                                                                          const FunctionDecl *fn) {
+  if (fn->isAbstract() && !cls->isAbstract) {
+    std::string message = ErrorTextAbstract::needsClass(fn->name, cls->name);
+
+    return err(InheritCheckerAbstractNeedsClassError{
+        .code = InheritCheckerAbstractNeedsClassErrorCode::ABSTRACT_IN_CONCRETE,
+        .message = message,
+    });
+  }
+
+  return ok(fn);
+}
+
+InheritChecker::ResultAbstractOverride
+InheritChecker::abstractImplemented(const ClassDecl *cls, const FunctionDecl *found) {
+  if (found->cls() != cls) {
+    std::string variant = variantText(found);
+    std::string message = ErrorTextAbstract::notImpl(cls->name, variant, found->cls()->name);
+
+    return err(InheritCheckerAbstractImplementedError{
+        .code = InheritCheckerAbstractImplementedErrorCode::NOT_IMPLEMENTED,
+        .message = message,
+    });
+  }
+
+  return ok(found);
+}
+
 void InheritChecker::checkAbstract(ClassDecl *cls) {
   if (cls->literal()) {
     return;
   }
   for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
-    if (fn->isAbstract() && !cls->isAbstract) {
-      this->checker.diags_.error(fn->loc(), "abstract method '" + fn->name +
-                                                "' needs an abstract class: '" + cls->name +
-                                                "' can be created with 'new', and the method would "
-                                                "have no body; write 'abstract class " +
-                                                cls->name + "'");
+    ResultAbstractHasClass abstract = InheritChecker::abstractNeedsClass(cls, fn);
+    if (abstract.isErr()) {
+      this->checker.diags_.error(fn->loc(), abstract.error().message);
     }
   }
   if (cls->isAbstract) {
     return;
   }
-  std::vector<FunctionDecl *> missing;
   for (size_t slot = 0; slot < cls->vtable.size(); ++slot) {
     if (cls->vtable[slot]) {
       continue;
@@ -82,20 +107,131 @@ void InheritChecker::checkAbstract(ClassDecl *cls) {
           found = fn;
         }
       }
-      if (found) {
-        if (found->cls() != cls) {
-          missing.push_back(found);
-        }
-        break;
+      if (!found) {
+        continue;
       }
+      ResultAbstractOverride implemented = InheritChecker::abstractImplemented(cls, found);
+      if (implemented.isErr()) {
+        this->checker.diags_.error(cls->loc(), implemented.error().message);
+      }
+      break;
     }
   }
-  for (FunctionDecl *fn : missing) {
-    this->checker.diags_.error(cls->loc(),
-                               "class '" + cls->name + "' does not implement the abstract method " +
-                                   variantText(fn) + " of '" + fn->cls()->name +
-                                   "'; implement it, or make '" + cls->name + "' abstract too");
+}
+
+InheritChecker::ResultFieldTypeMatches InheritChecker::fieldMatches(llvm::StringRef prefix,
+                                                                    const Field &member,
+                                                                    const Field *actual,
+                                                                    const ClassDecl *cls) {
+  bool same = actual->type == member.type || WideWrites::sameReference(actual->type, member.type);
+  if (!same) {
+    std::string message = ErrorTextImplements::fieldType(prefix, member.name, member.type->name(),
+                                                         cls->name, actual->type->name());
+
+    return err(InheritCheckerFieldMatchesError{
+        .code = InheritCheckerFieldMatchesErrorCode::FIELD_TYPE_DIFFERS,
+        .message = message,
+    });
   }
+
+  return ok(actual);
+}
+
+InheritChecker::ResultMemberIsDeclared
+InheritChecker::memberDeclared(llvm::StringRef prefix, const Field &member,
+                               llvm::ArrayRef<FunctionDecl *> methods) {
+  if (methods.empty()) {
+    bool optional = member.type->isOptional();
+    std::string type = optional ? member.type->inner()->name().str() : member.type->name().str();
+    std::string message = ErrorTextImplements::noMember(prefix, member.name, optional, type);
+
+    return err(InheritCheckerMemberDeclaredError{
+        .code = InheritCheckerMemberDeclaredErrorCode::NO_MEMBER,
+        .message = message,
+    });
+  }
+
+  return ok(&member);
+}
+
+InheritChecker::ResultMemberIsFunction
+InheritChecker::methodForField(const Field &member, const Type *iface, const ClassDecl *cls) {
+  if (!member.type->isFunction()) {
+    std::string message =
+        ErrorTextImplements::fieldNotFn(member.name, member.type->name(), iface->name(), cls->name);
+
+    return err(InheritCheckerMethodForFieldError{
+        .code = InheritCheckerMethodForFieldErrorCode::FIELD_AS_METHOD,
+        .message = message,
+    });
+  }
+
+  return ok(&member);
+}
+
+InheritChecker::ResultReplaceableField
+InheritChecker::replaceable(const Field &member, llvm::ArrayRef<FunctionDecl *> methods,
+                            const Type *iface, const ClassDecl *cls) {
+  if (!member.readonly && llvm::none_of(methods, InheritChecker::isArrowMethod)) {
+    std::string message = ErrorTextImplements::mustField(member.name, iface->name(), cls->name);
+
+    return err(InheritCheckerReplaceableError{
+        .code = InheritCheckerReplaceableErrorCode::METHOD_NOT_FIELD,
+        .message = message,
+    });
+  }
+
+  return ok(&member);
+}
+
+InheritChecker::ResultReturnTypeAgrees
+InheritChecker::returnMatches(llvm::StringRef name, const Type *ret, const Type *expected,
+                              const Type *iface, const ClassDecl *cls) {
+  if (ret && !ret->isError() && ret != expected) {
+    std::string message =
+        ErrorTextImplements::returns(name, ret->name(), iface->name(), cls->name, expected->name());
+
+    return err(InheritCheckerReturnMatchesError{
+        .code = InheritCheckerReturnMatchesErrorCode::RETURN_DIFFERS,
+        .message = message,
+    });
+  }
+
+  return ok(ret);
+}
+
+InheritChecker::ResultVariantForParams
+InheritChecker::variantFound(llvm::StringRef prefix, const Field &member,
+                             llvm::ArrayRef<FunctionDecl *> methods, const ClassDecl *cls,
+                             bool found) {
+  if (!found) {
+    std::string variants = variantList(methods);
+    std::string message =
+        ErrorTextImplements::params(prefix, member.name, member.type->name(), cls->name, variants);
+
+    return err(InheritCheckerVariantFoundError{
+        .code = InheritCheckerVariantFoundErrorCode::OTHER_PARAMETERS,
+        .message = message,
+    });
+  }
+
+  return ok(&member);
+}
+
+InheritChecker::ResultSignatureVariant InheritChecker::signatureVariant(llvm::StringRef prefix,
+                                                                        llvm::StringRef name,
+                                                                        const Type *signature,
+                                                                        bool found) {
+  if (!found) {
+    std::string message = ErrorTextImplements::noVariant(prefix, name, signature->name());
+
+    return err(InheritCheckerSignatureVariantError{
+        .code = InheritCheckerSignatureVariantErrorCode::NO_VARIANT,
+        .message = message,
+    });
+  }
+
+  return ok(signature);
 }
 
 void InheritChecker::checkImplements(ClassDecl *cls) {
@@ -105,7 +241,7 @@ void InheritChecker::checkImplements(ClassDecl *cls) {
     if (!llvm::is_contained(cls->implemented, iface)) {
       continue;
     }
-    std::string prefix = "class '" + cls->name.str() + "' implements '" + iface->name().str() + "'";
+    std::string prefix = ErrorTextImplements::prefix(cls->name, iface->name());
     for (const Field &member : iface->fields()) {
       const ClassField *field = ClassBases::findField(cls, member.name);
       if (field && !field->method()) {
@@ -114,41 +250,26 @@ void InheritChecker::checkImplements(ClassDecl *cls) {
           continue;
         }
         llvm::SMLoc loc = cls->field(member.name) ? field->loc : cls->loc();
-        if (actual->type != member.type && !WideWrites::sameReference(actual->type, member.type)) {
-          this->checker.diags_.error(
-              loc, prefix + ", whose field '" + member.name + "' is '" + member.type->name() +
-                       "', but in '" + cls->name + "' it is '" + actual->type->name() +
-                       "'; the types must be the same, or objects "
-                       "of a type down the chain of the interface's, such as 'Dog' for "
-                       "'Animal'");
+        ResultFieldTypeMatches matches = InheritChecker::fieldMatches(prefix, member, actual, cls);
+        if (matches.isErr()) {
+          this->checker.diags_.error(loc, matches.error().message);
         }
         continue;
       }
       std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member.name, false);
-      if (methods.empty()) {
-        std::string type = member.type->isOptional() ? member.type->inner()->name().str()
-                                                     : member.type->name().str();
-        this->checker.diags_.error(cls->loc(), prefix + ", but has no '" + member.name +
-                                                   "'; declare it, e.g. '" + member.name +
-                                                   (member.type->isOptional() ? "?" : "") + ": " +
-                                                   type + "'");
+      ResultMemberIsDeclared declared = InheritChecker::memberDeclared(prefix, member, methods);
+      if (declared.isErr()) {
+        this->checker.diags_.error(cls->loc(), declared.error().message);
         continue;
       }
-      if (!member.type->isFunction()) {
-        this->checker.diags_.error(methods[0]->loc(), "'" + member.name + "' is a field of type '" +
-                                                          member.type->name() + "' in '" +
-                                                          iface->name() + "', which '" + cls->name +
-                                                          "' implements, so it cannot be a method");
+      ResultMemberIsFunction function = InheritChecker::methodForField(member, iface, cls);
+      if (function.isErr()) {
+        this->checker.diags_.error(methods[0]->loc(), function.error().message);
         continue;
       }
-      if (!member.readonly && llvm::none_of(methods, isArrowMethod)) {
-        this->checker.diags_.error(methods[0]->loc(),
-                                   "'" + member.name + "' is a field in '" + iface->name() +
-                                       "' that code may replace, so in '" + cls->name +
-                                       "', which implements it, it must be a field too: '" +
-                                       member.name + " = (...) => ...'; or declare it in '" +
-                                       iface->name() + "' as a method, '" + member.name +
-                                       "(...): ...'");
+      ResultReplaceableField replaced = InheritChecker::replaceable(member, methods, iface, cls);
+      if (replaced.isErr()) {
+        this->checker.diags_.error(methods[0]->loc(), replaced.error().message);
         continue;
       }
       bool found = false;
@@ -158,18 +279,16 @@ void InheritChecker::checkImplements(ClassDecl *cls) {
         }
         found = true;
         const Type *ret = this->checker.returnInferrer().returnType(fn->sym);
-        if (ret && !ret->isError() && ret != member.type->ret()) {
-          this->checker.diags_.error(fn->loc(), "'" + fn->name + "' returns '" + ret->name() +
-                                                    "', and '" + iface->name() + "', which '" +
-                                                    cls->name + "' implements, says it returns '" +
-                                                    member.type->ret()->name() + "'");
+        ResultReturnTypeAgrees agrees =
+            InheritChecker::returnMatches(fn->name, ret, member.type->ret(), iface, cls);
+        if (agrees.isErr()) {
+          this->checker.diags_.error(fn->loc(), agrees.error().message);
         }
       }
-      if (!found) {
-        this->checker.diags_.error(
-            methods[0]->loc(), prefix + ", whose '" + member.name + "' is '" + member.type->name() +
-                                   "', but '" + cls->name + "." + member.name +
-                                   "' takes other parameters: " + variantList(methods));
+      ResultVariantForParams variant =
+          InheritChecker::variantFound(prefix, member, methods, cls, found);
+      if (variant.isErr()) {
+        this->checker.diags_.error(methods[0]->loc(), variant.error().message);
       }
     }
     for (const Overload &overload : iface->overloads()) {
@@ -178,75 +297,133 @@ void InheritChecker::checkImplements(ClassDecl *cls) {
         auto fn = llvm::find_if(methods, [&](const FunctionDecl *m) {
           return m->sym && InheritChecker::takesParams(signature, m->sym);
         });
-        if (fn == methods.end()) {
-          this->checker.diags_.error(cls->loc(),
-                                     prefix + ", but has no variant of '" + overload.name +
-                                         "' for its signature '" + signature->name() +
-                                         "'; each signature needs a variant with these parameters");
+        ResultSignatureVariant variant =
+            InheritChecker::signatureVariant(prefix, overload.name, signature, fn != methods.end());
+        if (variant.isErr()) {
+          this->checker.diags_.error(cls->loc(), variant.error().message);
           continue;
         }
         const Type *ret = this->checker.returnInferrer().returnType((*fn)->sym);
-        if (ret && !ret->isError() && ret != signature->ret()) {
-          this->checker.diags_.error(
-              (*fn)->loc(), "'" + overload.name + "' returns '" + ret->name() + "', and '" +
-                                iface->name() + "', which '" + cls->name +
-                                "' implements, says it returns '" + signature->ret()->name() + "'");
+        ResultReturnTypeAgrees agrees =
+            InheritChecker::returnMatches(overload.name, ret, signature->ret(), iface, cls);
+        if (agrees.isErr()) {
+          this->checker.diags_.error((*fn)->loc(), agrees.error().message);
         }
       }
     }
   }
 }
 
+InheritChecker::ResultConstructorScope InheritChecker::superAllowed(FunctionDecl *ctor) {
+  if (!ctor || !ctor->isConstructor() || !ctor->cls()) {
+    std::string message = ErrorTextSuperCall::outside();
+
+    return err(InheritCheckerSuperAllowedError{
+        .code = InheritCheckerSuperAllowedErrorCode::NOT_IN_CONSTRUCTOR,
+        .message = message,
+    });
+  }
+
+  return ok(ctor);
+}
+
+InheritChecker::ResultParentClassFound InheritChecker::parentClass(ClassDecl *cls) {
+  if (!cls->parent && !cls->base) {
+    std::string message = ErrorTextSuperCall::noParent(cls->name);
+
+    return err(InheritCheckerParentClassError{
+        .code = InheritCheckerParentClassErrorCode::NO_PARENT,
+        .message = message,
+    });
+  }
+  if (!cls->parent) {
+    return err(InheritCheckerParentClassError{
+        .code = InheritCheckerParentClassErrorCode::BASE_ONLY,
+        .message = "",
+    });
+  }
+
+  return ok(cls->parent);
+}
+
+InheritChecker::ResultSuperIsStatement InheritChecker::rootSuper(const CallExpr *call) const {
+  if (!this->checker.rootSupers_.contains(call)) {
+    std::string message = ErrorTextSuperCall::statement();
+
+    return err(InheritCheckerRootSuperError{
+        .code = InheritCheckerRootSuperErrorCode::NOT_A_STATEMENT,
+        .message = message,
+    });
+  }
+
+  return ok(call);
+}
+
+InheritChecker::ResultSuperNotRepeated InheritChecker::superOnce(const ClassDecl *cls) const {
+  if (!this->checker.flow_.beforeSuper) {
+    std::string message = ErrorTextSuperCall::twice(cls->parent->name);
+
+    return err(InheritCheckerSuperOnceError{
+        .code = InheritCheckerSuperOnceErrorCode::CALLED_TWICE,
+        .message = message,
+    });
+  }
+
+  return ok(cls);
+}
+
+InheritChecker::ResultNoSuperArguments InheritChecker::superArguments(const CallExpr *call,
+                                                                      const ClassDecl *parent) {
+  if (!call->args.empty()) {
+    std::string message = ErrorTextSuperCall::noArgs(parent->name);
+
+    return err(InheritCheckerSuperArgumentsError{
+        .code = InheritCheckerSuperArgumentsErrorCode::NO_CONSTRUCTOR,
+        .message = message,
+    });
+  }
+
+  return ok(call);
+}
+
 Expr *InheritChecker::checkSuperCall(CallExpr *call) {
   call->type = Type::voidTy();
   call->callee->type = Type::voidTy();
   call->target = SuperCall{};
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->checker.exprChecker().checkExpr(arg);
+  ResultConstructorScope scope = InheritChecker::superAllowed(this->checker.currentDecl());
+  if (scope.isErr()) {
+    this->checker.diags_.error(call->loc(), scope.error().message);
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    return call;
+  }
+  ClassDecl *cls = scope.value()->cls();
+  ResultParentClassFound parent = InheritChecker::parentClass(cls);
+  if (parent.isErr()) {
+    if (parent.error().code != InheritCheckerParentClassErrorCode::BASE_ONLY) {
+      this->checker.diags_.error(call->loc(), parent.error().message);
     }
-  };
-  FunctionDecl *ctor = this->checker.currentDecl();
-  if (!ctor || !ctor->isConstructor() || !ctor->cls()) {
-    this->checker.diags_.error(call->loc(),
-                               "'super(...)' can be called only in the constructor of a class that "
-                               "extends another");
-    checkArgsLoosely();
+    this->checker.argumentChecker().checkArgsLoosely(call);
     return call;
   }
-  ClassDecl *cls = ctor->cls();
-  if (!cls->parent) {
-    if (!cls->base) {
-      this->checker.diags_.error(call->loc(),
-                                 "'super(...)' calls the constructor of the class that '" +
-                                     cls->name + "' extends, and it extends none");
-    }
-    checkArgsLoosely();
+  ResultSuperIsStatement statement = this->rootSuper(call);
+  if (statement.isErr()) {
+    this->checker.diags_.error(call->loc(), statement.error().message);
+    this->checker.argumentChecker().checkArgsLoosely(call);
     return call;
   }
-  if (!this->checker.rootSupers_.contains(call)) {
-    this->checker.diags_.error(call->loc(),
-                               "'super(...)' must be a statement of its own in the body of the "
-                               "constructor, not inside a block, a condition, a loop or another "
-                               "expression: the fields are set right after it");
-    checkArgsLoosely();
-    return call;
-  }
-  if (!this->checker.flow_.beforeSuper) {
-    this->checker.diags_.error(call->loc(),
-                               "'super(...)' is called a second time; the constructor of '" +
-                                   cls->parent->name + "' runs once");
-    checkArgsLoosely();
+  ResultSuperNotRepeated once = this->superOnce(cls);
+  if (once.isErr()) {
+    this->checker.diags_.error(call->loc(), once.error().message);
+    this->checker.argumentChecker().checkArgsLoosely(call);
     return call;
   }
   std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(cls->parent);
   if (ctors.empty()) {
-    if (!call->args.empty()) {
-      this->checker.diags_.error(call->loc(), "class '" + cls->parent->name +
-                                                  "' has no constructor, so "
-                                                  "'super()' takes no arguments");
+    ResultNoSuperArguments none = InheritChecker::superArguments(call, cls->parent);
+    if (none.isErr()) {
+      this->checker.diags_.error(call->loc(), none.error().message);
     }
-    checkArgsLoosely();
+    this->checker.argumentChecker().checkArgsLoosely(call);
   } else {
     bool checked = false;
     OverloadResolver::ResultVariantChosen picked =
@@ -258,8 +435,12 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
     if (picked.isOk()) {
       FuncSymbol *sym = picked.value();
       const FunctionDecl *chosen = sym->decl ? sym->decl : ctors[0];
-      this->checker.classMemberChecker().checkAccess(chosen->cls(), chosen->access(), "constructor",
-                                                     call->loc());
+      ClassMemberChecker::ResultMemberAccessible accessible =
+          this->checker.classMemberChecker().checkAccess(chosen->cls(), chosen->access(),
+                                                         "constructor");
+      if (accessible.isErr()) {
+        this->checker.diags_.error(call->loc(), accessible.error().message);
+      }
       this->checker.returnInferrer().resolveParams(sym);
       call->target = SuperCall{.method = sym};
       std::vector<bool> given(checked ? call->args.size() : 0, true);
@@ -279,14 +460,83 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
   return call;
 }
 
+InheritChecker::ResultSuperMethodScope InheritChecker::superContext(FunctionDecl *method) {
+  if (!method || (!method->cls()->parent && !method->cls()->base)) {
+    std::string message = ErrorTextSuperMethod::outside();
+
+    return err(InheritCheckerSuperContextError{
+        .code = InheritCheckerSuperContextErrorCode::NO_SUPER_CLASS,
+        .message = message,
+    });
+  }
+  if (!method->cls()->parent) {
+    return err(InheritCheckerSuperContextError{
+        .code = InheritCheckerSuperContextErrorCode::BASE_ONLY,
+        .message = "",
+    });
+  }
+
+  return ok(method);
+}
+
+InheritChecker::ResultObjectIsComplete
+InheritChecker::objectComplete(const MemberExpr *member) const {
+  bool early = this->checker.classChecker().isInitThis(member->object).isOk() &&
+               !this->checker.flow_.beforeSuper &&
+               this->checker.classChecker().thisReady(this->checker.flow_).isErr();
+  if (early) {
+    std::string field = this->checker.classChecker().firstUnset(this->checker.flow_).value();
+    std::string message = ErrorTextSuperMethod::early(member->name, field);
+
+    return err(InheritCheckerObjectCompleteError{
+        .code = InheritCheckerObjectCompleteErrorCode::CALLED_BEFORE_SET,
+        .message = message,
+    });
+  }
+
+  return ok(member);
+}
+
+InheritChecker::ResultParentHasMethods InheritChecker::parentMethods(const ClassDecl *parent,
+                                                                     llvm::StringRef name) {
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(parent, name, false);
+  if (methods.empty() && ClassBases::findField(parent, name)) {
+    std::string message = ErrorTextSuperMethod::isField(name, parent->name);
+
+    return err(InheritCheckerParentMethodsError{
+        .code = InheritCheckerParentMethodsErrorCode::FIELD_OF_PARENT,
+        .message = message,
+    });
+  }
+  if (methods.empty()) {
+    std::string message = ErrorTextSuperMethod::noMethod(parent->name, name);
+
+    return err(InheritCheckerParentMethodsError{
+        .code = InheritCheckerParentMethodsErrorCode::NO_SUCH_METHOD,
+        .message = message,
+    });
+  }
+
+  return ok(methods);
+}
+
+InheritChecker::ResultMethodHasItsBody InheritChecker::methodBody(FuncSymbol *sym,
+                                                                  llvm::StringRef name) {
+  if (sym->decl->isAbstract()) {
+    std::string message = ErrorTextSuperMethod::abstract(name, sym->decl->cls()->name);
+
+    return err(InheritCheckerMethodBodyError{
+        .code = InheritCheckerMethodBodyErrorCode::ABSTRACT_METHOD,
+        .message = message,
+    });
+  }
+
+  return ok(sym);
+}
+
 Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   member->type = Type::error();
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->checker.exprChecker().checkExpr(arg);
-    }
-  };
   FunctionDecl *method = nullptr;
   for (FunctionDecl *fn : llvm::reverse(this->checker.functions_)) {
     if (fn->isArrow()) {
@@ -297,14 +547,12 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
     }
     break;
   }
-  if (!method || !method->cls()->parent) {
-    if (!method || !method->cls()->base) {
-      this->checker.diags_.error(member->object->loc(),
-                                 "'super' is the class that the class of the method "
-                                 "extends; it exists in the methods of a class that "
-                                 "extends another");
+  ResultSuperMethodScope scope = InheritChecker::superContext(method);
+  if (scope.isErr()) {
+    if (scope.error().code != InheritCheckerSuperContextErrorCode::BASE_ONLY) {
+      this->checker.diags_.error(member->object->loc(), scope.error().message);
     }
-    checkArgsLoosely();
+    this->checker.argumentChecker().checkArgsLoosely(call);
     return call;
   }
   ClassDecl *parent = method->cls()->parent;
@@ -317,33 +565,26 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   }
   member->object = reference.isOk() ? reference.value() : self;
   if (member->object->type->isError()) {
-    checkArgsLoosely();
+    this->checker.argumentChecker().checkArgsLoosely(call);
     return call;
   }
-  if (this->checker.classChecker().isInitThis(member->object).isOk() &&
-      !this->checker.flow_.beforeSuper &&
-      this->checker.classChecker().thisReady(this->checker.flow_).isErr()) {
-    this->checker.diags_.error(
-        member->loc(), "'super." + member->name +
-                           "()' is called before every field is set: field '" +
-                           this->checker.classChecker().firstUnset(this->checker.flow_).value() +
-                           "' is not set yet, and the method may read it");
+  ResultObjectIsComplete complete = this->objectComplete(member);
+  if (complete.isErr()) {
+    this->checker.diags_.error(member->loc(), complete.error().message);
   }
-  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(parent, member->name, false);
-  if (methods.empty()) {
-    if (ClassBases::findField(parent, member->name)) {
-      this->checker.diags_.error(
-          member->loc(), "'" + member->name + "' is a field of '" + parent->name +
-                             "'; call the function it holds as 'this." + member->name + "(...)'");
-    } else {
-      this->checker.diags_.error(member->loc(), "class '" + parent->name + "' has no method '" +
-                                                    member->name + "'");
-    }
-    checkArgsLoosely();
+  ResultParentHasMethods found = InheritChecker::parentMethods(parent, member->name);
+  if (found.isErr()) {
+    this->checker.diags_.error(member->loc(), found.error().message);
+    this->checker.argumentChecker().checkArgsLoosely(call);
     return call;
   }
-  this->checker.classMemberChecker().checkAccess(methods[0]->cls(), methods[0]->access(),
-                                                 member->name, member->loc());
+  std::vector<FunctionDecl *> methods = found.value();
+  ClassMemberChecker::ResultMemberAccessible accessible =
+      this->checker.classMemberChecker().checkAccess(methods[0]->cls(), methods[0]->access(),
+                                                     member->name);
+  if (accessible.isErr()) {
+    this->checker.diags_.error(member->loc(), accessible.error().message);
+  }
   if (this->checker.eventMaps().isEmitterClass(parent)) {
     if (Expr *checked =
             this->checker.emitterChecker().checkEmitterCall(call, member, parent, true)) {
@@ -361,14 +602,13 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   if (picked.isErr()) {
     return call;
   }
-  FuncSymbol *sym = picked.value();
-  if (sym->decl->isAbstract()) {
-    this->checker.diags_.error(member->loc(), "'" + member->name + "' is abstract in '" +
-                                                  sym->decl->cls()->name +
-                                                  "': it has no body to call");
-    checkArgsLoosely();
+  ResultMethodHasItsBody body = InheritChecker::methodBody(picked.value(), member->name);
+  if (body.isErr()) {
+    this->checker.diags_.error(member->loc(), body.error().message);
+    this->checker.argumentChecker().checkArgsLoosely(call);
     return call;
   }
+  FuncSymbol *sym = body.value();
   this->checker.returnInferrer().resolveParams(sym);
   call->target = SuperCall{};
   if (sym->isGeneric() && checked) {

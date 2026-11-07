@@ -1,12 +1,13 @@
 #pragma once
 
+#include "compiler/library/bytes/bytes_lower_helpers/bytes_lower_helpers.h"
 #include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 class BytesLowerer {
 public:
-  explicit BytesLowerer(Lowering &lowering);
+  explicit BytesLowerer(Lowering &owner);
 
   llvm::Value *emitBytesIndex(IndexExpr *index);
   llvm::Value *emitBytesElementAssign(AssignExpr *assign, bool needResult);
@@ -21,8 +22,14 @@ public:
   llvm::Constant *encodingTable(llvm::StringRef name);
 
 private:
-  Lowering &lowering_;
-  llvm::StringMap<llvm::Constant *> encodingTables_;
+  static llvm::StructType *bytesStruct(llvm::LLVMContext &ctx);
+  static llvm::Type *storageType(llvm::IRBuilder<> &b, Bytes kind);
+  static bool isSignedKind(Bytes kind);
+  static llvm::Value *toStorage(Lowering &, llvm::IRBuilder<> &b, Bytes kind, llvm::Value *value,
+                                llvm::FunctionCallee f16);
+
+  Lowering &lowering;
+  llvm::StringMap<llvm::Constant *> encodingTables;
 };
 
 }

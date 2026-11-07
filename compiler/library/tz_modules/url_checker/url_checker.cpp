@@ -7,14 +7,10 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-namespace {
-
-bool isLibraryClass(const Type *type, llvm::StringRef name) {
+bool UrlChecker::isLibraryClass(const Type *type, llvm::StringRef name) {
   const ClassDecl *cls = type ? type->nonOptional()->classDecl() : nullptr;
 
   return cls && cls->library() && cls->name == name;
-}
-
 }
 
 const Expr *UrlChecker::unconverted(const Expr *expr) {
@@ -46,9 +42,7 @@ std::optional<std::string> UrlChecker::literalText(const Expr *expr) {
   return text;
 }
 
-namespace {
-
-bool validHost(llvm::StringRef host) {
+bool UrlChecker::validHost(llvm::StringRef host) {
   if (host.empty()) {
     return false;
   }
@@ -72,9 +66,8 @@ bool validHost(llvm::StringRef host) {
   return true;
 }
 
-}
-
-UrlChecker::UrlChecker(Checker &checker) : checker_(checker) {}
+UrlChecker::UrlChecker(Checker &owner)
+    : checker(owner) {}
 
 bool UrlChecker::validUrlText(llvm::StringRef text, bool relative) {
   text = text.trim(" \t\n\r\f\v");
@@ -98,7 +91,8 @@ bool UrlChecker::validUrlText(llvm::StringRef text, bool relative) {
   if (size_t at = authority.rfind('@'); at != llvm::StringRef::npos) {
     authority = authority.drop_front(at + 1);
   }
-  llvm::StringRef host = authority, port;
+  llvm::StringRef host = authority;
+  llvm::StringRef port;
   if (!authority.starts_with("[")) {
     std::tie(host, port) = authority.split(':');
   } else if (size_t close = authority.find(']'); close != llvm::StringRef::npos) {
@@ -108,7 +102,7 @@ bool UrlChecker::validUrlText(llvm::StringRef text, bool relative) {
       return false;
     }
   }
-  if (!validHost(host)) {
+  if (!UrlChecker::validHost(host)) {
     return false;
   }
   if (!llvm::all_of(port, llvm::isDigit)) {
@@ -120,59 +114,60 @@ bool UrlChecker::validUrlText(llvm::StringRef text, bool relative) {
 }
 
 bool UrlChecker::knownAbsolute(const Expr *expr) const {
-  expr = unconverted(expr);
-  if (std::optional<std::string> text = literalText(expr)) {
-    return validUrlText(*text, false);
+  expr = UrlChecker::unconverted(expr);
+  if (std::optional<std::string> text = UrlChecker::literalText(expr)) {
+    return UrlChecker::validUrlText(*text, false);
   }
-  if (isLibraryClass(expr->type, "URL")) {
+  if (UrlChecker::isLibraryClass(expr->type, "URL")) {
     return true;
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
-    return member->name == "url" && isLibraryClass(member->object->type, "Request");
+    return member->name == "url" && UrlChecker::isLibraryClass(member->object->type, "Request");
   }
   if (auto *call = dyn_cast<CallExpr>(expr); call && call->args.empty()) {
     auto *member = dyn_cast<MemberExpr>(call->callee);
-    return member && member->name == "href" && isLibraryClass(member->object->type, "URL");
+    return member && member->name == "href" &&
+           UrlChecker::isLibraryClass(member->object->type, "URL");
   }
 
   return false;
 }
 
 void UrlChecker::checkUrlNew(NewExpr *expr) {
-  if (checker_.libraryCalls().inLibrary(expr->loc())) {
+  if (this->checker.libraryCalls().inLibrary(expr->loc())) {
     return;
   }
   const std::vector<Expr *> &args = expr->ctor() ? expr->ctor()->args : expr->args;
   if (args.empty() || llvm::any_of(args, [](const Expr *a) { return a->type->isError(); })) {
     return;
   }
-  const Expr *input = unconverted(args[0]);
-  if (args.size() > 1 && !knownAbsolute(args[1])) {
-    checker_.diags_.error(args[1]->loc(),
-                          "'new URL' with a base known only when the program runs may fail, and "
-                          "'new' gives no Result; write 'URL.parse(input, base)', which gives a "
-                          "Result<URL, UrlError>");
+  const Expr *input = UrlChecker::unconverted(args[0]);
+  if (args.size() > 1 && !this->knownAbsolute(args[1])) {
+    this->checker.diags_.error(
+        args[1]->loc(), "'new URL' with a base known only when the program runs may fail, and "
+                        "'new' gives no Result; write 'URL.parse(input, base)', which gives a "
+                        "Result<URL, UrlError>");
     return;
   }
-  std::optional<std::string> text = literalText(input);
+  std::optional<std::string> text = UrlChecker::literalText(input);
   if (text) {
-    if (!validUrlText(*text, args.size() > 1)) {
-      checker_.diags_.error(input->loc(), "'" + *text + "' is not a valid URL" +
-                                              (args.size() > 1 ? "" : " without a base"));
+    if (!UrlChecker::validUrlText(*text, args.size() > 1)) {
+      this->checker.diags_.error(input->loc(), "'" + *text + "' is not a valid URL" +
+                                                   (args.size() > 1 ? "" : " without a base"));
     }
     return;
   }
-  if (!knownAbsolute(input)) {
-    checker_.diags_.error(input->loc(),
-                          "'new URL' of a text known only when the program runs may fail, and "
-                          "'new' gives no Result; write 'URL.parse(text" +
-                              std::string(args.size() > 1 ? ", base" : "") +
-                              ")', which gives a Result<URL, UrlError>");
+  if (!this->knownAbsolute(input)) {
+    this->checker.diags_.error(input->loc(),
+                               "'new URL' of a text known only when the program runs may fail, and "
+                               "'new' gives no Result; write 'URL.parse(text" +
+                                   std::string(args.size() > 1 ? ", base" : "") +
+                                   ")', which gives a Result<URL, UrlError>");
   }
 }
 
 bool UrlChecker::checkUrlSetter(MemberExpr *member, const CallExpr *call) {
-  if (call->args.size() != 1 || !isLibraryClass(member->object->type, "URL")) {
+  if (call->args.size() != 1 || !UrlChecker::isLibraryClass(member->object->type, "URL")) {
     return false;
   }
   llvm::StringRef name = member->name;
@@ -181,14 +176,14 @@ bool UrlChecker::checkUrlSetter(MemberExpr *member, const CallExpr *call) {
     return false;
   }
   const Expr *input = call->args[0];
-  std::optional<std::string> text = literalText(input);
+  std::optional<std::string> text = UrlChecker::literalText(input);
   if (!text) {
     return false;
   }
   llvm::StringRef value = *text;
   std::string problem;
   if (name == "setHref") {
-    if (!validUrlText(value, false)) {
+    if (!UrlChecker::validUrlText(value, false)) {
       problem = "'" + *text + "' is not a valid URL";
     }
   } else if (name == "setProtocol") {
@@ -209,7 +204,8 @@ bool UrlChecker::checkUrlSetter(MemberExpr *member, const CallExpr *call) {
       problem = "'" + *text + "' is not a port: a port is digits from 0 to 65535, or '' for none";
     }
   } else {
-    llvm::StringRef host = value, port;
+    llvm::StringRef host = value;
+    llvm::StringRef port;
     if (name == "setHost" && !value.starts_with("[")) {
       std::tie(host, port) = value.split(':');
     } else if (name == "setHost") {
@@ -219,14 +215,14 @@ bool UrlChecker::checkUrlSetter(MemberExpr *member, const CallExpr *call) {
       port.consume_front(":");
     }
     unsigned long long number = 0;
-    if (!validHost(host) || !llvm::all_of(port, llvm::isDigit) ||
+    if (!UrlChecker::validHost(host) || !llvm::all_of(port, llvm::isDigit) ||
         (!port.empty() && (port.getAsInteger(10, number) || number > 65535))) {
       problem = "'" + *text + "' is not a host" +
                 std::string(name == "setHost" ? ", with an optional port" : "");
     }
   }
   if (!problem.empty()) {
-    checker_.diags_.error(input->loc(), problem);
+    this->checker.diags_.error(input->loc(), problem);
     return false;
   }
 

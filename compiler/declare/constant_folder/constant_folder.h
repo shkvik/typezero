@@ -26,8 +26,8 @@ private:
 
   static constexpr int64_t maxExact = int64_t(1) << 53;
 
-  static double power(double x, double y);
   static int32_t jsToInt32(double x);
+  static double power(double x, double y);
   static std::string formatNumber(double value);
   static bool fitsIn(const Type *type, int64_t value);
   static int64_t wrapTo(const Type *type, int64_t value);
@@ -36,9 +36,8 @@ private:
   static ResultShiftCountFits shiftCount(const Type *shifted, int64_t count);
   static std::string constantText(std::optional<int64_t> exact, double value);
   static std::pair<int64_t, std::optional<int64_t>> intPower(int64_t base, int64_t exponent);
-
-  void reportOverflow(const Expr *expr, const Type *type, const std::string &value, int64_t wrapped,
-                      bool wraps);
+  static std::string overflowText(const Type *type, const std::string &value, int64_t wrapped,
+                                  bool wraps);
 
   Checker &checker;
   llvm::DenseMap<const Expr *, int64_t> constants;

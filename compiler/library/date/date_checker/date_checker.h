@@ -6,7 +6,7 @@ namespace tz {
 
 class DateChecker {
 public:
-  explicit DateChecker(Checker &checker);
+  explicit DateChecker(Checker &owner);
 
   Expr *checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args);
   Expr *timeArg(Expr *arg);
@@ -22,7 +22,13 @@ public:
   void checkDateFields(std::vector<Expr *> &args, size_t first = 0, llvm::StringRef setter = "");
 
 private:
-  Checker &checker_;
+  static std::string utf8(const std::u16string &text);
+  static std::optional<std::u16string> literalText(const Expr *e);
+  static bool isLeap(int64_t year);
+  static int daysInMonth(int64_t year, int64_t month);
+  static std::string missingDay(std::optional<int64_t> year, int64_t month, int64_t day);
+
+  Checker &checker;
 };
 
 }

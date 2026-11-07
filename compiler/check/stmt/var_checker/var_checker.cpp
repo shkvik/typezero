@@ -58,7 +58,7 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
         name && decl->isConst && !declared && !d.destructured() && name->typeArgs.empty()) {
       if (FuncSymbol *generic = this->checker.genericChecker().genericNamed(name)) {
         Scopes::ResultEntryDeclared added =
-            this->checker.scopes().declare(d.name, d.loc, {FunctionEntry{.func = generic}});
+            this->checker.scopes().declare(d.name, {FunctionEntry{.func = generic}});
         if (added.isErr()) {
           this->checker.diags_.error(d.loc, added.error().message);
         }

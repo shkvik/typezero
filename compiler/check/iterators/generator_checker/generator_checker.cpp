@@ -17,14 +17,16 @@ namespace tz {
 GeneratorChecker::GeneratorChecker(Checker &owner)
     : checker(owner) {}
 
-const Type *GeneratorChecker::resolveIteratorType(const TypeRef &ref) {
+GeneratorChecker::ResultResolvedIterator GeneratorChecker::resolveIteratorType(const TypeRef &ref) {
   llvm::StringRef name = ref.name;
   if (name == "IteratorResult" && !this->checker.typeDeclarer().lookupType(name)) {
     if (ref.args.empty() || ref.args.size() > 2) {
-      this->checker.diags_.error(
-          ref.loc, "'IteratorResult' takes 1-2 type arguments: the values and what the "
-                   "iterator gives when it is done, e.g. 'IteratorResult<int, undefined>'");
-      return Type::error();
+      std::string message = ErrorTextIteratorType::resultArgs();
+
+      return err(GeneratorCheckerResolveIteratorTypeError{
+          .code = GeneratorCheckerResolveIteratorTypeErrorCode::RESULT_TYPE_ARGUMENTS,
+          .message = message,
+      });
     }
     const Type *value = this->checker.typeResolver().resolveType(ref.args[0], false);
     const Type *returned = Type::undefinedTy();
@@ -36,31 +38,36 @@ const Type *GeneratorChecker::resolveIteratorType(const TypeRef &ref) {
       }
     }
     if (value->isError() || returned->isError()) {
-      return Type::error();
+      return ok(Type::error());
     }
-    return IterableChecker::iteratorResultType(value, returned);
+    const Type *result = IterableChecker::iteratorResultType(value, returned);
+
+    return ok(result);
   }
   if (name == "Iterable" && !this->checker.typeDeclarer().lookupType(name)) {
-    this->checker.diags_.error(
-        ref.loc, "'Iterable<T>' can only be the type of a parameter of a function declared "
-                 "at the top level or of a method, which it makes generic: a copy for "
-                 "each kind of iterable; here, write the type itself, e.g. 'int[]', or "
-                 "'Iterator<int>' for any iterator");
-    return Type::error();
+    std::string message = ErrorTextIteratorType::iterable();
+
+    return err(GeneratorCheckerResolveIteratorTypeError{
+        .code = GeneratorCheckerResolveIteratorTypeErrorCode::ITERABLE_TYPE,
+        .message = message,
+    });
   }
   bool async = name == "AsyncGenerator" || name == "AsyncIterableIterator" ||
                name == "AsyncIterator" || name == "AsyncIterable";
   if (name != "Generator" && name != "IterableIterator" &&
       !(name == "Iterator" && !this->checker.typeDeclarer().lookupType(name)) && !async) {
-    return nullptr;
+    return err(GeneratorCheckerResolveIteratorTypeError{
+        .code = GeneratorCheckerResolveIteratorTypeErrorCode::NOT_AN_ITERATOR,
+        .message = "",
+    });
   }
   if (ref.args.empty() || ref.args.size() > 3) {
-    this->checker.diags_.error(ref.loc,
-                               "'" + name +
-                                   "' takes 1-3 type arguments: the values it gives, what it "
-                                   "returns and what next() sends, e.g. '" +
-                                   name + "<int>'");
-    return Type::error();
+    std::string message = ErrorTextIteratorType::typeArgs(name);
+
+    return err(GeneratorCheckerResolveIteratorTypeError{
+        .code = GeneratorCheckerResolveIteratorTypeErrorCode::WRONG_TYPE_ARGUMENTS,
+        .message = message,
+    });
   }
   const Type *yielded = this->checker.typeResolver().resolveType(ref.args[0], false);
   auto other = [&](size_t i) -> const Type * {
@@ -79,41 +86,89 @@ const Type *GeneratorChecker::resolveIteratorType(const TypeRef &ref) {
   const Type *sent = other(2);
   for (const Type *t : {yielded, returned, sent}) {
     if (t->isError()) {
-      return t;
+      return ok(t);
     }
   }
-  if (async) {
-    return Type::asyncIterator(yielded, returned, sent);
-  }
+  const Type *iterator = async ? Type::asyncIterator(yielded, returned, sent)
+                               : Type::iterator(yielded, returned, sent);
 
-  return Type::iterator(yielded, returned, sent);
+  return ok(iterator);
 }
 
-const Type *GeneratorChecker::generatorReturnType(const FunctionDecl *fn, const Type *declared) {
-  if (!fn->isGenerator || declared->isError()) {
-    return declared;
-  }
-  if (fn->isAsync) {
-    if (declared->isAsyncIterator()) {
-      return declared;
-    }
+GeneratorChecker::ResultGeneratorReturns
+GeneratorChecker::generatorReturnType(const FunctionDecl *fn, const Type *declared) {
+  bool plain = !fn->isGenerator || declared->isError();
+  if (!plain && fn->isAsync && !declared->isAsyncIterator()) {
     const Type *yielded = declared->isIterator() ? declared->yielded() : declared;
-    this->checker.diags_.error(
-        fn->returnType->loc, "an async generator returns an async iterator: declare its type as "
-                             "'AsyncGenerator<" +
-                                 (yielded->isVoid() ? std::string("int") : yielded->name().str()) +
-                                 ">'");
-    return Type::error();
-  }
-  if (declared->isIterator()) {
-    return declared;
-  }
-  this->checker.diags_.error(
-      fn->returnType->loc, "a generator returns an iterator: declare its type as 'Generator<" +
-                               (declared->isVoid() ? std::string("int") : declared->name().str()) +
-                               ">'");
+    std::string shown = yielded->isVoid() ? std::string("int") : yielded->name().str();
+    std::string message = ErrorTextGeneratorType::async(shown);
 
-  return Type::error();
+    return err(GeneratorCheckerGeneratorReturnTypeError{
+        .code = GeneratorCheckerGeneratorReturnTypeErrorCode::ASYNC_NEEDS_ASYNC_ITERATOR,
+        .message = message,
+    });
+  }
+  if (!plain && !fn->isAsync && !declared->isIterator()) {
+    std::string shown = declared->isVoid() ? std::string("int") : declared->name().str();
+    std::string message = ErrorTextGeneratorType::sync(shown);
+
+    return err(GeneratorCheckerGeneratorReturnTypeError{
+        .code = GeneratorCheckerGeneratorReturnTypeErrorCode::NEEDS_ITERATOR,
+        .message = message,
+    });
+  }
+
+  return ok(declared);
+}
+
+GeneratorChecker::ResultYieldedTypesJoin
+GeneratorChecker::yieldsJoin(const Type *yielded, const Type *t, const FuncSymbol *fn) {
+  const Type *common = yielded ? LiteralTypes::unionUnify(yielded, t) : t;
+  if (!common || common->isError()) {
+    std::string name = quotedName(fn->name);
+    std::string message = ErrorTextYields::differ(name, t->name(), yielded->name());
+
+    return err(GeneratorCheckerYieldsJoinError{
+        .code = GeneratorCheckerYieldsJoinErrorCode::TYPES_DIFFER,
+        .message = message,
+    });
+  }
+
+  return ok(common);
+}
+
+GeneratorChecker::ResultReturnsOfOneType
+GeneratorChecker::returnsJoin(const Type *returned, const Type *t, const FuncSymbol *fn) {
+  const Type *common = returned ? LiteralTypes::unionUnify(returned, t) : t;
+  if (!common || common->isError()) {
+    std::string name = quotedName(fn->name);
+    std::string message = ErrorTextAsyncReturns::differ(name, t->name(), returned->name());
+
+    return err(GeneratorCheckerReturnsJoinError{
+        .code = GeneratorCheckerReturnsJoinErrorCode::TYPES_DIFFER,
+        .message = message,
+    });
+  }
+
+  return ok(common);
+}
+
+GeneratorChecker::ResultYieldedTypeKnown
+GeneratorChecker::yieldsKnown(const Type *yielded, const FuncSymbol *fn, bool noYields) {
+  if (!yielded || yielded->isUndefined()) {
+    std::string why = noYields  ? ErrorTextYields::noYield()
+                      : yielded ? ErrorTextYields::onlyUndef()
+                                : "";
+    std::string name = quotedName(fn->name);
+    std::string message = ErrorTextYields::unknown(name, why);
+
+    return err(GeneratorCheckerYieldsKnownError{
+        .code = GeneratorCheckerYieldsKnownErrorCode::NOTHING_YIELDED,
+        .message = message,
+    });
+  }
+
+  return ok(yielded);
 }
 
 const Type *GeneratorChecker::inferGeneratorType(const FuncSymbol *fn,
@@ -134,17 +189,14 @@ const Type *GeneratorChecker::inferGeneratorType(const FuncSymbol *fn,
       broken = true;
       continue;
     }
-    const Type *common = yielded ? LiteralTypes::unionUnify(yielded, t) : t;
-    if (!common || common->isError()) {
+    ResultYieldedTypesJoin joined = GeneratorChecker::yieldsJoin(yielded, t, fn);
+    if (joined.isErr()) {
       if (report) {
-        this->checker.diags_.error(yield->loc(), quotedName(fn->name) + " yields '" + t->name() +
-                                                     "' here and '" + yielded->name() +
-                                                     "' elsewhere; a generator yields values of "
-                                                     "one type");
+        this->checker.diags_.error(yield->loc(), joined.error().message);
       }
       return Type::error();
     }
-    yielded = common;
+    yielded = joined.value();
   }
   if (!yielded || yielded->isUndefined()) {
     if (!report) {
@@ -153,11 +205,10 @@ const Type *GeneratorChecker::inferGeneratorType(const FuncSymbol *fn,
     if (broken && !yielded) {
       return Type::error();
     }
-    std::string why = yields.empty() ? ": it has no 'yield'"
-                      : yielded      ? ": it yields only undefined"
-                                     : "";
-    this->checker.diags_.error(fn->loc, "cannot tell what " + quotedName(fn->name) + " yields" +
-                                            why + "; declare its type, e.g. ': Generator<int>'");
+    ResultYieldedTypeKnown known = GeneratorChecker::yieldsKnown(yielded, fn, yields.empty());
+    if (known.isErr()) {
+      this->checker.diags_.error(fn->loc, known.error().message);
+    }
     return Type::error();
   }
 
@@ -179,18 +230,14 @@ const Type *GeneratorChecker::inferGeneratorType(const FuncSymbol *fn,
       undefined = true;
       continue;
     }
-    const Type *common = returned ? LiteralTypes::unionUnify(returned, t) : t;
-    if (!common || common->isError()) {
+    ResultReturnsOfOneType joined = GeneratorChecker::returnsJoin(returned, t, fn);
+    if (joined.isErr()) {
       if (report) {
-        this->checker.diags_.error(ret->value->loc(), quotedName(fn->name) + " returns '" +
-                                                          t->name() + "' here and '" +
-                                                          returned->name() +
-                                                          "' elsewhere; a function returns values "
-                                                          "of one type");
+        this->checker.diags_.error(ret->value->loc(), joined.error().message);
       }
       return Type::error();
     }
-    returned = common;
+    returned = joined.value();
   }
   if (!returned) {
     returned = Type::voidTy();
@@ -241,19 +288,155 @@ const Type *GeneratorChecker::asyncIteratedType(const Type *type) {
   return awaited && awaited->isVoid() ? Type::undefinedTy() : awaited;
 }
 
-bool GeneratorChecker::checkSendsNothing(const Type *iterator, llvm::SMLoc loc,
-                                         llvm::StringRef what) {
+GeneratorChecker::ResultNextNeedsNoValue GeneratorChecker::checkSendsNothing(const Type *iterator,
+                                                                             llvm::StringRef what) {
   const Type *sent = iterator->sent();
-  if (sent->isVoid() || sent->isOptional() || sent->isError()) {
-    return true;
-  }
-  this->checker.diags_.error(
-      loc, what + " resumes each 'yield' of '" + iterator->name() +
-               "' without a value, but it expects '" + sent->name() +
-               "' from next(x); call next(x) yourself, or let the generator take '" + sent->name() +
-               " | undefined'");
+  bool free = sent->isVoid() || sent->isOptional() || sent->isError();
+  if (!free) {
+    std::string message = ErrorTextSendsNothing::expects(what, iterator->name(), sent->name());
 
-  return false;
+    return err(GeneratorCheckerCheckSendsNothingError{
+        .code = GeneratorCheckerCheckSendsNothingErrorCode::EXPECTS_VALUE,
+        .message = message,
+    });
+  }
+
+  return ok(iterator);
+}
+
+GeneratorChecker::ResultNothingSentAsync
+GeneratorChecker::asyncSent(const Type *sent, const Type *yielded, bool loose) {
+  if (!sent->isVoid() && !loose) {
+    std::string shown = yielded ? yielded->name().str() : std::string("int");
+    std::string message = ErrorTextYield::asyncSent(shown);
+
+    return err(GeneratorCheckerAsyncSentError{
+        .code = GeneratorCheckerAsyncSentErrorCode::SENT_TO_ASYNC,
+        .message = message,
+    });
+  }
+
+  return ok(sent);
+}
+
+GeneratorChecker::ResultPromiseYieldFits GeneratorChecker::promiseYield(const Type *t,
+                                                                        const Type *given,
+                                                                        const Type *yielded,
+                                                                        const FuncSymbol *fn) {
+  if (!given) {
+    std::string message = ErrorTextYield::mixed(t->name());
+
+    return err(GeneratorCheckerPromiseYieldError{
+        .code = GeneratorCheckerPromiseYieldErrorCode::MIXED_PROMISE,
+        .message = message,
+    });
+  }
+  bool other = yielded && !given->isError() && given != t &&
+               !TypeRelations::isImplicitlyConvertible(given, yielded);
+  if (other) {
+    std::string name = quotedName(fn->name);
+    std::string message = ErrorTextYield::promise(given->name(), name, yielded->name());
+
+    return err(GeneratorCheckerPromiseYieldError{
+        .code = GeneratorCheckerPromiseYieldErrorCode::OTHER_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok(given);
+}
+
+GeneratorChecker::ResultYieldGivesAValue GeneratorChecker::valueYielded(const Type *yielded,
+                                                                        const FuncSymbol *fn) {
+  if (yielded && !yielded->isOptional() && !yielded->isError()) {
+    std::string name = quotedName(fn->name);
+    std::string message = ErrorTextYield::noValue(name, yielded->name());
+
+    return err(GeneratorCheckerValueYieldedError{
+        .code = GeneratorCheckerValueYieldedErrorCode::UNDEFINED_YIELD,
+        .message = message,
+    });
+  }
+
+  return ok(yielded);
+}
+
+GeneratorChecker::ResultDelegateAsyncFit GeneratorChecker::delegateAsync(const Type *type,
+                                                                         const Type *element,
+                                                                         const Type *yielded,
+                                                                         const FuncSymbol *fn) {
+  if (!element && !type->isError()) {
+    std::string message = ErrorTextYield::notAsync(type->name());
+
+    return err(GeneratorCheckerDelegateAsyncError{
+        .code = GeneratorCheckerDelegateAsyncErrorCode::NOT_ASYNC_ITERABLE,
+        .message = message,
+    });
+  }
+  if (element && yielded && !TypeRelations::isImplicitlyConvertible(element, yielded)) {
+    std::string name = quotedName(fn->name);
+    std::string message = ErrorTextYield::otherType(element->name(), name, yielded->name());
+
+    return err(GeneratorCheckerDelegateAsyncError{
+        .code = GeneratorCheckerDelegateAsyncErrorCode::OTHER_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok(element);
+}
+
+GeneratorChecker::ResultDelegateSyncFits
+GeneratorChecker::delegateSync(const Type *type, const Type *element, const Type *yielded,
+                               const Type *sent, bool loose, const FuncSymbol *fn) {
+  if (!element && !type->isError()) {
+    std::string message = ErrorTextYield::notIter(type->name());
+
+    return err(GeneratorCheckerDelegateSyncError{
+        .code = GeneratorCheckerDelegateSyncErrorCode::NOT_ITERABLE,
+        .message = message,
+    });
+  }
+  bool sends =
+      element && type->isIterator() && !type->sent()->isVoid() && type->sent() != sent && !loose;
+  if (sends) {
+    std::string name = quotedName(fn->name);
+    std::string gets = sent->isVoid() ? ErrorTextYield::nothing() : quotedName(sent->name());
+    std::string message = ErrorTextYield::sends(type->name(), type->sent()->name(), name, gets);
+
+    return err(GeneratorCheckerDelegateSyncError{
+        .code = GeneratorCheckerDelegateSyncErrorCode::SENDS_DIFFER,
+        .message = message,
+    });
+  }
+  if (element && yielded && !TypeRelations::isImplicitlyConvertible(element, yielded)) {
+    std::string name = quotedName(fn->name);
+    std::string message = ErrorTextYield::otherType(element->name(), name, yielded->name());
+
+    return err(GeneratorCheckerDelegateSyncError{
+        .code = GeneratorCheckerDelegateSyncErrorCode::OTHER_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok(element);
+}
+
+GeneratorChecker::ResultSentTypeDeclared
+GeneratorChecker::sentDeclared(const YieldExpr *yield, bool async, const Type *sent,
+                               const Type *yielded, bool loose) {
+  bool untyped = !yield->delegate && !async && sent->isVoid() && !yield->discarded && !loose;
+  if (untyped) {
+    std::string shown = yielded ? yielded->name().str() : std::string("int");
+    std::string message = ErrorTextYield::untyped(shown);
+
+    return err(GeneratorCheckerSentDeclaredError{
+        .code = GeneratorCheckerSentDeclaredErrorCode::UNTYPED_SENT,
+        .message = message,
+    });
+  }
+
+  return ok(sent);
 }
 
 Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
@@ -271,12 +454,12 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
   const Type *yielded = generator ? generator->yielded() : nullptr;
   const Type *sent = generator ? generator->sent() : Type::voidTy();
   bool loose = fn->ret && !generator;
-  if (async && !sent->isVoid() && !loose) {
-    this->checker.diags_.error(yield->loc(),
-                               "values sent with next(x) to an async generator are not "
-                               "supported yet; declare it as 'AsyncGenerator<" +
-                                   (yielded ? yielded->name().str() : std::string("int")) + ">'");
-    sent = Type::voidTy();
+  if (async) {
+    ResultNothingSentAsync nothing = GeneratorChecker::asyncSent(sent, yielded, loose);
+    if (nothing.isErr()) {
+      this->checker.diags_.error(yield->loc(), nothing.error().message);
+      sent = Type::voidTy();
+    }
   }
 
   if (!yield->delegate && async) {
@@ -284,41 +467,26 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
       yield->value = this->checker.exprChecker().checkExpr(yield->value, yielded);
       const Type *t = yield->value->type;
       const Type *given = t->isError() ? t : AsyncChecker::awaitedType(t);
-      if (!given) {
-        this->checker.diags_.error(yield->value->loc(),
-                                   "'yield' of '" + t->name() +
-                                       "' gives the value of the Promise or the value "
-                                       "itself, which make no one type; check what it "
-                                       "holds first");
+      ResultPromiseYieldFits fits = GeneratorChecker::promiseYield(t, given, yielded, fn);
+      if (fits.isErr()) {
+        this->checker.diags_.error(yield->value->loc(), fits.error().message);
       } else if (yielded && !given->isError() && given == t) {
         yield->value = this->checker.typeRelations().coerce(yield->value, yielded);
-      } else if (yielded && !given->isError() &&
-                 !TypeRelations::isImplicitlyConvertible(given, yielded)) {
-        this->checker.diags_.error(yield->value->loc(), "the Promise gives '" + given->name() +
-                                                            "', but " + quotedName(fn->name) +
-                                                            " yields '" + yielded->name() + "'");
       }
-    } else if (yielded && !yielded->isOptional() && !yielded->isError()) {
-      this->checker.diags_.error(yield->loc(), "'yield' without a value gives undefined, but " +
-                                                   quotedName(fn->name) + " yields '" +
-                                                   yielded->name() + "'");
+    } else {
+      ResultYieldGivesAValue value = GeneratorChecker::valueYielded(yielded, fn);
+      if (value.isErr()) {
+        this->checker.diags_.error(yield->loc(), value.error().message);
+      }
     }
   } else if (yield->delegate && async) {
     yield->value =
         this->checker.dictChecker().iterableOf(this->checker.exprChecker().checkExpr(yield->value));
     const Type *type = yield->value->type;
     const Type *element = this->asyncIteratedType(type);
-    if (!element) {
-      if (!type->isError()) {
-        this->checker.diags_.error(yield->value->loc(),
-                                   "'yield*' in an async generator needs an async "
-                                   "iterator, an array or an iterator, found '" +
-                                       type->name() + "'");
-      }
-    } else if (yielded && !TypeRelations::isImplicitlyConvertible(element, yielded)) {
-      this->checker.diags_.error(yield->value->loc(),
-                                 "'yield*' gives values of type '" + element->name() + "', but " +
-                                     quotedName(fn->name) + " yields '" + yielded->name() + "'");
+    ResultDelegateAsyncFit fits = GeneratorChecker::delegateAsync(type, element, yielded, fn);
+    if (fits.isErr()) {
+      this->checker.diags_.error(yield->value->loc(), fits.error().message);
     }
     yield->element = element ? element : Type::error();
   } else if (!yield->delegate) {
@@ -327,10 +495,11 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
       if (yielded) {
         yield->value = this->checker.typeRelations().coerce(yield->value, yielded);
       }
-    } else if (yielded && !yielded->isOptional() && !yielded->isError()) {
-      this->checker.diags_.error(yield->loc(), "'yield' without a value gives undefined, but " +
-                                                   quotedName(fn->name) + " yields '" +
-                                                   yielded->name() + "'");
+    } else {
+      ResultYieldGivesAValue value = GeneratorChecker::valueYielded(yielded, fn);
+      if (value.isErr()) {
+        this->checker.diags_.error(yield->loc(), value.error().message);
+      }
     }
   } else {
     this->checker.iteratorMethods().markFused(yield->value);
@@ -338,22 +507,10 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
         this->checker.dictChecker().iterableOf(this->checker.exprChecker().checkExpr(yield->value));
     const Type *type = yield->value->type;
     const Type *element = GeneratorChecker::iteratedType(type);
-    if (!element) {
-      if (!type->isError()) {
-        this->checker.diags_.error(yield->value->loc(),
-                                   "'yield*' needs an array, a string or an iterator, found '" +
-                                       type->name() + "'");
-      }
-    } else if (type->isIterator() && !type->sent()->isVoid() && type->sent() != sent && !loose) {
-      this->checker.diags_.error(yield->value->loc(),
-                                 "'yield*' passes on what next(x) sends, and '" + type->name() +
-                                     "' expects '" + type->sent()->name() + "' from it, but " +
-                                     quotedName(fn->name) + " gets " +
-                                     (sent->isVoid() ? "nothing" : "'" + sent->name().str() + "'"));
-    } else if (yielded && !TypeRelations::isImplicitlyConvertible(element, yielded)) {
-      this->checker.diags_.error(yield->value->loc(),
-                                 "'yield*' gives values of type '" + element->name() + "', but " +
-                                     quotedName(fn->name) + " yields '" + yielded->name() + "'");
+    ResultDelegateSyncFits fits =
+        GeneratorChecker::delegateSync(type, element, yielded, sent, loose, fn);
+    if (fits.isErr()) {
+      this->checker.diags_.error(yield->value->loc(), fits.error().message);
     }
     yield->element = element ? element : Type::error();
   }
@@ -362,6 +519,12 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
   }
   this->checker.flowChecker().calledFunction();
 
+  ResultSentTypeDeclared declared =
+      GeneratorChecker::sentDeclared(yield, async, sent, yielded, loose);
+  if (declared.isErr()) {
+    this->checker.diags_.error(yield->loc(), declared.error().message);
+    return yield;
+  }
   if (yield->delegate) {
     const Type *type = yield->value->type;
     yield->type = type->isError() ? Type::error()
@@ -372,14 +535,8 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
     yield->type = Type::undefinedTy();
   } else if (!sent->isVoid()) {
     yield->type = sent;
-  } else if (yield->discarded || loose) {
-    yield->type = Type::undefinedTy();
   } else {
-    this->checker.diags_.error(
-        yield->loc(), "the value of 'yield' is what next(x) sends, and nothing says its type; "
-                      "declare it in the return type, e.g. ': Generator<" +
-                          (yielded ? yielded->name().str() : std::string("int")) +
-                          ", void, string>'");
+    yield->type = Type::undefinedTy();
   }
 
   return yield;
@@ -387,7 +544,10 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
 
 Expr *GeneratorChecker::destructuredIterator(Expr *init, const VarDeclarator &d) {
   const Type *iterator = init->type;
-  this->checkSendsNothing(iterator, init->loc(), "destructuring");
+  ResultNextNeedsNoValue nothing = this->checkSendsNothing(iterator, "destructuring");
+  if (nothing.isErr()) {
+    this->checker.diags_.error(init->loc(), nothing.error().message);
+  }
   Expr *source = init;
   if (!d.patternRest()) {
     auto *member = this->checker.ctx_.make<MemberExpr>(init->loc(), init, "take");
