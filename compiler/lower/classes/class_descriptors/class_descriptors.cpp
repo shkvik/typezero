@@ -1,5 +1,4 @@
 #include "compiler/lower/classes/class_descriptors/class_descriptors.h"
-#include "compiler/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
 #include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
@@ -8,6 +7,7 @@
 #include "compiler/lower/iterators/generator_lowerer/generator_lowerer.h"
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
+#include "compiler/lower/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -46,18 +46,18 @@ ClassDescriptors::ClassDescriptors(Lowering &owner)
     : lowering(owner) {}
 
 llvm::Constant *ClassDescriptors::dropDescriptor(llvm::Function *drop) {
-  llvm::Constant *&descriptor = this->lowering.dropDescriptors_[drop];
+  llvm::Constant *&descriptor = this->lowering.dropDescriptors[drop];
   if (!descriptor) {
-    llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-    auto *type = llvm::StructType::get(this->lowering.ctx_, llvm::ArrayRef<llvm::Type *>(ptr));
+    llvm::Type *ptr = this->lowering.builder.getPtrTy();
+    auto *type = llvm::StructType::get(this->lowering.ctx, llvm::ArrayRef<llvm::Type *>(ptr));
     llvm::Constant *init = llvm::ConstantStruct::get(type, {drop});
     if (this->lowering.parallel_) {
       llvm::Constant *null = llvm::ConstantPointerNull::get(ptr);
-      type = this->lowering.layoutDescTy_;
+      type = this->lowering.layoutDescTy;
       init = llvm::ConstantStruct::get(
-          this->lowering.layoutDescTy_,
-          {drop, null, this->lowering.builder_.getInt32(0), this->lowering.builder_.getInt32(0),
-           null, this->lowering.builder_.getInt32(0), this->lowering.builder_.getInt32(0)});
+          this->lowering.layoutDescTy,
+          {drop, null, this->lowering.builder.getInt32(0), this->lowering.builder.getInt32(0), null,
+           this->lowering.builder.getInt32(0), this->lowering.builder.getInt32(0)});
     }
     auto *global = new llvm::GlobalVariable(*this->lowering.module_, type, true,
                                             llvm::GlobalValue::PrivateLinkage, init,
@@ -79,7 +79,7 @@ llvm::Function *ClassDescriptors::methodCode(const FunctionDecl *fn) {
 
 void ClassDescriptors::declareMethods(ClassDecl *cls) {
   const ClassDecl *named = cls->generic() ? cls->generic() : cls;
-  std::string prefix = "tz." + this->lowering.symbolPrefixes_.lookup(named) +
+  std::string prefix = "tz." + this->lowering.symbolPrefixes.lookup(named) +
                        (cls->generic() ? cls->type->name().str() : cls->name.str()) + ".";
   for (FunctionDecl *fn : ClassDescriptors::instanceMethods(cls)) {
     std::string name = prefix + fn->name.str();
@@ -123,11 +123,11 @@ void ClassDescriptors::emitMethods(ClassDecl *cls) {
       continue;
     }
     this->lowering.functionBuilder().beginFunction(this->lowering.functions_.lookup(fn->sym), fn);
-    this->lowering.envParam_ = this->lowering.function_->getArg(0);
-    this->lowering.envParam_->setName("this");
+    this->lowering.envParam = this->lowering.function->getArg(0);
+    this->lowering.envParam->setName("this");
     std::vector<llvm::Value *> args;
-    for (unsigned i = 1; i < this->lowering.function_->arg_size(); ++i) {
-      args.push_back(this->lowering.function_->getArg(i));
+    for (unsigned i = 1; i < this->lowering.function->arg_size(); ++i) {
+      args.push_back(this->lowering.function->getArg(i));
     }
     this->lowering.functionBuilder().emitParamsAndBody(fn, args);
     this->lowering.functionBuilder().finishFunction();
@@ -151,10 +151,10 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
       shown = name;
     }
     entries.push_back(llvm::ConstantStruct::get(
-        this->lowering.fieldDescTy_,
+        this->lowering.fieldDescTy,
         {this->lowering.stringLowerer().utf8Constant(shown),
-         this->lowering.builder_.getInt32(uint32_t(shown.size())),
-         this->lowering.builder_.getInt32(uint32_t(offset)),
+         this->lowering.builder.getInt32(uint32_t(shown.size())),
+         this->lowering.builder.getInt32(uint32_t(offset)),
          this->lowering.typeDescriptors().typeDescriptor(type->fields()[i].type)}));
   };
   bool emitter = false;
@@ -167,11 +167,11 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
                                      cls->name == "CryptoKey"));
   auto method = [&](llvm::StringRef name, const FunctionDecl *fn) {
     entries.push_back(llvm::ConstantStruct::get(
-        this->lowering.fieldDescTy_, {this->lowering.stringLowerer().utf8Constant(name),
-                                      this->lowering.builder_.getInt32(uint32_t(name.size())),
-                                      this->lowering.builder_.getInt32(kMethodField),
-                                      this->lowering.typeDescriptors().typeDescriptor(
-                                          ClosureLowerer::functionTypeOf(fn->sym))}));
+        this->lowering.fieldDescTy, {this->lowering.stringLowerer().utf8Constant(name),
+                                     this->lowering.builder.getInt32(uint32_t(name.size())),
+                                     this->lowering.builder.getInt32(kMethodField),
+                                     this->lowering.typeDescriptors().typeDescriptor(
+                                         ClosureLowerer::functionTypeOf(fn->sym))}));
   };
   if (cls->literal()) {
     for (const ObjectLitExpr::Property &prop : cls->literal()->props) {
@@ -219,9 +219,9 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
     }
   }
   std::string name = cls->name.empty() ? "object" : cls->name.str();
-  llvm::Constant *fields = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+  llvm::Constant *fields = llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy());
   if (!entries.empty()) {
-    auto *arrayType = llvm::ArrayType::get(this->lowering.fieldDescTy_, entries.size());
+    auto *arrayType = llvm::ArrayType::get(this->lowering.fieldDescTy, entries.size());
     auto *global = new llvm::GlobalVariable(
         *this->lowering.module_, arrayType, true, llvm::GlobalValue::PrivateLinkage,
         llvm::ConstantArray::get(arrayType, entries), "tz.fields." + name);
@@ -233,25 +233,25 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
     shown = c->parent ? c->parent->name : llvm::StringRef();
   }
   llvm::Constant *className =
-      shown.empty() ? llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy())
+      shown.empty() ? llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy())
                     : this->lowering.stringLowerer().utf8Constant(shown);
   uint32_t flags = library ? 1073741824 : 0;
   llvm::Constant *base = llvm::ConstantStruct::get(
-      this->lowering.layoutDescTy_,
-      {layout.drop, fields, this->lowering.builder_.getInt32(uint32_t(entries.size())),
-       this->lowering.builder_.getInt32(flags), className,
-       this->lowering.builder_.getInt32(uint32_t(shown.size())),
-       this->lowering.builder_.getInt32(cls->id)});
-  llvm::Constant *null = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+      this->lowering.layoutDescTy,
+      {layout.drop, fields, this->lowering.builder.getInt32(uint32_t(entries.size())),
+       this->lowering.builder.getInt32(flags), className,
+       this->lowering.builder.getInt32(uint32_t(shown.size())),
+       this->lowering.builder.getInt32(cls->id)});
+  llvm::Constant *null = llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy());
   std::vector<llvm::Constant *> slots;
   for (FunctionDecl *fn : cls->vtable) {
     slots.push_back(fn ? this->methodCode(fn) : null);
     slots.push_back(fn ? this->lowering.closureLowerer().functionInfo(fn) : null);
   }
-  auto *slotsType = llvm::ArrayType::get(this->lowering.builder_.getPtrTy(), slots.size());
+  auto *slotsType = llvm::ArrayType::get(this->lowering.builder.getPtrTy(), slots.size());
   auto *descType =
-      llvm::StructType::get(this->lowering.ctx_, {this->lowering.layoutDescTy_,
-                                                  this->lowering.builder_.getPtrTy(), slotsType});
+      llvm::StructType::get(this->lowering.ctx, {this->lowering.layoutDescTy,
+                                                 this->lowering.builder.getPtrTy(), slotsType});
   assert(this->lowering.module_->getDataLayout().getStructLayout(descType)->getElementOffset(2) ==
          this->lowering.kVtableOffset);
   auto *global = new llvm::GlobalVariable(

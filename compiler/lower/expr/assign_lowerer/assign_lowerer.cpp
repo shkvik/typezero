@@ -1,11 +1,11 @@
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
-#include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
-#include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
-#include "compiler/library/json/json_lowerer/json_lowerer.h"
 #include "compiler/lower/expr/binary_lowerer/binary_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
+#include "compiler/lower/library/bytes/bytes_lowerer/bytes_lowerer.h"
+#include "compiler/lower/library/decimal/decimal_lowerer/decimal_lowerer.h"
+#include "compiler/lower/library/json/json_lowerer/json_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/memory/store_lowerer/store_lowerer.h"
 #include "compiler/lower/module_builder/module_builder.h"
@@ -62,7 +62,7 @@ llvm::Value *AssignLowerer::emitAssign(AssignExpr *assign, bool needResult) {
   if (!assign->op) {
     value = this->lowering.exprLowerer().emitExpr(assign->value);
   } else if (type->isString()) {
-    Lowering::Operand old{this->lowering.builder_.CreateLoad(this->lowering.strTy_, address), false,
+    Lowering::Operand old{this->lowering.builder.CreateLoad(this->lowering.strTy, address), false,
                           type};
     if (!AssignLowerer::cannotAssign(assign->value)) {
       this->lowering.refCounts().retainString(old.value);
@@ -71,7 +71,7 @@ llvm::Value *AssignLowerer::emitAssign(AssignExpr *assign, bool needResult) {
     Lowering::Operand rhs = this->lowering.stringLowerer().emitConcatPart(assign->value, false);
     value = this->lowering.stringLowerer().concatOperands({old, rhs});
   } else if (type->isDecimal()) {
-    llvm::Value *old = this->lowering.builder_.CreateLoad(this->lowering.decTy_, address);
+    llvm::Value *old = this->lowering.builder.CreateLoad(this->lowering.decTy, address);
     bool hold = !AssignLowerer::cannotAssign(assign->value);
     if (hold) {
       this->lowering.refCounts().retainValue(old, type);
@@ -82,7 +82,7 @@ llvm::Value *AssignLowerer::emitAssign(AssignExpr *assign, bool needResult) {
     }
   } else {
     llvm::Value *old =
-        this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(type), address);
+        this->lowering.builder.CreateLoad(this->lowering.moduleBuilder().lower(type), address);
     llvm::Value *rhs = this->lowering.exprLowerer().emitExpr(assign->value);
     value = this->lowering.binaryLowerer().emitArithmetic(*assign->op, old, rhs, type,
                                                           assign->rangeProven);
@@ -101,14 +101,14 @@ llvm::Value *AssignLowerer::emitNullishAssign(AssignExpr *assign, bool needResul
   const Type *varType = var->type;
   llvm::Value *address = this->lowering.functionFrame().addressOf(var);
   llvm::Value *old =
-      this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(varType), address);
+      this->lowering.builder.CreateLoad(this->lowering.moduleBuilder().lower(varType), address);
   llvm::BasicBlock *keepBlock = this->lowering.functionFrame().newBlock("nullish.keep");
   llvm::BasicBlock *assignBlock = this->lowering.functionFrame().newBlock("nullish.assign");
   llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("nullish.end");
   llvm::Value *has = varType->nonOptional()->isJson()
                          ? this->lowering.jsonLowerer().jsonPresent(old)
                          : this->lowering.optionalLowerer().optionalHas(old, varType);
-  this->lowering.builder_.CreateCondBr(has, keepBlock, assignBlock);
+  this->lowering.builder.CreateCondBr(has, keepBlock, assignBlock);
 
   const Type *resultType = assign->type;
   this->lowering.functionFrame().switchTo(keepBlock);
@@ -118,8 +118,8 @@ llvm::Value *AssignLowerer::emitNullishAssign(AssignExpr *assign, bool needResul
     kept = resultType->isOptional() ? old
                                     : this->lowering.optionalLowerer().optionalValue(old, varType);
   }
-  llvm::BasicBlock *keepEnd = this->lowering.builder_.GetInsertBlock();
-  this->lowering.builder_.CreateBr(endBlock);
+  llvm::BasicBlock *keepEnd = this->lowering.builder.GetInsertBlock();
+  this->lowering.builder.CreateBr(endBlock);
 
   this->lowering.functionFrame().switchTo(assignBlock);
   llvm::Value *value = this->lowering.exprLowerer().emitExpr(assign->value);
@@ -127,7 +127,7 @@ llvm::Value *AssignLowerer::emitNullishAssign(AssignExpr *assign, bool needResul
   llvm::Value *stored = valueType->isOptional()
                             ? value
                             : this->lowering.optionalLowerer().makeOptional(
-                                  value, this->lowering.builder_.getTrue(), varType);
+                                  value, this->lowering.builder.getTrue(), varType);
   this->lowering.storeLowerer().storeVar(var, address, stored, true);
   llvm::Value *assigned = nullptr;
   if (needResult) {
@@ -136,15 +136,15 @@ llvm::Value *AssignLowerer::emitNullishAssign(AssignExpr *assign, bool needResul
                    ? stored
                    : this->lowering.optionalLowerer().optionalValue(stored, varType);
   }
-  llvm::BasicBlock *assignEnd = this->lowering.builder_.GetInsertBlock();
-  this->lowering.builder_.CreateBr(endBlock);
+  llvm::BasicBlock *assignEnd = this->lowering.builder.GetInsertBlock();
+  this->lowering.builder.CreateBr(endBlock);
 
   this->lowering.functionFrame().switchTo(endBlock);
   if (!needResult) {
     return nullptr;
   }
   llvm::PHINode *phi =
-      this->lowering.builder_.CreatePHI(this->lowering.moduleBuilder().lower(resultType), 2);
+      this->lowering.builder.CreatePHI(this->lowering.moduleBuilder().lower(resultType), 2);
   phi->addIncoming(kept, keepEnd);
   phi->addIncoming(assigned, assignEnd);
 
@@ -188,18 +188,18 @@ llvm::Value *AssignLowerer::emitUpdate(UpdateExpr *update) {
     return result;
   }
   llvm::Type *type = this->lowering.moduleBuilder().lower(update->type);
-  llvm::Value *old = this->lowering.builder_.CreateLoad(type, address);
+  llvm::Value *old = this->lowering.builder.CreateLoad(type, address);
   llvm::Value *updated;
   if (update->type->isFloat()) {
     llvm::Value *one = llvm::ConstantFP::get(type, 1.0);
-    updated = update->increment ? this->lowering.builder_.CreateFAdd(old, one)
-                                : this->lowering.builder_.CreateFSub(old, one);
+    updated = update->increment ? this->lowering.builder.CreateFAdd(old, one)
+                                : this->lowering.builder.CreateFSub(old, one);
   } else {
     llvm::Value *one = llvm::ConstantInt::get(type, 1);
-    updated = update->increment ? this->lowering.builder_.CreateAdd(old, one)
-                                : this->lowering.builder_.CreateSub(old, one);
+    updated = update->increment ? this->lowering.builder.CreateAdd(old, one)
+                                : this->lowering.builder.CreateSub(old, one);
   }
-  this->lowering.builder_.CreateStore(updated, address);
+  this->lowering.builder.CreateStore(updated, address);
   if (holder.value) {
     this->lowering.refCounts().dropOperand(holder);
   }

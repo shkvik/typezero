@@ -32,10 +32,10 @@ private:
   void list();
 
   std::string root_;
-  std::vector<std::string> docFiles_;
-  std::vector<std::string> testFiles_;
-  bool listed_ = false;
-  std::map<std::string, std::vector<std::string>> cache_;
+  std::vector<std::string> docFiles;
+  std::vector<std::string> testFiles;
+  bool listed = false;
+  std::map<std::string, std::vector<std::string>> cache;
 };
 
 }

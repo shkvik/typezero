@@ -1,5 +1,4 @@
 #include "compiler/lower/iterators/inline_generator_lowerer/inline_generator_lowerer.h"
-#include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -7,13 +6,14 @@
 #include "compiler/lower/iterators/coroutine_lowerer/coroutine_lowerer.h"
 #include "compiler/lower/iterators/iter_lower_helpers/iter_lower_helpers.h"
 #include "compiler/lower/iterators/lazy_chain_lowerer/lazy_chain_lowerer.h"
+#include "compiler/lower/library/regex/regex_lowerer/regex_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/objects/dict_lowerer/dict_lowerer.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
-#include "compiler/pipeline/check_program/ast_walker/ast_walker.h"
 #include "compiler/program/ast/ast.h"
+#include "compiler/program/ast_walker/ast_walker.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
@@ -46,8 +46,8 @@ InlineGeneratorLowerer::InlineGeneratorLowerer(Lowering &owner)
     : lowering(owner) {}
 
 bool InlineGeneratorLowerer::isInlinable(const FunctionDecl *decl) const {
-  if (!decl->isGenerator || decl->isClosure() || !decl->sym || !decl->sym->ret ||
-      !decl->sym->ret->isIterator()) {
+  if (!decl->isGenerator || decl->isClosure() || !decl->sym || !decl->sym->hasReturnType() ||
+      !decl->sym->getKnownReturnType()->isIterator()) {
     return false;
   }
   unsigned depth = 0;
@@ -72,7 +72,7 @@ Lowering::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *re
                             ? this->lowering.functionFrame().createManagedSlot(t, "operand")
                             : this->lowering.functionFrame().createStackSlot(
                                   this->lowering.moduleBuilder().lower(t), "operand");
-    this->lowering.builder_.CreateStore(this->lowering.exprLowerer().emitExpr(expr), slot);
+    this->lowering.builder.CreateStore(this->lowering.exprLowerer().emitExpr(expr), slot);
 
     return slot;
   };
@@ -85,22 +85,22 @@ Lowering::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *re
         llvm::Value *text = hold(cast<MemberExpr>(call->callee)->object);
         llvm::Value *regex = hold(call->args[0]);
         if (!call->regex) {
-          this->lowering.builder_.CreateCall(
+          this->lowering.builder.CreateCall(
               this->lowering.regexLowerer().regexFunction("tz_re_check_match_all",
-                                                          this->lowering.builder_.getVoidTy(),
-                                                          {this->lowering.builder_.getPtrTy()}),
-              {this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(), regex,
-                                                  "regex")});
+                                                          this->lowering.builder.getVoidTy(),
+                                                          {this->lowering.builder.getPtrTy()}),
+              {this->lowering.builder.CreateLoad(this->lowering.builder.getPtrTy(), regex,
+                                                 "regex")});
         }
         llvm::Value *lastSlot = this->lowering.functionFrame().createStackSlot(
-            this->lowering.builder_.getInt32Ty(), "lastIndex");
-        this->lowering.builder_.CreateStore(
-            this->lowering.builder_.CreateCall(
+            this->lowering.builder.getInt32Ty(), "lastIndex");
+        this->lowering.builder.CreateStore(
+            this->lowering.builder.CreateCall(
                 this->lowering.regexLowerer().regexFunction("tz_re_match_all_begin",
-                                                            this->lowering.builder_.getInt32Ty(),
-                                                            {this->lowering.builder_.getPtrTy()}),
-                {this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(), regex,
-                                                    "regex")}),
+                                                            this->lowering.builder.getInt32Ty(),
+                                                            {this->lowering.builder.getPtrTy()}),
+                {this->lowering.builder.CreateLoad(this->lowering.builder.getPtrTy(), regex,
+                                                   "regex")}),
             lastSlot);
         return this->lowering.regexLowerer().matchAllProducer(
             text, regex, lastSlot,
@@ -147,10 +147,10 @@ Lowering::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *re
         if (call->func() && this->isInlinable(call->func()->decl)) {
           FunctionDecl *decl = call->func()->decl;
           auto snapshot = std::make_shared<
-              std::tuple<decltype(this->lowering.addresses_), decltype(this->lowering.boxSlots_),
-                         decltype(this->lowering.envBoxes_), decltype(this->lowering.groupEnvs_)>>(
-              this->lowering.addresses_, this->lowering.boxSlots_, this->lowering.envBoxes_,
-              this->lowering.groupEnvs_);
+              std::tuple<decltype(this->lowering.addresses), decltype(this->lowering.boxSlots),
+                         decltype(this->lowering.envBoxes), decltype(this->lowering.groupEnvs)>>(
+              this->lowering.addresses, this->lowering.boxSlots, this->lowering.envBoxes,
+              this->lowering.groupEnvs);
           std::vector<llvm::Value *> args;
           for (Expr *arg : call->args) {
             args.push_back(this->lowering.exprLowerer().emitExpr(arg));
@@ -163,8 +163,8 @@ Lowering::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *re
           Lowering::Producer producer;
           producer.run = [this, decl, returnSlot, snapshot](const Lowering::Consumer &consumer) {
             this->emitInlineGenerator(decl, consumer, returnSlot);
-            std::tie(this->lowering.addresses_, this->lowering.boxSlots_, this->lowering.envBoxes_,
-                     this->lowering.groupEnvs_) = *snapshot;
+            std::tie(this->lowering.addresses, this->lowering.boxSlots, this->lowering.envBoxes,
+                     this->lowering.groupEnvs) = *snapshot;
           };
           return producer;
         }
@@ -188,12 +188,12 @@ void InlineGeneratorLowerer::emitInlineGenerator(FunctionDecl *decl,
                                   this->lowering.coroutineLowerer().saveContext(),
                                   this->lowering.functionFrame().newBlock("gen.done"),
                                   returnSlot,
-                                  this->lowering.scopes_.size()};
-  this->lowering.currentFn_ = decl;
-  this->lowering.envParam_ = nullptr;
-  this->lowering.returnType_ = decl->sym->ret;
-  this->lowering.tailGroup_ = nullptr;
-  this->lowering.targets_.clear();
+                                  this->lowering.scopes.size()};
+  this->lowering.currentFn = decl;
+  this->lowering.envParam = nullptr;
+  this->lowering.returnType = decl->sym->getKnownReturnType();
+  this->lowering.tailGroup = nullptr;
+  this->lowering.targets.clear();
   this->lowering.inline_ = &frame;
   unsigned copies = this->inlineCopies;
   this->inlineCopies *= std::max(InlineGeneratorLowerer::countYields(decl), 1u);
@@ -218,7 +218,7 @@ llvm::Value *InlineGeneratorLowerer::emitYieldValue(llvm::Value *value, const Ty
     if (sent) {
       this->lowering.refCounts().releaseValue(sent, sentType);
     }
-    return resultType ? this->lowering.builder_.getFalse() : nullptr;
+    return resultType ? this->lowering.builder.getFalse() : nullptr;
   }
   if (!sent) {
     return this->lowering.optionalLowerer().undefinedValue(resultType);
@@ -228,10 +228,10 @@ llvm::Value *InlineGeneratorLowerer::emitYieldValue(llvm::Value *value, const Ty
 }
 
 llvm::Value *InlineGeneratorLowerer::emitYield(YieldExpr *yield) {
-  if (this->lowering.async_ && this->lowering.async_->generator) {
+  if (this->lowering.async && this->lowering.async->generator) {
     return this->lowering.asyncGeneratorLowerer().emitAsyncYield(yield);
   }
-  const Type *generator = this->lowering.currentFn_->sym->ret;
+  const Type *generator = this->lowering.currentFn->sym->getKnownReturnType();
   const Type *yielded = generator->yielded();
   if (!yield->delegate) {
     llvm::Value *value = yield->value ? this->lowering.exprLowerer().emitExpr(yield->value)
@@ -254,19 +254,19 @@ llvm::Value *InlineGeneratorLowerer::emitYield(YieldExpr *yield) {
     return this->emitYieldValue(
         this->lowering.exprLowerer().emitConversion(value, element, yielded), innerSent);
   };
-  size_t depth = this->lowering.scopes_.size();
+  size_t depth = this->lowering.scopes.size();
   llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("yield.all.end");
   consumer.stop = [this, depth, endBlock] {
     this->lowering.functionFrame().emitCleanups(depth);
-    this->lowering.builder_.CreateBr(endBlock);
+    this->lowering.builder.CreateBr(endBlock);
   };
   producer.run(consumer);
   this->lowering.functionFrame().emitBlock(endBlock);
-  llvm::Value *result = this->lowering.builder_.getFalse();
+  llvm::Value *result = this->lowering.builder.getFalse();
   if (returnSlot) {
-    result = this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(yield->type),
-                                                returnSlot);
-    this->lowering.builder_.CreateStore(
+    result = this->lowering.builder.CreateLoad(this->lowering.moduleBuilder().lower(yield->type),
+                                               returnSlot);
+    this->lowering.builder.CreateStore(
         llvm::Constant::getNullValue(this->lowering.moduleBuilder().lower(yield->type)),
         returnSlot);
   }

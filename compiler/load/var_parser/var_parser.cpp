@@ -7,9 +7,9 @@
 #include "compiler/load/pattern_parser/pattern_parser.h"
 #include "compiler/load/stmt_parser/stmt_parser.h"
 #include "compiler/load/template_parser/template_parser.h"
-#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/load/token_cursor/token_cursor.h"
 #include "compiler/load/type_parser/type_parser.h"
+#include "compiler/program/to_utf8/to_utf8.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
@@ -24,11 +24,13 @@ using llvm::isa;
 
 namespace tz {
 
-VarParser::VarParser(Parser &parser) : parser_(parser) {}
+VarParser::VarParser(Parser &parser)
+    : parser(parser) {}
 
 VarDeclStmt *VarParser::parseVarDecl() {
-  auto *decl = parser_.ctx_.make<VarDeclStmt>(parser_.tok_.loc(), parser_.tok_.is(Tok::KwConst));
-  parser_.cursor().advance();
+  auto *decl =
+      this->parser.ctx.make<VarDeclStmt>(this->parser.tok.loc(), this->parser.tok.is(Tok::KwConst));
+  this->parser.cursor().advance();
   parseDeclarators(decl);
 
   return decl;
@@ -36,30 +38,30 @@ VarDeclStmt *VarParser::parseVarDecl() {
 
 void VarParser::parseDeclarators(VarDeclStmt *decl) {
   do {
-    if (parser_.tok_.is(Tok::LBracket) || parser_.tok_.is(Tok::LBrace)) {
-      std::unique_ptr<Parser::Pattern> pattern = parser_.patterns().parseBindingPattern();
+    if (this->parser.tok.is(Tok::LBracket) || this->parser.tok.is(Tok::LBrace)) {
+      std::unique_ptr<Parser::Pattern> pattern = this->parser.patterns().parseBindingPattern();
       std::optional<TypeRef> typeAnn;
-      if (parser_.cursor().accept(Tok::Colon)) {
-        typeAnn = parser_.types().parseType();
+      if (this->parser.cursor().accept(Tok::Colon)) {
+        typeAnn = this->parser.types().parseType();
       }
-      if (!parser_.tok_.is(Tok::Assign)) {
-        parser_.cursor().error(pattern->loc,
-                               pattern->object
-                                   ? "a destructuring declaration needs a value: '{ a, b } = ...'"
-                                   : "a destructuring declaration needs a value: '[a, b] = ...'");
+      if (!this->parser.tok.is(Tok::Assign)) {
+        this->parser.cursor().error(
+            pattern->loc, pattern->object
+                              ? "a destructuring declaration needs a value: '{ a, b } = ...'"
+                              : "a destructuring declaration needs a value: '[a, b] = ...'");
         return;
       }
-      parser_.cursor().advance();
-      parser_.patterns().declarePattern(decl, *pattern, parser_.exprs().parseExpr(),
-                                        std::move(typeAnn));
+      this->parser.cursor().advance();
+      this->parser.patterns().declarePattern(decl, *pattern, this->parser.exprs().parseExpr(),
+                                             std::move(typeAnn));
       continue;
     }
     VarDeclarator d;
     if (!parseBinding(d)) {
       return;
     }
-    if (parser_.cursor().accept(Tok::Assign)) {
-      d.init = parser_.exprs().parseExpr();
+    if (this->parser.cursor().accept(Tok::Assign)) {
+      d.init = this->parser.exprs().parseExpr();
     }
     if (auto *ce = llvm::dyn_cast_or_null<ClassExpr>(d.init); ce && ce->decl->name.empty()) {
       ce->decl->name = d.name;
@@ -68,7 +70,7 @@ void VarParser::parseDeclarators(VarDeclStmt *decl) {
       recordConstant(d.name, d.init);
     }
     decl->decls.push_back(d);
-  } while (parser_.cursor().accept(Tok::Comma));
+  } while (this->parser.cursor().accept(Tok::Comma));
 }
 
 void VarParser::recordConstant(llvm::StringRef name, const Expr *init) {
@@ -78,22 +80,22 @@ void VarParser::recordConstant(llvm::StringRef name, const Expr *init) {
   } else if (auto *tmpl = dyn_cast<TemplateExpr>(init); tmpl && tmpl->exprs.empty()) {
     values.push_back(ToUtf8::toUtf8(tmpl->quasis[0]));
   } else if (auto *other = dyn_cast<NameExpr>(init)) {
-    values = parser_.stringConstants_.lookup(other->name);
+    values = this->parser.stringConstants.lookup(other->name);
   }
-  std::vector<std::string> &all = parser_.stringConstants_[name];
+  std::vector<std::string> &all = this->parser.stringConstants[name];
   all.insert(all.end(), values.begin(), values.end());
 }
 
 bool VarParser::parseBinding(VarDeclarator &d) {
-  d.loc = parser_.tok_.loc();
-  if (!parser_.tok_.is(Tok::Identifier)) {
-    parser_.cursor().error(parser_.tok_.loc(), "expected a variable name");
+  d.loc = this->parser.tok.loc();
+  if (!this->parser.tok.is(Tok::Identifier)) {
+    this->parser.cursor().error(this->parser.tok.loc(), "expected a variable name");
     return false;
   }
-  d.name = parser_.tok_.text;
-  parser_.cursor().advance();
-  if (parser_.cursor().accept(Tok::Colon)) {
-    d.typeAnn = parser_.types().parseType();
+  d.name = this->parser.tok.text;
+  this->parser.cursor().advance();
+  if (this->parser.cursor().accept(Tok::Colon)) {
+    d.typeAnn = this->parser.types().parseType();
   }
 
   return true;

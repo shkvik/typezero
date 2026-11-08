@@ -132,6 +132,7 @@ struct ClassDecl : Stmt {
   ClassGenerics generics = NotGeneric{};
   bool checkOnly = false;
   std::vector<FunctionDecl *> methodInstances;
+  const ClassDecl *pristine = nullptr;
   bool isGeneric() const;
   bool isEmitted() const;
   const ClassDecl *staticOwner() const;

@@ -114,7 +114,7 @@ bool Resolver::collect(std::map<std::string, std::vector<Requirement>> &reqs) {
         const Manifest &local = it->second;
         std::string by = local.path.empty() ? source.dir() : local.path;
         queue.push_back({by, local.dir, true, &local.dependencies, nullptr});
-      } else if (auto it = chosen_.find(id); it != chosen_.end()) {
+      } else if (auto it = this->chosen.find(id); it != this->chosen.end()) {
         queue.push_back({it->second.describe(), "", false, nullptr, &it->second.dependencies});
       }
     }
@@ -155,8 +155,8 @@ bool Resolver::choose(const std::string &id, const std::vector<Requirement> &req
 
 bool Resolver::chooseJsr(const std::string &id, const std::vector<Requirement> &reqs, Locked &out) {
   const Source &source = reqs.front().source;
-  auto it = versions_.find(id);
-  if (it == versions_.end()) {
+  auto it = this->versions.find(id);
+  if (it == this->versions.end()) {
     JsrVersions versions;
     std::string error;
     if (!JsrClient::jsrVersions(source.scope(), source.name(), versions, error)) {
@@ -166,7 +166,7 @@ bool Resolver::chooseJsr(const std::string &id, const std::vector<Requirement> &
       Report::report(error);
       return false;
     }
-    it = versions_.emplace(id, std::move(versions)).first;
+    it = this->versions.emplace(id, std::move(versions)).first;
   }
   const std::vector<JsrVersions::Entry> &all = it->second.versions;
 
@@ -294,30 +294,30 @@ bool Resolver::run(Lock &out) {
       if (list.front().source.form.is<LocalSource>()) {
         continue;
       }
-      auto current = chosen_.find(id);
-      if (current != chosen_.end() && fits(current->second, list)) {
+      auto current = this->chosen.find(id);
+      if (current != this->chosen.end() && fits(current->second, list)) {
         continue;
       }
       Locked pick;
-      auto old = old_.packages.find(id);
-      if (!updating(id) && old != old_.packages.end() && fits(old->second, list)) {
+      auto old = this->old.packages.find(id);
+      if (!updating(id) && old != this->old.packages.end() && fits(old->second, list)) {
         pick = old->second;
       } else if (!choose(id, list, pick)) {
         return false;
       }
-      chosen_[id] = std::move(pick);
+      this->chosen[id] = std::move(pick);
       changed = true;
     }
-    for (auto it = chosen_.begin(); it != chosen_.end();) {
+    for (auto it = this->chosen.begin(); it != this->chosen.end();) {
       if (reqs.count(it->first)) {
         ++it;
       } else {
-        it = chosen_.erase(it);
+        it = this->chosen.erase(it);
         changed = true;
       }
     }
     if (!changed) {
-      out.packages = chosen_;
+      out.packages = this->chosen;
       return true;
     }
   }

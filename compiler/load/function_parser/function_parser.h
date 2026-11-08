@@ -20,7 +20,7 @@ public:
   std::vector<TypeParamDecl> parseTypeParams();
 
 private:
-  Parser &parser_;
+  Parser &parser;
 };
 
 }

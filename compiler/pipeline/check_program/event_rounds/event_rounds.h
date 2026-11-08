@@ -1,6 +1,6 @@
 #pragma once
 
-#include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/semantic/semantic_external.h"
 
 namespace tz {
 
@@ -12,7 +12,7 @@ public:
 
 private:
   EventInference inference_;
-  unsigned round_ = 0;
+  unsigned round = 0;
 };
 
 }

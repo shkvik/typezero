@@ -10,9 +10,9 @@ using llvm::dyn_cast;
 namespace tz {
 
 KnowledgeWalk::KnowledgeWalk(KnowledgePass &pass, size_t module, size_t from)
-    : pass_(pass),
+    : pass(pass),
       module_(module),
-      from_(from) {}
+      from(from) {}
 
 bool KnowledgeWalk::builtinClassName(llvm::StringRef name) {
   static const llvm::StringRef names[] = {
@@ -41,8 +41,8 @@ void KnowledgeWalk::param(const Param &param) {
     expr(decorator.expr);
   }
   const Type *type = param.sym && param.sym->type ? param.sym->type : param.declaredType;
-  pass_.typed(module_, param.loc, param.name, type);
-  pass_.local(param.sym, module_, from_, llvm::SMLoc(), true);
+  this->pass.typed(module_, param.loc, param.name, type);
+  this->pass.local(param.sym, module_, this->from, llvm::SMLoc(), true);
 }
 
 void KnowledgeWalk::function(const FunctionDecl *fn) {
@@ -84,13 +84,13 @@ void KnowledgeWalk::classDecl(const ClassDecl *cls) {
   for (const TypeRef &ref : cls->interfaces) {
     typeRef(ref);
   }
-  size_t outer = from_;
+  size_t outer = this->from;
   for (const ClassField &field : cls->fields) {
     if (field.parameter()) {
       continue;
     }
-    size_t own = pass_.fieldSymbol(cls, field.name, field.isStatic());
-    from_ = own == Knowledge::kNone ? outer : own;
+    size_t own = this->pass.fieldSymbol(cls, field.name, field.isStatic());
+    this->from = own == Knowledge::kNone ? outer : own;
     for (const Decorator &decorator : field.decorators) {
       expr(decorator.expr);
     }
@@ -100,14 +100,14 @@ void KnowledgeWalk::classDecl(const ClassDecl *cls) {
     if (field.init) {
       expr(field.init);
     }
-    from_ = outer;
+    this->from = outer;
   }
   for (const auto *list : {&cls->constructors, &cls->methods}) {
     for (const FunctionDecl *method : *list) {
-      size_t own = pass_.functionSymbol(method);
-      from_ = own == Knowledge::kNone ? outer : own;
+      size_t own = this->pass.functionSymbol(method);
+      this->from = own == Knowledge::kNone ? outer : own;
       function(method);
-      from_ = outer;
+      this->from = outer;
     }
   }
 }
@@ -120,8 +120,8 @@ void KnowledgeWalk::declarator(const VarDeclarator &declarator) {
     expr(declarator.init);
   }
   if (!declarator.name.starts_with("%") && declarator.sym) {
-    pass_.typed(module_, declarator.loc, declarator.name, declarator.sym->type);
-    pass_.local(declarator.sym, module_, from_, llvm::SMLoc());
+    this->pass.typed(module_, declarator.loc, declarator.name, declarator.sym->type);
+    this->pass.local(declarator.sym, module_, this->from, llvm::SMLoc());
   }
 }
 
@@ -129,16 +129,17 @@ void KnowledgeWalk::typeRef(const TypeRef &ref) {
   if ((ref.kind() == TypeRefKind::NAME_REF || ref.kind() == TypeRefKind::GENERIC_REF) &&
       !ref.name.empty()) {
     auto [head, member] = ref.name.split('.');
-    size_t symbol = pass_.typeSymbol(module_, head);
+    size_t symbol = this->pass.typeSymbol(module_, head);
     if (symbol != Knowledge::kNone) {
-      pass_.reference(symbol, from_, module_, ref.loc, false);
+      this->pass.reference(symbol, this->from, module_, ref.loc, false);
     }
     size_t own = symbol == Knowledge::kNone || member.empty()
                      ? Knowledge::kNone
-                     : pass_.enumMemberSymbol(symbol, member);
+                     : this->pass.enumMemberSymbol(symbol, member);
     if (own != Knowledge::kNone) {
-      pass_.reference(own, from_, module_,
-                      llvm::SMLoc::getFromPointer(ref.loc.getPointer() + head.size() + 1), false);
+      this->pass.reference(own, this->from, module_,
+                           llvm::SMLoc::getFromPointer(ref.loc.getPointer() + head.size() + 1),
+                           false);
     }
   }
   for (const TypeRef &arg : ref.args) {
@@ -151,50 +152,51 @@ bool KnowledgeWalk::use(const Expr *e, bool call) {
     for (const TypeRef &arg : name->typeArgs) {
       typeRef(arg);
     }
-    pass_.typed(module_, name->loc(), name->name, name->type);
+    this->pass.typed(module_, name->loc(), name->name, name->type);
     size_t symbol = Knowledge::kNone;
     if (name->var()) {
-      symbol = pass_.variableSymbol(name->var());
+      symbol = this->pass.variableSymbol(name->var());
       if (symbol == Knowledge::kNone) {
-        pass_.local(name->var(), module_, from_, name->loc());
+        this->pass.local(name->var(), module_, this->from, name->loc());
       }
     }
     if (symbol == Knowledge::kNone && name->func()) {
-      symbol = pass_.functionSymbol(name->func()->decl);
+      symbol = this->pass.functionSymbol(name->func()->decl);
     }
     if (symbol == Knowledge::kNone && name->cls()) {
-      symbol = pass_.classSymbol(name->cls());
+      symbol = this->pass.classSymbol(name->cls());
     }
     if (symbol == Knowledge::kNone && !name->var() && !name->func()) {
-      size_t named = pass_.typeSymbol(module_, name->name);
-      if (named != Knowledge::kNone && pass_.symbolKind(named) == "class") {
+      size_t named = this->pass.typeSymbol(module_, name->name);
+      if (named != Knowledge::kNone && this->pass.symbolKind(named) == "class") {
         symbol = named;
       } else if (named == Knowledge::kNone && KnowledgeWalk::builtinClassName(name->name)) {
-        pass_.builtinClass(module_, name->loc(), name->name);
+        this->pass.builtinClass(module_, name->loc(), name->name);
       }
     }
-    return symbol != Knowledge::kNone && pass_.reference(symbol, from_, module_, name->loc(), call);
+    return symbol != Knowledge::kNone &&
+           this->pass.reference(symbol, this->from, module_, name->loc(), call);
   }
   if (auto *member = dyn_cast<MemberExpr>(e)) {
     expr(member->object);
     for (const TypeRef &arg : member->typeArgs) {
       typeRef(arg);
     }
-    pass_.typed(module_, member->loc(), member->name, member->type);
+    this->pass.typed(module_, member->loc(), member->name, member->type);
     size_t symbol = Knowledge::kNone;
     if (member->method()) {
-      symbol = pass_.functionSymbol(member->method()->decl);
+      symbol = this->pass.functionSymbol(member->method()->decl);
     }
     const Type *object = member->object ? member->object->type : nullptr;
     if (symbol == Knowledge::kNone && object) {
       if (const ClassDecl *cls = object->nonOptional()->classRef()) {
-        symbol = pass_.fieldSymbol(cls, member->name, true);
+        symbol = this->pass.fieldSymbol(cls, member->name, true);
       } else if (const ClassDecl *owner = object->nonOptional()->classDecl()) {
-        symbol = pass_.fieldSymbol(owner, member->name, false);
+        symbol = this->pass.fieldSymbol(owner, member->name, false);
       }
     }
     return symbol != Knowledge::kNone &&
-           pass_.reference(symbol, from_, module_, member->loc(), call);
+           this->pass.reference(symbol, this->from, module_, member->loc(), call);
   }
   expr(e);
 
@@ -205,17 +207,17 @@ void KnowledgeWalk::expr(const Expr *e) {
   if (!e) {
     return;
   }
-  const auto &namedUses = pass_.program().file.namedUses;
+  const auto &namedUses = this->pass.program().file.inventory.namedUses;
   if (auto found = namedUses.find(e); found != namedUses.end()) {
     const auto *cls = dyn_cast<ClassDecl>(found->second.decl);
-    size_t symbol = cls ? pass_.classSymbol(cls) : pass_.enumSymbol(found->second.decl);
+    size_t symbol = cls ? this->pass.classSymbol(cls) : this->pass.enumSymbol(found->second.decl);
     if (symbol != Knowledge::kNone) {
-      pass_.reference(symbol, from_, module_, found->second.name, false);
+      this->pass.reference(symbol, this->from, module_, found->second.name, false);
       size_t own = found->second.member.empty()
                        ? Knowledge::kNone
-                       : pass_.enumMemberSymbol(symbol, found->second.member);
+                       : this->pass.enumMemberSymbol(symbol, found->second.member);
       if (own != Knowledge::kNone) {
-        pass_.reference(own, from_, module_, e->loc(), false);
+        this->pass.reference(own, this->from, module_, e->loc(), false);
       }
     }
   }
@@ -276,9 +278,9 @@ void KnowledgeWalk::expr(const Expr *e) {
     bool named = call->callee && use(call->callee, true);
     const FuncSymbol *callee = call->func() ? call->func() : call->method();
     if (!named && callee && call->callee) {
-      size_t symbol = pass_.functionSymbol(callee->decl);
+      size_t symbol = this->pass.functionSymbol(callee->decl);
       if (symbol != Knowledge::kNone) {
-        pass_.reference(symbol, from_, module_, call->callee->loc(), true);
+        this->pass.reference(symbol, this->from, module_, call->callee->loc(), true);
       }
     }
     for (const Expr *arg : call->args) {
@@ -294,15 +296,15 @@ void KnowledgeWalk::expr(const Expr *e) {
     if (create->callee) {
       use(create->callee, true);
     } else if (create->cls()) {
-      size_t symbol = pass_.classSymbol(create->cls());
+      size_t symbol = this->pass.classSymbol(create->cls());
       if (symbol != Knowledge::kNone) {
-        pass_.reference(symbol, from_, module_, create->loc(), false);
+        this->pass.reference(symbol, this->from, module_, create->loc(), false);
       }
     }
     if (create->ctor() && create->ctor()->func()) {
-      size_t symbol = pass_.functionSymbol(create->ctor()->func()->decl);
+      size_t symbol = this->pass.functionSymbol(create->ctor()->func()->decl);
       if (symbol != Knowledge::kNone) {
-        pass_.reference(symbol, from_, module_, create->loc(), true);
+        this->pass.reference(symbol, this->from, module_, create->loc(), true);
       }
     }
     for (const Expr *arg : create->ctor() ? create->ctor()->args : create->args) {

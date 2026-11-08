@@ -22,7 +22,7 @@ public:
   static const VarSymbol *callableParam(const FunctionDecl *fn, const Expr *e);
 
 private:
-  Analysis &analysis_;
+  Analysis &analysis;
 };
 
 }

@@ -41,28 +41,28 @@ IteratorLowerer::IteratorLowerer(Lowering &owner)
     : lowering(owner) {}
 
 void IteratorLowerer::emitIteratorForOf(ForOfStmt *stmt) {
-  llvm::SmallVector<llvm::StringRef, 1> labels = std::move(this->lowering.pendingLabels_);
-  this->lowering.pendingLabels_.clear();
+  llvm::SmallVector<llvm::StringRef, 1> labels = std::move(this->lowering.pendingLabels);
+  this->lowering.pendingLabels.clear();
   this->lowering.functionFrame().pushScope();
   Lowering::Producer producer = this->lowering.inlineGeneratorLowerer().prepare(stmt->iterable);
-  size_t depth = this->lowering.scopes_.size();
+  size_t depth = this->lowering.scopes.size();
   llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("for.of.end");
   Lowering::Consumer consumer;
   consumer.stop = [this, depth, endBlock] {
     this->lowering.functionFrame().emitCleanups(depth);
-    this->lowering.builder_.CreateBr(endBlock);
+    this->lowering.builder.CreateBr(endBlock);
   };
   consumer.each = [this, stmt, labels, depth, endBlock](llvm::Value *value) -> llvm::Value * {
     llvm::BasicBlock *nextBlock = this->lowering.functionFrame().newBlock("for.of.next");
-    size_t here = this->lowering.scopes_.size();
+    size_t here = this->lowering.scopes.size();
     this->lowering.functionFrame().pushScope();
     this->lowering.storeLowerer().storeVar(
         stmt->binding.sym,
         this->lowering.functionFrame().createLocal(stmt->binding.sym, stmt->binding.name), value,
         true);
-    this->lowering.targets_.push_back({labels, true, false, endBlock, nextBlock, depth, here});
+    this->lowering.targets.push_back({labels, true, false, endBlock, nextBlock, depth, here});
     this->lowering.stmtLowerer().emitStmt(stmt->body);
-    this->lowering.targets_.pop_back();
+    this->lowering.targets.pop_back();
     this->lowering.functionFrame().popScope();
     this->lowering.functionFrame().emitBlock(nextBlock);
 
@@ -76,7 +76,7 @@ void IteratorLowerer::emitIteratorForOf(ForOfStmt *stmt) {
 void IteratorLowerer::emitIteratorSpread(llvm::Value *array, Expr *source, const Type *element) {
   this->lowering.functionFrame().pushScope();
   Lowering::Producer producer = this->lowering.inlineGeneratorLowerer().prepare(source);
-  size_t depth = this->lowering.scopes_.size();
+  size_t depth = this->lowering.scopes.size();
   llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("spread.end");
   const Type *yielded = IteratorLowerer::iteratedType(source->type);
   Lowering::Consumer consumer;
@@ -88,7 +88,7 @@ void IteratorLowerer::emitIteratorSpread(llvm::Value *array, Expr *source, const
   };
   consumer.stop = [this, depth, endBlock] {
     this->lowering.functionFrame().emitCleanups(depth);
-    this->lowering.builder_.CreateBr(endBlock);
+    this->lowering.builder.CreateBr(endBlock);
   };
   producer.run(consumer);
   this->lowering.functionFrame().emitBlock(endBlock);
@@ -126,25 +126,25 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
   llvm::Value *callback = nullptr;
   if (callbackExpr) {
     callback = this->lowering.functionFrame().createManagedSlot(callbackType, "callback");
-    this->lowering.builder_.CreateStore(this->lowering.exprLowerer().emitExpr(callbackExpr),
-                                        callback);
+    this->lowering.builder.CreateStore(this->lowering.exprLowerer().emitExpr(callbackExpr),
+                                       callback);
   }
-  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+  llvm::Type *i64 = this->lowering.builder.getInt64Ty();
   llvm::Value *counter = this->lowering.functionFrame().createStackSlot(i64, "counter");
-  this->lowering.builder_.CreateStore(this->lowering.builder_.getInt64(0), counter);
+  this->lowering.builder.CreateStore(this->lowering.builder.getInt64(0), counter);
   auto nextCount = [this, counter, i64] {
-    llvm::Value *count = this->lowering.builder_.CreateLoad(i64, counter, "count");
-    this->lowering.builder_.CreateStore(
-        this->lowering.builder_.CreateAdd(count, this->lowering.builder_.getInt64(1)), counter);
+    llvm::Value *count = this->lowering.builder.CreateLoad(i64, counter, "count");
+    this->lowering.builder.CreateStore(
+        this->lowering.builder.CreateAdd(count, this->lowering.builder.getInt64(1)), counter);
 
     return count;
   };
-  size_t depth = this->lowering.scopes_.size();
+  size_t depth = this->lowering.scopes.size();
   llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("iter.end");
   Lowering::Consumer consumer;
   consumer.stop = [this, depth, endBlock] {
     this->lowering.functionFrame().emitCleanups(depth);
-    this->lowering.builder_.CreateBr(endBlock);
+    this->lowering.builder.CreateBr(endBlock);
   };
 
   llvm::Value *array = nullptr;
@@ -157,8 +157,8 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
   case Builtin::IterToArray: {
     const Type *stored = resultType->inner();
     array = this->lowering.groupLowerer().newArray(Type::array(stored),
-                                                   this->lowering.builder_.getInt64(0),
-                                                   this->lowering.builder_.getInt64(0));
+                                                   this->lowering.builder.getInt64(0),
+                                                   this->lowering.builder.getInt64(0));
     consumer.each = [=, this](llvm::Value *value) -> llvm::Value * {
       if (callback) {
         value = this->lowering.lazyChainLowerer().callCallback(
@@ -187,14 +187,14 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
     resultSlot = this->lowering.functionFrame().createStackSlot(
         this->lowering.moduleBuilder().lower(accType), "acc");
     if (call->args.size() > 1) {
-      this->lowering.builder_.CreateStore(this->lowering.exprLowerer().emitExpr(call->args[1]),
-                                          resultSlot);
+      this->lowering.builder.CreateStore(this->lowering.exprLowerer().emitExpr(call->args[1]),
+                                         resultSlot);
     } else {
-      this->lowering.builder_.CreateStore(
+      this->lowering.builder.CreateStore(
           llvm::Constant::getNullValue(this->lowering.moduleBuilder().lower(accType)), resultSlot);
-      hasAcc = this->lowering.functionFrame().createStackSlot(this->lowering.builder_.getInt1Ty(),
+      hasAcc = this->lowering.functionFrame().createStackSlot(this->lowering.builder.getInt1Ty(),
                                                               "has.acc");
-      this->lowering.builder_.CreateStore(this->lowering.builder_.getFalse(), hasAcc);
+      this->lowering.builder.CreateStore(this->lowering.builder.getFalse(), hasAcc);
     }
     consumer.each = [=, this](llvm::Value *value) -> llvm::Value * {
       llvm::BasicBlock *firstBlock = nullptr;
@@ -203,19 +203,19 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
         firstBlock = this->lowering.functionFrame().newBlock("reduce.first");
         nextBlock = this->lowering.functionFrame().newBlock("reduce.next");
         llvm::BasicBlock *combineBlock = this->lowering.functionFrame().newBlock("reduce.combine");
-        this->lowering.builder_.CreateCondBr(
-            this->lowering.builder_.CreateLoad(this->lowering.builder_.getInt1Ty(), hasAcc),
+        this->lowering.builder.CreateCondBr(
+            this->lowering.builder.CreateLoad(this->lowering.builder.getInt1Ty(), hasAcc),
             combineBlock, firstBlock);
         this->lowering.functionFrame().switchTo(firstBlock);
-        this->lowering.builder_.CreateStore(value, resultSlot);
-        this->lowering.builder_.CreateStore(this->lowering.builder_.getTrue(), hasAcc);
+        this->lowering.builder.CreateStore(value, resultSlot);
+        this->lowering.builder.CreateStore(this->lowering.builder.getTrue(), hasAcc);
         nextCount();
-        this->lowering.builder_.CreateBr(nextBlock);
+        this->lowering.builder.CreateBr(nextBlock);
         this->lowering.functionFrame().switchTo(combineBlock);
       }
-      llvm::Value *acc = this->lowering.builder_.CreateLoad(
+      llvm::Value *acc = this->lowering.builder.CreateLoad(
           this->lowering.moduleBuilder().lower(accType), resultSlot);
-      this->lowering.builder_.CreateStore(
+      this->lowering.builder.CreateStore(
           this->lowering.lazyChainLowerer().callCallback(
               callback, callbackType, {acc, value, nextCount()}, {accType, element, Type::intTy()}),
           resultSlot);
@@ -232,10 +232,10 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
   case Builtin::IterFind: {
     resultSlot = this->lowering.functionFrame().createStackSlot(
         this->lowering.moduleBuilder().lower(resultType), "result");
-    this->lowering.builder_.CreateStore(
-        method == Builtin::IterSome ? this->lowering.builder_.getFalse()
+    this->lowering.builder.CreateStore(
+        method == Builtin::IterSome ? this->lowering.builder.getFalse()
         : method == Builtin::IterEvery
-            ? this->lowering.builder_.getTrue()
+            ? this->lowering.builder.getTrue()
             : this->lowering.optionalLowerer().undefinedValue(resultType),
         resultSlot);
     consumer.each = [=, this](llvm::Value *value) -> llvm::Value * {
@@ -246,16 +246,16 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
       llvm::Value *decides = this->lowering.lazyChainLowerer().callCallback(
           callback, callbackType, {value, nextCount()}, {element, Type::intTy()});
       if (method == Builtin::IterEvery) {
-        decides = this->lowering.builder_.CreateNot(decides);
+        decides = this->lowering.builder.CreateNot(decides);
       }
       llvm::BasicBlock *foundBlock = this->lowering.functionFrame().newBlock("iter.found");
       llvm::BasicBlock *otherBlock = this->lowering.functionFrame().newBlock("iter.other");
-      this->lowering.builder_.CreateCondBr(decides, foundBlock, otherBlock);
+      this->lowering.builder.CreateCondBr(decides, foundBlock, otherBlock);
       this->lowering.functionFrame().switchTo(foundBlock);
-      this->lowering.builder_.CreateStore(
+      this->lowering.builder.CreateStore(
           find ? this->lowering.optionalLowerer().makeOptional(
-                     value, this->lowering.builder_.getTrue(), resultType)
-               : this->lowering.builder_.getInt1(method == Builtin::IterSome),
+                     value, this->lowering.builder.getTrue(), resultType)
+               : this->lowering.builder.getInt1(method == Builtin::IterSome),
           resultSlot);
       consumer.stop();
       this->lowering.functionFrame().switchTo(otherBlock);
@@ -276,13 +276,13 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
   if (array) {
     result = array;
   } else if (resultSlot) {
-    result = this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(accType),
-                                                resultSlot);
+    result = this->lowering.builder.CreateLoad(this->lowering.moduleBuilder().lower(accType),
+                                               resultSlot);
     if (hasAcc) {
       llvm::Value *has =
-          this->lowering.builder_.CreateLoad(this->lowering.builder_.getInt1Ty(), hasAcc);
+          this->lowering.builder.CreateLoad(this->lowering.builder.getInt1Ty(), hasAcc);
       result = accType == resultType
-                   ? this->lowering.builder_.CreateSelect(
+                   ? this->lowering.builder.CreateSelect(
                          has, result, this->lowering.optionalLowerer().undefinedValue(resultType))
                    : this->lowering.optionalLowerer().makeOptional(result, has, resultType);
     }
@@ -312,18 +312,18 @@ llvm::Value *IteratorLowerer::emitNext(CallExpr *call) {
   }
   llvm::Value *out = this->lowering.functionFrame().createStackSlot(
       this->lowering.moduleBuilder().lower(element), "next.value");
-  this->lowering.builder_.CreateStore(
+  this->lowering.builder.CreateStore(
       llvm::Constant::getNullValue(this->lowering.moduleBuilder().lower(element)), out);
   llvm::Value *ret = nullptr;
   if (!returned->isVoid()) {
     ret = this->lowering.functionFrame().createStackSlot(
         this->lowering.moduleBuilder().lower(returned), "next.return");
-    this->lowering.builder_.CreateStore(
+    this->lowering.builder.CreateStore(
         llvm::Constant::getNullValue(this->lowering.moduleBuilder().lower(returned)), ret);
   }
-  llvm::Value *frame = this->lowering.builder_.CreateConstInBoundsGEP1_64(
-      this->lowering.builder_.getInt8Ty(), it, kHeaderSize, "frame");
-  llvm::Value *wasDone = this->lowering.builder_.CreateCall(
+  llvm::Value *frame = this->lowering.builder.CreateConstInBoundsGEP1_64(
+      this->lowering.builder.getInt8Ty(), it, kHeaderSize, "frame");
+  llvm::Value *wasDone = this->lowering.builder.CreateCall(
       this->lowering.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_done), {frame},
       "was.done");
   llvm::Value *has = this->lowering.coroutineLowerer().emitResume(it, out, in, ret);
@@ -332,24 +332,24 @@ llvm::Value *IteratorLowerer::emitNext(CallExpr *call) {
   }
   const Type *valueType = call->type->field("value")->type;
   llvm::Value *given = this->lowering.exprLowerer().emitConversion(
-      this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(element), out),
+      this->lowering.builder.CreateLoad(this->lowering.moduleBuilder().lower(element), out),
       element, valueType);
-  llvm::Value *value = this->lowering.builder_.CreateSelect(
+  llvm::Value *value = this->lowering.builder.CreateSelect(
       has, given, this->lowering.optionalLowerer().undefinedValue(valueType));
   if (ret) {
     llvm::Value *returnedValue = this->lowering.exprLowerer().emitConversion(
-        this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(returned), ret),
+        this->lowering.builder.CreateLoad(this->lowering.moduleBuilder().lower(returned), ret),
         returned, valueType);
-    returnedValue = this->lowering.builder_.CreateSelect(
+    returnedValue = this->lowering.builder.CreateSelect(
         wasDone, this->lowering.optionalLowerer().undefinedValue(valueType), returnedValue);
-    value = this->lowering.builder_.CreateSelect(has, value, returnedValue);
+    value = this->lowering.builder.CreateSelect(has, value, returnedValue);
   }
   const Type *resultType = call->type;
   llvm::Value *result = this->lowering.objectLayouts().allocObject(resultType, {0, 1});
-  this->lowering.builder_.CreateStore(
+  this->lowering.builder.CreateStore(
       value, this->lowering.objectLayouts().fieldAddress(result, resultType, "value"));
-  this->lowering.builder_.CreateStore(
-      this->lowering.builder_.CreateNot(has),
+  this->lowering.builder.CreateStore(
+      this->lowering.builder.CreateNot(has),
       this->lowering.objectLayouts().fieldAddress(result, resultType, "done"));
   this->lowering.groupLowerer().adoptFields(result, resultType);
   this->lowering.refCounts().releaseValue(it, type);
@@ -366,7 +366,7 @@ llvm::Value *IteratorLowerer::emitIteratorObject(CallExpr *call) {
         return this->lowering.exprLowerer().emitExpr(arg);
       }
       Builtin kind = arg->type->isString() ? Builtin::IterFrom : Builtin::ArrValues;
-      return this->lowering.builder_.CreateCall(
+      return this->lowering.builder.CreateCall(
           this->lowering.generatorLowerer().iteratorFunction(kind, arg->type, nullptr, result),
           {this->lowering.exprLowerer().emitExpr(arg)});
     }
@@ -379,9 +379,9 @@ llvm::Value *IteratorLowerer::emitIteratorObject(CallExpr *call) {
     case Builtin::SetValues:
     case Builtin::SetEntries: {
       Expr *array = cast<MemberExpr>(call->callee)->object;
-      return this->lowering.builder_.CreateCall(this->lowering.generatorLowerer().iteratorFunction(
-                                                    call->builtin(), array->type, nullptr, result),
-                                                {this->lowering.exprLowerer().emitExpr(array)});
+      return this->lowering.builder.CreateCall(this->lowering.generatorLowerer().iteratorFunction(
+                                                   call->builtin(), array->type, nullptr, result),
+                                               {this->lowering.exprLowerer().emitExpr(array)});
     }
     default: {
       Expr *receiver = cast<MemberExpr>(call->callee)->object;
@@ -389,7 +389,7 @@ llvm::Value *IteratorLowerer::emitIteratorObject(CallExpr *call) {
       llvm::Function *fn = this->lowering.generatorLowerer().iteratorFunction(
           call->builtin(), receiver->type, arg->type, result);
       llvm::Value *source = this->lowering.exprLowerer().emitExpr(receiver);
-      return this->lowering.builder_.CreateCall(
+      return this->lowering.builder.CreateCall(
           fn, {source, this->lowering.exprLowerer().emitExpr(arg)});
     }
   }

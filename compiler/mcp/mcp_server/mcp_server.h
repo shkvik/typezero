@@ -40,9 +40,9 @@ private:
     std::vector<std::pair<std::string, std::pair<int64_t, uint64_t>>> stamps;
   };
 
-  std::string self_;
-  std::string here_;
-  std::map<std::string, Cached> cache_;
+  std::string self;
+  std::string here;
+  std::map<std::string, Cached> cache;
 };
 
 }

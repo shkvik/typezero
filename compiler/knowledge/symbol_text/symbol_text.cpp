@@ -187,8 +187,8 @@ std::string SymbolText::function(const FunctionDecl &fn) {
     text += ": " + SymbolText::typeName(type);
   }
   text += ")";
-  if (!fn.isConstructor() && sym && sym->ret) {
-    text += ": " + SymbolText::typeName(sym->ret);
+  if (!fn.isConstructor() && sym && sym->hasReturnType()) {
+    text += ": " + SymbolText::typeName(sym->getKnownReturnType());
   }
 
   return text;

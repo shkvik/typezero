@@ -14,7 +14,7 @@ using llvm::isa;
 namespace tz {
 
 MemoryAnalysis::MemoryAnalysis(MemoryPlan &plan)
-    : plan_(plan) {}
+    : plan(plan) {}
 
 bool MemoryAnalysis::letsThisGo(const ClassDecl *cls) {
   for (const FunctionDecl *fn : cls->constructors) {
@@ -48,27 +48,27 @@ void MemoryAnalysis::analyzeCycles(SourceFile &file) {
   OwnerScanner owners;
   std::vector<OwnerScanner::BackRef> backRefs = findBackRefs(file, owners);
 
-  CycleFinder finder(plan_, scan, file);
+  CycleFinder finder(this->plan, scan, file);
   for (;;) {
-    plan_.uncounted.clear();
+    this->plan.uncounted.clear();
     for (const OwnerScanner::BackRef &b : backRefs) {
-      plan_.uncounted.insert({b.fn, b.self});
+      this->plan.uncounted.insert({b.fn, b.self});
     }
     finder.run();
-    if (plan_.hasCycles) {
-      HeldMembers held(plan_, scan, finder);
+    if (this->plan.hasCycles) {
+      HeldMembers held(this->plan, scan, finder);
       held.run();
     }
     size_t before = backRefs.size();
     llvm::erase_if(backRefs, [&](const OwnerScanner::BackRef &b) {
       const ClassDecl *made = owners.madeBy(b.field);
 
-      return !made || plan_.refMayBeMember(made->type);
+      return !made || this->plan.refMayBeMember(made->type);
     });
     if (backRefs.size() == before) {
       for (const OwnerScanner::BackRef &b : backRefs) {
-        plan_.ownedFields.insert({b.owner->type, b.field.str()});
-        plan_.backRefFields.insert({owners.madeBy(b.field)->type, b.callback.str()});
+        this->plan.ownedFields.insert({b.owner->type, b.field.str()});
+        this->plan.backRefFields.insert({owners.madeBy(b.field)->type, b.callback.str()});
       }
       break;
     }
@@ -77,18 +77,18 @@ void MemoryAnalysis::analyzeCycles(SourceFile &file) {
   for (const Type *t : scan.types) {
     if (t->isWeakRef()) {
       for (const Type *s : finder.runtimeTypesOf(t->weakTarget())) {
-        plan_.weakTargets.insert(s);
+        this->plan.weakTargets.insert(s);
       }
     }
   }
-  for (const Type *t : file.listenerReceivers) {
+  for (const Type *t : file.inventory.listenerReceivers) {
     for (const Type *s : finder.runtimeTypesOf(t)) {
-      plan_.weakTargets.insert(s);
+      this->plan.weakTargets.insert(s);
     }
   }
 
-  plan_.carriedMembers.clear();
-  if (plan_.hasCycles) {
+  this->plan.carriedMembers.clear();
+  if (this->plan.hasCycles) {
     for (const InstanceFlow &flow : scan.instanceFlows) {
       carry(flow.concrete, flow.rep, flow.out, 0);
     }
@@ -133,8 +133,8 @@ void MemoryAnalysis::carry(const Type *concrete, const Type *rep, bool out, unsi
   if (rep->isAnyObject()) {
     return;
   }
-  if (out && plan_.refMayBeMember(rep) && !plan_.refMayBeMember(concrete)) {
-    plan_.carriedMembers.insert(concrete);
+  if (out && this->plan.refMayBeMember(rep) && !this->plan.refMayBeMember(concrete)) {
+    this->plan.carriedMembers.insert(concrete);
   }
   switch (concrete->kind()) {
   case Type::Kind::Array:
@@ -187,13 +187,13 @@ void MemoryAnalysis::scanProgram(SourceFile &file, CycleScanner &scan) {
     }
     scan.stmt(item);
   }
-  for (const FunctionDecl *fn : file.instances) {
+  for (const FunctionDecl *fn : file.inventory.instances) {
     scan.function(fn);
   }
-  for (const Type *type : plan_.subtypes) {
+  for (const Type *type : this->plan.subtypes) {
     scan.addType(type);
   }
-  for (const auto &[from, to] : file.views) {
+  for (const auto &[from, to] : file.inventory.views) {
     scan.addType(from);
     scan.addType(to);
   }
@@ -229,7 +229,7 @@ std::vector<OwnerScanner::BackRef> MemoryAnalysis::findBackRefs(SourceFile &file
     }
     owners.topLevel(item);
   }
-  for (const FunctionDecl *fn : file.instances) {
+  for (const FunctionDecl *fn : file.inventory.instances) {
     owners.function(fn);
   }
 
@@ -240,17 +240,17 @@ void MemoryAnalysis::findEternals(SourceFile &file) {
   for (Stmt *item : file.items) {
     if (auto *decl = dyn_cast<VarDeclStmt>(item)) {
       for (const VarDeclarator &d : decl->decls) {
-        if (d.sym && !d.alias && !d.sym->reassigned && plan_.mayHoldMember(d.sym->type) &&
-            (d.sym->usedInFunction() || !file.topLevelAwait)) {
-          plan_.eternals.insert(d.sym);
+        if (d.sym && !d.alias && !d.sym->reassigned && this->plan.mayHoldMember(d.sym->type) &&
+            (d.sym->usedInFunction() || !file.inventory.topLevelAwait)) {
+          this->plan.eternals.insert(d.sym);
         }
       }
     }
     if (auto *cls = dyn_cast<ClassDecl>(item)) {
       for (const ClassField &f : cls->fields) {
         if (f.isStatic() && f.var() && f.init && !f.var()->reassigned &&
-            plan_.mayHoldMember(f.var()->type)) {
-          plan_.eternals.insert(f.var());
+            this->plan.mayHoldMember(f.var()->type)) {
+          this->plan.eternals.insert(f.var());
         }
       }
     }
@@ -262,15 +262,15 @@ void MemoryAnalysis::findUnstored(SourceFile &file) {
     switch (e->kind()) {
     case Expr::Kind::New: {
       auto *create = cast<NewExpr>(e);
-      return create->cls() && plan_.isCyclic(create->cls()->type);
+      return create->cls() && this->plan.isCyclic(create->cls()->type);
     }
     case Expr::Kind::ObjectLit: {
       auto *lit = cast<ObjectLitExpr>(e);
       const Type *type = lit->cls ? lit->cls->type : lit->type;
-      return type && plan_.isCyclic(type);
+      return type && this->plan.isCyclic(type);
     }
     case Expr::Kind::ArrayLit:
-      return e->type && plan_.isCyclic(e->type);
+      return e->type && this->plan.isCyclic(e->type);
     case Expr::Kind::Call:
       switch (cast<CallExpr>(e)->builtin()) {
         case Builtin::ArrSlice:
@@ -279,7 +279,7 @@ void MemoryAnalysis::findUnstored(SourceFile &file) {
         case Builtin::ArrFlatMap:
         case Builtin::ArrConcat:
         case Builtin::DictNew:
-          return e->type && plan_.isCyclic(e->type);
+          return e->type && this->plan.isCyclic(e->type);
         default:
 
           return false;
@@ -287,7 +287,7 @@ void MemoryAnalysis::findUnstored(SourceFile &file) {
     case Expr::Kind::Function: {
       const FunctionDecl *fn = cast<FunctionExpr>(e)->fn;
       const void *key = fn->group ? static_cast<const void *>(fn->group) : fn;
-      return !fn->nonEscaping && !fn->receiverEnv && plan_.isCyclicEnv(key);
+      return !fn->nonEscaping && !fn->receiverEnv && this->plan.isCyclicEnv(key);
     }
     default:
       return false;
@@ -331,10 +331,10 @@ void MemoryAnalysis::findUnstored(SourceFile &file) {
     }
     scan.topLevel(item);
   }
-  for (const FunctionDecl *fn : file.instances) {
+  for (const FunctionDecl *fn : file.inventory.instances) {
     scan.function(fn);
   }
-  plan_.unstoredSites = scan.unstored();
+  this->plan.unstoredSites = scan.unstored();
 }
 
 }

@@ -19,11 +19,11 @@ RuntimeFunctions::RuntimeFunctions(Lowering &owner)
     : lowering(owner) {}
 
 void RuntimeFunctions::declareRuntime() {
-  llvm::Type *voidTy = this->lowering.builder_.getVoidTy();
-  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
-  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
-  llvm::Type *f64 = this->lowering.builder_.getDoubleTy();
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *voidTy = this->lowering.builder.getVoidTy();
+  llvm::Type *i32 = this->lowering.builder.getInt32Ty();
+  llvm::Type *i64 = this->lowering.builder.getInt64Ty();
+  llvm::Type *f64 = this->lowering.builder.getDoubleTy();
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
 
   auto declare = [&](llvm::StringRef name, llvm::Type *ret, llvm::ArrayRef<llvm::Type *> params) {
     llvm::FunctionCallee callee = this->lowering.module_->getOrInsertFunction(
@@ -130,9 +130,9 @@ void RuntimeFunctions::declareRuntime() {
 
 void RuntimeFunctions::defineRefCountHelpers() {
   for (bool isString : {true, false}) {
-    llvm::Type *param = isString ? static_cast<llvm::Type *>(this->lowering.strTy_)
-                                 : this->lowering.builder_.getPtrTy();
-    auto *type = llvm::FunctionType::get(this->lowering.builder_.getVoidTy(), {param}, false);
+    llvm::Type *param = isString ? static_cast<llvm::Type *>(this->lowering.strTy)
+                                 : this->lowering.builder.getPtrTy();
+    auto *type = llvm::FunctionType::get(this->lowering.builder.getVoidTy(), {param}, false);
     for (bool isRetain : {true, false}) {
       std::string name =
           std::string(isString ? "tz.str." : "tz.arr.") + (isRetain ? "retain" : "release");
@@ -141,9 +141,9 @@ void RuntimeFunctions::defineRefCountHelpers() {
       fn->addFnAttr(llvm::Attribute::AlwaysInline);
       fn->addFnAttr(llvm::Attribute::NoUnwind);
 
-      llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx_, "entry", fn));
-      auto *countedBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "counted", fn);
-      auto *doneBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "done", fn);
+      llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx, "entry", fn));
+      auto *countedBlock = llvm::BasicBlock::Create(this->lowering.ctx, "counted", fn);
+      auto *doneBlock = llvm::BasicBlock::Create(this->lowering.ctx, "done", fn);
       llvm::Value *obj, *counted;
       if (isString) {
         llvm::Value *str = fn->getArg(0);
@@ -158,7 +158,7 @@ void RuntimeFunctions::defineRefCountHelpers() {
       b.SetInsertPoint(countedBlock);
       llvm::Value *count = b.CreateLoad(b.getInt64Ty(), obj, "rc");
       auto *freeBlock =
-          isRetain ? nullptr : llvm::BasicBlock::Create(this->lowering.ctx_, "free", fn);
+          isRetain ? nullptr : llvm::BasicBlock::Create(this->lowering.ctx, "free", fn);
       if (this->lowering.parallel_) {
         this->countShared(b, obj, count, isRetain, freeBlock, doneBlock);
       }
@@ -177,33 +177,31 @@ void RuntimeFunctions::defineRefCountHelpers() {
       b.SetInsertPoint(doneBlock);
       b.CreateRetVoid();
       if (isString) {
-        (isRetain ? this->lowering.retainFn_ : this->lowering.releaseFn_) = fn;
+        (isRetain ? this->lowering.retainFn : this->lowering.releaseFn) = fn;
       } else {
-        (isRetain ? this->lowering.arrRetainFn_ : this->lowering.arrReleaseFn_) = fn;
+        (isRetain ? this->lowering.arrRetainFn : this->lowering.arrReleaseFn) = fn;
       }
     }
   }
 
-  auto *objHeader =
-      llvm::StructType::get(this->lowering.ctx_, {this->lowering.builder_.getInt64Ty(),
-                                                  this->lowering.builder_.getPtrTy()});
-  auto *type = llvm::FunctionType::get(this->lowering.builder_.getVoidTy(),
-                                       {this->lowering.builder_.getPtrTy()}, false);
+  auto *objHeader = llvm::StructType::get(
+      this->lowering.ctx, {this->lowering.builder.getInt64Ty(), this->lowering.builder.getPtrTy()});
+  auto *type = llvm::FunctionType::get(this->lowering.builder.getVoidTy(),
+                                       {this->lowering.builder.getPtrTy()}, false);
   for (bool isRetain : {true, false}) {
     auto *fn = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage,
                                       isRetain ? "tz.obj.retain" : "tz.obj.release",
                                       this->lowering.module_.get());
     fn->addFnAttr(llvm::Attribute::AlwaysInline);
     fn->addFnAttr(llvm::Attribute::NoUnwind);
-    llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx_, "entry", fn));
-    auto *countedBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "counted", fn);
-    auto *doneBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "done", fn);
+    llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx, "entry", fn));
+    auto *countedBlock = llvm::BasicBlock::Create(this->lowering.ctx, "counted", fn);
+    auto *doneBlock = llvm::BasicBlock::Create(this->lowering.ctx, "done", fn);
     llvm::Value *obj = fn->getArg(0);
     b.CreateCondBr(b.CreateIsNotNull(obj), countedBlock, doneBlock);
     b.SetInsertPoint(countedBlock);
     llvm::Value *count = b.CreateLoad(b.getInt64Ty(), obj, "rc");
-    auto *dropBlock =
-        isRetain ? nullptr : llvm::BasicBlock::Create(this->lowering.ctx_, "drop", fn);
+    auto *dropBlock = isRetain ? nullptr : llvm::BasicBlock::Create(this->lowering.ctx, "drop", fn);
     if (this->lowering.parallel_) {
       this->countShared(b, obj, count, isRetain, dropBlock, doneBlock);
     }
@@ -223,27 +221,27 @@ void RuntimeFunctions::defineRefCountHelpers() {
     }
     b.SetInsertPoint(doneBlock);
     b.CreateRetVoid();
-    (isRetain ? this->lowering.objRetainFn_ : this->lowering.objReleaseFn_) = fn;
+    (isRetain ? this->lowering.objRetainFn : this->lowering.objReleaseFn) = fn;
   }
-  this->lowering.plainObjRetainFn_ = this->lowering.objRetainFn_;
-  this->lowering.plainObjReleaseFn_ = this->lowering.objReleaseFn_;
+  this->lowering.plainObjRetainFn = this->lowering.objRetainFn;
+  this->lowering.plainObjReleaseFn = this->lowering.objReleaseFn;
 
-  this->lowering.refRetainFn_ = llvm::Function::Create(
+  this->lowering.refRetainFn = llvm::Function::Create(
       type, llvm::GlobalValue::InternalLinkage, "tz.ref.retain", this->lowering.module_.get());
-  this->lowering.refRetainFn_->addFnAttr(llvm::Attribute::AlwaysInline);
-  this->lowering.refRetainFn_->addFnAttr(llvm::Attribute::NoUnwind);
+  this->lowering.refRetainFn->addFnAttr(llvm::Attribute::AlwaysInline);
+  this->lowering.refRetainFn->addFnAttr(llvm::Attribute::NoUnwind);
   {
     llvm::IRBuilder<> b(
-        llvm::BasicBlock::Create(this->lowering.ctx_, "entry", this->lowering.refRetainFn_));
+        llvm::BasicBlock::Create(this->lowering.ctx, "entry", this->lowering.refRetainFn));
     auto *countedBlock =
-        llvm::BasicBlock::Create(this->lowering.ctx_, "counted", this->lowering.refRetainFn_);
+        llvm::BasicBlock::Create(this->lowering.ctx, "counted", this->lowering.refRetainFn);
     auto *memberBlock =
-        llvm::BasicBlock::Create(this->lowering.ctx_, "member", this->lowering.refRetainFn_);
+        llvm::BasicBlock::Create(this->lowering.ctx, "member", this->lowering.refRetainFn);
     auto *plainBlock =
-        llvm::BasicBlock::Create(this->lowering.ctx_, "plain", this->lowering.refRetainFn_);
+        llvm::BasicBlock::Create(this->lowering.ctx, "plain", this->lowering.refRetainFn);
     auto *doneBlock =
-        llvm::BasicBlock::Create(this->lowering.ctx_, "done", this->lowering.refRetainFn_);
-    llvm::Value *obj = this->lowering.refRetainFn_->getArg(0);
+        llvm::BasicBlock::Create(this->lowering.ctx, "done", this->lowering.refRetainFn);
+    llvm::Value *obj = this->lowering.refRetainFn->getArg(0);
     b.CreateCondBr(b.CreateIsNotNull(obj), countedBlock, doneBlock);
     b.SetInsertPoint(countedBlock);
     llvm::Value *count = b.CreateLoad(b.getInt64Ty(), obj, "rc");
@@ -260,25 +258,25 @@ void RuntimeFunctions::defineRefCountHelpers() {
     b.CreateRetVoid();
   }
   if (this->lowering.memory().hasCycles) {
-    this->lowering.objRetainFn_ = this->lowering.refRetainFn_;
-    this->lowering.objReleaseFn_ =
-        this->lowering.groupLowerer().groupAwareRelease(this->lowering.plainObjReleaseFn_);
+    this->lowering.objRetainFn = this->lowering.refRetainFn;
+    this->lowering.objReleaseFn =
+        this->lowering.groupLowerer().groupAwareRelease(this->lowering.plainObjReleaseFn);
   }
 
-  this->lowering.instanceReleaseFn_ =
+  this->lowering.instanceReleaseFn =
       llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage, "tz.instance.release",
                              this->lowering.module_.get());
-  this->lowering.instanceReleaseFn_->addFnAttr(llvm::Attribute::AlwaysInline);
-  this->lowering.instanceReleaseFn_->addFnAttr(llvm::Attribute::NoUnwind);
+  this->lowering.instanceReleaseFn->addFnAttr(llvm::Attribute::AlwaysInline);
+  this->lowering.instanceReleaseFn->addFnAttr(llvm::Attribute::NoUnwind);
   llvm::IRBuilder<> b(
-      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", this->lowering.instanceReleaseFn_));
+      llvm::BasicBlock::Create(this->lowering.ctx, "entry", this->lowering.instanceReleaseFn));
   auto *countedBlock =
-      llvm::BasicBlock::Create(this->lowering.ctx_, "counted", this->lowering.instanceReleaseFn_);
+      llvm::BasicBlock::Create(this->lowering.ctx, "counted", this->lowering.instanceReleaseFn);
   auto *dropBlock =
-      llvm::BasicBlock::Create(this->lowering.ctx_, "drop", this->lowering.instanceReleaseFn_);
+      llvm::BasicBlock::Create(this->lowering.ctx, "drop", this->lowering.instanceReleaseFn);
   auto *doneBlock =
-      llvm::BasicBlock::Create(this->lowering.ctx_, "done", this->lowering.instanceReleaseFn_);
-  llvm::Value *obj = this->lowering.instanceReleaseFn_->getArg(0);
+      llvm::BasicBlock::Create(this->lowering.ctx, "done", this->lowering.instanceReleaseFn);
+  llvm::Value *obj = this->lowering.instanceReleaseFn->getArg(0);
   b.CreateCondBr(b.CreateIsNotNull(obj), countedBlock, doneBlock);
   b.SetInsertPoint(countedBlock);
   llvm::Value *instanceCount = b.CreateLoad(b.getInt64Ty(), obj, "rc");
@@ -295,10 +293,10 @@ void RuntimeFunctions::defineRefCountHelpers() {
   b.CreateBr(doneBlock);
   b.SetInsertPoint(doneBlock);
   b.CreateRetVoid();
-  this->lowering.plainInstanceReleaseFn_ = this->lowering.instanceReleaseFn_;
+  this->lowering.plainInstanceReleaseFn = this->lowering.instanceReleaseFn;
   if (this->lowering.memory().hasCycles) {
-    this->lowering.instanceReleaseFn_ =
-        this->lowering.groupLowerer().groupAwareRelease(this->lowering.plainInstanceReleaseFn_);
+    this->lowering.instanceReleaseFn =
+        this->lowering.groupLowerer().groupAwareRelease(this->lowering.plainInstanceReleaseFn);
   }
 }
 
@@ -306,10 +304,10 @@ void RuntimeFunctions::countShared(llvm::IRBuilder<> &b, llvm::Value *obj, llvm:
                                    bool retain, llvm::BasicBlock *freeBlock,
                                    llvm::BasicBlock *doneBlock) {
   llvm::Function *fn = b.GetInsertBlock()->getParent();
-  auto *sharedBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "shared", fn);
-  auto *plainBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "plain", fn);
+  auto *sharedBlock = llvm::BasicBlock::Create(this->lowering.ctx, "shared", fn);
+  auto *plainBlock = llvm::BasicBlock::Create(this->lowering.ctx, "plain", fn);
   b.CreateCondBr(b.CreateICmpSLT(count, b.getInt64(0)), sharedBlock, plainBlock,
-                 llvm::MDBuilder(this->lowering.ctx_).createUnlikelyBranchWeights());
+                 llvm::MDBuilder(this->lowering.ctx).createUnlikelyBranchWeights());
   b.SetInsertPoint(sharedBlock);
   if (retain) {
     b.CreateAtomicRMW(llvm::AtomicRMWInst::Add, obj, b.getInt64(1), llvm::MaybeAlign(8),
@@ -318,7 +316,7 @@ void RuntimeFunctions::countShared(llvm::IRBuilder<> &b, llvm::Value *obj, llvm:
   } else {
     llvm::Value *old = b.CreateAtomicRMW(llvm::AtomicRMWInst::Sub, obj, b.getInt64(1),
                                          llvm::MaybeAlign(8), llvm::AtomicOrdering::AcquireRelease);
-    auto *lastBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "shared.last", fn);
+    auto *lastBlock = llvm::BasicBlock::Create(this->lowering.ctx, "shared.last", fn);
     b.CreateCondBr(b.CreateICmpEQ(old, b.getInt64(uint64_t(kRcShared + 1))), lastBlock, doneBlock);
     b.SetInsertPoint(lastBlock);
     b.CreateStore(b.getInt64(0), obj);

@@ -2,7 +2,8 @@
 
 namespace tz {
 
-CycleEscapes::CycleEscapes(CycleScanner &scanner) : scanner_(scanner) {}
+CycleEscapes::CycleEscapes(CycleScanner &scanner)
+    : scanner(scanner) {}
 
 void CycleEscapes::ordered(const Stmt *stmt, const VarSymbol *self, bool &escaped, bool afterSuper,
                            llvm::DenseSet<const AssignExpr *> &safe) {
@@ -90,7 +91,7 @@ bool CycleEscapes::exprEscapes(const Expr *expr, const VarSymbol *self) {
 }
 
 bool CycleEscapes::constructionEscapes(const ClassDecl *cls) {
-  auto [it, inserted] = scanner_.escapes_.try_emplace(cls, true);
+  auto [it, inserted] = this->scanner.escapes.try_emplace(cls, true);
   if (!inserted) {
     return it->second;
   }
@@ -102,7 +103,7 @@ bool CycleEscapes::constructionEscapes(const ClassDecl *cls) {
   if (cls->init && cls->init->thisVar()) {
     escapes = escapes || CycleScanner::thisEscapes(cls->init->body, cls->init->thisVar());
   }
-  scanner_.escapes_[cls] = escapes;
+  this->scanner.escapes[cls] = escapes;
 
   return escapes;
 }

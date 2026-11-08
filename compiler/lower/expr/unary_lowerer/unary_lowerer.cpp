@@ -1,7 +1,7 @@
 #include "compiler/lower/expr/unary_lowerer/unary_lowerer.h"
-#include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
-#include "compiler/library/json/json_lowerer/json_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
+#include "compiler/lower/library/decimal/decimal_lowerer/decimal_lowerer.h"
+#include "compiler/lower/library/json/json_lowerer/json_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
@@ -32,14 +32,14 @@ llvm::Value *UnaryLowerer::emitUnary(UnaryExpr *unary) {
   }
   if (unary->op == UnaryOp::Void) {
     this->lowering.stmtLowerer().emitDiscarded(unary->operand);
-    return this->lowering.builder_.getFalse();
+    return this->lowering.builder.getFalse();
   }
   const Type *type = unary->operand->type;
   if ((unary->op == UnaryOp::Plus || unary->op == UnaryOp::Neg) && type->isString()) {
     Lowering::Operand str = this->lowering.refCounts().emitOperand(unary->operand, true);
     llvm::Value *number = this->lowering.numberLowerer().emitStringToNumber(str.value);
     this->lowering.refCounts().dropOperand(str);
-    return unary->op == UnaryOp::Neg ? this->lowering.builder_.CreateFNeg(number) : number;
+    return unary->op == UnaryOp::Neg ? this->lowering.builder.CreateFNeg(number) : number;
   }
   if (type->isDecimal()) {
     if (unary->op == UnaryOp::Plus) {
@@ -59,20 +59,20 @@ llvm::Value *UnaryLowerer::emitUnary(UnaryExpr *unary) {
   switch (unary->op) {
   case UnaryOp::Neg:
     if (type->isBool()) {
-      return this->lowering.builder_.CreateFNeg(
-          this->lowering.builder_.CreateUIToFP(operand, this->lowering.builder_.getDoubleTy()));
+      return this->lowering.builder.CreateFNeg(
+          this->lowering.builder.CreateUIToFP(operand, this->lowering.builder.getDoubleTy()));
     }
     return UnionLayout::storedType(unary->type)->isFloat()
-               ? this->lowering.builder_.CreateFNeg(operand)
-               : this->lowering.builder_.CreateNeg(operand);
+               ? this->lowering.builder.CreateFNeg(operand)
+               : this->lowering.builder.CreateNeg(operand);
   case UnaryOp::Plus:
-    return type->isBool() ? this->lowering.builder_.CreateUIToFP(
-                                operand, this->lowering.builder_.getDoubleTy())
-                          : operand;
+    return type->isBool()
+               ? this->lowering.builder.CreateUIToFP(operand, this->lowering.builder.getDoubleTy())
+               : operand;
   case UnaryOp::Not:
-    return this->lowering.builder_.CreateNot(operand);
+    return this->lowering.builder.CreateNot(operand);
   case UnaryOp::BitNot:
-    return this->lowering.builder_.CreateNot(operand);
+    return this->lowering.builder.CreateNot(operand);
   case UnaryOp::TypeOf:
   case UnaryOp::NonNull:
   case UnaryOp::Void:
@@ -101,7 +101,7 @@ llvm::Value *UnaryLowerer::emitTypeOf(Expr *operand) {
     Lowering::Operand value = this->lowering.refCounts().emitOperand(operand, true);
     llvm::Value *has = this->lowering.optionalLowerer().optionalHas(value.value, type);
     this->lowering.refCounts().dropOperand(value);
-    return this->lowering.builder_.CreateSelect(
+    return this->lowering.builder.CreateSelect(
         has,
         this->lowering.stringLowerer().stringLiteral(
             UnaryLowerer::ascii16(TypeSpelling::typeOfName(type->inner()))),
@@ -118,18 +118,18 @@ llvm::Value *UnaryLowerer::emitTypeOf(Expr *operand) {
     constexpr uint32_t kLayoutClass = 2097152;
     Lowering::Operand value = this->lowering.refCounts().emitOperand(operand, true);
     llvm::Value *layout =
-        this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(),
-                                           this->lowering.builder_.CreateConstInBoundsGEP1_64(
-                                               this->lowering.builder_.getInt8Ty(), value.value, 8),
-                                           "layout");
-    llvm::Value *flags = this->lowering.builder_.CreateLoad(
-        this->lowering.builder_.getInt32Ty(),
-        this->lowering.builder_.CreateStructGEP(this->lowering.layoutDescTy_, layout, 3), "flags");
-    llvm::Value *isClass = this->lowering.builder_.CreateICmpNE(
-        this->lowering.builder_.CreateAnd(flags, this->lowering.builder_.getInt32(kLayoutClass)),
-        this->lowering.builder_.getInt32(0));
+        this->lowering.builder.CreateLoad(this->lowering.builder.getPtrTy(),
+                                          this->lowering.builder.CreateConstInBoundsGEP1_64(
+                                              this->lowering.builder.getInt8Ty(), value.value, 8),
+                                          "layout");
+    llvm::Value *flags = this->lowering.builder.CreateLoad(
+        this->lowering.builder.getInt32Ty(),
+        this->lowering.builder.CreateStructGEP(this->lowering.layoutDescTy, layout, 3), "flags");
+    llvm::Value *isClass = this->lowering.builder.CreateICmpNE(
+        this->lowering.builder.CreateAnd(flags, this->lowering.builder.getInt32(kLayoutClass)),
+        this->lowering.builder.getInt32(0));
     this->lowering.refCounts().dropOperand(value);
-    return this->lowering.builder_.CreateSelect(
+    return this->lowering.builder.CreateSelect(
         isClass, this->lowering.stringLowerer().stringLiteral(u"class"),
         this->lowering.stringLowerer().stringLiteral(u"object"));
   }
@@ -150,10 +150,10 @@ llvm::Value *UnaryLowerer::emitEnumName(IndexExpr *index) {
     llvm::convertUTF8ToUTF16String(m.name, units);
     llvm::Value *name = this->lowering.optionalLowerer().makeOptional(
         this->lowering.stringLowerer().stringLiteral(std::u16string(units.begin(), units.end())),
-        this->lowering.builder_.getTrue(), type);
-    llvm::Value *matches = this->lowering.builder_.CreateICmpEQ(
-        value, this->lowering.builder_.getInt64(static_cast<uint64_t>(int64_t(m.number))));
-    result = this->lowering.builder_.CreateSelect(matches, name, result);
+        this->lowering.builder.getTrue(), type);
+    llvm::Value *matches = this->lowering.builder.CreateICmpEQ(
+        value, this->lowering.builder.getInt64(static_cast<uint64_t>(int64_t(m.number))));
+    result = this->lowering.builder.CreateSelect(matches, name, result);
   }
 
   return result;

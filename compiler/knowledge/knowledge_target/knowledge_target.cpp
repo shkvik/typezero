@@ -18,9 +18,9 @@ KnowledgeTarget::KnowledgeTarget(llvm::StringRef text) : text_(text.str()) {
     return;
   }
   file_ = text.take_front(at + 3).str();
-  line_ = number;
+  this->line = number;
   if (col != 0) {
-    column_ = col;
+    this->column = col;
   }
 }
 
@@ -33,15 +33,15 @@ std::vector<size_t> KnowledgeTarget::resolve(const Knowledge &knowledge) const {
     return {};
   }
   std::optional<unsigned> character;
-  if (column_) {
-    character = *column_ - 1;
+  if (this->column) {
+    character = *this->column - 1;
   }
 
-  return knowledge.at(*module, line_ - 1, character);
+  return knowledge.at(*module, this->line - 1, character);
 }
 
 size_t KnowledgeTarget::localAt(const Knowledge &knowledge) const {
-  if (!isPlace() || !column_) {
+  if (!isPlace() || !this->column) {
     return Knowledge::kNone;
   }
   std::optional<size_t> module = knowledge.moduleAt(file_);
@@ -49,11 +49,11 @@ size_t KnowledgeTarget::localAt(const Knowledge &knowledge) const {
     return Knowledge::kNone;
   }
 
-  return knowledge.localAt(*module, line_ - 1, *column_ - 1, nullptr);
+  return knowledge.localAt(*module, this->line - 1, *this->column - 1, nullptr);
 }
 
 const KnownType *KnowledgeTarget::typeAt(const Knowledge &knowledge) const {
-  if (!isPlace() || !column_) {
+  if (!isPlace() || !this->column) {
     return nullptr;
   }
   std::optional<size_t> module = knowledge.moduleAt(file_);
@@ -61,7 +61,7 @@ const KnownType *KnowledgeTarget::typeAt(const Knowledge &knowledge) const {
     return nullptr;
   }
 
-  return knowledge.typeAt(*module, line_ - 1, *column_ - 1);
+  return knowledge.typeAt(*module, this->line - 1, *this->column - 1);
 }
 
 }

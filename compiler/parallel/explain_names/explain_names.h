@@ -26,7 +26,7 @@ public:
   std::string positions(const std::vector<std::pair<llvm::SMLoc, const FunctionDecl *>> &ats) const;
 
 private:
-  Analysis &analysis_;
+  Analysis &analysis;
 };
 
 }

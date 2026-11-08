@@ -4,7 +4,7 @@ namespace tz {
 
 void Diagnostics::error(llvm::SMLoc loc, const llvm::Twine &message) {
   ++errorsSeen_;
-  if (muted_) {
+  if (this->muted) {
     return;
   }
   if (capture_) {
@@ -12,11 +12,11 @@ void Diagnostics::error(llvm::SMLoc loc, const llvm::Twine &message) {
     return;
   }
   ++errorCount_;
-  errors_.add({llvm::SourceMgr::DK_Error, Diagnostic::Form::Located, loc, message.str()});
+  this->errors.add({llvm::SourceMgr::DK_Error, Diagnostic::Form::Located, loc, message.str()});
 }
 
 bool Diagnostics::isQuiet(llvm::SMLoc loc) const {
-  for (const auto &[begin, end] : quiet_) {
+  for (const auto &[begin, end] : this->quiet) {
     if (loc.getPointer() >= begin && loc.getPointer() < end) {
       return true;
     }
@@ -26,35 +26,35 @@ bool Diagnostics::isQuiet(llvm::SMLoc loc) const {
 }
 
 void Diagnostics::warning(llvm::SMLoc loc, const llvm::Twine &message) {
-  if (muted_ || capture_ || isQuiet(loc)) {
+  if (this->muted || capture_ || isQuiet(loc)) {
     return;
   }
-  errors_.add({llvm::SourceMgr::DK_Warning, Diagnostic::Form::Located, loc, message.str()});
+  this->errors.add({llvm::SourceMgr::DK_Warning, Diagnostic::Form::Located, loc, message.str()});
 }
 
 void Diagnostics::hint(llvm::SMLoc loc, const llvm::Twine &message) {
-  if (muted_ || capture_ || isQuiet(loc)) {
+  if (this->muted || capture_ || isQuiet(loc)) {
     return;
   }
-  errors_.add({llvm::SourceMgr::DK_Remark, Diagnostic::Form::Located, loc, message.str()});
+  this->errors.add({llvm::SourceMgr::DK_Remark, Diagnostic::Form::Located, loc, message.str()});
 }
 
 void Diagnostics::note(llvm::SMLoc loc, const llvm::Twine &message) {
-  if (muted_ || capture_) {
+  if (this->muted || capture_) {
     return;
   }
-  errors_.add({llvm::SourceMgr::DK_Note, Diagnostic::Form::Located, loc, message.str()});
+  this->errors.add({llvm::SourceMgr::DK_Note, Diagnostic::Form::Located, loc, message.str()});
 }
 
 void Diagnostics::tool(const llvm::Twine &message) {
   ++errorsSeen_;
   ++errorCount_;
-  errors_.tool(message);
+  this->errors.tool(message);
 }
 
 Errors Diagnostics::take() {
-  Errors taken = std::move(errors_);
-  errors_ = Errors();
+  Errors taken = std::move(this->errors);
+  this->errors = Errors();
 
   return taken;
 }

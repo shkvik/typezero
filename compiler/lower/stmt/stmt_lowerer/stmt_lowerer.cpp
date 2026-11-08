@@ -44,7 +44,7 @@ void StmtLowerer::emitStmt(Stmt *stmt) {
   case Stmt::Kind::Function:
     break;
   case Stmt::Kind::Expr:
-    if (this->lowering.tailStatements_.contains(stmt)) {
+    if (this->lowering.tailStatements.contains(stmt)) {
       this->lowering.tailCallLowerer().emitTailJump(cast<CallExpr>(cast<ExprStmt>(stmt)->expr));
     } else {
       this->emitDiscarded(cast<ExprStmt>(stmt)->expr);
@@ -88,7 +88,7 @@ void StmtLowerer::emitStmt(Stmt *stmt) {
     }
     break;
   case Stmt::Kind::Debugger:
-    this->lowering.builder_.CreateCall(this->lowering.rt_.debugger);
+    this->lowering.builder.CreateCall(this->lowering.rt_.debugger);
     break;
   }
   this->lowering.debugInfo().restore(outer);
@@ -109,12 +109,12 @@ void StmtLowerer::emitStatements(BlockStmt *block) {
 
 void StmtLowerer::storeReplacing(llvm::Value *address, llvm::Value *value, const Type *type) {
   if (!type->isManaged()) {
-    this->lowering.builder_.CreateStore(value, address);
+    this->lowering.builder.CreateStore(value, address);
     return;
   }
   llvm::Value *previous =
-      this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(type), address);
-  this->lowering.builder_.CreateStore(value, address);
+      this->lowering.builder.CreateLoad(this->lowering.moduleBuilder().lower(type), address);
+  this->lowering.builder.CreateStore(value, address);
   this->lowering.refCounts().releaseValue(previous, type);
 }
 
@@ -134,7 +134,7 @@ void StmtLowerer::emitVarDecl(VarDeclStmt *decl) {
     if (this->lowering.isEternal(var)) {
       this->lowering.publishLowerer().pinValue(value, var->type);
       if (!global) {
-        this->lowering.eternalSlots_.insert(address);
+        this->lowering.eternalSlots.insert(address);
       }
     }
   }
@@ -146,7 +146,7 @@ void StmtLowerer::emitIf(IfStmt *stmt) {
   llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("if.end");
   llvm::BasicBlock *elseBlock =
       stmt->elseStmt ? this->lowering.functionFrame().newBlock("if.else") : endBlock;
-  this->lowering.builder_.CreateCondBr(cond, thenBlock, elseBlock);
+  this->lowering.builder.CreateCondBr(cond, thenBlock, elseBlock);
 
   this->lowering.functionFrame().switchTo(thenBlock);
   this->emitStmt(stmt->thenStmt);
@@ -169,25 +169,25 @@ void StmtLowerer::emitReturn(ReturnStmt *stmt) {
       this->lowering.refCounts().releaseValue(value, stmt->value->type);
     }
     this->lowering.functionFrame().emitCleanups(this->lowering.inline_->scopeDepth);
-    this->lowering.builder_.CreateBr(this->lowering.inline_->exit);
+    this->lowering.builder.CreateBr(this->lowering.inline_->exit);
     this->lowering.functionFrame().startDeadBlock();
     return;
   }
-  if (this->lowering.coro_ && this->lowering.currentFn_ && this->lowering.currentFn_->isGenerator &&
-      this->lowering.async_) {
+  if (this->lowering.coro && this->lowering.currentFn && this->lowering.currentFn->isGenerator &&
+      this->lowering.async) {
     this->lowering.asyncGeneratorLowerer().emitAsyncGeneratorReturn(stmt);
     return;
   }
-  if (this->lowering.coro_ && this->lowering.currentFn_ && this->lowering.currentFn_->isGenerator) {
+  if (this->lowering.coro && this->lowering.currentFn && this->lowering.currentFn->isGenerator) {
     this->lowering.exitLowerer().emitReturnOf(
         stmt->value ? this->lowering.exprLowerer().emitExpr(stmt->value) : nullptr);
     return;
   }
-  if (this->lowering.async_) {
+  if (this->lowering.async) {
     this->lowering.asyncLowerer().emitAsyncReturnStmt(stmt);
     return;
   }
-  if (stmt->value && this->lowering.tailGroup_ &&
+  if (stmt->value && this->lowering.tailGroup &&
       this->lowering.tailCallLowerer().hasTailCall(stmt->value)) {
     this->lowering.tailCallLowerer().emitTailReturn(stmt->value);
     return;
@@ -197,7 +197,7 @@ void StmtLowerer::emitReturn(ReturnStmt *stmt) {
 
 void StmtLowerer::emitReturnValue(Expr *expr) {
   llvm::Value *value = expr ? this->lowering.exprLowerer().emitExpr(expr) : nullptr;
-  if (value && this->lowering.returnType_ && this->lowering.returnType_->isVoid() &&
+  if (value && this->lowering.returnType && this->lowering.returnType->isVoid() &&
       !expr->type->isVoid()) {
     this->lowering.refCounts().releaseValue(value, expr->type);
     value = nullptr;

@@ -10,10 +10,10 @@
 #include "compiler/load/pattern_parser/pattern_parser.h"
 #include "compiler/load/stmt_parser/stmt_parser.h"
 #include "compiler/load/template_parser/template_parser.h"
-#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/load/token_cursor/token_cursor.h"
 #include "compiler/load/type_parser/type_parser.h"
 #include "compiler/load/var_parser/var_parser.h"
+#include "compiler/program/to_utf8/to_utf8.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
@@ -26,271 +26,278 @@ namespace tz {
 
 using llvm::dyn_cast;
 
-PrimaryParser::PrimaryParser(Parser &parser) : parser_(parser) {}
+PrimaryParser::PrimaryParser(Parser &parser)
+    : parser(parser) {}
 
 Expr *PrimaryParser::parsePrimary() {
-  llvm::SMLoc loc = parser_.tok_.loc();
-  llvm::SaveAndRestore<bool> allowIn(parser_.noIn_, false);
-  if (parser_.tok_.is(Tok::At)) {
-    parser_.classes().rejectDecorators(parser_.classes().parseDecorators());
-    if (parser_.recovering_) {
-      return parser_.ctx_.make<IntLitExpr>(loc, 0);
+  llvm::SMLoc loc = this->parser.tok.loc();
+  llvm::SaveAndRestore<bool> allowIn(this->parser.noIn, false);
+  if (this->parser.tok.is(Tok::At)) {
+    this->parser.classes().rejectDecorators(this->parser.classes().parseDecorators());
+    if (this->parser.recovering) {
+      return this->parser.ctx.make<IntLitExpr>(loc, 0);
     }
     return parsePrimary();
   }
-  switch (parser_.tok_.kind) {
-  case Tok::IntLiteral:
-    return parseIntLiteral();
-  case Tok::FloatLiteral:
-    return parseFloatLiteral();
-  case Tok::StringLiteral: {
-    std::u16string value;
-    LiteralText::decodeStringLiteral(parser_.tok_, value, parser_.diags_);
-    parser_.cursor().advance();
-    return parser_.ctx_.make<StringLitExpr>(loc, std::move(value));
-  }
-  case Tok::TemplateString:
-  case Tok::TemplateHead:
-    return parser_.templates().parseTemplate();
-  case Tok::Slash:
-  case Tok::SlashAssign: {
-    if (parser_.hasPeeked_) {
-      parser_.lexer_.restore(parser_.peekState_);
-      parser_.hasPeeked_ = false;
+  switch (this->parser.tok.kind) {
+    case Tok::IntLiteral:
+      return parseIntLiteral();
+    case Tok::FloatLiteral:
+      return parseFloatLiteral();
+    case Tok::StringLiteral: {
+      std::u16string value;
+      LiteralText::decodeStringLiteral(this->parser.tok, value, this->parser.diags);
+      this->parser.cursor().advance();
+      return this->parser.ctx.make<StringLitExpr>(loc, std::move(value));
     }
-    parser_.tok_ = parser_.lexer_.regex(parser_.tok_.text.data(), parser_.tok_.newlineBefore);
-    std::u16string pattern, flags;
-    LiteralText::decodeRegex(parser_.tok_, pattern, flags);
-    auto *lit = parser_.ctx_.make<RegexLitExpr>(loc, std::move(pattern), std::move(flags));
-    lit->written = parser_.tok_.text.size();
-    parser_.cursor().advance();
-    return lit;
-  }
-  case Tok::KwTrue:
-  case Tok::KwFalse: {
-    bool value = parser_.tok_.is(Tok::KwTrue);
-    parser_.cursor().advance();
-    return parser_.ctx_.make<BoolLitExpr>(loc, value);
-  }
-  case Tok::Identifier: {
-    if (parser_.tok_.text == "import") {
-      parser_.cursor().report(
-          loc, parser_.cursor().peek().is(Tok::Dot)
-                   ? "'import.meta' is not supported"
-                   : "dynamic 'import()' is not supported: every file the program uses is "
-                     "compiled into it; import by name at the top of the file, e.g. 'import "
-                     "{ a } from \"./x\"'");
-      parser_.cursor().advance();
-      return parser_.ctx_.make<IntLitExpr>(loc, 0);
-    }
-    if (parser_.cursor().peek().is(Tok::Arrow) && !parser_.cursor().peek().newlineBefore) {
-      return parser_.functions().parseArrow();
-    }
-    if (parser_.tok_.text == "async") {
-      if (Expr *fn = parser_.functions().tryAsyncFunction()) {
-        return fn;
+    case Tok::TemplateString:
+    case Tok::TemplateHead:
+      return this->parser.templates().parseTemplate();
+    case Tok::Slash:
+    case Tok::SlashAssign: {
+      if (this->parser.hasPeeked) {
+        this->parser.lexer.restore(this->parser.peekState);
+        this->parser.hasPeeked = false;
       }
+      this->parser.tok =
+          this->parser.lexer.regex(this->parser.tok.text.data(), this->parser.tok.newlineBefore);
+      std::u16string pattern, flags;
+      LiteralText::decodeRegex(this->parser.tok, pattern, flags);
+      auto *lit = this->parser.ctx.make<RegexLitExpr>(loc, std::move(pattern), std::move(flags));
+      lit->written = this->parser.tok.text.size();
+      this->parser.cursor().advance();
+      return lit;
     }
-    if (parser_.tok_.text == "class" &&
-        (parser_.cursor().peek().is(Tok::Identifier) || parser_.cursor().peek().is(Tok::LBrace))) {
-      ClassDecl *cls = parser_.classes().parseClass(true);
-      return parser_.ctx_.make<ClassExpr>(loc, cls);
+    case Tok::KwTrue:
+    case Tok::KwFalse: {
+      bool value = this->parser.tok.is(Tok::KwTrue);
+      this->parser.cursor().advance();
+      return this->parser.ctx.make<BoolLitExpr>(loc, value);
     }
-    if (parser_.tok_.text == "yield" && parser_.inGenerator_) {
-      parser_.cursor().report(loc, "'yield' must be in parentheses here, e.g. '1 + (yield x)'");
-      return parser_.exprs().parseYield();
+    case Tok::Identifier: {
+      if (this->parser.tok.text == "import") {
+        this->parser.cursor().report(
+            loc, this->parser.cursor().peek().is(Tok::Dot)
+                     ? "'import.meta' is not supported"
+                     : "dynamic 'import()' is not supported: every file the program uses is "
+                       "compiled into it; import by name at the top of the file, e.g. 'import "
+                       "{ a } from \"./x\"'");
+        this->parser.cursor().advance();
+        return this->parser.ctx.make<IntLitExpr>(loc, 0);
+      }
+      if (this->parser.cursor().peek().is(Tok::Arrow) &&
+          !this->parser.cursor().peek().newlineBefore) {
+        return this->parser.functions().parseArrow();
+      }
+      if (this->parser.tok.text == "async") {
+        if (Expr *fn = this->parser.functions().tryAsyncFunction()) {
+          return fn;
+        }
+      }
+      if (this->parser.tok.text == "class" && (this->parser.cursor().peek().is(Tok::Identifier) ||
+                                               this->parser.cursor().peek().is(Tok::LBrace))) {
+        ClassDecl *cls = this->parser.classes().parseClass(true);
+        return this->parser.ctx.make<ClassExpr>(loc, cls);
+      }
+      if (this->parser.tok.text == "yield" && this->parser.inGenerator) {
+        this->parser.cursor().report(loc,
+                                     "'yield' must be in parentheses here, e.g. '1 + (yield x)'");
+        return this->parser.exprs().parseYield();
+      }
+      llvm::StringRef name = this->parser.tok.text;
+      this->parser.cursor().advance();
+      if (name == "undefined") {
+        return this->parser.ctx.make<UndefinedExpr>(loc);
+      }
+      return this->parser.ctx.make<NameExpr>(loc, name);
     }
-    llvm::StringRef name = parser_.tok_.text;
-    parser_.cursor().advance();
-    if (name == "undefined") {
-      return parser_.ctx_.make<UndefinedExpr>(loc);
+    case Tok::KwFunction: {
+      FunctionDecl *fn = this->parser.functions().parseFunction(true);
+      return this->parser.ctx.make<FunctionExpr>(loc, fn);
     }
-    return parser_.ctx_.make<NameExpr>(loc, name);
-  }
-  case Tok::KwFunction: {
-    FunctionDecl *fn = parser_.functions().parseFunction(true);
-    return parser_.ctx_.make<FunctionExpr>(loc, fn);
-  }
-  case Tok::LParen: {
-    if (parser_.functions().arrowAhead()) {
-      return parser_.functions().parseArrow();
+    case Tok::LParen: {
+      if (this->parser.functions().arrowAhead()) {
+        return this->parser.functions().parseArrow();
+      }
+      this->parser.cursor().advance();
+      Expr *inner = this->parser.exprs().parseSequence();
+      this->parser.cursor().expect(Tok::RParen, "to close the parenthesized expression");
+      return inner;
     }
-    parser_.cursor().advance();
-    Expr *inner = parser_.exprs().parseSequence();
-    parser_.cursor().expect(Tok::RParen, "to close the parenthesized expression");
-    return inner;
-  }
-  case Tok::LBracket:
-    return parseArrayLiteral();
-  case Tok::LBrace:
-    return parseObjectLiteral();
-  case Tok::KwNew:
-    return parser_.calls().parseNew();
-  case Tok::Less: {
-    Parser::Snapshot start = parser_.cursor().snapshot();
-    const char *text = parser_.tok_.text.data();
-    bool muted = parser_.diags_.setMuted(true);
-    parser_.recovering_ = false;
-    std::vector<TypeParamDecl> typeParams = parser_.functions().parseTypeParams();
-    bool arrow =
-        !parser_.recovering_ && parser_.tok_.is(Tok::LParen) && parser_.functions().arrowAhead();
-    parser_.diags_.setMuted(muted);
-    if (arrow) {
-      parser_.recovering_ = start.recovering;
-      return parser_.functions().parseArrow(std::move(typeParams), text);
+    case Tok::LBracket:
+      return parseArrayLiteral();
+    case Tok::LBrace:
+      return parseObjectLiteral();
+    case Tok::KwNew:
+      return this->parser.calls().parseNew();
+    case Tok::Less: {
+      Parser::Snapshot start = this->parser.cursor().snapshot();
+      const char *text = this->parser.tok.text.data();
+      bool muted = this->parser.diags.setMuted(true);
+      this->parser.recovering = false;
+      std::vector<TypeParamDecl> typeParams = this->parser.functions().parseTypeParams();
+      bool arrow = !this->parser.recovering && this->parser.tok.is(Tok::LParen) &&
+                   this->parser.functions().arrowAhead();
+      this->parser.diags.setMuted(muted);
+      if (arrow) {
+        this->parser.recovering = start.recovering;
+        return this->parser.functions().parseArrow(std::move(typeParams), text);
+      }
+      this->parser.cursor().rewind(std::move(start));
+      this->parser.cursor().error(loc, "expected an expression, found '<'");
+      return this->parser.ctx.make<IntLitExpr>(loc, 0);
     }
-    parser_.cursor().rewind(std::move(start));
-    parser_.cursor().error(loc, "expected an expression, found '<'");
-    return parser_.ctx_.make<IntLitExpr>(loc, 0);
-  }
-  default:
-    parser_.cursor().error(loc, llvm::Twine("expected an expression, found ") +
-                                    TokenKinds::tokSpelling(parser_.tok_.kind));
-    return parser_.ctx_.make<IntLitExpr>(loc, 0);
+    default:
+      this->parser.cursor().error(loc, llvm::Twine("expected an expression, found ") +
+                                           TokenKinds::tokSpelling(this->parser.tok.kind));
+      return this->parser.ctx.make<IntLitExpr>(loc, 0);
   }
 }
 
 Expr *PrimaryParser::parseArrayLiteral() {
-  auto *lit = parser_.ctx_.make<ArrayLitExpr>(parser_.tok_.loc());
-  parser_.cursor().advance();
-  while (!parser_.tok_.is(Tok::RBracket) && !parser_.tok_.is(Tok::Eof)) {
-    if (parser_.tok_.is(Tok::Comma)) {
-      lit->elements.push_back({parser_.ctx_.make<UndefinedExpr>(parser_.tok_.loc()), false, true});
-      parser_.cursor().advance();
+  auto *lit = this->parser.ctx.make<ArrayLitExpr>(this->parser.tok.loc());
+  this->parser.cursor().advance();
+  while (!this->parser.tok.is(Tok::RBracket) && !this->parser.tok.is(Tok::Eof)) {
+    if (this->parser.tok.is(Tok::Comma)) {
+      lit->elements.push_back(
+          {this->parser.ctx.make<UndefinedExpr>(this->parser.tok.loc()), false, true});
+      this->parser.cursor().advance();
       continue;
     }
-    bool spread = parser_.cursor().accept(Tok::Ellipsis);
-    lit->elements.push_back({parser_.exprs().parseExpr(), spread});
-    if (!parser_.cursor().accept(Tok::Comma)) {
+    bool spread = this->parser.cursor().accept(Tok::Ellipsis);
+    lit->elements.push_back({this->parser.exprs().parseExpr(), spread});
+    if (!this->parser.cursor().accept(Tok::Comma)) {
       break;
     }
   }
-  parser_.cursor().expect(Tok::RBracket, "to close the array");
+  this->parser.cursor().expect(Tok::RBracket, "to close the array");
 
   return lit;
 }
 
 Expr *PrimaryParser::parseObjectLiteral() {
-  auto *lit = parser_.ctx_.make<ObjectLitExpr>(parser_.tok_.loc());
-  parser_.cursor().advance();
-  while (!parser_.tok_.is(Tok::RBrace) && !parser_.tok_.is(Tok::Eof)) {
-    if (parser_.tok_.is(Tok::At)) {
-      parser_.classes().rejectDecorators(parser_.classes().parseDecorators());
-      if (parser_.recovering_) {
+  auto *lit = this->parser.ctx.make<ObjectLitExpr>(this->parser.tok.loc());
+  this->parser.cursor().advance();
+  while (!this->parser.tok.is(Tok::RBrace) && !this->parser.tok.is(Tok::Eof)) {
+    if (this->parser.tok.is(Tok::At)) {
+      this->parser.classes().rejectDecorators(this->parser.classes().parseDecorators());
+      if (this->parser.recovering) {
         return lit;
       }
     }
-    llvm::SMLoc loc = parser_.tok_.loc();
-    if (parser_.cursor().accept(Tok::Ellipsis)) {
+    llvm::SMLoc loc = this->parser.tok.loc();
+    if (this->parser.cursor().accept(Tok::Ellipsis)) {
       ObjectLitExpr::Property spread;
       spread.loc = loc;
-      spread.value = parser_.exprs().parseExpr();
+      spread.value = this->parser.exprs().parseExpr();
       spread.form = SpreadProperty{};
       lit->props.push_back(std::move(spread));
-      if (!parser_.cursor().accept(Tok::Comma)) {
+      if (!this->parser.cursor().accept(Tok::Comma)) {
         break;
       }
       continue;
     }
-    if (!parser_.classes().symbolKeyAhead() && parser_.cursor().accept(Tok::LBracket)) {
+    if (!this->parser.classes().symbolKeyAhead() && this->parser.cursor().accept(Tok::LBracket)) {
       ObjectLitExpr::Property prop;
       prop.loc = loc;
-      Expr *key = parser_.exprs().parseExpr();
+      Expr *key = this->parser.exprs().parseExpr();
       prop.form = ComputedProperty{.key = key};
-      parser_.cursor().expect(Tok::RBracket, "to close the key");
+      this->parser.cursor().expect(Tok::RBracket, "to close the key");
       if (auto *name = dyn_cast<NameExpr>(prop.key())) {
-        for (const std::string &text : parser_.stringConstants_.lookup(name->name)) {
-          parser_.fieldNames_.insert(text);
+        for (const std::string &text : this->parser.stringConstants.lookup(name->name)) {
+          this->parser.fieldNames.insert(text);
         }
       } else if (auto *text = dyn_cast<StringLitExpr>(prop.key())) {
-        parser_.fieldNames_.insert(ToUtf8::toUtf8(text->value));
+        this->parser.fieldNames.insert(ToUtf8::toUtf8(text->value));
       }
-      if (parser_.tok_.is(Tok::LParen) || parser_.tok_.is(Tok::Less)) {
-        parser_.cursor().error(
+      if (this->parser.tok.is(Tok::LParen) || this->parser.tok.is(Tok::Less)) {
+        this->parser.cursor().error(
             loc, "a method cannot have a key in brackets; write its name: 'f() { ... }'");
-        parser_.cursor().skipToClosingBrace();
+        this->parser.cursor().skipToClosingBrace();
         return lit;
       }
-      if (!parser_.cursor().expect(Tok::Colon, "after the key in brackets")) {
-        parser_.cursor().skipToClosingBrace();
+      if (!this->parser.cursor().expect(Tok::Colon, "after the key in brackets")) {
+        this->parser.cursor().skipToClosingBrace();
         return lit;
       }
-      prop.value = parser_.exprs().parseExpr();
+      prop.value = this->parser.exprs().parseExpr();
       lit->props.push_back(std::move(prop));
-      if (!parser_.cursor().accept(Tok::Comma)) {
+      if (!this->parser.cursor().accept(Tok::Comma)) {
         break;
       }
       continue;
     }
-    bool accessor = parser_.tok_.is(Tok::Identifier) &&
-                    (parser_.tok_.text == "get" || parser_.tok_.text == "set") &&
-                    (parser_.cursor().peek().is(Tok::Identifier) ||
-                     TokenKinds::isKeyword(parser_.cursor().peek().kind) ||
-                     parser_.cursor().peek().is(Tok::StringLiteral));
+    bool accessor = this->parser.tok.is(Tok::Identifier) &&
+                    (this->parser.tok.text == "get" || this->parser.tok.text == "set") &&
+                    (this->parser.cursor().peek().is(Tok::Identifier) ||
+                     TokenKinds::isKeyword(this->parser.cursor().peek().kind) ||
+                     this->parser.cursor().peek().is(Tok::StringLiteral));
     if (accessor) {
-      parser_.cursor().error(
+      this->parser.cursor().error(
           loc, "getters and setters are not supported: reading or writing a field never runs code; "
                "write a function instead");
-      parser_.cursor().skipToClosingBrace();
+      this->parser.cursor().skipToClosingBrace();
       return lit;
     }
-    bool isAsync =
-        parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "async" &&
-        !parser_.cursor().peek().is(Tok::Colon) && !parser_.cursor().peek().is(Tok::Comma) &&
-        !parser_.cursor().peek().is(Tok::RBrace) && !parser_.cursor().peek().is(Tok::LParen) &&
-        !parser_.cursor().peek().newlineBefore;
+    bool isAsync = this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "async" &&
+                   !this->parser.cursor().peek().is(Tok::Colon) &&
+                   !this->parser.cursor().peek().is(Tok::Comma) &&
+                   !this->parser.cursor().peek().is(Tok::RBrace) &&
+                   !this->parser.cursor().peek().is(Tok::LParen) &&
+                   !this->parser.cursor().peek().newlineBefore;
     if (isAsync) {
-      parser_.cursor().advance();
+      this->parser.cursor().advance();
     }
-    const char *start = parser_.tok_.text.data();
-    bool generator = parser_.cursor().accept(Tok::Star);
-    bool identifier = parser_.tok_.is(Tok::Identifier);
+    const char *start = this->parser.tok.text.data();
+    bool generator = this->parser.cursor().accept(Tok::Star);
+    bool identifier = this->parser.tok.is(Tok::Identifier);
     llvm::StringRef name;
-    if (!parser_.objectTypes().parseFieldName(name)) {
-      parser_.cursor().skipToClosingBrace();
+    if (!this->parser.objectTypes().parseFieldName(name)) {
+      this->parser.cursor().skipToClosingBrace();
       return lit;
     }
     Expr *value = nullptr;
     PropertyForm form = ValueProperty{};
-    if (parser_.tok_.is(Tok::LParen) || parser_.tok_.is(Tok::Less)) {
-      auto *fn = parser_.ctx_.make<FunctionDecl>(loc, name);
+    if (this->parser.tok.is(Tok::LParen) || this->parser.tok.is(Tok::Less)) {
+      auto *fn = this->parser.ctx.make<FunctionDecl>(loc, name);
       fn->place = FunctionPlace::EXPRESSION;
       fn->isGenerator = generator;
       fn->isAsync = isAsync;
-      parser_.classes().parseMethodRest(fn, start);
-      if (parser_.recovering_ || !fn->body) {
+      this->parser.classes().parseMethodRest(fn, start);
+      if (this->parser.recovering || !fn->body) {
         if (!fn->body) {
-          parser_.cursor().error(parser_.tok_.loc(),
-                                 "expected '{' to start the body of the method");
+          this->parser.cursor().error(this->parser.tok.loc(),
+                                      "expected '{' to start the body of the method");
         }
-        parser_.cursor().skipToClosingBrace();
+        this->parser.cursor().skipToClosingBrace();
         return lit;
       }
-      value = parser_.ctx_.make<FunctionExpr>(loc, fn);
+      value = this->parser.ctx.make<FunctionExpr>(loc, fn);
       form = MethodProperty{};
     } else if (generator || isAsync) {
-      parser_.cursor().error(parser_.tok_.loc(),
-                             generator ? "expected '(' after the name of the generator method"
-                                       : "expected '(' after the name of the async method");
-      parser_.cursor().skipToClosingBrace();
+      this->parser.cursor().error(this->parser.tok.loc(),
+                                  generator ? "expected '(' after the name of the generator method"
+                                            : "expected '(' after the name of the async method");
+      this->parser.cursor().skipToClosingBrace();
       return lit;
-    } else if (parser_.cursor().accept(Tok::Colon)) {
-      value = parser_.exprs().parseExpr();
-    } else if (identifier && (parser_.tok_.is(Tok::Comma) || parser_.tok_.is(Tok::RBrace))) {
-      value = name == "undefined" ? static_cast<Expr *>(parser_.ctx_.make<UndefinedExpr>(loc))
-                                  : parser_.ctx_.make<NameExpr>(loc, name);
-    } else if (identifier && parser_.tok_.is(Tok::Assign)) {
-      llvm::SMLoc assignLoc = parser_.tok_.loc();
-      parser_.cursor().advance();
-      value = parser_.ctx_.make<AssignExpr>(assignLoc, std::nullopt,
-                                            parser_.ctx_.make<NameExpr>(loc, name),
-                                            parser_.exprs().parseExpr());
+    } else if (this->parser.cursor().accept(Tok::Colon)) {
+      value = this->parser.exprs().parseExpr();
+    } else if (identifier &&
+               (this->parser.tok.is(Tok::Comma) || this->parser.tok.is(Tok::RBrace))) {
+      value = name == "undefined" ? static_cast<Expr *>(this->parser.ctx.make<UndefinedExpr>(loc))
+                                  : this->parser.ctx.make<NameExpr>(loc, name);
+    } else if (identifier && this->parser.tok.is(Tok::Assign)) {
+      llvm::SMLoc assignLoc = this->parser.tok.loc();
+      this->parser.cursor().advance();
+      value = this->parser.ctx.make<AssignExpr>(assignLoc, std::nullopt,
+                                                this->parser.ctx.make<NameExpr>(loc, name),
+                                                this->parser.exprs().parseExpr());
       form = DefaultedProperty{};
     } else {
-      parser_.cursor().error(parser_.tok_.loc(),
-                             llvm::Twine("expected ':' after the field name, found ") +
-                                 TokenKinds::tokSpelling(parser_.tok_.kind));
-      parser_.cursor().skipToClosingBrace();
+      this->parser.cursor().error(this->parser.tok.loc(),
+                                  llvm::Twine("expected ':' after the field name, found ") +
+                                      TokenKinds::tokSpelling(this->parser.tok.kind));
+      this->parser.cursor().skipToClosingBrace();
       return lit;
     }
     ObjectLitExpr::Property prop;
@@ -299,25 +306,25 @@ Expr *PrimaryParser::parseObjectLiteral() {
     prop.value = value;
     prop.form = std::move(form);
     lit->props.push_back(std::move(prop));
-    if (!parser_.cursor().accept(Tok::Comma)) {
+    if (!this->parser.cursor().accept(Tok::Comma)) {
       break;
     }
   }
-  parser_.cursor().expect(Tok::RBrace, "to close the object");
+  this->parser.cursor().expect(Tok::RBrace, "to close the object");
 
   return lit;
 }
 
 Expr *PrimaryParser::parseIntLiteral() {
-  llvm::SMLoc loc = parser_.tok_.loc();
-  llvm::StringRef source = parser_.tok_.text;
+  llvm::SMLoc loc = this->parser.tok.loc();
+  llvm::StringRef source = this->parser.tok.text;
   llvm::SmallString<32> digits;
-  for (char c : parser_.tok_.text) {
+  for (char c : this->parser.tok.text) {
     if (c != '_') {
       digits.push_back(c);
     }
   }
-  parser_.cursor().advance();
+  this->parser.cursor().advance();
 
   llvm::StringRef text = digits;
   unsigned radix = 10;
@@ -345,15 +352,15 @@ Expr *PrimaryParser::parseIntLiteral() {
 
   uint64_t value = 0;
   if (!text.getAsInteger(radix, value)) {
-    auto *lit = parser_.ctx_.make<IntLitExpr>(loc, value);
+    auto *lit = this->parser.ctx.make<IntLitExpr>(loc, value);
     lit->text = source;
     return lit;
   }
   for (char c : text) {
     unsigned digit = llvm::isDigit(c) ? c - '0' : llvm::isAlpha(c) ? (c | 0x20) - 'a' + 10 : radix;
     if (digit >= radix) {
-      parser_.cursor().report(loc, "invalid integer literal");
-      return parser_.ctx_.make<IntLitExpr>(loc, 0);
+      this->parser.cursor().report(loc, "invalid integer literal");
+      return this->parser.ctx.make<IntLitExpr>(loc, 0);
     }
   }
   double rounded = 0;
@@ -366,28 +373,28 @@ Expr *PrimaryParser::parseIntLiteral() {
                             llvm::APFloat::rmNearestTiesToEven);
     rounded = number.convertToDouble();
   }
-  auto *lit = parser_.ctx_.make<FloatLitExpr>(loc, rounded);
+  auto *lit = this->parser.ctx.make<FloatLitExpr>(loc, rounded);
   lit->text = source;
 
   return lit;
 }
 
 Expr *PrimaryParser::parseFloatLiteral() {
-  llvm::SMLoc loc = parser_.tok_.loc();
-  llvm::StringRef text = parser_.tok_.text;
+  llvm::SMLoc loc = this->parser.tok.loc();
+  llvm::StringRef text = this->parser.tok.text;
   llvm::SmallString<32> digits;
-  for (char c : parser_.tok_.text) {
+  for (char c : this->parser.tok.text) {
     if (c != '_') {
       digits.push_back(c);
     }
   }
-  parser_.cursor().advance();
+  this->parser.cursor().advance();
 
   double value = 0;
   if (llvm::StringRef(digits).getAsDouble(value)) {
-    parser_.cursor().report(loc, "invalid number literal");
+    this->parser.cursor().report(loc, "invalid number literal");
   }
-  auto *lit = parser_.ctx_.make<FloatLitExpr>(loc, value);
+  auto *lit = this->parser.ctx.make<FloatLitExpr>(loc, value);
   lit->text = text;
 
   return lit;

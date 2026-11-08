@@ -11,10 +11,11 @@
 #include "compiler/load/primary_parser/primary_parser.h"
 #include "compiler/load/stmt_parser/stmt_parser.h"
 #include "compiler/load/template_parser/template_parser.h"
-#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/load/token_cursor/token_cursor.h"
 #include "compiler/load/type_parser/type_parser.h"
 #include "compiler/load/var_parser/var_parser.h"
+#include "compiler/program/ast/ast_cloner/ast_cloner.h"
+#include "compiler/program/to_utf8/to_utf8.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
@@ -32,7 +33,10 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 Parser::Parser(Lexer &lexer, AstContext &ctx, Diagnostics &diags, bool library)
-    : lexer_(lexer), ctx_(ctx), diags_(diags), library_(library) {
+    : lexer(lexer),
+      ctx(ctx),
+      diags(diags),
+      library_(library) {
   cursor_ = std::make_unique<TokenCursor>(*this);
   stmts_ = std::make_unique<StmtParser>(*this);
   vars_ = std::make_unique<VarParser>(*this);
@@ -53,56 +57,26 @@ Parser::Parser(Lexer &lexer, AstContext &ctx, Diagnostics &diags, bool library)
 
 SourceFile Parser::parseSourceFile() {
   SourceFile file;
-  while (!tok_.is(Tok::Eof)) {
-    if (tok_.is(Tok::RBrace)) {
-      cursor().error(tok_.loc(), "unexpected '}'");
+  while (!this->tok.is(Tok::Eof)) {
+    if (this->tok.is(Tok::RBrace)) {
+      cursor().error(this->tok.loc(), "unexpected '}'");
       cursor().advance();
-      recovering_ = false;
+      this->recovering = false;
       continue;
     }
     file.items.push_back(stmts().parseStatement(true));
-    if (recovering_) {
+    if (this->recovering) {
       cursor().synchronize();
     }
   }
-  file.fieldNames = std::move(fieldNames_);
-  file.imports = std::move(imports_);
-  file.exports = std::move(exports_);
-  file.stringConstants = std::move(stringConstants_);
+  file.fieldNames = std::move(this->fieldNames);
+  file.imports = std::move(this->imports);
+  file.exports = std::move(this->exports);
+  file.stringConstants = std::move(this->stringConstants);
+  AstCloner cloner(this->ctx);
+  cloner.keepPristine(file.items);
 
   return file;
-}
-
-ClassDecl *Parser::parseClassCopy() { return classes().parseClass(); }
-
-FunctionDecl *Parser::parseMethodCopy() {
-  const char *start = tok_.text.data();
-  bool generator = cursor().accept(Tok::Star);
-  llvm::SMLoc loc = tok_.loc();
-  llvm::StringRef name = tok_.text;
-  bool constructor = tok_.is(Tok::Identifier) && name == "constructor";
-  cursor().advance();
-  auto *fn = ctx_.make<FunctionDecl>(loc, name);
-  if (constructor) {
-    fn->role = ClassMember{.method = Constructor{}};
-  }
-  fn->isGenerator = generator;
-  classes().parseMethodRest(fn, start);
-
-  return fn;
-}
-
-FunctionDecl *Parser::parseFunctionExprCopy() {
-  if (tok_.is(Tok::KwFunction)) {
-    return functions().parseFunction(true);
-  }
-  if (tok_.is(Tok::Less)) {
-    const char *start = tok_.text.data();
-    std::vector<TypeParamDecl> typeParams = functions().parseTypeParams();
-    return functions().parseArrow(std::move(typeParams), start)->fn;
-  }
-
-  return functions().parseArrow()->fn;
 }
 
 bool Parser::Pattern::declares(llvm::StringRef name) const {
@@ -115,7 +89,6 @@ bool Parser::Pattern::declares(llvm::StringRef name) const {
   return false;
 }
 
-FunctionDecl *Parser::parseFunctionCopy() { return functions().parseFunction(false); }
 
 Parser::~Parser() = default;
 }

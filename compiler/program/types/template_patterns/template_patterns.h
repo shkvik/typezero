@@ -13,7 +13,6 @@ public:
                               std::vector<std::u16string> &parts);
 
 private:
-  static std::string utf8Text(const std::u16string &text);
 };
 
 }

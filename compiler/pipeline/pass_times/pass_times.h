@@ -18,7 +18,7 @@ public:
   std::string text() const;
 
 private:
-  std::chrono::steady_clock::time_point started_;
+  std::chrono::steady_clock::time_point started;
   std::vector<std::pair<std::string, double>> passes_;
   unsigned rounds_ = 0;
 };

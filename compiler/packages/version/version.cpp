@@ -4,67 +4,114 @@
 
 namespace tz::pkg {
 
-namespace {
+Version::Version(uint64_t majorNumber, uint64_t minorNumber, uint64_t patchNumber,
+                 std::vector<std::string> prerelease)
+    : major(majorNumber),
+      minor(minorNumber),
+      patch(patchNumber),
+      pre(std::move(prerelease)) {}
 
-bool isNumeric(llvm::StringRef id) { return !id.empty() && llvm::all_of(id, llvm::isDigit); }
+std::string Version::str() const {
+  std::string text = std::to_string(this->major) + "." + std::to_string(this->minor) + "." +
+                     std::to_string(this->patch);
+  for (size_t i = 0; i < this->pre.size(); ++i) {
+    text += (i ? "." : "-") + this->pre[i];
+  }
 
+  return text;
+}
+
+void Version::dropPrerelease() {
+  this->pre.clear();
+}
+
+bool Version::isPrerelease() const {
+  return !this->pre.empty();
+}
+
+uint64_t Version::getMajor() const {
+  return this->major;
+}
+
+uint64_t Version::getMinor() const {
+  return this->minor;
+}
+
+uint64_t Version::getPatch() const {
+  return this->patch;
+}
+
+int Version::compare(const Version &other) const {
+  if (this->major != other.major) {
+    return this->major < other.major ? -1 : 1;
+  }
+  if (this->minor != other.minor) {
+    return this->minor < other.minor ? -1 : 1;
+  }
+  if (this->patch != other.patch) {
+    return this->patch < other.patch ? -1 : 1;
+  }
+  if (this->pre.empty() || other.pre.empty()) {
+    if (this->pre.empty() == other.pre.empty()) {
+      return 0;
+    }
+
+    return this->pre.empty() ? 1 : -1;
+  }
+  for (size_t i = 0; i < this->pre.size() && i < other.pre.size(); ++i) {
+    int order = Version::comparePrerelease(this->pre[i], other.pre[i]);
+    if (order != 0) {
+      return order;
+    }
+  }
+  if (this->pre.size() == other.pre.size()) {
+    return 0;
+  }
+
+  return this->pre.size() < other.pre.size() ? -1 : 1;
+}
+
+bool Version::operator<(const Version &other) const {
+  return this->compare(other) < 0;
+}
+
+bool Version::operator==(const Version &other) const {
+  return this->compare(other) == 0;
 }
 
 bool Version::parse(llvm::StringRef text, Version &out) {
-  Partial p;
-  if (!PartialParser::parsePartial(text.trim(), p) || p.count != 3) {
+  Partial partial;
+  bool parsed = PartialParser::parsePartial(text.trim(), partial);
+  if (!parsed || partial.count != 3) {
     return false;
   }
-  out = p.version();
+  out = partial.version();
 
   return true;
 }
 
-int Version::compare(const Version &o) const {
-  if (major != o.major) {
-    return major < o.major ? -1 : 1;
-  }
-  if (minor != o.minor) {
-    return minor < o.minor ? -1 : 1;
-  }
-  if (patch != o.patch) {
-    return patch < o.patch ? -1 : 1;
-  }
-  if (pre.empty() || o.pre.empty()) {
-    return pre.empty() == o.pre.empty() ? 0 : (pre.empty() ? 1 : -1);
-  }
-  for (size_t i = 0; i < pre.size() && i < o.pre.size(); ++i) {
-    const std::string &a = pre[i], &b = o.pre[i];
-    if (a == b) {
-      continue;
-    }
-    bool an = isNumeric(a), bn = isNumeric(b);
-    if (an && bn) {
-      if (a.size() != b.size()) {
-        return a.size() < b.size() ? -1 : 1;
-      }
-      return a < b ? -1 : 1;
-    }
-    if (an != bn) {
-      return an ? -1 : 1;
-    }
-
-    return a < b ? -1 : 1;
-  }
-  if (pre.size() == o.pre.size()) {
+int Version::comparePrerelease(const std::string &mine, const std::string &theirs) {
+  if (mine == theirs) {
     return 0;
   }
+  bool mineNumeric = Version::isNumeric(mine);
+  bool theirsNumeric = Version::isNumeric(theirs);
+  if (mineNumeric && theirsNumeric) {
+    if (mine.size() != theirs.size()) {
+      return mine.size() < theirs.size() ? -1 : 1;
+    }
 
-  return pre.size() < o.pre.size() ? -1 : 1;
-}
-
-std::string Version::str() const {
-  std::string s = std::to_string(major) + "." + std::to_string(minor) + "." + std::to_string(patch);
-  for (size_t i = 0; i < pre.size(); ++i) {
-    s += (i ? "." : "-") + pre[i];
+    return mine < theirs ? -1 : 1;
+  }
+  if (mineNumeric != theirsNumeric) {
+    return mineNumeric ? -1 : 1;
   }
 
-  return s;
+  return mine < theirs ? -1 : 1;
+}
+
+bool Version::isNumeric(llvm::StringRef id) {
+  return !id.empty() && llvm::all_of(id, llvm::isDigit);
 }
 
 }

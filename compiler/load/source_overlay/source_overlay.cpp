@@ -14,16 +14,16 @@ namespace path = llvm::sys::path;
 }
 
 void SourceOverlay::set(llvm::StringRef path, llvm::StringRef text) {
-  texts_[key(path)] = text.str();
+  this->texts[key(path)] = text.str();
 }
 
 const std::string *SourceOverlay::find(llvm::StringRef path) const {
-  if (texts_.empty()) {
+  if (this->texts.empty()) {
     return nullptr;
   }
-  auto it = texts_.find(key(path));
+  auto it = this->texts.find(key(path));
 
-  return it == texts_.end() ? nullptr : &it->second;
+  return it == this->texts.end() ? nullptr : &it->second;
 }
 
 std::string SourceOverlay::key(llvm::StringRef file) {

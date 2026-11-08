@@ -1,9 +1,9 @@
 #include "compiler/lower/memory/publish_lowerer/publish_lowerer.h"
-#include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
 #include "compiler/lower/functions/env_lowerer/env_lowerer.h"
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
+#include "compiler/lower/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/memory/group_lowerer/group_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/memory/memory_plan/memory_plan.h"
@@ -38,17 +38,17 @@ PublishLowerer::publishFunction(const Type *type, llvm::StructType *layout,
                                 llvm::ArrayRef<std::pair<const VarSymbol *, unsigned>> captures,
                                 llvm::ArrayRef<std::pair<unsigned, const Type *>> values,
                                 llvm::StringRef name) {
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-  auto *fnType = llvm::FunctionType::get(this->lowering.builder_.getVoidTy(), {ptr}, false);
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
+  auto *fnType = llvm::FunctionType::get(this->lowering.builder.getVoidTy(), {ptr}, false);
   auto *fn = llvm::Function::Create(fnType, llvm::GlobalValue::InternalLinkage,
                                     "tz.publish." + name, this->lowering.module_.get());
   fn->addFnAttr(llvm::Attribute::NoUnwind);
-  llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx_, "entry", fn));
+  llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx, "entry", fn));
   llvm::Value *object = fn->getArg(0);
   llvm::FunctionCallee value = this->lowering.processLowerer().processFunction(
-      "tz_publish_value", this->lowering.builder_.getVoidTy(), {ptr, ptr});
+      "tz_publish_value", this->lowering.builder.getVoidTy(), {ptr, ptr});
   llvm::FunctionCallee ref = this->lowering.processLowerer().processFunction(
-      "tz_publish_object", this->lowering.builder_.getVoidTy(), {ptr});
+      "tz_publish_object", this->lowering.builder.getVoidTy(), {ptr});
   auto one = [&](const Type *t, unsigned element) {
     if (!t->isManaged()) {
       return;
@@ -81,9 +81,9 @@ void PublishLowerer::finishPublishTable(llvm::Instruction *init) {
   if (!this->lowering.parallel_) {
     return;
   }
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
   std::vector<llvm::Constant *> entries;
-  auto *entryType = llvm::StructType::get(this->lowering.ctx_, {ptr, ptr});
+  auto *entryType = llvm::StructType::get(this->lowering.ctx, {ptr, ptr});
   llvm::DenseSet<llvm::Constant *> seen;
   auto add = [&](llvm::Constant *descriptor, llvm::Function *publish) {
     if (seen.insert(descriptor).second) {
@@ -108,7 +108,7 @@ void PublishLowerer::finishPublishTable(llvm::Instruction *init) {
     return publish;
   };
   std::vector<std::pair<const Type *, llvm::Constant *>> layouts;
-  for (const auto &[key, descriptor] : this->lowering.layoutDescriptors_) {
+  for (const auto &[key, descriptor] : this->lowering.layoutDescriptors) {
     layouts.push_back({key.first, descriptor});
   }
   for (const auto &[type, descriptor] : layouts) {
@@ -119,7 +119,7 @@ void PublishLowerer::finishPublishTable(llvm::Instruction *init) {
   for (const auto &[cls, descriptor] : this->lowering.classDescriptors_) {
     add(descriptor, objectPublish(cls->type));
   }
-  for (const auto &[key, layout] : this->lowering.envLayouts_) {
+  for (const auto &[key, layout] : this->lowering.envLayouts) {
     std::vector<std::pair<const VarSymbol *, unsigned>> captures;
     for (size_t i = 0; i < layout.fields.size(); ++i) {
       if (!this->lowering.memory().uncounted.count({key, layout.fields[i]})) {
@@ -128,22 +128,22 @@ void PublishLowerer::finishPublishTable(llvm::Instruction *init) {
     }
     add(layout.descriptor, this->publishFunction(nullptr, layout.type, captures, {}, "env"));
   }
-  for (const auto &[type, drop] : this->lowering.boxDrops_) {
+  for (const auto &[type, drop] : this->lowering.boxDrops) {
     if (!type->isManaged()) {
       continue;
     }
     llvm::Function *publish = this->publishFunction(
         nullptr, this->lowering.envLowerer().boxType(type), {}, {{2u, type}}, "box");
-    llvm::Constant *dropDescriptor = this->lowering.dropDescriptors_.lookup(drop);
+    llvm::Constant *dropDescriptor = this->lowering.dropDescriptors.lookup(drop);
     if (dropDescriptor) {
       add(dropDescriptor, publish);
     }
-    llvm::Constant *memberDescriptor = this->lowering.memberDescriptors_.lookup(drop);
+    llvm::Constant *memberDescriptor = this->lowering.memberDescriptors.lookup(drop);
     if (memberDescriptor) {
       add(memberDescriptor, publish);
     }
   }
-  for (const Lowering::PublishedObject &o : this->lowering.publishedObjects_) {
+  for (const Lowering::PublishedObject &o : this->lowering.publishedObjects) {
     add(o.descriptor, this->publishFunction(nullptr, o.type, {}, o.values, "other"));
   }
   auto *arrayType = llvm::ArrayType::get(entryType, entries.size());
@@ -152,8 +152,8 @@ void PublishLowerer::finishPublishTable(llvm::Instruction *init) {
       llvm::ConstantArray::get(arrayType, entries), "tz.publish.table");
   llvm::IRBuilder<> b(init->getNextNode());
   b.CreateCall(this->lowering.processLowerer().processFunction(
-                   "tz_publish_init", this->lowering.builder_.getVoidTy(),
-                   {ptr, this->lowering.builder_.getInt32Ty()}),
+                   "tz_publish_init", this->lowering.builder.getVoidTy(),
+                   {ptr, this->lowering.builder.getInt32Ty()}),
                {table, b.getInt32(uint32_t(entries.size()))});
 }
 
@@ -161,12 +161,12 @@ void PublishLowerer::pinValue(llvm::Value *value, const Type *type) {
   if (!this->lowering.memory().mayCarryMember(type) || isa<llvm::Constant>(value)) {
     return;
   }
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-  this->lowering.builder_.CreateCall(
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
+  this->lowering.builder.CreateCall(
       this->lowering.groupLowerer().groupFunction("tz_group_pin_value",
-                                                  this->lowering.builder_.getVoidTy(), {ptr, ptr}),
+                                                  this->lowering.builder.getVoidTy(), {ptr, ptr}),
       {this->lowering.typeDescriptors().typeDescriptor(type),
-       PublishLowerer::spillHere(this->lowering.builder_, value, "pinned")});
+       PublishLowerer::spillHere(this->lowering.builder, value, "pinned")});
 }
 
 void PublishLowerer::endValue(llvm::Value *value, const Type *type) {
@@ -174,12 +174,12 @@ void PublishLowerer::endValue(llvm::Value *value, const Type *type) {
     this->lowering.refCounts().releaseValue(value, type);
     return;
   }
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-  this->lowering.builder_.CreateCall(
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
+  this->lowering.builder.CreateCall(
       this->lowering.groupLowerer().groupFunction("tz_group_end_value",
-                                                  this->lowering.builder_.getVoidTy(), {ptr, ptr}),
+                                                  this->lowering.builder.getVoidTy(), {ptr, ptr}),
       {this->lowering.typeDescriptors().typeDescriptor(type),
-       PublishLowerer::spillHere(this->lowering.builder_, value, "ended")});
+       PublishLowerer::spillHere(this->lowering.builder, value, "ended")});
 }
 
 }

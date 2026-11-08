@@ -19,11 +19,15 @@ public:
   explicit operator bool() const { return errorCount_ != 0; }
   bool isEmpty() const;
 
-  std::vector<Diagnostic>::const_iterator begin() const { return list_.begin(); }
-  std::vector<Diagnostic>::const_iterator end() const { return list_.end(); }
+  std::vector<Diagnostic>::const_iterator begin() const {
+    return this->list.begin();
+  }
+  std::vector<Diagnostic>::const_iterator end() const {
+    return this->list.end();
+  }
 
 private:
-  std::vector<Diagnostic> list_;
+  std::vector<Diagnostic> list;
   unsigned errorCount_ = 0;
 };
 

@@ -10,7 +10,7 @@
 
 namespace tz {
 
-class FeatureRegistry;
+class LowererRegistry;
 
 class Target;
 struct MemoryPlan;
@@ -20,18 +20,18 @@ struct Program;
 class LowerPass {
 public:
   LowerPass(llvm::LLVMContext &context, const Target &target, llvm::StringRef moduleName,
-            const FeatureRegistry &features, DebugLevel debug, bool optimize);
+            const LowererRegistry &lowerers, DebugLevel debug, bool optimize);
 
   Result<Lowered, Errors> run(Program &program, const ParallelPlan &plan,
                               const MemoryPlan &memory) const;
 
 private:
-  llvm::LLVMContext &context_;
-  const Target &target_;
-  std::string moduleName_;
-  const FeatureRegistry &features_;
-  DebugLevel debug_;
-  bool optimize_;
+  llvm::LLVMContext &context;
+  const Target &target;
+  std::string moduleName;
+  const LowererRegistry &lowerers;
+  DebugLevel debug;
+  bool optimize;
 };
 
 }

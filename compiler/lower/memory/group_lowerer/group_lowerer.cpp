@@ -33,10 +33,10 @@ llvm::FunctionCallee GroupLowerer::groupFunction(llvm::StringRef name, llvm::Typ
 
 llvm::Value *GroupLowerer::allocMember(uint64_t size, const llvm::Twine &name) {
   llvm::FunctionCallee alloc = this->groupFunction(
-      "tz_group_alloc", this->lowering.builder_.getPtrTy(), {this->lowering.builder_.getInt64Ty()});
+      "tz_group_alloc", this->lowering.builder.getPtrTy(), {this->lowering.builder.getInt64Ty()});
   cast<llvm::Function>(alloc.getCallee())->addRetAttr(llvm::Attribute::NoAlias);
 
-  return this->lowering.builder_.CreateCall(alloc, {this->lowering.builder_.getInt64(size)}, name);
+  return this->lowering.builder.CreateCall(alloc, {this->lowering.builder.getInt64(size)}, name);
 }
 
 void GroupLowerer::adoptFields(llvm::Value *object, const Type *type) {
@@ -49,27 +49,26 @@ void GroupLowerer::adoptFields(llvm::Value *object, const Type *type) {
     if (this->lowering.memory().mayHoldMember(fields[i].type)) {
       this->lowering.storeLowerer().groupStore(
           object,
-          this->lowering.builder_.CreateLoad(
+          this->lowering.builder.CreateLoad(
               this->lowering.moduleBuilder().lower(fields[i].type),
-              this->lowering.builder_.CreateStructGEP(layout.type, object, layout.elements[i])),
+              this->lowering.builder.CreateStructGEP(layout.type, object, layout.elements[i])),
           fields[i].type);
     }
   }
 }
 
 llvm::Constant *GroupLowerer::memberDescriptor(llvm::Function *drop, llvm::StringRef name) {
-  llvm::Constant *&descriptor = this->lowering.memberDescriptors_[drop];
+  llvm::Constant *&descriptor = this->lowering.memberDescriptors[drop];
   if (descriptor) {
     return descriptor;
   }
-  llvm::Constant *null = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+  llvm::Constant *null = llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy());
   llvm::Constant *init = llvm::ConstantStruct::get(
-      this->lowering.layoutDescTy_,
-      {drop, null, this->lowering.builder_.getInt32(0), this->lowering.builder_.getInt32(0),
+      this->lowering.layoutDescTy,
+      {drop, null, this->lowering.builder.getInt32(0), this->lowering.builder.getInt32(0),
        this->lowering.stringLowerer().utf8Constant(name),
-       this->lowering.builder_.getInt32(uint32_t(name.size())),
-       this->lowering.builder_.getInt32(0)});
-  auto *global = new llvm::GlobalVariable(*this->lowering.module_, this->lowering.layoutDescTy_,
+       this->lowering.builder.getInt32(uint32_t(name.size())), this->lowering.builder.getInt32(0)});
+  auto *global = new llvm::GlobalVariable(*this->lowering.module_, this->lowering.layoutDescTy,
                                           true, llvm::GlobalValue::PrivateLinkage, init,
                                           drop->getName() + ".layout");
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
@@ -87,15 +86,15 @@ llvm::Value *GroupLowerer::newArray(const Type *arrayType, llvm::Value *length,
                                     llvm::Value *capacity, bool member, const llvm::Twine &name) {
   llvm::Constant *element = this->lowering.typeDescriptors().typeDescriptor(arrayType->inner());
   if (!member) {
-    return this->lowering.builder_.CreateCall(this->lowering.rt_.arrNew,
-                                              {element, length, capacity}, name);
+    return this->lowering.builder.CreateCall(this->lowering.rt_.arrNew, {element, length, capacity},
+                                             name);
   }
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
+  llvm::Type *i64 = this->lowering.builder.getInt64Ty();
   llvm::FunctionCallee alloc = this->groupFunction("tz_arr_new_group", ptr, {ptr, i64, i64});
   cast<llvm::Function>(alloc.getCallee())->addRetAttr(llvm::Attribute::NoAlias);
 
-  return this->lowering.builder_.CreateCall(alloc, {element, length, capacity}, name);
+  return this->lowering.builder.CreateCall(alloc, {element, length, capacity}, name);
 }
 
 llvm::Function *GroupLowerer::groupAwareRelease(llvm::Function *plain) {
@@ -103,25 +102,25 @@ llvm::Function *GroupLowerer::groupAwareRelease(llvm::Function *plain) {
   if (fn) {
     return fn;
   }
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-  auto *type = llvm::FunctionType::get(this->lowering.builder_.getVoidTy(), {ptr}, false);
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
+  auto *type = llvm::FunctionType::get(this->lowering.builder.getVoidTy(), {ptr}, false);
   fn = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage, plain->getName() + ".g",
                               this->lowering.module_.get());
   fn->addFnAttr(llvm::Attribute::AlwaysInline);
   fn->addFnAttr(llvm::Attribute::NoUnwind);
-  llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx_, "entry", fn));
-  auto *countedBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "counted", fn);
-  auto *memberBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "member", fn);
-  auto *plainBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "plain", fn);
-  auto *doneBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "done", fn);
+  llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx, "entry", fn));
+  auto *countedBlock = llvm::BasicBlock::Create(this->lowering.ctx, "counted", fn);
+  auto *memberBlock = llvm::BasicBlock::Create(this->lowering.ctx, "member", fn);
+  auto *plainBlock = llvm::BasicBlock::Create(this->lowering.ctx, "plain", fn);
+  auto *doneBlock = llvm::BasicBlock::Create(this->lowering.ctx, "done", fn);
   llvm::Value *object = fn->getArg(0);
   b.CreateCondBr(b.CreateIsNotNull(object), countedBlock, doneBlock);
   b.SetInsertPoint(countedBlock);
   llvm::Value *count = b.CreateLoad(b.getInt64Ty(), object, "rc");
   if (this->lowering.parallel_) {
-    auto *notMemberBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "not.member", fn);
-    auto *sharedBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "shared", fn);
-    auto *lastBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "shared.last", fn);
+    auto *notMemberBlock = llvm::BasicBlock::Create(this->lowering.ctx, "not.member", fn);
+    auto *sharedBlock = llvm::BasicBlock::Create(this->lowering.ctx, "shared", fn);
+    auto *lastBlock = llvm::BasicBlock::Create(this->lowering.ctx, "shared.last", fn);
     b.CreateCondBr(b.CreateICmpSLT(count, b.getInt64(uint64_t(-(int64_t(1) << 60)))), memberBlock,
                    notMemberBlock);
     b.SetInsertPoint(notMemberBlock);
@@ -150,24 +149,24 @@ llvm::Function *GroupLowerer::groupAwareRelease(llvm::Function *plain) {
 }
 
 void GroupLowerer::retainObject(llvm::Value *object) {
-  this->lowering.builder_.CreateCall(
-      this->lowering.memory().hasCycles ? this->lowering.refRetainFn_ : this->lowering.arrRetainFn_,
-      {object});
+  this->lowering.builder.CreateCall(this->lowering.memory().hasCycles ? this->lowering.refRetainFn
+                                                                      : this->lowering.arrRetainFn,
+                                    {object});
 }
 
 llvm::Constant *GroupLowerer::groupSite() {
   llvm::Constant *frame = this->lowering.placeLowerer().frameDescriptor(
-      this->lowering.storeLoc_.isValid() ? this->lowering.storeLoc_ : this->lowering.loc_);
-  llvm::Constant *&site = this->groupSites[{frame, this->lowering.storeField_}];
+      this->lowering.storeLoc.isValid() ? this->lowering.storeLoc : this->lowering.loc_);
+  llvm::Constant *&site = this->groupSites[{frame, this->lowering.storeField}];
   if (site) {
     return site;
   }
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
-  auto *type = llvm::StructType::get(this->lowering.ctx_, {ptr, ptr, i32});
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder.getInt32Ty();
+  auto *type = llvm::StructType::get(this->lowering.ctx, {ptr, ptr, i32});
   llvm::Constant *init = llvm::ConstantStruct::get(
-      type, {frame, this->lowering.stringLowerer().utf8Constant(this->lowering.storeField_),
-             this->lowering.builder_.getInt32(uint32_t(this->lowering.storeField_.size()))});
+      type, {frame, this->lowering.stringLowerer().utf8Constant(this->lowering.storeField),
+             this->lowering.builder.getInt32(uint32_t(this->lowering.storeField.size()))});
   auto *global = new llvm::GlobalVariable(*this->lowering.module_, type, true,
                                           llvm::GlobalValue::PrivateLinkage, init, "tz.site");
   site = global;
@@ -176,13 +175,12 @@ llvm::Constant *GroupLowerer::groupSite() {
 }
 
 void GroupLowerer::noteUnstored(llvm::Value *object, const Expr *site) {
-  if (!this->lowering.debugMemory_ || !this->lowering.memory().unstoredSites.contains(site)) {
+  if (!this->lowering.debugMemory || !this->lowering.memory().unstoredSites.contains(site)) {
     return;
   }
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-  this->lowering.builder_.CreateCall(
-      this->groupFunction("tz_group_note_unstored", this->lowering.builder_.getVoidTy(),
-                          {ptr, ptr}),
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
+  this->lowering.builder.CreateCall(
+      this->groupFunction("tz_group_note_unstored", this->lowering.builder.getVoidTy(), {ptr, ptr}),
       {object, this->lowering.placeLowerer().frameDescriptor(site->loc())});
 }
 

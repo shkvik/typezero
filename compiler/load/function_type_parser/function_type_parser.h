@@ -13,7 +13,7 @@ public:
   bool parseSignatureParams(TypeRef &ref);
 
 private:
-  Parser &parser_;
+  Parser &parser;
 };
 
 }

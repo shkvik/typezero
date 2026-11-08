@@ -18,7 +18,9 @@ struct JsrVersion;
 class Resolver {
 public:
   Resolver(const Manifest &root, const Lock &old, const PrepareOptions &options)
-      : root_(root), old_(old), options_(options) {}
+      : root_(root),
+        old(old),
+        options(options) {}
 
   bool run(Lock &out);
   std::map<std::string, Manifest> locals;
@@ -27,9 +29,9 @@ private:
   static std::vector<std::string> jsrDependencies(const std::string &dir, const JsrVersion &meta);
   bool collect(std::map<std::string, std::vector<Requirement>> &reqs);
   bool updating(const std::string &id) const {
-    return options_.update &&
-           (options_.only.empty() ||
-            std::find(options_.only.begin(), options_.only.end(), id) != options_.only.end());
+    return this->options.update && (this->options.only.empty() ||
+                                    std::find(this->options.only.begin(), this->options.only.end(),
+                                              id) != this->options.only.end());
   }
   bool fits(const Locked &locked, const std::vector<Requirement> &reqs) const;
   bool choose(const std::string &id, const std::vector<Requirement> &reqs, Locked &out);
@@ -38,10 +40,10 @@ private:
   void reportSpec(const std::string &by, const Dependency *dep, const std::string &message);
 
   const Manifest &root_;
-  const Lock &old_;
-  const PrepareOptions &options_;
-  std::map<std::string, Locked> chosen_;
-  std::map<std::string, JsrVersions> versions_;
+  const Lock &old;
+  const PrepareOptions &options;
+  std::map<std::string, Locked> chosen;
+  std::map<std::string, JsrVersions> versions;
 };
 
 }

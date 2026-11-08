@@ -1,11 +1,11 @@
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
-#include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
-#include "compiler/library/json/json_lowerer/json_lowerer.h"
-#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/functions/env_lowerer/env_lowerer.h"
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
+#include "compiler/lower/library/decimal/decimal_lowerer/decimal_lowerer.h"
+#include "compiler/lower/library/json/json_lowerer/json_lowerer.h"
+#include "compiler/lower/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/memory/group_lowerer/group_lowerer.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
@@ -31,19 +31,19 @@ void RefCounts::retainValue(llvm::Value *value, const Type *type) {
   }
   switch (type->kind()) {
   case Type::Kind::String:
-    this->lowering.builder_.CreateCall(this->lowering.retainFn_, {value});
+    this->lowering.builder.CreateCall(this->lowering.retainFn, {value});
     break;
   case Type::Kind::Array:
-    this->lowering.builder_.CreateCall(this->lowering.memory().refMayCarryMember(type)
-                                           ? this->lowering.refRetainFn_
-                                           : this->lowering.arrRetainFn_,
-                                       {value});
+    this->lowering.builder.CreateCall(this->lowering.memory().refMayCarryMember(type)
+                                          ? this->lowering.refRetainFn
+                                          : this->lowering.arrRetainFn,
+                                      {value});
     break;
   case Type::Kind::Function:
-    this->lowering.builder_.CreateCall(this->lowering.memory().refMayCarryMember(type)
-                                           ? this->lowering.refRetainFn_
-                                           : this->lowering.plainObjRetainFn_,
-                                       {this->lowering.builder_.CreateExtractValue(value, 1)});
+    this->lowering.builder.CreateCall(this->lowering.memory().refMayCarryMember(type)
+                                          ? this->lowering.refRetainFn
+                                          : this->lowering.plainObjRetainFn,
+                                      {this->lowering.builder.CreateExtractValue(value, 1)});
     break;
   case Type::Kind::Object:
   case Type::Kind::Iterator:
@@ -51,21 +51,21 @@ void RefCounts::retainValue(llvm::Value *value, const Type *type) {
   case Type::Kind::Dict:
   case Type::Kind::Promise:
   case Type::Kind::Unknown:
-    this->lowering.builder_.CreateCall(this->lowering.memory().refMayCarryMember(type)
-                                           ? this->lowering.refRetainFn_
-                                           : this->lowering.arrRetainFn_,
-                                       {value});
+    this->lowering.builder.CreateCall(this->lowering.memory().refMayCarryMember(type)
+                                          ? this->lowering.refRetainFn
+                                          : this->lowering.arrRetainFn,
+                                      {value});
     break;
   case Type::Kind::Decimal:
-    this->lowering.builder_.CreateCall(this->lowering.decimalLowerer().decimalRefCount(true),
-                                       {value});
+    this->lowering.builder.CreateCall(this->lowering.decimalLowerer().decimalRefCount(true),
+                                      {value});
     break;
   case Type::Kind::Union:
     if (UnionLayout::isObjectUnion(type)) {
-      this->lowering.builder_.CreateCall(this->lowering.memory().refMayCarryMember(type)
-                                             ? this->lowering.refRetainFn_
-                                             : this->lowering.arrRetainFn_,
-                                         {value});
+      this->lowering.builder.CreateCall(this->lowering.memory().refMayCarryMember(type)
+                                            ? this->lowering.refRetainFn
+                                            : this->lowering.arrRetainFn,
+                                        {value});
     } else if (type->isTagged()) {
       this->lowering.unionLayout().countTagged(value, type, true);
     }
@@ -95,66 +95,65 @@ void RefCounts::releaseValue(llvm::Value *value, const Type *type) {
   }
   switch (type->kind()) {
   case Type::Kind::String:
-    this->lowering.builder_.CreateCall(this->lowering.releaseFn_, {value});
+    this->lowering.builder.CreateCall(this->lowering.releaseFn, {value});
     break;
   case Type::Kind::Array:
-    this->lowering.builder_.CreateCall(
+    this->lowering.builder.CreateCall(
         this->lowering.memory().refMayCarryMember(type)
-            ? this->lowering.groupLowerer().groupAwareRelease(this->lowering.arrReleaseFn_)
-            : this->lowering.arrReleaseFn_,
+            ? this->lowering.groupLowerer().groupAwareRelease(this->lowering.arrReleaseFn)
+            : this->lowering.arrReleaseFn,
         {value});
     break;
   case Type::Kind::Function:
-    this->lowering.builder_.CreateCall(
+    this->lowering.builder.CreateCall(
         this->lowering.memory().refMayCarryMember(type)
-            ? this->lowering.groupLowerer().groupAwareRelease(this->lowering.plainObjReleaseFn_)
-            : this->lowering.plainObjReleaseFn_,
-        {this->lowering.builder_.CreateExtractValue(value, 1)});
+            ? this->lowering.groupLowerer().groupAwareRelease(this->lowering.plainObjReleaseFn)
+            : this->lowering.plainObjReleaseFn,
+        {this->lowering.builder.CreateExtractValue(value, 1)});
     break;
   case Type::Kind::Object: {
     llvm::Function *release = type->isAnyObject() || this->lowering.hasSubtypes(type) ||
                                       type->isTimer() || type->isRuntimeObject() ||
                                       type->isCrypto() ||
                                       (type->classDecl() && type->classDecl()->builtin())
-                                  ? this->lowering.plainInstanceReleaseFn_
+                                  ? this->lowering.plainInstanceReleaseFn
                                   : this->lowering.objectLayouts().objectLayout(type).release;
-    this->lowering.builder_.CreateCall(
-        this->lowering.memory().refMayCarryMember(type)
-            ? this->lowering.groupLowerer().groupAwareRelease(release)
-            : release,
-        {value});
+    this->lowering.builder.CreateCall(this->lowering.memory().refMayCarryMember(type)
+                                          ? this->lowering.groupLowerer().groupAwareRelease(release)
+                                          : release,
+                                      {value});
     break;
   }
   case Type::Kind::Decimal:
-    this->lowering.builder_.CreateCall(this->lowering.decimalLowerer().decimalRefCount(false),
-                                       {value});
+    this->lowering.builder.CreateCall(this->lowering.decimalLowerer().decimalRefCount(false),
+                                      {value});
     break;
   case Type::Kind::Iterator:
   case Type::Kind::Dict:
   case Type::Kind::Promise:
   case Type::Kind::Unknown:
-    this->lowering.builder_.CreateCall(this->lowering.memory().refMayCarryMember(type)
-                                           ? this->lowering.groupLowerer().groupAwareRelease(
-                                                 this->lowering.plainInstanceReleaseFn_)
-                                           : this->lowering.plainInstanceReleaseFn_,
-                                       {value});
+    this->lowering.builder.CreateCall(
+        this->lowering.memory().refMayCarryMember(type)
+            ? this->lowering.groupLowerer().groupAwareRelease(this->lowering.plainInstanceReleaseFn)
+            : this->lowering.plainInstanceReleaseFn,
+        {value});
     break;
   case Type::Kind::Union:
     if (UnionLayout::isObjectUnion(type)) {
-      this->lowering.builder_.CreateCall(this->lowering.memory().refMayCarryMember(type)
-                                             ? this->lowering.groupLowerer().groupAwareRelease(
-                                                   this->lowering.plainInstanceReleaseFn_)
-                                             : this->lowering.plainInstanceReleaseFn_,
-                                         {value});
+      this->lowering.builder.CreateCall(this->lowering.memory().refMayCarryMember(type)
+                                            ? this->lowering.groupLowerer().groupAwareRelease(
+                                                  this->lowering.plainInstanceReleaseFn)
+                                            : this->lowering.plainInstanceReleaseFn,
+                                        {value});
     } else if (type->isTagged()) {
       this->lowering.unionLayout().countTagged(value, type, false);
     }
     break;
   case Type::Kind::Json:
-    this->lowering.builder_.CreateCall(
+    this->lowering.builder.CreateCall(
         this->lowering.jsonLowerer().jsonFunction("tz_json_release_value",
-                                                  this->lowering.builder_.getVoidTy(),
-                                                  {this->lowering.builder_.getPtrTy()}),
+                                                  this->lowering.builder.getVoidTy(),
+                                                  {this->lowering.builder.getPtrTy()}),
         {value});
     break;
   case Type::Kind::Optional:
@@ -209,7 +208,7 @@ llvm::Value *RefCounts::emitBorrowed(Expr *expr) {
       return nullptr;
     }
     if (conv->type->isString()) {
-      return this->lowering.builder_.CreateSelect(
+      return this->lowering.builder.CreateSelect(
           this->lowering.optionalLowerer().optionalHas(value, conv->operand->type),
           this->lowering.optionalLowerer().optionalValue(value, conv->operand->type),
           this->lowering.stringLowerer().stringLiteral(u"undefined"));
@@ -255,7 +254,7 @@ llvm::Value *RefCounts::emitBorrowed(Expr *expr) {
     return nullptr;
   }
 
-  return this->lowering.builder_.CreateLoad(
+  return this->lowering.builder.CreateLoad(
       this->lowering.moduleBuilder().lower(member->type),
       this->lowering.objectLayouts().fieldAddress(object, member->object->type, member->name),
       member->name);

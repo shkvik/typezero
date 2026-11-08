@@ -15,7 +15,7 @@ public:
   std::vector<std::string> decisionLines(unsigned piece) const;
 
 private:
-  Analysis &analysis_;
+  Analysis &analysis;
 };
 
 }

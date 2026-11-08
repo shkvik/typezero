@@ -83,24 +83,24 @@ void ProjectText::collect(llvm::StringRef dir, llvm::StringRef extension,
 }
 
 void ProjectText::list() {
-  if (listed_) {
+  if (this->listed) {
     return;
   }
   llvm::SmallString<256> docs(root_);
   path::append(docs, "docs");
-  ProjectText::collect(docs, ".md", docFiles_);
+  ProjectText::collect(docs, ".md", this->docFiles);
   llvm::SmallString<256> tests(root_);
   path::append(tests, "tests");
-  ProjectText::collect(tests, ".tz", testFiles_);
-  listed_ = true;
+  ProjectText::collect(tests, ".tz", this->testFiles);
+  this->listed = true;
 }
 
 const std::vector<std::string> &ProjectText::lines(const std::string &file) {
-  auto found = cache_.find(file);
-  if (found != cache_.end()) {
+  auto found = this->cache.find(file);
+  if (found != this->cache.end()) {
     return found->second;
   }
-  std::vector<std::string> &out = cache_[file];
+  std::vector<std::string> &out = this->cache[file];
   if (auto buffer = llvm::MemoryBuffer::getFile(file)) {
     llvm::SmallVector<llvm::StringRef, 0> split;
     (*buffer)->getBuffer().split(split, '\n');
@@ -125,7 +125,7 @@ std::vector<TextMention> ProjectText::docs(llvm::StringRef name, llvm::StringRef
   }
   words.push_back(name);
   for (llvm::StringRef word : words) {
-    for (const std::string &file : docFiles_) {
+    for (const std::string &file : this->docFiles) {
       std::string heading;
       const std::vector<std::string> &text = lines(file);
       for (size_t i = 0; i < text.size() && found.size() < limit; ++i) {
@@ -159,7 +159,7 @@ std::vector<std::string> ProjectText::tests(llvm::StringRef name, size_t limit) 
     return found;
   }
   list();
-  for (const std::string &file : testFiles_) {
+  for (const std::string &file : this->testFiles) {
     if (found.size() >= limit) {
       break;
     }

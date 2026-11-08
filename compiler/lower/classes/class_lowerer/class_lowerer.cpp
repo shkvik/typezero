@@ -54,20 +54,20 @@ llvm::Value *ClassLowerer::allocInstance(const ClassDecl *cls, bool member) {
   if (member) {
     object = this->lowering.groupLowerer().allocMember(size, "object");
   } else {
-    object = this->lowering.builder_.CreateCall(this->lowering.rt_.objAlloc,
-                                                {this->lowering.builder_.getInt64(size)}, "object");
-    this->lowering.builder_.CreateStore(
-        this->lowering.builder_.getInt64(1),
-        this->lowering.builder_.CreateStructGEP(layout.type, object, 0));
+    object = this->lowering.builder.CreateCall(this->lowering.rt_.objAlloc,
+                                               {this->lowering.builder.getInt64(size)}, "object");
+    this->lowering.builder.CreateStore(
+        this->lowering.builder.getInt64(1),
+        this->lowering.builder.CreateStructGEP(layout.type, object, 0));
   }
-  this->lowering.builder_.CreateStore(
+  this->lowering.builder.CreateStore(
       this->lowering.classDescriptors().classDescriptor(cls),
-      this->lowering.builder_.CreateStructGEP(layout.type, object, 1));
+      this->lowering.builder.CreateStructGEP(layout.type, object, 1));
   if (size > 16) {
-    this->lowering.builder_.CreateMemSet(this->lowering.builder_.CreateConstInBoundsGEP1_64(
-                                             this->lowering.builder_.getInt8Ty(), object, 16),
-                                         this->lowering.builder_.getInt8(0), size - 16,
-                                         llvm::MaybeAlign(8));
+    this->lowering.builder.CreateMemSet(this->lowering.builder.CreateConstInBoundsGEP1_64(
+                                            this->lowering.builder.getInt8Ty(), object, 16),
+                                        this->lowering.builder.getInt8(0), size - 16,
+                                        llvm::MaybeAlign(8));
   }
 
   return object;
@@ -98,25 +98,25 @@ void ClassLowerer::emitConstruct(llvm::Value *object, const ClassDecl *cls, cons
   if (ctor && ctor->decl->cls() == cls) {
     std::vector<llvm::Value *> all{object};
     if (!cls->parent && cls->init) {
-      this->lowering.builder_.CreateCall(this->lowering.classDescriptors().methodCode(cls->init),
-                                         {object});
+      this->lowering.builder.CreateCall(this->lowering.classDescriptors().methodCode(cls->init),
+                                        {object});
     }
     all.insert(all.end(), args.begin(), args.end());
-    this->lowering.builder_.CreateCall(this->lowering.classDescriptors().methodCode(ctor->decl),
-                                       all);
+    this->lowering.builder.CreateCall(this->lowering.classDescriptors().methodCode(ctor->decl),
+                                      all);
     return;
   }
   if (cls->parent) {
     this->emitConstruct(object, cls->parent, ctor, args);
   }
   if (cls->init) {
-    this->lowering.builder_.CreateCall(this->lowering.classDescriptors().methodCode(cls->init),
-                                       {object});
+    this->lowering.builder.CreateCall(this->lowering.classDescriptors().methodCode(cls->init),
+                                      {object});
   }
 }
 
 llvm::Value *ClassLowerer::emitSuperCall(CallExpr *call) {
-  const ClassDecl *cls = this->lowering.currentFn_->cls();
+  const ClassDecl *cls = this->lowering.currentFn->cls();
   std::vector<llvm::Value *> args = this->lowering.exprLowerer().emitExprs(call->args);
   const FuncSymbol *sym = call->method();
   if (sym) {
@@ -124,10 +124,10 @@ llvm::Value *ClassLowerer::emitSuperCall(CallExpr *call) {
       args.push_back(this->lowering.optionalLowerer().undefinedValue(sym->params[i]));
     }
   }
-  this->emitConstruct(this->lowering.envParam_, cls->parent, call->method(), args);
+  this->emitConstruct(this->lowering.envParam, cls->parent, call->method(), args);
   if (cls->init) {
-    this->lowering.builder_.CreateCall(this->lowering.classDescriptors().methodCode(cls->init),
-                                       {this->lowering.envParam_});
+    this->lowering.builder.CreateCall(this->lowering.classDescriptors().methodCode(cls->init),
+                                      {this->lowering.envParam});
   }
 
   return nullptr;
@@ -150,12 +150,12 @@ llvm::Value *ClassLowerer::emitMethodCall(CallExpr *call) {
   }
   llvm::CallInst *result =
       call->virtualCall()
-          ? this->lowering.builder_.CreateCall(this->lowering.closureLowerer().closureFnType(
-                                                   ClosureLowerer::functionTypeOf(method)),
-                                               this->lowering.inheritLowerer().vtableEntry(
-                                                   self.value, method->decl->slot(), false),
-                                               args)
-          : this->lowering.builder_.CreateCall(
+          ? this->lowering.builder.CreateCall(this->lowering.closureLowerer().closureFnType(
+                                                  ClosureLowerer::functionTypeOf(method)),
+                                              this->lowering.inheritLowerer().vtableEntry(
+                                                  self.value, method->decl->slot(), false),
+                                              args)
+          : this->lowering.builder.CreateCall(
                 this->lowering.classDescriptors().methodCode(method->decl), args);
   this->lowering.refCounts().dropOperand(self);
 
@@ -180,30 +180,30 @@ llvm::Value *ClassLowerer::emitInstanceOf(BinaryExpr *bin) {
   llvm::Value *last = nullptr;
   if (bin->rhs->type->isConstructor()) {
     llvm::Value *rhs = this->lowering.exprLowerer().emitExpr(bin->rhs);
-    first = this->lowering.builder_.CreateLoad(this->lowering.builder_.getInt32Ty(),
-                                               this->lowering.builder_.CreateConstInBoundsGEP1_64(
-                                                   this->lowering.builder_.getInt8Ty(), rhs, 24),
-                                               "first");
-    last = this->lowering.builder_.CreateLoad(this->lowering.builder_.getInt32Ty(),
-                                              this->lowering.builder_.CreateConstInBoundsGEP1_64(
-                                                  this->lowering.builder_.getInt8Ty(), rhs, 28),
-                                              "last");
+    first = this->lowering.builder.CreateLoad(this->lowering.builder.getInt32Ty(),
+                                              this->lowering.builder.CreateConstInBoundsGEP1_64(
+                                                  this->lowering.builder.getInt8Ty(), rhs, 24),
+                                              "first");
+    last = this->lowering.builder.CreateLoad(this->lowering.builder.getInt32Ty(),
+                                             this->lowering.builder.CreateConstInBoundsGEP1_64(
+                                                 this->lowering.builder.getInt8Ty(), rhs, 28),
+                                             "last");
   }
   auto classMatches = [&](llvm::Value *object) {
     if (first) {
       llvm::Value *descriptor =
-          this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(),
-                                             this->lowering.builder_.CreateConstInBoundsGEP1_64(
-                                                 this->lowering.builder_.getInt8Ty(), object, 8),
-                                             "descriptor");
-      llvm::Value *id = this->lowering.builder_.CreateLoad(
-          this->lowering.builder_.getInt32Ty(),
-          this->lowering.builder_.CreateStructGEP(this->lowering.layoutDescTy_, descriptor, 6),
+          this->lowering.builder.CreateLoad(this->lowering.builder.getPtrTy(),
+                                            this->lowering.builder.CreateConstInBoundsGEP1_64(
+                                                this->lowering.builder.getInt8Ty(), object, 8),
+                                            "descriptor");
+      llvm::Value *id = this->lowering.builder.CreateLoad(
+          this->lowering.builder.getInt32Ty(),
+          this->lowering.builder.CreateStructGEP(this->lowering.layoutDescTy, descriptor, 6),
           "class");
-      return this->lowering.builder_.CreateAnd(
-          this->lowering.builder_.CreateICmpNE(first, this->lowering.builder_.getInt32(0)),
-          this->lowering.builder_.CreateICmpULE(this->lowering.builder_.CreateSub(id, first),
-                                                this->lowering.builder_.CreateSub(last, first)));
+      return this->lowering.builder.CreateAnd(
+          this->lowering.builder.CreateICmpNE(first, this->lowering.builder.getInt32(0)),
+          this->lowering.builder.CreateICmpULE(this->lowering.builder.CreateSub(id, first),
+                                               this->lowering.builder.CreateSub(last, first)));
     }
     if (!cls) {
       const Type *those = bin->rhs->type;
@@ -212,21 +212,21 @@ llvm::Value *ClassLowerer::emitInstanceOf(BinaryExpr *bin) {
           those->isUnion() ? those->members() : llvm::ArrayRef<const Type *>(those));
     }
     llvm::Value *descriptor =
-        this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(),
-                                           this->lowering.builder_.CreateConstInBoundsGEP1_64(
-                                               this->lowering.builder_.getInt8Ty(), object, 8),
-                                           "descriptor");
-    llvm::Value *id = this->lowering.builder_.CreateLoad(
-        this->lowering.builder_.getInt32Ty(),
-        this->lowering.builder_.CreateStructGEP(this->lowering.layoutDescTy_, descriptor, 6),
+        this->lowering.builder.CreateLoad(this->lowering.builder.getPtrTy(),
+                                          this->lowering.builder.CreateConstInBoundsGEP1_64(
+                                              this->lowering.builder.getInt8Ty(), object, 8),
+                                          "descriptor");
+    llvm::Value *id = this->lowering.builder.CreateLoad(
+        this->lowering.builder.getInt32Ty(),
+        this->lowering.builder.CreateStructGEP(this->lowering.layoutDescTy, descriptor, 6),
         "class");
     if (cls->lastId <= cls->id) {
-      return this->lowering.builder_.CreateICmpEQ(id, this->lowering.builder_.getInt32(cls->id));
+      return this->lowering.builder.CreateICmpEQ(id, this->lowering.builder.getInt32(cls->id));
     }
 
-    return this->lowering.builder_.CreateICmpULE(
-        this->lowering.builder_.CreateSub(id, this->lowering.builder_.getInt32(cls->id)),
-        this->lowering.builder_.getInt32(cls->lastId - cls->id));
+    return this->lowering.builder.CreateICmpULE(
+        this->lowering.builder.CreateSub(id, this->lowering.builder.getInt32(cls->id)),
+        this->lowering.builder.getInt32(cls->lastId - cls->id));
   };
   llvm::Value *result;
   if (type->nonOptional()->isTagged()) {
@@ -234,20 +234,20 @@ llvm::Value *ClassLowerer::emitInstanceOf(BinaryExpr *bin) {
     const Type *u = type->nonOptional();
     llvm::BasicBlock *testBlock = this->lowering.functionFrame().newBlock("instanceof.test");
     llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("instanceof.end");
-    llvm::BasicBlock *entry = this->lowering.builder_.GetInsertBlock();
-    this->lowering.builder_.CreateCondBr(
-        this->lowering.builder_.CreateICmpEQ(
+    llvm::BasicBlock *entry = this->lowering.builder.GetInsertBlock();
+    this->lowering.builder.CreateCondBr(
+        this->lowering.builder.CreateICmpEQ(
             this->lowering.unionLayout().unionTag(tagged),
-            this->lowering.builder_.getInt32(unsigned(UnionSlot::Object))),
+            this->lowering.builder.getInt32(unsigned(UnionSlot::Object))),
         testBlock, endBlock);
     this->lowering.functionFrame().switchTo(testBlock);
     llvm::Value *matches =
         classMatches(this->lowering.unionLayout().taggedPart(tagged, u, UnionSlot::Object));
-    llvm::BasicBlock *testEnd = this->lowering.builder_.GetInsertBlock();
-    this->lowering.builder_.CreateBr(endBlock);
+    llvm::BasicBlock *testEnd = this->lowering.builder.GetInsertBlock();
+    this->lowering.builder.CreateBr(endBlock);
     this->lowering.functionFrame().switchTo(endBlock);
-    llvm::PHINode *phi = this->lowering.builder_.CreatePHI(this->lowering.builder_.getInt1Ty(), 2);
-    phi->addIncoming(this->lowering.builder_.getFalse(), entry);
+    llvm::PHINode *phi = this->lowering.builder.CreatePHI(this->lowering.builder.getInt1Ty(), 2);
+    phi->addIncoming(this->lowering.builder.getFalse(), entry);
     phi->addIncoming(matches, testEnd);
     result = phi;
   } else if (!type->isOptional() && !type->isUnknown()) {
@@ -256,16 +256,16 @@ llvm::Value *ClassLowerer::emitInstanceOf(BinaryExpr *bin) {
     llvm::Value *object = this->lowering.optionalLowerer().optionalValue(value.value, type);
     llvm::BasicBlock *testBlock = this->lowering.functionFrame().newBlock("instanceof.test");
     llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("instanceof.end");
-    llvm::BasicBlock *entry = this->lowering.builder_.GetInsertBlock();
-    this->lowering.builder_.CreateCondBr(
+    llvm::BasicBlock *entry = this->lowering.builder.GetInsertBlock();
+    this->lowering.builder.CreateCondBr(
         this->lowering.optionalLowerer().optionalHas(value.value, type), testBlock, endBlock);
     this->lowering.functionFrame().switchTo(testBlock);
     llvm::Value *matches = classMatches(object);
-    llvm::BasicBlock *testEnd = this->lowering.builder_.GetInsertBlock();
-    this->lowering.builder_.CreateBr(endBlock);
+    llvm::BasicBlock *testEnd = this->lowering.builder.GetInsertBlock();
+    this->lowering.builder.CreateBr(endBlock);
     this->lowering.functionFrame().switchTo(endBlock);
-    llvm::PHINode *phi = this->lowering.builder_.CreatePHI(this->lowering.builder_.getInt1Ty(), 2);
-    phi->addIncoming(this->lowering.builder_.getFalse(), entry);
+    llvm::PHINode *phi = this->lowering.builder.CreatePHI(this->lowering.builder.getInt1Ty(), 2);
+    phi->addIncoming(this->lowering.builder.getFalse(), entry);
     phi->addIncoming(matches, testEnd);
     result = phi;
   }
@@ -284,15 +284,15 @@ llvm::Value *ClassLowerer::emitMethodLiteral(ObjectLitExpr *lit) {
   if (member) {
     object = this->lowering.groupLowerer().allocMember(size, "object");
   } else {
-    object = this->lowering.builder_.CreateCall(this->lowering.rt_.objAlloc,
-                                                {this->lowering.builder_.getInt64(size)}, "object");
-    this->lowering.builder_.CreateStore(
-        this->lowering.builder_.getInt64(1),
-        this->lowering.builder_.CreateStructGEP(layout.type, object, 0));
+    object = this->lowering.builder.CreateCall(this->lowering.rt_.objAlloc,
+                                               {this->lowering.builder.getInt64(size)}, "object");
+    this->lowering.builder.CreateStore(
+        this->lowering.builder.getInt64(1),
+        this->lowering.builder.CreateStructGEP(layout.type, object, 0));
   }
-  this->lowering.builder_.CreateStore(
+  this->lowering.builder.CreateStore(
       this->lowering.classDescriptors().classDescriptor(cls),
-      this->lowering.builder_.CreateStructGEP(layout.type, object, 1));
+      this->lowering.builder.CreateStructGEP(layout.type, object, 1));
   this->lowering.groupLowerer().noteUnstored(object, lit);
   std::vector<std::pair<llvm::Value *, const Type *>> fields;
   for (const ObjectLitExpr::Property &prop : lit->props) {
@@ -300,7 +300,7 @@ llvm::Value *ClassLowerer::emitMethodLiteral(ObjectLitExpr *lit) {
       continue;
     }
     llvm::Value *value = this->lowering.exprLowerer().emitExpr(prop.value);
-    this->lowering.builder_.CreateStore(
+    this->lowering.builder.CreateStore(
         value, this->lowering.objectLayouts().fieldAddress(object, type, prop.name));
     fields.push_back({value, type->field(prop.name)->type});
   }
@@ -311,25 +311,25 @@ llvm::Value *ClassLowerer::emitMethodLiteral(ObjectLitExpr *lit) {
     llvm::Value *value;
     if (var->boxed()) {
       value = this->lowering.envLowerer().boxPointer(var);
-      this->lowering.builder_.CreateCall(this->lowering.objRetainFn_, {value});
+      this->lowering.builder.CreateCall(this->lowering.objRetainFn, {value});
       boxes.push_back(value);
     } else {
       value = this->lowering.envLowerer().emitVarValue(var, false);
       fields.push_back({value, ClosureLowerer::typeOf(var)});
     }
-    this->lowering.builder_.CreateStore(
-        value, this->lowering.builder_.CreateStructGEP(layout.type, object,
-                                                       unsigned(layout.captures + i)));
+    this->lowering.builder.CreateStore(
+        value,
+        this->lowering.builder.CreateStructGEP(layout.type, object, unsigned(layout.captures + i)));
   }
   if (member) {
     for (auto [value, fieldType] : fields) {
       this->lowering.storeLowerer().groupStore(object, value, fieldType);
     }
     for (llvm::Value *box : boxes) {
-      this->lowering.builder_.CreateCall(
+      this->lowering.builder.CreateCall(
           this->lowering.groupLowerer().groupFunction(
-              "tz_group_store", this->lowering.builder_.getVoidTy(),
-              {this->lowering.builder_.getPtrTy(), this->lowering.builder_.getPtrTy()}),
+              "tz_group_store", this->lowering.builder.getVoidTy(),
+              {this->lowering.builder.getPtrTy(), this->lowering.builder.getPtrTy()}),
           {object, box});
     }
   }

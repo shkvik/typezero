@@ -1,7 +1,4 @@
 #include "compiler/lower/module_builder/module_builder.h"
-#include "compiler/library/json/json_writers/json_writers.h"
-#include "compiler/library/reflect/reflect_lowerer/reflect_lowerer.h"
-#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/classes/class_descriptors/class_descriptors.h"
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
@@ -12,6 +9,9 @@
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
 #include "compiler/lower/functions/tail_call_lowerer/tail_call_lowerer.h"
 #include "compiler/lower/iterators/generator_lowerer/generator_lowerer.h"
+#include "compiler/lower/library/json/json_writers/json_writers.h"
+#include "compiler/lower/library/reflect/reflect_lowerer/reflect_lowerer.h"
+#include "compiler/lower/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/memory/memory_debug/memory_debug.h"
 #include "compiler/lower/memory/publish_lowerer/publish_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
@@ -35,7 +35,7 @@ ModuleBuilder::ModuleBuilder(Lowering &owner)
     : lowering(owner) {}
 
 std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
-  this->lowering.comparesFunctions_ = file.comparesFunctions;
+  this->lowering.comparesFunctions = file.inventory.comparesFunctions;
   this->lowering.debugInfo().start(file);
   if (this->lowering.parallel_) {
     for (const Module *module : file.modules) {
@@ -47,7 +47,7 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
         if (cls) {
           for (const ClassField &f : cls->fields) {
             if (f.isStatic() && f.var()) {
-              this->lowering.libraryState_.insert(f.var());
+              this->lowering.libraryState.insert(f.var());
             }
           }
           continue;
@@ -58,27 +58,27 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
             const Type *t = d.sym->type;
             bool value = t && (t->isNumeric() || t->isBool() || t->isString());
             if (d.sym->usedInFunction() && !(d.sym->isConst && value)) {
-              this->lowering.libraryState_.insert(d.sym);
+              this->lowering.libraryState.insert(d.sym);
             }
           }
         }
       }
     }
   }
-  this->lowering.usesTls_ = file.usesTls;
-  this->lowering.nativeError_ = file.nativeError;
-  this->lowering.subtypes_ = file.subtypes;
-  this->lowering.usesAsync_ = file.usesAsync;
-  this->lowering.esModule_ = file.topLevelAwait;
+  this->lowering.usesTls = file.inventory.usesTls;
+  this->lowering.nativeError = file.inventory.nativeError;
+  this->lowering.subtypes = file.inventory.subtypes;
+  this->lowering.usesAsync = file.inventory.usesAsync;
+  this->lowering.esModule = file.inventory.topLevelAwait;
   for (const Module *module : file.modules) {
     if (module->isEntry &&
         (llvm::any_of(module->file.imports, [](const ImportDecl &i) { return !i.implicit; }) ||
          !module->file.exports.empty())) {
-      this->lowering.esModule_ = true;
+      this->lowering.esModule = true;
     }
   }
   this->lowering.runtimeFunctions().declareRuntime();
-  this->lowering.debugMemory_ = getenv("TZ_CHECK_LEAKS") != nullptr;
+  this->lowering.debugMemory = getenv("TZ_CHECK_LEAKS") != nullptr;
   this->lowering.runtimeFunctions().defineRefCountHelpers();
   this->lowering.inheritLowerer().prepareDispatch(file);
   for (const Module *module : file.modules) {
@@ -94,7 +94,7 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
       prefix += (part == ".." ? std::string("up") : part.str()) + ".";
     }
     for (const Stmt *item : module->file.items) {
-      this->lowering.symbolPrefixes_[item] = prefix;
+      this->lowering.symbolPrefixes[item] = prefix;
     }
   }
   std::vector<FunctionDecl *> functions;
@@ -118,8 +118,9 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
       }
     }
   }
-  functions.insert(functions.end(), file.instances.begin(), file.instances.end());
-  this->lowering.emittedClasses_.assign(classes.begin(), classes.end());
+  functions.insert(functions.end(), file.inventory.instances.begin(),
+                   file.inventory.instances.end());
+  this->lowering.emittedClasses.assign(classes.begin(), classes.end());
   for (FunctionDecl *fn : functions) {
     this->lowering.functionBuilder().declareFunction(fn);
   }
@@ -135,7 +136,7 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
     this->lowering.classDescriptors().emitMethods(cls);
   }
   this->emitMain(file);
-  while (!this->lowering.pendingClosures_.empty() || !this->lowering.pendingIterators_.empty()) {
+  while (!this->lowering.pendingClosures.empty() || !this->lowering.pendingIterators.empty()) {
     this->lowering.closureLowerer().emitPendingClosures();
     this->lowering.generatorLowerer().emitPendingIterators();
   }
@@ -152,50 +153,50 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
 llvm::Type *ModuleBuilder::lower(const Type *type) {
   switch (type->kind()) {
   case Type::Kind::Void:
-    return this->lowering.builder_.getVoidTy();
+    return this->lowering.builder.getVoidTy();
   case Type::Kind::Undefined:
-    return this->lowering.builder_.getInt1Ty();
+    return this->lowering.builder.getInt1Ty();
   case Type::Kind::Bool:
-    return this->lowering.builder_.getInt1Ty();
+    return this->lowering.builder.getInt1Ty();
   case Type::Kind::Int:
-    return this->lowering.builder_.getIntNTy(type->bitWidth());
+    return this->lowering.builder.getIntNTy(type->bitWidth());
   case Type::Kind::Double:
-    return this->lowering.builder_.getDoubleTy();
+    return this->lowering.builder.getDoubleTy();
   case Type::Kind::Decimal:
-    return this->lowering.decTy_;
+    return this->lowering.decTy;
   case Type::Kind::String:
-    return this->lowering.strTy_;
+    return this->lowering.strTy;
   case Type::Kind::Array:
-    return this->lowering.builder_.getPtrTy();
+    return this->lowering.builder.getPtrTy();
   case Type::Kind::Optional:
     if (UnionLayout::zeroIsUndefined(type->inner())) {
       return this->lower(type->inner());
     }
-    return llvm::StructType::get(this->lowering.ctx_,
-                                 {this->lower(type->inner()), this->lowering.builder_.getInt1Ty()});
+    return llvm::StructType::get(this->lowering.ctx,
+                                 {this->lower(type->inner()), this->lowering.builder.getInt1Ty()});
   case Type::Kind::Literal:
   case Type::Kind::Union:
     return this->lowering.unionLayout().lowerUnion(type);
   case Type::Kind::Function:
-    return this->lowering.fnTy_;
+    return this->lowering.fnTy;
   case Type::Kind::Object:
-    return this->lowering.builder_.getPtrTy();
+    return this->lowering.builder.getPtrTy();
   case Type::Kind::Result:
     return this->lowering.resultLowerer().resultLayout(type).type;
   case Type::Kind::Never:
-    return llvm::StructType::get(this->lowering.ctx_);
+    return llvm::StructType::get(this->lowering.ctx);
   case Type::Kind::Iterator:
-    return this->lowering.builder_.getPtrTy();
+    return this->lowering.builder.getPtrTy();
   case Type::Kind::Json:
-    return this->lowering.builder_.getPtrTy();
+    return this->lowering.builder.getPtrTy();
   case Type::Kind::Dict:
-    return this->lowering.builder_.getPtrTy();
+    return this->lowering.builder.getPtrTy();
   case Type::Kind::Promise:
-    return this->lowering.builder_.getPtrTy();
+    return this->lowering.builder.getPtrTy();
   case Type::Kind::Unknown:
-    return this->lowering.builder_.getPtrTy();
+    return this->lowering.builder.getPtrTy();
   case Type::Kind::ClassRef:
-    return this->lowering.builder_.getPtrTy();
+    return this->lowering.builder.getPtrTy();
   case Type::Kind::Error:
   case Type::Kind::Param:
     break;
@@ -212,14 +213,14 @@ void ModuleBuilder::declareGlobals(SourceFile &file) {
           continue;
         }
         llvm::Type *type = this->lower(f.var()->type);
-        this->lowering.globals_[f.var()] =
+        this->lowering.globals[f.var()] =
             cls->usedAsValue
                 ? this->lowering.unknownLowerer().staticFieldAddress(cls, f.var())
                 : new llvm::GlobalVariable(
                       *this->lowering.module_, type, false, llvm::GlobalValue::InternalLinkage,
                       llvm::Constant::getNullValue(type),
-                      "tz." + this->lowering.symbolPrefixes_.lookup(cls) + f.var()->name);
-        this->lowering.debugInfo().declareGlobal(f.var(), this->lowering.globals_[f.var()]);
+                      "tz." + this->lowering.symbolPrefixes.lookup(cls) + f.var()->name);
+        this->lowering.debugInfo().declareGlobal(f.var(), this->lowering.globals[f.var()]);
         if (f.var()->type->isManaged()) {
           this->managedGlobals.push_back(f.var());
         }
@@ -230,11 +231,11 @@ void ModuleBuilder::declareGlobals(SourceFile &file) {
           llvm::Constant *adapter =
               cast<llvm::Constant>(this->lowering.closureLowerer().makeFunctionValue(
                   this->lowering.decoratorLowerer().implAdapterInfo(fn),
-                  llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy())));
-          this->lowering.globals_[impl] =
+                  llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy())));
+          this->lowering.globals[impl] =
               new llvm::GlobalVariable(*this->lowering.module_, this->lower(impl->type), false,
                                        llvm::GlobalValue::InternalLinkage, adapter,
-                                       "tz." + this->lowering.symbolPrefixes_.lookup(cls) +
+                                       "tz." + this->lowering.symbolPrefixes.lookup(cls) +
                                            cls->name.str() + "." + fn->name.str() + ".impl");
           this->managedGlobals.push_back(impl);
         }
@@ -250,11 +251,11 @@ void ModuleBuilder::declareGlobals(SourceFile &file) {
         continue;
       }
       llvm::Type *type = this->lower(d.sym->type);
-      this->lowering.globals_[d.sym] = new llvm::GlobalVariable(
+      this->lowering.globals[d.sym] = new llvm::GlobalVariable(
           *this->lowering.module_, type, false, llvm::GlobalValue::InternalLinkage,
           llvm::Constant::getNullValue(type),
-          "tz." + this->lowering.symbolPrefixes_.lookup(decl) + d.name);
-      this->lowering.debugInfo().declareGlobal(d.sym, this->lowering.globals_[d.sym]);
+          "tz." + this->lowering.symbolPrefixes.lookup(decl) + d.name);
+      this->lowering.debugInfo().declareGlobal(d.sym, this->lowering.globals[d.sym]);
       if (d.sym->type->isManaged()) {
         this->managedGlobals.push_back(d.sym);
       }
@@ -264,8 +265,8 @@ void ModuleBuilder::declareGlobals(SourceFile &file) {
 
 void ModuleBuilder::emitMain(SourceFile &file) {
   llvm::Function *asyncMain =
-      file.topLevelAwait ? this->lowering.asyncLowerer().emitAsyncMain(file) : nullptr;
-  auto *type = llvm::FunctionType::get(this->lowering.builder_.getInt32Ty(), false);
+      file.inventory.topLevelAwait ? this->lowering.asyncLowerer().emitAsyncMain(file) : nullptr;
+  auto *type = llvm::FunctionType::get(this->lowering.builder.getInt32Ty(), false);
   auto *main = llvm::Function::Create(type, llvm::GlobalValue::ExternalLinkage, "main",
                                       this->lowering.module_.get());
   this->lowering.functionBuilder().setFunctionAttributes(main);
@@ -273,49 +274,49 @@ void ModuleBuilder::emitMain(SourceFile &file) {
   if (!asyncMain) {
     this->lowering.debugInfo().beginTopLevel(main);
   }
-  this->mainInit = this->lowering.builder_.CreateCall(this->lowering.rt_.init);
+  this->mainInit = this->lowering.builder.CreateCall(this->lowering.rt_.init);
   this->lowering.functionFrame().pushScope();
-  llvm::Type *voidTy = this->lowering.builder_.getVoidTy();
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *voidTy = this->lowering.builder.getVoidTy();
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
   if (asyncMain) {
-    llvm::Value *promise = this->lowering.builder_.CreateCall(asyncMain, {}, "main");
-    this->lowering.builder_.CreateCall(
+    llvm::Value *promise = this->lowering.builder.CreateCall(asyncMain, {}, "main");
+    this->lowering.builder.CreateCall(
         this->lowering.asyncLowerer().asyncFunction("tz_async_main", voidTy, {ptr}), {promise});
-    this->lowering.builder_.CreateCall(this->lowering.instanceReleaseFn_, {promise});
+    this->lowering.builder.CreateCall(this->lowering.instanceReleaseFn, {promise});
   } else {
     for (Stmt *item : file.items) {
       if (!isa<FunctionDecl>(item)) {
         this->lowering.stmtLowerer().emitStmt(item);
       }
     }
-    if (this->lowering.usesAsync_ && this->lowering.functionFrame().blockIsOpen()) {
-      this->lowering.builder_.CreateCall(
+    if (this->lowering.usesAsync && this->lowering.functionFrame().blockIsOpen()) {
+      this->lowering.builder.CreateCall(
           this->lowering.asyncLowerer().asyncFunction("tz_async_run", voidTy,
-                                                      {this->lowering.builder_.getInt32Ty()}),
-          {this->lowering.builder_.getInt32(this->lowering.esModule_)});
+                                                      {this->lowering.builder.getInt32Ty()}),
+          {this->lowering.builder.getInt32(this->lowering.esModule)});
     }
   }
   if (this->lowering.functionFrame().blockIsOpen()) {
-    this->lowering.builder_.CreateCall(this->lowering.rt_.mainDone);
+    this->lowering.builder.CreateCall(this->lowering.rt_.mainDone);
   }
   this->lowering.functionFrame().popScope();
   if (this->lowering.functionFrame().blockIsOpen()) {
     for (const VarSymbol *var : llvm::reverse(this->managedGlobals)) {
       llvm::Type *lowered = this->lower(var->type);
       llvm::Value *address = this->lowering.functionFrame().addressOf(var);
-      llvm::Value *value = this->lowering.builder_.CreateLoad(lowered, address);
-      this->lowering.builder_.CreateStore(llvm::Constant::getNullValue(lowered), address);
+      llvm::Value *value = this->lowering.builder.CreateLoad(lowered, address);
+      this->lowering.builder.CreateStore(llvm::Constant::getNullValue(lowered), address);
       if (this->lowering.isEternal(var)) {
         this->lowering.publishLowerer().endValue(value, var->type);
       } else {
         this->lowering.refCounts().releaseValue(value, var->type);
       }
     }
-    if (this->lowering.usesAsync_) {
-      this->lowering.builder_.CreateCall(
+    if (this->lowering.usesAsync) {
+      this->lowering.builder.CreateCall(
           this->lowering.asyncLowerer().asyncFunction("tz_async_shutdown", voidTy, {}));
     }
-    this->lowering.builder_.CreateCall(this->lowering.rt_.shutdown);
+    this->lowering.builder.CreateCall(this->lowering.rt_.shutdown);
   }
   this->lowering.functionBuilder().finishFunction();
 }

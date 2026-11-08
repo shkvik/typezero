@@ -1,5 +1,4 @@
 #include "compiler/parallel/conflicts/conflicts.h"
-#include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
 #include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
@@ -12,6 +11,7 @@
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
 #include "compiler/parallel/parallel_model/parallel_model.h"
 #include "compiler/parallel/pieces/pieces.h"
+#include "compiler/program/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -36,30 +36,30 @@ using llvm::isa;
 namespace tz::parallel {
 
 Conflicts::Conflicts(Analysis &analysis)
-    : analysis_(analysis) {}
+    : analysis(analysis) {}
 
 bool Conflicts::concurrent(unsigned a, unsigned b) const {
-  const PieceInst &pa = analysis_.pieceInstances[a], &pb = analysis_.pieceInstances[b];
+  const PieceInst &pa = this->analysis.pieceInstances[a], &pb = this->analysis.pieceInstances[b];
   if (pa.root == pb.root) {
-    return analysis_.roots[pa.root].multi;
+    return this->analysis.roots[pa.root].multi;
   }
   auto contains = [](const std::vector<unsigned> &v, unsigned x) {
     return std::binary_search(v.begin(), v.end(), x);
   };
-  for (const auto &[r, interval] : analysis_.roots[pa.root].chain) {
+  for (const auto &[r, interval] : this->analysis.roots[pa.root].chain) {
     if (r == pb.root) {
-      return analysis_.roots[r].multi || contains(interval, b);
+      return this->analysis.roots[r].multi || contains(interval, b);
     }
   }
-  for (const auto &[r, interval] : analysis_.roots[pb.root].chain) {
+  for (const auto &[r, interval] : this->analysis.roots[pb.root].chain) {
     if (r == pa.root) {
-      return analysis_.roots[r].multi || contains(interval, a);
+      return this->analysis.roots[r].multi || contains(interval, a);
     }
   }
-  for (const auto &[ra, ia] : analysis_.roots[pa.root].chain) {
-    for (const auto &[rb, ib] : analysis_.roots[pb.root].chain) {
+  for (const auto &[ra, ia] : this->analysis.roots[pa.root].chain) {
+    for (const auto &[rb, ib] : this->analysis.roots[pb.root].chain) {
       if (ra == rb) {
-        if (analysis_.roots[ra].multi) {
+        if (this->analysis.roots[ra].multi) {
           return true;
         }
         for (unsigned x : ia) {
@@ -98,7 +98,7 @@ std::vector<Touch> Conflicts::touches(const Effects &effects) const {
       }
     }
     bool inner = a.origin.isValid() && a.anchor.isValid() &&
-                 !analysis_.partedAnchors.contains(a.anchor.getPointer());
+                 !this->analysis.partedAnchors.contains(a.anchor.getPointer());
     WaitPlace place{a.at, inner ? a.anchor : llvm::SMLoc(), inner ? a.home : nullptr};
     if (!llvm::is_contained(t.places, place)) {
       t.places.push_back(place);
@@ -120,7 +120,7 @@ uint64_t Conflicts::maskOf(const Loc &loc) const {
   case LocKind::Var:
     return hash(loc.key, 10, 30);
   case LocKind::Field:
-    return loc.key == analysis_.star ? kAnyField | kFieldBits : hash(loc.key, 40, 24);
+    return loc.key == this->analysis.star ? kAnyField | kFieldBits : hash(loc.key, 40, 24);
   case LocKind::Elements:
   case LocKind::OwnCell:
     return kElements;
@@ -132,13 +132,13 @@ uint64_t Conflicts::maskOf(const Loc &loc) const {
 }
 
 void Conflicts::decide() {
-  analysis_.pieceTouches.resize(analysis_.pieceInstances.size());
-  for (unsigned i = 0; i < analysis_.pieceInstances.size(); ++i) {
-    const PieceInst &p = analysis_.pieceInstances[i];
-    const FnInfo &f = *analysis_.byFunction[p.fn];
+  this->analysis.pieceTouches.resize(this->analysis.pieceInstances.size());
+  for (unsigned i = 0; i < this->analysis.pieceInstances.size(); ++i) {
+    const PieceInst &p = this->analysis.pieceInstances[i];
+    const FnInfo &f = *this->analysis.byFunction[p.fn];
     Effects effects;
     for (const Access &a : f.segs[p.seg].effects) {
-      if (!analysis_.pieces.keeps(p, a)) {
+      if (!this->analysis.pieces.keeps(p, a)) {
         continue;
       }
       Access b = a;
@@ -150,18 +150,18 @@ void Conflicts::decide() {
           }
           b.loc.ref = *p.self;
         } else {
-          b.loc.ref = analysis_.callWalk.classRef(owner);
+          b.loc.ref = this->analysis.callWalk.classRef(owner);
         }
       }
       effects.insert(b);
     }
-    analysis_.pieceTouches[i] = touches(effects);
+    this->analysis.pieceTouches[i] = touches(effects);
   }
-  analysis_.decisions.assign(analysis_.pieceInstances.size(), {});
-  std::vector<uint64_t> touched(analysis_.pieceInstances.size(), 0),
-      written(analysis_.pieceInstances.size(), 0);
-  for (unsigned i = 0; i < analysis_.pieceInstances.size(); ++i) {
-    for (const Touch &t : analysis_.pieceTouches[i]) {
+  this->analysis.decisions.assign(this->analysis.pieceInstances.size(), {});
+  std::vector<uint64_t> touched(this->analysis.pieceInstances.size(), 0),
+      written(this->analysis.pieceInstances.size(), 0);
+  for (unsigned i = 0; i < this->analysis.pieceInstances.size(); ++i) {
+    for (const Touch &t : this->analysis.pieceTouches[i]) {
       uint64_t bits = maskOf(t.loc);
       touched[i] |= bits;
       if (t.write) {
@@ -169,30 +169,30 @@ void Conflicts::decide() {
       }
     }
   }
-  for (unsigned i = 0; i < analysis_.pieceInstances.size(); ++i) {
-    for (unsigned j = i; j < analysis_.pieceInstances.size(); ++j) {
+  for (unsigned i = 0; i < this->analysis.pieceInstances.size(); ++i) {
+    for (unsigned j = i; j < this->analysis.pieceInstances.size(); ++j) {
       bool maybe = (written[i] & touched[j]) || (written[j] & touched[i]);
-      if (!maybe && !analysis_.decisions[i].alone && !analysis_.decisions[j].alone) {
+      if (!maybe && !this->analysis.decisions[i].alone && !this->analysis.decisions[j].alone) {
         continue;
       }
       if (!concurrent(i, j)) {
         continue;
       }
-      analysis_.decisions[i].alone = analysis_.decisions[j].alone = false;
+      this->analysis.decisions[i].alone = this->analysis.decisions[j].alone = false;
       if (!maybe) {
         continue;
       }
       std::vector<Loc> shared;
       std::vector<const Touch *> mineI, mineJ;
-      for (const Touch &x : analysis_.pieceTouches[i]) {
-        for (const Touch &y : analysis_.pieceTouches[j]) {
+      for (const Touch &x : this->analysis.pieceTouches[i]) {
+        for (const Touch &y : this->analysis.pieceTouches[j]) {
           if (!(x.write || y.write)) {
             continue;
           }
           if (x.loc.kind == LocKind::OwnCell && y.loc.kind == LocKind::OwnCell &&
               x.loc.key == y.loc.key &&
-              analysis_.pieceInstances[i].root == analysis_.pieceInstances[j].root &&
-              analysis_.roots[analysis_.pieceInstances[i].root].ownCell == x.loc.key) {
+              this->analysis.pieceInstances[i].root == this->analysis.pieceInstances[j].root &&
+              this->analysis.roots[this->analysis.pieceInstances[i].root].ownCell == x.loc.key) {
             continue;
           }
           Loc lx = x.loc, ly = y.loc;
@@ -202,7 +202,7 @@ void Conflicts::decide() {
           if (ly.kind == LocKind::OwnCell) {
             ly.kind = LocKind::Elements;
           }
-          if (!analysis_.aliasAnalysis.locsMayMeet(lx, ly)) {
+          if (!this->analysis.aliasAnalysis.locsMayMeet(lx, ly)) {
             continue;
           }
           if (!llvm::is_contained(shared, x.loc)) {
@@ -219,11 +219,11 @@ void Conflicts::decide() {
         for (const Touch *t : mine) {
           for (const auto &[at, via] : t->ats) {
             if (!d.from.isValid() ||
-                analysis_.explainNames.posOf(at) < analysis_.explainNames.posOf(d.from)) {
+                this->analysis.explainNames.posOf(at) < this->analysis.explainNames.posOf(d.from)) {
               d.from = at;
             }
             if (!d.to.isValid() ||
-                analysis_.explainNames.posOf(d.to) < analysis_.explainNames.posOf(at)) {
+                this->analysis.explainNames.posOf(d.to) < this->analysis.explainNames.posOf(at)) {
               d.to = at;
             }
             if (!llvm::is_contained(d.ats, at)) {
@@ -237,8 +237,8 @@ void Conflicts::decide() {
           }
         }
       };
-      analysis_.decisions[i].partners.push_back({j, shared});
-      extend(analysis_.decisions[i], mineI);
+      this->analysis.decisions[i].partners.push_back({j, shared});
+      extend(this->analysis.decisions[i], mineI);
       if (j != i) {
         std::vector<Loc> theirs;
         for (const Touch *t : mineJ) {
@@ -246,8 +246,8 @@ void Conflicts::decide() {
             theirs.push_back(t->loc);
           }
         }
-        analysis_.decisions[j].partners.push_back({i, theirs});
-        extend(analysis_.decisions[j], mineJ);
+        this->analysis.decisions[j].partners.push_back({i, theirs});
+        extend(this->analysis.decisions[j], mineJ);
       }
     }
   }
@@ -255,19 +255,19 @@ void Conflicts::decide() {
 }
 
 bool Conflicts::reachers(const FunctionDecl *home, std::vector<unsigned> &out) const {
-  if (analysis_.byFunction[home->id] == nullptr) {
+  if (this->analysis.byFunction[home->id] == nullptr) {
     return false;
   }
-  std::vector<bool> seen(analysis_.byFunction.size(), false);
+  std::vector<bool> seen(this->analysis.byFunction.size(), false);
   std::deque<int> queue{home->id};
   seen[home->id] = true;
   auto add = [&](int fn, unsigned seg) {
-    auto it = analysis_.segPieces.find({fn, seg});
-    if (it != analysis_.segPieces.end()) {
+    auto it = this->analysis.segPieces.find({fn, seg});
+    if (it != this->analysis.segPieces.end()) {
       out.insert(out.end(), it->second.begin(), it->second.end());
     }
   };
-  const FnInfo &own = *analysis_.byFunction[home->id];
+  const FnInfo &own = *this->analysis.byFunction[home->id];
   for (unsigned s = 0; s < own.segs.size(); ++s) {
     if (own.isInline(s)) {
       add(home->id, s);
@@ -276,12 +276,12 @@ bool Conflicts::reachers(const FunctionDecl *home, std::vector<unsigned> &out) c
   while (!queue.empty()) {
     int g = queue.front();
     queue.pop_front();
-    for (int edgeIndex : analysis_.callGraph.incoming(g)) {
-      const CallEdge &call = analysis_.callGraph.edge(edgeIndex);
+    for (int edgeIndex : this->analysis.callGraph.incoming(g)) {
+      const CallEdge &call = this->analysis.callGraph.edge(edgeIndex);
       if (call.mode == Mode::Callback) {
         continue;
       }
-      const FnInfo &f = *analysis_.byFunction[call.from];
+      const FnInfo &f = *this->analysis.byFunction[call.from];
       for (unsigned s : f.calls[call.call].segs) {
         add(call.from, s);
         if (f.isInline(s) && !seen[call.from]) {
@@ -298,7 +298,7 @@ bool Conflicts::reachers(const FunctionDecl *home, std::vector<unsigned> &out) c
 }
 
 void Conflicts::placeWaits() {
-  std::vector<Decision> &decisions = analysis_.decisions;
+  std::vector<Decision> &decisions = this->analysis.decisions;
   std::vector<llvm::DenseSet<const char *>> mine(decisions.size());
   std::map<const FunctionDecl *, std::set<const char *>> byHome;
   for (unsigned i = 0; i < decisions.size(); ++i) {

@@ -5,13 +5,15 @@
 namespace tz {
 
 Lexer::Lexer(llvm::StringRef source, Diagnostics &diags)
-    : cur_(source.begin()), end_(source.end()), diags_(diags) {
+    : cur(source.begin()),
+      end(source.end()),
+      diags(diags) {
   if (source.starts_with("\xEF\xBB\xBF")) {
-    cur_ += 3;
+    this->cur += 3;
   }
-  if (source.substr(cur_ - source.begin()).starts_with("#!")) {
-    while (cur_ < end_ && *cur_ != '\n') {
-      ++cur_;
+  if (source.substr(this->cur - source.begin()).starts_with("#!")) {
+    while (this->cur < this->end && *this->cur != '\n') {
+      ++this->cur;
     }
   }
 }
@@ -28,7 +30,7 @@ bool Lexer::match(char c) {
   if (peek() != c) {
     return false;
   }
-  ++cur_;
+  ++this->cur;
 
   return true;
 }
@@ -36,7 +38,7 @@ bool Lexer::match(char c) {
 Token Lexer::make(Tok kind, const char *start, bool newlineBefore) const {
   Token tok;
   tok.kind = kind;
-  tok.text = llvm::StringRef(start, cur_ - start);
+  tok.text = llvm::StringRef(start, this->cur - start);
   tok.newlineBefore = newlineBefore;
 
   return tok;
@@ -44,34 +46,34 @@ Token Lexer::make(Tok kind, const char *start, bool newlineBefore) const {
 
 bool Lexer::skipTrivia() {
   bool newline = false;
-  while (cur_ < end_) {
-    char c = *cur_;
+  while (this->cur < this->end) {
+    char c = *this->cur;
     if (c == '\n') {
       newline = true;
-      ++cur_;
+      ++this->cur;
     } else if (c == ' ' || c == '\t' || c == '\r' || c == '\f' || c == '\v') {
-      ++cur_;
+      ++this->cur;
     } else if (c == '/' && peek(1) == '/') {
-      while (cur_ < end_ && *cur_ != '\n') {
-        ++cur_;
+      while (this->cur < this->end && *this->cur != '\n') {
+        ++this->cur;
       }
     } else if (c == '/' && peek(1) == '*') {
-      const char *start = cur_;
-      cur_ += 2;
+      const char *start = this->cur;
+      this->cur += 2;
       bool closed = false;
-      while (cur_ < end_) {
-        if (*cur_ == '\n') {
+      while (this->cur < this->end) {
+        if (*this->cur == '\n') {
           newline = true;
         }
-        if (*cur_ == '*' && peek(1) == '/') {
-          cur_ += 2;
+        if (*this->cur == '*' && peek(1) == '/') {
+          this->cur += 2;
           closed = true;
           break;
         }
-        ++cur_;
+        ++this->cur;
       }
       if (!closed) {
-        diags_.error(llvm::SMLoc::getFromPointer(start), "unterminated comment");
+        this->diags.error(llvm::SMLoc::getFromPointer(start), "unterminated comment");
       }
     } else {
       break;
@@ -83,29 +85,29 @@ bool Lexer::skipTrivia() {
 
 Token Lexer::next() {
   bool nl = skipTrivia();
-  const char *start = cur_;
-  if (cur_ >= end_) {
+  const char *start = this->cur;
+  if (this->cur >= this->end) {
     return make(Tok::Eof, start, nl);
   }
 
-  char c = *cur_++;
+  char c = *this->cur++;
   switch (c) {
   case '(':
     return make(Tok::LParen, start, nl);
   case ')':
     return make(Tok::RParen, start, nl);
   case '{':
-    if (!templateBraces_.empty()) {
-      ++templateBraces_.back();
+    if (!this->templateBraces.empty()) {
+      ++this->templateBraces.back();
     }
     return make(Tok::LBrace, start, nl);
   case '}':
-    if (!templateBraces_.empty()) {
-      if (templateBraces_.back() == 0) {
-        templateBraces_.pop_back();
+    if (!this->templateBraces.empty()) {
+      if (this->templateBraces.back() == 0) {
+        this->templateBraces.pop_back();
         return lexTemplate(start, true, nl);
       }
-      --templateBraces_.back();
+      --this->templateBraces.back();
     }
     return make(Tok::RBrace, start, nl);
   case '`':
@@ -125,7 +127,7 @@ Token Lexer::next() {
       return make(match('=') ? Tok::QuestionQuestionAssign : Tok::QuestionQuestion, start, nl);
     }
     if (peek() == '.' && !llvm::isDigit(peek(1))) {
-      ++cur_;
+      ++this->cur;
       return make(Tok::QuestionDot, start, nl);
     }
     return make(Tok::Question, start, nl);
@@ -136,7 +138,7 @@ Token Lexer::next() {
       return lexNumber(start, nl);
     }
     if (peek() == '.' && peek(1) == '.') {
-      cur_ += 2;
+      this->cur += 2;
       return make(Tok::Ellipsis, start, nl);
     }
     return make(Tok::Dot, start, nl);
@@ -252,8 +254,8 @@ Token Lexer::next() {
     return lexIdentifier(start, nl);
   }
 
-  diags_.error(llvm::SMLoc::getFromPointer(start),
-               "unexpected character '" + llvm::Twine(llvm::StringRef(start, 1)) + "'");
+  this->diags.error(llvm::SMLoc::getFromPointer(start),
+                    "unexpected character '" + llvm::Twine(llvm::StringRef(start, 1)) + "'");
 
   return next();
 }
@@ -263,29 +265,29 @@ Token Lexer::lexNumber(const char *start, bool newlineBefore) {
   char second = peek();
   if (*start == '0' && (second == 'x' || second == 'X' || second == 'b' || second == 'B' ||
                         second == 'o' || second == 'O')) {
-    ++cur_;
+    ++this->cur;
     while (llvm::isAlnum(peek()) || peek() == '_') {
-      ++cur_;
+      ++this->cur;
     }
-    if (cur_[-1] == 'n' && cur_ - start > 3) {
-      --cur_;
+    if (this->cur[-1] == 'n' && this->cur - start > 3) {
+      --this->cur;
     }
   } else {
     if (*start == '.') {
       isFloat = true;
     }
     while (llvm::isDigit(peek()) || peek() == '_') {
-      ++cur_;
+      ++this->cur;
     }
     if (!isFloat && peek() == '.' && Lexer::isIdentStart(peek(1)) && peek(1) != 'e' &&
         peek(1) != 'E') {
-      llvm::StringRef number(start, static_cast<size_t>(cur_ - start));
-      const char *name = cur_ + 1, *nameEnd = name;
-      while (nameEnd < end_ && Lexer::isIdentChar(*nameEnd)) {
+      llvm::StringRef number(start, static_cast<size_t>(this->cur - start));
+      const char *name = this->cur + 1, *nameEnd = name;
+      while (nameEnd < this->end && Lexer::isIdentChar(*nameEnd)) {
         ++nameEnd;
       }
       llvm::StringRef property(name, static_cast<size_t>(nameEnd - name));
-      diags_.error(
+      this->diags.error(
           llvm::SMLoc::getFromPointer(name),
           "a point right after a number belongs to the number, so a name cannot follow it; "
           "write '" +
@@ -294,37 +296,37 @@ Token Lexer::lexNumber(const char *start, bool newlineBefore) {
     }
     if (!isFloat && peek() == '.') {
       isFloat = true;
-      ++cur_;
+      ++this->cur;
       while (llvm::isDigit(peek()) || peek() == '_') {
-        ++cur_;
+        ++this->cur;
       }
     }
     char e = peek();
     if ((e == 'e' || e == 'E') && (llvm::isDigit(peek(1)) || ((peek(1) == '+' || peek(1) == '-') &&
                                                               llvm::isDigit(peek(2))))) {
       isFloat = true;
-      cur_ += 2;
+      this->cur += 2;
       while (llvm::isDigit(peek()) || peek() == '_') {
-        ++cur_;
+        ++this->cur;
       }
     }
   }
 
   if (peek() == 'n' && !Lexer::isIdentChar(peek(1))) {
     Token tok = make(isFloat ? Tok::FloatLiteral : Tok::IntLiteral, start, newlineBefore);
-    diags_.error(llvm::SMLoc::getFromPointer(start),
-                 "'" + tok.text +
-                     "n' is a bigint, and there is no bigint: integers up to 9.2e18 "
-                     "fit in 'int', longer ones in 'decimal' (e.g. 'const n: decimal = " +
-                     tok.text + "')");
-    ++cur_;
+    this->diags.error(llvm::SMLoc::getFromPointer(start),
+                      "'" + tok.text +
+                          "n' is a bigint, and there is no bigint: integers up to 9.2e18 "
+                          "fit in 'int', longer ones in 'decimal' (e.g. 'const n: decimal = " +
+                          tok.text + "')");
+    ++this->cur;
     return tok;
   }
   if (Lexer::isIdentStart(peek())) {
-    diags_.error(llvm::SMLoc::getFromPointer(cur_),
-                 "an identifier cannot directly follow a number");
+    this->diags.error(llvm::SMLoc::getFromPointer(this->cur),
+                      "an identifier cannot directly follow a number");
     while (Lexer::isIdentChar(peek())) {
-      ++cur_;
+      ++this->cur;
     }
   }
 
@@ -333,16 +335,16 @@ Token Lexer::lexNumber(const char *start, bool newlineBefore) {
 
 Token Lexer::lexString(const char *start, char quote, bool newlineBefore) {
   for (;;) {
-    if (cur_ >= end_ || *cur_ == '\n' || *cur_ == '\r') {
-      diags_.error(llvm::SMLoc::getFromPointer(start), "unterminated string literal");
+    if (this->cur >= this->end || *this->cur == '\n' || *this->cur == '\r') {
+      this->diags.error(llvm::SMLoc::getFromPointer(start), "unterminated string literal");
       break;
     }
-    char c = *cur_++;
+    char c = *this->cur++;
     if (c == quote) {
       break;
     }
-    if (c == '\\' && cur_ < end_) {
-      ++cur_;
+    if (c == '\\' && this->cur < this->end) {
+      ++this->cur;
     }
   }
 
@@ -351,42 +353,45 @@ Token Lexer::lexString(const char *start, char quote, bool newlineBefore) {
 
 Token Lexer::lexTemplate(const char *start, bool continuation, bool newlineBefore) {
   for (;;) {
-    if (cur_ >= end_) {
-      diags_.error(llvm::SMLoc::getFromPointer(start), "unterminated template literal");
+    if (this->cur >= this->end) {
+      this->diags.error(llvm::SMLoc::getFromPointer(start), "unterminated template literal");
       return make(continuation ? Tok::TemplateTail : Tok::TemplateString, start, newlineBefore);
     }
-    char c = *cur_++;
+    char c = *this->cur++;
     if (c == '`') {
       return make(continuation ? Tok::TemplateTail : Tok::TemplateString, start, newlineBefore);
     }
     if (c == '$' && peek() == '{') {
-      ++cur_;
-      templateBraces_.push_back(0);
+      ++this->cur;
+      this->templateBraces.push_back(0);
       return make(continuation ? Tok::TemplateMiddle : Tok::TemplateHead, start, newlineBefore);
     }
-    if (c == '\\' && cur_ < end_) {
-      ++cur_;
+    if (c == '\\' && this->cur < this->end) {
+      ++this->cur;
     }
   }
 }
 
 Token Lexer::regex(const char *start, bool newlineBefore) {
-  cur_ = start + 1;
+  this->cur = start + 1;
   bool inClass = false;
   auto lineBreak = [&] {
-    return *cur_ == '\n' || *cur_ == '\r' ||
-           llvm::StringRef(cur_, static_cast<size_t>(end_ - cur_)).starts_with("\xE2\x80\xA8") ||
-           llvm::StringRef(cur_, static_cast<size_t>(end_ - cur_)).starts_with("\xE2\x80\xA9");
+    return *this->cur == '\n' || *this->cur == '\r' ||
+           llvm::StringRef(this->cur, static_cast<size_t>(this->end - this->cur))
+               .starts_with("\xE2\x80\xA8") ||
+           llvm::StringRef(this->cur, static_cast<size_t>(this->end - this->cur))
+               .starts_with("\xE2\x80\xA9");
   };
   for (;;) {
-    if (cur_ >= end_ || lineBreak()) {
-      diags_.error(llvm::SMLoc::getFromPointer(start), "unterminated regular expression literal");
+    if (this->cur >= this->end || lineBreak()) {
+      this->diags.error(llvm::SMLoc::getFromPointer(start),
+                        "unterminated regular expression literal");
       return make(Tok::RegexLiteral, start, newlineBefore);
     }
-    char c = *cur_++;
+    char c = *this->cur++;
     if (c == '\\') {
-      if (cur_ < end_ && !lineBreak()) {
-        ++cur_;
+      if (this->cur < this->end && !lineBreak()) {
+        ++this->cur;
       }
     } else if (c == '[') {
       inClass = true;
@@ -396,8 +401,8 @@ Token Lexer::regex(const char *start, bool newlineBefore) {
       break;
     }
   }
-  while (cur_ < end_ && Lexer::isIdentChar(*cur_)) {
-    ++cur_;
+  while (this->cur < this->end && Lexer::isIdentChar(*this->cur)) {
+    ++this->cur;
   }
 
   return make(Tok::RegexLiteral, start, newlineBefore);
@@ -405,9 +410,9 @@ Token Lexer::regex(const char *start, bool newlineBefore) {
 
 Token Lexer::lexIdentifier(const char *start, bool newlineBefore) {
   while (Lexer::isIdentChar(peek())) {
-    ++cur_;
+    ++this->cur;
   }
-  llvm::StringRef text(start, cur_ - start);
+  llvm::StringRef text(start, this->cur - start);
   Tok kind = llvm::StringSwitch<Tok>(text)
                  .Case("as", Tok::KwAs)
                  .Case("break", Tok::KwBreak)

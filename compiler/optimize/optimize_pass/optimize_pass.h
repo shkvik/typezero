@@ -17,8 +17,8 @@ public:
 private:
   void runPasses(llvm::Module &module) const;
 
-  const Target &target_;
-  const BuildOptions &options_;
+  const Target &target;
+  const BuildOptions &options;
 };
 
 }

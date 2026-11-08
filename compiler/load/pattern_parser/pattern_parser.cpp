@@ -7,10 +7,10 @@
 #include "compiler/load/object_type_parser/object_type_parser.h"
 #include "compiler/load/stmt_parser/stmt_parser.h"
 #include "compiler/load/template_parser/template_parser.h"
-#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/load/token_cursor/token_cursor.h"
 #include "compiler/load/type_parser/type_parser.h"
 #include "compiler/load/var_parser/var_parser.h"
+#include "compiler/program/to_utf8/to_utf8.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
@@ -25,7 +25,8 @@ using llvm::isa;
 
 namespace tz {
 
-PatternParser::PatternParser(Parser &parser) : parser_(parser) {}
+PatternParser::PatternParser(Parser &parser)
+    : parser(parser) {}
 
 BindingForm PatternParser::formOf(const Parser::Pattern &pattern) {
   if (pattern.object) {
@@ -37,116 +38,120 @@ BindingForm PatternParser::formOf(const Parser::Pattern &pattern) {
 }
 
 std::unique_ptr<Parser::Pattern> PatternParser::parseBindingPattern() {
-  if (parser_.tok_.is(Tok::LBrace)) {
+  if (this->parser.tok.is(Tok::LBrace)) {
     return parseObjectPattern();
   }
   auto pattern = std::make_unique<Parser::Pattern>();
-  pattern->loc = parser_.tok_.loc();
-  parser_.cursor().advance();
-  while (!parser_.tok_.is(Tok::RBracket) && !parser_.tok_.is(Tok::Eof)) {
+  pattern->loc = this->parser.tok.loc();
+  this->parser.cursor().advance();
+  while (!this->parser.tok.is(Tok::RBracket) && !this->parser.tok.is(Tok::Eof)) {
     Parser::Pattern::Element e;
-    e.loc = parser_.tok_.loc();
-    if (parser_.cursor().accept(Tok::Comma)) {
+    e.loc = this->parser.tok.loc();
+    if (this->parser.cursor().accept(Tok::Comma)) {
       e.hole = true;
       pattern->elements.push_back(std::move(e));
       continue;
     }
-    e.rest = parser_.cursor().accept(Tok::Ellipsis);
-    if (parser_.tok_.is(Tok::LBracket) || parser_.tok_.is(Tok::LBrace)) {
+    e.rest = this->parser.cursor().accept(Tok::Ellipsis);
+    if (this->parser.tok.is(Tok::LBracket) || this->parser.tok.is(Tok::LBrace)) {
       e.nested = parseBindingPattern();
-    } else if (parser_.tok_.is(Tok::Identifier)) {
-      e.name = parser_.tok_.text;
-      parser_.cursor().advance();
+    } else if (this->parser.tok.is(Tok::Identifier)) {
+      e.name = this->parser.tok.text;
+      this->parser.cursor().advance();
     } else {
-      parser_.cursor().error(
-          parser_.tok_.loc(),
+      this->parser.cursor().error(
+          this->parser.tok.loc(),
           llvm::Twine("expected a variable name in the destructuring pattern, found ") +
-              TokenKinds::tokSpelling(parser_.tok_.kind));
+              TokenKinds::tokSpelling(this->parser.tok.kind));
       return pattern;
     }
-    if (parser_.tok_.is(Tok::Assign)) {
+    if (this->parser.tok.is(Tok::Assign)) {
       if (e.rest) {
-        parser_.cursor().report(parser_.tok_.loc(), "a rest element cannot have a default value");
+        this->parser.cursor().report(this->parser.tok.loc(),
+                                     "a rest element cannot have a default value");
       }
-      parser_.cursor().advance();
-      e.defaultValue = parser_.exprs().parseExpr();
+      this->parser.cursor().advance();
+      e.defaultValue = this->parser.exprs().parseExpr();
     }
     bool rest = e.rest;
     pattern->elements.push_back(std::move(e));
-    if (!parser_.cursor().accept(Tok::Comma)) {
+    if (!this->parser.cursor().accept(Tok::Comma)) {
       break;
     }
     if (rest) {
-      parser_.cursor().report(pattern->elements.back().loc, "a rest element must be the last one");
+      this->parser.cursor().report(pattern->elements.back().loc,
+                                   "a rest element must be the last one");
     }
   }
-  parser_.cursor().expect(Tok::RBracket, "to close the destructuring pattern");
+  this->parser.cursor().expect(Tok::RBracket, "to close the destructuring pattern");
 
   return pattern;
 }
 
 std::unique_ptr<Parser::Pattern> PatternParser::parseObjectPattern() {
   auto pattern = std::make_unique<Parser::Pattern>();
-  pattern->loc = parser_.tok_.loc();
+  pattern->loc = this->parser.tok.loc();
   pattern->object = true;
-  parser_.cursor().advance();
-  while (!parser_.tok_.is(Tok::RBrace) && !parser_.tok_.is(Tok::Eof)) {
+  this->parser.cursor().advance();
+  while (!this->parser.tok.is(Tok::RBrace) && !this->parser.tok.is(Tok::Eof)) {
     Parser::Pattern::Element e;
-    e.loc = parser_.tok_.loc();
-    if (parser_.cursor().accept(Tok::Ellipsis)) {
+    e.loc = this->parser.tok.loc();
+    if (this->parser.cursor().accept(Tok::Ellipsis)) {
       e.rest = true;
-      if (!parser_.tok_.is(Tok::Identifier)) {
-        parser_.cursor().error(parser_.tok_.loc(),
-                               "expected a variable name after '...' in the destructuring pattern");
+      if (!this->parser.tok.is(Tok::Identifier)) {
+        this->parser.cursor().error(
+            this->parser.tok.loc(),
+            "expected a variable name after '...' in the destructuring pattern");
         return pattern;
       }
-      e.name = parser_.tok_.text;
-      parser_.cursor().advance();
+      e.name = this->parser.tok.text;
+      this->parser.cursor().advance();
     } else {
-      bool identifier = parser_.tok_.is(Tok::Identifier);
-      if (parser_.cursor().accept(Tok::LBracket)) {
-        e.keyExpr = parser_.exprs().parseExpr();
-        parser_.cursor().expect(Tok::RBracket, "to close the key");
-      } else if (!parser_.objectTypes().parseFieldName(e.key)) {
-        parser_.cursor().skipToClosingBrace();
+      bool identifier = this->parser.tok.is(Tok::Identifier);
+      if (this->parser.cursor().accept(Tok::LBracket)) {
+        e.keyExpr = this->parser.exprs().parseExpr();
+        this->parser.cursor().expect(Tok::RBracket, "to close the key");
+      } else if (!this->parser.objectTypes().parseFieldName(e.key)) {
+        this->parser.cursor().skipToClosingBrace();
         return pattern;
       }
-      if (parser_.cursor().accept(Tok::Colon)) {
-        if (parser_.tok_.is(Tok::LBracket) || parser_.tok_.is(Tok::LBrace)) {
+      if (this->parser.cursor().accept(Tok::Colon)) {
+        if (this->parser.tok.is(Tok::LBracket) || this->parser.tok.is(Tok::LBrace)) {
           e.nested = parseBindingPattern();
-        } else if (parser_.tok_.is(Tok::Identifier)) {
-          e.name = parser_.tok_.text;
-          parser_.cursor().advance();
+        } else if (this->parser.tok.is(Tok::Identifier)) {
+          e.name = this->parser.tok.text;
+          this->parser.cursor().advance();
         } else {
-          parser_.cursor().error(
-              parser_.tok_.loc(),
+          this->parser.cursor().error(
+              this->parser.tok.loc(),
               llvm::Twine("expected a variable name in the destructuring pattern, found ") +
-                  TokenKinds::tokSpelling(parser_.tok_.kind));
+                  TokenKinds::tokSpelling(this->parser.tok.kind));
           return pattern;
         }
       } else if (identifier && !e.keyExpr) {
         e.name = e.key;
       } else {
-        parser_.cursor().error(parser_.tok_.loc(),
-                               llvm::Twine("a key in a destructuring pattern needs a variable: '") +
-                                   (e.keyExpr ? llvm::Twine("[key]") : llvm::Twine(e.key)) +
-                                   ": name'");
+        this->parser.cursor().error(
+            this->parser.tok.loc(),
+            llvm::Twine("a key in a destructuring pattern needs a variable: '") +
+                (e.keyExpr ? llvm::Twine("[key]") : llvm::Twine(e.key)) + ": name'");
         return pattern;
       }
-      if (parser_.cursor().accept(Tok::Assign)) {
-        e.defaultValue = parser_.exprs().parseExpr();
+      if (this->parser.cursor().accept(Tok::Assign)) {
+        e.defaultValue = this->parser.exprs().parseExpr();
       }
     }
     bool rest = e.rest;
     pattern->elements.push_back(std::move(e));
-    if (!parser_.cursor().accept(Tok::Comma)) {
+    if (!this->parser.cursor().accept(Tok::Comma)) {
       break;
     }
     if (rest) {
-      parser_.cursor().report(pattern->elements.back().loc, "a rest element must be the last one");
+      this->parser.cursor().report(pattern->elements.back().loc,
+                                   "a rest element must be the last one");
     }
   }
-  parser_.cursor().expect(Tok::RBrace, "to close the destructuring pattern");
+  this->parser.cursor().expect(Tok::RBrace, "to close the destructuring pattern");
 
   return pattern;
 }
@@ -164,7 +169,7 @@ std::unique_ptr<Parser::Pattern> PatternParser::patternFromLiteral(Expr *expr) {
       e.key = prop.name;
       e.keyExpr = prop.key();
       if (e.rest && i + 1 != object->props.size()) {
-        parser_.cursor().report(e.loc, "a rest element must be the last one");
+        this->parser.cursor().report(e.loc, "a rest element must be the last one");
       }
       Expr *target = prop.value;
       if (auto *assign = dyn_cast<AssignExpr>(target); assign && !assign->op && !e.rest) {
@@ -188,7 +193,7 @@ std::unique_ptr<Parser::Pattern> PatternParser::patternFromLiteral(Expr *expr) {
     e.hole = element.hole;
     e.rest = element.spread;
     if (e.rest && i + 1 != lit->elements.size()) {
-      parser_.cursor().report(e.loc, "a rest element must be the last one");
+      this->parser.cursor().report(e.loc, "a rest element must be the last one");
     }
     Expr *target = element.expr;
     if (auto *assign = dyn_cast<AssignExpr>(target); assign && !assign->op && !e.rest) {
@@ -208,7 +213,7 @@ std::unique_ptr<Parser::Pattern> PatternParser::patternFromLiteral(Expr *expr) {
 
 VarDeclarator PatternParser::hiddenDeclarator(llvm::SMLoc loc, Expr *init) {
   VarDeclarator d;
-  d.name = parser_.ctx_.hiddenName();
+  d.name = this->parser.ctx.hiddenName();
   d.loc = loc;
   d.init = init;
 
@@ -246,8 +251,8 @@ void PatternParser::declareElements(VarDeclStmt *decl, const Parser::Pattern &pa
 }
 
 Stmt *PatternParser::assignPattern(llvm::SMLoc loc, const Parser::Pattern &pattern, Expr *value) {
-  auto *block = parser_.ctx_.make<BlockStmt>(loc);
-  auto *decl = parser_.ctx_.make<VarDeclStmt>(loc, true);
+  auto *block = this->parser.ctx.make<BlockStmt>(loc);
+  auto *decl = this->parser.ctx.make<VarDeclStmt>(loc, true);
   block->body.push_back(decl);
   auto *lit = dyn_cast<ArrayLitExpr>(value);
   bool direct =
@@ -275,9 +280,10 @@ Stmt *PatternParser::assignPattern(llvm::SMLoc loc, const Parser::Pattern &patte
     }
     Expr *element;
     if (direct) {
-      element = parser_.ctx_.make<NameExpr>(e.loc, values[i]);
+      element = this->parser.ctx.make<NameExpr>(e.loc, values[i]);
       if (e.defaultValue) {
-        element = parser_.ctx_.make<BinaryExpr>(e.loc, BinaryOp::Nullish, element, e.defaultValue);
+        element =
+            this->parser.ctx.make<BinaryExpr>(e.loc, BinaryOp::Nullish, element, e.defaultValue);
       }
     } else {
       element = elementOf(base, pattern, i, keyReads);
@@ -285,8 +291,8 @@ Stmt *PatternParser::assignPattern(llvm::SMLoc loc, const Parser::Pattern &patte
     if (e.nested) {
       block->body.push_back(assignPattern(e.loc, *e.nested, element));
     } else {
-      block->body.push_back(parser_.ctx_.make<ExprStmt>(
-          e.loc, parser_.ctx_.make<AssignExpr>(e.loc, std::nullopt, e.target, element)));
+      block->body.push_back(this->parser.ctx.make<ExprStmt>(
+          e.loc, this->parser.ctx.make<AssignExpr>(e.loc, std::nullopt, e.target, element)));
     }
   }
 
@@ -296,17 +302,17 @@ Stmt *PatternParser::assignPattern(llvm::SMLoc loc, const Parser::Pattern &patte
 Expr *PatternParser::elementOf(llvm::StringRef base, const Parser::Pattern &pattern, size_t i,
                                std::vector<const IndexExpr *> &keyReads) {
   const Parser::Pattern::Element &e = pattern.elements[i];
-  auto *source = parser_.ctx_.make<NameExpr>(e.loc, base);
+  auto *source = this->parser.ctx.make<NameExpr>(e.loc, base);
   Expr *element;
   if (!pattern.object) {
-    auto *position = parser_.ctx_.make<IntLitExpr>(e.loc, i);
+    auto *position = this->parser.ctx.make<IntLitExpr>(e.loc, i);
     if (e.rest) {
-      auto *slice = parser_.ctx_.make<MemberExpr>(e.loc, source, "slice");
-      return parser_.ctx_.make<CallExpr>(e.loc, slice, std::vector<Expr *>{position});
+      auto *slice = this->parser.ctx.make<MemberExpr>(e.loc, source, "slice");
+      return this->parser.ctx.make<CallExpr>(e.loc, slice, std::vector<Expr *>{position});
     }
-    element = parser_.ctx_.make<IndexExpr>(e.loc, source, position);
+    element = this->parser.ctx.make<IndexExpr>(e.loc, source, position);
   } else if (e.rest) {
-    auto *copy = parser_.ctx_.make<ObjectLitExpr>(e.loc);
+    auto *copy = this->parser.ctx.make<ObjectLitExpr>(e.loc);
     ObjectLitExpr::Property spread;
     spread.loc = e.loc;
     spread.value = source;
@@ -321,14 +327,14 @@ Expr *PatternParser::elementOf(llvm::StringRef base, const Parser::Pattern &patt
     copy->props.push_back(std::move(spread));
     return copy;
   } else if (e.keyExpr) {
-    auto *read = parser_.ctx_.make<IndexExpr>(e.loc, source, e.keyExpr);
+    auto *read = this->parser.ctx.make<IndexExpr>(e.loc, source, e.keyExpr);
     keyReads.push_back(read);
     element = read;
   } else {
-    element = parser_.ctx_.make<MemberExpr>(e.loc, source, e.key);
+    element = this->parser.ctx.make<MemberExpr>(e.loc, source, e.key);
   }
   if (e.defaultValue) {
-    element = parser_.ctx_.make<BinaryExpr>(e.loc, BinaryOp::Nullish, element, e.defaultValue);
+    element = this->parser.ctx.make<BinaryExpr>(e.loc, BinaryOp::Nullish, element, e.defaultValue);
   }
 
   return element;

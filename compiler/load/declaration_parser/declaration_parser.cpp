@@ -10,11 +10,12 @@
 
 namespace tz {
 
-DeclarationParser::DeclarationParser(Parser &parser) : parser_(parser) {}
+DeclarationParser::DeclarationParser(Parser &parser)
+    : parser(parser) {}
 
 DeclarationFile DeclarationParser::parse() {
   DeclarationFile file;
-  while (!parser_.tok_.is(Tok::Eof)) {
+  while (!this->parser.tok.is(Tok::Eof)) {
     parseItem(file);
   }
 
@@ -23,111 +24,114 @@ DeclarationFile DeclarationParser::parse() {
 
 void DeclarationParser::skipItem() {
   int depth = 0;
-  while (!parser_.tok_.is(Tok::Eof)) {
-    if (parser_.tok_.is(Tok::LBrace)) {
+  while (!this->parser.tok.is(Tok::Eof)) {
+    if (this->parser.tok.is(Tok::LBrace)) {
       ++depth;
-    } else if (parser_.tok_.is(Tok::RBrace)) {
+    } else if (this->parser.tok.is(Tok::RBrace)) {
       --depth;
       if (depth <= 0) {
-        parser_.cursor().advance();
+        this->parser.cursor().advance();
         return;
       }
-    } else if (parser_.tok_.is(Tok::Semi) && depth == 0) {
-      parser_.cursor().advance();
+    } else if (this->parser.tok.is(Tok::Semi) && depth == 0) {
+      this->parser.cursor().advance();
       return;
     }
-    parser_.cursor().advance();
+    this->parser.cursor().advance();
   }
 }
 
 void DeclarationParser::parseItem(DeclarationFile &file) {
-  llvm::SMLoc loc = parser_.tok_.loc();
-  if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "import") {
-    parser_.modules().parseImport(true);
+  llvm::SMLoc loc = this->parser.tok.loc();
+  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "import") {
+    this->parser.modules().parseImport(true);
     return;
   }
-  if (!parser_.tok_.is(Tok::Identifier) || parser_.tok_.text != "export") {
-    parser_.cursor().report(loc, "a declaration file holds only what its module exports: 'export "
+  if (!this->parser.tok.is(Tok::Identifier) || this->parser.tok.text != "export") {
+    this->parser.cursor().report(loc,
+                                 "a declaration file holds only what its module exports: 'export "
                                  "type', 'export declare function', 'export declare class' and "
                                  "imports of the types they name");
     skipItem();
     return;
   }
-  const Token &next = parser_.cursor().peek();
+  const Token &next = this->parser.cursor().peek();
   if (next.is(Tok::LBrace) || next.is(Tok::Star)) {
-    parser_.modules().parseExport(true);
+    this->parser.modules().parseExport(true);
     return;
   }
-  parser_.cursor().advance();
-  if (parser_.tok_.is(Tok::Identifier) &&
-      (parser_.tok_.text == "type" || parser_.tok_.text == "interface")) {
-    if (Stmt *stmt = parser_.stmts().parseStatement(true)) {
+  this->parser.cursor().advance();
+  if (this->parser.tok.is(Tok::Identifier) &&
+      (this->parser.tok.text == "type" || this->parser.tok.text == "interface")) {
+    if (Stmt *stmt = this->parser.stmts().parseStatement(true)) {
       file.items.push_back(stmt);
     }
     return;
   }
-  if (!parser_.tok_.is(Tok::Identifier) || parser_.tok_.text != "declare") {
-    parser_.cursor().report(parser_.tok_.loc(),
-                            "a declaration file has no code: write 'export declare function' or "
-                            "'export declare class', with signatures and no bodies");
+  if (!this->parser.tok.is(Tok::Identifier) || this->parser.tok.text != "declare") {
+    this->parser.cursor().report(
+        this->parser.tok.loc(),
+        "a declaration file has no code: write 'export declare function' or "
+        "'export declare class', with signatures and no bodies");
     skipItem();
     return;
   }
-  parser_.cursor().advance();
-  if (parser_.tok_.is(Tok::KwFunction)) {
-    FunctionDecl *fn = parser_.functions().parseFunction(false, false);
+  this->parser.cursor().advance();
+  if (this->parser.tok.is(Tok::KwFunction)) {
+    FunctionDecl *fn = this->parser.functions().parseFunction(false, false);
     if (fn->body) {
-      parser_.cursor().report(fn->loc(), "a function of a declaration file has no body: its code "
-                                         "is in the module");
+      this->parser.cursor().report(fn->loc(),
+                                   "a function of a declaration file has no body: its code "
+                                   "is in the module");
     }
     file.items.push_back(fn);
     return;
   }
-  bool isAbstract = parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "abstract";
+  bool isAbstract = this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "abstract";
   if (isAbstract) {
-    parser_.cursor().advance();
+    this->parser.cursor().advance();
   }
-  if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "class") {
+  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "class") {
     parseClass(file, isAbstract);
     return;
   }
-  parser_.cursor().report(parser_.tok_.loc(),
-                          "expected 'function' or 'class' after 'export declare'");
+  this->parser.cursor().report(this->parser.tok.loc(),
+                               "expected 'function' or 'class' after 'export declare'");
   skipItem();
 }
 
 void DeclarationParser::parseClass(DeclarationFile &file, bool isAbstract) {
-  parser_.cursor().advance();
+  this->parser.cursor().advance();
   DeclaredClass cls;
   cls.isAbstract = isAbstract;
-  cls.loc = parser_.tok_.loc();
-  if (parser_.tok_.is(Tok::Identifier)) {
-    cls.name = parser_.tok_.text;
-    parser_.cursor().advance();
+  cls.loc = this->parser.tok.loc();
+  if (this->parser.tok.is(Tok::Identifier)) {
+    cls.name = this->parser.tok.text;
+    this->parser.cursor().advance();
   } else {
-    parser_.cursor().error(parser_.tok_.loc(), "expected the name of the class");
+    this->parser.cursor().error(this->parser.tok.loc(), "expected the name of the class");
   }
-  if (parser_.tok_.is(Tok::Less)) {
-    cls.typeParams = parser_.functions().parseTypeParams();
+  if (this->parser.tok.is(Tok::Less)) {
+    cls.typeParams = this->parser.functions().parseTypeParams();
   }
-  if (!parser_.tok_.is(Tok::LBrace)) {
-    parser_.cursor().report(parser_.tok_.loc(),
-                            "a class of a declaration file lists its members only; what it "
-                            "extends and implements is in the module");
-    while (!parser_.tok_.is(Tok::LBrace) && !parser_.tok_.is(Tok::Eof)) {
-      parser_.cursor().advance();
+  if (!this->parser.tok.is(Tok::LBrace)) {
+    this->parser.cursor().report(this->parser.tok.loc(),
+                                 "a class of a declaration file lists its members only; what it "
+                                 "extends and implements is in the module");
+    while (!this->parser.tok.is(Tok::LBrace) && !this->parser.tok.is(Tok::Eof)) {
+      this->parser.cursor().advance();
     }
   }
-  parser_.cursor().expect(Tok::LBrace, "to start the members of the class");
-  while (!parser_.tok_.is(Tok::RBrace) && !parser_.tok_.is(Tok::Eof)) {
+  this->parser.cursor().expect(Tok::LBrace, "to start the members of the class");
+  while (!this->parser.tok.is(Tok::RBrace) && !this->parser.tok.is(Tok::Eof)) {
     parseMember(cls);
   }
-  parser_.cursor().expect(Tok::RBrace, "to end the class");
+  this->parser.cursor().expect(Tok::RBrace, "to end the class");
   file.classes.push_back(std::move(cls));
 }
 
 bool DeclarationParser::memberWordAhead() const {
-  const Token &next = parser_.cursor().peek();
+  const Token &next = this->parser.cursor().peek();
 
   return next.is(Tok::Identifier) || TokenKinds::isKeyword(next.kind) ||
          next.is(Tok::StringLiteral) || next.is(Tok::LBracket);
@@ -137,10 +141,10 @@ void DeclarationParser::parseMember(DeclaredClass &cls) {
   DeclaredMember member;
   DeclaredField field;
   for (;;) {
-    if (!parser_.tok_.is(Tok::Identifier) || !memberWordAhead()) {
+    if (!this->parser.tok.is(Tok::Identifier) || !memberWordAhead()) {
       break;
     }
-    llvm::StringRef word = parser_.tok_.text;
+    llvm::StringRef word = this->parser.tok.text;
     if (word == "public" || word == "private" || word == "protected") {
       member.access = word == "public"    ? Access::Public
                       : word == "private" ? Access::Private
@@ -153,48 +157,49 @@ void DeclarationParser::parseMember(DeclaredClass &cls) {
     } else if (word != "async" && word != "abstract" && word != "override") {
       break;
     }
-    parser_.cursor().advance();
+    this->parser.cursor().advance();
   }
-  member.loc = parser_.tok_.loc();
-  if (parser_.classes().symbolKeyAhead()) {
-    if (!parser_.objectTypes().parseFieldName(member.name)) {
+  member.loc = this->parser.tok.loc();
+  if (this->parser.classes().symbolKeyAhead()) {
+    if (!this->parser.objectTypes().parseFieldName(member.name)) {
       skipItem();
       return;
     }
-  } else if (parser_.tok_.is(Tok::Identifier) || TokenKinds::isKeyword(parser_.tok_.kind)) {
-    member.name = parser_.tok_.text;
-    parser_.cursor().advance();
+  } else if (this->parser.tok.is(Tok::Identifier) || TokenKinds::isKeyword(this->parser.tok.kind)) {
+    member.name = this->parser.tok.text;
+    this->parser.cursor().advance();
   } else {
-    parser_.cursor().error(parser_.tok_.loc(), "expected the name of a member");
+    this->parser.cursor().error(this->parser.tok.loc(), "expected the name of a member");
     skipItem();
     return;
   }
   bool constructor = member.name == "constructor";
-  if (parser_.cursor().accept(Tok::Question)) {
+  if (this->parser.cursor().accept(Tok::Question)) {
     field.optional = true;
   }
-  if (parser_.tok_.is(Tok::LParen) || parser_.tok_.is(Tok::Less)) {
+  if (this->parser.tok.is(Tok::LParen) || this->parser.tok.is(Tok::Less)) {
     DeclaredSignature signature;
-    if (parser_.tok_.is(Tok::Less)) {
-      signature.typeParams = parser_.functions().parseTypeParams();
+    if (this->parser.tok.is(Tok::Less)) {
+      signature.typeParams = this->parser.functions().parseTypeParams();
     }
-    auto *fn = parser_.ctx_.make<FunctionDecl>(member.loc, member.name);
-    parser_.functions().parseParams(fn);
+    auto *fn = this->parser.ctx.make<FunctionDecl>(member.loc, member.name);
+    this->parser.functions().parseParams(fn);
     signature.params = fn->params;
     if (constructor) {
       member.form = DeclaredConstructor{.signature = std::move(signature)};
     } else {
       member.form = DeclaredMethod{.signature = std::move(signature)};
     }
-    if (parser_.cursor().accept(Tok::Colon)) {
-      member.type = parser_.types().parseReturnType();
+    if (this->parser.cursor().accept(Tok::Colon)) {
+      member.type = this->parser.types().parseReturnType();
     }
-    if (parser_.tok_.is(Tok::LBrace)) {
-      parser_.cursor().report(parser_.tok_.loc(), "a method of a declaration file has no body: "
-                                                  "its code is in the module");
+    if (this->parser.tok.is(Tok::LBrace)) {
+      this->parser.cursor().report(this->parser.tok.loc(),
+                                   "a method of a declaration file has no body: "
+                                   "its code is in the module");
       skipItem();
     } else {
-      parser_.cursor().expectSemicolon();
+      this->parser.cursor().expectSemicolon();
     }
     cls.members.push_back(std::move(member));
     return;
@@ -204,12 +209,12 @@ void DeclarationParser::parseMember(DeclaredClass &cls) {
   } else {
     member.form = field;
   }
-  if (parser_.cursor().accept(Tok::Colon)) {
-    member.type = parser_.types().parseType();
+  if (this->parser.cursor().accept(Tok::Colon)) {
+    member.type = this->parser.types().parseType();
   } else {
-    parser_.cursor().error(parser_.tok_.loc(), "expected ':' and the type of the field");
+    this->parser.cursor().error(this->parser.tok.loc(), "expected ':' and the type of the field");
   }
-  parser_.cursor().expectSemicolon();
+  this->parser.cursor().expectSemicolon();
   cls.members.push_back(std::move(member));
 }
 

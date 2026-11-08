@@ -21,7 +21,7 @@ public:
 
 private:
   SourcePlaces places_;
-  std::string entry_;
+  std::string entry;
 };
 
 }

@@ -89,6 +89,7 @@ struct FunctionDecl : Stmt {
   const FunctionDecl *thisSource() const;
 
   FunctionDecl *generic = nullptr;
+  const FunctionDecl *pristine = nullptr;
   llvm::StringRef listName;
   size_t listStart = 0;
   const Type *listType = nullptr;

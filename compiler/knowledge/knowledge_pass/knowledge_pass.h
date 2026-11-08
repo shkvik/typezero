@@ -34,7 +34,9 @@ public:
   size_t fieldSymbol(const ClassDecl *cls, llvm::StringRef name, bool isStatic) const;
   size_t typeSymbol(size_t module, llvm::StringRef name) const;
   size_t enumSymbol(const void *decl) const;
-  llvm::StringRef symbolKind(size_t symbol) const { return out_.symbols[symbol].kind; }
+  llvm::StringRef symbolKind(size_t symbol) const {
+    return this->out.symbols[symbol].kind;
+  }
   size_t enumMemberSymbol(size_t enumSymbol, llvm::StringRef name) const;
   const Program &program() const { return program_; }
   bool reference(size_t symbol, size_t from, size_t module, llvm::SMLoc loc, bool call);
@@ -59,23 +61,23 @@ private:
 
   const Program &program_;
   SourcePlaces places_;
-  Knowledge out_;
-  llvm::DenseMap<const Module *, size_t> moduleIndex_;
+  Knowledge out;
+  llvm::DenseMap<const Module *, size_t> moduleIndex;
   llvm::DenseMap<const FunctionDecl *, size_t> functions_;
-  llvm::DenseMap<const char *, size_t> declaredAt_;
+  llvm::DenseMap<const char *, size_t> declaredAt;
   llvm::DenseMap<const ClassDecl *, size_t> classes_;
-  llvm::DenseMap<const VarSymbol *, size_t> variables_;
-  std::map<std::tuple<const ClassDecl *, std::string, bool>, size_t> fields_;
-  llvm::DenseMap<const void *, size_t> enums_;
-  std::map<std::pair<size_t, std::string>, size_t> enumMembers_;
-  std::vector<llvm::StringMap<size_t>> scopes_;
-  llvm::DenseSet<std::pair<size_t, const char *>> seenReferences_;
-  llvm::DenseSet<const char *> seenTypes_;
-  llvm::DenseSet<const char *> seenBuiltins_;
-  llvm::DenseMap<const char *, size_t> locals_;
-  llvm::DenseSet<const char *> seenLocalUses_;
-  std::map<std::string, const Type *> memberTypes_;
-  std::set<std::string> keys_;
+  llvm::DenseMap<const VarSymbol *, size_t> variables;
+  std::map<std::tuple<const ClassDecl *, std::string, bool>, size_t> fields;
+  llvm::DenseMap<const void *, size_t> enums;
+  std::map<std::pair<size_t, std::string>, size_t> enumMembers;
+  std::vector<llvm::StringMap<size_t>> scopes;
+  llvm::DenseSet<std::pair<size_t, const char *>> seenReferences;
+  llvm::DenseSet<const char *> seenTypes;
+  llvm::DenseSet<const char *> seenBuiltins;
+  llvm::DenseMap<const char *, size_t> locals;
+  llvm::DenseSet<const char *> seenLocalUses;
+  std::map<std::string, const Type *> memberTypes;
+  std::set<std::string> keys;
 };
 
 }

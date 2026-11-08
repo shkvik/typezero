@@ -1,0 +1,202 @@
+type ReadFileError =
+  | { kind: "READ_FILE_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "READ_FILE_ERROR_WRONG_TYPE"; code: "EISDIR" | "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "READ_FILE_ERROR_PERMISSION"; code: "EACCES" | "EPERM"; message: string; syscall: string; path: string }
+  | { kind: "READ_FILE_ERROR_BUSY"; code: "EBUSY" | "EAGAIN" | "EMFILE" | "ENFILE"; message: string; syscall: string; path: string }
+  | { kind: "READ_FILE_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string }
+  | { kind: "READ_FILE_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "EBADF" | "UNKNOWN"; message: string; syscall: string; path: string }
+type WriteFileError =
+  | { kind: "WRITE_FILE_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "WRITE_FILE_ERROR_WRONG_TYPE"; code: "EISDIR" | "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "WRITE_FILE_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; message: string; syscall: string; path: string }
+  | { kind: "WRITE_FILE_ERROR_BUSY"; code: "EBUSY" | "ETXTBSY" | "EAGAIN" | "EMFILE" | "ENFILE"; message: string; syscall: string; path: string }
+  | { kind: "WRITE_FILE_ERROR_FULL"; code: "ENOSPC" | "EFBIG"; message: string; syscall: string; path: string }
+  | { kind: "WRITE_FILE_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string }
+  | { kind: "WRITE_FILE_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "EBADF" | "EPIPE" | "EOF" | "UNKNOWN"; message: string; syscall: string; path: string }
+type WriteNewFileError =
+  | { kind: "WRITE_NEW_FILE_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "WRITE_NEW_FILE_ERROR_EXISTS"; code: "EEXIST"; message: string; syscall: string; path: string }
+  | { kind: "WRITE_NEW_FILE_ERROR_WRONG_TYPE"; code: "EISDIR" | "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "WRITE_NEW_FILE_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; message: string; syscall: string; path: string }
+  | { kind: "WRITE_NEW_FILE_ERROR_BUSY"; code: "EBUSY" | "ETXTBSY" | "EAGAIN" | "EMFILE" | "ENFILE"; message: string; syscall: string; path: string }
+  | { kind: "WRITE_NEW_FILE_ERROR_FULL"; code: "ENOSPC" | "EFBIG"; message: string; syscall: string; path: string }
+  | { kind: "WRITE_NEW_FILE_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string }
+  | { kind: "WRITE_NEW_FILE_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "EBADF" | "EPIPE" | "EOF" | "UNKNOWN"; message: string; syscall: string; path: string }
+type AppendFileError =
+  | { kind: "APPEND_FILE_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "APPEND_FILE_ERROR_WRONG_TYPE"; code: "EISDIR" | "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "APPEND_FILE_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; message: string; syscall: string; path: string }
+  | { kind: "APPEND_FILE_ERROR_BUSY"; code: "EBUSY" | "ETXTBSY" | "EAGAIN" | "EMFILE" | "ENFILE"; message: string; syscall: string; path: string }
+  | { kind: "APPEND_FILE_ERROR_FULL"; code: "ENOSPC" | "EFBIG"; message: string; syscall: string; path: string }
+  | { kind: "APPEND_FILE_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string }
+  | { kind: "APPEND_FILE_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "EBADF" | "EPIPE" | "EOF" | "UNKNOWN"; message: string; syscall: string; path: string }
+type AppendNewFileError =
+  | { kind: "APPEND_NEW_FILE_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "APPEND_NEW_FILE_ERROR_EXISTS"; code: "EEXIST"; message: string; syscall: string; path: string }
+  | { kind: "APPEND_NEW_FILE_ERROR_WRONG_TYPE"; code: "EISDIR" | "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "APPEND_NEW_FILE_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; message: string; syscall: string; path: string }
+  | { kind: "APPEND_NEW_FILE_ERROR_BUSY"; code: "EBUSY" | "ETXTBSY" | "EAGAIN" | "EMFILE" | "ENFILE"; message: string; syscall: string; path: string }
+  | { kind: "APPEND_NEW_FILE_ERROR_FULL"; code: "ENOSPC" | "EFBIG"; message: string; syscall: string; path: string }
+  | { kind: "APPEND_NEW_FILE_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string }
+  | { kind: "APPEND_NEW_FILE_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "EBADF" | "EPIPE" | "EOF" | "UNKNOWN"; message: string; syscall: string; path: string }
+type TruncateError =
+  | { kind: "TRUNCATE_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "TRUNCATE_ERROR_WRONG_TYPE"; code: "EISDIR" | "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "TRUNCATE_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; message: string; syscall: string; path: string }
+  | { kind: "TRUNCATE_ERROR_BUSY"; code: "EBUSY" | "ETXTBSY" | "EMFILE" | "ENFILE"; message: string; syscall: string; path: string }
+  | { kind: "TRUNCATE_ERROR_FULL"; code: "ENOSPC" | "EFBIG"; message: string; syscall: string; path: string }
+  | { kind: "TRUNCATE_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string }
+  | { kind: "TRUNCATE_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string }
+type AccessError =
+  | { kind: "ACCESS_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "ACCESS_ERROR_WRONG_TYPE"; code: "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "ACCESS_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; message: string; syscall: string; path: string }
+  | { kind: "ACCESS_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string }
+  | { kind: "ACCESS_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string }
+type ChangeModeError =
+  | { kind: "CHANGE_MODE_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "CHANGE_MODE_ERROR_WRONG_TYPE"; code: "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "CHANGE_MODE_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; message: string; syscall: string; path: string }
+  | { kind: "CHANGE_MODE_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string }
+  | { kind: "CHANGE_MODE_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string }
+type StatusError =
+  | { kind: "STATUS_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "STATUS_ERROR_WRONG_TYPE"; code: "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "STATUS_ERROR_PERMISSION"; code: "EACCES" | "EPERM"; message: string; syscall: string; path: string }
+  | { kind: "STATUS_ERROR_BUSY"; code: "EBUSY"; message: string; syscall: string; path: string }
+  | { kind: "STATUS_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string }
+  | { kind: "STATUS_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string }
+type StatusIfExistsError =
+  | { kind: "STATUS_IF_EXISTS_ERROR_WRONG_TYPE"; code: "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "STATUS_IF_EXISTS_ERROR_PERMISSION"; code: "EACCES" | "EPERM"; message: string; syscall: string; path: string }
+  | { kind: "STATUS_IF_EXISTS_ERROR_BUSY"; code: "EBUSY"; message: string; syscall: string; path: string }
+  | { kind: "STATUS_IF_EXISTS_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string }
+  | { kind: "STATUS_IF_EXISTS_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string }
+type LinkStatusError =
+  | { kind: "LINK_STATUS_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "LINK_STATUS_ERROR_WRONG_TYPE"; code: "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "LINK_STATUS_ERROR_PERMISSION"; code: "EACCES" | "EPERM"; message: string; syscall: string; path: string }
+  | { kind: "LINK_STATUS_ERROR_BUSY"; code: "EBUSY"; message: string; syscall: string; path: string }
+  | { kind: "LINK_STATUS_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string }
+  | { kind: "LINK_STATUS_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string }
+type LinkStatusIfExistsError =
+  | { kind: "LINK_STATUS_IF_EXISTS_ERROR_WRONG_TYPE"; code: "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "LINK_STATUS_IF_EXISTS_ERROR_PERMISSION"; code: "EACCES" | "EPERM"; message: string; syscall: string; path: string }
+  | { kind: "LINK_STATUS_IF_EXISTS_ERROR_BUSY"; code: "EBUSY"; message: string; syscall: string; path: string }
+  | { kind: "LINK_STATUS_IF_EXISTS_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string }
+  | { kind: "LINK_STATUS_IF_EXISTS_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string }
+type ReadDirectoryError =
+  | { kind: "READ_DIRECTORY_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "READ_DIRECTORY_ERROR_WRONG_TYPE"; code: "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "READ_DIRECTORY_ERROR_PERMISSION"; code: "EACCES" | "EPERM"; message: string; syscall: string; path: string }
+  | { kind: "READ_DIRECTORY_ERROR_BUSY"; code: "EMFILE" | "ENFILE"; message: string; syscall: string; path: string }
+  | { kind: "READ_DIRECTORY_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL" | "ECHARSET"; message: string; syscall: string; path: string }
+  | { kind: "READ_DIRECTORY_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string }
+type RealPathError =
+  | { kind: "REAL_PATH_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "REAL_PATH_ERROR_WRONG_TYPE"; code: "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "REAL_PATH_ERROR_PERMISSION"; code: "EACCES" | "EPERM"; message: string; syscall: string; path: string }
+  | { kind: "REAL_PATH_ERROR_BUSY"; code: "EBUSY"; message: string; syscall: string; path: string }
+  | { kind: "REAL_PATH_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL" | "ECHARSET"; message: string; syscall: string; path: string }
+  | { kind: "REAL_PATH_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string }
+type MakeDirectoryError =
+  | { kind: "MAKE_DIRECTORY_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "MAKE_DIRECTORY_ERROR_EXISTS"; code: "EEXIST"; message: string; syscall: string; path: string }
+  | { kind: "MAKE_DIRECTORY_ERROR_WRONG_TYPE"; code: "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "MAKE_DIRECTORY_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; message: string; syscall: string; path: string }
+  | { kind: "MAKE_DIRECTORY_ERROR_FULL"; code: "ENOSPC" | "EMLINK"; message: string; syscall: string; path: string }
+  | { kind: "MAKE_DIRECTORY_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string }
+  | { kind: "MAKE_DIRECTORY_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string }
+type MakeTemporaryDirectoryError =
+  | { kind: "MAKE_TEMPORARY_DIRECTORY_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "MAKE_TEMPORARY_DIRECTORY_ERROR_WRONG_TYPE"; code: "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "MAKE_TEMPORARY_DIRECTORY_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; message: string; syscall: string; path: string }
+  | { kind: "MAKE_TEMPORARY_DIRECTORY_ERROR_FULL"; code: "ENOSPC" | "EMLINK"; message: string; syscall: string; path: string }
+  | { kind: "MAKE_TEMPORARY_DIRECTORY_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string }
+  | { kind: "MAKE_TEMPORARY_DIRECTORY_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string }
+type RemoveDirectoryError =
+  | { kind: "REMOVE_DIRECTORY_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "REMOVE_DIRECTORY_ERROR_NOT_EMPTY"; code: "ENOTEMPTY"; message: string; syscall: string; path: string }
+  | { kind: "REMOVE_DIRECTORY_ERROR_WRONG_TYPE"; code: "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "REMOVE_DIRECTORY_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; message: string; syscall: string; path: string }
+  | { kind: "REMOVE_DIRECTORY_ERROR_BUSY"; code: "EBUSY"; message: string; syscall: string; path: string }
+  | { kind: "REMOVE_DIRECTORY_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string }
+  | { kind: "REMOVE_DIRECTORY_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string }
+type UnlinkError =
+  | { kind: "UNLINK_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "UNLINK_ERROR_WRONG_TYPE"; code: "EISDIR" | "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "UNLINK_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; message: string; syscall: string; path: string }
+  | { kind: "UNLINK_ERROR_BUSY"; code: "EBUSY"; message: string; syscall: string; path: string }
+  | { kind: "UNLINK_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string }
+  | { kind: "UNLINK_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string }
+type RemoveError =
+  | { kind: "REMOVE_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string }
+  | { kind: "REMOVE_ERROR_NOT_EMPTY"; code: "ENOTEMPTY"; message: string; syscall: string; path: string }
+  | { kind: "REMOVE_ERROR_WRONG_TYPE"; code: "EISDIR" | "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "REMOVE_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; message: string; syscall: string; path: string }
+  | { kind: "REMOVE_ERROR_BUSY"; code: "EBUSY" | "EMFILE" | "ENFILE"; message: string; syscall: string; path: string }
+  | { kind: "REMOVE_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL" | "ECHARSET"; message: string; syscall: string; path: string }
+  | { kind: "REMOVE_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string }
+type ForceRemoveError =
+  | { kind: "FORCE_REMOVE_ERROR_NOT_EMPTY"; code: "ENOTEMPTY"; message: string; syscall: string; path: string }
+  | { kind: "FORCE_REMOVE_ERROR_WRONG_TYPE"; code: "EISDIR" | "ENOTDIR"; message: string; syscall: string; path: string }
+  | { kind: "FORCE_REMOVE_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; message: string; syscall: string; path: string }
+  | { kind: "FORCE_REMOVE_ERROR_BUSY"; code: "EBUSY" | "EMFILE" | "ENFILE"; message: string; syscall: string; path: string }
+  | { kind: "FORCE_REMOVE_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL" | "ECHARSET"; message: string; syscall: string; path: string }
+  | { kind: "FORCE_REMOVE_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string }
+type RenameError =
+  | { kind: "RENAME_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "RENAME_ERROR_EXISTS"; code: "EEXIST"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "RENAME_ERROR_WRONG_TYPE"; code: "ENOTDIR"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "RENAME_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "RENAME_ERROR_BUSY"; code: "EBUSY"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "RENAME_ERROR_FULL"; code: "ENOSPC" | "EMLINK"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "RENAME_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "RENAME_ERROR_UNSUPPORTED"; code: "EXDEV"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "RENAME_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string; dest: string }
+type ReplaceError =
+  | { kind: "REPLACE_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "REPLACE_ERROR_NOT_EMPTY"; code: "ENOTEMPTY" | "EEXIST"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "REPLACE_ERROR_WRONG_TYPE"; code: "EISDIR" | "ENOTDIR"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "REPLACE_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "REPLACE_ERROR_BUSY"; code: "EBUSY"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "REPLACE_ERROR_FULL"; code: "ENOSPC" | "EMLINK"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "REPLACE_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "REPLACE_ERROR_UNSUPPORTED"; code: "EXDEV"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "REPLACE_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string; dest: string }
+type CopyFileError =
+  | { kind: "COPY_FILE_ERROR_NOT_FOUND"; code: "ENOENT"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "COPY_FILE_ERROR_EXISTS"; code: "EEXIST"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "COPY_FILE_ERROR_WRONG_TYPE"; code: "EISDIR" | "ENOTDIR"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "COPY_FILE_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "COPY_FILE_ERROR_BUSY"; code: "EBUSY" | "ETXTBSY" | "EMFILE" | "ENFILE"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "COPY_FILE_ERROR_FULL"; code: "ENOSPC" | "EFBIG"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "COPY_FILE_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; message: string; syscall: string; path: string; dest: string }
+  | { kind: "COPY_FILE_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "UNKNOWN"; message: string; syscall: string; path: string; dest: string }
+interface ReadStreamErrorNotFound extends StreamError { kind: "READ_STREAM_ERROR_NOT_FOUND"; code: "ENOENT"; syscall: string; path: string }
+interface ReadStreamErrorWrongType extends StreamError { kind: "READ_STREAM_ERROR_WRONG_TYPE"; code: "EISDIR" | "ENOTDIR"; syscall: string; path: string }
+interface ReadStreamErrorPermission extends StreamError { kind: "READ_STREAM_ERROR_PERMISSION"; code: "EACCES" | "EPERM"; syscall: string; path: string }
+interface ReadStreamErrorBusy extends StreamError { kind: "READ_STREAM_ERROR_BUSY"; code: "EBUSY" | "EAGAIN" | "EMFILE" | "ENFILE"; syscall: string; path: string }
+interface ReadStreamErrorPath extends StreamError { kind: "READ_STREAM_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; syscall: string; path: string }
+interface ReadStreamErrorSystem extends StreamError { kind: "READ_STREAM_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "EBADF" | "UNKNOWN"; syscall: string; path: string }
+interface ReadStreamErrorInvalidRange extends StreamError { kind: "READ_STREAM_ERROR_INVALID_RANGE"; code: "ERR_OUT_OF_RANGE"; path: string }
+type ReadStreamError = ReadStreamErrorNotFound | ReadStreamErrorWrongType | ReadStreamErrorPermission | ReadStreamErrorBusy | ReadStreamErrorPath | ReadStreamErrorSystem | ReadStreamErrorInvalidRange
+interface WriteStreamErrorNotFound extends StreamError { kind: "WRITE_STREAM_ERROR_NOT_FOUND"; code: "ENOENT"; syscall: string; path: string }
+interface WriteStreamErrorWrongType extends StreamError { kind: "WRITE_STREAM_ERROR_WRONG_TYPE"; code: "EISDIR" | "ENOTDIR"; syscall: string; path: string }
+interface WriteStreamErrorPermission extends StreamError { kind: "WRITE_STREAM_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; syscall: string; path: string }
+interface WriteStreamErrorBusy extends StreamError { kind: "WRITE_STREAM_ERROR_BUSY"; code: "EBUSY" | "ETXTBSY" | "EAGAIN" | "EMFILE" | "ENFILE"; syscall: string; path: string }
+interface WriteStreamErrorFull extends StreamError { kind: "WRITE_STREAM_ERROR_FULL"; code: "ENOSPC" | "EFBIG"; syscall: string; path: string }
+interface WriteStreamErrorPath extends StreamError { kind: "WRITE_STREAM_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; syscall: string; path: string }
+interface WriteStreamErrorSystem extends StreamError { kind: "WRITE_STREAM_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "EBADF" | "EPIPE" | "EOF" | "UNKNOWN"; syscall: string; path: string }
+interface WriteStreamErrorInvalidRange extends StreamError { kind: "WRITE_STREAM_ERROR_INVALID_RANGE"; code: "ERR_OUT_OF_RANGE"; path: string }
+type WriteStreamError = WriteStreamErrorNotFound | WriteStreamErrorWrongType | WriteStreamErrorPermission | WriteStreamErrorBusy | WriteStreamErrorFull | WriteStreamErrorPath | WriteStreamErrorSystem | WriteStreamErrorInvalidRange
+interface WriteNewStreamErrorNotFound extends StreamError { kind: "WRITE_NEW_STREAM_ERROR_NOT_FOUND"; code: "ENOENT"; syscall: string; path: string }
+interface WriteNewStreamErrorExists extends StreamError { kind: "WRITE_NEW_STREAM_ERROR_EXISTS"; code: "EEXIST"; syscall: string; path: string }
+interface WriteNewStreamErrorWrongType extends StreamError { kind: "WRITE_NEW_STREAM_ERROR_WRONG_TYPE"; code: "EISDIR" | "ENOTDIR"; syscall: string; path: string }
+interface WriteNewStreamErrorPermission extends StreamError { kind: "WRITE_NEW_STREAM_ERROR_PERMISSION"; code: "EACCES" | "EPERM" | "EROFS"; syscall: string; path: string }
+interface WriteNewStreamErrorBusy extends StreamError { kind: "WRITE_NEW_STREAM_ERROR_BUSY"; code: "EBUSY" | "ETXTBSY" | "EAGAIN" | "EMFILE" | "ENFILE"; syscall: string; path: string }
+interface WriteNewStreamErrorFull extends StreamError { kind: "WRITE_NEW_STREAM_ERROR_FULL"; code: "ENOSPC" | "EFBIG"; syscall: string; path: string }
+interface WriteNewStreamErrorPath extends StreamError { kind: "WRITE_NEW_STREAM_ERROR_PATH"; code: "ERR_INVALID_PATH" | "ENAMETOOLONG" | "ELOOP" | "EINVAL"; syscall: string; path: string }
+interface WriteNewStreamErrorSystem extends StreamError { kind: "WRITE_NEW_STREAM_ERROR_SYSTEM"; code: "EIO" | "ENOMEM" | "ETIMEDOUT" | "EBADF" | "EPIPE" | "EOF" | "UNKNOWN"; syscall: string; path: string }
+interface WriteNewStreamErrorInvalidRange extends StreamError { kind: "WRITE_NEW_STREAM_ERROR_INVALID_RANGE"; code: "ERR_OUT_OF_RANGE"; path: string }
+type WriteNewStreamError = WriteNewStreamErrorNotFound | WriteNewStreamErrorExists | WriteNewStreamErrorWrongType | WriteNewStreamErrorPermission | WriteNewStreamErrorBusy | WriteNewStreamErrorFull | WriteNewStreamErrorPath | WriteNewStreamErrorSystem | WriteNewStreamErrorInvalidRange

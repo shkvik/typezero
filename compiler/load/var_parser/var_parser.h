@@ -14,7 +14,7 @@ public:
   void recordConstant(llvm::StringRef name, const Expr *init);
 
 private:
-  Parser &parser_;
+  Parser &parser;
 };
 
 }

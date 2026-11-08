@@ -16,7 +16,7 @@ private:
   void parseMember(DeclaredClass &cls);
   bool memberWordAhead() const;
   void skipItem();
-  Parser &parser_;
+  Parser &parser;
 };
 
 }

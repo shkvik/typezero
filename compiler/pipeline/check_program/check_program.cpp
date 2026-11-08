@@ -1,22 +1,21 @@
 #include "compiler/pipeline/check_program/check_program.h"
-#include "compiler/library/feature_registry/feature_registry.h"
 #include "compiler/load/load_pass/load_pass.h"
 #include "compiler/pipeline/build_options/build_options.h"
-#include "compiler/pipeline/check_program/check/check_pass/check_pass.h"
-#include "compiler/pipeline/check_program/check_state/check_state.h"
-#include "compiler/pipeline/check_program/declare/declare_pass/declare_pass.h"
+#include "compiler/pipeline/check_program/check_pass/check_pass.h"
+#include "compiler/pipeline/check_program/declare_pass/declare_pass.h"
 #include "compiler/pipeline/check_program/event_rounds/event_rounds.h"
-#include "compiler/pipeline/check_program/infer/infer_pass/infer_pass.h"
-#include "compiler/pipeline/check_program/instances/instances_pass/instances_pass.h"
-#include "compiler/pipeline/check_program/overflow/overflow_pass/overflow_pass.h"
-#include "compiler/pipeline/check_program/whole_program/whole_program_pass/whole_program_pass.h"
+#include "compiler/pipeline/check_program/infer_pass/infer_pass.h"
+#include "compiler/pipeline/check_program/instances_pass/instances_pass.h"
+#include "compiler/pipeline/check_program/interprocedural_pass/interprocedural_pass.h"
+#include "compiler/pipeline/check_program/overflow_pass/overflow_pass.h"
 #include "compiler/pipeline/pass_times/pass_times.h"
 #include "compiler/program/program/program.h"
+#include "compiler/semantic/semantic_external.h"
+#include "llvm/ADT/STLExtras.h"
 
 namespace tz {
 
 Errors checkProgram(Program &program, const BuildOptions &options, PassTimes *times) {
-  FeatureRegistry features;
   EventRounds rounds;
   PassTimes unused;
   PassTimes &clock = times ? *times : unused;
@@ -30,17 +29,17 @@ Errors checkProgram(Program &program, const BuildOptions &options, PassTimes *ti
       return errors;
     }
 
-    CheckState state(*program.asts.back(), *program.diags, program.file, features,
-                     rounds.inference());
-    DeclarePass declare(state, program.file);
+    SemanticExternalFacade engine(*program.asts.back(), *program.diags, program.file,
+                                  rounds.inference());
+    DeclarePass declare(engine, program);
     errors.add(declare.run());
     clock.stop("declare");
 
-    InferPass infer(state);
+    InferPass infer(engine);
     errors.add(infer.run());
     clock.stop("infer");
 
-    CheckPass check(state, program.file);
+    CheckPass check(engine);
     CheckPass::ResultChecked checked = check.run();
     if (checked.isErr()) {
       errors.add(checked.error());
@@ -56,12 +55,16 @@ Errors checkProgram(Program &program, const BuildOptions &options, PassTimes *ti
     }
     clock.stop("check");
 
-    InstancesPass instances(state);
+    InstancesPass instances(engine);
     errors.add(instances.run());
     clock.stop("instances");
 
-    WholeProgramPass whole(state, program);
-    errors.add(whole.run());
+    InterproceduralPass interprocedural(engine, program);
+    interprocedural.checkLoadOrder();
+    engine.finishProgram();
+    program.file.inventory = engine.takeInventory();
+    llvm::append_range(program.file.items, program.file.inventory.lateClasses);
+    errors.add(interprocedural.checkValueFlows());
     clock.stop("whole program");
     if (rounds.again()) {
       continue;

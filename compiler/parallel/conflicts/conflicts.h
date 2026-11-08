@@ -20,7 +20,7 @@ public:
 private:
   void placeWaits();
   bool reachers(const FunctionDecl *home, std::vector<unsigned> &out) const;
-  Analysis &analysis_;
+  Analysis &analysis;
 };
 
 }

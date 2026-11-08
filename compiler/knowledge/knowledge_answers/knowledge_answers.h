@@ -38,7 +38,7 @@ private:
                                                 std::vector<size_t> &modules) const;
   std::vector<size_t> problemsIn(size_t symbol) const;
 
-  const Knowledge &knowledge_;
+  const Knowledge &knowledge;
   ProjectText &text_;
 };
 

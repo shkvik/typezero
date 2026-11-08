@@ -1,4 +1,5 @@
 #include "compiler/program/types/template_patterns/template_patterns.h"
+#include "compiler/program/to_utf8/to_utf8.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -18,15 +19,6 @@
 #include <tuple>
 
 namespace tz {
-
-std::string TemplatePatterns::utf8Text(const std::u16string &text) {
-  std::string utf8;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      utf8);
-
-  return utf8;
-}
 
 bool TemplatePatterns::splitByTemplate(const std::u16string &text,
                                        llvm::ArrayRef<std::u16string> texts,
@@ -153,7 +145,7 @@ bool TemplatePatterns::holeAccepts(const Type *hole, const std::u16string &part)
            value >= double(hole->intMin()) && value <= double(hole->intMax());
   case Type::Kind::Literal:
     return hole->isStringLiteral() ? part == hole->literalText()
-                                   : TemplatePatterns::utf8Text(part) == hole->name();
+                                   : ToUtf8::toUtf8(part) == hole->name();
   case Type::Kind::Union:
     return llvm::any_of(hole->members(),
                         [&](const Type *m) { return TemplatePatterns::holeAccepts(m, part); });

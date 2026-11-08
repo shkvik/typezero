@@ -1,11 +1,11 @@
 #include "compiler/lower/values/number_lowerer/number_lowerer.h"
-#include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
-#include "compiler/library/math/math_lowerer/math_lowerer.h"
-#include "compiler/library/process/process_lowerer/process_lowerer.h"
-#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
+#include "compiler/lower/library/decimal/decimal_lowerer/decimal_lowerer.h"
+#include "compiler/lower/library/math/math_lowerer/math_lowerer.h"
+#include "compiler/lower/library/process/process_lowerer/process_lowerer.h"
+#include "compiler/lower/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
@@ -22,10 +22,10 @@ NumberLowerer::NumberLowerer(Lowering &owner)
     : lowering(owner) {}
 
 llvm::Value *NumberLowerer::toI64(llvm::Value *value, const Type *type) {
-  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+  llvm::Type *i64 = this->lowering.builder.getInt64Ty();
 
-  return type->isUnsigned() ? this->lowering.builder_.CreateZExtOrTrunc(value, i64)
-                            : this->lowering.builder_.CreateSExtOrTrunc(value, i64);
+  return type->isUnsigned() ? this->lowering.builder.CreateZExtOrTrunc(value, i64)
+                            : this->lowering.builder.CreateSExtOrTrunc(value, i64);
 }
 
 llvm::Value *NumberLowerer::emitCheckedIntCast(llvm::Value *value, const Type *from,
@@ -33,7 +33,7 @@ llvm::Value *NumberLowerer::emitCheckedIntCast(llvm::Value *value, const Type *f
   if (to->holds(from)) {
     return this->intCast(value, from, to);
   }
-  llvm::IRBuilder<> &b = this->lowering.builder_;
+  llvm::IRBuilder<> &b = this->lowering.builder;
   llvm::Type *i64 = b.getInt64Ty();
   llvm::Value *wide = this->toI64(value, from);
   llvm::Value *fits = b.getTrue();
@@ -50,7 +50,7 @@ llvm::Value *NumberLowerer::emitCheckedIntCast(llvm::Value *value, const Type *f
   llvm::BasicBlock *badBlock = this->lowering.functionFrame().newBlock("int.does.not.fit");
   llvm::BasicBlock *okBlock = this->lowering.functionFrame().newBlock("int.fits");
   b.CreateCondBr(fits, okBlock, badBlock,
-                 llvm::MDBuilder(this->lowering.ctx_).createLikelyBranchWeights());
+                 llvm::MDBuilder(this->lowering.ctx).createLikelyBranchWeights());
   this->lowering.functionFrame().switchTo(badBlock);
   b.CreateCall(this->lowering.processLowerer().processFunction(
                    "tz_panic_int_does_not_fit", b.getVoidTy(), {i64, b.getInt32Ty(), b.getPtrTy()}),
@@ -64,26 +64,26 @@ llvm::Value *NumberLowerer::emitCheckedIntCast(llvm::Value *value, const Type *f
 llvm::Value *NumberLowerer::intCast(llvm::Value *value, const Type *from, const Type *to) {
   llvm::Type *target = this->lowering.moduleBuilder().lower(to);
 
-  return from->isUnsigned() ? this->lowering.builder_.CreateZExtOrTrunc(value, target)
-                            : this->lowering.builder_.CreateSExtOrTrunc(value, target);
+  return from->isUnsigned() ? this->lowering.builder.CreateZExtOrTrunc(value, target)
+                            : this->lowering.builder.CreateSExtOrTrunc(value, target);
 }
 
 llvm::Value *NumberLowerer::toDouble(llvm::Value *value, const Type *from) {
-  llvm::Type *f64 = this->lowering.builder_.getDoubleTy();
+  llvm::Type *f64 = this->lowering.builder.getDoubleTy();
 
-  return from->isUnsigned() ? this->lowering.builder_.CreateUIToFP(value, f64)
-                            : this->lowering.builder_.CreateSIToFP(value, f64);
+  return from->isUnsigned() ? this->lowering.builder.CreateUIToFP(value, f64)
+                            : this->lowering.builder.CreateSIToFP(value, f64);
 }
 
 llvm::Value *NumberLowerer::fromDouble(llvm::Value *value, const Type *to) {
   llvm::Type *target = this->lowering.moduleBuilder().lower(to);
 
-  return to->isUnsigned() ? this->lowering.builder_.CreateFPToUI(value, target)
-                          : this->lowering.builder_.CreateFPToSI(value, target);
+  return to->isUnsigned() ? this->lowering.builder.CreateFPToUI(value, target)
+                          : this->lowering.builder.CreateFPToSI(value, target);
 }
 
 llvm::Value *NumberLowerer::emitCheckedInteger(llvm::Value *value, const Type *to) {
-  llvm::Type *f64 = this->lowering.builder_.getDoubleTy();
+  llvm::Type *f64 = this->lowering.builder.getDoubleTy();
   double lowest = double(to->intMin());
   double above = to->bitWidth() == 64
                      ? (to->isUnsigned() ? 18446744073709551616.0 : 9223372036854775808.0)
@@ -91,32 +91,31 @@ llvm::Value *NumberLowerer::emitCheckedInteger(llvm::Value *value, const Type *t
   llvm::Value *low = llvm::ConstantFP::get(f64, lowest);
   llvm::Value *high = llvm::ConstantFP::get(f64, above);
   llvm::Value *fits =
-      this->lowering.builder_.CreateAnd(this->lowering.builder_.CreateFCmpOGE(value, low),
-                                        this->lowering.builder_.CreateFCmpOLT(value, high));
+      this->lowering.builder.CreateAnd(this->lowering.builder.CreateFCmpOGE(value, low),
+                                       this->lowering.builder.CreateFCmpOLT(value, high));
   llvm::BasicBlock *badBlock = this->lowering.functionFrame().newBlock("int.does.not.fit");
   llvm::BasicBlock *okBlock = this->lowering.functionFrame().newBlock("int.fits");
-  this->lowering.builder_.CreateCondBr(
-      fits, okBlock, badBlock, llvm::MDBuilder(this->lowering.ctx_).createLikelyBranchWeights());
+  this->lowering.builder.CreateCondBr(
+      fits, okBlock, badBlock, llvm::MDBuilder(this->lowering.ctx).createLikelyBranchWeights());
   this->lowering.functionFrame().switchTo(badBlock);
-  this->lowering.builder_.CreateCall(
-      this->lowering.processLowerer().processFunction("tz_panic_does_not_fit",
-                                                      this->lowering.builder_.getVoidTy(),
-                                                      {f64, this->lowering.builder_.getPtrTy()}),
-      {value, this->lowering.builder_.CreateGlobalString(to->name())});
-  this->lowering.builder_.CreateUnreachable();
+  this->lowering.builder.CreateCall(this->lowering.processLowerer().processFunction(
+                                        "tz_panic_does_not_fit", this->lowering.builder.getVoidTy(),
+                                        {f64, this->lowering.builder.getPtrTy()}),
+                                    {value, this->lowering.builder.CreateGlobalString(to->name())});
+  this->lowering.builder.CreateUnreachable();
   this->lowering.functionFrame().switchTo(okBlock);
 
   return this->fromDouble(value, to);
 }
 
 llvm::Value *NumberLowerer::emitStringToNumber(llvm::Value *str) {
-  return this->lowering.builder_.CreateCall(this->lowering.rt_.strToNumber,
-                                            {this->lowering.stringLowerer().stringObj(str),
-                                             this->lowering.stringLowerer().stringMeta(str)});
+  return this->lowering.builder.CreateCall(this->lowering.rt_.strToNumber,
+                                           {this->lowering.stringLowerer().stringObj(str),
+                                            this->lowering.stringLowerer().stringMeta(str)});
 }
 
 llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
-  llvm::Type *f64 = this->lowering.builder_.getDoubleTy();
+  llvm::Type *f64 = this->lowering.builder.getDoubleTy();
   bool hasArg = !call->args.empty();
   const Type *argType = hasArg ? call->args[0]->type : nullptr;
 
@@ -128,12 +127,12 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
       Lowering::Operand value = this->lowering.refCounts().emitOperand(call->args[0], true);
       const Type *base = argType;
       llvm::Value *v = value.value;
-      llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+      llvm::Type *i64 = this->lowering.builder.getInt64Ty();
       if (base->isString() && call->type->isResult()) {
-        llvm::Value *parsed = this->lowering.builder_.CreateCall(
+        llvm::Value *parsed = this->lowering.builder.CreateCall(
             this->lowering.processLowerer().processFunction(
                 "tz_str_to_number_r", f64,
-                {this->lowering.builder_.getPtrTy(), i64, this->lowering.builder_.getPtrTy()}),
+                {this->lowering.builder.getPtrTy(), i64, this->lowering.builder.getPtrTy()}),
             {this->lowering.stringLowerer().stringObj(v),
              this->lowering.stringLowerer().stringMeta(v),
              this->lowering.resultLowerer().failureMaker(call->type->errType())});
@@ -142,12 +141,12 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
       }
       llvm::Value *number =
           base->isString() ? this->emitStringToNumber(v)
-          : base->isBool() ? this->lowering.builder_.CreateUIToFP(v, f64)
+          : base->isBool() ? this->lowering.builder.CreateUIToFP(v, f64)
           : base->isDecimal()
-              ? this->lowering.builder_.CreateCall(this->lowering.decimalLowerer().decimalFunction(
-                                                       "tz_dec_to_f64", f64, {i64, i64}),
-                                                   {this->lowering.decimalLowerer().decimalCoef(v),
-                                                    this->lowering.decimalLowerer().decimalMeta(v)})
+              ? this->lowering.builder.CreateCall(this->lowering.decimalLowerer().decimalFunction(
+                                                      "tz_dec_to_f64", f64, {i64, i64}),
+                                                  {this->lowering.decimalLowerer().decimalCoef(v),
+                                                   this->lowering.decimalLowerer().decimalMeta(v)})
           : base->isInteger() ? this->toDouble(v, base)
                               : v;
       this->lowering.refCounts().dropOperand(value);
@@ -158,21 +157,21 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
       bool isInt = call->builtin() == Builtin::ParseInt;
       Lowering::Operand str = this->lowering.refCounts().emitOperand(
           call->args[0], call->args.size() == 1 || AssignLowerer::cannotAssign(call->args[1]));
-      llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-      llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+      llvm::Type *ptr = this->lowering.builder.getPtrTy();
+      llvm::Type *i64 = this->lowering.builder.getInt64Ty();
       llvm::Value *maker = this->lowering.resultLowerer().failureMaker(call->type->errType());
       llvm::Value *result;
       if (isInt) {
         llvm::Value *radix = call->args.size() > 1
                                  ? this->lowering.exprLowerer().emitExpr(call->args[1])
-                                 : this->lowering.builder_.getInt64(0);
-        result = this->lowering.builder_.CreateCall(
+                                 : this->lowering.builder.getInt64(0);
+        result = this->lowering.builder.CreateCall(
             this->lowering.processLowerer().processFunction("tz_parse_int_r", i64,
                                                             {ptr, i64, i64, ptr}),
             {this->lowering.stringLowerer().stringObj(str.value),
              this->lowering.stringLowerer().stringMeta(str.value), radix, maker});
       } else {
-        result = this->lowering.builder_.CreateCall(
+        result = this->lowering.builder.CreateCall(
             this->lowering.processLowerer().processFunction("tz_parse_float_r", f64,
                                                             {ptr, i64, ptr}),
             {this->lowering.stringLowerer().stringObj(str.value),
@@ -185,33 +184,32 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
     case Builtin::IsSafeInteger: {
       llvm::Value *x = this->lowering.exprLowerer().emitExpr(call->args[0]);
       if (argType->isInteger() && argType->bitWidth() < 64) {
-        return this->lowering.builder_.getTrue();
+        return this->lowering.builder.getTrue();
       }
       if (argType->isInteger()) {
         if (call->builtin() != Builtin::IsSafeInteger) {
-          return this->lowering.builder_.getTrue();
+          return this->lowering.builder.getTrue();
         }
-        llvm::Value *limit = this->lowering.builder_.getInt64((int64_t(1) << 53) - 1);
+        llvm::Value *limit = this->lowering.builder.getInt64((int64_t(1) << 53) - 1);
         if (argType->isUnsigned()) {
-          return this->lowering.builder_.CreateICmpULE(x, limit);
+          return this->lowering.builder.CreateICmpULE(x, limit);
         }
-        return this->lowering.builder_.CreateICmpULE(
-            this->lowering.builder_.CreateAdd(x, limit),
-            this->lowering.builder_.CreateAdd(limit, limit));
+        return this->lowering.builder.CreateICmpULE(this->lowering.builder.CreateAdd(x, limit),
+                                                    this->lowering.builder.CreateAdd(limit, limit));
       }
       llvm::Value *magnitude =
-          this->lowering.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::fabs, x);
+          this->lowering.builder.CreateUnaryIntrinsic(llvm::Intrinsic::fabs, x);
       llvm::Value *finite =
-          this->lowering.builder_.CreateFCmpOLT(magnitude, llvm::ConstantFP::getInfinity(f64));
-      llvm::Value *whole = this->lowering.builder_.CreateFCmpOEQ(
-          this->lowering.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::trunc, x), x);
-      llvm::Value *integer = this->lowering.builder_.CreateAnd(finite, whole);
+          this->lowering.builder.CreateFCmpOLT(magnitude, llvm::ConstantFP::getInfinity(f64));
+      llvm::Value *whole = this->lowering.builder.CreateFCmpOEQ(
+          this->lowering.builder.CreateUnaryIntrinsic(llvm::Intrinsic::trunc, x), x);
+      llvm::Value *integer = this->lowering.builder.CreateAnd(finite, whole);
       if (call->builtin() == Builtin::IsInteger) {
         return integer;
       }
-      llvm::Value *safe = this->lowering.builder_.CreateFCmpOLE(
+      llvm::Value *safe = this->lowering.builder.CreateFCmpOLE(
           magnitude, llvm::ConstantFP::get(f64, 9007199254740991.0));
-      return this->lowering.builder_.CreateAnd(integer, safe);
+      return this->lowering.builder.CreateAnd(integer, safe);
     }
     case Builtin::FromCharCode:
     case Builtin::FromCodePoint: {
@@ -223,14 +221,14 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
       for (Expr *arg : call->args) {
         llvm::Value *value = this->lowering.exprLowerer().emitExpr(arg);
         values.push_back(
-            units ? this->lowering.builder_.CreateTrunc(value, this->lowering.builder_.getInt32Ty())
+            units ? this->lowering.builder.CreateTrunc(value, this->lowering.builder.getInt32Ty())
                   : value);
       }
       llvm::Value *array = this->lowering.mathLowerer().spillArray(
-          values, units ? this->lowering.builder_.getInt32Ty() : f64);
+          values, units ? this->lowering.builder.getInt32Ty() : f64);
       llvm::Value *text = this->lowering.stringLowerer().callReturningString(
           units ? this->lowering.rt_.strFromCharCodes : this->lowering.rt_.strFromCodePoints,
-          {array, this->lowering.builder_.getInt64(values.size())});
+          {array, this->lowering.builder.getInt64(values.size())});
       return text;
     }
     case Builtin::UriEncodeComponent:
@@ -242,13 +240,13 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
           : call->builtin() == Builtin::UriEncode          ? "tz_uri_encode"
           : call->builtin() == Builtin::UriDecodeComponent ? "tz_uri_decode_component"
                                                            : "tz_uri_decode";
-      llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+      llvm::Type *ptr = this->lowering.builder.getPtrTy();
       Lowering::Operand text = this->lowering.refCounts().emitOperand(call->args[0], true);
       if (call->type->isResult()) {
         llvm::Value *result = this->lowering.stringLowerer().callReturningString(
             this->lowering.processLowerer().processFunction(
-                name, this->lowering.builder_.getVoidTy(),
-                {ptr, ptr, this->lowering.builder_.getInt64Ty(), ptr}),
+                name, this->lowering.builder.getVoidTy(),
+                {ptr, ptr, this->lowering.builder.getInt64Ty(), ptr}),
             {this->lowering.stringLowerer().stringObj(text.value),
              this->lowering.stringLowerer().stringMeta(text.value),
              this->lowering.resultLowerer().failureMaker(call->type->errType())});
@@ -257,8 +255,8 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
       }
       llvm::Value *result = this->lowering.stringLowerer().callReturningString(
           this->lowering.processLowerer().processFunction(
-              name, this->lowering.builder_.getVoidTy(),
-              {ptr, ptr, this->lowering.builder_.getInt64Ty()}),
+              name, this->lowering.builder.getVoidTy(),
+              {ptr, ptr, this->lowering.builder.getInt64Ty()}),
           {this->lowering.stringLowerer().stringObj(text.value),
            this->lowering.stringLowerer().stringMeta(text.value)});
       this->lowering.refCounts().dropOperand(text);
@@ -268,7 +266,7 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
       llvm::Value *x =
           this->lowering.exprLowerer().emitExpr(cast<MemberExpr>(call->callee)->object);
       llvm::Value *digits = hasArg ? this->lowering.exprLowerer().emitExpr(call->args[0])
-                                   : this->lowering.builder_.getInt64(0);
+                                   : this->lowering.builder.getInt64(0);
       llvm::Value *text = this->lowering.stringLowerer().callReturningString(
           this->lowering.rt_.numToFixed, {x, digits});
       return text;

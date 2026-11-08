@@ -39,16 +39,16 @@ bool Loader::run(llvm::StringRef entryPath, SourceFile &program) {
     if (path::extension(entryPath) == ".ts") {
       message += "; rename it to " + path::stem(entryPath).str() + ".tz";
     }
-    diags_.tool(message);
+    this->diags.tool(message);
     return false;
   }
   llvm::SmallString<256> real;
   if (std::error_code ec = fs::real_path(entryPath, real)) {
-    diags_.tool("cannot read '" + entryPath + "': " + ec.message());
+    this->diags.tool("cannot read '" + entryPath + "': " + ec.message());
     return false;
   }
-  entryDir_ = path::parent_path(entryPath).str();
-  entryRealDir_ = path::parent_path(real).str();
+  this->entryDir = path::parent_path(entryPath).str();
+  this->entryRealDir = path::parent_path(real).str();
   Module *entry = nullptr;
   if (std::optional<LibraryFile> library = LibraryFiles::find(real)) {
     entry = libraryEntry(*library);
@@ -56,10 +56,10 @@ bool Loader::run(llvm::StringRef entryPath, SourceFile &program) {
     std::string error;
     entry = parse(entryPath.str(), std::string(real), path::filename(real).str(), error);
     if (!entry) {
-      diags_.tool("cannot read '" + entryPath + "': " + error);
+      this->diags.tool("cannot read '" + entryPath + "': " + error);
       return false;
     }
-    packageOf_[entry] = packages_ ? 0 : -1;
+    this->packageOf[entry] = this->packages ? 0 : -1;
   }
   if (!entry) {
     return false;
@@ -67,7 +67,7 @@ bool Loader::run(llvm::StringRef entryPath, SourceFile &program) {
   entry->isEntry = true;
   visit(entry);
 
-  for (Module *module : order_) {
+  for (Module *module : this->order) {
     program.modules.push_back(module);
     SourceFile &file = module->file;
     program.items.insert(program.items.end(), file.items.begin(), file.items.end());
@@ -79,44 +79,45 @@ bool Loader::run(llvm::StringRef entryPath, SourceFile &program) {
       all.insert(all.end(), constant.getValue().begin(), constant.getValue().end());
     }
   }
+  library_->loadBuiltins(program.builtins);
 
   return true;
 }
 
 Module *Loader::libraryEntry(const LibraryFile &library) {
-  libraryTree_ = library.tree;
+  this->libraryTree = library.tree;
   Module *found = this->library().libraryModule(library.file, library.module, llvm::SMLoc());
   if (!found) {
     return nullptr;
   }
-  Module *entry = ctx_.newModule();
+  Module *entry = this->ctx.newModule();
   entry->name = library.module + " (checked alone)";
   ImportDecl decl;
   decl.implicit = true;
   decl.path = library.module;
   decl.from = found;
   entry->file.imports.push_back(std::move(decl));
-  packageOf_[entry] = -1;
-  states_[entry] = State::New;
+  this->packageOf[entry] = -1;
+  this->states[entry] = State::New;
 
   return entry;
 }
 
 std::string Loader::treeFile(llvm::StringRef file) {
-  if (libraryTree_.empty()) {
+  if (this->libraryTree.empty()) {
     return "";
   }
-  auto [it, inserted] = treeFiles_.try_emplace(file);
+  auto [it, inserted] = this->treeFiles.try_emplace(file);
   if (inserted) {
-    it->second = LibraryFiles::pathIn(libraryTree_, file);
+    it->second = LibraryFiles::pathIn(this->libraryTree, file);
   }
 
   return it->second;
 }
 
 llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> Loader::read(llvm::StringRef filePath) const {
-  if (overlay_) {
-    if (const std::string *text = overlay_->find(filePath)) {
+  if (this->overlay) {
+    if (const std::string *text = this->overlay->find(filePath)) {
       return llvm::MemoryBuffer::getMemBufferCopy(*text, filePath);
     }
   }
@@ -135,18 +136,18 @@ Module *Loader::parse(const std::string &filePath, const std::string &realPath, 
   llvm::StringRef text = sourceMgr_.getMemoryBuffer(id)->getBuffer();
   rejectReferences(text);
 
-  Module *module = ctx_.newModule();
+  Module *module = this->ctx.newModule();
   module->path = filePath;
   module->name = std::move(name);
-  Lexer lexer(text, diags_);
-  module->file = Parser(lexer, ctx_, diags_).parseSourceFile();
+  Lexer lexer(text, this->diags);
+  module->file = Parser(lexer, this->ctx, this->diags).parseSourceFile();
   library().importLibraryGlobals(module, text);
   library().importFsStreams(module, text);
   library().importProcessSignals(module, text);
   loadDeclarations(module, filePath, false);
-  byRealPath_[realPath] = module;
-  realPaths_[module] = realPath;
-  states_[module] = State::New;
+  this->byRealPath[realPath] = module;
+  this->realPaths[module] = realPath;
+  this->states[module] = State::New;
 
   return module;
 }
@@ -165,30 +166,30 @@ Module *Loader::parseJson(const std::string &filePath, const std::string &realPa
   size_t at = 0;
   std::string problem;
   if (!JsonModule::jsonModuleText(json.drop_front(skipped), kJsonExport, source, at, problem)) {
-    diags_.error(llvm::SMLoc::getFromPointer(json.data() + skipped + at),
-                 "'" + name + "' is not JSON: " + problem);
+    this->diags.error(llvm::SMLoc::getFromPointer(json.data() + skipped + at),
+                      "'" + name + "' is not JSON: " + problem);
     return nullptr;
   }
   unsigned generated = sourceMgr_.AddNewSourceBuffer(
       llvm::MemoryBuffer::getMemBufferCopy(source, filePath), llvm::SMLoc());
   llvm::StringRef text = sourceMgr_.getMemoryBuffer(generated)->getBuffer();
 
-  Module *module = ctx_.newModule();
+  Module *module = this->ctx.newModule();
   module->path = filePath;
   module->name = std::move(name);
-  Lexer lexer(text, diags_);
-  module->file = Parser(lexer, ctx_, diags_).parseSourceFile();
-  byRealPath_[realPath] = module;
-  realPaths_[module] = realPath;
-  states_[module] = State::New;
+  Lexer lexer(text, this->diags);
+  module->file = Parser(lexer, this->ctx, this->diags).parseSourceFile();
+  this->byRealPath[realPath] = module;
+  this->realPaths[module] = realPath;
+  this->states[module] = State::New;
 
   return module;
 }
 
 void Loader::visit(Module *module) {
-  states_[module] = State::Loading;
-  loading_.push_back(module);
-  module->loadPath = loading_;
+  this->states[module] = State::Loading;
+  this->loading.push_back(module);
+  module->loadPath = this->loading;
 
   struct Request {
     const char *at;
@@ -213,15 +214,15 @@ void Loader::visit(Module *module) {
     Module *target =
         *request.from ? *request.from : resolver().resolve(module, request.path, request.loc);
     *request.from = target;
-    if (target && states_[target] == State::New) {
+    if (target && this->states[target] == State::New) {
       visit(target);
     }
   }
 
-  loading_.pop_back();
-  states_[module] = State::Loaded;
-  module->order = static_cast<unsigned>(order_.size());
-  order_.push_back(module);
+  this->loading.pop_back();
+  this->states[module] = State::Loaded;
+  module->order = static_cast<unsigned>(this->order.size());
+  this->order.push_back(module);
 }
 
 void Loader::loadDeclarations(Module *module, llvm::StringRef filePath, bool library) {
@@ -232,20 +233,20 @@ void Loader::loadDeclarations(Module *module, llvm::StringRef filePath, bool lib
   }
   auto buffer = read(declarations);
   if (!buffer) {
-    diags_.tool("cannot read '" + declarations + "': " + buffer.getError().message());
+    this->diags.tool("cannot read '" + declarations + "': " + buffer.getError().message());
     return;
   }
   unsigned id = sourceMgr_.AddNewSourceBuffer(std::move(*buffer), llvm::SMLoc());
   module->buffers.push_back(id);
   llvm::StringRef text = sourceMgr_.getMemoryBuffer(id)->getBuffer();
-  Lexer lexer(text, diags_);
+  Lexer lexer(text, this->diags);
   module->declaration = std::make_unique<DeclarationFile>(
-      Parser(lexer, ctx_, diags_, library).parseDeclarationFile());
+      Parser(lexer, this->ctx, this->diags, library).parseDeclarationFile());
   module->declaration->path = std::string(declarations);
 }
 
 std::string Loader::relativeName(llvm::StringRef realPath) const {
-  std::vector<llvm::StringRef> base(path::begin(entryRealDir_), path::end(entryRealDir_));
+  std::vector<llvm::StringRef> base(path::begin(this->entryRealDir), path::end(this->entryRealDir));
   std::vector<llvm::StringRef> target(path::begin(realPath), path::end(realPath));
   size_t common = 0;
   while (common < base.size() && common < target.size() && base[common] == target[common]) {
@@ -270,9 +271,10 @@ void Loader::rejectReferences(llvm::StringRef text) {
     size_t end = text.find('\n', at);
     llvm::StringRef line = text.slice(at, end).ltrim();
     if (line.consume_front("///") && line.ltrim().starts_with("<reference")) {
-      diags_.error(llvm::SMLoc::getFromPointer(line.data() - 3),
-                   "'/// <reference>' is not supported: files are joined by imports; import what "
-                   "the file needs by name, e.g. 'import { a } from \"./x\"'");
+      this->diags.error(
+          llvm::SMLoc::getFromPointer(line.data() - 3),
+          "'/// <reference>' is not supported: files are joined by imports; import what "
+          "the file needs by name, e.g. 'import { a } from \"./x\"'");
     }
     if (end == llvm::StringRef::npos) {
       break;
@@ -289,7 +291,11 @@ bool loadProgram(llvm::StringRef entryPath, llvm::SourceMgr &sourceMgr, AstConte
 
 Loader::Loader(llvm::SourceMgr &sourceMgr, AstContext &ctx, Diagnostics &diags,
                const pkg::Graph *packages, const SourceOverlay *overlay)
-    : sourceMgr_(sourceMgr), ctx_(ctx), diags_(diags), packages_(packages), overlay_(overlay) {
+    : sourceMgr_(sourceMgr),
+      ctx(ctx),
+      diags(diags),
+      packages(packages),
+      overlay(overlay) {
   resolver_ = std::make_unique<ModuleResolver>(*this);
   library_ = std::make_unique<LibraryModules>(*this);
 }

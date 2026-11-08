@@ -12,7 +12,7 @@ public:
   Expr *parseNew();
 
 private:
-  Parser &parser_;
+  Parser &parser;
 };
 
 }

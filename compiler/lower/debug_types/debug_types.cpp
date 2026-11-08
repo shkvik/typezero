@@ -1,6 +1,6 @@
 #include "compiler/lower/debug_types/debug_types.h"
-#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
+#include "compiler/lower/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/types/union_layout/union_layout.h"
 #include "llvm/BinaryFormat/Dwarf.h"
@@ -148,10 +148,10 @@ DebugTypes::structure(llvm::StringRef name, llvm::StructType *layout,
 
 llvm::DIType *DebugTypes::header() {
   if (!this->headerType) {
-    llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-    llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+    llvm::Type *ptr = this->lowering.builder.getPtrTy();
+    llvm::Type *i64 = this->lowering.builder.getInt64Ty();
     this->headerType =
-        this->structure("tz_object", llvm::StructType::get(this->lowering.ctx_, {i64, ptr}),
+        this->structure("tz_object", llvm::StructType::get(this->lowering.ctx, {i64, ptr}),
                         {{"rc", this->basic("int", 64, llvm::dwarf::DW_ATE_signed)},
                          {"type", this->voidPointer()}});
   }
@@ -162,13 +162,13 @@ llvm::DIType *DebugTypes::header() {
 llvm::DIType *DebugTypes::string() {
   if (!this->stringType) {
     llvm::DIType *meta = this->basic("uint64", 64, llvm::dwarf::DW_ATE_unsigned);
-    this->stringType = this->structure("string", this->lowering.strTy_,
+    this->stringType = this->structure("string", this->lowering.strTy,
                                        {{"obj", this->voidPointer()}, {"meta", meta}});
-    llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+    llvm::Type *i64 = this->lowering.builder.getInt64Ty();
     llvm::DICompositeType *rope = this->structure(
         "tz_rope",
-        llvm::StructType::get(this->lowering.ctx_, {i64, i64, this->lowering.strTy_,
-                                                    this->lowering.strTy_, this->lowering.strTy_}),
+        llvm::StructType::get(this->lowering.ctx, {i64, i64, this->lowering.strTy,
+                                                   this->lowering.strTy, this->lowering.strTy}),
         {{"rc", this->basic("int", 64, llvm::dwarf::DW_ATE_signed)},
          {"kind", meta},
          {"left", this->stringType},
@@ -185,10 +185,10 @@ llvm::DIType *DebugTypes::function() {
     llvm::DISubroutineType *signature =
         this->builder.createSubroutineType(this->builder.getOrCreateTypeArray({nullptr}));
     llvm::DIType *info = this->structure(
-        "FunctionInfo", this->lowering.fnInfoTy_,
+        "FunctionInfo", this->lowering.fnInfoTy,
         {{"code", this->builder.createPointerType(signature, 64)}, {"name", this->string()}});
     this->functionType =
-        this->structure("Function", this->lowering.fnTy_,
+        this->structure("Function", this->lowering.fnTy,
                         {{"info", this->pointer(info)}, {"env", this->voidPointer()}});
   }
 
@@ -197,9 +197,9 @@ llvm::DIType *DebugTypes::function() {
 
 llvm::DIType *DebugTypes::atom() {
   if (!this->atomType) {
-    llvm::Type *index = this->lowering.builder_.getInt32Ty();
+    llvm::Type *index = this->lowering.builder.getInt32Ty();
     this->atomType =
-        this->structure("atom", llvm::StructType::get(this->lowering.ctx_, llvm::ArrayRef(index)),
+        this->structure("atom", llvm::StructType::get(this->lowering.ctx, llvm::ArrayRef(index)),
                         {{"index", this->basic("int32", 32, llvm::dwarf::DW_ATE_signed)}});
   }
 
@@ -208,10 +208,10 @@ llvm::DIType *DebugTypes::atom() {
 
 llvm::DIType *DebugTypes::opaque(const Type *type) {
   std::string name = this->unique(type->name(), type);
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
+  llvm::Type *i64 = this->lowering.builder.getInt64Ty();
 
-  return this->structure(name, llvm::StructType::get(this->lowering.ctx_, {i64, ptr}), {});
+  return this->structure(name, llvm::StructType::get(this->lowering.ctx, {i64, ptr}), {});
 }
 
 llvm::DIType *DebugTypes::array(const Type *type) {
@@ -222,7 +222,7 @@ llvm::DIType *DebugTypes::array(const Type *type) {
   llvm::DIType *u32 = this->basic("uint32", 32, llvm::dwarf::DW_ATE_unsigned);
 
   return this->structure(this->unique("Array<" + type->inner()->name().str() + ">", type),
-                         this->lowering.arrayTy_,
+                         this->lowering.arrayTy,
                          {{"rc", this->basic("int", 64, llvm::dwarf::DW_ATE_signed)},
                           {"type", this->voidPointer()},
                           {"data", this->pointer(element)},
@@ -259,17 +259,17 @@ llvm::DIType *DebugTypes::object(const Type *type) {
 }
 
 void DebugTypes::completeObject(const Type *type, llvm::DICompositeType *temporary) {
-  const Lowering::ObjectLayout *layout = this->lowering.interfaces_.count(type)
+  const Lowering::ObjectLayout *layout = this->lowering.interfaces.count(type)
                                              ? nullptr
                                              : this->lowering.objectLayouts().builtLayout(type);
   llvm::DICompositeType *made;
   if (!layout) {
-    llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-    llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
-    made = this->structure(temporary->getName(),
-                           llvm::StructType::get(this->lowering.ctx_, {i64, ptr}),
-                           {{"rc", this->basic("int", 64, llvm::dwarf::DW_ATE_signed)},
-                            {"type", this->voidPointer()}});
+    llvm::Type *ptr = this->lowering.builder.getPtrTy();
+    llvm::Type *i64 = this->lowering.builder.getInt64Ty();
+    made =
+        this->structure(temporary->getName(), llvm::StructType::get(this->lowering.ctx, {i64, ptr}),
+                        {{"rc", this->basic("int", 64, llvm::dwarf::DW_ATE_signed)},
+                         {"type", this->voidPointer()}});
   } else {
     llvm::ArrayRef<Field> fields = type->fields();
     std::vector<std::pair<llvm::StringRef, llvm::DIType *>> named(layout->type->getNumElements());
@@ -303,9 +303,9 @@ llvm::DIType *DebugTypes::result(const Type *type) {
 llvm::DIType *DebugTypes::dict(const Type *type) {
   const Type *key = type->keyType();
   const Type *value = type->valueType();
-  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+  llvm::Type *i32 = this->lowering.builder.getInt32Ty();
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
+  llvm::Type *i64 = this->lowering.builder.getInt64Ty();
   std::vector<llvm::Type *> elements{i32, i32, this->lowering.moduleBuilder().lower(key)};
   llvm::DIType *u32 = this->basic("uint32", 32, llvm::dwarf::DW_ATE_unsigned);
   auto stored = [&](const Type *part) {
@@ -327,9 +327,9 @@ llvm::DIType *DebugTypes::dict(const Type *type) {
   name += ">";
   name = this->unique(name, type);
   llvm::DIType *entry = this->structure(
-      name + "::Entry", llvm::StructType::get(this->lowering.ctx_, elements), entryFields);
+      name + "::Entry", llvm::StructType::get(this->lowering.ctx, elements), entryFields);
   llvm::StructType *map = llvm::StructType::get(
-      this->lowering.ctx_, {i64, ptr, ptr, ptr, i32, i32, i32, i32, i32, i32, ptr});
+      this->lowering.ctx, {i64, ptr, ptr, ptr, i32, i32, i32, i32, i32, i32, ptr});
 
   return this->structure(name, map,
                          {{"rc", this->basic("int", 64, llvm::dwarf::DW_ATE_signed)},
@@ -371,11 +371,11 @@ llvm::DIType *DebugTypes::tagged(const Type *type) {
       this->unit, name + "::Payload", nullptr, 0, payloadBits, 64, llvm::DINode::FlagZero,
       this->builder.getOrCreateArray(members));
   union_ = this->builder.replaceTemporary(llvm::TempDICompositeType(payload), union_);
-  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
-  llvm::Type *words = llvm::ArrayType::get(this->lowering.builder_.getInt64Ty(), payloadBits / 64);
+  llvm::Type *i32 = this->lowering.builder.getInt32Ty();
+  llvm::Type *words = llvm::ArrayType::get(this->lowering.builder.getInt64Ty(), payloadBits / 64);
 
   return this->structure(
-      name, llvm::StructType::get(this->lowering.ctx_, {i32, words}),
+      name, llvm::StructType::get(this->lowering.ctx, {i32, words}),
       {{"tag", this->basic("uint32", 32, llvm::dwarf::DW_ATE_unsigned)}, {"payload", union_}});
 }
 
@@ -395,7 +395,7 @@ llvm::DIType *DebugTypes::make(const Type *type) {
   case Type::Kind::Double:
     return this->basic("double", 64, llvm::dwarf::DW_ATE_float);
   case Type::Kind::Decimal:
-    return this->structure("decimal", this->lowering.decTy_,
+    return this->structure("decimal", this->lowering.decTy,
                            {{"coef", this->basic("int", 64, llvm::dwarf::DW_ATE_signed)},
                             {"meta", this->basic("uint64", 64, llvm::dwarf::DW_ATE_unsigned)}});
   case Type::Kind::String:

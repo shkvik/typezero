@@ -1,0 +1,18 @@
+#pragma once
+
+#include "compiler/interprocedural/flows/flows.h"
+
+namespace tz {
+
+class FlowBuiltins {
+public:
+  explicit FlowBuiltins(Flows &owner);
+
+  Refs builtin(CallExpr *c, MemberExpr *member, const Refs &receiver,
+               const std::vector<Refs> &args);
+
+private:
+  Flows &flows;
+};
+
+}

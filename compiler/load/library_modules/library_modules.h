@@ -7,9 +7,6 @@
 
 namespace tz {
 
-inline constexpr llvm::StringLiteral kSubtleName = "%subtle";
-inline constexpr llvm::StringLiteral kIntlLocaleName = "%IntlLocale";
-
 class LibraryModules {
 public:
   explicit LibraryModules(Loader &loader);
@@ -18,6 +15,7 @@ public:
   void importLibraryGlobals(Module *module, llvm::StringRef text);
   void importFsStreams(Module *module, llvm::StringRef text);
   void importProcessSignals(Module *module, llvm::StringRef text);
+  void loadBuiltins(BuiltinDeclarations &builtins);
 
 private:
   static void appendPart(SourceFile &file, SourceFile &part);
@@ -25,7 +23,7 @@ private:
                                              llvm::SMLoc loc, std::string &fullPath,
                                              std::vector<unsigned> &buffers);
 
-  Loader &loader_;
+  Loader &loader;
 };
 
 }

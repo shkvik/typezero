@@ -1,5 +1,4 @@
 #include "compiler/parallel/explain_names/explain_names.h"
-#include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
 #include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
@@ -12,6 +11,7 @@
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
 #include "compiler/parallel/parallel_model/parallel_model.h"
 #include "compiler/parallel/pieces/pieces.h"
+#include "compiler/program/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -34,17 +34,18 @@ using llvm::dyn_cast;
 
 using llvm::dyn_cast_or_null;
 
-ExplainNames::ExplainNames(Analysis &analysis) : analysis_(analysis) {}
+ExplainNames::ExplainNames(Analysis &analysis)
+    : analysis(analysis) {}
 
 Pos ExplainNames::posOf(llvm::SMLoc loc) const {
   Pos pos;
   if (!loc.isValid()) {
     return pos;
   }
-  pos.buffer = analysis_.sources.FindBufferContainingLoc(loc);
+  pos.buffer = this->analysis.sources.FindBufferContainingLoc(loc);
   if (pos.buffer) {
     pos.offset = unsigned(loc.getPointer() -
-                          analysis_.sources.getMemoryBuffer(pos.buffer)->getBufferStart());
+                          this->analysis.sources.getMemoryBuffer(pos.buffer)->getBufferStart());
   }
 
   return pos;
@@ -55,20 +56,20 @@ unsigned ExplainNames::lineOf(llvm::SMLoc loc) const {
     return 0;
   }
 
-  return analysis_.sources.FindLineNumber(loc);
+  return this->analysis.sources.FindLineNumber(loc);
 }
 
 std::string ExplainNames::where(llvm::SMLoc loc) const {
   if (!loc.isValid()) {
     return "?";
   }
-  unsigned buffer = analysis_.sources.FindBufferContainingLoc(loc);
-  std::string line = std::to_string(analysis_.sources.FindLineNumber(loc, buffer));
+  unsigned buffer = this->analysis.sources.FindBufferContainingLoc(loc);
+  std::string line = std::to_string(this->analysis.sources.FindLineNumber(loc, buffer));
   if (!buffer) {
     return line;
   }
-  llvm::StringRef id = analysis_.sources.getMemoryBuffer(buffer)->getBufferIdentifier();
-  for (const Module *module : analysis_.program.modules) {
+  llvm::StringRef id = this->analysis.sources.getMemoryBuffer(buffer)->getBufferIdentifier();
+  for (const Module *module : this->analysis.program.modules) {
     if (module->path == id) {
       return module->isEntry ? line : module->name + ":" + line;
     }
@@ -153,8 +154,8 @@ std::string ExplainNames::refName(Ref r) const {
     return "its own object";
   case RefKind::Site: {
     auto *e = static_cast<const Expr *>(r.ptr);
-    auto found = analysis_.siteName.find(e);
-    if (found != analysis_.siteName.end()) {
+    auto found = this->analysis.siteName.find(e);
+    if (found != this->analysis.siteName.end()) {
       return found->second.str();
     }
     const Type *t = e->type ? e->type->nonOptional() : nullptr;
@@ -208,13 +209,13 @@ std::string ExplainNames::locName(const Loc &loc) const {
     }
     if (loc.ref.kind == RefKind::Type ||
         (loc.ref.kind == RefKind::Site &&
-         !analysis_.siteName.count(static_cast<const Expr *>(loc.ref.ptr)))) {
+         !this->analysis.siteName.count(static_cast<const Expr *>(loc.ref.ptr)))) {
       return field.str() + " of " + object;
     }
     return object + "." + field.str();
   }
   case LocKind::Elements: {
-    const Type *t = analysis_.aliasAnalysis.typeOfRef(loc.ref);
+    const Type *t = this->analysis.aliasAnalysis.typeOfRef(loc.ref);
     std::string what = t && t->isDict()                                 ? "entries"
                        : t && (t->isIterator() || t->isAsyncIterator()) ? "position"
                        : t && t->isBytes()                              ? "bytes"
@@ -225,8 +226,9 @@ std::string ExplainNames::locName(const Loc &loc) const {
   case LocKind::OwnCell:
     return "elements of " + refName(loc.ref) + ", each task its own";
   case LocKind::Contents:
-    if (loc.key == analysis_.inner) {
-      return "the objects inside its own " + typeText(analysis_.aliasAnalysis.typeOfRef(loc.ref));
+    if (loc.key == this->analysis.inner) {
+      return "the objects inside its own " +
+             typeText(this->analysis.aliasAnalysis.typeOfRef(loc.ref));
     }
     return "everything in " + refName(loc.ref);
   case LocKind::Resource:
@@ -264,7 +266,7 @@ std::string ExplainNames::positions(
     if (via) {
       FnInfo info;
       info.decl = via;
-      text += " in " + analysis_.explainTitles.fnName(info);
+      text += " in " + this->analysis.explainTitles.fnName(info);
     }
     if (!llvm::is_contained(parts, text)) {
       parts.push_back(text);

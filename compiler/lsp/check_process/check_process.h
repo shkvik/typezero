@@ -16,8 +16,8 @@ public:
   void kill();
 
 private:
-  llvm::sys::ProcessInfo info_;
-  bool running_ = false;
+  llvm::sys::ProcessInfo info;
+  bool running = false;
 };
 
 }

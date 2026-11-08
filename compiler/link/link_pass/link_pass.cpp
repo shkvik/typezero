@@ -11,8 +11,8 @@
 namespace tz {
 
 LinkPass::LinkPass(const Target &target, const BuildOptions &options)
-    : target_(target),
-      options_(options) {}
+    : target(target),
+      options(options) {}
 
 bool LinkPass::inUse(llvm::StringRef path) {
   namespace fs = llvm::sys::fs;
@@ -31,10 +31,10 @@ bool LinkPass::inUse(llvm::StringRef path) {
 
 Errors LinkPass::run(const ObjectFile &object, const CryptoUse &crypto, bool parallel) const {
   Errors errors;
-  const llvm::Triple &triple = target_.triple();
+  const llvm::Triple &triple = this->target.triple();
   std::string variant = parallel ? "tzrt_mt" : "tzrt";
   std::string runtime =
-      options_.runtime.path(triple.isOSWindows() ? variant + ".lib" : "lib" + variant + ".a");
+      this->options.runtime.path(triple.isOSWindows() ? variant + ".lib" : "lib" + variant + ".a");
   if (!llvm::sys::fs::exists(runtime)) {
     errors.tool("the runtime is missing: " + runtime);
     return errors;
@@ -48,7 +48,7 @@ Errors LinkPass::run(const ObjectFile &object, const CryptoUse &crypto, bool par
     }
     libs.push_back(crypto.full ? "libcrypto.lib" : "libcrypto_direct.lib");
     for (const char *lib : libs) {
-      std::string path = options_.runtime.path(lib);
+      std::string path = this->options.runtime.path(lib);
       if (!llvm::sys::fs::exists(path)) {
         errors.tool("the library of node:crypto is missing: " + path);
         return errors;
@@ -64,17 +64,17 @@ Errors LinkPass::run(const ObjectFile &object, const CryptoUse &crypto, bool par
 
   std::string messages;
   std::string natvis;
-  if (options_.debug == DebugLevel::Full) {
-    natvis = options_.runtime.path("tz.natvis");
+  if (this->options.debug == DebugLevel::Full) {
+    natvis = this->options.runtime.path("tz.natvis");
     if (!llvm::sys::fs::exists(natvis)) {
       errors.tool("the debugger views of tz are missing: " + natvis);
       return errors;
     }
   }
-  if (!Linker::linkExecutable(triple, inputs, options_.output, options_.debug != DebugLevel::None,
-                              natvis, messages)) {
-    if (LinkPass::inUse(options_.output)) {
-      errors.tool("cannot write '" + options_.output +
+  if (!Linker::linkExecutable(triple, inputs, this->options.output,
+                              this->options.debug != DebugLevel::None, natvis, messages)) {
+    if (LinkPass::inUse(this->options.output)) {
+      errors.tool("cannot write '" + this->options.output +
                   "': it is in use, probably still running; stop it and build again");
     } else {
       errors.raw(messages);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/symbols/completer/completer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringMap.h"
@@ -25,14 +26,21 @@ struct TypePredicate {
   const Type *type = nullptr;
 };
 
-struct FuncSymbol {
+class FuncSymbol {
+public:
+  bool isGeneric() const;
+  bool hasReturnType() const;
+  const Type *getReturnType();
+  void setCompleter(Completer *engine);
+  void setReturnType(const Type *type);
+  const Type *getKnownReturnType() const;
+
   llvm::StringRef name;
   llvm::SMLoc loc;
   std::vector<const Type *> params;
   size_t minArgs = 0;
   bool hasRest = false;
   bool hasThis = false;
-  const Type *ret = nullptr;
   bool inferring = false;
   const Type *assumed = nullptr;
   FunctionDecl *decl = nullptr;
@@ -40,8 +48,11 @@ struct FuncSymbol {
   bool pendingParams = false;
   std::vector<const Type *> typeParams;
   std::vector<const Type *> typeDefaults;
-  bool isGeneric() const { return !typeParams.empty(); }
   std::optional<TypePredicate> predicate;
+
+private:
+  const Type *ret = nullptr;
+  Completer *completer = nullptr;
 };
 
 }

@@ -13,7 +13,7 @@ public:
                                 const std::vector<StoreScanner::Sources> &args);
 
 private:
-  StoreScanner &scanner_;
+  StoreScanner &scanner;
 };
 
 }

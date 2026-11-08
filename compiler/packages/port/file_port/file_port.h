@@ -12,7 +12,10 @@ namespace tz::pkg {
 class FilePort {
 public:
   FilePort(std::string file, std::string text, const PortContext &ctx, Counts &counts)
-      : file_(std::move(file)), text_(std::move(text)), ctx_(ctx), counts_(counts) {}
+      : file_(std::move(file)),
+        text_(std::move(text)),
+        ctx(ctx),
+        counts(counts) {}
 
   void run();
   const std::string &text() const { return text_; }
@@ -22,17 +25,23 @@ private:
   static bool isOperandEnd(const Token &t);
   static std::string templateText(llvm::StringRef literal);
   void retokenize();
-  size_t at(size_t i) const { return static_cast<size_t>(toks_[i].text.data() - text_.data()); }
-  size_t endOf(size_t i) const { return at(i) + toks_[i].text.size(); }
-  bool is(size_t i, Tok kind) const { return i < toks_.size() && toks_[i].kind == kind; }
+  size_t at(size_t i) const {
+    return static_cast<size_t>(this->toks[i].text.data() - text_.data());
+  }
+  size_t endOf(size_t i) const {
+    return at(i) + this->toks[i].text.size();
+  }
+  bool is(size_t i, Tok kind) const {
+    return i < this->toks.size() && this->toks[i].kind == kind;
+  }
   bool isName(size_t i, llvm::StringRef name) const {
-    return is(i, Tok::Identifier) && toks_[i].text == name;
+    return is(i, Tok::Identifier) && this->toks[i].text == name;
   }
   bool afterDot(size_t i) const {
     return i > 0 && (is(i - 1, Tok::Dot) || is(i - 1, Tok::QuestionDot));
   }
   void add(size_t begin, size_t end, std::string text, const char *kind, std::string note = "") {
-    edits_.push_back({begin, end, std::move(text), kind, std::move(note)});
+    this->edits.push_back({begin, end, std::move(text), kind, std::move(note)});
   }
   bool apply();
   void privateName(size_t i);
@@ -55,13 +64,13 @@ private:
 
   std::string file_;
   std::string text_;
-  const PortContext &ctx_;
-  Counts &counts_;
-  std::vector<Token> toks_;
-  std::vector<size_t> close_;
-  std::vector<Edit> edits_;
+  const PortContext &ctx;
+  Counts &counts;
+  std::vector<Token> toks;
+  std::vector<size_t> close;
+  std::vector<Edit> edits;
   std::vector<Note> notes_;
-  llvm::StringSet<> notedPackages_;
+  llvm::StringSet<> notedPackages;
 };
 
 }

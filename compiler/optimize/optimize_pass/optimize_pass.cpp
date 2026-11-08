@@ -8,13 +8,14 @@
 namespace tz {
 
 OptimizePass::OptimizePass(const Target &target, const BuildOptions &options)
-    : target_(target), options_(options) {}
+    : target(target),
+      options(options) {}
 
 Errors OptimizePass::run(llvm::Module &module, bool parallel) const {
   Errors errors;
-  if (options_.optimize) {
+  if (this->options.optimize) {
     RuntimeLinker linker;
-    errors = linker.run(module, options_.runtime.path(parallel ? "tzrt_mt.bc" : "tzrt.bc"));
+    errors = linker.run(module, this->options.runtime.path(parallel ? "tzrt_mt.bc" : "tzrt.bc"));
     if (errors) {
       return errors;
     }
@@ -30,7 +31,7 @@ void OptimizePass::runPasses(llvm::Module &module) const {
   llvm::CGSCCAnalysisManager cgam;
   llvm::ModuleAnalysisManager mam;
 
-  llvm::PassBuilder pb(&target_.machine());
+  llvm::PassBuilder pb(&this->target.machine());
   pb.registerModuleAnalyses(mam);
   pb.registerCGSCCAnalyses(cgam);
   pb.registerFunctionAnalyses(fam);
@@ -38,7 +39,7 @@ void OptimizePass::runPasses(llvm::Module &module) const {
   pb.crossRegisterProxies(lam, fam, cgam, mam);
 
   llvm::ModulePassManager mpm;
-  if (options_.optimize) {
+  if (this->options.optimize) {
     mpm.addPass(llvm::GlobalDCEPass());
     mpm.addPass(pb.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2));
   } else {

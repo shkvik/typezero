@@ -11,7 +11,7 @@ public:
   TemplateExpr *parseTemplate(bool raw = false);
 
 private:
-  Parser &parser_;
+  Parser &parser;
 };
 
 }

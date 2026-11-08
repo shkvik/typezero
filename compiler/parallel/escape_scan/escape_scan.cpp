@@ -1,5 +1,4 @@
 #include "compiler/parallel/escape_scan/escape_scan.h"
-#include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
 #include "compiler/parallel/call_walk/call_walk.h"
@@ -11,6 +10,7 @@
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
 #include "compiler/parallel/parallel_model/parallel_model.h"
 #include "compiler/parallel/pieces/pieces.h"
+#include "compiler/program/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -36,7 +36,7 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 EscapeScan::EscapeScan(Analysis &analysis)
-    : analysis_(analysis) {}
+    : analysis(analysis) {}
 
 bool EscapeScan::keepsReceiver(Builtin b, bool discarded) {
   switch (b) {
@@ -71,8 +71,8 @@ bool EscapeScan::keepsReceiver(Builtin b, bool discarded) {
 }
 
 const Escapes &EscapeScan::escapes(const FunctionDecl *owner) {
-  auto found = analysis_.escapes.find(owner);
-  if (found != analysis_.escapes.end()) {
+  auto found = this->analysis.escapes.find(owner);
+  if (found != this->analysis.escapes.end()) {
     return found->second;
   }
   Escapes out;
@@ -82,14 +82,14 @@ const Escapes &EscapeScan::escapes(const FunctionDecl *owner) {
     }
     scanStmt(owner->body, out);
   } else {
-    for (const Stmt *item : analysis_.program.items) {
+    for (const Stmt *item : this->analysis.program.items) {
       if (!isa<FunctionDecl, ClassDecl>(item)) {
         scanStmt(item, out);
       }
     }
   }
 
-  return analysis_.escapes[owner] = std::move(out);
+  return this->analysis.escapes[owner] = std::move(out);
 }
 
 void EscapeScan::scanStmt(const Stmt *s, Escapes &out) {
@@ -224,7 +224,7 @@ void EscapeScan::scanUses(const Expr *e, bool safe, Escapes &out, bool discarded
       }
       return;
     }
-    if (m && c->method() && analysis_.isLibrary(c->method()->decl)) {
+    if (m && c->method() && this->analysis.isLibrary(c->method()->decl)) {
       scanUses(m->object, true, out);
     } else if (m && (c->method() || !c->unionMethods().empty())) {
       scanUses(m->object, false, out);
@@ -288,11 +288,11 @@ void EscapeScan::scanUses(const Expr *e, bool safe, Escapes &out, bool discarded
 }
 
 bool EscapeScan::constructorLeaks(const ClassDecl *cls) {
-  auto found = analysis_.leaks.find(cls);
-  if (found != analysis_.leaks.end()) {
+  auto found = this->analysis.leaks.find(cls);
+  if (found != this->analysis.leaks.end()) {
     return found->second;
   }
-  analysis_.leaks[cls] = true;
+  this->analysis.leaks[cls] = true;
   bool leaks = false;
   for (const ClassDecl *k = cls; k && !leaks; k = k->parent) {
     std::vector<const FunctionDecl *> fns(k->constructors.begin(), k->constructors.end());
@@ -310,7 +310,7 @@ bool EscapeScan::constructorLeaks(const ClassDecl *cls) {
     }
   }
 
-  return analysis_.leaks[cls] = leaks;
+  return this->analysis.leaks[cls] = leaks;
 }
 
 }

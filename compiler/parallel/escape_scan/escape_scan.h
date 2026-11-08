@@ -16,7 +16,7 @@ public:
 
 private:
   static bool keepsReceiver(Builtin b, bool discarded);
-  Analysis &analysis_;
+  Analysis &analysis;
 };
 
 }

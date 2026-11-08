@@ -1,5 +1,5 @@
 #include "compiler/memory/owner_scanner/owner_scanner.h"
-#include "compiler/load/to_utf8/to_utf8.h"
+#include "compiler/program/to_utf8/to_utf8.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 #include <functional>
@@ -23,38 +23,38 @@ const Expr *OwnerScanner::bare(const Expr *e) {
 }
 
 void OwnerScanner::function(const FunctionDecl *fn) {
-  if (!fn || !scanned_.insert(fn).second) {
+  if (!fn || !this->scanned.insert(fn).second) {
     return;
   }
-  const FunctionDecl *saved = current_;
-  current_ = fn;
+  const FunctionDecl *saved = this->current;
+  this->current = fn;
   for (const Param &param : fn->params) {
     expr(param.defaultValue(), Use::Value);
   }
   stmt(fn->body);
-  current_ = saved;
+  this->current = saved;
 }
 
 void OwnerScanner::topLevel(const Stmt *s) {
-  current_ = nullptr;
+  this->current = nullptr;
   stmt(s);
 }
 
 std::vector<OwnerScanner::BackRef>
 OwnerScanner::proven(const std::function<bool(const ClassDecl *)> &escapes) const {
   std::vector<BackRef> out;
-  for (const BackRef &b : candidates_) {
-    if (valueReads_.contains(b.field) || nonCallReads_.contains(b.callback) ||
-        bad_.contains(b.field)) {
+  for (const BackRef &b : this->candidates) {
+    if (this->valueReads.contains(b.field) || this->nonCallReads.contains(b.callback) ||
+        this->bad.contains(b.field)) {
       continue;
     }
-    auto writes = writes_.find(b.field);
-    if (writes == writes_.end()) {
+    auto fieldWrites = this->writes.find(b.field);
+    if (fieldWrites == this->writes.end()) {
       continue;
     }
     const ClassDecl *made = nullptr;
     bool fresh = true;
-    for (const Write &w : writes->second) {
+    for (const Write &w : fieldWrites->second) {
       if (!w.made || !w.cls || !w.cls->derivesFrom(b.owner) || (made && w.made != made)) {
         fresh = false;
       }
@@ -76,9 +76,11 @@ OwnerScanner::proven(const std::function<bool(const ClassDecl *)> &escapes) cons
 }
 
 const ClassDecl *OwnerScanner::madeBy(llvm::StringRef field) const {
-  auto writes = writes_.find(field);
+  auto fieldWrites = this->writes.find(field);
 
-  return writes == writes_.end() || writes->second.empty() ? nullptr : writes->second.front().made;
+  return fieldWrites == this->writes.end() || fieldWrites->second.empty()
+             ? nullptr
+             : fieldWrites->second.front().made;
 }
 
 void OwnerScanner::stmt(const Stmt *stmt) {
@@ -182,10 +184,10 @@ void OwnerScanner::expr(const Expr *e, Use use) {
   case Expr::Kind::Member: {
     auto *member = llvm::cast<MemberExpr>(e);
     if (use != Use::Callee) {
-      nonCallReads_.insert(member->name);
+      this->nonCallReads.insert(member->name);
     }
     if (use == Use::Value) {
-      valueReads_.insert(member->name);
+      this->valueReads.insert(member->name);
     }
     bool binds = member->method() ||
                  (member->type && member->type->nonOptional()->isFunction() && use == Use::Value);
@@ -234,11 +236,11 @@ void OwnerScanner::expr(const Expr *e, Use use) {
       wrote(member, assign);
       expr(member->object, Use::Receiver);
       if (assign->op) {
-        nonCallReads_.insert(member->name), valueReads_.insert(member->name);
+        this->nonCallReads.insert(member->name), this->valueReads.insert(member->name);
       }
     } else if (auto *index = llvm::dyn_cast<IndexExpr>(assign->target)) {
       if (!index->field().empty()) {
-        bad_.insert(index->field());
+        this->bad.insert(index->field());
       }
       expr(index->object, Use::Receiver);
       expr(index->index, Use::Value);
@@ -291,8 +293,8 @@ void OwnerScanner::expr(const Expr *e, Use use) {
 }
 
 void OwnerScanner::readAll(llvm::StringRef name) {
-  valueReads_.insert(name);
-  nonCallReads_.insert(name);
+  this->valueReads.insert(name);
+  this->nonCallReads.insert(name);
 }
 
 void OwnerScanner::readFields(const Type *type) {
@@ -314,7 +316,7 @@ void OwnerScanner::readFields(const Type *type) {
 }
 
 void OwnerScanner::wrote(const MemberExpr *target, const AssignExpr *assign) {
-  const FunctionDecl *fn = current_;
+  const FunctionDecl *fn = this->current;
   auto *object = llvm::dyn_cast<NameExpr>(OwnerScanner::bare(target->object));
   bool self = fn && fn->thisVar() && object && object->var() == fn->thisVar();
   bool construction = self && fn->cls() && (fn->isConstructor() || fn == fn->cls()->init);
@@ -332,7 +334,7 @@ void OwnerScanner::wrote(const MemberExpr *target, const AssignExpr *assign) {
   if (assign->op) {
     made = nullptr;
   }
-  writes_[target->name].push_back({construction ? fn->cls() : nullptr, made});
+  this->writes[target->name].push_back({construction ? fn->cls() : nullptr, made});
   auto *owned = llvm::dyn_cast<MemberExpr>(OwnerScanner::bare(target->object));
   auto *fe = llvm::dyn_cast<FunctionExpr>(OwnerScanner::bare(assign->value));
   if (!owned || !fe || fe->fn->nonEscaping || fe->fn->isAsync || fe->fn->isGenerator || !fn ||
@@ -342,7 +344,7 @@ void OwnerScanner::wrote(const MemberExpr *target, const AssignExpr *assign) {
   auto *holder = llvm::dyn_cast<NameExpr>(OwnerScanner::bare(owned->object));
   if (holder && holder->var() == fn->thisVar() &&
       llvm::is_contained(fe->fn->captures, fn->thisVar())) {
-    candidates_.push_back({fn->cls(), owned->name, target->name, fe->fn, fn->thisVar()});
+    this->candidates.push_back({fn->cls(), owned->name, target->name, fe->fn, fn->thisVar()});
   }
 }
 

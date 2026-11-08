@@ -29,8 +29,8 @@ PromiseCombineLowerer::PromiseCombineLowerer(Lowering &owner)
     : lowering(owner) {}
 
 llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder.getInt32Ty();
   const Type *anyPromise = Type::promise(Type::voidTy());
   Expr *arg = call->args[0];
   const Type *argType = arg->type;
@@ -40,27 +40,27 @@ llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
     }
     auto *fn = cast<llvm::Function>(
         this->lowering.asyncLowerer().asyncFunction("tz_promise_resolved", ptr, {ptr}).getCallee());
-    llvm::Value *promise = this->lowering.builder_.CreateCall(
+    llvm::Value *promise = this->lowering.builder.CreateCall(
         fn, {this->lowering.promiseLowerer().promiseLayout(type)}, "promise");
     if (this->lowering.promiseLowerer().promiseValueSize(type)) {
-      this->lowering.builder_.CreateStore(
+      this->lowering.builder.CreateStore(
           value, this->lowering.promiseLowerer().promiseValueAddress(promise));
     }
 
     return promise;
   };
   auto arrayOf = [&](std::vector<llvm::Value *> values, llvm::ArrayRef<const Type *> types) {
-    llvm::Value *array = this->lowering.builder_.CreateCall(
+    llvm::Value *array = this->lowering.builder.CreateCall(
         this->lowering.rt_.arrNew,
         {this->lowering.typeDescriptors().typeDescriptor(anyPromise),
-         this->lowering.builder_.getInt64(values.size()),
-         this->lowering.builder_.getInt64(values.size())},
+         this->lowering.builder.getInt64(values.size()),
+         this->lowering.builder.getInt64(values.size())},
         "promises");
     llvm::Value *data = this->lowering.arrayLowerer().arrayData(array);
     for (size_t i = 0; i < values.size(); ++i) {
-      this->lowering.builder_.CreateStore(
+      this->lowering.builder.CreateStore(
           toPromise(values[i], types[i]),
-          this->lowering.builder_.CreateConstInBoundsGEP1_64(ptr, data, i));
+          this->lowering.builder.CreateConstInBoundsGEP1_64(ptr, data, i));
     }
 
     return array;
@@ -91,7 +91,7 @@ llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
       given.push_back(f.type);
     }
     for (const Field &f : argType->fields()) {
-      llvm::Value *v = this->lowering.builder_.CreateLoad(
+      llvm::Value *v = this->lowering.builder.CreateLoad(
           this->lowering.moduleBuilder().lower(f.type),
           this->lowering.objectLayouts().fieldAddress(tuple, argType, f.name));
       this->lowering.refCounts().retainValue(v, f.type);
@@ -105,7 +105,7 @@ llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
   } else {
     const Type *element = argType->inner();
     llvm::Value *values = this->lowering.exprLowerer().emitExpr(arg);
-    promises = this->lowering.builder_.CreateCall(
+    promises = this->lowering.builder.CreateCall(
         this->lowering.asyncLowerer().asyncFunction("tz_promise_resolve_all", ptr, {ptr, ptr, ptr}),
         {values, this->lowering.promiseLowerer().promiseLayout(element),
          this->lowering.typeDescriptors().typeDescriptor(anyPromise)},
@@ -115,7 +115,7 @@ llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
 
   const Type *result = call->type->promised();
   int32_t kind = call->builtin() == Builtin::PromiseAll ? kAll : kRace;
-  llvm::Constant *null = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+  llvm::Constant *null = llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy());
   llvm::Constant *items = null;
   llvm::Constant *tuple = null;
   llvm::Constant *convert = null;
@@ -154,21 +154,21 @@ llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
       convert = global;
     }
   }
-  auto *shapeType = llvm::StructType::get(this->lowering.ctx_, {ptr, ptr, ptr, i32, ptr});
+  auto *shapeType = llvm::StructType::get(this->lowering.ctx, {ptr, ptr, ptr, i32, ptr});
   auto *shape = new llvm::GlobalVariable(
       *this->lowering.module_, shapeType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(shapeType,
                                 {this->lowering.promiseLowerer().promiseLayout(result), items,
-                                 tuple, this->lowering.builder_.getInt32(tupleSize), convert}),
+                                 tuple, this->lowering.builder.getInt32(tupleSize), convert}),
       "tz.promise.combine");
   shape->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
-  llvm::Value *promise = this->lowering.builder_.CreateCall(
+  llvm::Value *promise = this->lowering.builder.CreateCall(
       this->lowering.asyncLowerer().asyncFunction("tz_promise_combine", ptr, {i32, ptr, ptr}),
-      {this->lowering.builder_.getInt32(uint32_t(kind)), promises, shape}, "promise");
-  this->lowering.builder_.CreateCall(
+      {this->lowering.builder.getInt32(uint32_t(kind)), promises, shape}, "promise");
+  this->lowering.builder.CreateCall(
       this->lowering.memory().hasCycles
-          ? this->lowering.groupLowerer().groupAwareRelease(this->lowering.arrReleaseFn_)
-          : this->lowering.arrReleaseFn_,
+          ? this->lowering.groupLowerer().groupAwareRelease(this->lowering.arrReleaseFn)
+          : this->lowering.arrReleaseFn,
       {promises});
 
   return promise;
@@ -179,23 +179,22 @@ llvm::Function *PromiseCombineLowerer::combineConverter(const Type *from, const 
   if (fn) {
     return fn;
   }
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
   fn = llvm::Function::Create(
-      llvm::FunctionType::get(this->lowering.builder_.getVoidTy(), {ptr, ptr}, false),
+      llvm::FunctionType::get(this->lowering.builder.getVoidTy(), {ptr, ptr}, false),
       llvm::GlobalValue::InternalLinkage, "tz.promise.convert", this->lowering.module_.get());
   this->lowering.functionBuilder().setFunctionAttributes(fn);
-  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
-  llvm::Function *outer = std::exchange(this->lowering.function_, fn);
-  this->lowering.builder_.SetInsertPoint(
-      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", fn));
-  llvm::Value *value = this->lowering.builder_.CreateLoad(
-      this->lowering.moduleBuilder().lower(from), fn->getArg(1), "value");
+  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder.saveIP();
+  llvm::Function *outer = std::exchange(this->lowering.function, fn);
+  this->lowering.builder.SetInsertPoint(llvm::BasicBlock::Create(this->lowering.ctx, "entry", fn));
+  llvm::Value *value = this->lowering.builder.CreateLoad(this->lowering.moduleBuilder().lower(from),
+                                                         fn->getArg(1), "value");
   this->lowering.refCounts().retainValue(value, from);
-  this->lowering.builder_.CreateStore(this->lowering.exprLowerer().emitConversion(value, from, to),
-                                      fn->getArg(0));
-  this->lowering.builder_.CreateRetVoid();
-  this->lowering.function_ = outer;
-  this->lowering.builder_.restoreIP(point);
+  this->lowering.builder.CreateStore(this->lowering.exprLowerer().emitConversion(value, from, to),
+                                     fn->getArg(0));
+  this->lowering.builder.CreateRetVoid();
+  this->lowering.function = outer;
+  this->lowering.builder.restoreIP(point);
 
   return fn;
 }

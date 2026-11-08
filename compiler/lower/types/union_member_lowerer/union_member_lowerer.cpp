@@ -13,6 +13,7 @@
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/types/union_layout/union_layout.h"
 #include "compiler/lower/types/union_lowerer/union_lowerer.h"
+#include "compiler/program/to_utf8/to_utf8.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ConvertUTF.h"
 
@@ -39,8 +40,8 @@ llvm::Value *UnionMemberLowerer::unionFieldAddress(llvm::Value *object, const Ty
   };
   int64_t offset = offsetIn(members.front());
   if (offset >= 0 && llvm::all_of(members, [&](const Type *m) { return offsetIn(m) == offset; })) {
-    return this->lowering.builder_.CreateConstInBoundsGEP1_64(
-        this->lowering.builder_.getInt8Ty(), object, uint64_t(offset), name + ".addr");
+    return this->lowering.builder.CreateConstInBoundsGEP1_64(
+        this->lowering.builder.getInt8Ty(), object, uint64_t(offset), name + ".addr");
   }
   llvm::Value *id = this->lowering.unionLowerer().objectClassId(object);
   llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("union.field.end");
@@ -50,20 +51,20 @@ llvm::Value *UnionMemberLowerer::unionFieldAddress(llvm::Value *object, const Ty
     if (i + 1 < members.size()) {
       llvm::BasicBlock *block = this->lowering.functionFrame().newBlock("union.field");
       next = this->lowering.functionFrame().newBlock("union.field.next");
-      this->lowering.builder_.CreateCondBr(
-          this->lowering.unionLowerer().emitIsOneOf(id, members[i]), block, next);
+      this->lowering.builder.CreateCondBr(this->lowering.unionLowerer().emitIsOneOf(id, members[i]),
+                                          block, next);
       this->lowering.functionFrame().switchTo(block);
     }
     incoming.push_back({this->lowering.objectLayouts().fieldAddress(object, members[i], name),
-                        this->lowering.builder_.GetInsertBlock()});
-    this->lowering.builder_.CreateBr(endBlock);
+                        this->lowering.builder.GetInsertBlock()});
+    this->lowering.builder.CreateBr(endBlock);
     if (next) {
       this->lowering.functionFrame().switchTo(next);
     }
   }
   this->lowering.functionFrame().switchTo(endBlock);
-  llvm::PHINode *phi = this->lowering.builder_.CreatePHI(this->lowering.builder_.getPtrTy(),
-                                                         unsigned(incoming.size()));
+  llvm::PHINode *phi = this->lowering.builder.CreatePHI(this->lowering.builder.getPtrTy(),
+                                                        unsigned(incoming.size()));
   for (auto [v, block] : incoming) {
     phi->addIncoming(v, block);
   }
@@ -81,8 +82,8 @@ llvm::Value *UnionMemberLowerer::emitUnionFieldRead(MemberExpr *member) {
   llvm::Value *result;
   if (same) {
     llvm::Value *address = this->unionFieldAddress(object.value, type, member->name);
-    result = this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(fieldType),
-                                                address, member->name);
+    result = this->lowering.builder.CreateLoad(this->lowering.moduleBuilder().lower(fieldType),
+                                               address, member->name);
     this->lowering.refCounts().retainValue(result, fieldType);
     result = this->lowering.exprLowerer().emitConversion(result, fieldType, member->type);
   } else {
@@ -95,24 +96,24 @@ llvm::Value *UnionMemberLowerer::emitUnionFieldRead(MemberExpr *member) {
       if (i + 1 < members.size()) {
         llvm::BasicBlock *read = this->lowering.functionFrame().newBlock("union.field");
         next = this->lowering.functionFrame().newBlock("union.field.next");
-        this->lowering.builder_.CreateCondBr(this->lowering.unionLowerer().emitIsOneOf(id, m), read,
-                                             next);
+        this->lowering.builder.CreateCondBr(this->lowering.unionLowerer().emitIsOneOf(id, m), read,
+                                            next);
         this->lowering.functionFrame().switchTo(read);
       }
       const Type *own = m->field(member->name)->type;
-      llvm::Value *value = this->lowering.builder_.CreateLoad(
+      llvm::Value *value = this->lowering.builder.CreateLoad(
           this->lowering.moduleBuilder().lower(own),
           this->lowering.objectLayouts().fieldAddress(object.value, m, member->name), member->name);
       this->lowering.refCounts().retainValue(value, own);
       incoming.push_back({this->lowering.exprLowerer().emitConversion(value, own, member->type),
-                          this->lowering.builder_.GetInsertBlock()});
-      this->lowering.builder_.CreateBr(endBlock);
+                          this->lowering.builder.GetInsertBlock()});
+      this->lowering.builder.CreateBr(endBlock);
       if (next) {
         this->lowering.functionFrame().switchTo(next);
       }
     }
     this->lowering.functionFrame().switchTo(endBlock);
-    llvm::PHINode *phi = this->lowering.builder_.CreatePHI(
+    llvm::PHINode *phi = this->lowering.builder.CreatePHI(
         this->lowering.moduleBuilder().lower(member->type), unsigned(incoming.size()));
     for (auto [v, block] : incoming) {
       phi->addIncoming(v, block);
@@ -135,32 +136,29 @@ llvm::Value *UnionMemberLowerer::emitObjectIn(BinaryExpr *bin) {
   }
   auto *text = dyn_cast<StringLitExpr>(key);
   if (text) {
-    llvm::convertUTF16ToUTF8String(
-        llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text->value.data()),
-                                    text->value.size()),
-        name);
+    name = ToUtf8::toUtf8(text->value);
   }
   llvm::Value *object = value.value;
   llvm::Value *result;
   const Type *objects = type->nonOptional();
   llvm::Value *present = type->isOptional()
                              ? this->lowering.optionalLowerer().optionalHas(object, type)
-                             : this->lowering.builder_.getTrue();
+                             : this->lowering.builder.getTrue();
   if (type->isOptional()) {
     object = this->lowering.optionalLowerer().optionalValue(object, type);
   }
   std::vector<const Type *> with;
   if (objects->isTagged()) {
-    llvm::Value *isObject = this->lowering.builder_.CreateICmpEQ(
+    llvm::Value *isObject = this->lowering.builder.CreateICmpEQ(
         this->lowering.unionLayout().unionTag(object),
-        this->lowering.builder_.getInt32(unsigned(UnionSlot::Object)));
-    present = this->lowering.builder_.CreateAnd(present, isObject);
+        this->lowering.builder.getInt32(unsigned(UnionSlot::Object)));
+    present = this->lowering.builder.CreateAnd(present, isObject);
     objects = objects->slotPart(UnionSlot::Object);
-    object = this->lowering.builder_.CreateSelect(
+    object = this->lowering.builder.CreateSelect(
         isObject,
         this->lowering.unionLayout().taggedPart(object, value.type->nonOptional(),
                                                 UnionSlot::Object),
-        llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()));
+        llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy()));
   }
   for (const Type *m :
        objects->isUnion() ? objects->members() : llvm::ArrayRef<const Type *>(objects)) {
@@ -168,18 +166,18 @@ llvm::Value *UnionMemberLowerer::emitObjectIn(BinaryExpr *bin) {
       with.push_back(m);
     }
   }
-  llvm::BasicBlock *before = this->lowering.builder_.GetInsertBlock();
+  llvm::BasicBlock *before = this->lowering.builder.GetInsertBlock();
   llvm::BasicBlock *testBlock = this->lowering.functionFrame().newBlock("in.test");
   llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("in.end");
-  this->lowering.builder_.CreateCondBr(present, testBlock, endBlock);
+  this->lowering.builder.CreateCondBr(present, testBlock, endBlock);
   this->lowering.functionFrame().switchTo(testBlock);
   llvm::Value *matches = this->lowering.unionLowerer().emitIsOneOf(
       this->lowering.unionLowerer().objectClassId(object), with);
-  llvm::BasicBlock *testEnd = this->lowering.builder_.GetInsertBlock();
-  this->lowering.builder_.CreateBr(endBlock);
+  llvm::BasicBlock *testEnd = this->lowering.builder.GetInsertBlock();
+  this->lowering.builder.CreateBr(endBlock);
   this->lowering.functionFrame().switchTo(endBlock);
-  llvm::PHINode *phi = this->lowering.builder_.CreatePHI(this->lowering.builder_.getInt1Ty(), 2);
-  phi->addIncoming(this->lowering.builder_.getFalse(), before);
+  llvm::PHINode *phi = this->lowering.builder.CreatePHI(this->lowering.builder.getInt1Ty(), 2);
+  phi->addIncoming(this->lowering.builder.getFalse(), before);
   phi->addIncoming(matches, testEnd);
   result = phi;
   this->lowering.refCounts().dropOperand(value);
@@ -206,8 +204,8 @@ llvm::Value *UnionMemberLowerer::emitUnionMethodCall(CallExpr *call) {
     if (i + 1 < call->unionMethods().size()) {
       llvm::BasicBlock *block = this->lowering.functionFrame().newBlock("union.call");
       next = this->lowering.functionFrame().newBlock("union.call.next");
-      this->lowering.builder_.CreateCondBr(this->lowering.unionLowerer().emitIsOneOf(id, m.member),
-                                           block, next);
+      this->lowering.builder.CreateCondBr(this->lowering.unionLowerer().emitIsOneOf(id, m.member),
+                                          block, next);
       this->lowering.functionFrame().switchTo(block);
     }
     llvm::Value *result;
@@ -216,23 +214,23 @@ llvm::Value *UnionMemberLowerer::emitUnionMethodCall(CallExpr *call) {
       args.insert(args.end(), values.begin(), values.end());
       result =
           m.virtualCall
-              ? this->lowering.builder_.CreateCall(this->lowering.closureLowerer().closureFnType(
-                                                       ClosureLowerer::functionTypeOf(m.method)),
-                                                   this->lowering.inheritLowerer().vtableEntry(
-                                                       self.value, m.method->decl->slot(), false),
-                                                   args)
-              : this->lowering.builder_.CreateCall(
+              ? this->lowering.builder.CreateCall(this->lowering.closureLowerer().closureFnType(
+                                                      ClosureLowerer::functionTypeOf(m.method)),
+                                                  this->lowering.inheritLowerer().vtableEntry(
+                                                      self.value, m.method->decl->slot(), false),
+                                                  args)
+              : this->lowering.builder.CreateCall(
                     this->lowering.classDescriptors().methodCode(m.method->decl), args);
     } else {
-      llvm::Value *fn = this->lowering.builder_.CreateLoad(
-          this->lowering.fnTy_,
+      llvm::Value *fn = this->lowering.builder.CreateLoad(
+          this->lowering.fnTy,
           this->lowering.objectLayouts().fieldAddress(self.value, m.member, member->name));
       result = this->lowering.closureLowerer().callFunctionValue(fn, fnType, values);
     }
     if (result && !result->getType()->isVoidTy()) {
-      incoming.push_back({result, this->lowering.builder_.GetInsertBlock()});
+      incoming.push_back({result, this->lowering.builder.GetInsertBlock()});
     }
-    this->lowering.builder_.CreateBr(endBlock);
+    this->lowering.builder.CreateBr(endBlock);
     if (next) {
       this->lowering.functionFrame().switchTo(next);
     }
@@ -240,8 +238,8 @@ llvm::Value *UnionMemberLowerer::emitUnionMethodCall(CallExpr *call) {
   this->lowering.functionFrame().switchTo(endBlock);
   llvm::Value *result = nullptr;
   if (!incoming.empty()) {
-    llvm::PHINode *phi = this->lowering.builder_.CreatePHI(incoming.front().first->getType(),
-                                                           unsigned(incoming.size()));
+    llvm::PHINode *phi = this->lowering.builder.CreatePHI(incoming.front().first->getType(),
+                                                          unsigned(incoming.size()));
     for (auto [v, block] : incoming) {
       phi->addIncoming(v, block);
     }

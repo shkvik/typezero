@@ -32,7 +32,7 @@ public:
   void var(const VarSymbol *v, bool write, llvm::SMLoc at);
 
 private:
-  Analysis &analysis_;
+  Analysis &analysis;
 };
 
 }

@@ -1,8 +1,8 @@
 #include "compiler/lower/expr/member_lowerer/member_lowerer.h"
-#include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
-#include "compiler/library/json/json_lowerer/json_lowerer.h"
-#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
+#include "compiler/lower/library/bytes/bytes_lowerer/bytes_lowerer.h"
+#include "compiler/lower/library/json/json_lowerer/json_lowerer.h"
+#include "compiler/lower/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/objects/object_lowerer/object_lowerer.h"
 #include "compiler/lower/values/array_lowerer/array_lowerer.h"
@@ -10,7 +10,6 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
-
 
 namespace tz {
 

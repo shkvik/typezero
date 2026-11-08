@@ -1,0 +1,14 @@
+#pragma once
+
+#include "compiler/lower/library/bytes/bytes_call_site/bytes_call_site.h"
+
+namespace tz {
+
+class TypedArrayCalls : public BytesCallSite {
+public:
+  using BytesCallSite::BytesCallSite;
+
+  llvm::Value *emit();
+};
+
+}

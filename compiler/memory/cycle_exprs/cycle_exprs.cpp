@@ -1,11 +1,12 @@
 #include "compiler/memory/cycle_exprs/cycle_exprs.h"
 #include "compiler/memory/cycle_escapes/cycle_escapes.h"
+#include "compiler/program/to_utf8/to_utf8.h"
 #include "llvm/Support/ConvertUTF.h"
 
 namespace tz {
 
 CycleExprs::CycleExprs(CycleScanner &scanner)
-    : scanner_(scanner) {}
+    : scanner(scanner) {}
 
 bool CycleExprs::runsAndDrops(Builtin builtin) {
   switch (builtin) {
@@ -33,22 +34,22 @@ void CycleExprs::closure(const FunctionExpr *expr, bool held) {
   if (!fn->nonEscaping) {
     const void *key = fn->group ? static_cast<const void *>(fn->group) : fn;
     const std::vector<VarSymbol *> &captures = fn->group ? fn->group->captures : fn->captures;
-    scanner_.envs[key].assign(captures.begin(), captures.end());
+    this->scanner.envs[key].assign(captures.begin(), captures.end());
     if (held && expr->type) {
-      scanner_.closuresOf[expr->type->nonOptional()].insert(key);
+      this->scanner.closuresOf[expr->type->nonOptional()].insert(key);
     }
     if (held && fn->sym) {
-      scanner_.closuresOf[CycleScanner::functionType(fn)].insert(key);
+      this->scanner.closuresOf[CycleScanner::functionType(fn)].insert(key);
     }
   }
-  scanner_.function(fn);
+  this->scanner.function(fn);
 }
 
 void CycleExprs::expr(const Expr *expr) {
   if (!expr) {
     return;
   }
-  scanner_.addType(expr->type);
+  this->scanner.addType(expr->type);
   switch (expr->kind()) {
   case Expr::Kind::Template:
     for (const Expr *e : llvm::cast<TemplateExpr>(expr)->exprs) {
@@ -63,9 +64,9 @@ void CycleExprs::expr(const Expr *expr) {
   case Expr::Kind::ObjectLit: {
     auto *lit = llvm::cast<ObjectLitExpr>(expr);
     if (lit->cls) {
-      scanner_.addType(lit->cls->type);
+      this->scanner.addType(lit->cls->type);
       for (const FunctionDecl *fn : lit->cls->methods) {
-        scanner_.function(fn);
+        this->scanner.function(fn);
       }
     }
     for (const ObjectLitExpr::Property &p : lit->props) {
@@ -76,7 +77,7 @@ void CycleExprs::expr(const Expr *expr) {
       if (p.spread() && p.value->type && p.value->type->isObject()) {
         for (const Field &f : p.value->type->fields()) {
           if (f.type->isFunction()) {
-            scanner_.boundOf[f.type].insert(p.value->type);
+            this->scanner.boundOf[f.type].insert(p.value->type);
           }
         }
       }
@@ -85,13 +86,13 @@ void CycleExprs::expr(const Expr *expr) {
   }
   case Expr::Kind::Name:
     if (auto *name = llvm::cast<NameExpr>(expr); name->var()) {
-      scanner_.addVar(name->var());
+      this->scanner.addVar(name->var());
     } else if (name->func() && name->func()->decl && name->func()->decl->isInstance && name->type) {
       const FuncSymbol *fn = name->func();
-      const Type *rep =
-          Type::function(fn->params, fn->minArgs, fn->hasRest,
-                         fn->ret ? fn->ret : Type::voidTy(), fn->hasThis);
-      scanner_.instanceFlows.push_back({name->type, rep, true});
+      const Type *rep = Type::function(
+          fn->params, fn->minArgs, fn->hasRest,
+          fn->hasReturnType() ? fn->getKnownReturnType() : Type::voidTy(), fn->hasThis);
+      this->scanner.instanceFlows.push_back({name->type, rep, true});
     }
     break;
   case Expr::Kind::Member: {
@@ -99,9 +100,9 @@ void CycleExprs::expr(const Expr *expr) {
     this->expr(member->object);
     const Type *object = member->object->type ? member->object->type->nonOptional() : nullptr;
     if (member->type && member->type->nonOptional()->isFunction() && object &&
-        !scanner_.callee_.contains(member) &&
+        !this->scanner.callee.contains(member) &&
         (member->method() || (object->isObject() && !object->isClass() && object->isBase()))) {
-      scanner_.boundOf[member->type->nonOptional()].insert(member->object->type);
+      this->scanner.boundOf[member->type->nonOptional()].insert(member->object->type);
     }
     break;
   }
@@ -124,7 +125,7 @@ void CycleExprs::expr(const Expr *expr) {
     auto *assign = llvm::cast<AssignExpr>(expr);
     assigned(assign);
     if (auto *index = llvm::dyn_cast<IndexExpr>(assign->target); index && index->object->type) {
-      scanner_.mutated.insert(index->object->type->nonOptional());
+      this->scanner.mutated.insert(index->object->type->nonOptional());
     }
     target(assign->target);
     this->expr(assign->value);
@@ -135,23 +136,23 @@ void CycleExprs::expr(const Expr *expr) {
     break;
   case Expr::Kind::Call: {
     auto *call = llvm::cast<CallExpr>(expr);
-    scanner_.callee_.insert(call->callee);
+    this->scanner.callee.insert(call->callee);
     this->expr(call->callee);
     if (const FuncSymbol *fn = call->func() ? call->func() : call->method();
         fn && fn->decl && fn->decl->isInstance) {
-      if (fn->ret && call->type) {
-        scanner_.instanceFlows.push_back({call->type, fn->ret, true});
+      if (fn->hasReturnType() && call->type) {
+        this->scanner.instanceFlows.push_back({call->type, fn->getKnownReturnType(), true});
       }
       for (size_t i = 0; i < call->args.size() && i < fn->params.size(); ++i) {
         if (call->args[i] && call->args[i]->type && fn->params[i]) {
-          scanner_.instanceFlows.push_back({call->args[i]->type, fn->params[i], false});
+          this->scanner.instanceFlows.push_back({call->args[i]->type, fn->params[i], false});
         }
       }
     }
     bool drops = CycleExprs::runsAndDrops(call->builtin());
     for (const Expr *arg : call->args) {
       if (const FunctionExpr *fn = drops ? CycleExprs::closureLiteral(arg) : nullptr) {
-        scanner_.addType(arg->type);
+        this->scanner.addType(arg->type);
         closure(fn, false);
       } else {
         this->expr(arg);
@@ -163,7 +164,7 @@ void CycleExprs::expr(const Expr *expr) {
           continue;
         }
         if (arg->type && arg->type->nonOptional()->isFunction()) {
-          scanner_.reactionCallbacks.insert(arg->type->nonOptional());
+          this->scanner.reactionCallbacks.insert(arg->type->nonOptional());
         }
       }
     }
@@ -178,7 +179,7 @@ void CycleExprs::expr(const Expr *expr) {
       case Builtin::RecordNullishSet:
         if (auto *member = llvm::dyn_cast<MemberExpr>(call->callee);
             member && member->object->type) {
-          scanner_.mutated.insert(member->object->type->nonOptional());
+          this->scanner.mutated.insert(member->object->type->nonOptional());
         }
         break;
       default:
@@ -205,11 +206,11 @@ void CycleExprs::expr(const Expr *expr) {
     this->expr(conv->operand);
     if (conv->type && conv->operand->type &&
         (conv->type->nonOptional()->isUnknown() || conv->type->nonOptional()->isAnyObject())) {
-      scanner_.toUnknown.insert(conv->operand->type);
+      this->scanner.toUnknown.insert(conv->operand->type);
     }
     if (conv->type && conv->operand->type && conv->type->nonOptional()->isFunction() &&
         conv->operand->type->nonOptional()->isFunction()) {
-      scanner_.fnCasts.insert({conv->operand->type->nonOptional(), conv->type->nonOptional()});
+      this->scanner.fnCasts.insert({conv->operand->type->nonOptional(), conv->type->nonOptional()});
     }
     break;
   }
@@ -263,36 +264,34 @@ void CycleExprs::assigned(const AssignExpr *assign) {
       for (const Type *n : key->isUnion() ? key->members() : llvm::ArrayRef<const Type *>(key)) {
         if (n->isStringLiteral()) {
           const std::u16string &text = n->literalText();
-          std::string name;
-          llvm::convertUTF16ToUTF8String(
-              llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()),
-                                          text.size()),
-              name);
+          std::string name = ToUtf8::toUtf8(text);
           names.push_back(std::move(name));
         }
       }
     }
   }
   for (std::string &name : names) {
-    scanner_.mutableFields.insert(std::move(name));
+    this->scanner.mutableFields.insert(std::move(name));
   }
 }
 
 bool CycleExprs::constructionWrite(const AssignExpr *assign) {
-  const FunctionDecl *fn = scanner_.current_;
+  const FunctionDecl *fn = this->scanner.current;
   if (!fn || !fn->cls() || !fn->thisVar() || (!fn->isConstructor() && fn != fn->cls()->init)) {
     return false;
   }
-  auto [it, inserted] = scanner_.safeWrites_.try_emplace(fn);
+  auto [it, inserted] = this->scanner.safeWrites.try_emplace(fn);
   if (inserted) {
     const ClassDecl *cls = fn->cls();
     bool initEscapes = cls->init && cls->init->thisVar() &&
                        CycleScanner::thisEscapes(cls->init->body, cls->init->thisVar());
-    bool escaped = fn == cls->init
-                       ? cls->parent && scanner_.cycleEscapes().constructionEscapes(cls->parent)
-                       : !cls->parent && initEscapes;
+    bool escaped =
+        fn == cls->init
+            ? cls->parent && this->scanner.cycleEscapes().constructionEscapes(cls->parent)
+            : !cls->parent && initEscapes;
     bool afterSuper =
-        (cls->parent && scanner_.cycleEscapes().constructionEscapes(cls->parent)) || initEscapes;
+        (cls->parent && this->scanner.cycleEscapes().constructionEscapes(cls->parent)) ||
+        initEscapes;
     CycleEscapes::ordered(fn->body, fn->thisVar(), escaped, afterSuper, it->second);
   }
 

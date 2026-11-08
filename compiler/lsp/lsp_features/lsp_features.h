@@ -42,11 +42,11 @@ private:
                                        std::string &name, bool &library) const;
   size_t offset(unsigned line, unsigned character) const;
 
-  const Knowledge &knowledge_;
+  const Knowledge &knowledge;
   size_t module_;
   llvm::StringRef text_;
-  UriOf uriOf_;
-  TextOf textOf_;
+  UriOf uriOf;
+  TextOf textOf;
 };
 
 }

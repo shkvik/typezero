@@ -23,7 +23,7 @@ public:
 
 private:
   static bool startsStatement(Tok kind);
-  Parser &parser_;
+  Parser &parser;
 };
 
 }

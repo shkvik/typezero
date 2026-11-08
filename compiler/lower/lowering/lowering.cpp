@@ -1,35 +1,4 @@
 #include "compiler/lower/lowering/lowering.h"
-#include "compiler/library/bytes/bytes_call_lowerer/bytes_call_lowerer.h"
-#include "compiler/library/bytes/bytes_callback_lowerer/bytes_callback_lowerer.h"
-#include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
-#include "compiler/library/child_process/child_lowerer/child_lowerer.h"
-#include "compiler/library/console/console_lowerer/console_lowerer.h"
-#include "compiler/library/crypto/crypto_lowerer/crypto_lowerer.h"
-#include "compiler/library/date/date_lowerer/date_lowerer.h"
-#include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
-#include "compiler/library/fs/fs_lowerer/fs_lowerer.h"
-#include "compiler/library/fs/fs_promises_lowerer/fs_promises_lowerer.h"
-#include "compiler/library/intl/intl_call_lowerer/intl_call_lowerer.h"
-#include "compiler/library/intl/intl_lowerer/intl_lowerer.h"
-#include "compiler/library/json/json_lowerer/json_lowerer.h"
-#include "compiler/library/json/json_writers/json_writers.h"
-#include "compiler/library/math/math_lowerer/math_lowerer.h"
-#include "compiler/library/os/os_lowerer/os_lowerer.h"
-#include "compiler/library/path/path_lowerer/path_lowerer.h"
-#include "compiler/library/process/process_lowerer/process_lowerer.h"
-#include "compiler/library/reflect/class_info_lowerer/class_info_lowerer.h"
-#include "compiler/library/reflect/reflect_args_lowerer/reflect_args_lowerer.h"
-#include "compiler/library/reflect/reflect_dispatch_lowerer/reflect_dispatch_lowerer.h"
-#include "compiler/library/reflect/reflect_lowerer/reflect_lowerer.h"
-#include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
-#include "compiler/library/regex/regex_native_lowerer/regex_native_lowerer.h"
-#include "compiler/library/result/err_sites/err_sites.h"
-#include "compiler/library/result/result_combine_lowerer/result_combine_lowerer.h"
-#include "compiler/library/result/result_lowerer/result_lowerer.h"
-#include "compiler/library/stream/stream_lowerer/stream_lowerer.h"
-#include "compiler/library/tz_modules/library_call_lowerer/library_call_lowerer.h"
-#include "compiler/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
-#include "compiler/library/weakref/weak_ref_lowerer/weak_ref_lowerer.h"
 #include "compiler/lower/async/async_builtin_lowerer/async_builtin_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/async/promise_combine_lowerer/promise_combine_lowerer.h"
@@ -61,6 +30,37 @@
 #include "compiler/lower/iterators/lazy_chain_lowerer/lazy_chain_lowerer.h"
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
+#include "compiler/lower/library/bytes/bytes_call_lowerer/bytes_call_lowerer.h"
+#include "compiler/lower/library/bytes/bytes_callback_lowerer/bytes_callback_lowerer.h"
+#include "compiler/lower/library/bytes/bytes_lowerer/bytes_lowerer.h"
+#include "compiler/lower/library/child_process/child_lowerer/child_lowerer.h"
+#include "compiler/lower/library/console/console_lowerer/console_lowerer.h"
+#include "compiler/lower/library/crypto/crypto_lowerer/crypto_lowerer.h"
+#include "compiler/lower/library/date/date_lowerer/date_lowerer.h"
+#include "compiler/lower/library/decimal/decimal_lowerer/decimal_lowerer.h"
+#include "compiler/lower/library/fs/fs_lowerer/fs_lowerer.h"
+#include "compiler/lower/library/fs/fs_promises_lowerer/fs_promises_lowerer.h"
+#include "compiler/lower/library/intl/intl_call_lowerer/intl_call_lowerer.h"
+#include "compiler/lower/library/intl/intl_lowerer/intl_lowerer.h"
+#include "compiler/lower/library/json/json_lowerer/json_lowerer.h"
+#include "compiler/lower/library/json/json_writers/json_writers.h"
+#include "compiler/lower/library/math/math_lowerer/math_lowerer.h"
+#include "compiler/lower/library/os/os_lowerer/os_lowerer.h"
+#include "compiler/lower/library/path/path_lowerer/path_lowerer.h"
+#include "compiler/lower/library/process/process_lowerer/process_lowerer.h"
+#include "compiler/lower/library/reflect/class_info_lowerer/class_info_lowerer.h"
+#include "compiler/lower/library/reflect/reflect_args_lowerer/reflect_args_lowerer.h"
+#include "compiler/lower/library/reflect/reflect_dispatch_lowerer/reflect_dispatch_lowerer.h"
+#include "compiler/lower/library/reflect/reflect_lowerer/reflect_lowerer.h"
+#include "compiler/lower/library/regex/regex_lowerer/regex_lowerer.h"
+#include "compiler/lower/library/regex/regex_native_lowerer/regex_native_lowerer.h"
+#include "compiler/lower/library/result/err_sites/err_sites.h"
+#include "compiler/lower/library/result/result_combine_lowerer/result_combine_lowerer.h"
+#include "compiler/lower/library/result/result_lowerer/result_lowerer.h"
+#include "compiler/lower/library/stream/stream_lowerer/stream_lowerer.h"
+#include "compiler/lower/library/tz_modules/library_call_lowerer/library_call_lowerer.h"
+#include "compiler/lower/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
+#include "compiler/lower/library/weakref/weak_ref_lowerer/weak_ref_lowerer.h"
 #include "compiler/lower/memory/group_lowerer/group_lowerer.h"
 #include "compiler/lower/memory/memory_debug/memory_debug.h"
 #include "compiler/lower/memory/publish_lowerer/publish_lowerer.h"
@@ -107,111 +107,114 @@ using llvm::isa;
 
 Lowering::Lowering(llvm::LLVMContext &ctx, llvm::StringRef moduleName,
                    const llvm::DataLayout &layout)
-    : ctx_(ctx), module_(std::make_unique<llvm::Module>(moduleName, ctx)), builder_(ctx) {
-  moduleBuilderPart_ = std::make_unique<ModuleBuilder>(*this);
-  functionBuilderPart_ = std::make_unique<FunctionBuilder>(*this);
-  runtimeFunctionsPart_ = std::make_unique<RuntimeFunctions>(*this);
-  functionFramePart_ = std::make_unique<FunctionFrame>(*this);
-  refCountsPart_ = std::make_unique<RefCounts>(*this);
-  optionalLowererPart_ = std::make_unique<OptionalLowerer>(*this);
-  stmtLowererPart_ = std::make_unique<StmtLowerer>(*this);
-  loopLowererPart_ = std::make_unique<LoopLowerer>(*this);
-  switchLowererPart_ = std::make_unique<SwitchLowerer>(*this);
-  exprLowererPart_ = std::make_unique<ExprLowerer>(*this);
-  unaryLowererPart_ = std::make_unique<UnaryLowerer>(*this);
-  binaryLowererPart_ = std::make_unique<BinaryLowerer>(*this);
-  equalityLowererPart_ = std::make_unique<EqualityLowerer>(*this);
-  truthLowererPart_ = std::make_unique<TruthLowerer>(*this);
-  assignLowererPart_ = std::make_unique<AssignLowerer>(*this);
-  callLowererPart_ = std::make_unique<CallLowerer>(*this);
-  consoleLowererPart_ = std::make_unique<ConsoleLowerer>(*this);
-  stringLowererPart_ = std::make_unique<StringLowerer>(*this);
-  stringMethodLowererPart_ = std::make_unique<StringMethodLowerer>(*this);
-  memberLowererPart_ = std::make_unique<MemberLowerer>(*this);
-  typeDescriptorsPart_ = std::make_unique<TypeDescriptors>(*this);
-  arrayLowererPart_ = std::make_unique<ArrayLowerer>(*this);
-  arrayMethodLowererPart_ = std::make_unique<ArrayMethodLowerer>(*this);
-  callbackMethodLowererPart_ = std::make_unique<CallbackMethodLowerer>(*this);
-  promiseLowererPart_ = std::make_unique<PromiseLowerer>(*this);
-  asyncLowererPart_ = std::make_unique<AsyncLowerer>(*this);
-  promiseCombineLowererPart_ = std::make_unique<PromiseCombineLowerer>(*this);
-  reactionLowererPart_ = std::make_unique<ReactionLowerer>(*this);
-  asyncBuiltinLowererPart_ = std::make_unique<AsyncBuiltinLowerer>(*this);
-  asyncGeneratorLowererPart_ = std::make_unique<AsyncGeneratorLowerer>(*this);
-  mathLowererPart_ = std::make_unique<MathLowerer>(*this);
-  numberLowererPart_ = std::make_unique<NumberLowerer>(*this);
-  classDescriptorsPart_ = std::make_unique<ClassDescriptors>(*this);
-  classLowererPart_ = std::make_unique<ClassLowerer>(*this);
-  closureLowererPart_ = std::make_unique<ClosureLowerer>(*this);
-  envLowererPart_ = std::make_unique<EnvLowerer>(*this);
-  groupLowererPart_ = std::make_unique<GroupLowerer>(*this);
-  storeLowererPart_ = std::make_unique<StoreLowerer>(*this);
-  weakRefLowererPart_ = std::make_unique<WeakRefLowerer>(*this);
-  memoryDebugPart_ = std::make_unique<MemoryDebug>(*this);
-  publishLowererPart_ = std::make_unique<PublishLowerer>(*this);
-  decoratorLowererPart_ = std::make_unique<DecoratorLowerer>(*this);
-  dictLowererPart_ = std::make_unique<DictLowerer>(*this);
-  dictMethodLowererPart_ = std::make_unique<DictMethodLowerer>(*this);
-  inheritLowererPart_ = std::make_unique<InheritLowerer>(*this);
-  coroutineLowererPart_ = std::make_unique<CoroutineLowerer>(*this);
-  generatorLowererPart_ = std::make_unique<GeneratorLowerer>(*this);
-  lazyChainLowererPart_ = std::make_unique<LazyChainLowerer>(*this);
-  inlineGeneratorLowererPart_ = std::make_unique<InlineGeneratorLowerer>(*this);
-  iteratorLowererPart_ = std::make_unique<IteratorLowerer>(*this);
-  objectLayoutsPart_ = std::make_unique<ObjectLayouts>(*this);
-  objectLowererPart_ = std::make_unique<ObjectLowerer>(*this);
-  tailCallLowererPart_ = std::make_unique<TailCallLowerer>(*this);
-  placeLowererPart_ = std::make_unique<PlaceLowerer>(*this);
-  exitLowererPart_ = std::make_unique<ExitLowerer>(*this);
-  unionLayoutPart_ = std::make_unique<UnionLayout>(*this);
-  unionLowererPart_ = std::make_unique<UnionLowerer>(*this);
-  unionMemberLowererPart_ = std::make_unique<UnionMemberLowerer>(*this);
-  unknownLowererPart_ = std::make_unique<UnknownLowerer>(*this);
-  bytesLowererPart_ = std::make_unique<BytesLowerer>(*this);
-  bytesCallbackLowererPart_ = std::make_unique<BytesCallbackLowerer>(*this);
-  bytesCallLowererPart_ = std::make_unique<BytesCallLowerer>(*this);
-  childLowererPart_ = std::make_unique<ChildLowerer>(*this);
-  cryptoLowererPart_ = std::make_unique<CryptoLowerer>(*this);
-  dateLowererPart_ = std::make_unique<DateLowerer>(*this);
-  decimalLowererPart_ = std::make_unique<DecimalLowerer>(*this);
-  libraryCallLowererPart_ = std::make_unique<LibraryCallLowerer>(*this);
-  intlLowererPart_ = std::make_unique<IntlLowerer>(*this);
-  intlCallLowererPart_ = std::make_unique<IntlCallLowerer>(*this);
-  jsonLowererPart_ = std::make_unique<JsonLowerer>(*this);
-  jsonWritersPart_ = std::make_unique<JsonWriters>(*this);
-  fsPromisesLowererPart_ = std::make_unique<FsPromisesLowerer>(*this);
-  fsLowererPart_ = std::make_unique<FsLowerer>(*this);
-  pathLowererPart_ = std::make_unique<PathLowerer>(*this);
-  osLowererPart_ = std::make_unique<OsLowerer>(*this);
-  objectMakerPart_ = std::make_unique<ObjectMaker>(*this);
-  processLowererPart_ = std::make_unique<ProcessLowerer>(*this);
-  unknownCastLowererPart_ = std::make_unique<UnknownCastLowerer>(*this);
-  reflectArgsLowererPart_ = std::make_unique<ReflectArgsLowerer>(*this);
-  classInfoLowererPart_ = std::make_unique<ClassInfoLowerer>(*this);
-  reflectDispatchLowererPart_ = std::make_unique<ReflectDispatchLowerer>(*this);
-  reflectLowererPart_ = std::make_unique<ReflectLowerer>(*this);
-  regexLowererPart_ = std::make_unique<RegexLowerer>(*this);
-  regexNativeLowererPart_ = std::make_unique<RegexNativeLowerer>(*this);
-  resultLowererPart_ = std::make_unique<ResultLowerer>(*this);
-  resultCombineLowererPart_ = std::make_unique<ResultCombineLowerer>(*this);
-  errSitesPart_ = std::make_unique<ErrSites>(*this);
-  debugInfoPart_ = std::make_unique<DebugInfo>(*this);
-  streamLowererPart_ = std::make_unique<StreamLowerer>(*this);
-  tzModulesLowererPart_ = std::make_unique<TzModulesLowerer>(*this);
+    : ctx(ctx),
+      module_(std::make_unique<llvm::Module>(moduleName, ctx)),
+      builder(ctx) {
+  this->moduleBuilderPart = std::make_unique<ModuleBuilder>(*this);
+  this->functionBuilderPart = std::make_unique<FunctionBuilder>(*this);
+  this->runtimeFunctionsPart = std::make_unique<RuntimeFunctions>(*this);
+  this->functionFramePart = std::make_unique<FunctionFrame>(*this);
+  this->refCountsPart = std::make_unique<RefCounts>(*this);
+  this->optionalLowererPart = std::make_unique<OptionalLowerer>(*this);
+  this->stmtLowererPart = std::make_unique<StmtLowerer>(*this);
+  this->loopLowererPart = std::make_unique<LoopLowerer>(*this);
+  this->switchLowererPart = std::make_unique<SwitchLowerer>(*this);
+  this->exprLowererPart = std::make_unique<ExprLowerer>(*this);
+  this->unaryLowererPart = std::make_unique<UnaryLowerer>(*this);
+  this->binaryLowererPart = std::make_unique<BinaryLowerer>(*this);
+  this->equalityLowererPart = std::make_unique<EqualityLowerer>(*this);
+  this->truthLowererPart = std::make_unique<TruthLowerer>(*this);
+  this->assignLowererPart = std::make_unique<AssignLowerer>(*this);
+  this->callLowererPart = std::make_unique<CallLowerer>(*this);
+  this->consoleLowererPart = std::make_unique<ConsoleLowerer>(*this);
+  this->stringLowererPart = std::make_unique<StringLowerer>(*this);
+  this->stringMethodLowererPart = std::make_unique<StringMethodLowerer>(*this);
+  this->memberLowererPart = std::make_unique<MemberLowerer>(*this);
+  this->typeDescriptorsPart = std::make_unique<TypeDescriptors>(*this);
+  this->arrayLowererPart = std::make_unique<ArrayLowerer>(*this);
+  this->arrayMethodLowererPart = std::make_unique<ArrayMethodLowerer>(*this);
+  this->callbackMethodLowererPart = std::make_unique<CallbackMethodLowerer>(*this);
+  this->promiseLowererPart = std::make_unique<PromiseLowerer>(*this);
+  this->asyncLowererPart = std::make_unique<AsyncLowerer>(*this);
+  this->promiseCombineLowererPart = std::make_unique<PromiseCombineLowerer>(*this);
+  this->reactionLowererPart = std::make_unique<ReactionLowerer>(*this);
+  this->asyncBuiltinLowererPart = std::make_unique<AsyncBuiltinLowerer>(*this);
+  this->asyncGeneratorLowererPart = std::make_unique<AsyncGeneratorLowerer>(*this);
+  this->mathLowererPart = std::make_unique<MathLowerer>(*this);
+  this->numberLowererPart = std::make_unique<NumberLowerer>(*this);
+  this->classDescriptorsPart = std::make_unique<ClassDescriptors>(*this);
+  this->classLowererPart = std::make_unique<ClassLowerer>(*this);
+  this->closureLowererPart = std::make_unique<ClosureLowerer>(*this);
+  this->envLowererPart = std::make_unique<EnvLowerer>(*this);
+  this->groupLowererPart = std::make_unique<GroupLowerer>(*this);
+  this->storeLowererPart = std::make_unique<StoreLowerer>(*this);
+  this->weakRefLowererPart = std::make_unique<WeakRefLowerer>(*this);
+  this->memoryDebugPart = std::make_unique<MemoryDebug>(*this);
+  this->publishLowererPart = std::make_unique<PublishLowerer>(*this);
+  this->decoratorLowererPart = std::make_unique<DecoratorLowerer>(*this);
+  this->dictLowererPart = std::make_unique<DictLowerer>(*this);
+  this->dictMethodLowererPart = std::make_unique<DictMethodLowerer>(*this);
+  this->inheritLowererPart = std::make_unique<InheritLowerer>(*this);
+  this->coroutineLowererPart = std::make_unique<CoroutineLowerer>(*this);
+  this->generatorLowererPart = std::make_unique<GeneratorLowerer>(*this);
+  this->lazyChainLowererPart = std::make_unique<LazyChainLowerer>(*this);
+  this->inlineGeneratorLowererPart = std::make_unique<InlineGeneratorLowerer>(*this);
+  this->iteratorLowererPart = std::make_unique<IteratorLowerer>(*this);
+  this->objectLayoutsPart = std::make_unique<ObjectLayouts>(*this);
+  this->objectLowererPart = std::make_unique<ObjectLowerer>(*this);
+  this->tailCallLowererPart = std::make_unique<TailCallLowerer>(*this);
+  this->placeLowererPart = std::make_unique<PlaceLowerer>(*this);
+  this->exitLowererPart = std::make_unique<ExitLowerer>(*this);
+  this->unionLayoutPart = std::make_unique<UnionLayout>(*this);
+  this->unionLowererPart = std::make_unique<UnionLowerer>(*this);
+  this->unionMemberLowererPart = std::make_unique<UnionMemberLowerer>(*this);
+  this->unknownLowererPart = std::make_unique<UnknownLowerer>(*this);
+  this->bytesLowererPart = std::make_unique<BytesLowerer>(*this);
+  this->bytesCallbackLowererPart = std::make_unique<BytesCallbackLowerer>(*this);
+  this->bytesCallLowererPart = std::make_unique<BytesCallLowerer>(*this);
+  this->childLowererPart = std::make_unique<ChildLowerer>(*this);
+  this->cryptoLowererPart = std::make_unique<CryptoLowerer>(*this);
+  this->dateLowererPart = std::make_unique<DateLowerer>(*this);
+  this->decimalLowererPart = std::make_unique<DecimalLowerer>(*this);
+  this->libraryCallLowererPart = std::make_unique<LibraryCallLowerer>(*this);
+  this->intlLowererPart = std::make_unique<IntlLowerer>(*this);
+  this->intlCallLowererPart = std::make_unique<IntlCallLowerer>(*this);
+  this->jsonLowererPart = std::make_unique<JsonLowerer>(*this);
+  this->jsonWritersPart = std::make_unique<JsonWriters>(*this);
+  this->fsPromisesLowererPart = std::make_unique<FsPromisesLowerer>(*this);
+  this->fsLowererPart = std::make_unique<FsLowerer>(*this);
+  this->pathLowererPart = std::make_unique<PathLowerer>(*this);
+  this->osLowererPart = std::make_unique<OsLowerer>(*this);
+  this->objectMakerPart = std::make_unique<ObjectMaker>(*this);
+  this->processLowererPart = std::make_unique<ProcessLowerer>(*this);
+  this->unknownCastLowererPart = std::make_unique<UnknownCastLowerer>(*this);
+  this->reflectArgsLowererPart = std::make_unique<ReflectArgsLowerer>(*this);
+  this->classInfoLowererPart = std::make_unique<ClassInfoLowerer>(*this);
+  this->reflectDispatchLowererPart = std::make_unique<ReflectDispatchLowerer>(*this);
+  this->reflectLowererPart = std::make_unique<ReflectLowerer>(*this);
+  this->regexLowererPart = std::make_unique<RegexLowerer>(*this);
+  this->regexNativeLowererPart = std::make_unique<RegexNativeLowerer>(*this);
+  this->resultLowererPart = std::make_unique<ResultLowerer>(*this);
+  this->resultCombineLowererPart = std::make_unique<ResultCombineLowerer>(*this);
+  this->errSitesPart = std::make_unique<ErrSites>(*this);
+  this->debugInfoPart = std::make_unique<DebugInfo>(*this);
+  this->streamLowererPart = std::make_unique<StreamLowerer>(*this);
+  this->tzModulesLowererPart = std::make_unique<TzModulesLowerer>(*this);
   module_->setDataLayout(layout);
-  llvm::Type *ptr = builder_.getPtrTy();
-  llvm::Type *i32 = builder_.getInt32Ty();
-  llvm::Type *i64 = builder_.getInt64Ty();
-  strTy_ = llvm::StructType::create(ctx, {ptr, i64}, "tz.string");
-  arrayTy_ = llvm::StructType::create(ctx, {i64, ptr, ptr, i32, i32, ptr}, "tz.array");
-  typeDescTy_ = llvm::StructType::create(ctx, {i32, i32, ptr}, "tz.type");
-  fnTy_ = llvm::StructType::create(ctx, {ptr, ptr}, "tz.fn");
-  fnInfoTy_ = llvm::StructType::create(ctx, {ptr, strTy_}, "tz.fninfo");
-  decTy_ = llvm::StructType::create(ctx, {i64, i64}, "tz.decimal");
-  fieldDescTy_ = llvm::StructType::create(ctx, {ptr, i32, i32, ptr}, "tz.field");
-  layoutDescTy_ = llvm::StructType::create(ctx, {ptr, ptr, i32, i32, ptr, i32, i32}, "tz.layout");
-  promiseTy_ = llvm::StructType::create(ctx, {ptr, ptr, ptr, i32, i32}, "tz.promise");
-  promiseObjTy_ = llvm::StructType::create(ctx, {i64, ptr, ptr, ptr, i32, i32}, "tz.Promise");
+  llvm::Type *ptr = this->builder.getPtrTy();
+  llvm::Type *i32 = this->builder.getInt32Ty();
+  llvm::Type *i64 = this->builder.getInt64Ty();
+  this->strTy = llvm::StructType::create(ctx, {ptr, i64}, "tz.string");
+  this->arrayTy = llvm::StructType::create(ctx, {i64, ptr, ptr, i32, i32, ptr}, "tz.array");
+  this->typeDescTy = llvm::StructType::create(ctx, {i32, i32, ptr}, "tz.type");
+  this->fnTy = llvm::StructType::create(ctx, {ptr, ptr}, "tz.fn");
+  this->fnInfoTy = llvm::StructType::create(ctx, {ptr, this->strTy}, "tz.fninfo");
+  this->decTy = llvm::StructType::create(ctx, {i64, i64}, "tz.decimal");
+  this->fieldDescTy = llvm::StructType::create(ctx, {ptr, i32, i32, ptr}, "tz.field");
+  this->layoutDescTy =
+      llvm::StructType::create(ctx, {ptr, ptr, i32, i32, ptr, i32, i32}, "tz.layout");
+  this->promiseTy = llvm::StructType::create(ctx, {ptr, ptr, ptr, i32, i32}, "tz.promise");
+  this->promiseObjTy = llvm::StructType::create(ctx, {i64, ptr, ptr, ptr, i32, i32}, "tz.Promise");
 }
 
 const Expr *Lowering::stripImplicit(const Expr *e) {
@@ -241,29 +244,29 @@ const Expr *Lowering::awaitedOperand(const Expr *e) {
   return operand;
 }
 
-void Lowering::setParallelPlan(const ParallelPlan *plan) {
-  plan_ = plan;
-  parallel_ =
-      plan && llvm::any_of(plan->pieces, [](const ParallelPlan::Piece &p) { return !p.alone; });
+void Lowering::setParallelPlan(const ParallelPlan *parallelPlan) {
+  this->plan = parallelPlan;
+  parallel_ = parallelPlan && llvm::any_of(parallelPlan->pieces,
+                                           [](const ParallelPlan::Piece &p) { return !p.alone; });
   if (!parallel_) {
     return;
   }
-  ownedParams_.insert(plan->ownedParams.begin(), plan->ownedParams.end());
-  for (const ParallelPlan::Piece &piece : plan->pieces) {
+  this->ownedParams.insert(parallelPlan->ownedParams.begin(), parallelPlan->ownedParams.end());
+  for (const ParallelPlan::Piece &piece : parallelPlan->pieces) {
     if (piece.alone) {
       continue;
     }
     if (piece.start) {
-      aheadStarts_.try_emplace(piece.start, uint32_t(aheadStarts_.size() + 1));
+      this->aheadStarts.try_emplace(piece.start, uint32_t(this->aheadStarts.size() + 1));
       if (piece.fn) {
-        aheadFunctions_.insert(piece.fn);
+        this->aheadFunctions.insert(piece.fn);
       }
       if (piece.inOrderWith.empty() && piece.orderedAt.empty()) {
-        freeAwaits_.insert(piece.start);
+        this->freeAwaits.insert(piece.start);
       }
     }
     for (llvm::SMLoc at : piece.orderedAt) {
-      orderedLocs_.insert(at.getPointer());
+      this->orderedLocs.insert(at.getPointer());
     }
   }
 }
@@ -273,7 +276,7 @@ void Lowering::noteAwaited(const Expr *operand) {
     return;
   }
   if (auto *call = llvm::dyn_cast_or_null<CallExpr>(Lowering::stripImplicit(operand))) {
-    awaitedCalls_.insert(call);
+    this->awaitedCalls.insert(call);
   }
 }
 
@@ -297,23 +300,24 @@ void Lowering::noteAwaitedNext(const Stmt *declared, const Stmt *next) {
   }
   auto *name = llvm::dyn_cast_or_null<NameExpr>(Lowering::awaitedOperand(first));
   if (name && name->var() == d.sym) {
-    awaitedCalls_.insert(call);
+    this->awaitedCalls.insert(call);
   }
 }
 
 void Lowering::markAwaitedCall(const CallExpr *call, const FunctionDecl *target) {
-  if (!publishesFrame(target) || !awaitedCalls_.contains(call)) {
+  if (!publishesFrame(target) || !this->awaitedCalls.contains(call)) {
     return;
   }
-  builder_.CreateCall(
-      processLowerer().processFunction("tz_call_awaited", builder_.getVoidTy(), {}));
+  this->builder.CreateCall(
+      processLowerer().processFunction("tz_call_awaited", this->builder.getVoidTy(), {}));
 }
 
 void Lowering::orderAt(llvm::SMLoc loc) {
-  if (!parallel_ || !function_ || !orderedLocs_.contains(loc.getPointer())) {
+  if (!parallel_ || !this->function || !this->orderedLocs.contains(loc.getPointer())) {
     return;
   }
-  builder_.CreateCall(processLowerer().processFunction("tz_order_enter", builder_.getVoidTy(), {}));
+  this->builder.CreateCall(
+      processLowerer().processFunction("tz_order_enter", this->builder.getVoidTy(), {}));
 }
 
 Lowering::~Lowering() = default;

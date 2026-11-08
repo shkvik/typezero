@@ -11,22 +11,26 @@
 namespace tz {
 
 LowerPass::LowerPass(llvm::LLVMContext &context, const Target &target, llvm::StringRef moduleName,
-                     const FeatureRegistry &features, DebugLevel debug, bool optimize)
-    : context_(context), target_(target), moduleName_(moduleName.str()), features_(features),
-      debug_(debug), optimize_(optimize) {}
+                     const LowererRegistry &lowerers, DebugLevel debug, bool optimize)
+    : context(context),
+      target(target),
+      moduleName(moduleName.str()),
+      lowerers(lowerers),
+      debug(debug),
+      optimize(optimize) {}
 
 Result<Lowered, Errors> LowerPass::run(Program &program, const ParallelPlan &plan,
                                        const MemoryPlan &memory) const {
-  llvm::DataLayout layout = target_.machine().createDataLayout();
-  Lowering lowering(context_, moduleName_, layout);
+  llvm::DataLayout layout = this->target.machine().createDataLayout();
+  Lowering lowering(this->context, this->moduleName, layout);
   lowering.setSourceMgr(&program.sourceMgr);
   lowering.setParallelPlan(&plan);
   lowering.setMemoryPlan(&memory);
-  lowering.setFeatures(&features_);
+  lowering.setLowerers(&this->lowerers);
   lowering.setContexts(llvm::any_of(program.file.modules, [](const Module *m) {
     return m->builtin && m->name == "node:async_hooks";
   }));
-  lowering.setDebug(debug_, optimize_, target_.triple().isOSWindows());
+  lowering.setDebug(this->debug, this->optimize, this->target.triple().isOSWindows());
   std::unique_ptr<llvm::Module> module = lowering.moduleBuilder().generate(program.file);
   std::string problems = lowering.mismatch();
   llvm::raw_string_ostream out(problems);
@@ -41,7 +45,7 @@ Result<Lowered, Errors> LowerPass::run(Program &program, const ParallelPlan &pla
     errors.tool("internal error: the generated LLVM IR is invalid");
     return err(errors);
   }
-  module->setTargetTriple(target_.triple());
+  module->setTargetTriple(this->target.triple());
 
   return ok(Lowered{std::move(module), lowering.parallel()});
 }

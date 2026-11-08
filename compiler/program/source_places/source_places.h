@@ -44,8 +44,8 @@ private:
   std::string pathOf(unsigned id, bool &file) const;
 
   const llvm::SourceMgr &sourceMgr_;
-  mutable unsigned last_ = 0;
-  mutable llvm::DenseMap<unsigned, std::pair<std::string, bool>> paths_;
+  mutable unsigned last = 0;
+  mutable llvm::DenseMap<unsigned, std::pair<std::string, bool>> paths;
 };
 
 }

@@ -14,7 +14,7 @@ public:
 private:
   static void anchor();
 
-  std::string dir_;
+  std::string dir;
 };
 
 }

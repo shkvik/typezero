@@ -1,9 +1,9 @@
 #include "compiler/pipeline/pipeline/pipeline.h"
 #include "compiler/emit/emit_pass/emit_pass.h"
 #include "compiler/emit/ir_writer/ir_writer.h"
-#include "compiler/library/feature_registry/feature_registry.h"
 #include "compiler/link/licenses_pass/licenses_pass.h"
 #include "compiler/link/link_pass/link_pass.h"
+#include "compiler/lower/library/lowerer_registry/lowerer_registry.h"
 #include "compiler/lower/lower_pass/lower_pass.h"
 #include "compiler/memory/memory_pass/memory_pass.h"
 #include "compiler/optimize/optimize_pass/optimize_pass.h"
@@ -28,8 +28,8 @@ Errors buildProgram(Program &program, const BuildOptions &options) {
   MemoryPlan memoryPlan = memory.run(program);
 
   llvm::LLVMContext context;
-  FeatureRegistry features;
-  LowerPass lower(context, target.value(), llvm::sys::path::filename(options.input), features,
+  LowererRegistry lowerers;
+  LowerPass lower(context, target.value(), llvm::sys::path::filename(options.input), lowerers,
                   options.debug, options.optimize);
   Result<Lowered, Errors> lowered = lower.run(program, plan, memoryPlan);
   if (lowered.isErr()) {

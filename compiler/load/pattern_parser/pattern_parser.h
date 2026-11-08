@@ -22,7 +22,7 @@ public:
 private:
   static BindingForm formOf(const Parser::Pattern &pattern);
 
-  Parser &parser_;
+  Parser &parser;
 };
 
 }

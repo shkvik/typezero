@@ -1,7 +1,7 @@
 #pragma once
 
-#include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/program/ast/ast.h"
+#include "compiler/program/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"

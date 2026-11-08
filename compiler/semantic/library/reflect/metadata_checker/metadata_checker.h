@@ -1,0 +1,31 @@
+#pragma once
+
+#include "compiler/result/result/result.h"
+#include "compiler/semantic/library/reflect/metadata_checker/metadata_checker_errors.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
+
+namespace tz {
+
+class MetadataChecker {
+public:
+  using ResultMetadataTyped = Result<const Type *, MetadataCheckerMetadataTypeError>;
+
+  explicit MetadataChecker(SemanticState &owner);
+
+  const void *metadataKey(const Expr *key, std::string &label);
+  ResultMetadataTyped metadataType(const void *key, llvm::StringRef label, llvm::SMLoc loc,
+                                   const Type *expected);
+  void checkBodyEarly(FunctionDecl *fn);
+  Expr *designClass(const Type *type, llvm::SMLoc loc);
+  ClassDecl *designConstructor(const Type *type);
+  ClassDecl *builtinConstructor(llvm::StringRef name);
+  void writeDesignRecords(ClassDecl *cls, ClassField *field, FunctionDecl *method,
+                          const FunctionDecl *ctor, llvm::SMLoc loc);
+  void writeDesignRecord(ClassDecl *cls, const char16_t *key, Expr *value, llvm::StringRef member,
+                         llvm::SMLoc loc);
+
+private:
+  SemanticState &state;
+};
+
+}

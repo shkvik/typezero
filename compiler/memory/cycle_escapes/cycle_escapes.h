@@ -20,7 +20,7 @@ public:
   static void walkStmt(const Stmt *stmt, const std::function<void(const Expr *)> &visit);
 
 private:
-  CycleScanner &scanner_;
+  CycleScanner &scanner;
 };
 
 }

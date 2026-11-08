@@ -31,16 +31,16 @@ constexpr milliseconds kPollDelay(10);
 }
 
 LspServer::LspServer(LspChannel &channel, std::string self)
-    : channel_(channel),
-      self_(std::move(self)) {
-  request_ = LspServer::temporaryFile("tz-lsp-request", "json");
-  response_ = LspServer::temporaryFile("tz-lsp-response", "json");
+    : channel(channel),
+      self(std::move(self)) {
+  this->request = LspServer::temporaryFile("tz-lsp-request", "json");
+  this->response = LspServer::temporaryFile("tz-lsp-response", "json");
   log_ = LspServer::temporaryFile("tz-lsp-check", "log");
 }
 
 LspServer::~LspServer() {
-  fs::remove(request_);
-  fs::remove(response_);
+  fs::remove(this->request);
+  fs::remove(this->response);
   fs::remove(log_);
 }
 
@@ -71,7 +71,7 @@ llvm::json::Object LspServer::startRange() {
 int LspServer::run() {
   std::thread worker([this] { work(); });
   for (;;) {
-    std::optional<std::string> body = channel_.read();
+    std::optional<std::string> body = this->channel.read();
     if (!body) {
       break;
     }
@@ -87,13 +87,13 @@ int LspServer::run() {
     }
   }
   {
-    std::lock_guard<std::mutex> lock(mutex_);
-    stopping_ = true;
+    std::lock_guard<std::mutex> lock(this->mutex);
+    this->stopping = true;
   }
-  wake_.notify_all();
+  this->wake.notify_all();
   worker.join();
 
-  return shutdown_ ? 0 : 1;
+  return this->shutdown ? 0 : 1;
 }
 
 bool LspServer::handle(const llvm::json::Object &message) {
@@ -114,7 +114,7 @@ bool LspServer::handle(const llvm::json::Object &message) {
     const llvm::json::Object *workspace = client ? client->getObject("workspace") : nullptr;
     const llvm::json::Object *semantic =
         workspace ? workspace->getObject("semanticTokens") : nullptr;
-    refreshTokens_ = semantic && semantic->getBoolean("refreshSupport").value_or(false);
+    this->refreshTokens = semantic && semantic->getBoolean("refreshSupport").value_or(false);
     llvm::json::Object capabilities{{"textDocumentSync", std::move(sync)},
                                     {"hoverProvider", true},
                                     {"definitionProvider", true},
@@ -128,14 +128,14 @@ bool LspServer::handle(const llvm::json::Object &message) {
     return true;
   }
   if (*method == "shutdown") {
-    shutdown_ = true;
+    this->shutdown = true;
     reply(id ? *id : nullptr, nullptr);
     return true;
   }
   if (*method == "exit") {
     return false;
   }
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(this->mutex);
   if (*method == "textDocument/didOpen") {
     opened(args);
   } else if (*method == "textDocument/didChange") {
@@ -149,7 +149,7 @@ bool LspServer::handle(const llvm::json::Object &message) {
   } else if (id) {
     fail(*id, -32601, "tz does not answer '" + *method + "'");
   }
-  wake_.notify_all();
+  this->wake.notify_all();
 
   return true;
 }
@@ -169,19 +169,19 @@ bool LspServer::answer(llvm::StringRef method, const llvm::json::Value &id,
   const llvm::json::Object *item = args.getObject("textDocument");
   std::optional<llvm::StringRef> uri = item ? item->getString("uri") : std::nullopt;
   const llvm::json::Object *position = args.getObject("position");
-  auto found = uri ? documents_.find(uri->str()) : documents_.end();
+  auto found = uri ? this->documents.find(uri->str()) : this->documents.end();
   const Knowledge *knowledge = nullptr;
   size_t module = 0;
-  if (found != documents_.end()) {
+  if (found != this->documents.end()) {
     const TextDocument &document = *found->second;
-    auto own = entries_.find(document.entry);
-    if (own != entries_.end()) {
+    auto own = this->entries.find(document.entry);
+    if (own != this->entries.end()) {
       if (std::optional<size_t> at = own->second.knowledge.moduleAt(document.path())) {
         knowledge = &own->second.knowledge;
         module = *at;
       }
     }
-    for (auto &[key, entry] : entries_) {
+    for (auto &[key, entry] : this->entries) {
       if (knowledge) {
         break;
       }
@@ -209,7 +209,7 @@ bool LspServer::answer(llvm::StringRef method, const llvm::json::Value &id,
   auto uriOf = [this](llvm::StringRef file) { return uriFor(file); };
   auto textOf = [this](llvm::StringRef file) {
     std::string key = SourceOverlay::key(file);
-    for (const auto &[open, document] : documents_) {
+    for (const auto &[open, document] : this->documents) {
       if (document->key() == key) {
         return document->text();
       }
@@ -248,16 +248,18 @@ bool LspServer::answer(llvm::StringRef method, const llvm::json::Value &id,
 }
 
 void LspServer::reply(const llvm::json::Value &id, llvm::json::Value result) {
-  channel_.send(llvm::json::Object{{"jsonrpc", "2.0"}, {"id", id}, {"result", std::move(result)}});
+  this->channel.send(
+      llvm::json::Object{{"jsonrpc", "2.0"}, {"id", id}, {"result", std::move(result)}});
 }
 
 void LspServer::fail(const llvm::json::Value &id, int code, const llvm::Twine &message) {
   llvm::json::Object error{{"code", code}, {"message", message.str()}};
-  channel_.send(llvm::json::Object{{"jsonrpc", "2.0"}, {"id", id}, {"error", std::move(error)}});
+  this->channel.send(
+      llvm::json::Object{{"jsonrpc", "2.0"}, {"id", id}, {"error", std::move(error)}});
 }
 
 void LspServer::notify(llvm::StringRef method, llvm::json::Value params) {
-  channel_.send(
+  this->channel.send(
       llvm::json::Object{{"jsonrpc", "2.0"}, {"method", method}, {"params", std::move(params)}});
 }
 
@@ -278,7 +280,7 @@ void LspServer::opened(const llvm::json::Object &params) {
   }
   auto document = std::make_unique<TextDocument>(uri->str(), file, text->str());
   TextDocument &added = *document;
-  documents_[uri->str()] = std::move(document);
+  this->documents[uri->str()] = std::move(document);
   assign(added, kOpenDelay);
   touch(added.key(), kOpenDelay);
 }
@@ -290,8 +292,8 @@ void LspServer::changed(const llvm::json::Object &params) {
   if (!uri || !changes) {
     return;
   }
-  auto found = documents_.find(uri->str());
-  if (found == documents_.end()) {
+  auto found = this->documents.find(uri->str());
+  if (found == this->documents.end()) {
     return;
   }
   TextDocument &document = *found->second;
@@ -300,8 +302,8 @@ void LspServer::changed(const llvm::json::Object &params) {
       document.apply(*fields);
     }
   }
-  auto entry = entries_.find(document.entry);
-  if (entry != entries_.end()) {
+  auto entry = this->entries.find(document.entry);
+  if (entry != this->entries.end()) {
     schedule(entry->second, kTypingDelay);
   }
   touch(document.key(), kTypingDelay);
@@ -313,13 +315,13 @@ void LspServer::closed(const llvm::json::Object &params) {
   if (!uri) {
     return;
   }
-  auto found = documents_.find(uri->str());
-  if (found == documents_.end()) {
+  auto found = this->documents.find(uri->str());
+  if (found == this->documents.end()) {
     return;
   }
   std::string entry = found->second->entry;
   std::string file = found->second->key();
-  documents_.erase(found);
+  this->documents.erase(found);
   if (!used(entry)) {
     forget(entry);
   }
@@ -351,27 +353,27 @@ void LspServer::watched(const llvm::json::Object &params) {
   }
   if (manifests) {
     std::vector<std::string> keys;
-    for (const auto &[key, entry] : entries_) {
+    for (const auto &[key, entry] : this->entries) {
       keys.push_back(key);
     }
     for (const std::string &key : keys) {
       forget(key);
     }
-    for (auto &[uri, document] : documents_) {
+    for (auto &[uri, document] : this->documents) {
       document->alone = false;
       assign(*document, kOpenDelay);
     }
     return;
   }
   if (moved) {
-    for (auto &[key, entry] : entries_) {
+    for (auto &[key, entry] : this->entries) {
       schedule(entry, kOpenDelay);
     }
     return;
   }
   for (const std::string &file : files) {
     bool open = false;
-    for (const auto &[uri, document] : documents_) {
+    for (const auto &[uri, document] : this->documents) {
       open = open || document->key() == file;
     }
     if (!open) {
@@ -391,7 +393,7 @@ std::string LspServer::entryOf(const TextDocument &document) const {
 void LspServer::assign(TextDocument &document, milliseconds delay) {
   std::string file = entryOf(document);
   document.entry = SourceOverlay::key(file);
-  Entry &entry = entries_[document.entry];
+  Entry &entry = this->entries[document.entry];
   if (entry.path.empty()) {
     entry.key = document.entry;
     entry.path = file;
@@ -400,7 +402,7 @@ void LspServer::assign(TextDocument &document, milliseconds delay) {
 }
 
 void LspServer::touch(const std::string &file, milliseconds delay) {
-  for (auto &[key, entry] : entries_) {
+  for (auto &[key, entry] : this->entries) {
     if (key == file || entry.files.count(file) != 0) {
       schedule(entry, delay);
     }
@@ -411,25 +413,25 @@ void LspServer::schedule(Entry &entry, milliseconds delay) {
   entry.dirty = true;
   entry.level = 1;
   entry.due = Clock::now() + delay;
-  if (checking_ && running_ == entry.key) {
-    cancel_ = true;
+  if (this->checking && this->running == entry.key) {
+    this->cancel = true;
   }
 }
 
 void LspServer::forget(const std::string &key) {
-  auto found = entries_.find(key);
-  if (found == entries_.end()) {
+  auto found = this->entries.find(key);
+  if (found == this->entries.end()) {
     return;
   }
   publish(found->second, {});
-  if (checking_ && running_ == key) {
-    cancel_ = true;
+  if (this->checking && this->running == key) {
+    this->cancel = true;
   }
-  entries_.erase(found);
+  this->entries.erase(found);
 }
 
 bool LspServer::used(const std::string &key) const {
-  for (const auto &[uri, document] : documents_) {
+  for (const auto &[uri, document] : this->documents) {
     if (document->entry == key) {
       return true;
     }
@@ -440,7 +442,7 @@ bool LspServer::used(const std::string &key) const {
 
 std::string LspServer::uriFor(llvm::StringRef file) const {
   std::string key = SourceOverlay::key(file);
-  for (const auto &[uri, document] : documents_) {
+  for (const auto &[uri, document] : this->documents) {
     if (document->key() == key) {
       return uri;
     }
@@ -450,18 +452,18 @@ std::string LspServer::uriFor(llvm::StringRef file) const {
 }
 
 void LspServer::work() {
-  std::unique_lock<std::mutex> lock(mutex_);
-  while (!stopping_) {
-    if (checking_) {
-      if (cancel_) {
-        process_.kill();
-        checking_ = false;
-        cancel_ = false;
+  std::unique_lock<std::mutex> lock(this->mutex);
+  while (!this->stopping) {
+    if (this->checking) {
+      if (this->cancel) {
+        this->process.kill();
+        this->checking = false;
+        this->cancel = false;
         continue;
       }
-      std::optional<int> code = process_.poll();
+      std::optional<int> code = this->process.poll();
       if (!code) {
-        wake_.wait_for(lock, kPollDelay);
+        this->wake.wait_for(lock, kPollDelay);
         continue;
       }
       finish(*code);
@@ -470,7 +472,7 @@ void LspServer::work() {
     Clock::time_point now = Clock::now();
     Clock::time_point earliest = Clock::time_point::max();
     Entry *next = nullptr;
-    for (auto &[key, entry] : entries_) {
+    for (auto &[key, entry] : this->entries) {
       if (!entry.dirty) {
         continue;
       }
@@ -483,21 +485,21 @@ void LspServer::work() {
     if (next) {
       start(*next);
     } else if (earliest == Clock::time_point::max()) {
-      wake_.wait(lock);
+      this->wake.wait(lock);
     } else {
-      wake_.wait_until(lock, earliest);
+      this->wake.wait_until(lock, earliest);
     }
   }
-  if (checking_) {
-    process_.kill();
-    checking_ = false;
+  if (this->checking) {
+    this->process.kill();
+    this->checking = false;
   }
 }
 
 void LspServer::start(Entry &entry) {
   entry.dirty = false;
   llvm::json::Array files;
-  for (const auto &[uri, document] : documents_) {
+  for (const auto &[uri, document] : this->documents) {
     files.push_back(llvm::json::Object{{"path", document->path()}, {"text", document->text()}});
   }
   llvm::json::Value request = llvm::json::Object{{"entry", entry.path},
@@ -506,27 +508,27 @@ void LspServer::start(Entry &entry) {
                                                  {"level", entry.level}};
   std::error_code ec;
   {
-    llvm::raw_fd_ostream out(request_, ec);
+    llvm::raw_fd_ostream out(this->request, ec);
     if (!ec) {
       out << request;
     }
   }
   if (ec) {
-    log("tz: cannot write '" + request_ + "': " + ec.message());
+    log("tz: cannot write '" + this->request + "': " + ec.message());
     return;
   }
-  fs::remove(response_);
+  fs::remove(this->response);
   std::string error;
-  llvm::StringRef args[] = {self_, "lsp", "--check", request_, response_};
-  if (!process_.start(self_, args, log_, error)) {
-    log("tz: cannot start '" + self_ + "': " + error);
+  llvm::StringRef args[] = {this->self, "lsp", "--check", this->request, this->response};
+  if (!this->process.start(this->self, args, log_, error)) {
+    log("tz: cannot start '" + this->self + "': " + error);
     return;
   }
-  checking_ = true;
-  cancel_ = false;
-  running_ = entry.key;
-  runningLevel_ = entry.level;
-  started_ = Clock::now();
+  this->checking = true;
+  this->cancel = false;
+  this->running = entry.key;
+  this->runningLevel = entry.level;
+  this->started = Clock::now();
 }
 
 llvm::json::Value LspServer::diagnostic(const llvm::json::Object &found) const {
@@ -556,20 +558,20 @@ llvm::json::Value LspServer::diagnostic(const llvm::json::Object &found) const {
 }
 
 void LspServer::finish(int code) {
-  checking_ = false;
-  auto found = entries_.find(running_);
-  if (found == entries_.end()) {
+  this->checking = false;
+  auto found = this->entries.find(this->running);
+  if (found == this->entries.end()) {
     return;
   }
   Entry &entry = found->second;
-  auto elapsed = std::chrono::duration_cast<milliseconds>(Clock::now() - started_).count();
+  auto elapsed = std::chrono::duration_cast<milliseconds>(Clock::now() - this->started).count();
   if (auto output = llvm::MemoryBuffer::getFile(log_); output && !(*output)->getBuffer().empty()) {
     log((*output)->getBuffer().rtrim());
   }
 
   std::optional<llvm::json::Value> parsed;
   if (code == 0) {
-    if (auto buffer = llvm::MemoryBuffer::getFile(response_)) {
+    if (auto buffer = llvm::MemoryBuffer::getFile(this->response)) {
       llvm::Expected<llvm::json::Value> value = llvm::json::parse((*buffer)->getBuffer());
       if (value) {
         parsed = std::move(*value);
@@ -594,10 +596,10 @@ void LspServer::finish(int code) {
 
   if (const llvm::json::Value *known = report->get("knowledge")) {
     KnowledgeJson::read(*known, entry.knowledge);
-    if (refreshTokens_) {
-      channel_.send(llvm::json::Object{{"jsonrpc", "2.0"},
-                                       {"id", "tz-" + std::to_string(nextRequest_++)},
-                                       {"method", "workspace/semanticTokens/refresh"}});
+    if (this->refreshTokens) {
+      this->channel.send(llvm::json::Object{{"jsonrpc", "2.0"},
+                                            {"id", "tz-" + std::to_string(this->nextRequest++)},
+                                            {"method", "workspace/semanticTokens/refresh"}});
     }
   }
   entry.files.clear();
@@ -617,15 +619,15 @@ void LspServer::finish(int code) {
       }
     }
   }
-  log("tz: checked " + entry.path + (runningLevel_ == 1 ? " (quick)" : " (whole program)") +
+  log("tz: checked " + entry.path + (this->runningLevel == 1 ? " (quick)" : " (whole program)") +
       " in " + std::to_string(elapsed) + " ms: " + std::to_string(count) + " problems (" +
       report->getString("times").value_or("").str() + ")");
-  for (const auto &[uri, document] : documents_) {
+  for (const auto &[uri, document] : this->documents) {
     if (entry.files.count(document->key()) != 0) {
       next.try_emplace(uri);
     }
   }
-  if (runningLevel_ == 1) {
+  if (this->runningLevel == 1) {
     entry.quick.clear();
     for (const auto &[uri, list] : next) {
       std::set<std::string> &seen = entry.quick[uri];
@@ -660,7 +662,7 @@ void LspServer::finish(int code) {
     return;
   }
   std::string key = entry.key;
-  for (auto &[uri, document] : documents_) {
+  for (auto &[uri, document] : this->documents) {
     if (document->entry == key && !document->alone && entry.files.count(document->key()) == 0) {
       document->alone = true;
       assign(*document, milliseconds(0));
@@ -683,7 +685,7 @@ void LspServer::publish(Entry &entry, std::map<std::string, llvm::json::Array> n
   for (const std::string &uri : uris) {
     llvm::json::Array merged;
     std::set<std::string> seen;
-    for (const auto &[key, other] : entries_) {
+    for (const auto &[key, other] : this->entries) {
       auto list = other.published.find(uri);
       if (list == other.published.end()) {
         continue;

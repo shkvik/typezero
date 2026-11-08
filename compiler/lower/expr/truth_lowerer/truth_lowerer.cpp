@@ -32,26 +32,26 @@ llvm::Value *TruthLowerer::emitLogical(BinaryExpr *bin) {
   llvm::Value *lhs = this->lowering.exprLowerer().emitExpr(bin->lhs);
   llvm::Value *truth = this->emitTruth(lhs, lhsType);
   llvm::Value *decided = this->decidedValue(bin, lhs);
-  llvm::BasicBlock *lhsEnd = this->lowering.builder_.GetInsertBlock();
+  llvm::BasicBlock *lhsEnd = this->lowering.builder.GetInsertBlock();
   llvm::BasicBlock *rhsBlock =
       this->lowering.functionFrame().newBlock(isAnd ? "and.rhs" : "or.rhs");
   llvm::BasicBlock *endBlock =
       this->lowering.functionFrame().newBlock(isAnd ? "and.end" : "or.end");
   if (isAnd) {
-    this->lowering.builder_.CreateCondBr(truth, rhsBlock, endBlock);
+    this->lowering.builder.CreateCondBr(truth, rhsBlock, endBlock);
   } else {
-    this->lowering.builder_.CreateCondBr(truth, endBlock, rhsBlock);
+    this->lowering.builder.CreateCondBr(truth, endBlock, rhsBlock);
   }
 
   this->lowering.functionFrame().switchTo(rhsBlock);
   this->lowering.refCounts().releaseValue(lhs, lhsType);
   llvm::Value *rhs = this->lowering.exprLowerer().emitExpr(bin->rhs);
-  llvm::BasicBlock *rhsEnd = this->lowering.builder_.GetInsertBlock();
-  this->lowering.builder_.CreateBr(endBlock);
+  llvm::BasicBlock *rhsEnd = this->lowering.builder.GetInsertBlock();
+  this->lowering.builder.CreateBr(endBlock);
 
   this->lowering.functionFrame().switchTo(endBlock);
   llvm::PHINode *phi =
-      this->lowering.builder_.CreatePHI(this->lowering.moduleBuilder().lower(bin->type), 2);
+      this->lowering.builder.CreatePHI(this->lowering.moduleBuilder().lower(bin->type), 2);
   phi->addIncoming(decided, lhsEnd);
   phi->addIncoming(rhs, rhsEnd);
 
@@ -63,7 +63,7 @@ llvm::Value *TruthLowerer::decidedValue(BinaryExpr *bin, llvm::Value *lhs) {
   const Type *from = bin->lhs->type;
   const Type *to = bin->type;
   if (from->isBool() && to->isBool()) {
-    return this->lowering.builder_.getInt1(!isAnd);
+    return this->lowering.builder.getInt1(!isAnd);
   }
   const Type *base = from->nonOptional();
   if (isAnd && (base->isArray() || base->isFunction() || TruthLowerer::isReference(base))) {
@@ -76,7 +76,7 @@ llvm::Value *TruthLowerer::decidedValue(BinaryExpr *bin, llvm::Value *lhs) {
     return this->lowering.optionalLowerer().optionalValue(lhs, from);
   }
 
-  return this->lowering.optionalLowerer().makeOptional(lhs, this->lowering.builder_.getTrue(), to);
+  return this->lowering.optionalLowerer().makeOptional(lhs, this->lowering.builder.getTrue(), to);
 }
 
 llvm::Value *TruthLowerer::emitTruth(llvm::Value *value, const Type *type) {
@@ -87,8 +87,8 @@ llvm::Value *TruthLowerer::emitTruth(llvm::Value *value, const Type *type) {
   case Type::Kind::Union:
     return this->lowering.unionLowerer().emitUnionTruth(value, type);
   case Type::Kind::String:
-    return this->lowering.builder_.CreateICmpNE(this->lowering.stringLowerer().stringLength(value),
-                                                this->lowering.builder_.getInt64(0));
+    return this->lowering.builder.CreateICmpNE(this->lowering.stringLowerer().stringLength(value),
+                                               this->lowering.builder.getInt64(0));
   case Type::Kind::Optional: {
     llvm::Value *has = this->lowering.optionalLowerer().optionalHas(value, type);
     const Type *inner = type->inner();
@@ -96,7 +96,7 @@ llvm::Value *TruthLowerer::emitTruth(llvm::Value *value, const Type *type) {
         !(inner->isUnion() && !UnionLayout::isObjectUnion(inner))) {
       return has;
     }
-    return this->lowering.builder_.CreateAnd(
+    return this->lowering.builder.CreateAnd(
         has, this->emitTruth(this->lowering.optionalLowerer().optionalValue(value, type), inner));
   }
   default:

@@ -17,7 +17,7 @@ DebugInfo::DebugInfo(Lowering &owner)
 DebugInfo::~DebugInfo() = default;
 
 void DebugInfo::start(const SourceFile &file) {
-  if (this->lowering.debugLevel_ == DebugLevel::None || !this->lowering.sourceMgr_ ||
+  if (this->lowering.debugLevel == DebugLevel::None || !this->lowering.sourceMgr_ ||
       this->lowering.sourceMgr_->getNumBuffers() == 0) {
     return;
   }
@@ -27,7 +27,7 @@ void DebugInfo::start(const SourceFile &file) {
     }
   }
   llvm::Module &module = *this->lowering.module_;
-  if (this->lowering.codeView_) {
+  if (this->lowering.codeView) {
     module.addModuleFlag(llvm::Module::Warning, "CodeView", 1);
   } else {
     module.addModuleFlag(llvm::Module::Warning, "Dwarf Version", 5);
@@ -37,11 +37,11 @@ void DebugInfo::start(const SourceFile &file) {
   this->entryBuffer = this->lowering.sourceMgr_->getMainFileID();
   this->unit = this->builder->createCompileUnit(
       llvm::DISourceLanguageName(llvm::dwarf::DW_LANG_C_plus_plus), this->fileOf(this->entryBuffer),
-      "tz", this->lowering.optimized_, "", 0, "",
-      this->lowering.debugLevel_ == DebugLevel::Full ? llvm::DICompileUnit::FullDebug
-                                                     : llvm::DICompileUnit::LineTablesOnly);
+      "tz", this->lowering.optimized, "", 0, "",
+      this->lowering.debugLevel == DebugLevel::Full ? llvm::DICompileUnit::FullDebug
+                                                    : llvm::DICompileUnit::LineTablesOnly);
   this->signature = this->builder->createSubroutineType(this->builder->getOrCreateTypeArray({}));
-  if (this->lowering.debugLevel_ == DebugLevel::Full) {
+  if (this->lowering.debugLevel == DebugLevel::Full) {
     this->types = std::make_unique<DebugTypes>(this->lowering, *this->builder, this->unit);
   }
 }
@@ -90,7 +90,7 @@ llvm::DISubprogram *DebugInfo::describe(llvm::Function *function, llvm::StringRe
   unsigned line = loc.isValid() ? sources.getLineAndColumn(loc, buffer).first : 1;
   llvm::DIFile *file = this->fileOf(buffer);
   llvm::DISubprogram::DISPFlags flags = llvm::DISubprogram::SPFlagDefinition;
-  if (this->lowering.optimized_) {
+  if (this->lowering.optimized) {
     flags |= llvm::DISubprogram::SPFlagOptimized;
   }
   if (function->hasLocalLinkage()) {
@@ -100,14 +100,14 @@ llvm::DISubprogram *DebugInfo::describe(llvm::Function *function, llvm::StringRe
       this->builder->createFunction(file, name, function->getName(), file, line, this->signature,
                                     line, llvm::DINode::FlagPrototyped, flags);
   function->setSubprogram(subprogram);
-  this->lowering.builder_.SetCurrentDebugLocation(
-      llvm::DILocation::get(this->lowering.ctx_, line, 0, subprogram));
+  this->lowering.builder.SetCurrentDebugLocation(
+      llvm::DILocation::get(this->lowering.ctx, line, 0, subprogram));
 
   return subprogram;
 }
 
 void DebugInfo::beginFunction(llvm::Function *function, const FunctionDecl *fn) {
-  this->lowering.builder_.SetCurrentDebugLocation(llvm::DebugLoc());
+  this->lowering.builder.SetCurrentDebugLocation(llvm::DebugLoc());
   if (!this->unit || !fn || function->getSubprogram()) {
     return;
   }
@@ -130,7 +130,7 @@ void DebugInfo::at(llvm::SMLoc loc) {
   if (!this->unit || !loc.isValid()) {
     return;
   }
-  llvm::BasicBlock *block = this->lowering.builder_.GetInsertBlock();
+  llvm::BasicBlock *block = this->lowering.builder.GetInsertBlock();
   llvm::DISubprogram *subprogram = block ? block->getParent()->getSubprogram() : nullptr;
   if (!subprogram) {
     return;
@@ -142,21 +142,21 @@ void DebugInfo::at(llvm::SMLoc loc) {
   }
   auto [line, column] = sources.getLineAndColumn(loc, buffer);
   llvm::DIScope *scope = this->scopeIn(subprogram, this->fileOf(buffer));
-  llvm::DebugLoc current = this->lowering.builder_.getCurrentDebugLocation();
+  llvm::DebugLoc current = this->lowering.builder.getCurrentDebugLocation();
   if (current && current->getLine() == line && current->getScope() == scope) {
     return;
   }
-  this->lowering.builder_.SetCurrentDebugLocation(
-      llvm::DILocation::get(this->lowering.ctx_, line, column, scope));
+  this->lowering.builder.SetCurrentDebugLocation(
+      llvm::DILocation::get(this->lowering.ctx, line, column, scope));
 }
 
 llvm::DebugLoc DebugInfo::here() const {
-  return this->lowering.builder_.getCurrentDebugLocation();
+  return this->lowering.builder.getCurrentDebugLocation();
 }
 
 void DebugInfo::restore(const llvm::DebugLoc &loc) {
   if (this->unit) {
-    this->lowering.builder_.SetCurrentDebugLocation(loc);
+    this->lowering.builder.SetCurrentDebugLocation(loc);
   }
 }
 
@@ -173,7 +173,7 @@ void DebugInfo::repair(llvm::Function &function) {
         }
       }
       if (!last) {
-        last = llvm::DILocation::get(this->lowering.ctx_, subprogram->getLine(), 0, subprogram);
+        last = llvm::DILocation::get(this->lowering.ctx, subprogram->getLine(), 0, subprogram);
       }
     }
     for (llvm::Instruction &inst : block) {
@@ -192,7 +192,7 @@ void DebugInfo::repair(llvm::Function &function) {
 }
 
 unsigned DebugInfo::argumentOf(const VarSymbol *var) const {
-  const FunctionDecl *fn = this->lowering.currentFn_;
+  const FunctionDecl *fn = this->lowering.currentFn;
   if (!fn) {
     return 0;
   }
@@ -210,7 +210,7 @@ unsigned DebugInfo::argumentOf(const VarSymbol *var) const {
 }
 
 void DebugInfo::declare(const VarSymbol *var, llvm::Value *address) {
-  llvm::BasicBlock *block = this->lowering.builder_.GetInsertBlock();
+  llvm::BasicBlock *block = this->lowering.builder.GetInsertBlock();
   llvm::Function *function = block ? block->getParent() : nullptr;
   llvm::DISubprogram *subprogram = function ? function->getSubprogram() : nullptr;
   if (!this->types || !subprogram || !var || var->name.empty() || !var->type || !address ||
@@ -230,17 +230,17 @@ void DebugInfo::declare(const VarSymbol *var, llvm::Value *address) {
                                               64);
     }
     type = this->types->referenceTo(type);
-    storage = this->lowering.functionFrame().createStackSlot(this->lowering.builder_.getPtrTy(),
+    storage = this->lowering.functionFrame().createStackSlot(this->lowering.builder.getPtrTy(),
                                                              var->name + ".ref");
-    this->lowering.builder_.CreateStore(address, storage);
+    this->lowering.builder.CreateStore(address, storage);
   }
   unsigned argument =
-      this->owners.lookup(function) == this->lowering.currentFn_ ? this->argumentOf(var) : 0;
+      this->owners.lookup(function) == this->lowering.currentFn ? this->argumentOf(var) : 0;
   if (argument && type->getSizeInBits() > 64) {
     argument = 0;
   }
   llvm::DINode::DIFlags flags =
-      var == (this->lowering.currentFn_ ? this->lowering.currentFn_->thisVar() : nullptr)
+      var == (this->lowering.currentFn ? this->lowering.currentFn->thisVar() : nullptr)
           ? llvm::DINode::FlagArtificial | llvm::DINode::FlagObjectPointer
           : llvm::DINode::FlagZero;
   llvm::DILocalVariable *variable =
@@ -248,7 +248,7 @@ void DebugInfo::declare(const VarSymbol *var, llvm::Value *address) {
                                                         type, true, flags)
                : this->builder->createAutoVariable(scope, var->name, file, line, type, true, flags);
   this->builder->insertDeclare(storage, variable, this->builder->createExpression(),
-                               llvm::DILocation::get(this->lowering.ctx_, line, 0, scope),
+                               llvm::DILocation::get(this->lowering.ctx, line, 0, scope),
                                llvm::InsertPosition(std::next(storage->getIterator())));
 }
 
@@ -266,7 +266,7 @@ void DebugInfo::declareGlobal(const VarSymbol *var, llvm::Value *address) {
 }
 
 void DebugInfo::finish() {
-  this->lowering.builder_.SetCurrentDebugLocation(llvm::DebugLoc());
+  this->lowering.builder.SetCurrentDebugLocation(llvm::DebugLoc());
   if (!this->unit) {
     return;
   }

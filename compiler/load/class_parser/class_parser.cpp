@@ -8,10 +8,10 @@
 #include "compiler/load/pattern_parser/pattern_parser.h"
 #include "compiler/load/stmt_parser/stmt_parser.h"
 #include "compiler/load/template_parser/template_parser.h"
-#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/load/token_cursor/token_cursor.h"
 #include "compiler/load/type_parser/type_parser.h"
 #include "compiler/load/var_parser/var_parser.h"
+#include "compiler/program/to_utf8/to_utf8.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
@@ -26,63 +26,64 @@ using llvm::isa;
 
 namespace tz {
 
-ClassParser::ClassParser(Parser &parser) : parser_(parser) {}
+ClassParser::ClassParser(Parser &parser)
+    : parser(parser) {}
 
 ClassDecl *ClassParser::parseClass(bool expression) {
-  const char *start = parser_.tok_.text.data();
-  llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance();
-  bool named =
-      parser_.tok_.is(Tok::Identifier) &&
-      !(expression && (parser_.tok_.text == "extends" || parser_.tok_.text == "implements"));
-  auto *cls = parser_.ctx_.make<ClassDecl>(named ? parser_.tok_.loc() : loc,
-                                           named ? parser_.tok_.text : llvm::StringRef());
+  const char *start = this->parser.tok.text.data();
+  llvm::SMLoc loc = this->parser.tok.loc();
+  this->parser.cursor().advance();
+  bool named = this->parser.tok.is(Tok::Identifier) &&
+               !(expression &&
+                 (this->parser.tok.text == "extends" || this->parser.tok.text == "implements"));
+  auto *cls = this->parser.ctx.make<ClassDecl>(named ? this->parser.tok.loc() : loc,
+                                               named ? this->parser.tok.text : llvm::StringRef());
   if (expression) {
     cls->syntax = ExpressionClass{};
   }
   if (named) {
-    parser_.cursor().advance();
+    this->parser.cursor().advance();
   }
-  if (parser_.tok_.is(Tok::Less)) {
-    cls->typeParams = parser_.functions().parseTypeParams();
+  if (this->parser.tok.is(Tok::Less)) {
+    cls->typeParams = this->parser.functions().parseTypeParams();
   }
   if (!cls->typeParams.empty()) {
     cls->generics = GenericTemplate{};
   }
-  if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "extends") {
-    parser_.cursor().advance();
-    const Token &next = parser_.cursor().peek();
-    bool value = !parser_.tok_.is(Tok::Identifier) || next.is(Tok::LParen) || next.is(Tok::Dot) ||
-                 next.is(Tok::LBracket);
+  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "extends") {
+    this->parser.cursor().advance();
+    const Token &next = this->parser.cursor().peek();
+    bool value = !this->parser.tok.is(Tok::Identifier) || next.is(Tok::LParen) ||
+                 next.is(Tok::Dot) || next.is(Tok::LBracket);
     if (value) {
-      cls->baseExpr = parser_.calls().parseCallOrMember();
+      cls->baseExpr = this->parser.calls().parseCallOrMember();
     } else {
-      llvm::SMLoc baseLoc = parser_.tok_.loc();
-      llvm::StringRef baseName = parser_.tok_.text;
-      cls->base = parser_.types().parsePrimaryType();
+      llvm::SMLoc baseLoc = this->parser.tok.loc();
+      llvm::StringRef baseName = this->parser.tok.text;
+      cls->base = this->parser.types().parsePrimaryType();
       if (expression && cls->base->kind() == TypeRefKind::NAME_REF) {
-        cls->baseExpr = parser_.ctx_.make<NameExpr>(baseLoc, baseName);
+        cls->baseExpr = this->parser.ctx.make<NameExpr>(baseLoc, baseName);
       }
     }
   }
-  if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "implements") {
-    parser_.cursor().advance();
+  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "implements") {
+    this->parser.cursor().advance();
     do {
-      cls->interfaces.push_back(parser_.types().parsePrimaryType());
-    } while (parser_.cursor().accept(Tok::Comma));
+      cls->interfaces.push_back(this->parser.types().parsePrimaryType());
+    } while (this->parser.cursor().accept(Tok::Comma));
   }
-  if (!parser_.cursor().expect(Tok::LBrace, "to start the members of the class")) {
+  if (!this->parser.cursor().expect(Tok::LBrace, "to start the members of the class")) {
     return cls;
   }
-  while (!parser_.tok_.is(Tok::RBrace) && !parser_.tok_.is(Tok::Eof)) {
+  while (!this->parser.tok.is(Tok::RBrace) && !this->parser.tok.is(Tok::Eof)) {
     parseClassMember(cls);
-    if (parser_.recovering_) {
+    if (this->parser.recovering) {
       skipClassMember();
-      parser_.recovering_ = false;
+      this->parser.recovering = false;
     }
   }
-  parser_.cursor().expect(Tok::RBrace, "to close the class");
-  cls->source = parser_.cursor().textFrom(start);
+  this->parser.cursor().expect(Tok::RBrace, "to close the class");
+  cls->source = this->parser.cursor().textFrom(start);
 
   return cls;
 }
@@ -90,10 +91,11 @@ ClassDecl *ClassParser::parseClass(bool expression) {
 bool ClassParser::memberModifierAhead() {
   static const char *const modifiers[] = {"public",   "private",  "protected", "readonly", "static",
                                           "override", "abstract", "declare",   "accessor", "async"};
-  if (!parser_.tok_.is(Tok::Identifier) || !llvm::is_contained(modifiers, parser_.tok_.text)) {
+  if (!this->parser.tok.is(Tok::Identifier) ||
+      !llvm::is_contained(modifiers, this->parser.tok.text)) {
     return false;
   }
-  const Token &next = parser_.cursor().peek();
+  const Token &next = this->parser.cursor().peek();
   if (next.newlineBefore && !next.is(Tok::LBrace)) {
     return false;
   }
@@ -115,18 +117,18 @@ bool ClassParser::memberModifierAhead() {
 
 void ClassParser::skipClassMember() {
   bool moved = false;
-  while (!parser_.tok_.is(Tok::Eof) && !parser_.tok_.is(Tok::RBrace)) {
-    if (moved && parser_.tok_.newlineBefore) {
+  while (!this->parser.tok.is(Tok::Eof) && !this->parser.tok.is(Tok::RBrace)) {
+    if (moved && this->parser.tok.newlineBefore) {
       return;
     }
-    if (parser_.cursor().accept(Tok::Semi)) {
+    if (this->parser.cursor().accept(Tok::Semi)) {
       return;
     }
-    if (parser_.tok_.is(Tok::LBrace)) {
-      parser_.cursor().advance();
-      parser_.cursor().skipToClosingBrace();
+    if (this->parser.tok.is(Tok::LBrace)) {
+      this->parser.cursor().advance();
+      this->parser.cursor().skipToClosingBrace();
     } else {
-      parser_.cursor().advance();
+      this->parser.cursor().advance();
     }
     moved = true;
   }
@@ -134,13 +136,13 @@ void ClassParser::skipClassMember() {
 
 std::vector<Decorator> ClassParser::parseDecorators() {
   std::vector<Decorator> decorators;
-  while (parser_.tok_.is(Tok::At)) {
-    llvm::SMLoc loc = parser_.tok_.loc();
-    parser_.cursor().advance();
+  while (this->parser.tok.is(Tok::At)) {
+    llvm::SMLoc loc = this->parser.tok.loc();
+    this->parser.cursor().advance();
     if (Expr *expr = parseDecoratorExpr()) {
       decorators.push_back({loc, expr});
     }
-    if (parser_.recovering_) {
+    if (this->parser.recovering) {
       break;
     }
   }
@@ -149,49 +151,49 @@ std::vector<Decorator> ClassParser::parseDecorators() {
 }
 
 Expr *ClassParser::parseDecoratorExpr() {
-  if (parser_.cursor().accept(Tok::LParen)) {
-    Expr *expr = parser_.exprs().parseSequence();
-    parser_.cursor().expect(Tok::RParen, "to close the decorator");
+  if (this->parser.cursor().accept(Tok::LParen)) {
+    Expr *expr = this->parser.exprs().parseSequence();
+    this->parser.cursor().expect(Tok::RParen, "to close the decorator");
     return expr;
   }
-  if (!parser_.tok_.is(Tok::Identifier)) {
-    parser_.cursor().error(parser_.tok_.loc(),
-                           llvm::Twine("expected the name of a decorator after '@', found ") +
-                               TokenKinds::tokSpelling(parser_.tok_.kind));
+  if (!this->parser.tok.is(Tok::Identifier)) {
+    this->parser.cursor().error(this->parser.tok.loc(),
+                                llvm::Twine("expected the name of a decorator after '@', found ") +
+                                    TokenKinds::tokSpelling(this->parser.tok.kind));
     return nullptr;
   }
-  Expr *expr = parser_.ctx_.make<NameExpr>(parser_.tok_.loc(), parser_.tok_.text);
-  parser_.cursor().advance();
-  while (parser_.tok_.is(Tok::Dot)) {
-    parser_.cursor().advance();
-    if (!parser_.tok_.is(Tok::Identifier) && !TokenKinds::isKeyword(parser_.tok_.kind)) {
-      parser_.cursor().error(parser_.tok_.loc(), "expected a property name after '.'");
+  Expr *expr = this->parser.ctx.make<NameExpr>(this->parser.tok.loc(), this->parser.tok.text);
+  this->parser.cursor().advance();
+  while (this->parser.tok.is(Tok::Dot)) {
+    this->parser.cursor().advance();
+    if (!this->parser.tok.is(Tok::Identifier) && !TokenKinds::isKeyword(this->parser.tok.kind)) {
+      this->parser.cursor().error(this->parser.tok.loc(), "expected a property name after '.'");
       return expr;
     }
-    expr = parser_.ctx_.make<MemberExpr>(parser_.tok_.loc(), expr, parser_.tok_.text);
-    parser_.cursor().advance();
+    expr = this->parser.ctx.make<MemberExpr>(this->parser.tok.loc(), expr, this->parser.tok.text);
+    this->parser.cursor().advance();
   }
-  if (!parser_.tok_.is(Tok::LParen)) {
+  if (!this->parser.tok.is(Tok::LParen)) {
     return expr;
   }
   llvm::SMLoc loc = expr->loc();
-  parser_.cursor().advance();
-  llvm::SaveAndRestore<bool> allowIn(parser_.noIn_, false);
+  this->parser.cursor().advance();
+  llvm::SaveAndRestore<bool> allowIn(this->parser.noIn, false);
   std::vector<Expr *> args;
   std::vector<bool> spread;
-  while (!parser_.tok_.is(Tok::RParen) && !parser_.tok_.is(Tok::Eof)) {
-    bool spreads = parser_.cursor().accept(Tok::Ellipsis);
+  while (!this->parser.tok.is(Tok::RParen) && !this->parser.tok.is(Tok::Eof)) {
+    bool spreads = this->parser.cursor().accept(Tok::Ellipsis);
     if (spreads || !spread.empty()) {
       spread.resize(args.size(), false);
       spread.push_back(spreads);
     }
-    args.push_back(parser_.exprs().parseExpr());
-    if (!parser_.cursor().accept(Tok::Comma)) {
+    args.push_back(this->parser.exprs().parseExpr());
+    if (!this->parser.cursor().accept(Tok::Comma)) {
       break;
     }
   }
-  parser_.cursor().expect(Tok::RParen, "to close the argument list");
-  auto *call = parser_.ctx_.make<CallExpr>(loc, expr, std::move(args));
+  this->parser.cursor().expect(Tok::RParen, "to close the argument list");
+  auto *call = this->parser.ctx.make<CallExpr>(loc, expr, std::move(args));
   call->spread = std::move(spread);
 
   return call;
@@ -199,53 +201,53 @@ Expr *ClassParser::parseDecoratorExpr() {
 
 void ClassParser::rejectDecorators(llvm::ArrayRef<Decorator> decorators) {
   if (!decorators.empty()) {
-    parser_.cursor().report(decorators[0].loc,
-                            "a decorator can decorate only a class, a member of a class or a "
-                            "parameter of a method or a constructor");
+    this->parser.cursor().report(decorators[0].loc,
+                                 "a decorator can decorate only a class, a member of a class or a "
+                                 "parameter of a method or a constructor");
   }
 }
 
 void ClassParser::skipTypeParams() {
   int depth = 0;
   do {
-    if (parser_.tok_.is(Tok::Less)) {
+    if (this->parser.tok.is(Tok::Less)) {
       ++depth;
-    } else if (parser_.tok_.is(Tok::Greater)) {
+    } else if (this->parser.tok.is(Tok::Greater)) {
       --depth;
-    } else if (parser_.tok_.is(Tok::Shr)) {
+    } else if (this->parser.tok.is(Tok::Shr)) {
       depth -= 2;
-    } else if (parser_.tok_.is(Tok::Eof) || parser_.tok_.is(Tok::LBrace) ||
-               parser_.tok_.is(Tok::LParen)) {
+    } else if (this->parser.tok.is(Tok::Eof) || this->parser.tok.is(Tok::LBrace) ||
+               this->parser.tok.is(Tok::LParen)) {
       return;
     }
-    parser_.cursor().advance();
+    this->parser.cursor().advance();
   } while (depth > 0);
 }
 
 void ClassParser::parseClassMember(ClassDecl *cls) {
-  if (parser_.cursor().accept(Tok::Semi)) {
+  if (this->parser.cursor().accept(Tok::Semi)) {
     return;
   }
   std::vector<Decorator> decorators = parseDecorators();
-  if (parser_.recovering_) {
+  if (this->parser.recovering) {
     return;
   }
-  llvm::SMLoc loc = parser_.tok_.loc();
+  llvm::SMLoc loc = this->parser.tok.loc();
   bool isStatic = false, readonly = false, isAbstract = false, isOverride = false;
   bool isAsync = false;
   bool accessor = false;
   Access access = Access::Public;
   while (memberModifierAhead()) {
-    llvm::StringRef word = parser_.tok_.text;
-    llvm::SMLoc at = parser_.tok_.loc();
-    parser_.cursor().advance();
+    llvm::StringRef word = this->parser.tok.text;
+    llvm::SMLoc at = this->parser.tok.loc();
+    this->parser.cursor().advance();
     if (word == "static") {
-      if (parser_.tok_.is(Tok::LBrace)) {
-        parser_.cursor().report(
+      if (this->parser.tok.is(Tok::LBrace)) {
+        this->parser.cursor().report(
             at, "static blocks are not supported; give each static field its value in its "
                 "declaration");
-        parser_.cursor().advance();
-        parser_.cursor().skipToClosingBrace();
+        this->parser.cursor().advance();
+        this->parser.cursor().skipToClosingBrace();
         return;
       }
       isStatic = true;
@@ -262,7 +264,7 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
     } else if (word == "abstract") {
       isAbstract = true;
     } else if (word == "declare") {
-      parser_.cursor().report(
+      this->parser.cursor().report(
           at, "'declare' is not supported: a field gets its value in its declaration or in the "
               "constructor");
     } else if (word == "accessor") {
@@ -271,25 +273,25 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
       isAsync = true;
     }
   }
-  bool accessorAhead = parser_.tok_.is(Tok::Identifier) &&
-                       (parser_.tok_.text == "get" || parser_.tok_.text == "set") &&
-                       !parser_.cursor().peek().newlineBefore &&
-                       (parser_.cursor().peek().is(Tok::Identifier) ||
-                        TokenKinds::isKeyword(parser_.cursor().peek().kind) ||
-                        parser_.cursor().peek().is(Tok::StringLiteral));
+  bool accessorAhead = this->parser.tok.is(Tok::Identifier) &&
+                       (this->parser.tok.text == "get" || this->parser.tok.text == "set") &&
+                       !this->parser.cursor().peek().newlineBefore &&
+                       (this->parser.cursor().peek().is(Tok::Identifier) ||
+                        TokenKinds::isKeyword(this->parser.cursor().peek().kind) ||
+                        this->parser.cursor().peek().is(Tok::StringLiteral));
   if (accessorAhead) {
-    bool getter = parser_.tok_.text == "get";
-    parser_.cursor().advance();
-    std::string name = parser_.tok_.text.str();
+    bool getter = this->parser.tok.text == "get";
+    this->parser.cursor().advance();
+    std::string name = this->parser.tok.text.str();
     std::string setter =
         name.empty() ? "set" : "set" + std::string(1, llvm::toUpper(name[0])) + name.substr(1);
     if (getter) {
-      parser_.cursor().report(
+      this->parser.cursor().report(
           loc, "getters are not supported: reading a field never runs code; write a method "
                "instead, e.g. '" +
                    name + "()'");
     } else {
-      parser_.cursor().report(
+      this->parser.cursor().report(
           loc, "setters are not supported: writing a field never runs code; write a method "
                "instead, e.g. '" +
                    setter + "(value)'");
@@ -297,41 +299,41 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
     skipClassMember();
     return;
   }
-  if (parser_.tok_.is(Tok::LBracket) && !symbolKeyAhead()) {
-    parser_.cursor().report(
+  if (this->parser.tok.is(Tok::LBracket) && !symbolKeyAhead()) {
+    this->parser.cursor().report(
         loc, "a member name in brackets is not supported: an object has a fixed set of fields; "
              "keep a dictionary in a field, e.g. 'items: Record<string, T> = {}' or "
              "'items = new Map<string, T>()'");
     skipClassMember();
     return;
   }
-  const char *start = parser_.tok_.text.data();
-  bool generator = parser_.cursor().accept(Tok::Star);
-  llvm::SMLoc nameLoc = parser_.tok_.loc();
-  bool plainName = parser_.tok_.is(Tok::Identifier);
-  bool hash = parser_.tok_.hash;
+  const char *start = this->parser.tok.text.data();
+  bool generator = this->parser.cursor().accept(Tok::Star);
+  llvm::SMLoc nameLoc = this->parser.tok.loc();
+  bool plainName = this->parser.tok.is(Tok::Identifier);
+  bool hash = this->parser.tok.hash;
   llvm::StringRef name;
-  if (!parser_.objectTypes().parseFieldName(name)) {
+  if (!this->parser.objectTypes().parseFieldName(name)) {
     return;
   }
   if (hash) {
-    parser_.cursor().report(nameLoc, "there is no '#" + name +
-                                         "' in tz: a private member is 'private " + name + "'");
+    this->parser.cursor().report(
+        nameLoc, "there is no '#" + name + "' in tz: a private member is 'private " + name + "'");
     access = Access::Private;
   }
 
-  if (parser_.tok_.is(Tok::LParen) || parser_.tok_.is(Tok::Less)) {
-    auto *fn = parser_.ctx_.make<FunctionDecl>(nameLoc, name);
+  if (this->parser.tok.is(Tok::LParen) || this->parser.tok.is(Tok::Less)) {
+    auto *fn = this->parser.ctx.make<FunctionDecl>(nameLoc, name);
     bool constructor = plainName && name == "constructor" && !isStatic;
     bool abstractMethod = isAbstract && !constructor;
     if (accessor) {
-      parser_.cursor().report(loc, "'accessor' goes before a field, not a method");
+      this->parser.cursor().report(loc, "'accessor' goes before a field, not a method");
     }
     ClassMember member{.cls = cls, .access = access, .isOverride = isOverride && !constructor};
     if (!decorators.empty() && constructor) {
-      parser_.cursor().report(decorators[0].loc,
-                              "a decorator cannot decorate a constructor; decorate the class, "
-                              "or a parameter of the constructor");
+      this->parser.cursor().report(decorators[0].loc,
+                                   "a decorator cannot decorate a constructor; decorate the class, "
+                                   "or a parameter of the constructor");
     } else {
       member.decorators = std::move(decorators);
     }
@@ -346,45 +348,46 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
     fn->isGenerator = generator && !constructor;
     fn->isAsync = isAsync && !constructor;
     if (generator && fn->isConstructor()) {
-      parser_.cursor().report(loc, "a constructor cannot be a generator: 'new' gives the object");
+      this->parser.cursor().report(loc,
+                                   "a constructor cannot be a generator: 'new' gives the object");
     }
     if (isAsync && fn->isConstructor()) {
-      parser_.cursor().report(
+      this->parser.cursor().report(
           loc, "a constructor cannot be 'async': 'new' gives the object, not a Promise");
     }
     if (readonly) {
-      parser_.cursor().report(loc,
-                              "a method cannot be 'readonly': a method cannot be replaced anyway");
+      this->parser.cursor().report(
+          loc, "a method cannot be 'readonly': a method cannot be replaced anyway");
     }
     if ((isOverride || isAbstract) && fn->isConstructor()) {
-      parser_.cursor().report(loc, std::string("a constructor cannot be '") +
-                                       (isOverride ? "override" : "abstract") + "'");
+      this->parser.cursor().report(loc, std::string("a constructor cannot be '") +
+                                            (isOverride ? "override" : "abstract") + "'");
     }
     if (isAbstract && isStatic) {
-      parser_.cursor().report(
+      this->parser.cursor().report(
           loc, "a static method cannot be 'abstract': it belongs to the class itself");
     }
     parseMethodRest(fn, start);
-    if (parser_.recovering_) {
+    if (this->parser.recovering) {
       return;
     }
     if (abstractMethod) {
       if (fn->body) {
-        parser_.cursor().report(nameLoc, "abstract method '" + name +
-                                             "' cannot have a body: the classes that "
-                                             "extend '" +
-                                             cls->name +
-                                             "' give it one; to give it one here, drop 'abstract'");
+        this->parser.cursor().report(
+            nameLoc, "abstract method '" + name +
+                         "' cannot have a body: the classes that "
+                         "extend '" +
+                         cls->name + "' give it one; to give it one here, drop 'abstract'");
       }
-      fn->body = parser_.ctx_.make<BlockStmt>(nameLoc);
+      fn->body = this->parser.ctx.make<BlockStmt>(nameLoc);
       cls->methods.push_back(fn);
       return;
     }
     if (!fn->body) {
       std::string what = fn->isConstructor() ? "the constructor" : "method '" + name.str() + "'";
-      parser_.cursor().report(nameLoc,
-                              what + " has no body; overload signatures over one body are not "
-                                     "supported: give each variant a body of its own");
+      this->parser.cursor().report(nameLoc,
+                                   what + " has no body; overload signatures over one body are not "
+                                          "supported: give each variant a body of its own");
       return;
     }
     if (!fn->isConstructor()) {
@@ -392,7 +395,7 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
       return;
     }
     if (fn->returnType) {
-      parser_.cursor().report(fn->returnType->loc, "a constructor cannot have a return type");
+      this->parser.cursor().report(fn->returnType->loc, "a constructor cannot have a return type");
     }
     std::vector<Stmt *> sets;
     size_t properties = 0;
@@ -403,7 +406,7 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
       if (!param.property) {
         continue;
       }
-      parser_.fieldNames_.insert(param.name);
+      this->parser.fieldNames.insert(param.name);
       if (!llvm::any_of(cls->fields, [&](const ClassField &f) {
             return f.parameter() && f.name == param.name;
           })) {
@@ -416,11 +419,11 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
         field.form = ParameterField{};
         cls->fields.insert(cls->fields.begin() + std::ptrdiff_t(properties++), field);
       }
-      auto *target = parser_.ctx_.make<MemberExpr>(
-          param.loc, parser_.ctx_.make<NameExpr>(param.loc, "this"), param.name);
-      auto *set = parser_.ctx_.make<AssignExpr>(param.loc, std::nullopt, target,
-                                                parser_.ctx_.make<NameExpr>(param.loc, param.name));
-      sets.push_back(parser_.ctx_.make<ExprStmt>(param.loc, set));
+      auto *target = this->parser.ctx.make<MemberExpr>(
+          param.loc, this->parser.ctx.make<NameExpr>(param.loc, "this"), param.name);
+      auto *set = this->parser.ctx.make<AssignExpr>(
+          param.loc, std::nullopt, target, this->parser.ctx.make<NameExpr>(param.loc, param.name));
+      sets.push_back(this->parser.ctx.make<ExprStmt>(param.loc, set));
     }
     auto at = fn->body->body.begin();
     if (cls->base) {
@@ -440,9 +443,9 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
   }
 
   if (generator || isAsync) {
-    parser_.cursor().error(parser_.tok_.loc(),
-                           generator ? "expected '(' after the name of the generator method"
-                                     : "expected '(' after the name of the async method");
+    this->parser.cursor().error(this->parser.tok.loc(),
+                                generator ? "expected '(' after the name of the generator method"
+                                          : "expected '(' after the name of the async method");
     return;
   }
   ClassField field;
@@ -457,54 +460,56 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
   field.accessor = accessor;
   field.decorators = std::move(decorators);
   if (isAbstract) {
-    parser_.cursor().report(
+    this->parser.cursor().report(
         loc, "abstract fields are not supported: declare the field in the class that sets it, "
              "or give it a value here");
   }
-  if (parser_.cursor().accept(Tok::Question)) {
+  if (this->parser.cursor().accept(Tok::Question)) {
     field.presence = FieldPresence::OPTIONAL;
-  } else if (parser_.tok_.is(Tok::Bang) && !parser_.tok_.newlineBefore) {
-    parser_.cursor().advance();
+  } else if (this->parser.tok.is(Tok::Bang) && !this->parser.tok.newlineBefore) {
+    this->parser.cursor().advance();
     field.presence = FieldPresence::DEFINITE;
   }
-  if (parser_.cursor().accept(Tok::Colon)) {
-    field.type = parser_.types().parseType();
+  if (this->parser.cursor().accept(Tok::Colon)) {
+    field.type = this->parser.types().parseType();
   }
-  if (parser_.cursor().accept(Tok::Assign)) {
-    field.init = parser_.exprs().parseExpr();
+  if (this->parser.cursor().accept(Tok::Assign)) {
+    field.init = this->parser.exprs().parseExpr();
   }
-  if (!parser_.cursor().accept(Tok::Semi) && !parser_.cursor().accept(Tok::Comma) &&
-      !parser_.tok_.is(Tok::RBrace) && !parser_.tok_.newlineBefore) {
-    parser_.cursor().error(parser_.tok_.loc(), llvm::Twine("expected ';' after the field, found ") +
-                                                   TokenKinds::tokSpelling(parser_.tok_.kind));
+  if (!this->parser.cursor().accept(Tok::Semi) && !this->parser.cursor().accept(Tok::Comma) &&
+      !this->parser.tok.is(Tok::RBrace) && !this->parser.tok.newlineBefore) {
+    this->parser.cursor().error(this->parser.tok.loc(),
+                                llvm::Twine("expected ';' after the field, found ") +
+                                    TokenKinds::tokSpelling(this->parser.tok.kind));
     return;
   }
   cls->fields.push_back(std::move(field));
 }
 
 void ClassParser::parseMethodRest(FunctionDecl *fn, const char *start) {
-  llvm::SaveAndRestore<bool> inGenerator(parser_.inGenerator_, fn->isGenerator);
-  if (parser_.tok_.is(Tok::Less)) {
-    fn->typeParams = parser_.functions().parseTypeParams();
+  llvm::SaveAndRestore<bool> inGenerator(this->parser.inGenerator, fn->isGenerator);
+  if (this->parser.tok.is(Tok::Less)) {
+    fn->typeParams = this->parser.functions().parseTypeParams();
   }
   Parser::ParamPatterns patterns;
-  parser_.functions().parseParams(fn, &patterns);
-  if (parser_.cursor().accept(Tok::Colon)) {
-    fn->returnType = parser_.types().parseReturnType();
+  this->parser.functions().parseParams(fn, &patterns);
+  if (this->parser.cursor().accept(Tok::Colon)) {
+    fn->returnType = this->parser.types().parseReturnType();
   }
-  if (parser_.tok_.is(Tok::LBrace)) {
-    fn->body = parser_.stmts().parseBlock();
-    parser_.functions().addPrologue(fn, patterns);
-  } else if (!parser_.cursor().accept(Tok::Semi) && !parser_.tok_.newlineBefore &&
-             !parser_.tok_.is(Tok::RBrace) && !parser_.tok_.is(Tok::Eof)) {
-    parser_.cursor().error(parser_.tok_.loc(), "expected '{' to start the body of the method");
+  if (this->parser.tok.is(Tok::LBrace)) {
+    fn->body = this->parser.stmts().parseBlock();
+    this->parser.functions().addPrologue(fn, patterns);
+  } else if (!this->parser.cursor().accept(Tok::Semi) && !this->parser.tok.newlineBefore &&
+             !this->parser.tok.is(Tok::RBrace) && !this->parser.tok.is(Tok::Eof)) {
+    this->parser.cursor().error(this->parser.tok.loc(),
+                                "expected '{' to start the body of the method");
   }
-  fn->source = parser_.cursor().textFrom(start);
+  fn->source = this->parser.cursor().textFrom(start);
 }
 
 bool ClassParser::symbolKeyAhead() {
-  return parser_.tok_.is(Tok::LBracket) && parser_.cursor().peek().is(Tok::Identifier) &&
-         parser_.cursor().peek().text == "Symbol";
+  return this->parser.tok.is(Tok::LBracket) && this->parser.cursor().peek().is(Tok::Identifier) &&
+         this->parser.cursor().peek().text == "Symbol";
 }
 
 }

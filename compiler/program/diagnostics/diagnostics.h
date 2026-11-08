@@ -19,9 +19,9 @@ public:
   void hint(llvm::SMLoc loc, const llvm::Twine &message);
   void tool(const llvm::Twine &message);
 
-  bool setMuted(bool muted) {
-    bool old = muted_;
-    muted_ = muted;
+  bool setMuted(bool silent) {
+    bool old = this->muted;
+    this->muted = silent;
 
     return old;
   }
@@ -39,7 +39,9 @@ public:
   std::vector<Captured> *capture() const { return capture_; }
 
   Errors take();
-  void quietRange(const char *begin, const char *end) { quiet_.push_back({begin, end}); }
+  void quietRange(const char *begin, const char *end) {
+    this->quiet.push_back({begin, end});
+  }
   bool isQuiet(llvm::SMLoc loc) const;
 
   llvm::SourceMgr &sourceMgr() const { return sourceMgr_; }
@@ -52,10 +54,10 @@ private:
   llvm::SourceMgr &sourceMgr_;
   unsigned errorCount_ = 0;
   unsigned errorsSeen_ = 0;
-  bool muted_ = false;
+  bool muted = false;
   std::vector<Captured> *capture_ = nullptr;
-  Errors errors_;
-  std::vector<std::pair<const char *, const char *>> quiet_;
+  Errors errors;
+  std::vector<std::pair<const char *, const char *>> quiet;
 };
 
 }

@@ -18,7 +18,7 @@ public:
   bool tryTypeArgs(std::vector<TypeRef> &args, bool callOnly = false);
 
 private:
-  Parser &parser_;
+  Parser &parser;
 };
 
 }

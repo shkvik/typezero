@@ -12,11 +12,11 @@ bool EventRounds::again() {
   if (!inference_.open || inference_.final) {
     return false;
   }
-  if (!inference_.changed || round_ + 2 >= kRounds) {
+  if (!inference_.changed || this->round + 2 >= kRounds) {
     inference_.final = true;
   }
   inference_.changed = inference_.open = false;
-  ++round_;
+  ++this->round;
 
   return true;
 }

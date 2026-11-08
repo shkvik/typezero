@@ -40,7 +40,7 @@ private:
   bool later(int fn, llvm::SMLoc at, llvm::SMLoc origin);
   void addEntry(unsigned act, unsigned piece, const Entry &add, bool &changed);
   void noteFlow(int root, unsigned from, unsigned to, llvm::SMLoc origin);
-  Analysis &analysis_;
+  Analysis &analysis;
 };
 
 }

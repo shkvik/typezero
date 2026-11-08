@@ -15,7 +15,7 @@ public:
   void send(const llvm::json::Value &message);
 
 private:
-  std::mutex mutex_;
+  std::mutex mutex;
 };
 
 }

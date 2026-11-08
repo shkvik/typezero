@@ -15,38 +15,38 @@ bool CheckProcess::start(llvm::StringRef program, llvm::ArrayRef<llvm::StringRef
                          llvm::StringRef log, std::string &error) {
   std::vector<std::optional<llvm::StringRef>> redirects = {llvm::StringRef(""), log, log};
   bool failed = false;
-  info_ = llvm::sys::ExecuteNoWait(program, args, std::nullopt, redirects, 0, &error, &failed);
-  running_ = !failed && info_.Pid != 0;
+  this->info = llvm::sys::ExecuteNoWait(program, args, std::nullopt, redirects, 0, &error, &failed);
+  this->running = !failed && this->info.Pid != 0;
 
-  return running_;
+  return this->running;
 }
 
 std::optional<int> CheckProcess::poll() {
-  if (!running_) {
+  if (!this->running) {
     return std::nullopt;
   }
   std::string error;
-  llvm::sys::ProcessInfo done = llvm::sys::Wait(info_, 0, &error, nullptr, true);
+  llvm::sys::ProcessInfo done = llvm::sys::Wait(this->info, 0, &error, nullptr, true);
   if (done.Pid == 0) {
     return std::nullopt;
   }
-  running_ = false;
+  this->running = false;
 
   return done.ReturnCode;
 }
 
 void CheckProcess::kill() {
-  if (!running_) {
+  if (!this->running) {
     return;
   }
 #ifdef _WIN32
-  TerminateProcess(info_.Process, 1);
+  TerminateProcess(this->info.Process, 1);
 #else
-  ::kill(info_.Pid, SIGKILL);
+  ::kill(this->info.Pid, SIGKILL);
 #endif
   std::string error;
-  llvm::sys::Wait(info_, std::nullopt, &error);
-  running_ = false;
+  llvm::sys::Wait(this->info, std::nullopt, &error);
+  this->running = false;
 }
 
 }

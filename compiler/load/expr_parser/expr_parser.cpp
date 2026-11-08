@@ -7,10 +7,10 @@
 #include "compiler/load/pattern_parser/pattern_parser.h"
 #include "compiler/load/stmt_parser/stmt_parser.h"
 #include "compiler/load/template_parser/template_parser.h"
-#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/load/token_cursor/token_cursor.h"
 #include "compiler/load/type_parser/type_parser.h"
 #include "compiler/load/var_parser/var_parser.h"
+#include "compiler/program/to_utf8/to_utf8.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
@@ -30,7 +30,7 @@ constexpr int kPowPrec = 11;
 }
 
 ExprParser::ExprParser(Parser &parser)
-    : parser_(parser) {}
+    : parser(parser) {}
 
 int ExprParser::binaryPrec(Tok kind) {
   switch (kind) {
@@ -181,208 +181,209 @@ bool ExprParser::assignmentOp(Tok kind, std::optional<BinaryOp> &op) {
 }
 
 Expr *ExprParser::parseYield() {
-  llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance();
-  bool delegate = !parser_.tok_.newlineBefore && parser_.cursor().accept(Tok::Star);
+  llvm::SMLoc loc = this->parser.tok.loc();
+  this->parser.cursor().advance();
+  bool delegate = !this->parser.tok.newlineBefore && this->parser.cursor().accept(Tok::Star);
   Expr *value = nullptr;
   if (delegate) {
     value = parseExpr();
-  } else if (!parser_.tok_.newlineBefore) {
-    switch (parser_.tok_.kind) {
-    case Tok::RParen:
-    case Tok::RBracket:
-    case Tok::RBrace:
-    case Tok::Comma:
-    case Tok::Semi:
-    case Tok::Colon:
-    case Tok::Question:
-    case Tok::Eof:
-    case Tok::TemplateMiddle:
-    case Tok::TemplateTail:
-      break;
-    default:
-      if (ExprParser::binaryPrec(parser_.tok_.kind) < 0 || parser_.tok_.is(Tok::Plus) ||
-          parser_.tok_.is(Tok::Minus) || parser_.tok_.is(Tok::Less)) {
-        value = parseExpr();
-      }
+  } else if (!this->parser.tok.newlineBefore) {
+    switch (this->parser.tok.kind) {
+      case Tok::RParen:
+      case Tok::RBracket:
+      case Tok::RBrace:
+      case Tok::Comma:
+      case Tok::Semi:
+      case Tok::Colon:
+      case Tok::Question:
+      case Tok::Eof:
+      case Tok::TemplateMiddle:
+      case Tok::TemplateTail:
+        break;
+      default:
+        if (ExprParser::binaryPrec(this->parser.tok.kind) < 0 || this->parser.tok.is(Tok::Plus) ||
+            this->parser.tok.is(Tok::Minus) || this->parser.tok.is(Tok::Less)) {
+          value = parseExpr();
+        }
     }
   }
-  if (!parser_.inGenerator_) {
-    parser_.cursor().report(
+  if (!this->parser.inGenerator) {
+    this->parser.cursor().report(
         loc, "'yield' can only be used in a generator function, declared with 'function*'");
-    return value ? value : parser_.ctx_.make<UndefinedExpr>(loc);
+    return value ? value : this->parser.ctx.make<UndefinedExpr>(loc);
   }
 
-  return parser_.ctx_.make<YieldExpr>(loc, value, delegate);
+  return this->parser.ctx.make<YieldExpr>(loc, value, delegate);
 }
 
 Expr *ExprParser::parseSequence() {
   Expr *first = parseExpr();
-  if (!parser_.tok_.is(Tok::Comma)) {
+  if (!this->parser.tok.is(Tok::Comma)) {
     return first;
   }
   std::vector<Expr *> exprs{first};
-  while (parser_.cursor().accept(Tok::Comma)) {
+  while (this->parser.cursor().accept(Tok::Comma)) {
     exprs.push_back(parseExpr());
   }
 
-  return parser_.ctx_.make<SequenceExpr>(first->loc(), std::move(exprs));
+  return this->parser.ctx.make<SequenceExpr>(first->loc(), std::move(exprs));
 }
 
 Expr *ExprParser::parseExpr() {
-  const char *start = parser_.tok_.text.begin();
-  if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "yield") {
+  const char *start = this->parser.tok.text.begin();
+  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "yield") {
     return parseYield();
   }
   Expr *lhs = parseConditional();
   std::optional<BinaryOp> op;
-  if (!ExprParser::assignmentOp(parser_.tok_.kind, op)) {
+  if (!ExprParser::assignmentOp(this->parser.tok.kind, op)) {
     return lhs;
   }
-  llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance();
+  llvm::SMLoc loc = this->parser.tok.loc();
+  this->parser.cursor().advance();
   Expr *rhs = parseExpr();
-  auto *assign = parser_.ctx_.make<AssignExpr>(loc, op, lhs, rhs);
-  assign->source = llvm::StringRef(start, static_cast<size_t>(parser_.prevEnd_ - start));
+  auto *assign = this->parser.ctx.make<AssignExpr>(loc, op, lhs, rhs);
+  assign->source = llvm::StringRef(start, static_cast<size_t>(this->parser.prevEnd - start));
 
   return assign;
 }
 
 Expr *ExprParser::parseConditional() {
   Expr *cond = parseBinary(0);
-  if (!parser_.tok_.is(Tok::Question)) {
+  if (!this->parser.tok.is(Tok::Question)) {
     return cond;
   }
-  llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance();
+  llvm::SMLoc loc = this->parser.tok.loc();
+  this->parser.cursor().advance();
   Expr *thenExpr = parseExpr();
-  parser_.cursor().expect(Tok::Colon, "in the conditional expression");
+  this->parser.cursor().expect(Tok::Colon, "in the conditional expression");
   Expr *elseExpr = parseExpr();
 
-  return parser_.ctx_.make<ConditionalExpr>(loc, cond, thenExpr, elseExpr);
+  return this->parser.ctx.make<ConditionalExpr>(loc, cond, thenExpr, elseExpr);
 }
 
 Expr *ExprParser::parseBinary(int minPrec) {
-  const char *start = parser_.tok_.text.begin();
+  const char *start = this->parser.tok.text.begin();
   llvm::StringRef unary;
-  if (parser_.tok_.is(Tok::Minus) || parser_.tok_.is(Tok::Plus) || parser_.tok_.is(Tok::Bang) ||
-      parser_.tok_.is(Tok::Tilde) || parser_.tok_.is(Tok::KwTypeof) ||
-      parser_.tok_.is(Tok::KwVoid) || parser_.tok_.is(Tok::KwDelete)) {
-    unary = parser_.tok_.text;
+  if (this->parser.tok.is(Tok::Minus) || this->parser.tok.is(Tok::Plus) ||
+      this->parser.tok.is(Tok::Bang) || this->parser.tok.is(Tok::Tilde) ||
+      this->parser.tok.is(Tok::KwTypeof) || this->parser.tok.is(Tok::KwVoid) ||
+      this->parser.tok.is(Tok::KwDelete)) {
+    unary = this->parser.tok.text;
   }
   Expr *lhs = parseUnary();
-  if (!unary.empty() && parser_.tok_.is(Tok::StarStar)) {
-    parser_.cursor().report(parser_.tok_.loc(),
-                            "the left side of '**' cannot be a unary '" + unary +
-                                "' expression; add parentheses, e.g. '(" + unary +
-                                (llvm::isAlpha(unary[0]) ? " " : "") + "x) ** 2'");
+  if (!unary.empty() && this->parser.tok.is(Tok::StarStar)) {
+    this->parser.cursor().report(this->parser.tok.loc(),
+                                 "the left side of '**' cannot be a unary '" + unary +
+                                     "' expression; add parentheses, e.g. '(" + unary +
+                                     (llvm::isAlpha(unary[0]) ? " " : "") + "x) ** 2'");
   }
   for (;;) {
-    if (parser_.tok_.is(Tok::KwAs) && kRelationalPrec >= minPrec) {
-      llvm::SMLoc loc = parser_.tok_.loc();
-      parser_.cursor().advance();
-      lhs = parser_.ctx_.make<CastExpr>(loc, lhs, parser_.types().parseType());
+    if (this->parser.tok.is(Tok::KwAs) && kRelationalPrec >= minPrec) {
+      llvm::SMLoc loc = this->parser.tok.loc();
+      this->parser.cursor().advance();
+      lhs = this->parser.ctx.make<CastExpr>(loc, lhs, this->parser.types().parseType());
       continue;
     }
-    if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "satisfies" &&
-        !parser_.tok_.newlineBefore && kRelationalPrec >= minPrec) {
-      llvm::SMLoc loc = parser_.tok_.loc();
-      parser_.cursor().advance();
-      const char *typeStart = parser_.tok_.text.data();
-      parser_.types().parseType();
-      llvm::StringRef type(typeStart,
-                           static_cast<size_t>(std::max(parser_.prevEnd_, typeStart) - typeStart));
-      parser_.cursor().report(
+    if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "satisfies" &&
+        !this->parser.tok.newlineBefore && kRelationalPrec >= minPrec) {
+      llvm::SMLoc loc = this->parser.tok.loc();
+      this->parser.cursor().advance();
+      const char *typeStart = this->parser.tok.text.data();
+      this->parser.types().parseType();
+      llvm::StringRef type(
+          typeStart, static_cast<size_t>(std::max(this->parser.prevEnd, typeStart) - typeStart));
+      this->parser.cursor().report(
           loc, "'satisfies' is not supported, just as 'as' is not; declare the type of the "
                "variable instead: 'const x: " +
                    type + " = ...'");
       continue;
     }
-    if (parser_.tok_.is(Tok::KwIn) && parser_.noIn_) {
+    if (this->parser.tok.is(Tok::KwIn) && this->parser.noIn) {
       return lhs;
     }
-    if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "instanceof" &&
+    if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "instanceof" &&
         kRelationalPrec >= minPrec) {
-      llvm::SMLoc loc = parser_.tok_.loc();
-      parser_.cursor().advance();
+      llvm::SMLoc loc = this->parser.tok.loc();
+      this->parser.cursor().advance();
       Expr *rhs = parseBinary(kRelationalPrec + 1);
-      auto *bin = parser_.ctx_.make<BinaryExpr>(loc, BinaryOp::InstanceOf, lhs, rhs);
-      bin->source = llvm::StringRef(start, static_cast<size_t>(parser_.prevEnd_ - start));
+      auto *bin = this->parser.ctx.make<BinaryExpr>(loc, BinaryOp::InstanceOf, lhs, rhs);
+      bin->source = llvm::StringRef(start, static_cast<size_t>(this->parser.prevEnd - start));
       lhs = bin;
       continue;
     }
-    int prec = ExprParser::binaryPrec(parser_.tok_.kind);
+    int prec = ExprParser::binaryPrec(this->parser.tok.kind);
     if (prec < 0 || prec < minPrec) {
       return lhs;
     }
-    BinaryOp op = ExprParser::binaryOpFor(parser_.tok_.kind);
-    llvm::SMLoc loc = parser_.tok_.loc();
-    if (parser_.tok_.is(Tok::EqEqEq)) {
-      parser_.cursor().report(loc,
-                              "'===' is not supported; use '==', which does not convert types");
-    } else if (parser_.tok_.is(Tok::BangEqEq)) {
-      parser_.cursor().report(loc,
-                              "'!==' is not supported; use '!=', which does not convert types");
+    BinaryOp op = ExprParser::binaryOpFor(this->parser.tok.kind);
+    llvm::SMLoc loc = this->parser.tok.loc();
+    if (this->parser.tok.is(Tok::EqEqEq)) {
+      this->parser.cursor().report(
+          loc, "'===' is not supported; use '==', which does not convert types");
+    } else if (this->parser.tok.is(Tok::BangEqEq)) {
+      this->parser.cursor().report(
+          loc, "'!==' is not supported; use '!=', which does not convert types");
     }
-    parser_.cursor().advance();
+    this->parser.cursor().advance();
     Expr *rhs = parseBinary(prec == kPowPrec ? prec : prec + 1);
-    auto *bin = parser_.ctx_.make<BinaryExpr>(loc, op, lhs, rhs);
-    bin->source = llvm::StringRef(start, static_cast<size_t>(parser_.prevEnd_ - start));
+    auto *bin = this->parser.ctx.make<BinaryExpr>(loc, op, lhs, rhs);
+    bin->source = llvm::StringRef(start, static_cast<size_t>(this->parser.prevEnd - start));
     lhs = bin;
   }
 }
 
 Expr *ExprParser::parseUnary() {
-  llvm::SMLoc loc = parser_.tok_.loc();
-  if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "await") {
-    parser_.cursor().advance();
-    return parser_.ctx_.make<AwaitExpr>(loc, parseUnary());
+  llvm::SMLoc loc = this->parser.tok.loc();
+  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "await") {
+    this->parser.cursor().advance();
+    return this->parser.ctx.make<AwaitExpr>(loc, parseUnary());
   }
   std::optional<UnaryOp> op;
-  switch (parser_.tok_.kind) {
-  case Tok::Minus:
-    op = UnaryOp::Neg;
-    break;
-  case Tok::Plus:
-    op = UnaryOp::Plus;
-    break;
-  case Tok::Bang:
-    op = UnaryOp::Not;
-    break;
-  case Tok::Tilde:
-    op = UnaryOp::BitNot;
-    break;
-  case Tok::KwTypeof:
-    op = UnaryOp::TypeOf;
-    break;
-  case Tok::KwVoid:
-    op = UnaryOp::Void;
-    break;
-  case Tok::KwDelete:
-    op = UnaryOp::Delete;
-    break;
-  case Tok::PlusPlus:
-  case Tok::MinusMinus: {
-    bool increment = parser_.tok_.is(Tok::PlusPlus);
-    parser_.cursor().advance();
-    return parser_.ctx_.make<UpdateExpr>(loc, increment, true, parseUnary());
+  switch (this->parser.tok.kind) {
+    case Tok::Minus:
+      op = UnaryOp::Neg;
+      break;
+    case Tok::Plus:
+      op = UnaryOp::Plus;
+      break;
+    case Tok::Bang:
+      op = UnaryOp::Not;
+      break;
+    case Tok::Tilde:
+      op = UnaryOp::BitNot;
+      break;
+    case Tok::KwTypeof:
+      op = UnaryOp::TypeOf;
+      break;
+    case Tok::KwVoid:
+      op = UnaryOp::Void;
+      break;
+    case Tok::KwDelete:
+      op = UnaryOp::Delete;
+      break;
+    case Tok::PlusPlus:
+    case Tok::MinusMinus: {
+      bool increment = this->parser.tok.is(Tok::PlusPlus);
+      this->parser.cursor().advance();
+      return this->parser.ctx.make<UpdateExpr>(loc, increment, true, parseUnary());
+    }
+    default:
+      return parsePostfix();
   }
-  default:
-    return parsePostfix();
-  }
-  parser_.cursor().advance();
+  this->parser.cursor().advance();
 
-  return parser_.ctx_.make<UnaryExpr>(loc, *op, parseUnary());
+  return this->parser.ctx.make<UnaryExpr>(loc, *op, parseUnary());
 }
 
 Expr *ExprParser::parsePostfix() {
-  Expr *expr = parser_.calls().parseCallOrMember();
-  if ((parser_.tok_.is(Tok::PlusPlus) || parser_.tok_.is(Tok::MinusMinus)) &&
-      !parser_.tok_.newlineBefore) {
-    bool increment = parser_.tok_.is(Tok::PlusPlus);
-    llvm::SMLoc loc = parser_.tok_.loc();
-    parser_.cursor().advance();
-    return parser_.ctx_.make<UpdateExpr>(loc, increment, false, expr);
+  Expr *expr = this->parser.calls().parseCallOrMember();
+  if ((this->parser.tok.is(Tok::PlusPlus) || this->parser.tok.is(Tok::MinusMinus)) &&
+      !this->parser.tok.newlineBefore) {
+    bool increment = this->parser.tok.is(Tok::PlusPlus);
+    llvm::SMLoc loc = this->parser.tok.loc();
+    this->parser.cursor().advance();
+    return this->parser.ctx.make<UpdateExpr>(loc, increment, false, expr);
   }
 
   return expr;

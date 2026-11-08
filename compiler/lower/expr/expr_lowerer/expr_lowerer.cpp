@@ -1,13 +1,4 @@
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
-#include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
-#include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
-#include "compiler/library/json/json_lowerer/json_lowerer.h"
-#include "compiler/library/reflect/reflect_lowerer/reflect_lowerer.h"
-#include "compiler/library/regex/matcher_builder/matcher_builder.h"
-#include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
-#include "compiler/library/result/err_sites/err_sites.h"
-#include "compiler/library/result/result_lowerer/result_lowerer.h"
-#include "compiler/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
@@ -22,6 +13,15 @@
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
 #include "compiler/lower/functions/env_lowerer/env_lowerer.h"
 #include "compiler/lower/iterators/inline_generator_lowerer/inline_generator_lowerer.h"
+#include "compiler/lower/library/bytes/bytes_lowerer/bytes_lowerer.h"
+#include "compiler/lower/library/decimal/decimal_lowerer/decimal_lowerer.h"
+#include "compiler/lower/library/json/json_lowerer/json_lowerer.h"
+#include "compiler/lower/library/reflect/reflect_lowerer/reflect_lowerer.h"
+#include "compiler/lower/library/regex/matcher_builder/matcher_builder.h"
+#include "compiler/lower/library/regex/regex_lowerer/regex_lowerer.h"
+#include "compiler/lower/library/result/err_sites/err_sites.h"
+#include "compiler/lower/library/result/result_lowerer/result_lowerer.h"
+#include "compiler/lower/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/objects/dict_lowerer/dict_lowerer.h"
@@ -35,7 +35,7 @@
 #include "compiler/lower/values/array_method_lowerer/array_method_lowerer.h"
 #include "compiler/lower/values/number_lowerer/number_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
-#include "compiler/pipeline/check_program/types/type_relations/type_relations.h"
+#include "compiler/semantic/semantic_external.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
@@ -61,8 +61,7 @@ llvm::Value *ExprLowerer::emitExpr(Expr *expr) {
   this->lowering.debugInfo().at(expr->loc());
   llvm::Value *value = this->emitExprKind(expr);
   if (value && this->lowering.mismatch_.empty() && !expr->type->isVoid() &&
-      !expr->type->isError() && !expr->type->isNever() &&
-      this->lowering.builder_.GetInsertBlock()) {
+      !expr->type->isError() && !expr->type->isNever() && this->lowering.builder.GetInsertBlock()) {
     llvm::Type *want = this->lowering.moduleBuilder().lower(expr->type);
     if (value->getType() != want) {
       llvm::raw_string_ostream out(this->lowering.mismatch_);
@@ -93,7 +92,7 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
     auto *lit = cast<IntLitExpr>(expr);
     const Type *type = UnionLayout::storedType(lit->type);
     if (type->isFloat()) {
-      return llvm::ConstantFP::get(this->lowering.builder_.getDoubleTy(),
+      return llvm::ConstantFP::get(this->lowering.builder.getDoubleTy(),
                                    static_cast<double>(lit->value));
     }
     if (type->isDecimal()) {
@@ -105,19 +104,19 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
     if (expr->type->isDecimal()) {
       return this->lowering.decimalLowerer().emitDecimalLiteral(expr);
     }
-    return llvm::ConstantFP::get(this->lowering.builder_.getDoubleTy(),
+    return llvm::ConstantFP::get(this->lowering.builder.getDoubleTy(),
                                  cast<FloatLitExpr>(expr)->value);
   case Expr::Kind::BoolLit:
-    return this->lowering.builder_.getInt1(cast<BoolLitExpr>(expr)->value);
+    return this->lowering.builder.getInt1(cast<BoolLitExpr>(expr)->value);
   case Expr::Kind::StringLit:
     if (expr->type->isStringLiteral()) {
-      return this->lowering.builder_.getInt32(expr->type->atom());
+      return this->lowering.builder.getInt32(expr->type->atom());
     }
     return this->lowering.stringLowerer().stringLiteral(cast<StringLitExpr>(expr)->value);
   case Expr::Kind::RegexLit:
     return this->lowering.regexLowerer().emitRegexLiteral(cast<RegexLitExpr>(expr));
   case Expr::Kind::Undefined:
-    return this->lowering.builder_.getFalse();
+    return this->lowering.builder.getFalse();
   case Expr::Kind::Template:
     return this->lowering.stringLowerer().emitTemplate(cast<TemplateExpr>(expr));
   case Expr::Kind::ArrayLit:
@@ -129,7 +128,7 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
     if (name->func()) {
       return this->lowering.closureLowerer().makeFunctionValue(
           this->lowering.closureLowerer().functionInfo(name->func()->decl),
-          llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()));
+          llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy()));
     }
     if (!name->var() && name->type->isJson()) {
       return this->lowering.jsonLowerer().emitJsonNull();
@@ -158,11 +157,11 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
       Lowering::Operand object = this->lowering.refCounts().emitOperand(
           index->object, AssignLowerer::cannotAssign(index->index));
       llvm::Value *key = this->emitExpr(index->index);
-      llvm::Value *value = this->lowering.builder_.CreateLoad(
-          this->lowering.moduleBuilder().lower(index->type),
-          this->lowering.objectLowerer().keyedFieldAddress(object.value, object.type, key,
-                                                           index->index->type),
-          "field");
+      llvm::Value *value =
+          this->lowering.builder.CreateLoad(this->lowering.moduleBuilder().lower(index->type),
+                                            this->lowering.objectLowerer().keyedFieldAddress(
+                                                object.value, object.type, key, index->index->type),
+                                            "field");
       this->lowering.refCounts().retainValue(value, index->type);
       this->lowering.refCounts().dropOperand(object);
       return value;
@@ -258,24 +257,24 @@ llvm::Value *ExprLowerer::emitOptionalChain(OptionalChainExpr *chain) {
   }
   llvm::BasicBlock *undefinedBlock = this->lowering.functionFrame().newBlock("chain.undefined");
   llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("chain.end");
-  this->lowering.chainEnds_.push_back(undefinedBlock);
+  this->lowering.chainEnds.push_back(undefinedBlock);
   llvm::Value *value = this->emitExpr(chain->chain);
-  this->lowering.chainEnds_.pop_back();
+  this->lowering.chainEnds.pop_back();
   const Type *type = chain->chain->type;
   if (!type->isVoid() && !type->isOptional()) {
-    value = this->lowering.optionalLowerer().makeOptional(value, this->lowering.builder_.getTrue(),
+    value = this->lowering.optionalLowerer().makeOptional(value, this->lowering.builder.getTrue(),
                                                           chain->type);
   }
-  llvm::BasicBlock *valueEnd = this->lowering.builder_.GetInsertBlock();
-  this->lowering.builder_.CreateBr(endBlock);
+  llvm::BasicBlock *valueEnd = this->lowering.builder.GetInsertBlock();
+  this->lowering.builder.CreateBr(endBlock);
   this->lowering.functionFrame().switchTo(undefinedBlock);
-  this->lowering.builder_.CreateBr(endBlock);
+  this->lowering.builder.CreateBr(endBlock);
   this->lowering.functionFrame().switchTo(endBlock);
   if (type->isVoid()) {
     return nullptr;
   }
   llvm::PHINode *phi =
-      this->lowering.builder_.CreatePHI(this->lowering.moduleBuilder().lower(chain->type), 2);
+      this->lowering.builder.CreatePHI(this->lowering.moduleBuilder().lower(chain->type), 2);
   phi->addIncoming(value, valueEnd);
   phi->addIncoming(this->lowering.optionalLowerer().undefinedValue(chain->type), undefinedBlock);
 
@@ -289,8 +288,8 @@ llvm::Value *ExprLowerer::emitChainLink(CastExpr *link) {
   }
   llvm::Value *value = this->emitExpr(link->operand);
   llvm::BasicBlock *valueBlock = this->lowering.functionFrame().newBlock("chain.link");
-  this->lowering.builder_.CreateCondBr(this->lowering.optionalLowerer().optionalHas(value, type),
-                                       valueBlock, this->lowering.chainEnds_.back());
+  this->lowering.builder.CreateCondBr(this->lowering.optionalLowerer().optionalHas(value, type),
+                                      valueBlock, this->lowering.chainEnds.back());
   this->lowering.functionFrame().switchTo(valueBlock);
 
   return this->lowering.optionalLowerer().optionalValue(value, type);
@@ -301,24 +300,24 @@ llvm::Value *ExprLowerer::emitConditional(ConditionalExpr *cond) {
   llvm::BasicBlock *thenBlock = this->lowering.functionFrame().newBlock("cond.then");
   llvm::BasicBlock *elseBlock = this->lowering.functionFrame().newBlock("cond.else");
   llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("cond.end");
-  this->lowering.builder_.CreateCondBr(test, thenBlock, elseBlock);
+  this->lowering.builder.CreateCondBr(test, thenBlock, elseBlock);
 
   this->lowering.functionFrame().switchTo(thenBlock);
   llvm::Value *thenValue = this->emitExpr(cond->thenExpr);
-  llvm::BasicBlock *thenEnd = this->lowering.builder_.GetInsertBlock();
-  this->lowering.builder_.CreateBr(endBlock);
+  llvm::BasicBlock *thenEnd = this->lowering.builder.GetInsertBlock();
+  this->lowering.builder.CreateBr(endBlock);
 
   this->lowering.functionFrame().switchTo(elseBlock);
   llvm::Value *elseValue = this->emitExpr(cond->elseExpr);
-  llvm::BasicBlock *elseEnd = this->lowering.builder_.GetInsertBlock();
-  this->lowering.builder_.CreateBr(endBlock);
+  llvm::BasicBlock *elseEnd = this->lowering.builder.GetInsertBlock();
+  this->lowering.builder.CreateBr(endBlock);
 
   this->lowering.functionFrame().switchTo(endBlock);
   if (cond->type->isVoid()) {
     return nullptr;
   }
   llvm::PHINode *phi =
-      this->lowering.builder_.CreatePHI(this->lowering.moduleBuilder().lower(cond->type), 2);
+      this->lowering.builder.CreatePHI(this->lowering.moduleBuilder().lower(cond->type), 2);
   phi->addIncoming(thenValue, thenEnd);
   phi->addIncoming(elseValue, elseEnd);
 
@@ -368,7 +367,7 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
       from->nonOptional() != to->nonOptional()) {
     return this->lowering.jsonLowerer().emitJsonConversion(value, from, to);
   }
-  if (TypeRelations::copiesIntoRecord(from, to)) {
+  if (SemanticExternalFacade::copiesIntoRecord(from, to)) {
     return this->lowering.dictLowerer().emitRecordFromObject(value, from, to);
   }
   if (from->isResult() && to->isResult()) {
@@ -385,7 +384,7 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
 
   if (to->isString()) {
     if (from->isBool()) {
-      return this->lowering.builder_.CreateSelect(
+      return this->lowering.builder.CreateSelect(
           value, this->lowering.stringLowerer().stringLiteral(u"true"),
           this->lowering.stringLowerer().stringLiteral(u"false"));
     }
@@ -403,11 +402,11 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
       return this->lowering.stringLowerer().stringLiteral(u"undefined");
     }
     if (from->isDecimal()) {
-      llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
-      llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+      llvm::Type *i64 = this->lowering.builder.getInt64Ty();
+      llvm::Type *ptr = this->lowering.builder.getPtrTy();
       llvm::Value *text = this->lowering.stringLowerer().callReturningString(
           this->lowering.decimalLowerer().decimalFunction(
-              "tz_dec_to_string", this->lowering.builder_.getVoidTy(), {ptr, i64, i64}),
+              "tz_dec_to_string", this->lowering.builder.getVoidTy(), {ptr, i64, i64}),
           {this->lowering.decimalLowerer().decimalCoef(value),
            this->lowering.decimalLowerer().decimalMeta(value)});
       this->lowering.refCounts().releaseValue(value, from);
@@ -429,7 +428,7 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
           this->lowering.optionalLowerer().optionalHas(value, from), to);
     }
     return this->lowering.optionalLowerer().makeOptional(
-        this->emitConversion(value, from, to->inner()), this->lowering.builder_.getTrue(), to);
+        this->emitConversion(value, from, to->inner()), this->lowering.builder.getTrue(), to);
   }
   if (from->isOptional()) {
     return this->emitConversion(this->lowering.optionalLowerer().optionalValue(value, from),
@@ -450,7 +449,7 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
   }
   if (from->isFloat() && to->isInteger()) {
     return this->lowering.numberLowerer().intCast(
-        this->lowering.builder_.CreateCall(this->lowering.rt_.toInt32, {value}),
+        this->lowering.builder.CreateCall(this->lowering.rt_.toInt32, {value}),
         Type::integer(32, false), to);
   }
   llvm_unreachable("Checker rejects this conversion");

@@ -55,11 +55,11 @@ private:
 
   static void visitChildren(const Expr *e, const std::function<void(const Expr *)> &visit);
 
-  llvm::DenseSet<const FunctionDecl *> scanned_;
-  const FunctionDecl *current_ = nullptr;
-  llvm::StringSet<> valueReads_, nonCallReads_, bad_;
-  llvm::StringMap<std::vector<Write>> writes_;
-  std::vector<BackRef> candidates_;
+  llvm::DenseSet<const FunctionDecl *> scanned;
+  const FunctionDecl *current = nullptr;
+  llvm::StringSet<> valueReads, nonCallReads, bad;
+  llvm::StringMap<std::vector<Write>> writes;
+  std::vector<BackRef> candidates;
 };
 
 }

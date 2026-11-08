@@ -57,46 +57,46 @@ llvm::Constant *StringLowerer::utf8Constant(llvm::StringRef text) {
   auto [it, inserted] = this->utf8Constants.try_emplace(text, nullptr);
   if (inserted) {
     it->second =
-        this->lowering.builder_.CreateGlobalString(text, ".msg", 0, this->lowering.module_.get());
+        this->lowering.builder.CreateGlobalString(text, ".msg", 0, this->lowering.module_.get());
   }
 
   return it->second;
 }
 
 llvm::Value *StringLowerer::stringObj(llvm::Value *str) {
-  return this->lowering.builder_.CreateExtractValue(str, 0);
+  return this->lowering.builder.CreateExtractValue(str, 0);
 }
 
 llvm::Value *StringLowerer::stringMeta(llvm::Value *str) {
-  return this->lowering.builder_.CreateExtractValue(str, 1);
+  return this->lowering.builder.CreateExtractValue(str, 1);
 }
 
 llvm::Value *StringLowerer::stringLength(llvm::Value *str) {
-  return this->lowering.builder_.CreateAnd(
-      this->stringMeta(str), this->lowering.builder_.getInt64(kStrLengthMask), "length");
+  return this->lowering.builder.CreateAnd(
+      this->stringMeta(str), this->lowering.builder.getInt64(kStrLengthMask), "length");
 }
 
 llvm::Value *StringLowerer::callReturningString(llvm::FunctionCallee fn,
                                                 llvm::ArrayRef<llvm::Value *> args) {
   llvm::AllocaInst *out =
-      this->lowering.functionFrame().createStackSlot(this->lowering.strTy_, "str.out");
+      this->lowering.functionFrame().createStackSlot(this->lowering.strTy, "str.out");
   std::vector<llvm::Value *> all{out};
   all.insert(all.end(), args.begin(), args.end());
-  this->lowering.builder_.CreateCall(fn, all);
+  this->lowering.builder.CreateCall(fn, all);
 
-  return this->lowering.builder_.CreateLoad(this->lowering.strTy_, out);
+  return this->lowering.builder.CreateLoad(this->lowering.strTy, out);
 }
 
 llvm::Value *StringLowerer::concatOperands(llvm::ArrayRef<Lowering::Operand> operands) {
-  auto *arrayTy = llvm::ArrayType::get(this->lowering.strTy_, operands.size());
+  auto *arrayTy = llvm::ArrayType::get(this->lowering.strTy, operands.size());
   llvm::AllocaInst *array = this->lowering.functionFrame().createStackSlot(arrayTy, "concat.parts");
   for (size_t i = 0; i < operands.size(); ++i) {
-    this->lowering.builder_.CreateStore(operands[i].value,
-                                        this->lowering.builder_.CreateConstInBoundsGEP2_32(
-                                            arrayTy, array, 0, static_cast<unsigned>(i)));
+    this->lowering.builder.CreateStore(operands[i].value,
+                                       this->lowering.builder.CreateConstInBoundsGEP2_32(
+                                           arrayTy, array, 0, static_cast<unsigned>(i)));
   }
   llvm::Value *result = this->callReturningString(
-      this->lowering.rt_.strConcatN, {array, this->lowering.builder_.getInt64(operands.size())});
+      this->lowering.rt_.strConcatN, {array, this->lowering.builder.getInt64(operands.size())});
   for (const Lowering::Operand &operand : operands) {
     this->lowering.refCounts().dropOperand(operand);
   }
@@ -129,17 +129,16 @@ Lowering::Operand StringLowerer::emitConcatPart(Expr *expr, bool canBorrow) {
   llvm::Value *value = this->lowering.exprLowerer().emitExpr(conv->operand);
   llvm::Value *bits =
       from->isFloat()
-          ? this->lowering.builder_.CreateBitCast(value, this->lowering.builder_.getInt64Ty())
+          ? this->lowering.builder.CreateBitCast(value, this->lowering.builder.getInt64Ty())
       : from->isUnsigned()
-          ? this->lowering.builder_.CreateZExt(value, this->lowering.builder_.getInt64Ty())
-          : this->lowering.builder_.CreateSExt(value, this->lowering.builder_.getInt64Ty());
-  llvm::Value *part = llvm::UndefValue::get(this->lowering.strTy_);
-  part = this->lowering.builder_.CreateInsertValue(
-      part, this->lowering.builder_.CreateIntToPtr(bits, this->lowering.builder_.getPtrTy()), 0);
-  part = this->lowering.builder_.CreateInsertValue(
+          ? this->lowering.builder.CreateZExt(value, this->lowering.builder.getInt64Ty())
+          : this->lowering.builder.CreateSExt(value, this->lowering.builder.getInt64Ty());
+  llvm::Value *part = llvm::UndefValue::get(this->lowering.strTy);
+  part = this->lowering.builder.CreateInsertValue(
+      part, this->lowering.builder.CreateIntToPtr(bits, this->lowering.builder.getPtrTy()), 0);
+  part = this->lowering.builder.CreateInsertValue(
       part,
-      this->lowering.builder_.getInt64(kNumberPart |
-                                       (from->isFloat() ? kNumberDouble : kNumberInt)),
+      this->lowering.builder.getInt64(kNumberPart | (from->isFloat() ? kNumberDouble : kNumberInt)),
       1);
 
   return {part, false, Type::string()};
@@ -181,31 +180,31 @@ llvm::Value *StringLowerer::emitStringComparison(BinaryExpr *bin) {
   Lowering::Operand rhs = this->lowering.refCounts().emitOperand(bin->rhs, true);
   llvm::Value *args[] = {this->stringObj(lhs.value), this->stringMeta(lhs.value),
                          this->stringObj(rhs.value), this->stringMeta(rhs.value)};
-  llvm::Value *zero = this->lowering.builder_.getInt32(0);
+  llvm::Value *zero = this->lowering.builder.getInt32(0);
   llvm::Value *result;
   switch (bin->op) {
   case BinaryOp::Eq:
     result = this->lowering.equalityLowerer().emitValuesEqual(lhs.value, rhs.value, Type::string());
     break;
   case BinaryOp::Ne:
-    result = this->lowering.builder_.CreateNot(
+    result = this->lowering.builder.CreateNot(
         this->lowering.equalityLowerer().emitValuesEqual(lhs.value, rhs.value, Type::string()));
     break;
   case BinaryOp::Lt:
-    result = this->lowering.builder_.CreateICmpSLT(
-        this->lowering.builder_.CreateCall(this->lowering.rt_.strCompare, args), zero);
+    result = this->lowering.builder.CreateICmpSLT(
+        this->lowering.builder.CreateCall(this->lowering.rt_.strCompare, args), zero);
     break;
   case BinaryOp::Le:
-    result = this->lowering.builder_.CreateICmpSLE(
-        this->lowering.builder_.CreateCall(this->lowering.rt_.strCompare, args), zero);
+    result = this->lowering.builder.CreateICmpSLE(
+        this->lowering.builder.CreateCall(this->lowering.rt_.strCompare, args), zero);
     break;
   case BinaryOp::Gt:
-    result = this->lowering.builder_.CreateICmpSGT(
-        this->lowering.builder_.CreateCall(this->lowering.rt_.strCompare, args), zero);
+    result = this->lowering.builder.CreateICmpSGT(
+        this->lowering.builder.CreateCall(this->lowering.rt_.strCompare, args), zero);
     break;
   case BinaryOp::Ge:
-    result = this->lowering.builder_.CreateICmpSGE(
-        this->lowering.builder_.CreateCall(this->lowering.rt_.strCompare, args), zero);
+    result = this->lowering.builder.CreateICmpSGE(
+        this->lowering.builder.CreateCall(this->lowering.rt_.strCompare, args), zero);
     break;
   default:
     llvm_unreachable("not a string comparison");
@@ -230,7 +229,7 @@ llvm::Value *StringLowerer::emitStringIndex(IndexExpr *index) {
     result = read();
   } else {
     result = this->lowering.arrayLowerer().emitCheckedRead(
-        this->lowering.builder_.CreateICmpULT(position, this->stringLength(object.value)),
+        this->lowering.builder.CreateICmpULT(position, this->stringLength(object.value)),
         index->type, read);
   }
   this->lowering.refCounts().dropOperand(object);
@@ -249,8 +248,8 @@ llvm::Constant *StringLowerer::stringLiteral(const std::u16string &text) {
   llvm::Constant *value;
   if (text.empty()) {
     value = llvm::ConstantStruct::get(
-        this->lowering.strTy_, {llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()),
-                                this->lowering.builder_.getInt64(kStrAscii)});
+        this->lowering.strTy, {llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy()),
+                               this->lowering.builder.getInt64(kStrAscii)});
   } else if (!twoByte && text.size() <= kInlineMax) {
     bool little = this->lowering.module_->getDataLayout().isLittleEndian();
     uint64_t bits = 0;
@@ -259,39 +258,38 @@ llvm::Constant *StringLowerer::stringLiteral(const std::u16string &text) {
     }
     uint64_t meta = text.size() | kStrRope | (ascii ? kStrAscii : 0);
     value = llvm::ConstantStruct::get(
-        this->lowering.strTy_,
-        {llvm::ConstantExpr::getIntToPtr(this->lowering.builder_.getInt64(bits),
-                                         this->lowering.builder_.getPtrTy()),
-         this->lowering.builder_.getInt64(meta)});
+        this->lowering.strTy,
+        {llvm::ConstantExpr::getIntToPtr(this->lowering.builder.getInt64(bits),
+                                         this->lowering.builder.getPtrTy()),
+         this->lowering.builder.getInt64(meta)});
   } else {
     llvm::Constant *data;
     if (twoByte) {
       std::vector<uint16_t> units(text.begin(), text.end());
-      data = llvm::ConstantDataArray::get(this->lowering.ctx_, units);
+      data = llvm::ConstantDataArray::get(this->lowering.ctx, units);
     } else {
       std::vector<uint8_t> units;
       for (char16_t c : text) {
         units.push_back(static_cast<uint8_t>(c));
       }
-      data = llvm::ConstantDataArray::get(this->lowering.ctx_, units);
+      data = llvm::ConstantDataArray::get(this->lowering.ctx, units);
     }
-    llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
-    auto *layout =
-        llvm::StructType::get(this->lowering.ctx_, {this->lowering.builder_.getInt64Ty(), i32, i32,
-                                                    i32, i32, data->getType()});
+    llvm::Type *i32 = this->lowering.builder.getInt32Ty();
+    auto *layout = llvm::StructType::get(this->lowering.ctx, {this->lowering.builder.getInt64Ty(),
+                                                              i32, i32, i32, i32, data->getType()});
     auto length = static_cast<uint32_t>(text.size());
     llvm::Constant *init = llvm::ConstantStruct::get(
-        layout, {this->lowering.builder_.getInt64(kLiteralRefCount),
-                 this->lowering.builder_.getInt32(twoByte ? kKindBuffer2 : kKindBuffer1),
-                 this->lowering.builder_.getInt32(0), this->lowering.builder_.getInt32(length),
-                 this->lowering.builder_.getInt32(length), data});
+        layout, {this->lowering.builder.getInt64(kLiteralRefCount),
+                 this->lowering.builder.getInt32(twoByte ? kKindBuffer2 : kKindBuffer1),
+                 this->lowering.builder.getInt32(0), this->lowering.builder.getInt32(length),
+                 this->lowering.builder.getInt32(length), data});
     auto *global = new llvm::GlobalVariable(*this->lowering.module_, layout, true,
                                             llvm::GlobalValue::PrivateLinkage, init, ".str");
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
     global->setAlignment(llvm::Align(8));
     uint64_t meta = length | (twoByte ? kStrTwoByte : 0) | (ascii ? kStrAscii : 0);
-    value = llvm::ConstantStruct::get(this->lowering.strTy_,
-                                      {global, this->lowering.builder_.getInt64(meta)});
+    value = llvm::ConstantStruct::get(this->lowering.strTy,
+                                      {global, this->lowering.builder.getInt64(meta)});
   }
   this->literals.emplace(text, value);
 

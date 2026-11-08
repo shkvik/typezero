@@ -9,7 +9,7 @@ PlaceLowerer::PlaceLowerer(Lowering &owner)
     : lowering(owner) {}
 
 std::string PlaceLowerer::frameFunctionName() const {
-  const FunctionDecl *fn = this->lowering.currentFn_;
+  const FunctionDecl *fn = this->lowering.currentFn;
   if (!fn) {
     return "";
   }
@@ -52,16 +52,16 @@ llvm::Constant *PlaceLowerer::frameDescriptor(llvm::SMLoc loc, const std::string
       file = it->second;
     }
   }
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
-  auto *type = llvm::StructType::get(this->lowering.ctx_, {ptr, i32, i32, ptr, i32, i32});
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder.getInt32Ty();
+  auto *type = llvm::StructType::get(this->lowering.ctx, {ptr, i32, i32, ptr, i32, i32});
   llvm::Constant *init =
       llvm::ConstantStruct::get(type, {this->lowering.stringLowerer().utf8Constant(function),
-                                       this->lowering.builder_.getInt32(uint32_t(function.size())),
-                                       this->lowering.builder_.getInt32(line),
+                                       this->lowering.builder.getInt32(uint32_t(function.size())),
+                                       this->lowering.builder.getInt32(line),
                                        this->lowering.stringLowerer().utf8Constant(file),
-                                       this->lowering.builder_.getInt32(uint32_t(file.size())),
-                                       this->lowering.builder_.getInt32(column)});
+                                       this->lowering.builder.getInt32(uint32_t(file.size())),
+                                       this->lowering.builder.getInt32(column)});
   auto *global = new llvm::GlobalVariable(*this->lowering.module_, type, true,
                                           llvm::GlobalValue::PrivateLinkage, init, "tz.frame");
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);

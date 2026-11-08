@@ -20,7 +20,7 @@ public:
   bool symbolKeyAhead();
 
 private:
-  Parser &parser_;
+  Parser &parser;
 };
 
 }

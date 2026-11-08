@@ -4,18 +4,14 @@
 #include "compiler/program/ast/function_decl/function_decl.h"
 #include "compiler/program/ast/import_decl/import_decl.h"
 #include "compiler/program/ast/stmt/stmt.h"
+#include "compiler/program/builtin_declarations/builtin_declarations.h"
+#include "compiler/program/program_inventory/program_inventory.h"
 #include "llvm/ADT/DenseMap.h"
 
 namespace tz {
 
 struct Module;
 class Type;
-
-struct NamedUse {
-  const Stmt *decl = nullptr;
-  llvm::SMLoc name;
-  llvm::StringRef member;
-};
 
 struct SourceFile {
   std::vector<Stmt *> items;
@@ -24,17 +20,9 @@ struct SourceFile {
   std::vector<Module *> modules;
   llvm::StringSet<> fieldNames;
   llvm::StringMap<std::vector<std::string>> stringConstants;
-  bool usesAsync = false;
-  bool topLevelAwait = false;
-  bool comparesFunctions = false;
-  bool usesTls = false;
-  const Type *nativeError = nullptr;
   llvm::SmallPtrSet<const FunctionDecl *, 8> unusedFunctions;
-  std::vector<FunctionDecl *> instances;
-  std::vector<const Type *> subtypes;
-  std::vector<std::pair<const Type *, const Type *>> views;
-  std::vector<const Type *> listenerReceivers;
-  llvm::DenseMap<const Expr *, NamedUse> namedUses;
+  BuiltinDeclarations builtins;
+  ProgramInventory inventory;
 };
 
 }

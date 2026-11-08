@@ -26,7 +26,7 @@ public:
   void readSpread(const Expr *e, bool object, llvm::SMLoc at);
 
 private:
-  Analysis &analysis_;
+  Analysis &analysis;
 };
 
 }

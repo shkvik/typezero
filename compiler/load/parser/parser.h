@@ -29,10 +29,6 @@ public:
   Parser(Lexer &lexer, AstContext &ctx, Diagnostics &diags, bool library = false);
   SourceFile parseSourceFile();
   DeclarationFile parseDeclarationFile();
-  FunctionDecl *parseFunctionCopy();
-  FunctionDecl *parseFunctionExprCopy();
-  FunctionDecl *parseMethodCopy();
-  ClassDecl *parseClassCopy();
 
 private:
   struct Snapshot {
@@ -61,24 +57,24 @@ private:
 
     bool declares(llvm::StringRef name) const;
   };
-  Lexer &lexer_;
-  AstContext &ctx_;
-  Diagnostics &diags_;
-  Token tok_;
-  const char *prevEnd_ = nullptr;
-  Token peeked_;
-  bool hasPeeked_ = false;
-  Lexer::State peekState_;
-  bool recovering_ = false;
-  bool noIn_ = false;
-  bool noConditional_ = false;
-  bool disallowConditional_ = false;
-  bool inGenerator_ = false;
+  Lexer &lexer;
+  AstContext &ctx;
+  Diagnostics &diags;
+  Token tok;
+  const char *prevEnd = nullptr;
+  Token peeked;
+  bool hasPeeked = false;
+  Lexer::State peekState;
+  bool recovering = false;
+  bool noIn = false;
+  bool noConditional = false;
+  bool disallowConditional = false;
+  bool inGenerator = false;
   bool library_ = false;
-  llvm::StringSet<> fieldNames_;
-  std::vector<ImportDecl> imports_;
-  std::vector<ExportDecl> exports_;
-  llvm::StringMap<std::vector<std::string>> stringConstants_;
+  llvm::StringSet<> fieldNames;
+  std::vector<ImportDecl> imports;
+  std::vector<ExportDecl> exports;
+  llvm::StringMap<std::vector<std::string>> stringConstants;
 
 public:
   ~Parser();

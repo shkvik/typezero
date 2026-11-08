@@ -5,8 +5,8 @@
 #include "compiler/packages/graph/graph.h"
 #include "compiler/packages/package/package.h"
 #include "compiler/packages/specifier/specifier.h"
-#include "compiler/pipeline/check_program/topics/builtin_modules/builtin_module_checker/builtin_module_checker.h"
 #include "compiler/program/ast/ast.h"
+#include "compiler/program/library/builtin_modules/known_modules/known_modules.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -26,7 +26,7 @@ namespace path = llvm::sys::path;
 namespace tz {
 
 ModuleResolver::ModuleResolver(Loader &loader)
-    : loader_(loader) {}
+    : loader(loader) {}
 
 std::string ModuleResolver::foreignFile(llvm::StringRef dir, llvm::StringRef file,
                                         llvm::StringRef spec) {
@@ -56,57 +56,59 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
     return nullptr;
   }
   if (spec == "node:events" || spec == "events") {
-    return loader_.library().libraryModule("events.tz", "node:events", loc);
+    return this->loader.library().libraryModule("events.tz", "node:events", loc);
   }
   if (spec == "tz:http") {
-    return loader_.library().libraryModule("http.tz", "tz:http", loc);
+    return this->loader.library().libraryModule("http.tz", "tz:http", loc);
   }
   if (spec == "tz:http2") {
-    return loader_.library().libraryModule("http2.tz", "tz:http2", loc);
+    return this->loader.library().libraryModule("http2.tz", "tz:http2", loc);
   }
   if (spec == "node:net" || spec == "net") {
-    return loader_.library().libraryModule("net.tz", "node:net", loc);
+    return this->loader.library().libraryModule("net.tz", "node:net", loc);
   }
   if (spec == "node:dgram" || spec == "dgram") {
-    return loader_.library().libraryModule("dgram.tz", "node:dgram", loc);
+    return this->loader.library().libraryModule("dgram.tz", "node:dgram", loc);
   }
   if (spec == "tz:packet") {
-    return loader_.library().libraryModule("packet.tz", "tz:packet", loc);
+    return this->loader.library().libraryModule("packet.tz", "tz:packet", loc);
   }
   if (spec == "tz:socket") {
-    return loader_.library().libraryModule("socket.tz", "tz:socket", loc);
+    return this->loader.library().libraryModule("socket.tz", "tz:socket", loc);
   }
   if (spec == "tz:sync") {
-    return loader_.library().libraryModule("sync.tz", "tz:sync", loc);
+    return this->loader.library().libraryModule("sync.tz", "tz:sync", loc);
   }
   if (spec == "node:async_hooks" || spec == "async_hooks") {
-    return loader_.library().libraryModule("async_hooks.tz", "node:async_hooks", loc);
+    return this->loader.library().libraryModule("async_hooks.tz", "node:async_hooks", loc);
   }
   if (from->builtin && (spec == "tz:web" || spec == "tz:url" || spec == "tz:fetch" ||
                         spec == "tz:intrinsics" || spec == "tz:websocket")) {
-    return loader_.library().libraryModule(spec.drop_front(3).str() + ".tz", spec, loc);
+    return this->loader.library().libraryModule(spec.drop_front(3).str() + ".tz", spec, loc);
   }
   if (spec == "node:stream" || spec == "stream") {
-    return loader_.library().libraryModule("stream.tz", "node:stream", loc);
+    return this->loader.library().libraryModule("stream.tz", "node:stream", loc);
   }
   if (spec == "node:stream/promises" || spec == "stream/promises") {
-    return loader_.library().libraryModule("stream_promises.tz", "node:stream/promises", loc);
+    return this->loader.library().libraryModule("stream_promises.tz", "node:stream/promises", loc);
   }
   if (spec == "node:stream/consumers" || spec == "stream/consumers") {
-    return loader_.library().libraryModule("stream_consumers.tz", "node:stream/consumers", loc);
+    return this->loader.library().libraryModule("stream_consumers.tz", "node:stream/consumers",
+                                                loc);
   }
   if (spec == "node:string_decoder" || spec == "string_decoder") {
-    return loader_.library().libraryModule("string_decoder.tz", "node:string_decoder", loc);
+    return this->loader.library().libraryModule("string_decoder.tz", "node:string_decoder", loc);
   }
   if (BuiltinModulePaths::isBuiltinModule(spec)) {
-    BuiltinModuleChecker::ResultKnownModule known = BuiltinModuleChecker::knownModule(spec);
+    KnownModules::ResultFind known = KnownModules::find(spec);
     if (known.isErr()) {
-      loader_.diags_.error(loc, known.error().message);
+      this->loader.diags.error(loc, known.error().message);
     }
     return nullptr;
   }
   if (spec.contains('\\')) {
-    loader_.diags_.error(loc, "write '/' in the path of an import, not '\\', as on every system");
+    this->loader.diags.error(loc,
+                             "write '/' in the path of an import, not '\\', as on every system");
     return nullptr;
   }
   bool relative = spec == "." || spec == ".." || spec.starts_with("./") || spec.starts_with("../");
@@ -115,7 +117,7 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
       return resolvePackage(from, spec, loc);
     }
     if (spec.empty() || path::is_absolute(spec) || spec.starts_with("/") || spec.contains(':')) {
-      loader_.diags_.error(
+      this->loader.diags.error(
           loc, "an import names a file by its path relative to the importing file, e.g. "
                "'./math' or '../lib/math'");
     } else {
@@ -127,33 +129,33 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
   std::vector<std::string> candidates;
   llvm::StringRef last = path::filename(spec, path::Style::posix);
   llvm::StringRef ext = path::extension(spec, path::Style::posix);
-  std::string baseDir = path::parent_path(loader_.realPaths_[from]).str();
+  std::string baseDir = path::parent_path(this->loader.realPaths[from]).str();
   if (spec.ends_with("/") || last == "." || last == "..") {
     candidates.push_back((spec.rtrim('/') + "/index.tz").str());
   } else if (ext == ".tz" || ext == ".json") {
     candidates.push_back(spec.str());
   } else if (std::string problem = ModuleResolver::foreignFile(baseDir, spec, spec);
              !problem.empty()) {
-    loader_.diags_.error(loc, problem);
+    this->loader.diags.error(loc, problem);
     return nullptr;
   } else {
     candidates.push_back((spec + ".tz").str());
     candidates.push_back((spec + "/index.tz").str());
   }
 
-  return load(baseDir, candidates, spec, loc, loader_.packageOf_[from]);
+  return load(baseDir, candidates, spec, loc, this->loader.packageOf[from]);
 }
 
 Module *ModuleResolver::resolvePackage(Module *from, llvm::StringRef spec, llvm::SMLoc loc) {
   if (spec.starts_with("npm:")) {
-    loader_.diags_.error(
+    this->loader.diags.error(
         loc, "npm packages are not supported: npm has compiled JavaScript, not "
              "TypeScript sources (docs/packages.md); look for the package on JSR or take "
              "its sources from git");
     return nullptr;
   }
-  if (!loader_.packages_) {
-    loader_.diags_.error(
+  if (!this->loader.packages) {
+    this->loader.diags.error(
         loc, "'" + spec +
                  "' is the name of a package, but there is no package.json to list packages "
                  "in; make one with 'tz init' and add the package with 'tz add " +
@@ -163,19 +165,20 @@ Module *ModuleResolver::resolvePackage(Module *from, llvm::StringRef spec, llvm:
                  spec + "')");
     return nullptr;
   }
-  int fromPackage = loader_.packageOf_[from];
-  const pkg::Package &home = loader_.packages_->packages[fromPackage];
+  int fromPackage = this->loader.packageOf[from];
+  const pkg::Package &home = this->loader.packages->packages[fromPackage];
   std::string name, subpath;
   const unsigned *target = nullptr;
   if (spec.starts_with("jsr:")) {
     std::string source, inside;
     if (!pkg::Specifier::splitJsrImport(spec, name, source, inside)) {
-      loader_.diags_.error(loc, "'" + spec + "' does not name a JSR package: 'jsr:@scope/name@^1'");
+      this->loader.diags.error(loc,
+                               "'" + spec + "' does not name a JSR package: 'jsr:@scope/name@^1'");
       return nullptr;
     }
     subpath = "." + inside;
     if (!home.jsr) {
-      loader_.diags_.error(
+      this->loader.diags.error(
           loc, "import a package by its name in package.json: add it with 'tz add jsr:" + name +
                    "' and write 'from \"" + name +
                    (subpath == "." ? std::string() : subpath.substr(1)) + "\"'");
@@ -187,8 +190,8 @@ Module *ModuleResolver::resolvePackage(Module *from, llvm::StringRef spec, llvm:
     }
   } else {
     if (!pkg::Specifier::splitPackageSpecifier(spec, name, subpath)) {
-      loader_.diags_.error(loc, "'" + spec +
-                                    "' does not name a package: a scoped name is '@scope/name'");
+      this->loader.diags.error(
+          loc, "'" + spec + "' does not name a package: a scoped name is '@scope/name'");
       return nullptr;
     }
     auto it = home.aliases.find(name);
@@ -198,20 +201,21 @@ Module *ModuleResolver::resolvePackage(Module *from, llvm::StringRef spec, llvm:
   }
   if (!target) {
     if (fromPackage == 0) {
-      loader_.diags_.error(loc, "'" + name + "' is not a dependency in " + home.manifestPath +
-                                    "; add it with 'tz add " + name + "'");
+      this->loader.diags.error(loc, "'" + name + "' is not a dependency in " + home.manifestPath +
+                                        "; add it with 'tz add " + name + "'");
     } else if (home.jsr) {
-      loader_.diags_.error(loc, "'" + name + "' is not a dependency of " + home.name +
-                                    ": a JSR package imports another one as 'jsr:@scope/name@^1'");
+      this->loader.diags.error(loc,
+                               "'" + name + "' is not a dependency of " + home.name +
+                                   ": a JSR package imports another one as 'jsr:@scope/name@^1'");
     } else {
-      loader_.diags_.error(loc, "'" + name + "' is not a dependency of package " + home.name +
-                                    (home.manifestPath.empty()
-                                         ? std::string(", which has no package.json")
-                                         : " (" + home.manifestPath + ")"));
+      this->loader.diags.error(loc, "'" + name + "' is not a dependency of package " + home.name +
+                                        (home.manifestPath.empty()
+                                             ? std::string(", which has no package.json")
+                                             : " (" + home.manifestPath + ")"));
     }
     return nullptr;
   }
-  const pkg::Package &package = loader_.packages_->packages[*target];
+  const pkg::Package &package = this->loader.packages->packages[*target];
   int index = static_cast<int>(*target);
 
   std::vector<std::string> candidates;
@@ -225,8 +229,8 @@ Module *ModuleResolver::resolvePackage(Module *from, llvm::StringRef spec, llvm:
                 (key == "." ? std::string() : key.substr(1)) + "'";
     }
     if (candidates.empty()) {
-      loader_.diags_.error(loc, "'" + spec + "' names nothing " + name + " exports; it exports " +
-                                    listed);
+      this->loader.diags.error(loc, "'" + spec + "' names nothing " + name +
+                                        " exports; it exports " + listed);
       return nullptr;
     }
   } else if (subpath == ".") {
@@ -241,7 +245,7 @@ Module *ModuleResolver::resolvePackage(Module *from, llvm::StringRef spec, llvm:
       candidates.push_back(file.str());
     } else if (std::string problem = ModuleResolver::foreignFile(package.dir, file, spec);
                !problem.empty()) {
-      loader_.diags_.error(loc, problem);
+      this->loader.diags.error(loc, problem);
       return nullptr;
     } else {
       candidates.push_back((file + ".tz").str());
@@ -253,15 +257,15 @@ Module *ModuleResolver::resolvePackage(Module *from, llvm::StringRef spec, llvm:
 }
 
 const std::string *ModuleResolver::realFile(llvm::StringRef full) {
-  auto found = realFiles_.find(full);
-  if (found == realFiles_.end()) {
+  auto found = this->realFiles.find(full);
+  if (found == this->realFiles.end()) {
     llvm::SmallString<256> real;
     if (!fs::is_regular_file(full)) {
       real.clear();
     } else if (fs::real_path(full, real)) {
       real = full;
     }
-    found = realFiles_.try_emplace(full, std::string(real)).first;
+    found = this->realFiles.try_emplace(full, std::string(real)).first;
   }
 
   return found->second.empty() ? nullptr : &found->second;
@@ -270,7 +274,7 @@ const std::string *ModuleResolver::realFile(llvm::StringRef full) {
 Module *ModuleResolver::load(llvm::StringRef baseDir, const std::vector<std::string> &candidates,
                              llvm::StringRef spec, llvm::SMLoc loc, int package) {
   const pkg::Package *owner =
-      loader_.packages_ && package > 0 ? &loader_.packages_->packages[package] : nullptr;
+      this->loader.packages && package > 0 ? &this->loader.packages->packages[package] : nullptr;
   bool byName = !spec.starts_with(".");
   for (const std::string &candidate : candidates) {
     llvm::SmallString<256> full(baseDir);
@@ -282,33 +286,33 @@ Module *ModuleResolver::load(llvm::StringRef baseDir, const std::vector<std::str
     }
     llvm::SmallString<256> real(*known);
     if (real.str() != full.str() && real.str().equals_insensitive(full)) {
-      loader_.diags_.error(
-          loc, "the file is named '" + loader_.relativeName(real) + "', but the import says '" +
-                   spec +
+      this->loader.diags.error(
+          loc, "the file is named '" + this->loader.relativeName(real) +
+                   "', but the import says '" + spec +
                    "'; write the name with the same capital letters, or the program will "
                    "not build where names are case-sensitive");
       return nullptr;
     }
-    if (Module *loaded = loader_.byRealPath_.lookup(real)) {
+    if (Module *loaded = this->loader.byRealPath.lookup(real)) {
       return loaded;
     }
     bool json = path::extension(real) == ".json";
     if (path::extension(real) != ".tz" && !json) {
-      loader_.diags_.error(loc, "'" + spec + "' names " + path::filename(real) +
-                                    ", and the files of tz end in .tz: rename it to " +
-                                    path::stem(real) + ".tz");
+      this->loader.diags.error(loc, "'" + spec + "' names " + path::filename(real) +
+                                        ", and the files of tz end in .tz: rename it to " +
+                                        path::stem(real) + ".tz");
       return nullptr;
     }
-    std::string name = loader_.relativeName(real);
+    std::string name = this->loader.relativeName(real);
     std::string filePath = name;
     if (owner) {
       llvm::StringRef inside = real.str();
       bool within =
           inside.consume_front(owner->dir) && (inside.starts_with("/") || inside.starts_with("\\"));
       if (!within && owner->external) {
-        loader_.diags_.error(loc,
-                             "'" + spec + "' is outside package " + owner->name +
-                                 ": a package imports only its own files and its dependencies");
+        this->loader.diags.error(loc,
+                                 "'" + spec + "' is outside package " + owner->name +
+                                     ": a package imports only its own files and its dependencies");
         return nullptr;
       }
       if (within) {
@@ -316,36 +320,37 @@ Module *ModuleResolver::load(llvm::StringRef baseDir, const std::vector<std::str
       }
       filePath = std::string(real);
     } else if (!path::is_absolute(name)) {
-      llvm::SmallString<256> joined(loader_.entryDir_);
+      llvm::SmallString<256> joined(this->loader.entryDir);
       path::append(joined, name);
       path::native(joined);
       filePath = std::string(joined);
     }
     std::string error;
-    Module *module = json ? loader_.parseJson(filePath, std::string(real), name, error)
-                          : loader_.parse(filePath, std::string(real), name, error);
+    Module *module = json ? this->loader.parseJson(filePath, std::string(real), name, error)
+                          : this->loader.parse(filePath, std::string(real), name, error);
     if (!module && !error.empty()) {
-      loader_.diags_.error(loc, "cannot read '" + name + "': " + error);
+      this->loader.diags.error(loc, "cannot read '" + name + "': " + error);
     } else if (module) {
-      loader_.packageOf_[module] = package;
+      this->loader.packageOf[module] = package;
     }
     return module;
   }
 
   if (owner && byName) {
     if (candidates.size() == 1) {
-      loader_.diags_.error(loc, "cannot find '" + candidates[0] + "' in package " + owner->name +
-                                    " (" + owner->dir + "), which '" + spec + "' names");
+      this->loader.diags.error(loc, "cannot find '" + candidates[0] + "' in package " +
+                                        owner->name + " (" + owner->dir + "), which '" + spec +
+                                        "' names");
     } else if (candidates.size() == 2) {
-      loader_.diags_.error(loc, "cannot find '" + spec + "': package " + owner->name + " has no " +
-                                    candidates[0] + " or " + candidates[1] + " (in " + owner->dir +
-                                    ")");
+      this->loader.diags.error(loc, "cannot find '" + spec + "': package " + owner->name +
+                                        " has no " + candidates[0] + " or " + candidates[1] +
+                                        " (in " + owner->dir + ")");
     } else {
-      loader_.diags_.error(loc,
-                           "package " + owner->name +
-                               " names no file to import: it has no package.json with \"main\" or "
-                               "\"exports\", and none of " +
-                               llvm::join(candidates, ", ") + " (in " + owner->dir + ")");
+      this->loader.diags.error(
+          loc, "package " + owner->name +
+                   " names no file to import: it has no package.json with \"main\" or "
+                   "\"exports\", and none of " +
+                   llvm::join(candidates, ", ") + " (in " + owner->dir + ")");
     }
     return nullptr;
   }
@@ -368,7 +373,7 @@ Module *ModuleResolver::load(llvm::StringRef baseDir, const std::vector<std::str
     message += "; there is " + typescript + ", and the files of tz end in .tz: rename it to " +
                typescript.substr(0, typescript.size() - 3) + ".tz";
   }
-  loader_.diags_.error(loc, message);
+  this->loader.diags.error(loc, message);
 
   return nullptr;
 }

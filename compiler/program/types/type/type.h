@@ -20,6 +20,8 @@ struct Interned;
 
 class Type {
 public:
+  static constexpr int64_t kMaxLength = (int64_t(1) << 30) - 1;
+
   enum class Kind {
     Error,
     Void,
@@ -48,7 +50,7 @@ public:
   enum class DictKind { Record, Map, Set };
 
   Kind kind() const {
-    return data_.kind();
+    return this->data.kind();
   }
   bool isError() const {
     return kind() == Kind::Error;
@@ -189,7 +191,9 @@ public:
   const Field *field(llvm::StringRef name) const;
   llvm::ArrayRef<Overload> overloads() const;
   const Overload *overload(llvm::StringRef name) const;
-  bool isIncomplete() const { return incomplete_; }
+  bool isIncomplete() const {
+    return this->incomplete;
+  }
   bool isAnyObject() const;
   bool isRegExp() const;
   bool isMatch() const;
@@ -347,7 +351,6 @@ private:
   static ObjectKey objectKey(llvm::ArrayRef<Field> fields, llvm::ArrayRef<Overload> overloads);
   static std::string quotedText(const std::u16string &text);
   static std::string numberText(double value);
-  static std::string utf8Text(const std::u16string &text);
   enum class ObjectKind {
     ORDINARY_OBJECT,
     ANY_OBJECT,
@@ -551,17 +554,17 @@ private:
   const ObjectForm *objectForm() const;
 
   Type(Kind kind, std::string name, const Type *inner = nullptr)
-      : data_(dataFor(kind)),
+      : data(dataFor(kind)),
         inner_(inner),
         name_(std::move(name)),
-        id_(++count_) {}
-  static unsigned count_;
+        id_(++Type::count) {}
+  static unsigned count;
 
-  Data data_;
+  Data data;
   const Type *inner_;
   std::string name_;
   std::vector<const Type *> params_;
-  bool incomplete_ = false;
+  bool incomplete = false;
   std::vector<const Type *> bases_;
   bool isBase_ = false;
   unsigned id_;

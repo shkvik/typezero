@@ -70,15 +70,15 @@ unsigned SourcePlaces::bufferOf(const char *at) const {
   if (!at) {
     return 0;
   }
-  if (last_ != 0) {
-    const llvm::MemoryBuffer *buffer = sourceMgr_.getMemoryBuffer(last_);
+  if (this->last != 0) {
+    const llvm::MemoryBuffer *buffer = sourceMgr_.getMemoryBuffer(this->last);
     if (at >= buffer->getBufferStart() && at <= buffer->getBufferEnd()) {
-      return last_;
+      return this->last;
     }
   }
   unsigned id = sourceMgr_.FindBufferContainingLoc(llvm::SMLoc::getFromPointer(at));
   if (id != 0) {
-    last_ = id;
+    this->last = id;
   }
 
   return id;
@@ -100,17 +100,17 @@ void SourcePlaces::position(unsigned id, const char *at, unsigned &line,
 void SourcePlaces::nameFiles(const std::vector<Module *> &modules) {
   for (const Module *module : modules) {
     for (const auto &[id, file] : module->bufferFiles) {
-      paths_[id] = {absolute(file), true};
+      this->paths[id] = {absolute(file), true};
     }
   }
 }
 
 std::string SourcePlaces::pathOf(unsigned id, bool &file) const {
-  auto found = paths_.find(id);
-  if (found == paths_.end()) {
+  auto found = this->paths.find(id);
+  if (found == this->paths.end()) {
     llvm::StringRef name = sourceMgr_.getMemoryBuffer(id)->getBufferIdentifier();
     bool regular = llvm::sys::fs::is_regular_file(name);
-    found = paths_.try_emplace(id, regular ? absolute(name) : name.str(), regular).first;
+    found = this->paths.try_emplace(id, regular ? absolute(name) : name.str(), regular).first;
   }
   file = found->second.second;
 

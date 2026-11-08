@@ -19,7 +19,7 @@ public:
   std::string contextOf(unsigned piece) const;
 
 private:
-  Analysis &analysis_;
+  Analysis &analysis;
 };
 
 }

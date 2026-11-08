@@ -1,5 +1,4 @@
 #include "compiler/lower/iterators/generator_lowerer/generator_lowerer.h"
-#include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/functions/env_lowerer/env_lowerer.h"
@@ -7,6 +6,7 @@
 #include "compiler/lower/iterators/coroutine_lowerer/coroutine_lowerer.h"
 #include "compiler/lower/iterators/iter_lower_helpers/iter_lower_helpers.h"
 #include "compiler/lower/iterators/lazy_chain_lowerer/lazy_chain_lowerer.h"
+#include "compiler/lower/library/regex/regex_lowerer/regex_lowerer.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/objects/dict_lowerer/dict_lowerer.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
@@ -14,7 +14,6 @@
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
-
 
 namespace tz {
 
@@ -49,12 +48,12 @@ llvm::Constant *GeneratorLowerer::iteratorLayout(unsigned flags) {
     return layout;
   }
   if (!this->iterDropFn) {
-    auto *type = llvm::FunctionType::get(this->lowering.builder_.getVoidTy(),
-                                         {this->lowering.builder_.getPtrTy()}, false);
+    auto *type = llvm::FunctionType::get(this->lowering.builder.getVoidTy(),
+                                         {this->lowering.builder.getPtrTy()}, false);
     this->iterDropFn = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage,
                                               "tz.iter.destroy", this->lowering.module_.get());
     this->iterDropFn->addFnAttr(llvm::Attribute::NoUnwind);
-    llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx_, "entry", this->iterDropFn));
+    llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx, "entry", this->iterDropFn));
     llvm::Value *frame = b.CreateConstInBoundsGEP1_64(b.getInt8Ty(), this->iterDropFn->getArg(0),
                                                       kHeaderSize, "frame");
     b.CreateCall(this->lowering.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_destroy),
@@ -62,14 +61,13 @@ llvm::Constant *GeneratorLowerer::iteratorLayout(unsigned flags) {
     b.CreateRetVoid();
   }
   auto *global = new llvm::GlobalVariable(
-      *this->lowering.module_, this->lowering.layoutDescTy_, true,
-      llvm::GlobalValue::PrivateLinkage,
+      *this->lowering.module_, this->lowering.layoutDescTy, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(
-          this->lowering.layoutDescTy_,
-          {this->iterDropFn, llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()),
-           this->lowering.builder_.getInt32(0), this->lowering.builder_.getInt32(flags),
-           llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()),
-           this->lowering.builder_.getInt32(0), this->lowering.builder_.getInt32(0)}),
+          this->lowering.layoutDescTy,
+          {this->iterDropFn, llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy()),
+           this->lowering.builder.getInt32(0), this->lowering.builder.getInt32(flags),
+           llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy()),
+           this->lowering.builder.getInt32(0), this->lowering.builder.getInt32(0)}),
       "tz.layout.iterator");
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   layout = global;
@@ -84,8 +82,8 @@ void GeneratorLowerer::emitGenerator(FunctionDecl *fn, llvm::Function *function)
   }
   this->lowering.functionBuilder().beginFunction(function, fn);
   Lowering::Coroutine coroutine{};
-  this->lowering.coro_ = &coroutine;
-  const Type *type = fn->sym->ret;
+  this->lowering.coro = &coroutine;
+  const Type *type = fn->sym->getKnownReturnType();
   this->lowering.coroutineLowerer().beginCoroutine(
       kLayoutGenerator, type->isIterator() && !type->sent()->isVoid() ? type->sent() : nullptr);
   coroutine.yielded = type->isIterator() ? type->yielded() : nullptr;
@@ -93,19 +91,19 @@ void GeneratorLowerer::emitGenerator(FunctionDecl *fn, llvm::Function *function)
   std::vector<llvm::Value *> args;
   unsigned first = 0;
   if (fn->isClosure() || fn->takesThis()) {
-    this->lowering.envParam_ = this->lowering.function_->getArg(0);
+    this->lowering.envParam = this->lowering.function->getArg(0);
     if (fn->isClosure()) {
       this->lowering.envLowerer().bindCaptures(fn);
     } else {
-      this->lowering.envParam_->setName("this");
+      this->lowering.envParam->setName("this");
     }
     llvm::Value *slot = this->lowering.functionFrame().createObjectSlot("env");
-    this->lowering.builder_.CreateCall(this->lowering.objRetainFn_, {this->lowering.envParam_});
-    this->lowering.builder_.CreateStore(this->lowering.envParam_, slot);
+    this->lowering.builder.CreateCall(this->lowering.objRetainFn, {this->lowering.envParam});
+    this->lowering.builder.CreateStore(this->lowering.envParam, slot);
     first = 1;
   }
-  for (unsigned i = first; i < this->lowering.function_->arg_size(); ++i) {
-    args.push_back(this->lowering.function_->getArg(i));
+  for (unsigned i = first; i < this->lowering.function->arg_size(); ++i) {
+    args.push_back(this->lowering.function->getArg(i));
   }
   this->lowering.functionBuilder().emitParams(fn, args);
   this->lowering.coroutineLowerer().emitSuspend();
@@ -113,10 +111,10 @@ void GeneratorLowerer::emitGenerator(FunctionDecl *fn, llvm::Function *function)
   if (this->lowering.functionFrame().blockIsOpen()) {
     this->lowering.coroutineLowerer().emitCoroutineReturn(nullptr, nullptr);
   }
-  this->lowering.scopes_.pop_back();
+  this->lowering.scopes.pop_back();
   this->lowering.coroutineLowerer().finishCoroutine();
-  this->lowering.coro_ = nullptr;
-  this->lowering.function_ = nullptr;
+  this->lowering.coro = nullptr;
+  this->lowering.function = nullptr;
 }
 
 llvm::Function *GeneratorLowerer::iteratorFunction(Builtin builtin, const Type *source,
@@ -130,7 +128,7 @@ llvm::Function *GeneratorLowerer::iteratorFunction(Builtin builtin, const Type *
     params.push_back(this->lowering.moduleBuilder().lower(operand));
   }
   if (builtin == Builtin::StrMatchAll) {
-    params.push_back(this->lowering.builder_.getPtrTy());
+    params.push_back(this->lowering.builder.getPtrTy());
   }
   const char *name = "tz.iter";
   switch (builtin) {
@@ -183,31 +181,31 @@ llvm::Function *GeneratorLowerer::iteratorFunction(Builtin builtin, const Type *
     break;
   }
   fn = llvm::Function::Create(
-      llvm::FunctionType::get(this->lowering.builder_.getPtrTy(), params, false),
+      llvm::FunctionType::get(this->lowering.builder.getPtrTy(), params, false),
       llvm::GlobalValue::InternalLinkage, name, this->lowering.module_.get());
   this->lowering.functionBuilder().setFunctionAttributes(fn);
-  this->lowering.pendingIterators_.push_back({fn, builtin, source, operand, result});
+  this->lowering.pendingIterators.push_back({fn, builtin, source, operand, result});
 
   return fn;
 }
 
 void GeneratorLowerer::emitPendingIterators() {
-  while (!this->lowering.pendingIterators_.empty()) {
-    Lowering::IteratorJob job = this->lowering.pendingIterators_.back();
-    this->lowering.pendingIterators_.pop_back();
+  while (!this->lowering.pendingIterators.empty()) {
+    Lowering::IteratorJob job = this->lowering.pendingIterators.back();
+    this->lowering.pendingIterators.pop_back();
     this->lowering.functionBuilder().beginFunction(job.function, nullptr);
     Lowering::Coroutine coroutine{};
-    this->lowering.coro_ = &coroutine;
+    this->lowering.coro = &coroutine;
     bool stage = BuiltinGroups::isIteratorStage(job.builtin);
     bool matches = job.builtin == Builtin::StrMatchAll;
     bool dict = BuiltinGroups::isDictIterator(job.builtin);
     llvm::StructType *dictPromise = nullptr;
     unsigned flags = 0;
     if (dict) {
-      llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-      llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+      llvm::Type *ptr = this->lowering.builder.getPtrTy();
+      llvm::Type *i32 = this->lowering.builder.getInt32Ty();
       dictPromise =
-          llvm::StructType::get(this->lowering.ctx_, {ptr, ptr, ptr, i32, i32, ptr, i32, i32});
+          llvm::StructType::get(this->lowering.ctx, {ptr, ptr, ptr, i32, i32, ptr, i32, i32});
       flags = kLayoutDictIterator | (job.builtin == Builtin::MapValues ? kLayoutDictValues : 0) |
               (job.builtin == Builtin::MapEntries || job.builtin == Builtin::SetEntries
                    ? kLayoutDictEntries
@@ -227,32 +225,32 @@ void GeneratorLowerer::emitPendingIterators() {
                               ? this->lowering.functionFrame().createManagedSlot(type, name)
                               : this->lowering.functionFrame().createStackSlot(
                                     this->lowering.moduleBuilder().lower(type), name);
-      this->lowering.builder_.CreateStore(value, slot);
+      this->lowering.builder.CreateStore(value, slot);
 
       return slot;
     };
-    llvm::Value *source = hold(this->lowering.function_->getArg(0), job.source, "source");
+    llvm::Value *source = hold(this->lowering.function->getArg(0), job.source, "source");
     llvm::Value *operand =
-        job.operand ? hold(this->lowering.function_->getArg(1), job.operand, "operand") : nullptr;
+        job.operand ? hold(this->lowering.function->getArg(1), job.operand, "operand") : nullptr;
     llvm::Value *lastSlot = nullptr;
     if (matches) {
-      lastSlot = this->lowering.functionFrame().createStackSlot(
-          this->lowering.builder_.getInt32Ty(), "lastIndex");
+      lastSlot = this->lowering.functionFrame().createStackSlot(this->lowering.builder.getInt32Ty(),
+                                                                "lastIndex");
       llvm::Value *regex =
-          this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(), operand, "regex");
-      this->lowering.builder_.CreateStore(
-          this->lowering.builder_.CreateCall(
+          this->lowering.builder.CreateLoad(this->lowering.builder.getPtrTy(), operand, "regex");
+      this->lowering.builder.CreateStore(
+          this->lowering.builder.CreateCall(
               this->lowering.regexLowerer().regexFunction("tz_re_match_all_begin",
-                                                          this->lowering.builder_.getInt32Ty(),
-                                                          {this->lowering.builder_.getPtrTy()}),
+                                                          this->lowering.builder.getInt32Ty(),
+                                                          {this->lowering.builder.getPtrTy()}),
               {regex}),
           lastSlot);
     }
     llvm::Value *mapField = nullptr;
     if (dict) {
-      mapField = this->lowering.builder_.CreateStructGEP(dictPromise, coroutine.promise, 5);
-      this->lowering.builder_.CreateStore(
-          this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(), source), mapField);
+      mapField = this->lowering.builder.CreateStructGEP(dictPromise, coroutine.promise, 5);
+      this->lowering.builder.CreateStore(
+          this->lowering.builder.CreateLoad(this->lowering.builder.getPtrTy(), source), mapField);
     }
     this->lowering.coroutineLowerer().emitSuspend();
     Lowering::Consumer yield;
@@ -261,22 +259,22 @@ void GeneratorLowerer::emitPendingIterators() {
     };
     yield.stop = [&] {
       this->lowering.coroutineLowerer().emitCoroutineReturn(nullptr, nullptr);
-      this->lowering.builder_.CreateUnreachable();
+      this->lowering.builder.CreateUnreachable();
     };
     if (matches) {
       this->lowering.regexLowerer()
-          .matchAllProducer(source, operand, lastSlot, this->lowering.function_->getArg(2))
+          .matchAllProducer(source, operand, lastSlot, this->lowering.function->getArg(2))
           .run(yield);
     } else if (dict) {
       this->lowering.dictLowerer().beginDictIteration(source);
       llvm::Value *position =
-          this->lowering.builder_.CreateStructGEP(dictPromise, coroutine.promise, 6);
+          this->lowering.builder.CreateStructGEP(dictPromise, coroutine.promise, 6);
       this->lowering.dictLowerer()
           .dictProducer(mapField, job.source, job.builtin, position)
           .run(yield);
       if (this->lowering.functionFrame().blockIsOpen()) {
-        this->lowering.builder_.CreateStore(
-            llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()), mapField);
+        this->lowering.builder.CreateStore(
+            llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy()), mapField);
       }
     } else if (!stage) {
       Lowering::Producer producer =
@@ -294,10 +292,10 @@ void GeneratorLowerer::emitPendingIterators() {
     if (this->lowering.functionFrame().blockIsOpen()) {
       this->lowering.coroutineLowerer().emitCoroutineReturn(nullptr, nullptr);
     }
-    this->lowering.scopes_.pop_back();
+    this->lowering.scopes.pop_back();
     this->lowering.coroutineLowerer().finishCoroutine();
-    this->lowering.coro_ = nullptr;
-    this->lowering.function_ = nullptr;
+    this->lowering.coro = nullptr;
+    this->lowering.function = nullptr;
   }
 }
 

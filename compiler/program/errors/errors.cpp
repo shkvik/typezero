@@ -6,7 +6,7 @@ void Errors::add(Diagnostic diagnostic) {
   if (diagnostic.kind == llvm::SourceMgr::DK_Error) {
     ++errorCount_;
   }
-  list_.push_back(std::move(diagnostic));
+  this->list.push_back(std::move(diagnostic));
 }
 
 void Errors::add(const Errors &other) {
@@ -22,7 +22,7 @@ void Errors::add(const Warnings &warnings) {
 }
 
 bool Errors::isEmpty() const {
-  return list_.empty();
+  return this->list.empty();
 }
 
 void Errors::tool(const llvm::Twine &message) {

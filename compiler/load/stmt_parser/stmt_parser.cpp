@@ -6,10 +6,10 @@
 #include "compiler/load/module_parser/module_parser.h"
 #include "compiler/load/pattern_parser/pattern_parser.h"
 #include "compiler/load/template_parser/template_parser.h"
-#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/load/token_cursor/token_cursor.h"
 #include "compiler/load/type_parser/type_parser.h"
 #include "compiler/load/var_parser/var_parser.h"
+#include "compiler/program/to_utf8/to_utf8.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
@@ -24,406 +24,418 @@ using llvm::isa;
 
 namespace tz {
 
-StmtParser::StmtParser(Parser &parser) : parser_(parser) {}
+StmtParser::StmtParser(Parser &parser)
+    : parser(parser) {}
 
 Stmt *StmtParser::parseStatement(bool topLevel) {
-  llvm::SMLoc loc = parser_.tok_.loc();
-  switch (parser_.tok_.kind) {
-  case Tok::At: {
-    std::vector<Decorator> decorators = parser_.classes().parseDecorators();
-    Stmt *stmt = parseStatement(topLevel);
-    if (auto *cls = dyn_cast<ClassDecl>(stmt)) {
-      cls->decorators.insert(cls->decorators.begin(), decorators.begin(), decorators.end());
-    } else {
-      parser_.classes().rejectDecorators(decorators);
-    }
-    return stmt;
-  }
-  case Tok::LBrace:
-    return parseBlock();
-  case Tok::KwFunction:
-    return parser_.functions().parseFunctionDecl();
-  case Tok::KwVar:
-    parser_.cursor().report(loc, "'var' is not supported; use 'let' or 'const'");
-    [[fallthrough]];
-  case Tok::KwLet:
-  case Tok::KwConst: {
-    if (parser_.tok_.is(Tok::KwConst) && parser_.cursor().peek().is(Tok::KwEnum)) {
-      parser_.cursor().advance();
-      return parser_.decls().parseEnum();
-    }
-    VarDeclStmt *decl = parser_.vars().parseVarDecl();
-    parser_.cursor().expectSemicolon();
-    return decl;
-  }
-  case Tok::KwIf:
-    return parseIf();
-  case Tok::KwWhile:
-    return parseWhile();
-  case Tok::KwDo:
-    return parseDoWhile();
-  case Tok::KwFor:
-    return parseFor();
-  case Tok::KwSwitch:
-    return parseSwitch();
-  case Tok::KwEnum:
-    return parser_.decls().parseEnum();
-  case Tok::KwReturn:
-    return parseReturn();
-  case Tok::KwBreak:
-  case Tok::KwContinue:
-    return parseBreakOrContinue();
-  case Tok::KwDebugger:
-    parser_.cursor().advance();
-    parser_.cursor().expectSemicolon();
-    return parser_.ctx_.make<DebuggerStmt>(loc);
-  case Tok::Semi:
-    parser_.cursor().advance();
-    return parser_.ctx_.make<EmptyStmt>(loc);
-  case Tok::Identifier:
-    if (parser_.tok_.text == "import" && !parser_.cursor().peek().is(Tok::LParen) &&
-        !parser_.cursor().peek().is(Tok::Dot)) {
-      return parser_.modules().parseImport(topLevel);
-    }
-    if (parser_.tok_.text == "export") {
-      return parser_.modules().parseExport(topLevel);
-    }
-    if ((parser_.tok_.text == "namespace" || parser_.tok_.text == "module" ||
-         parser_.tok_.text == "declare") &&
-        (parser_.cursor().peek().is(Tok::Identifier) ||
-         TokenKinds::isKeyword(parser_.cursor().peek().kind) ||
-         parser_.cursor().peek().is(Tok::StringLiteral)) &&
-        !parser_.cursor().peek().newlineBefore) {
-      if (parser_.tok_.text != "declare") {
-        return skipDeclaration(loc, "'" + parser_.tok_.text +
-                                        "' is not supported: it is TypeScript's old way to group "
-                                        "code; put the code in a file of its own and import it "
-                                        "by name");
+  llvm::SMLoc loc = this->parser.tok.loc();
+  switch (this->parser.tok.kind) {
+    case Tok::At: {
+      std::vector<Decorator> decorators = this->parser.classes().parseDecorators();
+      Stmt *stmt = parseStatement(topLevel);
+      if (auto *cls = dyn_cast<ClassDecl>(stmt)) {
+        cls->decorators.insert(cls->decorators.begin(), decorators.begin(), decorators.end());
+      } else {
+        this->parser.classes().rejectDecorators(decorators);
       }
-      if (parser_.library_ && parser_.cursor().peek().is(Tok::KwFunction)) {
-        parser_.cursor().advance();
-        return parser_.functions().parseDeclaredFunction();
+      return stmt;
+    }
+    case Tok::LBrace:
+      return parseBlock();
+    case Tok::KwFunction:
+      return this->parser.functions().parseFunctionDecl();
+    case Tok::KwVar:
+      this->parser.cursor().report(loc, "'var' is not supported; use 'let' or 'const'");
+      [[fallthrough]];
+    case Tok::KwLet:
+    case Tok::KwConst: {
+      if (this->parser.tok.is(Tok::KwConst) && this->parser.cursor().peek().is(Tok::KwEnum)) {
+        this->parser.cursor().advance();
+        return this->parser.decls().parseEnum();
       }
-      llvm::StringRef what = parser_.cursor().peek().text;
-      if (what == "module" || what == "global" || what == "namespace") {
-        return skipDeclaration(loc, "'declare " + what +
-                                        "' is not supported: every file is a module of the "
-                                        "program; import what it needs by name");
+      VarDeclStmt *decl = this->parser.vars().parseVarDecl();
+      this->parser.cursor().expectSemicolon();
+      return decl;
+    }
+    case Tok::KwIf:
+      return parseIf();
+    case Tok::KwWhile:
+      return parseWhile();
+    case Tok::KwDo:
+      return parseDoWhile();
+    case Tok::KwFor:
+      return parseFor();
+    case Tok::KwSwitch:
+      return parseSwitch();
+    case Tok::KwEnum:
+      return this->parser.decls().parseEnum();
+    case Tok::KwReturn:
+      return parseReturn();
+    case Tok::KwBreak:
+    case Tok::KwContinue:
+      return parseBreakOrContinue();
+    case Tok::KwDebugger:
+      this->parser.cursor().advance();
+      this->parser.cursor().expectSemicolon();
+      return this->parser.ctx.make<DebuggerStmt>(loc);
+    case Tok::Semi:
+      this->parser.cursor().advance();
+      return this->parser.ctx.make<EmptyStmt>(loc);
+    case Tok::Identifier:
+      if (this->parser.tok.text == "import" && !this->parser.cursor().peek().is(Tok::LParen) &&
+          !this->parser.cursor().peek().is(Tok::Dot)) {
+        return this->parser.modules().parseImport(topLevel);
       }
-      return skipDeclaration(loc, "'declare' is not supported: the compiler needs the code of "
-                                  "every declaration; write the declaration itself, or import it");
-    }
-    if (parser_.cursor().peek().is(Tok::Colon)) {
-      llvm::StringRef label = parser_.tok_.text;
-      parser_.cursor().advance();
-      parser_.cursor().advance();
-      return parser_.ctx_.make<LabeledStmt>(loc, label, parseStatement());
-    }
-    if (parser_.tok_.text == "type" && parser_.cursor().peek().is(Tok::Identifier) &&
-        !parser_.cursor().peek().newlineBefore) {
-      return parser_.decls().parseTypeAlias();
-    }
-    if (parser_.tok_.text == "interface" && parser_.cursor().peek().is(Tok::Identifier) &&
-        !parser_.cursor().peek().newlineBefore) {
-      return parser_.decls().parseInterface();
-    }
-    if (parser_.tok_.text == "class" && parser_.cursor().peek().is(Tok::Identifier) &&
-        !parser_.cursor().peek().newlineBefore) {
-      return parser_.classes().parseClass();
-    }
-    if (parser_.tok_.text == "throw") {
-      return parseThrow();
-    }
-    if (parser_.tok_.text == "try" && parser_.cursor().peek().is(Tok::LBrace)) {
-      return parseTry();
-    }
-    if ((parser_.tok_.text == "catch" || parser_.tok_.text == "finally") &&
-        (parser_.cursor().peek().is(Tok::LBrace) || parser_.cursor().peek().is(Tok::LParen))) {
-      parser_.cursor().report(loc, "there is no '" + parser_.tok_.text +
-                                       "' in tz: an error is a value; a function that can fail "
-                                       "gives a 'Result', checked with 'if'");
-      parser_.cursor().advance();
-      if (parser_.cursor().accept(Tok::LParen)) {
-        while (!parser_.tok_.is(Tok::Eof) && !parser_.cursor().accept(Tok::RParen)) {
-          parser_.cursor().advance();
+      if (this->parser.tok.text == "export") {
+        return this->parser.modules().parseExport(topLevel);
+      }
+      if ((this->parser.tok.text == "namespace" || this->parser.tok.text == "module" ||
+           this->parser.tok.text == "declare") &&
+          (this->parser.cursor().peek().is(Tok::Identifier) ||
+           TokenKinds::isKeyword(this->parser.cursor().peek().kind) ||
+           this->parser.cursor().peek().is(Tok::StringLiteral)) &&
+          !this->parser.cursor().peek().newlineBefore) {
+        if (this->parser.tok.text != "declare") {
+          return skipDeclaration(loc, "'" + this->parser.tok.text +
+                                          "' is not supported: it is TypeScript's old way to group "
+                                          "code; put the code in a file of its own and import it "
+                                          "by name");
+        }
+        if (this->parser.library_ && this->parser.cursor().peek().is(Tok::KwFunction)) {
+          this->parser.cursor().advance();
+          return this->parser.functions().parseDeclaredFunction();
+        }
+        llvm::StringRef what = this->parser.cursor().peek().text;
+        if (what == "module" || what == "global" || what == "namespace") {
+          return skipDeclaration(loc, "'declare " + what +
+                                          "' is not supported: every file is a module of the "
+                                          "program; import what it needs by name");
+        }
+        return skipDeclaration(loc,
+                               "'declare' is not supported: the compiler needs the code of "
+                               "every declaration; write the declaration itself, or import it");
+      }
+      if (this->parser.cursor().peek().is(Tok::Colon)) {
+        llvm::StringRef label = this->parser.tok.text;
+        this->parser.cursor().advance();
+        this->parser.cursor().advance();
+        return this->parser.ctx.make<LabeledStmt>(loc, label, parseStatement());
+      }
+      if (this->parser.tok.text == "type" && this->parser.cursor().peek().is(Tok::Identifier) &&
+          !this->parser.cursor().peek().newlineBefore) {
+        return this->parser.decls().parseTypeAlias();
+      }
+      if (this->parser.tok.text == "interface" &&
+          this->parser.cursor().peek().is(Tok::Identifier) &&
+          !this->parser.cursor().peek().newlineBefore) {
+        return this->parser.decls().parseInterface();
+      }
+      if (this->parser.tok.text == "class" && this->parser.cursor().peek().is(Tok::Identifier) &&
+          !this->parser.cursor().peek().newlineBefore) {
+        return this->parser.classes().parseClass();
+      }
+      if (this->parser.tok.text == "throw") {
+        return parseThrow();
+      }
+      if (this->parser.tok.text == "try" && this->parser.cursor().peek().is(Tok::LBrace)) {
+        return parseTry();
+      }
+      if ((this->parser.tok.text == "catch" || this->parser.tok.text == "finally") &&
+          (this->parser.cursor().peek().is(Tok::LBrace) ||
+           this->parser.cursor().peek().is(Tok::LParen))) {
+        this->parser.cursor().report(loc,
+                                     "there is no '" + this->parser.tok.text +
+                                         "' in tz: an error is a value; a function that can fail "
+                                         "gives a 'Result', checked with 'if'");
+        this->parser.cursor().advance();
+        if (this->parser.cursor().accept(Tok::LParen)) {
+          while (!this->parser.tok.is(Tok::Eof) && !this->parser.cursor().accept(Tok::RParen)) {
+            this->parser.cursor().advance();
+          }
+        }
+        parseBlock();
+        return this->parser.ctx.make<EmptyStmt>(loc);
+      }
+      if (this->parser.tok.text == "abstract" && this->parser.cursor().peek().is(Tok::Identifier) &&
+          this->parser.cursor().peek().text == "class" &&
+          !this->parser.cursor().peek().newlineBefore) {
+        this->parser.cursor().advance();
+        ClassDecl *cls = this->parser.classes().parseClass();
+        cls->isAbstract = true;
+        return cls;
+      }
+      if (this->parser.functions().asyncFunctionAhead()) {
+        this->parser.cursor().advance();
+        return this->parser.functions().parseFunctionDecl(true);
+      }
+      [[fallthrough]];
+    default: {
+      Expr *expr = this->parser.exprs().parseSequence();
+      if (auto *assign = dyn_cast<AssignExpr>(expr); assign && !assign->op) {
+        if (isa<ArrayLitExpr>(assign->target) || isa<ObjectLitExpr>(assign->target)) {
+          Stmt *stmt = this->parser.patterns().assignPattern(
+              loc, *this->parser.patterns().patternFromLiteral(assign->target), assign->value);
+          this->parser.cursor().expectSemicolon();
+          return stmt;
         }
       }
-      parseBlock();
-      return parser_.ctx_.make<EmptyStmt>(loc);
+      this->parser.cursor().expectSemicolon();
+      return this->parser.ctx.make<ExprStmt>(loc, expr);
     }
-    if (parser_.tok_.text == "abstract" && parser_.cursor().peek().is(Tok::Identifier) &&
-        parser_.cursor().peek().text == "class" && !parser_.cursor().peek().newlineBefore) {
-      parser_.cursor().advance();
-      ClassDecl *cls = parser_.classes().parseClass();
-      cls->isAbstract = true;
-      return cls;
-    }
-    if (parser_.functions().asyncFunctionAhead()) {
-      parser_.cursor().advance();
-      return parser_.functions().parseFunctionDecl(true);
-    }
-    [[fallthrough]];
-  default: {
-    Expr *expr = parser_.exprs().parseSequence();
-    if (auto *assign = dyn_cast<AssignExpr>(expr); assign && !assign->op) {
-      if (isa<ArrayLitExpr>(assign->target) || isa<ObjectLitExpr>(assign->target)) {
-        Stmt *stmt = parser_.patterns().assignPattern(
-            loc, *parser_.patterns().patternFromLiteral(assign->target), assign->value);
-        parser_.cursor().expectSemicolon();
-        return stmt;
-      }
-    }
-    parser_.cursor().expectSemicolon();
-    return parser_.ctx_.make<ExprStmt>(loc, expr);
-  }
   }
 }
 
 Stmt *StmtParser::skipDeclaration(llvm::SMLoc loc, const llvm::Twine &message) {
-  parser_.cursor().report(loc, message);
-  parser_.cursor().advance();
-  while (!parser_.tok_.is(Tok::Eof) && !parser_.tok_.is(Tok::RBrace)) {
-    if (parser_.tok_.is(Tok::LBrace)) {
-      parser_.cursor().advance();
-      parser_.cursor().skipToClosingBrace();
+  this->parser.cursor().report(loc, message);
+  this->parser.cursor().advance();
+  while (!this->parser.tok.is(Tok::Eof) && !this->parser.tok.is(Tok::RBrace)) {
+    if (this->parser.tok.is(Tok::LBrace)) {
+      this->parser.cursor().advance();
+      this->parser.cursor().skipToClosingBrace();
       break;
     }
-    if (parser_.cursor().accept(Tok::Semi)) {
+    if (this->parser.cursor().accept(Tok::Semi)) {
       break;
     }
-    parser_.cursor().advance();
-    if (parser_.tok_.newlineBefore) {
+    this->parser.cursor().advance();
+    if (this->parser.tok.newlineBefore) {
       break;
     }
   }
 
-  return parser_.ctx_.make<EmptyStmt>(loc);
+  return this->parser.ctx.make<EmptyStmt>(loc);
 }
 
 Stmt *StmtParser::parseBreakOrContinue() {
-  llvm::SMLoc loc = parser_.tok_.loc();
-  bool isBreak = parser_.tok_.is(Tok::KwBreak);
-  parser_.cursor().advance();
+  llvm::SMLoc loc = this->parser.tok.loc();
+  bool isBreak = this->parser.tok.is(Tok::KwBreak);
+  this->parser.cursor().advance();
   llvm::StringRef label;
-  if (parser_.tok_.is(Tok::Identifier) && !parser_.tok_.newlineBefore) {
-    label = parser_.tok_.text;
-    parser_.cursor().advance();
+  if (this->parser.tok.is(Tok::Identifier) && !this->parser.tok.newlineBefore) {
+    label = this->parser.tok.text;
+    this->parser.cursor().advance();
   }
-  parser_.cursor().expectSemicolon();
+  this->parser.cursor().expectSemicolon();
   if (isBreak) {
-    return parser_.ctx_.make<BreakStmt>(loc, label);
+    return this->parser.ctx.make<BreakStmt>(loc, label);
   }
 
-  return parser_.ctx_.make<ContinueStmt>(loc, label);
+  return this->parser.ctx.make<ContinueStmt>(loc, label);
 }
 
 Stmt *StmtParser::parseSwitch() {
-  llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance();
-  parser_.cursor().expect(Tok::LParen, "after 'switch'");
-  Expr *discriminant = parser_.exprs().parseSequence();
-  parser_.cursor().expect(Tok::RParen, "after the value of 'switch'");
-  auto *stmt = parser_.ctx_.make<SwitchStmt>(loc, discriminant);
-  parser_.cursor().expect(Tok::LBrace, "to start the cases of 'switch'");
+  llvm::SMLoc loc = this->parser.tok.loc();
+  this->parser.cursor().advance();
+  this->parser.cursor().expect(Tok::LParen, "after 'switch'");
+  Expr *discriminant = this->parser.exprs().parseSequence();
+  this->parser.cursor().expect(Tok::RParen, "after the value of 'switch'");
+  auto *stmt = this->parser.ctx.make<SwitchStmt>(loc, discriminant);
+  this->parser.cursor().expect(Tok::LBrace, "to start the cases of 'switch'");
   bool hasDefault = false;
-  while (!parser_.tok_.is(Tok::RBrace) && !parser_.tok_.is(Tok::Eof)) {
+  while (!this->parser.tok.is(Tok::RBrace) && !this->parser.tok.is(Tok::Eof)) {
     SwitchCase c;
-    c.loc = parser_.tok_.loc();
-    if (parser_.cursor().accept(Tok::KwCase)) {
-      c.test = parser_.exprs().parseExpr();
-    } else if (parser_.tok_.is(Tok::KwDefault)) {
+    c.loc = this->parser.tok.loc();
+    if (this->parser.cursor().accept(Tok::KwCase)) {
+      c.test = this->parser.exprs().parseExpr();
+    } else if (this->parser.tok.is(Tok::KwDefault)) {
       if (hasDefault) {
-        parser_.cursor().report(parser_.tok_.loc(), "a 'switch' can have only one 'default'");
+        this->parser.cursor().report(this->parser.tok.loc(),
+                                     "a 'switch' can have only one 'default'");
       }
       hasDefault = true;
-      parser_.cursor().advance();
+      this->parser.cursor().advance();
     } else {
-      parser_.cursor().error(parser_.tok_.loc(),
-                             llvm::Twine("expected 'case' or 'default', found ") +
-                                 TokenKinds::tokSpelling(parser_.tok_.kind));
+      this->parser.cursor().error(this->parser.tok.loc(),
+                                  llvm::Twine("expected 'case' or 'default', found ") +
+                                      TokenKinds::tokSpelling(this->parser.tok.kind));
       break;
     }
-    parser_.cursor().expect(Tok::Colon, c.test ? "after the value of 'case'" : "after 'default'");
-    while (!parser_.tok_.is(Tok::KwCase) && !parser_.tok_.is(Tok::KwDefault) &&
-           !parser_.tok_.is(Tok::RBrace) && !parser_.tok_.is(Tok::Eof)) {
+    this->parser.cursor().expect(Tok::Colon,
+                                 c.test ? "after the value of 'case'" : "after 'default'");
+    while (!this->parser.tok.is(Tok::KwCase) && !this->parser.tok.is(Tok::KwDefault) &&
+           !this->parser.tok.is(Tok::RBrace) && !this->parser.tok.is(Tok::Eof)) {
       c.body.push_back(parseStatement());
-      if (parser_.recovering_) {
-        parser_.cursor().synchronize();
+      if (this->parser.recovering) {
+        this->parser.cursor().synchronize();
       }
     }
     stmt->cases.push_back(std::move(c));
   }
-  parser_.cursor().expect(Tok::RBrace, "to close 'switch'");
+  this->parser.cursor().expect(Tok::RBrace, "to close 'switch'");
 
   return stmt;
 }
 
 BlockStmt *StmtParser::parseBlock() {
-  auto *block = parser_.ctx_.make<BlockStmt>(parser_.tok_.loc());
-  parser_.cursor().expect(Tok::LBrace);
-  while (!parser_.tok_.is(Tok::RBrace) && !parser_.tok_.is(Tok::Eof)) {
+  auto *block = this->parser.ctx.make<BlockStmt>(this->parser.tok.loc());
+  this->parser.cursor().expect(Tok::LBrace);
+  while (!this->parser.tok.is(Tok::RBrace) && !this->parser.tok.is(Tok::Eof)) {
     block->body.push_back(parseStatement());
-    if (parser_.recovering_) {
-      parser_.cursor().synchronize();
+    if (this->parser.recovering) {
+      this->parser.cursor().synchronize();
     }
   }
-  block->end = parser_.tok_.loc();
-  parser_.cursor().expect(Tok::RBrace, "to close the block");
+  block->end = this->parser.tok.loc();
+  this->parser.cursor().expect(Tok::RBrace, "to close the block");
 
   return block;
 }
 
 Stmt *StmtParser::parseIf() {
-  llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance();
-  parser_.cursor().expect(Tok::LParen, "after 'if'");
-  Expr *cond = parser_.exprs().parseSequence();
-  parser_.cursor().expect(Tok::RParen, "after the condition");
+  llvm::SMLoc loc = this->parser.tok.loc();
+  this->parser.cursor().advance();
+  this->parser.cursor().expect(Tok::LParen, "after 'if'");
+  Expr *cond = this->parser.exprs().parseSequence();
+  this->parser.cursor().expect(Tok::RParen, "after the condition");
   Stmt *thenStmt = parseStatement();
   Stmt *elseStmt = nullptr;
-  if (parser_.cursor().accept(Tok::KwElse)) {
+  if (this->parser.cursor().accept(Tok::KwElse)) {
     elseStmt = parseStatement();
   }
 
-  return parser_.ctx_.make<IfStmt>(loc, cond, thenStmt, elseStmt);
+  return this->parser.ctx.make<IfStmt>(loc, cond, thenStmt, elseStmt);
 }
 
 Stmt *StmtParser::parseWhile() {
-  llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance();
-  parser_.cursor().expect(Tok::LParen, "after 'while'");
-  Expr *cond = parser_.exprs().parseSequence();
-  parser_.cursor().expect(Tok::RParen, "after the condition");
+  llvm::SMLoc loc = this->parser.tok.loc();
+  this->parser.cursor().advance();
+  this->parser.cursor().expect(Tok::LParen, "after 'while'");
+  Expr *cond = this->parser.exprs().parseSequence();
+  this->parser.cursor().expect(Tok::RParen, "after the condition");
   Stmt *body = parseStatement();
 
-  return parser_.ctx_.make<WhileStmt>(loc, cond, body);
+  return this->parser.ctx.make<WhileStmt>(loc, cond, body);
 }
 
 Stmt *StmtParser::parseDoWhile() {
-  llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance();
+  llvm::SMLoc loc = this->parser.tok.loc();
+  this->parser.cursor().advance();
   Stmt *body = parseStatement();
-  parser_.cursor().expect(Tok::KwWhile, "after the body of 'do'");
-  parser_.cursor().expect(Tok::LParen, "after 'while'");
-  Expr *cond = parser_.exprs().parseSequence();
-  parser_.cursor().expect(Tok::RParen, "after the condition");
-  parser_.cursor().accept(Tok::Semi);
+  this->parser.cursor().expect(Tok::KwWhile, "after the body of 'do'");
+  this->parser.cursor().expect(Tok::LParen, "after 'while'");
+  Expr *cond = this->parser.exprs().parseSequence();
+  this->parser.cursor().expect(Tok::RParen, "after the condition");
+  this->parser.cursor().accept(Tok::Semi);
 
-  return parser_.ctx_.make<DoWhileStmt>(loc, body, cond);
+  return this->parser.ctx.make<DoWhileStmt>(loc, body, cond);
 }
 
 Stmt *StmtParser::parseFor() {
-  llvm::SMLoc forLoc = parser_.tok_.loc();
-  auto *loop = parser_.ctx_.make<ForStmt>(forLoc);
-  parser_.cursor().advance();
+  llvm::SMLoc forLoc = this->parser.tok.loc();
+  auto *loop = this->parser.ctx.make<ForStmt>(forLoc);
+  this->parser.cursor().advance();
   llvm::SMLoc awaitLoc;
-  if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "await") {
-    awaitLoc = parser_.tok_.loc();
-    parser_.cursor().advance();
+  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "await") {
+    awaitLoc = this->parser.tok.loc();
+    this->parser.cursor().advance();
   }
-  parser_.cursor().expect(Tok::LParen, "after 'for'");
+  this->parser.cursor().expect(Tok::LParen, "after 'for'");
 
-  llvm::SaveAndRestore<bool> noIn(parser_.noIn_, true);
-  if (parser_.tok_.is(Tok::KwLet) || parser_.tok_.is(Tok::KwConst) || parser_.tok_.is(Tok::KwVar)) {
-    if (parser_.tok_.is(Tok::KwVar)) {
-      parser_.cursor().error(parser_.tok_.loc(), "'var' is not supported; use 'let' or 'const'");
+  llvm::SaveAndRestore<bool> noIn(this->parser.noIn, true);
+  if (this->parser.tok.is(Tok::KwLet) || this->parser.tok.is(Tok::KwConst) ||
+      this->parser.tok.is(Tok::KwVar)) {
+    if (this->parser.tok.is(Tok::KwVar)) {
+      this->parser.cursor().error(this->parser.tok.loc(),
+                                  "'var' is not supported; use 'let' or 'const'");
     }
-    auto *decl = parser_.ctx_.make<VarDeclStmt>(parser_.tok_.loc(), parser_.tok_.is(Tok::KwConst));
-    parser_.cursor().advance();
+    auto *decl = this->parser.ctx.make<VarDeclStmt>(this->parser.tok.loc(),
+                                                    this->parser.tok.is(Tok::KwConst));
+    this->parser.cursor().advance();
     VarDeclarator first;
     std::unique_ptr<Parser::Pattern> pattern;
-    if (parser_.tok_.is(Tok::LBracket) || parser_.tok_.is(Tok::LBrace)) {
-      pattern = parser_.patterns().parseBindingPattern();
-    } else if (!parser_.vars().parseBinding(first)) {
+    if (this->parser.tok.is(Tok::LBracket) || this->parser.tok.is(Tok::LBrace)) {
+      pattern = this->parser.patterns().parseBindingPattern();
+    } else if (!this->parser.vars().parseBinding(first)) {
       return loop;
     }
-    bool forIn = parser_.tok_.is(Tok::KwIn);
-    if ((parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "of") || forIn) {
+    bool forIn = this->parser.tok.is(Tok::KwIn);
+    if ((this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "of") || forIn) {
       if (forIn && pattern) {
-        parser_.cursor().report(
+        this->parser.cursor().report(
             pattern->loc,
             "the variable of 'for...in' is a key, a string, and cannot be destructured");
       }
-      parser_.cursor().advance();
-      parser_.noIn_ = false;
-      auto *forOf = parser_.ctx_.make<ForOfStmt>(forLoc);
+      this->parser.cursor().advance();
+      this->parser.noIn = false;
+      auto *forOf = this->parser.ctx.make<ForOfStmt>(forLoc);
       forOf->isConst = decl->isConst;
       forOf->keys = forIn;
       forOf->isAwait = awaitLoc.isValid();
       if (forIn && forOf->isAwait) {
-        parser_.cursor().report(
+        this->parser.cursor().report(
             awaitLoc, "'for await' goes over the values of an iterable, with 'of': 'for await "
                       "(const x of xs)'");
       }
-      forOf->iterable = parser_.exprs().parseExpr();
-      parser_.cursor().expect(Tok::RParen, "to close the loop header");
+      forOf->iterable = this->parser.exprs().parseExpr();
+      this->parser.cursor().expect(Tok::RParen, "to close the loop header");
       forOf->body = parseStatement();
       if (!pattern || forIn) {
         forOf->binding = first;
         if (pattern) {
-          forOf->binding.name = parser_.ctx_.hiddenName();
+          forOf->binding.name = this->parser.ctx.hiddenName();
           forOf->binding.loc = pattern->loc;
         }
         return forOf;
       }
-      forOf->binding.name = parser_.ctx_.hiddenName();
+      forOf->binding.name = this->parser.ctx.hiddenName();
       forOf->binding.loc = pattern->loc;
       if (pattern->object) {
         forOf->binding.form = ObjectPattern{};
       } else {
         forOf->binding.form = ArrayPattern{};
       }
-      auto *elements = parser_.ctx_.make<VarDeclStmt>(pattern->loc, decl->isConst);
-      parser_.patterns().declareElements(elements, *pattern, forOf->binding.name);
-      auto *body = parser_.ctx_.make<BlockStmt>(forOf->body->loc());
+      auto *elements = this->parser.ctx.make<VarDeclStmt>(pattern->loc, decl->isConst);
+      this->parser.patterns().declareElements(elements, *pattern, forOf->binding.name);
+      auto *body = this->parser.ctx.make<BlockStmt>(forOf->body->loc());
       body->body = {elements, forOf->body};
       forOf->body = body;
       return forOf;
     }
     if (pattern) {
-      if (!parser_.cursor().expect(Tok::Assign, "after the destructuring pattern")) {
+      if (!this->parser.cursor().expect(Tok::Assign, "after the destructuring pattern")) {
         return loop;
       }
-      parser_.patterns().declarePattern(decl, *pattern, parser_.exprs().parseExpr(), std::nullopt);
+      this->parser.patterns().declarePattern(decl, *pattern, this->parser.exprs().parseExpr(),
+                                             std::nullopt);
     } else {
-      if (parser_.cursor().accept(Tok::Assign)) {
-        first.init = parser_.exprs().parseExpr();
+      if (this->parser.cursor().accept(Tok::Assign)) {
+        first.init = this->parser.exprs().parseExpr();
       }
       decl->decls.push_back(first);
     }
-    if (parser_.cursor().accept(Tok::Comma)) {
-      parser_.vars().parseDeclarators(decl);
+    if (this->parser.cursor().accept(Tok::Comma)) {
+      this->parser.vars().parseDeclarators(decl);
     }
     loop->init = decl;
-  } else if (!parser_.tok_.is(Tok::Semi)) {
-    llvm::SMLoc loc = parser_.tok_.loc();
-    loop->init = parser_.ctx_.make<ExprStmt>(loc, parser_.exprs().parseSequence());
+  } else if (!this->parser.tok.is(Tok::Semi)) {
+    llvm::SMLoc loc = this->parser.tok.loc();
+    loop->init = this->parser.ctx.make<ExprStmt>(loc, this->parser.exprs().parseSequence());
   }
-  if (parser_.tok_.is(Tok::KwIn) ||
-      (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "of")) {
-    parser_.cursor().error(parser_.tok_.loc(),
-                           parser_.tok_.is(Tok::KwIn)
-                               ? "'for...in' needs a new variable: 'for (const k in ...)'"
-                               : "'for...of' needs a new variable: 'for (const x of ...)'");
+  if (this->parser.tok.is(Tok::KwIn) ||
+      (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "of")) {
+    this->parser.cursor().error(this->parser.tok.loc(),
+                                this->parser.tok.is(Tok::KwIn)
+                                    ? "'for...in' needs a new variable: 'for (const k in ...)'"
+                                    : "'for...of' needs a new variable: 'for (const x of ...)'");
     return loop;
   }
-  parser_.noIn_ = false;
+  this->parser.noIn = false;
   if (awaitLoc.isValid()) {
-    parser_.cursor().report(
+    this->parser.cursor().report(
         awaitLoc, "'for await' goes over the values of an iterable: 'for await (const x of "
                   "xs)'");
   }
-  parser_.cursor().expect(Tok::Semi, "after the loop initializer");
+  this->parser.cursor().expect(Tok::Semi, "after the loop initializer");
 
-  if (!parser_.tok_.is(Tok::Semi)) {
-    loop->cond = parser_.exprs().parseSequence();
+  if (!this->parser.tok.is(Tok::Semi)) {
+    loop->cond = this->parser.exprs().parseSequence();
   }
-  parser_.cursor().expect(Tok::Semi, "after the loop condition");
+  this->parser.cursor().expect(Tok::Semi, "after the loop condition");
 
-  if (!parser_.tok_.is(Tok::RParen)) {
-    loop->step = parser_.exprs().parseSequence();
+  if (!this->parser.tok.is(Tok::RParen)) {
+    loop->step = this->parser.exprs().parseSequence();
   }
-  parser_.cursor().expect(Tok::RParen, "to close the loop header");
+  this->parser.cursor().expect(Tok::RParen, "to close the loop header");
 
   loop->body = parseStatement();
 
@@ -431,50 +443,50 @@ Stmt *StmtParser::parseFor() {
 }
 
 Stmt *StmtParser::parseReturn() {
-  llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance();
+  llvm::SMLoc loc = this->parser.tok.loc();
+  this->parser.cursor().advance();
   Expr *value = nullptr;
-  if (!parser_.tok_.is(Tok::Semi) && !parser_.tok_.is(Tok::RBrace) && !parser_.tok_.is(Tok::Eof) &&
-      !parser_.tok_.newlineBefore) {
-    value = parser_.exprs().parseSequence();
+  if (!this->parser.tok.is(Tok::Semi) && !this->parser.tok.is(Tok::RBrace) &&
+      !this->parser.tok.is(Tok::Eof) && !this->parser.tok.newlineBefore) {
+    value = this->parser.exprs().parseSequence();
   }
-  parser_.cursor().expectSemicolon();
+  this->parser.cursor().expectSemicolon();
 
-  return parser_.ctx_.make<ReturnStmt>(loc, value);
+  return this->parser.ctx.make<ReturnStmt>(loc, value);
 }
 
 Stmt *StmtParser::parseThrow() {
-  llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().report(loc, "there is no 'throw' in tz: an error is a value; return it, "
-                               "'return err(...)', and give the function a 'Result'");
-  parser_.cursor().advance();
-  if (!parser_.tok_.newlineBefore && !parser_.tok_.is(Tok::Semi) && !parser_.tok_.is(Tok::RBrace) &&
-      !parser_.tok_.is(Tok::Eof)) {
-    parser_.exprs().parseSequence();
-    parser_.cursor().expectSemicolon();
+  llvm::SMLoc loc = this->parser.tok.loc();
+  this->parser.cursor().report(loc, "there is no 'throw' in tz: an error is a value; return it, "
+                                    "'return err(...)', and give the function a 'Result'");
+  this->parser.cursor().advance();
+  if (!this->parser.tok.newlineBefore && !this->parser.tok.is(Tok::Semi) &&
+      !this->parser.tok.is(Tok::RBrace) && !this->parser.tok.is(Tok::Eof)) {
+    this->parser.exprs().parseSequence();
+    this->parser.cursor().expectSemicolon();
   }
 
-  return parser_.ctx_.make<EmptyStmt>(loc);
+  return this->parser.ctx.make<EmptyStmt>(loc);
 }
 
 Stmt *StmtParser::parseTry() {
-  parser_.cursor().report(parser_.tok_.loc(),
-                          "there is no 'try' in tz: an error is a value; a function that can "
-                          "fail gives a 'Result', checked with 'if'");
-  parser_.cursor().advance();
+  this->parser.cursor().report(this->parser.tok.loc(),
+                               "there is no 'try' in tz: an error is a value; a function that can "
+                               "fail gives a 'Result', checked with 'if'");
+  this->parser.cursor().advance();
   BlockStmt *block = parseBlock();
-  if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "catch") {
-    parser_.cursor().advance();
-    if (parser_.cursor().accept(Tok::LParen)) {
-      while (!parser_.tok_.is(Tok::RParen) && !parser_.tok_.is(Tok::Eof)) {
-        parser_.cursor().advance();
+  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "catch") {
+    this->parser.cursor().advance();
+    if (this->parser.cursor().accept(Tok::LParen)) {
+      while (!this->parser.tok.is(Tok::RParen) && !this->parser.tok.is(Tok::Eof)) {
+        this->parser.cursor().advance();
       }
-      parser_.cursor().expect(Tok::RParen, "after the variable of 'catch'");
+      this->parser.cursor().expect(Tok::RParen, "after the variable of 'catch'");
     }
     parseBlock();
   }
-  if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "finally") {
-    parser_.cursor().advance();
+  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "finally") {
+    this->parser.cursor().advance();
     parseBlock();
   }
 

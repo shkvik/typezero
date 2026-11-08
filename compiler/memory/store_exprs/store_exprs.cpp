@@ -12,30 +12,31 @@ using llvm::isa;
 
 namespace tz {
 
-StoreExprs::StoreExprs(StoreScanner &scanner) : scanner_(scanner) {}
+StoreExprs::StoreExprs(StoreScanner &scanner)
+    : scanner(scanner) {}
 
 StoreScanner::Sources StoreExprs::expr(const Expr *e) {
   if (!e) {
     return {};
   }
   StoreScanner::Sources out;
-  if (scanner_.isSite_(e)) {
-    out.push_back(scanner_.node({StoreScanner::Kind::Site, e}));
+  if (this->scanner.isSite_(e)) {
+    out.push_back(this->scanner.node({StoreScanner::Kind::Site, e}));
   }
   switch (e->kind()) {
   case Expr::Kind::Name: {
     auto *name = llvm::cast<NameExpr>(e);
     if (name->var()) {
-      out.push_back(scanner_.var(name->var()));
-      if (name->var()->function() && !scanner_.callee_.contains(e)) {
-        scanner_.escapes(name->var()->function());
+      out.push_back(this->scanner.var(name->var()));
+      if (name->var()->function() && !this->scanner.callee.contains(e)) {
+        this->scanner.escapes(name->var()->function());
       }
-      if (name->var()->lambda() && !scanner_.callee_.contains(e)) {
-        scanner_.escapes(name->var()->lambda());
+      if (name->var()->lambda() && !this->scanner.callee.contains(e)) {
+        this->scanner.escapes(name->var()->lambda());
       }
     }
-    if (name->func() && !scanner_.callee_.contains(e)) {
-      scanner_.escapes(name->func()->decl);
+    if (name->func() && !this->scanner.callee.contains(e)) {
+      this->scanner.escapes(name->func()->decl);
     }
     break;
   }
@@ -48,7 +49,7 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
     for (const ArrayLitExpr::Element &x : llvm::cast<ArrayLitExpr>(e)->elements) {
       StoreScanner::Sources element = expr(x.expr);
       if (!x.spread || (x.expr->type && x.expr->type->isIterator())) {
-        scanner_.store(element);
+        this->scanner.store(element);
       }
     }
     break;
@@ -58,7 +59,7 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
       expr(p.key());
       if (p.method()) {
         if (auto *fe = llvm::dyn_cast<FunctionExpr>(p.value)) {
-          scanner_.function(fe->fn);
+          this->scanner.function(fe->fn);
         }
         continue;
       }
@@ -67,19 +68,19 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
                    llvm::any_of(p.value->type->fields(),
                                 [](const Field &f) { return f.type->isFunction(); });
       if (!p.spread() || binds) {
-        scanner_.store(value);
+        this->scanner.store(value);
       }
     }
     if (lit->cls) {
       for (const FunctionDecl *fn : lit->cls->methods) {
-        scanner_.function(fn);
+        this->scanner.function(fn);
         if (fn->thisVar()) {
-          scanner_.flowInto(scanner_.var(fn->thisVar()), out);
+          this->scanner.flowInto(this->scanner.var(fn->thisVar()), out);
         }
       }
       if (lit->cls->group) {
         for (const VarSymbol *v : lit->cls->group->captures) {
-          scanner_.edge(scanner_.stored(), scanner_.var(v));
+          this->scanner.edge(this->scanner.stored(), this->scanner.var(v));
         }
       }
     }
@@ -88,17 +89,17 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
   case Expr::Kind::Member: {
     auto *member = llvm::cast<MemberExpr>(e);
     StoreScanner::Sources object = expr(member->object);
-    if (member->method() && !scanner_.callee_.contains(e)) {
-      scanner_.store(object);
-      scanner_.escapes(member->method()->decl);
+    if (member->method() && !this->scanner.callee.contains(e)) {
+      this->scanner.store(object);
+      this->scanner.escapes(member->method()->decl);
     }
     if (member->type && member->type->nonOptional()->isFunction() &&
-        !scanner_.callee_.contains(e)) {
-      scanner_.store(object);
+        !this->scanner.callee.contains(e)) {
+      this->scanner.store(object);
     }
     out.clear();
-    if (scanner_.isSite_(e)) {
-      out.push_back(scanner_.node({StoreScanner::Kind::Site, e}));
+    if (this->scanner.isSite_(e)) {
+      out.push_back(this->scanner.node({StoreScanner::Kind::Site, e}));
     }
     break;
   }
@@ -126,8 +127,8 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
     auto *assign = llvm::cast<AssignExpr>(e);
     StoreScanner::Sources value = expr(assign->value);
     if (auto *name = llvm::dyn_cast<NameExpr>(assign->target); name && name->var()) {
-      scanner_.flowInto(scanner_.var(name->var()), value);
-      out.push_back(scanner_.var(name->var()));
+      this->scanner.flowInto(this->scanner.var(name->var()), value);
+      out.push_back(this->scanner.var(name->var()));
     } else {
       if (auto *member = llvm::dyn_cast<MemberExpr>(assign->target)) {
         expr(member->object);
@@ -135,7 +136,7 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
         expr(index->object);
         expr(index->index);
       }
-      scanner_.store(value);
+      this->scanner.store(value);
       out.insert(out.end(), value.begin(), value.end());
     }
     break;
@@ -144,7 +145,7 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
     expr(llvm::cast<UpdateExpr>(e)->target);
     break;
   case Expr::Kind::Call: {
-    StoreScanner::Sources result = scanner_.storeCalls().call(llvm::cast<CallExpr>(e));
+    StoreScanner::Sources result = this->scanner.storeCalls().call(llvm::cast<CallExpr>(e));
     out.insert(out.end(), result.begin(), result.end());
     break;
   }
@@ -157,20 +158,20 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
     if (const ClassDecl *cls = create->cls()) {
       const FunctionDecl *ctor =
           create->ctor() && create->ctor()->func() ? create->ctor()->func()->decl : nullptr;
-      scanner_.storeStmts().bindArgs(ctor, args);
+      this->scanner.storeStmts().bindArgs(ctor, args);
       for (const ClassDecl *c = cls; c; c = c->parent) {
         if (c->init && c->init->thisVar()) {
-          scanner_.flowInto(scanner_.var(c->init->thisVar()), out);
+          this->scanner.flowInto(this->scanner.var(c->init->thisVar()), out);
         }
         for (const FunctionDecl *k : c->constructors) {
           if (k->thisVar()) {
-            scanner_.flowInto(scanner_.var(k->thisVar()), out);
+            this->scanner.flowInto(this->scanner.var(k->thisVar()), out);
           }
         }
       }
     } else {
       for (const StoreScanner::Sources &a : args) {
-        scanner_.store(a);
+        this->scanner.store(a);
       }
     }
     break;
@@ -188,7 +189,7 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
     StoreScanner::Sources operand = expr(conv->operand);
     if (conv->type &&
         (conv->type->nonOptional()->isUnknown() || conv->type->nonOptional()->isAnyObject())) {
-      scanner_.store(operand);
+      this->scanner.store(operand);
     } else {
       out.insert(out.end(), operand.begin(), operand.end());
     }
@@ -212,21 +213,21 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
     if (!fn->nonEscaping) {
       const std::vector<VarSymbol *> &captures = fn->group ? fn->group->captures : fn->captures;
       for (const VarSymbol *v : captures) {
-        scanner_.edge(scanner_.stored(), scanner_.var(v));
+        this->scanner.edge(this->scanner.stored(), this->scanner.var(v));
       }
-      if (!scanner_.callee_.contains(e)) {
-        scanner_.escapes(fn);
+      if (!this->scanner.callee.contains(e)) {
+        this->scanner.escapes(fn);
       }
     }
-    scanner_.function(fn);
+    this->scanner.function(fn);
     break;
   }
   case Expr::Kind::Yield:
-    scanner_.store(expr(llvm::cast<YieldExpr>(e)->value));
+    this->scanner.store(expr(llvm::cast<YieldExpr>(e)->value));
     break;
   case Expr::Kind::Await: {
     StoreScanner::Sources value = expr(llvm::cast<AwaitExpr>(e)->value);
-    scanner_.store(value);
+    this->scanner.store(value);
     break;
   }
   default:

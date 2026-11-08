@@ -12,7 +12,7 @@ public:
   void builtinEffects(const CallExpr *c, const Expr *recv);
 
 private:
-  Analysis &analysis_;
+  Analysis &analysis;
 };
 
 }

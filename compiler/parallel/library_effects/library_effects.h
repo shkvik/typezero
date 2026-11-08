@@ -40,7 +40,7 @@ private:
   static bool isContextClass(llvm::StringRef cls);
   static bool readOnlyExpr(const Expr *e);
   static bool readOnlyStmt(const Stmt *s);
-  Analysis &analysis_;
+  Analysis &analysis;
   llvm::DenseMap<const FunctionDecl *, bool> readsOnly_;
 };
 

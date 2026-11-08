@@ -22,7 +22,7 @@ private:
   void findEternals(SourceFile &file);
   void carry(const Type *concrete, const Type *rep, bool out, unsigned depth);
 
-  MemoryPlan &plan_;
+  MemoryPlan &plan;
 };
 
 }

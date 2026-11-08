@@ -116,20 +116,22 @@ class DebugInfo;
 class StreamLowerer;
 class TzModulesLowerer;
 
-class FeatureRegistry;
+class LowererRegistry;
 class Lowering {
 public:
   Lowering(llvm::LLVMContext &ctx, llvm::StringRef moduleName, const llvm::DataLayout &layout);
   void setSourceMgr(const llvm::SourceMgr *sourceMgr) { sourceMgr_ = sourceMgr; }
   const std::string &mismatch() const { return mismatch_; }
-  void setFeatures(const FeatureRegistry *features) { features_ = features; }
+  void setLowerers(const LowererRegistry *registry) {
+    this->lowerers = registry;
+  }
   void setContexts(bool contexts) { contexts_ = contexts; }
-  void setParallelPlan(const ParallelPlan *plan);
+  void setParallelPlan(const ParallelPlan *parallelPlan);
   void setMemoryPlan(const MemoryPlan *memory) { memory_ = memory; }
-  void setDebug(DebugLevel level, bool optimized, bool codeView) {
-    debugLevel_ = level;
-    optimized_ = optimized;
-    codeView_ = codeView;
+  void setDebug(DebugLevel level, bool optimizedBuild, bool withCodeView) {
+    this->debugLevel = level;
+    this->optimized = optimizedBuild;
+    this->codeView = withCodeView;
   }
   bool parallel() const { return parallel_; }
   bool contexts() const { return contexts_; }
@@ -178,7 +180,9 @@ private:
     bool dispatch = false;
   };
   static constexpr uint64_t kVtableOffset = 48;
-  bool hasSubtypes(const Type *type) const { return withSubtypes_.contains(type); }
+  bool hasSubtypes(const Type *type) const {
+    return this->withSubtypes.contains(type);
+  }
   struct ResultLayout {
     llvm::StructType *type = nullptr;
     unsigned value = 0, error = 0, ok = 0, site = 0;
@@ -189,8 +193,8 @@ private:
     std::vector<std::vector<llvm::Value *>> slots;
     std::vector<llvm::BasicBlock *> starts;
   };
-  llvm::DenseMap<const Type *, llvm::Function *> unionRetains_, unionReleases_;
-  std::vector<const Type *> subtypes_;
+  llvm::DenseMap<const Type *, llvm::Function *> unionRetains, unionReleases;
+  std::vector<const Type *> subtypes;
   struct Consumer {
     std::function<llvm::Value *(llvm::Value *)> each;
     std::function<void()> stop;
@@ -237,20 +241,20 @@ private:
     bool dropsPromise = false;
     bool generator = false;
   };
-  bool cleanupNoAwait_ = false;
-  AsyncState *async_ = nullptr;
-  bool usesAsync_ = false;
-  bool esModule_ = false;
-  llvm::StructType *promiseObjTy_ = nullptr;
-  llvm::DenseMap<const Type *, llvm::Constant *> promiseLayouts_, resolverInfos_;
+  bool cleanupNoAwait = false;
+  AsyncState *async = nullptr;
+  bool usesAsync = false;
+  bool esModule = false;
+  llvm::StructType *promiseObjTy = nullptr;
+  llvm::DenseMap<const Type *, llvm::Constant *> promiseLayouts, resolverInfos;
   std::map<std::tuple<const Type *, const Type *, const Type *>, llvm::Function *>
       reactionHandlers_;
-  std::vector<const ClassDecl *> emittedClasses_;
-  llvm::DenseMap<const ClassDecl *, llvm::GlobalVariable *> classInfos_;
-  llvm::SetVector<const Type *> unknownFunctionTypes_;
-  bool reflectsNew_ = false, reflectsGet_ = false;
-  llvm::MDNode *tbaaHeader_ = nullptr, *tbaaData_ = nullptr;
-  llvm::StructType *bytesTy_ = nullptr;
+  std::vector<const ClassDecl *> emittedClasses;
+  llvm::DenseMap<const ClassDecl *, llvm::GlobalVariable *> classInfos;
+  llvm::SetVector<const Type *> unknownFunctionTypes;
+  bool reflectsNew = false, reflectsGet = false;
+  llvm::MDNode *tbaaHeader = nullptr, *tbaaData = nullptr;
+  llvm::StructType *bytesTy = nullptr;
   struct IntlNumber {
     Operand operand;
     int kind;
@@ -266,78 +270,78 @@ private:
   }
   bool ownerMayBeMember(const Type *type) const { return memory_->refMayCarryMember(type); }
   bool isEternal(const VarSymbol *var) const { return memory_->isEternal(var); }
-  bool debugMemory_ = false;
-  std::string storeField_;
-  llvm::SMLoc storeLoc_;
+  bool debugMemory = false;
+  std::string storeField;
+  llvm::SMLoc storeLoc;
   struct PublishedObject {
     llvm::Constant *descriptor;
     llvm::StructType *type;
     std::vector<std::pair<unsigned, const Type *>> values;
   };
-  std::vector<PublishedObject> publishedObjects_;
-  llvm::DenseSet<const FunctionDecl *> aheadFunctions_;
-  llvm::DenseSet<const VarSymbol *> ownedParams_;
-  llvm::DenseSet<const CallExpr *> awaitedCalls_;
+  std::vector<PublishedObject> publishedObjects;
+  llvm::DenseSet<const FunctionDecl *> aheadFunctions;
+  llvm::DenseSet<const VarSymbol *> ownedParams;
+  llvm::DenseSet<const CallExpr *> awaitedCalls;
   bool publishesFrame(const FunctionDecl *fn) const {
     return parallel_ && fn && fn->isAsync && !fn->isGenerator &&
-           (aheadFunctions_.contains(fn) || fn->awaitsAhead);
+           (this->aheadFunctions.contains(fn) || fn->awaitsAhead);
   }
   void noteAwaited(const Expr *operand);
   void noteAwaitedNext(const Stmt *declared, const Stmt *next);
   void markAwaitedCall(const CallExpr *call, const FunctionDecl *target);
-  llvm::DenseMap<llvm::Function *, llvm::Constant *> memberDescriptors_;
-  std::vector<std::pair<llvm::Constant *, const Type *>> boxDescriptors_;
-  llvm::DenseSet<llvm::Value *> eternalSlots_;
-  const ParallelPlan *plan_ = nullptr;
+  llvm::DenseMap<llvm::Function *, llvm::Constant *> memberDescriptors;
+  std::vector<std::pair<llvm::Constant *, const Type *>> boxDescriptors;
+  llvm::DenseSet<llvm::Value *> eternalSlots;
+  const ParallelPlan *plan = nullptr;
   const MemoryPlan *memory_ = nullptr;
-  const FeatureRegistry *features_ = nullptr;
+  const LowererRegistry *lowerers = nullptr;
   bool parallel_ = false;
   bool contexts_ = false;
-  llvm::DenseMap<const Node *, uint32_t> aheadStarts_;
-  llvm::DenseSet<const Node *> freeAwaits_;
-  llvm::DenseSet<const Node *> movableAwaits_;
-  llvm::DenseSet<const char *> orderedLocs_;
-  llvm::DenseSet<const VarSymbol *> libraryState_;
-  llvm::Function *refRetainFn_ = nullptr;
-  llvm::Function *plainInstanceReleaseFn_ = nullptr;
-  llvm::Function *plainObjReleaseFn_ = nullptr;
-  llvm::Function *plainObjRetainFn_ = nullptr;
-  llvm::LLVMContext &ctx_;
+  llvm::DenseMap<const Node *, uint32_t> aheadStarts;
+  llvm::DenseSet<const Node *> freeAwaits;
+  llvm::DenseSet<const Node *> movableAwaits;
+  llvm::DenseSet<const char *> orderedLocs;
+  llvm::DenseSet<const VarSymbol *> libraryState;
+  llvm::Function *refRetainFn = nullptr;
+  llvm::Function *plainInstanceReleaseFn = nullptr;
+  llvm::Function *plainObjReleaseFn = nullptr;
+  llvm::Function *plainObjRetainFn = nullptr;
+  llvm::LLVMContext &ctx;
   std::unique_ptr<llvm::Module> module_;
-  llvm::IRBuilder<> builder_;
-  llvm::StructType *strTy_;
-  llvm::StructType *arrayTy_;
-  llvm::StructType *typeDescTy_;
-  llvm::StructType *fnTy_;
-  llvm::StructType *fnInfoTy_;
-  llvm::StructType *decTy_;
-  llvm::Function *function_ = nullptr;
-  const Type *returnType_ = nullptr;
-  FunctionDecl *currentFn_ = nullptr;
-  llvm::Value *envParam_ = nullptr;
-  llvm::DenseMap<const VarSymbol *, llvm::Value *> addresses_, globals_;
-  llvm::DenseMap<const VarSymbol *, llvm::Value *> boxSlots_, envBoxes_;
-  llvm::DenseMap<const NestedGroup *, llvm::Value *> groupEnvs_;
-  llvm::DenseMap<const void *, EnvLayout> envLayouts_;
-  llvm::DenseMap<const Type *, llvm::Function *> boxDrops_;
-  std::vector<FunctionDecl *> pendingClosures_;
-  bool comparesFunctions_ = false;
-  bool usesTls_ = false;
-  const Type *nativeError_ = nullptr;
-  llvm::DenseMap<const FunctionDecl *, TailGroup *> tailGroupOf_;
-  TailGroup *tailGroup_ = nullptr;
-  llvm::DenseSet<const Stmt *> tailStatements_;
+  llvm::IRBuilder<> builder;
+  llvm::StructType *strTy;
+  llvm::StructType *arrayTy;
+  llvm::StructType *typeDescTy;
+  llvm::StructType *fnTy;
+  llvm::StructType *fnInfoTy;
+  llvm::StructType *decTy;
+  llvm::Function *function = nullptr;
+  const Type *returnType = nullptr;
+  FunctionDecl *currentFn = nullptr;
+  llvm::Value *envParam = nullptr;
+  llvm::DenseMap<const VarSymbol *, llvm::Value *> addresses, globals;
+  llvm::DenseMap<const VarSymbol *, llvm::Value *> boxSlots, envBoxes;
+  llvm::DenseMap<const NestedGroup *, llvm::Value *> groupEnvs;
+  llvm::DenseMap<const void *, EnvLayout> envLayouts;
+  llvm::DenseMap<const Type *, llvm::Function *> boxDrops;
+  std::vector<FunctionDecl *> pendingClosures;
+  bool comparesFunctions = false;
+  bool usesTls = false;
+  const Type *nativeError = nullptr;
+  llvm::DenseMap<const FunctionDecl *, TailGroup *> tailGroupOf;
+  TailGroup *tailGroup = nullptr;
+  llvm::DenseSet<const Stmt *> tailStatements;
   llvm::DenseMap<const FuncSymbol *, llvm::Function *> functions_;
   llvm::DenseMap<const Type *, llvm::Constant *> typeDescriptors_;
-  std::map<std::pair<const Type *, std::vector<unsigned>>, llvm::Constant *> layoutDescriptors_;
-  llvm::StructType *fieldDescTy_;
-  llvm::StructType *layoutDescTy_;
+  std::map<std::pair<const Type *, std::vector<unsigned>>, llvm::Constant *> layoutDescriptors;
+  llvm::StructType *fieldDescTy;
+  llvm::StructType *layoutDescTy;
   llvm::DenseMap<const ClassDecl *, llvm::Constant *> classDescriptors_;
-  llvm::DenseMap<llvm::Function *, llvm::Constant *> dropDescriptors_;
-  std::map<const Type *, InterfaceInfo> interfaces_;
-  llvm::DenseSet<const Type *> withSubtypes_;
-  llvm::DenseMap<const Stmt *, std::string> symbolPrefixes_;
-  std::vector<Scope> scopes_;
+  llvm::DenseMap<llvm::Function *, llvm::Constant *> dropDescriptors;
+  std::map<const Type *, InterfaceInfo> interfaces;
+  llvm::DenseSet<const Type *> withSubtypes;
+  llvm::DenseMap<const Stmt *, std::string> symbolPrefixes;
+  std::vector<Scope> scopes;
   struct JumpTarget {
     llvm::SmallVector<llvm::StringRef, 1> labels;
     bool isLoop;
@@ -347,18 +351,18 @@ private:
     size_t scopeDepth;
     size_t continueDepth = ~size_t(0);
   };
-  std::vector<JumpTarget> targets_;
+  std::vector<JumpTarget> targets;
   InlineGenerator *inline_ = nullptr;
-  Coroutine *coro_ = nullptr;
+  Coroutine *coro = nullptr;
   struct IteratorJob {
     llvm::Function *function;
     Builtin builtin;
     const Type *source, *operand, *result;
   };
-  std::vector<IteratorJob> pendingIterators_;
-  llvm::StructType *promiseTy_ = nullptr;
-  llvm::SmallVector<llvm::StringRef, 1> pendingLabels_;
-  std::vector<llvm::BasicBlock *> chainEnds_;
+  std::vector<IteratorJob> pendingIterators;
+  llvm::StructType *promiseTy = nullptr;
+  llvm::SmallVector<llvm::StringRef, 1> pendingLabels;
+  std::vector<llvm::BasicBlock *> chainEnds;
   struct Runtime {
     llvm::FunctionCallee init;
     llvm::FunctionCallee shutdown;
@@ -435,114 +439,294 @@ private:
     llvm::FunctionCallee objValues;
     llvm::FunctionCallee objEntries;
   } rt_;
-  llvm::Function *retainFn_ = nullptr;
-  llvm::Function *releaseFn_ = nullptr;
-  llvm::Function *arrRetainFn_ = nullptr;
-  llvm::Function *arrReleaseFn_ = nullptr;
-  llvm::Function *objRetainFn_ = nullptr;
-  llvm::Function *objReleaseFn_ = nullptr;
-  llvm::Function *instanceReleaseFn_ = nullptr;
-  llvm::DenseSet<const CallExpr *> tailJumps_;
+  llvm::Function *retainFn = nullptr;
+  llvm::Function *releaseFn = nullptr;
+  llvm::Function *arrRetainFn = nullptr;
+  llvm::Function *arrReleaseFn = nullptr;
+  llvm::Function *objRetainFn = nullptr;
+  llvm::Function *objReleaseFn = nullptr;
+  llvm::Function *instanceReleaseFn = nullptr;
+  llvm::DenseSet<const CallExpr *> tailJumps;
   llvm::SMLoc loc_;
-  DebugLevel debugLevel_ = DebugLevel::None;
-  bool optimized_ = true;
-  bool codeView_ = true;
+  DebugLevel debugLevel = DebugLevel::None;
+  bool optimized = true;
+  bool codeView = true;
   const llvm::SourceMgr *sourceMgr_ = nullptr;
   std::string mismatch_;
 
 public:
   ~Lowering();
 
-  ModuleBuilder &moduleBuilder() const { return *moduleBuilderPart_; }
-  FunctionBuilder &functionBuilder() const { return *functionBuilderPart_; }
-  RuntimeFunctions &runtimeFunctions() const { return *runtimeFunctionsPart_; }
-  FunctionFrame &functionFrame() const { return *functionFramePart_; }
-  RefCounts &refCounts() const { return *refCountsPart_; }
-  OptionalLowerer &optionalLowerer() const { return *optionalLowererPart_; }
-  StmtLowerer &stmtLowerer() const { return *stmtLowererPart_; }
-  LoopLowerer &loopLowerer() const { return *loopLowererPart_; }
-  SwitchLowerer &switchLowerer() const { return *switchLowererPart_; }
-  ExprLowerer &exprLowerer() const { return *exprLowererPart_; }
-  UnaryLowerer &unaryLowerer() const { return *unaryLowererPart_; }
-  BinaryLowerer &binaryLowerer() const { return *binaryLowererPart_; }
-  EqualityLowerer &equalityLowerer() const { return *equalityLowererPart_; }
-  TruthLowerer &truthLowerer() const { return *truthLowererPart_; }
-  AssignLowerer &assignLowerer() const { return *assignLowererPart_; }
-  CallLowerer &callLowerer() const { return *callLowererPart_; }
-  ConsoleLowerer &consoleLowerer() const { return *consoleLowererPart_; }
-  StringLowerer &stringLowerer() const { return *stringLowererPart_; }
-  StringMethodLowerer &stringMethodLowerer() const { return *stringMethodLowererPart_; }
-  MemberLowerer &memberLowerer() const { return *memberLowererPart_; }
-  TypeDescriptors &typeDescriptors() const { return *typeDescriptorsPart_; }
-  ArrayLowerer &arrayLowerer() const { return *arrayLowererPart_; }
-  ArrayMethodLowerer &arrayMethodLowerer() const { return *arrayMethodLowererPart_; }
-  CallbackMethodLowerer &callbackMethodLowerer() const { return *callbackMethodLowererPart_; }
-  PromiseLowerer &promiseLowerer() const { return *promiseLowererPart_; }
-  AsyncLowerer &asyncLowerer() const { return *asyncLowererPart_; }
-  PromiseCombineLowerer &promiseCombineLowerer() const { return *promiseCombineLowererPart_; }
-  ReactionLowerer &reactionLowerer() const { return *reactionLowererPart_; }
-  AsyncBuiltinLowerer &asyncBuiltinLowerer() const { return *asyncBuiltinLowererPart_; }
-  AsyncGeneratorLowerer &asyncGeneratorLowerer() const { return *asyncGeneratorLowererPart_; }
-  MathLowerer &mathLowerer() const { return *mathLowererPart_; }
-  NumberLowerer &numberLowerer() const { return *numberLowererPart_; }
-  ClassDescriptors &classDescriptors() const { return *classDescriptorsPart_; }
-  ClassLowerer &classLowerer() const { return *classLowererPart_; }
-  ClosureLowerer &closureLowerer() const { return *closureLowererPart_; }
-  EnvLowerer &envLowerer() const { return *envLowererPart_; }
-  GroupLowerer &groupLowerer() const { return *groupLowererPart_; }
-  StoreLowerer &storeLowerer() const { return *storeLowererPart_; }
-  WeakRefLowerer &weakRefLowerer() const { return *weakRefLowererPart_; }
-  MemoryDebug &memoryDebug() const { return *memoryDebugPart_; }
-  PublishLowerer &publishLowerer() const { return *publishLowererPart_; }
-  DecoratorLowerer &decoratorLowerer() const { return *decoratorLowererPart_; }
-  DictLowerer &dictLowerer() const { return *dictLowererPart_; }
-  DictMethodLowerer &dictMethodLowerer() const { return *dictMethodLowererPart_; }
-  InheritLowerer &inheritLowerer() const { return *inheritLowererPart_; }
-  CoroutineLowerer &coroutineLowerer() const { return *coroutineLowererPart_; }
-  GeneratorLowerer &generatorLowerer() const { return *generatorLowererPart_; }
-  LazyChainLowerer &lazyChainLowerer() const { return *lazyChainLowererPart_; }
-  InlineGeneratorLowerer &inlineGeneratorLowerer() const { return *inlineGeneratorLowererPart_; }
-  IteratorLowerer &iteratorLowerer() const { return *iteratorLowererPart_; }
-  ObjectLayouts &objectLayouts() const { return *objectLayoutsPart_; }
-  ObjectLowerer &objectLowerer() const { return *objectLowererPart_; }
-  TailCallLowerer &tailCallLowerer() const { return *tailCallLowererPart_; }
-  PlaceLowerer &placeLowerer() const { return *placeLowererPart_; }
-  ExitLowerer &exitLowerer() const { return *exitLowererPart_; }
-  UnionLayout &unionLayout() const { return *unionLayoutPart_; }
-  UnionLowerer &unionLowerer() const { return *unionLowererPart_; }
-  UnionMemberLowerer &unionMemberLowerer() const { return *unionMemberLowererPart_; }
-  UnknownLowerer &unknownLowerer() const { return *unknownLowererPart_; }
-  BytesLowerer &bytesLowerer() const { return *bytesLowererPart_; }
-  BytesCallbackLowerer &bytesCallbackLowerer() const { return *bytesCallbackLowererPart_; }
-  BytesCallLowerer &bytesCallLowerer() const { return *bytesCallLowererPart_; }
-  ChildLowerer &childLowerer() const { return *childLowererPart_; }
-  CryptoLowerer &cryptoLowerer() const { return *cryptoLowererPart_; }
-  DateLowerer &dateLowerer() const { return *dateLowererPart_; }
-  DecimalLowerer &decimalLowerer() const { return *decimalLowererPart_; }
-  LibraryCallLowerer &libraryCallLowerer() const { return *libraryCallLowererPart_; }
-  IntlLowerer &intlLowerer() const { return *intlLowererPart_; }
-  IntlCallLowerer &intlCallLowerer() const { return *intlCallLowererPart_; }
-  JsonLowerer &jsonLowerer() const { return *jsonLowererPart_; }
-  JsonWriters &jsonWriters() const { return *jsonWritersPart_; }
-  FsPromisesLowerer &fsPromisesLowerer() const { return *fsPromisesLowererPart_; }
-  FsLowerer &fsLowerer() const { return *fsLowererPart_; }
-  PathLowerer &pathLowerer() const { return *pathLowererPart_; }
-  OsLowerer &osLowerer() const { return *osLowererPart_; }
-  ObjectMaker &objectMaker() const { return *objectMakerPart_; }
-  ProcessLowerer &processLowerer() const { return *processLowererPart_; }
-  UnknownCastLowerer &unknownCastLowerer() const { return *unknownCastLowererPart_; }
-  ReflectArgsLowerer &reflectArgsLowerer() const { return *reflectArgsLowererPart_; }
-  ClassInfoLowerer &classInfoLowerer() const { return *classInfoLowererPart_; }
-  ReflectDispatchLowerer &reflectDispatchLowerer() const { return *reflectDispatchLowererPart_; }
-  ReflectLowerer &reflectLowerer() const { return *reflectLowererPart_; }
-  RegexLowerer &regexLowerer() const { return *regexLowererPart_; }
-  RegexNativeLowerer &regexNativeLowerer() const { return *regexNativeLowererPart_; }
-  ResultLowerer &resultLowerer() const { return *resultLowererPart_; }
-  ResultCombineLowerer &resultCombineLowerer() const { return *resultCombineLowererPart_; }
-  ErrSites &errSites() const { return *errSitesPart_; }
-  DebugInfo &debugInfo() const { return *debugInfoPart_; }
-  StreamLowerer &streamLowerer() const { return *streamLowererPart_; }
-  TzModulesLowerer &tzModulesLowerer() const { return *tzModulesLowererPart_; }
+  ModuleBuilder &moduleBuilder() const {
+    return *this->moduleBuilderPart;
+  }
+  FunctionBuilder &functionBuilder() const {
+    return *this->functionBuilderPart;
+  }
+  RuntimeFunctions &runtimeFunctions() const {
+    return *this->runtimeFunctionsPart;
+  }
+  FunctionFrame &functionFrame() const {
+    return *this->functionFramePart;
+  }
+  RefCounts &refCounts() const {
+    return *this->refCountsPart;
+  }
+  OptionalLowerer &optionalLowerer() const {
+    return *this->optionalLowererPart;
+  }
+  StmtLowerer &stmtLowerer() const {
+    return *this->stmtLowererPart;
+  }
+  LoopLowerer &loopLowerer() const {
+    return *this->loopLowererPart;
+  }
+  SwitchLowerer &switchLowerer() const {
+    return *this->switchLowererPart;
+  }
+  ExprLowerer &exprLowerer() const {
+    return *this->exprLowererPart;
+  }
+  UnaryLowerer &unaryLowerer() const {
+    return *this->unaryLowererPart;
+  }
+  BinaryLowerer &binaryLowerer() const {
+    return *this->binaryLowererPart;
+  }
+  EqualityLowerer &equalityLowerer() const {
+    return *this->equalityLowererPart;
+  }
+  TruthLowerer &truthLowerer() const {
+    return *this->truthLowererPart;
+  }
+  AssignLowerer &assignLowerer() const {
+    return *this->assignLowererPart;
+  }
+  CallLowerer &callLowerer() const {
+    return *this->callLowererPart;
+  }
+  ConsoleLowerer &consoleLowerer() const {
+    return *this->consoleLowererPart;
+  }
+  StringLowerer &stringLowerer() const {
+    return *this->stringLowererPart;
+  }
+  StringMethodLowerer &stringMethodLowerer() const {
+    return *this->stringMethodLowererPart;
+  }
+  MemberLowerer &memberLowerer() const {
+    return *this->memberLowererPart;
+  }
+  TypeDescriptors &typeDescriptors() const {
+    return *this->typeDescriptorsPart;
+  }
+  ArrayLowerer &arrayLowerer() const {
+    return *this->arrayLowererPart;
+  }
+  ArrayMethodLowerer &arrayMethodLowerer() const {
+    return *this->arrayMethodLowererPart;
+  }
+  CallbackMethodLowerer &callbackMethodLowerer() const {
+    return *this->callbackMethodLowererPart;
+  }
+  PromiseLowerer &promiseLowerer() const {
+    return *this->promiseLowererPart;
+  }
+  AsyncLowerer &asyncLowerer() const {
+    return *this->asyncLowererPart;
+  }
+  PromiseCombineLowerer &promiseCombineLowerer() const {
+    return *this->promiseCombineLowererPart;
+  }
+  ReactionLowerer &reactionLowerer() const {
+    return *this->reactionLowererPart;
+  }
+  AsyncBuiltinLowerer &asyncBuiltinLowerer() const {
+    return *this->asyncBuiltinLowererPart;
+  }
+  AsyncGeneratorLowerer &asyncGeneratorLowerer() const {
+    return *this->asyncGeneratorLowererPart;
+  }
+  MathLowerer &mathLowerer() const {
+    return *this->mathLowererPart;
+  }
+  NumberLowerer &numberLowerer() const {
+    return *this->numberLowererPart;
+  }
+  ClassDescriptors &classDescriptors() const {
+    return *this->classDescriptorsPart;
+  }
+  ClassLowerer &classLowerer() const {
+    return *this->classLowererPart;
+  }
+  ClosureLowerer &closureLowerer() const {
+    return *this->closureLowererPart;
+  }
+  EnvLowerer &envLowerer() const {
+    return *this->envLowererPart;
+  }
+  GroupLowerer &groupLowerer() const {
+    return *this->groupLowererPart;
+  }
+  StoreLowerer &storeLowerer() const {
+    return *this->storeLowererPart;
+  }
+  WeakRefLowerer &weakRefLowerer() const {
+    return *this->weakRefLowererPart;
+  }
+  MemoryDebug &memoryDebug() const {
+    return *this->memoryDebugPart;
+  }
+  PublishLowerer &publishLowerer() const {
+    return *this->publishLowererPart;
+  }
+  DecoratorLowerer &decoratorLowerer() const {
+    return *this->decoratorLowererPart;
+  }
+  DictLowerer &dictLowerer() const {
+    return *this->dictLowererPart;
+  }
+  DictMethodLowerer &dictMethodLowerer() const {
+    return *this->dictMethodLowererPart;
+  }
+  InheritLowerer &inheritLowerer() const {
+    return *this->inheritLowererPart;
+  }
+  CoroutineLowerer &coroutineLowerer() const {
+    return *this->coroutineLowererPart;
+  }
+  GeneratorLowerer &generatorLowerer() const {
+    return *this->generatorLowererPart;
+  }
+  LazyChainLowerer &lazyChainLowerer() const {
+    return *this->lazyChainLowererPart;
+  }
+  InlineGeneratorLowerer &inlineGeneratorLowerer() const {
+    return *this->inlineGeneratorLowererPart;
+  }
+  IteratorLowerer &iteratorLowerer() const {
+    return *this->iteratorLowererPart;
+  }
+  ObjectLayouts &objectLayouts() const {
+    return *this->objectLayoutsPart;
+  }
+  ObjectLowerer &objectLowerer() const {
+    return *this->objectLowererPart;
+  }
+  TailCallLowerer &tailCallLowerer() const {
+    return *this->tailCallLowererPart;
+  }
+  PlaceLowerer &placeLowerer() const {
+    return *this->placeLowererPart;
+  }
+  ExitLowerer &exitLowerer() const {
+    return *this->exitLowererPart;
+  }
+  UnionLayout &unionLayout() const {
+    return *this->unionLayoutPart;
+  }
+  UnionLowerer &unionLowerer() const {
+    return *this->unionLowererPart;
+  }
+  UnionMemberLowerer &unionMemberLowerer() const {
+    return *this->unionMemberLowererPart;
+  }
+  UnknownLowerer &unknownLowerer() const {
+    return *this->unknownLowererPart;
+  }
+  BytesLowerer &bytesLowerer() const {
+    return *this->bytesLowererPart;
+  }
+  BytesCallbackLowerer &bytesCallbackLowerer() const {
+    return *this->bytesCallbackLowererPart;
+  }
+  BytesCallLowerer &bytesCallLowerer() const {
+    return *this->bytesCallLowererPart;
+  }
+  ChildLowerer &childLowerer() const {
+    return *this->childLowererPart;
+  }
+  CryptoLowerer &cryptoLowerer() const {
+    return *this->cryptoLowererPart;
+  }
+  DateLowerer &dateLowerer() const {
+    return *this->dateLowererPart;
+  }
+  DecimalLowerer &decimalLowerer() const {
+    return *this->decimalLowererPart;
+  }
+  LibraryCallLowerer &libraryCallLowerer() const {
+    return *this->libraryCallLowererPart;
+  }
+  IntlLowerer &intlLowerer() const {
+    return *this->intlLowererPart;
+  }
+  IntlCallLowerer &intlCallLowerer() const {
+    return *this->intlCallLowererPart;
+  }
+  JsonLowerer &jsonLowerer() const {
+    return *this->jsonLowererPart;
+  }
+  JsonWriters &jsonWriters() const {
+    return *this->jsonWritersPart;
+  }
+  FsPromisesLowerer &fsPromisesLowerer() const {
+    return *this->fsPromisesLowererPart;
+  }
+  FsLowerer &fsLowerer() const {
+    return *this->fsLowererPart;
+  }
+  PathLowerer &pathLowerer() const {
+    return *this->pathLowererPart;
+  }
+  OsLowerer &osLowerer() const {
+    return *this->osLowererPart;
+  }
+  ObjectMaker &objectMaker() const {
+    return *this->objectMakerPart;
+  }
+  ProcessLowerer &processLowerer() const {
+    return *this->processLowererPart;
+  }
+  UnknownCastLowerer &unknownCastLowerer() const {
+    return *this->unknownCastLowererPart;
+  }
+  ReflectArgsLowerer &reflectArgsLowerer() const {
+    return *this->reflectArgsLowererPart;
+  }
+  ClassInfoLowerer &classInfoLowerer() const {
+    return *this->classInfoLowererPart;
+  }
+  ReflectDispatchLowerer &reflectDispatchLowerer() const {
+    return *this->reflectDispatchLowererPart;
+  }
+  ReflectLowerer &reflectLowerer() const {
+    return *this->reflectLowererPart;
+  }
+  RegexLowerer &regexLowerer() const {
+    return *this->regexLowererPart;
+  }
+  RegexNativeLowerer &regexNativeLowerer() const {
+    return *this->regexNativeLowererPart;
+  }
+  ResultLowerer &resultLowerer() const {
+    return *this->resultLowererPart;
+  }
+  ResultCombineLowerer &resultCombineLowerer() const {
+    return *this->resultCombineLowererPart;
+  }
+  ErrSites &errSites() const {
+    return *this->errSitesPart;
+  }
+  DebugInfo &debugInfo() const {
+    return *this->debugInfoPart;
+  }
+  StreamLowerer &streamLowerer() const {
+    return *this->streamLowererPart;
+  }
+  TzModulesLowerer &tzModulesLowerer() const {
+    return *this->tzModulesLowererPart;
+  }
 
 private:
   friend class ModuleBuilder;
@@ -642,96 +826,96 @@ private:
   friend class DebugTypes;
   friend class StreamLowerer;
   friend class TzModulesLowerer;
-  std::unique_ptr<ModuleBuilder> moduleBuilderPart_;
-  std::unique_ptr<FunctionBuilder> functionBuilderPart_;
-  std::unique_ptr<RuntimeFunctions> runtimeFunctionsPart_;
-  std::unique_ptr<FunctionFrame> functionFramePart_;
-  std::unique_ptr<RefCounts> refCountsPart_;
-  std::unique_ptr<OptionalLowerer> optionalLowererPart_;
-  std::unique_ptr<StmtLowerer> stmtLowererPart_;
-  std::unique_ptr<LoopLowerer> loopLowererPart_;
-  std::unique_ptr<SwitchLowerer> switchLowererPart_;
-  std::unique_ptr<ExprLowerer> exprLowererPart_;
-  std::unique_ptr<UnaryLowerer> unaryLowererPart_;
-  std::unique_ptr<BinaryLowerer> binaryLowererPart_;
-  std::unique_ptr<EqualityLowerer> equalityLowererPart_;
-  std::unique_ptr<TruthLowerer> truthLowererPart_;
-  std::unique_ptr<AssignLowerer> assignLowererPart_;
-  std::unique_ptr<CallLowerer> callLowererPart_;
-  std::unique_ptr<ConsoleLowerer> consoleLowererPart_;
-  std::unique_ptr<StringLowerer> stringLowererPart_;
-  std::unique_ptr<StringMethodLowerer> stringMethodLowererPart_;
-  std::unique_ptr<MemberLowerer> memberLowererPart_;
-  std::unique_ptr<TypeDescriptors> typeDescriptorsPart_;
-  std::unique_ptr<ArrayLowerer> arrayLowererPart_;
-  std::unique_ptr<ArrayMethodLowerer> arrayMethodLowererPart_;
-  std::unique_ptr<CallbackMethodLowerer> callbackMethodLowererPart_;
-  std::unique_ptr<PromiseLowerer> promiseLowererPart_;
-  std::unique_ptr<AsyncLowerer> asyncLowererPart_;
-  std::unique_ptr<PromiseCombineLowerer> promiseCombineLowererPart_;
-  std::unique_ptr<ReactionLowerer> reactionLowererPart_;
-  std::unique_ptr<AsyncBuiltinLowerer> asyncBuiltinLowererPart_;
-  std::unique_ptr<AsyncGeneratorLowerer> asyncGeneratorLowererPart_;
-  std::unique_ptr<MathLowerer> mathLowererPart_;
-  std::unique_ptr<NumberLowerer> numberLowererPart_;
-  std::unique_ptr<ClassDescriptors> classDescriptorsPart_;
-  std::unique_ptr<ClassLowerer> classLowererPart_;
-  std::unique_ptr<ClosureLowerer> closureLowererPart_;
-  std::unique_ptr<EnvLowerer> envLowererPart_;
-  std::unique_ptr<GroupLowerer> groupLowererPart_;
-  std::unique_ptr<StoreLowerer> storeLowererPart_;
-  std::unique_ptr<WeakRefLowerer> weakRefLowererPart_;
-  std::unique_ptr<MemoryDebug> memoryDebugPart_;
-  std::unique_ptr<PublishLowerer> publishLowererPart_;
-  std::unique_ptr<DecoratorLowerer> decoratorLowererPart_;
-  std::unique_ptr<DictLowerer> dictLowererPart_;
-  std::unique_ptr<DictMethodLowerer> dictMethodLowererPart_;
-  std::unique_ptr<InheritLowerer> inheritLowererPart_;
-  std::unique_ptr<CoroutineLowerer> coroutineLowererPart_;
-  std::unique_ptr<GeneratorLowerer> generatorLowererPart_;
-  std::unique_ptr<LazyChainLowerer> lazyChainLowererPart_;
-  std::unique_ptr<InlineGeneratorLowerer> inlineGeneratorLowererPart_;
-  std::unique_ptr<IteratorLowerer> iteratorLowererPart_;
-  std::unique_ptr<ObjectLayouts> objectLayoutsPart_;
-  std::unique_ptr<ObjectLowerer> objectLowererPart_;
-  std::unique_ptr<TailCallLowerer> tailCallLowererPart_;
-  std::unique_ptr<PlaceLowerer> placeLowererPart_;
-  std::unique_ptr<ExitLowerer> exitLowererPart_;
-  std::unique_ptr<UnionLayout> unionLayoutPart_;
-  std::unique_ptr<UnionLowerer> unionLowererPart_;
-  std::unique_ptr<UnionMemberLowerer> unionMemberLowererPart_;
-  std::unique_ptr<UnknownLowerer> unknownLowererPart_;
-  std::unique_ptr<BytesLowerer> bytesLowererPart_;
-  std::unique_ptr<BytesCallbackLowerer> bytesCallbackLowererPart_;
-  std::unique_ptr<BytesCallLowerer> bytesCallLowererPart_;
-  std::unique_ptr<ChildLowerer> childLowererPart_;
-  std::unique_ptr<CryptoLowerer> cryptoLowererPart_;
-  std::unique_ptr<DateLowerer> dateLowererPart_;
-  std::unique_ptr<DecimalLowerer> decimalLowererPart_;
-  std::unique_ptr<LibraryCallLowerer> libraryCallLowererPart_;
-  std::unique_ptr<IntlLowerer> intlLowererPart_;
-  std::unique_ptr<IntlCallLowerer> intlCallLowererPart_;
-  std::unique_ptr<JsonLowerer> jsonLowererPart_;
-  std::unique_ptr<JsonWriters> jsonWritersPart_;
-  std::unique_ptr<FsPromisesLowerer> fsPromisesLowererPart_;
-  std::unique_ptr<FsLowerer> fsLowererPart_;
-  std::unique_ptr<PathLowerer> pathLowererPart_;
-  std::unique_ptr<OsLowerer> osLowererPart_;
-  std::unique_ptr<ObjectMaker> objectMakerPart_;
-  std::unique_ptr<ProcessLowerer> processLowererPart_;
-  std::unique_ptr<UnknownCastLowerer> unknownCastLowererPart_;
-  std::unique_ptr<ReflectArgsLowerer> reflectArgsLowererPart_;
-  std::unique_ptr<ClassInfoLowerer> classInfoLowererPart_;
-  std::unique_ptr<ReflectDispatchLowerer> reflectDispatchLowererPart_;
-  std::unique_ptr<ReflectLowerer> reflectLowererPart_;
-  std::unique_ptr<RegexLowerer> regexLowererPart_;
-  std::unique_ptr<RegexNativeLowerer> regexNativeLowererPart_;
-  std::unique_ptr<ResultLowerer> resultLowererPart_;
-  std::unique_ptr<ResultCombineLowerer> resultCombineLowererPart_;
-  std::unique_ptr<ErrSites> errSitesPart_;
-  std::unique_ptr<DebugInfo> debugInfoPart_;
-  std::unique_ptr<StreamLowerer> streamLowererPart_;
-  std::unique_ptr<TzModulesLowerer> tzModulesLowererPart_;
+  std::unique_ptr<ModuleBuilder> moduleBuilderPart;
+  std::unique_ptr<FunctionBuilder> functionBuilderPart;
+  std::unique_ptr<RuntimeFunctions> runtimeFunctionsPart;
+  std::unique_ptr<FunctionFrame> functionFramePart;
+  std::unique_ptr<RefCounts> refCountsPart;
+  std::unique_ptr<OptionalLowerer> optionalLowererPart;
+  std::unique_ptr<StmtLowerer> stmtLowererPart;
+  std::unique_ptr<LoopLowerer> loopLowererPart;
+  std::unique_ptr<SwitchLowerer> switchLowererPart;
+  std::unique_ptr<ExprLowerer> exprLowererPart;
+  std::unique_ptr<UnaryLowerer> unaryLowererPart;
+  std::unique_ptr<BinaryLowerer> binaryLowererPart;
+  std::unique_ptr<EqualityLowerer> equalityLowererPart;
+  std::unique_ptr<TruthLowerer> truthLowererPart;
+  std::unique_ptr<AssignLowerer> assignLowererPart;
+  std::unique_ptr<CallLowerer> callLowererPart;
+  std::unique_ptr<ConsoleLowerer> consoleLowererPart;
+  std::unique_ptr<StringLowerer> stringLowererPart;
+  std::unique_ptr<StringMethodLowerer> stringMethodLowererPart;
+  std::unique_ptr<MemberLowerer> memberLowererPart;
+  std::unique_ptr<TypeDescriptors> typeDescriptorsPart;
+  std::unique_ptr<ArrayLowerer> arrayLowererPart;
+  std::unique_ptr<ArrayMethodLowerer> arrayMethodLowererPart;
+  std::unique_ptr<CallbackMethodLowerer> callbackMethodLowererPart;
+  std::unique_ptr<PromiseLowerer> promiseLowererPart;
+  std::unique_ptr<AsyncLowerer> asyncLowererPart;
+  std::unique_ptr<PromiseCombineLowerer> promiseCombineLowererPart;
+  std::unique_ptr<ReactionLowerer> reactionLowererPart;
+  std::unique_ptr<AsyncBuiltinLowerer> asyncBuiltinLowererPart;
+  std::unique_ptr<AsyncGeneratorLowerer> asyncGeneratorLowererPart;
+  std::unique_ptr<MathLowerer> mathLowererPart;
+  std::unique_ptr<NumberLowerer> numberLowererPart;
+  std::unique_ptr<ClassDescriptors> classDescriptorsPart;
+  std::unique_ptr<ClassLowerer> classLowererPart;
+  std::unique_ptr<ClosureLowerer> closureLowererPart;
+  std::unique_ptr<EnvLowerer> envLowererPart;
+  std::unique_ptr<GroupLowerer> groupLowererPart;
+  std::unique_ptr<StoreLowerer> storeLowererPart;
+  std::unique_ptr<WeakRefLowerer> weakRefLowererPart;
+  std::unique_ptr<MemoryDebug> memoryDebugPart;
+  std::unique_ptr<PublishLowerer> publishLowererPart;
+  std::unique_ptr<DecoratorLowerer> decoratorLowererPart;
+  std::unique_ptr<DictLowerer> dictLowererPart;
+  std::unique_ptr<DictMethodLowerer> dictMethodLowererPart;
+  std::unique_ptr<InheritLowerer> inheritLowererPart;
+  std::unique_ptr<CoroutineLowerer> coroutineLowererPart;
+  std::unique_ptr<GeneratorLowerer> generatorLowererPart;
+  std::unique_ptr<LazyChainLowerer> lazyChainLowererPart;
+  std::unique_ptr<InlineGeneratorLowerer> inlineGeneratorLowererPart;
+  std::unique_ptr<IteratorLowerer> iteratorLowererPart;
+  std::unique_ptr<ObjectLayouts> objectLayoutsPart;
+  std::unique_ptr<ObjectLowerer> objectLowererPart;
+  std::unique_ptr<TailCallLowerer> tailCallLowererPart;
+  std::unique_ptr<PlaceLowerer> placeLowererPart;
+  std::unique_ptr<ExitLowerer> exitLowererPart;
+  std::unique_ptr<UnionLayout> unionLayoutPart;
+  std::unique_ptr<UnionLowerer> unionLowererPart;
+  std::unique_ptr<UnionMemberLowerer> unionMemberLowererPart;
+  std::unique_ptr<UnknownLowerer> unknownLowererPart;
+  std::unique_ptr<BytesLowerer> bytesLowererPart;
+  std::unique_ptr<BytesCallbackLowerer> bytesCallbackLowererPart;
+  std::unique_ptr<BytesCallLowerer> bytesCallLowererPart;
+  std::unique_ptr<ChildLowerer> childLowererPart;
+  std::unique_ptr<CryptoLowerer> cryptoLowererPart;
+  std::unique_ptr<DateLowerer> dateLowererPart;
+  std::unique_ptr<DecimalLowerer> decimalLowererPart;
+  std::unique_ptr<LibraryCallLowerer> libraryCallLowererPart;
+  std::unique_ptr<IntlLowerer> intlLowererPart;
+  std::unique_ptr<IntlCallLowerer> intlCallLowererPart;
+  std::unique_ptr<JsonLowerer> jsonLowererPart;
+  std::unique_ptr<JsonWriters> jsonWritersPart;
+  std::unique_ptr<FsPromisesLowerer> fsPromisesLowererPart;
+  std::unique_ptr<FsLowerer> fsLowererPart;
+  std::unique_ptr<PathLowerer> pathLowererPart;
+  std::unique_ptr<OsLowerer> osLowererPart;
+  std::unique_ptr<ObjectMaker> objectMakerPart;
+  std::unique_ptr<ProcessLowerer> processLowererPart;
+  std::unique_ptr<UnknownCastLowerer> unknownCastLowererPart;
+  std::unique_ptr<ReflectArgsLowerer> reflectArgsLowererPart;
+  std::unique_ptr<ClassInfoLowerer> classInfoLowererPart;
+  std::unique_ptr<ReflectDispatchLowerer> reflectDispatchLowererPart;
+  std::unique_ptr<ReflectLowerer> reflectLowererPart;
+  std::unique_ptr<RegexLowerer> regexLowererPart;
+  std::unique_ptr<RegexNativeLowerer> regexNativeLowererPart;
+  std::unique_ptr<ResultLowerer> resultLowererPart;
+  std::unique_ptr<ResultCombineLowerer> resultCombineLowererPart;
+  std::unique_ptr<ErrSites> errSitesPart;
+  std::unique_ptr<DebugInfo> debugInfoPart;
+  std::unique_ptr<StreamLowerer> streamLowererPart;
+  std::unique_ptr<TzModulesLowerer> tzModulesLowererPart;
 };
 
 }

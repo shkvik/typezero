@@ -49,7 +49,7 @@ void LspChannel::send(const llvm::json::Value &message) {
   std::string text;
   llvm::raw_string_ostream stream(text);
   stream << message;
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(this->mutex);
   std::fprintf(stdout, "Content-Length: %zu\r\n\r\n", text.size());
   std::fwrite(text.data(), 1, text.size(), stdout);
   std::fflush(stdout);

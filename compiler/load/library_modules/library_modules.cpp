@@ -6,6 +6,7 @@
 #include "compiler/packages/package/package.h"
 #include "compiler/packages/specifier/specifier.h"
 #include "compiler/program/ast/ast.h"
+#include "compiler/program/library/library_module_names/library_module_names.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -105,10 +106,23 @@ const ModuleParts kModuleParts[] = {
     {"fetch.tz", {"fetch_proxy.tz"}},
 };
 
+struct BuiltinFile {
+  BuiltinText text;
+  llvm::StringLiteral file;
+  llvm::StringLiteral name;
+};
+
+constexpr BuiltinFile kBuiltinFiles[] = {
+    {BuiltinText::PRELUDE, "prelude.d.tz", "<tz>"},
+    {BuiltinText::ITERATE, "iterate.tz", "<tz>"},
+    {BuiltinText::FILE_SYSTEM_ERRORS, "fs_errors.d.tz", "<node:fs errors>"},
+    {BuiltinText::CRYPTO_ERRORS, "crypto_errors.d.tz", "<node:crypto errors>"},
+    {BuiltinText::CHILD_PROCESS_ERRORS, "child_errors.d.tz", "<node:child_process errors>"},
+};
 }
 
 LibraryModules::LibraryModules(Loader &loader)
-    : loader_(loader) {}
+    : loader(loader) {}
 
 void LibraryModules::appendPart(SourceFile &file, SourceFile &part) {
   llvm::append_range(file.items, part.items);
@@ -126,7 +140,7 @@ std::optional<SourceFile> LibraryModules::parseLibraryFile(llvm::StringRef file,
                                                            llvm::StringRef name, llvm::SMLoc loc,
                                                            std::string &fullPath,
                                                            std::vector<unsigned> &buffers) {
-  std::string tree = loader_.treeFile(file);
+  std::string tree = this->loader.treeFile(file);
   llvm::SmallString<256> path;
   if (tree.empty()) {
     std::string self = llvm::sys::fs::getMainExecutable(nullptr, (void *)(intptr_t)&loadProgram);
@@ -136,29 +150,41 @@ std::optional<SourceFile> LibraryModules::parseLibraryFile(llvm::StringRef file,
     path = tree;
   }
   fullPath = std::string(path);
-  auto buffer = tree.empty() ? llvm::MemoryBuffer::getFile(path) : loader_.read(path);
+  auto buffer = tree.empty() ? llvm::MemoryBuffer::getFile(path) : this->loader.read(path);
   if (!buffer) {
     std::string advice = tree.empty() ? "; reinstall tz" : "";
-    loader_.diags_.error(loc, "cannot read '" + std::string(path) + "', the code of '" + name +
-                                  "' that tz has built in: " + buffer.getError().message() +
-                                  advice);
+    this->loader.diags.error(loc, "cannot read '" + std::string(path) + "', the code of '" + name +
+                                      "' that tz has built in: " + buffer.getError().message() +
+                                      advice);
     return std::nullopt;
   }
-  unsigned id = loader_.sourceMgr_.AddNewSourceBuffer(
+  unsigned id = this->loader.sourceMgr_.AddNewSourceBuffer(
       llvm::MemoryBuffer::getMemBufferCopy((*buffer)->getBuffer(), name), llvm::SMLoc());
   buffers.push_back(id);
-  loader_.libraryBuffers_[id] = std::string(path);
+  this->loader.libraryBuffers[id] = std::string(path);
   if (!tree.empty()) {
-    loader_.treeBuffers_[id] = tree;
+    this->loader.treeBuffers[id] = tree;
   }
-  llvm::StringRef text = loader_.sourceMgr_.getMemoryBuffer(id)->getBuffer();
-  Lexer lexer(text, loader_.diags_);
+  llvm::StringRef text = this->loader.sourceMgr_.getMemoryBuffer(id)->getBuffer();
+  Lexer lexer(text, this->loader.diags);
 
-  return Parser(lexer, loader_.ctx_, loader_.diags_, true).parseSourceFile();
+  return Parser(lexer, this->loader.ctx, this->loader.diags, true).parseSourceFile();
+}
+
+void LibraryModules::loadBuiltins(BuiltinDeclarations &builtins) {
+  for (const BuiltinFile &builtin : kBuiltinFiles) {
+    std::string fullPath;
+    std::vector<unsigned> buffers;
+    std::optional<SourceFile> parsed =
+        this->parseLibraryFile(builtin.file, builtin.name, llvm::SMLoc(), fullPath, buffers);
+    if (parsed.has_value()) {
+      builtins.setItems(builtin.text, std::move(parsed->items));
+    }
+  }
 }
 
 Module *LibraryModules::libraryModule(llvm::StringRef file, llvm::StringRef name, llvm::SMLoc loc) {
-  auto [it, inserted] = loader_.libraries_.try_emplace(name, nullptr);
+  auto [it, inserted] = this->loader.libraries.try_emplace(name, nullptr);
   if (!inserted) {
     return it->second;
   }
@@ -181,22 +207,22 @@ Module *LibraryModules::libraryModule(llvm::StringRef file, llvm::StringRef name
       LibraryModules::appendPart(*parsed, *rest);
     }
   }
-  Module *module = loader_.ctx_.newModule();
+  Module *module = this->loader.ctx.newModule();
   module->path = path;
   module->name = name.str();
   module->builtin = true;
   module->buffers = std::move(buffers);
   for (unsigned id : module->buffers) {
-    module->bufferPaths.push_back({id, loader_.libraryBuffers_.lookup(id)});
-    auto tree = loader_.treeBuffers_.find(id);
-    if (tree != loader_.treeBuffers_.end()) {
+    module->bufferPaths.push_back({id, this->loader.libraryBuffers.lookup(id)});
+    auto tree = this->loader.treeBuffers.find(id);
+    if (tree != this->loader.treeBuffers.end()) {
       module->bufferFiles.push_back({id, tree->second});
     }
   }
   module->file = std::move(*parsed);
-  loader_.loadDeclarations(module, path, true);
-  loader_.realPaths_[module] = path;
-  loader_.states_[module] = Loader::State::New;
+  this->loader.loadDeclarations(module, path, true);
+  this->loader.realPaths[module] = path;
+  this->loader.states[module] = Loader::State::New;
   it->second = module;
 
   return module;
@@ -206,8 +232,8 @@ void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) 
   llvm::StringMap<const char *> mentions;
   const char *subtle = nullptr;
   const char *locale = nullptr;
-  bool muted = loader_.diags_.setMuted(true);
-  Lexer lexer(text, loader_.diags_);
+  bool muted = this->loader.diags.setMuted(true);
+  Lexer lexer(text, this->loader.diags);
   bool property = false;
   Token before[2];
   static const llvm::StringSet<> names = [] {
@@ -235,7 +261,7 @@ void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) 
     before[0] = before[1];
     before[1] = token;
   }
-  loader_.diags_.setMuted(muted);
+  this->loader.diags.setMuted(muted);
   if (mentions.empty() && !subtle && !locale) {
     return;
   }
@@ -294,13 +320,13 @@ void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) 
   if (subtle) {
     llvm::SMLoc loc = llvm::SMLoc::getFromPointer(subtle);
     if (ImportDecl *decl = importOf("webcrypto.tz", "tz:webcrypto", loc)) {
-      decl->names.push_back({"subtle", loc, kSubtleName, loc});
+      decl->names.push_back({"subtle", loc, LibraryModuleNames::kSubtleName, loc});
     }
   }
   if (locale && module->name != "tz:locale") {
     llvm::SMLoc loc = llvm::SMLoc::getFromPointer(locale);
     if (ImportDecl *decl = importOf("locale.tz", "tz:locale", loc)) {
-      decl->names.push_back({"Locale", loc, kIntlLocaleName, loc});
+      decl->names.push_back({"Locale", loc, LibraryModuleNames::kIntlLocaleName, loc});
     }
   }
   for (ImportDecl &decl : imports) {
@@ -347,13 +373,13 @@ void LibraryModules::importFsStreams(Module *module, llvm::StringRef text) {
     return;
   }
   if (streams.names.empty()) {
-    bool muted = loader_.diags_.setMuted(true);
-    Lexer lexer(text, loader_.diags_);
+    bool muted = this->loader.diags.setMuted(true);
+    Lexer lexer(text, this->loader.diags);
     std::vector<Token> tokens;
     for (Token token = lexer.next(); !token.is(Tok::Eof); token = lexer.next()) {
       tokens.push_back(token);
     }
-    loader_.diags_.setMuted(muted);
+    this->loader.diags.setMuted(muted);
     auto is = [&](size_t i, Tok kind, llvm::StringRef text) {
       return i < tokens.size() && tokens[i].is(kind) && (text.empty() || tokens[i].text == text);
     };
@@ -424,8 +450,8 @@ void LibraryModules::importProcessSignals(Module *module, llvm::StringRef text) 
   if (!text.contains("process")) {
     return;
   }
-  bool muted = loader_.diags_.setMuted(true);
-  Lexer lexer(text, loader_.diags_);
+  bool muted = this->loader.diags.setMuted(true);
+  Lexer lexer(text, this->loader.diags);
   Token before[3];
   const char *at = nullptr;
   for (Token token = lexer.next(); !token.is(Tok::Eof) && !at; token = lexer.next()) {
@@ -439,7 +465,7 @@ void LibraryModules::importProcessSignals(Module *module, llvm::StringRef text) 
     before[1] = before[2];
     before[2] = token;
   }
-  loader_.diags_.setMuted(muted);
+  this->loader.diags.setMuted(muted);
   if (!at) {
     return;
   }

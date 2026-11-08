@@ -20,12 +20,12 @@ private:
   bool add(llvm::DenseSet<const Type *> &set, const Type *t);
   bool addType(const Type *t);
 
-  MemoryPlan &plan_;
-  const CycleScanner &scan_;
-  CycleFinder &finder_;
-  std::vector<unsigned> callbacks_;
-  std::vector<std::pair<const Type *, std::vector<unsigned>>> promised_;
-  std::vector<bool> held_;
+  MemoryPlan &plan;
+  const CycleScanner &scan;
+  CycleFinder &finder;
+  std::vector<unsigned> callbacks;
+  std::vector<std::pair<const Type *, std::vector<unsigned>>> promised;
+  std::vector<bool> held;
 };
 
 }

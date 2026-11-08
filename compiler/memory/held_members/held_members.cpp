@@ -5,35 +5,37 @@ namespace tz {
 using Kind = CycleGraph::Kind;
 
 HeldMembers::HeldMembers(MemoryPlan &plan, const CycleScanner &scan, CycleFinder &finder)
-    : plan_(plan), scan_(scan), finder_(finder) {}
+    : plan(plan),
+      scan(scan),
+      finder(finder) {}
 
 bool HeldMembers::isMemberNode(unsigned v) const {
-  const CycleGraph::Node &node = finder_.graph.nodes[v];
+  const CycleGraph::Node &node = this->finder.graph.nodes[v];
   switch (node.kind) {
   case Kind::TypeNode:
-    return plan_.cyclicTypes.contains(static_cast<const Type *>(node.key));
+    return this->plan.cyclicTypes.contains(static_cast<const Type *>(node.key));
   case Kind::EnvNode:
-    return plan_.cyclicEnvs.contains(node.key);
+    return this->plan.cyclicEnvs.contains(node.key);
   case Kind::BoxNode:
-    return plan_.cyclicBoxes.contains(static_cast<const Type *>(node.key));
+    return this->plan.cyclicBoxes.contains(static_cast<const Type *>(node.key));
   default:
     return false;
   }
 }
 
 bool HeldMembers::passesOn(unsigned v) const {
-  Kind kind = finder_.graph.nodes[v].kind;
+  Kind kind = this->finder.graph.nodes[v].kind;
 
   return kind == Kind::FnNode || kind == Kind::AnyObjectNode || kind == Kind::UnknownNode;
 }
 
 void HeldMembers::findHeld() {
-  const CycleGraph &graph = finder_.graph;
-  held_.assign(graph.nodes.size(), false);
+  const CycleGraph &graph = this->finder.graph;
+  this->held.assign(graph.nodes.size(), false);
   std::vector<unsigned> work;
   std::vector<bool> seen(graph.nodes.size(), false);
   auto reach = [&](unsigned v) {
-    held_[v] = true;
+    this->held[v] = true;
     if (passesOn(v) && !seen[v]) {
       seen[v] = true;
       work.push_back(v);
@@ -45,11 +47,11 @@ void HeldMembers::findHeld() {
       work.push_back(v);
     }
   }
-  for (unsigned n : callbacks_) {
+  for (unsigned n : this->callbacks) {
     reach(n);
   }
-  for (const auto &[value, to] : promised_) {
-    if (plan_.promiseIsMember(value)) {
+  for (const auto &[value, to] : this->promised) {
+    if (this->plan.promiseIsMember(value)) {
       for (unsigned n : to) {
         reach(n);
       }
@@ -65,24 +67,24 @@ void HeldMembers::findHeld() {
 }
 
 bool HeldMembers::isHeld(Kind kind, const void *key) const {
-  int v = finder_.nodeOf(kind, key);
+  int v = this->finder.nodeOf(kind, key);
 
-  return v >= 0 && held_[unsigned(v)];
+  return v >= 0 && this->held[unsigned(v)];
 }
 
 bool HeldMembers::add(llvm::DenseSet<const Type *> &set, const Type *t) {
   if (!set.insert(t).second) {
     return false;
   }
-  plan_.refMember.clear();
+  this->plan.refMember.clear();
 
   return true;
 }
 
 bool HeldMembers::addType(const Type *t) {
-  if (plan_.cyclicTypes.contains(t) || t->isWeakRef() || t->isAnyObject() || t->isRuntimeObject() ||
-      t->isBytes() || t->isCrypto() || t->isIntl() || t->isDate() || t->isRegExp() ||
-      t->isMatch() || t->isTimer()) {
+  if (this->plan.cyclicTypes.contains(t) || t->isWeakRef() || t->isAnyObject() ||
+      t->isRuntimeObject() || t->isBytes() || t->isCrypto() || t->isIntl() || t->isDate() ||
+      t->isRegExp() || t->isMatch() || t->isTimer()) {
     return false;
   }
   if (!(t->isObject() || t->isArray() || t->isDict()) || !isHeld(Kind::TypeNode, t)) {
@@ -91,64 +93,65 @@ bool HeldMembers::addType(const Type *t) {
   bool holds = false;
   if (t->isObject()) {
     for (const Field &f : t->fields()) {
-      holds = holds || plan_.mayHoldMember(f.type);
+      holds = holds || this->plan.mayHoldMember(f.type);
     }
   } else if (t->isArray()) {
-    holds = plan_.mayHoldMember(t->inner());
+    holds = this->plan.mayHoldMember(t->inner());
   } else {
-    holds =
-        plan_.mayHoldMember(t->keyType()) || (!t->isSet() && plan_.mayHoldMember(t->valueType()));
+    holds = this->plan.mayHoldMember(t->keyType()) ||
+            (!t->isSet() && this->plan.mayHoldMember(t->valueType()));
   }
   if (!holds) {
     return false;
   }
-  bool changed = add(plan_.cyclicTypes, t);
+  bool changed = add(this->plan.cyclicTypes, t);
   if (t->isObject() || t->isDict()) {
-    plan_.anyCyclicObject = true;
+    this->plan.anyCyclicObject = true;
   }
   if (t->isArray()) {
-    plan_.cyclicArrayReps.insert(CycleFinder::representationOf(t));
+    this->plan.cyclicArrayReps.insert(CycleFinder::representationOf(t));
   }
 
   return changed;
 }
 
 void HeldMembers::run() {
-  for (const Type *t : scan_.reactionCallbacks) {
-    callbacks_.push_back(finder_.fnNodeOf(t));
+  for (const Type *t : this->scan.reactionCallbacks) {
+    this->callbacks.push_back(this->finder.fnNodeOf(t));
   }
-  for (const Type *t : scan_.types) {
+  for (const Type *t : this->scan.types) {
     if (t->isPromise()) {
-      promised_.push_back({t->promised(), {}});
-      finder_.refers(t->promised(), promised_.back().second);
+      this->promised.push_back({t->promised(), {}});
+      this->finder.refers(t->promised(), this->promised.back().second);
     }
   }
   for (bool changed = true; changed;) {
     changed = false;
     findHeld();
-    for (const Type *t : scan_.types) {
+    for (const Type *t : this->scan.types) {
       if (addType(t)) {
         changed = true;
       }
     }
-    for (const auto &[key, captures] : scan_.envs) {
-      if (plan_.cyclicEnvs.contains(key) || !isHeld(Kind::EnvNode, key)) {
+    for (const auto &[key, captures] : this->scan.envs) {
+      if (this->plan.cyclicEnvs.contains(key) || !isHeld(Kind::EnvNode, key)) {
         continue;
       }
       bool holds = false;
       for (const VarSymbol *var : captures) {
         const Type *type = CycleFinder::valueTypeOf(var);
-        holds = holds || (var->boxed() ? plan_.isCyclicBox(type) : plan_.mayHoldMember(type));
+        holds =
+            holds || (var->boxed() ? this->plan.isCyclicBox(type) : this->plan.mayHoldMember(type));
       }
-      if (holds && plan_.cyclicEnvs.insert(key).second) {
-        plan_.refMember.clear();
+      if (holds && this->plan.cyclicEnvs.insert(key).second) {
+        this->plan.refMember.clear();
         changed = true;
       }
     }
-    for (const VarSymbol *var : scan_.boxed) {
+    for (const VarSymbol *var : this->scan.boxed) {
       const Type *type = CycleFinder::valueTypeOf(var);
-      if (isHeld(Kind::BoxNode, type) && plan_.mayHoldMember(type) &&
-          add(plan_.cyclicBoxes, type)) {
+      if (isHeld(Kind::BoxNode, type) && this->plan.mayHoldMember(type) &&
+          add(this->plan.cyclicBoxes, type)) {
         changed = true;
       }
     }

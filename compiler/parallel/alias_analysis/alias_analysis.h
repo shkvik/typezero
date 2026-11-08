@@ -25,7 +25,7 @@ public:
   bool locsMayMeet(const Loc &a, const Loc &b);
 
 private:
-  Analysis &analysis_;
+  Analysis &analysis;
 };
 
 }

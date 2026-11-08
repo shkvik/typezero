@@ -7,13 +7,15 @@ namespace tz {
 using Kind = CycleGraph::Kind;
 
 CycleFinder::CycleFinder(MemoryPlan &plan, const CycleScanner &scan, const SourceFile &file)
-    : plan_(plan), scan_(scan), file_(file) {
-  for (const Type *t : scan_.types) {
+    : plan(plan),
+      scan(scan),
+      file_(file) {
+  for (const Type *t : this->scan.types) {
     if (t->isObject() && !t->isAnyObject()) {
-      objects_.push_back(t);
+      this->objects.push_back(t);
     }
     if (t->isDict()) {
-      dicts_.push_back(t);
+      this->dicts.push_back(t);
     }
   }
 }
@@ -42,18 +44,19 @@ const Type *CycleFinder::valueTypeOf(const VarSymbol *var) {
   const FunctionDecl *fn = var->function() ? var->function() : var->lambda();
   const FuncSymbol *sym = fn->sym;
 
-  return Type::function(sym->params, sym->minArgs, sym->hasRest, sym->ret, sym->hasThis);
+  return Type::function(sym->params, sym->minArgs, sym->hasRest, sym->getKnownReturnType(),
+                        sym->hasThis);
 }
 
 const std::vector<const Type *> &CycleFinder::runtimeTypesOf(const Type *type) {
-  auto [it, inserted] = runtimeTypes_.try_emplace(type);
+  auto [it, inserted] = this->runtimeTypes.try_emplace(type);
   if (inserted) {
-    for (const Type *s : objects_) {
+    for (const Type *s : this->objects) {
       if (s->isSubtypeOf(type)) {
         it->second.push_back(s);
       }
     }
-    for (const auto &[from, to] : file_.views) {
+    for (const auto &[from, to] : file_.inventory.views) {
       if (to == type && !llvm::is_contained(it->second, from)) {
         it->second.push_back(from);
       }
@@ -76,7 +79,8 @@ const Type *CycleFinder::containerRepresentation(const Type *type) {
 }
 
 bool CycleFinder::isMutated(const Type *type) const {
-  return scan_.mutated.contains(type) || scan_.mutated.contains(containerRepresentation(type));
+  return this->scan.mutated.contains(type) ||
+         this->scan.mutated.contains(containerRepresentation(type));
 }
 
 unsigned CycleFinder::fnNodeOf(const Type *type) {
@@ -105,7 +109,7 @@ void CycleFinder::refers(const Type *type, std::vector<unsigned> &out) {
     break;
   case Type::Kind::Object:
     if (type->isAnyObject()) {
-      out.push_back(anyNode_);
+      out.push_back(this->anyNode);
     } else if (!type->isWeakRef()) {
       for (const Type *s : runtimeTypesOf(type)) {
         out.push_back(graph.node(Kind::TypeNode, s));
@@ -120,12 +124,12 @@ void CycleFinder::refers(const Type *type, std::vector<unsigned> &out) {
     out.push_back(fnNodeOf(type));
     break;
   case Type::Kind::Unknown:
-    out.push_back(unknownNode_);
+    out.push_back(this->unknownNode);
     break;
   case Type::Kind::Promise:
-    out.push_back(anyNode_);
-    out.push_back(unknownNode_);
-    out.push_back(fnNodeOf(anyFunction_));
+    out.push_back(this->anyNode);
+    out.push_back(this->unknownNode);
+    out.push_back(fnNodeOf(this->anyFunction));
     break;
   default:
     break;
@@ -149,27 +153,27 @@ void CycleFinder::captureEdges(unsigned from, const VarSymbol *var) {
 }
 
 void CycleFinder::run() {
-  plan_.cyclicTypes.clear();
-  plan_.cyclicEnvs.clear();
-  plan_.cyclicBoxes.clear();
-  plan_.cyclicArrayReps.clear();
-  plan_.refMember.clear();
-  plan_.hasCycles = plan_.anyCyclicObject = plan_.fnMayBeMember = false;
+  this->plan.cyclicTypes.clear();
+  this->plan.cyclicEnvs.clear();
+  this->plan.cyclicBoxes.clear();
+  this->plan.cyclicArrayReps.clear();
+  this->plan.refMember.clear();
+  this->plan.hasCycles = this->plan.anyCyclicObject = this->plan.fnMayBeMember = false;
   graph = CycleGraph();
-  anyFunction_ = representationOf(Type::function({}, 0, false, Type::voidTy()));
-  anyNode_ = graph.node(Kind::AnyObjectNode, nullptr);
-  unknownNode_ = graph.node(Kind::UnknownNode, nullptr);
+  this->anyFunction = representationOf(Type::function({}, 0, false, Type::voidTy()));
+  this->anyNode = graph.node(Kind::AnyObjectNode, nullptr);
+  this->unknownNode = graph.node(Kind::UnknownNode, nullptr);
   buildGraph();
   markCyclic(cyclicNodes());
   markFunctions();
 }
 
 void CycleFinder::buildGraph() {
-  for (const Type *t : scan_.types) {
+  for (const Type *t : this->scan.types) {
     if (t->isObject() && !t->isAnyObject() && !t->isWeakRef()) {
       unsigned n = graph.node(Kind::TypeNode, t);
       for (const Field &f : t->fields()) {
-        edges(n, f.type, scan_.mutableFields.count(f.name) != 0);
+        edges(n, f.type, this->scan.mutableFields.count(f.name) != 0);
       }
       if (const ClassDecl *cls = t->classDecl(); cls && cls->group) {
         for (const VarSymbol *var : cls->group->captures) {
@@ -186,29 +190,29 @@ void CycleFinder::buildGraph() {
       }
     }
   }
-  for (const auto &[key, captures] : scan_.envs) {
+  for (const auto &[key, captures] : this->scan.envs) {
     unsigned n = graph.node(Kind::EnvNode, key);
     for (const VarSymbol *var : captures) {
-      if (!plan_.uncounted.contains({key, var})) {
+      if (!this->plan.uncounted.contains({key, var})) {
         captureEdges(n, var);
       }
     }
   }
-  for (const auto &[type, keys] : scan_.closuresOf) {
+  for (const auto &[type, keys] : this->scan.closuresOf) {
     for (const void *key : keys) {
       unsigned fn = fnNodeOf(type), env = graph.node(Kind::EnvNode, key);
       graph.edge(fn, env, false);
     }
   }
-  for (const auto &[from, to] : scan_.fnCasts) {
+  for (const auto &[from, to] : this->scan.fnCasts) {
     unsigned a = fnNodeOf(to), b = fnNodeOf(from);
     graph.edge(a, b, false);
   }
-  for (const VarSymbol *var : scan_.boxed) {
+  for (const VarSymbol *var : this->scan.boxed) {
     unsigned n = graph.node(Kind::BoxNode, valueTypeOf(var));
     edges(n, valueTypeOf(var), true);
   }
-  for (const auto &[fnType, holders] : scan_.boundOf) {
+  for (const auto &[fnType, holders] : this->scan.boundOf) {
     for (const Type *type : holders) {
       std::vector<unsigned> to;
       refers(type, to);
@@ -219,32 +223,32 @@ void CycleFinder::buildGraph() {
     }
   }
   {
-    unsigned any = fnNodeOf(anyFunction_);
+    unsigned any = fnNodeOf(this->anyFunction);
     for (unsigned v = 0, end = unsigned(graph.nodes.size()); v < end; ++v) {
       if (graph.nodes[v].kind == Kind::FnNode && v != any) {
         graph.edge(any, v, false);
       }
     }
   }
-  for (const Type *t : objects_) {
+  for (const Type *t : this->objects) {
     if (!t->isWeakRef()) {
       unsigned n = graph.node(Kind::TypeNode, t);
-      graph.edge(anyNode_, n, false);
+      graph.edge(this->anyNode, n, false);
     }
   }
-  for (const Type *t : dicts_) {
+  for (const Type *t : this->dicts) {
     unsigned n = graph.node(Kind::TypeNode, t);
-    graph.edge(anyNode_, n, false);
+    graph.edge(this->anyNode, n, false);
   }
-  for (const Type *type : scan_.toUnknown) {
+  for (const Type *type : this->scan.toUnknown) {
     std::vector<unsigned> to;
     refers(type, to);
     for (unsigned n : to) {
       const CycleGraph::Node &node = graph.nodes[n];
       auto *t = static_cast<const Type *>(node.key);
-      if ((node.kind == Kind::TypeNode && (t->isObject() || t->isDict())) || n == anyNode_ ||
+      if ((node.kind == Kind::TypeNode && (t->isObject() || t->isDict())) || n == this->anyNode ||
           node.kind == Kind::FnNode) {
-        graph.edge(unknownNode_, n, false);
+        graph.edge(this->unknownNode, n, false);
       }
     }
   }
@@ -310,23 +314,23 @@ void CycleFinder::markCyclic(const std::vector<bool> &cyclic) {
     switch (node.kind) {
     case Kind::TypeNode: {
       auto *type = static_cast<const Type *>(node.key);
-      plan_.cyclicTypes.insert(type);
+      this->plan.cyclicTypes.insert(type);
       if (type->isObject() || type->isDict()) {
-        plan_.anyCyclicObject = true;
+        this->plan.anyCyclicObject = true;
       }
       if (type->isArray()) {
-        plan_.cyclicArrayReps.insert(representationOf(type));
+        this->plan.cyclicArrayReps.insert(representationOf(type));
       }
-      plan_.hasCycles = true;
+      this->plan.hasCycles = true;
       break;
     }
     case Kind::EnvNode:
-      plan_.cyclicEnvs.insert(node.key);
-      plan_.hasCycles = true;
+      this->plan.cyclicEnvs.insert(node.key);
+      this->plan.hasCycles = true;
       break;
     case Kind::BoxNode:
-      plan_.cyclicBoxes.insert(static_cast<const Type *>(node.key));
-      plan_.hasCycles = true;
+      this->plan.cyclicBoxes.insert(static_cast<const Type *>(node.key));
+      this->plan.hasCycles = true;
       break;
     default:
       break;
@@ -351,16 +355,16 @@ void CycleFinder::markFunctions() {
           if (seen.insert(w).second) {
             work.push_back(w);
           }
-        } else if ((node.kind == Kind::EnvNode && plan_.cyclicEnvs.contains(node.key)) ||
+        } else if ((node.kind == Kind::EnvNode && this->plan.cyclicEnvs.contains(node.key)) ||
                    (node.kind == Kind::TypeNode &&
-                    plan_.cyclicTypes.contains(static_cast<const Type *>(node.key)))) {
+                    this->plan.cyclicTypes.contains(static_cast<const Type *>(node.key)))) {
           member = true;
         }
       }
     }
     auto *type = static_cast<const Type *>(graph.nodes[v].key);
-    plan_.fnMayBeMember = plan_.fnMayBeMember || member;
-    plan_.refMember[type] = member || plan_.hasCycles;
+    this->plan.fnMayBeMember = this->plan.fnMayBeMember || member;
+    this->plan.refMember[type] = member || this->plan.hasCycles;
   }
 }
 

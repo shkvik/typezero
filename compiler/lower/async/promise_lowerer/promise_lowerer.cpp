@@ -1,5 +1,4 @@
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
-#include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/async/promise_combine_lowerer/promise_combine_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
@@ -8,6 +7,7 @@
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
+#include "compiler/lower/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/memory/group_lowerer/group_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
@@ -46,26 +46,26 @@ uint64_t PromiseLowerer::promiseValueSize(const Type *value) {
 }
 
 llvm::Value *PromiseLowerer::promiseValueAddress(llvm::Value *promise) {
-  return this->lowering.builder_.CreateConstInBoundsGEP1_64(
-      this->lowering.builder_.getInt8Ty(), promise, kPromiseHeader, "promise.value");
+  return this->lowering.builder.CreateConstInBoundsGEP1_64(
+      this->lowering.builder.getInt8Ty(), promise, kPromiseHeader, "promise.value");
 }
 
 llvm::Constant *PromiseLowerer::promiseLayout(const Type *value) {
-  llvm::Constant *&layout = this->lowering.promiseLayouts_[value];
+  llvm::Constant *&layout = this->lowering.promiseLayouts[value];
   if (layout) {
     return layout;
   }
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-  llvm::Constant *fields = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
+  llvm::Constant *fields = llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy());
   uint32_t count = 0;
   if (this->promiseValueSize(value)) {
     auto *field = new llvm::GlobalVariable(
-        *this->lowering.module_, this->lowering.fieldDescTy_, true,
+        *this->lowering.module_, this->lowering.fieldDescTy, true,
         llvm::GlobalValue::PrivateLinkage,
-        llvm::ConstantStruct::get(this->lowering.fieldDescTy_,
+        llvm::ConstantStruct::get(this->lowering.fieldDescTy,
                                   {this->lowering.stringLowerer().utf8Constant(""),
-                                   this->lowering.builder_.getInt32(0),
-                                   this->lowering.builder_.getInt32(uint32_t(kPromiseHeader)),
+                                   this->lowering.builder.getInt32(0),
+                                   this->lowering.builder.getInt32(uint32_t(kPromiseHeader)),
                                    this->lowering.typeDescriptors().typeDescriptor(value)}),
         "tz.promise.field");
     field->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
@@ -74,20 +74,19 @@ llvm::Constant *PromiseLowerer::promiseLayout(const Type *value) {
   }
   auto *drop = cast<llvm::Function>(
       this->lowering.asyncLowerer()
-          .asyncFunction("tz_promise_drop", this->lowering.builder_.getVoidTy(), {ptr})
+          .asyncFunction("tz_promise_drop", this->lowering.builder.getVoidTy(), {ptr})
           .getCallee());
   uint32_t flags =
       kLayoutPromise | (this->lowering.memory().promiseIsMember(value) ? 0x80000000u : 0u);
   auto *global = new llvm::GlobalVariable(
-      *this->lowering.module_, this->lowering.layoutDescTy_, true,
-      llvm::GlobalValue::PrivateLinkage,
+      *this->lowering.module_, this->lowering.layoutDescTy, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(
-          this->lowering.layoutDescTy_,
-          {drop, fields, this->lowering.builder_.getInt32(count),
-           this->lowering.builder_.getInt32(flags),
-           llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()),
-           this->lowering.builder_.getInt32(0),
-           this->lowering.builder_.getInt32(
+          this->lowering.layoutDescTy,
+          {drop, fields, this->lowering.builder.getInt32(count),
+           this->lowering.builder.getInt32(flags),
+           llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy()),
+           this->lowering.builder.getInt32(0),
+           this->lowering.builder.getInt32(
                this->lowering.unionLowerer().plainTypeId(Type::promise(value)))}),
       "tz.layout.promise");
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
@@ -97,77 +96,77 @@ llvm::Constant *PromiseLowerer::promiseLayout(const Type *value) {
 }
 
 llvm::Value *PromiseLowerer::newPromise(const Type *value) {
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
   auto *fn = cast<llvm::Function>(
       this->lowering.asyncLowerer().asyncFunction("tz_promise_new", ptr, {ptr}).getCallee());
   fn->addRetAttr(llvm::Attribute::NoAlias);
 
-  return this->lowering.builder_.CreateCall(fn, {this->promiseLayout(value)}, "promise");
+  return this->lowering.builder.CreateCall(fn, {this->promiseLayout(value)}, "promise");
 }
 
 void PromiseLowerer::fulfillPromise(llvm::Value *promise, llvm::Value *value, const Type *type) {
   if (value && this->promiseValueSize(type)) {
-    this->lowering.builder_.CreateStore(value, this->promiseValueAddress(promise));
+    this->lowering.builder.CreateStore(value, this->promiseValueAddress(promise));
   }
-  this->lowering.builder_.CreateCall(this->lowering.asyncLowerer().asyncFunction(
-                                         "tz_promise_fulfill", this->lowering.builder_.getVoidTy(),
-                                         {this->lowering.builder_.getPtrTy()}),
-                                     {promise});
+  this->lowering.builder.CreateCall(this->lowering.asyncLowerer().asyncFunction(
+                                        "tz_promise_fulfill", this->lowering.builder.getVoidTy(),
+                                        {this->lowering.builder.getPtrTy()}),
+                                    {promise});
 }
 
 void PromiseLowerer::followPromise(llvm::Value *promise, llvm::Value *other, uint32_t site) {
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
-  this->lowering.builder_.CreateCall(this->lowering.asyncLowerer().asyncFunction(
-                                         "tz_promise_follow", this->lowering.builder_.getVoidTy(),
-                                         {ptr, ptr, this->lowering.builder_.getInt32Ty()}),
-                                     {promise, other, this->lowering.builder_.getInt32(site)});
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
+  this->lowering.builder.CreateCall(this->lowering.asyncLowerer().asyncFunction(
+                                        "tz_promise_follow", this->lowering.builder.getVoidTy(),
+                                        {ptr, ptr, this->lowering.builder.getInt32Ty()}),
+                                    {promise, other, this->lowering.builder.getInt32(site)});
 }
 
 llvm::Value *PromiseLowerer::promiseField(llvm::Value *promise, unsigned field) {
-  return this->lowering.builder_.CreateStructGEP(this->lowering.promiseObjTy_, promise, field);
+  return this->lowering.builder.CreateStructGEP(this->lowering.promiseObjTy, promise, field);
 }
 
 llvm::Constant *PromiseLowerer::resolverInfo(const Type *value) {
-  llvm::Constant *&info = this->lowering.resolverInfos_[value];
+  llvm::Constant *&info = this->lowering.resolverInfos[value];
   if (info) {
     return info;
   }
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
   bool holds = this->promiseValueSize(value) != 0;
   std::vector<llvm::Type *> params{ptr};
   if (!value->isVoid()) {
     params.push_back(this->lowering.moduleBuilder().lower(value));
   }
   auto *code = llvm::Function::Create(
-      llvm::FunctionType::get(this->lowering.builder_.getVoidTy(), params, false),
+      llvm::FunctionType::get(this->lowering.builder.getVoidTy(), params, false),
       llvm::GlobalValue::InternalLinkage, "tz.promise.resolve", this->lowering.module_.get());
   this->lowering.functionBuilder().setFunctionAttributes(code);
-  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
-  llvm::Function *outer = std::exchange(this->lowering.function_, code);
-  this->lowering.builder_.SetInsertPoint(
-      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", code));
+  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder.saveIP();
+  llvm::Function *outer = std::exchange(this->lowering.function, code);
+  this->lowering.builder.SetInsertPoint(
+      llvm::BasicBlock::Create(this->lowering.ctx, "entry", code));
   llvm::Value *promise = code->getArg(0);
-  llvm::Value *locked = this->lowering.builder_.CreateCall(
+  llvm::Value *locked = this->lowering.builder.CreateCall(
       this->lowering.asyncLowerer().asyncFunction("tz_promise_lock",
-                                                  this->lowering.builder_.getInt32Ty(), {ptr}),
+                                                  this->lowering.builder.getInt32Ty(), {ptr}),
       {promise}, "locked");
   llvm::BasicBlock *settleBlock = this->lowering.functionFrame().newBlock("settle");
   llvm::BasicBlock *dropBlock = this->lowering.functionFrame().newBlock("drop");
-  this->lowering.builder_.CreateCondBr(this->lowering.builder_.CreateIsNotNull(locked), settleBlock,
-                                       dropBlock);
+  this->lowering.builder.CreateCondBr(this->lowering.builder.CreateIsNotNull(locked), settleBlock,
+                                      dropBlock);
   this->lowering.functionFrame().switchTo(settleBlock);
   this->fulfillPromise(promise, holds ? code->getArg(1) : nullptr, value);
-  this->lowering.builder_.CreateRetVoid();
+  this->lowering.builder.CreateRetVoid();
   this->lowering.functionFrame().switchTo(dropBlock);
   if (!value->isVoid()) {
     this->lowering.refCounts().releaseValue(code->getArg(1), value);
   }
-  this->lowering.builder_.CreateRetVoid();
-  this->lowering.function_ = outer;
-  this->lowering.builder_.restoreIP(point);
+  this->lowering.builder.CreateRetVoid();
+  this->lowering.function = outer;
+  this->lowering.builder.restoreIP(point);
   info = new llvm::GlobalVariable(
-      *this->lowering.module_, this->lowering.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
-      llvm::ConstantStruct::get(this->lowering.fnInfoTy_,
+      *this->lowering.module_, this->lowering.fnInfoTy, true, llvm::GlobalValue::PrivateLinkage,
+      llvm::ConstantStruct::get(this->lowering.fnInfoTy,
                                 {code, this->lowering.stringLowerer().stringLiteral(u"")}),
       "tz.fninfo.resolve");
 
@@ -182,7 +181,7 @@ llvm::Value *PromiseLowerer::emitPromiseNew(CallExpr *call) {
   llvm::Value *promise = this->newPromise(value);
   std::vector<llvm::Value *> args;
   if (!fnType->params().empty()) {
-    this->lowering.builder_.CreateCall(this->lowering.objRetainFn_, {promise});
+    this->lowering.builder.CreateCall(this->lowering.objRetainFn, {promise});
     args.push_back(
         this->lowering.closureLowerer().makeFunctionValue(this->resolverInfo(value), promise));
   }
@@ -194,7 +193,7 @@ llvm::Value *PromiseLowerer::emitPromiseNew(CallExpr *call) {
 
 llvm::Value *PromiseLowerer::emitPromiseStatic(CallExpr *call) {
   const Type *type = call->type;
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
   switch (call->builtin()) {
     case Builtin::PromiseResolve: {
       if (!call->args.empty() && call->args[0]->type->isPromise()) {
@@ -207,10 +206,10 @@ llvm::Value *PromiseLowerer::emitPromiseStatic(CallExpr *call) {
       auto *fn = cast<llvm::Function>(this->lowering.asyncLowerer()
                                           .asyncFunction("tz_promise_resolved", ptr, {ptr})
                                           .getCallee());
-      llvm::Value *promise = this->lowering.builder_.CreateCall(
-          fn, {this->promiseLayout(type->promised())}, "promise");
+      llvm::Value *promise =
+          this->lowering.builder.CreateCall(fn, {this->promiseLayout(type->promised())}, "promise");
       if (value && this->promiseValueSize(type->promised())) {
-        this->lowering.builder_.CreateStore(value, this->promiseValueAddress(promise));
+        this->lowering.builder.CreateStore(value, this->promiseValueAddress(promise));
       }
       return promise;
     }
@@ -219,10 +218,10 @@ llvm::Value *PromiseLowerer::emitPromiseStatic(CallExpr *call) {
       const Type *value = promiseType->promised();
       llvm::Value *promise = this->newPromise(value);
       llvm::Value *object = this->lowering.objectLayouts().allocObject(type, {0, 1});
-      this->lowering.builder_.CreateStore(
+      this->lowering.builder.CreateStore(
           promise, this->lowering.objectLayouts().fieldAddress(object, type, "promise"));
-      this->lowering.builder_.CreateCall(this->lowering.objRetainFn_, {promise});
-      this->lowering.builder_.CreateStore(
+      this->lowering.builder.CreateCall(this->lowering.objRetainFn, {promise});
+      this->lowering.builder.CreateStore(
           this->lowering.closureLowerer().makeFunctionValue(this->resolverInfo(value), promise),
           this->lowering.objectLayouts().fieldAddress(object, type, "resolve"));
       this->lowering.groupLowerer().adoptFields(object, type);

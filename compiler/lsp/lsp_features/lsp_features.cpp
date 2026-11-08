@@ -18,11 +18,11 @@ const char *const kKeywords[] = {
 
 LspFeatures::LspFeatures(const Knowledge &knowledge, size_t module, llvm::StringRef text,
                          UriOf uriOf, TextOf textOf)
-    : knowledge_(knowledge),
+    : knowledge(knowledge),
       module_(module),
       text_(text),
-      uriOf_(uriOf),
-      textOf_(textOf) {}
+      uriOf(uriOf),
+      textOf(textOf) {}
 
 bool LspFeatures::isWordChar(char c) {
   return llvm::isAlnum(c) || c == '_' || c == '$' || static_cast<unsigned char>(c) >= 0x80;
@@ -98,14 +98,14 @@ llvm::json::Object LspFeatures::range(const SourcePlace &place) {
 
 std::string LspFeatures::uriOfPlace(const SourcePlace &place) const {
   if (!place.file) {
-    for (const KnownModule &module : knowledge_.modules) {
+    for (const KnownModule &module : this->knowledge.modules) {
       if (module.library && module.path == place.path && !module.file.empty()) {
-        return uriOf_(module.file);
+        return this->uriOf(module.file);
       }
     }
   }
 
-  return uriOf_(place.path);
+  return this->uriOf(place.path);
 }
 
 llvm::json::Object LspFeatures::location(const SourcePlace &place) const {
@@ -119,17 +119,17 @@ size_t LspFeatures::offset(unsigned line, unsigned character) const {
 llvm::json::Value LspFeatures::hover(unsigned line, unsigned character) const {
   const SourcePlace *at = nullptr;
   std::string value;
-  size_t symbol = knowledge_.symbolAt(module_, line, character, &at);
+  size_t symbol = this->knowledge.symbolAt(module_, line, character, &at);
   if (symbol != Knowledge::kNone) {
-    const KnownSymbol &known = knowledge_.symbols[symbol];
-    std::string title = known.kind + " " + knowledge_.qualified(symbol);
+    const KnownSymbol &known = this->knowledge.symbols[symbol];
+    std::string title = known.kind + " " + this->knowledge.qualified(symbol);
     value = LspFeatures::code(known.signature.empty() ? title : known.signature) + "\n\n" + title +
-            " - " + knowledge_.modules[known.module].name;
-  } else if (size_t local = knowledge_.localAt(module_, line, character, &at);
+            " - " + this->knowledge.modules[known.module].name;
+  } else if (size_t local = this->knowledge.localAt(module_, line, character, &at);
              local != Knowledge::kNone) {
-    const KnownLocal &known = knowledge_.locals[local];
+    const KnownLocal &known = this->knowledge.locals[local];
     value = LspFeatures::code(known.name + ": " + known.type);
-  } else if (const KnownType *type = knowledge_.typeAt(module_, line, character)) {
+  } else if (const KnownType *type = this->knowledge.typeAt(module_, line, character)) {
     at = &type->place;
     value = LspFeatures::code(type->kind == "class" ? "class " + type->name
                                                     : type->name + ": " + type->type);
@@ -142,13 +142,13 @@ llvm::json::Value LspFeatures::hover(unsigned line, unsigned character) const {
 }
 
 llvm::json::Value LspFeatures::definition(unsigned line, unsigned character) const {
-  size_t symbol = knowledge_.symbolAt(module_, line, character, nullptr);
+  size_t symbol = this->knowledge.symbolAt(module_, line, character, nullptr);
   if (symbol != Knowledge::kNone) {
-    return location(knowledge_.symbols[symbol].place);
+    return location(this->knowledge.symbols[symbol].place);
   }
-  size_t local = knowledge_.localAt(module_, line, character, nullptr);
+  size_t local = this->knowledge.localAt(module_, line, character, nullptr);
   if (local != Knowledge::kNone) {
-    return location(knowledge_.locals[local].place);
+    return location(this->knowledge.locals[local].place);
   }
 
   return nullptr;
@@ -158,24 +158,24 @@ std::vector<SourcePlace> LspFeatures::occurrences(unsigned line, unsigned charac
                                                   bool declaration, std::string &name,
                                                   bool &library) const {
   std::vector<SourcePlace> places;
-  size_t symbol = knowledge_.symbolAt(module_, line, character, nullptr);
+  size_t symbol = this->knowledge.symbolAt(module_, line, character, nullptr);
   if (symbol != Knowledge::kNone) {
-    const KnownSymbol &known = knowledge_.symbols[symbol];
+    const KnownSymbol &known = this->knowledge.symbols[symbol];
     name = known.name;
-    library = knowledge_.modules[known.module].library;
+    library = this->knowledge.modules[known.module].library;
     if (declaration) {
       places.push_back(known.place);
     }
-    for (size_t reference : knowledge_.referencesTo(symbol)) {
-      places.push_back(knowledge_.references[reference].place);
+    for (size_t reference : this->knowledge.referencesTo(symbol)) {
+      places.push_back(this->knowledge.references[reference].place);
     }
     return places;
   }
-  size_t local = knowledge_.localAt(module_, line, character, nullptr);
+  size_t local = this->knowledge.localAt(module_, line, character, nullptr);
   if (local != Knowledge::kNone) {
-    const KnownLocal &known = knowledge_.locals[local];
+    const KnownLocal &known = this->knowledge.locals[local];
     name = known.name;
-    library = knowledge_.modules[known.module].library;
+    library = this->knowledge.modules[known.module].library;
     if (declaration) {
       places.push_back(known.place);
     }
@@ -200,14 +200,14 @@ llvm::json::Value LspFeatures::references(unsigned line, unsigned character,
 llvm::json::Value LspFeatures::prepareRename(unsigned line, unsigned character) const {
   const SourcePlace *at = nullptr;
   std::string name;
-  size_t symbol = knowledge_.symbolAt(module_, line, character, &at);
+  size_t symbol = this->knowledge.symbolAt(module_, line, character, &at);
   bool library = false;
   if (symbol != Knowledge::kNone) {
-    name = knowledge_.symbols[symbol].name;
-    library = knowledge_.modules[knowledge_.symbols[symbol].module].library;
-  } else if (size_t local = knowledge_.localAt(module_, line, character, &at);
+    name = this->knowledge.symbols[symbol].name;
+    library = this->knowledge.modules[this->knowledge.symbols[symbol].module].library;
+  } else if (size_t local = this->knowledge.localAt(module_, line, character, &at);
              local != Knowledge::kNone) {
-    name = knowledge_.locals[local].name;
+    name = this->knowledge.locals[local].name;
   }
   if (!at || library || name == "constructor") {
     return nullptr;
@@ -238,7 +238,7 @@ llvm::json::Value LspFeatures::rename(unsigned line, unsigned character, llvm::S
     }
     auto found = texts.find(place.path);
     if (found == texts.end()) {
-      found = texts.try_emplace(place.path, textOf_(place.path)).first;
+      found = texts.try_emplace(place.path, this->textOf(place.path)).first;
     }
     llvm::StringRef text = found->second;
     size_t start = LspFeatures::offsetIn(text, place.line, place.character);
@@ -249,7 +249,7 @@ llvm::json::Value LspFeatures::rename(unsigned line, unsigned character, llvm::S
     SourcePlace exact = place;
     exact.endLine = place.line;
     exact.endCharacter = place.character + static_cast<unsigned>(old.size());
-    changes[uriOf_(place.path)].push_back(
+    changes[this->uriOf(place.path)].push_back(
         llvm::json::Object{{"range", range(exact)}, {"newText", name.str()}});
   }
   llvm::json::Object all;
@@ -355,36 +355,36 @@ llvm::json::Value LspFeatures::semanticTokens() const {
     }
   };
   auto modifiersOf = [&](size_t symbol, bool declaration) {
-    const KnownSymbol &known = knowledge_.symbols[symbol];
+    const KnownSymbol &known = this->knowledge.symbols[symbol];
     int modifiers = declaration ? 1 : 0;
     if (known.kind == "const" || llvm::StringRef(known.signature).contains("readonly ")) {
       modifiers |= 2;
     }
-    if (knowledge_.modules[known.module].library) {
+    if (this->knowledge.modules[known.module].library) {
       modifiers |= 4;
     }
 
     return modifiers;
   };
-  for (size_t symbol : knowledge_.symbolsOf(module_)) {
-    const KnownSymbol &known = knowledge_.symbols[symbol];
+  for (size_t symbol : this->knowledge.symbolsOf(module_)) {
+    const KnownSymbol &known = this->knowledge.symbols[symbol];
     llvm::StringRef name = known.kind == "constructor" ? llvm::StringRef() : known.name;
     add(known.place, name, typeOf(known.kind), modifiersOf(symbol, true));
   }
-  for (const KnownReference &reference : knowledge_.references) {
+  for (const KnownReference &reference : this->knowledge.references) {
     if (reference.module != module_) {
       continue;
     }
-    const KnownSymbol &known = knowledge_.symbols[reference.symbol];
+    const KnownSymbol &known = this->knowledge.symbols[reference.symbol];
     llvm::StringRef name = known.kind == "constructor" ? known.container : known.name;
     add(reference.place, name, typeOf(known.kind), modifiersOf(reference.symbol, false));
   }
-  for (const KnownType &builtin : knowledge_.types) {
+  for (const KnownType &builtin : this->knowledge.types) {
     if (builtin.module == module_ && builtin.kind == "class") {
       add(builtin.place, builtin.name, 0, 4);
     }
   }
-  for (const KnownLocal &local : knowledge_.locals) {
+  for (const KnownLocal &local : this->knowledge.locals) {
     if (local.module != module_) {
       continue;
     }
@@ -439,14 +439,14 @@ llvm::json::Value LspFeatures::completion(unsigned line, unsigned character) con
     std::string object = text_.slice(from, end).str();
     std::vector<KnownMember> members;
     if (object == "this") {
-      std::vector<size_t> around = knowledge_.at(module_, line, std::nullopt);
+      std::vector<size_t> around = this->knowledge.at(module_, line, std::nullopt);
       size_t owner = around.empty() ? Knowledge::kNone : around.front();
-      while (owner != Knowledge::kNone && knowledge_.symbols[owner].kind != "class") {
-        owner = knowledge_.symbols[owner].parent;
+      while (owner != Knowledge::kNone && this->knowledge.symbols[owner].kind != "class") {
+        owner = this->knowledge.symbols[owner].parent;
       }
       if (owner != Knowledge::kNone) {
-        for (size_t member : knowledge_.members(owner)) {
-          const KnownSymbol &known = knowledge_.symbols[member];
+        for (size_t member : this->knowledge.members(owner)) {
+          const KnownSymbol &known = this->knowledge.symbols[member];
           if (known.kind != "constructor") {
             members.push_back({known.name, known.kind, known.signature});
           }
@@ -454,7 +454,7 @@ llvm::json::Value LspFeatures::completion(unsigned line, unsigned character) con
       }
     } else {
       const KnownType *best = nullptr;
-      for (const KnownType &type : knowledge_.types) {
+      for (const KnownType &type : this->knowledge.types) {
         bool before =
             type.place.line < line || (type.place.line == line && type.place.character < character);
         if (type.module == module_ && type.name == object && before) {
@@ -462,15 +462,15 @@ llvm::json::Value LspFeatures::completion(unsigned line, unsigned character) con
         }
       }
       if (!best) {
-        for (const KnownType &type : knowledge_.types) {
+        for (const KnownType &type : this->knowledge.types) {
           if (type.module == module_ && type.name == object) {
             best = &type;
           }
         }
       }
       if (best) {
-        auto found = knowledge_.typeMembers.find(best->base);
-        if (found != knowledge_.typeMembers.end()) {
+        auto found = this->knowledge.typeMembers.find(best->base);
+        if (found != this->knowledge.typeMembers.end()) {
           members = found->second;
         }
       }
@@ -481,21 +481,21 @@ llvm::json::Value LspFeatures::completion(unsigned line, unsigned character) con
     return llvm::json::Object{{"isIncomplete", false}, {"items", std::move(items)}};
   }
 
-  std::vector<size_t> around = knowledge_.at(module_, line, std::nullopt);
+  std::vector<size_t> around = this->knowledge.at(module_, line, std::nullopt);
   size_t owner = around.empty() ? Knowledge::kNone : around.front();
-  for (const KnownLocal &local : knowledge_.locals) {
+  for (const KnownLocal &local : this->knowledge.locals) {
     if (local.module == module_ && (local.owner == owner || local.owner == Knowledge::kNone)) {
       add(local.name, 6, local.type);
     }
   }
-  for (size_t symbol : knowledge_.symbolsOf(module_)) {
-    const KnownSymbol &known = knowledge_.symbols[symbol];
+  for (size_t symbol : this->knowledge.symbolsOf(module_)) {
+    const KnownSymbol &known = this->knowledge.symbols[symbol];
     if (known.parent == Knowledge::kNone) {
       add(known.name, LspFeatures::symbolKind(known.kind), known.signature);
     }
   }
-  for (const KnownReference &reference : knowledge_.references) {
-    const KnownSymbol &known = knowledge_.symbols[reference.symbol];
+  for (const KnownReference &reference : this->knowledge.references) {
+    const KnownSymbol &known = this->knowledge.symbols[reference.symbol];
     if (reference.module == module_ && known.parent == Knowledge::kNone) {
       add(known.name, LspFeatures::symbolKind(known.kind), known.signature);
     }

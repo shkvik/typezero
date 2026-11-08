@@ -54,11 +54,11 @@ const Type *InheritLowerer::layoutPrefix(const Type *type) const {
 void InheritLowerer::prepareDispatch(SourceFile &file) {
   std::vector<const Type *> order;
   auto implement = [&](const Type *type, const Type *iface) {
-    this->lowering.withSubtypes_.insert(iface);
+    this->lowering.withSubtypes.insert(iface);
     if (iface->isClass()) {
       return false;
     }
-    auto [it, inserted] = this->lowering.interfaces_.try_emplace(iface);
+    auto [it, inserted] = this->lowering.interfaces.try_emplace(iface);
     if (inserted) {
       order.push_back(iface);
       it->second.implementers.push_back(iface);
@@ -70,7 +70,7 @@ void InheritLowerer::prepareDispatch(SourceFile &file) {
 
     return true;
   };
-  for (const Type *type : file.subtypes) {
+  for (const Type *type : file.inventory.subtypes) {
     if (TypeQueries::mentionsParam(type)) {
       continue;
     }
@@ -87,13 +87,13 @@ void InheritLowerer::prepareDispatch(SourceFile &file) {
   }
   for (bool changed = true; changed;) {
     changed = false;
-    for (auto [from, to] : file.views) {
+    for (auto [from, to] : file.inventory.views) {
       if (TypeQueries::mentionsParam(from) || TypeQueries::mentionsParam(to)) {
         continue;
       }
       changed |= implement(from, to);
-      auto found = this->lowering.interfaces_.find(from);
-      if (found != this->lowering.interfaces_.end()) {
+      auto found = this->lowering.interfaces.find(from);
+      if (found != this->lowering.interfaces.end()) {
         std::vector<const Type *> others = found->second.implementers;
         for (const Type *other : others) {
           changed |= implement(other, to);
@@ -109,7 +109,7 @@ void InheritLowerer::prepareDispatch(SourceFile &file) {
     return data.getStructLayout(layout.type)->getElementOffset(layout.elements[field]);
   };
   for (const Type *iface : order) {
-    Lowering::InterfaceInfo &info = this->lowering.interfaces_[iface];
+    Lowering::InterfaceInfo &info = this->lowering.interfaces[iface];
     std::vector<llvm::Type *> entries;
     llvm::ArrayRef<Field> fields = iface->fields();
     info.members.resize(fields.size());
@@ -122,8 +122,8 @@ void InheritLowerer::prepareDispatch(SourceFile &file) {
       if (callable) {
         member.entry = int(entries.size());
         member.callable = true;
-        entries.push_back(this->lowering.builder_.getPtrTy());
-        entries.push_back(this->lowering.builder_.getPtrTy());
+        entries.push_back(this->lowering.builder.getPtrTy());
+        entries.push_back(this->lowering.builder.getPtrTy());
         continue;
       }
       uint64_t offset = offsetOf(iface, k);
@@ -133,29 +133,29 @@ void InheritLowerer::prepareDispatch(SourceFile &file) {
         continue;
       }
       member.entry = int(entries.size());
-      entries.push_back(this->lowering.builder_.getInt64Ty());
+      entries.push_back(this->lowering.builder.getInt64Ty());
     }
     for (const Overload &overload : iface->overloads()) {
       std::vector<Lowering::InterfaceMember> &signatures = info.overloads.emplace_back();
       for (size_t i = 0; i < overload.signatures.size(); ++i) {
         signatures.push_back({int(entries.size()), true});
-        entries.push_back(this->lowering.builder_.getPtrTy());
-        entries.push_back(this->lowering.builder_.getPtrTy());
+        entries.push_back(this->lowering.builder.getPtrTy());
+        entries.push_back(this->lowering.builder.getPtrTy());
       }
     }
     info.dispatch = !entries.empty();
-    info.table = llvm::StructType::get(this->lowering.ctx_, entries);
+    info.table = llvm::StructType::get(this->lowering.ctx, entries);
   }
 
   std::vector<const Type *> numbered;
   for (const Type *iface : order) {
-    Lowering::InterfaceInfo &info = this->lowering.interfaces_[iface];
+    Lowering::InterfaceInfo &info = this->lowering.interfaces[iface];
     if (!info.dispatch) {
       continue;
     }
     llvm::SmallVector<unsigned, 4> taken;
     for (const Type *other : numbered) {
-      const Lowering::InterfaceInfo &o = this->lowering.interfaces_[other];
+      const Lowering::InterfaceInfo &o = this->lowering.interfaces[other];
       if (llvm::any_of(info.implementers,
                        [&](const Type *t) { return llvm::is_contained(o.implementers, t); })) {
         taken.push_back(o.color);
@@ -177,8 +177,8 @@ InheritLowerer::dispatchedMember(const Type *type, llvm::StringRef name, int sig
   if (!type->isObject()) {
     return nullptr;
   }
-  auto found = this->lowering.interfaces_.find(type);
-  if (found == this->lowering.interfaces_.end() || !found->second.dispatch) {
+  auto found = this->lowering.interfaces.find(type);
+  if (found == this->lowering.interfaces.end() || !found->second.dispatch) {
     return nullptr;
   }
   if (signature >= 0) {
@@ -200,43 +200,43 @@ InheritLowerer::dispatchedMember(const Type *type, llvm::StringRef name, int sig
 }
 
 llvm::Value *InheritLowerer::tableEntry(llvm::Value *object, const Type *iface, unsigned entry) {
-  const Lowering::InterfaceInfo &info = this->lowering.interfaces_.find(iface)->second;
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  const Lowering::InterfaceInfo &info = this->lowering.interfaces.find(iface)->second;
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
   llvm::Value *descriptor =
-      this->lowering.builder_.CreateLoad(ptr,
-                                         this->lowering.builder_.CreateConstInBoundsGEP1_64(
-                                             this->lowering.builder_.getInt8Ty(), object, 8),
-                                         "descriptor");
-  llvm::Value *tableList = InheritLowerer::invariant(this->lowering.builder_.CreateLoad(
+      this->lowering.builder.CreateLoad(ptr,
+                                        this->lowering.builder.CreateConstInBoundsGEP1_64(
+                                            this->lowering.builder.getInt8Ty(), object, 8),
+                                        "descriptor");
+  llvm::Value *tableList = InheritLowerer::invariant(this->lowering.builder.CreateLoad(
       ptr,
-      this->lowering.builder_.CreateConstInBoundsGEP1_64(this->lowering.builder_.getInt8Ty(),
-                                                         descriptor, kItablesOffset),
+      this->lowering.builder.CreateConstInBoundsGEP1_64(this->lowering.builder.getInt8Ty(),
+                                                        descriptor, kItablesOffset),
       "itables"));
-  llvm::Value *table = InheritLowerer::invariant(this->lowering.builder_.CreateLoad(
-      ptr, this->lowering.builder_.CreateConstInBoundsGEP1_64(ptr, tableList, info.color),
+  llvm::Value *table = InheritLowerer::invariant(this->lowering.builder.CreateLoad(
+      ptr, this->lowering.builder.CreateConstInBoundsGEP1_64(ptr, tableList, info.color),
       "itable"));
 
-  return this->lowering.builder_.CreateStructGEP(info.table, table, entry);
+  return this->lowering.builder.CreateStructGEP(info.table, table, entry);
 }
 
 llvm::Value *InheritLowerer::vtableEntry(llvm::Value *object, int slot, bool info) {
-  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
   llvm::Value *descriptor =
-      this->lowering.builder_.CreateLoad(ptr,
-                                         this->lowering.builder_.CreateConstInBoundsGEP1_64(
-                                             this->lowering.builder_.getInt8Ty(), object, 8),
-                                         "descriptor");
+      this->lowering.builder.CreateLoad(ptr,
+                                        this->lowering.builder.CreateConstInBoundsGEP1_64(
+                                            this->lowering.builder.getInt8Ty(), object, 8),
+                                        "descriptor");
   uint64_t offset = this->lowering.kVtableOffset + 16 * uint64_t(slot) + (info ? 8 : 0);
 
-  return InheritLowerer::invariant(this->lowering.builder_.CreateLoad(
-      ptr,
-      this->lowering.builder_.CreateConstInBoundsGEP1_64(this->lowering.builder_.getInt8Ty(),
-                                                         descriptor, offset),
-      info ? "info" : "code"));
+  return InheritLowerer::invariant(
+      this->lowering.builder.CreateLoad(ptr,
+                                        this->lowering.builder.CreateConstInBoundsGEP1_64(
+                                            this->lowering.builder.getInt8Ty(), descriptor, offset),
+                                        info ? "info" : "code"));
 }
 
 llvm::Constant *InheritLowerer::itablesOf(const Type *type) {
-  llvm::Constant *null = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+  llvm::Constant *null = llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy());
   auto found = this->tablesOf.find(type);
   if (found == this->tablesOf.end()) {
     return null;
@@ -247,9 +247,9 @@ llvm::Constant *InheritLowerer::itablesOf(const Type *type) {
   }
   std::vector<llvm::Constant *> tables(this->colors, null);
   for (const Type *iface : found->second) {
-    tables[this->lowering.interfaces_[iface].color] = this->itable(type, iface);
+    tables[this->lowering.interfaces[iface].color] = this->itable(type, iface);
   }
-  auto *arrayType = llvm::ArrayType::get(this->lowering.builder_.getPtrTy(), this->colors);
+  auto *arrayType = llvm::ArrayType::get(this->lowering.builder.getPtrTy(), this->colors);
   auto *array = new llvm::GlobalVariable(
       *this->lowering.module_, arrayType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantArray::get(arrayType, tables), "tz.itables." + InheritLowerer::typeName(type));
@@ -264,9 +264,9 @@ llvm::Constant *InheritLowerer::itable(const Type *type, const Type *iface) {
   if (global) {
     return global;
   }
-  const Lowering::InterfaceInfo &info = this->lowering.interfaces_[iface];
+  const Lowering::InterfaceInfo &info = this->lowering.interfaces[iface];
   const llvm::DataLayout &data = this->lowering.module_->getDataLayout();
-  llvm::Constant *null = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+  llvm::Constant *null = llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy());
   std::vector<llvm::Constant *> entries;
   llvm::ArrayRef<Field> fields = iface->fields();
   for (unsigned k = 0; k < fields.size(); ++k) {
@@ -280,7 +280,7 @@ llvm::Constant *InheritLowerer::itable(const Type *type, const Type *iface) {
       uint64_t offset =
           data.getStructLayout(layout.type)
               ->getElementOffset(layout.elements[ObjectLayouts::fieldIndex(type, f.name)]);
-      entries.push_back(this->lowering.builder_.getInt64(offset));
+      entries.push_back(this->lowering.builder.getInt64(offset));
       continue;
     }
     const ClassDecl *cls = type->classDecl();
@@ -353,11 +353,11 @@ std::pair<llvm::Function *, llvm::Constant *> InheritLowerer::fieldStub(const Ty
       "tz." + InheritLowerer::typeName(type) + "." + member.name + ".stub",
       this->lowering.module_.get());
   this->lowering.functionBuilder().setFunctionAttributes(code);
-  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
-  this->lowering.builder_.SetInsertPoint(
-      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", code));
-  llvm::Value *fn = this->lowering.builder_.CreateLoad(
-      this->lowering.fnTy_,
+  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder.saveIP();
+  this->lowering.builder.SetInsertPoint(
+      llvm::BasicBlock::Create(this->lowering.ctx, "entry", code));
+  llvm::Value *fn = this->lowering.builder.CreateLoad(
+      this->lowering.fnTy,
       this->lowering.objectLayouts().fieldAddress(code->getArg(0), type, member.name, true),
       member.name);
   this->lowering.refCounts().retainValue(fn, fnType);
@@ -368,16 +368,16 @@ std::pair<llvm::Function *, llvm::Constant *> InheritLowerer::fieldStub(const Ty
   llvm::Value *result = this->lowering.closureLowerer().callFunctionValue(fn, fnType, args);
   this->lowering.refCounts().releaseValue(fn, fnType);
   if (result) {
-    this->lowering.builder_.CreateRet(result);
+    this->lowering.builder.CreateRet(result);
   } else {
-    this->lowering.builder_.CreateRetVoid();
+    this->lowering.builder.CreateRetVoid();
   }
-  this->lowering.builder_.restoreIP(point);
+  this->lowering.builder.restoreIP(point);
   llvm::SmallVector<llvm::UTF16, 16> units;
   llvm::convertUTF8ToUTF16String(member.name, units);
   auto *info = new llvm::GlobalVariable(
-      *this->lowering.module_, this->lowering.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
-      llvm::ConstantStruct::get(this->lowering.fnInfoTy_,
+      *this->lowering.module_, this->lowering.fnInfoTy, true, llvm::GlobalValue::PrivateLinkage,
+      llvm::ConstantStruct::get(this->lowering.fnInfoTy,
                                 {code, this->lowering.stringLowerer().stringLiteral(
                                            std::u16string(units.begin(), units.end()))}),
       "tz.fninfo." + member.name);
@@ -396,7 +396,7 @@ llvm::Value *InheritLowerer::emitInterfaceCall(CallExpr *call) {
     for (Expr *arg : call->args) {
       this->lowering.stmtLowerer().emitDiscarded(arg);
     }
-    this->lowering.builder_.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(
+    this->lowering.builder.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(
         this->lowering.module_.get(), llvm::Intrinsic::trap));
     return fnType->ret()->isVoid()
                ? nullptr
@@ -411,10 +411,10 @@ llvm::Value *InheritLowerer::emitInterfaceCall(CallExpr *call) {
   for (size_t i = call->args.size(); i < fnType->params().size(); ++i) {
     args.push_back(this->lowering.optionalLowerer().undefinedValue(fnType->params()[i]));
   }
-  llvm::Value *code = InheritLowerer::invariant(this->lowering.builder_.CreateLoad(
-      this->lowering.builder_.getPtrTy(),
+  llvm::Value *code = InheritLowerer::invariant(this->lowering.builder.CreateLoad(
+      this->lowering.builder.getPtrTy(),
       this->tableEntry(self.value, iface, unsigned(method->entry)), "code"));
-  llvm::CallInst *result = this->lowering.builder_.CreateCall(
+  llvm::CallInst *result = this->lowering.builder.CreateCall(
       this->lowering.closureLowerer().closureFnType(fnType), code, args);
   this->lowering.refCounts().dropOperand(self);
 

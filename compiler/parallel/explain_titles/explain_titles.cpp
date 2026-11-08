@@ -1,5 +1,4 @@
 #include "compiler/parallel/explain_titles/explain_titles.h"
-#include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
 #include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
@@ -12,6 +11,7 @@
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
 #include "compiler/parallel/parallel_model/parallel_model.h"
 #include "compiler/parallel/pieces/pieces.h"
+#include "compiler/program/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -31,11 +31,11 @@
 namespace tz::parallel {
 
 ExplainTitles::ExplainTitles(Analysis &analysis)
-    : analysis_(analysis) {}
+    : analysis(analysis) {}
 
 std::string ExplainTitles::fnName(const FnInfo &f) const {
   const FunctionDecl *fn = f.decl;
-  if (fn == analysis_.module) {
+  if (fn == this->analysis.module) {
     return "the top-level code";
   }
   std::string name = fn->name.str();
@@ -43,7 +43,7 @@ std::string ExplainTitles::fnName(const FnInfo &f) const {
     std::string owner =
         fn->cls()->literal()
             ? "the object " +
-                  Analysis::atText(analysis_.explainNames.where(fn->cls()->literal()->loc()))
+                  Analysis::atText(this->analysis.explainNames.where(fn->cls()->literal()->loc()))
             : fn->cls()->name.str();
     if (fn->isConstructor()) {
       return "constructor of " + owner;
@@ -56,7 +56,7 @@ std::string ExplainTitles::fnName(const FnInfo &f) const {
   if (fn->isInstance && !fn->typeArgs.empty()) {
     name += "<";
     for (size_t i = 0; i < fn->typeArgs.size(); ++i) {
-      name += (i ? ", " : "") + analysis_.explainNames.typeText(fn->typeArgs[i]);
+      name += (i ? ", " : "") + this->analysis.explainNames.typeText(fn->typeArgs[i]);
     }
     name += ">";
   }
@@ -65,7 +65,7 @@ std::string ExplainTitles::fnName(const FnInfo &f) const {
       return name;
     }
     name = (fn->isArrow() ? "the arrow " : "the function ") +
-           Analysis::atText(analysis_.explainNames.where(fn->loc()));
+           Analysis::atText(this->analysis.explainNames.where(fn->loc()));
     for (const FunctionDecl *up = fn->parent; up; up = up->parent) {
       if (up->isInstance) {
         FnInfo info;
@@ -80,7 +80,7 @@ std::string ExplainTitles::fnName(const FnInfo &f) const {
 
 std::string ExplainTitles::fnTitle(const FnInfo &f) const {
   const FunctionDecl *fn = f.decl;
-  if (fn == analysis_.module) {
+  if (fn == this->analysis.module) {
     return "top-level code";
   }
   std::string kind = f.asyncGen ? "async generator" : f.async ? "async" : "";
@@ -102,7 +102,7 @@ std::string ExplainTitles::fnTitle(const FnInfo &f) const {
   } else {
     title += " " + fnName(f);
   }
-  title += ", " + Analysis::lineText(analysis_.explainNames.where(fn->loc()));
+  title += ", " + Analysis::lineText(this->analysis.explainNames.where(fn->loc()));
   for (const FunctionDecl *up = fn->parent; up && (fn->isArrow() || fn->isExpression());
        up = up->parent) {
     if (up->isInstance) {
@@ -120,16 +120,17 @@ std::string ExplainTitles::segTitle(const FnInfo &f, unsigned seg) const {
   if (s.kind == SegKind::Start) {
     return "start";
   }
-  std::string at = analysis_.explainNames.where(s.loc);
-  unsigned line = analysis_.explainNames.lineOf(s.loc), same = 0;
+  std::string at = this->analysis.explainNames.where(s.loc);
+  unsigned line = this->analysis.explainNames.lineOf(s.loc), same = 0;
   for (const Segment &o : f.segs) {
-    if (o.kind != SegKind::Start && analysis_.explainNames.lineOf(o.loc) == line &&
-        analysis_.explainNames.posOf(o.loc).buffer == analysis_.explainNames.posOf(s.loc).buffer) {
+    if (o.kind != SegKind::Start && this->analysis.explainNames.lineOf(o.loc) == line &&
+        this->analysis.explainNames.posOf(o.loc).buffer ==
+            this->analysis.explainNames.posOf(s.loc).buffer) {
       ++same;
     }
   }
   if (same > 1) {
-    at += ":" + std::to_string(analysis_.sources.getLineAndColumn(s.loc).second);
+    at += ":" + std::to_string(this->analysis.sources.getLineAndColumn(s.loc).second);
   }
   switch (s.kind) {
   case SegKind::Await:
@@ -146,62 +147,63 @@ std::string ExplainTitles::segTitle(const FnInfo &f, unsigned seg) const {
 }
 
 std::string ExplainTitles::rootTitle(int r) const {
-  if (analysis_.rootTitles.empty()) {
+  if (this->analysis.rootTitles.empty()) {
     auto key = [&](size_t i, const std::string &title) {
-      return title + "|" + std::to_string(analysis_.roots[i].fn);
+      return title + "|" + std::to_string(this->analysis.roots[i].fn);
     };
     std::map<std::string, std::set<std::string>> columns;
-    for (size_t i = 0; i < analysis_.roots.size(); ++i) {
+    for (size_t i = 0; i < this->analysis.roots.size(); ++i) {
       columns[key(i, rootTitleAt(int(i), false))].insert(rootTitleAt(int(i), true));
     }
     std::vector<std::string> titles;
-    for (size_t i = 0; i < analysis_.roots.size(); ++i) {
+    for (size_t i = 0; i < this->analysis.roots.size(); ++i) {
       std::string title = rootTitleAt(int(i), false);
       titles.push_back(columns[key(i, title)].size() > 1 ? rootTitleAt(int(i), true) : title);
     }
     std::map<std::string, unsigned> count;
     std::map<std::string, unsigned> same, seen;
-    for (size_t i = 0; i < analysis_.roots.size(); ++i) {
+    for (size_t i = 0; i < this->analysis.roots.size(); ++i) {
       ++same[key(i, titles[i])];
     }
-    for (size_t i = 0; i < analysis_.roots.size(); ++i) {
+    for (size_t i = 0; i < this->analysis.roots.size(); ++i) {
       std::string title = titles[i];
-      int parent = analysis_.roots[i].parent;
+      int parent = this->analysis.roots[i].parent;
       if (same[key(i, titles[i])] > 1 && parent >= 0 && size_t(parent) < i) {
-        title += " from " + analysis_.rootTitles[size_t(parent)];
+        title += " from " + this->analysis.rootTitles[size_t(parent)];
       }
-      analysis_.rootTitles.push_back(title);
+      this->analysis.rootTitles.push_back(title);
     }
     count.clear();
-    for (size_t i = 0; i < analysis_.roots.size(); ++i) {
-      ++count[key(i, analysis_.rootTitles[i])];
+    for (size_t i = 0; i < this->analysis.roots.size(); ++i) {
+      ++count[key(i, this->analysis.rootTitles[i])];
     }
-    for (size_t i = 0; i < analysis_.roots.size(); ++i) {
-      if (count[key(i, analysis_.rootTitles[i])] > 1) {
-        analysis_.rootTitles[i] += " #" + std::to_string(++seen[key(i, analysis_.rootTitles[i])]);
+    for (size_t i = 0; i < this->analysis.roots.size(); ++i) {
+      if (count[key(i, this->analysis.rootTitles[i])] > 1) {
+        this->analysis.rootTitles[i] +=
+            " #" + std::to_string(++seen[key(i, this->analysis.rootTitles[i])]);
       }
     }
   }
 
-  return analysis_.rootTitles[size_t(r)];
+  return this->analysis.rootTitles[size_t(r)];
 }
 
 std::string ExplainTitles::rootTitleAt(int r, bool column) const {
-  const Root &root = analysis_.roots[r];
+  const Root &root = this->analysis.roots[r];
   if (r == 0) {
     return "the top-level code";
   }
-  const CallRec &rec = analysis_.byFunction[root.callerFn]->calls[root.rec];
-  std::string place = analysis_.explainNames.where(rec.loc);
+  const CallRec &rec = this->analysis.byFunction[root.callerFn]->calls[root.rec];
+  std::string place = this->analysis.explainNames.where(rec.loc);
   if (column) {
-    place += ":" + std::to_string(analysis_.sources.getLineAndColumn(rec.loc).second);
+    place += ":" + std::to_string(this->analysis.sources.getLineAndColumn(rec.loc).second);
   }
   std::string at = " " + Analysis::atText(place);
   if (root.mode == Mode::Callback) {
     return (root.multi ? "the callbacks" : "the callback") + at;
   }
   if (rec.kind == CallKind::Inline) {
-    const FnInfo &target = *analysis_.byFunction[root.fn];
+    const FnInfo &target = *this->analysis.byFunction[root.fn];
     const FunctionDecl *fn = target.decl;
     std::string text = (root.multi ? "the tasks of " : "the task of ") + fnName(target);
     if (fn && !fn->name.empty()) {
@@ -209,25 +211,25 @@ std::string ExplainTitles::rootTitleAt(int r, bool column) const {
     }
     return text;
   }
-  std::string text = rec.call ? analysis_.explainNames.callText(rec.call)
-                              : fnName(*analysis_.byFunction[root.fn]) + "()";
+  std::string text = rec.call ? this->analysis.explainNames.callText(rec.call)
+                              : fnName(*this->analysis.byFunction[root.fn]) + "()";
 
   return (root.multi ? "the tasks " : "the task ") + text + at;
 }
 
 std::string ExplainTitles::contextOf(unsigned piece) const {
-  const PieceInst &p = analysis_.pieceInstances[piece];
+  const PieceInst &p = this->analysis.pieceInstances[piece];
   std::string text = rootTitle(p.root);
-  if (analysis_.sameTask.at(std::make_tuple(p.fn, p.seg, p.root)) > 1 && p.self) {
-    text += ", this = " + analysis_.explainNames.refName(*p.self);
+  if (this->analysis.sameTask.at(std::make_tuple(p.fn, p.seg, p.root)) > 1 && p.self) {
+    text += ", this = " + this->analysis.explainNames.refName(*p.self);
   }
 
   return text;
 }
 
 std::string ExplainTitles::pieceTitle(unsigned piece, bool withContext) const {
-  const PieceInst &p = analysis_.pieceInstances[piece];
-  const FnInfo &f = *analysis_.byFunction[p.fn];
+  const PieceInst &p = this->analysis.pieceInstances[piece];
+  const FnInfo &f = *this->analysis.byFunction[p.fn];
   std::string text = p.seg != 0          ? fnName(f) + " " + segTitle(f, p.seg)
                      : f.segs.size() > 1 ? "the start of " + fnName(f)
                                          : fnName(f);

@@ -32,13 +32,13 @@ private:
   bool isMutated(const Type *type) const;
   static const Type *containerRepresentation(const Type *type);
 
-  MemoryPlan &plan_;
-  const CycleScanner &scan_;
+  MemoryPlan &plan;
+  const CycleScanner &scan;
   const SourceFile &file_;
-  std::vector<const Type *> objects_, dicts_;
-  std::map<const Type *, std::vector<const Type *>> runtimeTypes_;
-  const Type *anyFunction_ = nullptr;
-  unsigned anyNode_ = 0, unknownNode_ = 0;
+  std::vector<const Type *> objects, dicts;
+  std::map<const Type *, std::vector<const Type *>> runtimeTypes;
+  const Type *anyFunction = nullptr;
+  unsigned anyNode = 0, unknownNode = 0;
 };
 
 }

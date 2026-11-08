@@ -68,25 +68,25 @@ private:
   void publish(Entry &entry, std::map<std::string, llvm::json::Array> next);
   llvm::json::Value diagnostic(const llvm::json::Object &found) const;
 
-  LspChannel &channel_;
-  std::string self_;
-  std::string request_;
-  std::string response_;
+  LspChannel &channel;
+  std::string self;
+  std::string request;
+  std::string response;
   std::string log_;
-  std::mutex mutex_;
-  std::condition_variable wake_;
-  std::map<std::string, std::unique_ptr<TextDocument>> documents_;
-  std::map<std::string, Entry> entries_;
-  CheckProcess process_;
-  std::string running_;
-  int runningLevel_ = 1;
-  bool refreshTokens_ = false;
-  int nextRequest_ = 1;
-  bool checking_ = false;
-  bool cancel_ = false;
-  bool stopping_ = false;
-  bool shutdown_ = false;
-  Clock::time_point started_;
+  std::mutex mutex;
+  std::condition_variable wake;
+  std::map<std::string, std::unique_ptr<TextDocument>> documents;
+  std::map<std::string, Entry> entries;
+  CheckProcess process;
+  std::string running;
+  int runningLevel = 1;
+  bool refreshTokens = false;
+  int nextRequest = 1;
+  bool checking = false;
+  bool cancel = false;
+  bool stopping = false;
+  bool shutdown = false;
+  Clock::time_point started;
 };
 
 }

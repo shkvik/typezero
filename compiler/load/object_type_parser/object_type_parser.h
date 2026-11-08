@@ -15,7 +15,7 @@ public:
   bool parseFieldName(llvm::StringRef &name);
 
 private:
-  Parser &parser_;
+  Parser &parser;
 };
 
 }

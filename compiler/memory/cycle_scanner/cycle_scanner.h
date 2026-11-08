@@ -73,24 +73,28 @@ public:
   static bool thisEscapes(const Stmt *stmt, const VarSymbol *self);
 
 private:
-  llvm::DenseSet<const FunctionDecl *> scanned_;
-  llvm::DenseSet<const Expr *> callee_;
-  llvm::DenseMap<const ClassDecl *, bool> escapes_;
-  std::map<const FunctionDecl *, llvm::DenseSet<const AssignExpr *>> safeWrites_;
-  const FunctionDecl *current_ = nullptr;
+  llvm::DenseSet<const FunctionDecl *> scanned;
+  llvm::DenseSet<const Expr *> callee;
+  llvm::DenseMap<const ClassDecl *, bool> escapes;
+  std::map<const FunctionDecl *, llvm::DenseSet<const AssignExpr *>> safeWrites;
+  const FunctionDecl *current = nullptr;
 
 public:
   CycleScanner();
   ~CycleScanner();
 
-  CycleExprs &cycleExprs() const { return *cycleExprsPart_; }
-  CycleEscapes &cycleEscapes() const { return *cycleEscapesPart_; }
+  CycleExprs &cycleExprs() const {
+    return *this->cycleExprsPart;
+  }
+  CycleEscapes &cycleEscapes() const {
+    return *this->cycleEscapesPart;
+  }
 
 private:
   friend class CycleExprs;
   friend class CycleEscapes;
-  std::unique_ptr<CycleExprs> cycleExprsPart_;
-  std::unique_ptr<CycleEscapes> cycleEscapesPart_;
+  std::unique_ptr<CycleExprs> cycleExprsPart;
+  std::unique_ptr<CycleEscapes> cycleEscapesPart;
 };
 
 }

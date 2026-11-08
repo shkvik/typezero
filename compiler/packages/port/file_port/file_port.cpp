@@ -61,11 +61,11 @@ std::string FilePort::templateText(llvm::StringRef literal) {
 }
 
 void FilePort::retokenize() {
-  toks_ = Scanner::tokenize(text_);
-  close_.assign(toks_.size(), std::string::npos);
+  this->toks = Scanner::tokenize(text_);
+  this->close.assign(this->toks.size(), std::string::npos);
   std::vector<size_t> open;
-  for (size_t i = 0; i < toks_.size(); ++i) {
-    Tok k = toks_[i].kind;
+  for (size_t i = 0; i < this->toks.size(); ++i) {
+    Tok k = this->toks[i].kind;
     if (k == Tok::LParen || k == Tok::LBracket || k == Tok::LBrace || k == Tok::TemplateHead) {
       open.push_back(i);
       continue;
@@ -78,22 +78,22 @@ void FilePort::retokenize() {
     if (want == Tok::Eof) {
       continue;
     }
-    if (!open.empty() && toks_[open.back()].kind == want) {
-      close_[open.back()] = i;
+    if (!open.empty() && this->toks[open.back()].kind == want) {
+      this->close[open.back()] = i;
       open.pop_back();
     }
   }
 }
 
 bool FilePort::apply() {
-  if (edits_.empty()) {
+  if (this->edits.empty()) {
     return false;
   }
-  std::stable_sort(edits_.begin(), edits_.end(),
+  std::stable_sort(this->edits.begin(), this->edits.end(),
                    [](const Edit &a, const Edit &b) { return a.begin < b.begin; });
   std::vector<const Edit *> taken;
   size_t last = 0;
-  for (const Edit &edit : edits_) {
+  for (const Edit &edit : this->edits) {
     if (edit.begin < last) {
       continue;
     }
@@ -132,12 +132,12 @@ bool FilePort::apply() {
         static_cast<long long>(edit->text.size()) - static_cast<long long>(edit->end - edit->begin);
     from = edit->end;
     if (edit->kind) {
-      ++counts_[edit->kind];
+      ++this->counts[edit->kind];
     }
   }
   out.append(text_, from, std::string::npos);
   text_ = std::move(out);
-  edits_.clear();
+  this->edits.clear();
 
   return true;
 }
@@ -174,31 +174,31 @@ void FilePort::streamHooks() {
       {"_destroy", "onDestroy"},     {"_construct", "onConstruct"}};
   const char *kind = "'_read', '_write' and the other methods of a stream became 'onRead', "
                      "'onWrite'...";
-  for (size_t i = 0; i < toks_.size(); ++i) {
+  for (size_t i = 0; i < this->toks.size(); ++i) {
     if (!isName(i, "class") || afterDot(i)) {
       continue;
     }
     size_t open = i + 1;
     llvm::StringRef base;
     bool extends = false;
-    while (open < toks_.size() && !is(open, Tok::LBrace)) {
+    while (open < this->toks.size() && !is(open, Tok::LBrace)) {
       if (isName(open, "extends")) {
         extends = true;
       } else if (extends && base.empty() && is(open, Tok::Identifier) && !is(open + 1, Tok::Dot)) {
-        base = toks_[open].text;
+        base = this->toks[open].text;
       }
       ++open;
     }
-    if (open >= toks_.size() || close_[open] == std::string::npos ||
+    if (open >= this->toks.size() || this->close[open] == std::string::npos ||
         !llvm::is_contained(streams, base)) {
       continue;
     }
-    for (size_t k = open + 1; k < close_[open]; ++k) {
+    for (size_t k = open + 1; k < this->close[open]; ++k) {
       if (!is(k, Tok::Identifier)) {
         continue;
       }
       const auto *hook =
-          llvm::find_if(hooks, [&](const auto &h) { return h.first == toks_[k].text; });
+          llvm::find_if(hooks, [&](const auto &h) { return h.first == this->toks[k].text; });
       if (hook == std::end(hooks)) {
         continue;
       }
@@ -212,7 +212,7 @@ void FilePort::streamHooks() {
 }
 
 void FilePort::modules() {
-  for (size_t i = 0; i < toks_.size(); ++i) {
+  for (size_t i = 0; i < this->toks.size(); ++i) {
     if (afterDot(i)) {
       continue;
     }
@@ -221,29 +221,29 @@ void FilePort::modules() {
         exportDefault(i);
       } else if (isName(i + 1, "type") && is(i + 2, Tok::LBrace)) {
         add(at(i + 1), at(i + 2), "", "'import type' and 'export type' lost 'type'");
-        exportList(i + 2, close_[i + 2]);
+        exportList(i + 2, this->close[i + 2]);
       } else if (isName(i + 1, "type") && is(i + 2, Tok::Star)) {
         add(at(i + 1), at(i + 2), "", "'import type' and 'export type' lost 'type'");
       } else if (is(i + 1, Tok::LBrace)) {
-        exportList(i + 1, close_[i + 1]);
+        exportList(i + 1, this->close[i + 1]);
       }
     } else if (isName(i, "import")) {
       importDecl(i);
     }
   }
-  for (size_t i = 1; i < toks_.size(); ++i) {
+  for (size_t i = 1; i < this->toks.size(); ++i) {
     if (!is(i, Tok::StringLiteral) ||
         !(isName(i - 1, "from") || (isName(i - 1, "import") && !afterDot(i - 1)))) {
       continue;
     }
-    std::string spec = Scanner::stringValue(toks_[i]);
+    std::string spec = Scanner::stringValue(this->toks[i]);
     llvm::StringRef ref(spec);
     llvm::StringRef ext = path::extension(ref, path::Style::posix);
     if (!(ref.starts_with("./") || ref.starts_with("../")) || ref.ends_with(".d.ts") ||
         (ext != ".ts" && ext != ".js")) {
       continue;
     }
-    char quote = toks_[i].text.front();
+    char quote = this->toks[i].text.front();
     add(at(i), endOf(i), quote + ref.drop_back(3).str() + ".tz" + quote,
         "imports of .ts and .js files name the .tz files of the copy");
   }
@@ -252,13 +252,13 @@ void FilePort::modules() {
 void FilePort::exportDefault(size_t i) {
   const char *kind = "'export default' became a named export";
   size_t def = i + 1, k = i + 2;
-  if (k >= toks_.size()) {
+  if (k >= this->toks.size()) {
     return;
   }
   llvm::SmallString<256> real;
   fs::real_path(file_, real);
-  auto known = ctx_.defaultNames.find(std::string(real));
-  std::string name = known != ctx_.defaultNames.end() ? known->second : "";
+  auto known = this->ctx.defaultNames.find(std::string(real));
+  std::string name = known != this->ctx.defaultNames.end() ? known->second : "";
   size_t keyword = k;
   if (isName(keyword, "async") && is(keyword + 1, Tok::KwFunction)) {
     ++keyword;
@@ -271,13 +271,13 @@ void FilePort::exportDefault(size_t i) {
     if (is(last + 1, Tok::Star)) {
       ++last;
     }
-    bool named = is(last + 1, Tok::Identifier) && toks_[last + 1].text != "extends" &&
-                 toks_[last + 1].text != "implements";
+    bool named = is(last + 1, Tok::Identifier) && this->toks[last + 1].text != "extends" &&
+                 this->toks[last + 1].text != "implements";
     if (named) {
       add(at(def), at(k), "", kind);
     } else {
       std::string words = text_.substr(at(k), endOf(last) - at(k));
-      if (last + 1 < toks_.size()) {
+      if (last + 1 < this->toks.size()) {
         add(at(def), at(last + 1), words + " " + name + (is(last + 1, Tok::LParen) ? "" : " "),
             kind);
       } else {
@@ -287,8 +287,8 @@ void FilePort::exportDefault(size_t i) {
     return;
   }
   if (is(k, Tok::Identifier) &&
-      (k + 1 >= toks_.size() || is(k + 1, Tok::Semi) || toks_[k + 1].newlineBefore)) {
-    add(at(i), endOf(k), "export { " + toks_[k].text.str() + " }", kind);
+      (k + 1 >= this->toks.size() || is(k + 1, Tok::Semi) || this->toks[k + 1].newlineBefore)) {
+    add(at(i), endOf(k), "export { " + this->toks[k].text.str() + " }", kind);
     return;
   }
   add(at(def), endOf(def), "const " + name + " =", kind);
@@ -300,11 +300,12 @@ void FilePort::exportList(size_t open, size_t close) {
   }
   std::string target;
   if (isName(close + 1, "from") && is(close + 2, Tok::StringLiteral)) {
-    std::string spec = Scanner::stringValue(toks_[close + 2]);
+    std::string spec = Scanner::stringValue(this->toks[close + 2]);
     std::string file = Scanner::resolveRelative(file_, spec, Sources::TypeScript);
     llvm::SmallString<256> real;
     if (!file.empty() && !fs::real_path(file, real)) {
-      if (auto it = ctx_.defaultNames.find(std::string(real)); it != ctx_.defaultNames.end()) {
+      if (auto it = this->ctx.defaultNames.find(std::string(real));
+          it != this->ctx.defaultNames.end()) {
         target = it->second;
       }
     }
@@ -330,14 +331,14 @@ void FilePort::exportList(size_t open, size_t close) {
 bool FilePort::members(const std::string &name, size_t skipBegin, size_t skipEnd,
                        std::vector<std::string> &items) {
   llvm::StringSet<> own;
-  for (size_t j = 0; j < toks_.size(); ++j) {
+  for (size_t j = 0; j < this->toks.size(); ++j) {
     if ((j < skipBegin || j >= skipEnd) && is(j, Tok::Identifier) && !afterDot(j)) {
-      own.insert(toks_[j].text);
+      own.insert(this->toks[j].text);
     }
   }
   std::vector<Edit> uses;
   std::set<std::string> seen;
-  for (size_t j = 0; j < toks_.size(); ++j) {
+  for (size_t j = 0; j < this->toks.size(); ++j) {
     if (j >= skipBegin && j < skipEnd) {
       continue;
     }
@@ -350,7 +351,7 @@ bool FilePort::members(const std::string &name, size_t skipBegin, size_t skipEnd
     if (!is(j + 1, Tok::Dot) || !is(j + 2, Tok::Identifier)) {
       return false;
     }
-    std::string member = toks_[j + 2].text.str();
+    std::string member = this->toks[j + 2].text.str();
     std::string local = own.contains(member) ? name + PortNames::capitalize(member) : member;
     uses.push_back({at(j), endOf(j + 2), local, nullptr, ""});
     if (seen.insert(member).second) {
@@ -358,7 +359,7 @@ bool FilePort::members(const std::string &name, size_t skipBegin, size_t skipEnd
     }
   }
   for (Edit &use : uses) {
-    edits_.push_back(std::move(use));
+    this->edits.push_back(std::move(use));
   }
 
   return true;
@@ -369,9 +370,9 @@ void FilePort::importDecl(size_t i) {
     return;
   }
   size_t from = std::string::npos;
-  for (size_t j = i + 1; j < toks_.size() && j < i + 2000; ++j) {
-    if (is(j, Tok::LBrace) && close_[j] != std::string::npos) {
-      j = close_[j];
+  for (size_t j = i + 1; j < this->toks.size() && j < i + 2000; ++j) {
+    if (is(j, Tok::LBrace) && this->close[j] != std::string::npos) {
+      j = this->close[j];
       continue;
     }
     if (is(j, Tok::Semi) || is(j, Tok::Assign)) {
@@ -392,35 +393,35 @@ void FilePort::importDecl(size_t i) {
     ++c;
   }
   size_t clauseBegin = c;
-  std::string spec = Scanner::stringValue(toks_[from + 1]);
+  std::string spec = Scanner::stringValue(this->toks[from + 1]);
   llvm::StringRef specRef(spec);
 
   std::string package, source, sub;
   if (Specifier::splitJsrImport(specRef, package, source, sub)) {
-    char quote = toks_[from + 1].text.front();
+    char quote = this->toks[from + 1].text.front();
     add(at(from + 1), endOf(from + 1), std::string(1, quote) + package + sub + quote,
         "'jsr:' imports became package names in package.json");
   }
 
   std::string defaultName, ns;
   if (is(c, Tok::Identifier) && (is(c + 1, Tok::Comma) || c + 1 == from)) {
-    defaultName = toks_[c].text.str();
+    defaultName = this->toks[c].text.str();
     c += is(c + 1, Tok::Comma) ? 2 : 1;
   }
   if (is(c, Tok::Star) && is(c + 1, Tok::KwAs) && is(c + 2, Tok::Identifier)) {
-    ns = toks_[c + 2].text.str();
+    ns = this->toks[c + 2].text.str();
     c += 3;
   }
   std::vector<std::string> items;
-  if (is(c, Tok::LBrace) && close_[c] != std::string::npos) {
+  if (is(c, Tok::LBrace) && this->close[c] != std::string::npos) {
     bool rewrite = !defaultName.empty() || !ns.empty();
     std::string item;
-    for (size_t j = c + 1; j < close_[c]; ++j) {
+    for (size_t j = c + 1; j < this->close[c]; ++j) {
       if (isName(j, "type") && is(j + 1, Tok::Identifier)) {
         if (!rewrite) {
           add(at(j), at(j + 1), "", typeKind);
         } else {
-          ++counts_[typeKind];
+          ++this->counts[typeKind];
         }
         continue;
       }
@@ -431,7 +432,7 @@ void FilePort::importDecl(size_t i) {
         item.clear();
         continue;
       }
-      item += (item.empty() ? "" : " ") + toks_[j].text.str();
+      item += (item.empty() ? "" : " ") + this->toks[j].text.str();
     }
     if (!item.empty()) {
       items.push_back(item);
@@ -448,7 +449,8 @@ void FilePort::importDecl(size_t i) {
       std::string target = Scanner::resolveRelative(file_, spec, Sources::TypeScript);
       llvm::SmallString<256> real;
       if (!target.empty() && !fs::real_path(target, real)) {
-        if (auto it = ctx_.defaultNames.find(std::string(real)); it != ctx_.defaultNames.end()) {
+        if (auto it = this->ctx.defaultNames.find(std::string(real));
+            it != this->ctx.defaultNames.end()) {
           exported = it->second;
         }
       }
@@ -476,8 +478,8 @@ void FilePort::importDecl(size_t i) {
 }
 
 void FilePort::tokens() {
-  for (size_t i = 0; i < toks_.size(); ++i) {
-    const Token &t = toks_[i];
+  for (size_t i = 0; i < this->toks.size(); ++i) {
+    const Token &t = this->toks[i];
     switch (t.kind) {
     case Tok::EqEqEq:
       add(at(i), endOf(i), "==", "'===' and '!==' became '==' and '!='");
@@ -489,7 +491,7 @@ void FilePort::tokens() {
       add(at(i), endOf(i), "let", "'var' became 'let'");
       break;
     case Tok::KwVoid:
-      if (is(i + 1, Tok::IntLiteral) && toks_[i + 1].text == "0") {
+      if (is(i + 1, Tok::IntLiteral) && this->toks[i + 1].text == "0") {
         add(at(i), endOf(i + 1), "undefined", "'null' and 'void 0' became 'undefined'");
       }
       break;
@@ -550,7 +552,7 @@ void FilePort::tokens() {
 }
 
 size_t FilePort::unary(size_t i) const {
-  size_t n = toks_.size();
+  size_t n = this->toks.size();
   while (i < n && (is(i, Tok::Bang) || is(i, Tok::Tilde) || is(i, Tok::Minus) || is(i, Tok::Plus) ||
                    is(i, Tok::KwTypeof) || is(i, Tok::KwVoid) || is(i, Tok::KwDelete) ||
                    isName(i, "await"))) {
@@ -559,49 +561,51 @@ size_t FilePort::unary(size_t i) const {
   if (i >= n) {
     return 0;
   }
-  auto closed = [&](size_t j) { return close_[j] == std::string::npos ? 0 : close_[j] + 1; };
-  switch (toks_[i].kind) {
-  case Tok::Identifier: {
-    llvm::StringRef name = toks_[i].text;
-    if (name == "function" || name == "class" || name == "async" || name == "yield" ||
-        is(i + 1, Tok::Arrow)) {
-      return 0;
+  auto closed = [&](size_t j) {
+    return this->close[j] == std::string::npos ? 0 : this->close[j] + 1;
+  };
+  switch (this->toks[i].kind) {
+    case Tok::Identifier: {
+      llvm::StringRef name = this->toks[i].text;
+      if (name == "function" || name == "class" || name == "async" || name == "yield" ||
+          is(i + 1, Tok::Arrow)) {
+        return 0;
+      }
+      ++i;
+      break;
     }
-    ++i;
-    break;
-  }
-  case Tok::KwNew:
-    if (!is(i + 1, Tok::Identifier)) {
-      return 0;
+    case Tok::KwNew:
+      if (!is(i + 1, Tok::Identifier)) {
+        return 0;
+      }
+      i += 2;
+      break;
+    case Tok::IntLiteral:
+    case Tok::FloatLiteral:
+    case Tok::StringLiteral:
+    case Tok::TemplateString:
+    case Tok::RegexLiteral:
+    case Tok::KwTrue:
+    case Tok::KwFalse:
+      ++i;
+      break;
+    case Tok::TemplateHead:
+    case Tok::LBracket:
+      i = closed(i);
+      break;
+    case Tok::LParen: {
+      size_t after = closed(i);
+      if (!after || is(after, Tok::Arrow)) {
+        return 0;
+      }
+      i = after;
+      break;
     }
-    i += 2;
-    break;
-  case Tok::IntLiteral:
-  case Tok::FloatLiteral:
-  case Tok::StringLiteral:
-  case Tok::TemplateString:
-  case Tok::RegexLiteral:
-  case Tok::KwTrue:
-  case Tok::KwFalse:
-    ++i;
-    break;
-  case Tok::TemplateHead:
-  case Tok::LBracket:
-    i = closed(i);
-    break;
-  case Tok::LParen: {
-    size_t after = closed(i);
-    if (!after || is(after, Tok::Arrow)) {
+    default:
       return 0;
-    }
-    i = after;
-    break;
-  }
-  default:
-    return 0;
   }
   while (i && i < n) {
-    const Token &t = toks_[i];
+    const Token &t = this->toks[i];
     if (t.is(Tok::Dot) || t.is(Tok::QuestionDot)) {
       if (is(i + 1, Tok::Identifier)) {
         i += 2;
@@ -641,9 +645,9 @@ void FilePort::privateName(size_t i) {
                        isName(first - 1, "async") || isName(first - 1, "override"))) {
     --first;
   }
-  bool declared =
-      !afterDot(i) && (first == 0 || toks_[first].newlineBefore || is(first - 1, Tok::LBrace) ||
-                       is(first - 1, Tok::RBrace) || is(first - 1, Tok::Semi));
+  bool declared = !afterDot(i) &&
+                  (first == 0 || this->toks[first].newlineBefore || is(first - 1, Tok::LBrace) ||
+                   is(first - 1, Tok::RBrace) || is(first - 1, Tok::Semi));
   if (!declared) {
     add(at(i) - 1, at(i), "", kind);
   } else if (first == i) {
@@ -658,65 +662,65 @@ bool FilePort::chainMayStart(size_t i) const {
   if (i == 0) {
     return true;
   }
-  switch (toks_[i - 1].kind) {
-  case Tok::LParen:
-  case Tok::LBracket:
-  case Tok::Comma:
-  case Tok::Semi:
-  case Tok::Colon:
-  case Tok::Question:
-  case Tok::Assign:
-  case Tok::PlusAssign:
-  case Tok::Arrow:
-  case Tok::KwReturn:
-  case Tok::KwCase:
-  case Tok::AmpAmp:
-  case Tok::PipePipe:
-  case Tok::QuestionQuestion:
-  case Tok::EqEq:
-  case Tok::BangEq:
-  case Tok::EqEqEq:
-  case Tok::BangEqEq:
-  case Tok::TemplateHead:
-  case Tok::TemplateMiddle:
-    return true;
-  case Tok::Identifier:
-    return toks_[i - 1].text == "throw";
-  default:
-    return false;
+  switch (this->toks[i - 1].kind) {
+    case Tok::LParen:
+    case Tok::LBracket:
+    case Tok::Comma:
+    case Tok::Semi:
+    case Tok::Colon:
+    case Tok::Question:
+    case Tok::Assign:
+    case Tok::PlusAssign:
+    case Tok::Arrow:
+    case Tok::KwReturn:
+    case Tok::KwCase:
+    case Tok::AmpAmp:
+    case Tok::PipePipe:
+    case Tok::QuestionQuestion:
+    case Tok::EqEq:
+    case Tok::BangEq:
+    case Tok::EqEqEq:
+    case Tok::BangEqEq:
+    case Tok::TemplateHead:
+    case Tok::TemplateMiddle:
+      return true;
+    case Tok::Identifier:
+      return this->toks[i - 1].text == "throw";
+    default:
+      return false;
   }
 }
 
 bool FilePort::chainEnds(size_t i) const {
-  if (i >= toks_.size() || toks_[i].newlineBefore) {
+  if (i >= this->toks.size() || this->toks[i].newlineBefore) {
     return true;
   }
-  switch (toks_[i].kind) {
-  case Tok::RParen:
-  case Tok::RBracket:
-  case Tok::RBrace:
-  case Tok::Comma:
-  case Tok::Semi:
-  case Tok::Colon:
-  case Tok::Question:
-  case Tok::QuestionQuestion:
-  case Tok::AmpAmp:
-  case Tok::PipePipe:
-  case Tok::EqEq:
-  case Tok::BangEq:
-  case Tok::EqEqEq:
-  case Tok::BangEqEq:
-  case Tok::TemplateMiddle:
-  case Tok::TemplateTail:
-  case Tok::KwAs:
-    return true;
-  default:
-    return false;
+  switch (this->toks[i].kind) {
+    case Tok::RParen:
+    case Tok::RBracket:
+    case Tok::RBrace:
+    case Tok::Comma:
+    case Tok::Semi:
+    case Tok::Colon:
+    case Tok::Question:
+    case Tok::QuestionQuestion:
+    case Tok::AmpAmp:
+    case Tok::PipePipe:
+    case Tok::EqEq:
+    case Tok::BangEq:
+    case Tok::EqEqEq:
+    case Tok::BangEqEq:
+    case Tok::TemplateMiddle:
+    case Tok::TemplateTail:
+    case Tok::KwAs:
+      return true;
+    default:
+      return false;
   }
 }
 
 void FilePort::concatenations() {
-  for (size_t i = 0; i < toks_.size(); ++i) {
+  for (size_t i = 0; i < this->toks.size(); ++i) {
     if (!chainMayStart(i)) {
       continue;
     }
@@ -743,7 +747,7 @@ void FilePort::concatenations() {
     auto literal = [&](const std::pair<size_t, size_t> &p) {
       return (p.second == p.first + 1 &&
               (is(p.first, Tok::StringLiteral) || is(p.first, Tok::TemplateString))) ||
-             (is(p.first, Tok::TemplateHead) && close_[p.first] + 1 == p.second);
+             (is(p.first, Tok::TemplateHead) && this->close[p.first] + 1 == p.second);
     };
     size_t first = 0;
     while (first < parts.size() && !literal(parts[first])) {
@@ -774,7 +778,7 @@ void FilePort::concatenations() {
     for (size_t k = first; k < parts.size(); ++k) {
       auto [from, to] = parts[k];
       if (is(from, Tok::StringLiteral) && to == from + 1) {
-        out += FilePort::templateText(toks_[from].text);
+        out += FilePort::templateText(this->toks[from].text);
       } else if (literal(parts[k])) {
         out += llvm::StringRef(source(from, to)).drop_front().drop_back().str();
       } else {
@@ -790,8 +794,8 @@ void FilePort::concatenations() {
 void FilePort::manual() {
   std::vector<std::pair<size_t, size_t>> lists;
   std::map<std::string, unsigned> functions;
-  for (size_t i = 0; i < toks_.size(); ++i) {
-    const Token &t = toks_[i];
+  for (size_t i = 0; i < this->toks.size(); ++i) {
+    const Token &t = this->toks[i];
     if ((isName(i, "import") || isName(i, "export")) && !afterDot(i)) {
       size_t j = i + 1;
       if (isName(j, "type")) {
@@ -803,8 +807,8 @@ void FilePort::manual() {
       if (is(j, Tok::Identifier) && is(j + 1, Tok::Comma)) {
         j += 2;
       }
-      if (is(j, Tok::LBrace) && close_[j] != std::string::npos) {
-        lists.push_back({j, close_[j]});
+      if (is(j, Tok::LBrace) && this->close[j] != std::string::npos) {
+        lists.push_back({j, this->close[j]});
       }
     }
     bool inList = llvm::any_of(lists, [&](auto &l) { return i > l.first && i < l.second; });
@@ -812,7 +816,7 @@ void FilePort::manual() {
       continue;
     }
 
-    if (t.is(Tok::KwAs) && !inList && i > 0 && FilePort::isOperandEnd(toks_[i - 1])) {
+    if (t.is(Tok::KwAs) && !inList && i > 0 && FilePort::isOperandEnd(this->toks[i - 1])) {
       if (is(i + 1, Tok::KwConst)) {
         note(i, "'as const' is not supported: declare the type of the value instead, e.g. a "
                 "union of literal types");
@@ -840,8 +844,8 @@ void FilePort::manual() {
       continue;
     }
     if (t.is(Tok::KwFunction) && is(i + 1, Tok::Identifier)) {
-      if (++functions[toks_[i + 1].text.str()] == 2) {
-        note(i, "several signatures with one body ('" + toks_[i + 1].text.str() +
+      if (++functions[this->toks[i + 1].text.str()] == 2) {
+        note(i, "several signatures with one body ('" + this->toks[i + 1].text.str() +
                     "') are not supported for plain functions (docs/overloads.md): keep one "
                     "signature with unions, or give each its own function");
       }
@@ -851,14 +855,14 @@ void FilePort::manual() {
       continue;
     }
     llvm::StringRef name = t.text;
-    if (name == "satisfies" && i > 0 && FilePort::isOperandEnd(toks_[i - 1])) {
+    if (name == "satisfies" && i > 0 && FilePort::isOperandEnd(this->toks[i - 1])) {
       note(i, "'satisfies' is not supported: declare the type of the variable instead, or "
               "remove it");
     } else if (name == "asserts" && i > 0 && is(i - 1, Tok::Colon) && is(i + 1, Tok::Identifier) &&
                !t.newlineBefore) {
       note(i, "'asserts' is not supported (docs/narrowing.md): there are no exceptions, so a "
               "function cannot stop its caller; write '" +
-                  toks_[i + 1].text.str() +
+                  this->toks[i + 1].text.str() +
                   " is T' and return whether it holds, then check it at the call: 'if "
                   "(!isT(x)) return err(...)'");
     } else if ((name == "get" || name == "set") &&
@@ -871,7 +875,7 @@ void FilePort::manual() {
                 isName(i - 1, "override"))) {
       note(i, "getters and setters are not supported (docs/objects.md): reading a field never "
               "runs code; make '" +
-                  name.str() + " " + toks_[i + 1].text.str() +
+                  name.str() + " " + this->toks[i + 1].text.str() +
                   "()' a method, or keep the value in a field");
     } else if (name == "prototype" || name == "__proto__") {
       note(i, "prototypes are not supported (docs/objects.md): declare the methods in a class");
@@ -879,7 +883,7 @@ void FilePort::manual() {
                (isName(i + 2, "setPrototypeOf") || isName(i + 2, "getPrototypeOf") ||
                 isName(i + 2, "create") || isName(i + 2, "defineProperty") ||
                 isName(i + 2, "defineProperties") || isName(i + 2, "freeze"))) {
-      note(i, "'Object." + toks_[i + 2].text.str() +
+      note(i, "'Object." + this->toks[i + 2].text.str() +
                   "' is not supported: objects have the fields of their type, and no prototypes "
                   "(docs/objects.md)");
     } else if (name == "arguments" && !is(i + 1, Tok::Colon)) {
@@ -895,7 +899,7 @@ void FilePort::manual() {
                   "' is not supported: move what it declares into a file of its own and import "
                   "it by name (docs/modules.md)");
     } else if (name == "declare" && (isName(i + 1, "global") || isName(i + 1, "module"))) {
-      note(i, "'declare " + toks_[i + 1].text.str() + "' is not supported (docs/modules.md)");
+      note(i, "'declare " + this->toks[i + 1].text.str() + "' is not supported (docs/modules.md)");
     } else if (name == "bigint" || (name == "BigInt" && is(i + 1, Tok::LParen))) {
       note(i, "bigint is not supported (docs/decimal.md): use long, or decimal for exact big "
               "numbers");
@@ -914,7 +918,7 @@ void FilePort::manual() {
     } else if (name == "export" && is(i + 1, Tok::Star) && is(i + 2, Tok::KwAs)) {
       note(i, "'export * as' is not supported: export the names, or 'export *'");
     } else if (name == "from" && is(i + 1, Tok::StringLiteral)) {
-      std::string spec = Scanner::stringValue(toks_[i + 1]);
+      std::string spec = Scanner::stringValue(this->toks[i + 1]);
       llvm::StringRef s = spec;
       std::string package, sub;
       if (s.starts_with("npm:")) {
@@ -923,14 +927,15 @@ void FilePort::manual() {
       } else if (!s.starts_with(".") && !s.contains(':') &&
                  !BuiltinModulePaths::isBuiltinModule(s) && s != "neverthrow" &&
                  Specifier::splitPackageSpecifier(s, package, sub) &&
-                 !ctx_.jsrDependencies.count(package) && notedPackages_.insert(package).second) {
+                 !this->ctx.jsrDependencies.count(package) &&
+                 this->notedPackages.insert(package).second) {
         note(i + 1, "'" + package +
                         "' is another package: add it to package.json once it is adapted for tz "
                         "(docs/packages.md), or do without it");
       }
     }
   }
-  for (size_t i = 1; i < toks_.size(); ++i) {
+  for (size_t i = 1; i < this->toks.size(); ++i) {
     if ((is(i, Tok::TemplateHead) || is(i, Tok::TemplateString)) &&
         (is(i - 1, Tok::Pipe) || (is(i - 1, Tok::Assign) && i >= 3 && isName(i - 3, "type")))) {
       note(i, "template literal types are not supported: write 'string'");

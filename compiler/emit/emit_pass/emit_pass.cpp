@@ -7,7 +7,8 @@
 
 namespace tz {
 
-EmitPass::EmitPass(const Target &target) : target_(target) {}
+EmitPass::EmitPass(const Target &target)
+    : target(target) {}
 
 Result<ObjectFile, Errors> EmitPass::run(llvm::Module &module) const {
   llvm::SmallString<128> path;
@@ -21,8 +22,8 @@ Result<ObjectFile, Errors> EmitPass::run(llvm::Module &module) const {
   FileWriter writer;
   Errors errors = writer.write(path, [&](llvm::raw_pwrite_stream &out) {
     llvm::legacy::PassManager pm;
-    if (target_.machine().addPassesToEmitFile(pm, out, nullptr,
-                                              llvm::CodeGenFileType::ObjectFile)) {
+    if (this->target.machine().addPassesToEmitFile(pm, out, nullptr,
+                                                   llvm::CodeGenFileType::ObjectFile)) {
       supported = false;
       return;
     }

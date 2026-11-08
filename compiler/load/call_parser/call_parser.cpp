@@ -8,10 +8,10 @@
 #include "compiler/load/primary_parser/primary_parser.h"
 #include "compiler/load/stmt_parser/stmt_parser.h"
 #include "compiler/load/template_parser/template_parser.h"
-#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/load/token_cursor/token_cursor.h"
 #include "compiler/load/type_parser/type_parser.h"
 #include "compiler/load/var_parser/var_parser.h"
+#include "compiler/program/to_utf8/to_utf8.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
@@ -24,86 +24,88 @@ namespace tz {
 
 using llvm::dyn_cast;
 
-CallParser::CallParser(Parser &parser) : parser_(parser) {}
+CallParser::CallParser(Parser &parser)
+    : parser(parser) {}
 
 Expr *CallParser::parseCallOrMember() {
-  Expr *expr = parser_.primaries().parsePrimary();
+  Expr *expr = this->parser.primaries().parsePrimary();
   bool chain = false;
   auto finish = [&]() -> Expr * {
-    return chain ? parser_.ctx_.make<OptionalChainExpr>(expr->loc(), expr) : expr;
+    return chain ? this->parser.ctx.make<OptionalChainExpr>(expr->loc(), expr) : expr;
   };
   for (;;) {
-    if (auto *name = dyn_cast<NameExpr>(expr); name && !chain && parser_.tok_.is(Tok::Less) &&
+    if (auto *name = dyn_cast<NameExpr>(expr); name && !chain && this->parser.tok.is(Tok::Less) &&
                                                name->typeArgs.empty() &&
-                                               parser_.types().tryTypeArgs(name->typeArgs)) {
+                                               this->parser.types().tryTypeArgs(name->typeArgs)) {
       continue;
     }
     if (auto *member = dyn_cast<MemberExpr>(expr);
-        member && parser_.tok_.is(Tok::Less) && member->typeArgs.empty() &&
-        parser_.types().tryTypeArgs(member->typeArgs, true)) {
+        member && this->parser.tok.is(Tok::Less) && member->typeArgs.empty() &&
+        this->parser.types().tryTypeArgs(member->typeArgs, true)) {
       continue;
     }
     bool optional = false;
-    if (parser_.tok_.is(Tok::QuestionDot)) {
+    if (this->parser.tok.is(Tok::QuestionDot)) {
       optional = chain = true;
-      parser_.cursor().advance();
-      if (parser_.tok_.is(Tok::Identifier) || TokenKinds::isKeyword(parser_.tok_.kind)) {
-        auto *member = parser_.ctx_.make<MemberExpr>(parser_.tok_.loc(), expr, parser_.tok_.text);
+      this->parser.cursor().advance();
+      if (this->parser.tok.is(Tok::Identifier) || TokenKinds::isKeyword(this->parser.tok.kind)) {
+        auto *member =
+            this->parser.ctx.make<MemberExpr>(this->parser.tok.loc(), expr, this->parser.tok.text);
         member->optional = true;
         expr = member;
-        parser_.cursor().advance();
+        this->parser.cursor().advance();
         continue;
       }
-      if (!parser_.tok_.is(Tok::LParen) && !parser_.tok_.is(Tok::LBracket)) {
-        parser_.cursor().error(parser_.tok_.loc(),
-                               "expected a property name, '[' or '(' after '?.'");
+      if (!this->parser.tok.is(Tok::LParen) && !this->parser.tok.is(Tok::LBracket)) {
+        this->parser.cursor().error(this->parser.tok.loc(),
+                                    "expected a property name, '[' or '(' after '?.'");
         return finish();
       }
     }
-    if (parser_.tok_.is(Tok::LParen)) {
+    if (this->parser.tok.is(Tok::LParen)) {
       llvm::SMLoc loc = expr->loc();
-      parser_.cursor().advance();
-      llvm::SaveAndRestore<bool> allowIn(parser_.noIn_, false);
+      this->parser.cursor().advance();
+      llvm::SaveAndRestore<bool> allowIn(this->parser.noIn, false);
       std::vector<Expr *> args;
       std::vector<bool> spread;
-      while (!parser_.tok_.is(Tok::RParen) && !parser_.tok_.is(Tok::Eof)) {
-        bool spreads = parser_.cursor().accept(Tok::Ellipsis);
+      while (!this->parser.tok.is(Tok::RParen) && !this->parser.tok.is(Tok::Eof)) {
+        bool spreads = this->parser.cursor().accept(Tok::Ellipsis);
         if (spreads || !spread.empty()) {
           spread.resize(args.size(), false);
           spread.push_back(spreads);
         }
-        args.push_back(parser_.exprs().parseExpr());
-        if (!parser_.cursor().accept(Tok::Comma)) {
+        args.push_back(this->parser.exprs().parseExpr());
+        if (!this->parser.cursor().accept(Tok::Comma)) {
           break;
         }
       }
-      parser_.cursor().expect(Tok::RParen, "to close the argument list");
-      auto *call = parser_.ctx_.make<CallExpr>(loc, expr, std::move(args));
+      this->parser.cursor().expect(Tok::RParen, "to close the argument list");
+      auto *call = this->parser.ctx.make<CallExpr>(loc, expr, std::move(args));
       call->optional = optional;
       call->spread = std::move(spread);
       expr = call;
-    } else if (parser_.tok_.is(Tok::Dot)) {
-      parser_.cursor().advance();
-      llvm::SMLoc loc = parser_.tok_.loc();
-      if (!parser_.tok_.is(Tok::Identifier) && !TokenKinds::isKeyword(parser_.tok_.kind)) {
-        parser_.cursor().error(parser_.tok_.loc(), "expected a property name after '.'");
+    } else if (this->parser.tok.is(Tok::Dot)) {
+      this->parser.cursor().advance();
+      llvm::SMLoc loc = this->parser.tok.loc();
+      if (!this->parser.tok.is(Tok::Identifier) && !TokenKinds::isKeyword(this->parser.tok.kind)) {
+        this->parser.cursor().error(this->parser.tok.loc(), "expected a property name after '.'");
         return finish();
       }
-      expr = parser_.ctx_.make<MemberExpr>(loc, expr, parser_.tok_.text);
-      parser_.cursor().advance();
-    } else if (parser_.tok_.is(Tok::LBracket)) {
-      llvm::SMLoc loc = parser_.tok_.loc();
-      parser_.cursor().advance();
-      llvm::SaveAndRestore<bool> allowIn(parser_.noIn_, false);
-      Expr *index = parser_.exprs().parseSequence();
-      parser_.cursor().expect(Tok::RBracket, "to close the index");
-      auto *access = parser_.ctx_.make<IndexExpr>(loc, expr, index);
+      expr = this->parser.ctx.make<MemberExpr>(loc, expr, this->parser.tok.text);
+      this->parser.cursor().advance();
+    } else if (this->parser.tok.is(Tok::LBracket)) {
+      llvm::SMLoc loc = this->parser.tok.loc();
+      this->parser.cursor().advance();
+      llvm::SaveAndRestore<bool> allowIn(this->parser.noIn, false);
+      Expr *index = this->parser.exprs().parseSequence();
+      this->parser.cursor().expect(Tok::RBracket, "to close the index");
+      auto *access = this->parser.ctx.make<IndexExpr>(loc, expr, index);
       access->optional = optional;
       expr = access;
-    } else if (parser_.tok_.is(Tok::TemplateString) || parser_.tok_.is(Tok::TemplateHead)) {
+    } else if (this->parser.tok.is(Tok::TemplateString) || this->parser.tok.is(Tok::TemplateHead)) {
       if (chain) {
-        parser_.cursor().report(
-            parser_.tok_.loc(),
+        this->parser.cursor().report(
+            this->parser.tok.loc(),
             "a tagged template cannot be part of an optional chain; check the tag "
             "before the template");
       }
@@ -111,20 +113,20 @@ Expr *CallParser::parseCallOrMember() {
       auto *object = member ? dyn_cast<NameExpr>(member->object) : nullptr;
       bool raw = object && object->name == "String" && member->name == "raw";
       llvm::SMLoc loc = expr->loc();
-      TemplateExpr *tmpl = parser_.templates().parseTemplate(raw);
-      auto *texts = parser_.ctx_.make<ArrayLitExpr>(tmpl->loc());
+      TemplateExpr *tmpl = this->parser.templates().parseTemplate(raw);
+      auto *texts = this->parser.ctx.make<ArrayLitExpr>(tmpl->loc());
       for (std::u16string &text : tmpl->quasis) {
         texts->elements.push_back(
-            {parser_.ctx_.make<StringLitExpr>(tmpl->loc(), std::move(text)), false});
+            {this->parser.ctx.make<StringLitExpr>(tmpl->loc(), std::move(text)), false});
       }
       std::vector<Expr *> args{texts};
       args.insert(args.end(), tmpl->exprs.begin(), tmpl->exprs.end());
-      auto *call = parser_.ctx_.make<CallExpr>(loc, expr, std::move(args));
+      auto *call = this->parser.ctx.make<CallExpr>(loc, expr, std::move(args));
       call->tagged = true;
       expr = call;
-    } else if (parser_.tok_.is(Tok::Bang) && !parser_.tok_.newlineBefore) {
-      expr = parser_.ctx_.make<UnaryExpr>(parser_.tok_.loc(), UnaryOp::NonNull, expr);
-      parser_.cursor().advance();
+    } else if (this->parser.tok.is(Tok::Bang) && !this->parser.tok.newlineBefore) {
+      expr = this->parser.ctx.make<UnaryExpr>(this->parser.tok.loc(), UnaryOp::NonNull, expr);
+      this->parser.cursor().advance();
     } else {
       return finish();
     }
@@ -132,86 +134,89 @@ Expr *CallParser::parseCallOrMember() {
 }
 
 Expr *CallParser::parseNew() {
-  llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance();
+  llvm::SMLoc loc = this->parser.tok.loc();
+  this->parser.cursor().advance();
   Expr *callee = nullptr;
-  if (parser_.tok_.is(Tok::LParen)) {
-    llvm::SMLoc at = parser_.tok_.loc();
-    parser_.cursor().advance();
-    llvm::SaveAndRestore<bool> allowIn(parser_.noIn_, false);
-    callee = parser_.exprs().parseSequence();
-    parser_.cursor().expect(Tok::RParen, "to close the class");
+  if (this->parser.tok.is(Tok::LParen)) {
+    llvm::SMLoc at = this->parser.tok.loc();
+    this->parser.cursor().advance();
+    llvm::SaveAndRestore<bool> allowIn(this->parser.noIn, false);
+    callee = this->parser.exprs().parseSequence();
+    this->parser.cursor().expect(Tok::RParen, "to close the class");
     std::vector<Expr *> args;
-    if (parser_.cursor().accept(Tok::LParen)) {
-      while (!parser_.tok_.is(Tok::RParen) && !parser_.tok_.is(Tok::Eof)) {
-        args.push_back(parser_.exprs().parseExpr());
-        if (!parser_.cursor().accept(Tok::Comma)) {
+    if (this->parser.cursor().accept(Tok::LParen)) {
+      while (!this->parser.tok.is(Tok::RParen) && !this->parser.tok.is(Tok::Eof)) {
+        args.push_back(this->parser.exprs().parseExpr());
+        if (!this->parser.cursor().accept(Tok::Comma)) {
           break;
         }
       }
-      parser_.cursor().expect(Tok::RParen, "to close the argument list");
+      this->parser.cursor().expect(Tok::RParen, "to close the argument list");
     }
-    auto *create = parser_.ctx_.make<NewExpr>(at, "", std::vector<TypeRef>(), std::move(args));
+    auto *create = this->parser.ctx.make<NewExpr>(at, "", std::vector<TypeRef>(), std::move(args));
     create->callee = callee;
     return create;
   }
-  if (!parser_.tok_.is(Tok::Identifier)) {
-    parser_.cursor().error(parser_.tok_.loc(), "expected a class name after 'new'");
-    return parser_.ctx_.make<IntLitExpr>(loc, 0);
+  if (!this->parser.tok.is(Tok::Identifier)) {
+    this->parser.cursor().error(this->parser.tok.loc(), "expected a class name after 'new'");
+    return this->parser.ctx.make<IntLitExpr>(loc, 0);
   }
-  llvm::StringRef name = parser_.tok_.text;
-  llvm::SMLoc nameLoc = parser_.tok_.loc();
-  parser_.cursor().advance();
+  llvm::StringRef name = this->parser.tok.text;
+  llvm::SMLoc nameLoc = this->parser.tok.loc();
+  this->parser.cursor().advance();
   llvm::StringRef member;
   llvm::SMLoc memberLoc;
-  if (parser_.cursor().accept(Tok::Dot)) {
-    if (parser_.tok_.is(Tok::Identifier)) {
-      member = parser_.tok_.text;
-      memberLoc = parser_.tok_.loc();
-      parser_.cursor().advance();
+  if (this->parser.cursor().accept(Tok::Dot)) {
+    if (this->parser.tok.is(Tok::Identifier)) {
+      member = this->parser.tok.text;
+      memberLoc = this->parser.tok.loc();
+      this->parser.cursor().advance();
     } else {
-      parser_.cursor().error(parser_.tok_.loc(), "expected a name after '.'");
+      this->parser.cursor().error(this->parser.tok.loc(), "expected a name after '.'");
     }
   }
-  if (parser_.tok_.is(Tok::Dot) || parser_.tok_.is(Tok::LBracket)) {
-    callee = parser_.ctx_.make<NameExpr>(nameLoc, name);
+  if (this->parser.tok.is(Tok::Dot) || this->parser.tok.is(Tok::LBracket)) {
+    callee = this->parser.ctx.make<NameExpr>(nameLoc, name);
     if (!member.empty()) {
-      callee = parser_.ctx_.make<MemberExpr>(memberLoc, callee, member);
+      callee = this->parser.ctx.make<MemberExpr>(memberLoc, callee, member);
     }
-    while (parser_.tok_.is(Tok::Dot) || parser_.tok_.is(Tok::LBracket)) {
-      if (parser_.cursor().accept(Tok::Dot)) {
-        if (!parser_.tok_.is(Tok::Identifier) && !TokenKinds::isKeyword(parser_.tok_.kind)) {
-          parser_.cursor().error(parser_.tok_.loc(), "expected a property name after '.'");
+    while (this->parser.tok.is(Tok::Dot) || this->parser.tok.is(Tok::LBracket)) {
+      if (this->parser.cursor().accept(Tok::Dot)) {
+        if (!this->parser.tok.is(Tok::Identifier) &&
+            !TokenKinds::isKeyword(this->parser.tok.kind)) {
+          this->parser.cursor().error(this->parser.tok.loc(), "expected a property name after '.'");
           break;
         }
-        callee = parser_.ctx_.make<MemberExpr>(parser_.tok_.loc(), callee, parser_.tok_.text);
-        parser_.cursor().advance();
+        callee = this->parser.ctx.make<MemberExpr>(this->parser.tok.loc(), callee,
+                                                   this->parser.tok.text);
+        this->parser.cursor().advance();
         continue;
       }
-      llvm::SMLoc at = parser_.tok_.loc();
-      parser_.cursor().advance();
-      llvm::SaveAndRestore<bool> allowIn(parser_.noIn_, false);
-      Expr *index = parser_.exprs().parseSequence();
-      parser_.cursor().expect(Tok::RBracket, "to close the index");
-      callee = parser_.ctx_.make<IndexExpr>(at, callee, index);
+      llvm::SMLoc at = this->parser.tok.loc();
+      this->parser.cursor().advance();
+      llvm::SaveAndRestore<bool> allowIn(this->parser.noIn, false);
+      Expr *index = this->parser.exprs().parseSequence();
+      this->parser.cursor().expect(Tok::RBracket, "to close the index");
+      callee = this->parser.ctx.make<IndexExpr>(at, callee, index);
     }
     name = member = {};
   }
   std::vector<TypeRef> typeArgs;
-  if (parser_.tok_.is(Tok::Less)) {
-    typeArgs = parser_.types().parseTypeArgs();
+  if (this->parser.tok.is(Tok::Less)) {
+    typeArgs = this->parser.types().parseTypeArgs();
   }
   std::vector<Expr *> args;
-  if (parser_.cursor().accept(Tok::LParen)) {
-    while (!parser_.tok_.is(Tok::RParen) && !parser_.tok_.is(Tok::Eof)) {
-      args.push_back(parser_.exprs().parseExpr());
-      if (!parser_.cursor().accept(Tok::Comma)) {
+  if (this->parser.cursor().accept(Tok::LParen)) {
+    while (!this->parser.tok.is(Tok::RParen) && !this->parser.tok.is(Tok::Eof)) {
+      args.push_back(this->parser.exprs().parseExpr());
+      if (!this->parser.cursor().accept(Tok::Comma)) {
         break;
       }
     }
-    parser_.cursor().expect(Tok::RParen, "to close the argument list");
+    this->parser.cursor().expect(Tok::RParen, "to close the argument list");
   }
-  auto *create = parser_.ctx_.make<NewExpr>(nameLoc, name, std::move(typeArgs), std::move(args));
+  auto *create =
+      this->parser.ctx.make<NewExpr>(nameLoc, name, std::move(typeArgs), std::move(args));
   create->member = member;
   create->callee = callee;
 

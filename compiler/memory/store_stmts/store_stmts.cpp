@@ -11,7 +11,8 @@ using llvm::isa;
 
 namespace tz {
 
-StoreStmts::StoreStmts(StoreScanner &scanner) : scanner_(scanner) {}
+StoreStmts::StoreStmts(StoreScanner &scanner)
+    : scanner(scanner) {}
 
 void StoreStmts::stmt(const Stmt *stmt) {
   if (!stmt) {
@@ -22,7 +23,7 @@ void StoreStmts::stmt(const Stmt *stmt) {
     auto *block = llvm::cast<BlockStmt>(stmt);
     if (NestedGroup *group = block->group) {
       for (const VarSymbol *v : group->captures) {
-        scanner_.edge(scanner_.stored(), scanner_.var(v));
+        this->scanner.edge(this->scanner.stored(), this->scanner.var(v));
       }
     }
     for (const Stmt *s : block->body) {
@@ -33,60 +34,60 @@ void StoreStmts::stmt(const Stmt *stmt) {
   case Stmt::Kind::VarDecl:
     for (const VarDeclarator &d : llvm::cast<VarDeclStmt>(stmt)->decls) {
       if (d.sym) {
-        scanner_.flowInto(scanner_.var(d.sym), scanner_.storeExprs().expr(d.init));
+        this->scanner.flowInto(this->scanner.var(d.sym), this->scanner.storeExprs().expr(d.init));
       } else {
-        scanner_.storeExprs().expr(d.init);
+        this->scanner.storeExprs().expr(d.init);
       }
     }
     break;
   case Stmt::Kind::Function: {
     auto *fn = llvm::cast<FunctionDecl>(stmt);
-    scanner_.function(fn);
+    this->scanner.function(fn);
     break;
   }
   case Stmt::Kind::Expr:
-    scanner_.storeExprs().expr(llvm::cast<ExprStmt>(stmt)->expr);
+    this->scanner.storeExprs().expr(llvm::cast<ExprStmt>(stmt)->expr);
     break;
   case Stmt::Kind::If: {
     auto *s = llvm::cast<IfStmt>(stmt);
-    scanner_.storeExprs().expr(s->cond);
+    this->scanner.storeExprs().expr(s->cond);
     this->stmt(s->thenStmt);
     this->stmt(s->elseStmt);
     break;
   }
   case Stmt::Kind::While:
-    scanner_.storeExprs().expr(llvm::cast<WhileStmt>(stmt)->cond);
+    this->scanner.storeExprs().expr(llvm::cast<WhileStmt>(stmt)->cond);
     this->stmt(llvm::cast<WhileStmt>(stmt)->body);
     break;
   case Stmt::Kind::DoWhile:
     this->stmt(llvm::cast<DoWhileStmt>(stmt)->body);
-    scanner_.storeExprs().expr(llvm::cast<DoWhileStmt>(stmt)->cond);
+    this->scanner.storeExprs().expr(llvm::cast<DoWhileStmt>(stmt)->cond);
     break;
   case Stmt::Kind::For: {
     auto *s = llvm::cast<ForStmt>(stmt);
     this->stmt(s->init);
-    scanner_.storeExprs().expr(s->cond);
-    scanner_.storeExprs().expr(s->step);
+    this->scanner.storeExprs().expr(s->cond);
+    this->scanner.storeExprs().expr(s->step);
     this->stmt(s->body);
     break;
   }
   case Stmt::Kind::ForOf: {
     auto *s = llvm::cast<ForOfStmt>(stmt);
-    StoreScanner::Sources iterable = scanner_.storeExprs().expr(s->iterable);
+    StoreScanner::Sources iterable = this->scanner.storeExprs().expr(s->iterable);
     if (s->iterable->type && s->iterable->type->isIterator()) {
-      scanner_.store(iterable);
+      this->scanner.store(iterable);
     }
     if (s->binding.sym) {
-      scanner_.var(s->binding.sym);
+      this->scanner.var(s->binding.sym);
     }
     this->stmt(s->body);
     break;
   }
   case Stmt::Kind::Switch: {
     auto *s = llvm::cast<SwitchStmt>(stmt);
-    scanner_.storeExprs().expr(s->discriminant);
+    this->scanner.storeExprs().expr(s->discriminant);
     for (const SwitchCase &c : s->cases) {
-      scanner_.storeExprs().expr(c.test);
+      this->scanner.storeExprs().expr(c.test);
       for (const Stmt *body : c.body) {
         this->stmt(body);
       }
@@ -97,11 +98,13 @@ void StoreStmts::stmt(const Stmt *stmt) {
     this->stmt(llvm::cast<LabeledStmt>(stmt)->body);
     break;
   case Stmt::Kind::Return: {
-    StoreScanner::Sources value = scanner_.storeExprs().expr(llvm::cast<ReturnStmt>(stmt)->value);
-    if (!scanner_.current_ || scanner_.current_->isGenerator || scanner_.current_->isAsync) {
-      scanner_.store(value);
+    StoreScanner::Sources value =
+        this->scanner.storeExprs().expr(llvm::cast<ReturnStmt>(stmt)->value);
+    if (!this->scanner.current || this->scanner.current->isGenerator ||
+        this->scanner.current->isAsync) {
+      this->scanner.store(value);
     } else {
-      scanner_.flowInto(scanner_.result(scanner_.current_), value);
+      this->scanner.flowInto(this->scanner.result(this->scanner.current), value);
     }
     break;
   }
@@ -109,7 +112,7 @@ void StoreStmts::stmt(const Stmt *stmt) {
     auto *cls = llvm::cast<ClassDecl>(stmt);
     for (const ClassField &f : cls->fields) {
       if (f.isStatic() && f.var()) {
-        scanner_.flowInto(scanner_.var(f.var()), scanner_.storeExprs().expr(f.init));
+        this->scanner.flowInto(this->scanner.var(f.var()), this->scanner.storeExprs().expr(f.init));
       }
     }
     for (const Stmt *s : cls->decorations) {
@@ -125,16 +128,16 @@ void StoreStmts::stmt(const Stmt *stmt) {
 void StoreStmts::bindArgs(const FunctionDecl *fn, const std::vector<StoreScanner::Sources> &args) {
   if (!fn || fn->impl()) {
     for (const StoreScanner::Sources &a : args) {
-      scanner_.store(a);
+      this->scanner.store(a);
     }
     return;
   }
   for (size_t i = 0; i < args.size(); ++i) {
     bool rest = fn->sym && fn->sym->hasRest && i + 1 >= fn->params.size();
     if (i < fn->params.size() && !rest && fn->params[i].sym) {
-      scanner_.flowInto(scanner_.var(fn->params[i].sym), args[i]);
+      this->scanner.flowInto(this->scanner.var(fn->params[i].sym), args[i]);
     } else {
-      scanner_.store(args[i]);
+      this->scanner.store(args[i]);
     }
   }
 }

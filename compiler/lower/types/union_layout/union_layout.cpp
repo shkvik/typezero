@@ -105,10 +105,10 @@ bool UnionLayout::zeroIsUndefined(const Type *inner) {
 
 llvm::Type *UnionLayout::lowerUnion(const Type *type) {
   if (UnionLayout::isAtomType(type)) {
-    return this->lowering.builder_.getInt32Ty();
+    return this->lowering.builder.getInt32Ty();
   }
   if (UnionLayout::isObjectUnion(type)) {
-    return this->lowering.builder_.getPtrTy();
+    return this->lowering.builder.getPtrTy();
   }
   const Type *stored = UnionLayout::storedType(type);
   if (stored != type) {
@@ -118,12 +118,12 @@ llvm::Type *UnionLayout::lowerUnion(const Type *type) {
   for (UnionSlot slot : type->slots()) {
     words = std::max(words, UnionLayout::slotWords(slot));
   }
-  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+  llvm::Type *i64 = this->lowering.builder.getInt64Ty();
 
-  return words == 1 ? llvm::StructType::get(this->lowering.ctx_,
-                                            {this->lowering.builder_.getInt32Ty(), i64})
-                    : llvm::StructType::get(this->lowering.ctx_,
-                                            {this->lowering.builder_.getInt32Ty(), i64, i64});
+  return words == 1
+             ? llvm::StructType::get(this->lowering.ctx, {this->lowering.builder.getInt32Ty(), i64})
+             : llvm::StructType::get(this->lowering.ctx,
+                                     {this->lowering.builder.getInt32Ty(), i64, i64});
 }
 
 llvm::GlobalVariable *UnionLayout::atomTable() {
@@ -134,7 +134,7 @@ llvm::GlobalVariable *UnionLayout::atomTable() {
   for (const Type *literal : Type::stringLiterals()) {
     strings.push_back(this->lowering.stringLowerer().stringLiteral(literal->literalText()));
   }
-  auto *arrayType = llvm::ArrayType::get(this->lowering.strTy_, strings.size());
+  auto *arrayType = llvm::ArrayType::get(this->lowering.strTy, strings.size());
   this->atomTableVariable = new llvm::GlobalVariable(
       *this->lowering.module_, arrayType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantArray::get(arrayType, strings), "tz.atoms");
@@ -152,12 +152,12 @@ llvm::Value *UnionLayout::atomString(llvm::Value *atom) {
                : this->lowering.stringLowerer().stringLiteral(literals[index - 1]->literalText());
   }
   llvm::GlobalVariable *table = this->atomTable();
-  llvm::Value *address = this->lowering.builder_.CreateInBoundsGEP(
+  llvm::Value *address = this->lowering.builder.CreateInBoundsGEP(
       table->getValueType(), table,
-      {this->lowering.builder_.getInt64(0),
-       this->lowering.builder_.CreateZExt(atom, this->lowering.builder_.getInt64Ty())});
+      {this->lowering.builder.getInt64(0),
+       this->lowering.builder.CreateZExt(atom, this->lowering.builder.getInt64Ty())});
 
-  return this->lowering.builder_.CreateLoad(this->lowering.strTy_, address, "atom.text");
+  return this->lowering.builder.CreateLoad(this->lowering.strTy, address, "atom.text");
 }
 
 llvm::Constant *UnionLayout::atomDescriptor() {
@@ -165,11 +165,11 @@ llvm::Constant *UnionLayout::atomDescriptor() {
     return this->atomDescriptorConstant;
   }
   auto *descType = llvm::StructType::get(
-      this->lowering.ctx_, {this->lowering.typeDescTy_, this->lowering.builder_.getPtrTy()});
+      this->lowering.ctx, {this->lowering.typeDescTy, this->lowering.builder.getPtrTy()});
   llvm::Constant *base = llvm::ConstantStruct::get(
-      this->lowering.typeDescTy_,
-      {this->lowering.builder_.getInt32(15), this->lowering.builder_.getInt32(4),
-       llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy())});
+      this->lowering.typeDescTy,
+      {this->lowering.builder.getInt32(15), this->lowering.builder.getInt32(4),
+       llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy())});
   auto *global = new llvm::GlobalVariable(
       *this->lowering.module_, descType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(descType, {base, this->atomTable()}), "tz.type.atom");
@@ -194,20 +194,20 @@ llvm::Constant *UnionLayout::unionDescriptor(const Type *type) {
     return found;
   }
   constexpr unsigned kSlots = 20;
-  auto *slotsType = llvm::ArrayType::get(this->lowering.builder_.getPtrTy(), kSlots);
+  auto *slotsType = llvm::ArrayType::get(this->lowering.builder.getPtrTy(), kSlots);
   std::vector<llvm::Constant *> slots(
-      kSlots, llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()));
+      kSlots, llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy()));
   for (UnionSlot slot : type->slots()) {
     slots[unsigned(slot)] = this->lowering.typeDescriptors().typeDescriptor(type->slotPart(slot));
   }
   uint64_t size = this->lowering.module_->getDataLayout().getTypeAllocSize(
       this->lowering.moduleBuilder().lower(type));
   llvm::Constant *base = llvm::ConstantStruct::get(
-      this->lowering.typeDescTy_,
-      {this->lowering.builder_.getInt32(14), this->lowering.builder_.getInt32(uint32_t(size)),
-       llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy())});
+      this->lowering.typeDescTy,
+      {this->lowering.builder.getInt32(14), this->lowering.builder.getInt32(uint32_t(size)),
+       llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy())});
   auto *descType =
-      llvm::StructType::get(this->lowering.ctx_, {this->lowering.typeDescTy_, slotsType});
+      llvm::StructType::get(this->lowering.ctx, {this->lowering.typeDescTy, slotsType});
   auto *global = new llvm::GlobalVariable(
       *this->lowering.module_, descType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(descType, {base, llvm::ConstantArray::get(slotsType, slots)}),
@@ -219,26 +219,26 @@ llvm::Constant *UnionLayout::unionDescriptor(const Type *type) {
 }
 
 llvm::Value *UnionLayout::unionTag(llvm::Value *value) {
-  return this->lowering.builder_.CreateExtractValue(value, 0, "tag");
+  return this->lowering.builder.CreateExtractValue(value, 0, "tag");
 }
 
 llvm::Value *UnionLayout::makeTagged(const Type *unionType, UnionSlot slot, llvm::Value *part) {
   auto *type = cast<llvm::StructType>(this->lowering.moduleBuilder().lower(unionType));
   llvm::Value *result = llvm::Constant::getNullValue(type);
-  result = this->lowering.builder_.CreateInsertValue(
-      result, this->lowering.builder_.getInt32(unsigned(slot)), 0);
+  result = this->lowering.builder.CreateInsertValue(
+      result, this->lowering.builder.getInt32(unsigned(slot)), 0);
   std::vector<llvm::Value *> words;
   auto *structType = dyn_cast<llvm::StructType>(part->getType());
   if (structType) {
     for (unsigned i = 0; i < structType->getNumElements(); ++i) {
-      words.push_back(UnionLayout::toWord(this->lowering.builder_,
-                                          this->lowering.builder_.CreateExtractValue(part, i)));
+      words.push_back(UnionLayout::toWord(this->lowering.builder,
+                                          this->lowering.builder.CreateExtractValue(part, i)));
     }
   } else {
-    words.push_back(UnionLayout::toWord(this->lowering.builder_, part));
+    words.push_back(UnionLayout::toWord(this->lowering.builder, part));
   }
   for (unsigned i = 0; i < words.size(); ++i) {
-    result = this->lowering.builder_.CreateInsertValue(result, words[i], i + 1);
+    result = this->lowering.builder.CreateInsertValue(result, words[i], i + 1);
   }
 
   return result;
@@ -250,18 +250,18 @@ llvm::Value *UnionLayout::taggedPart(llvm::Value *value, const Type *unionType, 
   if (structType) {
     llvm::Value *part = llvm::UndefValue::get(type);
     for (unsigned i = 0; i < structType->getNumElements(); ++i) {
-      part = this->lowering.builder_.CreateInsertValue(
+      part = this->lowering.builder.CreateInsertValue(
           part,
-          UnionLayout::fromWord(this->lowering.builder_,
-                                this->lowering.builder_.CreateExtractValue(value, i + 1),
+          UnionLayout::fromWord(this->lowering.builder,
+                                this->lowering.builder.CreateExtractValue(value, i + 1),
                                 structType->getElementType(i)),
           i);
     }
     return part;
   }
 
-  return UnionLayout::fromWord(this->lowering.builder_,
-                               this->lowering.builder_.CreateExtractValue(value, 1), type);
+  return UnionLayout::fromWord(this->lowering.builder,
+                               this->lowering.builder.CreateExtractValue(value, 1), type);
 }
 
 llvm::Value *UnionLayout::forEachSlot(llvm::Value *value, llvm::ArrayRef<UnionSlot> slots,
@@ -269,28 +269,28 @@ llvm::Value *UnionLayout::forEachSlot(llvm::Value *value, llvm::ArrayRef<UnionSl
                                       llvm::Type *resultType, llvm::Value *otherwise) {
   llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("union.end");
   llvm::BasicBlock *otherBlock = this->lowering.functionFrame().newBlock("union.other");
-  llvm::SwitchInst *sw = this->lowering.builder_.CreateSwitch(this->unionTag(value), otherBlock,
-                                                              unsigned(slots.size()));
+  llvm::SwitchInst *sw = this->lowering.builder.CreateSwitch(this->unionTag(value), otherBlock,
+                                                             unsigned(slots.size()));
   llvm::PHINode *phi = nullptr;
   std::vector<std::pair<llvm::Value *, llvm::BasicBlock *>> incoming;
   for (UnionSlot slot : slots) {
     llvm::BasicBlock *block = this->lowering.functionFrame().newBlock("union.slot");
-    sw->addCase(this->lowering.builder_.getInt32(unsigned(slot)), block);
+    sw->addCase(this->lowering.builder.getInt32(unsigned(slot)), block);
     this->lowering.functionFrame().switchTo(block);
     llvm::Value *result = each(slot);
     if (this->lowering.functionFrame().blockIsOpen()) {
-      incoming.push_back({result, this->lowering.builder_.GetInsertBlock()});
-      this->lowering.builder_.CreateBr(endBlock);
+      incoming.push_back({result, this->lowering.builder.GetInsertBlock()});
+      this->lowering.builder.CreateBr(endBlock);
     }
   }
   this->lowering.functionFrame().switchTo(otherBlock);
   if (otherwise) {
     incoming.push_back({otherwise, otherBlock});
   }
-  this->lowering.builder_.CreateBr(endBlock);
+  this->lowering.builder.CreateBr(endBlock);
   this->lowering.functionFrame().switchTo(endBlock);
   if (resultType && !resultType->isVoidTy()) {
-    phi = this->lowering.builder_.CreatePHI(resultType, unsigned(incoming.size()));
+    phi = this->lowering.builder.CreatePHI(resultType, unsigned(incoming.size()));
     for (auto [v, block] : incoming) {
       phi->addIncoming(v ? v : llvm::PoisonValue::get(resultType), block);
     }
@@ -310,20 +310,20 @@ void UnionLayout::countTagged(llvm::Value *value, const Type *type, bool retain)
     return;
   }
   llvm::Function *&helper =
-      (retain ? this->lowering.unionRetains_ : this->lowering.unionReleases_)[type];
+      (retain ? this->lowering.unionRetains : this->lowering.unionReleases)[type];
   if (!helper) {
-    auto *fnType = llvm::FunctionType::get(this->lowering.builder_.getVoidTy(),
+    auto *fnType = llvm::FunctionType::get(this->lowering.builder.getVoidTy(),
                                            {this->lowering.moduleBuilder().lower(type)}, false);
     helper =
         llvm::Function::Create(fnType, llvm::GlobalValue::InternalLinkage,
                                (retain ? "tz.union.retain." : "tz.union.release.") + type->name(),
                                this->lowering.module_.get());
     helper->addFnAttr(llvm::Attribute::NoUnwind);
-    llvm::IRBuilder<>::InsertPointGuard guard(this->lowering.builder_);
-    llvm::Function *outer = this->lowering.function_;
-    this->lowering.function_ = helper;
-    this->lowering.builder_.SetInsertPoint(
-        llvm::BasicBlock::Create(this->lowering.ctx_, "entry", helper));
+    llvm::IRBuilder<>::InsertPointGuard guard(this->lowering.builder);
+    llvm::Function *outer = this->lowering.function;
+    this->lowering.function = helper;
+    this->lowering.builder.SetInsertPoint(
+        llvm::BasicBlock::Create(this->lowering.ctx, "entry", helper));
     llvm::Value *arg = helper->getArg(0);
     this->forEachSlot(
         arg, managed,
@@ -338,10 +338,10 @@ void UnionLayout::countTagged(llvm::Value *value, const Type *type, bool retain)
           return nullptr;
         },
         nullptr, nullptr);
-    this->lowering.builder_.CreateRetVoid();
-    this->lowering.function_ = outer;
+    this->lowering.builder.CreateRetVoid();
+    this->lowering.function = outer;
   }
-  this->lowering.builder_.CreateCall(helper, {value});
+  this->lowering.builder.CreateCall(helper, {value});
 }
 
 }

@@ -1,5 +1,4 @@
 #include "compiler/parallel/pieces/pieces.h"
-#include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
 #include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
@@ -12,6 +11,7 @@
 #include "compiler/parallel/library_effects/library_effects.h"
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
 #include "compiler/parallel/parallel_model/parallel_model.h"
+#include "compiler/program/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -36,10 +36,10 @@ using llvm::isa;
 namespace tz::parallel {
 
 Pieces::Pieces(Analysis &analysis)
-    : analysis_(analysis) {}
+    : analysis(analysis) {}
 
 bool Pieces::scheduled(const Activation &act, unsigned seg) const {
-  const FnInfo &f = *analysis_.byFunction[act.fn];
+  const FnInfo &f = *this->analysis.byFunction[act.fn];
   if (seg == 0) {
     return act.callbackStart;
   }
@@ -50,37 +50,38 @@ bool Pieces::scheduled(const Activation &act, unsigned seg) const {
 unsigned Pieces::activate(int fn, int root, std::optional<Ref> self, bool callbackStart,
                           bool rootStart) {
   auto key = std::make_tuple(fn, root, self, callbackStart);
-  auto [it, inserted] = analysis_.actIndex.try_emplace(key, unsigned(analysis_.acts.size()));
+  auto [it, inserted] =
+      this->analysis.actIndex.try_emplace(key, unsigned(this->analysis.acts.size()));
   if (inserted) {
-    Activation &act = analysis_.acts.emplace_back();
+    Activation &act = this->analysis.acts.emplace_back();
     act.fn = fn;
     act.root = root;
     act.self = self;
     act.callbackStart = callbackStart;
-    analysis_.actsByTask[{fn, root}].push_back(it->second);
+    this->analysis.actsByTask[{fn, root}].push_back(it->second);
   }
-  analysis_.acts[it->second].rootStart |= rootStart;
+  this->analysis.acts[it->second].rootStart |= rootStart;
 
   return it->second;
 }
 
 int Pieces::newRoot(int parent, int fn, std::optional<Ref> self, int callerFn, unsigned rec,
                     Mode mode) {
-  for (int p = parent; p >= 0; p = analysis_.roots[p].parent) {
-    Root &up = analysis_.roots[p];
+  for (int p = parent; p >= 0; p = this->analysis.roots[p].parent) {
+    Root &up = this->analysis.roots[p];
     if (up.fn == fn && up.self == self && up.callerFn == callerFn && up.rec == int(rec)) {
       up.multi = up.recursive = true;
       return p;
     }
   }
   auto key = std::make_tuple(parent, fn, self, callerFn, rec);
-  if (auto found = analysis_.rootIndex.find(key); found != analysis_.rootIndex.end()) {
+  if (auto found = this->analysis.rootIndex.find(key); found != this->analysis.rootIndex.end()) {
     return found->second;
   }
   constexpr size_t kMaxRoots = 4096;
-  if (analysis_.roots.size() >= kMaxRoots) {
-    for (size_t i = 0; i < analysis_.roots.size(); ++i) {
-      Root &r = analysis_.roots[i];
+  if (this->analysis.roots.size() >= kMaxRoots) {
+    for (size_t i = 0; i < this->analysis.roots.size(); ++i) {
+      Root &r = this->analysis.roots[i];
       if (r.fn == fn && r.callerFn == callerFn && r.rec == int(rec)) {
         r.multi = true;
         r.parent = -1;
@@ -88,8 +89,8 @@ int Pieces::newRoot(int parent, int fn, std::optional<Ref> self, int callerFn, u
       }
     }
   }
-  analysis_.rootIndex[key] = int(analysis_.roots.size());
-  Root &root = analysis_.roots.emplace_back();
+  this->analysis.rootIndex[key] = int(this->analysis.roots.size());
+  Root &root = this->analysis.roots.emplace_back();
   root.fn = fn;
   root.self = self;
   root.parent = parent;
@@ -97,13 +98,13 @@ int Pieces::newRoot(int parent, int fn, std::optional<Ref> self, int callerFn, u
   root.rec = int(rec);
   root.mode = mode;
 
-  return int(analysis_.roots.size() - 1);
+  return int(this->analysis.roots.size() - 1);
 }
 
 void Pieces::explore() {
-  Root &main = analysis_.roots.emplace_back();
-  main.fn = analysis_.module->id;
-  std::deque<unsigned> queue{activate(analysis_.module->id, 0, std::nullopt, true, false)};
+  Root &main = this->analysis.roots.emplace_back();
+  main.fn = this->analysis.module->id;
+  std::deque<unsigned> queue{activate(this->analysis.module->id, 0, std::nullopt, true, false)};
   llvm::DenseSet<unsigned> done;
   while (!queue.empty()) {
     unsigned ai = queue.front();
@@ -111,20 +112,20 @@ void Pieces::explore() {
     if (!done.insert(ai).second) {
       continue;
     }
-    Activation act = analysis_.acts[ai];
-    const FnInfo &f = *analysis_.byFunction[act.fn];
+    Activation act = this->analysis.acts[ai];
+    const FnInfo &f = *this->analysis.byFunction[act.fn];
     for (unsigned r = 0; r < f.calls.size(); ++r) {
       const CallRec &rec = f.calls[r];
       for (int edgeIndex : rec.edges) {
-        const CallEdge &c = analysis_.callGraph.edge(edgeIndex);
-        std::optional<Ref> self = analysis_.callResolver.bind(c.self, act);
+        const CallEdge &c = this->analysis.callGraph.edge(edgeIndex);
+        std::optional<Ref> self = this->analysis.callResolver.bind(c.self, act);
         unsigned next;
         switch (c.mode) {
         case Mode::Sync:
         case Mode::Await:
         case Mode::AsyncIter:
           next = activate(c.to, act.root, self, false, false);
-          analysis_.inlineEdges.push_back({ai, r, next});
+          this->analysis.inlineEdges.push_back({ai, r, next});
           break;
         case Mode::Spawn:
           next = activate(c.to, newRoot(act.root, c.to, self, act.fn, r, Mode::Spawn), self, false,
@@ -135,7 +136,7 @@ void Pieces::explore() {
                           true, false);
           break;
         }
-        analysis_.edges.push_back({ai, r, next});
+        this->analysis.edges.push_back({ai, r, next});
         if (!done.contains(next)) {
           queue.push_back(next);
         }
@@ -145,19 +146,19 @@ void Pieces::explore() {
 }
 
 void Pieces::findBindings() {
-  auto &bindings = analysis_.bindings;
-  bindings.assign(analysis_.acts.size(), {});
-  std::vector<bool> reached(analysis_.acts.size(), false);
-  for (const auto &[from, r, to] : analysis_.edges) {
+  auto &bindings = this->analysis.bindings;
+  bindings.assign(this->analysis.acts.size(), {});
+  std::vector<bool> reached(this->analysis.acts.size(), false);
+  for (const auto &[from, r, to] : this->analysis.edges) {
     reached[to] = true;
   }
   bool changed = true;
   while (changed) {
     changed = false;
-    for (const auto &[from, r, to] : analysis_.edges) {
-      const FunctionDecl *decl = analysis_.byFunction[analysis_.acts[to].fn]->decl;
-      const FunctionDecl *caller = analysis_.byFunction[analysis_.acts[from].fn]->decl;
-      const CallRec &rec = analysis_.byFunction[analysis_.acts[from].fn]->calls[r];
+    for (const auto &[from, r, to] : this->analysis.edges) {
+      const FunctionDecl *decl = this->analysis.byFunction[this->analysis.acts[to].fn]->decl;
+      const FunctionDecl *caller = this->analysis.byFunction[this->analysis.acts[from].fn]->decl;
+      const CallRec &rec = this->analysis.byFunction[this->analysis.acts[from].fn]->calls[r];
       for (size_t i = 0; i < decl->params.size(); ++i) {
         const VarSymbol *param = decl->params[i].sym;
         if (!param || !param->type || !param->type->nonOptional()->isFunction()) {
@@ -183,24 +184,24 @@ void Pieces::findBindings() {
       }
     }
   }
-  analysis_.reached = std::move(reached);
+  this->analysis.reached = std::move(reached);
 }
 
 bool Pieces::keeps(const PieceInst &piece, const Access &a) const {
-  const FunctionDecl *decl = analysis_.byFunction[piece.fn]->decl;
+  const FunctionDecl *decl = this->analysis.byFunction[piece.fn]->decl;
   if (!a.bound || llvm::none_of(decl->params, [&](const Param &p) { return p.sym == a.bound; })) {
     return true;
   }
-  for (unsigned ai : analysis_.actsOf(piece.fn, piece.root)) {
-    const Activation &act = analysis_.acts[ai];
+  for (unsigned ai : this->analysis.actsOf(piece.fn, piece.root)) {
+    const Activation &act = this->analysis.acts[ai];
     if (act.self != piece.self) {
       continue;
     }
-    if (!analysis_.reached[ai]) {
+    if (!this->analysis.reached[ai]) {
       return true;
     }
-    auto found = analysis_.bindings[ai].find(a.bound);
-    if (found != analysis_.bindings[ai].end() &&
+    auto found = this->analysis.bindings[ai].find(a.bound);
+    if (found != this->analysis.bindings[ai].end() &&
         (found->second.count(nullptr) || found->second.count(a.through))) {
       return true;
     }
@@ -210,34 +211,34 @@ bool Pieces::keeps(const PieceInst &piece, const Access &a) const {
 }
 
 void Pieces::findPieces() {
-  analysis_.actPieces.assign(analysis_.acts.size(), {});
-  for (unsigned ai = 0; ai < analysis_.acts.size(); ++ai) {
-    const Activation &act = analysis_.acts[ai];
-    const FnInfo &f = *analysis_.byFunction[act.fn];
+  this->analysis.actPieces.assign(this->analysis.acts.size(), {});
+  for (unsigned ai = 0; ai < this->analysis.acts.size(); ++ai) {
+    const Activation &act = this->analysis.acts[ai];
+    const FnInfo &f = *this->analysis.byFunction[act.fn];
     for (unsigned s = 0; s < f.segs.size(); ++s) {
       if (!scheduled(act, s)) {
         continue;
       }
       auto key = std::make_tuple(act.fn, s, act.root, act.self);
-      auto [it, inserted] =
-          analysis_.pieceIndex.try_emplace(key, unsigned(analysis_.pieceInstances.size()));
+      auto [it, inserted] = this->analysis.pieceIndex.try_emplace(
+          key, unsigned(this->analysis.pieceInstances.size()));
       if (inserted) {
-        analysis_.pieceInstances.push_back({act.fn, s, act.root, act.self});
-        analysis_.segPieces[{act.fn, s}].push_back(it->second);
-        ++analysis_.sameTask[std::make_tuple(act.fn, s, act.root)];
+        this->analysis.pieceInstances.push_back({act.fn, s, act.root, act.self});
+        this->analysis.segPieces[{act.fn, s}].push_back(it->second);
+        ++this->analysis.sameTask[std::make_tuple(act.fn, s, act.root)];
       }
-      analysis_.actPieces[ai].push_back(it->second);
+      this->analysis.actPieces[ai].push_back(it->second);
     }
   }
 }
 
 bool Pieces::ownPiece(unsigned act, unsigned piece) const {
-  return piece < analysis_.pieceInstances.size() &&
-         llvm::is_contained(analysis_.actPieces[act], piece);
+  return piece < this->analysis.pieceInstances.size() &&
+         llvm::is_contained(this->analysis.actPieces[act], piece);
 }
 
 void Pieces::addEntry(unsigned act, unsigned piece, const Entry &add, bool &changed) {
-  auto [it, inserted] = analysis_.entries.try_emplace({act, piece}, add);
+  auto [it, inserted] = this->analysis.entries.try_emplace({act, piece}, add);
   if (inserted) {
     changed = true;
     return;
@@ -250,7 +251,7 @@ void Pieces::addEntry(unsigned act, unsigned piece, const Entry &add, bool &chan
     cur.open = changed = true;
     return;
   }
-  const ExplainNames &names = analysis_.explainNames;
+  const ExplainNames &names = this->analysis.explainNames;
   if (names.posOf(add.first) < names.posOf(cur.first)) {
     cur.first = add.first;
     changed = true;
@@ -265,17 +266,18 @@ void Pieces::findHosts() {
   bool changed = true;
   while (changed) {
     changed = false;
-    for (const auto &[caller, r, callee] : analysis_.inlineEdges) {
-      const Activation &from = analysis_.acts[caller];
-      const CallRec &rec = analysis_.byFunction[from.fn]->calls[r];
+    for (const auto &[caller, r, callee] : this->analysis.inlineEdges) {
+      const Activation &from = this->analysis.acts[caller];
+      const CallRec &rec = this->analysis.byFunction[from.fn]->calls[r];
       std::vector<unsigned> at = piecesAt(from, rec.segs);
-      Activation &to = analysis_.acts[callee];
+      Activation &to = this->analysis.acts[callee];
       for (unsigned p : at) {
         changed |= to.hosts.insert(p).second;
         Entry add;
         if (ownPiece(caller, p)) {
           add.first = add.last = rec.loc;
-        } else if (auto e = analysis_.entries.find({caller, p}); e != analysis_.entries.end()) {
+        } else if (auto e = this->analysis.entries.find({caller, p});
+                   e != this->analysis.entries.end()) {
           add = e->second;
         } else {
           add.open = true;
@@ -290,14 +292,14 @@ int Pieces::stepOf(int fn, llvm::SMLoc loc) {
   if (!loc.isValid()) {
     return -1;
   }
-  auto [it, inserted] = analysis_.steps.try_emplace(fn);
+  auto [it, inserted] = this->analysis.steps.try_emplace(fn);
   std::vector<Pos> &steps = it->second;
-  const ExplainNames &names = analysis_.explainNames;
+  const ExplainNames &names = this->analysis.explainNames;
   if (inserted) {
-    const FunctionDecl *decl = analysis_.byFunction[fn]->decl;
-    if (decl == analysis_.module) {
-      for (const Stmt *s : analysis_.program.items) {
-        if (!isa<FunctionDecl>(s) && !analysis_.libraryEffects.inLibrary(s->loc())) {
+    const FunctionDecl *decl = this->analysis.byFunction[fn]->decl;
+    if (decl == this->analysis.module) {
+      for (const Stmt *s : this->analysis.program.items) {
+        if (!isa<FunctionDecl>(s) && !this->analysis.libraryEffects.inLibrary(s->loc())) {
           steps.push_back(names.posOf(s->loc()));
         }
       }
@@ -325,7 +327,7 @@ bool Pieces::later(int fn, llvm::SMLoc at, llvm::SMLoc origin) {
 }
 
 void Pieces::noteFlow(int root, unsigned from, unsigned to, llvm::SMLoc origin) {
-  auto &origins = analysis_.flowFrom[root];
+  auto &origins = this->analysis.flowFrom[root];
   auto [it, inserted] = origins.try_emplace({from, to}, origin);
   if (inserted || !it->second.isValid()) {
     return;
@@ -334,7 +336,7 @@ void Pieces::noteFlow(int root, unsigned from, unsigned to, llvm::SMLoc origin) 
     it->second = origin;
     return;
   }
-  const ExplainNames &names = analysis_.explainNames;
+  const ExplainNames &names = this->analysis.explainNames;
   if (names.posOf(it->second) < names.posOf(origin)) {
     it->second = origin;
   }
@@ -342,16 +344,16 @@ void Pieces::noteFlow(int root, unsigned from, unsigned to, llvm::SMLoc origin) 
 
 std::vector<unsigned> Pieces::piecesAt(const Activation &act, llvm::ArrayRef<unsigned> segs) const {
   std::vector<unsigned> out;
-  const FnInfo &f = *analysis_.byFunction[act.fn];
+  const FnInfo &f = *this->analysis.byFunction[act.fn];
   for (unsigned s : segs) {
     if (scheduled(act, s)) {
-      auto it = analysis_.pieceIndex.find(std::make_tuple(act.fn, s, act.root, act.self));
-      if (it != analysis_.pieceIndex.end()) {
+      auto it = this->analysis.pieceIndex.find(std::make_tuple(act.fn, s, act.root, act.self));
+      if (it != this->analysis.pieceIndex.end()) {
         out.push_back(it->second);
       }
     } else if (f.isInline(s)) {
       if (act.rootStart) {
-        out.push_back(analysis_.startNode(act.root));
+        out.push_back(this->analysis.startNode(act.root));
       } else {
         out.insert(out.end(), act.hosts.begin(), act.hosts.end());
       }
@@ -364,7 +366,7 @@ std::vector<unsigned> Pieces::piecesAt(const Activation &act, llvm::ArrayRef<uns
 }
 
 bool Pieces::once(int fi, unsigned rec, int rootFn, unsigned depth) {
-  if (analysis_.byFunction[fi]->calls[rec].repeated) {
+  if (this->analysis.byFunction[fi]->calls[rec].repeated) {
     return false;
   }
 
@@ -375,30 +377,30 @@ bool Pieces::fnOnce(int fi, int rootFn, unsigned depth) {
   if (fi == rootFn) {
     return true;
   }
-  if (depth > 32 || analysis_.valueFns.contains(fi)) {
+  if (depth > 32 || this->analysis.valueFns.contains(fi)) {
     return false;
   }
   auto key = std::make_pair(fi, rootFn);
-  auto found = analysis_.fnOnce.find(key);
-  if (found != analysis_.fnOnce.end()) {
+  auto found = this->analysis.fnOnce.find(key);
+  if (found != this->analysis.fnOnce.end()) {
     return found->second;
   }
-  analysis_.fnOnce[key] = false;
-  const std::vector<int> &incoming = analysis_.callGraph.incoming(fi);
+  this->analysis.fnOnce[key] = false;
+  const std::vector<int> &incoming = this->analysis.callGraph.incoming(fi);
   bool result = false;
   if (incoming.size() == 1) {
-    const CallEdge &call = analysis_.callGraph.edge(incoming[0]);
+    const CallEdge &call = this->analysis.callGraph.edge(incoming[0]);
     bool direct = !call.byType && (call.mode == Mode::Sync || call.mode == Mode::Await ||
                                    call.mode == Mode::AsyncIter);
     result = direct && once(call.from, unsigned(call.call), rootFn, depth + 1);
   }
 
-  return analysis_.fnOnce[key] = result;
+  return this->analysis.fnOnce[key] = result;
 }
 
 bool Pieces::rejectionEnds(const AwaitExpr *a, unsigned depth) {
-  auto found = analysis_.awaits.find(a);
-  if (found == analysis_.awaits.end()) {
+  auto found = this->analysis.awaits.find(a);
+  if (found == this->analysis.awaits.end()) {
     return false;
   }
 
@@ -406,21 +408,21 @@ bool Pieces::rejectionEnds(const AwaitExpr *a, unsigned depth) {
 }
 
 bool Pieces::fnRejectionEnds(int fi, unsigned depth) {
-  if (fi == analysis_.module->id) {
+  if (fi == this->analysis.module->id) {
     return true;
   }
-  if (depth > 32 || analysis_.valueFns.contains(fi) || !analysis_.byFunction[fi]->async) {
+  if (depth > 32 || this->analysis.valueFns.contains(fi) || !this->analysis.byFunction[fi]->async) {
     return false;
   }
-  auto found = analysis_.rejectionEnds.find(fi);
-  if (found != analysis_.rejectionEnds.end()) {
+  auto found = this->analysis.rejectionEnds.find(fi);
+  if (found != this->analysis.rejectionEnds.end()) {
     return found->second;
   }
-  analysis_.rejectionEnds[fi] = false;
+  this->analysis.rejectionEnds[fi] = false;
   bool result = true;
-  for (int edgeIndex : analysis_.callGraph.incoming(fi)) {
-    const CallEdge &c = analysis_.callGraph.edge(edgeIndex);
-    const CallRec &rec = analysis_.byFunction[c.from]->calls[c.call];
+  for (int edgeIndex : this->analysis.callGraph.incoming(fi)) {
+    const CallEdge &c = this->analysis.callGraph.edge(edgeIndex);
+    const CallRec &rec = this->analysis.byFunction[c.from]->calls[c.call];
     bool ends = false;
     switch (c.mode) {
     case Mode::Await:
@@ -439,31 +441,31 @@ bool Pieces::fnRejectionEnds(int fi, unsigned depth) {
     result &= ends && !c.byType;
   }
 
-  return analysis_.rejectionEnds[fi] = result;
+  return this->analysis.rejectionEnds[fi] = result;
 }
 
 void Pieces::findJoins() {
-  for (size_t i = 1; i < analysis_.roots.size(); ++i) {
-    Root &root = analysis_.roots[i];
+  for (size_t i = 1; i < this->analysis.roots.size(); ++i) {
+    Root &root = this->analysis.roots[i];
     if (root.rec < 0) {
       continue;
     }
-    const FnInfo &caller = *analysis_.byFunction[root.callerFn];
+    const FnInfo &caller = *this->analysis.byFunction[root.callerFn];
     const CallRec &rec = caller.calls[root.rec];
     std::optional<int> parentFn;
     if (root.parent >= 0) {
-      parentFn = analysis_.roots[root.parent].fn;
+      parentFn = this->analysis.roots[root.parent].fn;
     }
     root.multi |= rec.interval || !parentFn || !once(root.callerFn, root.rec, *parentFn, 0) ||
-                  (size_t(root.parent) < i && analysis_.roots[root.parent].multi);
-    const FunctionDecl *callee = analysis_.byFunction[root.fn]->decl;
+                  (size_t(root.parent) < i && this->analysis.roots[root.parent].multi);
+    const FunctionDecl *callee = this->analysis.byFunction[root.fn]->decl;
     if (rec.kind == CallKind::Inline && rec.call && rec.call->builtin() == Builtin::ArrMap &&
         callee && callee->params.size() > 1 && callee->params[1].sym &&
-        analysis_.ownIndex.contains(callee->params[1].sym) && !rec.inLoop && parentFn &&
+        this->analysis.ownIndex.contains(callee->params[1].sym) && !rec.inLoop && parentFn &&
         fnOnce(root.callerFn, *parentFn, 0)) {
       bool single = true;
-      for (int p = root.parent; p >= 0; p = analysis_.roots[p].parent) {
-        single &= !analysis_.roots[p].multi;
+      for (int p = root.parent; p >= 0; p = this->analysis.roots[p].parent) {
+        single &= !this->analysis.roots[p].multi;
       }
       if (single) {
         root.ownCell = callee;
@@ -474,14 +476,14 @@ void Pieces::findJoins() {
     }
     std::set<unsigned> spawnAt, interval;
     std::map<unsigned, llvm::SMLoc> spawnFrom;
-    for (unsigned ai : analysis_.actsOf(root.callerFn, root.parent)) {
-      for (unsigned p : piecesAt(analysis_.acts[ai], rec.segs)) {
+    for (unsigned ai : this->analysis.actsOf(root.callerFn, root.parent)) {
+      for (unsigned p : piecesAt(this->analysis.acts[ai], rec.segs)) {
         spawnAt.insert(p);
         llvm::SMLoc at;
         if (ownPiece(ai, p)) {
           at = rec.loc;
-        } else if (auto e = analysis_.entries.find({ai, p});
-                   e != analysis_.entries.end() && !e->second.open) {
+        } else if (auto e = this->analysis.entries.find({ai, p});
+                   e != this->analysis.entries.end() && !e->second.open) {
           at = e->second.first;
         }
         auto [it, inserted] = spawnFrom.try_emplace(p, at);
@@ -489,7 +491,7 @@ void Pieces::findJoins() {
           continue;
         }
         if (!at.isValid() ||
-            analysis_.explainNames.posOf(at) < analysis_.explainNames.posOf(it->second)) {
+            this->analysis.explainNames.posOf(at) < this->analysis.explainNames.posOf(it->second)) {
           it->second = at;
         }
       }
@@ -499,14 +501,14 @@ void Pieces::findJoins() {
     if (root.mode != Mode::Spawn || !rec.join) {
       continue;
     }
-    auto join = analysis_.joins.find(rec.join);
-    if (join == analysis_.joins.end() || !rejectionEnds(rec.join, 0)) {
+    auto join = this->analysis.joins.find(rec.join);
+    if (join == this->analysis.joins.end() || !rejectionEnds(rec.join, 0)) {
       continue;
     }
     bool found = false;
-    for (unsigned ai : analysis_.actsOf(join->second.fn, root.parent)) {
+    for (unsigned ai : this->analysis.actsOf(join->second.fn, root.parent)) {
       found = true;
-      for (unsigned p : piecesAt(analysis_.acts[ai], join->second.segs)) {
+      for (unsigned p : piecesAt(this->analysis.acts[ai], join->second.segs)) {
         interval.insert(p);
       }
     }
@@ -516,12 +518,12 @@ void Pieces::findJoins() {
     root.join = rec.join;
     root.interval.assign(interval.begin(), interval.end());
   }
-  for (size_t i = 1; i < analysis_.roots.size(); ++i) {
-    Root &root = analysis_.roots[i];
+  for (size_t i = 1; i < this->analysis.roots.size(); ++i) {
+    Root &root = this->analysis.roots[i];
     if (root.parent < 0 || size_t(root.parent) >= i) {
       continue;
     }
-    const Root &parent = analysis_.roots[root.parent];
+    const Root &parent = this->analysis.roots[root.parent];
     if (root.join) {
       root.chain.push_back({root.parent, root.interval});
       root.chain.insert(root.chain.end(), parent.chain.begin(), parent.chain.end());
@@ -535,33 +537,33 @@ void Pieces::findJoins() {
 }
 
 void Pieces::buildFlow() {
-  analysis_.flow.assign(analysis_.roots.size(), {});
-  analysis_.flowFrom.assign(analysis_.roots.size(), {});
-  for (unsigned ai = 0; ai < analysis_.acts.size(); ++ai) {
-    const Activation &act = analysis_.acts[ai];
-    const FnInfo &f = *analysis_.byFunction[act.fn];
+  this->analysis.flow.assign(this->analysis.roots.size(), {});
+  this->analysis.flowFrom.assign(this->analysis.roots.size(), {});
+  for (unsigned ai = 0; ai < this->analysis.acts.size(); ++ai) {
+    const Activation &act = this->analysis.acts[ai];
+    const FnInfo &f = *this->analysis.byFunction[act.fn];
     for (const auto &[a, b] : f.succ) {
       for (unsigned x : piecesAt(act, {a})) {
         llvm::SMLoc origin;
         if (scheduled(act, a)) {
           origin = f.segs[b].loc;
-        } else if (auto e = analysis_.entries.find({ai, x});
-                   e != analysis_.entries.end() && !e->second.open) {
+        } else if (auto e = this->analysis.entries.find({ai, x});
+                   e != this->analysis.entries.end() && !e->second.open) {
           origin = e->second.last;
         }
         for (unsigned y : piecesAt(act, {b})) {
-          analysis_.flow[act.root][x].push_back(y);
+          this->analysis.flow[act.root][x].push_back(y);
           noteFlow(act.root, x, y, origin);
         }
       }
     }
   }
-  for (const auto &[caller, r, callee] : analysis_.inlineEdges) {
-    const Activation &x = analysis_.acts[caller];
-    if (analysis_.acts[callee].root != x.root || analysis_.actPieces[callee].empty()) {
+  for (const auto &[caller, r, callee] : this->analysis.inlineEdges) {
+    const Activation &x = this->analysis.acts[caller];
+    if (this->analysis.acts[callee].root != x.root || this->analysis.actPieces[callee].empty()) {
       continue;
     }
-    const FnInfo &f = *analysis_.byFunction[x.fn];
+    const FnInfo &f = *this->analysis.byFunction[x.fn];
     const CallRec &rec = f.calls[r];
     std::vector<unsigned> after;
     for (const auto &[a, b] : f.succ) {
@@ -571,15 +573,15 @@ void Pieces::buildFlow() {
         }
       }
     }
-    for (unsigned p : analysis_.actPieces[callee]) {
-      std::vector<unsigned> &next = analysis_.flow[x.root][p];
+    for (unsigned p : this->analysis.actPieces[callee]) {
+      std::vector<unsigned> &next = this->analysis.flow[x.root][p];
       next.insert(next.end(), after.begin(), after.end());
       for (unsigned n : after) {
         noteFlow(x.root, p, n, llvm::SMLoc());
       }
     }
   }
-  for (auto &graph : analysis_.flow) {
+  for (auto &graph : this->analysis.flow) {
     for (auto &[node, next] : graph) {
       std::sort(next.begin(), next.end());
       next.erase(std::unique(next.begin(), next.end()), next.end());
@@ -590,7 +592,7 @@ void Pieces::buildFlow() {
 std::vector<unsigned> Pieces::reach(int root, const std::vector<unsigned> &from) const {
   std::set<unsigned> seen(from.begin(), from.end());
   std::vector<unsigned> pending(from.begin(), from.end());
-  const auto &graph = analysis_.flow[root];
+  const auto &graph = this->analysis.flow[root];
   while (!pending.empty()) {
     unsigned n = pending.back();
     pending.pop_back();
@@ -610,8 +612,8 @@ std::vector<unsigned> Pieces::reach(int root, const std::vector<unsigned> &from)
 
 std::vector<unsigned>
 Pieces::reachAfter(int root, const std::vector<std::pair<unsigned, llvm::SMLoc>> &from) {
-  const auto &graph = analysis_.flow[root];
-  const auto &origins = analysis_.flowFrom[root];
+  const auto &graph = this->analysis.flow[root];
+  const auto &origins = this->analysis.flowFrom[root];
   std::set<unsigned> seen, expanded;
   std::vector<unsigned> pending;
   auto visit = [&](unsigned n) {
@@ -631,8 +633,8 @@ Pieces::reachAfter(int root, const std::vector<std::pair<unsigned, llvm::SMLoc>>
     for (unsigned n : found->second) {
       auto origin = origins.find({p, n});
       bool after = !at.isValid() || origin == origins.end() || !origin->second.isValid() ||
-                   p >= analysis_.pieceInstances.size() ||
-                   later(analysis_.pieceInstances[p].fn, at, origin->second);
+                   p >= this->analysis.pieceInstances.size() ||
+                   later(this->analysis.pieceInstances[p].fn, at, origin->second);
       if (after) {
         visit(n);
       }

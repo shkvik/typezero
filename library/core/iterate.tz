@@ -1,0 +1,7 @@
+function* iterate<I, V>(it: I): Generator<V> {
+  while (true) {
+    const r = it.next()
+    if (r.done) return
+    yield r.value
+  }
+}

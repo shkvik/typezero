@@ -6,13 +6,9 @@
 namespace tz::pkg {
 
 Version Range::floorOf(uint64_t major, uint64_t minor, uint64_t patch) {
-  Version v;
-  v.major = major;
-  v.minor = minor;
-  v.patch = patch;
-  v.pre = {"0"};
+  Version floor(major, minor, patch, {"0"});
 
-  return v;
+  return floor;
 }
 
 Version Range::after(const Partial &p) {
@@ -36,7 +32,7 @@ bool Range::parse(llvm::StringRef text, Range &out, std::string &error) {
     if (!parseSet(alternative.trim(), set, error)) {
       return false;
     }
-    out.sets_.push_back(std::move(set));
+    out.sets.push_back(std::move(set));
   }
 
   return true;
@@ -151,7 +147,7 @@ bool Range::parseSet(llvm::StringRef text, Set &out, std::string &error) {
         add(Op::Less, Range::floorOf(0, 0, 0), true);
       } else {
         Version next = Range::after(p);
-        next.pre.clear();
+        next.dropPrerelease();
         add(Op::GreaterEq, next);
       }
       break;
@@ -209,8 +205,8 @@ bool Range::test(const Set &set, const Version &version) {
     return true;
   }
   for (const Comparator &c : set) {
-    if (!c.synthetic && c.version.isPrerelease() && c.version.major == version.major &&
-        c.version.minor == version.minor && c.version.patch == version.patch) {
+    if (!c.synthetic && c.version.isPrerelease() && c.version.getMajor() == version.getMajor() &&
+        c.version.getMinor() == version.getMinor() && c.version.getPatch() == version.getPatch()) {
       return true;
     }
   }
@@ -219,7 +215,7 @@ bool Range::test(const Set &set, const Version &version) {
 }
 
 bool Range::satisfies(const Version &version) const {
-  for (const Set &set : sets_) {
+  for (const Set &set : this->sets) {
     if (test(set, version)) {
       return true;
     }

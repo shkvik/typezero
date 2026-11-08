@@ -6,7 +6,7 @@ namespace tz {
 
 MemoryPlan MemoryPass::run(Program &program) const {
   MemoryPlan plan;
-  plan.subtypes = program.file.subtypes;
+  plan.subtypes = program.file.inventory.subtypes;
   MemoryAnalysis analysis(plan);
   analysis.analyzeCycles(program.file);
 

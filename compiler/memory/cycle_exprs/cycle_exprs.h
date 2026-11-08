@@ -18,7 +18,7 @@ private:
   static const FunctionExpr *closureLiteral(const Expr *arg);
   void closure(const FunctionExpr *expr, bool held);
 
-  CycleScanner &scanner_;
+  CycleScanner &scanner;
 };
 
 }

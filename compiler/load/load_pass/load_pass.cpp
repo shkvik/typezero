@@ -5,13 +5,16 @@
 namespace tz {
 
 LoadPass::LoadPass(llvm::StringRef path, const pkg::Graph *packages, const SourceOverlay *overlay)
-    : path_(path.str()), packages_(packages), overlay_(overlay) {}
+    : path_(path.str()),
+      packages(packages),
+      overlay(overlay) {}
 
 Errors LoadPass::run(Program &program) const {
   program.diags = std::make_unique<Diagnostics>(program.sourceMgr);
   AstContext &ast = *program.asts.emplace_back(std::make_unique<AstContext>());
   program.file = SourceFile();
-  loadProgram(path_, program.sourceMgr, ast, *program.diags, program.file, packages_, overlay_);
+  loadProgram(path_, program.sourceMgr, ast, *program.diags, program.file, this->packages,
+              this->overlay);
 
   return program.diags->take();
 }

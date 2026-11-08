@@ -15,41 +15,44 @@ namespace path = llvm::sys::path;
 class StagedDir {
 public:
   bool create(llvm::StringRef final, std::string &error) {
-    final_ = final.str();
+    this->final = final.str();
     if (std::error_code ec = fs::create_directories(path::parent_path(final))) {
       error = "cannot create '" + path::parent_path(final).str() + "': " + ec.message();
       return false;
     }
-    if (std::error_code ec = fs::createUniqueDirectory(final + ".tmp", temp_)) {
-      error = "cannot create a directory next to '" + final_ + "': " + ec.message();
+    if (std::error_code ec = fs::createUniqueDirectory(final + ".tmp", this->temp)) {
+      error = "cannot create a directory next to '" + this->final + "': " + ec.message();
       return false;
     }
 
     return true;
   }
-  llvm::StringRef path() const { return temp_; }
+  llvm::StringRef path() const {
+    return this->temp;
+  }
   bool commit(std::string &error) {
-    std::error_code ec = fs::rename(temp_, final_);
+    std::error_code ec = fs::rename(this->temp, this->final);
     if (!ec) {
-      temp_.clear();
+      this->temp.clear();
       return true;
     }
-    if (fs::is_directory(final_)) {
+    if (fs::is_directory(this->final)) {
       return true;
     }
-    error = "cannot move '" + std::string(temp_) + "' to '" + final_ + "': " + ec.message();
+    error =
+        "cannot move '" + std::string(this->temp) + "' to '" + this->final + "': " + ec.message();
 
     return false;
   }
   ~StagedDir() {
-    if (!temp_.empty()) {
-      fs::remove_directories(temp_, true);
+    if (!this->temp.empty()) {
+      fs::remove_directories(this->temp, true);
     }
   }
 
 private:
-  std::string final_;
-  llvm::SmallString<256> temp_;
+  std::string final;
+  llvm::SmallString<256> temp;
 };
 
 }

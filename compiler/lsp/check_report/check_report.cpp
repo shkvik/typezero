@@ -16,7 +16,8 @@ struct Item {
 }
 
 CheckReport::CheckReport(const llvm::SourceMgr &sourceMgr, llvm::StringRef entry)
-    : places_(sourceMgr), entry_(SourcePlaces::absolute(entry)) {}
+    : places_(sourceMgr),
+      entry(SourcePlaces::absolute(entry)) {}
 
 llvm::json::Object CheckReport::range(const SourcePlace &place) {
   llvm::json::Object start{{"line", place.line}, {"character", place.character}};
@@ -54,7 +55,7 @@ llvm::json::Value CheckReport::build(const Errors &errors, const std::vector<Mod
     if (place) {
       item.place = *place;
     } else {
-      item.place.path = entry_;
+      item.place.path = this->entry;
     }
     items.push_back(std::move(item));
   }

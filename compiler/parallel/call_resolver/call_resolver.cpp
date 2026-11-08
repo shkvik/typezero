@@ -1,5 +1,4 @@
 #include "compiler/parallel/call_resolver/call_resolver.h"
-#include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
 #include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_walk/call_walk.h"
@@ -12,6 +11,7 @@
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
 #include "compiler/parallel/parallel_model/parallel_model.h"
 #include "compiler/parallel/pieces/pieces.h"
+#include "compiler/program/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -36,41 +36,41 @@ using llvm::isa;
 namespace tz::parallel {
 
 CallResolver::CallResolver(Analysis &analysis)
-    : analysis_(analysis) {}
+    : analysis(analysis) {}
 
 void CallResolver::resolve() {
   while (true) {
-    while (!analysis_.worklist.empty()) {
-      int fi = analysis_.worklist.front();
-      analysis_.worklist.pop_front();
-      analysis_.codeWalk.walk(fi);
+    while (!this->analysis.worklist.empty()) {
+      int fi = this->analysis.worklist.front();
+      this->analysis.worklist.pop_front();
+      this->analysis.codeWalk.walk(fi);
     }
     std::map<const Type *, std::vector<int>> generators;
-    for (size_t i = 0; i < analysis_.records.size(); ++i) {
-      const FnInfo &f = analysis_.records[i];
-      if ((f.syncGen || f.asyncGen) && f.decl->sym && f.decl->sym->ret) {
-        generators[f.decl->sym->ret].push_back(f.decl->id);
+    for (size_t i = 0; i < this->analysis.records.size(); ++i) {
+      const FnInfo &f = this->analysis.records[i];
+      if ((f.syncGen || f.asyncGen) && f.decl->sym && f.decl->sym->hasReturnType()) {
+        generators[f.decl->sym->getKnownReturnType()].push_back(f.decl->id);
       }
     }
-    for (size_t i = 0; i < analysis_.records.size(); ++i) {
-      FnInfo &caller = analysis_.records[i];
+    for (size_t i = 0; i < this->analysis.records.size(); ++i) {
+      FnInfo &caller = this->analysis.records[i];
       for (CallRec &rec : caller.calls) {
         if (rec.reflect == CallRec::Reflect::Apply && rec.noSelf) {
           const llvm::DenseSet<int> &boxed =
-              analysis_.unknownAnyFn ? analysis_.valueFns : analysis_.unknownFns;
-          size_t known = analysis_.records.size();
+              this->analysis.unknownAnyFn ? this->analysis.valueFns : this->analysis.unknownFns;
+          size_t known = this->analysis.records.size();
           for (size_t k = 0; k < known; ++k) {
-            const FnInfo &target = analysis_.records[k];
+            const FnInfo &target = this->analysis.records[k];
             if (boxed.contains(target.decl->id)) {
-              analysis_.callWalk.addCallee(rec, target.decl, analysis_.classRefOrNone(target),
-                                           true);
+              this->analysis.callWalk.addCallee(rec, target.decl,
+                                                this->analysis.classRefOrNone(target), true);
             }
           }
           continue;
         }
         if (rec.reflect != CallRec::Reflect::None) {
-          std::vector<const ClassDecl *> classes = analysis_.programClasses;
-          for (const ClassDecl *cls : analysis_.classes) {
+          std::vector<const ClassDecl *> classes = this->analysis.programClasses;
+          for (const ClassDecl *cls : this->analysis.classes) {
             if (!cls->library() && !llvm::is_contained(classes, cls)) {
               classes.push_back(cls);
             }
@@ -82,13 +82,13 @@ void CallResolver::resolve() {
             if (rec.reflect == CallRec::Reflect::Apply) {
               const Type *object = rec.byObject ? rec.byObject->nonOptional() : nullptr;
               if (object && object->isObject() && !object->isAnyObject() && cls->type &&
-                  !analysis_.aliasAnalysis.typesMayAlias(cls->type, object)) {
+                  !this->analysis.aliasAnalysis.typesMayAlias(cls->type, object)) {
                 continue;
               }
               for (const FunctionDecl *method : cls->methods) {
                 if (!method->isStatic() && (rec.reflectNames.empty() ||
                                             llvm::is_contained(rec.reflectNames, method->name))) {
-                  analysis_.callWalk.addCallee(rec, method, rec.bySelf, true);
+                  this->analysis.callWalk.addCallee(rec, method, rec.bySelf, true);
                 }
               }
               continue;
@@ -102,28 +102,29 @@ void CallResolver::resolve() {
             }
             std::optional<Ref> self = Ref{RefKind::Site, rec.site};
             for (const FunctionDecl *ctor : cls->constructors) {
-              analysis_.callWalk.addCallee(rec, ctor, self, true);
+              this->analysis.callWalk.addCallee(rec, ctor, self, true);
             }
             for (const ClassDecl *k = cls; k; k = k->parent) {
               if (k->init) {
-                analysis_.callWalk.addCallee(rec, k->init, self, true);
+                this->analysis.callWalk.addCallee(rec, k->init, self, true);
               }
             }
           }
           continue;
         }
         if (rec.channel >= 0) {
-          for (int h : std::vector<int>(analysis_.listeners[rec.channel])) {
-            const FnInfo &target = *analysis_.byFunction[h];
-            analysis_.callWalk.addCallee(rec, target.decl, analysis_.classRefOrNone(target), true);
+          for (int h : std::vector<int>(this->analysis.listeners[rec.channel])) {
+            const FnInfo &target = *this->analysis.byFunction[h];
+            this->analysis.callWalk.addCallee(rec, target.decl,
+                                              this->analysis.classRefOrNone(target), true);
           }
-          for (const Type *t : analysis_.listenerTypes[rec.channel]) {
-            auto found = analysis_.values.find(t->nonOptional());
-            if (found != analysis_.values.end()) {
+          for (const Type *t : this->analysis.listenerTypes[rec.channel]) {
+            auto found = this->analysis.values.find(t->nonOptional());
+            if (found != this->analysis.values.end()) {
               for (int g : std::vector<int>(found->second)) {
-                const FnInfo &target = *analysis_.byFunction[g];
-                analysis_.callWalk.addCallee(rec, target.decl, analysis_.classRefOrNone(target),
-                                             true);
+                const FnInfo &target = *this->analysis.byFunction[g];
+                this->analysis.callWalk.addCallee(rec, target.decl,
+                                                  this->analysis.classRefOrNone(target), true);
               }
             }
           }
@@ -136,42 +137,42 @@ void CallResolver::resolve() {
           auto found = generators.find(rec.byType->nonOptional());
           if (found != generators.end()) {
             for (int g : found->second) {
-              const FnInfo &target = *analysis_.byFunction[g];
-              analysis_.callWalk.addCallee(rec, target.decl, analysis_.classRefOrNone(target),
-                                           true);
+              const FnInfo &target = *this->analysis.byFunction[g];
+              this->analysis.callWalk.addCallee(rec, target.decl,
+                                                this->analysis.classRefOrNone(target), true);
             }
           }
           continue;
         }
-        auto found = analysis_.values.find(rec.byType->nonOptional());
-        if (found != analysis_.values.end()) {
+        auto found = this->analysis.values.find(rec.byType->nonOptional());
+        if (found != this->analysis.values.end()) {
           for (int g : std::vector<int>(found->second)) {
-            const FnInfo &target = *analysis_.byFunction[g];
+            const FnInfo &target = *this->analysis.byFunction[g];
             std::optional<Ref> self;
             if (target.thisOwner) {
-              self = analysis_.callWalk.classRef(target.thisOwner);
+              self = this->analysis.callWalk.classRef(target.thisOwner);
             }
-            analysis_.callWalk.addCallee(rec, target.decl, self, true);
+            this->analysis.callWalk.addCallee(rec, target.decl, self, true);
           }
         }
         if (!rec.byName.empty() && rec.byObject) {
           const Type *object = rec.byObject->nonOptional();
-          for (size_t k = 0; k < analysis_.classes.size(); ++k) {
-            const ClassDecl *cls = analysis_.classes[k];
-            if (!cls->type ||
-                !(cls->literal() || analysis_.aliasAnalysis.typesMayAlias(cls->type, object))) {
+          for (size_t k = 0; k < this->analysis.classes.size(); ++k) {
+            const ClassDecl *cls = this->analysis.classes[k];
+            if (!cls->type || !(cls->literal() ||
+                                this->analysis.aliasAnalysis.typesMayAlias(cls->type, object))) {
               continue;
             }
             for (const FunctionDecl *method : cls->methods) {
               if (method->name == rec.byName && !method->isStatic()) {
-                analysis_.callWalk.addCallee(rec, method, rec.bySelf, true);
+                this->analysis.callWalk.addCallee(rec, method, rec.bySelf, true);
               }
             }
           }
         }
       }
     }
-    if (analysis_.worklist.empty()) {
+    if (this->analysis.worklist.empty()) {
       break;
     }
   }
@@ -187,7 +188,7 @@ std::optional<Access> CallResolver::substitute(const Access &a, const FnInfo &ca
     if (it != params.end()) {
       const Expr *arg = argument(rec, size_t(it - params.begin()));
       const FunctionDecl *passed = functionOf(arg);
-      const VarSymbol *param = callableParam(analysis_.byFunction[caller]->decl, arg);
+      const VarSymbol *param = callableParam(this->analysis.byFunction[caller]->decl, arg);
       if (passed && passed != b.through) {
         return std::nullopt;
       }
@@ -199,9 +200,9 @@ std::optional<Access> CallResolver::substitute(const Access &a, const FnInfo &ca
       }
     }
   }
-  bool byLibrary =
-      rec.kind == CallKind::Inline && rec.call && analysis_.libraryEffects.libraryTarget(rec.call);
-  if (analysis_.isLibrary(callee.decl) || byLibrary) {
+  bool byLibrary = rec.kind == CallKind::Inline && rec.call &&
+                   this->analysis.libraryEffects.libraryTarget(rec.call);
+  if (this->analysis.isLibrary(callee.decl) || byLibrary) {
     b.origin = llvm::SMLoc();
     b.anchor = llvm::SMLoc();
     b.home = nullptr;
@@ -212,7 +213,8 @@ std::optional<Access> CallResolver::substitute(const Access &a, const FnInfo &ca
   b.at = rec.loc;
   b.via = callee.decl;
   if (b.loc.ref.kind == RefKind::Owned) {
-    std::optional<Ref> ref = analysis_.ownership.substituted(b.loc.ref, callee, caller, rec, call);
+    std::optional<Ref> ref =
+        this->analysis.ownership.substituted(b.loc.ref, callee, caller, rec, call);
     if (!ref) {
       return std::nullopt;
     }
@@ -226,7 +228,7 @@ std::optional<Access> CallResolver::substitute(const Access &a, const FnInfo &ca
       }
       b.loc.ref = *self;
     } else if (owner != callee.thisOwner || !self) {
-      b.loc.ref = analysis_.callWalk.classRef(owner);
+      b.loc.ref = this->analysis.callWalk.classRef(owner);
     }
   }
 
@@ -234,7 +236,7 @@ std::optional<Access> CallResolver::substitute(const Access &a, const FnInfo &ca
 }
 
 void CallResolver::fold() {
-  for (FnInfo &f : analysis_.records) {
+  for (FnInfo &f : this->analysis.records) {
     for (unsigned s = 0; s < f.segs.size(); ++s) {
       if (f.isInline(s)) {
         f.inlineEffects.insert(f.segs[s].effects.begin(), f.segs[s].effects.end());
@@ -242,8 +244,8 @@ void CallResolver::fold() {
     }
   }
   std::deque<int> queue;
-  std::vector<bool> queued(analysis_.byFunction.size(), false);
-  for (const FnInfo &f : analysis_.records) {
+  std::vector<bool> queued(this->analysis.byFunction.size(), false);
+  for (const FnInfo &f : this->analysis.records) {
     queue.push_back(f.decl->id);
     queued[f.decl->id] = true;
   }
@@ -251,15 +253,15 @@ void CallResolver::fold() {
     int fi = queue.front();
     queue.pop_front();
     queued[fi] = false;
-    FnInfo &f = *analysis_.byFunction[fi];
+    FnInfo &f = *this->analysis.byFunction[fi];
     bool grew = false;
-    for (int index : analysis_.callGraph.outgoing(fi)) {
-      const CallEdge &call = analysis_.callGraph.edge(index);
+    for (int index : this->analysis.callGraph.outgoing(fi)) {
+      const CallEdge &call = this->analysis.callGraph.edge(index);
       if (call.mode == Mode::Callback) {
         continue;
       }
       const CallRec &rec = f.calls[call.call];
-      const FnInfo &g = *analysis_.byFunction[call.to];
+      const FnInfo &g = *this->analysis.byFunction[call.to];
       std::vector<Access> added;
       for (const Access &a : g.inlineEffects) {
         if (std::optional<Access> b = substitute(a, g, fi, call, rec)) {
@@ -281,8 +283,8 @@ void CallResolver::fold() {
     if (!grew) {
       continue;
     }
-    for (int index : analysis_.callGraph.incoming(fi)) {
-      const CallEdge &call = analysis_.callGraph.edge(index);
+    for (int index : this->analysis.callGraph.incoming(fi)) {
+      const CallEdge &call = this->analysis.callGraph.edge(index);
       if (call.mode != Mode::Callback && !queued[call.from]) {
         queued[call.from] = true;
         queue.push_back(call.from);
@@ -342,11 +344,11 @@ std::optional<Ref> CallResolver::bind(const std::optional<Ref> &self,
     return self;
   }
   auto *owner = static_cast<const FunctionDecl *>(self->ptr);
-  if (owner == analysis_.byFunction[caller.fn]->thisOwner && caller.self) {
+  if (owner == this->analysis.byFunction[caller.fn]->thisOwner && caller.self) {
     return caller.self;
   }
 
-  return analysis_.callWalk.classRef(owner);
+  return this->analysis.callWalk.classRef(owner);
 }
 
 }

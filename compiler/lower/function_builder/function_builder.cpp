@@ -1,5 +1,4 @@
 #include "compiler/lower/function_builder/function_builder.h"
-#include "compiler/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
 #include "compiler/lower/debug_info/debug_info.h"
@@ -8,6 +7,7 @@
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
 #include "compiler/lower/functions/tail_call_lowerer/tail_call_lowerer.h"
 #include "compiler/lower/iterators/generator_lowerer/generator_lowerer.h"
+#include "compiler/lower/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/memory/store_lowerer/store_lowerer.h"
 #include "compiler/lower/module_builder/module_builder.h"
@@ -36,11 +36,11 @@ void FunctionBuilder::declareFunction(FunctionDecl *fn) {
   for (const Type *param : sym->params) {
     params.push_back(this->lowering.moduleBuilder().lower(param));
   }
-  auto *type =
-      llvm::FunctionType::get(this->lowering.moduleBuilder().lower(sym->ret), params, false);
-  std::string name = "tz." + this->lowering.symbolPrefixes_.lookup(fn) + fn->name.str();
+  auto *type = llvm::FunctionType::get(
+      this->lowering.moduleBuilder().lower(sym->getKnownReturnType()), params, false);
+  std::string name = "tz." + this->lowering.symbolPrefixes.lookup(fn) + fn->name.str();
   if (fn->cls()) {
-    name = "tz." + this->lowering.symbolPrefixes_.lookup(fn->cls()) + fn->cls()->name.str() + "." +
+    name = "tz." + this->lowering.symbolPrefixes.lookup(fn->cls()) + fn->cls()->name.str() + "." +
            fn->name.str() + (fn->variant() ? "." + std::to_string(fn->variant()) : "");
   }
   if (fn->isInstance) {
@@ -59,16 +59,16 @@ void FunctionBuilder::declareFunction(FunctionDecl *fn) {
 }
 
 void FunctionBuilder::beginFunction(llvm::Function *function, FunctionDecl *fn) {
-  this->lowering.function_ = function;
-  this->lowering.currentFn_ = fn;
-  this->lowering.returnType_ = fn ? fn->sym->ret : nullptr;
-  this->lowering.envParam_ = nullptr;
-  this->lowering.addresses_.clear();
-  this->lowering.boxSlots_.clear();
-  this->lowering.envBoxes_.clear();
-  this->lowering.groupEnvs_.clear();
-  this->lowering.builder_.SetInsertPoint(
-      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", this->lowering.function_));
+  this->lowering.function = function;
+  this->lowering.currentFn = fn;
+  this->lowering.returnType = fn ? fn->sym->getKnownReturnType() : nullptr;
+  this->lowering.envParam = nullptr;
+  this->lowering.addresses.clear();
+  this->lowering.boxSlots.clear();
+  this->lowering.envBoxes.clear();
+  this->lowering.groupEnvs.clear();
+  this->lowering.builder.SetInsertPoint(
+      llvm::BasicBlock::Create(this->lowering.ctx, "entry", this->lowering.function));
   this->lowering.debugInfo().beginFunction(function, fn);
 }
 
@@ -89,14 +89,14 @@ void FunctionBuilder::emitFunction(FunctionDecl *fn) {
     this->lowering.asyncLowerer().emitAsyncFunction(fn, this->lowering.functions_.lookup(fn->sym));
     return;
   }
-  Lowering::TailGroup *group = this->lowering.tailGroupOf_.lookup(fn);
+  Lowering::TailGroup *group = this->lowering.tailGroupOf.lookup(fn);
   if (group) {
     this->lowering.tailCallLowerer().emitTailGroup(*group);
     return;
   }
   this->beginFunction(this->lowering.functions_.lookup(fn->sym), fn);
   std::vector<llvm::Value *> args;
-  for (llvm::Argument &arg : this->lowering.function_->args()) {
+  for (llvm::Argument &arg : this->lowering.function->args()) {
     args.push_back(&arg);
   }
   this->emitParamsAndBody(fn, args);
@@ -110,11 +110,11 @@ void FunctionBuilder::emitParamsAndBody(FunctionDecl *fn, llvm::ArrayRef<llvm::V
     for (const VarSymbol *var : fn->captures) {
       if (this->lowering.memory().uncounted.count({fn, var})) {
         const Type *type = ClosureLowerer::typeOf(var);
-        llvm::Value *owner = this->lowering.builder_.CreateLoad(
+        llvm::Value *owner = this->lowering.builder.CreateLoad(
             this->lowering.moduleBuilder().lower(type),
             this->lowering.functionFrame().addressOf(var), var->name);
         this->lowering.refCounts().retainValue(owner, type);
-        this->lowering.builder_.CreateStore(
+        this->lowering.builder.CreateStore(
             owner, this->lowering.functionFrame().createManagedSlot(type, var->name + ".held"));
       }
     }
@@ -126,9 +126,9 @@ void FunctionBuilder::emitParamsAndBody(FunctionDecl *fn, llvm::ArrayRef<llvm::V
 void FunctionBuilder::emitParams(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *> args) {
   if (fn->thisVar()) {
     llvm::Value *slot =
-        this->lowering.functionFrame().createStackSlot(this->lowering.builder_.getPtrTy(), "this");
-    this->lowering.builder_.CreateStore(this->lowering.envParam_, slot);
-    this->lowering.addresses_[fn->thisVar()] = slot;
+        this->lowering.functionFrame().createStackSlot(this->lowering.builder.getPtrTy(), "this");
+    this->lowering.builder.CreateStore(this->lowering.envParam, slot);
+    this->lowering.addresses[fn->thisVar()] = slot;
     this->lowering.debugInfo().declare(fn->thisVar(), slot);
   }
   for (size_t i = 0; i < fn->params.size(); ++i) {
@@ -146,20 +146,20 @@ void FunctionBuilder::emitParams(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *>
     llvm::BasicBlock *givenBlock = this->lowering.functionFrame().newBlock("param.given");
     llvm::BasicBlock *defaultBlock = this->lowering.functionFrame().newBlock("param.default");
     llvm::BasicBlock *doneBlock = this->lowering.functionFrame().newBlock("param.done");
-    this->lowering.builder_.CreateCondBr(this->lowering.optionalLowerer().optionalHas(arg, passed),
-                                         givenBlock, defaultBlock);
+    this->lowering.builder.CreateCondBr(this->lowering.optionalLowerer().optionalHas(arg, passed),
+                                        givenBlock, defaultBlock);
     this->lowering.functionFrame().switchTo(givenBlock);
     llvm::Value *given = param.sym->type->isOptional()
                              ? arg
                              : this->lowering.optionalLowerer().optionalValue(arg, passed);
-    this->lowering.builder_.CreateBr(doneBlock);
+    this->lowering.builder.CreateBr(doneBlock);
     this->lowering.functionFrame().switchTo(defaultBlock);
     llvm::Value *fallback = this->lowering.exprLowerer().emitExpr(param.defaultValue());
-    llvm::BasicBlock *defaultEnd = this->lowering.builder_.GetInsertBlock();
-    this->lowering.builder_.CreateBr(doneBlock);
+    llvm::BasicBlock *defaultEnd = this->lowering.builder.GetInsertBlock();
+    this->lowering.builder.CreateBr(doneBlock);
     this->lowering.functionFrame().switchTo(doneBlock);
     llvm::PHINode *value =
-        this->lowering.builder_.CreatePHI(this->lowering.moduleBuilder().lower(param.sym->type), 2);
+        this->lowering.builder.CreatePHI(this->lowering.moduleBuilder().lower(param.sym->type), 2);
     value->addIncoming(given, givenBlock);
     value->addIncoming(fallback, defaultEnd);
     this->lowering.storeLowerer().storeVar(param.sym, slot, value, false);
@@ -168,22 +168,22 @@ void FunctionBuilder::emitParams(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *>
 
 void FunctionBuilder::finishFunction() {
   this->closeBody();
-  this->lowering.function_ = nullptr;
+  this->lowering.function = nullptr;
 }
 
 void FunctionBuilder::closeBody() {
   if (this->lowering.functionFrame().blockIsOpen()) {
-    llvm::Type *ret = this->lowering.function_->getReturnType();
+    llvm::Type *ret = this->lowering.function->getReturnType();
     if (ret->isVoidTy()) {
-      this->lowering.builder_.CreateRetVoid();
-    } else if (this->lowering.function_->hasExternalLinkage()) {
-      this->lowering.builder_.CreateRet(this->lowering.builder_.getInt32(0));
-    } else if (this->lowering.returnType_ && (this->lowering.returnType_->isOptional() ||
-                                              this->lowering.returnType_->isUnknown())) {
-      this->lowering.builder_.CreateRet(
-          this->lowering.optionalLowerer().undefinedValue(this->lowering.returnType_));
+      this->lowering.builder.CreateRetVoid();
+    } else if (this->lowering.function->hasExternalLinkage()) {
+      this->lowering.builder.CreateRet(this->lowering.builder.getInt32(0));
+    } else if (this->lowering.returnType && (this->lowering.returnType->isOptional() ||
+                                             this->lowering.returnType->isUnknown())) {
+      this->lowering.builder.CreateRet(
+          this->lowering.optionalLowerer().undefinedValue(this->lowering.returnType));
     } else {
-      this->lowering.builder_.CreateUnreachable();
+      this->lowering.builder.CreateUnreachable();
     }
   }
 }

@@ -14,15 +14,9 @@ struct Partial {
   std::vector<std::string> pre;
 
   Version version() const {
-    Version v;
-    v.major = parts[0];
-    v.minor = parts[1];
-    v.patch = parts[2];
-    if (count == 3) {
-      v.pre = pre;
-    }
+    std::vector<std::string> prerelease = this->count == 3 ? this->pre : std::vector<std::string>();
 
-    return v;
+    return Version(this->parts[0], this->parts[1], this->parts[2], prerelease);
   }
 };
 

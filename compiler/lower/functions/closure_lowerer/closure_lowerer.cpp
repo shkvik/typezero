@@ -59,7 +59,8 @@ ClosureLowerer::ClosureLowerer(Lowering &owner)
     : lowering(owner) {}
 
 const Type *ClosureLowerer::functionTypeOf(const FuncSymbol *fn) {
-  return Type::function(fn->params, fn->minArgs, fn->hasRest, fn->ret, fn->hasThis);
+  return Type::function(fn->params, fn->minArgs, fn->hasRest, fn->getKnownReturnType(),
+                        fn->hasThis);
 }
 
 const Type *ClosureLowerer::typeOf(const VarSymbol *var) {
@@ -72,7 +73,7 @@ const Type *ClosureLowerer::typeOf(const VarSymbol *var) {
 }
 
 llvm::FunctionType *ClosureLowerer::closureFnType(const Type *fnType) {
-  std::vector<llvm::Type *> params{this->lowering.builder_.getPtrTy()};
+  std::vector<llvm::Type *> params{this->lowering.builder.getPtrTy()};
   for (const Type *param : fnType->params()) {
     params.push_back(this->lowering.moduleBuilder().lower(param));
   }
@@ -86,13 +87,13 @@ llvm::Value *ClosureLowerer::makeFunctionValue(llvm::Value *info, llvm::Value *e
   if (infoConst) {
     auto *envConst = dyn_cast<llvm::Constant>(env);
     if (envConst) {
-      return llvm::ConstantStruct::get(this->lowering.fnTy_, {infoConst, envConst});
+      return llvm::ConstantStruct::get(this->lowering.fnTy, {infoConst, envConst});
     }
   }
-  llvm::Value *value = llvm::UndefValue::get(this->lowering.fnTy_);
-  value = this->lowering.builder_.CreateInsertValue(value, info, 0);
+  llvm::Value *value = llvm::UndefValue::get(this->lowering.fnTy);
+  value = this->lowering.builder.CreateInsertValue(value, info, 0);
 
-  return this->lowering.builder_.CreateInsertValue(value, env, 1);
+  return this->lowering.builder.CreateInsertValue(value, env, 1);
 }
 
 llvm::Function *ClosureLowerer::closureCode(FunctionDecl *fn) {
@@ -105,7 +106,7 @@ llvm::Function *ClosureLowerer::closureCode(FunctionDecl *fn) {
                                 ClosureLowerer::qualifiedName(fn), this->lowering.module_.get());
   this->lowering.functionBuilder().setFunctionAttributes(code);
   this->closureCodes[fn] = code;
-  this->lowering.pendingClosures_.push_back(fn);
+  this->lowering.pendingClosures.push_back(fn);
 
   return code;
 }
@@ -126,7 +127,7 @@ llvm::Constant *ClosureLowerer::functionInfo(FunctionDecl *fn) {
                                   llvm::GlobalValue::InternalLinkage, "tz." + fn->name + ".value",
                                   this->lowering.module_.get());
     this->lowering.functionBuilder().setFunctionAttributes(code);
-    llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx_, "entry", code));
+    llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx, "entry", code));
     std::vector<llvm::Value *> args;
     for (unsigned i = 1; i < code->arg_size(); ++i) {
       args.push_back(code->getArg(i));
@@ -139,9 +140,9 @@ llvm::Constant *ClosureLowerer::functionInfo(FunctionDecl *fn) {
     }
   }
   auto *global = new llvm::GlobalVariable(
-      *this->lowering.module_, this->lowering.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
+      *this->lowering.module_, this->lowering.fnInfoTy, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(
-          this->lowering.fnInfoTy_,
+          this->lowering.fnInfoTy,
           {code, this->lowering.stringLowerer().stringLiteral(ClosureLowerer::utf16(fn->name))}),
       "tz.fninfo." + fn->name);
   this->infos[fn] = global;
@@ -157,8 +158,8 @@ llvm::Value *ClosureLowerer::emitFunctionExpr(FunctionExpr *fe) {
     return this->makeFunctionValue(info, this->lowering.envLowerer().emitVarValue(var, false));
   }
   const Lowering::EnvLayout &layout = this->lowering.envLowerer().envLayout(fn);
-  llvm::Value *env = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
-  if (!layout.fields.empty() || (this->lowering.comparesFunctions_ && !fn->nonEscaping)) {
+  llvm::Value *env = llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy());
+  if (!layout.fields.empty() || (this->lowering.comparesFunctions && !fn->nonEscaping)) {
     env = this->lowering.envLowerer().createEnv(
         layout, fn->nonEscaping, !this->lowering.memory().unstoredSites.contains(fe));
     this->lowering.groupLowerer().noteUnstored(env, fe);
@@ -169,34 +170,34 @@ llvm::Value *ClosureLowerer::emitFunctionExpr(FunctionExpr *fe) {
 
 llvm::Value *ClosureLowerer::closureEnv(CallExpr *call) {
   FunctionDecl *fn = call->func()->decl;
-  llvm::Value *null = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
-  if (this->lowering.currentFn_ && (this->lowering.currentFn_ == fn ||
-                                    (fn->group && this->lowering.currentFn_->group == fn->group))) {
-    return this->lowering.envParam_ ? this->lowering.envParam_ : null;
+  llvm::Value *null = llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy());
+  if (this->lowering.currentFn && (this->lowering.currentFn == fn ||
+                                   (fn->group && this->lowering.currentFn->group == fn->group))) {
+    return this->lowering.envParam ? this->lowering.envParam : null;
   }
-  if (fn->group && fn->group->owner == this->lowering.currentFn_) {
-    return this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(),
-                                              this->lowering.groupEnvs_.lookup(fn->group));
+  if (fn->group && fn->group->owner == this->lowering.currentFn) {
+    return this->lowering.builder.CreateLoad(this->lowering.builder.getPtrTy(),
+                                             this->lowering.groupEnvs.lookup(fn->group));
   }
   const VarSymbol *var = cast<NameExpr>(call->callee)->var();
 
-  return this->lowering.builder_.CreateExtractValue(
+  return this->lowering.builder.CreateExtractValue(
       this->lowering.envLowerer().emitVarValue(var, true), 1);
 }
 
 llvm::Value *ClosureLowerer::callFunctionValue(llvm::Value *fn, const Type *fnType,
                                                llvm::ArrayRef<llvm::Value *> args) {
-  std::vector<llvm::Value *> all{this->lowering.builder_.CreateExtractValue(fn, 1)};
+  std::vector<llvm::Value *> all{this->lowering.builder.CreateExtractValue(fn, 1)};
   all.insert(all.end(), args.begin(), args.end());
   for (size_t i = args.size(); i < fnType->params().size(); ++i) {
     all.push_back(this->lowering.optionalLowerer().undefinedValue(fnType->params()[i]));
   }
-  llvm::Value *info = this->lowering.builder_.CreateExtractValue(fn, 0);
-  llvm::Value *code = this->lowering.builder_.CreateLoad(
-      this->lowering.builder_.getPtrTy(),
-      this->lowering.builder_.CreateStructGEP(this->lowering.fnInfoTy_, info, 0), "code");
+  llvm::Value *info = this->lowering.builder.CreateExtractValue(fn, 0);
+  llvm::Value *code = this->lowering.builder.CreateLoad(
+      this->lowering.builder.getPtrTy(),
+      this->lowering.builder.CreateStructGEP(this->lowering.fnInfoTy, info, 0), "code");
   llvm::CallInst *result =
-      this->lowering.builder_.CreateCall(this->closureFnType(fnType), code, all);
+      this->lowering.builder.CreateCall(this->closureFnType(fnType), code, all);
 
   return result->getType()->isVoidTy() ? nullptr : result;
 }
@@ -233,11 +234,11 @@ llvm::Value *ClosureLowerer::emitFunctionAdapter(CastExpr *cast) {
                                         ClosureLowerer::qualifiedName(fn) + ".adapter",
                                         this->lowering.module_.get());
     this->lowering.functionBuilder().setFunctionAttributes(code);
-    llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
-    llvm::Function *outer = this->lowering.function_;
-    this->lowering.function_ = code;
-    this->lowering.builder_.SetInsertPoint(
-        llvm::BasicBlock::Create(this->lowering.ctx_, "entry", code));
+    llvm::IRBuilderBase::InsertPoint point = this->lowering.builder.saveIP();
+    llvm::Function *outer = this->lowering.function;
+    this->lowering.function = code;
+    this->lowering.builder.SetInsertPoint(
+        llvm::BasicBlock::Create(this->lowering.ctx, "entry", code));
     std::vector<llvm::Value *> args;
     llvm::ArrayRef<const Type *> params = from->params();
     llvm::ArrayRef<const Type *> given = to->params();
@@ -253,7 +254,7 @@ llvm::Value *ClosureLowerer::emitFunctionAdapter(CastExpr *cast) {
         args.push_back(this->lowering.exprLowerer().emitConversion(arg, given[i], params[i]));
       } else {
         args.push_back(this->lowering.optionalLowerer().makeOptional(
-            arg, this->lowering.builder_.getTrue(), params[i]));
+            arg, this->lowering.builder.getTrue(), params[i]));
       }
     }
     for (size_t i = params.size(); i < given.size(); ++i) {
@@ -262,29 +263,29 @@ llvm::Value *ClosureLowerer::emitFunctionAdapter(CastExpr *cast) {
     llvm::CallInst *result;
     if (fn->isClosure()) {
       args.insert(args.begin(), code->getArg(0));
-      result = this->lowering.builder_.CreateCall(this->closureCode(fn), args);
+      result = this->lowering.builder.CreateCall(this->closureCode(fn), args);
     } else {
-      result = this->lowering.builder_.CreateCall(this->lowering.functions_.lookup(fn->sym), args);
+      result = this->lowering.builder.CreateCall(this->lowering.functions_.lookup(fn->sym), args);
     }
     if (to->ret()->isVoid()) {
       if (!from->ret()->isVoid()) {
         this->lowering.refCounts().releaseValue(result, from->ret());
       }
-      this->lowering.builder_.CreateRetVoid();
+      this->lowering.builder.CreateRetVoid();
     } else {
-      this->lowering.builder_.CreateRet(result);
+      this->lowering.builder.CreateRet(result);
     }
-    this->lowering.function_ = outer;
-    this->lowering.builder_.restoreIP(point);
+    this->lowering.function = outer;
+    this->lowering.builder.restoreIP(point);
     info = new llvm::GlobalVariable(
-        *this->lowering.module_, this->lowering.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
+        *this->lowering.module_, this->lowering.fnInfoTy, true, llvm::GlobalValue::PrivateLinkage,
         llvm::ConstantStruct::get(
-            this->lowering.fnInfoTy_,
+            this->lowering.fnInfoTy,
             {code, this->lowering.stringLowerer().stringLiteral(ClosureLowerer::utf16(fn->name))}),
         "tz.fninfo." + fn->name);
   }
 
-  return this->makeFunctionValue(info, this->lowering.builder_.CreateExtractValue(value, 1));
+  return this->makeFunctionValue(info, this->lowering.builder.CreateExtractValue(value, 1));
 }
 
 void ClosureLowerer::emitClosure(FunctionDecl *fn) {
@@ -297,26 +298,26 @@ void ClosureLowerer::emitClosure(FunctionDecl *fn) {
     return;
   }
   this->lowering.tailCallLowerer().findTailGroups(fn);
-  Lowering::TailGroup *group = this->lowering.tailGroupOf_.lookup(fn);
+  Lowering::TailGroup *group = this->lowering.tailGroupOf.lookup(fn);
   if (group) {
     this->lowering.tailCallLowerer().emitTailGroup(*group);
     return;
   }
   this->lowering.functionBuilder().beginFunction(this->closureCode(fn), fn);
-  this->lowering.envParam_ = this->lowering.function_->getArg(0);
+  this->lowering.envParam = this->lowering.function->getArg(0);
   this->lowering.envLowerer().bindCaptures(fn);
   std::vector<llvm::Value *> args;
-  for (unsigned i = 1; i < this->lowering.function_->arg_size(); ++i) {
-    args.push_back(this->lowering.function_->getArg(i));
+  for (unsigned i = 1; i < this->lowering.function->arg_size(); ++i) {
+    args.push_back(this->lowering.function->getArg(i));
   }
   this->lowering.functionBuilder().emitParamsAndBody(fn, args);
   this->lowering.functionBuilder().finishFunction();
 }
 
 void ClosureLowerer::emitPendingClosures() {
-  while (!this->lowering.pendingClosures_.empty()) {
-    FunctionDecl *fn = this->lowering.pendingClosures_.back();
-    this->lowering.pendingClosures_.pop_back();
+  while (!this->lowering.pendingClosures.empty()) {
+    FunctionDecl *fn = this->lowering.pendingClosures.back();
+    this->lowering.pendingClosures.pop_back();
     this->emitClosure(fn);
   }
 }

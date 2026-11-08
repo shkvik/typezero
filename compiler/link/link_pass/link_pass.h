@@ -17,8 +17,8 @@ public:
 
 private:
   static bool inUse(llvm::StringRef path);
-  const Target &target_;
-  const BuildOptions &options_;
+  const Target &target;
+  const BuildOptions &options;
 };
 
 }

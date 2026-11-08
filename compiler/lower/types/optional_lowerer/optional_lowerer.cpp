@@ -24,13 +24,13 @@ llvm::Value *OptionalLowerer::makeOptional(llvm::Value *value, llvm::Value *has,
     if (always && always->isOne()) {
       return value;
     }
-    return this->lowering.builder_.CreateSelect(has, value,
-                                                llvm::Constant::getNullValue(value->getType()));
+    return this->lowering.builder.CreateSelect(has, value,
+                                               llvm::Constant::getNullValue(value->getType()));
   }
   llvm::Value *result = llvm::UndefValue::get(this->lowering.moduleBuilder().lower(type));
-  result = this->lowering.builder_.CreateInsertValue(result, value, 0);
+  result = this->lowering.builder.CreateInsertValue(result, value, 0);
 
-  return this->lowering.builder_.CreateInsertValue(result, has, 1);
+  return this->lowering.builder.CreateInsertValue(result, has, 1);
 }
 
 llvm::Value *OptionalLowerer::undefinedValue(const Type *optionalType) {
@@ -39,21 +39,21 @@ llvm::Value *OptionalLowerer::undefinedValue(const Type *optionalType) {
 
 llvm::Value *OptionalLowerer::optionalHas(llvm::Value *value, const Type *optionalType) {
   if (optionalType->isUnknown()) {
-    return this->lowering.builder_.CreateIsNotNull(value);
+    return this->lowering.builder.CreateIsNotNull(value);
   }
   const Type *inner = optionalType->inner();
   if (OptionalLowerer::isReference(inner)) {
-    return this->lowering.builder_.CreateIsNotNull(value);
+    return this->lowering.builder.CreateIsNotNull(value);
   }
   if (UnionLayout::isAtomType(inner)) {
-    return this->lowering.builder_.CreateICmpNE(value, this->lowering.builder_.getInt32(0));
+    return this->lowering.builder.CreateICmpNE(value, this->lowering.builder.getInt32(0));
   }
   if (inner->isTagged()) {
-    return this->lowering.builder_.CreateICmpNE(this->lowering.unionLayout().unionTag(value),
-                                                this->lowering.builder_.getInt32(0));
+    return this->lowering.builder.CreateICmpNE(this->lowering.unionLayout().unionTag(value),
+                                               this->lowering.builder.getInt32(0));
   }
 
-  return this->lowering.builder_.CreateExtractValue(value, 1);
+  return this->lowering.builder.CreateExtractValue(value, 1);
 }
 
 llvm::Value *OptionalLowerer::optionalValue(llvm::Value *value, const Type *optionalType) {
@@ -61,7 +61,7 @@ llvm::Value *OptionalLowerer::optionalValue(llvm::Value *value, const Type *opti
     return value;
   }
 
-  return this->lowering.builder_.CreateExtractValue(value, 0);
+  return this->lowering.builder.CreateExtractValue(value, 0);
 }
 
 }

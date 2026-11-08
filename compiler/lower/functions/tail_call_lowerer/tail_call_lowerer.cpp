@@ -1,17 +1,17 @@
 #include "compiler/lower/functions/tail_call_lowerer/tail_call_lowerer.h"
-#include "compiler/library/regex/matcher_builder/matcher_builder.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/expr/truth_lowerer/truth_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
 #include "compiler/lower/functions/env_lowerer/env_lowerer.h"
+#include "compiler/lower/library/regex/matcher_builder/matcher_builder.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
-#include "compiler/pipeline/check_program/ast_walker/ast_walker.h"
 #include "compiler/program/ast/ast.h"
+#include "compiler/program/ast_walker/ast_walker.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
@@ -29,12 +29,14 @@ void TailCallLowerer::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
   std::vector<bool> self(functions.size(), false);
   for (size_t i = 0; i < functions.size(); ++i) {
     FunctionDecl *fn = functions[i];
-    if (!fn->body || !fn->sym || !fn->sym->ret || fn->isGenerator || fn->isAsync || fn->impl()) {
+    if (!fn->body || !fn->sym || !fn->sym->hasReturnType() || fn->isGenerator || fn->isAsync ||
+        fn->impl()) {
       continue;
     }
     for (CallExpr *call : AstWalker::tailCallsIn(fn)) {
       auto target = llvm::find(functions, call->func()->decl);
-      if (target == functions.end() || call->func()->ret != fn->sym->ret ||
+      if (target == functions.end() ||
+          call->func()->getKnownReturnType() != fn->sym->getKnownReturnType() ||
           call->func()->decl->isGenerator || call->func()->decl->isAsync ||
           call->func()->decl->impl()) {
         continue;
@@ -82,13 +84,13 @@ void TailCallLowerer::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
     Lowering::TailGroup &group = this->tailGroups.emplace_back();
     for (size_t member : cycle) {
       group.members.push_back(functions[member]);
-      this->lowering.tailGroupOf_[functions[member]] = &group;
+      this->lowering.tailGroupOf[functions[member]] = &group;
     }
     for (FunctionDecl *member : group.members) {
       for (CallExpr *call : AstWalker::tailCallsIn(member)) {
         if (llvm::is_contained(group.members, call->func()->decl) &&
-            call->func()->ret == member->sym->ret) {
-          this->lowering.tailJumps_.insert(call);
+            call->func()->getKnownReturnType() == member->sym->getKnownReturnType()) {
+          this->lowering.tailJumps.insert(call);
         }
       }
     }
@@ -127,16 +129,16 @@ void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
   } else {
     std::vector<llvm::Type *> params;
     if (closure) {
-      params.push_back(this->lowering.builder_.getPtrTy());
+      params.push_back(this->lowering.builder.getPtrTy());
     }
-    params.push_back(this->lowering.builder_.getInt32Ty());
+    params.push_back(this->lowering.builder.getInt32Ty());
     for (FunctionDecl *member : group.members) {
       for (const Type *param : member->sym->params) {
         params.push_back(this->lowering.moduleBuilder().lower(param));
       }
     }
-    auto *type = llvm::FunctionType::get(this->lowering.moduleBuilder().lower(first->sym->ret),
-                                         params, false);
+    auto *type = llvm::FunctionType::get(
+        this->lowering.moduleBuilder().lower(first->sym->getKnownReturnType()), params, false);
     std::string name = "tz";
     for (FunctionDecl *member : group.members) {
       name += "." + member->name.str();
@@ -149,7 +151,7 @@ void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
   this->lowering.functionBuilder().beginFunction(function, first);
   unsigned next = 0;
   if (closure) {
-    this->lowering.envParam_ = function->getArg(next++);
+    this->lowering.envParam = function->getArg(next++);
     this->lowering.envLowerer().bindCaptures(first);
   }
   llvm::Value *which = merged ? function->getArg(next++) : nullptr;
@@ -160,48 +162,48 @@ void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
     for (const Type *param : member->sym->params) {
       llvm::AllocaInst *slot = this->lowering.functionFrame().createStackSlot(
           this->lowering.moduleBuilder().lower(param), member->name + ".arg");
-      this->lowering.builder_.CreateStore(function->getArg(next++), slot);
+      this->lowering.builder.CreateStore(function->getArg(next++), slot);
       group.slots[k].push_back(slot);
     }
     group.starts.push_back(this->lowering.functionFrame().newBlock(member->name + ".start"));
   }
   if (merged) {
-    llvm::SwitchInst *dispatch = this->lowering.builder_.CreateSwitch(
-        which, group.starts[0], unsigned(group.members.size()));
+    llvm::SwitchInst *dispatch =
+        this->lowering.builder.CreateSwitch(which, group.starts[0], unsigned(group.members.size()));
     for (size_t k = 1; k < group.members.size(); ++k) {
-      dispatch->addCase(this->lowering.builder_.getInt32(uint32_t(k)), group.starts[k]);
+      dispatch->addCase(this->lowering.builder.getInt32(uint32_t(k)), group.starts[k]);
     }
   } else {
-    this->lowering.builder_.CreateBr(group.starts[0]);
+    this->lowering.builder.CreateBr(group.starts[0]);
   }
 
   for (size_t k = 0; k < group.members.size(); ++k) {
     FunctionDecl *member = group.members[k];
-    this->lowering.tailGroup_ = &group;
-    this->lowering.currentFn_ = member;
-    this->lowering.returnType_ = member->sym->ret;
-    this->lowering.tailStatements_.clear();
-    if (this->lowering.returnType_->isVoid()) {
+    this->lowering.tailGroup = &group;
+    this->lowering.currentFn = member;
+    this->lowering.returnType = member->sym->getKnownReturnType();
+    this->lowering.tailStatements.clear();
+    if (this->lowering.returnType->isVoid()) {
       std::vector<Stmt *> stmts;
       AstWalker::tailStatementsOf(member->body, true, stmts);
       for (Stmt *stmt : stmts) {
         if (this->tailCall(cast<ExprStmt>(stmt)->expr)) {
-          this->lowering.tailStatements_.insert(stmt);
+          this->lowering.tailStatements.insert(stmt);
         }
       }
     }
     this->lowering.functionFrame().switchTo(group.starts[k]);
     std::vector<llvm::Value *> args;
     for (size_t i = 0; i < group.slots[k].size(); ++i) {
-      args.push_back(this->lowering.builder_.CreateLoad(
+      args.push_back(this->lowering.builder.CreateLoad(
           this->lowering.moduleBuilder().lower(member->sym->params[i]), group.slots[k][i]));
     }
     this->lowering.functionBuilder().emitParamsAndBody(member, args);
     this->lowering.functionBuilder().closeBody();
   }
-  this->lowering.tailGroup_ = nullptr;
-  this->lowering.tailStatements_.clear();
-  this->lowering.function_ = nullptr;
+  this->lowering.tailGroup = nullptr;
+  this->lowering.tailStatements.clear();
+  this->lowering.function = nullptr;
   if (!merged) {
     return;
   }
@@ -210,7 +212,7 @@ void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
     FunctionDecl *member = group.members[k];
     llvm::Function *own = closure ? this->lowering.closureLowerer().closureCode(member)
                                   : this->lowering.functions_.lookup(member->sym);
-    llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx_, "entry", own));
+    llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx, "entry", own));
     std::vector<llvm::Value *> args;
     unsigned arg = 0;
     if (closure) {
@@ -235,11 +237,11 @@ void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
 
 CallExpr *TailCallLowerer::tailCall(Expr *value) const {
   auto *call = dyn_cast<CallExpr>(value);
-  if (!call || !call->func() || call->builtin() != Builtin::None || !this->lowering.tailGroup_) {
+  if (!call || !call->func() || call->builtin() != Builtin::None || !this->lowering.tailGroup) {
     return nullptr;
   }
-  if (!llvm::is_contained(this->lowering.tailGroup_->members, call->func()->decl) ||
-      call->func()->ret != this->lowering.returnType_) {
+  if (!llvm::is_contained(this->lowering.tailGroup->members, call->func()->decl) ||
+      call->func()->getKnownReturnType() != this->lowering.returnType) {
     return nullptr;
   }
 
@@ -268,10 +270,10 @@ void TailCallLowerer::emitTailReturn(Expr *value) {
     llvm::Value *test = this->lowering.exprLowerer().emitExpr(cond->cond);
     llvm::BasicBlock *thenBlock = this->lowering.functionFrame().newBlock("tail.then");
     llvm::BasicBlock *elseBlock = this->lowering.functionFrame().newBlock("tail.else");
-    this->lowering.builder_.CreateCondBr(test, thenBlock, elseBlock);
+    this->lowering.builder.CreateCondBr(test, thenBlock, elseBlock);
     this->lowering.functionFrame().switchTo(thenBlock);
     this->emitTailReturn(cond->thenExpr);
-    this->lowering.builder_.CreateUnreachable();
+    this->lowering.builder.CreateUnreachable();
     this->lowering.functionFrame().switchTo(elseBlock);
     this->emitTailReturn(cond->elseExpr);
     return;
@@ -293,22 +295,22 @@ void TailCallLowerer::emitTailReturn(Expr *value) {
     bool isAnd = bin->op == BinaryOp::LogAnd;
     lhs = this->lowering.exprLowerer().emitExpr(bin->lhs);
     llvm::Value *truth = this->lowering.truthLowerer().emitTruth(lhs, bin->lhs->type);
-    this->lowering.builder_.CreateCondBr(truth, isAnd ? restBlock : decidedBlock,
-                                         isAnd ? decidedBlock : restBlock);
+    this->lowering.builder.CreateCondBr(truth, isAnd ? restBlock : decidedBlock,
+                                        isAnd ? decidedBlock : restBlock);
     this->lowering.functionFrame().switchTo(decidedBlock);
     llvm::Value *result = this->lowering.truthLowerer().decidedValue(bin, lhs);
     this->lowering.functionFrame().emitCleanups(0);
-    this->lowering.builder_.CreateRet(result);
+    this->lowering.builder.CreateRet(result);
   } else if (bin->lhs->type->isOptional()) {
     lhs = this->lowering.exprLowerer().emitExpr(bin->lhs);
-    this->lowering.builder_.CreateCondBr(
+    this->lowering.builder.CreateCondBr(
         this->lowering.optionalLowerer().optionalHas(lhs, bin->lhs->type), decidedBlock, restBlock);
     this->lowering.functionFrame().switchTo(decidedBlock);
     llvm::Value *result = bin->type->isOptional()
                               ? lhs
                               : this->lowering.optionalLowerer().optionalValue(lhs, bin->lhs->type);
     this->lowering.functionFrame().emitCleanups(0);
-    this->lowering.builder_.CreateRet(result);
+    this->lowering.builder.CreateRet(result);
   } else {
     this->lowering.stmtLowerer().emitReturnValue(value);
     return;
@@ -321,8 +323,8 @@ void TailCallLowerer::emitTailReturn(Expr *value) {
 }
 
 void TailCallLowerer::emitTailJump(CallExpr *call) {
-  size_t k = size_t(llvm::find(this->lowering.tailGroup_->members, call->func()->decl) -
-                    this->lowering.tailGroup_->members.begin());
+  size_t k = size_t(llvm::find(this->lowering.tailGroup->members, call->func()->decl) -
+                    this->lowering.tailGroup->members.begin());
   std::vector<llvm::Value *> args = this->lowering.exprLowerer().emitExprs(call->args);
   const FuncSymbol *func = call->func();
   for (size_t i = args.size(); i < func->params.size(); ++i) {
@@ -330,9 +332,9 @@ void TailCallLowerer::emitTailJump(CallExpr *call) {
   }
   this->lowering.functionFrame().emitCleanups(0);
   for (size_t i = 0; i < args.size(); ++i) {
-    this->lowering.builder_.CreateStore(args[i], this->lowering.tailGroup_->slots[k][i]);
+    this->lowering.builder.CreateStore(args[i], this->lowering.tailGroup->slots[k][i]);
   }
-  this->lowering.builder_.CreateBr(this->lowering.tailGroup_->starts[k]);
+  this->lowering.builder.CreateBr(this->lowering.tailGroup->starts[k]);
   this->lowering.functionFrame().startDeadBlock();
 }
 

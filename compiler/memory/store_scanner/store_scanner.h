@@ -46,26 +46,32 @@ private:
   void flowInto(unsigned place, const Sources &values);
   void store(const Sources &values);
   std::function<bool(const Expr *)> isSite_;
-  std::map<Key, unsigned> index_;
-  std::vector<std::vector<unsigned>> edges_;
-  llvm::DenseSet<const FunctionDecl *> scanned_;
-  llvm::DenseSet<const Expr *> callee_;
-  const FunctionDecl *current_ = nullptr;
+  std::map<Key, unsigned> index;
+  std::vector<std::vector<unsigned>> edges;
+  llvm::DenseSet<const FunctionDecl *> scanned;
+  llvm::DenseSet<const Expr *> callee;
+  const FunctionDecl *current = nullptr;
 
 public:
   ~StoreScanner();
 
-  StoreStmts &storeStmts() const { return *storeStmtsPart_; }
-  StoreExprs &storeExprs() const { return *storeExprsPart_; }
-  StoreCalls &storeCalls() const { return *storeCallsPart_; }
+  StoreStmts &storeStmts() const {
+    return *this->storeStmtsPart;
+  }
+  StoreExprs &storeExprs() const {
+    return *this->storeExprsPart;
+  }
+  StoreCalls &storeCalls() const {
+    return *this->storeCallsPart;
+  }
 
 private:
   friend class StoreStmts;
   friend class StoreExprs;
   friend class StoreCalls;
-  std::unique_ptr<StoreStmts> storeStmtsPart_;
-  std::unique_ptr<StoreExprs> storeExprsPart_;
-  std::unique_ptr<StoreCalls> storeCallsPart_;
+  std::unique_ptr<StoreStmts> storeStmtsPart;
+  std::unique_ptr<StoreExprs> storeExprsPart;
+  std::unique_ptr<StoreCalls> storeCallsPart;
 };
 
 }

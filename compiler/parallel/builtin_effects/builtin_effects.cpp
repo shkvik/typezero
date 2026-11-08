@@ -1,5 +1,4 @@
 #include "compiler/parallel/builtin_effects/builtin_effects.h"
-#include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
 #include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
@@ -11,6 +10,7 @@
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
 #include "compiler/parallel/parallel_model/parallel_model.h"
 #include "compiler/parallel/pieces/pieces.h"
+#include "compiler/program/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -31,7 +31,8 @@ namespace tz::parallel {
 
 using llvm::dyn_cast_or_null;
 
-BuiltinEffects::BuiltinEffects(Analysis &analysis) : analysis_(analysis) {}
+BuiltinEffects::BuiltinEffects(Analysis &analysis)
+    : analysis(analysis) {}
 
 void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   llvm::SMLoc at = c->loc();
@@ -39,47 +40,47 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   auto arg = [&](size_t i) -> const Expr * { return i < c->args.size() ? c->args[i] : nullptr; };
   auto readArgs = [&] {
     for (const Expr *a : c->args) {
-      analysis_.exprWalk.contents(a, false, at);
+      this->analysis.exprWalk.contents(a, false, at);
     }
   };
   auto field = [&](const Expr *object, llvm::StringRef name, bool write) {
     if (object && ParallelHelpers::holdsReferences(object->type)) {
-      analysis_.codeWalk.touch(LocKind::Field, analysis_.aliasAnalysis.refOf(object),
-                               analysis_.intern(name), write, at);
+      this->analysis.codeWalk.touch(LocKind::Field, this->analysis.aliasAnalysis.refOf(object),
+                                    this->analysis.intern(name), write, at);
     }
   };
   switch (b) {
   case Builtin::ConsoleLog:
   case Builtin::ProcessStdoutWrite:
     readArgs();
-    analysis_.resource(Res::Stdout, true, at);
+    this->analysis.resource(Res::Stdout, true, at);
     return;
   case Builtin::ConsoleError:
   case Builtin::ProcessStderrWrite:
     readArgs();
-    analysis_.resource(Res::Stderr, true, at);
+    this->analysis.resource(Res::Stderr, true, at);
     return;
   case Builtin::ProcessExit:
-    analysis_.resource(Res::Process, true, at);
-    analysis_.resource(Res::Stdout, true, at);
-    analysis_.resource(Res::Stderr, true, at);
+    this->analysis.resource(Res::Process, true, at);
+    this->analysis.resource(Res::Stdout, true, at);
+    this->analysis.resource(Res::Stderr, true, at);
     return;
   case Builtin::ProcessExitCode:
   case Builtin::ProcessEnv:
   case Builtin::EnvMap:
-    analysis_.resource(Res::Process, false, at);
+    this->analysis.resource(Res::Process, false, at);
     return;
   case Builtin::ProcessSetExitCode:
-    analysis_.resource(Res::Process, true, at);
+    this->analysis.resource(Res::Process, true, at);
     return;
   case Builtin::ReadLine:
   case Builtin::RlQuestion:
   case Builtin::RlQuestionCallback:
-    analysis_.resource(Res::Stdin, true, at);
-    analysis_.resource(Res::Stdout, true, at);
+    this->analysis.resource(Res::Stdin, true, at);
+    this->analysis.resource(Res::Stdout, true, at);
     return;
   case Builtin::RlClose:
-    analysis_.resource(Res::Stdin, true, at);
+    this->analysis.resource(Res::Stdin, true, at);
     return;
   case Builtin::StringOf:
   case Builtin::JsonStringify:
@@ -93,26 +94,26 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::ArrShift:
   case Builtin::ArrUnshift:
   case Builtin::ArrSplice:
-    analysis_.exprWalk.elements(recv, true, at);
+    this->analysis.exprWalk.elements(recv, true, at);
     if (recv && ParallelHelpers::holdsReferences(recv->type)) {
-      analysis_.codeWalk.touch(LocKind::Field, analysis_.aliasAnalysis.refOf(recv),
-                               analysis_.length, true, at);
+      this->analysis.codeWalk.touch(LocKind::Field, this->analysis.aliasAnalysis.refOf(recv),
+                                    this->analysis.length, true, at);
     }
     return;
   case Builtin::ArrReverse:
   case Builtin::ArrFill:
   case Builtin::ArrSort:
   case Builtin::ArrSortWith:
-    analysis_.exprWalk.elements(recv, true, at);
+    this->analysis.exprWalk.elements(recv, true, at);
     return;
   case Builtin::ArrJoin:
   case Builtin::ArrToString:
-    analysis_.exprWalk.contents(recv, false, at);
+    this->analysis.exprWalk.contents(recv, false, at);
     return;
   case Builtin::ArrConcat:
-    analysis_.exprWalk.elements(recv, false, at);
+    this->analysis.exprWalk.elements(recv, false, at);
     for (const Expr *a : c->args) {
-      analysis_.exprWalk.elements(a, false, at);
+      this->analysis.exprWalk.elements(a, false, at);
     }
     return;
   case Builtin::ArrAt:
@@ -135,7 +136,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::ArrKeys:
   case Builtin::ArrValues:
   case Builtin::ArrEntries:
-    analysis_.exprWalk.elements(recv, false, at);
+    this->analysis.exprWalk.elements(recv, false, at);
     return;
   case Builtin::ObjectKeys:
   case Builtin::ObjectValues:
@@ -143,12 +144,12 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     if (const Expr *a = arg(0); a && a->type && a->type->nonOptional()->isObject()) {
       field(a, "*", false);
     } else {
-      analysis_.exprWalk.elements(a, false, at);
+      this->analysis.exprWalk.elements(a, false, at);
     }
     return;
   case Builtin::IterNext:
     if (recv) {
-      analysis_.codeWalk.iterate(recv, c);
+      this->analysis.codeWalk.iterate(recv, c);
     }
     return;
   case Builtin::IterFrom:
@@ -156,9 +157,9 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     if (const Expr *a = arg(0);
         a && a->type &&
         (a->type->nonOptional()->isIterator() || a->type->nonOptional()->isAsyncIterator())) {
-      analysis_.codeWalk.iterate(a, c);
+      this->analysis.codeWalk.iterate(a, c);
     } else {
-      analysis_.exprWalk.contents(arg(0), false, at);
+      this->analysis.exprWalk.contents(arg(0), false, at);
     }
     return;
   case Builtin::IterMap:
@@ -173,7 +174,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::IterEvery:
   case Builtin::IterFind:
     if (recv) {
-      analysis_.codeWalk.iterate(recv, c);
+      this->analysis.codeWalk.iterate(recv, c);
     }
     return;
   case Builtin::MapGet:
@@ -185,18 +186,18 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::MapEntries:
   case Builtin::SetValues:
   case Builtin::SetEntries:
-    analysis_.exprWalk.elements(recv, false, at);
+    this->analysis.exprWalk.elements(recv, false, at);
     return;
   case Builtin::MapSet:
   case Builtin::MapDelete:
   case Builtin::MapClear:
   case Builtin::SetAdd:
   case Builtin::RecordSet:
-    analysis_.exprWalk.elements(recv, true, at);
+    this->analysis.exprWalk.elements(recv, true, at);
     return;
   case Builtin::RecordNullishSet:
-    analysis_.exprWalk.elements(recv, false, at);
-    analysis_.exprWalk.elements(recv, true, at);
+    this->analysis.exprWalk.elements(recv, false, at);
+    this->analysis.exprWalk.elements(recv, true, at);
     return;
   case Builtin::SetUnion:
   case Builtin::SetIntersection:
@@ -205,33 +206,33 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::SetIsSubsetOf:
   case Builtin::SetIsSupersetOf:
   case Builtin::SetIsDisjointFrom:
-    analysis_.exprWalk.elements(recv, false, at);
-    analysis_.exprWalk.elements(arg(0), false, at);
+    this->analysis.exprWalk.elements(recv, false, at);
+    this->analysis.exprWalk.elements(arg(0), false, at);
     return;
   case Builtin::DictNew:
   case Builtin::DictGroupBy:
-    analysis_.exprWalk.contents(arg(0), false, at);
+    this->analysis.exprWalk.contents(arg(0), false, at);
     return;
   case Builtin::FsReadFile:
     if (const Expr *a = arg(0); a && a->type && a->type->isInteger()) {
-      analysis_.resource(Res::Stdin, true, at);
+      this->analysis.resource(Res::Stdin, true, at);
     }
-    analysis_.resource(Res::Files, false, at);
+    this->analysis.resource(Res::Files, false, at);
     return;
   case Builtin::FsWriteFile:
     if (const Expr *a = arg(0); a && a->type && a->type->isInteger()) {
-      analysis_.resource(Res::Stdout, true, at);
-      analysis_.resource(Res::Stderr, true, at);
+      this->analysis.resource(Res::Stdout, true, at);
+      this->analysis.resource(Res::Stderr, true, at);
     }
-    analysis_.exprWalk.contents(arg(1), false, at);
-    analysis_.resource(Res::Files, true, at);
+    this->analysis.exprWalk.contents(arg(1), false, at);
+    this->analysis.resource(Res::Files, true, at);
     return;
   case Builtin::FsExists:
   case Builtin::FsAccess:
   case Builtin::FsStat:
   case Builtin::FsReaddir:
   case Builtin::FsRealpath:
-    analysis_.resource(Res::Files, false, at);
+    this->analysis.resource(Res::Files, false, at);
     return;
   case Builtin::FsChmod:
   case Builtin::FsTruncate:
@@ -243,7 +244,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::FsRename:
   case Builtin::FsReplace:
   case Builtin::FsCopyFile:
-    analysis_.resource(Res::Files, true, at);
+    this->analysis.resource(Res::Files, true, at);
     return;
   case Builtin::RegExpTest:
   case Builtin::RegExpExec:
@@ -282,7 +283,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::BytesFromBytes:
   case Builtin::BytesOf:
   case Builtin::BufferConcat:
-    analysis_.exprWalk.contents(arg(0), false, at);
+    this->analysis.exprWalk.contents(arg(0), false, at);
     return;
   case Builtin::BytesAt:
   case Builtin::BytesIndexOf:
@@ -300,14 +301,14 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::BufferToJSON:
   case Builtin::BufferEquals:
   case Builtin::BufferCompareTo:
-    analysis_.exprWalk.elements(recv, false, at);
+    this->analysis.exprWalk.elements(recv, false, at);
     for (const Expr *a : c->args) {
-      analysis_.exprWalk.elements(a, false, at);
+      this->analysis.exprWalk.elements(a, false, at);
     }
     return;
   case Builtin::BufferCompare:
-    analysis_.exprWalk.elements(arg(0), false, at);
-    analysis_.exprWalk.elements(arg(1), false, at);
+    this->analysis.exprWalk.elements(arg(0), false, at);
+    this->analysis.exprWalk.elements(arg(1), false, at);
     return;
   case Builtin::BytesReverse:
   case Builtin::BytesSort:
@@ -319,34 +320,34 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::BufferWriteNumber:
   case Builtin::BufferWriteVar:
   case Builtin::BufferSwap:
-    analysis_.exprWalk.elements(recv, true, at);
+    this->analysis.exprWalk.elements(recv, true, at);
     return;
   case Builtin::BytesSet:
-    analysis_.exprWalk.elements(recv, true, at);
-    analysis_.exprWalk.contents(arg(0), false, at);
+    this->analysis.exprWalk.elements(recv, true, at);
+    this->analysis.exprWalk.contents(arg(0), false, at);
     return;
   case Builtin::BufferCopy:
-    analysis_.exprWalk.elements(recv, false, at);
-    analysis_.exprWalk.elements(arg(0), true, at);
+    this->analysis.exprWalk.elements(recv, false, at);
+    this->analysis.exprWalk.elements(arg(0), true, at);
     return;
   case Builtin::TextEncodeInto:
-    analysis_.exprWalk.elements(arg(1), true, at);
+    this->analysis.exprWalk.elements(arg(1), true, at);
     return;
   case Builtin::TextDecode:
-    analysis_.exprWalk.elements(arg(0), false, at);
+    this->analysis.exprWalk.elements(arg(0), false, at);
     return;
   case Builtin::MetaDefine:
   case Builtin::MetaDelete:
-    analysis_.resource(Res::Metadata, true, at);
+    this->analysis.resource(Res::Metadata, true, at);
     return;
   case Builtin::ChildSpawnSync:
   case Builtin::ChildExecFileSync:
   case Builtin::ChildExecSync:
     readArgs();
-    analysis_.resource(Res::Files, true, at);
-    analysis_.resource(Res::Stdout, true, at);
-    analysis_.resource(Res::Stderr, true, at);
-    analysis_.resource(Res::Process, false, at);
+    this->analysis.resource(Res::Files, true, at);
+    this->analysis.resource(Res::Stdout, true, at);
+    this->analysis.resource(Res::Stderr, true, at);
+    this->analysis.resource(Res::Process, false, at);
     return;
   case Builtin::Crypto: {
     auto *number = dyn_cast_or_null<IntLitExpr>(ParallelHelpers::strip(arg(0)));
@@ -366,14 +367,14 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
       }
       bool bytes = a->type->nonOptional()->isBytes();
       if (kind == 'o' && bytes) {
-        analysis_.exprWalk.elements(a, fills, at);
+        this->analysis.exprWalk.elements(a, fills, at);
       } else if (kind == 'o') {
-        analysis_.codeWalk.touch(LocKind::Field, analysis_.aliasAnalysis.refOf(a), analysis_.state,
-                                 true, at);
+        this->analysis.codeWalk.touch(LocKind::Field, this->analysis.aliasAnalysis.refOf(a),
+                                      this->analysis.state, true, at);
       } else if (bytes) {
-        analysis_.exprWalk.elements(a, false, at);
+        this->analysis.exprWalk.elements(a, false, at);
       } else {
-        analysis_.exprWalk.contents(a, false, at);
+        this->analysis.exprWalk.contents(a, false, at);
       }
     }
     return;
@@ -384,15 +385,15 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     return;
   case Builtin::ReflectGet:
     if (const Expr *a = arg(0); a && ParallelHelpers::holdsReferences(a->type)) {
-      analysis_.codeWalk.touch(LocKind::Field, analysis_.aliasAnalysis.refOf(a), analysis_.star,
-                               false, at);
+      this->analysis.codeWalk.touch(LocKind::Field, this->analysis.aliasAnalysis.refOf(a),
+                                    this->analysis.star, false, at);
     }
     return;
   case Builtin::ReflectApply: {
     for (size_t i = 2; i < c->args.size(); ++i) {
-      analysis_.exprWalk.elements(c->args[i], false, at);
+      this->analysis.exprWalk.elements(c->args[i], false, at);
     }
-    CallRec &rec = analysis_.codeWalk.record(c, CallKind::Call, {}, at);
+    CallRec &rec = this->analysis.codeWalk.record(c, CallKind::Call, {}, at);
     rec.call = c;
     const Expr *fn = ParallelHelpers::strip(arg(0));
     if (fn && fn->type && fn->type->nonOptional()->isFunction()) {
@@ -402,7 +403,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     rec.reflect = CallRec::Reflect::Apply;
     const Expr *self = ParallelHelpers::strip(arg(1));
     rec.bySelf =
-        self ? std::optional<Ref>(analysis_.aliasAnalysis.receiverRef(self)) : std::nullopt;
+        self ? std::optional<Ref>(this->analysis.aliasAnalysis.receiverRef(self)) : std::nullopt;
     rec.byObject = self ? self->type : nullptr;
     rec.noSelf = self && self->type && self->type->isUndefined();
     if (auto *name = dyn_cast_or_null<NameExpr>(fn); name && name->var()) {
@@ -413,9 +414,9 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::ReflectConstruct:
   case Builtin::ReflectFill: {
     for (size_t i = 1; i < c->args.size(); ++i) {
-      analysis_.exprWalk.contents(c->args[i], false, at);
+      this->analysis.exprWalk.contents(c->args[i], false, at);
     }
-    CallRec &rec = analysis_.codeWalk.record(c, CallKind::Call, {}, at);
+    CallRec &rec = this->analysis.codeWalk.record(c, CallKind::Call, {}, at);
     rec.call = c;
     rec.reflect = CallRec::Reflect::Construct;
     return;
@@ -424,7 +425,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::MetaGetOwn:
   case Builtin::MetaHas:
   case Builtin::MetaHasOwn:
-    analysis_.resource(Res::Metadata, false, at);
+    this->analysis.resource(Res::Metadata, false, at);
     return;
   default:
     break;
@@ -432,11 +433,11 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   if (ParallelHelpers::knownBuiltin(b)) {
     return;
   }
-  analysis_.exprWalk.contents(recv, true, at);
+  this->analysis.exprWalk.contents(recv, true, at);
   for (const Expr *a : c->args) {
-    analysis_.exprWalk.contents(a, true, at);
+    this->analysis.exprWalk.contents(a, true, at);
   }
-  analysis_.resource(Res::Runtime, true, at);
+  this->analysis.resource(Res::Runtime, true, at);
 }
 
 }

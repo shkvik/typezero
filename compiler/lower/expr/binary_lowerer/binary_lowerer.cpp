@@ -1,11 +1,11 @@
 #include "compiler/lower/expr/binary_lowerer/binary_lowerer.h"
-#include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
-#include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
 #include "compiler/lower/expr/equality_lowerer/equality_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/expr/truth_lowerer/truth_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
+#include "compiler/lower/library/decimal/decimal_lowerer/decimal_lowerer.h"
+#include "compiler/lower/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/types/union_member_lowerer/union_member_lowerer.h"
 #include "compiler/lower/values/number_lowerer/number_lowerer.h"
@@ -72,7 +72,7 @@ llvm::Value *BinaryLowerer::emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::
   bool isFloat = type->isFloat();
   bool bitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor ||
                  op == BinaryOp::Shl || op == BinaryOp::Shr || op == BinaryOp::UShr;
-  llvm::IRBuilder<> &b = this->lowering.builder_;
+  llvm::IRBuilder<> &b = this->lowering.builder;
   std::optional<llvm::IRBuilder<>::FastMathFlagGuard> finite;
   if (isFloat && proven) {
     finite.emplace(b);
@@ -92,47 +92,47 @@ llvm::Value *BinaryLowerer::emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::
   }
   switch (op) {
   case BinaryOp::Add:
-    return isFloat ? this->lowering.builder_.CreateFAdd(lhs, rhs)
-                   : this->lowering.builder_.CreateAdd(lhs, rhs);
+    return isFloat ? this->lowering.builder.CreateFAdd(lhs, rhs)
+                   : this->lowering.builder.CreateAdd(lhs, rhs);
   case BinaryOp::Sub:
-    return isFloat ? this->lowering.builder_.CreateFSub(lhs, rhs)
-                   : this->lowering.builder_.CreateSub(lhs, rhs);
+    return isFloat ? this->lowering.builder.CreateFSub(lhs, rhs)
+                   : this->lowering.builder.CreateSub(lhs, rhs);
   case BinaryOp::Mul:
-    return isFloat ? this->lowering.builder_.CreateFMul(lhs, rhs)
-                   : this->lowering.builder_.CreateMul(lhs, rhs);
+    return isFloat ? this->lowering.builder.CreateFMul(lhs, rhs)
+                   : this->lowering.builder.CreateMul(lhs, rhs);
   case BinaryOp::Div:
-    return isFloat ? this->lowering.builder_.CreateFDiv(lhs, rhs)
+    return isFloat ? this->lowering.builder.CreateFDiv(lhs, rhs)
                    : this->emitIntDivRem(op, lhs, rhs, type, proven);
   case BinaryOp::Rem:
-    return isFloat ? this->lowering.builder_.CreateFRem(lhs, rhs)
+    return isFloat ? this->lowering.builder.CreateFRem(lhs, rhs)
                    : this->emitIntDivRem(op, lhs, rhs, type, proven);
   case BinaryOp::Pow: {
     if (isFloat) {
-      return this->lowering.builder_.CreateCall(this->lowering.rt_.mathPow, {lhs, rhs});
+      return this->lowering.builder.CreateCall(this->lowering.rt_.mathPow, {lhs, rhs});
     }
-    llvm::Value *result = this->lowering.builder_.CreateCall(
+    llvm::Value *result = this->lowering.builder.CreateCall(
         this->lowering.rt_.mathPowLong, {this->lowering.numberLowerer().toI64(lhs, type),
                                          this->lowering.numberLowerer().toI64(rhs, type)});
-    return this->lowering.builder_.CreateTrunc(result, lhs->getType());
+    return this->lowering.builder.CreateTrunc(result, lhs->getType());
   }
   case BinaryOp::BitAnd:
-    return this->lowering.builder_.CreateAnd(lhs, rhs);
+    return this->lowering.builder.CreateAnd(lhs, rhs);
   case BinaryOp::BitOr:
-    return this->lowering.builder_.CreateOr(lhs, rhs);
+    return this->lowering.builder.CreateOr(lhs, rhs);
   case BinaryOp::BitXor:
-    return this->lowering.builder_.CreateXor(lhs, rhs);
+    return this->lowering.builder.CreateXor(lhs, rhs);
   case BinaryOp::Shl:
   case BinaryOp::Shr:
   case BinaryOp::UShr: {
     llvm::Value *mask = llvm::ConstantInt::get(lhs->getType(), type->bitWidth() - 1);
-    llvm::Value *count = this->lowering.builder_.CreateAnd(rhs, mask);
+    llvm::Value *count = this->lowering.builder.CreateAnd(rhs, mask);
     if (op == BinaryOp::Shl) {
-      return this->lowering.builder_.CreateShl(lhs, count);
+      return this->lowering.builder.CreateShl(lhs, count);
     }
     if (op == BinaryOp::Shr && !type->isUnsigned()) {
-      return this->lowering.builder_.CreateAShr(lhs, count);
+      return this->lowering.builder.CreateAShr(lhs, count);
     }
-    return this->lowering.builder_.CreateLShr(lhs, count);
+    return this->lowering.builder.CreateLShr(lhs, count);
   }
   default:
     break;
@@ -145,17 +145,17 @@ llvm::Value *BinaryLowerer::emitComparison(BinaryOp op, llvm::Value *lhs, llvm::
   if (type->isFloat()) {
     switch (op) {
     case BinaryOp::Lt:
-      return this->lowering.builder_.CreateFCmpOLT(lhs, rhs);
+      return this->lowering.builder.CreateFCmpOLT(lhs, rhs);
     case BinaryOp::Le:
-      return this->lowering.builder_.CreateFCmpOLE(lhs, rhs);
+      return this->lowering.builder.CreateFCmpOLE(lhs, rhs);
     case BinaryOp::Gt:
-      return this->lowering.builder_.CreateFCmpOGT(lhs, rhs);
+      return this->lowering.builder.CreateFCmpOGT(lhs, rhs);
     case BinaryOp::Ge:
-      return this->lowering.builder_.CreateFCmpOGE(lhs, rhs);
+      return this->lowering.builder.CreateFCmpOGE(lhs, rhs);
     case BinaryOp::Eq:
-      return this->lowering.builder_.CreateFCmpOEQ(lhs, rhs);
+      return this->lowering.builder.CreateFCmpOEQ(lhs, rhs);
     case BinaryOp::Ne:
-      return this->lowering.builder_.CreateFCmpUNE(lhs, rhs);
+      return this->lowering.builder.CreateFCmpUNE(lhs, rhs);
     default:
       break;
     }
@@ -163,21 +163,21 @@ llvm::Value *BinaryLowerer::emitComparison(BinaryOp op, llvm::Value *lhs, llvm::
     bool u = type->isInteger() && type->isUnsigned();
     switch (op) {
     case BinaryOp::Lt:
-      return u ? this->lowering.builder_.CreateICmpULT(lhs, rhs)
-               : this->lowering.builder_.CreateICmpSLT(lhs, rhs);
+      return u ? this->lowering.builder.CreateICmpULT(lhs, rhs)
+               : this->lowering.builder.CreateICmpSLT(lhs, rhs);
     case BinaryOp::Le:
-      return u ? this->lowering.builder_.CreateICmpULE(lhs, rhs)
-               : this->lowering.builder_.CreateICmpSLE(lhs, rhs);
+      return u ? this->lowering.builder.CreateICmpULE(lhs, rhs)
+               : this->lowering.builder.CreateICmpSLE(lhs, rhs);
     case BinaryOp::Gt:
-      return u ? this->lowering.builder_.CreateICmpUGT(lhs, rhs)
-               : this->lowering.builder_.CreateICmpSGT(lhs, rhs);
+      return u ? this->lowering.builder.CreateICmpUGT(lhs, rhs)
+               : this->lowering.builder.CreateICmpSGT(lhs, rhs);
     case BinaryOp::Ge:
-      return u ? this->lowering.builder_.CreateICmpUGE(lhs, rhs)
-               : this->lowering.builder_.CreateICmpSGE(lhs, rhs);
+      return u ? this->lowering.builder.CreateICmpUGE(lhs, rhs)
+               : this->lowering.builder.CreateICmpSGE(lhs, rhs);
     case BinaryOp::Eq:
-      return this->lowering.builder_.CreateICmpEQ(lhs, rhs);
+      return this->lowering.builder.CreateICmpEQ(lhs, rhs);
     case BinaryOp::Ne:
-      return this->lowering.builder_.CreateICmpNE(lhs, rhs);
+      return this->lowering.builder.CreateICmpNE(lhs, rhs);
     default:
       break;
     }
@@ -187,7 +187,7 @@ llvm::Value *BinaryLowerer::emitComparison(BinaryOp op, llvm::Value *lhs, llvm::
 
 llvm::Value *BinaryLowerer::emitMixedComparison(BinaryOp op, llvm::Value *lhs, llvm::Value *rhs,
                                                 const Type *l, const Type *r) {
-  llvm::IRBuilder<> &b = this->lowering.builder_;
+  llvm::IRBuilder<> &b = this->lowering.builder;
   llvm::Type *wide = b.getIntNTy(65);
   lhs = l->isUnsigned() ? b.CreateZExt(lhs, wide) : b.CreateSExt(lhs, wide);
   rhs = r->isUnsigned() ? b.CreateZExt(rhs, wide) : b.CreateSExt(rhs, wide);
@@ -201,38 +201,38 @@ llvm::Value *BinaryLowerer::emitIntDivRem(BinaryOp op, llvm::Value *lhs, llvm::V
   bool u = type->isUnsigned();
   auto *known = dyn_cast<llvm::ConstantInt>(rhs);
   if (proven || (known && !known->isZero() && (u || !known->isMinusOne()))) {
-    return u       ? (isRem ? this->lowering.builder_.CreateURem(lhs, rhs)
-                            : this->lowering.builder_.CreateUDiv(lhs, rhs))
-           : isRem ? this->lowering.builder_.CreateSRem(lhs, rhs)
-                   : this->lowering.builder_.CreateSDiv(lhs, rhs);
+    return u       ? (isRem ? this->lowering.builder.CreateURem(lhs, rhs)
+                            : this->lowering.builder.CreateUDiv(lhs, rhs))
+           : isRem ? this->lowering.builder.CreateSRem(lhs, rhs)
+                   : this->lowering.builder.CreateSDiv(lhs, rhs);
   }
 
   llvm::Type *width = lhs->getType();
-  llvm::Value *isZero = this->lowering.builder_.CreateICmpEQ(rhs, llvm::ConstantInt::get(width, 0));
+  llvm::Value *isZero = this->lowering.builder.CreateICmpEQ(rhs, llvm::ConstantInt::get(width, 0));
   llvm::BasicBlock *throwBlock = this->lowering.functionFrame().newBlock("div.zero");
   llvm::BasicBlock *okBlock = this->lowering.functionFrame().newBlock("div.ok");
-  this->lowering.builder_.CreateCondBr(
+  this->lowering.builder.CreateCondBr(
       isZero, throwBlock, okBlock,
-      llvm::MDBuilder(this->lowering.ctx_).createUnlikelyBranchWeights());
+      llvm::MDBuilder(this->lowering.ctx).createUnlikelyBranchWeights());
   this->lowering.functionFrame().switchTo(throwBlock);
   this->lowering.processLowerer().emitPanic("Division by zero");
 
   this->lowering.functionFrame().switchTo(okBlock);
   if (u) {
-    return isRem ? this->lowering.builder_.CreateURem(lhs, rhs)
-                 : this->lowering.builder_.CreateUDiv(lhs, rhs);
+    return isRem ? this->lowering.builder.CreateURem(lhs, rhs)
+                 : this->lowering.builder.CreateUDiv(lhs, rhs);
   }
   llvm::Value *isMinusOne =
-      this->lowering.builder_.CreateICmpEQ(rhs, llvm::ConstantInt::getSigned(width, -1));
+      this->lowering.builder.CreateICmpEQ(rhs, llvm::ConstantInt::getSigned(width, -1));
   llvm::Value *divisor =
-      this->lowering.builder_.CreateSelect(isMinusOne, llvm::ConstantInt::get(width, 1), rhs);
+      this->lowering.builder.CreateSelect(isMinusOne, llvm::ConstantInt::get(width, 1), rhs);
   if (isRem) {
-    return this->lowering.builder_.CreateSRem(lhs, divisor);
+    return this->lowering.builder.CreateSRem(lhs, divisor);
   }
-  llvm::Value *quotient = this->lowering.builder_.CreateSDiv(lhs, divisor);
+  llvm::Value *quotient = this->lowering.builder.CreateSDiv(lhs, divisor);
 
-  return this->lowering.builder_.CreateSelect(isMinusOne, this->lowering.builder_.CreateNeg(lhs),
-                                              quotient);
+  return this->lowering.builder.CreateSelect(isMinusOne, this->lowering.builder.CreateNeg(lhs),
+                                             quotient);
 }
 
 }

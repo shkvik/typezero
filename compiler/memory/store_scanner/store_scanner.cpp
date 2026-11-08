@@ -37,18 +37,18 @@ void StoreScanner::forEachOverride(const FunctionDecl *fn,
 }
 
 StoreScanner::StoreScanner(std::function<bool(const Expr *)> site) : isSite_(std::move(site)) {
-  storeStmtsPart_ = std::make_unique<StoreStmts>(*this);
-  storeExprsPart_ = std::make_unique<StoreExprs>(*this);
-  storeCallsPart_ = std::make_unique<StoreCalls>(*this);
+  this->storeStmtsPart = std::make_unique<StoreStmts>(*this);
+  this->storeExprsPart = std::make_unique<StoreExprs>(*this);
+  this->storeCallsPart = std::make_unique<StoreCalls>(*this);
   node(Key{Kind::Stored, nullptr});
 }
 
 void StoreScanner::function(const FunctionDecl *fn) {
-  if (!fn || !scanned_.insert(fn).second) {
+  if (!fn || !this->scanned.insert(fn).second) {
     return;
   }
-  const FunctionDecl *saved = current_;
-  current_ = fn;
+  const FunctionDecl *saved = this->current;
+  this->current = fn;
   for (const Param &param : fn->params) {
     if (param.defaultValue()) {
       flowInto(var(param.sym), storeExprs().expr(param.defaultValue()));
@@ -58,11 +58,11 @@ void StoreScanner::function(const FunctionDecl *fn) {
     flowInto(var(fn->params.back().sym), {});
   }
   storeStmts().stmt(fn->body);
-  current_ = saved;
+  this->current = saved;
 }
 
 void StoreScanner::topLevel(const Stmt *s) {
-  current_ = nullptr;
+  this->current = nullptr;
   storeStmts().stmt(s);
 }
 
@@ -73,13 +73,13 @@ void StoreScanner::escapes(const FunctionDecl *fn) {
 }
 
 llvm::DenseSet<const Expr *> StoreScanner::unstored() {
-  std::vector<bool> reached(edges_.size(), false);
+  std::vector<bool> reached(this->edges.size(), false);
   std::vector<unsigned> work{0};
   reached[0] = true;
   while (!work.empty()) {
     unsigned n = work.back();
     work.pop_back();
-    for (unsigned m : edges_[n]) {
+    for (unsigned m : this->edges[n]) {
       if (!reached[m]) {
         reached[m] = true;
         work.push_back(m);
@@ -87,7 +87,7 @@ llvm::DenseSet<const Expr *> StoreScanner::unstored() {
     }
   }
   llvm::DenseSet<const Expr *> result;
-  for (const auto &[key, n] : index_) {
+  for (const auto &[key, n] : this->index) {
     if (key.kind == Kind::Site && !reached[n]) {
       result.insert(static_cast<const Expr *>(key.ptr));
     }
@@ -97,9 +97,9 @@ llvm::DenseSet<const Expr *> StoreScanner::unstored() {
 }
 
 unsigned StoreScanner::node(Key key) {
-  auto [it, inserted] = index_.try_emplace(key, unsigned(edges_.size()));
+  auto [it, inserted] = this->index.try_emplace(key, unsigned(this->edges.size()));
   if (inserted) {
-    edges_.emplace_back();
+    this->edges.emplace_back();
   }
 
   return it->second;
@@ -120,7 +120,7 @@ unsigned StoreScanner::result(const FunctionDecl *fn) { return node({Kind::Resul
 
 void StoreScanner::edge(unsigned from, unsigned to) {
   if (from != to) {
-    edges_[from].push_back(to);
+    this->edges[from].push_back(to);
   }
 }
 

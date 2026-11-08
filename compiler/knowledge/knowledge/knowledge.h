@@ -121,14 +121,14 @@ private:
   static unsigned size(const SourcePlace &place);
   void index() const;
 
-  mutable size_t indexed_ = 0;
-  mutable std::vector<std::string> moduleKeys_;
-  mutable std::vector<size_t> counts_;
-  mutable std::vector<std::vector<size_t>> to_;
-  mutable std::vector<std::vector<size_t>> from_;
-  mutable std::vector<std::vector<size_t>> children_;
-  mutable std::vector<std::vector<size_t>> byModule_;
-  mutable std::vector<std::vector<size_t>> importers_;
+  mutable size_t indexed = 0;
+  mutable std::vector<std::string> moduleKeys;
+  mutable std::vector<size_t> counts;
+  mutable std::vector<std::vector<size_t>> to;
+  mutable std::vector<std::vector<size_t>> from;
+  mutable std::vector<std::vector<size_t>> children;
+  mutable std::vector<std::vector<size_t>> byModule;
+  mutable std::vector<std::vector<size_t>> importers;
 };
 
 }

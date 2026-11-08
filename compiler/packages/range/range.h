@@ -27,7 +27,7 @@ private:
   static bool parseSet(llvm::StringRef text, Set &out, std::string &error);
   static bool test(const Set &set, const Version &version);
 
-  std::vector<Set> sets_;
+  std::vector<Set> sets;
   std::string text_;
 };
 

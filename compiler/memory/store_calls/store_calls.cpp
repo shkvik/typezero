@@ -12,24 +12,25 @@ using llvm::isa;
 
 namespace tz {
 
-StoreCalls::StoreCalls(StoreScanner &scanner) : scanner_(scanner) {}
+StoreCalls::StoreCalls(StoreScanner &scanner)
+    : scanner(scanner) {}
 
 StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
-  scanner_.callee_.insert(c->callee);
+  this->scanner.callee.insert(c->callee);
   auto *member = llvm::dyn_cast<MemberExpr>(c->callee);
   StoreScanner::Sources receiver;
   if (member) {
-    receiver = scanner_.storeExprs().expr(member->object);
+    receiver = this->scanner.storeExprs().expr(member->object);
   } else if (c->builtin() == Builtin::None && !c->func()) {
-    scanner_.storeExprs().expr(c->callee);
+    this->scanner.storeExprs().expr(c->callee);
   }
   std::vector<StoreScanner::Sources> args;
   for (const Expr *arg : c->args) {
-    args.push_back(scanner_.storeExprs().expr(arg));
+    args.push_back(this->scanner.storeExprs().expr(arg));
   }
   for (size_t i = 0; i < c->args.size(); ++i) {
     if (c->spreads(i)) {
-      scanner_.store(args[i]);
+      this->scanner.store(args[i]);
     }
   }
   StoreScanner::Sources out;
@@ -38,17 +39,17 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
   }
   auto methodCall = [&](const FunctionDecl *fn, bool virtualCall) {
     auto one = [&](const FunctionDecl *m) {
-      scanner_.storeStmts().bindArgs(m, args);
+      this->scanner.storeStmts().bindArgs(m, args);
       if (m->thisVar()) {
-        scanner_.flowInto(scanner_.var(m->thisVar()), receiver);
+        this->scanner.flowInto(this->scanner.var(m->thisVar()), receiver);
       } else {
-        scanner_.store(receiver);
+        this->scanner.store(receiver);
       }
-      out.push_back(scanner_.result(m));
+      out.push_back(this->scanner.result(m));
     };
     if (fn->impl()) {
-      scanner_.store(receiver);
-      scanner_.storeStmts().bindArgs(nullptr, args);
+      this->scanner.store(receiver);
+      this->scanner.storeStmts().bindArgs(nullptr, args);
       return;
     }
     if (virtualCall) {
@@ -59,27 +60,28 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
   };
   if (c->superCall() && !member) {
     const FunctionDecl *ctor = c->method() ? c->method()->decl : nullptr;
-    scanner_.storeStmts().bindArgs(ctor, args);
+    this->scanner.storeStmts().bindArgs(ctor, args);
     StoreScanner::Sources self =
-        scanner_.current_ && scanner_.current_->thisVar()
-            ? StoreScanner::Sources{scanner_.var(scanner_.current_->thisVar())}
+        this->scanner.current && this->scanner.current->thisVar()
+            ? StoreScanner::Sources{this->scanner.var(this->scanner.current->thisVar())}
             : StoreScanner::Sources{};
-    for (const ClassDecl *cls = scanner_.current_ && scanner_.current_->cls()
-                                    ? scanner_.current_->cls()->parent
+    for (const ClassDecl *cls = this->scanner.current && this->scanner.current->cls()
+                                    ? this->scanner.current->cls()->parent
                                     : nullptr;
          cls; cls = cls->parent) {
       if (cls->init && cls->init->thisVar()) {
-        scanner_.flowInto(scanner_.var(cls->init->thisVar()), self);
+        this->scanner.flowInto(this->scanner.var(cls->init->thisVar()), self);
       }
       for (const FunctionDecl *k : cls->constructors) {
         if (k->thisVar()) {
-          scanner_.flowInto(scanner_.var(k->thisVar()), self);
+          this->scanner.flowInto(this->scanner.var(k->thisVar()), self);
         }
       }
     }
-    if (scanner_.current_ && scanner_.current_->cls() && scanner_.current_->cls()->init &&
-        scanner_.current_->cls()->init->thisVar()) {
-      scanner_.flowInto(scanner_.var(scanner_.current_->cls()->init->thisVar()), self);
+    if (this->scanner.current && this->scanner.current->cls() &&
+        this->scanner.current->cls()->init && this->scanner.current->cls()->init->thisVar()) {
+      this->scanner.flowInto(this->scanner.var(this->scanner.current->cls()->init->thisVar()),
+                             self);
     }
     return out;
   }
@@ -92,18 +94,18 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
       if (m.method) {
         methodCall(m.method->decl, m.virtualCall);
       } else {
-        scanner_.storeStmts().bindArgs(nullptr, args);
+        this->scanner.storeStmts().bindArgs(nullptr, args);
       }
     }
     return out;
   }
   if (c->func()) {
-    scanner_.storeStmts().bindArgs(c->func()->decl, args);
-    out.push_back(scanner_.result(c->func()->decl));
+    this->scanner.storeStmts().bindArgs(c->func()->decl, args);
+    out.push_back(this->scanner.result(c->func()->decl));
     return out;
   }
-  scanner_.store(receiver);
-  scanner_.storeStmts().bindArgs(nullptr, args);
+  this->scanner.store(receiver);
+  this->scanner.storeStmts().bindArgs(nullptr, args);
 
   return out;
 }
@@ -111,8 +113,8 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
 StoreScanner::Sources StoreCalls::builtin(const CallExpr *c, const StoreScanner::Sources &receiver,
                                           const std::vector<StoreScanner::Sources> &args) {
   StoreScanner::Sources out;
-  if (scanner_.isSite_(c)) {
-    out.push_back(scanner_.node({StoreScanner::Kind::Site, c}));
+  if (this->scanner.isSite_(c)) {
+    out.push_back(this->scanner.node({StoreScanner::Kind::Site, c}));
   }
   for (const Expr *arg : c->args) {
     if (!arg->type || !arg->type->nonOptional()->isFunction()) {
@@ -120,9 +122,9 @@ StoreScanner::Sources StoreCalls::builtin(const CallExpr *c, const StoreScanner:
     }
     auto *fe = llvm::dyn_cast<FunctionExpr>(arg);
     if (!fe) {
-      scanner_.store(receiver);
+      this->scanner.store(receiver);
     } else if (fe->fn->params.size() >= 3 && fe->fn->params[2].sym) {
-      scanner_.flowInto(scanner_.var(fe->fn->params[2].sym), receiver);
+      this->scanner.flowInto(this->scanner.var(fe->fn->params[2].sym), receiver);
     }
   }
   switch (c->builtin()) {
@@ -176,7 +178,7 @@ StoreScanner::Sources StoreCalls::builtin(const CallExpr *c, const StoreScanner:
     case Builtin::RecordSet:
     case Builtin::RecordNullishSet:
       for (const StoreScanner::Sources &a : args) {
-        scanner_.store(a);
+        this->scanner.store(a);
       }
       if (c->builtin() == Builtin::MapSet || c->builtin() == Builtin::SetAdd) {
         out.insert(out.end(), receiver.begin(), receiver.end());
@@ -186,14 +188,14 @@ StoreScanner::Sources StoreCalls::builtin(const CallExpr *c, const StoreScanner:
     case Builtin::ArrFlatMap:
       for (const Expr *arg : c->args) {
         if (auto *fe = llvm::dyn_cast<FunctionExpr>(arg)) {
-          scanner_.edge(scanner_.stored(), scanner_.result(fe->fn));
+          this->scanner.edge(this->scanner.stored(), this->scanner.result(fe->fn));
         }
       }
       break;
     default:
-      scanner_.store(receiver);
+      this->scanner.store(receiver);
       for (const StoreScanner::Sources &a : args) {
-        scanner_.store(a);
+        this->scanner.store(a);
       }
       break;
   }

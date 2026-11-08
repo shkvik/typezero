@@ -73,56 +73,56 @@ std::string Knowledge::where(const SourcePlace &place) const {
 }
 
 void Knowledge::index() const {
-  if (indexed_ == symbols.size() + references.size() + modules.size() + 1) {
+  if (this->indexed == symbols.size() + references.size() + modules.size() + 1) {
     return;
   }
-  to_.assign(symbols.size(), {});
-  from_.assign(symbols.size(), {});
-  children_.assign(symbols.size(), {});
-  byModule_.assign(modules.size(), {});
-  importers_.assign(modules.size(), {});
-  counts_.assign(symbols.size(), 0);
+  this->to.assign(symbols.size(), {});
+  this->from.assign(symbols.size(), {});
+  this->children.assign(symbols.size(), {});
+  this->byModule.assign(modules.size(), {});
+  this->importers.assign(modules.size(), {});
+  this->counts.assign(symbols.size(), 0);
   for (size_t i = 0; i < references.size(); ++i) {
-    to_[references[i].symbol].push_back(i);
-    ++counts_[references[i].symbol];
+    this->to[references[i].symbol].push_back(i);
+    ++this->counts[references[i].symbol];
     if (references[i].from != kNone) {
-      from_[references[i].from].push_back(i);
+      this->from[references[i].from].push_back(i);
     }
   }
   for (size_t i = 0; i < symbols.size(); ++i) {
     if (symbols[i].parent != kNone) {
-      children_[symbols[i].parent].push_back(i);
+      this->children[symbols[i].parent].push_back(i);
     }
     if (symbols[i].module < modules.size()) {
-      byModule_[symbols[i].module].push_back(i);
+      this->byModule[symbols[i].module].push_back(i);
     }
   }
   for (size_t m = 0; m < modules.size(); ++m) {
     for (size_t imported : modules[m].imports) {
       if (imported < modules.size()) {
-        importers_[imported].push_back(m);
+        this->importers[imported].push_back(m);
       }
     }
   }
-  indexed_ = symbols.size() + references.size() + modules.size() + 1;
+  this->indexed = symbols.size() + references.size() + modules.size() + 1;
 }
 
 std::vector<size_t> Knowledge::referencesTo(size_t symbol) const {
   index();
 
-  return to_[symbol];
+  return this->to[symbol];
 }
 
 std::vector<size_t> Knowledge::referencesFrom(size_t symbol) const {
   index();
 
-  return from_[symbol];
+  return this->from[symbol];
 }
 
 const std::vector<size_t> &Knowledge::symbolsOf(size_t module) const {
   index();
 
-  return byModule_[module];
+  return this->byModule[module];
 }
 
 std::vector<size_t> Knowledge::usersOf(size_t symbol) const {
@@ -154,19 +154,19 @@ std::vector<size_t> Knowledge::usesOf(size_t symbol) const {
 std::vector<size_t> Knowledge::members(size_t symbol) const {
   index();
 
-  return children_[symbol];
+  return this->children[symbol];
 }
 
 size_t Knowledge::useCount(size_t symbol) const {
   index();
 
-  return counts_[symbol];
+  return this->counts[symbol];
 }
 
 std::vector<size_t> Knowledge::importersOf(size_t module) const {
   index();
 
-  return importers_[module];
+  return this->importers[module];
 }
 
 std::vector<size_t> Knowledge::named(llvm::StringRef name) const {
@@ -184,15 +184,15 @@ std::vector<size_t> Knowledge::named(llvm::StringRef name) const {
 }
 
 std::optional<size_t> Knowledge::moduleAt(llvm::StringRef path) const {
-  if (moduleKeys_.size() != modules.size()) {
-    moduleKeys_.clear();
+  if (this->moduleKeys.size() != modules.size()) {
+    this->moduleKeys.clear();
     for (const KnownModule &module : modules) {
-      moduleKeys_.push_back(module.library ? std::string() : SourceOverlay::key(module.path));
+      this->moduleKeys.push_back(module.library ? std::string() : SourceOverlay::key(module.path));
     }
   }
   std::string key = SourceOverlay::key(path);
   for (size_t i = 0; i < modules.size(); ++i) {
-    if (!modules[i].library && moduleKeys_[i] == key) {
+    if (!modules[i].library && this->moduleKeys[i] == key) {
       return i;
     }
   }

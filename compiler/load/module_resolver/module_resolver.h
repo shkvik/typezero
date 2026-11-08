@@ -17,8 +17,8 @@ private:
   static std::string foreignFile(llvm::StringRef dir, llvm::StringRef file, llvm::StringRef spec);
   const std::string *realFile(llvm::StringRef full);
 
-  Loader &loader_;
-  llvm::StringMap<std::string> realFiles_;
+  Loader &loader;
+  llvm::StringMap<std::string> realFiles;
 };
 
 }

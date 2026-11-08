@@ -31,10 +31,10 @@ const char kBudget[] = "Roughly how many tokens the answer may take.";
 }
 
 McpServer::McpServer(std::string self)
-    : self_(std::move(self)) {
+    : self(std::move(self)) {
   llvm::SmallString<256> here;
   fs::current_path(here);
-  here_ = std::string(here);
+  this->here = std::string(here);
   llvm::sys::ChangeStdinToBinary();
   llvm::sys::ChangeStdoutToBinary();
 }
@@ -279,7 +279,7 @@ std::string McpServer::call(llvm::StringRef name, const llvm::json::Object &args
     }
     entry = ProgramEntry::forFile(target->file());
   } else {
-    entry = ProgramEntry::forDirectory(here_);
+    entry = ProgramEntry::forDirectory(this->here);
   }
   if (entry.empty()) {
     failed = true;
@@ -330,15 +330,15 @@ const Knowledge *McpServer::knowledgeFor(const std::string &entry, bool &failed,
 
     return std::make_pair(time, status.getSize());
   };
-  auto found = cache_.find(entry);
-  if (found != cache_.end()) {
+  auto found = this->cache.find(entry);
+  if (found != this->cache.end()) {
     bool fresh = llvm::all_of(found->second.stamps, [&](const auto &stamp) {
       return stampOf(stamp.first) == stamp.second;
     });
     if (fresh) {
       return &found->second.knowledge;
     }
-    cache_.erase(found);
+    this->cache.erase(found);
   }
   std::string text = runTz({"query", "records", "--entry", entry, "--json", "--brief"}, failed);
   if (failed) {
@@ -360,7 +360,7 @@ const Knowledge *McpServer::knowledgeFor(const std::string &entry, bool &failed,
       cached.stamps.push_back({module.file, stampOf(module.file)});
     }
   }
-  auto [at, added] = cache_.try_emplace(entry, std::move(cached));
+  auto [at, added] = this->cache.try_emplace(entry, std::move(cached));
 
   return &at->second.knowledge;
 }
@@ -368,14 +368,14 @@ const Knowledge *McpServer::knowledgeFor(const std::string &entry, bool &failed,
 std::string McpServer::runTz(const std::vector<std::string> &args, bool &failed) {
   std::string out = McpServer::temporary("tz-mcp-out", "txt");
   std::string err = McpServer::temporary("tz-mcp-err", "txt");
-  std::vector<llvm::StringRef> argv = {self_};
+  std::vector<llvm::StringRef> argv = {this->self};
   for (const std::string &arg : args) {
     argv.push_back(arg);
   }
   std::optional<llvm::StringRef> redirects[] = {llvm::StringRef(""), llvm::StringRef(out),
                                                 llvm::StringRef(err)};
   std::string message;
-  int code = llvm::sys::ExecuteAndWait(self_, argv, std::nullopt, redirects, 0, 0, &message);
+  int code = llvm::sys::ExecuteAndWait(this->self, argv, std::nullopt, redirects, 0, 0, &message);
   std::string output = McpServer::readAll(out);
   std::string errors = McpServer::readAll(err);
   fs::remove(out);
@@ -391,9 +391,9 @@ std::string McpServer::runTz(const std::vector<std::string> &args, bool &failed)
 
 std::string McpServer::shown(llvm::StringRef file) const {
   llvm::StringRef rest = file;
-  if (rest.size() > here_.size() && rest.starts_with_insensitive(here_) &&
-      path::is_separator(rest[here_.size()])) {
-    rest = rest.drop_front(here_.size() + 1);
+  if (rest.size() > this->here.size() && rest.starts_with_insensitive(this->here) &&
+      path::is_separator(rest[this->here.size()])) {
+    rest = rest.drop_front(this->here.size() + 1);
   }
 
   return path::convert_to_slash(rest);
@@ -514,7 +514,7 @@ std::string McpServer::checkEdit(const llvm::json::Object &args, bool &failed) {
 }
 
 std::string McpServer::languageCard(bool &failed) const {
-  llvm::SmallString<256> dir(path::parent_path(self_));
+  llvm::SmallString<256> dir(path::parent_path(this->self));
   llvm::SmallString<256> card(dir);
   path::append(card, "ai.md");
   if (!fs::is_regular_file(card)) {

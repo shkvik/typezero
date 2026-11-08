@@ -2,12 +2,14 @@
 
 namespace tz {
 
-void PassTimes::start() { started_ = std::chrono::steady_clock::now(); }
+void PassTimes::start() {
+  this->started = std::chrono::steady_clock::now();
+}
 
 void PassTimes::stop(llvm::StringRef pass) {
   auto now = std::chrono::steady_clock::now();
-  double ms = std::chrono::duration<double, std::milli>(now - started_).count();
-  started_ = now;
+  double ms = std::chrono::duration<double, std::milli>(now - this->started).count();
+  this->started = now;
   for (auto &[name, total] : passes_) {
     if (name == pass) {
       total += ms;

@@ -35,7 +35,7 @@ private:
 }
 
 KnowledgeAnswers::KnowledgeAnswers(const Knowledge &knowledge, ProjectText &text)
-    : knowledge_(knowledge),
+    : knowledge(knowledge),
       text_(text) {}
 
 std::string KnowledgeAnswers::joined(const std::vector<std::string> &parts) {
@@ -52,19 +52,19 @@ std::string KnowledgeAnswers::uses(size_t count) {
 }
 
 std::string KnowledgeAnswers::title(size_t symbol) const {
-  return knowledge_.symbols[symbol].kind + " " + knowledge_.qualified(symbol);
+  return this->knowledge.symbols[symbol].kind + " " + this->knowledge.qualified(symbol);
 }
 
 std::string KnowledgeAnswers::fromText(size_t from, size_t module) const {
   if (from == Knowledge::kNone) {
-    return "top-level code of " + knowledge_.modules[module].name;
+    return "top-level code of " + this->knowledge.modules[module].name;
   }
 
   return title(from);
 }
 
 llvm::json::Object KnowledgeAnswers::symbolJson(size_t symbol) const {
-  const KnownSymbol &known = knowledge_.symbols[symbol];
+  const KnownSymbol &known = this->knowledge.symbols[symbol];
 
   return llvm::json::Object{{"key", known.key},
                             {"kind", known.kind},
@@ -72,19 +72,19 @@ llvm::json::Object KnowledgeAnswers::symbolJson(size_t symbol) const {
                             {"container", known.container},
                             {"signature", known.signature},
                             {"exported", known.exported},
-                            {"file", knowledge_.relative(known.place.path)},
+                            {"file", this->knowledge.relative(known.place.path)},
                             {"line", known.place.line + 1},
                             {"column", known.place.character + 1},
-                            {"uses", knowledge_.useCount(symbol)}};
+                            {"uses", this->knowledge.useCount(symbol)}};
 }
 
 llvm::json::Object KnowledgeAnswers::referenceJson(size_t reference) const {
-  const KnownReference &known = knowledge_.references[reference];
+  const KnownReference &known = this->knowledge.references[reference];
   llvm::json::Value from = known.from == Knowledge::kNone
                                ? llvm::json::Value(nullptr)
-                               : llvm::json::Value(knowledge_.symbols[known.from].key);
+                               : llvm::json::Value(this->knowledge.symbols[known.from].key);
 
-  return llvm::json::Object{{"file", knowledge_.relative(known.place.path)},
+  return llvm::json::Object{{"file", this->knowledge.relative(known.place.path)},
                             {"line", known.place.line + 1},
                             {"column", known.place.character + 1},
                             {"from", std::move(from)},
@@ -94,10 +94,10 @@ llvm::json::Object KnowledgeAnswers::referenceJson(size_t reference) const {
 }
 
 std::vector<size_t> KnowledgeAnswers::problemsIn(size_t symbol) const {
-  const KnownSymbol &known = knowledge_.symbols[symbol];
+  const KnownSymbol &known = this->knowledge.symbols[symbol];
   std::vector<size_t> found;
-  for (size_t i = 0; i < knowledge_.problems.size(); ++i) {
-    const KnownProblem &problem = knowledge_.problems[i];
+  for (size_t i = 0; i < this->knowledge.problems.size(); ++i) {
+    const KnownProblem &problem = this->knowledge.problems[i];
     if (problem.module == known.module && problem.place.line >= known.extent.line &&
         problem.place.line <= known.extent.endLine) {
       found.push_back(i);
@@ -113,8 +113,8 @@ std::string KnowledgeAnswers::map(size_t tokens, bool library) const {
   std::vector<size_t> shown;
   std::vector<std::string> builtins;
   unsigned lines = 0;
-  for (size_t m = 0; m < knowledge_.modules.size(); ++m) {
-    const KnownModule &module = knowledge_.modules[m];
+  for (size_t m = 0; m < this->knowledge.modules.size(); ++m) {
+    const KnownModule &module = this->knowledge.modules[m];
     if (module.library) {
       builtins.push_back(module.name);
     }
@@ -123,33 +123,33 @@ std::string KnowledgeAnswers::map(size_t tokens, bool library) const {
       lines += module.lines;
     }
   }
-  std::string header = "program " + knowledge_.relative(knowledge_.entry) + ": " +
+  std::string header = "program " + this->knowledge.relative(this->knowledge.entry) + ": " +
                        std::to_string(shown.size()) + " modules, " + std::to_string(lines) +
                        " lines";
-  if (!knowledge_.problems.empty()) {
-    header += ", " + std::to_string(knowledge_.problems.size()) + " problems";
+  if (!this->knowledge.problems.empty()) {
+    header += ", " + std::to_string(this->knowledge.problems.size()) + " problems";
   }
   budget.take(out, header);
   if (!builtins.empty() && !library) {
     budget.take(out, "built-in modules: " + KnowledgeAnswers::joined(builtins));
   }
 
-  std::vector<size_t> problems(knowledge_.modules.size(), 0);
-  for (const KnownProblem &problem : knowledge_.problems) {
+  std::vector<size_t> problems(this->knowledge.modules.size(), 0);
+  for (const KnownProblem &problem : this->knowledge.problems) {
     if (problem.module < problems.size()) {
       ++problems[problem.module];
     }
   }
-  std::vector<double> score(knowledge_.modules.size(), 0);
-  for (const KnownReference &reference : knowledge_.references) {
-    size_t target = knowledge_.symbols[reference.symbol].module;
+  std::vector<double> score(this->knowledge.modules.size(), 0);
+  for (const KnownReference &reference : this->knowledge.references) {
+    size_t target = this->knowledge.symbols[reference.symbol].module;
     if (target != reference.module) {
       score[target] += 1;
     }
   }
   for (size_t m : shown) {
-    score[m] += static_cast<double>(knowledge_.importersOf(m).size()) * 10;
-    if (knowledge_.modules[m].entry) {
+    score[m] += static_cast<double>(this->knowledge.importersOf(m).size()) * 10;
+    if (this->knowledge.modules[m].entry) {
       score[m] = 1e18;
     }
   }
@@ -157,7 +157,7 @@ std::string KnowledgeAnswers::map(size_t tokens, bool library) const {
                    [&](size_t a, size_t b) { return score[a] > score[b]; });
 
   auto head = [&](size_t m) {
-    const KnownModule &module = knowledge_.modules[m];
+    const KnownModule &module = this->knowledge.modules[m];
     std::string text = "\n" + module.name + " - " + std::to_string(module.lines) + " lines";
     if (!module.specifiers.empty()) {
       std::vector<std::string> some(module.specifiers.begin(),
@@ -168,11 +168,11 @@ std::string KnowledgeAnswers::map(size_t tokens, bool library) const {
         text += " and " + std::to_string(module.specifiers.size() - some.size()) + " more";
       }
     }
-    std::vector<size_t> importers = knowledge_.importersOf(m);
+    std::vector<size_t> importers = this->knowledge.importersOf(m);
     if (!importers.empty()) {
       std::vector<std::string> some;
       for (size_t importer : llvm::ArrayRef(importers).take_front(6)) {
-        some.push_back(knowledge_.modules[importer].name);
+        some.push_back(this->knowledge.modules[importer].name);
       }
       text += "; imported by " + KnowledgeAnswers::joined(some);
       if (importers.size() > some.size()) {
@@ -199,7 +199,7 @@ std::string KnowledgeAnswers::map(size_t tokens, bool library) const {
   budget.spend(headCost);
 
   auto line = [&](size_t symbol) {
-    const KnownSymbol &known = knowledge_.symbols[symbol];
+    const KnownSymbol &known = this->knowledge.symbols[symbol];
     std::string text = known.parent == Knowledge::kNone ? "  " : "    ";
     if (known.exported && known.parent == Knowledge::kNone &&
         !llvm::StringRef(known.signature).starts_with("export ")) {
@@ -207,14 +207,14 @@ std::string KnowledgeAnswers::map(size_t tokens, bool library) const {
     }
     text += known.signature.empty() ? title(symbol) : known.signature;
 
-    return text + "  - " + KnowledgeAnswers::uses(knowledge_.useCount(symbol)) + ", line " +
+    return text + "  - " + KnowledgeAnswers::uses(this->knowledge.useCount(symbol)) + ", line " +
            std::to_string(known.place.line + 1);
   };
   std::vector<std::pair<double, size_t>> candidates;
   for (size_t m : listed) {
-    for (size_t i : knowledge_.symbolsOf(m)) {
-      const KnownSymbol &known = knowledge_.symbols[i];
-      double priority = static_cast<double>(knowledge_.useCount(i)) * 10;
+    for (size_t i : this->knowledge.symbolsOf(m)) {
+      const KnownSymbol &known = this->knowledge.symbols[i];
+      double priority = static_cast<double>(this->knowledge.useCount(i)) * 10;
       if (known.parent == Knowledge::kNone) {
         priority += (known.exported ? 1e6 : 0) + (known.kind == "class" ? 1 : 0);
       } else {
@@ -227,7 +227,7 @@ std::string KnowledgeAnswers::map(size_t tokens, bool library) const {
                    [](const auto &a, const auto &b) { return a.first > b.first; });
   std::set<size_t> chosen;
   for (const auto &[priority, symbol] : candidates) {
-    size_t parent = knowledge_.symbols[symbol].parent;
+    size_t parent = this->knowledge.symbols[symbol].parent;
     if (parent != Knowledge::kNone && chosen.count(parent) == 0) {
       continue;
     }
@@ -241,16 +241,16 @@ std::string KnowledgeAnswers::map(size_t tokens, bool library) const {
   for (size_t m : listed) {
     out += head(m) + "\n";
     size_t omitted = 0;
-    for (size_t i : knowledge_.symbolsOf(m)) {
-      if (knowledge_.symbols[i].parent != Knowledge::kNone) {
+    for (size_t i : this->knowledge.symbolsOf(m)) {
+      if (this->knowledge.symbols[i].parent != Knowledge::kNone) {
         continue;
       }
       if (chosen.count(i) == 0) {
-        omitted += 1 + knowledge_.members(i).size();
+        omitted += 1 + this->knowledge.members(i).size();
         continue;
       }
       out += line(i) + "\n";
-      for (size_t member : knowledge_.members(i)) {
+      for (size_t member : this->knowledge.members(i)) {
         if (chosen.count(member) != 0) {
           out += line(member) + "\n";
         } else {
@@ -265,7 +265,7 @@ std::string KnowledgeAnswers::map(size_t tokens, bool library) const {
   if (listed.size() < shown.size()) {
     std::vector<std::string> rest;
     for (size_t m : llvm::ArrayRef(shown).drop_front(listed.size()).take_front(8)) {
-      rest.push_back(knowledge_.modules[m].name);
+      rest.push_back(this->knowledge.modules[m].name);
     }
     out += "\n... " + std::to_string(shown.size() - listed.size()) + " more modules (" +
            KnowledgeAnswers::joined(rest) +
@@ -278,8 +278,8 @@ std::string KnowledgeAnswers::map(size_t tokens, bool library) const {
 
 llvm::json::Value KnowledgeAnswers::mapJson(bool library) const {
   llvm::json::Array modules;
-  for (size_t m = 0; m < knowledge_.modules.size(); ++m) {
-    const KnownModule &module = knowledge_.modules[m];
+  for (size_t m = 0; m < this->knowledge.modules.size(); ++m) {
+    const KnownModule &module = this->knowledge.modules[m];
     if (module.library && !library) {
       continue;
     }
@@ -288,17 +288,17 @@ llvm::json::Value KnowledgeAnswers::mapJson(bool library) const {
       imports.push_back(specifier);
     }
     llvm::json::Array importers;
-    for (size_t importer : knowledge_.importersOf(m)) {
-      importers.push_back(knowledge_.modules[importer].name);
+    for (size_t importer : this->knowledge.importersOf(m)) {
+      importers.push_back(this->knowledge.modules[importer].name);
     }
     llvm::json::Array symbols;
-    for (size_t i : knowledge_.symbolsOf(m)) {
-      if (knowledge_.symbols[i].parent != Knowledge::kNone) {
+    for (size_t i : this->knowledge.symbolsOf(m)) {
+      if (this->knowledge.symbols[i].parent != Knowledge::kNone) {
         continue;
       }
       llvm::json::Object item = symbolJson(i);
       llvm::json::Array members;
-      for (size_t member : knowledge_.members(i)) {
+      for (size_t member : this->knowledge.members(i)) {
         members.push_back(symbolJson(member));
       }
       if (!members.empty()) {
@@ -307,7 +307,7 @@ llvm::json::Value KnowledgeAnswers::mapJson(bool library) const {
       symbols.push_back(std::move(item));
     }
     size_t problems = llvm::count_if(
-        knowledge_.problems, [&](const KnownProblem &problem) { return problem.module == m; });
+        this->knowledge.problems, [&](const KnownProblem &problem) { return problem.module == m; });
     modules.push_back(llvm::json::Object{{"name", module.name},
                                          {"path", module.path},
                                          {"lines", module.lines},
@@ -318,8 +318,8 @@ llvm::json::Value KnowledgeAnswers::mapJson(bool library) const {
                                          {"symbols", std::move(symbols)}});
   }
 
-  return llvm::json::Object{{"entry", knowledge_.relative(knowledge_.entry)},
-                            {"root", knowledge_.root},
+  return llvm::json::Object{{"entry", this->knowledge.relative(this->knowledge.entry)},
+                            {"root", this->knowledge.root},
                             {"modules", std::move(modules)}};
 }
 
@@ -330,8 +330,8 @@ std::string KnowledgeAnswers::context(const std::vector<size_t> &symbols, size_t
     budget.take(out, std::to_string(symbols.size()) + " symbols match; each follows");
   }
   for (size_t s : llvm::ArrayRef(symbols).take_front(5)) {
-    const KnownSymbol &known = knowledge_.symbols[s];
-    std::string head = "\n## " + title(s) + " - " + knowledge_.where(known.place);
+    const KnownSymbol &known = this->knowledge.symbols[s];
+    std::string head = "\n## " + title(s) + " - " + this->knowledge.where(known.place);
     if (known.exported) {
       head += " (exported)";
     }
@@ -345,13 +345,13 @@ std::string KnowledgeAnswers::context(const std::vector<size_t> &symbols, size_t
     if (!problems.empty()) {
       budget.take(out, "problems here:");
       for (size_t p : problems) {
-        const KnownProblem &problem = knowledge_.problems[p];
-        budget.take(out, "  " + knowledge_.where(problem.place) +
+        const KnownProblem &problem = this->knowledge.problems[p];
+        budget.take(out, "  " + this->knowledge.where(problem.place) +
                              (problem.severity == 1 ? " error: " : " warning: ") +
                              problem.message.substr(0, problem.message.find('\n')));
       }
     }
-    std::string source = knowledge_.sourceOf(s);
+    std::string source = this->knowledge.sourceOf(s);
     if (known.kind != "field" && known.kind != "const" && known.kind != "let" && !source.empty()) {
       llvm::SmallVector<llvm::StringRef, 0> rows;
       llvm::StringRef(source).split(rows, '\n');
@@ -383,21 +383,21 @@ std::string KnowledgeAnswers::context(const std::vector<size_t> &symbols, size_t
         budget.take(out, "  ... " + std::to_string(rows.size() - shownRows) + " lines more");
       }
     }
-    std::vector<size_t> members = knowledge_.members(s);
+    std::vector<size_t> members = this->knowledge.members(s);
     if (!members.empty()) {
       budget.take(out, "members:");
       for (size_t member : members) {
-        const KnownSymbol &part = knowledge_.symbols[member];
+        const KnownSymbol &part = this->knowledge.symbols[member];
         if (!budget.take(out, "  " + part.signature + "  - " +
-                                  KnowledgeAnswers::uses(knowledge_.useCount(member)) + ", line " +
-                                  std::to_string(part.place.line + 1))) {
+                                  KnowledgeAnswers::uses(this->knowledge.useCount(member)) +
+                                  ", line " + std::to_string(part.place.line + 1))) {
           break;
         }
       }
     }
-    std::vector<size_t> used = knowledge_.usesOf(s);
+    std::vector<size_t> used = this->knowledge.usesOf(s);
     for (size_t member : members) {
-      for (size_t inner : knowledge_.usesOf(member)) {
+      for (size_t inner : this->knowledge.usesOf(member)) {
         if (inner != s && !llvm::is_contained(members, inner) && !llvm::is_contained(used, inner)) {
           used.push_back(inner);
         }
@@ -406,8 +406,8 @@ std::string KnowledgeAnswers::context(const std::vector<size_t> &symbols, size_t
     if (!used.empty()) {
       budget.take(out, "uses (" + std::to_string(used.size()) + "):");
       for (size_t inner : used) {
-        const KnownSymbol &part = knowledge_.symbols[inner];
-        std::string text = "  " + title(inner) + " - " + knowledge_.where(part.place);
+        const KnownSymbol &part = this->knowledge.symbols[inner];
+        std::string text = "  " + title(inner) + " - " + this->knowledge.where(part.place);
         if (!part.signature.empty() && part.signature != title(inner)) {
           text += " - " + part.signature;
         }
@@ -416,13 +416,13 @@ std::string KnowledgeAnswers::context(const std::vector<size_t> &symbols, size_t
         }
       }
     }
-    std::vector<size_t> references = knowledge_.referencesTo(s);
+    std::vector<size_t> references = this->knowledge.referencesTo(s);
     if (!references.empty()) {
       budget.take(out, "used by (" + std::to_string(references.size()) + "):");
       size_t listed = 0;
       for (size_t reference : references) {
-        const KnownReference &referrer = knowledge_.references[reference];
-        if (!budget.take(out, "  " + knowledge_.where(referrer.place) + " in " +
+        const KnownReference &referrer = this->knowledge.references[reference];
+        if (!budget.take(out, "  " + this->knowledge.where(referrer.place) + " in " +
                                   fromText(referrer.from, referrer.module) + " - " +
                                   referrer.line)) {
           break;
@@ -433,7 +433,7 @@ std::string KnowledgeAnswers::context(const std::vector<size_t> &symbols, size_t
         budget.take(out, "  ... " + std::to_string(references.size() - listed) + " more");
       }
     }
-    std::vector<TextMention> docs = text_.docs(known.name, knowledge_.qualified(s), 5);
+    std::vector<TextMention> docs = text_.docs(known.name, this->knowledge.qualified(s), 5);
     if (!docs.empty()) {
       budget.take(out, "docs:");
       for (const TextMention &mention : docs) {
@@ -465,31 +465,31 @@ std::string KnowledgeAnswers::context(const std::vector<size_t> &symbols, size_t
 llvm::json::Value KnowledgeAnswers::contextJson(const std::vector<size_t> &symbols) {
   llvm::json::Array all;
   for (size_t s : symbols) {
-    const KnownSymbol &known = knowledge_.symbols[s];
+    const KnownSymbol &known = this->knowledge.symbols[s];
     llvm::json::Array problems;
     for (size_t p : problemsIn(s)) {
-      const KnownProblem &problem = knowledge_.problems[p];
+      const KnownProblem &problem = this->knowledge.problems[p];
       problems.push_back(
-          llvm::json::Object{{"file", knowledge_.relative(problem.place.path)},
+          llvm::json::Object{{"file", this->knowledge.relative(problem.place.path)},
                              {"line", problem.place.line + 1},
                              {"column", problem.place.character + 1},
                              {"severity", problem.severity == 1 ? "error" : "warning"},
                              {"message", problem.message}});
     }
     llvm::json::Array members;
-    for (size_t member : knowledge_.members(s)) {
+    for (size_t member : this->knowledge.members(s)) {
       members.push_back(symbolJson(member));
     }
     llvm::json::Array used;
-    for (size_t inner : knowledge_.usesOf(s)) {
+    for (size_t inner : this->knowledge.usesOf(s)) {
       used.push_back(symbolJson(inner));
     }
     llvm::json::Array usedBy;
-    for (size_t reference : knowledge_.referencesTo(s)) {
+    for (size_t reference : this->knowledge.referencesTo(s)) {
       usedBy.push_back(referenceJson(reference));
     }
     llvm::json::Array docs;
-    for (const TextMention &mention : text_.docs(known.name, knowledge_.qualified(s), 5)) {
+    for (const TextMention &mention : text_.docs(known.name, this->knowledge.qualified(s), 5)) {
       docs.push_back(llvm::json::Object{{"file", mention.file},
                                         {"line", mention.line},
                                         {"heading", mention.heading},
@@ -500,7 +500,7 @@ llvm::json::Value KnowledgeAnswers::contextJson(const std::vector<size_t> &symbo
       tests.push_back(file);
     }
     all.push_back(llvm::json::Object{{"symbol", symbolJson(s)},
-                                     {"source", knowledge_.sourceOf(s)},
+                                     {"source", this->knowledge.sourceOf(s)},
                                      {"problems", std::move(problems)},
                                      {"members", std::move(members)},
                                      {"uses", std::move(used)},
@@ -514,15 +514,15 @@ llvm::json::Value KnowledgeAnswers::contextJson(const std::vector<size_t> &symbo
 
 std::vector<size_t> KnowledgeAnswers::callers(size_t symbol) const {
   std::vector<size_t> targets = {symbol};
-  for (size_t member : knowledge_.members(symbol)) {
-    if (knowledge_.symbols[member].kind == "constructor") {
+  for (size_t member : this->knowledge.members(symbol)) {
+    if (this->knowledge.symbols[member].kind == "constructor") {
       targets.push_back(member);
     }
   }
   std::vector<size_t> found;
   for (size_t target : targets) {
-    for (size_t reference : knowledge_.referencesTo(target)) {
-      if (knowledge_.references[reference].call) {
+    for (size_t reference : this->knowledge.referencesTo(target)) {
+      if (this->knowledge.references[reference].call) {
         found.push_back(reference);
       }
     }
@@ -532,22 +532,22 @@ std::vector<size_t> KnowledgeAnswers::callers(size_t symbol) const {
 }
 
 std::string KnowledgeAnswers::local(size_t local, llvm::StringRef kind) const {
-  const KnownLocal &known = knowledge_.locals[local];
+  const KnownLocal &known = this->knowledge.locals[local];
   std::string owner = known.owner == Knowledge::kNone
-                          ? "top-level code of " + knowledge_.modules[known.module].name
+                          ? "top-level code of " + this->knowledge.modules[known.module].name
                           : title(known.owner);
   if (kind == "type") {
     return known.name + ": " + known.type + "\n";
   }
   if (kind == "definition") {
-    return knowledge_.where(known.place) + "  " + known.name + ": " + known.type + " (local of " +
-           owner + ")\n";
+    return this->knowledge.where(known.place) + "  " + known.name + ": " + known.type +
+           " (local of " + owner + ")\n";
   }
   std::string out = "local " + known.name + ": " + known.type + " - " +
-                    knowledge_.where(known.place) + " in " + owner + "\n";
+                    this->knowledge.where(known.place) + " in " + owner + "\n";
   out += std::to_string(known.uses.size()) + (known.uses.size() == 1 ? " use" : " uses") + ":\n";
   for (const SourcePlace &use : known.uses) {
-    out += "  " + knowledge_.where(use) + "\n";
+    out += "  " + this->knowledge.where(use) + "\n";
   }
 
   return out;
@@ -556,11 +556,12 @@ std::string KnowledgeAnswers::local(size_t local, llvm::StringRef kind) const {
 std::string KnowledgeAnswers::query(llvm::StringRef kind, const KnowledgeTarget &target,
                                     const std::vector<size_t> &symbols) const {
   std::string out;
-  if (size_t found = target.localAt(knowledge_); found != Knowledge::kNone && symbols.empty()) {
+  if (size_t found = target.localAt(this->knowledge);
+      found != Knowledge::kNone && symbols.empty()) {
     return local(found, kind);
   }
   if (kind == "type" && target.isPlace()) {
-    if (const KnownType *type = target.typeAt(knowledge_)) {
+    if (const KnownType *type = target.typeAt(this->knowledge)) {
       return type->name + ": " + type->type + "\n";
     }
   }
@@ -568,17 +569,17 @@ std::string KnowledgeAnswers::query(llvm::StringRef kind, const KnowledgeTarget 
     return "nothing in the program is named '" + target.text() + "'\n";
   }
   for (size_t s : symbols) {
-    const KnownSymbol &known = knowledge_.symbols[s];
+    const KnownSymbol &known = this->knowledge.symbols[s];
     if (kind == "definition") {
-      out += knowledge_.where(known.place) + "  " + known.signature + "\n";
+      out += this->knowledge.where(known.place) + "  " + known.signature + "\n";
     } else if (kind == "type") {
       out += (known.signature.empty() ? title(s) : known.signature) + "\n";
     } else if (kind == "references") {
-      std::vector<size_t> references = knowledge_.referencesTo(s);
+      std::vector<size_t> references = this->knowledge.referencesTo(s);
       out += title(s) + " - " + std::to_string(references.size()) + " references\n";
       for (size_t reference : references) {
-        const KnownReference &ref = knowledge_.references[reference];
-        out += "  " + knowledge_.where(ref.place) + " in " + fromText(ref.from, ref.module) +
+        const KnownReference &ref = this->knowledge.references[reference];
+        out += "  " + this->knowledge.where(ref.place) + " in " + fromText(ref.from, ref.module) +
                " - " + ref.line + "\n";
       }
     } else {
@@ -586,8 +587,9 @@ std::string KnowledgeAnswers::query(llvm::StringRef kind, const KnowledgeTarget 
       out += title(s) + " - called from " + std::to_string(calls.size()) +
              (calls.size() == 1 ? " place\n" : " places\n");
       for (size_t reference : calls) {
-        const KnownReference &ref = knowledge_.references[reference];
-        out += "  " + fromText(ref.from, ref.module) + " - " + knowledge_.where(ref.place) + "\n";
+        const KnownReference &ref = this->knowledge.references[reference];
+        out +=
+            "  " + fromText(ref.from, ref.module) + " - " + this->knowledge.where(ref.place) + "\n";
       }
     }
   }
@@ -598,7 +600,7 @@ std::string KnowledgeAnswers::query(llvm::StringRef kind, const KnowledgeTarget 
 llvm::json::Value KnowledgeAnswers::queryJson(llvm::StringRef kind, const KnowledgeTarget &target,
                                               const std::vector<size_t> &symbols) const {
   if (kind == "type" && target.isPlace()) {
-    if (const KnownType *type = target.typeAt(knowledge_)) {
+    if (const KnownType *type = target.typeAt(this->knowledge)) {
       return llvm::json::Object{{"name", type->name}, {"type", type->type}};
     }
   }
@@ -607,7 +609,7 @@ llvm::json::Value KnowledgeAnswers::queryJson(llvm::StringRef kind, const Knowle
     llvm::json::Object item{{"symbol", symbolJson(s)}};
     if (kind == "references" || kind == "callers") {
       llvm::json::Array places;
-      for (size_t reference : kind == "references" ? knowledge_.referencesTo(s) : callers(s)) {
+      for (size_t reference : kind == "references" ? this->knowledge.referencesTo(s) : callers(s)) {
         places.push_back(referenceJson(reference));
       }
       item[kind] = std::move(places);
@@ -627,23 +629,23 @@ KnowledgeAnswers::impactLevels(const std::vector<size_t> &symbols,
     if (seen.insert(s).second) {
       frontier.push_back(s);
     }
-    for (size_t member : knowledge_.members(s)) {
+    for (size_t member : this->knowledge.members(s)) {
       if (seen.insert(member).second) {
         frontier.push_back(member);
       }
     }
   }
   for (size_t s : frontier) {
-    if (!llvm::is_contained(modules, knowledge_.symbols[s].module)) {
-      modules.push_back(knowledge_.symbols[s].module);
+    if (!llvm::is_contained(modules, this->knowledge.symbols[s].module)) {
+      modules.push_back(this->knowledge.symbols[s].module);
     }
   }
   std::vector<std::vector<size_t>> levels;
   while (!frontier.empty() && levels.size() < 10) {
     std::vector<size_t> next;
     for (size_t s : frontier) {
-      for (size_t reference : knowledge_.referencesTo(s)) {
-        const KnownReference &ref = knowledge_.references[reference];
+      for (size_t reference : this->knowledge.referencesTo(s)) {
+        const KnownReference &ref = this->knowledge.references[reference];
         if (!llvm::is_contained(modules, ref.module)) {
           modules.push_back(ref.module);
         }
@@ -668,7 +670,8 @@ std::string KnowledgeAnswers::impact(const std::vector<size_t> &symbols, size_t 
   std::vector<std::vector<size_t>> levels = impactLevels(symbols, modules);
   std::vector<std::string> targets;
   for (size_t s : symbols) {
-    targets.push_back(title(s) + " (" + knowledge_.where(knowledge_.symbols[s].place) + ")");
+    targets.push_back(title(s) + " (" + this->knowledge.where(this->knowledge.symbols[s].place) +
+                      ")");
   }
   size_t total = 0;
   for (const std::vector<size_t> &level : levels) {
@@ -684,11 +687,11 @@ std::string KnowledgeAnswers::impact(const std::vector<size_t> &symbols, size_t 
                          std::to_string(levels[i].size()) + "):");
     size_t listed = 0;
     for (size_t s : levels[i]) {
-      const KnownSymbol &known = knowledge_.symbols[s];
+      const KnownSymbol &known = this->knowledge.symbols[s];
       if (known.exported) {
         exported.push_back(title(s));
       }
-      if (budget.take(out, "  " + title(s) + " - " + knowledge_.where(known.place))) {
+      if (budget.take(out, "  " + title(s) + " - " + this->knowledge.where(known.place))) {
         ++listed;
       }
     }
@@ -698,7 +701,7 @@ std::string KnowledgeAnswers::impact(const std::vector<size_t> &symbols, size_t 
   }
   std::vector<std::string> names;
   for (size_t m : modules) {
-    names.push_back(knowledge_.modules[m].name);
+    names.push_back(this->knowledge.modules[m].name);
   }
   budget.take(out, "modules: " + KnowledgeAnswers::joined(names));
   if (!exported.empty()) {
@@ -725,7 +728,7 @@ llvm::json::Value KnowledgeAnswers::impactJson(const std::vector<size_t> &symbol
   }
   llvm::json::Array names;
   for (size_t m : modules) {
-    names.push_back(knowledge_.modules[m].name);
+    names.push_back(this->knowledge.modules[m].name);
   }
 
   return llvm::json::Object{

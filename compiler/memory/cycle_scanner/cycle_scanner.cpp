@@ -64,14 +64,14 @@ void CycleScanner::addVar(const VarSymbol *var) {
 }
 
 void CycleScanner::function(const FunctionDecl *fn) {
-  if (!fn || !scanned_.insert(fn).second) {
+  if (!fn || !this->scanned.insert(fn).second) {
     return;
   }
   if (fn->sym) {
     for (const Type *p : fn->sym->params) {
       addType(p);
     }
-    addType(fn->sym->ret);
+    addType(fn->sym->getKnownReturnType());
   }
   for (const Param &param : fn->params) {
     addVar(param.sym);
@@ -81,10 +81,10 @@ void CycleScanner::function(const FunctionDecl *fn) {
   for (const VarSymbol *var : fn->captures) {
     addVar(var);
   }
-  const FunctionDecl *saved = current_;
-  current_ = fn;
+  const FunctionDecl *saved = this->current;
+  this->current = fn;
   stmt(fn->body);
-  current_ = saved;
+  this->current = saved;
 }
 
 void CycleScanner::classDecl(const ClassDecl *cls) {
@@ -195,7 +195,8 @@ void CycleScanner::stmt(const Stmt *stmt) {
 const Type *CycleScanner::functionType(const FunctionDecl *fn) {
   const FuncSymbol *sym = fn->sym;
 
-  return Type::function(sym->params, sym->minArgs, sym->hasRest, sym->ret, sym->hasThis);
+  return Type::function(sym->params, sym->minArgs, sym->hasRest, sym->getKnownReturnType(),
+                        sym->hasThis);
 }
 
 bool CycleScanner::thisEscapes(const Stmt *stmt, const VarSymbol *self) {
@@ -238,8 +239,8 @@ bool CycleScanner::thisEscapes(const Stmt *stmt, const VarSymbol *self) {
 }
 
 CycleScanner::CycleScanner() {
-  cycleExprsPart_ = std::make_unique<CycleExprs>(*this);
-  cycleEscapesPart_ = std::make_unique<CycleEscapes>(*this);
+  this->cycleExprsPart = std::make_unique<CycleExprs>(*this);
+  this->cycleEscapesPart = std::make_unique<CycleEscapes>(*this);
 }
 
 CycleScanner::~CycleScanner() = default;

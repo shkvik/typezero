@@ -15,7 +15,7 @@ public:
   Expr *parseFloatLiteral();
 
 private:
-  Parser &parser_;
+  Parser &parser;
 };
 
 }

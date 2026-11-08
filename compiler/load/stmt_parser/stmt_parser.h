@@ -22,7 +22,7 @@ public:
   Stmt *parseBreakOrContinue();
 
 private:
-  Parser &parser_;
+  Parser &parser;
 };
 
 }

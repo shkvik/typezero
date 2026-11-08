@@ -31,9 +31,9 @@ private:
   bool use(const Expr *expr, bool call);
   void param(const Param &param);
 
-  KnowledgePass &pass_;
+  KnowledgePass &pass;
   size_t module_;
-  size_t from_;
+  size_t from;
 };
 
 }

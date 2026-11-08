@@ -16,7 +16,7 @@ public:
   Result<ObjectFile, Errors> run(llvm::Module &module) const;
 
 private:
-  const Target &target_;
+  const Target &target;
 };
 
 }

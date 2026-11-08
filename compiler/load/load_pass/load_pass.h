@@ -22,8 +22,8 @@ public:
 
 private:
   std::string path_;
-  const pkg::Graph *packages_;
-  const SourceOverlay *overlay_;
+  const pkg::Graph *packages;
+  const SourceOverlay *overlay;
 };
 
 }

@@ -17,7 +17,7 @@ public:
 private:
   bool parseImportAttributes(bool json);
 
-  Parser &parser_;
+  Parser &parser;
 };
 
 }

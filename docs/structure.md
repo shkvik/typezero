@@ -31,9 +31,13 @@
 - **Три дерева по виду кода.** `compiler/` — весь C++ (`tz.exe`), `runtime/` — весь C (`tzrt.lib`,
   `tzrt.bc`, `tzcrypto.lib`), `library/` — весь код на tz (`bin/lib`).
 - **Библиотека — темы.** Всё, что программа берёт из глобального имени или модуля (`Math`,
-  `node:crypto`, `Date`…), — тема с одним именем во всех деревьях: проверка и построение IR в
-  `compiler/library/<тема>/`, рантайм на C в `runtime/library/<тема>/`, код на tz в
-  `library/<тема>/`. Проходы не знают имён тем.
+  `node:crypto`, `Date`…), — тема с одним именем во всех деревьях: проверка в
+  `compiler/semantic/library/<тема>/`, построение IR в `compiler/lower/library/<тема>/`, справочники
+  без проверки в `compiler/program/library/<тема>/`, рантайм на C в `runtime/library/<тема>/`, код на
+  tz в `library/<тема>/`. Проходы не знают имён тем.
+- **Движок типов — `compiler/semantic/`.** Объявления, вывод, проверка тел и библиотека — один
+  движок; снаружи его подключают только через фасад `SemanticExternalFacade`
+  (`semantic/semantic_external.h`). Хранилище движка `semantic_state/` закрыто.
 - **Каждый класс — в своей папке.** Маленькие классы вместо `Sema` и `CodeGen`.
 - **Ошибки — значения.** Проход отдаёт свои `Errors`; `compile` отдаёт `Result` через `ok` и `err`,
   как в neverthrow.
@@ -44,7 +48,7 @@
 
 - **Каждый класс — в своей папке**, названной как класс: `ExprChecker` — это
   `expr_checker/expr_checker.h` и `expr_checker.cpp`. У класса из одних данных — только `.h`.
-  Папки без файлов (`check/`, `ast/`, `compiler/library/crypto/`) только собирают классы в группы.
+  Папки без файлов (`bodies/`, `ast/`, `semantic/library/crypto/`) только собирают классы в группы.
   Модуль на C — так же: `runtime/core/string/string.c` и его `.h`.
 - **`#include` — от корня репозитория:** `"compiler/check/sema/sema.h"`,
   `"runtime/core/tzrt/tzrt.h"`.
@@ -74,10 +78,11 @@ compiler/         весь C++ → tz.exe
   cli/            команды tz: разбор аргументов, build, run, init, add, port, licenses
   pipeline/       конвейер проходов от .tz до exe
   program/        что идёт по конвейеру
-  load/ pipeline/check_program/ (declare … overflow) parallel/ memory/ lower/
+  load/ pipeline/check_program/ (прогоны declare … overflow) parallel/ memory/ lower/
   optimize/ emit/ link/                                                       проходы
+  semantic/       движок типов, снаружи — только фасад semantic_external.h
+  interprocedural/ проверки по всей программе после движка: потоки значений, переполнение
   packages/       package.json, package-lock.json, JSR, git, tz port
-  library/        C++-часть тем: feature/, feature_registry/, tz_modules/, <тема>/
 runtime/          весь C → tzrt.lib, tzrt.bc, tzcrypto.lib
   core/           рантайм языка: память, строки, массивы, async, потоки
   library/        C-часть тем: <тема>/<модуль>/
@@ -87,7 +92,8 @@ tests/ docs/ bench/ examples/ third_party/
 ```
 
 `src/` больше нет. Тема, у которой есть код нескольких видов, лежит в нескольких деревьях под одним
-именем: `node:crypto` — `compiler/library/crypto/`, `runtime/library/crypto/` и `library/crypto/`.
+именем: `node:crypto` — `compiler/semantic/library/crypto/` (проверка), `compiler/lower/library/crypto/`
+(IR), `runtime/library/crypto/` и `library/crypto/`.
 
 ## Сейчас
 
@@ -96,28 +102,29 @@ tests/ docs/ bench/ examples/ third_party/
 
 ```
 compiler/
-  CMakeLists.txt     все .cpp под compiler/ по маске
+  CMakeLists.txt     все .cpp под compiler/ по маске; main.cpp — вход tz
   pipeline/          pipeline/ — buildProgram; build_options/, runtime_files/, pass_times/;
-                     check_program/ — checkProgram и всё, что вызывает только он:
-                       check_state/ (CheckState — хранилище групп данных), ast_walker/, scopes/,
-                       facts/, flow/, types/, generics/, event_rounds/, shared_helpers/;
-                       проходы declare/ infer/ check/ (check_pass/, top_level_checker/)
-                       instances/ whole_program/ overflow/;
-                       topics/<тема>/<класс>/ — темы проверки: языка (async classes declarations
-                       expr functions iterators objects stmt values) и библиотеки (чекеры из
-                       library/: bytes crypto date events fs intl json …)
-  cli/               main.cpp, args/, command_line/, *_command/ (build, run, init, add, remove,
-                     update, port, licenses, version, explain), error_printer/
-  program/           program/, module/, source_file/, ast/ (по папке на узел; ast.h — все разом),
-                     symbols/, types/ (type/ — класс Type; type_op/, union_slot/, field/, overload/…
-                     и модули функций над типами), diagnostic/, diagnostics/, errors/
+                     check_program/ — checkProgram и тонкие прогоны, которые зовут фасад движка:
+                       declare_pass/ infer_pass/ check_pass/ instances_pass/ interprocedural_pass/
+                       overflow_pass/ event_rounds/
+  semantic/          движок типов; semantic_external.{h,cpp} — фасад SemanticExternalFacade;
+                     внутри по ярусам (вызовы идут вниз): infer/ library/ → bodies/ → flow/
+                     declare/ → generics/ → types/ names/ → feature/ semantic_state/ (закрытое
+                     хранилище групп данных); вверх — только через интерфейсы (Completer из
+                     program/, Feature)
+  interprocedural/   после движка, по всей программе: flows/ flow_*/ wide_writes/ load_order/
+                     unused/ context_checker/ pool_checker/ held_value_checker/ overflow/
+  cli/               папка на слово команды tz (build/ run/ knowledge/ lsp/ mcp/ licenses/
+                     version/ init/ add/ remove/ update/ port/); разбор и помощники — command_line/
+  program/           program/, module/, source_file/, program_inventory/ (опись после проверки),
+                     builtin_declarations/ (встроенные тексты из library/*.tz), ast/ (по папке на
+                     узел; ast.h — все разом; ast_cloner/ — копии generic), ast_walker/,
+                     symbols/ (+ completer/), types/, library/ (справочники тем без проверки),
+                     to_utf8/, diagnostic/, diagnostics/, errors/
   result/            result/, ok/, err/
-  load/              load_pass/, loader/, module_resolver/, library_modules/, library_files/,
-                     source_overlay/, json_module/, lexer/, token/,
-                     literal_text/, parser/ и его части: token_cursor/, stmt_parser/, var_parser/,
-                     pattern_parser/, expr_parser/, call_parser/, primary_parser/, template_parser/,
-                     function_parser/, class_parser/, decl_parser/, module_parser/, type_parser/,
-                     object_type_parser/, function_type_parser/
+  load/              load_pass/, loader/, module_resolver/, library_modules/ (+ встроенные тексты),
+                     library_files/, source_overlay/, json_module/, lexer/, token/, literal_text/,
+                     parser/ и его части
   parallel/          parallel_pass/, analysis/ (общее), pieces/, code_walk/, expr_walk/, call_walk/,
                      call_resolver/, alias_analysis/, escape_scan/, library_effects/,
                      builtin_effects/, conflicts/, parallel_analysis/, explainer/,
@@ -127,16 +134,14 @@ compiler/
                      store_scanner/ (+ store_stmts/, store_exprs/, store_calls/)
   lower/             lower_pass/, lowering/ (Lowering), module_builder/, runtime_functions/,
                      function_builder/, function_frame/, layouts/; expr/ stmt/ values/ objects/
-                     functions/ classes/ types/ errors/ iterators/ async/ memory/
+                     functions/ classes/ types/ errors/ iterators/ async/ memory/;
+                     library/ — library_lowerer/ (интерфейс), lowerer_registry/, <тема>/
+                     (<тема>_library_lowerer/ и классы IR)
   optimize/          optimize_pass/, runtime_linker/, target/
   emit/              emit_pass/, object_file/, file_writer/, ir_writer/
   link/              link_pass/, linker/, licenses/, licenses_pass/
   packages/          по классу на папку: manifest/, lock/, resolver/, package_graph/, jsr_client/,
-                     git_client/, http_client/, json_parser/, scanner/, port/…
-  library/           feature/, feature_registry/; темы: builtin_modules bytes child_process
-                     console crypto date decimal events fs intl json math os path process
-                     reflect regex result stream tz_modules weakref — в каждой <тема>_feature/,
-                     классы IR и общие помощники; классы проверки — в pipeline/check_program/topics/
+                     git_client/, http_client/, json_parser/, scanner/, port/, project_packages/…
   knowledge/         записи о программе для редактора и ИИ: knowledge_pass/, knowledge_answers/…
   lsp/               tz lsp: lsp_server/, lsp_check/ (дочерняя проверка), lsp_features/…
   mcp/               tz mcp: mcp_server/
@@ -158,16 +163,16 @@ library/             по теме на папку; stream/stream.tz (класс
 Что не так, как в цели, и почему:
 
 - **`enum Builtin` остался.** Вызов темы несёт `call->builtin`, а не `call.feature` и `call.op`;
-  `LowerPass` находит тему вызова через `FeatureRegistry::lowering(builtin)`. Значения `Builtin`
+  `LowerPass` находит тему вызова через `LowererRegistry::find(builtin)`. Значения `Builtin`
   встречаются в 147 файлах (2249 мест), по ним идут 71 `switch`, а несколько проверок сравнивают
   значения по порядку (`b >= Builtin::ArrForEach && b <= Builtin::ArrSortWith`): заменить их на
   списки операций тем — отдельный шаг со своей проверкой.
-- **`Checker` и `Lowering` держат общее состояние прохода** — поля, которые нужны многим классам
-  (`checker.h` — 1172 строки, `lowering.h` — 771), а не только ссылки.
+- **`Lowering` держит общее состояние прохода** — поля, которые нужны многим классам (`lowering.h`),
+  а не только ссылки. У движка `semantic/` состояние разложено по группам `semantic_state/`.
 - **Крючки тем** — те, что понадобились: `prepare`, `declare`, `checkAnyCall`, `checkStaticCall`,
   `checkMethodCall`, `methodReceiver`, `checkClassMethodCall`, `checkValueMethodCall`,
-  `checkFunctionCall`, `checkLibraryCall`, `lowers` и `lowerCall`; для встроенных модулей —
-  `exportProblem` (есть ли такое имя у модуля), `checkModuleCall` (вызов `join` из `node:path`),
+  `checkFunctionCall`, `checkLibraryCall`; для встроенных модулей —
+  `exportFound` (есть ли такое имя у модуля), `checkModuleCall` (вызов `join` из `node:path`),
   `checkModuleValue` (`sep`, `EOL`) и `checkModuleMember` (`constants.F_OK`).
   `builtin_modules` знает только имена модулей `node:*` и `tz:io` и привязывает импорты, а что
   делает модуль, решает его тема: `path`, `os`, `fs` (`fs`, `fs/promises`, `readline`, `tz:io`),
@@ -180,7 +185,36 @@ library/             по теме на папку; stream/stream.tz (класс
   `FilePort` (848) и десяток файлов по 500–600 строк; функции по 200–450 строк — большие `switch`
   по `Builtin`, которые уйдут вместе с ним.
 - **Конвейер** чуть другой, чем в разделе «Конвейер»: `checkProgram` отдаёт `Errors`, а круги
-  карт событий повторяют проходы от загрузки до `WholeProgramPass`.
+  карт событий повторяют прогоны от загрузки до межпроцедурных проверок.
+
+### Движок `semantic/` (9 ноября)
+
+Раскладка — по образцу `tmp/project_struct/`, правки сверх переносов — `tmp/project_struct.md`.
+
+- **Фасад.** `SemanticExternalFacade` (`semantic/semantic_external.h`) — единственный вход в движок:
+  `declareProgram`, `inferProgram`, `walkBodies`, `checkInstances`, `finishProgram`, `takeInventory`,
+  `getDiagnostics`, `isInsideLibrary`, `getWideningStore` и статические вопросы о типах
+  (`isImplicitlyConvertible`, `copiesIntoRecord`, `awaitedType`, `narrowingsOf`, `decimalLiteral`,
+  `loadChain`, `quotedName`). Прогоны `pipeline/check_program/*_pass` — по строке на вызов фасада.
+  Фасад создаёт `FeatureRegistry`; `SemanticState` держит только список `const Feature *`.
+- **Ярусы.** Внутри движка вызовы идут вниз: `infer/`, `library/` → `bodies/` → `flow/`,
+  `declare/` → `generics/` → `types/`, `names/` → `feature/`, `semantic_state/`. Вверх — только
+  через интерфейсы: `Feature` (`semantic/feature/`, реализуют `semantic/library/<тема>`) и
+  `Completer` (`program/symbols/completer/`, реализует `semantic/infer/return_completer/`).
+- **Движок не подключает** `load/`, `lower/` и прочие проходы — только `program/`, `result/`,
+  `union/`. Встроенные тексты на tz (`library/core/prelude.d.tz`, `core/iterate.tz`,
+  `fs/fs_errors.d.tz`, `crypto/crypto_errors.d.tz`, `child_process/child_errors.d.tz`) разбирает
+  `LoadPass` в `SourceFile::builtins`; копии функций и generic-классов делает `AstCloner`
+  (`program/ast/ast_cloner/`) из чистого двойника, который `Parser::parseSourceFile` откладывает
+  сразу после разбора (`FunctionDecl::pristine`, `ClassDecl::pristine`).
+- **Движок не пишет в программу.** Факты для понижения и анализов (`usesAsync`, подтипы, виды,
+  копии generic, `nativeError`, поздние классы…) копит `InventoryStore`; `checkProgram` кладёт их
+  в `SourceFile::inventory` (`ProgramInventory`, `program/program_inventory/`) после
+  `finishProgram` и до межпроцедурных проверок.
+- **Тип возврата по требованию.** У `FuncSymbol` поле `ret` закрыто: `getReturnType()` достраивает
+  тип через `Completer`, `getKnownReturnType()` читает без вывода, `hasReturnType()`.
+- **Понижение тем.** `LibraryLowerer` (`lower/library/library_lowerer/`) и `LowererRegistry`;
+  у каждой темы — `<Тема>LibraryLowerer`. `Feature` про понижение не знает.
 
 ## Конвейер
 
@@ -544,6 +578,10 @@ link/
 ```
 
 ## Темы библиотеки: `compiler/library/`, `runtime/library/`, `library/`
+
+Цель 25 октября. С 9 ноября C++-часть тем разложена по проходам: проверка —
+`compiler/semantic/library/<тема>/`, IR — `compiler/lower/library/<тема>/`, справочники без
+проверки — `compiler/program/library/<тема>/` (раздел «Сейчас», «Движок `semantic/`»).
 
 Тема — то, что программа берёт из глобального имени или модуля. У темы одно имя во всех трёх
 деревьях; в каждом лежит её код своего вида.

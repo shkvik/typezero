@@ -13,7 +13,7 @@ public:
   Stmt *parseEnum();
 
 private:
-  Parser &parser_;
+  Parser &parser;
 };
 
 }

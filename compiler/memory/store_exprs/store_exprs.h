@@ -11,7 +11,7 @@ public:
   StoreScanner::Sources expr(const Expr *e);
 
 private:
-  StoreScanner &scanner_;
+  StoreScanner &scanner;
 };
 
 }

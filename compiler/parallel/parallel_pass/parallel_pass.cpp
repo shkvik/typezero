@@ -5,7 +5,7 @@
 namespace tz {
 
 ParallelPlan ParallelPass::run(const Program &program) const {
-  if (!program.file.usesAsync || std::getenv("TZ_NO_PARALLEL")) {
+  if (!program.file.inventory.usesAsync || std::getenv("TZ_NO_PARALLEL")) {
     return ParallelPlan();
   }
 

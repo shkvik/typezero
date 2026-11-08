@@ -1,0 +1,21 @@
+#pragma once
+
+#include "compiler/interprocedural/overflow/overflow_check/overflow_check.h"
+
+namespace tz {
+
+class BuiltinEvaluator {
+public:
+  explicit BuiltinEvaluator(OverflowCheck &check);
+
+  Val evalBuiltin(const CallExpr *call, State &st);
+  Val evalMath(const CallExpr *call, State &st);
+  void checkDateParts(const CallExpr *call, const std::vector<Val> &args);
+
+private:
+  static double monthStart(double months);
+  static Num dateTime(const std::array<Num, 7> &parts);
+  OverflowCheck &check;
+};
+
+}

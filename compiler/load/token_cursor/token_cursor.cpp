@@ -7,9 +7,9 @@
 #include "compiler/load/pattern_parser/pattern_parser.h"
 #include "compiler/load/stmt_parser/stmt_parser.h"
 #include "compiler/load/template_parser/template_parser.h"
-#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/load/type_parser/type_parser.h"
 #include "compiler/load/var_parser/var_parser.h"
+#include "compiler/program/to_utf8/to_utf8.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
@@ -25,7 +25,7 @@ using llvm::isa;
 namespace tz {
 
 TokenCursor::TokenCursor(Parser &parser)
-    : parser_(parser) {}
+    : parser(parser) {}
 
 bool TokenCursor::startsStatement(Tok kind) {
   switch (kind) {
@@ -52,27 +52,27 @@ bool TokenCursor::startsStatement(Tok kind) {
 }
 
 void TokenCursor::advance() {
-  parser_.prevEnd_ = parser_.tok_.text.end();
-  if (parser_.hasPeeked_) {
-    parser_.tok_ = parser_.peeked_;
-    parser_.hasPeeked_ = false;
+  this->parser.prevEnd = this->parser.tok.text.end();
+  if (this->parser.hasPeeked) {
+    this->parser.tok = this->parser.peeked;
+    this->parser.hasPeeked = false;
     return;
   }
-  parser_.tok_ = parser_.lexer_.next();
+  this->parser.tok = this->parser.lexer.next();
 }
 
 const Token &TokenCursor::peek() {
-  if (!parser_.hasPeeked_) {
-    parser_.peekState_ = parser_.lexer_.save();
-    parser_.peeked_ = parser_.lexer_.next();
-    parser_.hasPeeked_ = true;
+  if (!this->parser.hasPeeked) {
+    this->parser.peekState = this->parser.lexer.save();
+    this->parser.peeked = this->parser.lexer.next();
+    this->parser.hasPeeked = true;
   }
 
-  return parser_.peeked_;
+  return this->parser.peeked;
 }
 
 bool TokenCursor::accept(Tok kind) {
-  if (!parser_.tok_.is(kind)) {
+  if (!this->parser.tok.is(kind)) {
     return false;
   }
   advance();
@@ -88,7 +88,8 @@ bool TokenCursor::expect(Tok kind, llvm::StringRef context) {
   if (!context.empty()) {
     message += " " + context.str();
   }
-  error(parser_.tok_.loc(), message + ", found " + TokenKinds::tokSpelling(parser_.tok_.kind));
+  error(this->parser.tok.loc(),
+        message + ", found " + TokenKinds::tokSpelling(this->parser.tok.kind));
 
   return false;
 }
@@ -97,62 +98,64 @@ void TokenCursor::expectSemicolon() {
   if (accept(Tok::Semi)) {
     return;
   }
-  if (parser_.tok_.is(Tok::RBrace) || parser_.tok_.is(Tok::Eof) || parser_.tok_.newlineBefore) {
+  if (this->parser.tok.is(Tok::RBrace) || this->parser.tok.is(Tok::Eof) ||
+      this->parser.tok.newlineBefore) {
     return;
   }
-  error(parser_.tok_.loc(),
-        llvm::Twine("expected ';', found ") + TokenKinds::tokSpelling(parser_.tok_.kind));
+  error(this->parser.tok.loc(),
+        llvm::Twine("expected ';', found ") + TokenKinds::tokSpelling(this->parser.tok.kind));
 }
 
 void TokenCursor::error(llvm::SMLoc loc, const llvm::Twine &message) {
-  if (parser_.recovering_) {
+  if (this->parser.recovering) {
     return;
   }
-  parser_.recovering_ = true;
-  parser_.diags_.error(loc, message);
+  this->parser.recovering = true;
+  this->parser.diags.error(loc, message);
 }
 
 void TokenCursor::report(llvm::SMLoc loc, const llvm::Twine &message) {
-  if (!parser_.recovering_) {
-    parser_.diags_.error(loc, message);
+  if (!this->parser.recovering) {
+    this->parser.diags.error(loc, message);
   }
 }
 
 Parser::Snapshot TokenCursor::snapshot() const {
-  return {parser_.lexer_.save(), parser_.peekState_, parser_.tok_,       parser_.peeked_,
-          parser_.prevEnd_,      parser_.hasPeeked_, parser_.recovering_};
+  return {this->parser.lexer.save(), this->parser.peekState, this->parser.tok,
+          this->parser.peeked,       this->parser.prevEnd,   this->parser.hasPeeked,
+          this->parser.recovering};
 }
 
 void TokenCursor::rewind(Parser::Snapshot s) {
-  parser_.lexer_.restore(std::move(s.lexer));
-  parser_.peekState_ = std::move(s.peekState);
-  parser_.tok_ = s.tok;
-  parser_.peeked_ = s.peeked;
-  parser_.prevEnd_ = s.prevEnd;
-  parser_.hasPeeked_ = s.hasPeeked;
-  parser_.recovering_ = s.recovering;
+  this->parser.lexer.restore(std::move(s.lexer));
+  this->parser.peekState = std::move(s.peekState);
+  this->parser.tok = s.tok;
+  this->parser.peeked = s.peeked;
+  this->parser.prevEnd = s.prevEnd;
+  this->parser.hasPeeked = s.hasPeeked;
+  this->parser.recovering = s.recovering;
 }
 
 void TokenCursor::synchronize() {
-  parser_.recovering_ = false;
+  this->parser.recovering = false;
   for (;;) {
-    if (parser_.tok_.is(Tok::Eof) || parser_.tok_.is(Tok::RBrace)) {
+    if (this->parser.tok.is(Tok::Eof) || this->parser.tok.is(Tok::RBrace)) {
       return;
     }
-    if (parser_.tok_.is(Tok::Semi)) {
+    if (this->parser.tok.is(Tok::Semi)) {
       advance();
       return;
     }
-    bool declaration = parser_.tok_.is(Tok::Identifier) &&
-                       (parser_.tok_.text == "type" || parser_.tok_.text == "interface" ||
-                        parser_.tok_.text == "namespace" || parser_.tok_.text == "module" ||
-                        parser_.tok_.text == "declare" || parser_.tok_.text == "class") &&
+    bool declaration = this->parser.tok.is(Tok::Identifier) &&
+                       (this->parser.tok.text == "type" || this->parser.tok.text == "interface" ||
+                        this->parser.tok.text == "namespace" || this->parser.tok.text == "module" ||
+                        this->parser.tok.text == "declare" || this->parser.tok.text == "class") &&
                        peek().is(Tok::Identifier) && !peek().newlineBefore;
-    declaration |= parser_.tok_.is(Tok::Identifier) &&
-                   (parser_.tok_.text == "import" || parser_.tok_.text == "export" ||
-                    parser_.tok_.text == "throw" || parser_.tok_.text == "try");
-    if (parser_.tok_.newlineBefore &&
-        (TokenCursor::startsStatement(parser_.tok_.kind) || declaration)) {
+    declaration |= this->parser.tok.is(Tok::Identifier) &&
+                   (this->parser.tok.text == "import" || this->parser.tok.text == "export" ||
+                    this->parser.tok.text == "throw" || this->parser.tok.text == "try");
+    if (this->parser.tok.newlineBefore &&
+        (TokenCursor::startsStatement(this->parser.tok.kind) || declaration)) {
       return;
     }
     advance();
@@ -160,10 +163,10 @@ void TokenCursor::synchronize() {
 }
 
 void TokenCursor::skipToClosingBrace() {
-  for (unsigned depth = 0; !parser_.tok_.is(Tok::Eof); advance()) {
-    if (parser_.tok_.is(Tok::LBrace)) {
+  for (unsigned depth = 0; !this->parser.tok.is(Tok::Eof); advance()) {
+    if (this->parser.tok.is(Tok::LBrace)) {
       ++depth;
-    } else if (parser_.tok_.is(Tok::RBrace)) {
+    } else if (this->parser.tok.is(Tok::RBrace)) {
       if (depth == 0) {
         advance();
         return;
@@ -174,7 +177,7 @@ void TokenCursor::skipToClosingBrace() {
 }
 
 llvm::StringRef TokenCursor::textFrom(const char *start) const {
-  return llvm::StringRef(start, static_cast<size_t>(std::max(parser_.prevEnd_, start) - start));
+  return llvm::StringRef(start, static_cast<size_t>(std::max(this->parser.prevEnd, start) - start));
 }
 
 }

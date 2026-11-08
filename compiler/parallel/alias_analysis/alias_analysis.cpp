@@ -1,5 +1,4 @@
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
-#include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
 #include "compiler/parallel/call_walk/call_walk.h"
@@ -13,6 +12,7 @@
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
 #include "compiler/parallel/parallel_model/parallel_model.h"
 #include "compiler/parallel/pieces/pieces.h"
+#include "compiler/program/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -37,7 +37,8 @@ using llvm::dyn_cast_or_null;
 
 using llvm::isa;
 
-AliasAnalysis::AliasAnalysis(Analysis &analysis) : analysis_(analysis) {}
+AliasAnalysis::AliasAnalysis(Analysis &analysis)
+    : analysis(analysis) {}
 
 bool AliasAnalysis::isAllocation(const Expr *e) const {
   e = ParallelHelpers::strip(e);
@@ -49,7 +50,7 @@ bool AliasAnalysis::isAllocation(const Expr *e) const {
     made = ParallelHelpers::strip(a->value);
   }
   if (auto *c = dyn_cast_or_null<CallExpr>(made)) {
-    if (const FunctionDecl *lib = analysis_.libraryEffects.libraryTarget(c)) {
+    if (const FunctionDecl *lib = this->analysis.libraryEffects.libraryTarget(c)) {
       if (made != e) {
         return lib->isAsync;
       }
@@ -94,19 +95,19 @@ Ref AliasAnalysis::refOf(const Expr *e) {
   if (auto *n = dyn_cast<NameExpr>(e); n && n->var()) {
     const VarSymbol *v = n->var();
     if (v->owner() && v->owner()->thisVar() == v) {
-      if (analysis_.fn && analysis_.fn->decl != v->owner()) {
-        if (std::optional<Ref> owned = analysis_.ownership.ownedRef(e)) {
+      if (this->analysis.fn && this->analysis.fn->decl != v->owner()) {
+        if (std::optional<Ref> owned = this->analysis.ownership.ownedRef(e)) {
           return *owned;
         }
       }
       return Ref{RefKind::This, v->owner()};
     }
-    auto it = analysis_.declInit.find(v);
-    if (it != analysis_.declInit.end() && !v->reassigned && isAllocation(it->second)) {
+    auto it = this->analysis.declInit.find(v);
+    if (it != this->analysis.declInit.end() && !v->reassigned && isAllocation(it->second)) {
       if (isLocal(v)) {
         return Ref{RefKind::Local, nullptr};
       }
-      if (std::optional<Ref> owned = analysis_.ownership.ownedRef(e)) {
+      if (std::optional<Ref> owned = this->analysis.ownership.ownedRef(e)) {
         return *owned;
       }
       return Ref{RefKind::Site, it->second};
@@ -115,7 +116,7 @@ Ref AliasAnalysis::refOf(const Expr *e) {
   if (isAllocation(e)) {
     return Ref{RefKind::Local, nullptr};
   }
-  if (std::optional<Ref> owned = analysis_.ownership.ownedRef(e)) {
+  if (std::optional<Ref> owned = this->analysis.ownership.ownedRef(e)) {
     return *owned;
   }
 
@@ -136,16 +137,16 @@ bool AliasAnalysis::isLocal(const VarSymbol *v) {
       !ParallelHelpers::holdsReferences(v->type)) {
     return false;
   }
-  auto it = analysis_.declInit.find(v);
-  if (it == analysis_.declInit.end() || !isAllocation(it->second)) {
+  auto it = this->analysis.declInit.find(v);
+  if (it == this->analysis.declInit.end() || !isAllocation(it->second)) {
     return false;
   }
   if (auto *n = dyn_cast<NewExpr>(it->second);
-      n && n->cls() && analysis_.escapeScan.constructorLeaks(n->cls())) {
+      n && n->cls() && this->analysis.escapeScan.constructorLeaks(n->cls())) {
     return false;
   }
 
-  return !analysis_.escapeScan.escapes(v->owner()).contains(v);
+  return !this->analysis.escapeScan.escapes(v->owner()).contains(v);
 }
 
 const Type *AliasAnalysis::typeOfRef(Ref r) const {
@@ -188,8 +189,8 @@ bool AliasAnalysis::typesMayAlias(const Type *a, const Type *b) {
   }
   auto key = std::make_pair(std::min(a, b, std::less<const Type *>()),
                             std::max(a, b, std::less<const Type *>()));
-  auto found = analysis_.alias.find(key);
-  if (found != analysis_.alias.end()) {
+  auto found = this->analysis.alias.find(key);
+  if (found != this->analysis.alias.end()) {
     return found->second;
   }
   bool result = false;
@@ -198,7 +199,7 @@ bool AliasAnalysis::typesMayAlias(const Type *a, const Type *b) {
     result = ParallelHelpers::holdsReferences(a) && ParallelHelpers::holdsReferences(b);
   } else if (a->isUnion() || b->isUnion()) {
     const Type *u = a->isUnion() ? a : b, *other = a->isUnion() ? b : a;
-    analysis_.alias[key] = false;
+    this->analysis.alias[key] = false;
     for (const Type *m : u->members()) {
       if (typesMayAlias(m, other)) {
         result = true;
@@ -218,19 +219,19 @@ bool AliasAnalysis::typesMayAlias(const Type *a, const Type *b) {
     result = objectTypesMayAlias(a, b);
   }
 
-  return analysis_.alias[key] = result;
+  return this->analysis.alias[key] = result;
 }
 
 bool AliasAnalysis::objectTypesMayAlias(const Type *a, const Type *b) {
   if (a == b || a->isSubtypeOf(b) || b->isSubtypeOf(a)) {
     return true;
   }
-  for (const Type *t : analysis_.program.subtypes) {
+  for (const Type *t : this->analysis.program.inventory.subtypes) {
     if (t->isSubtypeOf(a) && t->isSubtypeOf(b)) {
       return true;
     }
   }
-  for (const auto &[x, y] : analysis_.program.views) {
+  for (const auto &[x, y] : this->analysis.program.inventory.views) {
     if ((x == a && y == b) || (x == b && y == a)) {
       return true;
     }
@@ -240,8 +241,8 @@ bool AliasAnalysis::objectTypesMayAlias(const Type *a, const Type *b) {
 }
 
 const std::vector<const Type *> &AliasAnalysis::inside(const Type *type) {
-  auto found = analysis_.reach.find(type);
-  if (found != analysis_.reach.end()) {
+  auto found = this->analysis.reach.find(type);
+  if (found != this->analysis.reach.end()) {
     return found->second;
   }
   std::vector<const Type *> out;
@@ -299,7 +300,7 @@ const std::vector<const Type *> &AliasAnalysis::inside(const Type *type) {
         }
         down.insert(down.end(), cls->children.begin(), cls->children.end());
       }
-      for (const Type *sub : analysis_.program.subtypes) {
+      for (const Type *sub : this->analysis.program.inventory.subtypes) {
         if (sub != t && sub->isSubtypeOf(t)) {
           fieldsOf(sub);
         }
@@ -318,7 +319,7 @@ const std::vector<const Type *> &AliasAnalysis::inside(const Type *type) {
     parts(t);
   }
 
-  return analysis_.reach[type] = std::move(out);
+  return this->analysis.reach[type] = std::move(out);
 }
 
 bool AliasAnalysis::mayReach(Ref from, Ref to, bool innerOnly) {
@@ -352,14 +353,14 @@ bool AliasAnalysis::locsMayMeet(const Loc &a, const Loc &b) {
   if (a.kind == LocKind::Contents || b.kind == LocKind::Contents) {
     const Loc &c = a.kind == LocKind::Contents ? a : b;
     const Loc &o = a.kind == LocKind::Contents ? b : a;
-    return mayReach(c.ref, o.ref, c.key == analysis_.inner) ||
-           (o.kind == LocKind::Contents && mayReach(o.ref, c.ref, o.key == analysis_.inner));
+    return mayReach(c.ref, o.ref, c.key == this->analysis.inner) ||
+           (o.kind == LocKind::Contents && mayReach(o.ref, c.ref, o.key == this->analysis.inner));
   }
   if (a.kind == LocKind::Field || b.kind == LocKind::Field) {
     if (a.kind != b.kind) {
       return false;
     }
-    return (a.key == b.key || a.key == analysis_.star || b.key == analysis_.star) &&
+    return (a.key == b.key || a.key == this->analysis.star || b.key == this->analysis.star) &&
            sameObject(a.ref, b.ref);
   }
 

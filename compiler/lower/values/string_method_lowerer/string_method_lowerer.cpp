@@ -46,26 +46,26 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
           std::all_of(call->args.begin() + i + 1, call->args.end(), AssignLowerer::cannotAssign);
       strings.push_back(this->lowering.refCounts().emitOperand(arg, later));
     } else {
-      numbers.push_back(this->lowering.builder_.CreateSExt(
-          this->lowering.exprLowerer().emitExpr(arg), this->lowering.builder_.getInt64Ty()));
+      numbers.push_back(this->lowering.builder.CreateSExt(
+          this->lowering.exprLowerer().emitExpr(arg), this->lowering.builder.getInt64Ty()));
     }
   }
   auto optional = [&](size_t i) -> std::pair<llvm::Value *, llvm::Value *> {
     if (i < numbers.size()) {
-      return {numbers[i], this->lowering.builder_.getInt32(1)};
+      return {numbers[i], this->lowering.builder.getInt32(1)};
     }
 
-    return {this->lowering.builder_.getInt64(0), this->lowering.builder_.getInt32(0)};
+    return {this->lowering.builder.getInt64(0), this->lowering.builder.getInt32(0)};
   };
   auto optionalString = [&](size_t i) -> std::array<llvm::Value *, 3> {
     if (i < strings.size()) {
       return {this->lowering.stringLowerer().stringObj(strings[i].value),
               this->lowering.stringLowerer().stringMeta(strings[i].value),
-              this->lowering.builder_.getInt32(1)};
+              this->lowering.builder.getInt32(1)};
     }
 
-    return {llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()),
-            this->lowering.builder_.getInt64(0), this->lowering.builder_.getInt32(0)};
+    return {llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy()),
+            this->lowering.builder.getInt64(0), this->lowering.builder.getInt32(0)};
   };
 
   llvm::Value *obj = this->lowering.stringLowerer().stringObj(receiver.value);
@@ -76,14 +76,14 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
     case Builtin::StrCharCodeAt: {
       llvm::Value *position = numbers[0];
       auto read = [&]() -> llvm::Value * {
-        return this->lowering.builder_.CreateSExt(
-            this->lowering.builder_.CreateCall(this->lowering.rt_.strCharCodeAt,
-                                               {obj, meta, position}),
-            this->lowering.builder_.getInt64Ty());
+        return this->lowering.builder.CreateSExt(
+            this->lowering.builder.CreateCall(this->lowering.rt_.strCharCodeAt,
+                                              {obj, meta, position}),
+            this->lowering.builder.getInt64Ty());
       };
       result = call->mayBeOutOfRange
                    ? this->lowering.arrayLowerer().emitCheckedRead(
-                         this->lowering.builder_.CreateICmpULT(
+                         this->lowering.builder.CreateICmpULT(
                              position, this->lowering.stringLowerer().stringLength(receiver.value)),
                          call->type, read)
                    : read();
@@ -92,22 +92,22 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
     case Builtin::StrAt: {
       llvm::Value *length = this->lowering.stringLowerer().stringLength(receiver.value);
       llvm::Value *position = numbers[0];
-      position = this->lowering.builder_.CreateSelect(
-          this->lowering.builder_.CreateICmpSLT(position, this->lowering.builder_.getInt64(0)),
-          this->lowering.builder_.CreateAdd(position, length), position);
+      position = this->lowering.builder.CreateSelect(
+          this->lowering.builder.CreateICmpSLT(position, this->lowering.builder.getInt64(0)),
+          this->lowering.builder.CreateAdd(position, length), position);
       auto read = [&] {
         return this->lowering.stringLowerer().callReturningString(this->lowering.rt_.strCharAt,
                                                                   {obj, meta, position});
       };
       result = call->mayBeOutOfRange
                    ? this->lowering.arrayLowerer().emitCheckedRead(
-                         this->lowering.builder_.CreateICmpULT(position, length), call->type, read)
+                         this->lowering.builder.CreateICmpULT(position, length), call->type, read)
                    : read();
       break;
     }
     case Builtin::StrSlice:
     case Builtin::StrSubstring: {
-      llvm::Value *start = numbers.empty() ? this->lowering.builder_.getInt64(0) : numbers[0];
+      llvm::Value *start = numbers.empty() ? this->lowering.builder.getInt64(0) : numbers[0];
       auto [end, hasEnd] = optional(1);
       result = this->lowering.stringLowerer().callReturningString(
           call->builtin() == Builtin::StrSlice ? this->lowering.rt_.strSlice
@@ -126,13 +126,12 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
                                                       : this->lowering.rt_.strEndsWith;
       llvm::Value *search = strings[0].value;
       auto [position, hasPosition] = optional(0);
-      result = this->lowering.builder_.CreateCall(
+      result = this->lowering.builder.CreateCall(
           fn, {obj, meta, this->lowering.stringLowerer().stringObj(search),
                this->lowering.stringLowerer().stringMeta(search), position, hasPosition});
-      result =
-          call->builtin() != Builtin::StrIndexOf
-              ? this->lowering.builder_.CreateICmpNE(result, this->lowering.builder_.getInt32(0))
-              : this->lowering.builder_.CreateSExt(result, this->lowering.builder_.getInt64Ty());
+      result = call->builtin() != Builtin::StrIndexOf
+                   ? this->lowering.builder.CreateICmpNE(result, this->lowering.builder.getInt32(0))
+                   : this->lowering.builder.CreateSExt(result, this->lowering.builder.getInt64Ty());
       break;
     }
     case Builtin::StrRepeat:
@@ -143,19 +142,19 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
     case Builtin::StrCharAt:
       result = this->lowering.stringLowerer().callReturningString(
           this->lowering.rt_.strCharAtOrEmpty,
-          {obj, meta, numbers.empty() ? this->lowering.builder_.getInt64(0) : numbers[0]});
+          {obj, meta, numbers.empty() ? this->lowering.builder.getInt64(0) : numbers[0]});
       break;
     case Builtin::StrCodePointAt: {
       llvm::Value *position = numbers[0];
       auto read = [&]() -> llvm::Value * {
-        return this->lowering.builder_.CreateSExt(
-            this->lowering.builder_.CreateCall(this->lowering.rt_.strCodePoint,
-                                               {obj, meta, position}),
-            this->lowering.builder_.getInt64Ty());
+        return this->lowering.builder.CreateSExt(
+            this->lowering.builder.CreateCall(this->lowering.rt_.strCodePoint,
+                                              {obj, meta, position}),
+            this->lowering.builder.getInt64Ty());
       };
       result = call->mayBeOutOfRange
                    ? this->lowering.arrayLowerer().emitCheckedRead(
-                         this->lowering.builder_.CreateICmpULT(
+                         this->lowering.builder.CreateICmpULT(
                              position, this->lowering.stringLowerer().stringLength(receiver.value)),
                          call->type, read)
                    : read();
@@ -164,17 +163,17 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
     case Builtin::StrLastIndexOf: {
       llvm::Value *search = strings[0].value;
       auto [position, hasPosition] = optional(0);
-      result = this->lowering.builder_.CreateCall(
+      result = this->lowering.builder.CreateCall(
           this->lowering.rt_.strLastIndexOf,
           {obj, meta, this->lowering.stringLowerer().stringObj(search),
            this->lowering.stringLowerer().stringMeta(search), position, hasPosition});
-      result = this->lowering.builder_.CreateSExt(result, this->lowering.builder_.getInt64Ty());
+      result = this->lowering.builder.CreateSExt(result, this->lowering.builder.getInt64Ty());
       break;
     }
     case Builtin::StrSplit: {
       auto [sepObj, sepMeta, hasSep] = optionalString(0);
       auto [limit, hasLimit] = optional(0);
-      result = this->lowering.builder_.CreateCall(
+      result = this->lowering.builder.CreateCall(
           this->lowering.rt_.strSplit,
           {this->lowering.typeDescriptors().typeDescriptor(Type::string()), obj, meta, sepObj,
            sepMeta, hasSep, limit, hasLimit},
@@ -188,7 +187,7 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
                  : call->builtin() == Builtin::StrTrimEnd ? 2
                                                           : 3;
       result = this->lowering.stringLowerer().callReturningString(
-          this->lowering.rt_.strTrim, {obj, meta, this->lowering.builder_.getInt32(ends)});
+          this->lowering.rt_.strTrim, {obj, meta, this->lowering.builder.getInt32(ends)});
       break;
     }
     case Builtin::StrPadStart:
@@ -197,7 +196,7 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
       result = this->lowering.stringLowerer().callReturningString(
           this->lowering.rt_.strPad,
           {obj, meta, numbers[0], fillObj, fillMeta, hasFill,
-           this->lowering.builder_.getInt32(call->builtin() == Builtin::StrPadStart)});
+           this->lowering.builder.getInt32(call->builtin() == Builtin::StrPadStart)});
       failable = true;
       break;
     }
@@ -218,7 +217,7 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
            this->lowering.stringLowerer().stringMeta(pattern),
            this->lowering.stringLowerer().stringObj(replacement),
            this->lowering.stringLowerer().stringMeta(replacement),
-           this->lowering.builder_.getInt32(call->builtin() == Builtin::StrReplaceAll)});
+           this->lowering.builder.getInt32(call->builtin() == Builtin::StrReplaceAll)});
       break;
     }
     default:
