@@ -15,7 +15,6 @@ public:
   const void *metadataKey(const Expr *key, std::string &label);
   ResultMetadataTyped metadataType(const void *key, llvm::StringRef label, llvm::SMLoc loc,
                                    const Type *expected);
-  void findMetadataWriters(SourceFile &program);
   void checkBodyEarly(FunctionDecl *fn);
   Expr *designClass(const Type *type, llvm::SMLoc loc);
   ClassDecl *designConstructor(const Type *type);

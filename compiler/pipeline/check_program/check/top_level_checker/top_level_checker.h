@@ -16,7 +16,7 @@ public:
   ScopeEntry lookupValue(llvm::StringRef name);
   bool loadEarly(Module *source, llvm::StringRef name);
   ResultSourceIsLoaded checkLoaded(const NameExpr *name);
-  void checkTopLevel(Module *module, llvm::StringRef until = {});
+  void loadTopLevel(Module *module, llvm::StringRef until = {});
   Module *laterSource(llvm::StringRef name, llvm::StringRef &declared);
   static std::string loadChain(const Module *reader, const Module *source);
   ResultVarNotImported checkImportAssign(const NameExpr *name, const VarSymbol *var) const;

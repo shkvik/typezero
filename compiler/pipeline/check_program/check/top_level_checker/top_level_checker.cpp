@@ -15,7 +15,7 @@ namespace tz {
 TopLevelChecker::TopLevelChecker(CheckState &owner)
     : state(owner) {}
 
-void TopLevelChecker::checkTopLevel(Module *module, llvm::StringRef until) {
+void TopLevelChecker::loadTopLevel(Module *module, llvm::StringRef until) {
   ModuleState &here = this->state.getModuleStates().getModuleState(module);
   Module *outer = this->state.getModuleStates().getCurrentModule();
   ModuleDeclarer(this->state).useModule(module);
@@ -112,7 +112,7 @@ bool TopLevelChecker::loadEarly(Module *source, llvm::StringRef name) {
   this->state.getReturnInference().enterModuleLoad();
   bool muted = this->state.getDiagnostics().setMuted(false);
 
-  this->checkTopLevel(source, name);
+  this->loadTopLevel(source, name);
 
   this->state.getDiagnostics().setMuted(muted);
   this->state.getReturnInference().leaveModuleLoad();

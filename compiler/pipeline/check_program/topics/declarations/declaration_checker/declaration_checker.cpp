@@ -100,7 +100,7 @@ DeclarationChecker::exportDeclared(llvm::StringRef name, const llvm::StringSet<>
   return ok(name);
 }
 
-void DeclarationChecker::check(Module *module) {
+void DeclarationChecker::walkDeclarationFile(Module *module) {
   this->checkedModule = module;
   Module *outer = this->state.getModuleStates().getCurrentModule();
   ModuleDeclarer(this->state).useModule(module);

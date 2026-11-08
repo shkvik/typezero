@@ -15,6 +15,16 @@ void Errors::add(const Errors &other) {
   }
 }
 
+void Errors::add(const Warnings &warnings) {
+  for (const Diagnostic &diagnostic : warnings) {
+    add(diagnostic);
+  }
+}
+
+bool Errors::isEmpty() const {
+  return list_.empty();
+}
+
 void Errors::tool(const llvm::Twine &message) {
   add({llvm::SourceMgr::DK_Error, Diagnostic::Form::Tool, llvm::SMLoc(), message.str()});
 }

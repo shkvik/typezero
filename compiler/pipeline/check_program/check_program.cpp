@@ -41,7 +41,19 @@ Errors checkProgram(Program &program, const BuildOptions &options, PassTimes *ti
     clock.stop("infer");
 
     CheckPass check(state, program.file);
-    errors.add(check.run());
+    CheckPass::ResultChecked checked = check.run();
+    if (checked.isErr()) {
+      errors.add(checked.error());
+    } else {
+      PassDone &done = checked.value();
+      switch (done.kind()) {
+        case PassDoneKind::NO_WARNINGS:
+          break;
+        case PassDoneKind::WITH_WARNINGS:
+          errors.add(done.as<WithWarnings>()->warnings);
+          break;
+      }
+    }
     clock.stop("check");
 
     InstancesPass instances(state);

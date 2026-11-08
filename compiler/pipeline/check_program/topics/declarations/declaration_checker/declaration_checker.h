@@ -12,7 +12,7 @@ namespace tz {
 class DeclarationChecker {
 public:
   explicit DeclarationChecker(CheckState &owner);
-  void check(Module *module);
+  void walkDeclarationFile(Module *module);
 
 private:
   struct Exported {

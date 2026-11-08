@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/program/diagnostic/diagnostic.h"
+#include "compiler/program/warnings/warnings.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/SMLoc.h"
 #include <vector>
@@ -11,10 +12,12 @@ class Errors {
 public:
   void add(Diagnostic diagnostic);
   void add(const Errors &other);
+  void add(const Warnings &warnings);
   void tool(const llvm::Twine &message);
   void raw(const llvm::Twine &text, llvm::SourceMgr::DiagKind kind = llvm::SourceMgr::DK_Error);
 
   explicit operator bool() const { return errorCount_ != 0; }
+  bool isEmpty() const;
 
   std::vector<Diagnostic>::const_iterator begin() const { return list_.begin(); }
   std::vector<Diagnostic>::const_iterator end() const { return list_.end(); }

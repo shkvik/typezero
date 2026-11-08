@@ -1,5 +1,4 @@
 #include "compiler/pipeline/check_program/topics/reflect/metadata_checker/metadata_checker.h"
-#include "compiler/pipeline/check_program/ast_walker/ast_walker.h"
 #include "compiler/pipeline/check_program/declare/class_declarer/class_declarer.h"
 #include "compiler/pipeline/check_program/infer/return_inferrer/return_inferrer.h"
 #include "compiler/pipeline/check_program/scopes/scopes.h"
@@ -62,33 +61,6 @@ const void *MetadataChecker::metadataKey(const Expr *key, std::string &label) {
   }
 
   return entry.cls();
-}
-
-void MetadataChecker::findMetadataWriters(SourceFile &program) {
-  for (Module *module : program.modules) {
-    for (Stmt *item : module->file.items) {
-      std::vector<FunctionDecl *> fns;
-      if (auto *fn = dyn_cast<FunctionDecl>(item)) {
-        fns.push_back(fn);
-      } else if (auto *cls = dyn_cast<ClassDecl>(item)) {
-        fns = cls->methods;
-      }
-      for (FunctionDecl *fn : fns) {
-        AstWalker::visitExprs(fn, [&](const Expr *e) {
-          auto *call = dyn_cast<CallExpr>(e);
-          auto *member = call ? dyn_cast<MemberExpr>(call->callee) : nullptr;
-          auto *object = member ? dyn_cast<NameExpr>(member->object) : nullptr;
-          if (!object || object->name != "Reflect" || member->name != "defineMetadata" ||
-              call->args.empty()) {
-            return;
-          }
-          if (auto *key = dyn_cast<NameExpr>(call->args[0])) {
-            this->state.getReflectStore().addMetadataWriter(key->name, fn);
-          }
-        });
-      }
-    }
-  }
 }
 
 void MetadataChecker::checkBodyEarly(FunctionDecl *fn) {

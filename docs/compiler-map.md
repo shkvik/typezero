@@ -45,11 +45,14 @@ pipeline/                          конвейер проходов
       type_context/                TypeContext: где сейчас разбор типа — extends, хвостовые вызовы, назначения
       widening_store/              WideningStore: расширения типов, которые надо проверить по программе
     declare/                       проход DeclarePass: классы, функции, типы, импорты
+      assigned_fields/             AssignedFields: имена полей, в которые где-то присваивают
       class_declarer/              ClassDeclarer: классы — поля, методы, перегрузки
       constant_folder/             ConstantFolder: значения констант при сборке, переполнение в них
       declare_pass/                DeclarePass: объявляет всё, что есть в модулях
       import_binder/               ImportBinder: связывает импорты с экспортами
+      metadata_writers/            MetadataWriters: какие функции пишут Reflect.defineMetadata по ключу
       module_declarer/             ModuleDeclarer: модули, их экспорты, поиск имени
+      names_in_functions/          NamesInFunctions: имена верхнего уровня, нужные внутри функций
       prelude/                     Prelude: встроенные типы (FetchError, Result…) — строка kPrelude
       type_declarer/               TypeDeclarer: type, interface, enum
     event_rounds/                  EventRounds: круги проверки, пока карты событий не перестанут меняться
