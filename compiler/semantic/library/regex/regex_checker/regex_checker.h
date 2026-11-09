@@ -34,6 +34,7 @@ public:
 private:
   using ResultParsedFlags = Result<uint32_t, RegexCheckerParsedFlagsError>;
 
+  static bool assignsName(llvm::ArrayRef<const Stmt *> stmts, llvm::StringRef name);
   static ResultParsedFlags parsedFlags(const std::u16string &flags);
   static std::u16string units(const uint32_t *program, uint32_t start, uint32_t length);
   static bool isFlag(llvm::StringRef name, uint32_t &flag);

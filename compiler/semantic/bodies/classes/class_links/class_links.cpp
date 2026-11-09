@@ -2,12 +2,12 @@
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/bodies/classes/overload_resolver/overload_resolver_errors.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
+#include "compiler/semantic/declare/class_tree/class_tree.h"
 #include "compiler/semantic/generics/generic_class_instantiator/generic_class_instantiator.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/stream/chunk_types/chunk_types.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
-#include <functional>
 
 namespace tz {
 
@@ -123,22 +123,30 @@ FunctionDecl *ClassLinks::soleImplementation(const ClassDecl *cls, FunctionDecl 
   }
   FunctionDecl *only = variant->isAbstract() ? nullptr : variant;
   unsigned count = only ? 1 : 0;
-  std::function<void(const ClassDecl *)> walk = [&](const ClassDecl *c) {
-    for (const ClassDecl *child : c->children) {
-      for (FunctionDecl *fn : ClassLinks::ownMethods(child)) {
-        if (!fn->isAbstract() && fn != variant && ClassLinks::overridesTransitively(fn, variant)) {
-          only = fn;
-          count += child->isEmitted() ? 1 : 2;
-        }
+  std::vector<ClassDecl *> below =
+      cls != nullptr ? ClassTree::descendants(cls) : std::vector<ClassDecl *>();
+  for (const ClassDecl *child : below) {
+    for (FunctionDecl *fn : ClassLinks::ownMethods(child)) {
+      if (!fn->isAbstract() && fn != variant && ClassLinks::overridesTransitively(fn, variant)) {
+        only = fn;
+        count += child->isEmitted() ? 1 : 2;
       }
-      walk(child);
     }
-  };
-  if (cls) {
-    walk(cls);
   }
 
   return count == 1 ? only : nullptr;
+}
+
+FunctionDecl *ClassLinks::firstImplementation(const ClassDecl *cls, const FunctionDecl *fn) {
+  for (const ClassDecl *child : ClassTree::descendants(cls)) {
+    for (FunctionDecl *impl : ClassLinks::ownMethods(child)) {
+      if (!impl->isAbstract() && ClassLinks::overridesTransitively(impl, fn)) {
+        return impl;
+      }
+    }
+  }
+
+  return nullptr;
 }
 
 const Type *ClassLinks::commonClass(const Type *a, const Type *b) {
@@ -157,18 +165,7 @@ const Type *ClassLinks::commonClass(const Type *a, const Type *b) {
 }
 
 void ClassLinks::linkClasses() {
-  std::vector<ClassDecl *> order;
-  std::function<void(ClassDecl *)> visit = [&](ClassDecl *cls) {
-    order.push_back(cls);
-    for (ClassDecl *child : cls->children) {
-      visit(child);
-    }
-  };
-  for (ClassDecl *cls : this->state.getClassStore().getClasses()) {
-    if (!cls->parent && !cls->literal()) {
-      visit(cls);
-    }
-  }
+  std::vector<ClassDecl *> order = ClassTree::treeOrder(this->state.getClassStore().getClasses());
 
   for (ClassDecl *cls : order) {
     this->linkOverrides(cls);
@@ -190,18 +187,7 @@ void ClassLinks::linkClasses() {
         continue;
       }
       if (fn->isAbstract() && !fn->overrides()) {
-        FunctionDecl *source = nullptr;
-        std::function<void(const ClassDecl *)> find = [&](const ClassDecl *c) {
-          for (const ClassDecl *child : c->children) {
-            for (FunctionDecl *impl : ClassLinks::ownMethods(child)) {
-              if (!source && !impl->isAbstract() && ClassLinks::overridesTransitively(impl, fn)) {
-                source = impl;
-              }
-            }
-            find(child);
-          }
-        };
-        find(cls);
+        FunctionDecl *source = ClassLinks::firstImplementation(cls, fn);
         fn->sym->setReturnType(nullptr);
         this->state.getClassStore().rememberReturnSource(fn, source);
         if (source) {
@@ -242,18 +228,7 @@ void ClassLinks::linkClasses() {
 }
 
 void ClassLinks::numberClasses() {
-  std::vector<ClassDecl *> order;
-  std::function<void(ClassDecl *)> visit = [&](ClassDecl *cls) {
-    order.push_back(cls);
-    for (ClassDecl *child : cls->children) {
-      visit(child);
-    }
-  };
-  for (ClassDecl *cls : this->state.getClassStore().getClasses()) {
-    if (!cls->parent && !cls->literal()) {
-      visit(cls);
-    }
-  }
+  std::vector<ClassDecl *> order = ClassTree::treeOrder(this->state.getClassStore().getClasses());
   unsigned next = 0;
   for (ClassDecl *cls : order) {
     cls->id = ++next;

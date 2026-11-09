@@ -2,6 +2,7 @@
 
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/stmt/return_checker/return_checker_errors.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
@@ -17,6 +18,11 @@ class TypeRelations;
 class ConditionFacts;
 class EmitterChecker;
 class PredicateChecker;
+
+struct ReturnPart {
+  const Stmt *stmt;
+  std::vector<llvm::StringRef> labels;
+};
 
 class ReturnChecker {
 public:
@@ -39,6 +45,12 @@ private:
   static bool isTrueLiteral(const Expr *expr);
   ResultInsideOfFunction enclosingFunction() const;
   static bool breaksTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels);
+  static NodeChildren<ReturnPart> returnParts(ReturnPart part);
+  static ReturnPart unlabeled(const ReturnPart &part);
+  static NodeChildren<const Stmt *> ifBranches(const IfStmt *s);
+  static const std::vector<Stmt *> *switchTail(const SwitchStmt *s,
+                                               llvm::ArrayRef<llvm::StringRef> labels);
+  static bool nodeReturns(const ReturnPart &part, std::vector<bool> &answers);
   static ResultVoidReturnsEmpty voidReturn(const Type *type, const FuncSymbol *fn);
   static ResultValueNotRequired valueRequired(const Type *returned, const FuncSymbol *fn);
   static ResultAwaitNotReturned awaitReturned(const ReturnStmt *ret, const FuncSymbol *fn);

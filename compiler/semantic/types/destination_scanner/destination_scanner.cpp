@@ -7,6 +7,7 @@
 #include "compiler/semantic/bodies/iterators/iterable_checker/iterable_checker.h"
 #include "compiler/semantic/bodies/shared_helpers/shared_helpers.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/flow/predicate_checker/predicate_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -15,6 +16,7 @@
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
+#include <deque>
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -44,144 +46,172 @@ bool DestinationScanner::isResultLiteral(const CallExpr *call) {
 }
 
 bool DestinationScanner::scanDestinations(llvm::ArrayRef<Stmt *> stmts, DestinationScan &scan) {
-  for (const Stmt *stmt : stmts) {
-    if (auto *fn = dyn_cast<FunctionDecl>(stmt); fn && fn->name == scan.getName()) {
-      return false;
-    }
-  }
-  scan.enterScope();
-  for (const Stmt *stmt : stmts) {
-    if (auto *fn = dyn_cast<FunctionDecl>(stmt)) {
-      scan.declare(fn->name, this->destination->declaredFunctionType(fn));
-    }
-  }
-  bool visible = true;
-  for (const Stmt *stmt : stmts) {
-    this->scanDestinations(stmt, scan);
-    if (auto *decl = dyn_cast<VarDeclStmt>(stmt);
-        decl && llvm::any_of(decl->decls,
-                             [&](const VarDeclarator &v) { return v.name == scan.getName(); })) {
-      visible = false;
-      break;
-    }
-  }
-  scan.leaveScope();
+  this->runScan(StartList{stmts}, scan);
+  bool hidesName = llvm::any_of(stmts, [&](const Stmt *stmt) {
+    auto *fn = dyn_cast<FunctionDecl>(stmt);
+    return (fn != nullptr && fn->name == scan.getName()) ||
+           DestinationScanner::declaresName(stmt, scan.getName());
+  });
 
-  return visible;
+  return !hidesName;
 }
 
 void DestinationScanner::scanFunctionDestinations(const FunctionDecl *fn, DestinationScan &scan) {
-  if (!fn->body ||
-      llvm::any_of(fn->params, [&](const Param &p) { return p.name == scan.getName(); })) {
-    return;
-  }
-  const Type *outer = scan.getReturns();
-  const Type *returned =
-      fn->returnType
-          ? this->predicateChecker->resolveReturnType(const_cast<FunctionDecl *>(fn), nullptr)
-          : nullptr;
-  scan.setReturns(returned);
-  scan.enterScope();
-  for (const Param &param : fn->params) {
-    const Type *type = param.type && !this->iterableChecker->isIterableRef(*param.type)
-                           ? this->typeResolver->resolveType(*param.type, false)
-                           : nullptr;
-    if (param.defaultValue()) {
-      this->scanDestinations(param.defaultValue(), type, scan);
-    }
-    scan.declare(param.name, type && param.optional() ? Type::optional(type) : type);
-  }
-  this->scanDestinations(fn->body->body, scan);
-  scan.leaveScope();
-  scan.setReturns(outer);
+  this->runScan(ScanFunction{fn}, scan);
 }
 
 void DestinationScanner::scanDestinations(const Stmt *stmt, DestinationScan &scan) {
+  this->runScan(ScanStmt{stmt}, scan);
+}
+
+void DestinationScanner::scanDestinations(const Expr *expr, const Type *sink,
+                                          DestinationScan &scan) {
+  this->runScan(ScanExpr{expr, sink}, scan);
+}
+
+void DestinationScanner::runScan(ScanStep first, DestinationScan &scan) {
+  ScanRun run{scan, {std::move(first)}, {}};
+  while (!run.steps.empty()) {
+    ScanStep step = std::move(run.steps.back());
+    run.steps.pop_back();
+    this->applyStep(step, run);
+  }
+}
+
+void DestinationScanner::applyStep(const ScanStep &step, ScanRun &run) {
+  switch (step.kind()) {
+    case ScanStepKind::START_LIST:
+      this->startList(*step.as<StartList>(), run);
+      break;
+    case ScanStepKind::LIST_ITEM:
+      DestinationScanner::listItem(*step.as<ListItem>(), run);
+      break;
+    case ScanStepKind::STMT:
+      this->scanStmt(step.as<ScanStmt>()->stmt, run);
+      break;
+    case ScanStepKind::EXPR:
+      this->scanExpr(*step.as<ScanExpr>(), run);
+      break;
+    case ScanStepKind::VAR_DECLARE:
+      this->varDeclare(step.as<VarDeclare>()->d, run);
+      break;
+    case ScanStepKind::DECLARE_NAME:
+      run.scan.declare(step.as<DeclareName>()->name, step.as<DeclareName>()->type);
+      break;
+    case ScanStepKind::LEAVE_SCOPE:
+      run.scan.leaveScope();
+      break;
+    case ScanStepKind::FOR_REST:
+      DestinationScanner::forRest(step.as<ForRest>()->loop, run);
+      break;
+    case ScanStepKind::FOR_OF_REST:
+      DestinationScanner::forOfRest(step.as<ForOfRest>()->loop, run);
+      break;
+    case ScanStepKind::FUNCTION:
+      this->scanFunction(step.as<ScanFunction>()->fn, run);
+      break;
+    case ScanStepKind::PARAM:
+      this->scanParam(step.as<ScanParam>()->param, run);
+      break;
+    case ScanStepKind::FUNCTION_END:
+      DestinationScanner::functionEnd(step.as<FunctionEnd>()->outerReturns, run);
+      break;
+    case ScanStepKind::ASSIGN_VALUE:
+      this->assignValue(step.as<AssignValue>()->assign, run);
+      break;
+  }
+}
+
+void DestinationScanner::startList(const StartList &list, ScanRun &run) {
+  for (const Stmt *stmt : list.stmts) {
+    if (auto *fn = dyn_cast<FunctionDecl>(stmt); fn && fn->name == run.scan.getName()) {
+      return;
+    }
+  }
+  run.scan.enterScope();
+  for (const Stmt *stmt : list.stmts) {
+    if (auto *fn = dyn_cast<FunctionDecl>(stmt)) {
+      run.scan.declare(fn->name, this->destination->declaredFunctionType(fn));
+    }
+  }
+  run.steps.push_back(ListItem{list.stmts, 0});
+}
+
+void DestinationScanner::listItem(const ListItem &item, ScanRun &run) {
+  bool afterDeclaration = item.index > 0 && DestinationScanner::declaresName(
+                                                item.stmts[item.index - 1], run.scan.getName());
+  if (item.index == item.stmts.size() || afterDeclaration) {
+    run.scan.leaveScope();
+  } else {
+    run.steps.push_back(ListItem{item.stmts, item.index + 1});
+    run.steps.push_back(ScanStmt{item.stmts[item.index]});
+  }
+}
+
+bool DestinationScanner::declaresName(const Stmt *stmt, llvm::StringRef name) {
+  auto *decl = dyn_cast<VarDeclStmt>(stmt);
+
+  return decl != nullptr &&
+         llvm::any_of(decl->decls, [&](const VarDeclarator &v) { return v.name == name; });
+}
+
+void DestinationScanner::scanStmt(const Stmt *stmt, ScanRun &run) {
   if (!stmt) {
     return;
   }
-  auto expr = [&](const Expr *e) {
-    if (e) {
-      this->scanDestinations(e, nullptr, scan);
-    }
-  };
   switch (stmt->kind()) {
   case Stmt::Kind::Block:
-    this->scanDestinations(cast<BlockStmt>(stmt)->body, scan);
+    run.steps.push_back(StartList{cast<BlockStmt>(stmt)->body});
     break;
   case Stmt::Kind::VarDecl:
-    for (const VarDeclarator &d : cast<VarDeclStmt>(stmt)->decls) {
-      const Type *type = d.typeAnn ? this->typeResolver->resolveType(*d.typeAnn, false) : nullptr;
-      if (d.init) {
-        this->scanDestinations(d.init, type, scan);
-      }
-      scan.declare(d.name, type);
+    for (const VarDeclarator &d : llvm::reverse(cast<VarDeclStmt>(stmt)->decls)) {
+      run.steps.push_back(VarDeclare{&d});
     }
     break;
   case Stmt::Kind::Function:
-    this->scanFunctionDestinations(cast<FunctionDecl>(stmt), scan);
+    run.steps.push_back(ScanFunction{cast<FunctionDecl>(stmt)});
     break;
   case Stmt::Kind::Expr:
-    expr(cast<ExprStmt>(stmt)->expr);
+    run.steps.push_back(ScanExpr{cast<ExprStmt>(stmt)->expr, nullptr});
     break;
   case Stmt::Kind::If: {
     auto *s = cast<IfStmt>(stmt);
-    expr(s->cond);
-    this->scanDestinations(s->thenStmt, scan);
-    this->scanDestinations(s->elseStmt, scan);
+    run.steps.push_back(ScanStmt{s->elseStmt});
+    run.steps.push_back(ScanStmt{s->thenStmt});
+    run.steps.push_back(ScanExpr{s->cond, nullptr});
     break;
   }
   case Stmt::Kind::While:
-    expr(cast<WhileStmt>(stmt)->cond);
-    this->scanDestinations(cast<WhileStmt>(stmt)->body, scan);
+    run.steps.push_back(ScanStmt{cast<WhileStmt>(stmt)->body});
+    run.steps.push_back(ScanExpr{cast<WhileStmt>(stmt)->cond, nullptr});
     break;
   case Stmt::Kind::DoWhile:
-    this->scanDestinations(cast<DoWhileStmt>(stmt)->body, scan);
-    expr(cast<DoWhileStmt>(stmt)->cond);
+    run.steps.push_back(ScanExpr{cast<DoWhileStmt>(stmt)->cond, nullptr});
+    run.steps.push_back(ScanStmt{cast<DoWhileStmt>(stmt)->body});
     break;
   case Stmt::Kind::For: {
     auto *s = cast<ForStmt>(stmt);
-    scan.enterScope();
-    this->scanDestinations(s->init, scan);
-    if (!scan.isDeclaredInnermost(scan.getName())) {
-      expr(s->cond);
-      expr(s->step);
-      this->scanDestinations(s->body, scan);
-    }
-    scan.leaveScope();
+    run.scan.enterScope();
+    run.steps.push_back(ForRest{s});
+    run.steps.push_back(ScanStmt{s->init});
     break;
   }
   case Stmt::Kind::ForOf: {
     auto *s = cast<ForOfStmt>(stmt);
-    expr(s->iterable);
-    if (s->binding.name == scan.getName()) {
-      break;
-    }
-    scan.enterScope();
-    scan.declare(s->binding.name, nullptr);
-    this->scanDestinations(s->body, scan);
-    scan.leaveScope();
+    run.steps.push_back(ForOfRest{s});
+    run.steps.push_back(ScanExpr{s->iterable, nullptr});
     break;
   }
-  case Stmt::Kind::Switch: {
-    auto *s = cast<SwitchStmt>(stmt);
-    expr(s->discriminant);
-    std::vector<Stmt *> all;
-    for (const SwitchCase &c : s->cases) {
-      expr(c.test);
-      all.insert(all.end(), c.body.begin(), c.body.end());
-    }
-    this->scanDestinations(all, scan);
+  case Stmt::Kind::Switch:
+    DestinationScanner::scanSwitch(cast<SwitchStmt>(stmt), run);
     break;
-  }
   case Stmt::Kind::Labeled:
-    this->scanDestinations(cast<LabeledStmt>(stmt)->body, scan);
+    run.steps.push_back(ScanStmt{cast<LabeledStmt>(stmt)->body});
     break;
   case Stmt::Kind::Return:
     if (const Expr *value = cast<ReturnStmt>(stmt)->value) {
-      this->scanDestinations(
-          value, scan.getReturns() && !scan.getReturns()->isVoid() ? scan.getReturns() : nullptr,
-          scan);
+      const Type *returns = run.scan.getReturns();
+      run.steps.push_back(ScanExpr{value, returns && !returns->isVoid() ? returns : nullptr});
     }
     break;
   default:
@@ -189,148 +219,237 @@ void DestinationScanner::scanDestinations(const Stmt *stmt, DestinationScan &sca
   }
 }
 
-void DestinationScanner::scanDestinations(const Expr *expr, const Type *sink,
-                                          DestinationScan &scan) {
-  auto sub = [&](const Expr *e, const Type *to = nullptr) {
-    if (e) {
-      this->scanDestinations(e, to, scan);
-    }
-  };
-  if (sink && sink->isError()) {
-    sink = nullptr;
+void DestinationScanner::scanSwitch(const SwitchStmt *s, ScanRun &run) {
+  std::vector<Stmt *> &all = run.caseBodies.emplace_back();
+  for (const SwitchCase &c : s->cases) {
+    all.insert(all.end(), c.body.begin(), c.body.end());
   }
+  run.steps.push_back(StartList{all});
+  for (const SwitchCase &c : llvm::reverse(s->cases)) {
+    run.steps.push_back(ScanExpr{c.test, nullptr});
+  }
+  run.steps.push_back(ScanExpr{s->discriminant, nullptr});
+}
+
+void DestinationScanner::varDeclare(const VarDeclarator *d, ScanRun &run) {
+  const Type *type = d->typeAnn ? this->typeResolver->resolveType(*d->typeAnn, false) : nullptr;
+  run.steps.push_back(DeclareName{d->name, type});
+  if (d->init) {
+    run.steps.push_back(ScanExpr{d->init, type});
+  }
+}
+
+void DestinationScanner::forRest(const ForStmt *loop, ScanRun &run) {
+  run.steps.push_back(LeaveScope{});
+  if (!run.scan.isDeclaredInnermost(run.scan.getName())) {
+    run.steps.push_back(ScanStmt{loop->body});
+    run.steps.push_back(ScanExpr{loop->step, nullptr});
+    run.steps.push_back(ScanExpr{loop->cond, nullptr});
+  }
+}
+
+void DestinationScanner::forOfRest(const ForOfStmt *loop, ScanRun &run) {
+  if (loop->binding.name != run.scan.getName()) {
+    run.scan.enterScope();
+    run.scan.declare(loop->binding.name, nullptr);
+    run.steps.push_back(LeaveScope{});
+    run.steps.push_back(ScanStmt{loop->body});
+  }
+}
+
+void DestinationScanner::scanFunction(const FunctionDecl *fn, ScanRun &run) {
+  bool hidden =
+      llvm::any_of(fn->params, [&](const Param &p) { return p.name == run.scan.getName(); });
+  if (!fn->body || hidden) {
+    return;
+  }
+  const Type *outer = run.scan.getReturns();
+  const Type *returned =
+      fn->returnType
+          ? this->predicateChecker->resolveReturnType(const_cast<FunctionDecl *>(fn), nullptr)
+          : nullptr;
+  run.scan.setReturns(returned);
+  run.scan.enterScope();
+  run.steps.push_back(FunctionEnd{outer});
+  run.steps.push_back(StartList{fn->body->body});
+  for (const Param &param : llvm::reverse(fn->params)) {
+    run.steps.push_back(ScanParam{&param});
+  }
+}
+
+void DestinationScanner::scanParam(const Param *param, ScanRun &run) {
+  const Type *type = param->type && !this->iterableChecker->isIterableRef(*param->type)
+                         ? this->typeResolver->resolveType(*param->type, false)
+                         : nullptr;
+  run.steps.push_back(
+      DeclareName{param->name, type && param->optional() ? Type::optional(type) : type});
+  if (param->defaultValue()) {
+    run.steps.push_back(ScanExpr{param->defaultValue(), type});
+  }
+}
+
+void DestinationScanner::functionEnd(const Type *outerReturns, ScanRun &run) {
+  run.scan.leaveScope();
+  run.scan.setReturns(outerReturns);
+}
+
+void DestinationScanner::assignValue(const AssignExpr *assign, ScanRun &run) {
+  const Type *sink = assign->op ? nullptr : this->peekType(assign->target, run.scan);
+  run.steps.push_back(ScanExpr{assign->value, sink});
+}
+
+void DestinationScanner::scanExpr(const ScanExpr &scanned, ScanRun &run) {
+  const Expr *expr = scanned.expr;
+  if (!expr) {
+    return;
+  }
+  const Type *sink = scanned.sink && !scanned.sink->isError() ? scanned.sink : nullptr;
+  std::vector<ScanExpr> parts = this->exprParts(expr, sink, run);
+  for (const ScanExpr &part : llvm::reverse(parts)) {
+    run.steps.push_back(part);
+  }
+}
+
+std::vector<ScanExpr> DestinationScanner::exprParts(const Expr *expr, const Type *sink,
+                                                    ScanRun &run) {
   const Type *object = sink ? sink->nonOptional() : nullptr;
   switch (expr->kind()) {
   case Expr::Kind::Name: {
     auto *name = cast<NameExpr>(expr);
-    if (sink && name->name == scan.getName() && !scan.isHidden(name->name)) {
-      scan.addFound(sink, name->loc());
+    if (sink && name->name == run.scan.getName() && !run.scan.isHidden(name->name)) {
+      run.scan.addFound(sink, name->loc());
     }
-    break;
+    return {};
   }
-  case Expr::Kind::ObjectLit:
+  case Expr::Kind::ObjectLit: {
+    std::vector<ScanExpr> parts;
     for (const ObjectLitExpr::Property &prop : cast<ObjectLitExpr>(expr)->props) {
-      sub(prop.key());
+      parts.push_back(ScanExpr{prop.key(), nullptr});
       const Field *field =
           object && object->isObject() && !prop.spread() ? object->field(prop.name) : nullptr;
-      sub(prop.value, field ? field->type : nullptr);
+      parts.push_back(ScanExpr{prop.value, field ? field->type : nullptr});
     }
-    break;
-  case Expr::Kind::ArrayLit: {
-    auto *lit = cast<ArrayLitExpr>(expr);
-    for (size_t i = 0; i < lit->elements.size(); ++i) {
-      const ArrayLitExpr::Element &e = lit->elements[i];
-      const Type *to = nullptr;
-      if (object && object->isArray()) {
-        to = e.spread ? object : object->inner();
-      } else if (object && object->isTuple() && !e.spread && i < object->fields().size()) {
-        to = object->fields()[i].type;
-      }
-      sub(e.expr, to);
-    }
-    break;
+    return parts;
   }
+  case Expr::Kind::ArrayLit:
+    return DestinationScanner::arrayParts(cast<ArrayLitExpr>(expr), object);
   case Expr::Kind::Conditional: {
     auto *cond = cast<ConditionalExpr>(expr);
-    sub(cond->cond);
-    sub(cond->thenExpr, sink);
-    sub(cond->elseExpr, sink);
-    break;
+    return {ScanExpr{cond->cond, nullptr}, ScanExpr{cond->thenExpr, sink},
+            ScanExpr{cond->elseExpr, sink}};
   }
   case Expr::Kind::Binary: {
     auto *bin = cast<BinaryExpr>(expr);
     bool passes =
         bin->op == BinaryOp::Nullish || bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr;
-    sub(bin->lhs, bin->op == BinaryOp::Nullish ? sink : nullptr);
-    sub(bin->rhs, passes ? sink : nullptr);
-    break;
+    return {ScanExpr{bin->lhs, bin->op == BinaryOp::Nullish ? sink : nullptr},
+            ScanExpr{bin->rhs, passes ? sink : nullptr}};
   }
   case Expr::Kind::Sequence: {
     auto *seq = cast<SequenceExpr>(expr);
+    std::vector<ScanExpr> parts;
     for (size_t i = 0; i < seq->exprs.size(); ++i) {
-      sub(seq->exprs[i], i + 1 == seq->exprs.size() ? sink : nullptr);
+      parts.push_back(ScanExpr{seq->exprs[i], i + 1 == seq->exprs.size() ? sink : nullptr});
     }
-    break;
+    return parts;
   }
-  case Expr::Kind::Assign: {
-    auto *assign = cast<AssignExpr>(expr);
-    auto *target = dyn_cast<NameExpr>(assign->target);
-    if (target && target->name == scan.getName() && !scan.isHidden(target->name)) {
-      if (const Type *type = assign->op ? nullptr : this->peekType(assign->value, scan)) {
-        scan.addFound(type, assign->loc());
-      }
-      sub(assign->value);
-      break;
-    }
-    if (!isa<NameExpr>(assign->target)) {
-      sub(assign->target);
-    }
-    sub(assign->value, assign->op ? nullptr : this->peekType(assign->target, scan));
-    break;
-  }
-  case Expr::Kind::Call: {
-    auto *call = cast<CallExpr>(expr);
-    std::vector<const Type *> params = this->calleeParams(call, scan);
-    sub(call->callee);
-    for (size_t i = 0; i < call->args.size(); ++i) {
-      sub(call->args[i], i < params.size() && !call->spreads(i) ? params[i] : nullptr);
-    }
-    break;
-  }
+  case Expr::Kind::Assign:
+    return this->assignParts(cast<AssignExpr>(expr), run);
+  case Expr::Kind::Call:
+    return this->callParts(cast<CallExpr>(expr), run);
   case Expr::Kind::Function:
-    this->scanFunctionDestinations(cast<FunctionExpr>(expr)->fn, scan);
-    break;
-  case Expr::Kind::Template:
+    run.steps.push_back(ScanFunction{cast<FunctionExpr>(expr)->fn});
+    return {};
+  case Expr::Kind::Template: {
+    std::vector<ScanExpr> parts;
     for (const Expr *e : cast<TemplateExpr>(expr)->exprs) {
-      sub(e);
+      parts.push_back(ScanExpr{e, nullptr});
     }
-    break;
+    return parts;
+  }
   case Expr::Kind::Member:
-    sub(cast<MemberExpr>(expr)->object);
-    break;
+    return {ScanExpr{cast<MemberExpr>(expr)->object, nullptr}};
   case Expr::Kind::Index:
-    sub(cast<IndexExpr>(expr)->object);
-    sub(cast<IndexExpr>(expr)->index);
-    break;
+    return {ScanExpr{cast<IndexExpr>(expr)->object, nullptr},
+            ScanExpr{cast<IndexExpr>(expr)->index, nullptr}};
   case Expr::Kind::Unary:
-    sub(cast<UnaryExpr>(expr)->operand);
-    break;
+    return {ScanExpr{cast<UnaryExpr>(expr)->operand, nullptr}};
   case Expr::Kind::Update:
-    sub(cast<UpdateExpr>(expr)->target);
-    break;
-  case Expr::Kind::New: {
-    auto *create = cast<NewExpr>(expr);
-    const FuncSymbol *ctor = nullptr;
-    if (ClassDecl *cls =
-            scan.isHidden(create->name) ? nullptr : this->scopes->lookup(create->name).cls()) {
-      if (cls->constructors.size() == 1 && cls->constructors[0]->sym &&
-          !cls->constructors[0]->sym->pendingParams) {
-        ctor = cls->constructors[0]->sym;
-      }
-    }
-    for (size_t i = 0; i < create->args.size(); ++i) {
-      sub(create->args[i],
-          ctor && i < ctor->params.size() && !ctor->hasRest ? ctor->params[i] : nullptr);
-    }
-    break;
-  }
+    return {ScanExpr{cast<UpdateExpr>(expr)->target, nullptr}};
+  case Expr::Kind::New:
+    return this->newParts(cast<NewExpr>(expr), run);
   case Expr::Kind::Cast:
-    sub(cast<CastExpr>(expr)->operand);
-    break;
+    return {ScanExpr{cast<CastExpr>(expr)->operand, nullptr}};
   case Expr::Kind::OptionalChain:
-    sub(cast<OptionalChainExpr>(expr)->chain);
-    break;
+    return {ScanExpr{cast<OptionalChainExpr>(expr)->chain, nullptr}};
   case Expr::Kind::Yield:
-    if (const Expr *value = cast<YieldExpr>(expr)->value) {
-      sub(value);
-    }
-    break;
+    return {ScanExpr{cast<YieldExpr>(expr)->value, nullptr}};
   case Expr::Kind::Await:
-    sub(cast<AwaitExpr>(expr)->value);
-    break;
+    return {ScanExpr{cast<AwaitExpr>(expr)->value, nullptr}};
   default:
-    break;
+    return {};
   }
+}
+
+std::vector<ScanExpr> DestinationScanner::arrayParts(const ArrayLitExpr *lit, const Type *object) {
+  std::vector<ScanExpr> parts;
+  for (size_t i = 0; i < lit->elements.size(); ++i) {
+    const ArrayLitExpr::Element &e = lit->elements[i];
+    const Type *to = nullptr;
+    if (object && object->isArray()) {
+      to = e.spread ? object : object->inner();
+    } else if (object && object->isTuple() && !e.spread && i < object->fields().size()) {
+      to = object->fields()[i].type;
+    }
+    parts.push_back(ScanExpr{e.expr, to});
+  }
+
+  return parts;
+}
+
+std::vector<ScanExpr> DestinationScanner::assignParts(const AssignExpr *assign, ScanRun &run) {
+  auto *target = dyn_cast<NameExpr>(assign->target);
+  if (target && target->name == run.scan.getName() && !run.scan.isHidden(target->name)) {
+    if (const Type *type = assign->op ? nullptr : this->peekType(assign->value, run.scan)) {
+      run.scan.addFound(type, assign->loc());
+    }
+    return {ScanExpr{assign->value, nullptr}};
+  }
+  run.steps.push_back(AssignValue{assign});
+  if (!isa<NameExpr>(assign->target)) {
+    return {ScanExpr{assign->target, nullptr}};
+  }
+
+  return {};
+}
+
+std::vector<ScanExpr> DestinationScanner::callParts(const CallExpr *call, ScanRun &run) {
+  std::vector<const Type *> params = this->calleeParams(call, run.scan);
+  std::vector<ScanExpr> parts = {ScanExpr{call->callee, nullptr}};
+  for (size_t i = 0; i < call->args.size(); ++i) {
+    const Type *to = i < params.size() && !call->spreads(i) ? params[i] : nullptr;
+    parts.push_back(ScanExpr{call->args[i], to});
+  }
+
+  return parts;
+}
+
+std::vector<ScanExpr> DestinationScanner::newParts(const NewExpr *create, ScanRun &run) {
+  const FuncSymbol *ctor = nullptr;
+  if (ClassDecl *cls =
+          run.scan.isHidden(create->name) ? nullptr : this->scopes->lookup(create->name).cls()) {
+    if (cls->constructors.size() == 1 && cls->constructors[0]->sym &&
+        !cls->constructors[0]->sym->pendingParams) {
+      ctor = cls->constructors[0]->sym;
+    }
+  }
+  std::vector<ScanExpr> parts;
+  for (size_t i = 0; i < create->args.size(); ++i) {
+    const Type *to = ctor && i < ctor->params.size() && !ctor->hasRest ? ctor->params[i] : nullptr;
+    parts.push_back(ScanExpr{create->args[i], to});
+  }
+
+  return parts;
 }
 
 const Type *DestinationScanner::peekName(llvm::StringRef name, const DestinationScan &scan) const {
@@ -344,53 +463,94 @@ const Type *DestinationScanner::peekName(llvm::StringRef name, const Destination
 }
 
 const Type *DestinationScanner::peekType(const Expr *expr, const DestinationScan &scan) const {
+  std::vector<const Type *> answers;
+  for (const Expr *node : ChildrenFirst::order(expr, DestinationScanner::peekParts)) {
+    const Type *type = this->nodePeekType(node, scan, answers);
+    answers.push_back(type);
+  }
+
+  return answers.back();
+}
+
+NodeChildren<const Expr *> DestinationScanner::peekParts(const Expr *expr) {
+  if (auto *member = dyn_cast<MemberExpr>(expr)) {
+    return {member->object};
+  }
+  if (auto *index = dyn_cast<IndexExpr>(expr)) {
+    return {index->object};
+  }
+  if (auto *cond = dyn_cast<ConditionalExpr>(expr); cond && Destination::literalShaped(cond)) {
+    return {cond->thenExpr, cond->elseExpr};
+  }
+  auto *call = dyn_cast<CallExpr>(expr);
+  bool literal = call != nullptr && DestinationScanner::isResultLiteral(call);
+  if (literal && !call->args.empty()) {
+    return {call->args[0]};
+  }
+
+  return {};
+}
+
+const Type *DestinationScanner::nodePeekType(const Expr *expr, const DestinationScan &scan,
+                                             std::vector<const Type *> &answers) const {
   if (auto *name = dyn_cast<NameExpr>(expr)) {
     return name->name == scan.getName() ? nullptr : this->peekName(name->name, scan);
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
-    if (member->name == "subtle" &&
-        this->callChecker->isGlobalName(member->object, GlobalName::CRYPTO)) {
-      VarSymbol *subtle = this->scopes->lookup(LibraryModuleNames::kSubtleName).var();
-      return subtle ? subtle->type : nullptr;
-    }
-    const Type *object = this->peekType(member->object, scan);
-    object = object ? object->nonOptional() : nullptr;
-    if (object && object->isRecord()) {
-      return object->valueType();
-    }
-    const Field *field = object && object->isObject() ? object->field(member->name) : nullptr;
-    return field ? field->type : nullptr;
+    const Type *object = ChildrenFirst::takeAnswer(answers);
+    return this->memberPeekType(member, object);
   }
-  if (auto *index = dyn_cast<IndexExpr>(expr)) {
-    const Type *object = this->peekType(index->object, scan);
+  if (isa<IndexExpr>(expr)) {
+    const Type *object = ChildrenFirst::takeAnswer(answers);
     if (object && object->isRecord()) {
       return object->valueType();
     }
     return object && object->isArray() ? object->inner() : nullptr;
   }
   if (auto *cond = dyn_cast<ConditionalExpr>(expr); cond && Destination::literalShaped(cond)) {
-    const Type *a = this->peekType(cond->thenExpr, scan);
-    const Type *b = this->peekType(cond->elseExpr, scan);
+    const Type *b = ChildrenFirst::takeAnswer(answers);
+    const Type *a = ChildrenFirst::takeAnswer(answers);
     const Type *common = a && b ? TypeRelations::unify(a, b) : nullptr;
     return common && !common->isError() ? common : nullptr;
   }
   if (auto *call = dyn_cast<CallExpr>(expr); call && DestinationScanner::isResultLiteral(call)) {
-    const Type *half = Type::voidTy();
-    if (!call->args.empty()) {
-      half = this->peekType(call->args[0], scan);
-      if (!half) {
-        half = SharedHelpers::literalType(call->args[0]);
-      }
-    }
-    if (!half) {
-      return nullptr;
-    }
-    std::optional<GlobalName> made = GlobalNameTable::find(cast<NameExpr>(call->callee)->name);
-    return made == GlobalName::OK ? Type::result(half, Type::never())
-                                  : Type::result(Type::never(), half);
+    return DestinationScanner::resultPeekType(call, answers);
   }
 
   return nullptr;
+}
+
+const Type *DestinationScanner::memberPeekType(const MemberExpr *member, const Type *object) const {
+  if (member->name == "subtle" &&
+      this->callChecker->isGlobalName(member->object, GlobalName::CRYPTO)) {
+    VarSymbol *subtle = this->scopes->lookup(LibraryModuleNames::kSubtleName).var();
+    return subtle ? subtle->type : nullptr;
+  }
+  const Type *plain = object ? object->nonOptional() : nullptr;
+  if (plain && plain->isRecord()) {
+    return plain->valueType();
+  }
+  const Field *field = plain && plain->isObject() ? plain->field(member->name) : nullptr;
+
+  return field ? field->type : nullptr;
+}
+
+const Type *DestinationScanner::resultPeekType(const CallExpr *call,
+                                               std::vector<const Type *> &answers) {
+  const Type *half = Type::voidTy();
+  if (!call->args.empty()) {
+    half = ChildrenFirst::takeAnswer(answers);
+    if (!half) {
+      half = SharedHelpers::literalType(call->args[0]);
+    }
+  }
+  if (!half) {
+    return nullptr;
+  }
+  std::optional<GlobalName> made = GlobalNameTable::find(cast<NameExpr>(call->callee)->name);
+
+  return made == GlobalName::OK ? Type::result(half, Type::never())
+                                : Type::result(Type::never(), half);
 }
 
 std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,

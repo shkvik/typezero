@@ -448,26 +448,6 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
 
   std::string target;
   std::vector<bool> checkedArgs(args.size(), false);
-  std::function<bool(const Expr *)> isJsonValue = [&](const Expr *e) -> bool {
-    if (auto *name = dyn_cast_or_null<NameExpr>(e)) {
-      VarSymbol *var = this->scopes->lookup(name->name).var();
-      return var && var->type && var->type->nonOptional()->isJson();
-    }
-    if (auto *m = dyn_cast_or_null<MemberExpr>(e)) {
-      return isJsonValue(m->object);
-    }
-    if (auto *index = dyn_cast_or_null<IndexExpr>(e)) {
-      return isJsonValue(index->object);
-    }
-    if (auto *c = dyn_cast_or_null<CallExpr>(e)) {
-      if (auto *m = dyn_cast<MemberExpr>(c->callee)) {
-        return m->name == "parse" && m->typeArgs.empty() &&
-               this->callChecker->isGlobalName(m->object, GlobalName::JSON);
-      }
-    }
-
-    return false;
-  };
   if (method == "digest") {
     this->literalAlgorithm(algorithm(0), "digest", "", bad);
   } else if (method == "generateKey") {
@@ -499,7 +479,7 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     if (!name.empty()) {
       target = "subtleImport" + SubtleAlgorithms::familyOf(name).str();
     }
-    if ((f.empty() || f == "jwk") && isJsonValue(arg(1)) && isa<NameExpr>(member->object) &&
+    if ((f.empty() || f == "jwk") && this->isJsonValue(arg(1)) && isa<NameExpr>(member->object) &&
         this->state.getLibraryDeclarations().findLibraryFunction("subtleJwkOf")) {
       Expr *json = this->exprChecker->checkExpr(arg(1));
       auto *callee = this->state.getAst().make<NameExpr>(json->loc(), "subtleJwkOf");
@@ -595,6 +575,38 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
   }
 
   return checked;
+}
+
+bool SubtleCallChecker::isJsonValue(const Expr *expr) const {
+  const Expr *root = expr;
+  const Expr *inner = SubtleCallChecker::accessInner(root);
+  while (inner != nullptr) {
+    root = inner;
+    inner = SubtleCallChecker::accessInner(root);
+  }
+  if (auto *name = dyn_cast_or_null<NameExpr>(root)) {
+    VarSymbol *var = this->scopes->lookup(name->name).var();
+    return var && var->type && var->type->nonOptional()->isJson();
+  }
+  auto *call = dyn_cast_or_null<CallExpr>(root);
+  auto *member = call != nullptr ? dyn_cast<MemberExpr>(call->callee) : nullptr;
+  if (member == nullptr) {
+    return false;
+  }
+
+  return member->name == "parse" && member->typeArgs.empty() &&
+         this->callChecker->isGlobalName(member->object, GlobalName::JSON);
+}
+
+const Expr *SubtleCallChecker::accessInner(const Expr *expr) {
+  if (auto *member = dyn_cast_or_null<MemberExpr>(expr)) {
+    return member->object;
+  }
+  if (auto *index = dyn_cast_or_null<IndexExpr>(expr)) {
+    return index->object;
+  }
+
+  return nullptr;
 }
 
 }

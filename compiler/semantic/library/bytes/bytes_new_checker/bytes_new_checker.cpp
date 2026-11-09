@@ -7,6 +7,7 @@
 #include "compiler/semantic/bodies/iterators/iterator_methods/iterator_methods.h"
 #include "compiler/semantic/bodies/values/array_literal_checker/array_literal_checker_errors.h"
 #include "compiler/semantic/declare/prelude/prelude.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
 #include "compiler/semantic/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/semantic/library/bytes/byte_proofs/byte_proofs_errors.h"
@@ -54,6 +55,31 @@ std::optional<std::u16string> BytesNewChecker::literalText(const Expr *e) {
 }
 
 bool BytesNewChecker::mayBeFatal(const Expr *options) {
+  std::vector<bool> answers;
+  for (const Expr *node : ChildrenFirst::order(options, BytesNewChecker::spreadOptions)) {
+    bool fatal = BytesNewChecker::nodeMayBeFatal(node, answers);
+    answers.push_back(fatal);
+  }
+
+  return answers.back();
+}
+
+NodeChildren<const Expr *> BytesNewChecker::spreadOptions(const Expr *options) {
+  auto *literal = dyn_cast<ObjectLitExpr>(options);
+  if (options->type->isError() || literal == nullptr) {
+    return {};
+  }
+  NodeChildren<const Expr *> spreads;
+  for (const ObjectLitExpr::Property &prop : literal->props) {
+    if (prop.spread()) {
+      spreads.push_back(prop.value);
+    }
+  }
+
+  return spreads;
+}
+
+bool BytesNewChecker::nodeMayBeFatal(const Expr *options, std::vector<bool> &answers) {
   if (options->type->isError()) {
     return false;
   }
@@ -62,27 +88,33 @@ bool BytesNewChecker::mayBeFatal(const Expr *options) {
     const Field *field = options->type->field("fatal");
     return field && !field->type->isUndefined();
   }
+  size_t spreadCount = BytesNewChecker::spreadOptions(options).size();
+  std::vector<bool> spreads = ChildrenFirst::takeAnswers(answers, spreadCount);
+  size_t nextSpread = 0;
   bool fatal = false;
   for (const ObjectLitExpr::Property &prop : literal->props) {
     if (prop.spread()) {
-      fatal = fatal || BytesNewChecker::mayBeFatal(prop.value);
-      continue;
+      fatal = fatal || spreads[nextSpread];
+      nextSpread += 1;
+    } else if (prop.name == "fatal") {
+      fatal = BytesNewChecker::fatalFlag(prop.value);
     }
-    if (prop.name != "fatal") {
-      continue;
-    }
-    const Expr *value = prop.value;
-    while (auto *conv = dyn_cast<CastExpr>(value)) {
-      if (!conv->isImplicit()) {
-        break;
-      }
-      value = conv->operand;
-    }
-    auto *flag = dyn_cast<BoolLitExpr>(value);
-    fatal = !isa<UndefinedExpr>(value) && !(flag && !flag->value);
   }
 
   return fatal;
+}
+
+bool BytesNewChecker::fatalFlag(const Expr *value) {
+  const Expr *plain = value;
+  while (auto *conv = dyn_cast<CastExpr>(plain)) {
+    if (!conv->isImplicit()) {
+      break;
+    }
+    plain = conv->operand;
+  }
+  auto *flag = dyn_cast<BoolLitExpr>(plain);
+
+  return !isa<UndefinedExpr>(plain) && !(flag && !flag->value);
 }
 
 BytesNewChecker::ResultDecoderLabel BytesNewChecker::decoderLabel(llvm::StringRef label) {

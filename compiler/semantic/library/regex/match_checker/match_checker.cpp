@@ -22,20 +22,39 @@ MatchChecker::MatchChecker(SemanticState &owner, SemanticParts &all)
 }
 
 Expr *MatchChecker::matchItems(Expr *match) {
-  const Type *array = Type::array(Type::optional(Type::string()));
-  if (match->type->isOptional()) {
+  std::vector<Expr *> optionals;
+  Expr *link = match;
+  while (link->type->isOptional()) {
     this->state.getFunctionStack().enterOptionalChain();
-    Expr *items = this->matchItems(this->exprChecker->chainLink(match));
-    auto *chain = this->state.getAst().make<OptionalChainExpr>(match->loc(), items);
-    chain->mayShortCircuit = this->state.getFunctionStack().isShortCircuiting();
-    chain->type = Type::optional(array);
-    this->state.getFunctionStack().leaveOptionalChain();
-    return chain;
+    optionals.push_back(link);
+    link = this->exprChecker->chainLink(link);
   }
-  auto *items = this->state.getAst().make<MemberExpr>(match->loc(), match, "%items");
-  items->type = array;
+  Expr *items = this->itemsMember(link);
+  for (Expr *optional : llvm::reverse(optionals)) {
+    items = this->optionalItems(optional, items);
+  }
 
   return items;
+}
+
+Expr *MatchChecker::itemsMember(Expr *match) {
+  auto *items = this->state.getAst().make<MemberExpr>(match->loc(), match, "%items");
+  items->type = MatchChecker::itemsType();
+
+  return items;
+}
+
+Expr *MatchChecker::optionalItems(Expr *match, Expr *items) {
+  auto *chain = this->state.getAst().make<OptionalChainExpr>(match->loc(), items);
+  chain->mayShortCircuit = this->state.getFunctionStack().isShortCircuiting();
+  chain->type = Type::optional(MatchChecker::itemsType());
+  this->state.getFunctionStack().leaveOptionalChain();
+
+  return chain;
+}
+
+const Type *MatchChecker::itemsType() {
+  return Type::array(Type::optional(Type::string()));
 }
 
 Expr *MatchChecker::checkMatchMember(MemberExpr *member) {

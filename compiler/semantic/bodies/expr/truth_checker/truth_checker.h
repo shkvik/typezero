@@ -2,6 +2,7 @@
 
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/expr/truth_checker/truth_checker_errors.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
@@ -47,6 +48,10 @@ private:
   static std::string objectMessage(const Expr *expr, const Type *base, TruthUse use,
                                    llvm::StringRef x, llvm::StringRef y);
   static std::string sourceText(const Expr *expr);
+  static NodeChildren<const Expr *> sourceParts(const Expr *expr);
+  static std::string nodeSource(const Expr *expr, std::vector<std::string> &answers);
+  static std::string stringSource(const StringLitExpr *lit);
+  static std::string callSource(const CallExpr *call, std::vector<std::string> &answers);
   static std::string hintText(const Expr *expr, const char *placeholder = "x");
   static const NameExpr *narrowedVariable(const Expr *expr);
   static bool isLength(const Expr *expr);

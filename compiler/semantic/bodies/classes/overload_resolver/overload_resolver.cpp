@@ -1,6 +1,7 @@
 #include "compiler/semantic/bodies/classes/overload_resolver/overload_resolver.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/generics/generic_check_helpers/generic_check_helpers.h"
 #include "compiler/semantic/generics/generic_instantiator/generic_instantiator.h"
@@ -152,15 +153,10 @@ const Type *OverloadResolver::parameterAt(const FuncSymbol *sym, size_t i) {
 }
 
 bool OverloadResolver::hasFloatLiteral(const Expr *expr) {
-  if (isa<FloatLitExpr>(expr)) {
-    return true;
-  }
-  if (auto *unary = dyn_cast<UnaryExpr>(expr)) {
-    return OverloadResolver::hasFloatLiteral(unary->operand);
-  }
-  if (auto *bin = dyn_cast<BinaryExpr>(expr)) {
-    return OverloadResolver::hasFloatLiteral(bin->lhs) ||
-           OverloadResolver::hasFloatLiteral(bin->rhs);
+  for (const Expr *node : ExprParts::operatorTree(expr)) {
+    if (isa<FloatLitExpr>(node)) {
+      return true;
+    }
   }
 
   return false;

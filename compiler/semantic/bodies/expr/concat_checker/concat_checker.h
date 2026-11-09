@@ -27,6 +27,7 @@ private:
   static const Expr *unconverted(const Expr *expr);
   static ResultConvertsToText convertible(const Expr *expr);
   static void concatParts(const BinaryExpr *bin, Parts &parts);
+  static const BinaryExpr *leftConcat(const BinaryExpr *bin);
   static std::string concatTemplate(const Parts &parts, llvm::StringRef &only);
   static std::pair<llvm::StringRef, llvm::StringRef> operandTexts(llvm::StringRef source,
                                                                   llvm::SMLoc op, size_t length);

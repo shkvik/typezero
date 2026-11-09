@@ -1,4 +1,5 @@
 #include "compiler/semantic/generics/generic_check_helpers/generic_check_helpers.h"
+#include "compiler/semantic/types/type_parts/type_routes.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
 #include <set>
@@ -10,74 +11,24 @@ using llvm::isa;
 
 namespace tz {
 
-bool GenericCheckHelpers::mentionsAnyOf(const Type *type, llvm::ArrayRef<const Type *> params,
-                                        llvm::SmallPtrSetImpl<const Type *> &seen) {
-  switch (type->kind()) {
-  case Type::Kind::Param:
-    if (type->typeOp() != TypeOp::None) {
-      return llvm::any_of(type->operands(), [&](const Type *t) {
-        return t && GenericCheckHelpers::mentionsAnyOf(t, params, seen);
-      });
-    }
-    return llvm::is_contained(params, type);
-  case Type::Kind::Optional:
-  case Type::Kind::Array:
-  case Type::Kind::Promise:
-    return GenericCheckHelpers::mentionsAnyOf(type->inner(), params, seen);
-  case Type::Kind::Result:
-    return GenericCheckHelpers::mentionsAnyOf(type->okType(), params, seen) ||
-           GenericCheckHelpers::mentionsAnyOf(type->errType(), params, seen);
-  case Type::Kind::Function:
-    return GenericCheckHelpers::mentionsAnyOf(type->ret(), params, seen) ||
-           llvm::any_of(type->params(), [&](const Type *p) {
-             return GenericCheckHelpers::mentionsAnyOf(p, params, seen);
-           });
-  case Type::Kind::Iterator:
-    return GenericCheckHelpers::mentionsAnyOf(type->yielded(), params, seen) ||
-           GenericCheckHelpers::mentionsAnyOf(type->returned(), params, seen) ||
-           GenericCheckHelpers::mentionsAnyOf(type->sent(), params, seen);
-  case Type::Kind::Dict:
-    return GenericCheckHelpers::mentionsAnyOf(type->keyType(), params, seen) ||
-           GenericCheckHelpers::mentionsAnyOf(type->valueType(), params, seen);
-  case Type::Kind::ClassRef:
-    return type->isConstructor() &&
-           GenericCheckHelpers::mentionsAnyOf(type->constructed(), params, seen);
-  case Type::Kind::Object:
-    if (type->isAsyncIterator()) {
-      return GenericCheckHelpers::mentionsAnyOf(type->yielded(), params, seen) ||
-             GenericCheckHelpers::mentionsAnyOf(type->returned(), params, seen) ||
-             GenericCheckHelpers::mentionsAnyOf(type->sent(), params, seen);
-    }
-    if (!type->typeArgs().empty()) {
-      return llvm::any_of(type->typeArgs(), [&](const Type *t) {
-        return GenericCheckHelpers::mentionsAnyOf(t, params, seen);
-      });
-    }
-    if (!seen.insert(type).second) {
-      return false;
-    }
-    if (type->tupleRest() && GenericCheckHelpers::mentionsAnyOf(type->tupleRest(), params, seen)) {
-      return true;
-    }
-    return llvm::any_of(type->fields(), [&](const Field &f) {
-      return GenericCheckHelpers::mentionsAnyOf(f.type, params, seen);
-    });
-  case Type::Kind::Union:
-    return llvm::any_of(type->members(), [&](const Type *m) {
-      return GenericCheckHelpers::mentionsAnyOf(m, params, seen);
-    });
-  default:
-    return false;
-  }
-}
-
 bool GenericCheckHelpers::mentionsAnyOf(const Type *type, llvm::ArrayRef<const Type *> params) {
   if (params.empty() || !TypeQueries::mentionsParam(type)) {
     return false;
   }
-  llvm::SmallPtrSet<const Type *, 4> seen;
+  TypeParts parts = TypeParts::collect(type, kMentionsRoute);
+  for (const Type *part : parts.getTypes()) {
+    if (GenericCheckHelpers::isParamOf(part, params)) {
+      return true;
+    }
+  }
 
-  return GenericCheckHelpers::mentionsAnyOf(type, params, seen);
+  return false;
+}
+
+bool GenericCheckHelpers::isParamOf(const Type *type, llvm::ArrayRef<const Type *> params) {
+  bool plainParam = type->isParam() && type->typeOp() == TypeOp::None;
+
+  return plainParam && llvm::is_contained(params, type);
 }
 
 std::string GenericCheckHelpers::constraintSpelling(const Type *param, const TypeParamDecl *decl) {

@@ -8,6 +8,7 @@
 #include "compiler/semantic/types/conditional_check_helpers/conditional_check_helpers.h"
 #include "compiler/semantic/types/extends_relation/extends_relation.h"
 #include "compiler/semantic/types/type_operators/type_operators.h"
+#include "compiler/semantic/types/type_ref_parts/type_ref_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
@@ -42,137 +43,170 @@ std::vector<const Type *> ConditionalTypes::distributed(const Type *type) {
 }
 
 void ConditionalTypes::collectNames(const TypeRef &ref, std::vector<llvm::StringRef> &names) {
-  if ((ref.kind() == TypeRefKind::NAME_REF || ref.kind() == TypeRefKind::GENERIC_REF) &&
-      !ref.name.empty() && !llvm::is_contained(names, ref.name)) {
-    names.push_back(ref.name);
-  }
-  for (const TypeRef &arg : ref.args) {
-    ConditionalTypes::collectNames(arg, names);
+  for (const TypeRef *part : TypeRefParts::collect(ref)) {
+    bool named = part->kind() == TypeRefKind::NAME_REF || part->kind() == TypeRefKind::GENERIC_REF;
+    if (named && !part->name.empty() && !llvm::is_contained(names, part->name)) {
+      names.push_back(part->name);
+    }
   }
 }
 
 void ConditionalTypes::collectInfers(const TypeRef &ref, std::vector<const TypeRef *> &infers,
                                      std::vector<bool> &lists, bool spread) {
-  if (ref.kind() == TypeRefKind::CONDITIONAL_REF) {
-    return;
-  }
-  if (ref.kind() == TypeRefKind::INFER_REF) {
-    auto found = llvm::find_if(infers, [&](const TypeRef *r) { return r->name == ref.name; });
-    if (found == infers.end()) {
-      infers.push_back(&ref);
-      lists.push_back(spread);
-    } else if (spread) {
-      lists[size_t(found - infers.begin())] = true;
+  std::vector<SpreadRef> stack = {SpreadRef{&ref, spread}};
+  while (!stack.empty()) {
+    SpreadRef next = stack.back();
+    stack.pop_back();
+    TypeRefKind kind = next.ref->kind();
+    if (kind == TypeRefKind::INFER_REF) {
+      ConditionalTypes::noteInfer(next, infers, lists);
+    }
+    if (kind != TypeRefKind::CONDITIONAL_REF) {
+      ConditionalTypes::pushSpreadArgs(*next.ref, stack);
     }
   }
-  for (size_t i = 0; i < ref.args.size(); ++i) {
-    bool spreadHere =
-        (ref.kind() == TypeRefKind::TUPLE_REF && i < ref.spread().size() && ref.spread()[i]) ||
-        (ref.kind() == TypeRefKind::FUNCTION_REF && ref.rest() && i + 2 == ref.args.size());
-    ConditionalTypes::collectInfers(ref.args[i], infers, lists, spreadHere);
+}
+
+void ConditionalTypes::noteInfer(SpreadRef part, std::vector<const TypeRef *> &infers,
+                                 std::vector<bool> &lists) {
+  auto found = llvm::find_if(infers, [&](const TypeRef *r) { return r->name == part.ref->name; });
+  if (found == infers.end()) {
+    infers.push_back(part.ref);
+    lists.push_back(part.spread);
+  } else if (part.spread) {
+    lists[size_t(found - infers.begin())] = true;
   }
+}
+
+void ConditionalTypes::pushSpreadArgs(const TypeRef &ref, std::vector<SpreadRef> &stack) {
+  for (size_t i = ref.args.size(); i > 0; --i) {
+    stack.push_back(SpreadRef{&ref.args[i - 1], ConditionalTypes::spreadsAt(ref, i - 1)});
+  }
+}
+
+bool ConditionalTypes::spreadsAt(const TypeRef &ref, size_t i) {
+  bool tupleSpread =
+      ref.kind() == TypeRefKind::TUPLE_REF && i < ref.spread().size() && ref.spread()[i];
+  bool restParam =
+      ref.kind() == TypeRefKind::FUNCTION_REF && ref.rest() && i + 2 == ref.args.size();
+
+  return tupleSpread || restParam;
 }
 
 bool ConditionalTypes::mentionsOtherParams(const Type *type, llvm::ArrayRef<const Type *> allowed,
                                            llvm::SmallPtrSetImpl<const Type *> &seen) {
-  if (!TypeQueries::mentionsParam(type)) {
-    return false;
+  std::vector<const Type *> stack = {type};
+  while (!stack.empty()) {
+    const Type *next = stack.back();
+    stack.pop_back();
+    bool skipped = next == nullptr || !TypeQueries::mentionsParam(next);
+    bool plainParam =
+        !skipped && next->kind() == Type::Kind::Param && next->typeOp() == TypeOp::None;
+    if (plainParam && !llvm::is_contained(allowed, next)) {
+      return true;
+    }
+    if (!skipped && !plainParam) {
+      std::vector<const Type *> parts = ConditionalTypes::otherParamParts(next, seen);
+      stack.insert(stack.end(), parts.rbegin(), parts.rend());
+    }
   }
-  auto other = [&](const Type *t) {
-    return t && ConditionalTypes::mentionsOtherParams(t, allowed, seen);
-  };
+
+  return false;
+}
+
+std::vector<const Type *>
+ConditionalTypes::otherParamParts(const Type *type, llvm::SmallPtrSetImpl<const Type *> &seen) {
   switch (type->kind()) {
   case Type::Kind::Param:
     if (type->typeOp() == TypeOp::Conditional) {
-      return llvm::any_of(type->operands().drop_front(), other);
+      return std::vector<const Type *>(type->operands().begin() + 1, type->operands().end());
     }
-    if (type->typeOp() != TypeOp::None) {
-      return llvm::any_of(type->operands(), other);
-    }
-    return !llvm::is_contained(allowed, type);
+    return std::vector<const Type *>(type->operands().begin(), type->operands().end());
   case Type::Kind::Optional:
   case Type::Kind::Array:
   case Type::Kind::Promise:
-    return other(type->inner());
+    return {type->inner()};
   case Type::Kind::Result:
-    return other(type->okType()) || other(type->errType());
-  case Type::Kind::Function:
-    return other(type->ret()) || llvm::any_of(type->params(), other);
-  case Type::Kind::Iterator:
-    return other(type->yielded()) || other(type->returned()) || other(type->sent());
-  case Type::Kind::Dict:
-    return other(type->keyType()) || other(type->valueType());
-  case Type::Kind::Union:
-    return llvm::any_of(type->members(), other);
-  case Type::Kind::Object:
-    if (type->isAsyncIterator()) {
-      return other(type->yielded()) || other(type->returned()) || other(type->sent());
-    }
-    if (!type->typeArgs().empty()) {
-      return llvm::any_of(type->typeArgs(), other);
-    }
-    if (!seen.insert(type).second) {
-      return false;
-    }
-    if (other(type->tupleRest())) {
-      return true;
-    }
-    return llvm::any_of(type->fields(), [&](const Field &f) { return other(f.type); });
-  default:
-    return false;
+    return {type->okType(), type->errType()};
+  case Type::Kind::Function: {
+    std::vector<const Type *> parts = {type->ret()};
+    parts.insert(parts.end(), type->params().begin(), type->params().end());
+    return parts;
   }
+  case Type::Kind::Iterator:
+    return {type->yielded(), type->returned(), type->sent()};
+  case Type::Kind::Dict:
+    return {type->keyType(), type->valueType()};
+  case Type::Kind::Union:
+    return std::vector<const Type *>(type->members().begin(), type->members().end());
+  case Type::Kind::Object:
+    return ConditionalTypes::objectParamParts(type, seen);
+  default:
+    return {};
+  }
+}
+
+std::vector<const Type *>
+ConditionalTypes::objectParamParts(const Type *type, llvm::SmallPtrSetImpl<const Type *> &seen) {
+  if (type->isAsyncIterator()) {
+    return {type->yielded(), type->returned(), type->sent()};
+  }
+  if (!type->typeArgs().empty()) {
+    return std::vector<const Type *>(type->typeArgs().begin(), type->typeArgs().end());
+  }
+  if (!seen.insert(type).second) {
+    return {};
+  }
+  std::vector<const Type *> parts = {type->tupleRest()};
+  for (const Field &f : type->fields()) {
+    parts.push_back(f.type);
+  }
+
+  return parts;
 }
 
 void ConditionalTypes::collectParams(const Type *type, std::vector<const Type *> &params,
                                      llvm::SmallPtrSetImpl<const Type *> &seen) {
-  if (!TypeQueries::mentionsParam(type) || !seen.insert(type).second) {
-    return;
+  std::vector<const Type *> stack = {type};
+  while (!stack.empty()) {
+    const Type *next = stack.back();
+    stack.pop_back();
+    bool fresh = next != nullptr && TypeQueries::mentionsParam(next) && seen.insert(next).second;
+    if (fresh && next->kind() == Type::Kind::Param && next->typeOp() == TypeOp::None) {
+      params.push_back(next);
+    } else if (fresh) {
+      std::vector<const Type *> parts = ConditionalTypes::paramParts(next);
+      stack.insert(stack.end(), parts.rbegin(), parts.rend());
+    }
   }
-  auto add = [&](const Type *t) {
-    if (t) {
-      ConditionalTypes::collectParams(t, params, seen);
-    }
-  };
+}
+
+std::vector<const Type *> ConditionalTypes::paramParts(const Type *type) {
   switch (type->kind()) {
-  case Type::Kind::Param:
-    if (type->typeOp() == TypeOp::None) {
-      params.push_back(type);
-    }
-    break;
   case Type::Kind::Optional:
   case Type::Kind::Array:
   case Type::Kind::Promise:
-    add(type->inner());
-    break;
+    return {type->inner()};
   case Type::Kind::Result:
-    add(type->okType());
-    add(type->errType());
-    break;
-  case Type::Kind::Function:
-    add(type->ret());
-    for (const Type *p : type->params()) {
-      add(p);
-    }
-    break;
+    return {type->okType(), type->errType()};
+  case Type::Kind::Function: {
+    std::vector<const Type *> parts = {type->ret()};
+    parts.insert(parts.end(), type->params().begin(), type->params().end());
+    return parts;
+  }
   case Type::Kind::Dict:
-    add(type->keyType());
-    add(type->valueType());
-    break;
+    return {type->keyType(), type->valueType()};
   case Type::Kind::Union:
-    for (const Type *m : type->members()) {
-      add(m);
-    }
-    break;
-  case Type::Kind::Object:
-    for (const Type *t : type->typeArgs()) {
-      add(t);
-    }
+    return std::vector<const Type *>(type->members().begin(), type->members().end());
+  case Type::Kind::Object: {
+    std::vector<const Type *> parts(type->typeArgs().begin(), type->typeArgs().end());
     for (const Field &f : type->fields()) {
-      add(f.type);
+      parts.push_back(f.type);
     }
-    break;
+    return parts;
+  }
   default:
-    break;
+    return {};
   }
 }
 

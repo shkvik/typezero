@@ -32,6 +32,7 @@ private:
   using ResultNotAsserting = Result<const TypeRef *, PredicateCheckerNotAssertingError>;
   using ResultPredicateArg = Result<int, PredicateCheckerPredicateArgError>;
 
+  static bool looksLikeTest(const Expr *expr);
   static ResultPredicateArg predicateArg(const FunctionDecl *fn, const TypeRef &ref);
   ResultNotAsserting notAsserting(const FunctionDecl *fn, const TypeRef &ref);
   static const VarSymbol *argumentVariable(const Expr *expr);

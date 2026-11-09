@@ -307,17 +307,32 @@ std::string CryptoArgs::numberText(double value) {
 }
 
 std::optional<double> CryptoArgs::knownNumber(const Expr *arg) const {
+  std::vector<const Expr *> negations;
+  const Expr *inner = arg;
+  auto *negation = dyn_cast<UnaryExpr>(inner);
+  while (negation != nullptr && negation->op == UnaryOp::Neg) {
+    negations.push_back(inner);
+    inner = negation->operand;
+    negation = dyn_cast<UnaryExpr>(inner);
+  }
+  std::optional<double> value = this->plainNumber(inner);
+  for (const Expr *negated : llvm::reverse(negations)) {
+    if (value.has_value()) {
+      value = -*value;
+    } else {
+      value = this->plainNumber(negated);
+    }
+  }
+
+  return value;
+}
+
+std::optional<double> CryptoArgs::plainNumber(const Expr *arg) const {
   if (auto *lit = dyn_cast<FloatLitExpr>(arg)) {
     return lit->value;
   }
   if (auto *lit = dyn_cast<IntLitExpr>(arg)) {
     return double(lit->value);
-  }
-  if (auto *unary = dyn_cast<UnaryExpr>(arg); unary && unary->op == UnaryOp::Neg) {
-    std::optional<double> inner = this->knownNumber(unary->operand);
-    if (inner) {
-      return -*inner;
-    }
   }
   if (auto *conversion = dyn_cast<CastExpr>(arg)) {
     if (std::optional<int64_t> value = this->constantFolder->intConstant(conversion->operand)) {

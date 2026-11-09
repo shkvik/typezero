@@ -11,6 +11,7 @@
 #include "compiler/semantic/library/reflect/reflect_checker/reflect_checker.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
+#include "compiler/semantic/types/type_parts/type_routes.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/SmallString.h"
@@ -35,79 +36,110 @@ JsonStaticChecker::JsonStaticChecker(SemanticState &owner, SemanticParts &all)
   this->bufferStaticChecker = &all.getBufferStaticChecker();
 }
 
-bool JsonStaticChecker::mayHoldItself(const Type *type, std::vector<const Type *> &open) {
-  type = type->nonOptional();
-  if (type->isParam() || type->isAnyObject()) {
-    return false;
-  }
-  if (type->isJson() || (type->isBase() && !type->classDecl()) || type->isUnknown() ||
-      llvm::is_contained(open, type)) {
-    return true;
-  }
-  open.push_back(type);
-  bool may = false;
-  auto fieldsHold = [&](const Type *t) {
-    return llvm::any_of(t->fields(), [&](const Field &f) {
-      return JsonStaticChecker::mayHoldItself(f.type, open);
-    });
-  };
-  if (const ClassDecl *cls = type->classDecl()) {
-    std::vector<const ClassDecl *> family{cls};
-    for (size_t i = 0; i < family.size() && !may; ++i) {
-      if (family[i]->type) {
-        may = fieldsHold(family[i]->type);
-      }
-      family.insert(family.end(), family[i]->children.begin(), family[i]->children.end());
+bool JsonStaticChecker::mayHoldItself(const Type *type) {
+  std::vector<const Type *> open;
+  std::vector<HoldStep> steps = {EnterHold{type}};
+  while (!steps.empty()) {
+    HoldStep step = steps.back();
+    steps.pop_back();
+    if (step.is<LeaveHold>()) {
+      open.pop_back();
+    } else if (JsonStaticChecker::enterHold(step.as<EnterHold>()->type, open, steps)) {
+      return true;
     }
-  } else if (type->isArray()) {
-    may = JsonStaticChecker::mayHoldItself(type->inner(), open);
-  } else if (type->isResult()) {
-    may = JsonStaticChecker::mayHoldItself(type->okType(), open) ||
-          JsonStaticChecker::mayHoldItself(type->errType(), open);
-  } else if (type->isDict()) {
-    may = JsonStaticChecker::mayHoldItself(type->valueType(), open);
-  } else if (type->isObject()) {
-    may = fieldsHold(type);
-  } else if (type->isUnion()) {
-    may = llvm::any_of(type->members(),
-                       [&](const Type *m) { return JsonStaticChecker::mayHoldItself(m, open); });
   }
-  open.pop_back();
 
-  return may;
+  return false;
 }
 
-const ClassDecl *JsonStaticChecker::classWithToJson(const Type *type,
-                                                    llvm::SmallPtrSetImpl<const Type *> &seen) {
-  while (type->isOptional() || type->isArray()) {
-    type = type->inner();
+bool JsonStaticChecker::enterHold(const Type *type, std::vector<const Type *> &open,
+                                  std::vector<HoldStep> &steps) {
+  const Type *plain = type->nonOptional();
+  if (plain->isParam() || plain->isAnyObject()) {
+    return false;
+  }
+  if (plain->isJson() || (plain->isBase() && !plain->classDecl()) || plain->isUnknown() ||
+      llvm::is_contained(open, plain)) {
+    return true;
+  }
+  open.push_back(plain);
+  steps.push_back(LeaveHold{});
+  std::vector<const Type *> parts = JsonStaticChecker::heldParts(plain);
+  for (const Type *part : llvm::reverse(parts)) {
+    steps.push_back(EnterHold{part});
+  }
+
+  return false;
+}
+
+std::vector<const Type *> JsonStaticChecker::heldParts(const Type *type) {
+  if (const ClassDecl *cls = type->classDecl()) {
+    return JsonStaticChecker::familyFields(cls);
+  }
+  if (type->isArray()) {
+    return {type->inner()};
   }
   if (type->isResult()) {
-    if (const ClassDecl *cls = JsonStaticChecker::classWithToJson(type->okType(), seen)) {
-      return cls;
+    return {type->okType(), type->errType()};
+  }
+  if (type->isDict()) {
+    return {type->valueType()};
+  }
+  if (type->isObject()) {
+    return JsonStaticChecker::fieldTypes(type);
+  }
+  if (type->isUnion()) {
+    return std::vector<const Type *>(type->members().begin(), type->members().end());
+  }
+
+  return {};
+}
+
+std::vector<const Type *> JsonStaticChecker::familyFields(const ClassDecl *cls) {
+  std::vector<const ClassDecl *> family{cls};
+  for (size_t i = 0; i < family.size(); ++i) {
+    family.insert(family.end(), family[i]->children.begin(), family[i]->children.end());
+  }
+  std::vector<const Type *> parts;
+  for (const ClassDecl *member : family) {
+    if (member->type) {
+      std::vector<const Type *> fields = JsonStaticChecker::fieldTypes(member->type);
+      parts.insert(parts.end(), fields.begin(), fields.end());
     }
-    return JsonStaticChecker::classWithToJson(type->errType(), seen);
   }
-  if (type->isRecord()) {
-    return JsonStaticChecker::classWithToJson(type->valueType(), seen);
-  }
-  if (!type->isObject() || !seen.insert(type).second) {
-    return nullptr;
-  }
-  if (const ClassDecl *cls = type->classDecl()) {
-    for (const FunctionDecl *fn : cls->methods) {
-      if (fn->name == "toJSON" && !fn->isStatic()) {
-        return cls;
-      }
-    }
-  }
+
+  return parts;
+}
+
+std::vector<const Type *> JsonStaticChecker::fieldTypes(const Type *type) {
+  std::vector<const Type *> types;
   for (const Field &f : type->fields()) {
-    if (const ClassDecl *cls = JsonStaticChecker::classWithToJson(f.type, seen)) {
+    types.push_back(f.type);
+  }
+
+  return types;
+}
+
+const ClassDecl *JsonStaticChecker::classWithToJson(const Type *type) {
+  TypeParts parts = TypeParts::collect(type, kToJsonRoute);
+  for (const Type *part : parts.getTypes()) {
+    const ClassDecl *cls = part->classDecl();
+    if (cls != nullptr && JsonStaticChecker::hasToJson(cls)) {
       return cls;
     }
   }
 
   return nullptr;
+}
+
+bool JsonStaticChecker::hasToJson(const ClassDecl *cls) {
+  for (const FunctionDecl *fn : cls->methods) {
+    if (fn->name == "toJSON" && !fn->isStatic()) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 bool JsonStaticChecker::mayStringifyToUndefined(const Type *type) {
@@ -174,8 +206,7 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
     this->state.getDiagnostics().error(value->loc(), message);
     ok = false;
   }
-  llvm::SmallPtrSet<const Type *, 8> seen;
-  if (const ClassDecl *cls = ok ? JsonStaticChecker::classWithToJson(value->type, seen) : nullptr) {
+  if (const ClassDecl *cls = ok ? JsonStaticChecker::classWithToJson(value->type) : nullptr) {
     std::string message = ErrorTextJsonStatic::toJson(cls->name);
     this->state.getDiagnostics().error(value->loc(), message);
     ok = false;
@@ -216,9 +247,8 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
   call->type = JsonStaticChecker::mayStringifyToUndefined(value->type)
                    ? Type::optional(Type::string())
                    : Type::string();
-  std::vector<const Type *> open;
   if (!this->libraryCalls->inLibrary(call->loc()) &&
-      JsonStaticChecker::mayHoldItself(value->type, open)) {
+      JsonStaticChecker::mayHoldItself(value->type)) {
     call->type = Type::result(call->type, this->prelude->builtinType("JsonError"));
   }
 

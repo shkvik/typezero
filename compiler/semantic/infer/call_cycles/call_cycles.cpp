@@ -1,9 +1,12 @@
 #include "compiler/semantic/infer/call_cycles/call_cycles.h"
 #include "compiler/program/ast_walker/ast_walker.h"
 #include "compiler/semantic/declare/import_binder/import_binder.h"
+#include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
+
+using llvm::dyn_cast;
 
 namespace tz {
 
@@ -22,7 +25,7 @@ void CallCycles::findCycles(llvm::ArrayRef<FunctionDecl *> functions, ResolveCal
   int count = int(search.nodes.size());
   for (int node = 0; node < count; ++node) {
     if (search.index[node] < 0) {
-      this->visit(node, search);
+      this->tarjanSearch(node, search);
     }
   }
 }
@@ -51,6 +54,20 @@ CallCycles::unknownReturns(llvm::ArrayRef<FunctionDecl *> functions) const {
   return nodes;
 }
 
+llvm::StringSet<> CallCycles::memberCallsIn(const FunctionDecl *fn) {
+  PlacedNodes nodes = PlacedNodes::collect({fn->body}, {});
+  llvm::StringSet<> names;
+  for (const PlacedExpr &placed : nodes.getExprs()) {
+    auto *call = dyn_cast<CallExpr>(placed.expr);
+    auto *member = call != nullptr ? dyn_cast<MemberExpr>(call->callee) : nullptr;
+    if (member != nullptr) {
+      names.insert(member->name);
+    }
+  }
+
+  return names;
+}
+
 llvm::StringSet<> CallCycles::namesUsed(const FunctionDecl *fn) {
   llvm::StringSet<> names;
   for (const Param &param : fn->params) {
@@ -77,8 +94,7 @@ std::vector<std::vector<int>> CallCycles::callsBetween(llvm::ArrayRef<FunctionDe
   for (int from = 0; from < count; ++from) {
     FunctionDecl *fn = nodes[from];
     llvm::StringSet<> names = CallCycles::namesUsed(fn);
-    llvm::StringSet<> members;
-    AstWalker::collectMemberCalls(fn->body, members);
+    llvm::StringSet<> members = CallCycles::memberCallsIn(fn);
     for (const auto &member : members) {
       for (int to = 0; to < count; ++to) {
         if (nodes[to]->cls() && nodes[to]->name == member.getKey()) {
@@ -106,24 +122,63 @@ std::vector<std::vector<int>> CallCycles::callsBetween(llvm::ArrayRef<FunctionDe
   return calls;
 }
 
-void CallCycles::visit(int node, CycleSearch &search) {
-  search.index[node] = search.next;
-  search.low[node] = search.next;
-  ++search.next;
-  search.stack.push_back(node);
-  search.onStack[node] = true;
-  for (int to : search.calls[node]) {
-    if (search.index[to] < 0) {
-      this->visit(to, search);
-      search.low[node] = std::min(search.low[node], search.low[to]);
-    } else if (search.onStack[to]) {
-      search.low[node] = std::min(search.low[node], search.index[to]);
+void CallCycles::tarjanSearch(int start, CycleSearch &search) {
+  std::vector<TarjanFrame> frames;
+  CallCycles::enter(start, search, frames);
+  while (!frames.empty()) {
+    int caller = frames.back().node;
+    std::optional<int> callee = CallCycles::takeNextCall(frames.back(), search);
+    if (callee.has_value()) {
+      CallCycles::followCall(caller, *callee, search, frames);
+    } else {
+      this->finishTop(search, frames);
     }
   }
+}
+
+std::optional<int> CallCycles::takeNextCall(TarjanFrame &frame, const CycleSearch &search) {
+  const std::vector<int> &calls = search.calls[frame.node];
+  if (frame.nextCall == calls.size()) {
+    return std::nullopt;
+  }
+  int callee = calls[frame.nextCall];
+  frame.nextCall += 1;
+
+  return callee;
+}
+
+void CallCycles::finishTop(CycleSearch &search, std::vector<TarjanFrame> &frames) {
+  int finished = frames.back().node;
+  frames.pop_back();
+  if (!frames.empty()) {
+    int caller = frames.back().node;
+    search.low[caller] = std::min(search.low[caller], search.low[finished]);
+  }
+  this->closeIfRoot(finished, search);
+}
+
+void CallCycles::enter(int node, CycleSearch &search, std::vector<TarjanFrame> &frames) {
+  search.index[node] = search.next;
+  search.low[node] = search.next;
+  search.next += 1;
+  search.stack.push_back(node);
+  search.onStack[node] = true;
+  frames.push_back(TarjanFrame{.node = node, .nextCall = 0});
+}
+
+void CallCycles::followCall(int from, int to, CycleSearch &search,
+                            std::vector<TarjanFrame> &frames) {
+  if (search.index[to] < 0) {
+    CallCycles::enter(to, search, frames);
+  } else if (search.onStack[to]) {
+    search.low[from] = std::min(search.low[from], search.index[to]);
+  }
+}
+
+void CallCycles::closeIfRoot(int node, CycleSearch &search) {
   if (search.low[node] != search.index[node]) {
     return;
   }
-
   std::vector<FuncSymbol *> cycle = CallCycles::popCycle(node, search);
   bool callsItself = llvm::is_contained(search.calls[node], node);
   if (cycle.size() == 1 && !callsItself) {

@@ -1,5 +1,4 @@
 #include "compiler/semantic/library/regex/regex_checker/regex_checker.h"
-#include "compiler/program/ast_walker/ast_walker.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
@@ -8,6 +7,7 @@
 #include "compiler/semantic/bodies/objects/object_checker/object_checker.h"
 #include "compiler/semantic/bodies/stmt/var_checker/var_checker.h"
 #include "compiler/semantic/declare/prelude/prelude.h"
+#include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
 #include "compiler/semantic/library/process/process_checker/process_checker.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
@@ -139,22 +139,26 @@ void RegexChecker::noteRegexVariable(VarSymbol *var, const Expr *init, bool isCo
     if (block.empty()) {
       return;
     }
-    bool assigned = false;
-    for (const Stmt *stmt : VarChecker::followingStatements(block, index)) {
-      AstWalker::visitExprs(stmt, [&](const Expr *e) {
-        if (auto *assign = dyn_cast<AssignExpr>(e)) {
-          if (auto *target = dyn_cast<NameExpr>(assign->target);
-              target && target->name == var->name) {
-            assigned = true;
-          }
-        }
-      });
-    }
+    std::vector<const Stmt *> following = VarChecker::followingStatements(block, index);
+    bool assigned = RegexChecker::assignsName(following, var->name);
     if (assigned) {
       return;
     }
   }
   var->holds = RegexLiteral{.regex = lit};
+}
+
+bool RegexChecker::assignsName(llvm::ArrayRef<const Stmt *> stmts, llvm::StringRef name) {
+  PlacedNodes nodes = PlacedNodes::collect(stmts, {});
+  for (const PlacedExpr &placed : nodes.getExprs()) {
+    auto *assign = dyn_cast<AssignExpr>(placed.expr);
+    auto *target = assign != nullptr ? dyn_cast<NameExpr>(assign->target) : nullptr;
+    if (target != nullptr && target->name == name) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 const Type *RegexChecker::matchType(const RegexLitExpr *regex) {

@@ -27,6 +27,7 @@ private:
 
   static std::optional<std::u16string> literalText(const Expr *e);
   static std::optional<double> literalNumber(const Expr *e);
+  static std::optional<double> plainNumber(const Expr *e);
   static const IntlService *serviceOf(IntlKind kind);
   static bool isSanctionedUnit(llvm::StringRef unit);
   static bool isWellFormedUnit(llvm::StringRef unit);

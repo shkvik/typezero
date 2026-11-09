@@ -16,6 +16,11 @@ class ReturnInferrer;
 class ExtendsRelation;
 class TopLevelChecker;
 
+struct SpreadRef {
+  const TypeRef *ref;
+  bool spread;
+};
+
 class ConditionalTypes {
 public:
   static bool mentionsParamBesides(const Type *type, llvm::ArrayRef<const Type *> allowed);
@@ -39,10 +44,19 @@ private:
   static void collectNames(const TypeRef &ref, std::vector<llvm::StringRef> &names);
   static void collectInfers(const TypeRef &ref, std::vector<const TypeRef *> &infers,
                             std::vector<bool> &lists, bool spread = false);
+  static void noteInfer(SpreadRef part, std::vector<const TypeRef *> &infers,
+                        std::vector<bool> &lists);
+  static void pushSpreadArgs(const TypeRef &ref, std::vector<SpreadRef> &stack);
+  static bool spreadsAt(const TypeRef &ref, size_t i);
   static bool mentionsOtherParams(const Type *type, llvm::ArrayRef<const Type *> allowed,
                                   llvm::SmallPtrSetImpl<const Type *> &seen);
   static void collectParams(const Type *type, std::vector<const Type *> &params,
                             llvm::SmallPtrSetImpl<const Type *> &seen);
+  static std::vector<const Type *> otherParamParts(const Type *type,
+                                                   llvm::SmallPtrSetImpl<const Type *> &seen);
+  static std::vector<const Type *> objectParamParts(const Type *type,
+                                                    llvm::SmallPtrSetImpl<const Type *> &seen);
+  static std::vector<const Type *> paramParts(const Type *type);
   static bool isBinding(const Stmt *decl);
   SemanticState &state;
   TypeParams *typeParams = nullptr;

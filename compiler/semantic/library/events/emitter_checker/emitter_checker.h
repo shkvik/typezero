@@ -55,7 +55,8 @@ private:
   };
 
   static EmitterMethod emitterMethod(llvm::StringRef name);
-  static std::string chainText(const Expr *expr);
+  static std::optional<std::string> chainText(const Expr *expr);
+  static std::optional<std::string> rootText(const Expr *expr);
   static bool isServiceEvent(llvm::StringRef name);
   static std::string fileOfPlace(const std::string &place);
   static std::string shortPlace(const std::string &place);

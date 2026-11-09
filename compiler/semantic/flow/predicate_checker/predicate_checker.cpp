@@ -1,6 +1,7 @@
 #include "compiler/semantic/flow/predicate_checker/predicate_checker.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker_errors.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/flow/field_facts/field_facts.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/flow/union_narrowing/union_narrowing.h"
@@ -148,6 +149,16 @@ const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sy
 }
 
 bool PredicateChecker::looksBoolean(const Expr *expr) {
+  for (const Expr *part : ExprParts::logicParts(expr)) {
+    if (!PredicateChecker::looksLikeTest(part)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool PredicateChecker::looksLikeTest(const Expr *expr) {
   if (isa<BoolLitExpr>(expr)) {
     return true;
   }
@@ -168,9 +179,6 @@ bool PredicateChecker::looksBoolean(const Expr *expr) {
   case BinaryOp::InstanceOf:
   case BinaryOp::In:
     return true;
-  case BinaryOp::LogAnd:
-  case BinaryOp::LogOr:
-    return PredicateChecker::looksBoolean(bin->lhs) && PredicateChecker::looksBoolean(bin->rhs);
   default:
     return false;
   }

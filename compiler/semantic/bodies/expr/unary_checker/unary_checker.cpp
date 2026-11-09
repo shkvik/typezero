@@ -50,26 +50,48 @@ std::optional<std::string> UnaryChecker::simpleText(const Expr *expr) {
 }
 
 std::optional<std::string> UnaryChecker::assertedText(const Expr *expr) {
-  while (auto *conv = dyn_cast<CastExpr>(expr)) {
-    if (!conv->isImplicit()) {
+  std::vector<std::string> answers;
+  for (const Expr *node : ChildrenFirst::order(expr, UnaryChecker::textParts)) {
+    std::optional<std::string> text = UnaryChecker::nodeText(node, answers);
+    if (!text.has_value()) {
       return std::nullopt;
     }
-    expr = conv->operand;
+    answers.push_back(*text);
+  }
+
+  return answers.back();
+}
+
+NodeChildren<const Expr *> UnaryChecker::textParts(const Expr *expr) {
+  if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit()) {
+    return {conv->operand};
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
-    std::optional<std::string> object = UnaryChecker::assertedText(member->object);
-    if (!object) {
-      return std::nullopt;
-    }
-    return *object + (member->optional ? "?." : ".") + member->name.str();
+    return {member->object};
   }
   if (auto *index = dyn_cast<IndexExpr>(expr)) {
-    std::optional<std::string> object = UnaryChecker::assertedText(index->object);
-    std::optional<std::string> position = UnaryChecker::assertedText(index->index);
-    if (!object || !position) {
-      return std::nullopt;
-    }
-    return *object + "[" + *position + "]";
+    return {index->object, index->index};
+  }
+
+  return {};
+}
+
+std::optional<std::string> UnaryChecker::nodeText(const Expr *expr,
+                                                  std::vector<std::string> &answers) {
+  if (auto *conv = dyn_cast<CastExpr>(expr); conv && !conv->isImplicit()) {
+    return std::nullopt;
+  }
+  if (isa<CastExpr>(expr)) {
+    return ChildrenFirst::takeAnswer(answers);
+  }
+  if (auto *member = dyn_cast<MemberExpr>(expr)) {
+    std::string object = ChildrenFirst::takeAnswer(answers);
+    return object + (member->optional ? "?." : ".") + member->name.str();
+  }
+  if (isa<IndexExpr>(expr)) {
+    std::string position = ChildrenFirst::takeAnswer(answers);
+    std::string object = ChildrenFirst::takeAnswer(answers);
+    return object + "[" + position + "]";
   }
   if (auto *name = dyn_cast<NameExpr>(expr); name && name->name.starts_with("%")) {
     return std::nullopt;

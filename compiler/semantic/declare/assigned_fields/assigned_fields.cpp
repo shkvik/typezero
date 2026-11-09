@@ -1,6 +1,6 @@
 #include "compiler/semantic/declare/assigned_fields/assigned_fields.h"
-#include "compiler/program/ast_walker/ast_walker.h"
 #include "compiler/semantic/bodies/objects/keyed_field_checker/keyed_field_checker.h"
+#include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
@@ -15,9 +15,9 @@ AssignedFields::AssignedFields(SemanticState &owner, SemanticParts &all)
 }
 
 void AssignedFields::rememberAssigned(SourceFile &program) {
-  auto rememberTarget = [&](const Expr *expr) { this->rememberTarget(expr); };
-  for (Stmt *item : program.items) {
-    AstWalker::visitExprs(item, rememberTarget);
+  PlacedNodes nodes = PlacedNodes::collect(program.items, {});
+  for (const PlacedExpr &placed : nodes.getExprs()) {
+    this->rememberTarget(placed.expr);
   }
 }
 

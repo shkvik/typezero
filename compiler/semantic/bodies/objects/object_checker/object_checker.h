@@ -39,7 +39,7 @@ public:
   ResultObjectStaticCall checkObjectCall(CallExpr *call, MemberExpr *member, const Type *expected);
 
 private:
-  static std::string chainText(const Expr *expr);
+  static std::optional<std::string> chainText(const Expr *expr);
   using ResultEnumMemberValues = Result<Expr *, ObjectCheckerEnumMembersError>;
   using ResultForInKeysAllowed = Result<const Type *, ObjectCheckerWalkableError>;
   using ResultLengthIsNotFixed = Result<const Type *, ObjectCheckerFixedLengthError>;

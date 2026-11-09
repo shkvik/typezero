@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/semantic/semantic_state/semantic_state.h"
+#include "compiler/union/union/union.h"
 
 namespace tz {
 
@@ -9,6 +10,26 @@ class Scopes;
 class TypeDeclarer;
 class TypeRelations;
 class ConditionalTypes;
+
+enum class ExpectationStepKind { ENTER, JOIN };
+
+struct EnterExpectation {
+  static constexpr ExpectationStepKind kind = ExpectationStepKind::ENTER;
+  const Type *type;
+  unsigned depth;
+};
+
+struct JoinBranches {
+  static constexpr ExpectationStepKind kind = ExpectationStepKind::JOIN;
+  size_t count;
+};
+
+using ExpectationStep = Union<EnterExpectation, JoinBranches>;
+
+struct TextLookup {
+  std::optional<std::vector<std::string>> texts;
+  const ConditionalExpr *choice;
+};
 
 class LiteralTypes {
 public:
@@ -35,6 +56,11 @@ private:
   static bool isLiteralSet(const Type *type);
   static const Type *literalPart(const Type *expected, UnionSlot slot);
   static std::optional<std::u16string> writtenText(const Expr *e);
+  static std::optional<std::vector<std::string>> typeTexts(const Type *type);
+  static void joinBranches(const JoinBranches &join, std::vector<const Type *> &answers);
+  void enterExpectation(const EnterExpectation &enter, std::vector<ExpectationStep> &steps,
+                        std::vector<const Type *> &answers);
+  TextLookup lookupTexts(const Expr *arg);
   static bool choiceTexts(const Expr *e, std::vector<std::u16string> &texts);
 
   SemanticState &state;

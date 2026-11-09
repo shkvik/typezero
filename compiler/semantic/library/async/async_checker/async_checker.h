@@ -50,6 +50,7 @@ private:
   using ResultInAsyncContext = Result<const FuncSymbol *, AsyncCheckerAsyncContextError>;
   using ResultBindingUntyped = Result<const VarDeclarator *, AsyncCheckerBindingTypeError>;
 
+  static const Type *awaitedPlain(const Type *type);
   static const Type *awaited(const Type *type);
   static std::string statementText(llvm::SMLoc at);
   ResultInAsyncContext asyncContext(bool loop) const;

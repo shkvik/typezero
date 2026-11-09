@@ -21,6 +21,28 @@ class AliasInstantiator;
 class BuiltinModuleTypes;
 class BuiltinModuleChecker;
 
+struct AliasFrame {
+  TypeAliasDecl *alias;
+  std::optional<Module *> previousModule;
+  bool builtinModule;
+  std::vector<TypeAliasDecl *> needed;
+  size_t nextNeeded;
+};
+
+struct EnumCount {
+  double next;
+  bool counting;
+  bool numbers;
+  bool strings;
+};
+
+struct EnumFrame {
+  EnumDecl *decl;
+  std::optional<Module *> previousModule;
+  size_t nextMember;
+  EnumCount count;
+};
+
 class TypeDeclarer {
 public:
   using ResultEnumIndexValue = Result<Expr *, TypeDeclarerCheckEnumIndexError>;
@@ -63,6 +85,29 @@ private:
   static ResultMemberConstant memberConstant(std::optional<ConstantValue> constant);
 
   ResultTypeNameIsFree freeTypeName(llvm::StringRef name) const;
+
+  static TypeAliasDecl *takeUnresolvedAlias(AliasFrame &frame);
+  static Type *declareSelf(const TypeAliasDecl *alias);
+  const Type *resolvingAlias(TypeAliasDecl *alias);
+  void startAlias(std::vector<AliasFrame> &frames, TypeAliasDecl *alias);
+  void finishAlias(std::vector<AliasFrame> &frames);
+  std::optional<Module *> enterHomeModule(const Stmt *decl);
+  std::vector<TypeAliasDecl *> neededAliases(const TypeAliasDecl *alias) const;
+  TypeAliasDecl *plainAliasNamed(const TypeRef &part) const;
+  const Type *resolveAliasBody(TypeAliasDecl *alias);
+  const Type *resolveObjectAlias(TypeAliasDecl *alias);
+  const Type *resolveUnionAlias(TypeAliasDecl *alias);
+  void nameBuiltinUnion(const TypeAliasDecl *alias);
+
+  void reportEnumCycle(const EnumDecl *decl);
+  void startEnum(std::vector<EnumFrame> &frames, EnumDecl *decl);
+  void enterMember(const EnumFrame &frame);
+  EnumDecl *unresolvedEnum(const EnumFrame &frame) const;
+  void resolveNextMember(std::vector<EnumFrame> &frames);
+  void countMember(EnumFrame &frame);
+  std::optional<double> memberNumber(EnumFrame &frame, EnumMember &m);
+  void numberMember(EnumFrame &frame, EnumMember &m, double value);
+  void finishEnum(std::vector<EnumFrame> &frames);
 
   SemanticState &state;
   Scopes *scopes = nullptr;

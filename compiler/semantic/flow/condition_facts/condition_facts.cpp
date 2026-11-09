@@ -10,8 +10,8 @@
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/unknown_checker/unknown_checker.h"
 #include "llvm/ADT/STLExtras.h"
-#include <functional>
 
+using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
 
@@ -63,45 +63,67 @@ bool ConditionFacts::chainDefined(const Expr *e, Flow &flow) const {
   if (!chain) {
     return false;
   }
-  std::function<std::optional<FieldPath>(const Expr *)> walk =
-      [&](const Expr *x) -> std::optional<FieldPath> {
-    if (auto *link = dyn_cast<CastExpr>(x)) {
-      if (!link->shortCircuit && !link->isImplicit()) {
-        return std::nullopt;
-      }
-      std::optional<FieldPath> inner = walk(link->operand);
-      if (link->shortCircuit && inner) {
-        if (inner->names.empty()) {
-          flow.defined.insert(inner->var);
-        } else {
-          FieldFacts::defineField(flow, *inner);
-        }
-      }
-      return inner;
-    }
-    if (auto *name = dyn_cast<NameExpr>(x)) {
-      if (!name->var()) {
-        return std::nullopt;
-      }
-      FieldPath path;
-      path.var = name->var();
-      return path;
-    }
-    if (auto *member = dyn_cast<MemberExpr>(x)) {
-      std::optional<FieldPath> path = walk(member->object);
-      if (path) {
-        path->names.push_back(member->name);
-      }
-      return path;
-    }
-    return std::nullopt;
-  };
-  std::optional<FieldPath> whole = walk(chain->chain);
+  std::optional<FieldPath> whole = ConditionFacts::definedPath(chain->chain, flow);
   if (whole && !whole->names.empty()) {
     FieldFacts::defineField(flow, *whole);
   }
 
   return true;
+}
+
+std::optional<FieldPath> ConditionFacts::definedPath(const Expr *expr, Flow &flow) {
+  std::vector<const Expr *> links;
+  const Expr *root = expr;
+  const Expr *inner = ConditionFacts::pathInner(root);
+  while (inner != nullptr) {
+    links.push_back(root);
+    root = inner;
+    inner = ConditionFacts::pathInner(root);
+  }
+  std::optional<FieldPath> path = ConditionFacts::pathRoot(root);
+  if (!path.has_value()) {
+    return std::nullopt;
+  }
+  for (const Expr *link : llvm::reverse(links)) {
+    ConditionFacts::extendPath(link, *path, flow);
+  }
+
+  return path;
+}
+
+const Expr *ConditionFacts::pathInner(const Expr *expr) {
+  if (auto *link = dyn_cast<CastExpr>(expr)) {
+    bool passes = link->shortCircuit || link->isImplicit();
+    return passes ? link->operand : nullptr;
+  }
+  if (auto *member = dyn_cast<MemberExpr>(expr)) {
+    return member->object;
+  }
+
+  return nullptr;
+}
+
+std::optional<FieldPath> ConditionFacts::pathRoot(const Expr *expr) {
+  auto *name = dyn_cast<NameExpr>(expr);
+  if (name == nullptr || name->var() == nullptr) {
+    return std::nullopt;
+  }
+  FieldPath path;
+  path.var = name->var();
+
+  return path;
+}
+
+void ConditionFacts::extendPath(const Expr *link, FieldPath &path, Flow &flow) {
+  auto *member = dyn_cast<MemberExpr>(link);
+  bool checked = member == nullptr && cast<CastExpr>(link)->shortCircuit;
+  if (member != nullptr) {
+    path.names.push_back(member->name);
+  } else if (checked && path.names.empty()) {
+    flow.defined.insert(path.var);
+  } else if (checked) {
+    FieldFacts::defineField(flow, path);
+  }
 }
 
 void ConditionFacts::addConditionFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) const {

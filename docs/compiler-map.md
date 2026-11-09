@@ -277,6 +277,7 @@ semantic/                         движок типов: объявления,
   declare/                        объявления: классы, функции, типы, импорты, prelude
     assigned_fields/              AssignedFields: имена полей, в которые где-то присваивают
     class_declarer/               ClassDeclarer: классы — поля, методы, перегрузки
+    class_tree/                   ClassTree: наследники класса списком (в глубину, как рекурсия) и все классы в порядке дерева
     constant_folder/              ConstantFolder: значения констант при сборке, переполнение в них
     import_binder/                ImportBinder: связывает импорты с экспортами
     metadata_writers/             MetadataWriters: какие функции пишут Reflect.defineMetadata по ключу
@@ -285,7 +286,9 @@ semantic/                         движок типов: объявления,
     prelude/                      Prelude: встроенные типы (FetchError, Result…) — строка kPrelude
     type_declarer/                TypeDeclarer: type, interface, enum
   flow/                           поток управления: сужение, факты, доказательства
+    children_first/               ChildrenFirst: запись дерева «детьми вперёд» и снятие ответов детей со стека (стековая машина вместо рекурсии)
     condition_facts/              ConditionFacts: факты из условий if
+    expr_parts/                   ExprParts: выражение списком частей — части &&, части && и ||, ветки ?:, узлы арифметики, листья литералов
     facts/                        Facts: линейные факты о целых (a < b + 1) для доказательств индексов
     field_facts/                  FieldFacts: сужение полей (obj.x, r.error) по путям
     flow_checker/                 FlowChecker: слияние веток, что сбивают присваивания и вызовы
@@ -458,6 +461,8 @@ semantic/                         движок типов: объявления,
     literal_types/                LiteralTypes: литеральные типы, const-литералы
     template_types/               TemplateTypes: шаблонные типы строк, Uppercase…
     type_operators/               TypeOperators: keyof, typeof, индексные типы
+    type_parts/                   TypeParts: части типа списком по маршруту (TypeEdge); type_routes.h — маршруты всех функций рядом
+    type_ref_parts/               TypeRefParts: части записи типа (TypeRef) списком
     type_relations/               TypeRelations: приводимость, преобразование, общий тип
     type_resolver/                TypeResolver: запись типа в коде → Type
     typeops_check_helpers/        общие помощники операторов типов

@@ -19,6 +19,8 @@ public:
   Expr *narrowedField(MemberExpr *member);
 
 private:
+  static bool holdsField(const MemberExpr *member);
+
   SemanticState &state;
   TypeRelations *typeRelations = nullptr;
 };

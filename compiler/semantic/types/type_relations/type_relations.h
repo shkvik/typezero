@@ -43,6 +43,8 @@ private:
   using ResultRangeWasProven = Result<const Expr *, TypeRelationsRangeProvenError>;
   using ResultTypeAssignable = Result<const Expr *, TypeRelationsAssignableError>;
 
+  static bool isIntLiteralNode(const Expr *expr);
+  static bool isWideInteger(const Type *type);
   static ResultRangeWasProven rangeProven(const Expr *expr, const Type *to, llvm::StringRef what,
                                           llvm::ArrayRef<std::pair<int64_t, int64_t>> intervals);
   static std::string rangeCheck(const Expr *expr, const Type *target,

@@ -2,6 +2,7 @@
 
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/functions/callback_checker/callback_checker_errors.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
@@ -20,6 +21,11 @@ class NestedFunctions;
 class PredicateChecker;
 class GenericInstantiator;
 class FunctionValueChecker;
+
+struct SignedCondition {
+  const Expr *cond;
+  bool whenTrue;
+};
 
 class CallbackChecker {
 public:
@@ -57,6 +63,13 @@ private:
                                               llvm::StringRef name, llvm::StringRef method);
   static ResultArgumentsSuffice argumentsEnough(const Type *type, const Signature &expected,
                                                 llvm::StringRef name, llvm::StringRef method);
+  using DefinedVars = llvm::SmallPtrSet<const VarSymbol *, 4>;
+
+  static NodeChildren<SignedCondition> signedParts(SignedCondition part);
+  static DefinedVars joinDefined(bool isAnd, bool whenTrue, DefinedVars left,
+                                 const DefinedVars &right);
+  DefinedVars definedBy(SignedCondition part, std::vector<DefinedVars> &answers) const;
+
   static ResultParameterMatches callbackParam(const Type *type, const Signature &expected, size_t i,
                                               unsigned primary, const FunctionDecl *known,
                                               llvm::StringRef name, llvm::StringRef method);

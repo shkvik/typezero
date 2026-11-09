@@ -56,27 +56,46 @@ EmitterChecker::EmitterChecker(SemanticState &owner, SemanticParts &all)
   this->genericClassInstantiator = &all.getGenericClassInstantiator();
 }
 
-std::string EmitterChecker::chainText(const Expr *expr) {
+std::optional<std::string> EmitterChecker::chainText(const Expr *expr) {
+  std::vector<llvm::StringRef> names;
+  const Expr *link = expr;
+  while (auto *member = dyn_cast<MemberExpr>(link)) {
+    if (member->optional) {
+      return std::nullopt;
+    }
+    names.push_back(member->name);
+    link = member->object;
+  }
+  std::optional<std::string> root = EmitterChecker::rootText(link);
+  if (!root.has_value()) {
+    return std::nullopt;
+  }
+  std::string text = *root;
+  for (llvm::StringRef name : llvm::reverse(names)) {
+    text += "." + name.str();
+  }
+
+  return text;
+}
+
+std::optional<std::string> EmitterChecker::rootText(const Expr *expr) {
   if (auto *name = dyn_cast<NameExpr>(expr)) {
     return name->name.str();
   }
-  if (auto *call = dyn_cast<CallExpr>(expr); call && isa<NameExpr>(call->callee)) {
-    llvm::StringRef fn = cast<NameExpr>(call->callee)->name;
-    auto *fd = call->args.size() == 1 ? dyn_cast<IntLitExpr>(call->args[0]) : nullptr;
-    if (fn == "processStdin" && call->args.empty()) {
-      return "process.stdin";
-    }
-    if (fn == "processStdout" && fd) {
-      return fd->value == 2 ? "process.stderr" : "process.stdout";
-    }
-    return "";
+  auto *call = dyn_cast<CallExpr>(expr);
+  auto *callee = call != nullptr ? dyn_cast<NameExpr>(call->callee) : nullptr;
+  if (callee == nullptr) {
+    return std::nullopt;
   }
-  if (auto *member = dyn_cast<MemberExpr>(expr); member && !member->optional) {
-    std::string object = EmitterChecker::chainText(member->object);
-    return object.empty() ? "" : object + "." + member->name.str();
+  auto *fd = call->args.size() == 1 ? dyn_cast<IntLitExpr>(call->args[0]) : nullptr;
+  if (callee->name == "processStdin" && call->args.empty()) {
+    return "process.stdin";
+  }
+  if (callee->name == "processStdout" && fd != nullptr) {
+    return fd->value == 2 ? "process.stderr" : "process.stdout";
   }
 
-  return "";
+  return std::nullopt;
 }
 
 bool EmitterChecker::isServiceEvent(llvm::StringRef name) {
@@ -291,8 +310,8 @@ EmitterKey EmitterChecker::keyOf(const Expr *root) const {
   }
   if (std::optional<FieldPath> path = this->fieldFacts->fieldPath(root)) {
     key.path = *path;
-  } else if (std::string text = EmitterChecker::chainText(root); !text.empty()) {
-    key.text = text;
+  } else if (std::optional<std::string> text = EmitterChecker::chainText(root)) {
+    key.text = *text;
   } else {
     key.root = root;
   }
@@ -460,13 +479,11 @@ Expr *EmitterChecker::collectEmitterCall(CallExpr *call, MemberExpr *member,
       wider.push_back(both);
     }
     if (const Type *now = Type::tuple(wider); now != before) {
-      llvm::SmallPtrSet<const Type *, 8> seen;
-      store.changeInferredEvent(site, *key, this->eventMapInference->portable(now, seen));
+      store.changeInferredEvent(site, *key, this->eventMapInference->portable(now));
     }
     return call;
   }
-  llvm::SmallPtrSet<const Type *, 8> seen;
-  store.addInferredEvent(site, {*key, this->eventMapInference->portable(found, seen),
+  store.addInferredEvent(site, {*key, this->eventMapInference->portable(found),
                                 EmitterChecker::shortPlace(this->eventMapInference->placeOf(loc))});
 
   return call;

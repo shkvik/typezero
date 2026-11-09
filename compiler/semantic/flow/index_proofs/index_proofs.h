@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/result/result/result.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/flow/index_proofs/index_proofs_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
@@ -20,7 +21,7 @@ public:
   IndexProofs(SemanticState &owner, SemanticParts &all);
 
   std::optional<Linear> linear(const Expr *expr) const;
-  std::optional<Linear> lengthOf(const Expr *object) const;
+  std::optional<Linear> lengthOf(const Expr *expr) const;
   std::optional<Linear> knownLength(const Expr *value) const;
   bool provesInBounds(const Expr *object, const Expr *index, bool allowEnd) const;
   bool provesAtInBounds(const Expr *object, const Expr *index) const;
@@ -47,6 +48,18 @@ public:
   bool provesSumUpTo(std::optional<Linear> a, std::optional<Linear> b, const Expr *object) const;
 
 private:
+  static NodeChildren<const Expr *> linearParts(const Expr *expr);
+  static bool isIntWidening(const CastExpr *conv);
+  static bool isLinearStep(const BinaryExpr *bin);
+  std::optional<Linear> nodeLinear(const Expr *expr, std::vector<Linear> &answers) const;
+  std::optional<Linear> linearSum(const BinaryExpr *bin, const Linear &l, const Linear &r) const;
+  static const Expr *withoutWidening(const Expr *expr);
+  static std::vector<const Expr *> provedBranches(const Expr *expr);
+  bool provesValueBetween(const Expr *expr, int64_t lo, std::optional<int64_t> hi) const;
+  static const Expr *viewedSource(const Expr *value);
+  static const Expr *sameLengthInner(const Expr *object);
+  static const Expr *sameLengthSource(const Expr *object);
+  static const CallExpr *wholeByteView(const Expr *value);
   static const VarSymbol *variableOf(const Expr *expr);
 
   SemanticState &state;

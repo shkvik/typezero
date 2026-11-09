@@ -23,6 +23,10 @@ public:
 private:
   static const VarSymbol *variableOf(const Expr *expr);
   static const NameExpr *optionalVariable(const Expr *expr);
+  static std::optional<FieldPath> definedPath(const Expr *expr, Flow &flow);
+  static const Expr *pathInner(const Expr *expr);
+  static std::optional<FieldPath> pathRoot(const Expr *expr);
+  static void extendPath(const Expr *link, FieldPath &path, Flow &flow);
   static void addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual);
 
   bool chainDefined(const Expr *e, Flow &flow) const;

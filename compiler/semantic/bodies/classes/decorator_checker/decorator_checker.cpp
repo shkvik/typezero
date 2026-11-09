@@ -70,29 +70,40 @@ std::string DecoratorChecker::argumentsText(Place place) {
 }
 
 std::string DecoratorChecker::decoratorName(const Expr *expr) {
-  if (auto *call = dyn_cast<CallExpr>(expr)) {
-    return DecoratorChecker::decoratorName(call->callee);
+  std::vector<llvm::StringRef> names;
+  const Expr *link = DecoratorChecker::withoutCalls(expr);
+  while (auto *member = dyn_cast<MemberExpr>(link)) {
+    names.push_back(member->name);
+    link = DecoratorChecker::withoutCalls(member->object);
   }
-  if (auto *name = dyn_cast<NameExpr>(expr)) {
-    return name->name.starts_with("%") ? "" : name->name.str();
+  auto *root = dyn_cast<NameExpr>(link);
+  if (root == nullptr || root->name.starts_with("%")) {
+    return "";
   }
-  if (auto *member = dyn_cast<MemberExpr>(expr)) {
-    std::string object = DecoratorChecker::decoratorName(member->object);
-    return object.empty() ? "" : object + "." + member->name.str();
+  std::string text = root->name.str();
+  for (llvm::StringRef name : llvm::reverse(names)) {
+    text += "." + name.str();
   }
 
-  return "";
+  return text;
+}
+
+const Expr *DecoratorChecker::withoutCalls(const Expr *expr) {
+  const Expr *callee = expr;
+  while (auto *call = dyn_cast<CallExpr>(callee)) {
+    callee = call->callee;
+  }
+
+  return callee;
 }
 
 bool DecoratorChecker::isPlainReference(const Expr *expr) {
-  if (isa<NameExpr>(expr)) {
-    return true;
-  }
-  if (auto *member = dyn_cast<MemberExpr>(expr)) {
-    return DecoratorChecker::isPlainReference(member->object);
+  const Expr *link = expr;
+  while (auto *member = dyn_cast<MemberExpr>(link)) {
+    link = member->object;
   }
 
-  return false;
+  return isa<NameExpr>(link);
 }
 
 bool DecoratorChecker::decoratedParams(const FunctionDecl *fn) {

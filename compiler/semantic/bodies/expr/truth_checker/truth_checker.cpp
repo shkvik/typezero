@@ -3,6 +3,7 @@
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/flow/condition_facts/condition_facts.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
@@ -27,8 +28,44 @@ TruthChecker::TruthChecker(SemanticState &owner, SemanticParts &all)
 }
 
 std::string TruthChecker::sourceText(const Expr *expr) {
+  std::vector<std::string> answers;
+  for (const Expr *node : ChildrenFirst::order(expr, TruthChecker::sourceParts)) {
+    std::string text = TruthChecker::nodeSource(node, answers);
+    if (text.empty()) {
+      return "";
+    }
+    answers.push_back(std::move(text));
+  }
+
+  return answers.back();
+}
+
+NodeChildren<const Expr *> TruthChecker::sourceParts(const Expr *expr) {
   if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit()) {
-    return TruthChecker::sourceText(conv->operand);
+    return {conv->operand};
+  }
+  if (auto *chain = dyn_cast<OptionalChainExpr>(expr)) {
+    return {chain->chain};
+  }
+  if (auto *member = dyn_cast<MemberExpr>(expr)) {
+    return {member->object};
+  }
+  if (auto *index = dyn_cast<IndexExpr>(expr)) {
+    return {index->object, index->index};
+  }
+  auto *call = dyn_cast<CallExpr>(expr);
+  if (call == nullptr || call->hasSpread()) {
+    return {};
+  }
+  NodeChildren<const Expr *> parts = {call->callee};
+  parts.append(call->args.begin(), call->args.end());
+
+  return parts;
+}
+
+std::string TruthChecker::nodeSource(const Expr *expr, std::vector<std::string> &answers) {
+  if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit()) {
+    return ChildrenFirst::takeAnswer(answers);
   }
   switch (expr->kind()) {
   case Expr::Kind::Name: {
@@ -41,53 +78,54 @@ std::string TruthChecker::sourceText(const Expr *expr) {
     return cast<BoolLitExpr>(expr)->value ? "true" : "false";
   case Expr::Kind::Undefined:
     return "undefined";
-  case Expr::Kind::StringLit: {
-    std::string text = "\"";
-    for (char16_t c : cast<StringLitExpr>(expr)->value) {
-      if (c < 0x20 || c >= 0x7f || c == '"' || c == '\\') {
-        return "";
-      }
-      text += static_cast<char>(c);
-    }
-    return text + "\"";
-  }
+  case Expr::Kind::StringLit:
+    return TruthChecker::stringSource(cast<StringLitExpr>(expr));
   case Expr::Kind::ArrayLit:
     return cast<ArrayLitExpr>(expr)->elements.empty() ? "[]" : "";
   case Expr::Kind::OptionalChain:
-    return TruthChecker::sourceText(cast<OptionalChainExpr>(expr)->chain);
+    return ChildrenFirst::takeAnswer(answers);
   case Expr::Kind::Member: {
     auto *member = cast<MemberExpr>(expr);
-    std::string object = TruthChecker::sourceText(member->object);
-    return object.empty() ? "" : object + (member->optional ? "?." : ".") + member->name.str();
+    std::string object = ChildrenFirst::takeAnswer(answers);
+    return object + (member->optional ? "?." : ".") + member->name.str();
   }
   case Expr::Kind::Index: {
     auto *index = cast<IndexExpr>(expr);
-    std::string object = TruthChecker::sourceText(index->object);
-    std::string position = TruthChecker::sourceText(index->index);
-    if (object.empty() || position.empty()) {
-      return "";
-    }
+    std::string position = ChildrenFirst::takeAnswer(answers);
+    std::string object = ChildrenFirst::takeAnswer(answers);
     return object + (index->optional ? "?.[" : "[") + position + "]";
   }
-  case Expr::Kind::Call: {
-    auto *call = cast<CallExpr>(expr);
-    std::string text = TruthChecker::sourceText(call->callee);
-    if (text.empty() || call->hasSpread()) {
-      return "";
-    }
-    text += call->optional ? "?.(" : "(";
-    for (size_t i = 0; i < call->args.size(); ++i) {
-      std::string arg = TruthChecker::sourceText(call->args[i]);
-      if (arg.empty()) {
-        return "";
-      }
-      text += (i > 0 ? ", " : "") + arg;
-    }
-    return text + ")";
-  }
+  case Expr::Kind::Call:
+    return TruthChecker::callSource(cast<CallExpr>(expr), answers);
   default:
     return "";
   }
+}
+
+std::string TruthChecker::stringSource(const StringLitExpr *lit) {
+  std::string text = "\"";
+  for (char16_t c : lit->value) {
+    if (c < 0x20 || c >= 0x7f || c == '"' || c == '\\') {
+      return "";
+    }
+    text += static_cast<char>(c);
+  }
+
+  return text + "\"";
+}
+
+std::string TruthChecker::callSource(const CallExpr *call, std::vector<std::string> &answers) {
+  if (call->hasSpread()) {
+    return "";
+  }
+  std::vector<std::string> args = ChildrenFirst::takeAnswers(answers, call->args.size());
+  std::string text = ChildrenFirst::takeAnswer(answers);
+  text += call->optional ? "?.(" : "(";
+  for (size_t i = 0; i < args.size(); ++i) {
+    text += (i > 0 ? ", " : "") + args[i];
+  }
+
+  return text + ")";
 }
 
 std::string TruthChecker::hintText(const Expr *expr, const char *placeholder) {

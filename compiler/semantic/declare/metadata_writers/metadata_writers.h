@@ -14,6 +14,7 @@ public:
   void rememberWriters(SourceFile &program);
 
 private:
+  void rememberWritersIn(FunctionDecl *fn);
   void rememberWriter(FunctionDecl *fn, const Expr *expr);
 
   SemanticState &state;

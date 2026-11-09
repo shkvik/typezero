@@ -14,10 +14,10 @@
 #include "compiler/semantic/library/fs/fs_declarer/fs_declarer.h"
 #include "compiler/semantic/library/reflect/reflect_call_checker/reflect_call_checker.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
+#include "compiler/semantic/types/type_parts/type_routes.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/unknown_checker/unknown_checker.h"
 #include "llvm/ADT/STLExtras.h"
-#include <functional>
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -40,62 +40,20 @@ ReflectChecker::ReflectChecker(SemanticState &owner, SemanticParts &all)
 }
 
 void ReflectChecker::classesIn(const Type *type, llvm::SmallPtrSetImpl<ClassDecl *> &out) {
-  type = type->nonOptional();
-  if (type->isArray()) {
-    ReflectChecker::classesIn(type->inner(), out);
-    return;
-  }
-  if (type->isUnion()) {
-    for (const Type *m : type->members()) {
-      ReflectChecker::classesIn(m, out);
+  TypeParts parts = TypeParts::collect(type, kReflectClassesRoute);
+  for (const Type *part : parts.getTypes()) {
+    auto *cls = const_cast<ClassDecl *>(part->classDecl());
+    if (cls != nullptr && !cls->literal()) {
+      out.insert(cls);
     }
-    return;
-  }
-  if (ClassDecl *cls = const_cast<ClassDecl *>(type->classDecl()); cls && !cls->literal()) {
-    out.insert(cls);
   }
 }
 
-void ReflectChecker::constructorsIn(const Type *type, llvm::SmallVectorImpl<const Type *> &out,
-                                    llvm::SmallPtrSetImpl<const Type *> &seen) {
-  if (!type || !seen.insert(type).second) {
-    return;
-  }
-  if (type->isConstructor()) {
-    out.push_back(type->constructed());
-    return;
-  }
-  if (type->isOptional() || type->isArray() || type->isPromise()) {
-    ReflectChecker::constructorsIn(type->inner(), out, seen);
-    return;
-  }
-  if (type->isResult()) {
-    ReflectChecker::constructorsIn(type->okType(), out, seen);
-    ReflectChecker::constructorsIn(type->errType(), out, seen);
-    return;
-  }
-  if (type->isDict()) {
-    ReflectChecker::constructorsIn(type->keyType(), out, seen);
-    ReflectChecker::constructorsIn(type->valueType(), out, seen);
-    return;
-  }
-  if (type->isFunction()) {
-    for (const Type *param : type->params()) {
-      ReflectChecker::constructorsIn(param, out, seen);
-    }
-    ReflectChecker::constructorsIn(type->ret(), out, seen);
-    return;
-  }
-  if (type->isIterator() || type->isAsyncIterator()) {
-    ReflectChecker::constructorsIn(type->yielded(), out, seen);
-    return;
-  }
-  for (const Type *m : type->members()) {
-    ReflectChecker::constructorsIn(m, out, seen);
-  }
-  if (type->isObject() && !type->isClass()) {
-    for (const Field &f : type->fields()) {
-      ReflectChecker::constructorsIn(f.type, out, seen);
+void ReflectChecker::constructorsIn(const Type *type, llvm::SmallVectorImpl<const Type *> &out) {
+  TypeParts parts = TypeParts::collect(type, kReflectConstructorsRoute);
+  for (const Type *part : parts.getTypes()) {
+    if (part->isConstructor()) {
+      out.push_back(part->constructed());
     }
   }
 }
@@ -146,12 +104,11 @@ void ReflectChecker::noteReflectedConversion(const Type *from, const Type *to,
 
 void ReflectChecker::noteConstructorFlow(const Type *from, const Type *to) {
   llvm::SmallVector<const Type *, 4> sources, targets;
-  llvm::SmallPtrSet<const Type *, 16> seenFrom, seenTo;
-  ReflectChecker::constructorsIn(to, targets, seenTo);
+  ReflectChecker::constructorsIn(to, targets);
   if (targets.empty()) {
     return;
   }
-  ReflectChecker::constructorsIn(from, sources, seenFrom);
+  ReflectChecker::constructorsIn(from, sources);
   for (const Type *x : sources) {
     for (const Type *y : targets) {
       if (x != y && ReflectChecker::instanceOf(x, y)) {
@@ -179,29 +136,32 @@ void ReflectChecker::finishReflection() {
     }
     return;
   }
-  std::function<void(ClassDecl *)> methods = [&](ClassDecl *cls) {
-    if (cls->reflectMethods) {
-      return;
-    }
-    cls->reflectMethods = true;
-    for (ClassDecl *child : cls->children) {
-      methods(child);
-    }
-  };
   if (reflect.isAnyObjectRead()) {
     for (ClassDecl *cls : reflect.getEscapedClasses()) {
-      methods(cls);
+      ReflectChecker::markReflectMethods(cls);
     }
     for (ClassDecl *cls : this->state.getClassStore().getClasses()) {
       if (cls->reflectNew) {
-        methods(cls);
+        ReflectChecker::markReflectMethods(cls);
       }
     }
   }
   for (ClassDecl *cls : reflect.getReflectedObjects()) {
-    methods(cls);
+    ReflectChecker::markReflectMethods(cls);
   }
   this->checkReflectNews();
+}
+
+void ReflectChecker::markReflectMethods(ClassDecl *cls) {
+  std::vector<ClassDecl *> stack = {cls};
+  while (!stack.empty()) {
+    ClassDecl *next = stack.back();
+    stack.pop_back();
+    if (!next->reflectMethods) {
+      next->reflectMethods = true;
+      stack.insert(stack.end(), next->children.rbegin(), next->children.rend());
+    }
+  }
 }
 
 const Type *ReflectChecker::reflectError() {

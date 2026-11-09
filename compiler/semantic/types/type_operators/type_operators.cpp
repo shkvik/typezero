@@ -54,26 +54,31 @@ llvm::ArrayRef<const Type *> TypeOperators::membersOf(const Type *&type) {
 }
 
 const Type *TypeOperators::keysOf(const Type *type) {
-  type = type->nonOptional();
-  if (type->isUnion()) {
-    std::vector<const Type *> common;
-    bool first = true;
-    for (const Type *m : type->members()) {
-      const Type *keys = this->keysOf(m);
-      if (!keys) {
-        return nullptr;
-      }
-      std::vector<const Type *> mine;
-      for (const Type *k : TypeOperators::membersOf(keys)) {
-        if (first || llvm::is_contained(common, k)) {
-          mine.push_back(k);
-        }
-      }
-      common = std::move(mine);
-      first = false;
-    }
-    return common.empty() ? Type::never() : Type::unionOf(common);
+  const Type *plain = type->nonOptional();
+  if (!plain->isUnion()) {
+    return this->ownKeys(plain);
   }
+  std::vector<const Type *> common;
+  bool first = true;
+  for (const Type *m : plain->members()) {
+    const Type *keys = this->ownKeys(m->nonOptional());
+    if (!keys) {
+      return nullptr;
+    }
+    std::vector<const Type *> mine;
+    for (const Type *k : TypeOperators::membersOf(keys)) {
+      if (first || llvm::is_contained(common, k)) {
+        mine.push_back(k);
+      }
+    }
+    common = std::move(mine);
+    first = false;
+  }
+
+  return common.empty() ? Type::never() : Type::unionOf(common);
+}
+
+const Type *TypeOperators::ownKeys(const Type *type) {
   if (type->isRecord()) {
     return type->keyType();
   }

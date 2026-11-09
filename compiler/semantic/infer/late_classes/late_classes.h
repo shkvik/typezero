@@ -7,6 +7,7 @@
 namespace tz {
 
 class SemanticParts;
+class PlacedNodes;
 class ClassBases;
 class ClassLinks;
 class FsDeclarer;
@@ -46,14 +47,15 @@ private:
   using ResultNoOldObjectHeld = Result<const ClassField *, LateClassesOldObjectError>;
   using ResultFieldNameIsFree = Result<const ClassField *, LateClassesReplacedFieldError>;
 
+  static bool hasClassExprIn(const PlacedNodes &nodes);
   static ResultStaticTypeKnown staticType(const ClassField &field, const Type *type);
   static ResultNoOldObjectHeld oldObject(const ClassDecl *cls, const ClassField &field);
-  static bool holdsType(const Type *type, const Type *target,
-                        llvm::SmallPtrSetImpl<const Type *> &seen);
+  static bool holdsType(const Type *type, const Type *target);
   static ResultFieldNameIsFree replacedField(const ClassDecl *cls, const ClassDecl *replacement,
                                              const ClassDecl *child, const ClassField &field);
 
   void relink(ClassDecl *cls);
+  void relinkClass(ClassDecl *cls);
   void noteMethodNames(const ClassDecl *cls);
   ResultBaseClassUsable baseClass(const Type *type) const;
 

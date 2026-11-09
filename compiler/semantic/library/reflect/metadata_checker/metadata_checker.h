@@ -33,6 +33,8 @@ public:
                          llvm::SMLoc loc);
 
 private:
+  static const Type *designPlain(const Type *type);
+  ClassDecl *plainConstructor(const Type *type);
   SemanticState &state;
   Scopes *scopes = nullptr;
   ClassDeclarer *classDeclarer = nullptr;

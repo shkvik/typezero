@@ -178,11 +178,32 @@ std::optional<int> BytesCheckHelpers::encodingNamed(llvm::StringRef name) {
 }
 
 std::string BytesCheckHelpers::valueText(const Expr *e) {
-  while (auto *conv = dyn_cast<CastExpr>(e)) {
-    if (!conv->isImplicit()) {
-      break;
+  std::vector<std::string> answers;
+  for (const Expr *node : ChildrenFirst::order(e, BytesCheckHelpers::valueParts)) {
+    std::string text = BytesCheckHelpers::nodeValueText(node, answers);
+    if (text == "x") {
+      return text;
     }
-    e = conv->operand;
+    answers.push_back(std::move(text));
+  }
+
+  return answers.back();
+}
+
+NodeChildren<const Expr *> BytesCheckHelpers::valueParts(const Expr *e) {
+  if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
+    return {conv->operand};
+  }
+  if (auto *index = dyn_cast<IndexExpr>(e)) {
+    return {index->object, index->index};
+  }
+
+  return {};
+}
+
+std::string BytesCheckHelpers::nodeValueText(const Expr *e, std::vector<std::string> &answers) {
+  if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
+    return ChildrenFirst::takeAnswer(answers);
   }
   if (auto *name = dyn_cast<NameExpr>(e)) {
     return name->name.str();
@@ -193,12 +214,10 @@ std::string BytesCheckHelpers::valueText(const Expr *e) {
   if (auto *bin = dyn_cast<BinaryExpr>(e); bin && !bin->source.empty()) {
     return "(" + bin->source.str() + ")";
   }
-  if (auto *index = dyn_cast<IndexExpr>(e)) {
-    std::string object = BytesCheckHelpers::valueText(index->object),
-                position = BytesCheckHelpers::valueText(index->index);
-    if (object != "x" && position != "x") {
-      return object + "[" + position + "]";
-    }
+  if (llvm::isa<IndexExpr>(e)) {
+    std::string position = ChildrenFirst::takeAnswer(answers);
+    std::string object = ChildrenFirst::takeAnswer(answers);
+    return object + "[" + position + "]";
   }
 
   return "x";

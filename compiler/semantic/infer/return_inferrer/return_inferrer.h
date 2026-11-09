@@ -61,6 +61,9 @@ private:
   const Type *templateReturn(FuncSymbol *fn);
   ResultNotCalledEarly earlyCall(const FuncSymbol *fn) const;
   const Type *instanceParam(FuncSymbol *fn, const Type *type);
+  static bool isInstanceMethod(const FuncSymbol *fn);
+  void copyGenericParams(FuncSymbol *fn);
+  void resolveOwnParams(FuncSymbol *fn);
   ResultParamTypeKnown defaultType(const Param &param, const Type *found) const;
   ResultCycleTypeKnown cycleType(const FuncSymbol *fn, int cycleSize, bool failed) const;
   ResultReturnsUnified commonReturn(const FuncSymbol *fn, const Type *before,

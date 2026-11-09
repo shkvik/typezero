@@ -1,6 +1,7 @@
 #include "compiler/semantic/infer/constructor_calls/constructor_calls.h"
 #include "compiler/program/ast_walker/ast_walker.h"
 #include "compiler/semantic/bodies/classes/class_links/class_links.h"
+#include "compiler/semantic/declare/class_tree/class_tree.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::dyn_cast;
@@ -21,8 +22,7 @@ void ConstructorCalls::checkConstructorCalls() {
       functions.push_back(cls->init);
     }
     for (FunctionDecl *ctor : functions) {
-      llvm::SmallPtrSet<const FunctionDecl *, 8> seen;
-      this->scanConstructorCalls(ctor, cls, nullptr, ctor, seen);
+      this->scanConstructorCalls(ctor, cls);
     }
   }
 }
@@ -39,15 +39,11 @@ const NameExpr *ConstructorCalls::receiverName(const CallExpr *call) {
 
 const ClassDecl *ConstructorCalls::overridingChild(const ClassDecl *cls,
                                                    const FunctionDecl *method) {
-  for (const ClassDecl *child : cls->children) {
+  for (const ClassDecl *child : ClassTree::descendants(cls)) {
     for (FunctionDecl *other : ClassLinks::ownMethods(child)) {
       if (ClassLinks::overridesTransitively(other, method)) {
         return child;
       }
-    }
-    const ClassDecl *found = ConstructorCalls::overridingChild(child, method);
-    if (found) {
-      return found;
     }
   }
 
@@ -100,42 +96,70 @@ ConstructorCalls::ResultNotOverridden ConstructorCalls::overriddenCall(const Cla
   return ok(target);
 }
 
-void ConstructorCalls::scanConstructorCalls(const FunctionDecl *fn, const ClassDecl *cls,
-                                            const CallExpr *origin, const FunctionDecl *ctor,
-                                            llvm::SmallPtrSetImpl<const FunctionDecl *> &seen) {
+void ConstructorCalls::scanConstructorCalls(const FunctionDecl *ctor, const ClassDecl *cls) {
+  llvm::SmallPtrSet<const FunctionDecl *, 8> seen;
+  std::vector<ScanFrame> frames;
+  ConstructorCalls::enterScan(frames, ctor, nullptr, seen);
+  while (!frames.empty()) {
+    std::optional<ScanTarget> next = this->takeNextTarget(frames.back(), cls, ctor, seen);
+    if (next.has_value()) {
+      ConstructorCalls::enterScan(frames, next->fn, next->site, seen);
+    } else {
+      frames.pop_back();
+    }
+  }
+}
+
+void ConstructorCalls::enterScan(std::vector<ScanFrame> &frames, const FunctionDecl *fn,
+                                 const CallExpr *origin,
+                                 llvm::SmallPtrSetImpl<const FunctionDecl *> &seen) {
   if (!fn->body || !fn->thisVar()) {
     return;
   }
   bool firstVisit = seen.insert(fn).second;
-  if (!firstVisit) {
-    return;
+  if (firstVisit) {
+    std::vector<const Expr *> exprs = AstWalker::exprsIn(fn->body, false);
+    frames.push_back(ScanFrame{fn, origin, std::move(exprs), 0});
   }
+}
 
-  const VarSymbol *self = fn->thisVar();
-  auto scanCall = [&](const Expr *e) {
-    auto *call = dyn_cast<CallExpr>(e);
-    bool originReported = origin && this->state.getClassStore().isCallReported(origin);
-    if (!call || !call->method() || originReported) {
-      return;
+std::optional<ScanTarget>
+ConstructorCalls::takeNextTarget(ScanFrame &frame, const ClassDecl *cls, const FunctionDecl *ctor,
+                                 llvm::SmallPtrSetImpl<const FunctionDecl *> &seen) {
+  while (frame.next < frame.exprs.size()) {
+    const Expr *e = frame.exprs[frame.next];
+    frame.next += 1;
+    const CallExpr *call = this->selfCall(frame, e);
+    if (call == nullptr) {
+      continue;
     }
-    const NameExpr *name = ConstructorCalls::receiverName(call);
-    if (!name || name->var() != self) {
-      return;
-    }
-    const CallExpr *site = origin ? origin : call;
+    const CallExpr *site = frame.origin ? frame.origin : call;
     ResultNotOverridden target = ConstructorCalls::overriddenCall(cls, ctor, call, site);
     if (target.isErr()) {
       this->state.getDiagnostics().error(site->loc(), target.error().message);
       this->state.getClassStore().markCallReported(site);
-      return;
+      continue;
     }
-    if (!origin) {
+    if (!frame.origin) {
       seen.clear();
     }
-    seen.insert(fn);
-    this->scanConstructorCalls(target.value(), cls, site, ctor, seen);
-  };
-  AstWalker::visitExprs(fn->body, scanCall, false);
+    seen.insert(frame.fn);
+    return ScanTarget{target.value(), site};
+  }
+
+  return std::nullopt;
+}
+
+const CallExpr *ConstructorCalls::selfCall(const ScanFrame &frame, const Expr *e) const {
+  auto *call = dyn_cast<CallExpr>(e);
+  bool originReported = frame.origin && this->state.getClassStore().isCallReported(frame.origin);
+  if (!call || !call->method() || originReported) {
+    return nullptr;
+  }
+  const NameExpr *name = ConstructorCalls::receiverName(call);
+  bool onSelf = name != nullptr && name->var() == frame.fn->thisVar();
+
+  return onSelf ? call : nullptr;
 }
 
 }

@@ -6,6 +6,18 @@
 
 namespace tz {
 
+struct ScanFrame {
+  const FunctionDecl *fn;
+  const CallExpr *origin;
+  std::vector<const Expr *> exprs;
+  size_t next;
+};
+
+struct ScanTarget {
+  const FunctionDecl *fn;
+  const CallExpr *site;
+};
+
 class ConstructorCalls {
 public:
   explicit ConstructorCalls(SemanticState &owner);
@@ -20,9 +32,14 @@ private:
   static ResultNotOverridden overriddenCall(const ClassDecl *cls, const FunctionDecl *ctor,
                                             const CallExpr *call, const CallExpr *site);
 
-  void scanConstructorCalls(const FunctionDecl *fn, const ClassDecl *cls, const CallExpr *origin,
-                            const FunctionDecl *ctor,
-                            llvm::SmallPtrSetImpl<const FunctionDecl *> &seen);
+  static void enterScan(std::vector<ScanFrame> &frames, const FunctionDecl *fn,
+                        const CallExpr *origin, llvm::SmallPtrSetImpl<const FunctionDecl *> &seen);
+
+  void scanConstructorCalls(const FunctionDecl *ctor, const ClassDecl *cls);
+  std::optional<ScanTarget> takeNextTarget(ScanFrame &frame, const ClassDecl *cls,
+                                           const FunctionDecl *ctor,
+                                           llvm::SmallPtrSetImpl<const FunctionDecl *> &seen);
+  const CallExpr *selfCall(const ScanFrame &frame, const Expr *e) const;
 
   SemanticState &state;
 };

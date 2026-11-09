@@ -9,6 +9,7 @@
 #include "compiler/semantic/infer/late_classes/late_classes.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
+#include "compiler/semantic/types/type_parts/type_routes.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
@@ -35,53 +36,16 @@ GenericInstantiator::GenericInstantiator(SemanticState &owner, SemanticParts &al
   this->genericClassChecker = &all.getGenericClassChecker();
 }
 
-const ClassDecl *GenericInstantiator::literalClassIn(const Type *type,
-                                                     llvm::SmallPtrSetImpl<const Type *> &seen) {
-  switch (type->kind()) {
-  case Type::Kind::Optional:
-  case Type::Kind::Array:
-  case Type::Kind::Promise:
-    return GenericInstantiator::literalClassIn(type->inner(), seen);
-  case Type::Kind::Result:
-    if (const ClassDecl *cls = GenericInstantiator::literalClassIn(type->okType(), seen)) {
+const ClassDecl *GenericInstantiator::literalClassIn(const Type *type) {
+  TypeParts parts = TypeParts::collect(type, kLiteralClassRoute);
+  for (const Type *part : parts.getTypes()) {
+    const ClassDecl *cls = part->classDecl();
+    if (cls != nullptr && cls->literal()) {
       return cls;
     }
-    return GenericInstantiator::literalClassIn(type->errType(), seen);
-  case Type::Kind::Function:
-    for (const Type *p : type->params()) {
-      if (const ClassDecl *cls = GenericInstantiator::literalClassIn(p, seen)) {
-        return cls;
-      }
-    }
-    return GenericInstantiator::literalClassIn(type->ret(), seen);
-  case Type::Kind::Iterator:
-    for (const Type *t : {type->yielded(), type->returned(), type->sent()}) {
-      if (const ClassDecl *cls = GenericInstantiator::literalClassIn(t, seen)) {
-        return cls;
-      }
-    }
-    return nullptr;
-  case Type::Kind::Dict:
-    if (const ClassDecl *cls = GenericInstantiator::literalClassIn(type->keyType(), seen)) {
-      return cls;
-    }
-    return GenericInstantiator::literalClassIn(type->valueType(), seen);
-  case Type::Kind::Object:
-    if (!seen.insert(type).second) {
-      return nullptr;
-    }
-    if (const ClassDecl *cls = type->classDecl()) {
-      return cls->literal() ? cls : nullptr;
-    }
-    for (const Field &f : type->fields()) {
-      if (const ClassDecl *cls = GenericInstantiator::literalClassIn(f.type, seen)) {
-        return cls;
-      }
-    }
-    return nullptr;
-  default:
-    return nullptr;
   }
+
+  return nullptr;
 }
 
 std::string GenericInstantiator::typeList(llvm::ArrayRef<const Type *> types) {
@@ -259,8 +223,7 @@ Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic
 }
 
 bool GenericInstantiator::returnsOwnClass(const FuncSymbol *generic, const Type *ret) {
-  llvm::SmallPtrSet<const Type *, 4> seen;
-  const ClassDecl *cls = ret ? GenericInstantiator::literalClassIn(ret, seen) : nullptr;
+  const ClassDecl *cls = ret ? GenericInstantiator::literalClassIn(ret) : nullptr;
   ResultNoClassReturn plain = GenericInstantiator::ownClassReturn(generic, cls);
   if (plain.isOk()) {
     return false;

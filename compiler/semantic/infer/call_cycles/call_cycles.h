@@ -18,6 +18,11 @@ public:
   void findProgramCycles();
 
 private:
+  struct TarjanFrame {
+    int node;
+    size_t nextCall;
+  };
+
   struct CycleSearch {
     int next = 0;
     std::vector<int> low;
@@ -29,9 +34,15 @@ private:
   };
 
   static llvm::StringSet<> namesUsed(const FunctionDecl *fn);
+  static llvm::StringSet<> memberCallsIn(const FunctionDecl *fn);
   static std::vector<FuncSymbol *> popCycle(int node, CycleSearch &search);
+  static std::optional<int> takeNextCall(TarjanFrame &frame, const CycleSearch &search);
+  static void enter(int node, CycleSearch &search, std::vector<TarjanFrame> &frames);
+  static void followCall(int from, int to, CycleSearch &search, std::vector<TarjanFrame> &frames);
 
-  void visit(int node, CycleSearch &search);
+  void tarjanSearch(int start, CycleSearch &search);
+  void finishTop(CycleSearch &search, std::vector<TarjanFrame> &frames);
+  void closeIfRoot(int node, CycleSearch &search);
   std::vector<FunctionDecl *> unknownReturns(llvm::ArrayRef<FunctionDecl *> functions) const;
   std::vector<std::vector<int>> callsBetween(llvm::ArrayRef<FunctionDecl *> nodes,
                                              ResolveCall resolve) const;

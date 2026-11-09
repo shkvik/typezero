@@ -287,15 +287,26 @@ Expr *AsyncChecker::checkAwait(AwaitExpr *await, const Type *expected) {
 }
 
 const Type *AsyncChecker::awaitedType(const Type *type) {
+  int optionals = 0;
+  const Type *inner = type;
+  while (inner->isOptional()) {
+    optionals += 1;
+    inner = inner->inner();
+  }
+  const Type *awaited = AsyncChecker::awaitedPlain(inner);
+  for (int i = 0; i < optionals; ++i) {
+    if (awaited == nullptr || awaited->isVoid()) {
+      return awaited;
+    }
+    awaited = Type::optional(awaited);
+  }
+
+  return awaited;
+}
+
+const Type *AsyncChecker::awaitedPlain(const Type *type) {
   if (type->isPromise()) {
     return type->promised();
-  }
-  if (type->isOptional()) {
-    const Type *inner = AsyncChecker::awaitedType(type->inner());
-    if (!inner || inner->isVoid()) {
-      return inner;
-    }
-    return Type::optional(inner);
   }
   if (!type->isUnion() ||
       llvm::none_of(type->members(), [](const Type *m) { return m->isPromise(); })) {

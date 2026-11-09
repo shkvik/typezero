@@ -25,6 +25,9 @@ private:
   using ResultGroupIndex = Result<int64_t, MatchCheckerGroupIndexError>;
 
   static ResultGroupIndex groupIndex(int64_t index, int groups);
+  static const Type *itemsType();
+  Expr *itemsMember(Expr *match);
+  Expr *optionalItems(Expr *match, Expr *items);
 
   SemanticState &state;
   ExprChecker *exprChecker = nullptr;

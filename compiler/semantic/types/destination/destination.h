@@ -23,6 +23,8 @@ public:
 
 private:
   static std::vector<const Expr *> findReturnValues(const Stmt *body);
+  static bool isLiteralShape(const Expr *expr);
+  static std::vector<const Expr *> shapeChoices(const Expr *expr);
   static const Type *writable(const Type *type);
   SemanticState &state;
   Scopes *scopes = nullptr;

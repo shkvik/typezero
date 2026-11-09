@@ -2,6 +2,7 @@
 #include "compiler/semantic/generics/generic_class_instantiator/generic_class_instantiator.h"
 #include "compiler/semantic/generics/widening_relations/widening_relations.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
+#include "compiler/semantic/types/type_ref_parts/type_ref_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include <map>
 
@@ -14,11 +15,8 @@ GenericWidening::GenericWidening(SemanticState &owner, SemanticParts &all)
 }
 
 bool GenericWidening::mentions(const TypeRef &ref, llvm::StringRef name) {
-  if (ref.kind() == TypeRefKind::NAME_REF && ref.name == name) {
-    return true;
-  }
-  for (const TypeRef &arg : ref.args) {
-    if (GenericWidening::mentions(arg, name)) {
+  for (const TypeRef *part : TypeRefParts::collect(ref)) {
+    if (part->kind() == TypeRefKind::NAME_REF && part->name == name) {
       return true;
     }
   }

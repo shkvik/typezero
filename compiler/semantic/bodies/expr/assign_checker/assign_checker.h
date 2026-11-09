@@ -50,6 +50,7 @@ private:
   using ResultCompoundOperands = Result<const Type *, AssignCheckerCompoundOperandsError>;
   using ResultElementWriteSafe = Result<const IndexExpr *, AssignCheckerElementWritableError>;
 
+  Expr *copyRoot(const Expr *e);
   Expr *copyChain(const Expr *e);
   Expr *checkFieldLogicalAssign(AssignExpr *assign);
   static ResultFieldChainCopied fieldChain(Expr *read);

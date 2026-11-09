@@ -13,19 +13,23 @@ namespace tz {
 
 std::vector<const Type *> TypeopsCheckHelpers::distributedMembers(const Type *type) {
   std::vector<const Type *> out;
-  if (type->isOptional()) {
-    out = TypeopsCheckHelpers::distributedMembers(type->inner());
-    out.push_back(Type::undefinedTy());
-  } else if (type->isUnion()) {
-    for (const Type *m : type->members()) {
-      for (const Type *n : TypeopsCheckHelpers::distributedMembers(m)) {
-        out.push_back(n);
+  std::vector<const Type *> stack = {type};
+  while (!stack.empty()) {
+    const Type *next = stack.back();
+    stack.pop_back();
+    if (next->isOptional()) {
+      stack.push_back(Type::undefinedTy());
+      stack.push_back(next->inner());
+    } else if (next->isUnion()) {
+      for (const Type *member : llvm::reverse(next->members())) {
+        stack.push_back(member);
       }
+    } else if (next->isBool()) {
+      out.push_back(Type::boolLiteral(false));
+      out.push_back(Type::boolLiteral(true));
+    } else if (!next->isNever()) {
+      out.push_back(next);
     }
-  } else if (type->isBool()) {
-    out = {Type::boolLiteral(false), Type::boolLiteral(true)};
-  } else if (!type->isNever()) {
-    out.push_back(type);
   }
 
   return out;

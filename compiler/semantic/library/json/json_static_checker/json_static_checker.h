@@ -3,6 +3,7 @@
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/json/json_static_checker/json_static_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
+#include "compiler/union/union/union.h"
 
 namespace tz {
 
@@ -14,6 +15,19 @@ class LibraryCalls;
 class TypeRelations;
 class ArgumentChecker;
 class BufferStaticChecker;
+
+enum class HoldStepKind { ENTER, LEAVE };
+
+struct EnterHold {
+  static constexpr HoldStepKind kind = HoldStepKind::ENTER;
+  const Type *type;
+};
+
+struct LeaveHold {
+  static constexpr HoldStepKind kind = HoldStepKind::LEAVE;
+};
+
+using HoldStep = Union<EnterHold, LeaveHold>;
 
 class JsonStaticChecker {
 public:
@@ -30,9 +44,14 @@ private:
 
   static ResultConstantJson constantJson(llvm::StringRef text);
   static ResultEmbeddedPath embeddedPath(llvm::StringRef fn, llvm::StringRef shown);
-  static bool mayHoldItself(const Type *type, std::vector<const Type *> &open);
-  static const ClassDecl *classWithToJson(const Type *type,
-                                          llvm::SmallPtrSetImpl<const Type *> &seen);
+  static bool mayHoldItself(const Type *type);
+  static bool enterHold(const Type *type, std::vector<const Type *> &open,
+                        std::vector<HoldStep> &steps);
+  static std::vector<const Type *> heldParts(const Type *type);
+  static std::vector<const Type *> familyFields(const ClassDecl *cls);
+  static std::vector<const Type *> fieldTypes(const Type *type);
+  static const ClassDecl *classWithToJson(const Type *type);
+  static bool hasToJson(const ClassDecl *cls);
   static bool mayStringifyToUndefined(const Type *type);
 
   void checkConstantJson(const Expr *arg);

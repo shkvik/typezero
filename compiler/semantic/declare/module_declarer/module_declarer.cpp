@@ -210,8 +210,10 @@ ModuleDeclarer::ResultExportUnique ModuleDeclarer::freeExport(const ModuleState 
   return ok(&name);
 }
 
-void ModuleDeclarer::exportName(ModuleState &here, Module *module, const ExportSource *source,
-                                const ModuleName &name) {
+void ModuleDeclarer::exportName(Module *module, const NamedExportStep &step) {
+  ModuleState &here = this->state.getModuleStates().getModuleState(module);
+  const ExportSource *source = step.source;
+  const ModuleName &name = *step.name;
   if (source && !source->from) {
     return;
   }
@@ -265,45 +267,148 @@ ModuleDeclarer::ResultStarIsUnique ModuleDeclarer::starExport(llvm::StringRef na
 }
 
 const llvm::StringMap<ModuleExport> &ModuleDeclarer::exportsOf(Module *module) {
-  ModuleState &here = this->state.getModuleStates().getModuleState(module);
-  if (here.exportsDone || here.exportsBusy) {
-    return here.exports;
+  ModuleState &asked = this->state.getModuleStates().getModuleState(module);
+  if (asked.exportsDone || asked.exportsBusy) {
+    return asked.exports;
   }
-  here.exportsBusy = true;
+  std::vector<ExportsFrame> frames;
+  this->startExports(frames, module);
+  while (!frames.empty()) {
+    Module *needed = this->unreadyModule(frames.back());
+    if (needed != nullptr) {
+      this->startExports(frames, needed);
+    } else {
+      this->runExportStep(frames);
+    }
+  }
 
+  return asked.exports;
+}
+
+void ModuleDeclarer::startExports(std::vector<ExportsFrame> &frames, Module *module) {
+  this->state.getModuleStates().getModuleState(module).exportsBusy = true;
+  std::vector<ExportStep> steps = ModuleDeclarer::exportSteps(module);
+  frames.push_back(ExportsFrame{module, std::move(steps), 0});
+}
+
+std::vector<ExportStep> ModuleDeclarer::exportSteps(Module *module) {
+  std::vector<ExportStep> steps;
   for (const ExportDecl &decl : module->file.exports) {
-    const ExportSource *source = decl.source();
-    ResultSourceUsable local = ModuleDeclarer::exportSource(source);
-    if (local.isErr()) {
-      this->state.getDiagnostics().error(source->pathLoc, local.error().message);
-      continue;
-    }
-    for (const ModuleName &name : decl.names()) {
-      this->exportName(here, module, source, name);
+    ResultSourceUsable usable = ModuleDeclarer::exportSource(decl.source());
+    if (usable.isOk()) {
+      ModuleDeclarer::addNameSteps(decl, steps);
+    } else {
+      steps.push_back(BadSourceStep{decl.source()->pathLoc, usable.error().message});
     }
   }
-
   for (const ExportDecl &decl : module->file.exports) {
     const ExportAll *all = decl.form.as<ExportAll>();
-    if (!all || !all->source.from || all->source.from == module) {
-      continue;
-    }
-    for (const auto &entry : this->exportsOf(all->source.from)) {
-      llvm::StringRef name = entry.getKey();
-      const ModuleBinding &target = entry.getValue().target;
-      auto existing = here.exports.find(name);
-      const ModuleExport *ours = existing != here.exports.end() ? &existing->second : nullptr;
-      ResultStarIsUnique unique = ModuleDeclarer::starExport(name, ours, all, target);
-      if (unique.isErr()) {
-        this->state.getDiagnostics().error(decl.loc, unique.error().message);
-      }
-      here.exports.try_emplace(name, ModuleExport{target, decl.loc, all});
+    bool fromOther = all != nullptr && all->source.from != nullptr && all->source.from != module;
+    if (fromOther) {
+      steps.push_back(StarExportStep{&decl, all->source.from});
     }
   }
-  here.exportsBusy = false;
-  here.exportsDone = true;
 
-  return here.exports;
+  return steps;
+}
+
+void ModuleDeclarer::addNameSteps(const ExportDecl &decl, std::vector<ExportStep> &steps) {
+  for (const ModuleName &name : decl.names()) {
+    steps.push_back(NamedExportStep{decl.source(), &name});
+  }
+}
+
+Module *ModuleDeclarer::unreadyModule(const ExportsFrame &frame) {
+  if (frame.nextStep == frame.steps.size()) {
+    return nullptr;
+  }
+  Module *needed = this->stepNeeds(frame.module, frame.steps[frame.nextStep]);
+  if (needed == nullptr) {
+    return nullptr;
+  }
+  const ModuleState &neededState = this->state.getModuleStates().getModuleState(needed);
+  bool waiting = !neededState.exportsDone && !neededState.exportsBusy;
+
+  return waiting ? needed : nullptr;
+}
+
+Module *ModuleDeclarer::stepNeeds(Module *module, const ExportStep &step) {
+  switch (step.kind()) {
+    case ExportStepKind::BAD_SOURCE:
+      return nullptr;
+    case ExportStepKind::NAMED:
+      return this->namedExportNeeds(module, *step.as<NamedExportStep>());
+    case ExportStepKind::STAR:
+      return step.as<StarExportStep>()->from;
+  }
+  llvm_unreachable("unknown export step");
+}
+
+Module *ModuleDeclarer::namedExportNeeds(Module *module, const NamedExportStep &step) {
+  if (step.source != nullptr) {
+    return step.source->from;
+  }
+  bool declared =
+      this->state.getModuleStates().getModuleState(module).declared.count(step.name->name);
+  if (declared) {
+    return nullptr;
+  }
+  std::optional<ImportedName> imported = ModuleDeclarer::findImport(module, step.name->name);
+
+  return imported.has_value() ? imported->from : nullptr;
+}
+
+void ModuleDeclarer::runExportStep(std::vector<ExportsFrame> &frames) {
+  ExportsFrame &frame = frames.back();
+  if (frame.nextStep == frame.steps.size()) {
+    this->finishExports(frames);
+  } else {
+    const ExportStep &step = frame.steps[frame.nextStep];
+    frame.nextStep += 1;
+    this->applyExportStep(frame.module, step);
+  }
+}
+
+void ModuleDeclarer::applyExportStep(Module *module, const ExportStep &step) {
+  switch (step.kind()) {
+    case ExportStepKind::BAD_SOURCE:
+      this->reportBadSource(*step.as<BadSourceStep>());
+      break;
+    case ExportStepKind::NAMED:
+      this->exportName(module, *step.as<NamedExportStep>());
+      break;
+    case ExportStepKind::STAR:
+      this->mergeStarExport(module, *step.as<StarExportStep>());
+      break;
+  }
+}
+
+void ModuleDeclarer::reportBadSource(const BadSourceStep &step) {
+  this->state.getDiagnostics().error(step.loc, step.message);
+}
+
+void ModuleDeclarer::mergeStarExport(Module *module, const StarExportStep &star) {
+  ModuleState &here = this->state.getModuleStates().getModuleState(module);
+  const ExportDecl &decl = *star.decl;
+  const ExportAll *all = decl.form.as<ExportAll>();
+  for (const auto &entry : this->exportsOf(all->source.from)) {
+    llvm::StringRef name = entry.getKey();
+    const ModuleBinding &target = entry.getValue().target;
+    auto existing = here.exports.find(name);
+    const ModuleExport *ours = existing != here.exports.end() ? &existing->second : nullptr;
+    ResultStarIsUnique unique = ModuleDeclarer::starExport(name, ours, all, target);
+    if (unique.isErr()) {
+      this->state.getDiagnostics().error(decl.loc, unique.error().message);
+    }
+    here.exports.try_emplace(name, ModuleExport{target, decl.loc, all});
+  }
+}
+
+void ModuleDeclarer::finishExports(std::vector<ExportsFrame> &frames) {
+  ModuleState &done = this->state.getModuleStates().getModuleState(frames.back().module);
+  done.exportsBusy = false;
+  done.exportsDone = true;
+  frames.pop_back();
 }
 
 ModuleDeclarer::ResultExportTarget ModuleDeclarer::findExport(Module *from, llvm::StringRef path,
@@ -346,20 +451,25 @@ std::optional<ModuleBinding> ModuleDeclarer::resolveLocal(Module *module, llvm::
   if (this->state.getModuleStates().getModuleState(module).declared.count(name)) {
     return ModuleBinding{module, name};
   }
+  std::optional<ImportedName> imported = ModuleDeclarer::findImport(module, name);
+  if (!imported.has_value() || imported->from == nullptr) {
+    return std::nullopt;
+  }
+  const llvm::StringMap<ModuleExport> &theirs = this->exportsOf(imported->from);
+  auto found = theirs.find(imported->name);
+  if (found == theirs.end()) {
+    return std::nullopt;
+  }
+
+  return found->second.target;
+}
+
+std::optional<ImportedName> ModuleDeclarer::findImport(const Module *module, llvm::StringRef name) {
   for (const ImportDecl &decl : module->file.imports) {
     for (const ModuleName &imported : decl.names) {
-      if (imported.as != name) {
-        continue;
+      if (imported.as == name) {
+        return ImportedName{decl.from, imported.name};
       }
-      if (!decl.from) {
-        return std::nullopt;
-      }
-      const llvm::StringMap<ModuleExport> &theirs = this->exportsOf(decl.from);
-      auto found = theirs.find(imported.name);
-      if (found == theirs.end()) {
-        return std::nullopt;
-      }
-      return found->second.target;
     }
   }
 

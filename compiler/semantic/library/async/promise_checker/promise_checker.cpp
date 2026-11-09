@@ -7,6 +7,7 @@
 #include "compiler/semantic/bodies/functions/callback_checker/callback_checker.h"
 #include "compiler/semantic/bodies/functions/closure_checker/closure_checker.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
+#include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/result/result_checker/result_checker.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
@@ -48,6 +49,19 @@ const Type *PromiseChecker::resolverType(const Type *value) {
   return Type::function(params, params.size(), false, Type::voidTy());
 }
 
+bool PromiseChecker::callsWithValue(const Stmt *body, llvm::StringRef resolve) {
+  PlacedNodes nodes = PlacedNodes::collect({body}, {});
+  for (const PlacedExpr &placed : nodes.getExprs()) {
+    auto *call = dyn_cast<CallExpr>(placed.expr);
+    auto *name = call != nullptr ? dyn_cast<NameExpr>(call->callee) : nullptr;
+    if (name != nullptr && name->name == resolve && !call->args.empty()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 const Type *PromiseChecker::executorValueType(const Expr *executor) {
   auto *fe = dyn_cast<FunctionExpr>(executor);
   if (!fe) {
@@ -57,12 +71,7 @@ const Type *PromiseChecker::executorValueType(const Expr *executor) {
     return Type::voidTy();
   }
   llvm::StringRef resolve = fe->fn->params[0].name;
-  bool given = false;
-  AstWalker::visitExprs(fe->fn->body, [&](const Expr *e) {
-    auto *call = dyn_cast<CallExpr>(e);
-    auto *name = call ? dyn_cast<NameExpr>(call->callee) : nullptr;
-    given |= name && name->name == resolve && !call->args.empty();
-  });
+  bool given = PromiseChecker::callsWithValue(fe->fn->body, resolve);
   if (!given) {
     return Type::voidTy();
   }

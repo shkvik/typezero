@@ -8,6 +8,7 @@
 #include "compiler/semantic/bodies/objects/dict_checker/dict_checker.h"
 #include "compiler/semantic/bodies/objects/keyed_field_checker/keyed_field_checker.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
@@ -54,17 +55,13 @@ VarChecker::VarChecker(SemanticState &owner, SemanticParts &all)
 }
 
 bool VarChecker::isTextChoice(const Expr *expr) {
-  while (auto *conv = dyn_cast<CastExpr>(expr)) {
-    if (!conv->isImplicit()) {
+  for (const Expr *branch : ExprParts::choiceBranches(expr)) {
+    if (!isa<StringLitExpr>(branch)) {
       return false;
     }
-    expr = conv->operand;
-  }
-  if (auto *choice = dyn_cast<ConditionalExpr>(expr)) {
-    return VarChecker::isTextChoice(choice->thenExpr) && VarChecker::isTextChoice(choice->elseExpr);
   }
 
-  return isa<StringLitExpr>(expr);
+  return true;
 }
 
 std::vector<const Stmt *> VarChecker::followingStatements(llvm::ArrayRef<Stmt *> stmts, size_t i) {

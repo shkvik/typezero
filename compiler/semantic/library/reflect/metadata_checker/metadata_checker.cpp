@@ -125,19 +125,29 @@ Expr *MetadataChecker::designClass(const Type *type, llvm::SMLoc loc) {
 }
 
 ClassDecl *MetadataChecker::designConstructor(const Type *type) {
-  type = type->nonOptional();
-  if (type->isLiteral()) {
-    type = type->literalBase();
+  const Type *plain = MetadataChecker::designPlain(type);
+  if (!plain->isUnion()) {
+    return this->plainConstructor(plain);
   }
-  if (type->isUnion()) {
-    ClassDecl *common = this->designConstructor(type->members().front());
-    for (const Type *m : type->members()) {
-      if (this->designConstructor(m) != common) {
-        return this->builtinConstructor("Object");
-      }
+  const Type *first = MetadataChecker::designPlain(plain->members().front());
+  ClassDecl *common = this->plainConstructor(first);
+  for (const Type *member : plain->members()) {
+    ClassDecl *own = this->plainConstructor(MetadataChecker::designPlain(member));
+    if (own != common) {
+      return this->builtinConstructor("Object");
     }
-    return common;
   }
+
+  return common;
+}
+
+const Type *MetadataChecker::designPlain(const Type *type) {
+  const Type *plain = type->nonOptional();
+
+  return plain->isLiteral() ? plain->literalBase() : plain;
+}
+
+ClassDecl *MetadataChecker::plainConstructor(const Type *type) {
   if (type->isBytes()) {
     return this->builtinConstructor(type->name());
   }

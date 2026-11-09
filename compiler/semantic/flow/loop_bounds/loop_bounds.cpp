@@ -1,5 +1,6 @@
 #include "compiler/semantic/flow/loop_bounds/loop_bounds.h"
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -79,35 +80,40 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
     return std::nullopt;
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
-    auto *name = dyn_cast<NameExpr>(member->object);
-    const VarSymbol *var = name ? this->scopes->lookup(name->name).var() : nullptr;
-    if (BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH) && var &&
-        var->type->isBytes()) {
-      return std::pair{int64_t(0), Type::kMaxLength};
-    }
-    if (!BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)) {
-      return std::nullopt;
-    }
-    if (isa<StringLitExpr>(member->object) || isa<ArrayLitExpr>(member->object)) {
-      return std::pair{int64_t(0), Type::kMaxLength};
-    }
-    if (var && (var->type->isString() || var->type->isArray() || var->type->isTypedArray())) {
-      return std::pair{int64_t(0), Type::kMaxLength};
-    }
-    return std::nullopt;
+    return this->memberRange(member);
   }
   if (auto *bin = dyn_cast<BinaryExpr>(expr)) {
+    auto *member = dyn_cast<MemberExpr>(bin->lhs);
     auto *lit = dyn_cast<IntLitExpr>(bin->rhs);
-    if (bin->op != BinaryOp::Sub || !isa<MemberExpr>(bin->lhs) || !lit ||
-        lit->value > kMaxConstant) {
+    if (bin->op != BinaryOp::Sub || member == nullptr || !lit || lit->value > kMaxConstant) {
       return std::nullopt;
     }
-    std::optional<std::pair<int64_t, int64_t>> length = this->syntacticIntRange(bin->lhs);
+    std::optional<std::pair<int64_t, int64_t>> length = this->memberRange(member);
     if (!length) {
       return std::nullopt;
     }
     auto k = static_cast<int64_t>(lit->value);
     return std::pair{length->first - k, length->second - k};
+  }
+
+  return std::nullopt;
+}
+
+std::optional<std::pair<int64_t, int64_t>> LoopBounds::memberRange(const MemberExpr *member) const {
+  auto *name = dyn_cast<NameExpr>(member->object);
+  const VarSymbol *var = name ? this->scopes->lookup(name->name).var() : nullptr;
+  if (BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH) && var &&
+      var->type->isBytes()) {
+    return std::pair{int64_t(0), Type::kMaxLength};
+  }
+  if (!BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)) {
+    return std::nullopt;
+  }
+  if (isa<StringLitExpr>(member->object) || isa<ArrayLitExpr>(member->object)) {
+    return std::pair{int64_t(0), Type::kMaxLength};
+  }
+  if (var && (var->type->isString() || var->type->isArray() || var->type->isTypedArray())) {
+    return std::pair{int64_t(0), Type::kMaxLength};
   }
 
   return std::nullopt;
@@ -143,15 +149,21 @@ bool LoopBounds::boundedBelow(const Expr *expr, int64_t limit, const LoopScan &s
 
 std::optional<int64_t> LoopBounds::condBoundsAbove(const Expr *cond, const VarSymbol *var,
                                                    const LoopScan &scan, int64_t step) const {
-  auto *bin = llvm::dyn_cast_or_null<BinaryExpr>(cond);
-  if (!bin) {
-    return std::nullopt;
-  }
-  if (bin->op == BinaryOp::LogAnd) {
-    if (std::optional<int64_t> k = this->condBoundsAbove(bin->lhs, var, scan, step)) {
+  for (const Expr *part : ExprParts::andParts(cond)) {
+    std::optional<int64_t> k = this->comparisonBoundsAbove(part, var, scan, step);
+    if (k.has_value()) {
       return k;
     }
-    return this->condBoundsAbove(bin->rhs, var, scan, step);
+  }
+
+  return std::nullopt;
+}
+
+std::optional<int64_t> LoopBounds::comparisonBoundsAbove(const Expr *part, const VarSymbol *var,
+                                                         const LoopScan &scan, int64_t step) const {
+  auto *bin = llvm::dyn_cast_or_null<BinaryExpr>(part);
+  if (!bin) {
+    return std::nullopt;
   }
   auto lookupVar = [&](llvm::StringRef name) -> const VarSymbol * {
     return this->scopes->lookup(name).var();
@@ -191,13 +203,20 @@ std::optional<int64_t> LoopBounds::condBoundsAbove(const Expr *cond, const VarSy
 
 bool LoopBounds::condBoundsBelow(const Expr *cond, const VarSymbol *var, const LoopScan &scan,
                                  int64_t step) const {
-  auto *bin = llvm::dyn_cast_or_null<BinaryExpr>(cond);
+  for (const Expr *part : ExprParts::andParts(cond)) {
+    if (this->comparisonBoundsBelow(part, var, scan, step)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool LoopBounds::comparisonBoundsBelow(const Expr *part, const VarSymbol *var, const LoopScan &scan,
+                                       int64_t step) const {
+  auto *bin = llvm::dyn_cast_or_null<BinaryExpr>(part);
   if (!bin) {
     return false;
-  }
-  if (bin->op == BinaryOp::LogAnd) {
-    return this->condBoundsBelow(bin->lhs, var, scan, step) ||
-           this->condBoundsBelow(bin->rhs, var, scan, step);
   }
   auto isVar = [&](const Expr *e) {
     auto *name = dyn_cast<NameExpr>(e);

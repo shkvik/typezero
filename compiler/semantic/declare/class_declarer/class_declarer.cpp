@@ -4,6 +4,7 @@
 #include "compiler/semantic/bodies/classes/overload_resolver/overload_resolver_errors.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker.h"
 #include "compiler/semantic/bodies/shared_helpers/shared_helpers.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/generics/generic_class_checker/generic_class_checker.h"
 #include "compiler/semantic/generics/widening_relations/widening_relations.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
@@ -516,40 +517,83 @@ Expr *ClassDeclarer::literalValue(const Type *literal, llvm::SMLoc loc) {
   return number < 0 ? this->state.getAst().make<UnaryExpr>(loc, UnaryOp::Neg, value) : value;
 }
 
-bool ClassDeclarer::startsEmpty(const ClassDecl *cls,
-                                llvm::SmallPtrSetImpl<const ClassDecl *> &visiting) {
-  bool madeByConstructor = cls->isAbstract || cls->builtin() || cls->isGeneric() ||
-                           cls->typeParams.size() || !ClassLinks::constructorsOf(cls).empty();
-  if (madeByConstructor) {
-    return false;
-  }
-  bool firstVisit = visiting.insert(cls).second;
-  if (!firstVisit) {
-    return false;
-  }
-  for (const ClassDecl *c = cls; c; c = c->parent) {
-    this->resolveClass(const_cast<ClassDecl *>(c));
-    for (const ClassField &f : c->fields) {
-      if (f.isStatic() || f.init || f.method() || f.optional() || !f.resolved) {
-        continue;
-      }
-      const ClassDecl *inner = f.resolved->classDecl();
-      if (inner && !this->startsEmpty(inner, visiting)) {
-        return false;
-      }
+Expr *ClassDeclarer::defaultValue(const Type *type, const TypeRef *ref, llvm::SMLoc loc,
+                                  llvm::SmallPtrSetImpl<const ClassDecl *> &visiting) {
+  DefaultRun run{visiting, loc, {DefaultFor{type, ref}}, {}};
+  while (!run.steps.empty()) {
+    DefaultStep step = run.steps.back();
+    run.steps.pop_back();
+    bool fits = this->applyDefaultStep(step, run);
+    if (!fits) {
+      return nullptr;
     }
   }
-  visiting.erase(cls);
+
+  return run.values.back();
+}
+
+bool ClassDeclarer::applyDefaultStep(const DefaultStep &step, DefaultRun &run) {
+  switch (step.kind()) {
+    case DefaultStepKind::VALUE:
+      return this->defaultFor(*step.as<DefaultFor>(), run);
+    case DefaultStepKind::CHECK_EMPTY:
+      return ClassDeclarer::checkEmpty(step.as<CheckEmpty>()->cls, run);
+    case DefaultStepKind::RESOLVE_FAMILY:
+      this->resolveFamily(step.as<ResolveFamily>()->cls, run);
+      return true;
+    case DefaultStepKind::LEAVE_EMPTY:
+      run.visiting.erase(step.as<LeaveEmpty>()->cls);
+      return true;
+    case DefaultStepKind::MAKE_NEW:
+      this->makeEmptyNew(step.as<MakeNew>()->cls, run);
+      return true;
+    case DefaultStepKind::FILL_OBJECT:
+      ClassDeclarer::fillObject(*step.as<FillObject>(), run);
+      return true;
+  }
+  llvm_unreachable("unknown default step");
+}
+
+bool ClassDeclarer::defaultFor(const DefaultFor &wanted, DefaultRun &run) {
+  auto &ctx = this->state.getAst();
+  const Type *type = wanted.type;
+  llvm::SMLoc loc = run.loc;
+  if (!type || type->isError() || type->isParam()) {
+    return false;
+  }
+  if (Expr *simple = this->simpleDefault(type, wanted.ref, loc)) {
+    run.values.push_back(simple);
+    return true;
+  }
+  const ClassDecl *cls = type->classDecl();
+  if (cls) {
+    if (cls->name.empty()) {
+      return false;
+    }
+    run.steps.push_back(MakeNew{cls});
+    run.steps.push_back(CheckEmpty{cls});
+    return true;
+  }
+  if (!ClassDeclarer::isPlainObject(type)) {
+    return false;
+  }
+  auto *object = ctx.make<ObjectLitExpr>(loc);
+  std::vector<const Field *> fields;
+  for (const Field &field : type->fields()) {
+    if (!(field.type && field.type->isOptional())) {
+      fields.push_back(&field);
+    }
+  }
+  run.steps.push_back(FillObject{object, fields});
+  for (const Field *field : llvm::reverse(fields)) {
+    run.steps.push_back(DefaultFor{field->type, nullptr});
+  }
 
   return true;
 }
 
-Expr *ClassDeclarer::defaultValue(const Type *type, const TypeRef *ref, llvm::SMLoc loc,
-                                  llvm::SmallPtrSetImpl<const ClassDecl *> &visiting) {
+Expr *ClassDeclarer::simpleDefault(const Type *type, const TypeRef *ref, llvm::SMLoc loc) {
   auto &ctx = this->state.getAst();
-  if (!type || type->isError() || type->isParam()) {
-    return nullptr;
-  }
   if (type->isString()) {
     return ctx.make<StringLitExpr>(loc, u"");
   }
@@ -580,38 +624,68 @@ Expr *ClassDeclarer::defaultValue(const Type *type, const TypeRef *ref, llvm::SM
   if (literals) {
     return this->literalValue(type->members().front(), loc);
   }
-  const ClassDecl *cls = type->classDecl();
-  if (cls) {
-    if (cls->name.empty() || !this->startsEmpty(cls, visiting)) {
-      return nullptr;
-    }
-    return ctx.make<NewExpr>(loc, cls->name, std::vector<TypeRef>(), std::vector<Expr *>());
-  }
-  auto hidden = [](const Field &f) { return f.name.starts_with("%"); };
-  bool plainObject = type->isObject() && !type->isTuple() && !type->isAnyObject() &&
-                     !type->isDate() && !type->isRegExp() && !type->isMatch() && !type->isIntl() &&
-                     !type->isWeakRef() && !type->isRuntimeObject() && !type->isBytes() &&
-                     llvm::none_of(type->fields(), hidden);
-  if (!plainObject) {
-    return nullptr;
-  }
-  auto *object = ctx.make<ObjectLitExpr>(loc);
-  for (const Field &field : type->fields()) {
-    if (field.type && field.type->isOptional()) {
-      continue;
-    }
-    Expr *value = this->defaultValue(field.type, nullptr, loc, visiting);
-    if (!value) {
-      return nullptr;
-    }
-    ObjectLitExpr::Property property;
-    property.name = field.name;
-    property.loc = loc;
-    property.value = value;
-    object->props.push_back(property);
-  }
 
-  return object;
+  return nullptr;
+}
+
+bool ClassDeclarer::isPlainObject(const Type *type) {
+  auto hidden = [](const Field &f) { return f.name.starts_with("%"); };
+
+  return type->isObject() && !type->isTuple() && !type->isAnyObject() && !type->isDate() &&
+         !type->isRegExp() && !type->isMatch() && !type->isIntl() && !type->isWeakRef() &&
+         !type->isRuntimeObject() && !type->isBytes() && llvm::none_of(type->fields(), hidden);
+}
+
+bool ClassDeclarer::checkEmpty(const ClassDecl *cls, DefaultRun &run) {
+  bool madeByConstructor = cls->isAbstract || cls->builtin() || cls->isGeneric() ||
+                           cls->typeParams.size() || !ClassLinks::constructorsOf(cls).empty();
+  if (madeByConstructor) {
+    return false;
+  }
+  bool firstVisit = run.visiting.insert(cls).second;
+  if (!firstVisit) {
+    return false;
+  }
+  run.steps.push_back(LeaveEmpty{cls});
+  run.steps.push_back(ResolveFamily{cls});
+
+  return true;
+}
+
+void ClassDeclarer::resolveFamily(const ClassDecl *c, DefaultRun &run) {
+  this->resolveClass(const_cast<ClassDecl *>(c));
+  if (c->parent) {
+    run.steps.push_back(ResolveFamily{c->parent});
+  }
+  std::vector<const ClassDecl *> inner;
+  for (const ClassField &f : c->fields) {
+    bool skipped = f.isStatic() || f.init || f.method() || f.optional() || !f.resolved;
+    const ClassDecl *held = skipped ? nullptr : f.resolved->classDecl();
+    if (held) {
+      inner.push_back(held);
+    }
+  }
+  for (const ClassDecl *held : llvm::reverse(inner)) {
+    run.steps.push_back(CheckEmpty{held});
+  }
+}
+
+void ClassDeclarer::makeEmptyNew(const ClassDecl *cls, DefaultRun &run) {
+  auto *made = this->state.getAst().make<NewExpr>(run.loc, cls->name, std::vector<TypeRef>(),
+                                                  std::vector<Expr *>());
+  run.values.push_back(made);
+}
+
+void ClassDeclarer::fillObject(const FillObject &fill, DefaultRun &run) {
+  std::vector<Expr *> values = ChildrenFirst::takeAnswers(run.values, fill.fields.size());
+  for (size_t i = 0; i < values.size(); ++i) {
+    ObjectLitExpr::Property property;
+    property.name = fill.fields[i]->name;
+    property.loc = run.loc;
+    property.value = values[i];
+    fill.object->props.push_back(property);
+  }
+  run.values.push_back(fill.object);
 }
 
 void ClassDeclarer::checkVariantList(llvm::ArrayRef<FunctionDecl *> functions) {
@@ -733,21 +807,38 @@ ClassDeclarer::ResultNarrowingLayout ClassDeclarer::narrowedField(const ClassDec
 }
 
 void ClassDeclarer::completeClass(ClassDecl *cls) {
-  auto *type = const_cast<Type *>(cls->type);
-  if (!type->isIncomplete() || cls->literal()) {
-    return;
+  std::vector<CompletionStep> steps = {StartCompletion{cls}};
+  while (!steps.empty()) {
+    CompletionStep step = steps.back();
+    steps.pop_back();
+    if (const StartCompletion *begin = step.as<StartCompletion>()) {
+      this->startCompletion(begin->cls, steps);
+    } else {
+      this->finishCompletion(step.as<FinishCompletion>()->cls);
+    }
   }
-  if (this->state.getClassStore().isCompleting(cls)) {
+}
+
+void ClassDeclarer::startCompletion(ClassDecl *cls, std::vector<CompletionStep> &steps) {
+  bool incomplete = cls->type->isIncomplete() && !cls->literal();
+  if (!incomplete || this->state.getClassStore().isCompleting(cls)) {
     return;
   }
   this->state.getClassStore().enterCompletion(cls);
-  if (cls->parent) {
-    this->completeClass(cls->parent);
+  steps.push_back(FinishCompletion{cls});
+  if (ClassDecl *generic = cls->generic()) {
+    steps.push_back(StartCompletion{generic});
   }
+  if (cls->parent) {
+    steps.push_back(StartCompletion{cls->parent});
+  }
+}
+
+void ClassDeclarer::finishCompletion(ClassDecl *cls) {
+  auto *type = const_cast<Type *>(cls->type);
   bool muted = false;
   ClassDecl *generic = cls->generic();
   if (generic) {
-    this->completeClass(generic);
     for (size_t i = 0; i < cls->fields.size() && i < generic->fields.size(); ++i) {
       ClassField &f = cls->fields[i];
       const Type *original = generic->fields[i].resolved;

@@ -55,6 +55,7 @@ private:
   static std::string argumentsText(Place place);
   static bool isPlainReference(const Expr *expr);
   static std::string decoratorName(const Expr *expr);
+  static const Expr *withoutCalls(const Expr *expr);
   static bool decoratedParams(const FunctionDecl *fn);
   static ResultMetadataArgsPair metadataArgs(const CallExpr *metadata);
   static ResultDescriptorUsable genericDescriptor(const ClassDecl *cls, bool descriptor);

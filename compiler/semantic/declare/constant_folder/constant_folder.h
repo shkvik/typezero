@@ -3,6 +3,7 @@
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder_errors.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
@@ -25,12 +26,18 @@ public:
   ResultDivisorNotZero checkDivisor(BinaryOp op, const Expr *divisor) const;
   Expr *globalConstant(GlobalName object, llvm::StringRef name, llvm::SMLoc loc);
   std::optional<ConstantValue> evalConstant(const Expr *expr, EnumDecl *self, size_t defined);
+  std::vector<EnumDecl *> enumsNeeded(const Expr *init, const EnumDecl *self) const;
 
 private:
   using ResultShiftCountFits = Result<const Type *, ConstantFolderShiftCountError>;
 
   static constexpr int64_t maxExact = int64_t(1) << 53;
 
+  std::optional<int64_t> plainIntConstant(const Expr *expr) const;
+  static NodeChildren<const Expr *> constantParts(const Expr *expr);
+  EnumDecl *enumNamedBy(const Expr *expr) const;
+  std::optional<ConstantValue> nodeConstant(const Expr *expr, EnumDecl *self, size_t defined,
+                                            std::vector<std::optional<ConstantValue>> &answers);
   static int32_t jsToInt32(double x);
   static double power(double x, double y);
   static std::string formatNumber(double value);

@@ -49,6 +49,7 @@ public:
 private:
   using ResultKeyObjectType = Result<const Type *, CryptoArgsKeyObjectTypeError>;
 
+  std::optional<double> plainNumber(const Expr *arg) const;
   static ResultKeyObjectType keyObjectType(const Type *type, llvm::StringRef what);
   static std::u16string utf16Of(llvm::StringRef text);
   static std::optional<std::string> literalOf(const Expr *e);

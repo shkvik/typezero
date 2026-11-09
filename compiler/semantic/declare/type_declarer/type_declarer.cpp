@@ -13,6 +13,8 @@
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
+#include "compiler/semantic/types/type_parts/type_routes.h"
+#include "compiler/semantic/types/type_ref_parts/type_ref_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -22,6 +24,7 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
+using llvm::dyn_cast_or_null;
 
 namespace tz {
 
@@ -231,82 +234,192 @@ TypeDeclarer::ResultUnionRecursion TypeDeclarer::recursiveUnion(const TypeAliasD
 }
 
 const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
-  if (alias->resolved) {
+  if (alias->resolved != nullptr) {
     return alias->resolved;
   }
-  Module *home = this->state.getModuleStates().findDeclModule(alias);
-  bool elsewhere = home && home != this->state.getModuleStates().getCurrentModule() &&
-                   this->state.getScopeStack().isTopLevel();
-  if (elsewhere) {
-    Module *here = this->state.getModuleStates().getCurrentModule();
-    this->moduleDeclarer->useModule(home);
-    const Type *type = this->resolveAlias(alias);
-    this->moduleDeclarer->useModule(here);
-    return type;
+  if (alias->resolving) {
+    return this->resolvingAlias(alias);
   }
-  if (alias->resolving && alias->self) {
+  std::vector<AliasFrame> frames;
+  this->startAlias(frames, alias);
+  while (!frames.empty()) {
+    TypeAliasDecl *needed = TypeDeclarer::takeUnresolvedAlias(frames.back());
+    if (needed != nullptr) {
+      this->startAlias(frames, needed);
+    } else {
+      this->finishAlias(frames);
+    }
+  }
+
+  return alias->resolved;
+}
+
+const Type *TypeDeclarer::resolvingAlias(TypeAliasDecl *alias) {
+  ResultAliasNotCyclic cycle = TypeDeclarer::aliasCycle(alias);
+  if (cycle.isOk()) {
     alias->recursive = true;
     return alias->self;
   }
-  ResultAliasNotCyclic cycle = TypeDeclarer::aliasCycle(alias);
-  if (cycle.isErr()) {
-    this->state.getDiagnostics().error(alias->loc(), cycle.error().message);
-    alias->resolved = Type::error();
-    return alias->resolved;
-  }
+  this->state.getDiagnostics().error(alias->loc(), cycle.error().message);
+  alias->resolved = Type::error();
 
+  return alias->resolved;
+}
+
+void TypeDeclarer::startAlias(std::vector<AliasFrame> &frames, TypeAliasDecl *alias) {
+  std::optional<Module *> previousModule = this->enterHomeModule(alias);
   alias->resolving = true;
   bool builtinModule = this->builtinModuleTypes->alias(alias->name) == alias;
   if (builtinModule) {
     this->state.getTypeContext().enterBuiltinModule();
   }
-  const Type *type = nullptr;
-  if (alias->type.kind() == TypeRefKind::OBJECT_REF) {
-    alias->self = Type::declareObject(alias->name);
-    std::vector<const Type *> bases;
-    std::vector<Overload> overloads;
-    std::vector<Field> fields = alias->bases.empty()
-                                    ? this->typeResolver->resolveFields(alias->type, &overloads)
-                                    : this->classBases->interfaceFields(alias, bases, overloads);
-    if (alias->recursive) {
-      alias->self->defineFields(std::move(fields), std::move(overloads));
-      type = alias->self;
-    } else {
-      type = Type::object(std::move(fields), alias->name, std::move(overloads));
+  alias->self = TypeDeclarer::declareSelf(alias);
+  std::vector<TypeAliasDecl *> needed = this->neededAliases(alias);
+  frames.push_back(AliasFrame{alias, previousModule, builtinModule, std::move(needed), 0});
+}
+
+TypeAliasDecl *TypeDeclarer::takeUnresolvedAlias(AliasFrame &frame) {
+  while (frame.nextNeeded < frame.needed.size()) {
+    TypeAliasDecl *needed = frame.needed[frame.nextNeeded];
+    frame.nextNeeded += 1;
+    bool waiting = needed->resolved == nullptr && !needed->resolving;
+    if (waiting) {
+      return needed;
     }
-    for (const Type *base : bases) {
-      if (!type->isError()) {
-        this->classBases->addBase(type, base);
-      }
-    }
-  } else if (alias->type.kind() == TypeRefKind::UNION_REF) {
-    alias->self = Type::declareUnion(alias->name);
-    type = this->typeResolver->resolveTypeInner(alias->type);
-    ResultUnionRecursion recursion = TypeDeclarer::recursiveUnion(alias, type);
-    if (recursion.isErr()) {
-      this->state.getDiagnostics().error(alias->loc(), recursion.error().message);
-      type = Type::error();
-    } else if (alias->recursive && !type->isError()) {
-      alias->self->defineMembers(type);
-      type = alias->self;
-    }
-  } else {
-    type = this->typeResolver->resolveTypeInner(alias->type);
   }
+
+  return nullptr;
+}
+
+void TypeDeclarer::finishAlias(std::vector<AliasFrame> &frames) {
+  AliasFrame frame = std::move(frames.back());
+  frames.pop_back();
+  TypeAliasDecl *alias = frame.alias;
+  const Type *type = this->resolveAliasBody(alias);
   alias->resolving = false;
-  if (builtinModule) {
+  if (frame.builtinModule) {
     this->state.getTypeContext().leaveBuiltinModule();
   }
-  if (!alias->resolved) {
+  if (alias->resolved == nullptr) {
     alias->resolved = type;
   }
+  this->nameBuiltinUnion(alias);
+  if (frame.previousModule.has_value()) {
+    this->moduleDeclarer->useModule(*frame.previousModule);
+  }
+}
+
+std::optional<Module *> TypeDeclarer::enterHomeModule(const Stmt *decl) {
+  ModuleStates &modules = this->state.getModuleStates();
+  Module *home = modules.findDeclModule(decl);
+  Module *here = modules.getCurrentModule();
+  bool elsewhere = home != nullptr && home != here && this->state.getScopeStack().isTopLevel();
+  if (!elsewhere) {
+    return std::nullopt;
+  }
+  this->moduleDeclarer->useModule(home);
+
+  return here;
+}
+
+Type *TypeDeclarer::declareSelf(const TypeAliasDecl *alias) {
+  TypeRefKind kind = alias->type.kind();
+  if (kind == TypeRefKind::OBJECT_REF) {
+    return Type::declareObject(alias->name);
+  }
+  if (kind == TypeRefKind::UNION_REF) {
+    return Type::declareUnion(alias->name);
+  }
+
+  return nullptr;
+}
+
+std::vector<TypeAliasDecl *> TypeDeclarer::neededAliases(const TypeAliasDecl *alias) const {
+  std::vector<const TypeRef *> parts;
+  for (const TypeRef &base : alias->bases) {
+    std::vector<const TypeRef *> baseParts = TypeRefParts::collect(base, kNeededAliasesRoute);
+    parts.insert(parts.end(), baseParts.begin(), baseParts.end());
+  }
+  std::vector<const TypeRef *> bodyParts = TypeRefParts::collect(alias->type, kNeededAliasesRoute);
+  parts.insert(parts.end(), bodyParts.begin(), bodyParts.end());
+  std::vector<TypeAliasDecl *> needed;
+  for (const TypeRef *part : parts) {
+    TypeAliasDecl *found = this->plainAliasNamed(*part);
+    if (found != nullptr) {
+      needed.push_back(found);
+    }
+  }
+
+  return needed;
+}
+
+TypeAliasDecl *TypeDeclarer::plainAliasNamed(const TypeRef &part) const {
+  bool builtinName = Type::fromName(part.name) != nullptr;
+  if (part.kind() != TypeRefKind::NAME_REF || builtinName) {
+    return nullptr;
+  }
+  auto *alias = dyn_cast_or_null<TypeAliasDecl>(this->lookupType(part.name));
+  bool plain =
+      alias != nullptr && alias->typeParams.empty() && !TypeDeclarer::mentionsTypeOf(alias->type);
+
+  return plain ? alias : nullptr;
+}
+
+const Type *TypeDeclarer::resolveAliasBody(TypeAliasDecl *alias) {
+  TypeRefKind kind = alias->type.kind();
+  if (kind == TypeRefKind::OBJECT_REF) {
+    return this->resolveObjectAlias(alias);
+  }
+  if (kind == TypeRefKind::UNION_REF) {
+    return this->resolveUnionAlias(alias);
+  }
+
+  return this->typeResolver->resolveTypeInner(alias->type);
+}
+
+const Type *TypeDeclarer::resolveObjectAlias(TypeAliasDecl *alias) {
+  std::vector<const Type *> bases;
+  std::vector<Overload> overloads;
+  std::vector<Field> fields = alias->bases.empty()
+                                  ? this->typeResolver->resolveFields(alias->type, &overloads)
+                                  : this->classBases->interfaceFields(alias, bases, overloads);
+  const Type *type = nullptr;
+  if (alias->recursive) {
+    alias->self->defineFields(std::move(fields), std::move(overloads));
+    type = alias->self;
+  } else {
+    type = Type::object(std::move(fields), alias->name, std::move(overloads));
+  }
+  for (const Type *base : bases) {
+    if (!type->isError()) {
+      this->classBases->addBase(type, base);
+    }
+  }
+
+  return type;
+}
+
+const Type *TypeDeclarer::resolveUnionAlias(TypeAliasDecl *alias) {
+  const Type *type = this->typeResolver->resolveTypeInner(alias->type);
+  ResultUnionRecursion recursion = TypeDeclarer::recursiveUnion(alias, type);
+  if (recursion.isErr()) {
+    this->state.getDiagnostics().error(alias->loc(), recursion.error().message);
+    return Type::error();
+  }
+  if (alias->recursive && !type->isError()) {
+    alias->self->defineMembers(type);
+    return alias->self;
+  }
+
+  return type;
+}
+
+void TypeDeclarer::nameBuiltinUnion(const TypeAliasDecl *alias) {
   bool builtin = this->state.getAliasStore().findBuiltinAlias(alias->name) == alias ||
                  this->builtinModuleTypes->alias(alias->name) == alias;
   if (builtin && alias->type.kind() == TypeRefKind::UNION_REF) {
     Type::nameUnion(alias->resolved, alias->name);
   }
-
-  return alias->resolved;
 }
 
 TypeDeclarer::ResultEnumIsResolved TypeDeclarer::enumCycle(const EnumDecl *decl) {
@@ -393,81 +506,145 @@ TypeDeclarer::ResultEnumKindIsSame TypeDeclarer::enumKinds(const EnumDecl *decl,
 
 void TypeDeclarer::resolveEnum(EnumDecl *decl) {
   if (decl->stage != EnumStage::UNRESOLVED) {
-    ResultEnumIsResolved resolved = TypeDeclarer::enumCycle(decl);
-    if (resolved.isErr()) {
-      this->state.getDiagnostics().error(decl->loc(), resolved.error().message);
+    this->reportEnumCycle(decl);
+    return;
+  }
+  std::vector<EnumFrame> frames;
+  this->startEnum(frames, decl);
+  while (!frames.empty()) {
+    EnumDecl *needed = this->unresolvedEnum(frames.back());
+    if (needed != nullptr) {
+      this->startEnum(frames, needed);
+    } else {
+      this->resolveNextMember(frames);
     }
-    return;
   }
-  Module *home = this->state.getModuleStates().findDeclModule(decl);
-  bool elsewhere = home && home != this->state.getModuleStates().getCurrentModule() &&
-                   this->state.getScopeStack().isTopLevel();
-  if (elsewhere) {
-    Module *here = this->state.getModuleStates().getCurrentModule();
-    this->moduleDeclarer->useModule(home);
-    this->resolveEnum(decl);
-    this->moduleDeclarer->useModule(here);
-    return;
+}
+
+void TypeDeclarer::reportEnumCycle(const EnumDecl *decl) {
+  ResultEnumIsResolved resolved = TypeDeclarer::enumCycle(decl);
+  if (resolved.isErr()) {
+    this->state.getDiagnostics().error(decl->loc(), resolved.error().message);
   }
+}
+
+void TypeDeclarer::startEnum(std::vector<EnumFrame> &frames, EnumDecl *decl) {
+  std::optional<Module *> previousModule = this->enterHomeModule(decl);
   decl->stage = EnumStage::RESOLVING;
-  double next = 0;
-  bool counting = true;
-  bool numbers = false;
-  bool strings = false;
-  for (size_t i = 0; i < decl->members.size(); ++i) {
-    EnumMember &m = decl->members[i];
-    for (size_t j = 0; j < i; ++j) {
-      ResultMemberIsUnique unique = TypeDeclarer::uniqueMember(m, decl->members[j]);
-      if (unique.isErr()) {
-        this->state.getDiagnostics().error(m.loc, unique.error().message);
-      }
-    }
-    double value = next;
-    if (m.init) {
-      std::optional<ConstantValue> found = this->constantFolder->evalConstant(m.init, decl, i);
-      ResultMemberConstant constant = TypeDeclarer::memberConstant(found);
-      if (constant.isErr()) {
-        this->state.getDiagnostics().error(m.init->loc(), constant.error().message);
-        counting = false;
-        continue;
-      }
-      const ConstantValue &c = constant.value();
-      if (c.isString) {
-        m.isString = true;
-        m.text = c.text;
-        strings = true;
-        counting = false;
-        continue;
-      }
-      value = c.number;
-    }
-    ResultMemberHasValue valued = TypeDeclarer::countedMember(m, counting);
-    if (valued.isErr()) {
-      this->state.getDiagnostics().error(m.loc, valued.error().message);
-      continue;
-    }
-    ResultMemberIntValue whole = TypeDeclarer::wholeMember(m, value);
-    if (whole.isErr()) {
-      llvm::SMLoc at = m.init ? m.init->loc() : m.loc;
-      this->state.getDiagnostics().error(at, whole.error().message);
-      counting = false;
-      continue;
-    }
-    m.number = static_cast<int64_t>(value);
-    numbers = true;
-    next = value + 1;
-    counting = true;
+  EnumCount count{0, true, false, false};
+  frames.push_back(EnumFrame{decl, previousModule, 0, count});
+  this->enterMember(frames.back());
+}
+
+void TypeDeclarer::enterMember(const EnumFrame &frame) {
+  const std::vector<EnumMember> &members = frame.decl->members;
+  if (frame.nextMember == members.size()) {
+    return;
   }
-  ResultEnumKindIsSame same = TypeDeclarer::enumKinds(decl, numbers, strings);
+  const EnumMember &member = members[frame.nextMember];
+  for (size_t earlier = 0; earlier < frame.nextMember; ++earlier) {
+    ResultMemberIsUnique unique = TypeDeclarer::uniqueMember(member, members[earlier]);
+    if (unique.isErr()) {
+      this->state.getDiagnostics().error(member.loc, unique.error().message);
+    }
+  }
+}
+
+EnumDecl *TypeDeclarer::unresolvedEnum(const EnumFrame &frame) const {
+  if (frame.nextMember == frame.decl->members.size()) {
+    return nullptr;
+  }
+  const Expr *init = frame.decl->members[frame.nextMember].init;
+  std::vector<EnumDecl *> needed = this->constantFolder->enumsNeeded(init, frame.decl);
+  for (EnumDecl *other : needed) {
+    if (other->stage == EnumStage::UNRESOLVED) {
+      return other;
+    }
+  }
+
+  return nullptr;
+}
+
+void TypeDeclarer::resolveNextMember(std::vector<EnumFrame> &frames) {
+  EnumFrame &frame = frames.back();
+  if (frame.nextMember == frame.decl->members.size()) {
+    this->finishEnum(frames);
+  } else {
+    this->countMember(frame);
+    frame.nextMember += 1;
+    this->enterMember(frame);
+  }
+}
+
+void TypeDeclarer::countMember(EnumFrame &frame) {
+  EnumMember &m = frame.decl->members[frame.nextMember];
+  std::optional<double> value = this->memberNumber(frame, m);
+  if (value.has_value()) {
+    this->numberMember(frame, m, *value);
+  }
+}
+
+std::optional<double> TypeDeclarer::memberNumber(EnumFrame &frame, EnumMember &m) {
+  if (!m.init) {
+    return frame.count.next;
+  }
+  std::optional<ConstantValue> found =
+      this->constantFolder->evalConstant(m.init, frame.decl, frame.nextMember);
+  ResultMemberConstant constant = TypeDeclarer::memberConstant(found);
+  if (constant.isErr()) {
+    this->state.getDiagnostics().error(m.init->loc(), constant.error().message);
+    frame.count.counting = false;
+    return std::nullopt;
+  }
+  const ConstantValue &c = constant.value();
+  if (c.isString) {
+    m.isString = true;
+    m.text = c.text;
+    frame.count.strings = true;
+    frame.count.counting = false;
+    return std::nullopt;
+  }
+
+  return c.number;
+}
+
+void TypeDeclarer::numberMember(EnumFrame &frame, EnumMember &m, double value) {
+  ResultMemberHasValue valued = TypeDeclarer::countedMember(m, frame.count.counting);
+  if (valued.isErr()) {
+    this->state.getDiagnostics().error(m.loc, valued.error().message);
+    return;
+  }
+  ResultMemberIntValue whole = TypeDeclarer::wholeMember(m, value);
+  if (whole.isErr()) {
+    llvm::SMLoc at = m.init ? m.init->loc() : m.loc;
+    this->state.getDiagnostics().error(at, whole.error().message);
+    frame.count.counting = false;
+    return;
+  }
+  m.number = static_cast<int64_t>(value);
+  frame.count.numbers = true;
+  frame.count.next = value + 1;
+  frame.count.counting = true;
+}
+
+void TypeDeclarer::finishEnum(std::vector<EnumFrame> &frames) {
+  EnumFrame frame = frames.back();
+  frames.pop_back();
+  EnumDecl *decl = frame.decl;
+  ResultEnumKindIsSame same =
+      TypeDeclarer::enumKinds(decl, frame.count.numbers, frame.count.strings);
   if (same.isErr()) {
     this->state.getDiagnostics().error(decl->loc(), same.error().message);
   }
-  decl->isString = strings && !numbers;
+  decl->isString = frame.count.strings && !frame.count.numbers;
   decl->stage = EnumStage::RESOLVED;
   if (decl->isString) {
     for (const EnumMember &m : decl->members) {
       this->state.getFlowState().markFieldAssigned(ToUtf8::toUtf8(m.text));
     }
+  }
+  if (frame.previousModule.has_value()) {
+    this->moduleDeclarer->useModule(*frame.previousModule);
   }
 }
 

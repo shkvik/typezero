@@ -224,13 +224,11 @@ bool ChunkTypes::recordStreamChunk(const Type *chunk, const Type *value, llvm::S
       return true;
     }
     if (const Type *now = Type::tuple({both}); now != before) {
-      llvm::SmallPtrSet<const Type *, 8> seen;
-      store.changeInferredEvent(*site, "chunk", this->eventMapInference->portable(now, seen));
+      store.changeInferredEvent(*site, "chunk", this->eventMapInference->portable(now));
     }
     return true;
   }
-  llvm::SmallPtrSet<const Type *, 8> seen;
-  store.addInferredEvent(*site, {"chunk", this->eventMapInference->portable(found, seen),
+  store.addInferredEvent(*site, {"chunk", this->eventMapInference->portable(found),
                                  this->eventMapInference->placeOf(loc)});
 
   return true;

@@ -47,8 +47,7 @@ private:
                                    llvm::ArrayRef<const Type *> args) const;
   ResultParamsMeaning paramsMeaningful(const FuncSymbol *generic, llvm::ArrayRef<const Type *> reps,
                                        llvm::ArrayRef<const Type *> args);
-  static const ClassDecl *literalClassIn(const Type *type,
-                                         llvm::SmallPtrSetImpl<const Type *> &seen);
+  static const ClassDecl *literalClassIn(const Type *type);
   static std::string typeList(llvm::ArrayRef<const Type *> types);
   static std::string bindingList(llvm::ArrayRef<const Type *> params,
                                  llvm::ArrayRef<const Type *> args);

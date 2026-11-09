@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
@@ -24,6 +25,15 @@ public:
   const Type *numberParam(const Type *param, const Type *only = nullptr) const;
 
 private:
+  static NodeChildren<const Expr *> conditionParts(const Expr *cond);
+  static bool isBoolPass(const CastExpr *conv);
+  static std::optional<bool> nodeCondition(const Expr *cond,
+                                           std::vector<std::optional<bool>> &answers);
+  static NodeChildren<const Expr *> shapeParts(const Expr *expr);
+  static bool hasGaps(const ArrayLitExpr *lit);
+  static const Type *nodeShape(const Expr *expr, std::vector<const Type *> &answers);
+  static const Type *arrayShape(const ArrayLitExpr *lit, std::vector<const Type *> &answers);
+  static const Type *objectShape(const ObjectLitExpr *lit, std::vector<const Type *> &answers);
   SemanticState &state;
   Scopes *scopes = nullptr;
   ConcatChecker *concatChecker = nullptr;

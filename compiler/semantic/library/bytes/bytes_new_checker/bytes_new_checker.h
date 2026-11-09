@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/result/result/result.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/library/bytes/bytes_new_checker/bytes_new_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
@@ -35,6 +36,9 @@ private:
   static ResultDecoderLabel decoderLabel(llvm::StringRef label);
   static std::optional<std::u16string> literalText(const Expr *e);
   static bool mayBeFatal(const Expr *options);
+  static NodeChildren<const Expr *> spreadOptions(const Expr *options);
+  static bool nodeMayBeFatal(const Expr *options, std::vector<bool> &answers);
+  static bool fatalFlag(const Expr *value);
 
   SemanticState &state;
   Prelude *prelude = nullptr;

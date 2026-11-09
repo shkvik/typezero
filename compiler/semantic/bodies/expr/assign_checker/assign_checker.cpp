@@ -69,6 +69,27 @@ AssignChecker::operandTexts(llvm::StringRef source, llvm::SMLoc op, size_t lengt
 }
 
 Expr *AssignChecker::copyChain(const Expr *e) {
+  std::vector<const MemberExpr *> members;
+  const Expr *link = e;
+  while (auto *member = dyn_cast<MemberExpr>(link)) {
+    if (member->optional) {
+      return nullptr;
+    }
+    members.push_back(member);
+    link = member->object;
+  }
+  Expr *copy = this->copyRoot(link);
+  if (copy == nullptr) {
+    return nullptr;
+  }
+  for (const MemberExpr *member : llvm::reverse(members)) {
+    copy = this->state.getAst().make<MemberExpr>(member->loc(), copy, member->name);
+  }
+
+  return copy;
+}
+
+Expr *AssignChecker::copyRoot(const Expr *e) {
   if (auto *name = dyn_cast<NameExpr>(e)) {
     return this->state.getAst().make<NameExpr>(name->loc(), name->name);
   }
@@ -77,11 +98,6 @@ Expr *AssignChecker::copyChain(const Expr *e) {
   }
   if (auto *lit = dyn_cast<StringLitExpr>(e)) {
     return this->state.getAst().make<StringLitExpr>(lit->loc(), lit->value);
-  }
-  if (auto *member = dyn_cast<MemberExpr>(e); member && !member->optional) {
-    if (Expr *object = this->copyChain(member->object)) {
-      return this->state.getAst().make<MemberExpr>(member->loc(), object, member->name);
-    }
   }
 
   return nullptr;
@@ -273,6 +289,7 @@ AssignChecker::ResultLengthIsInBounds AssignChecker::lengthProven(const MemberEx
   return ok(value);
 }
 
+// TODO: Подумать, как сделать читаемым этот говнокусок и понять вообще что он делает
 Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   if (auto *member = dyn_cast<MemberExpr>(assign->target)) {
     member->object = this->builtinModuleChecker->processAlias(member->object);

@@ -22,6 +22,11 @@ public:
   std::optional<std::pair<int64_t, int64_t>> syntacticIntRange(const Expr *expr) const;
 
 private:
+  std::optional<int64_t> comparisonBoundsAbove(const Expr *part, const VarSymbol *var,
+                                               const LoopScan &scan, int64_t step) const;
+  bool comparisonBoundsBelow(const Expr *part, const VarSymbol *var, const LoopScan &scan,
+                             int64_t step) const;
+  std::optional<std::pair<int64_t, int64_t>> memberRange(const MemberExpr *member) const;
   static std::optional<int64_t>
   varPlus(const Expr *expr, const VarSymbol *var,
           llvm::function_ref<const VarSymbol *(llvm::StringRef)> lookupVar);

@@ -183,45 +183,69 @@ Expr *TzModulesChecker::adaptResult(Expr *expr, const Type *to) {
 }
 
 std::string TzModulesChecker::knownPrefix(const Expr *expr) const {
-  while (auto *cast = dyn_cast<CastExpr>(expr)) {
-    expr = cast->operand;
+  const Expr *source = expr;
+  const Expr *inner = TzModulesChecker::prefixInner(source);
+  while (inner != nullptr) {
+    source = inner;
+    inner = TzModulesChecker::prefixInner(source);
   }
-  auto ascii = [](const std::u16string &text) {
-    std::string out;
-    for (char16_t c : text) {
-      if (c >= 0x80) {
-        break;
-      }
-      out += static_cast<char>(c);
-    }
 
-    return out;
-  };
-  if (auto *lit = dyn_cast<StringLitExpr>(expr)) {
-    return ascii(lit->value);
+  return this->ownPrefix(source);
+}
+
+const Expr *TzModulesChecker::prefixInner(const Expr *expr) {
+  if (auto *conv = dyn_cast<CastExpr>(expr)) {
+    return conv->operand;
   }
   if (auto *tmpl = dyn_cast<TemplateExpr>(expr)) {
-    if (tmpl->quasis[0].empty() && !tmpl->exprs.empty()) {
-      return this->knownPrefix(tmpl->exprs[0]);
-    }
-    return ascii(tmpl->quasis[0]);
+    bool startsWithValue = tmpl->quasis[0].empty() && !tmpl->exprs.empty();
+    return startsWithValue ? tmpl->exprs[0] : nullptr;
   }
-  if (auto *bin = dyn_cast<BinaryExpr>(expr); bin && bin->op == BinaryOp::Add) {
-    return this->knownPrefix(bin->lhs);
+  if (auto *bin = dyn_cast<BinaryExpr>(expr)) {
+    return bin->op == BinaryOp::Add ? bin->lhs : nullptr;
+  }
+  auto *made = dyn_cast<NewExpr>(expr);
+
+  return made != nullptr ? TzModulesChecker::addressArgument(made) : nullptr;
+}
+
+const Expr *TzModulesChecker::addressArgument(const NewExpr *made) {
+  const ClassDecl *cls = made->cls();
+  bool request = cls != nullptr && cls->library() && cls->name == "Request";
+  bool url = cls != nullptr && cls->library() && cls->name == "URL";
+  if (!request && !url) {
+    return nullptr;
+  }
+  const std::vector<Expr *> &args = made->ctor() ? made->ctor()->args : made->args;
+  bool given = !args.empty() && (request || args.size() == 1);
+
+  return given ? args[0] : nullptr;
+}
+
+std::string TzModulesChecker::ownPrefix(const Expr *expr) const {
+  if (auto *lit = dyn_cast<StringLitExpr>(expr)) {
+    return TzModulesChecker::asciiPrefix(lit->value);
+  }
+  if (auto *tmpl = dyn_cast<TemplateExpr>(expr)) {
+    return TzModulesChecker::asciiPrefix(tmpl->quasis[0]);
   }
   if (auto *name = dyn_cast<NameExpr>(expr); name && name->var()) {
     return this->state.getConstantStore().findConstPrefix(name->var());
   }
-  if (auto *made = dyn_cast<NewExpr>(expr);
-      made && made->cls() && made->cls()->library() &&
-      (made->cls()->name == "URL" || made->cls()->name == "Request")) {
-    const std::vector<Expr *> &args = made->ctor() ? made->ctor()->args : made->args;
-    if (!args.empty() && (made->cls()->name == "Request" || args.size() == 1)) {
-      return this->knownPrefix(args[0]);
-    }
-  }
 
   return std::string();
+}
+
+std::string TzModulesChecker::asciiPrefix(const std::u16string &text) {
+  std::string out;
+  for (char16_t c : text) {
+    if (c >= 0x80) {
+      break;
+    }
+    out += static_cast<char>(c);
+  }
+
+  return out;
 }
 
 void TzModulesChecker::noteHttpsCall(CallExpr *call, const FunctionDecl *fn) {

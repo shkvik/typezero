@@ -6,6 +6,7 @@
 #include "compiler/semantic/bodies/functions/closure_checker/closure_checker.h"
 #include "compiler/semantic/bodies/functions/function_value_checker/function_value_checker.h"
 #include "compiler/semantic/bodies/iterators/iterable_checker/iterable_checker.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/generics/arg_list_checker/arg_list_checker.h"
 #include "compiler/semantic/generics/generic_check_helpers/generic_check_helpers.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
@@ -17,6 +18,7 @@
 #include "compiler/semantic/library/result/result_types/result_types.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
+#include "compiler/semantic/types/type_parts/type_routes.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "compiler/semantic/types/utility_types/utility_types.h"
@@ -47,43 +49,46 @@ TypeArgInferrer::TypeArgInferrer(SemanticState &owner, SemanticParts &all)
 }
 
 bool TypeArgInferrer::grows(const Type *type, llvm::ArrayRef<const Type *> params, bool inside) {
-  switch (type->kind()) {
-  case Type::Kind::Param:
-    return inside && llvm::is_contained(params, type);
-  case Type::Kind::Optional:
-    return TypeArgInferrer::grows(type->inner(), params, inside);
-  case Type::Kind::Array:
-  case Type::Kind::Promise:
-    return TypeArgInferrer::grows(type->inner(), params, true);
-  case Type::Kind::Result:
-    return TypeArgInferrer::grows(type->okType(), params, true) ||
-           TypeArgInferrer::grows(type->errType(), params, true);
-  case Type::Kind::Function:
-    return TypeArgInferrer::grows(type->ret(), params, true) ||
-           llvm::any_of(type->params(),
-                        [&](const Type *p) { return TypeArgInferrer::grows(p, params, true); });
-  case Type::Kind::Object:
-  case Type::Kind::Iterator:
-  case Type::Kind::Dict:
-    return GenericCheckHelpers::mentionsAnyOf(type, params);
-  default:
-    return false;
+  const Type *bare = type;
+  while (bare->isOptional()) {
+    bare = bare->inner();
   }
+  if (TypeArgInferrer::growsHere(bare, params, inside)) {
+    return true;
+  }
+  TypeParts parts = TypeParts::collect(bare, kGrowsRoute);
+  for (const Type *part : parts.getTypes()) {
+    if (part != bare && TypeArgInferrer::growsHere(part, params, true)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool TypeArgInferrer::growsHere(const Type *type, llvm::ArrayRef<const Type *> params,
+                                bool inside) {
+  if (type->isParam()) {
+    return inside && llvm::is_contained(params, type);
+  }
+  bool holder = type->isObject() || type->isIterator() || type->isDict();
+
+  return holder && GenericCheckHelpers::mentionsAnyOf(type, params);
 }
 
 bool TypeArgInferrer::isContextSensitive(const Expr *arg) {
+  for (const Expr *leaf : ExprParts::literalLeaves(arg)) {
+    if (TypeArgInferrer::needsContext(leaf)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool TypeArgInferrer::needsContext(const Expr *arg) {
   if (auto *fe = dyn_cast<FunctionExpr>(arg)) {
     return llvm::any_of(fe->fn->params, [](const Param &p) { return !p.type; });
-  }
-  if (auto *lit = dyn_cast<ArrayLitExpr>(arg)) {
-    return llvm::any_of(lit->elements, [](const ArrayLitExpr::Element &e) {
-      return TypeArgInferrer::isContextSensitive(e.expr);
-    });
-  }
-  if (auto *lit = dyn_cast<ObjectLitExpr>(arg)) {
-    return llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) {
-      return TypeArgInferrer::isContextSensitive(p.value);
-    });
   }
   if (auto *name = dyn_cast<NameExpr>(arg)) {
     static const GlobalName functions[] = {GlobalName::STRING,     GlobalName::NUMBER,

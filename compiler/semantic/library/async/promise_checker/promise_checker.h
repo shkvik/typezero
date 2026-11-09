@@ -32,6 +32,7 @@ private:
   using ResultExecutorShaped = Result<const Expr *, PromiseCheckerExecutorShapeError>;
 
   static const Type *awaited(const Type *type);
+  static bool callsWithValue(const Stmt *body, llvm::StringRef resolve);
   static ResultExecutorShaped executorShape(const Expr *executor);
   ResultValueTypeKnown valueType(NewExpr *expr, const CallExpr *call, const Type *expected);
 

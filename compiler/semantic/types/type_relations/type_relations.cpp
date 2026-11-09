@@ -5,6 +5,7 @@
 #include "compiler/semantic/bodies/iterators/iterable_checker/iterable_checker.h"
 #include "compiler/semantic/bodies/objects/object_checker/object_checker.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/generics/generic_widening/generic_widening.h"
 #include "compiler/semantic/generics/widening_relations/widening_relations.h"
@@ -15,6 +16,7 @@
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/conditional_types/conditional_types.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
+#include "compiler/semantic/types/type_parts/type_routes.h"
 #include "compiler/semantic/types/unknown_checker/unknown_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cctype>
@@ -42,11 +44,17 @@ TypeRelations::TypeRelations(SemanticState &owner, SemanticParts &all)
 }
 
 bool TypeRelations::holdsWideInteger(const Type *type) {
-  type = type->nonOptional();
-  if (type->isUnion()) {
-    return llvm::any_of(type->members(),
-                        [](const Type *m) { return TypeRelations::holdsWideInteger(m); });
+  TypeParts parts = TypeParts::collect(type, kWideIntegerRoute);
+  for (const Type *part : parts.getTypes()) {
+    if (TypeRelations::isWideInteger(part)) {
+      return true;
+    }
   }
+
+  return false;
+}
+
+bool TypeRelations::isWideInteger(const Type *type) {
   if (!type->isInteger()) {
     return false;
   }
@@ -196,6 +204,16 @@ const Type *TypeRelations::commonNumericType(const Type *a, const Type *b) {
 }
 
 bool TypeRelations::isIntLiteralTree(const Expr *expr) {
+  for (const Expr *node : ExprParts::operatorTree(expr)) {
+    if (!TypeRelations::isIntLiteralNode(node)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool TypeRelations::isIntLiteralNode(const Expr *expr) {
   if (isa<IntLitExpr>(expr)) {
     return true;
   }
@@ -203,13 +221,11 @@ bool TypeRelations::isIntLiteralTree(const Expr *expr) {
     return name->var() && name->var()->literalConst;
   }
   if (auto *unary = dyn_cast<UnaryExpr>(expr)) {
-    return (unary->op == UnaryOp::Neg || unary->op == UnaryOp::Plus) &&
-           TypeRelations::isIntLiteralTree(unary->operand);
+    return unary->op == UnaryOp::Neg || unary->op == UnaryOp::Plus;
   }
   if (auto *bin = dyn_cast<BinaryExpr>(expr)) {
-    return (bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub || bin->op == BinaryOp::Mul ||
-            bin->op == BinaryOp::Rem || bin->op == BinaryOp::Pow) &&
-           TypeRelations::isIntLiteralTree(bin->lhs) && TypeRelations::isIntLiteralTree(bin->rhs);
+    return bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub || bin->op == BinaryOp::Mul ||
+           bin->op == BinaryOp::Rem || bin->op == BinaryOp::Pow;
   }
 
   return false;

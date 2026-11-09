@@ -42,6 +42,7 @@ private:
   using ResultRoundingMode = Result<int, DecimalCheckerRoundingModeError>;
   using ResultLiteralRange = Result<DecimalLiteral, DecimalCheckerLiteralRangeError>;
 
+  static bool isLiteralNode(const Expr *expr);
   static ResultLiteralRange literalRange(const Expr *lit);
   static ResultRoundingMode roundingMode(const std::u16string &text);
 

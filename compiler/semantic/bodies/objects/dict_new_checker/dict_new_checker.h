@@ -33,6 +33,8 @@ private:
   using ResultDefinedType = Result<const Type *, DictNewCheckerElementsKnownError>;
 
   static ResultPartsJoined partsJoin(bool keys, const Type *common, const Type *type);
+  static std::vector<const ReturnStmt *> branchReturns(const Stmt *body);
+  static bool returnsPair(const ReturnStmt *ret);
   static ResultPairTypesOk pairsKnown(const Type *key, const Type *value);
   static ResultSourceShape sourceShape(const Type *type, const Type *given, const Type *wanted,
                                        bool pairs, llvm::StringRef what);

@@ -44,16 +44,28 @@ std::optional<std::u16string> IntlOptionsChecker::literalText(const Expr *e) {
 }
 
 std::optional<double> IntlOptionsChecker::literalNumber(const Expr *e) {
+  bool negative = false;
+  const Expr *inner = e;
+  auto *negation = dyn_cast<UnaryExpr>(inner);
+  while (negation != nullptr && negation->op == UnaryOp::Neg) {
+    negative = !negative;
+    inner = negation->operand;
+    negation = dyn_cast<UnaryExpr>(inner);
+  }
+  std::optional<double> value = IntlOptionsChecker::plainNumber(inner);
+  if (!value.has_value() || !negative) {
+    return value;
+  }
+
+  return -*value;
+}
+
+std::optional<double> IntlOptionsChecker::plainNumber(const Expr *e) {
   if (auto *lit = dyn_cast<IntLitExpr>(e)) {
     return double(lit->value);
   }
   if (auto *lit = dyn_cast<FloatLitExpr>(e)) {
     return lit->value;
-  }
-  if (auto *unary = dyn_cast<UnaryExpr>(e); unary && unary->op == UnaryOp::Neg) {
-    if (std::optional<double> value = IntlOptionsChecker::literalNumber(unary->operand)) {
-      return -*value;
-    }
   }
 
   return std::nullopt;

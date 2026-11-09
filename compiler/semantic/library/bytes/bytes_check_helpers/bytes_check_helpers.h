@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -41,6 +42,8 @@ public:
   static std::string numberWhat(Bytes kind);
 
 private:
+  static NodeChildren<const Expr *> valueParts(const Expr *e);
+  static std::string nodeValueText(const Expr *e, std::vector<std::string> &answers);
   static Range operateWide(BinaryOp op, const Range &a, const Range &b, bool isInt);
   static bool known(const Range &r);
   static int64_t allOnes(int64_t v);

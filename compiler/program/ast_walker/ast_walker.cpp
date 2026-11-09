@@ -319,6 +319,13 @@ void AstWalker::visitExprs(const Expr *expr, llvm::function_ref<void(const Expr 
   }
 }
 
+std::vector<const Expr *> AstWalker::exprsIn(const Stmt *stmt, bool intoFunctions) {
+  std::vector<const Expr *> exprs;
+  AstWalker::visitExprs(stmt, [&](const Expr *e) { exprs.push_back(e); }, intoFunctions);
+
+  return exprs;
+}
+
 void AstWalker::visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr *)> visit,
                            bool intoFunctions) {
   if (!stmt) {
@@ -543,16 +550,6 @@ std::vector<CallExpr *> AstWalker::tailCallsIn(FunctionDecl *fn) {
   }
 
   return calls;
-}
-
-void AstWalker::collectMemberCalls(const Stmt *body, llvm::StringSet<> &names) {
-  AstWalker::visitExprs(body, [&](const Expr *e) {
-    if (auto *call = dyn_cast<CallExpr>(e)) {
-      if (auto *member = dyn_cast<MemberExpr>(call->callee)) {
-        names.insert(member->name);
-      }
-    }
-  });
 }
 
 }

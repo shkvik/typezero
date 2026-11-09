@@ -4,6 +4,7 @@
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/expr/truth_checker/truth_checker.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker_errors.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/flow/condition_facts/condition_facts.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
@@ -395,28 +396,96 @@ bool ReturnChecker::isExit(const Stmt *stmt) {
 }
 
 bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels) {
-  auto returns = [](const Stmt *s) { return ReturnChecker::alwaysReturns(s); };
+  ReturnPart whole{stmt, std::vector<llvm::StringRef>(labels.begin(), labels.end())};
+  std::vector<bool> answers;
+  for (const ReturnPart &part : ChildrenFirst::order(whole, ReturnChecker::returnParts)) {
+    bool returns = ReturnChecker::nodeReturns(part, answers);
+    answers.push_back(returns);
+  }
+
+  return answers.back();
+}
+
+NodeChildren<ReturnPart> ReturnChecker::returnParts(ReturnPart part) {
+  NodeChildren<const Stmt *> inner;
+  if (auto *block = dyn_cast<BlockStmt>(part.stmt)) {
+    inner.append(block->body.begin(), block->body.end());
+  } else if (auto *branch = dyn_cast<IfStmt>(part.stmt)) {
+    inner = ReturnChecker::ifBranches(branch);
+  } else if (auto *cases = dyn_cast<SwitchStmt>(part.stmt)) {
+    const std::vector<Stmt *> *tail = ReturnChecker::switchTail(cases, part.labels);
+    if (tail != nullptr) {
+      inner.append(tail->begin(), tail->end());
+    }
+  } else if (isa<LabeledStmt>(part.stmt)) {
+    return {ReturnChecker::unlabeled(part)};
+  }
+  NodeChildren<ReturnPart> parts;
+  for (const Stmt *stmt : inner) {
+    parts.push_back(ReturnPart{stmt, {}});
+  }
+
+  return parts;
+}
+
+ReturnPart ReturnChecker::unlabeled(const ReturnPart &part) {
+  ReturnPart inner = part;
+  while (auto *labeled = dyn_cast<LabeledStmt>(inner.stmt)) {
+    inner.labels.push_back(labeled->label);
+    inner.stmt = labeled->body;
+  }
+
+  return inner;
+}
+
+NodeChildren<const Stmt *> ReturnChecker::ifBranches(const IfStmt *s) {
+  if (auto *lit = dyn_cast<BoolLitExpr>(s->cond)) {
+    if (lit->value && !s->elseStmt) {
+      return {s->thenStmt};
+    }
+    if (!lit->value && isa<EmptyStmt>(s->thenStmt)) {
+      return s->elseStmt ? NodeChildren<const Stmt *>{s->elseStmt} : NodeChildren<const Stmt *>{};
+    }
+  }
+  if (!s->elseStmt) {
+    return {};
+  }
+
+  return {s->thenStmt, s->elseStmt};
+}
+
+const std::vector<Stmt *> *ReturnChecker::switchTail(const SwitchStmt *s,
+                                                     llvm::ArrayRef<llvm::StringRef> labels) {
+  bool hasDefault =
+      s->exhaustive || llvm::any_of(s->cases, [](const SwitchCase &c) { return !c.test; });
+  if (!hasDefault || s->cases.empty()) {
+    return nullptr;
+  }
+  Exits exits(false, labels);
+  if (llvm::any_of(s->cases, [&](const SwitchCase &c) { return exits.in(c.body); })) {
+    return nullptr;
+  }
+
+  return &s->cases.back().body;
+}
+
+bool ReturnChecker::nodeReturns(const ReturnPart &part, std::vector<bool> &answers) {
+  const Stmt *stmt = part.stmt;
+  llvm::ArrayRef<llvm::StringRef> labels = part.labels;
   switch (stmt->kind()) {
   case Stmt::Kind::Return:
     return true;
   case Stmt::Kind::Expr:
     return ReturnChecker::isExit(stmt);
-  case Stmt::Kind::Block:
-    return llvm::any_of(cast<BlockStmt>(stmt)->body, returns) &&
-           !ReturnChecker::breaksTo(stmt, labels);
+  case Stmt::Kind::Block: {
+    std::vector<bool> inner =
+        ChildrenFirst::takeAnswers(answers, cast<BlockStmt>(stmt)->body.size());
+    return llvm::is_contained(inner, true) && !ReturnChecker::breaksTo(stmt, labels);
+  }
   case Stmt::Kind::If: {
-    auto *s = cast<IfStmt>(stmt);
-    if (auto *lit = dyn_cast<BoolLitExpr>(s->cond)) {
-      if (lit->value && !s->elseStmt) {
-        return ReturnChecker::alwaysReturns(s->thenStmt) && !ReturnChecker::breaksTo(stmt, labels);
-      }
-      if (!lit->value && isa<EmptyStmt>(s->thenStmt)) {
-        return s->elseStmt && ReturnChecker::alwaysReturns(s->elseStmt) &&
-               !ReturnChecker::breaksTo(stmt, labels);
-      }
-    }
-    return s->elseStmt && ReturnChecker::alwaysReturns(s->thenStmt) &&
-           ReturnChecker::alwaysReturns(s->elseStmt) && !ReturnChecker::breaksTo(stmt, labels);
+    size_t count = ReturnChecker::ifBranches(cast<IfStmt>(stmt)).size();
+    std::vector<bool> inner = ChildrenFirst::takeAnswers(answers, count);
+    return count > 0 && !llvm::is_contained(inner, false) && !ReturnChecker::breaksTo(stmt, labels);
   }
   case Stmt::Kind::While: {
     auto *s = cast<WhileStmt>(stmt);
@@ -432,26 +501,15 @@ bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringR
            !Exits(true, labels).in({s->body});
   }
   case Stmt::Kind::Switch: {
-    auto *s = cast<SwitchStmt>(stmt);
-    bool hasDefault =
-        s->exhaustive || llvm::any_of(s->cases, [](const SwitchCase &c) { return !c.test; });
-    if (!hasDefault || s->cases.empty()) {
+    const std::vector<Stmt *> *tail = ReturnChecker::switchTail(cast<SwitchStmt>(stmt), labels);
+    if (tail == nullptr) {
       return false;
     }
-    Exits exits(false, labels);
-    if (llvm::any_of(s->cases, [&](const SwitchCase &c) { return exits.in(c.body); })) {
-      return false;
-    }
-    return llvm::any_of(s->cases.back().body, returns);
+    std::vector<bool> inner = ChildrenFirst::takeAnswers(answers, tail->size());
+    return llvm::is_contained(inner, true);
   }
-  case Stmt::Kind::Labeled: {
-    llvm::SmallVector<llvm::StringRef, 2> all(labels.begin(), labels.end());
-    while (auto *labeled = dyn_cast<LabeledStmt>(stmt)) {
-      all.push_back(labeled->label);
-      stmt = labeled->body;
-    }
-    return ReturnChecker::alwaysReturns(stmt, all);
-  }
+  case Stmt::Kind::Labeled:
+    return ChildrenFirst::takeAnswer(answers);
   default:
     return false;
   }

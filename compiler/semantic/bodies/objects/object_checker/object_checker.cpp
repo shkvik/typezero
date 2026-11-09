@@ -44,25 +44,31 @@ ObjectChecker::ObjectChecker(SemanticState &owner, SemanticParts &all)
   this->classMemberChecker = &all.getClassMemberChecker();
 }
 
-std::string ObjectChecker::chainText(const Expr *expr) {
-  expr = ObjectCheckHelpers::unnarrowed(expr);
-  if (auto *name = dyn_cast<NameExpr>(expr)) {
-    return name->name.str();
+std::optional<std::string> ObjectChecker::chainText(const Expr *expr) {
+  std::vector<llvm::StringRef> names;
+  const Expr *link = ObjectCheckHelpers::unnarrowed(expr);
+  while (auto *member = dyn_cast<MemberExpr>(link)) {
+    if (member->optional) {
+      return std::nullopt;
+    }
+    names.push_back(member->name);
+    link = ObjectCheckHelpers::unnarrowed(member->object);
   }
-  auto *member = dyn_cast<MemberExpr>(expr);
-  if (!member || member->optional) {
-    return "";
+  auto *root = dyn_cast<NameExpr>(link);
+  if (root == nullptr) {
+    return std::nullopt;
   }
-  std::string outer = ObjectChecker::chainText(member->object);
+  std::string text = root->name.str();
+  for (llvm::StringRef name : llvm::reverse(names)) {
+    text += "." + name.str();
+  }
 
-  return outer.empty() ? "" : outer + "." + member->name.str();
+  return text;
 }
 
 std::string ObjectChecker::fieldText(const Expr *object, llvm::StringRef field) {
-  std::string text = ObjectChecker::chainText(object);
-  if (text.empty()) {
-    text = "o";
-  }
+  std::optional<std::string> chain = ObjectChecker::chainText(object);
+  std::string text = chain.has_value() ? *chain : "o";
   bool identifier = !field.empty() && !llvm::isDigit(field[0]) && llvm::all_of(field, [](char c) {
     return llvm::isAlnum(c) || c == '_' || c == '$';
   });

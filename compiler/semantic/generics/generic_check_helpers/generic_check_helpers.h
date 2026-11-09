@@ -13,8 +13,7 @@ public:
   static std::string constraintSpelling(const Type *param, const TypeParamDecl *decl = nullptr);
 
 private:
-  static bool mentionsAnyOf(const Type *type, llvm::ArrayRef<const Type *> params,
-                            llvm::SmallPtrSetImpl<const Type *> &seen);
+  static bool isParamOf(const Type *type, llvm::ArrayRef<const Type *> params);
 };
 
 }

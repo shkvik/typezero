@@ -888,20 +888,32 @@ bool CallChecker::isUnshadowedGlobal(const NameExpr *name) const {
 }
 
 bool CallChecker::isGlobalName(const Expr *expr, GlobalName global) const {
-  llvm::StringRef name = GlobalNameTable::getName(global);
-  auto *member = dyn_cast<MemberExpr>(expr);
-  bool throughGlobalThis = global == GlobalName::CRYPTO && member != nullptr &&
-                           member->name == name && !member->optional &&
-                           this->isGlobalName(member->object, GlobalName::GLOBAL_THIS);
+  bool throughGlobalThis = global == GlobalName::CRYPTO && this->isGlobalThisMember(expr, global);
   if (throughGlobalThis) {
     return true;
   }
+
+  return this->namesGlobal(expr, global);
+}
+
+bool CallChecker::namesGlobal(const Expr *expr, GlobalName global) const {
+  llvm::StringRef name = GlobalNameTable::getName(global);
   auto *named = dyn_cast<NameExpr>(expr);
   if (named == nullptr || named->name != name) {
     return false;
   }
 
   return this->isUnshadowedGlobal(named);
+}
+
+bool CallChecker::isGlobalThisMember(const Expr *expr, GlobalName global) const {
+  llvm::StringRef name = GlobalNameTable::getName(global);
+  auto *member = dyn_cast<MemberExpr>(expr);
+  if (member == nullptr || member->optional || member->name != name) {
+    return false;
+  }
+
+  return this->namesGlobal(member->object, GlobalName::GLOBAL_THIS);
 }
 
 bool CallChecker::isGlobalMember(const MemberExpr *member, GlobalMember which) const {

@@ -51,6 +51,7 @@ private:
   static const char *accessName(Access access);
   static bool isArrowMethod(const FunctionDecl *fn);
   static bool declaresReturn(const FunctionDecl *fn);
+  static FunctionDecl *firstImplementation(const ClassDecl *cls, const FunctionDecl *fn);
   static void interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out);
 
   SemanticState &state;

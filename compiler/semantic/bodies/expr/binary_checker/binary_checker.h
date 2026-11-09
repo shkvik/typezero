@@ -43,6 +43,7 @@ private:
 
   void adaptLiterals(BinaryExpr *bin);
   static bool onlyIntLiterals(const Expr *expr);
+  static bool isIntLiteralNode(const Expr *expr);
   ResultBitwiseResolved checkBits(BinaryExpr *bin);
   ResultWrappingChecked checkWrapping(BinaryExpr *bin);
   static std::string mixedNumbersText(const BinaryExpr *bin);

@@ -1,5 +1,4 @@
 #include "compiler/semantic/infer/late_classes/late_classes.h"
-#include "compiler/program/ast_walker/ast_walker.h"
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/bodies/classes/class_checker/class_checker.h"
 #include "compiler/semantic/bodies/classes/class_links/class_links.h"
@@ -8,13 +7,16 @@
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
+#include "compiler/semantic/declare/class_tree/class_tree.h"
 #include "compiler/semantic/declare/module_declarer/module_declarer.h"
+#include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
 #include "compiler/semantic/generics/generic_instantiator/generic_instantiator.h"
 #include "compiler/semantic/generics/type_params/type_params.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/fs/fs_declarer/fs_declarer.h"
 #include "compiler/semantic/library/reflect/reflect_checker/reflect_checker.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
+#include "compiler/semantic/types/type_parts/type_routes.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -42,36 +44,10 @@ LateClasses::LateClasses(SemanticState &owner, SemanticParts &all)
   this->genericInstantiator = &all.getGenericInstantiator();
 }
 
-bool LateClasses::holdsType(const Type *type, const Type *target,
-                            llvm::SmallPtrSetImpl<const Type *> &seen) {
-  if (type == target) {
-    return true;
-  }
-  bool firstVisit = seen.insert(type).second;
-  if (!firstVisit) {
-    return false;
-  }
-  auto memberHolds = [&](const Type *member) {
-    return LateClasses::holdsType(member, target, seen);
-  };
-  auto fieldHolds = [&](const Field &field) {
-    return LateClasses::holdsType(field.type, target, seen);
-  };
-  switch (type->kind()) {
-    case Type::Kind::Optional:
-    case Type::Kind::Array:
-    case Type::Kind::Promise:
-      return LateClasses::holdsType(type->inner(), target, seen);
-    case Type::Kind::Union:
-      return llvm::any_of(type->members(), memberHolds);
-    case Type::Kind::Dict:
-      return LateClasses::holdsType(type->keyType(), target, seen) ||
-             LateClasses::holdsType(type->valueType(), target, seen);
-    case Type::Kind::Object:
-      return llvm::any_of(type->fields(), fieldHolds);
-    default:
-      return false;
-  }
+bool LateClasses::holdsType(const Type *type, const Type *target) {
+  TypeParts parts = TypeParts::collect(type, kHoldsRoute);
+
+  return llvm::is_contained(parts.getTypes(), target);
 }
 
 Expr *LateClasses::checkClassExpr(ClassExpr *expr, const Type *expected) {
@@ -344,19 +320,19 @@ void LateClasses::noteMethodNames(const ClassDecl *cls) {
 }
 
 void LateClasses::markLateOverrides(SourceFile &program) {
-  auto noteClassExpr = [&](const Expr *e) {
-    auto *classExpr = dyn_cast<ClassExpr>(e);
-    bool extends = classExpr && (classExpr->decl->baseExpr || classExpr->decl->base);
-    if (extends) {
-      this->noteMethodNames(classExpr->decl);
-    }
-  };
   for (Stmt *item : program.items) {
     auto *cls = dyn_cast<ClassDecl>(item);
     if (cls && cls->baseExpr) {
       this->noteMethodNames(cls);
     }
-    AstWalker::visitExprs(item, noteClassExpr);
+  }
+  PlacedNodes nodes = PlacedNodes::collect(program.items, {});
+  for (const PlacedExpr &placed : nodes.getExprs()) {
+    auto *classExpr = dyn_cast<ClassExpr>(placed.expr);
+    bool extends = classExpr && (classExpr->decl->baseExpr || classExpr->decl->base);
+    if (extends) {
+      this->noteMethodNames(classExpr->decl);
+    }
   }
   for (ClassDecl *cls : this->state.getClassStore().getClasses()) {
     this->markLateOverrides(cls);
@@ -392,12 +368,21 @@ bool LateClasses::hasClassExpr(const FunctionDecl *fn) {
   if (late.isClassExprKnown(fn)) {
     return late.hasClassExpr(fn);
   }
-  bool has = false;
-  auto spotClassExpr = [&](const Expr *e) { has |= isa<ClassExpr>(e); };
-  AstWalker::visitExprs(fn->body, spotClassExpr);
+  PlacedNodes nodes = PlacedNodes::collect({fn->body}, {});
+  bool has = LateClasses::hasClassExprIn(nodes);
   late.rememberClassExpr(fn, has);
 
   return has;
+}
+
+bool LateClasses::hasClassExprIn(const PlacedNodes &nodes) {
+  for (const PlacedExpr &placed : nodes.getExprs()) {
+    if (isa<ClassExpr>(placed.expr)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 bool LateClasses::isTemplate(const FuncSymbol *generic) {
@@ -434,9 +419,8 @@ void LateClasses::checkTemplateInstance(InstanceRecord *instance) {
 
 LateClasses::ResultNoOldObjectHeld LateClasses::oldObject(const ClassDecl *cls,
                                                           const ClassField &field) {
-  llvm::SmallPtrSet<const Type *, 8> seen;
   bool typed = field.isStatic() && field.var() && field.var()->type;
-  bool holds = typed && LateClasses::holdsType(field.var()->type, cls->type, seen);
+  bool holds = typed && LateClasses::holdsType(field.var()->type, cls->type);
   if (holds) {
     std::string message = ErrorTextOldObject::held(cls->name, field.name);
 
@@ -467,14 +451,18 @@ LateClasses::ResultFieldNameIsFree LateClasses::replacedField(const ClassDecl *c
 }
 
 void LateClasses::relink(ClassDecl *cls) {
+  this->relinkClass(cls);
+  for (ClassDecl *below : ClassTree::descendants(cls)) {
+    this->relinkClass(below);
+  }
+}
+
+void LateClasses::relinkClass(ClassDecl *cls) {
   const_cast<Type *>(cls->type)->forgetFields();
   bool muted = this->state.getDiagnostics().setMuted(true);
   this->classLinks->linkOverrides(cls);
   this->state.getDiagnostics().setMuted(muted);
   this->classLinks->buildVtable(cls);
-  for (ClassDecl *child : cls->children) {
-    this->relink(child);
-  }
 }
 
 void LateClasses::replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SMLoc loc) {

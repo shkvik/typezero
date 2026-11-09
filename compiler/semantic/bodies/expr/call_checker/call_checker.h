@@ -90,6 +90,8 @@ private:
   using ResultTypeArgsAbsent = Result<const MemberExpr *, CallCheckerNoTypeArgsError>;
   using ResultTypeArgsUsable = Result<const FuncSymbol *, CallCheckerDirectTypeArgsError>;
 
+  bool namesGlobal(const Expr *expr, GlobalName global) const;
+  bool isGlobalThisMember(const Expr *expr, GlobalName global) const;
   static ResultTypeArgsAbsent noTypeArgs(const MemberExpr *member);
   static ResultNoSpreadPassed spreadFree(const CallExpr *call, size_t i);
   static ResultCalleeCallable calleeCallable(const Type *type, const NameExpr *calleeName);

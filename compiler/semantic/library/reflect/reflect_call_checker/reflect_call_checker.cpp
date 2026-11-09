@@ -4,6 +4,7 @@
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
+#include "compiler/semantic/declare/class_tree/class_tree.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/reflect/metadata_checker/metadata_checker.h"
 #include "compiler/semantic/library/reflect/reflect_checker/reflect_checker.h"
@@ -11,7 +12,6 @@
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/unknown_checker/unknown_checker.h"
 #include "llvm/ADT/STLExtras.h"
-#include <functional>
 
 using llvm::dyn_cast;
 using llvm::isa;
@@ -318,19 +318,24 @@ FunctionDecl *ReflectCallChecker::knownReflectMethod(ClassDecl *cls, llvm::Strin
       return nullptr;
     }
   }
-  std::function<bool(const ClassDecl *)> declaresAgain = [&](const ClassDecl *c) {
-    return llvm::any_of(c->children, [&](const ClassDecl *child) {
-      return llvm::any_of(ClassLinks::ownMethods(child),
-                          [&](const FunctionDecl *m) { return m->name == name; }) ||
-             declaresAgain(child);
-    });
-  };
-  if (declaresAgain(cls)) {
+  if (ReflectCallChecker::declaredBelow(cls, name)) {
     return nullptr;
   }
   several = methods.size() > 1;
 
   return methods.front();
+}
+
+bool ReflectCallChecker::declaredBelow(const ClassDecl *cls, llvm::StringRef name) {
+  for (const ClassDecl *child : ClassTree::descendants(cls)) {
+    for (const FunctionDecl *method : ClassLinks::ownMethods(child)) {
+      if (method->name == name) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 const FunctionDecl *ReflectCallChecker::heldReflectMethod(const Expr *f) {

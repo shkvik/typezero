@@ -26,6 +26,10 @@ public:
 private:
   static const Expr *uncast(const Expr *expr);
   static bool plainTransport(const Expr *transport);
+  static const Expr *prefixInner(const Expr *expr);
+  static const Expr *addressArgument(const NewExpr *made);
+  static std::string asciiPrefix(const std::u16string &text);
+  std::string ownPrefix(const Expr *expr) const;
   using ResultExternalParams = Result<const Type *, TzModulesCheckerExternalParamError>;
   using ResultExternalReturn = Result<const Type *, TzModulesCheckerExternalReturnError>;
   using ResultPlainSignature = Result<const FunctionDecl *, TzModulesCheckerPlainSignatureError>;

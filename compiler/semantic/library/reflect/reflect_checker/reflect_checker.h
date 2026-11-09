@@ -35,8 +35,7 @@ private:
 
   static ResultFillableClass fillableClass(ClassDecl *made);
   static void classesIn(const Type *type, llvm::SmallPtrSetImpl<ClassDecl *> &out);
-  static void constructorsIn(const Type *type, llvm::SmallVectorImpl<const Type *> &out,
-                             llvm::SmallPtrSetImpl<const Type *> &seen);
+  static void constructorsIn(const Type *type, llvm::SmallVectorImpl<const Type *> &out);
   static bool instanceOf(const Type *made, const Type *of);
   static Expr *stripImplicit(Expr *expr);
 
@@ -44,6 +43,7 @@ private:
   const Type *reflectError();
   ResultConstructible constructible(ClassDecl *cls, llvm::ArrayRef<const Type *> args);
   void checkReflectNews();
+  static void markReflectMethods(ClassDecl *cls);
 
   SemanticState &state;
   Prelude *prelude = nullptr;

@@ -62,7 +62,9 @@ private:
   static ResultArgNotGrowing notGrowing(const FuncSymbol *generic, const Type *bound,
                                         const Type *param);
   static bool grows(const Type *type, llvm::ArrayRef<const Type *> params, bool inside);
+  static bool growsHere(const Type *type, llvm::ArrayRef<const Type *> params, bool inside);
   static bool isContextSensitive(const Expr *arg);
+  static bool needsContext(const Expr *arg);
 
   void precheckFields(ObjectLitExpr *lit, const Type *pattern,
                       llvm::ArrayRef<const Type *> genericTypeParams, Inference &inference);

@@ -2,6 +2,7 @@
 #include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/semantic/bodies/classes/decorator_checker/decorator_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/generics/alias_instantiator/alias_instantiator.h"
 #include "compiler/semantic/generics/generic_check_helpers/generic_check_helpers.h"
 #include "compiler/semantic/generics/generic_class_instantiator/generic_class_instantiator.h"
@@ -9,6 +10,7 @@
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_operators/type_operators.h"
+#include "compiler/semantic/types/type_parts/type_routes.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
@@ -26,37 +28,16 @@ TypeParams::TypeParams(SemanticState &owner, SemanticParts &all)
   this->genericClassInstantiator = &all.getGenericClassInstantiator();
 }
 
-bool TypeParams::mentionsInObject(const Type *type, llvm::ArrayRef<const Type *> params,
-                                  llvm::SmallPtrSetImpl<const Type *> &seen) {
-  switch (type->kind()) {
-  case Type::Kind::Param:
-    return type->typeOp() != TypeOp::None && GenericCheckHelpers::mentionsAnyOf(type, params);
-  case Type::Kind::Optional:
-  case Type::Kind::Array:
-    return TypeParams::mentionsInObject(type->inner(), params, seen);
-  case Type::Kind::Result:
-    return TypeParams::mentionsInObject(type->okType(), params, seen) ||
-           TypeParams::mentionsInObject(type->errType(), params, seen);
-  case Type::Kind::Function:
-    return TypeParams::mentionsInObject(type->ret(), params, seen) ||
-           llvm::any_of(type->params(), [&](const Type *p) {
-             return TypeParams::mentionsInObject(p, params, seen);
-           });
-  case Type::Kind::Iterator:
-    return TypeParams::mentionsInObject(type->yielded(), params, seen) ||
-           TypeParams::mentionsInObject(type->returned(), params, seen);
-  case Type::Kind::Dict:
-    return TypeParams::mentionsInObject(type->keyType(), params, seen) ||
-           TypeParams::mentionsInObject(type->valueType(), params, seen);
-  case Type::Kind::Union:
-    return llvm::any_of(type->members(), [&](const Type *m) {
-      return TypeParams::mentionsInObject(m, params, seen);
-    });
-  case Type::Kind::Object:
-    return !seen.contains(type) && GenericCheckHelpers::mentionsAnyOf(type, params);
-  default:
-    return false;
+bool TypeParams::mentionsInObject(const Type *type, llvm::ArrayRef<const Type *> params) {
+  TypeParts parts = TypeParts::collect(type, kMentionsInObjectRoute);
+  for (const Type *part : parts.getTypes()) {
+    bool operation = part->isParam() && part->typeOp() != TypeOp::None;
+    if ((operation || part->isObject()) && GenericCheckHelpers::mentionsAnyOf(part, params)) {
+      return true;
+    }
   }
+
+  return false;
 }
 
 TypeParams::ResultParamNameIsNew TypeParams::uniqueName(const TypeParamDecl &earlier,
@@ -239,127 +220,310 @@ const Type *TypeParams::substituteValue(const Type *type, llvm::ArrayRef<const T
 
 const Type *TypeParams::substituteAt(const Type *type, llvm::ArrayRef<const Type *> params,
                                      llvm::ArrayRef<const Type *> args, bool voidOk) {
-  if (!GenericCheckHelpers::mentionsAnyOf(type, params)) {
-    return type;
+  std::vector<SubstituteStep> steps = {SubstituteType{type, voidOk}};
+  std::vector<const Type *> answers;
+  while (!steps.empty()) {
+    SubstituteStep step = steps.back();
+    steps.pop_back();
+    if (const SubstituteType *enter = step.as<SubstituteType>()) {
+      this->enterSubstitute(*enter, params, args, steps, answers);
+    } else {
+      const Type *built = this->buildSubstituted(*step.as<BuildSubstituted>(), answers);
+      answers.push_back(built);
+    }
   }
-  auto sub = [&](const Type *t) { return this->substituteAt(t, params, args, false); };
-  auto held = [&](const Type *t) { return this->substituteAt(t, params, args, true); };
-  switch (type->kind()) {
-  case Type::Kind::Param: {
-    if (type->typeOp() != TypeOp::None) {
-      std::vector<const Type *> operands;
-      for (const Type *t : type->operands()) {
-        operands.push_back(t ? held(t) : nullptr);
-      }
-      return this->typeOperators->evalTypeOp(type, operands);
+
+  return answers.back();
+}
+
+void TypeParams::enterSubstitute(const SubstituteType &enter, llvm::ArrayRef<const Type *> params,
+                                 llvm::ArrayRef<const Type *> args,
+                                 std::vector<SubstituteStep> &steps,
+                                 std::vector<const Type *> &answers) {
+  const Type *type = enter.type;
+  bool untouched = type == nullptr || !GenericCheckHelpers::mentionsAnyOf(type, params);
+  std::optional<SubstituteForm> form = untouched ? std::nullopt : this->substituteForm(type);
+  if (untouched) {
+    answers.push_back(type);
+  } else if (!form.has_value()) {
+    answers.push_back(TypeParams::plainSubstitute(type, params, args, enter.voidOk));
+  } else {
+    if (*form == SubstituteForm::OBJECT) {
+      this->state.getGenericStore().enterSubstitution(type);
     }
-    const Type *arg = args[size_t(llvm::find(params, type) - params.begin())];
-    if (arg && arg->isVoid() && !voidOk) {
-      return Type::undefinedTy();
+    std::vector<SubstituteType> parts = this->substituteParts(type, *form);
+    steps.push_back(BuildSubstituted{type, *form, parts.size()});
+    for (const SubstituteType &part : llvm::reverse(parts)) {
+      steps.push_back(part);
     }
-    return arg ? arg : type;
-  }
-  case Type::Kind::Optional:
-    return Type::optional(sub(type->inner()));
-  case Type::Kind::Array:
-    return Type::array(sub(type->inner()));
-  case Type::Kind::Result:
-    return Type::result(held(type->okType()), held(type->errType()));
-  case Type::Kind::Function: {
-    std::vector<const Type *> ps;
-    for (const Type *p : type->params()) {
-      ps.push_back(sub(p));
-    }
-    return Type::function(ps, type->minArgs(), type->hasRest(), held(type->ret()), type->hasThis());
-  }
-  case Type::Kind::Iterator:
-    return Type::iterator(sub(type->yielded()), held(type->returned()), held(type->sent()));
-  case Type::Kind::Dict:
-    return Type::dict(type->dictKind(), sub(type->keyType()), sub(type->valueType()));
-  case Type::Kind::Union: {
-    std::vector<const Type *> members;
-    for (const Type *m : type->members()) {
-      members.push_back(sub(m));
-    }
-    return Type::unionOf(members);
-  }
-  case Type::Kind::Promise:
-    return Type::promise(held(type->promised()));
-  case Type::Kind::ClassRef:
-    return type->isConstructor() ? Type::constructorOf(sub(type->constructed())) : type;
-  case Type::Kind::Object: {
-    if (type->isAsyncIterator()) {
-      return Type::asyncIterator(sub(type->yielded()), held(type->returned()), held(type->sent()));
-    }
-    if (const DescriptorOrigin *origin = this->state.getAliasStore().findDescriptorOrigin(type)) {
-      auto [list, ret] = *origin;
-      return this->decoratorChecker->methodDescriptorType(sub(list), held(ret));
-    }
-    if (const ClassDecl *cls = type->classDecl(); cls && !type->typeArgs().empty()) {
-      std::vector<const Type *> newArgs;
-      for (const Type *a : type->typeArgs()) {
-        newArgs.push_back(held(a));
-      }
-      auto *generic = const_cast<ClassDecl *>(cls->generic() ? cls->generic() : cls);
-      GenericClassInstantiator::ResultClassMade made =
-          this->genericClassInstantiator->instantiateClass(
-              generic, std::move(newArgs), this->state.getGenericStore().getInstanceLoc());
-      if (made.isErr() && made.error().code !=
-                              GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
-        llvm::SMLoc at =
-            made.error().code ==
-                    GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
-                ? generic->loc()
-                : (this->state.getGenericStore().getInstanceLoc().isValid()
-                       ? this->state.getGenericStore().getInstanceLoc()
-                       : generic->loc());
-        this->state.getDiagnostics().error(at, made.error().message);
-      }
-      return made.isOk() ? made.value()->type : Type::error();
-    }
-    if (const AliasOrigin *origin = this->state.getAliasStore().findAliasOrigin(type)) {
-      auto [alias, oldArgs] = *origin;
-      std::vector<const Type *> newArgs;
-      for (const Type *a : oldArgs) {
-        newArgs.push_back(held(a));
-      }
-      return this->aliasInstantiator->instantiateAlias(alias, std::move(newArgs), alias->loc());
-    }
-    if (type->isTuple()) {
-      std::vector<const Type *> elements;
-      std::vector<bool> spread;
-      for (const Field &f : type->fields()) {
-        elements.push_back(sub(f.type));
-        spread.push_back(f.type->isListParam());
-      }
-      if (llvm::is_contained(spread, true)) {
-        std::string why;
-        const Type *list = ArgumentLists::spreadTuple(elements, spread, why);
-        return list ? list : Type::error();
-      }
-      if (type->tupleMin() < elements.size() || type->tupleRest()) {
-        return Type::argumentList(elements, type->tupleMin(),
-                                  type->tupleRest() ? sub(type->tupleRest()) : nullptr);
-      }
-      return Type::tuple(elements, !type->fields().empty() && type->fields().front().readonly);
-    }
-    if (this->state.getGenericStore().isSubstituting(type)) {
-      return type;
-    }
-    this->state.getGenericStore().enterSubstitution(type);
-    std::vector<Field> fields;
-    for (const Field &f : type->fields()) {
-      fields.push_back({f.name, sub(f.type), f.readonly});
-    }
-    this->state.getGenericStore().leaveSubstitution(type);
-    return Type::object(std::move(fields));
-  }
-  default:
-    return type;
   }
 }
 
+const Type *TypeParams::plainSubstitute(const Type *type, llvm::ArrayRef<const Type *> params,
+                                        llvm::ArrayRef<const Type *> args, bool voidOk) {
+  if (!type->isParam()) {
+    return type;
+  }
+  const Type *arg = args[size_t(llvm::find(params, type) - params.begin())];
+  if (arg && arg->isVoid() && !voidOk) {
+    return Type::undefinedTy();
+  }
+
+  return arg ? arg : type;
+}
+
+std::optional<SubstituteForm> TypeParams::substituteForm(const Type *type) const {
+  switch (type->kind()) {
+    case Type::Kind::Param:
+      return type->typeOp() != TypeOp::None ? std::optional(SubstituteForm::TYPE_OPERATOR)
+                                            : std::nullopt;
+    case Type::Kind::Optional:
+      return SubstituteForm::OPTIONAL;
+    case Type::Kind::Array:
+      return SubstituteForm::ARRAY;
+    case Type::Kind::Result:
+      return SubstituteForm::RESULT;
+    case Type::Kind::Function:
+      return SubstituteForm::FUNCTION;
+    case Type::Kind::Iterator:
+      return SubstituteForm::ITERATOR;
+    case Type::Kind::Dict:
+      return SubstituteForm::DICT;
+    case Type::Kind::Union:
+      return SubstituteForm::UNION;
+    case Type::Kind::Promise:
+      return SubstituteForm::PROMISE;
+    case Type::Kind::ClassRef:
+      return type->isConstructor() ? std::optional(SubstituteForm::CONSTRUCTOR) : std::nullopt;
+    case Type::Kind::Object:
+      return this->objectForm(type);
+    default:
+      return std::nullopt;
+  }
+}
+
+std::optional<SubstituteForm> TypeParams::objectForm(const Type *type) const {
+  if (type->isAsyncIterator()) {
+    return SubstituteForm::ASYNC_ITERATOR;
+  }
+  if (this->state.getAliasStore().findDescriptorOrigin(type)) {
+    return SubstituteForm::DESCRIPTOR;
+  }
+  if (const ClassDecl *cls = type->classDecl(); cls && !type->typeArgs().empty()) {
+    return SubstituteForm::CLASS_INSTANCE;
+  }
+  if (this->state.getAliasStore().findAliasOrigin(type)) {
+    return SubstituteForm::ALIAS_INSTANCE;
+  }
+  if (type->isTuple()) {
+    return SubstituteForm::TUPLE;
+  }
+  if (this->state.getGenericStore().isSubstituting(type)) {
+    return std::nullopt;
+  }
+
+  return SubstituteForm::OBJECT;
+}
+
+std::vector<SubstituteType> TypeParams::substituteParts(const Type *type,
+                                                        SubstituteForm form) const {
+  switch (form) {
+    case SubstituteForm::TYPE_OPERATOR:
+      return TypeParams::partsOf(type->operands(), true);
+    case SubstituteForm::OPTIONAL:
+    case SubstituteForm::ARRAY:
+      return {SubstituteType{type->inner(), false}};
+    case SubstituteForm::RESULT:
+      return {SubstituteType{type->okType(), true}, SubstituteType{type->errType(), true}};
+    case SubstituteForm::FUNCTION: {
+      std::vector<SubstituteType> parts = TypeParams::partsOf(type->params(), false);
+      parts.push_back(SubstituteType{type->ret(), true});
+      return parts;
+    }
+    case SubstituteForm::ITERATOR:
+    case SubstituteForm::ASYNC_ITERATOR:
+      return {SubstituteType{type->yielded(), false}, SubstituteType{type->returned(), true},
+              SubstituteType{type->sent(), true}};
+    case SubstituteForm::DICT:
+      return {SubstituteType{type->keyType(), false}, SubstituteType{type->valueType(), false}};
+    case SubstituteForm::UNION:
+      return TypeParams::partsOf(type->members(), false);
+    case SubstituteForm::PROMISE:
+      return {SubstituteType{type->promised(), true}};
+    case SubstituteForm::CONSTRUCTOR:
+      return {SubstituteType{type->constructed(), false}};
+    case SubstituteForm::DESCRIPTOR: {
+      const DescriptorOrigin *origin = this->state.getAliasStore().findDescriptorOrigin(type);
+      return {SubstituteType{origin->args, false}, SubstituteType{origin->ret, true}};
+    }
+    case SubstituteForm::CLASS_INSTANCE:
+      return TypeParams::partsOf(type->typeArgs(), true);
+    case SubstituteForm::ALIAS_INSTANCE:
+      return TypeParams::partsOf(this->state.getAliasStore().findAliasOrigin(type)->args, true);
+    case SubstituteForm::TUPLE: {
+      std::vector<SubstituteType> parts = TypeParams::fieldParts(type);
+      if (!TypeParams::hasListParam(type) && type->tupleRest()) {
+        parts.push_back(SubstituteType{type->tupleRest(), false});
+      }
+      return parts;
+    }
+    case SubstituteForm::OBJECT:
+      return TypeParams::fieldParts(type);
+  }
+  llvm_unreachable("unknown substitution");
+}
+
+std::vector<SubstituteType> TypeParams::partsOf(llvm::ArrayRef<const Type *> types, bool voidOk) {
+  std::vector<SubstituteType> parts;
+  for (const Type *part : types) {
+    parts.push_back(SubstituteType{part, voidOk});
+  }
+
+  return parts;
+}
+
+std::vector<SubstituteType> TypeParams::fieldParts(const Type *type) {
+  std::vector<SubstituteType> parts;
+  for (const Field &f : type->fields()) {
+    parts.push_back(SubstituteType{f.type, false});
+  }
+
+  return parts;
+}
+
+bool TypeParams::hasListParam(const Type *tuple) {
+  for (const Field &f : tuple->fields()) {
+    if (f.type->isListParam()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+const Type *TypeParams::buildSubstituted(const BuildSubstituted &build,
+                                         std::vector<const Type *> &answers) {
+  const Type *type = build.type;
+  std::vector<const Type *> parts = ChildrenFirst::takeAnswers(answers, build.count);
+  switch (build.form) {
+    case SubstituteForm::TYPE_OPERATOR:
+      return this->typeOperators->evalTypeOp(type, parts);
+    case SubstituteForm::OPTIONAL:
+      return Type::optional(parts[0]);
+    case SubstituteForm::ARRAY:
+      return Type::array(parts[0]);
+    case SubstituteForm::RESULT:
+      return Type::result(parts[0], parts[1]);
+    case SubstituteForm::FUNCTION: {
+      const Type *ret = parts.back();
+      parts.pop_back();
+      return Type::function(parts, type->minArgs(), type->hasRest(), ret, type->hasThis());
+    }
+    case SubstituteForm::ITERATOR:
+      return Type::iterator(parts[0], parts[1], parts[2]);
+    case SubstituteForm::DICT:
+      return Type::dict(type->dictKind(), parts[0], parts[1]);
+    case SubstituteForm::UNION:
+      return Type::unionOf(parts);
+    case SubstituteForm::PROMISE:
+      return Type::promise(parts[0]);
+    case SubstituteForm::CONSTRUCTOR:
+      return Type::constructorOf(parts[0]);
+    case SubstituteForm::ASYNC_ITERATOR:
+      return Type::asyncIterator(parts[0], parts[1], parts[2]);
+    case SubstituteForm::DESCRIPTOR:
+      return this->decoratorChecker->methodDescriptorType(parts[0], parts[1]);
+    case SubstituteForm::CLASS_INSTANCE:
+      return this->substitutedInstance(type, std::move(parts));
+    case SubstituteForm::ALIAS_INSTANCE: {
+      TypeAliasDecl *alias = this->state.getAliasStore().findAliasOrigin(type)->alias;
+      return this->aliasInstantiator->instantiateAlias(alias, std::move(parts), alias->loc());
+    }
+    case SubstituteForm::TUPLE:
+      return TypeParams::substitutedTuple(type, std::move(parts));
+    case SubstituteForm::OBJECT:
+      return this->substitutedObject(type, parts);
+  }
+  llvm_unreachable("unknown substitution");
+}
+
+const Type *TypeParams::substitutedInstance(const Type *type, std::vector<const Type *> newArgs) {
+  const ClassDecl *cls = type->classDecl();
+  auto *generic = const_cast<ClassDecl *>(cls->generic() ? cls->generic() : cls);
+  GenericClassInstantiator::ResultClassMade made = this->genericClassInstantiator->instantiateClass(
+      generic, std::move(newArgs), this->state.getGenericStore().getInstanceLoc());
+  if (made.isErr() &&
+      made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+    llvm::SMLoc at =
+        made.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
+            ? generic->loc()
+            : (this->state.getGenericStore().getInstanceLoc().isValid()
+                   ? this->state.getGenericStore().getInstanceLoc()
+                   : generic->loc());
+    this->state.getDiagnostics().error(at, made.error().message);
+  }
+
+  return made.isOk() ? made.value()->type : Type::error();
+}
+
+const Type *TypeParams::substitutedTuple(const Type *type, std::vector<const Type *> parts) {
+  const Type *rest = nullptr;
+  if (!TypeParams::hasListParam(type) && type->tupleRest()) {
+    rest = parts.back();
+    parts.pop_back();
+  }
+  std::vector<bool> spread;
+  for (const Field &f : type->fields()) {
+    spread.push_back(f.type->isListParam());
+  }
+  if (llvm::is_contained(spread, true)) {
+    std::string why;
+    const Type *list = ArgumentLists::spreadTuple(parts, spread, why);
+    return list ? list : Type::error();
+  }
+  if (type->tupleMin() < parts.size() || type->tupleRest()) {
+    return Type::argumentList(parts, type->tupleMin(), rest);
+  }
+
+  return Type::tuple(parts, !type->fields().empty() && type->fields().front().readonly);
+}
+
+const Type *TypeParams::substitutedObject(const Type *type, llvm::ArrayRef<const Type *> parts) {
+  this->state.getGenericStore().leaveSubstitution(type);
+  std::vector<Field> fields;
+  for (size_t i = 0; i < parts.size(); ++i) {
+    const Field &f = type->fields()[i];
+    fields.push_back({f.name, parts[i], f.readonly});
+  }
+
+  return Type::object(std::move(fields));
+}
+
 const Type *TypeParams::representation(const Type *type) {
+  std::vector<const Type *> answers;
+  for (const Type *node : ChildrenFirst::order(type, TypeParams::representationParts)) {
+    const Type *shown = TypeParams::nodeRepresentation(node, answers);
+    answers.push_back(shown);
+  }
+
+  return answers.back();
+}
+
+NodeChildren<const Type *> TypeParams::representationParts(const Type *type) {
+  switch (type->kind()) {
+    case Type::Kind::Array:
+    case Type::Kind::Optional:
+      return {type->inner()};
+    case Type::Kind::Result:
+      return {type->okType(), type->errType()};
+    case Type::Kind::Union:
+      return NodeChildren<const Type *>(type->members().begin(), type->members().end());
+    default:
+      return {};
+  }
+}
+
+const Type *TypeParams::nodeRepresentation(const Type *type, std::vector<const Type *> &answers) {
   switch (type->kind()) {
   case Type::Kind::Object:
   case Type::Kind::Iterator:
@@ -368,17 +532,16 @@ const Type *TypeParams::representation(const Type *type) {
   case Type::Kind::Function:
     return Type::function({}, 0, false, Type::voidTy());
   case Type::Kind::Array:
-    return Type::array(TypeParams::representation(type->inner()));
+    return Type::array(ChildrenFirst::takeAnswer(answers));
   case Type::Kind::Optional:
-    return Type::optional(TypeParams::representation(type->inner()));
-  case Type::Kind::Result:
-    return Type::result(TypeParams::representation(type->okType()),
-                        TypeParams::representation(type->errType()));
+    return Type::optional(ChildrenFirst::takeAnswer(answers));
+  case Type::Kind::Result: {
+    const Type *err = ChildrenFirst::takeAnswer(answers);
+    const Type *ok = ChildrenFirst::takeAnswer(answers);
+    return Type::result(ok, err);
+  }
   case Type::Kind::Union: {
-    std::vector<const Type *> members;
-    for (const Type *m : type->members()) {
-      members.push_back(TypeParams::representation(m));
-    }
+    std::vector<const Type *> members = ChildrenFirst::takeAnswers(answers, type->members().size());
     return Type::unionOf(members);
   }
   default:
@@ -415,13 +578,21 @@ bool TypeParams::satisfies(const Type *arg, const Type *param, llvm::ArrayRef<co
 }
 
 bool TypeParams::hasMembersOf(const Type *arg, const Type *constraint) {
-  if (arg->isParam() && arg->constraint()) {
-    return this->hasMembersOf(arg->constraint(), constraint);
+  TypeParts parts = TypeParts::collect(arg, kMembersOfRoute);
+  for (const Type *part : parts.getTypes()) {
+    bool constrained = part->isParam() && part->constraint() != nullptr;
+    if (constrained || part->isUnion()) {
+      continue;
+    }
+    if (!this->objectHasMembersOf(part, constraint)) {
+      return false;
+    }
   }
-  if (arg->isUnion()) {
-    return llvm::all_of(arg->members(),
-                        [&](const Type *m) { return this->hasMembersOf(m, constraint); });
-  }
+
+  return true;
+}
+
+bool TypeParams::objectHasMembersOf(const Type *arg, const Type *constraint) {
   if (!arg->isObject() || arg->isTuple() != constraint->isTuple() || constraint->isClass() ||
       arg->isAnyObject()) {
     return false;
@@ -489,13 +660,12 @@ bool TypeParams::exactTypeParam(FuncSymbol *generic, size_t k) {
         exact[i] = exact[i] || (p != params[i] && p->constraint() &&
                                 GenericCheckHelpers::mentionsAnyOf(p->constraint(), params[i]));
       }
-      llvm::SmallPtrSet<const Type *, 4> seen;
       for (const Type *p : generic->params) {
-        exact[i] = exact[i] || (p && TypeParams::mentionsInObject(p, params[i], seen));
+        exact[i] = exact[i] || (p && TypeParams::mentionsInObject(p, params[i]));
       }
       if (generic->hasReturnType()) {
-        exact[i] = exact[i] ||
-                   TypeParams::mentionsInObject(generic->getKnownReturnType(), params[i], seen);
+        exact[i] =
+            exact[i] || TypeParams::mentionsInObject(generic->getKnownReturnType(), params[i]);
       }
     }
     this->state.getGenericStore().rememberExactParams(generic, exact);

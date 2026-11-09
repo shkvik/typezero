@@ -31,6 +31,7 @@ public:
   const Type *evalTypeOp(const Type *op, llvm::ArrayRef<const Type *> operands);
 
 private:
+  const Type *ownKeys(const Type *type);
   static std::u16string utf16(llvm::StringRef text);
   static llvm::ArrayRef<const Type *> membersOf(const Type *&type);
 

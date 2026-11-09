@@ -10,7 +10,6 @@
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
-#include <functional>
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -39,36 +38,42 @@ void DictNewChecker::markPairs(Expr *arg) {
   if (!maps || !fe || fe->fn->returnType || !fe->fn->body) {
     return;
   }
-  std::vector<const Expr *> returned;
-  bool plain = true;
-  std::function<void(const Stmt *)> walk = [&](const Stmt *s) {
-    if (!s) {
-      return;
-    }
-    if (auto *ret = dyn_cast<ReturnStmt>(s)) {
-      auto *pair = dyn_cast_or_null<ArrayLitExpr>(ret->value);
-      if (!pair || pair->elements.size() != 2 || pair->elements[0].spread ||
-          pair->elements[1].spread) {
-        plain = false;
-        return;
-      }
-      returned.push_back(pair);
-    } else if (auto *block = dyn_cast<BlockStmt>(s)) {
-      for (const Stmt *inner : block->body) {
-        walk(inner);
-      }
-    } else if (auto *branch = dyn_cast<IfStmt>(s)) {
-      walk(branch->thenStmt);
-      walk(branch->elseStmt);
-    }
-  };
-  walk(fe->fn->body);
-  if (!plain || returned.empty()) {
+  std::vector<const ReturnStmt *> returns = DictNewChecker::branchReturns(fe->fn->body);
+  bool plain = llvm::all_of(returns, DictNewChecker::returnsPair);
+  if (!plain || returns.empty()) {
     return;
   }
-  for (const Expr *pair : returned) {
-    this->state.getExpressionMarks().markPairLiteral(pair);
+  for (const ReturnStmt *ret : returns) {
+    this->state.getExpressionMarks().markPairLiteral(ret->value);
   }
+}
+
+std::vector<const ReturnStmt *> DictNewChecker::branchReturns(const Stmt *body) {
+  std::vector<const ReturnStmt *> returns;
+  std::vector<const Stmt *> stack = {body};
+  while (!stack.empty()) {
+    const Stmt *next = stack.back();
+    stack.pop_back();
+    if (auto *ret = dyn_cast_or_null<ReturnStmt>(next)) {
+      returns.push_back(ret);
+    } else if (auto *block = dyn_cast_or_null<BlockStmt>(next)) {
+      for (const Stmt *inner : llvm::reverse(block->body)) {
+        stack.push_back(inner);
+      }
+    } else if (auto *branch = dyn_cast_or_null<IfStmt>(next)) {
+      stack.push_back(branch->elseStmt);
+      stack.push_back(branch->thenStmt);
+    }
+  }
+
+  return returns;
+}
+
+bool DictNewChecker::returnsPair(const ReturnStmt *ret) {
+  auto *pair = dyn_cast_or_null<ArrayLitExpr>(ret->value);
+
+  return pair != nullptr && pair->elements.size() == 2 && !pair->elements[0].spread &&
+         !pair->elements[1].spread;
 }
 
 DictNewChecker::ResultPartsJoined DictNewChecker::partsJoin(bool keys, const Type *common,

@@ -1,4 +1,5 @@
 #include "compiler/semantic/flow/field_facts/field_facts.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/semantic/bodies/objects/object_check_helpers/object_check_helpers.h"
 #include "compiler/semantic/library/stream/set_encoding_checker/set_encoding_checker.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -16,30 +17,43 @@ FieldFacts::FieldFacts(SemanticState &owner, SemanticParts &all)
 }
 
 std::optional<FieldPath> FieldFacts::fieldPath(const Expr *expr) const {
-  auto *member = dyn_cast<MemberExpr>(ObjectCheckHelpers::unnarrowed(expr));
-  if (!member || member->optional || !member->object->type) {
+  std::vector<llvm::StringRef> names;
+  const Expr *link = ObjectCheckHelpers::unnarrowed(expr);
+  auto *member = dyn_cast<MemberExpr>(link);
+  if (member == nullptr) {
     return std::nullopt;
   }
-  const Type *holder = member->object->type;
-  bool half = holder->isResult() && (member->name == "value" || member->name == "error");
-  if (!(holder->isObject() || holder->isUnion() || holder->nonOptional()->isJson() || half)) {
-    return std::nullopt;
-  }
-  const Expr *object = ObjectCheckHelpers::unnarrowed(member->object);
-  FieldPath path;
-  if (auto *name = dyn_cast<NameExpr>(object)) {
-    if (!name->var()) {
+  while (member != nullptr) {
+    if (!FieldFacts::holdsField(member)) {
       return std::nullopt;
     }
-    path.var = name->var();
-  } else if (std::optional<FieldPath> outer = this->fieldPath(object)) {
-    path = std::move(*outer);
-  } else {
+    names.push_back(member->name);
+    link = ObjectCheckHelpers::unnarrowed(member->object);
+    member = dyn_cast<MemberExpr>(link);
+  }
+  auto *root = dyn_cast<NameExpr>(link);
+  if (root == nullptr || root->var() == nullptr) {
     return std::nullopt;
   }
-  path.names.push_back(member->name);
+  FieldPath path;
+  path.var = root->var();
+  for (llvm::StringRef name : llvm::reverse(names)) {
+    path.names.push_back(name);
+  }
 
   return path;
+}
+
+bool FieldFacts::holdsField(const MemberExpr *member) {
+  if (member->optional || member->object->type == nullptr) {
+    return false;
+  }
+  const Type *holder = member->object->type;
+  bool value = BuiltinPropertyTable::isName(member->name, BuiltinProperty::RESULT_VALUE);
+  bool error = BuiltinPropertyTable::isName(member->name, BuiltinProperty::RESULT_ERROR);
+  bool resultHalf = holder->isResult() && (value || error);
+
+  return holder->isObject() || holder->isUnion() || holder->nonOptional()->isJson() || resultHalf;
 }
 
 bool FieldFacts::isFieldDefined(const FieldPath &path) const {

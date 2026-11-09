@@ -7,6 +7,7 @@
 #include "compiler/semantic/bodies/expr/truth_checker/truth_checker.h"
 #include "compiler/semantic/bodies/expr/unary_checker/unary_checker.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/library/date/date_checker/date_checker.h"
@@ -44,16 +45,25 @@ BinaryChecker::BinaryChecker(SemanticState &owner, SemanticParts &all)
 }
 
 bool BinaryChecker::onlyIntLiterals(const Expr *expr) {
+  for (const Expr *node : ExprParts::operatorTree(expr)) {
+    if (!BinaryChecker::isIntLiteralNode(node)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool BinaryChecker::isIntLiteralNode(const Expr *expr) {
   if (isa<IntLitExpr>(expr)) {
     return true;
   }
   if (auto *unary = dyn_cast<UnaryExpr>(expr)) {
-    return (unary->op == UnaryOp::Neg || unary->op == UnaryOp::Plus) &&
-           BinaryChecker::onlyIntLiterals(unary->operand);
+    return unary->op == UnaryOp::Neg || unary->op == UnaryOp::Plus;
   }
   if (auto *bin = dyn_cast<BinaryExpr>(expr)) {
-    return bin->op != BinaryOp::Div && DecimalChecker::isLiteralTree(bin) &&
-           BinaryChecker::onlyIntLiterals(bin->lhs) && BinaryChecker::onlyIntLiterals(bin->rhs);
+    return bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub || bin->op == BinaryOp::Mul ||
+           bin->op == BinaryOp::Rem || bin->op == BinaryOp::Pow;
   }
 
   return false;

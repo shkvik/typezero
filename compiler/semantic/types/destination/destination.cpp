@@ -65,40 +65,47 @@ const Type *Destination::writable(const Type *type) {
 }
 
 bool Destination::literalShaped(const Expr *expr) {
-  if (isa<ObjectLitExpr>(expr) || isa<ArrayLitExpr>(expr)) {
-    return true;
-  }
-  if (auto *cond = dyn_cast<ConditionalExpr>(expr)) {
-    return Destination::literalShaped(cond->thenExpr) || Destination::literalShaped(cond->elseExpr);
-  }
-  if (auto *call = dyn_cast<CallExpr>(expr)) {
-    if (DestinationScanner::isResultLiteral(call)) {
+  std::vector<const Expr *> stack = {expr};
+  while (!stack.empty()) {
+    const Expr *next = stack.back();
+    stack.pop_back();
+    if (Destination::isLiteralShape(next)) {
       return true;
     }
-    auto *member = dyn_cast<MemberExpr>(call->callee);
-    if (member == nullptr || call->args.size() != 1) {
-      return false;
-    }
-    const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
-    bool maps = method != nullptr &&
-                (method->method == ArrayMethod::MAP || method->method == ArrayMethod::FLAT_MAP);
-    if (!maps) {
-      return false;
-    }
-    auto *fe = dyn_cast<FunctionExpr>(call->args[0]);
-    if (fe == nullptr) {
-      return false;
-    }
-    for (const Expr *value : Destination::findReturnValues(fe->fn->body)) {
-      if (Destination::literalShaped(value)) {
-        return true;
-      }
-    }
-
-    return false;
+    std::vector<const Expr *> choices = Destination::shapeChoices(next);
+    stack.insert(stack.end(), choices.rbegin(), choices.rend());
   }
 
   return false;
+}
+
+bool Destination::isLiteralShape(const Expr *expr) {
+  if (isa<ObjectLitExpr>(expr) || isa<ArrayLitExpr>(expr)) {
+    return true;
+  }
+  auto *call = dyn_cast<CallExpr>(expr);
+
+  return call != nullptr && DestinationScanner::isResultLiteral(call);
+}
+
+std::vector<const Expr *> Destination::shapeChoices(const Expr *expr) {
+  if (auto *cond = dyn_cast<ConditionalExpr>(expr)) {
+    return {cond->thenExpr, cond->elseExpr};
+  }
+  auto *call = dyn_cast<CallExpr>(expr);
+  auto *member = call != nullptr ? dyn_cast<MemberExpr>(call->callee) : nullptr;
+  if (member == nullptr || call->args.size() != 1) {
+    return {};
+  }
+  const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
+  bool maps = method != nullptr &&
+              (method->method == ArrayMethod::MAP || method->method == ArrayMethod::FLAT_MAP);
+  auto *fe = maps ? dyn_cast<FunctionExpr>(call->args[0]) : nullptr;
+  if (fe == nullptr) {
+    return {};
+  }
+
+  return Destination::findReturnValues(fe->fn->body);
 }
 
 bool Destination::literalFits(const Expr *expr, const Type *type) const {

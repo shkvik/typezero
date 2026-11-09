@@ -9,6 +9,7 @@
 #include "compiler/semantic/bodies/functions/function_value_checker/function_value_checker.h"
 #include "compiler/semantic/bodies/functions/nested_functions/nested_functions.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/flow/condition_facts/condition_facts.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
@@ -19,7 +20,6 @@
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
-#include <functional>
 
 using llvm::dyn_cast;
 using llvm::isa;
@@ -250,37 +250,66 @@ bool CallbackChecker::keepsDefined(const Expr *callback) const {
   if (!ret || !ret->value) {
     return false;
   }
-  std::function<llvm::SmallPtrSet<const VarSymbol *, 4>(const Expr *, bool)> defined =
-      [&](const Expr *cond, bool value) -> llvm::SmallPtrSet<const VarSymbol *, 4> {
-    if (auto *unary = dyn_cast<UnaryExpr>(cond); unary && unary->op == UnaryOp::Not) {
-      return defined(unary->operand, !value);
-    }
-    if (auto *bin = dyn_cast<BinaryExpr>(cond);
-        bin && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr)) {
-      llvm::SmallPtrSet<const VarSymbol *, 4> l = defined(bin->lhs, value),
-                                              r = defined(bin->rhs, value);
-      if ((bin->op == BinaryOp::LogAnd) == value) {
-        l.insert(r.begin(), r.end());
-        return l;
-      }
-      llvm::SmallPtrSet<const VarSymbol *, 4> both;
-      for (const VarSymbol *var : l) {
-        if (r.contains(var)) {
-          both.insert(var);
-        }
-      }
-      return both;
-    }
-    if (auto *conv = dyn_cast<CastExpr>(cond); conv && conv->isImplicit() && conv->type->isBool()) {
-      cond = conv->operand;
-    }
-    Flow whenTrue, whenFalse;
-    this->conditionFacts->addConditionFacts(cond, whenTrue, whenFalse);
+  SignedCondition whole{ret->value, true};
+  std::vector<DefinedVars> answers;
+  for (SignedCondition part : ChildrenFirst::order(whole, CallbackChecker::signedParts)) {
+    DefinedVars vars = this->definedBy(part, answers);
+    answers.push_back(std::move(vars));
+  }
 
-    return value ? whenTrue.defined : whenFalse.defined;
-  };
+  return answers.back().contains(fe->fn->params[0].sym);
+}
 
-  return defined(ret->value, true).contains(fe->fn->params[0].sym);
+NodeChildren<SignedCondition> CallbackChecker::signedParts(SignedCondition part) {
+  if (auto *unary = dyn_cast<UnaryExpr>(part.cond); unary && unary->op == UnaryOp::Not) {
+    return {SignedCondition{unary->operand, !part.whenTrue}};
+  }
+  auto *bin = dyn_cast<BinaryExpr>(part.cond);
+  bool logic = bin != nullptr && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr);
+  if (logic) {
+    return {SignedCondition{bin->lhs, part.whenTrue}, SignedCondition{bin->rhs, part.whenTrue}};
+  }
+
+  return {};
+}
+
+CallbackChecker::DefinedVars CallbackChecker::definedBy(SignedCondition part,
+                                                        std::vector<DefinedVars> &answers) const {
+  if (auto *unary = dyn_cast<UnaryExpr>(part.cond); unary && unary->op == UnaryOp::Not) {
+    return ChildrenFirst::takeAnswer(answers);
+  }
+  auto *bin = dyn_cast<BinaryExpr>(part.cond);
+  bool logic = bin != nullptr && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr);
+  if (logic) {
+    DefinedVars right = ChildrenFirst::takeAnswer(answers);
+    DefinedVars left = ChildrenFirst::takeAnswer(answers);
+    return CallbackChecker::joinDefined(bin->op == BinaryOp::LogAnd, part.whenTrue, left, right);
+  }
+  const Expr *cond = part.cond;
+  if (auto *conv = dyn_cast<CastExpr>(cond); conv && conv->isImplicit() && conv->type->isBool()) {
+    cond = conv->operand;
+  }
+  Flow whenTrue, whenFalse;
+  this->conditionFacts->addConditionFacts(cond, whenTrue, whenFalse);
+
+  return part.whenTrue ? whenTrue.defined : whenFalse.defined;
+}
+
+CallbackChecker::DefinedVars CallbackChecker::joinDefined(bool isAnd, bool whenTrue,
+                                                          DefinedVars left,
+                                                          const DefinedVars &right) {
+  if (isAnd == whenTrue) {
+    left.insert(right.begin(), right.end());
+    return left;
+  }
+  DefinedVars both;
+  for (const VarSymbol *var : left) {
+    if (right.contains(var)) {
+      both.insert(var);
+    }
+  }
+
+  return both;
 }
 
 CallbackChecker::ResultCallbackIsPassed CallbackChecker::callbackGiven(size_t count,

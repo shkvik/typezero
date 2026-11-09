@@ -46,14 +46,29 @@ const Expr *ConcatChecker::unconverted(const Expr *expr) {
 }
 
 void ConcatChecker::concatParts(const BinaryExpr *bin, Parts &parts) {
-  auto [lhs, rhs] = ConcatChecker::operandTexts(bin->source, bin->loc(), 1);
-  auto *left = dyn_cast<BinaryExpr>(ConcatChecker::unconverted(bin->lhs));
-  if (left && left->op == BinaryOp::Add && left->type && left->type->isString()) {
-    ConcatChecker::concatParts(left, parts);
-  } else {
-    parts.push_back({ConcatChecker::unconverted(bin->lhs), lhs});
+  std::vector<const BinaryExpr *> chain;
+  const BinaryExpr *link = bin;
+  while (link != nullptr) {
+    chain.push_back(link);
+    link = ConcatChecker::leftConcat(link);
   }
-  parts.push_back({ConcatChecker::unconverted(bin->rhs), rhs});
+  const BinaryExpr *first = chain.back();
+  std::pair<llvm::StringRef, llvm::StringRef> firstTexts =
+      ConcatChecker::operandTexts(first->source, first->loc(), 1);
+  parts.push_back({ConcatChecker::unconverted(first->lhs), firstTexts.first});
+  for (const BinaryExpr *step : llvm::reverse(chain)) {
+    std::pair<llvm::StringRef, llvm::StringRef> texts =
+        ConcatChecker::operandTexts(step->source, step->loc(), 1);
+    parts.push_back({ConcatChecker::unconverted(step->rhs), texts.second});
+  }
+}
+
+const BinaryExpr *ConcatChecker::leftConcat(const BinaryExpr *bin) {
+  auto *left = dyn_cast<BinaryExpr>(ConcatChecker::unconverted(bin->lhs));
+  bool concat = left != nullptr && left->op == BinaryOp::Add && left->type != nullptr &&
+                left->type->isString();
+
+  return concat ? left : nullptr;
 }
 
 std::string ConcatChecker::concatTemplate(const Parts &parts, llvm::StringRef &only) {

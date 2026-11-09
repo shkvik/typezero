@@ -7,6 +7,7 @@
 namespace tz {
 
 class SemanticParts;
+class PlacedNodes;
 class Scopes;
 class ExprChecker;
 class FlowChecker;
@@ -38,6 +39,7 @@ private:
   static ResultListIsFilled listFilled(const Type *list, llvm::ArrayRef<const Type *> parts,
                                        size_t k);
   static bool usedAsValue(const Stmt *body, llvm::StringRef name, bool known);
+  static llvm::SmallPtrSet<const Expr *, 4> listUses(const PlacedNodes &nodes, bool known);
 
   SemanticState &state;
   Scopes *scopes = nullptr;

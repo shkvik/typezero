@@ -5,6 +5,7 @@
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
 #include "compiler/semantic/declare/prelude/prelude.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -130,31 +131,36 @@ std::pair<llvm::StringRef, llvm::StringRef> DecimalChecker::sidesOf(const Binary
 }
 
 bool DecimalChecker::isLiteralTree(const Expr *expr) {
-  switch (expr->kind()) {
-  case Expr::Kind::IntLit:
-  case Expr::Kind::FloatLit:
-    return true;
-  case Expr::Kind::Unary: {
-    auto *unary = cast<UnaryExpr>(expr);
-    return (unary->op == UnaryOp::Neg || unary->op == UnaryOp::Plus) &&
-           DecimalChecker::isLiteralTree(unary->operand);
+  for (const Expr *node : ExprParts::operatorTree(expr)) {
+    if (!DecimalChecker::isLiteralNode(node)) {
+      return false;
+    }
   }
-  case Expr::Kind::Binary: {
-    auto *bin = cast<BinaryExpr>(expr);
-    switch (bin->op) {
+
+  return true;
+}
+
+bool DecimalChecker::isLiteralNode(const Expr *expr) {
+  if (isa<IntLitExpr>(expr) || isa<FloatLitExpr>(expr)) {
+    return true;
+  }
+  if (auto *unary = dyn_cast<UnaryExpr>(expr)) {
+    return unary->op == UnaryOp::Neg || unary->op == UnaryOp::Plus;
+  }
+  auto *bin = dyn_cast<BinaryExpr>(expr);
+  if (bin == nullptr) {
+    return false;
+  }
+  switch (bin->op) {
     case BinaryOp::Add:
     case BinaryOp::Sub:
     case BinaryOp::Mul:
     case BinaryOp::Div:
     case BinaryOp::Rem:
     case BinaryOp::Pow:
-      return DecimalChecker::isLiteralTree(bin->lhs) && DecimalChecker::isLiteralTree(bin->rhs);
+      return true;
     default:
       return false;
-    }
-  }
-  default:
-    return false;
   }
 }
 

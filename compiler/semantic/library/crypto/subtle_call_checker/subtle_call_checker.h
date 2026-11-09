@@ -47,6 +47,8 @@ private:
   static std::string algorithmIn(llvm::StringRef op, llvm::StringRef upper);
   static std::optional<double> numberLiteral(const Expr *e);
   static const ObjectLitExpr::Property *property(const ObjectLitExpr *lit, llvm::StringRef name);
+  static const Expr *accessInner(const Expr *expr);
+  bool isJsonValue(const Expr *expr) const;
 
   std::string literalAlgorithm(const Expr *arg, llvm::StringRef op, llvm::StringRef fallback,
                                bool &bad);

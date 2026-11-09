@@ -1,6 +1,8 @@
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/APInt.h"
@@ -117,6 +119,51 @@ std::string ConstantFolder::constantText(std::optional<int64_t> exact, double va
 
 std::optional<ConstantValue> ConstantFolder::evalConstant(const Expr *expr, EnumDecl *self,
                                                           size_t defined) {
+  std::vector<std::optional<ConstantValue>> answers;
+  for (const Expr *node : ChildrenFirst::order(expr, ConstantFolder::constantParts)) {
+    std::optional<ConstantValue> value = this->nodeConstant(node, self, defined, answers);
+    answers.push_back(std::move(value));
+  }
+
+  return answers.back();
+}
+
+NodeChildren<const Expr *> ConstantFolder::constantParts(const Expr *expr) {
+  if (auto *unary = dyn_cast<UnaryExpr>(expr)) {
+    return {unary->operand};
+  }
+  if (auto *bin = dyn_cast<BinaryExpr>(expr)) {
+    return {bin->lhs, bin->rhs};
+  }
+
+  return {};
+}
+
+std::vector<EnumDecl *> ConstantFolder::enumsNeeded(const Expr *init, const EnumDecl *self) const {
+  std::vector<EnumDecl *> needed;
+  if (init == nullptr) {
+    return needed;
+  }
+  for (const Expr *part : ExprParts::operatorTree(init)) {
+    EnumDecl *other = this->enumNamedBy(part);
+    if (other != nullptr && other != self) {
+      needed.push_back(other);
+    }
+  }
+
+  return needed;
+}
+
+EnumDecl *ConstantFolder::enumNamedBy(const Expr *expr) const {
+  auto *access = dyn_cast<MemberExpr>(expr);
+  auto *object = access != nullptr ? dyn_cast<NameExpr>(access->object) : nullptr;
+
+  return object != nullptr ? this->scopes->lookup(object->name).enumDecl() : nullptr;
+}
+
+std::optional<ConstantValue>
+ConstantFolder::nodeConstant(const Expr *expr, EnumDecl *self, size_t defined,
+                             std::vector<std::optional<ConstantValue>> &answers) {
   auto number = [](double value) {
     ConstantValue c;
     c.number = value;
@@ -150,7 +197,7 @@ std::optional<ConstantValue> ConstantFolder::evalConstant(const Expr *expr, Enum
     }
     case Expr::Kind::Unary: {
       auto *unary = cast<UnaryExpr>(expr);
-      std::optional<ConstantValue> v = this->evalConstant(unary->operand, self, defined);
+      std::optional<ConstantValue> v = ChildrenFirst::takeAnswer(answers);
       if (!v || v->isString) {
         return std::nullopt;
       }
@@ -167,8 +214,8 @@ std::optional<ConstantValue> ConstantFolder::evalConstant(const Expr *expr, Enum
     }
     case Expr::Kind::Binary: {
       auto *bin = cast<BinaryExpr>(expr);
-      std::optional<ConstantValue> l = this->evalConstant(bin->lhs, self, defined);
-      std::optional<ConstantValue> r = this->evalConstant(bin->rhs, self, defined);
+      std::optional<ConstantValue> r = ChildrenFirst::takeAnswer(answers);
+      std::optional<ConstantValue> l = ChildrenFirst::takeAnswer(answers);
       if (!l || !r) {
         return std::nullopt;
       }
@@ -221,8 +268,7 @@ std::optional<ConstantValue> ConstantFolder::evalConstant(const Expr *expr, Enum
     }
     case Expr::Kind::Member: {
       auto *access = cast<MemberExpr>(expr);
-      auto *object = dyn_cast<NameExpr>(access->object);
-      EnumDecl *decl = object ? this->scopes->lookup(object->name).enumDecl() : nullptr;
+      EnumDecl *decl = this->enumNamedBy(access);
       if (!decl) {
         return std::nullopt;
       }
@@ -246,37 +292,46 @@ std::optional<ConstantValue> ConstantFolder::evalConstant(const Expr *expr, Enum
 }
 
 std::optional<int64_t> ConstantFolder::intConstant(const Expr *expr) const {
-  if (!expr->type || !expr->type->isInteger()) {
+  std::vector<const CastExpr *> casts;
+  const Expr *inner = expr;
+  while (auto *conv = dyn_cast<CastExpr>(inner)) {
+    bool integer = conv->type != nullptr && conv->type->isInteger();
+    if (!integer || !conv->isImplicit()) {
+      return std::nullopt;
+    }
+    casts.push_back(conv);
+    inner = conv->operand;
+  }
+  std::optional<int64_t> value = this->plainIntConstant(inner);
+  if (!value.has_value()) {
     return std::nullopt;
   }
-  switch (expr->kind()) {
-    case Expr::Kind::IntLit: {
-      uint64_t value = cast<IntLitExpr>(expr)->value;
-      if (value > uint64_t(std::numeric_limits<int64_t>::max()) ||
-          !ConstantFolder::fitsIn(expr->type, static_cast<int64_t>(value))) {
-        return std::nullopt;
-      }
-      return static_cast<int64_t>(value);
-    }
-    case Expr::Kind::Name: {
-      return this->state.getConstantStore().findConstVar(cast<NameExpr>(expr)->var());
-    }
-    case Expr::Kind::Cast: {
-      auto *conv = cast<CastExpr>(expr);
-      if (!conv->isImplicit()) {
-        return std::nullopt;
-      }
-      std::optional<int64_t> value = this->intConstant(conv->operand);
-      if (!value) {
-        return std::nullopt;
-      }
-      return ConstantFolder::fitsIn(conv->type, *value) ? std::optional<int64_t>(*value)
-                                                        : std::nullopt;
-    }
-    default: {
-      return this->state.getConstantStore().findIntConstant(expr);
+  for (const CastExpr *conv : casts) {
+    if (!ConstantFolder::fitsIn(conv->type, *value)) {
+      return std::nullopt;
     }
   }
+
+  return value;
+}
+
+std::optional<int64_t> ConstantFolder::plainIntConstant(const Expr *expr) const {
+  if (expr->type == nullptr || !expr->type->isInteger()) {
+    return std::nullopt;
+  }
+  if (auto *lit = dyn_cast<IntLitExpr>(expr)) {
+    uint64_t value = lit->value;
+    if (value > uint64_t(std::numeric_limits<int64_t>::max()) ||
+        !ConstantFolder::fitsIn(expr->type, static_cast<int64_t>(value))) {
+      return std::nullopt;
+    }
+    return static_cast<int64_t>(value);
+  }
+  if (auto *name = dyn_cast<NameExpr>(expr)) {
+    return this->state.getConstantStore().findConstVar(name->var());
+  }
+
+  return this->state.getConstantStore().findIntConstant(expr);
 }
 
 std::optional<uint64_t> ConstantFolder::unsignedConstant(const Expr *expr) const {

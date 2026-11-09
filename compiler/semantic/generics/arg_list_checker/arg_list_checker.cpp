@@ -1,10 +1,10 @@
 #include "compiler/semantic/generics/arg_list_checker/arg_list_checker.h"
-#include "compiler/program/ast_walker/ast_walker.h"
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
+#include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
@@ -27,37 +27,48 @@ ArgListChecker::ArgListChecker(SemanticState &owner, SemanticParts &all)
 }
 
 bool ArgListChecker::usedAsValue(const Stmt *body, llvm::StringRef name, bool known) {
-  llvm::SmallPtrSet<const Expr *, 4> spreads;
-  bool value = false;
-  AstWalker::visitExprs(body, [&](const Expr *e) {
-    if (auto *call = dyn_cast<CallExpr>(e)) {
+  PlacedNodes nodes = PlacedNodes::collect({body}, {});
+  llvm::SmallPtrSet<const Expr *, 4> listUses = ArgListChecker::listUses(nodes, known);
+  for (const PlacedExpr &placed : nodes.getExprs()) {
+    auto *named = dyn_cast<NameExpr>(placed.expr);
+    if (named != nullptr && named->name == name && !listUses.contains(named)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+llvm::SmallPtrSet<const Expr *, 4> ArgListChecker::listUses(const PlacedNodes &nodes, bool known) {
+  llvm::SmallPtrSet<const Expr *, 4> uses;
+  for (const PlacedExpr &placed : nodes.getExprs()) {
+    const Expr *expr = placed.expr;
+    if (auto *call = dyn_cast<CallExpr>(expr)) {
       for (size_t i = 0; i < call->args.size(); ++i) {
         if (call->spreads(i)) {
-          spreads.insert(call->args[i]);
+          uses.insert(call->args[i]);
         }
       }
-    } else if (auto *lit = dyn_cast<ArrayLitExpr>(e)) {
-      for (const ArrayLitExpr::Element &el : lit->elements) {
-        if (el.spread) {
-          spreads.insert(el.expr);
+    }
+    if (auto *lit = dyn_cast<ArrayLitExpr>(expr)) {
+      for (const ArrayLitExpr::Element &element : lit->elements) {
+        if (element.spread) {
+          uses.insert(element.expr);
         }
       }
-    } else if (auto *member = dyn_cast<MemberExpr>(e);
-               member && known &&
-               BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)) {
-      spreads.insert(member->object);
-    } else if (auto *index = dyn_cast<IndexExpr>(e);
-               index && known && isa<IntLitExpr>(index->index)) {
-      spreads.insert(index->object);
     }
-  });
-  AstWalker::visitExprs(body, [&](const Expr *e) {
-    if (auto *n = dyn_cast<NameExpr>(e); n && n->name == name && !spreads.contains(n)) {
-      value = true;
+    auto *member = dyn_cast<MemberExpr>(expr);
+    if (member != nullptr && known &&
+        BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)) {
+      uses.insert(member->object);
     }
-  });
+    auto *index = dyn_cast<IndexExpr>(expr);
+    if (index != nullptr && known && isa<IntLitExpr>(index->index)) {
+      uses.insert(index->object);
+    }
+  }
 
-  return value;
+  return uses;
 }
 
 bool ArgListChecker::spreadsLists(const Type *type) {

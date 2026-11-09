@@ -1,6 +1,7 @@
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/bodies/expr/concat_checker/concat_checker.h"
 #include "compiler/semantic/bodies/shared_helpers/shared_helpers.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/generics/generic_check_helpers/generic_check_helpers.h"
 #include "compiler/semantic/generics/inference/inference.h"
 #include "compiler/semantic/names/scopes/scopes.h"
@@ -117,20 +118,46 @@ Expr *GenericChecker::forceConversion(Expr *expr, const Type *to) {
 }
 
 std::optional<bool> GenericChecker::constantCondition(const Expr *cond) const {
-  while (auto *conv = dyn_cast<CastExpr>(cond)) {
-    if (!conv->isImplicit() || !conv->type->isBool() || !conv->operand->type->isBool()) {
-      break;
-    }
-    cond = conv->operand;
+  std::vector<std::optional<bool>> answers;
+  for (const Expr *node : ChildrenFirst::order(cond, GenericChecker::conditionParts)) {
+    std::optional<bool> value = GenericChecker::nodeCondition(node, answers);
+    answers.push_back(value);
+  }
+
+  return answers.back();
+}
+
+NodeChildren<const Expr *> GenericChecker::conditionParts(const Expr *cond) {
+  if (auto *conv = dyn_cast<CastExpr>(cond); conv && GenericChecker::isBoolPass(conv)) {
+    return {conv->operand};
+  }
+  if (auto *unary = dyn_cast<UnaryExpr>(cond); unary && unary->op == UnaryOp::Not) {
+    return {unary->operand};
+  }
+  auto *bin = dyn_cast<BinaryExpr>(cond);
+  bool logic = bin != nullptr && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr);
+  if (logic) {
+    return {bin->lhs, bin->rhs};
+  }
+
+  return {};
+}
+
+bool GenericChecker::isBoolPass(const CastExpr *conv) {
+  return conv->isImplicit() && conv->type->isBool() && conv->operand->type->isBool();
+}
+
+std::optional<bool> GenericChecker::nodeCondition(const Expr *cond,
+                                                  std::vector<std::optional<bool>> &answers) {
+  if (auto *conv = dyn_cast<CastExpr>(cond); conv && GenericChecker::isBoolPass(conv)) {
+    return ChildrenFirst::takeAnswer(answers);
   }
   if (auto *lit = dyn_cast<BoolLitExpr>(cond)) {
     return lit->value;
   }
   if (auto *unary = dyn_cast<UnaryExpr>(cond); unary && unary->op == UnaryOp::Not) {
-    if (std::optional<bool> value = this->constantCondition(unary->operand)) {
-      return !*value;
-    }
-    return std::nullopt;
+    std::optional<bool> value = ChildrenFirst::takeAnswer(answers);
+    return value.has_value() ? std::optional<bool>(!*value) : std::nullopt;
   }
   if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin() == Builtin::JsonIsJson) {
     const Type *type = call->args[0]->type;
@@ -144,13 +171,14 @@ std::optional<bool> GenericChecker::constantCondition(const Expr *cond) const {
     return std::nullopt;
   }
   if (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr) {
+    std::optional<bool> r = ChildrenFirst::takeAnswer(answers);
+    std::optional<bool> l = ChildrenFirst::takeAnswer(answers);
     bool isAnd = bin->op == BinaryOp::LogAnd;
-    std::optional<bool> l = this->constantCondition(bin->lhs);
     if (l && *l != isAnd) {
       return l;
     }
     if (l) {
-      return this->constantCondition(bin->rhs);
+      return r;
     }
     return std::nullopt;
   }
@@ -203,6 +231,46 @@ std::optional<bool> GenericChecker::constantCondition(const Expr *cond) const {
 }
 
 const Type *GenericChecker::literalShape(const Expr *expr) {
+  std::vector<const Type *> answers;
+  for (const Expr *node : ChildrenFirst::order(expr, GenericChecker::shapeParts)) {
+    const Type *shape = GenericChecker::nodeShape(node, answers);
+    if (shape == nullptr) {
+      return nullptr;
+    }
+    answers.push_back(shape);
+  }
+
+  return answers.back();
+}
+
+NodeChildren<const Expr *> GenericChecker::shapeParts(const Expr *expr) {
+  if (SharedHelpers::literalType(expr) != nullptr) {
+    return {};
+  }
+  if (auto *lit = dyn_cast<ArrayLitExpr>(expr); lit && !GenericChecker::hasGaps(lit)) {
+    NodeChildren<const Expr *> parts;
+    for (const ArrayLitExpr::Element &e : lit->elements) {
+      parts.push_back(e.expr);
+    }
+    return parts;
+  }
+  if (auto *lit = dyn_cast<ObjectLitExpr>(expr)) {
+    NodeChildren<const Expr *> parts;
+    for (const ObjectLitExpr::Property &p : lit->props) {
+      parts.push_back(p.value);
+    }
+    return parts;
+  }
+
+  return {};
+}
+
+bool GenericChecker::hasGaps(const ArrayLitExpr *lit) {
+  return llvm::any_of(lit->elements,
+                      [](const ArrayLitExpr::Element &e) { return e.spread || e.hole; });
+}
+
+const Type *GenericChecker::nodeShape(const Expr *expr, std::vector<const Type *> &answers) {
   if (const Type *type = SharedHelpers::literalType(expr)) {
     return isa<TemplateExpr>(expr) ? nullptr : type;
   }
@@ -210,30 +278,46 @@ const Type *GenericChecker::literalShape(const Expr *expr) {
     return Type::undefinedTy();
   }
   if (auto *lit = dyn_cast<ArrayLitExpr>(expr)) {
-    const Type *element = nullptr;
-    for (const ArrayLitExpr::Element &e : lit->elements) {
-      const Type *type = e.spread || e.hole ? nullptr : GenericChecker::literalShape(e.expr);
-      element = type && element ? TypeRelations::unify(element, type) : type;
-      if (!element) {
-        return nullptr;
-      }
-    }
-    return element && !element->isUndefined() ? Type::array(element) : nullptr;
+    return GenericChecker::arrayShape(lit, answers);
   }
   if (auto *lit = dyn_cast<ObjectLitExpr>(expr)) {
-    std::vector<Field> fields;
-    for (const ObjectLitExpr::Property &p : lit->props) {
-      const Type *type = GenericChecker::literalShape(p.value);
-      if (!type || type->isUndefined() ||
-          llvm::any_of(fields, [&](const Field &f) { return f.name == p.name; })) {
-        return nullptr;
-      }
-      fields.push_back({p.name.str(), type, false});
-    }
-    return Type::object(std::move(fields));
+    return GenericChecker::objectShape(lit, answers);
   }
 
   return nullptr;
+}
+
+const Type *GenericChecker::arrayShape(const ArrayLitExpr *lit,
+                                       std::vector<const Type *> &answers) {
+  if (GenericChecker::hasGaps(lit)) {
+    return nullptr;
+  }
+  std::vector<const Type *> types = ChildrenFirst::takeAnswers(answers, lit->elements.size());
+  const Type *element = nullptr;
+  for (const Type *type : types) {
+    element = element ? TypeRelations::unify(element, type) : type;
+    if (!element) {
+      return nullptr;
+    }
+  }
+
+  return element && !element->isUndefined() ? Type::array(element) : nullptr;
+}
+
+const Type *GenericChecker::objectShape(const ObjectLitExpr *lit,
+                                        std::vector<const Type *> &answers) {
+  std::vector<const Type *> types = ChildrenFirst::takeAnswers(answers, lit->props.size());
+  std::vector<Field> fields;
+  for (size_t i = 0; i < types.size(); ++i) {
+    const ObjectLitExpr::Property &p = lit->props[i];
+    bool repeated = llvm::any_of(fields, [&](const Field &f) { return f.name == p.name; });
+    if (types[i]->isUndefined() || repeated) {
+      return nullptr;
+    }
+    fields.push_back({p.name.str(), types[i], false});
+  }
+
+  return Type::object(std::move(fields));
 }
 
 }

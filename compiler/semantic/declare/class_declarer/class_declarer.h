@@ -3,6 +3,7 @@
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
+#include "compiler/union/union/union.h"
 
 namespace tz {
 
@@ -13,6 +14,70 @@ class TypeResolver;
 class ReturnInferrer;
 class FunctionChecker;
 class GenericClassChecker;
+
+enum class DefaultStepKind {
+  VALUE,
+  CHECK_EMPTY,
+  RESOLVE_FAMILY,
+  LEAVE_EMPTY,
+  MAKE_NEW,
+  FILL_OBJECT
+};
+
+struct DefaultFor {
+  static constexpr DefaultStepKind kind = DefaultStepKind::VALUE;
+  const Type *type;
+  const TypeRef *ref;
+};
+
+struct CheckEmpty {
+  static constexpr DefaultStepKind kind = DefaultStepKind::CHECK_EMPTY;
+  const ClassDecl *cls;
+};
+
+struct ResolveFamily {
+  static constexpr DefaultStepKind kind = DefaultStepKind::RESOLVE_FAMILY;
+  const ClassDecl *cls;
+};
+
+struct LeaveEmpty {
+  static constexpr DefaultStepKind kind = DefaultStepKind::LEAVE_EMPTY;
+  const ClassDecl *cls;
+};
+
+struct MakeNew {
+  static constexpr DefaultStepKind kind = DefaultStepKind::MAKE_NEW;
+  const ClassDecl *cls;
+};
+
+struct FillObject {
+  static constexpr DefaultStepKind kind = DefaultStepKind::FILL_OBJECT;
+  ObjectLitExpr *object;
+  std::vector<const Field *> fields;
+};
+
+using DefaultStep = Union<DefaultFor, CheckEmpty, ResolveFamily, LeaveEmpty, MakeNew, FillObject>;
+
+enum class CompletionStepKind { START, FINISH };
+
+struct StartCompletion {
+  static constexpr CompletionStepKind kind = CompletionStepKind::START;
+  ClassDecl *cls;
+};
+
+struct FinishCompletion {
+  static constexpr CompletionStepKind kind = CompletionStepKind::FINISH;
+  ClassDecl *cls;
+};
+
+using CompletionStep = Union<StartCompletion, FinishCompletion>;
+
+struct DefaultRun {
+  llvm::SmallPtrSetImpl<const ClassDecl *> &visiting;
+  llvm::SMLoc loc;
+  std::vector<DefaultStep> steps;
+  std::vector<Expr *> values;
+};
 
 class ClassDeclarer {
 public:
@@ -72,7 +137,16 @@ private:
   void arrowMethod(ClassDecl *cls, ClassField &f, const Type *type);
   void checkVariantList(llvm::ArrayRef<FunctionDecl *> functions);
   const Type *declaredFieldType(const ClassDecl *cls, ClassField &f);
-  bool startsEmpty(const ClassDecl *cls, llvm::SmallPtrSetImpl<const ClassDecl *> &visiting);
+  static bool checkEmpty(const ClassDecl *cls, DefaultRun &run);
+  void startCompletion(ClassDecl *cls, std::vector<CompletionStep> &steps);
+  void finishCompletion(ClassDecl *cls);
+  static bool isPlainObject(const Type *type);
+  static void fillObject(const FillObject &fill, DefaultRun &run);
+  bool applyDefaultStep(const DefaultStep &step, DefaultRun &run);
+  bool defaultFor(const DefaultFor &wanted, DefaultRun &run);
+  Expr *simpleDefault(const Type *type, const TypeRef *ref, llvm::SMLoc loc);
+  void resolveFamily(const ClassDecl *c, DefaultRun &run);
+  void makeEmptyNew(const ClassDecl *cls, DefaultRun &run);
   void declareStaticVar(const ClassDecl *cls, const ClassField &f, StaticField *shared,
                         const Type *type);
   Expr *defaultValue(const Type *type, const TypeRef *ref, llvm::SMLoc loc,

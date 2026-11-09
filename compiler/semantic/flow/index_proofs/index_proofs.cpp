@@ -2,6 +2,7 @@
 #include "compiler/program/ast/await_expr/await_expr.h"
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/semantic/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
@@ -41,6 +42,41 @@ const VarSymbol *IndexProofs::variableOf(const Expr *expr) {
 }
 
 std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
+  std::vector<Linear> answers;
+  for (const Expr *node : ChildrenFirst::order(expr, IndexProofs::linearParts)) {
+    std::optional<Linear> answer = this->nodeLinear(node, answers);
+    if (!answer.has_value()) {
+      return std::nullopt;
+    }
+    answers.push_back(*answer);
+  }
+
+  return answers.back();
+}
+
+NodeChildren<const Expr *> IndexProofs::linearParts(const Expr *expr) {
+  if (auto *conv = dyn_cast<CastExpr>(expr); conv && IndexProofs::isIntWidening(conv)) {
+    return {conv->operand};
+  }
+  if (auto *bin = dyn_cast<BinaryExpr>(expr); bin && IndexProofs::isLinearStep(bin)) {
+    return {bin->lhs, bin->rhs};
+  }
+
+  return {};
+}
+
+bool IndexProofs::isIntWidening(const CastExpr *conv) {
+  return conv->isImplicit() && conv->operand->type->isInt() && conv->type->isInteger();
+}
+
+bool IndexProofs::isLinearStep(const BinaryExpr *bin) {
+  bool addOrSub = bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub;
+
+  return addOrSub && bin->type->isInteger();
+}
+
+std::optional<Linear> IndexProofs::nodeLinear(const Expr *expr,
+                                              std::vector<Linear> &answers) const {
   switch (expr->kind()) {
   case Expr::Kind::IntLit: {
     auto *lit = cast<IntLitExpr>(expr);
@@ -80,11 +116,10 @@ std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
     return std::nullopt;
   }
   case Expr::Kind::Cast: {
-    auto *conv = cast<CastExpr>(expr);
-    if (conv->isImplicit() && conv->operand->type->isInt() && conv->type->isInteger()) {
-      return this->linear(conv->operand);
+    if (!IndexProofs::isIntWidening(cast<CastExpr>(expr))) {
+      return std::nullopt;
     }
-    return std::nullopt;
+    return ChildrenFirst::takeAnswer(answers);
   }
   case Expr::Kind::Call: {
     auto *call = cast<CallExpr>(expr);
@@ -97,45 +132,48 @@ std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
   }
   case Expr::Kind::Binary: {
     auto *bin = cast<BinaryExpr>(expr);
-    if ((bin->op != BinaryOp::Add && bin->op != BinaryOp::Sub) || !expr->type->isInteger()) {
+    if (!IndexProofs::isLinearStep(bin)) {
       return std::nullopt;
     }
-    std::optional<Linear> l = this->linear(bin->lhs);
-    std::optional<Linear> r = this->linear(bin->rhs);
-    if (!l || !r) {
-      return std::nullopt;
-    }
-    Linear result;
-    if (r->term.isZero()) {
-      result = {l->term, bin->op == BinaryOp::Add ? l->offset + r->offset : l->offset - r->offset};
-    } else if (bin->op == BinaryOp::Add && l->term.isZero()) {
-      result = {r->term, l->offset + r->offset};
-    } else if (std::optional<Term> both = Term::sum(l->term, r->term);
-               both && bin->op == BinaryOp::Add) {
-      result = {*both, l->offset + r->offset};
-    } else {
-      return std::nullopt;
-    }
-    if (result.offset > int64_t(kMaxConstant) || result.offset < -int64_t(kMaxConstant)) {
-      return std::nullopt;
-    }
-    if (expr->type->isInt() && !result.term.isZero()) {
-      const Facts &facts = this->state.getFlowState().getFacts();
-      if ((result.offset > 0 &&
-           !facts.proves(result.term, Term::zero(), kIntMax - (result.offset - 1))) ||
-          (result.offset < 0 && !facts.proves(Term::zero(), result.term,
-                                              Facts::saturatingSub(result.offset + 1, kIntMin)))) {
-        return std::nullopt;
-      }
-    }
-    return result;
+    Linear right = ChildrenFirst::takeAnswer(answers);
+    Linear left = ChildrenFirst::takeAnswer(answers);
+    return this->linearSum(bin, left, right);
   }
   default:
     return std::nullopt;
   }
 }
 
-std::optional<Linear> IndexProofs::lengthOf(const Expr *object) const {
+std::optional<Linear> IndexProofs::linearSum(const BinaryExpr *bin, const Linear &l,
+                                             const Linear &r) const {
+  Linear result;
+  if (r.term.isZero()) {
+    result = {l.term, bin->op == BinaryOp::Add ? l.offset + r.offset : l.offset - r.offset};
+  } else if (bin->op == BinaryOp::Add && l.term.isZero()) {
+    result = {r.term, l.offset + r.offset};
+  } else if (std::optional<Term> both = Term::sum(l.term, r.term);
+             both && bin->op == BinaryOp::Add) {
+    result = {*both, l.offset + r.offset};
+  } else {
+    return std::nullopt;
+  }
+  if (result.offset > int64_t(kMaxConstant) || result.offset < -int64_t(kMaxConstant)) {
+    return std::nullopt;
+  }
+  if (bin->type->isInt() && !result.term.isZero()) {
+    const Facts &facts = this->state.getFlowState().getFacts();
+    if ((result.offset > 0 &&
+         !facts.proves(result.term, Term::zero(), kIntMax - (result.offset - 1))) ||
+        (result.offset < 0 && !facts.proves(Term::zero(), result.term,
+                                            Facts::saturatingSub(result.offset + 1, kIntMin)))) {
+      return std::nullopt;
+    }
+  }
+  return result;
+}
+
+std::optional<Linear> IndexProofs::lengthOf(const Expr *expr) const {
+  const Expr *object = IndexProofs::sameLengthSource(expr);
   if (auto *lit = dyn_cast<StringLitExpr>(object)) {
     return Linear{Term::zero(), static_cast<int64_t>(lit->value.size())};
   }
@@ -153,12 +191,6 @@ std::optional<Linear> IndexProofs::lengthOf(const Expr *object) const {
     if (type->isString() || type->isArray() || type->isByteView() ||
         type->bytes() == Type::Bytes::ArrayBuffer) {
       return Linear{Term::lengthOf(var), 0};
-    }
-  }
-  if (auto *wait = dyn_cast<AwaitExpr>(object)) {
-    if (auto *all = dyn_cast<CallExpr>(wait->value);
-        all && all->builtin() == Builtin::PromiseAll && all->args.size() == 1) {
-      return this->lengthOf(all->args[0]);
     }
   }
   if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin() == Builtin::DecToFraction) {
@@ -183,9 +215,6 @@ std::optional<Linear> IndexProofs::lengthOf(const Expr *object) const {
         return n;
       }
       return std::nullopt;
-    case Builtin::BytesFromArray:
-    case Builtin::BytesFromBytes:
-      return this->lengthOf(call->args[0]);
     case Builtin::BufferFromString:
       return this->utf8Length(call);
     case Builtin::BytesBuffer:
@@ -288,19 +317,50 @@ bool IndexProofs::provesNotEmpty(const Expr *object) const {
 }
 
 bool IndexProofs::provesBetween(const Expr *expr, int64_t lo, std::optional<int64_t> hi) const {
-  while (auto *conv = dyn_cast<CastExpr>(expr)) {
+  for (const Expr *branch : IndexProofs::provedBranches(expr)) {
+    if (!this->provesValueBetween(branch, lo, hi)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+std::vector<const Expr *> IndexProofs::provedBranches(const Expr *expr) {
+  std::vector<const Expr *> branches;
+  std::vector<const Expr *> stack = {expr};
+  while (!stack.empty()) {
+    const Expr *next = IndexProofs::withoutWidening(stack.back());
+    stack.pop_back();
+    auto *choice = dyn_cast<ConditionalExpr>(next);
+    if (choice != nullptr) {
+      stack.push_back(choice->elseExpr);
+      stack.push_back(choice->thenExpr);
+      continue;
+    }
+    branches.push_back(next);
+  }
+
+  return branches;
+}
+
+const Expr *IndexProofs::withoutWidening(const Expr *expr) {
+  const Expr *inner = expr;
+  while (auto *conv = dyn_cast<CastExpr>(inner)) {
     const Type *from = conv->operand->type;
     if (!conv->isImplicit() || !from || !from->isInteger() ||
         !(conv->type->isFloat() ||
           (conv->type->isInteger() && conv->type->bitWidth() >= from->bitWidth()))) {
       break;
     }
-    expr = conv->operand;
+    inner = conv->operand;
   }
-  if (auto *cond = dyn_cast<ConditionalExpr>(expr)) {
-    return this->provesBetween(cond->thenExpr, lo, hi) &&
-           this->provesBetween(cond->elseExpr, lo, hi);
-  }
+
+  return inner;
+}
+
+bool IndexProofs::provesValueBetween(const Expr *expr, int64_t lo,
+                                     std::optional<int64_t> hi) const {
   if (!expr->type || !expr->type->nonOptional()->isInteger()) {
     return false;
   }
@@ -603,7 +663,8 @@ void IndexProofs::addIndexCallbackFacts(const FunctionDecl *fn) {
 }
 
 IntegerRange IndexProofs::lengthRange(const Expr *value) const {
-  auto *call = dyn_cast<CallExpr>(value);
+  const Expr *source = IndexProofs::viewedSource(value);
+  auto *call = dyn_cast<CallExpr>(source);
   if (!call) {
     return {};
   }
@@ -612,15 +673,58 @@ IntegerRange IndexProofs::lengthRange(const Expr *value) const {
     case Builtin::ArrayBufferNew:
     case Builtin::BufferAllocFill:
       return call->args.empty() ? IntegerRange{0, 0} : this->byteProofs->valueRange(call->args[0]);
-    case Builtin::DataViewNew:
-    case Builtin::BytesView:
-      if (call->args.size() == 1 && call->type && call->type->elementSize() == 1) {
-        return this->lengthRange(call->args[0]);
-      }
-      return {};
     default:
       return {};
   }
+}
+
+const Expr *IndexProofs::sameLengthSource(const Expr *object) {
+  const Expr *source = object;
+  const Expr *inner = IndexProofs::sameLengthInner(source);
+  while (inner != nullptr) {
+    source = inner;
+    inner = IndexProofs::sameLengthInner(source);
+  }
+
+  return source;
+}
+
+const Expr *IndexProofs::sameLengthInner(const Expr *object) {
+  if (auto *wait = dyn_cast<AwaitExpr>(object)) {
+    auto *all = dyn_cast<CallExpr>(wait->value);
+    bool single = all != nullptr && all->builtin() == Builtin::PromiseAll && all->args.size() == 1;
+    return single ? all->args[0] : nullptr;
+  }
+  auto *call = dyn_cast<CallExpr>(object);
+  if (call == nullptr) {
+    return nullptr;
+  }
+  bool fromArray = call->builtin() == Builtin::BytesFromArray;
+  bool fromBytes = call->builtin() == Builtin::BytesFromBytes;
+
+  return fromArray || fromBytes ? call->args[0] : nullptr;
+}
+
+const Expr *IndexProofs::viewedSource(const Expr *value) {
+  const Expr *source = value;
+  const CallExpr *view = IndexProofs::wholeByteView(source);
+  while (view != nullptr) {
+    source = view->args[0];
+    view = IndexProofs::wholeByteView(source);
+  }
+
+  return source;
+}
+
+const CallExpr *IndexProofs::wholeByteView(const Expr *value) {
+  auto *call = dyn_cast<CallExpr>(value);
+  if (call == nullptr) {
+    return nullptr;
+  }
+  bool view = call->builtin() == Builtin::DataViewNew || call->builtin() == Builtin::BytesView;
+  bool whole = call->args.size() == 1 && call->type && call->type->elementSize() == 1;
+
+  return view && whole ? call : nullptr;
 }
 
 std::optional<Linear> IndexProofs::knownLength(const Expr *value) const {

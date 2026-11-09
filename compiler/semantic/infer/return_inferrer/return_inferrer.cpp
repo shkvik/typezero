@@ -496,23 +496,41 @@ ReturnInferrer::ResultParamTypeKnown ReturnInferrer::defaultType(const Param &pa
 }
 
 void ReturnInferrer::resolveParams(FuncSymbol *fn) {
-  if (!fn->pendingParams) {
-    return;
+  std::vector<FuncSymbol *> instances;
+  FuncSymbol *at = fn;
+  while (at->pendingParams && ReturnInferrer::isInstanceMethod(at)) {
+    at->pendingParams = false;
+    instances.push_back(at);
+    at = at->decl->generic->sym;
   }
-  fn->pendingParams = false;
+  if (at->pendingParams) {
+    at->pendingParams = false;
+    this->resolveOwnParams(at);
+  }
+  for (FuncSymbol *instance : llvm::reverse(instances)) {
+    this->copyGenericParams(instance);
+  }
+}
+
+bool ReturnInferrer::isInstanceMethod(const FuncSymbol *fn) {
+  const FunctionDecl *decl = fn->decl;
+
+  return decl->generic != nullptr && decl->cls() && decl->cls()->generic();
+}
+
+void ReturnInferrer::copyGenericParams(FuncSymbol *fn) {
   FunctionDecl *decl = fn->decl;
   FunctionDecl *generic = decl->generic;
-  if (generic && decl->cls() && decl->cls()->generic()) {
-    this->resolveParams(generic->sym);
-    for (size_t i = 0; i < fn->params.size() && i < generic->sym->params.size(); ++i) {
-      fn->params[i] = this->instanceParam(fn, generic->sym->params[i]);
-    }
-    for (size_t i = 0; i < decl->params.size() && i < generic->params.size(); ++i) {
-      decl->params[i].declaredType = this->instanceParam(fn, generic->params[i].declaredType);
-    }
-    return;
+  for (size_t i = 0; i < fn->params.size() && i < generic->sym->params.size(); ++i) {
+    fn->params[i] = this->instanceParam(fn, generic->sym->params[i]);
   }
+  for (size_t i = 0; i < decl->params.size() && i < generic->params.size(); ++i) {
+    decl->params[i].declaredType = this->instanceParam(fn, generic->params[i].declaredType);
+  }
+}
 
+void ReturnInferrer::resolveOwnParams(FuncSymbol *fn) {
+  FunctionDecl *decl = fn->decl;
   std::vector<const Type *> found(decl->params.size(), nullptr);
   auto failed = [](const Type *type) { return type && type->isError(); };
   for (bool report : {false, true}) {

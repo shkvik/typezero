@@ -6,6 +6,7 @@
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/expr/truth_checker/truth_checker_errors.h"
 #include "compiler/semantic/bodies/values/array_literal_checker/array_literal_checker.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/flow/field_facts/field_facts.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
@@ -13,7 +14,6 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
-#include <functional>
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -62,43 +62,47 @@ const Expr *JsonChecker::bare(const Expr *expr) {
 }
 
 bool JsonChecker::sameRef(const Expr *a, const Expr *b) {
-  a = JsonChecker::bare(a);
-  b = JsonChecker::bare(b);
-  auto *na = dyn_cast_or_null<NameExpr>(a);
-  auto *nb = dyn_cast_or_null<NameExpr>(b);
-  if (na && nb) {
-    return na->var() && na->var() == nb->var();
+  const Expr *left = JsonChecker::bare(a);
+  const Expr *right = JsonChecker::bare(b);
+  auto *leftMember = dyn_cast_or_null<MemberExpr>(left);
+  auto *rightMember = dyn_cast_or_null<MemberExpr>(right);
+  while (leftMember != nullptr && rightMember != nullptr) {
+    if (leftMember->name != rightMember->name) {
+      return false;
+    }
+    left = JsonChecker::bare(leftMember->object);
+    right = JsonChecker::bare(rightMember->object);
+    leftMember = dyn_cast_or_null<MemberExpr>(left);
+    rightMember = dyn_cast_or_null<MemberExpr>(right);
   }
-  auto *ma = dyn_cast_or_null<MemberExpr>(a);
-  auto *mb = dyn_cast_or_null<MemberExpr>(b);
+  auto *leftName = dyn_cast_or_null<NameExpr>(left);
+  auto *rightName = dyn_cast_or_null<NameExpr>(right);
+  if (leftName == nullptr || rightName == nullptr) {
+    return false;
+  }
 
-  return ma && mb && ma->name == mb->name && JsonChecker::sameRef(ma->object, mb->object);
+  return leftName->var() != nullptr && leftName->var() == rightName->var();
 }
 
 std::string JsonChecker::refText(const Expr *expr) {
-  expr = JsonChecker::bare(expr);
-  if (auto *name = dyn_cast<NameExpr>(expr)) {
-    return name->name.str();
+  std::vector<llvm::StringRef> names;
+  const Expr *link = JsonChecker::bare(expr);
+  while (auto *member = dyn_cast<MemberExpr>(link)) {
+    names.push_back(member->name);
+    link = JsonChecker::bare(member->object);
   }
-  if (auto *member = dyn_cast<MemberExpr>(expr)) {
-    return JsonChecker::refText(member->object) + "." + member->name.str();
+  auto *root = dyn_cast<NameExpr>(link);
+  std::string text = root != nullptr ? root->name.str() : "x";
+  for (llvm::StringRef name : llvm::reverse(names)) {
+    text += "." + name.str();
   }
 
-  return "x";
+  return text;
 }
 
 void JsonChecker::checkRedundantTests(const BinaryExpr *bin) {
   bool isAnd = bin->op == BinaryOp::LogAnd;
-  std::vector<const Expr *> terms;
-  std::function<void(const Expr *)> collect = [&](const Expr *e) {
-    if (auto *b = dyn_cast<BinaryExpr>(e); b && b->op == bin->op) {
-      collect(b->lhs);
-      collect(b->rhs);
-      return;
-    }
-    terms.push_back(e);
-  };
-  collect(bin->lhs);
+  std::vector<const Expr *> terms = ExprParts::sameOperatorParts(bin->lhs, bin->op);
   const Expr *tested = nullptr;
   bool nullTest = false;
   const Expr *rhs = JsonChecker::bare(bin->rhs);

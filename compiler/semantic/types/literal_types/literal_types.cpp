@@ -1,6 +1,8 @@
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/conditional_types/conditional_types.h"
@@ -55,22 +57,14 @@ std::optional<std::u16string> LiteralTypes::writtenText(const Expr *e) {
 }
 
 bool LiteralTypes::choiceTexts(const Expr *e, std::vector<std::u16string> &texts) {
-  while (auto *conv = dyn_cast<CastExpr>(e)) {
-    if (!conv->isImplicit()) {
+  for (const Expr *branch : ExprParts::choiceBranches(e)) {
+    std::optional<std::u16string> text = LiteralTypes::writtenText(branch);
+    if (!text.has_value()) {
       return false;
     }
-    e = conv->operand;
-  }
-  if (auto *choice = dyn_cast<ConditionalExpr>(e)) {
-    return LiteralTypes::choiceTexts(choice->thenExpr, texts) &&
-           LiteralTypes::choiceTexts(choice->elseExpr, texts);
-  }
-  std::optional<std::u16string> text = LiteralTypes::writtenText(e);
-  if (!text) {
-    return false;
-  }
-  if (!llvm::is_contained(texts, *text)) {
-    texts.push_back(*text);
+    if (!llvm::is_contained(texts, *text)) {
+      texts.push_back(*text);
+    }
   }
 
   return true;
@@ -174,15 +168,43 @@ const Type *LiteralTypes::unionUnify(const Type *a, const Type *b) {
 }
 
 const Type *LiteralTypes::literalExpectation(const Type *expected, unsigned depth) {
-  if (!expected || depth > 8 || expected->nonOptional()->typeOp() != TypeOp::Conditional) {
-    return expected;
-  }
-  std::vector<const Type *> branches;
-  for (const Type *branch : this->conditionalTypes->conditionalBranches(expected->nonOptional())) {
-    branches.push_back(this->literalExpectation(branch, depth + 1));
+  std::vector<ExpectationStep> steps = {EnterExpectation{expected, depth}};
+  std::vector<const Type *> answers;
+  while (!steps.empty()) {
+    ExpectationStep step = steps.back();
+    steps.pop_back();
+    if (const EnterExpectation *enter = step.as<EnterExpectation>()) {
+      this->enterExpectation(*enter, steps, answers);
+    } else {
+      LiteralTypes::joinBranches(*step.as<JoinBranches>(), answers);
+    }
   }
 
-  return branches.empty() ? expected : Type::unionOf(branches);
+  return answers.back();
+}
+
+void LiteralTypes::enterExpectation(const EnterExpectation &enter,
+                                    std::vector<ExpectationStep> &steps,
+                                    std::vector<const Type *> &answers) {
+  const Type *expected = enter.type;
+  bool conditional =
+      expected && enter.depth <= 8 && expected->nonOptional()->typeOp() == TypeOp::Conditional;
+  std::vector<const Type *> branches =
+      conditional ? this->conditionalTypes->conditionalBranches(expected->nonOptional())
+                  : std::vector<const Type *>();
+  if (branches.empty()) {
+    answers.push_back(expected);
+  } else {
+    steps.push_back(JoinBranches{branches.size()});
+    for (const Type *branch : llvm::reverse(branches)) {
+      steps.push_back(EnterExpectation{branch, enter.depth + 1});
+    }
+  }
+}
+
+void LiteralTypes::joinBranches(const JoinBranches &join, std::vector<const Type *> &answers) {
+  std::vector<const Type *> members = ChildrenFirst::takeAnswers(answers, join.count);
+  answers.push_back(Type::unionOf(members));
 }
 
 const Type *LiteralTypes::stringLiteralFor(const Type *expected, const std::u16string &text) {
@@ -369,26 +391,30 @@ const Type *LiteralTypes::typeIn(const Flow &flow, const VarSymbol *var) const {
 }
 
 std::optional<std::vector<std::string>> LiteralTypes::knownTexts(const Expr *arg) {
-  auto typeTexts = [](const Type *type) -> std::optional<std::vector<std::string>> {
-    if (!type) {
+  std::vector<std::string> texts;
+  std::vector<const Expr *> stack = {arg};
+  while (!stack.empty()) {
+    const Expr *next = stack.back();
+    stack.pop_back();
+    TextLookup lookup = this->lookupTexts(next);
+    if (lookup.choice != nullptr) {
+      stack.push_back(lookup.choice->elseExpr);
+      stack.push_back(lookup.choice->thenExpr);
+    } else if (lookup.texts.has_value()) {
+      texts.insert(texts.end(), lookup.texts->begin(), lookup.texts->end());
+    } else {
       return std::nullopt;
     }
-    type = type->nonOptional();
-    llvm::ArrayRef<const Type *> members =
-        type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
-    std::vector<std::string> texts;
-    for (const Type *m : members) {
-      if (!m->isStringLiteral()) {
-        return std::nullopt;
-      }
-      texts.push_back(ToUtf8::toUtf8(m->literalText()));
-    }
-    return texts;
-  };
+  }
+
+  return texts;
+}
+
+TextLookup LiteralTypes::lookupTexts(const Expr *arg) {
   const Expr *e = arg;
   while (true) {
-    if (std::optional<std::vector<std::string>> texts = typeTexts(e->type)) {
-      return texts;
+    if (std::optional<std::vector<std::string>> texts = LiteralTypes::typeTexts(e->type)) {
+      return TextLookup{texts, nullptr};
     }
     auto *conv = dyn_cast<CastExpr>(e);
     if (!conv || !conv->isImplicit()) {
@@ -398,9 +424,9 @@ std::optional<std::vector<std::string>> LiteralTypes::knownTexts(const Expr *arg
   }
   if (auto *name = dyn_cast<NameExpr>(e)) {
     if (VarSymbol *var = this->scopes->lookup(name->name).var()) {
-      if (std::optional<std::vector<std::string>> texts =
-              typeTexts(this->typeIn(this->state.getFlowState().getFlow(), var))) {
-        return texts;
+      const Type *flowType = this->typeIn(this->state.getFlowState().getFlow(), var);
+      if (std::optional<std::vector<std::string>> texts = LiteralTypes::typeTexts(flowType)) {
+        return TextLookup{texts, nullptr};
       }
       if (const Expr *lit = this->state.getConstantStore().findConstLiteral(var)) {
         e = lit;
@@ -408,19 +434,31 @@ std::optional<std::vector<std::string>> LiteralTypes::knownTexts(const Expr *arg
     }
   }
   if (auto *choice = dyn_cast<ConditionalExpr>(e)) {
-    std::optional<std::vector<std::string>> a = this->knownTexts(choice->thenExpr);
-    std::optional<std::vector<std::string>> b = this->knownTexts(choice->elseExpr);
-    if (!a || !b) {
-      return std::nullopt;
-    }
-    a->insert(a->end(), b->begin(), b->end());
-    return a;
+    return TextLookup{std::nullopt, choice};
   }
   if (std::optional<std::u16string> text = LiteralTypes::writtenText(e)) {
-    return std::vector<std::string>{ToUtf8::toUtf8(*text)};
+    return TextLookup{std::vector<std::string>{ToUtf8::toUtf8(*text)}, nullptr};
   }
 
-  return typeTexts(e->type);
+  return TextLookup{LiteralTypes::typeTexts(e->type), nullptr};
+}
+
+std::optional<std::vector<std::string>> LiteralTypes::typeTexts(const Type *type) {
+  if (!type) {
+    return std::nullopt;
+  }
+  const Type *plain = type->nonOptional();
+  llvm::ArrayRef<const Type *> members =
+      plain->isUnion() ? plain->members() : llvm::ArrayRef<const Type *>(plain);
+  std::vector<std::string> texts;
+  for (const Type *m : members) {
+    if (!m->isStringLiteral()) {
+      return std::nullopt;
+    }
+    texts.push_back(ToUtf8::toUtf8(m->literalText()));
+  }
+
+  return texts;
 }
 
 }

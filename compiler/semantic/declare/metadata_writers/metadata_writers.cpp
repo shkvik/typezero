@@ -1,5 +1,5 @@
 #include "compiler/semantic/declare/metadata_writers/metadata_writers.h"
-#include "compiler/program/ast_walker/ast_walker.h"
+#include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 using llvm::dyn_cast;
@@ -19,10 +19,20 @@ void MetadataWriters::rememberWriters(SourceFile &program) {
         functions = cls->methods;
       }
       for (FunctionDecl *fn : functions) {
-        auto rememberWriter = [&](const Expr *expr) { this->rememberWriter(fn, expr); };
-        AstWalker::visitExprs(fn, rememberWriter);
+        this->rememberWritersIn(fn);
       }
     }
+  }
+}
+
+void MetadataWriters::rememberWritersIn(FunctionDecl *fn) {
+  std::vector<const Expr *> defaults;
+  for (const Param &param : fn->params) {
+    defaults.push_back(param.defaultValue());
+  }
+  PlacedNodes nodes = PlacedNodes::collect({fn->body}, defaults);
+  for (const PlacedExpr &placed : nodes.getExprs()) {
+    this->rememberWriter(fn, placed.expr);
   }
 }
 
