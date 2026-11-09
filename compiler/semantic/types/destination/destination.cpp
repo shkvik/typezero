@@ -109,113 +109,170 @@ std::vector<const Expr *> Destination::shapeChoices(const Expr *expr) {
 }
 
 bool Destination::literalFits(const Expr *expr, const Type *type) const {
-  type = type->nonOptional();
-  if (type->isUnion()) {
-    if (auto *lit = dyn_cast<ObjectLitExpr>(expr)) {
-      if (const Type *member = this->literalTypes->literalMember(lit, type)) {
-        return this->literalFits(expr, member);
-      }
-    }
-    if (const Type *array = type->slotPart(UnionSlot::Array); array && isa<ArrayLitExpr>(expr)) {
-      return this->literalFits(expr, array);
-    }
-    return false;
-  }
-  if (auto *lit = dyn_cast<ObjectLitExpr>(expr)) {
-    if (!type->isObject() || type->isTuple() || type->isIncomplete()) {
+  std::vector<LiteralGoal> goals = {LiteralGoal{expr, type}};
+  while (!goals.empty()) {
+    LiteralGoal goal = goals.back();
+    goals.pop_back();
+    std::optional<std::vector<LiteralGoal>> needs = this->literalNeeds(goal.expr, goal.type);
+    if (!needs.has_value()) {
       return false;
     }
-    std::vector<llvm::StringRef> names;
-    for (const ObjectLitExpr::Property &prop : lit->props) {
-      if (prop.spread()) {
-        auto *name = dyn_cast<NameExpr>(prop.value);
-        const VarSymbol *var = name ? this->scopes->lookup(name->name).var() : nullptr;
-        if (!var || !var->type || !var->type->isObject() || var->type->isTuple()) {
-          return false;
-        }
-        for (const Field &f : var->type->fields()) {
-          if (!llvm::is_contained(prop.omit(), f.name)) {
-            names.push_back(f.name);
-          }
-        }
-        continue;
-      }
-      if (prop.key()) {
-        return false;
-      }
-      llvm::StringRef name = prop.name;
-      const Field *field = type->field(name);
-      if (!field ||
-          (Destination::literalShaped(prop.value) && !this->literalFits(prop.value, field->type))) {
-        return false;
-      }
-      names.push_back(name);
-    }
-    for (llvm::StringRef name : names) {
-      if (!type->field(name)) {
-        return false;
-      }
-    }
-    return llvm::all_of(type->fields(), [&](const Field &f) {
-      return f.type->isOptional() || llvm::is_contained(names, f.name);
-    });
-  }
-  if (auto *lit = dyn_cast<ArrayLitExpr>(expr)) {
-    if (type->isTuple()) {
-      if (lit->elements.size() != type->fields().size()) {
-        return false;
-      }
-      for (size_t i = 0; i < lit->elements.size(); ++i) {
-        const ArrayLitExpr::Element &e = lit->elements[i];
-        if (e.spread || (Destination::literalShaped(e.expr) &&
-                         !this->literalFits(e.expr, type->fields()[i].type))) {
-          return false;
-        }
-      }
-      return true;
-    }
-    if (!type->isArray()) {
-      return false;
-    }
-    return llvm::all_of(lit->elements, [&](const ArrayLitExpr::Element &e) {
-      return e.spread || !Destination::literalShaped(e.expr) ||
-             this->literalFits(e.expr, type->inner());
-    });
-  }
-  if (auto *cond = dyn_cast<ConditionalExpr>(expr)) {
-    return (!Destination::literalShaped(cond->thenExpr) ||
-            this->literalFits(cond->thenExpr, type)) &&
-           (!Destination::literalShaped(cond->elseExpr) || this->literalFits(cond->elseExpr, type));
-  }
-  if (auto *call = dyn_cast<CallExpr>(expr)) {
-    if (DestinationScanner::isResultLiteral(call)) {
-      if (!type->isResult()) {
-        return false;
-      }
-      auto *maker = cast<NameExpr>(call->callee);
-      bool isOk = GlobalNameTable::find(maker->name) == GlobalName::OK;
-      const Type *half = isOk ? type->okType() : type->errType();
-      return call->args.empty() || !Destination::literalShaped(call->args[0]) ||
-             this->literalFits(call->args[0], half);
-    }
-    if (!type->isArray()) {
-      return false;
-    }
-    auto *fe = cast<FunctionExpr>(call->args[0]);
-    auto *member = cast<MemberExpr>(call->callee);
-    const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
-    bool mapsEach = method != nullptr && method->method == ArrayMethod::MAP;
-    const Type *element = mapsEach ? type->inner() : type;
-    for (const Expr *value : Destination::findReturnValues(fe->fn->body)) {
-      if (Destination::literalShaped(value) && !this->literalFits(value, element)) {
-        return false;
-      }
-    }
-
-    return true;
+    goals.insert(goals.end(), needs->rbegin(), needs->rend());
   }
 
   return true;
+}
+
+std::optional<std::vector<LiteralGoal>> Destination::literalNeeds(const Expr *expr,
+                                                                  const Type *wanted) const {
+  const Type *type = wanted->nonOptional();
+  if (type->isUnion()) {
+    return this->unionNeeds(expr, type);
+  }
+  if (auto *lit = dyn_cast<ObjectLitExpr>(expr)) {
+    return this->objectNeeds(lit, type);
+  }
+  if (auto *lit = dyn_cast<ArrayLitExpr>(expr)) {
+    return Destination::arrayNeeds(lit, type);
+  }
+  if (auto *cond = dyn_cast<ConditionalExpr>(expr)) {
+    std::vector<LiteralGoal> needs;
+    for (const Expr *branch : {cond->thenExpr, cond->elseExpr}) {
+      if (Destination::literalShaped(branch)) {
+        needs.push_back(LiteralGoal{branch, type});
+      }
+    }
+    return needs;
+  }
+  if (auto *call = dyn_cast<CallExpr>(expr)) {
+    return Destination::callNeeds(call, type);
+  }
+
+  return std::vector<LiteralGoal>();
+}
+
+std::optional<std::vector<LiteralGoal>> Destination::unionNeeds(const Expr *expr,
+                                                                const Type *type) const {
+  if (auto *lit = dyn_cast<ObjectLitExpr>(expr)) {
+    if (const Type *member = this->literalTypes->literalMember(lit, type)) {
+      return std::vector<LiteralGoal>{LiteralGoal{expr, member}};
+    }
+  }
+  if (const Type *array = type->slotPart(UnionSlot::Array); array && isa<ArrayLitExpr>(expr)) {
+    return std::vector<LiteralGoal>{LiteralGoal{expr, array}};
+  }
+
+  return std::nullopt;
+}
+
+std::optional<std::vector<LiteralGoal>> Destination::objectNeeds(const ObjectLitExpr *lit,
+                                                                 const Type *type) const {
+  if (!type->isObject() || type->isTuple() || type->isIncomplete()) {
+    return std::nullopt;
+  }
+  std::vector<LiteralGoal> needs;
+  std::vector<llvm::StringRef> names;
+  for (const ObjectLitExpr::Property &prop : lit->props) {
+    if (prop.spread()) {
+      auto *name = dyn_cast<NameExpr>(prop.value);
+      const VarSymbol *var = name ? this->scopes->lookup(name->name).var() : nullptr;
+      if (!var || !var->type || !var->type->isObject() || var->type->isTuple()) {
+        return std::nullopt;
+      }
+      for (const Field &f : var->type->fields()) {
+        if (!llvm::is_contained(prop.omit(), f.name)) {
+          names.push_back(f.name);
+        }
+      }
+      continue;
+    }
+    if (prop.key()) {
+      return std::nullopt;
+    }
+    const Field *field = type->field(prop.name);
+    if (!field) {
+      return std::nullopt;
+    }
+    if (Destination::literalShaped(prop.value)) {
+      needs.push_back(LiteralGoal{prop.value, field->type});
+    }
+    names.push_back(prop.name);
+  }
+  for (llvm::StringRef name : names) {
+    if (!type->field(name)) {
+      return std::nullopt;
+    }
+  }
+  bool complete = llvm::all_of(type->fields(), [&](const Field &f) {
+    return f.type->isOptional() || llvm::is_contained(names, f.name);
+  });
+  if (!complete) {
+    return std::nullopt;
+  }
+
+  return needs;
+}
+
+std::optional<std::vector<LiteralGoal>> Destination::arrayNeeds(const ArrayLitExpr *lit,
+                                                                const Type *type) {
+  std::vector<LiteralGoal> needs;
+  if (type->isTuple()) {
+    if (lit->elements.size() != type->fields().size()) {
+      return std::nullopt;
+    }
+    for (size_t i = 0; i < lit->elements.size(); ++i) {
+      const ArrayLitExpr::Element &e = lit->elements[i];
+      if (e.spread) {
+        return std::nullopt;
+      }
+      if (Destination::literalShaped(e.expr)) {
+        needs.push_back(LiteralGoal{e.expr, type->fields()[i].type});
+      }
+    }
+    return needs;
+  }
+  if (!type->isArray()) {
+    return std::nullopt;
+  }
+  for (const ArrayLitExpr::Element &e : lit->elements) {
+    if (!e.spread && Destination::literalShaped(e.expr)) {
+      needs.push_back(LiteralGoal{e.expr, type->inner()});
+    }
+  }
+
+  return needs;
+}
+
+std::optional<std::vector<LiteralGoal>> Destination::callNeeds(const CallExpr *call,
+                                                               const Type *type) {
+  std::vector<LiteralGoal> needs;
+  if (DestinationScanner::isResultLiteral(call)) {
+    if (!type->isResult()) {
+      return std::nullopt;
+    }
+    auto *maker = cast<NameExpr>(call->callee);
+    bool isOk = GlobalNameTable::find(maker->name) == GlobalName::OK;
+    const Type *half = isOk ? type->okType() : type->errType();
+    if (!call->args.empty() && Destination::literalShaped(call->args[0])) {
+      needs.push_back(LiteralGoal{call->args[0], half});
+    }
+    return needs;
+  }
+  if (!type->isArray()) {
+    return std::nullopt;
+  }
+  auto *fe = cast<FunctionExpr>(call->args[0]);
+  auto *member = cast<MemberExpr>(call->callee);
+  const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
+  bool mapsEach = method != nullptr && method->method == ArrayMethod::MAP;
+  const Type *element = mapsEach ? type->inner() : type;
+  for (const Expr *value : Destination::findReturnValues(fe->fn->body)) {
+    if (Destination::literalShaped(value)) {
+      needs.push_back(LiteralGoal{value, element});
+    }
+  }
+
+  return needs;
 }
 
 const Type *Destination::literalDestination(const VarDeclarator &d,

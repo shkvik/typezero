@@ -19,6 +19,16 @@ class TzModulesChecker;
 class WideningRelations;
 class FunctionValueChecker;
 
+struct ConversionGoal {
+  const Type *from;
+  const Type *to;
+};
+
+struct ConversionStep {
+  bool possible;
+  std::vector<ConversionGoal> needs;
+};
+
 class TypeRelations {
 public:
   TypeRelations(SemanticState &owner, SemanticParts &all);
@@ -40,6 +50,13 @@ public:
   static std::string conversionMethod(const Type *to);
 
 private:
+  static ConversionStep conversionStep(const Type *from, const Type *to);
+  static ConversionStep stepHolds();
+  static ConversionStep stepDecided(bool possible);
+  static ConversionStep stepNeeds(std::vector<ConversionGoal> goals);
+  static ConversionStep jsonStep(const Type *from, const Type *to);
+  static ConversionStep resultStep(const Type *from, const Type *to);
+  static std::optional<bool> plainConvertible(const Type *from, const Type *to);
   using ResultRangeWasProven = Result<const Expr *, TypeRelationsRangeProvenError>;
   using ResultTypeAssignable = Result<const Expr *, TypeRelationsAssignableError>;
 

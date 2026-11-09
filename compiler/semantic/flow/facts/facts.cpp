@@ -1,5 +1,6 @@
 #include "compiler/semantic/flow/facts/facts.h"
 #include "compiler/program/types/types.h"
+#include "llvm/ADT/STLExtras.h"
 #include <algorithm>
 #include <limits>
 
@@ -107,33 +108,79 @@ bool Facts::proves(Term lhs, Term rhs, int64_t offset) const {
   return least && *least <= offset;
 }
 
-std::optional<int64_t> Facts::bound(Term lhs, Term rhs) const { return bound(lhs, rhs, true); }
-
-std::optional<int64_t> Facts::bound(Term lhs, Term rhs, bool sums) const {
+std::optional<int64_t> Facts::bound(Term lhs, Term rhs) const {
   if (lhs == rhs) {
     return 1;
   }
+  std::vector<Term> nodes = this->boundNodes(lhs, rhs);
+  std::vector<PartLimit> limits = this->partLimits(nodes);
 
+  return this->shortestBound(nodes, lhs, rhs, &limits);
+}
+
+std::optional<int64_t> Facts::plainBound(Term lhs, Term rhs) const {
+  if (lhs == rhs) {
+    return 1;
+  }
+  std::vector<Term> nodes = this->boundNodes(lhs, rhs);
+
+  return this->shortestBound(nodes, lhs, rhs, nullptr);
+}
+
+std::vector<Term> Facts::boundNodes(Term lhs, Term rhs) const {
   std::vector<Term> nodes{Term::zero()};
-  auto node = [&](Term t) {
-    for (size_t i = 0; i < nodes.size(); ++i) {
-      if (nodes[i] == t) {
-        return i;
+  for (const Fact &fact : this->facts) {
+    Facts::addNode(nodes, fact.lhs);
+    Facts::addNode(nodes, fact.rhs);
+  }
+  Facts::addNode(nodes, lhs);
+  Facts::addNode(nodes, rhs);
+  for (size_t i = 1; i < nodes.size(); ++i) {
+    if (nodes[i].isSum()) {
+      Term first = nodes[i].first();
+      Term second = nodes[i].second();
+      Facts::addNode(nodes, first);
+      Facts::addNode(nodes, second);
+    }
+  }
+
+  return nodes;
+}
+
+void Facts::addNode(std::vector<Term> &nodes, Term term) {
+  if (!llvm::is_contained(nodes, term)) {
+    nodes.push_back(term);
+  }
+}
+
+size_t Facts::nodeIndex(const std::vector<Term> &nodes, Term term) {
+  return size_t(llvm::find(nodes, term) - nodes.begin());
+}
+
+std::vector<Facts::PartLimit> Facts::partLimits(const std::vector<Term> &nodes) const {
+  std::vector<PartLimit> limits;
+  for (size_t i = 1; i < nodes.size(); ++i) {
+    if (nodes[i].isSum()) {
+      for (Term part : {nodes[i].second(), nodes[i].first()}) {
+        std::optional<int64_t> above = this->plainBound(part, Term::zero());
+        std::optional<int64_t> below = this->plainBound(Term::zero(), part);
+        limits.push_back(PartLimit{part, above, below});
       }
     }
-    nodes.push_back(t);
+  }
 
-    return nodes.size() - 1;
-  };
-  struct Edge {
-    size_t from, to;
-    int64_t weight;
-  };
+  return limits;
+}
+
+std::optional<int64_t> Facts::shortestBound(const std::vector<Term> &nodes, Term lhs, Term rhs,
+                                            const std::vector<PartLimit> *limits) const {
   std::vector<Edge> edges;
   for (const Fact &fact : this->facts) {
-    edges.push_back({node(fact.lhs), node(fact.rhs), fact.offset - 1});
+    edges.push_back(
+        {Facts::nodeIndex(nodes, fact.lhs), Facts::nodeIndex(nodes, fact.rhs), fact.offset - 1});
   }
-  size_t source = node(lhs), target = node(rhs);
+  size_t source = Facts::nodeIndex(nodes, lhs);
+  size_t target = Facts::nodeIndex(nodes, rhs);
   for (size_t i = 1; i < nodes.size(); ++i) {
     if (!nodes[i].isSum()) {
       continue;
@@ -141,14 +188,15 @@ std::optional<int64_t> Facts::bound(Term lhs, Term rhs, bool sums) const {
     Term parts[2] = {nodes[i].first(), nodes[i].second()};
     for (int k = 0; k < 2; ++k) {
       Term other = parts[1 - k];
-      size_t self = node(parts[k]);
+      size_t self = Facts::nodeIndex(nodes, parts[k]);
       std::optional<int64_t> hi = Facts::upper(other), lo = Facts::lower(other);
-      if (sums) {
-        if (std::optional<int64_t> above = bound(other, Term::zero(), false)) {
-          hi = hi ? std::min(*hi, *above - 1) : *above - 1;
+      if (limits != nullptr) {
+        const PartLimit &limit = Facts::limitOf(*limits, other);
+        if (limit.above) {
+          hi = hi ? std::min(*hi, *limit.above - 1) : *limit.above - 1;
         }
-        if (std::optional<int64_t> below = bound(Term::zero(), other, false)) {
-          lo = lo ? std::max(*lo, 1 - *below) : 1 - *below;
+        if (limit.below) {
+          lo = lo ? std::max(*lo, 1 - *limit.below) : 1 - *limit.below;
         }
       }
       if (hi) {
@@ -159,6 +207,16 @@ std::optional<int64_t> Facts::bound(Term lhs, Term rhs, bool sums) const {
       }
     }
   }
+  Facts::addZeroEdges(nodes, edges);
+
+  return Facts::shortestDistance(nodes.size(), edges, source, target);
+}
+
+const Facts::PartLimit &Facts::limitOf(const std::vector<PartLimit> &limits, Term term) {
+  return *llvm::find_if(limits, [&](const PartLimit &limit) { return limit.term == term; });
+}
+
+void Facts::addZeroEdges(const std::vector<Term> &nodes, std::vector<Edge> &edges) {
   for (size_t i = 1; i < nodes.size(); ++i) {
     std::optional<int64_t> hi, lo;
     if (nodes[i].isSum()) {
@@ -175,10 +233,13 @@ std::optional<int64_t> Facts::bound(Term lhs, Term rhs, bool sums) const {
       edges.push_back({0, i, -*lo});
     }
   }
+}
 
-  std::vector<int64_t> dist(nodes.size(), kInf);
+std::optional<int64_t> Facts::shortestDistance(size_t count, const std::vector<Edge> &edges,
+                                               size_t source, size_t target) {
+  std::vector<int64_t> dist(count, kInf);
   dist[source] = 0;
-  for (size_t round = 0; round + 1 < nodes.size(); ++round) {
+  for (size_t round = 0; round + 1 < count; ++round) {
     bool changed = false;
     for (const Edge &e : edges) {
       if (dist[e.from] == kInf) {

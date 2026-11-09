@@ -1,11 +1,41 @@
 #pragma once
 
 #include "compiler/semantic/semantic_state/semantic_state.h"
+#include "compiler/union/union/union.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
 #include <set>
 
 namespace tz {
+
+enum class InferStepKind { PAIR, HELD, LIST, CANDIDATE };
+
+struct InferPair {
+  static constexpr InferStepKind kind = InferStepKind::PAIR;
+  const Type *pattern;
+  const Type *actual;
+};
+
+struct InferHeld {
+  static constexpr InferStepKind kind = InferStepKind::HELD;
+  const Type *pattern;
+  const Type *actual;
+};
+
+struct InferList {
+  static constexpr InferStepKind kind = InferStepKind::LIST;
+  const Type *pattern;
+  const Type *actual;
+  const std::vector<const Type *> *bound;
+};
+
+struct AddCandidate {
+  static constexpr InferStepKind kind = InferStepKind::CANDIDATE;
+  size_t index;
+  const Type *type;
+};
+
+using InferStep = Union<InferPair, InferHeld, InferList, AddCandidate>;
 
 class Inference {
 public:
@@ -30,6 +60,13 @@ public:
 private:
   static const Type *paramsAsList(const Type *fn, size_t from);
   static const Type *listSlice(const Type *list, size_t begin, size_t end, bool last);
+
+  void runInference(InferStep first);
+  std::vector<InferStep> applyInferStep(const InferStep &step);
+  std::vector<InferStep> inferPair(const Type *pattern, const Type *actual);
+  std::vector<InferStep> inferHeld(const Type *pattern, const Type *actual);
+  std::vector<InferStep> inferList(const Type *pattern, const Type *actual,
+                                   const std::vector<const Type *> *bound);
 
   llvm::ArrayRef<const Type *> params;
   std::vector<std::vector<const Type *>> candidates, weakCandidates, literalCandidates;

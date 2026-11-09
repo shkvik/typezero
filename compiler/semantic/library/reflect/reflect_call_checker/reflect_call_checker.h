@@ -38,6 +38,7 @@ private:
   static bool isDesignKey(const Expr *key);
   static Expr *stripImplicit(Expr *expr);
   static bool declaredBelow(const ClassDecl *cls, llvm::StringRef name);
+  static bool acceptsPlain(const Type *arg, const Type *param);
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

@@ -85,21 +85,22 @@ const std::vector<const Type *> &Inference::getLiteralCandidates(size_t k) const
   return this->literalCandidates[k];
 }
 
-void Inference::from(const Type *pattern, const Type *actual) {
+std::vector<InferStep> Inference::inferPair(const Type *pattern, const Type *actual) {
+  std::vector<InferStep> inner;
   if (actual->isError()) {
-    return;
+    return inner;
   }
   if (actual->isVoid()) {
     if (auto at = llvm::find(this->params, pattern); at != this->params.end()) {
       this->candidates[size_t(at - this->params.begin())].push_back(actual);
     }
-    return;
+    return inner;
   }
   if (auto at = llvm::find(this->params, pattern); at != this->params.end()) {
     size_t k = size_t(at - this->params.begin());
     if (actual->isUndefined()) {
       this->undefinedSeen[k] = true;
-      return;
+      return inner;
     }
     const Type *element = pattern->iterated();
     const Type *candidate = actual;
@@ -112,85 +113,86 @@ void Inference::from(const Type *pattern, const Type *actual) {
         .push_back(candidate);
     if (element && this->elementOf) {
       if (const Type *given = this->elementOf(candidate)) {
-        this->from(element, given);
+        inner.push_back(InferPair{element, given});
       }
     }
-    return;
+    return inner;
   }
   if (!GenericCheckHelpers::mentionsAnyOf(pattern, this->params)) {
-    return;
+    return inner;
   }
   switch (pattern->kind()) {
   case Type::Kind::Optional:
     if (!actual->isUndefined()) {
-      this->from(pattern->inner(), actual->nonOptional());
+      inner.push_back(InferPair{pattern->inner(), actual->nonOptional()});
     }
-    return;
+    return inner;
   case Type::Kind::Array:
     if (actual->isArray()) {
-      this->from(pattern->inner(), actual->inner());
+      inner.push_back(InferPair{pattern->inner(), actual->inner()});
     }
-    return;
+    return inner;
   case Type::Kind::Result:
     if (actual->isResult()) {
-      this->fromHeld(pattern->okType(), actual->okType());
-      this->from(pattern->errType(), actual->errType());
+      inner.push_back(InferHeld{pattern->okType(), actual->okType()});
+      inner.push_back(InferPair{pattern->errType(), actual->errType()});
     }
-    return;
+    return inner;
   case Type::Kind::Function: {
     if (!actual->isFunction()) {
-      return;
+      return inner;
     }
     llvm::ArrayRef<const Type *> ps = pattern->params();
     bool list =
         pattern->hasRest() && (ps.back()->isListParam() || ArgListChecker::spreadsLists(ps.back()));
     size_t fixed = list ? ps.size() - 1 : ps.size();
     for (size_t i = 0; i < fixed && i < actual->params().size(); ++i) {
-      this->from(ps[i], actual->params()[i]);
+      inner.push_back(InferPair{ps[i], actual->params()[i]});
     }
     if (list && actual->params().size() - (actual->hasRest() ? 1 : 0) >= fixed) {
-      this->from(ps.back(), Inference::paramsAsList(actual, fixed));
+      inner.push_back(InferPair{ps.back(), Inference::paramsAsList(actual, fixed)});
     }
     if (auto at = llvm::find(this->params, pattern->ret());
         at != this->params.end() && actual->ret()->isVoid()) {
-      this->candidates[size_t(at - this->params.begin())].push_back(actual->ret());
+      inner.push_back(AddCandidate{size_t(at - this->params.begin()), actual->ret()});
     } else if (!pattern->ret()->isVoid()) {
-      this->from(pattern->ret(), actual->ret());
+      inner.push_back(InferPair{pattern->ret(), actual->ret()});
     }
-    return;
+    return inner;
   }
   case Type::Kind::Iterator:
     if (!actual->isIterator()) {
-      return;
+      return inner;
     }
-    this->from(pattern->yielded(), actual->yielded());
-    this->from(pattern->returned(), actual->returned());
-    this->from(pattern->sent(), actual->sent());
-    return;
+    inner.push_back(InferPair{pattern->yielded(), actual->yielded()});
+    inner.push_back(InferPair{pattern->returned(), actual->returned()});
+    inner.push_back(InferPair{pattern->sent(), actual->sent()});
+    return inner;
   case Type::Kind::Dict:
     if (pattern->isRecord() && actual->isObject() && !actual->isClass() && !actual->isTuple()) {
       for (const Field &f : actual->fields()) {
-        this->from(pattern->valueType(), f.type);
+        inner.push_back(InferPair{pattern->valueType(), f.type});
       }
-      return;
+      return inner;
     }
     if (!actual->isDict() || actual->dictKind() != pattern->dictKind()) {
-      return;
+      return inner;
     }
-    this->from(pattern->keyType(), actual->keyType());
-    this->from(pattern->valueType(), actual->valueType());
-    return;
+    inner.push_back(InferPair{pattern->keyType(), actual->keyType()});
+    inner.push_back(InferPair{pattern->valueType(), actual->valueType()});
+    return inner;
   case Type::Kind::Promise:
     if (actual->isPromise()) {
-      this->fromHeld(pattern->promised(), actual->promised());
+      inner.push_back(InferHeld{pattern->promised(), actual->promised()});
     }
-    return;
+    return inner;
   case Type::Kind::ClassRef:
     if (pattern->isConstructor() && actual->isClassRef()) {
-      this->from(pattern->constructed(),
-                 actual->isConstructor() ? actual->constructed() : actual->classRef()->type);
+      inner.push_back(InferPair{pattern->constructed(), actual->isConstructor()
+                                                            ? actual->constructed()
+                                                            : actual->classRef()->type});
     }
-    return;
+    return inner;
   case Type::Kind::Object: {
     if (pattern->isAsyncIterator()) {
       if (!actual->isAsyncIterator() && this->asyncOf) {
@@ -199,27 +201,27 @@ void Inference::from(const Type *pattern, const Type *actual) {
         }
       }
       if (actual->isAsyncIterator()) {
-        this->from(pattern->yielded(), actual->yielded());
-        this->from(pattern->returned(), actual->returned());
-        this->from(pattern->sent(), actual->sent());
+        inner.push_back(InferPair{pattern->yielded(), actual->yielded()});
+        inner.push_back(InferPair{pattern->returned(), actual->returned()});
+        inner.push_back(InferPair{pattern->sent(), actual->sent()});
       }
-      return;
+      return inner;
     }
     if (!actual->isObject() || !this->visited.insert({pattern, actual}).second) {
-      return;
+      return inner;
     }
     if (ArgListChecker::spreadsLists(pattern) && actual->isTuple()) {
-      this->matchList(pattern, actual, nullptr);
-      return;
+      inner.push_back(InferList{pattern, actual, nullptr});
+      return inner;
     }
     if (const ClassDecl *cls = pattern->classDecl(); cls && !pattern->typeArgs().empty()) {
       const ClassDecl *generic = cls->generic() ? cls->generic() : cls;
       if (const ClassDecl *found = GenericClassChecker::genericInstanceOf(actual, generic)) {
         for (size_t k = 0; k < pattern->typeArgs().size() && k < found->typeArgs.size(); ++k) {
-          this->from(pattern->typeArgs()[k], found->typeArgs[k]);
+          inner.push_back(InferPair{pattern->typeArgs()[k], found->typeArgs[k]});
         }
       }
-      return;
+      return inner;
     }
     if (const AliasOrigin *origin = this->origins.findAliasOrigin(pattern)) {
       std::vector<const Type *> queue{actual};
@@ -229,19 +231,19 @@ void Inference::from(const Type *pattern, const Type *actual) {
         if (other && other->alias == origin->alias) {
           const std::vector<const Type *> &want = origin->args, &have = other->args;
           for (size_t k = 0; k < want.size() && k < have.size(); ++k) {
-            this->from(want[k], have[k]);
+            inner.push_back(InferPair{want[k], have[k]});
           }
-          return;
+          return inner;
         }
         queue.insert(queue.end(), t->bases().begin(), t->bases().end());
       }
     }
     for (const Field &f : pattern->fields()) {
       if (const Field *a = actual->field(f.name)) {
-        this->from(f.type, a->type);
+        inner.push_back(InferPair{f.type, a->type});
       }
     }
-    return;
+    return inner;
   }
   case Type::Kind::Union: {
     std::vector<const Type *> open, fixed;
@@ -254,14 +256,14 @@ void Inference::from(const Type *pattern, const Type *actual) {
         const ClassDecl *cls = m->classDecl();
         if (cls && !m->typeArgs().empty() &&
             GenericClassChecker::genericInstanceOf(value, cls->generic() ? cls->generic() : cls)) {
-          this->from(m, value);
-          return;
+          inner.push_back(InferPair{m, value});
+          return inner;
         }
       }
-      return;
+      return inner;
     }
     if (open.empty()) {
-      return;
+      return inner;
     }
     std::vector<const Type *> rest;
     const Type *value = actual->nonOptional();
@@ -272,26 +274,28 @@ void Inference::from(const Type *pattern, const Type *actual) {
       }
     }
     if (!rest.empty()) {
-      this->from(open.front(), Type::unionOf(rest));
+      inner.push_back(InferPair{open.front(), Type::unionOf(rest)});
     }
-    return;
+    return inner;
   }
   default:
-    return;
+    return inner;
   }
 }
 
-void Inference::fromHeld(const Type *pattern, const Type *actual) {
+std::vector<InferStep> Inference::inferHeld(const Type *pattern, const Type *actual) {
   if (auto at = llvm::find(this->params, pattern); at != this->params.end() && actual->isVoid()) {
     (this->weak ? this->weakCandidates : this->candidates)[size_t(at - this->params.begin())]
         .push_back(actual);
-    return;
+    return {};
   }
-  this->from(pattern, actual);
+
+  return {InferPair{pattern, actual}};
 }
 
-void Inference::matchList(const Type *pattern, const Type *actual,
-                          const std::vector<const Type *> *bound) {
+std::vector<InferStep> Inference::inferList(const Type *pattern, const Type *actual,
+                                            const std::vector<const Type *> *bound) {
+  std::vector<InferStep> inner;
   llvm::ArrayRef<Field> parts = pattern->fields();
   size_t count = actual->fields().size();
   std::vector<int> lengths(parts.size(), 1);
@@ -313,30 +317,74 @@ void Inference::matchList(const Type *pattern, const Type *actual,
       if (!bound) {
         this->deferred.push_back({pattern, actual});
       }
-      return;
+      return inner;
     } else {
       unknown = int(i);
     }
   }
   if (known > count || (actual->tupleRest() && unknown != int(parts.size()) - 1)) {
-    return;
+    return inner;
   }
   if (unknown >= 0) {
     lengths[size_t(unknown)] = int(count - known);
   } else if (known != count) {
-    return;
+    return inner;
   }
   size_t at = 0;
   for (size_t i = 0; i < parts.size(); ++i) {
     size_t length = size_t(lengths[i]);
     if (parts[i].type->isListParam()) {
-      this->from(parts[i].type,
-                 Inference::listSlice(actual, at, at + length, i + 1 == parts.size()));
+      inner.push_back(InferPair{
+          parts[i].type, Inference::listSlice(actual, at, at + length, i + 1 == parts.size())});
     } else if (at < count) {
-      this->from(parts[i].type, actual->fields()[at].type);
+      inner.push_back(InferPair{parts[i].type, actual->fields()[at].type});
     }
     at += length;
   }
+
+  return inner;
+}
+
+void Inference::from(const Type *pattern, const Type *actual) {
+  this->runInference(InferPair{pattern, actual});
+}
+
+void Inference::fromHeld(const Type *pattern, const Type *actual) {
+  this->runInference(InferHeld{pattern, actual});
+}
+
+void Inference::matchList(const Type *pattern, const Type *actual,
+                          const std::vector<const Type *> *bound) {
+  this->runInference(InferList{pattern, actual, bound});
+}
+
+void Inference::runInference(InferStep first) {
+  std::vector<InferStep> steps = {first};
+  while (!steps.empty()) {
+    InferStep step = steps.back();
+    steps.pop_back();
+    std::vector<InferStep> inner = this->applyInferStep(step);
+    steps.insert(steps.end(), inner.rbegin(), inner.rend());
+  }
+}
+
+std::vector<InferStep> Inference::applyInferStep(const InferStep &step) {
+  switch (step.kind()) {
+    case InferStepKind::PAIR:
+      return this->inferPair(step.as<InferPair>()->pattern, step.as<InferPair>()->actual);
+    case InferStepKind::HELD:
+      return this->inferHeld(step.as<InferHeld>()->pattern, step.as<InferHeld>()->actual);
+    case InferStepKind::LIST: {
+      const InferList *list = step.as<InferList>();
+      return this->inferList(list->pattern, list->actual, list->bound);
+    }
+    case InferStepKind::CANDIDATE: {
+      const AddCandidate *candidate = step.as<AddCandidate>();
+      this->candidates[candidate->index].push_back(candidate->type);
+      return {};
+    }
+  }
+  llvm_unreachable("unknown inference step");
 }
 
 void Inference::retry(const std::vector<const Type *> &bound) {

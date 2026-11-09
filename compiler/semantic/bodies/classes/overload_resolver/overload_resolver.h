@@ -3,6 +3,7 @@
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/classes/overload_resolver/overload_resolver_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
+#include "compiler/union/union/union.h"
 
 namespace tz {
 
@@ -15,6 +16,40 @@ class ReturnInferrer;
 class ArgumentChecker;
 class TypeArgInferrer;
 class GenericInstantiator;
+
+enum class RankForm {
+  SAME,
+  OPTIONAL_SAME,
+  OPTIONAL_WRAP,
+  WORST_MEMBER,
+  BEST_TARGET,
+  RESULT,
+  FIELDS
+};
+
+enum class RankStepKind { GOAL, JOIN };
+
+struct RankGoal {
+  static constexpr RankStepKind kind = RankStepKind::GOAL;
+  const Type *from;
+  const Type *to;
+};
+
+struct RankJoin {
+  static constexpr RankStepKind kind = RankStepKind::JOIN;
+  const Type *from;
+  const Type *to;
+  RankForm form;
+  std::vector<RankGoal> parts;
+};
+
+using RankStep = Union<RankGoal, RankJoin>;
+
+struct RankRun {
+  std::vector<RankStep> steps;
+  std::vector<int> answers;
+  std::vector<std::pair<const Type *, const Type *>> path;
+};
 
 class OverloadResolver {
 public:
@@ -36,6 +71,14 @@ public:
 
 private:
   static int conversionRank(const Type *from, const Type *to);
+  static void enterRank(const Type *from, const Type *to, RankRun &run);
+  static std::optional<int> rankLeaf(const Type *from, const Type *to);
+  static bool sameShapeObjects(const Type *from, const Type *to);
+  static RankJoin rankJoin(const Type *from, const Type *to);
+  static void joinRanks(const RankJoin &join, RankRun &run);
+  static int worstRank(llvm::ArrayRef<int> ranks);
+  static int bestRank(llvm::ArrayRef<int> ranks);
+  static int resultRank(const RankJoin &join, llvm::ArrayRef<int> ranks);
   static const Type *parameterAt(const FuncSymbol *sym, size_t i);
   static bool hasFloatLiteral(const Expr *expr);
 

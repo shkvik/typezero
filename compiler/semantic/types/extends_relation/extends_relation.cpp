@@ -28,15 +28,82 @@ std::vector<const Type *> ExtendsRelation::distributed(const Type *type) {
 }
 
 bool ExtendsRelation::extendsType(const Type *type, const Type *pattern, InferMatch *inference) {
+  std::vector<ExtendsStep> steps = {ExtendsGoal{type, pattern}};
+  while (!steps.empty()) {
+    ExtendsStep step = std::move(steps.back());
+    steps.pop_back();
+    bool holds = this->applyExtendsStep(step, inference, steps);
+    if (!holds && !ExtendsRelation::retryChoice(steps, inference)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool ExtendsRelation::applyExtendsStep(const ExtendsStep &step, InferMatch *inference,
+                                       std::vector<ExtendsStep> &steps) {
+  switch (step.kind()) {
+    case ExtendsStepKind::GOAL:
+      return this->extendsStep(step.as<ExtendsGoal>()->type, step.as<ExtendsGoal>()->pattern,
+                               inference, steps);
+    case ExtendsStepKind::BIND:
+      ExtendsRelation::bindInfer(*step.as<BindInfer>(), inference);
+      return true;
+    case ExtendsStepKind::CHOICE:
+      return true;
+  }
+  llvm_unreachable("unknown extends step");
+}
+
+bool ExtendsRelation::retryChoice(std::vector<ExtendsStep> &steps, InferMatch *inference) {
+  while (!steps.empty()) {
+    ExtendsStep step = std::move(steps.back());
+    steps.pop_back();
+    const ExtendsChoice *choice = step.as<ExtendsChoice>();
+    if (choice == nullptr) {
+      continue;
+    }
+    if (inference) {
+      inference->bound = choice->saved;
+    }
+    bool tried = ExtendsRelation::tryAlternative(
+        ExtendsChoice{choice->type, choice->pattern, choice->next + 1, choice->saved}, steps);
+    if (tried) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool ExtendsRelation::tryAlternative(ExtendsChoice choice, std::vector<ExtendsStep> &steps) {
+  llvm::ArrayRef<const Type *> members = choice.pattern->members();
+  if (choice.next >= members.size()) {
+    return false;
+  }
+  const Type *member = members[choice.next];
+  const Type *type = choice.type;
+  steps.push_back(std::move(choice));
+  steps.push_back(ExtendsGoal{type, member});
+
+  return true;
+}
+
+void ExtendsRelation::bindInfer(const BindInfer &bind, InferMatch *inference) {
+  const Type *&bound = inference->bound[bind.index];
+  bound = bound && bound != bind.type ? Type::unionOf({bound, bind.type}) : bind.type;
+}
+
+bool ExtendsRelation::extendsStep(const Type *type, const Type *pattern, InferMatch *inference,
+                                  std::vector<ExtendsStep> &steps) {
   if (inference) {
     auto found = llvm::find(inference->params, pattern);
     if (found != inference->params.end()) {
-      if (const Type *constraint = pattern->constraint();
-          constraint && !this->extendsType(type, constraint, inference)) {
-        return false;
+      steps.push_back(BindInfer{size_t(found - inference->params.begin()), type});
+      if (const Type *constraint = pattern->constraint()) {
+        steps.push_back(ExtendsGoal{type, constraint});
       }
-      const Type *&bound = inference->bound[size_t(found - inference->params.begin())];
-      bound = bound && bound != type ? Type::unionOf({bound, type}) : type;
       return true;
     }
   }
@@ -50,26 +117,22 @@ bool ExtendsRelation::extendsType(const Type *type, const Type *pattern, InferMa
     return false;
   }
   if (type->isUnion() || type->isOptional()) {
-    return llvm::all_of(ExtendsRelation::distributed(type),
-                        [&](const Type *m) { return this->extendsType(m, pattern, inference); });
+    ExtendsRelation::pushGoals(ExtendsRelation::distributed(type), pattern, steps);
+    return true;
   }
   if (pattern->isOptional()) {
-    return type->isUndefined() || this->extendsType(type, pattern->inner(), inference);
+    if (!type->isUndefined()) {
+      steps.push_back(ExtendsGoal{type, pattern->inner()});
+    }
+    return true;
   }
   if (type->isUndefined()) {
     return false;
   }
   if (pattern->isUnion()) {
-    for (const Type *m : pattern->members()) {
-      std::vector<const Type *> saved = inference ? inference->bound : std::vector<const Type *>();
-      if (this->extendsType(type, m, inference)) {
-        return true;
-      }
-      if (inference) {
-        inference->bound = std::move(saved);
-      }
-    }
-    return false;
+    std::vector<const Type *> saved = inference ? inference->bound : std::vector<const Type *>();
+    return ExtendsRelation::tryAlternative(ExtendsChoice{type, pattern, 0, std::move(saved)},
+                                           steps);
   }
   if (pattern->typeOp() == TypeOp::Template) {
     return type->isStringLiteral() &&
@@ -83,7 +146,11 @@ bool ExtendsRelation::extendsType(const Type *type, const Type *pattern, InferMa
     return pattern == Type::string();
   }
   if (type->isLiteral()) {
-    return !pattern->isLiteral() && this->extendsType(type->literalBase(), pattern, inference);
+    if (pattern->isLiteral()) {
+      return false;
+    }
+    steps.push_back(ExtendsGoal{type->literalBase(), pattern});
+    return true;
   }
   if (pattern->isLiteral() || type->isParam() || pattern->isParam()) {
     return false;
@@ -91,18 +158,26 @@ bool ExtendsRelation::extendsType(const Type *type, const Type *pattern, InferMa
   if (pattern->isAnyObject()) {
     return UnknownChecker::isObjectReference(type);
   }
+
+  return this->structureStep(type, pattern, inference, steps);
+}
+
+bool ExtendsRelation::structureStep(const Type *type, const Type *pattern, InferMatch *inference,
+                                    std::vector<ExtendsStep> &steps) {
   if (type->isArray()) {
-    return pattern->isArray() && this->extendsType(type->inner(), pattern->inner(), inference);
+    return pattern->isArray() &&
+           ExtendsRelation::pushPairs({{type->inner(), pattern->inner()}}, steps);
   }
   if (type->isTuple()) {
     if (pattern->isArray()) {
+      std::vector<ExtendsGoal> goals;
       for (const Field &f : type->fields()) {
-        if (!this->extendsType(f.type, pattern->inner(), inference)) {
-          return false;
-        }
+        goals.push_back(ExtendsGoal{f.type, pattern->inner()});
       }
-      return !type->tupleRest() ||
-             this->extendsType(type->tupleRest()->inner(), pattern->inner(), inference);
+      if (type->tupleRest()) {
+        goals.push_back(ExtendsGoal{type->tupleRest()->inner(), pattern->inner()});
+      }
+      return ExtendsRelation::pushPairs(goals, steps);
     }
     return pattern->isTuple() && this->extendsTuple(type, pattern, inference);
   }
@@ -111,22 +186,25 @@ bool ExtendsRelation::extendsType(const Type *type, const Type *pattern, InferMa
   }
   if (type->isPromise()) {
     return pattern->isPromise() &&
-           this->extendsType(type->promised(), pattern->promised(), inference);
+           ExtendsRelation::pushPairs({{type->promised(), pattern->promised()}}, steps);
   }
   if (type->isIterator()) {
     return pattern->isIterator() &&
-           this->extendsType(type->yielded(), pattern->yielded(), inference) &&
-           this->extendsType(type->returned(), pattern->returned(), inference) &&
-           this->extendsType(type->sent(), pattern->sent(), inference);
+           ExtendsRelation::pushPairs({{type->yielded(), pattern->yielded()},
+                                       {type->returned(), pattern->returned()},
+                                       {type->sent(), pattern->sent()}},
+                                      steps);
   }
   if (type->isDict()) {
     return pattern->isDict() && type->dictKind() == pattern->dictKind() &&
-           this->extendsType(type->keyType(), pattern->keyType(), inference) &&
-           this->extendsType(type->valueType(), pattern->valueType(), inference);
+           ExtendsRelation::pushPairs(
+               {{type->keyType(), pattern->keyType()}, {type->valueType(), pattern->valueType()}},
+               steps);
   }
   if (type->isResult()) {
-    return pattern->isResult() && this->extendsType(type->okType(), pattern->okType(), inference) &&
-           this->extendsType(type->errType(), pattern->errType(), inference);
+    return pattern->isResult() &&
+           ExtendsRelation::pushPairs(
+               {{type->okType(), pattern->okType()}, {type->errType(), pattern->errType()}}, steps);
   }
   if (type->isObject() && pattern->isObject()) {
     return this->extendsObject(type, pattern, inference);
@@ -134,6 +212,22 @@ bool ExtendsRelation::extendsType(const Type *type, const Type *pattern, InferMa
 
   return !pattern->isObject() && !type->isObject() &&
          TypeRelations::isImplicitlyConvertible(type, pattern);
+}
+
+void ExtendsRelation::pushGoals(llvm::ArrayRef<const Type *> types, const Type *pattern,
+                                std::vector<ExtendsStep> &steps) {
+  for (const Type *type : llvm::reverse(types)) {
+    steps.push_back(ExtendsGoal{type, pattern});
+  }
+}
+
+bool ExtendsRelation::pushPairs(llvm::ArrayRef<ExtendsGoal> goals,
+                                std::vector<ExtendsStep> &steps) {
+  for (const ExtendsGoal &goal : llvm::reverse(goals)) {
+    steps.push_back(goal);
+  }
+
+  return true;
 }
 
 bool ExtendsRelation::extendsTuple(const Type *type, const Type *pattern, InferMatch *inference) {

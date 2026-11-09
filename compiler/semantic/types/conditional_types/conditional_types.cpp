@@ -230,6 +230,50 @@ const Type *ConditionalTypes::resolveTypeArgument(const TypeRef &ref) {
 const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
   bool tail = this->state.getTypeContext().isTailCallAllowed();
   this->state.getTypeContext().forbidTailCall();
+  PreparedConditional prepared;
+  if (const Type *early = this->prepareConditional(ref, prepared)) {
+    return early;
+  }
+  bool binding = ref.args[0].kind() == TypeRefKind::NAME_REF &&
+                 ConditionalTypes::isBinding(this->typeDeclarer->lookupType(ref.args[0].name));
+  std::vector<const Type *> members =
+      binding ? ConditionalTypes::distributed(prepared.check) : std::vector<const Type *>();
+  if (binding && members.size() != 1) {
+    return this->distributeConditional(ref, members);
+  }
+
+  return this->chooseBranch(ref, prepared, tail);
+}
+
+const Type *ConditionalTypes::distributeConditional(const TypeRef &ref,
+                                                    llvm::ArrayRef<const Type *> members) {
+  std::vector<const Type *> results;
+  for (const Type *m : members) {
+    this->state.getScopeStack().openTypeScope();
+    this->bindType(ref.args[0].name, m, ref.loc);
+    const Type *result = this->memberConditional(ref);
+    this->state.getScopeStack().closeTypeScope();
+    if (result->isError()) {
+      return result;
+    }
+    results.push_back(result);
+  }
+
+  return results.empty() ? Type::never() : Type::unionOf(results);
+}
+
+const Type *ConditionalTypes::memberConditional(const TypeRef &ref) {
+  this->state.getTypeContext().forbidTailCall();
+  PreparedConditional prepared;
+  if (const Type *early = this->prepareConditional(ref, prepared)) {
+    return early;
+  }
+
+  return this->chooseBranch(ref, prepared, false);
+}
+
+const Type *ConditionalTypes::prepareConditional(const TypeRef &ref,
+                                                 PreparedConditional &prepared) {
   if (ref.args.size() != 4) {
     return Type::error();
   }
@@ -272,24 +316,17 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
       ConditionalTypes::mentionsParamBesides(pattern, infers)) {
     return this->deferConditional(ref);
   }
-  if (ref.args[0].kind() == TypeRefKind::NAME_REF &&
-      ConditionalTypes::isBinding(this->typeDeclarer->lookupType(ref.args[0].name))) {
-    std::vector<const Type *> members = ConditionalTypes::distributed(check);
-    if (members.size() != 1) {
-      std::vector<const Type *> results;
-      for (const Type *m : members) {
-        this->state.getScopeStack().openTypeScope();
-        this->bindType(ref.args[0].name, m, ref.loc);
-        const Type *result = this->resolveConditional(ref);
-        this->state.getScopeStack().closeTypeScope();
-        if (result->isError()) {
-          return result;
-        }
-        results.push_back(result);
-      }
-      return results.empty() ? Type::never() : Type::unionOf(results);
-    }
-  }
+  prepared = PreparedConditional{check, pattern, std::move(inferRefs), std::move(infers)};
+
+  return nullptr;
+}
+
+const Type *ConditionalTypes::chooseBranch(const TypeRef &ref, const PreparedConditional &prepared,
+                                           bool tail) {
+  const Type *check = prepared.check;
+  const Type *pattern = prepared.pattern;
+  const std::vector<const TypeRef *> &inferRefs = prepared.inferRefs;
+  const std::vector<const Type *> &infers = prepared.infers;
   InferMatch inference{infers, std::vector<const Type *>(infers.size(), nullptr)};
   bool yes = this->extendsRelation->extendsType(check, pattern, &inference);
   this->state.getScopeStack().openTypeScope();
@@ -443,28 +480,78 @@ std::vector<const Type *> ConditionalTypes::conditionalBranches(const Type *cond
 }
 
 bool ConditionalTypes::fitsConditional(const Type *from, const Type *to, unsigned depth) {
-  if (depth > 8 || to->typeOp() != TypeOp::Conditional) {
+  std::vector<FitsStep> steps = {FitsGoal{from, to, depth}};
+  while (!steps.empty()) {
+    FitsStep step = std::move(steps.back());
+    steps.pop_back();
+    const FitsGoal *goal = step.as<FitsGoal>();
+    bool holds = goal == nullptr || this->fitsStep(*goal, steps);
+    if (!holds && !this->retryFits(steps)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool ConditionalTypes::fitsStep(const FitsGoal &goal, std::vector<FitsStep> &steps) {
+  if (goal.depth > 8 || goal.to->typeOp() != TypeOp::Conditional) {
     return false;
   }
-  if (from->isUnion()) {
-    return llvm::all_of(from->members(),
-                        [&](const Type *m) { return this->fitsConditional(m, to, depth + 1); });
-  }
-  for (const Type *branch : this->conditionalBranches(to)) {
-    if (TypeRelations::isImplicitlyConvertible(from, branch) ||
-        this->fitsConditional(from, branch, depth + 1)) {
-      return true;
+  if (goal.from->isUnion()) {
+    for (const Type *m : llvm::reverse(goal.from->members())) {
+      steps.push_back(FitsGoal{m, goal.to, goal.depth + 1});
     }
-    std::vector<const Type *> params;
-    llvm::SmallPtrSet<const Type *, 8> seen;
-    ConditionalTypes::collectParams(branch, params, seen);
-    InferMatch match{params, std::vector<const Type *>(params.size(), nullptr)};
-    if (!params.empty() && this->extendsRelation->extendsType(from, branch, &match)) {
+    return true;
+  }
+  std::vector<const Type *> branches = this->conditionalBranches(goal.to);
+
+  return this->tryFitsAlternative(FitsChoice{goal.from, goal.depth, std::move(branches), 0}, steps);
+}
+
+bool ConditionalTypes::retryFits(std::vector<FitsStep> &steps) {
+  while (!steps.empty()) {
+    FitsStep step = std::move(steps.back());
+    steps.pop_back();
+    FitsChoice *choice = step.as<FitsChoice>();
+    if (choice != nullptr && this->tryFitsAlternative(std::move(*choice), steps)) {
       return true;
     }
   }
 
   return false;
+}
+
+bool ConditionalTypes::tryFitsAlternative(FitsChoice choice, std::vector<FitsStep> &steps) {
+  while (choice.next < choice.branches.size() * 3) {
+    const Type *branch = choice.branches[choice.next / 3];
+    size_t way = choice.next % 3;
+    choice.next += 1;
+    if (way == 0 && TypeRelations::isImplicitlyConvertible(choice.from, branch)) {
+      return true;
+    }
+    if (way == 1) {
+      const Type *from = choice.from;
+      unsigned depth = choice.depth;
+      steps.push_back(std::move(choice));
+      steps.push_back(FitsGoal{from, branch, depth + 1});
+      return true;
+    }
+    if (way == 2 && this->extendsWithParams(choice.from, branch)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool ConditionalTypes::extendsWithParams(const Type *from, const Type *branch) {
+  std::vector<const Type *> params;
+  llvm::SmallPtrSet<const Type *, 8> seen;
+  ConditionalTypes::collectParams(branch, params, seen);
+  InferMatch match{params, std::vector<const Type *>(params.size(), nullptr)};
+
+  return !params.empty() && this->extendsRelation->extendsType(from, branch, &match);
 }
 
 ConditionalTypes::ResultIntersectionJoined

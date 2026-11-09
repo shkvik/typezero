@@ -109,13 +109,20 @@ Expr *ReflectCallChecker::stripImplicit(Expr *expr) {
 }
 
 bool ReflectCallChecker::reflectAccepts(const Type *arg, const Type *param) {
-  if (param->isUnknown()) {
-    return true;
+  const Type *given = arg;
+  const Type *wanted = param;
+  while (wanted->isOptional()) {
+    if (given->isUndefined()) {
+      return true;
+    }
+    given = given->isOptional() ? given->inner() : given;
+    wanted = wanted->inner();
   }
-  if (param->isOptional()) {
-    return arg->isUndefined() || ReflectCallChecker::reflectAccepts(
-                                     arg->isOptional() ? arg->inner() : arg, param->inner());
-  }
+
+  return wanted->isUnknown() || ReflectCallChecker::acceptsPlain(given, wanted);
+}
+
+bool ReflectCallChecker::acceptsPlain(const Type *arg, const Type *param) {
   if (arg->isOptional() || arg->isUnion() || param->isUnion()) {
     return false;
   }

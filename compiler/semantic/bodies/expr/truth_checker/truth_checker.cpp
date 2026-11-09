@@ -185,38 +185,99 @@ Expr *TruthChecker::checkCondition(Expr *cond, Flow &whenTrue, Flow &whenFalse) 
 }
 
 Expr *TruthChecker::checkBranching(Expr *expr, Flow &whenTrue, Flow &whenFalse, TruthUse use) {
-  if (auto *bin = dyn_cast<BinaryExpr>(expr);
-      bin && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr)) {
-    bool isAnd = bin->op == BinaryOp::LogAnd;
-    Flow lhsTrue, lhsFalse, rhsTrue, rhsFalse;
-    bin->lhs = this->checkBranching(bin->lhs, lhsTrue, lhsFalse);
-    if (std::optional<bool> constant = this->state.getGenericStore().isCheckingInstance()
-                                           ? this->genericChecker->constantCondition(bin->lhs)
-                                           : std::nullopt;
-        constant && *constant != isAnd) {
-      whenTrue = lhsTrue;
-      whenFalse = lhsFalse;
-      this->state.getFlowState().replaceFlow(FlowChecker::join(whenTrue, whenFalse));
+  BranchRun run;
+  run.steps.push_back(BranchExpr{expr, use});
+  while (!run.steps.empty()) {
+    BranchStep step = std::move(run.steps.back());
+    run.steps.pop_back();
+    this->applyBranchStep(step, run);
+  }
+  BranchResult result = std::move(run.results.back());
+  whenTrue = std::move(result.whenTrue);
+  whenFalse = std::move(result.whenFalse);
 
-      return bin->lhs;
-    }
-    this->state.getFlowState().replaceFlow(isAnd ? lhsTrue : lhsFalse);
-    bin->rhs = this->checkBranching(bin->rhs, rhsTrue, rhsFalse);
-    whenTrue = isAnd ? rhsTrue : FlowChecker::join(lhsTrue, rhsTrue);
-    whenFalse = isAnd ? FlowChecker::join(lhsFalse, rhsFalse) : rhsFalse;
-    this->state.getFlowState().replaceFlow(FlowChecker::join(whenTrue, whenFalse));
-    this->jsonChecker->checkRedundantTests(bin);
-    bin->type = Type::boolTy();
-    return bin;
+  return result.expr;
+}
+
+void TruthChecker::applyBranchStep(BranchStep &step, BranchRun &run) {
+  switch (step.kind()) {
+    case BranchStepKind::EXPR:
+      this->enterBranch(*step.as<BranchExpr>(), run);
+      break;
+    case BranchStepKind::LEFT_DONE:
+      this->leftDone(step.as<LeftDone>()->bin, run);
+      break;
+    case BranchStepKind::RIGHT_DONE:
+      this->rightDone(*step.as<RightDone>(), run);
+      break;
+    case BranchStepKind::NOT_DONE:
+      TruthChecker::notDone(step.as<NotDone>()->unary, run);
+      break;
+  }
+}
+
+void TruthChecker::enterBranch(const BranchExpr &branch, BranchRun &run) {
+  Expr *expr = branch.expr;
+  auto *bin = dyn_cast<BinaryExpr>(expr);
+  if (bin && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr)) {
+    run.steps.push_back(LeftDone{bin});
+    run.steps.push_back(BranchExpr{bin->lhs, TruthUse::Condition});
+    return;
   }
   if (auto *unary = dyn_cast<UnaryExpr>(expr); unary && unary->op == UnaryOp::Not) {
-    Flow operandTrue, operandFalse;
-    unary->operand = this->checkBranching(unary->operand, operandTrue, operandFalse, TruthUse::Not);
-    whenTrue = operandFalse;
-    whenFalse = operandTrue;
-    unary->type = Type::boolTy();
-    return unary;
+    run.steps.push_back(NotDone{unary});
+    run.steps.push_back(BranchExpr{unary->operand, TruthUse::Not});
+    return;
   }
+  BranchResult result;
+  result.expr = this->branchLeaf(expr, result.whenTrue, result.whenFalse, branch.use);
+  run.results.push_back(std::move(result));
+}
+
+void TruthChecker::leftDone(BinaryExpr *bin, BranchRun &run) {
+  BranchResult left = ChildrenFirst::takeAnswer(run.results);
+  bin->lhs = left.expr;
+  bool isAnd = bin->op == BinaryOp::LogAnd;
+  std::optional<bool> constant = this->state.getGenericStore().isCheckingInstance()
+                                     ? this->genericChecker->constantCondition(bin->lhs)
+                                     : std::nullopt;
+  if (constant && *constant != isAnd) {
+    this->state.getFlowState().replaceFlow(FlowChecker::join(left.whenTrue, left.whenFalse));
+    run.results.push_back(std::move(left));
+    return;
+  }
+  this->state.getFlowState().replaceFlow(isAnd ? left.whenTrue : left.whenFalse);
+  run.steps.push_back(RightDone{bin, std::move(left.whenTrue), std::move(left.whenFalse)});
+  run.steps.push_back(BranchExpr{bin->rhs, TruthUse::Condition});
+}
+
+void TruthChecker::rightDone(RightDone &done, BranchRun &run) {
+  BranchResult right = ChildrenFirst::takeAnswer(run.results);
+  BinaryExpr *bin = done.bin;
+  bin->rhs = right.expr;
+  bool isAnd = bin->op == BinaryOp::LogAnd;
+  BranchResult result;
+  result.expr = bin;
+  result.whenTrue = isAnd ? right.whenTrue : FlowChecker::join(done.lhsTrue, right.whenTrue);
+  result.whenFalse = isAnd ? FlowChecker::join(done.lhsFalse, right.whenFalse) : right.whenFalse;
+  this->state.getFlowState().replaceFlow(FlowChecker::join(result.whenTrue, result.whenFalse));
+  this->jsonChecker->checkRedundantTests(bin);
+  bin->type = Type::boolTy();
+  run.results.push_back(std::move(result));
+}
+
+void TruthChecker::notDone(UnaryExpr *unary, BranchRun &run) {
+  BranchResult operand = ChildrenFirst::takeAnswer(run.results);
+  unary->operand = operand.expr;
+  unary->type = Type::boolTy();
+  BranchResult result;
+  result.expr = unary;
+  result.whenTrue = std::move(operand.whenFalse);
+  result.whenFalse = std::move(operand.whenTrue);
+  run.results.push_back(std::move(result));
+}
+
+Expr *TruthChecker::branchLeaf(Expr *expr, Flow &whenTrue, Flow &whenFalse, TruthUse use) {
   if (this->isBooleanCall(expr)) {
     return this->checkBooleanCall(cast<CallExpr>(expr), whenTrue, whenFalse);
   }

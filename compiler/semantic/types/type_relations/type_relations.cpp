@@ -83,64 +83,135 @@ bool TypeRelations::copiesIntoRecord(const Type *from, const Type *to) {
 }
 
 bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
-  if (from == to) {
-    return true;
+  std::vector<ConversionGoal> goals = {ConversionGoal{from, to}};
+  while (!goals.empty()) {
+    ConversionGoal goal = goals.back();
+    goals.pop_back();
+    ConversionStep step = TypeRelations::conversionStep(goal.from, goal.to);
+    if (!step.possible) {
+      return false;
+    }
+    goals.insert(goals.end(), step.needs.rbegin(), step.needs.rend());
   }
-  if (from->isNever()) {
-    return true;
+
+  return true;
+}
+
+ConversionStep TypeRelations::conversionStep(const Type *from, const Type *to) {
+  if (from == to || from->isNever()) {
+    return TypeRelations::stepHolds();
   }
   if (to->isUnknown()) {
-    return !from->isVoid();
+    return TypeRelations::stepDecided(!from->isVoid());
   }
   if (to->isAnyObject()) {
-    return UnknownChecker::isObjectReference(from) ||
-           (from->isParam() && from->constraint() &&
-            TypeRelations::isImplicitlyConvertible(from->constraint(), to));
+    if (UnknownChecker::isObjectReference(from)) {
+      return TypeRelations::stepHolds();
+    }
+    bool constrained = from->isParam() && from->constraint();
+    return constrained ? TypeRelations::stepNeeds({{from->constraint(), to}})
+                       : TypeRelations::stepDecided(false);
   }
   if (to->isConstructor() && from->isClassRef()) {
     if (from->classRef() && from->classRef()->isGeneric()) {
-      return false;
+      return TypeRelations::stepDecided(false);
     }
     const Type *made = ClassValueChecker::constructedBy(from);
-    return made ? TypeRelations::isImplicitlyConvertible(made, to->constructed())
-                : to->constructed()->isAnyObject();
+    return made ? TypeRelations::stepNeeds({{made, to->constructed()}})
+                : TypeRelations::stepDecided(to->constructed()->isAnyObject());
   }
   if (to->isJson()) {
-    return from->isString() || from->isNumeric() || from->isBool() || from->isLiteral() ||
-           (from->isArray() && from->inner()->isJson()) ||
-           (from->isRecord() && from->keyType()->isString() &&
-            !TypeRelations::holdsWideInteger(from->valueType()) &&
-            TypeRelations::isImplicitlyConvertible(from->valueType()->nonOptional(), to));
+    return TypeRelations::jsonStep(from, to);
   }
   if (to->isOptional()) {
-    return from->isUndefined() ||
-           TypeRelations::isImplicitlyConvertible(from->nonOptional(), to->inner());
+    return from->isUndefined() ? TypeRelations::stepHolds()
+                               : TypeRelations::stepNeeds({{from->nonOptional(), to->inner()}});
   }
   if (to->isUnion()) {
     if (from->isUnion()) {
-      return llvm::all_of(from->members(),
-                          [&](const Type *m) { return LiteralTypes::unionMemberFor(m, to); });
+      bool all = llvm::all_of(from->members(),
+                              [&](const Type *m) { return LiteralTypes::unionMemberFor(m, to); });
+      return TypeRelations::stepDecided(all);
     }
-    return LiteralTypes::unionMemberFor(from, to) != nullptr;
+    return TypeRelations::stepDecided(LiteralTypes::unionMemberFor(from, to) != nullptr);
   }
   if (from->isUnion()) {
-    return !from->isTagged() && !UnionSlots::hasParamMember(from) &&
-           llvm::all_of(from->members(), [&](const Type *m) {
-             return TypeRelations::isImplicitlyConvertible(m, to);
-           });
+    if (from->isTagged() || UnionSlots::hasParamMember(from)) {
+      return TypeRelations::stepDecided(false);
+    }
+    std::vector<ConversionGoal> members;
+    for (const Type *m : from->members()) {
+      members.push_back(ConversionGoal{m, to});
+    }
+    return TypeRelations::stepNeeds(std::move(members));
   }
   if (to->isPattern()) {
-    return from->isStringLiteral() && TemplatePatterns::matchesPattern(from->literalText(), to);
+    return TypeRelations::stepDecided(from->isStringLiteral() &&
+                                      TemplatePatterns::matchesPattern(from->literalText(), to));
   }
   if (from->isPattern()) {
-    return to == Type::string();
+    return TypeRelations::stepDecided(to == Type::string());
   }
   if (from->isLiteral()) {
-    return !to->isLiteral() && TypeRelations::isImplicitlyConvertible(from->literalBase(), to);
+    return to->isLiteral() ? TypeRelations::stepDecided(false)
+                           : TypeRelations::stepNeeds({{from->literalBase(), to}});
   }
   if (from->isParam() && from->constraint()) {
-    return TypeRelations::isImplicitlyConvertible(from->constraint(), to);
+    return TypeRelations::stepNeeds({{from->constraint(), to}});
   }
+
+  std::optional<bool> plain = TypeRelations::plainConvertible(from, to);
+  if (plain.has_value()) {
+    return TypeRelations::stepDecided(*plain);
+  }
+  if (from->isResult() && to->isResult()) {
+    return TypeRelations::resultStep(from, to);
+  }
+
+  return TypeRelations::stepDecided(false);
+}
+
+ConversionStep TypeRelations::stepHolds() {
+  return ConversionStep{true, {}};
+}
+
+ConversionStep TypeRelations::stepDecided(bool possible) {
+  return ConversionStep{possible, {}};
+}
+
+ConversionStep TypeRelations::stepNeeds(std::vector<ConversionGoal> goals) {
+  return ConversionStep{true, std::move(goals)};
+}
+
+ConversionStep TypeRelations::jsonStep(const Type *from, const Type *to) {
+  bool plain = from->isString() || from->isNumeric() || from->isBool() || from->isLiteral() ||
+               (from->isArray() && from->inner()->isJson());
+  if (plain) {
+    return TypeRelations::stepHolds();
+  }
+  bool record = from->isRecord() && from->keyType()->isString() &&
+                !TypeRelations::holdsWideInteger(from->valueType());
+  return record ? TypeRelations::stepNeeds({{from->valueType()->nonOptional(), to}})
+                : TypeRelations::stepDecided(false);
+}
+
+ConversionStep TypeRelations::resultStep(const Type *from, const Type *to) {
+  std::vector<ConversionGoal> needs;
+  for (auto [a, b] :
+       {std::pair{from->okType(), to->okType()}, std::pair{from->errType(), to->errType()}}) {
+    if (a == b || a->isNever()) {
+      continue;
+    }
+    if (a->isVoid() || b->isVoid()) {
+      return TypeRelations::stepDecided(false);
+    }
+    needs.push_back(ConversionGoal{a, b});
+  }
+
+  return TypeRelations::stepNeeds(std::move(needs));
+}
+
+std::optional<bool> TypeRelations::plainConvertible(const Type *from, const Type *to) {
   if (from->isArray() && to->isArray()) {
     return WideningRelations::sameReference(from->inner(), to->inner());
   }
@@ -181,15 +252,8 @@ bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
   if (TypeRelations::copiesIntoRecord(from, to)) {
     return true;
   }
-  if (from->isResult() && to->isResult()) {
-    auto half = [](const Type *a, const Type *b) {
-      return a == b || a->isNever() ||
-             (!a->isVoid() && !b->isVoid() && TypeRelations::isImplicitlyConvertible(a, b));
-    };
-    return half(from->okType(), to->okType()) && half(from->errType(), to->errType());
-  }
 
-  return false;
+  return std::nullopt;
 }
 
 const Type *TypeRelations::commonNumericType(const Type *a, const Type *b) {

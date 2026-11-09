@@ -113,15 +113,32 @@ bool GenericWidening::referenceFits(const Type *own, const Type *wide) {
     return true;
   }
   if (own->isUnion() && !own->isTagged()) {
-    return llvm::all_of(own->members(),
-                        [&](const Type *m) { return GenericWidening::referenceFits(m, wide); });
-  }
-  if (wide->isUnion() && !wide->isTagged()) {
-    return llvm::any_of(wide->members(),
-                        [&](const Type *m) { return GenericWidening::referenceFits(own, m); });
+    for (const Type *member : own->members()) {
+      if (!GenericWidening::fitsWide(member, wide)) {
+        return false;
+      }
+    }
+    return true;
   }
 
-  return WideningRelations::sameReference(own, wide);
+  return GenericWidening::fitsWide(own, wide);
+}
+
+bool GenericWidening::fitsWide(const Type *own, const Type *wide) {
+  if (own == wide || own->isNever()) {
+    return true;
+  }
+  if (!wide->isUnion() || wide->isTagged()) {
+    return WideningRelations::sameReference(own, wide);
+  }
+  for (const Type *member : wide->members()) {
+    bool fits = own == member || own->isNever() || WideningRelations::sameReference(own, member);
+    if (fits) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 bool GenericWidening::covariant(const ClassDecl *generic, size_t index) {

@@ -9,8 +9,23 @@ WideningRelations::WideningRelations(SemanticState &owner)
 
 void WideningRelations::collectNarrowings(const Type *from, const Type *to, int depth,
                                           std::vector<NarrowedPart> &out, TypePairs &seen) {
-  from = from->nonOptional();
-  to = to->nonOptional();
+  std::vector<NarrowingStep> steps = {VisitNarrowing{from, to, depth}};
+  while (!steps.empty()) {
+    NarrowingStep step = steps.back();
+    steps.pop_back();
+    if (const VisitNarrowing *visit = step.as<VisitNarrowing>()) {
+      WideningRelations::visitNarrowing(*visit, out, seen, steps);
+    } else {
+      out.push_back(step.as<EmitNarrowing>()->part);
+    }
+  }
+}
+
+void WideningRelations::visitNarrowing(const VisitNarrowing &visit, std::vector<NarrowedPart> &out,
+                                       TypePairs &seen, std::vector<NarrowingStep> &steps) {
+  const Type *from = visit.from->nonOptional();
+  const Type *to = visit.to->nonOptional();
+  int depth = visit.depth;
   if (from == to || depth > WideningRelations::maxDepth) {
     return;
   }
@@ -28,48 +43,53 @@ void WideningRelations::collectNarrowings(const Type *from, const Type *to, int 
           .owner = from,
       });
     }
-    WideningRelations::collectNarrowings(from->inner(), to->inner(), depth + 1, out, seen);
+    steps.push_back(VisitNarrowing{from->inner(), to->inner(), depth + 1});
     return;
   }
   if (from->isUnion()) {
-    if (llvm::is_contained(from->members(), to)) {
-      return;
-    }
-    for (const Type *member : from->members()) {
-      WideningRelations::collectNarrowings(member, to, depth, out, seen);
+    if (!llvm::is_contained(from->members(), to)) {
+      for (const Type *member : llvm::reverse(from->members())) {
+        steps.push_back(VisitNarrowing{member, to, depth});
+      }
     }
     return;
   }
   bool objects = from->isObject() && to->isObject() && !from->isAnyObject() && !to->isAnyObject();
-  if (!objects) {
-    return;
+  if (objects) {
+    WideningRelations::pushFieldNarrowings(from, to, depth, steps);
   }
+}
+
+void WideningRelations::pushFieldNarrowings(const Type *from, const Type *to, int depth,
+                                            std::vector<NarrowingStep> &steps) {
+  std::vector<NarrowingStep> fieldSteps;
   for (const Field &wide : to->fields()) {
     const Field *own = from->field(wide.name);
     if (!own) {
       continue;
     }
     if (own->readonly && !wide.readonly) {
-      out.push_back(NarrowedPart{
+      fieldSteps.push_back(EmitNarrowing{NarrowedPart{
           .depth = depth,
           .element = false,
           .name = wide.name,
           .narrow = nullptr,
           .owner = from,
-      });
+      }});
     } else if (own->type != wide.type) {
-      out.push_back(NarrowedPart{
+      fieldSteps.push_back(EmitNarrowing{NarrowedPart{
           .depth = depth,
           .element = false,
           .name = wide.name,
           .narrow = own->type,
           .owner = from,
-      });
+      }});
     }
     if (own->type != wide.type) {
-      WideningRelations::collectNarrowings(own->type, wide.type, depth + 1, out, seen);
+      fieldSteps.push_back(VisitNarrowing{own->type, wide.type, depth + 1});
     }
   }
+  steps.insert(steps.end(), fieldSteps.rbegin(), fieldSteps.rend());
 }
 
 std::vector<NarrowedPart> WideningRelations::narrowingsOf(const Type *from, const Type *to) {
@@ -105,26 +125,48 @@ bool WideningRelations::widensWrites(const Type *from, const Type *to) {
 }
 
 bool WideningRelations::sameReference(const Type *from, const Type *to) {
-  if (from == to) {
+  const Type *own = from;
+  const Type *wide = to;
+  while (own != wide && (wide->isOptional() || (own->isArray() && wide->isArray()))) {
+    if (wide->isOptional()) {
+      const Type *inner = wide->inner();
+      bool reference = inner->isObject() || inner->isArray();
+      if (!reference) {
+        return false;
+      }
+      own = own->nonOptional();
+      wide = inner;
+    } else {
+      own = own->inner();
+      wide = wide->inner();
+    }
+  }
+  if (own == wide) {
     return true;
   }
-  if (to->isOptional()) {
-    const Type *inner = to->inner();
-    bool reference = inner->isObject() || inner->isArray();
-    return reference && WideningRelations::sameReference(from->nonOptional(), inner);
-  }
-  if (from->isOptional()) {
+  if (own->isOptional()) {
     return false;
   }
-  if (from->isArray() && to->isArray()) {
-    return WideningRelations::sameReference(from->inner(), to->inner());
+  if (own->isUnion()) {
+    return !own->isTagged() && WideningRelations::membersShareReference(own, wide);
   }
-  auto sameObject = [&](const Type *member) {
-    return member->isObject() && WideningRelations::sameReference(member, to);
-  };
-  if (from->isUnion()) {
-    return !from->isTagged() && llvm::all_of(from->members(), sameObject);
+
+  return WideningRelations::objectsShareReference(own, wide);
+}
+
+bool WideningRelations::membersShareReference(const Type *own, const Type *wide) {
+  for (const Type *member : own->members()) {
+    bool same = member->isObject() &&
+                (member == wide || WideningRelations::objectsShareReference(member, wide));
+    if (!same) {
+      return false;
+    }
   }
+
+  return true;
+}
+
+bool WideningRelations::objectsShareReference(const Type *from, const Type *to) {
   bool objects = from->isObject() && to->isObject() && !from->isAnyObject() && !to->isAnyObject();
   if (!objects) {
     return false;

@@ -1,6 +1,7 @@
 #include "compiler/semantic/bodies/classes/overload_resolver/overload_resolver.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/generics/generic_check_helpers/generic_check_helpers.h"
@@ -32,43 +33,54 @@ OverloadResolver::OverloadResolver(SemanticState &owner, SemanticParts &all)
 }
 
 int OverloadResolver::conversionRank(const Type *from, const Type *to) {
+  RankRun run;
+  run.steps.push_back(RankGoal{from, to});
+  while (!run.steps.empty()) {
+    RankStep step = std::move(run.steps.back());
+    run.steps.pop_back();
+    if (const RankGoal *goal = step.as<RankGoal>()) {
+      OverloadResolver::enterRank(goal->from, goal->to, run);
+    } else {
+      OverloadResolver::joinRanks(*step.as<RankJoin>(), run);
+    }
+  }
+
+  return run.answers.back();
+}
+
+void OverloadResolver::enterRank(const Type *from, const Type *to, RankRun &run) {
+  std::pair<const Type *, const Type *> pair{from, to};
+  if (llvm::is_contained(run.path, pair)) {
+    run.answers.push_back(-1);
+    return;
+  }
+  std::optional<int> rank = OverloadResolver::rankLeaf(from, to);
+  if (rank.has_value()) {
+    run.answers.push_back(*rank);
+    return;
+  }
+  RankJoin join = OverloadResolver::rankJoin(from, to);
+  std::vector<RankGoal> parts = join.parts;
+  run.path.push_back(pair);
+  run.steps.push_back(std::move(join));
+  for (const RankGoal &part : llvm::reverse(parts)) {
+    run.steps.push_back(part);
+  }
+}
+
+// TODO: говнокод
+std::optional<int> OverloadResolver::rankLeaf(const Type *from, const Type *to) {
   if (from == to || from->isError() || to->isError()) {
     return 0;
   }
   if (to->isOptional()) {
-    if (from->isUndefined()) {
-      return 1;
-    }
-    if (from->isOptional()) {
-      int inner = OverloadResolver::conversionRank(from->inner(), to->inner());
-      return inner < 0 ? -1 : inner;
-    }
-    int inner = OverloadResolver::conversionRank(from, to->inner());
-    return inner < 0 ? -1 : inner + 1;
+    return from->isUndefined() ? std::optional<int>(1) : std::nullopt;
   }
   if (from->isNever()) {
     return 1;
   }
   if (to->isUnion()) {
-    int rank = -1;
-    if (from->isUnion()) {
-      rank = 0;
-      for (const Type *member : from->members()) {
-        int inner = OverloadResolver::conversionRank(member, to);
-        if (inner < 0) {
-          return -1;
-        }
-        rank = std::max(rank, inner);
-      }
-      return rank;
-    }
-    for (const Type *member : to->members()) {
-      int inner = OverloadResolver::conversionRank(from, member);
-      if (inner >= 0 && (rank < 0 || inner < rank)) {
-        rank = inner;
-      }
-    }
-    return rank < 0 ? -1 : rank + 1;
+    return std::nullopt;
   }
   if (to->isJson()) {
     return from->isString() || from->isNumeric() || from->isBool() ||
@@ -77,7 +89,7 @@ int OverloadResolver::conversionRank(const Type *from, const Type *to) {
                : -1;
   }
   if (from->isParam() && from->constraint()) {
-    return OverloadResolver::conversionRank(from->constraint(), to);
+    return std::nullopt;
   }
   if (from->isIterator() && to->isIterator()) {
     return from->yielded() == to->yielded() &&
@@ -111,36 +123,126 @@ int OverloadResolver::conversionRank(const Type *from, const Type *to) {
       })) {
     return 1;
   }
-  if (from->isObject() && to->isObject() && !from->isClass() && !to->isClass() &&
-      !from->isAnyObject() && !to->isAnyObject() && !from->isTuple() && !to->isTuple() &&
-      from->overloads().empty() && to->overloads().empty() &&
-      llvm::all_of(from->fields(),
-                   [&](const Field &f) {
-                     const Field *t = to->field(f.name);
-                     return t && OverloadResolver::conversionRank(f.type, t->type) >= 0;
-                   }) &&
-      llvm::all_of(to->fields(), [&](const Field &t) {
-        return from->field(t.name) || t.type->isOptional() || t.type->isUndefined();
-      })) {
-    return 2;
+  if (OverloadResolver::sameShapeObjects(from, to)) {
+    return std::nullopt;
   }
   if (from->isResult() && to->isResult()) {
-    auto half = [](const Type *a, const Type *b) {
-      if (a == b) {
-        return 0;
-      }
-      if (a->isNever()) {
-        return 1;
-      }
-
-      return a->isVoid() || b->isVoid() ? -1 : OverloadResolver::conversionRank(a, b);
-    };
-    int value = half(from->okType(), to->okType());
-    int error = half(from->errType(), to->errType());
-    return value < 0 || error < 0 ? -1 : std::max(value, error);
+    return std::nullopt;
   }
 
   return -1;
+}
+
+bool OverloadResolver::sameShapeObjects(const Type *from, const Type *to) {
+  return from->isObject() && to->isObject() && !from->isClass() && !to->isClass() &&
+         !from->isAnyObject() && !to->isAnyObject() && !from->isTuple() && !to->isTuple() &&
+         from->overloads().empty() && to->overloads().empty() &&
+         llvm::all_of(from->fields(), [&](const Field &f) { return to->field(f.name); }) &&
+         llvm::all_of(to->fields(), [&](const Field &t) {
+           return from->field(t.name) || t.type->isOptional() || t.type->isUndefined();
+         });
+}
+
+RankJoin OverloadResolver::rankJoin(const Type *from, const Type *to) {
+  RankJoin join{from, to, RankForm::SAME, {}};
+  if (to->isOptional()) {
+    bool both = from->isOptional();
+    join.form = both ? RankForm::OPTIONAL_SAME : RankForm::OPTIONAL_WRAP;
+    join.parts = {RankGoal{both ? from->inner() : from, to->inner()}};
+  } else if (to->isUnion() && from->isUnion()) {
+    join.form = RankForm::WORST_MEMBER;
+    for (const Type *member : from->members()) {
+      join.parts.push_back(RankGoal{member, to});
+    }
+  } else if (to->isUnion()) {
+    join.form = RankForm::BEST_TARGET;
+    for (const Type *member : to->members()) {
+      join.parts.push_back(RankGoal{from, member});
+    }
+  } else if (from->isParam() && from->constraint()) {
+    join.parts = {RankGoal{from->constraint(), to}};
+  } else if (from->isResult() && to->isResult()) {
+    join.form = RankForm::RESULT;
+    join.parts = {RankGoal{from->okType(), to->okType()}, RankGoal{from->errType(), to->errType()}};
+  } else {
+    join.form = RankForm::FIELDS;
+    for (const Field &f : from->fields()) {
+      join.parts.push_back(RankGoal{f.type, to->field(f.name)->type});
+    }
+  }
+
+  return join;
+}
+
+void OverloadResolver::joinRanks(const RankJoin &join, RankRun &run) {
+  run.path.pop_back();
+  std::vector<int> ranks = ChildrenFirst::takeAnswers(run.answers, join.parts.size());
+  bool failed = llvm::is_contained(ranks, -1);
+  int rank = -1;
+  switch (join.form) {
+    case RankForm::SAME:
+      rank = ranks[0];
+      break;
+    case RankForm::OPTIONAL_SAME:
+      rank = ranks[0] < 0 ? -1 : ranks[0];
+      break;
+    case RankForm::OPTIONAL_WRAP:
+      rank = ranks[0] < 0 ? -1 : ranks[0] + 1;
+      break;
+    case RankForm::WORST_MEMBER:
+      rank = failed ? -1 : OverloadResolver::worstRank(ranks);
+      break;
+    case RankForm::BEST_TARGET:
+      rank = OverloadResolver::bestRank(ranks);
+      break;
+    case RankForm::RESULT:
+      rank = OverloadResolver::resultRank(join, ranks);
+      break;
+    case RankForm::FIELDS:
+      rank = failed ? -1 : 2;
+      break;
+  }
+  run.answers.push_back(rank);
+}
+
+int OverloadResolver::worstRank(llvm::ArrayRef<int> ranks) {
+  int rank = 0;
+  for (int inner : ranks) {
+    rank = std::max(rank, inner);
+  }
+
+  return rank;
+}
+
+int OverloadResolver::bestRank(llvm::ArrayRef<int> ranks) {
+  int rank = -1;
+  for (int inner : ranks) {
+    if (inner >= 0 && (rank < 0 || inner < rank)) {
+      rank = inner;
+    }
+  }
+
+  return rank < 0 ? -1 : rank + 1;
+}
+
+int OverloadResolver::resultRank(const RankJoin &join, llvm::ArrayRef<int> ranks) {
+  std::pair<const Type *, const Type *> halves[2] = {{join.from->okType(), join.to->okType()},
+                                                     {join.from->errType(), join.to->errType()}};
+  int values[2] = {0, 0};
+  for (size_t i = 0; i < 2; ++i) {
+    auto [a, b] = halves[i];
+    if (a == b) {
+      values[i] = 0;
+    } else if (a->isNever()) {
+      values[i] = 1;
+    } else if (a->isVoid() || b->isVoid()) {
+      values[i] = -1;
+    } else {
+      values[i] = ranks[i];
+    }
+  }
+
+  return values[0] < 0 || values[1] < 0 ? -1 : std::max(values[0], values[1]);
 }
 
 const Type *OverloadResolver::parameterAt(const FuncSymbol *sym, size_t i) {

@@ -26,6 +26,7 @@ private:
   static bool writtenFromOutside(const ClassDecl *generic, llvm::StringRef name);
   static bool passedOnSafely(const ClassDecl *generic, llvm::StringRef name);
   static bool referenceFits(const Type *own, const Type *wide);
+  static bool fitsWide(const Type *own, const Type *wide);
 
   SemanticState &state;
   TypeRelations *typeRelations = nullptr;

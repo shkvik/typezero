@@ -70,9 +70,31 @@ private:
   static std::optional<int64_t> lower(Term t);
   static std::optional<int64_t> plus(std::optional<int64_t> a, std::optional<int64_t> b);
   static std::optional<int64_t> upper(Term t);
-  std::vector<Fact> facts;
+  struct Edge {
+    size_t from, to;
+    int64_t weight;
+  };
 
-  std::optional<int64_t> bound(Term lhs, Term rhs, bool sums) const;
+  struct PartLimit {
+    Term term;
+    std::optional<int64_t> above;
+    std::optional<int64_t> below;
+  };
+
+  static void addNode(std::vector<Term> &nodes, Term term);
+  static size_t nodeIndex(const std::vector<Term> &nodes, Term term);
+  static const PartLimit &limitOf(const std::vector<PartLimit> &limits, Term term);
+  static void addZeroEdges(const std::vector<Term> &nodes, std::vector<Edge> &edges);
+  static std::optional<int64_t> shortestDistance(size_t count, const std::vector<Edge> &edges,
+                                                 size_t source, size_t target);
+
+  std::optional<int64_t> plainBound(Term lhs, Term rhs) const;
+  std::vector<Term> boundNodes(Term lhs, Term rhs) const;
+  std::vector<PartLimit> partLimits(const std::vector<Term> &nodes) const;
+  std::optional<int64_t> shortestBound(const std::vector<Term> &nodes, Term lhs, Term rhs,
+                                       const std::vector<PartLimit> *limits) const;
+
+  std::vector<Fact> facts;
 };
 
 }
