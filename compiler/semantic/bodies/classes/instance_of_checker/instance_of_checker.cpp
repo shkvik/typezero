@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/classes/instance_of_checker/instance_of_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker_errors.h"
@@ -28,19 +29,23 @@ InstanceOfChecker::ResultInstanceTested InstanceOfChecker::checkInstanceOf(Binar
   bin->type = Type::boolTy();
   auto *name = dyn_cast<NameExpr>(bin->rhs);
   ClassDecl *cls = name ? this->topLevelChecker->lookupValue(name->name).cls() : nullptr;
-  for (llvm::StringRef builtin : {"Date", "Map", "Set"}) {
-    if (cls || !this->callChecker->isGlobalName(bin->rhs, builtin)) {
+  static const GlobalName collections[] = {GlobalName::DATE, GlobalName::MAP, GlobalName::SET};
+  for (GlobalName global : collections) {
+    if (cls || !this->callChecker->isGlobalName(bin->rhs, global)) {
       continue;
     }
+    llvm::StringRef builtin = GlobalNameTable::getName(global);
     auto is = [&](const Type *t) {
-      return builtin == "Date" ? t->isDate() : builtin == "Map" ? t->isMap() : t->isSet();
+      return global == GlobalName::DATE  ? t->isDate()
+             : global == GlobalName::MAP ? t->isMap()
+                                         : t->isSet();
     };
     const Type *type = bin->lhs->type;
     const Type *base = type->nonOptional();
     std::string what = ErrorTextFunctionName::quoted(builtin);
     bool opaque = base->isUnknown() || base->isAnyObject();
-    if (opaque && builtin != "Date") {
-      llvm::StringRef example = builtin == "Map" ? "Map<string, int>" : "Set<string>";
+    if (opaque && global != GlobalName::DATE) {
+      llvm::StringRef example = global == GlobalName::MAP ? "Map<string, int>" : "Set<string>";
       std::string message = ErrorTextInstanceOf::untypedMap(builtin, example);
 
       return err(InstanceOfCheckerCheckInstanceOfError{

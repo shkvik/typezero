@@ -1,4 +1,6 @@
 #include "compiler/semantic/bodies/objects/dict_checker/dict_checker.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
+#include "compiler/program/library/dict/dict_method_table/dict_method_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/iterators/iterable_checker/iterable_checker.h"
@@ -16,19 +18,6 @@
 using llvm::dyn_cast;
 
 namespace tz {
-
-namespace {
-
-const llvm::StringLiteral kMapMethods[] = {"get",  "set",    "has",     "delete", "clear",
-                                           "keys", "values", "entries", "forEach"};
-
-const llvm::StringLiteral kSetMethods[] = {"add",          "has",          "delete",
-                                           "clear",        "keys",         "values",
-                                           "entries",      "forEach",      "union",
-                                           "intersection", "difference",   "symmetricDifference",
-                                           "isSubsetOf",   "isSupersetOf", "isDisjointFrom"};
-
-}
 
 DictChecker::DictChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -202,12 +191,13 @@ Expr *DictChecker::iterableOf(Expr *expr) {
     return expr;
   }
   if (type->isMap()) {
-    return this->dictCall(expr->loc(), expr, "entries", Builtin::MapEntries, {},
+    return this->dictCall(expr->loc(), expr, DictMethodTable::getName(DictMethod::ENTRIES),
+                          Builtin::MapEntries, {},
                           Type::iterator(Type::tuple({type->keyType(), type->valueType()})));
   }
 
-  return this->dictCall(expr->loc(), expr, "values", Builtin::SetValues, {},
-                        Type::iterator(type->keyType()));
+  return this->dictCall(expr->loc(), expr, DictMethodTable::getName(DictMethod::VALUES),
+                        Builtin::SetValues, {}, Type::iterator(type->keyType()));
 }
 
 Expr *DictChecker::keyLiteral(llvm::SMLoc loc, llvm::StringRef name) {
@@ -248,19 +238,22 @@ DictChecker::ResultDictMemberAccess DictChecker::checkDictMember(MemberExpr *mem
   llvm::SMLoc loc = member->loc();
   if (type->isRecord()) {
     Expr *key = this->keyLiteral(loc, member->name);
-    Expr *read = this->dictCall(loc, member->object, "get", Builtin::MapGet, {key},
-                                Type::optional(type->valueType()));
+    Expr *read = this->dictCall(loc, member->object, DictMethodTable::getName(DictMethod::GET),
+                                Builtin::MapGet, {key}, Type::optional(type->valueType()));
 
     return ok(read);
   }
-  if (member->name == "size") {
-    Expr *size = this->dictCall(loc, member->object, "size", Builtin::MapSize, {}, Type::intTy());
+  if (BuiltinPropertyTable::isName(member->name, BuiltinProperty::SIZE)) {
+    Expr *size =
+        this->dictCall(loc, member->object, BuiltinPropertyTable::getName(BuiltinProperty::SIZE),
+                       Builtin::MapSize, {}, Type::intTy());
 
     return ok(size);
   }
   std::string text = DictCheckHelpers::dictText(member->object, type);
-  bool method = type->isMap() ? llvm::is_contained(kMapMethods, member->name)
-                              : llvm::is_contained(kSetMethods, member->name);
+  const DictMethodInfo *found = DictMethodTable::find(member->name);
+  bool method = found != nullptr && (type->isMap() ? DictMethodTable::isOnMap(*found)
+                                                   : DictMethodTable::isOnSet(*found));
   member->type = Type::error();
   if (method) {
     std::string message = ErrorTextDictMember::callOnly(text, member->name);
@@ -282,8 +275,9 @@ DictChecker::ResultDictIndexedValue DictChecker::checkDictIndex(IndexExpr *index
   const Type *type = index->object->type;
   if (type->isRecord()) {
     Expr *key = this->checkRecordKey(index->index);
-    Expr *read = this->dictCall(index->loc(), index->object, "get", Builtin::MapGet, {key},
-                                Type::optional(type->valueType()));
+    Expr *read =
+        this->dictCall(index->loc(), index->object, DictMethodTable::getName(DictMethod::GET),
+                       Builtin::MapGet, {key}, Type::optional(type->valueType()));
 
     return ok(read);
   }
@@ -325,7 +319,8 @@ DictChecker::ResultRecordTargetType DictChecker::checkDictTarget(Expr *target, b
         .message = message,
     });
   }
-  if (!type->isRecord() && member && member->name == "size") {
+  if (!type->isRecord() && member &&
+      BuiltinPropertyTable::isName(member->name, BuiltinProperty::SIZE)) {
     std::string message = ErrorTextDictTarget::setSize(text);
 
     return err(DictCheckerCheckDictTargetError{
@@ -375,8 +370,8 @@ Expr *DictChecker::recordAssign(AssignExpr *assign) {
     key = this->keyLiteral(member->loc(), member->name);
   }
 
-  return this->dictCall(assign->loc(), object, "set", Builtin::RecordSet, {key, assign->value},
-                        object->type->valueType());
+  return this->dictCall(assign->loc(), object, DictMethodTable::getName(DictMethod::SET),
+                        Builtin::RecordSet, {key, assign->value}, object->type->valueType());
 }
 
 Expr *DictChecker::checkRecordNullishAssign(AssignExpr *assign, IndexExpr *index) {
@@ -394,8 +389,9 @@ Expr *DictChecker::checkRecordNullishAssign(AssignExpr *assign, IndexExpr *index
   bool definite = !value->type->isOptional() && !value->type->isUndefined();
   value = this->typeRelations->coerce(value, valueType);
 
-  return this->dictCall(assign->loc(), index->object, "set", Builtin::RecordNullishSet,
-                        {key, value}, definite ? valueType->nonOptional() : valueType);
+  return this->dictCall(assign->loc(), index->object, DictMethodTable::getName(DictMethod::SET),
+                        Builtin::RecordNullishSet, {key, value},
+                        definite ? valueType->nonOptional() : valueType);
 }
 
 DictChecker::ResultRecordKeyDeleted
@@ -420,9 +416,11 @@ DictChecker::checkDictDelete(UnaryExpr *unary, Expr *object, Expr *keyExpr, llvm
   auto *yes = this->state.getAst().make<BoolLitExpr>(unary->loc(), true);
   yes->type = Type::boolTy();
   auto *seq = this->state.getAst().make<SequenceExpr>(
-      unary->loc(), std::vector<Expr *>{this->dictCall(unary->loc(), object, "delete",
-                                                       Builtin::MapDelete, {key}, Type::boolTy()),
-                                        yes});
+      unary->loc(),
+      std::vector<Expr *>{this->dictCall(unary->loc(), object,
+                                         DictMethodTable::getName(DictMethod::DELETE_KEY),
+                                         Builtin::MapDelete, {key}, Type::boolTy()),
+                          yes});
   seq->type = Type::boolTy();
 
   return ok(seq);
@@ -460,7 +458,8 @@ DictChecker::ResultRecordKeyChecked DictChecker::checkDictIn(BinaryExpr *bin) {
   }
   std::string what = ErrorTextKeyType::keyLabel();
   key = this->typeRelations->coerce(key, Type::string(), what);
-  Expr *has = this->dictCall(bin->loc(), bin->rhs, "has", Builtin::MapHas, {key}, Type::boolTy());
+  Expr *has = this->dictCall(bin->loc(), bin->rhs, DictMethodTable::getName(DictMethod::HAS),
+                             Builtin::MapHas, {key}, Type::boolTy());
 
   return ok(has);
 }

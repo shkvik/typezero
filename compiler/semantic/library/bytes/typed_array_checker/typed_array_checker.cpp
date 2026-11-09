@@ -1,4 +1,7 @@
 #include "compiler/semantic/library/bytes/typed_array_checker/typed_array_checker.h"
+#include "compiler/program/library/builtin_names/global_member_table/global_member_table.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/bytes/bytes_method_table/bytes_method_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/expr/member_checker/member_checker.h"
@@ -78,27 +81,31 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     return lit;
   };
 
-  static const llvm::StringLiteral callbacks[] = {"forEach",       "map",  "filter",   "reduce",
-                                                  "reduceRight",   "find", "findLast", "findIndex",
-                                                  "findLastIndex", "some", "every"};
-  if (llvm::is_contained(callbacks, name) ||
-      ((name == "sort" || name == "toSorted") && !call->args.empty())) {
+  const BytesMethodInfo *found = BytesMethodTable::find(name);
+  std::optional<BytesMethod> method = std::nullopt;
+  if (found != nullptr) {
+    method = found->method;
+  }
+  bool sorts = method == BytesMethod::SORT || method == BytesMethod::TO_SORTED;
+  bool takesCallback = found != nullptr && found->form.is<TypedArrayCallbackMethod>();
+  if (takesCallback || (sorts && !call->args.empty())) {
     bool arrow = !call->args.empty() && isa<FunctionExpr>(call->args[0]);
     Expr *result = this->callbackChecker->checkCallbackMethod(call, member, expected);
     int64_t lo, hi;
-    if (name == "map" && !call->args.empty() && !arrow && call->args[0]->type->isFunction() &&
-        type->elementRange(lo, hi) && type->bytes() != Bytes::Uint8Clamped) {
+    if (method == BytesMethod::MAP && !call->args.empty() && !arrow &&
+        call->args[0]->type->isFunction() && type->elementRange(lo, hi) &&
+        type->bytes() != Bytes::Uint8Clamped) {
       std::string range = ErrorTextBytes::range(lo, hi);
       std::string hint = BytesCheckHelpers::wrapHint(type->bytes(), "f(x)");
       std::string message = ErrorTextTypedArray::mapFits(what, range, hint);
       this->state.getDiagnostics().error(call->args[0]->loc(), message);
     }
-    if (name == "toSorted" && !call->type->isError()) {
+    if (method == BytesMethod::TO_SORTED && !call->type->isError()) {
       call->type = copy;
     }
     return result;
   }
-  if (name == "flatMap") {
+  if (method == BytesMethod::FLAT_MAP) {
     std::string message = ErrorTextTypedArray::flatMap();
     this->state.getDiagnostics().error(member->loc(), message);
     for (Expr *&arg : call->args) {
@@ -106,7 +113,7 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     }
     return call;
   }
-  if (name == "at") {
+  if (method == BytesMethod::AT) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -117,7 +124,8 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     call->mayBeOutOfRange = !inRange;
     return made(Builtin::BytesAt, inRange ? element : Type::optional(element));
   }
-  if (name == "indexOf" || name == "lastIndexOf" || name == "includes") {
+  if (method == BytesMethod::INDEX_OF || method == BytesMethod::LAST_INDEX_OF ||
+      method == BytesMethod::INCLUDES) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -127,19 +135,20 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     if (!value->type->isNumeric()) {
       return call;
     }
-    std::vector<Expr *> args{mode(name == "indexOf"       ? 0
-                                  : name == "lastIndexOf" ? 1
-                                                          : 2),
+    std::vector<Expr *> args{mode(method == BytesMethod::INDEX_OF        ? 0
+                                  : method == BytesMethod::LAST_INDEX_OF ? 1
+                                                                         : 2),
                              this->typeRelations->convert(value, Type::doubleTy())};
     if (call->args.size() == 2) {
       args.push_back(this->memberChecker->checkPosition(call->args[1]));
     }
     call->args = std::move(args);
-    return made(Builtin::BytesIndexOf, name == "includes" ? Type::boolTy() : Type::intTy());
+    return made(Builtin::BytesIndexOf,
+                method == BytesMethod::INCLUDES ? Type::boolTy() : Type::intTy());
   }
-  if (name == "join" || name == "toString") {
+  if (method == BytesMethod::JOIN || method == BytesMethod::TO_STRING) {
     ArgumentChecker::ResultArityMatches arity =
-        this->argumentChecker->checkArity(call, 0, name == "join" ? 1 : 0);
+        this->argumentChecker->checkArity(call, 0, method == BytesMethod::JOIN ? 1 : 0);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
@@ -149,21 +158,24 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     }
     return made(Builtin::BytesJoin, Type::string());
   }
-  if (name == "reverse" || name == "sort" || name == "toReversed" || name == "toSorted") {
+  if (method == BytesMethod::REVERSE || method == BytesMethod::SORT ||
+      method == BytesMethod::TO_REVERSED || method == BytesMethod::TO_SORTED) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
     }
-    if (name == "reverse") {
+    if (method == BytesMethod::REVERSE) {
       return made(Builtin::BytesReverse, type);
     }
-    if (name == "sort") {
+    if (method == BytesMethod::SORT) {
       return made(Builtin::BytesSort, type);
     }
-    return made(name == "toReversed" ? Builtin::BytesToReversed : Builtin::BytesToSorted, copy);
+    return made(method == BytesMethod::TO_REVERSED ? Builtin::BytesToReversed
+                                                   : Builtin::BytesToSorted,
+                copy);
   }
-  if (name == "fill") {
+  if (method == BytesMethod::FILL) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 3);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -179,7 +191,7 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     positions(1);
     return made(Builtin::BytesFill, type);
   }
-  if (name == "set") {
+  if (method == BytesMethod::SET) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -216,16 +228,17 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     this->checkSetRange(member->object, source, call->args.size() > 1 ? call->args[1] : nullptr);
     return made(Builtin::BytesSet, Type::voidTy());
   }
-  if (name == "subarray" || name == "slice") {
+  if (method == BytesMethod::SUBARRAY || method == BytesMethod::SLICE) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 2);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
     }
     positions(0);
-    return made(name == "subarray" ? Builtin::BytesSubarray : Builtin::BytesSlice, type);
+    return made(method == BytesMethod::SUBARRAY ? Builtin::BytesSubarray : Builtin::BytesSlice,
+                type);
   }
-  if (name == "copyWithin") {
+  if (method == BytesMethod::COPY_WITHIN) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 3);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -234,7 +247,7 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     positions(0);
     return made(Builtin::BytesCopyWithin, type);
   }
-  if (name == "with") {
+  if (method == BytesMethod::WITH) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 2);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -257,15 +270,18 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     call->args[1] = this->typeRelations->convert(call->args[1], Type::doubleTy());
     return made(Builtin::BytesWith, copy);
   }
-  if (name == "keys" || name == "values" || name == "entries") {
+  if (method == BytesMethod::KEYS || method == BytesMethod::VALUES ||
+      method == BytesMethod::ENTRIES) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
     }
-    auto *arrayName = this->state.getAst().make<NameExpr>(member->loc(), "Array");
+    llvm::StringRef arrayGlobal = GlobalNameTable::getName(GlobalName::ARRAY);
+    llvm::StringRef fromName = GlobalMemberTable::getName(GlobalMember::ARRAY_FROM);
+    auto *arrayName = this->state.getAst().make<NameExpr>(member->loc(), arrayGlobal);
     auto *from = this->state.getAst().make<CallExpr>(
-        member->loc(), this->state.getAst().make<MemberExpr>(member->loc(), arrayName, "from"),
+        member->loc(), this->state.getAst().make<MemberExpr>(member->loc(), arrayName, fromName),
         std::vector<Expr *>{member->object});
     from->target = BuiltinCall{.builtin = Builtin::ArrayFrom};
     from->type = Type::array(element);
@@ -283,7 +299,7 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
   for (Expr *&arg : call->args) {
     arg = this->exprChecker->checkExpr(arg);
   }
-  std::string message = name == "toLocaleString"
+  std::string message = method == BytesMethod::TO_LOCALE_STRING
                             ? ErrorTextTypedArray::locale()
                             : ErrorTextTypedArray::noMember(name, type->name());
   this->state.getDiagnostics().error(member->loc(), message);

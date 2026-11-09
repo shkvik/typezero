@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/bytes/buffer_checker/buffer_checker.h"
+#include "compiler/program/library/bytes/bytes_method_table/bytes_method_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/expr/member_checker/member_checker.h"
@@ -81,6 +82,7 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
   const Type *type = member->object->type;
   const Type *uint8 = Type::bytesType(Bytes::Uint8);
   llvm::StringRef name = member->name;
+  std::optional<BytesMethod> method = BytesMethodTable::findMethod(name);
   auto made = [&](Builtin builtin, const Type *result) {
     call->target = BuiltinCall{.builtin = builtin};
     call->type = result;
@@ -125,13 +127,13 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
   };
   auto utf8Lit = [&] { return intLit(Utf8); };
 
-  if (name == "slice") {
+  if (method == BytesMethod::SLICE) {
     std::string message = ErrorTextBuffer::slice();
     this->state.getDiagnostics().error(member->loc(), message);
     checkArgsLoosely();
     return call;
   }
-  if (name == "toString" || name == "toLocaleString") {
+  if (method == BytesMethod::TO_STRING || method == BytesMethod::TO_LOCALE_STRING) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 3);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -145,7 +147,7 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     call->args = std::move(args);
     return made(Builtin::BufferToString, Type::string());
   }
-  if (name == "toJSON") {
+  if (method == BytesMethod::TO_JSON) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -154,7 +156,7 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     return made(Builtin::BufferToJSON, Type::object({{"type", Type::string(), false},
                                                      {"data", Type::array(Type::intTy()), false}}));
   }
-  if (name == "equals") {
+  if (method == BytesMethod::EQUALS) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -163,7 +165,7 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     call->args[0] = bytesArg(call->args[0]);
     return made(Builtin::BufferEquals, Type::boolTy());
   }
-  if (name == "compare") {
+  if (method == BytesMethod::COMPARE) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 5);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -193,7 +195,7 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     }
     return made(Builtin::BufferCompareTo, Type::intTy());
   }
-  if (name == "copy") {
+  if (method == BytesMethod::COPY) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 4);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -223,7 +225,7 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     }
     return made(Builtin::BufferCopy, Type::intTy());
   }
-  if (name == "write") {
+  if (method == BytesMethod::WRITE) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 4);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -239,7 +241,7 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
         if (checked->type->isString()) {
           encoding = this->bytesChecker->checkBufferEncoding(checked);
           if (i + 1 != call->args.size()) {
-            std::string message = ErrorTextBuffer::encoding("write");
+            std::string message = ErrorTextBuffer::encoding(name);
             this->state.getDiagnostics().error(call->args[i + 1]->loc(), message);
           }
           break;
@@ -265,8 +267,9 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     call->args = std::move(args);
     return made(Builtin::BufferWrite, Type::intTy());
   }
-  if (name == "fill" || name == "indexOf" || name == "lastIndexOf" || name == "includes") {
-    bool fill = name == "fill";
+  if (method == BytesMethod::FILL || method == BytesMethod::INDEX_OF ||
+      method == BytesMethod::LAST_INDEX_OF || method == BytesMethod::INCLUDES) {
+    bool fill = method == BytesMethod::FILL;
     ArgumentChecker::ResultArityMatches arity =
         this->argumentChecker->checkArity(call, 1, fill ? 4 : 3);
     if (arity.isErr()) {
@@ -314,7 +317,9 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     }
     std::vector<Expr *> args;
     if (!fill) {
-      args.push_back(intLit(name == "indexOf" ? 0 : name == "lastIndexOf" ? 1 : 2));
+      args.push_back(intLit(method == BytesMethod::INDEX_OF        ? 0
+                            : method == BytesMethod::LAST_INDEX_OF ? 1
+                                                                   : 2));
     }
     args.push_back(value);
     args.push_back(encoding ? encoding : utf8Lit());
@@ -323,15 +328,19 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     if (fill) {
       return made(Builtin::BufferFill, type);
     }
-    return made(Builtin::BufferIndexOf, name == "includes" ? Type::boolTy() : Type::intTy());
+    return made(Builtin::BufferIndexOf,
+                method == BytesMethod::INCLUDES ? Type::boolTy() : Type::intTy());
   }
-  if (name == "swap16" || name == "swap32" || name == "swap64") {
+  if (method == BytesMethod::SWAP16 || method == BytesMethod::SWAP32 ||
+      method == BytesMethod::SWAP64) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
     }
-    call->args = {intLit(name == "swap16" ? 2 : name == "swap32" ? 4 : 8)};
+    call->args = {intLit(method == BytesMethod::SWAP16   ? 2
+                         : method == BytesMethod::SWAP32 ? 4
+                                                         : 8)};
     return made(Builtin::BufferSwap, type);
   }
   NumberMethod m;
@@ -437,7 +446,8 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
 Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
-  if (type->bytes() == Bytes::TextEncoder && name == "encode") {
+  std::optional<BytesMethod> method = BytesMethodTable::findMethod(name);
+  if (type->bytes() == Bytes::TextEncoder && method == BytesMethod::ENCODE) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -450,7 +460,7 @@ Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
     call->type = Type::bytesType(Bytes::Uint8);
     return call;
   }
-  if (type->bytes() == Bytes::TextEncoder && name == "encodeInto") {
+  if (type->bytes() == Bytes::TextEncoder && method == BytesMethod::ENCODE_INTO) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 2);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -463,7 +473,7 @@ Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if ((type->bytes() == Bytes::TextDecoder || type->bytes() == Bytes::FatalTextDecoder) &&
-      name == "decode") {
+      method == BytesMethod::DECODE) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 2);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);

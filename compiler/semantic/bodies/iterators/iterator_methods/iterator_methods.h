@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/iterator/iterator_method_table/iterator_method_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/iterators/iterator_methods/iterator_methods_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -33,11 +34,6 @@ public:
   ResultArrayIterateCall checkArrayIterator(CallExpr *call, MemberExpr *member);
 
 private:
-  struct Helper {
-    llvm::StringLiteral name;
-    Builtin builtin;
-  };
-
   using ResultCallbackIsPassed = Result<size_t, IteratorMethodsCallbackGivenError>;
   using ResultNextValueOneType = Result<const Type *, IteratorMethodsNextValueError>;
   using ResultInitialValueType = Result<const Type *, IteratorMethodsInitialValueError>;
@@ -45,7 +41,7 @@ private:
   using ResultCallbackHasValue = Result<const Type *, IteratorMethodsCallbackValueError>;
   using ResultNotThrowOrReturn = Result<llvm::StringRef, IteratorMethodsPlainMethodError>;
   using ResultSourceIsIterable = Result<const Type *, IteratorMethodsIteratedSourceError>;
-  using ResultKnownHelperFound = Result<const Helper *, IteratorMethodsIteratorHelperError>;
+  using ResultKnownHelperFound = Result<Builtin, IteratorMethodsIteratorHelperError>;
   using ResultArrayStaticKnown = Result<const MemberExpr *, IteratorMethodsArrayStaticError>;
 
   static ResultNextValueOneType nextValue(const Type *iterator);

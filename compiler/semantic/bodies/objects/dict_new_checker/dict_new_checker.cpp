@@ -1,4 +1,6 @@
 #include "compiler/semantic/bodies/objects/dict_new_checker/dict_new_checker.h"
+#include "compiler/program/library/array/array_method_table/array_method_table.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/iterators/generator_checker/generator_checker.h"
 #include "compiler/semantic/bodies/iterators/iterator_methods/iterator_methods.h"
@@ -31,7 +33,10 @@ void DictNewChecker::markPairs(Expr *arg) {
   auto *call = dyn_cast<CallExpr>(arg);
   auto *member = call ? dyn_cast<MemberExpr>(call->callee) : nullptr;
   auto *fe = call && call->args.size() == 1 ? dyn_cast<FunctionExpr>(call->args[0]) : nullptr;
-  if (!member || member->name != "map" || !fe || fe->fn->returnType || !fe->fn->body) {
+  const ArrayMethodInfo *method =
+      member != nullptr ? ArrayMethodTable::find(member->name) : nullptr;
+  bool maps = method != nullptr && method->method == ArrayMethod::MAP;
+  if (!maps || !fe || fe->fn->returnType || !fe->fn->body) {
     return;
   }
   std::vector<const Expr *> returned;
@@ -301,9 +306,10 @@ Expr *DictNewChecker::checkDictSource(Expr *arg, bool pairs, const Type *&elemen
 }
 
 Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
-  bool isMap = expr->name == "Map";
+  std::optional<GlobalName> global = GlobalNameTable::find(expr->name);
+  bool isMap = global == GlobalName::MAP;
   llvm::SMLoc loc = expr->loc();
-  if (expr->name == "WeakMap" || expr->name == "WeakSet") {
+  if (global == GlobalName::WEAK_MAP || global == GlobalName::WEAK_SET) {
     TypeRef ref;
     ref.name = expr->name;
     ref.loc = loc;

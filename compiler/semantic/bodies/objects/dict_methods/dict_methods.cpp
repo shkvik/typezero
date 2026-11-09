@@ -1,4 +1,8 @@
 #include "compiler/semantic/bodies/objects/dict_methods/dict_methods.h"
+#include "compiler/program/library/builtin_names/global_member_table/global_member_table.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/dict/dict_method_table/dict_method_table.h"
+#include "compiler/program/library/object/object_member_table/object_member_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -33,7 +37,8 @@ DictMethods::ResultDictMethodCalled DictMethods::checkDictMethod(CallExpr *call,
   if (type->isRecord()) {
     std::string key = text + "." + name.str();
     this->argumentChecker->checkArgsLoosely(call);
-    bool hasOwn = name == "hasOwnProperty" && call->args.size() == 1;
+    std::optional<ObjectMember> inherited = ObjectMemberTable::find(name);
+    bool hasOwn = inherited == ObjectMember::HAS_OWN_PROPERTY && call->args.size() == 1;
     if (hasOwn) {
       std::string message = ErrorTextRecordMethod::hasOwn(key, text);
 
@@ -60,6 +65,15 @@ DictMethods::ResultDictMethodCalled DictMethods::checkDictMethod(CallExpr *call,
   const Type *key = type->keyType();
   const Type *value = type->valueType();
   bool isMap = type->isMap();
+  const DictMethodInfo *found = DictMethodTable::find(name);
+  bool known = found != nullptr &&
+               (isMap ? DictMethodTable::isOnMap(*found) : DictMethodTable::isOnSet(*found));
+  std::optional<DictMethod> method = std::nullopt;
+  Builtin methodBuiltin = Builtin::None;
+  if (known) {
+    method = found->method;
+    methodBuiltin = DictMethodTable::getBuiltin(*found, isMap);
+  }
   auto set = [&](Builtin builtin, const Type *result) -> ResultDictMethodCalled {
     call->target = BuiltinCall{.builtin = builtin};
     call->type = result;
@@ -81,60 +95,64 @@ DictMethods::ResultDictMethodCalled DictMethods::checkDictMethod(CallExpr *call,
     call->args[i] = this->argumentChecker->checkArg(call->args[i], key);
   };
 
-  if (name == "get" && isMap) {
+  if (method == DictMethod::GET) {
     ResultDictMethodCalled counted = arity(1, 1);
     if (counted.isErr()) {
       return counted;
     }
     keyArg(0);
-    return set(Builtin::MapGet, Type::optional(value));
+    return set(methodBuiltin, Type::optional(value));
   }
-  if (name == "set" && isMap) {
+  if (method == DictMethod::SET) {
     ResultDictMethodCalled counted = arity(2, 2);
     if (counted.isErr()) {
       return counted;
     }
     keyArg(0);
     call->args[1] = this->argumentChecker->checkArg(call->args[1], value);
-    return set(Builtin::MapSet, type);
+    return set(methodBuiltin, type);
   }
-  if (name == "add" && !isMap) {
+  if (method == DictMethod::ADD) {
     ResultDictMethodCalled counted = arity(1, 1);
     if (counted.isErr()) {
       return counted;
     }
     keyArg(0);
-    return set(Builtin::SetAdd, type);
+    return set(methodBuiltin, type);
   }
-  if (name == "has" || name == "delete") {
+  if (method == DictMethod::HAS || method == DictMethod::DELETE_KEY) {
     ResultDictMethodCalled counted = arity(1, 1);
     if (counted.isErr()) {
       return counted;
     }
     keyArg(0);
-    return set(name == "has" ? Builtin::MapHas : Builtin::MapDelete, Type::boolTy());
+    return set(methodBuiltin, Type::boolTy());
   }
-  if (name == "clear") {
+  if (method == DictMethod::CLEAR) {
     ResultDictMethodCalled counted = arity(0, 0);
     if (counted.isErr()) {
       return counted;
     }
-    return set(Builtin::MapClear, Type::voidTy());
+    return set(methodBuiltin, Type::voidTy());
   }
-  if (name == "keys" || name == "values" || name == "entries") {
+  if (method == DictMethod::KEYS || method == DictMethod::VALUES || method == DictMethod::ENTRIES) {
     ResultDictMethodCalled counted = arity(0, 0);
     if (counted.isErr()) {
       return counted;
     }
     if (!isMap) {
-      return name == "entries" ? set(Builtin::SetEntries, Type::iterator(Type::tuple({key, key})))
-                               : set(Builtin::SetValues, Type::iterator(key));
+      const Type *setIterated = method == DictMethod::ENTRIES
+                                    ? Type::iterator(Type::tuple({key, key}))
+                                    : Type::iterator(key);
+      return set(methodBuiltin, setIterated);
     }
-    return name == "keys"     ? set(Builtin::MapKeys, Type::iterator(key))
-           : name == "values" ? set(Builtin::MapValues, Type::iterator(value))
-                              : set(Builtin::MapEntries, Type::iterator(Type::tuple({key, value})));
+    const Type *mapIterated = method == DictMethod::KEYS ? Type::iterator(key)
+                              : method == DictMethod::VALUES
+                                  ? Type::iterator(value)
+                                  : Type::iterator(Type::tuple({key, value}));
+    return set(methodBuiltin, mapIterated);
   }
-  if (name == "forEach") {
+  if (method == DictMethod::FOR_EACH) {
     bool thisArg = call->args.size() == 2;
     if (thisArg) {
       this->argumentChecker->checkArgsLoosely(call);
@@ -154,28 +172,13 @@ DictMethods::ResultDictMethodCalled DictMethods::checkDictMethod(CallExpr *call,
     sig.voidResult = true;
     sig.params = {isMap ? value : key, key, type};
     call->args[0] =
-        this->callbackChecker->checkFunctionArg(call->args[0], sig, isMap ? 2 : 1, "forEach");
+        this->callbackChecker->checkFunctionArg(call->args[0], sig, isMap ? 2 : 1, name);
     this->flowChecker->calledFunction();
-    return set(Builtin::MapForEach, Type::voidTy());
+    return set(methodBuiltin, Type::voidTy());
   }
-  struct Combine {
-    llvm::StringLiteral name;
-    Builtin builtin;
-    bool test;
-  };
-  static const Combine combines[] = {
-      {"union", Builtin::SetUnion, false},
-      {"intersection", Builtin::SetIntersection, false},
-      {"difference", Builtin::SetDifference, false},
-      {"symmetricDifference", Builtin::SetSymmetricDifference, false},
-      {"isSubsetOf", Builtin::SetIsSubsetOf, true},
-      {"isSupersetOf", Builtin::SetIsSupersetOf, true},
-      {"isDisjointFrom", Builtin::SetIsDisjointFrom, true},
-  };
-  for (const Combine &c : combines) {
-    if (isMap || c.name != name) {
-      continue;
-    }
+  bool combines =
+      known && (found->form.is<SetCombineDictMethod>() || found->form.is<SetTestDictMethod>());
+  if (combines) {
     ResultDictMethodCalled counted = arity(1, 1);
     if (counted.isErr()) {
       return counted;
@@ -198,7 +201,8 @@ DictMethods::ResultDictMethodCalled DictMethods::checkDictMethod(CallExpr *call,
           .message = message,
       });
     }
-    return set(c.builtin, c.test ? Type::boolTy() : type);
+    bool tests = found->form.is<SetTestDictMethod>();
+    return set(methodBuiltin, tests ? Type::boolTy() : type);
   }
   this->argumentChecker->checkArgsLoosely(call);
   std::string message = ErrorTextDictMethod::noProperty(name, type->name(), text, isMap);
@@ -346,7 +350,8 @@ DictMethods::ResultGroupByCallTyped DictMethods::checkGroupBy(CallExpr *call, bo
 
 DictMethods::ResultMapFunctionTyped DictMethods::checkMapStatic(CallExpr *call,
                                                                 MemberExpr *member) {
-  if (member->name == "groupBy") {
+  std::optional<GlobalMember> found = GlobalMemberTable::find(GlobalName::MAP, member->name);
+  if (found == GlobalMember::MAP_GROUP_BY) {
     ResultGroupByCallTyped grouped = this->checkGroupBy(call, true);
     if (grouped.isOk()) {
       return ok(grouped.value());
@@ -387,7 +392,9 @@ DictMethods::ResultDictObjectCalled DictMethods::checkDictObjectCall(CallExpr *c
   if (!type->isRecord()) {
     std::string text = DictCheckHelpers::dictText(arg, type);
     llvm::StringRef kind = type->isMap() ? "Map" : "Set";
-    llvm::StringRef method = fn == "entries" && type->isSet() ? llvm::StringRef("values") : fn;
+    std::optional<GlobalMember> objectMember = GlobalMemberTable::find(GlobalName::OBJECT, fn);
+    bool setEntries = objectMember == GlobalMember::OBJECT_ENTRIES && type->isSet();
+    llvm::StringRef method = setEntries ? DictMethodTable::getName(DictMethod::VALUES) : fn;
     std::string message = ErrorTextDictObject::empty(fn, kind, text, method);
 
     return err(DictMethodsCheckDictObjectCallError{
@@ -396,12 +403,15 @@ DictMethods::ResultDictObjectCalled DictMethods::checkDictObjectCall(CallExpr *c
     });
   }
   const Type *value = type->valueType();
-  call->target = BuiltinCall{.builtin = fn == "keys"     ? Builtin::ObjectKeys
-                                        : fn == "values" ? Builtin::ObjectValues
-                                                         : Builtin::ObjectEntries};
-  call->type = fn == "keys"     ? Type::array(Type::string())
-               : fn == "values" ? Type::array(value)
-                                : Type::array(Type::tuple({Type::string(), value}));
+  std::optional<GlobalMember> objectMember = GlobalMemberTable::find(GlobalName::OBJECT, fn);
+  bool keys = objectMember == GlobalMember::OBJECT_KEYS;
+  bool values = objectMember == GlobalMember::OBJECT_VALUES;
+  call->target = BuiltinCall{.builtin = keys     ? Builtin::ObjectKeys
+                                        : values ? Builtin::ObjectValues
+                                                 : Builtin::ObjectEntries};
+  call->type = keys     ? Type::array(Type::string())
+               : values ? Type::array(value)
+                        : Type::array(Type::tuple({Type::string(), value}));
 
   return ok(call);
 }

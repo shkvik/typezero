@@ -1,4 +1,7 @@
 #include "compiler/semantic/library/result/result_checker/result_checker.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/result/result_method_table/result_method_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -59,12 +62,12 @@ const Expr *ResultChecker::unconverted(const Expr *expr) {
 }
 
 Expr *ResultChecker::checkResultCall(CallExpr *call, NameExpr *name, const Type *expected) {
-  llvm::StringRef which = this->resultTypes->resultName(name->name);
-  if (which != "ok" && which != "err") {
+  std::optional<GlobalName> which = this->resultTypes->resultName(name->name);
+  if (which != GlobalName::OK && which != GlobalName::ERR) {
     return nullptr;
   }
 
-  return this->checkOkErr(call, name, which == "ok", expected);
+  return this->checkOkErr(call, name, which == GlobalName::OK, expected);
 }
 
 ResultChecker::ResultOkErrTypeArgs ResultChecker::okErrTypeArgs(const NameExpr *name) {
@@ -174,8 +177,11 @@ ResultChecker::ResultStaticIsKnown ResultChecker::staticMethod(const NameExpr *n
 
 Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
   auto *name = dyn_cast<NameExpr>(member->object);
-  if (!name || call->optional || member->optional ||
-      this->resultTypes->resultName(name->name) != "Result") {
+  if (!name || call->optional || member->optional) {
+    return nullptr;
+  }
+  std::optional<GlobalName> which = this->resultTypes->resultName(name->name);
+  if (which != GlobalName::RESULT) {
     return nullptr;
   }
   llvm::StringRef method = member->name;
@@ -312,14 +318,15 @@ Expr *ResultChecker::checkResultMember(MemberExpr *member) {
     }
     return half;
   };
-  if (name == "value") {
+  std::optional<BuiltinProperty> property = BuiltinPropertyTable::find(name);
+  if (property == BuiltinProperty::RESULT_VALUE) {
     if (type->errType()->isNever()) {
       member->type = ResultChecker::halfParam(type->okType());
       return defined(member);
     }
     std::string message = ErrorTextResultMember::value(r);
     this->state.getDiagnostics().error(member->loc(), message);
-  } else if (name == "error") {
+  } else if (property == BuiltinProperty::RESULT_ERROR) {
     if (type->okType()->isNever()) {
       member->type = ResultChecker::halfParam(type->errType());
       return defined(member);
@@ -327,12 +334,9 @@ Expr *ResultChecker::checkResultMember(MemberExpr *member) {
     std::string message = ErrorTextResultMember::error(r);
     this->state.getDiagnostics().error(member->loc(), message);
   } else {
-    static const char *const methods[] = {"isOk",    "isErr",  "map",       "mapErr",
-                                          "andThen", "orElse", "match",     "unwrapOr",
-                                          "andTee",  "orTee",  "andThrough"};
-    std::string message = llvm::is_contained(methods, name)
-                              ? ErrorTextResultMember::method(name, r)
-                              : ErrorTextResultMember::noMember(name, type->name());
+    const ResultMethodInfo *method = ResultMethodTable::find(name);
+    std::string message = method != nullptr ? ErrorTextResultMember::method(name, r)
+                                            : ErrorTextResultMember::noMember(name, type->name());
     this->state.getDiagnostics().error(member->loc(), message);
   }
 

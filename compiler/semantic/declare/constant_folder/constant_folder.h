@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -22,7 +23,7 @@ public:
   void noteUnsignedVar(const VarSymbol *var, const Expr *init);
   std::optional<uint64_t> unsignedConstant(const Expr *expr) const;
   ResultDivisorNotZero checkDivisor(BinaryOp op, const Expr *divisor) const;
-  Expr *globalConstant(llvm::StringRef object, llvm::StringRef name, llvm::SMLoc loc);
+  Expr *globalConstant(GlobalName object, llvm::StringRef name, llvm::SMLoc loc);
   std::optional<ConstantValue> evalConstant(const Expr *expr, EnumDecl *self, size_t defined);
 
 private:

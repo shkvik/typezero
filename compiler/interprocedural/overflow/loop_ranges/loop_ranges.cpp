@@ -9,6 +9,7 @@
 #include "compiler/interprocedural/overflow/slots/slots.h"
 #include "compiler/interprocedural/overflow/value_range/value_range.h"
 #include "compiler/program/ast_walker/ast_walker.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -100,7 +101,8 @@ bool LoopRanges::grows(const Stmt *body, const VarSymbol *var) {
         found = true;
       }
       if (auto *member = dyn_cast<MemberExpr>(assign->target);
-          member && member->name == "length" && isVar(member->object)) {
+          member && BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) &&
+          isVar(member->object)) {
         found = true;
       }
     }

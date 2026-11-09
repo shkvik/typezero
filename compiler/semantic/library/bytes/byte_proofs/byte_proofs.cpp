@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/bytes/byte_proofs/byte_proofs.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
 #include "compiler/semantic/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
@@ -19,7 +20,7 @@ ByteProofs::ByteProofs(SemanticState &owner, SemanticParts &all)
   this->constantFolder = &all.getConstantFolder();
 }
 
-const VarSymbol *ByteProofs::viewOwner(const Expr *expr, llvm::StringRef field, const Type **type) {
+const VarSymbol *ByteProofs::viewOwner(const Expr *expr, BuiltinProperty field, const Type **type) {
   if (auto *call = dyn_cast<CallExpr>(expr);
       call &&
       (call->builtin() == Builtin::BytesBuffer || call->builtin() == Builtin::BytesByteOffset ||
@@ -27,7 +28,7 @@ const VarSymbol *ByteProofs::viewOwner(const Expr *expr, llvm::StringRef field, 
     expr = call->callee;
   }
   auto *member = dyn_cast<MemberExpr>(expr);
-  if (!member || member->name != field || !member->object->type ||
+  if (!member || !BuiltinPropertyTable::isName(member->name, field) || !member->object->type ||
       !member->object->type->isByteView()) {
     return nullptr;
   }
@@ -60,20 +61,21 @@ const Expr *ByteProofs::withoutCasts(const Expr *expr) {
 bool ByteProofs::sameView(const Expr *buffer, const Expr *offset, const Expr *length,
                           int64_t size) {
   const Type *ownerType = nullptr;
-  const VarSymbol *owner = ByteProofs::viewOwner(buffer, "buffer", &ownerType);
+  const VarSymbol *owner = ByteProofs::viewOwner(buffer, BuiltinProperty::BUFFER, &ownerType);
   if (!owner || !offset ||
-      ByteProofs::viewOwner(ByteProofs::withoutCasts(offset), "byteOffset") != owner) {
+      ByteProofs::viewOwner(ByteProofs::withoutCasts(offset), BuiltinProperty::BYTE_OFFSET) !=
+          owner) {
     return false;
   }
   if (!length) {
     return size == 1;
   }
   length = ByteProofs::withoutCasts(length);
-  if (ByteProofs::viewOwner(length, "byteLength") == owner) {
+  if (ByteProofs::viewOwner(length, BuiltinProperty::BYTE_LENGTH) == owner) {
     return size == 1;
   }
 
-  return ByteProofs::viewOwner(length, "length") == owner &&
+  return ByteProofs::viewOwner(length, BuiltinProperty::LENGTH) == owner &&
          ownerType->elementSize() == uint64_t(size);
 }
 
@@ -184,7 +186,8 @@ IntegerRange ByteProofs::computedRange(const Expr *e) const {
   }
   case Expr::Kind::Member: {
     auto *member = cast<MemberExpr>(e);
-    if (member->name == "length" || member->name == "byteLength") {
+    if (BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) ||
+        BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH)) {
       return {0, Type::kMaxLength};
     }
     return {};

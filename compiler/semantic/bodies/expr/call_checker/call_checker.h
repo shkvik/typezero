@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/builtin_names/global_member_table/global_member_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -76,7 +77,9 @@ public:
 
   bool rejectSpread(CallExpr *call);
   Expr *checkCall(CallExpr *call, const Type *expected);
-  bool isGlobalName(const Expr *expr, llvm::StringRef name) const;
+  bool isUnshadowedGlobal(const NameExpr *name) const;
+  bool isGlobalName(const Expr *expr, GlobalName global) const;
+  bool isGlobalMember(const MemberExpr *member, GlobalMember which) const;
   ResultValueCallTyped checkValueCall(CallExpr *call, const Type *fnType);
   Expr *checkDirectCall(CallExpr *call, FuncSymbol *func, llvm::SMLoc loc,
                         const Type *expected = nullptr);

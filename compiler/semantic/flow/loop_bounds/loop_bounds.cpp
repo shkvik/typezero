@@ -1,4 +1,5 @@
 #include "compiler/semantic/flow/loop_bounds/loop_bounds.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -80,10 +81,11 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
     auto *name = dyn_cast<NameExpr>(member->object);
     const VarSymbol *var = name ? this->scopes->lookup(name->name).var() : nullptr;
-    if (member->name == "byteLength" && var && var->type->isBytes()) {
+    if (BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH) && var &&
+        var->type->isBytes()) {
       return std::pair{int64_t(0), Type::kMaxLength};
     }
-    if (member->name != "length") {
+    if (!BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)) {
       return std::nullopt;
     }
     if (isa<StringLitExpr>(member->object) || isa<ArrayLitExpr>(member->object)) {

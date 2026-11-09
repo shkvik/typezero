@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/result/result_types/result_types_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -18,7 +19,7 @@ public:
 
   ResultTypes(SemanticState &owner, SemanticParts &all);
 
-  llvm::StringRef resultName(llvm::StringRef name) const;
+  std::optional<GlobalName> resultName(llvm::StringRef name) const;
   llvm::StringRef resultTypeName(llvm::StringRef name) const;
   static ResultImportSource importSource(const ImportDecl &decl);
   const Type *resolveResultType(const TypeRef &ref, llvm::StringRef name);

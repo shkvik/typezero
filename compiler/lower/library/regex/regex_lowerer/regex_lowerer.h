@@ -19,6 +19,8 @@ public:
   llvm::Value *emitReplaceWith(CallExpr *call);
 
 private:
+  static bool isReplaceAll(const MemberExpr *member);
+
   Lowering &lowering;
   std::map<std::vector<uint32_t>, llvm::Constant *> regexPrograms;
   std::map<std::pair<const Type *, std::vector<uint32_t>>, llvm::Constant *> matchShapes;

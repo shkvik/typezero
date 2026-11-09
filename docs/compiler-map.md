@@ -103,19 +103,37 @@ program/                    что идёт по конвейеру: модул�
   diagnostic/               Diagnostic: место, вид, текст
   diagnostics/              Diagnostics: сбор ошибок при разборе и проверке
   errors/                   Errors: что нашёл проход
-  library/                  справочники библиотеки без проверки: ошибки fs и crypto, crypto_api, regex, имена модулей
+  library/                  справочники библиотеки без проверки: имена глобальных объектов, свойств и методов встроенных типов, ошибки fs и crypto, crypto_api, regex, имена модулей
+    array/                  массивы
+      array_method_table/   ArrayMethodTable: методы массива — имя, Builtin, вид колбэка, меняет ли длину и элементы
+    builtin_names/          имена встроенного: глобальные объекты, их статические члены, свойства
+      builtin_property_table/ BuiltinPropertyTable: свойства встроенных типов — length, byteLength, size, value…
+      global_member_table/  GlobalMemberTable: статические члены глобальных объектов — Array.from, Object.keys…
+      global_name_table/    GlobalNameTable: имена глобальных объектов и функций — Array, Math, parseInt…
     builtin_modules/        встроенные модули node:*
       known_modules/        KnownModules: какие модули node:* есть и какой модуль у имени
+    bytes/                  типизированные массивы, Buffer, ArrayBuffer, TextEncoder/TextDecoder
+      bytes_method_table/   BytesMethodTable: имена методов байтовых типов, какие есть у типизированного массива
     crypto/                 node:crypto и crypto.subtle
       crypto_api/           таблица функций и алгоритмов crypto
       crypto_error_types/   CryptoErrorTypes: имена типов ошибок node:crypto
     decimal/                decimal
       decimal_literal/      DecimalLiteral: точное значение литерала
+    dict/                   Map и Set
+      dict_method_table/    DictMethodTable: методы Map и Set — имя, Builtin, у кого есть, операции над множествами
     fs/                     node:fs, fs/promises, readline, tz:io
       fs_error_types/       FsErrorTypes: имена типов ошибок node:fs и глагол для текста ошибки
+    iterator/               итераторы
+      iterator_method_table/ IteratorMethodTable: методы итератора — имя, Builtin, звено ленивой цепочки или потребитель
     library_module_names/   LibraryModuleNames: имена служебных модулей библиотеки (subtle, Intl.Locale)
+    object/                 объекты
+      object_member_table/  ObjectMemberTable: члены Object.prototype — toString, hasOwnProperty…
     regex/                  регулярные выражения, собранные при сборке
       regex_syntax/         разбор регулярного выражения
+    result/                 Result
+      result_method_table/  ResultMethodTable: методы Result — имя, Builtin, число аргументов и колбэков
+    string/                 строки
+      string_method_table/  StringMethodTable: методы строки — имя, Builtin, число и вид аргументов, результат
   module/                   Module: файл программы или встроенный модуль; bufferFiles — файлы буферов модуля из дерева library/
     load_chain/             LoadChain: цепочка загрузки «main.tz -> a.tz -> (b.tz …)» для ошибок чтения до загрузки
   pass_done/                PassDone: итог прохода — без предупреждений или с ними

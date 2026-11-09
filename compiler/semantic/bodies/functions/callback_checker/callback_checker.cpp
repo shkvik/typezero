@@ -1,4 +1,6 @@
 #include "compiler/semantic/bodies/functions/callback_checker/callback_checker.h"
+#include "compiler/program/library/array/array_method_table/array_method_table.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker_errors.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -360,46 +362,28 @@ CallbackChecker::ResultComparisonNumber CallbackChecker::comparison(const Type *
 
 Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
                                            const Type *expected) {
-  enum Kind { ForEach, Map, FlatMap, Filter, Reduce, Find, FindIndex, Test, Sort };
-  struct Method {
-    llvm::StringLiteral name;
-    Builtin builtin;
-    Kind kind;
-  };
-  static const Method methods[] = {
-      {"forEach", Builtin::ArrForEach, ForEach},
-      {"map", Builtin::ArrMap, Map},
-      {"flatMap", Builtin::ArrFlatMap, FlatMap},
-      {"filter", Builtin::ArrFilter, Filter},
-      {"reduce", Builtin::ArrReduce, Reduce},
-      {"reduceRight", Builtin::ArrReduceRight, Reduce},
-      {"find", Builtin::ArrFind, Find},
-      {"findLast", Builtin::ArrFindLast, Find},
-      {"findIndex", Builtin::ArrFindIndex, FindIndex},
-      {"findLastIndex", Builtin::ArrFindLastIndex, FindIndex},
-      {"some", Builtin::ArrSome, Test},
-      {"every", Builtin::ArrEvery, Test},
-  };
   const Type *arrayType = member->object->type;
   bool typed = arrayType->isTypedArray();
   const Type *element = typed ? arrayType->elementType() : arrayType->inner();
   llvm::StringRef name = member->name;
-  const Method *method = nullptr;
-  for (const Method &m : methods) {
-    if (m.name == name) {
-      method = &m;
-    }
+  const ArrayMethodInfo *method = ArrayMethodTable::find(name);
+  const CallbackArrayMethod *callbackMethod = nullptr;
+  if (method != nullptr) {
+    callbackMethod = method->form.as<CallbackArrayMethod>();
   }
-  Kind kind = method ? method->kind : Sort;
+  ArrayCallback kind = ArrayCallback::COMPARE;
+  if (callbackMethod != nullptr) {
+    kind = callbackMethod->callback;
+  }
   size_t count = call->args.size();
-  size_t maxArgs = kind == Reduce ? 2 : 1;
+  size_t maxArgs = kind == ArrayCallback::REDUCE ? 2 : 1;
   ResultCallbackIsPassed passed = CallbackChecker::callbackGiven(count, name);
   if (passed.isErr()) {
     this->state.getDiagnostics().error(member->loc(), passed.error().message);
     return call;
   }
   ResultNoExtraArguments extra =
-      CallbackChecker::extraArguments(count, maxArgs, name, kind == Reduce);
+      CallbackChecker::extraArguments(count, maxArgs, name, kind == ArrayCallback::REDUCE);
   if (extra.isErr()) {
     bool thisArg = extra.error().code == CallbackCheckerExtraArgumentsErrorCode::THIS_ARGUMENT;
     llvm::SMLoc at = thisArg ? call->args[1]->loc() : member->loc();
@@ -415,70 +399,71 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
   sig.pad = false;
   unsigned primary = 1;
   const Type *accumulator = element;
-  bool someValue =
-      kind != Reduce || count == 2 || this->indexProofs->provesNotEmpty(member->object);
+  bool someValue = kind != ArrayCallback::REDUCE || count == 2 ||
+                   this->indexProofs->provesNotEmpty(member->object);
   switch (kind) {
-  case ForEach:
-    sig.voidResult = true;
-    break;
-  case Map:
-  case FlatMap:
-    if (const Type *wanted = expected ? expected->nonOptional() : nullptr;
-        wanted && wanted->isArray() &&
-        (wanted->inner()->holdsObjects() || wanted->inner()->holdsResults() ||
-         (kind == Map && wanted->inner()->nonOptional()->isArray()))) {
-      sig.ret = kind == Map ? wanted->inner() : wanted;
-    }
-    if (typed) {
-      sig.ret = element;
-    }
-    break;
-  case Filter:
-  case Find:
-  case FindIndex:
-  case Test:
-    sig.ret = Type::boolTy();
-    break;
-  case Reduce:
-    primary = 2;
-    if (count == 2) {
-      Expr *&init = call->args[1];
-      auto *unary = dyn_cast<UnaryExpr>(init);
-      bool literal = isa<IntLitExpr>(init) ||
-                     (unary && unary->op == UnaryOp::Neg && isa<IntLitExpr>(unary->operand));
-      const Type *elementType = GenericChecker::apparentType(element);
-      bool decimalStart = elementType->isDecimal() && DecimalChecker::isLiteralTree(init);
-      bool wide = elementType->isInt() || elementType->isFloat();
-      init = this->exprChecker->checkExpr(init, decimalStart || (literal && wide) ? elementType
-                                                                                  : nullptr);
-      accumulator = init->type;
-      ResultInitialValueType initial = CallbackChecker::initialValue(accumulator, name);
-      if (initial.isErr()) {
-        this->state.getDiagnostics().error(init->loc(), initial.error().message);
-        accumulator = Type::error();
+    case ArrayCallback::FOR_EACH:
+      sig.voidResult = true;
+      break;
+    case ArrayCallback::MAP:
+    case ArrayCallback::FLAT_MAP:
+      if (const Type *wanted = expected ? expected->nonOptional() : nullptr;
+          wanted && wanted->isArray() &&
+          (wanted->inner()->holdsObjects() || wanted->inner()->holdsResults() ||
+           (kind == ArrayCallback::MAP && wanted->inner()->nonOptional()->isArray()))) {
+        sig.ret = kind == ArrayCallback::MAP ? wanted->inner() : wanted;
       }
-    }
-    sig.ret = accumulator;
-    break;
-  case Sort:
-    primary = 2;
-    break;
+      if (typed) {
+        sig.ret = element;
+      }
+      break;
+    case ArrayCallback::FILTER:
+    case ArrayCallback::FIND:
+    case ArrayCallback::FIND_INDEX:
+    case ArrayCallback::TEST:
+      sig.ret = Type::boolTy();
+      break;
+    case ArrayCallback::REDUCE:
+      primary = 2;
+      if (count == 2) {
+        Expr *&init = call->args[1];
+        auto *unary = dyn_cast<UnaryExpr>(init);
+        bool literal = isa<IntLitExpr>(init) ||
+                       (unary && unary->op == UnaryOp::Neg && isa<IntLitExpr>(unary->operand));
+        const Type *elementType = GenericChecker::apparentType(element);
+        bool decimalStart = elementType->isDecimal() && DecimalChecker::isLiteralTree(init);
+        bool wide = elementType->isInt() || elementType->isFloat();
+        init = this->exprChecker->checkExpr(init, decimalStart || (literal && wide) ? elementType
+                                                                                    : nullptr);
+        accumulator = init->type;
+        ResultInitialValueType initial = CallbackChecker::initialValue(accumulator, name);
+        if (initial.isErr()) {
+          this->state.getDiagnostics().error(init->loc(), initial.error().message);
+          accumulator = Type::error();
+        }
+      }
+      sig.ret = accumulator;
+      break;
+    case ArrayCallback::COMPARE:
+      primary = 2;
+      break;
   }
   if (accumulator->isError()) {
     call->args[0] = this->exprChecker->checkExpr(call->args[0]);
     return call;
   }
-  if (kind == Sort) {
+  if (kind == ArrayCallback::COMPARE) {
     sig.params = {element, element};
-  } else if (kind == Reduce) {
+  } else if (kind == ArrayCallback::REDUCE) {
     sig.params = {accumulator, element, Type::intTy(), arrayType};
   } else {
     sig.params = {element, Type::intTy(), arrayType};
   }
 
-  bool isBoolean = this->callChecker->isGlobalName(call->args[0], "Boolean");
-  if (auto *fe = dyn_cast<FunctionExpr>(call->args[0]); fe && kind != Sort) {
-    this->state.getCallbackFacts().rememberIndexCallback(fe->fn, kind == Reduce ? 2 : 1);
+  bool isBoolean = this->callChecker->isGlobalName(call->args[0], GlobalName::BOOLEAN);
+  if (auto *fe = dyn_cast<FunctionExpr>(call->args[0]); fe && kind != ArrayCallback::COMPARE) {
+    this->state.getCallbackFacts().rememberIndexCallback(fe->fn,
+                                                         kind == ArrayCallback::REDUCE ? 2 : 1);
     if (auto *lit = dyn_cast<ArrayLitExpr>(member->object); lit && element->isInt()) {
       std::optional<int64_t> lo, hi;
       for (const ArrayLitExpr::Element &e : lit->elements) {
@@ -493,79 +478,84 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
       }
       if (lo) {
         this->state.getCallbackFacts().rememberElementCallback(
-            fe->fn, {kind == Reduce ? 1u : 0u, *lo, *hi});
+            fe->fn, {kind == ArrayCallback::REDUCE ? 1u : 0u, *lo, *hi});
       }
     }
   }
   if (auto *fe = dyn_cast<FunctionExpr>(call->args[0]); fe && typed) {
     ByteCallback info;
-    info.param = kind == Reduce ? 1 : 0;
+    info.param = kind == ArrayCallback::REDUCE ? 1 : 0;
     arrayType->elementRange(info.lo, info.hi);
-    if (kind == Map) {
+    if (kind == ArrayCallback::MAP) {
       info.target = arrayType;
     }
     this->state.getCallbackFacts().rememberByteCallback(fe->fn, info);
   }
   call->args[0] = this->checkFunctionArg(call->args[0], sig, primary, name);
   const Type *callback = call->args[0]->type;
-  call->target = BuiltinCall{.builtin = method ? method->builtin : Builtin::ArrSortWith};
+  Builtin builtin = Builtin::ArrSortWith;
+  if (callbackMethod != nullptr) {
+    builtin = method->builtin;
+  }
+  call->target = BuiltinCall{.builtin = builtin};
   this->flowChecker->calledFunction();
   if (!callback->isFunction()) {
     return call;
   }
   const Type *result = callback->ret();
   switch (kind) {
-  case ForEach:
-    call->type = Type::voidTy();
-    break;
-  case Map:
-  case FlatMap: {
-    ResultCallbackHasValue value = CallbackChecker::mappedValue(result, name);
-    if (value.isErr()) {
-      this->state.getDiagnostics().error(call->args[0]->loc(), value.error().message);
-      return call;
+    case ArrayCallback::FOR_EACH:
+      call->type = Type::voidTy();
+      break;
+    case ArrayCallback::MAP:
+    case ArrayCallback::FLAT_MAP: {
+      ResultCallbackHasValue value = CallbackChecker::mappedValue(result, name);
+      if (value.isErr()) {
+        this->state.getDiagnostics().error(call->args[0]->loc(), value.error().message);
+        return call;
+      }
+      if (typed) {
+        call->type = arrayType;
+        break;
+      }
+      call->type =
+          kind == ArrayCallback::FLAT_MAP && result->isArray() ? result : Type::array(result);
+      break;
     }
-    if (typed) {
+    case ArrayCallback::FILTER:
+      if (const Type *kept = this->predicateChecker->filteredType(call->args[0], element)) {
+        call->type = Type::array(kept);
+      } else {
+        call->type = element->isOptional() && (isBoolean || this->keepsDefined(call->args[0]))
+                         ? Type::array(element->inner())
+                         : arrayType;
+      }
+      break;
+    case ArrayCallback::REDUCE:
+      call->type = someValue ? accumulator : Type::optional(accumulator);
+      call->mayBeOutOfRange = !someValue;
+      if (count == 2 && call->args.size() == 2) {
+        call->args[1] = this->typeRelations->coerce(call->args[1], accumulator);
+      }
+      break;
+    case ArrayCallback::FIND:
+      call->type = Type::optional(element);
+      break;
+    case ArrayCallback::FIND_INDEX:
+      call->type = Type::intTy();
+      break;
+    case ArrayCallback::TEST:
+      call->type = Type::boolTy();
+      break;
+    case ArrayCallback::COMPARE: {
+      ResultComparisonNumber number = CallbackChecker::comparison(result);
+      if (number.isErr()) {
+        this->state.getDiagnostics().error(call->args[0]->loc(), number.error().message);
+        return call;
+      }
       call->type = arrayType;
       break;
     }
-    call->type = kind == FlatMap && result->isArray() ? result : Type::array(result);
-    break;
-  }
-  case Filter:
-    if (const Type *kept = this->predicateChecker->filteredType(call->args[0], element)) {
-      call->type = Type::array(kept);
-    } else {
-      call->type = element->isOptional() && (isBoolean || this->keepsDefined(call->args[0]))
-                       ? Type::array(element->inner())
-                       : arrayType;
-    }
-    break;
-  case Reduce:
-    call->type = someValue ? accumulator : Type::optional(accumulator);
-    call->mayBeOutOfRange = !someValue;
-    if (count == 2 && call->args.size() == 2) {
-      call->args[1] = this->typeRelations->coerce(call->args[1], accumulator);
-    }
-    break;
-  case Find:
-    call->type = Type::optional(element);
-    break;
-  case FindIndex:
-    call->type = Type::intTy();
-    break;
-  case Test:
-    call->type = Type::boolTy();
-    break;
-  case Sort: {
-    ResultComparisonNumber number = CallbackChecker::comparison(result);
-    if (number.isErr()) {
-      this->state.getDiagnostics().error(call->args[0]->loc(), number.error().message);
-      return call;
-    }
-    call->type = arrayType;
-    break;
-  }
   }
 
   return call;

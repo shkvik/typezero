@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/builtin_modules/runtime_object_checker/runtime_object_checker.h"
+#include "compiler/program/library/iterator/iterator_method_table/iterator_method_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -125,12 +126,17 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
     break;
   }
   case Type::Runtime::AsyncIterator: {
-    if (name == "throw") {
+    const IteratorMethodInfo *method = IteratorMethodTable::find(name);
+    std::optional<IteratorMethod> which = std::nullopt;
+    if (method != nullptr) {
+      which = method->method;
+    }
+    if (which == IteratorMethod::THROW) {
       std::string message = ErrorTextAsyncIterator::noThrow();
       this->state.getDiagnostics().error(member->loc(), message);
       return loosely();
     }
-    if (name == "next" || name == "return") {
+    if (which == IteratorMethod::NEXT || which == IteratorMethod::RETURN) {
       std::string message = ErrorTextAsyncIterator::notYet(name);
       this->state.getDiagnostics().error(member->loc(), message);
       return loosely();

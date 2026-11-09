@@ -222,7 +222,7 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
     element = Type::error();
   }
 
-  LoopScan scan = this->loopScanner->scanLoop({stmt->body}, {});
+  LoopScan scan = this->loopScanner->scanForOfLoop(stmt);
   if (type->isIterator()) {
     scan.callsFunctions = true;
   }

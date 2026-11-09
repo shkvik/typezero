@@ -1,4 +1,7 @@
 #include "compiler/semantic/types/destination_scanner/destination_scanner.h"
+#include "compiler/program/library/array/array_method_table/array_method_table.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/dict/dict_method_table/dict_method_table.h"
 #include "compiler/program/library/library_module_names/library_module_names.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/iterators/iterable_checker/iterable_checker.h"
@@ -31,9 +34,13 @@ DestinationScanner::DestinationScanner(SemanticState &owner, SemanticParts &all)
 
 bool DestinationScanner::isResultLiteral(const CallExpr *call) {
   auto *name = dyn_cast<NameExpr>(call->callee);
+  if (name == nullptr) {
+    return false;
+  }
+  std::optional<GlobalName> global = GlobalNameTable::find(name->name);
+  bool okOrErr = global == GlobalName::OK || global == GlobalName::ERR;
 
-  return name && (name->name == "ok" || name->name == "err") && call->args.size() <= 1 &&
-         !call->hasSpread() && !call->optional;
+  return okOrErr && call->args.size() <= 1 && !call->hasSpread() && !call->optional;
 }
 
 bool DestinationScanner::scanDestinations(llvm::ArrayRef<Stmt *> stmts, DestinationScan &scan) {
@@ -341,7 +348,8 @@ const Type *DestinationScanner::peekType(const Expr *expr, const DestinationScan
     return name->name == scan.getName() ? nullptr : this->peekName(name->name, scan);
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
-    if (member->name == "subtle" && this->callChecker->isGlobalName(member->object, "crypto")) {
+    if (member->name == "subtle" &&
+        this->callChecker->isGlobalName(member->object, GlobalName::CRYPTO)) {
       VarSymbol *subtle = this->scopes->lookup(LibraryModuleNames::kSubtleName).var();
       return subtle ? subtle->type : nullptr;
     }
@@ -377,8 +385,9 @@ const Type *DestinationScanner::peekType(const Expr *expr, const DestinationScan
     if (!half) {
       return nullptr;
     }
-    return cast<NameExpr>(call->callee)->name == "ok" ? Type::result(half, Type::never())
-                                                      : Type::result(Type::never(), half);
+    std::optional<GlobalName> made = GlobalNameTable::find(cast<NameExpr>(call->callee)->name);
+    return made == GlobalName::OK ? Type::result(half, Type::never())
+                                  : Type::result(Type::never(), half);
   }
 
   return nullptr;
@@ -441,12 +450,18 @@ std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,
     }
     object = object->nonOptional();
     if (object->isArray()) {
-      static const char *const elements[] = {"push", "unshift", "includes", "indexOf",
-                                             "lastIndexOf"};
-      if (llvm::is_contained(elements, member->name)) {
+      const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
+      if (method == nullptr) {
+        return {};
+      }
+      ArrayMethod which = method->method;
+      bool adds = which == ArrayMethod::PUSH || which == ArrayMethod::UNSHIFT;
+      bool searches = which == ArrayMethod::INCLUDES || which == ArrayMethod::INDEX_OF ||
+                      which == ArrayMethod::LAST_INDEX_OF;
+      if (adds || searches) {
         return std::vector<const Type *>(call->args.size(), object->inner());
       }
-      if (member->name == "fill") {
+      if (which == ArrayMethod::FILL) {
         return {object->inner()};
       }
       return {};
@@ -456,12 +471,17 @@ std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,
         return spread(field->type->params(), field->type->hasRest());
       }
     }
-    if (object->isMap() && member->name == "set") {
+    const DictMethodInfo *dictMethod = DictMethodTable::find(member->name);
+    std::optional<DictMethod> method = std::nullopt;
+    if (dictMethod != nullptr) {
+      method = dictMethod->method;
+    }
+    if (object->isMap() && method == DictMethod::SET) {
       return {object->keyType(), object->valueType()};
     }
-    if (object->isDict() && !object->isRecord() &&
-        (member->name == "get" || member->name == "has" || member->name == "delete" ||
-         member->name == "add")) {
+    bool takesKey = method == DictMethod::GET || method == DictMethod::HAS ||
+                    method == DictMethod::DELETE_KEY || method == DictMethod::ADD;
+    if (object->isDict() && !object->isRecord() && takesKey) {
       return {object->keyType()};
     }
   }

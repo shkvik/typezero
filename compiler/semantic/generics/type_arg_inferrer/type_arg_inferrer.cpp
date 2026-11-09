@@ -1,4 +1,5 @@
 #include "compiler/semantic/generics/type_arg_inferrer/type_arg_inferrer.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -85,17 +86,19 @@ bool TypeArgInferrer::isContextSensitive(const Expr *arg) {
     });
   }
   if (auto *name = dyn_cast<NameExpr>(arg)) {
-    return name->typeArgs.empty() &&
-           llvm::is_contained(llvm::ArrayRef<llvm::StringRef>{"String", "Number", "parseInt",
-                                                              "parseFloat", "Boolean",
-                                                              "encodeURIComponent", "encodeURI",
-                                                              "decodeURIComponent", "decodeURI"},
-                              name->name);
+    static const GlobalName functions[] = {GlobalName::STRING,     GlobalName::NUMBER,
+                                           GlobalName::PARSE_INT,  GlobalName::PARSE_FLOAT,
+                                           GlobalName::BOOLEAN,    GlobalName::ENCODE_URI_COMPONENT,
+                                           GlobalName::ENCODE_URI, GlobalName::DECODE_URI_COMPONENT,
+                                           GlobalName::DECODE_URI};
+    std::optional<GlobalName> global = GlobalNameTable::find(name->name);
+    return name->typeArgs.empty() && global.has_value() && llvm::is_contained(functions, *global);
   }
   if (auto *member = dyn_cast<MemberExpr>(arg)) {
     if (auto *object = dyn_cast<NameExpr>(member->object)) {
-      return object->name == "Math" || object->name == "Number" || object->name == "String" ||
-             object->name == "console";
+      std::optional<GlobalName> global = GlobalNameTable::find(object->name);
+      return global == GlobalName::MATH || global == GlobalName::NUMBER ||
+             global == GlobalName::STRING || global == GlobalName::CONSOLE;
     }
   }
 
@@ -442,9 +445,12 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
     std::vector<size_t> sensitive;
     auto makesResults = [&](const Expr *arg) {
       auto *name = dyn_cast<NameExpr>(arg);
-      llvm::StringRef which = name ? this->resultTypes->resultName(name->name) : llvm::StringRef();
+      std::optional<GlobalName> which = std::nullopt;
+      if (name != nullptr) {
+        which = this->resultTypes->resultName(name->name);
+      }
 
-      return which == "inferred" || which == "err";
+      return which == GlobalName::OK || which == GlobalName::ERR;
     };
     for (size_t i = 0; i < call->args.size(); ++i) {
       Expr *&arg = call->args[i];

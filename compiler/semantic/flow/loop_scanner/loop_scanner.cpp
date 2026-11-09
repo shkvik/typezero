@@ -1,4 +1,10 @@
 #include "compiler/semantic/flow/loop_scanner/loop_scanner.h"
+#include "compiler/program/library/array/array_method_table/array_method_table.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
+#include "compiler/program/library/builtin_names/global_member_table/global_member_table.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/iterator/iterator_method_table/iterator_method_table.h"
+#include "compiler/program/library/result/result_method_table/result_method_table.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/objects/keyed_field_checker/keyed_field_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
@@ -13,12 +19,12 @@ namespace tz {
 
 namespace {
 
-const llvm::StringRef kGlobalFunctions[] = {"String",    "Number",
-                                            "parseInt",  "parseFloat",
-                                            "Boolean",   "encodeURIComponent",
-                                            "encodeURI", "decodeURIComponent",
-                                            "decodeURI", "ok",
-                                            "err"};
+const GlobalName kGlobalFunctions[] = {GlobalName::STRING,     GlobalName::NUMBER,
+                                       GlobalName::PARSE_INT,  GlobalName::PARSE_FLOAT,
+                                       GlobalName::BOOLEAN,    GlobalName::ENCODE_URI_COMPONENT,
+                                       GlobalName::ENCODE_URI, GlobalName::DECODE_URI_COMPONENT,
+                                       GlobalName::DECODE_URI, GlobalName::OK,
+                                       GlobalName::ERR};
 }
 
 LoopScanner::LoopScanner(SemanticState &owner, SemanticParts &all)
@@ -30,14 +36,40 @@ LoopScanner::LoopScanner(SemanticState &owner, SemanticParts &all)
 
 LoopScan LoopScanner::scanLoop(llvm::ArrayRef<const Stmt *> stmts,
                                llvm::ArrayRef<const Expr *> exprs) const {
+  LoopScan scan = this->scanWithNames(stmts, exprs, llvm::StringSet<>());
+
+  return scan;
+}
+
+LoopScan LoopScanner::scanForOfLoop(const ForOfStmt *loop) const {
+  llvm::StringSet<> bindingName;
+  bindingName.insert(loop->binding.name);
+  LoopScan scan = this->scanWithNames({loop->body}, {}, bindingName);
+
+  return scan;
+}
+
+LoopScan LoopScanner::scanWithNames(llvm::ArrayRef<const Stmt *> stmts,
+                                    llvm::ArrayRef<const Expr *> exprs,
+                                    const llvm::StringSet<> &headNames) const {
+  LoopScan namesPass = this->scanParts(stmts, exprs, headNames);
+  LoopScan scan = this->scanParts(stmts, exprs, namesPass.declaredInside);
+
+  return scan;
+}
+
+LoopScan LoopScanner::scanParts(llvm::ArrayRef<const Stmt *> stmts,
+                                llvm::ArrayRef<const Expr *> exprs,
+                                const llvm::StringSet<> &declaredInside) const {
   LoopScan scan;
+  scan.declaredInside = declaredInside;
   for (const Stmt *stmt : stmts) {
-    if (stmt) {
+    if (stmt != nullptr) {
       this->scanStmt(stmt, scan, 0);
     }
   }
   for (const Expr *expr : exprs) {
-    if (expr) {
+    if (expr != nullptr) {
       this->scanExpr(expr, scan, 0);
     }
   }
@@ -61,6 +93,7 @@ void LoopScanner::scanStmt(const Stmt *stmt, LoopScan &scan, unsigned depth) con
     break;
   case Stmt::Kind::VarDecl:
     for (const VarDeclarator &d : cast<VarDeclStmt>(stmt)->decls) {
+      scan.declaredInside.insert(d.name);
       if (d.init) {
         this->scanExpr(d.init, scan, depth);
       }
@@ -69,9 +102,13 @@ void LoopScanner::scanStmt(const Stmt *stmt, LoopScan &scan, unsigned depth) con
       }
     }
     break;
-  case Stmt::Kind::Function:
-    this->scanStmt(cast<FunctionDecl>(stmt)->body, scan, depth + 1);
+  case Stmt::Kind::Function: {
+    auto *fn = cast<FunctionDecl>(stmt);
+    scan.declaredInside.insert(fn->name);
+    LoopScanner::declareParams(fn, scan);
+    this->scanStmt(fn->body, scan, depth + 1);
     break;
+  }
   case Stmt::Kind::Continue:
   case Stmt::Kind::Empty:
   case Stmt::Kind::Debugger:
@@ -116,6 +153,7 @@ void LoopScanner::scanStmt(const Stmt *stmt, LoopScan &scan, unsigned depth) con
   }
   case Stmt::Kind::ForOf: {
     auto *s = cast<ForOfStmt>(stmt);
+    scan.declaredInside.insert(s->binding.name);
     if (s->isAwait && !scan.functionDepth) {
       scan.awaits = true;
     }
@@ -163,9 +201,13 @@ void LoopScanner::scanStmt(const Stmt *stmt, LoopScan &scan, unsigned depth) con
     }
     break;
   }
-  case Stmt::Kind::TypeAlias:
   case Stmt::Kind::Enum:
+    scan.declaredInside.insert(cast<EnumDecl>(stmt)->name);
+    break;
   case Stmt::Kind::Class:
+    scan.declaredInside.insert(cast<ClassDecl>(stmt)->name);
+    break;
+  case Stmt::Kind::TypeAlias:
     break;
   }
 }
@@ -203,7 +245,7 @@ void LoopScanner::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) con
     } else if (auto *member = dyn_cast<MemberExpr>(target)) {
       this->scanExpr(member->object, scan, depth);
       scan.fieldWrites.insert(member->name);
-      if (member->name == "length") {
+      if (BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)) {
         scan.growsArrays = scan.shrinksArrays = true;
         scan.releasesElements = true;
       }
@@ -290,56 +332,33 @@ void LoopScanner::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) con
     for (const Expr *arg : call->args) {
       this->scanExpr(arg, scan, depth);
     }
-    if (auto *member = dyn_cast<MemberExpr>(call->callee)) {
-      if (this->callChecker->isGlobalName(member->object, "console") ||
-          this->callChecker->isGlobalName(member->object, "Math")) {
-        break;
-      }
-      this->scanExpr(member->object, scan, depth);
-      llvm::StringRef method = member->name;
-      if (this->state.getInventoryStore().hasFieldName(method)) {
-        scan.callsFunctions = true;
-      }
-      if (method == "push" || method == "unshift") {
-        scan.growsArrays = true;
-      } else if (method == "pop" || method == "shift") {
-        scan.shrinksArrays = scan.releasesElements = true;
-      } else if (method == "splice") {
-        scan.growsArrays = scan.shrinksArrays = scan.releasesElements = true;
-      } else if (method == "fill") {
-        scan.releasesElements = true;
-      }
-      static const char *const callbacks[] = {
-          "map",     "filter", "forEach", "reduce",   "reduceRight",   "find",      "findIndex",
-          "some",    "every",  "flatMap", "findLast", "findLastIndex", "sort",      "mapErr",
-          "andThen", "orElse", "match",   "andTee",   "orTee",         "andThrough"};
-      if (llvm::is_contained(callbacks, method) && !call->args.empty() &&
-          !isa<FunctionExpr>(call->args.front())) {
-        scan.callsFunctions = true;
-      }
-      if (method == "next" || method == "toArray" ||
-          (method == "from" && (this->callChecker->isGlobalName(member->object, "Array") ||
-                                this->callChecker->isGlobalName(member->object, "Iterator")))) {
-        scan.callsFunctions = true;
-      }
-    } else if (!llvm::any_of(kGlobalFunctions, [&](llvm::StringRef name) {
-                 return this->callChecker->isGlobalName(call->callee, name);
-               })) {
+    auto *member = dyn_cast<MemberExpr>(call->callee);
+    if (member != nullptr) {
+      this->scanMethodCall(call, member, scan, depth);
+      break;
+    }
+    bool knownGlobal = llvm::any_of(kGlobalFunctions, [&](GlobalName global) {
+      return this->callChecker->isGlobalName(call->callee, global);
+    });
+    if (!knownGlobal) {
       scan.callsFunctions = true;
     }
     break;
   }
-  case Expr::Kind::New:
-    if (const Expr *callee = cast<NewExpr>(expr)->callee) {
+  case Expr::Kind::New: {
+    auto *made = cast<NewExpr>(expr);
+    if (const Expr *callee = made->callee) {
       this->scanExpr(callee, scan, depth);
     }
-    for (const Expr *arg : cast<NewExpr>(expr)->args) {
+    for (const Expr *arg : made->args) {
       this->scanExpr(arg, scan, depth);
     }
-    if (cast<NewExpr>(expr)->name != "Array") {
+    std::optional<GlobalName> madeGlobal = GlobalNameTable::find(made->name);
+    if (madeGlobal != GlobalName::ARRAY) {
       scan.callsFunctions = true;
     }
     break;
+  }
   case Expr::Kind::Conditional: {
     auto *cond = cast<ConditionalExpr>(expr);
     this->scanExpr(cond->cond, scan, depth);
@@ -358,11 +377,14 @@ void LoopScanner::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) con
   case Expr::Kind::OptionalChain:
     this->scanExpr(cast<OptionalChainExpr>(expr)->chain, scan, depth);
     break;
-  case Expr::Kind::Function:
+  case Expr::Kind::Function: {
+    const FunctionDecl *fn = cast<FunctionExpr>(expr)->fn;
+    LoopScanner::declareParams(fn, scan);
     ++scan.functionDepth;
-    this->scanStmt(cast<FunctionExpr>(expr)->fn->body, scan, depth + 1);
+    this->scanStmt(fn->body, scan, depth + 1);
     --scan.functionDepth;
     break;
+  }
   case Expr::Kind::Yield:
     if (const Expr *value = cast<YieldExpr>(expr)->value) {
       this->scanExpr(value, scan, depth);
@@ -384,4 +406,118 @@ void LoopScanner::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) con
   }
 }
 
+void LoopScanner::scanMethodCall(const CallExpr *call, const MemberExpr *member, LoopScan &scan,
+                                 unsigned depth) const {
+  if (this->callChecker->isGlobalName(member->object, GlobalName::CONSOLE) ||
+      this->callChecker->isGlobalName(member->object, GlobalName::MATH)) {
+    return;
+  }
+  this->scanExpr(member->object, scan, depth);
+  const Type *receiver = this->getTypeBeforeLoop(member->object, scan);
+  if (receiver != nullptr && receiver->isArray()) {
+    LoopScanner::scanArrayMethod(call, member->name, scan);
+    return;
+  }
+  if (receiver != nullptr && receiver->isResult()) {
+    LoopScanner::scanResultMethod(call, member->name, scan);
+    return;
+  }
+  this->scanMethodByName(call, member, scan);
+}
+
+void LoopScanner::scanMethodByName(const CallExpr *call, const MemberExpr *member,
+                                   LoopScan &scan) const {
+  llvm::StringRef name = member->name;
+  if (this->state.getInventoryStore().hasFieldName(name)) {
+    scan.callsFunctions = true;
+  }
+  LoopScanner::scanArrayMethod(call, name, scan);
+  LoopScanner::scanResultMethod(call, name, scan);
+  const IteratorMethodInfo *iteratorMethod = IteratorMethodTable::find(name);
+  bool drivesIterator =
+      iteratorMethod != nullptr && (iteratorMethod->method == IteratorMethod::NEXT ||
+                                    iteratorMethod->method == IteratorMethod::TO_ARRAY);
+  bool fromIterable = this->callChecker->isGlobalMember(member, GlobalMember::ARRAY_FROM) ||
+                      this->callChecker->isGlobalMember(member, GlobalMember::ITERATOR_FROM);
+  if (drivesIterator || fromIterable) {
+    scan.callsFunctions = true;
+  }
+}
+
+const Type *LoopScanner::getTypeBeforeLoop(const Expr *expr, const LoopScan &scan) const {
+  auto *name = dyn_cast<NameExpr>(expr);
+  if (name == nullptr) {
+    return nullptr;
+  }
+  if (scan.declaredInside.contains(name->name)) {
+    return nullptr;
+  }
+  const VarSymbol *var = this->scopes->lookup(name->name).var();
+  if (var == nullptr || var->type == nullptr) {
+    return nullptr;
+  }
+
+  return var->type->nonOptional();
+}
+
+void LoopScanner::scanArrayMethod(const CallExpr *call, llvm::StringRef name, LoopScan &scan) {
+  const ArrayMethodInfo *method = ArrayMethodTable::find(name);
+  if (method == nullptr) {
+    return;
+  }
+  switch (method->form.kind()) {
+    case ArrayMethodKind::READING:
+      break;
+    case ArrayMethodKind::RESIZING: {
+      LengthChange change = method->form.as<ResizingArrayMethod>()->change;
+      if (change != LengthChange::SHRINKS) {
+        scan.growsArrays = true;
+      }
+      if (change != LengthChange::GROWS) {
+        scan.shrinksArrays = true;
+        scan.releasesElements = true;
+      }
+      break;
+    }
+    case ArrayMethodKind::REWRITING:
+      if (method->form.as<RewritingArrayMethod>()->releasesElements) {
+        scan.releasesElements = true;
+      }
+      break;
+    case ArrayMethodKind::SORTING:
+    case ArrayMethodKind::CALLBACK:
+      if (LoopScanner::passesNamedFunction(call, 1)) {
+        scan.callsFunctions = true;
+      }
+      break;
+  }
+}
+
+void LoopScanner::scanResultMethod(const CallExpr *call, llvm::StringRef name, LoopScan &scan) {
+  const ResultMethodInfo *method = ResultMethodTable::find(name);
+  if (method == nullptr) {
+    return;
+  }
+  int callbackArgs = ResultMethodTable::countCallbacks(*method);
+  if (LoopScanner::passesNamedFunction(call, callbackArgs)) {
+    scan.callsFunctions = true;
+  }
+}
+
+void LoopScanner::declareParams(const FunctionDecl *fn, LoopScan &scan) {
+  for (const Param &param : fn->params) {
+    scan.declaredInside.insert(param.name);
+  }
+}
+
+bool LoopScanner::passesNamedFunction(const CallExpr *call, int callbackArgs) {
+  size_t checked = std::min(size_t(callbackArgs), call->args.size());
+  for (size_t i = 0; i < checked; ++i) {
+    if (!isa<FunctionExpr>(call->args[i])) {
+      return true;
+    }
+  }
+
+  return false;
+}
 }

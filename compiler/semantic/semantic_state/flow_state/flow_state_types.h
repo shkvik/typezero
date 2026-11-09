@@ -56,6 +56,7 @@ struct LoopScan {
   bool growsArrays = false;
   bool shrinksArrays = false;
   llvm::StringSet<> fieldWrites;
+  llvm::StringSet<> declaredInside;
   bool releasesElements = false;
   bool breaks = false;
   bool awaits = false;

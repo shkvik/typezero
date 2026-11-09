@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/expr/concat_checker/concat_checker.h"
+#include "compiler/program/library/object/object_member_table/object_member_table.h"
 #include "compiler/semantic/bodies/shared_helpers/shared_helpers.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
@@ -127,7 +128,8 @@ ConcatChecker::ResultConvertsToText ConcatChecker::convertible(const Expr *expr)
     });
   }
   ClassDecl *cls = ClassDeclarer::classOf(base);
-  bool ownToString = cls && !ClassDeclarer::methodsNamed(cls, "toString", false).empty();
+  llvm::StringRef toStringName = ObjectMemberTable::getName(ObjectMember::TO_STRING);
+  bool ownToString = cls && !ClassDeclarer::methodsNamed(cls, toStringName, false).empty();
   if (ownToString) {
     auto *name = dyn_cast<NameExpr>(expr);
     std::string text = name ? name->name.str() : "o";

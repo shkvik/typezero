@@ -1,4 +1,5 @@
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -556,26 +557,26 @@ std::string ConstantFolder::overflowText(const Type *type, const std::string &va
   return ErrorTextOverflow::inDouble(value, type->name(), wrapped);
 }
 
-Expr *ConstantFolder::globalConstant(llvm::StringRef object, llvm::StringRef name,
-                                     llvm::SMLoc loc) {
+Expr *ConstantFolder::globalConstant(GlobalName object, llvm::StringRef name, llvm::SMLoc loc) {
   struct Entry {
-    llvm::StringLiteral object, name;
+    GlobalName object;
+    llvm::StringLiteral name;
     double value;
   };
   static const Entry known[] = {
-      {"Math", "E", 2.718281828459045},
-      {"Math", "LN10", 2.302585092994046},
-      {"Math", "LN2", 0.6931471805599453},
-      {"Math", "LOG10E", 0.4342944819032518},
-      {"Math", "LOG2E", 1.4426950408889634},
-      {"Math", "PI", 3.141592653589793},
-      {"Math", "SQRT1_2", 0.7071067811865476},
-      {"Math", "SQRT2", 1.4142135623730951},
-      {"Number", "MAX_SAFE_INTEGER", 9007199254740991.0},
-      {"Number", "MIN_SAFE_INTEGER", -9007199254740991.0},
-      {"Number", "EPSILON", 2.220446049250313e-16},
-      {"Number", "MAX_VALUE", std::numeric_limits<double>::max()},
-      {"Number", "MIN_VALUE", std::numeric_limits<double>::denorm_min()},
+      {GlobalName::MATH, "E", 2.718281828459045},
+      {GlobalName::MATH, "LN10", 2.302585092994046},
+      {GlobalName::MATH, "LN2", 0.6931471805599453},
+      {GlobalName::MATH, "LOG10E", 0.4342944819032518},
+      {GlobalName::MATH, "LOG2E", 1.4426950408889634},
+      {GlobalName::MATH, "PI", 3.141592653589793},
+      {GlobalName::MATH, "SQRT1_2", 0.7071067811865476},
+      {GlobalName::MATH, "SQRT2", 1.4142135623730951},
+      {GlobalName::NUMBER, "MAX_SAFE_INTEGER", 9007199254740991.0},
+      {GlobalName::NUMBER, "MIN_SAFE_INTEGER", -9007199254740991.0},
+      {GlobalName::NUMBER, "EPSILON", 2.220446049250313e-16},
+      {GlobalName::NUMBER, "MAX_VALUE", std::numeric_limits<double>::max()},
+      {GlobalName::NUMBER, "MIN_VALUE", std::numeric_limits<double>::denorm_min()},
   };
   for (const Entry &entry : known) {
     if (entry.object == object && entry.name == name) {
@@ -587,5 +588,4 @@ Expr *ConstantFolder::globalConstant(llvm::StringRef object, llvm::StringRef nam
 
   return nullptr;
 }
-
 }

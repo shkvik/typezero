@@ -1,4 +1,6 @@
 #include "compiler/semantic/bodies/expr/truth_checker/truth_checker.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/flow/condition_facts/condition_facts.h"
@@ -116,7 +118,7 @@ bool TruthChecker::isLength(const Expr *expr) {
   }
   auto *member = dyn_cast<MemberExpr>(expr);
 
-  return member && member->name == "length";
+  return member && BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH);
 }
 
 bool TruthChecker::isLiteral(const Expr *expr) {
@@ -654,7 +656,7 @@ bool TruthChecker::isBooleanCall(const Expr *expr) const {
   auto *call = dyn_cast<CallExpr>(expr);
 
   return call && !call->optional && call->args.size() == 1 && !call->hasSpread() &&
-         this->callChecker->isGlobalName(call->callee, "Boolean");
+         this->callChecker->isGlobalName(call->callee, GlobalName::BOOLEAN);
 }
 
 Expr *TruthChecker::checkBooleanCall(CallExpr *call, Flow &whenTrue, Flow &whenFalse) {

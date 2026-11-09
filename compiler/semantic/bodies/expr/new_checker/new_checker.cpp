@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/expr/new_checker/new_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
 #include "compiler/semantic/bodies/classes/method_call_checker/method_call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -125,7 +126,8 @@ NewChecker::ResultNoTypeArgsOk NewChecker::noTypeArgs(const NewExpr *expr) {
 }
 
 NewChecker::ResultClassIsFound NewChecker::classFound(const NewExpr *expr) {
-  if (expr->name != "Array") {
+  std::optional<GlobalName> global = GlobalNameTable::find(expr->name);
+  if (global != GlobalName::ARRAY) {
     std::string message = ErrorTextClassFound::notFound(expr->name);
 
     return err(NewCheckerClassFoundError{
@@ -207,13 +209,14 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
   if (expr->callee) {
     return this->classValueChecker->checkValueNew(expr, expected);
   }
+  std::optional<GlobalName> global = GlobalNameTable::find(expr->name);
   if (!expr->member.empty()) {
-    ScopeEntry intl = this->scopes->lookup("Intl");
-    if (expr->name == "Intl" && !intl.var() && !intl.func() && !intl.cls() &&
-        expr->member == "Locale") {
+    ScopeEntry intl = this->scopes->lookup(expr->name);
+    bool globalIntl = global == GlobalName::INTL && !intl.var() && !intl.func() && !intl.cls();
+    if (globalIntl && expr->member == "Locale") {
       return this->intlChecker->checkLocaleNew(expr, expected);
     }
-    if (expr->name == "Intl" && !intl.var() && !intl.func() && !intl.cls()) {
+    if (globalIntl) {
       return expr->member == "DateTimeFormat"
                  ? this->dateFormatChecker->checkDateFormatNew(expr->loc(), expr->args)
                  : this->intlChecker->checkIntlNew(expr->loc(), expr->member, expr->args, true);
@@ -261,41 +264,37 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
     checkArgsLoosely();
     return expr;
   }
-  if (expr->name == "RegExp" && !this->scopes->lookup("RegExp").var() &&
-      !this->scopes->lookup("RegExp").func()) {
+  ScopeEntry named = this->scopes->lookup(expr->name);
+  bool unshadowed = !named.var() && !named.func();
+  if (global == GlobalName::REG_EXP && unshadowed) {
     ResultNoTypeArgsOk plainNew = NewChecker::noTypeArgs(expr);
     if (plainNew.isErr()) {
       this->state.getDiagnostics().error(expr->loc(), plainNew.error().message);
     }
     return this->regexChecker->checkRegExpConstructor(expr->loc(), expr->args);
   }
-  if (expr->name == "Date" && !this->scopes->lookup("Date").var() &&
-      !this->scopes->lookup("Date").func()) {
+  if (global == GlobalName::DATE && unshadowed) {
     ResultNoTypeArgsOk plainNew = NewChecker::noTypeArgs(expr);
     if (plainNew.isErr()) {
       this->state.getDiagnostics().error(expr->loc(), plainNew.error().message);
     }
     return this->dateChecker->checkDateNew(expr->loc(), expr->args);
   }
-  if ((expr->name == "Map" || expr->name == "Set" || expr->name == "WeakMap" ||
-       expr->name == "WeakSet") &&
-      !this->scopes->lookup(expr->name).var() && !this->scopes->lookup(expr->name).func()) {
+  bool collection = global == GlobalName::MAP || global == GlobalName::SET ||
+                    global == GlobalName::WEAK_MAP || global == GlobalName::WEAK_SET;
+  if (collection && unshadowed) {
     return this->dictNewChecker->checkDictNew(expr, expected);
   }
-  if (expr->name == "Promise" && !this->scopes->lookup("Promise").var() &&
-      !this->scopes->lookup("Promise").func()) {
+  if (global == GlobalName::PROMISE && unshadowed) {
     return this->promiseChecker->checkPromiseNew(expr, expected);
   }
-  if (expr->name == "WeakRef" && !this->scopes->lookup("WeakRef").var() &&
-      !this->scopes->lookup("WeakRef").func()) {
+  if (global == GlobalName::WEAK_REF && unshadowed) {
     return this->weakRefChecker->checkWeakRefNew(expr, expected);
   }
-  if (const Type *bytes = BytesChecker::bytesTypeNamed(expr->name);
-      bytes && !this->scopes->lookup(expr->name).var() &&
-      !this->scopes->lookup(expr->name).func()) {
+  if (const Type *bytes = BytesChecker::bytesTypeNamed(expr->name); bytes && unshadowed) {
     return this->bytesNewChecker->checkBytesNew(expr, bytes);
   }
-  if (expr->name == "BigInt64Array" || expr->name == "BigUint64Array") {
+  if (global == GlobalName::BIG_INT64_ARRAY || global == GlobalName::BIG_UINT64_ARRAY) {
     std::string what = ErrorTextFunctionName::quoted(expr->name);
     std::string bigint = ErrorTextBigInt::none(what);
     this->state.getDiagnostics().error(expr->loc(), bigint);

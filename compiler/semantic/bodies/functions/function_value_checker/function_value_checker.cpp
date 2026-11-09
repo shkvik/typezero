@@ -1,4 +1,6 @@
 #include "compiler/semantic/bodies/functions/function_value_checker/function_value_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/string/string_method_table/string_method_table.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/functions/callback_checker/callback_checker_errors.h"
 #include "compiler/semantic/bodies/functions/nested_functions/nested_functions.h"
@@ -50,26 +52,27 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg, const Signat
   unsigned maxArgs = 0;
   bool returnsNothing = false;
   if (auto *n = dyn_cast<NameExpr>(arg)) {
-    static const std::pair<llvm::StringLiteral, unsigned> globals[] = {
-        {"String", 1},    {"Number", 1},
-        {"parseInt", 2},  {"parseFloat", 1},
-        {"Boolean", 1},   {"encodeURIComponent", 1},
-        {"encodeURI", 1}, {"decodeURIComponent", 1},
-        {"decodeURI", 1}};
+    static const std::pair<GlobalName, unsigned> globals[] = {
+        {GlobalName::STRING, 1},     {GlobalName::NUMBER, 1},
+        {GlobalName::PARSE_INT, 2},  {GlobalName::PARSE_FLOAT, 1},
+        {GlobalName::BOOLEAN, 1},    {GlobalName::ENCODE_URI_COMPONENT, 1},
+        {GlobalName::ENCODE_URI, 1}, {GlobalName::DECODE_URI_COMPONENT, 1},
+        {GlobalName::DECODE_URI, 1},
+    };
     for (const auto &[global, count] : globals) {
       if (this->callChecker->isGlobalName(n, global)) {
-        name = global;
+        name = GlobalNameTable::getName(global);
         maxArgs = count;
       }
     }
-    if (llvm::StringRef result = this->resultTypes->resultName(n->name);
-        result == "ok" || result == "err") {
+    std::optional<GlobalName> result = this->resultTypes->resultName(n->name);
+    if (result == GlobalName::OK || result == GlobalName::ERR) {
       name = n->name;
       maxArgs = 1;
     }
   } else if (auto *m = dyn_cast<MemberExpr>(arg)) {
     name = m->name;
-    if (this->callChecker->isGlobalName(m->object, "Math")) {
+    if (this->callChecker->isGlobalName(m->object, GlobalName::MATH)) {
       static const llvm::StringLiteral two[] = {"pow", "atan2", "imul"};
       static const llvm::StringLiteral any[] = {"min", "max", "hypot"};
       static const llvm::StringLiteral one[] = {
@@ -87,7 +90,7 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg, const Signat
       } else if (name != "random") {
         name = {};
       }
-    } else if (this->callChecker->isGlobalName(m->object, "Number")) {
+    } else if (this->callChecker->isGlobalName(m->object, GlobalName::NUMBER)) {
       if (name == "parseInt") {
         maxArgs = 2;
       } else if (name == "parseFloat" || name == "isInteger" || name == "isSafeInteger") {
@@ -95,13 +98,13 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg, const Signat
       } else {
         name = {};
       }
-    } else if (this->callChecker->isGlobalName(m->object, "String")) {
+    } else if (this->callChecker->isGlobalName(m->object, GlobalName::STRING)) {
       if (name == "fromCharCode" || name == "fromCodePoint") {
         maxArgs = kAny;
       } else {
         name = {};
       }
-    } else if (this->callChecker->isGlobalName(m->object, "console") &&
+    } else if (this->callChecker->isGlobalName(m->object, GlobalName::CONSOLE) &&
                (name == "log" || name == "info" || name == "debug" || name == "error" ||
                 name == "warn")) {
       maxArgs = kAny;
@@ -173,7 +176,9 @@ FunctionValueChecker::asyncCallback(const Expr *arg, const Signature &expected,
   const Type *type = arg->type;
   bool promised = type->isFunction() && type->ret()->isPromise() && expected.ret &&
                   !expected.ret->isPromise() && !expected.voidResult && !expected.ret->isError();
-  bool replaces = method == "replace" || method == "replaceAll";
+  const StringMethodInfo *stringMethod = StringMethodTable::find(method);
+  bool replaces = stringMethod != nullptr && (stringMethod->method == StringMethod::REPLACE ||
+                                              stringMethod->method == StringMethod::REPLACE_ALL);
   if (promised && replaces) {
     std::string message = ErrorTextAsyncCallback::replace(method, expected.ret->name());
 

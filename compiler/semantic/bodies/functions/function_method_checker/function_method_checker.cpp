@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/functions/function_method_checker/function_method_checker.h"
+#include "compiler/program/library/array/array_method_table/array_method_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -71,7 +72,9 @@ FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(C
 FunctionMethodChecker::ResultParamsJoined
 FunctionMethodChecker::checkListMethod(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  if (member->name != "join") {
+  const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
+  bool joins = method != nullptr && method->method == ArrayMethod::JOIN;
+  if (!joins) {
     this->argumentChecker->checkArgsLoosely(call);
     std::string message = ErrorTextListMethod::noMethod(member->name);
 

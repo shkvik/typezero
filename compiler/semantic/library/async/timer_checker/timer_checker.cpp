@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/async/timer_checker/timer_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -117,10 +118,11 @@ bool TimerChecker::rearms(const Expr *callback) const {
 }
 
 TimerChecker::ResultTimerScheduled TimerChecker::checkAsyncGlobal(CallExpr *call, NameExpr *name) {
-  static const llvm::StringLiteral names[] = {"setTimeout",    "setInterval",   "setImmediate",
-                                              "clearTimeout",  "clearInterval", "clearImmediate",
-                                              "queueMicrotask"};
-  auto isTimer = [&](llvm::StringRef n) { return this->callChecker->isGlobalName(name, n); };
+  static const GlobalName names[] = {GlobalName::SET_TIMEOUT,    GlobalName::SET_INTERVAL,
+                                     GlobalName::SET_IMMEDIATE,  GlobalName::CLEAR_TIMEOUT,
+                                     GlobalName::CLEAR_INTERVAL, GlobalName::CLEAR_IMMEDIATE,
+                                     GlobalName::QUEUE_MICROTASK};
+  auto isTimer = [&](GlobalName timer) { return this->callChecker->isGlobalName(name, timer); };
   if (!llvm::any_of(names, isTimer)) {
     return err(TimerCheckerCheckAsyncGlobalError{
         .code = TimerCheckerCheckAsyncGlobalErrorCode::NOT_A_TIMER,
@@ -130,13 +132,14 @@ TimerChecker::ResultTimerScheduled TimerChecker::checkAsyncGlobal(CallExpr *call
   this->state.getInventoryStore().markUsesAsync();
   call->type = Type::error();
   llvm::StringRef fn = name->name;
+  std::optional<GlobalName> global = GlobalNameTable::find(fn);
   if (this->callChecker->rejectSpread(call)) {
     return err(TimerCheckerCheckAsyncGlobalError{
         .code = TimerCheckerCheckAsyncGlobalErrorCode::ALREADY_REPORTED,
         .message = "",
     });
   }
-  if (fn == "setTimeout" || fn == "setInterval") {
+  if (global == GlobalName::SET_TIMEOUT || global == GlobalName::SET_INTERVAL) {
     if (call->args.size() > 2) {
       this->argumentChecker->checkArgsLoosely(call);
       std::string message = ErrorTextAsyncGlobal::callbackArg();
@@ -154,8 +157,8 @@ TimerChecker::ResultTimerScheduled TimerChecker::checkAsyncGlobal(CallExpr *call
       });
     }
 
-    call->target =
-        BuiltinCall{.builtin = fn == "setTimeout" ? Builtin::SetTimeout : Builtin::SetInterval};
+    call->target = BuiltinCall{.builtin = global == GlobalName::SET_TIMEOUT ? Builtin::SetTimeout
+                                                                            : Builtin::SetInterval};
     call->args[0] = this->checkTaskCallback(call->args[0], fn);
     if (call->args.size() > 1) {
       call->args[1] = this->argumentChecker->checkAnyNumber(call->args[1]);
@@ -165,7 +168,7 @@ TimerChecker::ResultTimerScheduled TimerChecker::checkAsyncGlobal(CallExpr *call
       return ok(call);
     }
     int bits = 0;
-    if (fn == "setInterval") {
+    if (global == GlobalName::SET_INTERVAL) {
       if (!this->emitterChecker->classifyListener(call->args[0], nullptr, bits, true)) {
         return ok(call);
       }
@@ -183,8 +186,8 @@ TimerChecker::ResultTimerScheduled TimerChecker::checkAsyncGlobal(CallExpr *call
     }
     return ok(call);
   }
-  if (fn == "setImmediate" || fn == "queueMicrotask") {
-    if (call->args.size() > 1 && fn == "setImmediate") {
+  if (global == GlobalName::SET_IMMEDIATE || global == GlobalName::QUEUE_MICROTASK) {
+    if (call->args.size() > 1 && global == GlobalName::SET_IMMEDIATE) {
       this->argumentChecker->checkArgsLoosely(call);
       std::string message = ErrorTextAsyncGlobal::callbackArg();
 
@@ -201,10 +204,11 @@ TimerChecker::ResultTimerScheduled TimerChecker::checkAsyncGlobal(CallExpr *call
       });
     }
 
-    call->target = BuiltinCall{.builtin = fn == "setImmediate" ? Builtin::SetImmediate
-                                                               : Builtin::QueueMicrotask};
+    call->target =
+        BuiltinCall{.builtin = global == GlobalName::SET_IMMEDIATE ? Builtin::SetImmediate
+                                                                   : Builtin::QueueMicrotask};
     call->args[0] = this->checkTaskCallback(call->args[0], fn);
-    call->type = fn == "setImmediate" ? Type::immediate() : Type::voidTy();
+    call->type = global == GlobalName::SET_IMMEDIATE ? Type::immediate() : Type::voidTy();
     return ok(call);
   }
   ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
@@ -215,7 +219,7 @@ TimerChecker::ResultTimerScheduled TimerChecker::checkAsyncGlobal(CallExpr *call
     });
   }
 
-  bool immediate = fn == "clearImmediate";
+  bool immediate = global == GlobalName::CLEAR_IMMEDIATE;
   call->target =
       BuiltinCall{.builtin = immediate ? Builtin::ClearImmediate : Builtin::ClearTimeout};
   if (call->args.empty()) {
@@ -236,11 +240,11 @@ const Type *TimerChecker::timerCallType(const Expr *init) const {
   if (!callee) {
     return nullptr;
   }
-  if (this->callChecker->isGlobalName(callee, "setTimeout") ||
-      this->callChecker->isGlobalName(callee, "setInterval")) {
+  if (this->callChecker->isGlobalName(callee, GlobalName::SET_TIMEOUT) ||
+      this->callChecker->isGlobalName(callee, GlobalName::SET_INTERVAL)) {
     return Type::timeout();
   }
-  if (this->callChecker->isGlobalName(callee, "setImmediate")) {
+  if (this->callChecker->isGlobalName(callee, GlobalName::SET_IMMEDIATE)) {
     return Type::immediate();
   }
 

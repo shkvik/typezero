@@ -1,5 +1,6 @@
 #include "compiler/semantic/library/json/json_static_checker/json_static_checker.h"
 #include "compiler/packages/json_text/json_text.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -338,9 +339,9 @@ JsonStaticChecker::ResultConstantJson JsonStaticChecker::constantJson(llvm::Stri
 }
 
 Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
-  static const llvm::StringLiteral names[] = {"embedText", "embedBytes"};
-  if (!llvm::any_of(names,
-                    [&](llvm::StringRef n) { return this->callChecker->isGlobalName(name, n); })) {
+  bool embedsText = this->callChecker->isGlobalName(name, GlobalName::EMBED_TEXT);
+  bool embedsBytes = this->callChecker->isGlobalName(name, GlobalName::EMBED_BYTES);
+  if (!embedsText && !embedsBytes) {
     return nullptr;
   }
   llvm::StringRef fn = name->name;
@@ -359,7 +360,7 @@ Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
     this->state.getDiagnostics().error(name->loc(), message);
   }
 
-  if (fn == "embedBytes") {
+  if (embedsBytes) {
     return this->bufferStaticChecker->checkEmbedBytes(call, name);
   }
   ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);

@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/regex/string_regex_checker/string_regex_checker.h"
+#include "compiler/program/library/string/string_method_table/string_method_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -66,15 +67,20 @@ std::string StringRegexChecker::argumentText(const Expr *arg) {
 
 Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
-  static const llvm::StringLiteral methods[] = {"match",   "matchAll",   "search",
-                                                "replace", "replaceAll", "split"};
-  if (!llvm::is_contained(methods, name) || (name == "split" && call->args.empty())) {
+  const StringMethodInfo *found = StringMethodTable::find(name);
+  bool takesPattern = found != nullptr && (found->form.is<TextOrPatternStringMethod>() ||
+                                           found->form.is<PatternStringMethod>());
+  if (!takesPattern) {
+    return nullptr;
+  }
+  StringMethod method = found->method;
+  if (method == StringMethod::SPLIT && call->args.empty()) {
     return nullptr;
   }
   call->type = Type::error();
-  bool replace = name == "replace" || name == "replaceAll";
-  unsigned min = replace ? 2 : name == "split" ? 0 : 1;
-  unsigned max = name == "split" ? 2 : replace ? 2 : 1;
+  bool replace = method == StringMethod::REPLACE || method == StringMethod::REPLACE_ALL;
+  unsigned min = replace ? 2 : method == StringMethod::SPLIT ? 0 : 1;
+  unsigned max = method == StringMethod::SPLIT ? 2 : replace ? 2 : 1;
   ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, min, max);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -102,7 +108,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
       flags = tz_re_flags(regex->program.data());
     }
     bool global = flags && (*flags & TZ_RE_GLOBAL);
-    if (name == "match") {
+    if (method == StringMethod::MATCH) {
       if (!flags) {
         std::string message = ErrorTextStringRegex::matchFlag();
         this->state.getDiagnostics().error(member->loc(), message);
@@ -113,7 +119,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
                                          : this->regexChecker->matchType(regex));
       return call;
     }
-    if (name == "matchAll" || name == "replaceAll") {
+    if (method == StringMethod::MATCH_ALL || method == StringMethod::REPLACE_ALL) {
       if (flags && !global) {
         std::string source = ToUtf8::toUtf8(regex->pattern);
         std::string flagsText = ToUtf8::toUtf8(regex->flags);
@@ -121,18 +127,18 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
         this->state.getDiagnostics().error(pattern->loc(), message);
         return restLoosely();
       }
-      if (name == "matchAll") {
+      if (method == StringMethod::MATCH_ALL) {
         call->target = BuiltinCall{.builtin = Builtin::StrMatchAll};
         call->type = Type::iterator(this->regexChecker->matchType(regex));
         return call;
       }
     }
-    if (name == "search") {
+    if (method == StringMethod::SEARCH) {
       call->target = BuiltinCall{.builtin = Builtin::StrSearch};
       call->type = Type::intTy();
       return call;
     }
-    if (name == "split") {
+    if (method == StringMethod::SPLIT) {
       if (call->args.size() == 2) {
         call->args[1] = this->memberChecker->checkPosition(call->args[1]);
       }
@@ -152,7 +158,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
     auto *lit = dyn_cast<StringLitExpr>(pattern);
     std::string escaped = lit ? StringRegexChecker::escapedLiteral(lit->value) : std::string();
     std::string regexText = lit ? escaped : ErrorTextStringRegex::escapedRe(text);
-    if (name == "split") {
+    if (method == StringMethod::SPLIT) {
       if (call->args.size() == 2) {
         call->args[1] = this->memberChecker->checkPosition(call->args[1]);
       }
@@ -160,7 +166,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
       call->type = Type::array(Type::string());
       return call;
     }
-    if (name == "replaceAll") {
+    if (method == StringMethod::REPLACE_ALL) {
       Expr *&replacement = call->args[1];
       if (isa<FunctionExpr>(replacement)) {
         std::string message = ErrorTextStringRegex::functionRe(escaped, text);
@@ -173,15 +179,15 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
       return call;
     }
     std::string message =
-        name == "replace" ? ErrorTextStringRegex::replaceStr(text, regexText)
-        : name == "search"
+        method == StringMethod::REPLACE ? ErrorTextStringRegex::replaceStr(text, regexText)
+        : method == StringMethod::SEARCH
             ? ErrorTextStringRegex::searchStr(text, regexText, lit != nullptr)
             : ErrorTextStringRegex::includeStr(name, text, regexText, lit != nullptr);
     this->state.getDiagnostics().error(member->loc(), message);
     return restLoosely();
   }
-  std::string message =
-      ErrorTextStringRegex::notRegex(name, name == "split" || name == "replaceAll", type->name());
+  std::string message = ErrorTextStringRegex::notRegex(
+      name, method == StringMethod::SPLIT || method == StringMethod::REPLACE_ALL, type->name());
   this->state.getDiagnostics().error(pattern->loc(), message);
 
   return restLoosely();

@@ -11,7 +11,6 @@ class Scopes;
 class ResultTypes;
 class ClassChecker;
 class TypeRelations;
-class ConstantFolder;
 class GenericChecker;
 class ReturnInferrer;
 class MetadataChecker;
@@ -41,7 +40,6 @@ private:
   ResultTypes *resultTypes = nullptr;
   ClassChecker *classChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
-  ConstantFolder *constantFolder = nullptr;
   GenericChecker *genericChecker = nullptr;
   ReturnInferrer *returnInferrer = nullptr;
   MetadataChecker *metadataChecker = nullptr;

@@ -1,5 +1,6 @@
 #include "compiler/semantic/library/regex/regex_checker/regex_checker.h"
 #include "compiler/program/ast_walker/ast_walker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -306,7 +307,7 @@ Expr *RegexChecker::checkRegExpConstructor(llvm::SMLoc loc, std::vector<Expr *> 
   auto *escaped = dyn_cast<CallExpr>(args[0]);
   auto *escape = escaped ? dyn_cast<MemberExpr>(escaped->callee) : nullptr;
   bool fromEscape = escape && escape->name == "escape" &&
-                    this->callChecker->isGlobalName(escape->object, "RegExp");
+                    this->callChecker->isGlobalName(escape->object, GlobalName::REG_EXP);
   if (!fromEscape || !flags) {
     std::string message = ErrorTextRegExpNew::unknown(args.size() > 1);
     this->state.getDiagnostics().error(loc, message);

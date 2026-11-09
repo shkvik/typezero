@@ -1,4 +1,6 @@
 #include "compiler/semantic/bodies/expr/member_checker/member_checker.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/classes/class_member_checker/class_member_checker.h"
 #include "compiler/semantic/bodies/classes/overload_resolver/overload_resolver.h"
 #include "compiler/semantic/bodies/classes/static_checker/static_checker.h"
@@ -105,7 +107,7 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
   if (Expr *io = this->processChecker->checkProcessMember(member)) {
     return ok(io);
   }
-  if (this->callChecker->isGlobalName(member->object, "decimal")) {
+  if (this->callChecker->isGlobalName(member->object, GlobalName::DECIMAL)) {
     std::string message = ErrorTextMemberRead::decimal(member->name);
 
     return err(MemberCheckerCheckMemberError{
@@ -113,17 +115,17 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
         .message = message,
     });
   }
-  if (this->callChecker->isGlobalName(member->object, "RegExp")) {
+  if (this->callChecker->isGlobalName(member->object, GlobalName::REG_EXP)) {
     Expr *regex = this->regexChecker->checkRegExpStaticMember(member);
 
     return ok(regex);
   }
-  if (this->callChecker->isGlobalName(member->object, "crypto")) {
+  if (this->callChecker->isGlobalName(member->object, GlobalName::CRYPTO)) {
     Expr *crypto = this->cryptoChecker->checkWebCryptoMember(member);
 
     return ok(crypto);
   }
-  if (this->callChecker->isGlobalName(member->object, "globalThis")) {
+  if (this->callChecker->isGlobalName(member->object, GlobalName::GLOBAL_THIS)) {
     std::string message = member->name == "crypto" ? ErrorTextMemberRead::crypto()
                                                    : ErrorTextMemberRead::globalThis(member->name);
 
@@ -135,7 +137,7 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
   if (Expr *bytes = this->bytesChecker->checkBytesStaticMember(member)) {
     return ok(bytes);
   }
-  if (this->callChecker->isGlobalName(member->object, "Intl")) {
+  if (this->callChecker->isGlobalName(member->object, GlobalName::INTL)) {
     std::string message = ErrorTextMemberRead::intl(member->name);
 
     return err(MemberCheckerCheckMemberError{
@@ -143,7 +145,9 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
         .message = message,
     });
   }
-  for (llvm::StringRef global : {"console", "Math", "String", "Number"}) {
+  static const GlobalName withConstants[] = {GlobalName::CONSOLE, GlobalName::MATH,
+                                             GlobalName::STRING, GlobalName::NUMBER};
+  for (GlobalName global : withConstants) {
     if (this->callChecker->isGlobalName(member->object, global)) {
       if (Expr *constant =
               this->constantFolder->globalConstant(global, member->name, member->loc())) {
@@ -151,7 +155,7 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
       }
       static const llvm::StringLiteral numberFunctions[] = {"parseInt", "parseFloat", "isInteger",
                                                             "isSafeInteger"};
-      if (global == "Number" && !llvm::is_contained(numberFunctions, member->name)) {
+      if (global == GlobalName::NUMBER && !llvm::is_contained(numberFunctions, member->name)) {
         std::string message = ErrorTextMemberRead::numberProp(member->name);
 
         return err(MemberCheckerCheckMemberError{
@@ -159,7 +163,8 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
             .message = message,
         });
       }
-      std::string message = ErrorTextMemberRead::asValue(global, member->name);
+      llvm::StringRef globalName = GlobalNameTable::getName(global);
+      std::string message = ErrorTextMemberRead::asValue(globalName, member->name);
 
       return err(MemberCheckerCheckMemberError{
           .code = MemberCheckerCheckMemberErrorCode::GLOBAL_FUNCTION,
@@ -310,7 +315,8 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
     }
     return ok(field.value());
   }
-  if ((type->isString() || type->isArray() || type->isListParam()) && member->name == "length") {
+  if ((type->isString() || type->isArray() || type->isListParam()) &&
+      BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)) {
     member->type = Type::intTy();
     return ok(member);
   }

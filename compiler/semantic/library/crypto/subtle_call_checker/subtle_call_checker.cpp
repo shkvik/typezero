@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/crypto/subtle_call_checker/subtle_call_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/program/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/classes/method_call_checker/method_call_checker.h"
@@ -461,7 +462,7 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     if (auto *c = dyn_cast_or_null<CallExpr>(e)) {
       if (auto *m = dyn_cast<MemberExpr>(c->callee)) {
         return m->name == "parse" && m->typeArgs.empty() &&
-               this->callChecker->isGlobalName(m->object, "JSON");
+               this->callChecker->isGlobalName(m->object, GlobalName::JSON);
       }
     }
 

@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/regex/match_checker/match_checker.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/expr/member_checker/member_checker.h"
 #include "compiler/semantic/bodies/objects/object_checker/object_checker.h"
@@ -40,7 +41,7 @@ Expr *MatchChecker::matchItems(Expr *match) {
 Expr *MatchChecker::checkMatchMember(MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
-  if (name == "length") {
+  if (BuiltinPropertyTable::isName(name, BuiltinProperty::LENGTH)) {
     member->object = this->matchItems(member->object);
     member->type = Type::intTy();
     return member;

@@ -424,7 +424,7 @@ void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
     element = Type::error();
   }
   this->flowChecker->calledFunction();
-  LoopScan scan = this->loopScanner->scanLoop({stmt->body}, {});
+  LoopScan scan = this->loopScanner->scanForOfLoop(stmt);
   scan.callsFunctions = true;
   stmt->borrowElements = false;
   Flow head = this->loopBounds->loopHead(scan, nullptr, false);

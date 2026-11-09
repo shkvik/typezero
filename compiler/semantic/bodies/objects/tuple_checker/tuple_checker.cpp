@@ -1,4 +1,6 @@
 #include "compiler/semantic/bodies/objects/tuple_checker/tuple_checker.h"
+#include "compiler/program/library/array/array_method_table/array_method_table.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -93,7 +95,7 @@ const Type *TupleChecker::tupleElement(const Type *tuple) {
 
 TupleChecker::ResultTupleMember TupleChecker::checkTupleMember(MemberExpr *member) {
   const Type *type = member->object->type;
-  if (member->name != "length") {
+  if (!BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)) {
     member->type = Type::error();
     std::string message = ErrorTextTupleMember::noProperty(member->name, type->name());
 
@@ -121,8 +123,10 @@ TupleChecker::ResultTupleMethod TupleChecker::checkTupleMethod(CallExpr *call, M
   if (auto *object = dyn_cast<NameExpr>(ObjectCheckHelpers::unnarrowed(member->object))) {
     text = object->name.str();
   }
-  static const char *const resizing[] = {"push", "pop", "shift", "unshift", "splice"};
-  if (name == "join") {
+  const ArrayMethodInfo *method = ArrayMethodTable::find(name);
+  bool joins = method != nullptr && method->method == ArrayMethod::JOIN;
+  bool resizes = method != nullptr && method->form.is<ResizingArrayMethod>();
+  if (joins) {
     ResultTupleJoined joined = this->checkTupleJoin(call, member);
     bool reported = joined.isErr() &&
                     joined.error().code == TupleCheckerCheckTupleJoinErrorCode::ALREADY_REPORTED;
@@ -142,7 +146,7 @@ TupleChecker::ResultTupleMethod TupleChecker::checkTupleMethod(CallExpr *call, M
   }
   this->argumentChecker->checkArgsLoosely(call);
   call->type = Type::error();
-  if (llvm::is_contained(resizing, name)) {
+  if (resizes) {
     std::string message = ErrorTextTupleMethod::fixedLen(name, text);
 
     return err(TupleCheckerCheckTupleMethodError{

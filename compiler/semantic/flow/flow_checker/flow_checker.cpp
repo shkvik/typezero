@@ -1,5 +1,8 @@
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/program/ast_walker/ast_walker.h"
+#include "compiler/program/library/array/array_method_table/array_method_table.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/flow/field_facts/field_facts.h"
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
 #include "compiler/semantic/flow/union_narrowing/union_narrowing.h"
@@ -286,7 +289,10 @@ bool FlowChecker::staysLocal(const FunctionDecl *fn, llvm::StringRef name) {
         if (auto *index = dyn_cast<IndexExpr>(e)) {
           safe += named(index->object) ? 1 : 0;
         } else if (auto *member = dyn_cast<MemberExpr>(e)) {
-          safe += named(member->object) && member->name == "length" ? 1 : 0;
+          safe += named(member->object) &&
+                          BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)
+                      ? 1
+                      : 0;
         } else if (auto *list = dyn_cast<ArrayLitExpr>(e)) {
           for (const ArrayLitExpr::Element &el : list->elements) {
             safe += el.spread && named(el.expr) ? 1 : 0;
@@ -299,18 +305,13 @@ bool FlowChecker::staysLocal(const FunctionDecl *fn, llvm::StringRef name) {
           if (!callee || !named(callee->object)) {
             return;
           }
-          static const char *const plain[] = {
-              "push",        "pop",      "shift",   "unshift",    "splice", "slice",   "indexOf",
-              "lastIndexOf", "includes", "join",    "at",         "fill",   "reverse", "concat",
-              "keys",        "values",   "entries", "toReversed", "with",   "flat"};
-          static const char *const callbacks[] = {
-              "map",       "filter",   "forEach",       "every",   "some", "find",
-              "findIndex", "findLast", "findLastIndex", "flatMap", "sort", "toSorted"};
-          bool reduce = callee->name == "reduce" || callee->name == "reduceRight";
-          bool calls = llvm::is_contained(callbacks, callee->name) || reduce;
-          if (!calls && !llvm::is_contained(plain, callee->name)) {
+          const ArrayMethodInfo *method = ArrayMethodTable::find(callee->name);
+          if (method == nullptr) {
             return;
           }
+          const CallbackArrayMethod *callback = method->form.as<CallbackArrayMethod>();
+          bool reduce = callback != nullptr && callback->callback == ArrayCallback::REDUCE;
+          bool calls = callback != nullptr || method->form.is<SortingArrayMethod>();
           if (calls && !llvm::all_of(call->args, [&](const Expr *arg) {
                 auto *fe = dyn_cast<FunctionExpr>(arg);
                 return !fe ? !reduce || arg != call->args.front()
@@ -366,7 +367,12 @@ bool FlowChecker::staysLocal(const FunctionDecl *fn, llvm::StringRef name) {
       const Expr *value = cast<ReturnStmt>(s)->value;
       auto *wrap = dyn_cast_or_null<CallExpr>(value);
       auto *callee = wrap ? dyn_cast<NameExpr>(wrap->callee) : nullptr;
-      if (callee && (callee->name == "ok" || callee->name == "err") && wrap->args.size() == 1) {
+      std::optional<GlobalName> wrapper = std::nullopt;
+      if (callee != nullptr) {
+        wrapper = GlobalNameTable::find(callee->name);
+      }
+      bool wraps = wrapper == GlobalName::OK || wrapper == GlobalName::ERR;
+      if (wraps && wrap->args.size() == 1) {
         value = wrap->args[0];
       }
       safe += named(value) ? 1 : 0;

@@ -11,6 +11,7 @@
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/values/array_lowerer/array_lowerer.h"
 #include "compiler/lower/values/callback_method_lowerer/callback_method_lowerer.h"
+#include "compiler/program/library/bytes/bytes_method_table/bytes_method_table.h"
 #include "runtime/library/bytes/encodings/encodings.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -38,7 +39,7 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
       call->args.size() > 1 ? this->lowering.exprLowerer().emitExpr(call->args[1]) : nullptr;
 
   if (method == Builtin::ArrSortWith) {
-    bool copy = member->name == "toSorted";
+    bool copy = BytesMethodTable::findMethod(member->name) == BytesMethod::TO_SORTED;
     llvm::Value *target = array;
     if (copy) {
       target = this->lowering.builder.CreateCall(

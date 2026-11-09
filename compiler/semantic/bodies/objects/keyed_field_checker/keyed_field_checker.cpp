@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/objects/keyed_field_checker/keyed_field_checker.h"
+#include "compiler/program/library/object/object_member_table/object_member_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -28,11 +29,9 @@ KeyedFieldChecker::KeyedFieldChecker(SemanticState &owner, SemanticParts &all)
 }
 
 bool KeyedFieldChecker::isInherited(llvm::StringRef name) {
-  static const char *const names[] = {"toString",      "valueOf",        "hasOwnProperty",
-                                      "isPrototypeOf", "toLocaleString", "propertyIsEnumerable",
-                                      "constructor",   "__proto__"};
+  std::optional<ObjectMember> member = ObjectMemberTable::find(name);
 
-  return llvm::is_contained(names, name);
+  return member.has_value();
 }
 
 bool KeyedFieldChecker::wrongKey(KeyedFieldCheckerCheckKeyedFieldErrorCode code) {

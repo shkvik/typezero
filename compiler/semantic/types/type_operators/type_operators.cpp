@@ -1,5 +1,6 @@
 #include "compiler/semantic/types/type_operators/type_operators.h"
 #include "compiler/program/ast/ast.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
@@ -178,8 +179,13 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
   }
   case TypeOp::Index: {
     const Type *object = operands[0];
-    if (operands[1]->isStringLiteral() && operands[1]->literalText() == u"length" &&
-        (object->isTuple() || object->isArray())) {
+    std::string key;
+    if (operands[1]->isStringLiteral()) {
+      key = ToUtf8::toUtf8(operands[1]->literalText());
+    }
+    bool lengthKey = operands[1]->isStringLiteral() &&
+                     BuiltinPropertyTable::isName(key, BuiltinProperty::LENGTH);
+    if (lengthKey && (object->isTuple() || object->isArray())) {
       if (object->isTuple() && !object->tupleRest() &&
           object->tupleMin() == object->fields().size()) {
         return Type::numberLiteral(double(object->fields().size()), Type::intTy());

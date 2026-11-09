@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/process/process_checker/process_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -42,7 +43,7 @@ bool ProcessChecker::isProcessMember(const Expr *expr, llvm::StringRef name) con
   auto *member = dyn_cast<MemberExpr>(expr);
 
   return member && !member->optional && member->name == name &&
-         this->callChecker->isGlobalName(member->object, "process");
+         this->callChecker->isGlobalName(member->object, GlobalName::PROCESS);
 }
 
 Expr *ProcessChecker::builtinCall(llvm::SMLoc loc, Expr *callee, Builtin builtin,
@@ -73,11 +74,11 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
   };
   llvm::StringRef name = member->name;
 
-  bool isDate = this->callChecker->isGlobalName(member->object, "Date");
+  bool isDate = this->callChecker->isGlobalName(member->object, GlobalName::DATE);
   if (isDate && name != "now") {
     return this->dateChecker->checkDateStatic(call, member);
   }
-  if (isDate || this->callChecker->isGlobalName(member->object, "performance")) {
+  if (isDate || this->callChecker->isGlobalName(member->object, GlobalName::PERFORMANCE)) {
     llvm::StringRef object = isDate ? "Date" : "performance";
     if (name != "now") {
       std::string message = ErrorTextProcessCall::onlyNow(object, name);
@@ -134,7 +135,7 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
 
-  if (!this->callChecker->isGlobalName(member->object, "process")) {
+  if (!this->callChecker->isGlobalName(member->object, GlobalName::PROCESS)) {
     return nullptr;
   }
   if (this->callChecker->rejectSpread(call)) {
@@ -291,10 +292,10 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
     return member;
   }
 
-  if (this->callChecker->isGlobalName(member->object, "Date")) {
+  if (this->callChecker->isGlobalName(member->object, GlobalName::DATE)) {
     return this->dateChecker->checkDateStaticMember(member);
   }
-  if (this->callChecker->isGlobalName(member->object, "performance")) {
+  if (this->callChecker->isGlobalName(member->object, GlobalName::PERFORMANCE)) {
     std::string message =
         name == "now" ? ErrorTextProcessMember::perfNow() : ErrorTextProcessMember::perfOther(name);
     this->state.getDiagnostics().error(member->loc(), message);
@@ -302,7 +303,7 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
     return member;
   }
 
-  if (!this->callChecker->isGlobalName(member->object, "process")) {
+  if (!this->callChecker->isGlobalName(member->object, GlobalName::PROCESS)) {
     return nullptr;
   }
   if (name == "stdin" || name == "stdout" || name == "stderr") {
@@ -364,7 +365,7 @@ Expr *ProcessChecker::checkProcessAssign(AssignExpr *assign) {
     return nullptr;
   }
   bool isEnv = this->isProcessMember(object, "env");
-  bool isProcess = this->callChecker->isGlobalName(object, "process") && !name.empty();
+  bool isProcess = this->callChecker->isGlobalName(object, GlobalName::PROCESS) && !name.empty();
   bool isStream =
       this->isProcessMember(object, "stdout") || this->isProcessMember(object, "stderr");
   if (!isEnv && !isProcess && !isStream) {

@@ -28,6 +28,8 @@
 - **Объявления в блоке — по длине строки**, псевдонимы `Result…` — одной длины.
 - **Части движка `semantic/` создаёт только сборка `SemanticParts`**, соседей часть берёт у неё в
   теле своего конструктора.
+- **Имена встроенного — из таблиц `program/library/`**: глобальные объекты, свойства и методы
+  встроенных типов не пишутся строками в проверке.
 - **Комментариев нет.** Форматирует `.clang-format`.
 
 ## Классы и структуры
@@ -169,6 +171,43 @@ ResultThisComesFrom found = this->thisOf(this->checker.currentDecl());
   отдаёт `bool`, всегда что-то проверяет, поэтому `enter…` ничего не возвращает.
 - **Хранилище данных отдаёт действия, а не поля:** класс-хранилище (как `SemanticState` и его группы)
   держит поля закрытыми; снаружи только методы по смыслу, без доступа к своим контейнерам.
+
+## Методы встроенных типов — из таблиц
+
+Имя, которое компилятор узнаёт в программе, ищется в таблице `program/library/` один раз, дальше
+код сравнивает `enum` и читает свойства строки таблицы, а не держит свой список строк:
+
+- глобальные объекты и функции — `GlobalNameTable` (`GlobalName::MATH`), проверка в коде —
+  `CallChecker::isGlobalName(expr, GlobalName::MATH)`;
+- их статические члены — `GlobalMemberTable` (`Array.from`, `Object.keys`, `Symbol.iterator`),
+  проверка — `CallChecker::isGlobalMember(member, GlobalMember::ARRAY_FROM)`;
+- свойства встроенных типов — `BuiltinPropertyTable` (`length`, `byteLength`, `size`);
+- методы: массива — `ArrayMethodTable`, `Result` — `ResultMethodTable`, итератора —
+  `IteratorMethodTable`, строки — `StringMethodTable`, `Map`/`Set` — `DictMethodTable`,
+  `Object.prototype` — `ObjectMemberTable`, байтовых типов — `BytesMethodTable`.
+
+Имя для созданного компилятором узла тоже берётся из таблицы (`DictMethodTable::getName(...)`).
+
+У строки таблицы нет полей по умолчанию и необязательных полей: то, что есть только у части
+методов, лежит в `form` — `Union` видов (правило «Вид вместо флагов» ниже). Пропустить `form` в
+строке нельзя — не соберётся; записать полю чужого вида — тоже.
+
+```cpp
+{
+    .name = "push",
+    .method = ArrayMethod::PUSH,
+    .builtin = Builtin::ArrPush,
+    .form = ResizingArrayMethod{.change = LengthChange::GROWS},
+},
+```
+
+```cpp
+const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
+bool resizes = method != nullptr && (method->grows || method->shrinks);
+```
+
+Не так: `static const char *const resizing[] = {"push", "pop", "shift", "unshift", "splice"};` —
+такие списки лежали в одиннадцати файлах и расходились между собой.
 
 ## Ошибки — `Result`
 

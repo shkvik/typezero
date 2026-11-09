@@ -8,6 +8,7 @@
 #include "compiler/interprocedural/overflow/program_scan/program_scan.h"
 #include "compiler/interprocedural/overflow/slots/slots.h"
 #include "compiler/interprocedural/overflow/value_range/value_range.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -162,7 +163,8 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
       n.integer = ValueRange::isIntegerType(name->var()->type);
     }
   } else if (auto *member = dyn_cast<MemberExpr>(expr);
-             member && member->name == "length" && ValueRange::hasLength(member->object->type)) {
+             member && BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) &&
+             ValueRange::hasLength(member->object->type)) {
     name = dyn_cast<NameExpr>(OverflowHelpers::stripCasts(member->object));
     n.length = true;
     n.integer = true;

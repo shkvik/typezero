@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/console/console_checker/console_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/generics/arg_list_checker/arg_list_checker.h"
@@ -79,7 +80,7 @@ Expr *ConsoleChecker::checkConsoleLog(CallExpr *call) {
 }
 
 Expr *ConsoleChecker::checkConsoleCall(CallExpr *call, MemberExpr *member) {
-  if (!this->callChecker->isGlobalName(member->object, "console")) {
+  if (!this->callChecker->isGlobalName(member->object, GlobalName::CONSOLE)) {
     return nullptr;
   }
   ResultConsoleMethod method = ConsoleChecker::consoleMethod(member);

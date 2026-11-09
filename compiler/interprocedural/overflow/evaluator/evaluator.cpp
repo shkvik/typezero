@@ -9,6 +9,7 @@
 #include "compiler/interprocedural/overflow/program_scan/program_scan.h"
 #include "compiler/interprocedural/overflow/slots/slots.h"
 #include "compiler/interprocedural/overflow/value_range/value_range.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/library/decimal/decimal_literal/decimal_literal.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
@@ -189,7 +190,8 @@ Val Evaluator::evalMember(const MemberExpr *member, State &st) {
   if (!objectType) {
     return Val();
   }
-  if (member->name == "length" && ValueRange::hasLength(objectType)) {
+  if (BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) &&
+      ValueRange::hasLength(objectType)) {
     return ValueRange::numVal(object.len.empty() ? ValueRange::someLength() : object.len);
   }
   if (objectType->isResult() && member->name == "value" && object.elem) {

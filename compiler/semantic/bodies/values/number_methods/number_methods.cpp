@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/values/number_methods/number_methods.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/binary_checker/binary_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -35,7 +36,7 @@ NumberMethods::NumberMethods(SemanticState &owner, SemanticParts &all)
 
 NumberMethods::ResultStaticCallMade NumberMethods::checkStaticCall(CallExpr *call,
                                                                    MemberExpr *member) {
-  bool isString = this->callChecker->isGlobalName(member->object, "String");
+  bool isString = this->callChecker->isGlobalName(member->object, GlobalName::STRING);
   llvm::StringRef fn = member->name;
   call->type = Type::error();
   if (isString && fn == "raw" && !call->tagged) {

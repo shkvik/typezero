@@ -1,4 +1,10 @@
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
+#include "compiler/program/library/array/array_method_table/array_method_table.h"
+#include "compiler/program/library/builtin_names/global_member_table/global_member_table.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/iterator/iterator_method_table/iterator_method_table.h"
+#include "compiler/program/library/object/object_member_table/object_member_table.h"
+#include "compiler/program/library/string/string_method_table/string_method_table.h"
 #include "compiler/semantic/bodies/classes/inherit_checker/inherit_checker.h"
 #include "compiler/semantic/bodies/classes/method_call_checker/method_call_checker.h"
 #include "compiler/semantic/bodies/classes/static_checker/static_checker.h"
@@ -187,12 +193,13 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
   call->type = Type::error();
   this->argListChecker->expandListSpreads(call->args, call->spread);
   if (auto *index = dyn_cast<IndexExpr>(call->callee); index && !index->optional) {
-    if (auto *key = dyn_cast<MemberExpr>(index->index);
-        key && (key->name == "iterator" || key->name == "asyncIterator") &&
-        this->isGlobalName(key->object, "Symbol")) {
+    auto *key = dyn_cast<MemberExpr>(index->index);
+    bool iterator = key != nullptr && this->isGlobalMember(key, GlobalMember::SYMBOL_ITERATOR);
+    bool asyncIterator =
+        key != nullptr && this->isGlobalMember(key, GlobalMember::SYMBOL_ASYNC_ITERATOR);
+    if (iterator || asyncIterator) {
       call->callee = this->state.getAst().make<MemberExpr>(
-          index->loc(), index->object,
-          key->name == "iterator" ? "[Symbol.iterator]" : "[Symbol.asyncIterator]");
+          index->loc(), index->object, iterator ? "[Symbol.iterator]" : "[Symbol.asyncIterator]");
     }
   }
 
@@ -204,7 +211,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     return nodeCall;
   }
   if (auto *member = dyn_cast<MemberExpr>(call->callee); member && !call->optional) {
-    if (this->isGlobalName(member->object, "Promise")) {
+    if (this->isGlobalName(member->object, GlobalName::PROMISE)) {
       return this->promiseStaticChecker->checkPromiseStatic(call, member, expected);
     }
     auto rejectTypeArgs = [&] {
@@ -216,10 +223,12 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     };
     if (auto *object = dyn_cast<NameExpr>(member->object);
         !object || !this->scopes->lookup(object->name).cls()) {
-      static const llvm::StringLiteral globals[] = {
-          "String",  "Number",  "Object", "Iterator", "Array",  "Map",  "Symbol", "Result",
-          "console", "process", "Math",   "Bit",      "RegExp", "Date", "Intl",   "decimal"};
-      auto named = [&](llvm::StringRef g) { return this->isGlobalName(object, g); };
+      static const GlobalName globals[] = {
+          GlobalName::STRING,  GlobalName::NUMBER,  GlobalName::OBJECT, GlobalName::ITERATOR,
+          GlobalName::ARRAY,   GlobalName::MAP,     GlobalName::SYMBOL, GlobalName::RESULT,
+          GlobalName::CONSOLE, GlobalName::PROCESS, GlobalName::MATH,   GlobalName::BIT,
+          GlobalName::REG_EXP, GlobalName::DATE,    GlobalName::INTL,   GlobalName::DECIMAL};
+      auto named = [&](GlobalName global) { return this->isGlobalName(object, global); };
       if (object && llvm::any_of(globals, named)) {
         rejectTypeArgs();
       }
@@ -231,16 +240,16 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     if (resultStatic != nullptr) {
       return resultStatic;
     }
-    if (this->isGlobalName(member->object, "JSON")) {
+    if (this->isGlobalName(member->object, GlobalName::JSON)) {
       return this->jsonStaticChecker->checkJsonStatic(call, member);
     }
-    if (this->isGlobalName(member->object, "Array") && member->name == "isArray") {
+    if (this->isGlobalMember(member, GlobalMember::ARRAY_IS_ARRAY)) {
       return this->jsonChecker->checkArrayIsArray(call, member);
     }
-    if (this->isGlobalName(member->object, "Json") && member->name == "isJson") {
+    if (this->isGlobalMember(member, GlobalMember::JSON_IS_JSON)) {
       return this->jsonChecker->checkJsonIsJson(call, member);
     }
-    if (this->isGlobalName(member->object, "Reflect")) {
+    if (this->isGlobalName(member->object, GlobalName::REFLECT)) {
       return this->reflectCallChecker->checkReflectCall(call, member, expected);
     }
     Expr *consoleCall = this->consoleChecker->checkConsoleCall(call, member);
@@ -252,42 +261,42 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return processCall;
     }
     MemberExpr *nested = dyn_cast<MemberExpr>(member->object);
-    bool bitCall = this->isGlobalName(member->object, "Bit") ||
-                   (nested != nullptr && this->isGlobalName(nested->object, "Bit"));
+    bool bitCall = this->isGlobalName(member->object, GlobalName::BIT) ||
+                   (nested != nullptr && this->isGlobalName(nested->object, GlobalName::BIT));
     if (bitCall) {
       return this->mathChecker->checkBitCall(call, member);
     }
-    if (this->isGlobalName(member->object, "Math")) {
+    if (this->isGlobalName(member->object, GlobalName::MATH)) {
       return this->mathChecker->checkMathCall(call, member, expected);
     }
-    if (this->isGlobalName(member->object, "RegExp")) {
+    if (this->isGlobalName(member->object, GlobalName::REG_EXP)) {
       return this->regexChecker->checkRegExpStatic(call, member);
     }
-    if (this->isGlobalName(member->object, "Intl")) {
+    if (this->isGlobalName(member->object, GlobalName::INTL)) {
       return this->dateFormatChecker->checkIntlCall(call, member);
     }
-    bool intlMember = nested != nullptr && this->isGlobalName(nested->object, "Intl");
+    bool intlMember = nested != nullptr && this->isGlobalName(nested->object, GlobalName::INTL);
     if (intlMember && nested->name == "Locale") {
       return this->intlChecker->checkLocaleStatic(call, member, expected);
     }
     if (intlMember) {
       return this->intlChecker->checkIntlStatic(call, member);
     }
-    if (this->isGlobalName(member->object, "decimal")) {
+    if (this->isGlobalName(member->object, GlobalName::DECIMAL)) {
       return this->decimalChecker->checkDecimalStatic(call, member);
     }
     if (this->cryptoChecker->isX509Class(member->object)) {
       return this->cryptoChecker->checkX509Parse(call, member);
     }
-    if (this->isGlobalName(member->object, "crypto")) {
+    if (this->isGlobalName(member->object, GlobalName::CRYPTO)) {
       return this->cryptoChecker->checkWebCryptoCall(call, member);
     }
     Expr *bytesStatic = this->bufferStaticChecker->checkBytesStatic(call, member);
     if (bytesStatic != nullptr) {
       return bytesStatic;
     }
-    if (this->isGlobalName(member->object, "String") ||
-        this->isGlobalName(member->object, "Number")) {
+    if (this->isGlobalName(member->object, GlobalName::STRING) ||
+        this->isGlobalName(member->object, GlobalName::NUMBER)) {
       if (this->rejectSpread(call)) {
         return call;
       }
@@ -299,7 +308,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       }
       return made.isOk() ? made.value() : call;
     }
-    if (this->isGlobalName(member->object, "Object")) {
+    if (this->isGlobalName(member->object, GlobalName::OBJECT)) {
       ObjectChecker::ResultObjectStaticCall objectCall =
           this->objectChecker->checkObjectCall(call, member, expected);
       if (objectCall.isOk()) {
@@ -339,7 +348,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     if (object && object->name == "this") {
       this->state.getClassContext().rememberThisMember(member->name);
     }
-    if (this->isGlobalName(member->object, "Iterator")) {
+    if (this->isGlobalName(member->object, GlobalName::ITERATOR)) {
       IteratorMethods::ResultIteratorFromCall from =
           this->iteratorMethods->checkIteratorFrom(call, member);
       if (from.isOk()) {
@@ -359,10 +368,10 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       this->state.getDiagnostics().error(at, from.error().message);
       return call;
     }
-    if (this->isGlobalName(member->object, "Array")) {
+    if (this->isGlobalName(member->object, GlobalName::ARRAY)) {
       return this->iteratorMethods->checkArrayFrom(call, member);
     }
-    if (this->isGlobalName(member->object, "Map")) {
+    if (this->isGlobalName(member->object, GlobalName::MAP)) {
       DictMethods::ResultMapFunctionTyped mapped = this->dictMethods->checkMapStatic(call, member);
       if (mapped.isOk()) {
         return mapped.value();
@@ -381,9 +390,8 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       this->state.getDiagnostics().error(at, mapped.error().message);
       return call;
     }
-    static const llvm::StringLiteral consumers[] = {"toArray", "forEach", "reduce",
-                                                    "some",    "every",   "find"};
-    if (llvm::is_contained(consumers, member->name)) {
+    const IteratorMethodInfo *iteratorMethod = IteratorMethodTable::find(member->name);
+    if (iteratorMethod != nullptr && iteratorMethod->form.is<IteratorConsumerMethod>()) {
       this->iteratorMethods->markFused(member->object);
     }
     member->object = this->genericChecker->apparent(this->exprChecker->checkExpr(member->object));
@@ -545,12 +553,14 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return checked;
     }
     rejectTypeArgs();
+    const ArrayMethodInfo *arrayMethod = ArrayMethodTable::find(member->name);
     if (receiver->isTuple()) {
-      static const char *const inPlace[] = {"push", "pop",     "shift", "unshift",    "splice",
-                                            "sort", "reverse", "fill",  "copyWithin", "join"};
-      Expr *copy = llvm::is_contained(inPlace, member->name)
-                       ? nullptr
-                       : this->tupleChecker->arrayCopy(member->object);
+      bool joins = arrayMethod != nullptr && arrayMethod->method == ArrayMethod::JOIN;
+      bool changes = arrayMethod != nullptr && (arrayMethod->form.is<ResizingArrayMethod>() ||
+                                                arrayMethod->form.is<RewritingArrayMethod>() ||
+                                                arrayMethod->form.is<SortingArrayMethod>());
+      bool inPlace = changes || joins;
+      Expr *copy = inPlace ? nullptr : this->tupleChecker->arrayCopy(member->object);
       if (!copy) {
         TupleChecker::ResultTupleMethod method = this->tupleChecker->checkTupleMethod(call, member);
         bool reported =
@@ -575,17 +585,21 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       this->state.getDiagnostics().error(at, fieldCall.error().message);
       return call;
     }
-    if (!(receiver->isArray() && member->name == "push") && this->rejectSpread(call)) {
+    bool arrayPush =
+        receiver->isArray() && arrayMethod != nullptr && arrayMethod->method == ArrayMethod::PUSH;
+    if (!arrayPush && this->rejectSpread(call)) {
       return call;
     }
     const Type *valueReceiver = member->object->type;
-    bool stringLocale = valueReceiver->isString() &&
-                        (member->name == "localeCompare" || member->name == "normalize");
+    const StringMethodInfo *stringMethod = StringMethodTable::find(member->name);
+    bool stringLocale = valueReceiver->isString() && stringMethod != nullptr &&
+                        stringMethod->form.is<LocaleStringMethod>();
     if (stringLocale) {
       return this->intlMethodChecker->checkStringLocale(call, member);
     }
+    std::optional<ObjectMember> localeMember = ObjectMemberTable::find(member->name);
     bool numberLocale = (valueReceiver->isNumeric() || valueReceiver->isDecimal()) &&
-                        member->name == "toLocaleString";
+                        localeMember == ObjectMember::TO_LOCALE_STRING;
     if (numberLocale) {
       return this->intlMethodChecker->checkNumberLocale(call, member);
     }
@@ -641,7 +655,9 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       }
       return made.value();
     }
-    if (receiver->isBool() && member->name == "toString" && call->args.empty()) {
+    std::optional<ObjectMember> objectMember = ObjectMemberTable::find(member->name);
+    bool boolToString = receiver->isBool() && objectMember == ObjectMember::TO_STRING;
+    if (boolToString && call->args.empty()) {
       call->args.push_back(this->concatChecker->toStringOperand(member->object));
       call->target = BuiltinCall{.builtin = Builtin::StringOf};
       call->type = Type::string();
@@ -738,8 +754,10 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       name->type = this->scopes->varType(var);
       return this->checkDirectCall(call, known->sym, name->loc());
     }
-    if (!entry.var() && !entry.func() && !entry.cls() && name->name == "Array" &&
-        !call->hasSpread()) {
+    std::optional<GlobalName> calledGlobal = GlobalNameTable::find(name->name);
+    bool arrayCall =
+        calledGlobal == GlobalName::ARRAY && !entry.var() && !entry.func() && !entry.cls();
+    if (arrayCall && !call->hasSpread()) {
       auto *made =
           this->state.getAst().make<NewExpr>(call->loc(), name->name, name->typeArgs, call->args);
 
@@ -860,22 +878,39 @@ bool CallChecker::rejectSpread(CallExpr *call) {
   return false;
 }
 
-bool CallChecker::isGlobalName(const Expr *expr, llvm::StringRef name) const {
-  if (auto *m = dyn_cast<MemberExpr>(expr); m && name == "crypto" && m->name == "crypto" &&
-                                            !m->optional &&
-                                            this->isGlobalName(m->object, "globalThis")) {
-    return true;
-  }
-  auto *n = dyn_cast<NameExpr>(expr);
-  if (!n || n->name != name) {
+bool CallChecker::isUnshadowedGlobal(const NameExpr *name) const {
+  if (this->builtinModuleChecker->nodeName(name->name)) {
     return false;
   }
-  if (this->builtinModuleChecker->nodeName(name)) {
-    return false;
-  }
-  ScopeEntry shadow = this->scopes->lookup(name);
+  ScopeEntry shadow = this->scopes->lookup(name->name);
 
   return !shadow.var() && !shadow.func() && !shadow.cls();
 }
 
+bool CallChecker::isGlobalName(const Expr *expr, GlobalName global) const {
+  llvm::StringRef name = GlobalNameTable::getName(global);
+  auto *member = dyn_cast<MemberExpr>(expr);
+  bool throughGlobalThis = global == GlobalName::CRYPTO && member != nullptr &&
+                           member->name == name && !member->optional &&
+                           this->isGlobalName(member->object, GlobalName::GLOBAL_THIS);
+  if (throughGlobalThis) {
+    return true;
+  }
+  auto *named = dyn_cast<NameExpr>(expr);
+  if (named == nullptr || named->name != name) {
+    return false;
+  }
+
+  return this->isUnshadowedGlobal(named);
+}
+
+bool CallChecker::isGlobalMember(const MemberExpr *member, GlobalMember which) const {
+  GlobalName owner = GlobalMemberTable::getOwner(which);
+  std::optional<GlobalMember> found = GlobalMemberTable::find(owner, member->name);
+  if (found != which) {
+    return false;
+  }
+
+  return this->isGlobalName(member->object, owner);
+}
 }

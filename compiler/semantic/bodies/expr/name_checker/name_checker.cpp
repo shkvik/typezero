@@ -1,11 +1,11 @@
 #include "compiler/semantic/bodies/expr/name_checker/name_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/classes/class_checker/class_checker.h"
 #include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker_errors.h"
 #include "compiler/semantic/bodies/expr/new_checker/new_checker_errors.h"
 #include "compiler/semantic/bodies/functions/nested_functions/nested_functions.h"
 #include "compiler/semantic/bodies/top_level_checker/top_level_checker.h"
-#include "compiler/semantic/declare/constant_folder/constant_folder.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
@@ -29,7 +29,6 @@ NameChecker::NameChecker(SemanticState &owner, SemanticParts &all)
   this->resultTypes = &all.getResultTypes();
   this->classChecker = &all.getClassChecker();
   this->typeRelations = &all.getTypeRelations();
-  this->constantFolder = &all.getConstantFolder();
   this->genericChecker = &all.getGenericChecker();
   this->returnInferrer = &all.getReturnInferrer();
   this->metadataChecker = &all.getMetadataChecker();
@@ -74,21 +73,25 @@ NameChecker::ResultVariableVisible NameChecker::notCaptured(const NameExpr *name
 
 NameChecker::ResultResolvedNameUse NameChecker::unknownName(NameExpr *name,
                                                             const ScopeEntry &entry) {
-  static const llvm::StringLiteral builtins[] = {"String", "Number", "parseInt", "parseFloat",
-                                                 "Boolean"};
-  static const llvm::StringLiteral uris[] = {"encodeURIComponent", "encodeURI",
-                                             "decodeURIComponent", "decodeURI"};
-  static const std::pair<llvm::StringLiteral, llvm::StringLiteral> objects[] = {
-      {"process", "process.argv"},
-      {"console", "console.log(x)"},
-      {"Date", "Date.now()"},
-      {"performance", "performance.now()"},
-      {"RegExp", "new RegExp(pattern)"},
-      {"JSON", "JSON.parse(text)"}};
-  auto object = llvm::find_if(objects, [&](const auto &o) { return o.first == name->name; });
-  llvm::StringRef result =
-      entry.enumDecl() ? llvm::StringRef() : this->resultTypes->resultName(name->name);
-  if (result == "ok" || result == "err") {
+  static const GlobalName builtins[] = {GlobalName::STRING, GlobalName::NUMBER,
+                                        GlobalName::PARSE_INT, GlobalName::PARSE_FLOAT,
+                                        GlobalName::BOOLEAN};
+  static const GlobalName uris[] = {GlobalName::ENCODE_URI_COMPONENT, GlobalName::ENCODE_URI,
+                                    GlobalName::DECODE_URI_COMPONENT, GlobalName::DECODE_URI};
+  static const std::pair<GlobalName, llvm::StringLiteral> objects[] = {
+      {GlobalName::PROCESS, "process.argv"},
+      {GlobalName::CONSOLE, "console.log(x)"},
+      {GlobalName::DATE, "Date.now()"},
+      {GlobalName::PERFORMANCE, "performance.now()"},
+      {GlobalName::REG_EXP, "new RegExp(pattern)"},
+      {GlobalName::JSON, "JSON.parse(text)"}};
+  std::optional<GlobalName> global = GlobalNameTable::find(name->name);
+  auto object = llvm::find_if(objects, [&](const auto &o) { return o.first == global; });
+  std::optional<GlobalName> result = std::nullopt;
+  if (!entry.enumDecl()) {
+    result = this->resultTypes->resultName(name->name);
+  }
+  if (result == GlobalName::OK || result == GlobalName::ERR) {
     std::string message = ErrorTextNameUse::okValue(name->name);
 
     return err(NameCheckerUnknownNameError{
@@ -96,7 +99,7 @@ NameChecker::ResultResolvedNameUse NameChecker::unknownName(NameExpr *name,
         .message = message,
     });
   }
-  if (result == "Result") {
+  if (result == GlobalName::RESULT) {
     std::string message = ErrorTextNameUse::resultUse(name->name);
 
     return err(NameCheckerUnknownNameError{
@@ -104,9 +107,9 @@ NameChecker::ResultResolvedNameUse NameChecker::unknownName(NameExpr *name,
         .message = message,
     });
   }
-  if (result == "Ok" || result == "Err") {
-    llvm::StringRef make = result == "Ok" ? "ok(value)" : "err(error)";
-    llvm::StringRef test = result == "Ok" ? "isOk()" : "isErr()";
+  if (result == GlobalName::OK_TYPE || result == GlobalName::ERR_TYPE) {
+    llvm::StringRef make = result == GlobalName::OK_TYPE ? "ok(value)" : "err(error)";
+    llvm::StringRef test = result == GlobalName::OK_TYPE ? "isOk()" : "isErr()";
     std::string message = ErrorTextNameUse::typeOnly(name->name, make, test);
 
     return err(NameCheckerUnknownNameError{
@@ -122,8 +125,9 @@ NameChecker::ResultResolvedNameUse NameChecker::unknownName(NameExpr *name,
         .message = message,
     });
   }
-  bool uri = llvm::is_contained(uris, name->name);
-  if (llvm::is_contained(builtins, name->name) || uri) {
+  bool uri = global.has_value() && llvm::is_contained(uris, *global);
+  bool builtin = global.has_value() && llvm::is_contained(builtins, *global);
+  if (builtin || uri) {
     llvm::StringRef returns = uri ? "string" : "double";
     std::string message = ErrorTextNameUse::builtin(name->name, returns);
 
@@ -148,8 +152,8 @@ NameChecker::ResultResolvedNameUse NameChecker::unknownName(NameExpr *name,
         .message = message,
     });
   }
-  if (name->name == "BigInt") {
-    std::string quoted = ErrorTextBigInt::quoted("BigInt");
+  if (global == GlobalName::BIG_INT) {
+    std::string quoted = ErrorTextBigInt::quoted(name->name);
     std::string bigint = ErrorTextBigInt::none(quoted);
     this->state.getDiagnostics().error(name->loc(), bigint);
 
@@ -158,7 +162,7 @@ NameChecker::ResultResolvedNameUse NameChecker::unknownName(NameExpr *name,
         .message = "",
     });
   }
-  if (name->name == "decimal") {
+  if (global == GlobalName::DECIMAL) {
     std::string message = ErrorTextNameUse::decimal();
 
     return err(NameCheckerUnknownNameError{
@@ -336,11 +340,6 @@ Expr *NameChecker::checkName(NameExpr *name) {
       return this->typeRelations->convert(name, type);
     }
     return name;
-  }
-  if (!entry.func() && !entry.enumDecl()) {
-    if (Expr *constant = this->constantFolder->globalConstant("", name->name, name->loc())) {
-      return constant;
-    }
   }
   if (entry.func()) {
     name->binding = NamedFunction{.func = entry.func()};

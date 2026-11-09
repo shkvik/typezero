@@ -9,6 +9,7 @@
 #include "compiler/interprocedural/overflow/program_scan/program_scan.h"
 #include "compiler/interprocedural/overflow/slots/slots.h"
 #include "compiler/interprocedural/overflow/value_range/value_range.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -51,7 +52,8 @@ OverflowCheck::Place AssignEvaluator::place(const Expr *target, State &st) {
   if (auto *member = dyn_cast<MemberExpr>(target)) {
     this->check.evaluator().eval(member->object, st);
     const Type *objectType = member->object->type ? member->object->type->nonOptional() : nullptr;
-    if (objectType && member->name == "length" && objectType->isArray()) {
+    if (objectType && BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) &&
+        objectType->isArray()) {
       p.kind = OverflowCheck::Place::Kind::Length;
       if (auto *name = dyn_cast<NameExpr>(OverflowHelpers::stripCasts(member->object))) {
         p.var = name->var();

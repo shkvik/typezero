@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/intl/intl_method_checker/intl_method_checker.h"
+#include "compiler/program/library/string/string_method_table/string_method_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -299,7 +300,8 @@ Expr *IntlMethodChecker::checkStringLocale(CallExpr *call, MemberExpr *member) {
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  if (member->name == "normalize") {
+  const StringMethodInfo *method = StringMethodTable::find(member->name);
+  if (method != nullptr && method->method == StringMethod::NORMALIZE) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);

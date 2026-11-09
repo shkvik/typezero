@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/functions/callback_checker/callback_checker_errors.h"
+#include "compiler/program/library/array/array_method_table/array_method_table.h"
 #include "llvm/ADT/Twine.h"
 
 namespace tz {
@@ -85,10 +86,11 @@ std::string ErrorTextCallbackMethod::notNumber(llvm::StringRef type) {
 }
 
 std::string ErrorTextCallbackArg::argsShape(llvm::StringRef method) {
-  if (method == "reduce" || method == "reduceRight") {
+  std::optional<ArrayCallback> callback = ArrayMethodTable::findCallback(method);
+  if (callback == ArrayCallback::REDUCE) {
     return "(accumulator, value, index, array)";
   }
-  if (method == "sort") {
+  if (callback == ArrayCallback::COMPARE) {
     return "(a, b)";
   }
 
@@ -102,8 +104,8 @@ std::string ErrorTextCallbackArg::position(size_t index) {
 }
 
 std::string ErrorTextCallbackArg::argName(llvm::StringRef method, size_t index) {
-  bool reduce = method == "reduce" || method == "reduceRight";
-  if (reduce) {
+  std::optional<ArrayCallback> callback = ArrayMethodTable::findCallback(method);
+  if (callback == ArrayCallback::REDUCE) {
     return index == 0 ? "accumulator" : index == 1 ? "value" : index == 2 ? "index" : "array";
   }
 

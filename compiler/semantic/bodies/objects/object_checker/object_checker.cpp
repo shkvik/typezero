@@ -1,4 +1,8 @@
 #include "compiler/semantic/bodies/objects/object_checker/object_checker.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
+#include "compiler/program/library/builtin_names/global_member_table/global_member_table.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/object/object_member_table/object_member_table.h"
 #include "compiler/semantic/bodies/classes/class_member_checker/class_member_checker.h"
 #include "compiler/semantic/bodies/classes/overload_resolver/overload_resolver.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
@@ -87,11 +91,9 @@ bool ObjectChecker::hasMethodFields(const ClassDecl *cls) {
 }
 
 bool ObjectChecker::isInherited(llvm::StringRef name) {
-  static const char *const names[] = {"toString",      "valueOf",        "hasOwnProperty",
-                                      "isPrototypeOf", "toLocaleString", "propertyIsEnumerable",
-                                      "constructor",   "__proto__"};
+  std::optional<ObjectMember> member = ObjectMemberTable::find(name);
 
-  return llvm::is_contained(names, name);
+  return member.has_value();
 }
 
 std::string ObjectChecker::noFieldText(const Type *type, llvm::StringRef name) {
@@ -103,8 +105,9 @@ std::string ObjectChecker::noFieldText(const Type *type, llvm::StringRef name) {
 ObjectChecker::ResultObjectStaticCall
 ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *expected) {
   llvm::StringRef fn = member->name;
+  std::optional<GlobalMember> objectMember = GlobalMemberTable::find(GlobalName::OBJECT, fn);
   call->type = Type::error();
-  if (fn == "groupBy") {
+  if (objectMember == GlobalMember::OBJECT_GROUP_BY) {
     DictMethods::ResultGroupByCallTyped grouped = this->dictMethods->checkGroupBy(call, false);
     if (grouped.isOk()) {
       return ok(grouped.value());
@@ -130,7 +133,7 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
         .message = grouped.error().message,
     });
   }
-  if (fn == "fromEntries") {
+  if (objectMember == GlobalMember::OBJECT_FROM_ENTRIES) {
     DictMethods::ResultFromEntriesTyped entries =
         this->dictMethods->checkFromEntries(call, expected);
     if (entries.isOk()) {
@@ -156,7 +159,8 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
         .message = entries.error().message,
     });
   }
-  if (fn != "keys" && fn != "values" && fn != "entries") {
+  if (objectMember != GlobalMember::OBJECT_KEYS && objectMember != GlobalMember::OBJECT_VALUES &&
+      objectMember != GlobalMember::OBJECT_ENTRIES) {
     this->argumentChecker->checkArgsLoosely(call);
     std::string message = ErrorTextObjectCall::noSupport(fn);
 
@@ -197,13 +201,15 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
     return ok(call);
   }
   if (type->nonOptional()->isJson()) {
-    call->target = BuiltinCall{.builtin = fn == "keys"     ? Builtin::ObjectKeys
-                                          : fn == "values" ? Builtin::ObjectValues
-                                                           : Builtin::ObjectEntries};
+    call->target = BuiltinCall{
+        .builtin = objectMember == GlobalMember::OBJECT_KEYS     ? Builtin::ObjectKeys
+                   : objectMember == GlobalMember::OBJECT_VALUES ? Builtin::ObjectValues
+                                                                 : Builtin::ObjectEntries};
     const Type *json = Type::json();
-    call->type = fn == "keys"     ? Type::array(Type::string())
-                 : fn == "values" ? Type::array(json)
-                                  : Type::array(Type::tuple({Type::string(), json}));
+    call->type = objectMember == GlobalMember::OBJECT_KEYS ? Type::array(Type::string())
+                 : objectMember == GlobalMember::OBJECT_VALUES
+                     ? Type::array(json)
+                     : Type::array(Type::tuple({Type::string(), json}));
     return ok(call);
   }
   if (type->isOptional() && (type->inner()->isObject() || type->inner()->isDict())) {
@@ -234,7 +240,7 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
         .message = message,
     });
   }
-  if (fn == "keys") {
+  if (objectMember == GlobalMember::OBJECT_KEYS) {
     call->target = BuiltinCall{.builtin = Builtin::ObjectKeys};
     call->type = Type::array(Type::string());
     return ok(call);
@@ -297,7 +303,7 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
         .message = message,
     });
   }
-  if (fn == "values") {
+  if (objectMember == GlobalMember::OBJECT_VALUES) {
     call->target = BuiltinCall{.builtin = Builtin::ObjectValues};
     call->type = Type::array(element);
   } else {
@@ -310,8 +316,9 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
 
 ObjectChecker::ResultEnumMemberValues ObjectChecker::enumMembers(CallExpr *call, EnumDecl *decl,
                                                                  llvm::StringRef fn) {
+  std::optional<GlobalMember> objectMember = GlobalMemberTable::find(GlobalName::OBJECT, fn);
   const Type *values = this->typeDeclarer->enumType(decl);
-  if (!decl->isString && fn != "keys") {
+  if (!decl->isString && objectMember != GlobalMember::OBJECT_KEYS) {
     llvm::StringRef first = decl->members.empty() ? "A" : decl->members.front().name;
     std::string message = ErrorTextObjectCall::numberEnum(fn, decl->name, first);
 
@@ -326,8 +333,8 @@ ObjectChecker::ResultEnumMemberValues ObjectChecker::enumMembers(CallExpr *call,
         this->state.getAst().make<StringLitExpr>(call->loc(), ObjectChecker::utf16(m.name));
     auto *member = this->state.getAst().make<MemberExpr>(
         call->loc(), this->state.getAst().make<NameExpr>(call->loc(), decl->name), m.name);
-    Expr *element = fn == "keys" ? static_cast<Expr *>(name) : member;
-    if (fn == "entries") {
+    Expr *element = objectMember == GlobalMember::OBJECT_KEYS ? static_cast<Expr *>(name) : member;
+    if (objectMember == GlobalMember::OBJECT_ENTRIES) {
       auto *pair = this->state.getAst().make<ArrayLitExpr>(call->loc());
       pair->elements.push_back({name, false});
       pair->elements.push_back({member, false});
@@ -335,9 +342,10 @@ ObjectChecker::ResultEnumMemberValues ObjectChecker::enumMembers(CallExpr *call,
     }
     list->elements.push_back({element, false});
   }
-  const Type *element = fn == "keys"     ? Type::string()
-                        : fn == "values" ? values
-                                         : Type::tuple({Type::string(), values});
+  const Type *element = objectMember == GlobalMember::OBJECT_KEYS ? Type::string()
+                        : objectMember == GlobalMember::OBJECT_VALUES
+                            ? values
+                            : Type::tuple({Type::string(), values});
   Expr *checked = this->exprChecker->checkExpr(list, Type::array(element));
   this->state.getInventoryStore().rememberNamedUse(checked, {decl, call->args[0]->loc(), ""});
 
@@ -435,7 +443,10 @@ void ObjectChecker::checkForIn(ForOfStmt *stmt) {
     Expr *again =
         variable ? static_cast<Expr *>(this->state.getAst().make<NameExpr>(loc, variable->name))
                  : this->state.getAst().make<MemberExpr>(
-                       loc, this->state.getAst().make<NameExpr>(loc, "process"), "env");
+                       loc,
+                       this->state.getAst().make<NameExpr>(
+                           loc, GlobalNameTable::getName(GlobalName::PROCESS)),
+                       "env");
     auto *has = this->state.getAst().make<BinaryExpr>(
         loc, BinaryOp::In, this->state.getAst().make<NameExpr>(loc, stmt->binding.name), again);
     auto *skip = this->state.getAst().make<IfStmt>(
@@ -459,8 +470,10 @@ void ObjectChecker::checkForIn(ForOfStmt *stmt) {
   }
   bool walks = allowed.isOk() && !type->isError();
   llvm::SMLoc loc = object->loc();
+  llvm::StringRef objectName = GlobalNameTable::getName(GlobalName::OBJECT);
+  llvm::StringRef keysName = GlobalMemberTable::getName(GlobalMember::OBJECT_KEYS);
   auto *callee = this->state.getAst().make<MemberExpr>(
-      loc, this->state.getAst().make<NameExpr>(loc, "Object"), "keys");
+      loc, this->state.getAst().make<NameExpr>(loc, objectName), keysName);
   auto *keys = this->state.getAst().make<CallExpr>(loc, callee, std::vector<Expr *>{object});
   keys->target = BuiltinCall{.builtin = Builtin::ObjectKeys};
   keys->type = walks ? Type::array(Type::string()) : Type::error();
@@ -568,7 +581,7 @@ ObjectChecker::ResultTargetObjectType ObjectChecker::objectDefined(const Type *t
 
 ObjectChecker::ResultLengthIsNotFixed ObjectChecker::fixedLength(const Type *type,
                                                                  const MemberExpr *member) {
-  if (type->isTuple() && member->name == "length") {
+  if (type->isTuple() && BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)) {
     std::string message = ErrorTextObjectField::tupleLen();
 
     return err(ObjectCheckerFixedLengthError{

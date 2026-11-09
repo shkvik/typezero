@@ -1,5 +1,6 @@
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
 #include "compiler/program/ast/await_expr/await_expr.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/library/bytes/byte_proofs/byte_proofs.h"
@@ -66,10 +67,12 @@ std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
   }
   case Expr::Kind::Member: {
     auto *member = cast<MemberExpr>(expr);
-    if (member->name == "length" && expr->type->isInt()) {
+    if (BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) &&
+        expr->type->isInt()) {
       return this->lengthOf(member->object);
     }
-    if (member->name == "byteLength" && expr->type->isInt() && member->object->type &&
+    if (BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH) &&
+        expr->type->isInt() && member->object->type &&
         (member->object->type->bytes() == Type::Bytes::ArrayBuffer ||
          member->object->type->bytes() == Type::Bytes::DataView)) {
       return this->lengthOf(member->object);
@@ -421,9 +424,9 @@ bool IndexProofs::provesLinearUpTo(Linear value, const Expr *object, int64_t les
   if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin() == Builtin::BytesBuffer) {
     owner = call->callee;
   }
-  if (auto *member = dyn_cast<MemberExpr>(owner); !length && member && member->name == "buffer" &&
-                                                  member->object->type &&
-                                                  member->object->type->isByteView()) {
+  if (auto *member = dyn_cast<MemberExpr>(owner);
+      !length && member && BuiltinPropertyTable::isName(member->name, BuiltinProperty::BUFFER) &&
+      member->object->type && member->object->type->isByteView()) {
     int64_t size = member->object->type->elementSize();
     std::optional<Linear> view = this->lengthOf(member->object);
     if (view) {

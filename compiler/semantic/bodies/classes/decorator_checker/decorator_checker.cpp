@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/classes/decorator_checker/decorator_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -440,7 +441,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     auto *member = call ? dyn_cast<MemberExpr>(call->callee) : nullptr;
 
     return member && member->name == "metadata" &&
-           this->callChecker->isGlobalName(member->object, "Reflect");
+           this->callChecker->isGlobalName(member->object, GlobalName::REFLECT);
   };
   const Type *earlyDescriptor = nullptr;
   auto methodDescriptor = [&]() -> const Type * {

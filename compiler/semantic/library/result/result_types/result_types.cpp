@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/result/result_types/result_types.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -10,8 +11,6 @@
 namespace tz {
 
 namespace {
-
-const llvm::StringLiteral kResultNames[] = {"ok", "err", "Result", "Ok", "Err"};
 
 const llvm::StringLiteral kResultTypes[] = {"Result", "Ok", "Err"};
 
@@ -36,13 +35,19 @@ llvm::StringRef ResultTypes::findName(llvm::ArrayRef<llvm::StringLiteral> names,
   return {};
 }
 
-llvm::StringRef ResultTypes::resultName(llvm::StringRef name) const {
+std::optional<GlobalName> ResultTypes::resultName(llvm::StringRef name) const {
   ScopeEntry entry = this->scopes->lookup(name);
   if (entry.found()) {
-    return {};
+    return std::nullopt;
+  }
+  static const GlobalName resultNames[] = {GlobalName::OK, GlobalName::ERR, GlobalName::RESULT,
+                                           GlobalName::OK_TYPE, GlobalName::ERR_TYPE};
+  std::optional<GlobalName> global = GlobalNameTable::find(name);
+  if (!global.has_value() || !llvm::is_contained(resultNames, *global)) {
+    return std::nullopt;
   }
 
-  return ResultTypes::findName(kResultNames, name);
+  return global;
 }
 
 llvm::StringRef ResultTypes::resultTypeName(llvm::StringRef name) const {

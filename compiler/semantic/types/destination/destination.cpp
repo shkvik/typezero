@@ -1,4 +1,6 @@
 #include "compiler/semantic/types/destination/destination.h"
+#include "compiler/program/library/array/array_method_table/array_method_table.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/iterators/iterable_checker/iterable_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -103,7 +105,13 @@ bool Destination::literalShaped(const Expr *expr) {
       return true;
     }
     auto *member = dyn_cast<MemberExpr>(call->callee);
-    if (!member || (member->name != "map" && member->name != "flatMap") || call->args.size() != 1) {
+    if (member == nullptr || call->args.size() != 1) {
+      return false;
+    }
+    const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
+    bool maps = method != nullptr &&
+                (method->method == ArrayMethod::MAP || method->method == ArrayMethod::FLAT_MAP);
+    if (!maps) {
       return false;
     }
     auto *fe = dyn_cast<FunctionExpr>(call->args[0]);
@@ -203,7 +211,8 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
       if (!type->isResult()) {
         return false;
       }
-      bool isOk = cast<NameExpr>(call->callee)->name == "ok";
+      auto *maker = cast<NameExpr>(call->callee);
+      bool isOk = GlobalNameTable::find(maker->name) == GlobalName::OK;
       const Type *half = isOk ? type->okType() : type->errType();
       return call->args.empty() || !Destination::literalShaped(call->args[0]) ||
              this->literalFits(call->args[0], half);
@@ -212,7 +221,10 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
       return false;
     }
     auto *fe = cast<FunctionExpr>(call->args[0]);
-    const Type *element = cast<MemberExpr>(call->callee)->name == "map" ? type->inner() : type;
+    auto *member = cast<MemberExpr>(call->callee);
+    const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
+    bool mapsEach = method != nullptr && method->method == ArrayMethod::MAP;
+    const Type *element = mapsEach ? type->inner() : type;
     bool fits = true;
     Destination::forEachReturn(fe->fn->body, [&](const Expr *value) {
       fits &= !Destination::literalShaped(value) || this->literalFits(value, element);

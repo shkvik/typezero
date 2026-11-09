@@ -1,5 +1,6 @@
 #include "compiler/semantic/library/async/promise_checker/promise_checker.h"
 #include "compiler/program/ast_walker/ast_walker.h"
+#include "compiler/program/library/result/result_method_table/result_method_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -204,10 +205,8 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
   const Type *type = member->object->type;
   const Type *value = type->promised();
   llvm::StringRef name = member->name;
-  static const llvm::StringLiteral resultMethods[] = {"isOk",    "isErr",  "map",       "mapErr",
-                                                      "andThen", "orElse", "match",     "unwrapOr",
-                                                      "andTee",  "orTee",  "andThrough"};
-  if (value->isResult() && llvm::is_contained(resultMethods, name)) {
+  const ResultMethodInfo *resultMethod = ResultMethodTable::find(name);
+  if (value->isResult() && resultMethod != nullptr) {
     auto *object = dyn_cast<NameExpr>(member->object);
     std::string promise = object ? object->name.str() : "p";
     this->argumentChecker->checkArgsLoosely(call);

@@ -1,5 +1,6 @@
 #include "compiler/semantic/generics/arg_list_checker/arg_list_checker.h"
 #include "compiler/program/ast_walker/ast_walker.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
@@ -42,7 +43,8 @@ bool ArgListChecker::usedAsValue(const Stmt *body, llvm::StringRef name, bool kn
         }
       }
     } else if (auto *member = dyn_cast<MemberExpr>(e);
-               member && known && member->name == "length") {
+               member && known &&
+               BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)) {
       spreads.insert(member->object);
     } else if (auto *index = dyn_cast<IndexExpr>(e);
                index && known && isa<IntLitExpr>(index->index)) {
@@ -256,7 +258,7 @@ Expr *ArgListChecker::listPart(Expr *expr) {
     return nullptr;
   }
   const std::vector<llvm::StringRef> &parts = *found;
-  if (member && member->name == "length") {
+  if (member && BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)) {
     auto *count = this->state.getAst().make<IntLitExpr>(member->loc(), parts.size());
     count->type = Type::intTy();
     return count;

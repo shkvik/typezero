@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/result/result_method_checker/result_method_checker.h"
+#include "compiler/program/library/result/result_method_table/result_method_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -57,38 +58,15 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  struct Method {
-    llvm::StringLiteral name;
-    Builtin builtin;
-    unsigned args;
-  };
-  static const Method methods[] = {
-      {"isOk", Builtin::ResultIsOk, 0},
-      {"isErr", Builtin::ResultIsErr, 0},
-      {"map", Builtin::ResultMap, 1},
-      {"mapErr", Builtin::ResultMapErr, 1},
-      {"andThen", Builtin::ResultAndThen, 1},
-      {"orElse", Builtin::ResultOrElse, 1},
-      {"match", Builtin::ResultMatch, 2},
-      {"unwrapOr", Builtin::ResultUnwrapOr, 1},
-      {"andTee", Builtin::ResultAndTee, 1},
-      {"orTee", Builtin::ResultOrTee, 1},
-      {"andThrough", Builtin::ResultAndThrough, 1},
-  };
-  const Method *method = nullptr;
-  for (const Method &m : methods) {
-    if (m.name == name) {
-      method = &m;
-    }
-  }
-  if (!method) {
+  const ResultMethodInfo *method = ResultMethodTable::find(name);
+  if (method == nullptr) {
     std::string message = ErrorTextResultMethod::noMember(name, type->name());
     this->state.getDiagnostics().error(member->loc(), message);
     checkArgsLoosely();
     return call;
   }
-  ArgumentChecker::ResultArityMatches arity =
-      this->argumentChecker->checkArity(call, method->args, method->args);
+  int args = ResultMethodTable::countArgs(*method);
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, args, args);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;

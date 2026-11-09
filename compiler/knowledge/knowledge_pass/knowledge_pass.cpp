@@ -2,6 +2,11 @@
 #include "compiler/knowledge/knowledge_walk/knowledge_walk.h"
 #include "compiler/knowledge/symbol_text/symbol_text.h"
 #include "compiler/program/ast/ast.h"
+#include "compiler/program/library/array/array_method_table/array_method_table.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
+#include "compiler/program/library/dict/dict_method_table/dict_method_table.h"
+#include "compiler/program/library/result/result_method_table/result_method_table.h"
+#include "compiler/program/library/string/string_method_table/string_method_table.h"
 #include "compiler/program/module/module.h"
 #include "compiler/program/program/program.h"
 #include "compiler/program/types/type/type.h"
@@ -99,10 +104,11 @@ void KnowledgePass::addMembers() {
       children[this->out.symbols[i].parent].push_back(i);
     }
   }
-  auto names = [](std::initializer_list<const char *> list, const char *kind) {
+  auto properties = [](std::initializer_list<BuiltinProperty> list) {
     std::vector<KnownMember> out;
-    for (const char *name : list) {
-      out.push_back({name, kind, ""});
+    for (BuiltinProperty property : list) {
+      llvm::StringRef name = BuiltinPropertyTable::getName(property);
+      out.push_back({name.str(), "method", ""});
     }
 
     return out;
@@ -124,31 +130,29 @@ void KnowledgePass::addMembers() {
         }
       }
     } else if (type->isString()) {
-      found = names({"length",   "at",         "charAt",     "charCodeAt",  "codePointAt",
-                     "endsWith", "includes",   "indexOf",    "lastIndexOf", "localeCompare",
-                     "match",    "matchAll",   "normalize",  "padEnd",      "padStart",
-                     "repeat",   "replace",    "replaceAll", "search",      "slice",
-                     "split",    "startsWith", "substring",  "toLowerCase", "toUpperCase",
-                     "trim",     "trimEnd",    "trimStart"},
-                    "method");
+      found = properties({BuiltinProperty::LENGTH});
+      for (const StringMethodInfo &method : StringMethodTable::getMethods()) {
+        found.push_back({method.name.str(), "method", ""});
+      }
     } else if (type->isArray()) {
-      found =
-          names({"length",      "at",       "concat",    "entries",  "every",         "fill",
-                 "filter",      "find",     "findIndex", "findLast", "findLastIndex", "flat",
-                 "flatMap",     "forEach",  "includes",  "indexOf",  "join",          "keys",
-                 "lastIndexOf", "map",      "pop",       "push",     "reduce",        "reduceRight",
-                 "reverse",     "shift",    "slice",     "some",     "sort",          "splice",
-                 "toReversed",  "toSorted", "unshift",   "values"},
-                "method");
+      found = properties({BuiltinProperty::LENGTH});
+      for (const ArrayMethodInfo &method : ArrayMethodTable::getMethods()) {
+        found.push_back({method.name.str(), "method", ""});
+      }
     } else if (type->isResult()) {
-      found = names({"isOk", "isErr", "value", "error", "map", "mapErr", "unwrapOr", "match"},
-                    "method");
-    } else if (type->isMap()) {
-      found = names(
-          {"size", "get", "set", "has", "delete", "clear", "keys", "values", "entries", "forEach"},
-          "method");
-    } else if (type->isSet()) {
-      found = names({"size", "add", "has", "delete", "clear", "values", "forEach"}, "method");
+      found = properties({BuiltinProperty::RESULT_VALUE, BuiltinProperty::RESULT_ERROR});
+      for (const ResultMethodInfo &method : ResultMethodTable::getMethods()) {
+        found.push_back({method.name.str(), "method", ""});
+      }
+    } else if (type->isMap() || type->isSet()) {
+      found = properties({BuiltinProperty::SIZE});
+      bool isMap = type->isMap();
+      for (const DictMethodInfo &method : DictMethodTable::getMethods()) {
+        bool has = isMap ? DictMethodTable::isOnMap(method) : DictMethodTable::isOnSet(method);
+        if (has) {
+          found.push_back({method.name.str(), "method", ""});
+        }
+      }
     } else if (type->isObject()) {
       for (const Field &field : type->fields()) {
         if (!field.name.empty() && field.name[0] != '%') {

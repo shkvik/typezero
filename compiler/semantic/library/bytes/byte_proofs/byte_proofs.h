@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/bytes/byte_proofs/byte_proofs_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -26,7 +27,7 @@ public:
   void checkByteCallbackResult(const FunctionDecl *fn, const Expr *value);
 
 private:
-  static const VarSymbol *viewOwner(const Expr *expr, llvm::StringRef field,
+  static const VarSymbol *viewOwner(const Expr *expr, BuiltinProperty field,
                                     const Type **type = nullptr);
   static const Expr *withoutCasts(const Expr *expr);
   static bool sameView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size);

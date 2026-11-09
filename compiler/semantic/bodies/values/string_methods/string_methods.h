@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/string/string_method_table/string_method_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/values/string_methods/string_methods_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -21,17 +22,9 @@ public:
   Expr *checkStringMethod(CallExpr *call, MemberExpr *member);
 
 private:
-  struct Method {
-    llvm::StringRef name;
-    Builtin builtin;
-    unsigned minArgs;
-    unsigned maxArgs;
-    const char *args;
-    const Type *ret;
-  };
+  using ResultStringMethod = Result<const StringMethodInfo *, StringMethodsStringMethodError>;
 
-  using ResultStringMethod = Result<const Method *, StringMethodsStringMethodError>;
-
+  static const Type *resultType(StringResult result);
   static ResultStringMethod stringMethod(llvm::StringRef name);
 
   SemanticState &state;

@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/math/math_checker/math_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/binary_checker/binary_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -119,9 +120,10 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
     }
   }
   if (!fn) {
-    std::string message = this->constantFolder->globalConstant("Math", member->name, member->loc())
-                              ? ErrorTextMath::constant(member->name)
-                              : ErrorTextMath::noMember(member->name);
+    std::string message =
+        this->constantFolder->globalConstant(GlobalName::MATH, member->name, member->loc())
+            ? ErrorTextMath::constant(member->name)
+            : ErrorTextMath::noMember(member->name);
     this->state.getDiagnostics().error(member->loc(), message);
     for (Expr *&arg : call->args) {
       arg = this->exprChecker->checkExpr(arg);

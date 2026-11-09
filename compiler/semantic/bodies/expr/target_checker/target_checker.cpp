@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/expr/target_checker/target_checker.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/semantic/bodies/classes/class_member_checker/class_member_checker.h"
 #include "compiler/semantic/bodies/classes/static_checker/static_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -115,7 +116,8 @@ TargetChecker::ResultDefinedDictType TargetChecker::dictDefined(const Type *type
 TargetChecker::ResultNoBytesProperty TargetChecker::bytesMember(const Type *type,
                                                                 const MemberExpr *member) {
   const Type *bytes = type->nonOptional();
-  bool length = member->name == "length" || member->name == "byteLength";
+  bool length = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) ||
+                BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH);
   if (bytes->isBytes() && length) {
     std::string message = ErrorTextMemberTarget::fixedSize(bytes->name());
 
@@ -138,7 +140,7 @@ TargetChecker::ResultNoBytesProperty TargetChecker::bytesMember(const Type *type
 
 TargetChecker::ResultFieldIsWritable
 TargetChecker::memberWritable(const Type *type, const MemberExpr *member, bool compound) {
-  bool length = member->name == "length";
+  bool length = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH);
   bool arrayLength = type->isArray() && length;
   if (arrayLength && compound) {
     std::string message = ErrorTextMemberTarget::onlyAssign();

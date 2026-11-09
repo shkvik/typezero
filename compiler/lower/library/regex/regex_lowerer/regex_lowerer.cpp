@@ -11,6 +11,7 @@
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
+#include "compiler/program/library/string/string_method_table/string_method_table.h"
 #include "runtime/library/regex/regex/regex.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -377,11 +378,12 @@ llvm::Value *RegexLowerer::emitRegexCall(CallExpr *call) {
           this->lowering.builder.getInt64Ty());
       break;
     case Builtin::StrReplaceRegex: {
+      bool replacesAll = RegexLowerer::isReplaceAll(member);
       result = this->lowering.stringLowerer().callReturningString(
           this->regexFunction("tz_re_replace", voidTy, {ptr, ptr, ptr, i64, ptr, i64, i32}),
           {regex.value, obj, meta, this->lowering.stringLowerer().stringObj(replacement.value),
            this->lowering.stringLowerer().stringMeta(replacement.value),
-           this->lowering.builder.getInt32(member->name == "replaceAll")});
+           this->lowering.builder.getInt32(replacesAll)});
       this->lowering.refCounts().dropOperand(replacement);
       break;
     }
@@ -424,11 +426,12 @@ llvm::Value *RegexLowerer::emitReplaceWith(CallExpr *call) {
     this->lowering.refCounts().releaseValue(regex, regexType);
     this->lowering.refCounts().releaseString(text);
   };
+  bool replacesAll = RegexLowerer::isReplaceAll(member);
   this->lowering.builder.CreateCall(
       this->regexFunction("tz_re_replacer_init", voidTy, {ptr, ptr, ptr, i64, i32}),
       {replacer, regex, this->lowering.stringLowerer().stringObj(text),
        this->lowering.stringLowerer().stringMeta(text),
-       this->lowering.builder.getInt32(member->name == "replaceAll")});
+       this->lowering.builder.getInt32(replacesAll)});
   llvm::FunctionCallee next = this->regexFunction("tz_re_replacer_next", ptr, {ptr});
   llvm::FunctionCallee capture =
       this->regexFunction("tz_re_replacer_capture", i32, {ptr, ptr, ptr, i32});
@@ -521,4 +524,9 @@ Lowering::Producer RegexLowerer::matchAllProducer(llvm::Value *textSlot, llvm::V
   return producer;
 }
 
+bool RegexLowerer::isReplaceAll(const MemberExpr *member) {
+  const StringMethodInfo *method = StringMethodTable::find(member->name);
+
+  return method != nullptr && method->method == StringMethod::REPLACE_ALL;
+}
 }

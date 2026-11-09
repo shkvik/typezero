@@ -10,6 +10,7 @@
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
 #include "compiler/parallel/parallel_model/parallel_model.h"
 #include "compiler/parallel/pieces/pieces.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
@@ -216,7 +217,7 @@ void ExprWalk::fieldAccess(const Expr *object, llvm::StringRef name, bool write,
     return;
   }
   if (type->isArray()) {
-    if (name == "length") {
+    if (BuiltinPropertyTable::isName(name, BuiltinProperty::LENGTH)) {
       this->analysis.codeWalk.touch(LocKind::Field, this->analysis.aliasAnalysis.refOf(object),
                                     this->analysis.length, write, at);
       if (write) {
