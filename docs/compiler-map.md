@@ -290,8 +290,10 @@ semantic/                         движок типов: объявления,
     flow_checker/                 FlowChecker: слияние веток, что сбивают присваивания и вызовы
     index_proofs/                 IndexProofs: доказательство, что индекс в границах массива
     loop_bounds/                  LoopBounds: границы переменной цикла из условия
-    loop_scanner/                 LoopScanner: что меняется в теле цикла
+    loop_scanner/                 LoopScanner: вопросы к телу цикла — выходит ли break, ждёт ли await, что меняется, вызывается ли чужой код
+    placed_nodes/                 PlacedNodes: тело цикла двумя списками — инструкции и выражения с их местом, обход в ширину
     predicate_checker/            PredicateChecker: функции-проверки (x is T) и факты из них
+    tree_place/                   TreePlace: место узла — внутри цикла, функции, switch, под какими метками
     union_narrowing/              UnionNarrowing: сужение объединений по kind, typeof, != undefined
   generics/                       обобщения: параметры, вывод, копии
     alias_instantiator/           AliasInstantiator: обобщённые type-алиасы
