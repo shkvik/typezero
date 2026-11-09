@@ -6,9 +6,18 @@
 
 namespace tz {
 
+class SemanticParts;
+class Prelude;
+class CallChecker;
+class ExprChecker;
+class ObjectChecker;
+class TypeRelations;
+class ProcessChecker;
+class ArgumentChecker;
+
 class RegexChecker {
 public:
-  explicit RegexChecker(SemanticState &owner);
+  RegexChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkRegexLit(RegexLitExpr *lit);
   static const RegexLitExpr *knownRegex(const Expr *expr);
@@ -30,6 +39,13 @@ private:
   static bool isFlag(llvm::StringRef name, uint32_t &flag);
 
   SemanticState &state;
+  Prelude *prelude = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  ObjectChecker *objectChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ProcessChecker *processChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

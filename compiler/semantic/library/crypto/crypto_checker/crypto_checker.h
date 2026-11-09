@@ -5,9 +5,16 @@
 
 namespace tz {
 
+class SemanticParts;
+class CryptoArgs;
+class ExprChecker;
+class WebCryptoChecker;
+class BuiltinModuleChecker;
+class CryptoFunctionChecker;
+
 class CryptoChecker {
 public:
-  explicit CryptoChecker(SemanticState &owner);
+  CryptoChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkCryptoMember(MemberExpr *member);
   Expr *checkCryptoNew(NewExpr *expr, llvm::StringRef cls);
@@ -22,6 +29,11 @@ public:
 
 private:
   SemanticState &state;
+  CryptoArgs *cryptoArgs = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  WebCryptoChecker *webCryptoChecker = nullptr;
+  BuiltinModuleChecker *builtinModuleChecker = nullptr;
+  CryptoFunctionChecker *cryptoFunctionChecker = nullptr;
 };
 
 }

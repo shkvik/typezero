@@ -6,12 +6,24 @@
 #include "compiler/semantic/generics/generic_class_instantiator/generic_class_instantiator.h"
 #include "compiler/semantic/generics/inference/inference.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_operators/type_operators.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace tz {
+
+TypeParams::TypeParams(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->typeResolver = &all.getTypeResolver();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->typeOperators = &all.getTypeOperators();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->decoratorChecker = &all.getDecoratorChecker();
+  this->aliasInstantiator = &all.getAliasInstantiator();
+  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+}
 
 bool TypeParams::mentionsInObject(const Type *type, llvm::ArrayRef<const Type *> params,
                                   llvm::SmallPtrSetImpl<const Type *> &seen) {
@@ -45,9 +57,6 @@ bool TypeParams::mentionsInObject(const Type *type, llvm::ArrayRef<const Type *>
     return false;
   }
 }
-
-TypeParams::TypeParams(SemanticState &owner)
-    : state(owner) {}
 
 TypeParams::ResultParamNameIsNew TypeParams::uniqueName(const TypeParamDecl &earlier,
                                                         const TypeParamDecl &decl) {
@@ -153,7 +162,7 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
       } else if (ref.kind() == TypeRefKind::NAME_REF && ref.name == "unknown") {
       } else if (ref.kind() == TypeRefKind::UNION_REF) {
         for (const TypeRef &member : ref.args) {
-          const Type *type = TypeResolver(this->state).resolveType(member, false);
+          const Type *type = this->typeResolver->resolveType(member, false);
           resolved &= !type->isError();
           if (!llvm::is_contained(alternatives, type)) {
             alternatives.push_back(type);
@@ -164,7 +173,7 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
           constraint = Type::optional(alternatives[alternatives[0]->isUndefined() ? 1 : 0]);
         }
       } else {
-        constraint = TypeResolver(this->state).resolveType(ref, false);
+        constraint = this->typeResolver->resolveType(ref, false);
         resolved &= !constraint->isError();
       }
       llvm::ArrayRef<const Type *> all = constraint ? llvm::ArrayRef<const Type *>(constraint)
@@ -186,7 +195,7 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
     }
     const Type *fallback = nullptr;
     if (decl.defaultType) {
-      fallback = TypeResolver(this->state).resolveType(*decl.defaultType, false);
+      fallback = this->typeResolver->resolveType(*decl.defaultType, false);
       ResultDefaultSatisfy satisfied = this->defaultFits(fallback, params[i], decl);
       if (satisfied.isErr()) {
         this->state.getDiagnostics().error(decl.defaultType->loc, satisfied.error().message);
@@ -240,7 +249,7 @@ const Type *TypeParams::substituteAt(const Type *type, llvm::ArrayRef<const Type
       for (const Type *t : type->operands()) {
         operands.push_back(t ? held(t) : nullptr);
       }
-      return TypeOperators(this->state).evalTypeOp(type, operands);
+      return this->typeOperators->evalTypeOp(type, operands);
     }
     const Type *arg = args[size_t(llvm::find(params, type) - params.begin())];
     if (arg && arg->isVoid() && !voidOk) {
@@ -282,7 +291,7 @@ const Type *TypeParams::substituteAt(const Type *type, llvm::ArrayRef<const Type
     }
     if (const DescriptorOrigin *origin = this->state.getAliasStore().findDescriptorOrigin(type)) {
       auto [list, ret] = *origin;
-      return DecoratorChecker(this->state).methodDescriptorType(sub(list), held(ret));
+      return this->decoratorChecker->methodDescriptorType(sub(list), held(ret));
     }
     if (const ClassDecl *cls = type->classDecl(); cls && !type->typeArgs().empty()) {
       std::vector<const Type *> newArgs;
@@ -291,9 +300,8 @@ const Type *TypeParams::substituteAt(const Type *type, llvm::ArrayRef<const Type
       }
       auto *generic = const_cast<ClassDecl *>(cls->generic() ? cls->generic() : cls);
       GenericClassInstantiator::ResultClassMade made =
-          GenericClassInstantiator(this->state)
-              .instantiateClass(generic, std::move(newArgs),
-                                this->state.getGenericStore().getInstanceLoc());
+          this->genericClassInstantiator->instantiateClass(
+              generic, std::move(newArgs), this->state.getGenericStore().getInstanceLoc());
       if (made.isErr() && made.error().code !=
                               GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
         llvm::SMLoc at =
@@ -313,8 +321,7 @@ const Type *TypeParams::substituteAt(const Type *type, llvm::ArrayRef<const Type
       for (const Type *a : oldArgs) {
         newArgs.push_back(held(a));
       }
-      return AliasInstantiator(this->state)
-          .instantiateAlias(alias, std::move(newArgs), alias->loc());
+      return this->aliasInstantiator->instantiateAlias(alias, std::move(newArgs), alias->loc());
     }
     if (type->isTuple()) {
       std::vector<const Type *> elements;
@@ -418,7 +425,7 @@ bool TypeParams::hasMembersOf(const Type *arg, const Type *constraint) {
     return false;
   }
   if (ClassDecl *cls = ClassDeclarer::classOf(arg)) {
-    ClassDeclarer(this->state).completeClass(cls);
+    this->classDeclarer->completeClass(cls);
   }
   const ClassDecl *cls = arg->classDecl();
   for (const Field &f : constraint->fields()) {
@@ -438,7 +445,7 @@ bool TypeParams::hasMembersOf(const Type *arg, const Type *constraint) {
     if (cls && f.readonly && f.type->isFunction()) {
       for (FunctionDecl *fn : ClassDeclarer::methodsNamed(cls, f.name, false)) {
         method |= fn->sym && fn->typeParams.empty() &&
-                  ReturnInferrer(this->state).functionType(fn->sym) == f.type;
+                  this->returnInferrer->functionType(fn->sym) == f.type;
       }
     }
     if (!method && !f.type->isOptional()) {
@@ -452,7 +459,7 @@ bool TypeParams::hasMembersOf(const Type *arg, const Type *constraint) {
     std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, overload.name, false);
     for (const Type *signature : overload.signatures) {
       if (llvm::none_of(methods, [&](FunctionDecl *fn) {
-            return fn->sym && ReturnInferrer(this->state).functionType(fn->sym) == signature;
+            return fn->sym && this->returnInferrer->functionType(fn->sym) == signature;
           })) {
         return false;
       }

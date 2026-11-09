@@ -6,6 +6,7 @@
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
 #include "compiler/semantic/flow/field_facts/field_facts.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
@@ -15,6 +16,16 @@
 using llvm::dyn_cast;
 
 namespace tz {
+
+KeyedFieldChecker::KeyedFieldChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->fieldFacts = &all.getFieldFacts();
+  this->exprChecker = &all.getExprChecker();
+  this->literalTypes = &all.getLiteralTypes();
+  this->objectChecker = &all.getObjectChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->constantFolder = &all.getConstantFolder();
+}
 
 bool KeyedFieldChecker::isInherited(llvm::StringRef name) {
   static const char *const names[] = {"toString",      "valueOf",        "hasOwnProperty",
@@ -45,9 +56,6 @@ bool KeyedFieldChecker::wrongKey(KeyedFieldCheckerCheckKeyedFieldErrorCode code)
 
   return false;
 }
-
-KeyedFieldChecker::KeyedFieldChecker(SemanticState &owner)
-    : state(owner) {}
 
 std::optional<std::string> KeyedFieldChecker::constantKey(const Expr *key) const {
   while (auto *conv = dyn_cast<CastExpr>(key)) {
@@ -132,7 +140,7 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkKeyedField(Index
   index->type = Type::error();
   std::string name;
   if (type->isTuple()) {
-    index->index = ExprChecker(this->state).checkExpr(index->index, Type::intTy());
+    index->index = this->exprChecker->checkExpr(index->index, Type::intTy());
     const Type *keyType = index->index->type;
     if (keyType->isError()) {
       return err(KeyedFieldCheckerCheckKeyedFieldError{
@@ -141,7 +149,7 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkKeyedField(Index
       });
     }
     std::optional<int64_t> position =
-        keyType->isInteger() ? ConstantFolder(this->state).intConstant(index->index) : std::nullopt;
+        keyType->isInteger() ? this->constantFolder->intConstant(index->index) : std::nullopt;
     size_t count = type->fields().size();
     if (!keyType->isInteger()) {
       std::string message = ErrorTextKeyedField::tupleKey(keyType->name());
@@ -169,12 +177,12 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkKeyedField(Index
     }
     name = std::to_string(*position);
   } else {
-    index->index = ExprChecker(this->state).checkExpr(index->index);
+    index->index = this->exprChecker->checkExpr(index->index);
     std::optional<std::string> key = this->constantKey(index->index);
     if (const Type *texts =
-            key ? nullptr : LiteralTypes(this->state).constTextType(index->index, nullptr);
+            key ? nullptr : this->literalTypes->constTextType(index->index, nullptr);
         texts && KeyedFieldChecker::keyedFieldType(type, texts)) {
-      index->index = TypeRelations(this->state).convert(index->index, texts);
+      index->index = this->typeRelations->convert(index->index, texts);
     }
     const Type *keyType = index->index->type;
     if (keyType->isError()) {
@@ -211,8 +219,8 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkKeyedField(Index
           });
         }
         for (const Type *n : names) {
-          FieldFacts(this->state)
-              .fieldsAssigned(this->state.getAst().keepName(ToUtf8::toUtf8(n->literalText())));
+          this->fieldFacts->fieldsAssigned(
+              this->state.getAst().keepName(ToUtf8::toUtf8(n->literalText())));
         }
       }
       index->form = KeyedFieldIndex{};
@@ -277,7 +285,7 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkKeyedField(Index
     return ok(member);
   }
 
-  ObjectChecker::ResultObjectFieldValue read = ObjectChecker(this->state).checkField(member);
+  ObjectChecker::ResultObjectFieldValue read = this->objectChecker->checkField(member);
   if (read.isErr()) {
     return err(KeyedFieldCheckerCheckKeyedFieldError{
         .code = KeyedFieldCheckerCheckKeyedFieldErrorCode::FIELD_NOT_FOUND,

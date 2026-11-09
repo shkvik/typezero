@@ -6,9 +6,14 @@
 
 namespace tz {
 
+class SemanticParts;
+class TypeResolver;
+class TypeOperators;
+class ExtendsRelation;
+
 class TemplateTypes {
 public:
-  explicit TemplateTypes(SemanticState &owner);
+  TemplateTypes(SemanticState &owner, SemanticParts &all);
 
   const Type *resolveTemplate(const TypeRef &ref);
   const Type *evalTemplate(llvm::ArrayRef<const Type *> operands);
@@ -30,6 +35,9 @@ private:
   static std::u16string changeCase(TypeOp op, const std::u16string &text);
 
   SemanticState &state;
+  TypeResolver *typeResolver = nullptr;
+  TypeOperators *typeOperators = nullptr;
+  ExtendsRelation *extendsRelation = nullptr;
 };
 
 }

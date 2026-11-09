@@ -19,12 +19,31 @@
 #include "compiler/semantic/library/stream/stream_checker/stream_checker.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/semantic/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace tz {
 
-MethodCallChecker::MethodCallChecker(SemanticState &owner)
-    : state(owner) {}
+MethodCallChecker::MethodCallChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->eventMaps = &all.getEventMaps();
+  this->fsDeclarer = &all.getFsDeclarer();
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->classChecker = &all.getClassChecker();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->streamChecker = &all.getStreamChecker();
+  this->emitterChecker = &all.getEmitterChecker();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->typeArgInferrer = &all.getTypeArgInferrer();
+  this->overloadResolver = &all.getOverloadResolver();
+  this->tzModulesChecker = &all.getTzModulesChecker();
+  this->classMemberChecker = &all.getClassMemberChecker();
+  this->eventTargetChecker = &all.getEventTargetChecker();
+  this->genericClassChecker = &all.getGenericClassChecker();
+}
 
 MethodCallChecker::ResultFieldIsCallable MethodCallChecker::fieldCallable(const Type *type,
                                                                           llvm::StringRef name) {
@@ -81,12 +100,12 @@ MethodCallChecker::ResultMethodsAreFound MethodCallChecker::instanceMethods(cons
 
 MethodCallChecker::ResultFieldsAreAllSet
 MethodCallChecker::fieldsSet(const MemberExpr *member) const {
-  bool early = ClassChecker(this->state).isInitThis(member->object).isOk() &&
+  bool early = this->classChecker->isInitThis(member->object).isOk() &&
                !this->state.getFlowState().isBeforeSuper() &&
-               ClassChecker(this->state).thisReady(this->state.getFlowState().getFlow()).isErr();
+               this->classChecker->thisReady(this->state.getFlowState().getFlow()).isErr();
   if (early) {
     std::string field =
-        ClassChecker(this->state).firstUnset(this->state.getFlowState().getFlow()).value();
+        this->classChecker->firstUnset(this->state.getFlowState().getFlow()).value();
     std::string message = ErrorTextUnsetCall::beforeSet(member->name, field);
 
     return err(MethodCallCheckerFieldsSetError{
@@ -114,35 +133,35 @@ MethodCallChecker::methodTypeArgs(const FuncSymbol *sym, const MemberExpr *membe
 
 Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, const Type *expected) {
   ClassDecl *cls = ClassDeclarer::classOf(member->object->type);
-  ClassDeclarer(this->state).completeClass(cls);
-  TzModulesChecker(this->state).noteTlsMethod(member, cls);
+  this->classDeclarer->completeClass(cls);
+  this->tzModulesChecker->noteTlsMethod(member, cls);
   call->type = Type::error();
   member->type = Type::error();
   llvm::StringRef name = member->name;
-  if (Expr *checked = FsDeclarer(this->state).checkFsClassMethod(call, member, cls)) {
+  if (Expr *checked = this->fsDeclarer->checkFsClassMethod(call, member, cls)) {
     return checked;
   }
-  if (Expr *checked = StreamChecker(this->state).checkStreamCall(call, member, cls)) {
+  if (Expr *checked = this->streamChecker->checkStreamCall(call, member, cls)) {
     return checked;
   }
-  if (EventMaps(this->state).isEmitterClass(cls)) {
-    if (Expr *checked = EmitterChecker(this->state).checkEmitterCall(call, member, cls, false)) {
+  if (this->eventMaps->isEmitterClass(cls)) {
+    if (Expr *checked = this->emitterChecker->checkEmitterCall(call, member, cls, false)) {
       return checked;
     }
   }
   if (ClassDecl *target = this->state.getLibraryDeclarations().findLibraryClass("EventTarget");
       target && cls->derivesFrom(target)) {
-    if (Expr *checked = EventTargetChecker(this->state).checkEventTargetCall(call, member, cls)) {
+    if (Expr *checked = this->eventTargetChecker->checkEventTargetCall(call, member, cls)) {
       return checked;
     }
   }
   const ClassField *field = ClassBases::findField(cls, name);
   if (field && !field->method()) {
-    call->callee = ClassMemberChecker(this->state).checkClassMember(member, nullptr);
+    call->callee = this->classMemberChecker->checkClassMember(member, nullptr);
     ResultFieldIsCallable callable = MethodCallChecker::fieldCallable(call->callee->type, name);
     if (callable.isOk()) {
       CallChecker::ResultValueCallTyped valued =
-          CallChecker(this->state).checkValueCall(call, callable.value());
+          this->callChecker->checkValueCall(call, callable.value());
       if (valued.isErr()) {
         this->state.getDiagnostics().error(call->callee->loc(), valued.error().message);
         return call;
@@ -152,20 +171,19 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
     if (callable.error().code != MethodCallCheckerFieldCallableErrorCode::ALREADY_REPORTED) {
       this->state.getDiagnostics().error(member->loc(), callable.error().message);
     }
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
   ResultMethodsAreFound found = MethodCallChecker::instanceMethods(cls, name);
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
   std::vector<FunctionDecl *> methods = found.value();
   if (methods.size() == 1) {
-    ClassMemberChecker::ResultMemberAccessible accessible =
-        ClassMemberChecker(this->state)
-            .checkAccess(methods[0]->cls(), methods[0]->access(), name, member->object);
+    ClassMemberChecker::ResultMemberAccessible accessible = this->classMemberChecker->checkAccess(
+        methods[0]->cls(), methods[0]->access(), name, member->object);
     if (accessible.isErr()) {
       this->state.getDiagnostics().error(member->loc(), accessible.error().message);
     }
@@ -177,8 +195,7 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   bool checked = false;
   std::vector<const Type *> bound;
   OverloadResolver::ResultVariantChosen picked =
-      OverloadResolver(this->state)
-          .chooseVariant(methods, call->args, call->spread, checked, &bound);
+      this->overloadResolver->chooseVariant(methods, call->args, call->spread, checked, &bound);
   if (picked.isErr() &&
       picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
     this->state.getDiagnostics().error(member->loc(), picked.error().message);
@@ -188,27 +205,25 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   }
   FuncSymbol *sym = picked.value();
   if (methods.size() > 1 && sym->decl) {
-    ClassMemberChecker::ResultMemberAccessible accessible =
-        ClassMemberChecker(this->state)
-            .checkAccess(sym->decl->cls(), sym->decl->access(), name, member->object);
+    ClassMemberChecker::ResultMemberAccessible accessible = this->classMemberChecker->checkAccess(
+        sym->decl->cls(), sym->decl->access(), name, member->object);
     if (accessible.isErr()) {
       this->state.getDiagnostics().error(member->loc(), accessible.error().message);
     }
   }
-  ReturnInferrer(this->state).resolveParams(sym);
+  this->returnInferrer->resolveParams(sym);
   ResultTypeArgsAllowed allowed = MethodCallChecker::methodTypeArgs(sym, member);
   if (allowed.isErr()) {
     this->state.getDiagnostics().error(member->loc(), allowed.error().message);
   }
   if (sym->isGeneric() && checked) {
-    return OverloadResolver(this->state).callGenericVariant(call, sym, bound, member->loc(), true);
+    return this->overloadResolver->callGenericVariant(call, sym, bound, member->loc(), true);
   }
   if (sym->isGeneric()) {
-    TypeArgInferrer(this->state)
-        .checkGenericCall(call, sym, member->loc(), expected, member->typeArgs);
+    this->typeArgInferrer->checkGenericCall(call, sym, member->loc(), expected, member->typeArgs);
     call->target = MethodCall{.method = call->func()};
     if (call->method()) {
-      member->type = ReturnInferrer(this->state).functionType(call->method());
+      member->type = this->returnInferrer->functionType(call->method());
     }
     return call;
   }
@@ -217,16 +232,16 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   } else {
     call->target = MethodCall{.method = sym, .virtualCall = true};
   }
-  member->type = ReturnInferrer(this->state).functionType(sym);
+  member->type = this->returnInferrer->functionType(sym);
   call->type = sym->getReturnType();
   std::vector<bool> given(checked ? call->args.size() : 0, true);
 
-  return ArgumentChecker(this->state)
-      .checkArguments(call, sym->params, sym->minArgs, sym->hasRest, member->loc(), &given);
+  return this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
+                                               member->loc(), &given);
 }
 
 MethodCallChecker::ResultClassNotRuntime MethodCallChecker::notRuntime(const ClassDecl *cls) const {
-  if (FsDeclarer(this->state).isRuntimeClass(cls)) {
+  if (this->fsDeclarer->isRuntimeClass(cls)) {
     std::string message = ErrorTextRuntimeNew::onlyFs(cls->name);
 
     return err(MethodCallCheckerNotRuntimeError{
@@ -300,13 +315,13 @@ MethodCallChecker::ResultArgumentsAbsent MethodCallChecker::argumentsAbsent(cons
 Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type *expected) {
   expr->type = Type::error();
   if (cls->isGeneric()) {
-    return GenericClassChecker(this->state).checkGenericNew(expr, cls, expected);
+    return this->genericClassChecker->checkGenericNew(expr, cls, expected);
   }
   ResultClassNotRuntime possible = this->notRuntime(cls);
   if (possible.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), possible.error().message);
     for (Expr *&arg : expr->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     return expr;
   }
@@ -322,7 +337,7 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
   if (concrete.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), concrete.error().message);
   }
-  ClassDeclarer(this->state).completeClass(cls);
+  this->classDeclarer->completeClass(cls);
   auto *call = this->state.getAst().make<CallExpr>(expr->loc(), nullptr, std::move(expr->args));
   expr->form = ClassNew{.cls = cls, .ctor = call};
   call->type = Type::voidTy();
@@ -331,13 +346,13 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
     ResultArgumentsAbsent absent = MethodCallChecker::argumentsAbsent(call, cls);
     if (absent.isErr()) {
       this->state.getDiagnostics().error(expr->loc(), absent.error().message);
-      ArgumentChecker(this->state).checkArgsLoosely(call);
+      this->argumentChecker->checkArgsLoosely(call);
       return expr;
     }
   } else {
     bool checked = false;
     OverloadResolver::ResultVariantChosen picked =
-        OverloadResolver(this->state).chooseVariant(ctors, call->args, {}, checked);
+        this->overloadResolver->chooseVariant(ctors, call->args, {}, checked);
     if (picked.isErr() &&
         picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
       this->state.getDiagnostics().error(expr->loc(), picked.error().message);
@@ -348,19 +363,19 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
     FuncSymbol *sym = picked.value();
     const FunctionDecl *chosen = sym->decl ? sym->decl : ctors[0];
     ClassMemberChecker::ResultMemberAccessible accessible =
-        ClassMemberChecker(this->state).checkAccess(chosen->cls(), chosen->access(), "constructor");
+        this->classMemberChecker->checkAccess(chosen->cls(), chosen->access(), "constructor");
     if (accessible.isErr()) {
       this->state.getDiagnostics().error(expr->loc(), accessible.error().message);
     }
-    ReturnInferrer(this->state).resolveParams(sym);
+    this->returnInferrer->resolveParams(sym);
     call->target = FunctionCall{.func = sym};
     std::vector<bool> given(checked ? call->args.size() : 0, true);
-    ArgumentChecker(this->state)
-        .checkArguments(call, sym->params, sym->minArgs, sym->hasRest, expr->loc(), &given);
+    this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
+                                          expr->loc(), &given);
   }
   for (const ClassDecl *c = cls; c; c = c->parent) {
     if (c->init || !c->constructors.empty()) {
-      FlowChecker(this->state).calledFunction();
+      this->flowChecker->calledFunction();
       break;
     }
   }

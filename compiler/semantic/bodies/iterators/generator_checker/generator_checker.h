@@ -6,13 +6,22 @@
 
 namespace tz {
 
+class SemanticParts;
+class DictChecker;
+class ExprChecker;
+class FlowChecker;
+class TypeDeclarer;
+class TypeResolver;
+class TypeRelations;
+class IteratorMethods;
+
 class GeneratorChecker {
 public:
   using ResultNextNeedsNoValue = Result<const Type *, GeneratorCheckerCheckSendsNothingError>;
   using ResultResolvedIterator = Result<const Type *, GeneratorCheckerResolveIteratorTypeError>;
   using ResultGeneratorReturns = Result<const Type *, GeneratorCheckerGeneratorReturnTypeError>;
 
-  explicit GeneratorChecker(SemanticState &owner);
+  GeneratorChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkYield(YieldExpr *yield);
   const Type *asyncIteratedType(const Type *type);
@@ -54,6 +63,13 @@ private:
                                              const FuncSymbol *fn);
 
   SemanticState &state;
+  DictChecker *dictChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  IteratorMethods *iteratorMethods = nullptr;
 };
 
 }

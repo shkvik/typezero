@@ -7,11 +7,25 @@
 
 namespace tz {
 
+class SemanticParts;
+class DateChecker;
+class DictChecker;
+class ExprChecker;
+class FlowChecker;
+class LibraryCalls;
+class LiteralTypes;
+class TruthChecker;
+class TypeRelations;
+class ConstantFolder;
+class GenericChecker;
+class LiteralChecker;
+class KeyedFieldChecker;
+
 class UnaryChecker {
 public:
   using ResultInOperatorSuited = Result<Expr *, UnaryCheckerCheckInError>;
 
-  explicit UnaryChecker(SemanticState &owner);
+  UnaryChecker(SemanticState &owner, SemanticParts &all);
 
   ResultInOperatorSuited checkIn(BinaryExpr *bin);
   Expr *checkUnary(UnaryExpr *unary, const Type *expected, bool wraps);
@@ -37,6 +51,18 @@ private:
                                               const Type *type, bool literal);
 
   SemanticState &state;
+  DateChecker *dateChecker = nullptr;
+  DictChecker *dictChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  LibraryCalls *libraryCalls = nullptr;
+  LiteralTypes *literalTypes = nullptr;
+  TruthChecker *truthChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ConstantFolder *constantFolder = nullptr;
+  GenericChecker *genericChecker = nullptr;
+  LiteralChecker *literalChecker = nullptr;
+  KeyedFieldChecker *keyedFieldChecker = nullptr;
 };
 
 }

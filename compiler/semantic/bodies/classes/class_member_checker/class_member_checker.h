@@ -7,11 +7,25 @@
 
 namespace tz {
 
+class SemanticParts;
+class EventMaps;
+class FieldFacts;
+class FsDeclarer;
+class ClassChecker;
+class LibraryCalls;
+class ClassDeclarer;
+class ObjectChecker;
+class TypeRelations;
+class EmitterChecker;
+class ReturnInferrer;
+class OverloadResolver;
+class TzModulesChecker;
+
 class ClassMemberChecker {
 public:
   using ResultMemberAccessible = Result<const ClassDecl *, ClassMemberCheckerCheckAccessError>;
 
-  explicit ClassMemberChecker(SemanticState &owner);
+  ClassMemberChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkClassMember(MemberExpr *member, const Type *expected);
   const Type *checkFieldTarget(MemberExpr *member, bool compound = false);
@@ -43,6 +57,18 @@ private:
                                                 llvm::StringRef name, const Type *type);
 
   SemanticState &state;
+  EventMaps *eventMaps = nullptr;
+  FieldFacts *fieldFacts = nullptr;
+  FsDeclarer *fsDeclarer = nullptr;
+  ClassChecker *classChecker = nullptr;
+  LibraryCalls *libraryCalls = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  ObjectChecker *objectChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  EmitterChecker *emitterChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  OverloadResolver *overloadResolver = nullptr;
+  TzModulesChecker *tzModulesChecker = nullptr;
 };
 
 }

@@ -6,12 +6,27 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class ClassBases;
+class ExprChecker;
+class IndexProofs;
+class LiteralTypes;
+class TypeResolver;
+class ClassDeclarer;
+class TypeRelations;
+class ConstantFolder;
+class ModuleDeclarer;
+class AliasInstantiator;
+class BuiltinModuleTypes;
+class BuiltinModuleChecker;
+
 class TypeDeclarer {
 public:
   using ResultEnumIndexValue = Result<Expr *, TypeDeclarerCheckEnumIndexError>;
   using ResultEnumMemberRead = Result<Expr *, TypeDeclarerCheckEnumMemberError>;
 
-  explicit TypeDeclarer(SemanticState &owner);
+  TypeDeclarer(SemanticState &owner, SemanticParts &all);
 
   void resolveEnum(EnumDecl *decl);
   const Type *enumType(EnumDecl *decl);
@@ -50,6 +65,19 @@ private:
   ResultTypeNameIsFree freeTypeName(llvm::StringRef name) const;
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  ClassBases *classBases = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  LiteralTypes *literalTypes = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ConstantFolder *constantFolder = nullptr;
+  ModuleDeclarer *moduleDeclarer = nullptr;
+  AliasInstantiator *aliasInstantiator = nullptr;
+  BuiltinModuleTypes *builtinModuleTypes = nullptr;
+  BuiltinModuleChecker *builtinModuleChecker = nullptr;
 };
 
 }

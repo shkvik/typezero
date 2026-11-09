@@ -3,6 +3,7 @@
 #include "compiler/semantic/generics/generic_check_helpers/generic_check_helpers.h"
 #include "compiler/semantic/generics/inference/inference.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/conditional_check_helpers/conditional_check_helpers.h"
 #include "compiler/semantic/types/template_types/template_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
@@ -12,6 +13,12 @@
 
 namespace tz {
 
+ExtendsRelation::ExtendsRelation(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->classDeclarer = &all.getClassDeclarer();
+  this->templateTypes = &all.getTemplateTypes();
+  this->returnInferrer = &all.getReturnInferrer();
+}
 
 std::vector<const Type *> ExtendsRelation::distributed(const Type *type) {
   std::vector<const Type *> out;
@@ -19,9 +26,6 @@ std::vector<const Type *> ExtendsRelation::distributed(const Type *type) {
 
   return out;
 }
-
-ExtendsRelation::ExtendsRelation(SemanticState &owner)
-    : state(owner) {}
 
 bool ExtendsRelation::extendsType(const Type *type, const Type *pattern, InferMatch *inference) {
   if (inference) {
@@ -69,8 +73,7 @@ bool ExtendsRelation::extendsType(const Type *type, const Type *pattern, InferMa
   }
   if (pattern->typeOp() == TypeOp::Template) {
     return type->isStringLiteral() &&
-           TemplateTypes(this->state)
-               .matchTemplate(type->literalText(), pattern->operands(), inference);
+           this->templateTypes->matchTemplate(type->literalText(), pattern->operands(), inference);
   }
   if (pattern->isPattern()) {
     return type->isStringLiteral() &&
@@ -287,7 +290,7 @@ bool ExtendsRelation::extendsObject(const Type *type, const Type *pattern, Infer
   }
   ClassDecl *cls = ClassDeclarer::classOf(type);
   if (cls) {
-    ClassDeclarer(this->state).completeClass(cls);
+    this->classDeclarer->completeClass(cls);
   }
   for (const Field &f : pattern->fields()) {
     const Type *own = nullptr;
@@ -296,7 +299,7 @@ bool ExtendsRelation::extendsObject(const Type *type, const Type *pattern, Infer
     } else if (cls) {
       if (std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, f.name, false);
           !methods.empty() && methods.back()->sym && methods.back()->typeParams.empty()) {
-        own = ReturnInferrer(this->state).functionType(methods.back()->sym);
+        own = this->returnInferrer->functionType(methods.back()->sym);
       }
     }
     if (!own) {

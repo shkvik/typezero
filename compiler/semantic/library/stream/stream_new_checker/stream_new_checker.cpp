@@ -6,6 +6,7 @@
 #include "compiler/semantic/library/events/event_map_inference/event_map_inference.h"
 #include "compiler/semantic/library/stream/chunk_types/chunk_types.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -50,8 +51,15 @@ struct StreamOptionFlags {
 
 }
 
-StreamNewChecker::StreamNewChecker(SemanticState &owner)
-    : state(owner) {}
+StreamNewChecker::StreamNewChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->chunkTypes = &all.getChunkTypes();
+  this->exprChecker = &all.getExprChecker();
+  this->libraryCalls = &all.getLibraryCalls();
+  this->eventMapInference = &all.getEventMapInference();
+  this->methodCallChecker = &all.getMethodCallChecker();
+  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+}
 
 StreamNewChecker::ResultConcreteStream
 StreamNewChecker::concreteStream(llvm::StringRef name, bool readable, bool writable) {
@@ -75,7 +83,7 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
   if (!readable && !writable && !duplex) {
     return nullptr;
   }
-  if (LibraryCalls(this->state).inLibrary(expr->loc())) {
+  if (this->libraryCalls->inLibrary(expr->loc())) {
     return nullptr;
   }
   ResultConcreteStream concrete = StreamNewChecker::concreteStream(name, readable, writable);
@@ -83,7 +91,7 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
     this->state.getDiagnostics().error(expr->loc(), concrete.error().message);
     expr->type = Type::error();
     for (Expr *&arg : expr->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
 
     return expr;
@@ -100,14 +108,14 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
     options.lit = dyn_cast<ObjectLitExpr>(expr->args[0]);
   }
   const Type *buffer = Type::bytesType(Type::Bytes::Buffer);
-  std::string site = "stream " + EventMapInference(this->state).placeOf(expr->loc());
+  std::string site = "stream " + this->eventMapInference->placeOf(expr->loc());
   auto side = [&](bool objectMode, bool text, llvm::StringRef key, const Type *fallback,
                   llvm::StringRef what) -> const Type * {
     if (!objectMode) {
       return text ? Type::string() : buffer;
     }
     if (const Type *found =
-            ChunkTypes(this->state).inferredChunkType(site + " " + key.str(), expr->loc())) {
+            this->chunkTypes->inferredChunkType(site + " " + key.str(), expr->loc())) {
       return found;
     }
     if (fallback) {
@@ -122,7 +130,7 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
   auto failed = [&] {
     expr->type = Type::error();
     for (Expr *&arg : expr->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
 
     return expr;
@@ -142,7 +150,7 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
   }
   std::vector<const Type *> args = {w, r};
   GenericClassInstantiator::ResultClassMade made =
-      GenericClassInstantiator(this->state).instantiateClass(generic, std::move(args), expr->loc());
+      this->genericClassInstantiator->instantiateClass(generic, std::move(args), expr->loc());
   if (made.isErr() &&
       made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
     llvm::SMLoc at =
@@ -155,7 +163,7 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
     return nullptr;
   }
 
-  return MethodCallChecker(this->state).checkClassNew(expr, made.value(), expected);
+  return this->methodCallChecker->checkClassNew(expr, made.value(), expected);
 }
 
 }

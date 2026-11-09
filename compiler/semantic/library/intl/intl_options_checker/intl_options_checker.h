@@ -7,9 +7,16 @@
 
 namespace tz {
 
+class SemanticParts;
+class ByteProofs;
+class ExprChecker;
+class IndexProofs;
+class IntlChecker;
+class LiteralTypes;
+
 class IntlOptionsChecker {
 public:
-  explicit IntlOptionsChecker(SemanticState &owner);
+  IntlOptionsChecker(SemanticState &owner, SemanticParts &all);
 
   bool checkIntlArgs(std::vector<Expr *> &args, size_t from, IntlKind kind, llvm::StringRef what);
 
@@ -30,6 +37,11 @@ private:
   static bool isStringLike(const Type *type);
 
   SemanticState &state;
+  ByteProofs *byteProofs = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  IntlChecker *intlChecker = nullptr;
+  LiteralTypes *literalTypes = nullptr;
 };
 
 }

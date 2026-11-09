@@ -49,8 +49,4 @@ std::string ErrorTextImportAssign::imported(llvm::StringRef name) {
       .str();
 }
 
-std::string ErrorTextNotLoaded::pending(llvm::StringRef name, bool started) {
-  return (llvm::Twine(" -> (") + name + (started ? " already started)" : " not loaded yet)")).str();
-}
-
 }

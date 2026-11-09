@@ -6,11 +6,16 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ResultTypes;
+class NestedFunctions;
+
 class FunctionValueChecker {
 public:
   using ResultAsyncCallbackOk = Result<const Expr *, FunctionValueCheckerAsyncCallbackError>;
 
-  explicit FunctionValueChecker(SemanticState &owner);
+  FunctionValueChecker(SemanticState &owner, SemanticParts &all);
 
   ResultAsyncCallbackOk asyncCallback(const Expr *arg, const Signature &expected,
                                       llvm::StringRef method) const;
@@ -26,6 +31,9 @@ private:
                                              unsigned primary);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ResultTypes *resultTypes = nullptr;
+  NestedFunctions *nestedFunctions = nullptr;
 };
 
 }

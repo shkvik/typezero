@@ -20,6 +20,9 @@ using llvm::isa;
 
 namespace tz {
 
+StoreLowerer::StoreLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 StoreLowerer::RefShape StoreLowerer::refShape(const Type *type) {
   switch (type->kind()) {
   case Type::Kind::Object:
@@ -53,9 +56,6 @@ llvm::Value *StoreLowerer::spillHere(llvm::IRBuilder<> &b, llvm::Value *value, c
 
   return slot;
 }
-
-StoreLowerer::StoreLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 void StoreLowerer::groupStore(llvm::Value *owner, llvm::Value *value, const Type *type) {
   if (!this->lowering.memory().mayCarryMember(type) || isa<llvm::Constant>(value)) {

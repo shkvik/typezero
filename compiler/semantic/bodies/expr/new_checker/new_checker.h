@@ -6,9 +6,33 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class UrlChecker;
+class DateChecker;
+class ExprChecker;
+class HttpChecker;
+class IndexProofs;
+class IntlChecker;
+class LibraryCalls;
+class RegexChecker;
+class TypeResolver;
+class CryptoChecker;
+class MemberChecker;
+class DictNewChecker;
+class PromiseChecker;
+class WeakRefChecker;
+class BytesNewChecker;
+class TopLevelChecker;
+class TzModulesChecker;
+class ClassValueChecker;
+class DateFormatChecker;
+class MethodCallChecker;
+class BuiltinModuleChecker;
+
 class NewChecker {
 public:
-  explicit NewChecker(SemanticState &owner);
+  NewChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkNew(NewExpr *expr, const Type *expected);
 
@@ -32,6 +56,28 @@ private:
   static ResultHasZeroValue zeroValue(const Type *element);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  UrlChecker *urlChecker = nullptr;
+  DateChecker *dateChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  HttpChecker *httpChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  IntlChecker *intlChecker = nullptr;
+  LibraryCalls *libraryCalls = nullptr;
+  RegexChecker *regexChecker = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  CryptoChecker *cryptoChecker = nullptr;
+  MemberChecker *memberChecker = nullptr;
+  DictNewChecker *dictNewChecker = nullptr;
+  PromiseChecker *promiseChecker = nullptr;
+  WeakRefChecker *weakRefChecker = nullptr;
+  BytesNewChecker *bytesNewChecker = nullptr;
+  TopLevelChecker *topLevelChecker = nullptr;
+  TzModulesChecker *tzModulesChecker = nullptr;
+  ClassValueChecker *classValueChecker = nullptr;
+  DateFormatChecker *dateFormatChecker = nullptr;
+  MethodCallChecker *methodCallChecker = nullptr;
+  BuiltinModuleChecker *builtinModuleChecker = nullptr;
 };
 
 }

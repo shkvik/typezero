@@ -28,15 +28,15 @@ BufferExports::ResultExportFound BufferExports::bufferExport(llvm::StringRef nam
   if (llvm::is_contained(kBufferExports, name)) {
     std::string message = ErrorTextBufferExport::notYet(name, path);
 
-    return err(FeatureExportFoundError{
-        .code = FeatureExportFoundErrorCode::NOT_YET,
+    return err(ModuleExportFoundError{
+        .code = ModuleExportFoundErrorCode::NOT_YET,
         .message = message,
     });
   }
   std::string message = ErrorTextModuleExport::none(path, name);
 
-  return err(FeatureExportFoundError{
-      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+  return err(ModuleExportFoundError{
+      .code = ModuleExportFoundErrorCode::NO_EXPORT,
       .message = message,
   });
 }

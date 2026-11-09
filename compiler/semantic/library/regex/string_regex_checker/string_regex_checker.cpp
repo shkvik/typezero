@@ -7,6 +7,7 @@
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/library/regex/regex_checker/regex_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "runtime/library/regex/regex/regex.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -16,6 +17,17 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+StringRegexChecker::StringRegexChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->regexChecker = &all.getRegexChecker();
+  this->memberChecker = &all.getMemberChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->callbackChecker = &all.getCallbackChecker();
+}
 
 std::u16string StringRegexChecker::units(const uint32_t *program, uint32_t start, uint32_t length) {
   std::u16string text;
@@ -52,9 +64,6 @@ std::string StringRegexChecker::argumentText(const Expr *arg) {
   return "s";
 }
 
-StringRegexChecker::StringRegexChecker(SemanticState &owner)
-    : state(owner) {}
-
 Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
   static const llvm::StringLiteral methods[] = {"match",   "matchAll",   "search",
@@ -66,21 +75,20 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
   bool replace = name == "replace" || name == "replaceAll";
   unsigned min = replace ? 2 : name == "split" ? 0 : 1;
   unsigned max = name == "split" ? 2 : replace ? 2 : 1;
-  ArgumentChecker::ResultArityMatches arity =
-      ArgumentChecker(this->state).checkArity(call, min, max);
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, min, max);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
   auto restLoosely = [&] {
     for (size_t i = 1; i < call->args.size(); ++i) {
-      call->args[i] = ExprChecker(this->state).checkExpr(call->args[i]);
+      call->args[i] = this->exprChecker->checkExpr(call->args[i]);
     }
 
     return call;
   };
   Expr *&pattern = call->args[0];
-  pattern = ExprChecker(this->state).checkExpr(pattern);
+  pattern = this->exprChecker->checkExpr(pattern);
   const Type *type = pattern->type;
   if (type->isError()) {
     return restLoosely();
@@ -102,7 +110,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
       }
       call->target = BuiltinCall{.builtin = global ? Builtin::StrMatchGlobal : Builtin::StrMatch};
       call->type = Type::optional(global ? Type::array(Type::string())
-                                         : RegexChecker(this->state).matchType(regex));
+                                         : this->regexChecker->matchType(regex));
       return call;
     }
     if (name == "matchAll" || name == "replaceAll") {
@@ -115,7 +123,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
       }
       if (name == "matchAll") {
         call->target = BuiltinCall{.builtin = Builtin::StrMatchAll};
-        call->type = Type::iterator(RegexChecker(this->state).matchType(regex));
+        call->type = Type::iterator(this->regexChecker->matchType(regex));
         return call;
       }
     }
@@ -126,7 +134,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
     }
     if (name == "split") {
       if (call->args.size() == 2) {
-        call->args[1] = MemberChecker(this->state).checkPosition(call->args[1]);
+        call->args[1] = this->memberChecker->checkPosition(call->args[1]);
       }
       bool undefinedGroups = !regex;
       for (uint32_t k = 1; regex && k < tz_re_captures(regex->program.data()); ++k) {
@@ -146,7 +154,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
     std::string regexText = lit ? escaped : ErrorTextStringRegex::escapedRe(text);
     if (name == "split") {
       if (call->args.size() == 2) {
-        call->args[1] = MemberChecker(this->state).checkPosition(call->args[1]);
+        call->args[1] = this->memberChecker->checkPosition(call->args[1]);
       }
       call->target = BuiltinCall{.builtin = Builtin::StrSplit};
       call->type = Type::array(Type::string());
@@ -159,7 +167,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
         this->state.getDiagnostics().error(replacement->loc(), message);
         return restLoosely();
       }
-      replacement = ArgumentChecker(this->state).checkArg(replacement, Type::string());
+      replacement = this->argumentChecker->checkArg(replacement, Type::string());
       call->target = BuiltinCall{.builtin = Builtin::StrReplaceAll};
       call->type = Type::string();
       return call;
@@ -184,12 +192,12 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
   Expr *&replacement = call->args[1];
   bool function = isa<FunctionExpr>(replacement);
   if (auto *name = dyn_cast<NameExpr>(replacement)) {
-    ScopeEntry entry = Scopes(this->state).lookup(name->name);
+    ScopeEntry entry = this->scopes->lookup(name->name);
     function = entry.func() ||
                (entry.var() && entry.var()->type && entry.var()->type->nonOptional()->isFunction());
   }
   if (!function) {
-    replacement = ArgumentChecker(this->state).checkArg(replacement, Type::string());
+    replacement = this->argumentChecker->checkArg(replacement, Type::string());
     call->target = BuiltinCall{.builtin = Builtin::StrReplaceRegex};
     call->type = Type::string();
     auto *text = dyn_cast<StringLitExpr>(replacement);
@@ -246,7 +254,7 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
   sig.pad = false;
   sig.ret = Type::string();
   sig.params.push_back(Type::string());
-  const Type *match = RegexChecker(this->state).matchType(regex);
+  const Type *match = this->regexChecker->matchType(regex);
   if (regex) {
     for (int k = 1; k <= match->matchGroups(); ++k) {
       sig.params.push_back(match->captureMandatory(unsigned(k)) ? Type::string()
@@ -271,19 +279,18 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
     while (sig.params.size() < fe->fn->params.size()) {
       sig.params.push_back(Type::string());
     }
-    replacement =
-        CallbackChecker(this->state)
-            .checkFunctionArg(replacement, sig, unsigned(sig.params.size()), member->name);
+    replacement = this->callbackChecker->checkFunctionArg(
+        replacement, sig, unsigned(sig.params.size()), member->name);
     return call;
   }
-  replacement = CallbackChecker(this->state)
-                    .checkFunctionArg(replacement, sig, unsigned(sig.params.size()), member->name);
+  replacement = this->callbackChecker->checkFunctionArg(replacement, sig,
+                                                        unsigned(sig.params.size()), member->name);
   if (!replacement->type->isFunction()) {
     return call;
   }
   call->target = BuiltinCall{.builtin = Builtin::StrReplaceRegexFn};
   call->type = Type::string();
-  FlowChecker(this->state).calledFunction();
+  this->flowChecker->calledFunction();
 
   return call;
 }

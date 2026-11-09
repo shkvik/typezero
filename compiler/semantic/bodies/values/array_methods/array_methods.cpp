@@ -8,6 +8,7 @@
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/library/json/json_checker/json_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/unknown_checker/unknown_checker.h"
 #include "llvm/ADT/STLExtras.h"
@@ -16,6 +17,18 @@
 using llvm::dyn_cast;
 
 namespace tz {
+
+ArrayMethods::ArrayMethods(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->indexProofs = &all.getIndexProofs();
+  this->memberChecker = &all.getMemberChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->callbackChecker = &all.getCallbackChecker();
+  this->iteratorMethods = &all.getIteratorMethods();
+}
 
 const VarSymbol *ArrayMethods::arrayVariable(const Expr *object) {
   if (auto *conv = dyn_cast<CastExpr>(object);
@@ -29,9 +42,6 @@ const VarSymbol *ArrayMethods::arrayVariable(const Expr *object) {
 
   return name->var();
 }
-
-ArrayMethods::ArrayMethods(SemanticState &owner)
-    : state(owner) {}
 
 ArrayMethods::ResultElementsAreText ArrayMethods::textElements(const Type *element,
                                                                llvm::StringRef name) {
@@ -159,7 +169,7 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
     if (count >= min && count <= max) {
       return ok(call);
     }
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     std::string message = ErrorTextArity::count(min, max, count);
 
     return err(ArrayMethodsCheckArrayMethodError{
@@ -169,12 +179,11 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
   };
   auto elementArg = [&](size_t i) {
     call->args[i] =
-        TypeRelations(this->state)
-            .coerce(ExprChecker(this->state).checkExpr(call->args[i], element), element);
+        this->typeRelations->coerce(this->exprChecker->checkExpr(call->args[i], element), element);
   };
   auto positionArgs = [&](size_t from) {
     for (size_t i = from; i < count; ++i) {
-      call->args[i] = MemberChecker(this->state).checkPosition(call->args[i]);
+      call->args[i] = this->memberChecker->checkPosition(call->args[i]);
     }
   };
 
@@ -182,13 +191,13 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
                                           "reduceRight", "find",    "findIndex", "some",
                                           "every",       "flatMap", "findLast",  "findLastIndex"};
   if (llvm::is_contained(callbacks, name) || (name == "sort" && count != 0)) {
-    Expr *checked = CallbackChecker(this->state).checkCallbackMethod(call, member, expected);
+    Expr *checked = this->callbackChecker->checkCallbackMethod(call, member, expected);
 
     return ok(checked);
   }
   if (name == "keys" || name == "values" || name == "entries") {
     IteratorMethods::ResultArrayIterateCall iterated =
-        IteratorMethods(this->state).checkArrayIterator(call, member);
+        this->iteratorMethods->checkArrayIterator(call, member);
     if (iterated.isErr()) {
       return err(ArrayMethodsCheckArrayMethodError{
           .code = ArrayMethodsCheckArrayMethodErrorCode::WRONG_ARITY,
@@ -202,9 +211,8 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
     bool spreads = call->hasSpread();
     for (size_t i = 0; i < count; ++i) {
       if (call->spreads(i)) {
-        call->args[i] =
-            TypeRelations(this->state)
-                .coerce(ExprChecker(this->state).checkExpr(call->args[i], arrayType), arrayType);
+        call->args[i] = this->typeRelations->coerce(
+            this->exprChecker->checkExpr(call->args[i], arrayType), arrayType);
       } else {
         elementArg(i);
       }
@@ -215,7 +223,7 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
       this->state.getFlowState().getFacts().shift(Term::lengthOf(self),
                                                   static_cast<int64_t>(count));
     }
-    FlowChecker(this->state).arrayResized(arrayType, true, false, spreads ? nullptr : self);
+    this->flowChecker->arrayResized(arrayType, true, false, spreads ? nullptr : self);
     return ok(call);
   }
 
@@ -225,7 +233,7 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
       return counted;
     }
     call->target = BuiltinCall{.builtin = name == "pop" ? Builtin::ArrPop : Builtin::ArrShift};
-    bool notEmpty = IndexProofs(this->state).provesNotEmpty(member->object);
+    bool notEmpty = this->indexProofs->provesNotEmpty(member->object);
     call->mayBeOutOfRange = !notEmpty;
     call->type = notEmpty ? element : Type::optional(element);
     if (self) {
@@ -236,7 +244,7 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
             [&](const Facts::Fact &f) { return f.rhs == Term::lengthOf(self); });
       }
     }
-    FlowChecker(this->state).arrayResized(arrayType, false, true, self);
+    this->flowChecker->arrayResized(arrayType, false, true, self);
     return ok(call);
   }
 
@@ -247,8 +255,7 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
     }
     positionArgs(0);
     call->target = BuiltinCall{.builtin = Builtin::ArrAt};
-    call->mayBeOutOfRange =
-        !IndexProofs(this->state).provesAtInBounds(member->object, call->args[0]);
+    call->mayBeOutOfRange = !this->indexProofs->provesAtInBounds(member->object, call->args[0]);
     call->type = call->mayBeOutOfRange ? Type::optional(element) : element;
     return ok(call);
   }
@@ -266,9 +273,9 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
 
   if (name == "concat") {
     for (size_t i = 0; i < count; ++i) {
-      call->args[i] = ExprChecker(this->state).checkExpr(call->args[i], arrayType);
+      call->args[i] = this->exprChecker->checkExpr(call->args[i], arrayType);
       if (call->args[i]->type != arrayType) {
-        call->args[i] = TypeRelations(this->state).coerce(call->args[i], element);
+        call->args[i] = this->typeRelations->coerce(call->args[i], element);
       }
     }
     call->target = BuiltinCall{.builtin = Builtin::ArrConcat};
@@ -282,7 +289,7 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
       return counted;
     }
     if (element->holdsResults()) {
-      ArgumentChecker(this->state).checkArgsLoosely(call);
+      this->argumentChecker->checkArgsLoosely(call);
       std::string message = ErrorTextArrayMethod::results(name);
 
       return err(ArrayMethodsCheckArrayMethodError{
@@ -305,7 +312,7 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
   if (name == "join" || name == "toString") {
     ResultElementsAreText text = ArrayMethods::textElements(element, name);
     if (text.isErr()) {
-      ArgumentChecker(this->state).checkArgsLoosely(call);
+      this->argumentChecker->checkArgsLoosely(call);
       return err(ArrayMethodsCheckArrayMethodError{
           .code = ArrayMethodsCheckArrayMethodErrorCode::ELEMENTS_NOT_TEXT,
           .message = text.error().message,
@@ -318,9 +325,8 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
       return counted;
     }
     if (count == 1) {
-      call->args[0] = TypeRelations(this->state)
-                          .coerce(ExprChecker(this->state).checkExpr(call->args[0], Type::string()),
-                                  Type::string());
+      call->args[0] = this->typeRelations->coerce(
+          this->exprChecker->checkExpr(call->args[0], Type::string()), Type::string());
     }
     call->target = BuiltinCall{.builtin = Builtin::ArrJoin};
     call->type = Type::string();
@@ -370,17 +376,17 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
     }
     for (size_t i = 0; i < count; ++i) {
       if (i < 2) {
-        call->args[i] = MemberChecker(this->state).checkPosition(call->args[i]);
+        call->args[i] = this->memberChecker->checkPosition(call->args[i]);
       } else {
         elementArg(i);
       }
     }
     call->target = BuiltinCall{.builtin = Builtin::ArrSplice};
     call->type = arrayType;
-    FlowChecker(this->state).arrayResized(arrayType, true, true);
+    this->flowChecker->arrayResized(arrayType, true, true);
     return ok(call);
   }
-  ArgumentChecker(this->state).checkArgsLoosely(call);
+  this->argumentChecker->checkArgsLoosely(call);
   std::string message = ErrorTextArrayMethod::noProperty(name, arrayType->name());
 
   return err(ArrayMethodsCheckArrayMethodError{

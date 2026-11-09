@@ -2,13 +2,17 @@
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/generics/arg_list_checker/arg_list_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cmath>
 
 namespace tz {
 
-ConsoleChecker::ConsoleChecker(SemanticState &owner)
-    : state(owner) {}
+ConsoleChecker::ConsoleChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+}
 
 ConsoleChecker::ResultPrintableItem ConsoleChecker::printable(const Expr *arg) {
   if (arg->type->isVoid()) {
@@ -60,7 +64,7 @@ Expr *ConsoleChecker::checkConsoleLog(CallExpr *call) {
   call->type = Type::voidTy();
   for (size_t i = 0; i < call->args.size(); ++i) {
     Expr *&arg = call->args[i];
-    arg = ExprChecker(this->state).checkExpr(arg);
+    arg = this->exprChecker->checkExpr(arg);
     ResultPrintableItem printable = ConsoleChecker::printable(arg);
     if (printable.isErr()) {
       this->state.getDiagnostics().error(arg->loc(), printable.error().message);
@@ -75,14 +79,14 @@ Expr *ConsoleChecker::checkConsoleLog(CallExpr *call) {
 }
 
 Expr *ConsoleChecker::checkConsoleCall(CallExpr *call, MemberExpr *member) {
-  if (!CallChecker(this->state).isGlobalName(member->object, "console")) {
+  if (!this->callChecker->isGlobalName(member->object, "console")) {
     return nullptr;
   }
   ResultConsoleMethod method = ConsoleChecker::consoleMethod(member);
   if (method.isErr()) {
     this->state.getDiagnostics().error(member->loc(), method.error().message);
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     return call;
   }

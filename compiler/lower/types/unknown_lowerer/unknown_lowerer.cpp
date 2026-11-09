@@ -30,6 +30,9 @@ constexpr int64_t kStaticRefCount = int64_t(1) << 62;
 
 }
 
+UnknownLowerer::UnknownLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 bool UnknownLowerer::hasCall(const Expr *expr) {
   if (!expr) {
     return false;
@@ -58,9 +61,6 @@ bool UnknownLowerer::isObjectHeaded(const Type *type) {
          type->isPromise() ||
          (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
-
-UnknownLowerer::UnknownLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::FunctionCallee UnknownLowerer::unknownFunction(llvm::StringRef name, llvm::Type *ret,
                                                      llvm::ArrayRef<llvm::Type *> params) {

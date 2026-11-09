@@ -6,9 +6,31 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class FieldFacts;
+class VarChecker;
+class DictChecker;
+class ExprChecker;
+class FlowChecker;
+class IndexProofs;
+class BytesChecker;
+class ClassChecker;
+class TruthChecker;
+class BinaryChecker;
+class ConcatChecker;
+class TargetChecker;
+class TypeRelations;
+class ConstantFolder;
+class DecimalChecker;
+class GenericChecker;
+class ProcessChecker;
+class TopLevelChecker;
+class BuiltinModuleChecker;
+
 class AssignChecker {
 public:
-  explicit AssignChecker(SemanticState &owner);
+  AssignChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkAssign(AssignExpr *assign);
   Expr *checkUpdate(UpdateExpr *update);
@@ -49,6 +71,26 @@ private:
                                                  const Type *type, const Expr *value, bool settled);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  FieldFacts *fieldFacts = nullptr;
+  VarChecker *varChecker = nullptr;
+  DictChecker *dictChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  BytesChecker *bytesChecker = nullptr;
+  ClassChecker *classChecker = nullptr;
+  TruthChecker *truthChecker = nullptr;
+  BinaryChecker *binaryChecker = nullptr;
+  ConcatChecker *concatChecker = nullptr;
+  TargetChecker *targetChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ConstantFolder *constantFolder = nullptr;
+  DecimalChecker *decimalChecker = nullptr;
+  GenericChecker *genericChecker = nullptr;
+  ProcessChecker *processChecker = nullptr;
+  TopLevelChecker *topLevelChecker = nullptr;
+  BuiltinModuleChecker *builtinModuleChecker = nullptr;
 };
 
 }

@@ -7,6 +7,7 @@
 #include "compiler/semantic/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
 #include "compiler/semantic/library/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/unknown_checker/unknown_checker.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -14,16 +15,21 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-InstanceOfChecker::InstanceOfChecker(SemanticState &owner)
-    : state(owner) {}
+InstanceOfChecker::InstanceOfChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->topLevelChecker = &all.getTopLevelChecker();
+}
 
 InstanceOfChecker::ResultInstanceTested InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
-  bin->lhs = ExprChecker(this->state).checkExpr(bin->lhs);
+  bin->lhs = this->exprChecker->checkExpr(bin->lhs);
   bin->type = Type::boolTy();
   auto *name = dyn_cast<NameExpr>(bin->rhs);
-  ClassDecl *cls = name ? TopLevelChecker(this->state).lookupValue(name->name).cls() : nullptr;
+  ClassDecl *cls = name ? this->topLevelChecker->lookupValue(name->name).cls() : nullptr;
   for (llvm::StringRef builtin : {"Date", "Map", "Set"}) {
-    if (cls || !CallChecker(this->state).isGlobalName(bin->rhs, builtin)) {
+    if (cls || !this->callChecker->isGlobalName(bin->rhs, builtin)) {
       continue;
     }
     auto is = [&](const Type *t) {
@@ -98,8 +104,8 @@ InstanceOfChecker::ResultInstanceTested InstanceOfChecker::checkInstanceOf(Binar
     }
     return ok(bin);
   }
-  if (const Type *bytes = !cls && name && !Scopes(this->state).lookup(name->name).var() &&
-                                  !Scopes(this->state).lookup(name->name).func()
+  if (const Type *bytes = !cls && name && !this->scopes->lookup(name->name).var() &&
+                                  !this->scopes->lookup(name->name).func()
                               ? BytesChecker::bytesTypeNamed(name->name)
                               : nullptr) {
     ResultBytesKindTested tested = this->checkBytesInstanceOf(bin, bytes);
@@ -112,7 +118,7 @@ InstanceOfChecker::ResultInstanceTested InstanceOfChecker::checkInstanceOf(Binar
     return ok(tested.value());
   }
   if (!cls) {
-    bin->rhs = ExprChecker(this->state).checkExpr(bin->rhs);
+    bin->rhs = this->exprChecker->checkExpr(bin->rhs);
     const Type *rhs = bin->rhs->type;
     ClassDecl *known = const_cast<ClassDecl *>(rhs->classRef());
     if (known && known->type) {

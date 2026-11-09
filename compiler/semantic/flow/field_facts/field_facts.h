@@ -4,9 +4,12 @@
 
 namespace tz {
 
+class SemanticParts;
+class TypeRelations;
+
 class FieldFacts {
 public:
-  explicit FieldFacts(SemanticState &owner);
+  FieldFacts(SemanticState &owner, SemanticParts &all);
 
   std::optional<FieldPath> fieldPath(const Expr *expr) const;
   bool isFieldDefined(const FieldPath &path) const;
@@ -17,6 +20,7 @@ public:
 
 private:
   SemanticState &state;
+  TypeRelations *typeRelations = nullptr;
 };
 
 }

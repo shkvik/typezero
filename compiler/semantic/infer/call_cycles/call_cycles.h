@@ -5,13 +5,17 @@
 
 namespace tz {
 
+class SemanticParts;
+class ImportBinder;
+
 class CallCycles {
 public:
   using ResolveCall = llvm::function_ref<FunctionDecl *(FunctionDecl *, llvm::StringRef)>;
 
-  explicit CallCycles(SemanticState &owner);
+  CallCycles(SemanticState &owner, SemanticParts &all);
 
   void findCycles(llvm::ArrayRef<FunctionDecl *> functions, ResolveCall resolve = nullptr);
+  void findProgramCycles();
 
 private:
   struct CycleSearch {
@@ -33,6 +37,7 @@ private:
                                              ResolveCall resolve) const;
 
   SemanticState &state;
+  ImportBinder *importBinder = nullptr;
 };
 
 }

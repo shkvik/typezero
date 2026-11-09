@@ -2,16 +2,19 @@
 #include "compiler/program/library/fs/fs_error_types/fs_error_types.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/library/builtin_modules/builtin_module_types/builtin_module_types.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 
 using llvm::dyn_cast;
 
 namespace tz {
 
-FsErrors::FsErrors(SemanticState &owner)
-    : state(owner) {}
+FsErrors::FsErrors(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->builtinModuleTypes = &all.getBuiltinModuleTypes();
+}
 
 void FsErrors::declare() {
-  BuiltinModuleTypes types(this->state);
+  BuiltinModuleTypes &types = *this->builtinModuleTypes;
   if (types.declared("ReadFileError")) {
     return;
   }
@@ -36,7 +39,7 @@ void FsErrors::declare() {
 }
 
 const Type *FsErrors::named(llvm::StringRef name) {
-  return BuiltinModuleTypes(this->state).named(name);
+  return this->builtinModuleTypes->named(name);
 }
 
 const Type *FsErrors::ofCall(const CallExpr *call) {

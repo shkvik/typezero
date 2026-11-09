@@ -13,6 +13,7 @@
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/library/result/result_checker/result_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cmath>
 
@@ -22,25 +23,38 @@ using llvm::isa;
 
 namespace tz {
 
-StmtChecker::StmtChecker(SemanticState &owner)
-    : state(owner) {}
+StmtChecker::StmtChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->varChecker = &all.getVarChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->jumpChecker = &all.getJumpChecker();
+  this->loopChecker = &all.getLoopChecker();
+  this->classChecker = &all.getClassChecker();
+  this->truthChecker = &all.getTruthChecker();
+  this->resultChecker = &all.getResultChecker();
+  this->returnChecker = &all.getReturnChecker();
+  this->switchChecker = &all.getSwitchChecker();
+  this->closureChecker = &all.getClosureChecker();
+  this->genericChecker = &all.getGenericChecker();
+}
 
 void StmtChecker::checkStmt(Stmt *stmt) {
   switch (stmt->kind()) {
   case Stmt::Kind::Block:
     this->state.getScopeStack().openScope();
-    ClosureChecker(this->state).checkStatements(cast<BlockStmt>(stmt));
-    Scopes(this->state).closeScope();
+    this->closureChecker->checkStatements(cast<BlockStmt>(stmt));
+    this->scopes->closeScope();
     break;
   case Stmt::Kind::VarDecl:
-    VarChecker(this->state).checkVarDecl(cast<VarDeclStmt>(stmt));
+    this->varChecker->checkVarDecl(cast<VarDeclStmt>(stmt));
     break;
   case Stmt::Kind::TypeAlias:
   case Stmt::Kind::Enum:
     break;
   case Stmt::Kind::Class: {
     auto *cls = cast<ClassDecl>(stmt);
-    ClassChecker::ResultClassDeclared declared = ClassChecker(this->state).checkClassStmt(cls);
+    ClassChecker::ResultClassDeclared declared = this->classChecker->checkClassStmt(cls);
     if (declared.isErr()) {
       this->state.getDiagnostics().error(cls->loc(), declared.error().message);
     }
@@ -58,9 +72,9 @@ void StmtChecker::checkStmt(Stmt *stmt) {
     if (auto *yield = dyn_cast<YieldExpr>(s->expr)) {
       yield->discarded = true;
     }
-    s->expr = ExprChecker(this->state).checkExpr(s->expr);
+    s->expr = this->exprChecker->checkExpr(s->expr);
     ResultChecker::ResultValueGetsUsed used =
-        ResultChecker(this->state).usedValue(s->expr, false, s->loc());
+        this->resultChecker->usedValue(s->expr, false, s->loc());
     if (used.isErr()) {
       this->state.getDiagnostics().error(s->expr->loc(), used.error().message);
     }
@@ -79,39 +93,39 @@ void StmtChecker::checkStmt(Stmt *stmt) {
     break;
   case Stmt::Kind::While:
     this->state.getScopeStack().enterBranch();
-    LoopChecker(this->state).checkWhile(cast<WhileStmt>(stmt));
+    this->loopChecker->checkWhile(cast<WhileStmt>(stmt));
     this->state.getScopeStack().leaveBranch();
     break;
   case Stmt::Kind::DoWhile:
     this->state.getScopeStack().enterBranch();
-    LoopChecker(this->state).checkDoWhile(cast<DoWhileStmt>(stmt));
+    this->loopChecker->checkDoWhile(cast<DoWhileStmt>(stmt));
     this->state.getScopeStack().leaveBranch();
     break;
   case Stmt::Kind::For:
     this->state.getScopeStack().enterBranch();
-    LoopChecker(this->state).checkFor(cast<ForStmt>(stmt));
+    this->loopChecker->checkFor(cast<ForStmt>(stmt));
     this->state.getScopeStack().leaveBranch();
     break;
   case Stmt::Kind::ForOf:
     this->state.getScopeStack().enterBranch();
-    LoopChecker(this->state).checkForOf(cast<ForOfStmt>(stmt));
+    this->loopChecker->checkForOf(cast<ForOfStmt>(stmt));
     this->state.getScopeStack().leaveBranch();
     break;
   case Stmt::Kind::Switch:
     this->state.getScopeStack().enterBranch();
-    SwitchChecker(this->state).checkSwitch(cast<SwitchStmt>(stmt));
+    this->switchChecker->checkSwitch(cast<SwitchStmt>(stmt));
     this->state.getScopeStack().leaveBranch();
     break;
   case Stmt::Kind::Labeled:
-    JumpChecker(this->state).checkLabeled(cast<LabeledStmt>(stmt));
+    this->jumpChecker->checkLabeled(cast<LabeledStmt>(stmt));
     break;
   case Stmt::Kind::Return:
-    ReturnChecker(this->state).checkReturn(cast<ReturnStmt>(stmt));
+    this->returnChecker->checkReturn(cast<ReturnStmt>(stmt));
     this->state.getFlowState().markUnreachable();
     break;
   case Stmt::Kind::Break:
   case Stmt::Kind::Continue: {
-    JumpChecker::ResultJumpTargeted jumped = JumpChecker(this->state).checkJump(stmt);
+    JumpChecker::ResultJumpTargeted jumped = this->jumpChecker->checkJump(stmt);
     if (jumped.isErr()) {
       this->state.getDiagnostics().error(stmt->loc(), jumped.error().message);
     }
@@ -126,9 +140,9 @@ void StmtChecker::checkStmt(Stmt *stmt) {
 
 void StmtChecker::checkIf(IfStmt *stmt) {
   Flow whenTrue, whenFalse;
-  stmt->cond = TruthChecker(this->state).checkCondition(stmt->cond, whenTrue, whenFalse);
+  stmt->cond = this->truthChecker->checkCondition(stmt->cond, whenTrue, whenFalse);
   if (std::optional<bool> constant = this->state.getGenericStore().isCheckingInstance()
-                                         ? GenericChecker(this->state).constantCondition(stmt->cond)
+                                         ? this->genericChecker->constantCondition(stmt->cond)
                                          : std::nullopt) {
     auto *lit = this->state.getAst().make<BoolLitExpr>(stmt->cond->loc(), *constant);
     lit->type = Type::boolTy();

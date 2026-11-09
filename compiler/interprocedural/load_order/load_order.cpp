@@ -1,6 +1,7 @@
 #include "compiler/interprocedural/load_order/load_order.h"
 #include "compiler/program/ast_walker/ast_walker.h"
-#include "compiler/semantic/semantic_external.h"
+#include "compiler/program/module/load_chain/load_chain.h"
+#include "compiler/program/module/module.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::dyn_cast;
@@ -130,17 +131,6 @@ LoadOrder::ResultReadAfterSet LoadOrder::earlyRead(const NameExpr *name, const M
         .message = message,
     });
   }
-  if (early) {
-    std::string what = ErrorTextEarlyRead::label(name->name, var->name, home->name);
-    std::string chain = SemanticExternalFacade::loadChain(module, home);
-    std::string message =
-        SemanticExternalFacade::notLoadedText(module->name, what, home->name, chain, var->name);
-
-    return err(LoadOrderEarlyReadError{
-        .code = LoadOrderEarlyReadErrorCode::READ_BEFORE_LOADED,
-        .message = message,
-    });
-  }
 
   return ok(name);
 }
@@ -263,7 +253,7 @@ LoadOrder::ResultSetBeforeRun LoadOrder::lateUse(const Site &site, const Functio
   }
   if (late) {
     std::string callee = LoadOrder::calleeName(fn);
-    std::string chain = SemanticExternalFacade::loadChain(site.module, home);
+    std::string chain = LoadChain::describe(site.module, home);
     std::string message =
         ErrorTextLateUse::otherFile(site.module->name, callee, use.var->name, home->name, chain);
 

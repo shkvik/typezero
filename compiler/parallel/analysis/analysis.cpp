@@ -42,6 +42,44 @@ using llvm::dyn_cast_or_null;
 
 using llvm::isa;
 
+Analysis::Analysis(const SourceFile &sourceFile, const llvm::SourceMgr &sourceManager,
+                   const AstContext &ast)
+    : program(sourceFile),
+      sources(sourceManager),
+      module(ast.moduleFunction()),
+      byFunction(ast.functionCount(), nullptr),
+      callGraph(ast.functionCount()),
+      codeWalk(*this),
+      exprWalk(*this),
+      callWalk(*this),
+      libraryEffects(*this),
+      builtinCalls(*this),
+      aliasAnalysis(*this),
+      escapeScan(*this),
+      callResolver(*this),
+      pieces(*this),
+      conflicts(*this),
+      explainer(*this),
+      explainNames(*this),
+      explainTitles(*this),
+      ownership(*this) {
+  for (const Module *loaded : this->program.modules) {
+    if (!loaded->builtin) {
+      continue;
+    }
+    for (unsigned id : loaded->buffers) {
+      const llvm::MemoryBuffer *buffer = this->sources.getMemoryBuffer(id);
+      this->libRanges.push_back({buffer->getBufferStart(), buffer->getBufferEnd()});
+    }
+  }
+  for (const Stmt *item : this->program.items) {
+    if (auto *cls = dyn_cast<ClassDecl>(item);
+        cls && !cls->builtin() && !this->libraryEffects.inLibrary(cls->loc())) {
+      this->programClasses.push_back(cls);
+    }
+  }
+}
+
 const FunctionDecl *Analysis::thisOwnerOf(const FunctionDecl *function) const {
   const FunctionDecl *source = function ? function->thisSource() : nullptr;
   if (source && source->takesThis()) {
@@ -114,44 +152,6 @@ const FunctionDecl *Analysis::planFunction(int function) const {
   const FunctionDecl *decl = this->byFunction[function]->decl;
 
   return decl == this->module ? nullptr : decl;
-}
-
-Analysis::Analysis(const SourceFile &sourceFile, const llvm::SourceMgr &sourceManager,
-                   const AstContext &ast)
-    : program(sourceFile),
-      sources(sourceManager),
-      module(ast.moduleFunction()),
-      byFunction(ast.functionCount(), nullptr),
-      callGraph(ast.functionCount()),
-      codeWalk(*this),
-      exprWalk(*this),
-      callWalk(*this),
-      libraryEffects(*this),
-      builtinCalls(*this),
-      aliasAnalysis(*this),
-      escapeScan(*this),
-      callResolver(*this),
-      pieces(*this),
-      conflicts(*this),
-      explainer(*this),
-      explainNames(*this),
-      explainTitles(*this),
-      ownership(*this) {
-  for (const Module *loaded : this->program.modules) {
-    if (!loaded->builtin) {
-      continue;
-    }
-    for (unsigned id : loaded->buffers) {
-      const llvm::MemoryBuffer *buffer = this->sources.getMemoryBuffer(id);
-      this->libRanges.push_back({buffer->getBufferStart(), buffer->getBufferEnd()});
-    }
-  }
-  for (const Stmt *item : this->program.items) {
-    if (auto *cls = dyn_cast<ClassDecl>(item);
-        cls && !cls->builtin() && !this->libraryEffects.inLibrary(cls->loc())) {
-      this->programClasses.push_back(cls);
-    }
-  }
 }
 
 bool Analysis::isLibrary(const FunctionDecl *function) const {

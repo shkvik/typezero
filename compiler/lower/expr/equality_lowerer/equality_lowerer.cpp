@@ -34,14 +34,14 @@ constexpr uint64_t kStrHeap = uint64_t(1) << 63;
 
 }
 
+EqualityLowerer::EqualityLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 bool EqualityLowerer::isReference(const Type *type) {
   return type->isObject() || type->isIterator() || type->isJson() || type->isDict() ||
          type->isPromise() || type->isUnknown() || type->isClassRef() ||
          (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
-
-EqualityLowerer::EqualityLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Value *EqualityLowerer::emitValuesEqual(llvm::Value *a, llvm::Value *b, const Type *type) {
   type = UnionLayout::storedType(type);

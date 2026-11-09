@@ -15,14 +15,14 @@
 
 namespace tz {
 
+StreamLowerer::StreamLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 bool StreamLowerer::isPlainObject(const Type *type) {
   return type->isObject() && !type->isClass() && !type->isAnyObject() && !type->isBytes() &&
          !type->isDate() && !type->isRegExp() && !type->isMatch() && !type->isIntl() &&
          !type->isCrypto() && !type->isRuntimeObject() && !type->isTimer() && type->bases().empty();
 }
-
-StreamLowerer::StreamLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Value *StreamLowerer::emitChunkAs(llvm::Value *u, const Type *to, llvm::BasicBlock *fail) {
   llvm::Type *ptr = this->lowering.builder.getPtrTy();

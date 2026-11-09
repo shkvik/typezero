@@ -6,12 +6,25 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class DictChecker;
+class ExprChecker;
+class FlowChecker;
+class IndexProofs;
+class MemberChecker;
+class TypeRelations;
+class ArgumentChecker;
+class CallbackChecker;
+class GeneratorChecker;
+class PredicateChecker;
+
 class IteratorMethods {
 public:
   using ResultIteratorFromCall = Result<Expr *, IteratorMethodsCheckIteratorFromError>;
   using ResultArrayIterateCall = Result<Expr *, IteratorMethodsCheckArrayIteratorError>;
 
-  explicit IteratorMethods(SemanticState &owner);
+  IteratorMethods(SemanticState &owner, SemanticParts &all);
 
   void markFused(Expr *expr) const;
   Expr *checkArrayFrom(CallExpr *call, MemberExpr *member);
@@ -46,6 +59,17 @@ private:
   static ResultCallbackIsPassed callbackGiven(size_t count, llvm::StringRef name, bool reduce);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  DictChecker *dictChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  MemberChecker *memberChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  CallbackChecker *callbackChecker = nullptr;
+  GeneratorChecker *generatorChecker = nullptr;
+  PredicateChecker *predicateChecker = nullptr;
 };
 
 }

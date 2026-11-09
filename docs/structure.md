@@ -34,7 +34,8 @@
   `node:crypto`, `Date`…), — тема с одним именем во всех деревьях: проверка в
   `compiler/semantic/library/<тема>/`, построение IR в `compiler/lower/library/<тема>/`, справочники
   без проверки в `compiler/program/library/<тема>/`, рантайм на C в `runtime/library/<тема>/`, код на
-  tz в `library/<тема>/`. Проходы не знают имён тем.
+  tz в `library/<тема>/`. Проходы конвейера не знают имён тем; внутри движка части зовут
+  проверяльщики тем прямо (`Feature` убран 9 ноября).
 - **Движок типов — `compiler/semantic/`.** Объявления, вывод, проверка тел и библиотека — один
   движок; снаружи его подключают только через фасад `SemanticExternalFacade`
   (`semantic/semantic_external.h`). Хранилище движка `semantic_state/` закрыто.
@@ -108,10 +109,10 @@ compiler/
                        declare_pass/ infer_pass/ check_pass/ instances_pass/ interprocedural_pass/
                        overflow_pass/ event_rounds/
   semantic/          движок типов; semantic_external.{h,cpp} — фасад SemanticExternalFacade;
-                     внутри по ярусам (вызовы идут вниз): infer/ library/ → bodies/ → flow/
-                     declare/ → generics/ → types/ names/ → feature/ semantic_state/ (закрытое
-                     хранилище групп данных); вверх — только через интерфейсы (Completer из
-                     program/, Feature)
+                     semantic_types.{h,cpp} — SemanticTypes; semantic_parts/ — SemanticParts,
+                     сборка всех частей; папки по ярусам: infer/ library/ → bodies/ → flow/
+                     declare/ → generics/ → types/ names/ → semantic_state/ (закрытое
+                     хранилище групп данных); вверх через интерфейс — только Completer
   interprocedural/   после движка, по всей программе: flows/ flow_*/ wide_writes/ load_order/
                      unused/ context_checker/ pool_checker/ held_value_checker/ overflow/
   cli/               папка на слово команды tz (build/ run/ knowledge/ lsp/ mcp/ licenses/
@@ -191,16 +192,30 @@ library/             по теме на папку; stream/stream.tz (класс
 
 Раскладка — по образцу `tmp/project_struct/`, правки сверх переносов — `tmp/project_struct.md`.
 
-- **Фасад.** `SemanticExternalFacade` (`semantic/semantic_external.h`) — единственный вход в движок:
-  `declareProgram`, `inferProgram`, `walkBodies`, `checkInstances`, `finishProgram`, `takeInventory`,
-  `getDiagnostics`, `isInsideLibrary`, `getWideningStore` и статические вопросы о типах
-  (`isImplicitlyConvertible`, `copiesIntoRecord`, `awaitedType`, `narrowingsOf`, `decimalLiteral`,
-  `loadChain`, `quotedName`). Прогоны `pipeline/check_program/*_pass` — по строке на вызов фасада.
-  Фасад создаёт `FeatureRegistry`; `SemanticState` держит только список `const Feature *`.
-- **Ярусы.** Внутри движка вызовы идут вниз: `infer/`, `library/` → `bodies/` → `flow/`,
-  `declare/` → `generics/` → `types/`, `names/` → `feature/`, `semantic_state/`. Вверх — только
-  через интерфейсы: `Feature` (`semantic/feature/`, реализуют `semantic/library/<тема>`) и
-  `Completer` (`program/symbols/completer/`, реализует `semantic/infer/return_completer/`).
+- **Фасад.** `SemanticExternalFacade` (`semantic/semantic_external.h`) — единственный вход в движок,
+  только шаги конвейера: `declareProgram`, `findCallCycles`, `walkBodies`, `walkInstances`,
+  `finishProgram`, `collectInventory`, `takeInventory`; для `WideWrites` ещё `isInsideLibrary` и
+  `getWideningStore`. Все шаги отдают `Errors`; `PassDone` собирает `CheckPass`. Фасад только
+  перечисляет шаги и читает хранилища, пишут в хранилища части. Прогоны
+  `pipeline/check_program/*_pass` — по строке на вызов фасада.
+- **Вопросы о типах снаружи** — `SemanticTypes` (`semantic/semantic_types.h`: `awaitedType`,
+  `copiesIntoRecord`, `isImplicitlyConvertible`, `narrowingsOf`) для `lower/` и `interprocedural/`.
+  Общее у движка и `LoadOrder` — в `program/`: цепочка загрузки `LoadChain`
+  (`program/module/load_chain/`), литерал decimal — `DecimalLiteral::fromExpr`.
+- **Части создаёт сборка.** `SemanticParts` (`semantic/semantic_parts/`) один раз создаёт все 165
+  частей полями; каждая часть берёт соседей у сборки в теле своего конструктора (поля-указатели),
+  геттеры сборки зовут только конструкторы частей и фасад. Правила — [code_style.md](code_style.md),
+  раздел «Части движка `semantic/`»; проверка — `tmp/check_parts.py`.
+- **Ярусы — раскладка, а не направление вызовов.** Папки: `infer/`, `library/` → `bodies/` →
+  `flow/`, `declare/` → `generics/` → `types/`, `names/` → `semantic_state/`. Части зовут друг
+  друга по кругу (большая часть папок движка — один узел по `#include`), поэтому друг друга не
+  создают. Вверх через интерфейс — только `Completer` (`program/symbols/completer/`, реализует
+  `semantic/infer/return_completer/`).
+- **Темы библиотеки — прямыми вызовами.** `Feature`, `FeatureRegistry` и классы `<Тема>Feature`
+  убраны: `CallChecker`, `BuiltinModuleChecker` и фасад зовут проверяльщики тем прямо (`if` по
+  глобальному имени, типу получателя или модулю, порядок виден в коде). Таблицы экспортов модулей —
+  `switch` в `BuiltinModuleChecker::moduleExport`, общая ошибка — `ModuleExportFoundError`
+  (`semantic/library/builtin_modules/module_export_errors/`).
 - **Движок не подключает** `load/`, `lower/` и прочие проходы — только `program/`, `result/`,
   `union/`. Встроенные тексты на tz (`library/core/prelude.d.tz`, `core/iterate.tz`,
   `fs/fs_errors.d.tz`, `crypto/crypto_errors.d.tz`, `child_process/child_errors.d.tz`) разбирает
@@ -210,11 +225,11 @@ library/             по теме на папку; stream/stream.tz (класс
 - **Движок не пишет в программу.** Факты для понижения и анализов (`usesAsync`, подтипы, виды,
   копии generic, `nativeError`, поздние классы…) копит `InventoryStore`; `checkProgram` кладёт их
   в `SourceFile::inventory` (`ProgramInventory`, `program/program_inventory/`) после
-  `finishProgram` и до межпроцедурных проверок.
+  `finishProgram` и `collectInventory` и до межпроцедурных проверок.
 - **Тип возврата по требованию.** У `FuncSymbol` поле `ret` закрыто: `getReturnType()` достраивает
   тип через `Completer`, `getKnownReturnType()` читает без вывода, `hasReturnType()`.
 - **Понижение тем.** `LibraryLowerer` (`lower/library/library_lowerer/`) и `LowererRegistry`;
-  у каждой темы — `<Тема>LibraryLowerer`. `Feature` про понижение не знает.
+  у каждой темы — `<Тема>LibraryLowerer`.
 
 ## Конвейер
 

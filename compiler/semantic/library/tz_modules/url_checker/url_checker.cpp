@@ -1,12 +1,18 @@
 #include "compiler/semantic/library/tz_modules/url_checker/url_checker.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 
 using llvm::dyn_cast;
 
 namespace tz {
+
+UrlChecker::UrlChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->libraryCalls = &all.getLibraryCalls();
+}
 
 bool UrlChecker::isLibraryClass(const Type *type, llvm::StringRef name) {
   const ClassDecl *cls = type ? type->nonOptional()->classDecl() : nullptr;
@@ -62,9 +68,6 @@ bool UrlChecker::validHost(llvm::StringRef host) {
 
   return true;
 }
-
-UrlChecker::UrlChecker(SemanticState &owner)
-    : state(owner) {}
 
 bool UrlChecker::validUrlText(llvm::StringRef text, bool relative) {
   text = text.trim(" \t\n\r\f\v");
@@ -170,7 +173,7 @@ UrlChecker::ResultInputIsKnown UrlChecker::knownInput(const Expr *input, bool ba
 }
 
 void UrlChecker::checkUrlNew(NewExpr *expr) {
-  if (LibraryCalls(this->state).inLibrary(expr->loc())) {
+  if (this->libraryCalls->inLibrary(expr->loc())) {
     return;
   }
   const std::vector<Expr *> &args = expr->ctor() ? expr->ctor()->args : expr->args;

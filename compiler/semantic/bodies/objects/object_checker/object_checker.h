@@ -6,6 +6,21 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class EventMaps;
+class FieldFacts;
+class CallChecker;
+class DictMethods;
+class ExprChecker;
+class TypeDeclarer;
+class ClassDeclarer;
+class TypeRelations;
+class ProcessChecker;
+class ArgumentChecker;
+class OverloadResolver;
+class ClassMemberChecker;
+
 class ObjectChecker {
 public:
   static std::string fieldText(const Expr *object, llvm::StringRef field);
@@ -13,7 +28,7 @@ public:
   using ResultFieldCallIsTyped = Result<Expr *, ObjectCheckerCheckFieldCallError>;
   using ResultObjectStaticCall = Result<Expr *, ObjectCheckerCheckObjectCallError>;
 
-  explicit ObjectChecker(SemanticState &owner);
+  ObjectChecker(SemanticState &owner, SemanticParts &all);
 
   void checkForIn(ForOfStmt *stmt);
   ResultObjectFieldValue checkField(MemberExpr *member);
@@ -45,6 +60,19 @@ private:
                                               const MemberExpr *member);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  EventMaps *eventMaps = nullptr;
+  FieldFacts *fieldFacts = nullptr;
+  CallChecker *callChecker = nullptr;
+  DictMethods *dictMethods = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ProcessChecker *processChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  OverloadResolver *overloadResolver = nullptr;
+  ClassMemberChecker *classMemberChecker = nullptr;
 };
 
 }

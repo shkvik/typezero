@@ -9,6 +9,7 @@
 #include "compiler/semantic/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
 #include "compiler/semantic/library/intl/intl_checker/intl_checker.h"
 #include "compiler/semantic/library/process/process_checker/process_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "runtime/library/date/date/date.h"
@@ -49,6 +50,19 @@ const DateOption kOptions[TZ_DTO_COUNT] = {
     {"timeStyle", {"full", "long", "medium", "short"}},
 };
 
+}
+
+DateFormatChecker::DateFormatChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->indexProofs = &all.getIndexProofs();
+  this->intlChecker = &all.getIntlChecker();
+  this->literalTypes = &all.getLiteralTypes();
+  this->typeRelations = &all.getTypeRelations();
+  this->genericChecker = &all.getGenericChecker();
+  this->processChecker = &all.getProcessChecker();
+  this->argumentChecker = &all.getArgumentChecker();
 }
 
 std::optional<std::u16string> DateFormatChecker::literalText(const Expr *e) {
@@ -136,20 +150,17 @@ DateFormatChecker::ResultOptionsObject DateFormatChecker::optionsObject(const Ty
   return ok(type);
 }
 
-DateFormatChecker::DateFormatChecker(SemanticState &owner)
-    : state(owner) {}
-
 bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
   bool ok = true;
   if (!args.empty()) {
-    args[0] = ExprChecker(this->state).checkExpr(args[0]);
-    ok = IntlChecker(this->state).checkLocaleArg(args[0], DateFormatChecker::methodName(kind));
+    args[0] = this->exprChecker->checkExpr(args[0]);
+    ok = this->intlChecker->checkLocaleArg(args[0], DateFormatChecker::methodName(kind));
   }
   if (args.size() < 2) {
     return ok;
   }
   Expr *&options = args[1];
-  options = ExprChecker(this->state).checkExpr(options);
+  options = this->exprChecker->checkExpr(options);
   const Type *type = options->type;
   if (type->isError()) {
     return false;
@@ -221,7 +232,7 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
     }
     return nullptr;
   };
-  bool exempt = IndexProofs(this->state).exempt(options->loc());
+  bool exempt = this->indexProofs->exempt(options->loc());
   for (const Field &field : type->fields()) {
     const Expr *given = propOf(field.name);
     llvm::SMLoc at = given ? given->loc() : options->loc();
@@ -229,7 +240,7 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
       if (given) {
         std::string digits = ErrorTextDateOptions::digitsName();
         IndexProofs::ResultBetweenProven between =
-            IndexProofs(this->state).requireBetween(given, 1, 3, digits);
+            this->indexProofs->requireBetween(given, 1, 3, digits);
         if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
           this->state.getDiagnostics().error(given->loc(), between.error().message);
         }
@@ -251,7 +262,7 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
       continue;
     }
     std::optional<std::vector<std::string>> texts =
-        given ? LiteralTypes(this->state).knownTexts(given) : std::nullopt;
+        given ? this->literalTypes->knownTexts(given) : std::nullopt;
     if (!texts) {
       texts = DateFormatChecker::textsOf(field.type->nonOptional());
     }
@@ -337,7 +348,7 @@ Expr *DateFormatChecker::checkDateFormatNew(llvm::SMLoc loc, std::vector<Expr *>
     std::string message = ErrorTextDateFormat::arity(args.size());
     this->state.getDiagnostics().error(loc, message);
     for (Expr *&arg : args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     auto *error = this->state.getAst().make<UndefinedExpr>(loc);
     error->type = Type::error();
@@ -349,38 +360,37 @@ Expr *DateFormatChecker::checkDateFormatNew(llvm::SMLoc loc, std::vector<Expr *>
     return error;
   }
 
-  return ProcessChecker(this->state)
-      .builtinCall(loc, callee, Builtin::DtfNew, args, Type::dateFormat());
+  return this->processChecker->builtinCall(loc, callee, Builtin::DtfNew, args, Type::dateFormat());
 }
 
 Expr *DateFormatChecker::checkIntlCall(CallExpr *call, MemberExpr *member) {
   if (member->name == "DateTimeFormat") {
-    if (CallChecker(this->state).rejectSpread(call)) {
+    if (this->callChecker->rejectSpread(call)) {
       return call;
     }
     return this->checkDateFormatNew(member->loc(), call->args);
   }
 
-  return IntlChecker(this->state).checkIntlFunction(call, member);
+  return this->intlChecker->checkIntlFunction(call, member);
 }
 
 Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
   call->type = Type::error();
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return call;
   }
   if (name == "format" || name == "formatToParts") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 1);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
     }
     if (!call->args.empty()) {
       Expr *&arg = call->args[0];
-      arg = GenericChecker(this->state).apparent(ExprChecker(this->state).checkExpr(arg));
+      arg = this->genericChecker->apparent(this->exprChecker->checkExpr(arg));
       if (arg->type->isNumeric()) {
-        arg = TypeRelations(this->state).convert(arg, Type::doubleTy());
+        arg = this->typeRelations->convert(arg, Type::doubleTy());
       } else if (!arg->type->isDate() && !arg->type->isError()) {
         std::string message = ErrorTextDateFormat::formatArg(name, arg->type->name());
         this->state.getDiagnostics().error(arg->loc(), message);
@@ -394,7 +404,7 @@ Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *membe
     return call;
   }
   if (name == "resolvedOptions") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 0);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
@@ -408,7 +418,7 @@ Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *membe
                             : ErrorTextDateFormat::noMember(name);
   this->state.getDiagnostics().error(member->loc(), message);
   for (Expr *&arg : call->args) {
-    arg = ExprChecker(this->state).checkExpr(arg);
+    arg = this->exprChecker->checkExpr(arg);
   }
 
   return call;

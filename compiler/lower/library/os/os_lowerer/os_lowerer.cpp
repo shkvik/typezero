@@ -10,6 +10,9 @@
 
 namespace tz {
 
+OsLowerer::OsLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 const std::vector<MakerFields> &OsLowerer::osObjects() {
   static const std::vector<MakerFields> table = {
       {nullptr, {"model", "speed", "times"}},
@@ -19,9 +22,6 @@ const std::vector<MakerFields> &OsLowerer::osObjects() {
 
   return table;
 }
-
-OsLowerer::OsLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Value *OsLowerer::emitOsCall(CallExpr *call) {
   llvm::Type *voidTy = this->lowering.builder.getVoidTy();

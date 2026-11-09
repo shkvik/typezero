@@ -3,12 +3,20 @@
 #include "compiler/semantic/bodies/classes/static_checker/static_checker.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+UnknownChecker::UnknownChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->staticChecker = &all.getStaticChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->classValueChecker = &all.getClassValueChecker();
+}
 
 const Type *UnknownChecker::typeOfNarrowed(const std::u16string &name) {
   static const std::pair<const char16_t *, const Type *(*)()> kinds[] = {
@@ -66,9 +74,6 @@ std::string UnknownChecker::hintName(const Expr *expr) {
 
   return "x";
 }
-
-UnknownChecker::UnknownChecker(SemanticState &owner)
-    : state(owner) {}
 
 bool UnknownChecker::isObjectReference(const Type *type) {
   return type->isObject() || type->isIterator() || type->isDict() || type->isClassRef() ||
@@ -137,7 +142,7 @@ UnknownChecker::ResultMemberChecked UnknownChecker::checkUnknownMember(MemberExp
   member->type = Type::error();
   if (member->object->type->isClassRef()) {
     ClassValueChecker::ResultClassMemberRead classMember =
-        ClassValueChecker(this->state).checkClassRefMember(member);
+        this->classValueChecker->checkClassRefMember(member);
     if (classMember.isErr()) {
       return err(UnknownCheckerCheckUnknownMemberError{
           .code = UnknownCheckerCheckUnknownMemberErrorCode::CLASS_MEMBER,
@@ -176,7 +181,7 @@ UnknownChecker::ResultMethodChecked UnknownChecker::checkUnknownMethod(CallExpr 
   call->type = Type::error();
   if (ClassDecl *cls = const_cast<ClassDecl *>(receiver->classRef()); cls && cls->type) {
     Expr *object = member->object;
-    Expr *result = StaticChecker(this->state).checkClassStaticCall(call, member, cls);
+    Expr *result = this->staticChecker->checkClassStaticCall(call, member, cls);
     if (isa<NameExpr>(object)) {
       return ok(result);
     }
@@ -185,7 +190,7 @@ UnknownChecker::ResultMethodChecked UnknownChecker::checkUnknownMethod(CallExpr 
     seq->type = result->type;
     return ok(seq);
   }
-  ArgumentChecker(this->state).checkArgsLoosely(call);
+  this->argumentChecker->checkArgsLoosely(call);
   if (receiver->isConstructor()) {
     std::string message = ErrorTextUnknownMethod::runtime(receiver->name());
 

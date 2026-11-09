@@ -6,10 +6,27 @@
 
 namespace tz {
 
+class SemanticParts;
+class ChunkTypes;
+class TypeParams;
+class ExprChecker;
+class FlowChecker;
+class TypeResolver;
+class ClassDeclarer;
+class EmitterChecker;
+class ModuleDeclarer;
+class ReturnInferrer;
+class FunctionChecker;
+class TypeArgInferrer;
+class StreamNewChecker;
+class MethodCallChecker;
+class ClassMemberChecker;
+class GenericClassInstantiator;
+
 class GenericClassChecker {
 public:
   static const ClassDecl *genericInstanceOf(const Type *type, const ClassDecl *generic);
-  explicit GenericClassChecker(SemanticState &owner);
+  GenericClassChecker(SemanticState &owner, SemanticParts &all);
 
   void declareClassTypeParams(ClassDecl *cls);
   void bindClassTypeParams(const ClassDecl *cls);
@@ -33,6 +50,21 @@ private:
                               llvm::ArrayRef<const Type *> args);
 
   SemanticState &state;
+  ChunkTypes *chunkTypes = nullptr;
+  TypeParams *typeParams = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  EmitterChecker *emitterChecker = nullptr;
+  ModuleDeclarer *moduleDeclarer = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  FunctionChecker *functionChecker = nullptr;
+  TypeArgInferrer *typeArgInferrer = nullptr;
+  StreamNewChecker *streamNewChecker = nullptr;
+  MethodCallChecker *methodCallChecker = nullptr;
+  ClassMemberChecker *classMemberChecker = nullptr;
+  GenericClassInstantiator *genericClassInstantiator = nullptr;
 };
 
 }

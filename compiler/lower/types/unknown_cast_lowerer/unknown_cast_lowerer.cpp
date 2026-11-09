@@ -27,15 +27,15 @@ enum : uint32_t { kKindString = 2, kKindBoolean = 3 };
 
 }
 
+UnknownCastLowerer::UnknownCastLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 bool UnknownCastLowerer::plainObject(const Type *type) {
   return type->isObject() && !type->isClass() && !type->isClassRef() && !type->isBase() &&
          type->bases().empty() && type->overloads().empty() && !type->isIncomplete() &&
          !type->isAnyObject() && !type->isDict() && !type->isDate() && !type->isRegExp() &&
          !type->isMatch() && !type->isIntl() && !type->isCrypto() && !type->isWeakRef();
 }
-
-UnknownCastLowerer::UnknownCastLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Value *UnknownCastLowerer::classIdIn(llvm::Value *id,
                                            llvm::ArrayRef<const ClassDecl *> classes) {

@@ -43,6 +43,9 @@ constexpr uint32_t kAsyncFrameAlign = 8;
 
 }
 
+AsyncLowerer::AsyncLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 const Expr *AsyncLowerer::resolvedValue(const Expr *expr) {
   auto *call = dyn_cast<CallExpr>(expr);
   if (!call || call->builtin() != Builtin::PromiseResolve || call->args.size() != 1 ||
@@ -52,9 +55,6 @@ const Expr *AsyncLowerer::resolvedValue(const Expr *expr) {
 
   return call->args[0];
 }
-
-AsyncLowerer::AsyncLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::FunctionCallee AsyncLowerer::asyncFunction(llvm::StringRef name, llvm::Type *ret,
                                                  llvm::ArrayRef<llvm::Type *> params) {

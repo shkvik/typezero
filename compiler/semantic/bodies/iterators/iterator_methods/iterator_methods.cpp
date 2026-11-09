@@ -11,6 +11,7 @@
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
 #include "compiler/semantic/flow/predicate_checker/predicate_checker.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -25,8 +26,20 @@ const llvm::StringLiteral kStages[] = {"map", "filter", "take", "drop", "flatMap
 
 }
 
-IteratorMethods::IteratorMethods(SemanticState &owner)
-    : state(owner) {}
+IteratorMethods::IteratorMethods(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->dictChecker = &all.getDictChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->indexProofs = &all.getIndexProofs();
+  this->memberChecker = &all.getMemberChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->callbackChecker = &all.getCallbackChecker();
+  this->generatorChecker = &all.getGeneratorChecker();
+  this->predicateChecker = &all.getPredicateChecker();
+}
 
 void IteratorMethods::markFused(Expr *expr) const {
   while (auto *call = dyn_cast<CallExpr>(expr)) {
@@ -34,8 +47,8 @@ void IteratorMethods::markFused(Expr *expr) const {
     if (!member || member->optional || call->optional) {
       return;
     }
-    if (CallChecker(this->state).isGlobalName(member->object, "Iterator") &&
-        member->name == "from" && call->args.size() == 1) {
+    if (this->callChecker->isGlobalName(member->object, "Iterator") && member->name == "from" &&
+        call->args.size() == 1) {
       expr = call->args[0];
       continue;
     }
@@ -51,7 +64,7 @@ IteratorMethods::ResultArrayIterateCall IteratorMethods::checkArrayIterator(Call
                                                                             MemberExpr *member) {
   const Type *element = member->object->type->inner();
   llvm::StringRef name = member->name;
-  ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 0);
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
   if (arity.isErr()) {
     return err(IteratorMethodsCheckArrayIteratorError{
         .code = IteratorMethodsCheckArrayIteratorErrorCode::WRONG_ARITY,
@@ -95,14 +108,14 @@ IteratorMethods::ResultSourceIsIterable IteratorMethods::iteratedSource(const Ty
 
 IteratorMethods::ResultIteratorFromCall IteratorMethods::checkIteratorFrom(CallExpr *call,
                                                                            MemberExpr *member) {
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return err(IteratorMethodsCheckIteratorFromError{
         .code = IteratorMethodsCheckIteratorFromErrorCode::ALREADY_REPORTED,
         .message = "",
     });
   }
   if (member->name != "from") {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     std::string message = ErrorTextStaticFrom::iterator(member->name);
 
     return err(IteratorMethodsCheckIteratorFromError{
@@ -110,15 +123,14 @@ IteratorMethods::ResultIteratorFromCall IteratorMethods::checkIteratorFrom(CallE
         .message = message,
     });
   }
-  ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 1, 1);
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     return err(IteratorMethodsCheckIteratorFromError{
         .code = IteratorMethodsCheckIteratorFromErrorCode::WRONG_ARITY,
         .message = arity.error().message,
     });
   }
-  call->args[0] =
-      DictChecker(this->state).iterableOf(ExprChecker(this->state).checkExpr(call->args[0]));
+  call->args[0] = this->dictChecker->iterableOf(this->exprChecker->checkExpr(call->args[0]));
   const Type *type = call->args[0]->type;
   ResultSourceIsIterable source = IteratorMethods::iteratedSource(type, "Iterator.from");
   if (source.isErr()) {
@@ -164,23 +176,22 @@ IteratorMethods::ResultCallbackHasValue IteratorMethods::callbackValue(const Typ
 }
 
 Expr *IteratorMethods::checkArrayFrom(CallExpr *call, MemberExpr *member) {
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return call;
   }
   ResultArrayStaticKnown known = IteratorMethods::arrayStatic(member);
   if (known.isErr()) {
     this->state.getDiagnostics().error(member->loc(), known.error().message);
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
-  ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 1, 2);
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
   this->markFused(call->args[0]);
-  call->args[0] =
-      DictChecker(this->state).iterableOf(ExprChecker(this->state).checkExpr(call->args[0]));
+  call->args[0] = this->dictChecker->iterableOf(this->exprChecker->checkExpr(call->args[0]));
   const Type *type = call->args[0]->type;
   ResultSourceIsIterable source = IteratorMethods::iteratedSource(type, "Array.from");
   if (source.isErr()) {
@@ -188,14 +199,14 @@ Expr *IteratorMethods::checkArrayFrom(CallExpr *call, MemberExpr *member) {
       this->state.getDiagnostics().error(call->args[0]->loc(), source.error().message);
     }
     if (call->args.size() == 2) {
-      call->args[1] = ExprChecker(this->state).checkExpr(call->args[1]);
+      call->args[1] = this->exprChecker->checkExpr(call->args[1]);
     }
     return call;
   }
   const Type *element = source.value();
   if (type->isIterator()) {
     GeneratorChecker::ResultNextNeedsNoValue nothing =
-        GeneratorChecker(this->state).checkSendsNothing(type, "'Array.from'");
+        this->generatorChecker->checkSendsNothing(type, "'Array.from'");
     if (nothing.isErr()) {
       this->state.getDiagnostics().error(call->args[0]->loc(), nothing.error().message);
     }
@@ -206,8 +217,7 @@ Expr *IteratorMethods::checkArrayFrom(CallExpr *call, MemberExpr *member) {
     Signature sig;
     sig.pad = false;
     sig.params = {element, Type::intTy()};
-    call->args[1] =
-        CallbackChecker(this->state).checkFunctionArg(call->args[1], sig, 1, "Array.from");
+    call->args[1] = this->callbackChecker->checkFunctionArg(call->args[1], sig, 1, "Array.from");
     const Type *callback = call->args[1]->type;
     if (!callback->isFunction()) {
       return call;
@@ -220,7 +230,7 @@ Expr *IteratorMethods::checkArrayFrom(CallExpr *call, MemberExpr *member) {
     }
     call->type = Type::array(value.value());
   }
-  FlowChecker(this->state).calledFunction();
+  this->flowChecker->calledFunction();
 
   return call;
 }
@@ -349,7 +359,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
   size_t count = call->args.size();
 
   if (name == "next") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 1);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
@@ -357,54 +367,54 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     ResultNextValueOneType next = IteratorMethods::nextValue(iterator);
     if (next.isErr()) {
       this->state.getDiagnostics().error(member->loc(), next.error().message);
-      ArgumentChecker(this->state).checkArgsLoosely(call);
+      this->argumentChecker->checkArgsLoosely(call);
       return call;
     }
     const Type *value = next.value();
     if (count == 1) {
       const Type *sent = iterator->sent();
-      call->args[0] = sent->isVoid() ? ExprChecker(this->state).checkExpr(call->args[0])
-                                     : ArgumentChecker(this->state).checkArg(call->args[0], sent);
+      call->args[0] = sent->isVoid() ? this->exprChecker->checkExpr(call->args[0])
+                                     : this->argumentChecker->checkArg(call->args[0], sent);
     }
     call->target = BuiltinCall{.builtin = Builtin::IterNext};
     call->type =
         Type::object({{"value", Type::optional(value), false}, {"done", Type::boolTy(), false}},
                      "IteratorResult<" + value->name().str() + ">");
-    FlowChecker(this->state).calledFunction();
+    this->flowChecker->calledFunction();
     return call;
   }
   ResultNotThrowOrReturn plain = IteratorMethods::plainMethod(name);
   if (plain.isErr()) {
     this->state.getDiagnostics().error(member->loc(), plain.error().message);
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
   ResultKnownHelperFound found = IteratorMethods::iteratorHelper(name, iterator);
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
   Builtin builtin = found.value()->builtin;
   std::string what = ErrorTextFunctionName::quoted(name);
   GeneratorChecker::ResultNextNeedsNoValue nothing =
-      GeneratorChecker(this->state).checkSendsNothing(iterator, what);
+      this->generatorChecker->checkSendsNothing(iterator, what);
   if (nothing.isErr()) {
     this->state.getDiagnostics().error(member->loc(), nothing.error().message);
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
 
   if (builtin == Builtin::IterTake || builtin == Builtin::IterDrop) {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 1, 1);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
     }
-    call->args[0] = MemberChecker(this->state).checkPosition(call->args[0]);
+    call->args[0] = this->memberChecker->checkPosition(call->args[0]);
     std::string counted = ErrorTextIteratorMethod::countOf(name);
     IndexProofs::ResultBetweenProven between =
-        IndexProofs(this->state).requireBetween(call->args[0], 0, std::nullopt, counted);
+        this->indexProofs->requireBetween(call->args[0], 0, std::nullopt, counted);
     if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
       this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
     }
@@ -413,14 +423,14 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (builtin == Builtin::IterToArray) {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 0);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
     }
     call->target = BuiltinCall{.builtin = builtin};
     call->type = Type::array(element);
-    FlowChecker(this->state).calledFunction();
+    this->flowChecker->calledFunction();
     return call;
   }
 
@@ -428,7 +438,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
   ResultCallbackIsPassed passed = IteratorMethods::callbackGiven(count, name, reduce);
   if (passed.isErr()) {
     this->state.getDiagnostics().error(member->loc(), passed.error().message);
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
   Signature sig;
@@ -452,10 +462,10 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
       auto *unary = dyn_cast<UnaryExpr>(init);
       bool literal = isa<IntLitExpr>(init) ||
                      (unary && unary->op == UnaryOp::Neg && isa<IntLitExpr>(unary->operand));
-      init = ExprChecker(this->state)
-                 .checkExpr(init, literal && GenericChecker::apparentType(element)->isNumeric()
-                                      ? GenericChecker::apparentType(element)
-                                      : nullptr);
+      init = this->exprChecker->checkExpr(
+          init, literal && GenericChecker::apparentType(element)->isNumeric()
+                    ? GenericChecker::apparentType(element)
+                    : nullptr);
       accumulator = init->type;
       ResultInitialValueType initial = IteratorMethods::initialValue(accumulator);
       if (initial.isErr()) {
@@ -469,16 +479,16 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     break;
   }
   if (accumulator->isError()) {
-    call->args[0] = ExprChecker(this->state).checkExpr(call->args[0]);
+    call->args[0] = this->exprChecker->checkExpr(call->args[0]);
     return call;
   }
   sig.params = reduce ? std::vector<const Type *>{accumulator, element, Type::intTy()}
                       : std::vector<const Type *>{element, Type::intTy()};
-  bool isBoolean = CallChecker(this->state).isGlobalName(call->args[0], "Boolean");
+  bool isBoolean = this->callChecker->isGlobalName(call->args[0], "Boolean");
   if (auto *fe = dyn_cast<FunctionExpr>(call->args[0])) {
     this->state.getCallbackFacts().rememberIndexCallback(fe->fn, reduce ? 2 : 1);
   }
-  call->args[0] = CallbackChecker(this->state).checkFunctionArg(call->args[0], sig, primary, name);
+  call->args[0] = this->callbackChecker->checkFunctionArg(call->args[0], sig, primary, name);
   if (BuiltinGroups::isIteratorStage(builtin)) {
     if (auto *fe = dyn_cast<FunctionExpr>(call->args[0])) {
       fe->fn->nonEscaping = call->fused;
@@ -486,7 +496,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
   }
   call->target = BuiltinCall{.builtin = builtin};
   if (BuiltinGroups::isIteratorSink(builtin)) {
-    FlowChecker(this->state).calledFunction();
+    this->flowChecker->calledFunction();
   }
   const Type *callback = call->args[0]->type;
   if (!callback->isFunction()) {
@@ -511,7 +521,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     }
     if (result->isIterator()) {
       GeneratorChecker::ResultNextNeedsNoValue flatSends =
-          GeneratorChecker(this->state).checkSendsNothing(result, "'flatMap'");
+          this->generatorChecker->checkSendsNothing(result, "'flatMap'");
       if (flatSends.isErr()) {
         this->state.getDiagnostics().error(call->args[0]->loc(), flatSends.error().message);
         return call;
@@ -521,12 +531,11 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     break;
   }
   case Builtin::IterFilter:
-    if (const Type *kept = PredicateChecker(this->state).filteredType(call->args[0], element)) {
+    if (const Type *kept = this->predicateChecker->filteredType(call->args[0], element)) {
       call->type = Type::iterator(kept);
     } else {
       call->type = Type::iterator(
-          element->isOptional() &&
-                  (isBoolean || CallbackChecker(this->state).keepsDefined(call->args[0]))
+          element->isOptional() && (isBoolean || this->callbackChecker->keepsDefined(call->args[0]))
               ? element->inner()
               : element);
     }
@@ -537,7 +546,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
   case Builtin::IterReduce:
     call->type = count == 2 ? accumulator : Type::optional(accumulator);
     if (count == 2 && call->args.size() == 2) {
-      call->args[1] = TypeRelations(this->state).coerce(call->args[1], accumulator);
+      call->args[1] = this->typeRelations->coerce(call->args[1], accumulator);
     }
     break;
   case Builtin::IterSome:

@@ -6,11 +6,15 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class TypeDeclarer;
+
 class ConstantFolder {
 public:
   using ResultDivisorNotZero = Result<const Expr *, ConstantFolderCheckDivisorError>;
 
-  explicit ConstantFolder(SemanticState &owner);
+  ConstantFolder(SemanticState &owner, SemanticParts &all);
 
   void foldUnary(UnaryExpr *unary, bool wraps);
   void foldBinary(BinaryExpr *bin, bool wraps);
@@ -40,6 +44,8 @@ private:
                                   bool wraps);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
 };
 
 }

@@ -7,6 +7,7 @@
 #include "compiler/semantic/flow/condition_facts/condition_facts.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/union_checker/union_checker.h"
 #include "llvm/ADT/STLExtras.h"
@@ -18,6 +19,19 @@ using llvm::isa;
 
 namespace tz {
 
+SwitchChecker::SwitchChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->exprChecker = &all.getExprChecker();
+  this->jumpChecker = &all.getJumpChecker();
+  this->stmtChecker = &all.getStmtChecker();
+  this->typeDeclarer = &all.getTypeDeclarer();
+  this->unionChecker = &all.getUnionChecker();
+  this->binaryChecker = &all.getBinaryChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->conditionFacts = &all.getConditionFacts();
+}
+
 bool SwitchChecker::isConstantTest(const Expr *test) {
   if (auto *unary = dyn_cast<UnaryExpr>(test); unary && unary->op == UnaryOp::Neg) {
     test = unary->operand;
@@ -26,9 +40,6 @@ bool SwitchChecker::isConstantTest(const Expr *test) {
   return isa<IntLitExpr>(test) || isa<FloatLitExpr>(test) || isa<StringLitExpr>(test) ||
          isa<BoolLitExpr>(test) || isa<UndefinedExpr>(test);
 }
-
-SwitchChecker::SwitchChecker(SemanticState &owner)
-    : state(owner) {}
 
 SwitchChecker::ResultValueComparable SwitchChecker::valueType(const Type *type) {
   if (type->isVoid()) {
@@ -86,7 +97,7 @@ SwitchChecker::casesHandled(const SwitchStmt *stmt, llvm::ArrayRef<const Type *>
 }
 
 void SwitchChecker::checkSwitch(SwitchStmt *stmt) {
-  stmt->discriminant = ExprChecker(this->state).checkExpr(stmt->discriminant);
+  stmt->discriminant = this->exprChecker->checkExpr(stmt->discriminant);
   const Type *type = stmt->discriminant->type;
   ResultValueComparable comparable = SwitchChecker::valueType(type);
   if (comparable.isErr()) {
@@ -98,7 +109,7 @@ void SwitchChecker::checkSwitch(SwitchStmt *stmt) {
   for (SwitchCase &c : stmt->cases) {
     all.insert(all.end(), c.body.begin(), c.body.end());
   }
-  TypeDeclarer(this->state).declareTypes(all);
+  this->typeDeclarer->declareTypes(all);
 
   const Type *base = type->nonOptional();
   const Type *hint = base->isNumeric() || base->isDecimal() || base->isJson() ? base
@@ -112,11 +123,11 @@ void SwitchChecker::checkSwitch(SwitchStmt *stmt) {
       continue;
     }
     this->state.getFlowState().replaceFlow(tests);
-    c.test = ExprChecker(this->state).checkExpr(c.test, hint);
+    c.test = this->exprChecker->checkExpr(c.test, hint);
     if (auto *typeOf = dyn_cast<UnaryExpr>(stmt->discriminant);
         typeOf && typeOf->op == UnaryOp::TypeOf && isa<StringLitExpr>(c.test)) {
       BinaryChecker::ResultTypeOfNameKnown known =
-          BinaryChecker(this->state).checkTypeOfName(typeOf->operand, cast<StringLitExpr>(c.test));
+          this->binaryChecker->checkTypeOfName(typeOf->operand, cast<StringLitExpr>(c.test));
       if (known.isErr() &&
           known.error().code != BinaryCheckerCheckTypeOfNameErrorCode::ALREADY_REPORTED) {
         this->state.getDiagnostics().error(c.test->loc(), known.error().message);
@@ -137,25 +148,24 @@ void SwitchChecker::checkSwitch(SwitchStmt *stmt) {
         }
         bool constant = SwitchChecker::isConstantTest(c.test) &&
                         !SwitchChecker::isConstantTest(stmt->discriminant);
-        c.test = TypeRelations(this->state).convert(c.test, common);
+        c.test = this->typeRelations->convert(c.test, common);
         c.compareType = common;
         if (constant) {
           BinaryExpr equal(c.loc, BinaryOp::Eq,
-                           TypeRelations(this->state).convert(stmt->discriminant, common), c.test);
+                           this->typeRelations->convert(stmt->discriminant, common), c.test);
           equal.type = Type::boolTy();
-          ConditionFacts(this->state).addConditionFacts(&equal, whenTrue, whenFalse);
+          this->conditionFacts->addConditionFacts(&equal, whenTrue, whenFalse);
         }
       }
     } else if (testType->isUndefined() && isa<UndefinedExpr>(c.test)) {
       BinaryExpr equal(c.loc, BinaryOp::Eq, stmt->discriminant, c.test);
       equal.type = Type::boolTy();
-      ConditionFacts(this->state).addConditionFacts(&equal, whenTrue, whenFalse);
+      this->conditionFacts->addConditionFacts(&equal, whenTrue, whenFalse);
     }
     matched[i] = whenTrue;
     tests = whenFalse;
   }
-  if (std::optional<std::vector<const Type *>> left =
-          UnionChecker(this->state).unhandledCases(stmt)) {
+  if (std::optional<std::vector<const Type *>> left = this->unionChecker->unhandledCases(stmt)) {
     ResultCasesAllHandled handled = SwitchChecker::casesHandled(stmt, *left);
     if (handled.isOk()) {
       stmt->exhaustive = true;
@@ -165,7 +175,7 @@ void SwitchChecker::checkSwitch(SwitchStmt *stmt) {
     }
   }
 
-  JumpChecker(this->state).pushTarget(JumpTarget::Kind::Switch);
+  this->jumpChecker->pushTarget(JumpTarget::Kind::Switch);
   size_t position = 0;
   Flow fallthrough;
   fallthrough.unreachable = true;
@@ -177,7 +187,7 @@ void SwitchChecker::checkSwitch(SwitchStmt *stmt) {
         FlowChecker::join(fallthrough, c.test ? matched[i] : tests));
     for (Stmt *s : c.body) {
       this->state.getBlockPosition().rememberBlockPosition(all, position++);
-      StmtChecker(this->state).checkStmt(s);
+      this->stmtChecker->checkStmt(s);
     }
     fallthrough = this->state.getFlowState().getFlow();
     for (Stmt *s : c.body) {
@@ -204,7 +214,7 @@ void SwitchChecker::checkSwitch(SwitchStmt *stmt) {
       }
     }
   }
-  Scopes(this->state).closeScope();
+  this->scopes->closeScope();
   this->state.getFlowState().replaceFlow(exit);
 }
 

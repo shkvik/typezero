@@ -7,6 +7,9 @@ using llvm::cast;
 
 namespace tz {
 
+RegexNativeLowerer::RegexNativeLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 bool RegexNativeLowerer::isBack(uint32_t op) {
   return op == RE_CHAR_BACK || op == RE_ANY_BACK || op == RE_ALL_BACK || op == RE_SET_BACK;
 }
@@ -27,9 +30,6 @@ void RegexNativeLowerer::addByte(ByteSet &s, uint32_t c) {
 uint64_t RegexNativeLowerer::counterRange(const CountedLoop &loop) {
   return loop.max == RE_INFINITY ? uint64_t(loop.min) + 1 : uint64_t(loop.max) + 1;
 }
-
-RegexNativeLowerer::RegexNativeLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Constant *RegexNativeLowerer::regexMatcher(const RegexLitExpr *lit) {
   llvm::Constant *&matcher = this->regexMatchers[lit->program];

@@ -11,6 +11,7 @@
 #include "compiler/semantic/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
 #include "compiler/semantic/library/bytes/typed_array_checker/typed_array_checker.h"
 #include "compiler/semantic/library/process/process_checker/process_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "runtime/library/bytes/encodings/encodings.h"
 #include "llvm/ADT/STLExtras.h"
@@ -51,6 +52,20 @@ const llvm::StringLiteral kTypedMethods[] = {
     "reduceRight", "reverse",    "set",      "slice",         "some",    "sort",
     "subarray",    "toReversed", "toSorted", "toString",      "values",  "with"};
 
+}
+
+BytesChecker::BytesChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->indexProofs = &all.getIndexProofs();
+  this->literalTypes = &all.getLiteralTypes();
+  this->bufferChecker = &all.getBufferChecker();
+  this->memberChecker = &all.getMemberChecker();
+  this->constantFolder = &all.getConstantFolder();
+  this->processChecker = &all.getProcessChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->typedArrayChecker = &all.getTypedArrayChecker();
 }
 
 std::optional<std::u16string> BytesChecker::literalText(const Expr *e) {
@@ -94,9 +109,6 @@ BytesChecker::ResultBytesIndexing BytesChecker::bytesIndexing(const Type *type) 
   return ok(type);
 }
 
-BytesChecker::BytesChecker(SemanticState &owner)
-    : state(owner) {}
-
 const Type *BytesChecker::bytesTypeNamed(llvm::StringRef name) {
   for (const auto &[n, kind] : kNames) {
     if (n == name) {
@@ -109,7 +121,7 @@ const Type *BytesChecker::bytesTypeNamed(llvm::StringRef name) {
 
 Expr *BytesChecker::checkBytesIndex(IndexExpr *index) {
   const Type *type = index->object->type;
-  index->index = MemberChecker(this->state).checkPosition(index->index);
+  index->index = this->memberChecker->checkPosition(index->index);
   ResultBytesIndexing indexing = BytesChecker::bytesIndexing(type);
   if (indexing.isErr()) {
     this->state.getDiagnostics().error(index->loc(), indexing.error().message);
@@ -118,7 +130,7 @@ Expr *BytesChecker::checkBytesIndex(IndexExpr *index) {
   if (index->index->type->isError()) {
     return index;
   }
-  bool inRange = IndexProofs(this->state).provesInBounds(index->object, index->index, false);
+  bool inRange = this->indexProofs->provesInBounds(index->object, index->index, false);
   if (ElementIndex *element = index->form.as<ElementIndex>()) {
     element->mayBeOutOfRange = !inRange;
   }
@@ -134,8 +146,8 @@ void BytesChecker::checkBytesStore(IndexExpr *index, const Expr *value) {
   }
   std::string object = BytesCheckHelpers::valueText(index->object);
   std::string position = BytesCheckHelpers::valueText(index->index);
-  if (!IndexProofs(this->state).provesInBounds(index->object, index->index, false)) {
-    std::optional<int64_t> at = ConstantFolder(this->state).intConstant(index->index);
+  if (!this->indexProofs->provesInBounds(index->object, index->index, false)) {
+    std::optional<int64_t> at = this->constantFolder->intConstant(index->index);
     std::string message = ErrorTextBytesIndex::store(target->name(), object, position, at);
     this->state.getDiagnostics().error(index->loc(), message);
     return;
@@ -146,8 +158,8 @@ Expr *BytesChecker::checkBytesMember(MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
   auto read = [&](Builtin builtin, const Type *result, std::vector<Expr *> args = {}) {
-    return ProcessChecker(this->state)
-        .builtinCall(member->loc(), member, builtin, std::move(args), result);
+    return this->processChecker->builtinCall(member->loc(), member, builtin, std::move(args),
+                                             result);
   };
   auto constant = [&](Expr *value) -> Expr * {
     if (isa<NameExpr>(member->object)) {
@@ -282,20 +294,19 @@ Expr *BytesChecker::checkBytesUnionMember(MemberExpr *member) {
     return member;
   }
   if (name == "buffer") {
-    return ProcessChecker(this->state)
-        .builtinCall(member->loc(), member, Builtin::BytesBuffer, {},
-                     Type::bytesType(Bytes::ArrayBuffer));
+    return this->processChecker->builtinCall(member->loc(), member, Builtin::BytesBuffer, {},
+                                             Type::bytesType(Bytes::ArrayBuffer));
   }
 
-  return ProcessChecker(this->state)
-      .builtinCall(member->loc(), member,
-                   name == "byteLength" ? Builtin::BytesByteLength : Builtin::BytesByteOffset, {},
-                   Type::intTy());
+  return this->processChecker->builtinCall(member->loc(), member,
+                                           name == "byteLength" ? Builtin::BytesByteLength
+                                                                : Builtin::BytesByteOffset,
+                                           {}, Type::intTy());
 }
 
 Expr *BytesChecker::checkBytesStaticMember(MemberExpr *member) {
   auto *object = dyn_cast<NameExpr>(member->object);
-  if (!object || !CallChecker(this->state).isGlobalName(object, object->name)) {
+  if (!object || !this->callChecker->isGlobalName(object, object->name)) {
     return nullptr;
   }
   const Type *type = BytesChecker::bytesTypeNamed(object->name);
@@ -326,11 +337,11 @@ Expr *BytesChecker::bytesToString(Expr *expr) {
     if (type->isBuffer()) {
       auto *encoding = this->state.getAst().make<IntLitExpr>(expr->loc(), Utf8);
       encoding->type = Type::intTy();
-      return ProcessChecker(this->state)
-          .builtinCall(expr->loc(), callee, Builtin::BufferToString, {encoding}, Type::string());
+      return this->processChecker->builtinCall(expr->loc(), callee, Builtin::BufferToString,
+                                               {encoding}, Type::string());
     }
-    return ProcessChecker(this->state)
-        .builtinCall(expr->loc(), callee, Builtin::BytesJoin, {}, Type::string());
+    return this->processChecker->builtinCall(expr->loc(), callee, Builtin::BytesJoin, {},
+                                             Type::string());
   }
   std::string message =
       ErrorTextBytesString::noText(type->name(), type->bytes() == Bytes::ArrayBuffer);
@@ -352,11 +363,11 @@ Expr *BytesChecker::checkBufferEncoding(Expr *arg) {
     lit->type = Type::intTy();
     return lit;
   }
-  arg = ArgumentChecker(this->state).checkArg(arg, Type::string());
-  if (arg->type->isError() || IndexProofs(this->state).exempt(arg->loc())) {
+  arg = this->argumentChecker->checkArg(arg, Type::string());
+  if (arg->type->isError() || this->indexProofs->exempt(arg->loc())) {
     return arg;
   }
-  std::optional<std::vector<std::string>> names = LiteralTypes(this->state).knownTexts(arg);
+  std::optional<std::vector<std::string>> names = this->literalTypes->knownTexts(arg);
   if (!names) {
     std::string message = ErrorTextBufferEncoding::notKnown();
     this->state.getDiagnostics().error(arg->loc(), message);
@@ -376,28 +387,27 @@ Expr *BytesChecker::checkBufferEncoding(Expr *arg) {
 Expr *BytesChecker::checkBytesMethod(CallExpr *call, MemberExpr *member, const Type *expected) {
   const Type *type = member->object->type;
   call->type = Type::error();
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return call;
   }
   switch (type->bytes()) {
   case Bytes::ArrayBuffer: {
     llvm::StringRef name = member->name;
     if (name == "slice") {
-      ArgumentChecker::ResultArityMatches arity =
-          ArgumentChecker(this->state).checkArity(call, 0, 2);
+      ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 2);
       if (arity.isErr()) {
         this->state.getDiagnostics().error(member->loc(), arity.error().message);
         return call;
       }
       for (Expr *&arg : call->args) {
-        arg = MemberChecker(this->state).checkPosition(arg);
+        arg = this->memberChecker->checkPosition(arg);
       }
       call->target = BuiltinCall{.builtin = Builtin::ArrayBufferSlice};
       call->type = type;
       return call;
     }
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     std::string message = name == "resize" || name == "transfer" || name == "transferToFixedLength"
                               ? ErrorTextArrayBuffer::notYet(name)
@@ -406,21 +416,21 @@ Expr *BytesChecker::checkBytesMethod(CallExpr *call, MemberExpr *member, const T
     return call;
   }
   case Bytes::DataView:
-    return TypedArrayChecker(this->state).checkDataViewMethod(call, member);
+    return this->typedArrayChecker->checkDataViewMethod(call, member);
   case Bytes::TextEncoder:
   case Bytes::TextDecoder:
   case Bytes::FatalTextDecoder:
-    return BufferChecker(this->state).checkTextMethod(call, member);
+    return this->bufferChecker->checkTextMethod(call, member);
   default:
     break;
   }
   if (type->isBuffer()) {
-    if (Expr *result = BufferChecker(this->state).checkBufferMethod(call, member)) {
+    if (Expr *result = this->bufferChecker->checkBufferMethod(call, member)) {
       return result;
     }
   }
 
-  return TypedArrayChecker(this->state).checkTypedArrayMethod(call, member, expected);
+  return this->typedArrayChecker->checkTypedArrayMethod(call, member, expected);
 }
 
 }

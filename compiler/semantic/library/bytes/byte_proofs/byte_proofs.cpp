@@ -2,6 +2,7 @@
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
 #include "compiler/semantic/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "runtime/library/bytes/encodings/encodings.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -11,6 +12,12 @@ using llvm::cast;
 using llvm::dyn_cast;
 
 namespace tz {
+
+ByteProofs::ByteProofs(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->indexProofs = &all.getIndexProofs();
+  this->constantFolder = &all.getConstantFolder();
+}
 
 const VarSymbol *ByteProofs::viewOwner(const Expr *expr, llvm::StringRef field, const Type **type) {
   if (auto *call = dyn_cast<CallExpr>(expr);
@@ -120,9 +127,6 @@ int64_t ByteProofs::floorShift(int64_t v, int64_t n) {
   return v >= 0 ? v >> n : -((-v + (int64_t(1) << n) - 1) >> n);
 }
 
-ByteProofs::ByteProofs(SemanticState &owner)
-    : state(owner) {}
-
 IntegerRange ByteProofs::valueRange(const Expr *e) const {
   Range r = this->computedRange(e);
   if (!e->type || !e->type->nonOptional()->isInteger()) {
@@ -143,7 +147,7 @@ IntegerRange ByteProofs::computedRange(const Expr *e) const {
   if (!e->type || !e->type->nonOptional()->isInteger()) {
     return {};
   }
-  if (std::optional<int64_t> c = ConstantFolder(this->state).intConstant(e)) {
+  if (std::optional<int64_t> c = this->constantFolder->intConstant(e)) {
     return ByteProofs::exact(*c);
   }
   switch (e->kind()) {
@@ -284,7 +288,7 @@ IntegerRange ByteProofs::computedRange(const Expr *e) const {
 }
 
 bool ByteProofs::provesFits(const Expr *expr, int64_t lo, int64_t hi) const {
-  return IndexProofs(this->state).provesBetween(expr, lo, hi);
+  return this->indexProofs->provesBetween(expr, lo, hi);
 }
 
 ByteProofs::ResultValueFitsType ByteProofs::valueFits(const Expr *value, const Type *target,
@@ -300,7 +304,7 @@ ByteProofs::ResultValueFitsType ByteProofs::valueFits(const Expr *value, const T
     return ok(value);
   }
   std::string range = ErrorTextBytes::range(lo, hi);
-  if (std::optional<int64_t> c = ConstantFolder(this->state).intConstant(value)) {
+  if (std::optional<int64_t> c = this->constantFolder->intConstant(value)) {
     std::string hint = BytesCheckHelpers::wrapHint(kind, std::to_string(*c));
     int64_t stored = ByteProofs::wrapped(kind, *c);
     std::string message = ErrorTextByteFit::constant(*c, what, range, stored, hint);
@@ -351,10 +355,10 @@ ByteProofs::ResultBufferAligned ByteProofs::bufferAligned(std::optional<int64_t>
 void ByteProofs::checkView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size,
                            llvm::StringRef what) {
   if (ByteProofs::sameView(buffer, offset, length, size) ||
-      IndexProofs(this->state).exempt(buffer->loc(), buffer)) {
+      this->indexProofs->exempt(buffer->loc(), buffer)) {
     return;
   }
-  IndexProofs proofs(this->state);
+  IndexProofs &proofs = *this->indexProofs;
   if (offset) {
     std::string offsetWhat = ErrorTextByteView::offsetOf(what);
     IndexProofs::ResultUpToWasProven upTo = proofs.requireUpTo(offset, buffer, 0, offsetWhat);
@@ -366,7 +370,7 @@ void ByteProofs::checkView(const Expr *buffer, const Expr *offset, const Expr *l
     }
   }
   std::optional<int64_t> start =
-      offset ? ConstantFolder(this->state).intConstant(offset) : std::optional<int64_t>(0);
+      offset ? this->constantFolder->intConstant(offset) : std::optional<int64_t>(0);
   ResultOffsetAligned aligned = ByteProofs::offsetAligned(start, size, what);
   if (aligned.isErr()) {
     this->state.getDiagnostics().error(offset->loc(), aligned.error().message);
@@ -407,9 +411,8 @@ void ByteProofs::checkView(const Expr *buffer, const Expr *offset, const Expr *l
 }
 
 bool ByteProofs::provesWithin(const Expr *object, const Expr *offset, int64_t size) const {
-  std::optional<Linear> at =
-      offset ? IndexProofs(this->state).linear(offset) : Linear{Term::zero(), 0};
-  std::optional<Linear> length = IndexProofs(this->state).lengthOf(object);
+  std::optional<Linear> at = offset ? this->indexProofs->linear(offset) : Linear{Term::zero(), 0};
+  std::optional<Linear> length = this->indexProofs->lengthOf(object);
   if (!at || !length) {
     return false;
   }

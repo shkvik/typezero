@@ -7,8 +7,9 @@
 
 namespace tz {
 
-WideWrites::WideWrites(SemanticExternalFacade &owner)
-    : engine(owner) {}
+WideWrites::WideWrites(SemanticExternalFacade &owner, Diagnostics &target)
+    : engine(owner),
+      diagnostics(target) {}
 
 bool WideWrites::breaks(const Write &write, const NarrowedPart &narrowing, int depth) {
   bool otherDepth = depth >= 0 && narrowing.depth != depth;
@@ -21,7 +22,7 @@ bool WideWrites::breaks(const Write &write, const NarrowedPart &narrowing, int d
   }
 
   return !narrowing.narrow || !write.value ||
-         !SemanticExternalFacade::isImplicitlyConvertible(write.value, narrowing.narrow);
+         !SemanticTypes::isImplicitlyConvertible(write.value, narrowing.narrow);
 }
 
 bool WideWrites::mayBe(const Write &write, const NarrowedPart &narrowing) {
@@ -34,10 +35,10 @@ bool WideWrites::mayBe(const Write &write, const NarrowedPart &narrowing) {
   if (narrowing.element) {
     return !through->isArray() || !narrowing.narrow ||
            TypeQueries::mentionsParam(through->inner()) ||
-           SemanticExternalFacade::isImplicitlyConvertible(narrowing.narrow, through->inner());
+           SemanticTypes::isImplicitlyConvertible(narrowing.narrow, through->inner());
   }
 
-  return SemanticExternalFacade::isImplicitlyConvertible(narrowing.owner, through);
+  return SemanticTypes::isImplicitlyConvertible(narrowing.owner, through);
 }
 
 bool WideWrites::mayHold(const Type *type, const Type *value, int depth) {
@@ -51,7 +52,7 @@ bool WideWrites::mayHold(const Type *type, const Type *value, int depth) {
     return true;
   }
   if (depth == 0) {
-    return SemanticExternalFacade::isImplicitlyConvertible(value, type);
+    return SemanticTypes::isImplicitlyConvertible(value, type);
   }
   if (!Flows::holdsReferences(type)) {
     return false;
@@ -225,7 +226,7 @@ WideWrites::WriteBreak WideWrites::breakingWrite(const FlowGraph &graph, const W
 }
 
 std::string WideWrites::writeLine(llvm::SMLoc write, llvm::SMLoc at) const {
-  llvm::SourceMgr &sources = this->engine.getDiagnostics().sourceMgr();
+  llvm::SourceMgr &sources = this->diagnostics.sourceMgr();
   unsigned id = sources.FindBufferContainingLoc(write);
   if (!id) {
     return ErrorTextWidening::someLine();
@@ -291,10 +292,10 @@ void WideWrites::checkWidenings(SourceFile &file) {
     return;
   }
   auto narrowings = [](const Type *from, const Type *to) {
-    return SemanticExternalFacade::narrowingsOf(from, to);
+    return SemanticTypes::narrowingsOf(from, to);
   };
   auto convertible = [](const Type *from, const Type *to) {
-    return SemanticExternalFacade::isImplicitlyConvertible(from, to);
+    return SemanticTypes::isImplicitlyConvertible(from, to);
   };
   Flows flows(widenings, narrowings, convertible);
   flows.walkProgram(file);
@@ -315,8 +316,8 @@ void WideWrites::checkWidenings(SourceFile &file) {
     if (safe.isErr()) {
       const Type *through = breaking.write->through ? breaking.write->through : conv.to;
       std::string note = ErrorTextWidening::through(through);
-      this->engine.getDiagnostics().error(conv.loc, safe.error().message);
-      this->engine.getDiagnostics().note(breaking.write->loc, note);
+      this->diagnostics.error(conv.loc, safe.error().message);
+      this->diagnostics.note(breaking.write->loc, note);
     }
   }
 }

@@ -7,6 +7,7 @@
 #include "compiler/semantic/generics/type_params/type_params.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/conditional_types/conditional_types.h"
 #include "compiler/semantic/types/type_operators/type_operators.h"
 #include "compiler/semantic/types/typeops_check_helpers/typeops_check_helpers.h"
@@ -19,24 +20,33 @@ using llvm::isa;
 
 namespace tz {
 
+UtilityTypes::UtilityTypes(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->typeParams = &all.getTypeParams();
+  this->exprChecker = &all.getExprChecker();
+  this->typeDeclarer = &all.getTypeDeclarer();
+  this->typeOperators = &all.getTypeOperators();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->conditionalTypes = &all.getConditionalTypes();
+  this->classValueChecker = &all.getClassValueChecker();
+}
+
 llvm::ArrayRef<const Type *> UtilityTypes::membersOf(const Type *&type) {
   return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
 }
 
-UtilityTypes::UtilityTypes(SemanticState &owner)
-    : state(owner) {}
-
 const Type *UtilityTypes::functionValueType(FuncSymbol *fn) {
   if (!fn->isGeneric()) {
-    return ReturnInferrer(this->state).functionType(fn);
+    return this->returnInferrer->functionType(fn);
   }
   if (fn->typeDefaults.size() != fn->typeParams.size() ||
       llvm::is_contained(fn->typeDefaults, nullptr)) {
     return nullptr;
   }
-  const Type *type = ReturnInferrer(this->state).functionType(fn);
+  const Type *type = this->returnInferrer->functionType(fn);
 
-  return TypeParams(this->state).substitute(type, fn->typeParams, fn->typeDefaults);
+  return this->typeParams->substitute(type, fn->typeParams, fn->typeDefaults);
 }
 
 const Type *UtilityTypes::importedValueType(Module *from, llvm::StringRef name) {
@@ -45,7 +55,7 @@ const Type *UtilityTypes::importedValueType(Module *from, llvm::StringRef name) 
       return fn->sym ? this->functionValueType(fn->sym) : nullptr;
     }
     if (auto *cls = dyn_cast<ClassDecl>(item); cls && cls->name == name) {
-      return cls->isGeneric() ? nullptr : ClassValueChecker(this->state).classValueType(cls);
+      return cls->isGeneric() ? nullptr : this->classValueChecker->classValueType(cls);
     }
     if (auto *decl = dyn_cast<VarDeclStmt>(item)) {
       for (const VarDeclarator &d : decl->decls) {
@@ -78,7 +88,7 @@ const UtilityTypes::Utility *UtilityTypes::utilityNamed(llvm::StringRef name) {
 
 UtilityTypes::ResultUtilityApplied UtilityTypes::resolveUtilityType(const TypeRef &ref) {
   const Utility *utility = UtilityTypes::utilityNamed(ref.name);
-  if (!utility || TypeDeclarer(this->state).lookupType(ref.name)) {
+  if (!utility || this->typeDeclarer->lookupType(ref.name)) {
     return err(UtilityTypesResolveUtilityTypeError{
         .code = UtilityTypesResolveUtilityTypeErrorCode::NOT_A_UTILITY,
         .message = "",
@@ -98,10 +108,8 @@ UtilityTypes::ResultUtilityApplied UtilityTypes::resolveUtilityType(const TypeRe
               utility->op == TypeOp::Capitalize || utility->op == TypeOp::Uncapitalize;
   std::vector<const Type *> operands;
   for (const TypeRef &arg : ref.args) {
-    const Type *signature =
-        function ? ConditionalTypes(this->state).signatureForUtility(arg) : nullptr;
-    operands.push_back(signature ? signature
-                                 : ConditionalTypes(this->state).resolveTypeArgument(arg));
+    const Type *signature = function ? this->conditionalTypes->signatureForUtility(arg) : nullptr;
+    operands.push_back(signature ? signature : this->conditionalTypes->resolveTypeArgument(arg));
     if (operands.back()->isError()) {
       return ok(operands.back());
     }
@@ -129,7 +137,7 @@ UtilityTypes::ResultUtilityApplied UtilityTypes::resolveUtilityType(const TypeRe
   }
 
   const Type *evaluated =
-      TypeOperators(this->state).evalTypeOp(Type::typeOp(utility->op, operands), operands);
+      this->typeOperators->evalTypeOp(Type::typeOp(utility->op, operands), operands);
 
   return ok(evaluated);
 }
@@ -148,7 +156,7 @@ UtilityTypes::ResultGenericIndexed UtilityTypes::checkGenericIndex(IndexExpr *in
   }
   if (!open) {
     auto *name = cast<NameExpr>(index->index);
-    VarSymbol *var = Scopes(this->state).lookup(name->name).var();
+    VarSymbol *var = this->scopes->lookup(name->name).var();
     if (!var || !var->type || !genericKey(var->type)) {
       return err(UtilityTypesCheckGenericIndexError{
           .code = UtilityTypesCheckGenericIndexErrorCode::NOT_A_GENERIC_INDEX,
@@ -156,7 +164,7 @@ UtilityTypes::ResultGenericIndexed UtilityTypes::checkGenericIndex(IndexExpr *in
       });
     }
   }
-  index->index = ExprChecker(this->state).checkExpr(index->index);
+  index->index = this->exprChecker->checkExpr(index->index);
   const Type *key = index->index->type;
   if (key->isError()) {
     return ok(index);
@@ -169,8 +177,7 @@ UtilityTypes::ResultGenericIndexed UtilityTypes::checkGenericIndex(IndexExpr *in
         .message = message,
     });
   }
-  index->type =
-      TypeOperators(this->state).evalTypeOp(Type::indexedAccess(object, key), {object, key});
+  index->type = this->typeOperators->evalTypeOp(Type::indexedAccess(object, key), {object, key});
 
   return ok(index);
 }

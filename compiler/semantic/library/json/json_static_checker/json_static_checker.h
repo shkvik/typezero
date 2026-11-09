@@ -6,9 +6,18 @@
 
 namespace tz {
 
+class SemanticParts;
+class Prelude;
+class CallChecker;
+class ExprChecker;
+class LibraryCalls;
+class TypeRelations;
+class ArgumentChecker;
+class BufferStaticChecker;
+
 class JsonStaticChecker {
 public:
-  explicit JsonStaticChecker(SemanticState &owner);
+  JsonStaticChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkJsonStatic(CallExpr *call, MemberExpr *member);
   Expr *checkJsonGlobal(CallExpr *call, NameExpr *name);
@@ -29,6 +38,13 @@ private:
   void checkConstantJson(const Expr *arg);
 
   SemanticState &state;
+  Prelude *prelude = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  LibraryCalls *libraryCalls = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  BufferStaticChecker *bufferStaticChecker = nullptr;
 };
 
 }

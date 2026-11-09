@@ -6,9 +6,14 @@
 
 namespace tz {
 
+class SemanticParts;
+class FsErrors;
+class FsChecker;
+class ExprChecker;
+
 class FsPromisesChecker {
 public:
-  explicit FsPromisesChecker(SemanticState &owner);
+  FsPromisesChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkFsPromisesCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
 
@@ -18,6 +23,9 @@ private:
   static ResultPromiseFunction promiseFunction(llvm::StringRef fn);
 
   SemanticState &state;
+  FsErrors *fsErrors = nullptr;
+  FsChecker *fsChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
 };
 
 }

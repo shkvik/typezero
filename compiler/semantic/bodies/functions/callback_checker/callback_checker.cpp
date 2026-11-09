@@ -14,6 +14,7 @@
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/generics/generic_instantiator/generic_instantiator.h"
 #include "compiler/semantic/library/decimal/decimal_checker/decimal_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
@@ -23,8 +24,22 @@ using llvm::isa;
 
 namespace tz {
 
-CallbackChecker::CallbackChecker(SemanticState &owner)
-    : state(owner) {}
+CallbackChecker::CallbackChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->indexProofs = &all.getIndexProofs();
+  this->typeRelations = &all.getTypeRelations();
+  this->closureChecker = &all.getClosureChecker();
+  this->conditionFacts = &all.getConditionFacts();
+  this->constantFolder = &all.getConstantFolder();
+  this->genericChecker = &all.getGenericChecker();
+  this->nestedFunctions = &all.getNestedFunctions();
+  this->predicateChecker = &all.getPredicateChecker();
+  this->genericInstantiator = &all.getGenericInstantiator();
+  this->functionValueChecker = &all.getFunctionValueChecker();
+}
 
 CallbackChecker::ResultFunctionIsPassed CallbackChecker::functionGiven(const Type *type,
                                                                        llvm::StringRef method) {
@@ -151,9 +166,9 @@ Expr *CallbackChecker::checkFunctionArg(Expr *arg, const Signature &expected, un
                                         llvm::StringRef method) {
   if (auto *fe = dyn_cast<FunctionExpr>(arg)) {
     fe->fn->nonEscaping = true;
-    Expr *checked = ClosureChecker(this->state).checkFunctionExpr(fe, &expected);
+    Expr *checked = this->closureChecker->checkFunctionExpr(fe, &expected);
     FunctionValueChecker::ResultAsyncCallbackOk awaited =
-        FunctionValueChecker(this->state).asyncCallback(checked, expected, method);
+        this->functionValueChecker->asyncCallback(checked, expected, method);
     if (awaited.isErr()) {
       this->state.getDiagnostics().error(checked->loc(), awaited.error().message);
       checked->type = Type::error();
@@ -161,16 +176,16 @@ Expr *CallbackChecker::checkFunctionArg(Expr *arg, const Signature &expected, un
     return checked;
   }
   if (FunctionExpr *wrapper =
-          FunctionValueChecker(this->state).builtinFunctionValue(arg, expected, primary, method)) {
+          this->functionValueChecker->builtinFunctionValue(arg, expected, primary, method)) {
     wrapper->fn->nonEscaping = true;
-    return ClosureChecker(this->state).checkFunctionExpr(wrapper, &expected);
+    return this->closureChecker->checkFunctionExpr(wrapper, &expected);
   }
   this->state.getFunctionStack().enterCallback(isa<MemberExpr>(arg) ? &expected : nullptr);
   auto *named = dyn_cast<NameExpr>(arg);
-  if (FuncSymbol *generic = named ? GenericChecker(this->state).genericNamed(named) : nullptr) {
-    arg = GenericInstantiator(this->state).checkGenericValue(named, generic, &expected);
+  if (FuncSymbol *generic = named ? this->genericChecker->genericNamed(named) : nullptr) {
+    arg = this->genericInstantiator->checkGenericValue(named, generic, &expected);
   } else {
-    arg = ExprChecker(this->state).checkExpr(arg);
+    arg = this->exprChecker->checkExpr(arg);
   }
   this->state.getFunctionStack().leaveCallback();
   const Type *type = arg->type;
@@ -182,7 +197,7 @@ Expr *CallbackChecker::checkFunctionArg(Expr *arg, const Signature &expected, un
     this->state.getDiagnostics().error(arg->loc(), given.error().message);
     return arg;
   }
-  FunctionDecl *known = NestedFunctions(this->state).namedFunction(arg);
+  FunctionDecl *known = this->nestedFunctions->namedFunction(arg);
   llvm::StringRef knownName = known ? known->name : llvm::StringRef();
   std::string name = ErrorTextFunctionName::quoted(knownName);
   ResultWithoutRestParam fixed = CallbackChecker::fixedParams(type, name);
@@ -205,7 +220,7 @@ Expr *CallbackChecker::checkFunctionArg(Expr *arg, const Signature &expected, un
     return arg;
   }
   FunctionValueChecker::ResultAsyncCallbackOk awaited =
-      FunctionValueChecker(this->state).asyncCallback(arg, expected, method);
+      this->functionValueChecker->asyncCallback(arg, expected, method);
   if (awaited.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), awaited.error().message);
     arg->type = Type::error();
@@ -258,7 +273,7 @@ bool CallbackChecker::keepsDefined(const Expr *callback) const {
       cond = conv->operand;
     }
     Flow whenTrue, whenFalse;
-    ConditionFacts(this->state).addConditionFacts(cond, whenTrue, whenFalse);
+    this->conditionFacts->addConditionFacts(cond, whenTrue, whenFalse);
 
     return value ? whenTrue.defined : whenFalse.defined;
   };
@@ -390,7 +405,7 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
     llvm::SMLoc at = thisArg ? call->args[1]->loc() : member->loc();
     this->state.getDiagnostics().error(at, extra.error().message);
     for (size_t i = maxArgs; i < count; ++i) {
-      call->args[i] = ExprChecker(this->state).checkExpr(call->args[i]);
+      call->args[i] = this->exprChecker->checkExpr(call->args[i]);
     }
     call->args.resize(maxArgs);
     count = maxArgs;
@@ -401,7 +416,7 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
   unsigned primary = 1;
   const Type *accumulator = element;
   bool someValue =
-      kind != Reduce || count == 2 || IndexProofs(this->state).provesNotEmpty(member->object);
+      kind != Reduce || count == 2 || this->indexProofs->provesNotEmpty(member->object);
   switch (kind) {
   case ForEach:
     sig.voidResult = true;
@@ -434,8 +449,8 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
       const Type *elementType = GenericChecker::apparentType(element);
       bool decimalStart = elementType->isDecimal() && DecimalChecker::isLiteralTree(init);
       bool wide = elementType->isInt() || elementType->isFloat();
-      init = ExprChecker(this->state)
-                 .checkExpr(init, decimalStart || (literal && wide) ? elementType : nullptr);
+      init = this->exprChecker->checkExpr(init, decimalStart || (literal && wide) ? elementType
+                                                                                  : nullptr);
       accumulator = init->type;
       ResultInitialValueType initial = CallbackChecker::initialValue(accumulator, name);
       if (initial.isErr()) {
@@ -450,7 +465,7 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
     break;
   }
   if (accumulator->isError()) {
-    call->args[0] = ExprChecker(this->state).checkExpr(call->args[0]);
+    call->args[0] = this->exprChecker->checkExpr(call->args[0]);
     return call;
   }
   if (kind == Sort) {
@@ -461,14 +476,14 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
     sig.params = {element, Type::intTy(), arrayType};
   }
 
-  bool isBoolean = CallChecker(this->state).isGlobalName(call->args[0], "Boolean");
+  bool isBoolean = this->callChecker->isGlobalName(call->args[0], "Boolean");
   if (auto *fe = dyn_cast<FunctionExpr>(call->args[0]); fe && kind != Sort) {
     this->state.getCallbackFacts().rememberIndexCallback(fe->fn, kind == Reduce ? 2 : 1);
     if (auto *lit = dyn_cast<ArrayLitExpr>(member->object); lit && element->isInt()) {
       std::optional<int64_t> lo, hi;
       for (const ArrayLitExpr::Element &e : lit->elements) {
         std::optional<int64_t> c =
-            e.spread || e.hole ? std::nullopt : ConstantFolder(this->state).intConstant(e.expr);
+            e.spread || e.hole ? std::nullopt : this->constantFolder->intConstant(e.expr);
         if (!c) {
           lo.reset();
           break;
@@ -494,7 +509,7 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
   call->args[0] = this->checkFunctionArg(call->args[0], sig, primary, name);
   const Type *callback = call->args[0]->type;
   call->target = BuiltinCall{.builtin = method ? method->builtin : Builtin::ArrSortWith};
-  FlowChecker(this->state).calledFunction();
+  this->flowChecker->calledFunction();
   if (!callback->isFunction()) {
     return call;
   }
@@ -518,7 +533,7 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
     break;
   }
   case Filter:
-    if (const Type *kept = PredicateChecker(this->state).filteredType(call->args[0], element)) {
+    if (const Type *kept = this->predicateChecker->filteredType(call->args[0], element)) {
       call->type = Type::array(kept);
     } else {
       call->type = element->isOptional() && (isBoolean || this->keepsDefined(call->args[0]))
@@ -530,7 +545,7 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
     call->type = someValue ? accumulator : Type::optional(accumulator);
     call->mayBeOutOfRange = !someValue;
     if (count == 2 && call->args.size() == 2) {
-      call->args[1] = TypeRelations(this->state).coerce(call->args[1], accumulator);
+      call->args[1] = this->typeRelations->coerce(call->args[1], accumulator);
     }
     break;
   case Find:

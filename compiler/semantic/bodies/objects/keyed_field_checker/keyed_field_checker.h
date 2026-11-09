@@ -6,11 +6,19 @@
 
 namespace tz {
 
+class SemanticParts;
+class FieldFacts;
+class ExprChecker;
+class LiteralTypes;
+class ObjectChecker;
+class TypeRelations;
+class ConstantFolder;
+
 class KeyedFieldChecker {
 public:
   using ResultKeyedFieldRead = Result<Expr *, KeyedFieldCheckerCheckKeyedFieldError>;
 
-  explicit KeyedFieldChecker(SemanticState &owner);
+  KeyedFieldChecker(SemanticState &owner, SemanticParts &all);
 
   std::optional<std::string> constantKey(const Expr *key) const;
   void keyNames(const Expr *key, llvm::function_ref<void(llvm::StringRef)> each) const;
@@ -22,6 +30,12 @@ private:
   static bool isInherited(llvm::StringRef name);
 
   SemanticState &state;
+  FieldFacts *fieldFacts = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  LiteralTypes *literalTypes = nullptr;
+  ObjectChecker *objectChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ConstantFolder *constantFolder = nullptr;
 };
 
 }

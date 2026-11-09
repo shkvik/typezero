@@ -6,9 +6,17 @@
 
 namespace tz {
 
+class SemanticParts;
+class ChunkTypes;
+class ExprChecker;
+class LibraryCalls;
+class EventMapInference;
+class MethodCallChecker;
+class GenericClassInstantiator;
+
 class StreamNewChecker {
 public:
-  explicit StreamNewChecker(SemanticState &owner);
+  StreamNewChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkStreamNew(NewExpr *expr, ClassDecl *generic, const Type *expected);
 
@@ -18,6 +26,12 @@ private:
   static ResultConcreteStream concreteStream(llvm::StringRef name, bool readable, bool writable);
 
   SemanticState &state;
+  ChunkTypes *chunkTypes = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  LibraryCalls *libraryCalls = nullptr;
+  EventMapInference *eventMapInference = nullptr;
+  MethodCallChecker *methodCallChecker = nullptr;
+  GenericClassInstantiator *genericClassInstantiator = nullptr;
 };
 
 }

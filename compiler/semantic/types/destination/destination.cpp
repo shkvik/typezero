@@ -1,6 +1,7 @@
 #include "compiler/semantic/types/destination/destination.h"
 #include "compiler/semantic/bodies/iterators/iterable_checker/iterable_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/destination_scan/destination_scan.h"
 #include "compiler/semantic/types/destination_scanner/destination_scanner.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
@@ -14,8 +15,14 @@ using llvm::isa;
 
 namespace tz {
 
-Destination::Destination(SemanticState &owner)
-    : state(owner) {}
+Destination::Destination(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->literalTypes = &all.getLiteralTypes();
+  this->typeResolver = &all.getTypeResolver();
+  this->iterableChecker = &all.getIterableChecker();
+  this->destinationScanner = &all.getDestinationScanner();
+}
 
 void Destination::forEachReturn(const Stmt *stmt, llvm::function_ref<void(const Expr *)> each) {
   if (!stmt) {
@@ -116,7 +123,7 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
   type = type->nonOptional();
   if (type->isUnion()) {
     if (auto *lit = dyn_cast<ObjectLitExpr>(expr)) {
-      if (const Type *member = LiteralTypes(this->state).literalMember(lit, type)) {
+      if (const Type *member = this->literalTypes->literalMember(lit, type)) {
         return this->literalFits(expr, member);
       }
     }
@@ -133,7 +140,7 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
     for (const ObjectLitExpr::Property &prop : lit->props) {
       if (prop.spread()) {
         auto *name = dyn_cast<NameExpr>(prop.value);
-        const VarSymbol *var = name ? Scopes(this->state).lookup(name->name).var() : nullptr;
+        const VarSymbol *var = name ? this->scopes->lookup(name->name).var() : nullptr;
         if (!var || !var->type || !var->type->isObject() || var->type->isTuple()) {
           return false;
         }
@@ -226,18 +233,15 @@ const Type *Destination::literalDestination(const VarDeclarator &d,
   bool visible = true;
   for (const VarDeclarator &next : later) {
     if (next.init) {
-      DestinationScanner(this->state)
-          .scanDestinations(
-              next.init,
-              next.typeAnn ? TypeResolver(this->state).resolveType(*next.typeAnn, false) : nullptr,
-              scan);
+      this->destinationScanner->scanDestinations(
+          next.init, next.typeAnn ? this->typeResolver->resolveType(*next.typeAnn, false) : nullptr,
+          scan);
     }
     if (next.name == d.name) {
       visible = false;
     }
-    scan.declare(next.name, next.typeAnn
-                                ? TypeResolver(this->state).resolveType(*next.typeAnn, false)
-                                : nullptr);
+    scan.declare(next.name,
+                 next.typeAnn ? this->typeResolver->resolveType(*next.typeAnn, false) : nullptr);
   }
   std::vector<const Stmt *> following = this->state.getBlockPosition().takeFollowing();
   for (const Stmt *stmt : following) {
@@ -249,7 +253,7 @@ const Type *Destination::literalDestination(const VarDeclarator &d,
         llvm::any_of(decl->decls, [&](const VarDeclarator &v) { return v.name == d.name; })) {
       visible = false;
     }
-    DestinationScanner(this->state).scanDestinations(stmt, scan);
+    this->destinationScanner->scanDestinations(stmt, scan);
   }
   this->state.getDiagnostics().setMuted(muted);
 
@@ -291,10 +295,10 @@ const Type *Destination::literalDestination(const VarDeclarator &d,
 const Type *Destination::declaredFunctionType(const FunctionDecl *fn) {
   std::vector<const Type *> params;
   for (const Param &param : fn->params) {
-    if (!param.type || IterableChecker(this->state).isIterableRef(*param.type)) {
+    if (!param.type || this->iterableChecker->isIterableRef(*param.type)) {
       return nullptr;
     }
-    const Type *type = TypeResolver(this->state).resolveType(*param.type, false);
+    const Type *type = this->typeResolver->resolveType(*param.type, false);
     params.push_back(param.optional() || param.defaultValue() ? Type::optional(type) : type);
   }
   bool hasRest = !fn->params.empty() && fn->params.back().rest();

@@ -6,12 +6,22 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class TypeParams;
+class ExprChecker;
+class TypeDeclarer;
+class TypeOperators;
+class ReturnInferrer;
+class ConditionalTypes;
+class ClassValueChecker;
+
 class UtilityTypes {
 public:
   using ResultUtilityApplied = Result<const Type *, UtilityTypesResolveUtilityTypeError>;
   using ResultGenericIndexed = Result<Expr *, UtilityTypesCheckGenericIndexError>;
 
-  explicit UtilityTypes(SemanticState &owner);
+  UtilityTypes(SemanticState &owner, SemanticParts &all);
 
   bool wantsLiteral(const Type *param) const;
   const Type *functionValueType(FuncSymbol *fn);
@@ -30,6 +40,14 @@ private:
   static llvm::ArrayRef<const Type *> membersOf(const Type *&type);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  TypeParams *typeParams = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
+  TypeOperators *typeOperators = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  ConditionalTypes *conditionalTypes = nullptr;
+  ClassValueChecker *classValueChecker = nullptr;
 };
 
 }

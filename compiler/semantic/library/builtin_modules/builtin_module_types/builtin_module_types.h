@@ -7,9 +7,12 @@
 
 namespace tz {
 
+class SemanticParts;
+class TypeDeclarer;
+
 class BuiltinModuleTypes {
 public:
-  explicit BuiltinModuleTypes(SemanticState &owner);
+  BuiltinModuleTypes(SemanticState &owner, SemanticParts &all);
 
   void declare(BuiltinText builtin);
   void exportFrom(NodeModule module, llvm::StringRef name);
@@ -20,6 +23,7 @@ public:
 
 private:
   SemanticState &state;
+  TypeDeclarer *typeDeclarer = nullptr;
 };
 
 }

@@ -6,9 +6,21 @@
 
 namespace tz {
 
+class SemanticParts;
+class Prelude;
+class CallChecker;
+class ExprChecker;
+class LibraryCalls;
+class TypeDeclarer;
+class TypeRelations;
+class StreamPipeline;
+class ArgumentChecker;
+class IterableChecker;
+class EventTargetChecker;
+
 class StreamSources {
 public:
-  explicit StreamSources(SemanticState &owner);
+  StreamSources(SemanticState &owner, SemanticParts &all);
 
   Expr *checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, llvm::SMLoc loc);
   Expr *processStream(MemberExpr *member);
@@ -22,6 +34,16 @@ private:
   ResultValuesIterator valuesIterator(Expr *source);
 
   SemanticState &state;
+  Prelude *prelude = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  LibraryCalls *libraryCalls = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  StreamPipeline *streamPipeline = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  IterableChecker *iterableChecker = nullptr;
+  EventTargetChecker *eventTargetChecker = nullptr;
 };
 
 }

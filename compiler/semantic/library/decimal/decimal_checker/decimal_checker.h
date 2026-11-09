@@ -7,16 +7,25 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class Prelude;
+class ExprChecker;
+class IndexProofs;
+class LiteralTypes;
+class TypeRelations;
+class ConstantFolder;
+class ArgumentChecker;
+
 class DecimalChecker {
 public:
-  explicit DecimalChecker(SemanticState &owner);
+  DecimalChecker(SemanticState &owner, SemanticParts &all);
 
   static bool isLiteralTree(const Expr *expr);
   static std::pair<llvm::StringRef, llvm::StringRef> sidesOf(const BinaryExpr *bin);
   static const Type *literalHint(const Expr *other, const Type *hint);
   static bool fitsLiteral(const Expr *expr, const Type *type);
   void checkComparisonOperands(BinaryExpr *bin);
-  static std::optional<DecimalLiteral> decimalLiteral(const Expr *expr);
   void checkDecimalLiteralRange(const Expr *lit);
   Expr *checkDecimalArithmetic(BinaryExpr *bin);
   Expr *checkDecimalComparison(BinaryExpr *bin);
@@ -37,6 +46,14 @@ private:
   static ResultRoundingMode roundingMode(const std::u16string &text);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  Prelude *prelude = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  LiteralTypes *literalTypes = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ConstantFolder *constantFolder = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

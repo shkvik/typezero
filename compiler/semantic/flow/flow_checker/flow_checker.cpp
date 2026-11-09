@@ -4,6 +4,7 @@
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
 #include "compiler/semantic/flow/union_narrowing/union_narrowing.h"
 #include "compiler/semantic/library/bytes/byte_proofs/byte_proofs.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include <limits>
@@ -23,6 +24,12 @@ constexpr int64_t kIntMax = std::numeric_limits<int64_t>::max();
 
 }
 
+FlowChecker::FlowChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->byteProofs = &all.getByteProofs();
+  this->indexProofs = &all.getIndexProofs();
+}
+
 void FlowChecker::addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual) {
   facts.add(x.term, y.term, y.offset - x.offset + (orEqual ? 1 : 0));
 }
@@ -30,9 +37,6 @@ void FlowChecker::addLess(Facts &facts, const Linear &x, const Linear &y, bool o
 bool FlowChecker::isArrayLength(const Term &t) {
   return t.length && t.var->type->nonOptional()->isArray();
 }
-
-FlowChecker::FlowChecker(SemanticState &owner)
-    : state(owner) {}
 
 bool FlowChecker::changedByCalls(const VarSymbol *var) const {
   if (var->isConst) {
@@ -184,12 +188,12 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
   }
 
   if (type->isInteger() && !type->isWrapping()) {
-    std::optional<Linear> v = IndexProofs(this->state).linear(value);
+    std::optional<Linear> v = this->indexProofs->linear(value);
     if (v && v->term == Term::of(var)) {
       this->incremented(var, v->offset);
       return;
     }
-    IntegerRange range = v ? IntegerRange{} : ByteProofs(this->state).valueRange(value);
+    IntegerRange range = v ? IntegerRange{} : this->byteProofs->valueRange(value);
     this->state.getFlowState().getFacts().forget(var);
     if (v) {
       this->state.getFlowState().getFacts().addEqual(Term::of(var), v->term, v->offset);
@@ -206,7 +210,7 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
         call && (call->builtin() == Builtin::MathMin || call->builtin() == Builtin::MathMax) &&
         !call->hasSpread()) {
       for (const Expr *arg : call->args) {
-        if (std::optional<Linear> bound = IndexProofs(this->state).linear(arg)) {
+        if (std::optional<Linear> bound = this->indexProofs->linear(arg)) {
           if (call->builtin() == Builtin::MathMin) {
             FlowChecker::addLess(this->state.getFlowState().getFacts(), Linear{Term::of(var), 0},
                                  *bound, true);
@@ -229,14 +233,14 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
   if (value->type->isOptional() || value->type->isUndefined()) {
     return;
   }
-  if (std::optional<Linear> length = IndexProofs(this->state).knownLength(value)) {
+  if (std::optional<Linear> length = this->indexProofs->knownLength(value)) {
     if (length->term != Term::lengthOf(var)) {
       this->state.getFlowState().getFacts().addEqual(Term::lengthOf(var), length->term,
                                                      length->offset);
     }
     return;
   }
-  IntegerRange range = IndexProofs(this->state).lengthRange(value);
+  IntegerRange range = this->indexProofs->lengthRange(value);
   if (range.lo) {
     this->state.getFlowState().getFacts().add(Term::zero(), Term::lengthOf(var),
                                               Facts::saturatingSub(1, *range.lo));

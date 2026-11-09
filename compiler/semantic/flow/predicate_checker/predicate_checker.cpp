@@ -5,6 +5,7 @@
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/flow/union_narrowing/union_narrowing.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
@@ -14,6 +15,15 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+PredicateChecker::PredicateChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->flowChecker = &all.getFlowChecker();
+  this->literalTypes = &all.getLiteralTypes();
+  this->typeResolver = &all.getTypeResolver();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->functionChecker = &all.getFunctionChecker();
+}
 
 const VarSymbol *PredicateChecker::argumentVariable(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
@@ -49,14 +59,11 @@ std::optional<Linear> PredicateChecker::argumentTerm(const Expr *expr) {
   return std::nullopt;
 }
 
-PredicateChecker::PredicateChecker(SemanticState &owner)
-    : state(owner) {}
-
 PredicateChecker::ResultNotAsserting PredicateChecker::notAsserting(const FunctionDecl *fn,
                                                                     const TypeRef &ref) {
   if (ref.asserts()) {
     const Type *type =
-        ref.args.empty() ? nullptr : TypeResolver(this->state).resolveType(ref.args[0], false);
+        ref.args.empty() ? nullptr : this->typeResolver->resolveType(ref.args[0], false);
     std::string args;
     for (const Param &p : fn->params) {
       args += (args.empty() ? "" : ", ") + p.name.str();
@@ -115,7 +122,7 @@ PredicateChecker::ResultPredicateArg PredicateChecker::predicateArg(const Functi
 const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sym) {
   const TypeRef &ref = *fn->returnType;
   if (ref.kind() != TypeRefKind::PREDICATE_REF) {
-    return TypeResolver(this->state).resolveType(ref, true);
+    return this->typeResolver->resolveType(ref, true);
   }
   if (sym) {
     ResultNotAsserting plain = this->notAsserting(fn, ref);
@@ -132,7 +139,7 @@ const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sy
   }
   int param = named.isOk() ? named.value() : -2;
   const Type *type =
-      ref.args.empty() ? nullptr : TypeResolver(this->state).resolveType(ref.args[0], false);
+      ref.args.empty() ? nullptr : this->typeResolver->resolveType(ref.args[0], false);
   if (sym && param != -2 && type && !type->isError()) {
     sym->predicate = TypePredicate{.param = param, .type = type};
   }
@@ -205,7 +212,7 @@ PredicateChecker::ResultExitNarrowed PredicateChecker::notePredicateExit(const F
   if (!var) {
     return ok(&whenTrue);
   }
-  const Type *shown = LiteralTypes(this->state).typeIn(whenTrue, var);
+  const Type *shown = this->literalTypes->typeIn(whenTrue, var);
   bool narrowed = shown->isError() || shown->isNever() ||
                   TypeRelations::isImplicitlyConvertible(shown, predicate.type);
   if (!narrowed) {
@@ -298,12 +305,12 @@ const Predicate *PredicateChecker::predicateOf(const FuncSymbol *fn) const {
     return nullptr;
   }
   predicates.markSummarizing(fn);
-  BodyState saved = ReturnInferrer(this->state).enterBody(decl);
+  BodyState saved = this->returnInferrer->enterBody(decl);
   bool muted = this->state.getDiagnostics().setMuted(true);
-  FunctionDecl *copy = ReturnInferrer(this->state).freshCopy(decl);
-  FunctionChecker(this->state).checkFunctionBody(copy);
+  FunctionDecl *copy = this->returnInferrer->freshCopy(decl);
+  this->functionChecker->checkFunctionBody(copy);
   this->state.getDiagnostics().setMuted(muted);
-  ReturnInferrer(this->state).leaveBody(saved);
+  this->returnInferrer->leaveBody(saved);
   return predicates.findPredicate(fn);
 }
 
@@ -324,10 +331,10 @@ void PredicateChecker::applyPredicate(const CallExpr *call, Flow &whenTrue, Flow
     const Expr *arg = argument(i);
     const VarSymbol *var = arg ? PredicateChecker::argumentVariable(arg) : nullptr;
 
-    return var && !FlowChecker(this->state).changedByCalls(var) ? var : nullptr;
+    return var && !this->flowChecker->changedByCalls(var) ? var : nullptr;
   };
   auto narrowTo = [&](Flow &flow, const VarSymbol *var, const Type *type) {
-    const Type *now = LiteralTypes(this->state).typeIn(flow, var);
+    const Type *now = this->literalTypes->typeIn(flow, var);
     if (TypeRelations::isImplicitlyConvertible(now, type)) {
       return;
     }
@@ -399,7 +406,7 @@ void PredicateChecker::applyPredicate(const CallExpr *call, Flow &whenTrue, Flow
         return Linear{Term::lengthOf(var), 0};
       }
       std::optional<Linear> value = PredicateChecker::argumentTerm(arg);
-      if (value && value->term.var && FlowChecker(this->state).changedByCalls(value->term.var)) {
+      if (value && value->term.var && this->flowChecker->changedByCalls(value->term.var)) {
         return std::nullopt;
       }
 

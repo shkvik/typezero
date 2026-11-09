@@ -7,6 +7,7 @@
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/library/json/json_checker/json_checker.h"
 #include "compiler/semantic/library/result/result_checker/result_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/unknown_checker/unknown_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
@@ -15,6 +16,18 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+ConditionFacts::ConditionFacts(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->fieldFacts = &all.getFieldFacts();
+  this->indexProofs = &all.getIndexProofs();
+  this->jsonChecker = &all.getJsonChecker();
+  this->resultChecker = &all.getResultChecker();
+  this->genericChecker = &all.getGenericChecker();
+  this->unionNarrowing = &all.getUnionNarrowing();
+  this->unknownChecker = &all.getUnknownChecker();
+  this->predicateChecker = &all.getPredicateChecker();
+}
 
 const VarSymbol *ConditionFacts::variableOf(const Expr *expr) {
   if (auto *conv = dyn_cast<CastExpr>(expr);
@@ -38,9 +51,6 @@ const NameExpr *ConditionFacts::optionalVariable(const Expr *expr) {
 void ConditionFacts::addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual) {
   facts.add(x.term, y.term, y.offset - x.offset + (orEqual ? 1 : 0));
 }
-
-ConditionFacts::ConditionFacts(SemanticState &owner)
-    : state(owner) {}
 
 bool ConditionFacts::chainDefined(const Expr *e, Flow &flow) const {
   while (auto *conv = dyn_cast<CastExpr>(e)) {
@@ -95,12 +105,12 @@ bool ConditionFacts::chainDefined(const Expr *e, Flow &flow) const {
 }
 
 void ConditionFacts::addConditionFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) const {
-  ResultChecker(this->state).addResultFacts(cond, whenTrue, whenFalse);
-  JsonChecker(this->state).addJsonFacts(cond, whenTrue, whenFalse);
-  UnionNarrowing(this->state).addUnionFacts(cond, whenTrue, whenFalse);
-  UnknownChecker(this->state).addUnknownFacts(cond, whenTrue, whenFalse);
+  this->resultChecker->addResultFacts(cond, whenTrue, whenFalse);
+  this->jsonChecker->addJsonFacts(cond, whenTrue, whenFalse);
+  this->unionNarrowing->addUnionFacts(cond, whenTrue, whenFalse);
+  this->unknownChecker->addUnknownFacts(cond, whenTrue, whenFalse);
   if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin() == Builtin::None) {
-    PredicateChecker(this->state).applyPredicate(call, whenTrue, whenFalse);
+    this->predicateChecker->applyPredicate(call, whenTrue, whenFalse);
     return;
   }
   if (const NameExpr *name = ConditionFacts::optionalVariable(cond)) {
@@ -112,7 +122,7 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Flow &whenTrue, Flow &w
       return std::nullopt;
     }
 
-    return FieldFacts(this->state).fieldPath(expr);
+    return this->fieldFacts->fieldPath(expr);
   };
   if (std::optional<FieldPath> path = optionalField(cond)) {
     FieldFacts::defineField(whenTrue, *path);
@@ -205,12 +215,12 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Flow &whenTrue, Flow &w
         auto numberNamed = [&](llvm::StringRef name) -> const Type * {
           for (const Type *t : param->alternatives()) {
             if (t->isNumeric() && name == TypeSpelling::typeOfName(t)) {
-              return GenericChecker(this->state).numberParam(param, t);
+              return this->genericChecker->numberParam(param, t);
             }
           }
           const Type *named = UnknownChecker::typeOfNarrowed(std::u16string(name.begin(), name.end()));
           if (param->alternatives().empty() && named && named->isNumeric()) {
-            return GenericChecker(this->state).numberParam(param, named);
+            return this->genericChecker->numberParam(param, named);
           }
           return nullptr;
         };
@@ -273,8 +283,8 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Flow &whenTrue, Flow &w
   default:
     return;
   }
-  std::optional<Linear> l = IndexProofs(this->state).linear(bin->lhs),
-                        r = IndexProofs(this->state).linear(bin->rhs);
+  std::optional<Linear> l = this->indexProofs->linear(bin->lhs),
+                        r = this->indexProofs->linear(bin->rhs);
   if (!l || !r) {
     return;
   }

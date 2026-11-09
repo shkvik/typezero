@@ -6,9 +6,24 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class ResultTypes;
+class ClassChecker;
+class TypeRelations;
+class ConstantFolder;
+class GenericChecker;
+class ReturnInferrer;
+class MetadataChecker;
+class NestedFunctions;
+class TopLevelChecker;
+class TzModulesChecker;
+class ClassValueChecker;
+class BuiltinModuleChecker;
+
 class NameChecker {
 public:
-  explicit NameChecker(SemanticState &owner);
+  NameChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkName(NameExpr *name);
 
@@ -22,6 +37,19 @@ private:
   static ResultNoTypeArguments typeArgsAbsent(const NameExpr *name, const ScopeEntry &entry);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  ResultTypes *resultTypes = nullptr;
+  ClassChecker *classChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ConstantFolder *constantFolder = nullptr;
+  GenericChecker *genericChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  MetadataChecker *metadataChecker = nullptr;
+  NestedFunctions *nestedFunctions = nullptr;
+  TopLevelChecker *topLevelChecker = nullptr;
+  TzModulesChecker *tzModulesChecker = nullptr;
+  ClassValueChecker *classValueChecker = nullptr;
+  BuiltinModuleChecker *builtinModuleChecker = nullptr;
 };
 
 }

@@ -4,9 +4,13 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class FlowChecker;
+
 class LoopBounds {
 public:
-  explicit LoopBounds(SemanticState &owner);
+  LoopBounds(SemanticState &owner, SemanticParts &all);
 
   Flow loopHead(const LoopScan &scan, const Expr *cond, bool induction) const;
   std::optional<int64_t> condBoundsAbove(const Expr *cond, const VarSymbol *var,
@@ -24,6 +28,8 @@ private:
   static bool isArrayLength(const Term &t);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  FlowChecker *flowChecker = nullptr;
 };
 
 }

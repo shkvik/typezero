@@ -7,11 +7,35 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class ByteProofs;
+class ChunkTypes;
+class TypeParams;
+class ExprChecker;
+class FlowChecker;
+class IndexProofs;
+class LateClasses;
+class AsyncChecker;
+class ClassChecker;
+class TypeResolver;
+class TypeRelations;
+class ArgListChecker;
+class ClosureChecker;
+class EmitterChecker;
+class ReturnInferrer;
+class IterableChecker;
+class GeneratorChecker;
+class PredicateChecker;
+class TzModulesChecker;
+class GenericClassChecker;
+
 class FunctionChecker {
 public:
-  explicit FunctionChecker(SemanticState &owner);
+  FunctionChecker(SemanticState &owner, SemanticParts &all);
 
   void checkFunctionBody(FunctionDecl *fn);
+  void walkFunctionFromScratch(FunctionDecl *fn);
   void declareFunction(FunctionDecl *fn, VarSymbol *var = nullptr, bool scoped = true);
 
 private:
@@ -36,6 +60,27 @@ private:
                                              const llvm::StringSet<> &names);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  ByteProofs *byteProofs = nullptr;
+  ChunkTypes *chunkTypes = nullptr;
+  TypeParams *typeParams = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  LateClasses *lateClasses = nullptr;
+  AsyncChecker *asyncChecker = nullptr;
+  ClassChecker *classChecker = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ArgListChecker *argListChecker = nullptr;
+  ClosureChecker *closureChecker = nullptr;
+  EmitterChecker *emitterChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  IterableChecker *iterableChecker = nullptr;
+  GeneratorChecker *generatorChecker = nullptr;
+  PredicateChecker *predicateChecker = nullptr;
+  TzModulesChecker *tzModulesChecker = nullptr;
+  GenericClassChecker *genericClassChecker = nullptr;
 };
 
 }

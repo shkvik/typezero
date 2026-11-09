@@ -2,6 +2,7 @@
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/objects/keyed_field_checker/keyed_field_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
@@ -20,8 +21,12 @@ const llvm::StringRef kGlobalFunctions[] = {"String",    "Number",
                                             "err"};
 }
 
-LoopScanner::LoopScanner(SemanticState &owner)
-    : state(owner) {}
+LoopScanner::LoopScanner(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->callChecker = &all.getCallChecker();
+  this->keyedFieldChecker = &all.getKeyedFieldChecker();
+}
 
 LoopScan LoopScanner::scanLoop(llvm::ArrayRef<const Stmt *> stmts,
                                llvm::ArrayRef<const Expr *> exprs) const {
@@ -42,7 +47,7 @@ LoopScan LoopScanner::scanLoop(llvm::ArrayRef<const Stmt *> stmts,
 
 bool LoopScanner::namesIterator(const Expr *expr) const {
   auto *name = dyn_cast<NameExpr>(expr);
-  const VarSymbol *var = name ? Scopes(this->state).lookup(name->name).var() : nullptr;
+  const VarSymbol *var = name ? this->scopes->lookup(name->name).var() : nullptr;
 
   return var && var->type && var->type->nonOptional()->isIterator();
 }
@@ -193,9 +198,8 @@ void LoopScanner::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) con
       this->scanExpr(index->index, scan, depth);
       scan.growsArrays = true;
       scan.releasesElements = true;
-      KeyedFieldChecker(this->state).keyNames(index->index, [&](llvm::StringRef name) {
-        scan.fieldWrites.insert(name);
-      });
+      this->keyedFieldChecker->keyNames(
+          index->index, [&](llvm::StringRef name) { scan.fieldWrites.insert(name); });
     } else if (auto *member = dyn_cast<MemberExpr>(target)) {
       this->scanExpr(member->object, scan, depth);
       scan.fieldWrites.insert(member->name);
@@ -287,8 +291,8 @@ void LoopScanner::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) con
       this->scanExpr(arg, scan, depth);
     }
     if (auto *member = dyn_cast<MemberExpr>(call->callee)) {
-      if (CallChecker(this->state).isGlobalName(member->object, "console") ||
-          CallChecker(this->state).isGlobalName(member->object, "Math")) {
+      if (this->callChecker->isGlobalName(member->object, "console") ||
+          this->callChecker->isGlobalName(member->object, "Math")) {
         break;
       }
       this->scanExpr(member->object, scan, depth);
@@ -314,13 +318,12 @@ void LoopScanner::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) con
         scan.callsFunctions = true;
       }
       if (method == "next" || method == "toArray" ||
-          (method == "from" &&
-           (CallChecker(this->state).isGlobalName(member->object, "Array") ||
-            CallChecker(this->state).isGlobalName(member->object, "Iterator")))) {
+          (method == "from" && (this->callChecker->isGlobalName(member->object, "Array") ||
+                                this->callChecker->isGlobalName(member->object, "Iterator")))) {
         scan.callsFunctions = true;
       }
     } else if (!llvm::any_of(kGlobalFunctions, [&](llvm::StringRef name) {
-                 return CallChecker(this->state).isGlobalName(call->callee, name);
+                 return this->callChecker->isGlobalName(call->callee, name);
                })) {
       scan.callsFunctions = true;
     }

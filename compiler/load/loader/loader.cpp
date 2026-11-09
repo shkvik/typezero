@@ -33,6 +33,17 @@ namespace path = llvm::sys::path;
 
 }
 
+Loader::Loader(llvm::SourceMgr &sourceMgr, AstContext &ctx, Diagnostics &diags,
+               const pkg::Graph *packages, const SourceOverlay *overlay)
+    : sourceMgr_(sourceMgr),
+      ctx(ctx),
+      diags(diags),
+      packages(packages),
+      overlay(overlay) {
+  resolver_ = std::make_unique<ModuleResolver>(*this);
+  library_ = std::make_unique<LibraryModules>(*this);
+}
+
 bool Loader::run(llvm::StringRef entryPath, SourceFile &program) {
   if (path::extension(entryPath) != ".tz") {
     std::string message = "'" + entryPath.str() + "' is not a file of tz: they end in .tz";
@@ -287,17 +298,6 @@ bool loadProgram(llvm::StringRef entryPath, llvm::SourceMgr &sourceMgr, AstConte
                  Diagnostics &diags, SourceFile &program, const pkg::Graph *packages,
                  const SourceOverlay *overlay) {
   return Loader(sourceMgr, ctx, diags, packages, overlay).run(entryPath, program);
-}
-
-Loader::Loader(llvm::SourceMgr &sourceMgr, AstContext &ctx, Diagnostics &diags,
-               const pkg::Graph *packages, const SourceOverlay *overlay)
-    : sourceMgr_(sourceMgr),
-      ctx(ctx),
-      diags(diags),
-      packages(packages),
-      overlay(overlay) {
-  resolver_ = std::make_unique<ModuleResolver>(*this);
-  library_ = std::make_unique<LibraryModules>(*this);
 }
 
 Loader::~Loader() = default;

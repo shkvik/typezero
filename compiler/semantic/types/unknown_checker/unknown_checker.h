@@ -6,13 +6,18 @@
 
 namespace tz {
 
+class SemanticParts;
+class StaticChecker;
+class ArgumentChecker;
+class ClassValueChecker;
+
 class UnknownChecker {
 public:
   using ResultValueNarrowed = Result<const Expr *, UnknownCheckerUnknownUseError>;
   using ResultMemberChecked = Result<Expr *, UnknownCheckerCheckUnknownMemberError>;
   using ResultMethodChecked = Result<Expr *, UnknownCheckerCheckUnknownMethodError>;
 
-  explicit UnknownChecker(SemanticState &owner);
+  UnknownChecker(SemanticState &owner, SemanticParts &all);
 
   static bool holdsUnknown(const Type *type);
   static bool isObjectReference(const Type *type);
@@ -28,6 +33,9 @@ private:
   static std::string hintName(const Expr *expr);
 
   SemanticState &state;
+  StaticChecker *staticChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  ClassValueChecker *classValueChecker = nullptr;
 };
 
 }

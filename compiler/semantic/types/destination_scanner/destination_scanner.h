@@ -4,12 +4,20 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class CallChecker;
+class Destination;
+class TypeResolver;
+class IterableChecker;
+class PredicateChecker;
+
 class DestinationScan;
 
 class DestinationScanner {
 public:
   static bool isResultLiteral(const CallExpr *call);
-  explicit DestinationScanner(SemanticState &owner);
+  DestinationScanner(SemanticState &owner, SemanticParts &all);
 
   void scanDestinations(const Stmt *stmt, DestinationScan &scan);
   bool scanDestinations(llvm::ArrayRef<Stmt *> stmts, DestinationScan &scan);
@@ -21,6 +29,12 @@ public:
 
 private:
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  CallChecker *callChecker = nullptr;
+  Destination *destination = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  IterableChecker *iterableChecker = nullptr;
+  PredicateChecker *predicateChecker = nullptr;
 };
 
 }

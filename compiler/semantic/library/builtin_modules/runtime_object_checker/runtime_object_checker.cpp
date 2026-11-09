@@ -5,6 +5,7 @@
 #include "compiler/semantic/bodies/functions/callback_checker/callback_checker.h"
 #include "compiler/semantic/declare/prelude/prelude.h"
 #include "compiler/semantic/library/fs/fs_checker/fs_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/SaveAndRestore.h"
 
@@ -12,8 +13,14 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-RuntimeObjectChecker::RuntimeObjectChecker(SemanticState &owner)
-    : state(owner) {}
+RuntimeObjectChecker::RuntimeObjectChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->prelude = &all.getPrelude();
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->callbackChecker = &all.getCallbackChecker();
+}
 
 Expr *RuntimeObjectChecker::checkRuntimeMember(MemberExpr *member) {
   const Type *type = member->object->type;
@@ -32,12 +39,12 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
   call->type = Type::error();
   auto loosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
 
     return call;
   };
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return call;
   }
   static const llvm::StringLiteral events[] = {"on",
@@ -59,8 +66,7 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
   case Type::Runtime::ReadlinePromises: {
     bool promises = type->runtimeKind() == Type::Runtime::ReadlinePromises;
     if (name == "close") {
-      ArgumentChecker::ResultArityMatches arity =
-          ArgumentChecker(this->state).checkArity(call, 0, 0);
+      ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
       if (arity.isErr()) {
         this->state.getDiagnostics().error(member->loc(), arity.error().message);
         return call;
@@ -71,17 +77,17 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
     }
     if (name == "question") {
       ArgumentChecker::ResultArityMatches arity =
-          ArgumentChecker(this->state).checkArity(call, 1, promises ? 1 : 3);
+          this->argumentChecker->checkArity(call, 1, promises ? 1 : 3);
       if (arity.isErr()) {
         this->state.getDiagnostics().error(member->loc(), arity.error().message);
         return call;
       }
-      Expr *query = ArgumentChecker(this->state).checkArg(call->args[0], Type::string());
+      Expr *query = this->argumentChecker->checkArg(call->args[0], Type::string());
       if (promises) {
         call->args = {query};
         call->target = BuiltinCall{.builtin = Builtin::RlQuestion};
         call->type = Type::promise(
-            Type::result(Type::string(), Prelude(this->state).builtinType("QuestionError")));
+            Type::result(Type::string(), this->prelude->builtinType("QuestionError")));
         return call;
       }
       if (call->args.size() < 2) {
@@ -99,8 +105,7 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
       sig.ret = Type::voidTy();
       sig.voidResult = true;
       sig.asyncVoid = true;
-      Expr *callback =
-          CallbackChecker(this->state).checkFunctionArg(call->args[1], sig, 1, "question");
+      Expr *callback = this->callbackChecker->checkFunctionArg(call->args[1], sig, 1, "question");
       if (!callback->type->isFunction()) {
         return call;
       }

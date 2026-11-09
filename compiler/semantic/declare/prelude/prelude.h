@@ -4,9 +4,13 @@
 
 namespace tz {
 
+class SemanticParts;
+class TypeDeclarer;
+class AliasInstantiator;
+
 class Prelude {
 public:
-  explicit Prelude(SemanticState &owner);
+  Prelude(SemanticState &owner, SemanticParts &all);
 
   void declarePrelude();
   const Type *builtinType(llvm::StringRef name);
@@ -14,6 +18,8 @@ public:
 
 private:
   SemanticState &state;
+  TypeDeclarer *typeDeclarer = nullptr;
+  AliasInstantiator *aliasInstantiator = nullptr;
 };
 
 }

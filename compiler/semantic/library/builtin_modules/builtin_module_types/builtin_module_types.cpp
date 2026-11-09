@@ -1,12 +1,15 @@
 #include "compiler/semantic/library/builtin_modules/builtin_module_types/builtin_module_types.h"
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 
 using llvm::dyn_cast;
 
 namespace tz {
 
-BuiltinModuleTypes::BuiltinModuleTypes(SemanticState &owner)
-    : state(owner) {}
+BuiltinModuleTypes::BuiltinModuleTypes(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->typeDeclarer = &all.getTypeDeclarer();
+}
 
 void BuiltinModuleTypes::declare(BuiltinText builtin) {
   llvm::ArrayRef<Stmt *> items = this->state.getLibraryDeclarations().getBuiltinItems(builtin);
@@ -42,7 +45,7 @@ const Type *BuiltinModuleTypes::named(llvm::StringRef name) {
   TypeAliasDecl *found = this->alias(name);
   assert(found && "a built-in module declares the type");
 
-  return TypeDeclarer(this->state).resolveAlias(found);
+  return this->typeDeclarer->resolveAlias(found);
 }
 
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/semantic/semantic_external.h"
+#include "compiler/semantic/semantic_types.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SourceMgr.h"

@@ -6,12 +6,24 @@
 #include "compiler/semantic/generics/widening_relations/widening_relations.h"
 #include "compiler/semantic/library/events/event_map_inference/event_map_inference.h"
 #include "compiler/semantic/library/fs/fs_declarer/fs_declarer.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::isa;
 
 namespace tz {
+
+ClassBases::ClassBases(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->fsDeclarer = &all.getFsDeclarer();
+  this->typeDeclarer = &all.getTypeDeclarer();
+  this->typeResolver = &all.getTypeResolver();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->moduleDeclarer = &all.getModuleDeclarer();
+  this->eventMapInference = &all.getEventMapInference();
+  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+}
 
 bool ClassBases::isErrorClass(llvm::StringRef name) {
   static const char *const names[] = {"Error",       "TypeError",      "RangeError",
@@ -26,9 +38,6 @@ const char *ClassBases::accessName(Access access) {
          : access == Access::Protected ? "protected"
                                        : "private";
 }
-
-ClassBases::ClassBases(SemanticState &owner)
-    : state(owner) {}
 
 void ClassBases::addBase(const Type *type, const Type *base) {
   const_cast<Type *>(type)->addBase(base);
@@ -82,7 +91,7 @@ ClassBases::ResultParentClassFound ClassBases::baseClass(const ClassDecl *cls, c
         .message = message,
     });
   }
-  if (FsDeclarer(this->state).isRuntimeClass(parent)) {
+  if (this->fsDeclarer->isRuntimeClass(parent)) {
     std::string message = ErrorTextExtends::runtime(cls->name, parent->name);
 
     return err(ClassBasesBaseClassError{
@@ -225,20 +234,18 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
   if (cls->base) {
     const TypeRef &ref = *cls->base;
     bool named = ref.kind() == TypeRefKind::NAME_REF || ref.kind() == TypeRefKind::GENERIC_REF;
-    Stmt *found = named ? TypeDeclarer(this->state).lookupType(ref.name) : nullptr;
+    Stmt *found = named ? this->typeDeclarer->lookupType(ref.name) : nullptr;
     auto *parent = llvm::dyn_cast_or_null<ClassDecl>(found);
     bool instance = false;
     if (parent && parent->library() && parent->name == "EventEmitter" &&
         ref.kind() == TypeRefKind::NAME_REF) {
-      const Type *events =
-          EventMapInference(this->state)
-              .inferredEventMap("class " + EventMapInference(this->state).placeOf(cls->loc()) +
-                                " " + cls->name.str());
+      const Type *events = this->eventMapInference->inferredEventMap(
+          "class " + this->eventMapInference->placeOf(cls->loc()) + " " + cls->name.str());
       ClassDecl *emitter = parent;
       parent = nullptr;
       if (events) {
         GenericClassInstantiator::ResultClassMade made =
-            GenericClassInstantiator(this->state).instantiateClass(emitter, {events}, ref.loc);
+            this->genericClassInstantiator->instantiateClass(emitter, {events}, ref.loc);
         if (made.isErr() &&
             made.error().code !=
                 GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
@@ -260,7 +267,7 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
         found = nullptr;
       }
     } else if (parent && (parent->isGeneric() || ref.kind() == TypeRefKind::GENERIC_REF)) {
-      const Type *type = TypeResolver(this->state).resolveType(ref, false);
+      const Type *type = this->typeResolver->resolveType(ref, false);
       parent = ClassDeclarer::classOf(type);
       instance = true;
       if (!parent) {
@@ -277,11 +284,11 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
           home && home != this->state.getModuleStates().getCurrentModule() &&
           this->state.getScopeStack().isTopLevel()) {
         Module *here = this->state.getModuleStates().getCurrentModule();
-        ModuleDeclarer(this->state).useModule(home);
-        ClassDeclarer(this->state).resolveClass(parent);
-        ModuleDeclarer(this->state).useModule(here);
+        this->moduleDeclarer->useModule(home);
+        this->classDeclarer->resolveClass(parent);
+        this->moduleDeclarer->useModule(here);
       } else {
-        ClassDeclarer(this->state).resolveClass(parent);
+        this->classDeclarer->resolveClass(parent);
       }
       this->state.getScopeStack().leaveOnlyTypes();
       cls->parent = parent;
@@ -290,7 +297,7 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
     }
   }
   for (const TypeRef &ref : cls->interfaces) {
-    const Type *type = TypeResolver(this->state).resolveType(ref, false);
+    const Type *type = this->typeResolver->resolveType(ref, false);
     if (type->isError()) {
       continue;
     }
@@ -465,16 +472,15 @@ std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias,
   std::vector<Field> fields;
   std::vector<std::string> origins;
   for (const TypeRef &ref : alias->bases) {
-    Stmt *found = ref.kind() == TypeRefKind::NAME_REF
-                      ? TypeDeclarer(this->state).lookupType(ref.name)
-                      : nullptr;
+    Stmt *found =
+        ref.kind() == TypeRefKind::NAME_REF ? this->typeDeclarer->lookupType(ref.name) : nullptr;
     auto *other = llvm::dyn_cast_or_null<TypeAliasDecl>(found);
     ResultInterfaceNotSelf self = ClassBases::notSelf(alias, other);
     if (self.isErr()) {
       this->state.getDiagnostics().error(ref.loc, self.error().message);
       continue;
     }
-    const Type *base = TypeResolver(this->state).resolveType(ref, false);
+    const Type *base = this->typeResolver->resolveType(ref, false);
     if (base->isError()) {
       continue;
     }
@@ -517,7 +523,7 @@ std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias,
   }
   const TypeRef &own = alias->type;
   std::vector<Overload> ownOverloads;
-  std::vector<Field> ownFields = TypeResolver(this->state).resolveFields(own, &ownOverloads);
+  std::vector<Field> ownFields = this->typeResolver->resolveFields(own, &ownOverloads);
   for (const Overload &o : ownOverloads) {
     ResultUnusedMethodName unused = ClassBases::newOverload(alias, o, fields, overloads);
     if (unused.isErr()) {

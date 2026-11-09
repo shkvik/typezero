@@ -2,6 +2,7 @@
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/generics/generic_check_helpers/generic_check_helpers.h"
 #include "compiler/semantic/generics/type_params/type_params.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -15,6 +16,13 @@ constexpr unsigned kMaxTailCalls = 1000;
 
 }
 
+AliasInstantiator::AliasInstantiator(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->classBases = &all.getClassBases();
+  this->typeParams = &all.getTypeParams();
+  this->typeResolver = &all.getTypeResolver();
+}
+
 std::string AliasInstantiator::typeList(llvm::ArrayRef<const Type *> types) {
   std::string text;
   for (const Type *t : types) {
@@ -23,9 +31,6 @@ std::string AliasInstantiator::typeList(llvm::ArrayRef<const Type *> types) {
 
   return text;
 }
-
-AliasInstantiator::AliasInstantiator(SemanticState &owner)
-    : state(owner) {}
 
 AliasInstantiator::ResultArgumentCount AliasInstantiator::argumentCount(const TypeAliasDecl *alias,
                                                                         size_t count, size_t got) {
@@ -58,7 +63,7 @@ AliasInstantiator::defaultExists(const TypeAliasDecl *alias, size_t count, const
 AliasInstantiator::ResultArgumentMatch
 AliasInstantiator::argumentMatch(const TypeAliasDecl *alias, llvm::ArrayRef<const Type *> params,
                                  llvm::ArrayRef<const Type *> args, size_t k) {
-  if (!TypeParams(this->state).satisfies(args[k], params[k], params, args)) {
+  if (!this->typeParams->satisfies(args[k], params[k], params, args)) {
     std::string constraint =
         GenericCheckHelpers::constraintSpelling(params[k], &alias->typeParams[k]);
     std::string message = ErrorTextAliasMatch::unsatisfied(args[k]->name(), constraint,
@@ -128,7 +133,7 @@ std::vector<const Type *> AliasInstantiator::aliasTypeParams(TypeAliasDecl *alia
   this->state.getScopeStack().openTypeScope();
   std::vector<const Type *> defaults;
   std::vector<const Type *> params =
-      TypeParams(this->state).declareTypeParams(alias->typeParams, &defaults);
+      this->typeParams->declareTypeParams(alias->typeParams, &defaults);
   this->state.getScopeStack().closeTypeScope();
   aliases.rememberAliasParams(alias, {std::move(params), std::move(defaults)});
 
@@ -163,7 +168,7 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
         type = Type::error();
         break;
       }
-      args.push_back(TypeParams(this->state).substitute(defaults[k], params, args));
+      args.push_back(this->typeParams->substitute(defaults[k], params, args));
     }
     for (size_t k = 0; k < params.size() && !type; ++k) {
       if (args[k]->isError()) {
@@ -228,14 +233,14 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
           this->state.getModuleStates().getModuleState(home).types);
     }
     this->state.getScopeStack().openTypeScope();
-    TypeParams(this->state).bindTypeParams(alias->typeParams, args);
+    this->typeParams->bindTypeParams(alias->typeParams, args);
     if (alias->type.kind() == TypeRefKind::OBJECT_REF) {
       entry.self = Type::declareObject(display);
       std::vector<const Type *> bases;
       std::vector<Overload> overloads;
-      std::vector<Field> fields =
-          alias->bases.empty() ? TypeResolver(this->state).resolveFields(alias->type, &overloads)
-                               : ClassBases(this->state).interfaceFields(alias, bases, overloads);
+      std::vector<Field> fields = alias->bases.empty()
+                                      ? this->typeResolver->resolveFields(alias->type, &overloads)
+                                      : this->classBases->interfaceFields(alias, bases, overloads);
       if (entry.recursive) {
         entry.self->defineFields(std::move(fields), std::move(overloads));
         type = entry.self;
@@ -244,7 +249,7 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
       }
       for (const Type *base : bases) {
         if (!type->isError()) {
-          ClassBases(this->state).addBase(type, base);
+          this->classBases->addBase(type, base);
         }
       }
     } else {
@@ -253,7 +258,7 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
       } else {
         this->state.getTypeContext().forbidTailCall();
       }
-      type = TypeResolver(this->state).resolveTypeInner(alias->type);
+      type = this->typeResolver->resolveTypeInner(alias->type);
       this->state.getTypeContext().forbidTailCall();
     }
     this->state.getScopeStack().closeTypeScope();

@@ -6,6 +6,17 @@
 
 namespace tz {
 
+class SemanticParts;
+class LateClasses;
+class ClassDeclarer;
+class TypeRelations;
+class GenericChecker;
+class InheritChecker;
+class ReturnInferrer;
+class FunctionChecker;
+class NestedFunctions;
+class DecoratorChecker;
+
 class ClassChecker {
 public:
   using ResultThisReference = Result<Expr *, ClassCheckerCheckThisError>;
@@ -17,7 +28,7 @@ public:
   using ResultHasDecorators = Result<const ClassDecl *, ClassCheckerHasDecoratorsError>;
   using ResultEveryFieldSet = Result<const FunctionDecl *, ClassCheckerCheckFieldsSetError>;
 
-  explicit ClassChecker(SemanticState &owner);
+  ClassChecker(SemanticState &owner, SemanticParts &all);
 
   void checkClassBodies(ClassDecl *cls);
   ResultEveryFieldSet checkFieldsSet() const;
@@ -41,6 +52,15 @@ private:
   ResultFieldHasValue fieldStartValue(const ClassDecl *cls, const ClassField &field) const;
 
   SemanticState &state;
+  LateClasses *lateClasses = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  GenericChecker *genericChecker = nullptr;
+  InheritChecker *inheritChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  FunctionChecker *functionChecker = nullptr;
+  NestedFunctions *nestedFunctions = nullptr;
+  DecoratorChecker *decoratorChecker = nullptr;
 };
 
 }

@@ -10,6 +10,7 @@
 #include "compiler/semantic/library/date/date_format_checker/date_format_checker.h"
 #include "compiler/semantic/library/math/math_checker/math_checker.h"
 #include "compiler/semantic/library/process/process_checker/process_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "runtime/library/date/date/date.h"
 #include "llvm/ADT/STLExtras.h"
@@ -76,6 +77,19 @@ const DateMethod kMethods[] = {
     {"toLocaleTimeString", Builtin::DateToLocale, TZ_DATE_LOCALE_TIME, 0, 2},
 };
 
+}
+
+DateChecker::DateChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->prelude = &all.getPrelude();
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->constantFolder = &all.getConstantFolder();
+  this->genericChecker = &all.getGenericChecker();
+  this->processChecker = &all.getProcessChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->dateFormatChecker = &all.getDateFormatChecker();
 }
 
 std::optional<std::u16string> DateChecker::literalText(const Expr *e) {
@@ -173,14 +187,11 @@ DateChecker::ResultLiteralDate DateChecker::literalDate(const std::u16string &te
   return ok(value);
 }
 
-DateChecker::DateChecker(SemanticState &owner)
-    : state(owner) {}
-
 Expr *DateChecker::dateTime(Expr *date) {
   auto *callee = this->state.getAst().make<MemberExpr>(date->loc(), date, "getTime");
 
-  return ProcessChecker(this->state)
-      .builtinCall(date->loc(), callee, Builtin::DateGetTime, {}, Type::intTy());
+  return this->processChecker->builtinCall(date->loc(), callee, Builtin::DateGetTime, {},
+                                           Type::intTy());
 }
 
 Expr *DateChecker::dateToString(Expr *date) {
@@ -188,8 +199,8 @@ Expr *DateChecker::dateToString(Expr *date) {
   auto *mode = this->state.getAst().make<IntLitExpr>(date->loc(), TZ_DATE_TEXT_FULL);
   mode->type = Type::intTy();
 
-  return ProcessChecker(this->state)
-      .builtinCall(date->loc(), callee, Builtin::DateToLocalString, {mode}, Type::string());
+  return this->processChecker->builtinCall(date->loc(), callee, Builtin::DateToLocalString, {mode},
+                                           Type::string());
 }
 
 void DateChecker::checkDateLiteral(const Expr *arg) {
@@ -208,7 +219,7 @@ void DateChecker::checkDateFields(std::vector<Expr *> &args, size_t first, llvm:
   for (size_t i = 0; i < args.size(); ++i) {
     args[i] = this->timeArg(args[i]);
     if (args[i]->type->isInteger()) {
-      constant[first + i] = ConstantFolder(this->state).intConstant(args[i]);
+      constant[first + i] = this->constantFolder->intConstant(args[i]);
     }
   }
   size_t end = first + args.size();
@@ -271,14 +282,14 @@ void DateChecker::checkDateFields(std::vector<Expr *> &args, size_t first, llvm:
 
 Expr *DateChecker::timeArg(Expr *arg) {
   if (!arg->type) {
-    arg = ExprChecker(this->state).checkExpr(arg, Type::intTy());
+    arg = this->exprChecker->checkExpr(arg, Type::intTy());
   }
-  arg = GenericChecker(this->state).apparent(arg);
+  arg = this->genericChecker->apparent(arg);
   if (arg->type->isInteger()) {
-    return arg->type->isInt() ? arg : TypeRelations(this->state).convert(arg, Type::intTy());
+    return arg->type->isInt() ? arg : this->typeRelations->convert(arg, Type::intTy());
   }
 
-  return TypeRelations(this->state).coerce(arg, Type::intTy());
+  return this->typeRelations->coerce(arg, Type::intTy());
 }
 
 Expr *DateChecker::checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
@@ -293,23 +304,22 @@ Expr *DateChecker::checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
     std::string message = ErrorTextDateNew::arity(args.size());
     this->state.getDiagnostics().error(loc, message);
     for (Expr *&arg : args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     return failed();
   }
   if (args.empty()) {
-    return ProcessChecker(this->state).builtinCall(loc, callee, Builtin::DateNew, {}, Type::date());
+    return this->processChecker->builtinCall(loc, callee, Builtin::DateNew, {}, Type::date());
   }
   if (args.size() == 1) {
     this->checkDateLiteral(args[0]);
-    Expr *arg = GenericChecker(this->state).apparent(ExprChecker(this->state).checkExpr(args[0]));
+    Expr *arg = this->genericChecker->apparent(this->exprChecker->checkExpr(args[0]));
     const Type *type = arg->type;
     if (type->isError()) {
       return failed();
     }
     if (type->isDate()) {
-      return ProcessChecker(this->state)
-          .builtinCall(loc, callee, Builtin::DateCopy, {arg}, Type::date());
+      return this->processChecker->builtinCall(loc, callee, Builtin::DateCopy, {arg}, Type::date());
     }
     if (type->isString()) {
       if (!DateChecker::literalText(args[0])) {
@@ -317,12 +327,12 @@ Expr *DateChecker::checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
         this->state.getDiagnostics().error(arg->loc(), message);
         return failed();
       }
-      return ProcessChecker(this->state)
-          .builtinCall(loc, callee, Builtin::DateFromString, {arg}, Type::date());
+      return this->processChecker->builtinCall(loc, callee, Builtin::DateFromString, {arg},
+                                               Type::date());
     }
     if (type->isNumeric()) {
-      return ProcessChecker(this->state)
-          .builtinCall(loc, callee, Builtin::DateNew, {this->timeArg(arg)}, Type::date());
+      return this->processChecker->builtinCall(loc, callee, Builtin::DateNew, {this->timeArg(arg)},
+                                               Type::date());
     }
     std::string message = ErrorTextDateValue::takes(type);
     this->state.getDiagnostics().error(arg->loc(), message);
@@ -330,20 +340,20 @@ Expr *DateChecker::checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
   }
   this->checkDateFields(args);
 
-  return ProcessChecker(this->state)
-      .builtinCall(loc, callee, Builtin::DateFromFields, args, Type::date());
+  return this->processChecker->builtinCall(loc, callee, Builtin::DateFromFields, args,
+                                           Type::date());
 }
 
 Expr *DateChecker::checkDateFunction(CallExpr *call, NameExpr *name) {
   call->type = Type::error();
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return call;
   }
   if (!call->args.empty()) {
     std::string message = ErrorTextDateNew::call();
     this->state.getDiagnostics().error(name->loc(), message);
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     return call;
   }
@@ -355,12 +365,12 @@ Expr *DateChecker::checkDateFunction(CallExpr *call, NameExpr *name) {
 
 Expr *DateChecker::checkDateStatic(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return call;
   }
   llvm::StringRef name = member->name;
   if (name == "UTC") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 1, 7);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 7);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
@@ -371,20 +381,20 @@ Expr *DateChecker::checkDateStatic(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "parse") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 1, 1);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
     }
     this->checkDateLiteral(call->args[0]);
-    call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], Type::string());
+    call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
     call->target = BuiltinCall{.builtin = Builtin::DateParse};
-    call->type = Type::result(Type::intTy(), Prelude(this->state).builtinType("DateError"));
+    call->type = Type::result(Type::intTy(), this->prelude->builtinType("DateError"));
     return call;
   }
   this->checkDateStaticMember(member);
   for (Expr *&arg : call->args) {
-    arg = ExprChecker(this->state).checkExpr(arg);
+    arg = this->exprChecker->checkExpr(arg);
   }
 
   return call;
@@ -406,12 +416,12 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   auto loosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
 
     return call;
   };
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return call;
   }
   const DateMethod *method = nullptr;
@@ -429,7 +439,7 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
     return loosely();
   }
   ArgumentChecker::ResultArityMatches arity =
-      ArgumentChecker(this->state).checkArity(call, method->min, method->max);
+      this->argumentChecker->checkArity(call, method->min, method->max);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
@@ -451,13 +461,13 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
     call->type = Type::intTy();
     break;
   case Builtin::DateSetTime:
-    call->args[0] = this->timeArg(ExprChecker(this->state).checkExpr(call->args[0], Type::intTy()));
+    call->args[0] = this->timeArg(this->exprChecker->checkExpr(call->args[0], Type::intTy()));
     call->type = Type::intTy();
     break;
   case Builtin::DateSetUTC:
   case Builtin::DateSetLocal:
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg, Type::intTy());
+      arg = this->exprChecker->checkExpr(arg, Type::intTy());
     }
     this->checkDateFields(
         call->args, size_t(method->field >= TZ_DATE_HOURS ? method->field - 1 : method->field),
@@ -467,7 +477,7 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
     break;
   case Builtin::DateToJSON:
     if (!call->args.empty()) {
-      call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], Type::string());
+      call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
     }
     call->type = Type::string();
     break;
@@ -476,7 +486,7 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
     call->type = Type::string();
     break;
   case Builtin::DateToLocale:
-    if (!DateFormatChecker(this->state).checkLocaleArgs(call->args, method->field)) {
+    if (!this->dateFormatChecker->checkLocaleArgs(call->args, method->field)) {
       return call;
     }
     call->args.insert(call->args.begin(), field(method->field));

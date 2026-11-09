@@ -30,6 +30,9 @@ constexpr int32_t kJsonArray = 4;
 
 }
 
+JsonLowerer::JsonLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 std::u16string JsonLowerer::utf16(llvm::StringRef text) {
   llvm::SmallVector<llvm::UTF16, 32> units;
   llvm::convertUTF8ToUTF16String(text, units);
@@ -46,9 +49,6 @@ bool JsonLowerer::isNullLiteral(const Expr *expr) {
 bool JsonLowerer::isJsonish(const Type *type) {
   return type->nonOptional()->isJson();
 }
-
-JsonLowerer::JsonLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::FunctionCallee JsonLowerer::jsonFunction(llvm::StringRef name, llvm::Type *ret,
                                                llvm::ArrayRef<llvm::Type *> params) {

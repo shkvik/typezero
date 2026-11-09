@@ -6,10 +6,21 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ExprChecker;
+class IndexProofs;
+class IntlChecker;
+class LiteralTypes;
+class TypeRelations;
+class GenericChecker;
+class ProcessChecker;
+class ArgumentChecker;
+
 class DateFormatChecker {
 public:
   static bool isLanguageTag(const std::string &tag);
-  explicit DateFormatChecker(SemanticState &owner);
+  DateFormatChecker(SemanticState &owner, SemanticParts &all);
 
   bool checkLocaleArgs(std::vector<Expr *> &args, int kind);
   Expr *checkDateFormatNew(llvm::SMLoc loc, std::vector<Expr *> &args);
@@ -29,6 +40,15 @@ private:
   static const char *methodName(int kind);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  IntlChecker *intlChecker = nullptr;
+  LiteralTypes *literalTypes = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  GenericChecker *genericChecker = nullptr;
+  ProcessChecker *processChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

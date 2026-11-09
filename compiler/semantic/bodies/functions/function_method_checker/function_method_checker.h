@@ -6,18 +6,26 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ArgListChecker;
+class ArgumentChecker;
+
 class FunctionMethodChecker {
 public:
   using ResultThisCallMade = Result<Expr *, FunctionMethodCheckerCheckThisCallError>;
   using ResultParamsJoined = Result<Expr *, FunctionMethodCheckerCheckListMethodError>;
 
-  explicit FunctionMethodChecker(SemanticState &owner);
+  FunctionMethodChecker(SemanticState &owner, SemanticParts &all);
 
   ResultThisCallMade checkThisCall(CallExpr *call, MemberExpr *member);
   ResultParamsJoined checkListMethod(CallExpr *call, MemberExpr *member);
 
 private:
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ArgListChecker *argListChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

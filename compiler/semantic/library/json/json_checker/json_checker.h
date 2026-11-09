@@ -6,9 +6,17 @@
 
 namespace tz {
 
+class SemanticParts;
+class FieldFacts;
+class CallChecker;
+class ExprChecker;
+class TypeRelations;
+class ArgumentChecker;
+class ArrayLiteralChecker;
+
 class JsonChecker {
 public:
-  explicit JsonChecker(SemanticState &owner);
+  JsonChecker(SemanticState &owner, SemanticParts &all);
 
   static bool holdsJson(const Type *type);
   static bool isNullName(const Expr *expr);
@@ -45,6 +53,12 @@ private:
   static std::string refText(const Expr *expr);
 
   SemanticState &state;
+  FieldFacts *fieldFacts = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  ArrayLiteralChecker *arrayLiteralChecker = nullptr;
 };
 
 }

@@ -1,6 +1,7 @@
 #include "compiler/semantic/bodies/expr/literal_checker/literal_checker.h"
 #include "compiler/semantic/bodies/expr/concat_checker/concat_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_operators/type_operators.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
@@ -12,8 +13,13 @@ using llvm::isa;
 
 namespace tz {
 
-LiteralChecker::LiteralChecker(SemanticState &owner)
-    : state(owner) {}
+LiteralChecker::LiteralChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->exprChecker = &all.getExprChecker();
+  this->literalTypes = &all.getLiteralTypes();
+  this->concatChecker = &all.getConcatChecker();
+  this->typeOperators = &all.getTypeOperators();
+}
 
 bool LiteralChecker::fitsIn(const IntLitExpr *lit, const Type *type, bool negated) {
   if (negated) {
@@ -28,7 +34,7 @@ LiteralChecker::ResultIntLiteralTyped
 LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool negated) {
   if (expected) {
     double value = negated ? -double(lit->value) : double(lit->value);
-    if (const Type *literal = LiteralTypes(this->state).numberLiteralFor(expected, value, false);
+    if (const Type *literal = this->literalTypes->numberLiteralFor(expected, value, false);
         literal && (!negated || value != 0)) {
       lit->type = literal;
       return ok(lit);
@@ -73,7 +79,7 @@ Expr *LiteralChecker::checkTemplate(TemplateExpr *tmpl, const Type *expected) {
   std::vector<const Type *> parts;
   bool constant = true;
   for (Expr *&e : tmpl->exprs) {
-    e = ExprChecker(this->state).checkExpr(e);
+    e = this->exprChecker->checkExpr(e);
     const Expr *part = e;
     if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit() && conv->type->isString()) {
       part = conv->operand;
@@ -81,7 +87,7 @@ Expr *LiteralChecker::checkTemplate(TemplateExpr *tmpl, const Type *expected) {
     parts.push_back(part->type);
     constant &= isa<NameExpr>(part) || isa<StringLitExpr>(part) || isa<IntLitExpr>(part) ||
                 isa<BoolLitExpr>(part);
-    e = ConcatChecker(this->state).toStringOperand(e);
+    e = this->concatChecker->toStringOperand(e);
   }
   tmpl->type = Type::string();
   const Type *want = expected ? expected->nonOptional() : nullptr;
@@ -105,7 +111,7 @@ Expr *LiteralChecker::checkTemplate(TemplateExpr *tmpl, const Type *expected) {
     }
   }
   const Type *type =
-      TypeOperators(this->state).evalTypeOp(Type::typeOp(TypeOp::Template, operands), operands);
+      this->typeOperators->evalTypeOp(Type::typeOp(TypeOp::Template, operands), operands);
   if (type->isPattern() ||
       (type->typeOp() == TypeOp::Template && TypeRelations::isImplicitlyConvertible(type, want))) {
     tmpl->type = type;

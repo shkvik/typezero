@@ -6,11 +6,29 @@
 
 namespace tz {
 
+class SemanticParts;
+class ClassBases;
+class ClassLinks;
+class FsDeclarer;
+class TypeParams;
+class ExprChecker;
+class ClassChecker;
+class ClassDeclarer;
+class TypeRelations;
+class ModuleDeclarer;
+class ReflectChecker;
+class ReturnInferrer;
+class FunctionChecker;
+class DecoratorChecker;
+class ClassValueChecker;
+class GenericInstantiator;
+
 class LateClasses {
 public:
-  explicit LateClasses(SemanticState &owner);
+  LateClasses(SemanticState &owner, SemanticParts &all);
 
   void checkLateClasses();
+  void rememberEmittedLateClasses();
   void makeLateClass(ClassDecl *cls);
   void checkStaticFields(ClassDecl *cls);
   void markLateOverrides(ClassDecl *cls);
@@ -40,6 +58,21 @@ private:
   ResultBaseClassUsable baseClass(const Type *type) const;
 
   SemanticState &state;
+  ClassBases *classBases = nullptr;
+  ClassLinks *classLinks = nullptr;
+  FsDeclarer *fsDeclarer = nullptr;
+  TypeParams *typeParams = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  ClassChecker *classChecker = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ModuleDeclarer *moduleDeclarer = nullptr;
+  ReflectChecker *reflectChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  FunctionChecker *functionChecker = nullptr;
+  DecoratorChecker *decoratorChecker = nullptr;
+  ClassValueChecker *classValueChecker = nullptr;
+  GenericInstantiator *genericInstantiator = nullptr;
 };
 
 }

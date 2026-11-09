@@ -12,6 +12,7 @@
 #include "compiler/semantic/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/semantic/library/events/event_maps/event_maps.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
@@ -24,8 +25,22 @@ using llvm::isa;
 
 namespace tz {
 
-EventTargetChecker::EventTargetChecker(SemanticState &owner)
-    : state(owner) {}
+EventTargetChecker::EventTargetChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->eventMaps = &all.getEventMaps();
+  this->typeParams = &all.getTypeParams();
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->libraryCalls = &all.getLibraryCalls();
+  this->typeDeclarer = &all.getTypeDeclarer();
+  this->typeResolver = &all.getTypeResolver();
+  this->typeRelations = &all.getTypeRelations();
+  this->closureChecker = &all.getClosureChecker();
+  this->emitterChecker = &all.getEmitterChecker();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->genericInstantiator = &all.getGenericInstantiator();
+}
 
 EventTargetChecker::ResultListenerEvent
 EventTargetChecker::listenerEvent(const Type *type, const ClassDecl *eventClass) {
@@ -58,7 +73,7 @@ EventTargetChecker::ResultOneErrorValue EventTargetChecker::oneErrorValue(const 
 
 EventTargetChecker::ResultEmitterEvents
 EventTargetChecker::emitterEvents(const Type *type, llvm::StringRef fn, bool target) {
-  const Type *events = EventMaps(this->state).eventMapOf(type);
+  const Type *events = this->eventMaps->eventMapOf(type);
   if (!events) {
     std::string message = ErrorTextEventsFunction::notEmitter(fn, target, type->name());
 
@@ -84,18 +99,18 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
   }
   call->type = Type::error();
   member->type = Type::error();
-  bool rejected = CallChecker(this->state).rejectSpread(call);
+  bool rejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : ArgumentChecker(this->state).checkArity(call, 2, 3);
+      rejected ? ok(call) : this->argumentChecker->checkArity(call, 2, 3);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
   if (rejected || arity.isErr()) {
     return call;
   }
-  call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], Type::string());
+  call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
   const Type *event = eventClass->type;
-  const Type *object = TypeDeclarer(this->state).resolveAlias(objectListener);
+  const Type *object = this->typeDeclarer->resolveAlias(objectListener);
   auto eventKind = [&](const Type *type, llvm::SMLoc loc) -> const Type * {
     if (type->isError()) {
       return nullptr;
@@ -113,11 +128,11 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
   if (auto *fe = dyn_cast<FunctionExpr>(listener)) {
     kind = event;
     if (!fe->fn->params.empty() && fe->fn->params[0].type && !fe->fn->params[0].rest()) {
-      kind = eventKind(TypeResolver(this->state).resolveType(*fe->fn->params[0].type, false),
+      kind = eventKind(this->typeResolver->resolveType(*fe->fn->params[0].type, false),
                        fe->fn->params[0].loc);
     }
     if (!kind) {
-      listener = ExprChecker(this->state).checkExpr(listener);
+      listener = this->exprChecker->checkExpr(listener);
       return call;
     }
     Signature sig;
@@ -126,23 +141,23 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
     sig.ret = Type::voidTy();
     sig.voidResult = true;
     sig.asyncVoid = true;
-    listener = ClosureChecker(this->state).checkFunctionExpr(fe, &sig);
+    listener = this->closureChecker->checkFunctionExpr(fe, &sig);
   } else if (isa<ObjectLitExpr>(listener)) {
-    listener = ArgumentChecker(this->state).checkArg(listener, object);
+    listener = this->argumentChecker->checkArg(listener, object);
   } else {
-    listener = ExprChecker(this->state).checkExpr(listener);
+    listener = this->exprChecker->checkExpr(listener);
     const Type *type = listener->type;
     if (type->isFunction()) {
       kind = type->params().empty() ? event : eventKind(type->params()[0], listener->loc());
       if (kind && type->params().empty()) {
-        listener = TypeRelations(this->state)
-                       .coerce(listener, Type::function({event}, 1, false, Type::voidTy()));
+        listener = this->typeRelations->coerce(listener,
+                                               Type::function({event}, 1, false, Type::voidTy()));
       } else if (kind) {
-        listener = TypeRelations(this->state)
-                       .coerce(listener, Type::function({kind}, 1, false, Type::voidTy()));
+        listener =
+            this->typeRelations->coerce(listener, Type::function({kind}, 1, false, Type::voidTy()));
       }
     } else {
-      listener = TypeRelations(this->state).coerce(listener, object, "the listener");
+      listener = this->typeRelations->coerce(listener, object, "the listener");
     }
   }
   if (listener->type->isError()) {
@@ -151,18 +166,18 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
   std::vector<bool> given(call->args.size(), false);
   given[0] = given[1] = true;
   if (!add) {
-    listener = TypeRelations(this->state).convert(listener, Type::unknown());
+    listener = this->typeRelations->convert(listener, Type::unknown());
     this->state.getInventoryStore().markComparesFunctions();
-    return EmitterChecker(this->state)
-        .callLibraryMethod(call, member, cls, "removeListenerWith", {}, &given, false);
+    return this->emitterChecker->callLibraryMethod(call, member, cls, "removeListenerWith", {},
+                                                   &given, false);
   }
   if (kind) {
-    return EmitterChecker(this->state)
-        .callLibraryMethod(call, member, cls, "addFunctionListener", {kind}, &given, false);
+    return this->emitterChecker->callLibraryMethod(call, member, cls, "addFunctionListener", {kind},
+                                                   &given, false);
   }
 
-  return EmitterChecker(this->state)
-      .callLibraryMethod(call, member, cls, "addObjectListener", {}, &given, false);
+  return this->emitterChecker->callLibraryMethod(call, member, cls, "addObjectListener", {}, &given,
+                                                 false);
 }
 
 Expr *EventTargetChecker::callLibraryFunction(CallExpr *call, llvm::StringRef name,
@@ -186,51 +201,50 @@ Expr *EventTargetChecker::callLibraryStatic(CallExpr *call, ClassDecl *cls, llvm
 Expr *EventTargetChecker::callLibrarySymbol(CallExpr *call, FuncSymbol *sym,
                                             llvm::ArrayRef<const Type *> bound,
                                             const std::vector<bool> &given, llvm::SMLoc loc) {
-  ReturnInferrer(this->state).resolveParams(sym);
+  this->returnInferrer->resolveParams(sym);
   const Type *ret = sym->getReturnType();
   FuncSymbol *callee = sym;
   if (sym->isGeneric() && !this->state.getFunctionStack().isInsideTrial() &&
       llvm::none_of(bound, [](const Type *t) { return TypeQueries::mentionsParam(t); })) {
-    if (FuncSymbol *instance = GenericInstantiator(this->state).instantiate(sym, bound, loc)) {
+    if (FuncSymbol *instance = this->genericInstantiator->instantiate(sym, bound, loc)) {
       callee = instance;
     }
   }
-  ReturnInferrer(this->state).resolveParams(callee);
+  this->returnInferrer->resolveParams(callee);
   call->target = FunctionCall{.func = callee};
-  call->type =
-      ret ? TypeParams(this->state).substitute(ret, sym->typeParams, bound) : Type::error();
+  call->type = ret ? this->typeParams->substitute(ret, sym->typeParams, bound) : Type::error();
   std::vector<const Type *> params = callee->params;
   if (callee == sym) {
     for (const Type *&p : params) {
-      p = TypeParams(this->state).substitute(p, sym->typeParams, bound);
+      p = this->typeParams->substitute(p, sym->typeParams, bound);
     }
   }
 
-  return ArgumentChecker(this->state)
-      .checkArguments(call, params, callee->minArgs, callee->hasRest, loc, &given);
+  return this->argumentChecker->checkArguments(call, params, callee->minArgs, callee->hasRest, loc,
+                                               &given);
 }
 
 Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
-  if (LibraryCalls(this->state).inLibrary(call->loc())) {
+  if (this->libraryCalls->inLibrary(call->loc())) {
     return nullptr;
   }
   call->type = Type::error();
   auto checkArgsLoosely = [&](size_t from) {
     for (size_t i = from; i < call->args.size(); ++i) {
-      call->args[i] = ExprChecker(this->state).checkExpr(call->args[i]);
+      call->args[i] = this->exprChecker->checkExpr(call->args[i]);
     }
   };
   if (fn == "getEventListeners" || fn == "listenerCount") {
-    bool rejected = CallChecker(this->state).rejectSpread(call);
+    bool rejected = this->callChecker->rejectSpread(call);
     ArgumentChecker::ResultArityMatches arity =
-        rejected ? ok(call) : ArgumentChecker(this->state).checkArity(call, 2, 2);
+        rejected ? ok(call) : this->argumentChecker->checkArity(call, 2, 2);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(loc, arity.error().message);
     }
     if (rejected || arity.isErr()) {
       return call;
     }
-    Expr *object = ExprChecker(this->state).checkExpr(call->args[0]);
+    Expr *object = this->exprChecker->checkExpr(call->args[0]);
     if (ClassDecl *target = this->state.getLibraryDeclarations().findLibraryClass("EventTarget");
         fn == "getEventListeners" && target && ClassDeclarer::classOf(object->type) &&
         ClassDeclarer::classOf(object->type)->derivesFrom(target)) {
@@ -239,9 +253,8 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
                                                          std::vector<Expr *>{call->args[1]});
       method->type = Type::error();
       std::vector<bool> given{false};
-      EmitterChecker(this->state)
-          .callLibraryMethod(method, member, ClassDeclarer::classOf(object->type), "listenersOf",
-                             {}, &given, false);
+      this->emitterChecker->callLibraryMethod(method, member, ClassDeclarer::classOf(object->type),
+                                              "listenersOf", {}, &given, false);
       return method;
     }
     if (object->type->isError()) {
@@ -259,9 +272,8 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
     member->type = Type::error();
     auto *method = this->state.getAst().make<CallExpr>(call->loc(), member,
                                                        std::vector<Expr *>{call->args[1]});
-    Expr *checked =
-        EmitterChecker(this->state)
-            .checkEmitterCall(method, member, ClassDeclarer::classOf(object->type), false);
+    Expr *checked = this->emitterChecker->checkEmitterCall(
+        method, member, ClassDeclarer::classOf(object->type), false);
     return checked ? checked : method;
   }
   if (fn != "once" && fn != "on") {
@@ -276,16 +288,16 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
       });
     }
   }
-  bool rejected = CallChecker(this->state).rejectSpread(call);
+  bool rejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : ArgumentChecker(this->state).checkArity(call, 2, most);
+      rejected ? ok(call) : this->argumentChecker->checkArity(call, 2, most);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
   if (rejected || arity.isErr()) {
     return call;
   }
-  call->args[0] = ExprChecker(this->state).checkExpr(call->args[0]);
+  call->args[0] = this->exprChecker->checkExpr(call->args[0]);
   const Type *type = call->args[0]->type;
   if (type->isError()) {
     checkArgsLoosely(1);
@@ -301,7 +313,7 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
       checkArgsLoosely(1);
       return call;
     }
-    call->args[1] = ArgumentChecker(this->state).checkArg(call->args[1], Type::string());
+    call->args[1] = this->argumentChecker->checkArg(call->args[1], Type::string());
 
     return this->callLibraryFunction(call, "onceTarget", {}, given, loc);
   }
@@ -312,7 +324,7 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
     return call;
   }
   const Type *events = emitter.value();
-  const Type *args = EventMaps(this->state).eventArgs(events, call->args[1], fn);
+  const Type *args = this->eventMaps->eventArgs(events, call->args[1], fn);
   if (!args) {
     checkArgsLoosely(2);
     return call;
@@ -326,7 +338,7 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
       root && root->library() && root->name != "EventEmitter" && root->name != "EventEmitterBase";
   bool runsOnce = (!this->state.getFunctionStack().getCurrentDecl() &&
                    !this->state.getFunctionStack().isInsideAwaitLoop()) ||
-                  EmitterChecker(this->state).ownsEmitter(call->args[0]);
+                  this->emitterChecker->ownsEmitter(call->args[0]);
   if (!ends && !timed && !runsOnce) {
     llvm::StringRef name =
         isa<NameExpr>(call->args[0]) ? cast<NameExpr>(call->args[0])->name : llvm::StringRef();
@@ -352,9 +364,8 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
       }
       failure = value.value();
     }
-    call->args.push_back(
-        ExprChecker(this->state)
-            .checkExpr(this->state.getAst().make<BoolLitExpr>(call->loc(), errors != nullptr)));
+    call->args.push_back(this->exprChecker->checkExpr(
+        this->state.getAst().make<BoolLitExpr>(call->loc(), errors != nullptr)));
     given.resize(call->args.size(), false);
     given.back() = true;
     return this->callLibraryFunction(call, fn.str() + "Within", {args, failure}, given, loc);
@@ -365,9 +376,8 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
   while (call->args.size() < most) {
     call->args.push_back(this->state.getAst().make<UndefinedExpr>(call->loc()));
   }
-  call->args.push_back(
-      ExprChecker(this->state)
-          .checkExpr(this->state.getAst().make<BoolLitExpr>(call->loc(), errors != nullptr)));
+  call->args.push_back(this->exprChecker->checkExpr(
+      this->state.getAst().make<BoolLitExpr>(call->loc(), errors != nullptr)));
   given.resize(call->args.size(), false);
   given.back() = true;
   if (!errors) {

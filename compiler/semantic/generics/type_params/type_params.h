@@ -6,9 +6,18 @@
 
 namespace tz {
 
+class SemanticParts;
+class TypeResolver;
+class ClassDeclarer;
+class TypeOperators;
+class ReturnInferrer;
+class DecoratorChecker;
+class AliasInstantiator;
+class GenericClassInstantiator;
+
 class TypeParams {
 public:
-  explicit TypeParams(SemanticState &owner);
+  TypeParams(SemanticState &owner, SemanticParts &all);
 
   std::vector<const Type *> declareTypeParams(llvm::ArrayRef<TypeParamDecl> decls,
                                               std::vector<const Type *> *defaults);
@@ -43,6 +52,13 @@ private:
                            llvm::ArrayRef<const Type *> args, bool voidOk);
 
   SemanticState &state;
+  TypeResolver *typeResolver = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  TypeOperators *typeOperators = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  DecoratorChecker *decoratorChecker = nullptr;
+  AliasInstantiator *aliasInstantiator = nullptr;
+  GenericClassInstantiator *genericClassInstantiator = nullptr;
 };
 
 }

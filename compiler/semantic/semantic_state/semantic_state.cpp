@@ -3,10 +3,9 @@
 namespace tz {
 
 SemanticState::SemanticState(AstContext &ctx, Diagnostics &diags, SourceFile &file,
-                             llvm::ArrayRef<const Feature *> registered, EventInference &inference)
+                             EventInference &inference)
     : ast(ctx),
       diagnostics(diags),
-      features(registered),
       inventoryStore(file),
       libraryDeclarations(file.builtins),
       eventStore(inference) {}
@@ -17,10 +16,6 @@ AstContext &SemanticState::getAst() {
 
 Diagnostics &SemanticState::getDiagnostics() {
   return this->diagnostics;
-}
-
-llvm::ArrayRef<const Feature *> SemanticState::getFeatures() const {
-  return this->features;
 }
 
 Completer *SemanticState::getCompleter() const {

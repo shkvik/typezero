@@ -6,9 +6,19 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallCycles;
+class ClassBases;
+class ExprChecker;
+class ClassDeclarer;
+class TypeRelations;
+class ReturnInferrer;
+class FunctionChecker;
+class PredicateChecker;
+
 class MethodLiteralChecker {
 public:
-  explicit MethodLiteralChecker(SemanticState &owner);
+  MethodLiteralChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkMethodLiteral(ObjectLitExpr *lit, const Type *target);
 
@@ -27,6 +37,14 @@ private:
   ResultPropertyFits propertyFits(const ObjectLitExpr::Property &prop, const Type *target) const;
 
   SemanticState &state;
+  CallCycles *callCycles = nullptr;
+  ClassBases *classBases = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  FunctionChecker *functionChecker = nullptr;
+  PredicateChecker *predicateChecker = nullptr;
 };
 
 }

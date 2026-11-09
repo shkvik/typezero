@@ -10,6 +10,7 @@
 #include "compiler/semantic/library/crypto/subtle_algorithms/subtle_algorithms.h"
 #include "compiler/semantic/library/events/event_target_checker/event_target_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -20,6 +21,17 @@ using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
+
+SubtleCallChecker::SubtleCallChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->methodCallChecker = &all.getMethodCallChecker();
+  this->eventTargetChecker = &all.getEventTargetChecker();
+}
 
 SubtleCallChecker::ResultKeyFormatKnown SubtleCallChecker::knownFormat(llvm::StringRef format) {
   static const llvm::StringLiteral formats[] = {"raw", "pkcs8", "spki", "jwk"};
@@ -307,9 +319,6 @@ std::string SubtleCallChecker::literalAlgorithm(const Expr *arg, llvm::StringRef
   return name;
 }
 
-SubtleCallChecker::SubtleCallChecker(SemanticState &owner)
-    : state(owner) {}
-
 Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, const Type *expected) {
   llvm::StringRef method = member->name;
   std::vector<Expr *> &args = call->args;
@@ -320,7 +329,7 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
   auto algorithm = [&](size_t i) -> const Expr * {
     Expr *e = arg(i);
     if (auto *name = dyn_cast_or_null<NameExpr>(e)) {
-      if (VarSymbol *var = Scopes(this->state).lookup(name->name).var()) {
+      if (VarSymbol *var = this->scopes->lookup(name->name).var()) {
         if (const Expr *lit = this->state.getConstantStore().findConstLiteral(var)) {
           return lit;
         }
@@ -440,7 +449,7 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
   std::vector<bool> checkedArgs(args.size(), false);
   std::function<bool(const Expr *)> isJsonValue = [&](const Expr *e) -> bool {
     if (auto *name = dyn_cast_or_null<NameExpr>(e)) {
-      VarSymbol *var = Scopes(this->state).lookup(name->name).var();
+      VarSymbol *var = this->scopes->lookup(name->name).var();
       return var && var->type && var->type->nonOptional()->isJson();
     }
     if (auto *m = dyn_cast_or_null<MemberExpr>(e)) {
@@ -452,7 +461,7 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     if (auto *c = dyn_cast_or_null<CallExpr>(e)) {
       if (auto *m = dyn_cast<MemberExpr>(c->callee)) {
         return m->name == "parse" && m->typeArgs.empty() &&
-               CallChecker(this->state).isGlobalName(m->object, "JSON");
+               this->callChecker->isGlobalName(m->object, "JSON");
       }
     }
 
@@ -491,12 +500,12 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     }
     if ((f.empty() || f == "jwk") && isJsonValue(arg(1)) && isa<NameExpr>(member->object) &&
         this->state.getLibraryDeclarations().findLibraryFunction("subtleJwkOf")) {
-      Expr *json = ExprChecker(this->state).checkExpr(arg(1));
+      Expr *json = this->exprChecker->checkExpr(arg(1));
       auto *callee = this->state.getAst().make<NameExpr>(json->loc(), "subtleJwkOf");
       auto *wrap =
           this->state.getAst().make<CallExpr>(json->loc(), callee, std::vector<Expr *>{json});
-      args[1] = EventTargetChecker(this->state)
-                    .callLibraryFunction(wrap, "subtleJwkOf", {}, {true}, json->loc());
+      args[1] = this->eventTargetChecker->callLibraryFunction(wrap, "subtleJwkOf", {}, {true},
+                                                              json->loc());
       checkedArgs[1] = true;
       if (target.empty()) {
         target = "subtleImportAny";
@@ -561,13 +570,13 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
         this->state.getLibraryDeclarations().findLibraryClass("SubtleCrypto"), method, false);
     FuncSymbol *sym = methods.size() == 1 ? methods[0]->sym : nullptr;
     if (sym) {
-      ReturnInferrer(this->state).resolveParams(sym);
+      this->returnInferrer->resolveParams(sym);
     }
     for (size_t i = 0; i < args.size(); ++i) {
       if (!checkedArgs[i]) {
         args[i] = sym && i < sym->params.size()
-                      ? ArgumentChecker(this->state).checkArg(args[i], sym->params[i])
-                      : ExprChecker(this->state).checkExpr(args[i]);
+                      ? this->argumentChecker->checkArg(args[i], sym->params[i])
+                      : this->exprChecker->checkExpr(args[i]);
       }
     }
     return call;
@@ -575,10 +584,10 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
   Expr *checked;
   if (!target.empty() && this->state.getLibraryDeclarations().findLibraryFunction(target) &&
       isa<NameExpr>(member->object)) {
-    checked = EventTargetChecker(this->state)
-                  .callLibraryFunction(call, target, {}, checkedArgs, member->loc());
+    checked =
+        this->eventTargetChecker->callLibraryFunction(call, target, {}, checkedArgs, member->loc());
   } else {
-    checked = MethodCallChecker(this->state).checkMethodCall(call, member, expected);
+    checked = this->methodCallChecker->checkMethodCall(call, member, expected);
   }
   if (!keyDataFits()) {
     checked->type = Type::error();

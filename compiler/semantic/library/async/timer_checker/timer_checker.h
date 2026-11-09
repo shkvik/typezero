@@ -6,6 +6,16 @@
 
 namespace tz {
 
+class SemanticParts;
+class FsChecker;
+class CallChecker;
+class ExprChecker;
+class TypeRelations;
+class ClosureChecker;
+class EmitterChecker;
+class ArgumentChecker;
+class FunctionValueChecker;
+
 class TimerChecker {
 public:
   using ResultNextTickQueued = Result<Expr *, TimerCheckerCheckNextTickError>;
@@ -14,7 +24,7 @@ public:
   using ResultSchedulerAwait = Result<Expr *, TimerCheckerCheckSchedulerCallError>;
   using ResultPromiseOfTimer = Result<Expr *, TimerCheckerCheckTimersPromisesCallError>;
 
-  explicit TimerChecker(SemanticState &owner);
+  TimerChecker(SemanticState &owner, SemanticParts &all);
 
   const Type *timerCallType(const Expr *init) const;
   ResultNextTickQueued checkNextTick(CallExpr *call);
@@ -33,6 +43,14 @@ private:
                                            llvm::StringRef fn);
 
   SemanticState &state;
+  FsChecker *fsChecker = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ClosureChecker *closureChecker = nullptr;
+  EmitterChecker *emitterChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  FunctionValueChecker *functionValueChecker = nullptr;
 };
 
 }

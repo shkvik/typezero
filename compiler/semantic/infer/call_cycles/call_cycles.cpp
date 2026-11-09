@@ -1,12 +1,16 @@
 #include "compiler/semantic/infer/call_cycles/call_cycles.h"
 #include "compiler/program/ast_walker/ast_walker.h"
+#include "compiler/semantic/declare/import_binder/import_binder.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 
 namespace tz {
 
-CallCycles::CallCycles(SemanticState &owner)
-    : state(owner) {}
+CallCycles::CallCycles(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->importBinder = &all.getImportBinder();
+}
 
 void CallCycles::findCycles(llvm::ArrayRef<FunctionDecl *> functions, ResolveCall resolve) {
   CycleSearch search;
@@ -21,6 +25,15 @@ void CallCycles::findCycles(llvm::ArrayRef<FunctionDecl *> functions, ResolveCal
       this->visit(node, search);
     }
   }
+}
+
+void CallCycles::findProgramCycles() {
+  ImportBinder &binder = *this->importBinder;
+  auto callee = [&binder](FunctionDecl *fn, llvm::StringRef name) {
+    return binder.cycleCallee(fn, name);
+  };
+  std::vector<FunctionDecl *> declared = this->state.getReturnInference().getDeclaredFunctions();
+  this->findCycles(declared, callee);
 }
 
 std::vector<FunctionDecl *>

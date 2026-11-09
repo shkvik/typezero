@@ -6,9 +6,17 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class ClassBases;
+class TypeResolver;
+class ReturnInferrer;
+class FunctionChecker;
+class GenericClassChecker;
+
 class ClassDeclarer {
 public:
-  explicit ClassDeclarer(SemanticState &owner);
+  ClassDeclarer(SemanticState &owner, SemanticParts &all);
 
   static ClassDecl *classOf(const Type *type);
   static std::vector<FunctionDecl *> methodsNamed(const ClassDecl *cls, llvm::StringRef name,
@@ -71,6 +79,12 @@ private:
                      llvm::SmallPtrSetImpl<const ClassDecl *> &visiting);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  ClassBases *classBases = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  FunctionChecker *functionChecker = nullptr;
+  GenericClassChecker *genericClassChecker = nullptr;
 };
 
 }

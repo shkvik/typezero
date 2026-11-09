@@ -7,7 +7,7 @@ InferPass::InferPass(SemanticExternalFacade &owner)
     : engine(owner) {}
 
 Errors InferPass::run() const {
-  return this->engine.inferProgram();
+  return this->engine.findCallCycles();
 }
 
 }

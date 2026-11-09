@@ -6,11 +6,22 @@
 
 namespace tz {
 
+class SemanticParts;
+class FlowChecker;
+class TypeDeclarer;
+class TypeResolver;
+class ClassDeclarer;
+class TypeRelations;
+class ReturnInferrer;
+class FunctionChecker;
+class MethodCallChecker;
+class GenericInstantiator;
+
 class IterableChecker {
 public:
   using ResultIterableParam = Result<const Type *, IterableCheckerIterableParamError>;
 
-  explicit IterableChecker(SemanticState &owner);
+  IterableChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *userIterator(Expr *expr);
   Expr *asyncUserIterator(Expr *expr);
@@ -31,6 +42,15 @@ private:
   static ResultAsyncIterator asyncIteratorGiven(const Type *type, const Expr *result);
 
   SemanticState &state;
+  FlowChecker *flowChecker = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  FunctionChecker *functionChecker = nullptr;
+  MethodCallChecker *methodCallChecker = nullptr;
+  GenericInstantiator *genericInstantiator = nullptr;
 };
 
 }

@@ -9,6 +9,7 @@
 #include "compiler/semantic/generics/generic_instantiator/generic_instantiator.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/intl/intl_checker/intl_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 
@@ -22,8 +23,18 @@ constexpr llvm::StringLiteral kAsyncIteratorMethod = "[Symbol.asyncIterator]";
 
 }
 
-IterableChecker::IterableChecker(SemanticState &owner)
-    : state(owner) {}
+IterableChecker::IterableChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->flowChecker = &all.getFlowChecker();
+  this->typeDeclarer = &all.getTypeDeclarer();
+  this->typeResolver = &all.getTypeResolver();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->typeRelations = &all.getTypeRelations();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->functionChecker = &all.getFunctionChecker();
+  this->methodCallChecker = &all.getMethodCallChecker();
+  this->genericInstantiator = &all.getGenericInstantiator();
+}
 
 FuncSymbol *IterableChecker::iterateFunction() {
   FuncSymbol *known = this->state.getExpressionMarks().getIterateSymbol();
@@ -34,7 +45,7 @@ FuncSymbol *IterableChecker::iterateFunction() {
       this->state.getLibraryDeclarations().getBuiltinItems(BuiltinText::ITERATE);
   FunctionDecl *fn = llvm::cast<FunctionDecl>(items.front());
   this->state.getScopeStack().enterOnlyTypes(this->state.getScopeStack().getTopTypes());
-  FunctionChecker(this->state).declareFunction(fn, nullptr, false);
+  this->functionChecker->declareFunction(fn, nullptr, false);
   this->state.getScopeStack().leaveOnlyTypes();
   this->state.getExpressionMarks().rememberIterateSymbol(fn->sym);
   this->state.getGenericStore().rememberExactParams(fn->sym, {true, true});
@@ -59,10 +70,10 @@ const Type *IterableChecker::nextValueType(const Type *type) {
   }
   const Type *next = nullptr;
   if (ClassDecl *cls = ClassDeclarer::classOf(type)) {
-    ClassDeclarer(this->state).completeClass(cls);
+    this->classDeclarer->completeClass(cls);
     for (FunctionDecl *fn : ClassDeclarer::methodsNamed(cls, "next", false)) {
       if (fn->sym && fn->sym->minArgs == 0 && fn->typeParams.empty()) {
-        next = ReturnInferrer(this->state).functionType(fn->sym);
+        next = this->returnInferrer->functionType(fn->sym);
       }
     }
   }
@@ -112,8 +123,8 @@ Expr *IterableChecker::iteratorOf(Expr *it) {
   auto *call = this->state.getAst().make<CallExpr>(loc, callee, std::vector<Expr *>{it});
   call->target = FunctionCall{.func = iterate};
   if (!this->state.getFunctionStack().isInsideTrial()) {
-    if (FuncSymbol *instance = GenericInstantiator(this->state)
-                                   .instantiate(iterate, {type->nonOptional(), value}, loc)) {
+    if (FuncSymbol *instance =
+            this->genericInstantiator->instantiate(iterate, {type->nonOptional(), value}, loc)) {
       call->target = FunctionCall{.func = instance};
     }
   }
@@ -121,9 +132,9 @@ Expr *IterableChecker::iteratorOf(Expr *it) {
   call->type = Type::iterator(value);
   callee->type = Type::function({type->nonOptional()}, 1, false, call->type);
   if (type->isOptional()) {
-    call->args[0] = TypeRelations(this->state).convert(it, type->nonOptional());
+    call->args[0] = this->typeRelations->convert(it, type->nonOptional());
   }
-  FlowChecker(this->state).calledFunction();
+  this->flowChecker->calledFunction();
 
   return call;
 }
@@ -134,14 +145,14 @@ Expr *IterableChecker::userIterator(Expr *expr) {
   if (!cls) {
     return nullptr;
   }
-  ClassDeclarer(this->state).completeClass(cls);
+  this->classDeclarer->completeClass(cls);
   if (ClassDeclarer::methodsNamed(cls, kIteratorMethod, false).empty() &&
       !ClassBases::findField(cls, kIteratorMethod)) {
     return nullptr;
   }
   auto *member = this->state.getAst().make<MemberExpr>(expr->loc(), expr, kIteratorMethod);
   auto *call = this->state.getAst().make<CallExpr>(expr->loc(), member, std::vector<Expr *>{});
-  Expr *result = MethodCallChecker(this->state).checkMethodCall(call, member);
+  Expr *result = this->methodCallChecker->checkMethodCall(call, member);
   if (result->type->isError() || result->type->isIterator()) {
     return result;
   }
@@ -162,7 +173,7 @@ const Type *IterableChecker::asyncIterableType(const Type *type) {
   if (!cls) {
     return nullptr;
   }
-  ClassDeclarer(this->state).completeClass(cls);
+  this->classDeclarer->completeClass(cls);
   std::vector<FunctionDecl *> methods =
       ClassDeclarer::methodsNamed(cls, kAsyncIteratorMethod, false);
   if (methods.size() != 1 || !methods[0]->sym) {
@@ -179,14 +190,14 @@ Expr *IterableChecker::asyncUserIterator(Expr *expr) {
   if (!cls) {
     return nullptr;
   }
-  ClassDeclarer(this->state).completeClass(cls);
+  this->classDeclarer->completeClass(cls);
   if (ClassDeclarer::methodsNamed(cls, kAsyncIteratorMethod, false).empty() &&
       !ClassBases::findField(cls, kAsyncIteratorMethod)) {
     return nullptr;
   }
   auto *member = this->state.getAst().make<MemberExpr>(expr->loc(), expr, kAsyncIteratorMethod);
   auto *call = this->state.getAst().make<CallExpr>(expr->loc(), member, std::vector<Expr *>{});
-  Expr *result = MethodCallChecker(this->state).checkMethodCall(call, member);
+  Expr *result = this->methodCallChecker->checkMethodCall(call, member);
   if (result->type->isError() || result->type->isAsyncIterator()) {
     return result;
   }
@@ -222,7 +233,7 @@ const Type *IterableChecker::elementTypeOf(const Type *type) {
   if (!cls) {
     return nullptr;
   }
-  ClassDeclarer(this->state).completeClass(cls);
+  this->classDeclarer->completeClass(cls);
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, kIteratorMethod, false);
   if (methods.size() != 1 || !methods[0]->sym) {
     return nullptr;
@@ -237,7 +248,7 @@ const Type *IterableChecker::elementTypeOf(const Type *type) {
 
 bool IterableChecker::isIterableRef(const TypeRef &ref) const {
   return ref.kind() == TypeRefKind::GENERIC_REF && ref.name == "Iterable" &&
-         !TypeDeclarer(this->state).lookupType("Iterable");
+         !this->typeDeclarer->lookupType("Iterable");
 }
 
 IterableChecker::ResultIteratorGiven IterableChecker::iteratorGiven(const Type *type,
@@ -284,7 +295,7 @@ IterableChecker::iterableParam(FunctionDecl *fn, FuncSymbol *sym, const TypeRef 
         .message = message,
     });
   }
-  const Type *element = TypeResolver(this->state).resolveType(ref.args[0], false);
+  const Type *element = this->typeResolver->resolveType(ref.args[0], false);
   if (element->isError()) {
     return ok(element);
   }

@@ -5,9 +5,12 @@
 
 namespace tz {
 
+class SemanticParts;
+class BuiltinModuleTypes;
+
 class CryptoErrors {
 public:
-  explicit CryptoErrors(SemanticState &owner);
+  CryptoErrors(SemanticState &owner, SemanticParts &all);
 
   void declare();
   const Type *named(llvm::StringRef name);
@@ -17,6 +20,7 @@ private:
   static bool flag(llvm::ArrayRef<Expr *> args, size_t i);
 
   SemanticState &state;
+  BuiltinModuleTypes *builtinModuleTypes = nullptr;
 };
 
 }

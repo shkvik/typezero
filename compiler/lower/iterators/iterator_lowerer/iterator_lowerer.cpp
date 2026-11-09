@@ -29,6 +29,9 @@ constexpr uint64_t kHeaderSize = 16;
 
 }
 
+IteratorLowerer::IteratorLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 const Type *IteratorLowerer::iteratedType(const Type *type) {
   if (type->isTypedArray()) {
     return type->elementType();
@@ -36,9 +39,6 @@ const Type *IteratorLowerer::iteratedType(const Type *type) {
 
   return type->isArray() ? type->inner() : type->isString() ? type : type->yielded();
 }
-
-IteratorLowerer::IteratorLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 void IteratorLowerer::emitIteratorForOf(ForOfStmt *stmt) {
   llvm::SmallVector<llvm::StringRef, 1> labels = std::move(this->lowering.pendingLabels);

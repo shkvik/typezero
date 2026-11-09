@@ -13,6 +13,9 @@
 
 namespace tz {
 
+PathLowerer::PathLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 const std::vector<MakerFields> &PathLowerer::pathObjects() {
   static const std::vector<MakerFields> table = {
       {nullptr, {"root", "dir", "base", "ext", "name"}},
@@ -20,9 +23,6 @@ const std::vector<MakerFields> &PathLowerer::pathObjects() {
 
   return table;
 }
-
-PathLowerer::PathLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Value *PathLowerer::emitPathCall(CallExpr *call) {
   llvm::Type *voidTy = this->lowering.builder.getVoidTy();

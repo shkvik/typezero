@@ -7,9 +7,19 @@
 
 namespace tz {
 
+class SemanticParts;
+class ExprChecker;
+class IndexProofs;
+class BytesChecker;
+class CryptoErrors;
+class TypeRelations;
+class ConstantFolder;
+class ProcessChecker;
+class ArgumentChecker;
+
 class CryptoArgs {
 public:
-  explicit CryptoArgs(SemanticState &owner);
+  CryptoArgs(SemanticState &owner, SemanticParts &all);
 
   Expr *cryptoCall(CallExpr *call, CryptoFn fn, std::vector<Expr *> args, const Type *type);
   Expr *cryptoResult(CallExpr *call, CryptoFn fn, std::vector<Expr *> args, const Type *type);
@@ -44,6 +54,14 @@ private:
   static std::optional<std::string> literalOf(const Expr *e);
 
   SemanticState &state;
+  ExprChecker *exprChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  BytesChecker *bytesChecker = nullptr;
+  CryptoErrors *cryptoErrors = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ConstantFolder *constantFolder = nullptr;
+  ProcessChecker *processChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

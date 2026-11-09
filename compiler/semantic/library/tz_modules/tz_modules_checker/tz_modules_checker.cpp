@@ -1,6 +1,7 @@
 #include "compiler/semantic/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -9,6 +10,12 @@ using llvm::dyn_cast;
 using llvm::dyn_cast_or_null;
 
 namespace tz {
+
+TzModulesChecker::TzModulesChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->libraryCalls = &all.getLibraryCalls();
+  this->returnInferrer = &all.getReturnInferrer();
+}
 
 const Expr *TzModulesChecker::uncast(const Expr *expr) {
   while (auto *cast = dyn_cast<CastExpr>(expr)) {
@@ -61,9 +68,6 @@ bool TzModulesChecker::isExternalValue(const Type *type) {
   return TzModulesChecker::isExternalReference(type);
 }
 
-TzModulesChecker::TzModulesChecker(SemanticState &owner)
-    : state(owner) {}
-
 TzModulesChecker::ResultPlainSignature TzModulesChecker::plainSignature(const FunctionDecl *fn) {
   if (!fn->typeParams.empty() || fn->sym->hasRest) {
     std::string message = ErrorTextIntrinsic::plain();
@@ -115,7 +119,7 @@ TzModulesChecker::ResultExternalReturn TzModulesChecker::externalReturn(const Ty
 
 void TzModulesChecker::checkExternal(FunctionDecl *fn) {
   FuncSymbol *sym = fn->sym;
-  ReturnInferrer(this->state).resolveParams(sym);
+  this->returnInferrer->resolveParams(sym);
   fn->checked = true;
   ResultPlainSignature plain = TzModulesChecker::plainSignature(fn);
   if (plain.isErr()) {
@@ -222,7 +226,7 @@ std::string TzModulesChecker::knownPrefix(const Expr *expr) const {
 
 void TzModulesChecker::noteHttpsCall(CallExpr *call, const FunctionDecl *fn) {
   if (!fn || this->state.getInventoryStore().isUsingTls() || call->args.empty() ||
-      LibraryCalls(this->state).inLibrary(call->loc())) {
+      this->libraryCalls->inLibrary(call->loc())) {
     return;
   }
   if (fn == this->state.getLibraryDeclarations().findLibraryFunction("fetch")) {
@@ -237,7 +241,7 @@ void TzModulesChecker::noteHttpsCall(CallExpr *call, const FunctionDecl *fn) {
 void TzModulesChecker::noteServer(const NewExpr *made) {
   const std::vector<Expr *> &args = made->ctor() ? made->ctor()->args : made->args;
   if (this->state.getInventoryStore().isUsingTls() || args.empty() ||
-      LibraryCalls(this->state).inLibrary(made->loc())) {
+      this->libraryCalls->inLibrary(made->loc())) {
     return;
   }
   this->noteServeOptions(args[0]);
@@ -263,7 +267,7 @@ void TzModulesChecker::noteServeOptions(const Expr *options) {
 
 void TzModulesChecker::noteTlsMethod(const MemberExpr *member, const ClassDecl *cls) {
   if (this->state.getInventoryStore().isUsingTls() || member->name != "startTls" ||
-      LibraryCalls(this->state).inLibrary(member->loc())) {
+      this->libraryCalls->inLibrary(member->loc())) {
     return;
   }
   for (; cls; cls = cls->parent) {
@@ -275,7 +279,7 @@ void TzModulesChecker::noteTlsMethod(const MemberExpr *member, const ClassDecl *
 }
 
 void TzModulesChecker::noteHttpsValue(const FunctionDecl *fn, llvm::SMLoc loc) {
-  if (fn && !LibraryCalls(this->state).inLibrary(loc) &&
+  if (fn && !this->libraryCalls->inLibrary(loc) &&
       fn == this->state.getLibraryDeclarations().findLibraryFunction("fetch")) {
     this->state.getInventoryStore().markUsesTls();
   }

@@ -2,12 +2,19 @@
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/library/process/process_checker/process_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
 
-
 namespace tz {
+
+FsDeclarer::FsDeclarer(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->processChecker = &all.getProcessChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+}
 
 std::optional<int> FsDeclarer::fileKind(llvm::StringRef method) {
   if (method == "isFile") {
@@ -34,9 +41,6 @@ std::optional<int> FsDeclarer::fileKind(llvm::StringRef method) {
 
   return std::nullopt;
 }
-
-FsDeclarer::FsDeclarer(SemanticState &owner)
-    : state(owner) {}
 
 void FsDeclarer::declareFsClasses() {
   auto declare = [&](llvm::StringRef name,
@@ -95,8 +99,8 @@ Expr *FsDeclarer::checkStatsDate(MemberExpr *member, ClassDecl *cls) {
     return nullptr;
   }
 
-  return ProcessChecker(this->state)
-      .builtinCall(member->loc(), member, Builtin::FsStatsDate, {}, Type::date());
+  return this->processChecker->builtinCall(member->loc(), member, Builtin::FsStatsDate, {},
+                                           Type::date());
 }
 
 bool FsDeclarer::isRuntimeClass(const ClassDecl *cls) const {
@@ -111,9 +115,9 @@ Expr *FsDeclarer::checkFsClassMethod(CallExpr *call, MemberExpr *member, ClassDe
   if (!kind) {
     return nullptr;
   }
-  bool rejected = CallChecker(this->state).rejectSpread(call);
+  bool rejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : ArgumentChecker(this->state).checkArity(call, 0, 0);
+      rejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 0);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }

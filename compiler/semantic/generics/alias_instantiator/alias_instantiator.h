@@ -6,9 +6,14 @@
 
 namespace tz {
 
+class SemanticParts;
+class ClassBases;
+class TypeParams;
+class TypeResolver;
+
 class AliasInstantiator {
 public:
-  explicit AliasInstantiator(SemanticState &owner);
+  AliasInstantiator(SemanticState &owner, SemanticParts &all);
 
   const Type *instantiateAlias(TypeAliasDecl *alias, std::vector<const Type *> args,
                                llvm::SMLoc loc);
@@ -32,6 +37,9 @@ private:
   static std::string typeList(llvm::ArrayRef<const Type *> types);
 
   SemanticState &state;
+  ClassBases *classBases = nullptr;
+  TypeParams *typeParams = nullptr;
+  TypeResolver *typeResolver = nullptr;
 };
 
 }

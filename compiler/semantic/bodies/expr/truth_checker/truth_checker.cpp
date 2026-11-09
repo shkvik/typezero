@@ -5,6 +5,7 @@
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/library/json/json_checker/json_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 
 using llvm::cast;
@@ -12,6 +13,16 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+TruthChecker::TruthChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->jsonChecker = &all.getJsonChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->conditionFacts = &all.getConditionFacts();
+  this->genericChecker = &all.getGenericChecker();
+}
 
 std::string TruthChecker::sourceText(const Expr *expr) {
   if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit()) {
@@ -129,9 +140,6 @@ const Type *TruthChecker::falsyType(const Type *type) {
              : type;
 }
 
-TruthChecker::TruthChecker(SemanticState &owner)
-    : state(owner) {}
-
 Expr *TruthChecker::checkCondition(Expr *cond, Flow &whenTrue, Flow &whenFalse) {
   return this->checkBranching(cond, whenTrue, whenFalse, TruthUse::Condition);
 }
@@ -143,7 +151,7 @@ Expr *TruthChecker::checkBranching(Expr *expr, Flow &whenTrue, Flow &whenFalse, 
     Flow lhsTrue, lhsFalse, rhsTrue, rhsFalse;
     bin->lhs = this->checkBranching(bin->lhs, lhsTrue, lhsFalse);
     if (std::optional<bool> constant = this->state.getGenericStore().isCheckingInstance()
-                                           ? GenericChecker(this->state).constantCondition(bin->lhs)
+                                           ? this->genericChecker->constantCondition(bin->lhs)
                                            : std::nullopt;
         constant && *constant != isAnd) {
       whenTrue = lhsTrue;
@@ -157,7 +165,7 @@ Expr *TruthChecker::checkBranching(Expr *expr, Flow &whenTrue, Flow &whenFalse, 
     whenTrue = isAnd ? rhsTrue : FlowChecker::join(lhsTrue, rhsTrue);
     whenFalse = isAnd ? FlowChecker::join(lhsFalse, rhsFalse) : rhsFalse;
     this->state.getFlowState().replaceFlow(FlowChecker::join(whenTrue, whenFalse));
-    JsonChecker(this->state).checkRedundantTests(bin);
+    this->jsonChecker->checkRedundantTests(bin);
     bin->type = Type::boolTy();
     return bin;
   }
@@ -173,23 +181,23 @@ Expr *TruthChecker::checkBranching(Expr *expr, Flow &whenTrue, Flow &whenFalse, 
     return this->checkBooleanCall(cast<CallExpr>(expr), whenTrue, whenFalse);
   }
   if (auto *assign = dyn_cast<AssignExpr>(expr); assign && !assign->op) {
-    expr = ExprChecker(this->state).checkExpr(assign);
+    expr = this->exprChecker->checkExpr(assign);
     whenTrue = this->state.getFlowState().getFlow();
     whenFalse = this->state.getFlowState().getFlow();
     ResultConditionForm form = TruthChecker::assignmentCondition(assign, use);
     if (form.isErr()) {
       this->state.getDiagnostics().error(assign->loc(), form.error().message);
     }
-    return TypeRelations(this->state).convert(expr, Type::boolTy());
+    return this->typeRelations->convert(expr, Type::boolTy());
   }
 
-  expr = ExprChecker(this->state).checkExpr(expr, Type::boolTy());
+  expr = this->exprChecker->checkExpr(expr, Type::boolTy());
   whenTrue = this->state.getFlowState().getFlow();
   whenFalse = this->state.getFlowState().getFlow();
   if (auto *lit = dyn_cast<BoolLitExpr>(expr)) {
     (lit->value ? whenFalse : whenTrue).unreachable = true;
   } else {
-    ConditionFacts(this->state).addConditionFacts(expr, whenTrue, whenFalse);
+    this->conditionFacts->addConditionFacts(expr, whenTrue, whenFalse);
   }
   if (!expr->type->isBool()) {
     ResultTruthIsTested truthy = this->checkTruthy(expr, use);
@@ -198,7 +206,7 @@ Expr *TruthChecker::checkBranching(Expr *expr, Flow &whenTrue, Flow &whenFalse, 
     }
   }
 
-  return TypeRelations(this->state).convert(expr, Type::boolTy());
+  return this->typeRelations->convert(expr, Type::boolTy());
 }
 
 Expr *TruthChecker::checkTestedValue(Expr *expr, const Type *expected, Flow &whenTrue,
@@ -212,13 +220,13 @@ Expr *TruthChecker::checkTestedValue(Expr *expr, const Type *expected, Flow &whe
       (unary && unary->op == UnaryOp::Not) || this->isBooleanCall(expr)) {
     return this->checkBranching(expr, whenTrue, whenFalse, use);
   }
-  expr = ExprChecker(this->state).checkExpr(expr, expected);
+  expr = this->exprChecker->checkExpr(expr, expected);
   whenTrue = this->state.getFlowState().getFlow();
   whenFalse = this->state.getFlowState().getFlow();
   if (auto *lit = dyn_cast<BoolLitExpr>(expr)) {
     (lit->value ? whenFalse : whenTrue).unreachable = true;
   } else {
-    ConditionFacts(this->state).addConditionFacts(expr, whenTrue, whenFalse);
+    this->conditionFacts->addConditionFacts(expr, whenTrue, whenFalse);
   }
 
   return expr;
@@ -232,8 +240,8 @@ Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Flow &wh
   const Expr *other = isAssign ? cast<AssignExpr>(bin->rhs)->value : bin->rhs;
 
   Flow lhsTrue, lhsFalse, rhsTrue, rhsFalse;
-  bin->lhs = GenericChecker(this->state)
-                 .apparent(this->checkTestedValue(bin->lhs, expected, lhsTrue, lhsFalse, use));
+  bin->lhs = this->genericChecker->apparent(
+      this->checkTestedValue(bin->lhs, expected, lhsTrue, lhsFalse, use));
   ResultTruthIsTested leftTruthy = this->checkTruthy(bin->lhs, use, other);
   if (leftTruthy.isErr()) {
     this->state.getDiagnostics().error(bin->lhs->loc(), leftTruthy.error().message);
@@ -250,7 +258,7 @@ Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Flow &wh
     }
     truthy &= rightTruthy.isOk();
   } else {
-    bin->rhs = ExprChecker(this->state).checkExpr(bin->rhs, hint);
+    bin->rhs = this->exprChecker->checkExpr(bin->rhs, hint);
     rhsTrue = this->state.getFlowState().getFlow();
     rhsFalse = this->state.getFlowState().getFlow();
   }
@@ -258,7 +266,7 @@ Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Flow &wh
   whenFalse = isAnd ? FlowChecker::join(lhsFalse, rhsFalse) : rhsFalse;
   this->state.getFlowState().replaceFlow(FlowChecker::join(whenTrue, whenFalse));
   if (!isAssign) {
-    JsonChecker(this->state).checkRedundantTests(bin);
+    this->jsonChecker->checkRedundantTests(bin);
   }
 
   const Type *r = bin->rhs->type;
@@ -283,7 +291,7 @@ Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Flow &wh
     return bin;
   }
   const Type *result = joined.value();
-  bin->rhs = TypeRelations(this->state).convert(bin->rhs, result);
+  bin->rhs = this->typeRelations->convert(bin->rhs, result);
   bin->type = result;
 
   return bin;
@@ -646,7 +654,7 @@ bool TruthChecker::isBooleanCall(const Expr *expr) const {
   auto *call = dyn_cast<CallExpr>(expr);
 
   return call && !call->optional && call->args.size() == 1 && !call->hasSpread() &&
-         CallChecker(this->state).isGlobalName(call->callee, "Boolean");
+         this->callChecker->isGlobalName(call->callee, "Boolean");
 }
 
 Expr *TruthChecker::checkBooleanCall(CallExpr *call, Flow &whenTrue, Flow &whenFalse) {

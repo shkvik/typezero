@@ -6,6 +6,7 @@
 #include "compiler/semantic/bodies/objects/record_literal_checker/record_literal_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/library/json/json_checker/json_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
@@ -16,6 +17,18 @@ using llvm::cast;
 using llvm::dyn_cast;
 
 namespace tz {
+
+ObjectLiteralChecker::ObjectLiteralChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->exprChecker = &all.getExprChecker();
+  this->jsonChecker = &all.getJsonChecker();
+  this->literalTypes = &all.getLiteralTypes();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->typeRelations = &all.getTypeRelations();
+  this->keyedFieldChecker = &all.getKeyedFieldChecker();
+  this->methodLiteralChecker = &all.getMethodLiteralChecker();
+  this->recordLiteralChecker = &all.getRecordLiteralChecker();
+}
 
 bool ObjectLiteralChecker::hasMethodFields(const ClassDecl *cls) {
   if (cls->literal()) {
@@ -29,9 +42,6 @@ bool ObjectLiteralChecker::hasMethodFields(const ClassDecl *cls) {
 
   return false;
 }
-
-ObjectLiteralChecker::ObjectLiteralChecker(SemanticState &owner)
-    : state(owner) {}
 
 ObjectLiteralChecker::ResultPropertyHasValue
 ObjectLiteralChecker::propertyPlain(const ObjectLitExpr::Property &prop) {
@@ -232,10 +242,10 @@ ObjectLiteralChecker::fieldGiven(const ObjectLitExpr *lit, const Field &field, c
 
 Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expected) {
   if (expected && expected->nonOptional()->isJson()) {
-    return JsonChecker(this->state).checkJsonObjectLit(lit);
+    return this->jsonChecker->checkJsonObjectLit(lit);
   }
   if (expected && expected->nonOptional()->isRecord()) {
-    return RecordLiteralChecker(this->state).checkRecordLit(lit, expected->nonOptional());
+    return this->recordLiteralChecker->checkRecordLit(lit, expected->nonOptional());
   }
   const Type *target = expected ? expected->nonOptional() : nullptr;
   const Type *expectedUnion = target && target->isUnion() ? target : nullptr;
@@ -264,9 +274,9 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     if (!computed) {
       continue;
     }
-    computed->key = ExprChecker(this->state).checkExpr(computed->key);
+    computed->key = this->exprChecker->checkExpr(computed->key);
     const Type *keyType = prop.key()->type;
-    if (std::optional<std::string> name = KeyedFieldChecker(this->state).constantKey(prop.key())) {
+    if (std::optional<std::string> name = this->keyedFieldChecker->constantKey(prop.key())) {
       prop.name = this->state.getAst().keepName(std::move(*name));
       this->state.getInventoryStore().addFieldName(prop.name);
       continue;
@@ -296,14 +306,14 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     }
   }
   if (expectedUnion) {
-    target = LiteralTypes(this->state).literalMember(lit, expectedUnion);
+    target = this->literalTypes->literalMember(lit, expectedUnion);
     if (!usable(target)) {
       target = nullptr;
     }
     if (!target) {
       for (const Type *m : expectedUnion->members()) {
         if (m->isRecord()) {
-          return RecordLiteralChecker(this->state).checkRecordLit(lit, m);
+          return this->recordLiteralChecker->checkRecordLit(lit, m);
         }
       }
     }
@@ -322,7 +332,7 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
       llvm::all_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.keyed(); })) {
     std::vector<Field> fields;
     for (ObjectLitExpr::Property &prop : lit->props) {
-      prop.value = ExprChecker(this->state).checkExpr(prop.value);
+      prop.value = this->exprChecker->checkExpr(prop.value);
       const Type *value = prop.value->type;
       if (value->isError()) {
         lit->type = Type::error();
@@ -367,26 +377,24 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     ResultKeyedObjectTyped object = ObjectLiteralChecker::keyedTarget(target, keyType);
     if (object.isErr()) {
       this->state.getDiagnostics().error(prop.key()->loc(), object.error().message);
-      prop.value = ExprChecker(this->state).checkExpr(prop.value);
+      prop.value = this->exprChecker->checkExpr(prop.value);
       lit->type = Type::error();
       return lit;
     }
     ResultKeyedFieldsAgree agree = ObjectLiteralChecker::keyedField(target, keyType);
     if (agree.isErr()) {
       this->state.getDiagnostics().error(prop.key()->loc(), agree.error().message);
-      prop.value = ExprChecker(this->state).checkExpr(prop.value);
+      prop.value = this->exprChecker->checkExpr(prop.value);
       lit->type = Type::error();
       return lit;
     }
     const Type *field = agree.value();
     std::string what = ErrorTextObjectLiteral::keyedName(keyType->name());
-    prop.value =
-        TypeRelations(this->state)
-            .coerce(inferred ? prop.value : ExprChecker(this->state).checkExpr(prop.value, field),
-                    field, what);
+    prop.value = this->typeRelations->coerce(
+        inferred ? prop.value : this->exprChecker->checkExpr(prop.value, field), field, what);
   }
   if (llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.method(); })) {
-    return MethodLiteralChecker(this->state).checkMethodLiteral(lit, target);
+    return this->methodLiteralChecker->checkMethodLiteral(lit, target);
   }
   if (lit->hasSpread()) {
     return this->checkSpreadLit(lit, target, named, typed);
@@ -399,7 +407,7 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
       continue;
     }
     if (!named[i]) {
-      prop.value = ExprChecker(this->state).checkExpr(prop.value);
+      prop.value = this->exprChecker->checkExpr(prop.value);
       continue;
     }
     if (auto *fe = dyn_cast<FunctionExpr>(prop.value); fe && fe->fn->name.empty()) {
@@ -412,7 +420,7 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
         bool prechecked = this->state.getExpressionMarks().isPrechecked(prop.value);
         this->state.getExpressionMarks().forgetPrechecked(prop.value);
         if (!prechecked) {
-          prop.value = ExprChecker(this->state).checkExpr(prop.value);
+          prop.value = this->exprChecker->checkExpr(prop.value);
         }
         if (found.error().code != ObjectLiteralCheckerTargetFieldErrorCode::OVERLOAD_NAME) {
           this->state.getDiagnostics().error(prop.loc, found.error().message);
@@ -422,15 +430,14 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
       const Field *field = found.value();
       bool prechecked = this->state.getExpressionMarks().isPrechecked(prop.value);
       this->state.getExpressionMarks().forgetPrechecked(prop.value);
-      Expr *value =
-          prechecked ? prop.value : ExprChecker(this->state).checkExpr(prop.value, field->type);
-      prop.value = TypeRelations(this->state).coerce(value, field->type, what);
+      Expr *value = prechecked ? prop.value : this->exprChecker->checkExpr(prop.value, field->type);
+      prop.value = this->typeRelations->coerce(value, field->type, what);
       continue;
     }
     bool prechecked = this->state.getExpressionMarks().isPrechecked(prop.value);
     this->state.getExpressionMarks().forgetPrechecked(prop.value);
     if (!prechecked) {
-      prop.value = ExprChecker(this->state).checkExpr(prop.value);
+      prop.value = this->exprChecker->checkExpr(prop.value);
     }
     const Type *type = prop.value->type;
     if (type->isError()) {
@@ -541,14 +548,14 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
     ObjectLitExpr::Property &prop = lit->props[i];
     if (!prop.spread()) {
       if (!named[i]) {
-        prop.value = ExprChecker(this->state).checkExpr(prop.value);
+        prop.value = this->exprChecker->checkExpr(prop.value);
         continue;
       }
       if (auto *fe = dyn_cast<FunctionExpr>(prop.value); fe && fe->fn->name.empty()) {
         fe->fn->name = prop.name;
       }
       const Field *wanted = target ? target->field(prop.name) : nullptr;
-      prop.value = ExprChecker(this->state).checkExpr(prop.value, wanted ? wanted->type : nullptr);
+      prop.value = this->exprChecker->checkExpr(prop.value, wanted ? wanted->type : nullptr);
       const Type *type = prop.value->type;
       Field *field = slot(prop.name);
       std::string what = ErrorTextObjectLiteral::fieldName(prop.name);
@@ -576,7 +583,7 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
       continue;
     }
 
-    prop.value = ExprChecker(this->state).checkExpr(prop.value);
+    prop.value = this->exprChecker->checkExpr(prop.value);
     const Type *type = prop.value->type;
     if (type->isError()) {
       typed = false;
@@ -606,7 +613,7 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
     }
     spread->omitKeys.clear();
     if (ClassDecl *cls = ClassDeclarer::classOf(type)) {
-      ClassDeclarer(this->state).completeClass(cls);
+      this->classDeclarer->completeClass(cls);
       ResultPlainSpreadClass plain = ObjectLiteralChecker::spreadFields(cls);
       if (plain.isErr()) {
         this->state.getDiagnostics().error(prop.value->loc(), plain.error().message);
@@ -638,7 +645,7 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
     }
   }
   if (records && typed) {
-    return RecordLiteralChecker(this->state).recordFromSpreads(lit);
+    return this->recordLiteralChecker->recordFromSpreads(lit);
   }
   if (!typed) {
     lit->type = Type::error();
@@ -681,7 +688,7 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
       if (replacedLater(prop.name)) {
         prop.replaced = true;
       } else {
-        prop.value = TypeRelations(this->state).convert(prop.value, result->field(prop.name)->type);
+        prop.value = this->typeRelations->convert(prop.value, result->field(prop.name)->type);
       }
       continue;
     }

@@ -21,6 +21,9 @@ enum class RefShape { None, Pointer, Function, Optional, Other };
 
 }
 
+PublishLowerer::PublishLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 llvm::Value *PublishLowerer::spillHere(llvm::IRBuilder<> &b, llvm::Value *value, const char *name) {
   llvm::BasicBlock &entry = b.GetInsertBlock()->getParent()->getEntryBlock();
   llvm::IRBuilder<> at(&entry, entry.begin());
@@ -29,9 +32,6 @@ llvm::Value *PublishLowerer::spillHere(llvm::IRBuilder<> &b, llvm::Value *value,
 
   return slot;
 }
-
-PublishLowerer::PublishLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Function *
 PublishLowerer::publishFunction(const Type *type, llvm::StructType *layout,

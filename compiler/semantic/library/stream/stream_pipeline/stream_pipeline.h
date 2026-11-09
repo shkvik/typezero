@@ -6,9 +6,25 @@
 
 namespace tz {
 
+class SemanticParts;
+class ChunkTypes;
+class CallChecker;
+class DictChecker;
+class ExprChecker;
+class TypeDeclarer;
+class StreamChecker;
+class StreamSources;
+class TypeRelations;
+class ClosureChecker;
+class EmitterChecker;
+class ProcessChecker;
+class ArgumentChecker;
+class EventMapInference;
+class EventTargetChecker;
+
 class StreamPipeline {
 public:
-  explicit StreamPipeline(SemanticState &owner);
+  StreamPipeline(SemanticState &owner, SemanticParts &all);
 
   Expr *checkStreamFunction(CallExpr *call, FunctionDecl *decl, llvm::SMLoc loc);
   Expr *checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *func);
@@ -26,6 +42,20 @@ private:
   static bool inModule(const std::string &place, llvm::StringRef module);
 
   SemanticState &state;
+  ChunkTypes *chunkTypes = nullptr;
+  CallChecker *callChecker = nullptr;
+  DictChecker *dictChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
+  StreamChecker *streamChecker = nullptr;
+  StreamSources *streamSources = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ClosureChecker *closureChecker = nullptr;
+  EmitterChecker *emitterChecker = nullptr;
+  ProcessChecker *processChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  EventMapInference *eventMapInference = nullptr;
+  EventTargetChecker *eventTargetChecker = nullptr;
 };
 
 }

@@ -6,13 +6,21 @@
 
 namespace tz {
 
+class SemanticParts;
+class FieldFacts;
+class BytesChecker;
+class ClassDeclarer;
+class ReturnInferrer;
+class ArgumentChecker;
+class ClassMemberChecker;
+
 class UnionChecker {
 public:
   using ResultUnionMemberTyped = Result<Expr *, UnionCheckerCheckUnionMemberError>;
   using ResultUnionMethodTyped = Result<Expr *, UnionCheckerCheckUnionMethodCallError>;
   using ResultUnionFieldTarget = Result<const Type *, UnionCheckerCheckUnionFieldTargetError>;
 
-  explicit UnionChecker(SemanticState &owner);
+  UnionChecker(SemanticState &owner, SemanticParts &all);
 
   ResultUnionMemberTyped checkUnionMember(MemberExpr *member);
   ResultUnionFieldTarget checkUnionFieldTarget(MemberExpr *member);
@@ -26,6 +34,12 @@ private:
   static std::string lackingHint(const MemberExpr *member, const Type *type);
 
   SemanticState &state;
+  FieldFacts *fieldFacts = nullptr;
+  BytesChecker *bytesChecker = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  ClassMemberChecker *classMemberChecker = nullptr;
 };
 
 }

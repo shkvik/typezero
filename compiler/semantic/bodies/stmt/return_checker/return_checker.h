@@ -6,9 +6,21 @@
 
 namespace tz {
 
+class SemanticParts;
+class ByteProofs;
+class ClassLinks;
+class ExprChecker;
+class ClassChecker;
+class TruthChecker;
+class ResultChecker;
+class TypeRelations;
+class ConditionFacts;
+class EmitterChecker;
+class PredicateChecker;
+
 class ReturnChecker {
 public:
-  explicit ReturnChecker(SemanticState &owner);
+  ReturnChecker(SemanticState &owner, SemanticParts &all);
 
   void checkReturn(ReturnStmt *ret);
   static bool isExit(const Stmt *stmt);
@@ -37,6 +49,16 @@ private:
                                                 const FuncSymbol *fn);
 
   SemanticState &state;
+  ByteProofs *byteProofs = nullptr;
+  ClassLinks *classLinks = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  ClassChecker *classChecker = nullptr;
+  TruthChecker *truthChecker = nullptr;
+  ResultChecker *resultChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ConditionFacts *conditionFacts = nullptr;
+  EmitterChecker *emitterChecker = nullptr;
+  PredicateChecker *predicateChecker = nullptr;
 };
 
 }

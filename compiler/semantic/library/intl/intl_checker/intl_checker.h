@@ -7,9 +7,20 @@
 
 namespace tz {
 
+class SemanticParts;
+class NewChecker;
+class CallChecker;
+class ExprChecker;
+class LiteralTypes;
+class TypeRelations;
+class ProcessChecker;
+class ArgumentChecker;
+class TopLevelChecker;
+class IntlOptionsChecker;
+
 class IntlChecker {
 public:
-  explicit IntlChecker(SemanticState &owner);
+  IntlChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkIntlNew(llvm::SMLoc loc, llvm::StringRef name, std::vector<Expr *> &args,
                      bool withNew);
@@ -40,6 +51,15 @@ private:
   ResultLanguageTags languageTags(const Expr *arg, llvm::StringRef what, bool constructor);
 
   SemanticState &state;
+  NewChecker *newChecker = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  LiteralTypes *literalTypes = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ProcessChecker *processChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  TopLevelChecker *topLevelChecker = nullptr;
+  IntlOptionsChecker *intlOptionsChecker = nullptr;
 };
 
 }

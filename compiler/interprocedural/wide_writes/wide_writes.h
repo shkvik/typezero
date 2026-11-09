@@ -3,6 +3,7 @@
 #include "compiler/interprocedural/wide_writes/wide_writes_errors.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/semantic_external.h"
+#include "compiler/semantic/semantic_types.h"
 #include <map>
 #include <set>
 #include <vector>
@@ -15,7 +16,7 @@ struct FlowGraph;
 
 class WideWrites {
 public:
-  explicit WideWrites(SemanticExternalFacade &owner);
+  WideWrites(SemanticExternalFacade &owner, Diagnostics &target);
 
   void checkWidenings(SourceFile &file);
 
@@ -52,6 +53,7 @@ private:
                            const Conversion &conv) const;
 
   SemanticExternalFacade &engine;
+  Diagnostics &diagnostics;
 };
 
 }

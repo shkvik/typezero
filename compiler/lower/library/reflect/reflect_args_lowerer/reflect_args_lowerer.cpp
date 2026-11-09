@@ -9,8 +9,10 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 
-
 namespace tz {
+
+ReflectArgsLowerer::ReflectArgsLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 bool ReflectArgsLowerer::narrower(const Type *a, const Type *b) {
   if (a == b || b->isUnknown()) {
@@ -39,9 +41,6 @@ bool ReflectArgsLowerer::narrower(const Type *a, const Type *b) {
 
   return false;
 }
-
-ReflectArgsLowerer::ReflectArgsLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Value *ReflectArgsLowerer::emitChooseVariant(llvm::ArrayRef<const FunctionDecl *> variants,
                                                    llvm::Value *selfId, llvm::Value *args,

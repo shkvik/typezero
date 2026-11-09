@@ -2,6 +2,7 @@
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/objects/dict_checker/dict_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -10,8 +11,13 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-RecordLiteralChecker::RecordLiteralChecker(SemanticState &owner)
-    : state(owner) {}
+RecordLiteralChecker::RecordLiteralChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->dictChecker = &all.getDictChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->typeRelations = &all.getTypeRelations();
+}
 
 RecordLiteralChecker::ResultPlainProperty
 RecordLiteralChecker::plainProperty(const ObjectLitExpr::Property &prop) {
@@ -66,11 +72,11 @@ Expr *RecordLiteralChecker::checkRecordLit(ObjectLitExpr *lit, const Type *recor
       prop.form = ValueProperty{};
     }
     if (prop.method()) {
-      prop.value = ExprChecker(this->state).checkExpr(prop.value);
+      prop.value = this->exprChecker->checkExpr(prop.value);
       continue;
     }
     if (prop.spread()) {
-      prop.value = ExprChecker(this->state).checkExpr(prop.value, record);
+      prop.value = this->exprChecker->checkExpr(prop.value, record);
       const Type *type = prop.value->type;
       if (type->isError()) {
         typed = false;
@@ -84,15 +90,15 @@ Expr *RecordLiteralChecker::checkRecordLit(ObjectLitExpr *lit, const Type *recor
       continue;
     }
     if (ComputedProperty *computed = prop.form.as<ComputedProperty>()) {
-      computed->key = DictChecker(this->state).checkRecordKey(computed->key);
+      computed->key = this->dictChecker->checkRecordKey(computed->key);
     }
     if (auto *fe = dyn_cast<FunctionExpr>(prop.value); fe && fe->fn->name.empty()) {
       fe->fn->name = prop.name;
     }
     std::string what = prop.key() ? ErrorTextRecordProperty::valueLabel()
                                   : ErrorTextRecordProperty::keyLabel(prop.name);
-    prop.value = TypeRelations(this->state)
-                     .coerce(ExprChecker(this->state).checkExpr(prop.value, value), value, what);
+    prop.value =
+        this->typeRelations->coerce(this->exprChecker->checkExpr(prop.value, value), value, what);
   }
   lit->type = typed ? record : Type::error();
 
@@ -141,7 +147,7 @@ RecordLiteralChecker::checkRecordSpread(ObjectLitExpr::Property &prop, const Typ
     });
   }
   if (ClassDecl *cls = ClassDeclarer::classOf(type)) {
-    ClassDeclarer(this->state).completeClass(cls);
+    this->classDeclarer->completeClass(cls);
   }
   for (const Field &f : type->fields()) {
     if (llvm::is_contained(prop.omit(), f.name)) {
@@ -248,7 +254,7 @@ Expr *RecordLiteralChecker::recordFromSpreads(ObjectLitExpr *lit) {
   const Type *record = Type::dict(Type::DictKind::Record, Type::string(), value);
   for (ObjectLitExpr::Property &prop : lit->props) {
     if (!prop.spread()) {
-      prop.value = TypeRelations(this->state).convert(prop.value, value);
+      prop.value = this->typeRelations->convert(prop.value, value);
       continue;
     }
     ResultSpreadIntoMap spread = this->checkRecordSpread(prop, value);

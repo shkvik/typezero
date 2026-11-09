@@ -18,6 +18,7 @@
 #include "compiler/semantic/library/regex/match_checker/match_checker.h"
 #include "compiler/semantic/library/result/result_checker/result_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cmath>
@@ -27,8 +28,27 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-LoopChecker::LoopChecker(SemanticState &owner)
-    : state(owner) {}
+LoopChecker::LoopChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->loopBounds = &all.getLoopBounds();
+  this->dictChecker = &all.getDictChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->jumpChecker = &all.getJumpChecker();
+  this->loopScanner = &all.getLoopScanner();
+  this->stmtChecker = &all.getStmtChecker();
+  this->asyncChecker = &all.getAsyncChecker();
+  this->matchChecker = &all.getMatchChecker();
+  this->truthChecker = &all.getTruthChecker();
+  this->tupleChecker = &all.getTupleChecker();
+  this->objectChecker = &all.getObjectChecker();
+  this->resultChecker = &all.getResultChecker();
+  this->constantFolder = &all.getConstantFolder();
+  this->emitterChecker = &all.getEmitterChecker();
+  this->genericChecker = &all.getGenericChecker();
+  this->iteratorMethods = &all.getIteratorMethods();
+  this->generatorChecker = &all.getGeneratorChecker();
+}
 
 bool LoopChecker::continuesTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels,
                               unsigned loops) {
@@ -64,11 +84,11 @@ bool LoopChecker::continuesTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> 
 }
 
 void LoopChecker::checkWhile(WhileStmt *stmt) {
-  LoopScan scan = LoopScanner(this->state).scanLoop({stmt->body}, {stmt->cond});
-  Flow head = LoopBounds(this->state).loopHead(scan, stmt->cond, true);
+  LoopScan scan = this->loopScanner->scanLoop({stmt->body}, {stmt->cond});
+  Flow head = this->loopBounds->loopHead(scan, stmt->cond, true);
   this->state.getFlowState().replaceFlow(head);
   Flow whenTrue, whenFalse;
-  stmt->cond = TruthChecker(this->state).checkCondition(stmt->cond, whenTrue, whenFalse);
+  stmt->cond = this->truthChecker->checkCondition(stmt->cond, whenTrue, whenFalse);
   this->state.getFlowState().replaceFlow(whenTrue);
   this->checkLoopBody(stmt->body, scan.awaits);
   this->state.getFlowState().replaceFlow(scan.breaks ? FlowChecker::join(whenFalse, head)
@@ -76,14 +96,14 @@ void LoopChecker::checkWhile(WhileStmt *stmt) {
 }
 
 void LoopChecker::checkDoWhile(DoWhileStmt *stmt) {
-  LoopScan scan = LoopScanner(this->state).scanLoop({stmt->body}, {stmt->cond});
-  Flow head = LoopBounds(this->state).loopHead(scan, nullptr, false);
+  LoopScan scan = this->loopScanner->scanLoop({stmt->body}, {stmt->cond});
+  Flow head = this->loopBounds->loopHead(scan, nullptr, false);
   this->state.getFlowState().replaceFlow(head);
   this->checkLoopBody(stmt->body, scan.awaits);
   this->state.getFlowState().replaceFlow(
       FlowChecker::join(this->state.getFlowState().getFlow(), head));
   Flow whenTrue, whenFalse;
-  stmt->cond = TruthChecker(this->state).checkCondition(stmt->cond, whenTrue, whenFalse);
+  stmt->cond = this->truthChecker->checkCondition(stmt->cond, whenTrue, whenFalse);
   this->state.getFlowState().replaceFlow(scan.breaks ? FlowChecker::join(whenFalse, head)
                                                      : whenFalse);
 }
@@ -93,16 +113,16 @@ void LoopChecker::checkFor(ForStmt *stmt) {
   this->state.getScopeStack().openScope();
   this->state.getBlockPosition().forgetBlock();
   if (stmt->init) {
-    StmtChecker(this->state).checkStmt(stmt->init);
+    this->stmtChecker->checkStmt(stmt->init);
   }
-  LoopScan scan = LoopScanner(this->state).scanLoop({stmt->body}, {stmt->cond, stmt->step});
-  Flow head = LoopBounds(this->state).loopHead(scan, stmt->cond, true);
+  LoopScan scan = this->loopScanner->scanLoop({stmt->body}, {stmt->cond, stmt->step});
+  Flow head = this->loopBounds->loopHead(scan, stmt->cond, true);
   this->state.getFlowState().replaceFlow(head);
   Flow whenTrue = head;
   Flow whenFalse = head;
   whenFalse.unreachable = true;
   if (stmt->cond) {
-    stmt->cond = TruthChecker(this->state).checkCondition(stmt->cond, whenTrue, whenFalse);
+    stmt->cond = this->truthChecker->checkCondition(stmt->cond, whenTrue, whenFalse);
   }
   this->state.getFlowState().replaceFlow(whenTrue);
   this->checkLoopBody(stmt->body, scan.awaits);
@@ -115,31 +135,29 @@ void LoopChecker::checkFor(ForStmt *stmt) {
     if (auto *yield = dyn_cast<YieldExpr>(stmt->step)) {
       yield->discarded = true;
     }
-    stmt->step = ExprChecker(this->state).checkExpr(stmt->step);
-    ResultChecker::ResultValueGetsUsed used = ResultChecker(this->state).usedValue(stmt->step);
+    stmt->step = this->exprChecker->checkExpr(stmt->step);
+    ResultChecker::ResultValueGetsUsed used = this->resultChecker->usedValue(stmt->step);
     if (used.isErr()) {
       this->state.getDiagnostics().error(stmt->step->loc(), used.error().message);
     }
   }
   this->state.getFlowState().replaceFlow(scan.breaks ? FlowChecker::join(whenFalse, head)
                                                      : whenFalse);
-  Scopes(this->state).closeScope();
+  this->scopes->closeScope();
 }
 
 void LoopChecker::checkForOf(ForOfStmt *stmt) {
   if (stmt->isAwait) {
-    AsyncChecker(this->state).checkForAwait(stmt);
-    EmitterChecker(this->state).noteErrorsHandled(stmt->iterable);
+    this->asyncChecker->checkForAwait(stmt);
+    this->emitterChecker->noteErrorsHandled(stmt->iterable);
     return;
   }
   if (stmt->keys) {
-    ObjectChecker(this->state).checkForIn(stmt);
+    this->objectChecker->checkForIn(stmt);
   } else {
-    IteratorMethods(this->state).markFused(stmt->iterable);
-    stmt->iterable =
-        DictChecker(this->state)
-            .iterableOf(GenericChecker(this->state)
-                            .apparent(ExprChecker(this->state).checkExpr(stmt->iterable)));
+    this->iteratorMethods->markFused(stmt->iterable);
+    stmt->iterable = this->dictChecker->iterableOf(
+        this->genericChecker->apparent(this->exprChecker->checkExpr(stmt->iterable)));
     auto *name = dyn_cast<NameExpr>(stmt->iterable);
     bool list =
         name && name->var() && name->type->isTuple() && !name->type->tupleRest() &&
@@ -161,16 +179,14 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
       }
       const Type *element = kinds.empty() ? nullptr : Type::unionOf(kinds);
       if (!elements->elements.empty()) {
-        stmt->iterable =
-            ExprChecker(this->state)
-                .checkExpr(elements, element && UnionSlots::unionProblem(element).empty()
-                                         ? Type::array(element)
-                                         : nullptr);
+        stmt->iterable = this->exprChecker->checkExpr(
+            elements,
+            element && UnionSlots::unionProblem(element).empty() ? Type::array(element) : nullptr);
       }
     }
   }
   if (stmt->iterable->type->isMatch()) {
-    stmt->iterable = MatchChecker(this->state).matchItems(stmt->iterable);
+    stmt->iterable = this->matchChecker->matchItems(stmt->iterable);
   }
   const Type *type = stmt->iterable->type;
   const Type *element = Type::error();
@@ -183,11 +199,11 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
   } else if (type->isIterator()) {
     element = type->yielded();
     GeneratorChecker::ResultNextNeedsNoValue nothing =
-        GeneratorChecker(this->state).checkSendsNothing(type, "'for...of'");
+        this->generatorChecker->checkSendsNothing(type, "'for...of'");
     if (nothing.isErr()) {
       this->state.getDiagnostics().error(stmt->iterable->loc(), nothing.error().message);
     }
-  } else if (Expr *copy = TupleChecker(this->state).arrayCopy(stmt->iterable)) {
+  } else if (Expr *copy = this->tupleChecker->arrayCopy(stmt->iterable)) {
     stmt->iterable = copy;
     element = copy->type->inner();
   } else {
@@ -206,24 +222,24 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
     element = Type::error();
   }
 
-  LoopScan scan = LoopScanner(this->state).scanLoop({stmt->body}, {});
+  LoopScan scan = this->loopScanner->scanLoop({stmt->body}, {});
   if (type->isIterator()) {
     scan.callsFunctions = true;
   }
   stmt->borrowElements = stmt->isConst && type->isArray() && element->isManaged() &&
                          !scan.callsFunctions && !scan.releasesElements;
-  Flow head = LoopBounds(this->state).loopHead(scan, nullptr, false);
+  Flow head = this->loopBounds->loopHead(scan, nullptr, false);
   this->state.getFlowState().replaceFlow(head);
   this->state.getScopeStack().openScope();
   stmt->binding.sym =
-      Scopes(this->state).declareVar(stmt->binding.name, stmt->binding.loc, element, stmt->isConst);
+      this->scopes->declareVar(stmt->binding.name, stmt->binding.loc, element, stmt->isConst);
   if (auto *lit = dyn_cast<ArrayLitExpr>(stmt->iterable);
       lit && element->isInt() && stmt->binding.sym && !stmt->binding.destructured() &&
       !lit->elements.empty()) {
     std::optional<int64_t> lo, hi;
     for (const ArrayLitExpr::Element &e : lit->elements) {
       std::optional<int64_t> c =
-          e.spread || e.hole ? std::nullopt : ConstantFolder(this->state).intConstant(e.expr);
+          e.spread || e.hole ? std::nullopt : this->constantFolder->intConstant(e.expr);
       if (!c) {
         lo.reset();
         break;
@@ -239,7 +255,7 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
     }
   }
   this->checkLoopBody(stmt->body, scan.awaits);
-  Scopes(this->state).closeScope();
+  this->scopes->closeScope();
   this->state.getFlowState().replaceFlow(head);
 }
 
@@ -268,7 +284,7 @@ LoopChecker::ResultIterableType LoopChecker::iterableType(const Type *type) cons
         .message = message,
     });
   }
-  if (type->isRuntimeObject() && GeneratorChecker(this->state).asyncIteratedType(type)) {
+  if (type->isRuntimeObject() && this->generatorChecker->asyncIteratedType(type)) {
     std::string message = ErrorTextForOf::later(type->name());
 
     return err(LoopCheckerIterableTypeError{
@@ -335,11 +351,11 @@ LoopChecker::ResultBindingShape LoopChecker::bindingShape(const ForOfStmt *stmt,
 }
 
 void LoopChecker::checkLoopBody(Stmt *body, bool awaits) {
-  JumpChecker(this->state).pushTarget(JumpTarget::Kind::Loop);
+  this->jumpChecker->pushTarget(JumpTarget::Kind::Loop);
   if (awaits) {
     this->state.getFunctionStack().enterAwaitLoop();
   }
-  StmtChecker::ResultBodyIsStatement checked = StmtChecker(this->state).checkBody(body);
+  StmtChecker::ResultBodyIsStatement checked = this->stmtChecker->checkBody(body);
   if (checked.isErr()) {
     this->state.getDiagnostics().error(body->loc(), checked.error().message);
   }

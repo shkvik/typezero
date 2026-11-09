@@ -6,14 +6,23 @@
 
 namespace tz {
 
+class SemanticParts;
+class ClassLinks;
+class LateClasses;
+class ImportBinder;
+class TypeDeclarer;
+class ClassDeclarer;
+class FunctionChecker;
+class GenericClassInstantiator;
+
 class ModuleDeclarer {
 public:
   using ResultExportTarget = Result<ModuleBinding, ModuleDeclarerFindExportError>;
 
-  explicit ModuleDeclarer(SemanticState &owner);
+  ModuleDeclarer(SemanticState &owner, SemanticParts &all);
 
   void useModule(Module *module);
-  std::vector<FunctionDecl *> declareModules(SourceFile &program);
+  void declareModules(SourceFile &program);
   const llvm::StringMap<ModuleExport> &exportsOf(Module *module);
   std::optional<ModuleBinding> resolveLocal(Module *module, llvm::StringRef name);
   ResultExportTarget findExport(Module *from, llvm::StringRef path, const ModuleName &name);
@@ -34,6 +43,13 @@ private:
                   const ModuleName &name);
 
   SemanticState &state;
+  ClassLinks *classLinks = nullptr;
+  LateClasses *lateClasses = nullptr;
+  ImportBinder *importBinder = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  FunctionChecker *functionChecker = nullptr;
+  GenericClassInstantiator *genericClassInstantiator = nullptr;
 };
 
 }

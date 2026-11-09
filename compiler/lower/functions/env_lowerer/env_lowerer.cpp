@@ -21,6 +21,9 @@ constexpr uint64_t kStackObjectCount = uint64_t(1) << 62;
 
 }
 
+EnvLowerer::EnvLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 std::string EnvLowerer::qualifiedName(const FunctionDecl *fn) {
   std::string name = fn->name.empty() ? "lambda" : fn->name.str();
   for (const FunctionDecl *p = fn->parent; p; p = p->parent) {
@@ -29,9 +32,6 @@ std::string EnvLowerer::qualifiedName(const FunctionDecl *fn) {
 
   return "tz." + name;
 }
-
-EnvLowerer::EnvLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 const Lowering::EnvLayout &EnvLowerer::envLayout(const FunctionDecl *fn) {
   const void *key = fn->group ? static_cast<const void *>(fn->group) : fn;

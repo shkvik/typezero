@@ -45,15 +45,15 @@ constexpr uint64_t kEntryLive = 4;
 
 }
 
+DictLowerer::DictLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 std::u16string DictLowerer::utf16(llvm::StringRef text) {
   llvm::SmallVector<llvm::UTF16, 32> units;
   llvm::convertUTF8ToUTF16String(text, units);
 
   return std::u16string(units.begin(), units.end());
 }
-
-DictLowerer::DictLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::FunctionCallee DictLowerer::dictFunction(llvm::StringRef name, llvm::Type *ret,
                                                llvm::ArrayRef<llvm::Type *> params) {

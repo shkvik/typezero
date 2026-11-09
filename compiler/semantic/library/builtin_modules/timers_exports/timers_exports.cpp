@@ -10,8 +10,8 @@ TimersExports::ResultExportFound TimersExports::timersExport(llvm::StringRef nam
   }
   std::string message = ErrorTextTimersExport::none(path, name);
 
-  return err(FeatureExportFoundError{
-      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+  return err(ModuleExportFoundError{
+      .code = ModuleExportFoundErrorCode::NO_EXPORT,
       .message = message,
   });
 }

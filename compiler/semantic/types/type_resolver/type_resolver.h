@@ -6,9 +6,26 @@
 
 namespace tz {
 
+class SemanticParts;
+class DictChecker;
+class ResultTypes;
+class AsyncChecker;
+class TypeDeclarer;
+class UtilityTypes;
+class CryptoChecker;
+class TemplateTypes;
+class TypeOperators;
+class ConditionalTypes;
+class DecoratorChecker;
+class GeneratorChecker;
+class AliasInstantiator;
+class ClassValueChecker;
+class BuiltinModuleChecker;
+class GenericClassInstantiator;
+
 class TypeResolver {
 public:
-  explicit TypeResolver(SemanticState &owner);
+  TypeResolver(SemanticState &owner, SemanticParts &all);
 
   const Type *resolveTypeInner(const TypeRef &ref);
   const Type *resolveType(const TypeRef &ref, bool allowVoid);
@@ -97,6 +114,21 @@ private:
   const Type *resolveSpreadTuple(const TypeRef &ref, const std::vector<const Type *> &elements);
 
   SemanticState &state;
+  DictChecker *dictChecker = nullptr;
+  ResultTypes *resultTypes = nullptr;
+  AsyncChecker *asyncChecker = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
+  UtilityTypes *utilityTypes = nullptr;
+  CryptoChecker *cryptoChecker = nullptr;
+  TemplateTypes *templateTypes = nullptr;
+  TypeOperators *typeOperators = nullptr;
+  ConditionalTypes *conditionalTypes = nullptr;
+  DecoratorChecker *decoratorChecker = nullptr;
+  GeneratorChecker *generatorChecker = nullptr;
+  AliasInstantiator *aliasInstantiator = nullptr;
+  ClassValueChecker *classValueChecker = nullptr;
+  BuiltinModuleChecker *builtinModuleChecker = nullptr;
+  GenericClassInstantiator *genericClassInstantiator = nullptr;
 };
 
 }

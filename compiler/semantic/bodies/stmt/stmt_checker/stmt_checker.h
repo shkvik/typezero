@@ -6,11 +6,25 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class VarChecker;
+class ExprChecker;
+class JumpChecker;
+class LoopChecker;
+class ClassChecker;
+class TruthChecker;
+class ResultChecker;
+class ReturnChecker;
+class SwitchChecker;
+class ClosureChecker;
+class GenericChecker;
+
 class StmtChecker {
 public:
   using ResultBodyIsStatement = Result<Stmt *, StmtCheckerCheckBodyError>;
 
-  explicit StmtChecker(SemanticState &owner);
+  StmtChecker(SemanticState &owner, SemanticParts &all);
 
   void checkIf(IfStmt *stmt);
   void checkStmt(Stmt *stmt);
@@ -22,6 +36,18 @@ private:
   ResultFunctionInBlock checkFunctionStmt(FunctionDecl *fn) const;
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  VarChecker *varChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  JumpChecker *jumpChecker = nullptr;
+  LoopChecker *loopChecker = nullptr;
+  ClassChecker *classChecker = nullptr;
+  TruthChecker *truthChecker = nullptr;
+  ResultChecker *resultChecker = nullptr;
+  ReturnChecker *returnChecker = nullptr;
+  SwitchChecker *switchChecker = nullptr;
+  ClosureChecker *closureChecker = nullptr;
+  GenericChecker *genericChecker = nullptr;
 };
 
 }

@@ -7,6 +7,20 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class ClassLinks;
+class TypeParams;
+class ExprChecker;
+class LateClasses;
+class AsyncChecker;
+class ClassChecker;
+class ImportBinder;
+class TypeRelations;
+class FunctionChecker;
+class GeneratorChecker;
+class GenericClassChecker;
+
 struct BodyState {
   Flow flow;
   ScopeSnapshot scopeStack;
@@ -19,7 +33,7 @@ struct BodyState {
 
 class ReturnInferrer {
 public:
-  explicit ReturnInferrer(SemanticState &owner);
+  ReturnInferrer(SemanticState &owner, SemanticParts &all);
 
   static bool returnsValue(const Stmt *stmt);
 
@@ -58,6 +72,18 @@ private:
                       llvm::ArrayRef<YieldExpr *> yields);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  ClassLinks *classLinks = nullptr;
+  TypeParams *typeParams = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  LateClasses *lateClasses = nullptr;
+  AsyncChecker *asyncChecker = nullptr;
+  ClassChecker *classChecker = nullptr;
+  ImportBinder *importBinder = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  FunctionChecker *functionChecker = nullptr;
+  GeneratorChecker *generatorChecker = nullptr;
+  GenericClassChecker *genericClassChecker = nullptr;
 };
 
 }

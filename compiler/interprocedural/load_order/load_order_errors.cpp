@@ -1,20 +1,10 @@
 #include "compiler/interprocedural/load_order/load_order_errors.h"
-#include "compiler/semantic/semantic_external.h"
 #include "llvm/ADT/Twine.h"
 
 namespace tz {
 
 std::string ErrorTextEarlyRead::sameFile(llvm::StringRef name) {
   return (llvm::Twine("'") + name + "' is used before it is declared").str();
-}
-
-std::string ErrorTextEarlyRead::label(llvm::StringRef name, llvm::StringRef var,
-                                      llvm::StringRef file) {
-  if (name != var) {
-    return (llvm::Twine("'") + name + "' ('" + var + "' of " + file + ")").str();
-  }
-
-  return (llvm::Twine("'") + name + "' of " + file).str();
 }
 
 std::string ErrorTextLateUse::sameFile(llvm::StringRef callee, llvm::StringRef var) {
@@ -43,7 +33,11 @@ std::string ErrorTextLateUse::declared(llvm::StringRef var) {
 }
 
 std::string ErrorTextLateUse::function(llvm::StringRef name) {
-  return SemanticExternalFacade::quotedName(name);
+  if (name.empty()) {
+    return "the function";
+  }
+
+  return (llvm::Twine("'") + name + "'").str();
 }
 
 std::string ErrorTextLateUse::creation(llvm::StringRef className) {

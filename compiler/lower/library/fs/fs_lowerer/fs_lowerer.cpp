@@ -20,6 +20,9 @@ using llvm::cast;
 
 namespace tz {
 
+FsLowerer::FsLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 const std::vector<MakerFields> &FsLowerer::fsObjects() {
   static const std::vector<MakerFields> table = {
       {nullptr, {"message", "errno", "code", "syscall", "path", "dest"}},
@@ -35,9 +38,6 @@ const std::vector<MakerFields> &FsLowerer::fsObjects() {
 
   return table;
 }
-
-FsLowerer::FsLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Function *FsLowerer::objectMaker(const Type *type) {
   return this->lowering.objectMaker().maker(type, FsLowerer::fsObjects());

@@ -6,9 +6,20 @@
 
 namespace tz {
 
+class SemanticParts;
+class Prelude;
+class CallChecker;
+class ExprChecker;
+class TypeRelations;
+class ConstantFolder;
+class GenericChecker;
+class ProcessChecker;
+class ArgumentChecker;
+class DateFormatChecker;
+
 class DateChecker {
 public:
-  explicit DateChecker(SemanticState &owner);
+  DateChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args);
   Expr *timeArg(Expr *arg);
@@ -34,6 +45,15 @@ private:
   static std::pair<int64_t, int64_t> carriedDay(int64_t year, int64_t month, int64_t day);
 
   SemanticState &state;
+  Prelude *prelude = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ConstantFolder *constantFolder = nullptr;
+  GenericChecker *genericChecker = nullptr;
+  ProcessChecker *processChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  DateFormatChecker *dateFormatChecker = nullptr;
 };
 
 }

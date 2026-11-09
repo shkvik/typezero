@@ -2,16 +2,49 @@
 #include "compiler/program/ast_walker/ast_walker.h"
 #include "compiler/program/library/builtin_modules/known_modules/known_modules.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
-#include "compiler/semantic/feature/feature.h"
 #include "compiler/semantic/library/async/timer_checker/timer_checker.h"
 #include "compiler/semantic/library/builtin_modules/builtin_module_types/builtin_module_types.h"
 #include "compiler/semantic/library/builtin_modules/node_check_helpers/node_check_helpers.h"
+#include "compiler/semantic/library/builtin_modules/timers_exports/timers_exports.h"
+#include "compiler/semantic/library/bytes/buffer_exports/buffer_exports.h"
+#include "compiler/semantic/library/child_process/child_checker/child_checker.h"
+#include "compiler/semantic/library/child_process/child_exports/child_exports.h"
+#include "compiler/semantic/library/crypto/crypto_checker/crypto_checker.h"
+#include "compiler/semantic/library/crypto/crypto_exports/crypto_exports.h"
+#include "compiler/semantic/library/crypto/crypto_function_checker/crypto_function_checker.h"
+#include "compiler/semantic/library/fs/fs_checker/fs_checker.h"
+#include "compiler/semantic/library/fs/fs_exports/fs_exports.h"
+#include "compiler/semantic/library/fs/fs_promises_checker/fs_promises_checker.h"
+#include "compiler/semantic/library/fs/readline_checker/readline_checker.h"
+#include "compiler/semantic/library/os/os_checker/os_checker.h"
+#include "compiler/semantic/library/os/os_exports/os_exports.h"
+#include "compiler/semantic/library/path/path_checker/path_checker.h"
+#include "compiler/semantic/library/path/path_exports/path_exports.h"
+#include "compiler/semantic/library/process/process_exports/process_exports.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using llvm::dyn_cast;
 
 namespace tz {
+
+BuiltinModuleChecker::BuiltinModuleChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->fsChecker = &all.getFsChecker();
+  this->osChecker = &all.getOsChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->pathChecker = &all.getPathChecker();
+  this->childChecker = &all.getChildChecker();
+  this->timerChecker = &all.getTimerChecker();
+  this->cryptoChecker = &all.getCryptoChecker();
+  this->readlineChecker = &all.getReadlineChecker();
+  this->fsPromisesChecker = &all.getFsPromisesChecker();
+  this->builtinModuleTypes = &all.getBuiltinModuleTypes();
+  this->cryptoFunctionChecker = &all.getCryptoFunctionChecker();
+}
 
 llvm::StringRef BuiltinModuleChecker::typicalName(NodeModule module) {
   switch (module) {
@@ -61,31 +94,76 @@ MemberExpr *BuiltinModuleChecker::processMember(AstContext &ctx, llvm::SMLoc loc
   return ctx.make<MemberExpr>(loc, process, name);
 }
 
-BuiltinModuleChecker::BuiltinModuleChecker(SemanticState &owner)
-    : state(owner) {}
-
 BuiltinModuleChecker::ResultExportFound
 BuiltinModuleChecker::exportFound(NodeModule module, llvm::StringRef name,
                                   llvm::StringRef path) const {
-  if (BuiltinModuleTypes(this->state).exported(module, name)) {
+  if (this->builtinModuleTypes->exported(module, name)) {
     return ok(module);
   }
-  for (const Feature *feature : this->state.getFeatures()) {
-    Feature::ResultExportFound found = feature->exportFound(module, name, path);
-    if (found.isOk()) {
-      return ok(module);
-    }
-    if (found.error().code != FeatureExportFoundErrorCode::NOT_MINE) {
-      std::string message = found.error().message;
+  ResultModuleExport found = BuiltinModuleChecker::moduleExport(module, name, path);
+  if (found.isErr()) {
+    std::string message = found.error().message;
 
-      return err(BuiltinModuleCheckerExportFoundError{
-          .code = BuiltinModuleCheckerExportFoundErrorCode::NOT_EXPORTED,
-          .message = message,
-      });
-    }
+    return err(BuiltinModuleCheckerExportFoundError{
+        .code = BuiltinModuleCheckerExportFoundErrorCode::NOT_EXPORTED,
+        .message = message,
+    });
   }
 
   return ok(module);
+}
+
+BuiltinModuleChecker::ResultModuleExport
+BuiltinModuleChecker::moduleExport(NodeModule module, llvm::StringRef name, llvm::StringRef path) {
+  switch (module) {
+    case NodeModule::Fs:
+      return FsExports::fsExport(name, path);
+    case NodeModule::FsPromises:
+      return FsExports::promisesExport(name, path);
+    case NodeModule::Readline:
+    case NodeModule::ReadlinePromises:
+      return FsExports::readlineExport(name, path, module == NodeModule::Readline);
+    case NodeModule::TzIo:
+      return FsExports::tzIoExport(name, path);
+    case NodeModule::TzFs:
+      return FsExports::tzFsExport(name, path);
+    case NodeModule::Path:
+    case NodeModule::PathPosix:
+    case NodeModule::PathWin32:
+      return PathExports::pathExport(name, path);
+    case NodeModule::Os:
+      return OsExports::osExport(name, path);
+    case NodeModule::Process:
+      return ProcessExports::processExport(name, path);
+    case NodeModule::Buffer:
+      return BufferExports::bufferExport(name, path);
+    case NodeModule::TimersPromises:
+      return TimersExports::timersExport(name, path);
+    case NodeModule::ChildProcess:
+      return ChildExports::childExport(name, path);
+    case NodeModule::Crypto:
+      return CryptoExports::cryptoExport(name, path);
+    case NodeModule::TzCrypto:
+      return CryptoExports::tzCryptoExport(name, path);
+  }
+  llvm_unreachable("unknown node module");
+}
+
+Expr *BuiltinModuleChecker::moduleValue(NodeModule module, llvm::StringRef name, Expr *expr) {
+  if (module == NodeModule::Crypto) {
+    return this->cryptoChecker->checkCryptoValue(name, expr);
+  }
+  if (BuiltinModuleChecker::isPathModule(module)) {
+    return this->pathChecker->checkPathValue(module, name, expr);
+  }
+  if (module == NodeModule::Os) {
+    return this->osChecker->checkOsValue(name, expr);
+  }
+  if (module == NodeModule::Fs || module == NodeModule::FsPromises) {
+    return this->fsChecker->checkFsValue(name, expr);
+  }
+
+  return nullptr;
 }
 
 void BuiltinModuleChecker::importBuiltinModule(Module *module, const ImportDecl &decl) {
@@ -173,7 +251,7 @@ const NodeName *BuiltinModuleChecker::nodeName(llvm::StringRef name) const {
   if (found->second.module == NodeModule::Buffer && name == "Buffer") {
     return nullptr;
   }
-  ScopeEntry entry = Scopes(this->state).lookup(name);
+  ScopeEntry entry = this->scopes->lookup(name);
   if (entry.found()) {
     return nullptr;
   }
@@ -207,10 +285,9 @@ Expr *BuiltinModuleChecker::nodeValue(const NodeName &n, Expr *expr) {
     this->state.getDiagnostics().error(expr->loc(), message);
     return expr;
   }
-  for (const Feature *feature : this->state.getFeatures()) {
-    if (Expr *value = feature->checkModuleValue(this->state, n.module, n.name, expr)) {
-      return value;
-    }
+  Expr *value = this->moduleValue(n.module, n.name, expr);
+  if (value != nullptr) {
+    return value;
   }
   std::string message = ErrorTextNodeValue::onlyCalled(n.name, label);
   this->state.getDiagnostics().error(expr->loc(), message);
@@ -224,17 +301,20 @@ Expr *BuiltinModuleChecker::checkNodeName(NameExpr *name) {
     return nullptr;
   }
   if (n->module == NodeModule::Process || (n->module == NodeModule::Buffer && !n->name.empty())) {
-    return ExprChecker(this->state).checkExpr(this->processAlias(name));
+    return this->exprChecker->checkExpr(this->processAlias(name));
   }
 
   return this->nodeValue(*n, name);
 }
 
 Expr *BuiltinModuleChecker::checkNodeMember(MemberExpr *member) {
-  for (const Feature *feature : this->state.getFeatures()) {
-    if (Expr *checked = feature->checkModuleMember(this->state, member)) {
-      return checked;
-    }
+  Expr *cryptoMember = this->cryptoChecker->checkCryptoModuleMember(member);
+  if (cryptoMember != nullptr) {
+    return cryptoMember;
+  }
+  Expr *fsConstant = this->fsChecker->checkFsConstant(member);
+  if (fsConstant != nullptr) {
+    return fsConstant;
   }
   auto *object = dyn_cast<NameExpr>(member->object);
   const NodeName *n = object ? this->nodeName(object->name) : nullptr;
@@ -287,7 +367,7 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
           ErrorTextNodeValue::notFunc(name->name, NodeCheckHelpers::moduleLabel(n->module));
       this->state.getDiagnostics().error(name->loc(), message);
       for (Expr *&arg : call->args) {
-        arg = ExprChecker(this->state).checkExpr(arg);
+        arg = this->exprChecker->checkExpr(arg);
       }
       call->type = Type::error();
       return call;
@@ -306,7 +386,7 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
     }
     if (n->module == NodeModule::TimersPromises && n->name == "scheduler") {
       TimerChecker::ResultSchedulerAwait awaited =
-          TimerChecker(this->state).checkSchedulerCall(call, member);
+          this->timerChecker->checkSchedulerCall(call, member);
       bool reported =
           awaited.isErr() &&
           awaited.error().code == TimerCheckerCheckSchedulerCallErrorCode::ALREADY_REPORTED;
@@ -323,7 +403,7 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
     if (found.isErr()) {
       this->state.getDiagnostics().error(member->loc(), found.error().message);
       for (Expr *&arg : call->args) {
-        arg = ExprChecker(this->state).checkExpr(arg);
+        arg = this->exprChecker->checkExpr(arg);
       }
       call->type = Type::error();
       return call;
@@ -334,11 +414,34 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
     return nullptr;
   }
 
-  for (const Feature *feature : this->state.getFeatures()) {
-    if (Expr *checked = feature->checkModuleCall(this->state, call, target.module, target.name, loc,
-                                                 expected)) {
-      return checked;
-    }
+  NodeModule module = target.module;
+  llvm::StringRef fn = target.name;
+  if (module == NodeModule::TimersPromises) {
+    return this->checkTimersPromises(call, fn, loc, expected);
+  }
+  if (module == NodeModule::Crypto || module == NodeModule::TzCrypto) {
+    return this->cryptoFunctionChecker->checkCryptoCall(call, fn, loc);
+  }
+  if (BuiltinModuleChecker::isPathModule(module)) {
+    return this->pathChecker->checkPathCall(call, module, fn, loc);
+  }
+  if (module == NodeModule::Os) {
+    return this->osChecker->checkOsCall(call, fn, loc);
+  }
+  if (module == NodeModule::Fs || (module == NodeModule::TzFs && fn == "replaceSync")) {
+    return this->fsChecker->checkFsModuleCall(call, fn, loc);
+  }
+  if (module == NodeModule::FsPromises || (module == NodeModule::TzFs && fn == "replace")) {
+    return this->fsPromisesChecker->checkFsPromisesCall(call, fn, loc);
+  }
+  if (module == NodeModule::Readline || module == NodeModule::ReadlinePromises) {
+    return this->readlineChecker->checkReadlineCall(call, module, fn, loc);
+  }
+  if (module == NodeModule::TzIo) {
+    return this->fsChecker->checkTzIoCall(call, loc);
+  }
+  if (module == NodeModule::ChildProcess) {
+    return this->childChecker->checkChildCall(call, fn, loc);
   }
 
   return nullptr;
@@ -347,7 +450,7 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
 Expr *BuiltinModuleChecker::checkTimersPromises(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
                                                 const Type *expected) {
   TimerChecker::ResultPromiseOfTimer promised =
-      TimerChecker(this->state).checkTimersPromisesCall(call, fn, loc, expected);
+      this->timerChecker->checkTimersPromisesCall(call, fn, loc, expected);
   if (promised.isOk()) {
     return promised.value();
   }

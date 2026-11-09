@@ -4,9 +4,15 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class TypeDeclarer;
+class TypeRelations;
+class ConditionalTypes;
+
 class LiteralTypes {
 public:
-  explicit LiteralTypes(SemanticState &owner);
+  LiteralTypes(SemanticState &owner, SemanticParts &all);
 
   static const Type *unionMemberFor(const Type *from, const Type *to);
   static const Type *unionUnify(const Type *a, const Type *b);
@@ -32,6 +38,10 @@ private:
   static bool choiceTexts(const Expr *e, std::vector<std::u16string> &texts);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ConditionalTypes *conditionalTypes = nullptr;
 };
 
 }

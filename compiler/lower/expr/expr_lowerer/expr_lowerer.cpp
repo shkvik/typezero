@@ -35,7 +35,7 @@
 #include "compiler/lower/values/array_method_lowerer/array_method_lowerer.h"
 #include "compiler/lower/values/number_lowerer/number_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
-#include "compiler/semantic/semantic_external.h"
+#include "compiler/semantic/semantic_types.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
@@ -45,14 +45,14 @@ using llvm::cast;
 
 namespace tz {
 
+ExprLowerer::ExprLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 bool ExprLowerer::isReference(const Type *type) {
   return type->isObject() || type->isIterator() || type->isJson() || type->isDict() ||
          type->isPromise() || type->isUnknown() || type->isClassRef() ||
          (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
-
-ExprLowerer::ExprLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Value *ExprLowerer::emitExpr(Expr *expr) {
   llvm::SMLoc outer = std::exchange(this->lowering.loc_, expr->loc());
@@ -367,7 +367,7 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
       from->nonOptional() != to->nonOptional()) {
     return this->lowering.jsonLowerer().emitJsonConversion(value, from, to);
   }
-  if (SemanticExternalFacade::copiesIntoRecord(from, to)) {
+  if (SemanticTypes::copiesIntoRecord(from, to)) {
     return this->lowering.dictLowerer().emitRecordFromObject(value, from, to);
   }
   if (from->isResult() && to->isResult()) {

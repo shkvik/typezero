@@ -4,6 +4,7 @@
 #include "compiler/semantic/generics/generic_check_helpers/generic_check_helpers.h"
 #include "compiler/semantic/generics/inference/inference.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -13,8 +14,12 @@ using llvm::isa;
 
 namespace tz {
 
-GenericChecker::GenericChecker(SemanticState &owner)
-    : state(owner) {}
+GenericChecker::GenericChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->concatChecker = &all.getConcatChecker();
+  this->typeRelations = &all.getTypeRelations();
+}
 
 const Type *GenericChecker::apparentType(const Type *type) {
   if (type->isParam() && type->constraint() && !type->isListParam()) {
@@ -51,11 +56,11 @@ const Type *GenericChecker::apparentType(const Type *type) {
 Expr *GenericChecker::apparent(Expr *expr) {
   const Type *type = GenericChecker::apparentType(expr->type);
 
-  return type == expr->type ? expr : TypeRelations(this->state).convert(expr, type);
+  return type == expr->type ? expr : this->typeRelations->convert(expr, type);
 }
 
 FuncSymbol *GenericChecker::genericNamed(const NameExpr *name) const {
-  ScopeEntry entry = Scopes(this->state).lookup(name->name);
+  ScopeEntry entry = this->scopes->lookup(name->name);
 
   return entry.func() && !entry.var() && entry.func()->isGeneric() ? entry.func() : nullptr;
 }
@@ -102,10 +107,10 @@ Expr *GenericChecker::forceConversion(Expr *expr, const Type *to) {
     return expr;
   }
   if (to->isString()) {
-    return ConcatChecker(this->state).toStringOperand(expr);
+    return this->concatChecker->toStringOperand(expr);
   }
   if (TypeRelations::isImplicitlyConvertible(type, to)) {
-    return TypeRelations(this->state).convert(expr, to);
+    return this->typeRelations->convert(expr, to);
   }
 
   return expr;

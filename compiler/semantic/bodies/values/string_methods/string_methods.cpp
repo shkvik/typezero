@@ -5,13 +5,21 @@
 #include "compiler/semantic/bodies/expr/member_checker/member_checker.h"
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
 #include "compiler/semantic/library/regex/string_regex_checker/string_regex_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cstring>
 
 namespace tz {
 
-StringMethods::StringMethods(SemanticState &owner)
-    : state(owner) {}
+StringMethods::StringMethods(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->exprChecker = &all.getExprChecker();
+  this->indexProofs = &all.getIndexProofs();
+  this->concatChecker = &all.getConcatChecker();
+  this->memberChecker = &all.getMemberChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->stringRegexChecker = &all.getStringRegexChecker();
+}
 
 StringMethods::ResultStringMethod StringMethods::stringMethod(llvm::StringRef name) {
   constexpr unsigned any = ~0u;
@@ -61,18 +69,18 @@ StringMethods::ResultStringMethod StringMethods::stringMethod(llvm::StringRef na
 }
 
 Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
-  if (Expr *regex = StringRegexChecker(this->state).checkStringRegexMethod(call, member)) {
+  if (Expr *regex = this->stringRegexChecker->checkStringRegexMethod(call, member)) {
     return regex;
   }
   ResultStringMethod found = StringMethods::stringMethod(member->name);
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
   const Method *method = found.value();
   ArgumentChecker::ResultArityMatches arity =
-      ArgumentChecker(this->state).checkArity(call, method->minArgs, method->maxArgs);
+      this->argumentChecker->checkArity(call, method->minArgs, method->maxArgs);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
@@ -83,13 +91,13 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
     Expr *&arg = call->args[i];
     switch (method->args[std::min(i, kinds - 1)]) {
     case 's':
-      arg = ArgumentChecker(this->state).checkArg(arg, Type::string());
+      arg = this->argumentChecker->checkArg(arg, Type::string());
       break;
     case 'p':
-      arg = MemberChecker(this->state).checkPosition(arg);
+      arg = this->memberChecker->checkPosition(arg);
       break;
     default:
-      arg = ConcatChecker(this->state).toStringOperand(ExprChecker(this->state).checkExpr(arg));
+      arg = this->concatChecker->toStringOperand(this->exprChecker->checkExpr(arg));
       break;
     }
   }
@@ -99,21 +107,20 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
   if (method->builtin == Builtin::StrRepeat) {
     std::string counted = ErrorTextStringMethod::repeatOf();
     IndexProofs::ResultBetweenProven between =
-        IndexProofs(this->state).requireBetween(call->args[0], 0, std::nullopt, counted);
+        this->indexProofs->requireBetween(call->args[0], 0, std::nullopt, counted);
     if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
       this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
     }
   } else if (method->builtin == Builtin::StrCharCodeAt) {
     call->mayBeOutOfRange =
-        !IndexProofs(this->state).provesInBounds(member->object, call->args[0], false);
+        !this->indexProofs->provesInBounds(member->object, call->args[0], false);
     call->type = call->mayBeOutOfRange ? Type::optional(Type::intTy()) : Type::intTy();
   } else if (method->builtin == Builtin::StrCodePointAt) {
     call->mayBeOutOfRange =
-        !IndexProofs(this->state).provesInBounds(member->object, call->args[0], false);
+        !this->indexProofs->provesInBounds(member->object, call->args[0], false);
     call->type = call->mayBeOutOfRange ? Type::optional(Type::intTy()) : Type::intTy();
   } else if (method->builtin == Builtin::StrAt) {
-    call->mayBeOutOfRange =
-        !IndexProofs(this->state).provesAtInBounds(member->object, call->args[0]);
+    call->mayBeOutOfRange = !this->indexProofs->provesAtInBounds(member->object, call->args[0]);
     call->type = call->mayBeOutOfRange ? Type::optional(Type::string()) : Type::string();
   }
 

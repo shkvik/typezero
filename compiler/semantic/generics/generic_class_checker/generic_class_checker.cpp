@@ -15,10 +15,30 @@
 #include "compiler/semantic/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/semantic/library/stream/chunk_types/chunk_types.h"
 #include "compiler/semantic/library/stream/stream_new_checker/stream_new_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace tz {
+
+GenericClassChecker::GenericClassChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->chunkTypes = &all.getChunkTypes();
+  this->typeParams = &all.getTypeParams();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->typeResolver = &all.getTypeResolver();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->emitterChecker = &all.getEmitterChecker();
+  this->moduleDeclarer = &all.getModuleDeclarer();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->functionChecker = &all.getFunctionChecker();
+  this->typeArgInferrer = &all.getTypeArgInferrer();
+  this->streamNewChecker = &all.getStreamNewChecker();
+  this->methodCallChecker = &all.getMethodCallChecker();
+  this->classMemberChecker = &all.getClassMemberChecker();
+  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+}
 
 std::string GenericClassChecker::typeNames(llvm::ArrayRef<const Type *> types) {
   std::string text;
@@ -50,9 +70,6 @@ const ClassDecl *GenericClassChecker::genericInstanceOf(const Type *type,
   return nullptr;
 }
 
-GenericClassChecker::GenericClassChecker(SemanticState &owner)
-    : state(owner) {}
-
 void GenericClassChecker::declareClassTypeParams(ClassDecl *cls) {
   if (!cls->isGeneric() || !cls->typeArgs.empty()) {
     return;
@@ -63,14 +80,14 @@ void GenericClassChecker::declareClassTypeParams(ClassDecl *cls) {
   bool moved = home && home != this->state.getModuleStates().getCurrentModule() &&
                this->state.getScopeStack().isTopLevel();
   if (moved) {
-    ModuleDeclarer(this->state).useModule(home);
+    this->moduleDeclarer->useModule(home);
   }
   this->state.getScopeStack().openTypeScope();
   std::vector<const Type *> defaults;
-  cls->typeArgs = TypeParams(this->state).declareTypeParams(cls->typeParams, &defaults);
+  cls->typeArgs = this->typeParams->declareTypeParams(cls->typeParams, &defaults);
   this->state.getScopeStack().closeTypeScope();
   if (moved) {
-    ModuleDeclarer(this->state).useModule(here);
+    this->moduleDeclarer->useModule(here);
   }
   this->state.getScopeStack().leaveOnlyTypes();
   this->state.getGenericStore().rememberClassDefaults(cls, std::move(defaults));
@@ -82,7 +99,7 @@ void GenericClassChecker::declareClassTypeParams(ClassDecl *cls) {
 
 void GenericClassChecker::bindClassTypeParams(const ClassDecl *cls) {
   if (cls && !cls->typeParams.empty() && cls->typeParams.size() == cls->typeArgs.size()) {
-    TypeParams(this->state).bindTypeParams(cls->typeParams, cls->typeArgs);
+    this->typeParams->bindTypeParams(cls->typeParams, cls->typeArgs);
   }
 }
 
@@ -91,7 +108,7 @@ const Type *GenericClassChecker::instanceType(const ClassDecl *inst, const Type 
     return type;
   }
 
-  return TypeParams(this->state).substitute(type, inst->generic()->typeArgs, inst->typeArgs);
+  return this->typeParams->substitute(type, inst->generic()->typeArgs, inst->typeArgs);
 }
 
 const Type *GenericClassChecker::instanceValueType(const ClassDecl *inst, const Type *type) {
@@ -99,7 +116,7 @@ const Type *GenericClassChecker::instanceValueType(const ClassDecl *inst, const 
     return type;
   }
 
-  return TypeParams(this->state).substituteValue(type, inst->generic()->typeArgs, inst->typeArgs);
+  return this->typeParams->substituteValue(type, inst->generic()->typeArgs, inst->typeArgs);
 }
 
 void GenericClassChecker::checkClassInstance(InstanceRecord *instance) {
@@ -110,7 +127,7 @@ void GenericClassChecker::checkClassInstance(InstanceRecord *instance) {
   instance->checking = true;
   std::vector<Diagnostics::Captured> errors;
   if (!this->state.getClassStore().isBrokenClass(inst->generic())) {
-    ClassDeclarer(this->state).completeClass(inst);
+    this->classDeclarer->completeClass(inst);
     std::vector<FunctionDecl *> bodies;
     if (inst->init) {
       bodies.push_back(inst->init);
@@ -126,14 +143,13 @@ void GenericClassChecker::checkClassInstance(InstanceRecord *instance) {
         continue;
       }
       if (!fn->sym->hasReturnType()) {
-        ReturnInferrer(this->state).inferReturnType(fn->sym);
+        this->returnInferrer->inferReturnType(fn->sym);
       }
-      BodyState saved = ReturnInferrer(this->state).enterBody(fn);
+      BodyState saved = this->returnInferrer->enterBody(fn);
       this->state.getGenericStore().rememberCheckingInstance(instance);
       this->state.getDiagnostics().setCapture(&errors);
-      this->state.getFlowState().replaceFlow(Flow());
-      FunctionChecker(this->state).checkFunctionBody(fn);
-      ReturnInferrer(this->state).leaveBody(saved);
+      this->functionChecker->walkFunctionFromScratch(fn);
+      this->returnInferrer->leaveBody(saved);
     }
   }
   instance->checking = false;
@@ -205,7 +221,7 @@ GenericClassChecker::constructorFit(const NewExpr *expr, const ClassDecl *generi
                                     llvm::ArrayRef<FunctionDecl *> ctors) {
   std::vector<FunctionDecl *> fit;
   for (FunctionDecl *c : ctors) {
-    ReturnInferrer(this->state).resolveParams(c->sym);
+    this->returnInferrer->resolveParams(c->sym);
     const FuncSymbol *sym = c->sym;
     if (expr->args.size() >= sym->minArgs &&
         (sym->hasRest || expr->args.size() <= sym->params.size())) {
@@ -240,24 +256,24 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
   auto checkArgsLoosely = [&](std::vector<Expr *> &args) {
     for (Expr *&arg : args) {
       if (!arg->type) {
-        arg = ExprChecker(this->state).checkExpr(arg);
+        arg = this->exprChecker->checkExpr(arg);
       }
     }
   };
   if (generic->library() && generic->name == "EventEmitter") {
-    if (Expr *emitter = EmitterChecker(this->state).checkEmitterNew(expr, generic, expected)) {
+    if (Expr *emitter = this->emitterChecker->checkEmitterNew(expr, generic, expected)) {
       return emitter;
     }
   }
-  if (generic->library() && ChunkTypes(this->state).isStreamClass(generic)) {
-    if (Expr *stream = StreamNewChecker(this->state).checkStreamNew(expr, generic, expected)) {
+  if (generic->library() && this->chunkTypes->isStreamClass(generic)) {
+    if (Expr *stream = this->streamNewChecker->checkStreamNew(expr, generic, expected)) {
       return stream;
     }
   }
   if (!expr->typeArgs.empty()) {
     std::vector<const Type *> args;
     for (const TypeRef &ref : expr->typeArgs) {
-      args.push_back(TypeResolver(this->state).resolveType(ref, true));
+      args.push_back(this->typeResolver->resolveType(ref, true));
       if (args.back()->isError()) {
         checkArgsLoosely(expr->args);
 
@@ -265,8 +281,7 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
       }
     }
     GenericClassInstantiator::ResultClassMade made =
-        GenericClassInstantiator(this->state)
-            .instantiateClass(generic, std::move(args), expr->loc());
+        this->genericClassInstantiator->instantiateClass(generic, std::move(args), expr->loc());
     if (made.isErr() &&
         made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
       llvm::SMLoc at =
@@ -281,7 +296,7 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
       return expr;
     }
     expr->typeArgs.clear();
-    return MethodCallChecker(this->state).checkClassNew(expr, inst, expected);
+    return this->methodCallChecker->checkClassNew(expr, inst, expected);
   }
   ResultClassDeclared declared = this->declaredFirst(generic);
   if (declared.isErr()) {
@@ -316,7 +331,7 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
     fn->typeParams = generic->typeArgs;
     fn->typeDefaults = this->state.getGenericStore().getClassDefaults(generic);
     if (ctor) {
-      ReturnInferrer(this->state).resolveParams(ctor->sym);
+      this->returnInferrer->resolveParams(ctor->sym);
       fn->params = ctor->sym->params;
       fn->minArgs = ctor->sym->minArgs;
       fn->hasRest = ctor->sym->hasRest;
@@ -326,11 +341,11 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
   auto *call = this->state.getAst().make<CallExpr>(expr->loc(), nullptr, std::move(expr->args));
   expr->form = ClassNew{.ctor = call};
   std::vector<const Type *> bound;
-  if (!TypeArgInferrer(this->state).bindGenericCall(call, fn, expr->loc(), expected, {}, bound)) {
+  if (!this->typeArgInferrer->bindGenericCall(call, fn, expr->loc(), expected, {}, bound)) {
     return expr;
   }
   GenericClassInstantiator::ResultClassMade made =
-      GenericClassInstantiator(this->state).instantiateClass(generic, bound, expr->loc());
+      this->genericClassInstantiator->instantiateClass(generic, bound, expr->loc());
   if (made.isErr() &&
       made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
     llvm::SMLoc at =
@@ -343,7 +358,7 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
   if (!inst) {
     return expr;
   }
-  ClassDeclarer(this->state).completeClass(inst);
+  this->classDeclarer->completeClass(inst);
   expr->form = ClassNew{.cls = inst, .ctor = call};
   call->type = Type::voidTy();
   if (ctor) {
@@ -353,14 +368,14 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
       call->target = FunctionCall{.func = mine[size_t(at)]->sym};
     }
     ClassMemberChecker::ResultMemberAccessible accessible =
-        ClassMemberChecker(this->state).checkAccess(ctor->cls(), ctor->access(), "constructor");
+        this->classMemberChecker->checkAccess(ctor->cls(), ctor->access(), "constructor");
     if (accessible.isErr()) {
       this->state.getDiagnostics().error(expr->loc(), accessible.error().message);
     }
   }
   for (const ClassDecl *c = inst; c; c = c->parent) {
     if (c->init || !c->constructors.empty()) {
-      FlowChecker(this->state).calledFunction();
+      this->flowChecker->calledFunction();
       break;
     }
   }

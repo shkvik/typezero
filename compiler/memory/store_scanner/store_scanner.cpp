@@ -15,6 +15,14 @@ using llvm::dyn_cast;
 
 using llvm::isa;
 
+StoreScanner::StoreScanner(std::function<bool(const Expr *)> site)
+    : isSite_(std::move(site)) {
+  this->storeStmtsPart = std::make_unique<StoreStmts>(*this);
+  this->storeExprsPart = std::make_unique<StoreExprs>(*this);
+  this->storeCallsPart = std::make_unique<StoreCalls>(*this);
+  node(Key{Kind::Stored, nullptr});
+}
+
 void StoreScanner::forEachOverride(const FunctionDecl *fn,
                                    llvm::function_ref<void(const FunctionDecl *)> visit) {
   if (!fn->isAbstract()) {
@@ -34,13 +42,6 @@ void StoreScanner::forEachOverride(const FunctionDecl *fn,
     }
   };
   down(fn->cls());
-}
-
-StoreScanner::StoreScanner(std::function<bool(const Expr *)> site) : isSite_(std::move(site)) {
-  this->storeStmtsPart = std::make_unique<StoreStmts>(*this);
-  this->storeExprsPart = std::make_unique<StoreExprs>(*this);
-  this->storeCallsPart = std::make_unique<StoreCalls>(*this);
-  node(Key{Kind::Stored, nullptr});
 }
 
 void StoreScanner::function(const FunctionDecl *fn) {

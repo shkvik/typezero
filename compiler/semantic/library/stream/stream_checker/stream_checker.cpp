@@ -13,6 +13,7 @@
 #include "compiler/semantic/library/stream/chunk_types/chunk_types.h"
 #include "compiler/semantic/library/stream/set_encoding_checker/set_encoding_checker.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -22,18 +23,31 @@ using llvm::isa;
 
 namespace tz {
 
+StreamChecker::StreamChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->prelude = &all.getPrelude();
+  this->fsChecker = &all.getFsChecker();
+  this->chunkTypes = &all.getChunkTypes();
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->resultChecker = &all.getResultChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->emitterChecker = &all.getEmitterChecker();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->setEncodingChecker = &all.getSetEncodingChecker();
+}
+
 bool StreamChecker::isByteChunk(const Type *type) {
   return type->isBuffer() || type->isString();
 }
-
-StreamChecker::StreamChecker(SemanticState &owner)
-    : state(owner) {}
 
 Expr *StreamChecker::checkStreamIntrinsic(CallExpr *call, NameExpr *name, const Type *typeArg) {
   switch (call->builtin()) {
     case Builtin::LibChunk:
     case Builtin::LibIsChunk:
-      call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], Type::unknown());
+      call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::unknown());
       call->type = call->builtin() == Builtin::LibChunk ? typeArg : Type::boolTy();
       if (call->builtin() == Builtin::LibIsChunk) {
         Expr *witness = this->state.getAst().make<UndefinedExpr>(call->loc());
@@ -43,20 +57,19 @@ Expr *StreamChecker::checkStreamIntrinsic(CallExpr *call, NameExpr *name, const 
       return call;
     case Builtin::LibChunkKind: {
       unsigned kind = typeArg->isBuffer() ? 0 : typeArg->isString() ? 1 : 2;
-      return ExprChecker(this->state)
-          .checkExpr(this->state.getAst().make<IntLitExpr>(call->loc(), uint64_t(kind)),
-                     Type::intTy());
+      return this->exprChecker->checkExpr(
+          this->state.getAst().make<IntLitExpr>(call->loc(), uint64_t(kind)), Type::intTy());
     }
     case Builtin::LibTypeName: {
       llvm::SmallVector<llvm::UTF16, 32> units;
       llvm::convertUTF8ToUTF16String(typeArg->name(), units);
-      return ExprChecker(this->state)
-          .checkExpr(this->state.getAst().make<StringLitExpr>(
-                         call->loc(), std::u16string(units.begin(), units.end())),
-                     Type::string());
+      return this->exprChecker->checkExpr(
+          this->state.getAst().make<StringLitExpr>(call->loc(),
+                                                   std::u16string(units.begin(), units.end())),
+          Type::string());
     }
     case Builtin::LibOverrides: {
-      call->args[0] = ExprChecker(this->state).checkExpr(call->args[0]);
+      call->args[0] = this->exprChecker->checkExpr(call->args[0]);
       call->type = Type::boolTy();
       ClassDecl *cls = ClassDeclarer::classOf(call->args[0]->type);
       auto *lit = dyn_cast<StringLitExpr>(call->args[1]);
@@ -72,7 +85,7 @@ Expr *StreamChecker::checkStreamIntrinsic(CallExpr *call, NameExpr *name, const 
         this->state.getDiagnostics().error(lit->loc(), there.error().message);
         return call;
       }
-      call->args[1] = ExprChecker(this->state).checkExpr(call->args[1]);
+      call->args[1] = this->exprChecker->checkExpr(call->args[1]);
       call->target = BuiltinCall{.builtin = Builtin::LibOverrides, .method = methods[0]->sym};
       return call;
     }
@@ -88,7 +101,7 @@ Expr *StreamChecker::checkStreamIntrinsic(CallExpr *call, NameExpr *name, const 
       const Type *buffer = Type::bytesType(Type::Bytes::Buffer);
       std::vector<const Type *> params;
       const Type *result = Type::promise(
-          Type::result(Type::intTy(), typeArg ? typeArg : FsChecker(this->state).nativeError()));
+          Type::result(Type::intTy(), typeArg ? typeArg : this->fsChecker->nativeError()));
       switch (call->builtin()) {
         case Builtin::LibFsOpen:
           params = {Type::string(), Type::string(), Type::intTy()};
@@ -110,11 +123,11 @@ Expr *StreamChecker::checkStreamIntrinsic(CallExpr *call, NameExpr *name, const 
           break;
       }
       for (size_t i = 0; i < params.size(); ++i) {
-        call->args[i] = ArgumentChecker(this->state).checkArg(call->args[i], params[i]);
+        call->args[i] = this->argumentChecker->checkArg(call->args[i], params[i]);
       }
       call->type = result;
       this->state.getInventoryStore().markUsesAsync();
-      FlowChecker(this->state).calledFunction();
+      this->flowChecker->calledFunction();
       return call;
     }
     default:
@@ -188,7 +201,7 @@ StreamChecker::ResultStreamSideOk StreamChecker::streamSide(const Type *chunk, c
 }
 
 const Type *StreamChecker::streamCallbackType() {
-  return Type::function({Type::optional(Prelude(this->state).builtinType("StreamError"))}, 0, false,
+  return Type::function({Type::optional(this->prelude->builtinType("StreamError"))}, 0, false,
                         Type::voidTy());
 }
 
@@ -203,12 +216,12 @@ Expr *StreamChecker::streamChunkArg(Expr *arg, const Type *chunk, bool eof, bool
   }
   if (!StreamChecker::isByteChunk(chunk)) {
     const Type *want = chunk;
-    arg = checked ? TypeRelations(this->state).coerce(arg, want)
-                  : ArgumentChecker(this->state).checkArg(arg, want);
-    return TypeRelations(this->state).convert(arg, Type::unknown());
+    arg = checked ? this->typeRelations->coerce(arg, want)
+                  : this->argumentChecker->checkArg(arg, want);
+    return this->typeRelations->convert(arg, Type::unknown());
   }
   if (!checked) {
-    arg = ExprChecker(this->state).checkExpr(arg);
+    arg = this->exprChecker->checkExpr(arg);
   }
   const Type *type = arg->type;
   if (type->isError()) {
@@ -234,7 +247,7 @@ Expr *StreamChecker::streamChunkArg(Expr *arg, const Type *chunk, bool eof, bool
     return arg;
   }
 
-  return TypeRelations(this->state).convert(arg, Type::unknown());
+  return this->typeRelations->convert(arg, Type::unknown());
 }
 
 Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDecl *cls) {
@@ -243,7 +256,7 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
       name != "setEncoding" && name != "pipe") {
     return nullptr;
   }
-  if (!ChunkTypes(this->state).isStreamClass(cls)) {
+  if (!this->chunkTypes->isStreamClass(cls)) {
     return nullptr;
   }
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
@@ -253,24 +266,24 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
   const Type *receiver = member->object->type;
   call->type = Type::error();
   member->type = Type::error();
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return call;
   }
   auto checkArgsLoosely = [&](size_t from) {
     for (size_t i = from; i < call->args.size(); ++i) {
-      call->args[i] = ExprChecker(this->state).checkExpr(call->args[i]);
+      call->args[i] = this->exprChecker->checkExpr(call->args[i]);
     }
   };
   if (name == "setEncoding") {
-    return SetEncodingChecker(this->state).checkSetEncoding(call, member, cls);
+    return this->setEncodingChecker->checkSetEncoding(call, member, cls);
   }
   if (name == "pipe") {
     std::string message = ErrorTextStreamCall::pipe();
     this->state.getDiagnostics().error(member->loc(), message);
 
-    return ResultChecker(this->state).markCallFailed(call);
+    return this->resultChecker->markCallFailed(call);
   }
-  StreamChunks chunks = ChunkTypes(this->state).streamChunksOf(cls);
+  StreamChunks chunks = this->chunkTypes->streamChunksOf(cls);
   bool reading = name == "push" || name == "unshift";
   const Type *chunk = reading ? chunks.readable : chunks.writable;
   ResultStreamSideOk side = StreamChecker::streamSide(chunk, receiver, name, reading);
@@ -281,13 +294,12 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
   }
   llvm::SMLoc loc = call->loc();
   auto undefinedOf = [&](const Type *type) {
-    return TypeRelations(this->state)
-        .convert(ExprChecker(this->state).checkExpr(this->state.getAst().make<UndefinedExpr>(loc)),
-                 type);
+    return this->typeRelations->convert(
+        this->exprChecker->checkExpr(this->state.getAst().make<UndefinedExpr>(loc)), type);
   };
   const Type *callback = this->streamCallbackType();
   const Type *encodingType = Type::optional(Type::string());
-  const Type *bufferEncoding = Type::optional(Prelude(this->state).builtinType("BufferEncoding"));
+  const Type *bufferEncoding = Type::optional(this->prelude->builtinType("BufferEncoding"));
   llvm::SmallPtrSet<const Expr *, 4> checked;
   auto isCallback = [&](Expr *&arg) {
     if (isa<FunctionExpr>(arg)) {
@@ -296,18 +308,18 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
     if (isa<StringLitExpr>(arg)) {
       return false;
     }
-    arg = ExprChecker(this->state).checkExpr(arg);
+    arg = this->exprChecker->checkExpr(arg);
     checked.insert(arg);
 
     return arg->type->nonOptional()->isFunction();
   };
   auto checkedAs = [&](Expr *arg, const Type *type) {
-    return checked.contains(arg) ? TypeRelations(this->state).coerce(arg, type)
-                                 : ArgumentChecker(this->state).checkArg(arg, type);
+    return checked.contains(arg) ? this->typeRelations->coerce(arg, type)
+                                 : this->argumentChecker->checkArg(arg, type);
   };
   auto encodingArg = [&](Expr *arg) {
     Expr *e = checkedAs(arg, bufferEncoding);
-    return e->type->isError() ? e : TypeRelations(this->state).convert(e, encodingType);
+    return e->type->isError() ? e : this->typeRelations->convert(e, encodingType);
   };
   std::vector<Expr *> args;
   llvm::StringRef impl;
@@ -316,19 +328,19 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
                     ? call->args.size()
                     : 0;
     for (size_t i = 0; i < call->args.size(); ++i) {
-      call->args[i] = ExprChecker(this->state).checkExpr(call->args[i]);
+      call->args[i] = this->exprChecker->checkExpr(call->args[i]);
       if (i == at && !isa<UndefinedExpr>(call->args[i])) {
-        ChunkTypes(this->state).recordStreamChunk(chunk, call->args[i]->type, call->args[i]->loc());
+        this->chunkTypes->recordStreamChunk(chunk, call->args[i]->type, call->args[i]->loc());
       }
     }
-    call->type = name == "end"
-                     ? Type::promise(Type::result(Type::voidTy(),
-                                                  Prelude(this->state).builtinType("StreamError")))
-                     : Type::boolTy();
+    call->type =
+        name == "end"
+            ? Type::promise(Type::result(Type::voidTy(), this->prelude->builtinType("StreamError")))
+            : Type::boolTy();
     return call;
   }
   if (reading) {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 1, 2);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
@@ -337,7 +349,7 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
     args.push_back(call->args.size() > 1 ? encodingArg(call->args[1]) : undefinedOf(encodingType));
     impl = name == "push" ? "pushTyped" : "unshiftTyped";
   } else if (name == "write") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 1, 3);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 3);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
@@ -359,7 +371,7 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
     const Type *written = Type::optional(callback);
     for (FunctionDecl *typed : ClassDeclarer::methodsNamed(cls, "writeTyped", false)) {
       if (typed->sym && typed->params.size() == 3) {
-        ReturnInferrer(this->state).resolveParams(typed->sym);
+        this->returnInferrer->resolveParams(typed->sym);
         written = typed->sym->params[2];
         break;
       }
@@ -367,7 +379,7 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
     args.push_back(cb ? checkedAs(cb, written) : undefinedOf(written));
     impl = "writeTyped";
   } else {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 3);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 3);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
@@ -380,7 +392,7 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
         std::string message = ErrorTextStreamCall::endWithFn();
         this->state.getDiagnostics().error(call->args[i]->loc(), message);
 
-        return ResultChecker(this->state).markCallFailed(call);
+        return this->resultChecker->markCallFailed(call);
       }
     }
     if (count >= 1) {
@@ -395,9 +407,8 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
         return call;
       }
     }
-    args.push_back(
-        ExprChecker(this->state)
-            .checkExpr(this->state.getAst().make<BoolLitExpr>(loc, chunkArg != nullptr)));
+    args.push_back(this->exprChecker->checkExpr(
+        this->state.getAst().make<BoolLitExpr>(loc, chunkArg != nullptr)));
     args.push_back(chunkArg ? this->streamChunkArg(chunkArg, chunk, false, true, name,
                                                    checked.contains(chunkArg))
                             : undefinedOf(Type::unknown()));
@@ -412,7 +423,7 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
   call->args = std::move(args);
   member->name = impl;
   std::vector<bool> given(call->args.size(), true);
-  EmitterChecker(this->state).callLibraryMethod(call, member, cls, impl, {}, &given, false);
+  this->emitterChecker->callLibraryMethod(call, member, cls, impl, {}, &given, false);
 
   return call;
 }

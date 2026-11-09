@@ -1,10 +1,17 @@
 #include "compiler/semantic/generics/generic_widening/generic_widening.h"
 #include "compiler/semantic/generics/generic_class_instantiator/generic_class_instantiator.h"
 #include "compiler/semantic/generics/widening_relations/widening_relations.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include <map>
 
 namespace tz {
+
+GenericWidening::GenericWidening(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->typeRelations = &all.getTypeRelations();
+  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+}
 
 bool GenericWidening::mentions(const TypeRef &ref, llvm::StringRef name) {
   if (ref.kind() == TypeRefKind::NAME_REF && ref.name == name) {
@@ -118,9 +125,6 @@ bool GenericWidening::referenceFits(const Type *own, const Type *wide) {
 
   return WideningRelations::sameReference(own, wide);
 }
-
-GenericWidening::GenericWidening(SemanticState &owner)
-    : state(owner) {}
 
 bool GenericWidening::covariant(const ClassDecl *generic, size_t index) {
   if (index >= generic->typeParams.size()) {
@@ -264,7 +268,7 @@ Expr *GenericWidening::joined(Expr *expr) {
       return expr;
     }
     GenericClassInstantiator::ResultClassMade widened =
-        GenericClassInstantiator(this->state).instantiateClass(generic, args, expr->loc());
+        this->genericClassInstantiator->instantiateClass(generic, args, expr->loc());
     if (widened.isErr() &&
         widened.error().code !=
             GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
@@ -278,7 +282,7 @@ Expr *GenericWidening::joined(Expr *expr) {
       return expr;
     }
 
-    return TypeRelations(this->state).convert(expr, widened.value()->type);
+    return this->typeRelations->convert(expr, widened.value()->type);
   }
 
   return expr;

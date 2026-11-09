@@ -16,14 +16,29 @@
 #include "compiler/semantic/library/stream/set_encoding_checker/set_encoding_checker.h"
 #include "compiler/semantic/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cmath>
 
 namespace tz {
 
-NameChecker::NameChecker(SemanticState &owner)
-    : state(owner) {}
+NameChecker::NameChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->resultTypes = &all.getResultTypes();
+  this->classChecker = &all.getClassChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->constantFolder = &all.getConstantFolder();
+  this->genericChecker = &all.getGenericChecker();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->metadataChecker = &all.getMetadataChecker();
+  this->nestedFunctions = &all.getNestedFunctions();
+  this->topLevelChecker = &all.getTopLevelChecker();
+  this->tzModulesChecker = &all.getTzModulesChecker();
+  this->classValueChecker = &all.getClassValueChecker();
+  this->builtinModuleChecker = &all.getBuiltinModuleChecker();
+}
 
 NameChecker::ResultNoTypeArguments NameChecker::typeArgsAbsent(const NameExpr *name,
                                                                const ScopeEntry &entry) {
@@ -72,7 +87,7 @@ NameChecker::ResultResolvedNameUse NameChecker::unknownName(NameExpr *name,
       {"JSON", "JSON.parse(text)"}};
   auto object = llvm::find_if(objects, [&](const auto &o) { return o.first == name->name; });
   llvm::StringRef result =
-      entry.enumDecl() ? llvm::StringRef() : ResultTypes(this->state).resultName(name->name);
+      entry.enumDecl() ? llvm::StringRef() : this->resultTypes->resultName(name->name);
   if (result == "ok" || result == "err") {
     std::string message = ErrorTextNameUse::okValue(name->name);
 
@@ -177,14 +192,14 @@ NameChecker::ResultResolvedNameUse NameChecker::unknownName(NameExpr *name,
     });
   }
   if (entry.cls()) {
-    Expr *value = ClassValueChecker(this->state).checkClassValue(name, entry.cls());
+    Expr *value = this->classValueChecker->checkClassValue(name, entry.cls());
 
     return ok(value);
   }
   ClassDecl *current = this->state.getClassContext().getCurrentClass();
   bool expression = current && current->expression();
   if (expression && !current->name.empty() && current->name == name->name) {
-    Expr *value = ClassValueChecker(this->state).checkClassValue(name, current);
+    Expr *value = this->classValueChecker->checkClassValue(name, current);
 
     return ok(value);
   }
@@ -196,7 +211,7 @@ NameChecker::ResultResolvedNameUse NameChecker::unknownName(NameExpr *name,
         .message = message,
     });
   }
-  TopLevelChecker::ResultSourceIsLoaded loaded = TopLevelChecker(this->state).checkLoaded(name);
+  TopLevelChecker::ResultSourceIsLoaded loaded = this->topLevelChecker->checkLoaded(name);
   if (loaded.isErr()) {
     bool reported = loaded.error().code == TopLevelCheckerCheckLoadedErrorCode::ALREADY_REPORTED;
 
@@ -263,7 +278,7 @@ NameChecker::ResultResolvedNameUse NameChecker::unknownName(NameExpr *name,
 
 Expr *NameChecker::checkName(NameExpr *name) {
   if (name->name == "this") {
-    ClassChecker::ResultThisReference reference = ClassChecker(this->state).checkThis(name);
+    ClassChecker::ResultThisReference reference = this->classChecker->checkThis(name);
     if (reference.isErr()) {
       this->state.getDiagnostics().error(name->loc(), reference.error().message);
       return name;
@@ -273,10 +288,10 @@ Expr *NameChecker::checkName(NameExpr *name) {
   if (name->cls() && name->type) {
     return name;
   }
-  if (Expr *node = BuiltinModuleChecker(this->state).checkNodeName(name)) {
+  if (Expr *node = this->builtinModuleChecker->checkNodeName(name)) {
     return node;
   }
-  ScopeEntry entry = TopLevelChecker(this->state).lookupValue(name->name);
+  ScopeEntry entry = this->topLevelChecker->lookupValue(name->name);
   ResultNoTypeArguments plain = NameChecker::typeArgsAbsent(name, entry);
   if (plain.isErr()) {
     this->state.getDiagnostics().error(name->loc(), plain.error().message);
@@ -288,9 +303,9 @@ Expr *NameChecker::checkName(NameExpr *name) {
     }
     name->binding = NamedVar{.var = entry.var()};
     entry.var()->read = true;
-    NestedFunctions(this->state).noteUse(entry.var(), name->loc());
-    name->type = Scopes(this->state).varType(entry.var());
-    Scopes::ResultNameIsVisible visible = Scopes(this->state).checkVisible(name, entry.var());
+    this->nestedFunctions->noteUse(entry.var(), name->loc());
+    name->type = this->scopes->varType(entry.var());
+    Scopes::ResultNameIsVisible visible = this->scopes->checkVisible(name, entry.var());
     if (visible.isErr()) {
       this->state.getDiagnostics().error(name->loc(), visible.error().message);
     }
@@ -298,46 +313,44 @@ Expr *NameChecker::checkName(NameExpr *name) {
       FieldPath path;
       path.var = entry.var();
       if (const Type *view = this->state.getStreamStore().findStreamView(path, name->loc())) {
-        return TypeRelations(this->state).convert(name, view);
+        return this->typeRelations->convert(name, view);
       }
     }
-    if (const Type *narrowed = GenericChecker(this->state).narrowedType(entry.var())) {
+    if (const Type *narrowed = this->genericChecker->narrowedType(entry.var())) {
       if (narrowed->isOptional() && this->state.getFlowState().isDefined(entry.var())) {
         narrowed = narrowed->inner();
       }
-      return TypeRelations(this->state).convert(name, narrowed);
+      return this->typeRelations->convert(name, narrowed);
     }
     bool defined = name->type->isOptional() && this->state.getFlowState().isDefined(entry.var());
     const Type *type = defined ? name->type->inner() : name->type;
     if (type->isResult()) {
       if (this->state.getFlowState().isOkResult(entry.var()) && !type->errType()->isNever()) {
-        return TypeRelations(this->state)
-            .convert(name, Type::result(type->okType(), Type::never()));
+        return this->typeRelations->convert(name, Type::result(type->okType(), Type::never()));
       }
       if (this->state.getFlowState().isErrResult(entry.var()) && !type->okType()->isNever()) {
-        return TypeRelations(this->state)
-            .convert(name, Type::result(Type::never(), type->errType()));
+        return this->typeRelations->convert(name, Type::result(Type::never(), type->errType()));
       }
     }
     if (defined) {
-      return TypeRelations(this->state).convert(name, type);
+      return this->typeRelations->convert(name, type);
     }
     return name;
   }
   if (!entry.func() && !entry.enumDecl()) {
-    if (Expr *constant = ConstantFolder(this->state).globalConstant("", name->name, name->loc())) {
+    if (Expr *constant = this->constantFolder->globalConstant("", name->name, name->loc())) {
       return constant;
     }
   }
   if (entry.func()) {
     name->binding = NamedFunction{.func = entry.func()};
-    name->type = ReturnInferrer(this->state).functionType(entry.func());
-    TzModulesChecker(this->state).noteHttpsValue(entry.func()->decl, name->loc());
+    name->type = this->returnInferrer->functionType(entry.func());
+    this->tzModulesChecker->noteHttpsValue(entry.func()->decl, name->loc());
     return name;
   }
   if (!entry.found()) {
-    if (ClassDecl *cls = MetadataChecker(this->state).builtinConstructor(name->name)) {
-      return ClassValueChecker(this->state).checkClassValue(name, cls);
+    if (ClassDecl *cls = this->metadataChecker->builtinConstructor(name->name)) {
+      return this->classValueChecker->checkClassValue(name, cls);
     }
   }
   ResultResolvedNameUse resolved = this->unknownName(name, entry);

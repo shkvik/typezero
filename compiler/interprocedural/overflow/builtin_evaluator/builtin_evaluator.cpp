@@ -51,6 +51,9 @@ const double kPartLimits[7][2] = {
 
 }
 
+BuiltinEvaluator::BuiltinEvaluator(OverflowCheck &check)
+    : check(check) {}
+
 double BuiltinEvaluator::monthStart(double months) {
   if (!(std::fabs(months) < 1e15)) {
     return months * 30.436875;
@@ -122,9 +125,6 @@ void BuiltinEvaluator::checkDateParts(const CallExpr *call, const std::vector<Va
   this->check.overflowWarnings().checkDate(BuiltinEvaluator::dateTime(nums),
                                            local ? edge - kDay : edge, parts);
 }
-
-BuiltinEvaluator::BuiltinEvaluator(OverflowCheck &check)
-    : check(check) {}
 
 Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
   if (OverflowHelpers::callbackArg(call->builtin())) {

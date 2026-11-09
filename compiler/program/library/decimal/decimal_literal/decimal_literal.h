@@ -7,9 +7,12 @@
 
 namespace tz {
 
+class Expr;
+
 struct DecimalLiteral {
   static std::optional<DecimalLiteral> read(llvm::StringRef text);
   static DecimalLiteral of(uint64_t value);
+  static std::optional<DecimalLiteral> fromExpr(const Expr *expr);
   static int roundingMode(const std::u16string &name);
   static DecimalLiteral normalized(std::string digits, int64_t exponent);
 

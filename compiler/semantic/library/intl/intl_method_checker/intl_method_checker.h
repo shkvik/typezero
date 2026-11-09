@@ -6,9 +6,19 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ExprChecker;
+class MathChecker;
+class LiteralTypes;
+class TypeRelations;
+class GenericChecker;
+class ArgumentChecker;
+class IntlOptionsChecker;
+
 class IntlMethodChecker {
 public:
-  explicit IntlMethodChecker(SemanticState &owner);
+  IntlMethodChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkIntlMethod(CallExpr *call, MemberExpr *member);
   Expr *checkNumberLocale(CallExpr *call, MemberExpr *member);
@@ -28,6 +38,14 @@ private:
                                     llvm::StringRef what);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  MathChecker *mathChecker = nullptr;
+  LiteralTypes *literalTypes = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  GenericChecker *genericChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  IntlOptionsChecker *intlOptionsChecker = nullptr;
 };
 
 }

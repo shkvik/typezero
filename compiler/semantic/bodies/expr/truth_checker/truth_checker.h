@@ -6,9 +6,17 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ExprChecker;
+class JsonChecker;
+class TypeRelations;
+class ConditionFacts;
+class GenericChecker;
+
 class TruthChecker {
 public:
-  explicit TruthChecker(SemanticState &owner);
+  TruthChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkCondition(Expr *cond, Flow &whenTrue, Flow &whenFalse);
   Expr *checkBranching(Expr *expr, Flow &whenTrue, Flow &whenFalse,
@@ -46,6 +54,12 @@ private:
   static const Type *falsyType(const Type *type);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  JsonChecker *jsonChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ConditionFacts *conditionFacts = nullptr;
+  GenericChecker *genericChecker = nullptr;
 };
 
 }

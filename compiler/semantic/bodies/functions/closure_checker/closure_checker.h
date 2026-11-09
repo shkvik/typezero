@@ -6,9 +6,24 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class TypeParams;
+class StmtChecker;
+class AsyncChecker;
+class ClassChecker;
+class TypeDeclarer;
+class TypeResolver;
+class ArgListChecker;
+class ReturnInferrer;
+class FunctionChecker;
+class NestedFunctions;
+class GeneratorChecker;
+class PredicateChecker;
+
 class ClosureChecker {
 public:
-  explicit ClosureChecker(SemanticState &owner);
+  ClosureChecker(SemanticState &owner, SemanticParts &all);
 
   static Signature signatureOf(const Type *fnType);
   Expr *checkFunctionExpr(FunctionExpr *fe, const Signature *expected);
@@ -37,6 +52,19 @@ private:
   static ResultPromiseAwaited promiseAwaited(const Signature *sig);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  TypeParams *typeParams = nullptr;
+  StmtChecker *stmtChecker = nullptr;
+  AsyncChecker *asyncChecker = nullptr;
+  ClassChecker *classChecker = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  ArgListChecker *argListChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  FunctionChecker *functionChecker = nullptr;
+  NestedFunctions *nestedFunctions = nullptr;
+  GeneratorChecker *generatorChecker = nullptr;
+  PredicateChecker *predicateChecker = nullptr;
 };
 
 }

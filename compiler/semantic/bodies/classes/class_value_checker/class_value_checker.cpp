@@ -7,6 +7,7 @@
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/reflect/reflect_checker/reflect_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
@@ -15,8 +16,17 @@ using llvm::isa;
 
 namespace tz {
 
-ClassValueChecker::ClassValueChecker(SemanticState &owner)
-    : state(owner) {}
+ClassValueChecker::ClassValueChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->typeResolver = &all.getTypeResolver();
+  this->staticChecker = &all.getStaticChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->reflectChecker = &all.getReflectChecker();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->methodCallChecker = &all.getMethodCallChecker();
+}
 
 const Type *ClassValueChecker::constructedBy(const Type *type) {
   if (type->isConstructor()) {
@@ -62,7 +72,7 @@ ClassValueChecker::resolveConstructorType(const TypeRef &ref) {
         .message = message,
     });
   }
-  const Type *made = TypeResolver(this->state).resolveType(ref.args[0], false);
+  const Type *made = this->typeResolver->resolveType(ref.args[0], false);
   if (made->isError()) {
     return ok(made);
   }
@@ -114,7 +124,7 @@ ClassValueChecker::ResultConstructorArgs ClassValueChecker::constructorArgs() {
         .message = message,
     });
   }
-  ReturnInferrer(this->state).resolveParams(sym);
+  this->returnInferrer->resolveParams(sym);
   if (llvm::is_contained(sym->params, nullptr)) {
     return ok(Type::error());
   }
@@ -183,11 +193,11 @@ ClassValueChecker::ResultArgumentNotVoid ClassValueChecker::argumentValue(const 
 
 Expr *ClassValueChecker::checkValueNew(NewExpr *expr, const Type *expected) {
   expr->type = Type::error();
-  expr->callee = ExprChecker(this->state).checkExpr(expr->callee);
+  expr->callee = this->exprChecker->checkExpr(expr->callee);
   const Type *type = expr->callee->type;
   if (type->isError()) {
     for (Expr *&arg : expr->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     return expr;
   }
@@ -195,7 +205,7 @@ Expr *ClassValueChecker::checkValueNew(NewExpr *expr, const Type *expected) {
   if (classValue.isErr()) {
     this->state.getDiagnostics().error(expr->callee->loc(), classValue.error().message);
     for (Expr *&arg : expr->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     return expr;
   }
@@ -204,11 +214,11 @@ Expr *ClassValueChecker::checkValueNew(NewExpr *expr, const Type *expected) {
     if (typed.isErr()) {
       this->state.getDiagnostics().error(expr->callee->loc(), typed.error().message);
       for (Expr *&arg : expr->args) {
-        arg = ExprChecker(this->state).checkExpr(arg);
+        arg = this->exprChecker->checkExpr(arg);
       }
       return expr;
     }
-    return MethodCallChecker(this->state).checkClassNew(expr, typed.value(), expected);
+    return this->methodCallChecker->checkClassNew(expr, typed.value(), expected);
   }
   ResultNoTypeArguments plain = ClassValueChecker::runtimeTypeArgs(expr);
   if (plain.isErr()) {
@@ -217,20 +227,20 @@ Expr *ClassValueChecker::checkValueNew(NewExpr *expr, const Type *expected) {
   expr->form = ReflectNew{};
   std::vector<const Type *> argTypes;
   for (Expr *&arg : expr->args) {
-    arg = ExprChecker(this->state).checkExpr(arg);
+    arg = this->exprChecker->checkExpr(arg);
     argTypes.push_back(arg->type);
     ResultArgumentNotVoid value = ClassValueChecker::argumentValue(arg);
     if (value.isErr()) {
       this->state.getDiagnostics().error(arg->loc(), value.error().message);
     } else {
-      arg = TypeRelations(this->state).convert(arg, Type::unknown());
+      arg = this->typeRelations->convert(arg, Type::unknown());
     }
   }
-  if (!ReflectChecker(this->state).onlyChecked()) {
+  if (!this->reflectChecker->onlyChecked()) {
     this->state.getReflectStore().addReflectedNew(expr, std::move(argTypes));
   }
-  FlowChecker(this->state).calledFunction();
-  if (!ReflectChecker(this->state).onlyChecked()) {
+  this->flowChecker->calledFunction();
+  if (!this->reflectChecker->onlyChecked()) {
     this->state.getReflectStore().markReflectionUsed();
   }
   expr->type = type->constructed();
@@ -317,7 +327,7 @@ ClassValueChecker::checkClassRefMember(MemberExpr *member) {
   }
   Expr *object = member->object;
   Expr *read =
-      StaticChecker(this->state).checkStaticMember(member, const_cast<ClassDecl *>(cls), nullptr);
+      this->staticChecker->checkStaticMember(member, const_cast<ClassDecl *>(cls), nullptr);
   Expr *value = this->afterClassValue(object, read);
 
   return ok(value);

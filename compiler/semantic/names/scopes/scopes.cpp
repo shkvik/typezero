@@ -1,13 +1,17 @@
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/bodies/stmt/var_checker/var_checker.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cmath>
 
 namespace tz {
 
-Scopes::Scopes(SemanticState &owner)
-    : state(owner) {}
+Scopes::Scopes(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->varChecker = &all.getVarChecker();
+  this->returnInferrer = &all.getReturnInferrer();
+}
 
 Scopes::ResultEntryDeclared Scopes::declare(llvm::StringRef name, ScopeEntry entry) {
   if (name == "undefined") {
@@ -49,9 +53,13 @@ ScopeEntry Scopes::lookup(llvm::StringRef name) const {
 
 void Scopes::closeScope() {
   if (this->state.getExpressionMarks().hasUntyped()) {
-    VarChecker(this->state).reportUntyped();
+    this->varChecker->reportUntyped();
   }
   this->state.getScopeStack().closeScope();
+}
+
+void Scopes::openScope() {
+  this->state.getScopeStack().openScope();
 }
 
 VarSymbol *Scopes::declareVar(llvm::StringRef name, llvm::SMLoc loc, const Type *type,
@@ -89,7 +97,7 @@ const Type *Scopes::varType(VarSymbol *var) {
   if (!fn || !fn->sym) {
     return Type::error();
   }
-  const Type *type = ReturnInferrer(this->state).functionType(fn->sym);
+  const Type *type = this->returnInferrer->functionType(fn->sym);
   if (var->function() && fn->sym->hasReturnType()) {
     var->type = type;
   }

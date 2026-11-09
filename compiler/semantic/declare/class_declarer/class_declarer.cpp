@@ -8,14 +8,22 @@
 #include "compiler/semantic/generics/widening_relations/widening_relations.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
 #include <limits>
 
 namespace tz {
 
-ClassDeclarer::ClassDeclarer(SemanticState &owner)
-    : state(owner) {}
+ClassDeclarer::ClassDeclarer(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->classBases = &all.getClassBases();
+  this->typeResolver = &all.getTypeResolver();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->functionChecker = &all.getFunctionChecker();
+  this->genericClassChecker = &all.getGenericClassChecker();
+}
 
 ClassDecl *ClassDeclarer::classOf(const Type *type) {
   return type ? const_cast<ClassDecl *>(type->classDecl()) : nullptr;
@@ -64,13 +72,12 @@ void ClassDeclarer::declareClass(ClassDecl *cls) {
   cls->id = this->state.getClassStore().takeClassId();
   cls->type = Type::classType(cls->name, cls);
   this->state.getClassStore().addClass(cls);
-  Scopes::ResultEntryDeclared added =
-      Scopes(this->state).declare(cls->name, {ClassEntry{.cls = cls}});
+  Scopes::ResultEntryDeclared added = this->scopes->declare(cls->name, {ClassEntry{.cls = cls}});
   if (added.isErr()) {
     this->state.getDiagnostics().error(cls->loc(), added.error().message);
   }
   if (added.isErr() && added.error().code != ScopesDeclareErrorCode::UNDEFINED_AS_NAME) {
-    ScopeEntry previousEntry = Scopes(this->state).lookup(cls->name);
+    ScopeEntry previousEntry = this->scopes->lookup(cls->name);
     std::string declaredHere = ErrorTextDeclare::previous();
     this->state.getDiagnostics().note(previousEntry.loc(), declaredHere);
   }
@@ -180,7 +187,7 @@ const Type *ClassDeclarer::declaredFieldType(const ClassDecl *cls, ClassField &f
       f.presence = FieldPresence::OPTIONAL;
     }
     if (param->type) {
-      return TypeResolver(this->state).resolveType(*param->type, false);
+      return this->typeResolver->resolveType(*param->type, false);
     }
     if (param->defaultValue()) {
       return SharedHelpers::literalType(param->defaultValue());
@@ -188,7 +195,7 @@ const Type *ClassDeclarer::declaredFieldType(const ClassDecl *cls, ClassField &f
     return nullptr;
   }
   if (f.type) {
-    return TypeResolver(this->state).resolveType(*f.type, false);
+    return this->typeResolver->resolveType(*f.type, false);
   }
 
   return SharedHelpers::literalType(f.init);
@@ -306,10 +313,10 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
     return;
   }
   cls->stage = ClassStage::RESOLVED;
-  GenericClassChecker(this->state).declareClassTypeParams(cls);
+  this->genericClassChecker->declareClassTypeParams(cls);
   this->state.getScopeStack().openTypeScope();
-  GenericClassChecker(this->state).bindClassTypeParams(cls);
-  ClassBases(this->state).resolveClassBases(cls);
+  this->genericClassChecker->bindClassTypeParams(cls);
+  this->classBases->resolveClassBases(cls);
   for (size_t i = 0; i < cls->fields.size(); ++i) {
     this->checkMemberName(cls, i);
   }
@@ -343,8 +350,7 @@ void ClassDeclarer::declareTyped(FunctionDecl *fn, const Type *declared) {
   for (size_t i = 0; i < fn->params.size(); ++i) {
     Param &param = fn->params[i];
     const Type *given = i < declared->params().size() ? declared->params()[i] : nullptr;
-    const Type *written =
-        param.type ? TypeResolver(this->state).resolveType(*param.type, false) : given;
+    const Type *written = param.type ? this->typeResolver->resolveType(*param.type, false) : given;
     ResultParamTypePassed passed = ClassDeclarer::paramType(param, written, declared);
     if (passed.isErr()) {
       this->state.getDiagnostics().error(param.loc, passed.error().message);
@@ -420,11 +426,11 @@ void ClassDeclarer::numberVariants(llvm::ArrayRef<FunctionDecl *> functions) {
 
 void ClassDeclarer::declareMethods(ClassDecl *cls) {
   for (FunctionDecl *ctor : cls->constructors) {
-    FunctionChecker(this->state).declareFunction(ctor, nullptr, false);
+    this->functionChecker->declareFunction(ctor, nullptr, false);
     ctor->sym->setReturnType(Type::voidTy());
   }
   for (FunctionDecl *fn : cls->methods) {
-    FunctionChecker(this->state).declareFunction(fn, nullptr, false);
+    this->functionChecker->declareFunction(fn, nullptr, false);
     ResultAbstractReturns returns = ClassDeclarer::abstractReturn(cls, fn);
     if (returns.isErr()) {
       this->state.getDiagnostics().error(fn->loc(), returns.error().message);
@@ -442,11 +448,11 @@ void ClassDeclarer::declareMethods(ClassDecl *cls) {
     }
     FunctionDecl *fn = f.method();
     this->state.getScopeStack().openTypeScope();
-    GenericClassChecker(this->state).bindClassTypeParams(cls);
-    const Type *declared = f.type ? TypeResolver(this->state).resolveType(*f.type, false) : nullptr;
+    this->genericClassChecker->bindClassTypeParams(cls);
+    const Type *declared = f.type ? this->typeResolver->resolveType(*f.type, false) : nullptr;
     this->state.getScopeStack().closeTypeScope();
     if (!declared || !declared->isFunction()) {
-      FunctionChecker(this->state).declareFunction(fn, nullptr, false);
+      this->functionChecker->declareFunction(fn, nullptr, false);
       continue;
     }
     this->declareTyped(fn, declared);
@@ -480,7 +486,7 @@ void ClassDeclarer::declareMethods(ClassDecl *cls) {
     init->role = ClassMember{.cls = cls};
     init->body = this->state.getAst().make<BlockStmt>(cls->loc());
     init->body->body = std::move(sets);
-    FunctionChecker(this->state).declareFunction(init, nullptr, false);
+    this->functionChecker->declareFunction(init, nullptr, false);
     init->sym->setReturnType(Type::voidTy());
     cls->init = init;
   }
@@ -748,8 +754,8 @@ void ClassDeclarer::completeClass(ClassDecl *cls) {
       if (f.isStatic() || f.method() || f.resolved) {
         continue;
       }
-      f.resolved = original ? GenericClassChecker(this->state).instanceValueType(cls, original)
-                            : Type::error();
+      f.resolved =
+          original ? this->genericClassChecker->instanceValueType(cls, original) : Type::error();
     }
     muted = this->state.getDiagnostics().setMuted(true);
   }
@@ -761,7 +767,7 @@ void ClassDeclarer::completeClass(ClassDecl *cls) {
       if (f.resolved || !ctor->sym) {
         continue;
       }
-      ReturnInferrer(this->state).resolveParams(ctor->sym);
+      this->returnInferrer->resolveParams(ctor->sym);
       for (const Param &param : ctor->params) {
         if (param.property && param.name == f.name && param.declaredType) {
           f.resolved = param.declaredType;
@@ -775,10 +781,9 @@ void ClassDeclarer::completeClass(ClassDecl *cls) {
   auto unresolved = [](const ClassField &f) { return !f.isStatic() && !f.method() && !f.resolved; };
   bool pending = llvm::any_of(cls->fields, unresolved);
   if (pending && cls->init && !cls->init->checked) {
-    BodyState saved = ReturnInferrer(this->state).enterBody(cls->init);
-    this->state.getFlowState().replaceFlow(Flow());
-    FunctionChecker(this->state).checkFunctionBody(cls->init);
-    ReturnInferrer(this->state).leaveBody(saved);
+    BodyState saved = this->returnInferrer->enterBody(cls->init);
+    this->functionChecker->walkFunctionFromScratch(cls->init);
+    this->returnInferrer->leaveBody(saved);
   }
   std::vector<Field> fields;
   if (cls->parent) {

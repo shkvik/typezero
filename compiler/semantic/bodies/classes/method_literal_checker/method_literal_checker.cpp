@@ -6,6 +6,7 @@
 #include "compiler/semantic/flow/predicate_checker/predicate_checker.h"
 #include "compiler/semantic/infer/call_cycles/call_cycles.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -14,8 +15,17 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-MethodLiteralChecker::MethodLiteralChecker(SemanticState &owner)
-    : state(owner) {}
+MethodLiteralChecker::MethodLiteralChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callCycles = &all.getCallCycles();
+  this->classBases = &all.getClassBases();
+  this->exprChecker = &all.getExprChecker();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->typeRelations = &all.getTypeRelations();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->functionChecker = &all.getFunctionChecker();
+  this->predicateChecker = &all.getPredicateChecker();
+}
 
 Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *lit, const Type *target) {
   lit->type = Type::error();
@@ -26,7 +36,7 @@ Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *lit, const Type *t
   if (spreadless.isErr()) {
     this->state.getDiagnostics().error(lit->loc(), spreadless.error().message);
     for (ObjectLitExpr::Property &prop : lit->props) {
-      prop.value = ExprChecker(this->state).checkExpr(prop.value);
+      prop.value = this->exprChecker->checkExpr(prop.value);
     }
     return lit;
   }
@@ -64,9 +74,9 @@ Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *lit, const Type *t
     }
     std::string what = ErrorTextFieldValue::label(prop.name);
     const Field *wanted = target ? target->field(prop.name) : nullptr;
-    prop.value = ExprChecker(this->state).checkExpr(prop.value, wanted ? wanted->type : nullptr);
+    prop.value = this->exprChecker->checkExpr(prop.value, wanted ? wanted->type : nullptr);
     if (wanted) {
-      prop.value = TypeRelations(this->state).coerce(prop.value, wanted->type, what);
+      prop.value = this->typeRelations->coerce(prop.value, wanted->type, what);
     }
     const Type *valueType =
         wanted && !prop.value->type->isError() ? wanted->type : prop.value->type;
@@ -110,27 +120,26 @@ Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *lit, const Type *t
     fn->creationSeq = group->creationSeq;
     const Field *wanted = target ? target->field(fn->name) : nullptr;
     if (wanted && wanted->type->isFunction()) {
-      ClassDeclarer(this->state).declareTyped(fn, wanted->type);
+      this->classDeclarer->declareTyped(fn, wanted->type);
       if (fn->returnType) {
-        fn->sym->setReturnType(PredicateChecker(this->state).resolveReturnType(fn, fn->sym));
+        fn->sym->setReturnType(this->predicateChecker->resolveReturnType(fn, fn->sym));
       }
     } else {
-      FunctionChecker(this->state).declareFunction(fn, nullptr, false);
+      this->functionChecker->declareFunction(fn, nullptr, false);
     }
   }
-  CallCycles(this->state)
-      .findCycles(cls->methods,
-                  [](FunctionDecl *, llvm::StringRef) -> FunctionDecl * { return nullptr; });
+  this->callCycles->findCycles(
+      cls->methods, [](FunctionDecl *, llvm::StringRef) -> FunctionDecl * { return nullptr; });
   for (FunctionDecl *fn : cls->methods) {
     if (!fn->sym->hasReturnType()) {
-      ReturnInferrer(this->state).inferReturnType(fn->sym);
+      this->returnInferrer->inferReturnType(fn->sym);
     }
     if (fn->checked) {
       continue;
     }
-    BodyState saved = ReturnInferrer(this->state).enterBody(fn);
-    FunctionChecker(this->state).checkFunctionBody(fn);
-    ReturnInferrer(this->state).leaveBody(saved);
+    BodyState saved = this->returnInferrer->enterBody(fn);
+    this->functionChecker->checkFunctionBody(fn);
+    this->returnInferrer->leaveBody(saved);
   }
   lit->type = type;
   if (!target) {
@@ -150,7 +159,7 @@ Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *lit, const Type *t
     lit->type = Type::error();
     return lit;
   }
-  ClassBases(this->state).addBase(type, target);
+  this->classBases->addBase(type, target);
 
   return lit;
 }
@@ -236,7 +245,7 @@ MethodLiteralChecker::propertyFits(const ObjectLitExpr::Property &prop, const Ty
   }
 
   FunctionDecl *fn = cast<FunctionExpr>(prop.value)->fn;
-  const Type *type = ReturnInferrer(this->state).functionType(fn->sym);
+  const Type *type = this->returnInferrer->functionType(fn->sym);
   if (type != member->type && !type->isError()) {
     std::string message = ErrorTextLiteralFits::otherType(target->name(), prop.name, type->name(),
                                                           member->type->name());

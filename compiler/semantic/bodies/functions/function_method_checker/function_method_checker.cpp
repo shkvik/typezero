@@ -3,12 +3,17 @@
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/generics/arg_list_checker/arg_list_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace tz {
 
-FunctionMethodChecker::FunctionMethodChecker(SemanticState &owner)
-    : state(owner) {}
+FunctionMethodChecker::FunctionMethodChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->argListChecker = &all.getArgListChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+}
 
 FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(CallExpr *call,
                                                                                MemberExpr *member) {
@@ -16,7 +21,7 @@ FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(C
   call->type = Type::error();
   llvm::StringRef name = member->name;
   if (name == "bind") {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     std::string message = ErrorTextThisCall::noBind();
 
     return err(FunctionMethodCheckerCheckThisCallError{
@@ -25,7 +30,7 @@ FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(C
     });
   }
   if (name != "call" && name != "apply") {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     std::string message = ErrorTextThisCall::noProperty(name);
 
     return err(FunctionMethodCheckerCheckThisCallError{
@@ -42,7 +47,7 @@ FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(C
     });
   }
   if (name == "apply" && (call->args.size() != 2 || call->hasSpread())) {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     std::string message = ErrorTextThisCall::applyArgs();
 
     return err(FunctionMethodCheckerCheckThisCallError{
@@ -53,13 +58,12 @@ FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(C
 
   if (name == "apply") {
     call->spread = {false, true};
-    ArgListChecker(this->state).expandListSpreads(call->args, call->spread);
+    this->argListChecker->expandListSpreads(call->args, call->spread);
   }
   call->callee = member->object;
   call->type = type->ret();
-  Expr *checked =
-      ArgumentChecker(this->state)
-          .checkArguments(call, type->params(), type->minArgs(), type->hasRest(), member->loc());
+  Expr *checked = this->argumentChecker->checkArguments(call, type->params(), type->minArgs(),
+                                                        type->hasRest(), member->loc());
 
   return ok(checked);
 }
@@ -68,7 +72,7 @@ FunctionMethodChecker::ResultParamsJoined
 FunctionMethodChecker::checkListMethod(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   if (member->name != "join") {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     std::string message = ErrorTextListMethod::noMethod(member->name);
 
     return err(FunctionMethodCheckerCheckListMethodError{
@@ -76,13 +80,13 @@ FunctionMethodChecker::checkListMethod(CallExpr *call, MemberExpr *member) {
         .message = message,
     });
   }
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return err(FunctionMethodCheckerCheckListMethodError{
         .code = FunctionMethodCheckerCheckListMethodErrorCode::ALREADY_REPORTED,
         .message = "",
     });
   }
-  ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 1);
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
   if (arity.isErr()) {
     return err(FunctionMethodCheckerCheckListMethodError{
         .code = FunctionMethodCheckerCheckListMethodErrorCode::WRONG_ARITY,
@@ -91,7 +95,7 @@ FunctionMethodChecker::checkListMethod(CallExpr *call, MemberExpr *member) {
   }
 
   if (!call->args.empty()) {
-    call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], Type::string());
+    call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
   }
   call->type = Type::string();
 

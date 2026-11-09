@@ -45,6 +45,9 @@ enum PartsSlot : unsigned {
 
 }
 
+CryptoLowerer::CryptoLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 std::string CryptoLowerer::asciiOf(const Type *literal) {
   std::string text;
   for (char16_t unit : literal->literalText()) {
@@ -61,9 +64,6 @@ std::vector<const Type *> CryptoLowerer::literalsOf(const Type *type) {
 
   return std::vector<const Type *>(type->members().begin(), type->members().end());
 }
-
-CryptoLowerer::CryptoLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::StructType *CryptoLowerer::partsType() {
   llvm::Type *ptr = this->lowering.builder.getPtrTy();

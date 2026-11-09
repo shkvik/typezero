@@ -6,11 +6,17 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class CryptoArgs;
+class ExprChecker;
+class ArgumentChecker;
+
 struct SubtleIntrinsic;
 
 class WebCryptoChecker {
 public:
-  explicit WebCryptoChecker(SemanticState &owner);
+  WebCryptoChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkSubtleIntrinsic(CallExpr *call, NameExpr *name, llvm::StringRef intrinsicName);
   Expr *subtleObject(MemberExpr *member);
@@ -27,6 +33,10 @@ private:
   ResultSubtleAvailable subtleAvailable() const;
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  CryptoArgs *cryptoArgs = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

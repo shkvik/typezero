@@ -16,6 +16,7 @@
 #include "compiler/semantic/library/regex/regex_checker/regex_checker.h"
 #include "compiler/semantic/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/destination/destination.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
@@ -28,6 +29,29 @@ using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
+
+VarChecker::VarChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->callCycles = &all.getCallCycles();
+  this->destination = &all.getDestination();
+  this->dictChecker = &all.getDictChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->indexProofs = &all.getIndexProofs();
+  this->regexChecker = &all.getRegexChecker();
+  this->timerChecker = &all.getTimerChecker();
+  this->typeResolver = &all.getTypeResolver();
+  this->typeRelations = &all.getTypeRelations();
+  this->closureChecker = &all.getClosureChecker();
+  this->constantFolder = &all.getConstantFolder();
+  this->genericChecker = &all.getGenericChecker();
+  this->functionChecker = &all.getFunctionChecker();
+  this->iteratorMethods = &all.getIteratorMethods();
+  this->generatorChecker = &all.getGeneratorChecker();
+  this->tzModulesChecker = &all.getTzModulesChecker();
+  this->keyedFieldChecker = &all.getKeyedFieldChecker();
+}
 
 bool VarChecker::isTextChoice(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
@@ -55,27 +79,23 @@ std::vector<const Stmt *> VarChecker::followingStatements(llvm::ArrayRef<Stmt *>
   return following;
 }
 
-VarChecker::VarChecker(SemanticState &owner)
-    : state(owner) {}
-
 void VarChecker::checkVarDecl(VarDeclStmt *decl) {
   llvm::ArrayRef<Stmt *> block = this->state.getBlockPosition().getBlock();
   size_t index = this->state.getBlockPosition().getBlockIndex();
   this->state.getBlockPosition().forgetBlock();
   for (size_t k = 0; k < decl->decls.size(); ++k) {
     VarDeclarator &d = decl->decls[k];
-    const Type *declared =
-        d.typeAnn ? TypeResolver(this->state).resolveType(*d.typeAnn, false) : nullptr;
+    const Type *declared = d.typeAnn ? this->typeResolver->resolveType(*d.typeAnn, false) : nullptr;
     if (auto *name = llvm::dyn_cast_or_null<NameExpr>(d.init);
         name && decl->isConst && !declared && !d.destructured() && name->typeArgs.empty()) {
-      if (FuncSymbol *generic = GenericChecker(this->state).genericNamed(name)) {
+      if (FuncSymbol *generic = this->genericChecker->genericNamed(name)) {
         Scopes::ResultEntryDeclared added =
-            Scopes(this->state).declare(d.name, {FunctionEntry{.func = generic}});
+            this->scopes->declare(d.name, {FunctionEntry{.func = generic}});
         if (added.isErr()) {
           this->state.getDiagnostics().error(d.loc, added.error().message);
         }
         if (added.isErr() && added.error().code != ScopesDeclareErrorCode::UNDEFINED_AS_NAME) {
-          ScopeEntry previousEntry = Scopes(this->state).lookup(d.name);
+          ScopeEntry previousEntry = this->scopes->lookup(d.name);
           std::string declaredHere = ErrorTextDeclare::previous();
           this->state.getDiagnostics().note(previousEntry.loc(), declaredHere);
         }
@@ -93,8 +113,8 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
         this->state.getModuleStates().rememberDeclModule(
             fn, this->state.getModuleStates().getCurrentModule());
       }
-      FunctionChecker(this->state).declareFunction(fn);
-      CallCycles(this->state).findCycles({fn});
+      this->functionChecker->declareFunction(fn);
+      this->callCycles->findCycles({fn});
       this->state.getReturnInference().addLiftedFunction(fn);
       d.alias = true;
       continue;
@@ -104,15 +124,15 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
         fe->fn->name = d.name;
       }
       if (decl->isConst && !d.destructured()) {
-        VarSymbol *var = Scopes(this->state).declareVar(d.name, d.loc, nullptr, true);
+        VarSymbol *var = this->scopes->declareVar(d.name, d.loc, nullptr, true);
         var->holds = Lambda{.lambda = fe->fn};
         d.sym = var;
         const Type *function =
             declared && declared->nonOptional()->isFunction() ? declared->nonOptional() : nullptr;
         Signature sig = function ? ClosureChecker::signatureOf(function) : Signature();
-        d.init = ClosureChecker(this->state).checkFunctionExpr(fe, function ? &sig : nullptr);
+        d.init = this->closureChecker->checkFunctionExpr(fe, function ? &sig : nullptr);
         if (declared) {
-          d.init = TypeRelations(this->state).coerce(d.init, declared);
+          d.init = this->typeRelations->coerce(d.init, declared);
         }
         if (auto *cast = dyn_cast<CastExpr>(d.init); cast && cast->adaptsResult) {
           var->holds = OrdinaryValue{};
@@ -130,16 +150,14 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       this->state.getBlockPosition().rememberFollowing(
           block.empty() ? std::vector<const Stmt *>()
                         : VarChecker::followingStatements(block, index));
-      hint = Destination(this->state)
-                 .literalDestination(d, llvm::ArrayRef(decl->decls).drop_front(k + 1));
+      hint =
+          this->destination->literalDestination(d, llvm::ArrayRef(decl->decls).drop_front(k + 1));
       places = this->state.getTypeContext().takeDestinationConflict();
     }
     VarSymbol *early = nullptr;
-    if (const Type *timer = d.init && !d.destructured()
-                                ? TimerChecker(this->state).timerCallType(d.init)
-                                : nullptr) {
-      early =
-          Scopes(this->state).declareVar(d.name, d.loc, declared ? declared : timer, decl->isConst);
+    if (const Type *timer =
+            d.init && !d.destructured() ? this->timerChecker->timerCallType(d.init) : nullptr) {
+      early = this->scopes->declareVar(d.name, d.loc, declared ? declared : timer, decl->isConst);
       if (LocalVarState *localState = early->local()) {
         localState->declSeq = ~0u;
       }
@@ -149,17 +167,17 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
         this->state.getExpressionMarks().enterVariableInit(d.name);
       }
       if (d.destructured() && !d.objectPattern()) {
-        IteratorMethods(this->state).markFused(d.init);
+        this->iteratorMethods->markFused(d.init);
       }
-      d.init = value = ExprChecker(this->state).checkExpr(d.init, hint);
+      d.init = value = this->exprChecker->checkExpr(d.init, hint);
       if (d.destructured() && !d.objectPattern()) {
-        d.init = value = DictChecker(this->state).iterableOf(d.init);
+        d.init = value = this->dictChecker->iterableOf(d.init);
       }
       if (!early) {
         this->state.getExpressionMarks().leaveVariableInit();
       }
       if (declared) {
-        d.init = TypeRelations(this->state).coerce(d.init, declared);
+        d.init = this->typeRelations->coerce(d.init, declared);
       } else {
         type = d.init->type;
         ResultInitHasType typed = VarChecker::initHasType(decl, d, type);
@@ -192,7 +210,7 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       d.init = value = chars;
       type = chars->type;
     } else if (d.destructured() && type->isIterator() && !declared) {
-      d.init = value = GeneratorChecker(this->state).destructuredIterator(d.init, d);
+      d.init = value = this->generatorChecker->destructuredIterator(d.init, d);
       type = d.init->type;
     } else {
       ResultDestructure shaped = VarChecker::destructurable(d, type);
@@ -208,9 +226,9 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       }
       d.sym = early;
     } else {
-      d.sym = Scopes(this->state).declareVar(d.name, d.loc, type, decl->isConst);
+      d.sym = this->scopes->declareVar(d.name, d.loc, type, decl->isConst);
     }
-    RegexChecker(this->state).noteRegexVariable(d.sym, value, decl->isConst, block, index);
+    this->regexChecker->noteRegexVariable(d.sym, value, decl->isConst, block, index);
     if (decl->isConst && !d.destructured()) {
       if (auto *got = llvm::dyn_cast_or_null<CallExpr>(value);
           got && got->builtin() == Builtin::ReflectMethod &&
@@ -290,28 +308,28 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       this->noteUntyped(d.sym, d.init != nullptr);
     }
     if (value) {
-      FlowChecker(this->state).assigned(d.sym, value);
+      this->flowChecker->assigned(d.sym, value);
     }
     if (const Type *base = type->nonOptional();
         decl->isConst && value && !d.destructured() &&
         (base->isByteView() || base->bytes() == Type::Bytes::ArrayBuffer)) {
-      if (std::optional<Linear> length = IndexProofs(this->state).knownLength(value);
+      if (std::optional<Linear> length = this->indexProofs->knownLength(value);
           length && length->term.isZero()) {
         this->state.getFlowState().rememberFixedLength(d.sym, length->offset);
       }
     }
     if (decl->isConst && d.init && type->isInteger()) {
-      ConstantFolder(this->state).noteUnsignedVar(d.sym, d.init);
-      if (std::optional<int64_t> constant = ConstantFolder(this->state).intConstant(d.init)) {
+      this->constantFolder->noteUnsignedVar(d.sym, d.init);
+      if (std::optional<int64_t> constant = this->constantFolder->intConstant(d.init)) {
         this->state.getConstantStore().rememberConstVar(d.sym, *constant);
         d.sym->literalConst = !declared && type->isInt() && TypeRelations::isIntLiteralTree(d.init);
       }
     }
     if (decl->isConst && d.init && type->isString()) {
-      if (std::optional<std::string> key = KeyedFieldChecker(this->state).constantKey(d.init)) {
+      if (std::optional<std::string> key = this->keyedFieldChecker->constantKey(d.init)) {
         this->state.getConstantStore().rememberConstKey(d.sym, std::move(*key));
       }
-      if (std::string prefix = TzModulesChecker(this->state).knownPrefix(d.init); !prefix.empty()) {
+      if (std::string prefix = this->tzModulesChecker->knownPrefix(d.init); !prefix.empty()) {
         this->state.getConstantStore().rememberConstPrefix(d.sym, std::move(prefix));
       }
     }

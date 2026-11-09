@@ -4,9 +4,14 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class ConcatChecker;
+class TypeRelations;
+
 class GenericChecker {
 public:
-  explicit GenericChecker(SemanticState &owner);
+  GenericChecker(SemanticState &owner, SemanticParts &all);
 
   static const Type *apparentType(const Type *type);
   Expr *apparent(Expr *expr);
@@ -20,6 +25,9 @@ public:
 
 private:
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  ConcatChecker *concatChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
 };
 
 }

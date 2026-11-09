@@ -6,9 +6,18 @@
 
 namespace tz {
 
+class SemanticParts;
+class FsDeclarer;
+class TypeDeclarer;
+class TypeResolver;
+class ClassDeclarer;
+class ModuleDeclarer;
+class EventMapInference;
+class GenericClassInstantiator;
+
 class ClassBases {
 public:
-  explicit ClassBases(SemanticState &owner);
+  ClassBases(SemanticState &owner, SemanticParts &all);
 
   void resolveClassBases(ClassDecl *cls);
   void addBase(const Type *type, const Type *base);
@@ -61,6 +70,13 @@ private:
                                               llvm::StringRef baseName);
 
   SemanticState &state;
+  FsDeclarer *fsDeclarer = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  ModuleDeclarer *moduleDeclarer = nullptr;
+  EventMapInference *eventMapInference = nullptr;
+  GenericClassInstantiator *genericClassInstantiator = nullptr;
 };
 
 }

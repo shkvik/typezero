@@ -2,13 +2,18 @@
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/library/fs/fs_checker/fs_checker.h"
 #include "compiler/semantic/library/fs/fs_errors/fs_errors.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/SaveAndRestore.h"
 
 namespace tz {
 
-FsPromisesChecker::FsPromisesChecker(SemanticState &owner)
-    : state(owner) {}
+FsPromisesChecker::FsPromisesChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->fsErrors = &all.getFsErrors();
+  this->fsChecker = &all.getFsChecker();
+  this->exprChecker = &all.getExprChecker();
+}
 
 FsPromisesChecker::ResultPromiseFunction FsPromisesChecker::promiseFunction(llvm::StringRef fn) {
   if (fn == "constants") {
@@ -38,13 +43,13 @@ Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef fn,
   if (function.isErr()) {
     this->state.getDiagnostics().error(loc, function.error().message);
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     return call;
   }
   FileSystemStore &files = this->state.getFileSystemStore();
   files.enterPromiseCall();
-  FsChecker(this->state).checkFsCall(call, fn, loc);
+  this->fsChecker->checkFsCall(call, fn, loc);
   files.leavePromiseCall();
   if (call->type->isError()) {
     return call;
@@ -60,7 +65,7 @@ Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef fn,
       {Builtin::FsReplace, Builtin::FspReplace},   {Builtin::FsRealpath, Builtin::FspRealpath}};
   for (const auto &[sync, async] : waiting) {
     if (call->builtin() == sync) {
-      const Type *error = FsErrors(this->state).ofCall(call);
+      const Type *error = this->fsErrors->ofCall(call);
       call->target = BuiltinCall{.builtin = async};
       call->type = Type::promise(Type::result(call->type, error));
       return call;

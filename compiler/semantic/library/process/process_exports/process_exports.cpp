@@ -18,8 +18,8 @@ ProcessExports::ResultExportFound ProcessExports::processExport(llvm::StringRef 
   }
   std::string message = ErrorTextProcessExport::notYet(name, path);
 
-  return err(FeatureExportFoundError{
-      .code = FeatureExportFoundErrorCode::NOT_YET,
+  return err(ModuleExportFoundError{
+      .code = ModuleExportFoundErrorCode::NOT_YET,
       .message = message,
   });
 }

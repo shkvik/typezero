@@ -2,6 +2,7 @@
 #include "compiler/program/ast_walker/ast_walker.h"
 #include "compiler/program/library/library_module_names/library_module_names.h"
 #include "compiler/semantic/declare/import_binder/import_binder.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 #include "llvm/ADT/StringSet.h"
 
@@ -9,8 +10,10 @@ using llvm::isa;
 
 namespace tz {
 
-NamesInFunctions::NamesInFunctions(SemanticState &owner)
-    : state(owner) {}
+NamesInFunctions::NamesInFunctions(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->importBinder = &all.getImportBinder();
+}
 
 void NamesInFunctions::rememberNames(SourceFile &program) {
   llvm::StringSet<> names;
@@ -21,7 +24,7 @@ void NamesInFunctions::rememberNames(SourceFile &program) {
     this->state.getScopeStack().markUsedInFunction(name.getKey());
   }
   this->state.getScopeStack().markUsedInFunction(LibraryModuleNames::kSubtleName);
-  ImportBinder(this->state).noteImportsInFunctions(program);
+  this->importBinder->noteImportsInFunctions(program);
 }
 
 }

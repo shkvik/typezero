@@ -6,11 +6,18 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ExprChecker;
+class FlowChecker;
+class TypeRelations;
+class ArgListChecker;
+
 class ArgumentChecker {
 public:
   using ResultArityMatches = Result<CallExpr *, ArgumentCheckerCheckArityError>;
 
-  explicit ArgumentChecker(SemanticState &owner);
+  ArgumentChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkAnyNumber(Expr *arg);
   void checkArgsLoosely(CallExpr *call);
@@ -28,6 +35,11 @@ private:
                                         size_t fixed, size_t count);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ArgListChecker *argListChecker = nullptr;
 };
 
 }

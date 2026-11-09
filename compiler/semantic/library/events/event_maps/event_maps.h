@@ -6,11 +6,23 @@
 
 namespace tz {
 
+class SemanticParts;
+class ExprChecker;
+class TypeDeclarer;
+class TypeResolver;
+class TypeRelations;
+class ClosureChecker;
+class ArgumentChecker;
+class EventMapInference;
+class KeyedFieldChecker;
+class FunctionValueChecker;
+class GenericClassInstantiator;
+
 class EventMaps {
 public:
   using ResultEventMapFits = Result<const Type *, EventMapsEventMapFitsError>;
 
-  explicit EventMaps(SemanticState &owner);
+  EventMaps(SemanticState &owner, SemanticParts &all);
 
   bool isEmitterClass(const ClassDecl *cls) const;
   const Type *eventMapOf(const Type *type) const;
@@ -32,6 +44,16 @@ private:
   static std::string nearestEvent(const Type *events, llvm::StringRef name);
 
   SemanticState &state;
+  ExprChecker *exprChecker = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ClosureChecker *closureChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  EventMapInference *eventMapInference = nullptr;
+  KeyedFieldChecker *keyedFieldChecker = nullptr;
+  FunctionValueChecker *functionValueChecker = nullptr;
+  GenericClassInstantiator *genericClassInstantiator = nullptr;
 };
 
 }

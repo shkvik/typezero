@@ -25,10 +25,6 @@ using llvm::isa;
 
 namespace tz {
 
-int64_t BytesCallSite::constantOf(const Expr *e) {
-  return int64_t(cast<IntLitExpr>(e)->value);
-}
-
 BytesCallSite::BytesCallSite(Lowering &lowering, CallExpr *call)
     : lowering(lowering),
       call(call),
@@ -39,6 +35,10 @@ BytesCallSite::BytesCallSite(Lowering &lowering, CallExpr *call)
       i64(lowering.builder.getInt64Ty()),
       f64(lowering.builder.getDoubleTy()),
       ptr(lowering.builder.getPtrTy()) {}
+
+int64_t BytesCallSite::constantOf(const Expr *e) {
+  return int64_t(cast<IntLitExpr>(e)->value);
+}
 
 llvm::FunctionCallee BytesCallSite::fn(llvm::StringRef name, llvm::Type *ret,
                                        llvm::ArrayRef<llvm::Type *> params) {

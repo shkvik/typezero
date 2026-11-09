@@ -7,6 +7,7 @@
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/library/async/async_checker/async_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
@@ -14,12 +15,20 @@
 
 namespace tz {
 
-GeneratorChecker::GeneratorChecker(SemanticState &owner)
-    : state(owner) {}
+GeneratorChecker::GeneratorChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->dictChecker = &all.getDictChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->typeDeclarer = &all.getTypeDeclarer();
+  this->typeResolver = &all.getTypeResolver();
+  this->typeRelations = &all.getTypeRelations();
+  this->iteratorMethods = &all.getIteratorMethods();
+}
 
 GeneratorChecker::ResultResolvedIterator GeneratorChecker::resolveIteratorType(const TypeRef &ref) {
   llvm::StringRef name = ref.name;
-  if (name == "IteratorResult" && !TypeDeclarer(this->state).lookupType(name)) {
+  if (name == "IteratorResult" && !this->typeDeclarer->lookupType(name)) {
     if (ref.args.empty() || ref.args.size() > 2) {
       std::string message = ErrorTextIteratorType::resultArgs();
 
@@ -28,13 +37,13 @@ GeneratorChecker::ResultResolvedIterator GeneratorChecker::resolveIteratorType(c
           .message = message,
       });
     }
-    const Type *value = TypeResolver(this->state).resolveType(ref.args[0], false);
+    const Type *value = this->typeResolver->resolveType(ref.args[0], false);
     const Type *returned = Type::undefinedTy();
     if (ref.args.size() == 2) {
       const TypeRef &arg = ref.args[1];
       if (!(arg.kind() == TypeRefKind::NAME_REF &&
             (arg.name == "void" || arg.name == "undefined" || arg.name == "unknown"))) {
-        returned = TypeResolver(this->state).resolveType(arg, false);
+        returned = this->typeResolver->resolveType(arg, false);
       }
     }
     if (value->isError() || returned->isError()) {
@@ -44,7 +53,7 @@ GeneratorChecker::ResultResolvedIterator GeneratorChecker::resolveIteratorType(c
 
     return ok(result);
   }
-  if (name == "Iterable" && !TypeDeclarer(this->state).lookupType(name)) {
+  if (name == "Iterable" && !this->typeDeclarer->lookupType(name)) {
     std::string message = ErrorTextIteratorType::iterable();
 
     return err(GeneratorCheckerResolveIteratorTypeError{
@@ -55,7 +64,7 @@ GeneratorChecker::ResultResolvedIterator GeneratorChecker::resolveIteratorType(c
   bool async = name == "AsyncGenerator" || name == "AsyncIterableIterator" ||
                name == "AsyncIterator" || name == "AsyncIterable";
   if (name != "Generator" && name != "IterableIterator" &&
-      !(name == "Iterator" && !TypeDeclarer(this->state).lookupType(name)) && !async) {
+      !(name == "Iterator" && !this->typeDeclarer->lookupType(name)) && !async) {
     return err(GeneratorCheckerResolveIteratorTypeError{
         .code = GeneratorCheckerResolveIteratorTypeErrorCode::NOT_AN_ITERATOR,
         .message = "",
@@ -69,7 +78,7 @@ GeneratorChecker::ResultResolvedIterator GeneratorChecker::resolveIteratorType(c
         .message = message,
     });
   }
-  const Type *yielded = TypeResolver(this->state).resolveType(ref.args[0], false);
+  const Type *yielded = this->typeResolver->resolveType(ref.args[0], false);
   auto other = [&](size_t i) -> const Type * {
     if (i >= ref.args.size()) {
       return Type::voidTy();
@@ -80,7 +89,7 @@ GeneratorChecker::ResultResolvedIterator GeneratorChecker::resolveIteratorType(c
       return Type::voidTy();
     }
 
-    return TypeResolver(this->state).resolveType(arg, false);
+    return this->typeResolver->resolveType(arg, false);
   };
   const Type *returned = other(1);
   const Type *sent = other(2);
@@ -445,7 +454,7 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
   FuncSymbol *fn = this->state.getFunctionStack().getCurrentFunction();
   if (!fn || !fn->decl || !fn->decl->isGenerator) {
     if (yield->value) {
-      yield->value = ExprChecker(this->state).checkExpr(yield->value);
+      yield->value = this->exprChecker->checkExpr(yield->value);
     }
     return yield;
   }
@@ -468,14 +477,14 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
 
   if (!yield->delegate && async) {
     if (yield->value) {
-      yield->value = ExprChecker(this->state).checkExpr(yield->value, yielded);
+      yield->value = this->exprChecker->checkExpr(yield->value, yielded);
       const Type *t = yield->value->type;
       const Type *given = t->isError() ? t : AsyncChecker::awaitedType(t);
       ResultPromiseYieldFits fits = GeneratorChecker::promiseYield(t, given, yielded, fn);
       if (fits.isErr()) {
         this->state.getDiagnostics().error(yield->value->loc(), fits.error().message);
       } else if (yielded && !given->isError() && given == t) {
-        yield->value = TypeRelations(this->state).coerce(yield->value, yielded);
+        yield->value = this->typeRelations->coerce(yield->value, yielded);
       }
     } else {
       ResultYieldGivesAValue value = GeneratorChecker::valueYielded(yielded, fn);
@@ -484,8 +493,7 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
       }
     }
   } else if (yield->delegate && async) {
-    yield->value =
-        DictChecker(this->state).iterableOf(ExprChecker(this->state).checkExpr(yield->value));
+    yield->value = this->dictChecker->iterableOf(this->exprChecker->checkExpr(yield->value));
     const Type *type = yield->value->type;
     const Type *element = this->asyncIteratedType(type);
     ResultDelegateAsyncFit fits = GeneratorChecker::delegateAsync(type, element, yielded, fn);
@@ -495,9 +503,9 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
     yield->element = element ? element : Type::error();
   } else if (!yield->delegate) {
     if (yield->value) {
-      yield->value = ExprChecker(this->state).checkExpr(yield->value, yielded);
+      yield->value = this->exprChecker->checkExpr(yield->value, yielded);
       if (yielded) {
-        yield->value = TypeRelations(this->state).coerce(yield->value, yielded);
+        yield->value = this->typeRelations->coerce(yield->value, yielded);
       }
     } else {
       ResultYieldGivesAValue value = GeneratorChecker::valueYielded(yielded, fn);
@@ -506,9 +514,8 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
       }
     }
   } else {
-    IteratorMethods(this->state).markFused(yield->value);
-    yield->value =
-        DictChecker(this->state).iterableOf(ExprChecker(this->state).checkExpr(yield->value));
+    this->iteratorMethods->markFused(yield->value);
+    yield->value = this->dictChecker->iterableOf(this->exprChecker->checkExpr(yield->value));
     const Type *type = yield->value->type;
     const Type *element = GeneratorChecker::iteratedType(type);
     ResultDelegateSyncFits fits =
@@ -521,7 +528,7 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
   if (!fn->hasReturnType() && this->state.getFunctionStack().isCollectingYields()) {
     this->state.getFunctionStack().addCollectedYield(yield);
   }
-  FlowChecker(this->state).calledFunction();
+  this->flowChecker->calledFunction();
 
   ResultSentTypeDeclared declared =
       GeneratorChecker::sentDeclared(yield, async, sent, yielded, loose);
@@ -566,7 +573,7 @@ Expr *GeneratorChecker::destructuredIterator(Expr *init, const VarDeclarator &d)
   auto *array = this->state.getAst().make<ArrayLitExpr>(init->loc());
   array->elements.push_back({source, true});
   array->type = Type::array(iterator->yielded());
-  FlowChecker(this->state).calledFunction();
+  this->flowChecker->calledFunction();
 
   return array;
 }

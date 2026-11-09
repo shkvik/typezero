@@ -8,6 +8,7 @@
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/reflect/metadata_checker/metadata_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -16,6 +17,19 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+DecoratorChecker::DecoratorChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->lateClasses = &all.getLateClasses();
+  this->stmtChecker = &all.getStmtChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->metadataChecker = &all.getMetadataChecker();
+  this->classValueChecker = &all.getClassValueChecker();
+}
 
 size_t DecoratorChecker::argumentsOf(Place place) {
   switch (place) {
@@ -84,9 +98,6 @@ bool DecoratorChecker::decoratedParams(const FunctionDecl *fn) {
   return llvm::any_of(fn->params, [](const Param &p) { return !p.decorators.empty(); });
 }
 
-DecoratorChecker::DecoratorChecker(SemanticState &owner)
-    : state(owner) {}
-
 const Type *DecoratorChecker::methodDescriptorType(const Type *args, const Type *ret) {
   const Type *value = Type::function({Type::unknown(), args}, 1, true, ret, true);
   const Type *flag = Type::boolTy();
@@ -105,7 +116,7 @@ bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &
                                        size_t &required) {
   const FuncSymbol *sym = nullptr;
   if (auto *name = dyn_cast<NameExpr>(callee)) {
-    ScopeEntry entry = Scopes(this->state).lookup(name->name);
+    ScopeEntry entry = this->scopes->lookup(name->name);
     if (entry.var()) {
       const Type *type = entry.var()->type;
       if (!type || !type->isFunction() || type->hasRest()) {
@@ -118,7 +129,7 @@ bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &
     sym = entry.func();
   } else if (auto *member = dyn_cast<MemberExpr>(callee)) {
     auto *object = dyn_cast<NameExpr>(member->object);
-    if (ClassDecl *cls = object ? Scopes(this->state).lookup(object->name).cls() : nullptr) {
+    if (ClassDecl *cls = object ? this->scopes->lookup(object->name).cls() : nullptr) {
       std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member->name, true);
       if (methods.size() == 1) {
         sym = methods[0]->sym;
@@ -128,7 +139,7 @@ bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &
   if (!sym) {
     return false;
   }
-  ReturnInferrer(this->state).resolveParams(const_cast<FuncSymbol *>(sym));
+  this->returnInferrer->resolveParams(const_cast<FuncSymbol *>(sym));
   if (sym->hasRest || llvm::is_contained(sym->params, nullptr)) {
     return false;
   }
@@ -429,7 +440,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     auto *member = call ? dyn_cast<MemberExpr>(call->callee) : nullptr;
 
     return member && member->name == "metadata" &&
-           CallChecker(this->state).isGlobalName(member->object, "Reflect");
+           this->callChecker->isGlobalName(member->object, "Reflect");
   };
   const Type *earlyDescriptor = nullptr;
   auto methodDescriptor = [&]() -> const Type * {
@@ -437,7 +448,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
       return earlyDescriptor;
     }
     FuncSymbol *sym = method->sym;
-    ReturnInferrer(this->state).resolveParams(sym);
+    this->returnInferrer->resolveParams(sym);
     const Type *ret = sym->getReturnType();
     if (!ret || ret->isError() || llvm::is_contained(sym->params, nullptr)) {
       return nullptr;
@@ -451,7 +462,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     if (!name || !name->typeArgs.empty() || own != Place::Method || cls->isGeneric()) {
       return nullptr;
     }
-    const FuncSymbol *factory = Scopes(this->state).lookup(name->name).func();
+    const FuncSymbol *factory = this->scopes->lookup(name->name).func();
     if (!factory || !factory->decl || factory->decl->typeParams.empty()) {
       return nullptr;
     }
@@ -481,12 +492,12 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     d.loc = use.decorator->loc;
     d.init = expr;
     if (const Type *hint = use.param < 0 ? factoryHint(expr) : nullptr) {
-      d.init = ExprChecker(this->state).checkExpr(expr, hint);
-      d.sym = Scopes(this->state).declareVar(hidden, d.loc, d.init->type, true);
+      d.init = this->exprChecker->checkExpr(expr, hint);
+      d.sym = this->scopes->declareVar(hidden, d.loc, d.init->type, true);
       decl->decls.push_back(std::move(d));
     } else {
       decl->decls.push_back(std::move(d));
-      StmtChecker(this->state).checkStmt(decl);
+      this->stmtChecker->checkStmt(decl);
     }
     out.push_back(decl);
     callees.push_back(this->state.getAst().make<NameExpr>(use.decorator->loc, hidden));
@@ -533,7 +544,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
   const Type *descType = nullptr;
   if (descriptor) {
     FuncSymbol *sym = method->sym;
-    ReturnInferrer(this->state).resolveParams(sym);
+    this->returnInferrer->resolveParams(sym);
     const Type *ret = sym->getReturnType();
     if (!ret || ret->isError() || llvm::is_contained(sym->params, nullptr)) {
       return;
@@ -547,13 +558,12 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     impl->type = descType->field("value")->type;
     impl->place = GlobalVar{.usedInFunction = true};
     impl->reassigned = true;
-    Scopes::ResultEntryDeclared added =
-        Scopes(this->state).declare(impl->name, {VarEntry{.var = impl}});
+    Scopes::ResultEntryDeclared added = this->scopes->declare(impl->name, {VarEntry{.var = impl}});
     if (added.isErr()) {
       this->state.getDiagnostics().error(impl->loc, added.error().message);
     }
     if (added.isErr() && added.error().code != ScopesDeclareErrorCode::UNDEFINED_AS_NAME) {
-      ScopeEntry previousEntry = Scopes(this->state).lookup(impl->name);
+      ScopeEntry previousEntry = this->scopes->lookup(impl->name);
       std::string declaredHere = ErrorTextDeclare::previous();
       this->state.getDiagnostics().note(previousEntry.loc(), declaredHere);
     }
@@ -570,10 +580,8 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     prop("writable", this->state.getAst().make<BoolLitExpr>(at, true));
     prop("enumerable", this->state.getAst().make<BoolLitExpr>(at, false));
     prop("configurable", this->state.getAst().make<BoolLitExpr>(at, true));
-    Expr *init = TypeRelations(this->state)
-                     .coerce(ExprChecker(this->state).checkExpr(lit, descType), descType);
-    descVar =
-        Scopes(this->state).declareVar(this->state.getAst().hiddenName(), at, descType, false);
+    Expr *init = this->typeRelations->coerce(this->exprChecker->checkExpr(lit, descType), descType);
+    descVar = this->scopes->declareVar(this->state.getAst().hiddenName(), at, descType, false);
     descVar->reassigned = true;
     auto *decl = this->state.getAst().make<VarDeclStmt>(at, false);
     VarDeclarator d;
@@ -593,7 +601,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
       }
     }
   }
-  MetadataChecker(this->state).writeDesignRecords(cls, field, method, ctor, at);
+  this->metadataChecker->writeDesignRecords(cls, field, method, ctor, at);
 
   ClassDecl *current = cls;
   for (size_t i = uses.size(); i-- > 0;) {
@@ -610,19 +618,19 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
       auto *callee = this->state.getAst().make<MemberExpr>(
           loc, this->state.getAst().make<NameExpr>(loc, "Reflect"), "defineMetadata");
       std::vector<Expr *> args{metadata->args[0], metadata->args[1],
-                               ClassValueChecker(this->state).classValueAt(cls, loc)};
+                               this->classValueChecker->classValueAt(cls, loc)};
       llvm::StringRef name = use.param >= 0 ? use.owner->name : memberName;
       if (place != Place::Class && !(use.param >= 0 && use.owner->isConstructor())) {
         args.push_back(this->state.getAst().make<StringLitExpr>(
             loc, std::u16string(name.begin(), name.end())));
       }
       out.push_back(this->state.getAst().make<ExprStmt>(
-          loc, ExprChecker(this->state)
-                   .checkExpr(this->state.getAst().make<CallExpr>(loc, callee, args))));
+          loc,
+          this->exprChecker->checkExpr(this->state.getAst().make<CallExpr>(loc, callee, args))));
       continue;
     }
     std::vector<Expr *> args{
-        ClassValueChecker(this->state).classValueAt(place == Place::Class ? current : cls, loc)};
+        this->classValueChecker->classValueAt(place == Place::Class ? current : cls, loc)};
     if (place != Place::Class) {
       llvm::StringRef name = use.param >= 0 ? use.owner->name : memberName;
       if (use.param >= 0 && use.owner->isConstructor()) {
@@ -639,7 +647,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     }
     args.resize(std::min(args.size(), takes[i]));
     auto *call = this->state.getAst().make<CallExpr>(loc, callees[i], std::move(args));
-    Expr *applied = ExprChecker(this->state).checkExpr(call);
+    Expr *applied = this->exprChecker->checkExpr(call);
     const Type *result = applied->type;
     if (descVar && place == Place::Method && result == descType) {
       auto *target = this->state.getAst().make<NameExpr>(loc, descVar->name);
@@ -651,7 +659,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     } else if (place == Place::Class && result->classRef() &&
                result->classRef()->derivesFrom(current)) {
       if (ClassDecl *given = const_cast<ClassDecl *>(result->classRef()); given != current) {
-        LateClasses(this->state).replaceClass(current, given, loc);
+        this->lateClasses->replaceClass(current, given, loc);
         current = given;
       }
     } else {
@@ -670,8 +678,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     auto *value = this->state.getAst().make<MemberExpr>(
         at, this->state.getAst().make<NameExpr>(at, descVar->name), "value");
     auto *assign = this->state.getAst().make<AssignExpr>(at, std::nullopt, target, value);
-    out.push_back(
-        this->state.getAst().make<ExprStmt>(at, ExprChecker(this->state).checkExpr(assign)));
+    out.push_back(this->state.getAst().make<ExprStmt>(at, this->exprChecker->checkExpr(assign)));
   }
 }
 

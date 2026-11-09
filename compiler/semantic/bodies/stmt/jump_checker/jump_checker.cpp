@@ -1,6 +1,7 @@
 #include "compiler/semantic/bodies/stmt/jump_checker/jump_checker.h"
 #include "compiler/semantic/bodies/stmt/stmt_checker/stmt_checker.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cmath>
 
@@ -10,13 +11,15 @@ using llvm::isa;
 
 namespace tz {
 
+JumpChecker::JumpChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->stmtChecker = &all.getStmtChecker();
+}
+
 bool JumpChecker::isLoop(const Stmt *stmt) {
   return isa<WhileStmt>(stmt) || isa<DoWhileStmt>(stmt) || isa<ForStmt>(stmt) ||
          isa<ForOfStmt>(stmt);
 }
-
-JumpChecker::JumpChecker(SemanticState &owner)
-    : state(owner) {}
 
 void JumpChecker::pushTarget(JumpTarget::Kind kind) {
   JumpTarget target{kind, this->state.getBlockPosition().takePendingLabels(), Flow()};
@@ -112,7 +115,7 @@ void JumpChecker::checkLabeled(LabeledStmt *stmt) {
   }
   if (JumpChecker::isLoop(body) || isa<SwitchStmt>(body)) {
     this->state.getBlockPosition().rememberPendingLabels(labels);
-    StmtChecker(this->state).checkStmt(body);
+    this->stmtChecker->checkStmt(body);
     return;
   }
   ResultBodyCanLabel labelable = JumpChecker::labelBody(body);
@@ -122,7 +125,7 @@ void JumpChecker::checkLabeled(LabeledStmt *stmt) {
   }
   this->state.getBlockPosition().rememberPendingLabels(labels);
   this->pushTarget(JumpTarget::Kind::Block);
-  StmtChecker(this->state).checkStmt(body);
+  this->stmtChecker->checkStmt(body);
   Flow breaks = this->state.getBlockPosition().leaveJumpTarget().breaks;
   this->state.getFlowState().replaceFlow(
       FlowChecker::join(this->state.getFlowState().getFlow(), breaks));

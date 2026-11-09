@@ -9,9 +9,20 @@
 #include "compiler/semantic/flow/field_facts/field_facts.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/bytes/bytes_checker/bytes_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/union_check_helpers/union_check_helpers.h"
 
 namespace tz {
+
+UnionChecker::UnionChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->fieldFacts = &all.getFieldFacts();
+  this->bytesChecker = &all.getBytesChecker();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->classMemberChecker = &all.getClassMemberChecker();
+}
 
 llvm::ArrayRef<const Type *> UnionChecker::membersOf(const Type *&type) {
   return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
@@ -25,9 +36,6 @@ bool UnionChecker::isLiteralSet(const Type *type) {
   return type->isUnion() &&
          llvm::all_of(type->members(), [](const Type *m) { return m->isLiteral(); });
 }
-
-UnionChecker::UnionChecker(SemanticState &owner)
-    : state(owner) {}
 
 std::string UnionChecker::lackingHint(const MemberExpr *member, const Type *type) {
   auto literals = [](const Type *t) {
@@ -97,7 +105,7 @@ UnionChecker::ResultUnionMemberTyped UnionChecker::checkUnionMember(MemberExpr *
     });
   }
   if (llvm::all_of(type->members(), [](const Type *m) { return m->isBytes(); })) {
-    Expr *bytes = BytesChecker(this->state).checkBytesUnionMember(member);
+    Expr *bytes = this->bytesChecker->checkBytesUnionMember(member);
 
     return ok(bytes);
   }
@@ -105,14 +113,14 @@ UnionChecker::ResultUnionMemberTyped UnionChecker::checkUnionMember(MemberExpr *
   const Type *lacking = nullptr;
   for (const Type *m : type->members()) {
     if (ClassDecl *cls = ClassDeclarer::classOf(m)) {
-      ClassDeclarer(this->state).completeClass(cls);
+      this->classDeclarer->completeClass(cls);
     }
     const Field *f = m->isObject() ? m->field(member->name) : nullptr;
     if (const ClassDecl *cls = ClassDeclarer::classOf(m)) {
       const ClassDecl *owner = nullptr;
       const ClassField *field = ClassBases::findField(cls, member->name, &owner);
       ClassMemberChecker::ResultMemberAccessible accessible =
-          field ? ClassMemberChecker(this->state).checkAccess(owner, field->access, member->name)
+          field ? this->classMemberChecker->checkAccess(owner, field->access, member->name)
                 : ClassMemberChecker::ResultMemberAccessible(ok(cls));
       if (accessible.isErr()) {
         return err(UnionCheckerCheckUnionMemberError{
@@ -175,7 +183,7 @@ UnionChecker::ResultUnionFieldTarget UnionChecker::checkUnionFieldTarget(MemberE
   const Type *field = nullptr;
   for (const Type *m : type->members()) {
     if (ClassDecl *incomplete = ClassDeclarer::classOf(m)) {
-      ClassDeclarer(this->state).completeClass(incomplete);
+      this->classDeclarer->completeClass(incomplete);
     }
     const Field *f = m->isObject() ? m->field(member->name) : nullptr;
     const ClassDecl *cls = ClassDeclarer::classOf(m);
@@ -192,9 +200,8 @@ UnionChecker::ResultUnionFieldTarget UnionChecker::checkUnionFieldTarget(MemberE
       });
     }
     ClassMemberChecker::ResultMemberAccessible accessible =
-        declared
-            ? ClassMemberChecker(this->state).checkAccess(owner, declared->access, member->name)
-            : ClassMemberChecker::ResultMemberAccessible(ok(cls));
+        declared ? this->classMemberChecker->checkAccess(owner, declared->access, member->name)
+                 : ClassMemberChecker::ResultMemberAccessible(ok(cls));
     if (accessible.isErr()) {
       return err(UnionCheckerCheckUnionFieldTargetError{
           .code = UnionCheckerCheckUnionFieldTargetErrorCode::NOT_ACCESSIBLE,
@@ -220,7 +227,7 @@ UnionChecker::ResultUnionFieldTarget UnionChecker::checkUnionFieldTarget(MemberE
     }
     field = f->type;
   }
-  FieldFacts(this->state).fieldsAssigned(member->name);
+  this->fieldFacts->fieldsAssigned(member->name);
   member->type = field;
 
   return ok(field);
@@ -302,7 +309,7 @@ UnionChecker::ResultUnionMethodTyped UnionChecker::checkUnionMethodCall(CallExpr
                        return !m->isObject();
                      });
   if (notNarrowed) {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     const char *typeOf = TypeSpelling::typeOfName(receiver->members().front());
     std::string message = ErrorTextUnionMember::narrow(name, receiver->name(), typeOf);
 
@@ -317,14 +324,14 @@ UnionChecker::ResultUnionMethodTyped UnionChecker::checkUnionMethodCall(CallExpr
     const Type *type = nullptr;
     UnionMethod entry{m, nullptr, false};
     if (ClassDecl *cls = ClassDeclarer::classOf(m)) {
-      ClassDeclarer(this->state).completeClass(cls);
+      this->classDeclarer->completeClass(cls);
       const ClassDecl *owner = nullptr;
       const ClassField *field = ClassBases::findField(cls, name, &owner);
       if (field && !field->method()) {
         ClassMemberChecker::ResultMemberAccessible accessible =
-            ClassMemberChecker(this->state).checkAccess(owner, field->access, name);
+            this->classMemberChecker->checkAccess(owner, field->access, name);
         if (accessible.isErr()) {
-          ArgumentChecker(this->state).checkArgsLoosely(call);
+          this->argumentChecker->checkArgsLoosely(call);
           return err(UnionCheckerCheckUnionMethodCallError{
               .code = UnionCheckerCheckUnionMethodCallErrorCode::NOT_ACCESSIBLE,
               .message = accessible.error().message,
@@ -334,7 +341,7 @@ UnionChecker::ResultUnionMethodTyped UnionChecker::checkUnionMethodCall(CallExpr
       } else if (std::vector<FunctionDecl *> variants =
                      ClassDeclarer::methodsNamed(cls, name, false);
                  variants.size() > 1) {
-        ArgumentChecker(this->state).checkArgsLoosely(call);
+        this->argumentChecker->checkArgsLoosely(call);
         std::string message = ErrorTextUnionMethod::variants(name, m->name(), receiver->name());
 
         return err(UnionCheckerCheckUnionMethodCallError{
@@ -343,26 +350,25 @@ UnionChecker::ResultUnionMethodTyped UnionChecker::checkUnionMethodCall(CallExpr
         });
       } else if (!variants.empty()) {
         ClassMemberChecker::ResultMemberAccessible accessible =
-            ClassMemberChecker(this->state)
-                .checkAccess(variants[0]->cls(), variants[0]->access(), name);
+            this->classMemberChecker->checkAccess(variants[0]->cls(), variants[0]->access(), name);
         if (accessible.isErr()) {
-          ArgumentChecker(this->state).checkArgsLoosely(call);
+          this->argumentChecker->checkArgsLoosely(call);
           return err(UnionCheckerCheckUnionMethodCallError{
               .code = UnionCheckerCheckUnionMethodCallErrorCode::NOT_ACCESSIBLE,
               .message = accessible.error().message,
           });
         }
         FuncSymbol *sym = variants[0]->sym;
-        ReturnInferrer(this->state).resolveParams(sym);
+        this->returnInferrer->resolveParams(sym);
         if (FunctionDecl *impl = ClassLinks::soleImplementation(cls, sym->decl)) {
           entry.method = impl->sym;
         } else {
           entry.method = sym, entry.virtualCall = true;
         }
-        type = ReturnInferrer(this->state).functionType(sym);
+        type = this->returnInferrer->functionType(sym);
       }
     } else if (const Field *f = m->field(name); f && m->isBase()) {
-      ArgumentChecker(this->state).checkArgsLoosely(call);
+      this->argumentChecker->checkArgsLoosely(call);
       std::string message = ErrorTextUnionMethod::isBase(name, receiver->name(), m->name());
 
       return err(UnionCheckerCheckUnionMethodCallError{
@@ -373,7 +379,7 @@ UnionChecker::ResultUnionMethodTyped UnionChecker::checkUnionMethodCall(CallExpr
       type = f->type;
     }
     if (!type || !type->isFunction()) {
-      ArgumentChecker(this->state).checkArgsLoosely(call);
+      this->argumentChecker->checkArgsLoosely(call);
       bool field = type != nullptr;
       std::string message =
           ErrorTextUnionMethod::notMethod(receiver->name(), m->name(), name, field);
@@ -384,7 +390,7 @@ UnionChecker::ResultUnionMethodTyped UnionChecker::checkUnionMethodCall(CallExpr
       });
     }
     if (fnType && type != fnType) {
-      ArgumentChecker(this->state).checkArgsLoosely(call);
+      this->argumentChecker->checkArgsLoosely(call);
       std::string message =
           ErrorTextUnionMethod::differ(receiver->name(), name, fnType->name(), type->name());
 
@@ -398,8 +404,8 @@ UnionChecker::ResultUnionMethodTyped UnionChecker::checkUnionMethodCall(CallExpr
   }
   call->target = UnionMethodCall{.unionMethods = std::move(methods)};
   member->type = fnType;
-  ArgumentChecker(this->state)
-      .checkArguments(call, fnType->params(), fnType->minArgs(), fnType->hasRest(), member->loc());
+  this->argumentChecker->checkArguments(call, fnType->params(), fnType->minArgs(),
+                                        fnType->hasRest(), member->loc());
   call->type = fnType->ret();
 
   return ok(call);

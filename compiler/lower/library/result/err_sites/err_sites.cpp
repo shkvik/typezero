@@ -12,6 +12,9 @@ namespace path = llvm::sys::path;
 
 }
 
+ErrSites::ErrSites(Lowering &owner)
+    : lowering(owner) {}
+
 std::string ErrSites::absolute(llvm::StringRef file) {
   llvm::SmallString<256> full(file);
   llvm::sys::fs::make_absolute(full);
@@ -20,9 +23,6 @@ std::string ErrSites::absolute(llvm::StringRef file) {
 
   return std::string(full);
 }
-
-ErrSites::ErrSites(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Type *ErrSites::type() {
   return this->lowering.builder.getPtrTy();

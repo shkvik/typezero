@@ -7,9 +7,21 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class StreamSources;
+class TypeRelations;
+class ReturnInferrer;
+class ArgumentChecker;
+class TypeArgInferrer;
+class OverloadResolver;
+class ClassValueChecker;
+class ClassMemberChecker;
+class EventTargetChecker;
+
 class StaticChecker {
 public:
-  explicit StaticChecker(SemanticState &owner);
+  StaticChecker(SemanticState &owner, SemanticParts &all);
 
   const Type *checkStaticTarget(Expr *&target, ClassDecl *cls);
   Expr *checkStaticMember(MemberExpr *member, ClassDecl *cls, const Type *expected);
@@ -41,6 +53,16 @@ private:
                                           llvm::StringRef name);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  StreamSources *streamSources = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  TypeArgInferrer *typeArgInferrer = nullptr;
+  OverloadResolver *overloadResolver = nullptr;
+  ClassValueChecker *classValueChecker = nullptr;
+  ClassMemberChecker *classMemberChecker = nullptr;
+  EventTargetChecker *eventTargetChecker = nullptr;
 };
 
 }

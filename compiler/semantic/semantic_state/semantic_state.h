@@ -33,16 +33,13 @@
 
 namespace tz {
 
-class Feature;
 
 class SemanticState {
 public:
-  SemanticState(AstContext &ctx, Diagnostics &diags, SourceFile &file,
-                llvm::ArrayRef<const Feature *> registered, EventInference &inference);
+  SemanticState(AstContext &ctx, Diagnostics &diags, SourceFile &file, EventInference &inference);
 
   AstContext &getAst();
   Diagnostics &getDiagnostics();
-  llvm::ArrayRef<const Feature *> getFeatures() const;
   Completer *getCompleter() const;
   void rememberCompleter(Completer *engine);
   ModuleStates &getModuleStates();
@@ -73,7 +70,6 @@ public:
 private:
   AstContext &ast;
   Diagnostics &diagnostics;
-  llvm::ArrayRef<const Feature *> features;
   Completer *completer = nullptr;
   ModuleStates moduleStates;
   ScopeStack scopeStack;

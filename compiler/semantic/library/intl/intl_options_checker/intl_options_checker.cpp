@@ -5,6 +5,7 @@
 #include "compiler/semantic/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/semantic/library/intl/intl_check_helpers/intl_check_helpers.h"
 #include "compiler/semantic/library/intl/intl_checker/intl_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "runtime/library/intl/intl/intl.h"
 #include "llvm/ADT/STLExtras.h"
@@ -20,6 +21,15 @@ namespace {
 
 const IntlService kSupported = {IntlKind::None, "supportedLocalesOf", 0, {kMatcher}, true};
 
+}
+
+IntlOptionsChecker::IntlOptionsChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->byteProofs = &all.getByteProofs();
+  this->exprChecker = &all.getExprChecker();
+  this->indexProofs = &all.getIndexProofs();
+  this->intlChecker = &all.getIntlChecker();
+  this->literalTypes = &all.getLiteralTypes();
 }
 
 std::optional<std::u16string> IntlOptionsChecker::literalText(const Expr *e) {
@@ -141,9 +151,6 @@ bool IntlOptionsChecker::isStringLike(const Type *type) {
           llvm::all_of(type->members(), [](const Type *m) { return m->isStringLiteral(); }));
 }
 
-IntlOptionsChecker::IntlOptionsChecker(SemanticState &owner)
-    : state(owner) {}
-
 IntlOptionsChecker::ResultOptionsGiven
 IntlOptionsChecker::optionsGiven(const Type *type, IntlKind kind, llvm::StringRef what) {
   if (type->isUndefined() && kind == IntlKind::DisplayNames) {
@@ -176,14 +183,14 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
   bool ok = true;
   if (args.size() > from) {
     Expr *&locale = args[from];
-    locale = ExprChecker(this->state).checkExpr(locale);
-    ok = IntlChecker(this->state).checkLocaleArg(locale, what);
+    locale = this->exprChecker->checkExpr(locale);
+    ok = this->intlChecker->checkLocaleArg(locale, what);
   }
   if (args.size() <= from + 1) {
     return ok;
   }
   Expr *&options = args[from + 1];
-  options = ExprChecker(this->state).checkExpr(options);
+  options = this->exprChecker->checkExpr(options);
   const Type *type = options->type;
   if (type->isError()) {
     return false;
@@ -269,8 +276,7 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
       bool open = false;
       std::vector<std::string> texts = IntlOptionsChecker::literalTexts(value, open);
       if (Expr *given = valueOf(field.name)) {
-        if (std::optional<std::vector<std::string>> known =
-                LiteralTypes(this->state).knownTexts(given)) {
+        if (std::optional<std::vector<std::string>> known = this->literalTypes->knownTexts(given)) {
           texts = *known;
           open = false;
         }
@@ -371,7 +377,7 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
     }
     const Expr *value = valueExpr(range.name);
     if (value && value->type->isInt() &&
-        ByteProofs(this->state).provesFits(value, range.min, range.max)) {
+        this->byteProofs->provesFits(value, range.min, range.max)) {
       continue;
     }
     std::string message = ErrorTextIntlField::rangeOpen(range.name, range.min, range.max);
@@ -385,8 +391,8 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
     }
     const Expr *x = valueExpr(low);
     const Expr *y = valueExpr(high);
-    std::optional<Linear> lx = x ? IndexProofs(this->state).linear(x) : std::nullopt;
-    std::optional<Linear> ly = y ? IndexProofs(this->state).linear(y) : std::nullopt;
+    std::optional<Linear> lx = x ? this->indexProofs->linear(x) : std::nullopt;
+    std::optional<Linear> ly = y ? this->indexProofs->linear(y) : std::nullopt;
     if (!lx && a && *a == std::floor(*a)) {
       lx = Linear{Term::zero(), int64_t(*a)};
     }

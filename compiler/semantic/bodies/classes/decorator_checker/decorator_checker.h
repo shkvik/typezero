@@ -6,6 +6,17 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class CallChecker;
+class ExprChecker;
+class LateClasses;
+class StmtChecker;
+class TypeRelations;
+class ReturnInferrer;
+class MetadataChecker;
+class ClassValueChecker;
+
 struct DecoratorUse {
   const Decorator *decorator;
   int param = -1;
@@ -14,7 +25,7 @@ struct DecoratorUse {
 
 class DecoratorChecker {
 public:
-  explicit DecoratorChecker(SemanticState &owner);
+  DecoratorChecker(SemanticState &owner, SemanticParts &all);
 
   void decorateClass(ClassDecl *cls);
   const Type *methodDescriptorType(const Type *args, const Type *ret);
@@ -62,6 +73,15 @@ private:
                                                 const ClassDecl *current);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  LateClasses *lateClasses = nullptr;
+  StmtChecker *stmtChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  MetadataChecker *metadataChecker = nullptr;
+  ClassValueChecker *classValueChecker = nullptr;
 };
 
 }

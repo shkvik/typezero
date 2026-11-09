@@ -3,6 +3,7 @@
 #include "compiler/semantic/bodies/functions/callback_checker/callback_checker_errors.h"
 #include "compiler/semantic/bodies/functions/nested_functions/nested_functions.h"
 #include "compiler/semantic/library/result/result_types/result_types.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
@@ -10,12 +11,16 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-FunctionValueChecker::FunctionValueChecker(SemanticState &owner)
-    : state(owner) {}
+FunctionValueChecker::FunctionValueChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->resultTypes = &all.getResultTypes();
+  this->nestedFunctions = &all.getNestedFunctions();
+}
 
 Expr *FunctionValueChecker::adaptFunction(Expr *expr, const Type *to) {
   const Type *from = expr->type;
-  if (!NestedFunctions(this->state).namedFunction(expr) || from->hasRest() || to->hasRest()) {
+  if (!this->nestedFunctions->namedFunction(expr) || from->hasRest() || to->hasRest()) {
     return nullptr;
   }
   llvm::ArrayRef<const Type *> params = from->params();
@@ -52,19 +57,19 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg, const Signat
         {"encodeURI", 1}, {"decodeURIComponent", 1},
         {"decodeURI", 1}};
     for (const auto &[global, count] : globals) {
-      if (CallChecker(this->state).isGlobalName(n, global)) {
+      if (this->callChecker->isGlobalName(n, global)) {
         name = global;
         maxArgs = count;
       }
     }
-    if (llvm::StringRef result = ResultTypes(this->state).resultName(n->name);
+    if (llvm::StringRef result = this->resultTypes->resultName(n->name);
         result == "ok" || result == "err") {
       name = n->name;
       maxArgs = 1;
     }
   } else if (auto *m = dyn_cast<MemberExpr>(arg)) {
     name = m->name;
-    if (CallChecker(this->state).isGlobalName(m->object, "Math")) {
+    if (this->callChecker->isGlobalName(m->object, "Math")) {
       static const llvm::StringLiteral two[] = {"pow", "atan2", "imul"};
       static const llvm::StringLiteral any[] = {"min", "max", "hypot"};
       static const llvm::StringLiteral one[] = {
@@ -82,7 +87,7 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg, const Signat
       } else if (name != "random") {
         name = {};
       }
-    } else if (CallChecker(this->state).isGlobalName(m->object, "Number")) {
+    } else if (this->callChecker->isGlobalName(m->object, "Number")) {
       if (name == "parseInt") {
         maxArgs = 2;
       } else if (name == "parseFloat" || name == "isInteger" || name == "isSafeInteger") {
@@ -90,13 +95,13 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg, const Signat
       } else {
         name = {};
       }
-    } else if (CallChecker(this->state).isGlobalName(m->object, "String")) {
+    } else if (this->callChecker->isGlobalName(m->object, "String")) {
       if (name == "fromCharCode" || name == "fromCodePoint") {
         maxArgs = kAny;
       } else {
         name = {};
       }
-    } else if (CallChecker(this->state).isGlobalName(m->object, "console") &&
+    } else if (this->callChecker->isGlobalName(m->object, "console") &&
                (name == "log" || name == "info" || name == "debug" || name == "error" ||
                 name == "warn")) {
       maxArgs = kAny;

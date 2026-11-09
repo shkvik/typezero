@@ -6,6 +6,7 @@
 #include "compiler/semantic/library/date/date_checker/date_checker.h"
 #include "compiler/semantic/library/json/json_checker/json_checker.h"
 #include "compiler/semantic/library/regex/regex_checker/regex_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/unknown_checker/unknown_checker.h"
 #include "llvm/ADT/STLExtras.h"
@@ -16,6 +17,15 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+ConcatChecker::ConcatChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->dateChecker = &all.getDateChecker();
+  this->bytesChecker = &all.getBytesChecker();
+  this->regexChecker = &all.getRegexChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->genericChecker = &all.getGenericChecker();
+}
 
 std::pair<llvm::StringRef, llvm::StringRef>
 ConcatChecker::operandTexts(llvm::StringRef source, llvm::SMLoc op, size_t length) {
@@ -80,9 +90,6 @@ std::string ConcatChecker::concatTemplate(const Parts &parts, llvm::StringRef &o
 
   return result + "`";
 }
-
-ConcatChecker::ConcatChecker(SemanticState &owner)
-    : state(owner) {}
 
 ConcatChecker::ResultConvertsToText ConcatChecker::convertible(const Expr *expr) {
   const Type *type = expr->type;
@@ -196,17 +203,17 @@ Expr *ConcatChecker::toStringOperand(Expr *expr) {
     return expr;
   }
   if (type->isRegExp()) {
-    return RegexChecker(this->state).regexToString(expr);
+    return this->regexChecker->regexToString(expr);
   }
   if (type->isDate()) {
-    return DateChecker(this->state).dateToString(expr);
+    return this->dateChecker->dateToString(expr);
   }
   if (type->isBytes()) {
-    return BytesChecker(this->state).bytesToString(expr);
+    return this->bytesChecker->bytesToString(expr);
   }
   if (type->nonOptional()->isParam()) {
-    GenericChecker(this->state).noteForced(expr, Type::string());
-    return TypeRelations(this->state).convert(expr, Type::string());
+    this->genericChecker->noteForced(expr, Type::string());
+    return this->typeRelations->convert(expr, Type::string());
   }
   ResultConvertsToText convertible = ConcatChecker::convertible(expr);
   if (convertible.isErr()) {
@@ -214,14 +221,14 @@ Expr *ConcatChecker::toStringOperand(Expr *expr) {
     return expr;
   }
   if (const Type *u = type->nonOptional(); u->isUnion() && u->isTagged()) {
-    auto *cast = dyn_cast<CastExpr>(TypeRelations(this->state).convert(expr, Type::string()));
+    auto *cast = dyn_cast<CastExpr>(this->typeRelations->convert(expr, Type::string()));
     if (cast) {
       cast->text = true;
     }
     return cast ? cast : expr;
   }
 
-  return TypeRelations(this->state).convert(expr, Type::string());
+  return this->typeRelations->convert(expr, Type::string());
 }
 
 std::string ConcatChecker::mixedConcatText(const BinaryExpr *root, const BinaryExpr *mixed) {

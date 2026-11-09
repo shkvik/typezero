@@ -9,6 +9,7 @@
 #include "compiler/semantic/bodies/values/global_function_checker/global_function_checker.h"
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
 #include "compiler/semantic/library/math/math_checker/math_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cstring>
@@ -18,16 +19,27 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-NumberMethods::NumberMethods(SemanticState &owner)
-    : state(owner) {}
+NumberMethods::NumberMethods(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->indexProofs = &all.getIndexProofs();
+  this->mathChecker = &all.getMathChecker();
+  this->binaryChecker = &all.getBinaryChecker();
+  this->concatChecker = &all.getConcatChecker();
+  this->memberChecker = &all.getMemberChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->literalChecker = &all.getLiteralChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->globalFunctionChecker = &all.getGlobalFunctionChecker();
+}
 
 NumberMethods::ResultStaticCallMade NumberMethods::checkStaticCall(CallExpr *call,
                                                                    MemberExpr *member) {
-  bool isString = CallChecker(this->state).isGlobalName(member->object, "String");
+  bool isString = this->callChecker->isGlobalName(member->object, "String");
   llvm::StringRef fn = member->name;
   call->type = Type::error();
   if (isString && fn == "raw" && !call->tagged) {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     std::string message = ErrorTextNumberStatic::rawTag();
 
     return err(NumberMethodsCheckStaticCallError{
@@ -42,23 +54,23 @@ NumberMethods::ResultStaticCallMade NumberMethods::checkStaticCall(CallExpr *cal
       tmpl->quasis.push_back(cast<StringLitExpr>(e.expr)->value);
     }
     tmpl->exprs.assign(call->args.begin() + 1, call->args.end());
-    Expr *raw = LiteralChecker(this->state).checkTemplate(tmpl);
+    Expr *raw = this->literalChecker->checkTemplate(tmpl);
     return ok(raw);
   }
   if (isString && (fn == "fromCharCode" || fn == "fromCodePoint")) {
     bool codeUnits = fn == "fromCharCode";
     for (Expr *&arg : call->args) {
-      arg = MathChecker(this->state).numericArg(arg);
+      arg = this->mathChecker->numericArg(arg);
       if (!codeUnits && arg->type->isNumeric()) {
         std::string what = ErrorTextNumberMethod::codePoint();
         IndexProofs::ResultBetweenProven between =
-            IndexProofs(this->state).requireBetween(arg, 0, 0x10FFFF, what);
+            this->indexProofs->requireBetween(arg, 0, 0x10FFFF, what);
         if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
           this->state.getDiagnostics().error(arg->loc(), between.error().message);
         }
       }
-      arg = codeUnits ? BinaryChecker(this->state).toInt32(arg)
-                      : TypeRelations(this->state).convert(arg, Type::doubleTy());
+      arg = codeUnits ? this->binaryChecker->toInt32(arg)
+                      : this->typeRelations->convert(arg, Type::doubleTy());
     }
     call->target =
         BuiltinCall{.builtin = codeUnits ? Builtin::FromCharCode : Builtin::FromCodePoint};
@@ -67,7 +79,7 @@ NumberMethods::ResultStaticCallMade NumberMethods::checkStaticCall(CallExpr *cal
   }
   if (!isString && (fn == "parseInt" || fn == "parseFloat")) {
     GlobalFunctionChecker::ResultFunctionCalled parsed =
-        GlobalFunctionChecker(this->state).checkGlobalFunction(call, fn, member->loc());
+        this->globalFunctionChecker->checkGlobalFunction(call, fn, member->loc());
     bool reported =
         parsed.isErr() &&
         parsed.error().code == GlobalFunctionCheckerCheckGlobalFunctionErrorCode::ALREADY_REPORTED;
@@ -94,22 +106,21 @@ NumberMethods::ResultStaticCallMade NumberMethods::checkStaticCall(CallExpr *cal
       if (fn != name) {
         continue;
       }
-      ArgumentChecker::ResultArityMatches arity =
-          ArgumentChecker(this->state).checkArity(call, 1, 1);
+      ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
       if (arity.isErr()) {
         return err(NumberMethodsCheckStaticCallError{
             .code = NumberMethodsCheckStaticCallErrorCode::WRONG_ARITY,
             .message = arity.error().message,
         });
       }
-      call->args[0] = MathChecker(this->state).numericArg(call->args[0]);
+      call->args[0] = this->mathChecker->numericArg(call->args[0]);
       call->target = BuiltinCall{.builtin = builtin};
       call->type = Type::boolTy();
       return ok(call);
     }
   }
 
-  ArgumentChecker(this->state).checkArgsLoosely(call);
+  this->argumentChecker->checkArgsLoosely(call);
   std::string message = ErrorTextNumberStatic::noProperty(fn, isString ? "String" : "Number");
 
   return err(NumberMethodsCheckStaticCallError{
@@ -139,7 +150,7 @@ NumberMethods::ResultConversionMade NumberMethods::checkConversion(CallExpr *cal
     });
   }
   call->type = Type::error();
-  ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 0);
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
   if (arity.isErr()) {
     return err(NumberMethodsCheckConversionError{
         .code = NumberMethodsCheckConversionErrorCode::WRONG_ARITY,
@@ -191,11 +202,11 @@ NumberMethods::ResultMethodCallMade NumberMethods::checkNumberMethod(CallExpr *c
     return ok(converted.value());
   }
   if (member->name == "toString" && call->args.size() == 1) {
-    member->object = TypeRelations(this->state).convert(member->object, Type::doubleTy());
-    call->args[0] = MemberChecker(this->state).checkPosition(call->args[0]);
+    member->object = this->typeRelations->convert(member->object, Type::doubleTy());
+    call->args[0] = this->memberChecker->checkPosition(call->args[0]);
     std::string what = ErrorTextNumberMethod::radix();
     IndexProofs::ResultBetweenProven between =
-        IndexProofs(this->state).requireBetween(call->args[0], 2, 36, what);
+        this->indexProofs->requireBetween(call->args[0], 2, 36, what);
     if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
       this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
     }
@@ -204,32 +215,32 @@ NumberMethods::ResultMethodCallMade NumberMethods::checkNumberMethod(CallExpr *c
     return ok(call);
   }
   if (member->name == "toString") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 0);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
     if (arity.isErr()) {
       return err(NumberMethodsCheckNumberMethodError{
           .code = NumberMethodsCheckNumberMethodErrorCode::WRONG_ARITY,
           .message = arity.error().message,
       });
     }
-    call->args.push_back(ConcatChecker(this->state).toStringOperand(member->object));
+    call->args.push_back(this->concatChecker->toStringOperand(member->object));
     call->target = BuiltinCall{.builtin = Builtin::StringOf};
     call->type = Type::string();
     return ok(call);
   }
   if (member->name == "toFixed") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 1);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
     if (arity.isErr()) {
       return err(NumberMethodsCheckNumberMethodError{
           .code = NumberMethodsCheckNumberMethodErrorCode::WRONG_ARITY,
           .message = arity.error().message,
       });
     }
-    member->object = TypeRelations(this->state).convert(member->object, Type::doubleTy());
+    member->object = this->typeRelations->convert(member->object, Type::doubleTy());
     if (!call->args.empty()) {
-      call->args[0] = MemberChecker(this->state).checkPosition(call->args[0]);
+      call->args[0] = this->memberChecker->checkPosition(call->args[0]);
       std::string what = ErrorTextNumberMethod::digits();
       IndexProofs::ResultBetweenProven between =
-          IndexProofs(this->state).requireBetween(call->args[0], 0, 100, what);
+          this->indexProofs->requireBetween(call->args[0], 0, 100, what);
       if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
         this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
       }
@@ -239,7 +250,7 @@ NumberMethods::ResultMethodCallMade NumberMethods::checkNumberMethod(CallExpr *c
     return ok(call);
   }
 
-  ArgumentChecker(this->state).checkArgsLoosely(call);
+  this->argumentChecker->checkArgsLoosely(call);
   std::string message =
       ErrorTextNumberMethod::noProperty(member->name, member->object->type->name());
 

@@ -3,6 +3,7 @@
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/objects/object_check_helpers/object_check_helpers.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
@@ -13,8 +14,13 @@ using llvm::isa;
 
 namespace tz {
 
-TupleChecker::TupleChecker(SemanticState &owner)
-    : state(owner) {}
+TupleChecker::TupleChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->argumentChecker = &all.getArgumentChecker();
+}
 
 Expr *TupleChecker::arrayCopy(Expr *tuple) {
   const Type *type = tuple->type;
@@ -37,13 +43,13 @@ Expr *TupleChecker::arrayCopy(Expr *tuple) {
 
 TupleChecker::ResultTupleJoined TupleChecker::checkTupleJoin(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return err(TupleCheckerCheckTupleJoinError{
         .code = TupleCheckerCheckTupleJoinErrorCode::ALREADY_REPORTED,
         .message = "",
     });
   }
-  ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 1);
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
   if (arity.isErr()) {
     return err(TupleCheckerCheckTupleJoinError{
         .code = TupleCheckerCheckTupleJoinErrorCode::WRONG_ARITY,
@@ -51,7 +57,7 @@ TupleChecker::ResultTupleJoined TupleChecker::checkTupleJoin(CallExpr *call, Mem
     });
   }
   if (!call->args.empty()) {
-    call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], Type::string());
+    call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
   }
   const Type *tuple = member->object->type;
   for (size_t i = 0; i < tuple->fields().size(); ++i) {
@@ -134,7 +140,7 @@ TupleChecker::ResultTupleMethod TupleChecker::checkTupleMethod(CallExpr *call, M
     }
     return ok(joined.value());
   }
-  ArgumentChecker(this->state).checkArgsLoosely(call);
+  this->argumentChecker->checkArgsLoosely(call);
   call->type = Type::error();
   if (llvm::is_contained(resizing, name)) {
     std::string message = ErrorTextTupleMethod::fixedLen(name, text);
@@ -168,7 +174,7 @@ TupleChecker::ResultTupleFilled TupleChecker::checkTupleLit(ArrayLitExpr *lit, c
   bool spread = llvm::any_of(lit->elements, spreads);
   if (spread || lit->elements.size() != fields.size()) {
     for (ArrayLitExpr::Element &e : lit->elements) {
-      e.expr = ExprChecker(this->state).checkExpr(e.expr);
+      e.expr = this->exprChecker->checkExpr(e.expr);
     }
   }
   if (spread) {
@@ -192,8 +198,8 @@ TupleChecker::ResultTupleFilled TupleChecker::checkTupleLit(ArrayLitExpr *lit, c
   for (size_t i = 0; i < fields.size(); ++i) {
     Expr *&e = lit->elements[i].expr;
     std::string what = ErrorTextTupleLit::element(i);
-    e = TypeRelations(this->state)
-            .coerce(ExprChecker(this->state).checkExpr(e, fields[i].type), fields[i].type, what);
+    e = this->typeRelations->coerce(this->exprChecker->checkExpr(e, fields[i].type), fields[i].type,
+                                    what);
   }
   lit->type = tuple;
 

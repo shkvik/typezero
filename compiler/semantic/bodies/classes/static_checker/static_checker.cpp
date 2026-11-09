@@ -12,12 +12,27 @@
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/events/event_target_checker/event_target_checker.h"
 #include "compiler/semantic/library/stream/stream_sources/stream_sources.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
 
 namespace tz {
+
+StaticChecker::StaticChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->streamSources = &all.getStreamSources();
+  this->typeRelations = &all.getTypeRelations();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->typeArgInferrer = &all.getTypeArgInferrer();
+  this->overloadResolver = &all.getOverloadResolver();
+  this->classValueChecker = &all.getClassValueChecker();
+  this->classMemberChecker = &all.getClassMemberChecker();
+  this->eventTargetChecker = &all.getEventTargetChecker();
+}
 
 ClassField *StaticChecker::staticField(ClassDecl *cls, llvm::StringRef name, ClassDecl **owner) {
   for (ClassDecl *c = cls; c; c = c->parent) {
@@ -31,9 +46,6 @@ ClassField *StaticChecker::staticField(ClassDecl *cls, llvm::StringRef name, Cla
 
   return nullptr;
 }
-
-StaticChecker::StaticChecker(SemanticState &owner)
-    : state(owner) {}
 
 StaticChecker::ResultStaticFieldType StaticChecker::fieldTyped(const ClassDecl *owner,
                                                                const VarSymbol *var,
@@ -121,7 +133,7 @@ Expr *StaticChecker::checkStaticMember(MemberExpr *member, ClassDecl *cls, const
   if (ClassField *found = StaticChecker::staticField(cls, name, &owner)) {
     ClassField &f = *found;
     ClassMemberChecker::ResultMemberAccessible accessible =
-        ClassMemberChecker(this->state).checkAccess(owner, f.access, name);
+        this->classMemberChecker->checkAccess(owner, f.access, name);
     if (accessible.isErr()) {
       this->state.getDiagnostics().error(member->loc(), accessible.error().message);
     }
@@ -142,7 +154,7 @@ Expr *StaticChecker::checkStaticMember(MemberExpr *member, ClassDecl *cls, const
     }
     read->type = typed.value();
     if (read->type->isOptional() && this->state.getFlowState().isDefined(f.var())) {
-      return TypeRelations(this->state).convert(read, read->type->inner());
+      return this->typeRelations->convert(read, read->type->inner());
     }
     return read;
   }
@@ -150,9 +162,9 @@ Expr *StaticChecker::checkStaticMember(MemberExpr *member, ClassDecl *cls, const
   bool classValue = found.isErr() && (name == "name" || name == "prototype");
   if (classValue) {
     auto *object = cast<NameExpr>(member->object);
-    member->object = ClassValueChecker(this->state).checkClassValue(object, cls);
+    member->object = this->classValueChecker->checkClassValue(object, cls);
     ClassValueChecker::ResultClassMemberRead read =
-        ClassValueChecker(this->state).checkClassRefMember(member);
+        this->classValueChecker->checkClassRefMember(member);
     if (read.isErr()) {
       this->state.getDiagnostics().error(member->loc(), read.error().message);
       return member;
@@ -165,12 +177,12 @@ Expr *StaticChecker::checkStaticMember(MemberExpr *member, ClassDecl *cls, const
   }
   std::vector<FunctionDecl *> methods = found.value();
   ClassMemberChecker::ResultMemberAccessible accessible =
-      ClassMemberChecker(this->state).checkAccess(methods[0]->cls(), methods[0]->access(), name);
+      this->classMemberChecker->checkAccess(methods[0]->cls(), methods[0]->access(), name);
   if (accessible.isErr()) {
     this->state.getDiagnostics().error(member->loc(), accessible.error().message);
   }
   OverloadResolver::ResultVariantOfType variant =
-      OverloadResolver(this->state).variantForType(methods, expected, member);
+      this->overloadResolver->variantForType(methods, expected, member);
   if (variant.isErr()) {
     this->state.getDiagnostics().error(member->loc(), variant.error().message);
     return member;
@@ -178,7 +190,7 @@ Expr *StaticChecker::checkStaticMember(MemberExpr *member, ClassDecl *cls, const
   FuncSymbol *sym = variant.value();
   auto *value = this->state.getAst().make<NameExpr>(member->loc(), name);
   value->binding = NamedFunction{.func = sym};
-  value->type = ReturnInferrer(this->state).functionType(sym);
+  value->type = this->returnInferrer->functionType(sym);
 
   return value;
 }
@@ -245,7 +257,7 @@ const Type *StaticChecker::checkStaticTarget(Expr *&target, ClassDecl *cls) {
   }
   ClassField &f = *found;
   ClassMemberChecker::ResultMemberAccessible accessible =
-      ClassMemberChecker(this->state).checkAccess(owner, f.access, f.name);
+      this->classMemberChecker->checkAccess(owner, f.access, f.name);
   if (accessible.isErr()) {
     this->state.getDiagnostics().error(member->loc(), accessible.error().message);
   }
@@ -308,17 +320,16 @@ Expr *StaticChecker::checkClassStaticCall(CallExpr *call, MemberExpr *member, Cl
       "once", "on", "listenerCount", "getEventListeners"};
   if (cls->library() && cls->name == "EventEmitter" &&
       llvm::is_contained(eventsFunctions, member->name)) {
-    if (Expr *events = EventTargetChecker(this->state)
-                           .checkEventsFunction(call, member->name, member->loc())) {
+    if (Expr *events =
+            this->eventTargetChecker->checkEventsFunction(call, member->name, member->loc())) {
       return events;
     }
-    return CallChecker(this->state)
-        .checkDirectCall(
-            call, this->state.getLibraryDeclarations().findLibraryFunction(member->name)->sym,
-            member->loc(), expected);
+    return this->callChecker->checkDirectCall(
+        call, this->state.getLibraryDeclarations().findLibraryFunction(member->name)->sym,
+        member->loc(), expected);
   }
   if (cls->library() && cls->name == "Readable" && member->name == "from") {
-    return StreamSources(this->state).checkStreamFrom(call, member);
+    return this->streamSources->checkStreamFrom(call, member);
   }
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member->name, true);
   if (methods.empty()) {
@@ -327,7 +338,7 @@ Expr *StaticChecker::checkClassStaticCall(CallExpr *call, MemberExpr *member, Cl
         StaticChecker::staticCallable(call->callee->type, cls, member->name);
     if (callable.isOk()) {
       CallChecker::ResultValueCallTyped valued =
-          CallChecker(this->state).checkValueCall(call, callable.value());
+          this->callChecker->checkValueCall(call, callable.value());
       if (valued.isErr()) {
         this->state.getDiagnostics().error(call->callee->loc(), valued.error().message);
         return call;
@@ -337,20 +348,18 @@ Expr *StaticChecker::checkClassStaticCall(CallExpr *call, MemberExpr *member, Cl
     if (callable.error().code != StaticCheckerStaticCallableErrorCode::ALREADY_REPORTED) {
       this->state.getDiagnostics().error(member->loc(), callable.error().message);
     }
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
   ClassMemberChecker::ResultMemberAccessible accessible =
-      ClassMemberChecker(this->state)
-          .checkAccess(methods[0]->cls(), methods[0]->access(), member->name);
+      this->classMemberChecker->checkAccess(methods[0]->cls(), methods[0]->access(), member->name);
   if (accessible.isErr()) {
     this->state.getDiagnostics().error(member->loc(), accessible.error().message);
   }
   bool checked = false;
   std::vector<const Type *> bound;
   OverloadResolver::ResultVariantChosen picked =
-      OverloadResolver(this->state)
-          .chooseVariant(methods, call->args, call->spread, checked, &bound);
+      this->overloadResolver->chooseVariant(methods, call->args, call->spread, checked, &bound);
   if (picked.isErr() &&
       picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
     this->state.getDiagnostics().error(member->loc(), picked.error().message);
@@ -359,24 +368,24 @@ Expr *StaticChecker::checkClassStaticCall(CallExpr *call, MemberExpr *member, Cl
     return call;
   }
   FuncSymbol *sym = picked.value();
-  ReturnInferrer(this->state).resolveParams(sym);
+  this->returnInferrer->resolveParams(sym);
   ResultTypeArgsAllowed allowed = StaticChecker::methodTypeArgs(sym, member);
   if (allowed.isErr()) {
     this->state.getDiagnostics().error(member->loc(), allowed.error().message);
   }
   if (sym->isGeneric() && checked) {
-    return OverloadResolver(this->state).callGenericVariant(call, sym, bound, member->loc(), false);
+    return this->overloadResolver->callGenericVariant(call, sym, bound, member->loc(), false);
   }
   if (sym->isGeneric()) {
-    return TypeArgInferrer(this->state)
-        .checkGenericCall(call, sym, member->loc(), expected, member->typeArgs);
+    return this->typeArgInferrer->checkGenericCall(call, sym, member->loc(), expected,
+                                                   member->typeArgs);
   }
   call->target = FunctionCall{.func = sym};
   call->type = sym->getReturnType();
   std::vector<bool> given(checked ? call->args.size() : 0, true);
 
-  return ArgumentChecker(this->state)
-      .checkArguments(call, sym->params, sym->minArgs, sym->hasRest, member->loc(), &given);
+  return this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
+                                               member->loc(), &given);
 }
 
 }

@@ -22,15 +22,15 @@ PathExports::ResultExportFound PathExports::pathExport(llvm::StringRef name, llv
   if (llvm::is_contained(kPathExports, name)) {
     std::string message = ErrorTextModuleExport::notYet(name, path);
 
-    return err(FeatureExportFoundError{
-        .code = FeatureExportFoundErrorCode::NOT_YET,
+    return err(ModuleExportFoundError{
+        .code = ModuleExportFoundErrorCode::NOT_YET,
         .message = message,
     });
   }
   std::string message = ErrorTextModuleExport::none(path, name);
 
-  return err(FeatureExportFoundError{
-      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+  return err(ModuleExportFoundError{
+      .code = ModuleExportFoundErrorCode::NO_EXPORT,
       .message = message,
   });
 }

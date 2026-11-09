@@ -5,10 +5,18 @@
 #include "compiler/semantic/generics/generic_class_instantiator/generic_class_instantiator.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/stream/chunk_types/chunk_types.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
 
 namespace tz {
+
+ClassLinks::ClassLinks(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->chunkTypes = &all.getChunkTypes();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+}
 
 bool ClassLinks::sameParams(const FuncSymbol *a, const FuncSymbol *b) {
   return a->params == b->params && a->minArgs == b->minArgs && a->hasRest == b->hasRest;
@@ -66,9 +74,6 @@ void ClassLinks::interfacesOf(const ClassDecl *cls, std::vector<const Type *> &o
     }
   }
 }
-
-ClassLinks::ClassLinks(SemanticState &owner)
-    : state(owner) {}
 
 std::vector<FunctionDecl *> ClassLinks::constructorsOf(const ClassDecl *cls) {
   for (const ClassDecl *c = cls; c; c = c->parent) {
@@ -437,9 +442,8 @@ void ClassLinks::linkOverrides(ClassDecl *cls) {
       if (target.isErr()) {
         this->state.getDiagnostics().error(fn->loc(), target.error().message);
       }
-      if (!inherited.empty() && ChunkTypes(this->state).isStreamHook(fn, true)) {
-        ChunkTypes::ResultHookParamsMatch params =
-            ChunkTypes(this->state).hookParams(fn, inherited);
+      if (!inherited.empty() && this->chunkTypes->isStreamHook(fn, true)) {
+        ChunkTypes::ResultHookParamsMatch params = this->chunkTypes->hookParams(fn, inherited);
         if (params.isErr() &&
             params.error().code == ChunkTypesHookParamsErrorCode::OTHER_PARAMETERS) {
           this->state.getDiagnostics().error(fn->loc(), params.error().message);
@@ -447,7 +451,7 @@ void ClassLinks::linkOverrides(ClassDecl *cls) {
         continue;
       }
       for (FunctionDecl *v : inherited) {
-        ClassDeclarer(this->state).checkVariantPair(v, fn);
+        this->classDeclarer->checkVariantPair(v, fn);
       }
       continue;
     }
@@ -477,7 +481,7 @@ void ClassLinks::linkOverrides(ClassDecl *cls) {
         this->state.getDiagnostics().error(fn->loc(), same.error().message);
         this->state.getDiagnostics().setMuted(outer);
       }
-      GenericClassInstantiator(this->state).markOverridden(p);
+      this->genericClassInstantiator->markOverridden(p);
     }
   }
   this->state.getDiagnostics().setMuted(muted);

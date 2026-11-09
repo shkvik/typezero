@@ -4,9 +4,19 @@
 
 namespace tz {
 
+class SemanticParts;
+class FieldFacts;
+class IndexProofs;
+class JsonChecker;
+class ResultChecker;
+class GenericChecker;
+class UnionNarrowing;
+class UnknownChecker;
+class PredicateChecker;
+
 class ConditionFacts {
 public:
-  explicit ConditionFacts(SemanticState &owner);
+  ConditionFacts(SemanticState &owner, SemanticParts &all);
 
   void addConditionFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) const;
 
@@ -18,6 +28,14 @@ private:
   bool chainDefined(const Expr *e, Flow &flow) const;
 
   SemanticState &state;
+  FieldFacts *fieldFacts = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  JsonChecker *jsonChecker = nullptr;
+  ResultChecker *resultChecker = nullptr;
+  GenericChecker *genericChecker = nullptr;
+  UnionNarrowing *unionNarrowing = nullptr;
+  UnknownChecker *unknownChecker = nullptr;
+  PredicateChecker *predicateChecker = nullptr;
 };
 
 }

@@ -6,9 +6,14 @@
 
 namespace tz {
 
+class SemanticParts;
+class UrlChecker;
+class LibraryCalls;
+class ConstantFolder;
+
 class HttpChecker {
 public:
-  explicit HttpChecker(SemanticState &owner);
+  HttpChecker(SemanticState &owner, SemanticParts &all);
 
   void checkResponseNew(NewExpr *expr);
   void checkRequestNew(NewExpr *expr);
@@ -42,6 +47,9 @@ private:
   bool inProgram(const Expr *expr) const;
 
   SemanticState &state;
+  UrlChecker *urlChecker = nullptr;
+  LibraryCalls *libraryCalls = nullptr;
+  ConstantFolder *constantFolder = nullptr;
 };
 
 }

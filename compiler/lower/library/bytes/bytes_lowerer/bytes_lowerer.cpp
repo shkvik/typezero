@@ -33,6 +33,9 @@ const EncodingTable kEncodingTables[] = {TZ_ENCODING_TABLES(TZ_ENCODING_TABLE)};
 
 }
 
+BytesLowerer::BytesLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 llvm::StructType *BytesLowerer::bytesStruct(llvm::LLVMContext &ctx) {
   llvm::Type *ptr = llvm::PointerType::getUnqual(ctx);
   llvm::Type *i32 = llvm::Type::getInt32Ty(ctx);
@@ -91,9 +94,6 @@ llvm::Value *BytesLowerer::toStorage(Lowering &, llvm::IRBuilder<> &b, Bytes kin
     return value->getType() == storage ? value : b.CreateTrunc(value, storage);
   }
 }
-
-BytesLowerer::BytesLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::MDNode *BytesLowerer::bytesTbaa(bool header) {
   if (!this->lowering.tbaaHeader) {

@@ -9,6 +9,7 @@
 #include "compiler/semantic/library/process/process_checker/process_checker_errors.h"
 #include "compiler/semantic/library/result/result_checker/result_checker.h"
 #include "compiler/semantic/library/stream/stream_sources/stream_sources.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/Support/ConvertUTF.h"
 
@@ -17,6 +18,19 @@ using llvm::dyn_cast;
 
 namespace tz {
 
+ProcessChecker::ProcessChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->dateChecker = &all.getDateChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->timerChecker = &all.getTimerChecker();
+  this->resultChecker = &all.getResultChecker();
+  this->streamSources = &all.getStreamSources();
+  this->typeRelations = &all.getTypeRelations();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->eventTargetChecker = &all.getEventTargetChecker();
+}
+
 std::u16string ProcessChecker::toUtf16(llvm::StringRef text) {
   llvm::SmallVector<llvm::UTF16, 32> units;
   llvm::convertUTF8ToUTF16String(text, units);
@@ -24,14 +38,11 @@ std::u16string ProcessChecker::toUtf16(llvm::StringRef text) {
   return std::u16string(units.begin(), units.end());
 }
 
-ProcessChecker::ProcessChecker(SemanticState &owner)
-    : state(owner) {}
-
 bool ProcessChecker::isProcessMember(const Expr *expr, llvm::StringRef name) const {
   auto *member = dyn_cast<MemberExpr>(expr);
 
   return member && !member->optional && member->name == name &&
-         CallChecker(this->state).isGlobalName(member->object, "process");
+         this->callChecker->isGlobalName(member->object, "process");
 }
 
 Expr *ProcessChecker::builtinCall(llvm::SMLoc loc, Expr *callee, Builtin builtin,
@@ -45,28 +56,28 @@ Expr *ProcessChecker::builtinCall(llvm::SMLoc loc, Expr *callee, Builtin builtin
 
 Expr *ProcessChecker::checkExitCode(Expr *code) {
   const Type *optionalInt = Type::optional(Type::intTy());
-  code = ExprChecker(this->state).checkExpr(code, Type::intTy());
+  code = this->exprChecker->checkExpr(code, Type::intTy());
   if (code->type->isOptional() || code->type->isUndefined()) {
-    return TypeRelations(this->state).coerce(code, optionalInt);
+    return this->typeRelations->coerce(code, optionalInt);
   }
 
-  return TypeRelations(this->state)
-      .convert(TypeRelations(this->state).coerce(code, Type::intTy()), optionalInt);
+  return this->typeRelations->convert(this->typeRelations->coerce(code, Type::intTy()),
+                                      optionalInt);
 }
 
 Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
   };
   llvm::StringRef name = member->name;
 
-  bool isDate = CallChecker(this->state).isGlobalName(member->object, "Date");
+  bool isDate = this->callChecker->isGlobalName(member->object, "Date");
   if (isDate && name != "now") {
-    return DateChecker(this->state).checkDateStatic(call, member);
+    return this->dateChecker->checkDateStatic(call, member);
   }
-  if (isDate || CallChecker(this->state).isGlobalName(member->object, "performance")) {
+  if (isDate || this->callChecker->isGlobalName(member->object, "performance")) {
     llvm::StringRef object = isDate ? "Date" : "performance";
     if (name != "now") {
       std::string message = ErrorTextProcessCall::onlyNow(object, name);
@@ -74,9 +85,9 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
       checkArgsLoosely();
       return call;
     }
-    bool rejected = CallChecker(this->state).rejectSpread(call);
+    bool rejected = this->callChecker->rejectSpread(call);
     ArgumentChecker::ResultArityMatches arity =
-        rejected ? ok(call) : ArgumentChecker(this->state).checkArity(call, 0, 0);
+        rejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 0);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
     }
@@ -102,19 +113,19 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
       checkArgsLoosely();
       return call;
     }
-    bool rejected = CallChecker(this->state).rejectSpread(call);
+    bool rejected = this->callChecker->rejectSpread(call);
     ArgumentChecker::ResultArityMatches arity =
-        rejected ? ok(call) : ArgumentChecker(this->state).checkArity(call, 1, 1);
+        rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
     }
     if (rejected || arity.isErr()) {
       return call;
     }
-    Expr *chunk = ExprChecker(this->state).checkExpr(call->args[0], Type::string());
+    Expr *chunk = this->exprChecker->checkExpr(call->args[0], Type::string());
     const Type *type = chunk->type;
     if (!type->isBuffer() && type->bytes() != Type::Bytes::Uint8) {
-      chunk = TypeRelations(this->state).coerce(chunk, Type::string());
+      chunk = this->typeRelations->coerce(chunk, Type::string());
     }
     call->args[0] = chunk;
     call->target = BuiltinCall{.builtin = isStdout ? Builtin::ProcessStdoutWrite
@@ -123,14 +134,14 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
 
-  if (!CallChecker(this->state).isGlobalName(member->object, "process")) {
+  if (!this->callChecker->isGlobalName(member->object, "process")) {
     return nullptr;
   }
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return call;
   }
   if (name == "nextTick") {
-    TimerChecker::ResultNextTickQueued queued = TimerChecker(this->state).checkNextTick(call);
+    TimerChecker::ResultNextTickQueued queued = this->timerChecker->checkNextTick(call);
     if (queued.isOk()) {
       return queued.value();
     }
@@ -146,7 +157,7 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "exit") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 1);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
@@ -159,7 +170,7 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "cwd") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 0);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
@@ -169,7 +180,7 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "uptime") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 0);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
@@ -186,7 +197,7 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     std::string message = ErrorTextProcessEvent::noThrown();
     this->state.getDiagnostics().error(call->args[0]->loc(), message);
 
-    return ResultChecker(this->state).markCallFailed(call);
+    return this->resultChecker->markCallFailed(call);
   }
   if ((name == "on" || name == "once" || name == "off") &&
       this->state.getLibraryDeclarations().findLibraryFunction("processOn")) {
@@ -219,7 +230,7 @@ ProcessChecker::ResultListenedSignal ProcessChecker::listenedSignal(llvm::String
 Expr *ProcessChecker::checkSignalCall(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
   call->type = Type::error();
-  ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 2, 2);
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
@@ -229,10 +240,10 @@ Expr *ProcessChecker::checkSignalCall(CallExpr *call, MemberExpr *member) {
       event ? ProcessChecker::listenedSignal(name, event->value) : ok(name);
   if (listened.isErr()) {
     this->state.getDiagnostics().error(event->loc(), listened.error().message);
-    call->args[1] = ExprChecker(this->state).checkExpr(call->args[1]);
+    call->args[1] = this->exprChecker->checkExpr(call->args[1]);
     return call;
   }
-  Expr *listener = ExprChecker(this->state).checkExpr(call->args[1]);
+  Expr *listener = this->exprChecker->checkExpr(call->args[1]);
   call->args[1] = listener;
   if (listener->type->isError()) {
     return call;
@@ -248,7 +259,7 @@ Expr *ProcessChecker::checkSignalCall(CallExpr *call, MemberExpr *member) {
   std::vector<bool> given(call->args.size(), true);
   given[0] = false;
 
-  return EventTargetChecker(this->state).callLibraryFunction(call, fn, {}, given, member->loc());
+  return this->eventTargetChecker->callLibraryFunction(call, fn, {}, given, member->loc());
 }
 
 Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
@@ -280,10 +291,10 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
     return member;
   }
 
-  if (CallChecker(this->state).isGlobalName(member->object, "Date")) {
-    return DateChecker(this->state).checkDateStaticMember(member);
+  if (this->callChecker->isGlobalName(member->object, "Date")) {
+    return this->dateChecker->checkDateStaticMember(member);
   }
-  if (CallChecker(this->state).isGlobalName(member->object, "performance")) {
+  if (this->callChecker->isGlobalName(member->object, "performance")) {
     std::string message =
         name == "now" ? ErrorTextProcessMember::perfNow() : ErrorTextProcessMember::perfOther(name);
     this->state.getDiagnostics().error(member->loc(), message);
@@ -291,11 +302,11 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
     return member;
   }
 
-  if (!CallChecker(this->state).isGlobalName(member->object, "process")) {
+  if (!this->callChecker->isGlobalName(member->object, "process")) {
     return nullptr;
   }
   if (name == "stdin" || name == "stdout" || name == "stderr") {
-    if (Expr *stream = StreamSources(this->state).processStream(member)) {
+    if (Expr *stream = this->streamSources->processStream(member)) {
       return stream;
     }
   }
@@ -334,7 +345,7 @@ Expr *ProcessChecker::checkProcessEnvIndex(IndexExpr *index) {
   if (!this->isProcessMember(index->object, "env")) {
     return nullptr;
   }
-  Expr *key = ArgumentChecker(this->state).checkArg(index->index, Type::string());
+  Expr *key = this->argumentChecker->checkArg(index->index, Type::string());
 
   return this->builtinCall(index->loc(), index->object, Builtin::ProcessEnv, {key},
                            Type::optional(Type::string()));
@@ -353,7 +364,7 @@ Expr *ProcessChecker::checkProcessAssign(AssignExpr *assign) {
     return nullptr;
   }
   bool isEnv = this->isProcessMember(object, "env");
-  bool isProcess = CallChecker(this->state).isGlobalName(object, "process") && !name.empty();
+  bool isProcess = this->callChecker->isGlobalName(object, "process") && !name.empty();
   bool isStream =
       this->isProcessMember(object, "stdout") || this->isProcessMember(object, "stderr");
   if (!isEnv && !isProcess && !isStream) {
@@ -377,7 +388,7 @@ Expr *ProcessChecker::checkProcessAssign(AssignExpr *assign) {
                               : ErrorTextProcessAssign::changed(cast<MemberExpr>(object)->name);
     this->state.getDiagnostics().error(assign->target->loc(), message);
   }
-  assign->value = ExprChecker(this->state).checkExpr(assign->value);
+  assign->value = this->exprChecker->checkExpr(assign->value);
   assign->type = Type::error();
 
   return assign;

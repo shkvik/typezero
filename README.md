@@ -4173,10 +4173,11 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 `compiler/semantic/library/crypto/`, построение IR — в `compiler/lower/library/crypto/`, C — в
 `runtime/library/crypto/`, код на tz — в `library/crypto/`.
 Каждый класс лежит в своей папке с его именем (`compiler/load/lexer/lexer.cpp`), модуль на C — так
-же (`runtime/core/string/string.c` и его `string.h`). Классы прохода, которым нужно общее состояние,
-находят его и друг друга через общее хранилище: `SemanticState` у движка типов, `Lowering` у построения
-IR. Темы подключены через `Feature` и `FeatureRegistry` (проверка) и `LibraryLowerer` и
-`LowererRegistry` (построение IR): проходы зовут крючки тем, а не называют их. Подробнее — [docs/structure.md](docs/structure.md).
+же (`runtime/core/string/string.c` и его `string.h`). У движка типов общие данные
+лежат в `SemanticState`, а все его классы-части один раз создаёт сборка `SemanticParts`, и каждая
+часть берёт у неё соседей в своём конструкторе; у построения IR общее хранилище — `Lowering`. Проверку тем
+части движка зовут прямо, по имени, типу или модулю; построение IR тем — через `LibraryLowerer` и
+`LowererRegistry`. Подробнее — [docs/structure.md](docs/structure.md).
 
 | Каталог | Что внутри |
 |---|---|

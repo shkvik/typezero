@@ -4,9 +4,14 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class CallChecker;
+class KeyedFieldChecker;
+
 class LoopScanner {
 public:
-  explicit LoopScanner(SemanticState &owner);
+  LoopScanner(SemanticState &owner, SemanticParts &all);
 
   LoopScan scanLoop(llvm::ArrayRef<const Stmt *> stmts, llvm::ArrayRef<const Expr *> exprs) const;
   bool namesIterator(const Expr *expr) const;
@@ -15,6 +20,9 @@ public:
 
 private:
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  CallChecker *callChecker = nullptr;
+  KeyedFieldChecker *keyedFieldChecker = nullptr;
 };
 
 }

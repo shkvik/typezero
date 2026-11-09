@@ -34,14 +34,14 @@ const llvm::StringLiteral kOptionNames[TZ_IO_COUNT] = {
 
 }
 
+IntlCallLowerer::IntlCallLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 int IntlCallLowerer::optionIndex(llvm::StringRef name) {
   auto at = llvm::find(kOptionNames, name);
 
   return at == std::end(kOptionNames) ? -1 : int(at - std::begin(kOptionNames));
 }
-
-IntlCallLowerer::IntlCallLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
   llvm::Type *voidTy = this->lowering.builder.getVoidTy(),

@@ -6,9 +6,17 @@
 
 namespace tz {
 
+class SemanticParts;
+class ExprChecker;
+class IndexProofs;
+class ConcatChecker;
+class MemberChecker;
+class ArgumentChecker;
+class StringRegexChecker;
+
 class StringMethods {
 public:
-  explicit StringMethods(SemanticState &owner);
+  StringMethods(SemanticState &owner, SemanticParts &all);
 
   Expr *checkStringMethod(CallExpr *call, MemberExpr *member);
 
@@ -27,6 +35,12 @@ private:
   static ResultStringMethod stringMethod(llvm::StringRef name);
 
   SemanticState &state;
+  ExprChecker *exprChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  ConcatChecker *concatChecker = nullptr;
+  MemberChecker *memberChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  StringRegexChecker *stringRegexChecker = nullptr;
 };
 
 }

@@ -7,7 +7,7 @@ InstancesPass::InstancesPass(SemanticExternalFacade &owner)
     : engine(owner) {}
 
 Errors InstancesPass::run() const {
-  return this->engine.checkInstances();
+  return this->engine.walkInstances();
 }
 
 }

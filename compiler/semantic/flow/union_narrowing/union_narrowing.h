@@ -4,9 +4,13 @@
 
 namespace tz {
 
+class SemanticParts;
+class FieldFacts;
+class LiteralTypes;
+
 class UnionNarrowing {
 public:
-  explicit UnionNarrowing(SemanticState &owner);
+  UnionNarrowing(SemanticState &owner, SemanticParts &all);
 
   static void narrowVariable(Flow &flow, const VarSymbol *var, const Type *type);
   std::optional<NarrowTarget> narrowTarget(const Expr *expr) const;
@@ -19,6 +23,8 @@ private:
   static const VarSymbol *readVariable(const Expr *expr);
   static const Type *keepMembers(const Type *type, llvm::function_ref<bool(const Type *)> keep);
   SemanticState &state;
+  FieldFacts *fieldFacts = nullptr;
+  LiteralTypes *literalTypes = nullptr;
 };
 
 }

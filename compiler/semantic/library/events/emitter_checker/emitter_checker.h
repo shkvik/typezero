@@ -5,9 +5,27 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class EventMaps;
+class FieldFacts;
+class TypeParams;
+class CallChecker;
+class ExprChecker;
+class LibraryCalls;
+class TypeResolver;
+class TypeRelations;
+class ReturnInferrer;
+class ArgumentChecker;
+class EventMapInference;
+class KeyedFieldChecker;
+class MethodCallChecker;
+class GenericInstantiator;
+class GenericClassInstantiator;
+
 class EmitterChecker {
 public:
-  explicit EmitterChecker(SemanticState &owner);
+  EmitterChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkEmitterCall(CallExpr *call, MemberExpr *member, ClassDecl *cls, bool super);
   Expr *callLibraryMethod(CallExpr *call, MemberExpr *member, ClassDecl *cls, llvm::StringRef name,
@@ -47,6 +65,22 @@ private:
   std::string emitterPath(const EmitterKey &key) const;
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  EventMaps *eventMaps = nullptr;
+  FieldFacts *fieldFacts = nullptr;
+  TypeParams *typeParams = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  LibraryCalls *libraryCalls = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  EventMapInference *eventMapInference = nullptr;
+  KeyedFieldChecker *keyedFieldChecker = nullptr;
+  MethodCallChecker *methodCallChecker = nullptr;
+  GenericInstantiator *genericInstantiator = nullptr;
+  GenericClassInstantiator *genericClassInstantiator = nullptr;
 };
 
 }

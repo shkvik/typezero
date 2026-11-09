@@ -4,9 +4,12 @@
 
 namespace tz {
 
+class SemanticParts;
+class BuiltinModuleTypes;
+
 class ChildErrorTypes {
 public:
-  explicit ChildErrorTypes(SemanticState &owner);
+  ChildErrorTypes(SemanticState &owner, SemanticParts &all);
 
   void declare();
   const Type *errorOf(llvm::StringRef fn, bool text, bool shell);
@@ -14,6 +17,7 @@ public:
 
 private:
   SemanticState &state;
+  BuiltinModuleTypes *builtinModuleTypes = nullptr;
 };
 
 }

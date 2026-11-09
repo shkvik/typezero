@@ -4,6 +4,7 @@
 #include "compiler/semantic/generics/alias_instantiator/alias_instantiator.h"
 #include "compiler/semantic/generics/generic_class_instantiator/generic_class_instantiator.h"
 #include "compiler/semantic/library/events/event_map_inference/event_map_inference.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -12,8 +13,14 @@ using llvm::isa;
 
 namespace tz {
 
-ChunkTypes::ChunkTypes(SemanticState &owner)
-    : state(owner) {}
+ChunkTypes::ChunkTypes(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->prelude = &all.getPrelude();
+  this->classBases = &all.getClassBases();
+  this->aliasInstantiator = &all.getAliasInstantiator();
+  this->eventMapInference = &all.getEventMapInference();
+  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+}
 
 bool ChunkTypes::isStreamClass(const ClassDecl *cls) const {
   ClassDecl *stream = this->state.getLibraryDeclarations().findLibraryClass("Stream");
@@ -47,9 +54,8 @@ void ChunkTypes::addStreamBases(ClassDecl *inst, llvm::SMLoc loc) {
       inst->typeArgs.size() != 3) {
     return;
   }
-  GenericClassInstantiator::ResultClassMade side =
-      GenericClassInstantiator(this->state)
-          .instantiateClass(writable, {inst->typeArgs[0], inst->typeArgs[2]}, loc);
+  GenericClassInstantiator::ResultClassMade side = this->genericClassInstantiator->instantiateClass(
+      writable, {inst->typeArgs[0], inst->typeArgs[2]}, loc);
   if (side.isErr() &&
       side.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
     llvm::SMLoc at =
@@ -59,7 +65,7 @@ void ChunkTypes::addStreamBases(ClassDecl *inst, llvm::SMLoc loc) {
     this->state.getDiagnostics().error(at, side.error().message);
   }
   if (side.isOk()) {
-    ClassBases(this->state).addBase(inst->type, side.value()->type);
+    this->classBases->addBase(inst->type, side.value()->type);
     if (inst->isEmitted()) {
       this->state.getInventoryStore().addSubtype(inst->type);
     }
@@ -81,7 +87,7 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
   bool transform = kind == "Transform" || kind == "PassThrough";
   const Type *readable = nullptr;
   const Type *writable = nullptr;
-  const Type *error = Prelude(this->state).builtinType("StreamError");
+  const Type *error = this->prelude->builtinType("StreamError");
   if (kind == "Readable" && lib->typeArgs.size() == 2) {
     readable = lib->typeArgs[0];
     error = lib->typeArgs[1];
@@ -106,7 +112,7 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
   auto generic = [&](llvm::StringRef name, const Type *arg) -> const Type * {
     TypeAliasDecl *decl = this->state.getLibraryDeclarations().findLibraryType(name);
 
-    return decl ? AliasInstantiator(this->state).instantiateAlias(decl, {arg}, fn->loc()) : nullptr;
+    return decl ? this->aliasInstantiator->instantiateAlias(decl, {arg}, fn->loc()) : nullptr;
   };
   const Type *callback = generic("HookCallback", error);
   const Type *transformCallback = generic("TransformHookCallback", error);
@@ -117,8 +123,7 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
   } else if (name == "onFinal" || name == "onConstruct") {
     params = {callback};
   } else if (name == "onDestroy") {
-    params = {Type::optional(Prelude(this->state).builtinType("StreamError")),
-              alias("StreamCallback")};
+    params = {Type::optional(this->prelude->builtinType("StreamError")), alias("StreamCallback")};
   } else if (name == "onFlush" && transform) {
     params = {transformCallback};
   } else if (name == "onTransform" && transform) {
@@ -178,7 +183,7 @@ ChunkTypes::hookParams(const FunctionDecl *fn, llvm::ArrayRef<FunctionDecl *> in
 }
 
 const Type *ChunkTypes::inferredChunkType(const std::string &site, llvm::SMLoc loc) {
-  const Type *map = EventMapInference(this->state).inferredEventMap(site);
+  const Type *map = this->eventMapInference->inferredEventMap(site);
   if (!map) {
     return nullptr;
   }
@@ -210,7 +215,7 @@ bool ChunkTypes::recordStreamChunk(const Type *chunk, const Type *value, llvm::S
   value = value->nonOptional();
   const Type *found = Type::tuple({value});
   if (const EventInference::Event *e = store.findInferredEvent(*site, "chunk")) {
-    const Type *before = EventMapInference(this->state).fromPortable(e->args, loc);
+    const Type *before = this->eventMapInference->fromPortable(e->args, loc);
     if (!before || before == found || before->fields().size() != 1) {
       return true;
     }
@@ -220,13 +225,13 @@ bool ChunkTypes::recordStreamChunk(const Type *chunk, const Type *value, llvm::S
     }
     if (const Type *now = Type::tuple({both}); now != before) {
       llvm::SmallPtrSet<const Type *, 8> seen;
-      store.changeInferredEvent(*site, "chunk", EventMapInference(this->state).portable(now, seen));
+      store.changeInferredEvent(*site, "chunk", this->eventMapInference->portable(now, seen));
     }
     return true;
   }
   llvm::SmallPtrSet<const Type *, 8> seen;
-  store.addInferredEvent(*site, {"chunk", EventMapInference(this->state).portable(found, seen),
-                                 EventMapInference(this->state).placeOf(loc)});
+  store.addInferredEvent(*site, {"chunk", this->eventMapInference->portable(found, seen),
+                                 this->eventMapInference->placeOf(loc)});
 
   return true;
 }

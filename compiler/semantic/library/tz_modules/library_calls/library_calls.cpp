@@ -5,6 +5,7 @@
 #include "compiler/semantic/library/stream/stream_checker/stream_checker.h"
 #include "compiler/semantic/library/tz_modules/tz_modules_checker/tz_modules_checker_errors.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Path.h"
@@ -13,8 +14,15 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-LibraryCalls::LibraryCalls(SemanticState &owner)
-    : state(owner) {}
+LibraryCalls::LibraryCalls(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->exprChecker = &all.getExprChecker();
+  this->typeResolver = &all.getTypeResolver();
+  this->streamChecker = &all.getStreamChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->webCryptoChecker = &all.getWebCryptoChecker();
+}
 
 void LibraryCalls::prepareLibraries(SourceFile &program) {
   for (Module *module : program.modules) {
@@ -79,7 +87,7 @@ LibraryCalls::ResultIntrinsicShape LibraryCalls::intrinsicShape(const CallExpr *
 }
 
 Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
-  ScopeEntry own = Scopes(this->state).lookup(name->name);
+  ScopeEntry own = this->scopes->lookup(name->name);
   const FunctionDecl *decl = own.func() ? own.func()->decl : nullptr;
   if (!decl || !decl->intrinsic()) {
     return nullptr;
@@ -88,11 +96,11 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
   call->type = Type::error();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
   };
   if (intrinsicName.starts_with("subtle")) {
-    return WebCryptoChecker(this->state).checkSubtleIntrinsic(call, name, intrinsicName);
+    return this->webCryptoChecker->checkSubtleIntrinsic(call, name, intrinsicName);
   }
   struct Intrinsic {
     llvm::StringLiteral name;
@@ -131,9 +139,8 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     checkArgsLoosely();
     return call;
   }
-  const Type *typeArg = intrinsic->typeArgs
-                            ? TypeResolver(this->state).resolveType(name->typeArgs[0], false)
-                            : nullptr;
+  const Type *typeArg =
+      intrinsic->typeArgs ? this->typeResolver->resolveType(name->typeArgs[0], false) : nullptr;
   call->target = BuiltinCall{.builtin = intrinsic->builtin};
   switch (intrinsic->builtin) {
   case Builtin::LibListener:
@@ -145,9 +152,9 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     if (fn->isFunction() && ArgumentLists::flattenArguments(fn->params(), minArgs, hasRest, flat)) {
       fn = Type::function(flat, minArgs, hasRest, fn->ret(), fn->hasThis());
     }
-    call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], Type::unknown());
+    call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::unknown());
     if (intrinsic->builtin == Builtin::LibBoundListener) {
-      call->args[1] = ArgumentChecker(this->state).checkArg(call->args[1], Type::anyObject());
+      call->args[1] = this->argumentChecker->checkArg(call->args[1], Type::anyObject());
     }
     call->type = fn;
     if (!fn->isFunction() && !fn->isParam() && !fn->isError()) {
@@ -157,7 +164,7 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     break;
   }
   case Builtin::LibAs: {
-    call->args[0] = ExprChecker(this->state).checkExpr(call->args[0]);
+    call->args[0] = this->exprChecker->checkExpr(call->args[0]);
     if (!typeArg->isClass() && !typeArg->isParam() && !typeArg->isError()) {
       std::string message = ErrorTextLibraryCall::asClass();
       this->state.getDiagnostics().error(name->loc(), message);
@@ -167,7 +174,7 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
   }
   case Builtin::LibAhead:
   case Builtin::LibAheadMovable: {
-    call->args[0] = ExprChecker(this->state).checkExpr(call->args[0]);
+    call->args[0] = this->exprChecker->checkExpr(call->args[0]);
     call->type = call->args[0]->type;
     auto promised = [](const Type *m) { return m->isPromise(); };
     bool awaitable = call->type->isError() || call->type->isPromise() ||
@@ -186,18 +193,17 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     call->type = Type::voidTy();
     break;
   case Builtin::LibPanic:
-    call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], Type::string());
+    call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
     call->type = Type::voidTy();
     break;
   case Builtin::LibDefer:
-    call->args[0] =
-        ArgumentChecker(this->state)
-            .checkArg(call->args[0], Type::function({}, 0, false, Type::voidTy(), false));
+    call->args[0] = this->argumentChecker->checkArg(
+        call->args[0], Type::function({}, 0, false, Type::voidTy(), false));
     call->type = Type::anyObject();
     break;
   case Builtin::LibWithContext: {
-    call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], Type::anyObject());
-    call->args[1] = ExprChecker(this->state).checkExpr(call->args[1]);
+    call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::anyObject());
+    call->args[1] = this->exprChecker->checkExpr(call->args[1]);
     call->type = call->args[1]->type->isFunction() && call->args[1]->type->params().empty()
                      ? call->args[1]->type->ret()
                      : Type::error();
@@ -219,7 +225,7 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
   case Builtin::LibStdinChunk:
   case Builtin::LibStdinFailed:
   case Builtin::LibStdWrite:
-    return StreamChecker(this->state).checkStreamIntrinsic(call, name, typeArg);
+    return this->streamChecker->checkStreamIntrinsic(call, name, typeArg);
   default:
     break;
   }

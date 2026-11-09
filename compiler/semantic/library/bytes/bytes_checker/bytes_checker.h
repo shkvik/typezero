@@ -6,9 +6,21 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ExprChecker;
+class IndexProofs;
+class LiteralTypes;
+class BufferChecker;
+class MemberChecker;
+class ConstantFolder;
+class ProcessChecker;
+class ArgumentChecker;
+class TypedArrayChecker;
+
 class BytesChecker {
 public:
-  explicit BytesChecker(SemanticState &owner);
+  BytesChecker(SemanticState &owner, SemanticParts &all);
 
   static const Type *bytesTypeNamed(llvm::StringRef name);
   Expr *checkBufferEncoding(Expr *arg);
@@ -29,6 +41,16 @@ private:
   static std::optional<std::u16string> literalText(const Expr *e);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  LiteralTypes *literalTypes = nullptr;
+  BufferChecker *bufferChecker = nullptr;
+  MemberChecker *memberChecker = nullptr;
+  ConstantFolder *constantFolder = nullptr;
+  ProcessChecker *processChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  TypedArrayChecker *typedArrayChecker = nullptr;
 };
 
 }

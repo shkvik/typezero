@@ -7,9 +7,18 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class CallChecker;
+class ExprChecker;
+class ReturnInferrer;
+class ArgumentChecker;
+class MethodCallChecker;
+class EventTargetChecker;
+
 class SubtleCallChecker {
 public:
-  explicit SubtleCallChecker(SemanticState &owner);
+  SubtleCallChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkSubtleCall(CallExpr *call, MemberExpr *member, const Type *expected);
 
@@ -43,6 +52,13 @@ private:
                                bool &bad);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  MethodCallChecker *methodCallChecker = nullptr;
+  EventTargetChecker *eventTargetChecker = nullptr;
 };
 
 }

@@ -11,7 +11,6 @@
 #include "compiler/interprocedural/overflow/value_range/value_range.h"
 #include "compiler/program/library/decimal/decimal_literal/decimal_literal.h"
 #include "compiler/program/types/types.h"
-#include "compiler/semantic/semantic_external.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
@@ -479,7 +478,7 @@ Num Evaluator::floatArithmetic(const Expr *site, BinaryOp op, const Num &l, cons
 }
 
 Num Evaluator::decimalLiteral(const Expr *expr) {
-  std::optional<DecimalLiteral> lit = SemanticExternalFacade::decimalLiteral(expr);
+  std::optional<DecimalLiteral> lit = DecimalLiteral::fromExpr(expr);
   if (!lit) {
     return ValueRange::range(-kInf, kInf, Origin::Trusted);
   }

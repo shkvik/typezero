@@ -19,7 +19,6 @@
 #include "compiler/semantic/bodies/values/number_methods/number_methods.h"
 #include "compiler/semantic/bodies/values/string_methods/string_methods.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
-#include "compiler/semantic/feature/feature.h"
 #include "compiler/semantic/generics/arg_list_checker/arg_list_checker.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/generics/type_arg_inferrer/type_arg_inferrer.h"
@@ -59,6 +58,7 @@
 #include "compiler/semantic/library/tz_modules/url_checker/url_checker.h"
 #include "compiler/semantic/library/weakref/weak_ref_checker/weak_ref_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/union_checker/union_checker.h"
 #include "compiler/semantic/types/unknown_checker/unknown_checker.h"
@@ -69,8 +69,69 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-CallChecker::CallChecker(SemanticState &owner)
-    : state(owner) {}
+CallChecker::CallChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->newChecker = &all.getNewChecker();
+  this->urlChecker = &all.getUrlChecker();
+  this->dateChecker = &all.getDateChecker();
+  this->dictMethods = &all.getDictMethods();
+  this->exprChecker = &all.getExprChecker();
+  this->httpChecker = &all.getHttpChecker();
+  this->intlChecker = &all.getIntlChecker();
+  this->jsonChecker = &all.getJsonChecker();
+  this->mathChecker = &all.getMathChecker();
+  this->nameChecker = &all.getNameChecker();
+  this->arrayMethods = &all.getArrayMethods();
+  this->bytesChecker = &all.getBytesChecker();
+  this->libraryCalls = &all.getLibraryCalls();
+  this->matchChecker = &all.getMatchChecker();
+  this->regexChecker = &all.getRegexChecker();
+  this->timerChecker = &all.getTimerChecker();
+  this->tupleChecker = &all.getTupleChecker();
+  this->unionChecker = &all.getUnionChecker();
+  this->concatChecker = &all.getConcatChecker();
+  this->cryptoChecker = &all.getCryptoChecker();
+  this->numberMethods = &all.getNumberMethods();
+  this->objectChecker = &all.getObjectChecker();
+  this->resultChecker = &all.getResultChecker();
+  this->staticChecker = &all.getStaticChecker();
+  this->stringMethods = &all.getStringMethods();
+  this->typeRelations = &all.getTypeRelations();
+  this->argListChecker = &all.getArgListChecker();
+  this->consoleChecker = &all.getConsoleChecker();
+  this->decimalChecker = &all.getDecimalChecker();
+  this->genericChecker = &all.getGenericChecker();
+  this->inheritChecker = &all.getInheritChecker();
+  this->processChecker = &all.getProcessChecker();
+  this->promiseChecker = &all.getPromiseChecker();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->streamPipeline = &all.getStreamPipeline();
+  this->unknownChecker = &all.getUnknownChecker();
+  this->weakRefChecker = &all.getWeakRefChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->iteratorMethods = &all.getIteratorMethods();
+  this->nestedFunctions = &all.getNestedFunctions();
+  this->topLevelChecker = &all.getTopLevelChecker();
+  this->typeArgInferrer = &all.getTypeArgInferrer();
+  this->tzModulesChecker = &all.getTzModulesChecker();
+  this->webCryptoChecker = &all.getWebCryptoChecker();
+  this->dateFormatChecker = &all.getDateFormatChecker();
+  this->intlMethodChecker = &all.getIntlMethodChecker();
+  this->jsonStaticChecker = &all.getJsonStaticChecker();
+  this->methodCallChecker = &all.getMethodCallChecker();
+  this->subtleCallChecker = &all.getSubtleCallChecker();
+  this->eventTargetChecker = &all.getEventTargetChecker();
+  this->reflectCallChecker = &all.getReflectCallChecker();
+  this->bufferStaticChecker = &all.getBufferStaticChecker();
+  this->cryptoMethodChecker = &all.getCryptoMethodChecker();
+  this->resultMethodChecker = &all.getResultMethodChecker();
+  this->builtinModuleChecker = &all.getBuiltinModuleChecker();
+  this->promiseStaticChecker = &all.getPromiseStaticChecker();
+  this->runtimeObjectChecker = &all.getRuntimeObjectChecker();
+  this->functionMethodChecker = &all.getFunctionMethodChecker();
+  this->globalFunctionChecker = &all.getGlobalFunctionChecker();
+}
 
 CallChecker::ResultTypeArgsAbsent CallChecker::noTypeArgs(const MemberExpr *member) {
   if (!member->typeArgs.empty()) {
@@ -124,7 +185,7 @@ CallChecker::ResultCalleeCallable CallChecker::calleeCallable(const Type *type,
 
 Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
   call->type = Type::error();
-  ArgListChecker(this->state).expandListSpreads(call->args, call->spread);
+  this->argListChecker->expandListSpreads(call->args, call->spread);
   if (auto *index = dyn_cast<IndexExpr>(call->callee); index && !index->optional) {
     if (auto *key = dyn_cast<MemberExpr>(index->index);
         key && (key->name == "iterator" || key->name == "asyncIterator") &&
@@ -136,16 +197,15 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
   }
 
   if (auto *name = dyn_cast<NameExpr>(call->callee); name && name->name == "super") {
-    return InheritChecker(this->state).checkSuperCall(call);
+    return this->inheritChecker->checkSuperCall(call);
   }
-  for (const Feature *feature : this->state.getFeatures()) {
-    if (Expr *checked = feature->checkAnyCall(this->state, call, expected)) {
-      return checked;
-    }
+  Expr *nodeCall = this->builtinModuleChecker->checkNodeCall(call, expected);
+  if (nodeCall != nullptr) {
+    return nodeCall;
   }
   if (auto *member = dyn_cast<MemberExpr>(call->callee); member && !call->optional) {
     if (this->isGlobalName(member->object, "Promise")) {
-      return PromiseStaticChecker(this->state).checkPromiseStatic(call, member, expected);
+      return this->promiseStaticChecker->checkPromiseStatic(call, member, expected);
     }
     auto rejectTypeArgs = [&] {
       ResultTypeArgsAbsent absent = CallChecker::noTypeArgs(member);
@@ -155,32 +215,83 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       }
     };
     if (auto *object = dyn_cast<NameExpr>(member->object);
-        !object || !Scopes(this->state).lookup(object->name).cls()) {
-      static const llvm::StringLiteral globals[] = {"String", "Number", "Object", "Iterator",
-                                                    "Array",  "Map",    "Symbol"};
+        !object || !this->scopes->lookup(object->name).cls()) {
+      static const llvm::StringLiteral globals[] = {
+          "String",  "Number",  "Object", "Iterator", "Array",  "Map",  "Symbol", "Result",
+          "console", "process", "Math",   "Bit",      "RegExp", "Date", "Intl",   "decimal"};
       auto named = [&](llvm::StringRef g) { return this->isGlobalName(object, g); };
-      if (object && (llvm::any_of(globals, named) ||
-                     llvm::any_of(this->state.getFeatures(), [&](const Feature *feature) {
-                       return llvm::any_of(feature->typeArgFreeGlobals(), named);
-                     }))) {
+      if (object && llvm::any_of(globals, named)) {
         rejectTypeArgs();
       }
     }
     if (auto *object = dyn_cast<NameExpr>(member->object); object && object->name == "super") {
-      return InheritChecker(this->state).checkSuperMethodCall(call, member);
+      return this->inheritChecker->checkSuperMethodCall(call, member);
     }
-    for (const Feature *feature : this->state.getFeatures()) {
-      if (Expr *checked = feature->checkStaticCall(this->state, call, member, expected)) {
-        return checked;
-      }
+    Expr *resultStatic = this->resultChecker->checkResultStatic(call, member);
+    if (resultStatic != nullptr) {
+      return resultStatic;
+    }
+    if (this->isGlobalName(member->object, "JSON")) {
+      return this->jsonStaticChecker->checkJsonStatic(call, member);
+    }
+    if (this->isGlobalName(member->object, "Array") && member->name == "isArray") {
+      return this->jsonChecker->checkArrayIsArray(call, member);
+    }
+    if (this->isGlobalName(member->object, "Json") && member->name == "isJson") {
+      return this->jsonChecker->checkJsonIsJson(call, member);
+    }
+    if (this->isGlobalName(member->object, "Reflect")) {
+      return this->reflectCallChecker->checkReflectCall(call, member, expected);
+    }
+    Expr *consoleCall = this->consoleChecker->checkConsoleCall(call, member);
+    if (consoleCall != nullptr) {
+      return consoleCall;
+    }
+    Expr *processCall = this->processChecker->checkProcessCall(call, member);
+    if (processCall != nullptr) {
+      return processCall;
+    }
+    MemberExpr *nested = dyn_cast<MemberExpr>(member->object);
+    bool bitCall = this->isGlobalName(member->object, "Bit") ||
+                   (nested != nullptr && this->isGlobalName(nested->object, "Bit"));
+    if (bitCall) {
+      return this->mathChecker->checkBitCall(call, member);
+    }
+    if (this->isGlobalName(member->object, "Math")) {
+      return this->mathChecker->checkMathCall(call, member, expected);
+    }
+    if (this->isGlobalName(member->object, "RegExp")) {
+      return this->regexChecker->checkRegExpStatic(call, member);
+    }
+    if (this->isGlobalName(member->object, "Intl")) {
+      return this->dateFormatChecker->checkIntlCall(call, member);
+    }
+    bool intlMember = nested != nullptr && this->isGlobalName(nested->object, "Intl");
+    if (intlMember && nested->name == "Locale") {
+      return this->intlChecker->checkLocaleStatic(call, member, expected);
+    }
+    if (intlMember) {
+      return this->intlChecker->checkIntlStatic(call, member);
+    }
+    if (this->isGlobalName(member->object, "decimal")) {
+      return this->decimalChecker->checkDecimalStatic(call, member);
+    }
+    if (this->cryptoChecker->isX509Class(member->object)) {
+      return this->cryptoChecker->checkX509Parse(call, member);
+    }
+    if (this->isGlobalName(member->object, "crypto")) {
+      return this->cryptoChecker->checkWebCryptoCall(call, member);
+    }
+    Expr *bytesStatic = this->bufferStaticChecker->checkBytesStatic(call, member);
+    if (bytesStatic != nullptr) {
+      return bytesStatic;
     }
     if (this->isGlobalName(member->object, "String") ||
         this->isGlobalName(member->object, "Number")) {
       if (this->rejectSpread(call)) {
         return call;
       }
-      NumberMethods::ResultStaticCallMade made =
-          NumberMethods(this->state).checkStaticCall(call, member);
+      NumberMethods::ResultStaticCallMade made = this->numberMethods->checkStaticCall(call, member);
       bool reported = made.isErr() &&
                       made.error().code == NumberMethodsCheckStaticCallErrorCode::ALREADY_REPORTED;
       if (made.isErr() && !reported) {
@@ -190,7 +301,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     }
     if (this->isGlobalName(member->object, "Object")) {
       ObjectChecker::ResultObjectStaticCall objectCall =
-          ObjectChecker(this->state).checkObjectCall(call, member, expected);
+          this->objectChecker->checkObjectCall(call, member, expected);
       if (objectCall.isOk()) {
         return objectCall.value();
       }
@@ -222,15 +333,15 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return call;
     }
     auto *object = dyn_cast<NameExpr>(member->object);
-    if (ClassDecl *cls = object ? Scopes(this->state).lookup(object->name).cls() : nullptr) {
-      return StaticChecker(this->state).checkClassStaticCall(call, member, cls, expected);
+    if (ClassDecl *cls = object ? this->scopes->lookup(object->name).cls() : nullptr) {
+      return this->staticChecker->checkClassStaticCall(call, member, cls, expected);
     }
     if (object && object->name == "this") {
       this->state.getClassContext().rememberThisMember(member->name);
     }
     if (this->isGlobalName(member->object, "Iterator")) {
       IteratorMethods::ResultIteratorFromCall from =
-          IteratorMethods(this->state).checkIteratorFrom(call, member);
+          this->iteratorMethods->checkIteratorFrom(call, member);
       if (from.isOk()) {
         return from.value();
       }
@@ -249,11 +360,10 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return call;
     }
     if (this->isGlobalName(member->object, "Array")) {
-      return IteratorMethods(this->state).checkArrayFrom(call, member);
+      return this->iteratorMethods->checkArrayFrom(call, member);
     }
     if (this->isGlobalName(member->object, "Map")) {
-      DictMethods::ResultMapFunctionTyped mapped =
-          DictMethods(this->state).checkMapStatic(call, member);
+      DictMethods::ResultMapFunctionTyped mapped = this->dictMethods->checkMapStatic(call, member);
       if (mapped.isOk()) {
         return mapped.value();
       }
@@ -274,25 +384,58 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     static const llvm::StringLiteral consumers[] = {"toArray", "forEach", "reduce",
                                                     "some",    "every",   "find"};
     if (llvm::is_contained(consumers, member->name)) {
-      IteratorMethods(this->state).markFused(member->object);
+      this->iteratorMethods->markFused(member->object);
     }
-    member->object =
-        GenericChecker(this->state).apparent(ExprChecker(this->state).checkExpr(member->object));
+    member->object = this->genericChecker->apparent(this->exprChecker->checkExpr(member->object));
     this->state.getClassContext().forgetThisMember();
     if (member->optional) {
-      member->object = ExprChecker(this->state).chainLink(member->object);
+      member->object = this->exprChecker->chainLink(member->object);
     }
     const Type *receiver = member->object->type;
     if (!receiver->isClass() && !receiver->isUnion()) {
       rejectTypeArgs();
     }
-    for (const Feature *feature : this->state.getFeatures()) {
-      if (Expr *checked = feature->checkMethodCall(this->state, call, member, expected)) {
-        return checked;
+    if (receiver->isRuntimeObject()) {
+      return this->runtimeObjectChecker->checkRuntimeMethod(call, member, expected);
+    }
+    if (receiver->isResult()) {
+      Expr *resultMethod = this->resultMethodChecker->checkResultMethod(call, member, expected);
+      if (resultMethod != nullptr) {
+        return resultMethod;
+      }
+    }
+    if (receiver->nonOptional()->isJson()) {
+      return this->jsonChecker->reportJsonMethod(call, member);
+    }
+    if (receiver->isRegExp()) {
+      return this->regexChecker->checkRegexMethod(call, member);
+    }
+    if (receiver->isDate()) {
+      Expr *dateMethod = this->dateChecker->checkDateMethod(call, member);
+      if (dateMethod != nullptr) {
+        return dateMethod;
+      }
+    }
+    if (receiver->isDateFormat()) {
+      return this->dateFormatChecker->checkDateFormatMethod(call, member);
+    }
+    if (receiver->isIntl()) {
+      return this->intlMethodChecker->checkIntlMethod(call, member);
+    }
+    if (receiver->isCrypto()) {
+      return this->cryptoMethodChecker->checkCryptoMethod(call, member);
+    }
+    if (receiver->isWeakRef()) {
+      return this->weakRefChecker->checkWeakRefMethod(call, member);
+    }
+    if (receiver->isBytes()) {
+      Expr *bytesMethod = this->bytesChecker->checkBytesMethod(call, member, expected);
+      if (bytesMethod != nullptr) {
+        return bytesMethod;
       }
     }
     UnknownChecker::ResultMethodChecked unknown =
-        UnknownChecker(this->state).checkUnknownMethod(call, member);
+        this->unknownChecker->checkUnknownMethod(call, member);
     if (unknown.isOk()) {
       return unknown.value();
     }
@@ -309,7 +452,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     }
     if (receiver->isFunction() && receiver->hasThis()) {
       FunctionMethodChecker::ResultThisCallMade made =
-          FunctionMethodChecker(this->state).checkThisCall(call, member);
+          this->functionMethodChecker->checkThisCall(call, member);
       if (made.isErr()) {
         this->state.getDiagnostics().error(member->loc(), made.error().message);
         return call;
@@ -318,7 +461,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     }
     if (receiver->isListParam()) {
       FunctionMethodChecker::ResultParamsJoined joined =
-          FunctionMethodChecker(this->state).checkListMethod(call, member);
+          this->functionMethodChecker->checkListMethod(call, member);
       bool reported =
           joined.isErr() &&
           joined.error().code == FunctionMethodCheckerCheckListMethodErrorCode::ALREADY_REPORTED;
@@ -329,7 +472,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     }
     if (receiver->isPromise()) {
       PromiseChecker::ResultPromiseChained chained =
-          PromiseChecker(this->state).checkPromiseMethod(call, member, expected);
+          this->promiseChecker->checkPromiseMethod(call, member, expected);
       if (chained.isOk()) {
         return chained.value();
       }
@@ -351,8 +494,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return call;
     }
     if (receiver->isTimer()) {
-      TimerChecker::ResultTimerMethodRun ran =
-          TimerChecker(this->state).checkTimerMethod(call, member);
+      TimerChecker::ResultTimerMethodRun ran = this->timerChecker->checkTimerMethod(call, member);
       bool reported = ran.isErr() &&
                       ran.error().code == TimerCheckerCheckTimerMethodErrorCode::ALREADY_REPORTED;
       if (ran.isErr() && !reported) {
@@ -360,36 +502,41 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       }
       return ran.isOk() ? ran.value() : call;
     }
-    for (const Feature *feature : this->state.getFeatures()) {
-      if (Expr *values = feature->methodReceiver(this->state, member->object)) {
+    if (member->object->type->isMatch()) {
+      Expr *values = this->matchChecker->matchItems(member->object);
+      if (values != nullptr) {
         member->object = values;
         receiver = values->type;
-        break;
       }
     }
     if (receiver->isUnion()) {
-      const Type *common = UnionChecker(this->state).commonBaseWith(receiver, member->name);
+      const Type *common = this->unionChecker->commonBaseWith(receiver, member->name);
       if (!common) {
         rejectTypeArgs();
         UnionChecker::ResultUnionMethodTyped unionCall =
-            UnionChecker(this->state).checkUnionMethodCall(call, member);
+            this->unionChecker->checkUnionMethodCall(call, member);
         if (unionCall.isErr()) {
           this->state.getDiagnostics().error(member->loc(), unionCall.error().message);
         }
         return unionCall.isOk() ? unionCall.value() : call;
       }
-      member->object = TypeRelations(this->state).convert(member->object, common);
+      member->object = this->typeRelations->convert(member->object, common);
       receiver = common;
     }
-    for (const Feature *feature : this->state.getFeatures()) {
-      if (Expr *checked = feature->checkClassMethodCall(this->state, call, member, expected)) {
-        return checked;
+    const Type *classReceiver = member->object->type;
+    bool subtleCall = classReceiver->isClass() &&
+                      this->webCryptoChecker->isSubtleClass(classReceiver, "SubtleCrypto") &&
+                      !this->libraryCalls->inLibrary(call->loc());
+    if (subtleCall) {
+      Expr *subtle = this->subtleCallChecker->checkSubtleCall(call, member, expected);
+      if (subtle != nullptr) {
+        return subtle;
       }
     }
     if (receiver->isClass()) {
-      bool proven = UrlChecker(this->state).checkUrlSetter(member, call);
-      Expr *checked = MethodCallChecker(this->state).checkMethodCall(call, member, expected);
-      HttpChecker(this->state).checkHeadersCall(call, member);
+      bool proven = this->urlChecker->checkUrlSetter(member, call);
+      Expr *checked = this->methodCallChecker->checkMethodCall(call, member, expected);
+      this->httpChecker->checkHeadersCall(call, member);
       if (proven && checked->type->isResult()) {
         auto *dropped = this->state.getAst().make<UnaryExpr>(call->loc(), UnaryOp::Void, checked);
         dropped->type = Type::undefinedTy();
@@ -403,10 +550,9 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
                                             "sort", "reverse", "fill",  "copyWithin", "join"};
       Expr *copy = llvm::is_contained(inPlace, member->name)
                        ? nullptr
-                       : TupleChecker(this->state).arrayCopy(member->object);
+                       : this->tupleChecker->arrayCopy(member->object);
       if (!copy) {
-        TupleChecker::ResultTupleMethod method =
-            TupleChecker(this->state).checkTupleMethod(call, member);
+        TupleChecker::ResultTupleMethod method = this->tupleChecker->checkTupleMethod(call, member);
         bool reported =
             method.isErr() &&
             method.error().code == TupleCheckerCheckTupleMethodErrorCode::ALREADY_REPORTED;
@@ -420,7 +566,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     }
     if (receiver->isObject()) {
       ObjectChecker::ResultFieldCallIsTyped fieldCall =
-          ObjectChecker(this->state).checkFieldCall(call, member);
+          this->objectChecker->checkFieldCall(call, member);
       if (fieldCall.isOk()) {
         return fieldCall.value();
       }
@@ -432,17 +578,25 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     if (!(receiver->isArray() && member->name == "push") && this->rejectSpread(call)) {
       return call;
     }
-    for (const Feature *feature : this->state.getFeatures()) {
-      if (Expr *checked = feature->checkValueMethodCall(this->state, call, member, expected)) {
-        return checked;
-      }
+    const Type *valueReceiver = member->object->type;
+    bool stringLocale = valueReceiver->isString() &&
+                        (member->name == "localeCompare" || member->name == "normalize");
+    if (stringLocale) {
+      return this->intlMethodChecker->checkStringLocale(call, member);
+    }
+    bool numberLocale = (valueReceiver->isNumeric() || valueReceiver->isDecimal()) &&
+                        member->name == "toLocaleString";
+    if (numberLocale) {
+      return this->intlMethodChecker->checkNumberLocale(call, member);
+    }
+    if (valueReceiver->isDecimal()) {
+      return this->decimalChecker->checkDecimalMethod(call, member);
     }
     if (receiver->isIterator()) {
-      return IteratorMethods(this->state).checkIteratorMethod(call, member);
+      return this->iteratorMethods->checkIteratorMethod(call, member);
     }
     if (receiver->isDict()) {
-      DictMethods::ResultDictMethodCalled method =
-          DictMethods(this->state).checkDictMethod(call, member);
+      DictMethods::ResultDictMethodCalled method = this->dictMethods->checkDictMethod(call, member);
       if (method.isOk()) {
         return method.value();
       }
@@ -467,11 +621,11 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return call;
     }
     if (receiver->isString()) {
-      return StringMethods(this->state).checkStringMethod(call, member);
+      return this->stringMethods->checkStringMethod(call, member);
     }
     if (receiver->isArray()) {
       ArrayMethods::ResultArrayMethodCall arrayCall =
-          ArrayMethods(this->state).checkArrayMethod(call, member, expected);
+          this->arrayMethods->checkArrayMethod(call, member, expected);
       if (arrayCall.isErr()) {
         this->state.getDiagnostics().error(member->loc(), arrayCall.error().message);
         return call;
@@ -480,7 +634,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     }
     if (receiver->isNumeric()) {
       NumberMethods::ResultMethodCallMade made =
-          NumberMethods(this->state).checkNumberMethod(call, member);
+          this->numberMethods->checkNumberMethod(call, member);
       if (made.isErr()) {
         this->state.getDiagnostics().error(member->loc(), made.error().message);
         return call;
@@ -488,7 +642,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return made.value();
     }
     if (receiver->isBool() && member->name == "toString" && call->args.empty()) {
-      call->args.push_back(ConcatChecker(this->state).toStringOperand(member->object));
+      call->args.push_back(this->concatChecker->toStringOperand(member->object));
       call->target = BuiltinCall{.builtin = Builtin::StringOf};
       call->type = Type::string();
       return call;
@@ -504,18 +658,24 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       std::string message = ErrorTextCallMethod::noProperty(member->name, receiver->name());
       this->state.getDiagnostics().error(member->loc(), message);
     }
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
 
   if (auto *name = dyn_cast<NameExpr>(call->callee); name && !call->optional) {
-    for (const Feature *feature : this->state.getFeatures()) {
-      if (Expr *checked = feature->checkFunctionCall(this->state, call, name, expected)) {
-        return checked;
-      }
+    Expr *libraryCall = this->libraryCalls->checkLibCall(call, name);
+    if (libraryCall != nullptr) {
+      return libraryCall;
     }
-    TimerChecker::ResultTimerScheduled task =
-        TimerChecker(this->state).checkAsyncGlobal(call, name);
+    Expr *resultCall = this->resultChecker->checkResultCall(call, name, expected);
+    if (resultCall != nullptr) {
+      return resultCall;
+    }
+    Expr *jsonCall = this->jsonStaticChecker->checkJsonGlobal(call, name);
+    if (jsonCall != nullptr) {
+      return jsonCall;
+    }
+    TimerChecker::ResultTimerScheduled task = this->timerChecker->checkAsyncGlobal(call, name);
     if (task.isOk()) {
       return task.value();
     }
@@ -535,7 +695,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
         return call;
     }
     GlobalFunctionChecker::ResultGlobalCallMade global =
-        GlobalFunctionChecker(this->state).checkGlobalCall(call, name);
+        this->globalFunctionChecker->checkGlobalCall(call, name);
     if (global.isOk()) {
       return global.value();
     }
@@ -551,17 +711,20 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
         this->state.getDiagnostics().error(call->args[0]->loc(), global.error().message);
         return call;
     }
-    ScopeEntry entry = TopLevelChecker(this->state).lookupValue(name->name);
+    ScopeEntry entry = this->topLevelChecker->lookupValue(name->name);
     if (entry.func() && !entry.var()) {
-      for (const Feature *feature : this->state.getFeatures()) {
-        if (Expr *checked = feature->checkLibraryCall(this->state, call, name, entry.func())) {
-          return checked;
-        }
+      Expr *eventsCall = this->eventTargetChecker->checkLibraryCall(call, name, entry.func());
+      if (eventsCall != nullptr) {
+        return eventsCall;
+      }
+      Expr *streamCall = this->streamPipeline->checkLibraryCall(call, name, entry.func());
+      if (streamCall != nullptr) {
+        return streamCall;
       }
     }
     if (entry.func() && !entry.var()) {
       Expr *checked = this->checkDirectCall(call, entry.func(), name->loc(), expected);
-      TzModulesChecker(this->state).noteHttpsCall(call, entry.func()->decl);
+      this->tzModulesChecker->noteHttpsCall(call, entry.func()->decl);
       return checked;
     }
     VarSymbol *var = entry.var();
@@ -571,8 +734,8 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
                               : nullptr;
     if (known && known->sym) {
       name->binding = NamedVar{.var = var};
-      NestedFunctions(this->state).noteUse(var, name->loc());
-      name->type = Scopes(this->state).varType(var);
+      this->nestedFunctions->noteUse(var, name->loc());
+      name->type = this->scopes->varType(var);
       return this->checkDirectCall(call, known->sym, name->loc());
     }
     if (!entry.var() && !entry.func() && !entry.cls() && name->name == "Array" &&
@@ -580,26 +743,26 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       auto *made =
           this->state.getAst().make<NewExpr>(call->loc(), name->name, name->typeArgs, call->args);
 
-      return NewChecker(this->state).checkNew(made, expected);
+      return this->newChecker->checkNew(made, expected);
     }
     if (!entry.var() && !entry.func()) {
       std::string why = !entry.cls() ? ErrorTextUnsupported::why(name->name) : std::string();
       if (!why.empty()) {
         std::string message = ErrorTextCallName::noSupport(name->name, why);
         this->state.getDiagnostics().error(name->loc(), message);
-      } else if (!NameChecker(this->state).checkName(name)->type->isError()) {
+      } else if (!this->nameChecker->checkName(name)->type->isError()) {
         std::string message = ErrorTextCallName::notFunc(name->name);
         this->state.getDiagnostics().error(name->loc(), message);
       }
-      ArgumentChecker(this->state).checkArgsLoosely(call);
+      this->argumentChecker->checkArgsLoosely(call);
       return call;
     }
   }
 
   auto *calleeName = dyn_cast<NameExpr>(call->callee);
-  call->callee = ExprChecker(this->state).checkExpr(call->callee);
+  call->callee = this->exprChecker->checkExpr(call->callee);
   if (call->optional) {
-    call->callee = ExprChecker(this->state).chainLink(call->callee);
+    call->callee = this->exprChecker->chainLink(call->callee);
   }
   ResultCalleeCallable callable = CallChecker::calleeCallable(call->callee->type, calleeName);
   if (callable.isOk()) {
@@ -612,7 +775,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
   if (callable.error().code != CallCheckerCalleeCallableErrorCode::ALREADY_REPORTED) {
     this->state.getDiagnostics().error(call->callee->loc(), callable.error().message);
   }
-  ArgumentChecker(this->state).checkArgsLoosely(call);
+  this->argumentChecker->checkArgsLoosely(call);
 
   return call;
 }
@@ -637,24 +800,24 @@ Expr *CallChecker::checkDirectCall(CallExpr *call, FuncSymbol *func, llvm::SMLoc
   llvm::ArrayRef<TypeRef> typeArgs =
       name ? llvm::ArrayRef<TypeRef>(name->typeArgs) : llvm::ArrayRef<TypeRef>();
   if (func->isGeneric()) {
-    return TypeArgInferrer(this->state).checkGenericCall(call, func, loc, expected, typeArgs);
+    return this->typeArgInferrer->checkGenericCall(call, func, loc, expected, typeArgs);
   }
   ResultTypeArgsUsable usable = CallChecker::directTypeArgs(func, typeArgs);
   if (usable.isErr()) {
     this->state.getDiagnostics().error(loc, usable.error().message);
   }
-  ReturnInferrer(this->state).resolveParams(func);
+  this->returnInferrer->resolveParams(func);
   call->target = FunctionCall{.func = func};
   call->type = func->getReturnType();
 
-  return ArgumentChecker(this->state)
-      .checkArguments(call, func->params, func->minArgs, func->hasRest, loc);
+  return this->argumentChecker->checkArguments(call, func->params, func->minArgs, func->hasRest,
+                                               loc);
 }
 
 CallChecker::ResultValueCallTyped CallChecker::checkValueCall(CallExpr *call, const Type *type) {
   call->type = type->ret();
   if (type->hasThis()) {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     std::string message = ErrorTextValueCall::takesThis();
 
     return err(CallCheckerCheckValueCallError{
@@ -662,9 +825,8 @@ CallChecker::ResultValueCallTyped CallChecker::checkValueCall(CallExpr *call, co
         .message = message,
     });
   }
-  Expr *checked = ArgumentChecker(this->state)
-                      .checkArguments(call, type->params(), type->minArgs(), type->hasRest(),
-                                      call->callee->loc());
+  Expr *checked = this->argumentChecker->checkArguments(call, type->params(), type->minArgs(),
+                                                        type->hasRest(), call->callee->loc());
 
   return ok(checked);
 }
@@ -689,7 +851,7 @@ bool CallChecker::rejectSpread(CallExpr *call) {
       continue;
     }
     this->state.getDiagnostics().error(call->args[i]->loc(), plain.error().message);
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     call->type = Type::error();
 
     return true;
@@ -708,10 +870,10 @@ bool CallChecker::isGlobalName(const Expr *expr, llvm::StringRef name) const {
   if (!n || n->name != name) {
     return false;
   }
-  if (BuiltinModuleChecker(this->state).nodeName(name)) {
+  if (this->builtinModuleChecker->nodeName(name)) {
     return false;
   }
-  ScopeEntry shadow = Scopes(this->state).lookup(name);
+  ScopeEntry shadow = this->scopes->lookup(name);
 
   return !shadow.var() && !shadow.func() && !shadow.cls();
 }

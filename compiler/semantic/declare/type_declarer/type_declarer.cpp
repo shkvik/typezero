@@ -10,6 +10,7 @@
 #include "compiler/semantic/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
 #include "compiler/semantic/library/builtin_modules/builtin_module_types/builtin_module_types.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
@@ -23,8 +24,22 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-TypeDeclarer::TypeDeclarer(SemanticState &owner)
-    : state(owner) {}
+TypeDeclarer::TypeDeclarer(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->classBases = &all.getClassBases();
+  this->exprChecker = &all.getExprChecker();
+  this->indexProofs = &all.getIndexProofs();
+  this->literalTypes = &all.getLiteralTypes();
+  this->typeResolver = &all.getTypeResolver();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->typeRelations = &all.getTypeRelations();
+  this->constantFolder = &all.getConstantFolder();
+  this->moduleDeclarer = &all.getModuleDeclarer();
+  this->aliasInstantiator = &all.getAliasInstantiator();
+  this->builtinModuleTypes = &all.getBuiltinModuleTypes();
+  this->builtinModuleChecker = &all.getBuiltinModuleChecker();
+}
 
 std::u16string TypeDeclarer::toUtf16(llvm::StringRef text) {
   llvm::SmallVector<llvm::UTF16, 32> units;
@@ -107,18 +122,18 @@ std::vector<Stmt *> TypeDeclarer::declareTypes(llvm::ArrayRef<Stmt *> stmts, boo
     } else if (decl) {
       name = decl->name;
       Scopes::ResultEntryDeclared added =
-          Scopes(this->state).declare(name, {EnumEntry{.enumDecl = decl}});
+          this->scopes->declare(name, {EnumEntry{.enumDecl = decl}});
       if (added.isErr()) {
         this->state.getDiagnostics().error(decl->loc(), added.error().message);
       }
       if (added.isErr() && added.error().code != ScopesDeclareErrorCode::UNDEFINED_AS_NAME) {
-        ScopeEntry previousEntry = Scopes(this->state).lookup(name);
+        ScopeEntry previousEntry = this->scopes->lookup(name);
         std::string declaredHere = ErrorTextDeclare::previous();
         this->state.getDiagnostics().note(previousEntry.loc(), declaredHere);
       }
     } else if (cls && this->state.getScopeStack().isTopLevel()) {
       name = cls->name;
-      ClassDeclarer(this->state).declareClass(cls);
+      this->classDeclarer->declareClass(cls);
     } else {
       continue;
     }
@@ -153,13 +168,13 @@ void TypeDeclarer::resolveTypes(llvm::ArrayRef<Stmt *> declared) {
       continue;
     }
     if (alias && !alias->typeParams.empty()) {
-      std::vector<const Type *> params = AliasInstantiator(this->state).aliasTypeParams(alias);
-      AliasInstantiator(this->state).instantiateAlias(alias, std::move(params), alias->loc());
+      std::vector<const Type *> params = this->aliasInstantiator->aliasTypeParams(alias);
+      this->aliasInstantiator->instantiateAlias(alias, std::move(params), alias->loc());
     } else if (alias) {
       this->resolveAlias(alias);
     } else if (cls) {
       if (!cls->baseExpr) {
-        ClassDeclarer(this->state).resolveClass(cls);
+        this->classDeclarer->resolveClass(cls);
       }
     } else {
       this->resolveEnum(cast<EnumDecl>(stmt));
@@ -175,12 +190,12 @@ Stmt *TypeDeclarer::lookupType(llvm::StringRef name) const {
   if (alias) {
     return alias;
   }
-  const NodeName *imported = BuiltinModuleChecker(this->state).nodeName(name);
+  const NodeName *imported = this->builtinModuleChecker->nodeName(name);
   if (imported) {
-    return BuiltinModuleTypes(this->state).exported(imported->module, imported->name);
+    return this->builtinModuleTypes->exported(imported->module, imported->name);
   }
   if (this->state.getTypeContext().isInsideBuiltinModule()) {
-    return BuiltinModuleTypes(this->state).alias(name);
+    return this->builtinModuleTypes->alias(name);
   }
 
   return nullptr;
@@ -222,9 +237,9 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
                    this->state.getScopeStack().isTopLevel();
   if (elsewhere) {
     Module *here = this->state.getModuleStates().getCurrentModule();
-    ModuleDeclarer(this->state).useModule(home);
+    this->moduleDeclarer->useModule(home);
     const Type *type = this->resolveAlias(alias);
-    ModuleDeclarer(this->state).useModule(here);
+    this->moduleDeclarer->useModule(here);
     return type;
   }
   if (alias->resolving && alias->self) {
@@ -239,7 +254,7 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
   }
 
   alias->resolving = true;
-  bool builtinModule = BuiltinModuleTypes(this->state).alias(alias->name) == alias;
+  bool builtinModule = this->builtinModuleTypes->alias(alias->name) == alias;
   if (builtinModule) {
     this->state.getTypeContext().enterBuiltinModule();
   }
@@ -248,9 +263,9 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
     alias->self = Type::declareObject(alias->name);
     std::vector<const Type *> bases;
     std::vector<Overload> overloads;
-    std::vector<Field> fields =
-        alias->bases.empty() ? TypeResolver(this->state).resolveFields(alias->type, &overloads)
-                             : ClassBases(this->state).interfaceFields(alias, bases, overloads);
+    std::vector<Field> fields = alias->bases.empty()
+                                    ? this->typeResolver->resolveFields(alias->type, &overloads)
+                                    : this->classBases->interfaceFields(alias, bases, overloads);
     if (alias->recursive) {
       alias->self->defineFields(std::move(fields), std::move(overloads));
       type = alias->self;
@@ -259,12 +274,12 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
     }
     for (const Type *base : bases) {
       if (!type->isError()) {
-        ClassBases(this->state).addBase(type, base);
+        this->classBases->addBase(type, base);
       }
     }
   } else if (alias->type.kind() == TypeRefKind::UNION_REF) {
     alias->self = Type::declareUnion(alias->name);
-    type = TypeResolver(this->state).resolveTypeInner(alias->type);
+    type = this->typeResolver->resolveTypeInner(alias->type);
     ResultUnionRecursion recursion = TypeDeclarer::recursiveUnion(alias, type);
     if (recursion.isErr()) {
       this->state.getDiagnostics().error(alias->loc(), recursion.error().message);
@@ -274,7 +289,7 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
       type = alias->self;
     }
   } else {
-    type = TypeResolver(this->state).resolveTypeInner(alias->type);
+    type = this->typeResolver->resolveTypeInner(alias->type);
   }
   alias->resolving = false;
   if (builtinModule) {
@@ -284,7 +299,7 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
     alias->resolved = type;
   }
   bool builtin = this->state.getAliasStore().findBuiltinAlias(alias->name) == alias ||
-                 BuiltinModuleTypes(this->state).alias(alias->name) == alias;
+                 this->builtinModuleTypes->alias(alias->name) == alias;
   if (builtin && alias->type.kind() == TypeRefKind::UNION_REF) {
     Type::nameUnion(alias->resolved, alias->name);
   }
@@ -387,9 +402,9 @@ void TypeDeclarer::resolveEnum(EnumDecl *decl) {
                    this->state.getScopeStack().isTopLevel();
   if (elsewhere) {
     Module *here = this->state.getModuleStates().getCurrentModule();
-    ModuleDeclarer(this->state).useModule(home);
+    this->moduleDeclarer->useModule(home);
     this->resolveEnum(decl);
-    ModuleDeclarer(this->state).useModule(here);
+    this->moduleDeclarer->useModule(here);
     return;
   }
   decl->stage = EnumStage::RESOLVING;
@@ -407,8 +422,7 @@ void TypeDeclarer::resolveEnum(EnumDecl *decl) {
     }
     double value = next;
     if (m.init) {
-      std::optional<ConstantValue> found =
-          ConstantFolder(this->state).evalConstant(m.init, decl, i);
+      std::optional<ConstantValue> found = this->constantFolder->evalConstant(m.init, decl, i);
       ResultMemberConstant constant = TypeDeclarer::memberConstant(found);
       if (constant.isErr()) {
         this->state.getDiagnostics().error(m.init->loc(), constant.error().message);
@@ -495,13 +509,13 @@ TypeDeclarer::ResultEnumMemberRead TypeDeclarer::checkEnumMember(EnumDecl *decl,
       this->state.getInventoryStore().rememberNamedUse(lit,
                                                        {decl, member->object->loc(), member->name});
     }
-    const Type *literal = LiteralTypes(this->state).stringLiteralFor(expected, m->text);
+    const Type *literal = this->literalTypes->stringLiteralFor(expected, m->text);
     lit->type = Type::stringLiteral(m->text);
     if (literal) {
       return ok(lit);
     }
     const Type *type = this->enumType(decl);
-    Expr *converted = TypeRelations(this->state).convert(lit, type);
+    Expr *converted = this->typeRelations->convert(lit, type);
 
     return ok(converted);
   }
@@ -515,7 +529,7 @@ TypeDeclarer::ResultEnumMemberRead TypeDeclarer::checkEnumMember(EnumDecl *decl,
   if (value < 0) {
     lit = this->state.getAst().make<UnaryExpr>(member->loc(), UnaryOp::Neg, lit);
   }
-  Expr *checked = ExprChecker(this->state).checkExpr(lit, expected);
+  Expr *checked = this->exprChecker->checkExpr(lit, expected);
 
   return ok(checked);
 }
@@ -523,7 +537,7 @@ TypeDeclarer::ResultEnumMemberRead TypeDeclarer::checkEnumMember(EnumDecl *decl,
 TypeDeclarer::ResultEnumIndexValue TypeDeclarer::checkEnumIndex(EnumDecl *decl, IndexExpr *index) {
   this->resolveEnum(decl);
   index->type = Type::error();
-  index->index = ExprChecker(this->state).checkExpr(index->index, Type::intTy());
+  index->index = this->exprChecker->checkExpr(index->index, Type::intTy());
   const Type *type = index->index->type;
   if (type->isError()) {
     return err(TypeDeclarerCheckEnumIndexError{
@@ -548,8 +562,8 @@ TypeDeclarer::ResultEnumIndexValue TypeDeclarer::checkEnumIndex(EnumDecl *decl, 
     });
   }
 
-  index->index = TypeRelations(this->state).convert(index->index, Type::intTy());
-  std::optional<Linear> value = IndexProofs(this->state).linear(index->index);
+  index->index = this->typeRelations->convert(index->index, Type::intTy());
+  std::optional<Linear> value = this->indexProofs->linear(index->index);
   if (value && value->term.isZero()) {
     const EnumMember *found = nullptr;
     for (const EnumMember &m : decl->members) {

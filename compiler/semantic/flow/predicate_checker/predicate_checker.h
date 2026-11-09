@@ -6,11 +6,18 @@
 
 namespace tz {
 
+class SemanticParts;
+class FlowChecker;
+class LiteralTypes;
+class TypeResolver;
+class ReturnInferrer;
+class FunctionChecker;
+
 class PredicateChecker {
 public:
   using ResultExitNarrowed = Result<const Flow *, PredicateCheckerNotePredicateExitError>;
 
-  explicit PredicateChecker(SemanticState &owner);
+  PredicateChecker(SemanticState &owner, SemanticParts &all);
 
   const Type *resolveReturnType(FunctionDecl *fn, FuncSymbol *sym);
   static bool looksBoolean(const Expr *expr);
@@ -31,6 +38,11 @@ private:
   static std::optional<Linear> argumentTerm(const Expr *expr);
 
   SemanticState &state;
+  FlowChecker *flowChecker = nullptr;
+  LiteralTypes *literalTypes = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  FunctionChecker *functionChecker = nullptr;
 };
 
 }

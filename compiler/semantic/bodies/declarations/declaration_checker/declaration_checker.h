@@ -9,9 +9,17 @@
 
 namespace tz {
 
+class SemanticParts;
+class TypeDeclarer;
+class TypeResolver;
+class ClassDeclarer;
+class ModuleDeclarer;
+class ReturnInferrer;
+class TopLevelChecker;
+
 class DeclarationChecker {
 public:
-  explicit DeclarationChecker(SemanticState &owner);
+  DeclarationChecker(SemanticState &owner, SemanticParts &all);
   void walkDeclarationFile(Module *module);
 
 private:
@@ -110,6 +118,12 @@ private:
                   const std::string &what);
 
   SemanticState &state;
+  TypeDeclarer *typeDeclarer = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  ModuleDeclarer *moduleDeclarer = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  TopLevelChecker *topLevelChecker = nullptr;
   Module *checkedModule = nullptr;
   llvm::StringMap<Exported> exportedNames;
 };

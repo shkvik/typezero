@@ -6,9 +6,18 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ExprChecker;
+class TypeResolver;
+class TypeRelations;
+class GenericChecker;
+class ProcessChecker;
+class ArgumentChecker;
+
 class WeakRefChecker {
 public:
-  explicit WeakRefChecker(SemanticState &owner);
+  WeakRefChecker(SemanticState &owner, SemanticParts &all);
 
   const Type *resolveWeakRefType(const TypeRef &ref);
   Expr *checkWeakRefNew(NewExpr *expr, const Type *expected);
@@ -28,6 +37,13 @@ private:
   static ResultMethodIsDerefed methodName(const MemberExpr *member, const Type *type);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  GenericChecker *genericChecker = nullptr;
+  ProcessChecker *processChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

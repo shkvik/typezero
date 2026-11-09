@@ -12,6 +12,7 @@
 #include "compiler/semantic/library/events/event_maps/event_maps.h"
 #include "compiler/semantic/library/process/process_checker/process_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -21,6 +22,23 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+ObjectChecker::ObjectChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->eventMaps = &all.getEventMaps();
+  this->fieldFacts = &all.getFieldFacts();
+  this->callChecker = &all.getCallChecker();
+  this->dictMethods = &all.getDictMethods();
+  this->exprChecker = &all.getExprChecker();
+  this->typeDeclarer = &all.getTypeDeclarer();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->typeRelations = &all.getTypeRelations();
+  this->processChecker = &all.getProcessChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->overloadResolver = &all.getOverloadResolver();
+  this->classMemberChecker = &all.getClassMemberChecker();
+}
 
 std::string ObjectChecker::chainText(const Expr *expr) {
   expr = ObjectCheckHelpers::unnarrowed(expr);
@@ -82,16 +100,12 @@ std::string ObjectChecker::noFieldText(const Type *type, llvm::StringRef name) {
   return ErrorTextObjectField::noField(name, type->name(), inherited);
 }
 
-ObjectChecker::ObjectChecker(SemanticState &owner)
-    : state(owner) {}
-
 ObjectChecker::ResultObjectStaticCall
 ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *expected) {
   llvm::StringRef fn = member->name;
   call->type = Type::error();
   if (fn == "groupBy") {
-    DictMethods::ResultGroupByCallTyped grouped =
-        DictMethods(this->state).checkGroupBy(call, false);
+    DictMethods::ResultGroupByCallTyped grouped = this->dictMethods->checkGroupBy(call, false);
     if (grouped.isOk()) {
       return ok(grouped.value());
     }
@@ -118,7 +132,7 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
   }
   if (fn == "fromEntries") {
     DictMethods::ResultFromEntriesTyped entries =
-        DictMethods(this->state).checkFromEntries(call, expected);
+        this->dictMethods->checkFromEntries(call, expected);
     if (entries.isOk()) {
       return ok(entries.value());
     }
@@ -143,7 +157,7 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
     });
   }
   if (fn != "keys" && fn != "values" && fn != "entries") {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     std::string message = ErrorTextObjectCall::noSupport(fn);
 
     return err(ObjectCheckerCheckObjectCallError{
@@ -151,13 +165,13 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
         .message = message,
     });
   }
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return err(ObjectCheckerCheckObjectCallError{
         .code = ObjectCheckerCheckObjectCallErrorCode::ALREADY_REPORTED,
         .message = "",
     });
   }
-  ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 1, 1);
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     return err(ObjectCheckerCheckObjectCallError{
         .code = ObjectCheckerCheckObjectCallErrorCode::WRONG_ARITY,
@@ -166,7 +180,7 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
   }
   Expr *&arg = call->args[0];
   if (auto *name = dyn_cast<NameExpr>(arg)) {
-    if (EnumDecl *decl = Scopes(this->state).lookup(name->name).enumDecl()) {
+    if (EnumDecl *decl = this->scopes->lookup(name->name).enumDecl()) {
       ResultEnumMemberValues members = this->enumMembers(call, decl, fn);
       if (members.isErr()) {
         return err(ObjectCheckerCheckObjectCallError{
@@ -177,7 +191,7 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
       return ok(members.value());
     }
   }
-  arg = ExprChecker(this->state).checkExpr(arg);
+  arg = this->exprChecker->checkExpr(arg);
   const Type *type = arg->type;
   if (type->isError()) {
     return ok(call);
@@ -201,8 +215,7 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
     });
   }
   if (type->isDict()) {
-    DictMethods::ResultDictObjectCalled listed =
-        DictMethods(this->state).checkDictObjectCall(call, fn);
+    DictMethods::ResultDictObjectCalled listed = this->dictMethods->checkDictObjectCall(call, fn);
     if (listed.isErr()) {
       return err(ObjectCheckerCheckObjectCallError{
           .code = ObjectCheckerCheckObjectCallErrorCode::DICT_ALWAYS_EMPTY,
@@ -227,8 +240,8 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
     return ok(call);
   }
   if (ClassDecl *cls = ClassDeclarer::classOf(type)) {
-    ClassDeclarer(this->state).completeClass(cls);
-    if (EventMaps(this->state).isEmitterClass(cls)) {
+    this->classDeclarer->completeClass(cls);
+    if (this->eventMaps->isEmitterClass(cls)) {
       std::string message = ErrorTextObjectCall::emitter(fn);
 
       return err(ObjectCheckerCheckObjectCallError{
@@ -255,7 +268,7 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
       continue;
     }
     if (ClassDecl *sub = ClassDeclarer::classOf(t)) {
-      ClassDeclarer(this->state).completeClass(sub);
+      this->classDeclarer->completeClass(sub);
     }
     for (const Field &f : t->fields()) {
       fields.push_back({t, &f});
@@ -297,7 +310,7 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
 
 ObjectChecker::ResultEnumMemberValues ObjectChecker::enumMembers(CallExpr *call, EnumDecl *decl,
                                                                  llvm::StringRef fn) {
-  const Type *values = TypeDeclarer(this->state).enumType(decl);
+  const Type *values = this->typeDeclarer->enumType(decl);
   if (!decl->isString && fn != "keys") {
     llvm::StringRef first = decl->members.empty() ? "A" : decl->members.front().name;
     std::string message = ErrorTextObjectCall::numberEnum(fn, decl->name, first);
@@ -325,7 +338,7 @@ ObjectChecker::ResultEnumMemberValues ObjectChecker::enumMembers(CallExpr *call,
   const Type *element = fn == "keys"     ? Type::string()
                         : fn == "values" ? values
                                          : Type::tuple({Type::string(), values});
-  Expr *checked = ExprChecker(this->state).checkExpr(list, Type::array(element));
+  Expr *checked = this->exprChecker->checkExpr(list, Type::array(element));
   this->state.getInventoryStore().rememberNamedUse(checked, {decl, call->args[0]->loc(), ""});
 
   return ok(checked);
@@ -336,11 +349,11 @@ Expr *ObjectChecker::enumObject(NameExpr *name, const Type *expected) {
   if (!target || !target->isDict()) {
     return nullptr;
   }
-  EnumDecl *decl = Scopes(this->state).lookup(name->name).enumDecl();
+  EnumDecl *decl = this->scopes->lookup(name->name).enumDecl();
   if (!decl) {
     return nullptr;
   }
-  TypeDeclarer(this->state).resolveEnum(decl);
+  this->typeDeclarer->resolveEnum(decl);
   auto *object = this->state.getAst().make<ObjectLitExpr>(name->loc());
   for (const EnumMember &m : decl->members) {
     ObjectLitExpr::Property p;
@@ -350,7 +363,7 @@ Expr *ObjectChecker::enumObject(NameExpr *name, const Type *expected) {
         name->loc(), this->state.getAst().make<NameExpr>(name->loc(), decl->name), m.name);
     object->props.push_back(p);
   }
-  Expr *checked = ExprChecker(this->state).checkExpr(object, expected);
+  Expr *checked = this->exprChecker->checkExpr(object, expected);
   this->state.getInventoryStore().rememberNamedUse(checked, {decl, name->loc(), ""});
 
   return checked;
@@ -413,8 +426,8 @@ ObjectChecker::ResultForInKeysAllowed ObjectChecker::walkable(const Type *type,
 
 void ObjectChecker::checkForIn(ForOfStmt *stmt) {
   auto *variable = dyn_cast<NameExpr>(stmt->iterable);
-  bool env = ProcessChecker(this->state).isProcessMember(stmt->iterable, "env");
-  Expr *object = ExprChecker(this->state).checkExpr(stmt->iterable);
+  bool env = this->processChecker->isProcessMember(stmt->iterable, "env");
+  Expr *object = this->exprChecker->checkExpr(stmt->iterable);
   const Type *type = object->type;
   if (type->isRecord() && (variable || env) && !isa<VarDeclStmt>(stmt->body) &&
       !isa<FunctionDecl>(stmt->body)) {
@@ -458,7 +471,7 @@ void ObjectChecker::checkForIn(ForOfStmt *stmt) {
 ObjectChecker::ResultObjectFieldValue ObjectChecker::checkField(MemberExpr *member) {
   const Type *type = member->object->type;
   if (type->isClass()) {
-    Expr *field = ClassMemberChecker(this->state).checkClassMember(member, nullptr);
+    Expr *field = this->classMemberChecker->checkClassMember(member, nullptr);
 
     return ok(field);
   }
@@ -473,13 +486,13 @@ ObjectChecker::ResultObjectFieldValue ObjectChecker::checkField(MemberExpr *memb
     });
   }
   member->type = field->type;
-  if (Expr *narrowed = FieldFacts(this->state).narrowedField(member); narrowed != member) {
+  if (Expr *narrowed = this->fieldFacts->narrowedField(member); narrowed != member) {
     return ok(narrowed);
   }
   if (field->type->isOptional()) {
-    if (std::optional<FieldPath> path = FieldFacts(this->state).fieldPath(member);
-        path && FieldFacts(this->state).isFieldDefined(*path)) {
-      Expr *defined = TypeRelations(this->state).convert(member, field->type->inner());
+    if (std::optional<FieldPath> path = this->fieldFacts->fieldPath(member);
+        path && this->fieldFacts->isFieldDefined(*path)) {
+      Expr *defined = this->typeRelations->convert(member, field->type->inner());
 
       return ok(defined);
     }
@@ -491,14 +504,14 @@ ObjectChecker::ResultObjectFieldValue ObjectChecker::checkField(MemberExpr *memb
 ObjectChecker::ResultFieldCallIsTyped ObjectChecker::checkFieldCall(CallExpr *call,
                                                                     MemberExpr *member) {
   if (member->object->type->overload(member->name)) {
-    Expr *overload = OverloadResolver(this->state).checkOverloadCall(call, member);
+    Expr *overload = this->overloadResolver->checkOverloadCall(call, member);
 
     return ok(overload);
   }
   ResultObjectFieldValue field = this->checkField(member);
   if (field.isErr()) {
     call->callee = member;
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     call->type = Type::error();
     return err(ObjectCheckerCheckFieldCallError{
         .code = ObjectCheckerCheckFieldCallErrorCode::NO_SUCH_FIELD,
@@ -508,7 +521,7 @@ ObjectChecker::ResultFieldCallIsTyped ObjectChecker::checkFieldCall(CallExpr *ca
   call->callee = field.value();
   const Type *type = call->callee->type;
   if (type->isFunction()) {
-    CallChecker::ResultValueCallTyped valued = CallChecker(this->state).checkValueCall(call, type);
+    CallChecker::ResultValueCallTyped valued = this->callChecker->checkValueCall(call, type);
     if (valued.isErr()) {
       return err(ObjectCheckerCheckFieldCallError{
           .code = ObjectCheckerCheckFieldCallErrorCode::TAKES_THIS,
@@ -517,7 +530,7 @@ ObjectChecker::ResultFieldCallIsTyped ObjectChecker::checkFieldCall(CallExpr *ca
     }
     return ok(valued.value());
   }
-  ArgumentChecker(this->state).checkArgsLoosely(call);
+  this->argumentChecker->checkArgsLoosely(call);
   call->type = Type::error();
   if (type->isOptional() && type->inner()->isFunction()) {
     std::string message = ErrorTextObjectField::maybeUndef();

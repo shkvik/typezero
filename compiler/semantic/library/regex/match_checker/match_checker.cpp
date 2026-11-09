@@ -3,6 +3,7 @@
 #include "compiler/semantic/bodies/expr/member_checker/member_checker.h"
 #include "compiler/semantic/bodies/objects/object_checker/object_checker.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "runtime/library/regex/regex/regex.h"
 #include "llvm/ADT/STLExtras.h"
@@ -10,14 +11,20 @@
 
 namespace tz {
 
-MatchChecker::MatchChecker(SemanticState &owner)
-    : state(owner) {}
+MatchChecker::MatchChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->exprChecker = &all.getExprChecker();
+  this->memberChecker = &all.getMemberChecker();
+  this->objectChecker = &all.getObjectChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->constantFolder = &all.getConstantFolder();
+}
 
 Expr *MatchChecker::matchItems(Expr *match) {
   const Type *array = Type::array(Type::optional(Type::string()));
   if (match->type->isOptional()) {
     this->state.getFunctionStack().enterOptionalChain();
-    Expr *items = this->matchItems(ExprChecker(this->state).chainLink(match));
+    Expr *items = this->matchItems(this->exprChecker->chainLink(match));
     auto *chain = this->state.getAst().make<OptionalChainExpr>(match->loc(), items);
     chain->mayShortCircuit = this->state.getFunctionStack().isShortCircuiting();
     chain->type = Type::optional(array);
@@ -39,7 +46,7 @@ Expr *MatchChecker::checkMatchMember(MemberExpr *member) {
     return member;
   }
   if (name == "index" || name == "input") {
-    ObjectChecker::ResultObjectFieldValue field = ObjectChecker(this->state).checkField(member);
+    ObjectChecker::ResultObjectFieldValue field = this->objectChecker->checkField(member);
     if (field.isErr()) {
       this->state.getDiagnostics().error(member->loc(), field.error().message);
       return member;
@@ -50,7 +57,7 @@ Expr *MatchChecker::checkMatchMember(MemberExpr *member) {
   if (name == "groups") {
     const Type *groups = type->field("groups")->type;
     if (!groups->isOptional()) {
-      ObjectChecker::ResultObjectFieldValue field = ObjectChecker(this->state).checkField(member);
+      ObjectChecker::ResultObjectFieldValue field = this->objectChecker->checkField(member);
       if (field.isErr()) {
         this->state.getDiagnostics().error(member->loc(), field.error().message);
         return member;
@@ -63,7 +70,7 @@ Expr *MatchChecker::checkMatchMember(MemberExpr *member) {
   }
   if (name == "indices") {
     if (type->field("indices")) {
-      ObjectChecker::ResultObjectFieldValue field = ObjectChecker(this->state).checkField(member);
+      ObjectChecker::ResultObjectFieldValue field = this->objectChecker->checkField(member);
       if (field.isErr()) {
         this->state.getDiagnostics().error(member->loc(), field.error().message);
         return member;
@@ -95,19 +102,19 @@ MatchChecker::ResultGroupIndex MatchChecker::groupIndex(int64_t index, int group
 
 Expr *MatchChecker::checkMatchIndex(IndexExpr *index) {
   const Type *type = index->object->type;
-  index->index = MemberChecker(this->state).checkPosition(index->index);
+  index->index = this->memberChecker->checkPosition(index->index);
   index->type = Type::error();
   if (index->index->type->isError()) {
     return index;
   }
   index->object = this->matchItems(index->object);
   const Type *item = Type::optional(Type::string());
-  std::optional<int64_t> k = ConstantFolder(this->state).intConstant(index->index);
+  std::optional<int64_t> k = this->constantFolder->intConstant(index->index);
   int groups = type->matchGroups();
   if (k && *k == 0) {
     index->form = ElementIndex{.mayBeOutOfRange = false};
     index->type = item;
-    return TypeRelations(this->state).convert(index, Type::string());
+    return this->typeRelations->convert(index, Type::string());
   }
   if (k && groups >= 0) {
     ResultGroupIndex group = MatchChecker::groupIndex(*k, groups);
@@ -118,7 +125,7 @@ Expr *MatchChecker::checkMatchIndex(IndexExpr *index) {
     index->form = ElementIndex{.mayBeOutOfRange = false};
     index->type = item;
     if (type->captureMandatory(unsigned(*k))) {
-      return TypeRelations(this->state).convert(index, Type::string());
+      return this->typeRelations->convert(index, Type::string());
     }
     return index;
   }

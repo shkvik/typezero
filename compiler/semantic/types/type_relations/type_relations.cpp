@@ -12,6 +12,7 @@
 #include "compiler/semantic/library/reflect/reflect_checker/reflect_checker.h"
 #include "compiler/semantic/library/result/result_types/result_types.h"
 #include "compiler/semantic/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/conditional_types/conditional_types.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/unknown_checker/unknown_checker.h"
@@ -25,8 +26,20 @@ using llvm::isa;
 
 namespace tz {
 
-TypeRelations::TypeRelations(SemanticState &owner)
-    : state(owner) {}
+TypeRelations::TypeRelations(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->byteProofs = &all.getByteProofs();
+  this->objectChecker = &all.getObjectChecker();
+  this->constantFolder = &all.getConstantFolder();
+  this->genericChecker = &all.getGenericChecker();
+  this->reflectChecker = &all.getReflectChecker();
+  this->unknownChecker = &all.getUnknownChecker();
+  this->iterableChecker = &all.getIterableChecker();
+  this->conditionalTypes = &all.getConditionalTypes();
+  this->tzModulesChecker = &all.getTzModulesChecker();
+  this->wideningRelations = &all.getWideningRelations();
+  this->functionValueChecker = &all.getFunctionValueChecker();
+}
 
 bool TypeRelations::holdsWideInteger(const Type *type) {
   type = type->nonOptional();
@@ -217,7 +230,7 @@ const Type *TypeRelations::literalTarget(const Expr *expr, const Type *to) {
   if (!target->isInteger()) {
     return nullptr;
   }
-  std::optional<int64_t> value = ConstantFolder(this->state).intConstant(expr);
+  std::optional<int64_t> value = this->constantFolder->intConstant(expr);
   if (!value) {
     return nullptr;
   }
@@ -414,7 +427,7 @@ Expr *TypeRelations::convert(Expr *expr, const Type *to) {
                   reflected->isUnknown() ||
                   (reflected->isArray() && reflected->inner()->isUnknown());
   if (expr->type->isParam() && !TypeQueries::mentionsParam(to)) {
-    GenericChecker(this->state).noteForced(expr, to);
+    this->genericChecker->noteForced(expr, to);
   }
   if ((to->isNumeric() || to->isDecimal()) && expr->type->isInteger()) {
     auto *unary = dyn_cast<UnaryExpr>(expr);
@@ -440,13 +453,13 @@ Expr *TypeRelations::convert(Expr *expr, const Type *to) {
   }
   auto *cast = this->state.getAst().make<CastExpr>(expr->loc(), expr, std::nullopt);
   cast->type = to;
-  if (WideningRelations(this->state).widensWrites(expr->type, to)) {
+  if (this->wideningRelations->widensWrites(expr->type, to)) {
     this->state.getWideningStore().rememberWideningCast(cast);
   }
   if (reflects) {
-    ReflectChecker(this->state).noteReflectedConversion(expr->type, to, cast);
+    this->reflectChecker->noteReflectedConversion(expr->type, to, cast);
   }
-  ReflectChecker(this->state).noteConstructorFlow(expr->type, to);
+  this->reflectChecker->noteConstructorFlow(expr->type, to);
 
   return cast;
 }
@@ -462,13 +475,13 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   if (this->literalAdapts(expr, to)) {
     return this->adaptLiteral(expr, to);
   }
-  if (ConditionalTypes(this->state).fitsConditional(from, to)) {
+  if (this->conditionalTypes->fitsConditional(from, to)) {
     return this->convert(expr, to);
   }
   if (to->nonOptional()->isIterator() && from->isObject()) {
-    Expr *iterator = IterableChecker(this->state).iteratorOf(expr);
+    Expr *iterator = this->iterableChecker->iteratorOf(expr);
     if (!iterator) {
-      iterator = IterableChecker(this->state).userIterator(expr);
+      iterator = this->iterableChecker->userIterator(expr);
     }
     if (iterator && iterator->type->isIterator() &&
         TypeRelations::isImplicitlyConvertible(iterator->type, to)) {
@@ -476,7 +489,7 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
     }
   }
   if (to->nonOptional()->isAsyncIterator() && from->isObject() && !from->isAsyncIterator()) {
-    if (Expr *iterator = IterableChecker(this->state).asyncUserIterator(expr);
+    if (Expr *iterator = this->iterableChecker->asyncUserIterator(expr);
         iterator && iterator->type->isAsyncIterator() &&
         TypeRelations::isImplicitlyConvertible(iterator->type, to)) {
       return this->convert(iterator, to);
@@ -484,10 +497,10 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   }
   const Type *function = to->isOptional() && to->inner()->isFunction() ? to->inner() : to;
   if (from->isFunction() && function->isFunction()) {
-    if (Expr *adapted = FunctionValueChecker(this->state).adaptFunction(expr, function)) {
+    if (Expr *adapted = this->functionValueChecker->adaptFunction(expr, function)) {
       return function == to ? adapted : this->convert(adapted, to);
     }
-    if (Expr *adapted = TzModulesChecker(this->state).adaptResult(expr, function)) {
+    if (Expr *adapted = this->tzModulesChecker->adaptResult(expr, function)) {
       return function == to ? adapted : this->convert(adapted, to);
     }
   }
@@ -500,7 +513,7 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
     intervals = LiteralTypes::intIntervals(target);
   }
   if (from->isInt() && llvm::any_of(intervals, [&](const std::pair<int64_t, int64_t> &interval) {
-        return ByteProofs(this->state).provesFits(expr, interval.first, interval.second);
+        return this->byteProofs->provesFits(expr, interval.first, interval.second);
       })) {
     return this->convert(expr, to);
   }
@@ -664,7 +677,7 @@ TypeRelations::ResultTypeAssignable TypeRelations::assignable(const Expr *expr, 
     });
   }
   if (from->isUnknown() || from->isAnyObject()) {
-    std::string hint = UnknownChecker(this->state).unknownHint(expr, to);
+    std::string hint = this->unknownChecker->unknownHint(expr, to);
     std::string message = prefix + hint;
 
     return err(TypeRelationsAssignableError{
@@ -752,7 +765,7 @@ TypeRelations::ResultTypeAssignable TypeRelations::assignable(const Expr *expr, 
                        !TypeRelations::isImplicitlyConvertible(fromObject, toObject);
   if (objectsDiffer) {
     std::string mismatch =
-        ObjectChecker(this->state).objectMismatch(fromObject, toObject, other != nullptr);
+        this->objectChecker->objectMismatch(fromObject, toObject, other != nullptr);
     std::string message = prefix + mismatch;
     if (other) {
       message += ErrorTextAssignable::both(other->name());

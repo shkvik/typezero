@@ -1,6 +1,7 @@
 #include "compiler/semantic/flow/union_narrowing/union_narrowing.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/flow/field_facts/field_facts.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/union_check_helpers/union_check_helpers.h"
@@ -10,8 +11,11 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-UnionNarrowing::UnionNarrowing(SemanticState &owner)
-    : state(owner) {}
+UnionNarrowing::UnionNarrowing(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->fieldFacts = &all.getFieldFacts();
+  this->literalTypes = &all.getLiteralTypes();
+}
 
 llvm::ArrayRef<const Type *> UnionNarrowing::membersOf(const Type *&type) {
   return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
@@ -82,8 +86,7 @@ std::optional<NarrowTarget> UnionNarrowing::narrowTarget(const Expr *expr) const
       read = conv->operand;
     }
     auto *member = dyn_cast<MemberExpr>(read);
-    std::optional<FieldPath> path =
-        member ? FieldFacts(this->state).fieldPath(member) : std::nullopt;
+    std::optional<FieldPath> path = member ? this->fieldFacts->fieldPath(member) : std::nullopt;
     if (!path) {
       return std::nullopt;
     }
@@ -101,7 +104,7 @@ std::optional<NarrowTarget> UnionNarrowing::narrowTarget(const Expr *expr) const
 
 const Type *UnionNarrowing::targetType(const Flow &flow, const NarrowTarget &target) const {
   if (target.var) {
-    return LiteralTypes(this->state).typeIn(flow, target.var);
+    return this->literalTypes->typeIn(flow, target.var);
   }
   for (const auto &[path, type] : flow.narrowedFields) {
     if (path == *target.path) {
@@ -313,7 +316,7 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Flow &whenTrue, Flow &whenF
     } else if (const VarSymbol *var = UnionNarrowing::readVariable(side);
                var && var->type && literal->literalBase() == var->type->nonOptional() &&
                (literal->isStringLiteral() || literal->literalBase()->isInt()) &&
-               LiteralTypes(this->state).typeIn(equal, var) == var->type) {
+               this->literalTypes->typeIn(equal, var) == var->type) {
       UnionNarrowing::narrowVariable(equal, var, literal);
     }
   }

@@ -7,9 +7,28 @@
 
 namespace tz {
 
+class SemanticParts;
+class EventMaps;
+class FsDeclarer;
+class CallChecker;
+class ExprChecker;
+class FlowChecker;
+class ClassChecker;
+class ClassDeclarer;
+class StreamChecker;
+class EmitterChecker;
+class ReturnInferrer;
+class ArgumentChecker;
+class TypeArgInferrer;
+class OverloadResolver;
+class TzModulesChecker;
+class ClassMemberChecker;
+class EventTargetChecker;
+class GenericClassChecker;
+
 class MethodCallChecker {
 public:
-  explicit MethodCallChecker(SemanticState &owner);
+  MethodCallChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkClassNew(NewExpr *expr, ClassDecl *cls, const Type *expected = nullptr);
   Expr *checkMethodCall(CallExpr *call, MemberExpr *member, const Type *expected = nullptr);
@@ -37,6 +56,23 @@ private:
   static ResultTypeArgsAllowed methodTypeArgs(const FuncSymbol *sym, const MemberExpr *member);
 
   SemanticState &state;
+  EventMaps *eventMaps = nullptr;
+  FsDeclarer *fsDeclarer = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  ClassChecker *classChecker = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  StreamChecker *streamChecker = nullptr;
+  EmitterChecker *emitterChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  TypeArgInferrer *typeArgInferrer = nullptr;
+  OverloadResolver *overloadResolver = nullptr;
+  TzModulesChecker *tzModulesChecker = nullptr;
+  ClassMemberChecker *classMemberChecker = nullptr;
+  EventTargetChecker *eventTargetChecker = nullptr;
+  GenericClassChecker *genericClassChecker = nullptr;
 };
 
 }

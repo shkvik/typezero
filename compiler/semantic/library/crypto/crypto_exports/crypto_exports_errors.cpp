@@ -1,5 +1,5 @@
 #include "compiler/semantic/library/crypto/crypto_exports/crypto_exports_errors.h"
-#include "compiler/semantic/feature/feature_errors.h"
+#include "compiler/semantic/library/builtin_modules/module_export_errors/module_export_errors.h"
 
 namespace tz {
 

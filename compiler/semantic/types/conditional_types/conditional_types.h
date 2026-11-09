@@ -6,13 +6,23 @@
 
 namespace tz {
 
+class SemanticParts;
+class TypeParams;
+class TypeDeclarer;
+class TypeResolver;
+class ClassDeclarer;
+class TypeOperators;
+class ReturnInferrer;
+class ExtendsRelation;
+class TopLevelChecker;
+
 class ConditionalTypes {
 public:
   static bool mentionsParamBesides(const Type *type, llvm::ArrayRef<const Type *> allowed);
 
   using ResultIntersectionJoined = Result<const Type *, ConditionalTypesResolveIntersectionError>;
 
-  explicit ConditionalTypes(SemanticState &owner);
+  ConditionalTypes(SemanticState &owner, SemanticParts &all);
 
   const Type *resolveConditional(const TypeRef &ref);
   const Type *deferConditional(const TypeRef &ref);
@@ -35,6 +45,14 @@ private:
                             llvm::SmallPtrSetImpl<const Type *> &seen);
   static bool isBinding(const Stmt *decl);
   SemanticState &state;
+  TypeParams *typeParams = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  TypeOperators *typeOperators = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  ExtendsRelation *extendsRelation = nullptr;
+  TopLevelChecker *topLevelChecker = nullptr;
 };
 
 }

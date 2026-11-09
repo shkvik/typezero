@@ -13,6 +13,7 @@
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/async/async_checker/async_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
@@ -22,8 +23,22 @@ using llvm::isa;
 
 namespace tz {
 
-ClosureChecker::ClosureChecker(SemanticState &owner)
-    : state(owner) {}
+ClosureChecker::ClosureChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->typeParams = &all.getTypeParams();
+  this->stmtChecker = &all.getStmtChecker();
+  this->asyncChecker = &all.getAsyncChecker();
+  this->classChecker = &all.getClassChecker();
+  this->typeDeclarer = &all.getTypeDeclarer();
+  this->typeResolver = &all.getTypeResolver();
+  this->argListChecker = &all.getArgListChecker();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->functionChecker = &all.getFunctionChecker();
+  this->nestedFunctions = &all.getNestedFunctions();
+  this->generatorChecker = &all.getGeneratorChecker();
+  this->predicateChecker = &all.getPredicateChecker();
+}
 
 Signature ClosureChecker::signatureOf(const Type *fnType) {
   Signature sig;
@@ -162,7 +177,7 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Signature *sig) 
     this->state.getDiagnostics().error(fe->loc(), plain.error().message);
     fn->typeArgs.assign(fn->typeParams.size(), Type::error());
     this->state.getScopeStack().openTypeScope();
-    TypeParams(this->state).bindTypeParams(fn->typeParams, fn->typeArgs);
+    this->typeParams->bindTypeParams(fn->typeParams, fn->typeArgs);
   }
 
   bool thisFromContext = false;
@@ -185,7 +200,7 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Signature *sig) 
     const Type *passed;
     if (param.type) {
       this->state.getTypeContext().enterListContext(param.rest());
-      type = TypeResolver(this->state).resolveType(*param.type, false);
+      type = this->typeResolver->resolveType(*param.type, false);
       this->state.getTypeContext().leaveListContext();
       if (param.optional()) {
         type = Type::optional(type);
@@ -253,13 +268,13 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Signature *sig) 
     }
     sym->minArgs = sig->minArgs;
   }
-  ArgListChecker(this->state).expandArgumentList(fn, sym);
+  this->argListChecker->expandArgumentList(fn, sym);
 
   if (fn->isGenerator) {
     if (fn->returnType) {
-      const Type *declared = TypeResolver(this->state).resolveType(*fn->returnType, true);
+      const Type *declared = this->typeResolver->resolveType(*fn->returnType, true);
       GeneratorChecker::ResultGeneratorReturns generator =
-          GeneratorChecker(this->state).generatorReturnType(fn, declared);
+          this->generatorChecker->generatorReturnType(fn, declared);
       if (generator.isErr()) {
         this->state.getDiagnostics().error(fn->returnType->loc, generator.error().message);
       }
@@ -277,8 +292,8 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Signature *sig) 
       sym->setReturnType(Type::voidTy());
       sym->discardsResult = true;
     } else if (fn->returnType) {
-      const Type *declared = TypeResolver(this->state).resolveType(*fn->returnType, true);
-      const Type *returned = AsyncChecker(this->state).asyncReturnType(fn, declared);
+      const Type *declared = this->typeResolver->resolveType(*fn->returnType, true);
+      const Type *returned = this->asyncChecker->asyncReturnType(fn, declared);
       sym->setReturnType(returned);
     } else if (sig && sig->ret && sig->ret->isPromise()) {
       sym->setReturnType(sig->ret);
@@ -289,7 +304,7 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Signature *sig) 
     sym->setReturnType(Type::voidTy());
     sym->discardsResult = true;
   } else if (fn->returnType) {
-    sym->setReturnType(PredicateChecker(this->state).resolveReturnType(fn, sym));
+    sym->setReturnType(this->predicateChecker->resolveReturnType(fn, sym));
   } else if (sig && sig->ret) {
     sym->setReturnType(sig->ret);
   } else if (!ReturnInferrer::returnsValue(fn->body)) {
@@ -304,21 +319,21 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Signature *sig) 
     AstWalker::collectNames(fn->body, names);
     bool recursive = !fn->ownName().empty() && names.contains(fn->ownName());
     for (const auto &entry : names) {
-      VarSymbol *var = Scopes(this->state).lookup(entry.getKey()).var();
+      VarSymbol *var = this->scopes->lookup(entry.getKey()).var();
       recursive |= var && var->lambda() == fn;
     }
     if (recursive) {
       this->state.getReturnInference().addCycle({sym});
-      BodyState saved = ReturnInferrer(this->state).enterBody(fn);
+      BodyState saved = this->returnInferrer->enterBody(fn);
       bool ownScope = !fn->ownName().empty();
       if (ownScope) {
         this->declareOwnName(fn);
       }
-      ReturnInferrer(this->state).inferCycle(this->state.getReturnInference().getCycleOf(sym));
+      this->returnInferrer->inferCycle(this->state.getReturnInference().getCycleOf(sym));
       if (ownScope) {
-        Scopes(this->state).closeScope();
+        this->scopes->closeScope();
       }
-      ReturnInferrer(this->state).leaveBody(saved);
+      this->returnInferrer->leaveBody(saved);
     }
   }
   ClassContext &classContext = this->state.getClassContext();
@@ -326,15 +341,14 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Signature *sig) 
   bool inInitializer =
       initializer && this->state.getFunctionStack().getCurrentDecl() == initializer;
   if (inInitializer) {
-    bool thisReady =
-        ClassChecker(this->state).thisReady(this->state.getFlowState().getFlow()).isOk();
+    bool thisReady = this->classChecker->thisReady(this->state.getFlowState().getFlow()).isOk();
     classContext.enterInitializerClosure(thisReady);
   }
   this->checkClosureBody(fn);
   if (inInitializer) {
     classContext.leaveInitializerClosure();
   }
-  fe->type = ReturnInferrer(this->state).functionType(sym);
+  fe->type = this->returnInferrer->functionType(sym);
 
   return fe;
 }
@@ -348,20 +362,19 @@ void ClosureChecker::declareOwnName(FunctionDecl *fn) {
   self->holds = Lambda{.lambda = fn};
   unsigned declSeq = this->state.getReturnInference().takeSequenceNumber();
   self->place = FunctionLocalVar{.owner = fn, .state = {.declSeq = declSeq}};
-  Scopes::ResultEntryDeclared added =
-      Scopes(this->state).declare(fn->ownName(), {VarEntry{.var = self}});
+  Scopes::ResultEntryDeclared added = this->scopes->declare(fn->ownName(), {VarEntry{.var = self}});
   if (added.isErr()) {
     this->state.getDiagnostics().error(fn->loc(), added.error().message);
   }
   if (added.isErr() && added.error().code != ScopesDeclareErrorCode::UNDEFINED_AS_NAME) {
-    ScopeEntry previousEntry = Scopes(this->state).lookup(fn->ownName());
+    ScopeEntry previousEntry = this->scopes->lookup(fn->ownName());
     std::string declaredHere = ErrorTextDeclare::previous();
     this->state.getDiagnostics().note(previousEntry.loc(), declaredHere);
   }
 }
 
 void ClosureChecker::checkClosureBody(FunctionDecl *fn) {
-  BodyState saved = ReturnInferrer(this->state).enterBody(fn);
+  BodyState saved = this->returnInferrer->enterBody(fn);
   auto fixed = [](Term t) {
     return (!t.var || (t.var->isConst && !t.length)) && (!t.var2 || (t.var2->isConst && !t.length2));
   };
@@ -395,19 +408,19 @@ void ClosureChecker::checkClosureBody(FunctionDecl *fn) {
     this->declareOwnName(fn);
   }
   if (fn->sym->hasReturnType()) {
-    FunctionChecker(this->state).checkFunctionBody(fn);
+    this->functionChecker->checkFunctionBody(fn);
   } else {
-    ReturnInferrer(this->state).checkAndInfer(fn);
+    this->returnInferrer->checkAndInfer(fn);
   }
   if (ownScope) {
-    Scopes(this->state).closeScope();
+    this->scopes->closeScope();
   }
-  ReturnInferrer(this->state).leaveBody(saved);
+  this->returnInferrer->leaveBody(saved);
 }
 
 void ClosureChecker::checkStatements(BlockStmt *block) {
-  TypeDeclarer(this->state).declareTypes(block->body);
-  NestedGroup *group = NestedFunctions(this->state).declareNested(block);
+  this->typeDeclarer->declareTypes(block->body);
+  NestedGroup *group = this->nestedFunctions->declareNested(block);
   if (group) {
     this->state.getFunctionStack().enterGroup(group);
   }
@@ -430,7 +443,7 @@ void ClosureChecker::checkStatements(BlockStmt *block) {
       }
     }
     this->state.getBlockPosition().rememberBlockPosition(block->body, i);
-    StmtChecker(this->state).checkStmt(block->body[i]);
+    this->stmtChecker->checkStmt(block->body[i]);
     auto *decided = dyn_cast<IfStmt>(block->body[i]);
     if (this->state.getGenericStore().isCheckingInstance() && decided &&
         isa<BoolLitExpr>(decided->cond) && this->state.getFlowState().isUnreachable() &&
@@ -443,7 +456,7 @@ void ClosureChecker::checkStatements(BlockStmt *block) {
   }
   this->state.getScopeStack().leaveBlockNames();
   if (group) {
-    NestedFunctions(this->state).finishGroup(group);
+    this->nestedFunctions->finishGroup(group);
     this->state.getFunctionStack().leaveGroup();
   }
 }

@@ -6,6 +6,7 @@
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/flow/predicate_checker/predicate_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/destination/destination.h"
 #include "compiler/semantic/types/destination_scan/destination_scan.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
@@ -18,8 +19,15 @@ using llvm::isa;
 
 namespace tz {
 
-DestinationScanner::DestinationScanner(SemanticState &owner)
-    : state(owner) {}
+DestinationScanner::DestinationScanner(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->callChecker = &all.getCallChecker();
+  this->destination = &all.getDestination();
+  this->typeResolver = &all.getTypeResolver();
+  this->iterableChecker = &all.getIterableChecker();
+  this->predicateChecker = &all.getPredicateChecker();
+}
 
 bool DestinationScanner::isResultLiteral(const CallExpr *call) {
   auto *name = dyn_cast<NameExpr>(call->callee);
@@ -37,7 +45,7 @@ bool DestinationScanner::scanDestinations(llvm::ArrayRef<Stmt *> stmts, Destinat
   scan.enterScope();
   for (const Stmt *stmt : stmts) {
     if (auto *fn = dyn_cast<FunctionDecl>(stmt)) {
-      scan.declare(fn->name, Destination(this->state).declaredFunctionType(fn));
+      scan.declare(fn->name, this->destination->declaredFunctionType(fn));
     }
   }
   bool visible = true;
@@ -63,13 +71,13 @@ void DestinationScanner::scanFunctionDestinations(const FunctionDecl *fn, Destin
   const Type *outer = scan.getReturns();
   const Type *returned =
       fn->returnType
-          ? PredicateChecker(this->state).resolveReturnType(const_cast<FunctionDecl *>(fn), nullptr)
+          ? this->predicateChecker->resolveReturnType(const_cast<FunctionDecl *>(fn), nullptr)
           : nullptr;
   scan.setReturns(returned);
   scan.enterScope();
   for (const Param &param : fn->params) {
-    const Type *type = param.type && !IterableChecker(this->state).isIterableRef(*param.type)
-                           ? TypeResolver(this->state).resolveType(*param.type, false)
+    const Type *type = param.type && !this->iterableChecker->isIterableRef(*param.type)
+                           ? this->typeResolver->resolveType(*param.type, false)
                            : nullptr;
     if (param.defaultValue()) {
       this->scanDestinations(param.defaultValue(), type, scan);
@@ -96,8 +104,7 @@ void DestinationScanner::scanDestinations(const Stmt *stmt, DestinationScan &sca
     break;
   case Stmt::Kind::VarDecl:
     for (const VarDeclarator &d : cast<VarDeclStmt>(stmt)->decls) {
-      const Type *type =
-          d.typeAnn ? TypeResolver(this->state).resolveType(*d.typeAnn, false) : nullptr;
+      const Type *type = d.typeAnn ? this->typeResolver->resolveType(*d.typeAnn, false) : nullptr;
       if (d.init) {
         this->scanDestinations(d.init, type, scan);
       }
@@ -287,9 +294,8 @@ void DestinationScanner::scanDestinations(const Expr *expr, const Type *sink,
   case Expr::Kind::New: {
     auto *create = cast<NewExpr>(expr);
     const FuncSymbol *ctor = nullptr;
-    if (ClassDecl *cls = scan.isHidden(create->name)
-                             ? nullptr
-                             : Scopes(this->state).lookup(create->name).cls()) {
+    if (ClassDecl *cls =
+            scan.isHidden(create->name) ? nullptr : this->scopes->lookup(create->name).cls()) {
       if (cls->constructors.size() == 1 && cls->constructors[0]->sym &&
           !cls->constructors[0]->sym->pendingParams) {
         ctor = cls->constructors[0]->sym;
@@ -325,7 +331,7 @@ const Type *DestinationScanner::peekName(llvm::StringRef name, const Destination
   if (local.has_value()) {
     return *local;
   }
-  VarSymbol *var = Scopes(this->state).lookup(name).var();
+  VarSymbol *var = this->scopes->lookup(name).var();
 
   return var ? var->type : nullptr;
 }
@@ -335,9 +341,8 @@ const Type *DestinationScanner::peekType(const Expr *expr, const DestinationScan
     return name->name == scan.getName() ? nullptr : this->peekName(name->name, scan);
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
-    if (member->name == "subtle" &&
-        CallChecker(this->state).isGlobalName(member->object, "crypto")) {
-      VarSymbol *subtle = Scopes(this->state).lookup(LibraryModuleNames::kSubtleName).var();
+    if (member->name == "subtle" && this->callChecker->isGlobalName(member->object, "crypto")) {
+      VarSymbol *subtle = this->scopes->lookup(LibraryModuleNames::kSubtleName).var();
       return subtle ? subtle->type : nullptr;
     }
     const Type *object = this->peekType(member->object, scan);
@@ -399,7 +404,7 @@ std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,
       return type && type->isFunction() ? spread(type->params(), type->hasRest())
                                         : std::vector<const Type *>{};
     }
-    ScopeEntry entry = Scopes(this->state).lookup(name->name);
+    ScopeEntry entry = this->scopes->lookup(name->name);
     FuncSymbol *func = entry.func();
     if (entry.var() && entry.var()->function()) {
       func = entry.var()->function()->sym;
@@ -423,7 +428,7 @@ std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,
       return spread(methods[0]->sym->params, methods[0]->sym->hasRest);
     };
     if (auto *name = dyn_cast<NameExpr>(member->object); name && !scan.isHidden(name->name)) {
-      if (ClassDecl *cls = Scopes(this->state).lookup(name->name).cls()) {
+      if (ClassDecl *cls = this->scopes->lookup(name->name).cls()) {
         return variant(cls, true);
       }
     }

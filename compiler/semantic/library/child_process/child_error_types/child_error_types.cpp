@@ -1,5 +1,6 @@
 #include "compiler/semantic/library/child_process/child_error_types/child_error_types.h"
 #include "compiler/semantic/library/builtin_modules/builtin_module_types/builtin_module_types.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 
 namespace tz {
 
@@ -13,11 +14,13 @@ const llvm::StringLiteral kChildTypeNames[] = {
 
 }
 
-ChildErrorTypes::ChildErrorTypes(SemanticState &owner)
-    : state(owner) {}
+ChildErrorTypes::ChildErrorTypes(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->builtinModuleTypes = &all.getBuiltinModuleTypes();
+}
 
 void ChildErrorTypes::declare() {
-  BuiltinModuleTypes types(this->state);
+  BuiltinModuleTypes &types = *this->builtinModuleTypes;
   if (types.declared("ExecTextError")) {
     return;
   }
@@ -33,11 +36,11 @@ const Type *ChildErrorTypes::errorOf(llvm::StringRef fn, bool text, bool shell) 
                                             : (shell ? "SpawnShell" : "Spawn");
   name += text ? "TextError" : "BytesError";
 
-  return BuiltinModuleTypes(this->state).named(name);
+  return this->builtinModuleTypes->named(name);
 }
 
 const Type *ChildErrorTypes::spawnResult(bool text) {
-  return BuiltinModuleTypes(this->state).named(text ? "SpawnTextResult" : "SpawnBytesResult");
+  return this->builtinModuleTypes->named(text ? "SpawnTextResult" : "SpawnBytesResult");
 }
 
 }

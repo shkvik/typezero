@@ -13,6 +13,7 @@
 #include "compiler/semantic/infer/late_classes/late_classes.h"
 #include "compiler/semantic/library/async/async_checker/async_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 
@@ -20,8 +21,21 @@ using llvm::cast;
 
 namespace tz {
 
-ReturnInferrer::ReturnInferrer(SemanticState &owner)
-    : state(owner) {}
+ReturnInferrer::ReturnInferrer(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->classLinks = &all.getClassLinks();
+  this->typeParams = &all.getTypeParams();
+  this->exprChecker = &all.getExprChecker();
+  this->lateClasses = &all.getLateClasses();
+  this->asyncChecker = &all.getAsyncChecker();
+  this->classChecker = &all.getClassChecker();
+  this->importBinder = &all.getImportBinder();
+  this->typeRelations = &all.getTypeRelations();
+  this->functionChecker = &all.getFunctionChecker();
+  this->generatorChecker = &all.getGeneratorChecker();
+  this->genericClassChecker = &all.getGenericClassChecker();
+}
 
 bool ReturnInferrer::returnsValue(const Stmt *stmt) {
   if (!stmt) {
@@ -78,7 +92,7 @@ const Type *ReturnInferrer::returnType(FuncSymbol *fn) {
   if (fn->hasReturnType()) {
     return fn->getKnownReturnType();
   }
-  if (LateClasses(this->state).isTemplate(fn)) {
+  if (this->lateClasses->isTemplate(fn)) {
     return Type::unknown();
   }
   ResultNotCalledEarly early = this->earlyCall(fn);
@@ -122,8 +136,7 @@ BodyState ReturnInferrer::enterBody(const FunctionDecl *fn) {
     this->state.getBlockPosition().forgetOtherCaseVars();
     Module *home = fn ? this->state.getModuleStates().findDeclModule(fn) : nullptr;
     if (home) {
-      ModuleDeclarer(this->state).useModule(home);
-      ImportBinder(this->state).bindImports();
+      this->importBinder->enterModule(home);
     }
     this->state.getGenericStore().forgetCheckingInstance();
     this->state.getDiagnostics().setCapture(nullptr);
@@ -156,20 +169,20 @@ const Type *ReturnInferrer::templateReturn(FuncSymbol *fn) {
   if (!ret) {
     return Type::error();
   }
-  const Type *instance = GenericClassChecker(this->state).instanceType(decl->cls(), ret);
+  const Type *instance = this->genericClassChecker->instanceType(decl->cls(), ret);
 
-  return TypeParams(this->state).substitute(instance, generic->typeParams, fn->typeParams);
+  return this->typeParams->substitute(instance, generic->typeParams, fn->typeParams);
 }
 
 void ReturnInferrer::inferReturnType(FuncSymbol *fn) {
   FunctionDecl *decl = fn->decl;
   bool fromTemplate = decl && decl->generic && decl->cls() && decl->cls()->generic() &&
-                      !LateClasses(this->state).hasClassExpr(decl->generic);
+                      !this->lateClasses->hasClassExpr(decl->generic);
   if (fromTemplate) {
     fn->setReturnType(this->templateReturn(fn));
     return;
   }
-  const Type *inherited = ClassLinks(this->state).inheritedReturnType(fn);
+  const Type *inherited = this->classLinks->inheritedReturnType(fn);
   if (inherited) {
     fn->setReturnType(inherited);
     return;
@@ -206,7 +219,7 @@ void ReturnInferrer::checkAndInfer(FunctionDecl *decl) {
   functions.rememberYieldCollector(&yields);
   fn->inferring = true;
   this->state.getReturnInference().enterInference(fn);
-  FunctionChecker(this->state).checkFunctionBody(decl);
+  this->functionChecker->checkFunctionBody(decl);
   this->state.getReturnInference().leaveInference();
   fn->inferring = false;
   functions.rememberReturnCollector(outerReturns);
@@ -215,15 +228,15 @@ void ReturnInferrer::checkAndInfer(FunctionDecl *decl) {
   bool fallsOff = !ReturnChecker::alwaysReturns(decl->body);
   const Type *type = nullptr;
   if (decl->isGenerator) {
-    type = GeneratorChecker(this->state).inferGeneratorType(fn, yields, returns, fallsOff, true);
+    type = this->generatorChecker->inferGeneratorType(fn, yields, returns, fallsOff, true);
   } else if (decl->isAsync) {
-    type = AsyncChecker(this->state).inferAsyncType(fn, returns, fallsOff, true);
+    type = this->asyncChecker->inferAsyncType(fn, returns, fallsOff, true);
   } else {
     type = this->unifyReturns(fn, returns, fallsOff, true);
   }
   fn->setReturnType(type ? type : Type::error());
   if (decl->isAsync && !decl->isGenerator) {
-    AsyncChecker(this->state).finishAsyncReturns(fn, returns);
+    this->asyncChecker->finishAsyncReturns(fn, returns);
     return;
   }
   this->convertReturns(decl, returns, yields);
@@ -244,7 +257,7 @@ void ReturnInferrer::convertReturns(const FunctionDecl *decl, llvm::ArrayRef<Ret
                      AsyncChecker::awaitedType(ret->value->type) == ret->value->type &&
                      !ret->value->type->isUndefined();
       if (typed && (!async || settled)) {
-        ret->value = TypeRelations(this->state).convert(ret->value, returned);
+        ret->value = this->typeRelations->convert(ret->value, returned);
       }
     }
   }
@@ -255,7 +268,7 @@ void ReturnInferrer::convertReturns(const FunctionDecl *decl, llvm::ArrayRef<Ret
       bool settled =
           typed && async && AsyncChecker::awaitedType(yield->value->type) == yield->value->type;
       if (typed && (!async || settled)) {
-        yield->value = TypeRelations(this->state).convert(yield->value, yielded);
+        yield->value = this->typeRelations->convert(yield->value, yielded);
       }
     }
   }
@@ -269,8 +282,7 @@ const Type *ReturnInferrer::trialReturn(FuncSymbol *fn) {
   functions.rememberReturnCollector(&returns);
   functions.rememberYieldCollector(&yields);
   functions.enterTrial();
-  this->state.getFlowState().replaceFlow(Flow());
-  FunctionChecker(this->state).checkFunctionBody(copy);
+  this->functionChecker->walkFunctionFromScratch(copy);
   functions.leaveTrial();
   functions.rememberReturnCollector(nullptr);
   functions.rememberYieldCollector(nullptr);
@@ -278,9 +290,9 @@ const Type *ReturnInferrer::trialReturn(FuncSymbol *fn) {
   bool fallsOff = !ReturnChecker::alwaysReturns(copy->body);
   const Type *found = nullptr;
   if (fn->decl->isGenerator) {
-    found = GeneratorChecker(this->state).inferGeneratorType(fn, yields, returns, fallsOff, false);
+    found = this->generatorChecker->inferGeneratorType(fn, yields, returns, fallsOff, false);
   } else if (fn->decl->isAsync) {
-    found = AsyncChecker(this->state).inferAsyncType(fn, returns, fallsOff, false);
+    found = this->asyncChecker->inferAsyncType(fn, returns, fallsOff, false);
   } else {
     found = this->unifyReturns(fn, returns, fallsOff, false);
   }
@@ -441,7 +453,7 @@ const Type *ReturnInferrer::unifyReturns(const FuncSymbol *fn, llvm::ArrayRef<Re
       type = found;
       continue;
     }
-    bool adapts = type != found && TypeRelations(this->state).literalAdapts(ret->value, type);
+    bool adapts = type != found && this->typeRelations->literalAdapts(ret->value, type);
     if (adapts) {
       continue;
     }
@@ -474,9 +486,9 @@ const Type *ReturnInferrer::instanceParam(FuncSymbol *fn, const Type *type) {
   }
   FunctionDecl *decl = fn->decl;
   FuncSymbol *generic = decl->generic->sym;
-  const Type *instance = GenericClassChecker(this->state).instanceValueType(decl->cls(), type);
+  const Type *instance = this->genericClassChecker->instanceValueType(decl->cls(), type);
 
-  return TypeParams(this->state).substituteValue(instance, generic->typeParams, fn->typeParams);
+  return this->typeParams->substituteValue(instance, generic->typeParams, fn->typeParams);
 }
 
 ReturnInferrer::ResultParamTypeKnown ReturnInferrer::defaultType(const Param &param,
@@ -523,7 +535,7 @@ void ReturnInferrer::resolveParams(FuncSymbol *fn) {
     FunctionDecl *copy = this->freshCopy(decl);
     this->state.getFunctionStack().enterFunction(copy);
     if (copy->takesThis()) {
-      ClassChecker::ResultNewThisSymbol declared = ClassChecker(this->state).declareThis(copy);
+      ClassChecker::ResultNewThisSymbol declared = this->classChecker->declareThis(copy);
       if (declared.isErr()) {
         this->state.getDiagnostics().error(copy->loc(), declared.error().message);
       }
@@ -535,13 +547,13 @@ void ReturnInferrer::resolveParams(FuncSymbol *fn) {
       Param &param = copy->params[i];
       const Type *type = decl->params[i].declaredType;
       if (!type) {
-        Expr *value = ExprChecker(this->state).checkExpr(param.defaultValue());
+        Expr *value = this->exprChecker->checkExpr(param.defaultValue());
         found[i] = value->type;
         type = value->type;
       }
-      Scopes(this->state).declareVar(param.name, param.loc, type, false);
+      this->scopes->declareVar(param.name, param.loc, type, false);
     }
-    Scopes(this->state).closeScope();
+    this->scopes->closeScope();
     this->state.getFunctionStack().leaveFunction();
     classContext.leaveClass();
     this->state.getDiagnostics().setMuted(muted);

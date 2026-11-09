@@ -2,12 +2,16 @@
 #include "compiler/semantic/declare/module_declarer/module_declarer.h"
 #include "compiler/semantic/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
 #include "compiler/semantic/library/result/result_types/result_types.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace tz {
 
-ImportBinder::ImportBinder(SemanticState &owner)
-    : state(owner) {}
+ImportBinder::ImportBinder(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->moduleDeclarer = &all.getModuleDeclarer();
+  this->builtinModuleChecker = &all.getBuiltinModuleChecker();
+}
 
 ImportBinder::ResultWholeImportOk ImportBinder::wholeImport(const ImportDecl &decl) {
   bool whole = !decl.whole.empty() && decl.from && decl.from->builtin;
@@ -88,7 +92,7 @@ void ImportBinder::importName(ModuleState &here, const ImportDecl &decl, const M
     return;
   }
   ModuleDeclarer::ResultExportTarget target =
-      ModuleDeclarer(this->state).findExport(decl.from, decl.path, name);
+      this->moduleDeclarer->findExport(decl.from, decl.path, name);
   if (target.isErr()) {
     this->state.getDiagnostics().error(name.loc, target.error().message);
     here.badImports.insert(name.as);
@@ -114,7 +118,7 @@ void ImportBinder::resolveImports(Module *module) {
       continue;
     }
     if (BuiltinModulePaths::isBuiltinModule(decl.path) && !decl.from) {
-      BuiltinModuleChecker(this->state).importBuiltinModule(module, decl);
+      this->builtinModuleChecker->importBuiltinModule(module, decl);
       continue;
     }
     ResultWholeImportOk whole = ImportBinder::wholeImport(decl);
@@ -172,6 +176,24 @@ void ImportBinder::bindImports() {
     if (value.var() && !own) {
       here.importedVars.insert(value.var());
     }
+  }
+}
+
+void ImportBinder::enterModule(Module *module) {
+  this->moduleDeclarer->useModule(module);
+  this->bindImports();
+}
+
+void ImportBinder::enterHomeModule(const FunctionDecl *fn) {
+  Module *home = this->state.getModuleStates().findDeclModule(fn);
+  if (home != nullptr) {
+    this->enterModule(home);
+  }
+}
+
+void ImportBinder::bindAllImports(const std::vector<Module *> &modules) {
+  for (Module *module : modules) {
+    this->enterModule(module);
   }
 }
 

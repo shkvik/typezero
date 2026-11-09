@@ -3,13 +3,20 @@
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/generics/arg_list_checker/arg_list_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace tz {
 
-ArgumentChecker::ArgumentChecker(SemanticState &owner)
-    : state(owner) {}
+ArgumentChecker::ArgumentChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->argListChecker = &all.getArgListChecker();
+}
 
 ArgumentChecker::ResultSpreadRestFits ArgumentChecker::spreadRest(const Expr *arg, const Type *to) {
   if (arg->type != to && !arg->type->isError() && !to->isError()) {
@@ -44,7 +51,7 @@ Expr *ArgumentChecker::checkArguments(CallExpr *call, llvm::ArrayRef<const Type 
                                       size_t minArgs, bool hasRest, llvm::SMLoc loc,
                                       const std::vector<bool> *checked) {
   if (!checked) {
-    ArgListChecker(this->state).expandListSpreads(call->args, call->spread);
+    this->argListChecker->expandListSpreads(call->args, call->spread);
   }
   size_t fixed = params.size() - (hasRest ? 1 : 0);
   unsigned least = static_cast<unsigned>(minArgs);
@@ -52,7 +59,7 @@ Expr *ArgumentChecker::checkArguments(CallExpr *call, llvm::ArrayRef<const Type 
       hasRest && (params.back()->isListParam() || ArgListChecker::spreadsLists(params.back()));
   if (listParam) {
     for (size_t i = 0; i < call->args.size() && i < fixed; ++i) {
-      if (call->spreads(i) && CallChecker(this->state).rejectSpread(call)) {
+      if (call->spreads(i) && this->callChecker->rejectSpread(call)) {
         return call;
       }
     }
@@ -63,16 +70,16 @@ Expr *ArgumentChecker::checkArguments(CallExpr *call, llvm::ArrayRef<const Type 
     }
     for (size_t i = 0; i < fixed; ++i) {
       bool given = checked && i < checked->size() && (*checked)[i];
-      call->args[i] = given ? TypeRelations(this->state).coerce(call->args[i], params[i])
+      call->args[i] = given ? this->typeRelations->coerce(call->args[i], params[i])
                             : this->checkArg(call->args[i], params[i]);
     }
-    ArgListChecker(this->state).checkListArguments(call, fixed, params.back(), loc, checked);
+    this->argListChecker->checkListArguments(call, fixed, params.back(), loc, checked);
 
     return call;
   }
   size_t spreadLimit = hasRest ? fixed : call->args.size();
   for (size_t i = 0; i < call->args.size() && i < spreadLimit; ++i) {
-    if (call->spreads(i) && CallChecker(this->state).rejectSpread(call)) {
+    if (call->spreads(i) && this->callChecker->rejectSpread(call)) {
       return call;
     }
   }
@@ -89,7 +96,7 @@ Expr *ArgumentChecker::checkArguments(CallExpr *call, llvm::ArrayRef<const Type 
   if (listRest && call->args.size() == fixed + 1 && call->spreads(fixed)) {
     Expr *&arg = call->args[fixed];
     if (!isChecked(fixed)) {
-      arg = ExprChecker(this->state).checkExpr(arg, listRest);
+      arg = this->exprChecker->checkExpr(arg, listRest);
     }
     ResultSpreadRestFits fits = ArgumentChecker::spreadRest(arg, listRest);
     if (fits.isErr()) {
@@ -110,7 +117,7 @@ Expr *ArgumentChecker::checkArguments(CallExpr *call, llvm::ArrayRef<const Type 
           element = listRest->fields()[i - fixed].type;
         }
         if (!call->spreads(i)) {
-          arg = TypeRelations(this->state).coerce(arg, element);
+          arg = this->typeRelations->coerce(arg, element);
         } else {
           ResultSpreadRestFits fits = ArgumentChecker::spreadRest(arg, restType);
           if (fits.isErr()) {
@@ -139,17 +146,17 @@ Expr *ArgumentChecker::checkArguments(CallExpr *call, llvm::ArrayRef<const Type 
     if (call->args[i] == checkedRest) {
       continue;
     }
-    call->args[i] = isChecked(i) ? TypeRelations(this->state).coerce(call->args[i], params[i])
+    call->args[i] = isChecked(i) ? this->typeRelations->coerce(call->args[i], params[i])
                                  : this->checkArg(call->args[i], params[i]);
   }
-  FlowChecker(this->state).calledFunction();
+  this->flowChecker->calledFunction();
 
   return call;
 }
 
 void ArgumentChecker::checkArgsLoosely(CallExpr *call) {
   for (Expr *&arg : call->args) {
-    arg = ExprChecker(this->state).checkExpr(arg);
+    arg = this->exprChecker->checkExpr(arg);
   }
 }
 
@@ -181,18 +188,18 @@ ArgumentChecker::ResultArityMatches ArgumentChecker::checkArity(CallExpr *call, 
 
 Expr *ArgumentChecker::checkArg(Expr *arg, const Type *to) {
   const Type *expected = to->isError() ? nullptr : to;
-  Expr *checked = ExprChecker(this->state).checkExpr(arg, expected);
+  Expr *checked = this->exprChecker->checkExpr(arg, expected);
 
-  return TypeRelations(this->state).coerce(checked, to);
+  return this->typeRelations->coerce(checked, to);
 }
 
 Expr *ArgumentChecker::checkAnyNumber(Expr *arg) {
-  arg = ExprChecker(this->state).checkExpr(arg);
+  arg = this->exprChecker->checkExpr(arg);
   if (arg->type->isInteger()) {
-    return TypeRelations(this->state).convert(arg, Type::doubleTy());
+    return this->typeRelations->convert(arg, Type::doubleTy());
   }
 
-  return TypeRelations(this->state).coerce(arg, Type::doubleTy());
+  return this->typeRelations->coerce(arg, Type::doubleTy());
 }
 
 }

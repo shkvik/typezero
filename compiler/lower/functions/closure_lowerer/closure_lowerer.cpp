@@ -23,6 +23,9 @@ using llvm::isa;
 
 namespace tz {
 
+ClosureLowerer::ClosureLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 std::u16string ClosureLowerer::utf16(llvm::StringRef text) {
   llvm::SmallVector<llvm::UTF16, 32> units;
   llvm::convertUTF8ToUTF16String(text, units);
@@ -54,9 +57,6 @@ FunctionDecl *ClosureLowerer::knownFunction(const Expr *expr) {
 
   return nullptr;
 }
-
-ClosureLowerer::ClosureLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 const Type *ClosureLowerer::functionTypeOf(const FuncSymbol *fn) {
   return Type::function(fn->params, fn->minArgs, fn->hasRest, fn->getKnownReturnType(),

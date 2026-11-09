@@ -6,9 +6,21 @@
 
 namespace tz {
 
+class SemanticParts;
+class Prelude;
+class ByteProofs;
+class ExprChecker;
+class IndexProofs;
+class LiteralTypes;
+class MemberChecker;
+class TypeRelations;
+class ArgumentChecker;
+class IteratorMethods;
+class GeneratorChecker;
+
 class BytesNewChecker {
 public:
-  explicit BytesNewChecker(SemanticState &owner);
+  BytesNewChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkBytesNew(NewExpr *expr, const Type *type);
   Expr *checkTextDecoderParse(CallExpr *call, MemberExpr *member);
@@ -25,6 +37,16 @@ private:
   static bool mayBeFatal(const Expr *options);
 
   SemanticState &state;
+  Prelude *prelude = nullptr;
+  ByteProofs *byteProofs = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  LiteralTypes *literalTypes = nullptr;
+  MemberChecker *memberChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  IteratorMethods *iteratorMethods = nullptr;
+  GeneratorChecker *generatorChecker = nullptr;
 };
 
 }

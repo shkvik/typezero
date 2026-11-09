@@ -6,13 +6,23 @@
 
 namespace tz {
 
+class SemanticParts;
+class ExprChecker;
+class FlowChecker;
+class TypeResolver;
+class StaticChecker;
+class TypeRelations;
+class ReflectChecker;
+class ReturnInferrer;
+class MethodCallChecker;
+
 class ClassValueChecker {
 public:
   using ResultClassMemberRead = Result<Expr *, ClassValueCheckerCheckClassRefMemberError>;
   using ResultConstructorArgs = Result<const Type *, ClassValueCheckerConstructorArgsError>;
   using ResultConstructorType = Result<const Type *, ClassValueCheckerResolveConstructorTypeError>;
 
-  explicit ClassValueChecker(SemanticState &owner);
+  ClassValueChecker(SemanticState &owner, SemanticParts &all);
 
   ResultConstructorArgs constructorArgs();
   const Type *classValueType(ClassDecl *cls);
@@ -39,6 +49,14 @@ private:
   static ResultNoTypeArguments runtimeTypeArgs(const NewExpr *expr);
 
   SemanticState &state;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  StaticChecker *staticChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ReflectChecker *reflectChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  MethodCallChecker *methodCallChecker = nullptr;
 };
 
 }

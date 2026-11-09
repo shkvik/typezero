@@ -6,6 +6,15 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class DictChecker;
+class ExprChecker;
+class FlowChecker;
+class DictNewChecker;
+class ArgumentChecker;
+class CallbackChecker;
+
 class DictMethods {
 public:
   using ResultGroupByCallTyped = Result<Expr *, DictMethodsCheckGroupByError>;
@@ -14,7 +23,7 @@ public:
   using ResultFromEntriesTyped = Result<Expr *, DictMethodsCheckFromEntriesError>;
   using ResultDictObjectCalled = Result<Expr *, DictMethodsCheckDictObjectCallError>;
 
-  explicit DictMethods(SemanticState &owner);
+  DictMethods(SemanticState &owner, SemanticParts &all);
 
   ResultGroupByCallTyped checkGroupBy(CallExpr *call, bool map);
   ResultMapFunctionTyped checkMapStatic(CallExpr *call, MemberExpr *member);
@@ -24,6 +33,13 @@ public:
 
 private:
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  DictChecker *dictChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  DictNewChecker *dictNewChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  CallbackChecker *callbackChecker = nullptr;
 };
 
 }

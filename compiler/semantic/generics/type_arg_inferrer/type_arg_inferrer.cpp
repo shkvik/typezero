@@ -14,6 +14,7 @@
 #include "compiler/semantic/infer/late_classes/late_classes.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/result/result_types/result_types.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
@@ -25,6 +26,24 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+TypeArgInferrer::TypeArgInferrer(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->typeParams = &all.getTypeParams();
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->lateClasses = &all.getLateClasses();
+  this->resultTypes = &all.getResultTypes();
+  this->typeResolver = &all.getTypeResolver();
+  this->utilityTypes = &all.getUtilityTypes();
+  this->closureChecker = &all.getClosureChecker();
+  this->genericChecker = &all.getGenericChecker();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->iterableChecker = &all.getIterableChecker();
+  this->genericInstantiator = &all.getGenericInstantiator();
+  this->functionValueChecker = &all.getFunctionValueChecker();
+}
 
 bool TypeArgInferrer::grows(const Type *type, llvm::ArrayRef<const Type *> params, bool inside) {
   switch (type->kind()) {
@@ -83,11 +102,8 @@ bool TypeArgInferrer::isContextSensitive(const Expr *arg) {
   return false;
 }
 
-TypeArgInferrer::TypeArgInferrer(SemanticState &owner)
-    : state(owner) {}
-
 void TypeArgInferrer::precheckFields(ObjectLitExpr *lit, const Type *pattern,
-                                     llvm::ArrayRef<const Type *> typeParams,
+                                     llvm::ArrayRef<const Type *> genericTypeParams,
                                      Inference &inference) {
   const Type *target = pattern->nonOptional();
   if (!target->isObject() || target->isClass() || target->isTuple() || lit->hasSpread() ||
@@ -98,12 +114,12 @@ void TypeArgInferrer::precheckFields(ObjectLitExpr *lit, const Type *pattern,
   }
   for (ObjectLitExpr::Property &prop : lit->props) {
     const Field *field = target->field(prop.name);
-    if (!field || !GenericCheckHelpers::mentionsAnyOf(field->type, typeParams) ||
+    if (!field || !GenericCheckHelpers::mentionsAnyOf(field->type, genericTypeParams) ||
         TypeArgInferrer::isContextSensitive(prop.value) || isa<ObjectLitExpr>(prop.value) ||
         isa<ArrayLitExpr>(prop.value) || GenericChecker::literalShape(prop.value)) {
       continue;
     }
-    prop.value = ExprChecker(this->state).checkExpr(prop.value);
+    prop.value = this->exprChecker->checkExpr(prop.value);
     this->state.getExpressionMarks().markPrechecked(prop.value);
     inference.from(field->type, prop.value->type);
   }
@@ -160,7 +176,7 @@ TypeArgInferrer::ResultConstraintMet
 TypeArgInferrer::constraintMet(const FuncSymbol *generic, std::vector<const Type *> &bound,
                                size_t k) {
   llvm::ArrayRef<const Type *> params = generic->typeParams;
-  if (!TypeParams(this->state).satisfies(bound[k], params[k], params, bound)) {
+  if (!this->typeParams->satisfies(bound[k], params[k], params, bound)) {
     llvm::ArrayRef<TypeParamDecl> decls = generic->decl->typeParams;
     std::string constraint =
         GenericCheckHelpers::constraintSpelling(params[k], k < decls.size() ? &decls[k] : nullptr);
@@ -248,8 +264,7 @@ bool TypeArgInferrer::finishTypeArgs(FuncSymbol *generic, std::vector<const Type
   bool inferred = true;
   for (size_t k = 0; k < params.size(); ++k) {
     if (!bound[k] && k < generic->typeDefaults.size() && generic->typeDefaults[k]) {
-      const Type *fallback =
-          TypeParams(this->state).substitute(generic->typeDefaults[k], params, bound);
+      const Type *fallback = this->typeParams->substitute(generic->typeDefaults[k], params, bound);
       bool open = false;
       for (size_t j = 0; j < params.size(); ++j) {
         open |= !bound[j] && GenericCheckHelpers::mentionsAnyOf(fallback, params[j]);
@@ -275,8 +290,8 @@ bool TypeArgInferrer::finishTypeArgs(FuncSymbol *generic, std::vector<const Type
       continue;
     }
     if (const Type *element = params[k]->iterated()) {
-      const Type *wanted = TypeParams(this->state).substitute(element, params, bound);
-      const Type *elements = IterableChecker(this->state).elementTypeOf(bound[k]);
+      const Type *wanted = this->typeParams->substitute(element, params, bound);
+      const Type *elements = this->iterableChecker->elementTypeOf(bound[k]);
       ResultIterableMatch matched =
           TypeArgInferrer::iterableFits(generic, bound[k], elements, wanted);
       if (matched.isErr()) {
@@ -308,13 +323,11 @@ Expr *TypeArgInferrer::checkGenericCall(CallExpr *call, FuncSymbol *generic, llv
   bool concrete =
       llvm::none_of(bound, [](const Type *t) { return TypeQueries::mentionsParam(t); }) &&
       (!cls || generic->decl->isStatic() || cls->isEmitted());
-  bool copiesReturn = LateClasses(this->state).isTemplate(generic) && !generic->hasReturnType();
+  bool copiesReturn = this->lateClasses->isTemplate(generic) && !generic->hasReturnType();
   if (concrete && !this->state.getFunctionStack().isInsideTrial() && !generic->inferring &&
       (generic->hasReturnType() || copiesReturn)) {
-    if (FuncSymbol *instance =
-            GenericInstantiator(this->state)
-                .instantiate(generic, bound, loc,
-                             GenericInstantiator(this->state).exactClassArgs(call, generic))) {
+    if (FuncSymbol *instance = this->genericInstantiator->instantiate(
+            generic, bound, loc, this->genericInstantiator->exactClassArgs(call, generic))) {
       call->target = FunctionCall{.func = instance};
       if (copiesReturn) {
         call->type = instance->hasReturnType() ? instance->getKnownReturnType() : Type::error();
@@ -330,23 +343,22 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
                                       std::vector<const Type *> &bound) {
   call->type = Type::error();
   unsigned errorsBefore = this->state.getDiagnostics().errorsSeen();
-  ReturnInferrer(this->state).resolveParams(generic);
+  this->returnInferrer->resolveParams(generic);
   const Type *ret = generic->getReturnType();
-  if (GenericInstantiator(this->state).returnsOwnClass(generic, ret)) {
+  if (this->genericInstantiator->returnsOwnClass(generic, ret)) {
     ret = nullptr;
   }
-  llvm::ArrayRef<const Type *> typeParams = generic->typeParams;
+  llvm::ArrayRef<const Type *> genericTypeParams = generic->typeParams;
   size_t fixed = generic->params.size() - (generic->hasRest ? 1 : 0);
   for (size_t i = 0; i < call->args.size() && i < (generic->hasRest ? fixed : call->args.size());
        ++i) {
-    if (call->spreads(i) && CallChecker(this->state).rejectSpread(call)) {
+    if (call->spreads(i) && this->callChecker->rejectSpread(call)) {
       return false;
     }
   }
-  ArgumentChecker::ResultArityMatches arity =
-      ArgumentChecker(this->state)
-          .checkArity(call, static_cast<unsigned>(generic->minArgs),
-                      generic->hasRest ? ~0u : static_cast<unsigned>(generic->params.size()));
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(
+      call, static_cast<unsigned>(generic->minArgs),
+      generic->hasRest ? ~0u : static_cast<unsigned>(generic->params.size()));
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return false;
@@ -364,7 +376,7 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
                              ? generic->params.back()
                              : nullptr;
 
-  bound.assign(typeParams.size(), nullptr);
+  bound.assign(genericTypeParams.size(), nullptr);
   std::vector<bool> checked(call->args.size(), false);
   std::vector<size_t> literals;
   bool inferred = true;
@@ -374,15 +386,14 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
       this->state.getDiagnostics().error(loc, counted.error().message);
       inferred = false;
     }
-    for (size_t k = 0; k < typeArgs.size() && k < typeParams.size(); ++k) {
-      bound[k] = TypeResolver(this->state).resolveType(typeArgs[k], true);
+    for (size_t k = 0; k < typeArgs.size() && k < genericTypeParams.size(); ++k) {
+      bound[k] = this->typeResolver->resolveType(typeArgs[k], true);
     }
   } else {
-    Inference inference(typeParams, this->state.getAliasStore(), [this](const Type *t) {
-      return IterableChecker(this->state).elementTypeOf(t);
-    });
+    Inference inference(genericTypeParams, this->state.getAliasStore(),
+                        [this](const Type *t) { return this->iterableChecker->elementTypeOf(t); });
     inference.setAsyncOf(
-        [this](const Type *t) { return IterableChecker(this->state).asyncIterableType(t); });
+        [this](const Type *t) { return this->iterableChecker->asyncIterableType(t); });
     auto settle = [&](size_t k) {
       if (bound[k]) {
         return;
@@ -398,7 +409,7 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
             continue;
           }
           ResultCandidateJoin joined =
-              TypeArgInferrer::candidatesJoin(generic, typeParams[k], type, c);
+              TypeArgInferrer::candidatesJoin(generic, genericTypeParams[k], type, c);
           if (joined.isErr() && strong && list == &inference.getWeakCandidates(k)) {
             continue;
           }
@@ -411,7 +422,7 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
           type = joined.value();
         }
       }
-      const Type *constraint = typeParams[k]->constraint();
+      const Type *constraint = genericTypeParams[k]->constraint();
       if (constraint && constraint->isUnion()) {
         constraint = LiteralTypes::numberMemberOf(constraint, false);
       }
@@ -431,8 +442,7 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
     std::vector<size_t> sensitive;
     auto makesResults = [&](const Expr *arg) {
       auto *name = dyn_cast<NameExpr>(arg);
-      llvm::StringRef which =
-          name ? ResultTypes(this->state).resultName(name->name) : llvm::StringRef();
+      llvm::StringRef which = name ? this->resultTypes->resultName(name->name) : llvm::StringRef();
 
       return which == "inferred" || which == "err";
     };
@@ -440,23 +450,22 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
       Expr *&arg = call->args[i];
       const Type *pattern = paramOf(i);
       if (listRest && i >= fixed) {
-        arg = ExprChecker(this->state).checkExpr(arg);
+        arg = this->exprChecker->checkExpr(arg);
         checked[i] = true;
         continue;
       }
-      if (!GenericCheckHelpers::mentionsAnyOf(pattern, typeParams)) {
-        arg = ExprChecker(this->state).checkExpr(arg, pattern);
+      if (!GenericCheckHelpers::mentionsAnyOf(pattern, genericTypeParams)) {
+        arg = this->exprChecker->checkExpr(arg, pattern);
         checked[i] = true;
       } else if (auto *text = dyn_cast<StringLitExpr>(arg);
-                 text && llvm::is_contained(typeParams, pattern) &&
-                 UtilityTypes(this->state).wantsLiteral(pattern)) {
+                 text && llvm::is_contained(genericTypeParams, pattern) &&
+                 this->utilityTypes->wantsLiteral(pattern)) {
         const Type *literal = Type::stringLiteral(text->value);
-        arg = ExprChecker(this->state).checkExpr(arg, literal);
+        arg = this->exprChecker->checkExpr(arg, literal);
         checked[i] = true;
         inference.from(pattern, literal);
       } else if (TypeArgInferrer::isContextSensitive(arg) || makesResults(arg) ||
-                 (isa<NameExpr>(arg) &&
-                  GenericChecker(this->state).genericNamed(cast<NameExpr>(arg)) &&
+                 (isa<NameExpr>(arg) && this->genericChecker->genericNamed(cast<NameExpr>(arg)) &&
                   cast<NameExpr>(arg)->typeArgs.empty())) {
         sensitive.push_back(i);
       } else if (const Type *shape = GenericChecker::literalShape(arg)) {
@@ -468,10 +477,10 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
       } else if (isa<ArrayLitExpr>(arg) || isa<ObjectLitExpr>(arg)) {
         sensitive.push_back(i);
         if (auto *lit = dyn_cast<ObjectLitExpr>(arg)) {
-          this->precheckFields(lit, pattern, typeParams, inference);
+          this->precheckFields(lit, pattern, genericTypeParams, inference);
         }
       } else {
-        arg = ExprChecker(this->state).checkExpr(arg);
+        arg = this->exprChecker->checkExpr(arg);
         checked[i] = true;
         bool intLiteral = arg->type->isInteger() && TypeRelations::isIntLiteralTree(arg);
         inference.markArgument(false, intLiteral);
@@ -491,24 +500,24 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
         inference.from(listRest, list);
       }
     }
-    for (size_t k = 0; k < typeParams.size(); ++k) {
+    for (size_t k = 0; k < genericTypeParams.size(); ++k) {
       if (!inference.getCandidates(k).empty()) {
         settle(k);
       }
     }
     if (inference.hasDeferred()) {
       inference.retry(bound);
-      for (size_t k = 0; k < typeParams.size(); ++k) {
+      for (size_t k = 0; k < genericTypeParams.size(); ++k) {
         if (!inference.getCandidates(k).empty()) {
           settle(k);
         }
       }
     }
     if (expected && llvm::is_contained(bound, nullptr) && ret &&
-        GenericCheckHelpers::mentionsAnyOf(ret, typeParams)) {
-      Inference fromExpected(typeParams, this->state.getAliasStore(), nullptr);
+        GenericCheckHelpers::mentionsAnyOf(ret, genericTypeParams)) {
+      Inference fromExpected(genericTypeParams, this->state.getAliasStore(), nullptr);
       fromExpected.from(ret, expected);
-      for (size_t k = 0; k < typeParams.size(); ++k) {
+      for (size_t k = 0; k < genericTypeParams.size(); ++k) {
         if (bound[k] || fromExpected.getCandidates(k).empty()) {
           continue;
         }
@@ -519,35 +528,36 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
         bound[k] = type;
       }
     }
-    for (size_t k = 0; k < typeParams.size(); ++k) {
+    for (size_t k = 0; k < genericTypeParams.size(); ++k) {
       settle(k);
     }
     for (size_t i : sensitive) {
       Expr *&arg = call->args[i];
       const Type *pattern = paramOf(i);
-      const Type *partial = TypeParams(this->state).substitute(pattern, typeParams, bound);
+      const Type *partial = this->typeParams->substitute(pattern, genericTypeParams, bound);
       const Type *fn = partial->nonOptional();
       if (fn->isFunction()) {
         Signature sig;
         for (const Type *p : fn->params()) {
-          sig.params.push_back(GenericCheckHelpers::mentionsAnyOf(p, typeParams) ? Type::error()
-                                                                                 : p);
+          sig.params.push_back(
+              GenericCheckHelpers::mentionsAnyOf(p, genericTypeParams) ? Type::error() : p);
         }
         sig.minArgs = fn->minArgs();
-        sig.ret = GenericCheckHelpers::mentionsAnyOf(fn->ret(), typeParams) ? nullptr : fn->ret();
+        sig.ret =
+            GenericCheckHelpers::mentionsAnyOf(fn->ret(), genericTypeParams) ? nullptr : fn->ret();
         sig.voidResult = fn->ret()->isVoid();
         auto *name = dyn_cast<NameExpr>(arg);
         auto *fe = dyn_cast<FunctionExpr>(arg);
         for (size_t p = 0;
-             p < fn->params().size() && !(name && GenericChecker(this->state).genericNamed(name));
-             ++p) {
+             p < fn->params().size() && !(name && this->genericChecker->genericNamed(name)); ++p) {
           if (fe && p < fe->fn->params.size() && fe->fn->params[p].type) {
             continue;
           }
-          for (size_t k = 0; k < typeParams.size(); ++k) {
-            bool mentioned = GenericCheckHelpers::mentionsAnyOf(fn->params()[p], typeParams[k]);
-            ResultCallbackParam known =
-                TypeArgInferrer::callbackParam(generic, typeParams[k], bound[k], mentioned, fe, p);
+          for (size_t k = 0; k < genericTypeParams.size(); ++k) {
+            bool mentioned =
+                GenericCheckHelpers::mentionsAnyOf(fn->params()[p], genericTypeParams[k]);
+            ResultCallbackParam known = TypeArgInferrer::callbackParam(
+                generic, genericTypeParams[k], bound[k], mentioned, fe, p);
             if (known.isErr()) {
               this->state.getDiagnostics().error(arg->loc(), known.error().message);
               bound[k] = Type::error();
@@ -556,42 +566,38 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
           }
         }
         if (fe) {
-          arg = ClosureChecker(this->state).checkFunctionExpr(fe, &sig);
-        } else if (FuncSymbol *other =
-                       name ? GenericChecker(this->state).genericNamed(name) : nullptr) {
-          arg = GenericInstantiator(this->state).checkGenericValue(name, other, &sig);
-        } else if (FunctionExpr *wrapper =
-                       FunctionValueChecker(this->state)
-                           .builtinFunctionValue(arg, sig, unsigned(sig.params.size()), {})) {
-          arg = ClosureChecker(this->state).checkFunctionExpr(wrapper, &sig);
+          arg = this->closureChecker->checkFunctionExpr(fe, &sig);
+        } else if (FuncSymbol *other = name ? this->genericChecker->genericNamed(name) : nullptr) {
+          arg = this->genericInstantiator->checkGenericValue(name, other, &sig);
+        } else if (FunctionExpr *wrapper = this->functionValueChecker->builtinFunctionValue(
+                       arg, sig, unsigned(sig.params.size()), {})) {
+          arg = this->closureChecker->checkFunctionExpr(wrapper, &sig);
         } else {
-          arg = ExprChecker(this->state).checkExpr(arg);
+          arg = this->exprChecker->checkExpr(arg);
         }
       } else {
         bool defaulted = false;
-        for (size_t k = 0;
-             k < typeParams.size() && GenericCheckHelpers::mentionsAnyOf(partial, typeParams);
+        for (size_t k = 0; k < genericTypeParams.size() &&
+                           GenericCheckHelpers::mentionsAnyOf(partial, genericTypeParams);
              ++k) {
           if (!bound[k] && k < generic->typeDefaults.size() && generic->typeDefaults[k] &&
-              !GenericCheckHelpers::mentionsAnyOf(generic->typeDefaults[k], typeParams)) {
+              !GenericCheckHelpers::mentionsAnyOf(generic->typeDefaults[k], genericTypeParams)) {
             bound[k] = generic->typeDefaults[k];
             defaulted = true;
           }
         }
         if (defaulted) {
-          partial = TypeParams(this->state).substitute(pattern, typeParams, bound);
+          partial = this->typeParams->substitute(pattern, genericTypeParams, bound);
         }
-        arg =
-            ExprChecker(this->state)
-                .checkExpr(arg, GenericCheckHelpers::mentionsAnyOf(partial, typeParams) ? nullptr
-                                                                                        : partial);
+        arg = this->exprChecker->checkExpr(
+            arg,
+            GenericCheckHelpers::mentionsAnyOf(partial, genericTypeParams) ? nullptr : partial);
       }
       checked[i] = true;
-      Inference more(typeParams, this->state.getAliasStore(), [this](const Type *t) {
-        return IterableChecker(this->state).elementTypeOf(t);
-      });
+      Inference more(genericTypeParams, this->state.getAliasStore(),
+                     [this](const Type *t) { return this->iterableChecker->elementTypeOf(t); });
       more.from(pattern, arg->type);
-      for (size_t k = 0; k < typeParams.size(); ++k) {
+      for (size_t k = 0; k < genericTypeParams.size(); ++k) {
         if (!bound[k]) {
           inference.adoptCandidates(k, more);
           settle(k);
@@ -606,8 +612,9 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
   }
   argErrors &= this->state.getDiagnostics().errorsSeen() > errorsBefore;
   inferred = this->finishTypeArgs(generic, bound, loc, true, argErrors) && inferred;
-  for (size_t k = 0; k < typeParams.size() && inferred; ++k) {
-    ResultArgNotGrowing growing = TypeArgInferrer::notGrowing(generic, bound[k], typeParams[k]);
+  for (size_t k = 0; k < genericTypeParams.size() && inferred; ++k) {
+    ResultArgNotGrowing growing =
+        TypeArgInferrer::notGrowing(generic, bound[k], genericTypeParams[k]);
     if (growing.isErr()) {
       this->state.getDiagnostics().error(loc, growing.error().message);
       inferred = false;
@@ -616,7 +623,7 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
   if (!inferred) {
     for (size_t i = 0; i < call->args.size(); ++i) {
       if (!checked[i]) {
-        call->args[i] = ExprChecker(this->state).checkExpr(call->args[i]);
+        call->args[i] = this->exprChecker->checkExpr(call->args[i]);
       }
     }
     return false;
@@ -625,16 +632,14 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
   this->state.getGenericStore().enterInstanceLoc(loc);
   std::vector<const Type *> params;
   for (const Type *p : generic->params) {
-    params.push_back(TypeParams(this->state).substituteValue(p, typeParams, bound));
+    params.push_back(this->typeParams->substituteValue(p, genericTypeParams, bound));
   }
   for (size_t i : literals) {
-    call->args[i] =
-        ExprChecker(this->state)
-            .checkExpr(call->args[i],
-                       TypeParams(this->state).substituteValue(paramOf(i), typeParams, bound));
+    call->args[i] = this->exprChecker->checkExpr(
+        call->args[i], this->typeParams->substituteValue(paramOf(i), genericTypeParams, bound));
     checked[i] = true;
   }
-  call->type = ret ? TypeParams(this->state).substitute(ret, typeParams, bound) : Type::error();
+  call->type = ret ? this->typeParams->substitute(ret, genericTypeParams, bound) : Type::error();
   this->state.getGenericStore().leaveInstanceLoc();
   size_t minArgs = generic->minArgs;
   bool hasRest = generic->hasRest;
@@ -642,21 +647,20 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
   if (ArgumentLists::flattenArguments(params, minArgs, hasRest, flat)) {
     params = std::move(flat);
   }
-  ArgumentChecker(this->state)
-      .checkArguments(call, params, minArgs, hasRest, loc, typeArgs.empty() ? &checked : nullptr);
+  this->argumentChecker->checkArguments(call, params, minArgs, hasRest, loc,
+                                        typeArgs.empty() ? &checked : nullptr);
 
   return ret != nullptr;
 }
 
 bool TypeArgInferrer::inferFromArguments(FuncSymbol *generic, llvm::ArrayRef<Expr *> args,
                                          std::vector<const Type *> &bound) {
-  ReturnInferrer(this->state).resolveParams(generic);
-  llvm::ArrayRef<const Type *> typeParams = generic->typeParams;
-  Inference inference(typeParams, this->state.getAliasStore(), [this](const Type *t) {
-    return IterableChecker(this->state).elementTypeOf(t);
-  });
+  this->returnInferrer->resolveParams(generic);
+  llvm::ArrayRef<const Type *> genericTypeParams = generic->typeParams;
+  Inference inference(genericTypeParams, this->state.getAliasStore(),
+                      [this](const Type *t) { return this->iterableChecker->elementTypeOf(t); });
   inference.setAsyncOf(
-      [this](const Type *t) { return IterableChecker(this->state).asyncIterableType(t); });
+      [this](const Type *t) { return this->iterableChecker->asyncIterableType(t); });
   size_t fixed = generic->params.size() - (generic->hasRest ? 1 : 0);
   for (size_t i = 0; i < args.size(); ++i) {
     const Type *pattern = nullptr;
@@ -669,8 +673,8 @@ bool TypeArgInferrer::inferFromArguments(FuncSymbol *generic, llvm::ArrayRef<Exp
       inference.from(pattern, args[i]->type);
     }
   }
-  bound.assign(typeParams.size(), nullptr);
-  for (size_t k = 0; k < typeParams.size(); ++k) {
+  bound.assign(genericTypeParams.size(), nullptr);
+  for (size_t k = 0; k < genericTypeParams.size(); ++k) {
     const Type *type = nullptr;
     for (const Type *c : inference.getCandidates(k)) {
       type = type ? TypeRelations::unify(type, c) : c;
@@ -685,12 +689,12 @@ bool TypeArgInferrer::inferFromArguments(FuncSymbol *generic, llvm::ArrayRef<Exp
     }
     bound[k] = type;
   }
-  for (size_t k = 0; k < typeParams.size(); ++k) {
+  for (size_t k = 0; k < genericTypeParams.size(); ++k) {
     if (!bound[k] && k < generic->typeDefaults.size() && generic->typeDefaults[k]) {
-      bound[k] = TypeParams(this->state).substitute(generic->typeDefaults[k], typeParams, bound);
+      bound[k] = this->typeParams->substitute(generic->typeDefaults[k], genericTypeParams, bound);
     }
-    if (!bound[k] || GenericCheckHelpers::mentionsAnyOf(bound[k], typeParams) ||
-        !TypeParams(this->state).satisfies(bound[k], typeParams[k], typeParams, bound)) {
+    if (!bound[k] || GenericCheckHelpers::mentionsAnyOf(bound[k], genericTypeParams) ||
+        !this->typeParams->satisfies(bound[k], genericTypeParams[k], genericTypeParams, bound)) {
       return false;
     }
   }

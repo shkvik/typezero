@@ -6,13 +6,19 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ExprChecker;
+class TypeRelations;
+class ArgumentChecker;
+
 class TupleChecker {
 public:
   using ResultTupleMember = Result<Expr *, TupleCheckerCheckTupleMemberError>;
   using ResultTupleMethod = Result<Expr *, TupleCheckerCheckTupleMethodError>;
   using ResultTupleFilled = Result<Expr *, TupleCheckerCheckTupleLitError>;
 
-  explicit TupleChecker(SemanticState &owner);
+  TupleChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *arrayCopy(Expr *tuple);
   static const Type *tupleElement(const Type *tuple);
@@ -26,6 +32,10 @@ private:
   ResultTupleJoined checkTupleJoin(CallExpr *call, MemberExpr *member);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

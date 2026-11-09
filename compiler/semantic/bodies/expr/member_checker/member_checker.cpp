@@ -25,6 +25,7 @@
 #include "compiler/semantic/library/regex/regex_checker/regex_checker.h"
 #include "compiler/semantic/library/result/result_checker/result_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/union_checker/union_checker.h"
 #include "compiler/semantic/types/unknown_checker/unknown_checker.h"
@@ -38,20 +39,51 @@ using llvm::isa;
 
 namespace tz {
 
-MemberChecker::MemberChecker(SemanticState &owner)
-    : state(owner) {}
+MemberChecker::MemberChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->callChecker = &all.getCallChecker();
+  this->dateChecker = &all.getDateChecker();
+  this->dictChecker = &all.getDictChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->indexProofs = &all.getIndexProofs();
+  this->intlChecker = &all.getIntlChecker();
+  this->jsonChecker = &all.getJsonChecker();
+  this->bytesChecker = &all.getBytesChecker();
+  this->matchChecker = &all.getMatchChecker();
+  this->regexChecker = &all.getRegexChecker();
+  this->tupleChecker = &all.getTupleChecker();
+  this->typeDeclarer = &all.getTypeDeclarer();
+  this->unionChecker = &all.getUnionChecker();
+  this->utilityTypes = &all.getUtilityTypes();
+  this->cryptoChecker = &all.getCryptoChecker();
+  this->objectChecker = &all.getObjectChecker();
+  this->resultChecker = &all.getResultChecker();
+  this->staticChecker = &all.getStaticChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->argListChecker = &all.getArgListChecker();
+  this->constantFolder = &all.getConstantFolder();
+  this->genericChecker = &all.getGenericChecker();
+  this->processChecker = &all.getProcessChecker();
+  this->unknownChecker = &all.getUnknownChecker();
+  this->overloadResolver = &all.getOverloadResolver();
+  this->keyedFieldChecker = &all.getKeyedFieldChecker();
+  this->classMemberChecker = &all.getClassMemberChecker();
+  this->builtinModuleChecker = &all.getBuiltinModuleChecker();
+  this->runtimeObjectChecker = &all.getRuntimeObjectChecker();
+}
 
 MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *member,
                                                                const Type *expected) {
   member->type = Type::error();
-  if (Expr *part = ArgListChecker(this->state).listPart(member)) {
+  if (Expr *part = this->argListChecker->listPart(member)) {
     return ok(part);
   }
   if (auto *name = dyn_cast<NameExpr>(member->object)) {
-    ScopeEntry entry = Scopes(this->state).lookup(name->name);
+    ScopeEntry entry = this->scopes->lookup(name->name);
     if (entry.enumDecl()) {
       TypeDeclarer::ResultEnumMemberRead read =
-          TypeDeclarer(this->state).checkEnumMember(entry.enumDecl(), member, expected);
+          this->typeDeclarer->checkEnumMember(entry.enumDecl(), member, expected);
       if (read.isOk()) {
         return ok(read.value());
       }
@@ -62,18 +94,18 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
       });
     }
     if (entry.cls()) {
-      Expr *read = StaticChecker(this->state).checkStaticMember(member, entry.cls(), expected);
+      Expr *read = this->staticChecker->checkStaticMember(member, entry.cls(), expected);
 
       return ok(read);
     }
   }
-  if (Expr *node = BuiltinModuleChecker(this->state).checkNodeMember(member)) {
+  if (Expr *node = this->builtinModuleChecker->checkNodeMember(member)) {
     return ok(node);
   }
-  if (Expr *io = ProcessChecker(this->state).checkProcessMember(member)) {
+  if (Expr *io = this->processChecker->checkProcessMember(member)) {
     return ok(io);
   }
-  if (CallChecker(this->state).isGlobalName(member->object, "decimal")) {
+  if (this->callChecker->isGlobalName(member->object, "decimal")) {
     std::string message = ErrorTextMemberRead::decimal(member->name);
 
     return err(MemberCheckerCheckMemberError{
@@ -81,17 +113,17 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
         .message = message,
     });
   }
-  if (CallChecker(this->state).isGlobalName(member->object, "RegExp")) {
-    Expr *regex = RegexChecker(this->state).checkRegExpStaticMember(member);
+  if (this->callChecker->isGlobalName(member->object, "RegExp")) {
+    Expr *regex = this->regexChecker->checkRegExpStaticMember(member);
 
     return ok(regex);
   }
-  if (CallChecker(this->state).isGlobalName(member->object, "crypto")) {
-    Expr *crypto = CryptoChecker(this->state).checkWebCryptoMember(member);
+  if (this->callChecker->isGlobalName(member->object, "crypto")) {
+    Expr *crypto = this->cryptoChecker->checkWebCryptoMember(member);
 
     return ok(crypto);
   }
-  if (CallChecker(this->state).isGlobalName(member->object, "globalThis")) {
+  if (this->callChecker->isGlobalName(member->object, "globalThis")) {
     std::string message = member->name == "crypto" ? ErrorTextMemberRead::crypto()
                                                    : ErrorTextMemberRead::globalThis(member->name);
 
@@ -100,10 +132,10 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
         .message = message,
     });
   }
-  if (Expr *bytes = BytesChecker(this->state).checkBytesStaticMember(member)) {
+  if (Expr *bytes = this->bytesChecker->checkBytesStaticMember(member)) {
     return ok(bytes);
   }
-  if (CallChecker(this->state).isGlobalName(member->object, "Intl")) {
+  if (this->callChecker->isGlobalName(member->object, "Intl")) {
     std::string message = ErrorTextMemberRead::intl(member->name);
 
     return err(MemberCheckerCheckMemberError{
@@ -112,9 +144,9 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
     });
   }
   for (llvm::StringRef global : {"console", "Math", "String", "Number"}) {
-    if (CallChecker(this->state).isGlobalName(member->object, global)) {
+    if (this->callChecker->isGlobalName(member->object, global)) {
       if (Expr *constant =
-              ConstantFolder(this->state).globalConstant(global, member->name, member->loc())) {
+              this->constantFolder->globalConstant(global, member->name, member->loc())) {
         return ok(constant);
       }
       static const llvm::StringLiteral numberFunctions[] = {"parseInt", "parseFloat", "isInteger",
@@ -147,24 +179,22 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
         .message = message,
     });
   }
-  member->object =
-      GenericChecker(this->state).apparent(ExprChecker(this->state).checkExpr(member->object));
+  member->object = this->genericChecker->apparent(this->exprChecker->checkExpr(member->object));
   this->state.getClassContext().forgetThisMember();
   if (member->optional) {
-    member->object = ExprChecker(this->state).chainLink(member->object);
+    member->object = this->exprChecker->chainLink(member->object);
   }
   const Type *type = member->object->type;
   if (type->isError()) {
     return ok(member);
   }
   if (type->nonOptional()->isJson()) {
-    Expr *json = JsonChecker(this->state).checkJsonMember(member);
+    Expr *json = this->jsonChecker->checkJsonMember(member);
 
     return ok(json);
   }
   if (type->isUnknown() || type->isAnyObject() || type->isClassRef()) {
-    UnknownChecker::ResultMemberChecked checked =
-        UnknownChecker(this->state).checkUnknownMember(member);
+    UnknownChecker::ResultMemberChecked checked = this->unknownChecker->checkUnknownMember(member);
     if (checked.isOk()) {
       return ok(checked.value());
     }
@@ -177,10 +207,9 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
     });
   }
   if (type->isUnion()) {
-    const Type *common = UnionChecker(this->state).commonBaseWith(type, member->name);
+    const Type *common = this->unionChecker->commonBaseWith(type, member->name);
     if (!common) {
-      UnionChecker::ResultUnionMemberTyped fieldRead =
-          UnionChecker(this->state).checkUnionMember(member);
+      UnionChecker::ResultUnionMemberTyped fieldRead = this->unionChecker->checkUnionMember(member);
       if (fieldRead.isOk()) {
         return ok(fieldRead.value());
       }
@@ -190,17 +219,16 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
           .message = fieldRead.error().message,
       });
     }
-    member->object = TypeRelations(this->state).convert(member->object, common);
+    member->object = this->typeRelations->convert(member->object, common);
     type = common;
   }
   if (type->isResult()) {
-    Expr *result = ResultChecker(this->state).checkResultMember(member);
+    Expr *result = this->resultChecker->checkResultMember(member);
 
     return ok(result);
   }
   if (type->isTuple()) {
-    TupleChecker::ResultTupleMember tupleMember =
-        TupleChecker(this->state).checkTupleMember(member);
+    TupleChecker::ResultTupleMember tupleMember = this->tupleChecker->checkTupleMember(member);
     if (tupleMember.isErr()) {
       return err(MemberCheckerCheckMemberError{
           .code = MemberCheckerCheckMemberErrorCode::TUPLE_MEMBER,
@@ -210,37 +238,37 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
     return ok(tupleMember.value());
   }
   if (type->isClass()) {
-    Expr *field = ClassMemberChecker(this->state).checkClassMember(member, expected);
+    Expr *field = this->classMemberChecker->checkClassMember(member, expected);
 
     return ok(field);
   }
   if (type->isRegExp()) {
-    Expr *regex = RegexChecker(this->state).checkRegexMember(member);
+    Expr *regex = this->regexChecker->checkRegexMember(member);
 
     return ok(regex);
   }
   if (type->isMatch()) {
-    Expr *match = MatchChecker(this->state).checkMatchMember(member);
+    Expr *match = this->matchChecker->checkMatchMember(member);
 
     return ok(match);
   }
   if (type->isDate()) {
-    Expr *date = DateChecker(this->state).checkDateMember(member);
+    Expr *date = this->dateChecker->checkDateMember(member);
 
     return ok(date);
   }
   if (type->isBytes()) {
-    Expr *bytes = BytesChecker(this->state).checkBytesMember(member);
+    Expr *bytes = this->bytesChecker->checkBytesMember(member);
 
     return ok(bytes);
   }
   if (type->isCrypto()) {
-    Expr *crypto = CryptoChecker(this->state).checkCryptoMember(member);
+    Expr *crypto = this->cryptoChecker->checkCryptoMember(member);
 
     return ok(crypto);
   }
   if (type->isIntl()) {
-    Expr *intl = IntlChecker(this->state).checkIntlMember(member, expected);
+    Expr *intl = this->intlChecker->checkIntlMember(member, expected);
 
     return ok(intl);
   }
@@ -253,7 +281,7 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
     });
   }
   if (type->isDict()) {
-    DictChecker::ResultDictMemberAccess dict = DictChecker(this->state).checkDictMember(member);
+    DictChecker::ResultDictMemberAccess dict = this->dictChecker->checkDictMember(member);
     if (dict.isErr()) {
       return err(MemberCheckerCheckMemberError{
           .code = MemberCheckerCheckMemberErrorCode::DICT_MEMBER,
@@ -263,17 +291,17 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
     return ok(dict.value());
   }
   if (type->isRuntimeObject()) {
-    Expr *runtime = RuntimeObjectChecker(this->state).checkRuntimeMember(member);
+    Expr *runtime = this->runtimeObjectChecker->checkRuntimeMember(member);
 
     return ok(runtime);
   }
   if (type->isObject() && type->overload(member->name)) {
-    Expr *overload = OverloadResolver(this->state).checkOverloadMember(member, expected);
+    Expr *overload = this->overloadResolver->checkOverloadMember(member, expected);
 
     return ok(overload);
   }
   if (type->isObject()) {
-    ObjectChecker::ResultObjectFieldValue field = ObjectChecker(this->state).checkField(member);
+    ObjectChecker::ResultObjectFieldValue field = this->objectChecker->checkField(member);
     if (field.isErr()) {
       return err(MemberCheckerCheckMemberError{
           .code = MemberCheckerCheckMemberErrorCode::OBJECT_FIELD,
@@ -288,7 +316,7 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
   }
   if (type->isInteger() && type->isWrapping() && member->name == "value") {
     Expr *value =
-        TypeRelations(this->state).convert(member->object, Type::integer(type->bitWidth(), true));
+        this->typeRelations->convert(member->object, Type::integer(type->bitWidth(), true));
 
     return ok(value);
   }
@@ -339,8 +367,7 @@ MemberChecker::ResultIndexIsInteger MemberChecker::positionType(const Type *type
 }
 
 Expr *MemberChecker::checkPosition(Expr *expr) {
-  expr =
-      GenericChecker(this->state).apparent(ExprChecker(this->state).checkExpr(expr, Type::intTy()));
+  expr = this->genericChecker->apparent(this->exprChecker->checkExpr(expr, Type::intTy()));
   const Type *type = expr->type;
   if (type->isError()) {
     return expr;
@@ -351,17 +378,16 @@ Expr *MemberChecker::checkPosition(Expr *expr) {
     return expr;
   }
 
-  return TypeRelations(this->state).convert(expr, Type::intTy());
+  return this->typeRelations->convert(expr, Type::intTy());
 }
 
 MemberChecker::ResultIndexedElement MemberChecker::checkIndex(IndexExpr *index) {
-  if (Expr *part = ArgListChecker(this->state).listPart(index)) {
+  if (Expr *part = this->argListChecker->listPart(index)) {
     return ok(part);
   }
   if (auto *name = dyn_cast<NameExpr>(index->object)) {
-    if (EnumDecl *decl = Scopes(this->state).lookup(name->name).enumDecl()) {
-      TypeDeclarer::ResultEnumIndexValue read =
-          TypeDeclarer(this->state).checkEnumIndex(decl, index);
+    if (EnumDecl *decl = this->scopes->lookup(name->name).enumDecl()) {
+      TypeDeclarer::ResultEnumIndexValue read = this->typeDeclarer->checkEnumIndex(decl, index);
       if (read.isOk()) {
         return ok(read.value());
       }
@@ -384,17 +410,16 @@ MemberChecker::ResultIndexedElement MemberChecker::checkIndex(IndexExpr *index) 
       });
     }
   }
-  index->object = BuiltinModuleChecker(this->state).processAlias(index->object);
-  if (Expr *variable = ProcessChecker(this->state).checkProcessEnvIndex(index)) {
+  index->object = this->builtinModuleChecker->processAlias(index->object);
+  if (Expr *variable = this->processChecker->checkProcessEnvIndex(index)) {
     return ok(variable);
   }
-  index->object =
-      GenericChecker(this->state).apparent(ExprChecker(this->state).checkExpr(index->object));
+  index->object = this->genericChecker->apparent(this->exprChecker->checkExpr(index->object));
   if (index->optional) {
-    index->object = ExprChecker(this->state).chainLink(index->object);
+    index->object = this->exprChecker->chainLink(index->object);
   }
   index->type = Type::error();
-  UtilityTypes::ResultGenericIndexed generic = UtilityTypes(this->state).checkGenericIndex(index);
+  UtilityTypes::ResultGenericIndexed generic = this->utilityTypes->checkGenericIndex(index);
   bool genericIndex =
       generic.isOk() ||
       generic.error().code != UtilityTypesCheckGenericIndexErrorCode::NOT_A_GENERIC_INDEX;
@@ -408,22 +433,22 @@ MemberChecker::ResultIndexedElement MemberChecker::checkIndex(IndexExpr *index) 
     return ok(generic.value());
   }
   if (index->object->type->isMatch()) {
-    Expr *match = MatchChecker(this->state).checkMatchIndex(index);
+    Expr *match = this->matchChecker->checkMatchIndex(index);
 
     return ok(match);
   }
   if (index->object->type->nonOptional()->isJson()) {
-    Expr *json = JsonChecker(this->state).checkJsonIndex(index);
+    Expr *json = this->jsonChecker->checkJsonIndex(index);
 
     return ok(json);
   }
   if (index->object->type->isBytes()) {
-    Expr *bytes = BytesChecker(this->state).checkBytesIndex(index);
+    Expr *bytes = this->bytesChecker->checkBytesIndex(index);
 
     return ok(bytes);
   }
   if (const Type *type = index->object->type; type->isUnknown() || type->isAnyObject()) {
-    index->index = ExprChecker(this->state).checkExpr(index->index);
+    index->index = this->exprChecker->checkExpr(index->index);
     UnknownChecker::ResultValueNarrowed narrowed = UnknownChecker::unknownUse(index->object, "");
     if (narrowed.isErr()) {
       return err(MemberCheckerCheckIndexError{
@@ -435,7 +460,7 @@ MemberChecker::ResultIndexedElement MemberChecker::checkIndex(IndexExpr *index) 
   }
   if (index->object->type->isObject()) {
     KeyedFieldChecker::ResultKeyedFieldRead keyed =
-        KeyedFieldChecker(this->state).checkKeyedField(index, false);
+        this->keyedFieldChecker->checkKeyedField(index, false);
     if (keyed.isOk()) {
       return ok(keyed.value());
     }
@@ -452,7 +477,7 @@ MemberChecker::ResultIndexedElement MemberChecker::checkIndex(IndexExpr *index) 
     });
   }
   if (index->object->type->isDict()) {
-    DictChecker::ResultDictIndexedValue dict = DictChecker(this->state).checkDictIndex(index);
+    DictChecker::ResultDictIndexedValue dict = this->dictChecker->checkDictIndex(index);
     if (dict.isErr()) {
       return err(MemberCheckerCheckIndexError{
           .code = MemberCheckerCheckIndexErrorCode::DICT_INDEX,
@@ -462,7 +487,7 @@ MemberChecker::ResultIndexedElement MemberChecker::checkIndex(IndexExpr *index) 
     return ok(dict.value());
   }
   if (index->object->type->isOptional() && index->object->type->inner()->isObject()) {
-    index->index = ExprChecker(this->state).checkExpr(index->index);
+    index->index = this->exprChecker->checkExpr(index->index);
     std::string message = ErrorTextIndexRead::undefined();
 
     return err(MemberCheckerCheckIndexError{
@@ -484,7 +509,7 @@ MemberChecker::ResultIndexedElement MemberChecker::checkIndex(IndexExpr *index) 
       index->type =
           Type::indexedAccess(type, Type::numberLiteral(double(lit->value), Type::intTy()));
     } else {
-      index->type = Type::optional(ArgListChecker(this->state).listElement(type));
+      index->type = Type::optional(this->argListChecker->listElement(type));
     }
     return ok(index);
   }
@@ -506,7 +531,7 @@ MemberChecker::ResultIndexedElement MemberChecker::checkIndex(IndexExpr *index) 
         .message = message,
     });
   }
-  bool inRange = IndexProofs(this->state).provesInBounds(index->object, index->index, false);
+  bool inRange = this->indexProofs->provesInBounds(index->object, index->index, false);
   if (ElementIndex *access = index->form.as<ElementIndex>()) {
     access->mayBeOutOfRange = !inRange;
   }

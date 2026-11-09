@@ -6,12 +6,29 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class LoopBounds;
+class DictChecker;
+class ExprChecker;
+class FlowChecker;
+class LoopChecker;
+class LoopScanner;
+class MatchChecker;
+class TypeResolver;
+class TypeRelations;
+class GenericChecker;
+class GenericWidening;
+class IterableChecker;
+class IteratorMethods;
+class GeneratorChecker;
+
 class AsyncChecker {
 public:
   using ResultPromiseTypeRef = Result<const Type *, AsyncCheckerResolvePromiseTypeError>;
   using ResultPromiseHandled = Result<const Expr *, AsyncCheckerCheckDiscardedPromiseError>;
 
-  explicit AsyncChecker(SemanticState &owner);
+  AsyncChecker(SemanticState &owner, SemanticParts &all);
 
   void checkForAwait(ForOfStmt *stmt);
   static const Type *awaitedType(const Type *type);
@@ -46,6 +63,21 @@ private:
                                              const FuncSymbol *fn);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  LoopBounds *loopBounds = nullptr;
+  DictChecker *dictChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  LoopChecker *loopChecker = nullptr;
+  LoopScanner *loopScanner = nullptr;
+  MatchChecker *matchChecker = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  GenericChecker *genericChecker = nullptr;
+  GenericWidening *genericWidening = nullptr;
+  IterableChecker *iterableChecker = nullptr;
+  IteratorMethods *iteratorMethods = nullptr;
+  GeneratorChecker *generatorChecker = nullptr;
 };
 
 }

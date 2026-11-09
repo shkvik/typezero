@@ -3,12 +3,20 @@
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/semantic/library/tz_modules/url_checker/url_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 
 using llvm::dyn_cast;
 
 namespace tz {
+
+HttpChecker::HttpChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->urlChecker = &all.getUrlChecker();
+  this->libraryCalls = &all.getLibraryCalls();
+  this->constantFolder = &all.getConstantFolder();
+}
 
 bool HttpChecker::isTokenChar(unsigned char c) {
   return c < 0x80 &&
@@ -90,9 +98,6 @@ bool HttpChecker::hasCredentials(llvm::StringRef url) {
   return authority.contains('@');
 }
 
-HttpChecker::HttpChecker(SemanticState &owner)
-    : state(owner) {}
-
 HttpChecker::ResultHeaderName HttpChecker::headerName(llvm::StringRef name) {
   if (!HttpChecker::isToken(name)) {
     std::string message = ErrorTextHeader::name(name);
@@ -169,7 +174,7 @@ bool HttpChecker::validReason(const std::u16string &text) {
 }
 
 bool HttpChecker::inProgram(const Expr *expr) const {
-  return !LibraryCalls(this->state).inLibrary(expr->loc());
+  return !this->libraryCalls->inLibrary(expr->loc());
 }
 
 void HttpChecker::checkHeaderName(const Expr *name) {
@@ -265,7 +270,7 @@ void HttpChecker::checkResponseNew(NewExpr *expr) {
       std::optional<int64_t> status =
           value->type && value->type->isLiteral() && value->type->literalBase()->isInt()
               ? std::optional<int64_t>(int64_t(value->type->literalNumber()))
-              : ConstantFolder(this->state).intConstant(value);
+              : this->constantFolder->intConstant(value);
       if (status && (*status == 204 || *status == 205 || *status == 304) &&
           HttpChecker::hasBody(args[0])) {
         std::string message = ErrorTextHttpResponse::noBody(*status);
@@ -299,7 +304,7 @@ void HttpChecker::checkRequestNew(NewExpr *expr) {
       if (url.isErr()) {
         this->state.getDiagnostics().error(input->loc(), url.error().message);
       }
-    } else if (!UrlChecker(this->state).knownAbsolute(input)) {
+    } else if (!this->urlChecker->knownAbsolute(input)) {
       std::string message = ErrorTextHttpRequest::unknown();
       this->state.getDiagnostics().error(input->loc(), message);
     }

@@ -6,9 +6,25 @@
 
 namespace tz {
 
+class SemanticParts;
+class ByteProofs;
+class CallChecker;
+class ExprChecker;
+class FlowChecker;
+class IndexProofs;
+class BytesChecker;
+class MemberChecker;
+class TypeRelations;
+class ArgumentChecker;
+class BytesNewChecker;
+class CallbackChecker;
+class IteratorMethods;
+class GeneratorChecker;
+class JsonStaticChecker;
+
 class BufferStaticChecker {
 public:
-  explicit BufferStaticChecker(SemanticState &owner);
+  BufferStaticChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkBytesFromWith(CallExpr *call, const Type *type, const std::string &what);
   Expr *checkBufferStatic(CallExpr *call, MemberExpr *member);
@@ -24,6 +40,20 @@ private:
   static std::optional<std::u16string> literalText(const Expr *e);
 
   SemanticState &state;
+  ByteProofs *byteProofs = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  BytesChecker *bytesChecker = nullptr;
+  MemberChecker *memberChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  BytesNewChecker *bytesNewChecker = nullptr;
+  CallbackChecker *callbackChecker = nullptr;
+  IteratorMethods *iteratorMethods = nullptr;
+  GeneratorChecker *generatorChecker = nullptr;
+  JsonStaticChecker *jsonStaticChecker = nullptr;
 };
 
 }

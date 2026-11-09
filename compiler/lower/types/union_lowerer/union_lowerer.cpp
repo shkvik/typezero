@@ -12,7 +12,7 @@
 #include "compiler/lower/types/union_layout/union_layout.h"
 #include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
-#include "compiler/semantic/semantic_external.h"
+#include "compiler/semantic/semantic_types.h"
 #include "llvm/IR/MDBuilder.h"
 
 using llvm::cast;
@@ -186,7 +186,7 @@ llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *f
   }
   if (!from->isUnion() && to->isUnion() && !llvm::is_contained(to->members(), from)) {
     for (const Type *member : to->members()) {
-      if (SemanticExternalFacade::copiesIntoRecord(from, member)) {
+      if (SemanticTypes::copiesIntoRecord(from, member)) {
         return this->lowering.dictLowerer().emitRecordFromObject(value, from, member);
       }
     }

@@ -62,6 +62,7 @@ Errors checkProgram(Program &program, const BuildOptions &options, PassTimes *ti
     InterproceduralPass interprocedural(engine, program);
     interprocedural.checkLoadOrder();
     engine.finishProgram();
+    engine.collectInventory();
     program.file.inventory = engine.takeInventory();
     llvm::append_range(program.file.items, program.file.inventory.lateClasses);
     errors.add(interprocedural.checkValueFlows());

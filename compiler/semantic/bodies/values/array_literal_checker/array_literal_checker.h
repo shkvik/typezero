@@ -6,9 +6,20 @@
 
 namespace tz {
 
+class SemanticParts;
+class DictChecker;
+class ExprChecker;
+class FlowChecker;
+class JsonChecker;
+class MatchChecker;
+class TupleChecker;
+class TypeRelations;
+class IteratorMethods;
+class GeneratorChecker;
+
 class ArrayLiteralChecker {
 public:
-  explicit ArrayLiteralChecker(SemanticState &owner);
+  ArrayLiteralChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkArrayLit(ArrayLitExpr *lit, const Type *expected);
 
@@ -32,6 +43,15 @@ private:
                                       const Type *element, const Type *type);
 
   SemanticState &state;
+  DictChecker *dictChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  JsonChecker *jsonChecker = nullptr;
+  MatchChecker *matchChecker = nullptr;
+  TupleChecker *tupleChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  IteratorMethods *iteratorMethods = nullptr;
+  GeneratorChecker *generatorChecker = nullptr;
 };
 
 }

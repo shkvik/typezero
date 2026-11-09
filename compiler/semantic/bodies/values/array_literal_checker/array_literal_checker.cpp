@@ -8,6 +8,7 @@
 #include "compiler/semantic/library/decimal/decimal_checker/decimal_checker.h"
 #include "compiler/semantic/library/json/json_checker/json_checker.h"
 #include "compiler/semantic/library/regex/match_checker/match_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/destination/destination.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
@@ -17,8 +18,18 @@
 
 namespace tz {
 
-ArrayLiteralChecker::ArrayLiteralChecker(SemanticState &owner)
-    : state(owner) {}
+ArrayLiteralChecker::ArrayLiteralChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->dictChecker = &all.getDictChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->jsonChecker = &all.getJsonChecker();
+  this->matchChecker = &all.getMatchChecker();
+  this->tupleChecker = &all.getTupleChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->iteratorMethods = &all.getIteratorMethods();
+  this->generatorChecker = &all.getGeneratorChecker();
+}
 
 ArrayLiteralChecker::ResultElementGiven
 ArrayLiteralChecker::elementGiven(const ArrayLitExpr::Element &e) {
@@ -153,7 +164,7 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
   if (pairLiteral && !expected) {
     std::vector<const Type *> parts;
     for (ArrayLitExpr::Element &e : lit->elements) {
-      e.expr = ExprChecker(this->state).checkExpr(e.expr);
+      e.expr = this->exprChecker->checkExpr(e.expr);
       parts.push_back(e.expr->type);
     }
     bool bad = llvm::any_of(
@@ -162,7 +173,7 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
     return lit;
   }
   if (expected && expected->nonOptional()->isJson()) {
-    return JsonChecker(this->state).checkJsonArrayLit(lit);
+    return this->jsonChecker->checkJsonArrayLit(lit);
   }
   if (expected && expected->isUnknown()) {
     expected = Type::array(Type::unknown());
@@ -183,7 +194,7 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
     if (given.isErr()) {
       this->state.getDiagnostics().error(hole.expr->loc(), given.error().message);
       for (ArrayLitExpr::Element &e : lit->elements) {
-        e.expr = ExprChecker(this->state).checkExpr(e.expr);
+        e.expr = this->exprChecker->checkExpr(e.expr);
       }
       lit->type = Type::error();
       return lit;
@@ -191,7 +202,7 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
   }
   if (expected && expected->nonOptional()->isTuple()) {
     TupleChecker::ResultTupleFilled tuple =
-        TupleChecker(this->state).checkTupleLit(lit, expected->nonOptional());
+        this->tupleChecker->checkTupleLit(lit, expected->nonOptional());
     if (tuple.isOk()) {
       return tuple.value();
     }
@@ -221,7 +232,7 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
       if (!hint && seen && seen->holdsObjects() && Destination::literalShaped(e.expr)) {
         hint = seen;
       }
-      e.expr = ExprChecker(this->state).checkExpr(e.expr, hint);
+      e.expr = this->exprChecker->checkExpr(e.expr, hint);
       types[i] = e.expr->type;
       someDecimal |= types[i]->nonOptional()->isDecimal();
       if (!e.expr->type->isError() && seen != Type::error()) {
@@ -232,13 +243,11 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
       }
       continue;
     }
-    IteratorMethods(this->state).markFused(e.expr);
-    e.expr = DictChecker(this->state)
-                 .iterableOf(ExprChecker(this->state)
-                                 .checkExpr(e.expr, expectedElement ? Type::array(expectedElement)
-                                                                    : nullptr));
+    this->iteratorMethods->markFused(e.expr);
+    e.expr = this->dictChecker->iterableOf(this->exprChecker->checkExpr(
+        e.expr, expectedElement ? Type::array(expectedElement) : nullptr));
     if (e.expr->type->isMatch()) {
-      e.expr = MatchChecker(this->state).matchItems(e.expr);
+      e.expr = this->matchChecker->matchItems(e.expr);
     }
     const Type *type = e.expr->type;
     if (type->isString()) {
@@ -248,11 +257,11 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
     if (type->isIterator()) {
       std::string what = ErrorTextSpreadable::spread();
       GeneratorChecker::ResultNextNeedsNoValue nothing =
-          GeneratorChecker(this->state).checkSendsNothing(type, what);
+          this->generatorChecker->checkSendsNothing(type, what);
       if (nothing.isErr()) {
         this->state.getDiagnostics().error(e.expr->loc(), nothing.error().message);
       }
-      FlowChecker(this->state).calledFunction();
+      this->flowChecker->calledFunction();
       types[i] = type->yielded();
       someDecimal |= types[i]->nonOptional()->isDecimal();
       continue;
@@ -298,7 +307,7 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
     if (types[i]) {
       continue;
     }
-    e.expr = ExprChecker(this->state).checkExpr(e.expr, literalHint);
+    e.expr = this->exprChecker->checkExpr(e.expr, literalHint);
     types[i] = e.expr->type;
   }
 
@@ -335,7 +344,7 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
   const Type *arrayType = Type::array(element);
   for (ArrayLitExpr::Element &e : lit->elements) {
     if (!e.spread) {
-      e.expr = TypeRelations(this->state).coerce(e.expr, element);
+      e.expr = this->typeRelations->coerce(e.expr, element);
       continue;
     }
     ResultSpreadFitsIn goes = ArrayLiteralChecker::spreadFits(e.expr->type, element, arrayType);

@@ -9,6 +9,7 @@
 #include "compiler/semantic/generics/type_params/type_params.h"
 #include "compiler/semantic/library/events/event_maps/event_maps.h"
 #include "compiler/semantic/library/stream/chunk_types/chunk_types.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
@@ -21,6 +22,16 @@ constexpr unsigned kMaxClassChain = 16;
 
 }
 
+GenericClassInstantiator::GenericClassInstantiator(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->chunkTypes = &all.getChunkTypes();
+  this->classBases = &all.getClassBases();
+  this->classLinks = &all.getClassLinks();
+  this->typeParams = &all.getTypeParams();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->genericClassChecker = &all.getGenericClassChecker();
+}
+
 std::string GenericClassInstantiator::typeNames(llvm::ArrayRef<const Type *> types) {
   std::string text;
   for (const Type *t : types) {
@@ -30,13 +41,10 @@ std::string GenericClassInstantiator::typeNames(llvm::ArrayRef<const Type *> typ
   return text;
 }
 
-GenericClassInstantiator::GenericClassInstantiator(SemanticState &owner)
-    : state(owner) {}
-
 GenericClassInstantiator::ResultClassMade
 GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::vector<const Type *> args,
                                            llvm::SMLoc use) {
-  GenericClassChecker(this->state).declareClassTypeParams(generic);
+  this->genericClassChecker->declareClassTypeParams(generic);
   llvm::SMLoc loc = use.isValid() ? use : generic->loc();
   std::vector<const Type *> params = generic->typeArgs;
   std::vector<const Type *> defaults = this->state.getGenericStore().getClassDefaults(generic);
@@ -69,7 +77,7 @@ GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::vector<const
     }
     std::vector<const Type *> known = args;
     known.resize(params.size(), nullptr);
-    args.push_back(TypeParams(this->state).substitute(defaults[k], params, known));
+    args.push_back(this->typeParams->substitute(defaults[k], params, known));
   }
   for (size_t k = 0; k < params.size(); ++k) {
     if (args[k]->isError()) {
@@ -86,7 +94,7 @@ GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::vector<const
           .message = message,
       });
     }
-    if (!TypeParams(this->state).satisfies(args[k], params[k], params, args)) {
+    if (!this->typeParams->satisfies(args[k], params[k], params, args)) {
       const TypeParamDecl &decl = generic->typeParams[k];
       std::string constraint = params[k]->constraint() ? params[k]->constraint()->name().str() : "";
       for (const Type *t : params[k]->alternatives()) {
@@ -194,9 +202,9 @@ GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::vector<const
   }
   if (check) {
     if (this->state.getGenericStore().isCheckingInstance()) {
-      GenericClassChecker(this->state).checkClassInstance(check);
+      this->genericClassChecker->checkClassInstance(check);
       if (check->failed) {
-        GenericClassChecker(this->state).reportClassInstance(check, loc);
+        this->genericClassChecker->reportClassInstance(check, loc);
       }
     } else {
       generics.addPendingInstance(check);
@@ -226,7 +234,7 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
   if (!of) {
     return;
   }
-  auto sub = [&](const Type *t) { return GenericClassChecker(this->state).instanceType(inst, t); };
+  auto sub = [&](const Type *t) { return this->genericClassChecker->instanceType(inst, t); };
   std::vector<const Type *> own = of->typeParams;
   std::vector<const Type *> mine = of->typeParams;
   for (const Type *&p : mine) {
@@ -238,12 +246,11 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
     }
   }
   auto sub2 = [&](const Type *t) {
-    return t ? TypeParams(this->state).substitute(sub(t), own, mine) : nullptr;
+    return t ? this->typeParams->substitute(sub(t), own, mine) : nullptr;
   };
   auto value = [&](const Type *t) {
-    return t ? TypeParams(this->state)
-                   .substituteValue(GenericClassChecker(this->state).instanceValueType(inst, t),
-                                    own, mine)
+    return t ? this->typeParams->substituteValue(
+                   this->genericClassChecker->instanceValueType(inst, t), own, mine)
              : nullptr;
   };
   fn->typeArgs = mine;
@@ -280,9 +287,9 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
 
 void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
   ClassDecl *generic = inst->generic();
-  auto sub = [&](const Type *t) { return GenericClassChecker(this->state).instanceType(inst, t); };
+  auto sub = [&](const Type *t) { return this->genericClassChecker->instanceType(inst, t); };
   auto addInstanceBase = [&](const Type *base) {
-    ClassBases(this->state).addBase(inst->type, base);
+    this->classBases->addBase(inst->type, base);
     if (inst->isEmitted()) {
       this->state.getInventoryStore().addSubtype(inst->type);
     }
@@ -301,7 +308,7 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
       addInstanceBase(type);
     }
   }
-  ChunkTypes(this->state).addStreamBases(inst, inst->loc());
+  this->chunkTypes->addStreamBases(inst, inst->loc());
   for (size_t i = 0; i < inst->fields.size() && i < generic->fields.size(); ++i) {
     ClassField &f = inst->fields[i];
     const ClassField &g = generic->fields[i];
@@ -311,7 +318,7 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
       continue;
     }
     f.resolved = g.method() ? sub(g.resolved)
-                            : GenericClassChecker(this->state).instanceValueType(inst, g.resolved);
+                            : this->genericClassChecker->instanceValueType(inst, g.resolved);
     if (g.method()) {
       FunctionDecl *fn = cast<FunctionExpr>(f.init)->fn;
       fn->name = g.method()->name;
@@ -355,7 +362,7 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
   }
   std::vector<Diagnostics::Captured> errors;
   std::vector<Diagnostics::Captured> *outer = this->state.getDiagnostics().setCapture(&errors);
-  ClassDeclarer(this->state).checkVariants(inst);
+  this->classDeclarer->checkVariants(inst);
   this->state.getDiagnostics().setCapture(outer);
   if (!errors.empty()) {
     if (InstanceRecord *check = this->state.getGenericStore().findClassCheck(inst);
@@ -369,9 +376,9 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
 
 void GenericClassInstantiator::linkInstance(ClassDecl *inst) {
   bool muted = this->state.getDiagnostics().setMuted(true);
-  ClassLinks(this->state).linkOverrides(inst);
+  this->classLinks->linkOverrides(inst);
   this->state.getDiagnostics().setMuted(muted);
-  ClassLinks(this->state).buildVtable(inst);
+  this->classLinks->buildVtable(inst);
 }
 
 void GenericClassInstantiator::markOverridden(FunctionDecl *fn) {

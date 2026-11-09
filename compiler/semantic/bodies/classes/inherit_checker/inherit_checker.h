@@ -7,9 +7,20 @@
 
 namespace tz {
 
+class SemanticParts;
+class EventMaps;
+class FlowChecker;
+class ClassChecker;
+class EmitterChecker;
+class ReturnInferrer;
+class ArgumentChecker;
+class TypeArgInferrer;
+class OverloadResolver;
+class ClassMemberChecker;
+
 class InheritChecker {
 public:
-  explicit InheritChecker(SemanticState &owner);
+  InheritChecker(SemanticState &owner, SemanticParts &all);
 
   void checkAbstract(ClassDecl *cls);
   void checkImplements(ClassDecl *cls);
@@ -73,6 +84,15 @@ private:
                                              const ClassDecl *cls, bool found);
 
   SemanticState &state;
+  EventMaps *eventMaps = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  ClassChecker *classChecker = nullptr;
+  EmitterChecker *emitterChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  TypeArgInferrer *typeArgInferrer = nullptr;
+  OverloadResolver *overloadResolver = nullptr;
+  ClassMemberChecker *classMemberChecker = nullptr;
 };
 
 }

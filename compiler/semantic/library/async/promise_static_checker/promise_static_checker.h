@@ -7,9 +7,17 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ExprChecker;
+class TypeResolver;
+class ResultChecker;
+class TypeRelations;
+class ArgumentChecker;
+
 class PromiseStaticChecker {
 public:
-  explicit PromiseStaticChecker(SemanticState &owner);
+  PromiseStaticChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkPromiseStatic(CallExpr *call, MemberExpr *member, const Type *expected);
 
@@ -39,6 +47,12 @@ private:
                         std::vector<const Type *> &tuple, llvm::StringRef fn);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  ResultChecker *resultChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

@@ -22,6 +22,9 @@
 
 namespace tz {
 
+ClassInfoLowerer::ClassInfoLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 std::string ClassInfoLowerer::className(const ClassDecl *cls) {
   return cls->name.empty() && cls->type ? cls->type->name().str() : cls->name.str();
 }
@@ -46,9 +49,6 @@ std::vector<FunctionDecl *> ClassInfoLowerer::constructorsOf(const ClassDecl *cl
 
   return {};
 }
-
-ClassInfoLowerer::ClassInfoLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::StructType *ClassInfoLowerer::classInfoType() {
   if (!this->classInfoTy) {

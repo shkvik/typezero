@@ -6,9 +6,19 @@
 
 namespace tz {
 
+class SemanticParts;
+class TypeParams;
+class LateClasses;
+class TypeResolver;
+class ArgListChecker;
+class ReturnInferrer;
+class FunctionChecker;
+class TypeArgInferrer;
+class GenericClassChecker;
+
 class GenericInstantiator {
 public:
-  explicit GenericInstantiator(SemanticState &owner);
+  GenericInstantiator(SemanticState &owner, SemanticParts &all);
 
   Expr *checkGenericValue(NameExpr *name, FuncSymbol *generic, const Signature *expected);
   bool returnsOwnClass(const FuncSymbol *generic, const Type *ret);
@@ -44,6 +54,14 @@ private:
                                  llvm::ArrayRef<const Type *> args);
 
   SemanticState &state;
+  TypeParams *typeParams = nullptr;
+  LateClasses *lateClasses = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  ArgListChecker *argListChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  FunctionChecker *functionChecker = nullptr;
+  TypeArgInferrer *typeArgInferrer = nullptr;
+  GenericClassChecker *genericClassChecker = nullptr;
 };
 
 }

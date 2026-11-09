@@ -11,6 +11,9 @@ using llvm::dyn_cast;
 
 namespace tz {
 
+UnionLayout::UnionLayout(Lowering &owner)
+    : lowering(owner) {}
+
 llvm::Value *UnionLayout::toWord(llvm::IRBuilder<> &b, llvm::Value *v) {
   llvm::Type *type = v->getType();
   if (type->isPointerTy()) {
@@ -56,9 +59,6 @@ bool UnionLayout::isReferenceLike(const Type *type) {
          type->isPromise() || type->isUnknown() || type->isClassRef() ||
          (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
-
-UnionLayout::UnionLayout(Lowering &owner)
-    : lowering(owner) {}
 
 bool UnionLayout::isAtomType(const Type *type) {
   return type->isStringLiteral() ||

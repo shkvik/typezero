@@ -4,8 +4,10 @@
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
 
-
 namespace tz {
+
+TypeDescriptors::TypeDescriptors(Lowering &owner)
+    : lowering(owner) {}
 
 uint32_t TypeDescriptors::descriptorKind(const Type *type) {
   switch (type->kind()) {
@@ -54,9 +56,6 @@ uint32_t TypeDescriptors::descriptorKind(const Type *type) {
     llvm_unreachable("no runtime descriptor for this type");
   }
 }
-
-TypeDescriptors::TypeDescriptors(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Constant *TypeDescriptors::typeDescriptor(const Type *type) {
   llvm::Constant *found = this->lowering.typeDescriptors_.lookup(type);

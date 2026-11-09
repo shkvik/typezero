@@ -4,6 +4,11 @@
 
 namespace tz {
 
+CycleScanner::CycleScanner() {
+  this->cycleExprsPart = std::make_unique<CycleExprs>(*this);
+  this->cycleEscapesPart = std::make_unique<CycleEscapes>(*this);
+}
+
 void CycleScanner::addType(const Type *type) {
   if (!type || !seenTypes.insert(type).second) {
     return;
@@ -236,11 +241,6 @@ bool CycleScanner::thisEscapes(const Stmt *stmt, const VarSymbol *self) {
   CycleEscapes::walkStmt(stmt, visit);
 
   return escapes;
-}
-
-CycleScanner::CycleScanner() {
-  this->cycleExprsPart = std::make_unique<CycleExprs>(*this);
-  this->cycleEscapesPart = std::make_unique<CycleEscapes>(*this);
 }
 
 CycleScanner::~CycleScanner() = default;

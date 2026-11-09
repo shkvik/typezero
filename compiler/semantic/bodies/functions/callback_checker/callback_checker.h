@@ -6,9 +6,24 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ExprChecker;
+class FlowChecker;
+class IndexProofs;
+class TypeRelations;
+class ClosureChecker;
+class ConditionFacts;
+class ConstantFolder;
+class GenericChecker;
+class NestedFunctions;
+class PredicateChecker;
+class GenericInstantiator;
+class FunctionValueChecker;
+
 class CallbackChecker {
 public:
-  explicit CallbackChecker(SemanticState &owner);
+  CallbackChecker(SemanticState &owner, SemanticParts &all);
 
   bool keepsDefined(const Expr *callback) const;
   Expr *checkCallbackMethod(CallExpr *call, MemberExpr *member, const Type *expected);
@@ -47,6 +62,19 @@ private:
                                               llvm::StringRef name, llvm::StringRef method);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ClosureChecker *closureChecker = nullptr;
+  ConditionFacts *conditionFacts = nullptr;
+  ConstantFolder *constantFolder = nullptr;
+  GenericChecker *genericChecker = nullptr;
+  NestedFunctions *nestedFunctions = nullptr;
+  PredicateChecker *predicateChecker = nullptr;
+  GenericInstantiator *genericInstantiator = nullptr;
+  FunctionValueChecker *functionValueChecker = nullptr;
 };
 
 }

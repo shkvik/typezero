@@ -5,9 +5,18 @@
 
 namespace tz {
 
+class SemanticParts;
+class FsChecker;
+class CallChecker;
+class ExprChecker;
+class BytesChecker;
+class TypeRelations;
+class ArgumentChecker;
+class ChildErrorTypes;
+
 class ChildChecker {
 public:
-  explicit ChildChecker(SemanticState &owner);
+  ChildChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
 
@@ -17,6 +26,13 @@ private:
   static bool hasZero(const Expr *expr);
 
   SemanticState &state;
+  FsChecker *fsChecker = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  BytesChecker *bytesChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  ChildErrorTypes *childErrorTypes = nullptr;
 };
 
 }

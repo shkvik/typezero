@@ -6,9 +6,14 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ExprChecker;
+class ArgumentChecker;
+
 class OsChecker {
 public:
-  explicit OsChecker(SemanticState &owner);
+  OsChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
   Expr *checkOsValue(llvm::StringRef name, Expr *expr);
@@ -21,6 +26,9 @@ private:
   static const Type *userInfoType();
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

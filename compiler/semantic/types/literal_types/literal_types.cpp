@@ -2,6 +2,7 @@
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/conditional_types/conditional_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/union_check_helpers/union_check_helpers.h"
@@ -11,6 +12,14 @@ using llvm::dyn_cast;
 using llvm::dyn_cast_or_null;
 
 namespace tz {
+
+LiteralTypes::LiteralTypes(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->typeDeclarer = &all.getTypeDeclarer();
+  this->typeRelations = &all.getTypeRelations();
+  this->conditionalTypes = &all.getConditionalTypes();
+}
 
 llvm::ArrayRef<const Type *> LiteralTypes::membersOf(const Type *&type) {
   return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
@@ -67,17 +76,14 @@ bool LiteralTypes::choiceTexts(const Expr *e, std::vector<std::u16string> &texts
   return true;
 }
 
-LiteralTypes::LiteralTypes(SemanticState &owner)
-    : state(owner) {}
-
 const Type *LiteralTypes::enumTag(const Expr *e) const {
   auto *member = dyn_cast<MemberExpr>(e);
   auto *owner = member ? dyn_cast<NameExpr>(member->object) : nullptr;
-  EnumDecl *decl = owner ? Scopes(this->state).lookup(owner->name).enumDecl() : nullptr;
+  EnumDecl *decl = owner ? this->scopes->lookup(owner->name).enumDecl() : nullptr;
   if (!decl) {
     return nullptr;
   }
-  TypeDeclarer(this->state).resolveEnum(decl);
+  this->typeDeclarer->resolveEnum(decl);
   const EnumMember *m = decl->find(member->name);
   if (!m) {
     return nullptr;
@@ -116,7 +122,7 @@ Expr *LiteralTypes::constText(Expr *checked, const Type *expected) {
   }
   const Type *type = this->constTextType(checked, expected);
 
-  return type ? TypeRelations(this->state).convert(checked, type) : checked;
+  return type ? this->typeRelations->convert(checked, type) : checked;
 }
 
 const Type *LiteralTypes::unionMemberFor(const Type *from, const Type *to) {
@@ -172,8 +178,7 @@ const Type *LiteralTypes::literalExpectation(const Type *expected, unsigned dept
     return expected;
   }
   std::vector<const Type *> branches;
-  for (const Type *branch :
-       ConditionalTypes(this->state).conditionalBranches(expected->nonOptional())) {
+  for (const Type *branch : this->conditionalTypes->conditionalBranches(expected->nonOptional())) {
     branches.push_back(this->literalExpectation(branch, depth + 1));
   }
 
@@ -313,7 +318,7 @@ const Type *LiteralTypes::literalMember(const ObjectLitExpr *lit, const Type *ta
         tag = this->enumTag(p.value);
       }
       if (auto *named = !tag && f ? dyn_cast_or_null<NameExpr>(p.value) : nullptr) {
-        const VarSymbol *var = Scopes(this->state).lookup(named->name).var();
+        const VarSymbol *var = this->scopes->lookup(named->name).var();
         const Type *known =
             var && var->type ? this->typeIn(this->state.getFlowState().getFlow(), var) : nullptr;
         if (known && LiteralTypes::isLiteralSet(known)) {
@@ -392,7 +397,7 @@ std::optional<std::vector<std::string>> LiteralTypes::knownTexts(const Expr *arg
     e = conv->operand;
   }
   if (auto *name = dyn_cast<NameExpr>(e)) {
-    if (VarSymbol *var = Scopes(this->state).lookup(name->name).var()) {
+    if (VarSymbol *var = this->scopes->lookup(name->name).var()) {
       if (std::optional<std::vector<std::string>> texts =
               typeTexts(this->typeIn(this->state.getFlowState().getFlow(), var))) {
         return texts;

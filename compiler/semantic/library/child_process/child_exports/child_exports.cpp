@@ -19,31 +19,31 @@ ChildExports::ResultExportFound ChildExports::childExport(llvm::StringRef name,
   if (name == "spawn" || name == "exec" || name == "execFile") {
     std::string message = ErrorTextChildExport::async(name, path);
 
-    return err(FeatureExportFoundError{
-        .code = FeatureExportFoundErrorCode::NOT_YET,
+    return err(ModuleExportFoundError{
+        .code = ModuleExportFoundErrorCode::NOT_YET,
         .message = message,
     });
   }
   if (name == "fork") {
     std::string message = ErrorTextChildExport::fork(name, path);
 
-    return err(FeatureExportFoundError{
-        .code = FeatureExportFoundErrorCode::NOT_POSSIBLE,
+    return err(ModuleExportFoundError{
+        .code = ModuleExportFoundErrorCode::NOT_POSSIBLE,
         .message = message,
     });
   }
   if (llvm::is_contained(kChildExports, name)) {
     std::string message = ErrorTextChildExport::notYet(name, path);
 
-    return err(FeatureExportFoundError{
-        .code = FeatureExportFoundErrorCode::NOT_YET,
+    return err(ModuleExportFoundError{
+        .code = ModuleExportFoundErrorCode::NOT_YET,
         .message = message,
     });
   }
   std::string message = ErrorTextModuleExport::none(path, name);
 
-  return err(FeatureExportFoundError{
-      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+  return err(ModuleExportFoundError{
+      .code = ModuleExportFoundErrorCode::NO_EXPORT,
       .message = message,
   });
 }

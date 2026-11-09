@@ -5,8 +5,7 @@
 
 namespace tz {
 
-enum class FeatureExportFoundErrorCode {
-  NOT_MINE,
+enum class ModuleExportFoundErrorCode {
   NO_EXPORT,
   NOT_YET,
   NOT_POSSIBLE,
@@ -14,8 +13,8 @@ enum class FeatureExportFoundErrorCode {
   CALLBACK_FORM,
 };
 
-struct FeatureExportFoundError {
-  FeatureExportFoundErrorCode code;
+struct ModuleExportFoundError {
+  ModuleExportFoundErrorCode code;
   std::string message;
 };
 

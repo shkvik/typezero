@@ -4,6 +4,7 @@
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -11,8 +12,15 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-MetadataChecker::MetadataChecker(SemanticState &owner)
-    : state(owner) {}
+MetadataChecker::MetadataChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->typeRelations = &all.getTypeRelations();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->functionChecker = &all.getFunctionChecker();
+  this->classValueChecker = &all.getClassValueChecker();
+}
 
 ClassDecl *MetadataChecker::builtinConstructor(llvm::StringRef name) {
   static const llvm::StringLiteral names[] = {"Number",       "String",
@@ -50,7 +58,7 @@ const void *MetadataChecker::metadataKey(const Expr *key, std::string &label) {
   if (!name) {
     return nullptr;
   }
-  ScopeEntry entry = Scopes(this->state).lookup(name->name);
+  ScopeEntry entry = this->scopes->lookup(name->name);
   label = name->name.str();
   if (entry.var()) {
     return entry.var()->isConst && entry.var()->type && !entry.var()->type->isString() ? entry.var()
@@ -69,19 +77,18 @@ void MetadataChecker::checkBodyEarly(FunctionDecl *fn) {
     return;
   }
   if (!fn->sym->hasReturnType()) {
-    ReturnInferrer(this->state).inferReturnType(fn->sym);
+    this->returnInferrer->inferReturnType(fn->sym);
     return;
   }
   if (fn->cls()) {
     return;
   }
-  BodyState saved = ReturnInferrer(this->state).enterBody(fn);
+  BodyState saved = this->returnInferrer->enterBody(fn);
   if (!this->state.getModuleStates().isTopLevelDone()) {
     this->state.getFunctionStack().rememberEarlyFunction(fn->sym);
   }
-  this->state.getFlowState().replaceFlow(Flow());
-  FunctionChecker(this->state).checkFunctionBody(fn);
-  ReturnInferrer(this->state).leaveBody(saved);
+  this->functionChecker->walkFunctionFromScratch(fn);
+  this->returnInferrer->leaveBody(saved);
 }
 
 MetadataChecker::ResultMetadataTyped MetadataChecker::metadataType(const void *key,
@@ -114,7 +121,7 @@ MetadataChecker::ResultMetadataTyped MetadataChecker::metadataType(const void *k
 }
 
 Expr *MetadataChecker::designClass(const Type *type, llvm::SMLoc loc) {
-  return ClassValueChecker(this->state).classValueAt(this->designConstructor(type), loc);
+  return this->classValueChecker->classValueAt(this->designConstructor(type), loc);
 }
 
 ClassDecl *MetadataChecker::designConstructor(const Type *type) {
@@ -178,13 +185,12 @@ void MetadataChecker::writeDesignRecord(ClassDecl *cls, const char16_t *key, Exp
     property->type = Type::string();
   }
   if (value->type->isClassRef()) {
-    value = TypeRelations(this->state).convert(value, Type::constructorOf(Type::anyObject()));
+    value = this->typeRelations->convert(value, Type::constructorOf(Type::anyObject()));
   }
-  std::vector<Expr *> args{
-      keyLit, TypeRelations(this->state).convert(value, Type::unknown()),
-      TypeRelations(this->state)
-          .convert(ClassValueChecker(this->state).classValueAt(cls, loc), Type::anyObject()),
-      TypeRelations(this->state).convert(property, Type::optional(Type::string()))};
+  std::vector<Expr *> args{keyLit, this->typeRelations->convert(value, Type::unknown()),
+                           this->typeRelations->convert(
+                               this->classValueChecker->classValueAt(cls, loc), Type::anyObject()),
+                           this->typeRelations->convert(property, Type::optional(Type::string()))};
   auto *call = this->state.getAst().make<CallExpr>(loc, callee, std::move(args));
   call->target = BuiltinCall{.builtin = Builtin::MetaDefine};
   call->designRecord = true;
@@ -196,12 +202,12 @@ void MetadataChecker::writeDesignRecords(ClassDecl *cls, ClassField *field, Func
                                          const FunctionDecl *ctor, llvm::SMLoc loc) {
   auto paramTypes = [&](const FunctionDecl *fn) {
     auto *list = this->state.getAst().make<ArrayLitExpr>(loc);
-    ReturnInferrer(this->state).resolveParams(fn->sym);
+    this->returnInferrer->resolveParams(fn->sym);
     const Type *any = Type::constructorOf(Type::anyObject());
     for (const Type *param : fn->sym->params) {
       if (param) {
         list->elements.push_back(
-            {TypeRelations(this->state).convert(this->designClass(param, loc), any), false});
+            {this->typeRelations->convert(this->designClass(param, loc), any), false});
       }
     }
     list->type = Type::array(any);
@@ -209,7 +215,7 @@ void MetadataChecker::writeDesignRecords(ClassDecl *cls, ClassField *field, Func
     return list;
   };
   if (field) {
-    ClassDeclarer(this->state).completeClass(cls);
+    this->classDeclarer->completeClass(cls);
     if (field->resolved && !field->resolved->isError()) {
       this->writeDesignRecord(cls, u"design:type", this->designClass(field->resolved, loc),
                               field->name, loc);
@@ -225,7 +231,7 @@ void MetadataChecker::writeDesignRecords(ClassDecl *cls, ClassField *field, Func
     this->writeDesignRecord(cls, u"design:paramtypes", paramTypes(method), method->name, loc);
     this->writeDesignRecord(
         cls, u"design:type",
-        ClassValueChecker(this->state).classValueAt(this->builtinConstructor("Function"), loc),
+        this->classValueChecker->classValueAt(this->builtinConstructor("Function"), loc),
         method->name, loc);
     return;
   }

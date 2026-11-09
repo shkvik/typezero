@@ -6,9 +6,20 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class ExprChecker;
+class JumpChecker;
+class StmtChecker;
+class TypeDeclarer;
+class UnionChecker;
+class BinaryChecker;
+class TypeRelations;
+class ConditionFacts;
+
 class SwitchChecker {
 public:
-  explicit SwitchChecker(SemanticState &owner);
+  SwitchChecker(SemanticState &owner, SemanticParts &all);
 
   void checkSwitch(SwitchStmt *stmt);
 
@@ -24,6 +35,15 @@ private:
                                             llvm::ArrayRef<const Type *> left);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  JumpChecker *jumpChecker = nullptr;
+  StmtChecker *stmtChecker = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
+  UnionChecker *unionChecker = nullptr;
+  BinaryChecker *binaryChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ConditionFacts *conditionFacts = nullptr;
 };
 
 }

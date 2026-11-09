@@ -9,14 +9,14 @@ using llvm::dyn_cast;
 
 namespace tz {
 
+OptionalLowerer::OptionalLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 bool OptionalLowerer::isReference(const Type *type) {
   return type->isObject() || type->isIterator() || type->isJson() || type->isDict() ||
          type->isPromise() || type->isUnknown() || type->isClassRef() ||
          (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
-
-OptionalLowerer::OptionalLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Value *OptionalLowerer::makeOptional(llvm::Value *value, llvm::Value *has, const Type *type) {
   if (type->isUnknown() || UnionLayout::zeroIsUndefined(type->inner())) {

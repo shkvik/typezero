@@ -6,6 +6,7 @@
 #include "compiler/semantic/flow/field_facts/field_facts.h"
 #include "compiler/semantic/library/async/async_checker/async_checker.h"
 #include "compiler/semantic/library/result/result_types/result_types.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
@@ -15,6 +16,19 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+ResultChecker::ResultChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->fieldFacts = &all.getFieldFacts();
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->resultTypes = &all.getResultTypes();
+  this->asyncChecker = &all.getAsyncChecker();
+  this->typeResolver = &all.getTypeResolver();
+  this->typeRelations = &all.getTypeRelations();
+  this->closureChecker = &all.getClosureChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+}
 
 const Type *ResultChecker::halfParam(const Type *half) {
   return half->isVoid() ? Type::undefinedTy() : half;
@@ -44,11 +58,8 @@ const Expr *ResultChecker::unconverted(const Expr *expr) {
   return expr;
 }
 
-ResultChecker::ResultChecker(SemanticState &owner)
-    : state(owner) {}
-
 Expr *ResultChecker::checkResultCall(CallExpr *call, NameExpr *name, const Type *expected) {
-  llvm::StringRef which = ResultTypes(this->state).resultName(name->name);
+  llvm::StringRef which = this->resultTypes->resultName(name->name);
   if (which != "ok" && which != "err") {
     return nullptr;
   }
@@ -70,9 +81,9 @@ ResultChecker::ResultOkErrTypeArgs ResultChecker::okErrTypeArgs(const NameExpr *
 }
 
 Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const Type *expected) {
-  bool rejected = CallChecker(this->state).rejectSpread(call);
+  bool rejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : ArgumentChecker(this->state).checkArity(call, 0, 1);
+      rejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(name->loc(), arity.error().message);
   }
@@ -85,8 +96,8 @@ Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const
     wanted = nullptr;
   }
   if (name->typeArgs.size() == 2) {
-    const Type *value = TypeResolver(this->state).resolveType(name->typeArgs[0], true);
-    const Type *error = TypeResolver(this->state).resolveType(name->typeArgs[1], true);
+    const Type *value = this->typeResolver->resolveType(name->typeArgs[0], true);
+    const Type *error = this->typeResolver->resolveType(name->typeArgs[1], true);
     if (value->isError() || error->isError()) {
       this->checkArgsLoosely(call);
       call->type = Type::error();
@@ -105,17 +116,17 @@ Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const
   if (!call->args.empty()) {
     Expr *&arg = call->args[0];
     bool hinted = wantedHalf && ResultChecker::givesType(wantedHalf);
-    arg = ExprChecker(this->state).checkExpr(arg, hinted ? wantedHalf : nullptr);
+    arg = this->exprChecker->checkExpr(arg, hinted ? wantedHalf : nullptr);
     half = arg->type;
     if (half->isVoid()) {
       std::string message = ErrorTextOkErr::voidValue(name->name);
       this->state.getDiagnostics().error(arg->loc(), message);
       half = Type::error();
     } else if (hinted && TypeRelations::isImplicitlyConvertible(half, wantedHalf)) {
-      arg = TypeRelations(this->state).convert(arg, wantedHalf);
+      arg = this->typeRelations->convert(arg, wantedHalf);
       half = wantedHalf;
     } else if (name->typeArgs.size() == 2 && !half->isError()) {
-      arg = TypeRelations(this->state).coerce(arg, wantedHalf);
+      arg = this->typeRelations->coerce(arg, wantedHalf);
       half = wantedHalf;
     }
   }
@@ -130,13 +141,13 @@ void ResultChecker::checkArgsLoosely(CallExpr *call) {
   for (Expr *&arg : call->args) {
     auto *fe = dyn_cast<FunctionExpr>(arg);
     if (!fe) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
       continue;
     }
     Signature loose;
     loose.params.assign(fe->fn->params.size(), Type::error());
     loose.pad = false;
-    arg = ClosureChecker(this->state).checkFunctionExpr(fe, &loose);
+    arg = this->closureChecker->checkFunctionExpr(fe, &loose);
   }
 }
 
@@ -164,7 +175,7 @@ ResultChecker::ResultStaticIsKnown ResultChecker::staticMethod(const NameExpr *n
 Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
   auto *name = dyn_cast<NameExpr>(member->object);
   if (!name || call->optional || member->optional ||
-      ResultTypes(this->state).resultName(name->name) != "Result") {
+      this->resultTypes->resultName(name->name) != "Result") {
     return nullptr;
   }
   llvm::StringRef method = member->name;
@@ -173,9 +184,9 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
     this->state.getDiagnostics().error(member->loc(), staticMethod.error().message);
     return this->markCallFailed(call);
   }
-  bool rejected = CallChecker(this->state).rejectSpread(call);
+  bool rejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : ArgumentChecker(this->state).checkArity(call, 1, 1);
+      rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
@@ -207,7 +218,7 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
                     [](const ArrayLitExpr::Element &e) { return e.spread || e.hole; })) {
     std::vector<const Type *> results;
     for (ArrayLitExpr::Element &e : lit->elements) {
-      e.expr = ExprChecker(this->state).checkExpr(e.expr);
+      e.expr = this->exprChecker->checkExpr(e.expr);
       results.push_back(e.expr->type);
     }
     if (llvm::any_of(results, [](const Type *t) { return t->isError(); })) {
@@ -240,7 +251,7 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
         return call;
       }
       for (ArrayLitExpr::Element &e : lit->elements) {
-        e.expr = TypeRelations(this->state).convert(e.expr, common);
+        e.expr = this->typeRelations->convert(e.expr, common);
       }
       lit->type = Type::array(common);
       call->type = Type::result(Type::array(common->okType()), errorsOf(common->errType()));
@@ -266,7 +277,7 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
     return call;
   }
 
-  arg = ExprChecker(this->state).checkExpr(arg);
+  arg = this->exprChecker->checkExpr(arg);
   const Type *type = arg->type;
   if (type->isError()) {
     return call;
@@ -290,13 +301,13 @@ Expr *ResultChecker::checkResultMember(MemberExpr *member) {
   llvm::StringRef name = member->name;
   std::string r = ResultChecker::receiverText(member->object);
   auto defined = [&](MemberExpr *half) -> Expr * {
-    if (Expr *narrowed = FieldFacts(this->state).narrowedField(half); narrowed != half) {
+    if (Expr *narrowed = this->fieldFacts->narrowedField(half); narrowed != half) {
       return narrowed;
     }
     if (half->type->isOptional()) {
-      if (std::optional<FieldPath> path = FieldFacts(this->state).fieldPath(half);
-          path && FieldFacts(this->state).isFieldDefined(*path)) {
-        return TypeRelations(this->state).convert(half, half->type->inner());
+      if (std::optional<FieldPath> path = this->fieldFacts->fieldPath(half);
+          path && this->fieldFacts->isFieldDefined(*path)) {
+        return this->typeRelations->convert(half, half->type->inner());
       }
     }
     return half;
@@ -333,7 +344,7 @@ ResultChecker::ResultValueGetsUsed ResultChecker::usedValue(const Expr *expr, bo
   const Type *type = expr->type;
   if (type && type->holdsPromises()) {
     AsyncChecker::ResultPromiseHandled handled =
-        AsyncChecker(this->state).checkDiscardedPromise(expr, callback, at);
+        this->asyncChecker->checkDiscardedPromise(expr, callback, at);
     if (handled.isErr()) {
       return err(ResultCheckerUsedValueError{
           .code = ResultCheckerUsedValueErrorCode::PROMISE_DROPPED,

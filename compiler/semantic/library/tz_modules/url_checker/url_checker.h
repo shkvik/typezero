@@ -6,9 +6,12 @@
 
 namespace tz {
 
+class SemanticParts;
+class LibraryCalls;
+
 class UrlChecker {
 public:
-  explicit UrlChecker(SemanticState &owner);
+  UrlChecker(SemanticState &owner, SemanticParts &all);
 
   void checkUrlNew(NewExpr *expr);
   bool checkUrlSetter(MemberExpr *member, const CallExpr *call);
@@ -32,6 +35,7 @@ private:
   static bool isLibraryClass(const Type *type, llvm::StringRef name);
 
   SemanticState &state;
+  LibraryCalls *libraryCalls = nullptr;
 };
 
 }

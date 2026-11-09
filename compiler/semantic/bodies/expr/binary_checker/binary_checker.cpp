@@ -15,6 +15,7 @@
 #include "compiler/semantic/library/json/json_checker/json_checker.h"
 #include "compiler/semantic/library/regex/match_checker/match_checker.h"
 #include "compiler/semantic/library/result/result_types/result_types.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
@@ -24,6 +25,23 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+BinaryChecker::BinaryChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->dateChecker = &all.getDateChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->jsonChecker = &all.getJsonChecker();
+  this->resultTypes = &all.getResultTypes();
+  this->matchChecker = &all.getMatchChecker();
+  this->truthChecker = &all.getTruthChecker();
+  this->unaryChecker = &all.getUnaryChecker();
+  this->concatChecker = &all.getConcatChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->constantFolder = &all.getConstantFolder();
+  this->decimalChecker = &all.getDecimalChecker();
+  this->genericChecker = &all.getGenericChecker();
+  this->instanceOfChecker = &all.getInstanceOfChecker();
+}
 
 bool BinaryChecker::onlyIntLiterals(const Expr *expr) {
   if (isa<IntLitExpr>(expr)) {
@@ -52,9 +70,6 @@ const Type *BinaryChecker::integerHint(const Expr *literal, const Expr *other, c
   return hint;
 }
 
-BinaryChecker::BinaryChecker(SemanticState &owner)
-    : state(owner) {}
-
 std::string BinaryChecker::operandTypesText(llvm::StringRef op, const Type *lhs, const Type *rhs) {
   bool undefined =
       lhs->isOptional() || rhs->isOptional() || lhs->isUndefined() || rhs->isUndefined();
@@ -64,7 +79,7 @@ std::string BinaryChecker::operandTypesText(llvm::StringRef op, const Type *lhs,
 
 BinaryChecker::ResultExponentIsValid BinaryChecker::powerExponent(const Expr *rhs,
                                                                   const Type *common) const {
-  std::optional<int64_t> exponent = ConstantFolder(this->state).intConstant(rhs);
+  std::optional<int64_t> exponent = this->constantFolder->intConstant(rhs);
   if (exponent && *exponent < 0) {
     std::string message = ErrorTextPower::negative(common->name());
 
@@ -84,7 +99,7 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
   }
   switch (bin->op) {
     case BinaryOp::In: {
-      UnaryChecker::ResultInOperatorSuited in = UnaryChecker(this->state).checkIn(bin);
+      UnaryChecker::ResultInOperatorSuited in = this->unaryChecker->checkIn(bin);
       if (in.isOk()) {
         return in.value();
       }
@@ -116,7 +131,7 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
 
     case BinaryOp::InstanceOf: {
       InstanceOfChecker::ResultInstanceTested tested =
-          InstanceOfChecker(this->state).checkInstanceOf(bin);
+          this->instanceOfChecker->checkInstanceOf(bin);
       if (tested.isOk()) {
         return tested.value();
       }
@@ -150,9 +165,8 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
   case BinaryOp::LogAnd:
   case BinaryOp::LogOr: {
     Flow whenTrue, whenFalse;
-    TruthChecker(this->state)
-        .checkLogical(bin, expected, whenTrue, whenFalse, false,
-                      bin->op == BinaryOp::LogAnd ? TruthUse::And : TruthUse::Or);
+    this->truthChecker->checkLogical(bin, expected, whenTrue, whenFalse, false,
+                                     bin->op == BinaryOp::LogAnd ? TruthUse::And : TruthUse::Or);
     this->state.getFlowState().replaceFlow(FlowChecker::join(whenTrue, whenFalse));
     return bin;
   }
@@ -174,14 +188,14 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
   case BinaryOp::Le:
   case BinaryOp::Gt:
   case BinaryOp::Ge: {
-    DecimalChecker(this->state).checkComparisonOperands(bin);
-    ResultTypes(this->state).neverOperands(bin);
+    this->decimalChecker->checkComparisonOperands(bin);
+    this->resultTypes->neverOperands(bin);
     bin->type = Type::boolTy();
     if (bin->lhs->type->isParam() && bin->lhs->type == bin->rhs->type) {
       return bin;
     }
-    bin->lhs = GenericChecker(this->state).apparent(bin->lhs);
-    bin->rhs = GenericChecker(this->state).apparent(bin->rhs);
+    bin->lhs = this->genericChecker->apparent(bin->lhs);
+    bin->rhs = this->genericChecker->apparent(bin->rhs);
     const Type *l = bin->lhs->type;
     const Type *r = bin->rhs->type;
     if (l->isError() || r->isError()) {
@@ -190,11 +204,11 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     if (l->isString() && r->isString()) {
       return bin;
     }
-    if (Expr *dates = DateChecker(this->state).checkDateOperands(bin)) {
+    if (Expr *dates = this->dateChecker->checkDateOperands(bin)) {
       return dates;
     }
     if (l->isDecimal() || r->isDecimal()) {
-      return DecimalChecker(this->state).checkDecimalComparison(bin);
+      return this->decimalChecker->checkDecimalComparison(bin);
     }
     if (l->isNumeric() && r->isNumeric()) {
       this->adaptLiterals(bin);
@@ -217,12 +231,9 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
   case BinaryOp::UShr: {
     const Type *hint =
         expected && expected->nonOptional()->isInteger() ? expected->nonOptional() : nullptr;
-    bin->lhs =
-        GenericChecker(this->state)
-            .apparent(ExprChecker(this->state)
-                          .checkExpr(bin->lhs,
-                                     BinaryChecker::onlyIntLiterals(bin->lhs) ? hint : nullptr));
-    bin->rhs = GenericChecker(this->state).apparent(ExprChecker(this->state).checkExpr(bin->rhs));
+    bin->lhs = this->genericChecker->apparent(this->exprChecker->checkExpr(
+        bin->lhs, BinaryChecker::onlyIntLiterals(bin->lhs) ? hint : nullptr));
+    bin->rhs = this->genericChecker->apparent(this->exprChecker->checkExpr(bin->rhs));
     ResultBitwiseResolved bits = this->checkBits(bin);
     if (bits.isErr()) {
       bool divisor = bits.error().code == BinaryCheckerCheckBitsErrorCode::DIVISOR_ZERO;
@@ -255,27 +266,27 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     if (DecimalChecker::isLiteralTree(bin->lhs) && !DecimalChecker::isLiteralTree(bin->rhs) &&
         (literals || BinaryChecker::onlyIntLiterals(bin->lhs))) {
       BinaryExpr *pending = marks.takeConcatChain();
-      bin->rhs = GenericChecker(this->state)
-                     .apparent(ExprChecker(this->state).checkExpr(bin->rhs, rhsHint, operandsWrap));
+      bin->rhs = this->genericChecker->apparent(
+          this->exprChecker->checkExpr(bin->rhs, rhsHint, operandsWrap));
       marks.rememberConcatChain(pending);
       const Type *lhsHint = BinaryChecker::integerHint(
           bin->lhs, bin->rhs, literals ? DecimalChecker::literalHint(bin->rhs, hint) : hint,
           bitwise);
-      bin->lhs = GenericChecker(this->state)
-                     .apparent(ExprChecker(this->state).checkExpr(bin->lhs, lhsHint, operandsWrap));
+      bin->lhs = this->genericChecker->apparent(
+          this->exprChecker->checkExpr(bin->lhs, lhsHint, operandsWrap));
       marks.forgetConcatChain();
     } else {
-      bin->lhs = GenericChecker(this->state)
-                     .apparent(ExprChecker(this->state).checkExpr(bin->lhs, hint, operandsWrap));
+      bin->lhs = this->genericChecker->apparent(
+          this->exprChecker->checkExpr(bin->lhs, hint, operandsWrap));
       marks.forgetConcatChain();
       if (literals && DecimalChecker::isLiteralTree(bin->rhs)) {
         rhsHint = DecimalChecker::literalHint(bin->lhs, rhsHint);
       }
       rhsHint = BinaryChecker::integerHint(bin->rhs, bin->lhs, rhsHint, bitwise);
-      bin->rhs = GenericChecker(this->state)
-                     .apparent(ExprChecker(this->state).checkExpr(bin->rhs, rhsHint, operandsWrap));
+      bin->rhs = this->genericChecker->apparent(
+          this->exprChecker->checkExpr(bin->rhs, rhsHint, operandsWrap));
     }
-    ResultTypes(this->state).neverOperands(bin);
+    this->resultTypes->neverOperands(bin);
     this->adaptLiterals(bin);
     const Type *l = bin->lhs->type;
     const Type *r = bin->rhs->type;
@@ -302,12 +313,12 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       return bin;
     }
     if (bin->op == BinaryOp::Add && (l->isString() || r->isString())) {
-      bin->lhs = ConcatChecker(this->state).toStringOperand(bin->lhs);
-      bin->rhs = ConcatChecker(this->state).toStringOperand(bin->rhs);
+      bin->lhs = this->concatChecker->toStringOperand(bin->lhs);
+      bin->rhs = this->concatChecker->toStringOperand(bin->rhs);
       bin->type = Type::string();
       return bin;
     }
-    if (Expr *dates = DateChecker(this->state).checkDateOperands(bin)) {
+    if (Expr *dates = this->dateChecker->checkDateOperands(bin)) {
       return dates;
     }
     if (bitwise) {
@@ -321,7 +332,7 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       return bits.value();
     }
     if (l->isDecimal() || r->isDecimal()) {
-      return DecimalChecker(this->state).checkDecimalArithmetic(bin);
+      return this->decimalChecker->checkDecimalArithmetic(bin);
     }
     if ((l->isWrapping() || r->isWrapping()) && l->isInteger() && r->isInteger()) {
       ResultWrappingChecked wrapped = this->checkWrapping(bin);
@@ -334,7 +345,7 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       return wrapped.value();
     }
     if (bin->op == BinaryOp::Pow && l->isFloat() && r->isInteger()) {
-      bin->rhs = TypeRelations(this->state).convert(bin->rhs, l);
+      bin->rhs = this->typeRelations->convert(bin->rhs, l);
       r = l;
     }
     bool operandsOk = bitwise ? l->isInteger() && r->isInteger() : l->isNumeric() && r->isNumeric();
@@ -349,8 +360,8 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       this->state.getDiagnostics().error(bin->loc(), message);
       return bin;
     }
-    bin->lhs = TypeRelations(this->state).convert(bin->lhs, common);
-    bin->rhs = TypeRelations(this->state).convert(bin->rhs, common);
+    bin->lhs = this->typeRelations->convert(bin->lhs, common);
+    bin->rhs = this->typeRelations->convert(bin->rhs, common);
     bin->type = common;
     if (!common->isInteger()) {
       return bin;
@@ -363,11 +374,11 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       }
     }
     ConstantFolder::ResultDivisorNotZero divisor =
-        ConstantFolder(this->state).checkDivisor(bin->op, bin->rhs);
+        this->constantFolder->checkDivisor(bin->op, bin->rhs);
     if (divisor.isErr()) {
       this->state.getDiagnostics().error(bin->rhs->loc(), divisor.error().message);
     }
-    ConstantFolder(this->state).foldBinary(bin, wraps);
+    this->constantFolder->foldBinary(bin, wraps);
     return bin;
   }
   }
@@ -385,11 +396,11 @@ BinaryChecker::ResultWrappingChecked BinaryChecker::checkWrapping(BinaryExpr *bi
     });
   }
   const Type *wrap = l->isWrapping() ? l : r;
-  bin->lhs = TypeRelations(this->state).convert(bin->lhs, wrap);
-  bin->rhs = TypeRelations(this->state).convert(bin->rhs, wrap);
+  bin->lhs = this->typeRelations->convert(bin->lhs, wrap);
+  bin->rhs = this->typeRelations->convert(bin->rhs, wrap);
   bin->type = wrap;
   ConstantFolder::ResultDivisorNotZero divisor =
-      ConstantFolder(this->state).checkDivisor(bin->op, bin->rhs);
+      this->constantFolder->checkDivisor(bin->op, bin->rhs);
   if (divisor.isErr()) {
     return err(BinaryCheckerCheckWrappingError{
         .code = BinaryCheckerCheckWrappingErrorCode::DIVISOR_ZERO,
@@ -466,9 +477,9 @@ BinaryChecker::ResultBitwiseResolved BinaryChecker::checkBits(BinaryExpr *bin) {
     });
   }
   if (shift) {
-    bin->rhs = TypeRelations(this->state).convert(bin->rhs, l);
+    bin->rhs = this->typeRelations->convert(bin->rhs, l);
     bin->type = l;
-    ConstantFolder(this->state).foldBinary(bin, false);
+    this->constantFolder->foldBinary(bin, false);
     return ok(bin);
   }
   if (l->isWrapping() || r->isWrapping()) {
@@ -493,7 +504,7 @@ BinaryChecker::ResultBitwiseResolved BinaryChecker::checkBits(BinaryExpr *bin) {
     });
   }
   bin->type = l;
-  ConstantFolder(this->state).foldBinary(bin, false);
+  this->constantFolder->foldBinary(bin, false);
 
   return ok(bin);
 }
@@ -511,12 +522,12 @@ void BinaryChecker::adaptLiterals(BinaryExpr *bin) {
   if (!number(l) || !number(r) || (bitwise && (!l->isInteger() || !r->isInteger()))) {
     return;
   }
-  if (TypeRelations(this->state).literalAdapts(bin->lhs, r) &&
+  if (this->typeRelations->literalAdapts(bin->lhs, r) &&
       !(bin->op == BinaryOp::Pow && r->isDecimal())) {
-    bin->lhs = TypeRelations(this->state).adaptLiteral(bin->lhs, r);
-  } else if (TypeRelations(this->state).literalAdapts(bin->rhs, l) &&
+    bin->lhs = this->typeRelations->adaptLiteral(bin->lhs, r);
+  } else if (this->typeRelations->literalAdapts(bin->rhs, l) &&
              !(bin->op == BinaryOp::Pow && (l->isDecimal() || l->isFloat()))) {
-    bin->rhs = TypeRelations(this->state).adaptLiteral(bin->rhs, l);
+    bin->rhs = this->typeRelations->adaptLiteral(bin->rhs, l);
   }
 }
 
@@ -652,10 +663,10 @@ BinaryChecker::ResultNoResultOperand BinaryChecker::noResults(const BinaryExpr *
 }
 
 Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
-  if (Expr *null = JsonChecker(this->state).checkNullEquality(bin)) {
+  if (Expr *null = this->jsonChecker->checkNullEquality(bin)) {
     return null;
   }
-  DecimalChecker(this->state).checkComparisonOperands(bin);
+  this->decimalChecker->checkComparisonOperands(bin);
   const Type *l = bin->lhs->type;
   const Type *r = bin->rhs->type;
   bin->type = Type::boolTy();
@@ -682,7 +693,7 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
     return bin;
   }
   if (l->nonOptional()->isJson() || r->nonOptional()->isJson()) {
-    return JsonChecker(this->state).checkJsonEquality(bin);
+    return this->jsonChecker->checkJsonEquality(bin);
   }
   ResultNoResultOperand plain = BinaryChecker::noResults(bin);
   if (plain.isErr()) {
@@ -702,7 +713,7 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
   const Type *common = TypeRelations::comparisonType(l, r);
   if (!common) {
     if (l->nonOptional()->isDecimal() || r->nonOptional()->isDecimal()) {
-      DecimalChecker(this->state).reportDecimalMix(bin);
+      this->decimalChecker->reportDecimalMix(bin);
     } else if (l->nonOptional()->isNumeric() && r->nonOptional()->isNumeric() && !l->isOptional() &&
                !r->isOptional()) {
       std::string message = BinaryChecker::mixedNumbersText(bin);
@@ -716,22 +727,22 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
   if (common->nonOptional()->isFunction()) {
     this->state.getInventoryStore().markComparesFunctions();
   }
-  bin->lhs = TypeRelations(this->state).convert(bin->lhs, common);
-  bin->rhs = TypeRelations(this->state).convert(bin->rhs, common);
+  bin->lhs = this->typeRelations->convert(bin->lhs, common);
+  bin->rhs = this->typeRelations->convert(bin->rhs, common);
 
   return bin;
 }
 
 BinaryChecker::ResultNullishResolved BinaryChecker::checkNullish(BinaryExpr *bin,
                                                                  const Type *expected) {
-  bin->lhs = ExprChecker(this->state).checkExpr(bin->lhs, expected);
+  bin->lhs = this->exprChecker->checkExpr(bin->lhs, expected);
   if (bin->lhs->type->nonOptional()->isMatch() && isa<ArrayLitExpr>(bin->rhs)) {
-    bin->lhs = MatchChecker(this->state).matchItems(bin->lhs);
+    bin->lhs = this->matchChecker->matchItems(bin->lhs);
   }
   const Type *l = bin->lhs->type;
   Flow afterLhs = this->state.getFlowState().getFlow();
   const Type *hint = l->isUndefined() || l->isError() ? expected : l->nonOptional();
-  bin->rhs = ExprChecker(this->state).checkExpr(bin->rhs, hint);
+  bin->rhs = this->exprChecker->checkExpr(bin->rhs, hint);
   this->state.getFlowState().replaceFlow(
       FlowChecker::join(afterLhs, this->state.getFlowState().getFlow()));
   const Type *r = bin->rhs->type;
@@ -767,8 +778,8 @@ BinaryChecker::ResultNullishResolved BinaryChecker::checkNullish(BinaryExpr *bin
   }
   const Type *result = r->isOptional() || r->isUndefined() ? Type::optional(base) : base;
   bin->lhs =
-      TypeRelations(this->state).convert(bin->lhs, l->isOptional() ? Type::optional(base) : result);
-  bin->rhs = TypeRelations(this->state).convert(bin->rhs, result);
+      this->typeRelations->convert(bin->lhs, l->isOptional() ? Type::optional(base) : result);
+  bin->rhs = this->typeRelations->convert(bin->rhs, result);
   bin->type = result;
 
   return ok(bin);
@@ -777,7 +788,7 @@ BinaryChecker::ResultNullishResolved BinaryChecker::checkNullish(BinaryExpr *bin
 Expr *BinaryChecker::toInt32(Expr *expr) {
   return expr->type->isInt() || expr->type->isError()
              ? expr
-             : TypeRelations(this->state).convert(expr, Type::intTy());
+             : this->typeRelations->convert(expr, Type::intTy());
 }
 
 }

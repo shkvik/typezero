@@ -4,9 +4,13 @@
 
 namespace tz {
 
+class SemanticParts;
+class ByteProofs;
+class IndexProofs;
+
 class FlowChecker {
 public:
-  explicit FlowChecker(SemanticState &owner);
+  FlowChecker(SemanticState &owner, SemanticParts &all);
 
   static Flow join(const Flow &a, const Flow &b);
   void assigned(const VarSymbol *var, const Expr *value);
@@ -23,6 +27,8 @@ private:
   static bool isArrayLength(const Term &t);
 
   SemanticState &state;
+  ByteProofs *byteProofs = nullptr;
+  IndexProofs *indexProofs = nullptr;
 };
 
 }

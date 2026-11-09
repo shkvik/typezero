@@ -6,9 +6,15 @@
 
 namespace tz {
 
+class SemanticParts;
+class CryptoArgs;
+class CallChecker;
+class ExprChecker;
+class ArgumentChecker;
+
 class CryptoMethodChecker {
 public:
-  explicit CryptoMethodChecker(SemanticState &owner);
+  CryptoMethodChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkCryptoMethod(CallExpr *call, MemberExpr *member);
 
@@ -18,6 +24,10 @@ private:
   static ResultIssuerChecked issuer(const Expr *other);
 
   SemanticState &state;
+  CryptoArgs *cryptoArgs = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

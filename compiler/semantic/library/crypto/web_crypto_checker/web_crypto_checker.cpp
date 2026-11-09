@@ -7,6 +7,7 @@
 #include "compiler/semantic/library/crypto/crypto_args/crypto_args.h"
 #include "compiler/semantic/library/tz_modules/tz_modules_checker/tz_modules_checker_errors.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 
@@ -40,8 +41,13 @@ const SubtleIntrinsic kSubtleIntrinsics[] = {
 
 }
 
-WebCryptoChecker::WebCryptoChecker(SemanticState &owner)
-    : state(owner) {}
+WebCryptoChecker::WebCryptoChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->cryptoArgs = &all.getCryptoArgs();
+  this->exprChecker = &all.getExprChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+}
 
 WebCryptoChecker::ResultSubtleCallShape
 WebCryptoChecker::subtleShape(const CallExpr *call, llvm::StringRef intrinsicName) {
@@ -76,7 +82,7 @@ WebCryptoChecker::literalAlgorithm(const Expr *checked, char kind, llvm::StringR
 }
 
 WebCryptoChecker::ResultSubtleAvailable WebCryptoChecker::subtleAvailable() const {
-  VarSymbol *subtle = Scopes(this->state).lookup(LibraryModuleNames::kSubtleName).var();
+  VarSymbol *subtle = this->scopes->lookup(LibraryModuleNames::kSubtleName).var();
   if (!subtle) {
     std::string message = ErrorTextSubtle::noSubtle();
 
@@ -96,7 +102,7 @@ Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name,
   if (shape.isErr()) {
     this->state.getDiagnostics().error(name->loc(), shape.error().message);
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     return call;
   }
@@ -108,28 +114,28 @@ Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name,
     Expr *checked = nullptr;
     switch (intrinsic->params[i]) {
     case 'm':
-      checked = CryptoArgs(this->state).cryptoMd(arg, true);
+      checked = this->cryptoArgs->cryptoMd(arg, true);
       break;
     case 'c':
-      checked = CryptoArgs(this->state).cryptoCipher(arg);
+      checked = this->cryptoArgs->cryptoCipher(arg);
       break;
     case 'd':
-      checked = CryptoArgs(this->state).cryptoData(arg, "data", false, true, true);
+      checked = this->cryptoArgs->cryptoData(arg, "data", false, true, true);
       break;
     case 'o':
-      checked = CryptoArgs(this->state).cryptoKeyObject(arg, "key");
+      checked = this->cryptoArgs->cryptoKeyObject(arg, "key");
       break;
     case 'b':
-      checked = ArgumentChecker(this->state).checkArg(arg, Type::boolTy());
+      checked = this->argumentChecker->checkArg(arg, Type::boolTy());
       break;
     case 'i':
-      checked = ArgumentChecker(this->state).checkArg(arg, Type::intTy());
+      checked = this->argumentChecker->checkArg(arg, Type::intTy());
       break;
     case 'f':
-      checked = ArgumentChecker(this->state).checkArg(arg, Type::doubleTy());
+      checked = this->argumentChecker->checkArg(arg, Type::doubleTy());
       break;
     default:
-      checked = ArgumentChecker(this->state).checkArg(arg, Type::string());
+      checked = this->argumentChecker->checkArg(arg, Type::string());
       break;
     }
     char kind = intrinsic->params[i];
@@ -155,8 +161,7 @@ Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name,
                           ? Type::intTy()
                           : Type::optional(Type::cryptoType(Type::Crypto::KeyObject));
 
-  return CryptoArgs(this->state)
-      .cryptoCall(call, intrinsic->fn, std::move(args), Type::promise(value));
+  return this->cryptoArgs->cryptoCall(call, intrinsic->fn, std::move(args), Type::promise(value));
 }
 
 bool WebCryptoChecker::isSubtleClass(const Type *type, llvm::StringRef name) const {
@@ -175,7 +180,7 @@ Expr *WebCryptoChecker::subtleObject(MemberExpr *member) {
   }
   auto *name = this->state.getAst().make<NameExpr>(member->loc(), LibraryModuleNames::kSubtleName);
 
-  return ExprChecker(this->state).checkExpr(name);
+  return this->exprChecker->checkExpr(name);
 }
 
 }

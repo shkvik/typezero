@@ -6,9 +6,23 @@
 
 namespace tz {
 
+class SemanticParts;
+class Prelude;
+class FsChecker;
+class ChunkTypes;
+class CallChecker;
+class ExprChecker;
+class FlowChecker;
+class ResultChecker;
+class TypeRelations;
+class EmitterChecker;
+class ReturnInferrer;
+class ArgumentChecker;
+class SetEncodingChecker;
+
 class StreamChecker {
 public:
-  explicit StreamChecker(SemanticState &owner);
+  StreamChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkStreamIntrinsic(CallExpr *call, NameExpr *name, const Type *typeArg);
   const Type *streamCallbackType();
@@ -33,6 +47,18 @@ private:
   static bool isByteChunk(const Type *type);
 
   SemanticState &state;
+  Prelude *prelude = nullptr;
+  FsChecker *fsChecker = nullptr;
+  ChunkTypes *chunkTypes = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  ResultChecker *resultChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  EmitterChecker *emitterChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  SetEncodingChecker *setEncodingChecker = nullptr;
 };
 
 }

@@ -1,10 +1,12 @@
 #include "compiler/semantic/bodies/top_level_checker/top_level_checker.h"
+#include "compiler/program/module/load_chain/load_chain.h"
 #include "compiler/semantic/bodies/stmt/stmt_checker/stmt_checker.h"
 #include "compiler/semantic/declare/import_binder/import_binder.h"
 #include "compiler/semantic/declare/module_declarer/module_declarer.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::dyn_cast;
@@ -12,16 +14,23 @@ using llvm::isa;
 
 namespace tz {
 
-TopLevelChecker::TopLevelChecker(SemanticState &owner)
-    : state(owner) {}
+TopLevelChecker::TopLevelChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->stmtChecker = &all.getStmtChecker();
+  this->importBinder = &all.getImportBinder();
+  this->emitterChecker = &all.getEmitterChecker();
+  this->moduleDeclarer = &all.getModuleDeclarer();
+  this->returnInferrer = &all.getReturnInferrer();
+}
 
 void TopLevelChecker::loadTopLevel(Module *module, llvm::StringRef until) {
   ModuleState &here = this->state.getModuleStates().getModuleState(module);
   Module *outer = this->state.getModuleStates().getCurrentModule();
-  ModuleDeclarer(this->state).useModule(module);
+  this->moduleDeclarer->useModule(module);
   this->state.getModuleStates().enterLoading(module);
   here.busy = true;
-  ImportBinder(this->state).bindImports();
+  this->importBinder->bindImports();
   if (here.flow) {
     this->state.getFlowState().replaceFlow(std::move(*here.flow));
     here.flow.reset();
@@ -33,7 +42,7 @@ void TopLevelChecker::loadTopLevel(Module *module, llvm::StringRef until) {
       continue;
     }
     this->state.getBlockPosition().rememberBlockPosition(items, here.next - 1);
-    StmtChecker(this->state).checkStmt(item);
+    this->stmtChecker->checkStmt(item);
     auto *decl = dyn_cast<VarDeclStmt>(item);
     if (!until.empty() && decl &&
         llvm::any_of(decl->decls, [&](const VarDeclarator &d) { return d.name == until; })) {
@@ -42,7 +51,7 @@ void TopLevelChecker::loadTopLevel(Module *module, llvm::StringRef until) {
   }
   if (here.next == items.size()) {
     here.loaded = true;
-    EmitterChecker(this->state).reportUnlistenedErrors();
+    this->emitterChecker->reportUnlistenedErrors();
   } else {
     here.flow = this->state.getFlowState().getFlow();
   }
@@ -51,8 +60,16 @@ void TopLevelChecker::loadTopLevel(Module *module, llvm::StringRef until) {
   here.values = this->state.getScopeStack().getTopValues();
   here.types = this->state.getScopeStack().getTopTypes();
   if (outer) {
-    ModuleDeclarer(this->state).useModule(outer);
+    this->moduleDeclarer->useModule(outer);
   }
+}
+
+void TopLevelChecker::loadAllTopLevels(const std::vector<Module *> &modules) {
+  this->state.getFlowState().replaceFlow(Flow());
+  for (Module *module : modules) {
+    this->loadTopLevel(module);
+  }
+  this->state.getModuleStates().markTopLevelDone();
 }
 
 Module *TopLevelChecker::laterSource(llvm::StringRef name, llvm::StringRef &declared) {
@@ -75,7 +92,7 @@ Module *TopLevelChecker::laterSource(llvm::StringRef name, llvm::StringRef &decl
 }
 
 ScopeEntry TopLevelChecker::lookupValue(llvm::StringRef name) {
-  ScopeEntry entry = Scopes(this->state).lookup(name);
+  ScopeEntry entry = this->scopes->lookup(name);
   if (entry.found() || !this->state.getModuleStates().getLoadingModule()) {
     return entry;
   }
@@ -95,10 +112,10 @@ ScopeEntry TopLevelChecker::lookupValue(llvm::StringRef name) {
       this->state.getScopeStack().addTopValue(value.getKey(), value.getValue());
     }
   } else {
-    ImportBinder(this->state).bindImports();
+    this->importBinder->bindImports();
   }
 
-  return Scopes(this->state).lookup(name);
+  return this->scopes->lookup(name);
 }
 
 bool TopLevelChecker::loadEarly(Module *source, llvm::StringRef name) {
@@ -106,7 +123,7 @@ bool TopLevelChecker::loadEarly(Module *source, llvm::StringRef name) {
   if (there.loaded || there.busy || !there.topLevelNames.contains(name)) {
     return false;
   }
-  BodyState saved = ReturnInferrer(this->state).enterBody(nullptr);
+  BodyState saved = this->returnInferrer->enterBody(nullptr);
   this->state.getFunctionStack().forgetEarlyFunction();
   this->state.getExpressionMarks().enterModuleLoad();
   this->state.getReturnInference().enterModuleLoad();
@@ -117,22 +134,9 @@ bool TopLevelChecker::loadEarly(Module *source, llvm::StringRef name) {
   this->state.getDiagnostics().setMuted(muted);
   this->state.getReturnInference().leaveModuleLoad();
   this->state.getExpressionMarks().leaveModuleLoad();
-  ReturnInferrer(this->state).leaveBody(saved);
+  this->returnInferrer->leaveBody(saved);
 
   return true;
-}
-
-std::string TopLevelChecker::loadChain(const Module *reader, const Module *source) {
-  std::string chain;
-  for (const Module *module : reader->loadPath) {
-    chain += (chain.empty() ? "" : " -> ") + module->name;
-  }
-  if (source != reader) {
-    bool started = llvm::is_contained(reader->loadPath, source);
-    chain += ErrorTextNotLoaded::pending(source->name, started);
-  }
-
-  return chain;
 }
 
 std::string TopLevelChecker::loadLabel(llvm::StringRef name, llvm::StringRef declared,
@@ -167,7 +171,7 @@ TopLevelChecker::ResultSourceIsLoaded TopLevelChecker::checkLoaded(const NameExp
                   this->state.getModuleStates().getCurrentModule() ==
                       this->state.getModuleStates().getLoadingModule();
   if (source && topLevel) {
-    std::string chain = TopLevelChecker::loadChain(reader, source);
+    std::string chain = LoadChain::describe(reader, source);
     std::string message =
         ErrorTextNotLoaded::whileLoads(reader->name, what, source->name, chain, declared);
 

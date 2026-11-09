@@ -6,11 +6,14 @@
 
 namespace tz {
 
+class SemanticParts;
+class StmtChecker;
+
 class JumpChecker {
 public:
   using ResultJumpTargeted = Result<Stmt *, JumpCheckerCheckJumpError>;
 
-  explicit JumpChecker(SemanticState &owner);
+  JumpChecker(SemanticState &owner, SemanticParts &all);
 
   void checkLabeled(LabeledStmt *stmt);
   ResultJumpTargeted checkJump(Stmt *stmt);
@@ -26,6 +29,7 @@ private:
                                 const LabeledStmt *labeled) const;
 
   SemanticState &state;
+  StmtChecker *stmtChecker = nullptr;
 };
 
 }

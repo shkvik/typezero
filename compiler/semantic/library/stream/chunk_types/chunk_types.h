@@ -6,11 +6,18 @@
 
 namespace tz {
 
+class SemanticParts;
+class Prelude;
+class ClassBases;
+class AliasInstantiator;
+class EventMapInference;
+class GenericClassInstantiator;
+
 class ChunkTypes {
 public:
   using ResultHookParamsMatch = Result<const FunctionDecl *, ChunkTypesHookParamsError>;
 
-  explicit ChunkTypes(SemanticState &owner);
+  ChunkTypes(SemanticState &owner, SemanticParts &all);
 
   bool isStreamClass(const ClassDecl *cls) const;
   StreamChunks streamChunksOf(const ClassDecl *cls) const;
@@ -24,6 +31,11 @@ public:
 
 private:
   SemanticState &state;
+  Prelude *prelude = nullptr;
+  ClassBases *classBases = nullptr;
+  AliasInstantiator *aliasInstantiator = nullptr;
+  EventMapInference *eventMapInference = nullptr;
+  GenericClassInstantiator *genericClassInstantiator = nullptr;
 };
 
 }

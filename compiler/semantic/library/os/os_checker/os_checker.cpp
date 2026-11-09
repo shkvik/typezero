@@ -3,9 +3,17 @@
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/library/builtin_modules/node_check_helpers/node_check_helpers.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace tz {
+
+OsChecker::OsChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+}
 
 const Type *OsChecker::cpuInfoType() {
   const Type *d = Type::doubleTy();
@@ -27,9 +35,6 @@ const Type *OsChecker::userInfoType() {
                        {"shell", Type::optional(Type::string()), false}},
                       "UserInfo");
 }
-
-OsChecker::OsChecker(SemanticState &owner)
-    : state(owner) {}
 
 Expr *OsChecker::checkOsValue(llvm::StringRef name, Expr *expr) {
   if (name == "EOL") {
@@ -64,13 +69,13 @@ Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
   if (function.isErr()) {
     this->state.getDiagnostics().error(loc, function.error().message);
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     return call;
   }
-  bool rejected = CallChecker(this->state).rejectSpread(call);
+  bool rejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : ArgumentChecker(this->state).checkArity(call, 0, 0);
+      rejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 0);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }

@@ -6,11 +6,21 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ExprChecker;
+class FlowChecker;
+class TypeResolver;
+class ClosureChecker;
+class ReturnInferrer;
+class ArgumentChecker;
+class CallbackChecker;
+
 class PromiseChecker {
 public:
   using ResultPromiseChained = Result<Expr *, PromiseCheckerCheckPromiseMethodError>;
 
-  explicit PromiseChecker(SemanticState &owner);
+  PromiseChecker(SemanticState &owner, SemanticParts &all);
 
   static const Type *resolverType(const Type *value);
   const Type *executorValueType(const Expr *executor);
@@ -26,6 +36,14 @@ private:
   ResultValueTypeKnown valueType(NewExpr *expr, const CallExpr *call, const Type *expected);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  ClosureChecker *closureChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  CallbackChecker *callbackChecker = nullptr;
 };
 
 }

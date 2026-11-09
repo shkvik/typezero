@@ -5,6 +5,7 @@
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/utility_types/utility_types.h"
 #include "llvm/ADT/STLExtras.h"
@@ -14,6 +15,15 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+ArgListChecker::ArgListChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->typeRelations = &all.getTypeRelations();
+}
 
 bool ArgListChecker::usedAsValue(const Stmt *body, llvm::StringRef name, bool known) {
   llvm::SmallPtrSet<const Expr *, 4> spreads;
@@ -53,9 +63,6 @@ bool ArgListChecker::spreadsLists(const Type *type) {
          llvm::any_of(type->fields(), [](const Field &f) { return f.type->isListParam(); });
 }
 
-ArgListChecker::ArgListChecker(SemanticState &owner)
-    : state(owner) {}
-
 const Type *ArgListChecker::listElement(const Type *list) {
   return Type::indexedAccess(list, Type::intTy());
 }
@@ -88,7 +95,7 @@ const Type *ArgListChecker::memberType(const Type *object, const Type *key) {
   }
   if (object->isObject() && !object->isTuple()) {
     if (ClassDecl *cls = ClassDeclarer::classOf(object)) {
-      ClassDeclarer(this->state).completeClass(cls);
+      this->classDeclarer->completeClass(cls);
     }
     llvm::ArrayRef<const Type *> names =
         key->isUnion() ? key->members() : llvm::ArrayRef<const Type *>(key);
@@ -165,14 +172,14 @@ void ArgListChecker::declareArgumentList(FunctionDecl *fn) {
   }
   llvm::SMLoc loc = fn->params.size() > fn->listStart ? fn->params[fn->listStart].loc : fn->loc();
   if (!ArgListChecker::usedAsValue(fn->body, fn->listName, !fn->listType->tupleRest())) {
-    VarSymbol *var = Scopes(this->state).declareVar(fn->listName, loc, Type::tuple(elements), true);
+    VarSymbol *var = this->scopes->declareVar(fn->listName, loc, Type::tuple(elements), true);
     this->state.getExpressionMarks().rememberArgumentList(var, std::move(parts));
     return;
   }
   ResultListIsSpread spreadOnly = ArgListChecker::restListValue(fn);
   if (spreadOnly.isErr()) {
     this->state.getDiagnostics().error(loc, spreadOnly.error().message);
-    Scopes(this->state).declareVar(fn->listName, loc, Type::error(), true);
+    this->scopes->declareVar(fn->listName, loc, Type::error(), true);
     return;
   }
   auto *alias =
@@ -206,7 +213,7 @@ void ArgListChecker::expandListSpreads(std::vector<Expr *> &args, std::vector<bo
   for (size_t i = 0; i < args.size(); ++i) {
     bool spreads = i < spread.size() && spread[i];
     auto *name = dyn_cast<NameExpr>(args[i]);
-    VarSymbol *var = spreads && name ? Scopes(this->state).lookup(name->name).var() : nullptr;
+    VarSymbol *var = spreads && name ? this->scopes->lookup(name->name).var() : nullptr;
     std::optional<std::vector<llvm::StringRef>> found =
         var ? this->state.getExpressionMarks().findArgumentList(var) : std::nullopt;
     if (found) {
@@ -242,8 +249,7 @@ Expr *ArgListChecker::listPart(Expr *expr) {
   auto *member = dyn_cast<MemberExpr>(expr);
   auto *index = dyn_cast<IndexExpr>(expr);
   auto *name = dyn_cast<NameExpr>(member ? member->object : index ? index->object : expr);
-  VarSymbol *var =
-      name && (member || index) ? Scopes(this->state).lookup(name->name).var() : nullptr;
+  VarSymbol *var = name && (member || index) ? this->scopes->lookup(name->name).var() : nullptr;
   std::optional<std::vector<llvm::StringRef>> found =
       var ? this->state.getExpressionMarks().findArgumentList(var) : std::nullopt;
   if (!found) {
@@ -260,8 +266,8 @@ Expr *ArgListChecker::listPart(Expr *expr) {
     return nullptr;
   }
 
-  return ExprChecker(this->state)
-      .checkExpr(this->state.getAst().make<NameExpr>(index->loc(), parts[size_t(k->value)]));
+  return this->exprChecker->checkExpr(
+      this->state.getAst().make<NameExpr>(index->loc(), parts[size_t(k->value)]));
 }
 
 ArgListChecker::ResultListIsSpread ArgListChecker::restListValue(const FunctionDecl *fn) {
@@ -340,10 +346,9 @@ bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type
   for (size_t i = fixed; i < call->args.size(); ++i) {
     Expr *&arg = call->args[i];
     if (!checked || i >= checked->size() || !(*checked)[i]) {
-      arg = ExprChecker(this->state)
-                .checkExpr(arg, !call->spreads(i) && k < parts.size() && !parts[k]->isListParam()
-                                    ? parts[k]
-                                    : nullptr);
+      arg = this->exprChecker->checkExpr(
+          arg,
+          !call->spreads(i) && k < parts.size() && !parts[k]->isListParam() ? parts[k] : nullptr);
     }
     if (arg->type->isError()) {
       typed = false;
@@ -355,7 +360,7 @@ bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type
       return false;
     }
     if (!call->spreads(i)) {
-      arg = TypeRelations(this->state).coerce(arg, parts[k]);
+      arg = this->typeRelations->coerce(arg, parts[k]);
     }
     ++k;
   }
@@ -364,7 +369,7 @@ bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type
     this->state.getDiagnostics().error(loc, filled.error().message);
     return false;
   }
-  FlowChecker(this->state).calledFunction();
+  this->flowChecker->calledFunction();
 
   return typed;
 }

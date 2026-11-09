@@ -7,6 +7,7 @@
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/reflect/metadata_checker/metadata_checker.h"
 #include "compiler/semantic/library/reflect/reflect_checker/reflect_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/unknown_checker/unknown_checker.h"
 #include "llvm/ADT/STLExtras.h"
@@ -16,6 +17,17 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+ReflectCallChecker::ReflectCallChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->reflectChecker = &all.getReflectChecker();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->metadataChecker = &all.getMetadataChecker();
+}
 
 ReflectCallChecker::ResultKeyOfRecords ReflectCallChecker::keyOfRecords(const Type *type) {
   if (!type->isString() && !type->isError()) {
@@ -150,15 +162,12 @@ bool ReflectCallChecker::reflectAccepts(const Type *arg, const Type *param) {
   }
 }
 
-ReflectCallChecker::ReflectCallChecker(SemanticState &owner)
-    : state(owner) {}
-
 Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
                                            const Type *expected) {
   call->type = Type::error();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
   };
   struct Function {
@@ -172,7 +181,7 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
       {"hasOwnMetadata", Builtin::MetaHasOwn, 2, 3}, {"deleteMetadata", Builtin::MetaDelete, 2, 3}};
   llvm::StringRef fn = member->name;
   if (fn == "get" || fn == "apply" || fn == "construct" || fn == "fill") {
-    return ReflectChecker(this->state).checkReflection(call, member, expected);
+    return this->reflectChecker->checkReflection(call, member, expected);
   }
   const Function *function =
       llvm::find_if(functions, [&](const Function &f) { return f.name == fn; });
@@ -185,10 +194,9 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
     checkArgsLoosely();
     return call;
   }
-  bool rejected = CallChecker(this->state).rejectSpread(call);
+  bool rejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call)
-               : ArgumentChecker(this->state).checkArity(call, function->min, function->max);
+      rejected ? ok(call) : this->argumentChecker->checkArity(call, function->min, function->max);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
@@ -200,14 +208,14 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
   Expr *&keyArg = call->args[0];
   llvm::SMLoc keyLoc = keyArg->loc();
   std::string label;
-  const void *key = MetadataChecker(this->state).metadataKey(keyArg, label);
+  const void *key = this->metadataChecker->metadataKey(keyArg, label);
   const Type *design = ReflectCallChecker::designType(keyArg);
   if (key) {
     call->metaKey = key;
     keyArg = this->state.getAst().make<StringLitExpr>(keyLoc, u"");
     keyArg->type = Type::string();
   } else {
-    keyArg = ExprChecker(this->state).checkExpr(keyArg);
+    keyArg = this->exprChecker->checkExpr(keyArg);
     ResultKeyOfRecords records = ReflectCallChecker::keyOfRecords(keyArg->type);
     if (records.isErr()) {
       this->state.getDiagnostics().error(keyLoc, records.error().message);
@@ -223,7 +231,7 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
   if (define) {
     Expr *&value = call->args[1];
     const MetadataType *known = key ? this->state.getReflectStore().findMetadataType(key) : nullptr;
-    value = ExprChecker(this->state).checkExpr(value, known ? known->type : nullptr);
+    value = this->exprChecker->checkExpr(value, known ? known->type : nullptr);
     const Type *type = value->type;
     if (type->isVoid()) {
       std::string message = ErrorTextMetadataValue::voidValue();
@@ -231,7 +239,7 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
     } else if (known && !type->isError()) {
       unsigned before = this->state.getDiagnostics().errorCount();
       std::string records = ErrorTextMetadataValue::label(label);
-      value = TypeRelations(this->state).coerce(value, known->type, records);
+      value = this->typeRelations->coerce(value, known->type, records);
       if (this->state.getDiagnostics().errorCount() > before) {
         std::string message = ErrorTextMetadataValue::since(label, known->type->name());
         this->state.getDiagnostics().note(known->loc, message);
@@ -245,25 +253,25 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
       }
     }
     if (!value->type->isVoid()) {
-      value = TypeRelations(this->state).convert(value, Type::unknown());
+      value = this->typeRelations->convert(value, Type::unknown());
     }
   }
 
   size_t at = define ? 2 : 1;
   Expr *&target = call->args[at];
-  target = ExprChecker(this->state).checkExpr(target);
+  target = this->exprChecker->checkExpr(target);
   const Type *targetType = target->type;
   ResultTargetObject object = ReflectCallChecker::targetObject(targetType);
   if (object.isErr()) {
     this->state.getDiagnostics().error(target->loc(), object.error().message);
   } else {
-    target = TypeRelations(this->state).convert(target, Type::anyObject());
+    target = this->typeRelations->convert(target, Type::anyObject());
   }
   if (call->args.size() == at + 1) {
     call->args.push_back(this->state.getAst().make<UndefinedExpr>(call->loc()));
   }
   call->args[at + 1] =
-      ArgumentChecker(this->state).checkArg(call->args[at + 1], Type::optional(Type::string()));
+      this->argumentChecker->checkArg(call->args[at + 1], Type::optional(Type::string()));
 
   call->target = BuiltinCall{.builtin = function->builtin};
   switch (function->builtin) {
@@ -277,7 +285,7 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
       break;
     }
     MetadataChecker::ResultMetadataTyped typed =
-        MetadataChecker(this->state).metadataType(key, label, keyLoc, expected);
+        this->metadataChecker->metadataType(key, label, keyLoc, expected);
     if (typed.isErr()) {
       this->state.getDiagnostics().error(keyLoc, typed.error().message);
     }
@@ -351,7 +359,7 @@ Expr *ReflectCallChecker::directReflectApply(CallExpr *call, const FunctionDecl 
     return nullptr;
   }
   FuncSymbol *sym = fn->sym;
-  ReturnInferrer(this->state).resolveParams(sym);
+  this->returnInferrer->resolveParams(sym);
   std::vector<Expr *> args;
   for (const ArrayLitExpr::Element &e : list->elements) {
     if (e.spread || e.hole) {
@@ -370,22 +378,19 @@ Expr *ReflectCallChecker::directReflectApply(CallExpr *call, const FunctionDecl 
     }
   }
   auto *member = this->state.getAst().make<MemberExpr>(call->loc(), self, fn->name);
-  member->type = ReturnInferrer(this->state).functionType(sym);
+  member->type = this->returnInferrer->functionType(sym);
   auto *direct = this->state.getAst().make<CallExpr>(call->loc(), member, std::move(args));
   direct->target = MethodCall{.method = sym};
   direct->type = sym->getReturnType();
   std::vector<bool> given(direct->args.size(), true);
-  Expr *result =
-      ArgumentChecker(this->state)
-          .checkArguments(direct, sym->params, sym->minArgs, sym->hasRest, call->loc(), &given);
+  Expr *result = this->argumentChecker->checkArguments(direct, sym->params, sym->minArgs,
+                                                       sym->hasRest, call->loc(), &given);
   if (!result->type->isVoid()) {
-    return TypeRelations(this->state).convert(result, Type::unknown());
+    return this->typeRelations->convert(result, Type::unknown());
   }
-  Expr *nothing =
-      TypeRelations(this->state)
-          .convert(ExprChecker(this->state)
-                       .checkExpr(this->state.getAst().make<UndefinedExpr>(call->loc())),
-                   Type::unknown());
+  Expr *nothing = this->typeRelations->convert(
+      this->exprChecker->checkExpr(this->state.getAst().make<UndefinedExpr>(call->loc())),
+      Type::unknown());
   auto *seq =
       this->state.getAst().make<SequenceExpr>(call->loc(), std::vector<Expr *>{result, nothing});
   seq->type = Type::unknown();
@@ -395,9 +400,9 @@ Expr *ReflectCallChecker::directReflectApply(CallExpr *call, const FunctionDecl 
 
 Expr *ReflectCallChecker::checkReflectArgs(Expr *args) {
   if (isa<ArrayLitExpr>(args)) {
-    return ExprChecker(this->state).checkExpr(args, Type::array(Type::unknown()));
+    return this->exprChecker->checkExpr(args, Type::array(Type::unknown()));
   }
-  args = ExprChecker(this->state).checkExpr(args);
+  args = this->exprChecker->checkExpr(args);
   ResultArgumentList list = ReflectCallChecker::argumentList(args->type);
   if (list.isOk()) {
     return args;

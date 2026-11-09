@@ -6,9 +6,17 @@
 
 namespace tz {
 
+class SemanticParts;
+class ChunkTypes;
+class FieldFacts;
+class StreamSources;
+class EmitterChecker;
+class ProcessChecker;
+class GenericClassInstantiator;
+
 class SetEncodingChecker {
 public:
-  explicit SetEncodingChecker(SemanticState &owner);
+  SetEncodingChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkSetEncoding(CallExpr *call, MemberExpr *member, ClassDecl *cls);
   const Type *encodedStreamType(ClassDecl *cls, llvm::SMLoc loc);
@@ -21,6 +29,12 @@ private:
   static ResultDecodedChunks decodedChunks(const Type *readable, const Type *receiver);
 
   SemanticState &state;
+  ChunkTypes *chunkTypes = nullptr;
+  FieldFacts *fieldFacts = nullptr;
+  StreamSources *streamSources = nullptr;
+  EmitterChecker *emitterChecker = nullptr;
+  ProcessChecker *processChecker = nullptr;
+  GenericClassInstantiator *genericClassInstantiator = nullptr;
 };
 
 }

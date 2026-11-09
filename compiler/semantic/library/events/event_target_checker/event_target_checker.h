@@ -6,9 +6,24 @@
 
 namespace tz {
 
+class SemanticParts;
+class EventMaps;
+class TypeParams;
+class CallChecker;
+class ExprChecker;
+class LibraryCalls;
+class TypeDeclarer;
+class TypeResolver;
+class TypeRelations;
+class ClosureChecker;
+class EmitterChecker;
+class ReturnInferrer;
+class ArgumentChecker;
+class GenericInstantiator;
+
 class EventTargetChecker {
 public:
-  explicit EventTargetChecker(SemanticState &owner);
+  EventTargetChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkEventTargetCall(CallExpr *call, MemberExpr *member, ClassDecl *cls);
   Expr *checkEventsFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
@@ -31,6 +46,19 @@ private:
   Expr *callLibrarySymbol(CallExpr *call, FuncSymbol *sym, llvm::ArrayRef<const Type *> bound,
                           const std::vector<bool> &given, llvm::SMLoc loc);
   SemanticState &state;
+  EventMaps *eventMaps = nullptr;
+  TypeParams *typeParams = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  LibraryCalls *libraryCalls = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ClosureChecker *closureChecker = nullptr;
+  EmitterChecker *emitterChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  GenericInstantiator *genericInstantiator = nullptr;
 };
 
 }

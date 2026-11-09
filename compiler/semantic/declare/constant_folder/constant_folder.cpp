@@ -1,6 +1,7 @@
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/CheckedArithmetic.h"
@@ -14,6 +15,12 @@ using llvm::cast;
 using llvm::dyn_cast;
 
 namespace tz {
+
+ConstantFolder::ConstantFolder(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->typeDeclarer = &all.getTypeDeclarer();
+}
 
 int32_t ConstantFolder::jsToInt32(double x) {
   if (!std::isfinite(x)) {
@@ -106,9 +113,6 @@ std::string ConstantFolder::constantText(std::optional<int64_t> exact, double va
 
   return text;
 }
-
-ConstantFolder::ConstantFolder(SemanticState &owner)
-    : state(owner) {}
 
 std::optional<ConstantValue> ConstantFolder::evalConstant(const Expr *expr, EnumDecl *self,
                                                           size_t defined) {
@@ -217,7 +221,7 @@ std::optional<ConstantValue> ConstantFolder::evalConstant(const Expr *expr, Enum
     case Expr::Kind::Member: {
       auto *access = cast<MemberExpr>(expr);
       auto *object = dyn_cast<NameExpr>(access->object);
-      EnumDecl *decl = object ? Scopes(this->state).lookup(object->name).enumDecl() : nullptr;
+      EnumDecl *decl = object ? this->scopes->lookup(object->name).enumDecl() : nullptr;
       if (!decl) {
         return std::nullopt;
       }
@@ -229,7 +233,7 @@ std::optional<ConstantValue> ConstantFolder::evalConstant(const Expr *expr, Enum
         }
         return std::nullopt;
       }
-      TypeDeclarer(this->state).resolveEnum(decl);
+      this->typeDeclarer->resolveEnum(decl);
       if (const EnumMember *m = decl->find(access->name)) {
         return member(*m);
       }

@@ -5,9 +5,13 @@
 
 namespace tz {
 
+class SemanticParts;
+class TypeRelations;
+class GenericClassInstantiator;
+
 class GenericWidening {
 public:
-  explicit GenericWidening(SemanticState &owner);
+  GenericWidening(SemanticState &owner, SemanticParts &all);
 
   static bool widens(const Type *from, const Type *to);
   static bool covariant(const ClassDecl *generic, size_t index);
@@ -24,6 +28,8 @@ private:
   static bool referenceFits(const Type *own, const Type *wide);
 
   SemanticState &state;
+  TypeRelations *typeRelations = nullptr;
+  GenericClassInstantiator *genericClassInstantiator = nullptr;
 };
 
 }

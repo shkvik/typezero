@@ -90,6 +90,9 @@ enum : uint32_t {
 
 }
 
+ChildLowerer::ChildLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 const Type *ChildLowerer::bufferType() {
   return Type::bytesType(Type::Bytes::Buffer);
 }
@@ -99,9 +102,6 @@ bool ChildLowerer::holds(const Type *type, const Type *member) {
 
   return type == member || llvm::is_contained(type->members(), member);
 }
-
-ChildLowerer::ChildLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::StructType *ChildLowerer::spawnPartsType() {
   llvm::Type *ptr = this->lowering.builder.getPtrTy();

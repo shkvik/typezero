@@ -1,0 +1,509 @@
+#pragma once
+
+#include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
+#include "compiler/semantic/bodies/classes/class_checker/class_checker.h"
+#include "compiler/semantic/bodies/classes/class_links/class_links.h"
+#include "compiler/semantic/bodies/classes/class_member_checker/class_member_checker.h"
+#include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
+#include "compiler/semantic/bodies/classes/decorator_checker/decorator_checker.h"
+#include "compiler/semantic/bodies/classes/inherit_checker/inherit_checker.h"
+#include "compiler/semantic/bodies/classes/instance_of_checker/instance_of_checker.h"
+#include "compiler/semantic/bodies/classes/method_call_checker/method_call_checker.h"
+#include "compiler/semantic/bodies/classes/method_literal_checker/method_literal_checker.h"
+#include "compiler/semantic/bodies/classes/overload_resolver/overload_resolver.h"
+#include "compiler/semantic/bodies/classes/static_checker/static_checker.h"
+#include "compiler/semantic/bodies/declarations/declaration_checker/declaration_checker.h"
+#include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
+#include "compiler/semantic/bodies/expr/assign_checker/assign_checker.h"
+#include "compiler/semantic/bodies/expr/binary_checker/binary_checker.h"
+#include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
+#include "compiler/semantic/bodies/expr/concat_checker/concat_checker.h"
+#include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
+#include "compiler/semantic/bodies/expr/literal_checker/literal_checker.h"
+#include "compiler/semantic/bodies/expr/member_checker/member_checker.h"
+#include "compiler/semantic/bodies/expr/name_checker/name_checker.h"
+#include "compiler/semantic/bodies/expr/new_checker/new_checker.h"
+#include "compiler/semantic/bodies/expr/target_checker/target_checker.h"
+#include "compiler/semantic/bodies/expr/truth_checker/truth_checker.h"
+#include "compiler/semantic/bodies/expr/unary_checker/unary_checker.h"
+#include "compiler/semantic/bodies/functions/callback_checker/callback_checker.h"
+#include "compiler/semantic/bodies/functions/closure_checker/closure_checker.h"
+#include "compiler/semantic/bodies/functions/function_checker/function_checker.h"
+#include "compiler/semantic/bodies/functions/function_method_checker/function_method_checker.h"
+#include "compiler/semantic/bodies/functions/function_value_checker/function_value_checker.h"
+#include "compiler/semantic/bodies/functions/nested_functions/nested_functions.h"
+#include "compiler/semantic/bodies/iterators/generator_checker/generator_checker.h"
+#include "compiler/semantic/bodies/iterators/iterable_checker/iterable_checker.h"
+#include "compiler/semantic/bodies/iterators/iterator_methods/iterator_methods.h"
+#include "compiler/semantic/bodies/objects/dict_checker/dict_checker.h"
+#include "compiler/semantic/bodies/objects/dict_methods/dict_methods.h"
+#include "compiler/semantic/bodies/objects/dict_new_checker/dict_new_checker.h"
+#include "compiler/semantic/bodies/objects/keyed_field_checker/keyed_field_checker.h"
+#include "compiler/semantic/bodies/objects/object_checker/object_checker.h"
+#include "compiler/semantic/bodies/objects/object_literal_checker/object_literal_checker.h"
+#include "compiler/semantic/bodies/objects/record_literal_checker/record_literal_checker.h"
+#include "compiler/semantic/bodies/objects/tuple_checker/tuple_checker.h"
+#include "compiler/semantic/bodies/stmt/jump_checker/jump_checker.h"
+#include "compiler/semantic/bodies/stmt/loop_checker/loop_checker.h"
+#include "compiler/semantic/bodies/stmt/return_checker/return_checker.h"
+#include "compiler/semantic/bodies/stmt/stmt_checker/stmt_checker.h"
+#include "compiler/semantic/bodies/stmt/switch_checker/switch_checker.h"
+#include "compiler/semantic/bodies/stmt/var_checker/var_checker.h"
+#include "compiler/semantic/bodies/top_level_checker/top_level_checker.h"
+#include "compiler/semantic/bodies/values/array_literal_checker/array_literal_checker.h"
+#include "compiler/semantic/bodies/values/array_methods/array_methods.h"
+#include "compiler/semantic/bodies/values/global_function_checker/global_function_checker.h"
+#include "compiler/semantic/bodies/values/number_methods/number_methods.h"
+#include "compiler/semantic/bodies/values/string_methods/string_methods.h"
+#include "compiler/semantic/declare/assigned_fields/assigned_fields.h"
+#include "compiler/semantic/declare/class_declarer/class_declarer.h"
+#include "compiler/semantic/declare/constant_folder/constant_folder.h"
+#include "compiler/semantic/declare/import_binder/import_binder.h"
+#include "compiler/semantic/declare/metadata_writers/metadata_writers.h"
+#include "compiler/semantic/declare/module_declarer/module_declarer.h"
+#include "compiler/semantic/declare/names_in_functions/names_in_functions.h"
+#include "compiler/semantic/declare/prelude/prelude.h"
+#include "compiler/semantic/declare/type_declarer/type_declarer.h"
+#include "compiler/semantic/flow/condition_facts/condition_facts.h"
+#include "compiler/semantic/flow/field_facts/field_facts.h"
+#include "compiler/semantic/flow/flow_checker/flow_checker.h"
+#include "compiler/semantic/flow/index_proofs/index_proofs.h"
+#include "compiler/semantic/flow/loop_bounds/loop_bounds.h"
+#include "compiler/semantic/flow/loop_scanner/loop_scanner.h"
+#include "compiler/semantic/flow/predicate_checker/predicate_checker.h"
+#include "compiler/semantic/flow/union_narrowing/union_narrowing.h"
+#include "compiler/semantic/generics/alias_instantiator/alias_instantiator.h"
+#include "compiler/semantic/generics/arg_list_checker/arg_list_checker.h"
+#include "compiler/semantic/generics/generic_checker/generic_checker.h"
+#include "compiler/semantic/generics/generic_class_checker/generic_class_checker.h"
+#include "compiler/semantic/generics/generic_class_instantiator/generic_class_instantiator.h"
+#include "compiler/semantic/generics/generic_instantiator/generic_instantiator.h"
+#include "compiler/semantic/generics/generic_widening/generic_widening.h"
+#include "compiler/semantic/generics/type_arg_inferrer/type_arg_inferrer.h"
+#include "compiler/semantic/generics/type_params/type_params.h"
+#include "compiler/semantic/generics/widening_relations/widening_relations.h"
+#include "compiler/semantic/infer/call_cycles/call_cycles.h"
+#include "compiler/semantic/infer/constructor_calls/constructor_calls.h"
+#include "compiler/semantic/infer/late_classes/late_classes.h"
+#include "compiler/semantic/infer/return_completer/return_completer.h"
+#include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
+#include "compiler/semantic/library/async/async_checker/async_checker.h"
+#include "compiler/semantic/library/async/promise_checker/promise_checker.h"
+#include "compiler/semantic/library/async/promise_static_checker/promise_static_checker.h"
+#include "compiler/semantic/library/async/timer_checker/timer_checker.h"
+#include "compiler/semantic/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
+#include "compiler/semantic/library/builtin_modules/builtin_module_types/builtin_module_types.h"
+#include "compiler/semantic/library/builtin_modules/runtime_object_checker/runtime_object_checker.h"
+#include "compiler/semantic/library/bytes/buffer_checker/buffer_checker.h"
+#include "compiler/semantic/library/bytes/buffer_static_checker/buffer_static_checker.h"
+#include "compiler/semantic/library/bytes/byte_proofs/byte_proofs.h"
+#include "compiler/semantic/library/bytes/bytes_checker/bytes_checker.h"
+#include "compiler/semantic/library/bytes/bytes_new_checker/bytes_new_checker.h"
+#include "compiler/semantic/library/bytes/typed_array_checker/typed_array_checker.h"
+#include "compiler/semantic/library/child_process/child_checker/child_checker.h"
+#include "compiler/semantic/library/child_process/child_error_types/child_error_types.h"
+#include "compiler/semantic/library/console/console_checker/console_checker.h"
+#include "compiler/semantic/library/crypto/crypto_args/crypto_args.h"
+#include "compiler/semantic/library/crypto/crypto_checker/crypto_checker.h"
+#include "compiler/semantic/library/crypto/crypto_errors/crypto_errors.h"
+#include "compiler/semantic/library/crypto/crypto_function_checker/crypto_function_checker.h"
+#include "compiler/semantic/library/crypto/crypto_method_checker/crypto_method_checker.h"
+#include "compiler/semantic/library/crypto/key_pair_checker/key_pair_checker.h"
+#include "compiler/semantic/library/crypto/subtle_call_checker/subtle_call_checker.h"
+#include "compiler/semantic/library/crypto/web_crypto_checker/web_crypto_checker.h"
+#include "compiler/semantic/library/date/date_checker/date_checker.h"
+#include "compiler/semantic/library/date/date_format_checker/date_format_checker.h"
+#include "compiler/semantic/library/decimal/decimal_checker/decimal_checker.h"
+#include "compiler/semantic/library/events/emitter_checker/emitter_checker.h"
+#include "compiler/semantic/library/events/event_map_inference/event_map_inference.h"
+#include "compiler/semantic/library/events/event_maps/event_maps.h"
+#include "compiler/semantic/library/events/event_target_checker/event_target_checker.h"
+#include "compiler/semantic/library/fs/fs_checker/fs_checker.h"
+#include "compiler/semantic/library/fs/fs_declarer/fs_declarer.h"
+#include "compiler/semantic/library/fs/fs_errors/fs_errors.h"
+#include "compiler/semantic/library/fs/fs_promises_checker/fs_promises_checker.h"
+#include "compiler/semantic/library/fs/readline_checker/readline_checker.h"
+#include "compiler/semantic/library/intl/intl_checker/intl_checker.h"
+#include "compiler/semantic/library/intl/intl_method_checker/intl_method_checker.h"
+#include "compiler/semantic/library/intl/intl_options_checker/intl_options_checker.h"
+#include "compiler/semantic/library/json/json_checker/json_checker.h"
+#include "compiler/semantic/library/json/json_static_checker/json_static_checker.h"
+#include "compiler/semantic/library/math/math_checker/math_checker.h"
+#include "compiler/semantic/library/os/os_checker/os_checker.h"
+#include "compiler/semantic/library/path/path_checker/path_checker.h"
+#include "compiler/semantic/library/process/process_checker/process_checker.h"
+#include "compiler/semantic/library/reflect/metadata_checker/metadata_checker.h"
+#include "compiler/semantic/library/reflect/reflect_call_checker/reflect_call_checker.h"
+#include "compiler/semantic/library/reflect/reflect_checker/reflect_checker.h"
+#include "compiler/semantic/library/regex/match_checker/match_checker.h"
+#include "compiler/semantic/library/regex/regex_checker/regex_checker.h"
+#include "compiler/semantic/library/regex/string_regex_checker/string_regex_checker.h"
+#include "compiler/semantic/library/result/result_checker/result_checker.h"
+#include "compiler/semantic/library/result/result_method_checker/result_method_checker.h"
+#include "compiler/semantic/library/result/result_types/result_types.h"
+#include "compiler/semantic/library/stream/chunk_types/chunk_types.h"
+#include "compiler/semantic/library/stream/set_encoding_checker/set_encoding_checker.h"
+#include "compiler/semantic/library/stream/stream_checker/stream_checker.h"
+#include "compiler/semantic/library/stream/stream_new_checker/stream_new_checker.h"
+#include "compiler/semantic/library/stream/stream_pipeline/stream_pipeline.h"
+#include "compiler/semantic/library/stream/stream_sources/stream_sources.h"
+#include "compiler/semantic/library/tz_modules/http_checker/http_checker.h"
+#include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
+#include "compiler/semantic/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
+#include "compiler/semantic/library/tz_modules/url_checker/url_checker.h"
+#include "compiler/semantic/library/weakref/weak_ref_checker/weak_ref_checker.h"
+#include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/types/conditional_types/conditional_types.h"
+#include "compiler/semantic/types/destination/destination.h"
+#include "compiler/semantic/types/destination_scanner/destination_scanner.h"
+#include "compiler/semantic/types/extends_relation/extends_relation.h"
+#include "compiler/semantic/types/literal_types/literal_types.h"
+#include "compiler/semantic/types/template_types/template_types.h"
+#include "compiler/semantic/types/type_operators/type_operators.h"
+#include "compiler/semantic/types/type_relations/type_relations.h"
+#include "compiler/semantic/types/type_resolver/type_resolver.h"
+#include "compiler/semantic/types/union_checker/union_checker.h"
+#include "compiler/semantic/types/unknown_checker/unknown_checker.h"
+#include "compiler/semantic/types/utility_types/utility_types.h"
+
+namespace tz {
+
+class SemanticParts {
+public:
+  explicit SemanticParts(SemanticState &state);
+
+  Scopes &getScopes();
+  Prelude &getPrelude();
+  FsErrors &getFsErrors();
+  EventMaps &getEventMaps();
+  FsChecker &getFsChecker();
+  OsChecker &getOsChecker();
+  ByteProofs &getByteProofs();
+  CallCycles &getCallCycles();
+  ChunkTypes &getChunkTypes();
+  ClassBases &getClassBases();
+  ClassLinks &getClassLinks();
+  CryptoArgs &getCryptoArgs();
+  FieldFacts &getFieldFacts();
+  FsDeclarer &getFsDeclarer();
+  LoopBounds &getLoopBounds();
+  NewChecker &getNewChecker();
+  TypeParams &getTypeParams();
+  UrlChecker &getUrlChecker();
+  VarChecker &getVarChecker();
+  CallChecker &getCallChecker();
+  DateChecker &getDateChecker();
+  Destination &getDestination();
+  DictChecker &getDictChecker();
+  DictMethods &getDictMethods();
+  ExprChecker &getExprChecker();
+  FlowChecker &getFlowChecker();
+  HttpChecker &getHttpChecker();
+  IndexProofs &getIndexProofs();
+  IntlChecker &getIntlChecker();
+  JsonChecker &getJsonChecker();
+  JumpChecker &getJumpChecker();
+  LateClasses &getLateClasses();
+  LoopChecker &getLoopChecker();
+  LoopScanner &getLoopScanner();
+  MathChecker &getMathChecker();
+  NameChecker &getNameChecker();
+  PathChecker &getPathChecker();
+  ResultTypes &getResultTypes();
+  StmtChecker &getStmtChecker();
+  ArrayMethods &getArrayMethods();
+  AsyncChecker &getAsyncChecker();
+  BytesChecker &getBytesChecker();
+  ChildChecker &getChildChecker();
+  ClassChecker &getClassChecker();
+  CryptoErrors &getCryptoErrors();
+  ImportBinder &getImportBinder();
+  LibraryCalls &getLibraryCalls();
+  LiteralTypes &getLiteralTypes();
+  MatchChecker &getMatchChecker();
+  RegexChecker &getRegexChecker();
+  TimerChecker &getTimerChecker();
+  TruthChecker &getTruthChecker();
+  TupleChecker &getTupleChecker();
+  TypeDeclarer &getTypeDeclarer();
+  TypeResolver &getTypeResolver();
+  UnaryChecker &getUnaryChecker();
+  UnionChecker &getUnionChecker();
+  UtilityTypes &getUtilityTypes();
+  AssignChecker &getAssignChecker();
+  BinaryChecker &getBinaryChecker();
+  BufferChecker &getBufferChecker();
+  ClassDeclarer &getClassDeclarer();
+  ConcatChecker &getConcatChecker();
+  CryptoChecker &getCryptoChecker();
+  MemberChecker &getMemberChecker();
+  NumberMethods &getNumberMethods();
+  ObjectChecker &getObjectChecker();
+  ResultChecker &getResultChecker();
+  ReturnChecker &getReturnChecker();
+  StaticChecker &getStaticChecker();
+  StreamChecker &getStreamChecker();
+  StreamSources &getStreamSources();
+  StringMethods &getStringMethods();
+  SwitchChecker &getSwitchChecker();
+  TargetChecker &getTargetChecker();
+  TemplateTypes &getTemplateTypes();
+  TypeOperators &getTypeOperators();
+  TypeRelations &getTypeRelations();
+  ArgListChecker &getArgListChecker();
+  AssignedFields &getAssignedFields();
+  ClosureChecker &getClosureChecker();
+  ConditionFacts &getConditionFacts();
+  ConsoleChecker &getConsoleChecker();
+  ConstantFolder &getConstantFolder();
+  DecimalChecker &getDecimalChecker();
+  DictNewChecker &getDictNewChecker();
+  EmitterChecker &getEmitterChecker();
+  GenericChecker &getGenericChecker();
+  InheritChecker &getInheritChecker();
+  KeyPairChecker &getKeyPairChecker();
+  LiteralChecker &getLiteralChecker();
+  ModuleDeclarer &getModuleDeclarer();
+  ProcessChecker &getProcessChecker();
+  PromiseChecker &getPromiseChecker();
+  ReflectChecker &getReflectChecker();
+  ReturnInferrer &getReturnInferrer();
+  StreamPipeline &getStreamPipeline();
+  UnionNarrowing &getUnionNarrowing();
+  UnknownChecker &getUnknownChecker();
+  WeakRefChecker &getWeakRefChecker();
+  ArgumentChecker &getArgumentChecker();
+  BytesNewChecker &getBytesNewChecker();
+  CallbackChecker &getCallbackChecker();
+  ChildErrorTypes &getChildErrorTypes();
+  ExtendsRelation &getExtendsRelation();
+  FunctionChecker &getFunctionChecker();
+  GenericWidening &getGenericWidening();
+  IterableChecker &getIterableChecker();
+  IteratorMethods &getIteratorMethods();
+  MetadataChecker &getMetadataChecker();
+  MetadataWriters &getMetadataWriters();
+  NestedFunctions &getNestedFunctions();
+  ReadlineChecker &getReadlineChecker();
+  ReturnCompleter &getReturnCompleter();
+  TopLevelChecker &getTopLevelChecker();
+  TypeArgInferrer &getTypeArgInferrer();
+  ConditionalTypes &getConditionalTypes();
+  ConstructorCalls &getConstructorCalls();
+  DecoratorChecker &getDecoratorChecker();
+  GeneratorChecker &getGeneratorChecker();
+  NamesInFunctions &getNamesInFunctions();
+  OverloadResolver &getOverloadResolver();
+  PredicateChecker &getPredicateChecker();
+  StreamNewChecker &getStreamNewChecker();
+  TzModulesChecker &getTzModulesChecker();
+  WebCryptoChecker &getWebCryptoChecker();
+  AliasInstantiator &getAliasInstantiator();
+  ClassValueChecker &getClassValueChecker();
+  DateFormatChecker &getDateFormatChecker();
+  EventMapInference &getEventMapInference();
+  FsPromisesChecker &getFsPromisesChecker();
+  InstanceOfChecker &getInstanceOfChecker();
+  IntlMethodChecker &getIntlMethodChecker();
+  JsonStaticChecker &getJsonStaticChecker();
+  KeyedFieldChecker &getKeyedFieldChecker();
+  MethodCallChecker &getMethodCallChecker();
+  SubtleCallChecker &getSubtleCallChecker();
+  TypedArrayChecker &getTypedArrayChecker();
+  WideningRelations &getWideningRelations();
+  BuiltinModuleTypes &getBuiltinModuleTypes();
+  ClassMemberChecker &getClassMemberChecker();
+  DeclarationChecker &getDeclarationChecker();
+  DestinationScanner &getDestinationScanner();
+  EventTargetChecker &getEventTargetChecker();
+  IntlOptionsChecker &getIntlOptionsChecker();
+  ReflectCallChecker &getReflectCallChecker();
+  SetEncodingChecker &getSetEncodingChecker();
+  StringRegexChecker &getStringRegexChecker();
+  ArrayLiteralChecker &getArrayLiteralChecker();
+  BufferStaticChecker &getBufferStaticChecker();
+  CryptoMethodChecker &getCryptoMethodChecker();
+  GenericClassChecker &getGenericClassChecker();
+  GenericInstantiator &getGenericInstantiator();
+  ResultMethodChecker &getResultMethodChecker();
+  BuiltinModuleChecker &getBuiltinModuleChecker();
+  FunctionValueChecker &getFunctionValueChecker();
+  MethodLiteralChecker &getMethodLiteralChecker();
+  ObjectLiteralChecker &getObjectLiteralChecker();
+  PromiseStaticChecker &getPromiseStaticChecker();
+  RecordLiteralChecker &getRecordLiteralChecker();
+  RuntimeObjectChecker &getRuntimeObjectChecker();
+  CryptoFunctionChecker &getCryptoFunctionChecker();
+  FunctionMethodChecker &getFunctionMethodChecker();
+  GlobalFunctionChecker &getGlobalFunctionChecker();
+  GenericClassInstantiator &getGenericClassInstantiator();
+
+private:
+  Scopes scopes;
+  Prelude prelude;
+  FsErrors fsErrors;
+  EventMaps eventMaps;
+  FsChecker fsChecker;
+  OsChecker osChecker;
+  ByteProofs byteProofs;
+  CallCycles callCycles;
+  ChunkTypes chunkTypes;
+  ClassBases classBases;
+  ClassLinks classLinks;
+  CryptoArgs cryptoArgs;
+  FieldFacts fieldFacts;
+  FsDeclarer fsDeclarer;
+  LoopBounds loopBounds;
+  NewChecker newChecker;
+  TypeParams typeParams;
+  UrlChecker urlChecker;
+  VarChecker varChecker;
+  CallChecker callChecker;
+  DateChecker dateChecker;
+  Destination destination;
+  DictChecker dictChecker;
+  DictMethods dictMethods;
+  ExprChecker exprChecker;
+  FlowChecker flowChecker;
+  HttpChecker httpChecker;
+  IndexProofs indexProofs;
+  IntlChecker intlChecker;
+  JsonChecker jsonChecker;
+  JumpChecker jumpChecker;
+  LateClasses lateClasses;
+  LoopChecker loopChecker;
+  LoopScanner loopScanner;
+  MathChecker mathChecker;
+  NameChecker nameChecker;
+  PathChecker pathChecker;
+  ResultTypes resultTypes;
+  StmtChecker stmtChecker;
+  ArrayMethods arrayMethods;
+  AsyncChecker asyncChecker;
+  BytesChecker bytesChecker;
+  ChildChecker childChecker;
+  ClassChecker classChecker;
+  CryptoErrors cryptoErrors;
+  ImportBinder importBinder;
+  LibraryCalls libraryCalls;
+  LiteralTypes literalTypes;
+  MatchChecker matchChecker;
+  RegexChecker regexChecker;
+  TimerChecker timerChecker;
+  TruthChecker truthChecker;
+  TupleChecker tupleChecker;
+  TypeDeclarer typeDeclarer;
+  TypeResolver typeResolver;
+  UnaryChecker unaryChecker;
+  UnionChecker unionChecker;
+  UtilityTypes utilityTypes;
+  AssignChecker assignChecker;
+  BinaryChecker binaryChecker;
+  BufferChecker bufferChecker;
+  ClassDeclarer classDeclarer;
+  ConcatChecker concatChecker;
+  CryptoChecker cryptoChecker;
+  MemberChecker memberChecker;
+  NumberMethods numberMethods;
+  ObjectChecker objectChecker;
+  ResultChecker resultChecker;
+  ReturnChecker returnChecker;
+  StaticChecker staticChecker;
+  StreamChecker streamChecker;
+  StreamSources streamSources;
+  StringMethods stringMethods;
+  SwitchChecker switchChecker;
+  TargetChecker targetChecker;
+  TemplateTypes templateTypes;
+  TypeOperators typeOperators;
+  TypeRelations typeRelations;
+  ArgListChecker argListChecker;
+  AssignedFields assignedFields;
+  ClosureChecker closureChecker;
+  ConditionFacts conditionFacts;
+  ConsoleChecker consoleChecker;
+  ConstantFolder constantFolder;
+  DecimalChecker decimalChecker;
+  DictNewChecker dictNewChecker;
+  EmitterChecker emitterChecker;
+  GenericChecker genericChecker;
+  InheritChecker inheritChecker;
+  KeyPairChecker keyPairChecker;
+  LiteralChecker literalChecker;
+  ModuleDeclarer moduleDeclarer;
+  ProcessChecker processChecker;
+  PromiseChecker promiseChecker;
+  ReflectChecker reflectChecker;
+  ReturnInferrer returnInferrer;
+  StreamPipeline streamPipeline;
+  UnionNarrowing unionNarrowing;
+  UnknownChecker unknownChecker;
+  WeakRefChecker weakRefChecker;
+  ArgumentChecker argumentChecker;
+  BytesNewChecker bytesNewChecker;
+  CallbackChecker callbackChecker;
+  ChildErrorTypes childErrorTypes;
+  ExtendsRelation extendsRelation;
+  FunctionChecker functionChecker;
+  GenericWidening genericWidening;
+  IterableChecker iterableChecker;
+  IteratorMethods iteratorMethods;
+  MetadataChecker metadataChecker;
+  MetadataWriters metadataWriters;
+  NestedFunctions nestedFunctions;
+  ReadlineChecker readlineChecker;
+  ReturnCompleter returnCompleter;
+  TopLevelChecker topLevelChecker;
+  TypeArgInferrer typeArgInferrer;
+  ConditionalTypes conditionalTypes;
+  ConstructorCalls constructorCalls;
+  DecoratorChecker decoratorChecker;
+  GeneratorChecker generatorChecker;
+  NamesInFunctions namesInFunctions;
+  OverloadResolver overloadResolver;
+  PredicateChecker predicateChecker;
+  StreamNewChecker streamNewChecker;
+  TzModulesChecker tzModulesChecker;
+  WebCryptoChecker webCryptoChecker;
+  AliasInstantiator aliasInstantiator;
+  ClassValueChecker classValueChecker;
+  DateFormatChecker dateFormatChecker;
+  EventMapInference eventMapInference;
+  FsPromisesChecker fsPromisesChecker;
+  InstanceOfChecker instanceOfChecker;
+  IntlMethodChecker intlMethodChecker;
+  JsonStaticChecker jsonStaticChecker;
+  KeyedFieldChecker keyedFieldChecker;
+  MethodCallChecker methodCallChecker;
+  SubtleCallChecker subtleCallChecker;
+  TypedArrayChecker typedArrayChecker;
+  WideningRelations wideningRelations;
+  BuiltinModuleTypes builtinModuleTypes;
+  ClassMemberChecker classMemberChecker;
+  DeclarationChecker declarationChecker;
+  DestinationScanner destinationScanner;
+  EventTargetChecker eventTargetChecker;
+  IntlOptionsChecker intlOptionsChecker;
+  ReflectCallChecker reflectCallChecker;
+  SetEncodingChecker setEncodingChecker;
+  StringRegexChecker stringRegexChecker;
+  ArrayLiteralChecker arrayLiteralChecker;
+  BufferStaticChecker bufferStaticChecker;
+  CryptoMethodChecker cryptoMethodChecker;
+  GenericClassChecker genericClassChecker;
+  GenericInstantiator genericInstantiator;
+  ResultMethodChecker resultMethodChecker;
+  BuiltinModuleChecker builtinModuleChecker;
+  FunctionValueChecker functionValueChecker;
+  MethodLiteralChecker methodLiteralChecker;
+  ObjectLiteralChecker objectLiteralChecker;
+  PromiseStaticChecker promiseStaticChecker;
+  RecordLiteralChecker recordLiteralChecker;
+  RuntimeObjectChecker runtimeObjectChecker;
+  CryptoFunctionChecker cryptoFunctionChecker;
+  FunctionMethodChecker functionMethodChecker;
+  GlobalFunctionChecker globalFunctionChecker;
+  GenericClassInstantiator genericClassInstantiator;
+};
+
+}

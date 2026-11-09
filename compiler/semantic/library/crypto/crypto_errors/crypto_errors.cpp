@@ -1,16 +1,19 @@
 #include "compiler/semantic/library/crypto/crypto_errors/crypto_errors.h"
 #include "compiler/program/library/crypto/crypto_error_types/crypto_error_types.h"
 #include "compiler/semantic/library/builtin_modules/builtin_module_types/builtin_module_types.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 
 using llvm::dyn_cast;
 
 namespace tz {
 
-CryptoErrors::CryptoErrors(SemanticState &owner)
-    : state(owner) {}
+CryptoErrors::CryptoErrors(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->builtinModuleTypes = &all.getBuiltinModuleTypes();
+}
 
 void CryptoErrors::declare() {
-  BuiltinModuleTypes types(this->state);
+  BuiltinModuleTypes &types = *this->builtinModuleTypes;
   if (types.declared("CreateHashError")) {
     return;
   }
@@ -21,7 +24,7 @@ void CryptoErrors::declare() {
 }
 
 const Type *CryptoErrors::named(llvm::StringRef name) {
-  return BuiltinModuleTypes(this->state).named(name);
+  return this->builtinModuleTypes->named(name);
 }
 
 const Type *CryptoErrors::ofCall(CryptoFn fn, llvm::ArrayRef<Expr *> args) {

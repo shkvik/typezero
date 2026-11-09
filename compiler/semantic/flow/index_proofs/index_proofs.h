@@ -6,13 +6,18 @@
 
 namespace tz {
 
+class SemanticParts;
+class ByteProofs;
+class LibraryCalls;
+class ConstantFolder;
+
 class IndexProofs {
 public:
   using ResultBetweenProven = Result<const Expr *, IndexProofsRequireBetweenError>;
   using ResultLessWasProven = Result<const Expr *, IndexProofsRequireLessError>;
   using ResultUpToWasProven = Result<const Expr *, IndexProofsRequireUpToError>;
 
-  explicit IndexProofs(SemanticState &owner);
+  IndexProofs(SemanticState &owner, SemanticParts &all);
 
   std::optional<Linear> linear(const Expr *expr) const;
   std::optional<Linear> lengthOf(const Expr *object) const;
@@ -45,6 +50,9 @@ private:
   static const VarSymbol *variableOf(const Expr *expr);
 
   SemanticState &state;
+  ByteProofs *byteProofs = nullptr;
+  LibraryCalls *libraryCalls = nullptr;
+  ConstantFolder *constantFolder = nullptr;
 };
 
 }

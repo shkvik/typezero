@@ -6,9 +6,20 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class DateChecker;
+class ExprChecker;
+class TimerChecker;
+class ResultChecker;
+class StreamSources;
+class TypeRelations;
+class ArgumentChecker;
+class EventTargetChecker;
+
 class ProcessChecker {
 public:
-  explicit ProcessChecker(SemanticState &owner);
+  ProcessChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkProcessCall(CallExpr *call, MemberExpr *member);
   Expr *checkProcessMember(MemberExpr *member);
@@ -28,6 +39,15 @@ private:
   Expr *checkSignalCall(CallExpr *call, MemberExpr *member);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  DateChecker *dateChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  TimerChecker *timerChecker = nullptr;
+  ResultChecker *resultChecker = nullptr;
+  StreamSources *streamSources = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  EventTargetChecker *eventTargetChecker = nullptr;
 };
 
 }

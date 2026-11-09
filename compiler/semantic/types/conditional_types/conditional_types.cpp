@@ -4,6 +4,7 @@
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
 #include "compiler/semantic/generics/type_params/type_params.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/conditional_check_helpers/conditional_check_helpers.h"
 #include "compiler/semantic/types/extends_relation/extends_relation.h"
 #include "compiler/semantic/types/type_operators/type_operators.h"
@@ -13,6 +14,18 @@
 #include <cmath>
 
 namespace tz {
+
+ConditionalTypes::ConditionalTypes(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->typeParams = &all.getTypeParams();
+  this->typeDeclarer = &all.getTypeDeclarer();
+  this->typeResolver = &all.getTypeResolver();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->typeOperators = &all.getTypeOperators();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->extendsRelation = &all.getExtendsRelation();
+  this->topLevelChecker = &all.getTopLevelChecker();
+}
 
 bool ConditionalTypes::isBinding(const Stmt *decl) {
   auto *alias = llvm::dyn_cast_or_null<TypeAliasDecl>(decl);
@@ -170,9 +183,6 @@ bool ConditionalTypes::mentionsParamBesides(const Type *type,
   return ConditionalTypes::mentionsOtherParams(type, allowed, seen);
 }
 
-ConditionalTypes::ConditionalTypes(SemanticState &owner)
-    : state(owner) {}
-
 void ConditionalTypes::bindType(llvm::StringRef name, const Type *type, llvm::SMLoc loc) {
   auto *alias = this->state.getAst().make<TypeAliasDecl>(loc, name, TypeRef());
   alias->resolved = type;
@@ -180,7 +190,7 @@ void ConditionalTypes::bindType(llvm::StringRef name, const Type *type, llvm::SM
 }
 
 const Type *ConditionalTypes::resolveTypeArgument(const TypeRef &ref) {
-  return TypeResolver(this->state).resolveTypeInner(ref);
+  return this->typeResolver->resolveTypeInner(ref);
 }
 
 const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
@@ -189,7 +199,7 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
   if (ref.args.size() != 4) {
     return Type::error();
   }
-  const Type *check = TypeResolver(this->state).resolveTypeInner(ref.args[0]);
+  const Type *check = this->typeResolver->resolveTypeInner(ref.args[0]);
   if (check->isError()) {
     return check;
   }
@@ -210,7 +220,7 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
     if (inferRefs[i]->args.empty()) {
       continue;
     }
-    const Type *constraint = TypeResolver(this->state).resolveTypeInner(inferRefs[i]->args[0]);
+    const Type *constraint = this->typeResolver->resolveTypeInner(inferRefs[i]->args[0]);
     if (constraint->isError()) {
       this->state.getScopeStack().closeTypeScope();
       return constraint;
@@ -218,7 +228,7 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
     const_cast<Type *>(infers[i])->setConstraint(constraint, {});
   }
   this->state.getTypeContext().enterExtendsClause();
-  const Type *pattern = TypeResolver(this->state).resolveTypeInner(ref.args[1]);
+  const Type *pattern = this->typeResolver->resolveTypeInner(ref.args[1]);
   this->state.getTypeContext().leaveExtendsClause();
   this->state.getScopeStack().closeTypeScope();
   if (pattern->isError()) {
@@ -229,7 +239,7 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
     return this->deferConditional(ref);
   }
   if (ref.args[0].kind() == TypeRefKind::NAME_REF &&
-      ConditionalTypes::isBinding(TypeDeclarer(this->state).lookupType(ref.args[0].name))) {
+      ConditionalTypes::isBinding(this->typeDeclarer->lookupType(ref.args[0].name))) {
     std::vector<const Type *> members = ConditionalTypes::distributed(check);
     if (members.size() != 1) {
       std::vector<const Type *> results;
@@ -247,7 +257,7 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
     }
   }
   InferMatch inference{infers, std::vector<const Type *>(infers.size(), nullptr)};
-  bool yes = ExtendsRelation(this->state).extendsType(check, pattern, &inference);
+  bool yes = this->extendsRelation->extendsType(check, pattern, &inference);
   this->state.getScopeStack().openTypeScope();
   for (size_t i = 0; yes && i < infers.size(); ++i) {
     const Type *bound = inference.bound[i];
@@ -260,10 +270,10 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
   const Type *result = nullptr;
   if (tail && branch.kind() == TypeRefKind::CONDITIONAL_REF) {
     this->state.getTypeContext().allowTailCall();
-    result = TypeResolver(this->state).resolveTypeInner(branch);
+    result = this->typeResolver->resolveTypeInner(branch);
   } else if (auto *alias = tail && branch.kind() == TypeRefKind::GENERIC_REF
                                ? llvm::dyn_cast_or_null<TypeAliasDecl>(
-                                     TypeDeclarer(this->state).lookupType(branch.name))
+                                     this->typeDeclarer->lookupType(branch.name))
                                : nullptr;
              alias && !alias->typeParams.empty()) {
     std::vector<const Type *> args;
@@ -277,7 +287,7 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
     }
     this->state.getTypeContext().rememberTailCall(alias, std::move(args));
   } else {
-    result = TypeResolver(this->state).resolveTypeInner(branch);
+    result = this->typeResolver->resolveTypeInner(branch);
   }
   this->state.getScopeStack().closeTypeScope();
 
@@ -306,7 +316,7 @@ const Type *ConditionalTypes::deferConditional(const TypeRef &ref) {
     std::vector<llvm::StringRef> names;
     ConditionalTypes::collectNames(ref, names);
     for (llvm::StringRef name : names) {
-      Stmt *decl = TypeDeclarer(this->state).lookupType(name);
+      Stmt *decl = this->typeDeclarer->lookupType(name);
       if (!decl) {
         continue;
       }
@@ -320,7 +330,7 @@ const Type *ConditionalTypes::deferConditional(const TypeRef &ref) {
   }
   std::vector<const Type *> operands{known->tag};
   for (llvm::StringRef name : known->bound) {
-    auto *alias = llvm::dyn_cast_or_null<TypeAliasDecl>(TypeDeclarer(this->state).lookupType(name));
+    auto *alias = llvm::dyn_cast_or_null<TypeAliasDecl>(this->typeDeclarer->lookupType(name));
     operands.push_back(alias && alias->resolved ? alias->resolved : Type::error());
   }
 
@@ -387,7 +397,7 @@ std::vector<const Type *> ConditionalTypes::conditionalBranches(const Type *cond
   bool muted = this->state.getDiagnostics().setMuted(true);
   std::vector<const Type *> branches;
   for (size_t i : {2, 3}) {
-    const Type *branch = TypeResolver(this->state).resolveTypeInner(info->ref->args[i]);
+    const Type *branch = this->typeResolver->resolveTypeInner(info->ref->args[i]);
     if (branch && !branch->isError()) {
       branches.push_back(branch);
     }
@@ -415,7 +425,7 @@ bool ConditionalTypes::fitsConditional(const Type *from, const Type *to, unsigne
     llvm::SmallPtrSet<const Type *, 8> seen;
     ConditionalTypes::collectParams(branch, params, seen);
     InferMatch match{params, std::vector<const Type *>(params.size(), nullptr)};
-    if (!params.empty() && ExtendsRelation(this->state).extendsType(from, branch, &match)) {
+    if (!params.empty() && this->extendsRelation->extendsType(from, branch, &match)) {
       return true;
     }
   }
@@ -427,7 +437,7 @@ ConditionalTypes::ResultIntersectionJoined
 ConditionalTypes::resolveIntersection(const TypeRef &ref) {
   std::vector<const Type *> parts;
   for (const TypeRef &arg : ref.args) {
-    parts.push_back(TypeResolver(this->state).resolveTypeInner(arg));
+    parts.push_back(this->typeResolver->resolveTypeInner(arg));
     if (parts.back()->isError()) {
       return ok(parts.back());
     }
@@ -443,14 +453,13 @@ ConditionalTypes::resolveIntersection(const TypeRef &ref) {
     for (size_t i : {0, 1}) {
       const Type *other = parts[1 - i];
       if (primitive(parts[i])) {
-        const Type *extracted =
-            TypeOperators(this->state)
-                .evalTypeOp(Type::typeOp(TypeOp::Extract, {other, parts[i]}), {other, parts[i]});
+        const Type *extracted = this->typeOperators->evalTypeOp(
+            Type::typeOp(TypeOp::Extract, {other, parts[i]}), {other, parts[i]});
         return ok(extracted);
       }
       if (emptyObject(parts[i])) {
-        const Type *defined = TypeOperators(this->state)
-                                  .evalTypeOp(Type::typeOp(TypeOp::NonNullable, {other}), {other});
+        const Type *defined =
+            this->typeOperators->evalTypeOp(Type::typeOp(TypeOp::NonNullable, {other}), {other});
         return ok(defined);
       }
     }
@@ -535,7 +544,7 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
     return nullptr;
   }
   auto erased = [&](FuncSymbol *fn) {
-    const Type *type = ReturnInferrer(this->state).functionType(fn);
+    const Type *type = this->returnInferrer->functionType(fn);
     std::vector<const Type *> args;
     for (const Type *p : fn->typeParams) {
       if (p->constraint()) {
@@ -549,10 +558,10 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
       }
     }
 
-    return TypeParams(this->state).substitute(type, fn->typeParams, args);
+    return this->typeParams->substitute(type, fn->typeParams, args);
   };
   if (ref.names().size() == 1) {
-    ScopeEntry entry = TopLevelChecker(this->state).lookupValue(ref.names().front());
+    ScopeEntry entry = this->topLevelChecker->lookupValue(ref.names().front());
     if (entry.func() && entry.func()->isGeneric()) {
       return erased(entry.func());
     }
@@ -561,7 +570,7 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
   if (ref.names().size() != 2) {
     return nullptr;
   }
-  VarSymbol *var = TopLevelChecker(this->state).lookupValue(ref.names().front()).var();
+  VarSymbol *var = this->topLevelChecker->lookupValue(ref.names().front()).var();
   if (!var || !var->type) {
     return nullptr;
   }
@@ -573,7 +582,7 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
   if (!cls || object->field(ref.names()[1])) {
     return nullptr;
   }
-  ClassDeclarer(this->state).completeClass(cls);
+  this->classDeclarer->completeClass(cls);
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, ref.names()[1], false);
   if (methods.empty() || !methods.back()->sym) {
     return nullptr;

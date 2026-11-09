@@ -6,11 +6,19 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class ClassDeclarer;
+class TypeRelations;
+class ReturnInferrer;
+class FunctionChecker;
+class ClassValueChecker;
+
 class MetadataChecker {
 public:
   using ResultMetadataTyped = Result<const Type *, MetadataCheckerMetadataTypeError>;
 
-  explicit MetadataChecker(SemanticState &owner);
+  MetadataChecker(SemanticState &owner, SemanticParts &all);
 
   const void *metadataKey(const Expr *key, std::string &label);
   ResultMetadataTyped metadataType(const void *key, llvm::StringRef label, llvm::SMLoc loc,
@@ -26,6 +34,12 @@ public:
 
 private:
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  FunctionChecker *functionChecker = nullptr;
+  ClassValueChecker *classValueChecker = nullptr;
 };
 
 }

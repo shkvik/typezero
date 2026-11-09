@@ -4,16 +4,20 @@
 
 namespace tz {
 
+class SemanticParts;
+class ReturnInferrer;
+
 class SemanticState;
 
 class ReturnCompleter : public Completer {
 public:
-  explicit ReturnCompleter(SemanticState &owner);
+  ReturnCompleter(SemanticState &owner, SemanticParts &all);
 
   const Type *completeReturnType(FuncSymbol *fn) override;
 
 private:
   SemanticState &state;
+  ReturnInferrer *returnInferrer = nullptr;
 };
 
 }

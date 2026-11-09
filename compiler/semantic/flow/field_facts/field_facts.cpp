@@ -1,6 +1,7 @@
 #include "compiler/semantic/flow/field_facts/field_facts.h"
 #include "compiler/semantic/bodies/objects/object_check_helpers/object_check_helpers.h"
 #include "compiler/semantic/library/stream/set_encoding_checker/set_encoding_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -9,8 +10,10 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-FieldFacts::FieldFacts(SemanticState &owner)
-    : state(owner) {}
+FieldFacts::FieldFacts(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->typeRelations = &all.getTypeRelations();
+}
 
 std::optional<FieldPath> FieldFacts::fieldPath(const Expr *expr) const {
   auto *member = dyn_cast<MemberExpr>(ObjectCheckHelpers::unnarrowed(expr));
@@ -62,7 +65,7 @@ Expr *FieldFacts::narrowedField(MemberExpr *member) {
   if (this->state.getStreamStore().hasStreamViews()) {
     if (std::optional<FieldPath> path = this->fieldPath(member)) {
       if (const Type *view = this->state.getStreamStore().findStreamView(*path, member->loc())) {
-        return TypeRelations(this->state).convert(member, view);
+        return this->typeRelations->convert(member, view);
       }
     }
   }
@@ -74,7 +77,7 @@ Expr *FieldFacts::narrowedField(MemberExpr *member) {
     return member;
   }
   if (const Type *type = this->state.getFlowState().findNarrowedField(*path)) {
-    return TypeRelations(this->state).convert(member, type);
+    return this->typeRelations->convert(member, type);
   }
 
   return member;

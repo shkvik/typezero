@@ -40,6 +40,9 @@ constexpr int64_t kLiteralRefCount = int64_t(1) << 62;
 
 }
 
+StringLowerer::StringLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 void StringLowerer::collectConcat(Expr *expr, std::vector<Expr *> &parts) {
   auto *bin = dyn_cast<BinaryExpr>(expr);
   if (bin && bin->op == BinaryOp::Add && bin->type->isString()) {
@@ -49,9 +52,6 @@ void StringLowerer::collectConcat(Expr *expr, std::vector<Expr *> &parts) {
     parts.push_back(expr);
   }
 }
-
-StringLowerer::StringLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Constant *StringLowerer::utf8Constant(llvm::StringRef text) {
   auto [it, inserted] = this->utf8Constants.try_emplace(text, nullptr);

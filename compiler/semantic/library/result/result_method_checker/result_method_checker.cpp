@@ -6,6 +6,7 @@
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/library/result/result_checker/result_checker.h"
 #include "compiler/semantic/library/result/result_types/result_types.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
@@ -15,6 +16,16 @@ using llvm::isa;
 
 namespace tz {
 
+ResultMethodChecker::ResultMethodChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->callbackChecker = &all.getCallbackChecker();
+}
+
 const Type *ResultMethodChecker::halfParam(const Type *half) {
   return half->isVoid() ? Type::undefinedTy() : half;
 }
@@ -22,9 +33,6 @@ const Type *ResultMethodChecker::halfParam(const Type *half) {
 bool ResultMethodChecker::givesType(const Type *half) {
   return !half->isNever() && !half->isVoid();
 }
-
-ResultMethodChecker::ResultMethodChecker(SemanticState &owner)
-    : state(owner) {}
 
 Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
                                              const Type *expected) {
@@ -43,10 +51,10 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
   llvm::StringRef name = member->name;
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
   };
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return call;
   }
   struct Method {
@@ -80,7 +88,7 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     return call;
   }
   ArgumentChecker::ResultArityMatches arity =
-      ArgumentChecker(this->state).checkArity(call, method->args, method->args);
+      this->argumentChecker->checkArity(call, method->args, method->args);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
@@ -95,8 +103,8 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
 
   if (builtin == Builtin::ResultUnwrapOr) {
     Expr *&arg = call->args[0];
-    arg = ExprChecker(this->state)
-              .checkExpr(arg, ResultMethodChecker::givesType(value) ? value : nullptr);
+    arg =
+        this->exprChecker->checkExpr(arg, ResultMethodChecker::givesType(value) ? value : nullptr);
     const Type *other = arg->type;
     if (other->isError()) {
       return call;
@@ -107,7 +115,7 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
       this->state.getDiagnostics().error(arg->loc(), message);
       return call;
     }
-    arg = TypeRelations(this->state).convert(arg, result);
+    arg = this->typeRelations->convert(arg, result);
     call->type = result;
     return call;
   }
@@ -120,7 +128,7 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
   }
   auto check = [&](Expr *&arg, const Type *half, const Type *ret) -> const Type * {
     if (half->isNever() && !isa<FunctionExpr>(arg)) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
       if (arg->type->isFunction()) {
         return arg->type->ret();
       }
@@ -137,7 +145,7 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     if (isa<FunctionExpr>(arg) && !sig.voidResult) {
       sig.ret = ret;
     }
-    arg = CallbackChecker(this->state).checkFunctionArg(arg, sig, 1, name);
+    arg = this->callbackChecker->checkFunctionArg(arg, sig, 1, name);
 
     return arg->type->isFunction() ? arg->type->ret() : nullptr;
   };
@@ -160,7 +168,7 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     const Type *both = wanted && !wanted->isVoid() ? wanted : nullptr;
     const Type *a = check(call->args[0], value, both);
     const Type *b = check(call->args[1], error, both);
-    FlowChecker(this->state).calledFunction();
+    this->flowChecker->calledFunction();
     if (!a || !b) {
       return call;
     }
@@ -181,7 +189,7 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     ret = check(call->args[0], onError ? error : value, nullptr);
     break;
   }
-  FlowChecker(this->state).calledFunction();
+  this->flowChecker->calledFunction();
   if (!ret) {
     return call;
   }

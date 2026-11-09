@@ -34,6 +34,9 @@ constexpr unsigned kMaxInlineCopies = 16;
 
 }
 
+InlineGeneratorLowerer::InlineGeneratorLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 unsigned InlineGeneratorLowerer::countYields(const FunctionDecl *fn) {
   unsigned count = 0;
   AstWalker::visitExprs(
@@ -41,9 +44,6 @@ unsigned InlineGeneratorLowerer::countYields(const FunctionDecl *fn) {
 
   return count;
 }
-
-InlineGeneratorLowerer::InlineGeneratorLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 bool InlineGeneratorLowerer::isInlinable(const FunctionDecl *decl) const {
   if (!decl->isGenerator || decl->isClosure() || !decl->sym || !decl->sym->hasReturnType() ||

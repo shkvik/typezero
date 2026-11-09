@@ -6,9 +6,23 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class DictChecker;
+class ExprChecker;
+class FlowChecker;
+class IndexProofs;
+class BinaryChecker;
+class TypeRelations;
+class ConstantFolder;
+class GenericChecker;
+class ArgumentChecker;
+class IteratorMethods;
+class GeneratorChecker;
+
 class MathChecker {
 public:
-  explicit MathChecker(SemanticState &owner);
+  MathChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkMathCall(CallExpr *call, MemberExpr *member, const Type *expected);
   Expr *checkMinMaxSpread(CallExpr *call, const Type *hint);
@@ -26,6 +40,18 @@ private:
   static ResultRoundedDouble roundedDouble(llvm::StringRef name, const Type *type);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  DictChecker *dictChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  BinaryChecker *binaryChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ConstantFolder *constantFolder = nullptr;
+  GenericChecker *genericChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  IteratorMethods *iteratorMethods = nullptr;
+  GeneratorChecker *generatorChecker = nullptr;
 };
 
 }

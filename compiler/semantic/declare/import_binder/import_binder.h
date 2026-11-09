@@ -6,11 +6,18 @@
 
 namespace tz {
 
+class SemanticParts;
+class ModuleDeclarer;
+class BuiltinModuleChecker;
+
 class ImportBinder {
 public:
-  explicit ImportBinder(SemanticState &owner);
+  ImportBinder(SemanticState &owner, SemanticParts &all);
 
   void bindImports();
+  void enterModule(Module *module);
+  void enterHomeModule(const FunctionDecl *fn);
+  void bindAllImports(const std::vector<Module *> &modules);
   void resolveImports(Module *module);
   void noteImportsInFunctions(SourceFile &program);
   FunctionDecl *cycleCallee(FunctionDecl *fn, llvm::StringRef name);
@@ -30,6 +37,8 @@ private:
   void importName(ModuleState &here, const ImportDecl &decl, const ModuleName &name);
 
   SemanticState &state;
+  ModuleDeclarer *moduleDeclarer = nullptr;
+  BuiltinModuleChecker *builtinModuleChecker = nullptr;
 };
 
 }

@@ -6,9 +6,26 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class DictChecker;
+class ExprChecker;
+class JsonChecker;
+class NameChecker;
+class UnionChecker;
+class UtilityTypes;
+class MemberChecker;
+class StaticChecker;
+class TypeRelations;
+class NestedFunctions;
+class TopLevelChecker;
+class KeyedFieldChecker;
+class ClassMemberChecker;
+class RuntimeObjectChecker;
+
 class TargetChecker {
 public:
-  explicit TargetChecker(SemanticState &owner);
+  TargetChecker(SemanticState &owner, SemanticParts &all);
 
   VarSymbol *checkVarTarget(NameExpr *name);
   const Type *checkAssignTarget(Expr *&target, bool compound);
@@ -34,6 +51,21 @@ private:
                                               bool compound);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  DictChecker *dictChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  JsonChecker *jsonChecker = nullptr;
+  NameChecker *nameChecker = nullptr;
+  UnionChecker *unionChecker = nullptr;
+  UtilityTypes *utilityTypes = nullptr;
+  MemberChecker *memberChecker = nullptr;
+  StaticChecker *staticChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  NestedFunctions *nestedFunctions = nullptr;
+  TopLevelChecker *topLevelChecker = nullptr;
+  KeyedFieldChecker *keyedFieldChecker = nullptr;
+  ClassMemberChecker *classMemberChecker = nullptr;
+  RuntimeObjectChecker *runtimeObjectChecker = nullptr;
 };
 
 }

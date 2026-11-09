@@ -30,6 +30,9 @@ constexpr int64_t kStaticRefCount = int64_t(1) << 62;
 
 }
 
+ReflectLowerer::ReflectLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 std::string ReflectLowerer::className(const ClassDecl *cls) {
   return cls->name.empty() && cls->type ? cls->type->name().str() : cls->name.str();
 }
@@ -43,9 +46,6 @@ std::vector<FunctionDecl *> ReflectLowerer::constructorsOf(const ClassDecl *cls)
 
   return {};
 }
-
-ReflectLowerer::ReflectLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Function *ReflectLowerer::constructFunction(const ClassDecl *cls) {
   if (llvm::Function *found = this->constructFunctions.lookup(cls)) {

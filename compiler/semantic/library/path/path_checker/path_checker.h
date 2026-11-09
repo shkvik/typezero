@@ -6,9 +6,15 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ExprChecker;
+class TypeRelations;
+class ArgumentChecker;
+
 class PathChecker {
 public:
-  explicit PathChecker(SemanticState &owner);
+  PathChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkPathCall(CallExpr *call, NodeModule module, llvm::StringRef fn, llvm::SMLoc loc);
   Expr *checkPathValue(NodeModule module, llvm::StringRef name, Expr *expr);
@@ -23,6 +29,10 @@ private:
   static const Type *formatInputType();
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

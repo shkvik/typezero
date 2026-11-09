@@ -8,6 +8,12 @@
 
 namespace tz {
 
+DebugTypes::DebugTypes(Lowering &owner, llvm::DIBuilder &debugBuilder,
+                       llvm::DICompileUnit *compileUnit)
+    : lowering(owner),
+      builder(debugBuilder),
+      unit(compileUnit) {}
+
 const char *DebugTypes::slotName(UnionSlot slot) {
   switch (slot) {
   case UnionSlot::String:
@@ -56,12 +62,6 @@ const char *DebugTypes::slotName(UnionSlot slot) {
 
   return "None";
 }
-
-DebugTypes::DebugTypes(Lowering &owner, llvm::DIBuilder &debugBuilder,
-                       llvm::DICompileUnit *compileUnit)
-    : lowering(owner),
-      builder(debugBuilder),
-      unit(compileUnit) {}
 
 bool DebugTypes::usesAtoms() const {
   return this->atomType != nullptr;

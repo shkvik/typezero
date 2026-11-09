@@ -10,6 +10,7 @@
 #include "compiler/semantic/library/stream/chunk_types/chunk_types.h"
 #include "compiler/semantic/library/stream/stream_pipeline/stream_pipeline.h"
 #include "compiler/semantic/library/stream/stream_sources/stream_sources.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::dyn_cast;
@@ -26,8 +27,15 @@ struct StreamEscape {
 
 }
 
-SetEncodingChecker::SetEncodingChecker(SemanticState &owner)
-    : state(owner) {}
+SetEncodingChecker::SetEncodingChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->chunkTypes = &all.getChunkTypes();
+  this->fieldFacts = &all.getFieldFacts();
+  this->streamSources = &all.getStreamSources();
+  this->emitterChecker = &all.getEmitterChecker();
+  this->processChecker = &all.getProcessChecker();
+  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+}
 
 const Type *SetEncodingChecker::encodedStreamType(ClassDecl *cls, llvm::SMLoc loc) {
   for (ClassDecl *c = cls; c; c = c->parent) {
@@ -50,7 +58,7 @@ const Type *SetEncodingChecker::encodedStreamType(ClassDecl *cls, llvm::SMLoc lo
       return nullptr;
     }
     GenericClassInstantiator::ResultClassMade made =
-        GenericClassInstantiator(this->state).instantiateClass(generic, args, loc);
+        this->genericClassInstantiator->instantiateClass(generic, args, loc);
     if (made.isErr() &&
         made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
       llvm::SMLoc at =
@@ -105,11 +113,10 @@ SetEncodingChecker::ResultStdinIsPlaced SetEncodingChecker::stdinPlace() const {
 
 Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, ClassDecl *cls) {
   const Type *receiver = member->object->type;
-  StreamChunks chunks = ChunkTypes(this->state).streamChunksOf(cls);
+  StreamChunks chunks = this->chunkTypes->streamChunksOf(cls);
   llvm::SMLoc loc = member->loc();
   auto plainCall = [&]() -> Expr * {
-    EmitterChecker(this->state)
-        .callLibraryMethod(call, member, cls, "setEncoding", {}, nullptr, false);
+    this->emitterChecker->callLibraryMethod(call, member, cls, "setEncoding", {}, nullptr, false);
     if (!call->type->isError()) {
       call->type = receiver;
     }
@@ -141,12 +148,12 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
     }
     stdinStream = true;
     path = FieldPath{};
-    path->var = StreamSources(this->state).processStdinVar();
+    path->var = this->streamSources->processStdinVar();
   } else if (auto *name = dyn_cast<NameExpr>(object); name && name->var()) {
     path = FieldPath{};
     path->var = name->var();
   } else {
-    path = FieldFacts(this->state).fieldPath(object);
+    path = this->fieldFacts->fieldPath(object);
   }
   auto reject = [&](const std::string &why) {
     std::string message = ErrorTextSetEncoding::changes(why);
@@ -211,13 +218,13 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
       if (auto *c = dyn_cast<CallExpr>(e)) {
         return c->func() && c->func()->name == "processStdin";
       }
-      return ProcessChecker(this->state).isProcessMember(e, "stdin");
+      return this->processChecker->isProcessMember(e, "stdin");
     }
     if (path->names.empty()) {
       auto *name = dyn_cast<NameExpr>(e);
       return name && (name->var() == root || (!name->var() && name->name == root->name));
     }
-    std::optional<FieldPath> p = FieldFacts(this->state).fieldPath(e);
+    std::optional<FieldPath> p = this->fieldFacts->fieldPath(e);
 
     return p && *p == *path;
   };

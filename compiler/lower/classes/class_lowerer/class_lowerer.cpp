@@ -24,6 +24,9 @@ using llvm::isa;
 
 namespace tz {
 
+ClassLowerer::ClassLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 bool ClassLowerer::staysDuringCall(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit() || conv->shortCircuit || !conv->operand->type->isOptional()) {
@@ -39,9 +42,6 @@ bool ClassLowerer::staysDuringCall(const Expr *expr) {
 
   return var->isConst || (!var->boxed() && !(var->isGlobal() && var->usedInFunction()));
 }
-
-ClassLowerer::ClassLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Value *ClassLowerer::allocInstance(const ClassDecl *cls) {
   return this->allocInstance(cls, this->lowering.isCyclic(cls->type));

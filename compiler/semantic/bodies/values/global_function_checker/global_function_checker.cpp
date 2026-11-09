@@ -12,6 +12,7 @@
 #include "compiler/semantic/library/decimal/decimal_checker/decimal_checker_errors.h"
 #include "compiler/semantic/library/math/math_checker/math_checker.h"
 #include "compiler/semantic/library/regex/regex_checker/regex_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cstring>
@@ -20,8 +21,21 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-GlobalFunctionChecker::GlobalFunctionChecker(SemanticState &owner)
-    : state(owner) {}
+GlobalFunctionChecker::GlobalFunctionChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->prelude = &all.getPrelude();
+  this->callChecker = &all.getCallChecker();
+  this->dateChecker = &all.getDateChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->mathChecker = &all.getMathChecker();
+  this->regexChecker = &all.getRegexChecker();
+  this->truthChecker = &all.getTruthChecker();
+  this->binaryChecker = &all.getBinaryChecker();
+  this->concatChecker = &all.getConcatChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->decimalChecker = &all.getDecimalChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+}
 
 GlobalFunctionChecker::ResultGlobalCallMade GlobalFunctionChecker::checkGlobalCall(CallExpr *call,
                                                                                    NameExpr *name) {
@@ -32,17 +46,17 @@ GlobalFunctionChecker::ResultGlobalCallMade GlobalFunctionChecker::checkGlobalCa
                                               "encodeURI", "decodeURIComponent",
                                               "decodeURI", "escape",
                                               "unescape"};
-  if (CallChecker(this->state).isGlobalName(name, "RegExp")) {
-    Expr *regex = CallChecker(this->state).rejectSpread(call)
+  if (this->callChecker->isGlobalName(name, "RegExp")) {
+    Expr *regex = this->callChecker->rejectSpread(call)
                       ? call
-                      : RegexChecker(this->state).checkRegExpConstructor(name->loc(), call->args);
+                      : this->regexChecker->checkRegExpConstructor(name->loc(), call->args);
     return ok(regex);
   }
-  if (CallChecker(this->state).isGlobalName(name, "Date")) {
-    Expr *date = DateChecker(this->state).checkDateFunction(call, name);
+  if (this->callChecker->isGlobalName(name, "Date")) {
+    Expr *date = this->dateChecker->checkDateFunction(call, name);
     return ok(date);
   }
-  auto isGlobal = [&](llvm::StringRef n) { return CallChecker(this->state).isGlobalName(name, n); };
+  auto isGlobal = [&](llvm::StringRef n) { return this->callChecker->isGlobalName(name, n); };
   if (!llvm::any_of(names, isGlobal)) {
     return err(GlobalFunctionCheckerCheckGlobalCallError{
         .code = GlobalFunctionCheckerCheckGlobalCallErrorCode::NOT_A_GLOBAL,
@@ -81,21 +95,21 @@ GlobalFunctionChecker::ResultGlobalCallMade GlobalFunctionChecker::checkGlobalCa
 GlobalFunctionChecker::ResultFunctionCalled
 GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   call->type = Type::error();
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return err(GlobalFunctionCheckerCheckGlobalFunctionError{
         .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::ALREADY_REPORTED,
         .message = "",
     });
   }
   if (fn == "decimal") {
-    Expr *made = DecimalChecker(this->state).checkDecimalCall(call, loc);
+    Expr *made = this->decimalChecker->checkDecimalCall(call, loc);
     return ok(made);
   }
   auto *encoded = call->args.size() == 1 ? dyn_cast<CallExpr>(call->args[0]) : nullptr;
   bool encodedInner =
-      encoded && CallChecker(this->state).isGlobalName(encoded->callee, "encodeURIComponent");
+      encoded && this->callChecker->isGlobalName(encoded->callee, "encodeURIComponent");
   if (fn == "unescape" && encodedInner) {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     std::string message = ErrorTextGlobalFunction::toBytes();
 
     return err(GlobalFunctionCheckerCheckGlobalFunctionError{
@@ -104,7 +118,7 @@ GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, l
     });
   }
   if (fn == "escape") {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     std::string message = ErrorTextGlobalFunction::escape();
 
     return err(GlobalFunctionCheckerCheckGlobalFunctionError{
@@ -113,7 +127,7 @@ GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, l
     });
   }
   if (fn == "unescape") {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     std::string message = ErrorTextGlobalFunction::unescape();
 
     return err(GlobalFunctionCheckerCheckGlobalFunctionError{
@@ -132,9 +146,9 @@ GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, l
     }
     auto *escaped = call->args.size() == 1 ? dyn_cast<CallExpr>(call->args[0]) : nullptr;
     if (escaped && fn == "decodeURIComponent" &&
-        CallChecker(this->state).isGlobalName(escaped->callee, "escape")) {
+        this->callChecker->isGlobalName(escaped->callee, "escape")) {
       for (Expr *&arg : escaped->args) {
-        arg = ExprChecker(this->state).checkExpr(arg);
+        arg = this->exprChecker->checkExpr(arg);
       }
       escaped->type = Type::error();
       std::string message = ErrorTextGlobalFunction::fromBytes();
@@ -144,22 +158,22 @@ GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, l
           .message = message,
       });
     }
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 1, 1);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
     if (arity.isErr()) {
       return err(GlobalFunctionCheckerCheckGlobalFunctionError{
           .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::WRONG_ARITY,
           .message = arity.error().message,
       });
     }
-    Expr *arg = ExprChecker(this->state).checkExpr(call->args[0], Type::string());
+    Expr *arg = this->exprChecker->checkExpr(call->args[0], Type::string());
     if (fn == "encodeURIComponent" && (arg->type->isNumeric() || arg->type->isBool())) {
-      call->args[0] = ConcatChecker(this->state).toStringOperand(arg);
+      call->args[0] = this->concatChecker->toStringOperand(arg);
     } else {
-      call->args[0] = TypeRelations(this->state).coerce(arg, Type::string());
+      call->args[0] = this->typeRelations->coerce(arg, Type::string());
     }
     call->target = BuiltinCall{.builtin = builtin};
     call->type = builtin == Builtin::UriDecodeComponent || builtin == Builtin::UriDecode
-                     ? Type::result(Type::string(), Prelude(this->state).builtinType("UriError"))
+                     ? Type::result(Type::string(), this->prelude->builtinType("UriError"))
                      : Type::string();
     return ok(call);
   }
@@ -167,14 +181,14 @@ GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, l
     std::string quoted = ErrorTextBigInt::quoted("BigInt");
     std::string bigint = ErrorTextBigInt::none(quoted);
     this->state.getDiagnostics().error(loc, bigint);
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return err(GlobalFunctionCheckerCheckGlobalFunctionError{
         .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::ALREADY_REPORTED,
         .message = "",
     });
   }
   if (fn == "Boolean") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 1);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
     if (arity.isErr()) {
       return err(GlobalFunctionCheckerCheckGlobalFunctionError{
           .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::WRONG_ARITY,
@@ -187,12 +201,12 @@ GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, l
       return ok(no);
     }
     Flow whenTrue, whenFalse;
-    Expr *truth = TruthChecker(this->state).checkBooleanCall(call, whenTrue, whenFalse);
+    Expr *truth = this->truthChecker->checkBooleanCall(call, whenTrue, whenFalse);
     this->state.getFlowState().replaceFlow(FlowChecker::join(whenTrue, whenFalse));
     return ok(truth);
   }
   if (fn == "String" || fn == "Number") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 1);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
     if (arity.isErr()) {
       return err(GlobalFunctionCheckerCheckGlobalFunctionError{
           .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::WRONG_ARITY,
@@ -201,14 +215,14 @@ GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, l
     }
     if (fn == "String") {
       for (Expr *&arg : call->args) {
-        arg = ConcatChecker(this->state).toStringOperand(ExprChecker(this->state).checkExpr(arg));
+        arg = this->concatChecker->toStringOperand(this->exprChecker->checkExpr(arg));
       }
       call->target = BuiltinCall{.builtin = Builtin::StringOf};
       call->type = Type::string();
       return ok(call);
     }
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
       const Type *type = arg->type;
       const Type *base = type->nonOptional();
       if (type->isError()) {
@@ -218,7 +232,7 @@ GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, l
         });
       }
       if (type->isDate()) {
-        Expr *time = DateChecker(this->state).dateTime(arg);
+        Expr *time = this->dateChecker->dateTime(arg);
         return ok(time);
       }
       if (type->isOptional() || type->isUndefined()) {
@@ -230,7 +244,7 @@ GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, l
         });
       }
       if (base->isNumeric()) {
-        arg = TypeRelations(this->state).convert(arg, Type::doubleTy());
+        arg = this->typeRelations->convert(arg, Type::doubleTy());
       } else if (!base->isBool() && !base->isString() && !base->isDecimal()) {
         std::string message = ErrorTextGlobalFunction::wrongType(type->name());
 
@@ -241,31 +255,29 @@ GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, l
       }
     }
     call->target = BuiltinCall{.builtin = Builtin::NumberOf};
-    call->type =
-        !call->args.empty() && call->args[0]->type->isString()
-            ? Type::result(Type::doubleTy(), Prelude(this->state).builtinType("NumberError"))
-            : Type::doubleTy();
+    call->type = !call->args.empty() && call->args[0]->type->isString()
+                     ? Type::result(Type::doubleTy(), this->prelude->builtinType("NumberError"))
+                     : Type::doubleTy();
     return ok(call);
   }
 
   if (fn == "parseInt" || fn == "parseFloat") {
     bool isInt = fn == "parseInt";
     ArgumentChecker::ResultArityMatches arity =
-        ArgumentChecker(this->state).checkArity(call, 1, isInt ? 2 : 1);
+        this->argumentChecker->checkArity(call, 1, isInt ? 2 : 1);
     if (arity.isErr()) {
       return err(GlobalFunctionCheckerCheckGlobalFunctionError{
           .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::WRONG_ARITY,
           .message = arity.error().message,
       });
     }
-    call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], Type::string());
+    call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
     if (call->args.size() == 2) {
-      call->args[1] =
-          BinaryChecker(this->state).toInt32(MathChecker(this->state).numericArg(call->args[1]));
+      call->args[1] = this->binaryChecker->toInt32(this->mathChecker->numericArg(call->args[1]));
     }
     call->target = BuiltinCall{.builtin = isInt ? Builtin::ParseInt : Builtin::ParseFloat};
     call->type = Type::result(isInt ? Type::intTy() : Type::doubleTy(),
-                              Prelude(this->state).builtinType("NumberError"));
+                              this->prelude->builtinType("NumberError"));
     return ok(call);
   }
 

@@ -1,5 +1,6 @@
 #include "compiler/semantic/types/template_types/template_types.h"
 #include "compiler/program/to_utf8/to_utf8.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/conditional_check_helpers/conditional_check_helpers.h"
 #include "compiler/semantic/types/extends_relation/extends_relation.h"
 #include "compiler/semantic/types/type_operators/type_operators.h"
@@ -14,6 +15,13 @@ namespace {
 
 constexpr size_t kMaxTemplateStrings = 100000;
 
+}
+
+TemplateTypes::TemplateTypes(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->typeResolver = &all.getTypeResolver();
+  this->typeOperators = &all.getTypeOperators();
+  this->extendsRelation = &all.getExtendsRelation();
 }
 
 std::u16string TemplateTypes::utf16(llvm::StringRef text) {
@@ -174,9 +182,6 @@ TemplateTypes::ResultCountAllowed TemplateTypes::stringCount(size_t count) {
   return ok(count);
 }
 
-TemplateTypes::TemplateTypes(SemanticState &owner)
-    : state(owner) {}
-
 bool TemplateTypes::matchTemplate(const std::u16string &text, llvm::ArrayRef<const Type *> parts,
                                   InferMatch *inference) {
   std::vector<std::u16string> texts;
@@ -213,7 +218,7 @@ bool TemplateTypes::matchTemplate(const std::u16string &text, llvm::ArrayRef<con
         piece = number->name() == ToUtf8::toUtf8(pieces[k]) ? number : constraint->nonOptional();
       }
     }
-    if (!ExtendsRelation(this->state).extendsType(piece, hole, inference)) {
+    if (!this->extendsRelation->extendsType(piece, hole, inference)) {
       return false;
     }
   }
@@ -228,7 +233,7 @@ const Type *TemplateTypes::resolveTemplate(const TypeRef &ref) {
     if (i >= ref.args.size()) {
       break;
     }
-    const Type *hole = TypeResolver(this->state).resolveTypeInner(ref.args[i]);
+    const Type *hole = this->typeResolver->resolveTypeInner(ref.args[i]);
     if (hole->isError()) {
       return hole;
     }
@@ -243,7 +248,7 @@ const Type *TemplateTypes::resolveTemplate(const TypeRef &ref) {
   }
   this->state.getTypeContext().rememberTemplateLoc(ref.loc);
   const Type *type =
-      TypeOperators(this->state).evalTypeOp(Type::typeOp(TypeOp::Template, operands), operands);
+      this->typeOperators->evalTypeOp(Type::typeOp(TypeOp::Template, operands), operands);
   this->state.getTypeContext().forgetTemplateLoc();
 
   return type;

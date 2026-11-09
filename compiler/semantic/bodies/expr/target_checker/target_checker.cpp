@@ -11,6 +11,7 @@
 #include "compiler/semantic/library/builtin_modules/runtime_object_checker/runtime_object_checker.h"
 #include "compiler/semantic/library/json/json_checker/json_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/union_checker/union_checker.h"
 #include "compiler/semantic/types/utility_types/utility_types.h"
@@ -22,8 +23,24 @@ using llvm::isa;
 
 namespace tz {
 
-TargetChecker::TargetChecker(SemanticState &owner)
-    : state(owner) {}
+TargetChecker::TargetChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->dictChecker = &all.getDictChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->jsonChecker = &all.getJsonChecker();
+  this->nameChecker = &all.getNameChecker();
+  this->unionChecker = &all.getUnionChecker();
+  this->utilityTypes = &all.getUtilityTypes();
+  this->memberChecker = &all.getMemberChecker();
+  this->staticChecker = &all.getStaticChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->nestedFunctions = &all.getNestedFunctions();
+  this->topLevelChecker = &all.getTopLevelChecker();
+  this->keyedFieldChecker = &all.getKeyedFieldChecker();
+  this->classMemberChecker = &all.getClassMemberChecker();
+  this->runtimeObjectChecker = &all.getRuntimeObjectChecker();
+}
 
 TargetChecker::ResultIndexIsNotBytes TargetChecker::indexNotBytes(const Type *type) {
   if (type->isBytes()) {
@@ -186,10 +203,10 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
   }
 
   if (auto *index = dyn_cast<IndexExpr>(target)) {
-    index->object = ExprChecker(this->state).checkExpr(index->object);
+    index->object = this->exprChecker->checkExpr(index->object);
     const Type *type = index->object->type;
     index->type = Type::error();
-    UtilityTypes::ResultGenericIndexed generic = UtilityTypes(this->state).checkGenericIndex(index);
+    UtilityTypes::ResultGenericIndexed generic = this->utilityTypes->checkGenericIndex(index);
     bool genericIndex =
         generic.isOk() ||
         generic.error().code != UtilityTypesCheckGenericIndexErrorCode::NOT_A_GENERIC_INDEX;
@@ -200,11 +217,11 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
       return index->type;
     }
     if (type->nonOptional()->isJson()) {
-      return JsonChecker(this->state).checkJsonTarget(index);
+      return this->jsonChecker->checkJsonTarget(index);
     }
     if (type->isDict()) {
       DictChecker::ResultRecordTargetType value =
-          DictChecker(this->state).checkDictTarget(index, compound);
+          this->dictChecker->checkDictTarget(index, compound);
       if (value.isErr()) {
         this->state.getDiagnostics().error(index->loc(), value.error().message);
         return Type::error();
@@ -212,20 +229,20 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
       return value.value();
     }
     if (type->isTypedArray()) {
-      index->index = MemberChecker(this->state).checkPosition(index->index);
+      index->index = this->memberChecker->checkPosition(index->index);
       index->type =
           type->bytes() == Type::Bytes::Uint8Clamped ? Type::intTy() : type->elementType();
       return index->type;
     }
     ResultIndexIsNotBytes notBytes = TargetChecker::indexNotBytes(type);
     if (notBytes.isErr()) {
-      index->index = ExprChecker(this->state).checkExpr(index->index);
+      index->index = this->exprChecker->checkExpr(index->index);
       this->state.getDiagnostics().error(index->loc(), notBytes.error().message);
       return Type::error();
     }
     if (type->isObject()) {
       KeyedFieldChecker::ResultKeyedFieldRead written =
-          KeyedFieldChecker(this->state).checkKeyedField(index, true);
+          this->keyedFieldChecker->checkKeyedField(index, true);
       if (written.isErr() &&
           written.error().code != KeyedFieldCheckerCheckKeyedFieldErrorCode::ALREADY_REPORTED) {
         bool wrongKey = KeyedFieldChecker::wrongKey(written.error().code);
@@ -241,15 +258,15 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
         return Type::error();
       }
       target = member;
-      return ClassMemberChecker(this->state).checkFieldTarget(member, compound);
+      return this->classMemberChecker->checkFieldTarget(member, compound);
     }
     ResultObjectIsDefined defined = TargetChecker::objectDefined(type);
     if (defined.isErr()) {
-      index->index = ExprChecker(this->state).checkExpr(index->index);
+      index->index = this->exprChecker->checkExpr(index->index);
       this->state.getDiagnostics().error(index->object->loc(), defined.error().message);
       return Type::error();
     }
-    index->index = MemberChecker(this->state).checkPosition(index->index);
+    index->index = this->memberChecker->checkPosition(index->index);
     if (type->isError()) {
       return type;
     }
@@ -267,13 +284,13 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
 
   if (auto *member = dyn_cast<MemberExpr>(target)) {
     auto *name = dyn_cast<NameExpr>(member->object);
-    if (ClassDecl *cls = name ? Scopes(this->state).lookup(name->name).cls() : nullptr) {
-      return StaticChecker(this->state).checkStaticTarget(target, cls);
+    if (ClassDecl *cls = name ? this->scopes->lookup(name->name).cls() : nullptr) {
+      return this->staticChecker->checkStaticTarget(target, cls);
     }
     if (name && name->name == "this") {
       this->state.getClassContext().rememberThisMember(member->name);
     }
-    member->object = ExprChecker(this->state).checkExpr(member->object);
+    member->object = this->exprChecker->checkExpr(member->object);
     this->state.getClassContext().forgetThisMember();
     const Type *type = member->object->type;
     member->type = Type::error();
@@ -281,15 +298,15 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
       return type;
     }
     if (type->nonOptional()->isJson()) {
-      return JsonChecker(this->state).checkJsonTarget(member);
+      return this->jsonChecker->checkJsonTarget(member);
     }
     if (ClassDecl *cls = const_cast<ClassDecl *>(type->classRef());
         cls && cls->type && isa<NameExpr>(member->object)) {
-      return StaticChecker(this->state).checkStaticTarget(target, cls);
+      return this->staticChecker->checkStaticTarget(target, cls);
     }
     if (type->isDict()) {
       DictChecker::ResultRecordTargetType value =
-          DictChecker(this->state).checkDictTarget(member, compound);
+          this->dictChecker->checkDictTarget(member, compound);
       if (value.isErr()) {
         this->state.getDiagnostics().error(member->loc(), value.error().message);
         return Type::error();
@@ -302,12 +319,12 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
       return Type::error();
     }
     if (type->isUnion()) {
-      if (const Type *common = UnionChecker(this->state).commonBaseWith(type, member->name)) {
-        member->object = TypeRelations(this->state).convert(member->object, common);
-        return ClassMemberChecker(this->state).checkFieldTarget(member, compound);
+      if (const Type *common = this->unionChecker->commonBaseWith(type, member->name)) {
+        member->object = this->typeRelations->convert(member->object, common);
+        return this->classMemberChecker->checkFieldTarget(member, compound);
       }
       UnionChecker::ResultUnionFieldTarget unionField =
-          UnionChecker(this->state).checkUnionFieldTarget(member);
+          this->unionChecker->checkUnionFieldTarget(member);
       if (unionField.isErr()) {
         this->state.getDiagnostics().error(member->loc(), unionField.error().message);
       }
@@ -319,10 +336,10 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
       return Type::error();
     }
     if (type->isRuntimeObject()) {
-      return RuntimeObjectChecker(this->state).checkRuntimeTarget(member, compound);
+      return this->runtimeObjectChecker->checkRuntimeTarget(member, compound);
     }
     if (type->isObject() || (type->isOptional() && type->inner()->isObject())) {
-      return ClassMemberChecker(this->state).checkFieldTarget(member, compound);
+      return this->classMemberChecker->checkFieldTarget(member, compound);
     }
     ResultFieldIsWritable writable = TargetChecker::memberWritable(type, member, compound);
     if (writable.isErr()) {
@@ -347,14 +364,14 @@ VarSymbol *TargetChecker::checkVarTarget(NameExpr *name) {
     this->state.getDiagnostics().error(name->loc(), thisTarget.error().message);
     return nullptr;
   }
-  ScopeEntry entry = TopLevelChecker(this->state).lookupValue(name->name);
+  ScopeEntry entry = this->topLevelChecker->lookupValue(name->name);
   if (!entry.var()) {
-    NameChecker(this->state).checkName(name);
+    this->nameChecker->checkName(name);
     return nullptr;
   }
   name->binding = NamedVar{.var = entry.var()};
-  name->type = Scopes(this->state).varType(entry.var());
-  Scopes::ResultNameIsVisible visible = Scopes(this->state).checkVisible(name, entry.var());
+  name->type = this->scopes->varType(entry.var());
+  Scopes::ResultNameIsVisible visible = this->scopes->checkVisible(name, entry.var());
   if (visible.isErr()) {
     this->state.getDiagnostics().error(name->loc(), visible.error().message);
   }
@@ -363,13 +380,13 @@ VarSymbol *TargetChecker::checkVarTarget(NameExpr *name) {
     this->state.getDiagnostics().error(name->loc(), mutableVar.error().message);
   } else {
     TopLevelChecker::ResultVarNotImported writable =
-        TopLevelChecker(this->state).checkImportAssign(name, entry.var());
+        this->topLevelChecker->checkImportAssign(name, entry.var());
     if (writable.isErr()) {
       this->state.getDiagnostics().error(name->loc(), writable.error().message);
     }
   }
   entry.var()->reassigned = true;
-  NestedFunctions(this->state).noteUse(entry.var(), name->loc());
+  this->nestedFunctions->noteUse(entry.var(), name->loc());
 
   return entry.var();
 }

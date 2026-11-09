@@ -13,6 +13,16 @@ using llvm::isa;
 
 namespace tz {
 
+Inference::Inference(llvm::ArrayRef<const Type *> typeParams, const AliasStore &aliases,
+                     TypeOf elementOfType)
+    : params(typeParams),
+      candidates(typeParams.size()),
+      weakCandidates(typeParams.size()),
+      literalCandidates(typeParams.size()),
+      undefinedSeen(typeParams.size(), false),
+      origins(aliases),
+      elementOf(std::move(elementOfType)) {}
+
 const Type *Inference::paramsAsList(const Type *fn, size_t from) {
   llvm::ArrayRef<const Type *> params = fn->params();
   size_t fixed = params.size() - (fn->hasRest() ? 1 : 0);
@@ -38,16 +48,6 @@ const Type *Inference::listSlice(const Type *list, size_t begin, size_t end, boo
 
   return Type::argumentList(elements, min, last ? list->tupleRest() : nullptr);
 }
-
-Inference::Inference(llvm::ArrayRef<const Type *> typeParams, const AliasStore &aliases,
-                     TypeOf elementOfType)
-    : params(typeParams),
-      candidates(typeParams.size()),
-      weakCandidates(typeParams.size()),
-      literalCandidates(typeParams.size()),
-      undefinedSeen(typeParams.size(), false),
-      origins(aliases),
-      elementOf(std::move(elementOfType)) {}
 
 bool Inference::hasDeferred() const {
   return !this->deferred.empty();

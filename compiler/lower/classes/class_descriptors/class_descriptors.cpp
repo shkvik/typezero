@@ -21,6 +21,9 @@ constexpr uint32_t kMethodField = 0xFFFFFFFFu;
 
 }
 
+ClassDescriptors::ClassDescriptors(Lowering &owner)
+    : lowering(owner) {}
+
 std::vector<FunctionDecl *> ClassDescriptors::instanceMethods(const ClassDecl *cls) {
   std::vector<FunctionDecl *> methods;
   for (FunctionDecl *fn : cls->methods) {
@@ -41,9 +44,6 @@ std::vector<FunctionDecl *> ClassDescriptors::instanceMethods(const ClassDecl *c
 
   return methods;
 }
-
-ClassDescriptors::ClassDescriptors(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Constant *ClassDescriptors::dropDescriptor(llvm::Function *drop) {
   llvm::Constant *&descriptor = this->lowering.dropDescriptors[drop];

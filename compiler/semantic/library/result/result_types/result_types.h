@@ -6,11 +6,17 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class TypeDeclarer;
+class TypeResolver;
+class TypeRelations;
+
 class ResultTypes {
 public:
   using ResultImportSource = Result<const ImportDecl *, ResultTypesImportSourceError>;
 
-  explicit ResultTypes(SemanticState &owner);
+  ResultTypes(SemanticState &owner, SemanticParts &all);
 
   llvm::StringRef resultName(llvm::StringRef name) const;
   llvm::StringRef resultTypeName(llvm::StringRef name) const;
@@ -27,6 +33,10 @@ private:
   static llvm::StringRef findName(llvm::ArrayRef<llvm::StringLiteral> names, llvm::StringRef name);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  TypeDeclarer *typeDeclarer = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  TypeRelations *typeRelations = nullptr;
 };
 
 }

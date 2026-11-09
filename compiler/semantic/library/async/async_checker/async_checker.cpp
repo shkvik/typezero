@@ -14,6 +14,7 @@
 #include "compiler/semantic/generics/generic_widening/generic_widening.h"
 #include "compiler/semantic/library/regex/match_checker/match_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
@@ -23,6 +24,25 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+AsyncChecker::AsyncChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->loopBounds = &all.getLoopBounds();
+  this->dictChecker = &all.getDictChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->loopChecker = &all.getLoopChecker();
+  this->loopScanner = &all.getLoopScanner();
+  this->matchChecker = &all.getMatchChecker();
+  this->typeResolver = &all.getTypeResolver();
+  this->typeRelations = &all.getTypeRelations();
+  this->genericChecker = &all.getGenericChecker();
+  this->genericWidening = &all.getGenericWidening();
+  this->iterableChecker = &all.getIterableChecker();
+  this->iteratorMethods = &all.getIteratorMethods();
+  this->generatorChecker = &all.getGeneratorChecker();
+}
 
 const Type *AsyncChecker::awaited(const Type *type) {
   return type->isPromise() ? type->promised() : type;
@@ -49,9 +69,6 @@ std::string AsyncChecker::statementText(llvm::SMLoc at) {
   return depth == 0 && text.size() <= 60 ? text.str() : "";
 }
 
-AsyncChecker::AsyncChecker(SemanticState &owner)
-    : state(owner) {}
-
 AsyncChecker::ResultPromiseTypeRef AsyncChecker::resolvePromiseType(const TypeRef &ref) {
   if (ref.name != "Promise" && ref.name != "PromiseLike") {
     return err(AsyncCheckerResolvePromiseTypeError{
@@ -67,7 +84,7 @@ AsyncChecker::ResultPromiseTypeRef AsyncChecker::resolvePromiseType(const TypeRe
         .message = message,
     });
   }
-  const Type *value = TypeResolver(this->state).resolveType(ref.args[0], true);
+  const Type *value = this->typeResolver->resolveType(ref.args[0], true);
   const Type *promise = Type::promise(AsyncChecker::awaited(value));
 
   return ok(promise);
@@ -189,7 +206,7 @@ void AsyncChecker::finishAsyncReturns(FuncSymbol *fn, llvm::ArrayRef<ReturnStmt 
       continue;
     }
     if (!value->isVoid()) {
-      ret->value = TypeRelations(this->state).convert(ret->value, value);
+      ret->value = this->typeRelations->convert(ret->value, value);
     }
   }
 }
@@ -250,9 +267,9 @@ Expr *AsyncChecker::checkAwait(AwaitExpr *await, const Type *expected) {
       (isa<NewExpr>(await->value) || isa<CallExpr>(await->value))) {
     hint = Type::promise(expected);
   }
-  await->value = ExprChecker(this->state).checkExpr(await->value, hint);
+  await->value = this->exprChecker->checkExpr(await->value, hint);
   const Type *type = await->value->type;
-  FlowChecker(this->state).calledFunction();
+  this->flowChecker->calledFunction();
   if (type->isError()) {
     return await;
   }
@@ -294,9 +311,9 @@ const Type *AsyncChecker::awaitedType(const Type *type) {
 }
 
 AsyncChecker::ResultAwaitedElement AsyncChecker::awaitedElement(const Type *type) const {
-  const Type *element = GeneratorChecker(this->state).asyncIteratedType(type);
+  const Type *element = this->generatorChecker->asyncIteratedType(type);
   bool optional = !element && type->isOptional() &&
-                  GeneratorChecker(this->state).asyncIteratedType(type->inner()) != nullptr;
+                  this->generatorChecker->asyncIteratedType(type->inner()) != nullptr;
   if (optional) {
     std::string message = ErrorTextAwaitedElement::undefined(type->name());
 
@@ -368,17 +385,16 @@ void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
   } else if (!context.value()) {
     this->state.getInventoryStore().markTopLevelAwait();
   }
-  IteratorMethods(this->state).markFused(stmt->iterable);
-  stmt->iterable =
-      GenericChecker(this->state).apparent(ExprChecker(this->state).checkExpr(stmt->iterable));
-  stmt->iterable = GenericWidening(this->state).joined(stmt->iterable);
-  if (Expr *iterator = IterableChecker(this->state).asyncUserIterator(stmt->iterable)) {
+  this->iteratorMethods->markFused(stmt->iterable);
+  stmt->iterable = this->genericChecker->apparent(this->exprChecker->checkExpr(stmt->iterable));
+  stmt->iterable = this->genericWidening->joined(stmt->iterable);
+  if (Expr *iterator = this->iterableChecker->asyncUserIterator(stmt->iterable)) {
     stmt->iterable = iterator;
   } else {
-    stmt->iterable = DictChecker(this->state).iterableOf(stmt->iterable);
+    stmt->iterable = this->dictChecker->iterableOf(stmt->iterable);
   }
   if (stmt->iterable->type->isMatch()) {
-    stmt->iterable = MatchChecker(this->state).matchItems(stmt->iterable);
+    stmt->iterable = this->matchChecker->matchItems(stmt->iterable);
   }
   const Type *type = stmt->iterable->type;
   const Type *element = Type::error();
@@ -393,7 +409,7 @@ void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
   if (awaited.isOk() && type->isIterator()) {
     std::string label = ErrorTextAsyncContext::awaitLoop();
     GeneratorChecker::ResultNextNeedsNoValue nothing =
-        GeneratorChecker(this->state).checkSendsNothing(type, label);
+        this->generatorChecker->checkSendsNothing(type, label);
     if (nothing.isErr()) {
       this->state.getDiagnostics().error(stmt->iterable->loc(), nothing.error().message);
     }
@@ -407,19 +423,19 @@ void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
     this->state.getDiagnostics().error(stmt->binding.loc, shape.error().message);
     element = Type::error();
   }
-  FlowChecker(this->state).calledFunction();
-  LoopScan scan = LoopScanner(this->state).scanLoop({stmt->body}, {});
+  this->flowChecker->calledFunction();
+  LoopScan scan = this->loopScanner->scanLoop({stmt->body}, {});
   scan.callsFunctions = true;
   stmt->borrowElements = false;
-  Flow head = LoopBounds(this->state).loopHead(scan, nullptr, false);
+  Flow head = this->loopBounds->loopHead(scan, nullptr, false);
   this->state.getFlowState().replaceFlow(head);
   this->state.getScopeStack().openScope();
   stmt->binding.sym =
-      Scopes(this->state).declareVar(stmt->binding.name, stmt->binding.loc, element, stmt->isConst);
-  LoopChecker(this->state).checkLoopBody(stmt->body, true);
-  Scopes(this->state).closeScope();
+      this->scopes->declareVar(stmt->binding.name, stmt->binding.loc, element, stmt->isConst);
+  this->loopChecker->checkLoopBody(stmt->body, true);
+  this->scopes->closeScope();
   this->state.getFlowState().replaceFlow(head);
-  FlowChecker(this->state).calledFunction();
+  this->flowChecker->calledFunction();
 }
 
 AsyncChecker::ResultPromiseHandled

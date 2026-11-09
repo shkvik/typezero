@@ -6,12 +6,22 @@
 
 namespace tz {
 
+class SemanticParts;
+class TypeParams;
+class ExprChecker;
+class FlowChecker;
+class TypeRelations;
+class ReturnInferrer;
+class ArgumentChecker;
+class TypeArgInferrer;
+class GenericInstantiator;
+
 class OverloadResolver {
 public:
   using ResultVariantChosen = Result<FuncSymbol *, OverloadResolverChooseVariantError>;
   using ResultVariantOfType = Result<FuncSymbol *, OverloadResolverVariantForTypeError>;
 
-  explicit OverloadResolver(SemanticState &owner);
+  OverloadResolver(SemanticState &owner, SemanticParts &all);
 
   ResultVariantChosen chooseVariant(llvm::ArrayRef<FunctionDecl *> variants,
                                     std::vector<Expr *> &args, const std::vector<bool> &spread,
@@ -30,6 +40,14 @@ private:
   static bool hasFloatLiteral(const Expr *expr);
 
   SemanticState &state;
+  TypeParams *typeParams = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  TypeArgInferrer *typeArgInferrer = nullptr;
+  GenericInstantiator *genericInstantiator = nullptr;
 };
 
 }

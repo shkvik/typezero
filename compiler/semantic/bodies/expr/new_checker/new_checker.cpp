@@ -24,6 +24,7 @@
 #include "compiler/semantic/library/tz_modules/url_checker/url_checker.h"
 #include "compiler/semantic/library/weakref/weak_ref_checker/weak_ref_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cstring>
@@ -32,8 +33,31 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-NewChecker::NewChecker(SemanticState &owner)
-    : state(owner) {}
+NewChecker::NewChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->urlChecker = &all.getUrlChecker();
+  this->dateChecker = &all.getDateChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->httpChecker = &all.getHttpChecker();
+  this->indexProofs = &all.getIndexProofs();
+  this->intlChecker = &all.getIntlChecker();
+  this->libraryCalls = &all.getLibraryCalls();
+  this->regexChecker = &all.getRegexChecker();
+  this->typeResolver = &all.getTypeResolver();
+  this->cryptoChecker = &all.getCryptoChecker();
+  this->memberChecker = &all.getMemberChecker();
+  this->dictNewChecker = &all.getDictNewChecker();
+  this->promiseChecker = &all.getPromiseChecker();
+  this->weakRefChecker = &all.getWeakRefChecker();
+  this->bytesNewChecker = &all.getBytesNewChecker();
+  this->topLevelChecker = &all.getTopLevelChecker();
+  this->tzModulesChecker = &all.getTzModulesChecker();
+  this->classValueChecker = &all.getClassValueChecker();
+  this->dateFormatChecker = &all.getDateFormatChecker();
+  this->methodCallChecker = &all.getMethodCallChecker();
+  this->builtinModuleChecker = &all.getBuiltinModuleChecker();
+}
 
 NewChecker::ResultNamespaceNew NewChecker::namespaceNew(const NewExpr *expr) {
   if (!expr->member.empty()) {
@@ -50,7 +74,7 @@ NewChecker::ResultNamespaceNew NewChecker::namespaceNew(const NewExpr *expr) {
 
 NewChecker::ResultCryptoMadeOk NewChecker::cryptoNew(const NewExpr *expr,
                                                      const ClassDecl *cls) const {
-  bool hidden = cls->library() && !LibraryCalls(this->state).inLibrary(expr->loc()) &&
+  bool hidden = cls->library() && !this->libraryCalls->inLibrary(expr->loc()) &&
                 (cls == this->state.getLibraryDeclarations().findLibraryClass("CryptoKey") ||
                  cls == this->state.getLibraryDeclarations().findLibraryClass("SubtleCrypto"));
   if (hidden && cls->name == "CryptoKey") {
@@ -135,7 +159,7 @@ NewChecker::ResultArrayElement NewChecker::arrayElement(const NewExpr *expr, con
     return ok(expected->nonOptional()->inner());
   }
 
-  const Type *element = TypeResolver(this->state).resolveType(expr->typeArgs[0], false);
+  const Type *element = this->typeResolver->resolveType(expr->typeArgs[0], false);
 
   return ok(element);
 }
@@ -170,30 +194,29 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
   expr->type = Type::error();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : expr->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
   };
   if (!expr->callee && !expr->name.empty() &&
-      TopLevelChecker(this->state).lookupValue(expr->name).var()) {
+      this->topLevelChecker->lookupValue(expr->name).var()) {
     expr->callee = this->state.getAst().make<NameExpr>(expr->loc(), expr->name);
     if (!expr->member.empty()) {
       expr->callee = this->state.getAst().make<MemberExpr>(expr->loc(), expr->callee, expr->member);
     }
   }
   if (expr->callee) {
-    return ClassValueChecker(this->state).checkValueNew(expr, expected);
+    return this->classValueChecker->checkValueNew(expr, expected);
   }
   if (!expr->member.empty()) {
-    ScopeEntry intl = Scopes(this->state).lookup("Intl");
+    ScopeEntry intl = this->scopes->lookup("Intl");
     if (expr->name == "Intl" && !intl.var() && !intl.func() && !intl.cls() &&
         expr->member == "Locale") {
-      return IntlChecker(this->state).checkLocaleNew(expr, expected);
+      return this->intlChecker->checkLocaleNew(expr, expected);
     }
     if (expr->name == "Intl" && !intl.var() && !intl.func() && !intl.cls()) {
       return expr->member == "DateTimeFormat"
-                 ? DateFormatChecker(this->state).checkDateFormatNew(expr->loc(), expr->args)
-                 : IntlChecker(this->state)
-                       .checkIntlNew(expr->loc(), expr->member, expr->args, true);
+                 ? this->dateFormatChecker->checkDateFormatNew(expr->loc(), expr->args)
+                 : this->intlChecker->checkIntlNew(expr->loc(), expr->member, expr->args, true);
     }
     ResultNamespaceNew plain = NewChecker::namespaceNew(expr);
     if (plain.isErr()) {
@@ -202,35 +225,35 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
     checkArgsLoosely();
     return expr;
   }
-  if (ClassDecl *cls = TopLevelChecker(this->state).lookupValue(expr->name).cls()) {
+  if (ClassDecl *cls = this->topLevelChecker->lookupValue(expr->name).cls()) {
     ResultCryptoMadeOk crypto = this->cryptoNew(expr, cls);
     if (crypto.isErr()) {
       this->state.getDiagnostics().error(expr->loc(), crypto.error().message);
       checkArgsLoosely();
       return expr;
     }
-    Expr *checked = MethodCallChecker(this->state)
-                        .checkClassNew(expr, ClassValueChecker::finalClass(cls), expected);
+    Expr *checked =
+        this->methodCallChecker->checkClassNew(expr, ClassValueChecker::finalClass(cls), expected);
     if (auto *made = dyn_cast<NewExpr>(checked); made && cls->library() && cls->name == "URL") {
-      UrlChecker(this->state).checkUrlNew(made);
+      this->urlChecker->checkUrlNew(made);
     }
     if (auto *made = dyn_cast<NewExpr>(checked); made && cls->library()) {
       if (cls->name == "Server" || cls->name == "Socket") {
-        TzModulesChecker(this->state).noteServer(made);
+        this->tzModulesChecker->noteServer(made);
       }
       if (cls->name == "Response") {
-        HttpChecker(this->state).checkResponseNew(made);
+        this->httpChecker->checkResponseNew(made);
       } else if (cls->name == "Request") {
-        HttpChecker(this->state).checkRequestNew(made);
+        this->httpChecker->checkRequestNew(made);
       } else if (cls->name == "Headers") {
-        HttpChecker(this->state).checkHeadersNew(made);
+        this->httpChecker->checkHeadersNew(made);
       }
     }
     return checked;
   }
-  if (const NodeName *n = BuiltinModuleChecker(this->state).nodeName(expr->name);
+  if (const NodeName *n = this->builtinModuleChecker->nodeName(expr->name);
       n && n->module == NodeModule::Crypto) {
-    return CryptoChecker(this->state).checkCryptoNew(expr, n->name);
+    return this->cryptoChecker->checkCryptoNew(expr, n->name);
   }
   ResultSupportedNew supported = NewChecker::supportedNew(expr);
   if (supported.isErr()) {
@@ -238,40 +261,39 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
     checkArgsLoosely();
     return expr;
   }
-  if (expr->name == "RegExp" && !Scopes(this->state).lookup("RegExp").var() &&
-      !Scopes(this->state).lookup("RegExp").func()) {
+  if (expr->name == "RegExp" && !this->scopes->lookup("RegExp").var() &&
+      !this->scopes->lookup("RegExp").func()) {
     ResultNoTypeArgsOk plainNew = NewChecker::noTypeArgs(expr);
     if (plainNew.isErr()) {
       this->state.getDiagnostics().error(expr->loc(), plainNew.error().message);
     }
-    return RegexChecker(this->state).checkRegExpConstructor(expr->loc(), expr->args);
+    return this->regexChecker->checkRegExpConstructor(expr->loc(), expr->args);
   }
-  if (expr->name == "Date" && !Scopes(this->state).lookup("Date").var() &&
-      !Scopes(this->state).lookup("Date").func()) {
+  if (expr->name == "Date" && !this->scopes->lookup("Date").var() &&
+      !this->scopes->lookup("Date").func()) {
     ResultNoTypeArgsOk plainNew = NewChecker::noTypeArgs(expr);
     if (plainNew.isErr()) {
       this->state.getDiagnostics().error(expr->loc(), plainNew.error().message);
     }
-    return DateChecker(this->state).checkDateNew(expr->loc(), expr->args);
+    return this->dateChecker->checkDateNew(expr->loc(), expr->args);
   }
   if ((expr->name == "Map" || expr->name == "Set" || expr->name == "WeakMap" ||
        expr->name == "WeakSet") &&
-      !Scopes(this->state).lookup(expr->name).var() &&
-      !Scopes(this->state).lookup(expr->name).func()) {
-    return DictNewChecker(this->state).checkDictNew(expr, expected);
+      !this->scopes->lookup(expr->name).var() && !this->scopes->lookup(expr->name).func()) {
+    return this->dictNewChecker->checkDictNew(expr, expected);
   }
-  if (expr->name == "Promise" && !Scopes(this->state).lookup("Promise").var() &&
-      !Scopes(this->state).lookup("Promise").func()) {
-    return PromiseChecker(this->state).checkPromiseNew(expr, expected);
+  if (expr->name == "Promise" && !this->scopes->lookup("Promise").var() &&
+      !this->scopes->lookup("Promise").func()) {
+    return this->promiseChecker->checkPromiseNew(expr, expected);
   }
-  if (expr->name == "WeakRef" && !Scopes(this->state).lookup("WeakRef").var() &&
-      !Scopes(this->state).lookup("WeakRef").func()) {
-    return WeakRefChecker(this->state).checkWeakRefNew(expr, expected);
+  if (expr->name == "WeakRef" && !this->scopes->lookup("WeakRef").var() &&
+      !this->scopes->lookup("WeakRef").func()) {
+    return this->weakRefChecker->checkWeakRefNew(expr, expected);
   }
   if (const Type *bytes = BytesChecker::bytesTypeNamed(expr->name);
-      bytes && !Scopes(this->state).lookup(expr->name).var() &&
-      !Scopes(this->state).lookup(expr->name).func()) {
-    return BytesNewChecker(this->state).checkBytesNew(expr, bytes);
+      bytes && !this->scopes->lookup(expr->name).var() &&
+      !this->scopes->lookup(expr->name).func()) {
+    return this->bytesNewChecker->checkBytesNew(expr, bytes);
   }
   if (expr->name == "BigInt64Array" || expr->name == "BigUint64Array") {
     std::string what = ErrorTextFunctionName::quoted(expr->name);
@@ -300,14 +322,14 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
     return expr;
   }
   if (expr->args.size() == 1) {
-    expr->args[0] = MemberChecker(this->state).checkPosition(expr->args[0]);
+    expr->args[0] = this->memberChecker->checkPosition(expr->args[0]);
     ResultHasZeroValue zero = NewChecker::zeroValue(element);
     if (zero.isErr()) {
       this->state.getDiagnostics().error(expr->loc(), zero.error().message);
     }
     std::string what = ErrorTextNewArray::length();
     IndexProofs::ResultBetweenProven between =
-        IndexProofs(this->state).requireBetween(expr->args[0], 0, std::nullopt, what);
+        this->indexProofs->requireBetween(expr->args[0], 0, std::nullopt, what);
     if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
       this->state.getDiagnostics().error(expr->args[0]->loc(), between.error().message);
     }

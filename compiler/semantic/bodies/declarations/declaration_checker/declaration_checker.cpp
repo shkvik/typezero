@@ -4,6 +4,7 @@
 #include "compiler/semantic/declare/module_declarer/module_declarer.h"
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/Support/Path.h"
 
@@ -11,6 +12,16 @@ using llvm::dyn_cast;
 using llvm::dyn_cast_or_null;
 
 namespace tz {
+
+DeclarationChecker::DeclarationChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->typeDeclarer = &all.getTypeDeclarer();
+  this->typeResolver = &all.getTypeResolver();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->moduleDeclarer = &all.getModuleDeclarer();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->topLevelChecker = &all.getTopLevelChecker();
+}
 
 const char *DeclarationChecker::accessWord(Access access) {
   return access == Access::Public      ? "public"
@@ -55,9 +66,6 @@ const FunctionDecl *DeclarationChecker::classMethod(const ClassDecl *cls,
   return method;
 }
 
-DeclarationChecker::DeclarationChecker(SemanticState &owner)
-    : state(owner) {}
-
 std::string DeclarationChecker::fileName() const {
   return llvm::sys::path::filename(this->checkedModule->path).str();
 }
@@ -67,7 +75,7 @@ const Type *DeclarationChecker::resolve(const std::optional<TypeRef> &ref, bool 
     return nullptr;
   }
 
-  return TypeResolver(this->state).resolveType(*ref, allowVoid);
+  return this->typeResolver->resolveType(*ref, allowVoid);
 }
 
 DeclarationChecker::ResultModuleExportsName
@@ -103,7 +111,7 @@ DeclarationChecker::exportDeclared(llvm::StringRef name, const llvm::StringSet<>
 void DeclarationChecker::walkDeclarationFile(Module *module) {
   this->checkedModule = module;
   Module *outer = this->state.getModuleStates().getCurrentModule();
-  ModuleDeclarer(this->state).useModule(module);
+  this->moduleDeclarer->useModule(module);
   this->exportedNames.clear();
   for (const ExportDecl &decl : module->file.exports) {
     const LocalExport *local = decl.form.as<LocalExport>();
@@ -156,14 +164,14 @@ void DeclarationChecker::walkDeclarationFile(Module *module) {
     }
   }
   if (outer) {
-    ModuleDeclarer(this->state).useModule(outer);
+    this->moduleDeclarer->useModule(outer);
   }
 }
 
 DeclarationChecker::ResultAliasTypesAreSame
 DeclarationChecker::checkAlias(TypeAliasDecl *declared, const Exported &exported) const {
   auto *implemented =
-      dyn_cast_or_null<TypeAliasDecl>(TypeDeclarer(this->state).lookupType(exported.local));
+      dyn_cast_or_null<TypeAliasDecl>(this->typeDeclarer->lookupType(exported.local));
   std::string file = this->fileName();
   if (!implemented) {
     std::string message = ErrorTextDeclaration::notType(declared->name, file);
@@ -187,8 +195,8 @@ DeclarationChecker::checkAlias(TypeAliasDecl *declared, const Exported &exported
   if (!implemented->typeParams.empty()) {
     return ok(implemented);
   }
-  const Type *there = TypeDeclarer(this->state).resolveAlias(implemented);
-  const Type *here = TypeDeclarer(this->state).resolveAlias(declared);
+  const Type *there = this->typeDeclarer->resolveAlias(implemented);
+  const Type *here = this->typeDeclarer->resolveAlias(declared);
   if (DeclarationChecker::typesAgree(here, there)) {
     return ok(implemented);
   }
@@ -374,7 +382,7 @@ DeclarationChecker::sameReturn(const Type *here, const Type *there, const std::s
 }
 
 void DeclarationChecker::checkFunction(FunctionDecl *declared, const Exported &exported) {
-  ScopeEntry entry = TopLevelChecker(this->state).lookupValue(exported.local);
+  ScopeEntry entry = this->topLevelChecker->lookupValue(exported.local);
   ResultModuleHasFunction found = this->functionFound(entry, declared->name);
   if (found.isErr()) {
     this->state.getDiagnostics().error(declared->loc(), found.error().message);
@@ -390,7 +398,7 @@ void DeclarationChecker::checkFunction(FunctionDecl *declared, const Exported &e
     }
     return;
   }
-  ReturnInferrer(this->state).resolveParams(entry.func());
+  this->returnInferrer->resolveParams(entry.func());
   if (!this->sameParams(declared->params, fn, declared->loc(), what)) {
     return;
   }
@@ -540,7 +548,7 @@ void DeclarationChecker::checkMethod(const DeclaredMember &member, const Functio
     }
     return;
   }
-  ReturnInferrer(this->state).resolveParams(fn->sym);
+  this->returnInferrer->resolveParams(fn->sym);
   bool constructor = member.form.is<DeclaredConstructor>();
   if (!this->sameParams(declared->params, fn, member.loc, what) || constructor) {
     return;
@@ -560,7 +568,7 @@ void DeclarationChecker::checkMethod(const DeclaredMember &member, const Functio
 
 DeclarationChecker::ResultModuleHasTheClass
 DeclarationChecker::classFound(const DeclaredClass &declared, const Exported &exported) const {
-  auto *cls = dyn_cast_or_null<ClassDecl>(TypeDeclarer(this->state).lookupType(exported.local));
+  auto *cls = dyn_cast_or_null<ClassDecl>(this->typeDeclarer->lookupType(exported.local));
   if (!cls) {
     std::string message = ErrorTextDeclaredClass::notClass(declared.name, this->fileName());
 
@@ -784,7 +792,7 @@ void DeclarationChecker::checkClass(const DeclaredClass &declared, const Exporte
   if (!cls->typeParams.empty()) {
     return;
   }
-  ClassDeclarer(this->state).completeClass(cls);
+  this->classDeclarer->completeClass(cls);
   llvm::StringSet<> seen;
   for (const DeclaredMember &member : declared.members) {
     std::string key = DeclarationChecker::memberKey(member.name, member.isStatic);

@@ -6,11 +6,27 @@
 
 namespace tz {
 
+class SemanticParts;
+class TypeParams;
+class CallChecker;
+class ExprChecker;
+class LateClasses;
+class ResultTypes;
+class TypeResolver;
+class UtilityTypes;
+class ClosureChecker;
+class GenericChecker;
+class ReturnInferrer;
+class ArgumentChecker;
+class IterableChecker;
+class GenericInstantiator;
+class FunctionValueChecker;
+
 class Inference;
 
 class TypeArgInferrer {
 public:
-  explicit TypeArgInferrer(SemanticState &owner);
+  TypeArgInferrer(SemanticState &owner, SemanticParts &all);
 
   bool bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm::SMLoc loc, const Type *expected,
                        llvm::ArrayRef<TypeRef> typeArgs, std::vector<const Type *> &bound);
@@ -49,8 +65,22 @@ private:
   static bool isContextSensitive(const Expr *arg);
 
   void precheckFields(ObjectLitExpr *lit, const Type *pattern,
-                      llvm::ArrayRef<const Type *> typeParams, Inference &inference);
+                      llvm::ArrayRef<const Type *> genericTypeParams, Inference &inference);
   SemanticState &state;
+  TypeParams *typeParams = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  LateClasses *lateClasses = nullptr;
+  ResultTypes *resultTypes = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  UtilityTypes *utilityTypes = nullptr;
+  ClosureChecker *closureChecker = nullptr;
+  GenericChecker *genericChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  IterableChecker *iterableChecker = nullptr;
+  GenericInstantiator *genericInstantiator = nullptr;
+  FunctionValueChecker *functionValueChecker = nullptr;
 };
 
 }

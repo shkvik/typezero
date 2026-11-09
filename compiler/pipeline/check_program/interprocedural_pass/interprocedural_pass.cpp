@@ -10,21 +10,26 @@
 namespace tz {
 
 InterproceduralPass::InterproceduralPass(SemanticExternalFacade &owner, Program &checked)
-    : engine(owner),
-      program(checked) {}
+    : program(checked),
+      loadOrder(std::make_unique<LoadOrder>(*checked.diags)),
+      wideWrites(std::make_unique<WideWrites>(owner, *checked.diags)),
+      poolChecker(std::make_unique<PoolChecker>(checked)),
+      contextChecker(std::make_unique<ContextChecker>(checked)) {}
 
-void InterproceduralPass::checkLoadOrder() const {
+InterproceduralPass::~InterproceduralPass() = default;
+
+void InterproceduralPass::checkLoadOrder() {
   SourceFile &file = this->program.file;
-  LoadOrder(this->engine.getDiagnostics()).checkLoadOrder(file);
+  this->loadOrder->checkLoadOrder(file);
   Unused::findUnused(file);
 }
 
-Errors InterproceduralPass::checkValueFlows() const {
+Errors InterproceduralPass::checkValueFlows() {
   SourceFile &file = this->program.file;
-  ContextChecker(this->program).run();
-  PoolChecker(this->program).run();
-  if (!this->engine.getDiagnostics().hasErrors()) {
-    WideWrites(this->engine).checkWidenings(file);
+  this->contextChecker->run();
+  this->poolChecker->run();
+  if (!this->program.diags->hasErrors()) {
+    this->wideWrites->checkWidenings(file);
   }
 
   return this->program.diags->take();

@@ -6,9 +6,20 @@
 
 namespace tz {
 
+class SemanticParts;
+class CryptoArgs;
+class CallChecker;
+class ExprChecker;
+class IndexProofs;
+class BytesChecker;
+class TypeRelations;
+class ConstantFolder;
+class KeyPairChecker;
+class ArgumentChecker;
+
 class CryptoFunctionChecker {
 public:
-  explicit CryptoFunctionChecker(SemanticState &owner);
+  CryptoFunctionChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkCryptoCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
 
@@ -25,6 +36,15 @@ private:
   Expr *asyncOf(Expr *checked);
 
   SemanticState &state;
+  CryptoArgs *cryptoArgs = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  BytesChecker *bytesChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ConstantFolder *constantFolder = nullptr;
+  KeyPairChecker *keyPairChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

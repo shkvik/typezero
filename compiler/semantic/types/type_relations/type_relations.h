@@ -6,9 +6,22 @@
 
 namespace tz {
 
+class SemanticParts;
+class ByteProofs;
+class ObjectChecker;
+class ConstantFolder;
+class GenericChecker;
+class ReflectChecker;
+class UnknownChecker;
+class IterableChecker;
+class ConditionalTypes;
+class TzModulesChecker;
+class WideningRelations;
+class FunctionValueChecker;
+
 class TypeRelations {
 public:
-  explicit TypeRelations(SemanticState &owner);
+  TypeRelations(SemanticState &owner, SemanticParts &all);
 
   Expr *convert(Expr *expr, const Type *to);
   Expr *coerce(Expr *expr, const Type *to, llvm::StringRef what = {});
@@ -40,6 +53,17 @@ private:
   llvm::SMLoc placeLoc(const Expr *expr, const Type *place) const;
 
   SemanticState &state;
+  ByteProofs *byteProofs = nullptr;
+  ObjectChecker *objectChecker = nullptr;
+  ConstantFolder *constantFolder = nullptr;
+  GenericChecker *genericChecker = nullptr;
+  ReflectChecker *reflectChecker = nullptr;
+  UnknownChecker *unknownChecker = nullptr;
+  IterableChecker *iterableChecker = nullptr;
+  ConditionalTypes *conditionalTypes = nullptr;
+  TzModulesChecker *tzModulesChecker = nullptr;
+  WideningRelations *wideningRelations = nullptr;
+  FunctionValueChecker *functionValueChecker = nullptr;
 };
 
 }

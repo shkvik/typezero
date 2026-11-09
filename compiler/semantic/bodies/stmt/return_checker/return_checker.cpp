@@ -11,6 +11,7 @@
 #include "compiler/semantic/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/semantic/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/semantic/library/result/result_checker/result_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/destination/destination.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
@@ -151,21 +152,32 @@ bool ReturnChecker::breaksTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> l
   }
 }
 
-ReturnChecker::ReturnChecker(SemanticState &owner)
-    : state(owner) {}
+ReturnChecker::ReturnChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->byteProofs = &all.getByteProofs();
+  this->classLinks = &all.getClassLinks();
+  this->exprChecker = &all.getExprChecker();
+  this->classChecker = &all.getClassChecker();
+  this->truthChecker = &all.getTruthChecker();
+  this->resultChecker = &all.getResultChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->conditionFacts = &all.getConditionFacts();
+  this->emitterChecker = &all.getEmitterChecker();
+  this->predicateChecker = &all.getPredicateChecker();
+}
 
 Expr *ReturnChecker::checkReturnValue(ReturnStmt *ret, const Type *hint, bool tested) {
   if (!this->state.getPredicateStore().isBuildingPredicate()) {
-    return ExprChecker(this->state).checkExpr(ret->value, hint);
+    return this->exprChecker->checkExpr(ret->value, hint);
   }
   if (!tested) {
-    Expr *value = ExprChecker(this->state).checkExpr(ret->value, hint);
+    Expr *value = this->exprChecker->checkExpr(ret->value, hint);
     if (value->type->isBool()) {
       Flow whenTrue = this->state.getFlowState().getFlow();
       Flow whenFalse = this->state.getFlowState().getFlow();
-      ConditionFacts(this->state).addConditionFacts(value, whenTrue, whenFalse);
+      this->conditionFacts->addConditionFacts(value, whenTrue, whenFalse);
       PredicateChecker::ResultExitNarrowed narrowed =
-          PredicateChecker(this->state).notePredicateExit(whenTrue, whenFalse);
+          this->predicateChecker->notePredicateExit(whenTrue, whenFalse);
       if (narrowed.isErr()) {
         this->state.getDiagnostics().error(ret->value->loc(), narrowed.error().message);
       }
@@ -173,10 +185,10 @@ Expr *ReturnChecker::checkReturnValue(ReturnStmt *ret, const Type *hint, bool te
     return value;
   }
   Flow whenTrue, whenFalse;
-  Expr *value = TruthChecker(this->state).checkBranching(ret->value, whenTrue, whenFalse);
+  Expr *value = this->truthChecker->checkBranching(ret->value, whenTrue, whenFalse);
   this->state.getFlowState().replaceFlow(FlowChecker::join(whenTrue, whenFalse));
   PredicateChecker::ResultExitNarrowed narrowed =
-      PredicateChecker(this->state).notePredicateExit(whenTrue, whenFalse);
+      this->predicateChecker->notePredicateExit(whenTrue, whenFalse);
   if (narrowed.isErr()) {
     this->state.getDiagnostics().error(ret->value->loc(), narrowed.error().message);
   }
@@ -217,7 +229,7 @@ ReturnChecker::ResultConstructorExits ReturnChecker::constructorReturn(const Ret
     });
   }
   if (initializer) {
-    ClassChecker::ResultEveryFieldSet fieldsSet = ClassChecker(this->state).checkFieldsSet();
+    ClassChecker::ResultEveryFieldSet fieldsSet = this->classChecker->checkFieldsSet();
     if (fieldsSet.isErr()) {
       return err(ReturnCheckerConstructorReturnError{
           .code = ReturnCheckerConstructorReturnErrorCode::FIELDS_UNSET,
@@ -320,16 +332,16 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
   if (inside.isErr()) {
     this->state.getDiagnostics().error(ret->loc(), inside.error().message);
     if (ret->value) {
-      ret->value = ExprChecker(this->state).checkExpr(ret->value);
+      ret->value = this->exprChecker->checkExpr(ret->value);
     }
     return;
   }
 
-  EmitterChecker(this->state).reportUnlistenedErrors();
+  this->emitterChecker->reportUnlistenedErrors();
   const FuncSymbol *fn = inside.value();
   if (fn->decl && fn->decl->isConstructor()) {
     if (ret->value) {
-      ret->value = ExprChecker(this->state).checkExpr(ret->value);
+      ret->value = this->exprChecker->checkExpr(ret->value);
     }
     ResultConstructorExits exits = this->constructorReturn(ret, fn);
     if (exits.isErr()) {
@@ -377,8 +389,7 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
   }
 
   if (fn->decl && fn->decl->isAsync && fn->decl->isGenerator) {
-    ret->value =
-        ExprChecker(this->state).checkExpr(ret->value, returned->isVoid() ? nullptr : returned);
+    ret->value = this->exprChecker->checkExpr(ret->value, returned->isVoid() ? nullptr : returned);
     const Type *given =
         ret->value->type->isError() ? nullptr : AsyncChecker::awaitedType(ret->value->type);
     ResultGeneratorReturns gives = ReturnChecker::generatorReturn(given, returned, fn);
@@ -402,10 +413,9 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
     ResultVoidReturnsEmpty empty = ReturnChecker::voidReturn(ret->value->type, fn);
     if (empty.isErr()) {
       this->state.getDiagnostics().error(ret->value->loc(), empty.error().message);
-      ClassLinks(this->state).noteInheritedReturn(fn->decl);
+      this->classLinks->noteInheritedReturn(fn->decl);
     } else if (fn->discardsResult) {
-      ResultChecker::ResultValueGetsUsed used =
-          ResultChecker(this->state).usedValue(ret->value, true);
+      ResultChecker::ResultValueGetsUsed used = this->resultChecker->usedValue(ret->value, true);
       if (used.isErr()) {
         this->state.getDiagnostics().error(ret->value->loc(), used.error().message);
       }
@@ -413,11 +423,11 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
     return;
   }
   unsigned errors = this->state.getDiagnostics().errorCount();
-  ret->value = TypeRelations(this->state).coerce(ret->value, returned);
+  ret->value = this->typeRelations->coerce(ret->value, returned);
   if (this->state.getDiagnostics().errorCount() > errors) {
-    ClassLinks(this->state).noteInheritedReturn(fn->decl);
+    this->classLinks->noteInheritedReturn(fn->decl);
   } else if (fn->decl) {
-    ByteProofs(this->state).checkByteCallbackResult(fn->decl, ret->value);
+    this->byteProofs->checkByteCallbackResult(fn->decl, ret->value);
   }
 }
 

@@ -8,6 +8,7 @@
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/infer/late_classes/late_classes.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -18,8 +19,18 @@ using llvm::isa;
 
 namespace tz {
 
-ClassChecker::ClassChecker(SemanticState &owner)
-    : state(owner) {}
+ClassChecker::ClassChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->lateClasses = &all.getLateClasses();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->typeRelations = &all.getTypeRelations();
+  this->genericChecker = &all.getGenericChecker();
+  this->inheritChecker = &all.getInheritChecker();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->functionChecker = &all.getFunctionChecker();
+  this->nestedFunctions = &all.getNestedFunctions();
+  this->decoratorChecker = &all.getDecoratorChecker();
+}
 
 ClassChecker::ResultClassDeclared ClassChecker::checkClassStmt(ClassDecl *cls) {
   bool topLevel = this->state.getScopeStack().isTopLevel() &&
@@ -34,12 +45,12 @@ ClassChecker::ResultClassDeclared ClassChecker::checkClassStmt(ClassDecl *cls) {
   }
 
   if (cls->baseExpr && cls->stage == ClassStage::UNRESOLVED) {
-    LateClasses(this->state).makeLateClass(cls);
+    this->lateClasses->makeLateClass(cls);
   }
-  LateClasses(this->state).checkStaticFields(cls);
+  this->lateClasses->checkStaticFields(cls);
   this->state.getClassContext().enterClass(cls);
   if (!cls->generic() && this->hasDecorators(cls).isOk()) {
-    DecoratorChecker(this->state).decorateClass(cls);
+    this->decoratorChecker->decorateClass(cls);
   }
   this->state.getClassContext().leaveClass();
 
@@ -118,10 +129,9 @@ ClassChecker::ResultReturnMatches ClassChecker::overrideReturn(const ClassDecl *
 }
 
 void ClassChecker::checkClassBodies(ClassDecl *cls) {
-  ClassDeclarer(this->state).completeClass(cls);
+  this->classDeclarer->completeClass(cls);
   if (cls->init && !cls->init->checked) {
-    this->state.getFlowState().replaceFlow(Flow());
-    FunctionChecker(this->state).checkFunctionBody(cls->init);
+    this->functionChecker->walkFunctionFromScratch(cls->init);
   }
   if (cls->constructors.empty()) {
     for (const ClassField &f : cls->fields) {
@@ -133,8 +143,7 @@ void ClassChecker::checkClassBodies(ClassDecl *cls) {
   }
   for (FunctionDecl *ctor : cls->constructors) {
     if (!ctor->checked) {
-      this->state.getFlowState().replaceFlow(Flow());
-      FunctionChecker(this->state).checkFunctionBody(ctor);
+      this->functionChecker->walkFunctionFromScratch(ctor);
     }
   }
   std::vector<FunctionDecl *> methods = cls->methods;
@@ -144,20 +153,19 @@ void ClassChecker::checkClassBodies(ClassDecl *cls) {
     }
   }
   for (FunctionDecl *fn : methods) {
-    if (LateClasses(this->state).isTemplate(fn->sym)) {
+    if (this->lateClasses->isTemplate(fn->sym)) {
       continue;
     }
     if (!fn->sym->hasReturnType()) {
-      ReturnInferrer(this->state).inferReturnType(fn->sym);
+      this->returnInferrer->inferReturnType(fn->sym);
     }
     if (fn->checked || fn->isAbstract()) {
       continue;
     }
-    this->state.getFlowState().replaceFlow(Flow());
-    FunctionChecker(this->state).checkFunctionBody(fn);
+    this->functionChecker->walkFunctionFromScratch(fn);
   }
-  InheritChecker(this->state).checkAbstract(cls);
-  InheritChecker(this->state).checkImplements(cls);
+  this->inheritChecker->checkAbstract(cls);
+  this->inheritChecker->checkImplements(cls);
   for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
     ResultReturnMatches returned = this->overrideReturn(cls, fn);
     if (returned.isErr()) {
@@ -405,7 +413,7 @@ ClassChecker::ResultThisReference ClassChecker::checkThis(NameExpr *name) {
   }
 
   name->binding = NamedVar{.var = var};
-  NestedFunctions(this->state).noteUse(var, name->loc());
+  this->nestedFunctions->noteUse(var, name->loc());
   name->type = var->type;
   ResultThisReadiness ready = this->readyThis(var);
   if (ready.isErr() && ready.error().code == ClassCheckerReadyThisErrorCode::BEFORE_SUPER) {
@@ -418,9 +426,8 @@ ClassChecker::ResultThisReference ClassChecker::checkThis(NameExpr *name) {
     });
   }
 
-  const Type *narrowed =
-      source->takesThis() ? nullptr : GenericChecker(this->state).narrowedType(var);
-  Expr *reference = narrowed ? TypeRelations(this->state).convert(name, narrowed) : name;
+  const Type *narrowed = source->takesThis() ? nullptr : this->genericChecker->narrowedType(var);
+  Expr *reference = narrowed ? this->typeRelations->convert(name, narrowed) : name;
 
   return ok(reference);
 }

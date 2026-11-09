@@ -40,6 +40,21 @@ using llvm::dyn_cast_or_null;
 
 using llvm::isa;
 
+OverflowCheck::OverflowCheck(SourceFile &program, Diagnostics &diags)
+    : program_(program),
+      diags(diags) {
+  this->programScanPart = std::make_unique<ProgramScan>(*this);
+  this->slotsPart = std::make_unique<Slots>(*this);
+  this->callRangesPart = std::make_unique<CallRanges>(*this);
+  this->executorPart = std::make_unique<Executor>(*this);
+  this->loopRangesPart = std::make_unique<LoopRanges>(*this);
+  this->narrowingPart = std::make_unique<Narrowing>(*this);
+  this->evaluatorPart = std::make_unique<Evaluator>(*this);
+  this->assignEvaluatorPart = std::make_unique<AssignEvaluator>(*this);
+  this->builtinEvaluatorPart = std::make_unique<BuiltinEvaluator>(*this);
+  this->overflowWarningsPart = std::make_unique<OverflowWarnings>(*this);
+}
+
 void OverflowCheck::run() {
   programScan().scanProgram();
   callRanges().analyzeAll();
@@ -160,21 +175,6 @@ void OverflowCheck::joinInto(Summaries &into, const Summaries &from) {
 
 void checkIntOverflow(SourceFile &program, Diagnostics &diags) {
   OverflowCheck(program, diags).run();
-}
-
-OverflowCheck::OverflowCheck(SourceFile &program, Diagnostics &diags)
-    : program_(program),
-      diags(diags) {
-  this->programScanPart = std::make_unique<ProgramScan>(*this);
-  this->slotsPart = std::make_unique<Slots>(*this);
-  this->callRangesPart = std::make_unique<CallRanges>(*this);
-  this->executorPart = std::make_unique<Executor>(*this);
-  this->loopRangesPart = std::make_unique<LoopRanges>(*this);
-  this->narrowingPart = std::make_unique<Narrowing>(*this);
-  this->evaluatorPart = std::make_unique<Evaluator>(*this);
-  this->assignEvaluatorPart = std::make_unique<AssignEvaluator>(*this);
-  this->builtinEvaluatorPart = std::make_unique<BuiltinEvaluator>(*this);
-  this->overflowWarningsPart = std::make_unique<OverflowWarnings>(*this);
 }
 
 OverflowCheck::~OverflowCheck() = default;

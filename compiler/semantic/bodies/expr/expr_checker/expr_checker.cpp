@@ -23,6 +23,7 @@
 #include "compiler/semantic/library/json/json_checker/json_checker.h"
 #include "compiler/semantic/library/regex/regex_checker/regex_checker.h"
 #include "compiler/semantic/library/result/result_checker/result_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/destination/destination.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
@@ -37,15 +38,41 @@ using llvm::isa;
 
 namespace tz {
 
-ExprChecker::ExprChecker(SemanticState &owner)
-    : state(owner) {}
+ExprChecker::ExprChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->newChecker = &all.getNewChecker();
+  this->callChecker = &all.getCallChecker();
+  this->jsonChecker = &all.getJsonChecker();
+  this->lateClasses = &all.getLateClasses();
+  this->nameChecker = &all.getNameChecker();
+  this->asyncChecker = &all.getAsyncChecker();
+  this->literalTypes = &all.getLiteralTypes();
+  this->regexChecker = &all.getRegexChecker();
+  this->truthChecker = &all.getTruthChecker();
+  this->typeResolver = &all.getTypeResolver();
+  this->unaryChecker = &all.getUnaryChecker();
+  this->assignChecker = &all.getAssignChecker();
+  this->binaryChecker = &all.getBinaryChecker();
+  this->memberChecker = &all.getMemberChecker();
+  this->objectChecker = &all.getObjectChecker();
+  this->resultChecker = &all.getResultChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->closureChecker = &all.getClosureChecker();
+  this->decimalChecker = &all.getDecimalChecker();
+  this->genericChecker = &all.getGenericChecker();
+  this->literalChecker = &all.getLiteralChecker();
+  this->generatorChecker = &all.getGeneratorChecker();
+  this->arrayLiteralChecker = &all.getArrayLiteralChecker();
+  this->genericInstantiator = &all.getGenericInstantiator();
+  this->functionValueChecker = &all.getFunctionValueChecker();
+  this->objectLiteralChecker = &all.getObjectLiteralChecker();
+}
 
 Expr *ExprChecker::checkExpr(Expr *expr, const Type *expected, bool wraps) {
   GenericStore &generics = this->state.getGenericStore();
   if (generics.isCheckingInstance() && generics.hasForcedTypes()) {
     if (const Type *to = generics.findForcedType(expr)) {
-      return GenericChecker(this->state)
-          .forceConversion(this->checkExprKind(expr, expected, wraps), to);
+      return this->genericChecker->forceConversion(this->checkExprKind(expr, expected, wraps), to);
     }
   }
 
@@ -54,21 +81,20 @@ Expr *ExprChecker::checkExpr(Expr *expr, const Type *expected, bool wraps) {
 
 Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
   if (auto *name = dyn_cast<NameExpr>(expr)) {
-    if (FuncSymbol *generic = GenericChecker(this->state).genericNamed(name)) {
+    if (FuncSymbol *generic = this->genericChecker->genericNamed(name)) {
       const Type *function = expected ? expected->nonOptional() : nullptr;
       Signature sig =
           function && function->isFunction() ? ClosureChecker::signatureOf(function) : Signature();
-      return GenericInstantiator(this->state)
-          .checkGenericValue(name, generic, function && function->isFunction() ? &sig : nullptr);
+      return this->genericInstantiator->checkGenericValue(
+          name, generic, function && function->isFunction() ? &sig : nullptr);
     }
   }
   if (expected && (isa<NameExpr>(expr) || isa<MemberExpr>(expr))) {
     if (const Type *function = expected->nonOptional(); function->isFunction()) {
       Signature sig = ClosureChecker::signatureOf(function);
-      if (FunctionExpr *wrapper =
-              FunctionValueChecker(this->state)
-                  .builtinFunctionValue(expr, sig, unsigned(sig.params.size()), {})) {
-        return ClosureChecker(this->state).checkFunctionExpr(wrapper, &sig);
+      if (FunctionExpr *wrapper = this->functionValueChecker->builtinFunctionValue(
+              expr, sig, unsigned(sig.params.size()), {})) {
+        return this->closureChecker->checkFunctionExpr(wrapper, &sig);
       }
     }
   }
@@ -76,7 +102,7 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
     case Expr::Kind::IntLit: {
       auto *lit = cast<IntLitExpr>(expr);
       LiteralChecker::ResultIntLiteralTyped typed =
-          LiteralChecker(this->state).checkIntLit(lit, expected, false);
+          this->literalChecker->checkIntLit(lit, expected, false);
       if (typed.isErr()) {
         this->state.getDiagnostics().error(lit->loc(), typed.error().message);
         return lit;
@@ -85,8 +111,7 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
     }
   case Expr::Kind::FloatLit: {
     if (const Type *literal =
-            LiteralTypes(this->state)
-                .numberLiteralFor(expected, cast<FloatLitExpr>(expr)->value, true)) {
+            this->literalTypes->numberLiteralFor(expected, cast<FloatLitExpr>(expr)->value, true)) {
       expr->type = literal;
 
       return expr;
@@ -94,7 +119,7 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
     const Type *member = LiteralTypes::numberMemberOf(expected, true);
     if (expected && (expected->nonOptional()->isDecimal() || (member && member->isDecimal()))) {
       expr->type = Type::decimalTy();
-      DecimalChecker(this->state).checkDecimalLiteralRange(expr);
+      this->decimalChecker->checkDecimalLiteralRange(expr);
       return expr;
     }
     expr->type = Type::doubleTy();
@@ -102,40 +127,39 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
   }
   case Expr::Kind::BoolLit: {
     const Type *literal =
-        LiteralTypes(this->state).boolLiteralFor(expected, cast<BoolLitExpr>(expr)->value);
+        this->literalTypes->boolLiteralFor(expected, cast<BoolLitExpr>(expr)->value);
     expr->type = literal ? literal : Type::boolTy();
     return expr;
   }
   case Expr::Kind::StringLit: {
     const Type *literal =
-        LiteralTypes(this->state).stringLiteralFor(expected, cast<StringLitExpr>(expr)->value);
+        this->literalTypes->stringLiteralFor(expected, cast<StringLitExpr>(expr)->value);
     expr->type = literal ? literal : Type::string();
     return expr;
   }
   case Expr::Kind::RegexLit:
-    return RegexChecker(this->state).checkRegexLit(cast<RegexLitExpr>(expr));
+    return this->regexChecker->checkRegexLit(cast<RegexLitExpr>(expr));
   case Expr::Kind::Undefined:
     expr->type = Type::undefinedTy();
     return expr;
   case Expr::Kind::Template:
-    return LiteralChecker(this->state).checkTemplate(cast<TemplateExpr>(expr), expected);
+    return this->literalChecker->checkTemplate(cast<TemplateExpr>(expr), expected);
   case Expr::Kind::ArrayLit:
-    return ArrayLiteralChecker(this->state).checkArrayLit(cast<ArrayLitExpr>(expr), expected);
+    return this->arrayLiteralChecker->checkArrayLit(cast<ArrayLitExpr>(expr), expected);
   case Expr::Kind::ObjectLit:
-    return ObjectLiteralChecker(this->state).checkObjectLit(cast<ObjectLitExpr>(expr), expected);
+    return this->objectLiteralChecker->checkObjectLit(cast<ObjectLitExpr>(expr), expected);
   case Expr::Kind::Name:
-    if (Expr *null = JsonChecker(this->state).checkNull(cast<NameExpr>(expr), expected)) {
+    if (Expr *null = this->jsonChecker->checkNull(cast<NameExpr>(expr), expected)) {
       return null;
     }
-    if (Expr *members = ObjectChecker(this->state).enumObject(cast<NameExpr>(expr), expected)) {
+    if (Expr *members = this->objectChecker->enumObject(cast<NameExpr>(expr), expected)) {
       return members;
     }
-    return LiteralTypes(this->state)
-        .constText(NameChecker(this->state).checkName(cast<NameExpr>(expr)), expected);
+    return this->literalTypes->constText(this->nameChecker->checkName(cast<NameExpr>(expr)),
+                                         expected);
   case Expr::Kind::Member: {
     auto *member = cast<MemberExpr>(expr);
-    MemberChecker::ResultMemberReadable read =
-        MemberChecker(this->state).checkMember(member, expected);
+    MemberChecker::ResultMemberReadable read = this->memberChecker->checkMember(member, expected);
     if (read.isOk()) {
       return read.value();
     }
@@ -147,7 +171,7 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
   }
   case Expr::Kind::Index: {
     auto *index = cast<IndexExpr>(expr);
-    MemberChecker::ResultIndexedElement element = MemberChecker(this->state).checkIndex(index);
+    MemberChecker::ResultIndexedElement element = this->memberChecker->checkIndex(index);
     if (element.isOk()) {
       return element.value();
     }
@@ -174,19 +198,19 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
     return index;
   }
   case Expr::Kind::Unary:
-    return UnaryChecker(this->state).checkUnary(cast<UnaryExpr>(expr), expected, wraps);
+    return this->unaryChecker->checkUnary(cast<UnaryExpr>(expr), expected, wraps);
   case Expr::Kind::Binary:
-    return BinaryChecker(this->state).checkBinary(cast<BinaryExpr>(expr), expected, wraps);
+    return this->binaryChecker->checkBinary(cast<BinaryExpr>(expr), expected, wraps);
   case Expr::Kind::Assign:
-    return AssignChecker(this->state).checkAssign(cast<AssignExpr>(expr));
+    return this->assignChecker->checkAssign(cast<AssignExpr>(expr));
   case Expr::Kind::Update:
-    return AssignChecker(this->state).checkUpdate(cast<UpdateExpr>(expr));
+    return this->assignChecker->checkUpdate(cast<UpdateExpr>(expr));
   case Expr::Kind::Call:
-    return CallChecker(this->state).checkCall(cast<CallExpr>(expr), expected);
+    return this->callChecker->checkCall(cast<CallExpr>(expr), expected);
   case Expr::Kind::New:
-    return NewChecker(this->state).checkNew(cast<NewExpr>(expr), expected);
+    return this->newChecker->checkNew(cast<NewExpr>(expr), expected);
   case Expr::Kind::Class:
-    return LateClasses(this->state).checkClassExpr(cast<ClassExpr>(expr), expected);
+    return this->lateClasses->checkClassExpr(cast<ClassExpr>(expr), expected);
   case Expr::Kind::Conditional: {
     auto *conditional = cast<ConditionalExpr>(expr);
     ResultBranchesMatch matched = this->checkConditional(conditional, expected);
@@ -213,14 +237,14 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
     const Type *function = expected ? expected->nonOptional() : nullptr;
     if (function && function->isFunction()) {
       Signature sig = ClosureChecker::signatureOf(function);
-      return ClosureChecker(this->state).checkFunctionExpr(cast<FunctionExpr>(expr), &sig);
+      return this->closureChecker->checkFunctionExpr(cast<FunctionExpr>(expr), &sig);
     }
-    return ClosureChecker(this->state).checkFunctionExpr(cast<FunctionExpr>(expr), nullptr);
+    return this->closureChecker->checkFunctionExpr(cast<FunctionExpr>(expr), nullptr);
   }
   case Expr::Kind::Yield:
-    return GeneratorChecker(this->state).checkYield(cast<YieldExpr>(expr));
+    return this->generatorChecker->checkYield(cast<YieldExpr>(expr));
   case Expr::Kind::Await:
-    return AsyncChecker(this->state).checkAwait(cast<AwaitExpr>(expr), expected);
+    return this->asyncChecker->checkAwait(cast<AwaitExpr>(expr), expected);
   }
   llvm_unreachable("unknown expression kind");
 }
@@ -228,7 +252,7 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
 Expr *ExprChecker::checkSequence(SequenceExpr *seq, const Type *expected, bool wraps) {
   for (size_t i = 0; i + 1 < seq->exprs.size(); ++i) {
     seq->exprs[i] = this->checkExpr(seq->exprs[i]);
-    ResultChecker::ResultValueGetsUsed used = ResultChecker(this->state).usedValue(seq->exprs[i]);
+    ResultChecker::ResultValueGetsUsed used = this->resultChecker->usedValue(seq->exprs[i]);
     if (used.isErr()) {
       this->state.getDiagnostics().error(seq->exprs[i]->loc(), used.error().message);
     }
@@ -283,9 +307,9 @@ Expr *ExprChecker::chainLink(Expr *object) {
 ExprChecker::ResultBranchesMatch ExprChecker::checkConditional(ConditionalExpr *cond,
                                                                const Type *expected) {
   Flow whenTrue, whenFalse;
-  cond->cond = TruthChecker(this->state).checkCondition(cond->cond, whenTrue, whenFalse);
+  cond->cond = this->truthChecker->checkCondition(cond->cond, whenTrue, whenFalse);
   if (std::optional<bool> constant = this->state.getGenericStore().isCheckingInstance()
-                                         ? GenericChecker(this->state).constantCondition(cond->cond)
+                                         ? this->genericChecker->constantCondition(cond->cond)
                                          : std::nullopt) {
     this->state.getFlowState().replaceFlow(*constant ? whenTrue : whenFalse);
     Expr *chosen = this->checkExpr(*constant ? cond->thenExpr : cond->elseExpr, expected);
@@ -340,11 +364,11 @@ ExprChecker::ResultBranchesMatch ExprChecker::checkConditional(ConditionalExpr *
     cond->type = a;
     return ok(cond);
   }
-  if (a != b && TypeRelations(this->state).literalAdapts(cond->thenExpr, b)) {
-    cond->thenExpr = TypeRelations(this->state).adaptLiteral(cond->thenExpr, b);
+  if (a != b && this->typeRelations->literalAdapts(cond->thenExpr, b)) {
+    cond->thenExpr = this->typeRelations->adaptLiteral(cond->thenExpr, b);
     a = b;
-  } else if (a != b && TypeRelations(this->state).literalAdapts(cond->elseExpr, a)) {
-    cond->elseExpr = TypeRelations(this->state).adaptLiteral(cond->elseExpr, a);
+  } else if (a != b && this->typeRelations->literalAdapts(cond->elseExpr, a)) {
+    cond->elseExpr = this->typeRelations->adaptLiteral(cond->elseExpr, a);
     b = a;
   }
   const Type *common = LiteralTypes::unionUnify(a, b);
@@ -356,15 +380,15 @@ ExprChecker::ResultBranchesMatch ExprChecker::checkConditional(ConditionalExpr *
         .message = message,
     });
   }
-  cond->thenExpr = TypeRelations(this->state).convert(cond->thenExpr, common);
-  cond->elseExpr = TypeRelations(this->state).convert(cond->elseExpr, common);
+  cond->thenExpr = this->typeRelations->convert(cond->thenExpr, common);
+  cond->elseExpr = this->typeRelations->convert(cond->elseExpr, common);
   cond->type = common;
 
   return ok(cond);
 }
 
 ExprChecker::ResultCastSupported ExprChecker::checkCast(CastExpr *cast) {
-  const Type *to = TypeResolver(this->state).resolveType(*cast->target, false);
+  const Type *to = this->typeResolver->resolveType(*cast->target, false);
   bool arrayLiteral = isa<ArrayLitExpr>(cast->operand);
   cast->operand = this->checkExpr(cast->operand, arrayLiteral && !to->isError() ? to : nullptr);
   const Type *from = cast->operand->type;

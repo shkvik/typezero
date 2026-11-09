@@ -8,6 +8,7 @@
 #include "compiler/semantic/bodies/stmt/var_checker/var_checker.h"
 #include "compiler/semantic/declare/prelude/prelude.h"
 #include "compiler/semantic/library/process/process_checker/process_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "runtime/library/regex/regex/regex.h"
 #include "llvm/ADT/STLExtras.h"
@@ -17,6 +18,17 @@
 using llvm::dyn_cast;
 
 namespace tz {
+
+RegexChecker::RegexChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->prelude = &all.getPrelude();
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->objectChecker = &all.getObjectChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->processChecker = &all.getProcessChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+}
 
 std::u16string RegexChecker::units(const uint32_t *program, uint32_t start, uint32_t length) {
   std::u16string text;
@@ -59,9 +71,6 @@ RegexChecker::ResultParsedFlags RegexChecker::parsedFlags(const std::u16string &
 
   return ok(parsed);
 }
-
-RegexChecker::RegexChecker(SemanticState &owner)
-    : state(owner) {}
 
 Expr *RegexChecker::checkRegexLit(RegexLitExpr *lit) {
   lit->type = Type::regExp();
@@ -180,8 +189,8 @@ const Type *RegexChecker::matchType(const RegexLitExpr *regex) {
 Expr *RegexChecker::regexToString(Expr *regex) {
   auto *callee = this->state.getAst().make<NameExpr>(regex->loc(), "String");
 
-  return ProcessChecker(this->state)
-      .builtinCall(regex->loc(), callee, Builtin::RegExpToString, {regex}, Type::string());
+  return this->processChecker->builtinCall(regex->loc(), callee, Builtin::RegExpToString, {regex},
+                                           Type::string());
 }
 
 Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
@@ -189,16 +198,16 @@ Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
   const RegexLitExpr *regex = RegexChecker::knownRegex(member->object);
   call->regex = regex;
   call->type = Type::error();
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return call;
   }
   if (name == "test" || name == "exec") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 1, 1);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
     }
-    call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], Type::string());
+    call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
     uint32_t flags = regex ? tz_re_flags(regex->program.data()) : 0;
     if (name == "test" && (flags & TZ_RE_GLOBAL)) {
       std::string message = ErrorTextRegexMethod::testG();
@@ -211,7 +220,7 @@ Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "toString") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 0);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
@@ -225,7 +234,7 @@ Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
       name == "compile" ? ErrorTextRegexMethod::compile() : ErrorTextRegexMethod::noMember(name);
   this->state.getDiagnostics().error(member->loc(), message);
   for (Expr *&arg : call->args) {
-    arg = ExprChecker(this->state).checkExpr(arg);
+    arg = this->exprChecker->checkExpr(arg);
   }
 
   return call;
@@ -234,7 +243,7 @@ Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
 Expr *RegexChecker::checkRegexMember(MemberExpr *member) {
   llvm::StringRef name = member->name;
   if (name == "lastIndex") {
-    ObjectChecker::ResultObjectFieldValue field = ObjectChecker(this->state).checkField(member);
+    ObjectChecker::ResultObjectFieldValue field = this->objectChecker->checkField(member);
     if (field.isErr()) {
       this->state.getDiagnostics().error(member->loc(), field.error().message);
       return member;
@@ -242,19 +251,19 @@ Expr *RegexChecker::checkRegexMember(MemberExpr *member) {
     return field.value();
   }
   if (name == "source") {
-    return ProcessChecker(this->state)
-        .builtinCall(member->loc(), member, Builtin::RegExpSource, {}, Type::string());
+    return this->processChecker->builtinCall(member->loc(), member, Builtin::RegExpSource, {},
+                                             Type::string());
   }
   if (name == "flags") {
-    return ProcessChecker(this->state)
-        .builtinCall(member->loc(), member, Builtin::RegExpFlags, {}, Type::string());
+    return this->processChecker->builtinCall(member->loc(), member, Builtin::RegExpFlags, {},
+                                             Type::string());
   }
   uint32_t flag;
   if (RegexChecker::isFlag(name, flag)) {
     auto *bit = this->state.getAst().make<IntLitExpr>(member->loc(), flag);
     bit->type = Type::intTy();
-    return ProcessChecker(this->state)
-        .builtinCall(member->loc(), member, Builtin::RegExpFlag, {bit}, Type::boolTy());
+    return this->processChecker->builtinCall(member->loc(), member, Builtin::RegExpFlag, {bit},
+                                             Type::boolTy());
   }
   std::string message = ErrorTextRegexMethod::notCalled(name, name == "test" || name == "exec");
   this->state.getDiagnostics().error(member->loc(), message);
@@ -266,7 +275,7 @@ Expr *RegexChecker::checkRegexMember(MemberExpr *member) {
 Expr *RegexChecker::checkRegExpConstructor(llvm::SMLoc loc, std::vector<Expr *> &args) {
   auto loosely = [&] {
     for (Expr *&arg : args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     auto *error = this->state.getAst().make<UndefinedExpr>(loc);
     error->type = Type::error();
@@ -297,7 +306,7 @@ Expr *RegexChecker::checkRegExpConstructor(llvm::SMLoc loc, std::vector<Expr *> 
   auto *escaped = dyn_cast<CallExpr>(args[0]);
   auto *escape = escaped ? dyn_cast<MemberExpr>(escaped->callee) : nullptr;
   bool fromEscape = escape && escape->name == "escape" &&
-                    CallChecker(this->state).isGlobalName(escape->object, "RegExp");
+                    this->callChecker->isGlobalName(escape->object, "RegExp");
   if (!fromEscape || !flags) {
     std::string message = ErrorTextRegExpNew::unknown(args.size() > 1);
     this->state.getDiagnostics().error(loc, message);
@@ -308,23 +317,22 @@ Expr *RegexChecker::checkRegExpConstructor(llvm::SMLoc loc, std::vector<Expr *> 
     this->state.getDiagnostics().error(args[1]->loc(), parsed.error().message);
     return loosely();
   }
-  args[0] = ExprChecker(this->state).checkExpr(args[0]);
-  args[0] = TypeRelations(this->state).coerce(args[0], Type::string());
+  args[0] = this->exprChecker->checkExpr(args[0]);
+  args[0] = this->typeRelations->coerce(args[0], Type::string());
   if (args.size() > 1) {
-    args[1] = ArgumentChecker(this->state).checkArg(args[1], Type::string());
+    args[1] = this->argumentChecker->checkArg(args[1], Type::string());
   }
 
-  return ProcessChecker(this->state)
-      .builtinCall(loc, this->state.getAst().make<NameExpr>(loc, "RegExp"), Builtin::RegExpNew,
-                   args, Type::regExp());
+  return this->processChecker->builtinCall(loc, this->state.getAst().make<NameExpr>(loc, "RegExp"),
+                                           Builtin::RegExpNew, args, Type::regExp());
 }
 
 Expr *RegexChecker::checkRegExpStatic(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   if (member->name == "parse") {
-    bool rejected = CallChecker(this->state).rejectSpread(call);
+    bool rejected = this->callChecker->rejectSpread(call);
     ArgumentChecker::ResultArityMatches arity =
-        rejected ? ok(call) : ArgumentChecker(this->state).checkArity(call, 1, 2);
+        rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
     }
@@ -332,29 +340,29 @@ Expr *RegexChecker::checkRegExpStatic(CallExpr *call, MemberExpr *member) {
       return call;
     }
     for (Expr *&arg : call->args) {
-      arg = ArgumentChecker(this->state).checkArg(arg, Type::string());
+      arg = this->argumentChecker->checkArg(arg, Type::string());
     }
     call->target = BuiltinCall{.builtin = Builtin::RegExpParse};
-    call->type = Type::result(Type::regExp(), Prelude(this->state).builtinType("RegexError"));
+    call->type = Type::result(Type::regExp(), this->prelude->builtinType("RegexError"));
     return call;
   }
   if (member->name != "escape") {
     this->checkRegExpStaticMember(member);
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     return call;
   }
-  bool rejected = CallChecker(this->state).rejectSpread(call);
+  bool rejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : ArgumentChecker(this->state).checkArity(call, 1, 1);
+      rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
   if (rejected || arity.isErr()) {
     return call;
   }
-  call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], Type::string());
+  call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
   call->target = BuiltinCall{.builtin = Builtin::RegExpEscape};
   call->type = Type::string();
 

@@ -1,4 +1,5 @@
 #include "compiler/program/library/decimal/decimal_literal/decimal_literal.h"
+#include "compiler/program/ast/ast.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
@@ -102,6 +103,24 @@ int DecimalLiteral::roundingMode(const std::u16string &name) {
   }
 
   return -1;
+}
+
+std::optional<DecimalLiteral> DecimalLiteral::fromExpr(const Expr *expr) {
+  const UnaryExpr *unary = llvm::dyn_cast<UnaryExpr>(expr);
+  if (unary != nullptr && unary->op == UnaryOp::Neg) {
+    expr = unary->operand;
+  }
+  const IntLitExpr *whole = llvm::dyn_cast<IntLitExpr>(expr);
+  if (whole != nullptr) {
+    return whole->text.empty() ? DecimalLiteral::of(whole->value)
+                               : DecimalLiteral::read(whole->text);
+  }
+  const FloatLitExpr *fraction = llvm::dyn_cast<FloatLitExpr>(expr);
+  if (fraction != nullptr) {
+    return DecimalLiteral::read(fraction->text);
+  }
+
+  return std::nullopt;
 }
 
 }

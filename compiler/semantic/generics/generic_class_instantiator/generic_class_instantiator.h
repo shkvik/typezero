@@ -6,11 +6,19 @@
 
 namespace tz {
 
+class SemanticParts;
+class ChunkTypes;
+class ClassBases;
+class ClassLinks;
+class TypeParams;
+class ClassDeclarer;
+class GenericClassChecker;
+
 class GenericClassInstantiator {
 public:
   using ResultClassMade = Result<ClassDecl *, GenericClassInstantiatorInstantiateClassError>;
 
-  explicit GenericClassInstantiator(SemanticState &owner);
+  GenericClassInstantiator(SemanticState &owner, SemanticParts &all);
 
   ResultClassMade instantiateClass(ClassDecl *generic, std::vector<const Type *> args,
                                    llvm::SMLoc use);
@@ -23,6 +31,12 @@ private:
   static std::string typeNames(llvm::ArrayRef<const Type *> types);
 
   SemanticState &state;
+  ChunkTypes *chunkTypes = nullptr;
+  ClassBases *classBases = nullptr;
+  ClassLinks *classLinks = nullptr;
+  TypeParams *typeParams = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  GenericClassChecker *genericClassChecker = nullptr;
 };
 
 }

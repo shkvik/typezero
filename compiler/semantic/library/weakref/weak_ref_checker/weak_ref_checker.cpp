@@ -4,13 +4,22 @@
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/library/process/process_checker/process_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 
 namespace tz {
 
-WeakRefChecker::WeakRefChecker(SemanticState &owner)
-    : state(owner) {}
+WeakRefChecker::WeakRefChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->typeResolver = &all.getTypeResolver();
+  this->typeRelations = &all.getTypeRelations();
+  this->genericChecker = &all.getGenericChecker();
+  this->processChecker = &all.getProcessChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+}
 
 WeakRefChecker::ResultTargetIsWritten WeakRefChecker::targetWritten(const TypeRef &ref) {
   if (ref.kind() != TypeRefKind::GENERIC_REF || ref.args.size() != 1) {
@@ -96,7 +105,7 @@ const Type *WeakRefChecker::resolveWeakRefType(const TypeRef &ref) {
     return Type::error();
   }
   const TypeRef &targetRef = *written.value();
-  const Type *target = TypeResolver(this->state).resolveType(targetRef, false);
+  const Type *target = this->typeResolver->resolveType(targetRef, false);
   if (target->isError()) {
     return target;
   }
@@ -114,7 +123,7 @@ Expr *WeakRefChecker::checkWeakRefNew(NewExpr *expr, const Type *expected) {
   auto *callee = this->state.getAst().make<NameExpr>(loc, "WeakRef");
   auto failed = [&] {
     for (Expr *&arg : expr->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     auto *error = this->state.getAst().make<UndefinedExpr>(loc);
     error->type = Type::error();
@@ -131,15 +140,15 @@ Expr *WeakRefChecker::checkWeakRefNew(NewExpr *expr, const Type *expected) {
   if (typeArgs.isErr()) {
     this->state.getDiagnostics().error(loc, typeArgs.error().message);
   } else if (expr->typeArgs.size() == 1) {
-    target = TypeResolver(this->state).resolveType(expr->typeArgs[0], false);
+    target = this->typeResolver->resolveType(expr->typeArgs[0], false);
   } else if (expected && expected->nonOptional()->isWeakRef()) {
     target = expected->nonOptional()->weakTarget();
   }
   if (target && target->isError()) {
     return failed();
   }
-  Expr *checked = ExprChecker(this->state).checkExpr(expr->args[0], target);
-  Expr *arg = GenericChecker(this->state).apparent(checked);
+  Expr *checked = this->exprChecker->checkExpr(expr->args[0], target);
+  Expr *arg = this->genericChecker->apparent(checked);
   if (arg->type->isError()) {
     return arg;
   }
@@ -151,10 +160,10 @@ Expr *WeakRefChecker::checkWeakRefNew(NewExpr *expr, const Type *expected) {
     this->state.getDiagnostics().error(arg->loc(), object.error().message);
     return arg;
   }
-  arg = TypeRelations(this->state).coerce(arg, target);
+  arg = this->typeRelations->coerce(arg, target);
 
-  return ProcessChecker(this->state)
-      .builtinCall(loc, callee, Builtin::WeakRefNew, {arg}, Type::weakRef(target));
+  return this->processChecker->builtinCall(loc, callee, Builtin::WeakRefNew, {arg},
+                                           Type::weakRef(target));
 }
 
 Expr *WeakRefChecker::checkWeakRefMethod(CallExpr *call, MemberExpr *member) {
@@ -164,13 +173,13 @@ Expr *WeakRefChecker::checkWeakRefMethod(CallExpr *call, MemberExpr *member) {
   if (deref.isErr()) {
     this->state.getDiagnostics().error(member->loc(), deref.error().message);
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     return call;
   }
-  bool rejected = CallChecker(this->state).rejectSpread(call);
+  bool rejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : ArgumentChecker(this->state).checkArity(call, 0, 0);
+      rejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 0);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }

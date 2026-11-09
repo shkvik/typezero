@@ -14,9 +14,23 @@
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/semantic/library/events/event_maps/event_maps.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace tz {
+
+InheritChecker::InheritChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->eventMaps = &all.getEventMaps();
+  this->flowChecker = &all.getFlowChecker();
+  this->classChecker = &all.getClassChecker();
+  this->emitterChecker = &all.getEmitterChecker();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->typeArgInferrer = &all.getTypeArgInferrer();
+  this->overloadResolver = &all.getOverloadResolver();
+  this->classMemberChecker = &all.getClassMemberChecker();
+}
 
 bool InheritChecker::takesParams(const Type *fnType, const FuncSymbol *sym) {
   return fnType->isFunction() && fnType->params() == llvm::ArrayRef<const Type *>(sym->params) &&
@@ -48,9 +62,6 @@ void InheritChecker::interfacesOf(const ClassDecl *cls, std::vector<const Type *
     }
   }
 }
-
-InheritChecker::InheritChecker(SemanticState &owner)
-    : state(owner) {}
 
 InheritChecker::ResultAbstractHasClass InheritChecker::abstractNeedsClass(const ClassDecl *cls,
                                                                           const FunctionDecl *fn) {
@@ -393,7 +404,7 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
       InheritChecker::superAllowed(this->state.getFunctionStack().getCurrentDecl());
   if (scope.isErr()) {
     this->state.getDiagnostics().error(call->loc(), scope.error().message);
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
   ClassDecl *cls = scope.value()->cls();
@@ -402,19 +413,19 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
     if (parent.error().code != InheritCheckerParentClassErrorCode::BASE_ONLY) {
       this->state.getDiagnostics().error(call->loc(), parent.error().message);
     }
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
   ResultSuperIsStatement statement = this->rootSuper(call);
   if (statement.isErr()) {
     this->state.getDiagnostics().error(call->loc(), statement.error().message);
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
   ResultSuperNotRepeated once = this->superOnce(cls);
   if (once.isErr()) {
     this->state.getDiagnostics().error(call->loc(), once.error().message);
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
   std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(cls->parent);
@@ -423,11 +434,11 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
     if (none.isErr()) {
       this->state.getDiagnostics().error(call->loc(), none.error().message);
     }
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
   } else {
     bool checked = false;
     OverloadResolver::ResultVariantChosen picked =
-        OverloadResolver(this->state).chooseVariant(ctors, call->args, call->spread, checked);
+        this->overloadResolver->chooseVariant(ctors, call->args, call->spread, checked);
     if (picked.isErr() &&
         picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
       this->state.getDiagnostics().error(call->loc(), picked.error().message);
@@ -436,16 +447,15 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
       FuncSymbol *sym = picked.value();
       const FunctionDecl *chosen = sym->decl ? sym->decl : ctors[0];
       ClassMemberChecker::ResultMemberAccessible accessible =
-          ClassMemberChecker(this->state)
-              .checkAccess(chosen->cls(), chosen->access(), "constructor");
+          this->classMemberChecker->checkAccess(chosen->cls(), chosen->access(), "constructor");
       if (accessible.isErr()) {
         this->state.getDiagnostics().error(call->loc(), accessible.error().message);
       }
-      ReturnInferrer(this->state).resolveParams(sym);
+      this->returnInferrer->resolveParams(sym);
       call->target = SuperCall{.method = sym};
       std::vector<bool> given(checked ? call->args.size() : 0, true);
-      ArgumentChecker(this->state)
-          .checkArguments(call, sym->params, sym->minArgs, sym->hasRest, call->loc(), &given);
+      this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
+                                            call->loc(), &given);
     }
   }
   this->state.getFlowState().markSuperCalled();
@@ -454,7 +464,7 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
       this->state.getFlowState().addSetField(f.name);
     }
   }
-  FlowChecker(this->state).calledFunction();
+  this->flowChecker->calledFunction();
 
   return call;
 }
@@ -480,12 +490,12 @@ InheritChecker::ResultSuperMethodScope InheritChecker::superContext(FunctionDecl
 
 InheritChecker::ResultObjectIsComplete
 InheritChecker::objectComplete(const MemberExpr *member) const {
-  bool early = ClassChecker(this->state).isInitThis(member->object).isOk() &&
+  bool early = this->classChecker->isInitThis(member->object).isOk() &&
                !this->state.getFlowState().isBeforeSuper() &&
-               ClassChecker(this->state).thisReady(this->state.getFlowState().getFlow()).isErr();
+               this->classChecker->thisReady(this->state.getFlowState().getFlow()).isErr();
   if (early) {
     std::string field =
-        ClassChecker(this->state).firstUnset(this->state.getFlowState().getFlow()).value();
+        this->classChecker->firstUnset(this->state.getFlowState().getFlow()).value();
     std::string message = ErrorTextSuperMethod::early(member->name, field);
 
     return err(InheritCheckerObjectCompleteError{
@@ -553,20 +563,20 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
     if (scope.error().code != InheritCheckerSuperContextErrorCode::BASE_ONLY) {
       this->state.getDiagnostics().error(member->object->loc(), scope.error().message);
     }
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
   ClassDecl *parent = method->cls()->parent;
   auto *self = this->state.getAst().make<NameExpr>(member->object->loc(), "this");
   this->state.getClassContext().rememberThisMember(member->name);
-  ClassChecker::ResultThisReference reference = ClassChecker(this->state).checkThis(self);
+  ClassChecker::ResultThisReference reference = this->classChecker->checkThis(self);
   this->state.getClassContext().forgetThisMember();
   if (reference.isErr()) {
     this->state.getDiagnostics().error(self->loc(), reference.error().message);
   }
   member->object = reference.isOk() ? reference.value() : self;
   if (member->object->type->isError()) {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
   ResultObjectIsComplete complete = this->objectComplete(member);
@@ -576,26 +586,24 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   ResultParentHasMethods found = InheritChecker::parentMethods(parent, member->name);
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
   std::vector<FunctionDecl *> methods = found.value();
   ClassMemberChecker::ResultMemberAccessible accessible =
-      ClassMemberChecker(this->state)
-          .checkAccess(methods[0]->cls(), methods[0]->access(), member->name);
+      this->classMemberChecker->checkAccess(methods[0]->cls(), methods[0]->access(), member->name);
   if (accessible.isErr()) {
     this->state.getDiagnostics().error(member->loc(), accessible.error().message);
   }
-  if (EventMaps(this->state).isEmitterClass(parent)) {
-    if (Expr *checked = EmitterChecker(this->state).checkEmitterCall(call, member, parent, true)) {
+  if (this->eventMaps->isEmitterClass(parent)) {
+    if (Expr *checked = this->emitterChecker->checkEmitterCall(call, member, parent, true)) {
       return checked;
     }
   }
   bool checked = false;
   std::vector<const Type *> bound;
   OverloadResolver::ResultVariantChosen picked =
-      OverloadResolver(this->state)
-          .chooseVariant(methods, call->args, call->spread, checked, &bound);
+      this->overloadResolver->chooseVariant(methods, call->args, call->spread, checked, &bound);
   if (picked.isErr() &&
       picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
     this->state.getDiagnostics().error(member->loc(), picked.error().message);
@@ -606,31 +614,30 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   ResultMethodHasItsBody body = InheritChecker::methodBody(picked.value(), member->name);
   if (body.isErr()) {
     this->state.getDiagnostics().error(member->loc(), body.error().message);
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
   FuncSymbol *sym = body.value();
-  ReturnInferrer(this->state).resolveParams(sym);
+  this->returnInferrer->resolveParams(sym);
   call->target = SuperCall{};
   if (sym->isGeneric() && checked) {
-    return OverloadResolver(this->state).callGenericVariant(call, sym, bound, member->loc(), true);
+    return this->overloadResolver->callGenericVariant(call, sym, bound, member->loc(), true);
   }
   if (sym->isGeneric()) {
-    TypeArgInferrer(this->state)
-        .checkGenericCall(call, sym, member->loc(), nullptr, member->typeArgs);
+    this->typeArgInferrer->checkGenericCall(call, sym, member->loc(), nullptr, member->typeArgs);
     call->target = SuperCall{.method = call->func()};
     if (call->method()) {
-      member->type = ReturnInferrer(this->state).functionType(call->method());
+      member->type = this->returnInferrer->functionType(call->method());
     }
     return call;
   }
   call->target = SuperCall{.method = sym};
-  member->type = ReturnInferrer(this->state).functionType(sym);
+  member->type = this->returnInferrer->functionType(sym);
   call->type = sym->getReturnType();
   std::vector<bool> given(checked ? call->args.size() : 0, true);
 
-  return ArgumentChecker(this->state)
-      .checkArguments(call, sym->params, sym->minArgs, sym->hasRest, member->loc(), &given);
+  return this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
+                                               member->loc(), &given);
 }
 
 }

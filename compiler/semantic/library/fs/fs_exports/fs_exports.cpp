@@ -139,8 +139,8 @@ FsExports::ResultExportFound FsExports::fsExport(llvm::StringRef name, llvm::Str
   if (name == "replaceSync" || name == "ReplaceError") {
     std::string message = ErrorTextFsExport::inTzFs(path, name);
 
-    return err(FeatureExportFoundError{
-        .code = FeatureExportFoundErrorCode::ELSEWHERE,
+    return err(ModuleExportFoundError{
+        .code = ModuleExportFoundErrorCode::ELSEWHERE,
         .message = message,
     });
   }
@@ -148,31 +148,31 @@ FsExports::ResultExportFound FsExports::fsExport(llvm::StringRef name, llvm::Str
   if (llvm::is_contained(kFsFunctions, sync) && llvm::is_contained(kFspFunctions, name)) {
     std::string message = ErrorTextFsExport::callback(name, path, sync);
 
-    return err(FeatureExportFoundError{
-        .code = FeatureExportFoundErrorCode::CALLBACK_FORM,
+    return err(ModuleExportFoundError{
+        .code = ModuleExportFoundErrorCode::CALLBACK_FORM,
         .message = message,
     });
   }
   if (llvm::is_contained(kFsFunctions, sync)) {
     std::string message = ErrorTextFsExport::syncOnly(name, path, sync);
 
-    return err(FeatureExportFoundError{
-        .code = FeatureExportFoundErrorCode::CALLBACK_FORM,
+    return err(ModuleExportFoundError{
+        .code = ModuleExportFoundErrorCode::CALLBACK_FORM,
         .message = message,
     });
   }
   if (llvm::is_contained(kFsExports, name)) {
     std::string message = ErrorTextModuleExport::notYet(name, path);
 
-    return err(FeatureExportFoundError{
-        .code = FeatureExportFoundErrorCode::NOT_YET,
+    return err(ModuleExportFoundError{
+        .code = ModuleExportFoundErrorCode::NOT_YET,
         .message = message,
     });
   }
   std::string message = ErrorTextModuleExport::none(path, name);
 
-  return err(FeatureExportFoundError{
-      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+  return err(ModuleExportFoundError{
+      .code = ModuleExportFoundErrorCode::NO_EXPORT,
       .message = message,
   });
 }
@@ -184,31 +184,31 @@ FsExports::ResultExportFound FsExports::promisesExport(llvm::StringRef name, llv
   if (name == "replace" || name == "ReplaceError") {
     std::string message = ErrorTextFsExport::inTzFs(path, name);
 
-    return err(FeatureExportFoundError{
-        .code = FeatureExportFoundErrorCode::ELSEWHERE,
+    return err(ModuleExportFoundError{
+        .code = ModuleExportFoundErrorCode::ELSEWHERE,
         .message = message,
     });
   }
   if (llvm::is_contained(kFspExports, name)) {
     std::string message = ErrorTextModuleExport::notYet(name, path);
 
-    return err(FeatureExportFoundError{
-        .code = FeatureExportFoundErrorCode::NOT_YET,
+    return err(ModuleExportFoundError{
+        .code = ModuleExportFoundErrorCode::NOT_YET,
         .message = message,
     });
   }
   if (llvm::is_contained(kFsFunctions, name)) {
     std::string message = ErrorTextFsExport::waiting(path, name);
 
-    return err(FeatureExportFoundError{
-        .code = FeatureExportFoundErrorCode::ELSEWHERE,
+    return err(ModuleExportFoundError{
+        .code = ModuleExportFoundErrorCode::ELSEWHERE,
         .message = message,
     });
   }
   std::string message = ErrorTextModuleExport::none(path, name);
 
-  return err(FeatureExportFoundError{
-      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+  return err(ModuleExportFoundError{
+      .code = ModuleExportFoundErrorCode::NO_EXPORT,
       .message = message,
   });
 }
@@ -223,15 +223,15 @@ FsExports::ResultExportFound FsExports::readlineExport(llvm::StringRef name, llv
       (hasPromises && name == "promises")) {
     std::string message = ErrorTextFsExport::readline(name, path);
 
-    return err(FeatureExportFoundError{
-        .code = FeatureExportFoundErrorCode::NOT_YET,
+    return err(ModuleExportFoundError{
+        .code = ModuleExportFoundErrorCode::NOT_YET,
         .message = message,
     });
   }
   std::string message = ErrorTextModuleExport::none(path, name);
 
-  return err(FeatureExportFoundError{
-      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+  return err(ModuleExportFoundError{
+      .code = ModuleExportFoundErrorCode::NO_EXPORT,
       .message = message,
   });
 }
@@ -243,8 +243,8 @@ FsExports::ResultExportFound FsExports::tzFsExport(llvm::StringRef name, llvm::S
   bool inNodeFs = llvm::is_contained(kFsFunctions, name) || llvm::is_contained(kFspFunctions, name);
   std::string message = ErrorTextFsExport::tzFs(path, name, inNodeFs);
 
-  return err(FeatureExportFoundError{
-      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+  return err(ModuleExportFoundError{
+      .code = ModuleExportFoundErrorCode::NO_EXPORT,
       .message = message,
   });
 }
@@ -255,8 +255,8 @@ FsExports::ResultExportFound FsExports::tzIoExport(llvm::StringRef name, llvm::S
   }
   std::string message = ErrorTextFsExport::tzIo(path, name);
 
-  return err(FeatureExportFoundError{
-      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+  return err(ModuleExportFoundError{
+      .code = ModuleExportFoundErrorCode::NO_EXPORT,
       .message = message,
   });
 }

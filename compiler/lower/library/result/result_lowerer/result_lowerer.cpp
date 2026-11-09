@@ -23,6 +23,9 @@ constexpr uint32_t kResultKind = 12;
 
 }
 
+ResultLowerer::ResultLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 bool ResultLowerer::argGetsError(Builtin method, size_t i) {
   switch (method) {
   case Builtin::ResultMapErr:
@@ -36,9 +39,6 @@ bool ResultLowerer::argGetsError(Builtin method, size_t i) {
     return false;
   }
 }
-
-ResultLowerer::ResultLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 Lowering::ResultLayout ResultLowerer::resultLayout(const Type *type) {
   if (auto found = this->resultLayouts.find(type); found != this->resultLayouts.end()) {

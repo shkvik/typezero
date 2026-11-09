@@ -6,9 +6,16 @@
 
 namespace tz {
 
+class SemanticParts;
+class FsChecker;
+class CallChecker;
+class ExprChecker;
+class ProcessChecker;
+class ArgumentChecker;
+
 class ReadlineChecker {
 public:
-  explicit ReadlineChecker(SemanticState &owner);
+  ReadlineChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkReadlineCall(CallExpr *call, NodeModule module, llvm::StringRef fn, llvm::SMLoc loc);
 
@@ -20,6 +27,11 @@ private:
   static ResultReadlineUsed readlineFunction(llvm::StringRef fn, NodeModule module);
 
   SemanticState &state;
+  FsChecker *fsChecker = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  ProcessChecker *processChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

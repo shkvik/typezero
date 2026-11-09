@@ -1,11 +1,17 @@
 #include "compiler/semantic/library/events/event_map_inference/event_map_inference.h"
 #include "compiler/semantic/generics/generic_class_instantiator/generic_class_instantiator.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Path.h"
 
 using llvm::dyn_cast;
 
 namespace tz {
+
+EventMapInference::EventMapInference(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+}
 
 std::string EventMapInference::fileOfPlace(const std::string &place) {
   size_t column = place.rfind(':');
@@ -61,9 +67,6 @@ bool EventMapInference::sameInEveryRound(const Type *type,
     return true;
   }
 }
-
-EventMapInference::EventMapInference(SemanticState &owner)
-    : state(owner) {}
 
 std::string EventMapInference::placeOf(llvm::SMLoc loc) const {
   llvm::SourceMgr &sm = this->state.getDiagnostics().sourceMgr();
@@ -235,7 +238,7 @@ const Type *EventMapInference::fromPortable(const EventInference::Portable &p, l
         break;
       }
       GenericClassInstantiator::ResultClassMade made =
-          GenericClassInstantiator(this->state).instantiateClass(cls, parts, loc);
+          this->genericClassInstantiator->instantiateClass(cls, parts, loc);
       if (made.isErr() && made.error().code !=
                               GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
         llvm::SMLoc at =

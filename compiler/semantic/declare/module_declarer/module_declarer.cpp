@@ -8,6 +8,7 @@
 #include "compiler/semantic/infer/late_classes/late_classes.h"
 #include "compiler/semantic/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/semantic/library/events/emitter_checker/emitter_checker_errors.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cassert>
 
@@ -15,8 +16,16 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-ModuleDeclarer::ModuleDeclarer(SemanticState &owner)
-    : state(owner) {}
+ModuleDeclarer::ModuleDeclarer(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->classLinks = &all.getClassLinks();
+  this->lateClasses = &all.getLateClasses();
+  this->importBinder = &all.getImportBinder();
+  this->typeDeclarer = &all.getTypeDeclarer();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->functionChecker = &all.getFunctionChecker();
+  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+}
 
 void ModuleDeclarer::useModule(Module *module) {
   if (module == this->state.getModuleStates().getCurrentModule()) {
@@ -37,7 +46,7 @@ void ModuleDeclarer::useModule(Module *module) {
       this->state.getModuleStates().getModuleState(module).types);
 }
 
-std::vector<FunctionDecl *> ModuleDeclarer::declareModules(SourceFile &program) {
+void ModuleDeclarer::declareModules(SourceFile &program) {
   this->state.getModuleStates().prepareModules(int(program.modules.size()));
   for (Module *module : program.modules) {
     ModuleState &here = this->state.getModuleStates().getModuleState(module);
@@ -67,21 +76,21 @@ std::vector<FunctionDecl *> ModuleDeclarer::declareModules(SourceFile &program) 
   std::vector<std::vector<Stmt *>> types(program.modules.size());
   for (Module *module : program.modules) {
     this->useModule(module);
-    types[module->order] = TypeDeclarer(this->state).declareTypes(module->file.items, false);
+    types[module->order] = this->typeDeclarer->declareTypes(module->file.items, false);
     for (Stmt *type : types[module->order]) {
       this->state.getModuleStates().rememberDeclModule(type, module);
     }
   }
   for (Module *module : program.modules) {
-    ImportBinder(this->state).resolveImports(module);
+    this->importBinder->resolveImports(module);
   }
   for (Module *module : program.modules) {
     this->useModule(module);
-    ImportBinder(this->state).bindImports();
+    this->importBinder->bindImports();
   }
   for (Module *module : program.modules) {
     this->useModule(module);
-    TypeDeclarer(this->state).resolveTypes(types[module->order]);
+    this->typeDeclarer->resolveTypes(types[module->order]);
   }
 
   std::vector<FunctionDecl *> functions;
@@ -89,7 +98,7 @@ std::vector<FunctionDecl *> ModuleDeclarer::declareModules(SourceFile &program) 
     this->useModule(module);
     for (Stmt *item : module->file.items) {
       if (auto *fn = dyn_cast<FunctionDecl>(item)) {
-        FunctionChecker(this->state).declareFunction(fn);
+        this->functionChecker->declareFunction(fn);
         this->state.getModuleStates().rememberDeclModule(fn, module);
         functions.push_back(fn);
       }
@@ -97,7 +106,7 @@ std::vector<FunctionDecl *> ModuleDeclarer::declareModules(SourceFile &program) 
       if (!cls || !cls->type || cls->baseExpr) {
         continue;
       }
-      ClassDeclarer(this->state).declareMethods(cls);
+      this->classDeclarer->declareMethods(cls);
       std::vector<FunctionDecl *> methods = cls->methods;
       methods.insert(methods.end(), cls->constructors.begin(), cls->constructors.end());
       if (cls->init) {
@@ -114,24 +123,20 @@ std::vector<FunctionDecl *> ModuleDeclarer::declareModules(SourceFile &program) 
       }
     }
   }
-  for (Module *module : program.modules) {
-    this->useModule(module);
-    ImportBinder(this->state).bindImports();
-  }
+  this->importBinder->bindAllImports(program.modules);
   this->state.getClassStore().markMethodsDeclared();
   GenericStore &generics = this->state.getGenericStore();
   for (ClassDecl *instance : generics.takeUnfilledClasses()) {
     generics.enterFilling(instance);
-    GenericClassInstantiator(this->state).fillInstance(instance);
+    this->genericClassInstantiator->fillInstance(instance);
     generics.leaveFilling();
   }
-  LateClasses(this->state).markLateOverrides(program);
-  ClassLinks(this->state).linkClasses();
+  this->lateClasses->markLateOverrides(program);
+  this->classLinks->linkClasses();
   for (Module *module : program.modules) {
     this->exportsOf(module);
   }
-
-  return functions;
+  this->state.getReturnInference().rememberDeclaredFunctions(std::move(functions));
 }
 
 ModuleDeclarer::ResultSourceUsable ModuleDeclarer::exportSource(const ExportSource *source) {

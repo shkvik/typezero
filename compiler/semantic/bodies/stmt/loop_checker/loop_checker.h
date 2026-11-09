@@ -6,9 +6,29 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class LoopBounds;
+class DictChecker;
+class ExprChecker;
+class JumpChecker;
+class LoopScanner;
+class StmtChecker;
+class AsyncChecker;
+class MatchChecker;
+class TruthChecker;
+class TupleChecker;
+class ObjectChecker;
+class ResultChecker;
+class ConstantFolder;
+class EmitterChecker;
+class GenericChecker;
+class IteratorMethods;
+class GeneratorChecker;
+
 class LoopChecker {
 public:
-  explicit LoopChecker(SemanticState &owner);
+  LoopChecker(SemanticState &owner, SemanticParts &all);
 
   void checkWhile(WhileStmt *stmt);
   void checkDoWhile(DoWhileStmt *stmt);
@@ -28,6 +48,24 @@ private:
   static ResultBindingShape bindingShape(const ForOfStmt *stmt, const Type *element);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  LoopBounds *loopBounds = nullptr;
+  DictChecker *dictChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  JumpChecker *jumpChecker = nullptr;
+  LoopScanner *loopScanner = nullptr;
+  StmtChecker *stmtChecker = nullptr;
+  AsyncChecker *asyncChecker = nullptr;
+  MatchChecker *matchChecker = nullptr;
+  TruthChecker *truthChecker = nullptr;
+  TupleChecker *tupleChecker = nullptr;
+  ObjectChecker *objectChecker = nullptr;
+  ResultChecker *resultChecker = nullptr;
+  ConstantFolder *constantFolder = nullptr;
+  EmitterChecker *emitterChecker = nullptr;
+  GenericChecker *genericChecker = nullptr;
+  IteratorMethods *iteratorMethods = nullptr;
+  GeneratorChecker *generatorChecker = nullptr;
 };
 
 }

@@ -6,9 +6,14 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallCycles;
+class ReturnInferrer;
+class FunctionChecker;
+
 class NestedFunctions {
 public:
-  explicit NestedFunctions(SemanticState &owner);
+  NestedFunctions(SemanticState &owner, SemanticParts &all);
 
   NestedGroup *declareNested(BlockStmt *block);
   void finishGroup(NestedGroup *group);
@@ -23,6 +28,9 @@ private:
   static void collectAssigned(const Stmt *stmt, std::vector<llvm::StringRef> &names);
 
   SemanticState &state;
+  CallCycles *callCycles = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  FunctionChecker *functionChecker = nullptr;
 };
 
 }

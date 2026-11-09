@@ -9,6 +9,7 @@
 #include "compiler/semantic/generics/type_params/type_params.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/decimal/decimal_checker/decimal_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -16,6 +17,18 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+OverloadResolver::OverloadResolver(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->typeParams = &all.getTypeParams();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->typeArgInferrer = &all.getTypeArgInferrer();
+  this->genericInstantiator = &all.getGenericInstantiator();
+}
 
 int OverloadResolver::conversionRank(const Type *from, const Type *to) {
   if (from == to || from->isError() || to->isError()) {
@@ -153,9 +166,6 @@ bool OverloadResolver::hasFloatLiteral(const Expr *expr) {
   return false;
 }
 
-OverloadResolver::OverloadResolver(SemanticState &owner)
-    : state(owner) {}
-
 OverloadResolver::ResultVariantChosen
 OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::vector<Expr *> &args,
                                 const std::vector<bool> &spread, bool &checked,
@@ -164,7 +174,7 @@ OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::ve
   auto checkLoosely = [&] {
     for (Expr *&arg : args) {
       if (!arg->type) {
-        arg = ExprChecker(this->state).checkExpr(arg);
+        arg = this->exprChecker->checkExpr(arg);
       }
     }
   };
@@ -175,7 +185,7 @@ OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::ve
   std::string what = first->isConstructor() ? ErrorTextVariant::ctorOf(first->cls()->name)
                                             : ErrorTextVariant::quoted(first->name);
   for (FunctionDecl *v : variants) {
-    ReturnInferrer(this->state).resolveParams(v->sym);
+    this->returnInferrer->resolveParams(v->sym);
   }
   if (llvm::is_contained(spread, true)) {
     checkLoosely();
@@ -244,8 +254,8 @@ OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::ve
         expected = Type::decimalTy();
       }
     }
-    args[i] = ExprChecker(this->state)
-                  .checkExpr(args[i], expected && !expected->isError() ? expected : nullptr);
+    args[i] = this->exprChecker->checkExpr(args[i],
+                                           expected && !expected->isError() ? expected : nullptr);
   }
   checked = true;
   auto failed = [](const Expr *arg) { return arg->type->isError(); };
@@ -268,7 +278,7 @@ OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::ve
   for (FunctionDecl *v : fit) {
     Candidate c{v, {}, v->sym->hasRest || count < v->sym->params.size(), {}};
     if (v->sym->isGeneric() &&
-        !TypeArgInferrer(this->state).inferFromArguments(v->sym, args, c.typeArgs)) {
+        !this->typeArgInferrer->inferFromArguments(v->sym, args, c.typeArgs)) {
       why += ErrorTextVariant::typeParams(ErrorTextVariant::text(v));
       continue;
     }
@@ -276,10 +286,10 @@ OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::ve
     for (size_t i = 0; i < count && mismatch.empty(); ++i) {
       const Type *param = OverloadResolver::parameterAt(v->sym, i);
       if (v->sym->isGeneric()) {
-        param = TypeParams(this->state).substituteValue(param, v->sym->typeParams, c.typeArgs);
+        param = this->typeParams->substituteValue(param, v->sym->typeParams, c.typeArgs);
       }
       int rank = OverloadResolver::conversionRank(args[i]->type, param);
-      if (rank < 0 && TypeRelations(this->state).literalAdapts(args[i], param)) {
+      if (rank < 0 && this->typeRelations->literalAdapts(args[i], param)) {
         rank = 1;
         c.adapted = true;
       }
@@ -354,20 +364,20 @@ OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::ve
 Expr *OverloadResolver::callGenericVariant(CallExpr *call, FuncSymbol *sym,
                                            llvm::ArrayRef<const Type *> bound, llvm::SMLoc loc,
                                            bool method) {
-  llvm::ArrayRef<const Type *> typeParams = sym->typeParams;
+  llvm::ArrayRef<const Type *> genericTypeParams = sym->typeParams;
   std::vector<const Type *> params;
   this->state.getGenericStore().enterInstanceLoc(loc);
   for (const Type *p : sym->params) {
-    params.push_back(TypeParams(this->state).substituteValue(p, typeParams, bound));
+    params.push_back(this->typeParams->substituteValue(p, genericTypeParams, bound));
   }
   const Type *ret = sym->getReturnType();
-  call->type = ret ? TypeParams(this->state).substitute(ret, typeParams, bound) : Type::error();
+  call->type = ret ? this->typeParams->substitute(ret, genericTypeParams, bound) : Type::error();
   this->state.getGenericStore().leaveInstanceLoc();
   FuncSymbol *callee = sym;
   const ClassDecl *cls = sym->decl->cls();
   if (!this->state.getFunctionStack().isInsideTrial() && !sym->inferring && sym->hasReturnType() &&
       (!cls || sym->decl->isStatic() || cls->isEmitted())) {
-    if (FuncSymbol *instance = GenericInstantiator(this->state).instantiate(sym, bound, loc)) {
+    if (FuncSymbol *instance = this->genericInstantiator->instantiate(sym, bound, loc)) {
       callee = instance;
     }
   }
@@ -379,12 +389,12 @@ Expr *OverloadResolver::callGenericVariant(CallExpr *call, FuncSymbol *sym,
     call->target = FunctionCall{.func = callee};
   }
   if (auto *member = dyn_cast<MemberExpr>(call->callee); member && method) {
-    member->type = ReturnInferrer(this->state).functionType(callee);
+    member->type = this->returnInferrer->functionType(callee);
   }
   std::vector<bool> given(call->args.size(), true);
 
-  return ArgumentChecker(this->state)
-      .checkArguments(call, params, sym->minArgs, sym->hasRest, loc, &given);
+  return this->argumentChecker->checkArguments(call, params, sym->minArgs, sym->hasRest, loc,
+                                               &given);
 }
 
 OverloadResolver::ResultVariantOfType
@@ -397,7 +407,7 @@ OverloadResolver::variantForType(llvm::ArrayRef<FunctionDecl *> variants, const 
   const Type *wanted = expected ? expected->nonOptional() : nullptr;
   if (wanted && wanted->isFunction()) {
     for (FunctionDecl *v : variants) {
-      if (ReturnInferrer(this->state).functionType(v->sym) == wanted) {
+      if (this->returnInferrer->functionType(v->sym) == wanted) {
         matching.push_back(v);
       }
     }
@@ -500,11 +510,11 @@ Expr *OverloadResolver::checkOverloadCall(CallExpr *call, MemberExpr *member) {
   call->target = OverloadCall{.signature = signature};
   member->type = overload.signatures[size_t(signature)];
   call->type = sym->getKnownReturnType();
-  FlowChecker(this->state).calledFunction();
+  this->flowChecker->calledFunction();
   std::vector<bool> given(checked ? call->args.size() : 0, true);
 
-  return ArgumentChecker(this->state)
-      .checkArguments(call, sym->params, sym->minArgs, sym->hasRest, member->loc(), &given);
+  return this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
+                                               member->loc(), &given);
 }
 
 Expr *OverloadResolver::checkOverloadMember(MemberExpr *member, const Type *expected) {

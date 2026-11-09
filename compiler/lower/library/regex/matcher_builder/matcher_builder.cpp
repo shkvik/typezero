@@ -22,6 +22,26 @@ using llvm::BasicBlock;
 
 using llvm::Value;
 
+MatcherBuilder::MatcherBuilder(llvm::Module &module, const uint32_t *program, bool threadLocal)
+    : threadLocal(threadLocal),
+      module_(module),
+      ctx(module.getContext()),
+      b(this->ctx),
+      program_(program),
+      code(program + program[TZ_RE_H_CODE]),
+      codeSize(program[TZ_RE_H_SOURCE] - program[TZ_RE_H_CODE]),
+      flags(program[TZ_RE_H_FLAGS]),
+      captures(program[TZ_RE_H_CAPTURES]),
+      registers(program[TZ_RE_H_REGISTERS]),
+      unicode((this->flags & (TZ_RE_UNICODE | TZ_RE_UNICODE_SETS)) != 0) {
+  this->matcherAnalysisPart = std::make_unique<MatcherAnalysis>(*this);
+  this->matcherCharsPart = std::make_unique<MatcherChars>(*this);
+  this->matcherMemoPart = std::make_unique<MatcherMemo>(*this);
+  this->matcherHeadPart = std::make_unique<MatcherHead>(*this);
+  this->matcherInstructionsPart = std::make_unique<MatcherInstructions>(*this);
+  this->matcherRepeatsPart = std::make_unique<MatcherRepeats>(*this);
+}
+
 bool MatcherBuilder::hasByte(const ByteSet &s, uint32_t c) {
   return (s[c / 32] >> (c % 32)) & 1;
 }
@@ -397,26 +417,6 @@ int64_t MatcherBuilder::followingChar(const uint32_t *code, uint32_t pc, bool un
       return -1;
     }
   }
-}
-
-MatcherBuilder::MatcherBuilder(llvm::Module &module, const uint32_t *program, bool threadLocal)
-    : threadLocal(threadLocal),
-      module_(module),
-      ctx(module.getContext()),
-      b(this->ctx),
-      program_(program),
-      code(program + program[TZ_RE_H_CODE]),
-      codeSize(program[TZ_RE_H_SOURCE] - program[TZ_RE_H_CODE]),
-      flags(program[TZ_RE_H_FLAGS]),
-      captures(program[TZ_RE_H_CAPTURES]),
-      registers(program[TZ_RE_H_REGISTERS]),
-      unicode((this->flags & (TZ_RE_UNICODE | TZ_RE_UNICODE_SETS)) != 0) {
-  this->matcherAnalysisPart = std::make_unique<MatcherAnalysis>(*this);
-  this->matcherCharsPart = std::make_unique<MatcherChars>(*this);
-  this->matcherMemoPart = std::make_unique<MatcherMemo>(*this);
-  this->matcherHeadPart = std::make_unique<MatcherHead>(*this);
-  this->matcherInstructionsPart = std::make_unique<MatcherInstructions>(*this);
-  this->matcherRepeatsPart = std::make_unique<MatcherRepeats>(*this);
 }
 
 llvm::BasicBlock *MatcherBuilder::newBlock(const llvm::Twine &name) {

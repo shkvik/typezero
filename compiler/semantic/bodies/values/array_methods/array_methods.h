@@ -6,11 +6,21 @@
 
 namespace tz {
 
+class SemanticParts;
+class ExprChecker;
+class FlowChecker;
+class IndexProofs;
+class MemberChecker;
+class TypeRelations;
+class ArgumentChecker;
+class CallbackChecker;
+class IteratorMethods;
+
 class ArrayMethods {
 public:
   using ResultArrayMethodCall = Result<Expr *, ArrayMethodsCheckArrayMethodError>;
 
-  explicit ArrayMethods(SemanticState &owner);
+  ArrayMethods(SemanticState &owner, SemanticParts &all);
 
   ResultArrayMethodCall checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *expected);
 
@@ -23,6 +33,14 @@ private:
   static ResultElementsAreText textElements(const Type *element, llvm::StringRef name);
 
   SemanticState &state;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  IndexProofs *indexProofs = nullptr;
+  MemberChecker *memberChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  CallbackChecker *callbackChecker = nullptr;
+  IteratorMethods *iteratorMethods = nullptr;
 };
 
 }

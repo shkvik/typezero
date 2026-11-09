@@ -6,10 +6,17 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class ExprChecker;
+class FlowChecker;
+class ClassDeclarer;
+class TypeRelations;
+
 class ArgListChecker {
 public:
   static bool spreadsLists(const Type *type);
-  explicit ArgListChecker(SemanticState &owner);
+  ArgListChecker(SemanticState &owner, SemanticParts &all);
 
   void expandArgumentList(FunctionDecl *fn, FuncSymbol *sym);
   void declareArgumentList(FunctionDecl *fn);
@@ -33,6 +40,11 @@ private:
   static bool usedAsValue(const Stmt *body, llvm::StringRef name, bool known);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  TypeRelations *typeRelations = nullptr;
 };
 
 }

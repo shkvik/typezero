@@ -6,9 +6,16 @@
 
 namespace tz {
 
+class SemanticParts;
+class ExprChecker;
+class MemberChecker;
+class ObjectChecker;
+class TypeRelations;
+class ConstantFolder;
+
 class MatchChecker {
 public:
-  explicit MatchChecker(SemanticState &owner);
+  MatchChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkMatchMember(MemberExpr *member);
   Expr *checkMatchIndex(IndexExpr *index);
@@ -20,6 +27,11 @@ private:
   static ResultGroupIndex groupIndex(int64_t index, int groups);
 
   SemanticState &state;
+  ExprChecker *exprChecker = nullptr;
+  MemberChecker *memberChecker = nullptr;
+  ObjectChecker *objectChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ConstantFolder *constantFolder = nullptr;
 };
 
 }

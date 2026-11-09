@@ -4,9 +4,12 @@
 
 namespace tz {
 
+class SemanticParts;
+class GenericClassInstantiator;
+
 class EventMapInference {
 public:
-  explicit EventMapInference(SemanticState &owner);
+  EventMapInference(SemanticState &owner, SemanticParts &all);
 
   const Type *inferredEventMap(const std::string &site);
   std::string placeOf(llvm::SMLoc loc) const;
@@ -20,6 +23,7 @@ private:
   ClassDecl *portableClass(const std::string &file, const std::string &name);
 
   SemanticState &state;
+  GenericClassInstantiator *genericClassInstantiator = nullptr;
 };
 
 }

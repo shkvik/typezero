@@ -6,11 +6,25 @@
 
 namespace tz {
 
+class SemanticParts;
+class EventMaps;
+class TypeParams;
+class TypeResolver;
+class UtilityTypes;
+class ClassDeclarer;
+class TemplateTypes;
+class ArgListChecker;
+class ReturnInferrer;
+class ExtendsRelation;
+class TopLevelChecker;
+class ConditionalTypes;
+class ClassValueChecker;
+
 class TypeOperators {
 public:
   using ResultTypeOpResolved = Result<const Type *, TypeOperatorsResolveTypeOpError>;
 
-  explicit TypeOperators(SemanticState &owner);
+  TypeOperators(SemanticState &owner, SemanticParts &all);
 
   const Type *keysOf(const Type *type);
   ResultTypeOpResolved resolveTypeOp(const TypeRef &ref);
@@ -21,6 +35,18 @@ private:
   static llvm::ArrayRef<const Type *> membersOf(const Type *&type);
 
   SemanticState &state;
+  EventMaps *eventMaps = nullptr;
+  TypeParams *typeParams = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  UtilityTypes *utilityTypes = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  TemplateTypes *templateTypes = nullptr;
+  ArgListChecker *argListChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  ExtendsRelation *extendsRelation = nullptr;
+  TopLevelChecker *topLevelChecker = nullptr;
+  ConditionalTypes *conditionalTypes = nullptr;
+  ClassValueChecker *classValueChecker = nullptr;
 };
 
 }

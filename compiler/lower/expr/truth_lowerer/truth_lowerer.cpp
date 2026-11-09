@@ -17,14 +17,14 @@ using llvm::isa;
 
 namespace tz {
 
+TruthLowerer::TruthLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 bool TruthLowerer::isReference(const Type *type) {
   return type->isObject() || type->isIterator() || type->isJson() || type->isDict() ||
          type->isPromise() || type->isUnknown() || type->isClassRef() ||
          (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
-
-TruthLowerer::TruthLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Value *TruthLowerer::emitLogical(BinaryExpr *bin) {
   bool isAnd = bin->op == BinaryOp::LogAnd;

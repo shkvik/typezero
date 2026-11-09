@@ -5,6 +5,7 @@
 #include "compiler/semantic/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/semantic/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
@@ -19,6 +20,13 @@ constexpr uint64_t kMaxConstant = uint64_t(1) << 40;
 
 }
 
+IndexProofs::IndexProofs(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->byteProofs = &all.getByteProofs();
+  this->libraryCalls = &all.getLibraryCalls();
+  this->constantFolder = &all.getConstantFolder();
+}
+
 const VarSymbol *IndexProofs::variableOf(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
@@ -30,9 +38,6 @@ const VarSymbol *IndexProofs::variableOf(const Expr *expr) {
 
   return name ? name->var() : nullptr;
 }
-
-IndexProofs::IndexProofs(SemanticState &owner)
-    : state(owner) {}
 
 std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
   switch (expr->kind()) {
@@ -247,7 +252,7 @@ bool IndexProofs::provesInBounds(const Expr *object, const Expr *index, bool all
           at->term, length->term, length->offset - at->offset + (allowEnd ? 1 : 0))) {
     return true;
   }
-  IntegerRange range = ByteProofs(this->state).valueRange(index);
+  IntegerRange range = this->byteProofs->valueRange(index);
 
   return range.lo && range.hi && *range.lo >= 0 &&
          this->state.getFlowState().getFacts().proves(
@@ -308,7 +313,7 @@ bool IndexProofs::provesBetween(const Expr *expr, int64_t lo, std::optional<int6
       upper |= hi && facts.proves(l->term, Term::zero(), *hi - l->offset + 1);
     }
   }
-  IntegerRange range = ByteProofs(this->state).valueRange(expr);
+  IntegerRange range = this->byteProofs->valueRange(expr);
   lower |= range.lo && *range.lo >= lo;
   upper |= hi && range.hi && *range.hi <= *hi;
 
@@ -327,7 +332,7 @@ bool IndexProofs::exempt(llvm::SMLoc loc, const Expr *object) const {
     return true;
   }
 
-  return this->state.getFlowState().isUnreachable() || LibraryCalls(this->state).inLibrary(loc);
+  return this->state.getFlowState().isUnreachable() || this->libraryCalls->inLibrary(loc);
 }
 
 IndexProofs::ResultBetweenProven IndexProofs::requireBetween(const Expr *expr, int64_t lo,
@@ -344,7 +349,7 @@ IndexProofs::ResultBetweenProven IndexProofs::requireBetween(const Expr *expr, i
   }
 
   std::string range = ErrorTextBetween::range(lo, hi);
-  std::optional<int64_t> constant = ConstantFolder(this->state).intConstant(expr);
+  std::optional<int64_t> constant = this->constantFolder->intConstant(expr);
   if (constant && !hi && lo == 0) {
     std::string message = ErrorTextBetween::negative(what, *constant);
 
@@ -449,7 +454,7 @@ bool IndexProofs::provesUpTo(const Expr *value, const Expr *object, int64_t less
       at && this->provesLinearUpTo(*at, object, less)) {
     return true;
   }
-  IntegerRange range = ByteProofs(this->state).valueRange(value);
+  IntegerRange range = this->byteProofs->valueRange(value);
 
   return range.hi && this->provesLinearUpTo(Linear{Term::zero(), *range.hi}, object, less);
 }
@@ -529,8 +534,8 @@ std::optional<Linear> IndexProofs::lengthAtMost(const Expr *expr) const {
       (call->builtin() != Builtin::BytesSubarray && call->builtin() != Builtin::BytesSlice)) {
     return std::nullopt;
   }
-  std::optional<int64_t> from = ConstantFolder(this->state).intConstant(call->args[0]);
-  std::optional<int64_t> to = ConstantFolder(this->state).intConstant(call->args[1]);
+  std::optional<int64_t> from = this->constantFolder->intConstant(call->args[0]);
+  std::optional<int64_t> to = this->constantFolder->intConstant(call->args[1]);
   if (!from || !to || *from < 0 || *to < *from) {
     return std::nullopt;
   }
@@ -603,8 +608,7 @@ IntegerRange IndexProofs::lengthRange(const Expr *value) const {
     case Builtin::BytesNew:
     case Builtin::ArrayBufferNew:
     case Builtin::BufferAllocFill:
-      return call->args.empty() ? IntegerRange{0, 0}
-                                : ByteProofs(this->state).valueRange(call->args[0]);
+      return call->args.empty() ? IntegerRange{0, 0} : this->byteProofs->valueRange(call->args[0]);
     case Builtin::DataViewNew:
     case Builtin::BytesView:
       if (call->args.size() == 1 && call->type && call->type->elementSize() == 1) {

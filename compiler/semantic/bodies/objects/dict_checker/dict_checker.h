@@ -6,6 +6,15 @@
 
 namespace tz {
 
+class SemanticParts;
+class ExprChecker;
+class IntlChecker;
+class TypeResolver;
+class TypeRelations;
+class ArgListChecker;
+class WeakRefChecker;
+class IterableChecker;
+
 class DictChecker {
 public:
   using ResultRecordKeyChecked = Result<Expr *, DictCheckerCheckDictInError>;
@@ -16,7 +25,7 @@ public:
   using ResultRecordTargetType = Result<const Type *, DictCheckerCheckDictTargetError>;
   using ResultDictTypeResolved = Result<const Type *, DictCheckerResolveDictTypeError>;
 
-  explicit DictChecker(SemanticState &owner);
+  DictChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *iterableOf(Expr *expr);
   Expr *checkRecordKey(Expr *key);
@@ -42,6 +51,13 @@ private:
   static ResultTextKeyForRecord stringKey(const Type *type);
 
   SemanticState &state;
+  ExprChecker *exprChecker = nullptr;
+  IntlChecker *intlChecker = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ArgListChecker *argListChecker = nullptr;
+  WeakRefChecker *weakRefChecker = nullptr;
+  IterableChecker *iterableChecker = nullptr;
 };
 
 }

@@ -9,6 +9,7 @@
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
 #include "compiler/semantic/generics/generic_class_instantiator/generic_class_instantiator.h"
 #include "compiler/semantic/library/events/event_map_inference/event_map_inference.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
@@ -18,6 +19,20 @@
 using llvm::dyn_cast;
 
 namespace tz {
+
+EventMaps::EventMaps(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->exprChecker = &all.getExprChecker();
+  this->typeDeclarer = &all.getTypeDeclarer();
+  this->typeResolver = &all.getTypeResolver();
+  this->typeRelations = &all.getTypeRelations();
+  this->closureChecker = &all.getClosureChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->eventMapInference = &all.getEventMapInference();
+  this->keyedFieldChecker = &all.getKeyedFieldChecker();
+  this->functionValueChecker = &all.getFunctionValueChecker();
+  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+}
 
 bool EventMaps::isServiceEvent(llvm::StringRef name) {
   return name == "newListener" || name == "removeListener";
@@ -58,9 +73,6 @@ std::string EventMaps::nearestEvent(const Type *events, llvm::StringRef name) {
 
   return bestDistance <= std::max<size_t>(2, name.size() / 3) ? best : std::string();
 }
-
-EventMaps::EventMaps(SemanticState &owner)
-    : state(owner) {}
 
 bool EventMaps::isEmitterClass(const ClassDecl *cls) const {
   ClassDecl *base = this->state.getLibraryDeclarations().findLibraryClass("EventEmitterBase");
@@ -169,11 +181,11 @@ const Type *EventMaps::eventArgs(const Type *events, Expr *&name, llvm::StringRe
     if (auto *lit = dyn_cast<StringLitExpr>(name); lit && label) {
       *label = ToUtf8::toUtf8(lit->value);
     }
-    name = ArgumentChecker(this->state).checkArg(name, Type::string());
+    name = this->argumentChecker->checkArg(name, Type::string());
     return name->type->isError() ? nullptr : events->valueType();
   }
-  name = ArgumentChecker(this->state).checkArg(name, Type::string());
-  std::optional<std::string> key = KeyedFieldChecker(this->state).constantKey(name);
+  name = this->argumentChecker->checkArg(name, Type::string());
+  std::optional<std::string> key = this->keyedFieldChecker->constantKey(name);
   if (!key) {
     if (!name->type->isError()) {
       std::string message = ErrorTextEventName::unknown(method);
@@ -191,7 +203,7 @@ const Type *EventMaps::eventArgs(const Type *events, Expr *&name, llvm::StringRe
   if (std::optional<std::string> site = this->state.getEventStore().findOpenMapSite(events)) {
     for (const EventInference::Event &e : this->state.getEventStore().getInferredEvents(*site)) {
       if (e.name == *key) {
-        return EventMapInference(this->state).fromPortable(e.args, loc);
+        return this->eventMapInference->fromPortable(e.args, loc);
       }
     }
     return nullptr;
@@ -247,42 +259,41 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
   if (auto *fe = dyn_cast<FunctionExpr>(arg)) {
     FunctionDecl *fn = fe->fn;
     if (!fn->params.empty() && fn->params[0].name == "this" && fn->params[0].type) {
-      const Type *self = TypeResolver(this->state).resolveType(*fn->params[0].type, false);
+      const Type *self = this->typeResolver->resolveType(*fn->params[0].type, false);
       if (!takesThis(self, fn->params[0].loc)) {
-        arg = ExprChecker(this->state).checkExpr(arg);
+        arg = this->exprChecker->checkExpr(arg);
         return arg;
       }
       if (fn->isAsync) {
         std::string message = ErrorTextListener::asyncThis();
         this->state.getDiagnostics().error(fe->loc(), message);
-        arg = ExprChecker(this->state).checkExpr(arg);
+        arg = this->exprChecker->checkExpr(arg);
         return arg;
       }
       kind = ListenerKind::This;
       const Type *wanted = withThis(self);
       Signature sig = ClosureChecker::signatureOf(wanted);
       sig.voidResult = true;
-      arg = ClosureChecker(this->state).checkFunctionExpr(fe, &sig);
+      arg = this->closureChecker->checkFunctionExpr(fe, &sig);
       if (arg->type->isError()) {
         return arg;
       }
-      return TypeRelations(this->state)
-          .convert(TypeRelations(this->state).coerce(arg, wanted), Type::unknown());
+      return this->typeRelations->convert(this->typeRelations->coerce(arg, wanted),
+                                          Type::unknown());
     }
     if (fn->isAsync) {
       kind = ListenerKind::Async;
     }
     Signature sig = ClosureChecker::signatureOf(fn->isAsync ? async : sync);
     sig.voidResult = !fn->isAsync;
-    arg = ClosureChecker(this->state).checkFunctionExpr(fe, &sig);
+    arg = this->closureChecker->checkFunctionExpr(fe, &sig);
     if (arg->type->isError()) {
       return arg;
     }
-    return TypeRelations(this->state)
-        .convert(TypeRelations(this->state).coerce(arg, fn->isAsync ? async : sync),
-                 Type::unknown());
+    return this->typeRelations->convert(
+        this->typeRelations->coerce(arg, fn->isAsync ? async : sync), Type::unknown());
   }
-  arg = ExprChecker(this->state).checkExpr(arg);
+  arg = this->exprChecker->checkExpr(arg);
   const Type *type = arg->type;
   if (type->isError()) {
     return arg;
@@ -298,7 +309,7 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
     }
     kind = ListenerKind::This;
     if (type == withThis(type->params()[0])) {
-      return TypeRelations(this->state).convert(arg, Type::unknown());
+      return this->typeRelations->convert(arg, Type::unknown());
     }
     std::string message = ErrorTextListener::gets(event, args->name(), type->name());
     this->state.getDiagnostics().error(arg->loc(), message);
@@ -310,15 +321,15 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
   }
   const Type *wanted = isAsync ? async : sync;
   if (type == wanted) {
-    return TypeRelations(this->state).convert(arg, Type::unknown());
+    return this->typeRelations->convert(arg, Type::unknown());
   }
   if (isAsync && type->ret() != async->ret()) {
     std::string message = ErrorTextListener::asyncRet(type->ret()->name());
     this->state.getDiagnostics().error(arg->loc(), message);
     return arg;
   }
-  if (Expr *adapted = FunctionValueChecker(this->state).adaptFunction(arg, wanted)) {
-    return TypeRelations(this->state).convert(adapted, Type::unknown());
+  if (Expr *adapted = this->functionValueChecker->adaptFunction(arg, wanted)) {
+    return this->typeRelations->convert(adapted, Type::unknown());
   }
   std::string message = ErrorTextListener::getsArrow(event, args->name(), type->name());
   this->state.getDiagnostics().error(arg->loc(), message);
@@ -330,7 +341,7 @@ const Type *EventMaps::createdType(const NewExpr *create) {
   if (!create->member.empty()) {
     return nullptr;
   }
-  auto *cls = llvm::dyn_cast_or_null<ClassDecl>(TypeDeclarer(this->state).lookupType(create->name));
+  auto *cls = llvm::dyn_cast_or_null<ClassDecl>(this->typeDeclarer->lookupType(create->name));
   if (!cls) {
     return nullptr;
   }
@@ -339,15 +350,14 @@ const Type *EventMaps::createdType(const NewExpr *create) {
   }
   std::vector<const Type *> args;
   for (const TypeRef &ref : create->typeArgs) {
-    args.push_back(TypeResolver(this->state).resolveType(ref, false));
+    args.push_back(this->typeResolver->resolveType(ref, false));
     if (args.back()->isError()) {
       return nullptr;
     }
   }
   if (args.empty() && cls->library() && cls->name == "EventEmitter") {
-    if (const Type *events =
-            EventMapInference(this->state)
-                .inferredEventMap("new " + EventMapInference(this->state).placeOf(create->loc()))) {
+    if (const Type *events = this->eventMapInference->inferredEventMap(
+            "new " + this->eventMapInference->placeOf(create->loc()))) {
       args.push_back(events);
     }
   }
@@ -355,7 +365,7 @@ const Type *EventMaps::createdType(const NewExpr *create) {
     return nullptr;
   }
   GenericClassInstantiator::ResultClassMade made =
-      GenericClassInstantiator(this->state).instantiateClass(cls, std::move(args), create->loc());
+      this->genericClassInstantiator->instantiateClass(cls, std::move(args), create->loc());
   if (made.isErr() &&
       made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
     llvm::SMLoc at =

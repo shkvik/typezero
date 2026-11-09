@@ -7,7 +7,6 @@ namespace tz {
 
 enum class LoadOrderEarlyReadErrorCode {
   USED_BEFORE_DECLARED,
-  READ_BEFORE_LOADED,
 };
 
 struct LoadOrderEarlyReadError {
@@ -18,7 +17,6 @@ struct LoadOrderEarlyReadError {
 class ErrorTextEarlyRead {
 public:
   static std::string sameFile(llvm::StringRef name);
-  static std::string label(llvm::StringRef name, llvm::StringRef var, llvm::StringRef file);
 };
 
 enum class LoadOrderLateUseErrorCode {

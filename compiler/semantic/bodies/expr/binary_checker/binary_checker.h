@@ -6,12 +6,27 @@
 
 namespace tz {
 
+class SemanticParts;
+class DateChecker;
+class ExprChecker;
+class JsonChecker;
+class ResultTypes;
+class MatchChecker;
+class TruthChecker;
+class UnaryChecker;
+class ConcatChecker;
+class TypeRelations;
+class ConstantFolder;
+class DecimalChecker;
+class GenericChecker;
+class InstanceOfChecker;
+
 class BinaryChecker {
 public:
   using ResultNullishResolved = Result<Expr *, BinaryCheckerCheckNullishError>;
   using ResultTypeOfNameKnown = Result<const StringLitExpr *, BinaryCheckerCheckTypeOfNameError>;
 
-  explicit BinaryChecker(SemanticState &owner);
+  BinaryChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *toInt32(Expr *expr);
   Expr *checkEquality(BinaryExpr *bin);
@@ -38,6 +53,19 @@ private:
                                  bool bitwise);
 
   SemanticState &state;
+  DateChecker *dateChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  JsonChecker *jsonChecker = nullptr;
+  ResultTypes *resultTypes = nullptr;
+  MatchChecker *matchChecker = nullptr;
+  TruthChecker *truthChecker = nullptr;
+  UnaryChecker *unaryChecker = nullptr;
+  ConcatChecker *concatChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ConstantFolder *constantFolder = nullptr;
+  DecimalChecker *decimalChecker = nullptr;
+  GenericChecker *genericChecker = nullptr;
+  InstanceOfChecker *instanceOfChecker = nullptr;
 };
 
 }

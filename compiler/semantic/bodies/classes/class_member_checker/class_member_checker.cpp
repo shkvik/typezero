@@ -12,6 +12,7 @@
 #include "compiler/semantic/library/fs/fs_declarer/fs_declarer.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/semantic/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -21,12 +22,25 @@ using llvm::dyn_cast_or_null;
 
 namespace tz {
 
+ClassMemberChecker::ClassMemberChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->eventMaps = &all.getEventMaps();
+  this->fieldFacts = &all.getFieldFacts();
+  this->fsDeclarer = &all.getFsDeclarer();
+  this->classChecker = &all.getClassChecker();
+  this->libraryCalls = &all.getLibraryCalls();
+  this->classDeclarer = &all.getClassDeclarer();
+  this->objectChecker = &all.getObjectChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->emitterChecker = &all.getEmitterChecker();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->overloadResolver = &all.getOverloadResolver();
+  this->tzModulesChecker = &all.getTzModulesChecker();
+}
+
 const char *ClassMemberChecker::accessWord(Access access) {
   return access == Access::Private ? "private" : "protected";
 }
-
-ClassMemberChecker::ClassMemberChecker(SemanticState &owner)
-    : state(owner) {}
 
 bool ClassMemberChecker::sameClass(const ClassDecl *a, const ClassDecl *b) {
   return a && b && a->staticOwner() == b->staticOwner();
@@ -146,10 +160,10 @@ ClassMemberChecker::instanceMethods(const ClassDecl *cls, llvm::StringRef name) 
 ClassMemberChecker::ResultObjectReadyToUse
 ClassMemberChecker::objectReady(bool viaThis, llvm::StringRef name) const {
   bool early = viaThis && !this->state.getFlowState().isBeforeSuper() &&
-               ClassChecker(this->state).thisReady(this->state.getFlowState().getFlow()).isErr();
+               this->classChecker->thisReady(this->state.getFlowState().getFlow()).isErr();
   if (early) {
     std::string field =
-        ClassChecker(this->state).firstUnset(this->state.getFlowState().getFlow()).value();
+        this->classChecker->firstUnset(this->state.getFlowState().getFlow()).value();
     std::string message = ErrorTextClassField::earlyThis(name, field);
 
     return err(ClassMemberCheckerObjectReadyError{
@@ -177,14 +191,14 @@ ClassMemberChecker::ResultPlainMethodValue ClassMemberChecker::methodValue(const
 
 Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expected) {
   ClassDecl *cls = ClassDeclarer::classOf(member->object->type);
-  ClassDeclarer(this->state).completeClass(cls);
-  TzModulesChecker(this->state).noteTlsMethod(member, cls);
+  this->classDeclarer->completeClass(cls);
+  this->tzModulesChecker->noteTlsMethod(member, cls);
   member->type = Type::error();
   llvm::StringRef name = member->name;
-  if (Expr *date = FsDeclarer(this->state).checkStatsDate(member, cls)) {
+  if (Expr *date = this->fsDeclarer->checkStatsDate(member, cls)) {
     return date;
   }
-  bool viaThis = ClassChecker(this->state).isInitThis(member->object).isOk();
+  bool viaThis = this->classChecker->isInitThis(member->object).isOk();
   const ClassDecl *owner = nullptr;
   const ClassField *field = ClassBases::findField(cls, name, &owner);
   if (field && !field->method()) {
@@ -204,13 +218,13 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
       return member;
     }
     member->type = typed.value();
-    if (Expr *narrowed = FieldFacts(this->state).narrowedField(member); narrowed != member) {
+    if (Expr *narrowed = this->fieldFacts->narrowedField(member); narrowed != member) {
       return narrowed;
     }
     if (field->resolved->isOptional()) {
-      if (std::optional<FieldPath> path = FieldFacts(this->state).fieldPath(member);
-          path && FieldFacts(this->state).isFieldDefined(*path)) {
-        return TypeRelations(this->state).convert(member, field->resolved->inner());
+      if (std::optional<FieldPath> path = this->fieldFacts->fieldPath(member);
+          path && this->fieldFacts->isFieldDefined(*path)) {
+        return this->typeRelations->convert(member, field->resolved->inner());
       }
     }
     return member;
@@ -226,9 +240,9 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
   if (accessible.isErr()) {
     this->state.getDiagnostics().error(member->loc(), accessible.error().message);
   }
-  if (methods[0]->cls()->library() && EventMaps(this->state).isEmitterClass(cls) &&
-      !LibraryCalls(this->state).inLibrary(member->loc()) && name != "eventNames") {
-    EmitterChecker(this->state).reportEmitterMethodValue(member);
+  if (methods[0]->cls()->library() && this->eventMaps->isEmitterClass(cls) &&
+      !this->libraryCalls->inLibrary(member->loc()) && name != "eventNames") {
+    this->emitterChecker->reportEmitterMethodValue(member);
 
     return member;
   }
@@ -237,7 +251,7 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
     this->state.getDiagnostics().error(member->loc(), ready.error().message);
   }
   OverloadResolver::ResultVariantOfType variant =
-      OverloadResolver(this->state).variantForType(methods, expected, member);
+      this->overloadResolver->variantForType(methods, expected, member);
   if (variant.isErr()) {
     this->state.getDiagnostics().error(member->loc(), variant.error().message);
     return member;
@@ -253,7 +267,7 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
   } else {
     member->form = MethodMember{.method = sym, .virtualCall = true};
   }
-  member->type = ReturnInferrer(this->state).functionType(sym);
+  member->type = this->returnInferrer->functionType(sym);
 
   return member;
 }
@@ -261,7 +275,7 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
 ClassMemberChecker::ResultStoredFieldValue ClassMemberChecker::statsDate(ClassDecl *cls,
                                                                          MemberExpr *member) {
   bool derived = this->state.getFileSystemStore().isStatsClass(cls) &&
-                 FsDeclarer(this->state).checkStatsDate(member, cls);
+                 this->fsDeclarer->checkStatsDate(member, cls);
   if (derived) {
     std::string message = ErrorTextFieldTarget::statsDate(member->name);
 
@@ -337,9 +351,9 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
   const Type *type = member->object->type;
   ClassDecl *cls = ClassDeclarer::classOf(type);
   if (!cls) {
-    return ObjectChecker(this->state).checkObjectFieldTarget(member);
+    return this->objectChecker->checkObjectFieldTarget(member);
   }
-  ClassDeclarer(this->state).completeClass(cls);
+  this->classDeclarer->completeClass(cls);
   llvm::StringRef name = member->name;
   const ClassDecl *owner = nullptr;
   const ClassField *field = ClassBases::findField(cls, name, &owner);
@@ -357,7 +371,7 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
   if (accessible.isErr()) {
     this->state.getDiagnostics().error(member->loc(), accessible.error().message);
   }
-  bool viaThis = ClassChecker(this->state).isInitThis(member->object).isOk();
+  bool viaThis = this->classChecker->isInitThis(member->object).isOk();
   if (compound) {
     ResultFieldIsSetBefore set = this->fieldSet(owner, name, viaThis);
     if (set.isErr()) {

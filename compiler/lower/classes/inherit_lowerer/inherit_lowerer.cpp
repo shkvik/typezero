@@ -25,6 +25,9 @@ constexpr uint64_t kItablesOffset = 40;
 
 }
 
+InheritLowerer::InheritLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 llvm::LoadInst *InheritLowerer::invariant(llvm::LoadInst *load) {
   load->setMetadata(llvm::LLVMContext::MD_invariant_load,
                     llvm::MDNode::get(load->getContext(), {}));
@@ -37,9 +40,6 @@ std::string InheritLowerer::typeName(const Type *type) {
 
   return name.starts_with("{") ? "object" : name.str();
 }
-
-InheritLowerer::InheritLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 const Type *InheritLowerer::layoutPrefix(const Type *type) const {
   for (const Type *base : type->bases()) {

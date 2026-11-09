@@ -5,9 +5,17 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ExprChecker;
+class FlowChecker;
+class TypeRelations;
+class ArgumentChecker;
+class CallbackChecker;
+
 class ResultMethodChecker {
 public:
-  explicit ResultMethodChecker(SemanticState &owner);
+  ResultMethodChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkResultMethod(CallExpr *call, MemberExpr *member, const Type *expected);
 
@@ -16,6 +24,12 @@ private:
   static bool givesType(const Type *half);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  CallbackChecker *callbackChecker = nullptr;
 };
 
 }

@@ -3,6 +3,7 @@
 #include "compiler/semantic/bodies/functions/function_checker/function_checker.h"
 #include "compiler/semantic/infer/call_cycles/call_cycles.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 
@@ -11,6 +12,13 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+NestedFunctions::NestedFunctions(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callCycles = &all.getCallCycles();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->functionChecker = &all.getFunctionChecker();
+}
 
 void NestedFunctions::collectAssigned(const Stmt *stmt, std::vector<llvm::StringRef> &names) {
   AstWalker::visitExprs(stmt, [&](const Expr *e) {
@@ -27,9 +35,6 @@ void NestedFunctions::collectAssigned(const Stmt *stmt, std::vector<llvm::String
     }
   });
 }
-
-NestedFunctions::NestedFunctions(SemanticState &owner)
-    : state(owner) {}
 
 NestedGroup *NestedFunctions::declareNested(BlockStmt *block) {
   std::vector<FunctionDecl *> members;
@@ -59,7 +64,7 @@ NestedGroup *NestedFunctions::declareNested(BlockStmt *block) {
     var->place = VarSymbol::localPlace(this->state.getFunctionStack().getCurrentDecl(), 0);
     var->holds = DeclaredFunction{.function = fn};
     fn->var = var;
-    FunctionChecker(this->state).declareFunction(fn, var);
+    this->functionChecker->declareFunction(fn, var);
     NestedFunctions::collectAssigned(fn->body, group->assignedNames);
   }
   for (Stmt *stmt : block->body) {
@@ -79,7 +84,7 @@ NestedGroup *NestedFunctions::declareNested(BlockStmt *block) {
       group->firstUse = i;
     }
   }
-  CallCycles(this->state).findCycles(group->members);
+  this->callCycles->findCycles(group->members);
 
   return group;
 }
@@ -88,14 +93,14 @@ void NestedFunctions::finishGroup(NestedGroup *group) {
   group->finished = true;
   for (FunctionDecl *fn : group->members) {
     if (!fn->sym->hasReturnType()) {
-      ReturnInferrer(this->state).inferReturnType(fn->sym);
+      this->returnInferrer->inferReturnType(fn->sym);
     }
     if (fn->checked) {
       continue;
     }
-    BodyState saved = ReturnInferrer(this->state).enterBody(fn);
-    FunctionChecker(this->state).checkFunctionBody(fn);
-    ReturnInferrer(this->state).leaveBody(saved);
+    BodyState saved = this->returnInferrer->enterBody(fn);
+    this->functionChecker->checkFunctionBody(fn);
+    this->returnInferrer->leaveBody(saved);
   }
   for (const NestedGroup::Use &use : group->uses) {
     ResultUseInOrder ordered = NestedFunctions::useOrder(group, use);

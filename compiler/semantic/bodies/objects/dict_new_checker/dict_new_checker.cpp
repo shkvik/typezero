@@ -5,6 +5,7 @@
 #include "compiler/semantic/bodies/objects/dict_checker/dict_checker.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/library/decimal/decimal_checker/decimal_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
@@ -16,8 +17,15 @@ using llvm::isa;
 
 namespace tz {
 
-DictNewChecker::DictNewChecker(SemanticState &owner)
-    : state(owner) {}
+DictNewChecker::DictNewChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->dictChecker = &all.getDictChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->iteratorMethods = &all.getIteratorMethods();
+  this->generatorChecker = &all.getGeneratorChecker();
+}
 
 void DictNewChecker::markPairs(Expr *arg) {
   auto *call = dyn_cast<CallExpr>(arg);
@@ -224,8 +232,8 @@ bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value)
     for (size_t i = 0; i < 2; ++i) {
       Expr *&part = pair->elements[i].expr;
       const Type *&common = i == 0 ? key : value;
-      part = ExprChecker(this->state)
-                 .checkExpr(part, common && DecimalChecker::isLiteralTree(part) ? common : nullptr);
+      part = this->exprChecker->checkExpr(
+          part, common && DecimalChecker::isLiteralTree(part) ? common : nullptr);
       const Type *t = part->type;
       if (t->isError()) {
         typed = false;
@@ -253,8 +261,8 @@ bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value)
   const Type *pairType = Type::tuple({key, value});
   for (const ArrayLitExpr::Element &e : lit->elements) {
     auto *pair = cast<ArrayLitExpr>(e.expr);
-    pair->elements[0].expr = TypeRelations(this->state).coerce(pair->elements[0].expr, key);
-    pair->elements[1].expr = TypeRelations(this->state).coerce(pair->elements[1].expr, value);
+    pair->elements[0].expr = this->typeRelations->coerce(pair->elements[0].expr, key);
+    pair->elements[1].expr = this->typeRelations->coerce(pair->elements[1].expr, value);
     pair->type = pairType;
   }
   lit->type = Type::array(pairType);
@@ -264,10 +272,9 @@ bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value)
 
 Expr *DictNewChecker::checkDictSource(Expr *arg, bool pairs, const Type *&element,
                                       llvm::StringRef what) {
-  IteratorMethods(this->state).markFused(arg);
-  arg = DictChecker(this->state)
-            .iterableOf(
-                ExprChecker(this->state).checkExpr(arg, element ? Type::array(element) : nullptr));
+  this->iteratorMethods->markFused(arg);
+  arg = this->dictChecker->iterableOf(
+      this->exprChecker->checkExpr(arg, element ? Type::array(element) : nullptr));
   const Type *type = arg->type;
   const Type *wanted = element;
   element = Type::error();
@@ -277,11 +284,11 @@ Expr *DictNewChecker::checkDictSource(Expr *arg, bool pairs, const Type *&elemen
   const Type *given = GeneratorChecker::iteratedType(type);
   if (given && type->isIterator()) {
     GeneratorChecker::ResultNextNeedsNoValue nothing =
-        GeneratorChecker(this->state).checkSendsNothing(type, what);
+        this->generatorChecker->checkSendsNothing(type, what);
     if (nothing.isErr()) {
       this->state.getDiagnostics().error(arg->loc(), nothing.error().message);
     }
-    FlowChecker(this->state).calledFunction();
+    this->flowChecker->calledFunction();
   }
   ResultSourceShape shaped = DictNewChecker::sourceShape(type, given, wanted, pairs, what);
   if (shaped.isErr()) {
@@ -300,19 +307,19 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
     TypeRef ref;
     ref.name = expr->name;
     ref.loc = loc;
-    DictChecker::ResultDictTypeResolved weak = DictChecker(this->state).resolveDictType(ref);
+    DictChecker::ResultDictTypeResolved weak = this->dictChecker->resolveDictType(ref);
     if (weak.isErr()) {
       this->state.getDiagnostics().error(loc, weak.error().message);
     }
     for (Expr *&arg : expr->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     expr->type = Type::error();
     return expr;
   }
   auto fail = [&] {
     for (Expr *&arg : expr->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     expr->type = Type::error();
 
@@ -336,7 +343,7 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
     ref.name = expr->name;
     ref.loc = loc;
     ref.args = expr->typeArgs;
-    DictChecker::ResultDictTypeResolved given = DictChecker(this->state).resolveDictType(ref);
+    DictChecker::ResultDictTypeResolved given = this->dictChecker->resolveDictType(ref);
     if (given.isErr()) {
       bool onKey = DictChecker::keyArgument(given.error().code);
       llvm::SMLoc at = onKey ? ref.args[0].loc : ref.loc;
@@ -372,7 +379,7 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
         expr->type = Type::error();
         return expr;
       }
-      DictChecker::ResultKeyTypeIsAllowed allowed = DictChecker(this->state).checkKeyType(key);
+      DictChecker::ResultKeyTypeIsAllowed allowed = this->dictChecker->checkKeyType(key);
       if (allowed.isErr()) {
         this->state.getDiagnostics().error(arg->loc(), allowed.error().message);
         expr->type = Type::error();
@@ -398,7 +405,7 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
           return expr;
         }
         const Type *k = isMap ? element->fields()[0].type : element;
-        DictChecker::ResultKeyTypeIsAllowed allowed = DictChecker(this->state).checkKeyType(k);
+        DictChecker::ResultKeyTypeIsAllowed allowed = this->dictChecker->checkKeyType(k);
         if (allowed.isErr()) {
           this->state.getDiagnostics().error(arg->loc(), allowed.error().message);
           expr->type = Type::error();
@@ -416,8 +423,7 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
       args.push_back(arg);
     }
   }
-  DictChecker::ResultKeyTypeIsAllowed keyAllowed =
-      DictChecker(this->state).checkKeyType(type->keyType());
+  DictChecker::ResultKeyTypeIsAllowed keyAllowed = this->dictChecker->checkKeyType(type->keyType());
   if (keyAllowed.isErr()) {
     this->state.getDiagnostics().error(loc, keyAllowed.error().message);
     return fail();

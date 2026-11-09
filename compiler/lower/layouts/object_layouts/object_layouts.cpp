@@ -19,14 +19,14 @@ using llvm::cast;
 
 namespace tz {
 
+ObjectLayouts::ObjectLayouts(Lowering &owner)
+    : lowering(owner) {}
+
 std::string ObjectLayouts::layoutName(const Type *type) {
   llvm::StringRef name = type->name();
 
   return name.starts_with("{") ? "object" : name.str();
 }
-
-ObjectLayouts::ObjectLayouts(Lowering &owner)
-    : lowering(owner) {}
 
 unsigned ObjectLayouts::fieldIndex(const Type *type, llvm::StringRef name) {
   llvm::ArrayRef<Field> fields = type->fields();

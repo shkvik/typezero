@@ -10,6 +10,7 @@
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cstring>
@@ -18,6 +19,22 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+MathChecker::MathChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->dictChecker = &all.getDictChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->indexProofs = &all.getIndexProofs();
+  this->binaryChecker = &all.getBinaryChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->constantFolder = &all.getConstantFolder();
+  this->genericChecker = &all.getGenericChecker();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->iteratorMethods = &all.getIteratorMethods();
+  this->generatorChecker = &all.getGeneratorChecker();
+}
 
 MathChecker::ResultWrapBitsWidth MathChecker::wrapBitsWidth(llvm::StringRef name) {
   unsigned bits = name == "Wrap32" ? 32 : name == "Wrap64" ? 64 : 0;
@@ -47,11 +64,8 @@ MathChecker::ResultRoundedDouble MathChecker::roundedDouble(llvm::StringRef name
   return ok(type);
 }
 
-MathChecker::MathChecker(SemanticState &owner)
-    : state(owner) {}
-
 Expr *MathChecker::numericArg(Expr *arg, const Type *hint) {
-  arg = GenericChecker(this->state).apparent(ExprChecker(this->state).checkExpr(arg, hint));
+  arg = this->genericChecker->apparent(this->exprChecker->checkExpr(arg, hint));
   const Type *type = arg->type;
   if (!type->isNumeric() && !type->isError()) {
     std::string message = ErrorTextMathArg::notDouble(type);
@@ -105,21 +119,20 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
     }
   }
   if (!fn) {
-    std::string message =
-        ConstantFolder(this->state).globalConstant("Math", member->name, member->loc())
-            ? ErrorTextMath::constant(member->name)
-            : ErrorTextMath::noMember(member->name);
+    std::string message = this->constantFolder->globalConstant("Math", member->name, member->loc())
+                              ? ErrorTextMath::constant(member->name)
+                              : ErrorTextMath::noMember(member->name);
     this->state.getDiagnostics().error(member->loc(), message);
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     return call;
   }
-  if (fn->kind != MinMax && CallChecker(this->state).rejectSpread(call)) {
+  if (fn->kind != MinMax && this->callChecker->rejectSpread(call)) {
     return call;
   }
   ArgumentChecker::ResultArityMatches arity =
-      ArgumentChecker(this->state).checkArity(call, fn->minArgs, fn->maxArgs);
+      this->argumentChecker->checkArity(call, fn->minArgs, fn->maxArgs);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
@@ -133,7 +146,7 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
   if (fn->kind == Pow) {
     auto *pow = this->state.getAst().make<BinaryExpr>(call->loc(), BinaryOp::Pow, call->args[0],
                                                       call->args[1]);
-    return BinaryChecker(this->state).checkBinary(pow, expected, false);
+    return this->binaryChecker->checkBinary(pow, expected, false);
   }
 
   call->target = BuiltinCall{.builtin = fn->builtin};
@@ -167,7 +180,7 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
     break;
   case Float:
     for (Expr *&arg : call->args) {
-      arg = TypeRelations(this->state).coerce(arg, Type::doubleTy());
+      arg = this->typeRelations->coerce(arg, Type::doubleTy());
     }
     call->type = Type::doubleTy();
     break;
@@ -192,7 +205,7 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
         return call;
       }
       if (fn->builtin == Builtin::MathImul) {
-        arg = TypeRelations(this->state).convert(arg, Type::integer(32, false));
+        arg = this->typeRelations->convert(arg, Type::integer(32, false));
       }
     }
     call->type = fn->builtin == Builtin::MathImul ? Type::integer(32, false) : Type::intTy();
@@ -224,8 +237,8 @@ const Type *MathChecker::sharedType(std::vector<Expr *> &args, const std::vector
     if (spread(i) || args[i]->type == common) {
       continue;
     }
-    if (TypeRelations(this->state).literalAdapts(args[i], common)) {
-      args[i] = TypeRelations(this->state).adaptLiteral(args[i], common);
+    if (this->typeRelations->literalAdapts(args[i], common)) {
+      args[i] = this->typeRelations->adaptLiteral(args[i], common);
       continue;
     }
     std::string hint = TypeRelations::conversionHint(args[i], common);
@@ -240,10 +253,8 @@ const Type *MathChecker::sharedType(std::vector<Expr *> &args, const std::vector
 Expr *MathChecker::bitsArg(Expr *arg, unsigned bits, const Type *literal, const std::string &what) {
   if (!arg->type) {
     const Type *hint = literal ? literal : Type::integer(bits, true);
-    arg =
-        ExprChecker(this->state)
-            .checkExpr(arg, TypeRelations::isIntLiteralTree(arg) && !isa<NameExpr>(arg) ? hint
-                                                                                        : nullptr);
+    arg = this->exprChecker->checkExpr(
+        arg, TypeRelations::isIntLiteralTree(arg) && !isa<NameExpr>(arg) ? hint : nullptr);
   }
   const Type *type = arg->type;
   if (type->isError()) {
@@ -253,11 +264,11 @@ Expr *MathChecker::bitsArg(Expr *arg, unsigned bits, const Type *literal, const 
     return arg;
   }
   const Type *target = literal ? literal : Type::integer(bits, true);
-  if (TypeRelations(this->state).literalAdapts(arg, target)) {
-    return TypeRelations(this->state).adaptLiteral(arg, target);
+  if (this->typeRelations->literalAdapts(arg, target)) {
+    return this->typeRelations->adaptLiteral(arg, target);
   }
-  if (literal && TypeRelations(this->state).literalAdapts(arg, Type::integer(bits, true))) {
-    return TypeRelations(this->state).adaptLiteral(arg, Type::integer(bits, true));
+  if (literal && this->typeRelations->literalAdapts(arg, Type::integer(bits, true))) {
+    return this->typeRelations->adaptLiteral(arg, Type::integer(bits, true));
   }
   std::string method = TypeRelations::conversionMethod(Type::integer(bits, true));
   std::string hint = type->isInteger()
@@ -275,7 +286,7 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   auto loosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
 
     return call;
@@ -292,13 +303,13 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
       this->state.getDiagnostics().error(member->loc(), message);
       return loosely();
     }
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 1, 1);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
     }
     Expr *&arg = call->args[0];
-    arg = ExprChecker(this->state).checkExpr(arg);
+    arg = this->exprChecker->checkExpr(arg);
     if (!arg->type->isInteger()) {
       if (!arg->type->isError()) {
         std::string message = ErrorTextBit::fromInt(inner->name, arg->type->name());
@@ -344,9 +355,9 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
     this->state.getDiagnostics().error(member->loc(), message);
     return loosely();
   }
-  bool rejected = CallChecker(this->state).rejectSpread(call);
+  bool rejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : ArgumentChecker(this->state).checkArity(call, fn->args, fn->args);
+      rejected ? ok(call) : this->argumentChecker->checkArity(call, fn->args, fn->args);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
@@ -370,7 +381,7 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
         this->state.getDiagnostics().error(arg->loc(), message);
         return call;
       }
-      arg = TypeRelations(this->state).convert(arg, u64);
+      arg = this->typeRelations->convert(arg, u64);
     }
     llvm::StringRef first = fn->builtin == Builtin::BitMul64   ? "hi"
                             : fn->builtin == Builtin::BitAdd64 ? "sum"
@@ -386,7 +397,7 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (fn->args == 2) {
-    call->args[1] = ExprChecker(this->state).checkExpr(call->args[1]);
+    call->args[1] = this->exprChecker->checkExpr(call->args[1]);
     if (!call->args[1]->type->isInteger()) {
       if (!call->args[1]->type->isError()) {
         std::string message = ErrorTextBit::count(what, call->args[1]->type->name());
@@ -394,7 +405,7 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
       }
       return call;
     }
-    call->args[1] = TypeRelations(this->state).convert(call->args[1], call->args[0]->type);
+    call->args[1] = this->typeRelations->convert(call->args[1], call->args[0]->type);
   }
   call->type = fn->counts ? Type::intTy() : call->args[0]->type;
 
@@ -409,20 +420,19 @@ Expr *MathChecker::checkMinMaxSpread(CallExpr *call, const Type *hint) {
     Expr *&arg = call->args[i];
     const Type *type;
     if (call->spreads(i)) {
-      IteratorMethods(this->state).markFused(arg);
-      arg = DictChecker(this->state)
-                .iterableOf(
-                    ExprChecker(this->state).checkExpr(arg, hint ? Type::array(hint) : nullptr));
+      this->iteratorMethods->markFused(arg);
+      arg = this->dictChecker->iterableOf(
+          this->exprChecker->checkExpr(arg, hint ? Type::array(hint) : nullptr));
       if (arg->type->isIterator()) {
         GeneratorChecker::ResultNextNeedsNoValue nothing =
-            GeneratorChecker(this->state).checkSendsNothing(arg->type, "a spread");
+            this->generatorChecker->checkSendsNothing(arg->type, "a spread");
         if (nothing.isErr()) {
           this->state.getDiagnostics().error(arg->loc(), nothing.error().message);
         } else {
           auto *values = this->state.getAst().make<ArrayLitExpr>(arg->loc());
           values->elements.push_back({arg, true});
           values->type = Type::array(arg->type->yielded());
-          FlowChecker(this->state).calledFunction();
+          this->flowChecker->calledFunction();
           arg = values;
         }
       }
@@ -432,7 +442,7 @@ Expr *MathChecker::checkMinMaxSpread(CallExpr *call, const Type *hint) {
         this->state.getDiagnostics().error(arg->loc(), message);
         ok = false;
       }
-      someValue |= IndexProofs(this->state).provesNotEmpty(arg);
+      someValue |= this->indexProofs->provesNotEmpty(arg);
     } else {
       arg = this->numericArg(arg, hint);
       type = arg->type;

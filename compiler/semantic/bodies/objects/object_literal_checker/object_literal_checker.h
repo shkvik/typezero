@@ -6,9 +6,19 @@
 
 namespace tz {
 
+class SemanticParts;
+class ExprChecker;
+class JsonChecker;
+class LiteralTypes;
+class ClassDeclarer;
+class TypeRelations;
+class KeyedFieldChecker;
+class MethodLiteralChecker;
+class RecordLiteralChecker;
+
 class ObjectLiteralChecker {
 public:
-  explicit ObjectLiteralChecker(SemanticState &owner);
+  ObjectLiteralChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkObjectLit(ObjectLitExpr *lit, const Type *expected);
 
@@ -56,6 +66,14 @@ private:
                        bool typed);
 
   SemanticState &state;
+  ExprChecker *exprChecker = nullptr;
+  JsonChecker *jsonChecker = nullptr;
+  LiteralTypes *literalTypes = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  KeyedFieldChecker *keyedFieldChecker = nullptr;
+  MethodLiteralChecker *methodLiteralChecker = nullptr;
+  RecordLiteralChecker *recordLiteralChecker = nullptr;
 };
 
 }

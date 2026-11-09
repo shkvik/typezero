@@ -6,9 +6,13 @@
 
 namespace tz {
 
+class SemanticParts;
+class LibraryCalls;
+class ReturnInferrer;
+
 class TzModulesChecker {
 public:
-  explicit TzModulesChecker(SemanticState &owner);
+  TzModulesChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *adaptResult(Expr *expr, const Type *to);
   void checkExternal(FunctionDecl *fn);
@@ -35,6 +39,8 @@ private:
   static bool isExternalValue(const Type *type);
 
   SemanticState &state;
+  LibraryCalls *libraryCalls = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
 };
 
 }

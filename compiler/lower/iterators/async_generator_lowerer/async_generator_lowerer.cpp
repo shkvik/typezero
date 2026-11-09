@@ -16,7 +16,7 @@
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/program/ast/ast.h"
 #include "compiler/program/types/types.h"
-#include "compiler/semantic/semantic_external.h"
+#include "compiler/semantic/semantic_types.h"
 #include "llvm/IR/MDBuilder.h"
 
 using llvm::cast;
@@ -177,7 +177,7 @@ void AsyncGeneratorLowerer::emitAsyncGeneratorReturn(ReturnStmt *stmt) {
     const Type *type = stmt->value->type;
     llvm::Value *value =
         this->awaitValueOf(this->lowering.exprLowerer().emitExpr(stmt->value), type, stmt->loc());
-    const Type *given = SemanticExternalFacade::awaitedType(type);
+    const Type *given = SemanticTypes::awaitedType(type);
     if (value && !given->isVoid()) {
       this->lowering.refCounts().releaseValue(value, given);
     }
@@ -191,8 +191,8 @@ llvm::Value *AsyncGeneratorLowerer::awaitValueOf(llvm::Value *value, const Type 
     return this->lowering.asyncLowerer().awaitPromise(value, type, loc);
   }
   if (AsyncLowerer::holdsPromise(type)) {
-    return this->lowering.asyncLowerer().awaitUnion(value, type,
-                                                    SemanticExternalFacade::awaitedType(type), loc);
+    return this->lowering.asyncLowerer().awaitUnion(value, type, SemanticTypes::awaitedType(type),
+                                                    loc);
   }
   this->lowering.asyncLowerer().suspendAsync(nullptr, loc);
 
@@ -258,7 +258,7 @@ llvm::Value *AsyncGeneratorLowerer::emitAsyncYield(YieldExpr *yield) {
     const Type *type = yield->value->type;
     value =
         this->awaitValueOf(this->lowering.exprLowerer().emitExpr(yield->value), type, yield->loc());
-    given = SemanticExternalFacade::awaitedType(type);
+    given = SemanticTypes::awaitedType(type);
   } else {
     this->lowering.asyncLowerer().suspendAsync(nullptr, yield->loc());
   }
@@ -426,7 +426,7 @@ void AsyncGeneratorLowerer::emitForAwait(ForOfStmt *stmt) {
                    element](llvm::Value *value) -> llvm::Value * {
     llvm::Value *awaited = this->awaitValueOf(value, from, stmt->loc());
     this->lowering.asyncLowerer().suspendAsync(nullptr, stmt->loc());
-    const Type *given = SemanticExternalFacade::awaitedType(from);
+    const Type *given = SemanticTypes::awaitedType(from);
     llvm::Value *converted =
         element->isUndefined() ? this->lowering.builder.getFalse()
         : given->isVoid() ? this->lowering.optionalLowerer().undefinedValue(element)

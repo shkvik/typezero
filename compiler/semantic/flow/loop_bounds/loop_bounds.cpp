@@ -1,6 +1,7 @@
 #include "compiler/semantic/flow/loop_bounds/loop_bounds.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include <limits>
 
@@ -17,6 +18,12 @@ constexpr int64_t kIntMax = std::numeric_limits<int64_t>::max();
 
 constexpr uint64_t kMaxConstant = uint64_t(1) << 40;
 
+}
+
+LoopBounds::LoopBounds(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->flowChecker = &all.getFlowChecker();
 }
 
 std::optional<int64_t>
@@ -47,9 +54,6 @@ bool LoopBounds::isArrayLength(const Term &t) {
   return t.length && t.var->type->nonOptional()->isArray();
 }
 
-LoopBounds::LoopBounds(SemanticState &owner)
-    : state(owner) {}
-
 std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const Expr *expr) const {
   if (auto *lit = dyn_cast<IntLitExpr>(expr)) {
     if (lit->value > uint64_t(kIntMax)) {
@@ -67,7 +71,7 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
     return std::pair{v, v};
   }
   if (auto *name = dyn_cast<NameExpr>(expr)) {
-    const VarSymbol *var = Scopes(this->state).lookup(name->name).var();
+    const VarSymbol *var = this->scopes->lookup(name->name).var();
     if (var && var->type->isInt()) {
       return std::pair{kIntMin, kIntMax};
     }
@@ -75,7 +79,7 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
     auto *name = dyn_cast<NameExpr>(member->object);
-    const VarSymbol *var = name ? Scopes(this->state).lookup(name->name).var() : nullptr;
+    const VarSymbol *var = name ? this->scopes->lookup(name->name).var() : nullptr;
     if (member->name == "byteLength" && var && var->type->isBytes()) {
       return std::pair{int64_t(0), Type::kMaxLength};
     }
@@ -114,7 +118,7 @@ bool LoopBounds::boundedAbove(const Expr *expr, int64_t limit, const LoopScan &s
     }
   }
   auto *name = dyn_cast<NameExpr>(expr);
-  const VarSymbol *var = name ? Scopes(this->state).lookup(name->name).var() : nullptr;
+  const VarSymbol *var = name ? this->scopes->lookup(name->name).var() : nullptr;
 
   return var && var->type->isInt() && !scan.changes.count(name->name) &&
          this->state.getFlowState().getFacts().proves(Term::of(var), Term::zero(),
@@ -128,7 +132,7 @@ bool LoopBounds::boundedBelow(const Expr *expr, int64_t limit, const LoopScan &s
     }
   }
   auto *name = dyn_cast<NameExpr>(expr);
-  const VarSymbol *var = name ? Scopes(this->state).lookup(name->name).var() : nullptr;
+  const VarSymbol *var = name ? this->scopes->lookup(name->name).var() : nullptr;
 
   return var && var->type->isInt() && !scan.changes.count(name->name) &&
          this->state.getFlowState().getFacts().proves(Term::zero(), Term::of(var),
@@ -148,7 +152,7 @@ std::optional<int64_t> LoopBounds::condBoundsAbove(const Expr *cond, const VarSy
     return this->condBoundsAbove(bin->rhs, var, scan, step);
   }
   auto lookupVar = [&](llvm::StringRef name) -> const VarSymbol * {
-    return Scopes(this->state).lookup(name).var();
+    return this->scopes->lookup(name).var();
   };
   const Expr *small = nullptr;
   const Expr *large = nullptr;
@@ -196,7 +200,7 @@ bool LoopBounds::condBoundsBelow(const Expr *cond, const VarSymbol *var, const L
   auto isVar = [&](const Expr *e) {
     auto *name = dyn_cast<NameExpr>(e);
 
-    return name && Scopes(this->state).lookup(name->name).var() == var;
+    return name && this->scopes->lookup(name->name).var() == var;
   };
   switch (bin->op) {
   case BinaryOp::Gt:
@@ -218,7 +222,7 @@ Flow LoopBounds::loopHead(const LoopScan &scan, const Expr *cond, bool induction
   for (const auto &entry : scan.changes) {
     llvm::StringRef name = entry.first();
     const LoopScan::Change &change = entry.second;
-    const VarSymbol *var = Scopes(this->state).lookup(name).var();
+    const VarSymbol *var = this->scopes->lookup(name).var();
 
     bool keepLower = false;
     bool keepUpper = false;
@@ -284,7 +288,7 @@ Flow LoopBounds::loopHead(const LoopScan &scan, const Expr *cond, bool induction
   llvm::erase_if(head.definedFields, written);
   llvm::erase_if(head.narrowedFields, [&](const auto &entry) { return written(entry.first); });
   if (scan.callsFunctions) {
-    FlowChecker(this->state).forgetCallEffects(head);
+    this->flowChecker->forgetCallEffects(head);
   }
   auto arrayPart = [](const Term &t) {
     return (t.length && LoopBounds::isArrayLength(t.first())) ||

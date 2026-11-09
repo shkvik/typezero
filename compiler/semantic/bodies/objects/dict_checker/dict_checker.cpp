@@ -7,6 +7,7 @@
 #include "compiler/semantic/generics/arg_list_checker/arg_list_checker.h"
 #include "compiler/semantic/library/intl/intl_checker/intl_checker.h"
 #include "compiler/semantic/library/weakref/weak_ref_checker/weak_ref_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
@@ -29,6 +30,17 @@ const llvm::StringLiteral kSetMethods[] = {"add",          "has",          "dele
 
 }
 
+DictChecker::DictChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->exprChecker = &all.getExprChecker();
+  this->intlChecker = &all.getIntlChecker();
+  this->typeResolver = &all.getTypeResolver();
+  this->typeRelations = &all.getTypeRelations();
+  this->argListChecker = &all.getArgListChecker();
+  this->weakRefChecker = &all.getWeakRefChecker();
+  this->iterableChecker = &all.getIterableChecker();
+}
+
 std::u16string DictChecker::toUtf16(llvm::StringRef text) {
   llvm::SmallVector<llvm::UTF16, 32> units;
   llvm::convertUTF8ToUTF16String(text, units);
@@ -36,13 +48,10 @@ std::u16string DictChecker::toUtf16(llvm::StringRef text) {
   return std::u16string(units.begin(), units.end());
 }
 
-DictChecker::DictChecker(SemanticState &owner)
-    : state(owner) {}
-
 DictChecker::ResultDictTypeResolved DictChecker::resolveDictType(const TypeRef &ref) {
   llvm::StringRef name = ref.name;
   if (name == "WeakRef") {
-    const Type *weak = WeakRefChecker(this->state).resolveWeakRefType(ref);
+    const Type *weak = this->weakRefChecker->resolveWeakRefType(ref);
 
     return ok(weak);
   }
@@ -74,9 +83,8 @@ DictChecker::ResultDictTypeResolved DictChecker::resolveDictType(const TypeRef &
         .message = message,
     });
   }
-  const Type *key = TypeResolver(this->state).resolveType(ref.args[0], false);
-  const Type *value =
-      set ? Type::voidTy() : TypeResolver(this->state).resolveType(ref.args[1], false);
+  const Type *key = this->typeResolver->resolveType(ref.args[0], false);
+  const Type *value = set ? Type::voidTy() : this->typeResolver->resolveType(ref.args[1], false);
   if (key->isError() || value->isError()) {
     return ok(Type::error());
   }
@@ -177,18 +185,18 @@ Expr *DictChecker::dictCall(llvm::SMLoc loc, Expr *receiver, llvm::StringRef nam
 
 Expr *DictChecker::iterableOf(Expr *expr) {
   const Type *type = expr->type;
-  if (Expr *iterator = IterableChecker(this->state).userIterator(expr)) {
+  if (Expr *iterator = this->iterableChecker->userIterator(expr)) {
     return iterator;
   }
   if (type && type->isParam() && type->iterated()) {
-    return TypeRelations(this->state).convert(expr, Type::iterator(type->iterated()));
+    return this->typeRelations->convert(expr, Type::iterator(type->iterated()));
   }
   if (type && type->isListParam()) {
-    return TypeRelations(this->state)
-        .convert(expr, Type::iterator(ArgListChecker(this->state).listElement(type)));
+    return this->typeRelations->convert(expr,
+                                        Type::iterator(this->argListChecker->listElement(type)));
   }
   if (type && type->intlKind() == IntlKind::Segments) {
-    return IntlChecker(this->state).segmentsArray(expr);
+    return this->intlChecker->segmentsArray(expr);
   }
   if (!type || (!type->isMap() && !type->isSet())) {
     return expr;
@@ -223,7 +231,7 @@ DictChecker::ResultTextKeyForRecord DictChecker::stringKey(const Type *type) {
 }
 
 Expr *DictChecker::checkRecordKey(Expr *key) {
-  key = ExprChecker(this->state).checkExpr(key, Type::string());
+  key = this->exprChecker->checkExpr(key, Type::string());
   ResultTextKeyForRecord text = DictChecker::stringKey(key->type);
   if (text.isErr()) {
     this->state.getDiagnostics().error(key->loc(), text.error().message);
@@ -232,7 +240,7 @@ Expr *DictChecker::checkRecordKey(Expr *key) {
 
   std::string what = ErrorTextKeyType::keyLabel();
 
-  return TypeRelations(this->state).coerce(key, Type::string(), what);
+  return this->typeRelations->coerce(key, Type::string(), what);
 }
 
 DictChecker::ResultDictMemberAccess DictChecker::checkDictMember(MemberExpr *member) {
@@ -279,7 +287,7 @@ DictChecker::ResultDictIndexedValue DictChecker::checkDictIndex(IndexExpr *index
 
     return ok(read);
   }
-  index->index = ExprChecker(this->state).checkExpr(index->index);
+  index->index = this->exprChecker->checkExpr(index->index);
   std::string text = DictCheckHelpers::dictText(index->object, type);
   index->type = Type::error();
   if (type->isMap()) {
@@ -306,7 +314,7 @@ DictChecker::ResultRecordTargetType DictChecker::checkDictTarget(Expr *target, b
   target->type = Type::error();
   std::string text = DictCheckHelpers::dictText(object, type);
   if (!type->isRecord() && index) {
-    index->index = ExprChecker(this->state).checkExpr(index->index);
+    index->index = this->exprChecker->checkExpr(index->index);
   }
   if (type->isMap()) {
     std::string access = index ? std::string("[key]") : "." + member->name.str();
@@ -372,7 +380,7 @@ Expr *DictChecker::recordAssign(AssignExpr *assign) {
 }
 
 Expr *DictChecker::checkRecordNullishAssign(AssignExpr *assign, IndexExpr *index) {
-  index->object = ExprChecker(this->state).checkExpr(index->object);
+  index->object = this->exprChecker->checkExpr(index->object);
   const Type *type = index->object->type;
   if (!type->isRecord()) {
     return nullptr;
@@ -380,11 +388,11 @@ Expr *DictChecker::checkRecordNullishAssign(AssignExpr *assign, IndexExpr *index
   Expr *key = this->checkRecordKey(index->index);
   const Type *valueType = type->valueType();
   Flow before = this->state.getFlowState().getFlow();
-  Expr *value = ExprChecker(this->state).checkExpr(assign->value, valueType);
+  Expr *value = this->exprChecker->checkExpr(assign->value, valueType);
   this->state.getFlowState().replaceFlow(
       FlowChecker::join(before, this->state.getFlowState().getFlow()));
   bool definite = !value->type->isOptional() && !value->type->isUndefined();
-  value = TypeRelations(this->state).coerce(value, valueType);
+  value = this->typeRelations->coerce(value, valueType);
 
   return this->dictCall(assign->loc(), index->object, "set", Builtin::RecordNullishSet,
                         {key, value}, definite ? valueType->nonOptional() : valueType);
@@ -397,7 +405,7 @@ DictChecker::checkDictDelete(UnaryExpr *unary, Expr *object, Expr *keyExpr, llvm
   if (!type->isRecord()) {
     std::string text = DictCheckHelpers::dictText(object, type);
     if (keyExpr) {
-      keyExpr = ExprChecker(this->state).checkExpr(keyExpr);
+      keyExpr = this->exprChecker->checkExpr(keyExpr);
     }
     const char *kind = type->isMap() ? "Map" : "Set";
     const char *what = type->isMap() ? "key" : "value";
@@ -451,7 +459,7 @@ DictChecker::ResultRecordKeyChecked DictChecker::checkDictIn(BinaryExpr *bin) {
     });
   }
   std::string what = ErrorTextKeyType::keyLabel();
-  key = TypeRelations(this->state).coerce(key, Type::string(), what);
+  key = this->typeRelations->coerce(key, Type::string(), what);
   Expr *has = this->dictCall(bin->loc(), bin->rhs, "has", Builtin::MapHas, {key}, Type::boolTy());
 
   return ok(has);

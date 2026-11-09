@@ -11,6 +11,9 @@
 
 namespace tz {
 
+ObjectMaker::ObjectMaker(Lowering &owner)
+    : lowering(owner) {}
+
 const std::vector<llvm::StringRef> &ObjectMaker::orderOf(const Type *type,
                                                          llvm::ArrayRef<MakerFields> orders) {
   for (const MakerFields &entry : orders) {
@@ -46,9 +49,6 @@ std::vector<const Type *> ObjectMaker::literalsOf(const Type *type) {
 
   return std::vector<const Type *>(type->members().begin(), type->members().end());
 }
-
-ObjectMaker::ObjectMaker(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Value *ObjectMaker::atomOf(const Type *type, llvm::Value *text) {
   llvm::Type *i32 = this->lowering.builder.getInt32Ty();

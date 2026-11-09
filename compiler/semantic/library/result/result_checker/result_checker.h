@@ -6,11 +6,22 @@
 
 namespace tz {
 
+class SemanticParts;
+class FieldFacts;
+class CallChecker;
+class ExprChecker;
+class ResultTypes;
+class AsyncChecker;
+class TypeResolver;
+class TypeRelations;
+class ClosureChecker;
+class ArgumentChecker;
+
 class ResultChecker {
 public:
   using ResultValueGetsUsed = Result<const Expr *, ResultCheckerUsedValueError>;
 
-  explicit ResultChecker(SemanticState &owner);
+  ResultChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkResultCall(CallExpr *call, NameExpr *name, const Type *expected);
   Expr *checkResultStatic(CallExpr *call, MemberExpr *member);
@@ -34,6 +45,15 @@ private:
   static const Expr *unconverted(const Expr *expr);
 
   SemanticState &state;
+  FieldFacts *fieldFacts = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  ResultTypes *resultTypes = nullptr;
+  AsyncChecker *asyncChecker = nullptr;
+  TypeResolver *typeResolver = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ClosureChecker *closureChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

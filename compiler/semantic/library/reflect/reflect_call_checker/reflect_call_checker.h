@@ -6,9 +6,18 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ExprChecker;
+class TypeRelations;
+class ReflectChecker;
+class ReturnInferrer;
+class ArgumentChecker;
+class MetadataChecker;
+
 class ReflectCallChecker {
 public:
-  explicit ReflectCallChecker(SemanticState &owner);
+  ReflectCallChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkReflectArgs(Expr *args);
   FunctionDecl *knownReflectMethod(ClassDecl *cls, llvm::StringRef name, bool &several);
@@ -30,6 +39,13 @@ private:
   static Expr *stripImplicit(Expr *expr);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ReflectChecker *reflectChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  MetadataChecker *metadataChecker = nullptr;
 };
 
 }

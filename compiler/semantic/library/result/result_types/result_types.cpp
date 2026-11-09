@@ -1,6 +1,7 @@
 #include "compiler/semantic/library/result/result_types/result_types.h"
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
 #include "compiler/semantic/names/scopes/scopes.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
@@ -16,6 +17,14 @@ const llvm::StringLiteral kResultTypes[] = {"Result", "Ok", "Err"};
 
 }
 
+ResultTypes::ResultTypes(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->scopes = &all.getScopes();
+  this->typeDeclarer = &all.getTypeDeclarer();
+  this->typeResolver = &all.getTypeResolver();
+  this->typeRelations = &all.getTypeRelations();
+}
+
 llvm::StringRef ResultTypes::findName(llvm::ArrayRef<llvm::StringLiteral> names,
                                       llvm::StringRef name) {
   for (llvm::StringLiteral n : names) {
@@ -27,11 +36,8 @@ llvm::StringRef ResultTypes::findName(llvm::ArrayRef<llvm::StringLiteral> names,
   return {};
 }
 
-ResultTypes::ResultTypes(SemanticState &owner)
-    : state(owner) {}
-
 llvm::StringRef ResultTypes::resultName(llvm::StringRef name) const {
-  ScopeEntry entry = Scopes(this->state).lookup(name);
+  ScopeEntry entry = this->scopes->lookup(name);
   if (entry.found()) {
     return {};
   }
@@ -40,7 +46,7 @@ llvm::StringRef ResultTypes::resultName(llvm::StringRef name) const {
 }
 
 llvm::StringRef ResultTypes::resultTypeName(llvm::StringRef name) const {
-  if (TypeDeclarer(this->state).lookupType(name)) {
+  if (this->typeDeclarer->lookupType(name)) {
     return {};
   }
 
@@ -84,7 +90,7 @@ const Type *ResultTypes::resolveResultType(const TypeRef &ref, llvm::StringRef n
       return Type::never();
     }
 
-    return TypeResolver(this->state).resolveTypeInner(arg);
+    return this->typeResolver->resolveTypeInner(arg);
   };
   const Type *value = half(ref.args[0]);
   const Type *error = half(ref.args[1]);
@@ -115,12 +121,12 @@ void ResultTypes::neverOperands(BinaryExpr *bin) {
   const Type *l = bin->lhs->type;
   const Type *r = bin->rhs->type;
   if (l->isNever() && r->isNever()) {
-    bin->lhs = TypeRelations(this->state).convert(bin->lhs, Type::doubleTy());
-    bin->rhs = TypeRelations(this->state).convert(bin->rhs, Type::doubleTy());
+    bin->lhs = this->typeRelations->convert(bin->lhs, Type::doubleTy());
+    bin->rhs = this->typeRelations->convert(bin->rhs, Type::doubleTy());
   } else if (l->isNever() && !r->isError() && !r->isVoid()) {
-    bin->lhs = TypeRelations(this->state).convert(bin->lhs, r);
+    bin->lhs = this->typeRelations->convert(bin->lhs, r);
   } else if (r->isNever() && !l->isError() && !l->isVoid()) {
-    bin->rhs = TypeRelations(this->state).convert(bin->rhs, l);
+    bin->rhs = this->typeRelations->convert(bin->rhs, l);
   }
 }
 

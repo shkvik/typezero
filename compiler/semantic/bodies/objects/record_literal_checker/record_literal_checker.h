@@ -6,9 +6,15 @@
 
 namespace tz {
 
+class SemanticParts;
+class DictChecker;
+class ExprChecker;
+class ClassDeclarer;
+class TypeRelations;
+
 class RecordLiteralChecker {
 public:
-  explicit RecordLiteralChecker(SemanticState &owner);
+  RecordLiteralChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkRecordLit(ObjectLitExpr *lit, const Type *record);
   Expr *recordFromSpreads(ObjectLitExpr *lit);
@@ -27,6 +33,10 @@ private:
   void reportSpread(const ObjectLitExpr::Property &prop, const ResultSpreadIntoMap &spread);
 
   SemanticState &state;
+  DictChecker *dictChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  TypeRelations *typeRelations = nullptr;
 };
 
 }

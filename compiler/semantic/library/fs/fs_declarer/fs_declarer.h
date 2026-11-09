@@ -4,9 +4,14 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ProcessChecker;
+class ArgumentChecker;
+
 class FsDeclarer {
 public:
-  explicit FsDeclarer(SemanticState &owner);
+  FsDeclarer(SemanticState &owner, SemanticParts &all);
 
   void declareFsClasses();
   Expr *checkFsClassMethod(CallExpr *call, MemberExpr *member, ClassDecl *cls);
@@ -17,6 +22,9 @@ private:
   static std::optional<int> fileKind(llvm::StringRef method);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ProcessChecker *processChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

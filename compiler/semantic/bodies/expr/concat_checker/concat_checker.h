@@ -6,9 +6,16 @@
 
 namespace tz {
 
+class SemanticParts;
+class DateChecker;
+class BytesChecker;
+class RegexChecker;
+class TypeRelations;
+class GenericChecker;
+
 class ConcatChecker {
 public:
-  explicit ConcatChecker(SemanticState &owner);
+  ConcatChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *toStringOperand(Expr *expr);
   static std::string mixedConcatText(const BinaryExpr *root, const BinaryExpr *mixed);
@@ -25,6 +32,11 @@ private:
                                                                   llvm::SMLoc op, size_t length);
 
   SemanticState &state;
+  DateChecker *dateChecker = nullptr;
+  BytesChecker *bytesChecker = nullptr;
+  RegexChecker *regexChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  GenericChecker *genericChecker = nullptr;
 };
 
 }

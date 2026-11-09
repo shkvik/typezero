@@ -6,9 +6,14 @@
 
 namespace tz {
 
+class SemanticParts;
+class ChunkTypes;
+class ClassDeclarer;
+class GenericClassInstantiator;
+
 class ClassLinks {
 public:
-  explicit ClassLinks(SemanticState &owner);
+  ClassLinks(SemanticState &owner, SemanticParts &all);
 
   void numberClasses();
   void buildVtable(ClassDecl *cls);
@@ -49,6 +54,9 @@ private:
   static void interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out);
 
   SemanticState &state;
+  ChunkTypes *chunkTypes = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  GenericClassInstantiator *genericClassInstantiator = nullptr;
 };
 
 }

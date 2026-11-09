@@ -5,9 +5,18 @@
 
 namespace tz {
 
+class SemanticParts;
+class Scopes;
+class ExprChecker;
+class FlowChecker;
+class RegexChecker;
+class MemberChecker;
+class ArgumentChecker;
+class CallbackChecker;
+
 class StringRegexChecker {
 public:
-  explicit StringRegexChecker(SemanticState &owner);
+  StringRegexChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkStringRegexMethod(CallExpr *call, MemberExpr *member);
   Expr *checkReplacement(CallExpr *call, MemberExpr *member, const RegexLitExpr *regex);
@@ -18,6 +27,13 @@ private:
   static std::string argumentText(const Expr *arg);
 
   SemanticState &state;
+  Scopes *scopes = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  RegexChecker *regexChecker = nullptr;
+  MemberChecker *memberChecker = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  CallbackChecker *callbackChecker = nullptr;
 };
 
 }

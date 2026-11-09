@@ -6,9 +6,17 @@
 
 namespace tz {
 
+class SemanticParts;
+class DictChecker;
+class ExprChecker;
+class FlowChecker;
+class TypeRelations;
+class IteratorMethods;
+class GeneratorChecker;
+
 class DictNewChecker {
 public:
-  explicit DictNewChecker(SemanticState &owner);
+  DictNewChecker(SemanticState &owner, SemanticParts &all);
 
   void markPairs(Expr *arg);
   bool inferPairs(Expr *arg, const Type *&key, const Type *&value);
@@ -36,6 +44,12 @@ private:
                                          bool isMap);
 
   SemanticState &state;
+  DictChecker *dictChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  IteratorMethods *iteratorMethods = nullptr;
+  GeneratorChecker *generatorChecker = nullptr;
 };
 
 }

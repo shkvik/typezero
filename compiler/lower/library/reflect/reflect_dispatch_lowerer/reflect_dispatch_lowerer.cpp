@@ -15,12 +15,12 @@
 
 namespace tz {
 
+ReflectDispatchLowerer::ReflectDispatchLowerer(Lowering &owner)
+    : lowering(owner) {}
+
 std::string ReflectDispatchLowerer::className(const ClassDecl *cls) {
   return cls->name.empty() && cls->type ? cls->type->name().str() : cls->name.str();
 }
-
-ReflectDispatchLowerer::ReflectDispatchLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Constant *ReflectDispatchLowerer::reflectDispatchInfo(
     const ClassDecl *cls, llvm::ArrayRef<const FunctionDecl *> variants, const Type *&type) {

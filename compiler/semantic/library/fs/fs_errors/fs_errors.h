@@ -5,9 +5,12 @@
 
 namespace tz {
 
+class SemanticParts;
+class BuiltinModuleTypes;
+
 class FsErrors {
 public:
-  explicit FsErrors(SemanticState &owner);
+  FsErrors(SemanticState &owner, SemanticParts &all);
 
   void declare();
   const Type *named(llvm::StringRef name);
@@ -18,6 +21,7 @@ private:
   static bool literalTrue(const Expr *expr);
 
   SemanticState &state;
+  BuiltinModuleTypes *builtinModuleTypes = nullptr;
 };
 
 }

@@ -9,6 +9,7 @@
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/result/result_checker/result_checker.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/destination/destination.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
@@ -21,12 +22,21 @@ using llvm::isa;
 
 namespace tz {
 
+PromiseChecker::PromiseChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->flowChecker = &all.getFlowChecker();
+  this->typeResolver = &all.getTypeResolver();
+  this->closureChecker = &all.getClosureChecker();
+  this->returnInferrer = &all.getReturnInferrer();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->callbackChecker = &all.getCallbackChecker();
+}
+
 const Type *PromiseChecker::awaited(const Type *type) {
   return type->isPromise() ? type->promised() : type;
 }
-
-PromiseChecker::PromiseChecker(SemanticState &owner)
-    : state(owner) {}
 
 const Type *PromiseChecker::resolverType(const Type *value) {
   std::vector<const Type *> params;
@@ -58,7 +68,7 @@ const Type *PromiseChecker::executorValueType(const Expr *executor) {
   if (fe->fn->pristine == nullptr) {
     return nullptr;
   }
-  FunctionDecl *copy = ReturnInferrer(this->state).freshCopy(fe->fn);
+  FunctionDecl *copy = this->returnInferrer->freshCopy(fe->fn);
   copy->sym = nullptr;
   auto *trial = this->state.getAst().make<FunctionExpr>(fe->loc(), copy);
   Flow saved = this->state.getFlowState().getFlow();
@@ -68,7 +78,7 @@ const Type *PromiseChecker::executorValueType(const Expr *executor) {
   sig.ret = Type::voidTy();
   sig.voidResult = true;
   sig.pad = false;
-  ClosureChecker(this->state).checkFunctionExpr(trial, &sig);
+  this->closureChecker->checkFunctionExpr(trial, &sig);
   this->state.getDiagnostics().setMuted(muted);
   this->state.getFlowState().replaceFlow(std::move(saved));
   const Type *found = nullptr;
@@ -106,7 +116,7 @@ PromiseChecker::ResultValueTypeKnown PromiseChecker::valueType(NewExpr *expr, co
     });
   }
   if (expr->typeArgs.size() == 1) {
-    const Type *written = TypeResolver(this->state).resolveType(expr->typeArgs[0], true);
+    const Type *written = this->typeResolver->resolveType(expr->typeArgs[0], true);
     return ok(PromiseChecker::awaited(written));
   }
   if (expected && expected->nonOptional()->isPromise() &&
@@ -154,7 +164,7 @@ Expr *PromiseChecker::checkPromiseNew(NewExpr *expr, const Type *expected) {
     this->state.getDiagnostics().error(expr->loc(), known.error().message);
   }
   const Type *value = known.isOk() ? known.value() : Type::error();
-  ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 1, 1);
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), arity.error().message);
     return call;
@@ -163,10 +173,10 @@ Expr *PromiseChecker::checkPromiseNew(NewExpr *expr, const Type *expected) {
     Signature loose;
     loose.params = {Type::error(), Type::error()};
     loose.pad = false;
-    call->args[0] = isa<FunctionExpr>(call->args[0])
-                        ? ClosureChecker(this->state)
-                              .checkFunctionExpr(cast<FunctionExpr>(call->args[0]), &loose)
-                        : ExprChecker(this->state).checkExpr(call->args[0]);
+    call->args[0] =
+        isa<FunctionExpr>(call->args[0])
+            ? this->closureChecker->checkFunctionExpr(cast<FunctionExpr>(call->args[0]), &loose)
+            : this->exprChecker->checkExpr(call->args[0]);
     return call;
   }
   Signature sig;
@@ -181,10 +191,9 @@ Expr *PromiseChecker::checkPromiseNew(NewExpr *expr, const Type *expected) {
   sig.ret = Type::voidTy();
   sig.voidResult = true;
   sig.pad = false;
-  call->args[0] =
-      CallbackChecker(this->state)
-          .checkFunctionArg(call->args[0], sig, unsigned(sig.params.size()), "new Promise");
-  FlowChecker(this->state).calledFunction();
+  call->args[0] = this->callbackChecker->checkFunctionArg(
+      call->args[0], sig, unsigned(sig.params.size()), "new Promise");
+  this->flowChecker->calledFunction();
   call->type = Type::promise(value);
 
   return call;
@@ -201,7 +210,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
   if (value->isResult() && llvm::is_contained(resultMethods, name)) {
     auto *object = dyn_cast<NameExpr>(member->object);
     std::string promise = object ? object->name.str() : "p";
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     call->type = Type::error();
     std::string message = ErrorTextPromiseMethod::onResult(name, promise);
 
@@ -210,7 +219,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
         .message = message,
     });
   }
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return err(PromiseCheckerCheckPromiseMethodError{
         .code = PromiseCheckerCheckPromiseMethodErrorCode::ALREADY_REPORTED,
         .message = "",
@@ -218,7 +227,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
   }
   this->state.getInventoryStore().markUsesAsync();
   if (name == "catch") {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     call->type = Type::error();
     std::string message = ErrorTextPromiseMethod::noCatch();
 
@@ -228,7 +237,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
     });
   }
   if (name == "finally") {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     call->type = Type::error();
     std::string message = ErrorTextPromiseMethod::noFinally();
 
@@ -238,7 +247,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
     });
   }
   if (name == "then" && call->args.size() == 2) {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     call->type = Type::error();
     std::string message = ErrorTextPromiseMethod::thenTwo();
 
@@ -248,7 +257,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
     });
   }
   if (name != "then") {
-    ArgumentChecker(this->state).checkArgsLoosely(call);
+    this->argumentChecker->checkArgsLoosely(call);
     std::string message = ErrorTextPromiseMethod::noMethod(name, type->name());
 
     return err(PromiseCheckerCheckPromiseMethodError{
@@ -257,7 +266,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
     });
   }
 
-  ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 1, 1);
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     return err(PromiseCheckerCheckPromiseMethodError{
         .code = PromiseCheckerCheckPromiseMethodErrorCode::WRONG_ARITY,
@@ -271,7 +280,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
   bool failed = false;
   auto callback = [&](Expr *&arg, const Type *param) -> const Type * {
     if (isa<UndefinedExpr>(arg)) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
       return nullptr;
     }
     Signature sig;
@@ -283,7 +292,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
     if (wanted && isa<FunctionExpr>(arg) && Destination::literalShaped(arg)) {
       sig.ret = wanted;
     }
-    arg = CallbackChecker(this->state).checkFunctionArg(arg, sig, 1, name);
+    arg = this->callbackChecker->checkFunctionArg(arg, sig, 1, name);
     if (!arg->type->isFunction()) {
       failed = true;
       return nullptr;

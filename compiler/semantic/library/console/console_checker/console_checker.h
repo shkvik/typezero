@@ -6,9 +6,13 @@
 
 namespace tz {
 
+class SemanticParts;
+class CallChecker;
+class ExprChecker;
+
 class ConsoleChecker {
 public:
-  explicit ConsoleChecker(SemanticState &owner);
+  ConsoleChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkConsoleLog(CallExpr *call);
   Expr *checkConsoleCall(CallExpr *call, MemberExpr *member);
@@ -23,6 +27,8 @@ private:
   static ResultSpreadableArg spreadable(const CallExpr *call, size_t i);
 
   SemanticState &state;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
 };
 
 }

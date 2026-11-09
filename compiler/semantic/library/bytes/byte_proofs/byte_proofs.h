@@ -6,11 +6,15 @@
 
 namespace tz {
 
+class SemanticParts;
+class IndexProofs;
+class ConstantFolder;
+
 class ByteProofs {
 public:
   using ResultValueFitsType = Result<const Expr *, ByteProofsValueFitsError>;
 
-  explicit ByteProofs(SemanticState &owner);
+  ByteProofs(SemanticState &owner, SemanticParts &all);
 
   IntegerRange valueRange(const Expr *expr) const;
   bool provesFits(const Expr *expr, int64_t lo, int64_t hi) const;
@@ -43,6 +47,8 @@ private:
   IntegerRange computedRange(const Expr *expr) const;
 
   SemanticState &state;
+  IndexProofs *indexProofs = nullptr;
+  ConstantFolder *constantFolder = nullptr;
 };
 
 }

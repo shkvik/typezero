@@ -7,6 +7,7 @@
 #include "compiler/semantic/library/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/semantic/library/child_process/child_error_types/child_error_types.h"
 #include "compiler/semantic/library/fs/fs_checker/fs_checker.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/Support/ConvertUTF.h"
 
@@ -16,6 +17,17 @@ using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
+
+ChildChecker::ChildChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->fsChecker = &all.getFsChecker();
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->bytesChecker = &all.getBytesChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->argumentChecker = &all.getArgumentChecker();
+  this->childErrorTypes = &all.getChildErrorTypes();
+}
 
 const Type *ChildChecker::bufferType() {
   return Type::bytesType(Type::Bytes::Buffer);
@@ -44,21 +56,18 @@ bool ChildChecker::hasZero(const Expr *expr) {
   return lit && lit->value.find(u'\0') != std::u16string::npos;
 }
 
-ChildChecker::ChildChecker(SemanticState &owner)
-    : state(owner) {}
-
 Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   call->type = Type::error();
   if (fn != "spawnSync" && fn != "execFileSync" && fn != "execSync") {
     for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
+      arg = this->exprChecker->checkExpr(arg);
     }
     return call;
   }
   bool exec = fn == "execSync";
-  bool rejected = CallChecker(this->state).rejectSpread(call);
+  bool rejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : ArgumentChecker(this->state).checkArity(call, 1, exec ? 2 : 3);
+      rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, exec ? 2 : 3);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
@@ -76,11 +85,11 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     auto *none = this->state.getAst().make<UndefinedExpr>(loc);
     none->type = Type::undefinedTy();
 
-    return TypeRelations(this->state).convert(none, Type::optional(type));
+    return this->typeRelations->convert(none, Type::optional(type));
   };
 
   std::vector<Expr *> args(ChildArgCount, nullptr);
-  args[ChildFile] = call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], string);
+  args[ChildFile] = call->args[0] = this->argumentChecker->checkArg(call->args[0], string);
   bool failed = false;
   if (ChildChecker::hasZero(call->args[0])) {
     std::string message = ErrorTextChildRun::zeroFile(exec);
@@ -105,7 +114,7 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
         }
       }
       args[ChildArgs] = call->args[1] =
-          ArgumentChecker(this->state).checkArg(call->args[1], Type::array(string));
+          this->argumentChecker->checkArg(call->args[1], Type::array(string));
     }
     optionsAt = 2;
   } else if (!exec && call->args.size() > 2) {
@@ -135,7 +144,7 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
                                             "argv0",
                                             "uid",
                                             "gid"};
-  if (!FsChecker(this->state).nodeOptions(call, optionsAt, fn, allowed, options)) {
+  if (!this->fsChecker->nodeOptions(call, optionsAt, fn, allowed, options)) {
     return call;
   }
 
@@ -145,11 +154,11 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     if (!lit) {
       std::string message = ErrorTextChildOption::encoding(fn);
       this->state.getDiagnostics().error(value->loc(), message);
-      ExprChecker(this->state).checkExpr(value);
+      this->exprChecker->checkExpr(value);
       failed = true;
     } else if (lit->value != u"buffer") {
       lit->type = string;
-      Expr *number = BytesChecker(this->state).checkBufferEncoding(lit);
+      Expr *number = this->bytesChecker->checkBufferEncoding(lit);
       if (number->type->isError()) {
         failed = true;
       } else {
@@ -178,7 +187,7 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
       if (!lit) {
         std::string message = ErrorTextChildStdio::literal();
         this->state.getDiagnostics().error(e->loc(), message);
-        ExprChecker(this->state).checkExpr(e);
+        this->exprChecker->checkExpr(e);
         return std::nullopt;
       }
       lit->type = string;
@@ -229,7 +238,7 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     } else {
       std::string message = ErrorTextChildOption::stdio(fn);
       this->state.getDiagnostics().error(value->loc(), message);
-      ExprChecker(this->state).checkExpr(value);
+      this->exprChecker->checkExpr(value);
       failed = true;
     }
   }
@@ -237,8 +246,7 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   auto option = [&](llvm::StringRef name, const Type *type) {
     Expr *value = options.lookup(name);
 
-    return value ? ArgumentChecker(this->state).checkArg(value, Type::optional(type))
-                 : absent(type);
+    return value ? this->argumentChecker->checkArg(value, Type::optional(type)) : absent(type);
   };
   if (ChildChecker::hasZero(options.lookup("cwd"))) {
     std::string message = ErrorTextChildRun::zeroCwd();
@@ -283,14 +291,14 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   args[ChildGid] = option("gid", Type::intTy());
 
   if (Expr *value = options.lookup("input")) {
-    Expr *input = ExprChecker(this->state).checkExpr(value, string);
+    Expr *input = this->exprChecker->checkExpr(value, string);
     const Type *t = input->type->nonOptional();
     if (t->isStringLiteral()) {
-      input = TypeRelations(this->state).coerce(input, string);
+      input = this->typeRelations->coerce(input, string);
     }
     t = input->type->nonOptional();
     if (t->isString() || t->isByteView()) {
-      args[ChildInput] = TypeRelations(this->state).coerce(input, Type::optional(t));
+      args[ChildInput] = this->typeRelations->coerce(input, Type::optional(t));
       if (t->isString() && encoding == ChildBytes && options.lookup("encoding") &&
           !isa<UndefinedExpr>(options.lookup("encoding"))) {
         std::string message = ErrorTextChildOption::bufferText();
@@ -308,13 +316,12 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     args[ChildInput] = absent(string);
   }
   if (Expr *value = options.lookup("killSignal")) {
-    Expr *signal = ExprChecker(this->state).checkExpr(value, string);
+    Expr *signal = this->exprChecker->checkExpr(value, string);
     const Type *t = signal->type->nonOptional();
     if (t->isStringLiteral() || t->isString()) {
-      args[ChildKillSignal] = TypeRelations(this->state).coerce(signal, Type::optional(string));
+      args[ChildKillSignal] = this->typeRelations->coerce(signal, Type::optional(string));
     } else if (t->isInt() || (t->isLiteral() && t->literalBase()->isInt())) {
-      args[ChildKillSignal] =
-          TypeRelations(this->state).coerce(signal, Type::optional(Type::intTy()));
+      args[ChildKillSignal] = this->typeRelations->coerce(signal, Type::optional(Type::intTy()));
     } else {
       if (!t->isError()) {
         std::string message = ErrorTextChildOption::killSignal(signal->type->name());
@@ -330,12 +337,12 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     if (auto *lit = dyn_cast<BoolLitExpr>(value)) {
       viaShell = viaShell || lit->value;
     }
-    Expr *shell = ExprChecker(this->state).checkExpr(value, string);
+    Expr *shell = this->exprChecker->checkExpr(value, string);
     const Type *t = shell->type->nonOptional();
     bool isBool = t->isBool() || (t->isLiteral() && t->literalBase()->isBool());
     if (t->isStringLiteral() || t->isString()) {
       viaShell = true;
-      args[ChildShell] = TypeRelations(this->state).coerce(shell, Type::optional(string));
+      args[ChildShell] = this->typeRelations->coerce(shell, Type::optional(string));
     } else if (isBool && exec) {
       if (auto *lit = dyn_cast<BoolLitExpr>(shell); lit && lit->value) {
         args[ChildShell] = absent(string);
@@ -349,7 +356,7 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
       this->state.getDiagnostics().error(shell->loc(), message);
       failed = true;
     } else if (isBool) {
-      args[ChildShell] = TypeRelations(this->state).coerce(shell, Type::optional(Type::boolTy()));
+      args[ChildShell] = this->typeRelations->coerce(shell, Type::optional(Type::boolTy()));
     } else {
       if (!t->isError()) {
         std::string message = ErrorTextChildOption::shell(shell->type->name());
@@ -374,11 +381,11 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
 
   bool textOutput = encoding != ChildBytes;
   const Type *text = textOutput ? string : ChildChecker::bufferType();
-  const Type *failure = ChildErrorTypes(this->state).errorOf(fn, textOutput, viaShell);
+  const Type *failure = this->childErrorTypes->errorOf(fn, textOutput, viaShell);
   auto output = [&](unsigned i) { return stdio[i] == ChildPipe ? text : Type::optional(text); };
   if (fn == "spawnSync") {
     call->target = BuiltinCall{.builtin = Builtin::ChildSpawnSync};
-    call->type = Type::result(ChildErrorTypes(this->state).spawnResult(textOutput), failure);
+    call->type = Type::result(this->childErrorTypes->spawnResult(textOutput), failure);
   } else {
     call->target =
         BuiltinCall{.builtin = exec ? Builtin::ChildExecSync : Builtin::ChildExecFileSync};

@@ -117,6 +117,7 @@ program/                    что идёт по конвейеру: модул�
     regex/                  регулярные выражения, собранные при сборке
       regex_syntax/         разбор регулярного выражения
   module/                   Module: файл программы или встроенный модуль; bufferFiles — файлы буферов модуля из дерева library/
+    load_chain/             LoadChain: цепочка загрузки «main.tz -> a.tz -> (b.tz …)» для ошибок чтения до загрузки
   pass_done/                PassDone: итог прохода — без предупреждений или с ними
   program/                  Program: модули и всё, что нашли проходы
   program_inventory/        ProgramInventory: опись программы после проверки — async, TLS, подтипы, виды, копии generic
@@ -264,7 +265,6 @@ semantic/                         движок типов: объявления,
     names_in_functions/           NamesInFunctions: имена верхнего уровня, нужные внутри функций
     prelude/                      Prelude: встроенные типы (FetchError, Result…) — строка kPrelude
     type_declarer/                TypeDeclarer: type, interface, enum
-  feature/                        Feature: интерфейс модуля библиотеки для проверки; реализуют semantic/library/<тема>
   flow/                           поток управления: сужение, факты, доказательства
     condition_facts/              ConditionFacts: факты из условий if
     facts/                        Facts: линейные факты о целых (a < b + 1) для доказательств индексов
@@ -295,7 +295,7 @@ semantic/                         движок типов: объявления,
     late_classes/                 LateClasses: классы-выражения и вложенные классы
     return_completer/             ReturnCompleter: реализует Completer — тип возврата по требованию
     return_inferrer/              ReturnInferrer: тип возврата функции по её return
-  library/                        проверка вызовов библиотеки: по папке на тему, реестр модулей
+  library/                        проверка вызовов библиотеки: по папке на тему
     async/                        async, await, Promise, таймеры
       async_checker/              AsyncChecker: await, for await, тип возврата async-функций, забытый Promise
       promise_checker/            PromiseChecker: new Promise, then / catch / finally
@@ -304,7 +304,7 @@ semantic/                         движок типов: объявления,
     builtin_modules/              встроенные модули node:* и tz:io — имена и импорты
       builtin_module_checker/     BuiltinModuleChecker: импорт встроенного модуля, его имена
       builtin_module_types/       BuiltinModuleTypes: типы встроенных модулей (ошибки fs, child_process), видны по импорту из модуля
-      builtin_modules_feature/    BuiltinModulesFeature: тема
+      module_export_errors/       ModuleExportFoundError: общая ошибка таблиц экспортов модулей node:* и tz:*
       node_check_helpers/         общие помощники модулей node:*
       runtime_object_checker/     RuntimeObjectChecker: объекты рантайма (Stats и др.) — члены
       timers_exports/             что экспортирует node:timers
@@ -315,24 +315,20 @@ semantic/                         движок типов: объявления,
       byte_proofs/                ByteProofs: доказательство, что запись байта в границах
       bytes_check_helpers/        общие помощники проверки байтов
       bytes_checker/              BytesChecker: индекс и запись элемента, кодировки
-      bytes_feature/              BytesFeature: тема
       bytes_new_checker/          BytesNewChecker: new Uint8Array, new TextDecoder
       typed_array_checker/        TypedArrayChecker: методы typed array и DataView
     child_process/                node:child_process
       child_checker/              ChildChecker: exec, execFile, spawn — аргументы и типы
       child_error_types/          ChildErrorTypes: 10 типов ошибок и 2 результата spawnSync, тип по вызову
       child_exports/              что экспортирует node:child_process
-      child_process_feature/      ChildProcessFeature: тема
     console/                      console
       console_checker/            ConsoleChecker: console.log и др.
-      console_feature/            ConsoleFeature: тема
     crypto/                       node:crypto и crypto.subtle
       crypto_args/                CryptoArgs: аргументы и результаты вызовов OpenSSL
       crypto_check_helpers/       общие помощники проверки crypto
       crypto_checker/             CryptoChecker: члены и new у классов crypto, X509
       crypto_errors/              CryptoErrors: типы ошибок node:crypto из crypto_errors.d.tz, ошибка вызова
       crypto_exports/             CryptoExports: что экспортируют node:crypto и tz:crypto
-      crypto_feature/             CryptoFeature: тема
       crypto_function_checker/    CryptoFunctionChecker: функции node:crypto
       crypto_method_checker/      CryptoMethodChecker: методы Hash, Hmac, Cipher и др.
       crypto_names/               имена хешей и шифров
@@ -342,72 +338,57 @@ semantic/                         движок типов: объявления,
       web_crypto_checker/         WebCryptoChecker: мост tz:webcrypto к рантайму
     date/                         Date и Intl.DateTimeFormat
       date_checker/               DateChecker: new Date, Date.*, методы
-      date_feature/               DateFeature: тема
       date_format_checker/        DateFormatChecker: toLocale… и Intl.DateTimeFormat
       date_syntax/                разбор строк дат при сборке
     decimal/                      decimal
       decimal_checker/            DecimalChecker: литералы и операции decimal
-      decimal_feature/            DecimalFeature: тема
     events/                       node:events и EventTarget
       emitter_checker/            EmitterChecker: on / emit у EventEmitter, правило «слушай error»
       event_map_inference/        EventMapInference: карта событий из вызовов emit
       event_maps/                 EventMaps: карта событий класса, тип слушателя
       event_target_checker/       EventTargetChecker: EventTarget, once / on из node:events
-      events_feature/             EventsFeature: тема
-    feature_registry/             FeatureRegistry: все темы
     fs/                           node:fs, fs/promises, readline, tz:io
       fs_checker/                 FsChecker: вызовы fs и tz:io
       fs_declarer/                FsDeclarer: классы fs (Stats, Dirent…)
       fs_errors/                  FsErrors: типы ошибок node:fs из fs_errors.d.tz, ошибка вызова
       fs_exports/                 что экспортирует node:fs
-      fs_feature/                 FsFeature: тема
       fs_promises_checker/        FsPromisesChecker: fs/promises
       readline_checker/           ReadlineChecker: readline
     intl/                         Intl
       intl_check_helpers/         опции и службы Intl
       intl_checker/               IntlChecker: new Intl.*, статические, члены
-      intl_feature/               IntlFeature: тема
       intl_method_checker/        IntlMethodChecker: format и toLocaleString
       intl_options_checker/       IntlOptionsChecker: объекты опций Intl
     json/                         JSON и тип Json
       json_checker/               JsonChecker: Json — члены, индекс, сужение
-      json_feature/               JsonFeature: тема
       json_static_checker/        JsonStaticChecker: JSON.parse литерала при сборке
     math/                         Math и Bit
       math_checker/               MathChecker: вызовы Math и Bit
-      math_feature/               MathFeature: тема
     os/                           node:os
       os_checker/                 OsChecker
       os_exports/                 что экспортирует node:os
-      os_feature/                 OsFeature: тема
     path/                         node:path
       path_checker/               PathChecker
       path_exports/               что экспортирует node:path
-      path_feature/               PathFeature: тема
     process/                      process
       process_checker/            ProcessChecker: process.*, env, argv, on / once / off
       process_exports/            что экспортирует node:process
-      process_feature/            ProcessFeature: тема
     reflect/                      отражение: Reflect и метаданные декораторов
       metadata_checker/           MetadataChecker: метаданные декораторов
       reflect_call_checker/       ReflectCallChecker: Reflect.apply и вызовы методов по имени
       reflect_checker/            ReflectChecker: вход проверки отражения
-      reflect_feature/            ReflectFeature: тема
     regex/                        регулярные выражения, собранные при сборке
       match_checker/              MatchChecker: результат match — группы с типами
       regex_checker/              RegexChecker: литералы, методы RegExp
-      regex_feature/              RegexFeature: тема
       string_regex_checker/       StringRegexChecker: replace / match / split строк с RegExp
     result/                       Result: ok, err, isOk
       result_checker/             ResultChecker: ok / err, члены Result, забытый Result
-      result_feature/             ResultFeature: тема
       result_method_checker/      ResultMethodChecker: map, andThen и др.
       result_types/               ResultTypes: тип Result, импорт neverthrow
     stream/                       node:stream
       chunk_types/                ChunkTypes: типы кусков потоков, крючки onRead…
       set_encoding_checker/       SetEncodingChecker: setEncoding сужает тип потока
       stream_checker/             StreamChecker: встроенные вызовы потоков
-      stream_feature/             StreamFeature: тема
       stream_new_checker/         StreamNewChecker: new Readable и др.
       stream_pipeline/            StreamPipeline: pipeline, finished, compose
       stream_sources/             StreamSources: createReadStream, process.stdin как поток
@@ -415,13 +396,12 @@ semantic/                         движок типов: объявления,
       http_checker/               HttpChecker: new Response, Request, Headers
       library_calls/              LibraryCalls: вызовы библиотеки на tz
       tz_modules_checker/         TzModulesChecker: declare function → tz_* рантайма, колбэки
-      tz_modules_feature/         TzModulesFeature: тема
       url_checker/                UrlChecker: new URL с литералом при сборке
     weakref/                      WeakRef
       weak_ref_checker/           WeakRefChecker
-      weakref_feature/            WeakRefFeature: тема
   names/                          имена: области видимости
     scopes/                       Scopes: области видимости имён
+  semantic_parts/                 SemanticParts: сборка — один раз создаёт все части движка и передаёт им соседей
   semantic_state/                 SemanticState: закрытое хранилище движка — группы данных с действиями
     alias_store/                  AliasStore: копии псевдонимов типов, их параметры и откуда тип
     block_position/               BlockPosition: место в блоке, метки, цели break / continue
@@ -451,7 +431,7 @@ semantic/                         движок типов: объявления,
     conditional_check_helpers/    общие помощники условных типов
     conditional_types/            ConditionalTypes: T extends U ? A : B, infer
     destination/                  Destination: тип, которого ждёт место, для литералов
-    destination_check_helpers/    общие помощники Destination
+    destination_scan/             DestinationScan: общие помощники Destination
     destination_scanner/          DestinationScanner: заранее ищет, куда идут литералы
     extends_relation/             ExtendsRelation: отношение extends у типов
     literal_types/                LiteralTypes: литеральные типы, const-литералы

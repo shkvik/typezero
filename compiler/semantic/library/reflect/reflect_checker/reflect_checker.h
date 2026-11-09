@@ -6,9 +6,22 @@
 
 namespace tz {
 
+class SemanticParts;
+class Prelude;
+class CallChecker;
+class ExprChecker;
+class FlowChecker;
+class ClassDeclarer;
+class TypeRelations;
+class ReturnInferrer;
+class ArgumentChecker;
+class ClassValueChecker;
+class ClassMemberChecker;
+class ReflectCallChecker;
+
 class ReflectChecker {
 public:
-  explicit ReflectChecker(SemanticState &owner);
+  ReflectChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkReflection(CallExpr *call, MemberExpr *member, const Type *expected);
   void noteReflectedConversion(const Type *from, const Type *to, const CastExpr *cast);
@@ -33,6 +46,17 @@ private:
   void checkReflectNews();
 
   SemanticState &state;
+  Prelude *prelude = nullptr;
+  CallChecker *callChecker = nullptr;
+  ExprChecker *exprChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
+  ClassValueChecker *classValueChecker = nullptr;
+  ClassMemberChecker *classMemberChecker = nullptr;
+  ReflectCallChecker *reflectCallChecker = nullptr;
 };
 
 }

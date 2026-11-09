@@ -6,9 +6,14 @@
 
 namespace tz {
 
+class SemanticParts;
+class CryptoArgs;
+class CryptoErrors;
+class ArgumentChecker;
+
 class KeyPairChecker {
 public:
-  explicit KeyPairChecker(SemanticState &owner);
+  KeyPairChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc, llvm::StringRef shown);
 
@@ -21,6 +26,9 @@ private:
   static std::optional<std::string> literalOf(const Expr *e);
 
   SemanticState &state;
+  CryptoArgs *cryptoArgs = nullptr;
+  CryptoErrors *cryptoErrors = nullptr;
+  ArgumentChecker *argumentChecker = nullptr;
 };
 
 }

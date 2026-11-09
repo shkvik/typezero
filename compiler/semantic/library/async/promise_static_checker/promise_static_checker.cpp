@@ -6,6 +6,7 @@
 #include "compiler/semantic/library/async/promise_checker/promise_checker.h"
 #include "compiler/semantic/library/result/result_checker/result_checker.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
+#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/destination/destination.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
@@ -17,12 +18,19 @@ using llvm::isa;
 
 namespace tz {
 
+PromiseStaticChecker::PromiseStaticChecker(SemanticState &owner, SemanticParts &all)
+    : state(owner) {
+  this->callChecker = &all.getCallChecker();
+  this->exprChecker = &all.getExprChecker();
+  this->typeResolver = &all.getTypeResolver();
+  this->resultChecker = &all.getResultChecker();
+  this->typeRelations = &all.getTypeRelations();
+  this->argumentChecker = &all.getArgumentChecker();
+}
+
 const Type *PromiseStaticChecker::awaited(const Type *type) {
   return type->isPromise() ? type->promised() : type;
 }
-
-PromiseStaticChecker::PromiseStaticChecker(SemanticState &owner)
-    : state(owner) {}
 
 PromiseStaticChecker::ResultEmptyListTyped
 PromiseStaticChecker::emptyList(const Type *wantedElement, llvm::StringRef fn) {
@@ -104,10 +112,8 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
     std::vector<const Type *> types;
     bool same = true;
     for (ArrayLitExpr::Element &e : lit->elements) {
-      e.expr =
-          ExprChecker(this->state)
-              .checkExpr(e.expr, wantedElement && Destination::literalShaped(e.expr) ? wantedElement
-                                                                                     : nullptr);
+      e.expr = this->exprChecker->checkExpr(
+          e.expr, wantedElement && Destination::literalShaped(e.expr) ? wantedElement : nullptr);
       if (e.expr->type->isError()) {
         return false;
       }
@@ -134,7 +140,7 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
     }
     if (!same && common && !common->isError()) {
       for (ArrayLitExpr::Element &e : lit->elements) {
-        e.expr = TypeRelations(this->state).convert(e.expr, common);
+        e.expr = this->typeRelations->convert(e.expr, common);
       }
       types.assign(types.size(), common);
       same = true;
@@ -150,7 +156,7 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
     }
     return true;
   }
-  arg = ExprChecker(this->state).checkExpr(arg);
+  arg = this->exprChecker->checkExpr(arg);
   const Type *type = arg->type;
   if (type->isError()) {
     return false;
@@ -264,7 +270,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
   llvm::StringRef name = member->name;
   this->state.getInventoryStore().markUsesAsync();
   call->type = Type::error();
-  if (CallChecker(this->state).rejectSpread(call)) {
+  if (this->callChecker->rejectSpread(call)) {
     return call;
   }
   ResultTypeArgsAbsent plain = PromiseStaticChecker::staticTypeArgs(member);
@@ -281,7 +287,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
   std::string fn = "Promise." + name.str();
 
   if (name == "resolve") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 1);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
@@ -292,8 +298,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
       return call;
     }
     Expr *&arg = call->args[0];
-    arg = ExprChecker(this->state)
-              .checkExpr(arg, wanted && !isa<UndefinedExpr>(arg) ? wanted : nullptr);
+    arg = this->exprChecker->checkExpr(arg, wanted && !isa<UndefinedExpr>(arg) ? wanted : nullptr);
     const Type *type = arg->type;
     if (type->isError()) {
       return call;
@@ -320,10 +325,10 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
                                                  : ErrorTextNoReject::any();
     this->state.getDiagnostics().error(member->loc(), message);
 
-    return ResultChecker(this->state).markCallFailed(call);
+    return this->resultChecker->markCallFailed(call);
   }
   if (name == "withResolvers") {
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 0);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
@@ -336,8 +341,8 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     }
     const Type *value = nullptr;
     if (member->typeArgs.size() == 1) {
-      value = PromiseStaticChecker::awaited(
-          TypeResolver(this->state).resolveType(member->typeArgs[0], true));
+      value =
+          PromiseStaticChecker::awaited(this->typeResolver->resolveType(member->typeArgs[0], true));
     } else if (expected && expected->isObject()) {
       if (const Field *promise = expected->field("promise");
           promise && promise->type->isPromise()) {
@@ -363,7 +368,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     if (name != listName) {
       continue;
     }
-    ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 1, 1);
+    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
@@ -417,7 +422,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
   }
   std::string message = ErrorTextPromiseStatic::unknown(name);
   this->state.getDiagnostics().error(member->loc(), message);
-  ArgumentChecker(this->state).checkArgsLoosely(call);
+  this->argumentChecker->checkArgsLoosely(call);
 
   return call;
 }
