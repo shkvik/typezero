@@ -1,5 +1,6 @@
 #include "compiler/semantic/bodies/objects/dict_checker/dict_checker.h"
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
+#include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/program/library/dict/dict_method_table/dict_method_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -39,12 +40,14 @@ std::u16string DictChecker::toUtf16(llvm::StringRef text) {
 
 DictChecker::ResultDictTypeResolved DictChecker::resolveDictType(const TypeRef &ref) {
   llvm::StringRef name = ref.name;
-  if (name == "WeakRef") {
+  if (TypeNameTable::isName(name, TypeName::WEAK_REF)) {
     const Type *weak = this->weakRefChecker->resolveWeakRefType(ref);
 
     return ok(weak);
   }
-  if (name == "WeakMap" || name == "WeakSet") {
+  const TypeNameInfo *builtin = TypeNameTable::find(name);
+  bool weakCollection = builtin != nullptr && builtin->form.is<WeakCollectionTypeName>();
+  if (weakCollection) {
     std::string message = ErrorTextDictType::weak(name, name.drop_front(4));
 
     return err(DictCheckerResolveDictTypeError{
@@ -52,15 +55,17 @@ DictChecker::ResultDictTypeResolved DictChecker::resolveDictType(const TypeRef &
         .message = message,
     });
   }
-  bool record = name == "Record";
-  bool map = name == "Map" || name == "ReadonlyMap";
-  bool set = name == "Set" || name == "ReadonlySet";
-  if (!record && !map && !set) {
+  const CollectionTypeName *collectionName =
+      builtin != nullptr ? builtin->form.as<CollectionTypeName>() : nullptr;
+  if (collectionName == nullptr) {
     return err(DictCheckerResolveDictTypeError{
         .code = DictCheckerResolveDictTypeErrorCode::NOT_A_DICT,
         .message = "",
     });
   }
+  bool record = collectionName->collection == Collection::RECORD;
+  bool map = collectionName->collection == Collection::MAP;
+  bool set = collectionName->collection == Collection::SET;
   size_t wanted = set ? 1 : 2;
   if (ref.kind() != TypeRefKind::GENERIC_REF || ref.args.size() != wanted) {
     std::string message = set   ? ErrorTextDictType::setArgs(name)

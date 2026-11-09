@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/async/async_checker/async_checker.h"
+#include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker_errors.h"
 #include "compiler/semantic/bodies/iterators/generator_checker/generator_checker.h"
@@ -70,7 +71,9 @@ std::string AsyncChecker::statementText(llvm::SMLoc at) {
 }
 
 AsyncChecker::ResultPromiseTypeRef AsyncChecker::resolvePromiseType(const TypeRef &ref) {
-  if (ref.name != "Promise" && ref.name != "PromiseLike") {
+  const TypeNameInfo *builtin = TypeNameTable::find(ref.name);
+  bool promiseName = builtin != nullptr && builtin->form.is<PromiseTypeName>();
+  if (!promiseName) {
     return err(AsyncCheckerResolvePromiseTypeError{
         .code = AsyncCheckerResolvePromiseTypeErrorCode::NOT_A_PROMISE,
         .message = "",

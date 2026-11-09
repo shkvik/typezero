@@ -106,10 +106,11 @@ program/                    что идёт по конвейеру: модул�
   library/                  справочники библиотеки без проверки: имена глобальных объектов, свойств и методов встроенных типов, ошибки fs и crypto, crypto_api, regex, имена модулей
     array/                  массивы
       array_method_table/   ArrayMethodTable: методы массива — имя, Builtin, вид колбэка, меняет ли длину и элементы
-    builtin_names/          имена встроенного: глобальные объекты, их статические члены, свойства
+    builtin_names/          имена встроенного: глобальные объекты, их статические члены, свойства, имена типов
       builtin_property_table/ BuiltinPropertyTable: свойства встроенных типов — length, byteLength, size, value…
       global_member_table/  GlobalMemberTable: статические члены глобальных объектов — Array.from, Object.keys…
       global_name_table/    GlobalNameTable: имена глобальных объектов и функций — Array, Math, parseInt…
+      type_name_table/      TypeNameTable: имена встроенных типов в позиции типа — Generator, Map, Record, Promise, void… и вид имени (итератор, коллекция, Result)
     builtin_modules/        встроенные модули node:*
       known_modules/        KnownModules: какие модули node:* есть и какой модуль у имени
     bytes/                  типизированные массивы, Buffer, ArrayBuffer, TextEncoder/TextDecoder

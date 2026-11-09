@@ -182,6 +182,8 @@ ResultThisComesFrom found = this->thisOf(this->checker.currentDecl());
 - их статические члены — `GlobalMemberTable` (`Array.from`, `Object.keys`, `Symbol.iterator`),
   проверка — `CallChecker::isGlobalMember(member, GlobalMember::ARRAY_FROM)`;
 - свойства встроенных типов — `BuiltinPropertyTable` (`length`, `byteLength`, `size`);
+- имена встроенных типов в позиции типа — `TypeNameTable` (`Generator`, `Map`, `Record`, `void`);
+  вид имени — в `form`: `IteratorTypeName{.async}`, `CollectionTypeName{.collection}`…;
 - методы: массива — `ArrayMethodTable`, `Result` — `ResultMethodTable`, итератора —
   `IteratorMethodTable`, строки — `StringMethodTable`, `Map`/`Set` — `DictMethodTable`,
   `Object.prototype` — `ObjectMemberTable`, байтовых типов — `BytesMethodTable`.

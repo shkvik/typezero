@@ -34,6 +34,7 @@ public:
                                  llvm::ArrayRef<ReturnStmt *> returns, bool fallsOff, bool report);
 
 private:
+  static bool namesNoValue(const TypeRef &arg);
   using ResultNothingSentAsync = Result<const Type *, GeneratorCheckerAsyncSentError>;
   using ResultYieldedTypesJoin = Result<const Type *, GeneratorCheckerYieldsJoinError>;
   using ResultReturnsOfOneType = Result<const Type *, GeneratorCheckerReturnsJoinError>;

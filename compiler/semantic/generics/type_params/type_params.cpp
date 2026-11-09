@@ -1,4 +1,5 @@
 #include "compiler/semantic/generics/type_params/type_params.h"
+#include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/semantic/bodies/classes/decorator_checker/decorator_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/generics/alias_instantiator/alias_instantiator.h"
@@ -157,9 +158,10 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
       std::vector<const Type *> alternatives;
       bool resolved = true;
       if (ref.kind() == TypeRefKind::ARRAY_REF && ref.args[0].kind() == TypeRefKind::NAME_REF &&
-          ref.args[0].name == "unknown") {
+          TypeNameTable::isName(ref.args[0].name, TypeName::UNKNOWN)) {
         created[i]->setList();
-      } else if (ref.kind() == TypeRefKind::NAME_REF && ref.name == "unknown") {
+      } else if (ref.kind() == TypeRefKind::NAME_REF &&
+                 TypeNameTable::isName(ref.name, TypeName::UNKNOWN)) {
       } else if (ref.kind() == TypeRefKind::UNION_REF) {
         for (const TypeRef &member : ref.args) {
           const Type *type = this->typeResolver->resolveType(member, false);

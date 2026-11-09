@@ -1,5 +1,6 @@
 #include "compiler/semantic/library/result/result_types/result_types.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -10,29 +11,12 @@
 
 namespace tz {
 
-namespace {
-
-const llvm::StringLiteral kResultTypes[] = {"Result", "Ok", "Err"};
-
-}
-
 ResultTypes::ResultTypes(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->scopes = &all.getScopes();
   this->typeDeclarer = &all.getTypeDeclarer();
   this->typeResolver = &all.getTypeResolver();
   this->typeRelations = &all.getTypeRelations();
-}
-
-llvm::StringRef ResultTypes::findName(llvm::ArrayRef<llvm::StringLiteral> names,
-                                      llvm::StringRef name) {
-  for (llvm::StringLiteral n : names) {
-    if (n == name) {
-      return n;
-    }
-  }
-
-  return {};
 }
 
 std::optional<GlobalName> ResultTypes::resultName(llvm::StringRef name) const {
@@ -50,12 +34,16 @@ std::optional<GlobalName> ResultTypes::resultName(llvm::StringRef name) const {
   return global;
 }
 
-llvm::StringRef ResultTypes::resultTypeName(llvm::StringRef name) const {
+std::optional<TypeName> ResultTypes::findResultType(llvm::StringRef name) const {
   if (this->typeDeclarer->lookupType(name)) {
-    return {};
+    return std::nullopt;
+  }
+  const TypeNameInfo *builtin = TypeNameTable::find(name);
+  if (builtin == nullptr || !builtin->form.is<ResultTypeName>()) {
+    return std::nullopt;
   }
 
-  return ResultTypes::findName(kResultTypes, name);
+  return builtin->type;
 }
 
 ResultTypes::ResultImportSource ResultTypes::importSource(const ImportDecl &decl) {
@@ -84,14 +72,14 @@ ResultTypes::ResultTypeArgsPair ResultTypes::resultTypeArgs(const TypeRef &ref) 
   return ok(&ref);
 }
 
-const Type *ResultTypes::resolveResultType(const TypeRef &ref, llvm::StringRef name) {
+const Type *ResultTypes::resolveResultType(const TypeRef &ref, TypeName result) {
   ResultTypeArgsPair args = ResultTypes::resultTypeArgs(ref);
   if (args.isErr()) {
     this->state.getDiagnostics().error(ref.loc, args.error().message);
     return Type::error();
   }
   auto half = [&](const TypeRef &arg) -> const Type * {
-    if (arg.kind() == TypeRefKind::NAME_REF && arg.name == "never") {
+    if (arg.kind() == TypeRefKind::NAME_REF && TypeNameTable::isName(arg.name, TypeName::NEVER)) {
       return Type::never();
     }
 
@@ -99,9 +87,9 @@ const Type *ResultTypes::resolveResultType(const TypeRef &ref, llvm::StringRef n
   };
   const Type *value = half(ref.args[0]);
   const Type *error = half(ref.args[1]);
-  if (name == "Ok") {
+  if (result == TypeName::OK) {
     error = Type::never();
-  } else if (name == "Err") {
+  } else if (result == TypeName::ERR) {
     value = Type::never();
   }
   return Type::result(value, error);

@@ -1,4 +1,5 @@
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
+#include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -57,11 +58,12 @@ std::string TypeDeclarer::formatNumber(double value) {
 
 TypeDeclarer::ResultAliasIsOwnType TypeDeclarer::builtinAlias(const TypeAliasDecl *alias) {
   llvm::StringRef name = alias->name;
-  bool builtin = Type::fromName(name) || name == "Array";
+  bool builtin = Type::fromName(name) || TypeNameTable::isName(name, TypeName::ARRAY);
   bool integer = builtin && Type::fromName(name)->isNumeric();
-  bool forTsc =
-      integer && alias->type.kind() == TypeRefKind::NAME_REF && alias->type.name == "number";
-  forTsc |= builtin && name == "Json" && alias->type.kind() == TypeRefKind::UNION_REF;
+  bool forTsc = integer && alias->type.kind() == TypeRefKind::NAME_REF &&
+                TypeNameTable::isName(alias->type.name, TypeName::NUMBER);
+  forTsc |= builtin && TypeNameTable::isName(name, TypeName::JSON) &&
+            alias->type.kind() == TypeRefKind::UNION_REF;
   if (forTsc) {
     return err(TypeDeclarerBuiltinAliasError{
         .code = TypeDeclarerBuiltinAliasErrorCode::DECLARED_FOR_TSC,

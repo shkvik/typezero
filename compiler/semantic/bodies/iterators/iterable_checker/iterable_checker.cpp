@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/iterators/iterable_checker/iterable_checker.h"
+#include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/bodies/classes/method_call_checker/method_call_checker.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker.h"
@@ -247,8 +248,9 @@ const Type *IterableChecker::elementTypeOf(const Type *type) {
 }
 
 bool IterableChecker::isIterableRef(const TypeRef &ref) const {
-  return ref.kind() == TypeRefKind::GENERIC_REF && ref.name == "Iterable" &&
-         !this->typeDeclarer->lookupType("Iterable");
+  return ref.kind() == TypeRefKind::GENERIC_REF &&
+         TypeNameTable::isName(ref.name, TypeName::ITERABLE) &&
+         !this->typeDeclarer->lookupType(ref.name);
 }
 
 IterableChecker::ResultIteratorGiven IterableChecker::iteratorGiven(const Type *type,

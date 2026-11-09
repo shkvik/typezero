@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/iterators/generator_checker/generator_checker.h"
+#include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker_errors.h"
 #include "compiler/semantic/bodies/iterators/iterable_checker/iterable_checker.h"
@@ -28,7 +29,8 @@ GeneratorChecker::GeneratorChecker(SemanticState &owner, SemanticParts &all)
 
 GeneratorChecker::ResultResolvedIterator GeneratorChecker::resolveIteratorType(const TypeRef &ref) {
   llvm::StringRef name = ref.name;
-  if (name == "IteratorResult" && !this->typeDeclarer->lookupType(name)) {
+  if (TypeNameTable::isName(name, TypeName::ITERATOR_RESULT) &&
+      !this->typeDeclarer->lookupType(name)) {
     if (ref.args.empty() || ref.args.size() > 2) {
       std::string message = ErrorTextIteratorType::resultArgs();
 
@@ -41,8 +43,7 @@ GeneratorChecker::ResultResolvedIterator GeneratorChecker::resolveIteratorType(c
     const Type *returned = Type::undefinedTy();
     if (ref.args.size() == 2) {
       const TypeRef &arg = ref.args[1];
-      if (!(arg.kind() == TypeRefKind::NAME_REF &&
-            (arg.name == "void" || arg.name == "undefined" || arg.name == "unknown"))) {
+      if (!GeneratorChecker::namesNoValue(arg)) {
         returned = this->typeResolver->resolveType(arg, false);
       }
     }
@@ -53,7 +54,7 @@ GeneratorChecker::ResultResolvedIterator GeneratorChecker::resolveIteratorType(c
 
     return ok(result);
   }
-  if (name == "Iterable" && !this->typeDeclarer->lookupType(name)) {
+  if (TypeNameTable::isName(name, TypeName::ITERABLE) && !this->typeDeclarer->lookupType(name)) {
     std::string message = ErrorTextIteratorType::iterable();
 
     return err(GeneratorCheckerResolveIteratorTypeError{
@@ -61,10 +62,12 @@ GeneratorChecker::ResultResolvedIterator GeneratorChecker::resolveIteratorType(c
         .message = message,
     });
   }
-  bool async = name == "AsyncGenerator" || name == "AsyncIterableIterator" ||
-               name == "AsyncIterator" || name == "AsyncIterable";
-  if (name != "Generator" && name != "IterableIterator" &&
-      !(name == "Iterator" && !this->typeDeclarer->lookupType(name)) && !async) {
+  const TypeNameInfo *builtin = TypeNameTable::find(name);
+  const IteratorTypeName *iteratorName =
+      builtin != nullptr ? builtin->form.as<IteratorTypeName>() : nullptr;
+  bool shadowed = TypeNameTable::isName(name, TypeName::ITERATOR) &&
+                  this->typeDeclarer->lookupType(name) != nullptr;
+  if (iteratorName == nullptr || shadowed) {
     return err(GeneratorCheckerResolveIteratorTypeError{
         .code = GeneratorCheckerResolveIteratorTypeErrorCode::NOT_AN_ITERATOR,
         .message = "",
@@ -84,8 +87,7 @@ GeneratorChecker::ResultResolvedIterator GeneratorChecker::resolveIteratorType(c
       return Type::voidTy();
     }
     const TypeRef &arg = ref.args[i];
-    if (arg.kind() == TypeRefKind::NAME_REF &&
-        (arg.name == "void" || arg.name == "undefined" || arg.name == "unknown")) {
+    if (GeneratorChecker::namesNoValue(arg)) {
       return Type::voidTy();
     }
 
@@ -98,10 +100,21 @@ GeneratorChecker::ResultResolvedIterator GeneratorChecker::resolveIteratorType(c
       return ok(t);
     }
   }
-  const Type *iterator = async ? Type::asyncIterator(yielded, returned, sent)
-                               : Type::iterator(yielded, returned, sent);
+  const Type *iterator = iteratorName->async ? Type::asyncIterator(yielded, returned, sent)
+                                             : Type::iterator(yielded, returned, sent);
 
   return ok(iterator);
+}
+
+bool GeneratorChecker::namesNoValue(const TypeRef &arg) {
+  if (arg.kind() != TypeRefKind::NAME_REF) {
+    return false;
+  }
+  bool isVoid = TypeNameTable::isName(arg.name, TypeName::VOID_TYPE);
+  bool isUndefined = TypeNameTable::isName(arg.name, TypeName::UNDEFINED);
+  bool isUnknown = TypeNameTable::isName(arg.name, TypeName::UNKNOWN);
+
+  return isVoid || isUndefined || isUnknown;
 }
 
 GeneratorChecker::ResultGeneratorReturns

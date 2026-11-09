@@ -1,4 +1,5 @@
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
+#include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/program/library/library_module_names/library_module_names.h"
 #include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
 #include "compiler/semantic/bodies/classes/decorator_checker/decorator_checker.h"
@@ -51,10 +52,10 @@ TypeResolver::TypeResolver(SemanticState &owner, SemanticParts &all)
 }
 
 const Type *TypeResolver::literalType(const TypeRef &ref) {
-  if (ref.name == "string") {
+  if (TypeNameTable::isName(ref.name, TypeName::STRING)) {
     return Type::stringLiteral(ref.text());
   }
-  if (ref.name == "boolean") {
+  if (TypeNameTable::isName(ref.name, TypeName::BOOLEAN)) {
     return Type::boolLiteral(ref.number() != 0);
   }
   bool whole = ref.number() == std::trunc(ref.number()) &&
@@ -127,8 +128,8 @@ TypeResolver::ResultEnumMemberExists TypeResolver::enumMember(const EnumDecl *de
 TypeResolver::ResultArrayBufferGiven TypeResolver::bufferArgument(const TypeRef &ref,
                                                                   const Type *bytes) {
   bool single = ref.args.size() == 1 && ref.args[0].kind() == TypeRefKind::NAME_REF;
-  bool buffer =
-      single && (ref.args[0].name == "ArrayBuffer" || ref.args[0].name == "ArrayBufferLike");
+  bool buffer = single && (TypeNameTable::isName(ref.args[0].name, TypeName::ARRAY_BUFFER) ||
+                           TypeNameTable::isName(ref.args[0].name, TypeName::ARRAY_BUFFER_LIKE));
   if (!buffer) {
     std::string message = ErrorTextGenericRef::bufferArg(ref.name);
 
@@ -486,20 +487,20 @@ TypeResolver::ResultIntlTypeResolved TypeResolver::intlType(llvm::StringRef name
 }
 
 const Type *TypeResolver::builtinNamed(llvm::StringRef name) const {
-  if (name == "TemplateStringsArray") {
+  if (TypeNameTable::isName(name, TypeName::TEMPLATE_STRINGS_ARRAY)) {
     const Type *text = Type::string();
     return Type::array(text);
   }
-  if (name == "RegExp") {
+  if (TypeNameTable::isName(name, TypeName::REG_EXP)) {
     return Type::regExp();
   }
-  if (name == "Date") {
+  if (TypeNameTable::isName(name, TypeName::DATE)) {
     return Type::date();
   }
-  if (name == "Timeout" || name == "NodeJS.Timeout") {
+  if (TypeNameTable::isName(name, TypeName::TIMEOUT)) {
     return Type::timeout();
   }
-  if (name == "Immediate" || name == "NodeJS.Immediate") {
+  if (TypeNameTable::isName(name, TypeName::IMMEDIATE)) {
     return Type::immediate();
   }
   if (const Type *bytes = BytesChecker::bytesTypeNamed(name)) {
@@ -518,7 +519,7 @@ const Type *TypeResolver::builtinNamed(llvm::StringRef name) const {
   if (const Type *crypto = this->cryptoChecker->cryptoTypeNamed(name)) {
     return crypto;
   }
-  if (name == "RegExpMatchArray" || name == "RegExpExecArray") {
+  if (TypeNameTable::isName(name, TypeName::REG_EXP_MATCH_ARRAY)) {
     return Type::match(-1, {}, nullptr, false);
   }
 
@@ -541,26 +542,28 @@ const Type *TypeResolver::resolveDict(const TypeRef &ref) {
 }
 
 std::string TypeResolver::missingText(llvm::StringRef name) const {
-  if (name == "Array") {
+  if (TypeNameTable::isName(name, TypeName::ARRAY)) {
     return ErrorTextTypeName::arrayArg();
   }
-  llvm::StringRef result = this->resultTypes->resultTypeName(name);
-  if (!result.empty()) {
+  std::optional<TypeName> result = this->resultTypes->findResultType(name);
+  if (result.has_value()) {
     return ErrorTextTypeName::resultArgs(name);
   }
-  if (name == "Generator" || name == "IterableIterator") {
+  bool generator = TypeNameTable::isName(name, TypeName::GENERATOR) ||
+                   TypeNameTable::isName(name, TypeName::ITERABLE_ITERATOR);
+  if (generator) {
     return ErrorTextTypeName::valuesArg(name);
   }
-  if (name == "Promise") {
+  if (TypeNameTable::isName(name, TypeName::PROMISE)) {
     return ErrorTextTypeName::promiseArg();
   }
-  if (name == "null") {
+  if (TypeNameTable::isName(name, TypeName::NULL_TYPE)) {
     return ErrorTextTypeName::nullType();
   }
-  if (name == "long") {
+  if (TypeNameTable::isName(name, TypeName::LONG)) {
     return ErrorTextTypeName::longType();
   }
-  if (name == "SharedArrayBuffer") {
+  if (TypeNameTable::isName(name, TypeName::SHARED_ARRAY_BUFFER)) {
     return ErrorTextTypeName::shared();
   }
 
@@ -568,13 +571,15 @@ std::string TypeResolver::missingText(llvm::StringRef name) const {
 }
 
 const Type *TypeResolver::missingType(const TypeRef &ref) {
-  if (ref.name == "bigint") {
+  if (TypeNameTable::isName(ref.name, TypeName::BIGINT)) {
     std::string what = ErrorTextTypeName::bigintType();
     std::string bigint = ErrorTextBigInt::none(what);
     this->state.getDiagnostics().error(ref.loc, bigint);
     return Type::error();
   }
-  if (ref.name == "BigInt64Array" || ref.name == "BigUint64Array") {
+  bool bigintArray = TypeNameTable::isName(ref.name, TypeName::BIG_INT64_ARRAY) ||
+                     TypeNameTable::isName(ref.name, TypeName::BIG_UINT64_ARRAY);
+  if (bigintArray) {
     std::string what = ErrorTextTypeName::bigintName(ref.name);
     std::string bigint = ErrorTextBigInt::none(what);
     this->state.getDiagnostics().error(ref.loc, bigint);
@@ -593,7 +598,8 @@ const Type *TypeResolver::resolveName(const TypeRef &ref) {
   if (const Type *type = Type::fromName(ref.name)) {
     return type;
   }
-  if (ref.name == "never" && !this->typeDeclarer->lookupType(ref.name)) {
+  if (TypeNameTable::isName(ref.name, TypeName::NEVER) &&
+      !this->typeDeclarer->lookupType(ref.name)) {
     return Type::never();
   }
   if (Stmt *decl = this->typeDeclarer->lookupType(ref.name)) {
@@ -629,11 +635,11 @@ const Type *TypeResolver::resolveName(const TypeRef &ref) {
   if (const Type *dict = this->resolveDict(ref)) {
     return dict;
   }
-  if (ref.name == "Constructor") {
+  if (TypeNameTable::isName(ref.name, TypeName::CONSTRUCTOR)) {
     const Type *object = Type::anyObject();
     return Type::constructorOf(object);
   }
-  if (ref.name == "ConstructorArgs") {
+  if (TypeNameTable::isName(ref.name, TypeName::CONSTRUCTOR_ARGS)) {
     ClassValueChecker::ResultConstructorArgs args = this->classValueChecker->constructorArgs();
     if (args.isErr()) {
       this->state.getDiagnostics().error(ref.loc, args.error().message);
@@ -793,11 +799,13 @@ const Type *TypeResolver::resolveGeneric(const TypeRef &ref) {
     }
     return buffer.value();
   }
-  llvm::StringRef result = this->resultTypes->resultTypeName(ref.name);
-  if (!result.empty()) {
-    return this->resultTypes->resolveResultType(ref, result);
+  std::optional<TypeName> result = this->resultTypes->findResultType(ref.name);
+  if (result.has_value()) {
+    return this->resultTypes->resolveResultType(ref, *result);
   }
-  if (ref.name == "Array" || ref.name == "ReadonlyArray") {
+  const TypeNameInfo *builtin = TypeNameTable::find(ref.name);
+  bool array = builtin != nullptr && builtin->form.is<ArrayTypeName>();
+  if (array) {
     return this->resolveArrayGeneric(ref);
   }
   if (auto *cls = dyn_cast_or_null<ClassDecl>(this->typeDeclarer->lookupType(ref.name))) {
@@ -815,16 +823,16 @@ const Type *TypeResolver::resolveGeneric(const TypeRef &ref) {
   if (const Type *promise = this->resolvePromise(ref)) {
     return promise;
   }
-  if (ref.name == "MethodDescriptor") {
+  if (TypeNameTable::isName(ref.name, TypeName::METHOD_DESCRIPTOR)) {
     return this->resolveDescriptor(ref);
   }
   if (const Type *utility = this->resolveUtility(ref)) {
     return utility;
   }
-  if (ref.name == "Constructor") {
+  if (TypeNameTable::isName(ref.name, TypeName::CONSTRUCTOR)) {
     return this->resolveConstructor(ref);
   }
-  if (ref.name == "InstanceType" && ref.args.size() == 1) {
+  if (TypeNameTable::isName(ref.name, TypeName::INSTANCE_TYPE) && ref.args.size() == 1) {
     return this->resolveInstanceType(ref);
   }
   std::string message = ErrorTextGenericRef::noSupport(ref.name);
@@ -848,7 +856,8 @@ const Type *TypeResolver::resolveUnion(const TypeRef &ref) {
   bool withNull = false;
   std::vector<const Type *> members;
   for (const TypeRef &member : ref.args) {
-    if (member.kind() == TypeRefKind::NAME_REF && member.name == "null") {
+    if (member.kind() == TypeRefKind::NAME_REF &&
+        TypeNameTable::isName(member.name, TypeName::NULL_TYPE)) {
       withNull = true;
       continue;
     }
