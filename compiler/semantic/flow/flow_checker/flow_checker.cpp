@@ -1,10 +1,10 @@
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
-#include "compiler/program/ast_walker/ast_walker.h"
 #include "compiler/program/library/array/array_method_table/array_method_table.h"
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/flow/field_facts/field_facts.h"
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
+#include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
 #include "compiler/semantic/flow/union_narrowing/union_narrowing.h"
 #include "compiler/semantic/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -12,10 +12,8 @@
 #include "llvm/ADT/STLExtras.h"
 #include <limits>
 
-using llvm::cast;
 using llvm::dyn_cast;
 using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
@@ -272,119 +270,161 @@ void FlowChecker::incremented(const VarSymbol *var, int64_t delta) {
 }
 
 bool FlowChecker::staysLocal(const FunctionDecl *fn, llvm::StringRef name) {
-  if (!fn || !fn->body) {
+  if (fn == nullptr || fn->body == nullptr) {
     return false;
   }
-  auto named = [&](const Expr *e) {
-    auto *n = dyn_cast_or_null<NameExpr>(e);
+  PlacedNodes nodes = PlacedNodes::collect({fn->body}, {});
+  size_t uses = FlowChecker::countUses(nodes, name);
+  size_t localUses = FlowChecker::countLocalUses(nodes, name);
 
-    return n && n->name == name;
-  };
-  size_t all = 0;
-  size_t safe = 0;
-  AstWalker::visitExprs(fn->body, [&](const Expr *e) { all += named(e) ? 1 : 0; });
-  AstWalker::visitExprs(
-      fn->body,
-      [&](const Expr *e) {
-        if (auto *index = dyn_cast<IndexExpr>(e)) {
-          safe += named(index->object) ? 1 : 0;
-        } else if (auto *member = dyn_cast<MemberExpr>(e)) {
-          safe += named(member->object) &&
-                          BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)
-                      ? 1
-                      : 0;
-        } else if (auto *list = dyn_cast<ArrayLitExpr>(e)) {
-          for (const ArrayLitExpr::Element &el : list->elements) {
-            safe += el.spread && named(el.expr) ? 1 : 0;
-          }
-        } else if (auto *call = dyn_cast<CallExpr>(e)) {
-          for (size_t i = 0; i < call->args.size(); ++i) {
-            safe += call->spreads(i) && named(call->args[i]) ? 1 : 0;
-          }
-          auto *callee = dyn_cast<MemberExpr>(call->callee);
-          if (!callee || !named(callee->object)) {
-            return;
-          }
-          const ArrayMethodInfo *method = ArrayMethodTable::find(callee->name);
-          if (method == nullptr) {
-            return;
-          }
-          const CallbackArrayMethod *callback = method->form.as<CallbackArrayMethod>();
-          bool reduce = callback != nullptr && callback->callback == ArrayCallback::REDUCE;
-          bool calls = callback != nullptr || method->form.is<SortingArrayMethod>();
-          if (calls && !llvm::all_of(call->args, [&](const Expr *arg) {
-                auto *fe = dyn_cast<FunctionExpr>(arg);
-                return !fe ? !reduce || arg != call->args.front()
-                           : fe->fn->params.size() < (reduce ? 4u : 3u);
-              })) {
-            return;
-          }
-          if (calls && !reduce && !call->args.empty() && !isa<FunctionExpr>(call->args.front())) {
-            return;
-          }
-          ++safe;
-        }
-      },
-      false);
-  std::function<void(const Stmt *)> loops = [&](const Stmt *s) {
-    if (!s) {
-      return;
-    }
-    switch (s->kind()) {
-    case Stmt::Kind::Block:
-      for (const Stmt *inner : cast<BlockStmt>(s)->body) {
-        loops(inner);
-      }
-      break;
-    case Stmt::Kind::If:
-      loops(cast<IfStmt>(s)->thenStmt);
-      loops(cast<IfStmt>(s)->elseStmt);
-      break;
-    case Stmt::Kind::While:
-      loops(cast<WhileStmt>(s)->body);
-      break;
-    case Stmt::Kind::DoWhile:
-      loops(cast<DoWhileStmt>(s)->body);
-      break;
-    case Stmt::Kind::For:
-      loops(cast<ForStmt>(s)->body);
-      break;
-    case Stmt::Kind::ForOf:
-      safe += named(cast<ForOfStmt>(s)->iterable) ? 1 : 0;
-      loops(cast<ForOfStmt>(s)->body);
-      break;
-    case Stmt::Kind::Switch:
-      for (const SwitchCase &c : cast<SwitchStmt>(s)->cases) {
-        for (const Stmt *inner : c.body) {
-          loops(inner);
-        }
-      }
-      break;
-    case Stmt::Kind::Labeled:
-      loops(cast<LabeledStmt>(s)->body);
-      break;
-    case Stmt::Kind::Return: {
-      const Expr *value = cast<ReturnStmt>(s)->value;
-      auto *wrap = dyn_cast_or_null<CallExpr>(value);
-      auto *callee = wrap ? dyn_cast<NameExpr>(wrap->callee) : nullptr;
-      std::optional<GlobalName> wrapper = std::nullopt;
-      if (callee != nullptr) {
-        wrapper = GlobalNameTable::find(callee->name);
-      }
-      bool wraps = wrapper == GlobalName::OK || wrapper == GlobalName::ERR;
-      if (wraps && wrap->args.size() == 1) {
-        value = wrap->args[0];
-      }
-      safe += named(value) ? 1 : 0;
-      break;
-    }
-    default:
-      break;
-    }
-  };
-  loops(fn->body);
+  return localUses == uses;
+}
 
-  return safe == all;
+size_t FlowChecker::countUses(const PlacedNodes &nodes, llvm::StringRef name) {
+  size_t uses = 0;
+  for (const PlacedExpr &placed : nodes.getExprs()) {
+    if (FlowChecker::isName(placed.expr, name)) {
+      uses += 1;
+    }
+  }
+
+  return uses;
+}
+
+size_t FlowChecker::countLocalUses(const PlacedNodes &nodes, llvm::StringRef name) {
+  size_t uses = 0;
+  for (const PlacedExpr &placed : nodes.getExprs()) {
+    if (placed.place.isInsideFunction()) {
+      continue;
+    }
+    if (FlowChecker::readsElement(placed.expr, name)) {
+      uses += 1;
+    }
+    if (FlowChecker::callsArrayMethod(placed.expr, name)) {
+      uses += 1;
+    }
+    uses += FlowChecker::countSpreads(placed.expr, name);
+  }
+  for (const PlacedStmt &placed : nodes.getStmts()) {
+    if (placed.place.isInsideFunction()) {
+      continue;
+    }
+    if (FlowChecker::iteratesOver(placed.stmt, name)) {
+      uses += 1;
+    }
+    if (FlowChecker::returnsName(placed.stmt, name)) {
+      uses += 1;
+    }
+  }
+
+  return uses;
+}
+
+bool FlowChecker::isName(const Expr *expr, llvm::StringRef name) {
+  auto *named = dyn_cast_or_null<NameExpr>(expr);
+
+  return named != nullptr && named->name == name;
+}
+
+bool FlowChecker::readsElement(const Expr *expr, llvm::StringRef name) {
+  if (auto *index = dyn_cast<IndexExpr>(expr)) {
+    return FlowChecker::isName(index->object, name);
+  }
+  if (auto *member = dyn_cast<MemberExpr>(expr)) {
+    bool length = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH);
+    return length && FlowChecker::isName(member->object, name);
+  }
+
+  return false;
+}
+
+size_t FlowChecker::countSpreads(const Expr *expr, llvm::StringRef name) {
+  size_t spreads = 0;
+  if (auto *list = dyn_cast<ArrayLitExpr>(expr)) {
+    for (const ArrayLitExpr::Element &element : list->elements) {
+      if (element.spread && FlowChecker::isName(element.expr, name)) {
+        spreads += 1;
+      }
+    }
+  }
+  if (auto *call = dyn_cast<CallExpr>(expr)) {
+    for (size_t i = 0; i < call->args.size(); ++i) {
+      if (call->spreads(i) && FlowChecker::isName(call->args[i], name)) {
+        spreads += 1;
+      }
+    }
+  }
+
+  return spreads;
+}
+
+bool FlowChecker::callsArrayMethod(const Expr *expr, llvm::StringRef name) {
+  auto *call = dyn_cast<CallExpr>(expr);
+  if (call == nullptr) {
+    return false;
+  }
+  auto *callee = dyn_cast<MemberExpr>(call->callee);
+  if (callee == nullptr || !FlowChecker::isName(callee->object, name)) {
+    return false;
+  }
+  const ArrayMethodInfo *method = ArrayMethodTable::find(callee->name);
+  if (method == nullptr) {
+    return false;
+  }
+  const CallbackArrayMethod *callback = method->form.as<CallbackArrayMethod>();
+  bool sorts = method->form.is<SortingArrayMethod>();
+  if (callback == nullptr && !sorts) {
+    return true;
+  }
+  bool reduces = callback != nullptr && callback->callback == ArrayCallback::REDUCE;
+  size_t arrayParam = reduces ? 3 : 2;
+
+  return FlowChecker::callbacksSkipArray(call, arrayParam);
+}
+
+bool FlowChecker::callbacksSkipArray(const CallExpr *call, size_t arrayParam) {
+  for (size_t i = 0; i < call->args.size(); ++i) {
+    auto *callback = dyn_cast<FunctionExpr>(call->args[i]);
+    if (callback == nullptr && i == 0) {
+      return false;
+    }
+    if (callback != nullptr && callback->fn->params.size() > arrayParam) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool FlowChecker::iteratesOver(const Stmt *stmt, llvm::StringRef name) {
+  auto *loop = dyn_cast<ForOfStmt>(stmt);
+
+  return loop != nullptr && FlowChecker::isName(loop->iterable, name);
+}
+
+bool FlowChecker::returnsName(const Stmt *stmt, llvm::StringRef name) {
+  auto *result = dyn_cast<ReturnStmt>(stmt);
+  if (result == nullptr) {
+    return false;
+  }
+  const Expr *value = FlowChecker::unwrapResult(result->value);
+
+  return FlowChecker::isName(value, name);
+}
+
+const Expr *FlowChecker::unwrapResult(const Expr *value) {
+  auto *wrap = dyn_cast_or_null<CallExpr>(value);
+  if (wrap == nullptr || wrap->args.size() != 1) {
+    return value;
+  }
+  auto *maker = dyn_cast<NameExpr>(wrap->callee);
+  if (maker == nullptr) {
+    return value;
+  }
+  std::optional<GlobalName> global = GlobalNameTable::find(maker->name);
+  bool wraps = global == GlobalName::OK || global == GlobalName::ERR;
+
+  return wraps ? wrap->args[0] : value;
 }
 
 void FlowChecker::forgetCallEffects(Flow &flow) const {

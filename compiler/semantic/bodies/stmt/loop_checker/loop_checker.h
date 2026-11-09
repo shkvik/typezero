@@ -2,6 +2,7 @@
 
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/stmt/loop_checker/loop_checker_errors.h"
+#include "compiler/semantic/flow/tree_place/tree_place.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
@@ -37,8 +38,9 @@ public:
   void checkLoopBody(Stmt *body, bool awaits);
 
 private:
-  static bool continuesTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels,
-                          unsigned loops = 0);
+  static bool continuesTo(const Stmt *body, llvm::ArrayRef<llvm::StringRef> labels);
+  static bool continuesLoop(const ContinueStmt *next, const TreePlace &place,
+                            llvm::ArrayRef<llvm::StringRef> labels);
   using ResultIterableType = Result<const Type *, LoopCheckerIterableTypeError>;
   using ResultBindingTyped = Result<const VarDeclarator *, LoopCheckerBindingTypeError>;
   using ResultBindingShape = Result<const Type *, LoopCheckerBindingShapeError>;

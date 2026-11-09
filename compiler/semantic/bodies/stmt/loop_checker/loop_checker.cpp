@@ -12,6 +12,7 @@
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/flow/loop_bounds/loop_bounds.h"
 #include "compiler/semantic/flow/loop_scanner/loop_scanner.h"
+#include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/library/async/async_checker/async_checker.h"
 #include "compiler/semantic/library/events/emitter_checker/emitter_checker.h"
@@ -23,7 +24,6 @@
 #include "llvm/ADT/STLExtras.h"
 #include <cmath>
 
-using llvm::cast;
 using llvm::dyn_cast;
 
 namespace tz {
@@ -50,37 +50,28 @@ LoopChecker::LoopChecker(SemanticState &owner, SemanticParts &all)
   this->generatorChecker = &all.getGeneratorChecker();
 }
 
-bool LoopChecker::continuesTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels,
-                              unsigned loops) {
-  if (!stmt) {
-    return false;
+bool LoopChecker::continuesTo(const Stmt *body, llvm::ArrayRef<llvm::StringRef> labels) {
+  PlacedNodes nodes = PlacedNodes::collect({body}, {});
+  for (const PlacedStmt &placed : nodes.getStmts()) {
+    if (placed.place.isInsideFunction()) {
+      continue;
+    }
+    auto *next = dyn_cast<ContinueStmt>(placed.stmt);
+    if (next != nullptr && LoopChecker::continuesLoop(next, placed.place, labels)) {
+      return true;
+    }
   }
-  auto inside = [&](const Stmt *s) { return LoopChecker::continuesTo(s, labels, loops); };
-  switch (stmt->kind()) {
-  case Stmt::Kind::Continue: {
-    llvm::StringRef label = cast<ContinueStmt>(stmt)->label;
-    return label.empty() ? loops == 0 : llvm::is_contained(labels, label);
+
+  return false;
+}
+
+bool LoopChecker::continuesLoop(const ContinueStmt *next, const TreePlace &place,
+                                llvm::ArrayRef<llvm::StringRef> labels) {
+  if (!next->label.empty()) {
+    return llvm::is_contained(labels, next->label);
   }
-  case Stmt::Kind::Block:
-    return llvm::any_of(cast<BlockStmt>(stmt)->body, inside);
-  case Stmt::Kind::If:
-    return inside(cast<IfStmt>(stmt)->thenStmt) || inside(cast<IfStmt>(stmt)->elseStmt);
-  case Stmt::Kind::While:
-    return LoopChecker::continuesTo(cast<WhileStmt>(stmt)->body, labels, loops + 1);
-  case Stmt::Kind::DoWhile:
-    return LoopChecker::continuesTo(cast<DoWhileStmt>(stmt)->body, labels, loops + 1);
-  case Stmt::Kind::For:
-    return LoopChecker::continuesTo(cast<ForStmt>(stmt)->body, labels, loops + 1);
-  case Stmt::Kind::ForOf:
-    return LoopChecker::continuesTo(cast<ForOfStmt>(stmt)->body, labels, loops + 1);
-  case Stmt::Kind::Switch:
-    return llvm::any_of(cast<SwitchStmt>(stmt)->cases,
-                        [&](const SwitchCase &c) { return llvm::any_of(c.body, inside); });
-  case Stmt::Kind::Labeled:
-    return inside(cast<LabeledStmt>(stmt)->body);
-  default:
-    return false;
-  }
+
+  return !place.isInsideLoop();
 }
 
 void LoopChecker::checkWhile(WhileStmt *stmt) {

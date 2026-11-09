@@ -7,6 +7,7 @@ namespace tz {
 class SemanticParts;
 class ByteProofs;
 class IndexProofs;
+class PlacedNodes;
 
 class FlowChecker {
 public:
@@ -23,8 +24,18 @@ public:
   void setDefined(const VarSymbol *var, bool defined);
 
 private:
-  static void addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual);
   static bool isArrayLength(const Term &t);
+  static const Expr *unwrapResult(const Expr *value);
+  static bool isName(const Expr *expr, llvm::StringRef name);
+  static bool returnsName(const Stmt *stmt, llvm::StringRef name);
+  static bool readsElement(const Expr *expr, llvm::StringRef name);
+  static bool iteratesOver(const Stmt *stmt, llvm::StringRef name);
+  static size_t countSpreads(const Expr *expr, llvm::StringRef name);
+  static bool callsArrayMethod(const Expr *expr, llvm::StringRef name);
+  static size_t countUses(const PlacedNodes &nodes, llvm::StringRef name);
+  static bool callbacksSkipArray(const CallExpr *call, size_t arrayParam);
+  static size_t countLocalUses(const PlacedNodes &nodes, llvm::StringRef name);
+  static void addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual);
 
   SemanticState &state;
   ByteProofs *byteProofs = nullptr;

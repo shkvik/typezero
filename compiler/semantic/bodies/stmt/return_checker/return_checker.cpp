@@ -6,6 +6,7 @@
 #include "compiler/semantic/bodies/functions/function_checker/function_checker_errors.h"
 #include "compiler/semantic/flow/condition_facts/condition_facts.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
+#include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
 #include "compiler/semantic/flow/predicate_checker/predicate_checker.h"
 #include "compiler/semantic/library/async/async_checker/async_checker.h"
 #include "compiler/semantic/library/bytes/byte_proofs/byte_proofs.h"
@@ -29,86 +30,58 @@ class Exits {
 public:
   Exits(bool forLoop, llvm::ArrayRef<llvm::StringRef> ownLabels);
 
-  bool any(llvm::ArrayRef<Stmt *> stmts);
-  bool in(const Stmt *stmt);
+  bool in(llvm::ArrayRef<const Stmt *> stmts) const;
 
 private:
-  bool inLoop(const Stmt *body);
+  bool breakLeaves(const BreakStmt *exit, const TreePlace &place) const;
+  bool continueLeaves(const ContinueStmt *next, const TreePlace &place) const;
 
   bool isLoop;
   llvm::ArrayRef<llvm::StringRef> labels;
-  llvm::SmallVector<llvm::StringRef, 4> inner;
-  unsigned loops = 0;
-  unsigned breakables = 0;
 };
 
 Exits::Exits(bool forLoop, llvm::ArrayRef<llvm::StringRef> ownLabels)
     : isLoop(forLoop),
       labels(ownLabels) {}
 
-bool Exits::any(llvm::ArrayRef<Stmt *> stmts) {
-  return llvm::any_of(stmts, [&](const Stmt *s) { return this->in(s); });
-}
-
-bool Exits::in(const Stmt *stmt) {
-  switch (stmt->kind()) {
-    case Stmt::Kind::Break: {
-      llvm::StringRef label = cast<BreakStmt>(stmt)->label;
-      return label.empty() ? this->breakables == 0 : !llvm::is_contained(this->inner, label);
+bool Exits::in(llvm::ArrayRef<const Stmt *> stmts) const {
+  PlacedNodes nodes = PlacedNodes::collect(stmts, {});
+  for (const PlacedStmt &placed : nodes.getStmts()) {
+    if (placed.place.isInsideFunction()) {
+      continue;
     }
-    case Stmt::Kind::Continue: {
-      llvm::StringRef label = cast<ContinueStmt>(stmt)->label;
-      if (label.empty()) {
-        return this->loops == 0 && !this->isLoop;
-      }
-      if (llvm::is_contained(this->inner, label)) {
-        return false;
-      }
-      return !(this->isLoop && llvm::is_contained(this->labels, label));
+    auto *exit = dyn_cast<BreakStmt>(placed.stmt);
+    if (exit != nullptr && this->breakLeaves(exit, placed.place)) {
+      return true;
     }
-    case Stmt::Kind::Block:
-      return this->any(cast<BlockStmt>(stmt)->body);
-    case Stmt::Kind::If: {
-      auto *s = cast<IfStmt>(stmt);
-      return this->in(s->thenStmt) || (s->elseStmt && this->in(s->elseStmt));
+    auto *next = dyn_cast<ContinueStmt>(placed.stmt);
+    if (next != nullptr && this->continueLeaves(next, placed.place)) {
+      return true;
     }
-    case Stmt::Kind::While:
-      return this->inLoop(cast<WhileStmt>(stmt)->body);
-    case Stmt::Kind::DoWhile:
-      return this->inLoop(cast<DoWhileStmt>(stmt)->body);
-    case Stmt::Kind::For:
-      return this->inLoop(cast<ForStmt>(stmt)->body);
-    case Stmt::Kind::ForOf:
-      return this->inLoop(cast<ForOfStmt>(stmt)->body);
-    case Stmt::Kind::Switch: {
-      ++this->breakables;
-      bool found = llvm::any_of(cast<SwitchStmt>(stmt)->cases,
-                                [&](const SwitchCase &c) { return this->any(c.body); });
-      --this->breakables;
-      return found;
-    }
-    case Stmt::Kind::Labeled: {
-      auto *s = cast<LabeledStmt>(stmt);
-      this->inner.push_back(s->label);
-      bool found = this->in(s->body);
-      this->inner.pop_back();
-      return found;
-    }
-    default:
-      return false;
   }
+
+  return false;
 }
 
-bool Exits::inLoop(const Stmt *body) {
-  ++this->loops;
-  ++this->breakables;
-  bool found = this->in(body);
-  --this->loops;
-  --this->breakables;
+bool Exits::breakLeaves(const BreakStmt *exit, const TreePlace &place) const {
+  if (!exit->label.empty()) {
+    return !place.hasLabel(exit->label);
+  }
 
-  return found;
+  return !place.isInsideLoop() && !place.isInsideSwitch();
 }
 
+bool Exits::continueLeaves(const ContinueStmt *next, const TreePlace &place) const {
+  if (next->label.empty()) {
+    return !place.isInsideLoop() && !this->isLoop;
+  }
+  if (place.hasLabel(next->label)) {
+    return false;
+  }
+  bool ownLabel = llvm::is_contained(this->labels, next->label);
+
+  return !(this->isLoop && ownLabel);
+}
 }
 
 bool ReturnChecker::isTrueLiteral(const Expr *expr) {
@@ -121,35 +94,18 @@ bool ReturnChecker::breaksTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> l
   if (labels.empty()) {
     return false;
   }
-  switch (stmt->kind()) {
-  case Stmt::Kind::Break:
-    return llvm::is_contained(labels, cast<BreakStmt>(stmt)->label);
-  case Stmt::Kind::Block:
-    return llvm::any_of(cast<BlockStmt>(stmt)->body,
-                        [&](const Stmt *s) { return ReturnChecker::breaksTo(s, labels); });
-  case Stmt::Kind::If: {
-    auto *s = cast<IfStmt>(stmt);
-    return ReturnChecker::breaksTo(s->thenStmt, labels) ||
-           (s->elseStmt && ReturnChecker::breaksTo(s->elseStmt, labels));
+  PlacedNodes nodes = PlacedNodes::collect({stmt}, {});
+  for (const PlacedStmt &placed : nodes.getStmts()) {
+    if (placed.place.isInsideFunction()) {
+      continue;
+    }
+    auto *exit = dyn_cast<BreakStmt>(placed.stmt);
+    if (exit != nullptr && llvm::is_contained(labels, exit->label)) {
+      return true;
+    }
   }
-  case Stmt::Kind::While:
-    return ReturnChecker::breaksTo(cast<WhileStmt>(stmt)->body, labels);
-  case Stmt::Kind::DoWhile:
-    return ReturnChecker::breaksTo(cast<DoWhileStmt>(stmt)->body, labels);
-  case Stmt::Kind::For:
-    return ReturnChecker::breaksTo(cast<ForStmt>(stmt)->body, labels);
-  case Stmt::Kind::ForOf:
-    return ReturnChecker::breaksTo(cast<ForOfStmt>(stmt)->body, labels);
-  case Stmt::Kind::Switch:
-    return llvm::any_of(cast<SwitchStmt>(stmt)->cases, [&](const SwitchCase &c) {
-      return llvm::any_of(c.body,
-                          [&](const Stmt *s) { return ReturnChecker::breaksTo(s, labels); });
-    });
-  case Stmt::Kind::Labeled:
-    return ReturnChecker::breaksTo(cast<LabeledStmt>(stmt)->body, labels);
-  default:
-    return false;
-  }
+
+  return false;
 }
 
 ReturnChecker::ReturnChecker(SemanticState &owner, SemanticParts &all)
@@ -464,15 +420,16 @@ bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringR
   }
   case Stmt::Kind::While: {
     auto *s = cast<WhileStmt>(stmt);
-    return ReturnChecker::isTrueLiteral(s->cond) && !Exits(true, labels).in(s->body);
+    return ReturnChecker::isTrueLiteral(s->cond) && !Exits(true, labels).in({s->body});
   }
   case Stmt::Kind::DoWhile: {
     auto *s = cast<DoWhileStmt>(stmt);
-    return ReturnChecker::isTrueLiteral(s->cond) && !Exits(true, labels).in(s->body);
+    return ReturnChecker::isTrueLiteral(s->cond) && !Exits(true, labels).in({s->body});
   }
   case Stmt::Kind::For: {
     auto *s = cast<ForStmt>(stmt);
-    return (!s->cond || ReturnChecker::isTrueLiteral(s->cond)) && !Exits(true, labels).in(s->body);
+    return (!s->cond || ReturnChecker::isTrueLiteral(s->cond)) &&
+           !Exits(true, labels).in({s->body});
   }
   case Stmt::Kind::Switch: {
     auto *s = cast<SwitchStmt>(stmt);
@@ -482,7 +439,7 @@ bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringR
       return false;
     }
     Exits exits(false, labels);
-    if (llvm::any_of(s->cases, [&](const SwitchCase &c) { return exits.any(c.body); })) {
+    if (llvm::any_of(s->cases, [&](const SwitchCase &c) { return exits.in(c.body); })) {
       return false;
     }
     return llvm::any_of(s->cases.back().body, returns);

@@ -2,6 +2,7 @@
 #include "compiler/program/library/array/array_method_table/array_method_table.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/iterators/iterable_checker/iterable_checker.h"
+#include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/destination_scan/destination_scan.h"
@@ -26,50 +27,20 @@ Destination::Destination(SemanticState &owner, SemanticParts &all)
   this->destinationScanner = &all.getDestinationScanner();
 }
 
-void Destination::forEachReturn(const Stmt *stmt, llvm::function_ref<void(const Expr *)> each) {
-  if (!stmt) {
-    return;
+std::vector<const Expr *> Destination::findReturnValues(const Stmt *body) {
+  std::vector<const Expr *> values;
+  PlacedNodes nodes = PlacedNodes::collect({body}, {});
+  for (const PlacedStmt &placed : nodes.getStmts()) {
+    if (placed.place.isInsideFunction()) {
+      continue;
+    }
+    auto *result = dyn_cast<ReturnStmt>(placed.stmt);
+    if (result != nullptr && result->value != nullptr) {
+      values.push_back(result->value);
+    }
   }
-  switch (stmt->kind()) {
-  case Stmt::Kind::Return:
-    if (const Expr *value = cast<ReturnStmt>(stmt)->value) {
-      each(value);
-    }
-    break;
-  case Stmt::Kind::Block:
-    for (const Stmt *s : cast<BlockStmt>(stmt)->body) {
-      Destination::forEachReturn(s, each);
-    }
-    break;
-  case Stmt::Kind::If:
-    Destination::forEachReturn(cast<IfStmt>(stmt)->thenStmt, each);
-    Destination::forEachReturn(cast<IfStmt>(stmt)->elseStmt, each);
-    break;
-  case Stmt::Kind::While:
-    Destination::forEachReturn(cast<WhileStmt>(stmt)->body, each);
-    break;
-  case Stmt::Kind::DoWhile:
-    Destination::forEachReturn(cast<DoWhileStmt>(stmt)->body, each);
-    break;
-  case Stmt::Kind::For:
-    Destination::forEachReturn(cast<ForStmt>(stmt)->body, each);
-    break;
-  case Stmt::Kind::ForOf:
-    Destination::forEachReturn(cast<ForOfStmt>(stmt)->body, each);
-    break;
-  case Stmt::Kind::Switch:
-    for (const SwitchCase &c : cast<SwitchStmt>(stmt)->cases) {
-      for (const Stmt *s : c.body) {
-        Destination::forEachReturn(s, each);
-      }
-    }
-    break;
-  case Stmt::Kind::Labeled:
-    Destination::forEachReturn(cast<LabeledStmt>(stmt)->body, each);
-    break;
-  default:
-    break;
-  }
+
+  return values;
 }
 
 const Type *Destination::writable(const Type *type) {
@@ -115,13 +86,16 @@ bool Destination::literalShaped(const Expr *expr) {
       return false;
     }
     auto *fe = dyn_cast<FunctionExpr>(call->args[0]);
-    bool returnsLiteral = false;
-    if (fe) {
-      Destination::forEachReturn(fe->fn->body, [&](const Expr *value) {
-        returnsLiteral |= Destination::literalShaped(value);
-      });
+    if (fe == nullptr) {
+      return false;
     }
-    return returnsLiteral;
+    for (const Expr *value : Destination::findReturnValues(fe->fn->body)) {
+      if (Destination::literalShaped(value)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   return false;
@@ -225,11 +199,13 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
     const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
     bool mapsEach = method != nullptr && method->method == ArrayMethod::MAP;
     const Type *element = mapsEach ? type->inner() : type;
-    bool fits = true;
-    Destination::forEachReturn(fe->fn->body, [&](const Expr *value) {
-      fits &= !Destination::literalShaped(value) || this->literalFits(value, element);
-    });
-    return fits;
+    for (const Expr *value : Destination::findReturnValues(fe->fn->body)) {
+      if (Destination::literalShaped(value) && !this->literalFits(value, element)) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   return true;

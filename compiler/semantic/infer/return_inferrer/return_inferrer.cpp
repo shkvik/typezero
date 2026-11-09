@@ -8,6 +8,7 @@
 #include "compiler/semantic/bodies/stmt/return_checker/return_checker.h"
 #include "compiler/semantic/declare/import_binder/import_binder.h"
 #include "compiler/semantic/declare/module_declarer/module_declarer.h"
+#include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
 #include "compiler/semantic/generics/generic_class_checker/generic_class_checker.h"
 #include "compiler/semantic/generics/type_params/type_params.h"
 #include "compiler/semantic/infer/late_classes/late_classes.h"
@@ -17,7 +18,7 @@
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
 
-using llvm::cast;
+using llvm::dyn_cast;
 
 namespace tz {
 
@@ -37,41 +38,29 @@ ReturnInferrer::ReturnInferrer(SemanticState &owner, SemanticParts &all)
   this->genericClassChecker = &all.getGenericClassChecker();
 }
 
-bool ReturnInferrer::returnsValue(const Stmt *stmt) {
-  if (!stmt) {
+bool ReturnInferrer::returnsValue(const Stmt *body) {
+  PlacedNodes nodes = PlacedNodes::collect({body}, {});
+  for (const PlacedStmt &placed : nodes.getStmts()) {
+    if (placed.place.isInsideFunction()) {
+      continue;
+    }
+    auto *result = dyn_cast<ReturnStmt>(placed.stmt);
+    if (result != nullptr && ReturnInferrer::givesValue(result)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool ReturnInferrer::givesValue(const ReturnStmt *result) {
+  if (result->value == nullptr) {
     return false;
   }
-  auto caseReturns = [](const SwitchCase &c) {
-    return llvm::any_of(c.body, ReturnInferrer::returnsValue);
-  };
-  switch (stmt->kind()) {
-    case Stmt::Kind::Return: {
-      const Expr *value = cast<ReturnStmt>(stmt)->value;
-      auto *unary = llvm::dyn_cast_or_null<UnaryExpr>(value);
-      return value && !(unary && unary->op == UnaryOp::Void);
-    }
-    case Stmt::Kind::Block:
-      return llvm::any_of(cast<BlockStmt>(stmt)->body, ReturnInferrer::returnsValue);
-    case Stmt::Kind::If: {
-      const auto *branch = cast<IfStmt>(stmt);
-      return ReturnInferrer::returnsValue(branch->thenStmt) ||
-             ReturnInferrer::returnsValue(branch->elseStmt);
-    }
-    case Stmt::Kind::While:
-      return ReturnInferrer::returnsValue(cast<WhileStmt>(stmt)->body);
-    case Stmt::Kind::DoWhile:
-      return ReturnInferrer::returnsValue(cast<DoWhileStmt>(stmt)->body);
-    case Stmt::Kind::For:
-      return ReturnInferrer::returnsValue(cast<ForStmt>(stmt)->body);
-    case Stmt::Kind::ForOf:
-      return ReturnInferrer::returnsValue(cast<ForOfStmt>(stmt)->body);
-    case Stmt::Kind::Switch:
-      return llvm::any_of(cast<SwitchStmt>(stmt)->cases, caseReturns);
-    case Stmt::Kind::Labeled:
-      return ReturnInferrer::returnsValue(cast<LabeledStmt>(stmt)->body);
-    default:
-      return false;
-  }
+  auto *unary = dyn_cast<UnaryExpr>(result->value);
+  bool discarded = unary != nullptr && unary->op == UnaryOp::Void;
+
+  return !discarded;
 }
 
 ReturnInferrer::ResultNotCalledEarly ReturnInferrer::earlyCall(const FuncSymbol *fn) const {

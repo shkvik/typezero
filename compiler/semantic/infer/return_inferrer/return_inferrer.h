@@ -35,7 +35,7 @@ class ReturnInferrer {
 public:
   ReturnInferrer(SemanticState &owner, SemanticParts &all);
 
-  static bool returnsValue(const Stmt *stmt);
+  static bool returnsValue(const Stmt *body);
 
   void resolveParams(FuncSymbol *fn);
   void inferReturnType(FuncSymbol *fn);
@@ -54,6 +54,7 @@ private:
   using ResultNotCalledEarly = Result<const FuncSymbol *, ReturnInferrerEarlyCallError>;
   using ResultReturnsDefined = Result<const FuncSymbol *, ReturnInferrerDefinedReturnError>;
 
+  static bool givesValue(const ReturnStmt *result);
   static std::vector<ReturnStmt *> literalsLast(llvm::ArrayRef<ReturnStmt *> returns);
 
   const Type *trialReturn(FuncSymbol *fn);
