@@ -101,6 +101,7 @@ private:
   using ResultFieldNameUnique = Result<const ClassField *, ClassDeclarerUniqueFieldError>;
   using ResultFieldNotLateSet = Result<const ClassField *, ClassDeclarerSetLaterError>;
   using ResultFieldTypeSource = Result<const ClassField *, ClassDeclarerTypedFieldError>;
+  using ResultFieldHasNoValue = Result<const ClassField *, ClassDeclarerFieldValueError>;
   using ResultFieldNameIsFree = Result<const ClassField *, ClassDeclarerFieldOrMethodError>;
   using ResultStaticGetsValue = Result<const ClassField *, ClassDeclarerStaticValueError>;
   using ResultNotParentMethod = Result<const ClassField *, ClassDeclarerParentMethodError>;
@@ -110,7 +111,7 @@ private:
   using ResultAbstractReturns = Result<const FunctionDecl *, ClassDeclarerAbstractReturnError>;
 
   static ResultFieldNotLateSet setLater(const ClassField &f);
-  static ResultFieldTypeSource typedField(const ClassField &f);
+  static ResultFieldHasNoValue fieldValue(const ClassField &f);
   static ResultGenericIsDirect genericMethod(const FunctionDecl *fn);
   static void numberVariants(llvm::ArrayRef<FunctionDecl *> functions);
   static int ambiguousCount(const FuncSymbol *x, const FuncSymbol *y);
@@ -118,6 +119,7 @@ private:
   static const ClassField *earlierField(const ClassDecl *cls, size_t index);
   static const Param *propertyParam(const ClassDecl *cls, llvm::StringRef name);
   static ResultNotParentMethod parentMethod(const ClassDecl *cls, const ClassField &f);
+  static ResultFieldTypeSource typedField(const ClassDecl *cls, const ClassField &f);
   static ResultVariantsUnequal variantPair(const FunctionDecl *a, const FunctionDecl *b);
   static ResultAbstractReturns abstractReturn(const ClassDecl *cls, const FunctionDecl *fn);
   static ResultParamTypePassed paramType(const Param &param, const Type *type,

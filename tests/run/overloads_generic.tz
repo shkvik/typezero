@@ -27,7 +27,12 @@ console.log(Fmt.wrap("a"), Fmt.wrap(7, 3), Fmt.wrap("b", 2))
 
 // In a generic class, with its own type parameter too.
 class Store<T> {
-  items: T[] = []
+  items: T[]
+
+  constructor() {
+    this.items = []
+  }
+
   add(x: T) { this.items.push(x); return this }
   add(xs: T[]) { for (const x of xs) this.items.push(x); return this }
   find(i: int): T | undefined { return this.items[i] }

@@ -16,7 +16,6 @@ class TypeResolver;
 class UtilityTypes;
 class ClosureChecker;
 class GenericChecker;
-class ReturnInferrer;
 class ArgumentChecker;
 class IterableChecker;
 class GenericInstantiator;
@@ -78,7 +77,6 @@ private:
   UtilityTypes *utilityTypes = nullptr;
   ClosureChecker *closureChecker = nullptr;
   GenericChecker *genericChecker = nullptr;
-  ReturnInferrer *returnInferrer = nullptr;
   ArgumentChecker *argumentChecker = nullptr;
   IterableChecker *iterableChecker = nullptr;
   GenericInstantiator *genericInstantiator = nullptr;

@@ -2,8 +2,13 @@
 // deep: a trie a million levels deep, maps of maps, maps that hold objects
 // that hold maps.
 class TrieNode {
-  children = new Map<string, TrieNode>()
-  end = false
+  children: Map<string, TrieNode>
+  end: boolean
+
+  constructor() {
+    this.children = new Map<string, TrieNode>()
+    this.end = false
+  }
 }
 function insert(root: TrieNode, word: string) {
   let node = root

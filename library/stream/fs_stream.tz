@@ -3,6 +3,7 @@ import {
   FaultCallback,
   HookCallback,
   Readable,
+  ReadableOptions,
   StreamCallback,
   StreamFault,
   Writable,
@@ -92,13 +93,13 @@ export class ReadStream<T = Buffer> extends Readable<T, ReadStreamError> {
   readonly start?: double
   readonly end?: double
   private position?: double
-  private readCount: int = 0
+  private readCount: int
   private opening: boolean
   readonly autoClose: boolean
-  private performingIO = false
+  private performingIO: boolean
   private ioDone?: (error: StreamFault | undefined) => void
   private invalid?: ReadStreamError
-  private file = new OpenFile()
+  private file: OpenFile
   private closer: object
 
   constructor(path: string, options?: ReadStreamOptions) {
@@ -108,6 +109,9 @@ export class ReadStream<T = Buffer> extends Readable<T, ReadStreamError> {
       emitClose: options?.emitClose,
       autoDestroy: options?.autoClose ?? true,
     })
+    this.readCount = 0
+    this.performingIO = false
+    this.file = new OpenFile()
     this.fileFd = options?.fd
     this.path = path
     this.flags = options?.flags ?? "r"
@@ -246,14 +250,14 @@ abstract class FileWriter<E extends StreamError> extends Writable<Buffer, E> {
   readonly mode: int
   readonly start?: double
   private position?: double
-  private writeCount: int = 0
+  private writeCount: int
   readonly flush: boolean
   private opening: boolean
   readonly autoClose: boolean
-  private performingIO = false
+  private performingIO: boolean
   private ioDone?: (error: StreamFault | undefined) => void
   private problem?: string
-  private file = new OpenFile()
+  private file: OpenFile
   private closer: object
 
   constructor(path: string, options?: WriteStreamOptions) {
@@ -264,6 +268,9 @@ abstract class FileWriter<E extends StreamError> extends Writable<Buffer, E> {
       autoDestroy: options?.autoClose ?? true,
       defaultEncoding: options?.encoding,
     })
+    this.writeCount = 0
+    this.performingIO = false
+    this.file = new OpenFile()
     this.fileFd = options?.fd
     this.path = path
     this.flags = options?.flags ?? "w"
@@ -515,8 +522,14 @@ export interface StdoutError extends StreamError {
 }
 
 class StdinStream extends Readable<Buffer, StdinError> {
-  readonly fd = 0
-  private reading = false
+  readonly fd: int
+  private reading: boolean
+
+  constructor(options?: ReadableOptions) {
+    super(options)
+    this.fd = 0
+    this.reading = false
+  }
 
   protected onRead(size: int): void {
     if (this.reading) return

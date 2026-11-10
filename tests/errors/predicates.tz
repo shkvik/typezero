@@ -23,7 +23,12 @@ function check(ok: boolean, why: string): asserts ok {
   if (!ok) console.log(why)
 }
 class Shelf {
-  items: string[] = []
+  items: string[]
+
+  constructor() {
+    this.items = []
+  }
+
   // expect-error: 'asserts this is Shelf' is not supported (docs/narrowing.md): there are no exceptions, so a function cannot stop its caller; write 'this is Shelf' and return whether it holds, then check it at the call: 'if (!shelf.full()) return err(...)'
   full(): asserts this is Shelf {}
 }

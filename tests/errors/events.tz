@@ -59,7 +59,11 @@ async function count(n: int) {
 // expect-error: an async listener returns 'Promise<void>', but this one returns 'Promise<int>'
 typed.on("user", count)
 class Other {
-  n = 1
+  n: int
+
+  constructor() {
+    this.n = 1
+  }
 }
 // expect-error: the listener takes 'this' of type 'Other', but it gets the emitter, of type 'EventEmitter<{ data: [string]; end: []; user: [User] }>'
 typed.on("end", function (this: Other) {})

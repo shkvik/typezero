@@ -13,7 +13,6 @@ class ExprChecker;
 class FlowChecker;
 class ClassDeclarer;
 class TypeRelations;
-class ReturnInferrer;
 class ArgumentChecker;
 class ClassValueChecker;
 class ClassMemberChecker;
@@ -52,7 +51,6 @@ private:
   FlowChecker *flowChecker = nullptr;
   ClassDeclarer *classDeclarer = nullptr;
   TypeRelations *typeRelations = nullptr;
-  ReturnInferrer *returnInferrer = nullptr;
   ArgumentChecker *argumentChecker = nullptr;
   ClassValueChecker *classValueChecker = nullptr;
   ClassMemberChecker *classMemberChecker = nullptr;

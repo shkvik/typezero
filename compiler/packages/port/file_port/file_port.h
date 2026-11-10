@@ -1,9 +1,12 @@
 #pragma once
 
 #include "compiler/load/token/token.h"
+#include "compiler/packages/port/class_members/class_members.h"
+#include "compiler/packages/port/class_shape/class_shape.h"
 #include "compiler/packages/port/edit/edit.h"
 #include "compiler/packages/port/note/note.h"
 #include "compiler/packages/port/port_context/port_context.h"
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -60,6 +63,31 @@ private:
   bool chainMayStart(size_t i) const;
   bool chainEnds(size_t i) const;
   void manual();
+  void fieldValues();
+  ClassShape classShape(size_t i) const;
+  void moveFieldValues(const ClassShape &shape);
+  size_t classMember(size_t k, size_t end, ClassMembers &members) const;
+  bool isMemberModifier(size_t i) const;
+  bool opens(size_t i) const;
+  size_t angleEnd(size_t less) const;
+  size_t typeEnd(size_t from, size_t end) const;
+  size_t valueEnd(size_t from, size_t end) const;
+  bool continuesType(size_t i) const;
+  bool continuesValue(size_t i) const;
+  bool isFunctionValue(size_t from, size_t to) const;
+  std::string valueType(size_t from, size_t to) const;
+  std::string newType(size_t from, size_t to) const;
+  llvm::StringSet<> parameterNames(size_t body) const;
+  bool usesAny(const FieldValue &field, const llvm::StringSet<> &names) const;
+  std::string lineBreak() const;
+  std::string lineIndent(size_t offset) const;
+  size_t lineAfter(size_t offset) const;
+  std::string fieldStatements(const std::vector<FieldValue> &fields,
+                              const std::string &indent) const;
+  std::optional<Edit> constructorEdit(size_t paren, bool extends,
+                                      const std::vector<FieldValue> &fields) const;
+  std::optional<Edit> newConstructor(size_t lastField,
+                                     const std::vector<FieldValue> &fields) const;
   void note(size_t i, const std::string &message) { notes_.push_back({at(i), message}); }
 
   std::string file_;

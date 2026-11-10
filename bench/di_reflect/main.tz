@@ -4,7 +4,12 @@
 // description, whose function checks its `this`, and Reflect.apply checks the
 // arguments against its parameters (docs/decorators.md, section 6).
 class Handler {
-  hits = 0
+  hits: int
+
+  constructor() {
+    this.hits = 0
+  }
+
   handle(n: int) {
     this.hits += n
     return this.hits

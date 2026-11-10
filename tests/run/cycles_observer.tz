@@ -5,9 +5,12 @@
 type Listener = (value: int) => void
 
 class Subject {
-  listeners: Listener[] = []
-  value = 0
-  constructor(public name: string) {}
+  listeners: Listener[]
+  value: int
+  constructor(public name: string) {
+    this.listeners = []
+    this.value = 0
+  }
   subscribe(listener: Listener) {
     this.listeners.push(listener)
     return () => {
@@ -22,8 +25,9 @@ class Subject {
 }
 
 class Display {
-  shown: string[] = []
+  shown: string[]
   constructor(public subject: Subject) {
+    this.shown = []
     subject.subscribe(v => this.show(v))
   }
   show(v: int) {
@@ -32,7 +36,12 @@ class Display {
 }
 
 class Logger {
-  lines = 0
+  lines: int
+
+  constructor() {
+    this.lines = 0
+  }
+
   log(v: int) {
     this.lines += v
   }

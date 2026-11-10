@@ -23,13 +23,15 @@ class Vec {
 }
 
 class Vec3 extends Vec {
-  z = 0.0
+  z: double
   constructor(x: double, y: double, z: double) {
     super(x, y)
+    this.z = 0.0
     this.z = z
   }
   constructor(v: Vec) {
     super(v)
+    this.z = 0.0
   }
   override add(k: double) {
     return new Vec(this.x + 2 * k, this.y + 2 * k)
@@ -77,7 +79,12 @@ class Num implements Addable {
   }
 }
 class Text implements Addable {
-  name = "text"
+  name: string
+
+  constructor() {
+    this.name = "text"
+  }
+
   add(k: double) {
     return `text+${k}`
   }

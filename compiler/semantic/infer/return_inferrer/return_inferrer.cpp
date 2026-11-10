@@ -1,8 +1,6 @@
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/program/ast/ast_cloner/ast_cloner.h"
-#include "compiler/semantic/bodies/classes/class_checker/class_checker.h"
 #include "compiler/semantic/bodies/classes/class_links/class_links.h"
-#include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker.h"
 #include "compiler/semantic/bodies/iterators/generator_checker/generator_checker.h"
 #include "compiler/semantic/bodies/stmt/return_checker/return_checker.h"
@@ -13,7 +11,6 @@
 #include "compiler/semantic/generics/type_params/type_params.h"
 #include "compiler/semantic/infer/late_classes/late_classes.h"
 #include "compiler/semantic/library/async/async_checker/async_checker.h"
-#include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
@@ -24,13 +21,10 @@ namespace tz {
 
 ReturnInferrer::ReturnInferrer(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
   this->classLinks = &all.getClassLinks();
   this->typeParams = &all.getTypeParams();
-  this->exprChecker = &all.getExprChecker();
   this->lateClasses = &all.getLateClasses();
   this->asyncChecker = &all.getAsyncChecker();
-  this->classChecker = &all.getClassChecker();
   this->importBinder = &all.getImportBinder();
   this->typeRelations = &all.getTypeRelations();
   this->functionChecker = &all.getFunctionChecker();
@@ -99,7 +93,6 @@ const Type *ReturnInferrer::returnType(FuncSymbol *fn) {
 }
 
 const Type *ReturnInferrer::functionType(FuncSymbol *fn) {
-  this->resolveParams(fn);
   const Type *ret = this->returnType(fn);
   const Type *returned = ret ? ret : Type::error();
 
@@ -467,119 +460,6 @@ const Type *ReturnInferrer::unifyReturns(const FuncSymbol *fn, llvm::ArrayRef<Re
   }
 
   return type;
-}
-
-const Type *ReturnInferrer::instanceParam(FuncSymbol *fn, const Type *type) {
-  if (!type) {
-    return nullptr;
-  }
-  FunctionDecl *decl = fn->decl;
-  FuncSymbol *generic = decl->generic->sym;
-  const Type *instance = this->genericClassChecker->instanceValueType(decl->cls(), type);
-
-  return this->typeParams->substituteValue(instance, generic->typeParams, fn->typeParams);
-}
-
-ReturnInferrer::ResultParamTypeKnown ReturnInferrer::defaultType(const Param &param,
-                                                                 const Type *found) const {
-  const Type *type = found ? found : Type::error();
-  if (type->isVoid() || type->isUndefined()) {
-    std::string message = ErrorTextDefaultType::unknown(param.label());
-
-    return err(ReturnInferrerDefaultTypeError{
-        .code = ReturnInferrerDefaultTypeErrorCode::UNKNOWN_FROM_DEFAULT,
-        .message = message,
-    });
-  }
-
-  return ok(type);
-}
-
-void ReturnInferrer::resolveParams(FuncSymbol *fn) {
-  std::vector<FuncSymbol *> instances;
-  FuncSymbol *at = fn;
-  while (at->pendingParams && ReturnInferrer::isInstanceMethod(at)) {
-    at->pendingParams = false;
-    instances.push_back(at);
-    at = at->decl->generic->sym;
-  }
-  if (at->pendingParams) {
-    at->pendingParams = false;
-    this->resolveOwnParams(at);
-  }
-  for (FuncSymbol *instance : llvm::reverse(instances)) {
-    this->copyGenericParams(instance);
-  }
-}
-
-bool ReturnInferrer::isInstanceMethod(const FuncSymbol *fn) {
-  const FunctionDecl *decl = fn->decl;
-
-  return decl->generic != nullptr && decl->cls() && decl->cls()->generic();
-}
-
-void ReturnInferrer::copyGenericParams(FuncSymbol *fn) {
-  FunctionDecl *decl = fn->decl;
-  FunctionDecl *generic = decl->generic;
-  for (size_t i = 0; i < fn->params.size() && i < generic->sym->params.size(); ++i) {
-    fn->params[i] = this->instanceParam(fn, generic->sym->params[i]);
-  }
-  for (size_t i = 0; i < decl->params.size() && i < generic->params.size(); ++i) {
-    decl->params[i].declaredType = this->instanceParam(fn, generic->params[i].declaredType);
-  }
-}
-
-void ReturnInferrer::resolveOwnParams(FuncSymbol *fn) {
-  FunctionDecl *decl = fn->decl;
-  std::vector<const Type *> found(decl->params.size(), nullptr);
-  auto failed = [](const Type *type) { return type && type->isError(); };
-  for (bool report : {false, true}) {
-    if (report && llvm::none_of(found, failed)) {
-      break;
-    }
-    BodyState saved = this->enterBody(decl);
-    bool muted = this->state.getDiagnostics().setMuted(!report);
-    FunctionDecl *copy = this->freshCopy(decl);
-    this->state.getFunctionStack().enterFunction(copy);
-    if (copy->takesThis()) {
-      ClassChecker::ResultNewThisSymbol declared = this->classChecker->declareThis(copy);
-      if (declared.isErr()) {
-        this->state.getDiagnostics().error(copy->loc(), declared.error().message);
-      }
-    }
-    ClassContext &classContext = this->state.getClassContext();
-    classContext.enterClass(copy->isClosure() ? classContext.getCurrentClass() : copy->cls());
-    this->state.getScopeStack().openScope();
-    for (size_t i = 0; i < decl->params.size() && i < copy->params.size(); ++i) {
-      Param &param = copy->params[i];
-      const Type *type = decl->params[i].declaredType;
-      if (!type) {
-        Expr *value = this->exprChecker->checkExpr(param.defaultValue());
-        found[i] = value->type;
-        type = value->type;
-      }
-      this->scopes->declareVar(param.name, param.loc, type, false);
-    }
-    this->scopes->closeScope();
-    this->state.getFunctionStack().leaveFunction();
-    classContext.leaveClass();
-    this->state.getDiagnostics().setMuted(muted);
-    this->leaveBody(saved);
-  }
-
-  for (size_t i = 0; i < decl->params.size(); ++i) {
-    Param &param = decl->params[i];
-    if (param.declaredType) {
-      continue;
-    }
-    ResultParamTypeKnown known = this->defaultType(param, found[i]);
-    if (known.isErr()) {
-      this->state.getDiagnostics().error(param.loc, known.error().message);
-    }
-    const Type *type = known.isOk() ? known.value() : Type::error();
-    param.declaredType = type;
-    fn->params[i] = Type::optional(type);
-  }
 }
 
 FunctionDecl *ReturnInferrer::freshCopy(const FunctionDecl *fn) {

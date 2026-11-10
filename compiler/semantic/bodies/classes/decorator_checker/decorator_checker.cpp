@@ -6,7 +6,6 @@
 #include "compiler/semantic/bodies/stmt/stmt_checker/stmt_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/infer/late_classes/late_classes.h"
-#include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/reflect/metadata_checker/metadata_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -27,7 +26,6 @@ DecoratorChecker::DecoratorChecker(SemanticState &owner, SemanticParts &all)
   this->lateClasses = &all.getLateClasses();
   this->stmtChecker = &all.getStmtChecker();
   this->typeRelations = &all.getTypeRelations();
-  this->returnInferrer = &all.getReturnInferrer();
   this->metadataChecker = &all.getMetadataChecker();
   this->classValueChecker = &all.getClassValueChecker();
 }
@@ -151,7 +149,6 @@ bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &
   if (!sym) {
     return false;
   }
-  this->returnInferrer->resolveParams(const_cast<FuncSymbol *>(sym));
   if (sym->hasRest || llvm::is_contained(sym->params, nullptr)) {
     return false;
   }
@@ -460,7 +457,6 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
       return earlyDescriptor;
     }
     FuncSymbol *sym = method->sym;
-    this->returnInferrer->resolveParams(sym);
     const Type *ret = sym->getReturnType();
     if (!ret || ret->isError() || llvm::is_contained(sym->params, nullptr)) {
       return nullptr;
@@ -556,7 +552,6 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
   const Type *descType = nullptr;
   if (descriptor) {
     FuncSymbol *sym = method->sym;
-    this->returnInferrer->resolveParams(sym);
     const Type *ret = sym->getReturnType();
     if (!ret || ret->isError() || llvm::is_contained(sym->params, nullptr)) {
       return;

@@ -23,10 +23,11 @@
 @Table("users")                                      // класс
 class User {
   @Column name: string                               // поле
-  @Column age: number = 0
+  @Column age: number
 
   constructor(@Inject("DEFAULT_NAME") name: string) { // параметр конструктора
     this.name = name
+    this.age = 0
   }
 
   @Log                                               // метод: обернуть
@@ -130,7 +131,11 @@ function Registered<T extends Constructor>(cls: T) {
 let nextId = 1
 function WithId<T extends Constructor>(cls: T) {
   return class extends cls {
-    id = nextId++
+    id: int
+    constructor(...args: ConstructorArgs) {
+      super(...args)
+      this.id = nextId++
+    }
   }
 }
 

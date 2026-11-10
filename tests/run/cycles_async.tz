@@ -3,8 +3,14 @@
 // which knows them; timers whose callbacks hold the objects; promises of
 // objects in cycles.
 class Scheduler {
-  tasks: Task[] = []
-  done: string[] = []
+  tasks: Task[]
+  done: string[]
+
+  constructor() {
+    this.tasks = []
+    this.done = []
+  }
+
   add(name: string, delay: int) {
     const task = new Task(name, this)
     this.tasks.push(task)

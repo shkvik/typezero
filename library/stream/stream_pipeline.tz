@@ -80,15 +80,24 @@ export function streamVoidSinkStage<A>(
 
 class PipelineState {
   error?: StreamFault
-  value: unknown = undefined
-  destroys: ((err: StreamFault | undefined) => void)[] = []
-  lastStreamCleanup: (() => void)[] = []
-  finishCount: int = 0
-  constructor(public callback: ((err: StreamFault | undefined, value: unknown) => void) | undefined) {}
+  value: unknown
+  destroys: ((err: StreamFault | undefined) => void)[]
+  lastStreamCleanup: (() => void)[]
+  finishCount: int
+  constructor(public callback: ((err: StreamFault | undefined, value: unknown) => void) | undefined) {
+    this.value = undefined
+    this.destroys = []
+    this.lastStreamCleanup = []
+    this.finishCount = 0
+  }
 }
 
 class PipelineDestroyer {
-  finished = false
+  finished: boolean
+
+  constructor() {
+    this.finished = false
+  }
 }
 
 function finishImpl(ps: PipelineState, err: StreamFault | undefined, final: boolean) {

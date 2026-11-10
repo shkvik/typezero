@@ -10,7 +10,12 @@ class ListNode {
 class List {
   head?: ListNode
   tail?: ListNode
-  length = 0
+  length: int
+
+  constructor() {
+    this.length = 0
+  }
+
   push(value: int) {
     const node = new ListNode(value)
     if (this.tail) {

@@ -11,9 +11,11 @@ export class User {
   @Column age: int | string
   @Column role: "admin" | "guest"
   @Column avatar: Uint8Array
-  @Column pending: Promise<string> | undefined = undefined
-  failures = 1
+  @Column pending: Promise<string> | undefined
+  failures: int
   constructor(name: string, age: int | string) {
+    this.pending = undefined
+    this.failures = 1
     this.name = name
     this.age = age
     this.role = "guest"
@@ -38,7 +40,12 @@ export class User {
 
 @Entity("admins")
 export class Admin extends User {
-  @Column level: int = 1
+  @Column level: int
+
+  constructor(name: string, age: int | string) {
+    super(name, age)
+    this.level = 1
+  }
 
   @Log
   override greet(greeting: string): string {

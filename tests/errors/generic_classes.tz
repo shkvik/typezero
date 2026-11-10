@@ -45,7 +45,7 @@ const n2: Num<string> = new Num(1)
 class Z<T> { constructor(x: T) {} }
 // expect-error: expected 1 argument, but got 0
 const z = new Z()
-class Empty<T> { items: T[] = [] }
+class Empty<T> { items: T[]; constructor() { this.items = [] } }
 // expect-error: cannot infer type parameter 'T' of 'new Empty': nothing in the call says what it is; give it, e.g. 'new Empty<int>(...)'
 const e = new Empty()
 // expect-error: 'Show' needs 1 type argument, e.g. 'Show<int>'

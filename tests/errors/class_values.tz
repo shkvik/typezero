@@ -37,7 +37,11 @@ function NotAClass(x: int) {
 // variables of the function around it.
 function Tag<B extends Constructor>(Base: B, tag: string) {
   return class extends Base {
-    t = tag
+    t: string
+    constructor(...args: ConstructorArgs) {
+      super(...args)
+      this.t = tag
+    }
   }
 }
 // expect-error: cannot call 'Tag' with B = typeof User: a class expression cannot use 'tag', a variable of the function around it
@@ -76,7 +80,11 @@ class Kept {}
 let ids = 1
 function WithId<T extends Constructor>(cls: T) {
   return class extends cls {
-    id = ids++
+    id: int
+    constructor(...args: ConstructorArgs) {
+      super(...args)
+      this.id = ids++
+    }
   }
 }
 @WithId

@@ -154,7 +154,6 @@ GenericInstantiator::paramsMeaningful(const FuncSymbol *generic, llvm::ArrayRef<
 Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic,
                                              const Signature *expected) {
   name->type = Type::error();
-  this->returnInferrer->resolveParams(generic);
   const Type *ret = generic->getReturnType();
   if (this->returnsOwnClass(generic, ret)) {
     ret = nullptr;

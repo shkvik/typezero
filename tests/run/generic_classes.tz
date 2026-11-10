@@ -19,11 +19,14 @@ console.log(d.value / 2, new Box<string[]>([]).value.length)
 const nested = new Box(new Box([1, 2]))
 console.log(nested, nested.get().get().length)
 
-// Fields with initial values, a constructor, and the type of `this`.
+// A field the constructor sets, a static one with a value, and the type of `this`.
 class Stack<T> {
-  items: T[] = []
+  items: T[]
   static created = 0
-  constructor() { Stack.created++ }
+  constructor() {
+    this.items = []
+    Stack.created++
+  }
   push(x: T) { this.items.push(x); return this }
   pop(): T | undefined { return this.items.pop() }
   peek() { return this.items.length > 0 ? this.items[this.items.length - 1] : undefined }
@@ -84,7 +87,12 @@ interface Repo<T> {
 }
 interface User { name: string; age: int }
 class MemRepo<T> implements Repo<T> {
-  private items: T[] = []
+  private items: T[]
+
+  constructor() {
+    this.items = []
+  }
+
   add(x: T) { this.items.push(x); return this }
   get(id: int) { return this.items[id] }
   all() { return this.items }
@@ -114,7 +122,12 @@ for (const v of values) {
 
 // Private members are the class's, whatever the types of the instance.
 class Wallet<T> {
-  private coins: T[] = []
+  private coins: T[]
+
+  constructor() {
+    this.coins = []
+  }
+
   add(x: T) { this.coins.push(x) }
   merge(other: Wallet<T>) { for (const x of other.coins) this.coins.push(x) }
   count() { return this.coins.length }
@@ -152,8 +165,10 @@ const shapes: Shape<string>[] = [new Square(2), new Circle("circle", 1)]
 for (const sh of shapes) console.log(sh.describe())
 console.log(new Circle(7, 2).describe())
 class TreeNode<T> {
-  children: TreeNode<T>[] = []
-  constructor(public value: T) {}
+  children: TreeNode<T>[]
+  constructor(public value: T) {
+    this.children = []
+  }
   add(v: T) {
     const n = new TreeNode(v)
     this.children.push(n)

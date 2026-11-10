@@ -29,7 +29,12 @@ export function words(text: string): string[] {
 }
 
 export class Counter<T> {
-  counts = new Map<T, int>()
+  counts: Map<T, int>
+
+  constructor() {
+    this.counts = new Map<T, int>()
+  }
+
   add(x: T): int {
     const n = (this.counts.get(x) ?? 0) + 1
     this.counts.set(x, n)

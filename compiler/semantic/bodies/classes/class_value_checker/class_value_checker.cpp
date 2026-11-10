@@ -5,7 +5,6 @@
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
-#include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/reflect/reflect_checker/reflect_checker.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
@@ -24,7 +23,6 @@ ClassValueChecker::ClassValueChecker(SemanticState &owner, SemanticParts &all)
   this->staticChecker = &all.getStaticChecker();
   this->typeRelations = &all.getTypeRelations();
   this->reflectChecker = &all.getReflectChecker();
-  this->returnInferrer = &all.getReturnInferrer();
   this->methodCallChecker = &all.getMethodCallChecker();
 }
 
@@ -124,7 +122,6 @@ ClassValueChecker::ResultConstructorArgs ClassValueChecker::constructorArgs() {
         .message = message,
     });
   }
-  this->returnInferrer->resolveParams(sym);
   if (llvm::is_contained(sym->params, nullptr)) {
     return ok(Type::error());
   }

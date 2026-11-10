@@ -28,7 +28,6 @@
 #include "compiler/semantic/generics/arg_list_checker/arg_list_checker.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/generics/type_arg_inferrer/type_arg_inferrer.h"
-#include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/async/promise_checker/promise_checker.h"
 #include "compiler/semantic/library/async/promise_static_checker/promise_static_checker.h"
 #include "compiler/semantic/library/async/timer_checker/timer_checker.h"
@@ -111,7 +110,6 @@ CallChecker::CallChecker(SemanticState &owner, SemanticParts &all)
   this->inheritChecker = &all.getInheritChecker();
   this->processChecker = &all.getProcessChecker();
   this->promiseChecker = &all.getPromiseChecker();
-  this->returnInferrer = &all.getReturnInferrer();
   this->streamPipeline = &all.getStreamPipeline();
   this->unknownChecker = &all.getUnknownChecker();
   this->weakRefChecker = &all.getWeakRefChecker();
@@ -824,7 +822,6 @@ Expr *CallChecker::checkDirectCall(CallExpr *call, FuncSymbol *func, llvm::SMLoc
   if (usable.isErr()) {
     this->state.getDiagnostics().error(loc, usable.error().message);
   }
-  this->returnInferrer->resolveParams(func);
   call->target = FunctionCall{.func = func};
   call->type = func->getReturnType();
 

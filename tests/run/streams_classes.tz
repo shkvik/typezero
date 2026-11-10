@@ -3,14 +3,15 @@
 // _transform in node): they take the parameters node passes, whose types may
 // be left out, as may the last of them (`onRead()`), as in node. pushEnd()
 // ends a stream, as push(null) does in node: the output is node's.
-import { Duplex, Readable, Transform, Writable } from "node:stream"
+import { Duplex, Readable, ReadableOptions, Transform, Writable } from "node:stream"
 import { finished, pipeline } from "node:stream/promises"
 
 class Counter extends Readable {
-  private n = 0
+  private n: int
   limit: int
   constructor(limit: int) {
     super()
+    this.n = 0
     this.limit = limit
   }
   onRead() {
@@ -31,7 +32,13 @@ class Upper extends Transform {
 }
 
 class Collect extends Writable {
-  parts: string[] = []
+  parts: string[]
+
+  constructor() {
+    super()
+    this.parts = []
+  }
+
   onWrite(chunk: Buffer, encoding: string, callback: (error?: StreamError) => void) {
     this.parts.push(chunk.toString())
     callback()
@@ -67,7 +74,13 @@ console.log("lines", linesEnded.isOk(), (await finished(lines)).isOk())
 
 // onRead(size: number), as the types of node have it: the highWaterMark.
 class Sized extends Readable {
-  sent = 0
+  sent: int
+
+  constructor(options?: ReadableOptions) {
+    super(options)
+    this.sent = 0
+  }
+
   onRead(size: number) {
     if (this.sent > 0) {
       this.pushEnd()

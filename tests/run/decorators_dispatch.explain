@@ -1,64 +1,64 @@
 top-level code
   start
-    reads  a variable the compiler made (line 22)
-    writes elements of routes (lines 22 in Route, 29 in Route, 34 in Route)
-    writes the length of routes (lines 22 in Route, 29 in Route, 34 in Route)
-    writes the metadata (lines 22, 29, 34)
-    reads  the method Counter.add as decorated (line 22)
-    writes the method Counter.add as decorated (line 22)
-    reads  value of any MethodDescriptor<[int], Promise<int>> (lines 22, 29, 34)
-    reads  a variable the compiler made (line 29)
-    reads  the method Counter.peek as decorated (line 29)
-    writes the method Counter.peek as decorated (line 29)
-    reads  a variable the compiler made (line 34)
-    reads  the method Counter.echo as decorated (line 34)
-    writes the method Counter.echo as decorated (line 34)
-    reads  elements of ids (line 56)
-    writes elements of ids (line 55)
-    writes the length of ids (line 55)
-    in order with request after await at line 50: elements of routes
-    in order: lines 22-34
+    reads  a variable the compiler made (line 26)
+    writes elements of routes (lines 26 in Route, 29 in Route, 34 in Route)
+    writes the length of routes (lines 26 in Route, 29 in Route, 34 in Route)
+    writes the metadata (lines 26, 33, 38)
+    reads  the method Counter.add as decorated (line 26)
+    writes the method Counter.add as decorated (line 26)
+    reads  value of any MethodDescriptor<[int], Promise<int>> (lines 26, 33, 38)
+    reads  a variable the compiler made (line 33)
+    reads  the method Counter.peek as decorated (line 33)
+    writes the method Counter.peek as decorated (line 33)
+    reads  a variable the compiler made (line 38)
+    reads  the method Counter.echo as decorated (line 38)
+    writes the method Counter.echo as decorated (line 38)
+    reads  elements of ids (line 60)
+    writes elements of ids (line 59)
+    writes the length of ids (line 59)
+    in order with request after await at line 54: elements of routes
+    in order: lines 26-38
     waits for its turn inside: line 12 in Route
-  after await at line 56
-    writes stdout (line 57)
-    reads  store.counts (line 57)
-    reads  entries of any Map<string, int> (line 57)
-    reads  elements of any int[] (line 57)
+  after await at line 60
+    writes stdout (line 61)
+    reads  store.counts (line 61)
+    reads  entries of any Map<string, int> (line 61)
+    reads  elements of any int[] (line 61)
     runs alone
 
-async method Counter.add, line 23
+async method Counter.add, line 27
   start: runs inside its caller
-    reads  store.counts (lines 24, 25)
-    reads  entries of any Map<string, int> (line 24)
-    writes entries of any Map<string, int> (line 25)
+    reads  store.counts (lines 28, 29)
+    reads  entries of any Map<string, int> (line 28)
+    writes entries of any Map<string, int> (line 29)
 
-async method Counter.peek, line 30
+async method Counter.peek, line 34
   start: runs inside its caller
-    reads  store.counts (line 31)
-    reads  entries of any Map<string, int> (line 31)
+    reads  store.counts (line 35)
+    reads  entries of any Map<string, int> (line 35)
 
-async method Counter.echo, line 35
+async method Counter.echo, line 39
   start: runs inside its caller
 
-async function dispatch, line 42
+async function dispatch, line 46
   start: runs inside its caller
-    reads  elements of routes (line 43)
-    reads  name of any Route (line 44)
-    reads  call of any Route (line 44)
-    reads  entries of any Map<string, int> (line 44 in call)
-    writes entries of any Map<string, int> (line 44 in call)
-    reads  store.counts (line 44 in call)
+    reads  elements of routes (line 47)
+    reads  name of any Route (line 48)
+    reads  call of any Route (line 48)
+    reads  entries of any Map<string, int> (line 48 in call)
+    writes entries of any Map<string, int> (line 48 in call)
+    reads  store.counts (line 48 in call)
 
-async function request, line 49
+async function request, line 53
   start: runs inside its caller
-  after await at line 50 (in the tasks request(i) at line 56)
-    reads  call of any Route (line 51 in dispatch)
-    reads  elements of routes (line 51 in dispatch)
-    reads  entries of any Map<string, int> (line 51 in dispatch)
-    writes entries of any Map<string, int> (line 51 in dispatch)
-    reads  name of any Route (line 51 in dispatch)
-    reads  store.counts (line 51 in dispatch)
+  after await at line 54 (in the tasks request(i) at line 60)
+    reads  call of any Route (line 55 in dispatch)
+    reads  elements of routes (line 55 in dispatch)
+    reads  entries of any Map<string, int> (line 55 in dispatch)
+    writes entries of any Map<string, int> (line 55 in dispatch)
+    reads  name of any Route (line 55 in dispatch)
+    reads  store.counts (line 55 in dispatch)
     in order with the same piece in other tasks: entries of any Map<string, int>
     in order with the start of the top-level code: elements of routes
-    in order: line 51
-    waits for its turn inside: lines 24 in Counter.add, 25 in Counter.add, 31 in Counter.peek, 43 in dispatch
+    in order: line 55
+    waits for its turn inside: lines 28 in Counter.add, 25 in Counter.add, 31 in Counter.peek, 43 in dispatch

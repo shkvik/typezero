@@ -25,7 +25,13 @@ t.on("change", (c) => console.log("text", c.value.toUpperCase()))
 t.set("b")
 
 class Logged extends EventEmitter<{ data: [n: int] }> {
-  log: string[] = []
+  log: string[]
+
+  constructor() {
+    super()
+    this.log = []
+  }
+
   send(n: int) {
     this.log.push(`send ${n}`)
     return super.emit("data", n)
@@ -37,7 +43,11 @@ console.log(l.send(5), l.log)
 
 type AppEvents = { start: [at: double] }
 class App {
-  bus: EventEmitter<AppEvents> = new EventEmitter()
+  bus: EventEmitter<AppEvents>
+
+  constructor() {
+    this.bus = new EventEmitter()
+  }
 }
 const app = new App()
 app.bus.on("start", (at) => console.log("start", at))
@@ -58,7 +68,12 @@ o.emit("constructor", 3)
 console.log(o.emit("toString"))
 
 class Server extends EventEmitter<{ close: [code: int] }> {
-  name = "srv"
+  name: string
+
+  constructor() {
+    super()
+    this.name = "srv"
+  }
 }
 const server = new Server()
 server.on("close", function (this: Server, code) {

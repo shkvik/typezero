@@ -279,17 +279,22 @@ function nop(error?: StreamFault) {
 
 class ReadableState {
   bits: int;
-  buffer: unknown[] = [];
-  bufferIndex: int = 0;
-  pipes: Stream[] = [];
+  buffer: unknown[];
+  bufferIndex: int;
+  pipes: Stream[];
   awaitDrainWriter?: Stream;
-  awaitDrainWriters = new Set<Stream>();
+  awaitDrainWriters: Set<Stream>;
   decoder?: StringDecoder;
   encoding?: string;
-  defaultEncoding = "utf8";
+  defaultEncoding: string;
   errored?: StreamFault;
   readable?: boolean;
   constructor(bits: int) {
+    this.buffer = [];
+    this.bufferIndex = 0;
+    this.pipes = [];
+    this.awaitDrainWriters = new Set<Stream>();
+    this.defaultEncoding = "utf8";
     this.bits = bits;
   }
 }
@@ -301,23 +306,32 @@ export interface BufferedWrite {
 }
 
 class AfterWriteTick {
-  count: int = 1;
-  constructor(readonly cb: FaultCallback) {}
+  count: int;
+  constructor(readonly cb: FaultCallback) {
+    this.count = 1;
+  }
 }
 
 class WritableState {
   bits: int;
-  writelen: int = 0;
-  buffered: (BufferedWrite | undefined)[] = [];
-  bufferedIndex: int = 0;
-  pendingcb: int = 0;
-  writecb: FaultCallback = nop;
+  writelen: int;
+  buffered: (BufferedWrite | undefined)[];
+  bufferedIndex: int;
+  pendingcb: int;
+  writecb: FaultCallback;
   afterWriteTickInfo?: AfterWriteTick;
-  onFinished: FaultCallback[] = [];
+  onFinished: FaultCallback[];
   errored?: StreamFault;
-  defaultEncoding = "utf8";
+  defaultEncoding: string;
   writable?: boolean;
   constructor(bits: int) {
+    this.writelen = 0;
+    this.buffered = [];
+    this.bufferedIndex = 0;
+    this.pendingcb = 0;
+    this.writecb = nop;
+    this.onFinished = [];
+    this.defaultEncoding = "utf8";
     this.bits = bits;
   }
 }
@@ -364,17 +378,31 @@ interface SideOptions {
 class StreamSetup {
   readable?: SideOptions;
   writable?: SideOptions;
-  duplex = false;
-  allowHalfOpen = true;
-  readableOff = false;
-  writableOff = false;
-  hasConstruct = false;
-  hasWritev = false;
-  hasFinal = false;
-  hasFlush = false;
-  transform = false;
-  transformsWrites = false;
-  transformsFinal = false;
+  duplex: boolean;
+  allowHalfOpen: boolean;
+  readableOff: boolean;
+  writableOff: boolean;
+  hasConstruct: boolean;
+  hasWritev: boolean;
+  hasFinal: boolean;
+  hasFlush: boolean;
+  transform: boolean;
+  transformsWrites: boolean;
+  transformsFinal: boolean;
+
+  constructor() {
+    this.duplex = false;
+    this.allowHalfOpen = true;
+    this.readableOff = false;
+    this.writableOff = false;
+    this.hasConstruct = false;
+    this.hasWritev = false;
+    this.hasFinal = false;
+    this.hasFlush = false;
+    this.transform = false;
+    this.transformsWrites = false;
+    this.transformsFinal = false;
+  }
 }
 
 export interface FinishedOptions {
@@ -385,15 +413,20 @@ export interface FinishedOptions {
 }
 
 class Eos {
-  willEmitClose = false;
-  writableFinished = false;
-  readableFinished = false;
-  closed = false;
+  willEmitClose: boolean;
+  writableFinished: boolean;
+  readableFinished: boolean;
+  closed: boolean;
   constructor(
     readonly readable: boolean,
     readonly writable: boolean,
     public callback: FaultCallback,
-  ) {}
+  ) {
+    this.willEmitClose = false;
+    this.writableFinished = false;
+    this.readableFinished = false;
+    this.closed = false;
+  }
 
   call(err?: StreamFault) {
     const callback = this.callback;
@@ -403,9 +436,14 @@ class Eos {
 }
 
 class IteratorWait {
-  callback: () => void = noWait;
-  ended = false;
+  callback: () => void;
+  ended: boolean;
   error?: StreamFault;
+
+  constructor() {
+    this.callback = noWait;
+    this.ended = false;
+  }
 
   wake() {
     const callback = this.callback;
@@ -423,12 +461,17 @@ class Composition {
   onfinish?: FaultCallback;
   onreadable?: () => void;
   onclose?: FaultCallback;
-  closing = true;
-  listeners: (() => void)[] = [];
+  closing: boolean;
+  listeners: (() => void)[];
   write?: (chunk: unknown, encoding: string, callback: FaultCallback) => void;
   final?: (callback: FaultCallback) => void;
   read?: (self: Stream) => void;
   destroy?: (error: StreamFault | undefined, callback: FaultCallback) => void;
+
+  constructor() {
+    this.closing = true;
+    this.listeners = [];
+  }
 }
 
 class ComposedDuplex<W, R> extends Duplex<W, R> {
@@ -661,34 +704,54 @@ function callFinishedCallbacks(
 }
 
 export class Stream extends EventEmitterBase {
-  private halfOpen = true;
-  private readHwm: int = 0;
-  private readLength: int = 0;
-  private readObjects = false;
-  private corked: int = 0;
-  private writeHwm: int = 0;
-  private writeLength: int = 0;
-  private writeObjects = false;
+  private halfOpen: boolean;
+  private readHwm: int;
+  private readLength: int;
+  private readObjects: boolean;
+  private corked: int;
+  private writeHwm: int;
+  private writeLength: int;
+  private writeObjects: boolean;
   private readableState?: ReadableState;
   private writableState?: WritableState;
-  private ready = false;
-  private constructWaits: (() => void)[] = [];
-  private destroyWaits: ((err: StreamFault | undefined) => void)[] = [];
-  private hasConstruct = false;
-  private hasWritev = false;
-  private hasFinal = false;
-  private hasFlush = false;
-  private transforming = false;
-  private transformsWrites = false;
-  private transformsFinal = false;
+  private ready: boolean;
+  private constructWaits: (() => void)[];
+  private destroyWaits: ((err: StreamFault | undefined) => void)[];
+  private hasConstruct: boolean;
+  private hasWritev: boolean;
+  private hasFinal: boolean;
+  private hasFlush: boolean;
+  private transforming: boolean;
+  private transformsWrites: boolean;
+  private transformsFinal: boolean;
   private transformCallback?: FaultCallback;
   private transformWritten?: FaultCallback;
-  private transformLength = 0;
-  private transformCount = 0;
+  private transformLength: int;
+  private transformCount: int;
   private weakSelf?: WeakRef<Stream>;
 
   constructor() {
     super();
+    this.halfOpen = true;
+    this.readHwm = 0;
+    this.readLength = 0;
+    this.readObjects = false;
+    this.corked = 0;
+    this.writeHwm = 0;
+    this.writeLength = 0;
+    this.writeObjects = false;
+    this.ready = false;
+    this.constructWaits = [];
+    this.destroyWaits = [];
+    this.hasConstruct = false;
+    this.hasWritev = false;
+    this.hasFinal = false;
+    this.hasFlush = false;
+    this.transforming = false;
+    this.transformsWrites = false;
+    this.transformsFinal = false;
+    this.transformLength = 0;
+    this.transformCount = 0;
   }
 
   public allowHalfOpen(): boolean {

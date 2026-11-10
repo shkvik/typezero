@@ -3,8 +3,9 @@
 // object goes; the same interval twice is one, with the new period. A
 // setTimeout that sets itself again is an interval too.
 class Session {
-  ticks = 0
+  ticks: int
   constructor(readonly name: string) {
+    this.ticks = 0
     setInterval(this.refresh, 5)
   }
   refresh() {
@@ -19,7 +20,12 @@ function login(name: string) {
 }
 
 class Feed {
-  pulls = 0
+  pulls: int
+
+  constructor() {
+    this.pulls = 0
+  }
+
   start() {
     setInterval(() => this.pull(), 5)
   }
@@ -29,8 +35,9 @@ class Feed {
 }
 
 class Ticker {
-  ticks = 0
+  ticks: int
   constructor() {
+    this.ticks = 0
     setTimeout(this.tick, 5)
   }
   tick() {

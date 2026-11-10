@@ -7,8 +7,9 @@ import { tmpdir } from "node:os"
 export class Store {
   dir: string
   // What each file held when it was last written, shared with the caller.
-  written = new Map<string, Uint8Array>()
+  written: Map<string, Uint8Array>
   constructor() {
+    this.written = new Map<string, Uint8Array>()
     this.dir = must(mkdtempSync(join(tmpdir(), "tz-bytes-mix-")))
   }
   path(name: string): string {

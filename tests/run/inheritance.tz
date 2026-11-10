@@ -10,9 +10,11 @@ class Animal {
   static create(name: string) {
     return new Animal(name)
   }
-  legs = (log.push("Animal.legs"), 4)
-  protected sound = "..."
+  legs: int
+  protected sound: string
   constructor(public name: string) {
+    this.legs = (log.push("Animal.legs"), 4)
+    this.sound = "..."
     log.push(`Animal(${name})`)
     Animal.created++
   }
@@ -25,10 +27,11 @@ class Animal {
 }
 
 class Dog extends Animal {
-  tricks: string[] = (log.push("Dog.tricks"), [])
+  tricks: string[]
   constructor(name: string, public breed: string) {
     log.push("Dog before super")
     super(name)
+    this.tricks = (log.push("Dog.tricks"), [])
     log.push("Dog after super")
     this.sound = "woof"
   }
@@ -48,9 +51,10 @@ class Puppy extends Dog {
 }
 
 class Bird extends Animal {
-  legs = 2
+  legs: int
   constructor(name: string) {
     super(name)
+    this.legs = 2
     this.sound = "tweet"
   }
 }
@@ -82,7 +86,12 @@ console.log(pick(true).name, pick(false).describe())
 
 // A method overridden down the chain, called from a method up the chain.
 class Counter {
-  count = 0
+  count: int
+
+  constructor() {
+    this.count = 0
+  }
+
   step() {
     return 1
   }
@@ -103,7 +112,5 @@ for (const c of counters) console.log(c.tick().tick().count)
 class Base {
   constructor(public id: int, public label: string) {}
 }
-class Plain extends Base {
-  extra = "e"
-}
+class Plain extends Base {}
 console.log(new Plain(7, "seven"))

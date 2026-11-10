@@ -5,7 +5,12 @@ import { EventEmitter } from "node:events"
 import { readFile } from "node:fs/promises"
 
 export class Jobs extends EventEmitter {
-  started = 0
+  started: int
+
+  constructor() {
+    super()
+    this.started = 0
+  }
 
   async read(name: string, path: string) {
     this.started++

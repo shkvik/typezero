@@ -438,8 +438,7 @@ std::vector<ScanExpr> DestinationScanner::newParts(const NewExpr *create, ScanRu
   const FuncSymbol *ctor = nullptr;
   if (ClassDecl *cls =
           run.scan.isHidden(create->name) ? nullptr : this->scopes->lookup(create->name).cls()) {
-    if (cls->constructors.size() == 1 && cls->constructors[0]->sym &&
-        !cls->constructors[0]->sym->pendingParams) {
+    if (cls->constructors.size() == 1 && cls->constructors[0]->sym) {
       ctor = cls->constructors[0]->sym;
     }
   }
@@ -578,7 +577,7 @@ std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,
     if (entry.var() && entry.var()->function()) {
       func = entry.var()->function()->sym;
     }
-    if (func && !func->pendingParams) {
+    if (func) {
       return spread(func->params, func->hasRest);
     }
     if (entry.var() && entry.var()->type && entry.var()->type->isFunction()) {
@@ -590,7 +589,7 @@ std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,
     auto variant = [&](const ClassDecl *cls, bool isStatic) -> std::vector<const Type *> {
       std::vector<FunctionDecl *> methods =
           ClassDeclarer::methodsNamed(cls, member->name, isStatic);
-      if (methods.size() != 1 || !methods[0]->sym || methods[0]->sym->pendingParams) {
+      if (methods.size() != 1 || !methods[0]->sym) {
         return {};
       }
 

@@ -70,7 +70,13 @@ console.log(h.emit("error", { code: "E_NOW", message: "now handled" }))
 // A class of its own, whose methods emit; on() gives the object back as
 // what it is, so calls chain.
 class Server extends EventEmitter<{ listening: [port: double]; close: [] }> {
-  port: double = 0
+  port: double
+
+  constructor() {
+    super()
+    this.port = 0
+  }
+
   listen(port: double) {
     this.port = port
     this.emit("listening", port)

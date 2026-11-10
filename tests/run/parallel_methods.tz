@@ -4,9 +4,10 @@
 // (an array may hold it twice) keep node's order (docs/async.md, section 4).
 class Account {
   name: string
-  balance = 0
+  balance: int
 
   constructor(name: string) {
+    this.balance = 0
     this.name = name
   }
 

@@ -3,7 +3,6 @@
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/declare/module_declarer/module_declarer.h"
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
-#include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/Support/Path.h"
@@ -19,7 +18,6 @@ DeclarationChecker::DeclarationChecker(SemanticState &owner, SemanticParts &all)
   this->typeResolver = &all.getTypeResolver();
   this->classDeclarer = &all.getClassDeclarer();
   this->moduleDeclarer = &all.getModuleDeclarer();
-  this->returnInferrer = &all.getReturnInferrer();
   this->topLevelChecker = &all.getTopLevelChecker();
 }
 
@@ -398,7 +396,6 @@ void DeclarationChecker::checkFunction(FunctionDecl *declared, const Exported &e
     }
     return;
   }
-  this->returnInferrer->resolveParams(entry.func());
   if (!this->sameParams(declared->params, fn, declared->loc(), what)) {
     return;
   }
@@ -548,7 +545,6 @@ void DeclarationChecker::checkMethod(const DeclaredMember &member, const Functio
     }
     return;
   }
-  this->returnInferrer->resolveParams(fn->sym);
   bool constructor = member.form.is<DeclaredConstructor>();
   if (!this->sameParams(declared->params, fn, member.loc, what) || constructor) {
     return;

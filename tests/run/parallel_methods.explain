@@ -1,33 +1,33 @@
 top-level code
   start
-    reads  elements of any int[] (line 23 in Account.deposit)
+    reads  elements of any int[] (line 24 in Account.deposit)
     parallel
-  after await at line 23
-    writes stdout (line 24)
-    reads  alice.balance (line 24)
-    reads  bob.balance (line 24)
-    reads  elements of accounts (line 27)
-    reads  elements of any int[] (line 27 in the arrow at line 27)
-    in order with Account.deposit after await at line 15 in the tasks account.deposit([10]) at line 27: alice.balance, bob.balance
-    in order: line 24
-  after await at line 27
-    writes stdout (line 28)
-    reads  alice.balance (line 28)
-    reads  bob.balance (line 28)
+  after await at line 24
+    writes stdout (line 25)
+    reads  alice.balance (line 25)
+    reads  bob.balance (line 25)
+    reads  elements of accounts (line 28)
+    reads  elements of any int[] (line 28 in the arrow at line 28)
+    in order with Account.deposit after await at line 16 in the tasks account.deposit([10]) at line 28: alice.balance, bob.balance
+    in order: line 25
+  after await at line 28
+    writes stdout (line 29)
+    reads  alice.balance (line 29)
+    reads  bob.balance (line 29)
     runs alone
 
-async method Account.deposit, line 13
+async method Account.deposit, line 14
   start: runs inside its caller
-    reads  elements of any int[] (line 14)
-  after await at line 15
-    reads  elements of any int[] (line 14)
-    reads  this.balance (line 16)
-    writes this.balance (line 16)
-    in the task alice.deposit([1, 2]) at line 23:
+    reads  elements of any int[] (line 15)
+  after await at line 16
+    reads  elements of any int[] (line 15)
+    reads  this.balance (line 17)
+    writes this.balance (line 17)
+    in the task alice.deposit([1, 2]) at line 24:
       parallel
-    in the task bob.deposit([3]) at line 23:
+    in the task bob.deposit([3]) at line 24:
       parallel
-    in the tasks account.deposit([10]) at line 27:
+    in the tasks account.deposit([10]) at line 28:
       in order with the same piece in other tasks: balance of any Account
-      in order with the top-level code after await at line 23: balance of any Account
-      in order: line 16
+      in order with the top-level code after await at line 24: balance of any Account
+      in order: line 17

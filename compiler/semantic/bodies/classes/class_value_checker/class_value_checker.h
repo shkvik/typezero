@@ -13,7 +13,6 @@ class TypeResolver;
 class StaticChecker;
 class TypeRelations;
 class ReflectChecker;
-class ReturnInferrer;
 class MethodCallChecker;
 
 class ClassValueChecker {
@@ -55,7 +54,6 @@ private:
   StaticChecker *staticChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
   ReflectChecker *reflectChecker = nullptr;
-  ReturnInferrer *returnInferrer = nullptr;
   MethodCallChecker *methodCallChecker = nullptr;
 };
 

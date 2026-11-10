@@ -461,8 +461,7 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
   field.decorators = std::move(decorators);
   if (isAbstract) {
     this->parser.cursor().report(
-        loc, "abstract fields are not supported: declare the field in the class that sets it, "
-             "or give it a value here");
+        loc, "abstract fields are not supported: declare the field in the class that sets it");
   }
   if (this->parser.cursor().accept(Tok::Question)) {
     field.presence = FieldPresence::OPTIONAL;

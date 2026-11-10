@@ -29,7 +29,7 @@ class Shape {
   move(public x: int) {}
   // expect-error: abstract method 'fill' cannot have a body: the classes that extend 'Shape' give it one; to give it one here, drop 'abstract'
   abstract fill() {}
-  // expect-error: abstract fields are not supported: declare the field in the class that sets it, or give it a value here
+  // expect-error: abstract fields are not supported: declare the field in the class that sets it
   abstract color: string
   // expect-error: a static method cannot be 'abstract': it belongs to the class itself
   static abstract make(): Shape

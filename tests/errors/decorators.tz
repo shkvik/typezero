@@ -17,9 +17,9 @@ function Replace(cls: object) {
 
 class Wrong {
   // expect-error: 'Log' cannot decorate a field: it takes 3 arguments, and a decorator of a field gets 2, the class and the name of the field
-  @Log count = 0
+  @Log count: int
   // expect-error: 'Inject' cannot decorate a field: it takes 3 arguments
-  @Inject name = ""
+  @Inject name: string
   // expect-error: 'Inject' takes the position of a parameter: it decorates parameters, not methods
   @Inject run() {}
   // expect-error: 'Log' takes the descriptor of a method: it decorates methods, not parameters
@@ -27,7 +27,7 @@ class Wrong {
     return steps
   }
   // expect-error: a decorator cannot decorate an 'accessor' field: in tz it is an ordinary field
-  @Column accessor size = 1
+  @Column accessor size: int
 }
 
 // expect-error: 'Column' cannot decorate a class: it takes 2 arguments, and a decorator of a class gets 1, the class
@@ -52,7 +52,7 @@ function plain(@Inject x: int) {
 class Clash {
   @Column static id = 0
   // expect-error: both the static member 'id' and the member 'id' of 'Clash' are decorated, and the records of '@Column' for both would be one
-  @Column id = 1
+  @Column id: int
   @Log size(n: int) { return n }
   // expect-error: two variants of 'size' of 'Clash' are decorated, and the records 'design:*' the compiler writes for both would be one
   @Column size(s: string) { return s.length }
@@ -60,7 +60,11 @@ class Clash {
 
 // There are no prototypes, and the decorator has the class.
 class Point {
-  x = 0
+  x: int
+
+  constructor() {
+    this.x = 0
+  }
 }
 // expect-error: there are no prototypes in tz: the methods belong to the class itself, and a decorator gets the class
 console.log(Point.prototype)

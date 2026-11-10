@@ -18,9 +18,7 @@ std::string ErrorTextClassStmt::nested(llvm::StringRef className) {
 
 std::string ErrorTextFieldsSet::pathUnset(llvm::StringRef className, llvm::StringRef field) {
   return (llvm::Twine("the constructor of '") + className + "' does not set field '" + field +
-          "' on every path; set it, give it a value where it is declared, or "
-          "make it optional: '" +
-          field + "?: T'")
+          "' on every path; set it on every path, or make it optional: '" + field + "?: T'")
       .str();
 }
 
@@ -60,15 +58,15 @@ std::string ErrorTextFirstUnset::allSet(llvm::StringRef className) {
 
 std::string ErrorTextStartValue::noStart(llvm::StringRef field, llvm::StringRef type) {
   return (llvm::Twine("field '") + field + "' has no value to start with: '" + type +
-          "' has no empty value, like \"\" or 0; give it one here, e.g. '" + field + ": " + type +
-          " = ...', set it in a constructor, or make it optional: '" + field + "?: " + type + "'")
+          "' has no empty value, like \"\" or 0; set it in a constructor, or make it optional: '" +
+          field + "?: " + type + "'")
       .str();
 }
 
 std::string ErrorTextStartValue::neverSet(llvm::StringRef field, llvm::StringRef type) {
-  return (llvm::Twine("field '") + field + "' never gets a value: give it one here, e.g. '" +
-          field + ": " + type + " = ...', set it in a constructor, or make it optional: '" + field +
-          "?: " + type + "'")
+  return (llvm::Twine("field '") + field +
+          "' never gets a value: set it in a constructor, or make it optional: '" + field + "?: " +
+          type + "'")
       .str();
 }
 

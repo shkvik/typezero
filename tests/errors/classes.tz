@@ -45,7 +45,7 @@ class Registry {
   static next() {
     return ++Registry.count
   }
-  name = "r"
+  name: string
 }
 const reg = new Registry()
 // expect-error: 'count' is a static member of 'Registry': use it through the class, 'Registry.count'
@@ -59,11 +59,16 @@ Registry.next = () => 0
 
 // Private and protected members are for the class itself.
 class Vault {
-  private code = 1234
-  private owner = "Ann"
-  protected level = 2
-  readonly opened: int = 0
-  private constructor() {}
+  private code: int
+  private owner: string
+  protected level: int
+  readonly opened: int
+  private constructor() {
+    this.code = 1234
+    this.owner = "Ann"
+    this.level = 2
+    this.opened = 0
+  }
   static open() {
     const v = new Vault()
     console.log(v.code + v.level)
@@ -92,7 +97,7 @@ class Box {
   static size = 1
   // expect-error: in a static field 'this' would be the class itself; use the class's name: 'Box.size'
   static double = this.size * 2
-  value = 1
+  value: int
   static make() {
     // expect-error: in a static method 'this' would be the class itself; use the class's name: 'Box.size'
     return this.size
@@ -108,7 +113,7 @@ class Box {
     return super.value
   }
   // expect-error: a constructor cannot return a value: 'new' gives the object
-  constructor() { return 5 }
+  constructor() { this.value = 1; return 5 }
 }
 
 // An instance is not converted to a string by calling code.
@@ -134,12 +139,16 @@ const wrong = new Point("a", 2)
 
 // Declarations.
 class Dup {
-  a = 1
+  a: int
   // expect-error: duplicate member 'a' in class 'Dup'
-  a = 2
+  a: int
   // expect-error: duplicate member 'b' in class 'Dup': a field and a method cannot share a name
   b() {}
-  b = 3
+  b: int
+  // expect-error: field 'e' cannot get a value where it is declared: set it in the constructor, 'this.e = ...'
+  e: int = 5
+  // expect-error: field 'f' cannot get a value where it is declared: set it in the constructor, 'this.f = ...'
+  f = "f"
   // expect-error: field 'c' needs a type, e.g. 'c: int'
   c
   // expect-error: static field 'd' needs a value, e.g. 'static d: int = ...', or make it optional: 'static d?: int'

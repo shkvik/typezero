@@ -17,7 +17,7 @@ hello, tz unset
 alpha
 failed ENOENT open true
 Ok { value: 'alpha' }
-Err { error: 'no a.txt' } at Memory.read (jobs.tz:66)
+Err { error: 'no a.txt' } at Memory.read (jobs.tz:74)
 5 letters
 Dear Ann, you owe 12.50.
 PLAIN never ran

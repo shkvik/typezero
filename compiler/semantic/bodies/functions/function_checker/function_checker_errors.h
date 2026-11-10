@@ -19,6 +19,7 @@ public:
   static std::string nested();
   static std::string decorator();
   static std::string needsType(llvm::StringRef label);
+  static std::string defaultNeedsType(llvm::StringRef label);
   static std::string arrowThis();
   static std::string methodThis();
   static std::string restArray(llvm::StringRef name);
@@ -76,6 +77,16 @@ public:
   static std::string noSuper(llvm::StringRef cls, llvm::StringRef parent);
   static std::string forward(llvm::StringRef label, llvm::StringRef used);
   static std::string noReturn(llvm::StringRef label, llvm::StringRef type);
+};
+
+enum class FunctionCheckerParamTypeKnownErrorCode {
+  NEEDS_TYPE,
+  DEFAULT_NOT_LITERAL,
+};
+
+struct FunctionCheckerParamTypeKnownError {
+  FunctionCheckerParamTypeKnownErrorCode code;
+  std::string message;
 };
 
 enum class FunctionCheckerDefaultOrderErrorCode {

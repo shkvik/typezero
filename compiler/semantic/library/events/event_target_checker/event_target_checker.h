@@ -17,7 +17,6 @@ class TypeResolver;
 class TypeRelations;
 class ClosureChecker;
 class EmitterChecker;
-class ReturnInferrer;
 class ArgumentChecker;
 class GenericInstantiator;
 
@@ -56,7 +55,6 @@ private:
   TypeRelations *typeRelations = nullptr;
   ClosureChecker *closureChecker = nullptr;
   EmitterChecker *emitterChecker = nullptr;
-  ReturnInferrer *returnInferrer = nullptr;
   ArgumentChecker *argumentChecker = nullptr;
   GenericInstantiator *genericInstantiator = nullptr;
 };

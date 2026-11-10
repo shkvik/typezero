@@ -30,14 +30,18 @@ class User {
   name: string
   email: string
   readonly id: int
-  tags: string[] = []
-  visits = 0
-  private password = "secret"
-  private notes = "none"
+  tags: string[]
+  visits: int
+  private password: string
+  private notes: string
   static count = 0
   static readonly prefix = "user-"
 
   constructor(name: string, id: int) {
+    this.tags = []
+    this.visits = 0
+    this.password = "secret"
+    this.notes = "none"
     this.name = name
     this.id = id
     this.email = `${name.toLowerCase()}@example.com`
@@ -75,11 +79,13 @@ console.log(User.count, Object.keys(bob))
 
 // Parameter properties with modifiers and default values.
 class Account {
-  history: double[] = []
+  history: double[]
   constructor(
     readonly owner: string,
     private balance: double = 0,
-  ) {}
+  ) {
+    this.history = []
+  }
   deposit(amount: double) {
     this.balance += amount
     this.history.push(amount)

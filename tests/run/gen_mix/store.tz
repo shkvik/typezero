@@ -18,11 +18,14 @@ export function Column(cls: object, name: string) {
 // A cache of values that a loader gives later, one promise for each key.
 @Table("cache")
 export class Cache<T> {
-  @Column items = new Map<string, T>()
-  last: Promise<T> | undefined = undefined
-  loads = 0
+  @Column items: Map<string, T>
+  last: Promise<T> | undefined
+  loads: int
   load: (key: string) => Promise<T>
   constructor(load: (key: string) => Promise<T>) {
+    this.items = new Map<string, T>()
+    this.last = undefined
+    this.loads = 0
     this.load = load
   }
   async get(key: string): Promise<T> {
@@ -44,11 +47,15 @@ export async function lengthOf(key: string): Promise<int> {
 // A value and what the runtime keeps next to it.
 export class Entry<T> {
   value: T
-  when = new Date(0)
-  pattern = /[a-z]+/g
-  raw = Buffer.from("ok")
-  code: int | string = 200
+  when: Date
+  pattern: RegExp
+  raw: Buffer
+  code: int | string
   constructor(value: T) {
+    this.when = new Date(0)
+    this.pattern = /[a-z]+/g
+    this.raw = Buffer.from("ok")
+    this.code = 200
     this.value = value
   }
 }

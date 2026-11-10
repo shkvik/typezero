@@ -156,7 +156,31 @@ ClassDeclarer::ResultFieldNotLateSet ClassDeclarer::setLater(const ClassField &f
   return ok(&f);
 }
 
-ClassDeclarer::ResultFieldTypeSource ClassDeclarer::typedField(const ClassField &f) {
+ClassDeclarer::ResultFieldHasNoValue ClassDeclarer::fieldValue(const ClassField &f) {
+  bool function = llvm::isa_and_nonnull<FunctionExpr>(f.init);
+  if (!f.isStatic() && f.init != nullptr && !function) {
+    std::string message = ErrorTextDeclaredValue::constructor(f.name);
+
+    return err(ClassDeclarerFieldValueError{
+        .code = ClassDeclarerFieldValueErrorCode::VALUE_OUTSIDE_CONSTRUCTOR,
+        .message = message,
+    });
+  }
+
+  return ok(&f);
+}
+
+ClassDeclarer::ResultFieldTypeSource ClassDeclarer::typedField(const ClassDecl *cls,
+                                                               const ClassField &f) {
+  const Param *property = f.parameter() ? ClassDeclarer::propertyParam(cls, f.name) : nullptr;
+  if (property != nullptr && !property->type) {
+    std::string message = ErrorTextTypedField::property(f.name);
+
+    return err(ClassDeclarerTypedFieldError{
+        .code = ClassDeclarerTypedFieldErrorCode::PROPERTY_NO_TYPE,
+        .message = message,
+    });
+  }
   if (!f.parameter() && !f.type && !f.init) {
     std::string message = ErrorTextTypedField::missing(f.name);
 
@@ -187,19 +211,18 @@ const Type *ClassDeclarer::declaredFieldType(const ClassDecl *cls, ClassField &f
     if (param->optional()) {
       f.presence = FieldPresence::OPTIONAL;
     }
-    if (param->type) {
-      return this->typeResolver->resolveType(*param->type, false);
-    }
-    if (param->defaultValue()) {
-      return SharedHelpers::literalType(param->defaultValue());
-    }
-    return nullptr;
+    return this->typeResolver->resolveType(*param->type, false);
   }
   if (f.type) {
     return this->typeResolver->resolveType(*f.type, false);
   }
+  const Type *literal = SharedHelpers::literalType(f.init);
+  bool fromValueLater = f.isStatic() || llvm::isa<FunctionExpr>(f.init);
+  if (literal != nullptr || fromValueLater) {
+    return literal;
+  }
 
-  return SharedHelpers::literalType(f.init);
+  return Type::error();
 }
 
 void ClassDeclarer::arrowMethod(ClassDecl *cls, ClassField &f, const Type *type) {
@@ -283,8 +306,12 @@ void ClassDeclarer::resolveField(ClassDecl *cls, ClassField &f) {
   if (early.isErr()) {
     this->state.getDiagnostics().error(f.loc, early.error().message);
   }
+  ResultFieldHasNoValue valueless = ClassDeclarer::fieldValue(f);
+  if (valueless.isErr()) {
+    this->state.getDiagnostics().error(f.loc, valueless.error().message);
+  }
   const Type *type = nullptr;
-  ResultFieldTypeSource source = ClassDeclarer::typedField(f);
+  ResultFieldTypeSource source = ClassDeclarer::typedField(cls, f);
   if (source.isErr()) {
     this->state.getDiagnostics().error(f.loc, source.error().message);
     type = Type::error();
@@ -849,25 +876,6 @@ void ClassDeclarer::finishCompletion(ClassDecl *cls) {
           original ? this->genericClassChecker->instanceValueType(cls, original) : Type::error();
     }
     muted = this->state.getDiagnostics().setMuted(true);
-  }
-  for (ClassField &f : cls->fields) {
-    if (!f.parameter() || f.resolved) {
-      continue;
-    }
-    for (FunctionDecl *ctor : cls->constructors) {
-      if (f.resolved || !ctor->sym) {
-        continue;
-      }
-      this->returnInferrer->resolveParams(ctor->sym);
-      for (const Param &param : ctor->params) {
-        if (param.property && param.name == f.name && param.declaredType) {
-          f.resolved = param.declaredType;
-        }
-      }
-    }
-    if (!f.resolved) {
-      f.resolved = Type::error();
-    }
   }
   auto unresolved = [](const ClassField &f) { return !f.isStatic() && !f.method() && !f.resolved; };
   bool pending = llvm::any_of(cls->fields, unresolved);

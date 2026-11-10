@@ -211,7 +211,6 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
       this->state.getDiagnostics().error(member->loc(), accessible.error().message);
     }
   }
-  this->returnInferrer->resolveParams(sym);
   ResultTypeArgsAllowed allowed = MethodCallChecker::methodTypeArgs(sym, member);
   if (allowed.isErr()) {
     this->state.getDiagnostics().error(member->loc(), allowed.error().message);
@@ -367,7 +366,6 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
     if (accessible.isErr()) {
       this->state.getDiagnostics().error(expr->loc(), accessible.error().message);
     }
-    this->returnInferrer->resolveParams(sym);
     call->target = FunctionCall{.func = sym};
     std::vector<bool> given(checked ? call->args.size() : 0, true);
     this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest,

@@ -16,6 +16,14 @@ std::string ErrorTextFunctionDecl::needsType(llvm::StringRef label) {
   return (llvm::Twine("parameter '") + label + "' needs a type annotation").str();
 }
 
+std::string ErrorTextFunctionDecl::defaultNeedsType(llvm::StringRef label) {
+  return (llvm::Twine("parameter '") + label +
+          "' needs a type: only a literal default value (a number, a string, true or false) "
+          "gives one, e.g. '" +
+          label + ": int = measure()'")
+      .str();
+}
+
 std::string ErrorTextFunctionDecl::arrowThis() {
   return "an arrow function cannot have a 'this' parameter: it sees the "
          "'this' of the function around it; write a 'function'";

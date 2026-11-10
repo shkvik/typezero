@@ -12,13 +12,23 @@ class User {
   }
 }
 class Post {
-  title = "untitled"
+  title: string
+
+  constructor() {
+    this.title = "untitled"
+  }
 }
 
 let clock = 100
 function Timestamped<B extends Constructor>(Base: B) {
   return class extends Base {
-    stamp = clock++
+    stamp: int
+
+    constructor(...args: ConstructorArgs) {
+      super(...args)
+      this.stamp = clock++
+    }
+
     age() {
       return clock - this.stamp
     }
@@ -37,7 +47,13 @@ console.log(post, post.stamp, TimedUser, TimedPost)
 // greet, and calls the one it replaces.
 function Tagged<B extends Constructor<User>>(Base: B) {
   return class Tagged extends Base {
-    tags: string[] = []
+    tags: string[]
+
+    constructor(...args: ConstructorArgs) {
+      super(...args)
+      this.tags = []
+    }
+
     tag(t: string) {
       this.tags.push(t)
       return this
@@ -58,14 +74,24 @@ for (const u of users) console.log(u.greet())
 const timed: InstanceType<typeof TimedUser>[] = [ann, new TimedUser("dan")]
 console.log(timed.map(u => u.stamp))
 const Admin = class extends Tagged(User) {
-  level = 1
+  level: int
+
+  constructor(name: string) {
+    super(name)
+    this.level = 1
+  }
 }
 const root = new Admin("root")
 root.tag("all")
 console.log(root, root.greet(), root.level)
 // A declaration whose base is a mixin is made where it runs.
 class Moderator extends Timestamped(User) {
-  role = "mod"
+  role: string
+
+  constructor(name: string) {
+    super(name)
+    this.role = "mod"
+  }
 }
 const mod = new Moderator("mo")
 console.log(mod, mod.age(), mod.greet(), Moderator)

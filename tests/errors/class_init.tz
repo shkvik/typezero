@@ -29,24 +29,28 @@ function register(user: User) {
   console.log(user.name)
 }
 
-// Initializers run in order, before the constructor and its parameter
-// properties.
+// The constructor sets the fields in order; its parameter properties are set
+// before its body runs.
 class Order {
-  // expect-error: field 'price' is read before it is set
-  total = this.price * 2
-  price = 10
-  constructor(public id: int) {}
+  total: int
+  price: int
+  constructor(public id: int) {
+    // expect-error: field 'price' is read before it is set
+    this.total = this.price * 2
+    this.price = 10
+  }
 }
 class Late {
-  // expect-error: field 'id' is read before it is set
-  label = `#${this.id}`
-  constructor(public id: int) {}
+  label: string
+  constructor(public id: int) {
+    this.label = `#${this.id}`
+  }
 }
 
 // A field without a value is set on every path of every constructor.
 class Branchy {
   x: int
-  // expect-error: the constructor of 'Branchy' does not set field 'x' on every path; set it, give it a value where it is declared, or make it optional: 'x?: T'
+  // expect-error: the constructor of 'Branchy' does not set field 'x' on every path; set it on every path, or make it optional: 'x?: T'
   constructor(flag: boolean) {
     if (flag) this.x = 1
   }
@@ -77,24 +81,23 @@ class Counter {
   }
 }
 class NoConstructor {
-  // expect-error: field 'at' has no value to start with: 'Date' has no empty value, like "" or 0; give it one here, e.g. 'at: Date = ...', set it in a constructor, or make it optional: 'at?: Date'
+  // expect-error: field 'at' has no value to start with: 'Date' has no empty value, like "" or 0; set it in a constructor, or make it optional: 'at?: Date'
   at: Date
   size: int
-  ok = 1
   maybe?: int
 }
 class Definite {
-  // expect-error: 'data!' ("set later") is not supported: a field gets its value where it is declared or in the constructor; if it may have none, make it optional: 'data?: T'
+  // expect-error: 'data!' ("set later") is not supported: a field gets its value in the constructor; if it may have none, make it optional: 'data?: T'
   data!: string
 }
 
-// Optional fields hold undefined from the start, and fields with values
-// are set before the constructor runs.
+// Optional fields hold undefined from the start.
 class Fine {
   limit?: int
-  count = 0
+  count: int
   name: string
   constructor() {
+    this.count = 0
     console.log(this.limit, this.count)
     this.name = "fine"
   }

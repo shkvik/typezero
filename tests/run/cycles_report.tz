@@ -7,7 +7,11 @@
 // group while the room lives, and the report names the reference that holds it.
 class Room {
   last?: Guest
-  visits = 0
+  visits: int
+
+  constructor() {
+    this.visits = 0
+  }
 }
 
 class Guest {

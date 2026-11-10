@@ -8,10 +8,12 @@ function later<T>(value: T, ms: number): Promise<T> {
 }
 
 class Cache<T> {
-  pending: Promise<T> | undefined = undefined
-  items = new Map<string, T>()
+  pending: Promise<T> | undefined
+  items: Map<string, T>
   load: (key: string) => Promise<T>
   constructor(load: (key: string) => Promise<T>) {
+    this.pending = undefined
+    this.items = new Map<string, T>()
     this.load = load
   }
   async get(key: string): Promise<T> {
@@ -31,11 +33,15 @@ console.log(await lengths.get("abc"), await lengths.get("abc"), lengths.items)
 
 class Holder<T> {
   value: T
-  when = new Date(0)
-  pattern = /x+/g
-  bytes = Buffer.from("hi")
-  either: int | string = 1
+  when: Date
+  pattern: RegExp
+  bytes: Buffer
+  either: int | string
   constructor(value: T) {
+    this.when = new Date(0)
+    this.pattern = /x+/g
+    this.bytes = Buffer.from("hi")
+    this.either = 1
     this.value = value
   }
 }

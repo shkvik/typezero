@@ -2,9 +2,11 @@
 // A tree whose nodes point at their parents: every node is in a cycle with
 // its parent, and the whole tree goes when nothing outside holds it.
 class TreeNode {
-  children: TreeNode[] = []
+  children: TreeNode[]
   parent?: TreeNode
-  constructor(public name: string) {}
+  constructor(public name: string) {
+    this.children = []
+  }
   add(child: TreeNode) {
     child.parent = this
     this.children.push(child)

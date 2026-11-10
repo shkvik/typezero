@@ -312,10 +312,17 @@ class DuplexSides {
   defaultEncoding?: BufferEncoding
   emitClose?: boolean
   autoDestroy?: boolean
-  hasWritev = false
-  hasFinal = false
-  hasConstruct = false
-  transform = false
+  hasWritev: boolean
+  hasFinal: boolean
+  hasConstruct: boolean
+  transform: boolean
+
+  constructor() {
+    this.hasWritev = false
+    this.hasFinal = false
+    this.hasConstruct = false
+    this.transform = false
+  }
 }
 
 function duplexSetup<W, R>(sides: DuplexSides): StreamSetup {
@@ -567,9 +574,10 @@ export function streamFromIterator<U>(iterator: Iterator<U>, options?: ReadableF
 
 class FromIterator<U> extends Readable<U> {
   private source: Iterator<U>
-  private reading = false
+  private reading: boolean
   constructor(iterator: Iterator<U>, options: ReadableOptions) {
     super(options)
+    this.reading = false
     this.source = iterator
   }
 
@@ -608,10 +616,11 @@ export function streamFromAsyncIterator<U>(iterator: AsyncIterator<U>,
 
 class FromAsyncIterator<U> extends Readable<U> {
   private source: AsyncIterator<U>
-  private started = false
+  private started: boolean
   private wake?: () => void
   constructor(iterator: AsyncIterator<U>, options: ReadableOptions) {
     super(options)
+    this.started = false
     this.source = iterator
   }
 

@@ -11,7 +11,12 @@
 // go through the descriptions, with the same results.
 
 class Logger {
-  lines: string[] = []
+  lines: string[]
+
+  constructor() {
+    this.lines = []
+  }
+
   log(text: string) {
     this.lines.push(text)
     return this.lines.length
@@ -19,7 +24,12 @@ class Logger {
 }
 
 class UserService {
-  name = "users"
+  name: string
+
+  constructor() {
+    this.name = "users"
+  }
+
   greet(who: string, times: int) {
     return `${this.name}: hello ${who} x${times}`
   }
@@ -42,7 +52,12 @@ class Point {
 
 // A small container, as a library writes it.
 class Container {
-  made = 0
+  made: int
+
+  constructor() {
+    this.made = 0
+  }
+
   get<T extends object>(cls: Constructor<T>): T {
     this.made++
     return new cls()

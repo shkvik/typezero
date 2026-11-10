@@ -6,7 +6,12 @@
 // 5 million objects, two calls each. `di_reflect` is the same program with the
 // class known only when it runs.
 class Handler {
-  hits = 0
+  hits: int
+
+  constructor() {
+    this.hits = 0
+  }
+
   handle(n: int) {
     this.hits += n
     return this.hits

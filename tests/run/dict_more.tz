@@ -18,8 +18,14 @@ d.two = 2
 console.log(d, new Map(Object.entries(d)))
 for (const [k, v] of Object.entries(d)) console.log(k, v)
 class Registry {
-  byName: Record<string, int[]> = {}
-  index = new Map<int, string>()
+  byName: Record<string, int[]>
+  index: Map<int, string>
+
+  constructor() {
+    this.byName = {}
+    this.index = new Map<int, string>()
+  }
+
   add(name: string, id: int) {
     (this.byName[name] ??= []).push(id)
     this.index.set(id, name)

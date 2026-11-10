@@ -3,7 +3,11 @@
 // undefined` is always truthy, also after narrowing; `unknown` and an
 // unconstrained T may hold a number, where 0 would count as false.
 class User {
-  name = "u"
+  name: string
+
+  constructor() {
+    this.name = "u"
+  }
 }
 const user = new User()
 // expect-error: an object is always truthy, so the condition is always true; drop the check, or give it a type that allows undefined: 'User | undefined'

@@ -3,14 +3,24 @@
 // written for its type: `Stack<int>` holds an int[], and `<` on T is `<` on
 // ints.
 class Stack<T> {
-  items: T[] = []
+  items: T[]
+
+  constructor() {
+    this.items = []
+  }
+
   push(x: T) { this.items.push(x) }
   pop(): T | undefined { return this.items.pop() }
   size() { return this.items.length }
 }
 
 class MinHeap<T extends int | double> {
-  items: T[] = []
+  items: T[]
+
+  constructor() {
+    this.items = []
+  }
+
   size() { return this.items.length }
   push(x: T) {
     const h = this.items

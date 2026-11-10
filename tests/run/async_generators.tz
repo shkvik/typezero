@@ -44,7 +44,12 @@ log(`search ${await search()}`)
 
 // Methods and function expressions; one that awaits between its values.
 class Bag {
-  items = ["x", "y"]
+  items: string[]
+
+  constructor() {
+    this.items = ["x", "y"]
+  }
+
   async *each() {
     for (const i of this.items) {
       await new Promise<void>((resolve) => setTimeout(resolve, 1))

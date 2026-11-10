@@ -18,8 +18,10 @@ class User {
 
 @Entity
 class Note {
-  tags: string[] = []
-  constructor(public text: string) {}
+  tags: string[]
+  constructor(public text: string) {
+    this.tags = []
+  }
   shout(times: int) {
     return this.text.toUpperCase().repeat(Math.max(times, 0))
   }

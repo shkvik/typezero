@@ -7,9 +7,10 @@ class Node {
   constructor(public value: int) {}
 }
 class Tagged extends Node {
-  tags: string[] = []
+  tags: string[]
   constructor(value: int, public label: string) {
     super(value)
+    this.tags = []
     this.tags.push(`t${value % 10}`)
   }
 }
@@ -32,11 +33,21 @@ interface Holder {
   items: string[]
 }
 class Box implements Holder {
-  items = ["a", "b"]
-  label = "box"
+  items: string[]
+  label: string
+
+  constructor() {
+    this.items = ["a", "b"]
+    this.label = "box"
+  }
 }
 class BigBox extends Box {
-  more = [["x"], ["y", "z"]]
+  more: string[][]
+
+  constructor() {
+    super()
+    this.more = [["x"], ["y", "z"]]
+  }
 }
 const holders: Holder[] = [new Box(), new BigBox(), { items: ["c"] }]
 console.log(holders.map(h => h.items.length).join(" "))

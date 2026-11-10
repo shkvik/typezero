@@ -33,9 +33,15 @@ function Get(path: string) {
 
 @Table("users")
 class User {
-  @Column name: string = ""
-  @Column age: int = 0
-  @Column joined = new Date(0)
+  @Column name: string
+  @Column age: int
+  @Column joined: Date
+
+  constructor() {
+    this.name = ""
+    this.age = 0
+    this.joined = new Date(0)
+  }
 
   @Deprecated("use add")
   plus(a: int, b: int) {
@@ -79,7 +85,12 @@ console.log(Reflect.getMetadata("design:type", User, "age") == Number, Reflect.g
 // records up the chain.
 console.log(Reflect.hasMetadata(Table, User), Reflect.hasOwnMetadata(Deprecated, User), Reflect.hasMetadata(Deprecated, User, "plus"))
 class Admin extends User {
-  @Column level: int = 1
+  @Column level: int
+
+  constructor() {
+    super()
+    this.level = 1
+  }
 }
 console.log(Reflect.getMetadata(Table, Admin), Reflect.getOwnMetadata(Table, Admin))
 console.log(Reflect.getMetadata(Column, Admin), Reflect.getMetadata(Column, User))

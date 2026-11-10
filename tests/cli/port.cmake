@@ -19,6 +19,7 @@ changed:
     1  'var' became 'let'
     1  '| null' next to Json was dropped: a Json holds null itself
     1  default imports became named imports
+    1  field values moved into the constructor
     2  imports of .ts and .js files name the .tz files of the copy
 then 'tz build lib/src/index.tz' reports what else tz does not accept
 ]])
@@ -76,8 +77,13 @@ export function short(unit: string) {
 }
 
 export class Tally {
-  private count = 0
+  private count: int
   private static made = 0
+
+  constructor() {
+    this.count = 0
+  }
+
   add() {
     Tally.made++
     return ++this.count
@@ -148,22 +154,23 @@ changed:
     1  'export default' became a named export
     1  'import * as' became named imports
     1  'jsr:' imports became package names in package.json
+    2  field values moved into the constructor
     2  imports of .ts and .js files name the .tz files of the copy
 to change by hand (14):
   manual/mod.tz:3:23: npm packages are not supported (docs/packages.md): take the package from JSR or git, adapted for tz, or do without it
   manual/mod.tz:4:19: 'zod' is another package: add it to package.json once it is adapted for tz (docs/packages.md), or do without it
   manual/mod.tz:5:1: an import for side effects is not supported: import what the file uses by name
-  manual/mod.tz:15:3: getters and setters are not supported (docs/objects.md): reading a field never runs code; make 'get size()' a method, or keep the value in a field
-  manual/mod.tz:16:3: getters and setters are not supported (docs/objects.md): reading a field never runs code; make 'set size()' a method, or keep the value in a field
-  manual/mod.tz:19:25: 'any' became 'unknown': give the exact type, or narrow the value before using it (typeof, instanceof, 'in')
-  manual/mod.tz:20:19: 'as' is not supported: remove it; if the value's type is wider than written, narrow it with a check (typeof, instanceof, 'in', '!= undefined')
-  manual/mod.tz:24:33: 'as const' is not supported: declare the type of the value instead, e.g. a union of literal types
-  manual/mod.tz:25:32: 'satisfies' is not supported: declare the type of the variable instead, or remove it
-  manual/mod.tz:28:8: several signatures with one body ('pick') are not supported for plain functions (docs/overloads.md): keep one signature with unions, or give each its own function
-  manual/mod.tz:34:10: 'arguments' is not supported: declare a rest parameter, e.g. '...args: string[]'
-  manual/mod.tz:34:39: prototypes are not supported (docs/objects.md): declare the methods in a class
-  manual/mod.tz:38:10: 'require' is not supported: import by name, e.g. 'import { x } from "./x"'
-  manual/mod.tz:45:37: 'asserts' is not supported (docs/narrowing.md): there are no exceptions, so a function cannot stop its caller; write 'p is T' and return whether it holds, then check it at the call: 'if (!isT(x)) return err(...)'
+  manual/mod.tz:20:3: getters and setters are not supported (docs/objects.md): reading a field never runs code; make 'get size()' a method, or keep the value in a field
+  manual/mod.tz:21:3: getters and setters are not supported (docs/objects.md): reading a field never runs code; make 'set size()' a method, or keep the value in a field
+  manual/mod.tz:24:25: 'any' became 'unknown': give the exact type, or narrow the value before using it (typeof, instanceof, 'in')
+  manual/mod.tz:25:19: 'as' is not supported: remove it; if the value's type is wider than written, narrow it with a check (typeof, instanceof, 'in', '!= undefined')
+  manual/mod.tz:29:33: 'as const' is not supported: declare the type of the value instead, e.g. a union of literal types
+  manual/mod.tz:30:32: 'satisfies' is not supported: declare the type of the variable instead, or remove it
+  manual/mod.tz:33:8: several signatures with one body ('pick') are not supported for plain functions (docs/overloads.md): keep one signature with unions, or give each its own function
+  manual/mod.tz:39:10: 'arguments' is not supported: declare a rest parameter, e.g. '...args: string[]'
+  manual/mod.tz:39:39: prototypes are not supported (docs/objects.md): declare the methods in a class
+  manual/mod.tz:43:10: 'require' is not supported: import by name, e.g. 'import { x } from "./x"'
+  manual/mod.tz:50:37: 'asserts' is not supported (docs/narrowing.md): there are no exceptions, so a function cannot stop its caller; write 'p is T' and return whether it holds, then check it at the call: 'if (!isT(x)) return err(...)'
 then 'tz build manual/mod.tz' reports what else tz does not accept
 ]])
 # jsr: imports become dependencies; the anonymous class gets the file's name.
@@ -183,7 +190,7 @@ expect_file(manual/package.json [[
 expect_match(manual/mod.tz "\nimport { join } from \"@std/path/join\"\n")
 expect_match(manual/mod.tz "\nimport { count } from \"./helpers.tz\"\n")
 expect_match(manual/mod.tz "\n  return arguments.length \\+ count\\(Box.prototype\\)\n")
-expect_file(manual/extra.tz "export class Extra {\n  name = \"extra\"\n}\n")
+expect_file(manual/extra.tz "export class Extra {\n  name: string\n\n  constructor() {\n    this.name = \"extra\"\n  }\n}\n")
 tz(port ${SOURCE}/port/manual EXIT 1 STDERR "tz: 'manual' is not empty; choose another directory with -o")
 
 # From JSR and from git, through the cache.
@@ -218,6 +225,7 @@ changed:
     4  '#x' became 'private x'
     1  '+' with a string became a template literal
     1  '===' and '!==' became '==' and '!='
+    1  field values moved into the constructor
 then 'tz build own/units.tz' reports what else tz does not accept
 ]])
 file(READ ${WORK}/lib/src/units.tz expected)

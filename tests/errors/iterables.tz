@@ -5,7 +5,7 @@ class NotIterator {
 }
 // expect-error: '[Symbol.iterator]()' of 'NotIterator' gives 'int', which is not an iterator: it needs a method 'next()' that gives '{ done, value }'
 for (const x of new NotIterator()) console.log(x)
-class Plain { n = 1 }
+class Plain { n: int; constructor() { this.n = 1 } }
 // expect-error: cannot iterate over a value of type 'Plain'
 for (const x of new Plain()) console.log(x)
 

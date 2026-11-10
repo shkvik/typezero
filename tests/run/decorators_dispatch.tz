@@ -13,7 +13,11 @@ function Route(cls: Constructor, name: string, descriptor: MethodDescriptor<[int
 }
 
 class Store {
-  counts = new Map<string, int>();
+  counts: Map<string, int>;
+
+  constructor() {
+    this.counts = new Map<string, int>();
+  }
 }
 
 const store = new Store();

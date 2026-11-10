@@ -8,7 +8,12 @@ class Link<T> {
 
 class Ring<T> {
   first?: Link<T>
-  size = 0
+  size: int
+
+  constructor() {
+    this.size = 0
+  }
+
   add(value: T) {
     const link = new Link(value)
     const first = this.first

@@ -11,7 +11,12 @@ function Injectable(cls: Constructor) {
 }
 
 class Container {
-  private instances = new Map<Constructor, object>()
+  private instances: Map<Constructor, object>
+
+  constructor() {
+    this.instances = new Map<Constructor, object>()
+  }
+
   resolve<T extends object>(cls: Constructor<T>): Result<T, string> {
     const found = this.instances.get(cls)
     if (found instanceof cls)
@@ -41,7 +46,12 @@ function must<T>(r: Result<T, string>): T {
 
 @Injectable
 class Logger {
-  lines: string[] = []
+  lines: string[]
+
+  constructor() {
+    this.lines = []
+  }
+
   log(text: string) {
     this.lines.push(text)
   }
@@ -99,7 +109,12 @@ function handle(path: string): unknown {
 }
 
 class UsersController {
-  users = ["ann", "bob"]
+  users: string[]
+
+  constructor() {
+    this.users = ["ann", "bob"]
+  }
+
   @Get("/users")
   list() {
     return this.users.join(", ")

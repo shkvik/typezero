@@ -6,7 +6,6 @@
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/declare/prelude/prelude.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
-#include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/semantic/library/fs/fs_checker/fs_checker.h"
 #include "compiler/semantic/library/result/result_checker/result_checker.h"
@@ -34,7 +33,6 @@ StreamChecker::StreamChecker(SemanticState &owner, SemanticParts &all)
   this->resultChecker = &all.getResultChecker();
   this->typeRelations = &all.getTypeRelations();
   this->emitterChecker = &all.getEmitterChecker();
-  this->returnInferrer = &all.getReturnInferrer();
   this->argumentChecker = &all.getArgumentChecker();
   this->setEncodingChecker = &all.getSetEncodingChecker();
 }
@@ -371,7 +369,6 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
     const Type *written = Type::optional(callback);
     for (FunctionDecl *typed : ClassDeclarer::methodsNamed(cls, "writeTyped", false)) {
       if (typed->sym && typed->params.size() == 3) {
-        this->returnInferrer->resolveParams(typed->sym);
         written = typed->sym->params[2];
         break;
       }

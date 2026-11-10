@@ -11,7 +11,7 @@ type Holed = `a${{ x: int }}`
 type Loud = Uppercase<int>
 // expect-error: field 'a' has type 'int' in one part of the intersection and 'string' in another; a field has one type
 type Both = { a: int } & { a: string }
-class Point { x: int = 0 }
+class Point { x: int; constructor() { this.x = 0 } }
 // expect-error: '&' joins object types into one with the fields of all, and 'Point' is not an object type
 type Placed = Point & { at: int }
 interface User { id: int; name: string }

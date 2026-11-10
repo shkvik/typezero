@@ -176,7 +176,11 @@ child.stdout.on("data", s => s.length)          // s: string
   поток, а снаружи — ошибка, если класс не открыл свой метод:
   ```ts
   class Counter extends Readable<string> {
-    private n = 0
+    private n: int
+    constructor() {
+      super()
+      this.n = 0
+    }
     protected override onRead() {
       this.push(this.n < 3 ? `${this.n++}` : undefined)
     }

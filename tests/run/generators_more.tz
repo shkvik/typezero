@@ -31,7 +31,7 @@ const q = asked()
 console.log(q.next().value, q.next(1).value, q.next(2).value, q.next(3).done)
 
 // Default and rest parameters.
-function* range(from: int, to = from + 3, step = 1) {
+function* range(from: int, to: int = from + 3, step = 1) {
   for (let i = from; i < to; i += step) yield i
 }
 console.log([...range(2)], [...range(0, 10, 4)])

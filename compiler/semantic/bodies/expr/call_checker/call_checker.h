@@ -42,7 +42,6 @@ class GenericChecker;
 class InheritChecker;
 class ProcessChecker;
 class PromiseChecker;
-class ReturnInferrer;
 class StreamPipeline;
 class UnknownChecker;
 class WeakRefChecker;
@@ -133,7 +132,6 @@ private:
   InheritChecker *inheritChecker = nullptr;
   ProcessChecker *processChecker = nullptr;
   PromiseChecker *promiseChecker = nullptr;
-  ReturnInferrer *returnInferrer = nullptr;
   StreamPipeline *streamPipeline = nullptr;
   UnknownChecker *unknownChecker = nullptr;
   WeakRefChecker *weakRefChecker = nullptr;

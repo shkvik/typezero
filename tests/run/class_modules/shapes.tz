@@ -14,8 +14,10 @@ export class Circle {
 }
 
 export class Square {
-  private id = 0
-  constructor(public side: double) {}
+  private id: int
+  constructor(public side: double) {
+    this.id = 0
+  }
   area() {
     return this.side * this.side
   }

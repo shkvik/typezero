@@ -66,8 +66,13 @@ for (const b of boxes) {
 
 // 6. keyof and mapped types over a class.
 class User {
-  name = "ann"
-  age = 30
+  name: string
+  age: int
+
+  constructor() {
+    this.name = "ann"
+    this.age = 30
+  }
 }
 function get<T, K extends keyof T>(obj: T, key: K): T[K] {
   return obj[key]

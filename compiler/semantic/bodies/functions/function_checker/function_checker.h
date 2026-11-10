@@ -23,7 +23,6 @@ class TypeRelations;
 class ArgListChecker;
 class ClosureChecker;
 class EmitterChecker;
-class ReturnInferrer;
 class IterableChecker;
 class GeneratorChecker;
 class PredicateChecker;
@@ -41,6 +40,7 @@ public:
 private:
   using ResultRestParamIsArray = Result<const Type *, FunctionCheckerRestTypeError>;
   using ResultParamOrderIsKept = Result<const Param *, FunctionCheckerRequiredOrderError>;
+  using ResultParamTypeIsKnown = Result<const Param *, FunctionCheckerParamTypeKnownError>;
   using ResultDecoratorAllowed = Result<const Param *, FunctionCheckerParamDecoratorsError>;
   using ResultThisParamAllowed = Result<const FunctionDecl *, FunctionCheckerThisParamError>;
   using ResultConstructorSuper = Result<const FunctionDecl *, FunctionCheckerSuperCalledError>;
@@ -50,6 +50,7 @@ private:
       Result<const FunctionDecl *, FunctionCheckerReturnsEverywhereError>;
 
   static ResultThisParamAllowed thisParam(const FunctionDecl *fn);
+  static ResultParamTypeIsKnown paramTypeKnown(const Param &param);
   static ResultTopLevelGenerics topLevelGeneric(const FunctionDecl *fn);
   static ResultRestParamIsArray restType(const Type *type, const Param &param);
   static ResultConstructorSuper superCalled(const FunctionDecl *fn, unsigned supers);
@@ -75,7 +76,6 @@ private:
   ArgListChecker *argListChecker = nullptr;
   ClosureChecker *closureChecker = nullptr;
   EmitterChecker *emitterChecker = nullptr;
-  ReturnInferrer *returnInferrer = nullptr;
   IterableChecker *iterableChecker = nullptr;
   GeneratorChecker *generatorChecker = nullptr;
   PredicateChecker *predicateChecker = nullptr;

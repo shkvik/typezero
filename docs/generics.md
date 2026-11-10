@@ -140,7 +140,8 @@ show("p", new Dog("Rex"))  // ошибка у этого вызова: show<Dog>
 type Maybe<T> = T | undefined
 type Mapper<T, U> = (x: T) => U
 class Stack<T> {
-  items: T[] = []
+  items: T[]
+  constructor() { this.items = [] }
   push(x: T) { this.items.push(x) }
   pop(): Maybe<T> { return this.items.pop() }
 }

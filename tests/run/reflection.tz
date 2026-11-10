@@ -7,8 +7,10 @@
 // reflection reaches.
 
 class Account {
-  balance = 0
-  constructor(public owner: string, public limit?: int) {}
+  balance: int
+  constructor(public owner: string, public limit?: int) {
+    this.balance = 0
+  }
   deposit(amount: int) {
     this.balance += amount
     return this.balance
@@ -18,7 +20,13 @@ class Account {
   }
 }
 class Savings extends Account {
-  rate = 2
+  rate: int
+
+  constructor(owner: string, limit?: int) {
+    super(owner, limit)
+    this.rate = 2
+  }
+
   summary() {
     return `${super.summary()} at ${this.rate}%`
   }

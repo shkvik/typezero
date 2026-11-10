@@ -25,12 +25,16 @@ export function normalizeEncoding(encoding: string | undefined): string {
 
 export class StringDecoder {
   readonly encoding: string
-  readonly lastChar = Buffer.alloc(4)
-  lastNeed: int = 0
-  lastTotal: int = 0
-  buffered: int = 0
+  readonly lastChar: Buffer
+  lastNeed: int
+  lastTotal: int
+  buffered: int
 
   constructor(encoding?: BufferEncoding) {
+    this.lastChar = Buffer.alloc(4)
+    this.lastNeed = 0
+    this.lastTotal = 0
+    this.buffered = 0
     this.encoding = normalizeEncoding(encoding)
   }
 

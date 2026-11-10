@@ -6,10 +6,12 @@
 import { Money } from "./money"
 
 class Wallet {
-  items: Money[] = []
+  items: Money[]
   last?: Result<int, string>
   onAdd = (m: Money) => this.add(m)
-  constructor(public owner: string) {}
+  constructor(public owner: string) {
+    this.items = []
+  }
 
   add(m: Money): Result<int, string> {
     const r = m.amount <= 0 ? err(`${m.toString()} is not positive`) : ok(this.items.push(m))

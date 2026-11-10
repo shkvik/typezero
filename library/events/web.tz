@@ -52,11 +52,13 @@ export class Event {
   readonly timeStamp: double
   readonly bubbles: boolean
   readonly composed: boolean
-  returnValue = true
-  cancelBubble = false
+  returnValue: boolean
+  cancelBubble: boolean
   private state: EventState
 
   constructor(type: string, options?: EventInit) {
+    this.returnValue = true
+    this.cancelBubble = false
     this.type = type
     this.bubbles = options?.bubbles ?? false
     this.cancelable = options?.cancelable ?? false
@@ -166,13 +168,15 @@ export interface AddEventListenerOptions {
 
 class Listener {
   next?: Listener
-  removed = false
+  removed: boolean
   constructor(
     readonly callback: (event: Event) => void,
     readonly original: unknown,
     readonly once: boolean,
     readonly capture: boolean,
-  ) {}
+  ) {
+    this.removed = false
+  }
 }
 
 export class EventTarget {

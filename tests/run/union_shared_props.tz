@@ -39,15 +39,17 @@ console.log(label(c), label(q))
 
 class Cat {
   name: string
-  lives = 9
+  lives: int
   constructor(name: string) {
+    this.lives = 9
     this.name = name
   }
 }
 class Robot {
-  serial = 7
+  serial: int
   name: string
   constructor(name: string) {
+    this.serial = 7
     this.name = name
   }
 }

@@ -32,9 +32,12 @@ console.log([...new Countdown(4)], Math.max(...new Countdown(5)))
 
 // An iterator class of its own, which is also iterable.
 class Fib {
-  private a = 0
-  private b = 1
-  constructor(private left: int) {}
+  private a: int
+  private b: int
+  constructor(private left: int) {
+    this.a = 0
+    this.b = 1
+  }
   next(): IteratorResult<int, undefined> {
     if (this.left == 0) return { done: true, value: undefined }
     this.left--
@@ -50,8 +53,14 @@ console.log([...new Fib(10)])
 
 // Pairs for a Map, from a generator method of a generic class.
 class Registry<T> {
-  private names: string[] = []
-  private values: T[] = []
+  private names: string[]
+  private values: T[]
+
+  constructor() {
+    this.names = []
+    this.values = []
+  }
+
   add(name: string, value: T) {
     this.names.push(name)
     this.values.push(value)
@@ -87,7 +96,12 @@ function largest<T extends number>(xs: Iterable<T>) {
 }
 console.log(largest([1.5, 0.5]), largest([...new Range(3, 9)].map(x => x.toDouble())))
 class Bag<T> {
-  items: T[] = []
+  items: T[]
+
+  constructor() {
+    this.items = []
+  }
+
   addAll(xs: Iterable<T>) {
     for (const x of xs) this.items.push(x)
     return this

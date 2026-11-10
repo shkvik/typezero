@@ -368,7 +368,6 @@ Expr *StaticChecker::checkClassStaticCall(CallExpr *call, MemberExpr *member, Cl
     return call;
   }
   FuncSymbol *sym = picked.value();
-  this->returnInferrer->resolveParams(sym);
   ResultTypeArgsAllowed allowed = StaticChecker::methodTypeArgs(sym, member);
   if (allowed.isErr()) {
     this->state.getDiagnostics().error(member->loc(), allowed.error().message);

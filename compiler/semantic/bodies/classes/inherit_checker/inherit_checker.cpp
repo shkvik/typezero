@@ -451,7 +451,6 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
       if (accessible.isErr()) {
         this->state.getDiagnostics().error(call->loc(), accessible.error().message);
       }
-      this->returnInferrer->resolveParams(sym);
       call->target = SuperCall{.method = sym};
       std::vector<bool> given(checked ? call->args.size() : 0, true);
       this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
@@ -460,7 +459,7 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
   }
   this->state.getFlowState().markSuperCalled();
   for (const ClassField &f : cls->fields) {
-    if (!f.isStatic() && ((f.init && !f.method()) || f.redeclared)) {
+    if (!f.isStatic() && f.init && !f.method()) {
       this->state.getFlowState().addSetField(f.name);
     }
   }
@@ -618,7 +617,6 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
   FuncSymbol *sym = body.value();
-  this->returnInferrer->resolveParams(sym);
   call->target = SuperCall{};
   if (sym->isGeneric() && checked) {
     return this->overloadResolver->callGenericVariant(call, sym, bound, member->loc(), true);

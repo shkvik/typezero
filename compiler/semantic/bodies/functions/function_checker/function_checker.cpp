@@ -49,7 +49,6 @@ FunctionChecker::FunctionChecker(SemanticState &owner, SemanticParts &all)
   this->argListChecker = &all.getArgListChecker();
   this->closureChecker = &all.getClosureChecker();
   this->emitterChecker = &all.getEmitterChecker();
-  this->returnInferrer = &all.getReturnInferrer();
   this->iterableChecker = &all.getIterableChecker();
   this->generatorChecker = &all.getGeneratorChecker();
   this->predicateChecker = &all.getPredicateChecker();
@@ -135,6 +134,28 @@ FunctionChecker::ResultParamOrderIsKept FunctionChecker::requiredOrder(const Par
   return ok(&param);
 }
 
+FunctionChecker::ResultParamTypeIsKnown FunctionChecker::paramTypeKnown(const Param &param) {
+  const Expr *value = param.defaultValue();
+  bool literal = value != nullptr && SharedHelpers::literalType(value) != nullptr;
+  if (param.type || literal || param.property) {
+    return ok(&param);
+  }
+  if (value != nullptr) {
+    std::string message = ErrorTextFunctionDecl::defaultNeedsType(param.label());
+
+    return err(FunctionCheckerParamTypeKnownError{
+        .code = FunctionCheckerParamTypeKnownErrorCode::DEFAULT_NOT_LITERAL,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextFunctionDecl::needsType(param.label());
+
+  return err(FunctionCheckerParamTypeKnownError{
+      .code = FunctionCheckerParamTypeKnownErrorCode::NEEDS_TYPE,
+      .message = message,
+  });
+}
+
 void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool scoped) {
   FuncSymbol *sym = this->state.getAst().newFunc();
   sym->setCompleter(this->state.getCompleter());
@@ -202,14 +223,11 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
     } else if (hook && i < hook->size() && !param.rest()) {
       type = (*hook)[i];
     } else if (param.defaultValue() && (type = SharedHelpers::literalType(param.defaultValue()))) {
-    } else if (param.defaultValue() && !param.rest() && !fn->source.empty()) {
-      param.declaredType = nullptr;
-      sym->params.push_back(nullptr);
-      sym->pendingParams = true;
-      continue;
     } else {
-      std::string message = ErrorTextFunctionDecl::needsType(param.label());
-      this->state.getDiagnostics().error(param.loc, message);
+      ResultParamTypeIsKnown known = FunctionChecker::paramTypeKnown(param);
+      if (known.isErr()) {
+        this->state.getDiagnostics().error(param.loc, known.error().message);
+      }
       type = Type::error();
     }
     if (param.optional()) {
@@ -336,7 +354,6 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
     return;
   }
   FuncSymbol *sym = fn->sym;
-  this->returnInferrer->resolveParams(sym);
   fn->checked = true;
   FunctionStack &functions = this->state.getFunctionStack();
   FuncSymbol *outer = functions.getCurrentFunction();

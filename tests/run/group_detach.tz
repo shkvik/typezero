@@ -6,7 +6,11 @@ import { EventEmitter } from "node:events"
 
 class List {
   head?: Item
-  size = 0
+  size: int
+
+  constructor() {
+    this.size = 0
+  }
 }
 
 class Item {
@@ -41,8 +45,13 @@ function list() {
 }
 
 class Service {
-  events = new EventEmitter<{ tick: [] }>()
-  ticks = 0
+  events: EventEmitter<{ tick: [] }>
+  ticks: int
+
+  constructor() {
+    this.events = new EventEmitter<{ tick: [] }>()
+    this.ticks = 0
+  }
 }
 
 class Payload {

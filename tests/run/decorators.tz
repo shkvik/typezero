@@ -37,10 +37,11 @@ class Rules {
 @Named("named") @Sealed
 class User {
   @Column name: string
-  @Rules.required @Column email = ""
+  @Rules.required @Column email: string
   @Column static count = 0
 
   constructor(@Inject("NAME") name: string, @Inject("AGE") public age: int) {
+    this.email = ""
     this.name = name
     User.count++
   }

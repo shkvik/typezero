@@ -6,7 +6,11 @@ enum GameMode {
 }
 
 class User {
-  readonly name: string = "Ann";
+  readonly name: string;
+
+  constructor() {
+    this.name = "Ann";
+  }
 }
 
 function count(d: Record<string, string>): int {

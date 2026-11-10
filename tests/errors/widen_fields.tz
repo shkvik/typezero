@@ -35,8 +35,9 @@ catsIn([kennel])
 // A class that implements an interface with a narrower field.
 interface Holder { held: Animal }
 class DogHolder implements Holder {
-  held: Dog = new Dog("Held")
+  held: Dog
+  constructor() { this.held = new Dog("Held") }
 }
 function swap(h: Holder) { h.held = new Cat("Swapped") }
-// expect-error: 'DogHolder' cannot go where 'Holder' is expected here: line 40 writes a 'Cat' to its field 'held', which is a 'Dog' in 'DogHolder'
+// expect-error: 'DogHolder' cannot go where 'Holder' is expected here: line 41 writes a 'Cat' to its field 'held', which is a 'Dog' in 'DogHolder'
 swap(new DogHolder())

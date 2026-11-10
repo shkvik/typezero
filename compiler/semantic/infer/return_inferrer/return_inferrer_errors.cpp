@@ -57,10 +57,4 @@ std::string ErrorTextDefinedReturn::undefined(llvm::StringRef function) {
       .str();
 }
 
-std::string ErrorTextDefaultType::unknown(llvm::StringRef param) {
-  return (llvm::Twine("cannot tell the type of '") + param +
-          "' from its default value; add one, e.g. '" + param + ": int | undefined = undefined'")
-      .str();
-}
-
 }

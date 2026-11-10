@@ -65,8 +65,14 @@ console.log(find([rex, new Cat("kit")], Cat), find([rex], Cat))
 
 // Class expressions: named by the constant, by themselves, or not at all.
 const Point = class {
-  x = 1
-  y = 2
+  x: int
+  y: int
+
+  constructor() {
+    this.x = 1
+    this.y = 2
+  }
+
   sum() {
     return this.x + this.y
   }

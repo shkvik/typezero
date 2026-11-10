@@ -16,7 +16,6 @@ class FlowChecker;
 class ResultChecker;
 class TypeRelations;
 class EmitterChecker;
-class ReturnInferrer;
 class ArgumentChecker;
 class SetEncodingChecker;
 
@@ -56,7 +55,6 @@ private:
   ResultChecker *resultChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
   EmitterChecker *emitterChecker = nullptr;
-  ReturnInferrer *returnInferrer = nullptr;
   ArgumentChecker *argumentChecker = nullptr;
   SetEncodingChecker *setEncodingChecker = nullptr;
 };

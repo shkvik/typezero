@@ -9,7 +9,10 @@ include(${SOURCE}/../cli.cmake)
 
 set(classes [[
 class UserService {
-  name = "users"
+  name: string
+  constructor() {
+    this.name = "users"
+  }
   greet(who: string) {
     return `${this.name}: hello ${who}`
   }

@@ -35,7 +35,12 @@ type Move = { dir: Dir; count: int }
 const moves: Move[] = [{ dir: "up", count: 2 }, { dir: "left", count: 1 }]
 console.log(moves, JSON.stringify(moves[0]))
 class Light {
-  state: "on" | "off" = "off"
+  state: "on" | "off"
+
+  constructor() {
+    this.state = "off"
+  }
+
   flip() {
     this.state = this.state == "on" ? "off" : "on"
     return this.state

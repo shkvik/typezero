@@ -42,7 +42,10 @@ console.log(countWhere(cart.totals(), t => t > 2), countWhere(cart.lines(), s =>
 const held = hold(cart.lines())
 console.log(held, held.value.next())
 class Reader {
-  source = Cart.sizes(100)
+  source: Generator<int>
+  constructor() {
+    this.source = Cart.sizes(100)
+  }
   read() {
     return this.source.next()
   }

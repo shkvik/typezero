@@ -7,22 +7,34 @@ interface Thing {
 }
 class Base implements Thing {
   peer?: Thing
-  kids: Base[] = []
-  constructor(public id: int) {}
+  kids: Base[]
+  constructor(public id: int) {
+    this.kids = []
+  }
   score(): int {
     return this.id
   }
 }
 class Leaf extends Base {
-  tags = new Set<Base>()
+  tags: Set<Base>
+
+  constructor(id: int) {
+    super(id)
+    this.tags = new Set<Base>()
+  }
+
   score(): int {
     return this.id * 2 + this.tags.size
   }
 }
 class Box {
   item?: Base | Leaf
-  rec: Record<string, Thing> = {}
+  rec: Record<string, Thing>
   get?: () => int
+
+  constructor() {
+    this.rec = {}
+  }
 }
 type Any = Base | Box
 

@@ -14,7 +14,12 @@ export function* parseLines(lines: string[]) {
 }
 
 export class Cart {
-  items: Item[] = []
+  items: Item[]
+
+  constructor() {
+    this.items = []
+  }
+
   add(item: Item) {
     this.items.push(item)
   }

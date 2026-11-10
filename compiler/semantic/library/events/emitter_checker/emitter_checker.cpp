@@ -495,7 +495,6 @@ Expr *EmitterChecker::callLibraryMethod(CallExpr *call, MemberExpr *member, Clas
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
   assert(!methods.empty() && "a method of the emitter's code");
   FuncSymbol *sym = methods[0]->sym;
-  this->returnInferrer->resolveParams(sym);
   llvm::SMLoc loc = member->loc();
   std::vector<const Type *> params = sym->params;
   const Type *ret = sym->getReturnType();
@@ -526,7 +525,6 @@ Expr *EmitterChecker::callLibraryMethod(CallExpr *call, MemberExpr *member, Clas
   member->type = this->returnInferrer->functionType(callee);
   call->type = ret ? ret : Type::error();
   if (callee != sym) {
-    this->returnInferrer->resolveParams(callee);
     return this->argumentChecker->checkArguments(call, callee->params, callee->minArgs,
                                                  callee->hasRest, loc, given);
   }

@@ -3,9 +3,11 @@
 // nodes (fan-out 4, depth 9) are built, walked from each leaf up to the root
 // and dropped; in tz each tree is one group (in Go, the collector).
 class TreeNode {
-  children: TreeNode[] = []
+  children: TreeNode[]
   parent?: TreeNode
-  constructor(public id: int) {}
+  constructor(public id: int) {
+    this.children = []
+  }
 }
 
 let nextId = 0

@@ -51,6 +51,7 @@ public:
 
 enum class ClassDeclarerTypedFieldErrorCode {
   NO_TYPE,
+  PROPERTY_NO_TYPE,
 };
 
 struct ClassDeclarerTypedFieldError {
@@ -61,6 +62,21 @@ struct ClassDeclarerTypedFieldError {
 class ErrorTextTypedField {
 public:
   static std::string missing(llvm::StringRef field);
+  static std::string property(llvm::StringRef field);
+};
+
+enum class ClassDeclarerFieldValueErrorCode {
+  VALUE_OUTSIDE_CONSTRUCTOR,
+};
+
+struct ClassDeclarerFieldValueError {
+  ClassDeclarerFieldValueErrorCode code;
+  std::string message;
+};
+
+class ErrorTextDeclaredValue {
+public:
+  static std::string constructor(llvm::StringRef field);
 };
 
 enum class ClassDeclarerStaticTypeParamsErrorCode {

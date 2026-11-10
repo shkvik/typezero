@@ -2,8 +2,10 @@
 // Async functions of every kind: methods that use `this`, closures, generic
 // functions, arrows given to map, `return` of a Promise.
 class Store {
-  items: string[] = []
-  constructor(public name: string) {}
+  items: string[]
+  constructor(public name: string) {
+    this.items = []
+  }
   async add(item: string) {
     await undefined
     this.items.push(item)

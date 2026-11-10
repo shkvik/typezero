@@ -81,7 +81,13 @@ if (after.isOk()) await after.value.stop()
 // functions is there as statics of Stream too, as in node. A class of the
 // program replaces the methods the stream calls: onRead and the others.
 class Countdown extends Readable<string> {
-  private left = 3
+  private left: int
+
+  constructor() {
+    super()
+    this.left = 3
+  }
+
   protected override onRead() {
     if (this.left == 0) this.pushEnd()
     else this.push(`${this.left--}`)

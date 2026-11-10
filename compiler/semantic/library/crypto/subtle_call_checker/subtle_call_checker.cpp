@@ -7,7 +7,6 @@
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
-#include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/crypto/subtle_algorithms/subtle_algorithms.h"
 #include "compiler/semantic/library/events/event_target_checker/event_target_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
@@ -28,7 +27,6 @@ SubtleCallChecker::SubtleCallChecker(SemanticState &owner, SemanticParts &all)
   this->scopes = &all.getScopes();
   this->callChecker = &all.getCallChecker();
   this->exprChecker = &all.getExprChecker();
-  this->returnInferrer = &all.getReturnInferrer();
   this->argumentChecker = &all.getArgumentChecker();
   this->methodCallChecker = &all.getMethodCallChecker();
   this->eventTargetChecker = &all.getEventTargetChecker();
@@ -550,9 +548,6 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(
         this->state.getLibraryDeclarations().findLibraryClass("SubtleCrypto"), method, false);
     FuncSymbol *sym = methods.size() == 1 ? methods[0]->sym : nullptr;
-    if (sym) {
-      this->returnInferrer->resolveParams(sym);
-    }
     for (size_t i = 0; i < args.size(); ++i) {
       if (!checkedArgs[i]) {
         args[i] = sym && i < sym->params.size()

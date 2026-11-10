@@ -7,8 +7,14 @@ export interface Priced {
 }
 
 export class Inventory {
-  counts = new Map<string, int>()
-  tags: Record<string, string[]> = {}
+  counts: Map<string, int>
+  tags: Record<string, string[]>
+
+  constructor() {
+    this.counts = new Map<string, int>()
+    this.tags = {}
+  }
+
   add(name: string, n: int, ...tags: string[]) {
     this.counts.set(name, (this.counts.get(name) ?? 0) + n)
     for (const t of tags) (this.tags[t] ??= []).push(name)
@@ -23,7 +29,13 @@ export class Inventory {
 }
 
 export class Shop extends Inventory implements Priced {
-  prices: Record<string, decimal> = {}
+  prices: Record<string, decimal>
+
+  constructor() {
+    super()
+    this.prices = {}
+  }
+
   price(name: string): Result<decimal, string> {
     const p = this.prices[name]
     if (p == undefined) return err(`no price for '${name}'`)
@@ -41,8 +53,14 @@ export class Shop extends Inventory implements Priced {
 }
 
 export class Ledger {
-  byDay = new Map<Date, string[]>()
-  closed = new Set<Date>()
+  byDay: Map<Date, string[]>
+  closed: Set<Date>
+
+  constructor() {
+    this.byDay = new Map<Date, string[]>()
+    this.closed = new Set<Date>()
+  }
+
   note(day: Date, text: string) {
     const list = this.byDay.get(day)
     if (list == undefined) this.byDay.set(day, [text])

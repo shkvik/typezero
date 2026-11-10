@@ -106,9 +106,9 @@ std::string ErrorTextRedeclared::narrower(llvm::StringRef name, llvm::StringRef 
 
 std::string ErrorTextRedeclared::noValue(llvm::StringRef name, llvm::StringRef owner) {
   return (llvm::Twine("'") + name + "' is a field of '" + owner +
-          "' already; declared again without a value, JavaScript would set "
+          "' already; declared again in a class without a constructor, JavaScript would set "
           "it to undefined after the constructor of '" +
-          owner + "' set it: drop the declaration, or give it a value")
+          owner + "' set it: drop the declaration, or set it in a constructor")
       .str();
 }
 

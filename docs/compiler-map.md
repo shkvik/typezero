@@ -751,7 +751,10 @@ packages/             пакеты: package.json, package-lock.json, JSR, git, t
   partial/            Partial: неполная версия (^1, ~1.2)
   paths/              папки пакетов, поиск файла вверх по папкам
   port/               tz port — перенос библиотеки TypeScript
+    class_members/    ClassMembers: поля со значениями и конструкторы класса при переносе
+    class_shape/      ClassShape: где тело класса и расширяет ли он другой
     edit/             Edit: правка текста при переносе
+    field_value/      FieldValue: поле со значением, которое уходит в конструктор
     file_port/        FilePort: перенос одного файла
     note/             Note: заметка о переносе
     port_context/     PortContext: общее для переноса пакета

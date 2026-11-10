@@ -371,7 +371,6 @@ Expr *ReflectCallChecker::directReflectApply(CallExpr *call, const FunctionDecl 
     return nullptr;
   }
   FuncSymbol *sym = fn->sym;
-  this->returnInferrer->resolveParams(sym);
   std::vector<Expr *> args;
   for (const ArrayLitExpr::Element &e : list->elements) {
     if (e.spread || e.hole) {

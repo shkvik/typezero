@@ -359,7 +359,6 @@ UnionChecker::ResultUnionMethodTyped UnionChecker::checkUnionMethodCall(CallExpr
           });
         }
         FuncSymbol *sym = variants[0]->sym;
-        this->returnInferrer->resolveParams(sym);
         if (FunctionDecl *impl = ClassLinks::soleImplementation(cls, sym->decl)) {
           entry.method = impl->sym;
         } else {

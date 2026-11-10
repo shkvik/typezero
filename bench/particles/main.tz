@@ -19,8 +19,10 @@ class Vec {
 }
 
 class Particle {
-  velocity = new Vec(0, 0)
-  constructor(public position: Vec, public mass: double) {}
+  velocity: Vec
+  constructor(public position: Vec, public mass: double) {
+    this.velocity = new Vec(0, 0)
+  }
   accelerate(force: Vec, dt: double) {
     this.velocity = this.velocity.add(force.scale(dt / this.mass))
   }
@@ -33,8 +35,9 @@ class Particle {
 }
 
 class World {
-  particles: Particle[] = []
+  particles: Particle[]
   constructor(count: int) {
+    this.particles = []
     for (let i = 0; i < count; i++) {
       const x = ((i * 7919) % 1000).toDouble() / 100.0
       const y = ((i * 104729) % 1000).toDouble() / 100.0

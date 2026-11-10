@@ -45,7 +45,6 @@ public:
   const Type *assumed = nullptr;
   FunctionDecl *decl = nullptr;
   bool discardsResult = false;
-  bool pendingParams = false;
   std::vector<const Type *> typeParams;
   std::vector<const Type *> typeDefaults;
   std::optional<TypePredicate> predicate;

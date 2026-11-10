@@ -8,13 +8,10 @@
 namespace tz {
 
 class SemanticParts;
-class Scopes;
 class ClassLinks;
 class TypeParams;
-class ExprChecker;
 class LateClasses;
 class AsyncChecker;
-class ClassChecker;
 class ImportBinder;
 class TypeRelations;
 class FunctionChecker;
@@ -37,7 +34,6 @@ public:
 
   static bool returnsValue(const Stmt *body);
 
-  void resolveParams(FuncSymbol *fn);
   void inferReturnType(FuncSymbol *fn);
   void checkAndInfer(FunctionDecl *decl);
   const Type *returnType(FuncSymbol *fn);
@@ -49,7 +45,6 @@ public:
 
 private:
   using ResultCycleTypeKnown = Result<const Type *, ReturnInferrerCycleTypeError>;
-  using ResultParamTypeKnown = Result<const Type *, ReturnInferrerDefaultTypeError>;
   using ResultReturnsUnified = Result<const Type *, ReturnInferrerCommonReturnError>;
   using ResultNotCalledEarly = Result<const FuncSymbol *, ReturnInferrerEarlyCallError>;
   using ResultReturnsDefined = Result<const FuncSymbol *, ReturnInferrerDefinedReturnError>;
@@ -60,11 +55,6 @@ private:
   const Type *trialReturn(FuncSymbol *fn);
   const Type *templateReturn(FuncSymbol *fn);
   ResultNotCalledEarly earlyCall(const FuncSymbol *fn) const;
-  const Type *instanceParam(FuncSymbol *fn, const Type *type);
-  static bool isInstanceMethod(const FuncSymbol *fn);
-  void copyGenericParams(FuncSymbol *fn);
-  void resolveOwnParams(FuncSymbol *fn);
-  ResultParamTypeKnown defaultType(const Param &param, const Type *found) const;
   ResultCycleTypeKnown cycleType(const FuncSymbol *fn, int cycleSize, bool failed) const;
   ResultReturnsUnified commonReturn(const FuncSymbol *fn, const Type *before,
                                     const ReturnStmt *ret) const;
@@ -76,13 +66,10 @@ private:
                       llvm::ArrayRef<YieldExpr *> yields);
 
   SemanticState &state;
-  Scopes *scopes = nullptr;
   ClassLinks *classLinks = nullptr;
   TypeParams *typeParams = nullptr;
-  ExprChecker *exprChecker = nullptr;
   LateClasses *lateClasses = nullptr;
   AsyncChecker *asyncChecker = nullptr;
-  ClassChecker *classChecker = nullptr;
   ImportBinder *importBinder = nullptr;
   TypeRelations *typeRelations = nullptr;
   FunctionChecker *functionChecker = nullptr;

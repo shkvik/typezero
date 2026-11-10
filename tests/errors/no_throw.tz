@@ -62,11 +62,20 @@ function decimals(places: int, mode: string, base: int) {
 }
 
 class Node {
-  next: Node | undefined = undefined
+  next: Node | undefined
+
+  constructor() {
+    this.next = undefined
+  }
 }
 class Point {
-  x = 1
-  y = 2
+  x: int
+  y: int
+
+  constructor() {
+    this.x = 1
+    this.y = 2
+  }
 }
 function json(j: Json) {
   // expect-error: type 'Result<string, JsonError>' is not assignable to type 'string'

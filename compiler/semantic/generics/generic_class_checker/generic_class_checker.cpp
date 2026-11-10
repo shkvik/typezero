@@ -221,7 +221,6 @@ GenericClassChecker::constructorFit(const NewExpr *expr, const ClassDecl *generi
                                     llvm::ArrayRef<FunctionDecl *> ctors) {
   std::vector<FunctionDecl *> fit;
   for (FunctionDecl *c : ctors) {
-    this->returnInferrer->resolveParams(c->sym);
     const FuncSymbol *sym = c->sym;
     if (expr->args.size() >= sym->minArgs &&
         (sym->hasRest || expr->args.size() <= sym->params.size())) {
@@ -331,7 +330,6 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
     fn->typeParams = generic->typeArgs;
     fn->typeDefaults = this->state.getGenericStore().getClassDefaults(generic);
     if (ctor) {
-      this->returnInferrer->resolveParams(ctor->sym);
       fn->params = ctor->sym->params;
       fn->minArgs = ctor->sym->minArgs;
       fn->hasRest = ctor->sym->hasRest;

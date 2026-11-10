@@ -21,7 +21,11 @@ console.log(`${u}`)
 u()
 
 class User {
-  name = "Ann"
+  name: string
+
+  constructor() {
+    this.name = "Ann"
+  }
 }
 const o: object = new User()
 // expect-error: an object has no property 'name' until 'instanceof' shows its class, e.g. 'if (o instanceof C) ...'

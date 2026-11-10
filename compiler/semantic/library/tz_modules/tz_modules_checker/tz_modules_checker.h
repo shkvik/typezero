@@ -8,7 +8,6 @@ namespace tz {
 
 class SemanticParts;
 class LibraryCalls;
-class ReturnInferrer;
 
 class TzModulesChecker {
 public:
@@ -44,7 +43,6 @@ private:
 
   SemanticState &state;
   LibraryCalls *libraryCalls = nullptr;
-  ReturnInferrer *returnInferrer = nullptr;
 };
 
 }

@@ -25,8 +25,10 @@ class Person implements Greeter, Aged {
 }
 
 class Robot implements Greeter {
-  serial = 7
-  constructor(public name: string) {}
+  serial: int
+  constructor(public name: string) {
+    this.serial = 7
+  }
   greet(other: string) {
     return `${this.name}#${this.serial} beeps at ${other}`
   }
@@ -35,9 +37,10 @@ class Robot implements Greeter {
 // A class that extends one with interfaces has them too; its own fields
 // lie after those up the chain, so Aged reads its fields through a table.
 class Student extends Robot implements Aged {
-  born = 2010
+  born: int
   constructor(name: string, public age: int) {
     super(name)
+    this.born = 2010
   }
 }
 
@@ -84,7 +87,12 @@ const counters: Counter[] = [
   { n: 10, inc() { this.n-- }, get() { return this.n * 100 } },
 ]
 class Real implements Counter {
-  n = 5
+  n: int
+
+  constructor() {
+    this.n = 5
+  }
+
   inc() {
     this.n *= 2
   }

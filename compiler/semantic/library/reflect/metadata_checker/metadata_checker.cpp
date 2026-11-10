@@ -212,7 +212,6 @@ void MetadataChecker::writeDesignRecords(ClassDecl *cls, ClassField *field, Func
                                          const FunctionDecl *ctor, llvm::SMLoc loc) {
   auto paramTypes = [&](const FunctionDecl *fn) {
     auto *list = this->state.getAst().make<ArrayLitExpr>(loc);
-    this->returnInferrer->resolveParams(fn->sym);
     const Type *any = Type::constructorOf(Type::anyObject());
     for (const Type *param : fn->sym->params) {
       if (param) {

@@ -42,7 +42,12 @@ bus.emit("chain", 3)
 console.log(bus.eventNames())
 
 class App {
-  events = new EventEmitter()
+  events: EventEmitter
+
+  constructor() {
+    this.events = new EventEmitter()
+  }
+
   start() {
     this.events.emit("ready", { at: 1 })
   }

@@ -37,4 +37,4 @@ lab: sit, roll no tricks nobody
 Rex Tweety, 2 legs: Tweety says tweet
 2
 4
-Plain { id: 7, label: 'seven', extra: 'e' }
+Plain { id: 7, label: 'seven' }

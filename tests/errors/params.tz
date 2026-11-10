@@ -10,11 +10,18 @@ g()
 g(1, 2, "3", 4)
 // expect-error: type 'string' is not assignable to type 'int'
 function h(a: int = "zero"): void {}
-// expect-error: cannot tell the type of 'p' from its default value
+// expect-error: parameter 'p' needs a type: only a literal default value (a number, a string, true or false) gives one
 function m(p = undefined): void {}
 // expect-error: the default value of 'first' uses 'later', which is not set yet
 function o(first: int = later, later: int = 1): void {}
 function q(maybe?: string): int {
   // expect-error: the value may be undefined
   return maybe.length
+}
+// A default value gives the parameter its type only when it is a literal.
+// expect-error: parameter 'n' needs a type: only a literal default value
+function twice(n = [1, 2].length): void {}
+class Sized {
+  // expect-error: parameter 'size' declares a field and needs a type, e.g. 'public size: int'
+  constructor(public size = 5) {}
 }

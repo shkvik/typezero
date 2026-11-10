@@ -284,9 +284,6 @@ OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::ve
   const FunctionDecl *first = variants[0];
   std::string what = first->isConstructor() ? ErrorTextVariant::ctorOf(first->cls()->name)
                                             : ErrorTextVariant::quoted(first->name);
-  for (FunctionDecl *v : variants) {
-    this->returnInferrer->resolveParams(v->sym);
-  }
   if (llvm::is_contained(spread, true)) {
     checkLoosely();
     std::string message = ErrorTextVariant::spread(what);

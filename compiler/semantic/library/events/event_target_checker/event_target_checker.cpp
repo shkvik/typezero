@@ -8,7 +8,6 @@
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
 #include "compiler/semantic/generics/generic_instantiator/generic_instantiator.h"
 #include "compiler/semantic/generics/type_params/type_params.h"
-#include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/semantic/library/events/event_maps/event_maps.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
@@ -37,7 +36,6 @@ EventTargetChecker::EventTargetChecker(SemanticState &owner, SemanticParts &all)
   this->typeRelations = &all.getTypeRelations();
   this->closureChecker = &all.getClosureChecker();
   this->emitterChecker = &all.getEmitterChecker();
-  this->returnInferrer = &all.getReturnInferrer();
   this->argumentChecker = &all.getArgumentChecker();
   this->genericInstantiator = &all.getGenericInstantiator();
 }
@@ -201,7 +199,6 @@ Expr *EventTargetChecker::callLibraryStatic(CallExpr *call, ClassDecl *cls, llvm
 Expr *EventTargetChecker::callLibrarySymbol(CallExpr *call, FuncSymbol *sym,
                                             llvm::ArrayRef<const Type *> bound,
                                             const std::vector<bool> &given, llvm::SMLoc loc) {
-  this->returnInferrer->resolveParams(sym);
   const Type *ret = sym->getReturnType();
   FuncSymbol *callee = sym;
   if (sym->isGeneric() && !this->state.getFunctionStack().isInsideTrial() &&
@@ -210,7 +207,6 @@ Expr *EventTargetChecker::callLibrarySymbol(CallExpr *call, FuncSymbol *sym,
       callee = instance;
     }
   }
-  this->returnInferrer->resolveParams(callee);
   call->target = FunctionCall{.func = callee};
   call->type = ret ? this->typeParams->substitute(ret, sym->typeParams, bound) : Type::error();
   std::vector<const Type *> params = callee->params;

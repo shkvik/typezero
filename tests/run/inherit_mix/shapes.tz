@@ -7,8 +7,10 @@ export interface Named {
 
 export abstract class Shape implements Named {
   static size = /^(\d+)x(\d+)$/
-  id = 0
-  constructor(public name: string) {}
+  id: int
+  constructor(public name: string) {
+    this.id = 0
+  }
   abstract area(): double
   *corners(): Generator<string> {
     yield `${this.name}: no corners`
@@ -19,9 +21,10 @@ export abstract class Shape implements Named {
 }
 
 export class Rect extends Shape {
-  label = /[a-z]+/
+  label: RegExp
   constructor(public w: double, public h: double) {
     super("rect")
+    this.label = /[a-z]+/
   }
   area() {
     return this.w * this.h

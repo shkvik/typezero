@@ -23,14 +23,27 @@ std::string ErrorTextFieldOrMethod::shared(llvm::StringRef field, llvm::StringRe
 
 std::string ErrorTextSetLater::definite(llvm::StringRef field) {
   return (llvm::Twine("'") + field +
-          "!' (\"set later\") is not supported: a field gets its value where it is declared or "
-          "in the constructor; if it may have none, make it optional: '" +
+          "!' (\"set later\") is not supported: a field gets its value in the constructor; if it "
+          "may have none, make it optional: '" +
           field + "?: T'")
       .str();
 }
 
 std::string ErrorTextTypedField::missing(llvm::StringRef field) {
   return (llvm::Twine("field '") + field + "' needs a type, e.g. '" + field + ": int'").str();
+}
+
+std::string ErrorTextTypedField::property(llvm::StringRef field) {
+  return (llvm::Twine("parameter '") + field +
+          "' declares a field and needs a type, e.g. 'public " + field + ": int'")
+      .str();
+}
+
+std::string ErrorTextDeclaredValue::constructor(llvm::StringRef field) {
+  return (llvm::Twine("field '") + field +
+          "' cannot get a value where it is declared: set it in the constructor, 'this." + field +
+          " = ...'")
+      .str();
 }
 
 std::string ErrorTextStaticParams::shared(llvm::StringRef field, llvm::StringRef className) {

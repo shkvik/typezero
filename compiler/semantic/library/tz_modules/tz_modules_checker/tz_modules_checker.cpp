@@ -1,5 +1,4 @@
 #include "compiler/semantic/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
-#include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
@@ -14,7 +13,6 @@ namespace tz {
 TzModulesChecker::TzModulesChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->libraryCalls = &all.getLibraryCalls();
-  this->returnInferrer = &all.getReturnInferrer();
 }
 
 const Expr *TzModulesChecker::uncast(const Expr *expr) {
@@ -119,7 +117,6 @@ TzModulesChecker::ResultExternalReturn TzModulesChecker::externalReturn(const Ty
 
 void TzModulesChecker::checkExternal(FunctionDecl *fn) {
   FuncSymbol *sym = fn->sym;
-  this->returnInferrer->resolveParams(sym);
   fn->checked = true;
   ResultPlainSignature plain = TzModulesChecker::plainSignature(fn);
   if (plain.isErr()) {

@@ -14,9 +14,10 @@ export abstract class Shape implements Measured {
 }
 
 export class Circle extends Shape {
-  kind: "circle" = "circle"
+  kind: "circle"
   constructor(name: string, made: Date, public r: double) {
     super(name, made)
+    this.kind = "circle"
   }
   area(): double {
     return 3 * this.r * this.r
@@ -24,9 +25,10 @@ export class Circle extends Shape {
 }
 
 export class Rect extends Shape {
-  kind: "rect" = "rect"
+  kind: "rect"
   constructor(name: string, made: Date, public w: double, public h: double) {
     super(name, made)
+    this.kind = "rect"
   }
   area(): double {
     return this.w * this.h

@@ -1,15 +1,22 @@
 // same-as-node --experimental-transform-types
-// What the compiler infers in classes: the types of fields from their
-// values, the return types of methods (also of those that call each other),
-// and the types of literals from the constructors and methods they go to.
+// What the compiler infers in classes: the return types of methods (also of
+// those that call each other), and the types of literals from the
+// constructors and methods they go to.
 const base = 10
 
 class Stats {
-  values = [1.5, 2.5, 4]
-  count = this.values.length + base
-  origin = { x: 0, y: 0 }
-  label = `stats of ${this.values.length}`
-  ready = this.count > 0
+  values: double[]
+  count: int
+  origin: { x: int; y: int }
+  label: string
+  ready: boolean
+  constructor() {
+    this.values = [1.5, 2.5, 4]
+    this.count = this.values.length + base
+    this.origin = { x: 0, y: 0 }
+    this.label = `stats of ${this.values.length}`
+    this.ready = this.count > 0
+  }
   scale(by: double = this.values.length.toDouble()) {
     return this.values.map(v => v * by)
   }
@@ -62,7 +69,12 @@ console.log(segment.length(), segment.moved(offset))
 
 // A tree of instances, and a static field that holds an instance.
 class Tree {
-  children: Tree[] = []
+  children: Tree[]
+
+  constructor() {
+    this.children = []
+  }
+
   add(child: Tree) {
     this.children.push(child)
     return this

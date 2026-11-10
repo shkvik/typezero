@@ -2,7 +2,12 @@
 class Box {
   // A field before `*name()` needs a ';', as in JavaScript: `[] * values()`
   // would go on.
-  items: int[] = [];
+  items: int[];
+
+  constructor() {
+    this.items = [];
+  }
+
   *values() {
     yield* this.items
     // expect-error: 'yield*' needs an array, a string or an iterator, found 'Result<

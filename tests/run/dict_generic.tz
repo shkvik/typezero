@@ -1,8 +1,14 @@
 // same-as-node
 // Dictionaries in classes, generic functions and Results.
 class Inventory {
-  private items = new Map<string, int>()
-  readonly tags: Set<string> = new Set()
+  private items: Map<string, int>
+  readonly tags: Set<string>
+
+  constructor() {
+    this.items = new Map<string, int>()
+    this.tags = new Set()
+  }
+
   add(name: string, n: int) {
     this.items.set(name, (this.items.get(name) ?? 0) + n)
     this.tags.add(name[0] ?? "")

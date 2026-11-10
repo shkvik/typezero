@@ -52,16 +52,24 @@ rename(ivan)
 console.log(ivan.pet.bark())
 
 // And by a class that extends another: the constructor of the class up the
-// chain sets the field, and the class's own initializer after it.
+// chain sets the field, and the class's own constructor after it.
 class Kennel {
   pet: Animal
-  open = true
-  constructor(pet: Animal) { this.pet = pet }
+  open: boolean
+  constructor(pet: Animal) {
+    this.open = true
+    this.pet = pet
+  }
   describe() { return `${this.pet.name} (${this.open ? "open" : "closed"})` }
 }
 class DogKennel extends Kennel {
-  pet: Dog = new Dog("Lassie")
-  readonly open = false
+  pet: Dog
+  readonly open: boolean
+  constructor(pet: Animal) {
+    super(pet)
+    this.pet = new Dog("Lassie")
+    this.open = false
+  }
   walk() { return this.pet.bark() }
 }
 const kennel = new DogKennel(new Dog("Rex"))

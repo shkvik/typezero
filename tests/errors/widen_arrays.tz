@@ -22,28 +22,29 @@ relay(dogs)
 
 // Kept in a field, and filled by a method later.
 class Shelter {
-  animals: Animal[] = []
+  animals: Animal[]
+  constructor() { this.animals = [] }
   take(xs: Animal[]) { this.animals = xs }
   add(x: Animal) { this.animals.unshift(x) }
 }
 const shelter = new Shelter()
-// expect-error: line 27 puts an 'Animal' into it, and an array of 'Dog' cannot hold one
+// expect-error: line 28 puts an 'Animal' into it, and an array of 'Dog' cannot hold one
 shelter.take(dogs)
 
 // Inside another array, in a dictionary, returned, in a closure.
 const nested: Animal[][] = []
-// expect-error: line 37 puts a 'Cat' into it
+// expect-error: line 38 puts a 'Cat' into it
 nested.push(dogs)
 nested[0]?.push(new Cat("Nested"))
 const byKind = new Map<string, Animal[]>()
-// expect-error: line 41 puts a 'Cat' into it
+// expect-error: line 42 puts a 'Cat' into it
 byKind.set("dogs", dogs)
 byKind.get("dogs")?.fill(new Cat("Filled"))
 function same(xs: Animal[]) { return xs }
-// expect-error: line 44 puts a 'Cat' into it
+// expect-error: line 45 puts a 'Cat' into it
 same(dogs).push(new Cat("Back"))
 function later(xs: Animal[]) { return () => { xs.push(new Cat("Later")) } }
-// expect-error: line 45 puts a 'Cat' into it
+// expect-error: line 46 puts a 'Cat' into it
 later(dogs)
 
 // Called through a function value, or as a callback.
@@ -51,11 +52,11 @@ const handlers: ((xs: Animal[]) => void)[] = [adopt]
 // expect-error: puts a 'Cat' into it, and an array of 'Dog' cannot hold one
 handlers[0]?.(dogs)
 function each(xs: Animal[], f: (xs: Animal[]) => void) { f(xs) }
-// expect-error: line 55 puts a 'Cat' into it
+// expect-error: line 56 puts a 'Cat' into it
 each(dogs, xs => { xs.push(new Cat("Callback")) })
 
 // An array of arrays: the inner arrays may not get another Animal either.
 const kennels: Dog[][] = [[new Dog("A")]]
 function fillAll(all: Animal[][]) { for (const xs of all) xs.push(new Cat("C")) }
-// expect-error: 'Dog[][]' cannot go where 'Animal[][]' is expected here: line 59 puts a 'Cat' into an array in it, and an array of 'Dog' cannot hold one
+// expect-error: 'Dog[][]' cannot go where 'Animal[][]' is expected here: line 60 puts a 'Cat' into an array in it, and an array of 'Dog' cannot hold one
 fillAll(kennels)

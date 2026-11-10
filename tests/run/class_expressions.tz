@@ -9,8 +9,9 @@ let made = 0
 function makeCounter() {
   return class Counter {
     static instances = 0
-    count = 0
+    count: int
     constructor() {
+      this.count = 0
       Counter.instances++
       made++
     }
@@ -31,13 +32,22 @@ console.log(B.instances)
 
 // In a generic class, each instance of it makes its own class.
 class Base {
-  base = true
+  base: boolean
+
+  constructor() {
+    this.base = true
+  }
 }
 class Box<T> {
   constructor(public value: T) {}
   holder() {
     return class Holder extends Base {
-      items: T[] = []
+      items: T[]
+
+      constructor() {
+        super()
+        this.items = []
+      }
     }
   }
 }
@@ -54,7 +64,13 @@ function Track(_cls: object, name: string) {
 }
 function WithStatus<B extends Constructor>(Base: B) {
   return class extends Base {
-    @Track status = "ok"
+    @Track status: string
+
+    constructor(...args: ConstructorArgs) {
+      super(...args)
+      this.status = "ok"
+    }
+
     @Track check() {
       return this.status
     }

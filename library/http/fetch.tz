@@ -126,17 +126,25 @@ function tlsVersionOf(socket: object): "TLSv1.2" | "TLSv1.3" {
 }
 
 export class Connection {
-  origin = ""
-  status = 0
-  absolute = false
-  proxyTarget: ProxyTarget | undefined = undefined
-  protocol: ResponseProtocol = "http/1.1"
-  address = ""
-  usedAt: double = 0
+  origin: string
+  status: int
+  absolute: boolean
+  proxyTarget: ProxyTarget | undefined
+  protocol: ResponseProtocol
+  address: string
+  usedAt: double
   private socket: object
-  private head: string[] = []
+  private head: string[]
 
   constructor(socket: object) {
+    this.origin = ""
+    this.status = 0
+    this.absolute = false
+    this.proxyTarget = undefined
+    this.protocol = "http/1.1"
+    this.address = ""
+    this.usedAt = 0
+    this.head = []
     this.socket = socket
   }
 
@@ -501,10 +509,11 @@ function headerValue(value: string): string {
 export type HeadersInit = Headers | [string, string][] | Record<string, string>
 
 export class Headers {
-  private list: string[] = []
+  private list: string[]
   private shown?: string[]
 
   constructor(init?: HeadersInit) {
+    this.list = []
     if (init == undefined) return
     if (init instanceof Headers) {
       this.list = [...init.list]
@@ -684,20 +693,34 @@ export type ReadableStreamReadResult<R> = { done: false; value: R } | { done: tr
 type ReadResult<R, E> = Result<ReadableStreamReadResult<R>, E | ReaderError | ControllerClosedError>
 
 class StreamState<R, E extends StreamError> {
-  queue: R[] = []
-  state = "readable"
+  queue: R[]
+  state: string
   error?: E
   misuse?: ControllerClosedError
   source?: UnderlyingSource<R, E>
-  started = false
-  pulling = false
-  pullAgain = false
-  closeRequested = false
-  locked = false
-  disturbed = false
-  bytes = false
-  highWaterMark: double = 1
-  reads: ((result: ReadResult<R, E>) => void)[] = []
+  started: boolean
+  pulling: boolean
+  pullAgain: boolean
+  closeRequested: boolean
+  locked: boolean
+  disturbed: boolean
+  bytes: boolean
+  highWaterMark: double
+  reads: ((result: ReadResult<R, E>) => void)[]
+
+  constructor() {
+    this.queue = []
+    this.state = "readable"
+    this.started = false
+    this.pulling = false
+    this.pullAgain = false
+    this.closeRequested = false
+    this.locked = false
+    this.disturbed = false
+    this.bytes = false
+    this.highWaterMark = 1
+    this.reads = []
+  }
 
   lock(locked: boolean) {
     this.locked = locked
@@ -1460,12 +1483,15 @@ class Wire {
   peer?: Peer
   tracer?: FetchTracer
   decode?: Decode
-  coding = ""
-  finished = false
+  coding: string
+  finished: boolean
   failure?: BodyError
-  received = 0
+  received: int
 
   constructor(conn: Connection, peer?: Peer, tracer?: FetchTracer) {
+    this.coding = ""
+    this.finished = false
+    this.received = 0
     this.conn = conn
     this.peer = peer
     this.tracer = tracer
@@ -1711,14 +1737,20 @@ function decodersOf(encoding: string | undefined): object[] | undefined {
 }
 
 class Body {
-  kind = BODY_NONE
-  text = ""
+  kind: int
+  text: string
   bytes?: Uint8Array
   stream?: ReadableStream<Uint8Array, BodyError>
   wire?: Wire
-  used = false
+  used: boolean
   type?: string
   opened?: StreamState<Uint8Array, BodyError>
+
+  constructor() {
+    this.kind = BODY_NONE
+    this.text = ""
+    this.used = false
+  }
 
   static of(init: BodyData | undefined): Body {
     const b = new Body()
@@ -1936,10 +1968,15 @@ class BodyStream extends ReadableStream<Uint8Array, BodyError> {
 }
 
 class TeeState {
-  buffers: Uint8Array[][] = [[], []]
-  done = false
+  buffers: Uint8Array[][]
+  done: boolean
   failure?: BodyError
   reading?: Promise<void>
+
+  constructor() {
+    this.buffers = [[], []]
+    this.done = false
+  }
 }
 
 function tee(source: ReadableStream<Uint8Array, BodyError>):
@@ -1989,7 +2026,11 @@ function tee(source: ReadableStream<Uint8Array, BodyError>):
 }
 
 export class FormData {
-  private list: [string, string][] = []
+  private list: [string, string][]
+
+  constructor() {
+    this.list = []
+  }
 
   append(name: string, value: string) {
     this.list.push([name, value])
@@ -2139,10 +2180,10 @@ function normalizeMethod(method: string): string {
 }
 
 export class Request {
-  readonly method: string = "GET"
+  readonly method: string
   readonly url: string
   readonly headers: Headers
-  readonly redirect: RequestRedirect = "follow"
+  readonly redirect: RequestRedirect
   readonly duplex?: "half"
   readonly timeout?: int
   readonly connectProtocol?: string
@@ -2150,6 +2191,8 @@ export class Request {
   private data: Body
 
   constructor(input: string | URL | Request, init?: RequestOptions) {
+    this.method = "GET"
+    this.redirect = "follow"
     if (input instanceof Request) {
       this.method = input.method
       this.url = input.url
@@ -2187,6 +2230,8 @@ export class Request {
   }
 
   private constructor(conn: Connection) {
+    this.method = "GET"
+    this.redirect = "follow"
     this.method = conn.method()
     this.headers = Headers.readFrom(conn)
     this.url = conn.target()
@@ -2352,19 +2397,26 @@ export type ResponseProtocol = "http/1.1" | "h2"
 export type HttpVersion = "auto" | "1.1" | "2"
 
 export class Response {
-  readonly status: int = 200
-  readonly statusText: string = ""
+  readonly status: int
+  readonly statusText: string
   readonly headers: Headers
-  readonly ok: boolean = true
-  readonly redirected: boolean = false
-  readonly type: string = "default"
-  readonly url: string = ""
-  readonly protocol: ResponseProtocol = "http/1.1"
+  readonly ok: boolean
+  readonly redirected: boolean
+  readonly type: string
+  readonly url: string
+  readonly protocol: ResponseProtocol
   upgrade?: (conn: Connection) => void
   private bodyStream?: ReadableStream<Uint8Array, BodyError>
   private data: Body
 
   constructor(body?: BodyData, init?: ResponseInit) {
+    this.status = 200
+    this.statusText = ""
+    this.ok = true
+    this.redirected = false
+    this.type = "default"
+    this.url = ""
+    this.protocol = "http/1.1"
     const status: int = init?.status ?? 200
     this.status = status
     this.ok = status >= 200 && status <= 299
@@ -2396,6 +2448,13 @@ export class Response {
   private constructor(status: int, statusText: string, headers: Headers, data: Body,
                       url: string, redirected: boolean, type: string,
                       protocol: ResponseProtocol) {
+    this.status = 200
+    this.statusText = ""
+    this.ok = true
+    this.redirected = false
+    this.type = "default"
+    this.url = ""
+    this.protocol = "http/1.1"
     this.status = status
     this.ok = status >= 200 && status <= 299
     this.statusText = statusText

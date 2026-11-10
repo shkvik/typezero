@@ -28,7 +28,12 @@ export class LineFeed {
 }
 
 export class Journal {
-  entries: string[] = []
+  entries: string[]
+
+  constructor() {
+    this.entries = []
+  }
+
   add(entry: string) {
     this.entries.push(entry)
   }
@@ -40,7 +45,12 @@ export class Journal {
 }
 
 export class Queue<T> {
-  items: T[] = []
+  items: T[]
+
+  constructor() {
+    this.items = []
+  }
+
   push(x: T) {
     this.items.push(x)
   }

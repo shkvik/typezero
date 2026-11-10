@@ -34,7 +34,11 @@ export async function* counting(upTo: int) {
 }
 
 export class Handlers {
-  served = 0
+  served: int
+
+  constructor() {
+    this.served = 0
+  }
 
   @Route("/hello")
   hello(req: Request): Response {

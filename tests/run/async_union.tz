@@ -43,7 +43,11 @@ const some: int | Promise<int> | undefined = process.argv.length > 100 ? undefin
 const none: int | Promise<int> | undefined = process.argv.length > 100 ? 1 : undefined
 console.log(await some, await none)
 class Job {
-  run: Promise<string> | undefined = undefined
+  run: Promise<string> | undefined
+
+  constructor() {
+    this.run = undefined
+  }
 }
 const job = new Job()
 job.run = later("ran", 1)

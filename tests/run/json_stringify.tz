@@ -3,8 +3,10 @@
 // a decimal is a string (docs/decimal.md), a Result an object with its value
 // or its error, a tuple an array.
 class Point {
-  private secret = 1
-  constructor(public x: double, public y: double) {}
+  private secret: int
+  constructor(public x: double, public y: double) {
+    this.secret = 1
+  }
   length() { return Math.hypot(this.x, this.y) + this.secret.toDouble() }
 }
 type Item = { name: string; price?: double; tags: string[] }

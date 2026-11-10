@@ -215,9 +215,10 @@ ClassBases::ResultAccessIsNotLower ClassBases::accessKept(const ClassField &fiel
   return ok(&field);
 }
 
-ClassBases::ResultValueOnRedeclare ClassBases::valueGiven(const ClassField &field,
+ClassBases::ResultValueOnRedeclare ClassBases::valueGiven(const ClassDecl *cls,
+                                                          const ClassField &field,
                                                           const ClassDecl *owner) {
-  if (!field.init && !field.parameter()) {
+  if (!field.init && !field.parameter() && cls->constructors.empty()) {
     std::string message = ErrorTextRedeclared::noValue(field.name, owner->name);
 
     return err(ClassBasesValueGivenError{
@@ -337,7 +338,7 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
     if (access.isErr()) {
       this->state.getDiagnostics().error(f.loc, access.error().message);
     }
-    ResultValueOnRedeclare valued = ClassBases::valueGiven(f, owner);
+    ResultValueOnRedeclare valued = ClassBases::valueGiven(cls, f, owner);
     if (valued.isErr()) {
       this->state.getDiagnostics().error(f.loc, valued.error().message);
     }

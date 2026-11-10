@@ -2,22 +2,26 @@
 // of docs/objects.md is strict about writing through a wider type: a field
 // keeps its type and an array of Dog is not an array of Animal.
 class Animal {
-  constructor(public name: string) {}
+  constructor(public name: string) {
+    this.secret = 1
+    this.level = 2
+  }
   speak() {
     return "..."
   }
-  private secret = 1
-  protected level = 2
+  private secret: int
+  protected level: int
   static count = 0
 }
 
 // `super(...)` comes before `this`, once, as a statement of the constructor.
 class Dog extends Animal {
-  breed = "lab"
+  breed: string
   constructor(name: string) {
     // expect-error: 'this' cannot be used before 'super(...)': the object exists once the constructor of 'Animal' has run
     console.log(this.breed)
     super(name)
+    this.breed = "lab"
   }
 }
 class Cat extends Animal {
@@ -81,27 +85,45 @@ class Mole extends Animal {
 // of its own, which lie in memory the same way (and become read-only; code
 // that writes through Kennel is checked in tests/errors/widen_fields.tz).
 class Kennel {
-  pet: Animal = new Animal("a")
-  readonly size: int = 1
-  open = true
+  pet: Animal
+  readonly size: int
+  open: boolean
+
+  constructor() {
+    this.pet = new Animal("a")
+    this.size = 1
+    this.open = true
+  }
 }
 class DogKennel extends Kennel {
-  pet: Dog = new Dog("d")
-  readonly open = false
+  pet: Dog
+  readonly open: boolean
   // expect-error: field 'size' of 'DogKennel' is 'double', and 'Kennel' declares it as 'int'; a class can narrow a field of the class it extends only to objects of a type down the chain of its type
-  readonly size: double = 2
+  readonly size: double
+  constructor() {
+    super()
+    this.pet = new Dog("d")
+    this.open = false
+    this.size = 2
+  }
 }
 class Secretive extends Animal {
   // expect-error: 'secret' is private in class 'Animal', so a class that extends it cannot declare it again
+  // expect-error: field 'secret' cannot get a value where it is declared
   secret = 2
   // expect-error: 'speak' is a method of 'Animal', so a class that extends it cannot have a field of that name
+  // expect-error: field 'speak' cannot get a value where it is declared
   speak = 5
-  // expect-error: 'name' is a field of 'Animal' already; declared again without a value, JavaScript would set it to undefined after the constructor of 'Animal' set it
+  // expect-error: 'name' is a field of 'Animal' already; declared again in a class without a constructor, JavaScript would set it to undefined after the constructor of 'Animal' set it
   name: string
 }
 class Parent {
-  label = "p"
+  label: string
   onClick = () => 1
+
+  constructor() {
+    this.label = "p"
+  }
 }
 class Child extends Parent {
   // expect-error: 'label' is a field of 'Parent', so a class that extends it cannot have a method of that name
@@ -110,7 +132,7 @@ class Child extends Parent {
   onClick() { return 2 }
 }
 // expect-error: 'override' says that 'x' is a field of the class that 'Lone' extends, and it extends none
-class Lone { override x = 1 }
+class Lone { override x: int }
 
 // An array of Dog is an array of Animal while no code puts another Animal
 // into it (tests/errors/widen_arrays.tz).
@@ -154,7 +176,11 @@ class Widget {
   layout() {}
 }
 class Button extends Widget {
-  label = "ok"
+  label: string
+  constructor() {
+    super()
+    this.label = "ok"
+  }
   render() {
     console.log(this.label.length)
   }

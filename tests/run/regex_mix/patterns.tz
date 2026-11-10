@@ -3,8 +3,10 @@
 // Results, and a text.
 export class Scanner {
   static numbers = /-?\d+(?:\.\d+)?/g
-  words = /\p{L}+/gu
-  constructor(public label: string) {}
+  words: RegExp
+  constructor(public label: string) {
+    this.words = /\p{L}+/gu
+  }
 
   wordsOf(text: string) {
     return [...text.matchAll(this.words)].map(m => m[0])

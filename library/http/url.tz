@@ -426,16 +426,24 @@ function isSpecial(scheme: string): boolean {
 }
 
 class UrlRecord {
-  scheme = ""
-  username = ""
-  password = ""
+  scheme: string
+  username: string
+  password: string
   host?: string
-  port = -1
-  path: string[] = []
+  port: int
+  path: string[]
   opaquePath?: string
   query?: string
   fragment?: string
   parts?: UrlParts
+
+  constructor() {
+    this.scheme = ""
+    this.username = ""
+    this.password = ""
+    this.port = -1
+    this.path = []
+  }
 
   copy(): UrlRecord {
     const r = new UrlRecord()
@@ -1155,10 +1163,11 @@ function partsOf(r: UrlRecord): UrlParts {
 
 export class URL {
   private state: UrlParts
-  readonly searchParams = new URLSearchParams()
+  readonly searchParams: URLSearchParams
   private record: UrlRecord
 
   constructor(input: string | URL, base?: string | URL) {
+    this.searchParams = new URLSearchParams()
     const text = typeof input == "string" ? input : input.href()
     let parsedBase: UrlRecord | undefined = undefined
     if (base != undefined) {
@@ -1175,6 +1184,7 @@ export class URL {
   }
 
   private constructor(record: UrlRecord) {
+    this.searchParams = new URLSearchParams()
     this.record = record
     this.state = partsOf(record)
     this.searchParams.watch((query?: string) => this.applyQuery(query))
@@ -1399,13 +1409,15 @@ export type URLSearchParamsInit = string | [string, string][] | Record<string, s
   URLSearchParams
 
 export class URLSearchParams {
-  private count: int = 0
-  private list: [string, string][] = []
+  private count: int
+  private list: [string, string][]
   private raw?: string
   private watcher?: (query?: string) => void
   private watchers?: ((query?: string) => void)[]
 
   constructor(init?: URLSearchParamsInit) {
+    this.count = 0
+    this.list = []
     if (init == undefined) return
     if (typeof init == "string") {
       this.list = parseForm(init.startsWith("?") ? init.slice(1) : init)

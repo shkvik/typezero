@@ -66,18 +66,4 @@ public:
   static std::string undefined(llvm::StringRef function);
 };
 
-enum class ReturnInferrerDefaultTypeErrorCode {
-  UNKNOWN_FROM_DEFAULT,
-};
-
-struct ReturnInferrerDefaultTypeError {
-  ReturnInferrerDefaultTypeErrorCode code;
-  std::string message;
-};
-
-class ErrorTextDefaultType {
-public:
-  static std::string unknown(llvm::StringRef param);
-};
-
 }

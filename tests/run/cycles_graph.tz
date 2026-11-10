@@ -2,9 +2,12 @@
 // Graphs: vertices that point at each other in any way, edges as objects
 // that point at both ends, and a map of vertices by name.
 class Vertex {
-  out: Vertex[] = []
-  edges: Edge[] = []
-  constructor(public id: int) {}
+  out: Vertex[]
+  edges: Edge[]
+  constructor(public id: int) {
+    this.out = []
+    this.edges = []
+  }
 }
 
 class Edge {
@@ -16,7 +19,12 @@ class Edge {
 }
 
 class Graph {
-  vertices = new Map<string, Vertex>()
+  vertices: Map<string, Vertex>
+
+  constructor() {
+    this.vertices = new Map<string, Vertex>()
+  }
+
   vertex(id: int): Vertex {
     const key = `v${id}`
     const found = this.vertices.get(key)

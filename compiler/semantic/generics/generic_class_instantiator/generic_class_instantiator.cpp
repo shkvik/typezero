@@ -261,7 +261,6 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
   for (const Type *p : of->params) {
     sym->params.push_back(value(p));
   }
-  sym->pendingParams = of->pendingParams;
   for (size_t i = 0; i < fn->params.size() && i < generic->params.size(); ++i) {
     fn->params[i].declaredType = value(generic->params[i].declaredType);
   }

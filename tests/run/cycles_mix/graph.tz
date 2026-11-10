@@ -7,9 +7,10 @@ import { EventEmitter } from "node:events"
 import { createHash, Hash } from "node:crypto"
 
 export class Room extends EventEmitter {
-  lines: string[] = []
+  lines: string[]
   constructor(readonly name: string) {
     super()
+    this.lines = []
   }
   say(who: string, text: string) {
     this.emit("say", { who: who, text: text })
@@ -25,8 +26,10 @@ export function Route(path: string) {
 }
 
 export class Handler {
-  handled = 0
-  constructor(readonly server: Server) {}
+  handled: int
+  constructor(readonly server: Server) {
+    this.handled = 0
+  }
   handle(conn: Conn, text: string): string {
     this.handled++
     return `${conn.id}:${text}`
@@ -38,8 +41,9 @@ export class Conn {
   onData?: (text: string) => void
   readonly finish: (why: string) => void
   readonly done: Promise<string>
-  readonly hash = sha256()
+  readonly hash: Hash
   constructor(readonly server: Server, readonly id: int) {
+    this.hash = sha256()
     // The resolve of the promise, whose environment is the promise.
     const { promise, resolve } = Promise.withResolvers<string>()
     this.done = promise
@@ -56,13 +60,19 @@ export class Conn {
 }
 
 export class Server {
-  readonly conns = new Set<Conn>()
-  readonly byId = new Map<int, Conn>()
-  readonly handlers = new Map<string, Handler>()
-  readonly log: string[] = []
-  readonly shutdown = new EventTarget()
-  down = false
+  readonly conns: Set<Conn>
+  readonly byId: Map<int, Conn>
+  readonly handlers: Map<string, Handler>
+  readonly log: string[]
+  readonly shutdown: EventTarget
+  down: boolean
   constructor(readonly name: string) {
+    this.conns = new Set<Conn>()
+    this.byId = new Map<int, Conn>()
+    this.handlers = new Map<string, Handler>()
+    this.log = []
+    this.shutdown = new EventTarget()
+    this.down = false
     // The target's listener holds the server, which holds the target.
     this.shutdown.addEventListener("shutdown", () => {
       this.down = true

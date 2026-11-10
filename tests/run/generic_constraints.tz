@@ -55,13 +55,23 @@ console.log(rex?.fetch(), loudest([new Animal("cat"), new Dog("pug")])?.speak())
 
 // Generic classes with constraints.
 class Ranked<T extends { name: string }> {
-  items: T[] = []
+  items: T[]
+
+  constructor() {
+    this.items = []
+  }
+
   add(x: T) { this.items.push(x); return this }
   names() { return this.items.map(x => x.name).join(", ") }
 }
 console.log(new Ranked<User>().add(ann).names(), new Ranked<Post>().add(post).add(post).names())
 class Total<T extends number> {
-  sum = 0.0
+  sum: double
+
+  constructor() {
+    this.sum = 0.0
+  }
+
   add(x: T) { this.sum += x; return this }
 }
 console.log(new Total<double>().add(1).add(2).sum, new Total<double>().add(0.5).sum)

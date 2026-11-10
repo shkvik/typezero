@@ -4,8 +4,10 @@
 // (JavaScript throws a TypeError). A type that is a tree by itself gives a
 // string.
 class Node {
-  next: Node | undefined = undefined
-  constructor(public name: string) {}
+  next: Node | undefined
+  constructor(public name: string) {
+    this.next = undefined
+  }
 }
 const a = new Node("a")
 const b = new Node("b")

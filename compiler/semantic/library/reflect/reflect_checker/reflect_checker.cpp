@@ -10,7 +10,6 @@
 #include "compiler/semantic/declare/prelude/prelude.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
-#include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/fs/fs_declarer/fs_declarer.h"
 #include "compiler/semantic/library/reflect/reflect_call_checker/reflect_call_checker.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -32,7 +31,6 @@ ReflectChecker::ReflectChecker(SemanticState &owner, SemanticParts &all)
   this->flowChecker = &all.getFlowChecker();
   this->classDeclarer = &all.getClassDeclarer();
   this->typeRelations = &all.getTypeRelations();
-  this->returnInferrer = &all.getReturnInferrer();
   this->argumentChecker = &all.getArgumentChecker();
   this->classValueChecker = &all.getClassValueChecker();
   this->classMemberChecker = &all.getClassMemberChecker();
@@ -223,7 +221,6 @@ ReflectChecker::constructible(ClassDecl *cls, llvm::ArrayRef<const Type *> args)
           .message = message,
       });
     }
-    this->returnInferrer->resolveParams(sym);
     symbols.push_back(sym);
     size_t fixed = sym->hasRest ? sym->params.size() - 1 : sym->params.size();
     bool fits = args.size() >= sym->minArgs && (sym->hasRest || args.size() <= fixed);

@@ -1,8 +1,13 @@
 // Classes with Results, decimals and generics: the rules of each hold for
 // the others.
 class Store {
-  saved: string[] = []
+  saved: string[]
   onSave = (s: string) => this.save(s)
+
+  constructor() {
+    this.saved = []
+  }
+
   save(s: string): Result<int, string> {
     if (s.length == 0) return err("empty")
     this.saved.push(s)

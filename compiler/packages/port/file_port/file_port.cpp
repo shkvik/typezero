@@ -160,6 +160,10 @@ void FilePort::run() {
     }
     retokenize();
   }
+  this->fieldValues();
+  if (apply()) {
+    retokenize();
+  }
   manual();
   std::stable_sort(notes_.begin(), notes_.end(),
                    [](const Note &a, const Note &b) { return a.offset < b.offset; });
@@ -941,6 +945,590 @@ void FilePort::manual() {
       note(i, "template literal types are not supported: write 'string'");
     }
   }
+}
+
+void FilePort::fieldValues() {
+  for (size_t i = 0; i < this->toks.size(); ++i) {
+    if (!isName(i, "class") || afterDot(i)) {
+      continue;
+    }
+    ClassShape shape = this->classShape(i);
+    if (shape.body != std::string::npos) {
+      this->moveFieldValues(shape);
+    }
+  }
+}
+
+bool FilePort::opens(size_t i) const {
+  Tok kind = this->toks[i].kind;
+  bool opening = kind == Tok::LParen || kind == Tok::LBracket || kind == Tok::LBrace ||
+                 kind == Tok::TemplateHead;
+
+  return opening && this->close[i] != std::string::npos;
+}
+
+size_t FilePort::angleEnd(size_t less) const {
+  int angles = 0;
+  for (size_t j = less; j < this->toks.size(); ++j) {
+    Tok kind = this->toks[j].kind;
+    if (kind == Tok::Semi) {
+      return j;
+    }
+    if (kind == Tok::Less) {
+      angles += 1;
+    } else if (kind == Tok::Greater) {
+      angles -= 1;
+    } else if (kind == Tok::Shr) {
+      angles -= 2;
+    } else if (kind == Tok::UShr) {
+      angles -= 3;
+    } else if (this->opens(j)) {
+      j = this->close[j];
+    }
+    if (angles <= 0) {
+      return j + 1;
+    }
+  }
+
+  return this->toks.size();
+}
+
+ClassShape FilePort::classShape(size_t i) const {
+  ClassShape shape;
+  size_t j = i + 1;
+  while (j < this->toks.size()) {
+    if (is(j, Tok::Less)) {
+      j = this->angleEnd(j);
+      continue;
+    }
+    if (is(j, Tok::LBrace)) {
+      shape.body = this->opens(j) ? j : std::string::npos;
+      return shape;
+    }
+    if (is(j, Tok::LParen) && this->opens(j)) {
+      j = this->close[j] + 1;
+      continue;
+    }
+    bool header = is(j, Tok::Identifier) || is(j, Tok::Dot) || is(j, Tok::Comma);
+    if (!header) {
+      return shape;
+    }
+    shape.extends = shape.extends || isName(j, "extends");
+    j += 1;
+  }
+
+  return shape;
+}
+
+bool FilePort::isMemberModifier(size_t i) const {
+  static const llvm::StringLiteral modifiers[] = {
+      "public", "private", "protected", "readonly", "static", "override",
+      "declare", "abstract", "accessor", "async", "get", "set"};
+  if (!is(i, Tok::Identifier) || !llvm::is_contained(modifiers, this->toks[i].text)) {
+    return false;
+  }
+  size_t next = i + 1;
+  if (next >= this->toks.size() || this->toks[next].newlineBefore) {
+    return false;
+  }
+
+  return is(next, Tok::Identifier) || is(next, Tok::StringLiteral) || is(next, Tok::LBracket) ||
+         is(next, Tok::Star) || is(next, Tok::IntLiteral);
+}
+
+bool FilePort::continuesType(size_t i) const {
+  Tok next = this->toks[i].kind;
+  Tok previous = this->toks[i - 1].kind;
+
+  return next == Tok::Pipe || next == Tok::Amp || previous == Tok::Pipe ||
+         previous == Tok::Amp || previous == Tok::Arrow || previous == Tok::Colon ||
+         previous == Tok::Comma;
+}
+
+bool FilePort::continuesValue(size_t i) const {
+  switch (this->toks[i].kind) {
+    case Tok::Dot:
+    case Tok::QuestionDot:
+    case Tok::Question:
+    case Tok::Colon:
+    case Tok::Arrow:
+    case Tok::Comma:
+    case Tok::LParen:
+    case Tok::LBracket:
+    case Tok::TemplateString:
+    case Tok::TemplateHead:
+    case Tok::Plus:
+    case Tok::Minus:
+    case Tok::Star:
+    case Tok::StarStar:
+    case Tok::Slash:
+    case Tok::Percent:
+    case Tok::Amp:
+    case Tok::Pipe:
+    case Tok::Caret:
+    case Tok::AmpAmp:
+    case Tok::PipePipe:
+    case Tok::QuestionQuestion:
+    case Tok::Shl:
+    case Tok::Shr:
+    case Tok::UShr:
+    case Tok::Less:
+    case Tok::LessEq:
+    case Tok::Greater:
+    case Tok::GreaterEq:
+    case Tok::EqEq:
+    case Tok::EqEqEq:
+    case Tok::BangEq:
+    case Tok::BangEqEq:
+    case Tok::KwAs:
+    case Tok::KwIn:
+      return true;
+    default:
+      return false;
+  }
+}
+
+size_t FilePort::typeEnd(size_t from, size_t end) const {
+  size_t j = from;
+  while (j < end) {
+    bool lineEnds = j > from && this->toks[j].newlineBefore && !this->continuesType(j);
+    if (is(j, Tok::Assign) || is(j, Tok::Semi) || lineEnds) {
+      return j;
+    }
+    if (is(j, Tok::Less)) {
+      j = this->angleEnd(j);
+      continue;
+    }
+    if (this->opens(j)) {
+      j = this->close[j];
+    }
+    j += 1;
+  }
+
+  return end;
+}
+
+size_t FilePort::valueEnd(size_t from, size_t end) const {
+  size_t j = from;
+  while (j < end) {
+    const Token &previous = this->toks[j - 1];
+    bool operandEnds = FilePort::isOperandEnd(previous) || previous.is(Tok::PlusPlus) ||
+                       previous.is(Tok::MinusMinus);
+    bool lineEnds = j > from && this->toks[j].newlineBefore && operandEnds &&
+                    !this->continuesValue(j);
+    if (is(j, Tok::Semi) || lineEnds) {
+      return j;
+    }
+    if (this->opens(j)) {
+      j = this->close[j];
+    }
+    j += 1;
+  }
+
+  return end;
+}
+
+bool FilePort::isFunctionValue(size_t from, size_t to) const {
+  if (is(from, Tok::KwFunction) || isName(from, "async")) {
+    return true;
+  }
+  if (is(from, Tok::Identifier) && from + 1 < to && is(from + 1, Tok::Arrow)) {
+    return true;
+  }
+  if (!is(from, Tok::LParen) && !is(from, Tok::Less)) {
+    return false;
+  }
+  for (size_t j = from; j < to; ++j) {
+    if (is(j, Tok::Arrow)) {
+      return true;
+    }
+    if (this->opens(j)) {
+      j = this->close[j];
+    }
+  }
+
+  return false;
+}
+
+std::string FilePort::newType(size_t from, size_t to) const {
+  if (!is(from, Tok::KwNew) || !is(from + 1, Tok::Identifier)) {
+    return "";
+  }
+  size_t j = from + 2;
+  while (is(j, Tok::Dot) && is(j + 1, Tok::Identifier)) {
+    j += 2;
+  }
+  bool generic = is(j, Tok::Less);
+  if (generic) {
+    j = this->angleEnd(j);
+  }
+  if (!is(j, Tok::LParen) || !this->opens(j) || this->close[j] + 1 != to) {
+    return "";
+  }
+  static const llvm::StringLiteral needArguments[] = {"Map",     "Set",     "Array",
+                                                      "WeakMap", "WeakSet", "Promise"};
+  if (!generic && llvm::is_contained(needArguments, this->toks[from + 1].text)) {
+    return "";
+  }
+  size_t begin = at(from + 1);
+
+  return text_.substr(begin, endOf(j - 1) - begin);
+}
+
+std::string FilePort::valueType(size_t from, size_t to) const {
+  bool negative = is(from, Tok::Minus);
+  size_t first = negative ? from + 1 : from;
+  if (to != first + 1) {
+    return this->newType(from, to);
+  }
+  switch (this->toks[first].kind) {
+    case Tok::IntLiteral:
+      return "int";
+    case Tok::FloatLiteral:
+      return "double";
+    case Tok::StringLiteral:
+    case Tok::TemplateString:
+      return negative ? "" : "string";
+    case Tok::KwTrue:
+    case Tok::KwFalse:
+      return negative ? "" : "boolean";
+    default:
+      return "";
+  }
+}
+
+llvm::StringSet<> FilePort::parameterNames(size_t paren) const {
+  llvm::StringSet<> names;
+  bool expectName = true;
+  for (size_t j = paren + 1; j < this->close[paren]; ++j) {
+    if (is(j, Tok::Comma)) {
+      expectName = true;
+      continue;
+    }
+    if (is(j, Tok::At)) {
+      while (is(j + 1, Tok::Identifier) || is(j + 1, Tok::Dot)) {
+        j += 1;
+      }
+      if (is(j + 1, Tok::LParen) && this->opens(j + 1)) {
+        j = this->close[j + 1];
+      }
+      continue;
+    }
+    bool pattern = is(j, Tok::LBrace) || is(j, Tok::LBracket);
+    if (expectName && pattern && this->opens(j)) {
+      for (size_t m = j + 1; m < this->close[j]; ++m) {
+        if (is(m, Tok::Identifier) && !afterDot(m)) {
+          names.insert(this->toks[m].text);
+        }
+      }
+      expectName = false;
+    }
+    if (this->opens(j)) {
+      j = this->close[j];
+      continue;
+    }
+    if (expectName && is(j, Tok::Identifier) && !this->isMemberModifier(j)) {
+      names.insert(this->toks[j].text);
+      expectName = false;
+    }
+  }
+
+  return names;
+}
+
+bool FilePort::usesAny(const FieldValue &field, const llvm::StringSet<> &names) const {
+  for (size_t j = field.valueBegin; j < field.valueEnd; ++j) {
+    if (is(j, Tok::Identifier) && !afterDot(j) && names.contains(this->toks[j].text)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+size_t FilePort::classMember(size_t k, size_t end, ClassMembers &members) const {
+  size_t j = k;
+  if (is(j, Tok::Semi)) {
+    return j + 1;
+  }
+  while (is(j, Tok::At)) {
+    j += 1;
+    while (is(j, Tok::Identifier) || is(j, Tok::Dot)) {
+      j += 1;
+    }
+    if (is(j, Tok::LParen) && this->opens(j)) {
+      j = this->close[j] + 1;
+    }
+  }
+  bool shared = false;
+  while (this->isMemberModifier(j)) {
+    shared = shared || isName(j, "static");
+    j += 1;
+  }
+  if (is(j, Tok::Star)) {
+    j += 1;
+  }
+  size_t name = j;
+  if (is(j, Tok::LBracket) && this->opens(j)) {
+    j = this->close[j];
+  }
+  if (j >= end) {
+    return end;
+  }
+  j += 1;
+  if (is(j, Tok::Question) || is(j, Tok::Bang)) {
+    j += 1;
+  }
+  if (is(j, Tok::Less)) {
+    j = this->angleEnd(j);
+  }
+  if (is(j, Tok::LBrace) && this->opens(j)) {
+    return this->close[j] + 1;
+  }
+  if (is(j, Tok::LParen) && this->opens(j)) {
+    if (isName(name, "constructor")) {
+      members.constructors.push_back(j);
+    }
+    size_t m = this->close[j] + 1;
+    while (m < end) {
+      bool typeLiteral = is(m - 1, Tok::Colon) || is(m - 1, Tok::Pipe) ||
+                         is(m - 1, Tok::Amp) || is(m - 1, Tok::Comma) || is(m - 1, Tok::Arrow);
+      if (is(m, Tok::LBrace) && this->opens(m) && !typeLiteral) {
+        return this->close[m] + 1;
+      }
+      if (is(m, Tok::Semi)) {
+        return m + 1;
+      }
+      if (this->toks[m].newlineBefore && !typeLiteral && !this->continuesType(m)) {
+        return m;
+      }
+      if (this->opens(m)) {
+        m = this->close[m];
+      }
+      m += 1;
+    }
+    return end;
+  }
+  FieldValue field;
+  field.name = name;
+  field.declarationEnd = j - 1;
+  if (is(j, Tok::Colon)) {
+    field.typed = true;
+    j = this->typeEnd(j + 1, end);
+    field.declarationEnd = j - 1;
+  }
+  bool known = j >= end || is(j, Tok::Assign) || is(j, Tok::Semi) || this->toks[j].newlineBefore;
+  if (!known) {
+    return std::max(j, k + 1);
+  }
+  members.lastField = j - 1;
+  if (is(j, Tok::Assign)) {
+    size_t value = j + 1;
+    size_t after = this->valueEnd(value, end);
+    field.valueBegin = value;
+    field.valueEnd = after;
+    field.semicolon = is(after, Tok::Semi);
+    members.lastField = after - 1;
+    bool function = this->isFunctionValue(value, after);
+    if (!shared && !function && after > value) {
+      members.values.push_back(field);
+    }
+    j = after;
+  }
+  if (is(j, Tok::Semi)) {
+    return j + 1;
+  }
+
+  return std::max(j, k + 1);
+}
+
+std::string FilePort::lineBreak() const {
+  return text_.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+}
+
+std::string FilePort::lineIndent(size_t offset) const {
+  size_t newline = offset == 0 ? std::string::npos : text_.rfind('\n', offset - 1);
+  size_t start = newline == std::string::npos ? 0 : newline + 1;
+  size_t stop = start;
+  while (stop < text_.size() && (text_[stop] == ' ' || text_[stop] == '\t')) {
+    stop += 1;
+  }
+
+  return text_.substr(start, stop - start);
+}
+
+size_t FilePort::lineAfter(size_t offset) const {
+  size_t newline = text_.find('\n', offset);
+
+  return newline == std::string::npos ? std::string::npos : newline + 1;
+}
+
+std::string FilePort::fieldStatements(const std::vector<FieldValue> &fields,
+                                      const std::string &indent) const {
+  std::string out;
+  for (const FieldValue &field : fields) {
+    size_t begin = at(field.valueBegin);
+    std::string value = text_.substr(begin, endOf(field.valueEnd - 1) - begin);
+    std::string fieldIndent = this->lineIndent(at(field.name));
+    if (indent.size() > fieldIndent.size()) {
+      std::string shift(indent.size() - fieldIndent.size(), ' ');
+      std::string shifted;
+      for (char c : value) {
+        shifted += c;
+        if (c == '\n') {
+          shifted += shift;
+        }
+      }
+      value = shifted;
+    }
+    std::string name = this->toks[field.name].text.str();
+    std::string end = field.semicolon ? ";" : "";
+    out += indent + "this." + name + " = " + value + end + this->lineBreak();
+  }
+
+  return out;
+}
+
+std::optional<Edit> FilePort::constructorEdit(size_t paren, bool extends,
+                                              const std::vector<FieldValue> &fields) const {
+  size_t body = this->close[paren] + 1;
+  if (!is(body, Tok::LBrace) || !this->opens(body)) {
+    return std::nullopt;
+  }
+  size_t bodyEnd = this->close[body];
+  llvm::StringRef text(text_);
+  if (extends) {
+    for (size_t m = body + 1; m < bodyEnd; ++m) {
+      if (isName(m, "super") && is(m + 1, Tok::LParen) && this->opens(m + 1)) {
+        size_t last = is(this->close[m + 1] + 1, Tok::Semi) ? this->close[m + 1] + 1
+                                                            : this->close[m + 1];
+        size_t line = this->lineAfter(endOf(last));
+        bool alone = line != std::string::npos && line <= at(bodyEnd) &&
+                     text.slice(endOf(last), line).trim().empty();
+        if (!alone) {
+          return std::nullopt;
+        }
+        std::string statements = this->fieldStatements(fields, this->lineIndent(at(m)));
+        return Edit{line, line, statements, nullptr, ""};
+      }
+      if (this->opens(m)) {
+        m = this->close[m];
+      }
+    }
+    return std::nullopt;
+  }
+  std::string constructorIndent = this->lineIndent(at(paren));
+  if (body + 1 == bodyEnd && !this->toks[bodyEnd].newlineBefore) {
+    std::string inner = this->fieldStatements(fields, constructorIndent + "  ");
+    std::string replaced = "{" + this->lineBreak() + inner + constructorIndent + "}";
+    return Edit{at(body), endOf(bodyEnd), replaced, nullptr, ""};
+  }
+  size_t line = this->lineAfter(endOf(body));
+  bool opensLine = line != std::string::npos && line <= at(bodyEnd) &&
+                   text.slice(endOf(body), line).trim().empty();
+  if (!opensLine) {
+    return std::nullopt;
+  }
+  bool statementBelow = body + 1 < bodyEnd && this->toks[body + 1].newlineBefore;
+  std::string indent =
+      statementBelow ? this->lineIndent(at(body + 1)) : constructorIndent + "  ";
+  if (indent.size() <= constructorIndent.size()) {
+    indent = constructorIndent + "  ";
+  }
+
+  return Edit{line, line, this->fieldStatements(fields, indent), nullptr, ""};
+}
+
+std::optional<Edit> FilePort::newConstructor(size_t lastField,
+                                             const std::vector<FieldValue> &fields) const {
+  size_t line = this->lineAfter(endOf(lastField));
+  llvm::StringRef text(text_);
+  if (line == std::string::npos) {
+    return std::nullopt;
+  }
+  llvm::StringRef rest = text.slice(endOf(lastField), line).trim();
+  if (!rest.empty() && rest != ";") {
+    return std::nullopt;
+  }
+  std::string newline = this->lineBreak();
+  std::string indent = this->lineIndent(at(fields.front().name));
+  llvm::StringRef next = text.slice(line, text.find('\n', line)).trim();
+  std::string tail = next.empty() || next == "}" ? "" : newline;
+  std::string statements = this->fieldStatements(fields, indent + "  ");
+  std::string made = newline + indent + "constructor() {" + newline + statements + indent + "}" +
+                     newline + tail;
+
+  return Edit{line, line, made, nullptr, ""};
+}
+
+void FilePort::moveFieldValues(const ClassShape &shape) {
+  size_t end = this->close[shape.body];
+  ClassMembers members;
+  size_t k = shape.body + 1;
+  while (k < end) {
+    k = this->classMember(k, end, members);
+  }
+  std::vector<FieldValue> moved;
+  for (const FieldValue &field : members.values) {
+    llvm::StringRef name = this->toks[field.name].text;
+    bool hidden = false;
+    for (size_t paren : members.constructors) {
+      hidden = hidden || this->usesAny(field, this->parameterNames(paren));
+    }
+    bool typeKnown = field.typed || !this->valueType(field.valueBegin, field.valueEnd).empty();
+    if (!is(field.name, Tok::Identifier)) {
+      continue;
+    }
+    if (hidden) {
+      note(field.name, "a field gets its value in the constructor (docs/objects.md), and the "
+                       "value of '" + name.str() +
+                           "' uses a name a parameter of the constructor hides: move it there "
+                           "by hand");
+      continue;
+    }
+    if (!typeKnown) {
+      note(field.name, "a field gets its value in the constructor (docs/objects.md), and only "
+                       "a literal shows the type of '" + name.str() + "': write '" +
+                           name.str() + ": T' and set it there, 'this." + name.str() +
+                           " = ...'");
+      continue;
+    }
+    moved.push_back(field);
+  }
+  if (moved.empty()) {
+    return;
+  }
+  std::vector<Edit> sets;
+  for (size_t paren : members.constructors) {
+    std::optional<Edit> set = this->constructorEdit(paren, shape.extends, moved);
+    if (set.has_value()) {
+      sets.push_back(*set);
+    }
+  }
+  bool placed = members.constructors.empty() ? !shape.extends
+                                             : sets.size() == members.constructors.size();
+  if (members.constructors.empty() && placed) {
+    std::optional<Edit> made = this->newConstructor(members.lastField, moved);
+    placed = made.has_value();
+    if (placed) {
+      sets.push_back(*made);
+    }
+  }
+  if (!placed) {
+    for (const FieldValue &field : moved) {
+      std::string name = this->toks[field.name].text.str();
+      note(field.name, "a field gets its value in the constructor (docs/objects.md): set '" +
+                           name + "' there by hand, 'this." + name + " = ...'");
+    }
+    return;
+  }
+  for (const FieldValue &field : moved) {
+    std::string type =
+        field.typed ? "" : ": " + this->valueType(field.valueBegin, field.valueEnd);
+    add(endOf(field.declarationEnd), endOf(field.valueEnd - 1), type,
+        "field values moved into the constructor");
+  }
+  this->edits.insert(this->edits.end(), sets.begin(), sets.end());
 }
 
 }

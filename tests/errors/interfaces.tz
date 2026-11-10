@@ -21,18 +21,32 @@ hello(new Thing("t"))
 // It has every member, of the same type.
 // expect-error: class 'NoArea' implements 'Shape', but has no 'area'; declare it, e.g. 'area: () => double'
 class NoArea implements Shape {
-  name = "x"
+  name: string
+
+  constructor() {
+    this.name = "x"
+  }
 }
 // A field may be read-only in the class while no code changes it through
 // the interface (tests/errors/widen_readonly.tz).
 class Square implements Shape {
-  readonly name = "square"
+  readonly name: string
+
+  constructor() {
+    this.name = "square"
+  }
+
   area() {
     return 1
   }
 }
 class Wide implements Shape {
-  name = "wide"
+  name: string
+
+  constructor() {
+    this.name = "wide"
+  }
+
   // expect-error: class 'Wide' implements 'Shape', whose 'area' is '() => double', but 'Wide.area' takes other parameters: area(k: int)
   area(k: int) {
     return 1.0 * k
@@ -43,7 +57,12 @@ class Counted implements Named {
   constructor(public name: int) {}
 }
 class Texty implements Shape {
-  name = "t"
+  name: string
+
+  constructor() {
+    this.name = "t"
+  }
+
   // expect-error: 'area' returns 'string', and 'Shape', which 'Texty' implements, says it returns 'double'
   area(): string {
     return ""

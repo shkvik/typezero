@@ -29,7 +29,13 @@ export class Bus extends EventEmitter {
 // A mixin of buses: the class it gives counts the notes it emits.
 export function Counting<B extends Constructor<Bus>>(Base: B) {
   return class extends Base {
-    emitted = 0
+    emitted: int
+
+    constructor(...args: ConstructorArgs) {
+      super(...args)
+      this.emitted = 0
+    }
+
     note(what: string) {
       this.emitted++
       this.emit("note", { what: what, count: this.emitted })
@@ -39,8 +45,10 @@ export function Counting<B extends Constructor<Bus>>(Base: B) {
 
 // Items of a class known only when the program runs, made from Json.
 export class Store<T extends object> {
-  items: T[] = []
-  constructor(readonly kind: Constructor<T>) {}
+  items: T[]
+  constructor(readonly kind: Constructor<T>) {
+    this.items = []
+  }
 
   load(data: Json[], args: (j: Json) => unknown[]) {
     for (const j of data) {

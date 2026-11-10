@@ -19,7 +19,13 @@ function Registered<T extends Constructor>(cls: T) {
 let nextId = 1
 function WithId<T extends Constructor>(cls: T) {
   return class extends cls {
-    id = nextId++
+    id: int
+
+    constructor(...args: ConstructorArgs) {
+      super(...args)
+      this.id = nextId++
+    }
+
     describe() {
       return `#${this.id}`
     }
@@ -56,7 +62,12 @@ console.log(pen, pen.id, created.length, created[0] == pen)
 
 // A class declared to extend a replaced class extends what the name means.
 class BigOrder extends Order {
-  big = true
+  big: boolean
+
+  constructor(total: number) {
+    super(total)
+    this.big = true
+  }
 }
 const big = new BigOrder(5000)
 const orders: Order[] = [order, big]
@@ -69,6 +80,10 @@ function Same<T extends Constructor>(cls: T) {
 }
 @Same
 class Kept {
-  x = 1
+  x: int
+
+  constructor() {
+    this.x = 1
+  }
 }
 console.log(new Kept(), Kept)

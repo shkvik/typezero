@@ -4,7 +4,12 @@
 // capture what holds the literal.
 class Button {
   onClick?: () => void
-  clicks = 0
+  clicks: int
+
+  constructor() {
+    this.clicks = 0
+  }
+
   click() {
     this.clicks++
     this.onClick?.()
@@ -12,9 +17,11 @@ class Button {
 }
 
 class Dialog {
-  button = new Button()
-  closed = 0
+  button: Button
+  closed: int
   constructor(public title: string) {
+    this.button = new Button()
+    this.closed = 0
     this.button.onClick = this.close
   }
   close() {
@@ -84,8 +91,10 @@ class Cat implements Named {
 }
 class Dog implements Named {
   friend?: Named
-  data: unknown = undefined
-  constructor(public name: string) {}
+  data: unknown
+  constructor(public name: string) {
+    this.data = undefined
+  }
 }
 type Pet = Cat | Dog
 const pets: Pet[] = []

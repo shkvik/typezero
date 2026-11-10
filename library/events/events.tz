@@ -19,13 +19,15 @@ const kReceiver = 16
 const kDedupe = 32
 
 class Listener {
-  fired = false
+  fired: boolean
   constructor(
     readonly code: unknown,
     readonly weak: object | undefined,
     readonly kind: int,
     readonly once: boolean,
-  ) {}
+  ) {
+    this.fired = false
+  }
 
   alive(): boolean {
     const weak = this.weak
@@ -53,9 +55,12 @@ class Listener {
 }
 
 class ListenerList {
-  private emitting = 0
-  sweepAt = 8
-  constructor(public items: Listener[]) {}
+  private emitting: int
+  sweepAt: int
+  constructor(public items: Listener[]) {
+    this.emitting = 0
+    this.sweepAt = 8
+  }
   begin() {
     this.emitting++
     return this.items
@@ -73,10 +78,17 @@ class ListenerList {
 }
 
 export class EventEmitterBase {
-  private events: Record<string, unknown> = libBare({})
-  private eventsCount = 0
-  private shapeMode = false
-  private capture = false
+  private events: Record<string, unknown>
+  private eventsCount: int
+  private shapeMode: boolean
+  private capture: boolean
+
+  constructor() {
+    this.events = libBare({})
+    this.eventsCount = 0
+    this.shapeMode = false
+    this.capture = false
+  }
 
   emit<A extends unknown[]>(type: string, ...args: A): boolean {
     const handler = this.events[type]
@@ -493,12 +505,18 @@ function onResult<A extends unknown[], E>(
 }
 
 class EventQueue<A extends unknown[], F> {
-  private events: A[] = []
+  private events: A[]
   private error?: F
-  private finished = false
+  private finished: boolean
   private wake?: () => void
-  private limit = 0
+  private limit: int
   private expired?: () => F
+
+  constructor() {
+    this.events = []
+    this.finished = false
+    this.limit = 0
+  }
 
   within(limit: int, expired: () => F) {
     this.limit = limit

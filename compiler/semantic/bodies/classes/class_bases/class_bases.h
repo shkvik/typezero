@@ -47,8 +47,9 @@ private:
   static ResultObjectTypeAsBase interfaceBase(const Type *base);
   static ResultEventMapInferred eventMapFound(const Type *events);
   static ResultImplementedShape implementedType(const Type *type, const ClassDecl *cls);
-  static ResultValueOnRedeclare valueGiven(const ClassField &field, const ClassDecl *owner);
   static ResultOverrideTargeted overrideTarget(const ClassDecl *cls, const ClassField &field);
+  static ResultValueOnRedeclare valueGiven(const ClassDecl *cls, const ClassField &field,
+                                           const ClassDecl *owner);
   static ResultInterfaceNotSelf notSelf(const TypeAliasDecl *alias, const TypeAliasDecl *other);
   static ResultMethodSignatures sameSignatures(const TypeAliasDecl *alias, const Overload &known,
                                                const Overload &other);

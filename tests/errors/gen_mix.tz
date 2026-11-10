@@ -11,7 +11,12 @@ function Mark(cls: object, name: string) {
   Reflect.defineMetadata("marked", true, cls, name)
 }
 class Stack<T> {
-  items: T[] = []
+  items: T[]
+
+  constructor() {
+    this.items = []
+  }
+
   // expect-error: a decorator that takes the descriptor of a method of a generic class is not supported yet: each instance of 'Stack' has a method of its own
   @Log
   push(x: T) {

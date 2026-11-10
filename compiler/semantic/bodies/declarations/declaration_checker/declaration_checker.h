@@ -14,7 +14,6 @@ class TypeDeclarer;
 class TypeResolver;
 class ClassDeclarer;
 class ModuleDeclarer;
-class ReturnInferrer;
 class TopLevelChecker;
 
 class DeclarationChecker {
@@ -122,7 +121,6 @@ private:
   TypeResolver *typeResolver = nullptr;
   ClassDeclarer *classDeclarer = nullptr;
   ModuleDeclarer *moduleDeclarer = nullptr;
-  ReturnInferrer *returnInferrer = nullptr;
   TopLevelChecker *topLevelChecker = nullptr;
   Module *checkedModule = nullptr;
   llvm::StringMap<Exported> exportedNames;

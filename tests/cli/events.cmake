@@ -15,7 +15,11 @@ import { EventEmitter } from "node:events"
 
 // Its map comes from the emits below and from the program that uses it.
 export class Ticker extends EventEmitter {
-  count = 0
+  count: int
+  constructor() {
+    super()
+    this.count = 0
+  }
   tick(by: string) {
     this.count++
     this.emit("tick", { n: this.count, by: by })

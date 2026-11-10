@@ -15,13 +15,16 @@ bump([settings])
 
 // A class that implements an interface with a read-only field.
 interface Named { name: string }
-class Fixed implements Named { readonly name = "fixed" }
+class Fixed implements Named {
+  readonly name: string
+  constructor() { this.name = "fixed" }
+}
 function rename(n: Named) { n.name += "!" }
-// expect-error: 'Fixed' cannot go where 'Named' is expected here: line 19 writes to its field 'name', which is read-only in 'Fixed'
+// expect-error: 'Fixed' cannot go where 'Named' is expected here: line 22 writes to its field 'name', which is read-only in 'Fixed'
 rename(new Fixed())
 
 // A read-only tuple.
 const origin: readonly [int, int] = [0, 0]
 function move(p: [int, int]) { p[0] = 1 }
-// expect-error: 'readonly [int, int]' cannot go where '[int, int]' is expected here: line 25 writes to its element 0, which is read-only in 'readonly [int, int]'
+// expect-error: 'readonly [int, int]' cannot go where '[int, int]' is expected here: line 28 writes to its element 0, which is read-only in 'readonly [int, int]'
 move(origin)

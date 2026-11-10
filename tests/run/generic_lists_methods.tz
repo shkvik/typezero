@@ -2,7 +2,12 @@
 // a value is bound to its object, so the wrapper calls it on that object.
 // (Not compared with node, where `c.inc` loses its `this`.)
 class Counter {
-  n = 0
+  n: int
+
+  constructor() {
+    this.n = 0
+  }
+
   inc(by: int) {
     this.n += by
     return this.n

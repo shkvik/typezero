@@ -13,9 +13,12 @@ export interface Source {
 }
 
 export class Job {
-  runs = 0
-  last: Promise<string> | undefined = undefined
-  constructor(public name: string) {}
+  runs: int
+  last: Promise<string> | undefined
+  constructor(public name: string) {
+    this.runs = 0
+    this.last = undefined
+  }
   async step(input: string): Promise<string> {
     return input
   }
@@ -60,7 +63,12 @@ export class Folder implements Source {
 }
 
 export class Memory implements Source {
-  data = new Map<string, string>()
+  data: Map<string, string>
+
+  constructor() {
+    this.data = new Map<string, string>()
+  }
+
   async read(key: string): Promise<Result<string, string>> {
     const found = this.data.get(key)
     if (found == undefined) return err(`no ${key}`)
@@ -70,9 +78,12 @@ export class Memory implements Source {
 
 // One promise for each key, shared by whoever asks again.
 export class Cache {
-  pending = new Map<string, Promise<int>>()
-  loads = 0
-  constructor(public load: (key: string) => Promise<int>) {}
+  pending: Map<string, Promise<int>>
+  loads: int
+  constructor(public load: (key: string) => Promise<int>) {
+    this.pending = new Map<string, Promise<int>>()
+    this.loads = 0
+  }
   get(key: string): Promise<int> {
     const known = this.pending.get(key)
     if (known != undefined)

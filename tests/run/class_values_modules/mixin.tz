@@ -1,11 +1,21 @@
 export let created = 0
 export function Counted<B extends Constructor>(Base: B) {
   return class extends Base {
-    serial = ++created
+    serial: int
+
+    constructor(...args: ConstructorArgs) {
+      super(...args)
+      this.serial = ++created
+    }
   }
 }
 export function WithTag<T extends Constructor>(cls: T) {
   return class extends cls {
-    tag = "tagged"
+    tag: string
+
+    constructor(...args: ConstructorArgs) {
+      super(...args)
+      this.tag = "tagged"
+    }
   }
 }

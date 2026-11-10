@@ -14,7 +14,6 @@
 #include "compiler/semantic/generics/inference/inference.h"
 #include "compiler/semantic/generics/type_params/type_params.h"
 #include "compiler/semantic/infer/late_classes/late_classes.h"
-#include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/library/result/result_types/result_types.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
@@ -41,7 +40,6 @@ TypeArgInferrer::TypeArgInferrer(SemanticState &owner, SemanticParts &all)
   this->utilityTypes = &all.getUtilityTypes();
   this->closureChecker = &all.getClosureChecker();
   this->genericChecker = &all.getGenericChecker();
-  this->returnInferrer = &all.getReturnInferrer();
   this->argumentChecker = &all.getArgumentChecker();
   this->iterableChecker = &all.getIterableChecker();
   this->genericInstantiator = &all.getGenericInstantiator();
@@ -351,7 +349,6 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
                                       std::vector<const Type *> &bound) {
   call->type = Type::error();
   unsigned errorsBefore = this->state.getDiagnostics().errorsSeen();
-  this->returnInferrer->resolveParams(generic);
   const Type *ret = generic->getReturnType();
   if (this->genericInstantiator->returnsOwnClass(generic, ret)) {
     ret = nullptr;
@@ -666,7 +663,6 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
 
 bool TypeArgInferrer::inferFromArguments(FuncSymbol *generic, llvm::ArrayRef<Expr *> args,
                                          std::vector<const Type *> &bound) {
-  this->returnInferrer->resolveParams(generic);
   llvm::ArrayRef<const Type *> genericTypeParams = generic->typeParams;
   Inference inference(genericTypeParams, this->state.getAliasStore(),
                       [this](const Type *t) { return this->iterableChecker->elementTypeOf(t); });

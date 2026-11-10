@@ -2,8 +2,10 @@
 // lent by the caller, who keeps it alive during the call even when the
 // method replaces what held it. The test runs with leak checks.
 class Item {
-  tags: string[] = []
-  constructor(public name: string) {}
+  tags: string[]
+  constructor(public name: string) {
+    this.tags = []
+  }
   rename(name: string) {
     this.name = `${name}!`
     return this
@@ -15,7 +17,12 @@ class Item {
 
 // The object a method is called on is replaced while the method runs.
 class Holder {
-  item = new Item("first")
+  item: Item
+
+  constructor() {
+    this.item = new Item("first")
+  }
+
   swap() {
     this.item = new Item("second")
     return "swapped"
@@ -27,7 +34,12 @@ class Holder {
 const h = new Holder()
 console.log(h.item.label(), h.swap(), h.item.label())
 class Owner {
-  holder = new Holder()
+  holder: Holder
+
+  constructor() {
+    this.holder = new Holder()
+  }
+
   replace() {
     this.holder = new Holder()
     return this.holder.swap()
@@ -62,8 +74,10 @@ console.log(rename("kept").label(), items.length)
 
 // Closures that hold `this`, and objects that hold closures.
 class Listener {
-  heard: string[] = []
-  constructor(public name: string) {}
+  heard: string[]
+  constructor(public name: string) {
+    this.heard = []
+  }
   handler() {
     return (event: string) => {
       this.heard.push(`${this.name}: ${event}`)

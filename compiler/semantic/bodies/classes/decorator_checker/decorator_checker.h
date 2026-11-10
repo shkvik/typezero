@@ -13,7 +13,6 @@ class ExprChecker;
 class LateClasses;
 class StmtChecker;
 class TypeRelations;
-class ReturnInferrer;
 class MetadataChecker;
 class ClassValueChecker;
 
@@ -80,7 +79,6 @@ private:
   LateClasses *lateClasses = nullptr;
   StmtChecker *stmtChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
-  ReturnInferrer *returnInferrer = nullptr;
   MetadataChecker *metadataChecker = nullptr;
   ClassValueChecker *classValueChecker = nullptr;
 };
