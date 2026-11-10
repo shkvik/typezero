@@ -6,7 +6,7 @@
 import { Duplex, Readable, ReadableOptions, Transform, Writable } from "node:stream"
 import { finished, pipeline } from "node:stream/promises"
 
-class Counter extends Readable {
+class Counter extends Readable<Buffer> {
   private n: int
   limit: int
   constructor(limit: int) {
@@ -21,7 +21,7 @@ class Counter extends Readable {
   }
 }
 
-class Upper extends Transform {
+class Upper extends Transform<Buffer> {
   onTransform(chunk, encoding, callback) {
     callback(undefined, chunk.toString().toUpperCase())
   }
@@ -31,7 +31,7 @@ class Upper extends Transform {
   }
 }
 
-class Collect extends Writable {
+class Collect extends Writable<Buffer> {
   parts: string[]
 
   constructor() {
@@ -73,7 +73,7 @@ const linesEnded = await lines.end("two")
 console.log("lines", linesEnded.isOk(), (await finished(lines)).isOk())
 
 // onRead(size: number), as the types of node have it: the highWaterMark.
-class Sized extends Readable {
+class Sized extends Readable<Buffer> {
   sent: int
 
   constructor(options?: ReadableOptions) {
@@ -96,7 +96,7 @@ sized.on("data", (b) => console.log("data", b.toString()))
 console.log("sized", (await finished(sized)).isOk())
 
 // A Duplex that gives back what is written to it.
-class Echo extends Duplex {
+class Echo extends Duplex<Buffer> {
   onRead(size) {}
   onWrite(chunk, encoding, callback) {
     this.push(chunk)

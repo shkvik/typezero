@@ -1,5 +1,5 @@
 // What main.tz builds its cycles from: an emitter whose events are those its
-// code and main.tz emit; a server whose connections refer back to it, with
+// code emits; a server whose connections refer back to it, with
 // an EventTarget that shuts it down, the promises of their ends and a hash
 // of what each reads; and handlers that a class decorator registers by path,
 // which reflection makes for each server.
@@ -14,6 +14,9 @@ export class Room extends EventEmitter {
   }
   say(who: string, text: string) {
     this.emit("say", { who: who, text: text })
+  }
+  close() {
+    this.emit("close")
   }
 }
 

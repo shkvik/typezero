@@ -8,7 +8,7 @@ const log = (s: string) => console.log(s)
 
 // Flowing: the chunks of read(), then 'end' and 'close'.
 let n = 0
-class Chunks extends Readable {
+class Chunks extends Readable<Buffer> {
   onRead(size) {
     log(`read ${size}`)
     n++
@@ -16,7 +16,7 @@ class Chunks extends Readable {
     else this.pushEnd()
   }
 }
-class Later extends Readable {
+class Later extends Readable<Buffer> {
   private chunks: string[]
   constructor(chunks: string[]) {
     super({ highWaterMark: 4 })
@@ -33,7 +33,7 @@ class Later extends Readable {
     setTimeout(() => this.push(chunk), 1)
   }
 }
-class Manual extends Readable {
+class Manual extends Readable<Buffer> {
   onRead() {}
 }
 const r = new Chunks()

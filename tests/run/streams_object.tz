@@ -1,5 +1,5 @@
-// Object-mode streams: their chunk types, given or found from what the
-// program pushes and writes (docs/streams.md, section 2), pipeline() of
+// Streams of objects: their chunk types, written in the classes
+// (docs/streams.md, section 2), pipeline() of
 // node:stream/promises with async generators, and node:stream/consumers.
 // undefined ends a stream, as null does in node: the output is node's with
 // push(null).
@@ -13,7 +13,7 @@ interface User {
 const log = (s: string) => console.log(s)
 class Users extends Readable<User> {
   constructor() {
-    super({ objectMode: true })
+    super()
   }
   onRead() {}
 }
@@ -23,7 +23,7 @@ users.push({ name: "bob", age: 25 })
 users.pushEnd()
 class ToLine extends Transform<User, string> {
   constructor() {
-    super({ writableObjectMode: true, encoding: "utf8" })
+    super({ encoding: "utf8" })
   }
   onTransform(user, encoding, callback) {
     callback(undefined, `${user.name}:${user.age}\n`)
@@ -63,8 +63,8 @@ const sunk = await pipeline(
 )
 log(`done ${sunk.isOk()}`)
 
-// The chunk types found from the program: what read() pushes, what
-// transform() gives its callback, what write() is declared to take.
+// Chunk types of each kind of stream: what read() pushes, what transform()
+// gives its callback, what write() takes.
 class Point {
   x: int
   y: int
@@ -77,7 +77,7 @@ let n = 0
 type Total = { label: string; total: int }
 class Points extends Readable<Point> {
   constructor() {
-    super({ objectMode: true })
+    super()
   }
   onRead() {
     n++
@@ -87,7 +87,7 @@ class Points extends Readable<Point> {
 }
 class Sum extends Transform<Point, Total> {
   constructor() {
-    super({ objectMode: true })
+    super()
   }
   onTransform(p, encoding, callback) {
     callback(undefined, { label: `p${p.x}`, total: p.x + p.y })
@@ -95,7 +95,7 @@ class Sum extends Transform<Point, Total> {
 }
 class Totals extends Writable<Total> {
   constructor() {
-    super({ objectMode: true })
+    super()
   }
   onWrite(item, encoding, callback) {
     log(`${item.label} = ${item.total}`)

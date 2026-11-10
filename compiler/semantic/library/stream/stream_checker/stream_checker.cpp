@@ -248,6 +248,7 @@ Expr *StreamChecker::streamChunkArg(Expr *arg, const Type *chunk, bool eof, bool
   return this->typeRelations->convert(arg, Type::unknown());
 }
 
+// TODO: говнокод
 Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDecl *cls) {
   llvm::StringRef name = member->name;
   if (name != "push" && name != "unshift" && name != "write" && name != "end" &&
@@ -321,22 +322,6 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
   };
   std::vector<Expr *> args;
   llvm::StringRef impl;
-  if (this->state.getEventStore().isOpenMap(chunk) && !call->args.empty()) {
-    size_t at = name == "end" && call->args.size() == 1 && isa<FunctionExpr>(call->args[0])
-                    ? call->args.size()
-                    : 0;
-    for (size_t i = 0; i < call->args.size(); ++i) {
-      call->args[i] = this->exprChecker->checkExpr(call->args[i]);
-      if (i == at && !isa<UndefinedExpr>(call->args[i])) {
-        this->chunkTypes->recordStreamChunk(chunk, call->args[i]->type, call->args[i]->loc());
-      }
-    }
-    call->type =
-        name == "end"
-            ? Type::promise(Type::result(Type::voidTy(), this->prelude->builtinType("StreamError")))
-            : Type::boolTy();
-    return call;
-  }
   if (reading) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
     if (arity.isErr()) {

@@ -51,19 +51,6 @@ void ClassBases::addBase(const Type *type, const Type *base) {
   }
 }
 
-ClassBases::ResultEventMapInferred ClassBases::eventMapFound(const Type *events) {
-  if (!events) {
-    std::string message = ErrorTextExtends::eventMap();
-
-    return err(ClassBasesEventMapFoundError{
-        .code = ClassBasesEventMapFoundErrorCode::NO_EVENT_MAP,
-        .message = message,
-    });
-  }
-
-  return ok(events);
-}
-
 ClassBases::ResultParentClassFound ClassBases::baseClass(const ClassDecl *cls, const TypeRef &ref,
                                                          bool named, bool instance,
                                                          ClassDecl *parent,
@@ -240,30 +227,21 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
     bool instance = false;
     if (parent && parent->library() && parent->name == "EventEmitter" &&
         ref.kind() == TypeRefKind::NAME_REF) {
-      const Type *events = this->eventMapInference->inferredEventMap(
-          "class " + this->eventMapInference->placeOf(cls->loc()) + " " + cls->name.str());
+      Type *events = this->eventMapInference->classEventMap(cls);
       ClassDecl *emitter = parent;
-      parent = nullptr;
-      if (events) {
-        GenericClassInstantiator::ResultClassMade made =
-            this->genericClassInstantiator->instantiateClass(emitter, {events}, ref.loc);
-        if (made.isErr() &&
-            made.error().code !=
-                GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
-          llvm::SMLoc at =
-              made.error().code ==
-                      GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
-                  ? emitter->loc()
-                  : ref.loc;
-          this->state.getDiagnostics().error(at, made.error().message);
-        }
-        parent = made.isOk() ? made.value() : nullptr;
+      GenericClassInstantiator::ResultClassMade made =
+          this->genericClassInstantiator->instantiateClass(emitter, {events}, ref.loc);
+      if (made.isErr() && made.error().code !=
+                              GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+        llvm::SMLoc at =
+            made.error().code ==
+                    GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
+                ? emitter->loc()
+                : ref.loc;
+        this->state.getDiagnostics().error(at, made.error().message);
       }
+      parent = made.isOk() ? made.value() : nullptr;
       instance = true;
-      ResultEventMapInferred map = ClassBases::eventMapFound(events);
-      if (map.isErr()) {
-        this->state.getDiagnostics().error(ref.loc, map.error().message);
-      }
       if (!parent) {
         found = nullptr;
       }

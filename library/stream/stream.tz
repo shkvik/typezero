@@ -367,7 +367,6 @@ interface SideOptions {
   highWaterMark?: double;
   sideHighWaterMark?: double;
   objectMode?: boolean;
-  sideObjectMode?: boolean;
   encoding?: BufferEncoding;
   defaultEncoding?: BufferEncoding;
   decodeStrings?: boolean;
@@ -711,7 +710,6 @@ export class Stream extends EventEmitterBase {
   private corked: int;
   private writeHwm: int;
   private writeLength: int;
-  private writeObjects: boolean;
   private readableState?: ReadableState;
   private writableState?: WritableState;
   private ready: boolean;
@@ -739,7 +737,6 @@ export class Stream extends EventEmitterBase {
     this.corked = 0;
     this.writeHwm = 0;
     this.writeLength = 0;
-    this.writeObjects = false;
     this.ready = false;
     this.constructWaits = [];
     this.destroyWaits = [];
@@ -844,7 +841,7 @@ export class Stream extends EventEmitterBase {
     return this.readLength;
   }
 
-  public readableObjectMode(): boolean {
+  protected readableObjectMode(): boolean {
     return this.readObjects;
   }
 
@@ -899,10 +896,6 @@ export class Stream extends EventEmitterBase {
     return w != undefined && (w.bits & (kDestroyed | kEnding | kNeedDrain)) == kNeedDrain;
   }
 
-  public writableObjectMode(): boolean {
-    return this.writeObjects;
-  }
-
   protected setUp(setup: StreamSetup) {
     if (this.ready) return;
     this.ready = true;
@@ -934,9 +927,7 @@ export class Stream extends EventEmitterBase {
 
   private initReadable(options: SideOptions, isDuplex: boolean) {
     let bits = kEmitClose | kAutoDestroy | kConstructed | kSync;
-    const objectMode =
-      (options.objectMode ?? false) ||
-      (isDuplex && (options.sideObjectMode ?? false));
+    const objectMode = options.objectMode ?? false;
     if (objectMode) bits |= kObjectMode;
     const state = new ReadableState(bits);
     this.readHwm = getHighWaterMark(
@@ -962,9 +953,7 @@ export class Stream extends EventEmitterBase {
 
   private initWritable(options: SideOptions, isDuplex: boolean) {
     let bits = kWSync | kConstructed | kEmitClose | kAutoDestroy;
-    const objectMode =
-      (options.objectMode ?? false) ||
-      (isDuplex && (options.sideObjectMode ?? false));
+    const objectMode = options.objectMode ?? false;
     if (objectMode) bits |= kObjectMode;
     const state = new WritableState(bits);
     this.writeHwm = getHighWaterMark(
@@ -981,7 +970,6 @@ export class Stream extends EventEmitterBase {
       state.defaultEncoding = normalizeEncoding(defaultEncoding);
     resetBuffer(state);
     this.writableState = state;
-    this.writeObjects = objectMode;
   }
 
   private initEnd() {
@@ -3077,7 +3065,7 @@ export class Stream extends EventEmitterBase {
         retIterable = transform(input);
         continue;
       }
-      const pt = new PassThrough<unknown>({ objectMode: true });
+      const pt = new PassThrough<unknown>();
       const sink = stage.sink;
       if (sink != undefined) {
         ps.finishCount++;
@@ -3214,8 +3202,6 @@ export class Stream extends EventEmitterBase {
       else c.onclose = callback;
     };
     const d = new ComposedDuplex<W, R>(c, {
-      writableObjectMode: head.writableObjectMode(),
-      readableObjectMode: tail.readableObjectMode(),
       writable,
       readable,
     });

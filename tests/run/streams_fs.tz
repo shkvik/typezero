@@ -48,7 +48,7 @@ const more = createWriteStream(out, { flags: "a" })
 const appended = await more.end("appended")
 console.log(`appended ${appended.isOk()} ${JSON.stringify(must(readFileSync(out, "utf8")))}`)
 
-class Upper extends Transform {
+class Upper extends Transform<Buffer> {
   onTransform(chunk, enc, cb) {
     cb(undefined, chunk.toString().toUpperCase())
   }

@@ -6,7 +6,7 @@
 // of strings (decodeStrings: false), and a write that fails.
 import { Writable } from "node:stream"
 const log = (s: string) => console.log(s)
-class Slow extends Writable {
+class Slow extends Writable<Buffer> {
   constructor() {
     super({ highWaterMark: 5 })
   }
@@ -19,7 +19,7 @@ class Slow extends Writable {
     callback()
   }
 }
-class Batched extends Writable {
+class Batched extends Writable<Buffer> {
   onWrite(chunk, encoding, callback) {
     this.onWritev([{ chunk, encoding }], callback)
   }
@@ -37,7 +37,7 @@ class Strings extends Writable<string> {
     cb()
   }
 }
-class Failing extends Writable {
+class Failing extends Writable<Buffer> {
   onWrite(chunk, enc, cb) {
     void chunk
     void enc

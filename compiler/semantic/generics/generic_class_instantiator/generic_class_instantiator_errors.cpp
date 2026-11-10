@@ -26,6 +26,12 @@ std::string ErrorTextClassInstance::needs(llvm::StringRef name, size_t count) {
       .str();
 }
 
+std::string ErrorTextClassInstance::chunks(llvm::StringRef name) {
+  return (llvm::Twine("'") + name + "' needs the type of its chunks, e.g. '" + name +
+          "<Buffer>', '" + name + "<string>' or '" + name + "<User>'")
+      .str();
+}
+
 std::string ErrorTextClassInstance::undefinedArg(llvm::StringRef arg, llvm::StringRef name) {
   return (llvm::Twine("'") + arg + "' cannot be a type argument of '" + name + "'").str();
 }

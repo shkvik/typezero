@@ -20,6 +20,7 @@ public:
   void addLateClass(ClassDecl *cls);
   bool hasUncheckedLateClasses() const;
   ClassDecl *takeUncheckedLateClass();
+  std::vector<ClassDecl *> getUncheckedLateClasses() const;
   void enterDeclaringClass(ClassDecl *cls);
   void leaveDeclaringClass();
   ClassDecl *getDeclaringClass() const;

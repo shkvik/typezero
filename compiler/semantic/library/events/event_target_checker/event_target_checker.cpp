@@ -325,9 +325,8 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
     checkArgsLoosely(2);
     return call;
   }
-  const Type *errors = events->isRecord()       ? events->valueType()
-                       : events->field("error") ? events->field("error")->type
-                                                : nullptr;
+  const Type *errors =
+      events->isRecord() ? events->valueType() : this->eventMaps->findEventArgs(events, "error");
   const ClassDecl *source = ClassDeclarer::classOf(type);
   const ClassDecl *root = source && source->generic() ? source->generic() : source;
   bool ends =

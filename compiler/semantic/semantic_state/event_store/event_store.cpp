@@ -2,105 +2,62 @@
 
 namespace tz {
 
-EventStore::EventStore(EventInference &rounds)
-    : inference(rounds) {}
+EventSite *EventStore::findSite(const std::string &key) {
+  auto found = this->sites.find(key);
 
-void EventStore::markInferenceOpen() {
-  this->inference.open = true;
+  return found == this->sites.end() ? nullptr : &found->second;
 }
 
-bool EventStore::isInferenceFinal() const {
-  return this->inference.final;
+EventSite *EventStore::addSite(EventSite site) {
+  std::string key = site.key;
+  const Type *map = site.map;
+  auto placed = this->sites.emplace(key, std::move(site)).first;
+  this->mapSites[map] = key;
+
+  return &placed->second;
 }
 
-std::vector<EventInference::Event> EventStore::getInferredEvents(const std::string &site) const {
-  auto found = this->inference.maps.find(site);
-  if (found == this->inference.maps.end()) {
-    return {};
+EventSite *EventStore::findSiteOfMap(const Type *map) {
+  auto found = this->mapSites.find(map);
+
+  return found == this->mapSites.end() ? nullptr : this->findSite(found->second);
+}
+
+std::vector<EventSite *> EventStore::getSites() {
+  std::vector<EventSite *> all;
+  for (auto &entry : this->sites) {
+    all.push_back(&entry.second);
   }
 
-  return found->second;
+  return all;
 }
 
-const EventInference::Event *EventStore::findInferredEvent(const std::string &site,
-                                                           llvm::StringRef name) const {
-  auto found = this->inference.maps.find(site);
-  if (found == this->inference.maps.end()) {
-    return nullptr;
-  }
-  for (const EventInference::Event &event : found->second) {
-    if (event.name == name) {
-      return &event;
-    }
-  }
-
-  return nullptr;
+void EventStore::markSentEmitsFinished() {
+  this->sentEmitsFinished = true;
 }
 
-void EventStore::addInferredEvent(const std::string &site, EventInference::Event event) {
-  this->inference.maps[site].push_back(std::move(event));
-  this->inference.changed = true;
+bool EventStore::hasFinishedSentEmits() const {
+  return this->sentEmitsFinished;
 }
 
-void EventStore::changeInferredEvent(const std::string &site, llvm::StringRef name,
-                                     EventInference::Portable args) {
-  for (EventInference::Event &event : this->inference.maps[site]) {
-    if (event.name == name) {
-      event.args = std::move(args);
-      this->inference.changed = true;
-      return;
-    }
-  }
+bool EventStore::hasCandidates(const Module *module) const {
+  return this->candidates.count(module) > 0;
 }
 
-void EventStore::rememberSiteMap(const std::string &site, const Type *map) {
-  this->siteMaps[site] = map;
+void EventStore::rememberCandidates(const Module *module, std::vector<EmitCandidate> found) {
+  this->candidates[module] = std::move(found);
 }
 
-const Type *EventStore::findSiteMap(const std::string &site) const {
-  auto found = this->siteMaps.find(site);
-  if (found == this->siteMaps.end()) {
-    return nullptr;
-  }
-
-  return found->second;
-}
-
-void EventStore::rememberOpenMap(const Type *map, const std::string &site) {
-  this->openMaps[map] = site;
-}
-
-bool EventStore::isOpenMap(const Type *map) const {
-  return this->openMaps.count(map) > 0;
-}
-
-std::optional<std::string> EventStore::findOpenMapSite(const Type *map) const {
-  auto found = this->openMaps.find(map);
-  if (found == this->openMaps.end()) {
-    return std::nullopt;
-  }
-
-  return found->second;
-}
-
-void EventStore::rememberInferredMap(const Type *map, const std::string &site) {
-  this->inferredMaps[map] = site;
-}
-
-bool EventStore::isInferredMap(const Type *map) const {
-  return this->inferredMaps.count(map) > 0;
-}
-
-std::optional<std::string> EventStore::findInferredMapSite(const Type *map) const {
-  auto found = this->inferredMaps.find(map);
-  if (found == this->inferredMaps.end()) {
-    return std::nullopt;
-  }
-
-  return found->second;
+const std::vector<EmitCandidate> &EventStore::getCandidates(const Module *module) const {
+  return this->candidates.at(module);
 }
 
 void EventStore::addErrorEmit(const Type *events, llvm::SMLoc loc) {
+  for (const ErrorEmit &known : this->errorEmits) {
+    if (known.loc == loc) {
+      return;
+    }
+  }
   this->errorEmits.push_back({events, loc});
 }
 
@@ -125,6 +82,11 @@ bool EventStore::isSelfListener(const ClassDecl *cls) const {
 }
 
 void EventStore::addDroppedNew(const ClassDecl *cls, llvm::SMLoc loc) {
+  for (const DroppedNew &known : this->droppedNews) {
+    if (known.loc == loc) {
+      return;
+    }
+  }
   this->droppedNews.push_back({cls, loc});
 }
 

@@ -58,12 +58,24 @@ GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::vector<const
     });
   }
   bool emitter = generic->library() && generic->name == "EventEmitter";
+  // TODO: в storage перенести
+  static const llvm::StringLiteral streams[] = {"Readable", "Writable", "Duplex", "Transform",
+                                                "PassThrough"};
+  bool chunked = generic->library() && llvm::is_contained(streams, generic->name);
   for (size_t k = args.size(); k < params.size(); ++k) {
     if (emitter) {
       std::string message = ErrorTextClassInstance::eventMap();
 
       return err(GenericClassInstantiatorInstantiateClassError{
           .code = GenericClassInstantiatorInstantiateClassErrorCode::EVENT_MAP_MISSING,
+          .message = message,
+      });
+    }
+    if ((k >= defaults.size() || !defaults[k]) && chunked) {
+      std::string message = ErrorTextClassInstance::chunks(name);
+
+      return err(GenericClassInstantiatorInstantiateClassError{
+          .code = GenericClassInstantiatorInstantiateClassErrorCode::CHUNK_TYPE_MISSING,
           .message = message,
       });
     }

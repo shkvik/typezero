@@ -4,7 +4,7 @@
 // to words in object mode, and the backpressure of a PassThrough.
 import { PassThrough, Transform } from "node:stream"
 const log = (s: string) => console.log(s)
-class Upper extends Transform {
+class Upper extends Transform<Buffer> {
   onTransform(chunk, encoding, callback) {
     log(`_transform ${chunk.toString()} ${encoding}`)
     callback(undefined, chunk.toString().toUpperCase())
@@ -42,7 +42,7 @@ split.on("error", (e) => log(`split error ${e.message}`))
 split.on("data", (word) => log(`word ${word} ${typeof word}`))
 const splitEnded = split.end("a bb ccc")
 
-const pt = new PassThrough({ highWaterMark: 2 })
+const pt = new PassThrough<Buffer>({ highWaterMark: 2 })
 log(`pt write ${pt.write("abc")}`)
 pt.on("error", (e) => log(`pt error ${e.message}`))
 pt.on("drain", () => log("pt drain"))
@@ -56,7 +56,7 @@ log(`ended ${(await upperEnded).isOk()} ${(await splitEnded).isOk()} ${(await pt
 
 // A transform that calls its callback twice is an error, as in node; each
 // write keeps its own callback, so a late second call is caught too.
-class Twice extends Transform {
+class Twice extends Transform<Buffer> {
   onTransform(chunk: Buffer, encoding, callback) {
     callback(undefined, chunk)
     callback()

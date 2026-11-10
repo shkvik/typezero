@@ -34,7 +34,7 @@ const file = join(dir, "herd.txt")
 let records = 0
 class ToLine extends Transform<Animal, string> {
   constructor() {
-    super({ objectMode: true })
+    super()
   }
   onTransform(a, _encoding, callback) {
     records++
@@ -52,7 +52,7 @@ console.log("written", dogs.map((d) => d.name).join(","))
 // The file back, a hash of its chunks, and its lines counted by a Writable.
 const hash = must(createHash("sha256"))
 let lines = 0
-class Counter extends Writable {
+class Counter extends Writable<Buffer> {
   onWrite(chunk: Buffer, _encoding, callback) {
     hash.update(chunk)
     lines += chunk.toString().split("\n").length - 1
@@ -65,7 +65,7 @@ stages.emit("stage", { name: "counted", count: lines })
 console.log("sha256", hash.digest("hex"))
 
 // A read stream joined to a Transform with pipeline(), and the text it gives.
-class Upper extends Transform {
+class Upper extends Transform<Buffer> {
   onTransform(chunk: Buffer, _encoding, callback) {
     callback(undefined, chunk.toString().toUpperCase())
   }

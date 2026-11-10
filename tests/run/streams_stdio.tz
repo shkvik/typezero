@@ -4,7 +4,7 @@
 // console.log.
 import { Transform } from "node:stream"
 import { pipeline } from "node:stream/promises"
-class Upper extends Transform {
+class Upper extends Transform<Buffer> {
   onTransform(chunk, enc, cb) {
     cb(undefined, chunk.toString().toUpperCase())
   }

@@ -5,6 +5,9 @@ export class Shop extends EventEmitter {
   sell(what: string, count: int) {
     this.emit("sold", { what: what, count: count })
   }
+  close() {
+    this.emit("closed")
+  }
 }
 
 export function report(shop: Shop) {

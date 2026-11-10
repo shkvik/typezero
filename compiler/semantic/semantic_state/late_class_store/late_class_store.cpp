@@ -17,6 +17,13 @@ ClassDecl *LateClassStore::takeUncheckedLateClass() {
   return cls;
 }
 
+std::vector<ClassDecl *> LateClassStore::getUncheckedLateClasses() const {
+  std::vector<ClassDecl *> unchecked(this->lateClasses.begin() + this->checkedCount,
+                                     this->lateClasses.end());
+
+  return unchecked;
+}
+
 void LateClassStore::enterDeclaringClass(ClassDecl *cls) {
   this->declaringClasses.push_back(cls);
 }

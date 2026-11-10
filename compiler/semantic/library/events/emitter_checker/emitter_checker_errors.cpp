@@ -83,11 +83,6 @@ std::string ErrorTextEmitterNew::dropped(llvm::StringRef cls) {
          cls.lower() + " = new " + cls.str() + "(...)' (docs/events.md, section 6)";
 }
 
-std::string ErrorTextEmitterNew::needsMap() {
-  return "'new EventEmitter()' needs its event map here, e.g. 'new "
-         "EventEmitter<{ data: [chunk: string]; end: [] }>()'";
-}
-
 std::string ErrorTextEmitted::oneValue(llvm::StringRef event) {
   return "an event carries one value: pass an object, e.g. 'emit(\"" + event.str() +
          "\", { from, text })' (docs/events.md, section 2)";
@@ -128,6 +123,19 @@ std::string ErrorTextEmitted::methodVal(llvm::StringRef name) {
          "map checks each call by the name of its event; wrap it in an "
          "arrow, e.g. '(listener) => bus." +
          name.str() + "(\"data\", listener)'";
+}
+
+std::string ErrorTextEmitted::foreign(llvm::StringRef event, llvm::StringRef owner) {
+  return "'" + event.str() + "' is not an event of this emitter: its events are the ones " +
+         "emitted in " + owner.str() + ", where it is made, and other modules emit only those; " +
+         "emit '" + event.str() + "' in " + owner.str() +
+         ", e.g. in a method of its class, or give the emitter its event map (docs/events.md, "
+         "section 2)";
+}
+
+std::string ErrorTextEmitted::voidValue(llvm::StringRef event) {
+  return "this has no value to send with '" + event.str() + "': it is 'void'; emit the event " +
+         "without a value, e.g. 'emit(\"" + event.str() + "\")'";
 }
 
 std::string ErrorTextEventsExport::hint(llvm::StringRef name) {

@@ -4,7 +4,7 @@
 // generator and a string.
 import { PassThrough, Readable } from "node:stream"
 const log = (s: string) => console.log(s)
-const pt = new PassThrough()
+const pt = new PassThrough<Buffer>()
 pt.write("one ")
 pt.write("two ")
 const ending = new Promise<void>((resolve) => setTimeout(resolve, 1)).then(() => pt.end("three"))
@@ -38,7 +38,7 @@ log(`sum ${sum}`)
 const one = Readable.from("whole string")
 one.on("error", (e) => log(`one error ${e.message}`))
 one.on("data", (s) => log(`one ${s} ${typeof s}`))
-class Broken extends Readable {
+class Broken extends Readable<Buffer> {
   onRead() {
     setTimeout(() => this.destroy({ message: "broken" }), 1)
   }

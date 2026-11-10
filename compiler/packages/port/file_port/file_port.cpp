@@ -149,6 +149,7 @@ void FilePort::run() {
     retokenize();
   }
   streamHooks();
+  streamTypes();
   if (apply()) {
     retokenize();
   }
@@ -943,6 +944,55 @@ void FilePort::manual() {
     if ((is(i, Tok::TemplateHead) || is(i, Tok::TemplateString)) &&
         (is(i - 1, Tok::Pipe) || (is(i - 1, Tok::Assign) && i >= 3 && isName(i - 3, "type")))) {
       note(i, "template literal types are not supported: write 'string'");
+    }
+  }
+}
+
+llvm::StringSet<> FilePort::streamImports() const {
+  static const llvm::StringLiteral streams[] = {"Readable", "Writable", "Duplex", "Transform",
+                                                "PassThrough"};
+  llvm::StringSet<> names;
+  for (size_t i = 0; i + 1 < this->toks.size(); ++i) {
+    if (!isName(i, "import") || afterDot(i) || !is(i + 1, Tok::LBrace) || !this->opens(i + 1)) {
+      continue;
+    }
+    size_t list = this->close[i + 1];
+    bool fromStream = isName(list + 1, "from") && is(list + 2, Tok::StringLiteral) &&
+                      (this->toks[list + 2].text == "\"node:stream\"" ||
+                       this->toks[list + 2].text == "'node:stream'" ||
+                       this->toks[list + 2].text == "\"stream\"" ||
+                       this->toks[list + 2].text == "'stream'");
+    if (!fromStream) {
+      continue;
+    }
+    for (size_t k = i + 2; k < list; ++k) {
+      bool local = is(k, Tok::Identifier) && !isName(k + 1, "as") &&
+                   (isName(k - 1, "as") || llvm::is_contained(streams, this->toks[k].text));
+      if (local) {
+        names.insert(this->toks[k].text);
+      }
+    }
+  }
+
+  return names;
+}
+
+void FilePort::streamTypes() {
+  const char *kind = "'Readable' became 'Readable<Buffer>'";
+  llvm::StringSet<> imported = this->streamImports();
+  for (size_t i = 1; i < this->toks.size(); ++i) {
+    bool named = is(i, Tok::Identifier) && !afterDot(i) && imported.contains(this->toks[i].text);
+    bool placed = isName(i - 1, "extends") || is(i - 1, Tok::KwNew);
+    bool bare = !is(i + 1, Tok::Less) && !is(i + 1, Tok::Dot);
+    if (named && placed && bare) {
+      add(endOf(i), endOf(i), "<Buffer>", kind);
+    }
+    bool mode = isName(i, "objectMode") || isName(i, "readableObjectMode") ||
+                isName(i, "writableObjectMode");
+    if (mode && !afterDot(i) && is(i + 1, Tok::Colon)) {
+      note(i, "'" + this->toks[i].text.str() +
+                  "' is not supported: the type of the chunks gives the mode "
+                  "(docs/streams.md), e.g. 'extends Readable<Row>'; remove it");
     }
   }
 }

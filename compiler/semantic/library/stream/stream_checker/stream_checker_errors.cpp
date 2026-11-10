@@ -26,10 +26,8 @@ std::string ErrorTextStreamCall::chunk(llvm::StringRef method, llvm::StringRef c
          (onlyStrings ? "; a Writable<string> gives its onWrite() the "
                         "strings written; make it a Writable<Buffer> to "
                         "write bytes"
-                      : "; to write objects, make the stream an "
-                        "object-mode one of their type, e.g. 'class "
-                        "Users extends Readable<User>' with "
-                        "'super({ objectMode: true })'");
+                      : "; to write objects, make the stream one of their type, e.g. "
+                        "'class Users extends Readable<User>'");
 }
 
 std::string ErrorTextStreamCall::pipe() {

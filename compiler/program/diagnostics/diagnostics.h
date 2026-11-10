@@ -25,6 +25,7 @@ public:
 
     return old;
   }
+  bool isMuted() const { return this->muted; }
 
   struct Captured {
     llvm::SMLoc loc;

@@ -16,10 +16,9 @@
 ```
 pipeline/                   конвейер проходов
   build_options/            BuildOptions: вход, выход, пакеты, текст редактора, уровень проверки
-  check_program/            checkProgram: загрузка и прогоны проверки — зовут фасад движка
+  check_program/            checkProgram: загрузка и проходы проверки — зовут фасад движка
     check_pass/             CheckPass: проверяет тела всех модулей по порядку загрузки
     declare_pass/           DeclarePass: объявляет всё, что есть в модулях
-    event_rounds/           EventRounds: круги проверки, пока карты событий не перестанут меняться
     infer_pass/             InferPass: выводит типы возврата
     instances_pass/         InstancesPass: копии обобщений и поздние классы
     interprocedural_pass/   InterproceduralPass: межпроцедурные проверки по всей программе
@@ -368,7 +367,7 @@ semantic/                         движок типов: объявления,
       decimal_checker/            DecimalChecker: литералы и операции decimal
     events/                       node:events и EventTarget
       emitter_checker/            EmitterChecker: on / emit у EventEmitter, правило «слушай error»
-      event_map_inference/        EventMapInference: карта событий из вызовов emit
+      event_map_inference/        EventMapInference: карта событий из emit модуля, заглядывание вперёд
       event_maps/                 EventMaps: карта событий класса, тип слушателя
       event_target_checker/       EventTargetChecker: EventTarget, once / on из node:events
     fs/                           node:fs, fs/promises, readline, tz:io
@@ -434,7 +433,7 @@ semantic/                         движок типов: объявления,
     class_context/                ClassContext: текущий класс, конструктор, статические поля, this.x
     class_store/                  ClassStore: все классы, номера, связи переопределений
     constant_store/               ConstantStore: константы при сборке, ключи и префиксы const
-    event_store/                  EventStore: карты событий по кругам, слушатели 'error'
+    event_store/                  EventStore: выведенные карты событий, emit-кандидаты, слушатели 'error'
     expression_marks/             ExpressionMarks: отметки выражений — цепочки +, перепроверка, нетипизированные
     file_system_store/            FileSystemStore: классы Stats и Dirent, вызов из fs/promises
     flow_state/                   FlowState: текущий поток — факты, сужения, поля; Flow и FieldPath

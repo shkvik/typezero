@@ -48,11 +48,6 @@ inline constexpr TypeEdge kReflectConstructorsRoute[] = {
     TypeEdge::YIELDED,  TypeEdge::DICT,  TypeEdge::UNION,   TypeEdge::FIELDS,
 };
 
-inline constexpr TypeEdge kSameEveryRoundRoute[] = {
-    TypeEdge::OPTIONAL, TypeEdge::ARRAY, TypeEdge::PROMISE, TypeEdge::RESULT, TypeEdge::FUNCTION,
-    TypeEdge::ITERATOR, TypeEdge::DICT,  TypeEdge::UNION,   TypeEdge::FIELDS, TypeEdge::TUPLE_REST,
-};
-
 inline constexpr TypeEdge kMembersOfRoute[] = {
     TypeEdge::CONSTRAINT,
     TypeEdge::UNION,

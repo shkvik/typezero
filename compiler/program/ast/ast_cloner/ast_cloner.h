@@ -15,6 +15,7 @@ public:
 
   ClassDecl *copyClass(const ClassDecl *cls);
   FunctionDecl *copyFunction(const FunctionDecl *fn);
+  Stmt *copyStatement(const Stmt *stmt);
   void keepPristine(llvm::ArrayRef<Stmt *> items);
 
 private:

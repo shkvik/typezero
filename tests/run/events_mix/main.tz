@@ -1,9 +1,8 @@
 // Events with the rest of the language, across files: an EventEmitter
-// subclass whose event map comes from the emits of both files, with async
-// listeners; a failed readFile of node:fs/promises as an event; on() in
-// `for await`, ended by an event and by `break`, and given to a generic
-// function; once(); and the overflow warnings, which the last of the rounds
-// that find the event maps reports.
+// subclass whose event map comes from the emits of its file, which this file
+// sends too, with async listeners; a failed readFile of node:fs/promises as
+// an event; on() in `for await`, ended by an event and by `break`, and given
+// to a generic function; once(); and the overflow warnings.
 import { on, once } from "node:events"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
@@ -23,10 +22,10 @@ jobs.on("done", async (done) => {
 })
 jobs.on("failed", (failed) => log(`failed ${failed.name}: ${failed.why}`))
 
-// 1. on() until "finished", which this file emits.
+// 1. on() until "finished".
 const done = on(jobs, "done", { close: ["finished"] })
 for (const name of files) await jobs.read(name, join(dir, name + ".txt"))
-jobs.emit("finished")
+jobs.finish()
 let total = 0
 for await (const [job] of done) {
   const weight: int = parseInt(String(job.size)).unwrapOr(0)
@@ -42,7 +41,7 @@ await jobs.read("missing", join(dir, "missing.txt"))
 setTimeout(() => {
   jobs.emit("start", "x")
   jobs.emit("start", "y")
-  jobs.emit("finished")
+  jobs.finish()
 }, 1)
 const collected = await collect(on(jobs, "start", { close: ["finished"] }))
 log(`${collected.length} ${collected.map(([name]) => name).join(",")}`)
@@ -54,7 +53,7 @@ for await (const [name] of on(jobs, "start")) {
 log(`start listeners ${jobs.listenerCount("start")}`)
 
 // 4. once(): the arguments of the next event.
-setTimeout(() => jobs.emit("finished"), 1)
+setTimeout(() => jobs.finish(), 1)
 const finished = await once(jobs, "finished")
 log(`once: ${finished.length}`)
 

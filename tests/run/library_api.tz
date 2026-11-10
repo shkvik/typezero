@@ -105,4 +105,4 @@ class Odd extends Readable<string> {
     this.pushChunk(42)
   }
 }
-for await (const item of new Odd({ objectMode: true })) console.log(item.isErr() ? item.error.message : item.value)
+for await (const item of new Odd()) console.log(item.isErr() ? item.error.message : item.value)

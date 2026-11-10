@@ -3,11 +3,6 @@
 
 namespace tz {
 
-std::string ErrorTextExtends::eventMap() {
-  return "'EventEmitter' needs its event map here, e.g. 'extends "
-         "EventEmitter<{ data: [chunk: string]; end: [] }>'";
-}
-
 std::string ErrorTextExtends::byName() {
   return "a class can extend only a class, by its name";
 }

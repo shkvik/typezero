@@ -29,7 +29,6 @@ public:
 private:
   using ResultParentClassFound = Result<ClassDecl *, ClassBasesBaseClassError>;
   using ResultUnusedMemberName = Result<const Field *, ClassBasesNewFieldError>;
-  using ResultEventMapInferred = Result<const Type *, ClassBasesEventMapFoundError>;
   using ResultObjectTypeAsBase = Result<const Type *, ClassBasesInterfaceBaseError>;
   using ResultFieldNarrowsDown = Result<const Field *, ClassBasesNarrowsFieldError>;
   using ResultFieldTypesAreOne = Result<const Field *, ClassBasesSameFieldTypeError>;
@@ -45,7 +44,6 @@ private:
   static const char *accessName(Access access);
   static bool isErrorClass(llvm::StringRef name);
   static ResultObjectTypeAsBase interfaceBase(const Type *base);
-  static ResultEventMapInferred eventMapFound(const Type *events);
   static ResultImplementedShape implementedType(const Type *type, const ClassDecl *cls);
   static ResultOverrideTargeted overrideTarget(const ClassDecl *cls, const ClassField &field);
   static ResultValueOnRedeclare valueGiven(const ClassDecl *cls, const ClassField &field,

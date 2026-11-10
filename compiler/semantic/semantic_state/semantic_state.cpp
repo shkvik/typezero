@@ -2,13 +2,11 @@
 
 namespace tz {
 
-SemanticState::SemanticState(AstContext &ctx, Diagnostics &diags, SourceFile &file,
-                             EventInference &inference)
+SemanticState::SemanticState(AstContext &ctx, Diagnostics &diags, SourceFile &file)
     : ast(ctx),
       diagnostics(diags),
       inventoryStore(file),
-      libraryDeclarations(file.builtins),
-      eventStore(inference) {}
+      libraryDeclarations(file.builtins) {}
 
 AstContext &SemanticState::getAst() {
   return this->ast;

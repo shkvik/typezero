@@ -4,7 +4,6 @@
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
-#include "compiler/semantic/bodies/objects/keyed_field_checker/keyed_field_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/flow/field_facts/field_facts.h"
 #include "compiler/semantic/generics/generic_class_instantiator/generic_class_instantiator.h"
@@ -50,7 +49,6 @@ EmitterChecker::EmitterChecker(SemanticState &owner, SemanticParts &all)
   this->returnInferrer = &all.getReturnInferrer();
   this->argumentChecker = &all.getArgumentChecker();
   this->eventMapInference = &all.getEventMapInference();
-  this->keyedFieldChecker = &all.getKeyedFieldChecker();
   this->methodCallChecker = &all.getMethodCallChecker();
   this->genericInstantiator = &all.getGenericInstantiator();
   this->genericClassInstantiator = &all.getGenericClassInstantiator();
@@ -98,24 +96,6 @@ std::optional<std::string> EmitterChecker::rootText(const Expr *expr) {
   return std::nullopt;
 }
 
-bool EmitterChecker::isServiceEvent(llvm::StringRef name) {
-  return name == "newListener" || name == "removeListener";
-}
-
-std::string EmitterChecker::fileOfPlace(const std::string &place) {
-  size_t column = place.rfind(':');
-  size_t line =
-      column == std::string::npos || column == 0 ? std::string::npos : place.rfind(':', column - 1);
-
-  return line == std::string::npos ? place : place.substr(0, line);
-}
-
-std::string EmitterChecker::shortPlace(const std::string &place) {
-  std::string file = EmitterChecker::fileOfPlace(place);
-
-  return llvm::sys::path::filename(file).str() + place.substr(file.size());
-}
-
 EmitterChecker::EmitterMethod EmitterChecker::emitterMethod(llvm::StringRef name) {
   if (name == "on" || name == "addListener" || name == "prependListener" || name == "once" ||
       name == "prependOnceListener") {
@@ -147,7 +127,11 @@ void EmitterChecker::noteListener(MemberExpr *member, const Type *events, llvm::
   if (event == "error") {
     this->state.getEventStore().markErrorListened(events);
   }
-  if (events->isRecord() || (event != "error" && !events->field("error"))) {
+  if (events->isRecord()) {
+    return;
+  }
+  const Type *errors = this->eventMaps->findEventArgs(events, "error");
+  if (event != "error" && errors == nullptr) {
     return;
   }
   const Expr *root = member->object;
@@ -345,9 +329,10 @@ std::string EmitterChecker::emitterPath(const EmitterKey &key) const {
 }
 
 void EmitterChecker::reportUnlistenedErrors() {
+  bool muted = this->state.getDiagnostics().isMuted();
   for (const auto &[key, loc] : this->state.getFlowState().takePendingErrors()) {
     EventStore &store = this->state.getEventStore();
-    if (store.isErrorSubscriptionReported(loc)) {
+    if (muted || store.isErrorSubscriptionReported(loc)) {
       continue;
     }
     store.markErrorSubscriptionReported(loc);
@@ -400,13 +385,7 @@ Expr *EmitterChecker::checkEmitterNew(NewExpr *expr, ClassDecl *generic, const T
              ClassDeclarer::classOf(want)->generic() == generic) {
     events = ClassDeclarer::classOf(want)->typeArgs[0];
   } else {
-    events = this->eventMapInference->inferredEventMap(
-        "new " + this->eventMapInference->placeOf(expr->loc()));
-    if (!events) {
-      std::string message = ErrorTextEmitterNew::needsMap();
-      this->state.getDiagnostics().error(expr->loc(), message);
-      return checkArgsLoosely();
-    }
+    events = this->eventMapInference->newEventMap(expr->loc());
   }
   if (!events) {
     return nullptr;
@@ -432,61 +411,140 @@ Expr *EmitterChecker::checkEmitterNew(NewExpr *expr, ClassDecl *generic, const T
   return this->methodCallChecker->checkClassNew(expr, inst, expected);
 }
 
-Expr *EmitterChecker::collectEmitterCall(CallExpr *call, MemberExpr *member,
-                                         const std::string &site) {
-  call->type = Type::boolTy();
-  member->type = Type::error();
-  llvm::SMLoc loc = call->args.empty() ? member->loc() : call->args[0]->loc();
-  if (call->args.size() > 2) {
-    std::string message = ErrorTextEmitted::oneValue("message");
-    this->state.getDiagnostics().error(call->args[2]->loc(), message);
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
+void EmitterChecker::checkLooseArgs(CallExpr *call, size_t from) {
+  for (size_t i = from; i < call->args.size(); ++i) {
+    call->args[i] = this->exprChecker->checkExpr(call->args[i]);
+  }
+}
+
+bool EmitterChecker::isOwnEmit(const EventSite *site, const SentEmit &emit) const {
+  if (emit.super) {
+    return true;
+  }
+  const Expr *object = emit.member->object;
+  while (auto *conv = dyn_cast<CastExpr>(object)) {
+    if (!conv->isImplicit()) {
+      break;
     }
+    object = conv->operand;
+  }
+  auto *self = dyn_cast<NameExpr>(object);
+  if (self != nullptr && self->name == "this") {
+    return true;
+  }
+  Module *module = this->eventMapInference->findModuleAt(emit.call->loc());
+
+  return module != nullptr && module == site->owner;
+}
+
+const Type *EmitterChecker::inferredEmitArgs(EventSite *site, const std::string &event,
+                                             llvm::SMLoc loc, std::string &first) {
+  EventRecord *record = this->eventMapInference->completeEvent(site, event);
+  if (record->args != nullptr) {
+    first = record->where;
+    return record->args;
+  }
+  std::string owner =
+      site->owner != nullptr ? llvm::sys::path::filename(site->owner->path).str() : "its module";
+  std::string message = ErrorTextEmitted::foreign(event, owner);
+  if (record->state == EventState::COMPLETING) {
+    message = ErrorTextEventName::circular(event);
+  } else if (!record->untyped.empty()) {
+    message = ErrorTextEventName::untyped(event, record->untyped);
+  }
+  this->state.getDiagnostics().error(loc, message);
+
+  return nullptr;
+}
+
+Expr *EmitterChecker::collectEmitterCall(const SentEmit &emit, EventSite *site,
+                                         const std::string &event, bool library) {
+  CallExpr *call = emit.call;
+  MemberExpr *member = emit.member;
+  call->type = Type::boolTy();
+  size_t count = call->args.size() - 1;
+  if (count > 1) {
+    std::string message = ErrorTextEmitted::oneValue(event);
+    this->state.getDiagnostics().error(call->args[2]->loc(), message);
+    this->checkLooseArgs(call, 1);
+    return call;
+  }
+  EventRecord *record = EventMapInference::findEvent(site, event);
+  if (record == nullptr) {
+    record = this->eventMapInference->addEvent(site, event);
+  }
+  const Type *before = record->args;
+  if (before != nullptr && before->fields().size() != count) {
+    std::string message = ErrorTextEmitted::countAt(event, before->name(), record->where, count);
+    this->state.getDiagnostics().error(member->loc(), message);
+    this->checkLooseArgs(call, 1);
     return call;
   }
   std::vector<const Type *> elements;
-  bool known = true;
-  for (size_t i = 0; i < call->args.size(); ++i) {
-    call->args[i] = i == 0 ? this->argumentChecker->checkArg(call->args[i], Type::string())
-                           : this->exprChecker->checkExpr(call->args[i]);
-    const Type *type = call->args[i]->type;
-    if (type->isError() || type->isVoid() || TypeQueries::mentionsParam(type)) {
-      known = false;
-    }
-    if (i > 0) {
-      elements.push_back(type->isLiteral() ? type->literalBase() : type);
-    }
-  }
-  std::optional<std::string> key =
-      call->args.empty() ? std::nullopt : this->keyedFieldChecker->constantKey(call->args[0]);
-  if (!key || !known || EmitterChecker::isServiceEvent(*key)) {
-    return call;
-  }
-  const Type *found = Type::tuple(elements);
-  EventStore &store = this->state.getEventStore();
-  if (const EventInference::Event *e = store.findInferredEvent(site, *key)) {
-    const Type *before = this->eventMapInference->fromPortable(e->args, loc);
-    if (!before || before == found || before->fields().size() != elements.size()) {
+  if (count == 1) {
+    const Type *wanted = before != nullptr ? before->fields()[0].type : nullptr;
+    call->args[1] = this->exprChecker->checkExpr(call->args[1], wanted);
+    const Type *type = call->args[1]->type;
+    if (type->isVoid()) {
+      std::string message = ErrorTextEmitted::voidValue(event);
+      this->state.getDiagnostics().error(call->args[1]->loc(), message);
       return call;
     }
-    std::vector<const Type *> wider;
-    for (size_t i = 0; i < elements.size(); ++i) {
-      const Type *both = TypeRelations::unify(before->fields()[i].type, elements[i]);
-      if (!both) {
-        return call;
-      }
-      wider.push_back(both);
+    if (type->isError() || TypeQueries::mentionsParam(type)) {
+      return call;
     }
-    if (const Type *now = Type::tuple(wider); now != before) {
-      store.changeInferredEvent(site, *key, this->eventMapInference->portable(now));
+    const Type *found = type->isLiteral() ? type->literalBase() : type;
+    bool fits = wanted != nullptr && TypeRelations::isImplicitlyConvertible(type, wanted);
+    const Type *wider = wanted != nullptr && !fits ? TypeRelations::unify(wanted, found) : nullptr;
+    const Type *element = fits ? wanted : wanted != nullptr ? wider : found;
+    if (element == nullptr) {
+      std::string message =
+          ErrorTextEmitted::typeAt(event, before->name(), record->where, type->name());
+      this->state.getDiagnostics().error(call->args[1]->loc(), message);
+      return call;
     }
+    elements.push_back(element);
+  }
+  const Type *args = Type::tuple(elements);
+  if (args != before) {
+    this->eventMapInference->rememberEventArgs(site, record, args, call->args[0]->loc());
+  }
+  if (this->state.getFunctionStack().isInsideTrial()) {
     return call;
   }
-  store.addInferredEvent(site, {*key, this->eventMapInference->portable(found),
-                                EmitterChecker::shortPlace(this->eventMapInference->placeOf(loc))});
+  if (event == "error" && !library) {
+    this->state.getEventStore().addErrorEmit(site->map, member->loc());
+  }
+  if (this->state.getEventStore().hasFinishedSentEmits()) {
+    this->finishEmit(emit, args);
+    return call;
+  }
+  record->sent.push_back(emit);
 
   return call;
+}
+
+void EmitterChecker::finishEmit(const SentEmit &emit, const Type *args) {
+  CallExpr *call = emit.call;
+  if (call->args.size() > 1) {
+    call->args[1] = this->typeRelations->coerce(call->args[1], args->fields()[0].type);
+  }
+  std::vector<bool> given(call->args.size(), true);
+  this->callLibraryMethod(call, emit.member, emit.cls, "emit", {args}, &given, emit.super);
+}
+
+void EmitterChecker::finishSentEmits() {
+  EventStore &store = this->state.getEventStore();
+  store.markSentEmitsFinished();
+  for (EventSite *site : store.getSites()) {
+    for (EventRecord &record : site->events) {
+      record.state = EventState::DONE;
+      for (const SentEmit &emit : record.sent) {
+        this->finishEmit(emit, record.args);
+      }
+      record.sent.clear();
+    }
+  }
 }
 
 Expr *EmitterChecker::callLibraryMethod(CallExpr *call, MemberExpr *member, ClassDecl *cls,
@@ -533,6 +591,7 @@ Expr *EmitterChecker::callLibraryMethod(CallExpr *call, MemberExpr *member, Clas
                                                given);
 }
 
+// TODO: говнокод
 Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, ClassDecl *cls,
                                        bool super) {
   EmitterMethod kind = EmitterChecker::emitterMethod(member->name);
@@ -559,11 +618,7 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  auto checkArgsLoosely = [&](size_t from) {
-    for (size_t i = from; i < call->args.size(); ++i) {
-      call->args[i] = this->exprChecker->checkExpr(call->args[i]);
-    }
-  };
+  auto checkArgsLoosely = [&](size_t from) { this->checkLooseArgs(call, from); };
   auto flag = [&](bool value) {
     return this->exprChecker->checkExpr(this->state.getAst().make<BoolLitExpr>(call->loc(), value));
   };
@@ -576,10 +631,27 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
       this->state.getDiagnostics().error(member->loc(), message);
       return call;
     }
-    if (std::optional<std::string> site = this->state.getEventStore().findOpenMapSite(events)) {
-      return this->collectEmitterCall(call, member, *site);
+    std::string first;
+    const Type *args = nullptr;
+    EventSite *site = this->state.getEventStore().findSiteOfMap(events);
+    if (site != nullptr) {
+      std::optional<std::string> key = this->eventMaps->eventKey(call->args[0], name);
+      if (!key) {
+        checkArgsLoosely(1);
+        return call;
+      }
+      event = *key;
+      SentEmit emit{.call = call, .member = member, .cls = cls, .super = super};
+      EventRecord *record = EventMapInference::findEvent(site, event);
+      bool service = EventMaps::isServiceEvent(event);
+      if (!service && this->isOwnEmit(site, emit) && !EventMapInference::isFrozen(record)) {
+        return this->collectEmitterCall(emit, site, event, library);
+      }
+      args = service ? EventMaps::serviceEventArgs()
+                     : this->inferredEmitArgs(site, event, call->args[0]->loc(), first);
+    } else {
+      args = this->eventMaps->eventArgs(events, call->args[0], name, &event);
     }
-    const Type *args = this->eventMaps->eventArgs(events, call->args[0], name, &event);
     if (!args) {
       checkArgsLoosely(1);
       return call;
@@ -593,14 +665,6 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
     }
     size_t min = args->tupleMin();
     size_t max = args->tupleRest() ? ~size_t(0) : args->fields().size();
-    std::string first;
-    if (std::optional<std::string> site = this->state.getEventStore().findInferredMapSite(events)) {
-      for (const EventInference::Event &e : this->state.getEventStore().getInferredEvents(*site)) {
-        if (e.name == event) {
-          first = e.where;
-        }
-      }
-    }
     if (count < min || count > max) {
       std::string message = !first.empty()
                                 ? ErrorTextEmitted::countAt(event, args->name(), first, count)

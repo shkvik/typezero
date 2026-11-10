@@ -5,18 +5,8 @@
 
 namespace tz {
 
-enum class ClassBasesEventMapFoundErrorCode {
-  NO_EVENT_MAP,
-};
-
-struct ClassBasesEventMapFoundError {
-  ClassBasesEventMapFoundErrorCode code;
-  std::string message;
-};
-
 class ErrorTextExtends {
 public:
-  static std::string eventMap();
   static std::string byName();
   static std::string itself(llvm::StringRef cls, llvm::StringRef through);
   static std::string runtime(llvm::StringRef cls, llvm::StringRef parent);

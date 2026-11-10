@@ -18,20 +18,21 @@ export type StreamEvents<T> = {
 export class StreamEmitter<Events> extends Stream {}
 
 let pendingSides: DuplexSides | undefined = undefined
+let pendingWholeChunks = false
 
 const kStringChunks = 1
+const kObjectChunks = 2
 
 export interface ReadableOptions {
   highWaterMark?: double
   encoding?: BufferEncoding
-  objectMode?: boolean
   emitClose?: boolean
   autoDestroy?: boolean
 }
 
 function chunkEncoding(kind: int, objectMode: boolean,
                        encoding: BufferEncoding | undefined): BufferEncoding | undefined {
-  if (objectMode || kind != kStringChunks) return encoding
+  if (objectMode || kind != kStringChunks) return undefined
   return encoding ?? "utf8"
 }
 
@@ -41,18 +42,21 @@ function backFault(back: StreamError | undefined, given: StreamFault | undefined
   return faultOf(back)
 }
 
-export abstract class Readable<T = Buffer, E extends StreamError = StreamError>
+export abstract class Readable<T, E extends StreamError = StreamError>
     extends StreamEmitter<StreamEvents<T>> {
   private failure?: E
 
   constructor(options?: ReadableOptions) {
     super()
+    const whole = pendingWholeChunks
+    pendingWholeChunks = false
     if (pendingSides != undefined) return
+    const objectMode = whole || chunkKind<T>() == kObjectChunks
     const setup = new StreamSetup()
     setup.readable = {
       highWaterMark: options?.highWaterMark,
-      objectMode: options?.objectMode,
-      encoding: chunkEncoding(chunkKind<T>(), options?.objectMode ?? false, options?.encoding),
+      objectMode: objectMode,
+      encoding: chunkEncoding(chunkKind<T>(), objectMode, options?.encoding),
       emitClose: options?.emitClose,
       autoDestroy: options?.autoDestroy,
     }
@@ -156,7 +160,6 @@ export interface WritableOptions {
   highWaterMark?: double
   decodeStrings?: boolean
   defaultEncoding?: BufferEncoding
-  objectMode?: boolean
   emitClose?: boolean
   autoDestroy?: boolean
 }
@@ -171,17 +174,18 @@ function decodesStrings(kind: int, objectMode: boolean) {
   return objectMode || kind != kStringChunks
 }
 
-export abstract class Writable<T = Buffer, E extends StreamError = StreamError>
+export abstract class Writable<T, E extends StreamError = StreamError>
     extends StreamEmitter<StreamEvents<T>> {
   private failure?: E
 
   constructor(options?: WritableOptions) {
     super()
+    const objectMode = chunkKind<T>() == kObjectChunks
     const setup = new StreamSetup()
     setup.writable = {
       highWaterMark: options?.highWaterMark,
-      objectMode: options?.objectMode,
-      decodeStrings: decodesStrings(chunkKind<T>(), options?.objectMode ?? false),
+      objectMode: objectMode,
+      decodeStrings: decodesStrings(chunkKind<T>(), objectMode),
       defaultEncoding: options?.defaultEncoding,
       emitClose: options?.emitClose,
       autoDestroy: options?.autoDestroy,
@@ -287,9 +291,6 @@ export interface DuplexOptions {
   highWaterMark?: double
   readableHighWaterMark?: double
   writableHighWaterMark?: double
-  objectMode?: boolean
-  readableObjectMode?: boolean
-  writableObjectMode?: boolean
   encoding?: BufferEncoding
   decodeStrings?: boolean
   defaultEncoding?: BufferEncoding
@@ -304,9 +305,6 @@ class DuplexSides {
   highWaterMark?: double
   readableHighWaterMark?: double
   writableHighWaterMark?: double
-  objectMode?: boolean
-  readableObjectMode?: boolean
-  writableObjectMode?: boolean
   encoding?: BufferEncoding
   decodeStrings?: boolean
   defaultEncoding?: BufferEncoding
@@ -326,15 +324,14 @@ class DuplexSides {
 }
 
 function duplexSetup<W, R>(sides: DuplexSides): StreamSetup {
-  const readableObjectMode = sides.objectMode == true || sides.readableObjectMode == true
-  const writableObjectMode = sides.objectMode == true || sides.writableObjectMode == true
+  const readableObjectMode = chunkKind<R>() == kObjectChunks
+  const writableObjectMode = chunkKind<W>() == kObjectChunks
   const setup = new StreamSetup()
   setup.duplex = true
   setup.readable = {
     highWaterMark: sides.highWaterMark,
     sideHighWaterMark: sides.readableHighWaterMark,
-    objectMode: sides.objectMode,
-    sideObjectMode: sides.readableObjectMode,
+    objectMode: readableObjectMode,
     encoding: chunkEncoding(chunkKind<R>(), readableObjectMode, sides.encoding),
     defaultEncoding: sides.defaultEncoding,
     emitClose: sides.emitClose,
@@ -343,8 +340,7 @@ function duplexSetup<W, R>(sides: DuplexSides): StreamSetup {
   setup.writable = {
     highWaterMark: sides.highWaterMark,
     sideHighWaterMark: sides.writableHighWaterMark,
-    objectMode: sides.objectMode,
-    sideObjectMode: sides.writableObjectMode,
+    objectMode: writableObjectMode,
     decodeStrings: decodesStrings(chunkKind<W>(), writableObjectMode),
     defaultEncoding: sides.defaultEncoding,
     emitClose: sides.emitClose,
@@ -365,9 +361,6 @@ function duplexSides(options: DuplexOptions | undefined): DuplexSides {
   sides.highWaterMark = options?.highWaterMark
   sides.readableHighWaterMark = options?.readableHighWaterMark
   sides.writableHighWaterMark = options?.writableHighWaterMark
-  sides.objectMode = options?.objectMode
-  sides.readableObjectMode = options?.readableObjectMode
-  sides.writableObjectMode = options?.writableObjectMode
   sides.encoding = options?.encoding
   sides.decodeStrings = options?.decodeStrings
   sides.defaultEncoding = options?.defaultEncoding
@@ -376,7 +369,7 @@ function duplexSides(options: DuplexOptions | undefined): DuplexSides {
   return sides
 }
 
-export abstract class Duplex<W = Buffer, R = W, E extends StreamError = StreamError>
+export abstract class Duplex<W, R = W, E extends StreamError = StreamError>
     extends Readable<R, E> {
   constructor(options?: DuplexOptions) {
     const given = pendingSides
@@ -448,9 +441,6 @@ export interface TransformOptions {
   highWaterMark?: double
   readableHighWaterMark?: double
   writableHighWaterMark?: double
-  objectMode?: boolean
-  readableObjectMode?: boolean
-  writableObjectMode?: boolean
   encoding?: BufferEncoding
   decodeStrings?: boolean
   defaultEncoding?: BufferEncoding
@@ -471,7 +461,7 @@ function transformSides(options: TransformOptions | undefined): DuplexSides {
   return sides
 }
 
-export abstract class Transform<W = Buffer, R = W, E extends StreamError = StreamError>
+export abstract class Transform<W, R = W, E extends StreamError = StreamError>
     extends Duplex<W, R, E> {
   constructor(options?: TransformOptions) {
     const sides = transformSides(options)
@@ -516,7 +506,7 @@ export abstract class Transform<W = Buffer, R = W, E extends StreamError = Strea
   }
 }
 
-export class PassThrough<W = Buffer, R = W> extends Transform<W, R> {
+export class PassThrough<W, R = W> extends Transform<W, R> {
   constructor(options?: TransformOptions) {
     super(options)
   }
@@ -529,7 +519,6 @@ export class PassThrough<W = Buffer, R = W> extends Transform<W, R> {
 }
 
 export interface ReadableFromOptions {
-  objectMode?: boolean
   highWaterMark?: double
   encoding?: BufferEncoding
   emitClose?: boolean
@@ -539,7 +528,6 @@ export interface ReadableFromOptions {
 function fromOptions(options: ReadableFromOptions | undefined, hwm: double | undefined):
     ReadableOptions {
   return {
-    objectMode: options?.objectMode ?? true,
     highWaterMark: options?.highWaterMark ?? hwm,
     encoding: options?.encoding,
     emitClose: options?.emitClose,
@@ -554,6 +542,7 @@ export function streamFromValue<U>(value: U, options?: ReadableFromOptions): Rea
 class FromValue<U> extends Readable<U> {
   private value?: U
   constructor(value: U, options: ReadableOptions) {
+    pendingWholeChunks = true
     super(options)
     this.value = value
   }
@@ -576,6 +565,7 @@ class FromIterator<U> extends Readable<U> {
   private source: Iterator<U>
   private reading: boolean
   constructor(iterator: Iterator<U>, options: ReadableOptions) {
+    pendingWholeChunks = true
     super(options)
     this.reading = false
     this.source = iterator
@@ -619,6 +609,7 @@ class FromAsyncIterator<U> extends Readable<U> {
   private started: boolean
   private wake?: () => void
   constructor(iterator: AsyncIterator<U>, options: ReadableOptions) {
+    pendingWholeChunks = true
     super(options)
     this.started = false
     this.source = iterator

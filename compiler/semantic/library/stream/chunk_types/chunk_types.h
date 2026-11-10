@@ -10,7 +10,6 @@ class SemanticParts;
 class Prelude;
 class ClassBases;
 class AliasInstantiator;
-class EventMapInference;
 class GenericClassInstantiator;
 
 class ChunkTypes {
@@ -26,15 +25,12 @@ public:
   ResultHookParamsMatch hookParams(const FunctionDecl *fn,
                                    llvm::ArrayRef<FunctionDecl *> inherited) const;
   void addStreamBases(ClassDecl *inst, llvm::SMLoc loc);
-  const Type *inferredChunkType(const std::string &site, llvm::SMLoc loc);
-  bool recordStreamChunk(const Type *chunk, const Type *value, llvm::SMLoc loc);
 
 private:
   SemanticState &state;
   Prelude *prelude = nullptr;
   ClassBases *classBases = nullptr;
   AliasInstantiator *aliasInstantiator = nullptr;
-  EventMapInference *eventMapInference = nullptr;
   GenericClassInstantiator *genericClassInstantiator = nullptr;
 };
 

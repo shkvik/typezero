@@ -7,8 +7,7 @@ std::string ErrorTextSetEncoding::unreadable(llvm::StringRef type) {
 }
 
 std::string ErrorTextSetEncoding::objectMode(llvm::StringRef chunk) {
-  return "setEncoding() decodes the Buffers of a stream of bytes, and this is an "
-         "object-mode stream of " +
+  return "setEncoding() decodes the Buffers of a stream of bytes, and this is a stream of " +
          chunk.str() + "; push strings into it instead";
 }
 

@@ -1,6 +1,6 @@
 # node:events in a project: a local package whose emitter gets its event map
-# from the emit() calls of the whole program (checked in rounds, docs/events.md),
-# the errors of the last round only, and the built-in modules
+# from the emit() calls of its own module (docs/events.md, section 2), which the
+# program also sends, each error reported once, and the built-in modules
 # written in tz (tz.exe's lib directory) found from any directory.
 include(${SOURCE}/../cli.cmake)
 
@@ -13,7 +13,7 @@ write(libs/ticker/package.json [[
 write(libs/ticker/mod.tz [[
 import { EventEmitter } from "node:events"
 
-// Its map comes from the emits below and from the program that uses it.
+// Its map comes from the emits below; the program may send them too.
 export class Ticker extends EventEmitter {
   count: int
   constructor() {
@@ -23,6 +23,9 @@ export class Ticker extends EventEmitter {
   tick(by: string) {
     this.count++
     this.emit("tick", { n: this.count, by: by })
+  }
+  done(total: int) {
+    this.emit("done", total)
   }
 }
 ]])
@@ -38,7 +41,7 @@ ticker.on("tick", (tick) => {
   const step: int = parseInt(tick.by).unwrapOr(0)
   if (step >= 0 && step < 1000) total += step
   console.log(`tick ${tick.n} by ${tick.by}`)
-  if (tick.n == 2) ticker.emit("done", total)
+  if (tick.n == 2) ticker.done(total)
 })
 setTimeout(() => {
   ticker.tick("1")
@@ -56,7 +59,7 @@ tz(run IN app STDOUT "tick 1 by 1\ntick 2 by 20\ndone 21\nlast -1\n")
 file(MAKE_DIRECTORY ${WORK}/app/sub)
 tz(build -o ../app.exe ../main.tz IN app/sub)
 
-# An overflow found in the last round, reported once.
+# An overflow, reported once.
 write(app/sum.tz [[
 import { Ticker } from "ticker"
 const t = new Ticker()
@@ -73,7 +76,7 @@ if(NOT count EQUAL 1)
   message(FATAL_ERROR "expected one overflow error, found ${count}:\n${TZ_STDERR}")
 endif()
 
-# An event that nothing emits, found in the last round, reported once.
+# An event that nothing emits, reported once.
 write(app/bad.tz [[
 import { Ticker } from "ticker"
 const t = new Ticker()

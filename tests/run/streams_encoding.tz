@@ -5,7 +5,7 @@
 // node's.
 import { PassThrough, Readable } from "node:stream"
 const log = (s: string) => console.log(s)
-class Manual extends Readable {
+class Manual extends Readable<Buffer> {
   onRead() {}
 }
 const r = new Manual()
@@ -16,12 +16,12 @@ r.pushEnd()
 r.on("error", (e) => log(`error ${e.message}`))
 r.on("data", (s) => log(`data ${JSON.stringify(s)} ${typeof s} ${s.length}`))
 r.on("end", () => log("end"))
-const pt = new PassThrough()
+const pt = new PassThrough<Buffer>()
 pt.setEncoding("hex")
 pt.on("error", (e) => log(`pt error ${e.message}`))
 pt.on("data", (s) => log(`hex ${s.toUpperCase()}`))
 const ptEnded = pt.end("AB")
-const t = new PassThrough({ encoding: "utf8" })
+const t = new PassThrough<Buffer, string>({ encoding: "utf8" })
 t.write(Buffer.from([0xe2, 0x82]))
 const tEnded = t.end(Buffer.from("€").subarray(2))
 for await (const item of t) {

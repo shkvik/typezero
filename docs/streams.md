@@ -15,8 +15,9 @@
 - Ошибка потока приходит туда, где компилятор заставит её разобрать: каждый элемент `for await`
   — `Result`, `pipeline`, `finished` и `end()` отдают `Promise<Result<...>>`, а подписка на
   `data` требует подписки на `error`. `pipe()` нет.
-- Тип кусков известен при компиляции: `Readable<T>`. По умолчанию — `Buffer`, с кодировкой —
-  `string`, в `objectMode` — то, что кладут в поток.
+- Тип кусков известен при компиляции и всегда написан: `Readable<Buffer>`, `Readable<string>`,
+  `Readable<User>`. Режим потока следует из типа: `Buffer` и `string` — лента байтов, любой
+  другой тип — каждый кусок целиком; `objectMode` нет (11 ноября).
 - `setEncoding` меняет тип кусков у той же переменной дальше по коду. Если поток уже передан
   куда-то ещё — ошибка компиляции.
 - Web-потоки (`ReadableStream` для `fetch`) — тоже есть, с переходами между ними, как в node.
@@ -58,10 +59,20 @@ child.stdout.setEncoding("utf8")
 child.stdout.on("data", s => s.length)          // s: string
 ```
 
-- **По умолчанию** — `Buffer` ([bytes.md](bytes.md)); кодировка при создании (`"utf8"`,
-  `{ encoding: "utf8" }`) — `string`.
-- **`objectMode`** — тип выводится из `push()` и `Readable.from(…)`, как типы событий из
-  `emit` ([events.md](events.md)); можно и явно: `new Readable<User>({ objectMode: true, … })`.
+- **Тип кусков пишут всегда** (решено 11 ноября): `class Lines extends Readable<string>`,
+  `class Parse extends Transform<Buffer, Row>`, `new PassThrough<Buffer>()`, `r: Readable<Buffer>`.
+  `Readable` без типа — ошибка «needs the type of its chunks, e.g. 'Readable<Buffer>'». Второй
+  тип у `Duplex`, `Transform`, `PassThrough` по умолчанию тот же, что первый; тип ошибки —
+  `StreamError`. Свои функции библиотеки (`createReadStream`, `Readable.from(…)`) тип дают сами.
+- **Режим — по типу, `objectMode` нет.** `Buffer` и `string` — лента байтов: куски можно
+  склеивать и резать, `highWaterMark` — в байтах. Любой другой тип (`Readable<User>`,
+  `Readable<Uint8Array>`) — каждый кусок доходит целиком, `highWaterMark` — в штуках.
+  Настроек `objectMode`, `readableObjectMode`, `writableObjectMode` и методов
+  `readableObjectMode()`, `writableObjectMode()` нет. Буфер, который должен дойти целиком,
+  кладут в свой тип: `Readable<Packet>`, где `type Packet = { data: Buffer }`.
+  `Readable.from(…)` отдаёт каждый элемент целиком, как в node.
+- **Кодировка** — у потока строк: `Readable<string>` декодирует `utf8`, другая — в
+  `{ encoding: "latin1" }`; у потока `Buffer` настройка `encoding` ничего не меняет.
 - **`setEncoding`** меняет тип кусков у той же переменной (или того же пути, `child.stdout`)
   дальше по коду.
 - **Если поток уже ушёл в другое место** — передан в функцию, сохранён в поле или массиве, на
@@ -205,8 +216,9 @@ child.stdout.on("data", s => s.length)          // s: string
    ([events.md](events.md), шаг 1), `Readable<T>` / `Writable<T>`, `pipe`, `pipeline`,
    `for await` ([iterators.md](iterators.md), шаг 4), `node:stream/consumers`,
    `node:string_decoder`. Нужен `Buffer` ([bytes.md](bytes.md), шаг 2).
-2. **Типы кусков** (сделано) — по кодировке при создании, вывод для `objectMode`, `setEncoding` с
-   ошибкой на поток, который уже ушёл в другое место.
+2. **Типы кусков** (сделано) — по кодировке при создании, `setEncoding` с ошибкой на поток,
+   который уже ушёл в другое место. 11 ноября: тип кусков всегда написан, режим по типу,
+   `objectMode` и вывод типа кусков из `push`/`write` убраны.
 3. **Потоки у файлов и процессов** (сделано, кроме асинхронных функций `node:child_process`) — `fs.createReadStream` / `createWriteStream`,
    `process.stdin`, асинхронные функции `node:child_process` ([process.md](process.md)).
 4. **Web-потоки и переходы** между ними; `node:http` ([net.md](net.md), раздел 7).

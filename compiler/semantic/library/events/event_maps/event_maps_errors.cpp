@@ -86,6 +86,19 @@ std::string ErrorTextEventName::notEmitted(llvm::StringRef key, const Type *even
   return message + ErrorTextEventName::didYouMean(nearest);
 }
 
+std::string ErrorTextEventName::untyped(llvm::StringRef key, llvm::StringRef place) {
+  return "the type of '" + key.str() + "' comes from the emit at " + place.str() +
+         ", which is checked later and uses names not known here; move that emit into a "
+         "function, or give the emitter its event map, e.g. 'new EventEmitter<{ " +
+         key.str() + ": [value: string] }>()' (docs/events.md, section 2)";
+}
+
+std::string ErrorTextEventName::circular(llvm::StringRef key) {
+  return "the type of '" + key.str() + "' is needed here while it is still being found from " +
+         "the emits that this code leads to; give the emitter its event map, e.g. " +
+         "'new EventEmitter<{ " + key.str() + ": [value: string] }>()' (docs/events.md, section 2)";
+}
+
 std::string ErrorTextEventName::noEvent(llvm::StringRef key, const Type *events,
                                         llvm::StringRef nearest) {
   std::string message = "the emitter has no event '" + key.str() + "'";

@@ -45,6 +45,8 @@ public:
   static std::string list(const Type *events);
   static std::string didYouMean(llvm::StringRef name);
   static std::string notEmitted(llvm::StringRef key, const Type *events, llvm::StringRef nearest);
+  static std::string untyped(llvm::StringRef key, llvm::StringRef place);
+  static std::string circular(llvm::StringRef key);
   static std::string noEvent(llvm::StringRef key, const Type *events, llvm::StringRef nearest);
 };
 

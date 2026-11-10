@@ -1,7 +1,7 @@
 // The chunk types of node:stream (docs/streams.md, section 2): setEncoding()
 // on a stream that went elsewhere before, or where its type would depend on
-// a branch; chunks of another type in push(), write() and pipeline(); an
-// object-mode stream whose type nothing tells; pipe(), which does not pass
+// a branch; chunks of another type in push(), write() and pipeline(); a
+// stream whose chunk type is not written; pipe(), which does not pass
 // an error on; streams made without a class of their own (Readable, Writable,
 // Duplex and Transform are abstract), push(undefined) instead of pushEnd(),
 // and an error put into a stream from outside.
@@ -11,12 +11,20 @@ class User {
   constructor(public name: string) {}
 }
 class Users extends Readable<User> {
+  onRead() {}
+}
+class Moded extends Readable<User> {
   constructor() {
+    // expect-error: has no field 'objectMode'
     super({ objectMode: true })
   }
   onRead() {}
 }
-class Bytes extends Readable {
+// expect-error: 'Readable' needs the type of its chunks, e.g. 'Readable<Buffer>', 'Readable<string>' or 'Readable<User>'
+class Untyped extends Readable {
+  onRead() {}
+}
+class Bytes extends Readable<Buffer> {
   onRead() {}
 }
 class Strings extends Writable<string> {
@@ -33,7 +41,7 @@ class Ends extends Readable<string> {
     this.push(undefined)
   }
 }
-function use(r: Readable) {
+function use(r: Readable<Buffer>) {
   r.on("error", (e) => console.log(e.message))
   r.on("end", () => {})
 }
@@ -57,7 +65,7 @@ setTimeout(() => e.resume(), 1)
 // expect-error: a function written before uses it before this
 e.setEncoding("utf8")
 const objects = new Users()
-// expect-error: setEncoding() decodes the Buffers of a stream of bytes, and this is an object-mode stream of User
+// expect-error: setEncoding() decodes the Buffers of a stream of bytes, and this is a stream of User
 objects.setEncoding("utf8")
 // expect-error: type 'string' is not assignable to type 'User'
 objects.push("not a user")
@@ -68,13 +76,13 @@ const strings = new Strings()
 // expect-error: 'write' of a stream of string takes a string, but this is 'Buffer'
 strings.write(Buffer.from("x"))
 // expect-error: 'pipe' is not supported: it does not pass an error on, so the source stops and the destination stays open; join the streams with 'await pipeline(source, destination)', which gives a Result
-objects.pipe(new PassThrough())
-// expect-error: cannot infer the type of the written chunks of this object-mode PassThrough: no code of the program writes to it
-const nothing = new PassThrough({ objectMode: true })
+objects.pipe(new PassThrough<Buffer>())
+// expect-error: 'PassThrough' needs the type of its chunks, e.g. 'new PassThrough<Buffer>()'
+const nothing = new PassThrough()
 // expect-error: parameter 's' is declared as 'string', but the function gets 'Buffer' here
 bytes.on("data", (s: string) => console.log(s))
 // expect-error: pipeline() writes chunks of User to 'PassThrough<Buffer, Buffer>', which takes Buffer
-pipeline(objects, new PassThrough(), (err) => {})
+pipeline(objects, new PassThrough<Buffer>(), (err) => {})
 // expect-error: compose() takes streams, and this is 'int'
 compose(bytes, 5)
 // expect-error: 'Readable.from' takes an iterable, an async iterable, a string or a Buffer, but this is 'int'
@@ -91,12 +99,12 @@ bytes.destroy()
 // A method the stream calls, with other parameters: another variant of the
 // name, which the stream would never call.
 // expect-error: class 'WrongChunks' does not implement the abstract method onWrite
-class WrongChunks extends Writable {
+class WrongChunks extends Writable<Buffer> {
   // expect-error: 'onWrite' is what node:stream calls, as 'onWrite(chunk: Buffer, encoding: string, callback: (StreamError?) => void)'
   onWrite(chunk: string, encoding: string, callback: () => void) {}
 }
 // expect-error: class 'WrongSize' does not implement the abstract method onRead
-class WrongSize extends Readable {
+class WrongSize extends Readable<Buffer> {
   // expect-error: 'onRead' is what node:stream calls, as 'onRead(size: int)'
   onRead(size: string) {}
 }

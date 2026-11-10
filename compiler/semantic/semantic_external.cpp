@@ -7,9 +7,9 @@ using llvm::dyn_cast;
 namespace tz {
 
 SemanticExternalFacade::SemanticExternalFacade(AstContext &ast, Diagnostics &diagnostics,
-                                               SourceFile &loaded, EventInference &inference)
+                                               SourceFile &loaded)
     : file(loaded),
-      state(std::make_unique<SemanticState>(ast, diagnostics, loaded, inference)),
+      state(std::make_unique<SemanticState>(ast, diagnostics, loaded)),
       parts(std::make_unique<SemanticParts>(*this->state)) {
   this->state->rememberCompleter(&this->parts->getReturnCompleter());
 }
@@ -44,6 +44,7 @@ Errors SemanticExternalFacade::walkBodies() {
   this->walkModuleItems();
   this->walkLiftedFunctions();
   this->walkDeclarationFiles();
+  this->parts->getEmitterChecker().finishSentEmits();
 
   return this->takeErrors();
 }

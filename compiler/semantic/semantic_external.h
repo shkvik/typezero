@@ -5,7 +5,6 @@
 #include "compiler/program/errors/errors.h"
 #include "compiler/program/program_inventory/program_inventory.h"
 #include "compiler/program/source_file/source_file.h"
-#include "compiler/semantic/semantic_state/event_store/event_store.h"
 #include "compiler/semantic/semantic_state/widening_store/widening_store.h"
 #include "llvm/Support/SMLoc.h"
 #include <memory>
@@ -17,8 +16,7 @@ class SemanticState;
 
 class SemanticExternalFacade {
 public:
-  SemanticExternalFacade(AstContext &ast, Diagnostics &diagnostics, SourceFile &loaded,
-                         EventInference &inference);
+  SemanticExternalFacade(AstContext &ast, Diagnostics &diagnostics, SourceFile &loaded);
   ~SemanticExternalFacade();
 
   Errors walkBodies();

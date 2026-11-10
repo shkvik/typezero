@@ -31,8 +31,8 @@ function chat(): WeakRef<Room> {
   })
   room.once("close", () => room.say("bot", `bye from ${room.name}`))
   room.say("ann", "hi")
-  room.emit("close")
-  room.emit("close")
+  room.close()
+  room.close()
   console.log(room.lines.join(" | "), room.listenerCount("say"), room.listenerCount("close"))
   return new WeakRef(room)
 }

@@ -3,13 +3,8 @@
 #include "compiler/semantic/declare/prelude/prelude.h"
 #include "compiler/semantic/generics/alias_instantiator/alias_instantiator.h"
 #include "compiler/semantic/generics/generic_class_instantiator/generic_class_instantiator.h"
-#include "compiler/semantic/library/events/event_map_inference/event_map_inference.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
-#include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
-
-using llvm::dyn_cast;
-using llvm::isa;
 
 namespace tz {
 
@@ -18,7 +13,6 @@ ChunkTypes::ChunkTypes(SemanticState &owner, SemanticParts &all)
   this->prelude = &all.getPrelude();
   this->classBases = &all.getClassBases();
   this->aliasInstantiator = &all.getAliasInstantiator();
-  this->eventMapInference = &all.getEventMapInference();
   this->genericClassInstantiator = &all.getGenericClassInstantiator();
 }
 
@@ -180,58 +174,6 @@ ChunkTypes::hookParams(const FunctionDecl *fn, llvm::ArrayRef<FunctionDecl *> in
       .code = ChunkTypesHookParamsErrorCode::OTHER_PARAMETERS,
       .message = message,
   });
-}
-
-const Type *ChunkTypes::inferredChunkType(const std::string &site, llvm::SMLoc loc) {
-  const Type *map = this->eventMapInference->inferredEventMap(site);
-  if (!map) {
-    return nullptr;
-  }
-  if (this->state.getEventStore().isOpenMap(map)) {
-    return map;
-  }
-  const Field *chunk = map->field("chunk");
-  if (!chunk || chunk->type->fields().empty()) {
-    return nullptr;
-  }
-  (void)loc;
-
-  return chunk->type->fields()[0].type;
-}
-
-bool ChunkTypes::recordStreamChunk(const Type *chunk, const Type *value, llvm::SMLoc loc) {
-  EventStore &store = this->state.getEventStore();
-  std::optional<std::string> site = store.findOpenMapSite(chunk);
-  if (!site) {
-    return false;
-  }
-  if (value->isError() || value->isVoid() || value->isUndefined() ||
-      TypeQueries::mentionsParam(value)) {
-    return true;
-  }
-  if (value->isLiteral()) {
-    value = value->literalBase();
-  }
-  value = value->nonOptional();
-  const Type *found = Type::tuple({value});
-  if (const EventInference::Event *e = store.findInferredEvent(*site, "chunk")) {
-    const Type *before = this->eventMapInference->fromPortable(e->args, loc);
-    if (!before || before == found || before->fields().size() != 1) {
-      return true;
-    }
-    const Type *both = TypeRelations::unify(before->fields()[0].type, value);
-    if (!both) {
-      return true;
-    }
-    if (const Type *now = Type::tuple({both}); now != before) {
-      store.changeInferredEvent(*site, "chunk", this->eventMapInference->portable(now));
-    }
-    return true;
-  }
-  store.addInferredEvent(*site, {"chunk", this->eventMapInference->portable(found),
-                                 this->eventMapInference->placeOf(loc)});
-
-  return true;
 }
 
 }

@@ -24,6 +24,13 @@ FunctionDecl *AstCloner::copyFunction(const FunctionDecl *fn) {
   return copy;
 }
 
+Stmt *AstCloner::copyStatement(const Stmt *stmt) {
+  Stmt *copy = this->cloneStmt(stmt);
+  this->finishCopies(false);
+
+  return copy;
+}
+
 void AstCloner::keepPristine(llvm::ArrayRef<Stmt *> items) {
   this->renames = false;
   for (const Stmt *item : items) {

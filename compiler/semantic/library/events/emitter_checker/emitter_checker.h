@@ -18,7 +18,6 @@ class TypeRelations;
 class ReturnInferrer;
 class ArgumentChecker;
 class EventMapInference;
-class KeyedFieldChecker;
 class MethodCallChecker;
 class GenericInstantiator;
 class GenericClassInstantiator;
@@ -33,7 +32,7 @@ public:
                           bool super);
   void reportEmitterMethodValue(MemberExpr *member);
   Expr *checkEmitterNew(NewExpr *expr, ClassDecl *generic, const Type *expected);
-  Expr *collectEmitterCall(CallExpr *call, MemberExpr *member, const std::string &site);
+  void finishSentEmits();
   void reportUnlistenedErrors();
   void checkErrorListeners();
   void checkDroppedListeners();
@@ -57,11 +56,15 @@ private:
   static EmitterMethod emitterMethod(llvm::StringRef name);
   static std::optional<std::string> chainText(const Expr *expr);
   static std::optional<std::string> rootText(const Expr *expr);
-  static bool isServiceEvent(llvm::StringRef name);
-  static std::string fileOfPlace(const std::string &place);
-  static std::string shortPlace(const std::string &place);
 
   void noteListener(MemberExpr *member, const Type *events, llvm::StringRef event);
+  void checkLooseArgs(CallExpr *call, size_t from);
+  bool isOwnEmit(const EventSite *site, const SentEmit &emit) const;
+  const Type *inferredEmitArgs(EventSite *site, const std::string &event, llvm::SMLoc loc,
+                               std::string &first);
+  Expr *collectEmitterCall(const SentEmit &emit, EventSite *site, const std::string &event,
+                           bool library);
+  void finishEmit(const SentEmit &emit, const Type *args);
   EmitterKey keyOf(const Expr *root) const;
   std::string emitterPath(const EmitterKey &key) const;
 
@@ -78,7 +81,6 @@ private:
   ReturnInferrer *returnInferrer = nullptr;
   ArgumentChecker *argumentChecker = nullptr;
   EventMapInference *eventMapInference = nullptr;
-  KeyedFieldChecker *keyedFieldChecker = nullptr;
   MethodCallChecker *methodCallChecker = nullptr;
   GenericInstantiator *genericInstantiator = nullptr;
   GenericClassInstantiator *genericClassInstantiator = nullptr;

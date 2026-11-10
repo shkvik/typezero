@@ -11,7 +11,7 @@ const log = (s: string) => console.log(s)
 
 class Sink extends Writable<string | undefined> {
   constructor() {
-    super({ objectMode: true })
+    super()
   }
   onWrite(chunk, encoding, callback) {
     log(`wrote ${chunk}`)

@@ -26,7 +26,7 @@ std::string PassTimes::text() const {
         (out.empty() ? "" : ", ") + name + " " + std::to_string(static_cast<long>(total)) + " ms";
   }
 
-  return out + "; " + std::to_string(rounds_) + (rounds_ == 1 ? " round" : " rounds");
+  return out;
 }
 
 }

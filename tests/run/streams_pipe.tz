@@ -6,7 +6,7 @@
 import { PassThrough, Readable, Writable, pipeline, finished } from "node:stream"
 const log = (s: string) => console.log(s)
 let i = 0
-class Parts extends Readable {
+class Parts extends Readable<Buffer> {
   constructor() {
     super({ highWaterMark: 4 })
   }
@@ -18,7 +18,7 @@ class Parts extends Readable {
 }
 const src = new Parts()
 const got: string[] = []
-class Slow extends Writable {
+class Slow extends Writable<Buffer> {
   constructor() {
     super({ highWaterMark: 6 })
   }
@@ -40,9 +40,9 @@ dst.on("finish", () => {
 })
 pipeline(src, dst, (err) => log(`src to dst ${err == undefined}`))
 
-const a = new PassThrough()
-const b = new PassThrough()
-class Printer extends Writable {
+const a = new PassThrough<Buffer>()
+const b = new PassThrough<Buffer>()
+class Printer extends Writable<Buffer> {
   onWrite(chunk, enc, cb) {
     log(`c got ${chunk.toString()}`)
     cb()
@@ -55,13 +55,13 @@ finished(c, (err) => log(`finished c ${err?.message ?? "ok"}`))
 a.write("x")
 const ending = a.end("y")
 
-class Breakable extends PassThrough {
+class Breakable extends PassThrough<Buffer> {
   break(message: string) {
     this.destroy({ message })
   }
 }
 const e1 = new Breakable()
-const e2 = new PassThrough()
+const e2 = new PassThrough<Buffer>()
 pipeline(e1, e2, (err) => log(`pipeline error ${err?.message} e1=${e1.destroyed()} e2=${e2.destroyed()}`))
 e1.break("bad")
 log(`a ended ${(await ending).isOk()}`)

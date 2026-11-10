@@ -10,6 +10,7 @@ changed:
     4  '#x' became 'private x'
     6  '+' with a string became a template literal
     6  '===' and '!==' became '==' and '!='
+    1  'Readable' became 'Readable<Buffer>'
     1  '_read', '_write' and the other methods of a stream became 'onRead', 'onWrite'...
     3  'export default' became a named export
     1  'import * as' became named imports
@@ -89,7 +90,7 @@ expect_file(lib/src/lines.tz [[
 import { Readable } from "node:stream"
 
 // The lines of a text as a stream of node, one chunk each.
-export class Lines extends Readable {
+export class Lines extends Readable<Buffer> {
   private left: string[]
   constructor(lines: string[]) {
     super()

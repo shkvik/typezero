@@ -175,6 +175,17 @@ EventMaps::ResultEventMapFits EventMaps::eventMapFits(const Type *events) {
   return ok(events);
 }
 
+std::optional<std::string> EventMaps::eventKey(Expr *&name, llvm::StringRef method) {
+  name = this->argumentChecker->checkArg(name, Type::string());
+  std::optional<std::string> key = this->keyedFieldChecker->constantKey(name);
+  if (!key && !name->type->isError()) {
+    std::string message = ErrorTextEventName::unknown(method);
+    this->state.getDiagnostics().error(name->loc(), message);
+  }
+
+  return key;
+}
+
 const Type *EventMaps::eventArgs(const Type *events, Expr *&name, llvm::StringRef method,
                                  std::string *label) {
   if (events->isRecord()) {
@@ -184,13 +195,8 @@ const Type *EventMaps::eventArgs(const Type *events, Expr *&name, llvm::StringRe
     name = this->argumentChecker->checkArg(name, Type::string());
     return name->type->isError() ? nullptr : events->valueType();
   }
-  name = this->argumentChecker->checkArg(name, Type::string());
-  std::optional<std::string> key = this->keyedFieldChecker->constantKey(name);
+  std::optional<std::string> key = this->eventKey(name, method);
   if (!key) {
-    if (!name->type->isError()) {
-      std::string message = ErrorTextEventName::unknown(method);
-      this->state.getDiagnostics().error(name->loc(), message);
-    }
     return nullptr;
   }
   if (label) {
@@ -200,24 +206,52 @@ const Type *EventMaps::eventArgs(const Type *events, Expr *&name, llvm::StringRe
   if (EventMaps::isServiceEvent(*key)) {
     return EventMaps::serviceEventArgs();
   }
-  if (std::optional<std::string> site = this->state.getEventStore().findOpenMapSite(events)) {
-    for (const EventInference::Event &e : this->state.getEventStore().getInferredEvents(*site)) {
-      if (e.name == *key) {
-        return this->eventMapInference->fromPortable(e.args, loc);
-      }
-    }
-    return nullptr;
+  EventSite *site = this->state.getEventStore().findSiteOfMap(events);
+  if (site != nullptr) {
+    return this->inferredEventArgs(site, *key, loc);
   }
   if (const Field *f = events->field(*key)) {
     return f->type;
   }
   std::string nearest = EventMaps::nearestEvent(events, *key);
-  std::string message = this->state.getEventStore().isInferredMap(events)
-                            ? ErrorTextEventName::notEmitted(*key, events, nearest)
-                            : ErrorTextEventName::noEvent(*key, events, nearest);
+  std::string message = ErrorTextEventName::noEvent(*key, events, nearest);
   this->state.getDiagnostics().error(loc, message);
 
   return nullptr;
+}
+
+const Type *EventMaps::inferredEventArgs(EventSite *site, const std::string &key, llvm::SMLoc loc) {
+  EventRecord *record = this->eventMapInference->completeEvent(site, key);
+  if (record->args != nullptr) {
+    return record->args;
+  }
+  if (record->state == EventState::COMPLETING) {
+    std::string message = ErrorTextEventName::circular(key);
+    this->state.getDiagnostics().error(loc, message);
+    return nullptr;
+  }
+  if (!record->untyped.empty()) {
+    std::string message = ErrorTextEventName::untyped(key, record->untyped);
+    this->state.getDiagnostics().error(loc, message);
+    return nullptr;
+  }
+  this->eventMapInference->completeSite(site);
+  std::string nearest = EventMaps::nearestEvent(site->map, key);
+  std::string message = ErrorTextEventName::notEmitted(key, site->map, nearest);
+  this->state.getDiagnostics().error(loc, message);
+
+  return nullptr;
+}
+
+const Type *EventMaps::findEventArgs(const Type *events, llvm::StringRef name) {
+  EventSite *site = this->state.getEventStore().findSiteOfMap(events);
+  if (site != nullptr) {
+    EventRecord *record = this->eventMapInference->completeEvent(site, name);
+    return record->args;
+  }
+  const Field *f = events->field(name);
+
+  return f != nullptr ? f->type : nullptr;
 }
 
 const Type *EventMaps::listenerType(const Type *args, const Type *ret) {
@@ -356,10 +390,8 @@ const Type *EventMaps::createdType(const NewExpr *create) {
     }
   }
   if (args.empty() && cls->library() && cls->name == "EventEmitter") {
-    if (const Type *events = this->eventMapInference->inferredEventMap(
-            "new " + this->eventMapInference->placeOf(create->loc()))) {
-      args.push_back(events);
-    }
+    Type *events = this->eventMapInference->newEventMap(create->loc());
+    args.push_back(events);
   }
   if (args.empty()) {
     return nullptr;

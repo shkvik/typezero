@@ -22,18 +22,9 @@ std::string ErrorTextStreamNew::abstract(llvm::StringRef name, bool readable, bo
                    : "");
 }
 
-std::string ErrorTextStreamNew::untyped(llvm::StringRef what, llvm::StringRef name, bool pushes) {
-  return "cannot infer the type of the " + what.str() + " of this object-mode " + name.str() +
-         ": no code of the program " + (pushes ? "pushes into it" : "writes to it") +
-         "; give the type, e.g. 'new " + name.str() + "<User>({ " + "objectMode: true, ... })'";
-}
-
-std::string ErrorTextStreamSide::written() {
-  return "written chunks";
-}
-
-std::string ErrorTextStreamSide::given() {
-  return "chunks it gives";
+std::string ErrorTextStreamNew::untyped(llvm::StringRef name) {
+  return "'" + name.str() + "' needs the type of its chunks, e.g. 'new " + name.str() +
+         "<Buffer>()', 'new " + name.str() + "<string>()' or 'new " + name.str() + "<User>()'";
 }
 
 }

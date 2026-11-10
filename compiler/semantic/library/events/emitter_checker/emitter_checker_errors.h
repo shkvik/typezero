@@ -29,7 +29,6 @@ public:
 class ErrorTextEmitterNew {
 public:
   static std::string dropped(llvm::StringRef cls);
-  static std::string needsMap();
 };
 
 class ErrorTextEmitted {
@@ -44,6 +43,8 @@ public:
   static std::string typeAt(llvm::StringRef event, llvm::StringRef args, llvm::StringRef first,
                             llvm::StringRef type);
   static std::string methodVal(llvm::StringRef name);
+  static std::string foreign(llvm::StringRef event, llvm::StringRef owner);
+  static std::string voidValue(llvm::StringRef event);
 };
 
 class ErrorTextEventsExport {

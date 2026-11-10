@@ -5,22 +5,22 @@
 import { PassThrough, Transform, Writable, compose, finished as finishedCb } from "node:stream"
 import { finished } from "node:stream/promises"
 const log = (s: string) => console.log(s)
-function sinkInto(w: Writable, text: string) {
+function sinkInto(w: Writable<Buffer>, text: string) {
   w.write(text)
   return w.end()
 }
-const pt = new PassThrough()
+const pt = new PassThrough<Buffer>()
 pt.on("data", (c) => log(`pt ${c.toString()}`))
 const sank = sinkInto(pt, "into a duplex")
 const ptDone = await finished(pt)
 log(`pt finished ${ptDone.isOk()} ${pt.writableFinished()} ${pt.readableEnded()} ${(await sank).isOk()}`)
 
-class Upper extends Transform {
+class Upper extends Transform<Buffer> {
   onTransform(chunk, enc, cb) {
     cb(undefined, chunk.toString().toUpperCase())
   }
 }
-class Exclaim extends Transform {
+class Exclaim extends Transform<Buffer> {
   onTransform(chunk, enc, cb) {
     cb(undefined, `${chunk.toString()}!`)
   }
@@ -35,7 +35,7 @@ const bothDone = await finished(both)
 log(`composed done ${bothDone.isOk()} ${(await bothEnded).isOk()}`)
 
 let constructed = false
-class Constructed extends Writable {
+class Constructed extends Writable<Buffer> {
   onConstruct(cb) {
     log("construct")
     setTimeout(() => {

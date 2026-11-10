@@ -1,10 +1,10 @@
 // same-as-node
-// Event maps found from the emit() calls of the whole program
-// (docs/events.md, section 2): of `new EventEmitter()`, of a class that
-// extends EventEmitter, through fields, parameters and other files. The
+// Event maps found from the emit() calls of the module where each emitter is
+// made (docs/events.md, section 2): of `new EventEmitter()` and of a class
+// that extends EventEmitter, through parameters and another file. The
 // listeners come first here; the emits that give them their types follow,
 // in functions, methods and another file, and an event may have the types
-// a listener of another one passes.
+// a listener of another one passes. A field holds an emitter with its map.
 import { EventEmitter, once } from "node:events"
 import { Shop, report } from "./shop.tz"
 
@@ -42,7 +42,7 @@ bus.emit("chain", 3)
 console.log(bus.eventNames())
 
 class App {
-  events: EventEmitter
+  events: EventEmitter<{ ready: [info: { at: int }] }>
 
   constructor() {
     this.events = new EventEmitter()
@@ -60,6 +60,6 @@ const shop = new Shop()
 shop.on("sold", (s) => console.log("sold", s.what, s.count))
 shop.sell("apple", 3)
 report(shop)
-setTimeout(() => shop.emit("closed"), 1)
+setTimeout(() => shop.close(), 1)
 await once(shop, "closed")
 console.log("closed", shop.eventNames())

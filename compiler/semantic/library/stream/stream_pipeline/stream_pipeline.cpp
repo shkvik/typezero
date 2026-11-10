@@ -117,9 +117,7 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
         this->state.getDiagnostics().error(loc, writable.error().message);
         return arg;
       }
-      if (chunk && this->chunkTypes->recordStreamChunk(chunks.writable, chunk, loc)) {
-      } else if (chunk && !this->state.getEventStore().isOpenMap(chunk) &&
-                 !this->streamTakes(chunks.writable, chunk)) {
+      if (chunk && !this->streamTakes(chunks.writable, chunk)) {
         std::string message = ErrorTextPipeline::chunkKind("pipeline", chunk->name(), type->name(),
                                                            chunks.writable->name());
         this->state.getDiagnostics().error(loc, message);
