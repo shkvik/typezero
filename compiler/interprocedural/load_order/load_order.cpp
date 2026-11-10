@@ -167,19 +167,22 @@ void LoadOrder::visitTopLevel(const Expr *e, Module *module, int time, LoadState
 void LoadOrder::topLevelUses(SourceFile &program, LoadState &loadState) {
   int time = 0;
   for (Module *module : program.modules) {
-    auto visit = [&](const Expr *e) { this->visitTopLevel(e, module, time, loadState); };
     for (Stmt *item : module->file.items) {
       if (isa<FunctionDecl>(item)) {
         continue;
       }
       auto *decl = dyn_cast<VarDeclStmt>(item);
       if (!decl) {
-        AstWalker::visitExprs(item, visit, false);
+        for (const Expr *e : AstWalker::exprsIn(item, false)) {
+          this->visitTopLevel(e, module, time, loadState);
+        }
         continue;
       }
       for (const VarDeclarator &d : decl->decls) {
         if (d.init) {
-          AstWalker::visitExprs(d.init, visit, false);
+          for (const Expr *e : AstWalker::exprsIn(d.init, false)) {
+            this->visitTopLevel(e, module, time, loadState);
+          }
         }
         if (d.sym) {
           ++time;
@@ -212,10 +215,14 @@ void LoadOrder::functionEffects(const FunctionDecl *fn, LoadState &loadState) {
   };
   for (const Param &param : fn->params) {
     if (param.defaultValue()) {
-      AstWalker::visitExprs(param.defaultValue(), visit, false);
+      for (const Expr *e : AstWalker::exprsIn(param.defaultValue(), false)) {
+        visit(e);
+      }
     }
   }
-  AstWalker::visitExprs(fn->body, visit, false);
+  for (const Expr *e : AstWalker::exprsIn(fn->body, false)) {
+    visit(e);
+  }
   for (const FunctionDecl *callee : own.calls) {
     LoadOrder::need(callee, loadState);
   }

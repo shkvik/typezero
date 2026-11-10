@@ -269,23 +269,26 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
     }
   }
   for (const Stmt *stmt : body) {
-    AstWalker::visitExprs(stmt, classify);
+    for (const Expr *e : AstWalker::exprsIn(stmt, true)) {
+      classify(e);
+    }
   }
   llvm::SmallPtrSet<const Expr *, 32> direct;
   for (const Stmt *stmt : body) {
-    AstWalker::visitExprs(stmt, [&](const Expr *e) { direct.insert(e); }, false);
+    std::vector<const Expr *> exprs = AstWalker::exprsIn(stmt, false);
+    direct.insert(exprs.begin(), exprs.end());
   }
   for (const Stmt *stmt : body) {
-    AstWalker::visitExprs(stmt, [&](const Expr *e) {
+    for (const Expr *e : AstWalker::exprsIn(stmt, true)) {
       if (!before(e) || isa<CastExpr>(e) || !isPath(e)) {
-        return;
+        continue;
       }
       if (!direct.contains(e)) {
         escapes.push_back({e->loc(), ErrorTextEncodingUse::function()});
       } else if (!safe.contains(e)) {
         escapes.push_back({e->loc(), ErrorTextEncodingUse::elsewhere()});
       }
-    });
+    }
   }
   if (!escapes.empty()) {
     const StreamEscape *first = &escapes[0];

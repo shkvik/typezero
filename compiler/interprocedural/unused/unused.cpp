@@ -30,14 +30,18 @@ void Unused::findUnused(SourceFile &program) {
   for (Module *module : program.modules) {
     for (Stmt *item : module->file.items) {
       if (module->isEntry || !isa<FunctionDecl>(item)) {
-        AstWalker::visitExprs(item, reach);
+        for (const Expr *e : AstWalker::exprsIn(item, true)) {
+          reach(e);
+        }
       }
     }
   }
   while (!queue.empty()) {
     const FunctionDecl *fn = queue.back();
     queue.pop_back();
-    AstWalker::visitExprs(fn, reach);
+    for (const Expr *e : AstWalker::exprsIn(fn, true)) {
+      reach(e);
+    }
   }
   for (Module *module : program.modules) {
     if (module->isEntry) {

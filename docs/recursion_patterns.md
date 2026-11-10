@@ -52,7 +52,8 @@ bool Exits::in(llvm::ArrayRef<const Stmt *> stmts) const {
 **Признак:** `AstWalker::visitExprs(body, [&](const Expr *e) { ... })`.
 
 **Стало:** `PlacedNodes::collect` и `for`; там, где был `intoFunctions = false`, — пропуск
-`isInsideFunction()`.
+`isInsideFunction()`. Где порядок важен — `AstWalker::exprsIn` и `for`: тот же прямой порядок,
+колбэков у `AstWalker` с 11.11 нет.
 
 **Смотреть:** не переводить, если колбэку важен порядок (сообщения со списком имён, сбор в
 вектор, порядок объединения типов) — у `PlacedNodes` обход в ширину. `AstWalker` с
@@ -503,6 +504,7 @@ ResultExportTarget found = this->exportNamed(theirs, source->from, source->path,
   вывод методов, взятых с запасом, — в подробностях; как старый код зовёт машину, пока перевод
   не закончен;
 - колбэки проверены (11.11): `CallCycles` — поиск имени, кольца нет; `Inference::elementOf/asyncOf`
-  — тип итератора, вопрос на шаге вызова. `AstWalker` (`compiler/program`) переводится: стек
-  вместо вызова себя, `visitExprs` и `forEachReturnValue` с колбэками уходят (списки
-  `exprsIn`, `returnValuesIn`), пример — `tmp/ast_walker_example.cpp`.
+  — тип итератора, вопрос на шаге вызова. `AstWalker` (`compiler/program`) переведён (11.11):
+  стек вместо вызова себя, `visitExprs` и `forEachReturnValue` с колбэками ушли — списки
+  `exprsIn` (у оператора и у выражения) и `returnValuesIn`; `tailCallsOf` и `tailStatementsOf`
+  отдают списки; вызывающие — `for` с ранним `return`.

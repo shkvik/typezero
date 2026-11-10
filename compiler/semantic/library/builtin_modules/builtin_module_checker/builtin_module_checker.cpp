@@ -166,6 +166,7 @@ Expr *BuiltinModuleChecker::moduleValue(NodeModule module, llvm::StringRef name,
   return nullptr;
 }
 
+// TODO: УЛЬТРА говнокод
 void BuiltinModuleChecker::importBuiltinModule(Module *module, const ImportDecl &decl) {
   ModuleState &here = this->state.getModuleStates().getModuleState(module);
   std::optional<NodeModule> which = KnownModules::moduleOf(decl.path);
@@ -196,13 +197,13 @@ void BuiltinModuleChecker::importBuiltinModule(Module *module, const ImportDecl 
   if (!decl.whole.empty()) {
     std::vector<llvm::StringRef> used;
     for (Stmt *item : module->file.items) {
-      AstWalker::visitExprs(item, [&](const Expr *e) {
+      for (const Expr *e : AstWalker::exprsIn(item, true)) {
         auto *member = dyn_cast<MemberExpr>(e);
         auto *object = member ? dyn_cast<NameExpr>(member->object) : nullptr;
         if (object && object->name == decl.whole && !llvm::is_contained(used, member->name)) {
           used.push_back(member->name);
         }
-      });
+      }
     }
     std::string names = ErrorTextNodeImport::list(used);
     std::string form = ErrorTextNodeImport::form(decl.wholeIsDefault);

@@ -184,9 +184,7 @@ void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
     this->lowering.returnType = member->sym->getKnownReturnType();
     this->lowering.tailStatements.clear();
     if (this->lowering.returnType->isVoid()) {
-      std::vector<Stmt *> stmts;
-      AstWalker::tailStatementsOf(member->body, true, stmts);
-      for (Stmt *stmt : stmts) {
+      for (Stmt *stmt : AstWalker::tailStatementsOf(member->body)) {
         if (this->tailCall(cast<ExprStmt>(stmt)->expr)) {
           this->lowering.tailStatements.insert(stmt);
         }
@@ -249,8 +247,7 @@ CallExpr *TailCallLowerer::tailCall(Expr *value) const {
 }
 
 bool TailCallLowerer::hasTailCall(Expr *value) const {
-  std::vector<CallExpr *> calls;
-  AstWalker::tailCallsOf(value, calls);
+  std::vector<CallExpr *> calls = AstWalker::tailCallsOf(value);
 
   return llvm::any_of(calls, [&](CallExpr *call) { return this->tailCall(call) != nullptr; });
 }

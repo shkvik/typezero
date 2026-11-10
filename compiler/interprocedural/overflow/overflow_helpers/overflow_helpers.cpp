@@ -124,20 +124,20 @@ bool OverflowHelpers::containsLoop(const Stmt *stmt) {
   default:
     break;
   }
-  bool found = false;
-  AstWalker::visitExprs(
-      stmt,
-      [&](const Expr *e) {
-        if (auto *call = dyn_cast<CallExpr>(e)) {
-          if (std::optional<size_t> at = OverflowHelpers::callbackArg(call->builtin());
-              at && *at < call->args.size()) {
-            found |= isa<FunctionExpr>(OverflowHelpers::stripCasts(call->args[*at]));
-          }
-        }
-      },
-      false);
+  for (const Expr *e : AstWalker::exprsIn(stmt, false)) {
+    auto *call = dyn_cast<CallExpr>(e);
+    if (call == nullptr) {
+      continue;
+    }
+    std::optional<size_t> at = OverflowHelpers::callbackArg(call->builtin());
+    bool passesFunction = at.has_value() && *at < call->args.size() &&
+                          isa<FunctionExpr>(OverflowHelpers::stripCasts(call->args[*at]));
+    if (passesFunction) {
+      return true;
+    }
+  }
 
-  return found;
+  return false;
 }
 
 }

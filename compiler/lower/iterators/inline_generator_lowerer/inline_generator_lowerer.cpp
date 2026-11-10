@@ -39,8 +39,11 @@ InlineGeneratorLowerer::InlineGeneratorLowerer(Lowering &owner)
 
 unsigned InlineGeneratorLowerer::countYields(const FunctionDecl *fn) {
   unsigned count = 0;
-  AstWalker::visitExprs(
-      fn->body, [&](const Expr *e) { count += isa<YieldExpr>(e) ? 1 : 0; }, false);
+  for (const Expr *e : AstWalker::exprsIn(fn->body, false)) {
+    if (isa<YieldExpr>(e)) {
+      count += 1;
+    }
+  }
 
   return count;
 }

@@ -21,7 +21,7 @@ NestedFunctions::NestedFunctions(SemanticState &owner, SemanticParts &all)
 }
 
 void NestedFunctions::collectAssigned(const Stmt *stmt, std::vector<llvm::StringRef> &names) {
-  AstWalker::visitExprs(stmt, [&](const Expr *e) {
+  for (const Expr *e : AstWalker::exprsIn(stmt, true)) {
     const Expr *target = nullptr;
     if (auto *assign = dyn_cast<AssignExpr>(e)) {
       target = assign->target;
@@ -33,7 +33,7 @@ void NestedFunctions::collectAssigned(const Stmt *stmt, std::vector<llvm::String
         names.push_back(name->name);
       }
     }
-  });
+  }
 }
 
 NestedGroup *NestedFunctions::declareNested(BlockStmt *block) {
@@ -148,6 +148,7 @@ NestedFunctions::ResultUseInOrder NestedFunctions::useOrder(const NestedGroup *g
   return ok(&use);
 }
 
+// TODO: говнокод
 void NestedFunctions::noteUse(VarSymbol *var, llvm::SMLoc loc) {
   LocalVarState *localState = var->local();
   if (!localState) {

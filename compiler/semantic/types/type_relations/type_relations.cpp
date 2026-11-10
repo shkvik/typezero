@@ -628,6 +628,7 @@ UnifyShortcut TypeRelations::shortUnify(const Type *a, const Type *b) {
   return {false, nullptr};
 }
 
+// TODO: говнокод
 const Type *TypeRelations::baseUnify(const Type *x, const Type *y) {
   auto number = [](const Type *t) { return t->isNumeric() || t->isDecimal(); };
   bool related = (number(x) && number(y)) || (x->isObject() && y->isObject()) ||

@@ -62,6 +62,7 @@ bool PromiseChecker::callsWithValue(const Stmt *body, llvm::StringRef resolve) {
   return false;
 }
 
+// TODO: говнокод
 const Type *PromiseChecker::executorValueType(const Expr *executor) {
   auto *fe = dyn_cast<FunctionExpr>(executor);
   if (!fe) {
@@ -93,16 +94,16 @@ const Type *PromiseChecker::executorValueType(const Expr *executor) {
   this->state.getFlowState().replaceFlow(std::move(saved));
   const Type *found = nullptr;
   bool unknown = false;
-  AstWalker::visitExprs(copy->body, [&](const Expr *e) {
+  for (const Expr *e : AstWalker::exprsIn(copy->body, true)) {
     auto *call = dyn_cast<CallExpr>(e);
     auto *name = call ? dyn_cast<NameExpr>(call->callee) : nullptr;
     if (!name || name->name != resolve || call->args.empty()) {
-      return;
+      continue;
     }
     const Type *t = call->args[0]->type;
     if (!t || t->isError() || t->isVoid() || t->isUndefined()) {
       unknown = true;
-      return;
+      continue;
     }
     const Type *common = found ? LiteralTypes::unionUnify(found, t) : t;
     if (!common || common->isError()) {
@@ -110,7 +111,7 @@ const Type *PromiseChecker::executorValueType(const Expr *executor) {
     } else {
       found = common;
     }
-  });
+  }
 
   return unknown ? nullptr : found;
 }

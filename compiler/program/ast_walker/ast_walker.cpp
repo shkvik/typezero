@@ -4,110 +4,126 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
 void AstWalker::collectNames(const Stmt *stmt, llvm::StringSet<> &names, bool inFunction) {
-  if (!stmt) {
+  AstWalker::namesFrom(NamePart{stmt, nullptr, inFunction}, names);
+}
+
+void AstWalker::collectNames(const Expr *expr, llvm::StringSet<> &names, bool inFunction) {
+  AstWalker::namesFrom(NamePart{nullptr, expr, inFunction}, names);
+}
+
+void AstWalker::namesFrom(NamePart root, llvm::StringSet<> &names) {
+  std::vector<NamePart> stack = {root};
+  while (!stack.empty()) {
+    NamePart part = stack.back();
+    stack.pop_back();
+    if (part.expr != nullptr) {
+      AstWalker::addReadName(part, names);
+      AstWalker::addNameChildren(part.expr, part.inFunction, stack);
+    } else if (part.stmt != nullptr) {
+      AstWalker::addNameChildren(part.stmt, part.inFunction, stack);
+    }
+  }
+}
+
+void AstWalker::addReadName(const NamePart &part, llvm::StringSet<> &names) {
+  if (!part.inFunction) {
     return;
   }
-  auto expr = [&](const Expr *e) { AstWalker::collectNames(e, names, inFunction); };
-  auto sub = [&](const Stmt *s) { AstWalker::collectNames(s, names, inFunction); };
+  auto *name = dyn_cast<NameExpr>(part.expr);
+  if (name != nullptr) {
+    names.insert(name->name);
+  }
+  auto *create = dyn_cast<NewExpr>(part.expr);
+  if (create != nullptr && !create->name.empty()) {
+    names.insert(create->name);
+  }
+}
+
+void AstWalker::addNameChildren(const Stmt *stmt, bool inFunction, std::vector<NamePart> &stack) {
+  auto addExpr = [&](const Expr *e) { stack.push_back(NamePart{nullptr, e, inFunction}); };
+  auto addStmt = [&](const Stmt *s) { stack.push_back(NamePart{s, nullptr, inFunction}); };
   switch (stmt->kind()) {
     case Stmt::Kind::Block:
       for (const Stmt *s : cast<BlockStmt>(stmt)->body) {
-        sub(s);
+        addStmt(s);
       }
       break;
     case Stmt::Kind::VarDecl:
       for (const VarDeclarator &d : cast<VarDeclStmt>(stmt)->decls) {
-        if (d.init) {
-          expr(d.init);
-        }
+        addExpr(d.init);
       }
       break;
     case Stmt::Kind::Function: {
       auto *fn = cast<FunctionDecl>(stmt);
       for (const Param &param : fn->params) {
-        if (param.defaultValue()) {
-          AstWalker::collectNames(param.defaultValue(), names, true);
-        }
+        stack.push_back(NamePart{nullptr, param.defaultValue(), true});
       }
-      AstWalker::collectNames(fn->body, names, true);
+      stack.push_back(NamePart{fn->body, nullptr, true});
       break;
     }
     case Stmt::Kind::Expr:
-      expr(cast<ExprStmt>(stmt)->expr);
+      addExpr(cast<ExprStmt>(stmt)->expr);
       break;
     case Stmt::Kind::If: {
       auto *s = cast<IfStmt>(stmt);
-      expr(s->cond);
-      sub(s->thenStmt);
-      sub(s->elseStmt);
+      addExpr(s->cond);
+      addStmt(s->thenStmt);
+      addStmt(s->elseStmt);
       break;
     }
     case Stmt::Kind::While:
-      expr(cast<WhileStmt>(stmt)->cond);
-      sub(cast<WhileStmt>(stmt)->body);
+      addExpr(cast<WhileStmt>(stmt)->cond);
+      addStmt(cast<WhileStmt>(stmt)->body);
       break;
     case Stmt::Kind::DoWhile:
-      expr(cast<DoWhileStmt>(stmt)->cond);
-      sub(cast<DoWhileStmt>(stmt)->body);
+      addExpr(cast<DoWhileStmt>(stmt)->cond);
+      addStmt(cast<DoWhileStmt>(stmt)->body);
       break;
     case Stmt::Kind::For: {
       auto *s = cast<ForStmt>(stmt);
-      sub(s->init);
-      if (s->cond) {
-        expr(s->cond);
-      }
-      if (s->step) {
-        expr(s->step);
-      }
-      sub(s->body);
+      addStmt(s->init);
+      addExpr(s->cond);
+      addExpr(s->step);
+      addStmt(s->body);
       break;
     }
     case Stmt::Kind::ForOf:
-      expr(cast<ForOfStmt>(stmt)->iterable);
-      sub(cast<ForOfStmt>(stmt)->body);
+      addExpr(cast<ForOfStmt>(stmt)->iterable);
+      addStmt(cast<ForOfStmt>(stmt)->body);
       break;
     case Stmt::Kind::Switch: {
       auto *s = cast<SwitchStmt>(stmt);
-      expr(s->discriminant);
+      addExpr(s->discriminant);
       for (const SwitchCase &c : s->cases) {
-        if (c.test) {
-          expr(c.test);
-        }
+        addExpr(c.test);
         for (const Stmt *body : c.body) {
-          sub(body);
+          addStmt(body);
         }
       }
       break;
     }
     case Stmt::Kind::Labeled:
-      sub(cast<LabeledStmt>(stmt)->body);
+      addStmt(cast<LabeledStmt>(stmt)->body);
       break;
     case Stmt::Kind::Return:
-      if (const Expr *value = cast<ReturnStmt>(stmt)->value) {
-        expr(value);
-      }
+      addExpr(cast<ReturnStmt>(stmt)->value);
       break;
     case Stmt::Kind::Class: {
       auto *cls = cast<ClassDecl>(stmt);
-      if (cls->baseExpr) {
-        AstWalker::collectNames(cls->baseExpr, names, inFunction);
-      }
+      addExpr(cls->baseExpr);
       for (const FunctionDecl *fn : cls->methods) {
-        AstWalker::collectNames(fn, names, true);
+        stack.push_back(NamePart{fn, nullptr, true});
       }
       for (const FunctionDecl *fn : cls->constructors) {
-        AstWalker::collectNames(fn, names, true);
+        stack.push_back(NamePart{fn, nullptr, true});
       }
       for (const ClassField &f : cls->fields) {
-        if (f.init) {
-          AstWalker::collectNames(f.init, names, f.isStatic() ? inFunction : true);
-        }
+        bool fieldInFunction = f.isStatic() ? inFunction : true;
+        stack.push_back(NamePart{nullptr, f.init, fieldInFunction});
       }
       break;
     }
@@ -121,198 +137,87 @@ void AstWalker::collectNames(const Stmt *stmt, llvm::StringSet<> &names, bool in
   }
 }
 
-void AstWalker::collectNames(const Expr *expr, llvm::StringSet<> &names, bool inFunction) {
-  auto sub = [&](const Expr *e) { AstWalker::collectNames(e, names, inFunction); };
+void AstWalker::addNameChildren(const Expr *expr, bool inFunction, std::vector<NamePart> &stack) {
+  auto addExpr = [&](const Expr *e) { stack.push_back(NamePart{nullptr, e, inFunction}); };
   switch (expr->kind()) {
-    case Expr::Kind::Name:
-      if (inFunction) {
-        names.insert(cast<NameExpr>(expr)->name);
-      }
-      break;
     case Expr::Kind::Template:
       for (const Expr *e : cast<TemplateExpr>(expr)->exprs) {
-        sub(e);
+        addExpr(e);
       }
       break;
     case Expr::Kind::ArrayLit:
       for (const ArrayLitExpr::Element &e : cast<ArrayLitExpr>(expr)->elements) {
-        sub(e.expr);
+        addExpr(e.expr);
       }
       break;
     case Expr::Kind::ObjectLit:
       for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(expr)->props) {
-        if (p.key()) {
-          sub(p.key());
-        }
-        sub(p.value);
+        addExpr(p.key());
+        addExpr(p.value);
       }
       break;
     case Expr::Kind::Member:
-      sub(cast<MemberExpr>(expr)->object);
+      addExpr(cast<MemberExpr>(expr)->object);
       break;
     case Expr::Kind::Index:
-      sub(cast<IndexExpr>(expr)->object);
-      sub(cast<IndexExpr>(expr)->index);
+      addExpr(cast<IndexExpr>(expr)->object);
+      addExpr(cast<IndexExpr>(expr)->index);
       break;
     case Expr::Kind::Unary:
-      sub(cast<UnaryExpr>(expr)->operand);
+      addExpr(cast<UnaryExpr>(expr)->operand);
       break;
     case Expr::Kind::Binary:
-      sub(cast<BinaryExpr>(expr)->lhs);
-      sub(cast<BinaryExpr>(expr)->rhs);
+      addExpr(cast<BinaryExpr>(expr)->lhs);
+      addExpr(cast<BinaryExpr>(expr)->rhs);
       break;
     case Expr::Kind::Assign:
-      sub(cast<AssignExpr>(expr)->target);
-      sub(cast<AssignExpr>(expr)->value);
+      addExpr(cast<AssignExpr>(expr)->target);
+      addExpr(cast<AssignExpr>(expr)->value);
       break;
     case Expr::Kind::Update:
-      sub(cast<UpdateExpr>(expr)->target);
+      addExpr(cast<UpdateExpr>(expr)->target);
       break;
     case Expr::Kind::Call:
-      sub(cast<CallExpr>(expr)->callee);
+      addExpr(cast<CallExpr>(expr)->callee);
       for (const Expr *arg : cast<CallExpr>(expr)->args) {
-        sub(arg);
+        addExpr(arg);
       }
       break;
     case Expr::Kind::New: {
       auto *create = cast<NewExpr>(expr);
-      if (inFunction && !create->name.empty()) {
-        names.insert(create->name);
-      }
-      if (create->callee) {
-        sub(create->callee);
-      }
-      for (const Expr *arg : create->ctor() ? create->ctor()->args : create->args) {
-        sub(arg);
+      addExpr(create->callee);
+      for (const Expr *arg : create->ctor() != nullptr ? create->ctor()->args : create->args) {
+        addExpr(arg);
       }
       break;
     }
     case Expr::Kind::Conditional:
-      sub(cast<ConditionalExpr>(expr)->cond);
-      sub(cast<ConditionalExpr>(expr)->thenExpr);
-      sub(cast<ConditionalExpr>(expr)->elseExpr);
+      addExpr(cast<ConditionalExpr>(expr)->cond);
+      addExpr(cast<ConditionalExpr>(expr)->thenExpr);
+      addExpr(cast<ConditionalExpr>(expr)->elseExpr);
       break;
     case Expr::Kind::Cast:
-      sub(cast<CastExpr>(expr)->operand);
+      addExpr(cast<CastExpr>(expr)->operand);
       break;
     case Expr::Kind::Sequence:
       for (const Expr *e : cast<SequenceExpr>(expr)->exprs) {
-        sub(e);
+        addExpr(e);
       }
       break;
     case Expr::Kind::OptionalChain:
-      sub(cast<OptionalChainExpr>(expr)->chain);
+      addExpr(cast<OptionalChainExpr>(expr)->chain);
       break;
     case Expr::Kind::Function:
-      AstWalker::collectNames(cast<FunctionExpr>(expr)->fn, names, true);
+      stack.push_back(NamePart{cast<FunctionExpr>(expr)->fn, nullptr, true});
       break;
     case Expr::Kind::Yield:
-      if (const Expr *value = cast<YieldExpr>(expr)->value) {
-        sub(value);
-      }
+      addExpr(cast<YieldExpr>(expr)->value);
       break;
     case Expr::Kind::Await:
-      sub(cast<AwaitExpr>(expr)->value);
+      addExpr(cast<AwaitExpr>(expr)->value);
       break;
     case Expr::Kind::Class:
-      AstWalker::collectNames(cast<ClassExpr>(expr)->decl, names, inFunction);
-      break;
-    default:
-      break;
-  }
-}
-
-void AstWalker::visitExprs(const Expr *expr, llvm::function_ref<void(const Expr *)> visit,
-                           bool intoFunctions) {
-  visit(expr);
-  auto sub = [&](const Expr *e) { AstWalker::visitExprs(e, visit, intoFunctions); };
-  switch (expr->kind()) {
-    case Expr::Kind::Template:
-      for (const Expr *e : cast<TemplateExpr>(expr)->exprs) {
-        sub(e);
-      }
-      break;
-    case Expr::Kind::ArrayLit:
-      for (const ArrayLitExpr::Element &e : cast<ArrayLitExpr>(expr)->elements) {
-        sub(e.expr);
-      }
-      break;
-    case Expr::Kind::ObjectLit:
-      for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(expr)->props) {
-        if (p.key()) {
-          sub(p.key());
-        }
-        sub(p.value);
-      }
-      break;
-    case Expr::Kind::Member:
-      sub(cast<MemberExpr>(expr)->object);
-      break;
-    case Expr::Kind::Index:
-      sub(cast<IndexExpr>(expr)->object);
-      sub(cast<IndexExpr>(expr)->index);
-      break;
-    case Expr::Kind::Unary:
-      sub(cast<UnaryExpr>(expr)->operand);
-      break;
-    case Expr::Kind::Binary:
-      sub(cast<BinaryExpr>(expr)->lhs);
-      sub(cast<BinaryExpr>(expr)->rhs);
-      break;
-    case Expr::Kind::Assign:
-      sub(cast<AssignExpr>(expr)->target);
-      sub(cast<AssignExpr>(expr)->value);
-      break;
-    case Expr::Kind::Update:
-      sub(cast<UpdateExpr>(expr)->target);
-      break;
-    case Expr::Kind::Call:
-      sub(cast<CallExpr>(expr)->callee);
-      for (const Expr *arg : cast<CallExpr>(expr)->args) {
-        sub(arg);
-      }
-      break;
-    case Expr::Kind::New: {
-      auto *create = cast<NewExpr>(expr);
-      if (create->callee) {
-        sub(create->callee);
-      }
-      for (const Expr *arg : create->ctor() ? create->ctor()->args : create->args) {
-        sub(arg);
-      }
-      break;
-    }
-    case Expr::Kind::Conditional:
-      sub(cast<ConditionalExpr>(expr)->cond);
-      sub(cast<ConditionalExpr>(expr)->thenExpr);
-      sub(cast<ConditionalExpr>(expr)->elseExpr);
-      break;
-    case Expr::Kind::Cast:
-      sub(cast<CastExpr>(expr)->operand);
-      break;
-    case Expr::Kind::Sequence:
-      for (const Expr *e : cast<SequenceExpr>(expr)->exprs) {
-        sub(e);
-      }
-      break;
-    case Expr::Kind::OptionalChain:
-      sub(cast<OptionalChainExpr>(expr)->chain);
-      break;
-    case Expr::Kind::Function:
-      if (intoFunctions) {
-        AstWalker::visitExprs(cast<FunctionExpr>(expr)->fn, visit);
-      }
-      break;
-    case Expr::Kind::Yield:
-      if (const Expr *value = cast<YieldExpr>(expr)->value) {
-        sub(value);
-      }
-      break;
-    case Expr::Kind::Await:
-      sub(cast<AwaitExpr>(expr)->value);
-      break;
-    case Expr::Kind::Class:
-      AstWalker::visitExprs(cast<ClassExpr>(expr)->decl, visit, intoFunctions);
+      stack.push_back(NamePart{cast<ClassExpr>(expr)->decl, nullptr, inFunction});
       break;
     default:
       break;
@@ -320,32 +225,136 @@ void AstWalker::visitExprs(const Expr *expr, llvm::function_ref<void(const Expr 
 }
 
 std::vector<const Expr *> AstWalker::exprsIn(const Stmt *stmt, bool intoFunctions) {
+  return AstWalker::exprsFrom(AstPart{stmt, nullptr}, intoFunctions);
+}
+
+std::vector<const Expr *> AstWalker::exprsIn(const Expr *expr, bool intoFunctions) {
+  return AstWalker::exprsFrom(AstPart{nullptr, expr}, intoFunctions);
+}
+
+std::vector<const Expr *> AstWalker::exprsFrom(AstPart root, bool intoFunctions) {
   std::vector<const Expr *> exprs;
-  AstWalker::visitExprs(stmt, [&](const Expr *e) { exprs.push_back(e); }, intoFunctions);
+  std::vector<AstPart> stack = {root};
+  std::vector<AstPart> children;
+  while (!stack.empty()) {
+    AstPart part = stack.back();
+    stack.pop_back();
+    children.clear();
+    if (part.expr != nullptr) {
+      exprs.push_back(part.expr);
+      AstWalker::addExprChildren(part.expr, intoFunctions, children);
+    } else if (part.stmt != nullptr) {
+      AstWalker::addStmtChildren(part.stmt, intoFunctions, children);
+    }
+    stack.insert(stack.end(), children.rbegin(), children.rend());
+  }
 
   return exprs;
 }
 
-void AstWalker::visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr *)> visit,
-                           bool intoFunctions) {
-  if (!stmt) {
-    return;
-  }
-  auto expr = [&](const Expr *e) {
-    if (e) {
-      AstWalker::visitExprs(e, visit, intoFunctions);
+void AstWalker::addExprChildren(const Expr *expr, bool intoFunctions,
+                                std::vector<AstPart> &children) {
+  auto addExpr = [&](const Expr *e) { children.push_back(AstPart{nullptr, e}); };
+  switch (expr->kind()) {
+    case Expr::Kind::Template:
+      for (const Expr *e : cast<TemplateExpr>(expr)->exprs) {
+        addExpr(e);
+      }
+      break;
+    case Expr::Kind::ArrayLit:
+      for (const ArrayLitExpr::Element &e : cast<ArrayLitExpr>(expr)->elements) {
+        addExpr(e.expr);
+      }
+      break;
+    case Expr::Kind::ObjectLit:
+      for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(expr)->props) {
+        addExpr(p.key());
+        addExpr(p.value);
+      }
+      break;
+    case Expr::Kind::Member:
+      addExpr(cast<MemberExpr>(expr)->object);
+      break;
+    case Expr::Kind::Index:
+      addExpr(cast<IndexExpr>(expr)->object);
+      addExpr(cast<IndexExpr>(expr)->index);
+      break;
+    case Expr::Kind::Unary:
+      addExpr(cast<UnaryExpr>(expr)->operand);
+      break;
+    case Expr::Kind::Binary:
+      addExpr(cast<BinaryExpr>(expr)->lhs);
+      addExpr(cast<BinaryExpr>(expr)->rhs);
+      break;
+    case Expr::Kind::Assign:
+      addExpr(cast<AssignExpr>(expr)->target);
+      addExpr(cast<AssignExpr>(expr)->value);
+      break;
+    case Expr::Kind::Update:
+      addExpr(cast<UpdateExpr>(expr)->target);
+      break;
+    case Expr::Kind::Call:
+      addExpr(cast<CallExpr>(expr)->callee);
+      for (const Expr *arg : cast<CallExpr>(expr)->args) {
+        addExpr(arg);
+      }
+      break;
+    case Expr::Kind::New: {
+      auto *create = cast<NewExpr>(expr);
+      addExpr(create->callee);
+      for (const Expr *arg : create->ctor() != nullptr ? create->ctor()->args : create->args) {
+        addExpr(arg);
+      }
+      break;
     }
-  };
-  auto sub = [&](const Stmt *s) { AstWalker::visitExprs(s, visit, intoFunctions); };
+    case Expr::Kind::Conditional:
+      addExpr(cast<ConditionalExpr>(expr)->cond);
+      addExpr(cast<ConditionalExpr>(expr)->thenExpr);
+      addExpr(cast<ConditionalExpr>(expr)->elseExpr);
+      break;
+    case Expr::Kind::Cast:
+      addExpr(cast<CastExpr>(expr)->operand);
+      break;
+    case Expr::Kind::Sequence:
+      for (const Expr *e : cast<SequenceExpr>(expr)->exprs) {
+        addExpr(e);
+      }
+      break;
+    case Expr::Kind::OptionalChain:
+      addExpr(cast<OptionalChainExpr>(expr)->chain);
+      break;
+    case Expr::Kind::Function:
+      if (intoFunctions) {
+        children.push_back(AstPart{cast<FunctionExpr>(expr)->fn, nullptr});
+      }
+      break;
+    case Expr::Kind::Yield:
+      addExpr(cast<YieldExpr>(expr)->value);
+      break;
+    case Expr::Kind::Await:
+      addExpr(cast<AwaitExpr>(expr)->value);
+      break;
+    case Expr::Kind::Class:
+      children.push_back(AstPart{cast<ClassExpr>(expr)->decl, nullptr});
+      break;
+    default:
+      break;
+  }
+}
+
+void AstWalker::addStmtChildren(const Stmt *stmt, bool intoFunctions,
+                                std::vector<AstPart> &children) {
+  auto addExpr = [&](const Expr *e) { children.push_back(AstPart{nullptr, e}); };
+  auto addStmt = [&](const Stmt *s) { children.push_back(AstPart{s, nullptr}); };
   switch (stmt->kind()) {
     case Stmt::Kind::Block:
       for (const Stmt *s : cast<BlockStmt>(stmt)->body) {
-        sub(s);
+        addStmt(s);
       }
       break;
     case Stmt::Kind::VarDecl:
       for (const VarDeclarator &d : cast<VarDeclStmt>(stmt)->decls) {
-        expr(d.init);
+        addExpr(d.init);
       }
       break;
     case Stmt::Kind::Function: {
@@ -354,197 +363,244 @@ void AstWalker::visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr 
       }
       auto *fn = cast<FunctionDecl>(stmt);
       for (const Param &param : fn->params) {
-        expr(param.defaultValue());
+        addExpr(param.defaultValue());
       }
-      sub(fn->body);
+      addStmt(fn->body);
       break;
     }
     case Stmt::Kind::Expr:
-      expr(cast<ExprStmt>(stmt)->expr);
+      addExpr(cast<ExprStmt>(stmt)->expr);
       break;
     case Stmt::Kind::If: {
       auto *s = cast<IfStmt>(stmt);
-      expr(s->cond);
-      sub(s->thenStmt);
-      sub(s->elseStmt);
+      addExpr(s->cond);
+      addStmt(s->thenStmt);
+      addStmt(s->elseStmt);
       break;
     }
     case Stmt::Kind::While:
-      expr(cast<WhileStmt>(stmt)->cond);
-      sub(cast<WhileStmt>(stmt)->body);
+      addExpr(cast<WhileStmt>(stmt)->cond);
+      addStmt(cast<WhileStmt>(stmt)->body);
       break;
     case Stmt::Kind::DoWhile:
-      sub(cast<DoWhileStmt>(stmt)->body);
-      expr(cast<DoWhileStmt>(stmt)->cond);
+      addStmt(cast<DoWhileStmt>(stmt)->body);
+      addExpr(cast<DoWhileStmt>(stmt)->cond);
       break;
     case Stmt::Kind::For: {
       auto *s = cast<ForStmt>(stmt);
-      sub(s->init);
-      expr(s->cond);
-      expr(s->step);
-      sub(s->body);
+      addStmt(s->init);
+      addExpr(s->cond);
+      addExpr(s->step);
+      addStmt(s->body);
       break;
     }
     case Stmt::Kind::ForOf:
-      expr(cast<ForOfStmt>(stmt)->iterable);
-      sub(cast<ForOfStmt>(stmt)->body);
+      addExpr(cast<ForOfStmt>(stmt)->iterable);
+      addStmt(cast<ForOfStmt>(stmt)->body);
       break;
     case Stmt::Kind::Switch: {
       auto *s = cast<SwitchStmt>(stmt);
-      expr(s->discriminant);
+      addExpr(s->discriminant);
       for (const SwitchCase &c : s->cases) {
-        expr(c.test);
+        addExpr(c.test);
         for (const Stmt *body : c.body) {
-          sub(body);
+          addStmt(body);
         }
       }
       break;
     }
     case Stmt::Kind::Labeled:
-      sub(cast<LabeledStmt>(stmt)->body);
+      addStmt(cast<LabeledStmt>(stmt)->body);
       break;
     case Stmt::Kind::Return:
-      expr(cast<ReturnStmt>(stmt)->value);
+      addExpr(cast<ReturnStmt>(stmt)->value);
       break;
-    case Stmt::Kind::Class: {
-      auto *cls = cast<ClassDecl>(stmt);
-      expr(cls->baseExpr);
-      for (const ClassField &f : cls->fields) {
-        if (f.init && (f.isStatic() || intoFunctions)) {
-          expr(f.init);
-        }
-      }
-      for (const Decorator &d : cls->decorators) {
-        expr(d.expr);
-      }
-      for (const ClassField &f : cls->fields) {
-        for (const Decorator &d : f.decorators) {
-          expr(d.expr);
-        }
-      }
-      for (const auto *fns : {&cls->methods, &cls->constructors}) {
-        for (const FunctionDecl *fn : *fns) {
-          for (const Decorator &d : fn->decorators()) {
-            expr(d.expr);
-          }
-          for (const Param &param : fn->params) {
-            for (const Decorator &d : param.decorators) {
-              expr(d.expr);
-            }
-          }
-        }
-      }
-      for (const Stmt *s : cls->decorations) {
-        sub(s);
-      }
-      if (!intoFunctions) {
-        break;
-      }
-      for (const FunctionDecl *fn : cls->methods) {
-        sub(fn);
-      }
-      for (const FunctionDecl *fn : cls->constructors) {
-        sub(fn);
-      }
+    case Stmt::Kind::Class:
+      AstWalker::addClassChildren(cast<ClassDecl>(stmt), intoFunctions, children);
       break;
-    }
     default:
       break;
   }
 }
 
-void AstWalker::forEachReturnValue(Stmt *stmt, llvm::function_ref<void(Expr *)> visit) {
-  if (!stmt) {
+void AstWalker::addClassChildren(const ClassDecl *cls, bool intoFunctions,
+                                 std::vector<AstPart> &children) {
+  auto addExpr = [&](const Expr *e) { children.push_back(AstPart{nullptr, e}); };
+  auto addStmt = [&](const Stmt *s) { children.push_back(AstPart{s, nullptr}); };
+  addExpr(cls->baseExpr);
+  for (const ClassField &f : cls->fields) {
+    if (f.isStatic() || intoFunctions) {
+      addExpr(f.init);
+    }
+  }
+  for (const Decorator &d : cls->decorators) {
+    addExpr(d.expr);
+  }
+  for (const ClassField &f : cls->fields) {
+    for (const Decorator &d : f.decorators) {
+      addExpr(d.expr);
+    }
+  }
+  for (const FunctionDecl *fn : cls->methods) {
+    AstWalker::addDecoratorChildren(fn, children);
+  }
+  for (const FunctionDecl *fn : cls->constructors) {
+    AstWalker::addDecoratorChildren(fn, children);
+  }
+  for (const Stmt *s : cls->decorations) {
+    addStmt(s);
+  }
+  if (!intoFunctions) {
     return;
   }
+  for (const FunctionDecl *fn : cls->methods) {
+    addStmt(fn);
+  }
+  for (const FunctionDecl *fn : cls->constructors) {
+    addStmt(fn);
+  }
+}
+
+void AstWalker::addDecoratorChildren(const FunctionDecl *fn, std::vector<AstPart> &children) {
+  for (const Decorator &d : fn->decorators()) {
+    children.push_back(AstPart{nullptr, d.expr});
+  }
+  for (const Param &param : fn->params) {
+    for (const Decorator &d : param.decorators) {
+      children.push_back(AstPart{nullptr, d.expr});
+    }
+  }
+}
+
+std::vector<Expr *> AstWalker::returnValuesIn(Stmt *body) {
+  std::vector<Expr *> values;
+  std::vector<Stmt *> stack = {body};
+  while (!stack.empty()) {
+    Stmt *stmt = stack.back();
+    stack.pop_back();
+    if (stmt == nullptr) {
+      continue;
+    }
+    auto *ret = dyn_cast<ReturnStmt>(stmt);
+    if (ret != nullptr && ret->value != nullptr) {
+      values.push_back(ret->value);
+    }
+    std::vector<Stmt *> children = AstWalker::returnScopeChildren(stmt);
+    stack.insert(stack.end(), children.rbegin(), children.rend());
+  }
+
+  return values;
+}
+
+std::vector<Stmt *> AstWalker::returnScopeChildren(Stmt *stmt) {
   switch (stmt->kind()) {
     case Stmt::Kind::Block:
-      for (Stmt *s : cast<BlockStmt>(stmt)->body) {
-        AstWalker::forEachReturnValue(s, visit);
-      }
-      break;
+      return cast<BlockStmt>(stmt)->body;
     case Stmt::Kind::If:
-      AstWalker::forEachReturnValue(cast<IfStmt>(stmt)->thenStmt, visit);
-      AstWalker::forEachReturnValue(cast<IfStmt>(stmt)->elseStmt, visit);
-      break;
+      return {cast<IfStmt>(stmt)->thenStmt, cast<IfStmt>(stmt)->elseStmt};
     case Stmt::Kind::While:
-      AstWalker::forEachReturnValue(cast<WhileStmt>(stmt)->body, visit);
-      break;
+      return {cast<WhileStmt>(stmt)->body};
     case Stmt::Kind::DoWhile:
-      AstWalker::forEachReturnValue(cast<DoWhileStmt>(stmt)->body, visit);
-      break;
+      return {cast<DoWhileStmt>(stmt)->body};
     case Stmt::Kind::For:
-      AstWalker::forEachReturnValue(cast<ForStmt>(stmt)->body, visit);
-      break;
+      return {cast<ForStmt>(stmt)->body};
     case Stmt::Kind::ForOf:
-      AstWalker::forEachReturnValue(cast<ForOfStmt>(stmt)->body, visit);
-      break;
-    case Stmt::Kind::Switch:
+      return {cast<ForOfStmt>(stmt)->body};
+    case Stmt::Kind::Switch: {
+      std::vector<Stmt *> children;
       for (SwitchCase &c : cast<SwitchStmt>(stmt)->cases) {
-        for (Stmt *s : c.body) {
-          AstWalker::forEachReturnValue(s, visit);
-        }
+        children.insert(children.end(), c.body.begin(), c.body.end());
       }
-      break;
+
+      return children;
+    }
     case Stmt::Kind::Labeled:
-      AstWalker::forEachReturnValue(cast<LabeledStmt>(stmt)->body, visit);
-      break;
-    case Stmt::Kind::Return:
-      if (Expr *value = cast<ReturnStmt>(stmt)->value) {
-        visit(value);
-      }
-      break;
+      return {cast<LabeledStmt>(stmt)->body};
     default:
-      break;
+      return {};
   }
 }
 
-void AstWalker::tailCallsOf(Expr *value, std::vector<CallExpr *> &calls) {
-  if (auto *call = dyn_cast<CallExpr>(value)) {
-    if (call->func() && call->builtin() == Builtin::None) {
-      calls.push_back(call);
+std::vector<CallExpr *> AstWalker::tailCallsOf(Expr *value) {
+  std::vector<CallExpr *> calls;
+  std::vector<Expr *> stack = {value};
+  while (!stack.empty()) {
+    Expr *expr = stack.back();
+    stack.pop_back();
+    auto *call = dyn_cast<CallExpr>(expr);
+    auto *cond = dyn_cast<ConditionalExpr>(expr);
+    auto *bin = dyn_cast<BinaryExpr>(expr);
+    auto *seq = dyn_cast<SequenceExpr>(expr);
+    if (call != nullptr) {
+      if (call->func() != nullptr && call->builtin() == Builtin::None) {
+        calls.push_back(call);
+      }
+    } else if (cond != nullptr) {
+      stack.push_back(cond->elseExpr);
+      stack.push_back(cond->thenExpr);
+    } else if (bin != nullptr) {
+      bool shortCircuit = bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr ||
+                          bin->op == BinaryOp::Nullish;
+      if (shortCircuit) {
+        stack.push_back(bin->rhs);
+      }
+    } else if (seq != nullptr) {
+      stack.push_back(seq->exprs.back());
     }
-  } else if (auto *cond = dyn_cast<ConditionalExpr>(value)) {
-    AstWalker::tailCallsOf(cond->thenExpr, calls);
-    AstWalker::tailCallsOf(cond->elseExpr, calls);
-  } else if (auto *bin = dyn_cast<BinaryExpr>(value)) {
-    if (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr || bin->op == BinaryOp::Nullish) {
-      AstWalker::tailCallsOf(bin->rhs, calls);
-    }
-  } else if (auto *seq = dyn_cast<SequenceExpr>(value)) {
-    AstWalker::tailCallsOf(seq->exprs.back(), calls);
   }
+
+  return calls;
 }
 
-void AstWalker::tailStatementsOf(Stmt *stmt, bool tail, std::vector<Stmt *> &stmts) {
-  if (auto *block = dyn_cast<BlockStmt>(stmt)) {
-    for (size_t i = 0; i < block->body.size(); ++i) {
-      bool beforeReturn = i + 1 < block->body.size() && isa<ReturnStmt>(block->body[i + 1]) &&
-                          !cast<ReturnStmt>(block->body[i + 1])->value;
-      AstWalker::tailStatementsOf(block->body[i],
-                                  beforeReturn || (tail && i + 1 == block->body.size()), stmts);
-    }
-  } else if (auto *ifStmt = dyn_cast<IfStmt>(stmt)) {
-    AstWalker::tailStatementsOf(ifStmt->thenStmt, tail, stmts);
-    if (ifStmt->elseStmt) {
-      AstWalker::tailStatementsOf(ifStmt->elseStmt, tail, stmts);
-    }
-  } else if (auto *expr = dyn_cast<ExprStmt>(stmt); expr && tail) {
-    auto *call = dyn_cast<CallExpr>(expr->expr);
-    if (call && call->func() && call->builtin() == Builtin::None) {
-      stmts.push_back(stmt);
+std::vector<Stmt *> AstWalker::tailStatementsOf(Stmt *body) {
+  std::vector<Stmt *> stmts;
+  std::vector<TailPart> stack = {TailPart{body, true}};
+  while (!stack.empty()) {
+    TailPart part = stack.back();
+    stack.pop_back();
+    auto *block = dyn_cast<BlockStmt>(part.stmt);
+    auto *branch = dyn_cast<IfStmt>(part.stmt);
+    if (block != nullptr) {
+      for (size_t i = block->body.size(); i > 0; --i) {
+        bool tail = AstWalker::isTailAt(block, i - 1, part.tail);
+        stack.push_back(TailPart{block->body[i - 1], tail});
+      }
+    } else if (branch != nullptr) {
+      if (branch->elseStmt != nullptr) {
+        stack.push_back(TailPart{branch->elseStmt, part.tail});
+      }
+      stack.push_back(TailPart{branch->thenStmt, part.tail});
+    } else if (part.tail && AstWalker::isPlainCallStatement(part.stmt)) {
+      stmts.push_back(part.stmt);
     }
   }
+
+  return stmts;
+}
+
+bool AstWalker::isTailAt(const BlockStmt *block, size_t i, bool tail) {
+  bool last = i + 1 == block->body.size();
+  auto *next = last ? nullptr : dyn_cast<ReturnStmt>(block->body[i + 1]);
+  bool beforeEmptyReturn = next != nullptr && next->value == nullptr;
+
+  return beforeEmptyReturn || (tail && last);
+}
+
+bool AstWalker::isPlainCallStatement(const Stmt *stmt) {
+  auto *statement = dyn_cast<ExprStmt>(stmt);
+  auto *call = statement != nullptr ? dyn_cast<CallExpr>(statement->expr) : nullptr;
+
+  return call != nullptr && call->func() != nullptr && call->builtin() == Builtin::None;
 }
 
 std::vector<CallExpr *> AstWalker::tailCallsIn(FunctionDecl *fn) {
   std::vector<CallExpr *> calls;
-  AstWalker::forEachReturnValue(fn->body,
-                                [&](Expr *value) { AstWalker::tailCallsOf(value, calls); });
+  for (Expr *value : AstWalker::returnValuesIn(fn->body)) {
+    std::vector<CallExpr *> tails = AstWalker::tailCallsOf(value);
+    calls.insert(calls.end(), tails.begin(), tails.end());
+  }
   if (fn->sym->getKnownReturnType()->isVoid()) {
-    std::vector<Stmt *> stmts;
-    AstWalker::tailStatementsOf(fn->body, true, stmts);
-    for (Stmt *stmt : stmts) {
+    for (Stmt *stmt : AstWalker::tailStatementsOf(fn->body)) {
       calls.push_back(cast<CallExpr>(cast<ExprStmt>(stmt)->expr));
     }
   }

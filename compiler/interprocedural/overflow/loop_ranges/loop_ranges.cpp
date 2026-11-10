@@ -52,10 +52,13 @@ LoopRanges::LoopRanges(OverflowCheck &check)
     : check(check) {}
 
 bool LoopRanges::yields(const Stmt *stmt) {
-  bool found = false;
-  AstWalker::visitExprs(stmt, [&](const Expr *e) { found |= isa<YieldExpr>(e); }, false);
+  for (const Expr *e : AstWalker::exprsIn(stmt, false)) {
+    if (isa<YieldExpr>(e)) {
+      return true;
+    }
+  }
 
-  return found;
+  return false;
 }
 
 bool LoopRanges::openEnded(const Expr *cond, const Stmt *body) {
@@ -68,16 +71,8 @@ bool LoopRanges::openEnded(const Expr *cond, const Stmt *body) {
   if (auto *lit = dyn_cast<BoolLitExpr>(OverflowHelpers::stripCasts(cond))) {
     return lit->value;
   }
-  bool input = false;
-  AstWalker::visitExprs(cond, [&](const Expr *e) {
-    if (auto *call = dyn_cast<CallExpr>(e)) {
-      input |= call->builtin() == Builtin::ReadLine ||
-               BuiltinGroups::isFsBuiltin(call->builtin()) ||
-               BuiltinGroups::isChildBuiltin(call->builtin());
-    }
-  });
 
-  return input;
+  return LoopRanges::readsInput(cond);
 }
 
 bool LoopRanges::grows(const Stmt *body, const VarSymbol *var) {
@@ -86,29 +81,28 @@ bool LoopRanges::grows(const Stmt *body, const VarSymbol *var) {
 
     return name && name->var() == var;
   };
-  bool found = false;
-  AstWalker::visitExprs(body, [&](const Expr *e) {
+  for (const Expr *e : AstWalker::exprsIn(body, true)) {
     if (auto *call = dyn_cast<CallExpr>(e)) {
       auto *member = dyn_cast<MemberExpr>(call->callee);
       if (member && isVar(member->object) &&
           (call->builtin() == Builtin::ArrPush || call->builtin() == Builtin::ArrUnshift ||
            call->builtin() == Builtin::ArrSplice)) {
-        found = true;
+        return true;
       }
     } else if (auto *assign = dyn_cast<AssignExpr>(e)) {
       if (auto *index = dyn_cast<IndexExpr>(assign->target);
           index && isVar(index->object) && index->mayAppend()) {
-        found = true;
+        return true;
       }
       if (auto *member = dyn_cast<MemberExpr>(assign->target);
           member && BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) &&
           isVar(member->object)) {
-        found = true;
+        return true;
       }
     }
-  });
+  }
 
-  return found;
+  return false;
 }
 
 bool LoopRanges::identicalNum(const Num &a, const Num &b) {
@@ -179,25 +173,33 @@ bool LoopRanges::awaitsIn(const Stmt *stmt) {
 }
 
 bool LoopRanges::waitsOrYields(const Stmt *stmt) {
-  bool found = false;
-  AstWalker::visitExprs(stmt, [&](const Expr *e) { found |= isa<AwaitExpr, YieldExpr>(e); }, false);
+  for (const Expr *e : AstWalker::exprsIn(stmt, false)) {
+    if (isa<AwaitExpr, YieldExpr>(e)) {
+      return true;
+    }
+  }
 
-  return found || LoopRanges::awaitsIn(stmt);
+  return LoopRanges::awaitsIn(stmt);
 }
 
 bool LoopRanges::readsInput(const Expr *cond) {
-  bool input = false;
-  if (cond) {
-    AstWalker::visitExprs(cond, [&](const Expr *e) {
-      if (auto *call = dyn_cast<CallExpr>(e)) {
-        input |= call->builtin() == Builtin::ReadLine ||
+  if (cond == nullptr) {
+    return false;
+  }
+  for (const Expr *e : AstWalker::exprsIn(cond, true)) {
+    auto *call = dyn_cast<CallExpr>(e);
+    if (call == nullptr) {
+      continue;
+    }
+    bool input = call->builtin() == Builtin::ReadLine ||
                  BuiltinGroups::isFsBuiltin(call->builtin()) ||
                  BuiltinGroups::isChildBuiltin(call->builtin());
-      }
-    });
+    if (input) {
+      return true;
+    }
   }
 
-  return input;
+  return false;
 }
 
 std::optional<double> LoopRanges::counterStep(const Expr *arg, const VarSymbol *param) {
@@ -453,16 +455,13 @@ void LoopRanges::findRecursions() {
     if (recursion.self.empty()) {
       continue;
     }
-    bool other = false;
-    AstWalker::visitExprs(
-        fn->body,
-        [&](const Expr *e) {
-          auto *call = dyn_cast<CallExpr>(e);
-          other |= call && call->func() && call->func()->decl == fn &&
-                   !llvm::is_contained(recursion.self, call);
-        },
-        false);
-    if (other) {
+    std::vector<const Expr *> exprs = AstWalker::exprsIn(fn->body, false);
+    auto otherSelfCall = [&](const Expr *e) {
+      auto *call = dyn_cast<CallExpr>(e);
+      return call != nullptr && call->func() != nullptr && call->func()->decl == fn &&
+             !llvm::is_contained(recursion.self, call);
+    };
+    if (llvm::any_of(exprs, otherSelfCall)) {
       continue;
     }
     for (size_t i = 0; i < fn->params.size() && recursion.counter < 0; ++i) {
