@@ -15,10 +15,10 @@
 
 namespace tz {
 
-Errors buildProgram(Program &program, const BuildOptions &options) {
-  Result<Target, Errors> target = Target::host(options.optimize);
+ResultBuiltProgram buildProgram(Program &program, const BuildOptions &options) {
+  auto target = Target::host(options.optimize);
   if (target.isErr()) {
-    return target.error();
+    return err(target.error());
   }
 
   ParallelPass parallel;
@@ -31,35 +31,45 @@ Errors buildProgram(Program &program, const BuildOptions &options) {
   LowererRegistry lowerers;
   LowerPass lower(context, target.value(), llvm::sys::path::filename(options.input), lowerers,
                   options.debug, options.optimize);
-  Result<Lowered, Errors> lowered = lower.run(program, plan, memoryPlan);
+  auto lowered = lower.run(program, plan, memoryPlan);
   if (lowered.isErr()) {
-    return lowered.error();
+    return err(lowered.error());
   }
   llvm::Module &module = *lowered.value().module;
 
   OptimizePass optimize(target.value(), options);
-  Errors optimizeErrors = optimize.run(module, lowered.value().parallel);
-  if (optimizeErrors) {
-    return optimizeErrors;
+  std::vector<Diagnostic> optimizeErrors = optimize.run(module, lowered.value().parallel);
+  if (!optimizeErrors.empty()) {
+    return err(optimizeErrors);
   }
 
   if (options.emitLLVM) {
     IrWriter writer;
-    return writer.run(module, options.output);
+    std::vector<Diagnostic> writeErrors = writer.run(module, options.output);
+    if (!writeErrors.empty()) {
+      return err(writeErrors);
+    }
+    return ok(BuiltProgram{});
   }
 
   LicensesPass licenses;
   CryptoUse crypto = licenses.run(module);
 
   EmitPass emit(target.value());
-  Result<ObjectFile, Errors> object = emit.run(module);
+  auto object = emit.run(module);
   if (object.isErr()) {
-    return object.error();
+    return err(object.error());
   }
 
   LinkPass link(target.value(), options);
+  auto linked = link.run(object.value(), crypto, lowered.value().parallel);
+  if (linked.isErr()) {
+    return err(linked.error());
+  }
 
-  return link.run(object.value(), crypto, lowered.value().parallel);
+  return ok(BuiltProgram{
+      .warnings = linked.value(),
+  });
 }
 
 }

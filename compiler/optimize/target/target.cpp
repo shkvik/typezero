@@ -23,15 +23,14 @@ void Target::initializeTargets() {
   LLVMInitializeAArch64AsmPrinter();
 }
 
-Result<Target, Errors> Target::host(bool optimize) {
+Result<Target, std::vector<Diagnostic>> Target::host(bool optimize) {
   static bool initialized = (Target::initializeTargets(), true);
   (void)initialized;
   llvm::Triple triple(llvm::sys::getDefaultTargetTriple());
   std::string error;
   const llvm::Target *target = llvm::TargetRegistry::lookupTarget(triple, error);
   if (!target) {
-    Errors errors;
-    errors.tool(error);
+    std::vector<Diagnostic> errors = {{.form = Diagnostic::Form::Tool, .message = error}};
     return err(errors);
   }
   llvm::TargetOptions options;

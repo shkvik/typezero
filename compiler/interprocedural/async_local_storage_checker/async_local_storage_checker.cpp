@@ -1,5 +1,5 @@
-#include "compiler/interprocedural/context_checker/context_checker.h"
-#include "compiler/interprocedural/context_checker/context_checker_errors.h"
+#include "compiler/interprocedural/async_local_storage_checker/async_local_storage_checker.h"
+#include "compiler/interprocedural/async_local_storage_checker/async_local_storage_checker_errors.h"
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
 #include "compiler/program/diagnostics/diagnostics.h"
 #include "compiler/program/types/types.h"
@@ -8,18 +8,18 @@ using llvm::isa;
 
 namespace tz {
 
-ContextChecker::ContextChecker(Program &checked)
-    : HeldValueChecker(checked) {}
+AsyncLocalStorageChecker::AsyncLocalStorageChecker(Program &checked, const LibraryRanges &library)
+    : HeldValueChecker(checked, library) {}
 
-bool ContextChecker::used() const {
+bool AsyncLocalStorageChecker::used() const {
   return this->usesModule("node:async_hooks");
 }
 
-bool ContextChecker::produces(const CallExpr *c) const {
+bool AsyncLocalStorageChecker::produces(const CallExpr *c) const {
   return HeldValueChecker::storageMethod(c, "getStore");
 }
 
-bool ContextChecker::takesOver(const CallExpr *c) {
+bool AsyncLocalStorageChecker::takesOver(const CallExpr *c) {
   if (this->current && HeldValueChecker::storageMethod(c, "getStore")) {
     this->readsDirectly.insert(this->current);
   }
@@ -35,41 +35,41 @@ bool ContextChecker::takesOver(const CallExpr *c) {
   return false;
 }
 
-void ContextChecker::sawNew(const NewExpr *n) {
+void AsyncLocalStorageChecker::sawNew(const NewExpr *n) {
   if (HeldValueChecker::storageClass(n->cls())) {
     this->news.push_back(n);
   }
 }
 
-void ContextChecker::startWalk() {
+void AsyncLocalStorageChecker::startWalk() {
   this->readsDirectly.clear();
   this->intervals.clear();
   this->runs.clear();
   this->news.clear();
 }
 
-void ContextChecker::kept(const Expr *value, bool, llvm::StringRef where) {
+void AsyncLocalStorageChecker::kept(const Expr *value, bool, llvm::StringRef where) {
   std::string message = ErrorTextAsyncStore::kept(where);
-  this->program.diags->error(value->loc(), message);
+  this->program.diags.error(value->loc(), message);
 }
 
-void ContextChecker::finish() {
+void AsyncLocalStorageChecker::finish() {
   this->checkNews();
   this->checkRuns();
   this->checkIntervals();
 }
 
-void ContextChecker::checkNews() {
+void AsyncLocalStorageChecker::checkNews() {
   for (const NewExpr *n : this->news) {
     if (this->allowedNews.contains(n)) {
       continue;
     }
     std::string message = ErrorTextAsyncStore::made();
-    this->program.diags->error(n->loc(), message);
+    this->program.diags.error(n->loc(), message);
   }
 }
 
-void ContextChecker::checkRuns() {
+void AsyncLocalStorageChecker::checkRuns() {
   for (const CallExpr *c : this->runs) {
     if (c->args.empty() || !parallel::ParallelHelpers::holdsReferences(c->args[0]->type)) {
       continue;
@@ -79,11 +79,11 @@ void ContextChecker::checkRuns() {
       continue;
     }
     std::string message = ErrorTextAsyncStore::runStore();
-    this->program.diags->error(store->loc(), message);
+    this->program.diags.error(store->loc(), message);
   }
 }
 
-const FunctionDecl *ContextChecker::reader(const FunctionDecl *fn) const {
+const FunctionDecl *AsyncLocalStorageChecker::reader(const FunctionDecl *fn) const {
   llvm::DenseMap<const FunctionDecl *, const FunctionDecl *> via;
   for (const FunctionDecl *f : this->readsDirectly) {
     via[f] = f;
@@ -108,7 +108,7 @@ const FunctionDecl *ContextChecker::reader(const FunctionDecl *fn) const {
   return found == via.end() ? nullptr : found->second;
 }
 
-void ContextChecker::checkIntervals() {
+void AsyncLocalStorageChecker::checkIntervals() {
   for (const CallExpr *c : this->intervals) {
     const FunctionDecl *fn = c->args.empty() ? nullptr : HeldValueChecker::callbackOf(c->args[0]);
     const FunctionDecl *reads = fn ? this->reader(fn) : nullptr;
@@ -119,7 +119,7 @@ void ContextChecker::checkIntervals() {
     std::string how = ErrorTextAsyncStore::readsIt(through);
     std::string message = c->builtin() == Builtin::SetInterval ? ErrorTextAsyncStore::interval(how)
                                                                : ErrorTextAsyncStore::restart(how);
-    this->program.diags->error(c->args[0]->loc(), message);
+    this->program.diags.error(c->args[0]->loc(), message);
   }
 }
 

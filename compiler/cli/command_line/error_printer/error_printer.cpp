@@ -7,8 +7,8 @@ ErrorPrinter::ErrorPrinter(const llvm::SourceMgr &sourceMgr, bool hints)
     : sourceMgr_(sourceMgr),
       hints(hints) {}
 
-void ErrorPrinter::print(const Errors &errors) const {
-  for (const Diagnostic &diagnostic : errors) {
+void ErrorPrinter::print(const std::vector<Diagnostic> &diagnostics) const {
+  for (const Diagnostic &diagnostic : diagnostics) {
     if (diagnostic.kind == llvm::SourceMgr::DK_Remark) {
       if (this->hints && diagnostic.form == Diagnostic::Form::Located) {
         sourceMgr_.GetMessage(diagnostic.loc, diagnostic.kind, "hint: " + diagnostic.message)

@@ -6,7 +6,6 @@
 #include "compiler/packages/project_packages/project_packages.h"
 #include "compiler/pipeline/build_options/build_options.h"
 #include "compiler/pipeline/check_program/check_program.h"
-#include "compiler/pipeline/pass_times/pass_times.h"
 #include "compiler/pipeline/runtime_files/runtime_files.h"
 #include "compiler/program/program/program.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -33,21 +32,20 @@ LspCheck::ResultResponseFile LspCheck::run(llvm::StringRef requestPath,
   ProjectPackages packages;
   RuntimeFiles runtime(this->argv0);
   Program program;
-  Errors errors;
-  PassTimes times;
+  std::vector<Diagnostic> found;
   if (packages.prepare(entry)) {
     BuildOptions options{entry, "", true, false, packages.graph(), runtime, &overlay};
     std::optional<int64_t> level = object.getInteger("level");
     options.overflow = level.value_or(2) != 1;
-    errors = checkProgram(program, options, &times);
+    ResultCheckedProgram checked = checkProgram(program, options);
+    found = checked.isOk() ? checked.value().warnings : checked.error();
   } else {
     std::string message = ErrorTextLspCheck::packages();
-    errors.tool(message);
+    found.push_back({.form = Diagnostic::Form::Tool, .message = message});
   }
   CheckReport report(program.sourceMgr, entry);
-  llvm::json::Value result = report.build(errors, program.file.modules);
+  llvm::json::Value result = report.build(found, program.file.modules);
   llvm::json::Object *answer = result.getAsObject();
-  answer->try_emplace("times", times.text());
   bool wantsKnowledge = object.getBoolean("knowledge").value_or(false);
   if (!program.file.modules.empty() && wantsKnowledge) {
     KnowledgePass pass(program, entry, ProgramEntry::rootOf(entry));

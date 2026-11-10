@@ -620,8 +620,7 @@ void LspServer::finish(int code) {
     }
   }
   log("tz: checked " + entry.path + (this->runningLevel == 1 ? " (quick)" : " (whole program)") +
-      " in " + std::to_string(elapsed) + " ms: " + std::to_string(count) + " problems (" +
-      report->getString("times").value_or("").str() + ")");
+      " in " + std::to_string(elapsed) + " ms: " + std::to_string(count) + " problems");
   for (const auto &[uri, document] : this->documents) {
     if (entry.files.count(document->key()) != 0) {
       next.try_emplace(uri);

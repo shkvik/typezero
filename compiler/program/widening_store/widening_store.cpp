@@ -1,4 +1,6 @@
-#include "compiler/semantic/semantic_state/widening_store/widening_store.h"
+#include "compiler/program/widening_store/widening_store.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/types/types.h"
 
 namespace tz {
 

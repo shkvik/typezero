@@ -9,8 +9,8 @@ using llvm::dyn_cast_or_null;
 
 namespace tz {
 
-PoolChecker::PoolChecker(Program &checked)
-    : HeldValueChecker(checked) {}
+PoolChecker::PoolChecker(Program &checked, const LibraryRanges &library)
+    : HeldValueChecker(checked, library) {}
 
 bool PoolChecker::used() const {
   return this->usesModule("tz:sync");
@@ -82,7 +82,7 @@ void PoolChecker::sawCall(const CallExpr *c) {
     this->allowedStores.insert(n);
     if (this->once(n)) {
       std::string message = ErrorTextPoolObject::runStore();
-      this->program.diags->error(n->loc(), message);
+      this->program.diags.error(n->loc(), message);
     }
     return;
   }
@@ -102,7 +102,7 @@ void PoolChecker::sawCall(const CallExpr *c) {
   this->runs.push_back({c, this->current});
   if (!this->awaited.contains(c) && this->once(c)) {
     std::string message = ErrorTextPoolObject::awaitRun();
-    this->program.diags->error(c->loc(), message);
+    this->program.diags.error(c->loc(), message);
   }
 }
 
@@ -111,7 +111,7 @@ void PoolChecker::spreadKept(const Expr *value) {
     return;
   }
   std::string message = ErrorTextPoolObject::storeCopy();
-  this->program.diags->error(value->loc(), message);
+  this->program.diags.error(value->loc(), message);
 }
 
 void PoolChecker::sawNew(const NewExpr *n) {
@@ -146,7 +146,7 @@ void PoolChecker::sawVoid(const CallExpr *c) {
     return;
   }
   std::string message = ErrorTextPoolObject::voidCall();
-  this->program.diags->error(c->loc(), message);
+  this->program.diags.error(c->loc(), message);
 }
 
 bool PoolChecker::closuresCarry() const {
@@ -159,7 +159,7 @@ void PoolChecker::kept(const Expr *value, bool closure, llvm::StringRef where) {
   }
   std::string message =
       closure ? ErrorTextPoolObject::keptFn(where) : ErrorTextPoolObject::kept(where);
-  this->program.diags->error(value->loc(), message);
+  this->program.diags.error(value->loc(), message);
 }
 
 void PoolChecker::runRoots(const Expr *callback, unsigned depth,
@@ -260,7 +260,7 @@ void PoolChecker::checkStoreRuns() {
     }
     std::string reading = how(target, reads);
     std::string message = ErrorTextPoolObject::voidStore(reading);
-    this->program.diags->error(c->loc(), message);
+    this->program.diags.error(c->loc(), message);
   }
   for (const auto &[c, at] : this->timers) {
     if (!at || !inside.contains(at) || c->args.empty()) {
@@ -273,7 +273,7 @@ void PoolChecker::checkStoreRuns() {
     }
     std::string reading = how(fn, reads);
     std::string message = ErrorTextPoolObject::later(reading);
-    this->program.diags->error(c->args[0]->loc(), message);
+    this->program.diags.error(c->args[0]->loc(), message);
   }
 }
 
@@ -284,7 +284,7 @@ void PoolChecker::finish() {
       continue;
     }
     std::string message = ErrorTextPoolObject::returned();
-    this->program.diags->error(at->loc(), message);
+    this->program.diags.error(at->loc(), message);
   }
 }
 

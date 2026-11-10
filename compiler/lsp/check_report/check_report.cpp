@@ -26,10 +26,11 @@ llvm::json::Object CheckReport::range(const SourcePlace &place) {
   return llvm::json::Object{{"start", std::move(start)}, {"end", std::move(end)}};
 }
 
-llvm::json::Value CheckReport::build(const Errors &errors, const std::vector<Module *> &modules) {
+llvm::json::Value CheckReport::build(const std::vector<Diagnostic> &found,
+                                     const std::vector<Module *> &modules) {
   places_.nameFiles(modules);
   std::vector<Item> items;
-  for (const Diagnostic &diagnostic : errors) {
+  for (const Diagnostic &diagnostic : found) {
     std::optional<SourcePlace> place =
         diagnostic.form == Diagnostic::Form::Located ? places_.find(diagnostic.loc) : std::nullopt;
     std::string text = llvm::StringRef(diagnostic.message).rtrim().str();

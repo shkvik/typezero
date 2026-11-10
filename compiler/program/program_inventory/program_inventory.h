@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/widening_store/widening_store.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SMLoc.h"
@@ -32,6 +33,7 @@ struct ProgramInventory {
   std::vector<const Type *> listenerReceivers;
   llvm::DenseMap<const Expr *, NamedUse> namedUses;
   std::vector<std::pair<const Type *, const Type *>> views;
+  WideningStore widenings;
 };
 
 }

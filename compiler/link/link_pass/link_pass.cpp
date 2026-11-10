@@ -29,15 +29,17 @@ bool LinkPass::inUse(llvm::StringRef path) {
   return ec == std::errc::permission_denied;
 }
 
-Errors LinkPass::run(const ObjectFile &object, const CryptoUse &crypto, bool parallel) const {
-  Errors errors;
+LinkPass::ResultLinked LinkPass::run(const ObjectFile &object, const CryptoUse &crypto,
+                                     bool parallel) const {
+  std::vector<Diagnostic> errors;
   const llvm::Triple &triple = this->target.triple();
   std::string variant = parallel ? "tzrt_mt" : "tzrt";
   std::string runtime =
       this->options.runtime.path(triple.isOSWindows() ? variant + ".lib" : "lib" + variant + ".a");
   if (!llvm::sys::fs::exists(runtime)) {
-    errors.tool("the runtime is missing: " + runtime);
-    return errors;
+    std::string message = "the runtime is missing: " + runtime;
+    errors.push_back({.form = Diagnostic::Form::Tool, .message = message});
+    return err(errors);
   }
 
   std::vector<std::string> inputs = {object.path, runtime};
@@ -50,8 +52,9 @@ Errors LinkPass::run(const ObjectFile &object, const CryptoUse &crypto, bool par
     for (const char *lib : libs) {
       std::string path = this->options.runtime.path(lib);
       if (!llvm::sys::fs::exists(path)) {
-        errors.tool("the library of node:crypto is missing: " + path);
-        return errors;
+        std::string message = "the library of node:crypto is missing: " + path;
+        errors.push_back({.form = Diagnostic::Form::Tool, .message = message});
+        return err(errors);
       }
       inputs.push_back(path);
     }
@@ -67,26 +70,30 @@ Errors LinkPass::run(const ObjectFile &object, const CryptoUse &crypto, bool par
   if (this->options.debug == DebugLevel::Full) {
     natvis = this->options.runtime.path("tz.natvis");
     if (!llvm::sys::fs::exists(natvis)) {
-      errors.tool("the debugger views of tz are missing: " + natvis);
-      return errors;
+      std::string message = "the debugger views of tz are missing: " + natvis;
+      errors.push_back({.form = Diagnostic::Form::Tool, .message = message});
+      return err(errors);
     }
   }
   if (!Linker::linkExecutable(triple, inputs, this->options.output,
                               this->options.debug != DebugLevel::None, natvis, messages)) {
     if (LinkPass::inUse(this->options.output)) {
-      errors.tool("cannot write '" + this->options.output +
-                  "': it is in use, probably still running; stop it and build again");
+      std::string message = "cannot write '" + this->options.output +
+                            "': it is in use, probably still running; stop it and build again";
+      errors.push_back({.form = Diagnostic::Form::Tool, .message = message});
     } else {
-      errors.raw(messages);
-      errors.tool("linking failed");
+      errors.push_back({.form = Diagnostic::Form::Raw, .message = messages});
+      errors.push_back({.form = Diagnostic::Form::Tool, .message = "linking failed"});
     }
-    return errors;
+    return err(errors);
   }
+  std::vector<Diagnostic> warnings;
   if (!messages.empty()) {
-    errors.raw(messages, llvm::SourceMgr::DK_Warning);
+    warnings.push_back(
+        {.kind = llvm::SourceMgr::DK_Warning, .form = Diagnostic::Form::Raw, .message = messages});
   }
 
-  return errors;
+  return ok(warnings);
 }
 
 }

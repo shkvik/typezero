@@ -12,8 +12,9 @@ using llvm::isa;
 
 namespace tz {
 
-HeldValueChecker::HeldValueChecker(Program &checked)
+HeldValueChecker::HeldValueChecker(Program &checked, const LibraryRanges &library)
     : program(checked),
+      library(library),
       current(nullptr),
       reporting(false) {}
 
@@ -118,25 +119,12 @@ bool HeldValueChecker::usesModule(llvm::StringRef name) const {
 }
 
 bool HeldValueChecker::inLibrary(llvm::SMLoc loc) const {
-  const char *at = loc.getPointer();
-
-  return llvm::any_of(this->libraryRanges, [&](const std::pair<const char *, const char *> &range) {
-    return at >= range.first && at < range.second;
-  });
+  return this->library.contains(loc);
 }
 
 void HeldValueChecker::run() {
   if (!this->used()) {
     return;
-  }
-  for (const Module *module : this->program.file.modules) {
-    if (!module->builtin) {
-      continue;
-    }
-    for (unsigned id : module->buffers) {
-      const llvm::MemoryBuffer *buffer = this->program.sourceMgr.getMemoryBuffer(id);
-      this->libraryRanges.push_back({buffer->getBufferStart(), buffer->getBufferEnd()});
-    }
   }
   auto known = [&] {
     return this->heldVars.size() + this->heldParams.size() + this->returnsHeld.size() +

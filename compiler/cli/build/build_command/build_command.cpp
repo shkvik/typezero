@@ -27,11 +27,12 @@ int BuildCommand::run(const Args &args, llvm::StringRef output) const {
   Program program;
   ErrorPrinter printer(program.sourceMgr, args.hints);
 
-  Errors checkErrors = checkProgram(program, options);
-  printer.print(checkErrors);
-  if (checkErrors) {
+  ResultCheckedProgram checked = checkProgram(program, options);
+  if (checked.isErr()) {
+    printer.print(checked.error());
     return kExitError;
   }
+  printer.print(checked.value().warnings);
 
   llvm::StringRef dir = llvm::sys::path::parent_path(output);
   if (!dir.empty()) {
@@ -40,11 +41,12 @@ int BuildCommand::run(const Args &args, llvm::StringRef output) const {
       return kExitError;
     }
   }
-  Errors buildErrors = buildProgram(program, options);
-  printer.print(buildErrors);
-  if (buildErrors) {
+  ResultBuiltProgram built = buildProgram(program, options);
+  if (built.isErr()) {
+    printer.print(built.error());
     return kExitError;
   }
+  printer.print(built.value().warnings);
 
   return 0;
 }

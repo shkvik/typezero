@@ -13,8 +13,8 @@ struct Program {
   ~Program();
 
   llvm::SourceMgr sourceMgr;
-  std::vector<std::unique_ptr<AstContext>> asts;
-  std::unique_ptr<Diagnostics> diags;
+  AstContext ast;
+  Diagnostics diags;
   SourceFile file;
 };
 

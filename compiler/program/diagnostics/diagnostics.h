@@ -1,6 +1,7 @@
 #pragma once
 
-#include "compiler/program/errors/errors.h"
+#include "compiler/program/diagnostic/diagnostic.h"
+#include "compiler/result/result/result.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/SourceMgr.h"
@@ -11,6 +12,8 @@ namespace tz {
 
 class Diagnostics {
 public:
+  using ResultTaken = Result<std::vector<Diagnostic>, std::vector<Diagnostic>>;
+
   explicit Diagnostics(llvm::SourceMgr &sourceMgr) : sourceMgr_(sourceMgr) {}
 
   void error(llvm::SMLoc loc, const llvm::Twine &message);
@@ -39,7 +42,7 @@ public:
   }
   std::vector<Captured> *capture() const { return capture_; }
 
-  Errors take();
+  ResultTaken take();
   void quietRange(const char *begin, const char *end) {
     this->quiet.push_back({begin, end});
   }
@@ -47,7 +50,6 @@ public:
 
   llvm::SourceMgr &sourceMgr() const { return sourceMgr_; }
 
-  bool hasErrors() const { return errorCount_ != 0; }
   unsigned errorCount() const { return errorCount_; }
   unsigned errorsSeen() const { return errorsSeen_; }
 
@@ -57,7 +59,7 @@ private:
   unsigned errorsSeen_ = 0;
   bool muted = false;
   std::vector<Captured> *capture_ = nullptr;
-  Errors errors;
+  std::vector<Diagnostic> found;
   std::vector<std::pair<const char *, const char *>> quiet;
 };
 

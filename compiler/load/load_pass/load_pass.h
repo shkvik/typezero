@@ -1,29 +1,21 @@
 #pragma once
 
-#include "compiler/program/errors/errors.h"
-#include "llvm/ADT/StringRef.h"
-#include <string>
+#include "compiler/program/diagnostics/diagnostics.h"
 
 namespace tz {
 
-namespace pkg {
-struct Graph;
-}
-
+struct BuildOptions;
 struct Program;
-class SourceOverlay;
 
 class LoadPass {
 public:
-  LoadPass(llvm::StringRef path, const pkg::Graph *packages,
-           const SourceOverlay *overlay = nullptr);
+  LoadPass(Program &program, const BuildOptions &options);
 
-  Errors run(Program &program) const;
+  Diagnostics::ResultTaken run();
 
 private:
-  std::string path_;
-  const pkg::Graph *packages;
-  const SourceOverlay *overlay;
+  Program &program;
+  const BuildOptions &options;
 };
 
 }

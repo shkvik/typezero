@@ -2,7 +2,8 @@
 
 namespace tz {
 
-Program::Program() = default;
+Program::Program()
+    : diags(sourceMgr) {}
 
 Program::~Program() = default;
 

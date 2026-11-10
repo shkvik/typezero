@@ -10,17 +10,17 @@ namespace tz {
 EmitPass::EmitPass(const Target &target)
     : target(target) {}
 
-Result<ObjectFile, Errors> EmitPass::run(llvm::Module &module) const {
+Result<ObjectFile, std::vector<Diagnostic>> EmitPass::run(llvm::Module &module) const {
   llvm::SmallString<128> path;
   if (std::error_code ec = llvm::sys::fs::createTemporaryFile("tz", "obj", path)) {
-    Errors errors;
-    errors.tool("cannot create a temporary file: " + ec.message());
+    std::string message = "cannot create a temporary file: " + ec.message();
+    std::vector<Diagnostic> errors = {{.form = Diagnostic::Form::Tool, .message = message}};
     return err(errors);
   }
   ObjectFile object{std::string(path), std::make_unique<llvm::FileRemover>(path)};
   bool supported = true;
   FileWriter writer;
-  Errors errors = writer.write(path, [&](llvm::raw_pwrite_stream &out) {
+  std::vector<Diagnostic> errors = writer.write(path, [&](llvm::raw_pwrite_stream &out) {
     llvm::legacy::PassManager pm;
     if (this->target.machine().addPassesToEmitFile(pm, out, nullptr,
                                                    llvm::CodeGenFileType::ObjectFile)) {
@@ -30,9 +30,10 @@ Result<ObjectFile, Errors> EmitPass::run(llvm::Module &module) const {
     pm.run(module);
   });
   if (!supported) {
-    errors.tool("the target cannot emit object files");
+    errors.push_back(
+        {.form = Diagnostic::Form::Tool, .message = "the target cannot emit object files"});
   }
-  if (errors) {
+  if (!errors.empty()) {
     return err(errors);
   }
 

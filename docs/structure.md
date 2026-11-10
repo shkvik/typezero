@@ -40,8 +40,10 @@
   движок; снаружи его подключают только через фасад `SemanticExternalFacade`
   (`semantic/semantic_external.h`). Хранилище движка `semantic_state/` закрыто.
 - **Каждый класс — в своей папке.** Маленькие классы вместо `Sema` и `CodeGen`.
-- **Ошибки — значения.** Проход отдаёт свои `Errors`; `compile` отдаёт `Result` через `ok` и `err`,
-  как в neverthrow.
+- **Ошибки — значения.** Найденное — `std::vector<Diagnostic>`. Шаг проверки отдаёт `Result` из
+  `Diagnostics::take()` (ok — предупреждения и подсказки, err — всё найденное с ошибками);
+  `checkProgram` и `buildProgram` отдают `Result<…, std::vector<Diagnostic>>` через `ok` и `err`,
+  как в neverthrow. Класса `Errors` нет (11 ноября).
 
 ## Правила кода
 
@@ -104,17 +106,16 @@ tests/ docs/ bench/ examples/ third_party/
 ```
 compiler/
   CMakeLists.txt     все .cpp под compiler/ по маске; main.cpp — вход tz
-  pipeline/          pipeline/ — buildProgram; build_options/, runtime_files/, pass_times/;
-                     check_program/ — checkProgram и тонкие прогоны, которые зовут фасад движка:
-                       declare_pass/ infer_pass/ check_pass/ instances_pass/ interprocedural_pass/
-                       overflow_pass/ event_rounds/
+  pipeline/          pipeline/ — buildProgram; build_options/, runtime_files/;
+                     check_program/ — checkProgram: загрузка и шаги двух фасадов —
+                       semantic (проверка по месту) и interprocedural (проверки всей программы)
   semantic/          движок типов; semantic_external.{h,cpp} — фасад SemanticExternalFacade;
                      semantic_types.{h,cpp} — SemanticTypes; semantic_parts/ — SemanticParts,
                      сборка всех частей; папки по ярусам: infer/ library/ → bodies/ → flow/
                      declare/ → generics/ → types/ names/ → semantic_state/ (закрытое
                      хранилище групп данных); вверх через интерфейс — только Completer
   interprocedural/   после движка, по всей программе: flows/ flow_*/ wide_writes/ load_order/
-                     unused/ context_checker/ pool_checker/ held_value_checker/ overflow/
+                     unused/ async_local_storage_checker/ pool_checker/ held_value_checker/ overflow/
   cli/               папка на слово команды tz (build/ run/ knowledge/ lsp/ mcp/ licenses/
                      version/ init/ add/ remove/ update/ port/); разбор и помощники — command_line/
   program/           program/, module/, source_file/, program_inventory/ (опись после проверки),
@@ -185,19 +186,19 @@ library/             по теме на папку; stream/stream.tz (класс
 - **Классы больше ~400 строк** ещё есть: `Type` (`type.cpp`, 1180 — его фабрики),
   `FilePort` (848) и десяток файлов по 500–600 строк; функции по 200–450 строк — большие `switch`
   по `Builtin`, которые уйдут вместе с ним.
-- **Конвейер** чуть другой, чем в разделе «Конвейер»: `checkProgram` отдаёт `Errors`, а круги
-  карт событий повторяют прогоны от загрузки до межпроцедурных проверок.
+- **Конвейер** — как в разделе «Конвейер» (11 ноября): прослоек `XxxPass` над фасадом и кругов
+  карт событий больше нет.
 
 ### Движок `semantic/` (9 ноября)
 
 Раскладка — по образцу `tmp/project_struct/`, правки сверх переносов — `tmp/project_struct.md`.
 
 - **Фасад.** `SemanticExternalFacade` (`semantic/semantic_external.h`) — единственный вход в движок,
-  только шаги конвейера: `declareProgram`, `findCallCycles`, `walkBodies`, `walkInstances`,
-  `finishProgram`, `collectInventory`, `takeInventory`; для `WideWrites` ещё `isInsideLibrary` и
-  `getWideningStore`. Все шаги отдают `Errors`; `PassDone` собирает `CheckPass`. Фасад только
-  перечисляет шаги и читает хранилища, пишут в хранилища части. Прогоны
-  `pipeline/check_program/*_pass` — по строке на вызов фасада.
+  берёт `Program`; только шаги конвейера: `collectDeclarations`, `findRecursion`,
+  `checkModuleCode`, `checkGenericCopies`, `finishProgram`. Каждый отдаёт `Diagnostics::ResultTaken`.
+  `finishProgram` ещё отдаёт инвентарь и хранилище расширений в `SourceFile::inventory` и
+  дописывает поздние классы в `file.items`. Фасад только перечисляет шаги, пишут в хранилища
+  части. Так же устроен `InterproceduralExternalFacade` (`interprocedural/interprocedural_external.h`).
 - **Вопросы о типах снаружи** — `SemanticTypes` (`semantic/semantic_types.h`: `awaitedType`,
   `copiesIntoRecord`, `isImplicitlyConvertible`, `narrowingsOf`) для `lower/` и `interprocedural/`.
   Общее у движка и `LoadOrder` — в `program/`: цепочка загрузки `LoadChain`
@@ -223,9 +224,9 @@ library/             по теме на папку; stream/stream.tz (класс
   (`program/ast/ast_cloner/`) из чистого двойника, который `Parser::parseSourceFile` откладывает
   сразу после разбора (`FunctionDecl::pristine`, `ClassDecl::pristine`).
 - **Движок не пишет в программу.** Факты для понижения и анализов (`usesAsync`, подтипы, виды,
-  копии generic, `nativeError`, поздние классы…) копит `InventoryStore`; `checkProgram` кладёт их
-  в `SourceFile::inventory` (`ProgramInventory`, `program/program_inventory/`) после
-  `finishProgram` и `collectInventory` и до межпроцедурных проверок.
+  копии generic, `nativeError`, поздние классы…) копит `InventoryStore`; в конце `finishProgram`
+  движок сам кладёт их в `SourceFile::inventory` (`ProgramInventory`, `program/program_inventory/`)
+  вместе с `WideningStore` — до межпроцедурных проверок.
 - **Тип возврата по требованию.** У `FuncSymbol` поле `ret` закрыто: `getReturnType()` достраивает
   тип через `Completer`, `getKnownReturnType()` читает без вывода, `hasReturnType()`.
 - **Понижение тем.** `LibraryLowerer` (`lower/library/library_lowerer/`) и `LowererRegistry`;
@@ -233,101 +234,50 @@ library/             по теме на папку; stream/stream.tz (класс
 
 ## Конвейер
 
-Сборка — две функции в `compiler/pipeline/pipeline.cpp`: проверить программу и построить exe.
+Сборка — две функции: `checkProgram` (`pipeline/check_program/`) и `buildProgram`
+(`pipeline/pipeline/`). Решено 11 ноября, пример — `tmp/check_program_example.cpp`.
 
 ```cpp
-Result<Program, Errors> checkProgram(const BuildOptions &options,
-                                     const FeatureRegistry &features) {
-  EventRounds rounds;
-  for (;;) {
-    Program program(rounds.maps());
-
-    LoadPass load(options);
-    Errors loadErrors = load.run(program);
-    if (loadErrors) {
-      return err(loadErrors);
-    }
-
-    DeclarePass declare(features);
-    Errors errors = declare.run(program);
-
-    InferPass infer;
-    errors.add(infer.run(program));
-
-    CheckPass check(features);
-    errors.add(check.run(program));
-    if (rounds.again(program)) {
-      continue;
-    }
-
-    InstancesPass instances;
-    errors.add(instances.run(program));
-
-    WholeProgramPass whole;
-    errors.add(whole.run(program));
-
-    OverflowPass overflow;
-    errors.add(overflow.run(program));
-    if (errors) {
-      return err(errors);
-    }
-
-    return ok(std::move(program));
-  }
-}
-
-Result<Build, Errors> build(const BuildOptions &options) {
-  FeatureRegistry features = FeatureRegistry::standard();
-  Result<Program, Errors> checked = checkProgram(options, features);
-  if (checked.isErr()) {
-    return err(checked.error());
-  }
-  Program &program = checked.value();
-
-  ParallelPass parallel(options);
-  ParallelPlan plan = parallel.run(program);
-
-  MemoryPass memory;
-  MemoryPlan memoryPlan = memory.run(program);
-
-  LowerPass lower(features, plan, memoryPlan);
-  std::unique_ptr<llvm::Module> ir = lower.run(program);
-
-  OptimizePass optimize(options);
-  Errors optimizeErrors = optimize.run(*ir);
-  if (optimizeErrors) {
-    return err(optimizeErrors);
+ResultCheckedProgram checkProgram(Program &program, const BuildOptions &options) {
+  LoadPass load(program, options);
+  auto loaded = load.run();
+  if (loaded.isErr()) {
+    return err(loaded.error());
   }
 
-  EmitPass emit(options);
-  Result<ObjectFile, Errors> object = emit.run(*ir);
-  if (object.isErr()) {
-    return err(object.error());
+  ItemList<Diagnostic> diagnostics;
+  SemanticExternalFacade semantic(program);
+
+  auto declarations = semantic.collectDeclarations();
+  if (declarations.isErr()) {
+    diagnostics.append(declarations.error());
+  }
+  // … findRecursion, checkModuleCode, checkGenericCopies, finishProgram — так же
+
+  InterproceduralExternalFacade interprocedural(program);
+  // … checkReadsBeforeInit, markUnreachableFunctions, checkAsyncLocalStorages,
+  //   checkPoolObjects, checkWideWrites (только без ошибок), checkOverflows (если включена)
+
+  if (!diagnostics.empty()) {
+    diagnostics.append(warnings);
+    return err(diagnostics);
   }
 
-  LinkPass link(options, features);
-  Errors linkErrors = link.run(object.value(), program);
-  if (linkErrors) {
-    return err(linkErrors);
-  }
-
-  return ok(Build(options.output));
+  return ok(CheckedProgram{
+      .warnings = std::move(warnings),
+  });
 }
 ```
 
 Что здесь видно:
 
-- **Остановки.** После `load` — как сейчас: при ошибках разбора дальше не идём. Ошибки `declare`,
-  `infer`, `check`, `instances` и `whole_program` собираются в одни `Errors` и проверяются вместе:
-  сейчас это один `Sema::check`, и тесты `tests/errors` ждут их в одном прогоне (см. «Открытые
-  вопросы»).
-- **Круги карт событий.** Программа, чьи эмиттеры получают карту событий из `emit()`, проверяется
-  кругами (сейчас — в `checkProgram` драйвера): `EventRounds` решает, нужен ли ещё круг, и ошибки
-  круга, после которого будет следующий, выбрасываются.
-- **Предупреждения.** `Errors` несёт и предупреждения (у `Diagnostic` есть вид); `if (errors)` —
-  истина, только если есть ошибка. Предупреждения о переполнении печатаются и рядом с ошибками, как
-  сейчас.
-- **Проходы без ошибок** (`parallel`, `memory`, `lower`) отдают свой результат, а не `Errors`.
+- **Остановки.** После загрузки — при ошибках дальше не идём. Остальные шаги идут все, ошибки
+  каждого добавляются в общий список: за один запуск видно ошибки объявлений, тел, копий и
+  проверок всей программы, и тесты `tests/errors` ждут их в одном прогоне.
+- **Кругов нет.** Карты событий без явного типа выводятся за один проход (docs/events.md, раздел 2).
+- **Предупреждения и подсказки** дают только проверка переполнений и компоновщик; они в
+  `CheckedProgram::warnings` и `BuiltProgram::warnings`, при ошибках — в конце списка ошибок.
+- **Проходы без ошибок** (`parallel`, `memory`) отдают свой результат.
 
 | Проход | Берёт | Меняет или отдаёт | Откуда сейчас |
 |---|---|---|---|

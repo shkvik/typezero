@@ -11,12 +11,12 @@ OptimizePass::OptimizePass(const Target &target, const BuildOptions &options)
     : target(target),
       options(options) {}
 
-Errors OptimizePass::run(llvm::Module &module, bool parallel) const {
-  Errors errors;
+std::vector<Diagnostic> OptimizePass::run(llvm::Module &module, bool parallel) const {
+  std::vector<Diagnostic> errors;
   if (this->options.optimize) {
     RuntimeLinker linker;
     errors = linker.run(module, this->options.runtime.path(parallel ? "tzrt_mt.bc" : "tzrt.bc"));
-    if (errors) {
+    if (!errors.empty()) {
       return errors;
     }
   }

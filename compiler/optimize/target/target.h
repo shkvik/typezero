@@ -1,16 +1,17 @@
 #pragma once
 
-#include "compiler/program/errors/errors.h"
+#include "compiler/program/diagnostic/diagnostic.h"
 #include "compiler/result/result/result.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/TargetParser/Triple.h"
 #include <memory>
+#include <vector>
 
 namespace tz {
 
 class Target {
 public:
-  static Result<Target, Errors> host(bool optimize);
+  static Result<Target, std::vector<Diagnostic>> host(bool optimize);
 
   const llvm::Triple &triple() const { return triple_; }
   llvm::TargetMachine &machine() const { return *machine_; }

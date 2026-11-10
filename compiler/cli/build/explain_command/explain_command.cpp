@@ -24,12 +24,13 @@ int ExplainCommand::run(const Args &args) const {
   Program program;
   ErrorPrinter printer(program.sourceMgr);
 
-  Errors checkErrors = checkProgram(program, options);
-  printer.print(checkErrors);
-  if (checkErrors) {
+  ResultCheckedProgram checked = checkProgram(program, options);
+  if (checked.isErr()) {
+    printer.print(checked.error());
     return kExitError;
   }
-  explainParallel(program.file, program.sourceMgr, *program.asts.back(), llvm::outs());
+  printer.print(checked.value().warnings);
+  explainParallel(program.file, program.sourceMgr, program.ast, llvm::outs());
 
   return 0;
 }

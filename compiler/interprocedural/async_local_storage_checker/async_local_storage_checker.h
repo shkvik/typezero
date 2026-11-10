@@ -4,9 +4,9 @@
 
 namespace tz {
 
-class ContextChecker : public HeldValueChecker {
+class AsyncLocalStorageChecker : public HeldValueChecker {
 public:
-  explicit ContextChecker(Program &checked);
+  AsyncLocalStorageChecker(Program &checked, const LibraryRanges &library);
 
 private:
   bool used() const override;

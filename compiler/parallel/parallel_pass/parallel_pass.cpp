@@ -9,7 +9,7 @@ ParallelPlan ParallelPass::run(const Program &program) const {
     return ParallelPlan();
   }
 
-  return planParallel(program.file, program.sourceMgr, *program.asts.back());
+  return planParallel(program.file, program.sourceMgr, program.ast);
 }
 
 }

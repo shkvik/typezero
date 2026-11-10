@@ -1,4 +1,5 @@
 #include "compiler/program/diagnostics/diagnostics.h"
+#include "llvm/ADT/STLExtras.h"
 
 namespace tz {
 
@@ -12,7 +13,7 @@ void Diagnostics::error(llvm::SMLoc loc, const llvm::Twine &message) {
     return;
   }
   ++errorCount_;
-  this->errors.add({llvm::SourceMgr::DK_Error, Diagnostic::Form::Located, loc, message.str()});
+  this->found.push_back({llvm::SourceMgr::DK_Error, Diagnostic::Form::Located, loc, message.str()});
 }
 
 bool Diagnostics::isQuiet(llvm::SMLoc loc) const {
@@ -29,34 +30,40 @@ void Diagnostics::warning(llvm::SMLoc loc, const llvm::Twine &message) {
   if (this->muted || capture_ || isQuiet(loc)) {
     return;
   }
-  this->errors.add({llvm::SourceMgr::DK_Warning, Diagnostic::Form::Located, loc, message.str()});
+  this->found.push_back(
+      {llvm::SourceMgr::DK_Warning, Diagnostic::Form::Located, loc, message.str()});
 }
 
 void Diagnostics::hint(llvm::SMLoc loc, const llvm::Twine &message) {
   if (this->muted || capture_ || isQuiet(loc)) {
     return;
   }
-  this->errors.add({llvm::SourceMgr::DK_Remark, Diagnostic::Form::Located, loc, message.str()});
+  this->found.push_back(
+      {llvm::SourceMgr::DK_Remark, Diagnostic::Form::Located, loc, message.str()});
 }
 
 void Diagnostics::note(llvm::SMLoc loc, const llvm::Twine &message) {
   if (this->muted || capture_) {
     return;
   }
-  this->errors.add({llvm::SourceMgr::DK_Note, Diagnostic::Form::Located, loc, message.str()});
+  this->found.push_back({llvm::SourceMgr::DK_Note, Diagnostic::Form::Located, loc, message.str()});
 }
 
 void Diagnostics::tool(const llvm::Twine &message) {
   ++errorsSeen_;
   ++errorCount_;
-  this->errors.tool(message);
+  this->found.push_back({.form = Diagnostic::Form::Tool, .message = message.str()});
 }
 
-Errors Diagnostics::take() {
-  Errors taken = std::move(this->errors);
-  this->errors = Errors();
+Diagnostics::ResultTaken Diagnostics::take() {
+  std::vector<Diagnostic> taken = std::move(this->found);
+  this->found.clear();
+  auto isError = [](const Diagnostic &d) { return d.kind == llvm::SourceMgr::DK_Error; };
+  if (llvm::any_of(taken, isError)) {
+    return err(taken);
+  }
 
-  return taken;
+  return ok(taken);
 }
 
 }

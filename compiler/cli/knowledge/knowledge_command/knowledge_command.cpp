@@ -45,17 +45,18 @@ bool KnowledgeCommand::learn(const std::string &entry, Knowledge &out) const {
   BuildOptions options{entry, "", true, false, packages.graph(), runtime};
   options.overflow = false;
   Program program;
-  Errors errors = checkProgram(program, options);
+  ResultCheckedProgram checked = checkProgram(program, options);
+  std::vector<Diagnostic> found = checked.isOk() ? checked.value().warnings : checked.error();
   if (program.file.modules.empty()) {
     ErrorPrinter printer(program.sourceMgr);
-    printer.print(errors);
+    printer.print(found);
     return false;
   }
   KnowledgePass pass(program, entry, ProgramEntry::rootOf(entry));
   out = pass.run();
   SourcePlaces places(program.sourceMgr);
   places.nameFiles(program.file.modules);
-  for (const Diagnostic &diagnostic : errors) {
+  for (const Diagnostic &diagnostic : found) {
     if (diagnostic.kind != llvm::SourceMgr::DK_Error &&
         diagnostic.kind != llvm::SourceMgr::DK_Warning) {
       continue;

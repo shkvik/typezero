@@ -19,8 +19,8 @@ LowerPass::LowerPass(llvm::LLVMContext &context, const Target &target, llvm::Str
       debug(debug),
       optimize(optimize) {}
 
-Result<Lowered, Errors> LowerPass::run(Program &program, const ParallelPlan &plan,
-                                       const MemoryPlan &memory) const {
+Result<Lowered, std::vector<Diagnostic>> LowerPass::run(Program &program, const ParallelPlan &plan,
+                                                        const MemoryPlan &memory) const {
   llvm::DataLayout layout = this->target.machine().createDataLayout();
   Lowering lowering(this->context, this->moduleName, layout);
   lowering.setSourceMgr(&program.sourceMgr);
@@ -40,9 +40,11 @@ Result<Lowered, Errors> LowerPass::run(Program &program, const ParallelPlan &pla
         out << "in " << function.getName() << "\n";
       }
     }
-    Errors errors;
-    errors.raw(problems);
-    errors.tool("internal error: the generated LLVM IR is invalid");
+    std::vector<Diagnostic> errors = {
+        {.form = Diagnostic::Form::Raw, .message = problems},
+        {.form = Diagnostic::Form::Tool,
+         .message = "internal error: the generated LLVM IR is invalid"},
+    };
     return err(errors);
   }
   module->setTargetTriple(this->target.triple());

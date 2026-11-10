@@ -7,7 +7,7 @@ using llvm::isa;
 
 namespace tz {
 
-void Unused::findUnused(SourceFile &program) {
+void Unused::markUnusedFunctions(SourceFile &program) {
   if (program.modules.size() < 2) {
     return;
   }

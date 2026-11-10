@@ -17,13 +17,6 @@
 pipeline/                   конвейер проходов
   build_options/            BuildOptions: вход, выход, пакеты, текст редактора, уровень проверки
   check_program/            checkProgram: загрузка и проходы проверки — зовут фасад движка
-    check_pass/             CheckPass: проверяет тела всех модулей по порядку загрузки
-    declare_pass/           DeclarePass: объявляет всё, что есть в модулях
-    infer_pass/             InferPass: выводит типы возврата
-    instances_pass/         InstancesPass: копии обобщений и поздние классы
-    interprocedural_pass/   InterproceduralPass: межпроцедурные проверки по всей программе
-    overflow_pass/          OverflowPass: пределы целых по всей программе
-  pass_times/               PassTimes: время каждого прохода для лога
   pipeline/                 buildProgram: от проверенной программы до exe
   runtime_files/            RuntimeFiles: где лежат tzrt.lib, tzrt.bc и lib/
 ```
@@ -101,7 +94,6 @@ program/                    что идёт по конвейеру: модул�
   builtin_declarations/     BuiltinDeclarations: разобранные встроенные тексты (prelude, iterate, ошибки fs, crypto, child_process) — их грузит LoadPass
   diagnostic/               Diagnostic: место, вид, текст
   diagnostics/              Diagnostics: сбор ошибок при разборе и проверке
-  errors/                   Errors: что нашёл проход
   library/                  справочники библиотеки без проверки: имена глобальных объектов, свойств и методов встроенных типов, ошибки fs и crypto, crypto_api, regex, имена модулей
     array/                  массивы
       array_method_table/   ArrayMethodTable: методы массива — имя, Builtin, вид колбэка, меняет ли длину и элементы
@@ -134,9 +126,9 @@ program/                    что идёт по конвейеру: модул�
       result_method_table/  ResultMethodTable: методы Result — имя, Builtin, число аргументов и колбэков
     string/                 строки
       string_method_table/  StringMethodTable: методы строки — имя, Builtin, число и вид аргументов, результат
+  library_ranges/           LibraryRanges: куски текста встроенных модулей — «это место в библиотеке?»
   module/                   Module: файл программы или встроенный модуль; bufferFiles — файлы буферов модуля из дерева library/
     load_chain/             LoadChain: цепочка загрузки «main.tz -> a.tz -> (b.tz …)» для ошибок чтения до загрузки
-  pass_done/                PassDone: итог прохода — без предупреждений или с ними
   program/                  Program: модули и всё, что нашли проходы
   program_inventory/        ProgramInventory: опись программы после проверки — async, TLS, подтипы, виды, копии generic
   source_file/              SourceFile: разобранный файл
@@ -158,7 +150,7 @@ program/                    что идёт по конвейеру: модул�
     type_spelling/          текст типа для сообщений
     union_slot/             место варианта в объединении
     union_slots/            раскладка вариантов объединения
-  warnings/                 Warnings: предупреждения прохода
+  widening_store/           WideningStore: расширения типов, которые надо проверить по программе; движок отдаёт его в инвентарь
 ```
 
 ```
@@ -171,6 +163,11 @@ result/     Result как в neverthrow
 ```
 union/     Union: обёртка над std::variant, где вид нельзя перепутать
   union/   Union<…>: kind(), as<T>(), is<T>()
+```
+
+```
+item_list/     ItemList: std::vector с append — добавить список в список
+  item_list/   ItemList<T>
 ```
 
 ```
@@ -449,7 +446,6 @@ semantic/                         движок типов: объявления,
     scope_stack/                  ScopeStack: области видимости значений и типов, ветвления
     stream_store/                 StreamStore: виды потоков после setEncoding, process.stdin
     type_context/                 TypeContext: где сейчас разбор типа — extends, хвостовые вызовы, назначения
-    widening_store/               WideningStore: расширения типов, которые надо проверить по программе
   types/                          типы: разрешение, отношения, вычисляемые типы
     conditional_check_helpers/    общие помощники условных типов
     conditional_types/            ConditionalTypes: T extends U ? A : B, infer
@@ -472,8 +468,8 @@ semantic/                         движок типов: объявления,
 ```
 
 ```
-interprocedural/         межпроцедурные проверки после движка: потоки значений по программе, переполнение
-  context_checker/       ContextChecker: правила AsyncLocalStorage по всей программе (docs/async.md, раздел 10)
+interprocedural/         межпроцедурные проверки после движка: потоки значений по программе, переполнение; снаружи — только фасад interprocedural_external.h
+  async_local_storage_checker/ AsyncLocalStorageChecker: правила AsyncLocalStorage по всей программе (docs/async.md, раздел 10)
   flow_builtins/         FlowBuiltins: потоки значений через встроенные вызовы
   flow_calls/            FlowCalls: потоки значений через вызовы
   flow_exprs/            FlowExprs: потоки значений в выражениях

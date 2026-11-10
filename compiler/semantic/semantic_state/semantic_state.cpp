@@ -120,4 +120,11 @@ WideningStore &SemanticState::getWideningStore() {
   return this->wideningStore;
 }
 
+WideningStore SemanticState::takeWideningStore() {
+  WideningStore taken = std::move(this->wideningStore);
+  this->wideningStore = WideningStore();
+
+  return taken;
+}
+
 }

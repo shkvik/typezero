@@ -1,13 +1,20 @@
 #pragma once
 
-#include "compiler/program/errors/errors.h"
+#include "compiler/program/diagnostic/diagnostic.h"
+#include "compiler/result/result/result.h"
+#include <vector>
 
 namespace tz {
 
 struct BuildOptions;
 struct Program;
-class PassTimes;
 
-Errors checkProgram(Program &program, const BuildOptions &options, PassTimes *times = nullptr);
+struct CheckedProgram {
+  std::vector<Diagnostic> warnings;
+};
+
+using ResultCheckedProgram = Result<CheckedProgram, std::vector<Diagnostic>>;
+
+ResultCheckedProgram checkProgram(Program &program, const BuildOptions &options);
 
 }

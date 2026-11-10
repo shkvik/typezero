@@ -7,9 +7,10 @@
 
 namespace tz {
 
-WideWrites::WideWrites(SemanticExternalFacade &owner, Diagnostics &target)
-    : engine(owner),
-      diagnostics(target) {}
+WideWrites::WideWrites(Program &checked, const LibraryRanges &library)
+    : program(checked),
+      library(library),
+      diagnostics(checked.diags) {}
 
 bool WideWrites::breaks(const Write &write, const NarrowedPart &narrowing, int depth) {
   bool otherDepth = depth >= 0 && narrowing.depth != depth;
@@ -179,7 +180,7 @@ WideWrites::WriteBreak WideWrites::breakingAt(const FlowGraph &graph, const Writ
 WideWrites::WriteBreak WideWrites::breakingAnywhere(const FlowGraph &graph,
                                                     const Conversion &conv) const {
   for (const Write &write : graph.writes) {
-    if (this->engine.isInsideLibrary(write.loc)) {
+    if (this->library.contains(write.loc)) {
       continue;
     }
     WriteBreak found = WideWrites::breakingNarrowing(write, conv, -1);
@@ -286,8 +287,8 @@ WideWrites::ResultWideningSafe WideWrites::widening(const Conversion &conv,
   return ok(&conv);
 }
 
-void WideWrites::checkWidenings(SourceFile &file) {
-  const WideningStore &widenings = this->engine.getWideningStore();
+void WideWrites::checkWidenings() {
+  const WideningStore &widenings = this->program.file.inventory.widenings;
   if (!widenings.hasWideningCasts() && !widenings.hasNarrowedFields()) {
     return;
   }
@@ -298,7 +299,7 @@ void WideWrites::checkWidenings(SourceFile &file) {
     return SemanticTypes::isImplicitlyConvertible(from, to);
   };
   Flows flows(widenings, narrowings, convertible);
-  flows.walkProgram(file);
+  flows.walkProgram(this->program.file);
   const FlowGraph &graph = flows.getFlowGraph();
 
   WritesAt writesAt = WideWrites::writesByNode(graph);

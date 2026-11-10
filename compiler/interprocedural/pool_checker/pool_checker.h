@@ -6,7 +6,7 @@ namespace tz {
 
 class PoolChecker : public HeldValueChecker {
 public:
-  explicit PoolChecker(Program &checked);
+  PoolChecker(Program &checked, const LibraryRanges &library);
 
 private:
   using Site = std::pair<const CallExpr *, const FunctionDecl *>;

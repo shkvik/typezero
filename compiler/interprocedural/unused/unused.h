@@ -6,7 +6,7 @@ namespace tz {
 
 class Unused {
 public:
-  static void findUnused(SourceFile &program);
+  static void markUnusedFunctions(SourceFile &program);
 };
 
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/program/ast/ast.h"
+#include "compiler/program/library_ranges/library_ranges.h"
 #include "compiler/program/program/program.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -13,7 +14,7 @@ namespace tz {
 
 class HeldValueChecker {
 public:
-  explicit HeldValueChecker(Program &checked);
+  HeldValueChecker(Program &checked, const LibraryRanges &library);
   virtual ~HeldValueChecker() = default;
 
   void run();
@@ -49,6 +50,7 @@ protected:
   const FunctionDecl *programTarget(const CallExpr *c) const;
 
   Program &program;
+  const LibraryRanges &library;
   const FunctionDecl *current;
   llvm::DenseSet<const Expr *> awaited;
   llvm::DenseSet<const Expr *> allowedNews;
@@ -78,7 +80,6 @@ private:
   llvm::DenseSet<const FunctionDecl *> walked;
   llvm::DenseSet<const FunctionDecl *> heldThis;
   std::set<std::pair<const FunctionDecl *, unsigned>> heldParams;
-  std::vector<std::pair<const char *, const char *>> libraryRanges;
 };
 
 }

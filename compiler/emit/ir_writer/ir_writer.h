@@ -1,14 +1,15 @@
 #pragma once
 
-#include "compiler/program/errors/errors.h"
+#include "compiler/program/diagnostic/diagnostic.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Module.h"
+#include <vector>
 
 namespace tz {
 
 class IrWriter {
 public:
-  Errors run(const llvm::Module &module, llvm::StringRef path) const;
+  std::vector<Diagnostic> run(const llvm::Module &module, llvm::StringRef path) const;
 };
 
 }

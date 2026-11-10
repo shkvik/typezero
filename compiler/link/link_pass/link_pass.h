@@ -1,7 +1,9 @@
 #pragma once
 
 #include "compiler/link/licenses/licenses.h"
-#include "compiler/program/errors/errors.h"
+#include "compiler/program/diagnostic/diagnostic.h"
+#include "compiler/result/result/result.h"
+#include <vector>
 
 namespace tz {
 
@@ -11,9 +13,11 @@ struct ObjectFile;
 
 class LinkPass {
 public:
+  using ResultLinked = Result<std::vector<Diagnostic>, std::vector<Diagnostic>>;
+
   LinkPass(const Target &target, const BuildOptions &options);
 
-  Errors run(const ObjectFile &object, const CryptoUse &crypto, bool parallel) const;
+  ResultLinked run(const ObjectFile &object, const CryptoUse &crypto, bool parallel) const;
 
 private:
   static bool inUse(llvm::StringRef path);

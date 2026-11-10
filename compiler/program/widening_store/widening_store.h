@@ -1,12 +1,13 @@
 #pragma once
 
-#include "compiler/program/ast/ast.h"
-#include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseSet.h"
 #include <map>
 #include <utility>
 
 namespace tz {
+
+class CastExpr;
+class Type;
 
 class WideningStore {
 public:

@@ -1,22 +1,20 @@
 #include "compiler/load/load_pass/load_pass.h"
 #include "compiler/load/loader/loader.h"
+#include "compiler/pipeline/build_options/build_options.h"
 #include "compiler/program/program/program.h"
 
 namespace tz {
 
-LoadPass::LoadPass(llvm::StringRef path, const pkg::Graph *packages, const SourceOverlay *overlay)
-    : path_(path.str()),
-      packages(packages),
-      overlay(overlay) {}
+LoadPass::LoadPass(Program &program, const BuildOptions &options)
+    : program(program),
+      options(options) {}
 
-Errors LoadPass::run(Program &program) const {
-  program.diags = std::make_unique<Diagnostics>(program.sourceMgr);
-  AstContext &ast = *program.asts.emplace_back(std::make_unique<AstContext>());
-  program.file = SourceFile();
-  loadProgram(path_, program.sourceMgr, ast, *program.diags, program.file, this->packages,
-              this->overlay);
+Diagnostics::ResultTaken LoadPass::run() {
+  this->program.file = SourceFile();
+  loadProgram(this->options.input, this->program.sourceMgr, this->program.ast, this->program.diags,
+              this->program.file, this->options.packages, this->options.overlay);
 
-  return program.diags->take();
+  return this->program.diags.take();
 }
 
 }

@@ -5,6 +5,7 @@
 #include "compiler/program/source_file/source_file.h"
 #include "compiler/program/symbols/completer/completer.h"
 #include "compiler/program/types/types.h"
+#include "compiler/program/widening_store/widening_store.h"
 #include "compiler/semantic/semantic_state/alias_store/alias_store.h"
 #include "compiler/semantic/semantic_state/block_position/block_position.h"
 #include "compiler/semantic/semantic_state/bytes_store/bytes_store.h"
@@ -28,7 +29,6 @@
 #include "compiler/semantic/semantic_state/scope_stack/scope_stack.h"
 #include "compiler/semantic/semantic_state/stream_store/stream_store.h"
 #include "compiler/semantic/semantic_state/type_context/type_context.h"
-#include "compiler/semantic/semantic_state/widening_store/widening_store.h"
 #include "llvm/ADT/ArrayRef.h"
 
 namespace tz {
@@ -65,6 +65,7 @@ public:
   FileSystemStore &getFileSystemStore();
   BytesStore &getBytesStore();
   WideningStore &getWideningStore();
+  WideningStore takeWideningStore();
 
 private:
   AstContext &ast;

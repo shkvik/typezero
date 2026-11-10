@@ -2,35 +2,27 @@
 
 #include "compiler/program/ast/ast.h"
 #include "compiler/program/diagnostics/diagnostics.h"
-#include "compiler/program/errors/errors.h"
-#include "compiler/program/program_inventory/program_inventory.h"
 #include "compiler/program/source_file/source_file.h"
-#include "compiler/semantic/semantic_state/widening_store/widening_store.h"
-#include "llvm/Support/SMLoc.h"
 #include <memory>
 
 namespace tz {
 
 class SemanticParts;
 class SemanticState;
+struct Program;
 
 class SemanticExternalFacade {
 public:
-  SemanticExternalFacade(AstContext &ast, Diagnostics &diagnostics, SourceFile &loaded);
+  explicit SemanticExternalFacade(Program &program);
   ~SemanticExternalFacade();
 
-  Errors walkBodies();
-  void finishProgram();
-  Errors walkInstances();
-  Errors findCallCycles();
-  Errors declareProgram();
-  void collectInventory();
-  ProgramInventory takeInventory();
-  bool isInsideLibrary(llvm::SMLoc loc) const;
-  const WideningStore &getWideningStore() const;
+  Diagnostics::ResultTaken collectDeclarations();
+  Diagnostics::ResultTaken findRecursion();
+  Diagnostics::ResultTaken checkModuleCode();
+  Diagnostics::ResultTaken checkGenericCopies();
+  Diagnostics::ResultTaken finishProgram();
 
 private:
-  Errors takeErrors();
   void walkModuleItems();
   void walkLiftedFunctions();
   void walkDeclarationFiles();

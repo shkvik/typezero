@@ -30,17 +30,20 @@ unsigned RuntimeLinker::copySize(llvm::Function &fn,
   return size;
 }
 
-Errors RuntimeLinker::run(llvm::Module &module, const std::string &path) const {
-  Errors errors;
+std::vector<Diagnostic> RuntimeLinker::run(llvm::Module &module, const std::string &path) const {
+  std::vector<Diagnostic> errors;
   auto buffer = llvm::MemoryBuffer::getFile(path);
   if (!buffer) {
-    errors.tool("the runtime is missing: " + path);
+    std::string message = "the runtime is missing: " + path;
+    errors.push_back({.form = Diagnostic::Form::Tool, .message = message});
     return errors;
   }
   llvm::Expected<std::unique_ptr<llvm::Module>> runtime =
       llvm::getOwningLazyBitcodeModule(std::move(*buffer), module.getContext());
   if (!runtime) {
-    errors.tool("cannot read the runtime " + path + ": " + llvm::toString(runtime.takeError()));
+    std::string message =
+        "cannot read the runtime " + path + ": " + llvm::toString(runtime.takeError());
+    errors.push_back({.form = Diagnostic::Form::Tool, .message = message});
     return errors;
   }
   (*runtime)->setTargetTriple(module.getTargetTriple());
@@ -49,8 +52,10 @@ Errors RuntimeLinker::run(llvm::Module &module, const std::string &path) const {
   for (llvm::Function &decl : module) {
     llvm::Function *def = decl.isDeclaration() ? (*runtime)->getFunction(decl.getName()) : nullptr;
     if (def && def->getFunctionType() != decl.getFunctionType()) {
-      errors.tool("internal error: " + decl.getName() +
-                  " is declared differently in Lowering and in the runtime");
+      std::string message = ("internal error: " + decl.getName() +
+                             " is declared differently in Lowering and in the runtime")
+                                .str();
+      errors.push_back({.form = Diagnostic::Form::Tool, .message = message});
       return errors;
     }
   }
@@ -61,7 +66,9 @@ Errors RuntimeLinker::run(llvm::Module &module, const std::string &path) const {
     }
     auto *var = llvm::dyn_cast<llvm::GlobalVariable>(&value);
     if (var && var->hasLocalLinkage() && !var->isConstant() && !var->getName().starts_with("__")) {
-      errors.tool("internal error: the runtime variable " + var->getName() + " is static");
+      std::string message =
+          ("internal error: the runtime variable " + var->getName() + " is static").str();
+      errors.push_back({.form = Diagnostic::Form::Tool, .message = message});
       return errors;
     }
     if (value.hasExternalLinkage()) {
@@ -75,7 +82,8 @@ Errors RuntimeLinker::run(llvm::Module &module, const std::string &path) const {
     }
   }
   if (llvm::Linker::linkModules(module, std::move(*runtime), llvm::Linker::LinkOnlyNeeded)) {
-    errors.tool("internal error: cannot link the runtime");
+    errors.push_back(
+        {.form = Diagnostic::Form::Tool, .message = "internal error: cannot link the runtime"});
     return errors;
   }
 

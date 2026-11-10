@@ -3,7 +3,7 @@
 
 namespace tz {
 
-Errors IrWriter::run(const llvm::Module &module, llvm::StringRef path) const {
+std::vector<Diagnostic> IrWriter::run(const llvm::Module &module, llvm::StringRef path) const {
   FileWriter writer;
 
   return writer.write(path, [&](llvm::raw_pwrite_stream &out) { module.print(out, nullptr); });

@@ -1,7 +1,8 @@
 #pragma once
 
-#include "compiler/program/errors/errors.h"
+#include "compiler/program/diagnostic/diagnostic.h"
 #include "llvm/IR/Module.h"
+#include <vector>
 
 namespace tz {
 
@@ -12,7 +13,7 @@ class OptimizePass {
 public:
   OptimizePass(const Target &target, const BuildOptions &options);
 
-  Errors run(llvm::Module &module, bool parallel) const;
+  std::vector<Diagnostic> run(llvm::Module &module, bool parallel) const;
 
 private:
   void runPasses(llvm::Module &module) const;
