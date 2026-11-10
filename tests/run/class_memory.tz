@@ -126,7 +126,7 @@ head = undefined
 
 // Static fields hold their objects until the program ends.
 class Cache {
-  static last = new Item("cached")
+  static last: Item = new Item("cached")
   static items: Item[] = []
   static remember(item: Item) {
     Cache.items.push(item)

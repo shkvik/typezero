@@ -6,7 +6,7 @@ export interface Named {
 }
 
 export abstract class Shape implements Named {
-  static size = /^(\d+)x(\d+)$/
+  static size: RegExp = /^(\d+)x(\d+)$/
   id: int
   constructor(public name: string) {
     this.id = 0

@@ -2,7 +2,7 @@
 // static field), a generator method over matches, a function that returns
 // Results, and a text.
 export class Scanner {
-  static numbers = /-?\d+(?:\.\d+)?/g
+  static numbers: RegExp = /-?\d+(?:\.\d+)?/g
   words: RegExp
   constructor(public label: string) {
     this.words = /\p{L}+/gu

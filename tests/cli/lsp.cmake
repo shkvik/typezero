@@ -98,7 +98,7 @@ console.log(owes(Kind.None), Object.values(Kind))
 ]])
 write(colors/statics.tz [[
 class Store {
-  private static readonly cache = new Map<string, int>()
+  private static readonly cache: Map<string, int> = new Map<string, int>()
   public static size(): int {
     return Store.cache.size
   }

@@ -96,7 +96,7 @@ const self = this
 class Box {
   static size = 1
   // expect-error: in a static field 'this' would be the class itself; use the class's name: 'Box.size'
-  static double = this.size * 2
+  static double: int = this.size * 2
   value: int
   static make() {
     // expect-error: in a static method 'this' would be the class itself; use the class's name: 'Box.size'
@@ -145,14 +145,22 @@ class Dup {
   // expect-error: duplicate member 'b' in class 'Dup': a field and a method cannot share a name
   b() {}
   b: int
-  // expect-error: field 'e' cannot get a value where it is declared: set it in the constructor, 'this.e = ...'
   e: int = 5
-  // expect-error: field 'f' cannot get a value where it is declared: set it in the constructor, 'this.f = ...'
+  // expect-error: field 'f' cannot get a value where it is declared: in a class without a constructor it can be only a literal next to a written type, e.g. 'f: int = 0'
   f = "f"
+  // expect-error: field 'g' cannot get a value where it is declared: in a class without a constructor it can be only a literal next to a written type
+  g: int[] = []
   // expect-error: field 'c' needs a type, e.g. 'c: int'
   c
   // expect-error: static field 'd' needs a value, e.g. 'static d: int = ...', or make it optional: 'static d?: int'
   static d: int
+  // expect-error: static field 'made' needs a type: only a literal shows it without checking the value, e.g. 'static made: int = ...'
+  static made = new Date(0)
+}
+class Built {
+  // expect-error: field 'n' cannot get a value where it is declared: set it in the constructor, 'this.n = ...'
+  n: int = 1
+  constructor() {}
 }
 // expect-error: duplicate declaration of 'Point'
 function Point() {}
@@ -163,7 +171,7 @@ const early = new Late()
 class Late {
   static n = 1
   // expect-error: 'Late.m' is read before it is set: the static fields are set in the order they are declared
-  static k = Late.m
+  static k: int = Late.m
   static m = 2
 }
 {

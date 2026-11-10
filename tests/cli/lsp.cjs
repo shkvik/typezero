@@ -332,7 +332,7 @@ async function main() {
   // are classes too.
   const staticColors = await colorsOf("colors/statics.tz")
   const staticAt = place => (staticColors.find(([where]) => where == place) ?? [place, "none"])[1]
-  expect("the colors of classes", ["1:38", "3:11", "3:17", "6:12", "6:26"].map(staticAt), [
+  expect("the colors of classes", ["1:56", "3:11", "3:17", "6:12", "6:26"].map(staticAt), [
     "class", "class", "property readonly", "class", "class",
   ])
   const kindColors = await colorsOf("colors/kinds.tz")

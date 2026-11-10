@@ -46,6 +46,29 @@ std::string ErrorTextDeclaredValue::constructor(llvm::StringRef field) {
       .str();
 }
 
+std::string ErrorTextDeclaredValue::literal(llvm::StringRef field) {
+  return (llvm::Twine("field '") + field +
+          "' cannot get a value where it is declared: in a class without a constructor it can "
+          "be only a literal next to a written type, e.g. '" +
+          field + ": int = 0'; set other values in a constructor")
+      .str();
+}
+
+std::string ErrorTextTypeSeen::shared(llvm::StringRef field) {
+  return (llvm::Twine("static field '") + field +
+          "' needs a type: only a literal shows it without checking the value, e.g. 'static " +
+          field + ": int = ...'")
+      .str();
+}
+
+std::string ErrorTextTypeSeen::function(llvm::StringRef field) {
+  return (llvm::Twine("field '") + field +
+          "' holds a function that code sets again, so it is a field, not a method, and needs "
+          "a type, e.g. '" +
+          field + ": () => void = ...'")
+      .str();
+}
+
 std::string ErrorTextStaticParams::shared(llvm::StringRef field, llvm::StringRef className) {
   return (llvm::Twine("static field '") + field + "' cannot use the type parameters of '" +
           className + "': every instance of the class shares it")

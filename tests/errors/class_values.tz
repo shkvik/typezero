@@ -51,7 +51,7 @@ function plain(...args: ConstructorArgs) {}
 function Labeled(label: string) {
   return class {
     // expect-error: a class expression cannot use 'label', a variable of the function around it: the class is made once, not at each call, and its static fields get their values the first time
-    static label = label
+    static label: string = label
   }
 }
 
@@ -90,6 +90,7 @@ function WithId<T extends Constructor>(cls: T) {
 @WithId
 class Stored {
   // expect-error: static field 'last' holds an object made before, of the class as declared
+  // expect-error: static field 'last' needs a type
   static last = new Stored()
 }
 

@@ -1,6 +1,6 @@
 ListReq {
   page: 0,
-  take: 0,
+  take: 10,
   query: '',
   mode: 'classic',
   rules: Rules { victoryPoints: 8, bankLimited: false },

@@ -67,6 +67,7 @@ public:
 
 enum class ClassDeclarerFieldValueErrorCode {
   VALUE_OUTSIDE_CONSTRUCTOR,
+  START_VALUE_NOT_LITERAL,
 };
 
 struct ClassDeclarerFieldValueError {
@@ -77,6 +78,23 @@ struct ClassDeclarerFieldValueError {
 class ErrorTextDeclaredValue {
 public:
   static std::string constructor(llvm::StringRef field);
+  static std::string literal(llvm::StringRef field);
+};
+
+enum class ClassDeclarerTypeSeenErrorCode {
+  STATIC_VALUE_NOT_LITERAL,
+  FUNCTION_FIELD_UNTYPED,
+};
+
+struct ClassDeclarerTypeSeenError {
+  ClassDeclarerTypeSeenErrorCode code;
+  std::string message;
+};
+
+class ErrorTextTypeSeen {
+public:
+  static std::string shared(llvm::StringRef field);
+  static std::string function(llvm::StringRef field);
 };
 
 enum class ClassDeclarerStaticTypeParamsErrorCode {

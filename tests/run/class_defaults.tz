@@ -1,7 +1,7 @@
 // A class without a constructor (its own or of a parent) gets one that sets every field without
 // a value to an empty one: "", 0, false, [], an empty Map or Set, the first member of an enum or
 // of a union of literals, an object of a class without a constructor, an object of the empty
-// values of its fields. An optional field stays undefined.
+// values of its fields. A declared value stays; an optional field stays undefined.
 enum GameMode {
   Classic = "classic",
   Ranked = "ranked",
@@ -14,7 +14,7 @@ class Rules {
 
 class Page {
   readonly page: int;
-  readonly take: int;
+  readonly take: int = 10;
 }
 
 class ListReq extends Page {

@@ -7,7 +7,6 @@
 #include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/generics/generic_class_checker/generic_class_checker.h"
 #include "compiler/semantic/generics/widening_relations/widening_relations.h"
-#include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
@@ -21,7 +20,6 @@ ClassDeclarer::ClassDeclarer(SemanticState &owner, SemanticParts &all)
   this->scopes = &all.getScopes();
   this->classBases = &all.getClassBases();
   this->typeResolver = &all.getTypeResolver();
-  this->returnInferrer = &all.getReturnInferrer();
   this->functionChecker = &all.getFunctionChecker();
   this->genericClassChecker = &all.getGenericClassChecker();
 }
@@ -156,13 +154,50 @@ ClassDeclarer::ResultFieldNotLateSet ClassDeclarer::setLater(const ClassField &f
   return ok(&f);
 }
 
-ClassDeclarer::ResultFieldHasNoValue ClassDeclarer::fieldValue(const ClassField &f) {
+ClassDeclarer::ResultFieldTypeIsSeen ClassDeclarer::typeSeen(const ClassField &f) {
+  bool untypedValue = !f.type && f.init != nullptr && SharedHelpers::literalType(f.init) == nullptr;
+  if (untypedValue && f.isStatic()) {
+    std::string message = ErrorTextTypeSeen::shared(f.name);
+
+    return err(ClassDeclarerTypeSeenError{
+        .code = ClassDeclarerTypeSeenErrorCode::STATIC_VALUE_NOT_LITERAL,
+        .message = message,
+    });
+  }
   bool function = llvm::isa_and_nonnull<FunctionExpr>(f.init);
-  if (!f.isStatic() && f.init != nullptr && !function) {
+  if (untypedValue && function && f.method() == nullptr) {
+    std::string message = ErrorTextTypeSeen::function(f.name);
+
+    return err(ClassDeclarerTypeSeenError{
+        .code = ClassDeclarerTypeSeenErrorCode::FUNCTION_FIELD_UNTYPED,
+        .message = message,
+    });
+  }
+
+  return ok(&f);
+}
+
+ClassDeclarer::ResultFieldHasNoValue ClassDeclarer::fieldValue(const ClassDecl *cls,
+                                                               const ClassField &f) {
+  bool function = llvm::isa_and_nonnull<FunctionExpr>(f.init);
+  bool valued = !f.isStatic() && f.init != nullptr && !function;
+  if (!valued) {
+    return ok(&f);
+  }
+  if (!cls->constructors.empty()) {
     std::string message = ErrorTextDeclaredValue::constructor(f.name);
 
     return err(ClassDeclarerFieldValueError{
         .code = ClassDeclarerFieldValueErrorCode::VALUE_OUTSIDE_CONSTRUCTOR,
+        .message = message,
+    });
+  }
+  bool literal = SharedHelpers::literalType(f.init) != nullptr;
+  if (!f.type || !literal) {
+    std::string message = ErrorTextDeclaredValue::literal(f.name);
+
+    return err(ClassDeclarerFieldValueError{
+        .code = ClassDeclarerFieldValueErrorCode::START_VALUE_NOT_LITERAL,
         .message = message,
     });
   }
@@ -306,7 +341,7 @@ void ClassDeclarer::resolveField(ClassDecl *cls, ClassField &f) {
   if (early.isErr()) {
     this->state.getDiagnostics().error(f.loc, early.error().message);
   }
-  ResultFieldHasNoValue valueless = ClassDeclarer::fieldValue(f);
+  ResultFieldHasNoValue valueless = ClassDeclarer::fieldValue(cls, f);
   if (valueless.isErr()) {
     this->state.getDiagnostics().error(f.loc, valueless.error().message);
   }
@@ -323,6 +358,12 @@ void ClassDeclarer::resolveField(ClassDecl *cls, ClassField &f) {
   }
   f.resolved = type;
   this->arrowMethod(cls, f, type);
+  ResultFieldTypeIsSeen seen = ClassDeclarer::typeSeen(f);
+  if (seen.isErr()) {
+    this->state.getDiagnostics().error(f.loc, seen.error().message);
+    type = Type::error();
+    f.resolved = type;
+  }
 
   ResultStaticTypeFixed fixed = ClassDeclarer::staticTypeParams(cls, f, type);
   if (fixed.isErr()) {
@@ -876,13 +917,6 @@ void ClassDeclarer::finishCompletion(ClassDecl *cls) {
           original ? this->genericClassChecker->instanceValueType(cls, original) : Type::error();
     }
     muted = this->state.getDiagnostics().setMuted(true);
-  }
-  auto unresolved = [](const ClassField &f) { return !f.isStatic() && !f.method() && !f.resolved; };
-  bool pending = llvm::any_of(cls->fields, unresolved);
-  if (pending && cls->init && !cls->init->checked) {
-    BodyState saved = this->returnInferrer->enterBody(cls->init);
-    this->functionChecker->walkFunctionFromScratch(cls->init);
-    this->returnInferrer->leaveBody(saved);
   }
   std::vector<Field> fields;
   if (cls->parent) {

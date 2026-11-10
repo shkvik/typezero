@@ -1469,14 +1469,24 @@ void FilePort::moveFieldValues(const ClassShape &shape) {
     k = this->classMember(k, end, members);
   }
   std::vector<FieldValue> moved;
+  bool ownConstructor = !members.constructors.empty();
   for (const FieldValue &field : members.values) {
     llvm::StringRef name = this->toks[field.name].text;
     bool hidden = false;
     for (size_t paren : members.constructors) {
       hidden = hidden || this->usesAny(field, this->parameterNames(paren));
     }
-    bool typeKnown = field.typed || !this->valueType(field.valueBegin, field.valueEnd).empty();
+    std::string type = this->valueType(field.valueBegin, field.valueEnd);
+    bool typeKnown = field.typed || !type.empty();
+    bool literal = !type.empty() && !is(field.valueBegin, Tok::KwNew);
     if (!is(field.name, Tok::Identifier)) {
+      continue;
+    }
+    if (!ownConstructor && literal) {
+      if (!field.typed) {
+        add(endOf(field.declarationEnd), endOf(field.declarationEnd), ": " + type,
+            "'x = 0' became 'x: int = 0'");
+      }
       continue;
     }
     if (hidden) {

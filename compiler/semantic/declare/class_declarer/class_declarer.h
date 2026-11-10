@@ -11,7 +11,6 @@ class SemanticParts;
 class Scopes;
 class ClassBases;
 class TypeResolver;
-class ReturnInferrer;
 class FunctionChecker;
 class GenericClassChecker;
 
@@ -102,6 +101,7 @@ private:
   using ResultFieldNotLateSet = Result<const ClassField *, ClassDeclarerSetLaterError>;
   using ResultFieldTypeSource = Result<const ClassField *, ClassDeclarerTypedFieldError>;
   using ResultFieldHasNoValue = Result<const ClassField *, ClassDeclarerFieldValueError>;
+  using ResultFieldTypeIsSeen = Result<const ClassField *, ClassDeclarerTypeSeenError>;
   using ResultFieldNameIsFree = Result<const ClassField *, ClassDeclarerFieldOrMethodError>;
   using ResultStaticGetsValue = Result<const ClassField *, ClassDeclarerStaticValueError>;
   using ResultNotParentMethod = Result<const ClassField *, ClassDeclarerParentMethodError>;
@@ -111,7 +111,7 @@ private:
   using ResultAbstractReturns = Result<const FunctionDecl *, ClassDeclarerAbstractReturnError>;
 
   static ResultFieldNotLateSet setLater(const ClassField &f);
-  static ResultFieldHasNoValue fieldValue(const ClassField &f);
+  static ResultFieldTypeIsSeen typeSeen(const ClassField &f);
   static ResultGenericIsDirect genericMethod(const FunctionDecl *fn);
   static void numberVariants(llvm::ArrayRef<FunctionDecl *> functions);
   static int ambiguousCount(const FuncSymbol *x, const FuncSymbol *y);
@@ -120,6 +120,7 @@ private:
   static const Param *propertyParam(const ClassDecl *cls, llvm::StringRef name);
   static ResultNotParentMethod parentMethod(const ClassDecl *cls, const ClassField &f);
   static ResultFieldTypeSource typedField(const ClassDecl *cls, const ClassField &f);
+  static ResultFieldHasNoValue fieldValue(const ClassDecl *cls, const ClassField &f);
   static ResultVariantsUnequal variantPair(const FunctionDecl *a, const FunctionDecl *b);
   static ResultAbstractReturns abstractReturn(const ClassDecl *cls, const FunctionDecl *fn);
   static ResultParamTypePassed paramType(const Param &param, const Type *type,
@@ -158,7 +159,6 @@ private:
   Scopes *scopes = nullptr;
   ClassBases *classBases = nullptr;
   TypeResolver *typeResolver = nullptr;
-  ReturnInferrer *returnInferrer = nullptr;
   FunctionChecker *functionChecker = nullptr;
   GenericClassChecker *genericClassChecker = nullptr;
 };

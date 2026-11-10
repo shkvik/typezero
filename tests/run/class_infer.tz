@@ -87,7 +87,7 @@ const tree = new Tree().add(new Tree()).add(new Tree().add(new Tree()))
 console.log(tree.size(), tree)
 
 class Config {
-  static current = new Config("default")
+  static current: Config = new Config("default")
   constructor(public name: string) {}
   static use(name: string) {
     Config.current = new Config(name)

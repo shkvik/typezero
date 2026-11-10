@@ -15,7 +15,7 @@ class ItemDto {
 
 class Page {
   readonly page: int;
-  readonly take: int;
+  readonly take: int = 10;
 }
 
 class JoinReq extends Page {

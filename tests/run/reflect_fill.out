@@ -1,6 +1,6 @@
 JoinReq {
   page: 0,
-  take: 0,
+  take: 10,
   roomCode: 'AB12CD',
   seats: 3,
   mode: 'ranked',
@@ -8,7 +8,7 @@ JoinReq {
   items: [ ItemDto { name: 'wood', count: 2 } ],
   tags: [ 'a', 'b' ],
   rating: 1500.5
-} true 0
+} true 10
 double REFLECT_FILL_ERROR_TYPE {"message":"could not fill JoinReq: field seats is int, and the value given is the double 3.5; check and convert the values before Reflect.fill","className":"JoinReq","field":"seats","expected":"int","got":"double","value":"3.5"}
 three REFLECT_FILL_ERROR_TYPE {"message":"could not fill JoinReq: field seats is int, and the value given is the string 'three'; check and convert the values before Reflect.fill","className":"JoinReq","field":"seats","expected":"int","got":"string","value":"'three'"}
 enum REFLECT_FILL_ERROR_TYPE {"message":"could not fill JoinReq: field mode is GameMode, and the value given is the string 'turbo'; check and convert the values before Reflect.fill","className":"JoinReq","field":"mode","expected":"GameMode","got":"string","value":"'turbo'"}

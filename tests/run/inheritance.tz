@@ -112,5 +112,7 @@ for (const c of counters) console.log(c.tick().tick().count)
 class Base {
   constructor(public id: int, public label: string) {}
 }
-class Plain extends Base {}
+class Plain extends Base {
+  extra: string = "e"
+}
 console.log(new Plain(7, "seven"))
