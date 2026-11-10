@@ -85,78 +85,90 @@ bool GenericWidening::writtenFromOutside(const ClassDecl *generic, llvm::StringR
   return false;
 }
 
-bool GenericWidening::passedOnSafely(const ClassDecl *generic, llvm::StringRef name) {
+bool GenericWidening::referenceFits(const Type *own, const Type *wide) {
+  return WideningRelations::referenceHolds(ReferenceFitsGoal{own, wide});
+}
+
+bool GenericWidening::covariant(const ClassDecl *generic, size_t index) {
+  std::optional<bool> ready = GenericWidening::readyVariance(generic, index);
+  if (ready.has_value()) {
+    return *ready;
+  }
+  std::vector<VarianceFrame> frames;
+  GenericWidening::startVariance(frames, generic, index);
+  while (!frames.empty()) {
+    GenericWidening::varianceStep(frames);
+  }
+
+  return GenericWidening::knownVariance()[std::make_pair(generic, index)];
+}
+
+std::optional<bool> GenericWidening::readyVariance(const ClassDecl *generic, size_t index) {
+  if (index >= generic->typeParams.size()) {
+    return false;
+  }
+  std::map<std::pair<const ClassDecl *, size_t>, bool> &known = GenericWidening::knownVariance();
+  auto found = known.find(std::make_pair(generic, index));
+  if (found == known.end()) {
+    return std::nullopt;
+  }
+
+  return found->second;
+}
+
+void GenericWidening::startVariance(std::vector<VarianceFrame> &frames, const ClassDecl *generic,
+                                    size_t index) {
+  std::map<std::pair<const ClassDecl *, size_t>, bool> &known = GenericWidening::knownVariance();
+  auto key = std::make_pair(generic, index);
+  known[key] = false;
+  llvm::StringRef name = generic->typeParams[index].name;
+  if (GenericWidening::writtenFromOutside(generic, name)) {
+    return;
+  }
   if (!generic->base || !GenericWidening::mentions(*generic->base, name)) {
-    return true;
+    known[key] = true;
+    return;
   }
   const ClassDecl *parent = generic->parent;
   const ClassDecl *baseGeneric = parent && parent->generic() ? parent->generic() : parent;
   if (!baseGeneric) {
-    return false;
+    return;
   }
-  const std::vector<TypeRef> &args = generic->base->args;
-  for (size_t i = 0; i < args.size(); ++i) {
+  frames.push_back(VarianceFrame{generic, index, baseGeneric, 0});
+}
+
+void GenericWidening::varianceStep(std::vector<VarianceFrame> &frames) {
+  VarianceFrame &frame = frames.back();
+  llvm::StringRef name = frame.generic->typeParams[frame.index].name;
+  const std::vector<TypeRef> &args = frame.generic->base->args;
+  while (frame.nextArg < args.size()) {
+    size_t i = frame.nextArg;
     if (!GenericWidening::mentions(args[i], name)) {
+      frame.nextArg += 1;
       continue;
     }
     bool direct = args[i].kind() == TypeRefKind::NAME_REF && args[i].name == name;
-    if (!direct || !GenericWidening::covariant(baseGeneric, i)) {
-      return false;
+    if (!direct) {
+      return GenericWidening::finishVariance(frames, false);
     }
+    const ClassDecl *baseGeneric = frame.baseGeneric;
+    std::optional<bool> passed = GenericWidening::readyVariance(baseGeneric, i);
+    if (!passed.has_value()) {
+      return GenericWidening::startVariance(frames, baseGeneric, i);
+    }
+    if (!*passed) {
+      return GenericWidening::finishVariance(frames, false);
+    }
+    frame.nextArg += 1;
   }
 
-  return true;
+  return GenericWidening::finishVariance(frames, true);
 }
 
-bool GenericWidening::referenceFits(const Type *own, const Type *wide) {
-  if (own == wide || own->isNever()) {
-    return true;
-  }
-  if (own->isUnion() && !own->isTagged()) {
-    for (const Type *member : own->members()) {
-      if (!GenericWidening::fitsWide(member, wide)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  return GenericWidening::fitsWide(own, wide);
-}
-
-bool GenericWidening::fitsWide(const Type *own, const Type *wide) {
-  if (own == wide || own->isNever()) {
-    return true;
-  }
-  if (!wide->isUnion() || wide->isTagged()) {
-    return WideningRelations::sameReference(own, wide);
-  }
-  for (const Type *member : wide->members()) {
-    bool fits = own == member || own->isNever() || WideningRelations::sameReference(own, member);
-    if (fits) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-bool GenericWidening::covariant(const ClassDecl *generic, size_t index) {
-  if (index >= generic->typeParams.size()) {
-    return false;
-  }
-  auto key = std::make_pair(generic, index);
-  std::map<std::pair<const ClassDecl *, size_t>, bool> &known = GenericWidening::knownVariance();
-  if (auto found = known.find(key); found != known.end()) {
-    return found->second;
-  }
-  known[key] = false;
-  llvm::StringRef name = generic->typeParams[index].name;
-  bool safe = !GenericWidening::writtenFromOutside(generic, name) &&
-              GenericWidening::passedOnSafely(generic, name);
-  known[key] = safe;
-
-  return safe;
+void GenericWidening::finishVariance(std::vector<VarianceFrame> &frames, bool safe) {
+  const VarianceFrame &frame = frames.back();
+  GenericWidening::knownVariance()[std::make_pair(frame.generic, frame.index)] = safe;
+  frames.pop_back();
 }
 
 const ClassDecl *GenericWidening::instanceOf(const ClassDecl *cls, const ClassDecl *generic) {
@@ -170,31 +182,7 @@ const ClassDecl *GenericWidening::instanceOf(const ClassDecl *cls, const ClassDe
 }
 
 bool GenericWidening::widens(const Type *from, const Type *to) {
-  if (!from->isClass() || !to->isClass()) {
-    return false;
-  }
-  const ClassDecl *target = to->classDecl();
-  const ClassDecl *source = from->classDecl();
-  if (!target || !source || !target->generic()) {
-    return false;
-  }
-  const ClassDecl *instance = GenericWidening::instanceOf(source, target->generic());
-  if (!instance || instance == target || instance->typeArgs.size() != target->typeArgs.size()) {
-    return false;
-  }
-  for (size_t i = 0; i < target->typeArgs.size(); ++i) {
-    const Type *own = instance->typeArgs[i];
-    const Type *wide = target->typeArgs[i];
-    if (own == wide) {
-      continue;
-    }
-    if (!GenericWidening::covariant(target->generic(), i) ||
-        !GenericWidening::referenceFits(own, wide)) {
-      return false;
-    }
-  }
-
-  return true;
+  return WideningRelations::referenceHolds(WidensGoal{from, to});
 }
 
 std::string GenericWidening::whyNot(const Type *from, const Type *to) {

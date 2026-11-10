@@ -96,18 +96,21 @@ const Type *ResultTypes::resolveResultType(const TypeRef &ref, TypeName result) 
 }
 
 const Type *ResultTypes::unifyHalf(const Type *a, const Type *b) {
+  return TypeRelations::unifyAs(UnifyForm::HALF, a, b);
+}
+
+UnifyShortcut ResultTypes::halfShortcut(const Type *a, const Type *b) {
   if (a == b || b->isNever()) {
-    return a;
+    return {true, a};
   }
   if (a->isNever()) {
-    return b;
+    return {true, b};
   }
   if (a->isVoid() || b->isVoid()) {
-    return nullptr;
+    return {true, nullptr};
   }
-  const Type *common = LiteralTypes::unionUnify(a, b);
 
-  return common && !common->isError() ? common : nullptr;
+  return {false, nullptr};
 }
 
 void ResultTypes::neverOperands(BinaryExpr *bin) {

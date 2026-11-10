@@ -1,6 +1,5 @@
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
-#include "compiler/semantic/declare/type_declarer/type_declarer.h"
 #include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/names/scopes/scopes.h"
@@ -22,7 +21,6 @@ namespace tz {
 ConstantFolder::ConstantFolder(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->scopes = &all.getScopes();
-  this->typeDeclarer = &all.getTypeDeclarer();
 }
 
 int32_t ConstantFolder::jsToInt32(double x) {
@@ -280,7 +278,6 @@ ConstantFolder::nodeConstant(const Expr *expr, EnumDecl *self, size_t defined,
         }
         return std::nullopt;
       }
-      this->typeDeclarer->resolveEnum(decl);
       if (const EnumMember *m = decl->find(access->name)) {
         return member(*m);
       }

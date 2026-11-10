@@ -133,6 +133,7 @@ std::optional<int> OverloadResolver::rankLeaf(const Type *from, const Type *to) 
   return -1;
 }
 
+// TODO: говнокод
 bool OverloadResolver::sameShapeObjects(const Type *from, const Type *to) {
   return from->isObject() && to->isObject() && !from->isClass() && !to->isClass() &&
          !from->isAnyObject() && !to->isAnyObject() && !from->isTuple() && !to->isTuple() &&
@@ -143,6 +144,7 @@ bool OverloadResolver::sameShapeObjects(const Type *from, const Type *to) {
          });
 }
 
+// TODO: говнокод
 RankJoin OverloadResolver::rankJoin(const Type *from, const Type *to) {
   RankJoin join{from, to, RankForm::SAME, {}};
   if (to->isOptional()) {
@@ -363,7 +365,7 @@ OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::ve
         .message = "",
     });
   }
-
+  // TODO: говнокод
   struct Candidate {
     FunctionDecl *fn;
     std::vector<int> ranks;

@@ -570,9 +570,17 @@ void TypeDeclarer::resolveNextMember(std::vector<EnumFrame> &frames) {
   if (frame.nextMember == frame.decl->members.size()) {
     this->finishEnum(frames);
   } else {
+    this->reportNeededCycles(frame);
     this->countMember(frame);
     frame.nextMember += 1;
     this->enterMember(frame);
+  }
+}
+
+void TypeDeclarer::reportNeededCycles(const EnumFrame &frame) {
+  const Expr *init = frame.decl->members[frame.nextMember].init;
+  for (const EnumDecl *other : this->constantFolder->enumsNeeded(init, frame.decl)) {
+    this->reportEnumCycle(other);
   }
 }
 

@@ -2,8 +2,10 @@
 
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/result/result/result.h"
+#include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/library/bytes/byte_proofs/byte_proofs_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
+#include "llvm/ADT/ArrayRef.h"
 
 namespace tz {
 
@@ -45,7 +47,11 @@ private:
   static int64_t allOnes(int64_t v);
   static int64_t floorShift(int64_t v, int64_t n);
 
-  IntegerRange computedRange(const Expr *expr) const;
+  static NodeChildren<const Expr *> rangeParts(const Expr *e);
+  static NodeChildren<const Expr *> callRangeParts(const CallExpr *call);
+  static IntegerRange clampToType(const Expr *e, IntegerRange r);
+  IntegerRange nodeRange(const Expr *e, std::vector<IntegerRange> &answers) const;
+  IntegerRange computedRange(const Expr *e, llvm::ArrayRef<IntegerRange> parts) const;
 
   SemanticState &state;
   IndexProofs *indexProofs = nullptr;

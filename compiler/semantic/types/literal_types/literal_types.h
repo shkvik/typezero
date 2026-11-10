@@ -35,7 +35,8 @@ class LiteralTypes {
 public:
   LiteralTypes(SemanticState &owner, SemanticParts &all);
 
-  static const Type *unionMemberFor(const Type *from, const Type *to);
+  static const Type *exactMemberFor(const Type *from, const Type *to);
+  static const Type *unionFallback(const Type *a, const Type *b);
   static const Type *unionUnify(const Type *a, const Type *b);
   const Type *stringLiteralFor(const Type *expected, const std::u16string &text);
   const Type *boolLiteralFor(const Type *expected, bool value);

@@ -129,8 +129,70 @@ int64_t ByteProofs::floorShift(int64_t v, int64_t n) {
   return v >= 0 ? v >> n : -((-v + (int64_t(1) << n) - 1) >> n);
 }
 
-IntegerRange ByteProofs::valueRange(const Expr *e) const {
-  Range r = this->computedRange(e);
+IntegerRange ByteProofs::valueRange(const Expr *expr) const {
+  std::vector<Range> answers;
+  for (const Expr *node : ChildrenFirst::order(expr, ByteProofs::rangeParts)) {
+    Range range = this->nodeRange(node, answers);
+    answers.push_back(range);
+  }
+
+  return answers.back();
+}
+
+NodeChildren<const Expr *> ByteProofs::rangeParts(const Expr *e) {
+  if (!e->type || !e->type->nonOptional()->isInteger()) {
+    return {};
+  }
+  switch (e->kind()) {
+    case Expr::Kind::Cast: {
+      auto *conv = cast<CastExpr>(e);
+      bool integer = conv->operand->type && conv->operand->type->isInteger();
+      if (!conv->isImplicit() || !integer) {
+        return {};
+      }
+      return {conv->operand};
+    }
+    case Expr::Kind::Call:
+      return ByteProofs::callRangeParts(cast<CallExpr>(e));
+    case Expr::Kind::Unary:
+      return {cast<UnaryExpr>(e)->operand};
+    case Expr::Kind::Binary:
+      return {cast<BinaryExpr>(e)->lhs, cast<BinaryExpr>(e)->rhs};
+    case Expr::Kind::Conditional:
+      return {cast<ConditionalExpr>(e)->thenExpr, cast<ConditionalExpr>(e)->elseExpr};
+    case Expr::Kind::Sequence:
+      return {cast<SequenceExpr>(e)->exprs.back()};
+    default:
+      return {};
+  }
+}
+
+NodeChildren<const Expr *> ByteProofs::callRangeParts(const CallExpr *call) {
+  switch (call->builtin()) {
+    case Builtin::NumConvert:
+      return {cast<MemberExpr>(call->callee)->object};
+    case Builtin::MathMin:
+    case Builtin::MathMax: {
+      if (call->hasSpread() || call->args.empty()) {
+        return {};
+      }
+      NodeChildren<const Expr *> parts(call->args.begin(), call->args.end());
+      return parts;
+    }
+    default:
+      return {};
+  }
+}
+
+Range ByteProofs::nodeRange(const Expr *e, std::vector<Range> &answers) const {
+  size_t count = ByteProofs::rangeParts(e).size();
+  std::vector<Range> parts = ChildrenFirst::takeAnswers(answers, count);
+  Range computed = this->computedRange(e, parts);
+
+  return ByteProofs::clampToType(e, computed);
+}
+
+Range ByteProofs::clampToType(const Expr *e, Range r) {
   if (!e->type || !e->type->nonOptional()->isInteger()) {
     return r;
   }
@@ -145,7 +207,7 @@ IntegerRange ByteProofs::valueRange(const Expr *e) const {
   return r;
 }
 
-IntegerRange ByteProofs::computedRange(const Expr *e) const {
+IntegerRange ByteProofs::computedRange(const Expr *e, llvm::ArrayRef<Range> parts) const {
   if (!e->type || !e->type->nonOptional()->isInteger()) {
     return {};
   }
@@ -158,7 +220,7 @@ IntegerRange ByteProofs::computedRange(const Expr *e) const {
     if (!conv->isImplicit() || !conv->operand->type || !conv->operand->type->isInteger()) {
       return {};
     }
-    Range r = this->valueRange(conv->operand);
+    Range r = parts[0];
     const Type *to = conv->type->nonOptional();
     if (!to->holds(conv->operand->type->nonOptional()) &&
         !(ByteProofs::known(r) && *r.lo >= to->intMin() &&
@@ -214,7 +276,7 @@ IntegerRange ByteProofs::computedRange(const Expr *e) const {
         }
         return {};
       case Builtin::NumConvert:
-        return this->valueRange(cast<MemberExpr>(call->callee)->object);
+        return parts[0];
       case Builtin::DataViewGet:
       case Builtin::BufferRead:
         if (Type::bytesType(Bytes(cast<IntLitExpr>(call->args[0])->value))->elementRange(lo, hi)) {
@@ -227,9 +289,9 @@ IntegerRange ByteProofs::computedRange(const Expr *e) const {
           return {};
         }
         bool min = call->builtin() == Builtin::MathMin;
-        Range r = this->valueRange(call->args[0]);
+        Range r = parts[0];
         for (size_t i = 1; i < call->args.size(); ++i) {
-          Range next = this->valueRange(call->args[i]);
+          Range next = parts[i];
           Range both;
           if (min) {
             if (r.hi || next.hi) {
@@ -256,7 +318,7 @@ IntegerRange ByteProofs::computedRange(const Expr *e) const {
   }
   case Expr::Kind::Unary: {
     auto *unary = cast<UnaryExpr>(e);
-    Range r = this->valueRange(unary->operand);
+    Range r = parts[0];
     if (unary->op == UnaryOp::Plus) {
       return r;
     }
@@ -274,17 +336,14 @@ IntegerRange ByteProofs::computedRange(const Expr *e) const {
   case Expr::Kind::Binary: {
     auto *bin = cast<BinaryExpr>(e);
     if (bin->op == BinaryOp::Nullish) {
-      return ByteProofs::unite(this->valueRange(bin->lhs), this->valueRange(bin->rhs));
+      return ByteProofs::unite(parts[0], parts[1]);
     }
-    return BytesCheckHelpers::operate(bin->op, this->valueRange(bin->lhs),
-                                      this->valueRange(bin->rhs), false);
+    return BytesCheckHelpers::operate(bin->op, parts[0], parts[1], false);
   }
-  case Expr::Kind::Conditional: {
-    auto *cond = cast<ConditionalExpr>(e);
-    return ByteProofs::unite(this->valueRange(cond->thenExpr), this->valueRange(cond->elseExpr));
-  }
+  case Expr::Kind::Conditional:
+    return ByteProofs::unite(parts[0], parts[1]);
   case Expr::Kind::Sequence:
-    return this->valueRange(cast<SequenceExpr>(e)->exprs.back());
+    return parts[0];
   default:
     return {};
   }

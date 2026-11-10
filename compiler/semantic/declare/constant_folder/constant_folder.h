@@ -10,7 +10,6 @@ namespace tz {
 
 class SemanticParts;
 class Scopes;
-class TypeDeclarer;
 
 class ConstantFolder {
 public:
@@ -53,7 +52,6 @@ private:
 
   SemanticState &state;
   Scopes *scopes = nullptr;
-  TypeDeclarer *typeDeclarer = nullptr;
 };
 
 }

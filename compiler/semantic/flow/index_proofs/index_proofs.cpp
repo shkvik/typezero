@@ -42,9 +42,17 @@ const VarSymbol *IndexProofs::variableOf(const Expr *expr) {
 }
 
 std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
+  return this->proofAnswer(ProofNode{ProofAsk::LINEAR, expr});
+}
+
+std::optional<Linear> IndexProofs::lengthOf(const Expr *expr) const {
+  return this->proofAnswer(ProofNode{ProofAsk::LENGTH, expr});
+}
+
+std::optional<Linear> IndexProofs::proofAnswer(ProofNode root) const {
   std::vector<Linear> answers;
-  for (const Expr *node : ChildrenFirst::order(expr, IndexProofs::linearParts)) {
-    std::optional<Linear> answer = this->nodeLinear(node, answers);
+  for (const ProofNode &node : ChildrenFirst::order(root, IndexProofs::proofParts)) {
+    std::optional<Linear> answer = this->nodeAnswer(node, answers);
     if (!answer.has_value()) {
       return std::nullopt;
     }
@@ -54,15 +62,84 @@ std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
   return answers.back();
 }
 
-NodeChildren<const Expr *> IndexProofs::linearParts(const Expr *expr) {
-  if (auto *conv = dyn_cast<CastExpr>(expr); conv && IndexProofs::isIntWidening(conv)) {
-    return {conv->operand};
+NodeChildren<ProofNode> IndexProofs::proofParts(ProofNode node) {
+  if (node.ask == ProofAsk::LINEAR) {
+    return IndexProofs::linearParts(node.expr);
   }
-  if (auto *bin = dyn_cast<BinaryExpr>(expr); bin && IndexProofs::isLinearStep(bin)) {
-    return {bin->lhs, bin->rhs};
+
+  return IndexProofs::lengthParts(node.expr);
+}
+
+std::optional<Linear> IndexProofs::nodeAnswer(const ProofNode &node,
+                                              std::vector<Linear> &answers) const {
+  if (node.ask == ProofAsk::LINEAR) {
+    return this->nodeLinear(node.expr, answers);
+  }
+
+  return this->nodeLength(node.expr, answers);
+}
+
+NodeChildren<ProofNode> IndexProofs::linearParts(const Expr *expr) {
+  auto *conv = dyn_cast<CastExpr>(expr);
+  if (conv != nullptr && IndexProofs::isIntWidening(conv)) {
+    return {ProofNode{ProofAsk::LINEAR, conv->operand}};
+  }
+  auto *bin = dyn_cast<BinaryExpr>(expr);
+  if (bin != nullptr && IndexProofs::isLinearStep(bin)) {
+    return {ProofNode{ProofAsk::LINEAR, bin->lhs}, ProofNode{ProofAsk::LINEAR, bin->rhs}};
+  }
+  const Expr *measured = IndexProofs::measuredObject(expr);
+  if (measured != nullptr) {
+    return {ProofNode{ProofAsk::LENGTH, measured}};
   }
 
   return {};
+}
+
+NodeChildren<ProofNode> IndexProofs::lengthParts(const Expr *expr) {
+  auto *call = dyn_cast<CallExpr>(IndexProofs::sameLengthSource(expr));
+  if (call == nullptr) {
+    return {};
+  }
+  const CallExpr *made = nullptr;
+  switch (call->builtin()) {
+    case Builtin::BytesNew:
+    case Builtin::ArrayBufferNew:
+    case Builtin::BufferAllocFill:
+      return {ProofNode{ProofAsk::LINEAR, call->args[0]}};
+    case Builtin::BytesBuffer:
+      made = IndexProofs::freshBufferSource(call);
+      break;
+    default:
+      break;
+  }
+  if (made == nullptr) {
+    return {};
+  }
+
+  return {ProofNode{ProofAsk::LENGTH, made}};
+}
+
+const Expr *IndexProofs::measuredObject(const Expr *expr) {
+  auto *member = dyn_cast<MemberExpr>(expr);
+  if (member != nullptr) {
+    const Type *object = member->object->type;
+    bool buffer = object != nullptr && (object->bytes() == Type::Bytes::ArrayBuffer ||
+                                        object->bytes() == Type::Bytes::DataView);
+    bool length = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH);
+    bool byteLength =
+        BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH) && buffer;
+    bool measured = (length || byteLength) && expr->type->isInt();
+
+    return measured ? member->object : nullptr;
+  }
+  auto *call = dyn_cast<CallExpr>(expr);
+  auto *callee = call != nullptr ? dyn_cast<MemberExpr>(call->callee) : nullptr;
+  const Type *object = callee != nullptr ? callee->object->type : nullptr;
+  bool singleBytes = object != nullptr && object->isTypedArray() && object->elementSize() == 1;
+  bool measured = singleBytes && call->builtin() == Builtin::BytesByteLength;
+
+  return measured ? callee->object : nullptr;
 }
 
 bool IndexProofs::isIntWidening(const CastExpr *conv) {
@@ -101,34 +178,18 @@ std::optional<Linear> IndexProofs::nodeLinear(const Expr *expr,
     }
     return std::nullopt;
   }
-  case Expr::Kind::Member: {
-    auto *member = cast<MemberExpr>(expr);
-    if (BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) &&
-        expr->type->isInt()) {
-      return this->lengthOf(member->object);
+  case Expr::Kind::Member:
+  case Expr::Kind::Call: {
+    if (IndexProofs::measuredObject(expr) == nullptr) {
+      return std::nullopt;
     }
-    if (BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH) &&
-        expr->type->isInt() && member->object->type &&
-        (member->object->type->bytes() == Type::Bytes::ArrayBuffer ||
-         member->object->type->bytes() == Type::Bytes::DataView)) {
-      return this->lengthOf(member->object);
-    }
-    return std::nullopt;
+    return ChildrenFirst::takeAnswer(answers);
   }
   case Expr::Kind::Cast: {
     if (!IndexProofs::isIntWidening(cast<CastExpr>(expr))) {
       return std::nullopt;
     }
     return ChildrenFirst::takeAnswer(answers);
-  }
-  case Expr::Kind::Call: {
-    auto *call = cast<CallExpr>(expr);
-    auto *member = dyn_cast<MemberExpr>(call->callee);
-    if (call->builtin() == Builtin::BytesByteLength && member && member->object->type &&
-        member->object->type->isTypedArray() && member->object->type->elementSize() == 1) {
-      return this->lengthOf(member->object);
-    }
-    return std::nullopt;
   }
   case Expr::Kind::Binary: {
     auto *bin = cast<BinaryExpr>(expr);
@@ -172,7 +233,8 @@ std::optional<Linear> IndexProofs::linearSum(const BinaryExpr *bin, const Linear
   return result;
 }
 
-std::optional<Linear> IndexProofs::lengthOf(const Expr *expr) const {
+std::optional<Linear> IndexProofs::nodeLength(const Expr *expr,
+                                              std::vector<Linear> &answers) const {
   const Expr *object = IndexProofs::sameLengthSource(expr);
   if (auto *lit = dyn_cast<StringLitExpr>(object)) {
     return Linear{Term::zero(), static_cast<int64_t>(lit->value.size())};
@@ -210,41 +272,53 @@ std::optional<Linear> IndexProofs::lengthOf(const Expr *expr) const {
   switch (call->builtin()) {
     case Builtin::BytesNew:
     case Builtin::ArrayBufferNew:
-    case Builtin::BufferAllocFill:
-      if (std::optional<Linear> n = this->linear(call->args[0]); n && n->term.isZero()) {
-        return n;
+    case Builtin::BufferAllocFill: {
+      Linear count = ChildrenFirst::takeAnswer(answers);
+      if (!count.term.isZero()) {
+        return std::nullopt;
       }
-      return std::nullopt;
+      return count;
+    }
     case Builtin::BufferFromString:
       return this->utf8Length(call);
     case Builtin::BytesBuffer:
-      return this->freshBufferLength(call);
+      return IndexProofs::freshBufferLength(call, answers);
     default:
       return std::nullopt;
   }
 }
 
-std::optional<Linear> IndexProofs::freshBufferLength(const CallExpr *call) const {
-  auto *member = dyn_cast<MemberExpr>(call->callee);
-  auto *made = member ? dyn_cast<CallExpr>(member->object) : nullptr;
-  if (!made || !made->type || !made->type->isTypedArray() || made->type->isBuffer()) {
+std::optional<Linear> IndexProofs::freshBufferLength(const CallExpr *call,
+                                                     std::vector<Linear> &answers) {
+  const CallExpr *made = IndexProofs::freshBufferSource(call);
+  if (made == nullptr) {
     return std::nullopt;
+  }
+  Linear count = ChildrenFirst::takeAnswer(answers);
+  if (!count.term.isZero()) {
+    return std::nullopt;
+  }
+
+  return Linear{Term::zero(), count.offset * int64_t(made->type->elementSize())};
+}
+
+const CallExpr *IndexProofs::freshBufferSource(const CallExpr *call) {
+  auto *member = dyn_cast<MemberExpr>(call->callee);
+  auto *made = member != nullptr ? dyn_cast<CallExpr>(member->object) : nullptr;
+  bool typed = made != nullptr && made->type != nullptr && made->type->isTypedArray() &&
+               !made->type->isBuffer();
+  if (!typed) {
+    return nullptr;
   }
   switch (made->builtin()) {
     case Builtin::BytesNew:
     case Builtin::BytesFromArray:
     case Builtin::BytesFromBytes:
     case Builtin::BytesOf:
-      break;
+      return made;
     default:
-      return std::nullopt;
+      return nullptr;
   }
-  std::optional<Linear> count = this->lengthOf(made);
-  if (!count || !count->term.isZero()) {
-    return std::nullopt;
-  }
-
-  return Linear{Term::zero(), count->offset * int64_t(made->type->elementSize())};
 }
 
 std::optional<Linear> IndexProofs::utf8Length(const CallExpr *call) const {
@@ -550,6 +624,11 @@ IndexProofs::ResultUpToWasProven IndexProofs::requireUpTo(const Expr *value, con
 
 std::optional<int64_t> IndexProofs::exactLength(const Expr *object) const {
   std::optional<Linear> length = this->knownLength(object);
+
+  return this->exactFrom(length);
+}
+
+std::optional<int64_t> IndexProofs::exactFrom(std::optional<Linear> length) const {
   if (!length) {
     return std::nullopt;
   }
@@ -566,12 +645,9 @@ std::optional<int64_t> IndexProofs::exactLength(const Expr *object) const {
   return *above - 1 + length->offset;
 }
 
-std::optional<Linear> IndexProofs::viewLength(const CallExpr *call) const {
+std::optional<Linear> IndexProofs::viewOver(const CallExpr *call,
+                                            std::optional<Linear> whole) const {
   int64_t size = call->type ? call->type->elementSize() : 1;
-  if (call->args.size() > 2) {
-    return this->linear(call->args[2]);
-  }
-  std::optional<Linear> whole = this->knownLength(call->args[0]);
   std::optional<Linear> from =
       call->args.size() > 1 ? this->linear(call->args[1]) : Linear{Term::zero(), 0};
   if (!whole || !from || !from->term.isZero()) {
@@ -580,7 +656,7 @@ std::optional<Linear> IndexProofs::viewLength(const CallExpr *call) const {
   if (size == 1) {
     return Linear{whole->term, whole->offset - from->offset};
   }
-  std::optional<int64_t> exact = this->exactLength(call->args[0]);
+  std::optional<int64_t> exact = this->exactFrom(whole);
   if (!exact || (*exact - from->offset) % size != 0) {
     return std::nullopt;
   }
@@ -728,6 +804,33 @@ const CallExpr *IndexProofs::wholeByteView(const Expr *value) {
 }
 
 std::optional<Linear> IndexProofs::knownLength(const Expr *value) const {
+  std::vector<const CallExpr *> views;
+  const Expr *base = value;
+  const CallExpr *view = IndexProofs::innerView(base);
+  while (view != nullptr) {
+    views.push_back(view);
+    base = view->args[0];
+    view = IndexProofs::innerView(base);
+  }
+  std::optional<Linear> length = this->baseLength(base);
+  for (const CallExpr *outer : llvm::reverse(views)) {
+    length = this->viewOver(outer, length);
+  }
+
+  return length;
+}
+
+const CallExpr *IndexProofs::innerView(const Expr *value) {
+  auto *call = dyn_cast<CallExpr>(value);
+  if (call == nullptr) {
+    return nullptr;
+  }
+  bool view = call->builtin() == Builtin::DataViewNew || call->builtin() == Builtin::BytesView;
+
+  return view && call->args.size() <= 2 ? call : nullptr;
+}
+
+std::optional<Linear> IndexProofs::baseLength(const Expr *value) const {
   if (auto *create = dyn_cast<NewExpr>(value)) {
     if (create->args.size() == 1) {
       return this->linear(create->args[0]);
@@ -748,7 +851,7 @@ std::optional<Linear> IndexProofs::knownLength(const Expr *value) const {
         return this->lengthOf(call->args[0]);
       case Builtin::DataViewNew:
       case Builtin::BytesView:
-        return this->viewLength(call);
+        return this->linear(call->args[2]);
       default:
         break;
     }

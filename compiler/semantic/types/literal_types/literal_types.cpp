@@ -119,7 +119,7 @@ Expr *LiteralTypes::constText(Expr *checked, const Type *expected) {
   return type ? this->typeRelations->convert(checked, type) : checked;
 }
 
-const Type *LiteralTypes::unionMemberFor(const Type *from, const Type *to) {
+const Type *LiteralTypes::exactMemberFor(const Type *from, const Type *to) {
   for (const Type *m : to->members()) {
     if (m == from) {
       return m;
@@ -132,19 +132,15 @@ const Type *LiteralTypes::unionMemberFor(const Type *from, const Type *to) {
       }
     }
   }
-  for (const Type *m : to->members()) {
-    if (!m->isParam() && !from->isParam() && TypeRelations::isImplicitlyConvertible(from, m)) {
-      return m;
-    }
-  }
 
   return nullptr;
 }
 
 const Type *LiteralTypes::unionUnify(const Type *a, const Type *b) {
-  if (const Type *common = TypeRelations::unify(a, b)) {
-    return common;
-  }
+  return TypeRelations::unifyAs(UnifyForm::UNION, a, b);
+}
+
+const Type *LiteralTypes::unionFallback(const Type *a, const Type *b) {
   if (a->isError() || b->isError()) {
     return Type::error();
   }

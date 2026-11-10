@@ -12,6 +12,13 @@ class ByteProofs;
 class LibraryCalls;
 class ConstantFolder;
 
+enum class ProofAsk { LINEAR, LENGTH };
+
+struct ProofNode {
+  ProofAsk ask;
+  const Expr *expr;
+};
+
 class IndexProofs {
 public:
   using ResultBetweenProven = Result<const Expr *, IndexProofsRequireBetweenError>;
@@ -38,20 +45,31 @@ public:
   ResultUpToWasProven requireUpTo(const Expr *value, const Expr *object, int64_t less,
                                   llvm::StringRef what);
   std::optional<int64_t> exactLength(const Expr *object) const;
-  std::optional<Linear> viewLength(const CallExpr *call) const;
   std::optional<Linear> utf8Length(const CallExpr *call) const;
   void addIndexCallbackFacts(const FunctionDecl *fn);
-  std::optional<Linear> freshBufferLength(const CallExpr *call) const;
   IntegerRange lengthRange(const Expr *value) const;
   std::optional<Linear> lengthAtMost(const Expr *expr) const;
   Linear settled(Linear value) const;
   bool provesSumUpTo(std::optional<Linear> a, std::optional<Linear> b, const Expr *object) const;
 
 private:
-  static NodeChildren<const Expr *> linearParts(const Expr *expr);
+  std::optional<Linear> proofAnswer(ProofNode root) const;
+  static NodeChildren<ProofNode> proofParts(ProofNode node);
+  static NodeChildren<ProofNode> linearParts(const Expr *expr);
+  static NodeChildren<ProofNode> lengthParts(const Expr *expr);
+  static const Expr *measuredObject(const Expr *expr);
   static bool isIntWidening(const CastExpr *conv);
   static bool isLinearStep(const BinaryExpr *bin);
+  std::optional<Linear> nodeAnswer(const ProofNode &node, std::vector<Linear> &answers) const;
   std::optional<Linear> nodeLinear(const Expr *expr, std::vector<Linear> &answers) const;
+  std::optional<Linear> nodeLength(const Expr *expr, std::vector<Linear> &answers) const;
+  static std::optional<Linear> freshBufferLength(const CallExpr *call,
+                                                 std::vector<Linear> &answers);
+  static const CallExpr *freshBufferSource(const CallExpr *call);
+  std::optional<int64_t> exactFrom(std::optional<Linear> length) const;
+  std::optional<Linear> viewOver(const CallExpr *call, std::optional<Linear> whole) const;
+  static const CallExpr *innerView(const Expr *value);
+  std::optional<Linear> baseLength(const Expr *value) const;
   std::optional<Linear> linearSum(const BinaryExpr *bin, const Linear &l, const Linear &r) const;
   static const Expr *withoutWidening(const Expr *expr);
   static std::vector<const Expr *> provedBranches(const Expr *expr);

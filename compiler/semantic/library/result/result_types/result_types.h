@@ -5,6 +5,7 @@
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/result/result_types/result_types_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
+#include "compiler/semantic/types/type_relations/type_relations.h"
 
 namespace tz {
 
@@ -25,6 +26,7 @@ public:
   static ResultImportSource importSource(const ImportDecl &decl);
   const Type *resolveResultType(const TypeRef &ref, TypeName result);
   static const Type *unifyHalf(const Type *a, const Type *b);
+  static UnifyShortcut halfShortcut(const Type *a, const Type *b);
   void neverOperands(BinaryExpr *bin);
 
 private:

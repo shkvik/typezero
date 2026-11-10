@@ -9,6 +9,13 @@ class SemanticParts;
 class TypeRelations;
 class GenericClassInstantiator;
 
+struct VarianceFrame {
+  const ClassDecl *generic;
+  size_t index;
+  const ClassDecl *baseGeneric;
+  size_t nextArg;
+};
+
 class GenericWidening {
 public:
   GenericWidening(SemanticState &owner, SemanticParts &all);
@@ -24,9 +31,12 @@ private:
   static std::map<std::pair<const ClassDecl *, size_t>, bool> &knownVariance();
   static std::string writerOf(const ClassDecl *generic, llvm::StringRef name);
   static bool writtenFromOutside(const ClassDecl *generic, llvm::StringRef name);
-  static bool passedOnSafely(const ClassDecl *generic, llvm::StringRef name);
+  static std::optional<bool> readyVariance(const ClassDecl *generic, size_t index);
+  static void startVariance(std::vector<VarianceFrame> &frames, const ClassDecl *generic,
+                            size_t index);
+  static void varianceStep(std::vector<VarianceFrame> &frames);
+  static void finishVariance(std::vector<VarianceFrame> &frames, bool safe);
   static bool referenceFits(const Type *own, const Type *wide);
-  static bool fitsWide(const Type *own, const Type *wide);
 
   SemanticState &state;
   TypeRelations *typeRelations = nullptr;

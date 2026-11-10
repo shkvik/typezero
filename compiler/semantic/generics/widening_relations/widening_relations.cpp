@@ -125,6 +125,49 @@ bool WideningRelations::widensWrites(const Type *from, const Type *to) {
 }
 
 bool WideningRelations::sameReference(const Type *from, const Type *to) {
+  return WideningRelations::referenceHolds(SameReferenceGoal{from, to});
+}
+
+bool WideningRelations::referenceHolds(ReferenceTask goal) {
+  std::vector<ReferenceTask> tasks = {std::move(goal)};
+  while (!tasks.empty()) {
+    ReferenceTask task = std::move(tasks.back());
+    tasks.pop_back();
+    ReferenceStep step = WideningRelations::referenceStep(task);
+    if (step.possible) {
+      tasks.insert(tasks.end(), step.needs.rbegin(), step.needs.rend());
+    } else if (!WideningRelations::retryWideMember(tasks)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+ReferenceStep WideningRelations::referenceStep(const ReferenceTask &task) {
+  switch (task.kind()) {
+    case ReferenceTaskKind::SAME:
+      return WideningRelations::sameStep(task.as<SameReferenceGoal>()->from,
+                                         task.as<SameReferenceGoal>()->to);
+    case ReferenceTaskKind::OBJECTS:
+      return WideningRelations::objectsStep(task.as<ObjectsShareGoal>()->from,
+                                            task.as<ObjectsShareGoal>()->to);
+    case ReferenceTaskKind::WIDENS:
+      return WideningRelations::widensStep(task.as<WidensGoal>()->from,
+                                           task.as<WidensGoal>()->to);
+    case ReferenceTaskKind::FITS:
+      return WideningRelations::fitsStep(task.as<ReferenceFitsGoal>()->own,
+                                         task.as<ReferenceFitsGoal>()->wide);
+    case ReferenceTaskKind::FITS_WIDE:
+      return WideningRelations::fitsWideStep(task.as<FitsWideGoal>()->own,
+                                             task.as<FitsWideGoal>()->wide);
+    case ReferenceTaskKind::WIDE_CHOICE:
+      return ReferenceStep{true, {}};
+  }
+  llvm_unreachable("unknown reference task");
+}
+
+ReferenceStep WideningRelations::sameStep(const Type *from, const Type *to) {
   const Type *own = from;
   const Type *wide = to;
   while (own != wide && (wide->isOptional() || (own->isArray() && wide->isArray()))) {
@@ -132,7 +175,7 @@ bool WideningRelations::sameReference(const Type *from, const Type *to) {
       const Type *inner = wide->inner();
       bool reference = inner->isObject() || inner->isArray();
       if (!reference) {
-        return false;
+        return ReferenceStep{false, {}};
       }
       own = own->nonOptional();
       wide = inner;
@@ -142,38 +185,45 @@ bool WideningRelations::sameReference(const Type *from, const Type *to) {
     }
   }
   if (own == wide) {
-    return true;
+    return ReferenceStep{true, {}};
   }
-  if (own->isOptional()) {
-    return false;
+  if (own->isOptional() || (own->isUnion() && own->isTagged())) {
+    return ReferenceStep{false, {}};
   }
   if (own->isUnion()) {
-    return !own->isTagged() && WideningRelations::membersShareReference(own, wide);
+    return WideningRelations::membersStep(own, wide);
   }
 
-  return WideningRelations::objectsShareReference(own, wide);
+  return ReferenceStep{true, {ObjectsShareGoal{own, wide}}};
 }
 
-bool WideningRelations::membersShareReference(const Type *own, const Type *wide) {
+ReferenceStep WideningRelations::membersStep(const Type *own, const Type *wide) {
+  std::vector<ReferenceTask> needs;
   for (const Type *member : own->members()) {
-    bool same = member->isObject() &&
-                (member == wide || WideningRelations::objectsShareReference(member, wide));
-    if (!same) {
-      return false;
+    if (!member->isObject()) {
+      return ReferenceStep{false, {}};
+    }
+    if (member != wide) {
+      needs.push_back(ObjectsShareGoal{member, wide});
     }
   }
 
-  return true;
+  return ReferenceStep{true, std::move(needs)};
 }
 
-bool WideningRelations::objectsShareReference(const Type *from, const Type *to) {
+ReferenceStep WideningRelations::objectsStep(const Type *from, const Type *to) {
   bool objects = from->isObject() && to->isObject() && !from->isAnyObject() && !to->isAnyObject();
   if (!objects) {
-    return false;
+    return ReferenceStep{false, {}};
   }
-  if (from->isSubtypeOf(to) || GenericWidening::widens(from, to)) {
-    return true;
+  if (from->isSubtypeOf(to) || WideningRelations::sameShapeFields(from, to)) {
+    return ReferenceStep{true, {}};
   }
+
+  return ReferenceStep{true, {WidensGoal{from, to}}};
+}
+
+bool WideningRelations::sameShapeFields(const Type *from, const Type *to) {
   bool otherShape = from->isClass() || to->isClass() || from->isTuple() != to->isTuple() ||
                     from->fields().size() != to->fields().size() || !from->overloads().empty() ||
                     !to->overloads().empty() || from->isBytes() || to->isBytes() ||
@@ -187,6 +237,94 @@ bool WideningRelations::objectsShareReference(const Type *from, const Type *to) 
   };
 
   return llvm::all_of(from->fields(), sameField);
+}
+
+ReferenceStep WideningRelations::widensStep(const Type *from, const Type *to) {
+  if (!from->isClass() || !to->isClass()) {
+    return ReferenceStep{false, {}};
+  }
+  const ClassDecl *target = to->classDecl();
+  const ClassDecl *source = from->classDecl();
+  if (!target || !source || !target->generic()) {
+    return ReferenceStep{false, {}};
+  }
+  const ClassDecl *instance = GenericWidening::instanceOf(source, target->generic());
+  if (!instance || instance == target || instance->typeArgs.size() != target->typeArgs.size()) {
+    return ReferenceStep{false, {}};
+  }
+  std::vector<ReferenceTask> needs;
+  for (size_t i = 0; i < target->typeArgs.size(); ++i) {
+    const Type *own = instance->typeArgs[i];
+    const Type *wide = target->typeArgs[i];
+    if (own == wide) {
+      continue;
+    }
+    if (!GenericWidening::covariant(target->generic(), i)) {
+      return ReferenceStep{false, {}};
+    }
+    needs.push_back(ReferenceFitsGoal{own, wide});
+  }
+
+  return ReferenceStep{true, std::move(needs)};
+}
+
+ReferenceStep WideningRelations::fitsStep(const Type *own, const Type *wide) {
+  if (own == wide || own->isNever()) {
+    return ReferenceStep{true, {}};
+  }
+  if (!own->isUnion() || own->isTagged()) {
+    return ReferenceStep{true, {FitsWideGoal{own, wide}}};
+  }
+  std::vector<ReferenceTask> needs;
+  for (const Type *member : own->members()) {
+    needs.push_back(FitsWideGoal{member, wide});
+  }
+
+  return ReferenceStep{true, std::move(needs)};
+}
+
+ReferenceStep WideningRelations::fitsWideStep(const Type *own, const Type *wide) {
+  if (own == wide || own->isNever()) {
+    return ReferenceStep{true, {}};
+  }
+  if (!wide->isUnion() || wide->isTagged()) {
+    return ReferenceStep{true, {SameReferenceGoal{own, wide}}};
+  }
+  if (llvm::is_contained(wide->members(), own)) {
+    return ReferenceStep{true, {}};
+  }
+
+  return WideningRelations::wideMemberTrial(WideMemberChoice{own, wide, 0});
+}
+
+ReferenceStep WideningRelations::wideMemberTrial(WideMemberChoice choice) {
+  llvm::ArrayRef<const Type *> members = choice.wide->members();
+  if (choice.next == members.size()) {
+    return ReferenceStep{false, {}};
+  }
+  const Type *member = members[choice.next];
+  const Type *own = choice.own;
+  choice.next += 1;
+
+  return ReferenceStep{true, {SameReferenceGoal{own, member}, choice}};
+}
+
+bool WideningRelations::retryWideMember(std::vector<ReferenceTask> &tasks) {
+  while (!tasks.empty()) {
+    ReferenceTask task = std::move(tasks.back());
+    tasks.pop_back();
+    const WideMemberChoice *choice = task.as<WideMemberChoice>();
+    if (choice == nullptr) {
+      continue;
+    }
+    ReferenceStep trial = WideningRelations::wideMemberTrial(*choice);
+    if (trial.possible) {
+      tasks.insert(tasks.end(), trial.needs.rbegin(), trial.needs.rend());
+      return true;
+    }
+  }
+
+  return false;
 }
 
 }

@@ -219,14 +219,15 @@ void ModuleDeclarer::exportName(Module *module, const NamedExportStep &step) {
   }
   std::optional<ModuleBinding> target;
   if (source) {
-    ResultExportTarget found = this->findExport(source->from, source->path, name);
+    const llvm::StringMap<ModuleExport> &theirs = this->readyExports(source->from);
+    ResultExportTarget found = this->exportNamed(theirs, source->from, source->path, name);
     if (found.isErr()) {
       this->state.getDiagnostics().error(name.loc, found.error().message);
       return;
     }
     target = found.value();
   } else {
-    target = this->resolveLocal(module, name.name);
+    target = this->readyLocal(module, name.name);
     ResultLocalIsKnown known = ModuleDeclarer::localExport(module, name, target.has_value());
     bool reported =
         known.isErr() && known.error().code == ModuleDeclarerLocalExportErrorCode::ALREADY_REPORTED;
@@ -391,7 +392,7 @@ void ModuleDeclarer::mergeStarExport(Module *module, const StarExportStep &star)
   ModuleState &here = this->state.getModuleStates().getModuleState(module);
   const ExportDecl &decl = *star.decl;
   const ExportAll *all = decl.form.as<ExportAll>();
-  for (const auto &entry : this->exportsOf(all->source.from)) {
+  for (const auto &entry : this->readyExports(star.from)) {
     llvm::StringRef name = entry.getKey();
     const ModuleBinding &target = entry.getValue().target;
     auto existing = here.exports.find(name);
@@ -414,6 +415,17 @@ void ModuleDeclarer::finishExports(std::vector<ExportsFrame> &frames) {
 ModuleDeclarer::ResultExportTarget ModuleDeclarer::findExport(Module *from, llvm::StringRef path,
                                                               const ModuleName &name) {
   const llvm::StringMap<ModuleExport> &theirs = this->exportsOf(from);
+
+  return this->exportNamed(theirs, from, path, name);
+}
+
+const llvm::StringMap<ModuleExport> &ModuleDeclarer::readyExports(Module *module) {
+  return this->state.getModuleStates().getModuleState(module).exports;
+}
+
+ModuleDeclarer::ResultExportTarget
+ModuleDeclarer::exportNamed(const llvm::StringMap<ModuleExport> &theirs, Module *from,
+                            llvm::StringRef path, const ModuleName &name) {
   auto found = theirs.find(name.name);
   bool missing = found == theirs.end();
   if (missing && from->builtin) {
@@ -447,7 +459,7 @@ ModuleDeclarer::ResultExportTarget ModuleDeclarer::findExport(Module *from, llvm
   return ok(found->second.target);
 }
 
-std::optional<ModuleBinding> ModuleDeclarer::resolveLocal(Module *module, llvm::StringRef name) {
+std::optional<ModuleBinding> ModuleDeclarer::readyLocal(Module *module, llvm::StringRef name) {
   if (this->state.getModuleStates().getModuleState(module).declared.count(name)) {
     return ModuleBinding{module, name};
   }
@@ -455,7 +467,7 @@ std::optional<ModuleBinding> ModuleDeclarer::resolveLocal(Module *module, llvm::
   if (!imported.has_value() || imported->from == nullptr) {
     return std::nullopt;
   }
-  const llvm::StringMap<ModuleExport> &theirs = this->exportsOf(imported->from);
+  const llvm::StringMap<ModuleExport> &theirs = this->readyExports(imported->from);
   auto found = theirs.find(imported->name);
   if (found == theirs.end()) {
     return std::nullopt;

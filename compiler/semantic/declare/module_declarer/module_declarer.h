@@ -58,7 +58,6 @@ public:
   void useModule(Module *module);
   void declareModules(SourceFile &program);
   const llvm::StringMap<ModuleExport> &exportsOf(Module *module);
-  std::optional<ModuleBinding> resolveLocal(Module *module, llvm::StringRef name);
   ResultExportTarget findExport(Module *from, llvm::StringRef path, const ModuleName &name);
 
 private:
@@ -87,6 +86,10 @@ private:
   void exportName(Module *module, const NamedExportStep &step);
   void mergeStarExport(Module *module, const StarExportStep &star);
   void finishExports(std::vector<ExportsFrame> &frames);
+  const llvm::StringMap<ModuleExport> &readyExports(Module *module);
+  ResultExportTarget exportNamed(const llvm::StringMap<ModuleExport> &theirs, Module *from,
+                                 llvm::StringRef path, const ModuleName &name);
+  std::optional<ModuleBinding> readyLocal(Module *module, llvm::StringRef name);
 
   SemanticState &state;
   ClassLinks *classLinks = nullptr;

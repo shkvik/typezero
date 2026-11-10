@@ -3,6 +3,7 @@
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 #include "compiler/semantic/types/type_relations/type_relations_errors.h"
+#include "compiler/union/union/union.h"
 
 namespace tz {
 
@@ -19,14 +20,56 @@ class TzModulesChecker;
 class WideningRelations;
 class FunctionValueChecker;
 
+enum class ConversionTaskKind { GOAL, MEMBER, CHOICE };
+
 struct ConversionGoal {
+  static constexpr ConversionTaskKind kind = ConversionTaskKind::GOAL;
   const Type *from;
   const Type *to;
 };
 
+struct MemberGoal {
+  static constexpr ConversionTaskKind kind = ConversionTaskKind::MEMBER;
+  const Type *from;
+  const Type *to;
+};
+
+struct MemberChoice {
+  static constexpr ConversionTaskKind kind = ConversionTaskKind::CHOICE;
+  const Type *from;
+  const Type *to;
+  size_t next;
+};
+
+using ConversionTask = Union<ConversionGoal, MemberGoal, MemberChoice>;
+
 struct ConversionStep {
   bool possible;
-  std::vector<ConversionGoal> needs;
+  std::vector<ConversionTask> needs;
+};
+
+enum class UnifyForm { WHOLE, HALF, UNION };
+enum class UnifyTaskKind { ENTER, COLLECT };
+
+struct EnterUnify {
+  static constexpr UnifyTaskKind kind = UnifyTaskKind::ENTER;
+  const Type *a;
+  const Type *b;
+  UnifyForm form;
+};
+
+struct CollectUnify {
+  static constexpr UnifyTaskKind kind = UnifyTaskKind::COLLECT;
+  const Type *a;
+  const Type *b;
+  UnifyForm form;
+};
+
+using UnifyTask = Union<EnterUnify, CollectUnify>;
+
+struct UnifyShortcut {
+  bool decided;
+  const Type *type;
 };
 
 class TypeRelations {
@@ -40,6 +83,7 @@ public:
   static bool holdsWideInteger(const Type *type);
   static const Type *commonNumericType(const Type *a, const Type *b);
   static const Type *unify(const Type *a, const Type *b);
+  static const Type *unifyAs(UnifyForm form, const Type *a, const Type *b);
   static const Type *comparisonType(const Type *a, const Type *b);
   static bool isIntLiteralTree(const Expr *expr);
   bool literalAdapts(const Expr *expr, const Type *to);
@@ -50,13 +94,29 @@ public:
   static std::string conversionMethod(const Type *to);
 
 private:
+  static ConversionStep taskStep(const ConversionTask &task);
   static ConversionStep conversionStep(const Type *from, const Type *to);
   static ConversionStep stepHolds();
   static ConversionStep stepDecided(bool possible);
   static ConversionStep stepNeeds(std::vector<ConversionGoal> goals);
   static ConversionStep jsonStep(const Type *from, const Type *to);
   static ConversionStep resultStep(const Type *from, const Type *to);
+  static ConversionStep memberGoals(const Type *from, const Type *to);
+  static ConversionStep memberStep(const MemberGoal &goal);
+  static ConversionStep memberTrial(MemberChoice choice);
+  static bool retryMember(std::vector<ConversionTask> &tasks);
+  static bool recordCopyShape(const Type *from, const Type *to);
+  static const Type *copiedFieldType(const Field &field, const Type *value);
+  static ConversionStep recordCopyStep(const Type *from, const Type *to);
   static std::optional<bool> plainConvertible(const Type *from, const Type *to);
+  static void enterUnify(const EnterUnify &enter, std::vector<UnifyTask> &tasks,
+                         std::vector<const Type *> &answers);
+  static void enterWholeUnify(const Type *a, const Type *b, std::vector<UnifyTask> &tasks,
+                              std::vector<const Type *> &answers);
+  static void collectUnify(const CollectUnify &collect, std::vector<const Type *> &answers);
+  static const Type *optionalLike(const Type *a, const Type *b, const Type *base);
+  static UnifyShortcut shortUnify(const Type *a, const Type *b);
+  static const Type *baseUnify(const Type *x, const Type *y);
   using ResultRangeWasProven = Result<const Expr *, TypeRelationsRangeProvenError>;
   using ResultTypeAssignable = Result<const Expr *, TypeRelationsAssignableError>;
 

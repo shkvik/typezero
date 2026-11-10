@@ -104,6 +104,7 @@ private:
   void enterMember(const EnumFrame &frame);
   EnumDecl *unresolvedEnum(const EnumFrame &frame) const;
   void resolveNextMember(std::vector<EnumFrame> &frames);
+  void reportNeededCycles(const EnumFrame &frame);
   void countMember(EnumFrame &frame);
   std::optional<double> memberNumber(EnumFrame &frame, EnumMember &m);
   void numberMember(EnumFrame &frame, EnumMember &m, double value);
