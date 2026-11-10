@@ -190,6 +190,7 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     call->type = Type::doubleTy();
     return call;
   }
+  // TODO: говнокод
   static const llvm::StringLiteral properties[] = {"argv",     "env",    "exitCode", "execPath",
                                                    "platform", "stdout", "stderr"};
   auto *event = call->args.empty() ? nullptr : dyn_cast<StringLitExpr>(call->args[0]);
@@ -250,6 +251,7 @@ Expr *ProcessChecker::checkSignalCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
   bool waits = listener->type->isFunction() && listener->type->ret()->isPromise();
+  // TODO: говнокод
   llvm::StringRef fn = name == "off" ? (waits ? "processOffAsync" : "processOff")
                                      : (waits ? "processOnAsync" : "processOn");
   if (name != "off") {
@@ -263,6 +265,7 @@ Expr *ProcessChecker::checkSignalCall(CallExpr *call, MemberExpr *member) {
   return this->eventTargetChecker->callLibraryFunction(call, fn, {}, given, member->loc());
 }
 
+// TODO: говнокод
 Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
   llvm::StringRef name = member->name;
   if (this->isProcessMember(member->object, "env")) {
@@ -352,6 +355,7 @@ Expr *ProcessChecker::checkProcessEnvIndex(IndexExpr *index) {
                            Type::optional(Type::string()));
 }
 
+// TODO: говнокод
 Expr *ProcessChecker::checkProcessAssign(AssignExpr *assign) {
   Expr *object = nullptr;
   llvm::StringRef name;

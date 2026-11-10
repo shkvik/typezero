@@ -117,6 +117,7 @@ bool TimerChecker::rearms(const Expr *callback) const {
   return call && call->method() == current->sym;
 }
 
+// TODO: говнокод
 TimerChecker::ResultTimerScheduled TimerChecker::checkAsyncGlobal(CallExpr *call, NameExpr *name) {
   static const GlobalName names[] = {GlobalName::SET_TIMEOUT,    GlobalName::SET_INTERVAL,
                                      GlobalName::SET_IMMEDIATE,  GlobalName::CLEAR_TIMEOUT,
@@ -324,6 +325,7 @@ TimerChecker::ResultTimerMethodRun TimerChecker::checkTimerMethod(CallExpr *call
   return ok(call);
 }
 
+// TODO: говнокод
 TimerChecker::ResultPromiseOfTimer TimerChecker::checkTimersPromisesCall(CallExpr *call,
                                                                          llvm::StringRef fn,
                                                                          llvm::SMLoc loc,

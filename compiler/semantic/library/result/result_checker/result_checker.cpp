@@ -83,6 +83,7 @@ ResultChecker::ResultOkErrTypeArgs ResultChecker::okErrTypeArgs(const NameExpr *
   return ok(name);
 }
 
+// TODO: говнокод
 Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const Type *expected) {
   bool rejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
@@ -175,6 +176,7 @@ ResultChecker::ResultStaticIsKnown ResultChecker::staticMethod(const NameExpr *n
   return ok(method);
 }
 
+// TODO: говнокод
 Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
   auto *name = dyn_cast<NameExpr>(member->object);
   if (!name || call->optional || member->optional) {

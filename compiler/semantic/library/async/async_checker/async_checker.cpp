@@ -391,6 +391,7 @@ AsyncChecker::ResultBindingPattern AsyncChecker::bindingShape(const VarDeclarato
   return ok(element);
 }
 
+// TODO: говнокод
 void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
   this->state.getInventoryStore().markUsesAsync();
   ResultInAsyncContext context = this->asyncContext(true);
