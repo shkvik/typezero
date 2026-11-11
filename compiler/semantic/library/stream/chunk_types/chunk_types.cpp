@@ -253,9 +253,9 @@ ChunkTypes::hookParams(const FunctionDecl *fn, llvm::ArrayRef<FunctionDecl *> in
         .message = "",
     });
   }
-  bool chunks = fn->name == "onWrite" || fn->name == "onWritev" || fn->name == "onTransform";
+  bool hasChunks = fn->name == "onWrite" || fn->name == "onWritev" || fn->name == "onTransform";
   std::string params = ErrorTextStreamHook::params(hook);
-  std::string message = ErrorTextStreamHook::other(fn->name, params, chunks);
+  std::string message = ErrorTextStreamHook::other(fn->name, params, hasChunks);
 
   return err(ChunkTypesHookParamsError{
       .code = ChunkTypesHookParamsErrorCode::OTHER_PARAMETERS,

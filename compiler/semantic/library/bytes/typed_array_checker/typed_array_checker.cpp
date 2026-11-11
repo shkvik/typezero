@@ -121,10 +121,10 @@ Expr *TypedArrayChecker::toBuiltinCall(CallExpr *call, Builtin builtin, const Ty
 Expr *TypedArrayChecker::checkCallbackCall(const TypedArrayCall &typed, BytesMethod method,
                                            const Type *expected) {
   CallExpr *call = typed.call;
-  bool arrow = !call->args.empty() && isa<FunctionExpr>(call->args[0]);
+  bool isArrow = !call->args.empty() && isa<FunctionExpr>(call->args[0]);
   Expr *checked = this->callbackChecker->checkCallbackMethod(call, typed.member, expected);
-  bool mapsNamedFunction = method == BytesMethod::MAP && !call->args.empty() && !arrow;
-  if (mapsNamedFunction) {
+  bool isMappingNamedFunction = method == BytesMethod::MAP && !call->args.empty() && !isArrow;
+  if (isMappingNamedFunction) {
     ResultMapFitsType fits = this->mapResultFits(typed);
     if (fits.isErr()) {
       this->state.getDiagnostics().error(call->args[0]->loc(), fits.error().message);
@@ -139,9 +139,9 @@ TypedArrayChecker::mapResultFits(const TypedArrayCall &typed) const {
   const Expr *callback = typed.call->args[0];
   int64_t lo = 0;
   int64_t hi = 0;
-  bool bounded = callback->type->isFunction() && typed.arrayType->elementRange(lo, hi) &&
-                 typed.arrayType->bytes() != Bytes::Uint8Clamped;
-  if (bounded) {
+  bool isBounded = callback->type->isFunction() && typed.arrayType->elementRange(lo, hi) &&
+                   typed.arrayType->bytes() != Bytes::Uint8Clamped;
+  if (isBounded) {
     std::string range = ErrorTextBytes::range(lo, hi);
     std::string hint = BytesCheckHelpers::wrapHint(typed.arrayType->bytes(), "f(x)");
     std::string message = ErrorTextTypedArray::mapFits(typed.what, range, hint);
@@ -158,15 +158,15 @@ TypedArrayChecker::mapResultFits(const TypedArrayCall &typed) const {
 Expr *TypedArrayChecker::checkSort(const TypedArrayCall &typed, const TypedArraySortMethod &sort,
                                    const Type *expected) {
   CallExpr *call = typed.call;
-  bool copies = sort.place == ReorderPlace::NEW_COPY;
+  bool isCopying = sort.place == ReorderPlace::NEW_COPY;
   if (!call->args.empty()) {
     Expr *checked = this->callbackChecker->checkCallbackMethod(call, typed.member, expected);
-    if (copies && !call->type->isError()) {
+    if (isCopying && !call->type->isError()) {
       call->type = typed.copyType;
     }
     return checked;
   }
-  const Type *sorted = copies ? typed.copyType : typed.arrayType;
+  const Type *sorted = isCopying ? typed.copyType : typed.arrayType;
 
   return TypedArrayChecker::toBuiltinCall(call, sort.builtin, sorted);
 }
@@ -179,8 +179,8 @@ Expr *TypedArrayChecker::checkReverse(const TypedArrayCall &typed,
     this->state.getDiagnostics().error(typed.member->loc(), arity.error().message);
     return call;
   }
-  bool copies = reverse.place == ReorderPlace::NEW_COPY;
-  const Type *reversed = copies ? typed.copyType : typed.arrayType;
+  bool isCopying = reverse.place == ReorderPlace::NEW_COPY;
+  const Type *reversed = isCopying ? typed.copyType : typed.arrayType;
 
   return TypedArrayChecker::toBuiltinCall(call, reverse.builtin, reversed);
 }
@@ -193,9 +193,9 @@ Expr *TypedArrayChecker::checkAt(const TypedArrayCall &typed) {
     return call;
   }
   this->walkPositionArgs(call, 0);
-  bool inRange = this->indexProofs->provesAtInBounds(typed.member->object, call->args[0]);
-  const Type *answer = inRange ? typed.element : Type::optional(typed.element);
-  call->mayBeOutOfRange = !inRange;
+  bool isInRange = this->indexProofs->provesAtInBounds(typed.member->object, call->args[0]);
+  const Type *answer = isInRange ? typed.element : Type::optional(typed.element);
+  call->mayBeOutOfRange = !isInRange;
 
   return TypedArrayChecker::toBuiltinCall(call, Builtin::BytesAt, answer);
 }
@@ -316,7 +316,7 @@ Expr *TypedArrayChecker::checkSet(const TypedArrayCall &typed) {
 
   this->walkPositionArgs(call, 1);
   const Expr *offset = call->args.size() > 1 ? call->args[1] : nullptr;
-  this->checkSetRange(typed.member->object, source, offset);
+  this->walkSetRange(typed.member->object, source, offset);
 
   return TypedArrayChecker::toBuiltinCall(call, Builtin::BytesSet, Type::voidTy());
 }
@@ -363,9 +363,9 @@ Expr *TypedArrayChecker::checkWith(const TypedArrayCall &typed) {
 
 TypedArrayChecker::ResultIndexProven TypedArrayChecker::withIndex(const Expr *array,
                                                                   const Expr *index) const {
-  bool unproven = !index->type->isError() && !this->indexProofs->provesAtInBounds(array, index) &&
-                  !this->indexProofs->exempt(index->loc(), array);
-  if (unproven) {
+  bool isUnproven = !index->type->isError() && !this->indexProofs->provesAtInBounds(array, index) &&
+                    !this->indexProofs->exempt(index->loc(), array);
+  if (isUnproven) {
     std::string arrayText = BytesCheckHelpers::valueText(array);
     std::string message = ErrorTextTypedArray::index(arrayText);
 
@@ -416,19 +416,19 @@ CallExpr *TypedArrayChecker::makeArrayFrom(const TypedArrayCall &typed) {
 
 Expr *TypedArrayChecker::reportMissingMethod(CallExpr *call, MemberExpr *member,
                                              const BytesMethodInfo *found) {
-  bool flatMap = found != nullptr && found->method == BytesMethod::FLAT_MAP;
-  if (flatMap) {
+  bool isFlatMap = found != nullptr && found->method == BytesMethod::FLAT_MAP;
+  if (isFlatMap) {
     std::string message = ErrorTextTypedArray::flatMap();
     this->state.getDiagnostics().error(member->loc(), message);
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
 
-  this->argumentChecker->checkArgsLoosely(call);
-  bool locale = found != nullptr && found->method == BytesMethod::TO_LOCALE_STRING;
+  this->argumentChecker->walkArgsLoosely(call);
+  bool isLocale = found != nullptr && found->method == BytesMethod::TO_LOCALE_STRING;
   std::string message =
-      locale ? ErrorTextTypedArray::locale()
-             : ErrorTextTypedArray::noMember(member->name, member->object->type->name());
+      isLocale ? ErrorTextTypedArray::locale()
+               : ErrorTextTypedArray::noMember(member->name, member->object->type->name());
   this->state.getDiagnostics().error(member->loc(), message);
 
   return call;
@@ -469,9 +469,9 @@ Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member)
   }
   const Type *kindType = Type::bytesType(m.kind);
   const Type *element = kindType->accessType();
-  bool oneByte = kindType->elementSize() == 1;
+  bool isOneByte = kindType->elementSize() == 1;
   unsigned min = m.write ? 2 : 1;
-  unsigned max = min + (oneByte ? 0 : 1);
+  unsigned max = min + (isOneByte ? 0 : 1);
   ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, min, max);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -509,9 +509,9 @@ Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member)
   return call;
 }
 
-void TypedArrayChecker::checkSetRange(const Expr *target, const Expr *source, const Expr *offset) {
+void TypedArrayChecker::walkSetRange(const Expr *target, const Expr *source, const Expr *offset) {
   IndexProofs &proofs = *this->indexProofs;
-  bool offsetUnproven = false;
+  bool isOffsetUnproven = false;
   if (offset) {
     std::string offsetWhat = ErrorTextTypedArray::setOffset();
     IndexProofs::ResultBetweenProven between =
@@ -519,9 +519,9 @@ void TypedArrayChecker::checkSetRange(const Expr *target, const Expr *source, co
     if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
       this->state.getDiagnostics().error(offset->loc(), between.error().message);
     }
-    offsetUnproven = between.isErr();
+    isOffsetUnproven = between.isErr();
   }
-  if (offsetUnproven || this->indexProofs->exempt(source->loc(), target)) {
+  if (isOffsetUnproven || this->indexProofs->exempt(source->loc(), target)) {
     return;
   }
   std::optional<Linear> at = offset ? proofs.linear(offset) : Linear{Term::zero(), 0};

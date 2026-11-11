@@ -27,8 +27,11 @@ bool TypeParts::follows(TypeEdge edge) const {
 }
 
 void TypeParts::addPart(const Type *type, std::vector<const Type *> &stack) {
-  bool firstVisit = type != nullptr && this->seen.insert(type).second;
-  if (!firstVisit) {
+  if (type == nullptr) {
+    return;
+  }
+  auto [_, isFirstVisit] = this->seen.insert(type);
+  if (!isFirstVisit) {
     return;
   }
   this->types.push_back(type);
@@ -54,10 +57,10 @@ std::vector<const Type *> TypeParts::childrenOf(const Type *type) const {
 }
 
 void TypeParts::addWrapperParts(std::vector<const Type *> &children, const Type *type) const {
-  bool optional = type->isOptional() && this->follows(TypeEdge::OPTIONAL);
-  bool array = type->isArray() && this->follows(TypeEdge::ARRAY);
-  bool promise = type->isPromise() && this->follows(TypeEdge::PROMISE);
-  if (optional || array || promise) {
+  bool isOptional = type->isOptional() && this->follows(TypeEdge::OPTIONAL);
+  bool isArray = type->isArray() && this->follows(TypeEdge::ARRAY);
+  bool isPromise = type->isPromise() && this->follows(TypeEdge::PROMISE);
+  if (isOptional || isArray || isPromise) {
     children.push_back(type->inner());
   }
 }
@@ -144,10 +147,10 @@ void TypeParts::addObjectParts(std::vector<const Type *> &children, const Type *
 }
 
 void TypeParts::addObjectFields(std::vector<const Type *> &children, const Type *type) const {
-  bool classObject = type->classDecl() != nullptr;
-  bool classFields = classObject && this->follows(TypeEdge::CLASS_FIELDS);
-  bool plainFields = !classObject && this->follows(TypeEdge::FIELDS);
-  if (classFields || plainFields) {
+  bool isClassObject = type->classDecl() != nullptr;
+  bool isClassFields = isClassObject && this->follows(TypeEdge::CLASS_FIELDS);
+  bool isPlainFields = !isClassObject && this->follows(TypeEdge::FIELDS);
+  if (isClassFields || isPlainFields) {
     for (const Field &field : type->fields()) {
       children.push_back(field.type);
     }

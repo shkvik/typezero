@@ -23,11 +23,11 @@ public:
   Num decimalArithmetic(const Expr *site, BinaryOp op, const Num &l, const Num &r, const Expr *lhs,
                         const Expr *rhs, bool square);
   Num bitwise(BinaryOp op, const Num &l, const Num &r, const Type *type) const;
-  static Num decimalLiteral(const Expr *expr);
+  Num decimalLiteral(const Expr *expr) const;
 
 private:
-  static Num blamed(Num n);
-  static bool sameVariable(const Expr *a, const Expr *b);
+  Num blamed(Num n) const;
+  bool sameVariable(const Expr *a, const Expr *b) const;
   OverflowCheck &check;
 };
 

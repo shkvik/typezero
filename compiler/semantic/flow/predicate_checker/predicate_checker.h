@@ -52,6 +52,7 @@ private:
   const VarSymbol *predicateVariable(const PredicateCall &applied, int i) const;
   void narrowParamTo(Flow &flow, const VarSymbol *var, const Type *type) const;
   void applySide(const PredicateCall &applied, const PredicateSide &side, Flow &flow) const;
+  const Predicate *predicateFromCopy(const FuncSymbol *fn) const;
   static int summaryParam(const Predicate *summary, const VarSymbol *var);
   std::optional<Linear> factTerm(const PredicateCall &applied, const Term &t) const;
 

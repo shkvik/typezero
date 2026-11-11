@@ -34,7 +34,7 @@ public:
   static void narrowJsonField(Flow &flow, const FieldPath &path, const Type *type);
   Expr *checkArrayIsArray(CallExpr *call, MemberExpr *member);
   Expr *checkJsonIsJson(CallExpr *call, MemberExpr *member);
-  void checkRedundantTests(const BinaryExpr *bin);
+  void walkRedundantTests(const BinaryExpr *bin);
 
 private:
   using ResultTypeOfAgrees = Result<const Expr *, JsonCheckerTypeOfAgreesError>;

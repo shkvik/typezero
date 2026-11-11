@@ -75,10 +75,10 @@ NewChecker::ResultNamespaceNew NewChecker::namespaceNew(const NewExpr *expr) {
 
 NewChecker::ResultCryptoMadeOk NewChecker::cryptoNew(const NewExpr *expr,
                                                      const ClassDecl *cls) const {
-  bool hidden = cls->library() && !this->libraryCalls->inLibrary(expr->loc()) &&
-                (cls == this->state.getLibraryDeclarations().findLibraryClass("CryptoKey") ||
-                 cls == this->state.getLibraryDeclarations().findLibraryClass("SubtleCrypto"));
-  if (hidden && cls->name == "CryptoKey") {
+  bool isHidden = cls->library() && !this->libraryCalls->inLibrary(expr->loc()) &&
+                  (cls == this->state.getLibraryDeclarations().findLibraryClass("CryptoKey") ||
+                   cls == this->state.getLibraryDeclarations().findLibraryClass("SubtleCrypto"));
+  if (isHidden && cls->name == "CryptoKey") {
     std::string message = ErrorTextCryptoNew::cryptoKey();
 
     return err(NewCheckerCryptoNewError{
@@ -86,7 +86,7 @@ NewChecker::ResultCryptoMadeOk NewChecker::cryptoNew(const NewExpr *expr,
         .message = message,
     });
   }
-  if (hidden) {
+  if (isHidden) {
     std::string message = ErrorTextCryptoNew::subtle();
 
     return err(NewCheckerCryptoNewError{
@@ -140,7 +140,7 @@ NewChecker::ResultClassIsFound NewChecker::classFound(const NewExpr *expr) {
 }
 
 NewChecker::ResultArrayElement NewChecker::arrayElement(const NewExpr *expr, const Type *expected) {
-  bool fromExpected = expr->typeArgs.empty() && expected && expected->nonOptional()->isArray();
+  bool isFromExpected = expr->typeArgs.empty() && expected && expected->nonOptional()->isArray();
   if (expr->typeArgs.size() > 1) {
     std::string message = ErrorTextNewArray::oneArg();
 
@@ -149,7 +149,7 @@ NewChecker::ResultArrayElement NewChecker::arrayElement(const NewExpr *expr, con
         .message = message,
     });
   }
-  if (expr->typeArgs.empty() && !fromExpected) {
+  if (expr->typeArgs.empty() && !isFromExpected) {
     std::string message = ErrorTextNewArray::needs();
 
     return err(NewCheckerArrayElementError{
@@ -157,7 +157,7 @@ NewChecker::ResultArrayElement NewChecker::arrayElement(const NewExpr *expr, con
         .message = message,
     });
   }
-  if (fromExpected) {
+  if (isFromExpected) {
     return ok(expected->nonOptional()->inner());
   }
 
@@ -237,9 +237,9 @@ Expr *NewChecker::checkArgsLoosely(NewExpr *expr) {
 }
 
 void NewChecker::bindValueCallee(NewExpr *expr) {
-  bool variable = expr->callee == nullptr && !expr->name.empty() &&
-                  this->topLevelChecker->lookupValue(expr->name).var() != nullptr;
-  if (!variable) {
+  bool isVariable = expr->callee == nullptr && !expr->name.empty() &&
+                    this->topLevelChecker->lookupValue(expr->name).var() != nullptr;
+  if (!isVariable) {
     return;
   }
   expr->callee = this->state.getAst().make<NameExpr>(expr->loc(), expr->name);
@@ -251,15 +251,15 @@ void NewChecker::bindValueCallee(NewExpr *expr) {
 Expr *NewChecker::checkNamespaceNew(NewExpr *expr, const Type *expected,
                                     std::optional<GlobalName> global) {
   ScopeEntry intl = this->scopes->lookup(expr->name);
-  bool globalIntl = global == GlobalName::INTL && intl.var() == nullptr && intl.func() == nullptr &&
-                    intl.cls() == nullptr;
-  if (globalIntl && expr->member == "Locale") {
+  bool isGlobalIntl = global == GlobalName::INTL && intl.var() == nullptr &&
+                      intl.func() == nullptr && intl.cls() == nullptr;
+  if (isGlobalIntl && expr->member == "Locale") {
     return this->intlChecker->checkLocaleNew(expr, expected);
   }
-  if (globalIntl && expr->member == "DateTimeFormat") {
+  if (isGlobalIntl && expr->member == "DateTimeFormat") {
     return this->dateFormatChecker->checkDateFormatNew(expr->loc(), expr->args);
   }
-  if (globalIntl) {
+  if (isGlobalIntl) {
     return this->intlChecker->checkIntlNew(expr->loc(), expr->member, expr->args, true);
   }
   ResultNamespaceNew plain = NewChecker::namespaceNew(expr);
@@ -288,45 +288,45 @@ Expr *NewChecker::checkClassInstanceNew(NewExpr *expr, ClassDecl *cls, const Typ
 
 void NewChecker::noteLibraryInstance(NewExpr *made, const ClassDecl *cls) {
   if (cls->name == "URL") {
-    this->urlChecker->checkUrlNew(made);
+    this->urlChecker->walkUrlNew(made);
   }
   if (cls->name == "Server" || cls->name == "Socket") {
     this->tzModulesChecker->noteServer(made);
   }
   if (cls->name == "Response") {
-    this->httpChecker->checkResponseNew(made);
+    this->httpChecker->walkResponseNew(made);
   } else if (cls->name == "Request") {
-    this->httpChecker->checkRequestNew(made);
+    this->httpChecker->walkRequestNew(made);
   } else if (cls->name == "Headers") {
-    this->httpChecker->checkHeadersNew(made);
+    this->httpChecker->walkHeadersNew(made);
   }
 }
 
 Expr *NewChecker::checkBuiltinNew(NewExpr *expr, const Type *expected,
                                   std::optional<GlobalName> global) {
   ScopeEntry named = this->scopes->lookup(expr->name);
-  bool unshadowed = named.var() == nullptr && named.func() == nullptr;
-  if (global == GlobalName::REG_EXP && unshadowed) {
+  bool isUnshadowed = named.var() == nullptr && named.func() == nullptr;
+  if (global == GlobalName::REG_EXP && isUnshadowed) {
     this->rejectTypeArgs(expr);
     return this->regexChecker->checkRegExpConstructor(expr->loc(), expr->args);
   }
-  if (global == GlobalName::DATE && unshadowed) {
+  if (global == GlobalName::DATE && isUnshadowed) {
     this->rejectTypeArgs(expr);
     return this->dateChecker->checkDateNew(expr->loc(), expr->args);
   }
-  bool collection = global == GlobalName::MAP || global == GlobalName::SET ||
-                    global == GlobalName::WEAK_MAP || global == GlobalName::WEAK_SET;
-  if (collection && unshadowed) {
+  bool isCollection = global == GlobalName::MAP || global == GlobalName::SET ||
+                      global == GlobalName::WEAK_MAP || global == GlobalName::WEAK_SET;
+  if (isCollection && isUnshadowed) {
     return this->dictNewChecker->checkDictNew(expr, expected);
   }
-  if (global == GlobalName::PROMISE && unshadowed) {
+  if (global == GlobalName::PROMISE && isUnshadowed) {
     return this->promiseChecker->checkPromiseNew(expr, expected);
   }
-  if (global == GlobalName::WEAK_REF && unshadowed) {
+  if (global == GlobalName::WEAK_REF && isUnshadowed) {
     return this->weakRefChecker->checkWeakRefNew(expr, expected);
   }
   const Type *bytes = BytesChecker::bytesTypeNamed(expr->name);
-  if (bytes != nullptr && unshadowed) {
+  if (bytes != nullptr && isUnshadowed) {
     return this->bytesNewChecker->checkBytesNew(expr, bytes);
   }
   if (global == GlobalName::BIG_INT64_ARRAY || global == GlobalName::BIG_UINT64_ARRAY) {

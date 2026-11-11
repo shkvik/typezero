@@ -16,14 +16,14 @@ bool AsyncLocalStorageChecker::used() const {
 }
 
 bool AsyncLocalStorageChecker::produces(const CallExpr *c) const {
-  return HeldValueChecker::storageMethod(c, "getStore");
+  return this->storageMethod(c, "getStore");
 }
 
 bool AsyncLocalStorageChecker::takesOver(const CallExpr *c) {
-  if (this->current && HeldValueChecker::storageMethod(c, "getStore")) {
+  if (this->current && this->storageMethod(c, "getStore")) {
     this->readsDirectly.insert(this->current);
   }
-  if (HeldValueChecker::storageMethod(c, "run")) {
+  if (this->storageMethod(c, "run")) {
     this->runs.push_back(c);
     return true;
   }
@@ -36,7 +36,7 @@ bool AsyncLocalStorageChecker::takesOver(const CallExpr *c) {
 }
 
 void AsyncLocalStorageChecker::sawNew(const NewExpr *n) {
-  if (HeldValueChecker::storageClass(n->cls())) {
+  if (this->storageClass(n->cls())) {
     this->news.push_back(n);
   }
 }
@@ -120,7 +120,7 @@ std::vector<Diagnostic> AsyncLocalStorageChecker::findReusedStores() const {
     if (c->args.empty() || !parallel::ParallelHelpers::holdsReferences(c->args[0]->type)) {
       continue;
     }
-    const Expr *store = HeldValueChecker::bare(c->args[0]);
+    const Expr *store = this->bare(c->args[0]);
     if (isa<ObjectLitExpr, ArrayLitExpr, NewExpr, UndefinedExpr>(store)) {
       continue;
     }
@@ -140,8 +140,8 @@ const FunctionDecl *AsyncLocalStorageChecker::reader(const FunctionDecl *fn) con
   for (const FunctionDecl *f : this->readsDirectly) {
     via[f] = f;
   }
-  for (bool grew = true; grew;) {
-    grew = false;
+  for (bool hasGrown = true; hasGrown;) {
+    hasGrown = false;
     for (const auto &[f, targets] : this->callees) {
       if (via.count(f)) {
         continue;
@@ -149,7 +149,7 @@ const FunctionDecl *AsyncLocalStorageChecker::reader(const FunctionDecl *fn) con
       for (const FunctionDecl *g : targets) {
         if (auto found = via.find(g); found != via.end()) {
           via[f] = found->second;
-          grew = true;
+          hasGrown = true;
           break;
         }
       }
@@ -163,7 +163,7 @@ const FunctionDecl *AsyncLocalStorageChecker::reader(const FunctionDecl *fn) con
 std::vector<Diagnostic> AsyncLocalStorageChecker::findStoreReadingTimers() const {
   auto found = std::vector<Diagnostic>();
   for (const CallExpr *c : this->intervals) {
-    const FunctionDecl *fn = c->args.empty() ? nullptr : HeldValueChecker::callbackOf(c->args[0]);
+    const FunctionDecl *fn = c->args.empty() ? nullptr : this->callbackOf(c->args[0]);
     const FunctionDecl *reads = fn ? this->reader(fn) : nullptr;
     if (!reads) {
       continue;

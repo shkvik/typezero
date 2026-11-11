@@ -120,7 +120,7 @@ private:
 
     return false;
   }
-  static void joinInto(Summaries &into, const Summaries &from);
+  void joinInto(Summaries &into, const Summaries &from) const;
   template <typename Map, typename Key> std::optional<Val> summary(const Map &map, const Key &key) {
     noteRead(&map, key);
     if (this->round == 0) {

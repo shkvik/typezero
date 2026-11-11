@@ -40,8 +40,8 @@ std::string ErrorTextDictMethod::noProperty(llvm::StringRef name, llvm::StringRe
                                             llvm::StringRef text, bool isMap) {
   std::string message =
       (llvm::Twine("property '") + name + "' does not exist on type '" + type + "'").str();
-  bool iterates = name == "map" || name == "filter" || name == "reduce" || name == "some" ||
-                  name == "every" || name == "find";
+  bool isIterating = name == "map" || name == "filter" || name == "reduce" || name == "some" ||
+                     name == "every" || name == "find";
   if (name == "length") {
     message += (llvm::Twine("; the number of entries is '") + text + ".size'").str();
   } else if (isMap && name == "add") {
@@ -50,7 +50,7 @@ std::string ErrorTextDictMethod::noProperty(llvm::StringRef name, llvm::StringRe
     message += (llvm::Twine("; a Set adds a value with '") + text +
                 ".add(value)' and checks one with '" + text + ".has(value)'")
                    .str();
-  } else if (iterates) {
+  } else if (isIterating) {
     message += (llvm::Twine("; call it on an iterator, e.g. '") + text +
                 (isMap ? ".entries()" : ".values()") + "." + name +
                 "(...)', or on an array, '[..." + text + "]." + name + "(...)'")

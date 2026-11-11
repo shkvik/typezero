@@ -38,9 +38,69 @@ namespace tz {
 OverflowWarnings::OverflowWarnings(OverflowCheck &check)
     : check(check) {}
 
-std::string OverflowWarnings::exprText(const Expr *expr) {
-  expr = OverflowHelpers::stripCasts(expr);
-  if (!expr) {
+std::string OverflowWarnings::exprText(const Expr *expr) const {
+  auto order = this->textOrder(expr);
+  auto answers = std::vector<std::string>();
+  for (const Expr *node : order) {
+    std::string text = this->nodeText(node, answers);
+    answers.push_back(text);
+  }
+
+  return answers.back();
+}
+
+std::vector<const Expr *> OverflowWarnings::textOrder(const Expr *expr) const {
+  auto order = std::vector<const Expr *>();
+  auto pending = std::vector<const Expr *>{OverflowHelpers::stripCasts(expr)};
+  while (!pending.empty()) {
+    const Expr *node = pending.back();
+    pending.pop_back();
+    order.push_back(node);
+    for (const Expr *child : this->textParts(node)) {
+      pending.push_back(OverflowHelpers::stripCasts(child));
+    }
+  }
+  std::reverse(order.begin(), order.end());
+
+  return order;
+}
+
+std::vector<const Expr *> OverflowWarnings::textParts(const Expr *expr) const {
+  if (expr == nullptr) {
+    return {};
+  }
+  switch (expr->kind()) {
+    case Expr::Kind::Member:
+      return {cast<MemberExpr>(expr)->object};
+    case Expr::Kind::Binary: {
+      auto *binary = cast<BinaryExpr>(expr);
+      if (!binary->source.empty()) {
+        return {};
+      }
+      return {binary->lhs, binary->rhs};
+    }
+    case Expr::Kind::Assign: {
+      auto *assign = cast<AssignExpr>(expr);
+      if (!assign->source.empty()) {
+        return {};
+      }
+      return {assign->target, assign->value};
+    }
+    case Expr::Kind::Update:
+      return {cast<UpdateExpr>(expr)->target};
+    case Expr::Kind::Unary:
+      return {cast<UnaryExpr>(expr)->operand};
+    case Expr::Kind::Call:
+      return {cast<CallExpr>(expr)->callee};
+    case Expr::Kind::Index:
+      return {cast<IndexExpr>(expr)->object};
+    default:
+      return {};
+  }
+}
+
+std::string OverflowWarnings::nodeText(const Expr *expr, std::vector<std::string> &answers) const {
+  if (expr == nullptr) {
     return "...";
   }
   switch (expr->kind()) {
@@ -52,67 +112,79 @@ std::string OverflowWarnings::exprText(const Expr *expr) {
   }
   case Expr::Kind::FloatLit: {
     auto *lit = cast<FloatLitExpr>(expr);
-    return lit->text.empty() ? OverflowWarnings::numberText(lit->value) : lit->text.str();
+    return lit->text.empty() ? this->numberText(lit->value) : lit->text.str();
   }
   case Expr::Kind::Member: {
-    auto *member = cast<MemberExpr>(expr);
-    return OverflowWarnings::exprText(member->object) + "." + member->name.str();
+    std::string object = this->takeAnswer(answers);
+    return object + "." + cast<MemberExpr>(expr)->name.str();
   }
-  case Expr::Kind::Binary:
-    if (!cast<BinaryExpr>(expr)->source.empty()) {
-      return cast<BinaryExpr>(expr)->source.str();
+  case Expr::Kind::Binary: {
+    auto *binary = cast<BinaryExpr>(expr);
+    if (!binary->source.empty()) {
+      return binary->source.str();
     }
-    return OverflowWarnings::exprText(cast<BinaryExpr>(expr)->lhs) + " " +
-           Operators::opSpelling(cast<BinaryExpr>(expr)->op) + " " +
-           OverflowWarnings::exprText(cast<BinaryExpr>(expr)->rhs);
+    std::string rhs = this->takeAnswer(answers);
+    std::string lhs = this->takeAnswer(answers);
+    return lhs + " " + Operators::opSpelling(binary->op) + " " + rhs;
+  }
   case Expr::Kind::Assign: {
     auto *assign = cast<AssignExpr>(expr);
     if (!assign->source.empty()) {
       return assign->source.str();
     }
-    return OverflowWarnings::exprText(assign->target) + " " +
-           (assign->op ? Operators::opSpelling(*assign->op) : "") + "= " +
-           OverflowWarnings::exprText(assign->value);
+    std::string value = this->takeAnswer(answers);
+    std::string target = this->takeAnswer(answers);
+    return target + " " + (assign->op ? Operators::opSpelling(*assign->op) : "") + "= " + value;
   }
   case Expr::Kind::Update: {
     auto *update = cast<UpdateExpr>(expr);
     std::string op = update->increment ? "++" : "--";
-    return update->prefix ? op + OverflowWarnings::exprText(update->target)
-                          : OverflowWarnings::exprText(update->target) + op;
+    std::string target = this->takeAnswer(answers);
+    return update->prefix ? op + target : target + op;
   }
   case Expr::Kind::Unary: {
-    auto *unary = cast<UnaryExpr>(expr);
-    return std::string(Operators::opSpelling(unary->op)) +
-           OverflowWarnings::exprText(unary->operand);
+    std::string operand = this->takeAnswer(answers);
+    return std::string(Operators::opSpelling(cast<UnaryExpr>(expr)->op)) + operand;
   }
-  case Expr::Kind::Call:
-    return OverflowWarnings::exprText(cast<CallExpr>(expr)->callee) + "(...)";
-  case Expr::Kind::Index:
-    return OverflowWarnings::exprText(cast<IndexExpr>(expr)->object) + "[...]";
+  case Expr::Kind::Call: {
+    std::string callee = this->takeAnswer(answers);
+    return callee + "(...)";
+  }
+  case Expr::Kind::Index: {
+    std::string object = this->takeAnswer(answers);
+    return object + "[...]";
+  }
   default:
     return "...";
   }
 }
 
-std::string OverflowWarnings::subject(const Expr *expr) {
+std::string OverflowWarnings::takeAnswer(std::vector<std::string> &answers) const {
+  std::string answer = std::move(answers.back());
+  answers.pop_back();
+
+  return answer;
+}
+
+std::string OverflowWarnings::subject(const Expr *expr) const {
   expr = OverflowHelpers::stripCasts(expr);
   if (!expr) {
     return "the value";
   }
   if (isa<NameExpr>(expr) || isa<MemberExpr>(expr)) {
-    return "'" + OverflowWarnings::exprText(expr) + "'";
+    return "'" + this->exprText(expr) + "'";
   }
   if (auto *index = dyn_cast<IndexExpr>(expr)) {
-    return "the element of '" + OverflowWarnings::exprText(index->object) + "'";
+    return "the element of '" + this->exprText(index->object) + "'";
   }
   if (auto *call = dyn_cast<CallExpr>(expr)) {
-    return "the result of '" + OverflowWarnings::exprText(call) + "'";
+    return "the result of '" + this->exprText(call) + "'";
   }
 
-  return "'" + OverflowWarnings::exprText(expr) + "'";
+  return "'" + this->exprText(expr) + "'";
 }
 
-std::string OverflowWarnings::numberText(double v) {
+std::string OverflowWarnings::numberText(double v) const {
   if (std::fabs(v) == kInf) {
     return v > 0 ? "any size" : "any negative size";
   }
@@ -131,14 +203,15 @@ std::string OverflowWarnings::numberText(double v) {
   return text;
 }
 
-std::string OverflowWarnings::roughNumber(double v) {
+std::string OverflowWarnings::roughNumber(double v) const {
   char text[64];
   std::snprintf(text, sizeof text, "%.6g", v);
 
   return text;
 }
 
-std::string OverflowWarnings::replaced(std::string text, llvm::StringRef from, llvm::StringRef to) {
+std::string OverflowWarnings::replaced(std::string text, llvm::StringRef from,
+                                       llvm::StringRef to) const {
   for (size_t at = text.find(from.str()); at != std::string::npos;
        at = text.find(from.str(), at + to.size())) {
     text.replace(at, from.size(), to.str());
@@ -247,29 +320,38 @@ std::string OverflowWarnings::line(llvm::SMLoc loc, llvm::SMLoc from) const {
 }
 
 std::string OverflowWarnings::inputText(const Reason *why, llvm::SMLoc from) const {
-  if (!why) {
-    return "outside the program";
+  auto passed = std::vector<const Reason *>();
+  const Reason *link = why;
+  while (link != nullptr && !link->calls.empty()) {
+    passed.push_back(link);
+    link = link->via;
   }
-  if (!why->calls.empty()) {
-    std::string text = inputText(why->via, from);
-    if (why->calls.size() == 1) {
-      return text + ", passed by the call on " + line(why->calls[0], from);
-    }
-    text += ", passed by the calls on lines ";
-    for (size_t i = 0; i < why->calls.size() && i < 4; ++i) {
-      if (i) {
-        text += i + 1 == why->calls.size() ? " and " : ", ";
-      }
-      std::string l = line(why->calls[i], from);
-      text += llvm::StringRef(l).drop_front(5).str();
-    }
-    if (why->calls.size() > 4) {
-      text += " and others";
-    }
-    return text;
+  std::string text = link == nullptr ? std::string("outside the program")
+                                     : link->what + " on " + line(link->loc, from);
+  for (const Reason *call : llvm::reverse(passed)) {
+    text += this->callsText(call, from);
   }
 
-  return why->what + " on " + line(why->loc, from);
+  return text;
+}
+
+std::string OverflowWarnings::callsText(const Reason *why, llvm::SMLoc from) const {
+  if (why->calls.size() == 1) {
+    return ", passed by the call on " + line(why->calls[0], from);
+  }
+  std::string text = ", passed by the calls on lines ";
+  for (size_t i = 0; i < why->calls.size() && i < 4; ++i) {
+    if (i) {
+      text += i + 1 == why->calls.size() ? " and " : ", ";
+    }
+    std::string l = line(why->calls[i], from);
+    text += llvm::StringRef(l).drop_front(5).str();
+  }
+  if (why->calls.size() > 4) {
+    text += " and others";
+  }
+
+  return text;
 }
 
 std::string OverflowWarnings::fixText(const Expr *site, const VarSymbol *accum) const {
@@ -277,9 +359,8 @@ std::string OverflowWarnings::fixText(const Expr *site, const VarSymbol *accum) 
     auto info = this->check.vars_.find(accum);
     const VarDeclarator *decl = info != this->check.vars_.end() ? info->second.decl : nullptr;
     if (decl && !decl->typeAnn && decl->init && !info->second.isConst) {
-      std::string init = this->check.programScan().isConstantTree(decl->init)
-                             ? OverflowWarnings::exprText(decl->init)
-                             : "...";
+      std::string init =
+          this->check.programScan().isConstantTree(decl->init) ? this->exprText(decl->init) : "...";
       return "check the values before, or count in a decimal: 'let " + accum->name.str() +
              ": decimal = " + init + "' and add 'x.toDecimal()'";
     }
@@ -312,13 +393,14 @@ void OverflowWarnings::noteProof(const Expr *site, bool proven) {
 
 bool OverflowWarnings::checkDivisor(const Expr *site, BinaryOp op, const Expr *divisor,
                                     const Num &l, const Num &r) {
-  bool zero = op == BinaryOp::Pow ? l.lo <= 0 && l.hi >= 0 && ValueRange::awayOf(l) == 0 && r.lo < 0
-                                  : r.lo <= 0 && r.hi >= 0 && ValueRange::awayOf(r) == 0;
-  if (!zero || !this->check.reporting || this->check.quiet) {
-    return !zero;
+  bool isZero = op == BinaryOp::Pow
+                    ? l.lo <= 0 && l.hi >= 0 && ValueRange::awayOf(l) == 0 && r.lo < 0
+                    : r.lo <= 0 && r.hi >= 0 && ValueRange::awayOf(r) == 0;
+  if (!isZero || !this->check.reporting || this->check.quiet) {
+    return !isZero;
   }
   llvm::SMLoc loc = divisor ? divisor->loc() : site->loc();
-  std::string text = divisor ? OverflowWarnings::exprText(divisor) : "x";
+  std::string text = divisor ? this->exprText(divisor) : "x";
   if (op != BinaryOp::Pow && r.lo == 0 && r.hi == 0 && divisor &&
       this->check.programScan().isConstantTree(divisor)) {
     if (ValueRange::isFloatType(site->type)) {
@@ -332,7 +414,7 @@ bool OverflowWarnings::checkDivisor(const Expr *site, BinaryOp op, const Expr *d
   }
   if (op == BinaryOp::Pow) {
     this->check.warnings.push_back(
-        {site->loc(), "cannot prove that '" + OverflowWarnings::exprText(site) +
+        {site->loc(), "cannot prove that '" + this->exprText(site) +
                           "' does not raise 0 to a negative power, which divides by zero; "
                           "check the base first, e.g. 'if (" +
                           text + " != 0)'"});
@@ -342,7 +424,7 @@ bool OverflowWarnings::checkDivisor(const Expr *site, BinaryOp op, const Expr *d
   if (r.lo == 0 && r.hi == 0) {
     why = "it is 0";
   } else if (r.loOrigin == Origin::Input || r.hiOrigin == Origin::Input) {
-    why = OverflowWarnings::subject(divisor) + " comes from " +
+    why = this->subject(divisor) + " comes from " +
           inputText(r.loOrigin == Origin::Input ? r.loWhy : r.hiWhy, loc);
   } else {
     why = "it may be 0";
@@ -362,13 +444,12 @@ bool OverflowWarnings::checkDecimalSqrt(const CallExpr *call, const Expr *value,
     return false;
   }
   llvm::SMLoc loc = value ? value->loc() : call->loc();
-  std::string text = value ? OverflowWarnings::exprText(value) : "x";
-  std::string why = x.loOrigin == Origin::Input ? OverflowWarnings::subject(value) +
-                                                      " comes from " + inputText(x.loWhy, loc)
-                    : x.loOrigin == Origin::Loop
-                        ? OverflowWarnings::subject(value) + " grows with every pass of a loop"
-                    : std::isfinite(x.lo) ? "it may be about " + OverflowWarnings::roughNumber(x.lo)
-                                          : std::string("it may be negative");
+  std::string text = value ? this->exprText(value) : "x";
+  std::string why =
+      x.loOrigin == Origin::Input  ? this->subject(value) + " comes from " + inputText(x.loWhy, loc)
+      : x.loOrigin == Origin::Loop ? this->subject(value) + " grows with every pass of a loop"
+      : std::isfinite(x.lo)        ? "it may be about " + this->roughNumber(x.lo)
+                                   : std::string("it may be negative");
   this->check.warnings.push_back(
       {loc, "cannot prove that '" + text +
                 "' is not negative, which sqrt() needs (a decimal has no "
@@ -385,12 +466,12 @@ bool OverflowWarnings::checkPowerBase(const Expr *site, const Expr *base, const 
   if (!this->check.reporting || this->check.quiet) {
     return false;
   }
-  std::string text = OverflowWarnings::exprText(base);
-  std::string why = a.loOrigin == Origin::Input ? OverflowWarnings::subject(base) + " comes from " +
-                                                      inputText(a.loWhy, site->loc())
-                                                : "it may be " + OverflowWarnings::numberText(a.lo);
+  std::string text = this->exprText(base);
+  std::string why = a.loOrigin == Origin::Input
+                        ? this->subject(base) + " comes from " + inputText(a.loWhy, site->loc())
+                        : "it may be " + this->numberText(a.lo);
   this->check.warnings.push_back(
-      {site->loc(), "cannot prove that the base of '" + OverflowWarnings::exprText(site) +
+      {site->loc(), "cannot prove that the base of '" + this->exprText(site) +
                         "' is not negative, which a fractional power needs (JavaScript gives "
                         "NaN): " +
                         why + "; check it first, e.g. 'if (" + text +
@@ -405,30 +486,30 @@ bool OverflowWarnings::checkDomain(const CallExpr *call, const Expr *value, cons
   if (x.empty()) {
     return true;
   }
-  bool low = (loOpen ? x.lo <= lo : x.lo < lo) && x.loOrigin != Origin::Trusted;
-  bool high = (hiOpen ? x.hi >= hi : x.hi > hi) && x.hiOrigin != Origin::Trusted;
-  if (!low && !high) {
+  bool isLow = (loOpen ? x.lo <= lo : x.lo < lo) && x.loOrigin != Origin::Trusted;
+  bool isHigh = (hiOpen ? x.hi >= hi : x.hi > hi) && x.hiOrigin != Origin::Trusted;
+  if (!isLow && !isHigh) {
     return true;
   }
   if (!this->check.reporting || this->check.quiet) {
     return false;
   }
-  Bound culprit = low ? x.low() : x.high();
+  Bound culprit = isLow ? x.low() : x.high();
   llvm::SMLoc loc = value ? value->loc() : call->loc();
   std::string why;
   if (culprit.origin == Origin::Input) {
-    why = OverflowWarnings::subject(value) + " comes from " + inputText(culprit.why, loc);
+    why = this->subject(value) + " comes from " + inputText(culprit.why, loc);
   } else if (culprit.origin == Origin::Loop) {
-    why = OverflowWarnings::subject(value) + " grows with every pass of a loop";
+    why = this->subject(value) + " grows with every pass of a loop";
   } else {
-    why = "it may be " + OverflowWarnings::numberText(culprit.v);
+    why = "it may be " + this->numberText(culprit.v);
   }
-  std::string text = OverflowWarnings::exprText(value);
-  this->check.warnings.push_back(
-      {loc, "cannot prove that the argument of '" + OverflowWarnings::exprText(call->callee) +
-                "' is " + what.str() + ": " + why + "; check it first, e.g. 'if (" +
-                OverflowWarnings::replaced(condition.str(), "x", text) + ")'" +
-                OverflowWarnings::replaced(extra.str(), "x", text)});
+  std::string text = this->exprText(value);
+  this->check.warnings.push_back({loc, "cannot prove that the argument of '" +
+                                           this->exprText(call->callee) + "' is " + what.str() +
+                                           ": " + why + "; check it first, e.g. 'if (" +
+                                           this->replaced(condition.str(), "x", text) + ")'" +
+                                           this->replaced(extra.str(), "x", text)});
 
   return false;
 }
@@ -440,14 +521,13 @@ bool OverflowWarnings::checkClamp(const CallExpr *call, const Num &lo, const Num
   if (!this->check.reporting || this->check.quiet || call->args.size() < 3) {
     return false;
   }
-  std::string low = OverflowWarnings::exprText(call->args[1]),
-              high = OverflowWarnings::exprText(call->args[2]);
+  std::string low = this->exprText(call->args[1]), high = this->exprText(call->args[2]);
   this->check.warnings.push_back(
       {call->args[1]->loc(), "cannot prove that the low bound of 'Math.clamp' is not above the "
                              "high one: '" +
-                                 low + "' may be " + OverflowWarnings::numberText(lo.hi) +
-                                 " and '" + high + "' " + OverflowWarnings::numberText(hi.lo) +
-                                 "; check it first, e.g. 'if (" + low + " <= " + high + ")'"});
+                                 low + "' may be " + this->numberText(lo.hi) + " and '" + high +
+                                 "' " + this->numberText(hi.lo) + "; check it first, e.g. 'if (" +
+                                 low + " <= " + high + ")'"});
 
   return false;
 }
@@ -464,13 +544,13 @@ void OverflowWarnings::checkShiftCount(const Expr *count, const Num &n, unsigned
   if (n.empty() || (n.lo >= 0 && n.hi < width) || !this->check.reporting || this->check.quiet) {
     return;
   }
-  std::string text = OverflowWarnings::exprText(count);
+  std::string text = this->exprText(count);
   std::string why;
   Bound culprit = n.hi >= width ? n.high() : n.low();
   if (culprit.origin == Origin::Input) {
-    why = OverflowWarnings::subject(count) + " comes from " + inputText(culprit.why, count->loc());
+    why = this->subject(count) + " comes from " + inputText(culprit.why, count->loc());
   } else {
-    why = "it may be " + OverflowWarnings::numberText(culprit.v);
+    why = "it may be " + this->numberText(culprit.v);
   }
   this->check.warnings.push_back(
       {count->loc(), "cannot prove that the shift count '" + text + "' is from 0 to " +
@@ -483,16 +563,16 @@ void OverflowWarnings::checkDate(const Num &time, double limit, llvm::ArrayRef<D
   if (time.empty() || (time.lo >= -limit && time.hi <= limit)) {
     return;
   }
-  bool low = time.lo < -limit && time.loOrigin != Origin::Trusted;
-  bool high = time.hi > limit && time.hiOrigin != Origin::Trusted;
-  if ((!low && !high) || !this->check.reporting || this->check.quiet) {
+  bool isLow = time.lo < -limit && time.loOrigin != Origin::Trusted;
+  bool isHigh = time.hi > limit && time.hiOrigin != Origin::Trusted;
+  if ((!isLow && !isHigh) || !this->check.reporting || this->check.quiet) {
     return;
   }
   auto above = [&](const DatePart &part) {
-    return high && part.num.hi > part.hi && part.num.hiOrigin != Origin::Trusted;
+    return isHigh && part.num.hi > part.hi && part.num.hiOrigin != Origin::Trusted;
   };
   auto below = [&](const DatePart &part) {
-    return low && part.num.lo < part.lo && part.num.loOrigin != Origin::Trusted;
+    return isLow && part.num.lo < part.lo && part.num.loOrigin != Origin::Trusted;
   };
   std::vector<const DatePart *> blamed;
   for (const DatePart &part : parts) {
@@ -509,70 +589,70 @@ void OverflowWarnings::checkDate(const Num &time, double limit, llvm::ArrayRef<D
   for (const DatePart *part : blamed) {
     Bound culprit = above(*part) ? part->num.high() : part->num.low();
     llvm::SMLoc loc = part->expr->loc();
-    std::string why = OverflowWarnings::subject(part->expr);
+    std::string why = this->subject(part->expr);
     if (culprit.origin == Origin::Input) {
       why += " comes from " + inputText(culprit.why, loc);
     } else if (culprit.origin == Origin::Loop) {
       why += " grows with every pass of a loop";
     } else {
-      why += " may be " + OverflowWarnings::numberText(culprit.v);
+      why += " may be " + this->numberText(culprit.v);
     }
-    std::string text = OverflowWarnings::exprText(part->expr);
+    std::string text = this->exprText(part->expr);
     this->check.warnings.push_back(
         {loc, "cannot prove that the time of the date fits in 'int' (about 292 million years "
               "around 1970): " +
                   why + "; check it first, e.g. 'if (" + text +
-                  " >= " + OverflowWarnings::numberText(part->lo) + " && " + text +
-                  " <= " + OverflowWarnings::numberText(part->hi) + ")'"});
+                  " >= " + this->numberText(part->lo) + " && " + text +
+                  " <= " + this->numberText(part->hi) + ")'"});
   }
 }
 
 bool OverflowWarnings::checkConversion(const Expr *site, const Expr *value, const Num &x,
                                        const Type *to) {
-  bool toJson = to->nonOptional()->isJson();
-  bool toDouble = to->isFloat() || toJson;
+  bool isToJson = to->nonOptional()->isJson();
+  bool isToDouble = to->isFloat() || isToJson;
   constexpr double kExact = 9007199254740992.0;
-  double lo = toDouble ? -kExact : ValueRange::limitsOf(to).lo,
-         hi = toDouble ? kExact : ValueRange::limitsOf(to).hi;
-  bool lowFits = toDouble ? x.lo >= lo : ValueRange::fitsLow(x.lo, to);
-  bool highFits = toDouble ? x.hi <= hi : ValueRange::fitsHigh(x.hi, to);
-  bool proven = lowFits && highFits;
-  if (!toDouble) {
-    noteProof(site, proven);
+  double lo = isToDouble ? -kExact : ValueRange::limitsOf(to).lo,
+         hi = isToDouble ? kExact : ValueRange::limitsOf(to).hi;
+  bool isLowFits = isToDouble ? x.lo >= lo : ValueRange::fitsLow(x.lo, to);
+  bool isHighFits = isToDouble ? x.hi <= hi : ValueRange::fitsHigh(x.hi, to);
+  bool isProven = isLowFits && isHighFits;
+  if (!isToDouble) {
+    noteProof(site, isProven);
   }
-  if (proven) {
+  if (isProven) {
     return true;
   }
-  bool blameLow = !lowFits && x.loOrigin != Origin::Trusted;
-  bool blameHigh = !highFits && x.hiOrigin != Origin::Trusted;
-  if (!blameLow && !blameHigh) {
+  bool isBlameLow = !isLowFits && x.loOrigin != Origin::Trusted;
+  bool isBlameHigh = !isHighFits && x.hiOrigin != Origin::Trusted;
+  if (!isBlameLow && !isBlameHigh) {
     return false;
   }
   if (!this->check.reporting || this->check.quiet) {
     return false;
   }
-  Bound culprit = blameHigh ? x.high() : x.low();
+  Bound culprit = isBlameHigh ? x.high() : x.low();
   llvm::SMLoc loc = site->loc();
-  std::string what = OverflowWarnings::subject(value);
+  std::string what = this->subject(value);
   std::string why;
   if (culprit.origin == Origin::Input) {
     why = what + " comes from " + inputText(culprit.why, loc);
   } else if (culprit.origin == Origin::Loop) {
     why = what + " grows with every pass of a loop";
   } else {
-    why = "it may be " + OverflowWarnings::numberText(culprit.v);
+    why = "it may be " + this->numberText(culprit.v);
   }
-  std::string text = OverflowWarnings::exprText(value);
-  std::string low = toDouble ? OverflowWarnings::numberText(lo) : std::to_string(to->intMin()),
-              high = toDouble ? OverflowWarnings::numberText(hi) : std::to_string(to->intMax());
+  std::string text = this->exprText(value);
+  std::string low = isToDouble ? this->numberText(lo) : std::to_string(to->intMin()),
+              high = isToDouble ? this->numberText(hi) : std::to_string(to->intMax());
   std::string message;
-  if (toJson) {
+  if (isToJson) {
     message = "cannot prove that " + what +
               " is within ±9007199254740992 (2^53): a number in a Json is a double, which holds "
               "every integer only up to there: " +
               why + "; check it first, e.g. 'if (" + text + " >= -9007199254740992 && " + text +
               " <= 9007199254740992)', or put it in the Json as text, 'String(" + text + ")'";
-  } else if (toDouble) {
+  } else if (isToDouble) {
     message = "cannot prove that " + what +
               " is within ±9007199254740992 (2^53), where a double holds every integer "
               "exactly: " +
@@ -594,11 +674,11 @@ void OverflowWarnings::warn(const Expr *site, const Num &l, const Num &r, const 
   if (!this->check.reporting || this->check.quiet) {
     return;
   }
-  bool top = !ValueRange::fitsHigh(exceeding.hi, type),
+  bool isTop = !ValueRange::fitsHigh(exceeding.hi, type),
        bottom = !ValueRange::fitsLow(exceeding.lo, type);
-  Bound culprit = top && bottom ? ValueRange::joint(0, exceeding.low(), exceeding.high())
-                  : top         ? exceeding.high()
-                                : exceeding.low();
+  Bound culprit = isTop && bottom ? ValueRange::joint(0, exceeding.low(), exceeding.high())
+                  : isTop         ? exceeding.high()
+                                  : exceeding.low();
   const Expr *subjectExpr = nullptr;
   auto operands = accum ? std::array{std::pair{&r, rhs}, std::pair{&l, lhs}}
                         : std::array{std::pair{&l, lhs}, std::pair{&r, rhs}};
@@ -624,24 +704,24 @@ void OverflowWarnings::warn(const Expr *site, const Num &l, const Num &r, const 
     divisor = assign->value;
   }
   if (ValueRange::isFloatType(type) && divisor && r.lo < 1 && r.hi > -1) {
-    std::string text = OverflowWarnings::exprText(divisor);
+    std::string text = this->exprText(divisor);
     this->check.warnings.push_back(
-        {loc, "'" + OverflowWarnings::exprText(site) +
+        {loc, "'" + this->exprText(site) +
                   "' may overflow double: it may go beyond ±1.8e308, where a double becomes "
                   "Infinity, as the divisor " +
-                  OverflowWarnings::subject(divisor) +
+                  this->subject(divisor) +
                   " may be close to 0; check it first, e.g. 'if (Math.abs(" + text +
                   ") >= 0.000001)'"});
     return;
   }
   if (culprit.origin == Origin::Input) {
-    why = OverflowWarnings::subject(subjectExpr) + " comes from " + inputText(culprit.why, loc);
+    why = this->subject(subjectExpr) + " comes from " + inputText(culprit.why, loc);
   } else if (culprit.origin == Origin::Loop) {
     const Reason *loop = culprit.why;
     while (loop && !loop->calls.empty()) {
       loop = loop->via;
     }
-    why = OverflowWarnings::subject(subjectExpr) + " grows with every pass of the loop on " +
+    why = this->subject(subjectExpr) + " grows with every pass of the loop on " +
           (loop ? line(loop->loc, loc) : std::string("an unknown line")) +
           (loop && loop->unbounded ? ", which has no bound" : "");
     if (culprit.why && !culprit.why->calls.empty()) {
@@ -650,9 +730,9 @@ void OverflowWarnings::warn(const Expr *site, const Num &l, const Num &r, const 
   } else if (ValueRange::isFloatType(type)) {
     why = "it may go beyond ±1.8e308, where a double becomes Infinity";
   } else {
-    why = "it may reach " + OverflowWarnings::numberText(top ? exceeding.hi : exceeding.lo);
+    why = "it may reach " + this->numberText(isTop ? exceeding.hi : exceeding.lo);
   }
-  this->check.warnings.push_back({loc, "'" + OverflowWarnings::exprText(site) + "' may overflow " +
+  this->check.warnings.push_back({loc, "'" + this->exprText(site) + "' may overflow " +
                                            type->nonOptional()->name().str() + ": " + why + "; " +
                                            fixText(site, accum)});
 }

@@ -47,8 +47,8 @@ MethodCallChecker::MethodCallChecker(SemanticState &owner, SemanticParts &all)
 
 MethodCallChecker::ResultFieldIsCallable MethodCallChecker::fieldCallable(const Type *type,
                                                                           llvm::StringRef name) {
-  bool optional = type->isOptional() && type->inner()->isFunction();
-  if (optional) {
+  bool isOptional = type->isOptional() && type->inner()->isFunction();
+  if (isOptional) {
     std::string message = ErrorTextFieldCall::undefined();
 
     return err(MethodCallCheckerFieldCallableError{
@@ -100,10 +100,10 @@ MethodCallChecker::ResultMethodsAreFound MethodCallChecker::instanceMethods(cons
 
 MethodCallChecker::ResultFieldsAreAllSet
 MethodCallChecker::fieldsSet(const MemberExpr *member) const {
-  bool early = this->classChecker->isInitThis(member->object).isOk() &&
-               !this->state.getFlowState().isBeforeSuper() &&
-               this->classChecker->thisReady(this->state.getFlowState().getFlow()).isErr();
-  if (early) {
+  bool isEarly = this->classChecker->isInitThis(member->object).isOk() &&
+                 !this->state.getFlowState().isBeforeSuper() &&
+                 this->classChecker->thisReady(this->state.getFlowState().getFlow()).isErr();
+  if (isEarly) {
     std::string field =
         this->classChecker->firstUnset(this->state.getFlowState().getFlow()).value();
     std::string message = ErrorTextUnsetCall::beforeSet(member->name, field);
@@ -148,7 +148,7 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   ResultMethodsAreFound found = MethodCallChecker::instanceMethods(cls, member->name);
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
   std::vector<FunctionDecl *> methods = found.value();
@@ -159,10 +159,10 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   if (ready.isErr()) {
     this->state.getDiagnostics().error(member->loc(), ready.error().message);
   }
-  bool checked = false;
+  bool isChecked = false;
   std::vector<const Type *> bound;
   OverloadResolver::ResultVariantChosen picked =
-      this->overloadResolver->chooseVariant(methods, call->args, call->spread, checked, &bound);
+      this->overloadResolver->chooseVariant(methods, call->args, call->spread, isChecked, &bound);
   if (picked.isErr() &&
       picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
     this->state.getDiagnostics().error(member->loc(), picked.error().message);
@@ -178,14 +178,14 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   if (allowed.isErr()) {
     this->state.getDiagnostics().error(member->loc(), allowed.error().message);
   }
-  if (sym->isGeneric() && checked) {
+  if (sym->isGeneric() && isChecked) {
     return this->overloadResolver->callGenericVariant(call, sym, bound, member->loc(), true);
   }
   if (sym->isGeneric()) {
     return this->checkGenericMethodCall(call, member, sym, expected);
   }
 
-  return this->checkPlainMethodCall(call, member, cls, sym, checked);
+  return this->checkPlainMethodCall(call, member, cls, sym, isChecked);
 }
 
 Expr *MethodCallChecker::checkLibraryMethodCall(CallExpr *call, MemberExpr *member,
@@ -228,7 +228,7 @@ Expr *MethodCallChecker::checkFieldCall(CallExpr *call, MemberExpr *member) {
   if (callable.error().code != MethodCallCheckerFieldCallableErrorCode::ALREADY_REPORTED) {
     this->state.getDiagnostics().error(member->loc(), callable.error().message);
   }
-  this->argumentChecker->checkArgsLoosely(call);
+  this->argumentChecker->walkArgsLoosely(call);
 
   return call;
 }
@@ -297,11 +297,12 @@ MethodCallChecker::ResultNoTypeArguments MethodCallChecker::classTypeArgs(const 
 
 MethodCallChecker::ResultClassIsDeclared
 MethodCallChecker::classDeclared(const ClassDecl *cls) const {
-  bool early = !cls->staticOwner()->declared && this->state.getModuleStates().getLoadingModule() &&
-               !this->state.getFunctionStack().isInsideFunction() &&
-               this->state.getModuleStates().findDeclModule(cls) ==
-                   this->state.getModuleStates().getLoadingModule();
-  if (early) {
+  bool isEarly = !cls->staticOwner()->declared &&
+                 this->state.getModuleStates().getLoadingModule() &&
+                 !this->state.getFunctionStack().isInsideFunction() &&
+                 this->state.getModuleStates().findDeclModule(cls) ==
+                     this->state.getModuleStates().getLoadingModule();
+  if (isEarly) {
     std::string message = ErrorTextClassOrder::usedEarly(cls->name);
 
     return err(MethodCallCheckerClassDeclaredError{
@@ -359,9 +360,9 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
   expr->form = ClassNew{.cls = cls, .ctor = call};
   call->type = Type::voidTy();
   std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(cls);
-  bool made = ctors.empty() ? this->noArgumentsFit(expr, call, cls)
-                            : this->constructorChosen(expr, call, ctors);
-  if (!made) {
+  bool isMade = ctors.empty() ? this->noArgumentsFit(expr, call, cls)
+                              : this->constructorChosen(expr, call, ctors);
+  if (!isMade) {
     return expr;
   }
   if (MethodCallChecker::hasInitializer(cls)) {
@@ -393,16 +394,16 @@ bool MethodCallChecker::noArgumentsFit(const NewExpr *expr, CallExpr *call, cons
     return true;
   }
   this->state.getDiagnostics().error(expr->loc(), absent.error().message);
-  this->argumentChecker->checkArgsLoosely(call);
+  this->argumentChecker->walkArgsLoosely(call);
 
   return false;
 }
 
 bool MethodCallChecker::constructorChosen(const NewExpr *expr, CallExpr *call,
                                           llvm::ArrayRef<FunctionDecl *> ctors) {
-  bool checked = false;
+  bool isChecked = false;
   OverloadResolver::ResultVariantChosen picked =
-      this->overloadResolver->chooseVariant(ctors, call->args, {}, checked);
+      this->overloadResolver->chooseVariant(ctors, call->args, {}, isChecked);
   if (picked.isErr() &&
       picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
     this->state.getDiagnostics().error(expr->loc(), picked.error().message);
@@ -418,7 +419,7 @@ bool MethodCallChecker::constructorChosen(const NewExpr *expr, CallExpr *call,
     this->state.getDiagnostics().error(expr->loc(), accessible.error().message);
   }
   call->target = FunctionCall{.func = sym};
-  std::vector<bool> given(checked ? call->args.size() : 0, true);
+  std::vector<bool> given(isChecked ? call->args.size() : 0, true);
   this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest, expr->loc(),
                                         &given);
 

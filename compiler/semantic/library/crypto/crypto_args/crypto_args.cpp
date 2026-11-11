@@ -125,8 +125,8 @@ Expr *CryptoArgs::cryptoData(Expr *arg, llvm::StringRef what, bool strings, bool
   if (type->isError()) {
     return arg;
   }
-  bool ok = fits(type) || (type->isUnion() && llvm::all_of(type->members(), fits));
-  if (!ok) {
+  bool isOk = fits(type) || (type->isUnion() && llvm::all_of(type->members(), fits));
+  if (!isOk) {
     std::string message = ErrorTextCryptoData::notData(what, strings, buffers, keys, type);
     this->state.getDiagnostics().error(arg->loc(), message);
     arg->type = Type::error();
@@ -367,7 +367,7 @@ bool CryptoArgs::checkCipherLengths(const Expr *cipher, const Expr *key, const E
   }
   llvm::StringRef name = kDirectCiphers[index->value].name;
   int64_t keyBytes = name.contains("128") ? 16 : name.contains("192") ? 24 : 32;
-  bool anyIv = name.ends_with("gcm");
+  bool isAnyIv = name.ends_with("gcm");
   int64_t ivBytes = name.starts_with("chacha") ? 12 : 16;
   auto bytesOf = [&](const Expr *e) -> std::optional<int64_t> {
     Type::Bytes kind = e->type->bytes();
@@ -377,24 +377,24 @@ bool CryptoArgs::checkCipherLengths(const Expr *cipher, const Expr *key, const E
 
     return this->indexProofs->exactLength(e);
   };
-  bool ok = true;
+  bool isOk = true;
   if (std::optional<int64_t> have = bytesOf(key); have && *have != keyBytes) {
     std::string message = ErrorTextCryptoCipher::keyBytes(name, keyBytes, *have);
     this->state.getDiagnostics().error(key->loc(), message);
-    ok = false;
+    isOk = false;
   }
   std::optional<int64_t> ivHave = bytesOf(iv);
-  if (ivHave && anyIv && *ivHave == 0) {
+  if (ivHave && isAnyIv && *ivHave == 0) {
     std::string message = ErrorTextCryptoCipher::emptyIv(name);
     this->state.getDiagnostics().error(iv->loc(), message);
-    ok = false;
-  } else if (ivHave && !anyIv && *ivHave != ivBytes) {
+    isOk = false;
+  } else if (ivHave && !isAnyIv && *ivHave != ivBytes) {
     std::string message = ErrorTextCryptoCipher::ivBytes(name, ivBytes, *ivHave);
     this->state.getDiagnostics().error(iv->loc(), message);
-    ok = false;
+    isOk = false;
   }
 
-  return ok;
+  return isOk;
 }
 
 Expr *CryptoArgs::cryptoKey(Expr *arg, llvm::StringRef what) {

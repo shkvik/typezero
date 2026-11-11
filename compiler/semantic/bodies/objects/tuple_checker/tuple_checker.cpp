@@ -124,13 +124,13 @@ TupleChecker::ResultTupleMethod TupleChecker::checkTupleMethod(CallExpr *call, M
     text = object->name.str();
   }
   const ArrayMethodInfo *method = ArrayMethodTable::find(name);
-  bool joins = method != nullptr && method->method == ArrayMethod::JOIN;
-  bool resizes = method != nullptr && method->form.is<ResizingArrayMethod>();
-  if (joins) {
+  bool isJoining = method != nullptr && method->method == ArrayMethod::JOIN;
+  bool isResizing = method != nullptr && method->form.is<ResizingArrayMethod>();
+  if (isJoining) {
     ResultTupleJoined joined = this->checkTupleJoin(call, member);
-    bool reported = joined.isErr() &&
-                    joined.error().code == TupleCheckerCheckTupleJoinErrorCode::ALREADY_REPORTED;
-    if (reported) {
+    bool isReported = joined.isErr() &&
+                      joined.error().code == TupleCheckerCheckTupleJoinErrorCode::ALREADY_REPORTED;
+    if (isReported) {
       return err(TupleCheckerCheckTupleMethodError{
           .code = TupleCheckerCheckTupleMethodErrorCode::ALREADY_REPORTED,
           .message = "",
@@ -144,9 +144,9 @@ TupleChecker::ResultTupleMethod TupleChecker::checkTupleMethod(CallExpr *call, M
     }
     return ok(joined.value());
   }
-  this->argumentChecker->checkArgsLoosely(call);
+  this->argumentChecker->walkArgsLoosely(call);
   call->type = Type::error();
-  if (resizes) {
+  if (isResizing) {
     std::string message = ErrorTextTupleMethod::fixedLen(name, text);
 
     return err(TupleCheckerCheckTupleMethodError{
@@ -175,13 +175,13 @@ TupleChecker::ResultTupleFilled TupleChecker::checkTupleLit(ArrayLitExpr *lit, c
   llvm::ArrayRef<Field> fields = tuple->fields();
   lit->type = Type::error();
   auto spreads = [](const ArrayLitExpr::Element &e) { return e.spread; };
-  bool spread = llvm::any_of(lit->elements, spreads);
-  if (spread || lit->elements.size() != fields.size()) {
+  bool isSpread = llvm::any_of(lit->elements, spreads);
+  if (isSpread || lit->elements.size() != fields.size()) {
     for (ArrayLitExpr::Element &e : lit->elements) {
       e.expr = this->exprChecker->checkExpr(e.expr);
     }
   }
-  if (spread) {
+  if (isSpread) {
     std::string message = ErrorTextTupleLit::spread(tuple->name());
 
     return err(TupleCheckerCheckTupleLitError{

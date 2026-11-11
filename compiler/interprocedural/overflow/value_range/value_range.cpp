@@ -284,8 +284,8 @@ Num ValueRange::powerFloat(const Num &a, const Num &b) {
   if (a.empty() || b.empty()) {
     return Num();
   }
-  bool straddles = a.lo <= 0 && a.hi >= 0;
-  double small = straddles ? ValueRange::awayOf(a) : std::min(std::fabs(a.lo), std::fabs(a.hi));
+  bool isStraddling = a.lo <= 0 && a.hi >= 0;
+  double small = isStraddling ? ValueRange::awayOf(a) : std::min(std::fabs(a.lo), std::fabs(a.hi));
   double big = std::max(std::fabs(a.lo), std::fabs(a.hi));
   double lo = kInf, hi = 0;
   for (double m : {small, big}) {
@@ -298,8 +298,8 @@ Num ValueRange::powerFloat(const Num &a, const Num &b) {
       hi = std::max(hi, p);
     }
   }
-  bool even = b.lo == b.hi && std::fmod(b.lo, 2.0) == 0;
-  if (a.lo < 0 && !even) {
+  bool isEven = b.lo == b.hi && std::fmod(b.lo, 2.0) == 0;
+  if (a.lo < 0 && !isEven) {
     return ValueRange::mixed(-hi, hi, a, b);
   }
 
@@ -354,6 +354,28 @@ Limits ValueRange::limitsOf(const Type *type) {
     return {-kInf, kInf};
   }
   type = type->nonOptional();
+  if (!type->isUnion()) {
+    return ValueRange::plainLimits(type);
+  }
+  Limits r{kInf, -kInf};
+  auto pending = std::vector<const Type *>(type->members().begin(), type->members().end());
+  while (!pending.empty()) {
+    const Type *member = pending.back();
+    pending.pop_back();
+    if (member != nullptr && member->nonOptional()->isUnion()) {
+      const auto &inner = member->nonOptional()->members();
+      pending.insert(pending.end(), inner.begin(), inner.end());
+      continue;
+    }
+    Limits l =
+        member != nullptr ? ValueRange::plainLimits(member->nonOptional()) : Limits{-kInf, kInf};
+    r = {std::min(r.lo, l.lo), std::max(r.hi, l.hi)};
+  }
+
+  return r;
+}
+
+Limits ValueRange::plainLimits(const Type *type) {
   if (type->isInteger()) {
     return {double(type->intMin()), double(type->intMax())};
   }
@@ -362,14 +384,6 @@ Limits ValueRange::limitsOf(const Type *type) {
   }
   if (type->isLiteral() && type->literalBase()->isNumeric()) {
     return {type->literalNumber(), type->literalNumber()};
-  }
-  if (type->isUnion()) {
-    Limits r{kInf, -kInf};
-    for (const Type *m : type->members()) {
-      Limits l = ValueRange::limitsOf(m);
-      r = {std::min(r.lo, l.lo), std::max(r.hi, l.hi)};
-    }
-    return r;
   }
 
   return {-kInf, kInf};
@@ -382,9 +396,9 @@ bool ValueRange::fitsLow(double lo, const Type *type) {
 bool ValueRange::fitsHigh(double hi, const Type *type) {
   Limits l = ValueRange::limitsOf(type);
   type = type->nonOptional();
-  bool rounded = type->isInteger() && type->bitWidth() == 64;
+  bool isRounded = type->isInteger() && type->bitWidth() == 64;
 
-  return rounded ? hi < l.hi : hi <= l.hi;
+  return isRounded ? hi < l.hi : hi <= l.hi;
 }
 
 bool ValueRange::fits(const Num &n, const Type *type) {
@@ -461,8 +475,15 @@ bool ValueRange::hasLength(const Type *type) {
 }
 
 bool ValueRange::tracked(const Type *type) {
-  return ValueRange::isNumberType(type) || ValueRange::hasLength(type) ||
-         (type && type->isResult() && ValueRange::tracked(type->okType()));
+  const Type *link = type;
+  while (!ValueRange::isNumberType(link) && !ValueRange::hasLength(link)) {
+    if (link == nullptr || !link->isResult()) {
+      return false;
+    }
+    link = link->okType();
+  }
+
+  return true;
 }
 
 Val ValueRange::numVal(Num num) {
@@ -488,31 +509,61 @@ ValPtr ValueRange::share(Val v) {
 }
 
 Val ValueRange::join(const Val &a, const Val &b) {
-  if (ValueRange::isBottom(a)) {
-    return b;
+  auto links = std::vector<std::pair<const Val *, const Val *>>{{&a, &b}};
+  while (ValueRange::needsDeeperJoin(*links.back().first, *links.back().second)) {
+    auto [left, right] = links.back();
+    links.push_back({left->elem.get(), right->elem.get()});
   }
-  if (ValueRange::isBottom(b)) {
-    return a;
+  auto [deepLeft, deepRight] = links.back();
+  Val joined;
+  if (ValueRange::isBottom(*deepLeft)) {
+    joined = *deepRight;
+  } else if (ValueRange::isBottom(*deepRight)) {
+    joined = *deepLeft;
+  } else {
+    joined = ValueRange::joinNumbers(*deepLeft, *deepRight);
+    if (deepLeft->elem && deepRight->elem) {
+      joined.elem = deepLeft->elem;
+    }
   }
-  Val r;
-  r.num = ValueRange::join(a.num, b.num);
-  r.len = ValueRange::join(a.len, b.len);
-  if (a.elem && b.elem) {
-    r.elem = a.elem == b.elem ? a.elem : ValueRange::share(ValueRange::join(*a.elem, *b.elem));
+  for (size_t i = links.size() - 1; i > 0; --i) {
+    auto [left, right] = links[i - 1];
+    Val upper = ValueRange::joinNumbers(*left, *right);
+    upper.elem = ValueRange::share(joined);
+    joined = upper;
   }
 
-  return r;
+  return joined;
+}
+
+bool ValueRange::needsDeeperJoin(const Val &a, const Val &b) {
+  return !ValueRange::isBottom(a) && !ValueRange::isBottom(b) && a.elem && b.elem &&
+         a.elem != b.elem;
+}
+
+Val ValueRange::joinNumbers(const Val &a, const Val &b) {
+  Val joined;
+  joined.num = ValueRange::join(a.num, b.num);
+  joined.len = ValueRange::join(a.len, b.len);
+
+  return joined;
 }
 
 bool ValueRange::sameVal(const Val &a, const Val &b) {
-  if (!ValueRange::sameNum(a.num, b.num) || !ValueRange::sameNum(a.len, b.len)) {
-    return false;
-  }
-  if (!a.elem || !b.elem) {
-    return !a.elem == !b.elem;
+  const Val *left = &a;
+  const Val *right = &b;
+  while (ValueRange::sameNum(left->num, right->num) && ValueRange::sameNum(left->len, right->len)) {
+    if (left->elem == nullptr || right->elem == nullptr) {
+      return (left->elem == nullptr) == (right->elem == nullptr);
+    }
+    if (left->elem == right->elem) {
+      return true;
+    }
+    left = left->elem.get();
+    right = right->elem.get();
   }
 
-  return a.elem == b.elem || ValueRange::sameVal(*a.elem, *b.elem);
+  return false;
 }
 
 State ValueRange::join(const State &a, const State &b) {

@@ -72,8 +72,8 @@ const Type *PromiseChecker::executorValueType(const Expr *executor) {
     return Type::voidTy();
   }
   llvm::StringRef resolve = fe->fn->params[0].name;
-  bool given = PromiseChecker::callsWithValue(fe->fn->body, resolve);
-  if (!given) {
+  bool isGiven = PromiseChecker::callsWithValue(fe->fn->body, resolve);
+  if (!isGiven) {
     return Type::voidTy();
   }
   if (fe->fn->pristine == nullptr) {
@@ -83,17 +83,17 @@ const Type *PromiseChecker::executorValueType(const Expr *executor) {
   copy->sym = nullptr;
   auto *trial = this->state.getAst().make<FunctionExpr>(fe->loc(), copy);
   Flow saved = this->state.getFlowState().getFlow();
-  bool muted = this->state.getDiagnostics().setMuted(true);
+  this->state.getDiagnostics().pushList(DiagnosticRoute::DISCARD);
   Signature sig;
   sig.params = {Type::error(), Type::error()};
   sig.ret = Type::voidTy();
   sig.voidResult = true;
   sig.pad = false;
   this->closureChecker->checkFunctionExpr(trial, &sig);
-  this->state.getDiagnostics().setMuted(muted);
+  this->state.getDiagnostics().popList();
   this->state.getFlowState().replaceFlow(std::move(saved));
   const Type *found = nullptr;
-  bool unknown = false;
+  bool isUnknown = false;
   for (const Expr *e : AstWalker::exprsIn(copy->body, true)) {
     auto *call = dyn_cast<CallExpr>(e);
     auto *name = call ? dyn_cast<NameExpr>(call->callee) : nullptr;
@@ -102,18 +102,18 @@ const Type *PromiseChecker::executorValueType(const Expr *executor) {
     }
     const Type *t = call->args[0]->type;
     if (!t || t->isError() || t->isVoid() || t->isUndefined()) {
-      unknown = true;
+      isUnknown = true;
       continue;
     }
     const Type *common = found ? LiteralTypes::unionUnify(found, t) : t;
     if (!common || common->isError()) {
-      unknown = true;
+      isUnknown = true;
     } else {
       found = common;
     }
   }
 
-  return unknown ? nullptr : found;
+  return isUnknown ? nullptr : found;
 }
 
 PromiseChecker::ResultValueTypeKnown PromiseChecker::valueType(NewExpr *expr, const CallExpr *call,
@@ -219,7 +219,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
   if (value->isResult() && resultMethod != nullptr) {
     auto *object = dyn_cast<NameExpr>(member->object);
     std::string promise = object ? object->name.str() : "p";
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     call->type = Type::error();
     std::string message = ErrorTextPromiseMethod::onResult(name, promise);
 
@@ -236,7 +236,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
   }
   this->state.getInventoryStore().markUsesAsync();
   if (name == "catch") {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     call->type = Type::error();
     std::string message = ErrorTextPromiseMethod::noCatch();
 
@@ -246,7 +246,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
     });
   }
   if (name == "finally") {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     call->type = Type::error();
     std::string message = ErrorTextPromiseMethod::noFinally();
 
@@ -256,7 +256,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
     });
   }
   if (name == "then" && call->args.size() == 2) {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     call->type = Type::error();
     std::string message = ErrorTextPromiseMethod::thenTwo();
 
@@ -266,7 +266,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
     });
   }
   if (name != "then") {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextPromiseMethod::noMethod(name, type->name());
 
     return err(PromiseCheckerCheckPromiseMethodError{
@@ -286,7 +286,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
   const Type *wanted = expected && expected->nonOptional()->isPromise()
                            ? expected->nonOptional()->promised()
                            : nullptr;
-  bool failed = false;
+  bool isFailed = false;
   auto callback = [&](Expr *&arg, const Type *param) -> const Type * {
     if (isa<UndefinedExpr>(arg)) {
       arg = this->exprChecker->checkExpr(arg);
@@ -303,7 +303,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
     }
     arg = this->callbackChecker->checkFunctionArg(arg, sig, 1, name);
     if (!arg->type->isFunction()) {
-      failed = true;
+      isFailed = true;
       return nullptr;
     }
     if (auto *fe = dyn_cast<FunctionExpr>(arg)) {
@@ -315,7 +315,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
   call->target = BuiltinCall{.builtin = Builtin::PromiseThen};
   const Type *onFulfilled = callback(call->args[0], value);
   const Type *result = onFulfilled ? onFulfilled : value;
-  if (failed || result->isError()) {
+  if (isFailed || result->isError()) {
     return err(PromiseCheckerCheckPromiseMethodError{
         .code = PromiseCheckerCheckPromiseMethodErrorCode::ALREADY_REPORTED,
         .message = "",

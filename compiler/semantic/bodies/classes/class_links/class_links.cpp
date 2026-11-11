@@ -391,14 +391,18 @@ ClassLinks::ResultSameTypeParams ClassLinks::sameTypeArgs(const ClassDecl *cls,
 }
 
 void ClassLinks::linkOverrides(ClassDecl *cls) {
-  bool muted = this->state.getDiagnostics().setMuted(false);
-  this->state.getDiagnostics().setMuted(muted || cls->generic() != nullptr);
+  bool isInstance = cls->generic() != nullptr;
+  if (isInstance) {
+    this->state.getDiagnostics().pushList(DiagnosticRoute::DISCARD);
+  }
   for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
     if (fn->sym != nullptr) {
       this->linkOverride(cls, fn);
     }
   }
-  this->state.getDiagnostics().setMuted(muted);
+  if (isInstance) {
+    this->state.getDiagnostics().popList();
+  }
 }
 
 void ClassLinks::linkOverride(ClassDecl *cls, FunctionDecl *fn) {
@@ -449,7 +453,7 @@ void ClassLinks::walkNewMethod(const ClassDecl *cls, FunctionDecl *fn,
     return;
   }
   for (FunctionDecl *v : inherited) {
-    this->classDeclarer->checkVariantPair(v, fn);
+    this->classDeclarer->reportVariantPair(v, fn);
   }
 }
 
@@ -482,9 +486,7 @@ void ClassLinks::walkOverrideChain(const ClassDecl *cls, const FunctionDecl *fn,
   for (FunctionDecl *p = base; p != nullptr; p = p->overrides()) {
     ResultSameTypeParams same = this->sameTypeArgs(cls, fn, p);
     if (same.isErr()) {
-      bool outer = this->state.getDiagnostics().setMuted(false);
-      this->state.getDiagnostics().error(fn->loc(), same.error().message);
-      this->state.getDiagnostics().setMuted(outer);
+      this->state.getDiagnostics().errorOutsideTrials(fn->loc(), same.error().message);
     }
     this->genericClassInstantiator->markOverridden(p);
   }

@@ -212,13 +212,13 @@ std::vector<InferStep> Inference::inferFunction(const Type *pattern, const Type 
   }
   std::vector<InferStep> inner;
   llvm::ArrayRef<const Type *> ps = pattern->params();
-  bool list =
+  bool isList =
       pattern->hasRest() && (ps.back()->isListParam() || ArgListChecker::spreadsLists(ps.back()));
-  size_t fixed = list ? ps.size() - 1 : ps.size();
+  size_t fixed = isList ? ps.size() - 1 : ps.size();
   for (size_t i = 0; i < fixed && i < actual->params().size(); ++i) {
     inner.push_back(InferPair{ps[i], actual->params()[i]});
   }
-  if (list && actual->params().size() - (actual->hasRest() ? 1 : 0) >= fixed) {
+  if (isList && actual->params().size() - (actual->hasRest() ? 1 : 0) >= fixed) {
     inner.push_back(InferPair{ps.back(), Inference::paramsAsList(actual, fixed)});
   }
   std::optional<size_t> returned = this->paramIndex(pattern->ret());
@@ -266,7 +266,11 @@ std::vector<InferStep> Inference::inferObject(const Type *pattern, const Type *a
   if (pattern->isAsyncIterator()) {
     return this->inferAsyncIterator(pattern, actual);
   }
-  if (!actual->isObject() || !this->visited.insert({pattern, actual}).second) {
+  if (!actual->isObject()) {
+    return {};
+  }
+  auto [_, isFirstVisit] = this->visited.insert({pattern, actual});
+  if (!isFirstVisit) {
     return {};
   }
   if (ArgListChecker::spreadsLists(pattern) && actual->isTuple()) {

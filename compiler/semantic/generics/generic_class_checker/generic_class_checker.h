@@ -32,7 +32,7 @@ public:
   void bindClassTypeParams(const ClassDecl *cls);
   const Type *instanceType(const ClassDecl *inst, const Type *type);
   const Type *instanceValueType(const ClassDecl *inst, const Type *type);
-  void checkClassInstance(InstanceRecord *instance);
+  void walkClassInstance(InstanceRecord *instance);
   void reportClassInstance(InstanceRecord *instance, llvm::SMLoc loc);
   Expr *checkGenericNew(NewExpr *expr, ClassDecl *generic, const Type *expected);
 

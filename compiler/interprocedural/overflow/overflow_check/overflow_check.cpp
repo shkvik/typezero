@@ -144,7 +144,7 @@ OverflowCheck::ResultOverflowChecked OverflowCheck::run() {
   return ok();
 }
 
-void OverflowCheck::joinInto(Summaries &into, const Summaries &from) {
+void OverflowCheck::joinInto(Summaries &into, const Summaries &from) const {
   for (const auto &[fn, slots] : from.params) {
     std::vector<Slot> &target = into.params[fn];
     if (target.size() < slots.size()) {

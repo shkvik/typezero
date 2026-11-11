@@ -34,7 +34,7 @@ public:
 
   static std::vector<const Stmt *> followingStatements(llvm::ArrayRef<Stmt *> stmts, size_t i);
 
-  void checkVarDecl(VarDeclStmt *decl);
+  void walkVarDecl(VarDeclStmt *decl);
   void noteUntyped(VarSymbol *var, bool initUndefined);
   void assignedUntyped(const VarSymbol *var, const Type *type);
   void reportUntyped();

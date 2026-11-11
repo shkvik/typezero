@@ -44,7 +44,6 @@ bool Scanner::regexMayFollow(const Token *prev) {
 std::vector<Token> Scanner::tokenize(llvm::StringRef text) {
   llvm::SourceMgr sourceMgr;
   Diagnostics diags(sourceMgr);
-  diags.setMuted(true);
   Lexer lexer(text, diags);
   std::vector<Token> tokens;
   while (true) {

@@ -63,76 +63,120 @@ std::optional<size_t> OverflowHelpers::callbackArg(Builtin builtin) {
 }
 
 Val OverflowHelpers::widenVal(const Val &old, const Val &grown, const Type *type) {
-  Val r = grown;
-  auto widen = [](const Num &o, Num n, Limits l) {
-    if (o.empty() || n.empty()) {
-      return n;
-    }
-    if (n.lo < o.lo) {
-      n.lo = l.lo;
-      if (!ValueRange::dangerous(n.loOrigin)) {
-        n.loOrigin = Origin::Trusted, n.loWhy = nullptr;
-      }
-    }
-    if (n.hi > o.hi) {
-      n.hi = l.hi;
-      if (!ValueRange::dangerous(n.hiOrigin)) {
-        n.hiOrigin = Origin::Trusted, n.hiWhy = nullptr;
-      }
-    }
-
-    return n;
-  };
-  r.num = widen(old.num, grown.num, ValueRange::limitsOf(type));
-  r.len = widen(old.len, grown.len, {0, kLengthMax});
-  if (old.elem && grown.elem) {
-    const Type *element =
-        type && type->nonOptional()->isArray() ? type->nonOptional()->inner() : nullptr;
-    r.elem = ValueRange::share(OverflowHelpers::widenVal(*old.elem, *grown.elem, element));
+  auto links = std::vector<WidenLink>{WidenLink{.old = &old, .grown = &grown, .type = type}};
+  while (links.back().old->elem != nullptr && links.back().grown->elem != nullptr) {
+    WidenLink last = links.back();
+    bool isArray = last.type != nullptr && last.type->nonOptional()->isArray();
+    const Type *element = isArray ? last.type->nonOptional()->inner() : nullptr;
+    links.push_back(WidenLink{
+        .old = last.old->elem.get(),
+        .grown = last.grown->elem.get(),
+        .type = element,
+    });
+  }
+  Val widened = OverflowHelpers::widenLink(links.back());
+  for (size_t i = links.size() - 1; i > 0; --i) {
+    Val outer = OverflowHelpers::widenLink(links[i - 1]);
+    outer.elem = ValueRange::share(widened);
+    widened = outer;
   }
 
-  return r;
+  return widened;
+}
+
+Val OverflowHelpers::widenLink(const WidenLink &link) {
+  Val widened = *link.grown;
+  Limits numLimits = ValueRange::limitsOf(link.type);
+  widened.num = OverflowHelpers::widenNum(link.old->num, link.grown->num, numLimits);
+  widened.len = OverflowHelpers::widenNum(link.old->len, link.grown->len, {0, kLengthMax});
+
+  return widened;
+}
+
+Num OverflowHelpers::widenNum(const Num &old, Num grown, Limits limits) {
+  if (old.empty() || grown.empty()) {
+    return grown;
+  }
+  if (grown.lo < old.lo) {
+    grown.lo = limits.lo;
+    if (!ValueRange::dangerous(grown.loOrigin)) {
+      grown.loOrigin = Origin::Trusted, grown.loWhy = nullptr;
+    }
+  }
+  if (grown.hi > old.hi) {
+    grown.hi = limits.hi;
+    if (!ValueRange::dangerous(grown.hiOrigin)) {
+      grown.hiOrigin = Origin::Trusted, grown.hiWhy = nullptr;
+    }
+  }
+
+  return grown;
 }
 
 bool OverflowHelpers::containsLoop(const Stmt *stmt) {
-  if (!stmt) {
-    return false;
-  }
-  switch (stmt->kind()) {
-  case Stmt::Kind::While:
-  case Stmt::Kind::DoWhile:
-  case Stmt::Kind::For:
-  case Stmt::Kind::ForOf:
-    return true;
-  case Stmt::Kind::Block:
-    return llvm::any_of(cast<BlockStmt>(stmt)->body, containsLoop);
-  case Stmt::Kind::If:
-    if (OverflowHelpers::containsLoop(cast<IfStmt>(stmt)->thenStmt) ||
-        OverflowHelpers::containsLoop(cast<IfStmt>(stmt)->elseStmt)) {
+  auto pending = std::vector<const Stmt *>{stmt};
+  while (!pending.empty()) {
+    const Stmt *next = pending.back();
+    pending.pop_back();
+    if (next == nullptr) {
+      continue;
+    }
+    if (OverflowHelpers::isLoopHere(next)) {
       return true;
     }
-    break;
-  case Stmt::Kind::Labeled:
-    return OverflowHelpers::containsLoop(cast<LabeledStmt>(stmt)->body);
-  case Stmt::Kind::Switch:
-    for (const SwitchCase &c : cast<SwitchStmt>(stmt)->cases) {
-      if (llvm::any_of(c.body, containsLoop)) {
-        return true;
-      }
-    }
-    break;
-  default:
-    break;
+    auto parts = OverflowHelpers::loopParts(next);
+    pending.insert(pending.end(), parts.rbegin(), parts.rend());
   }
+
+  return false;
+}
+
+bool OverflowHelpers::isLoopHere(const Stmt *stmt) {
+  if (isa<WhileStmt, DoWhileStmt, ForStmt, ForOfStmt>(stmt)) {
+    return true;
+  }
+  if (isa<BlockStmt, LabeledStmt>(stmt)) {
+    return false;
+  }
+
+  return OverflowHelpers::passesCallback(stmt);
+}
+
+std::vector<const Stmt *> OverflowHelpers::loopParts(const Stmt *stmt) {
+  const auto *block = dyn_cast<BlockStmt>(stmt);
+  if (block != nullptr) {
+    return std::vector<const Stmt *>(block->body.begin(), block->body.end());
+  }
+  const auto *branch = dyn_cast<IfStmt>(stmt);
+  if (branch != nullptr) {
+    return {branch->thenStmt, branch->elseStmt};
+  }
+  const auto *labeled = dyn_cast<LabeledStmt>(stmt);
+  if (labeled != nullptr) {
+    return {labeled->body};
+  }
+  const auto *choice = dyn_cast<SwitchStmt>(stmt);
+  if (choice == nullptr) {
+    return {};
+  }
+  auto parts = std::vector<const Stmt *>();
+  for (const SwitchCase &c : choice->cases) {
+    parts.insert(parts.end(), c.body.begin(), c.body.end());
+  }
+
+  return parts;
+}
+
+bool OverflowHelpers::passesCallback(const Stmt *stmt) {
   for (const Expr *e : AstWalker::exprsIn(stmt, false)) {
     auto *call = dyn_cast<CallExpr>(e);
     if (call == nullptr) {
       continue;
     }
     std::optional<size_t> at = OverflowHelpers::callbackArg(call->builtin());
-    bool passesFunction = at.has_value() && *at < call->args.size() &&
-                          isa<FunctionExpr>(OverflowHelpers::stripCasts(call->args[*at]));
-    if (passesFunction) {
+    bool isPassingFunction = at.has_value() && *at < call->args.size() &&
+                             isa<FunctionExpr>(OverflowHelpers::stripCasts(call->args[*at]));
+    if (isPassingFunction) {
       return true;
     }
   }

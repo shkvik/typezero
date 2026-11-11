@@ -128,10 +128,10 @@ bool DateFormatChecker::isLanguageTag(const std::string &tag) {
     }
   }
   llvm::StringRef language = parts[0];
-  bool length = (language.size() >= 2 && language.size() <= 3) ||
-                (language.size() >= 5 && language.size() <= 8);
+  bool isLength = (language.size() >= 2 && language.size() <= 3) ||
+                  (language.size() >= 5 && language.size() <= 8);
 
-  return length && llvm::all_of(language, alpha);
+  return isLength && llvm::all_of(language, alpha);
 }
 
 DateFormatChecker::ResultOptionsObject DateFormatChecker::optionsObject(const Type *type,
@@ -151,13 +151,13 @@ DateFormatChecker::ResultOptionsObject DateFormatChecker::optionsObject(const Ty
 }
 
 bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
-  bool ok = true;
+  bool isOk = true;
   if (!args.empty()) {
     args[0] = this->exprChecker->checkExpr(args[0]);
-    ok = this->intlChecker->checkLocaleArg(args[0], DateFormatChecker::methodName(kind));
+    isOk = this->intlChecker->checkLocaleArg(args[0], DateFormatChecker::methodName(kind));
   }
   if (args.size() < 2) {
-    return ok;
+    return isOk;
   }
   Expr *&options = args[1];
   options = this->exprChecker->checkExpr(options);
@@ -166,47 +166,47 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
     return false;
   }
   if (type->isUndefined()) {
-    return ok;
+    return isOk;
   }
   ResultOptionsObject object = DateFormatChecker::optionsObject(type, kind);
   if (object.isErr()) {
     this->state.getDiagnostics().error(options->loc(), object.error().message);
     return false;
   }
-  bool kindsFit = this->optionKindsFit(options, kind);
-  bool valuesFit = this->optionValuesFit(options);
+  bool isKindFitting = this->optionKindsFit(options, kind);
+  bool isValuesFitting = this->optionValuesFit(options);
 
-  return ok && kindsFit && valuesFit;
+  return isOk && isKindFitting && isValuesFitting;
 }
 
 bool DateFormatChecker::optionKindsFit(const Expr *options, int kind) {
-  bool ok = true;
+  bool isOk = true;
   bool hasStyle = false;
   bool hasComponent = false;
   for (const Field &field : options->type->fields()) {
     std::optional<DateFormatOption> option = DateFormatOptionTable::find(field.name);
-    bool fits = this->optionKindFits(options, field, option, kind);
-    if (!fits) {
-      ok = false;
+    bool isFitting = this->optionKindFits(options, field, option, kind);
+    if (!isFitting) {
+      isOk = false;
       continue;
     }
-    bool present = !field.type->isOptional();
+    bool isPresent = !field.type->isOptional();
     DateOptionRole role = DateFormatChecker::optionRole(*option);
     if (role == DateOptionRole::Style) {
-      hasStyle |= present;
-      bool methodFits = !present || this->styleFitsMethod(options, field.name, kind);
-      ok &= methodFits;
+      hasStyle |= isPresent;
+      bool isMethodFits = !isPresent || this->styleFitsMethod(options, field.name, kind);
+      isOk &= isMethodFits;
     } else if (role == DateOptionRole::Component) {
-      hasComponent |= present;
+      hasComponent |= isPresent;
     }
   }
   if (hasStyle && hasComponent) {
     std::string message = ErrorTextDateOptions::styleParts();
     this->state.getDiagnostics().error(options->loc(), message);
-    ok = false;
+    isOk = false;
   }
 
-  return ok;
+  return isOk;
 }
 
 bool DateFormatChecker::optionKindFits(const Expr *options, const Field &field,
@@ -234,8 +234,8 @@ const Type *DateFormatChecker::wantedOptionType(DateFormatOption option, const T
     return Type::boolTy();
   }
   if (option == DateFormatOption::FRACTIONAL_SECOND_DIGITS) {
-    bool numeric = value->isNumeric() || DateFormatChecker::numbersOf(value).has_value();
-    return numeric ? value : Type::intTy();
+    bool isNumeric = value->isNumeric() || DateFormatChecker::numbersOf(value).has_value();
+    return isNumeric ? value : Type::intTy();
   }
   if (DateFormatChecker::textsOf(value).has_value()) {
     return value;
@@ -275,9 +275,9 @@ DateFormatChecker::DateOptionRole DateFormatChecker::optionRole(DateFormatOption
 }
 
 bool DateFormatChecker::styleFitsMethod(const Expr *options, llvm::StringRef name, int kind) {
-  bool foreign = (kind == TZ_DATE_LOCALE_DATE && name == "timeStyle") ||
-                 (kind == TZ_DATE_LOCALE_TIME && name == "dateStyle");
-  if (!foreign) {
+  bool isForeign = (kind == TZ_DATE_LOCALE_DATE && name == "timeStyle") ||
+                   (kind == TZ_DATE_LOCALE_TIME && name == "dateStyle");
+  if (!isForeign) {
     return true;
   }
   std::string message = ErrorTextDateOptions::styleOnly(name, DateFormatChecker::methodName(kind));
@@ -288,22 +288,22 @@ bool DateFormatChecker::styleFitsMethod(const Expr *options, llvm::StringRef nam
 
 bool DateFormatChecker::optionValuesFit(const Expr *options) {
   auto *literal = dyn_cast<ObjectLitExpr>(options);
-  bool exempt = this->indexProofs->exempt(options->loc());
-  bool ok = true;
+  bool isExempt = this->indexProofs->exempt(options->loc());
+  bool isOk = true;
   for (const Field &field : options->type->fields()) {
     const Expr *given = DateFormatChecker::givenProperty(literal, field.name);
     DateOptionPlace place{
         .given = given,
         .at = given != nullptr ? given->loc() : options->loc(),
-        .exempt = exempt,
+        .exempt = isExempt,
     };
     std::optional<DateFormatOption> option = DateFormatOptionTable::find(field.name);
-    bool digits = option == DateFormatOption::FRACTIONAL_SECOND_DIGITS;
-    bool fits = digits ? this->digitsFit(field, place) : this->optionTextFits(field, place);
-    ok &= fits;
+    bool hasDigits = option == DateFormatOption::FRACTIONAL_SECOND_DIGITS;
+    bool isFitting = hasDigits ? this->digitsFit(field, place) : this->optionTextFits(field, place);
+    isOk &= isFitting;
   }
 
-  return ok;
+  return isOk;
 }
 
 const Expr *DateFormatChecker::givenProperty(const ObjectLitExpr *literal, llvm::StringRef name) {
@@ -331,9 +331,9 @@ bool DateFormatChecker::digitsFit(const Field &field, const DateOptionPlace &pla
   }
   std::optional<std::vector<double>> digits =
       DateFormatChecker::numbersOf(field.type->nonOptional());
-  bool outside =
+  bool isOutside =
       !digits.has_value() || llvm::any_of(*digits, [](double d) { return d < 1 || d > 3; });
-  if (place.exempt || !outside) {
+  if (place.exempt || !isOutside) {
     return true;
   }
   std::string message = ErrorTextDateOptions::digits();

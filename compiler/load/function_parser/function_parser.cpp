@@ -238,11 +238,11 @@ Expr *FunctionParser::tryAsyncFunction() {
   this->parser.cursor().advance();
   if (this->parser.tok.is(Tok::Less)) {
     const char *text = this->parser.tok.text.data();
-    bool muted = this->parser.diags.setMuted(true);
+    this->parser.diags.pushList(DiagnosticRoute::DISCARD);
     this->parser.recovering = false;
     std::vector<TypeParamDecl> typeParams = parseTypeParams();
     bool arrow = !this->parser.recovering && this->parser.tok.is(Tok::LParen) && arrowAhead();
-    this->parser.diags.setMuted(muted);
+    this->parser.diags.popList();
     if (!arrow) {
       this->parser.cursor().rewind(std::move(start));
       return nullptr;
@@ -268,7 +268,7 @@ Expr *FunctionParser::tryAsyncFunction() {
 
 bool FunctionParser::arrowAhead() {
   Parser::Snapshot start = this->parser.cursor().snapshot();
-  bool muted = this->parser.diags.setMuted(true);
+  this->parser.diags.pushList(DiagnosticRoute::DISCARD);
   this->parser.recovering = false;
   FunctionDecl probe(this->parser.tok.loc(), "");
   probe.syntax = ArrowFunction{};
@@ -279,7 +279,7 @@ bool FunctionParser::arrowAhead() {
     arrow = !this->parser.recovering;
   }
   arrow = arrow && this->parser.tok.is(Tok::Arrow);
-  this->parser.diags.setMuted(muted);
+  this->parser.diags.popList();
   this->parser.cursor().rewind(std::move(start));
 
   return arrow;

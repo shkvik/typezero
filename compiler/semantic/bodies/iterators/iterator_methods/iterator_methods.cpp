@@ -70,12 +70,12 @@ IteratorMethods::ResultArrayIterateCall IteratorMethods::checkArrayIterator(Call
     });
   }
   const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
-  bool keys = method != nullptr && method->method == ArrayMethod::KEYS;
-  bool values = method != nullptr && method->method == ArrayMethod::VALUES;
-  if (keys) {
+  bool hasKeys = method != nullptr && method->method == ArrayMethod::KEYS;
+  bool hasValues = method != nullptr && method->method == ArrayMethod::VALUES;
+  if (hasKeys) {
     call->target = BuiltinCall{.builtin = Builtin::ArrKeys};
     call->type = Type::iterator(Type::intTy());
-  } else if (values) {
+  } else if (hasValues) {
     call->target = BuiltinCall{.builtin = Builtin::ArrValues};
     call->type = Type::iterator(element);
   } else {
@@ -117,7 +117,7 @@ IteratorMethods::ResultIteratorFromCall IteratorMethods::checkIteratorFrom(CallE
   }
   std::optional<GlobalMember> found = GlobalMemberTable::find(GlobalName::ITERATOR, member->name);
   if (found != GlobalMember::ITERATOR_FROM) {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextStaticFrom::iterator(member->name);
 
     return err(IteratorMethodsCheckIteratorFromError{
@@ -136,11 +136,12 @@ IteratorMethods::ResultIteratorFromCall IteratorMethods::checkIteratorFrom(CallE
   const Type *type = call->args[0]->type;
   ResultSourceIsIterable source = IteratorMethods::iteratedSource(type, "Iterator.from");
   if (source.isErr()) {
-    bool reported = source.error().code == IteratorMethodsIteratedSourceErrorCode::ALREADY_REPORTED;
+    bool isReported =
+        source.error().code == IteratorMethodsIteratedSourceErrorCode::ALREADY_REPORTED;
 
     return err(IteratorMethodsCheckIteratorFromError{
-        .code = reported ? IteratorMethodsCheckIteratorFromErrorCode::ALREADY_REPORTED
-                         : IteratorMethodsCheckIteratorFromErrorCode::NOT_ITERABLE,
+        .code = isReported ? IteratorMethodsCheckIteratorFromErrorCode::ALREADY_REPORTED
+                           : IteratorMethodsCheckIteratorFromErrorCode::NOT_ITERABLE,
         .message = source.error().message,
     });
   }
@@ -185,7 +186,7 @@ Expr *IteratorMethods::checkArrayFrom(CallExpr *call, MemberExpr *member) {
   ResultArrayStaticKnown known = IteratorMethods::arrayStatic(member);
   if (known.isErr()) {
     this->state.getDiagnostics().error(member->loc(), known.error().message);
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
   ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
@@ -403,7 +404,7 @@ Expr *IteratorMethods::checkIteratorStep(CallExpr *call, MemberExpr *member, Bui
   ResultNextValueOneType next = IteratorMethods::nextValue(iterator);
   if (next.isErr()) {
     this->state.getDiagnostics().error(member->loc(), next.error().message);
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
   const Type *value = next.value();
@@ -427,13 +428,13 @@ std::optional<Builtin> IteratorMethods::helperBuiltin(CallExpr *call, MemberExpr
   ResultNotThrowOrReturn plain = IteratorMethods::plainMethod(name);
   if (plain.isErr()) {
     this->state.getDiagnostics().error(member->loc(), plain.error().message);
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     return std::nullopt;
   }
   ResultKnownHelperFound found = IteratorMethods::iteratorHelper(name, iterator);
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     return std::nullopt;
   }
   std::string what = ErrorTextFunctionName::quoted(name);
@@ -441,7 +442,7 @@ std::optional<Builtin> IteratorMethods::helperBuiltin(CallExpr *call, MemberExpr
       this->generatorChecker->checkSendsNothing(iterator, what);
   if (nothing.isErr()) {
     this->state.getDiagnostics().error(member->loc(), nothing.error().message);
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     return std::nullopt;
   }
 
@@ -481,14 +482,14 @@ Expr *IteratorMethods::checkIteratorCallback(CallExpr *call, MemberExpr *member,
   const Type *element = member->object->type->yielded();
   llvm::StringRef name = member->name;
   size_t count = call->args.size();
-  bool reduce = method == IteratorMethod::REDUCE;
-  ResultCallbackIsPassed passed = IteratorMethods::callbackGiven(count, name, reduce);
+  bool isReduce = method == IteratorMethod::REDUCE;
+  ResultCallbackIsPassed passed = IteratorMethods::callbackGiven(count, name, isReduce);
   if (passed.isErr()) {
     this->state.getDiagnostics().error(member->loc(), passed.error().message);
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
-  const Type *accumulator = reduce && count == 2 ? this->reduceInitType(call, element) : element;
+  const Type *accumulator = isReduce && count == 2 ? this->reduceInitType(call, element) : element;
   if (accumulator->isError()) {
     call->args[0] = this->exprChecker->checkExpr(call->args[0]);
     return call;
@@ -497,9 +498,9 @@ Expr *IteratorMethods::checkIteratorCallback(CallExpr *call, MemberExpr *member,
   bool isBoolean = this->callChecker->isGlobalName(call->args[0], GlobalName::BOOLEAN);
   auto *given = dyn_cast<FunctionExpr>(call->args[0]);
   if (given != nullptr) {
-    this->state.getCallbackFacts().rememberIndexCallback(given->fn, reduce ? 2 : 1);
+    this->state.getCallbackFacts().rememberIndexCallback(given->fn, isReduce ? 2 : 1);
   }
-  unsigned primary = reduce ? 2 : 1;
+  unsigned primary = isReduce ? 2 : 1;
   call->args[0] = this->callbackChecker->checkFunctionArg(call->args[0], sig, primary, name);
   auto *checked = dyn_cast<FunctionExpr>(call->args[0]);
   if (BuiltinGroups::isIteratorStage(builtin) && checked != nullptr) {
@@ -527,10 +528,11 @@ Expr *IteratorMethods::checkIteratorCallback(CallExpr *call, MemberExpr *member,
 const Type *IteratorMethods::reduceInitType(CallExpr *call, const Type *element) {
   Expr *init = call->args[1];
   auto *unary = dyn_cast<UnaryExpr>(init);
-  bool negative = unary != nullptr && unary->op == UnaryOp::Neg && isa<IntLitExpr>(unary->operand);
-  bool literal = isa<IntLitExpr>(init) || negative;
+  bool isNegative =
+      unary != nullptr && unary->op == UnaryOp::Neg && isa<IntLitExpr>(unary->operand);
+  bool isLiteral = isa<IntLitExpr>(init) || isNegative;
   const Type *apparent = GenericChecker::apparentType(element);
-  const Type *hint = literal && apparent->isNumeric() ? apparent : nullptr;
+  const Type *hint = isLiteral && apparent->isNumeric() ? apparent : nullptr;
   call->args[1] = this->exprChecker->checkExpr(init, hint);
   const Type *accumulator = call->args[1]->type;
   ResultInitialValueType initial = IteratorMethods::initialValue(accumulator);
@@ -549,17 +551,17 @@ Signature IteratorMethods::callbackSignature(IteratorMethod method, const Type *
   if (method == IteratorMethod::FOR_EACH) {
     sig.voidResult = true;
   }
-  bool predicate = method == IteratorMethod::FILTER || method == IteratorMethod::SOME ||
-                   method == IteratorMethod::EVERY || method == IteratorMethod::FIND;
-  if (predicate) {
+  bool isPredicate = method == IteratorMethod::FILTER || method == IteratorMethod::SOME ||
+                     method == IteratorMethod::EVERY || method == IteratorMethod::FIND;
+  if (isPredicate) {
     sig.ret = Type::boolTy();
   }
-  bool reduce = method == IteratorMethod::REDUCE;
-  if (reduce) {
+  bool isReduce = method == IteratorMethod::REDUCE;
+  if (isReduce) {
     sig.ret = accumulator;
   }
-  sig.params = reduce ? std::vector<const Type *>{accumulator, element, Type::intTy()}
-                      : std::vector<const Type *>{element, Type::intTy()};
+  sig.params = isReduce ? std::vector<const Type *>{accumulator, element, Type::intTy()}
+                        : std::vector<const Type *>{element, Type::intTy()};
 
   return sig;
 }
@@ -639,10 +641,10 @@ const Type *IteratorMethods::filteredElement(const IteratorCallback &callback) {
   if (kept != nullptr) {
     return kept;
   }
-  bool defined = element->isOptional() &&
-                 (callback.isBoolean || this->callbackChecker->keepsDefined(predicate));
+  bool isDefined = element->isOptional() &&
+                   (callback.isBoolean || this->callbackChecker->keepsDefined(predicate));
 
-  return defined ? element->inner() : element;
+  return isDefined ? element->inner() : element;
 }
 
 Expr *IteratorMethods::finishReduce(const IteratorCallback &callback) {

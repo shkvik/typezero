@@ -58,7 +58,7 @@ Expr *LateClasses::checkClassExpr(ClassExpr *expr, const Type *expected) {
   }
   cls->usedAsValue = true;
   if (!cls->declared) {
-    this->checkStaticFields(cls);
+    this->walkStaticFields(cls);
     ClassChecker::ResultHasDecorators decorated = this->classChecker->hasDecorators(cls);
     if (decorated.isOk()) {
       this->state.getClassContext().enterClass(cls);
@@ -176,9 +176,9 @@ void LateClasses::linkLateBase(ClassDecl *cls) {
   }
   cls->baseExpr = this->exprChecker->checkExpr(cls->baseExpr);
   ResultBaseClassUsable base = this->baseClass(cls->baseExpr->type);
-  bool reported =
+  bool isReported =
       base.isErr() && base.error().code == LateClassesBaseClassErrorCode::ALREADY_REPORTED;
-  if (base.isErr() && !reported) {
+  if (base.isErr() && !isReported) {
     this->state.getDiagnostics().error(cls->baseExpr->loc(), base.error().message);
   }
   ClassDecl *parent = base.isOk() ? base.value() : nullptr;
@@ -245,7 +245,7 @@ LateClasses::ResultStaticTypeKnown LateClasses::staticType(const ClassField &fie
   return ok(type);
 }
 
-void LateClasses::checkStaticFields(ClassDecl *cls) {
+void LateClasses::walkStaticFields(ClassDecl *cls) {
   ClassContext &classContext = this->state.getClassContext();
   classContext.enterClass(cls);
   classContext.enterStaticInit();
@@ -286,7 +286,7 @@ void LateClasses::checkStaticFields(ClassDecl *cls) {
   classContext.leaveClass();
 }
 
-void LateClasses::checkLateClasses() {
+void LateClasses::walkLateClasses() {
   LateClassStore &late = this->state.getLateClassStore();
   while (late.hasUncheckedLateClasses()) {
     ClassDecl *cls = late.takeUncheckedLateClass();
@@ -299,15 +299,18 @@ void LateClasses::checkLateClasses() {
     }
     InstanceRecord *owner = late.findLateOwner(cls);
     InstanceRecord *outerInstance = this->state.getGenericStore().getCheckingInstance();
-    std::vector<Diagnostics::Captured> *outerCapture = this->state.getDiagnostics().capture();
+    Diagnostics &diagnostics = this->state.getDiagnostics();
     if (owner) {
       this->state.getGenericStore().rememberCheckingInstance(owner);
-      late.captureLateErrorsOf(owner, this->state.getDiagnostics());
+      diagnostics.pushList(DiagnosticRoute::OWNER);
     }
     this->state.getFlowState().replaceFlow(Flow());
-    this->classChecker->checkClassBodies(cls);
+    this->classChecker->walkClassBodies(cls);
     this->state.getGenericStore().rememberCheckingInstance(outerInstance);
-    this->state.getDiagnostics().setCapture(outerCapture);
+    if (owner) {
+      auto classDiagnostics = diagnostics.popList();
+      late.addLateErrors(owner, classDiagnostics);
+    }
   }
   for (const LateError &error : late.getFirstLateErrors()) {
     InstanceRecord *instance = error.instance;
@@ -323,8 +326,8 @@ void LateClasses::checkLateClasses() {
 
 void LateClasses::rememberEmittedLateClasses() {
   for (ClassDecl *cls : this->state.getClassStore().getClasses()) {
-    bool late = cls->generic() || (cls->expression() && cls->type != nullptr);
-    if (late && cls->isEmitted()) {
+    bool isLate = cls->generic() || (cls->expression() && cls->type != nullptr);
+    if (isLate && cls->isEmitted()) {
       this->state.getInventoryStore().addLateClass(cls);
     }
   }
@@ -337,8 +340,8 @@ void LateClasses::noteMethodNames(const ClassDecl *cls) {
     }
   }
   for (const ClassField &f : cls->fields) {
-    bool arrowMethod = !f.isStatic() && f.init && isa<FunctionExpr>(f.init);
-    if (arrowMethod) {
+    bool isArrowMethod = !f.isStatic() && f.init && isa<FunctionExpr>(f.init);
+    if (isArrowMethod) {
       this->state.getLateClassStore().addLateMethodName(f.name);
     }
   }
@@ -354,8 +357,8 @@ void LateClasses::markLateOverrides(SourceFile &program) {
   PlacedNodes nodes = PlacedNodes::collect(program.items, {});
   for (const PlacedExpr &placed : nodes.getExprs()) {
     auto *classExpr = dyn_cast<ClassExpr>(placed.expr);
-    bool extends = classExpr && (classExpr->decl->baseExpr || classExpr->decl->base);
-    if (extends) {
+    bool isExtending = classExpr && (classExpr->decl->baseExpr || classExpr->decl->base);
+    if (isExtending) {
       this->noteMethodNames(classExpr->decl);
     }
   }
@@ -415,38 +418,40 @@ bool LateClasses::isTemplate(const FuncSymbol *generic) {
          this->hasClassExpr(generic->decl);
 }
 
-void LateClasses::checkTemplateInstance(InstanceRecord *instance) {
+void LateClasses::walkTemplateInstance(InstanceRecord *instance) {
   instance->checking = true;
-  std::vector<Diagnostics::Captured> errors;
+  Diagnostics &diagnostics = this->state.getDiagnostics();
   FunctionDecl *decl = instance->decl;
   BodyState saved = this->returnInferrer->enterBody(decl);
   this->state.getGenericStore().rememberCheckingInstance(instance);
-  this->state.getDiagnostics().setCapture(&errors);
+  diagnostics.pushList(DiagnosticRoute::OWNER);
   if (!this->state.getModuleStates().isTopLevelDone()) {
     this->state.getFunctionStack().rememberEarlyFunction(decl->sym);
   }
   this->state.getFlowState().replaceFlow(Flow());
   if (decl->sym->hasReturnType()) {
-    this->functionChecker->checkFunctionBody(decl);
+    this->functionChecker->walkFunctionBody(decl);
   } else {
-    this->returnInferrer->checkAndInfer(decl);
+    this->returnInferrer->inferFromBody(decl);
   }
+  auto instanceDiagnostics = diagnostics.popList();
   this->returnInferrer->leaveBody(saved);
   instance->checking = false;
   instance->checked = true;
-  if (errors.empty()) {
+  const Diagnostic *firstError = diagnostics.findFirstError(instanceDiagnostics);
+  if (firstError == nullptr) {
     return;
   }
   instance->failed = true;
-  instance->message = errors.front().message;
-  instance->errorLoc = errors.front().loc;
+  instance->message = firstError->message;
+  instance->errorLoc = firstError->loc;
 }
 
 LateClasses::ResultNoOldObjectHeld LateClasses::oldObject(const ClassDecl *cls,
                                                           const ClassField &field) {
-  bool typed = field.isStatic() && field.var() && field.var()->type;
-  bool holds = typed && LateClasses::holdsType(field.var()->type, cls->type);
-  if (holds) {
+  bool isTyped = field.isStatic() && field.var() && field.var()->type;
+  bool isHolding = isTyped && LateClasses::holdsType(field.var()->type, cls->type);
+  if (isHolding) {
     std::string message = ErrorTextOldObject::held(cls->name, field.name);
 
     return err(LateClassesOldObjectError{
@@ -462,8 +467,8 @@ LateClasses::ResultFieldNameIsFree LateClasses::replacedField(const ClassDecl *c
                                                               const ClassDecl *replacement,
                                                               const ClassDecl *child,
                                                               const ClassField &field) {
-  bool clash = !field.isStatic() && replacement->field(field.name);
-  if (clash) {
+  bool isClash = !field.isStatic() && replacement->field(field.name);
+  if (isClash) {
     std::string message = ErrorTextReplacedField::clash(child->name, cls->name, field.name);
 
     return err(LateClassesReplacedFieldError{
@@ -484,9 +489,9 @@ void LateClasses::relink(ClassDecl *cls) {
 
 void LateClasses::relinkClass(ClassDecl *cls) {
   const_cast<Type *>(cls->type)->forgetFields();
-  bool muted = this->state.getDiagnostics().setMuted(true);
+  this->state.getDiagnostics().pushList(DiagnosticRoute::DISCARD);
   this->classLinks->linkOverrides(cls);
-  this->state.getDiagnostics().setMuted(muted);
+  this->state.getDiagnostics().popList();
   this->classLinks->buildVtable(cls);
 }
 

@@ -33,9 +33,9 @@ ClassChecker::ClassChecker(SemanticState &owner, SemanticParts &all)
 }
 
 ClassChecker::ResultClassDeclared ClassChecker::checkClassStmt(ClassDecl *cls) {
-  bool topLevel = this->state.getScopeStack().isTopLevel() &&
-                  !this->state.getFunctionStack().isInsideFunction() && cls->type;
-  if (!topLevel) {
+  bool isTopLevel = this->state.getScopeStack().isTopLevel() &&
+                    !this->state.getFunctionStack().isInsideFunction() && cls->type;
+  if (!isTopLevel) {
     std::string message = ErrorTextClassStmt::nested(cls->name);
 
     return err(ClassCheckerCheckClassStmtError{
@@ -47,7 +47,7 @@ ClassChecker::ResultClassDeclared ClassChecker::checkClassStmt(ClassDecl *cls) {
   if (cls->baseExpr && cls->stage == ClassStage::UNRESOLVED) {
     this->lateClasses->makeLateClass(cls);
   }
-  this->lateClasses->checkStaticFields(cls);
+  this->lateClasses->walkStaticFields(cls);
   this->state.getClassContext().enterClass(cls);
   if (!cls->generic() && this->hasDecorators(cls).isOk()) {
     this->decoratorChecker->decorateClass(cls);
@@ -64,11 +64,11 @@ ClassChecker::ResultHasDecorators ClassChecker::hasDecorators(const ClassDecl *c
   };
   auto decoratedField = [](const ClassField &f) { return !f.decorators.empty(); };
 
-  bool decoratedAnywhere = !cls->decorators.empty() || llvm::any_of(cls->methods, decorated) ||
-                           llvm::any_of(cls->constructors, decorated) ||
-                           llvm::any_of(cls->fields, decoratedField);
+  bool isDecoratedAnywhere = !cls->decorators.empty() || llvm::any_of(cls->methods, decorated) ||
+                             llvm::any_of(cls->constructors, decorated) ||
+                             llvm::any_of(cls->fields, decoratedField);
 
-  if (!decoratedAnywhere) {
+  if (!isDecoratedAnywhere) {
     std::string message = ErrorTextDecorators::none(cls->name);
 
     return err(ClassCheckerHasDecoratorsError{
@@ -82,9 +82,9 @@ ClassChecker::ResultHasDecorators ClassChecker::hasDecorators(const ClassDecl *c
 
 ClassChecker::ResultFieldHasValue ClassChecker::fieldStartValue(const ClassDecl *cls,
                                                                 const ClassField &field) const {
-  bool needsValue = !field.isStatic() && !field.method() && !field.optional() && !field.init &&
-                    !field.definite() && field.resolved && !field.resolved->isError();
-  if (needsValue && ClassLinks::constructorsOf(cls).empty()) {
+  bool isNeedingValue = !field.isStatic() && !field.method() && !field.optional() && !field.init &&
+                        !field.definite() && field.resolved && !field.resolved->isError();
+  if (isNeedingValue && ClassLinks::constructorsOf(cls).empty()) {
     std::string message = ErrorTextStartValue::noStart(field.name, field.resolved->name());
 
     return err(ClassCheckerFieldStartValueError{
@@ -92,7 +92,7 @@ ClassChecker::ResultFieldHasValue ClassChecker::fieldStartValue(const ClassDecl 
         .message = message,
     });
   }
-  if (needsValue) {
+  if (isNeedingValue) {
     std::string message = ErrorTextStartValue::neverSet(field.name, field.resolved->name());
 
     return err(ClassCheckerFieldStartValueError{
@@ -110,12 +110,12 @@ ClassChecker::ResultReturnMatches ClassChecker::overrideReturn(const ClassDecl *
   const Type *mine = overridden ? method->sym->getReturnType() : nullptr;
   const Type *theirs = overridden ? overridden->sym->getReturnType() : nullptr;
 
-  bool known = mine && theirs && !mine->isError() && !theirs->isError();
-  bool narrowerObject = known && mine->nonOptional()->isObject() &&
-                        theirs->nonOptional()->isObject() &&
-                        TypeRelations::isImplicitlyConvertible(mine, theirs);
+  bool isKnown = mine && theirs && !mine->isError() && !theirs->isError();
+  bool isNarrowerObject = isKnown && mine->nonOptional()->isObject() &&
+                          theirs->nonOptional()->isObject() &&
+                          TypeRelations::isImplicitlyConvertible(mine, theirs);
 
-  if (known && mine != theirs && !narrowerObject) {
+  if (isKnown && mine != theirs && !isNarrowerObject) {
     std::string message = ErrorTextOverride::otherType(method->name, mine->name(), cls->name,
                                                        theirs->name(), overridden->cls()->name);
 
@@ -128,7 +128,7 @@ ClassChecker::ResultReturnMatches ClassChecker::overrideReturn(const ClassDecl *
   return ok(method);
 }
 
-void ClassChecker::checkClassBodies(ClassDecl *cls) {
+void ClassChecker::walkClassBodies(ClassDecl *cls) {
   this->classDeclarer->completeClass(cls);
   if (cls->init && !cls->init->checked) {
     this->functionChecker->walkFunctionFromScratch(cls->init);
@@ -164,8 +164,8 @@ void ClassChecker::checkClassBodies(ClassDecl *cls) {
     }
     this->functionChecker->walkFunctionFromScratch(fn);
   }
-  this->inheritChecker->checkAbstract(cls);
-  this->inheritChecker->checkImplements(cls);
+  this->inheritChecker->walkAbstract(cls);
+  this->inheritChecker->walkImplements(cls);
   for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
     ResultReturnMatches returned = this->overrideReturn(cls, fn);
     if (returned.isErr()) {
@@ -219,10 +219,10 @@ ClassChecker::ResultInitThisFound ClassChecker::isInitThis(const Expr *expr) con
     }
   }
   auto *name = dyn_cast<NameExpr>(expr);
-  bool inConstructor = this->state.getClassContext().getInitializerThis() &&
-                       this->state.getFunctionStack().getCurrentDecl() ==
-                           this->state.getClassContext().getInitializer();
-  if (!inConstructor) {
+  bool isInConstructor = this->state.getClassContext().getInitializerThis() &&
+                         this->state.getFunctionStack().getCurrentDecl() ==
+                             this->state.getClassContext().getInitializer();
+  if (!isInConstructor) {
     std::string message = ErrorTextInitThis::outside();
 
     return err(ClassCheckerIsInitThisError{
@@ -354,12 +354,12 @@ ClassChecker::ResultThisComesFrom ClassChecker::thisOf(const FunctionDecl *curre
 }
 
 ClassChecker::ResultThisReadiness ClassChecker::readyThis(VarSymbol *var) const {
-  bool inInit = var == this->state.getClassContext().getInitializerThis();
-  bool inConstructor = inInit && this->state.getFunctionStack().getCurrentDecl() ==
+  bool isInInit = var == this->state.getClassContext().getInitializerThis();
+  bool isInConstructor = isInInit && this->state.getFunctionStack().getCurrentDecl() ==
+                                         this->state.getClassContext().getInitializer();
+  bool isInClosure = isInInit && this->state.getFunctionStack().getCurrentDecl() !=
                                      this->state.getClassContext().getInitializer();
-  bool inClosure = inInit && this->state.getFunctionStack().getCurrentDecl() !=
-                                 this->state.getClassContext().getInitializer();
-  if (inClosure && !this->state.getClassContext().isClosureThisReady()) {
+  if (isInClosure && !this->state.getClassContext().isClosureThisReady()) {
     std::string message = ErrorTextReadyThis::inClosure();
 
     return err(ClassCheckerReadyThisError{
@@ -367,7 +367,7 @@ ClassChecker::ResultThisReadiness ClassChecker::readyThis(VarSymbol *var) const 
         .message = message,
     });
   }
-  if (inConstructor && this->state.getFlowState().isBeforeSuper()) {
+  if (isInConstructor && this->state.getFlowState().isBeforeSuper()) {
     std::string message = ErrorTextReadyThis::noSuper(
         this->state.getClassContext().getInitializer()->cls()->parent->name);
 
@@ -377,9 +377,9 @@ ClassChecker::ResultThisReadiness ClassChecker::readyThis(VarSymbol *var) const 
     });
   }
 
-  bool fieldsMatter = inConstructor && this->state.getClassContext().getThisMember().empty();
+  bool hasFieldsMatter = isInConstructor && this->state.getClassContext().getThisMember().empty();
   ResultFieldUnsetYet unset = this->firstUnset(this->state.getFlowState().getFlow());
-  if (fieldsMatter && unset.isOk()) {
+  if (hasFieldsMatter && unset.isOk()) {
     std::string message = ErrorTextReadyThis::unset(unset.value());
 
     return err(ClassCheckerReadyThisError{

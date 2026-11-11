@@ -83,8 +83,8 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
   if (fn == nullptr) {
     return this->reportMathMember(call, member);
   }
-  bool minMax = fn->form == MathFunctionForm::MIN_MAX;
-  if (!minMax && this->callChecker->rejectSpread(call)) {
+  bool isMinMax = fn->form == MathFunctionForm::MIN_MAX;
+  if (!isMinMax && this->callChecker->rejectSpread(call)) {
     return call;
   }
   ArgumentChecker::ResultArityMatches arity =
@@ -93,7 +93,7 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
-  if (minMax && call->args.empty()) {
+  if (isMinMax && call->args.empty()) {
     std::string message = ErrorTextMath::noValues(member->name);
     this->state.getDiagnostics().error(call->loc(), message);
     return call;
@@ -117,10 +117,10 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
 }
 
 Expr *MathChecker::reportMathMember(CallExpr *call, MemberExpr *member) {
-  bool constant = this->constantFolder->globalConstant(GlobalName::MATH, member->name,
-                                                       member->loc()) != nullptr;
+  bool isConstant = this->constantFolder->globalConstant(GlobalName::MATH, member->name,
+                                                         member->loc()) != nullptr;
   std::string message =
-      constant ? ErrorTextMath::constant(member->name) : ErrorTextMath::noMember(member->name);
+      isConstant ? ErrorTextMath::constant(member->name) : ErrorTextMath::noMember(member->name);
   this->state.getDiagnostics().error(member->loc(), message);
   for (Expr *&arg : call->args) {
     arg = this->exprChecker->checkExpr(arg);
@@ -130,23 +130,23 @@ Expr *MathChecker::reportMathMember(CallExpr *call, MemberExpr *member) {
 }
 
 bool MathChecker::mathArgsNumeric(CallExpr *call, MathFunctionForm form, const Type *hint) {
-  bool numeric = true;
+  bool isNumeric = true;
   for (Expr *&arg : call->args) {
     arg = this->numericArg(arg, MathChecker::mathArgHint(form, hint));
-    numeric &= arg->type->isNumeric();
+    isNumeric &= arg->type->isNumeric();
   }
 
-  return numeric;
+  return isNumeric;
 }
 
 const Type *MathChecker::mathArgHint(MathFunctionForm form, const Type *hint) {
   if (form == MathFunctionForm::FLOAT || form == MathFunctionForm::ROUNDING) {
     return Type::doubleTy();
   }
-  bool hinted = form == MathFunctionForm::SAME || form == MathFunctionForm::MIN_MAX ||
-                form == MathFunctionForm::CLAMP;
+  bool isHinted = form == MathFunctionForm::SAME || form == MathFunctionForm::MIN_MAX ||
+                  form == MathFunctionForm::CLAMP;
 
-  return hinted ? hint : nullptr;
+  return isHinted ? hint : nullptr;
 }
 
 Expr *MathChecker::checkMathResult(CallExpr *call, MemberExpr *member, const MathFunctionInfo &fn) {
@@ -196,19 +196,19 @@ Expr *MathChecker::checkSharedResult(CallExpr *call) {
 }
 
 Expr *MathChecker::checkInt32Math(CallExpr *call, MemberExpr *member, Builtin builtin) {
-  bool imul = builtin == Builtin::MathImul;
+  bool isImul = builtin == Builtin::MathImul;
   const Type *unsigned32 = Type::integer(32, false);
   std::string what = "Math." + member->name.str();
   for (Expr *&arg : call->args) {
-    arg = this->bitsArg(arg, 32, imul ? unsigned32 : nullptr, what);
+    arg = this->bitsArg(arg, 32, isImul ? unsigned32 : nullptr, what);
     if (arg->type->isError()) {
       return call;
     }
-    if (imul) {
+    if (isImul) {
       arg = this->typeRelations->convert(arg, unsigned32);
     }
   }
-  call->type = imul ? unsigned32 : Type::intTy();
+  call->type = isImul ? unsigned32 : Type::intTy();
 
   return call;
 }
@@ -290,13 +290,13 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
     this->state.getDiagnostics().error(member->loc(), message);
     return this->checkArgsLoosely(call);
   }
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, fn->args, fn->args);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, fn->args, fn->args);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
-  if (rejected || arity.isErr()) {
+  if (isRejected || arity.isErr()) {
     return call;
   }
   std::string what = ErrorTextBit::label(member->name);
@@ -427,9 +427,9 @@ Expr *MathChecker::checkMinMaxSpread(CallExpr *call, const Type *hint) {
 }
 
 bool MathChecker::minMaxArgFits(CallExpr *call, size_t i, const Type *hint, SpreadValues &values) {
-  bool spread = call->spreads(i);
+  bool isSpread = call->spreads(i);
   const Type *type = nullptr;
-  if (spread) {
+  if (isSpread) {
     type = this->spreadElementType(call, i, hint, values);
   } else {
     call->args[i] = this->numericArg(call->args[i], hint);
@@ -437,12 +437,12 @@ bool MathChecker::minMaxArgFits(CallExpr *call, size_t i, const Type *hint, Spre
     values.someValue = true;
   }
   values.numeric &= type->isNumeric();
-  if (!values.numeric || !spread) {
+  if (!values.numeric || !isSpread) {
     return true;
   }
   if (values.common != nullptr && values.common != type) {
-    bool min = call->builtin() == Builtin::MathMin;
-    std::string message = ErrorTextMath::spreadType(min, values.common->name(), type->name());
+    bool isMin = call->builtin() == Builtin::MathMin;
+    std::string message = ErrorTextMath::spreadType(isMin, values.common->name(), type->name());
     this->state.getDiagnostics().error(call->args[i]->loc(), message);
     return false;
   }
@@ -462,8 +462,8 @@ const Type *MathChecker::spreadElementType(CallExpr *call, size_t i, const Type 
   }
   Expr *arg = call->args[i];
   const Type *type = arg->type->isArray() ? arg->type->inner() : arg->type;
-  bool numericArray = arg->type->isArray() && type->isNumeric();
-  if (!arg->type->isError() && !numericArray) {
+  bool isNumericArray = arg->type->isArray() && type->isNumeric();
+  if (!arg->type->isError() && !isNumericArray) {
     std::string message = ErrorTextMath::spread(arg->type->name());
     this->state.getDiagnostics().error(arg->loc(), message);
     values.numeric = false;

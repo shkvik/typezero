@@ -76,7 +76,7 @@ std::vector<const Stmt *> VarChecker::followingStatements(llvm::ArrayRef<Stmt *>
   return following;
 }
 
-void VarChecker::checkVarDecl(VarDeclStmt *decl) {
+void VarChecker::walkVarDecl(VarDeclStmt *decl) {
   BlockPosition &position = this->state.getBlockPosition();
   llvm::ArrayRef<Stmt *> block = position.getBlock();
   size_t blockIndex = position.getBlockIndex();
@@ -114,22 +114,22 @@ void VarChecker::walkDeclarator(const DeclaratorPlace &place) {
 DeclaratorForm VarChecker::declaratorForm(const DeclaratorPlace &place) {
   const VarDeclStmt *decl = place.decl;
   const VarDeclarator &d = *place.declarator;
-  bool plainConst = decl->isConst && place.declared == nullptr && !d.destructured();
+  bool isPlainConst = decl->isConst && place.declared == nullptr && !d.destructured();
   auto *name = dyn_cast_or_null<NameExpr>(d.init);
-  if (name != nullptr && plainConst && name->typeArgs.empty()) {
+  if (name != nullptr && isPlainConst && name->typeArgs.empty()) {
     FuncSymbol *generic = this->genericChecker->genericNamed(name);
     if (generic != nullptr) {
       return GenericAliasDeclarator{.generic = generic};
     }
   }
   auto *function = dyn_cast_or_null<FunctionExpr>(d.init);
-  bool genericFunction = function != nullptr && !function->fn->typeParams.empty() && plainConst &&
-                         this->state.getScopeStack().isTopLevel();
-  if (genericFunction) {
+  bool isGenericFunction = function != nullptr && !function->fn->typeParams.empty() &&
+                           isPlainConst && this->state.getScopeStack().isTopLevel();
+  if (isGenericFunction) {
     return GenericFunctionDeclarator{.function = function->fn};
   }
-  bool constFunction = function != nullptr && decl->isConst && !d.destructured();
-  if (constFunction) {
+  bool isConstFunction = function != nullptr && decl->isConst && !d.destructured();
+  if (isConstFunction) {
     return ConstFunctionDeclarator{.function = function};
   }
 
@@ -143,9 +143,9 @@ void VarChecker::declareGenericAlias(const DeclaratorPlace &place, FuncSymbol *g
   if (added.isErr()) {
     this->state.getDiagnostics().error(d.loc, added.error().message);
   }
-  bool showPrevious =
+  bool isShowPrevious =
       added.isErr() && added.error().code != ScopesDeclareErrorCode::UNDEFINED_AS_NAME;
-  if (showPrevious) {
+  if (isShowPrevious) {
     ScopeEntry previousEntry = this->scopes->lookup(d.name);
     std::string declaredHere = ErrorTextDeclare::previous();
     this->state.getDiagnostics().note(previousEntry.loc(), declaredHere);
@@ -173,8 +173,8 @@ void VarChecker::declareConstFunction(const DeclaratorPlace &place, FunctionExpr
   VarSymbol *var = this->scopes->declareVar(d.name, d.loc, nullptr, true);
   var->holds = Lambda{.lambda = function->fn};
   d.sym = var;
-  bool functionDeclared = declared != nullptr && declared->nonOptional()->isFunction();
-  const Type *functionType = functionDeclared ? declared->nonOptional() : nullptr;
+  bool isFunctionDeclared = declared != nullptr && declared->nonOptional()->isFunction();
+  const Type *functionType = isFunctionDeclared ? declared->nonOptional() : nullptr;
   Signature signature =
       functionType != nullptr ? ClosureChecker::signatureOf(functionType) : Signature();
   const Signature *expectedSignature = functionType != nullptr ? &signature : nullptr;
@@ -232,9 +232,9 @@ void VarChecker::walkValueDeclarator(const DeclaratorPlace &place) {
 
 void VarChecker::findDestination(const DeclaratorPlace &place, VariableValue &variable) {
   const VarDeclarator &d = *place.declarator;
-  bool literalShaped = place.declared == nullptr && d.init != nullptr && !d.destructured() &&
-                       Destination::literalShaped(d.init);
-  if (literalShaped) {
+  bool isLiteralShaped = place.declared == nullptr && d.init != nullptr && !d.destructured() &&
+                         Destination::literalShaped(d.init);
+  if (isLiteralShaped) {
     std::vector<const Stmt *> following =
         place.block.empty() ? std::vector<const Stmt *>()
                             : VarChecker::followingStatements(place.block, place.blockIndex);
@@ -248,8 +248,8 @@ void VarChecker::findDestination(const DeclaratorPlace &place, VariableValue &va
 
 void VarChecker::declareTimerEarly(const DeclaratorPlace &place, VariableValue &variable) {
   const VarDeclarator &d = *place.declarator;
-  bool plainInit = d.init != nullptr && !d.destructured();
-  const Type *timer = plainInit ? this->timerChecker->timerCallType(d.init) : nullptr;
+  bool isPlainInit = d.init != nullptr && !d.destructured();
+  const Type *timer = isPlainInit ? this->timerChecker->timerCallType(d.init) : nullptr;
   if (timer != nullptr) {
     const Type *type = place.declared != nullptr ? place.declared : timer;
     variable.early = this->scopes->declareVar(d.name, d.loc, type, place.decl->isConst);
@@ -274,20 +274,20 @@ void VarChecker::walkVariableValue(const DeclaratorPlace &place, VariableValue &
 void VarChecker::walkInit(const DeclaratorPlace &place, VariableValue &variable) {
   VarDeclarator &d = *place.declarator;
   ExpressionMarks &marks = this->state.getExpressionMarks();
-  bool arrayPattern = d.destructured() && !d.objectPattern();
-  bool marksInit = variable.early == nullptr;
-  if (marksInit) {
+  bool isArrayPattern = d.destructured() && !d.objectPattern();
+  bool isMarkingInit = variable.early == nullptr;
+  if (isMarkingInit) {
     marks.enterVariableInit(d.name);
   }
-  if (arrayPattern) {
+  if (isArrayPattern) {
     this->iteratorMethods->markFused(d.init);
   }
   d.init = this->exprChecker->checkExpr(d.init, variable.hint);
-  if (arrayPattern) {
+  if (isArrayPattern) {
     d.init = this->dictChecker->iterableOf(d.init);
   }
   variable.value = d.init;
-  if (marksInit) {
+  if (isMarkingInit) {
     marks.leaveVariableInit();
   }
   if (place.declared != nullptr) {
@@ -326,12 +326,12 @@ void VarChecker::walkDestructuring(const DeclaratorPlace &place, VariableValue &
   if (d.destructured() && d.objectPattern()) {
     return;
   }
-  bool undeclaredPattern = d.destructured() && place.declared == nullptr;
-  bool text = variable.type->isString() || variable.type->isTypedArray();
-  if (undeclaredPattern && text) {
+  bool isUndeclaredPattern = d.destructured() && place.declared == nullptr;
+  bool isText = variable.type->isString() || variable.type->isTypedArray();
+  if (isUndeclaredPattern && isText) {
     return this->spreadTextIntoArray(place, variable);
   }
-  if (undeclaredPattern && variable.type->isIterator()) {
+  if (isUndeclaredPattern && variable.type->isIterator()) {
     return this->destructureIterator(place, variable);
   }
 
@@ -381,14 +381,14 @@ void VarChecker::declareVariable(const DeclaratorPlace &place, const VariableVal
 
 void VarChecker::rememberReflection(VarDeclarator &d, const Expr *value) {
   auto *call = dyn_cast_or_null<CallExpr>(value);
-  bool singleMethod = call != nullptr && call->builtin() == Builtin::ReflectMethod &&
-                      !this->state.getExpressionMarks().hasSeveralVariants(call);
-  if (singleMethod) {
+  bool isSingleMethod = call != nullptr && call->builtin() == Builtin::ReflectMethod &&
+                        !this->state.getExpressionMarks().hasSeveralVariants(call);
+  if (isSingleMethod) {
     d.sym->holds = ReflectedMethod{.method = call->method()->decl};
   }
-  bool readsByKey =
+  bool isReadingByKey =
       call != nullptr && call->builtin() == Builtin::ReflectGet && call->args.size() == 2;
-  if (readsByKey) {
+  if (isReadingByKey) {
     std::vector<llvm::StringRef> names = this->reflectedNames(call->args[1]);
     if (!names.empty()) {
       d.sym->holds = ReflectedNames{.names = std::move(names)};
@@ -436,8 +436,8 @@ std::vector<std::u16string> VarChecker::literalKeyTexts(const Expr *key) {
   }
   std::vector<std::u16string> texts;
   for (const Type *member : members) {
-    bool literalText = member->isLiteral() && member->literalBase()->isString();
-    if (!literalText) {
+    bool isLiteralText = member->isLiteral() && member->literalBase()->isString();
+    if (!isLiteralText) {
       return {};
     }
     texts.push_back(member->literalText());
@@ -449,9 +449,9 @@ std::vector<std::u16string> VarChecker::literalKeyTexts(const Expr *key) {
 void VarChecker::markUnsharedArray(const VarDeclarator &d, const VariableValue &variable) {
   LocalVarState *localState = d.sym->local();
   if (localState != nullptr) {
-    bool fresh = VarChecker::isFreshArray(variable.value);
+    bool isFresh = VarChecker::isFreshArray(variable.value);
     localState->unshared =
-        fresh && variable.type->isArray() && FlowChecker::staysLocal(d.sym->owner(), d.name);
+        isFresh && variable.type->isArray() && FlowChecker::staysLocal(d.sym->owner(), d.name);
   }
 }
 
@@ -474,18 +474,18 @@ void VarChecker::rememberConstLiteral(const DeclaratorPlace &place, const Variab
   VarDeclarator &d = *place.declarator;
   const Expr *value = variable.value;
   ConstantStore &constants = this->state.getConstantStore();
-  bool literal = place.decl->isConst && value != nullptr &&
-                 (isa<ObjectLitExpr>(value) || isa<StringLitExpr>(value) ||
-                  (isa<ConditionalExpr>(value) && VarChecker::isTextChoice(value)));
-  if (literal) {
+  bool isLiteral = place.decl->isConst && value != nullptr &&
+                   (isa<ObjectLitExpr>(value) || isa<StringLitExpr>(value) ||
+                    (isa<ConditionalExpr>(value) && VarChecker::isTextChoice(value)));
+  if (isLiteral) {
     constants.rememberConstLiteral(d.sym, value);
     d.sym->literalConst = place.declared == nullptr && variable.type->isString();
   }
   auto *alias = dyn_cast_or_null<NameExpr>(value);
-  bool textAlias = place.decl->isConst && alias != nullptr && alias->var() != nullptr &&
-                   alias->var()->literalConst && place.declared == nullptr &&
-                   variable.type->isString();
-  if (textAlias) {
+  bool isTextAlias = place.decl->isConst && alias != nullptr && alias->var() != nullptr &&
+                     alias->var()->literalConst && place.declared == nullptr &&
+                     variable.type->isString();
+  if (isTextAlias) {
     const Expr *aliased = constants.findConstLiteral(alias->var());
     constants.rememberConstLiteral(d.sym, aliased);
     d.sym->literalConst = true;
@@ -496,10 +496,10 @@ void VarChecker::rememberResultVariable(const DeclaratorPlace &place,
                                         const VariableValue &variable) {
   const VarDeclarator &d = *place.declarator;
   const Type *held = variable.type->nonOptional();
-  bool holdsResult = held->isResult() || (held->isPromise() && held->promised()->isResult());
-  bool tracked = !d.destructured() && !this->state.getGenericStore().isCheckingInstance() &&
-                 holdsResult && !this->exported(d.name);
-  if (tracked) {
+  bool isHoldingResult = held->isResult() || (held->isPromise() && held->promised()->isResult());
+  bool isTracked = !d.destructured() && !this->state.getGenericStore().isCheckingInstance() &&
+                   isHoldingResult && !this->exported(d.name);
+  if (isTracked) {
     this->state.getExpressionMarks().addResultVar(d.sym);
   }
 }
@@ -507,12 +507,12 @@ void VarChecker::rememberResultVariable(const DeclaratorPlace &place,
 void VarChecker::rememberFixedLength(const DeclaratorPlace &place, const VariableValue &variable) {
   const VarDeclarator &d = *place.declarator;
   const Type *base = variable.type->nonOptional();
-  bool bytes = base->isByteView() || base->bytes() == Type::Bytes::ArrayBuffer;
-  bool fixed = place.decl->isConst && variable.value != nullptr && !d.destructured() && bytes;
-  if (fixed) {
+  bool hasBytes = base->isByteView() || base->bytes() == Type::Bytes::ArrayBuffer;
+  bool isFixed = place.decl->isConst && variable.value != nullptr && !d.destructured() && hasBytes;
+  if (isFixed) {
     std::optional<Linear> length = this->indexProofs->knownLength(variable.value);
-    bool constantLength = length.has_value() && length->term.isZero();
-    if (constantLength) {
+    bool isConstantLength = length.has_value() && length->term.isZero();
+    if (isConstantLength) {
       this->state.getFlowState().rememberFixedLength(d.sym, length->offset);
     }
   }
@@ -520,8 +520,8 @@ void VarChecker::rememberFixedLength(const DeclaratorPlace &place, const Variabl
 
 void VarChecker::rememberConstNumber(const DeclaratorPlace &place, const VariableValue &variable) {
   const VarDeclarator &d = *place.declarator;
-  bool integer = place.decl->isConst && d.init != nullptr && variable.type->isInteger();
-  if (integer) {
+  bool isInteger = place.decl->isConst && d.init != nullptr && variable.type->isInteger();
+  if (isInteger) {
     this->constantFolder->noteUnsignedVar(d.sym, d.init);
     std::optional<int64_t> constant = this->constantFolder->intConstant(d.init);
     if (constant.has_value()) {
@@ -534,8 +534,8 @@ void VarChecker::rememberConstNumber(const DeclaratorPlace &place, const Variabl
 
 void VarChecker::rememberConstText(const DeclaratorPlace &place, const VariableValue &variable) {
   const VarDeclarator &d = *place.declarator;
-  bool text = place.decl->isConst && d.init != nullptr && variable.type->isString();
-  if (text) {
+  bool isText = place.decl->isConst && d.init != nullptr && variable.type->isString();
+  if (isText) {
     std::optional<std::string> key = this->keyedFieldChecker->constantKey(d.init);
     if (key.has_value()) {
       this->state.getConstantStore().rememberConstKey(d.sym, std::move(*key));
@@ -584,9 +584,9 @@ VarChecker::ResultConstValued VarChecker::constValue(const VarDeclStmt *decl,
 }
 
 VarChecker::ResultDestructure VarChecker::destructurable(const VarDeclarator &d, const Type *type) {
-  bool fits = !d.destructured() || type->isArray() || type->isTuple() || type->isMatch() ||
-              type->isError() || type->nonOptional()->isJson();
-  if (!fits && type->isOptional() && type->inner()->isArray()) {
+  bool isFitting = !d.destructured() || type->isArray() || type->isTuple() || type->isMatch() ||
+                   type->isError() || type->nonOptional()->isJson();
+  if (!isFitting && type->isOptional() && type->inner()->isArray()) {
     std::string message = ErrorTextVarShape::mayBeUndef(type->name());
 
     return err(VarCheckerDestructurableError{
@@ -594,7 +594,7 @@ VarChecker::ResultDestructure VarChecker::destructurable(const VarDeclarator &d,
         .message = message,
     });
   }
-  if (!fits) {
+  if (!isFitting) {
     std::string message = ErrorTextVarShape::notArray(type->name());
 
     return err(VarCheckerDestructurableError{

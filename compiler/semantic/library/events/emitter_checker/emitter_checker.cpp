@@ -198,23 +198,23 @@ bool EmitterChecker::classifyListener(Expr *arg, const Expr *emitter, int &bits,
     e = conv->operand;
     conv = dyn_cast<CastExpr>(e);
   }
-  bool topLevel = (this->state.getFunctionStack().getCurrentDecl() == nullptr &&
-                   !this->state.getFunctionStack().isInsideAwaitLoop()) ||
-                  (emitter != nullptr && this->ownsEmitter(emitter));
+  bool isTopLevel = (this->state.getFunctionStack().getCurrentDecl() == nullptr &&
+                     !this->state.getFunctionStack().isInsideAwaitLoop()) ||
+                    (emitter != nullptr && this->ownsEmitter(emitter));
   ListenerShape shape = EmitterChecker::listenerShape(e);
   switch (shape.form) {
     case ListenerForm::Free:
-      bits |= topLevel ? 0 : kDedupeBit;
+      bits |= isTopLevel ? 0 : kDedupeBit;
       return true;
     case ListenerForm::Receiver:
       if (shape.envFn != nullptr) {
         shape.envFn->receiverEnv = shape.var;
       }
-      return this->addListenerReceiver(shape, topLevel, bits);
+      return this->addListenerReceiver(shape, isTopLevel, bits);
     case ListenerForm::Captures:
-      return topLevel || this->reportsCapturesKept(arg, shape.captured, timer);
+      return isTopLevel || this->reportsCapturesKept(arg, shape.captured, timer);
     case ListenerForm::Unknown:
-      return topLevel || this->reportsUnknownListener(arg, timer);
+      return isTopLevel || this->reportsUnknownListener(arg, timer);
   }
 
   return false;
@@ -226,10 +226,10 @@ EmitterChecker::ListenerShape EmitterChecker::listenerShape(Expr *e) {
     return EmitterChecker::closureShape(fe->fn);
   }
   auto *member = dyn_cast<MemberExpr>(e);
-  bool method = member != nullptr && member->method() != nullptr &&
-                member->method()->decl != nullptr && !member->method()->decl->isStatic() &&
-                EmitterChecker::canReceive(member->object->type);
-  if (method) {
+  bool isMethod = member != nullptr && member->method() != nullptr &&
+                  member->method()->decl != nullptr && !member->method()->decl->isStatic() &&
+                  EmitterChecker::canReceive(member->object->type);
+  if (isMethod) {
     auto *self = dyn_cast<NameExpr>(member->object);
     return ListenerShape{
         .form = ListenerForm::Receiver,
@@ -264,9 +264,9 @@ EmitterChecker::ListenerShape EmitterChecker::closureShape(FunctionDecl *fn) {
     };
   }
   const VarSymbol *only = fn->captures[0];
-  bool single = fn->captures.size() == 1 && fn->group == nullptr && !fn->isGenerator &&
-                !only->boxed() && EmitterChecker::canReceive(only->type);
-  if (single) {
+  bool isSingle = fn->captures.size() == 1 && fn->group == nullptr && !fn->isGenerator &&
+                  !only->boxed() && EmitterChecker::canReceive(only->type);
+  if (isSingle) {
     return ListenerShape{
         .form = ListenerForm::Receiver,
         .type = only->type,
@@ -303,9 +303,9 @@ bool EmitterChecker::addListenerReceiver(const ListenerShape &shape, bool topLev
   bits |= kReceiverBit | (topLevel ? 0 : kDedupeBit);
   this->state.getInventoryStore().addListenerReceiver(shape.type);
   const FunctionDecl *fn = this->state.getFunctionStack().getCurrentDecl();
-  bool self = fn != nullptr && fn->isConstructor() && fn->cls() != nullptr &&
-              shape.var != nullptr && shape.var == fn->thisVar();
-  if (self) {
+  bool isSelf = fn != nullptr && fn->isConstructor() && fn->cls() != nullptr &&
+                shape.var != nullptr && shape.var == fn->thisVar();
+  if (isSelf) {
     this->state.getEventStore().addSelfListener(fn->cls());
   }
 
@@ -399,10 +399,11 @@ std::string EmitterChecker::emitterPath(const EmitterKey &key) const {
 }
 
 void EmitterChecker::reportUnlistenedErrors() {
-  bool muted = this->state.getDiagnostics().isMuted();
+  DiagnosticRoute destination = this->state.getDiagnostics().getCurrentDestination();
+  bool isDiscarded = destination == DiagnosticRoute::DISCARD;
   for (const auto &[key, loc] : this->state.getFlowState().takePendingErrors()) {
     EventStore &store = this->state.getEventStore();
-    if (muted || store.isErrorSubscriptionReported(loc)) {
+    if (isDiscarded || store.isErrorSubscriptionReported(loc)) {
       continue;
     }
     store.markErrorSubscriptionReported(loc);
@@ -412,7 +413,7 @@ void EmitterChecker::reportUnlistenedErrors() {
   }
 }
 
-void EmitterChecker::checkDroppedListeners() {
+void EmitterChecker::walkDroppedListeners() {
   EventStore &store = this->state.getEventStore();
   for (const DroppedNew &dropped : store.getDroppedNews()) {
     const ClassDecl *cls = dropped.cls;
@@ -427,7 +428,7 @@ void EmitterChecker::checkDroppedListeners() {
   }
 }
 
-void EmitterChecker::checkErrorListeners() {
+void EmitterChecker::walkErrorListeners() {
   EventStore &store = this->state.getEventStore();
   for (const ErrorEmit &emit : store.getErrorEmits()) {
     if (!store.isErrorListened(emit.events)) {
@@ -481,7 +482,7 @@ Expr *EmitterChecker::checkEmitterNew(NewExpr *expr, ClassDecl *generic, const T
   return this->methodCallChecker->checkClassNew(expr, inst, expected);
 }
 
-void EmitterChecker::checkLooseArgs(CallExpr *call, size_t from) {
+void EmitterChecker::walkLooseArgs(CallExpr *call, size_t from) {
   for (size_t i = from; i < call->args.size(); ++i) {
     call->args[i] = this->exprChecker->checkExpr(call->args[i]);
   }
@@ -536,7 +537,7 @@ Expr *EmitterChecker::collectEmitterCall(const SentEmit &emit, EventSite *site,
   if (count > 1) {
     std::string message = ErrorTextEmitted::oneValue(event);
     this->state.getDiagnostics().error(call->args[2]->loc(), message);
-    this->checkLooseArgs(call, 1);
+    this->walkLooseArgs(call, 1);
     return call;
   }
   EventRecord *record = EventMapInference::findEvent(site, event);
@@ -547,7 +548,7 @@ Expr *EmitterChecker::collectEmitterCall(const SentEmit &emit, EventSite *site,
   if (before != nullptr && before->fields().size() != count) {
     std::string message = ErrorTextEmitted::countAt(event, before->name(), record->where, count);
     this->state.getDiagnostics().error(member->loc(), message);
-    this->checkLooseArgs(call, 1);
+    this->walkLooseArgs(call, 1);
     return call;
   }
   std::vector<const Type *> elements;
@@ -593,9 +594,10 @@ std::optional<const Type *> EmitterChecker::emittedValueType(CallExpr *call,
     return std::nullopt;
   }
   const Type *found = type->isLiteral() ? type->literalBase() : type;
-  bool fits = wanted != nullptr && TypeRelations::isImplicitlyConvertible(type, wanted);
-  const Type *wider = wanted != nullptr && !fits ? TypeRelations::unify(wanted, found) : nullptr;
-  const Type *element = fits ? wanted : wanted != nullptr ? wider : found;
+  bool isFitting = wanted != nullptr && TypeRelations::isImplicitlyConvertible(type, wanted);
+  const Type *wider =
+      wanted != nullptr && !isFitting ? TypeRelations::unify(wanted, found) : nullptr;
+  const Type *element = isFitting ? wanted : wanted != nullptr ? wider : found;
   if (element == nullptr) {
     std::string message =
         ErrorTextEmitted::typeAt(event, before->name(), record->where, type->name());
@@ -676,8 +678,8 @@ Expr *EmitterChecker::callLibraryMethod(CallExpr *call, MemberExpr *member, Clas
 Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, ClassDecl *cls,
                                        bool super) {
   EmitterMethod kind = EmitterChecker::emitterMethod(member->name);
-  bool library = this->libraryCalls->inLibrary(call->loc());
-  if (kind == EmitterMethod::None || (library && kind != EmitterMethod::Emit)) {
+  bool isLibrary = this->libraryCalls->inLibrary(call->loc());
+  if (kind == EmitterMethod::None || (isLibrary && kind != EmitterMethod::Emit)) {
     return nullptr;
   }
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member->name, false);
@@ -686,7 +688,7 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
   }
   const Type *receiver = member->object->type;
   const Type *events = this->eventMaps->eventMapOf(receiver);
-  if (events == nullptr || (library && TypeQueries::mentionsParam(events))) {
+  if (events == nullptr || (isLibrary && TypeQueries::mentionsParam(events))) {
     return nullptr;
   }
   call->type = Type::error();
@@ -709,7 +711,7 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
   };
   switch (kind) {
     case EmitterMethod::Emit:
-      return this->checkEmit(emitter, library);
+      return this->checkEmit(emitter, isLibrary);
     case EmitterMethod::Listen:
     case EmitterMethod::Remove:
       return this->checkListenCall(emitter, kind);
@@ -764,7 +766,7 @@ Expr *EmitterChecker::checkSiteEmit(const EmitterCall &emitter, EventSite *site,
   CallExpr *call = emitter.call;
   std::optional<std::string> key = this->eventMaps->eventKey(call->args[0], emitter.member->name);
   if (!key.has_value()) {
-    this->checkLooseArgs(call, 1);
+    this->walkLooseArgs(call, 1);
     return call;
   }
   SentEmit emit{
@@ -774,13 +776,13 @@ Expr *EmitterChecker::checkSiteEmit(const EmitterCall &emitter, EventSite *site,
       .super = emitter.super,
   };
   EventRecord *record = EventMapInference::findEvent(site, *key);
-  bool service = EventMaps::isServiceEvent(*key);
-  if (!service && this->isOwnEmit(site, emit) && !EventMapInference::isFrozen(record)) {
+  bool isService = EventMaps::isServiceEvent(*key);
+  if (!isService && this->isOwnEmit(site, emit) && !EventMapInference::isFrozen(record)) {
     return this->collectEmitterCall(emit, site, *key, library);
   }
   std::string first;
-  const Type *args = service ? EventMaps::serviceEventArgs()
-                             : this->inferredEmitArgs(site, *key, call->args[0]->loc(), first);
+  const Type *args = isService ? EventMaps::serviceEventArgs()
+                               : this->inferredEmitArgs(site, *key, call->args[0]->loc(), first);
   EmitShape shape{
       .args = args,
       .event = *key,
@@ -795,14 +797,14 @@ Expr *EmitterChecker::checkEmitShape(const EmitterCall &emitter, const EmitShape
   CallExpr *call = emitter.call;
   MemberExpr *member = emitter.member;
   if (shape.args == nullptr) {
-    this->checkLooseArgs(call, 1);
+    this->walkLooseArgs(call, 1);
     return call;
   }
   size_t count = call->args.size() - 1;
   if (count > 1) {
     std::string message = ErrorTextEmitted::oneValue(shape.event);
     this->state.getDiagnostics().error(call->args[2]->loc(), message);
-    this->checkLooseArgs(call, 1);
+    this->walkLooseArgs(call, 1);
     return call;
   }
   size_t min = shape.args->tupleMin();
@@ -813,7 +815,7 @@ Expr *EmitterChecker::checkEmitShape(const EmitterCall &emitter, const EmitShape
             ? ErrorTextEmitted::countAt(shape.event, shape.args->name(), shape.first, count)
             : ErrorTextEmitted::arity(shape.event, shape.args->name(), min, max, count);
     this->state.getDiagnostics().error(member->loc(), message);
-    this->checkLooseArgs(call, 1);
+    this->walkLooseArgs(call, 1);
     return call;
   }
   if (shape.event == "error" && !library) {
@@ -839,7 +841,7 @@ bool EmitterChecker::emitValuesFit(CallExpr *call, const EmitShape &shape,
       std::string message =
           ErrorTextEmitted::typeAt(shape.event, shape.args->name(), shape.first, type->name());
       this->state.getDiagnostics().error(call->args[i]->loc(), message);
-      this->checkLooseArgs(call, i + 1);
+      this->walkLooseArgs(call, i + 1);
       return false;
     }
     call->args[i] = this->typeRelations->coerce(call->args[i], wanted);
@@ -859,7 +861,7 @@ Expr *EmitterChecker::checkListenCall(const EmitterCall &emitter, EmitterMethod 
   const Type *args =
       this->eventMaps->eventArgs(emitter.events, call->args[0], member->name, &event);
   if (args == nullptr) {
-    this->checkLooseArgs(call, 1);
+    this->walkLooseArgs(call, 1);
     return call;
   }
   ListenerKind listener = ListenerKind::Plain;
@@ -869,8 +871,8 @@ Expr *EmitterChecker::checkListenCall(const EmitterCall &emitter, EmitterMethod 
     return call;
   }
   if (kind == EmitterMethod::Listen) {
-    bool kept = this->addListenerBits(emitter, event, listener);
-    if (!kept) {
+    bool isKept = this->addListenerBits(emitter, event, listener);
+    if (!isKept) {
       return call;
     }
   } else {
@@ -929,7 +931,7 @@ Expr *EmitterChecker::checkCountCall(const EmitterCall &emitter) {
   const Type *args =
       this->eventMaps->eventArgs(emitter.events, call->args[0], member->name, &event);
   if (args == nullptr) {
-    this->checkLooseArgs(call, 1);
+    this->walkLooseArgs(call, 1);
     return call;
   }
   if (call->args.size() == 2) {
@@ -954,9 +956,10 @@ Expr *EmitterChecker::checkRemoveAllCall(const EmitterCall &emitter) {
     return call;
   }
   std::string event;
-  bool unknown = !call->args.empty() && this->eventMaps->eventArgs(emitter.events, call->args[0],
-                                                                   member->name, &event) == nullptr;
-  if (unknown) {
+  bool isUnknown =
+      !call->args.empty() &&
+      this->eventMaps->eventArgs(emitter.events, call->args[0], member->name, &event) == nullptr;
+  if (isUnknown) {
     return call;
   }
   std::vector<bool> given(call->args.size(), true);

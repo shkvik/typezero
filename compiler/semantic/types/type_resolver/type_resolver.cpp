@@ -58,10 +58,10 @@ const Type *TypeResolver::literalType(const TypeRef &ref) {
   if (TypeNameTable::isName(ref.name, TypeName::BOOLEAN)) {
     return Type::boolLiteral(ref.number() != 0);
   }
-  bool whole = ref.number() == std::trunc(ref.number()) &&
-               std::fabs(ref.number()) <= 9007199254740992.0 &&
-               !(ref.number() == 0 && std::signbit(ref.number()));
-  const Type *kind = whole ? Type::intTy() : Type::doubleTy();
+  bool isWhole = ref.number() == std::trunc(ref.number()) &&
+                 std::fabs(ref.number()) <= 9007199254740992.0 &&
+                 !(ref.number() == 0 && std::signbit(ref.number()));
+  const Type *kind = isWhole ? Type::intTy() : Type::doubleTy();
 
   return Type::numberLiteral(ref.number(), kind);
 }
@@ -74,7 +74,7 @@ bool TypeResolver::overloaded(const TypeRef &ref, size_t index) {
   if (!TypeResolver::isMethodAt(ref, index)) {
     return false;
   }
-  bool several = false;
+  bool isSeveral = false;
   for (size_t other = 0; other < ref.args.size(); ++other) {
     if (other == index || ref.names()[other] != ref.names()[index]) {
       continue;
@@ -82,10 +82,10 @@ bool TypeResolver::overloaded(const TypeRef &ref, size_t index) {
     if (!TypeResolver::isMethodAt(ref, other)) {
       return false;
     }
-    several = true;
+    isSeveral = true;
   }
 
-  return several;
+  return isSeveral;
 }
 
 TypeResolver::ResultStandaloneUsable TypeResolver::standalone(const Type *type, bool allowVoid) {
@@ -127,10 +127,11 @@ TypeResolver::ResultEnumMemberExists TypeResolver::enumMember(const EnumDecl *de
 
 TypeResolver::ResultArrayBufferGiven TypeResolver::bufferArgument(const TypeRef &ref,
                                                                   const Type *bytes) {
-  bool single = ref.args.size() == 1 && ref.args[0].kind() == TypeRefKind::NAME_REF;
-  bool buffer = single && (TypeNameTable::isName(ref.args[0].name, TypeName::ARRAY_BUFFER) ||
-                           TypeNameTable::isName(ref.args[0].name, TypeName::ARRAY_BUFFER_LIKE));
-  if (!buffer) {
+  bool isSingle = ref.args.size() == 1 && ref.args[0].kind() == TypeRefKind::NAME_REF;
+  bool isBuffer =
+      isSingle && (TypeNameTable::isName(ref.args[0].name, TypeName::ARRAY_BUFFER) ||
+                   TypeNameTable::isName(ref.args[0].name, TypeName::ARRAY_BUFFER_LIKE));
+  if (!isBuffer) {
     std::string message = ErrorTextGenericRef::bufferArg(ref.name);
 
     return err(TypeResolverBufferArgumentError{
@@ -354,8 +355,8 @@ TypeResolver::newSignature(const Overload &overload, const Type *type, llvm::Str
 
 TypeResolver::ResultUniqueFieldNames TypeResolver::newField(llvm::ArrayRef<Field> fields,
                                                             llvm::StringRef name) {
-  bool taken = llvm::any_of(fields, [&](const Field &field) { return field.name == name; });
-  if (taken) {
+  bool isTaken = llvm::any_of(fields, [&](const Field &field) { return field.name == name; });
+  if (isTaken) {
     std::string message = ErrorTextTypeFields::sameField(name);
 
     return err(TypeResolverNewFieldError{
@@ -441,8 +442,8 @@ const Type *TypeResolver::instantiate(ClassDecl *cls, std::vector<const Type *> 
   }
   GenericClassInstantiatorInstantiateClassErrorCode code = made.error().code;
   if (code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
-    bool endless = code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES;
-    llvm::SMLoc at = endless ? cls->loc() : loc;
+    bool isEndless = code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES;
+    llvm::SMLoc at = isEndless ? cls->loc() : loc;
     this->state.getDiagnostics().error(at, made.error().message);
   }
 
@@ -507,11 +508,11 @@ const Type *TypeResolver::builtinNamed(llvm::StringRef name) const {
     return bytes;
   }
   const NodeName *node = this->builtinModuleChecker->nodeName(name);
-  bool readline =
+  bool isReadline =
       node &&
       (node->module == NodeModule::Readline || node->module == NodeModule::ReadlinePromises) &&
       node->name == "Interface";
-  if (readline) {
+  if (isReadline) {
     Type::Runtime runtime = node->module == NodeModule::Readline ? Type::Runtime::Readline
                                                                  : Type::Runtime::ReadlinePromises;
     return Type::runtimeObject(runtime);
@@ -534,8 +535,8 @@ const Type *TypeResolver::resolveDict(const TypeRef &ref) {
   if (dict.error().code == DictCheckerResolveDictTypeErrorCode::NOT_A_DICT) {
     return nullptr;
   }
-  bool onKey = DictChecker::keyArgument(dict.error().code);
-  llvm::SMLoc at = onKey ? ref.args[0].loc : ref.loc;
+  bool isOnKey = DictChecker::keyArgument(dict.error().code);
+  llvm::SMLoc at = isOnKey ? ref.args[0].loc : ref.loc;
   this->state.getDiagnostics().error(at, dict.error().message);
 
   return Type::error();
@@ -549,9 +550,9 @@ std::string TypeResolver::missingText(llvm::StringRef name) const {
   if (result.has_value()) {
     return ErrorTextTypeName::resultArgs(name);
   }
-  bool generator = TypeNameTable::isName(name, TypeName::GENERATOR) ||
-                   TypeNameTable::isName(name, TypeName::ITERABLE_ITERATOR);
-  if (generator) {
+  bool isGenerator = TypeNameTable::isName(name, TypeName::GENERATOR) ||
+                     TypeNameTable::isName(name, TypeName::ITERABLE_ITERATOR);
+  if (isGenerator) {
     return ErrorTextTypeName::valuesArg(name);
   }
   if (TypeNameTable::isName(name, TypeName::PROMISE)) {
@@ -577,9 +578,9 @@ const Type *TypeResolver::missingType(const TypeRef &ref) {
     this->state.getDiagnostics().error(ref.loc, bigint);
     return Type::error();
   }
-  bool bigintArray = TypeNameTable::isName(ref.name, TypeName::BIG_INT64_ARRAY) ||
-                     TypeNameTable::isName(ref.name, TypeName::BIG_UINT64_ARRAY);
-  if (bigintArray) {
+  bool isBigintArray = TypeNameTable::isName(ref.name, TypeName::BIG_INT64_ARRAY) ||
+                       TypeNameTable::isName(ref.name, TypeName::BIG_UINT64_ARRAY);
+  if (isBigintArray) {
     std::string what = ErrorTextTypeName::bigintName(ref.name);
     std::string bigint = ErrorTextBigInt::none(what);
     this->state.getDiagnostics().error(ref.loc, bigint);
@@ -767,9 +768,9 @@ const Type *TypeResolver::resolveConstructor(const TypeRef &ref) {
   if (constructor.isOk()) {
     return constructor.value();
   }
-  bool objectType = constructor.error().code ==
-                    ClassValueCheckerResolveConstructorTypeErrorCode::NOT_AN_OBJECT_TYPE;
-  llvm::SMLoc at = objectType ? ref.args[0].loc : ref.loc;
+  bool isObjectType = constructor.error().code ==
+                      ClassValueCheckerResolveConstructorTypeErrorCode::NOT_AN_OBJECT_TYPE;
+  llvm::SMLoc at = isObjectType ? ref.args[0].loc : ref.loc;
   this->state.getDiagnostics().error(at, constructor.error().message);
 
   return Type::error();
@@ -804,8 +805,8 @@ const Type *TypeResolver::resolveGeneric(const TypeRef &ref) {
     return this->resultTypes->resolveResultType(ref, *result);
   }
   const TypeNameInfo *builtin = TypeNameTable::find(ref.name);
-  bool array = builtin != nullptr && builtin->form.is<ArrayTypeName>();
-  if (array) {
+  bool isArray = builtin != nullptr && builtin->form.is<ArrayTypeName>();
+  if (isArray) {
     return this->resolveArrayGeneric(ref);
   }
   if (auto *cls = dyn_cast_or_null<ClassDecl>(this->typeDeclarer->lookupType(ref.name))) {
@@ -853,12 +854,12 @@ const Type *TypeResolver::resolveArray(const TypeRef &ref) {
 }
 
 const Type *TypeResolver::resolveUnion(const TypeRef &ref) {
-  bool withNull = false;
+  bool isWithNull = false;
   std::vector<const Type *> members;
   for (const TypeRef &member : ref.args) {
     if (member.kind() == TypeRefKind::NAME_REF &&
         TypeNameTable::isName(member.name, TypeName::NULL_TYPE)) {
-      withNull = true;
+      isWithNull = true;
       continue;
     }
     const Type *type = this->resolveTypeInner(member);
@@ -873,7 +874,7 @@ const Type *TypeResolver::resolveUnion(const TypeRef &ref) {
     members.push_back(type);
   }
   const Type *type = Type::unionOf(members);
-  ResultUnionIsSupported supported = TypeResolver::unionAllowed(type, withNull);
+  ResultUnionIsSupported supported = TypeResolver::unionAllowed(type, isWithNull);
   if (supported.isErr()) {
     this->state.getDiagnostics().error(ref.loc, supported.error().message);
     return Type::error();
@@ -944,47 +945,47 @@ const Type *TypeResolver::resolveInfer(const TypeRef &ref) {
 const Type *TypeResolver::resolveFunctionType(const TypeRef &ref) {
   std::vector<const Type *> params;
   size_t minArgs = 0;
-  bool optional = false;
-  bool valid = true;
+  bool isOptional = false;
+  bool isValid = true;
   size_t count = ref.args.size() - 1;
   bool hasThis = count > 0 && !ref.names().empty() && ref.names()[0] == "this" &&
                  !ref.optional()[0] && !(ref.rest() && count == 1);
   for (size_t index = 0; index < count; ++index) {
-    bool rest = ref.rest() && index + 1 == count;
-    this->state.getTypeContext().enterListContext(rest);
+    bool hasRest = ref.rest() && index + 1 == count;
+    this->state.getTypeContext().enterListContext(hasRest);
     const Type *type = this->resolveType(ref.args[index], false);
     this->state.getTypeContext().leaveListContext();
-    valid &= !type->isError();
-    if (rest) {
+    isValid &= !type->isError();
+    if (hasRest) {
       ResultRestParamIsArray list = TypeResolver::restParam(type);
       if (list.isErr()) {
         this->state.getDiagnostics().error(ref.args[index].loc, list.error().message);
-        valid = false;
+        isValid = false;
       }
     } else if (ref.optional()[index]) {
       type = Type::optional(type);
-      optional = true;
+      isOptional = true;
     } else {
-      ResultParamOrderIsKept order = TypeResolver::paramOrder(optional);
+      ResultParamOrderIsKept order = TypeResolver::paramOrder(isOptional);
       if (order.isErr()) {
         this->state.getDiagnostics().error(ref.args[index].loc, order.error().message);
-        valid = false;
+        isValid = false;
       }
       minArgs = index + 1;
     }
     params.push_back(type);
   }
   const TypeRef &returned = ref.args.back();
-  bool predicate = returned.kind() == TypeRefKind::PREDICATE_REF;
-  const Type *returnType = predicate ? Type::boolTy() : this->resolveType(returned, true);
-  if (predicate && returned.asserts()) {
+  bool isPredicate = returned.kind() == TypeRefKind::PREDICATE_REF;
+  const Type *returnType = isPredicate ? Type::boolTy() : this->resolveType(returned, true);
+  if (isPredicate && returned.asserts()) {
     const Type *type = returned.args.empty() ? nullptr : this->resolveType(returned.args[0], false);
     std::string shown = returned.name.str() + (type ? " is " + type->name().str() : "");
     std::string message = ErrorTextAsserts::notAllowed(shown, type != nullptr, "");
     this->state.getDiagnostics().error(returned.loc, message);
     returnType = Type::error();
   }
-  if (!valid || returnType->isError()) {
+  if (!isValid || returnType->isError()) {
     return Type::error();
   }
 
@@ -1007,13 +1008,13 @@ TypeResolver::ResultTupleLengthFixed TypeResolver::fixedLength(const Type *list)
 
 const Type *TypeResolver::resolveSpreadTuple(const TypeRef &ref,
                                              const std::vector<const Type *> &elements) {
-  bool waiting = false;
+  bool isWaiting = false;
   for (size_t index = 0; index < elements.size(); ++index) {
-    waiting |= ref.spread()[index] && elements[index]->typeOp() != TypeOp::None &&
-               !elements[index]->isListParam();
+    isWaiting |= ref.spread()[index] && elements[index]->typeOp() != TypeOp::None &&
+                 !elements[index]->isListParam();
   }
-  bool known = llvm::none_of(elements, [](const Type *type) { return type->isError(); });
-  if (waiting && known) {
+  bool isKnown = llvm::none_of(elements, [](const Type *type) { return type->isError(); });
+  if (isWaiting && isKnown) {
     std::vector<const Type *> operands;
     for (size_t index = 0; index < elements.size(); ++index) {
       operands.push_back(Type::boolLiteral(ref.spread()[index]));
@@ -1052,9 +1053,9 @@ const Type *TypeResolver::resolveTuple(const TypeRef &ref) {
       return Type::error();
     }
   }
-  bool readonly = !ref.readonly().empty() && ref.readonly()[0];
+  bool isReadonly = !ref.readonly().empty() && ref.readonly()[0];
 
-  return Type::tuple(elements, readonly);
+  return Type::tuple(elements, isReadonly);
 }
 
 std::vector<Field> TypeResolver::resolveFields(const TypeRef &ref,

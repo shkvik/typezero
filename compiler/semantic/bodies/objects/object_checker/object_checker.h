@@ -30,7 +30,7 @@ public:
 
   ObjectChecker(SemanticState &owner, SemanticParts &all);
 
-  void checkForIn(ForOfStmt *stmt);
+  void walkForIn(ForOfStmt *stmt);
   ResultObjectFieldValue checkField(MemberExpr *member);
   Expr *enumObject(NameExpr *name, const Type *expected);
   const Type *checkObjectFieldTarget(MemberExpr *member);

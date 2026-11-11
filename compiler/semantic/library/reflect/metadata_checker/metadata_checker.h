@@ -11,7 +11,6 @@ class Scopes;
 class ClassDeclarer;
 class TypeRelations;
 class ReturnInferrer;
-class FunctionChecker;
 class ClassValueChecker;
 
 class MetadataChecker {
@@ -23,7 +22,7 @@ public:
   const void *metadataKey(const Expr *key, std::string &label);
   ResultMetadataTyped metadataType(const void *key, llvm::StringRef label, llvm::SMLoc loc,
                                    const Type *expected);
-  void checkBodyEarly(FunctionDecl *fn);
+  void walkBodyEarly(FunctionDecl *fn);
   Expr *designClass(const Type *type, llvm::SMLoc loc);
   ClassDecl *designConstructor(const Type *type);
   ClassDecl *builtinConstructor(llvm::StringRef name);
@@ -40,7 +39,6 @@ private:
   ClassDeclarer *classDeclarer = nullptr;
   TypeRelations *typeRelations = nullptr;
   ReturnInferrer *returnInferrer = nullptr;
-  FunctionChecker *functionChecker = nullptr;
   ClassValueChecker *classValueChecker = nullptr;
 };
 

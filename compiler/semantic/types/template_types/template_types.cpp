@@ -143,10 +143,10 @@ std::u16string TemplateTypes::lowerCase(char16_t c) {
 std::u16string TemplateTypes::changeCase(TypeOp op, const std::u16string &text) {
   std::u16string out;
   for (size_t i = 0; i < text.size(); ++i) {
-    bool first = i == 0;
-    if (op == TypeOp::Uppercase || (op == TypeOp::Capitalize && first)) {
+    bool isFirst = i == 0;
+    if (op == TypeOp::Uppercase || (op == TypeOp::Capitalize && isFirst)) {
       out += TemplateTypes::upperCase(text[i]);
-    } else if (op == TypeOp::Lowercase || (op == TypeOp::Uncapitalize && first)) {
+    } else if (op == TypeOp::Lowercase || (op == TypeOp::Uncapitalize && isFirst)) {
       out += TemplateTypes::lowerCase(text[i]);
     } else {
       out += text[i];
@@ -213,8 +213,8 @@ bool TemplateTypes::matchTemplate(const std::u16string &text, llvm::ArrayRef<con
         if (!TemplatePatterns::numberString(pieces[k], value)) {
           return false;
         }
-        bool whole = value == std::trunc(value) && std::fabs(value) <= 9007199254740992.0;
-        const Type *number = Type::numberLiteral(value, whole ? Type::intTy() : Type::doubleTy());
+        bool isWhole = value == std::trunc(value) && std::fabs(value) <= 9007199254740992.0;
+        const Type *number = Type::numberLiteral(value, isWhole ? Type::intTy() : Type::doubleTy());
         piece = number->name() == ToUtf8::toUtf8(pieces[k]) ? number : constraint->nonOptional();
       }
     }

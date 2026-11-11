@@ -292,8 +292,8 @@ std::optional<int64_t> ConstantFolder::intConstant(const Expr *expr) const {
   std::vector<const CastExpr *> casts;
   const Expr *inner = expr;
   while (auto *conv = dyn_cast<CastExpr>(inner)) {
-    bool integer = conv->type != nullptr && conv->type->isInteger();
-    if (!integer || !conv->isImplicit()) {
+    bool isInteger = conv->type != nullptr && conv->type->isInteger();
+    if (!isInteger || !conv->isImplicit()) {
       return std::nullopt;
     }
     casts.push_back(conv);
@@ -437,8 +437,9 @@ void ConstantFolder::foldUnsigned64(BinaryExpr *bin, bool wraps) {
   if (!l.has_value() || !r.has_value()) {
     return;
   }
-  bool supported = bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub || bin->op == BinaryOp::Mul;
-  if (!supported) {
+  bool isSupported =
+      bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub || bin->op == BinaryOp::Mul;
+  if (!isSupported) {
     return;
   }
   std::optional<uint64_t> result = ConstantFolder::unsignedResult(bin->op, *l, *r);
@@ -547,17 +548,17 @@ std::optional<ConstantFolder::IntFold> ConstantFolder::foldDivision(BinaryOp op,
   if (b == 0) {
     return std::nullopt;
   }
-  bool rem = op == BinaryOp::Rem;
+  bool isRem = op == BinaryOp::Rem;
   int64_t min = type->intMin();
   if (b == -1 && !type->isUnsigned()) {
     return IntFold{
-        .exact = rem ? std::optional<int64_t>(0) : llvm::checkedSub(int64_t(0), a),
-        .wrapped = rem ? 0 : (a == min ? min : -a),
+        .exact = isRem ? std::optional<int64_t>(0) : llvm::checkedSub(int64_t(0), a),
+        .wrapped = isRem ? 0 : (a == min ? min : -a),
         .value = 0,
         .text = ConstantFolder::wideText(0, a, BinaryOp::Sub),
     };
   }
-  int64_t quotient = rem ? a % b : a / b;
+  int64_t quotient = isRem ? a % b : a / b;
 
   return IntFold{
       .exact = quotient,
@@ -640,8 +641,8 @@ std::optional<ConstantFolder::IntFold> ConstantFolder::foldShiftLeft(BinaryExpr 
   llvm::APInt start(128, uint64_t(a), !shifted->isUnsigned());
   llvm::APInt wide = start.shl(unsigned(count));
   int bitsUsed = shifted->isUnsigned() ? int(wide.getActiveBits()) : int(wide.getSignificantBits());
-  bool fits = bitsUsed <= width;
-  if (!fits && !shifted->isWrapping()) {
+  bool isFitting = bitsUsed <= width;
+  if (!isFitting && !shifted->isWrapping()) {
     std::string shown = ConstantFolder::decimalText(wide);
     std::string message = ConstantFolder::overflowText(bin->type, shown, 0, false);
     this->state.getDiagnostics().error(bin->loc(), message);
@@ -671,8 +672,8 @@ void ConstantFolder::rememberFolded(BinaryExpr *bin, const IntFold &fold, bool w
 
 ConstantFolder::ResultDivisorNotZero ConstantFolder::checkDivisor(BinaryOp op,
                                                                   const Expr *divisor) const {
-  bool divides = op == BinaryOp::Div || op == BinaryOp::Rem;
-  if (divides && this->intConstant(divisor) == 0) {
+  bool isDividing = op == BinaryOp::Div || op == BinaryOp::Rem;
+  if (isDividing && this->intConstant(divisor) == 0) {
     std::string message = ErrorTextDivisor::zero();
 
     return err(ConstantFolderCheckDivisorError{
@@ -687,8 +688,8 @@ ConstantFolder::ResultDivisorNotZero ConstantFolder::checkDivisor(BinaryOp op,
 ConstantFolder::ResultShiftCountFits ConstantFolder::shiftCount(const Type *shifted,
                                                                 int64_t count) {
   int width = int(shifted->bitWidth());
-  bool outside = count < 0 || count >= int64_t(width);
-  if (outside && !shifted->isWrapping()) {
+  bool isOutside = count < 0 || count >= int64_t(width);
+  if (isOutside && !shifted->isWrapping()) {
     std::string message = ErrorTextShiftCount::outside(count, width - 1, shifted->name());
 
     return err(ConstantFolderShiftCountError{

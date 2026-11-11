@@ -124,22 +124,22 @@ const Expr *IndexProofs::measuredObject(const Expr *expr) {
   auto *member = dyn_cast<MemberExpr>(expr);
   if (member != nullptr) {
     const Type *object = member->object->type;
-    bool buffer = object != nullptr && (object->bytes() == Type::Bytes::ArrayBuffer ||
-                                        object->bytes() == Type::Bytes::DataView);
-    bool length = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH);
-    bool byteLength =
-        BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH) && buffer;
-    bool measured = (length || byteLength) && expr->type->isInt();
+    bool isBuffer = object != nullptr && (object->bytes() == Type::Bytes::ArrayBuffer ||
+                                          object->bytes() == Type::Bytes::DataView);
+    bool isLength = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH);
+    bool isByteLength =
+        BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH) && isBuffer;
+    bool isMeasured = (isLength || isByteLength) && expr->type->isInt();
 
-    return measured ? member->object : nullptr;
+    return isMeasured ? member->object : nullptr;
   }
   auto *call = dyn_cast<CallExpr>(expr);
   auto *callee = call != nullptr ? dyn_cast<MemberExpr>(call->callee) : nullptr;
   const Type *object = callee != nullptr ? callee->object->type : nullptr;
-  bool singleBytes = object != nullptr && object->isTypedArray() && object->elementSize() == 1;
-  bool measured = singleBytes && call->builtin() == Builtin::BytesByteLength;
+  bool isSingleBytes = object != nullptr && object->isTypedArray() && object->elementSize() == 1;
+  bool isMeasured = isSingleBytes && call->builtin() == Builtin::BytesByteLength;
 
-  return measured ? callee->object : nullptr;
+  return isMeasured ? callee->object : nullptr;
 }
 
 bool IndexProofs::isIntWidening(const CastExpr *conv) {
@@ -147,9 +147,9 @@ bool IndexProofs::isIntWidening(const CastExpr *conv) {
 }
 
 bool IndexProofs::isLinearStep(const BinaryExpr *bin) {
-  bool addOrSub = bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub;
+  bool isAddOrSub = bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub;
 
-  return addOrSub && bin->type->isInteger();
+  return isAddOrSub && bin->type->isInteger();
 }
 
 std::optional<Linear> IndexProofs::nodeLinear(const Expr *expr,
@@ -305,9 +305,9 @@ std::optional<Linear> IndexProofs::freshBufferLength(const CallExpr *call,
 const CallExpr *IndexProofs::freshBufferSource(const CallExpr *call) {
   auto *member = dyn_cast<MemberExpr>(call->callee);
   auto *made = member != nullptr ? dyn_cast<CallExpr>(member->object) : nullptr;
-  bool typed = made != nullptr && made->type != nullptr && made->type->isTypedArray() &&
-               !made->type->isBuffer();
-  if (!typed) {
+  bool isTyped = made != nullptr && made->type != nullptr && made->type->isTypedArray() &&
+                 !made->type->isBuffer();
+  if (!isTyped) {
     return nullptr;
   }
   switch (made->builtin()) {
@@ -439,22 +439,22 @@ bool IndexProofs::provesValueBetween(const Expr *expr, int64_t lo,
     return false;
   }
   const Facts &facts = this->state.getFlowState().getFacts();
-  bool lower = false;
-  bool upper = !hi;
+  bool isLower = false;
+  bool isUpper = !hi;
   if (std::optional<Linear> l = this->linear(expr)) {
     if (l->term.isZero()) {
-      lower = l->offset >= lo;
-      upper |= hi && l->offset <= *hi;
+      isLower = l->offset >= lo;
+      isUpper |= hi && l->offset <= *hi;
     } else {
-      lower = facts.proves(Term::zero(), l->term, l->offset - lo + 1);
-      upper |= hi && facts.proves(l->term, Term::zero(), *hi - l->offset + 1);
+      isLower = facts.proves(Term::zero(), l->term, l->offset - lo + 1);
+      isUpper |= hi && facts.proves(l->term, Term::zero(), *hi - l->offset + 1);
     }
   }
   IntegerRange range = this->byteProofs->valueRange(expr);
-  lower |= range.lo && *range.lo >= lo;
-  upper |= hi && range.hi && *range.hi <= *hi;
+  isLower |= range.lo && *range.lo >= lo;
+  isUpper |= hi && range.hi && *range.hi <= *hi;
 
-  return lower && upper;
+  return isLower && isUpper;
 }
 
 bool IndexProofs::exempt(llvm::SMLoc loc, const Expr *object) const {
@@ -611,9 +611,9 @@ IndexProofs::ResultUpToWasProven IndexProofs::requireUpTo(const Expr *value, con
 
   std::optional<std::string> text =
       value ? std::optional<std::string>(BytesCheckHelpers::valueText(value)) : std::nullopt;
-  bool bytes = object->type && (object->type->bytes() == Type::Bytes::ArrayBuffer ||
-                                object->type->bytes() == Type::Bytes::DataView);
-  std::string limit = ErrorTextUpTo::limit(BytesCheckHelpers::valueText(object), bytes, less);
+  bool hasBytes = object->type && (object->type->bytes() == Type::Bytes::ArrayBuffer ||
+                                   object->type->bytes() == Type::Bytes::DataView);
+  std::string limit = ErrorTextUpTo::limit(BytesCheckHelpers::valueText(object), hasBytes, less);
   std::string message = ErrorTextUpTo::unproven(what, text, limit);
 
   return err(IndexProofsRequireUpToError{
@@ -768,17 +768,18 @@ const Expr *IndexProofs::sameLengthSource(const Expr *object) {
 const Expr *IndexProofs::sameLengthInner(const Expr *object) {
   if (auto *wait = dyn_cast<AwaitExpr>(object)) {
     auto *all = dyn_cast<CallExpr>(wait->value);
-    bool single = all != nullptr && all->builtin() == Builtin::PromiseAll && all->args.size() == 1;
-    return single ? all->args[0] : nullptr;
+    bool isSingle =
+        all != nullptr && all->builtin() == Builtin::PromiseAll && all->args.size() == 1;
+    return isSingle ? all->args[0] : nullptr;
   }
   auto *call = dyn_cast<CallExpr>(object);
   if (call == nullptr) {
     return nullptr;
   }
-  bool fromArray = call->builtin() == Builtin::BytesFromArray;
-  bool fromBytes = call->builtin() == Builtin::BytesFromBytes;
+  bool isFromArray = call->builtin() == Builtin::BytesFromArray;
+  bool isFromBytes = call->builtin() == Builtin::BytesFromBytes;
 
-  return fromArray || fromBytes ? call->args[0] : nullptr;
+  return isFromArray || isFromBytes ? call->args[0] : nullptr;
 }
 
 const Expr *IndexProofs::viewedSource(const Expr *value) {
@@ -797,10 +798,10 @@ const CallExpr *IndexProofs::wholeByteView(const Expr *value) {
   if (call == nullptr) {
     return nullptr;
   }
-  bool view = call->builtin() == Builtin::DataViewNew || call->builtin() == Builtin::BytesView;
-  bool whole = call->args.size() == 1 && call->type && call->type->elementSize() == 1;
+  bool isView = call->builtin() == Builtin::DataViewNew || call->builtin() == Builtin::BytesView;
+  bool isWhole = call->args.size() == 1 && call->type && call->type->elementSize() == 1;
 
-  return view && whole ? call : nullptr;
+  return isView && isWhole ? call : nullptr;
 }
 
 std::optional<Linear> IndexProofs::knownLength(const Expr *value) const {
@@ -825,9 +826,9 @@ const CallExpr *IndexProofs::innerView(const Expr *value) {
   if (call == nullptr) {
     return nullptr;
   }
-  bool view = call->builtin() == Builtin::DataViewNew || call->builtin() == Builtin::BytesView;
+  bool isView = call->builtin() == Builtin::DataViewNew || call->builtin() == Builtin::BytesView;
 
-  return view && call->args.size() <= 2 ? call : nullptr;
+  return isView && call->args.size() <= 2 ? call : nullptr;
 }
 
 std::optional<Linear> IndexProofs::baseLength(const Expr *value) const {

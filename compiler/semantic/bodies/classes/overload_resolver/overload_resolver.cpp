@@ -94,27 +94,27 @@ std::optional<int> OverloadResolver::rankLeaf(const Type *from, const Type *to) 
     return from->isBuffer() && to->bytes() == Type::Bytes::Uint8 ? 1 : -1;
   }
   if (OverloadResolver::isOpaqueRanked(from) || OverloadResolver::isOpaqueRanked(to)) {
-    bool plainMatch = from->isMatch() && to->isMatch() && to->matchGroups() < 0 &&
-                      from->field("indices") == nullptr;
-    return plainMatch ? 1 : -1;
+    bool isPlainMatch = from->isMatch() && to->isMatch() && to->matchGroups() < 0 &&
+                        from->field("indices") == nullptr;
+    return isPlainMatch ? 1 : -1;
   }
 
   return OverloadResolver::objectRank(from, to);
 }
 
 int OverloadResolver::jsonRank(const Type *from) {
-  bool jsonValue = from->isString() || from->isNumeric() || from->isBool() ||
-                   (from->isArray() && from->inner()->isJson());
+  bool isJsonValue = from->isString() || from->isNumeric() || from->isBool() ||
+                     (from->isArray() && from->inner()->isJson());
 
-  return jsonValue ? 3 : -1;
+  return isJsonValue ? 3 : -1;
 }
 
 int OverloadResolver::iteratorRank(const Type *from, const Type *to) {
-  bool same = from->yielded() == to->yielded() &&
-              (from->returned() == to->returned() || to->returned()->isVoid()) &&
-              (from->sent() == to->sent() || to->sent()->isVoid());
+  bool isSame = from->yielded() == to->yielded() &&
+                (from->returned() == to->returned() || to->returned()->isVoid()) &&
+                (from->sent() == to->sent() || to->sent()->isVoid());
 
-  return same ? 1 : -1;
+  return isSame ? 1 : -1;
 }
 
 bool OverloadResolver::isOpaqueRanked(const Type *t) {
@@ -143,11 +143,11 @@ std::optional<int> OverloadResolver::objectRank(const Type *from, const Type *to
 }
 
 bool OverloadResolver::sameFieldObjects(const Type *from, const Type *to) {
-  bool plain = from->isObject() && to->isObject() && !from->isClass() && !to->isClass() &&
-               !from->isAnyObject() && !to->isAnyObject() && from->isTuple() == to->isTuple() &&
-               from->fields().size() == to->fields().size() && from->overloads().empty() &&
-               to->overloads().empty();
-  if (!plain) {
+  bool isPlain = from->isObject() && to->isObject() && !from->isClass() && !to->isClass() &&
+                 !from->isAnyObject() && !to->isAnyObject() && from->isTuple() == to->isTuple() &&
+                 from->fields().size() == to->fields().size() && from->overloads().empty() &&
+                 to->overloads().empty();
+  if (!isPlain) {
     return false;
   }
   for (const Field &f : from->fields()) {
@@ -175,9 +175,9 @@ bool OverloadResolver::sameShapeObjects(const Type *from, const Type *to) {
 RankJoin OverloadResolver::rankJoin(const Type *from, const Type *to) {
   RankJoin join{from, to, RankForm::SAME, {}};
   if (to->isOptional()) {
-    bool both = from->isOptional();
-    join.form = both ? RankForm::OPTIONAL_SAME : RankForm::OPTIONAL_WRAP;
-    join.parts = {RankGoal{both ? from->inner() : from, to->inner()}};
+    bool isBoth = from->isOptional();
+    join.form = isBoth ? RankForm::OPTIONAL_SAME : RankForm::OPTIONAL_WRAP;
+    join.parts = {RankGoal{isBoth ? from->inner() : from, to->inner()}};
   } else if (to->isUnion() && from->isUnion()) {
     join.form = RankForm::WORST_MEMBER;
     for (const Type *member : from->members()) {
@@ -206,7 +206,7 @@ RankJoin OverloadResolver::rankJoin(const Type *from, const Type *to) {
 void OverloadResolver::joinRanks(const RankJoin &join, RankRun &run) {
   run.path.pop_back();
   std::vector<int> ranks = ChildrenFirst::takeAnswers(run.answers, join.parts.size());
-  bool failed = llvm::is_contained(ranks, -1);
+  bool isFailed = llvm::is_contained(ranks, -1);
   int rank = -1;
   switch (join.form) {
     case RankForm::SAME:
@@ -219,7 +219,7 @@ void OverloadResolver::joinRanks(const RankJoin &join, RankRun &run) {
       rank = ranks[0] < 0 ? -1 : ranks[0] + 1;
       break;
     case RankForm::WORST_MEMBER:
-      rank = failed ? -1 : OverloadResolver::worstRank(ranks);
+      rank = isFailed ? -1 : OverloadResolver::worstRank(ranks);
       break;
     case RankForm::BEST_TARGET:
       rank = OverloadResolver::bestRank(ranks);
@@ -228,7 +228,7 @@ void OverloadResolver::joinRanks(const RankJoin &join, RankRun &run) {
       rank = OverloadResolver::resultRank(join, ranks);
       break;
     case RankForm::FIELDS:
-      rank = failed ? -1 : 2;
+      rank = isFailed ? -1 : 2;
       break;
   }
   run.answers.push_back(rank);
@@ -367,14 +367,14 @@ OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::ve
     }
     if (!expected && DecimalChecker::isLiteralTree(args[i]) &&
         OverloadResolver::hasFloatLiteral(args[i])) {
-      bool decimal = false;
-      bool dbl = false;
+      bool isDecimal = false;
+      bool isDbl = false;
       for (FunctionDecl *v : fit) {
         const Type *param = OverloadResolver::parameterAt(v->sym, i)->nonOptional();
-        decimal |= param->isDecimal();
-        dbl |= param->isFloat();
+        isDecimal |= param->isDecimal();
+        isDbl |= param->isFloat();
       }
-      if (decimal && !dbl) {
+      if (isDecimal && !isDbl) {
         expected = Type::decimalTy();
       }
     }
@@ -441,17 +441,17 @@ OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::ve
     });
   }
   auto better = [&](const Candidate &a, const Candidate &b) {
-    bool strictly = false;
+    bool isStrictly = false;
     for (size_t i = 0; i < count; ++i) {
       if (a.ranks[i] > b.ranks[i]) {
         return false;
       }
-      strictly |= a.ranks[i] < b.ranks[i];
+      isStrictly |= a.ranks[i] < b.ranks[i];
     }
-    bool generic = a.fn->sym->isGeneric();
-    bool otherGeneric = b.fn->sym->isGeneric();
+    bool isGeneric = a.fn->sym->isGeneric();
+    bool isOtherGeneric = b.fn->sym->isGeneric();
 
-    return strictly || (!a.leavesOut && b.leavesOut) || (!generic && otherGeneric);
+    return isStrictly || (!a.leavesOut && b.leavesOut) || (!isGeneric && isOtherGeneric);
   };
   for (const Candidate &c : applicable) {
     if (llvm::all_of(applicable,
@@ -475,9 +475,9 @@ OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::ve
     tied.push_back(c.fn);
   }
   auto adapted = [](const Candidate &c) { return c.adapted; };
-  bool literals = llvm::all_of(applicable, adapted);
+  bool hasLiterals = llvm::all_of(applicable, adapted);
   std::string list = ErrorTextVariant::list(tied);
-  std::string message = ErrorTextVariant::tie(what, list, literals);
+  std::string message = ErrorTextVariant::tie(what, list, hasLiterals);
 
   return err(OverloadResolverChooseVariantError{
       .code = OverloadResolverChooseVariantErrorCode::SEVERAL_VARIANTS_FIT,
@@ -538,16 +538,16 @@ OverloadResolver::variantForType(llvm::ArrayRef<FunctionDecl *> variants, const 
   } else if (this->state.getFunctionStack().getExpectedCallback()) {
     for (FunctionDecl *v : variants) {
       const FuncSymbol *sym = v->sym;
-      bool fits =
+      bool isFitting =
           !sym->hasRest &&
           sym->minArgs <= this->state.getFunctionStack().getExpectedCallback()->params.size() &&
           sym->params.size() <= this->state.getFunctionStack().getExpectedCallback()->params.size();
-      for (size_t i = 0; i < sym->params.size() && fits; ++i) {
+      for (size_t i = 0; i < sym->params.size() && isFitting; ++i) {
         const Type *param = sym->params[i];
         const Type *given = this->state.getFunctionStack().getExpectedCallback()->params[i];
-        fits = param == given || (param->isOptional() && param->inner() == given);
+        isFitting = param == given || (param->isOptional() && param->inner() == given);
       }
-      if (fits) {
+      if (isFitting) {
         matching.push_back(v);
       }
     }
@@ -597,8 +597,8 @@ std::vector<FunctionDecl *> OverloadResolver::signatureVariants(const Type *ifac
     for (size_t i = 0; i < signature->params().size(); ++i) {
       Param param;
       param.name = this->state.getAst().keepName(std::string(1, char('a' + i % 26)));
-      bool rest = sym->hasRest && i + 1 == signature->params().size();
-      if (rest) {
+      bool hasRest = sym->hasRest && i + 1 == signature->params().size();
+      if (hasRest) {
         param.form = RestParam{};
       } else if (i >= sym->minArgs) {
         param.form = OptionalParam{};
@@ -619,8 +619,8 @@ Expr *OverloadResolver::checkOverloadCall(CallExpr *call, MemberExpr *member) {
   const Overload &overload = *iface->overload(member->name);
   call->type = member->type = Type::error();
   std::vector<FunctionDecl *> variants = this->signatureVariants(iface, overload);
-  bool checked = false;
-  ResultVariantChosen chosen = this->chooseVariant(variants, call->args, call->spread, checked);
+  bool isChecked = false;
+  ResultVariantChosen chosen = this->chooseVariant(variants, call->args, call->spread, isChecked);
   if (chosen.isErr() &&
       chosen.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
     this->state.getDiagnostics().error(member->loc(), chosen.error().message);
@@ -635,7 +635,7 @@ Expr *OverloadResolver::checkOverloadCall(CallExpr *call, MemberExpr *member) {
   member->type = overload.signatures[size_t(signature)];
   call->type = sym->getKnownReturnType();
   this->flowChecker->calledFunction();
-  std::vector<bool> given(checked ? call->args.size() : 0, true);
+  std::vector<bool> given(isChecked ? call->args.size() : 0, true);
 
   return this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
                                                member->loc(), &given);

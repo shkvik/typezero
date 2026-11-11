@@ -30,7 +30,7 @@ public:
 
   ClassChecker(SemanticState &owner, SemanticParts &all);
 
-  void checkClassBodies(ClassDecl *cls);
+  void walkClassBodies(ClassDecl *cls);
   ResultEveryFieldSet checkFieldsSet() const;
   ResultThisReference checkThis(NameExpr *name);
   ResultNewThisSymbol declareThis(FunctionDecl *fn);

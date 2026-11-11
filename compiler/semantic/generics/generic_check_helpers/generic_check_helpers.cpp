@@ -26,9 +26,9 @@ bool GenericCheckHelpers::mentionsAnyOf(const Type *type, llvm::ArrayRef<const T
 }
 
 bool GenericCheckHelpers::isParamOf(const Type *type, llvm::ArrayRef<const Type *> params) {
-  bool plainParam = type->isParam() && type->typeOp() == TypeOp::None;
+  bool isPlainParam = type->isParam() && type->typeOp() == TypeOp::None;
 
-  return plainParam && llvm::is_contained(params, type);
+  return isPlainParam && llvm::is_contained(params, type);
 }
 
 std::string GenericCheckHelpers::constraintSpelling(const Type *param, const TypeParamDecl *decl) {

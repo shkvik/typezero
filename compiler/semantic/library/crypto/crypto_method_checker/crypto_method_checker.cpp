@@ -109,15 +109,15 @@ Expr *CryptoMethodChecker::reportNoMethod(CallExpr *call, MemberExpr *member) {
   Crypto kind = type->crypto();
   llvm::StringRef name = member->name;
   llvm::SMLoc loc = member->loc();
-  bool hash = kind == Crypto::Hash || kind == Crypto::Hmac || kind == Crypto::Sign ||
-              kind == Crypto::Verify;
-  bool cipher = kind == Crypto::Cipheriv || kind == Crypto::Decipheriv;
+  bool isHash = kind == Crypto::Hash || kind == Crypto::Hmac || kind == Crypto::Sign ||
+                kind == Crypto::Verify;
+  bool isCipher = kind == Crypto::Cipheriv || kind == Crypto::Decipheriv;
   static const llvm::StringLiteral streamMethods[] = {
       "write",   "end",         "pipe", "unpipe", "read",           "on",
       "once",    "off",         "emit", "pause",  "resume",         "setEncoding",
       "destroy", "addListener", "cork", "uncork", "removeListener", "setDefaultEncoding"};
-  if ((hash || cipher) && llvm::is_contained(streamMethods, name)) {
-    std::string message = ErrorTextCryptoMethod::stream(name, type->name(), kind, cipher);
+  if ((isHash || isCipher) && llvm::is_contained(streamMethods, name)) {
+    std::string message = ErrorTextCryptoMethod::stream(name, type->name(), kind, isCipher);
     this->state.getDiagnostics().error(loc, message);
     return this->checkLoosely(call);
   }
@@ -425,9 +425,9 @@ Expr *CryptoMethodChecker::checkKeyExport(const CryptoMethodCall &crypto) {
     return this->cryptoArgs->cryptoResult(call, CryptoFn::KeyExportSecret, {self}, buffer);
   }
   llvm::StringMap<Expr *> options;
-  bool read = this->cryptoArgs->cryptoOptions(args[0], name,
-                                              {"format", "type", "cipher", "passphrase"}, options);
-  if (!read) {
+  bool isRead = this->cryptoArgs->cryptoOptions(
+      args[0], name, {"format", "type", "cipher", "passphrase"}, options);
+  if (!isRead) {
     return call;
   }
   int format = 3;

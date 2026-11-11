@@ -15,10 +15,10 @@ class HttpChecker {
 public:
   HttpChecker(SemanticState &owner, SemanticParts &all);
 
-  void checkResponseNew(NewExpr *expr);
-  void checkRequestNew(NewExpr *expr);
-  void checkHeadersNew(NewExpr *expr);
-  void checkHeadersCall(const CallExpr *call, const MemberExpr *member);
+  void walkResponseNew(NewExpr *expr);
+  void walkRequestNew(NewExpr *expr);
+  void walkHeadersNew(NewExpr *expr);
+  void walkHeadersCall(const CallExpr *call, const MemberExpr *member);
   static bool validReason(const std::u16string &text);
 
 private:
@@ -26,6 +26,8 @@ private:
   using ResultRequestUrl = Result<llvm::StringRef, HttpCheckerRequestUrlError>;
   using ResultMethodName = Result<llvm::StringRef, HttpCheckerMethodNameError>;
   using ResultHeaderText = Result<const std::u16string *, HttpCheckerHeaderTextError>;
+  using ResultHeaderNameChecked = Result<void, HttpCheckerHeaderNameError>;
+  using ResultHeaderValueChecked = Result<void, HttpCheckerHeaderTextError>;
 
   static ResultHeaderName headerName(llvm::StringRef name);
   static ResultRequestUrl requestUrl(llvm::StringRef text);
@@ -41,9 +43,9 @@ private:
   static bool hasBody(const Expr *body);
   static bool hasCredentials(llvm::StringRef url);
 
-  void checkHeadersInit(const Expr *init);
-  void checkHeaderName(const Expr *name);
-  void checkHeaderValue(const Expr *value);
+  void walkHeadersInit(const Expr *init);
+  ResultHeaderNameChecked checkHeaderName(const Expr *name);
+  ResultHeaderValueChecked checkHeaderValue(const Expr *value);
   bool inProgram(const Expr *expr) const;
 
   SemanticState &state;

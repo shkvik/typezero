@@ -26,13 +26,15 @@ public:
   static std::pair<llvm::StringRef, llvm::StringRef> sidesOf(const BinaryExpr *bin);
   static const Type *literalHint(const Expr *other, const Type *hint);
   static bool fitsLiteral(const Expr *expr, const Type *type);
-  void checkComparisonOperands(BinaryExpr *bin);
-  void checkDecimalLiteralRange(const Expr *lit);
+  void walkComparisonOperands(BinaryExpr *bin);
+  using ResultDecimalLiteralChecked = Result<void, DecimalCheckerLiteralRangeError>;
+
+  ResultDecimalLiteralChecked checkDecimalLiteralRange(const Expr *lit);
   Expr *checkDecimalArithmetic(BinaryExpr *bin);
   Expr *checkDecimalComparison(BinaryExpr *bin);
   void reportDecimalMix(const BinaryExpr *bin);
-  void checkDecimalAssign(AssignExpr *assign, BinaryOp op);
-  void checkDecimalDivisor(BinaryOp op, const Expr *divisor);
+  void walkDecimalAssign(AssignExpr *assign, BinaryOp op);
+  void walkDecimalDivisor(BinaryOp op, const Expr *divisor);
   Expr *checkDecimalCall(CallExpr *call, llvm::SMLoc loc);
   Expr *checkDecimalStatic(CallExpr *call, MemberExpr *member);
   Expr *checkDecimalMethod(CallExpr *call, MemberExpr *member);

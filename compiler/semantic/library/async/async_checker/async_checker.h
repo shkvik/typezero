@@ -30,7 +30,7 @@ public:
 
   AsyncChecker(SemanticState &owner, SemanticParts &all);
 
-  void checkForAwait(ForOfStmt *stmt);
+  void walkForAwait(ForOfStmt *stmt);
   static const Type *awaitedType(const Type *type);
   Expr *checkAwait(AwaitExpr *await, const Type *expected);
   ResultPromiseTypeRef resolvePromiseType(const TypeRef &ref);

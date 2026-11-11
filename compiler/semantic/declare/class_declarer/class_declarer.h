@@ -88,10 +88,10 @@ public:
 
   void declareClass(ClassDecl *cls);
   void resolveClass(ClassDecl *cls);
-  void checkVariants(ClassDecl *cls);
+  void walkVariants(ClassDecl *cls);
   void completeClass(ClassDecl *cls);
   void declareMethods(ClassDecl *cls);
-  void checkVariantPair(FunctionDecl *a, FunctionDecl *b);
+  void reportVariantPair(FunctionDecl *a, FunctionDecl *b);
   void declareTyped(FunctionDecl *fn, const Type *declared);
 
 private:
@@ -140,9 +140,9 @@ private:
 
   Expr *literalValue(const Type *literal, llvm::SMLoc loc);
   void resolveField(ClassDecl *cls, ClassField &f);
-  void checkMemberName(const ClassDecl *cls, size_t index);
+  void walkMemberName(const ClassDecl *cls, size_t index);
   void arrowMethod(ClassDecl *cls, ClassField &f, const Type *type);
-  void checkVariantList(llvm::ArrayRef<FunctionDecl *> functions);
+  void walkVariantList(llvm::ArrayRef<FunctionDecl *> functions);
   const Type *declaredFieldType(const ClassDecl *cls, ClassField &f);
   static bool checkEmpty(const ClassDecl *cls, DefaultRun &run);
   void startCompletion(ClassDecl *cls, std::vector<CompletionStep> &steps);

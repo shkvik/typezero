@@ -39,8 +39,8 @@ const Type *GenericChecker::apparentType(const Type *type) {
       })) {
     std::vector<const Type *> members;
     for (const Type *m : type->members()) {
-      bool bounded = m->isParam() && m->constraint() && !m->isListParam();
-      const Type *seen = bounded ? m->constraint() : m;
+      bool isBounded = m->isParam() && m->constraint() && !m->isListParam();
+      const Type *seen = isBounded ? m->constraint() : m;
       if (!seen->isObject() || seen->isClass()) {
         return type;
       }
@@ -135,8 +135,8 @@ NodeChildren<const Expr *> GenericChecker::conditionParts(const Expr *cond) {
     return {unary->operand};
   }
   auto *bin = dyn_cast<BinaryExpr>(cond);
-  bool logic = bin != nullptr && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr);
-  if (logic) {
+  bool isLogic = bin != nullptr && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr);
+  if (isLogic) {
     return {bin->lhs, bin->rhs};
   }
 
@@ -215,8 +215,9 @@ std::optional<bool> GenericChecker::undefinedCondition(const BinaryExpr *bin) {
       operand = cast<CastExpr>(operand)->operand;
     }
     const Type *type = operand->type;
-    bool alwaysUndefined = type->isUndefined() || (type->isOptional() && type->inner()->isNever());
-    if (isa<UndefinedExpr>(other) && isa<NameExpr>(operand) && alwaysUndefined) {
+    bool isAlwaysUndefined =
+        type->isUndefined() || (type->isOptional() && type->inner()->isNever());
+    if (isa<UndefinedExpr>(other) && isa<NameExpr>(operand) && isAlwaysUndefined) {
       return bin->op == BinaryOp::Eq;
     }
   }
@@ -251,15 +252,15 @@ std::optional<bool> GenericChecker::typeOfAnswer(const BinaryExpr *bin, const Ty
     return std::nullopt;
   }
   std::u16string wanted(name.begin(), name.end());
-  bool equal = text->value == wanted;
+  bool isEqual = text->value == wanted;
   if (type->isOptional()) {
-    if (text->value == u"undefined" || equal) {
+    if (text->value == u"undefined" || isEqual) {
       return std::nullopt;
     }
-    equal = false;
+    isEqual = false;
   }
 
-  return bin->op == BinaryOp::Eq ? equal : !equal;
+  return bin->op == BinaryOp::Eq ? isEqual : !isEqual;
 }
 
 const Type *GenericChecker::literalShape(const Expr *expr) {
@@ -342,8 +343,8 @@ const Type *GenericChecker::objectShape(const ObjectLitExpr *lit,
   std::vector<Field> fields;
   for (size_t i = 0; i < types.size(); ++i) {
     const ObjectLitExpr::Property &p = lit->props[i];
-    bool repeated = llvm::any_of(fields, [&](const Field &f) { return f.name == p.name; });
-    if (types[i]->isUndefined() || repeated) {
+    bool isRepeated = llvm::any_of(fields, [&](const Field &f) { return f.name == p.name; });
+    if (types[i]->isUndefined() || isRepeated) {
       return nullptr;
     }
     fields.push_back({p.name.str(), types[i], false});

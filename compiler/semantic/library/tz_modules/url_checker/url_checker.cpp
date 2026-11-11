@@ -172,7 +172,7 @@ UrlChecker::ResultInputIsKnown UrlChecker::knownInput(const Expr *input, bool ba
   return ok(input);
 }
 
-void UrlChecker::checkUrlNew(NewExpr *expr) {
+void UrlChecker::walkUrlNew(NewExpr *expr) {
   if (this->libraryCalls->inLibrary(expr->loc())) {
     return;
   }
@@ -181,8 +181,8 @@ void UrlChecker::checkUrlNew(NewExpr *expr) {
     return;
   }
   const Expr *input = UrlChecker::unconverted(args[0]);
-  bool based = args.size() > 1;
-  if (based) {
+  bool isBased = args.size() > 1;
+  if (isBased) {
     ResultKnownBaseUrl base = this->knownBase(args[1]);
     if (base.isErr()) {
       this->state.getDiagnostics().error(args[1]->loc(), base.error().message);
@@ -191,13 +191,13 @@ void UrlChecker::checkUrlNew(NewExpr *expr) {
   }
   std::optional<std::string> text = UrlChecker::literalText(input);
   if (text) {
-    ResultUrlTextValid valid = UrlChecker::urlText(*text, based);
+    ResultUrlTextValid valid = UrlChecker::urlText(*text, isBased);
     if (valid.isErr()) {
       this->state.getDiagnostics().error(input->loc(), valid.error().message);
     }
     return;
   }
-  ResultInputIsKnown known = this->knownInput(input, based);
+  ResultInputIsKnown known = this->knownInput(input, isBased);
   if (known.isErr()) {
     this->state.getDiagnostics().error(input->loc(), known.error().message);
   }
@@ -240,8 +240,8 @@ UrlChecker::ResultSettableText UrlChecker::setterValue(llvm::StringRef name,
     llvm::StringRef scheme = value;
     scheme.consume_back(":");
     auto schemeChar = [](char c) { return llvm::isAlnum(c) || c == '+' || c == '-' || c == '.'; };
-    bool good = !scheme.empty() && llvm::isAlpha(scheme[0]) && llvm::all_of(scheme, schemeChar);
-    if (!good) {
+    bool isGood = !scheme.empty() && llvm::isAlpha(scheme[0]) && llvm::all_of(scheme, schemeChar);
+    if (!isGood) {
       std::string message = ErrorTextUrlSetter::protocol(value);
 
       return err(UrlCheckerSetterValueError{
@@ -252,9 +252,9 @@ UrlChecker::ResultSettableText UrlChecker::setterValue(llvm::StringRef name,
   }
   if (name == "setPort") {
     unsigned long long number = 0;
-    bool wrong = !value.empty() && (!llvm::all_of(value, llvm::isDigit) ||
-                                    value.getAsInteger(10, number) || number > 65535);
-    if (wrong) {
+    bool isWrong = !value.empty() && (!llvm::all_of(value, llvm::isDigit) ||
+                                      value.getAsInteger(10, number) || number > 65535);
+    if (isWrong) {
       std::string message = ErrorTextUrlSetter::port(value);
 
       return err(UrlCheckerSetterValueError{
@@ -275,9 +275,9 @@ UrlChecker::ResultSettableText UrlChecker::setterValue(llvm::StringRef name,
       port.consume_front(":");
     }
     unsigned long long number = 0;
-    bool wrong = !UrlChecker::validHost(host) || !llvm::all_of(port, llvm::isDigit) ||
-                 (!port.empty() && (port.getAsInteger(10, number) || number > 65535));
-    if (wrong) {
+    bool isWrong = !UrlChecker::validHost(host) || !llvm::all_of(port, llvm::isDigit) ||
+                   (!port.empty() && (port.getAsInteger(10, number) || number > 65535));
+    if (isWrong) {
       std::string message = ErrorTextUrlSetter::host(value, name == "setHost");
 
       return err(UrlCheckerSetterValueError{

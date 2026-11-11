@@ -44,8 +44,13 @@ InstanceRecord *LateClassStore::findLateOwner(const ClassDecl *cls) const {
   return this->lateOwners.lookup(cls);
 }
 
-void LateClassStore::captureLateErrorsOf(InstanceRecord *owner, Diagnostics &diagnostics) {
-  diagnostics.setCapture(&this->lateErrors[owner]);
+void LateClassStore::addLateErrors(InstanceRecord *owner, const std::vector<Diagnostic> &found) {
+  std::vector<Diagnostic> &errors = this->lateErrors[owner];
+  for (const Diagnostic &diagnostic : found) {
+    if (diagnostic.kind == llvm::SourceMgr::DK_Error) {
+      errors.push_back(diagnostic);
+    }
+  }
 }
 
 std::vector<LateError> LateClassStore::getFirstLateErrors() const {

@@ -31,11 +31,11 @@ class LoopChecker {
 public:
   LoopChecker(SemanticState &owner, SemanticParts &all);
 
-  void checkWhile(WhileStmt *stmt);
-  void checkDoWhile(DoWhileStmt *stmt);
-  void checkFor(ForStmt *stmt);
-  void checkForOf(ForOfStmt *stmt);
-  void checkLoopBody(Stmt *body, bool awaits);
+  void walkWhile(WhileStmt *stmt);
+  void walkDoWhile(DoWhileStmt *stmt);
+  void walkFor(ForStmt *stmt);
+  void walkForOf(ForOfStmt *stmt);
+  void walkLoopBody(Stmt *body, bool awaits);
 
 private:
   static bool continuesTo(const Stmt *body, llvm::ArrayRef<llvm::StringRef> labels);

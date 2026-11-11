@@ -160,8 +160,8 @@ UnaryChecker::ResultOperandIsInteger UnaryChecker::bitsOperand(const Type *type)
 
 UnaryChecker::ResultResultNotDropped
 UnaryChecker::resultKept(const UnaryExpr *unary, const Type *dropped, bool promised) const {
-  bool library = this->libraryCalls->inLibrary(unary->loc());
-  if (dropped->holdsResults() && !library) {
+  bool isLibrary = this->libraryCalls->inLibrary(unary->loc());
+  if (dropped->holdsResults() && !isLibrary) {
     std::string message = promised ? ErrorTextUnary::dropsAsync() : ErrorTextUnary::drops();
 
     return err(UnaryCheckerResultKeptError{
@@ -261,8 +261,8 @@ Expr *UnaryChecker::checkSign(UnaryExpr *unary, const Type *expected, bool wraps
   if (type->isDate() && unary->op == UnaryOp::Plus) {
     return this->dateChecker->dateTime(unary->operand);
   }
-  bool literal = isa<IntLitExpr>(unary->operand) || isa<FloatLitExpr>(unary->operand);
-  ResultOperandIsNumeric numeric = UnaryChecker::numberOperand(unary, op, type, literal);
+  bool isLiteral = isa<IntLitExpr>(unary->operand) || isa<FloatLitExpr>(unary->operand);
+  ResultOperandIsNumeric numeric = UnaryChecker::numberOperand(unary, op, type, isLiteral);
   if (numeric.isErr()) {
     this->state.getDiagnostics().error(unary->loc(), numeric.error().message);
     type = Type::error();
@@ -315,9 +315,9 @@ const Type *UnaryChecker::signHint(const UnaryExpr *unary, const Type *expected)
   if (member != nullptr) {
     wanted = member;
   }
-  bool numeric = wanted != nullptr && (wanted->isNumeric() || wanted->isDecimal());
+  bool isNumeric = wanted != nullptr && (wanted->isNumeric() || wanted->isDecimal());
 
-  return numeric ? wanted : nullptr;
+  return isNumeric ? wanted : nullptr;
 }
 
 Expr *UnaryChecker::checkNot(UnaryExpr *unary, bool wraps) {
@@ -349,11 +349,11 @@ Expr *UnaryChecker::checkVoid(UnaryExpr *unary, bool wraps) {
   unary->operand = this->exprChecker->checkExpr(unary->operand);
   unary->type = Type::undefinedTy();
   const Type *dropped = unary->operand->type;
-  bool promised = dropped->isPromise();
-  if (promised) {
+  bool isPromised = dropped->isPromise();
+  if (isPromised) {
     dropped = dropped->promised();
   }
-  ResultResultNotDropped kept = this->resultKept(unary, dropped, promised);
+  ResultResultNotDropped kept = this->resultKept(unary, dropped, isPromised);
   if (kept.isErr()) {
     this->state.getDiagnostics().error(unary->loc(), kept.error().message);
   }
@@ -556,7 +556,7 @@ UnaryChecker::ResultDeleteIsPossible UnaryChecker::checkKeyDelete(UnaryExpr *una
 
 UnaryChecker::ResultInOperatorSuited UnaryChecker::checkIn(BinaryExpr *bin) {
   std::optional<std::string> key = UnaryChecker::simpleText(bin->lhs);
-  bool literalKey = isa<IntLitExpr>(bin->lhs);
+  bool isLiteralKey = isa<IntLitExpr>(bin->lhs);
   std::string array = UnaryChecker::simpleText(bin->rhs).value_or("a");
   bin->lhs = this->exprChecker->checkExpr(bin->lhs);
   bin->rhs = this->exprChecker->checkExpr(bin->rhs);
@@ -585,8 +585,8 @@ UnaryChecker::ResultInOperatorSuited UnaryChecker::checkIn(BinaryExpr *bin) {
     });
   }
   std::string i = l->isInteger() && key.has_value() ? *key : "i";
-  std::string check =
-      literalKey ? i + " < " + array + ".length" : i + " >= 0 && " + i + " < " + array + ".length";
+  std::string check = isLiteralKey ? i + " < " + array + ".length"
+                                   : i + " >= 0 && " + i + " < " + array + ".length";
   std::string message = ErrorTextIn::array(check);
 
   return err(UnaryCheckerCheckInError{

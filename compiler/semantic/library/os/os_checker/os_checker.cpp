@@ -85,14 +85,14 @@ Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
 }
 
 bool OsChecker::hasRejectedArgs(CallExpr *call, llvm::SMLoc loc) {
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 0);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 0);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
 
-  return rejected || arity.isErr();
+  return isRejected || arity.isErr();
 }
 
 Expr *OsChecker::checkOsFunction(CallExpr *call, OsFunction function, llvm::SMLoc loc) {

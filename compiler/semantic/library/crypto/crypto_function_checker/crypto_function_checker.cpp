@@ -56,20 +56,20 @@ std::optional<std::string> CryptoFunctionChecker::literalOf(const Expr *e) {
 
 Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   llvm::StringRef sync = fn;
-  bool async = false;
+  bool isAsync = false;
   for (const auto &[form, syncName] : kAsyncForms) {
     if (fn == form) {
-      async = true;
+      isAsync = true;
       sync = syncName;
     }
   }
   for (const auto &[form, syncName] : kTzCryptoAsyncForms) {
     if (fn == form) {
-      async = true;
+      isAsync = true;
       sync = syncName;
     }
   }
-  if (async && !call->args.empty() && isa<FunctionExpr>(call->args.back())) {
+  if (isAsync && !call->args.empty() && isa<FunctionExpr>(call->args.back())) {
     std::string message = ErrorTextCryptoFunction::callback(fn);
     this->state.getDiagnostics().error(call->args.back()->loc(), message);
     for (Expr *&arg : call->args) {
@@ -80,7 +80,7 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
   }
   Expr *checked = this->checkSyncCall(call, sync, fn, loc);
 
-  return async ? this->asyncOf(checked) : checked;
+  return isAsync ? this->asyncOf(checked) : checked;
 }
 
 CryptoFunctionChecker::ResultFilledTarget
@@ -290,9 +290,9 @@ Expr *CryptoFunctionChecker::provenNumber(Expr *arg, int64_t lo, std::optional<i
   }
   IndexProofs::ResultBetweenProven between =
       this->indexProofs->requireBetween(checked, lo, hi, what);
-  bool shown =
+  bool isShown =
       between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT;
-  if (shown) {
+  if (isShown) {
     this->state.getDiagnostics().error(checked->loc(), between.error().message);
   }
   if (between.isErr() && !this->indexProofs->exempt(checked->loc())) {
@@ -473,17 +473,17 @@ Expr *CryptoFunctionChecker::checkRandomFill(SyncCall &sync) {
     return this->cryptoArgs->cryptoCall(call, CryptoFn::GetRandomValues, {target}, type);
   }
 
-  bool offsetGiven = CryptoFunctionChecker::isPresent(args, 1);
-  bool sizeGiven = CryptoFunctionChecker::isPresent(args, 2);
-  int has = (offsetGiven ? 1 : 0) | (sizeGiven ? 2 : 0);
+  bool isOffsetGiven = CryptoFunctionChecker::isPresent(args, 1);
+  bool isSizeGiven = CryptoFunctionChecker::isPresent(args, 2);
+  int has = (isOffsetGiven ? 1 : 0) | (isSizeGiven ? 2 : 0);
   Expr *offset = this->cryptoArgs->cryptoDouble(loc, 0);
   Expr *size = this->cryptoArgs->cryptoDouble(loc, 0);
-  if (offsetGiven) {
+  if (isOffsetGiven) {
     Expr *at = this->provenFillOffset(args[1], target);
     if (at == nullptr) {
       return call;
     }
-    if (sizeGiven) {
+    if (isSizeGiven) {
       Expr *count = this->provenFillSize(args[2], at, target);
       if (count == nullptr) {
         return call;
@@ -499,11 +499,11 @@ Expr *CryptoFunctionChecker::checkRandomFill(SyncCall &sync) {
 
 Expr *CryptoFunctionChecker::provenFillOffset(Expr *arg, const Expr *target) {
   Expr *at = this->exprChecker->checkExpr(arg, Type::intTy());
-  bool library = this->indexProofs->exempt(at->loc());
+  bool isLibrary = this->indexProofs->exempt(at->loc());
   if (at->type->isError()) {
     return nullptr;
   }
-  if (library) {
+  if (isLibrary) {
     return at;
   }
   std::string offsetWhat = ErrorTextCryptoFnLabel::offset();
@@ -531,8 +531,8 @@ Expr *CryptoFunctionChecker::provenFillSize(Expr *arg, Expr *at, const Expr *tar
   if (count->type->isError()) {
     return nullptr;
   }
-  bool library = this->indexProofs->exempt(at->loc());
-  if (!library) {
+  bool isLibrary = this->indexProofs->exempt(at->loc());
+  if (!isLibrary) {
     std::string sizeWhat = ErrorTextCryptoFnLabel::size();
     IndexProofs::ResultBetweenProven between =
         this->indexProofs->requireBetween(count, 0, {}, sizeWhat);
@@ -545,9 +545,9 @@ Expr *CryptoFunctionChecker::provenFillSize(Expr *arg, Expr *at, const Expr *tar
   }
   std::optional<Linear> start = this->indexProofs->linear(at);
   std::optional<Linear> length = this->indexProofs->linear(count);
-  bool fits = this->indexProofs->provesSumUpTo(start, length, target) ||
-              this->indexProofs->exempt(count->loc());
-  if (!fits) {
+  bool isFitting = this->indexProofs->provesSumUpTo(start, length, target) ||
+                   this->indexProofs->exempt(count->loc());
+  if (!isFitting) {
     std::string countText = BytesCheckHelpers::valueText(count);
     std::string atText = BytesCheckHelpers::valueText(at);
     std::string message = ErrorTextCryptoFunction::fillFits(countText, atText);
@@ -685,11 +685,11 @@ Expr *CryptoFunctionChecker::checkScrypt(SyncCall &sync) {
 
 bool CryptoFunctionChecker::argonOptionsGiven(SyncCall &sync) {
   std::vector<Expr *> &args = sync.call->args;
-  bool read = this->cryptoArgs->cryptoOptions(args[1], sync.shown,
-                                              {"message", "nonce", "parallelism", "tagLength",
-                                               "memory", "passes", "secret", "associatedData"},
-                                              sync.options);
-  if (!read) {
+  bool isRead = this->cryptoArgs->cryptoOptions(args[1], sync.shown,
+                                                {"message", "nonce", "parallelism", "tagLength",
+                                                 "memory", "passes", "secret", "associatedData"},
+                                                sync.options);
+  if (!isRead) {
     return false;
   }
   for (llvm::StringRef required :
@@ -778,13 +778,13 @@ Expr *CryptoFunctionChecker::checkCreateCipher(SyncCall &sync) {
     this->state.getDiagnostics().error(args[0]->loc(), message);
     return call;
   }
-  bool decrypt = sync.function == CryptoSyncFunction::CREATE_DECIPHERIV;
+  bool isDecrypt = sync.function == CryptoSyncFunction::CREATE_DECIPHERIV;
   return this->cryptoArgs->cryptoResult(
       call, CryptoFn::CipherNew,
       {cipher, key, iv,
        tag ? this->cryptoArgs->cryptoNumber(tag) : this->cryptoArgs->cryptoDouble(loc, -1),
-       this->cryptoArgs->cryptoBool(loc, decrypt)},
-      Type::cryptoType(decrypt ? Crypto::Decipheriv : Crypto::Cipheriv));
+       this->cryptoArgs->cryptoBool(loc, isDecrypt)},
+      Type::cryptoType(isDecrypt ? Crypto::Decipheriv : Crypto::Cipheriv));
 }
 
 Expr *CryptoFunctionChecker::checkNameList(SyncCall &sync) {
@@ -834,7 +834,7 @@ Expr *CryptoFunctionChecker::checkCreateKey(SyncCall &sync) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  bool priv = sync.function == CryptoSyncFunction::CREATE_PRIVATE_KEY;
+  bool isPriv = sync.function == CryptoSyncFunction::CREATE_PRIVATE_KEY;
   KeyInput input{
       .key = nullptr,
       .encoding = this->cryptoArgs->cryptoInt(loc, 0),
@@ -844,17 +844,17 @@ Expr *CryptoFunctionChecker::checkCreateKey(SyncCall &sync) {
       .has = 0,
   };
   if (isa<ObjectLitExpr>(args[0])) {
-    if (!this->keyOptionsRead(sync, priv, input)) {
+    if (!this->keyOptionsRead(sync, isPriv, input)) {
       return call;
     }
   } else {
-    input.key = this->cryptoArgs->cryptoData(args[0], "key", true, !priv, true);
+    input.key = this->cryptoArgs->cryptoData(args[0], "key", true, !isPriv, true);
   }
   if (input.key->type->isError() || input.passphrase->type->isError()) {
     return call;
   }
   const Type *keyObject = Type::cryptoType(Crypto::KeyObject);
-  std::vector<Expr *> keyArgs{this->cryptoArgs->cryptoBool(loc, priv),
+  std::vector<Expr *> keyArgs{this->cryptoArgs->cryptoBool(loc, isPriv),
                               input.key,
                               input.encoding,
                               this->cryptoArgs->cryptoInt(loc, input.format),
@@ -868,9 +868,9 @@ Expr *CryptoFunctionChecker::checkCreateKey(SyncCall &sync) {
 bool CryptoFunctionChecker::keyOptionsRead(SyncCall &sync, bool priv, KeyInput &input) {
   Expr *given = sync.call->args[0];
   llvm::StringMap<Expr *> &options = sync.options;
-  bool read = this->cryptoArgs->cryptoOptions(
+  bool isRead = this->cryptoArgs->cryptoOptions(
       given, sync.fn, {"key", "format", "type", "passphrase", "encoding"}, options);
-  if (!read) {
+  if (!isRead) {
     return false;
   }
   Expr *format = options.lookup("format");
@@ -914,8 +914,8 @@ bool CryptoFunctionChecker::keyDetailsRead(llvm::StringMap<Expr *> &options, Key
   if (encoding == nullptr) {
     return true;
   }
-  bool literal = CryptoFunctionChecker::literalOf(encoding).has_value();
-  Expr *number = literal ? this->bytesChecker->checkBufferEncoding(encoding) : nullptr;
+  bool isLiteral = CryptoFunctionChecker::literalOf(encoding).has_value();
+  Expr *number = isLiteral ? this->bytesChecker->checkBufferEncoding(encoding) : nullptr;
   if (number == nullptr || !isa<IntLitExpr>(number)) {
     std::string message = ErrorTextCryptoFunction::keyCoding();
     this->state.getDiagnostics().error(encoding->loc(), message);
@@ -990,8 +990,8 @@ Expr *CryptoFunctionChecker::checkSignOnce(SyncCall &sync) {
   llvm::StringRef fn = sync.fn;
   llvm::SMLoc loc = sync.loc;
   const Type *buffer = Type::bytesType(Type::Bytes::Buffer);
-  bool verify = sync.function == CryptoSyncFunction::VERIFY;
-  size_t count = verify ? 4 : 3;
+  bool isVerify = sync.function == CryptoSyncFunction::VERIFY;
+  size_t count = isVerify ? 4 : 3;
   ArgumentChecker::ResultArityMatches arity =
       this->argumentChecker->checkArity(call, unsigned(count), unsigned(count + 1));
   if (arity.isErr()) {
@@ -999,8 +999,8 @@ Expr *CryptoFunctionChecker::checkSignOnce(SyncCall &sync) {
   }
   if (arity.isErr() || this->cryptoArgs->rejectCryptoCallback(
                            call, count, fn,
-                           verify ? "'const ok = verify(algorithm, data, key, signature)'"
-                                  : "'const signature = sign(algorithm, data, key)'")) {
+                           isVerify ? "'const ok = verify(algorithm, data, key, signature)'"
+                                    : "'const signature = sign(algorithm, data, key)'")) {
     return call;
   }
   Expr *algorithm = isa<UndefinedExpr>(args[0])
@@ -1008,10 +1008,10 @@ Expr *CryptoFunctionChecker::checkSignOnce(SyncCall &sync) {
                         : this->argumentChecker->checkArg(args[0], Type::string());
   Expr *data = this->cryptoArgs->cryptoData(args[1], "data", true, false, true);
   std::vector<Expr *> signArgs = {algorithm, data};
-  if (!this->cryptoArgs->cryptoSignKey(args[2], fn, !verify, signArgs)) {
+  if (!this->cryptoArgs->cryptoSignKey(args[2], fn, !isVerify, signArgs)) {
     return call;
   }
-  if (verify) {
+  if (isVerify) {
     Expr *signature = this->cryptoArgs->cryptoData(args[3], "signature", true, false, true);
     if (signature->type->isError()) {
       return call;
@@ -1021,8 +1021,8 @@ Expr *CryptoFunctionChecker::checkSignOnce(SyncCall &sync) {
   if (data->type->isError()) {
     return call;
   }
-  return this->cryptoArgs->cryptoResult(call, verify ? CryptoFn::Verify : CryptoFn::Sign,
-                                        std::move(signArgs), verify ? Type::boolTy() : buffer);
+  return this->cryptoArgs->cryptoResult(call, isVerify ? CryptoFn::Verify : CryptoFn::Sign,
+                                        std::move(signArgs), isVerify ? Type::boolTy() : buffer);
 }
 
 Expr *CryptoFunctionChecker::checkCreateSigner(SyncCall &sync) {
@@ -1035,14 +1035,14 @@ Expr *CryptoFunctionChecker::checkCreateSigner(SyncCall &sync) {
     return call;
   }
   Expr *name = args[0];
-  bool literal = CryptoFunctionChecker::literalOf(name).has_value();
-  if (literal && !this->cryptoArgs->cryptoMd(name, true)) {
+  bool isLiteral = CryptoFunctionChecker::literalOf(name).has_value();
+  if (isLiteral && !this->cryptoArgs->cryptoMd(name, true)) {
     return call;
   }
-  bool verify = sync.function == CryptoSyncFunction::CREATE_VERIFY;
+  bool isVerify = sync.function == CryptoSyncFunction::CREATE_VERIFY;
   std::vector<Expr *> signArgs = {this->argumentChecker->checkArg(name, Type::string()),
-                                  this->cryptoArgs->cryptoBool(loc, verify)};
-  const Type *made = Type::cryptoType(verify ? Crypto::Verify : Crypto::Sign);
+                                  this->cryptoArgs->cryptoBool(loc, isVerify)};
+  const Type *made = Type::cryptoType(isVerify ? Crypto::Verify : Crypto::Sign);
   return this->cryptoArgs->cryptoResult(call, CryptoFn::SignNew, std::move(signArgs), made);
 }
 

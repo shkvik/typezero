@@ -127,9 +127,9 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
   std::string syncName =
       this->state.getFileSystemStore().isInsidePromiseCall() ? (fn + "Sync").str() : fn.str();
   std::optional<FsFunction> function = FsFunctionTable::find(syncName);
-  bool value = function == FsFunction::CONSTANTS || function == FsFunction::STATS ||
-               function == FsFunction::DIRENT;
-  if (value) {
+  bool isValue = function == FsFunction::CONSTANTS || function == FsFunction::STATS ||
+                 function == FsFunction::DIRENT;
+  if (isValue) {
     return this->reportNotFunction(call, fn, loc);
   }
   if (this->callChecker->rejectSpread(call)) {
@@ -236,9 +236,9 @@ Expr *FsChecker::checkPath(Expr *arg, bool fd) {
     std::string message = ErrorTextFsCall::zeroPath();
     this->state.getDiagnostics().error(checked->loc(), message);
   }
-  bool descriptor =
+  bool isDescriptor =
       fd && !this->state.getFileSystemStore().isInsidePromiseCall() && checked->type->isInt();
-  if (descriptor) {
+  if (isDescriptor) {
     return checked;
   }
 
@@ -353,9 +353,9 @@ Expr *FsChecker::checkWriteFile(FsCall &fs) {
   Expr *file = this->checkPath(call->args[0], true);
   Expr *data = this->exprChecker->checkExpr(call->args[1], string);
   auto view = [](const Type *t) { return t->isByteView(); };
-  bool bytes =
+  bool hasBytes =
       view(data->type) || (data->type->isUnion() && llvm::all_of(data->type->members(), view));
-  if (!data->type->isString() && !bytes && !data->type->isError()) {
+  if (!data->type->isString() && !hasBytes && !data->type->isError()) {
     std::string message = ErrorTextFsCall::data(fn, data->type);
     this->state.getDiagnostics().error(data->loc(), message);
     return this->checkLoosely(call);
@@ -365,7 +365,7 @@ Expr *FsChecker::checkWriteFile(FsCall &fs) {
   }
   Expr *number = nullptr;
   if (Expr *encoding = options.lookup("encoding"); encoding && !isa<UndefinedExpr>(encoding)) {
-    if (bytes) {
+    if (hasBytes) {
       std::string message = ErrorTextFsEncoding::forText(fn);
       this->state.getDiagnostics().error(encoding->loc(), message);
       return call;
@@ -383,7 +383,7 @@ Expr *FsChecker::checkWriteFile(FsCall &fs) {
   call->args = {file, data, flag,
                 mode ? this->argumentChecker->checkArg(mode, Type::intTy())
                      : this->makeIntLiteral(loc, 0666)};
-  if (!bytes) {
+  if (!hasBytes) {
     call->args.push_back(number ? number : this->makeIntLiteral(loc, 0));
   }
   call->target = BuiltinCall{.builtin = Builtin::FsWriteFile};
@@ -483,26 +483,26 @@ Expr *FsChecker::checkStat(FsCall &fs) {
                          options)) {
     return call;
   }
-  bool throwIfMissing = true;
-  bool big = false;
+  bool isThrowIfMissing = true;
+  bool isBig = false;
   if (Expr *value = options.lookup("throwIfNoEntry");
-      value && !this->literalFlag(fs, value, "throwIfNoEntry", throwIfMissing)) {
+      value && !this->literalFlag(fs, value, "throwIfNoEntry", isThrowIfMissing)) {
     return call;
   }
   if (Expr *value = options.lookup("bigint");
-      value && !this->literalFlag(fs, value, "bigint", big)) {
+      value && !this->literalFlag(fs, value, "bigint", isBig)) {
     return call;
   }
-  if (big) {
+  if (isBig) {
     std::string message = ErrorTextFsCall::bigint();
     this->state.getDiagnostics().error(options.lookup("bigint")->loc(), message);
     return call;
   }
   call->args = {file, this->makeBoolLiteral(loc, fs.function == FsFunction::STAT_SYNC),
-                this->makeBoolLiteral(loc, throwIfMissing)};
+                this->makeBoolLiteral(loc, isThrowIfMissing)};
   call->target = BuiltinCall{.builtin = Builtin::FsStat};
   const Type *stats = this->state.getFileSystemStore().getStatsClass()->type;
-  call->type = throwIfMissing ? stats : Type::optional(stats);
+  call->type = isThrowIfMissing ? stats : Type::optional(stats);
   return call;
 }
 
@@ -526,9 +526,9 @@ Expr *FsChecker::checkReaddir(FsCall &fs) {
       return call;
     }
   }
-  bool types = false;
+  bool hasTypes = false;
   if (Expr *value = options.lookup("withFileTypes");
-      value && !this->literalFlag(fs, value, "withFileTypes", types)) {
+      value && !this->literalFlag(fs, value, "withFileTypes", hasTypes)) {
     return call;
   }
   Expr *recursive = options.lookup("recursive");
@@ -536,7 +536,7 @@ Expr *FsChecker::checkReaddir(FsCall &fs) {
                                : this->makeBoolLiteral(loc, false)};
   call->target = BuiltinCall{.builtin = Builtin::FsReaddir};
   const Type *dirent = this->state.getFileSystemStore().getDirentClass()->type;
-  call->type = Type::array(types ? dirent : string);
+  call->type = Type::array(hasTypes ? dirent : string);
   return call;
 }
 
@@ -654,9 +654,9 @@ Expr *FsChecker::checkTwoPaths(FsCall &fs) {
 Expr *FsChecker::checkFsModuleCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   Expr *checked = this->checkFsCall(call, fn, loc);
   CallExpr *done = llvm::dyn_cast<CallExpr>(checked);
-  bool typed =
+  bool isTyped =
       done != nullptr && BuiltinGroups::isFsBuiltin(done->builtin()) && !done->type->isError();
-  if (typed) {
+  if (isTyped) {
     done->type = Type::result(done->type, this->fsErrors->ofCall(done));
   }
 
@@ -664,13 +664,13 @@ Expr *FsChecker::checkFsModuleCall(CallExpr *call, llvm::StringRef fn, llvm::SML
 }
 
 Expr *FsChecker::checkTzIoCall(CallExpr *call, llvm::SMLoc loc) {
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 1);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
-  if (rejected || arity.isErr()) {
+  if (isRejected || arity.isErr()) {
     return call;
   }
   if (!call->args.empty()) {

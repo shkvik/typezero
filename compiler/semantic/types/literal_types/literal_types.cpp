@@ -183,11 +183,11 @@ void LiteralTypes::enterExpectation(const EnterExpectation &enter,
                                     std::vector<ExpectationStep> &steps,
                                     std::vector<const Type *> &answers) {
   const Type *expected = enter.type;
-  bool conditional =
+  bool isConditional =
       expected && enter.depth <= 8 && expected->nonOptional()->typeOp() == TypeOp::Conditional;
   std::vector<const Type *> branches =
-      conditional ? this->conditionalTypes->conditionalBranches(expected->nonOptional())
-                  : std::vector<const Type *>();
+      isConditional ? this->conditionalTypes->conditionalBranches(expected->nonOptional())
+                    : std::vector<const Type *>();
   if (branches.empty()) {
     answers.push_back(expected);
   } else {
@@ -310,7 +310,7 @@ const Type *LiteralTypes::literalMember(const ObjectLitExpr *lit, const Type *ta
   }
   const Type *best = nullptr;
   int bestScore = -1;
-  bool ambiguous = false;
+  bool isAmbiguous = false;
   for (const Type *m : target->members()) {
     if (!LiteralTypes::isPlainObjectMember(m) || !LiteralTypes::namesFit(lit, m)) {
       continue;
@@ -322,13 +322,13 @@ const Type *LiteralTypes::literalMember(const ObjectLitExpr *lit, const Type *ta
     if (*score > bestScore) {
       best = m;
       bestScore = *score;
-      ambiguous = false;
+      isAmbiguous = false;
     } else if (*score == bestScore) {
-      ambiguous = true;
+      isAmbiguous = true;
     }
   }
 
-  return ambiguous ? nullptr : best;
+  return isAmbiguous ? nullptr : best;
 }
 
 bool LiteralTypes::hasSpread(const ObjectLitExpr *lit) {
@@ -380,13 +380,13 @@ std::optional<int> LiteralTypes::memberScore(const ObjectLitExpr *lit, const Typ
       continue;
     }
     const Type *field = f->type->nonOptional();
-    bool convertible = TypeRelations::isImplicitlyConvertible(tag, field) ||
-                       (tag->isLiteral() && tag->literalBase()->isInt() &&
-                        TypeRelations::isImplicitlyConvertible(tag->literalBase(), field));
-    if (convertible) {
-      bool tagged = LiteralTypes::isLiteralSet(field) ||
-                    (field->isUnion() && field->slotPart(UnionSlot::Atom) != nullptr);
-      score += tagged ? 1 : 0;
+    bool isConvertible = TypeRelations::isImplicitlyConvertible(tag, field) ||
+                         (tag->isLiteral() && tag->literalBase()->isInt() &&
+                          TypeRelations::isImplicitlyConvertible(tag->literalBase(), field));
+    if (isConvertible) {
+      bool isTagged = LiteralTypes::isLiteralSet(field) ||
+                      (field->isUnion() && field->slotPart(UnionSlot::Atom) != nullptr);
+      score += isTagged ? 1 : 0;
     } else if (LiteralTypes::isLiteralSet(field) || field->isUnion()) {
       return std::nullopt;
     }

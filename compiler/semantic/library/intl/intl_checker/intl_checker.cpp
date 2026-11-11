@@ -422,8 +422,8 @@ bool IntlChecker::checkLocaleArg(Expr *&arg, llvm::StringRef what) {
 }
 
 Expr *IntlChecker::checkLocaleList(Expr *arg, llvm::StringRef what) {
-  bool array = isa<ArrayLitExpr>(arg);
-  arg = this->exprChecker->checkExpr(arg, array ? Type::array(Type::string()) : nullptr);
+  bool isArray = isa<ArrayLitExpr>(arg);
+  arg = this->exprChecker->checkExpr(arg, isArray ? Type::array(Type::string()) : nullptr);
   const Type *type = arg->type;
   if (type->isError()) {
     return arg;

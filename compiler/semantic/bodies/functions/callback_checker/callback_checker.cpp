@@ -77,8 +77,8 @@ CallbackChecker::callbackParam(const Type *type, const Signature &expected, size
                                llvm::StringRef method) {
   const Type *param = type->params()[i];
   const Type *given = expected.params[i];
-  bool fits = param == given || (param->isOptional() && param->inner() == given);
-  if (!fits) {
+  bool isFitting = param == given || (param->isOptional() && param->inner() == given);
+  if (!isFitting) {
     std::string position = ErrorTextCallbackArg::position(i);
     std::string message =
         ErrorTextCallbackArg::paramType(name, param->name(), position, method, given->name());
@@ -89,8 +89,8 @@ CallbackChecker::callbackParam(const Type *type, const Signature &expected, size
     });
   }
   if (i >= primary && i >= type->minArgs()) {
-    bool named = known && i < known->params.size();
-    std::string paramName = named ? ErrorTextCallbackArg::paramName(known->params[i].name) : "";
+    bool isNamed = known && i < known->params.size();
+    std::string paramName = isNamed ? ErrorTextCallbackArg::paramName(known->params[i].name) : "";
     std::string argName = ErrorTextCallbackArg::argName(method, i);
     std::string args = ErrorTextCallbackArg::argsShape(method);
     std::string message = ErrorTextCallbackArg::extraParam(name, argName, paramName, method, args);
@@ -302,8 +302,8 @@ NodeChildren<SignedCondition> CallbackChecker::signedParts(SignedCondition part)
     return {SignedCondition{unary->operand, !part.whenTrue}};
   }
   auto *bin = dyn_cast<BinaryExpr>(part.cond);
-  bool logic = bin != nullptr && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr);
-  if (logic) {
+  bool isLogic = bin != nullptr && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr);
+  if (isLogic) {
     return {SignedCondition{bin->lhs, part.whenTrue}, SignedCondition{bin->rhs, part.whenTrue}};
   }
 
@@ -316,8 +316,8 @@ CallbackChecker::DefinedVars CallbackChecker::definedBy(SignedCondition part,
     return ChildrenFirst::takeAnswer(answers);
   }
   auto *bin = dyn_cast<BinaryExpr>(part.cond);
-  bool logic = bin != nullptr && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr);
-  if (logic) {
+  bool isLogic = bin != nullptr && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr);
+  if (isLogic) {
     DefinedVars right = ChildrenFirst::takeAnswer(answers);
     DefinedVars left = ChildrenFirst::takeAnswer(answers);
     return CallbackChecker::joinDefined(bin->op == BinaryOp::LogAnd, part.whenTrue, left, right);
@@ -429,7 +429,7 @@ CallbackChecker::ResultComparisonNumber CallbackChecker::comparison(const Type *
 Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
                                            const Type *expected) {
   const Type *arrayType = member->object->type;
-  bool typed = arrayType->isTypedArray();
+  bool isTyped = arrayType->isTypedArray();
   const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
   const CallbackArrayMethod *callbackMethod =
       method != nullptr ? method->form.as<CallbackArrayMethod>() : nullptr;
@@ -437,9 +437,9 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
       .call = call,
       .member = member,
       .arrayType = arrayType,
-      .element = typed ? arrayType->elementType() : arrayType->inner(),
+      .element = isTyped ? arrayType->elementType() : arrayType->inner(),
       .kind = callbackMethod != nullptr ? callbackMethod->callback : ArrayCallback::COMPARE,
-      .typed = typed,
+      .typed = isTyped,
       .count = call->args.size(),
       .accumulator = nullptr,
       .someValue = false,
@@ -451,10 +451,10 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
     return call;
   }
   this->walkExtraCallbackArgs(shape);
-  bool reduce = shape.kind == ArrayCallback::REDUCE;
+  bool isReduce = shape.kind == ArrayCallback::REDUCE;
   shape.someValue =
-      !reduce || shape.count == 2 || this->indexProofs->provesNotEmpty(member->object);
-  shape.accumulator = reduce && shape.count == 2 ? this->reduceInitType(shape) : shape.element;
+      !isReduce || shape.count == 2 || this->indexProofs->provesNotEmpty(member->object);
+  shape.accumulator = isReduce && shape.count == 2 ? this->reduceInitType(shape) : shape.element;
   if (shape.accumulator->isError()) {
     call->args[0] = this->exprChecker->checkExpr(call->args[0]);
     return call;
@@ -462,7 +462,7 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
   Signature sig = CallbackChecker::callbackSignature(shape, expected);
   shape.isBoolean = this->callChecker->isGlobalName(call->args[0], GlobalName::BOOLEAN);
   this->rememberCallbackFacts(shape);
-  unsigned primary = reduce || shape.kind == ArrayCallback::COMPARE ? 2 : 1;
+  unsigned primary = isReduce || shape.kind == ArrayCallback::COMPARE ? 2 : 1;
   call->args[0] = this->checkFunctionArg(call->args[0], sig, primary, member->name);
   Builtin builtin = callbackMethod != nullptr ? method->builtin : Builtin::ArrSortWith;
   call->target = BuiltinCall{.builtin = builtin};
@@ -476,15 +476,15 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
 
 void CallbackChecker::walkExtraCallbackArgs(ArrayCallbackShape &shape) {
   CallExpr *call = shape.call;
-  bool reduce = shape.kind == ArrayCallback::REDUCE;
-  size_t maxArgs = reduce ? 2 : 1;
+  bool isReduce = shape.kind == ArrayCallback::REDUCE;
+  size_t maxArgs = isReduce ? 2 : 1;
   ResultNoExtraArguments extra =
-      CallbackChecker::extraArguments(shape.count, maxArgs, shape.member->name, reduce);
+      CallbackChecker::extraArguments(shape.count, maxArgs, shape.member->name, isReduce);
   if (extra.isOk()) {
     return;
   }
-  bool thisArg = extra.error().code == CallbackCheckerExtraArgumentsErrorCode::THIS_ARGUMENT;
-  llvm::SMLoc at = thisArg ? call->args[1]->loc() : shape.member->loc();
+  bool isThisArg = extra.error().code == CallbackCheckerExtraArgumentsErrorCode::THIS_ARGUMENT;
+  llvm::SMLoc at = isThisArg ? call->args[1]->loc() : shape.member->loc();
   this->state.getDiagnostics().error(at, extra.error().message);
   for (size_t i = maxArgs; i < shape.count; ++i) {
     call->args[i] = this->exprChecker->checkExpr(call->args[i]);
@@ -497,12 +497,13 @@ const Type *CallbackChecker::reduceInitType(const ArrayCallbackShape &shape) {
   CallExpr *call = shape.call;
   Expr *init = call->args[1];
   auto *unary = dyn_cast<UnaryExpr>(init);
-  bool negative = unary != nullptr && unary->op == UnaryOp::Neg && isa<IntLitExpr>(unary->operand);
-  bool literal = isa<IntLitExpr>(init) || negative;
+  bool isNegative =
+      unary != nullptr && unary->op == UnaryOp::Neg && isa<IntLitExpr>(unary->operand);
+  bool isLiteral = isa<IntLitExpr>(init) || isNegative;
   const Type *elementType = GenericChecker::apparentType(shape.element);
-  bool decimalStart = elementType->isDecimal() && DecimalChecker::isLiteralTree(init);
-  bool wide = elementType->isInt() || elementType->isFloat();
-  const Type *hint = decimalStart || (literal && wide) ? elementType : nullptr;
+  bool isDecimalStart = elementType->isDecimal() && DecimalChecker::isLiteralTree(init);
+  bool isWide = elementType->isInt() || elementType->isFloat();
+  const Type *hint = isDecimalStart || (isLiteral && isWide) ? elementType : nullptr;
   call->args[1] = this->exprChecker->checkExpr(init, hint);
   const Type *accumulator = call->args[1]->type;
   ResultInitialValueType initial = CallbackChecker::initialValue(accumulator, shape.member->name);
@@ -525,9 +526,9 @@ Signature CallbackChecker::callbackSignature(const ArrayCallbackShape &shape,
   if (kind == ArrayCallback::MAP || kind == ArrayCallback::FLAT_MAP) {
     sig.ret = CallbackChecker::mappedReturn(shape, expected);
   }
-  bool predicate = kind == ArrayCallback::FILTER || kind == ArrayCallback::FIND ||
-                   kind == ArrayCallback::FIND_INDEX || kind == ArrayCallback::TEST;
-  if (predicate) {
+  bool isPredicate = kind == ArrayCallback::FILTER || kind == ArrayCallback::FIND ||
+                     kind == ArrayCallback::FIND_INDEX || kind == ArrayCallback::TEST;
+  if (isPredicate) {
     sig.ret = Type::boolTy();
   }
   if (kind == ArrayCallback::REDUCE) {
@@ -542,16 +543,16 @@ const Type *CallbackChecker::mappedReturn(const ArrayCallbackShape &shape, const
   if (shape.typed) {
     return shape.element;
   }
-  bool map = shape.kind == ArrayCallback::MAP;
+  bool isMap = shape.kind == ArrayCallback::MAP;
   const Type *wanted = expected != nullptr ? expected->nonOptional() : nullptr;
-  bool shaped = wanted != nullptr && wanted->isArray() &&
-                (wanted->inner()->holdsObjects() || wanted->inner()->holdsResults() ||
-                 (map && wanted->inner()->nonOptional()->isArray()));
-  if (!shaped) {
+  bool isShaped = wanted != nullptr && wanted->isArray() &&
+                  (wanted->inner()->holdsObjects() || wanted->inner()->holdsResults() ||
+                   (isMap && wanted->inner()->nonOptional()->isArray()));
+  if (!isShaped) {
     return nullptr;
   }
 
-  return map ? wanted->inner() : wanted;
+  return isMap ? wanted->inner() : wanted;
 }
 
 std::vector<const Type *> CallbackChecker::callbackParams(const ArrayCallbackShape &shape) {
@@ -570,12 +571,12 @@ void CallbackChecker::rememberCallbackFacts(const ArrayCallbackShape &shape) {
   if (fe == nullptr) {
     return;
   }
-  bool reduce = shape.kind == ArrayCallback::REDUCE;
+  bool isReduce = shape.kind == ArrayCallback::REDUCE;
   if (shape.kind != ArrayCallback::COMPARE) {
-    this->state.getCallbackFacts().rememberIndexCallback(fe->fn, reduce ? 2 : 1);
+    this->state.getCallbackFacts().rememberIndexCallback(fe->fn, isReduce ? 2 : 1);
     auto *lit = dyn_cast<ArrayLitExpr>(shape.member->object);
     std::optional<ElementCallback> elements = lit != nullptr && shape.element->isInt()
-                                                  ? this->literalElements(lit, reduce ? 1u : 0u)
+                                                  ? this->literalElements(lit, isReduce ? 1u : 0u)
                                                   : std::nullopt;
     if (elements.has_value()) {
       this->state.getCallbackFacts().rememberElementCallback(fe->fn, *elements);
@@ -585,7 +586,7 @@ void CallbackChecker::rememberCallbackFacts(const ArrayCallbackShape &shape) {
     return;
   }
   ByteCallback info;
-  info.param = reduce ? 1 : 0;
+  info.param = isReduce ? 1 : 0;
   shape.arrayType->elementRange(info.lo, info.hi);
   if (shape.kind == ArrayCallback::MAP) {
     info.target = shape.arrayType;
@@ -659,8 +660,8 @@ Expr *CallbackChecker::checkMappedResult(const ArrayCallbackShape &shape, const 
     call->type = shape.arrayType;
     return call;
   }
-  bool flat = shape.kind == ArrayCallback::FLAT_MAP && result->isArray();
-  call->type = flat ? result : Type::array(result);
+  bool isFlat = shape.kind == ArrayCallback::FLAT_MAP && result->isArray();
+  call->type = isFlat ? result : Type::array(result);
 
   return call;
 }
@@ -672,9 +673,9 @@ const Type *CallbackChecker::filteredArray(const ArrayCallbackShape &shape) {
   if (kept != nullptr) {
     return Type::array(kept);
   }
-  bool defined = element->isOptional() && (shape.isBoolean || this->keepsDefined(predicate));
+  bool isDefined = element->isOptional() && (shape.isBoolean || this->keepsDefined(predicate));
 
-  return defined ? Type::array(element->inner()) : shape.arrayType;
+  return isDefined ? Type::array(element->inner()) : shape.arrayType;
 }
 
 Expr *CallbackChecker::finishArrayReduce(const ArrayCallbackShape &shape) {

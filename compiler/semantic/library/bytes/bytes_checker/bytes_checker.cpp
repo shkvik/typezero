@@ -125,16 +125,16 @@ Expr *BytesChecker::checkBytesIndex(IndexExpr *index) {
   if (index->index->type->isError()) {
     return index;
   }
-  bool inRange = this->indexProofs->provesInBounds(index->object, index->index, false);
+  bool isInRange = this->indexProofs->provesInBounds(index->object, index->index, false);
   if (ElementIndex *element = index->form.as<ElementIndex>()) {
-    element->mayBeOutOfRange = !inRange;
+    element->mayBeOutOfRange = !isInRange;
   }
-  index->type = inRange ? type->elementType() : Type::optional(type->elementType());
+  index->type = isInRange ? type->elementType() : Type::optional(type->elementType());
 
   return index;
 }
 
-void BytesChecker::checkBytesStore(IndexExpr *index, const Expr *value) {
+void BytesChecker::walkBytesStore(IndexExpr *index, const Expr *value) {
   const Type *target = index->object->type;
   if (index->index->type->isError() || (value && value->type->isError())) {
     return;
@@ -258,16 +258,16 @@ Expr *BytesChecker::checkViewMember(MemberExpr *member, std::optional<BuiltinPro
     IntLitExpr *size = this->makeIntLiteral(member->loc(), type->elementSize());
     return this->keepObject(member, size);
   }
-  bool deprecated = type->isBuffer() &&
-                    (property == BuiltinProperty::PARENT || property == BuiltinProperty::OFFSET);
-  if (deprecated) {
+  bool isDeprecated = type->isBuffer() &&
+                      (property == BuiltinProperty::PARENT || property == BuiltinProperty::OFFSET);
+  if (isDeprecated) {
     std::string message = ErrorTextBytesMember::deprecated(member->name);
     this->state.getDiagnostics().error(member->loc(), message);
     return member;
   }
   const BytesMethodInfo *typedMethod = BytesMethodTable::find(member->name);
-  bool method = typedMethod != nullptr && !typedMethod->form.is<NotOnTypedArrayMethod>();
-  if (method) {
+  bool isMethod = typedMethod != nullptr && !typedMethod->form.is<NotOnTypedArrayMethod>();
+  if (isMethod) {
     std::string message = ErrorTextBytesMember::notCalled(member->name, type->name());
     this->state.getDiagnostics().error(member->loc(), message);
     return member;
@@ -470,10 +470,10 @@ Expr *BytesChecker::checkBytesMethod(CallExpr *call, MemberExpr *member, const T
     for (Expr *&arg : call->args) {
       arg = this->exprChecker->checkExpr(arg);
     }
-    bool notYet = method == BytesMethod::RESIZE || method == BytesMethod::TRANSFER ||
-                  method == BytesMethod::TRANSFER_TO_FIXED_LENGTH;
+    bool isNotYet = method == BytesMethod::RESIZE || method == BytesMethod::TRANSFER ||
+                    method == BytesMethod::TRANSFER_TO_FIXED_LENGTH;
     std::string message =
-        notYet ? ErrorTextArrayBuffer::notYet(name) : ErrorTextArrayBuffer::noMember(name);
+        isNotYet ? ErrorTextArrayBuffer::notYet(name) : ErrorTextArrayBuffer::noMember(name);
     this->state.getDiagnostics().error(member->loc(), message);
     return call;
   }

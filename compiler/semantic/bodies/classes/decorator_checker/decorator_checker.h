@@ -49,7 +49,7 @@ private:
       Result<const FunctionDecl *, DecoratorCheckerMemberDecoratableError>;
 
   static size_t argumentsOf(Place place);
-  void checkDecoratedNames(ClassDecl *cls);
+  void walkDecoratedNames(ClassDecl *cls);
   static std::string placeText(Place place);
   static std::string argumentsText(Place place);
   static bool isPlainReference(const Expr *expr);

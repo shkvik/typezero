@@ -16,24 +16,24 @@ const Type *UnionCheckHelpers::writtenLiteral(const Expr *expr) {
     }
     expr = conv->operand;
   }
-  bool negated = false;
+  bool isNegated = false;
   if (auto *unary = dyn_cast<UnaryExpr>(expr); unary && unary->op == UnaryOp::Neg) {
-    negated = true;
+    isNegated = true;
     expr = unary->operand;
   }
   if (auto *lit = dyn_cast<StringLitExpr>(expr)) {
-    return negated ? nullptr : Type::stringLiteral(lit->value);
+    return isNegated ? nullptr : Type::stringLiteral(lit->value);
   }
   if (auto *lit = dyn_cast<BoolLitExpr>(expr)) {
-    return negated ? nullptr : Type::boolLiteral(lit->value);
+    return isNegated ? nullptr : Type::boolLiteral(lit->value);
   }
   if (auto *lit = dyn_cast<IntLitExpr>(expr)) {
-    double value = negated ? -double(lit->value) : double(lit->value);
-    bool fits = std::fabs(value) <= 9007199254740992.0 && !(negated && lit->value == 0);
-    return Type::numberLiteral(value, fits ? Type::intTy() : Type::doubleTy());
+    double value = isNegated ? -double(lit->value) : double(lit->value);
+    bool isFitting = std::fabs(value) <= 9007199254740992.0 && !(isNegated && lit->value == 0);
+    return Type::numberLiteral(value, isFitting ? Type::intTy() : Type::doubleTy());
   }
   if (auto *lit = dyn_cast<FloatLitExpr>(expr)) {
-    return Type::numberLiteral(negated ? -lit->value : lit->value, Type::doubleTy());
+    return Type::numberLiteral(isNegated ? -lit->value : lit->value, Type::doubleTy());
   }
 
   return nullptr;

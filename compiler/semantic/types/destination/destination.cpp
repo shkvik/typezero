@@ -98,9 +98,9 @@ std::vector<const Expr *> Destination::shapeChoices(const Expr *expr) {
     return {};
   }
   const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
-  bool maps = method != nullptr &&
-              (method->method == ArrayMethod::MAP || method->method == ArrayMethod::FLAT_MAP);
-  auto *fe = maps ? dyn_cast<FunctionExpr>(call->args[0]) : nullptr;
+  bool isMapping = method != nullptr &&
+                   (method->method == ArrayMethod::MAP || method->method == ArrayMethod::FLAT_MAP);
+  auto *fe = isMapping ? dyn_cast<FunctionExpr>(call->args[0]) : nullptr;
   if (fe == nullptr) {
     return {};
   }
@@ -203,10 +203,10 @@ std::optional<std::vector<LiteralGoal>> Destination::objectNeeds(const ObjectLit
       return std::nullopt;
     }
   }
-  bool complete = llvm::all_of(type->fields(), [&](const Field &f) {
+  bool isComplete = llvm::all_of(type->fields(), [&](const Field &f) {
     return f.type->isOptional() || llvm::is_contained(names, f.name);
   });
-  if (!complete) {
+  if (!isComplete) {
     return std::nullopt;
   }
 
@@ -264,8 +264,8 @@ std::optional<std::vector<LiteralGoal>> Destination::callNeeds(const CallExpr *c
   auto *fe = cast<FunctionExpr>(call->args[0]);
   auto *member = cast<MemberExpr>(call->callee);
   const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
-  bool mapsEach = method != nullptr && method->method == ArrayMethod::MAP;
-  const Type *element = mapsEach ? type->inner() : type;
+  bool isMappingEach = method != nullptr && method->method == ArrayMethod::MAP;
+  const Type *element = isMappingEach ? type->inner() : type;
   for (const Expr *value : Destination::findReturnValues(fe->fn->body)) {
     if (Destination::literalShaped(value)) {
       needs.push_back(LiteralGoal{value, element});
@@ -281,11 +281,11 @@ const Type *Destination::literalDestination(const VarDeclarator &d,
   const Type *returned = current != nullptr ? current->getKnownReturnType() : nullptr;
   DestinationScan scan(d.name, returned);
   scan.enterScope();
-  bool muted = this->state.getDiagnostics().setMuted(true);
+  this->state.getDiagnostics().pushList(DiagnosticRoute::DISCARD);
   this->scanLaterDeclarators(later, scan);
-  bool visible = !Destination::isRedeclaredIn(later, d.name);
-  this->scanFollowing(d.name, visible, scan);
-  this->state.getDiagnostics().setMuted(muted);
+  bool isVisible = !Destination::isRedeclaredIn(later, d.name);
+  this->scanFollowing(d.name, isVisible, scan);
+  this->state.getDiagnostics().popList();
   std::vector<DestinationPlace> places = this->fittingPlaces(d.init, scan);
   const Type *chosen = Destination::chooseDestination(places);
   if (chosen == nullptr && !places.empty()) {
@@ -342,9 +342,9 @@ std::vector<Destination::DestinationPlace> Destination::fittingPlaces(const Expr
                                                                       const DestinationScan &scan) {
   std::vector<DestinationPlace> places;
   for (auto [type, loc] : scan.getFound()) {
-    bool fits = !type->isError() && !type->isVoid() && !TypeQueries::mentionsParam(type) &&
-                this->literalFits(init, type);
-    if (fits) {
+    bool isFitting = !type->isError() && !type->isVoid() && !TypeQueries::mentionsParam(type) &&
+                     this->literalFits(init, type);
+    if (isFitting) {
       places.push_back({type, loc});
     }
   }

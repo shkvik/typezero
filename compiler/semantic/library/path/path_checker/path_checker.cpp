@@ -74,13 +74,13 @@ PathChecker::ResultPathFunction PathChecker::pathFunction(llvm::StringRef fn) {
 }
 
 Expr *PathChecker::checkPathValue(NodeModule module, llvm::StringRef name, Expr *expr) {
-  bool win32 = module == NodeModule::PathWin32 ||
-               (module == NodeModule::Path && NodeCheckHelpers::targetIsWindows());
+  bool isWin32 = module == NodeModule::PathWin32 ||
+                 (module == NodeModule::Path && NodeCheckHelpers::targetIsWindows());
   if (name == "sep") {
-    return NodeCheckHelpers::stringLiteral(this->state.getAst(), expr->loc(), win32 ? "\\" : "/");
+    return NodeCheckHelpers::stringLiteral(this->state.getAst(), expr->loc(), isWin32 ? "\\" : "/");
   }
   if (name == "delimiter") {
-    return NodeCheckHelpers::stringLiteral(this->state.getAst(), expr->loc(), win32 ? ";" : ":");
+    return NodeCheckHelpers::stringLiteral(this->state.getAst(), expr->loc(), isWin32 ? ";" : ":");
   }
   ResultPathProperty value = PathChecker::pathValue(name, module);
   if (value.isErr()) {
@@ -99,9 +99,9 @@ Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::String
     this->state.getDiagnostics().error(loc, function.error().message);
     return this->checkArgsLoosely(call);
   }
-  bool win32 = module == NodeModule::PathWin32 ||
-               (module == NodeModule::Path && NodeCheckHelpers::targetIsWindows());
-  auto *style = this->state.getAst().make<IntLitExpr>(loc, win32 ? 1 : 0);
+  bool isWin32 = module == NodeModule::PathWin32 ||
+                 (module == NodeModule::Path && NodeCheckHelpers::targetIsWindows());
+  auto *style = this->state.getAst().make<IntLitExpr>(loc, isWin32 ? 1 : 0);
   style->type = Type::intTy();
   const PathFunctionInfo *path = PathFunctionTable::find(fn);
   if (path != nullptr && path->form == PathFunctionForm::JOINED) {
@@ -170,8 +170,8 @@ bool PathChecker::fitsFormatInput(const Type *type) {
   }
   const Type *string = Type::string();
   for (const Field &f : type->fields()) {
-    bool known = PathChecker::formatInputType()->field(f.name) != nullptr;
-    if (!known || (f.type != string && f.type != Type::optional(string))) {
+    bool isKnown = PathChecker::formatInputType()->field(f.name) != nullptr;
+    if (!isKnown || (f.type != string && f.type != Type::optional(string))) {
       return false;
     }
   }

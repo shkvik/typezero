@@ -240,8 +240,8 @@ void GenericInstantiator::typeGenericValue(NameExpr *name, FuncSymbol *generic, 
   const Type *result = this->typeParams->substitute(ret, genericTypeParams, bound);
   name->binding = NamedFunction{.func = generic};
   name->type = Type::function(params, generic->minArgs, generic->hasRest, result, generic->hasThis);
-  bool concrete = GenericInstantiator::isConcrete(bound);
-  if (!concrete || this->state.getFunctionStack().isInsideTrial() || generic->inferring) {
+  bool isConcrete = GenericInstantiator::isConcrete(bound);
+  if (!isConcrete || this->state.getFunctionStack().isInsideTrial() || generic->inferring) {
     return;
   }
   FuncSymbol *instance = this->instantiate(generic, bound, name->loc());
@@ -357,8 +357,8 @@ std::vector<const Type *> GenericInstantiator::instanceReps(FuncSymbol *generic,
                                                             llvm::ArrayRef<const Type *> args) {
   std::vector<const Type *> reps;
   for (size_t k = 0; k < args.size(); ++k) {
-    bool exactParam = this->typeParams->exactTypeParam(generic, k);
-    reps.push_back(exactParam ? args[k] : TypeParams::representation(args[k]));
+    bool isExactParam = this->typeParams->exactTypeParam(generic, k);
+    reps.push_back(isExactParam ? args[k] : TypeParams::representation(args[k]));
   }
 
   return reps;
@@ -366,11 +366,12 @@ std::vector<const Type *> GenericInstantiator::instanceReps(FuncSymbol *generic,
 
 FuncSymbol *GenericInstantiator::reuseInstance(InstanceRecord *instance, llvm::SMLoc loc,
                                                llvm::ArrayRef<const Type *> args) {
-  bool checking = this->state.getGenericStore().isCheckingInstance();
-  if (checking && !instance->checked && !instance->checking) {
-    this->checkInstance(instance);
+  bool isChecking = this->state.getGenericStore().isCheckingInstance();
+  if (isChecking && !instance->checked && !instance->checking) {
+    this->walkInstance(instance);
   }
-  if (this->state.getGenericStore().isCheckingInstance() && instance->failed) {
+  bool isReportDue = this->state.getGenericStore().isCheckingInstance() || !instance->isReported;
+  if (instance->failed && isReportDue) {
     this->reportInstance(instance, loc, args);
   }
 
@@ -406,14 +407,14 @@ void GenericInstantiator::placeInstance(const InstanceRecord &instance) {
 FuncSymbol *GenericInstantiator::checkNewInstance(InstanceRecord *instance, llvm::SMLoc loc,
                                                   llvm::ArrayRef<const Type *> args) {
   if (this->lateClasses->isTemplate(instance->generic)) {
-    this->lateClasses->checkTemplateInstance(instance);
+    this->lateClasses->walkTemplateInstance(instance);
     if (instance->failed) {
       this->reportInstance(instance, loc, args);
     }
     return instance->decl->sym;
   }
   if (this->state.getGenericStore().isCheckingInstance()) {
-    this->checkInstance(instance);
+    this->walkInstance(instance);
     if (instance->failed) {
       this->reportInstance(instance, loc, args);
     }
@@ -469,43 +470,49 @@ FunctionDecl *GenericInstantiator::instanceDecl(FuncSymbol *generic,
   return copy;
 }
 
-void GenericInstantiator::checkInstance(InstanceRecord *instance) {
+void GenericInstantiator::walkInstance(InstanceRecord *instance) {
   instance->checking = true;
-  std::vector<Diagnostics::Captured> errors;
+  Diagnostics &diagnostics = this->state.getDiagnostics();
+  auto instanceDiagnostics = std::vector<Diagnostic>();
   if (!this->state.getGenericStore().isBrokenGeneric(instance->generic)) {
     BodyState saved = this->returnInferrer->enterBody(instance->decl);
     this->state.getGenericStore().rememberCheckingInstance(instance);
-    this->state.getDiagnostics().setCapture(&errors);
+    diagnostics.pushList(DiagnosticRoute::OWNER);
     this->functionChecker->walkFunctionFromScratch(instance->decl);
+    instanceDiagnostics = diagnostics.popList();
     this->returnInferrer->leaveBody(saved);
   }
   instance->checking = false;
   instance->checked = true;
-  if (errors.empty()) {
+  const Diagnostic *firstError = diagnostics.findFirstError(instanceDiagnostics);
+  if (firstError == nullptr) {
     return;
   }
   instance->failed = true;
-  instance->message = errors.front().message;
-  instance->errorLoc = errors.front().loc;
+  instance->message = firstError->message;
+  instance->errorLoc = firstError->loc;
   if (instance->concrete == instance->args) {
     return;
   }
-  std::vector<Diagnostics::Captured> precise;
   FunctionDecl *copy = this->instanceDecl(instance->generic, instance->concrete, instance->exact);
   BodyState saved = this->returnInferrer->enterBody(copy);
   this->state.getGenericStore().rememberCheckingInstance(instance);
-  this->state.getDiagnostics().setCapture(&precise);
+  diagnostics.pushList(DiagnosticRoute::OWNER);
   this->functionChecker->walkFunctionFromScratch(copy);
+  auto preciseDiagnostics = diagnostics.popList();
   this->returnInferrer->leaveBody(saved);
-  if (!precise.empty()) {
-    instance->message = precise.front().message;
-    instance->errorLoc = precise.front().loc;
+  const Diagnostic *preciseError = diagnostics.findFirstError(preciseDiagnostics);
+  if (preciseError != nullptr) {
+    instance->message = preciseError->message;
+    instance->errorLoc = preciseError->loc;
   }
 }
 
 void GenericInstantiator::reportInstance(InstanceRecord *instance, llvm::SMLoc callLoc,
                                          llvm::ArrayRef<const Type *> concrete) {
-  if (this->state.getDiagnostics().capture()) {
+  DiagnosticRoute destination = this->state.getDiagnostics().getCurrentDestination();
+  instance->isReported = destination != DiagnosticRoute::DISCARD;
+  if (destination == DiagnosticRoute::OWNER) {
     this->state.getGenericStore().rememberFailedCall(callLoc, instance);
     this->state.getDiagnostics().error(callLoc, instance->message);
     return;
@@ -518,7 +525,11 @@ void GenericInstantiator::reportInstance(InstanceRecord *instance, llvm::SMLoc c
   auto nameOf = [](const InstanceRecord *i) { return i->cls ? i->cls->name : i->generic->name; };
   const InstanceRecord *at = instance;
   llvm::SmallPtrSet<const char *, 8> shown;
-  while (at && at->errorLoc.isValid() && shown.insert(at->errorLoc.getPointer()).second) {
+  while (at != nullptr && at->errorLoc.isValid()) {
+    auto [_, isFirstShown] = shown.insert(at->errorLoc.getPointer());
+    if (!isFirstShown) {
+      break;
+    }
     const InstanceRecord *next = this->state.getGenericStore().findFailedCall(at->errorLoc);
     std::string where =
         next ? ErrorTextInstanceCall::inWhich(nameOf(at), next->cls != nullptr, nameOf(next))
@@ -528,7 +539,7 @@ void GenericInstantiator::reportInstance(InstanceRecord *instance, llvm::SMLoc c
   }
 }
 
-void GenericInstantiator::checkInstances() {
+void GenericInstantiator::walkInstances() {
   GenericStore &generics = this->state.getGenericStore();
   for (int i = 0; i < generics.countPendingInstances(); ++i) {
     InstanceRecord *instance = generics.getPendingInstance(i);
@@ -536,13 +547,13 @@ void GenericInstantiator::checkInstances() {
       continue;
     }
     if (instance->cls) {
-      this->genericClassChecker->checkClassInstance(instance);
+      this->genericClassChecker->walkClassInstance(instance);
       if (instance->failed) {
         this->genericClassChecker->reportClassInstance(instance, instance->callLoc);
       }
       continue;
     }
-    this->checkInstance(instance);
+    this->walkInstance(instance);
     if (instance->failed) {
       this->reportInstance(instance, instance->callLoc, instance->concrete);
     }

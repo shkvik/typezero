@@ -74,8 +74,8 @@ ClassValueChecker::resolveConstructorType(const TypeRef &ref) {
   if (made->isError()) {
     return ok(made);
   }
-  bool objectType = (made->isObject() && !made->isTuple()) || made->isParam();
-  if (!objectType) {
+  bool isObjectType = (made->isObject() && !made->isTuple()) || made->isParam();
+  if (!isObjectType) {
     std::string message = ErrorTextConstructorType::notObject(made->name());
 
     return err(ClassValueCheckerResolveConstructorTypeError{
@@ -247,11 +247,11 @@ Expr *ClassValueChecker::checkValueNew(NewExpr *expr, const Type *expected) {
 
 ClassValueChecker::ResultClassIsDeclared
 ClassValueChecker::classDeclared(const ClassDecl *cls) const {
-  bool early = !cls->declared && this->state.getModuleStates().getLoadingModule() &&
-               !this->state.getFunctionStack().isInsideFunction() &&
-               this->state.getModuleStates().findDeclModule(cls) ==
-                   this->state.getModuleStates().getLoadingModule();
-  if (early) {
+  bool isEarly = !cls->declared && this->state.getModuleStates().getLoadingModule() &&
+                 !this->state.getFunctionStack().isInsideFunction() &&
+                 this->state.getModuleStates().findDeclModule(cls) ==
+                     this->state.getModuleStates().getLoadingModule();
+  if (isEarly) {
     std::string message = ErrorTextClassOrder::usedEarly(cls->name);
 
     return err(ClassValueCheckerClassDeclaredError{
@@ -304,9 +304,9 @@ ClassValueChecker::checkClassRefMember(MemberExpr *member) {
         .message = message,
     });
   }
-  bool plainName = member->name == "name" &&
-                   (!cls->type || ClassDeclarer::methodsNamed(cls, "name", true).empty());
-  if (plainName) {
+  bool isPlainName = member->name == "name" &&
+                     (!cls->type || ClassDeclarer::methodsNamed(cls, "name", true).empty());
+  if (isPlainName) {
     auto *text = this->state.getAst().make<StringLitExpr>(
         member->loc(), std::u16string(cls->name.begin(), cls->name.end()));
     text->type = Type::string();

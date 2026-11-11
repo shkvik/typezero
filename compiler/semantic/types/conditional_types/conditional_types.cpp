@@ -44,8 +44,9 @@ std::vector<const Type *> ConditionalTypes::distributed(const Type *type) {
 
 void ConditionalTypes::collectNames(const TypeRef &ref, std::vector<llvm::StringRef> &names) {
   for (const TypeRef *part : TypeRefParts::collect(ref)) {
-    bool named = part->kind() == TypeRefKind::NAME_REF || part->kind() == TypeRefKind::GENERIC_REF;
-    if (named && !part->name.empty() && !llvm::is_contained(names, part->name)) {
+    bool isNamed =
+        part->kind() == TypeRefKind::NAME_REF || part->kind() == TypeRefKind::GENERIC_REF;
+    if (isNamed && !part->name.empty() && !llvm::is_contained(names, part->name)) {
       names.push_back(part->name);
     }
   }
@@ -85,12 +86,12 @@ void ConditionalTypes::pushSpreadArgs(const TypeRef &ref, std::vector<SpreadRef>
 }
 
 bool ConditionalTypes::spreadsAt(const TypeRef &ref, size_t i) {
-  bool tupleSpread =
+  bool isTupleSpread =
       ref.kind() == TypeRefKind::TUPLE_REF && i < ref.spread().size() && ref.spread()[i];
-  bool restParam =
+  bool isRestParam =
       ref.kind() == TypeRefKind::FUNCTION_REF && ref.rest() && i + 2 == ref.args.size();
 
-  return tupleSpread || restParam;
+  return isTupleSpread || isRestParam;
 }
 
 bool ConditionalTypes::mentionsOtherParams(const Type *type, llvm::ArrayRef<const Type *> allowed,
@@ -99,13 +100,13 @@ bool ConditionalTypes::mentionsOtherParams(const Type *type, llvm::ArrayRef<cons
   while (!stack.empty()) {
     const Type *next = stack.back();
     stack.pop_back();
-    bool skipped = next == nullptr || !TypeQueries::mentionsParam(next);
-    bool plainParam =
-        !skipped && next->kind() == Type::Kind::Param && next->typeOp() == TypeOp::None;
-    if (plainParam && !llvm::is_contained(allowed, next)) {
+    bool isSkipped = next == nullptr || !TypeQueries::mentionsParam(next);
+    bool isPlainParam =
+        !isSkipped && next->kind() == Type::Kind::Param && next->typeOp() == TypeOp::None;
+    if (isPlainParam && !llvm::is_contained(allowed, next)) {
       return true;
     }
-    if (!skipped && !plainParam) {
+    if (!isSkipped && !isPlainParam) {
       std::vector<const Type *> parts = ConditionalTypes::otherParamParts(next, seen);
       stack.insert(stack.end(), parts.rbegin(), parts.rend());
     }
@@ -154,7 +155,8 @@ ConditionalTypes::objectParamParts(const Type *type, llvm::SmallPtrSetImpl<const
   if (!type->typeArgs().empty()) {
     return std::vector<const Type *>(type->typeArgs().begin(), type->typeArgs().end());
   }
-  if (!seen.insert(type).second) {
+  auto [_, isFirstVisit] = seen.insert(type);
+  if (!isFirstVisit) {
     return {};
   }
   std::vector<const Type *> parts = {type->tupleRest()};
@@ -171,10 +173,16 @@ void ConditionalTypes::collectParams(const Type *type, std::vector<const Type *>
   while (!stack.empty()) {
     const Type *next = stack.back();
     stack.pop_back();
-    bool fresh = next != nullptr && TypeQueries::mentionsParam(next) && seen.insert(next).second;
-    if (fresh && next->kind() == Type::Kind::Param && next->typeOp() == TypeOp::None) {
+    if (next == nullptr || !TypeQueries::mentionsParam(next)) {
+      continue;
+    }
+    auto [_, isFresh] = seen.insert(next);
+    if (!isFresh) {
+      continue;
+    }
+    if (next->kind() == Type::Kind::Param && next->typeOp() == TypeOp::None) {
       params.push_back(next);
-    } else if (fresh) {
+    } else {
       std::vector<const Type *> parts = ConditionalTypes::paramParts(next);
       stack.insert(stack.end(), parts.rbegin(), parts.rend());
     }
@@ -228,21 +236,21 @@ const Type *ConditionalTypes::resolveTypeArgument(const TypeRef &ref) {
 }
 
 const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
-  bool tail = this->state.getTypeContext().isTailCallAllowed();
+  bool isTail = this->state.getTypeContext().isTailCallAllowed();
   this->state.getTypeContext().forbidTailCall();
   PreparedConditional prepared;
   if (const Type *early = this->prepareConditional(ref, prepared)) {
     return early;
   }
-  bool binding = ref.args[0].kind() == TypeRefKind::NAME_REF &&
-                 ConditionalTypes::isBinding(this->typeDeclarer->lookupType(ref.args[0].name));
+  bool isBinding = ref.args[0].kind() == TypeRefKind::NAME_REF &&
+                   ConditionalTypes::isBinding(this->typeDeclarer->lookupType(ref.args[0].name));
   std::vector<const Type *> members =
-      binding ? ConditionalTypes::distributed(prepared.check) : std::vector<const Type *>();
-  if (binding && members.size() != 1) {
+      isBinding ? ConditionalTypes::distributed(prepared.check) : std::vector<const Type *>();
+  if (isBinding && members.size() != 1) {
     return this->distributeConditional(ref, members);
   }
 
-  return this->chooseBranch(ref, prepared, tail);
+  return this->chooseBranch(ref, prepared, isTail);
 }
 
 const Type *ConditionalTypes::distributeConditional(const TypeRef &ref,
@@ -328,16 +336,16 @@ const Type *ConditionalTypes::chooseBranch(const TypeRef &ref, const PreparedCon
   const std::vector<const TypeRef *> &inferRefs = prepared.inferRefs;
   const std::vector<const Type *> &infers = prepared.infers;
   InferMatch inference{infers, std::vector<const Type *>(infers.size(), nullptr)};
-  bool yes = this->extendsRelation->extendsType(check, pattern, &inference);
+  bool isYes = this->extendsRelation->extendsType(check, pattern, &inference);
   this->state.getScopeStack().openTypeScope();
-  for (size_t i = 0; yes && i < infers.size(); ++i) {
+  for (size_t i = 0; isYes && i < infers.size(); ++i) {
     const Type *bound = inference.bound[i];
     if (!bound) {
       bound = infers[i]->constraint() ? infers[i]->constraint() : Type::unknown();
     }
     this->bindType(inferRefs[i]->name, bound, inferRefs[i]->loc);
   }
-  const TypeRef &branch = ref.args[yes ? 2 : 3];
+  const TypeRef &branch = ref.args[isYes ? 2 : 3];
   const Type *result = nullptr;
   if (tail && branch.kind() == TypeRefKind::CONDITIONAL_REF) {
     this->state.getTypeContext().allowTailCall();
@@ -426,10 +434,10 @@ const Type *ConditionalTypes::evalConditional(llvm::ArrayRef<const Type *> opera
     this->bindType(info->bound[i], operands[i + 1], info->ref->loc);
   }
   TypeContext &types = this->state.getTypeContext();
-  bool tail = types.isTailCallAllowed();
+  bool isTail = types.isTailCallAllowed();
   types.forbidTailCall();
   const Type *result = this->resolveConditional(*info->ref);
-  if (tail) {
+  if (isTail) {
     types.allowTailCall();
   } else {
     types.forbidTailCall();
@@ -465,7 +473,7 @@ std::vector<const Type *> ConditionalTypes::conditionalBranches(const Type *cond
     }
     this->bindType(inferRefs[i]->name, param, inferRefs[i]->loc);
   }
-  bool muted = this->state.getDiagnostics().setMuted(true);
+  this->state.getDiagnostics().pushList(DiagnosticRoute::DISCARD);
   std::vector<const Type *> branches;
   for (size_t i : {2, 3}) {
     const Type *branch = this->typeResolver->resolveTypeInner(info->ref->args[i]);
@@ -473,7 +481,7 @@ std::vector<const Type *> ConditionalTypes::conditionalBranches(const Type *cond
       branches.push_back(branch);
     }
   }
-  this->state.getDiagnostics().setMuted(muted);
+  this->state.getDiagnostics().popList();
   this->state.getScopeStack().closeTypeScope();
 
   return branches;
@@ -485,8 +493,8 @@ bool ConditionalTypes::fitsConditional(const Type *from, const Type *to, unsigne
     FitsStep step = std::move(steps.back());
     steps.pop_back();
     const FitsGoal *goal = step.as<FitsGoal>();
-    bool holds = goal == nullptr || this->fitsStep(*goal, steps);
-    if (!holds && !this->retryFits(steps)) {
+    bool isHolding = goal == nullptr || this->fitsStep(*goal, steps);
+    if (!isHolding && !this->retryFits(steps)) {
       return false;
     }
   }
@@ -590,14 +598,14 @@ ConditionalTypes::resolveIntersection(const TypeRef &ref) {
            t->overloads().empty();
   };
   std::vector<std::vector<const Type *>> choices;
-  bool objects = true;
+  bool hasObjects = true;
   for (const Type *part : parts) {
     llvm::ArrayRef<const Type *> members =
         part->isUnion() ? part->members() : llvm::ArrayRef<const Type *>(part);
-    objects &= llvm::all_of(members, plainObject);
+    hasObjects &= llvm::all_of(members, plainObject);
     choices.emplace_back(members.begin(), members.end());
   }
-  if (objects) {
+  if (hasObjects) {
     std::vector<const Type *> merged{nullptr};
     for (const std::vector<const Type *> &choice : choices) {
       std::vector<const Type *> next;

@@ -85,14 +85,14 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     }
     return call;
   }
-  bool exec = function == ChildFunction::EXEC_SYNC;
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isExec = function == ChildFunction::EXEC_SYNC;
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, exec ? 2 : 3);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, isExec ? 2 : 3);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
-  if (rejected || arity.isErr()) {
+  if (isRejected || arity.isErr()) {
     return call;
   }
 
@@ -101,12 +101,12 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
       .function = *function,
       .fn = fn,
       .loc = loc,
-      .exec = exec,
+      .exec = isExec,
       .args = std::vector<Expr *>(ChildArgCount, nullptr),
   };
   run.encoding = ChildBytes;
   run.stdio = {ChildPipe, ChildPipe, ChildPipe};
-  run.viaShell = exec;
+  run.viaShell = isExec;
   this->walkFileArgument(run);
   std::optional<size_t> optionsAt = this->walkArgumentList(run);
   if (!optionsAt.has_value()) {
@@ -163,13 +163,13 @@ void ChildChecker::walkFileArgument(ChildRun &run) {
 
 std::optional<size_t> ChildChecker::walkArgumentList(ChildRun &run) {
   CallExpr *call = run.call;
-  bool listGiven = !run.exec && call->args.size() > 1 && !isa<ObjectLitExpr>(call->args[1]);
-  if (!run.exec && !listGiven && call->args.size() > 2) {
+  bool isListGiven = !run.exec && call->args.size() > 1 && !isa<ObjectLitExpr>(call->args[1]);
+  if (!run.exec && !isListGiven && call->args.size() > 2) {
     std::string message = ErrorTextChildRun::optionsAt(run.fn);
     this->state.getDiagnostics().error(call->args[2]->loc(), message);
     return std::nullopt;
   }
-  if (listGiven && !isa<UndefinedExpr>(call->args[1])) {
+  if (isListGiven && !isa<UndefinedExpr>(call->args[1])) {
     this->walkZeroArguments(run, call->args[1]);
     call->args[1] = this->argumentChecker->checkArg(call->args[1], Type::array(Type::string()));
     run.args[ChildArgs] = call->args[1];
@@ -180,7 +180,7 @@ std::optional<size_t> ChildChecker::walkArgumentList(ChildRun &run) {
     run.args[ChildArgs] = none;
   }
 
-  return listGiven ? 2 : 1;
+  return isListGiven ? 2 : 1;
 }
 
 void ChildChecker::walkZeroArguments(ChildRun &run, const Expr *given) {
@@ -324,9 +324,9 @@ void ChildChecker::walkOptionLimits(ChildRun &run) {
   for (llvm::StringRef limit : {"timeout", "maxBuffer"}) {
     Expr *value = options.lookup(limit);
     auto *unary = value != nullptr ? dyn_cast<UnaryExpr>(value) : nullptr;
-    bool negative = unary != nullptr && unary->op == UnaryOp::Neg &&
-                    (isa<IntLitExpr>(unary->operand) || isa<FloatLitExpr>(unary->operand));
-    if (negative) {
+    bool isNegative = unary != nullptr && unary->op == UnaryOp::Neg &&
+                      (isa<IntLitExpr>(unary->operand) || isa<FloatLitExpr>(unary->operand));
+    if (isNegative) {
       std::string message = ErrorTextChildRun::negative(limit);
       this->state.getDiagnostics().error(value->loc(), message);
       run.failed = true;
@@ -402,9 +402,9 @@ void ChildChecker::walkInputOption(ChildRun &run) {
   }
   run.args[ChildInput] = this->typeRelations->coerce(input, Type::optional(type));
   Expr *encoding = run.options.lookup("encoding");
-  bool bufferText = type->isString() && run.encoding == ChildBytes && encoding != nullptr &&
-                    !isa<UndefinedExpr>(encoding);
-  if (bufferText) {
+  bool isBufferText = type->isString() && run.encoding == ChildBytes && encoding != nullptr &&
+                      !isa<UndefinedExpr>(encoding);
+  if (isBufferText) {
     std::string message = ErrorTextChildOption::bufferText();
     this->state.getDiagnostics().error(input->loc(), message);
     run.failed = true;
@@ -424,8 +424,8 @@ void ChildChecker::walkKillSignalOption(ChildRun &run) {
     run.args[ChildKillSignal] = this->typeRelations->coerce(signal, Type::optional(string));
     return;
   }
-  bool number = type->isInt() || (type->isLiteral() && type->literalBase()->isInt());
-  if (number) {
+  bool isNumber = type->isInt() || (type->isLiteral() && type->literalBase()->isInt());
+  if (isNumber) {
     run.args[ChildKillSignal] = this->typeRelations->coerce(signal, Type::optional(Type::intTy()));
     return;
   }
@@ -497,11 +497,11 @@ Expr *ChildChecker::finishChildCall(ChildRun &run) {
   call->args = std::move(run.args);
   call->spread.clear();
 
-  bool textOutput = run.encoding != ChildBytes;
-  const Type *text = textOutput ? Type::string() : ChildChecker::bufferType();
-  const Type *failure = this->childErrorTypes->errorOf(run.fn, textOutput, run.viaShell);
+  bool isTextOutput = run.encoding != ChildBytes;
+  const Type *text = isTextOutput ? Type::string() : ChildChecker::bufferType();
+  const Type *failure = this->childErrorTypes->errorOf(run.fn, isTextOutput, run.viaShell);
   if (run.function == ChildFunction::SPAWN_SYNC) {
-    const Type *spawned = this->childErrorTypes->spawnResult(textOutput);
+    const Type *spawned = this->childErrorTypes->spawnResult(isTextOutput);
     call->target = BuiltinCall{.builtin = Builtin::ChildSpawnSync};
     call->type = Type::result(spawned, failure);
     return call;

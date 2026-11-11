@@ -88,9 +88,10 @@ SetEncodingChecker::ResultDecodedChunks SetEncodingChecker::decodedChunks(const 
 
 SetEncodingChecker::ResultStdinIsPlaced SetEncodingChecker::stdinPlace() const {
   const Module *module = this->state.getModuleStates().getCurrentModule();
-  bool topLevel = module && module->isEntry && !this->state.getFunctionStack().isInsideFunction() &&
-                  this->state.getScopeStack().isTopLevel();
-  if (!topLevel) {
+  bool isTopLevel = module && module->isEntry &&
+                    !this->state.getFunctionStack().isInsideFunction() &&
+                    this->state.getScopeStack().isTopLevel();
+  if (!isTopLevel) {
     std::string message = ErrorTextSetEncoding::stdinPlace();
 
     return err(SetEncodingCheckerStdinPlaceError{
@@ -115,16 +116,16 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
     return this->plainSetEncoding(call, member, cls, receiver);
   }
   const Expr *object = SetEncodingChecker::withoutImplicit(member->object);
-  bool stdinStream = SetEncodingChecker::isStdinCall(object);
-  if (stdinStream) {
+  bool isStdinStream = SetEncodingChecker::isStdinCall(object);
+  if (isStdinStream) {
     ResultStdinIsPlaced placed = this->stdinPlace();
     if (placed.isErr()) {
       this->state.getDiagnostics().error(loc, placed.error().message);
       return call;
     }
   }
-  std::optional<FieldPath> path = this->encodingPath(object, stdinStream);
-  std::optional<std::string> why = this->encodingPathProblem(path, stdinStream);
+  std::optional<FieldPath> path = this->encodingPath(object, isStdinStream);
+  std::optional<std::string> why = this->encodingPathProblem(path, isStdinStream);
   if (why.has_value()) {
     std::string message = ErrorTextSetEncoding::changes(*why);
     this->state.getDiagnostics().error(loc, message);
@@ -132,7 +133,7 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
   }
   EncodingRun run{
       .member = member,
-      .stdinStream = stdinStream,
+      .stdinStream = isStdinStream,
       .path = *path,
       .here = nullptr,
       .start = nullptr,
@@ -243,9 +244,9 @@ bool SetEncodingChecker::isOwnBlock(const VarSymbol *root, bool stdinStream) con
       declared = *found;
     }
   }
-  bool branched = stdinStream ? scopes.isInsideBranch() : scopes.isBranchedSince(declared);
+  bool isBranched = stdinStream ? scopes.isInsideBranch() : scopes.isBranchedSince(declared);
 
-  return declared + 1 == scopes.getScopeDepth() && !branched;
+  return declared + 1 == scopes.getScopeDepth() && !isBranched;
 }
 
 void SetEncodingChecker::markEscapeWindow(EncodingRun &run) {
@@ -353,9 +354,9 @@ void SetEncodingChecker::classifyUse(EncodingRun &run, const Expr *e) const {
 
 void SetEncodingChecker::noteEscape(EncodingRun &run, const Expr *e,
                                     const llvm::SmallPtrSetImpl<const Expr *> &direct) const {
-  bool candidate =
+  bool isCandidate =
       SetEncodingChecker::isBefore(run, e) && !isa<CastExpr>(e) && this->isEncodingPath(run, e);
-  if (!candidate) {
+  if (!isCandidate) {
     return;
   }
   if (!direct.contains(e)) {

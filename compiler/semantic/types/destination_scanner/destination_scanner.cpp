@@ -40,20 +40,20 @@ bool DestinationScanner::isResultLiteral(const CallExpr *call) {
     return false;
   }
   std::optional<GlobalName> global = GlobalNameTable::find(name->name);
-  bool okOrErr = global == GlobalName::OK || global == GlobalName::ERR;
+  bool isOkOrErr = global == GlobalName::OK || global == GlobalName::ERR;
 
-  return okOrErr && call->args.size() <= 1 && !call->hasSpread() && !call->optional;
+  return isOkOrErr && call->args.size() <= 1 && !call->hasSpread() && !call->optional;
 }
 
 bool DestinationScanner::scanDestinations(llvm::ArrayRef<Stmt *> stmts, DestinationScan &scan) {
   this->runScan(StartList{stmts}, scan);
-  bool hidesName = llvm::any_of(stmts, [&](const Stmt *stmt) {
+  bool isHidingName = llvm::any_of(stmts, [&](const Stmt *stmt) {
     auto *fn = dyn_cast<FunctionDecl>(stmt);
     return (fn != nullptr && fn->name == scan.getName()) ||
            DestinationScanner::declaresName(stmt, scan.getName());
   });
 
-  return !hidesName;
+  return !isHidingName;
 }
 
 void DestinationScanner::scanFunctionDestinations(const FunctionDecl *fn, DestinationScan &scan) {
@@ -138,9 +138,9 @@ void DestinationScanner::startList(const StartList &list, ScanRun &run) {
 }
 
 void DestinationScanner::listItem(const ListItem &item, ScanRun &run) {
-  bool afterDeclaration = item.index > 0 && DestinationScanner::declaresName(
-                                                item.stmts[item.index - 1], run.scan.getName());
-  if (item.index == item.stmts.size() || afterDeclaration) {
+  bool isAfterDeclaration = item.index > 0 && DestinationScanner::declaresName(
+                                                  item.stmts[item.index - 1], run.scan.getName());
+  if (item.index == item.stmts.size() || isAfterDeclaration) {
     run.scan.leaveScope();
   } else {
     run.steps.push_back(ListItem{item.stmts, item.index + 1});
@@ -277,9 +277,9 @@ void DestinationScanner::forOfRest(const ForOfStmt *loop, ScanRun &run) {
 }
 
 void DestinationScanner::scanFunction(const FunctionDecl *fn, ScanRun &run) {
-  bool hidden =
+  bool isHidden =
       llvm::any_of(fn->params, [&](const Param &p) { return p.name == run.scan.getName(); });
-  if (!fn->body || hidden) {
+  if (!fn->body || isHidden) {
     return;
   }
   const Type *outer = run.scan.getReturns();
@@ -388,9 +388,9 @@ std::vector<ScanExpr> DestinationScanner::exprParts(const Expr *expr, const Type
 
 std::vector<ScanExpr> DestinationScanner::nameParts(const NameExpr *name, const Type *sink,
                                                     ScanRun &run) {
-  bool found =
+  bool isFound =
       sink != nullptr && name->name == run.scan.getName() && !run.scan.isHidden(name->name);
-  if (found) {
+  if (isFound) {
     run.scan.addFound(sink, name->loc());
   }
 
@@ -402,8 +402,8 @@ std::vector<ScanExpr> DestinationScanner::objectParts(const ObjectLitExpr *lit,
   std::vector<ScanExpr> parts;
   for (const ObjectLitExpr::Property &prop : lit->props) {
     parts.push_back(ScanExpr{prop.key(), nullptr});
-    bool typedField = object != nullptr && object->isObject() && !prop.spread();
-    const Field *field = typedField ? object->field(prop.name) : nullptr;
+    bool isTypedField = object != nullptr && object->isObject() && !prop.spread();
+    const Field *field = isTypedField ? object->field(prop.name) : nullptr;
     parts.push_back(ScanExpr{prop.value, field != nullptr ? field->type : nullptr});
   }
 
@@ -417,18 +417,18 @@ std::vector<ScanExpr> DestinationScanner::conditionalParts(const ConditionalExpr
 }
 
 std::vector<ScanExpr> DestinationScanner::binaryParts(const BinaryExpr *bin, const Type *sink) {
-  bool nullish = bin->op == BinaryOp::Nullish;
-  bool passes = nullish || bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr;
+  bool isNullish = bin->op == BinaryOp::Nullish;
+  bool isPassing = isNullish || bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr;
 
-  return {ScanExpr{bin->lhs, nullish ? sink : nullptr},
-          ScanExpr{bin->rhs, passes ? sink : nullptr}};
+  return {ScanExpr{bin->lhs, isNullish ? sink : nullptr},
+          ScanExpr{bin->rhs, isPassing ? sink : nullptr}};
 }
 
 std::vector<ScanExpr> DestinationScanner::sequenceParts(const SequenceExpr *seq, const Type *sink) {
   std::vector<ScanExpr> parts;
   for (size_t i = 0; i < seq->exprs.size(); ++i) {
-    bool last = i + 1 == seq->exprs.size();
-    parts.push_back(ScanExpr{seq->exprs[i], last ? sink : nullptr});
+    bool isLast = i + 1 == seq->exprs.size();
+    parts.push_back(ScanExpr{seq->exprs[i], isLast ? sink : nullptr});
   }
 
   return parts;
@@ -534,8 +534,8 @@ NodeChildren<const Expr *> DestinationScanner::peekParts(const Expr *expr) {
     return {cond->thenExpr, cond->elseExpr};
   }
   auto *call = dyn_cast<CallExpr>(expr);
-  bool literal = call != nullptr && DestinationScanner::isResultLiteral(call);
-  if (literal && !call->args.empty()) {
+  bool isLiteral = call != nullptr && DestinationScanner::isResultLiteral(call);
+  if (isLiteral && !call->args.empty()) {
     return {call->args[0]};
   }
 
@@ -653,8 +653,8 @@ std::vector<const Type *> DestinationScanner::nameCalleeParams(const CallExpr *c
   if (func != nullptr) {
     return DestinationScanner::spreadParams(func->params, func->hasRest, argCount);
   }
-  bool functionVar = var != nullptr && var->type != nullptr && var->type->isFunction();
-  if (functionVar) {
+  bool isFunctionVar = var != nullptr && var->type != nullptr && var->type->isFunction();
+  if (isFunctionVar) {
     return DestinationScanner::spreadParams(var->type->params(), var->type->hasRest(), argCount);
   }
 
@@ -714,10 +714,10 @@ DestinationScanner::arrayMethodParams(const Type *array, llvm::StringRef name, s
     return {};
   }
   ArrayMethod which = method->method;
-  bool adds = which == ArrayMethod::PUSH || which == ArrayMethod::UNSHIFT;
-  bool searches = which == ArrayMethod::INCLUDES || which == ArrayMethod::INDEX_OF ||
-                  which == ArrayMethod::LAST_INDEX_OF;
-  if (adds || searches) {
+  bool isAdding = which == ArrayMethod::PUSH || which == ArrayMethod::UNSHIFT;
+  bool isSearching = which == ArrayMethod::INCLUDES || which == ArrayMethod::INDEX_OF ||
+                     which == ArrayMethod::LAST_INDEX_OF;
+  if (isAdding || isSearching) {
     return std::vector<const Type *>(argCount, array->inner());
   }
   if (which == ArrayMethod::FILL) {
@@ -737,9 +737,9 @@ std::vector<const Type *> DestinationScanner::dictMethodParams(const Type *objec
   if (object->isMap() && method == DictMethod::SET) {
     return {object->keyType(), object->valueType()};
   }
-  bool takesKey = method == DictMethod::GET || method == DictMethod::HAS ||
-                  method == DictMethod::DELETE_KEY || method == DictMethod::ADD;
-  if (object->isDict() && !object->isRecord() && takesKey) {
+  bool isTakingKey = method == DictMethod::GET || method == DictMethod::HAS ||
+                     method == DictMethod::DELETE_KEY || method == DictMethod::ADD;
+  if (object->isDict() && !object->isRecord() && isTakingKey) {
     return {object->keyType()};
   }
 

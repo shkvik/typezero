@@ -59,7 +59,7 @@ const Type *TypeOperators::keysOf(const Type *type) {
     return this->ownKeys(plain);
   }
   std::vector<const Type *> common;
-  bool first = true;
+  bool isFirst = true;
   for (const Type *m : plain->members()) {
     const Type *keys = this->ownKeys(m->nonOptional());
     if (!keys) {
@@ -67,12 +67,12 @@ const Type *TypeOperators::keysOf(const Type *type) {
     }
     std::vector<const Type *> mine;
     for (const Type *k : TypeOperators::membersOf(keys)) {
-      if (first || llvm::is_contained(common, k)) {
+      if (isFirst || llvm::is_contained(common, k)) {
         mine.push_back(k);
       }
     }
     common = std::move(mine);
-    first = false;
+    isFirst = false;
   }
 
   return common.empty() ? Type::never() : Type::unionOf(common);
@@ -182,10 +182,10 @@ const Type *TypeOperators::evalKeyOf(const Type *operand) {
 }
 
 const Type *TypeOperators::evalIndexed(const Type *object, const Type *key) {
-  bool lengthKey =
+  bool isLengthKey =
       key->isStringLiteral() &&
       BuiltinPropertyTable::isName(ToUtf8::toUtf8(key->literalText()), BuiltinProperty::LENGTH);
-  if (lengthKey && (object->isTuple() || object->isArray())) {
+  if (isLengthKey && (object->isTuple() || object->isArray())) {
     return TypeOperators::lengthType(object);
   }
   const Type *member = this->argListChecker->memberType(object, key);
@@ -194,9 +194,9 @@ const Type *TypeOperators::evalIndexed(const Type *object, const Type *key) {
 }
 
 const Type *TypeOperators::lengthType(const Type *object) {
-  bool fixed =
+  bool isFixed =
       object->isTuple() && !object->tupleRest() && object->tupleMin() == object->fields().size();
-  if (fixed) {
+  if (isFixed) {
     return Type::numberLiteral(double(object->fields().size()), Type::intTy());
   }
 
@@ -295,7 +295,7 @@ const Type *TypeOperators::addMappedField(const MappedOperands &mapped, const Ty
   } else if (mapped.optional < 0) {
     type = type->nonOptional();
   }
-  bool readonly =
+  bool isReadonly =
       mapped.readonly > 0 || (mapped.readonly == 0 && from != nullptr && from->readonly);
   std::vector<std::string> names{text};
   const Type *failed = this->renamedFields(mapped, name, names);
@@ -303,7 +303,7 @@ const Type *TypeOperators::addMappedField(const MappedOperands &mapped, const Ty
     return failed;
   }
   for (const std::string &field : names) {
-    TypeOperators::mergeMappedField(fields, field, type, readonly);
+    TypeOperators::mergeMappedField(fields, field, type, isReadonly);
   }
 
   return nullptr;
@@ -529,10 +529,10 @@ const Type *TypeOperators::declaredFunctionType(const FunctionDecl *fn, llvm::St
       minArgs = params.size();
     }
   }
-  bool rest = !fn->params.empty() && fn->params.back().rest();
+  bool hasRest = !fn->params.empty() && fn->params.back().rest();
   const Type *returned = this->typeResolver->resolveType(*fn->returnType, true);
 
-  return Type::function(params, minArgs, rest, returned);
+  return Type::function(params, minArgs, hasRest, returned);
 }
 
 const Type *TypeOperators::importedNameType(const std::vector<ImportDecl> &imports,
@@ -559,8 +559,9 @@ const Type *TypeOperators::singleMethodType(const Type *type, llvm::StringRef na
   }
   this->classDeclarer->completeClass(cls);
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
-  bool single = methods.size() == 1 && methods[0]->sym != nullptr && methods[0]->typeParams.empty();
-  if (!single) {
+  bool isSingle =
+      methods.size() == 1 && methods[0]->sym != nullptr && methods[0]->typeParams.empty();
+  if (!isSingle) {
     return nullptr;
   }
 

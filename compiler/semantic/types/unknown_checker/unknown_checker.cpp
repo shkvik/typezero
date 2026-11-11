@@ -92,11 +92,11 @@ bool UnknownChecker::holdsUnknown(const Type *type) {
 std::string UnknownChecker::unknownHint(const Expr *expr, const Type *to) {
   std::string x = UnknownChecker::hintName(expr);
   const Type *target = to ? to->nonOptional() : nullptr;
-  bool object = expr->type && expr->type->isAnyObject();
+  bool isObject = expr->type && expr->type->isAnyObject();
   std::string check;
   if (target && target->isClass() && !target->classDecl()->literal()) {
     check = ErrorTextUnknownHint::instanceOf(x, target->classDecl()->name);
-  } else if (object) {
+  } else if (isObject) {
     check = ErrorTextUnknownHint::instanceOf(x, "C");
   } else if (target && target->isString()) {
     check = ErrorTextUnknownHint::typeOf(x, "string");
@@ -111,7 +111,7 @@ std::string UnknownChecker::unknownHint(const Expr *expr, const Type *to) {
   } else {
     check = ErrorTextUnknownHint::typeOf(x, "string");
   }
-  if (object) {
+  if (isObject) {
     return ErrorTextUnknownHint::anyClass(check);
   }
 
@@ -190,7 +190,7 @@ UnknownChecker::ResultMethodChecked UnknownChecker::checkUnknownMethod(CallExpr 
     seq->type = result->type;
     return ok(seq);
   }
-  this->argumentChecker->checkArgsLoosely(call);
+  this->argumentChecker->walkArgsLoosely(call);
   if (receiver->isConstructor()) {
     std::string message = ErrorTextUnknownMethod::runtime(receiver->name());
 

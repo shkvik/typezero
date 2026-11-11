@@ -99,7 +99,7 @@ void NestedFunctions::finishGroup(NestedGroup *group) {
       continue;
     }
     BodyState saved = this->returnInferrer->enterBody(fn);
-    this->functionChecker->checkFunctionBody(fn);
+    this->functionChecker->walkFunctionBody(fn);
     this->returnInferrer->leaveBody(saved);
   }
   for (const NestedGroup::Use &use : group->uses) {

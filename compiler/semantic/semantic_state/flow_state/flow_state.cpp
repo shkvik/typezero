@@ -157,10 +157,10 @@ void FlowState::listenForErrors(const EmitterKey &key) {
 }
 
 void FlowState::addPendingErrors(const EmitterKey &key, llvm::SMLoc loc) {
-  bool listened = llvm::is_contained(this->flow.errorListened, key);
-  bool pending =
+  bool isListened = llvm::is_contained(this->flow.errorListened, key);
+  bool isPending =
       llvm::any_of(this->flow.errorPending, [&](const auto &entry) { return entry.first == key; });
-  if (!listened && !pending) {
+  if (!isListened && !isPending) {
     this->flow.errorPending.push_back({key, loc});
   }
 }

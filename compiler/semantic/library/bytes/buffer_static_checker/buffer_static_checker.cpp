@@ -100,14 +100,14 @@ BufferStaticChecker::ResultConcatSources BufferStaticChecker::concatSources(cons
 
 Expr *BufferStaticChecker::checkBytesStatic(CallExpr *call, MemberExpr *member) {
   auto *object = dyn_cast<NameExpr>(member->object);
-  bool global = object != nullptr && this->callChecker->isUnshadowedGlobal(object);
-  if (!global) {
+  bool isGlobal = object != nullptr && this->callChecker->isUnshadowedGlobal(object);
+  if (!isGlobal) {
     return nullptr;
   }
   std::optional<GlobalName> globalName = GlobalNameTable::find(object->name);
-  bool bigint =
+  bool isBigint =
       globalName == GlobalName::BIG_INT64_ARRAY || globalName == GlobalName::BIG_UINT64_ARRAY;
-  if (bigint) {
+  if (isBigint) {
     return this->reportBigIntArray(call, object);
   }
   const Type *type = BytesChecker::bytesTypeNamed(object->name);
@@ -154,7 +154,7 @@ Expr *BufferStaticChecker::reportBigIntArray(CallExpr *call, NameExpr *object) {
   std::string quoted = ErrorTextBigInt::quoted(object->name);
   std::string bigint = ErrorTextBigInt::none(quoted);
   this->state.getDiagnostics().error(object->loc(), bigint);
-  this->argumentChecker->checkArgsLoosely(call);
+  this->argumentChecker->walkArgsLoosely(call);
   call->type = Type::error();
 
   return call;
@@ -162,7 +162,7 @@ Expr *BufferStaticChecker::reportBigIntArray(CallExpr *call, NameExpr *object) {
 
 Expr *BufferStaticChecker::reportStatic(CallExpr *call, MemberExpr *member,
                                         const std::string &message) {
-  this->argumentChecker->checkArgsLoosely(call);
+  this->argumentChecker->walkArgsLoosely(call);
   this->state.getDiagnostics().error(member->loc(), message);
 
   return call;
@@ -241,12 +241,12 @@ Expr *BufferStaticChecker::checkBytesFromWith(CallExpr *call, const Type *type,
 
   Signature signature = BufferStaticChecker::mapperSignature(iterated.value(), type);
   this->rememberByteCallback(call->args[1], from, type);
-  bool arrow = isa<FunctionExpr>(call->args[1]);
+  bool isArrow = isa<FunctionExpr>(call->args[1]);
   call->args[1] = this->callbackChecker->checkFunctionArg(call->args[1], signature, 1, what);
   if (!call->args[1]->type->isFunction()) {
     return call;
   }
-  ResultMapResultFits fits = BufferStaticChecker::mapResultFits(type, arrow);
+  ResultMapResultFits fits = BufferStaticChecker::mapResultFits(type, isArrow);
   if (fits.isErr()) {
     this->state.getDiagnostics().error(call->args[1]->loc(), fits.error().message);
     return call;
@@ -285,8 +285,8 @@ BufferStaticChecker::ResultMapResultFits BufferStaticChecker::mapResultFits(cons
                                                                             bool arrow) {
   int64_t lo = 0;
   int64_t hi = 0;
-  bool bounded = !arrow && type->elementRange(lo, hi) && type->bytes() != Bytes::Uint8Clamped;
-  if (bounded) {
+  bool isBounded = !arrow && type->elementRange(lo, hi) && type->bytes() != Bytes::Uint8Clamped;
+  if (isBounded) {
     std::string elementWhat = ErrorTextByteView::element(type->name());
     std::string range = ErrorTextBytes::range(lo, hi);
     std::string hint = BytesCheckHelpers::wrapHint(type->bytes(), "f(x)");
@@ -403,7 +403,7 @@ Expr *BufferStaticChecker::checkBufferView(CallExpr *call) {
   std::string what = ErrorTextBufferStatic::buffer();
   Expr *offset = call->args.size() > 1 ? call->args[1] : nullptr;
   Expr *length = call->args.size() > 2 ? call->args[2] : nullptr;
-  this->byteProofs->checkView(call->args[0], offset, length, 1, what);
+  this->byteProofs->walkView(call->args[0], offset, length, 1, what);
   const Type *buffer = Type::bytesType(Bytes::Buffer);
 
   return BufferStaticChecker::toBuiltinCall(call, Builtin::BytesView, buffer);
@@ -529,11 +529,11 @@ Expr *BufferStaticChecker::checkByteLength(CallExpr *call, MemberExpr *member) {
   if (measured->isError()) {
     return call;
   }
-  bool bytes = measured->isByteView() || measured->bytes() == Bytes::ArrayBuffer;
+  bool hasBytes = measured->isByteView() || measured->bytes() == Bytes::ArrayBuffer;
   if (measured->isString()) {
     call->args.resize(2, nullptr);
     call->args[1] = this->encodingOrUtf8(call, call->args[1]);
-  } else if (!bytes) {
+  } else if (!hasBytes) {
     std::string message = ErrorTextBufferStatic::byteLength(measured->name());
     this->state.getDiagnostics().error(call->args[0]->loc(), message);
     return call;
@@ -567,9 +567,10 @@ Expr *BufferStaticChecker::checkIsBuffer(CallExpr *call, MemberExpr *member) {
   const Type *base = tested->nonOptional();
   llvm::ArrayRef<const Type *> members =
       base->isUnion() ? base->members() : llvm::ArrayRef<const Type *>(base);
-  bool undecided = !tested->isError() && llvm::any_of(members, BufferStaticChecker::mayBeBuffer) &&
-                   (tested->isOptional() || !llvm::all_of(members, BufferStaticChecker::isBuffer));
-  if (undecided) {
+  bool isUndecided =
+      !tested->isError() && llvm::any_of(members, BufferStaticChecker::mayBeBuffer) &&
+      (tested->isOptional() || !llvm::all_of(members, BufferStaticChecker::isBuffer));
+  if (isUndecided) {
     return this->makeBufferTest(call, member);
   }
 
@@ -604,8 +605,8 @@ Expr *BufferStaticChecker::checkIsEncoding(CallExpr *call, MemberExpr *member) {
   std::optional<std::u16string> text = BufferStaticChecker::literalText(call->args[0]);
   if (text.has_value()) {
     std::string utf8 = ToUtf8::toUtf8(*text);
-    bool known = BytesCheckHelpers::encodingNamed(utf8).has_value();
-    return this->makeBoolLiteral(call->loc(), known);
+    bool isKnown = BytesCheckHelpers::encodingNamed(utf8).has_value();
+    return this->makeBoolLiteral(call->loc(), isKnown);
   }
   call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
 
@@ -629,9 +630,9 @@ Expr *BufferStaticChecker::toBuiltinCall(CallExpr *call, Builtin builtin, const 
 
 void BufferStaticChecker::reportUnprovenBetween(const IndexProofs::ResultBetweenProven &between,
                                                 llvm::SMLoc at) {
-  bool shown =
+  bool isShown =
       between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT;
-  if (shown) {
+  if (isShown) {
     this->state.getDiagnostics().error(at, between.error().message);
   }
 }

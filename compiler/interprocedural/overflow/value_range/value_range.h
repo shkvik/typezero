@@ -125,6 +125,7 @@ public:
   static double times(double a, double b);
   static bool hasLength(const Type *type);
   static Limits limitsOf(const Type *type);
+  static Limits plainLimits(const Type *type);
   static bool isFloatType(const Type *type);
   static Num add(const Num &a, const Num &b);
   static bool isNumberType(const Type *type);
@@ -133,6 +134,8 @@ public:
   static bool isIntegerType(const Type *type);
   static bool isDecimalType(const Type *type);
   static Val join(const Val &a, const Val &b);
+  static bool needsDeeperJoin(const Val &a, const Val &b);
+  static Val joinNumbers(const Val &a, const Val &b);
   static Num power(const Num &a, const Num &b);
   static bool sameNum(const Num &a, const Num &b);
   static Num subtract(const Num &a, const Num &b);

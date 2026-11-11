@@ -45,18 +45,18 @@ Slots::Slots(OverflowCheck &check)
 
 Val Slots::readVar(const VarSymbol *var, const State &st) {
   auto info = this->check.vars_.find(var);
-  bool own = info != this->check.vars_.end() && info->second.declared &&
-             info->second.owner == this->check.owner && !info->second.writtenElsewhere;
+  bool isOwn = info != this->check.vars_.end() && info->second.declared &&
+               info->second.owner == this->check.owner && !info->second.writtenElsewhere;
   Val v;
-  bool found = false;
-  if (own) {
+  bool isFound = false;
+  if (isOwn) {
     auto value = st.vars.find(var);
     if (value != st.vars.end()) {
       v = value->second;
-      found = true;
+      isFound = true;
     }
   }
-  if (!found) {
+  if (!isFound) {
     std::optional<Val> s = this->check.summary(this->check.cur.vars, var);
     v = s ? this->check.overflowWarnings().fitVal(*s, var->type)
           : this->check.overflowWarnings().trusted(var->type);
@@ -208,9 +208,9 @@ bool Slots::mergeSlot(OverflowCheck::Slot &into, const OverflowCheck::Slot *from
     if (!v.len.empty() && !n.len.empty()) {
       v.len = ValueRange::meet(v.len, n.len);
     }
-    bool changed = !ValueRange::sameVal(v, into.val);
+    bool hasChanged = !ValueRange::sameVal(v, into.val);
     into.val = v;
-    return changed;
+    return hasChanged;
   }
   if (!from) {
     return false;

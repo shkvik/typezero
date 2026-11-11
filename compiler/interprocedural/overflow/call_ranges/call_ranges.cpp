@@ -39,11 +39,11 @@ CallRanges::CallRanges(OverflowCheck &check)
     : check(check) {}
 
 bool CallRanges::mergeSummaries(bool narrowing) {
-  bool changed = false;
+  bool hasChanged = false;
   this->check.changed.clear();
   auto note = [&](bool grew, const void *map, const void *key, llvm::StringRef field) {
     if (grew) {
-      changed = true;
+      hasChanged = true;
       this->check.changed.insert({map, key, field.str()});
     }
   };
@@ -113,7 +113,7 @@ bool CallRanges::mergeSummaries(bool narrowing) {
     for (auto &entry : this->check.next.preds) {
       OverflowCheck::Pred &into = this->check.cur.preds[entry.first];
       const OverflowCheck::Pred &from = entry.second;
-      bool grew = false;
+      bool hasGrown = false;
       auto merge = [&](std::vector<Num> &a, const std::vector<Num> &b) {
         if (a.size() < b.size()) {
           a.resize(b.size());
@@ -122,17 +122,17 @@ bool CallRanges::mergeSummaries(bool narrowing) {
           Num joined = ValueRange::join(a[i], b[i]);
           if (!ValueRange::sameNum(joined, a[i])) {
             a[i] = joined;
-            grew = true;
+            hasGrown = true;
           }
         }
       };
       merge(into.whenTrue, from.whenTrue);
       merge(into.whenFalse, from.whenFalse);
-      note(grew, &this->check.cur.preds, entry.first, "");
+      note(hasGrown, &this->check.cur.preds, entry.first, "");
     }
   }
 
-  return changed;
+  return hasChanged;
 }
 
 void CallRanges::analyzeAll() {
@@ -154,7 +154,7 @@ void CallRanges::analyzeAll() {
     OverflowCheck::FunctionMemo &memo = this->check.memos[i];
     if (memo.valid && !this->check.reporting && !this->check.readsChanged(memo)) {
       this->check.work += memo.work;
-      OverflowCheck::joinInto(this->check.next, memo.made);
+      this->check.joinInto(this->check.next, memo.made);
       continue;
     }
     OverflowCheck::Summaries others = std::move(this->check.next);
@@ -168,7 +168,7 @@ void CallRanges::analyzeAll() {
     memo.made = std::move(this->check.next);
     memo.valid = this->check.round >= 1;
     this->check.next = std::move(others);
-    OverflowCheck::joinInto(this->check.next, memo.made);
+    this->check.joinInto(this->check.next, memo.made);
   }
 }
 
@@ -179,14 +179,14 @@ Val CallRanges::paramValue(const FunctionDecl *fn, size_t index) {
     return this->check.overflowWarnings().trusted(type);
   }
   Val v;
-  bool known = false;
+  bool isKnown = false;
   this->check.noteRead(&this->check.cur.params, fn);
   auto found = this->check.cur.params.find(fn);
   if (found != this->check.cur.params.end() && index < found->second.size()) {
     v = found->second[index].val;
-    known = true;
+    isKnown = true;
   }
-  if (!known || this->check.unknownCallers.contains(fn)) {
+  if (!isKnown || this->check.unknownCallers.contains(fn)) {
     v = ValueRange::join(v, this->check.overflowWarnings().trusted(type));
   }
 
@@ -222,7 +222,7 @@ void CallRanges::passArgs(const FunctionDecl *fn, const CallExpr *call, llvm::Ar
   if (slots.size() < fn->params.size()) {
     slots.resize(fn->params.size());
   }
-  bool spread = call && call->hasSpread();
+  bool isSpread = call && call->hasSpread();
   for (size_t i = 0; i < fn->params.size(); ++i) {
     const Param &p = fn->params[i];
     if (!p.sym) {
@@ -235,12 +235,12 @@ void CallRanges::passArgs(const FunctionDecl *fn, const CallExpr *call, llvm::Ar
         element = ValueRange::join(element, call && call->spreads(k) && args[k].elem ? *args[k].elem
                                                                                      : args[k]);
       }
-      v.len = spread ? ValueRange::someLength()
-                     : ValueRange::exactly(double(args.size() > i ? args.size() - i : 0));
+      v.len = isSpread ? ValueRange::someLength()
+                       : ValueRange::exactly(double(args.size() > i ? args.size() - i : 0));
       v.elem = ValueRange::share(element);
-    } else if (i < args.size() && !spread) {
+    } else if (i < args.size() && !isSpread) {
       v = args[i];
-    } else if (spread) {
+    } else if (isSpread) {
       v = this->check.overflowWarnings().trusted(p.sym->type);
     } else {
       continue;
@@ -441,8 +441,9 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
     return this->check.overflowWarnings().trusted(call->type);
   }
   const FunctionDecl *fn = fe->fn;
-  bool reduce = call->builtin() == Builtin::ArrReduce || call->builtin() == Builtin::ArrReduceRight;
-  const VarSymbol *acc = reduce && !fn->params.empty() ? fn->params[0].sym : nullptr;
+  bool isReduce =
+      call->builtin() == Builtin::ArrReduce || call->builtin() == Builtin::ArrReduceRight;
+  const VarSymbol *acc = isReduce && !fn->params.empty() ? fn->params[0].sym : nullptr;
   if (acc && ValueRange::tracked(acc->type)) {
     this->check.slots().writeVar(acc, hasInit ? init : element, st);
   }

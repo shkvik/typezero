@@ -1,7 +1,7 @@
 #pragma once
 
 #include "compiler/program/ast/ast.h"
-#include "compiler/program/diagnostics/diagnostics.h"
+#include "compiler/program/diagnostic/diagnostic.h"
 #include "compiler/semantic/semantic_state/generic_store/generic_store_types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringSet.h"
@@ -12,7 +12,7 @@ namespace tz {
 
 struct LateError {
   InstanceRecord *instance = nullptr;
-  Diagnostics::Captured first;
+  Diagnostic first;
 };
 
 class LateClassStore {
@@ -26,7 +26,7 @@ public:
   ClassDecl *getDeclaringClass() const;
   void rememberLateOwner(const ClassDecl *cls, InstanceRecord *owner);
   InstanceRecord *findLateOwner(const ClassDecl *cls) const;
-  void captureLateErrorsOf(InstanceRecord *owner, Diagnostics &diagnostics);
+  void addLateErrors(InstanceRecord *owner, const std::vector<Diagnostic> &found);
   std::vector<LateError> getFirstLateErrors() const;
   void addLateMethodName(llvm::StringRef name);
   bool hasLateMethodNames() const;
@@ -40,7 +40,7 @@ private:
   int checkedCount = 0;
   std::vector<ClassDecl *> declaringClasses;
   llvm::DenseMap<const ClassDecl *, InstanceRecord *> lateOwners;
-  std::map<InstanceRecord *, std::vector<Diagnostics::Captured>> lateErrors;
+  std::map<InstanceRecord *, std::vector<Diagnostic>> lateErrors;
   llvm::StringSet<> lateMethodNames;
   llvm::DenseMap<const FunctionDecl *, bool> classExprHolders;
 };

@@ -25,11 +25,11 @@ public:
   ResultHeldValuesChecked run();
 
 protected:
-  static const Expr *bare(const Expr *e);
-  static bool storageMethod(const CallExpr *c, llvm::StringRef name);
-  static const VarSymbol *storageOf(const CallExpr *c);
-  static const FunctionDecl *callbackOf(const Expr *e);
-  static const ClassDecl *storageClass(const ClassDecl *cls);
+  const Expr *bare(const Expr *e) const;
+  bool storageMethod(const CallExpr *c, llvm::StringRef name) const;
+  const VarSymbol *storageOf(const CallExpr *c) const;
+  const FunctionDecl *callbackOf(const Expr *e) const;
+  const ClassDecl *storageClass(const ClassDecl *cls) const;
 
   virtual bool used() const = 0;
   virtual std::vector<Diagnostic> kept(const Expr *value, bool closure, llvm::StringRef where) = 0;
@@ -172,7 +172,7 @@ private:
             MarkAwaited, StartCall, FinishCall, FinishNew, FinishAssign, FinishUnary,
             FinishProperty, FinishElement, FinishDeclarator, FinishReturn>;
 
-  static std::string calleeName(const CallExpr *c);
+  std::string calleeName(const CallExpr *c) const;
 
   std::vector<Diagnostic> walkProgram();
   std::vector<WalkStep> programRoots() const;

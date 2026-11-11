@@ -39,12 +39,12 @@ StmtChecker::StmtChecker(SemanticState &owner, SemanticParts &all)
   this->genericChecker = &all.genericChecker;
 }
 
-void StmtChecker::checkStmt(Stmt *stmt) {
+void StmtChecker::walkStmt(Stmt *stmt) {
   switch (stmt->kind()) {
     case Stmt::Kind::Block:
       return this->walkBlock(cast<BlockStmt>(stmt));
     case Stmt::Kind::VarDecl:
-      return this->varChecker->checkVarDecl(cast<VarDeclStmt>(stmt));
+      return this->varChecker->walkVarDecl(cast<VarDeclStmt>(stmt));
     case Stmt::Kind::TypeAlias:
     case Stmt::Kind::Enum:
       return;
@@ -56,32 +56,32 @@ void StmtChecker::checkStmt(Stmt *stmt) {
       return this->walkExprStmt(cast<ExprStmt>(stmt));
     case Stmt::Kind::If:
       this->state.getScopeStack().enterBranch();
-      this->checkIf(cast<IfStmt>(stmt));
+      this->walkIf(cast<IfStmt>(stmt));
       return this->state.getScopeStack().leaveBranch();
     case Stmt::Kind::While:
       this->state.getScopeStack().enterBranch();
-      this->loopChecker->checkWhile(cast<WhileStmt>(stmt));
+      this->loopChecker->walkWhile(cast<WhileStmt>(stmt));
       return this->state.getScopeStack().leaveBranch();
     case Stmt::Kind::DoWhile:
       this->state.getScopeStack().enterBranch();
-      this->loopChecker->checkDoWhile(cast<DoWhileStmt>(stmt));
+      this->loopChecker->walkDoWhile(cast<DoWhileStmt>(stmt));
       return this->state.getScopeStack().leaveBranch();
     case Stmt::Kind::For:
       this->state.getScopeStack().enterBranch();
-      this->loopChecker->checkFor(cast<ForStmt>(stmt));
+      this->loopChecker->walkFor(cast<ForStmt>(stmt));
       return this->state.getScopeStack().leaveBranch();
     case Stmt::Kind::ForOf:
       this->state.getScopeStack().enterBranch();
-      this->loopChecker->checkForOf(cast<ForOfStmt>(stmt));
+      this->loopChecker->walkForOf(cast<ForOfStmt>(stmt));
       return this->state.getScopeStack().leaveBranch();
     case Stmt::Kind::Switch:
       this->state.getScopeStack().enterBranch();
-      this->switchChecker->checkSwitch(cast<SwitchStmt>(stmt));
+      this->switchChecker->walkSwitch(cast<SwitchStmt>(stmt));
       return this->state.getScopeStack().leaveBranch();
     case Stmt::Kind::Labeled:
-      return this->jumpChecker->checkLabeled(cast<LabeledStmt>(stmt));
+      return this->jumpChecker->walkLabeled(cast<LabeledStmt>(stmt));
     case Stmt::Kind::Return:
-      this->returnChecker->checkReturn(cast<ReturnStmt>(stmt));
+      this->returnChecker->walkReturn(cast<ReturnStmt>(stmt));
       return this->state.getFlowState().markUnreachable();
     case Stmt::Kind::Break:
     case Stmt::Kind::Continue:
@@ -94,7 +94,7 @@ void StmtChecker::checkStmt(Stmt *stmt) {
 
 void StmtChecker::walkBlock(BlockStmt *block) {
   this->state.getScopeStack().openScope();
-  this->closureChecker->checkStatements(block);
+  this->closureChecker->walkStatements(block);
   this->scopes->closeScope();
 }
 
@@ -140,7 +140,7 @@ void StmtChecker::walkJump(Stmt *stmt) {
   this->state.getFlowState().markUnreachable();
 }
 
-void StmtChecker::checkIf(IfStmt *stmt) {
+void StmtChecker::walkIf(IfStmt *stmt) {
   Flow whenTrue, whenFalse;
   stmt->cond = this->truthChecker->checkCondition(stmt->cond, whenTrue, whenFalse);
   if (std::optional<bool> constant = this->state.getGenericStore().isCheckingInstance()
@@ -199,9 +199,9 @@ StmtChecker::ResultFunctionInBlock StmtChecker::checkFunctionStmt(FunctionDecl *
 }
 
 StmtChecker::ResultBodyIsStatement StmtChecker::checkBody(Stmt *body) {
-  bool declaration = isa<VarDeclStmt>(body) || isa<TypeAliasDecl>(body) || isa<EnumDecl>(body) ||
-                     isa<FunctionDecl>(body);
-  if (declaration) {
+  bool isDeclaration = isa<VarDeclStmt>(body) || isa<TypeAliasDecl>(body) || isa<EnumDecl>(body) ||
+                       isa<FunctionDecl>(body);
+  if (isDeclaration) {
     std::string message = ErrorTextBody::declared();
 
     return err(StmtCheckerCheckBodyError{
@@ -210,7 +210,7 @@ StmtChecker::ResultBodyIsStatement StmtChecker::checkBody(Stmt *body) {
     });
   }
 
-  this->checkStmt(body);
+  this->walkStmt(body);
 
   return ok(body);
 }

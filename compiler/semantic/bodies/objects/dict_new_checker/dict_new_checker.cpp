@@ -34,13 +34,13 @@ void DictNewChecker::markPairs(Expr *arg) {
   auto *fe = call && call->args.size() == 1 ? dyn_cast<FunctionExpr>(call->args[0]) : nullptr;
   const ArrayMethodInfo *method =
       member != nullptr ? ArrayMethodTable::find(member->name) : nullptr;
-  bool maps = method != nullptr && method->method == ArrayMethod::MAP;
-  if (!maps || !fe || fe->fn->returnType || !fe->fn->body) {
+  bool isMapping = method != nullptr && method->method == ArrayMethod::MAP;
+  if (!isMapping || !fe || fe->fn->returnType || !fe->fn->body) {
     return;
   }
   std::vector<const ReturnStmt *> returns = DictNewChecker::branchReturns(fe->fn->body);
-  bool plain = llvm::all_of(returns, DictNewChecker::returnsPair);
-  if (!plain || returns.empty()) {
+  bool isPlain = llvm::all_of(returns, DictNewChecker::returnsPair);
+  if (!isPlain || returns.empty()) {
     return;
   }
   for (const ReturnStmt *ret : returns) {
@@ -123,13 +123,13 @@ DictNewChecker::ResultSourceShape DictNewChecker::sourceShape(const Type *type, 
         .message = message,
     });
   }
-  bool pair = given->isTuple() && given->fields().size() == 2;
-  bool pairFits =
-      pair &&
+  bool isPair = given->isTuple() && given->fields().size() == 2;
+  bool isPairFits =
+      isPair &&
       (!wanted ||
        (TypeRelations::isImplicitlyConvertible(given->fields()[0].type, wanted->fields()[0].type) &&
         TypeRelations::isImplicitlyConvertible(given->fields()[1].type, wanted->fields()[1].type)));
-  if (pairs && !pairFits) {
+  if (pairs && !isPairFits) {
     llvm::StringRef wantedName = wanted ? wanted->name() : llvm::StringRef();
     std::string message =
         ErrorTextDictSource::notPairs(what, wantedName, given->name(), given->isArray());
@@ -236,7 +236,7 @@ bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value)
     }
   }
   key = value = nullptr;
-  bool typed = true;
+  bool isTyped = true;
   for (const ArrayLitExpr::Element &e : lit->elements) {
     auto *pair = cast<ArrayLitExpr>(e.expr);
     for (size_t i = 0; i < 2; ++i) {
@@ -246,19 +246,19 @@ bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value)
           part, common && DecimalChecker::isLiteralTree(part) ? common : nullptr);
       const Type *t = part->type;
       if (t->isError()) {
-        typed = false;
+        isTyped = false;
         continue;
       }
       ResultPartsJoined joined = DictNewChecker::partsJoin(i == 0, common, t);
       if (joined.isErr()) {
         this->state.getDiagnostics().error(part->loc(), joined.error().message);
-        typed = false;
+        isTyped = false;
         continue;
       }
       common = joined.value();
     }
   }
-  if (!typed || !key || !value) {
+  if (!isTyped || !key || !value) {
     key = value = Type::error();
     return true;
   }
@@ -390,8 +390,8 @@ std::optional<const Type *> DictNewChecker::statedDictType(NewExpr *expr, const 
   ref.args = expr->typeArgs;
   DictChecker::ResultDictTypeResolved given = this->dictChecker->resolveDictType(ref);
   if (given.isErr()) {
-    bool onKey = DictChecker::keyArgument(given.error().code);
-    llvm::SMLoc at = onKey ? ref.args[0].loc : ref.loc;
+    bool isOnKey = DictChecker::keyArgument(given.error().code);
+    llvm::SMLoc at = isOnKey ? ref.args[0].loc : ref.loc;
     this->state.getDiagnostics().error(at, given.error().message);
     return std::nullopt;
   }
@@ -408,10 +408,10 @@ const Type *DictNewChecker::wantedDict(const Type *expected, bool isMap) {
     target = DictNewChecker::onlyDictMember(target->nonOptional(), isMap);
   }
   const Type *wanted = target != nullptr ? target->nonOptional() : nullptr;
-  bool fits =
+  bool isFitting =
       wanted != nullptr && wanted->isDict() && wanted->isMap() == isMap && !wanted->isRecord();
 
-  return fits ? wanted : nullptr;
+  return isFitting ? wanted : nullptr;
 }
 
 const Type *DictNewChecker::onlyDictMember(const Type *expected, bool isMap) {

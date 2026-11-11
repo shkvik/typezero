@@ -54,7 +54,7 @@ const double kPartLimits[7][2] = {
 BuiltinEvaluator::BuiltinEvaluator(OverflowCheck &check)
     : check(check) {}
 
-double BuiltinEvaluator::monthStart(double months) {
+double BuiltinEvaluator::monthStart(double months) const {
   if (!(std::fabs(months) < 1e15)) {
     return months * 30.436875;
   }
@@ -69,11 +69,10 @@ double BuiltinEvaluator::monthStart(double months) {
   return double(era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468);
 }
 
-Num BuiltinEvaluator::dateTime(const std::array<Num, 7> &parts) {
+Num BuiltinEvaluator::dateTime(const std::array<Num, 7> &parts) const {
   Num months = ValueRange::add(ValueRange::multiply(parts[0], ValueRange::exactly(12)), parts[1]);
-  Num days =
-      ValueRange::make({BuiltinEvaluator::monthStart(months.lo), months.loOrigin, months.loWhy},
-                       {BuiltinEvaluator::monthStart(months.hi), months.hiOrigin, months.hiWhy});
+  Num days = ValueRange::make({this->monthStart(months.lo), months.loOrigin, months.loWhy},
+                              {this->monthStart(months.hi), months.hiOrigin, months.hiWhy});
   Num time = ValueRange::multiply(
       ValueRange::add(days, ValueRange::subtract(parts[2], ValueRange::exactly(1))),
       ValueRange::exactly(kDay));
@@ -86,15 +85,16 @@ Num BuiltinEvaluator::dateTime(const std::array<Num, 7> &parts) {
 }
 
 void BuiltinEvaluator::checkDateParts(const CallExpr *call, const std::vector<Val> &args) {
-  bool setter = call->builtin() == Builtin::DateSetUTC || call->builtin() == Builtin::DateSetLocal;
-  bool local =
+  bool isSetter =
+      call->builtin() == Builtin::DateSetUTC || call->builtin() == Builtin::DateSetLocal;
+  bool isLocal =
       call->builtin() == Builtin::DateFromFields || call->builtin() == Builtin::DateSetLocal;
   std::array<Num, 7> nums = {ValueRange::exactly(1970), ValueRange::exactly(0),
                              ValueRange::exactly(1),    ValueRange::exactly(0),
                              ValueRange::exactly(0),    ValueRange::exactly(0),
                              ValueRange::exactly(0)};
   size_t first = 0, from = 0;
-  if (setter) {
+  if (isSetter) {
     auto *field = call->args.empty() ? nullptr : dyn_cast<IntLitExpr>(call->args[0]);
     if (!field) {
       return;
@@ -118,12 +118,12 @@ void BuiltinEvaluator::checkDateParts(const CallExpr *call, const std::vector<Va
     nums[k] = args[i].num;
     parts.push_back({call->args[i], args[i].num, kPartLimits[k][0], kPartLimits[k][1]});
   }
-  if (!setter && nums[0].lo <= 99 && nums[0].hi >= 0) {
+  if (!isSetter && nums[0].lo <= 99 && nums[0].hi >= 0) {
     nums[0] = ValueRange::join(nums[0], ValueRange::range(1900, 1999));
   }
   double edge = double(std::numeric_limits<int64_t>::max());
-  this->check.overflowWarnings().checkDate(BuiltinEvaluator::dateTime(nums),
-                                           local ? edge - kDay : edge, parts);
+  this->check.overflowWarnings().checkDate(this->dateTime(nums), isLocal ? edge - kDay : edge,
+                                           parts);
 }
 
 Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
@@ -214,8 +214,9 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
     case Builtin::NumConvert: {
       if (type->isDecimal() && receiverType && receiverType->isInteger() && !receiver.num.empty()) {
         Num x = receiver.num;
-        bool exact = std::fabs(x.lo) <= 9007199254740992.0 && std::fabs(x.hi) <= 9007199254740992.0;
-        return ValueRange::numVal(exact ? x : ValueRange::widenedDecimal(x));
+        bool isExact =
+            std::fabs(x.lo) <= 9007199254740992.0 && std::fabs(x.hi) <= 9007199254740992.0;
+        return ValueRange::numVal(isExact ? x : ValueRange::widenedDecimal(x));
       }
       if (!receiverType || !ValueRange::isNumberType(receiverType) || type->isDecimal() ||
           receiverType->isDecimal()) {
@@ -251,10 +252,10 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
     case Builtin::ArrUnshift: {
       Val values;
       double count = 0;
-      bool spreads = false;
+      bool isSpreading = false;
       for (size_t i = 0; i < args.size(); ++i) {
         if (call->spreads(i)) {
-          spreads = true;
+          isSpreading = true;
           values = ValueRange::join(
               values, this->check.slots().elementsOf(call->args[i], args[i], call->args[i]->type));
         } else {
@@ -263,8 +264,8 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
         }
       }
       this->check.slots().storeElements(receiverExpr, receiverType, values, st);
-      Num len = spreads ? ValueRange::make({length().lo + count}, {kLengthMax, Origin::Trusted})
-                        : ValueRange::add(length(), ValueRange::exactly(count));
+      Num len = isSpreading ? ValueRange::make({length().lo + count}, {kLengthMax, Origin::Trusted})
+                            : ValueRange::add(length(), ValueRange::exactly(count));
       setLength(len);
       return ValueRange::numVal(ValueRange::narrowTo(len, 0, kLengthMax));
     }
@@ -439,8 +440,9 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
         return ValueRange::numVal(x);
       }
       if (from && from->isInteger() && !x.empty()) {
-        bool exact = std::fabs(x.lo) <= 9007199254740992.0 && std::fabs(x.hi) <= 9007199254740992.0;
-        return ValueRange::numVal(exact ? x : ValueRange::widenedDecimal(x));
+        bool isExact =
+            std::fabs(x.lo) <= 9007199254740992.0 && std::fabs(x.hi) <= 9007199254740992.0;
+        return ValueRange::numVal(isExact ? x : ValueRange::widenedDecimal(x));
       }
       if (from && from->isFloat() && !x.empty()) {
         return ValueRange::numVal(ValueRange::widenedDecimal(x));
@@ -488,9 +490,9 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
       Num x =
           receiver.num.empty() ? this->check.overflowWarnings().trusted(type).num : receiver.num;
       Num n = arg(0).num.empty() ? this->check.overflowWarnings().trusted(type).num : arg(0).num;
-      bool ok = this->check.overflowWarnings().checkDivisor(
+      bool isOk = this->check.overflowWarnings().checkDivisor(
           call, BinaryOp::Div, call->args.empty() ? nullptr : call->args[0], x, n);
-      this->check.overflowWarnings().noteProof(call, ok);
+      this->check.overflowWarnings().noteProof(call, isOk);
       return this->check.overflowWarnings().trusted(type);
     }
     case Builtin::ProcessArgv:

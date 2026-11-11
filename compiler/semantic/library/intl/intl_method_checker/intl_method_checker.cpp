@@ -323,13 +323,13 @@ Expr *IntlMethodChecker::checkSegmentsContaining(CallExpr *call, MemberExpr *mem
 
 Expr *IntlMethodChecker::checkNumberLocale(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 2);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
-  if (rejected || arity.isErr()) {
+  if (isRejected || arity.isErr()) {
     return call;
   }
   if (!this->intlOptionsChecker->checkIntlArgs(call->args, 0, IntlKind::NumberFormat,

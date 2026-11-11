@@ -61,19 +61,19 @@ std::string TypeDeclarer::formatNumber(double value) {
 
 TypeDeclarer::ResultAliasIsOwnType TypeDeclarer::builtinAlias(const TypeAliasDecl *alias) {
   llvm::StringRef name = alias->name;
-  bool builtin = Type::fromName(name) || TypeNameTable::isName(name, TypeName::ARRAY);
-  bool integer = builtin && Type::fromName(name)->isNumeric();
-  bool forTsc = integer && alias->type.kind() == TypeRefKind::NAME_REF &&
-                TypeNameTable::isName(alias->type.name, TypeName::NUMBER);
-  forTsc |= builtin && TypeNameTable::isName(name, TypeName::JSON) &&
-            alias->type.kind() == TypeRefKind::UNION_REF;
-  if (forTsc) {
+  bool isBuiltin = Type::fromName(name) || TypeNameTable::isName(name, TypeName::ARRAY);
+  bool isInteger = isBuiltin && Type::fromName(name)->isNumeric();
+  bool isForTsc = isInteger && alias->type.kind() == TypeRefKind::NAME_REF &&
+                  TypeNameTable::isName(alias->type.name, TypeName::NUMBER);
+  isForTsc |= isBuiltin && TypeNameTable::isName(name, TypeName::JSON) &&
+              alias->type.kind() == TypeRefKind::UNION_REF;
+  if (isForTsc) {
     return err(TypeDeclarerBuiltinAliasError{
         .code = TypeDeclarerBuiltinAliasErrorCode::DECLARED_FOR_TSC,
         .message = "",
     });
   }
-  if (integer) {
+  if (isInteger) {
     std::string message = ErrorTextBuiltinAlias::number(name);
 
     return err(TypeDeclarerBuiltinAliasError{
@@ -81,7 +81,7 @@ TypeDeclarer::ResultAliasIsOwnType TypeDeclarer::builtinAlias(const TypeAliasDec
         .message = message,
     });
   }
-  if (builtin) {
+  if (isBuiltin) {
     std::string message = ErrorTextBuiltinAlias::builtin(name);
 
     return err(TypeDeclarerBuiltinAliasError{
@@ -116,9 +116,9 @@ std::vector<Stmt *> TypeDeclarer::declareTypes(llvm::ArrayRef<Stmt *> stmts, boo
     if (alias) {
       name = alias->name;
       ResultAliasIsOwnType own = TypeDeclarer::builtinAlias(alias);
-      bool forTsc =
+      bool isForTsc =
           own.isErr() && own.error().code == TypeDeclarerBuiltinAliasErrorCode::DECLARED_FOR_TSC;
-      if (own.isErr() && !forTsc) {
+      if (own.isErr() && !isForTsc) {
         this->state.getDiagnostics().error(alias->loc(), own.error().message);
       }
       if (own.isErr()) {
@@ -269,21 +269,21 @@ const Type *TypeDeclarer::resolvingAlias(TypeAliasDecl *alias) {
 void TypeDeclarer::startAlias(std::vector<AliasFrame> &frames, TypeAliasDecl *alias) {
   std::optional<Module *> previousModule = this->enterHomeModule(alias);
   alias->resolving = true;
-  bool builtinModule = this->builtinModuleTypes->alias(alias->name) == alias;
-  if (builtinModule) {
+  bool isBuiltinModule = this->builtinModuleTypes->alias(alias->name) == alias;
+  if (isBuiltinModule) {
     this->state.getTypeContext().enterBuiltinModule();
   }
   alias->self = TypeDeclarer::declareSelf(alias);
   std::vector<TypeAliasDecl *> needed = this->neededAliases(alias);
-  frames.push_back(AliasFrame{alias, previousModule, builtinModule, std::move(needed), 0});
+  frames.push_back(AliasFrame{alias, previousModule, isBuiltinModule, std::move(needed), 0});
 }
 
 TypeAliasDecl *TypeDeclarer::takeUnresolvedAlias(AliasFrame &frame) {
   while (frame.nextNeeded < frame.needed.size()) {
     TypeAliasDecl *needed = frame.needed[frame.nextNeeded];
     frame.nextNeeded += 1;
-    bool waiting = needed->resolved == nullptr && !needed->resolving;
-    if (waiting) {
+    bool isWaiting = needed->resolved == nullptr && !needed->resolving;
+    if (isWaiting) {
       return needed;
     }
   }
@@ -313,8 +313,8 @@ std::optional<Module *> TypeDeclarer::enterHomeModule(const Stmt *decl) {
   ModuleStates &modules = this->state.getModuleStates();
   Module *home = modules.findDeclModule(decl);
   Module *here = modules.getCurrentModule();
-  bool elsewhere = home != nullptr && home != here && this->state.getScopeStack().isTopLevel();
-  if (!elsewhere) {
+  bool isElsewhere = home != nullptr && home != here && this->state.getScopeStack().isTopLevel();
+  if (!isElsewhere) {
     return std::nullopt;
   }
   this->moduleDeclarer->useModule(home);
@@ -354,15 +354,15 @@ std::vector<TypeAliasDecl *> TypeDeclarer::neededAliases(const TypeAliasDecl *al
 }
 
 TypeAliasDecl *TypeDeclarer::plainAliasNamed(const TypeRef &part) const {
-  bool builtinName = Type::fromName(part.name) != nullptr;
-  if (part.kind() != TypeRefKind::NAME_REF || builtinName) {
+  bool isBuiltinName = Type::fromName(part.name) != nullptr;
+  if (part.kind() != TypeRefKind::NAME_REF || isBuiltinName) {
     return nullptr;
   }
   auto *alias = dyn_cast_or_null<TypeAliasDecl>(this->lookupType(part.name));
-  bool plain =
+  bool isPlain =
       alias != nullptr && alias->typeParams.empty() && !TypeDeclarer::mentionsTypeOf(alias->type);
 
-  return plain ? alias : nullptr;
+  return isPlain ? alias : nullptr;
 }
 
 const Type *TypeDeclarer::resolveAliasBody(TypeAliasDecl *alias) {
@@ -415,9 +415,9 @@ const Type *TypeDeclarer::resolveUnionAlias(TypeAliasDecl *alias) {
 }
 
 void TypeDeclarer::nameBuiltinUnion(const TypeAliasDecl *alias) {
-  bool builtin = this->state.getAliasStore().findBuiltinAlias(alias->name) == alias ||
-                 this->builtinModuleTypes->alias(alias->name) == alias;
-  if (builtin && alias->type.kind() == TypeRefKind::UNION_REF) {
+  bool isBuiltin = this->state.getAliasStore().findBuiltinAlias(alias->name) == alias ||
+                   this->builtinModuleTypes->alias(alias->name) == alias;
+  if (isBuiltin && alias->type.kind() == TypeRefKind::UNION_REF) {
     Type::nameUnion(alias->resolved, alias->name);
   }
 }
@@ -689,10 +689,10 @@ TypeDeclarer::ResultEnumMemberRead TypeDeclarer::checkEnumMember(EnumDecl *decl,
     });
   }
 
-  bool written = member->object && member->object->loc() != member->loc();
+  bool isWritten = member->object && member->object->loc() != member->loc();
   if (m->isString) {
     auto *lit = this->state.getAst().make<StringLitExpr>(member->loc(), m->text);
-    if (written) {
+    if (isWritten) {
       this->state.getInventoryStore().rememberNamedUse(lit,
                                                        {decl, member->object->loc(), member->name});
     }
@@ -709,7 +709,7 @@ TypeDeclarer::ResultEnumMemberRead TypeDeclarer::checkEnumMember(EnumDecl *decl,
   int64_t value = m->number;
   auto magnitude = static_cast<uint64_t>(value < 0 ? -value : value);
   Expr *lit = this->state.getAst().make<IntLitExpr>(member->loc(), magnitude);
-  if (written) {
+  if (isWritten) {
     this->state.getInventoryStore().rememberNamedUse(lit,
                                                      {decl, member->object->loc(), member->name});
   }

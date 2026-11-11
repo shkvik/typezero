@@ -1,6 +1,5 @@
 #include "compiler/semantic/library/reflect/metadata_checker/metadata_checker.h"
 #include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
-#include "compiler/semantic/bodies/functions/function_checker/function_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
 #include "compiler/semantic/names/scopes/scopes.h"
@@ -12,13 +11,13 @@ using llvm::dyn_cast;
 
 namespace tz {
 
+// TODO: значения в мапы
 MetadataChecker::MetadataChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->scopes = &all.scopes;
   this->classDeclarer = &all.classDeclarer;
   this->typeRelations = &all.typeRelations;
   this->returnInferrer = &all.returnInferrer;
-  this->functionChecker = &all.functionChecker;
   this->classValueChecker = &all.classValueChecker;
 }
 
@@ -71,7 +70,7 @@ const void *MetadataChecker::metadataKey(const Expr *key, std::string &label) {
   return entry.cls();
 }
 
-void MetadataChecker::checkBodyEarly(FunctionDecl *fn) {
+void MetadataChecker::walkBodyEarly(FunctionDecl *fn) {
   if (!fn->sym || fn->checked || fn->sym->isGeneric() ||
       this->state.getFunctionStack().isCheckingFunction(fn)) {
     return;
@@ -83,12 +82,7 @@ void MetadataChecker::checkBodyEarly(FunctionDecl *fn) {
   if (fn->cls()) {
     return;
   }
-  BodyState saved = this->returnInferrer->enterBody(fn);
-  if (!this->state.getModuleStates().isTopLevelDone()) {
-    this->state.getFunctionStack().rememberEarlyFunction(fn->sym);
-  }
-  this->functionChecker->walkFunctionFromScratch(fn);
-  this->returnInferrer->leaveBody(saved);
+  this->returnInferrer->walkBodyNow(fn);
 }
 
 MetadataChecker::ResultMetadataTyped MetadataChecker::metadataType(const void *key,
@@ -100,14 +94,14 @@ MetadataChecker::ResultMetadataTyped MetadataChecker::metadataType(const void *k
     return ok(known->type);
   }
   for (FunctionDecl *fn : reflect.getMetadataWriters(label)) {
-    this->checkBodyEarly(fn);
+    this->walkBodyEarly(fn);
     if (const MetadataType *known = reflect.findMetadataType(key)) {
       return ok(known->type);
     }
   }
-  bool written =
+  bool isWritten =
       expected && !expected->nonOptional()->isUnknown() && !TypeQueries::mentionsParam(expected);
-  if (!written) {
+  if (!isWritten) {
     std::string message = ErrorTextMetadataType::unknown(label);
 
     return err(MetadataCheckerMetadataTypeError{

@@ -1,7 +1,7 @@
-#include "compiler/interprocedural/flow_builtins/flow_builtins.h"
-#include "compiler/interprocedural/flow_calls/flow_calls.h"
-#include "compiler/interprocedural/flow_exprs/flow_exprs.h"
-#include "compiler/interprocedural/flow_stmts/flow_stmts.h"
+#include "compiler/interprocedural/wide_writes/flow_graph/flow_builtins/flow_builtins.h"
+#include "compiler/interprocedural/wide_writes/flow_graph/flow_calls/flow_calls.h"
+#include "compiler/interprocedural/wide_writes/flow_graph/flow_exprs/flow_exprs.h"
+#include "compiler/interprocedural/wide_writes/flow_graph/flow_stmts/flow_stmts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SourceMgr.h"
@@ -48,7 +48,7 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
   Refs results;
   for (const Expr *arg : c->args) {
     this->builder.getFlowCalls().callback(arg, given);
-    if (auto *f = llvm::dyn_cast<FunctionExpr>(FlowExprs::ownExpr(arg))) {
+    if (auto *f = llvm::dyn_cast<FunctionExpr>(this->builder.getFlowExprs().ownExpr(arg))) {
       results.push_back({this->builder.returnNode(f->fn), 0, 0});
     }
   }
@@ -164,9 +164,9 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
     case Builtin::ArrConcat: {
       Refs out = FlowGraphBuilder::copied(receiver);
       for (size_t i = 0; i < args.size(); ++i) {
-        bool array = c->args[i]->type && c->args[i]->type->nonOptional()->isArray();
-        FlowGraphBuilder::append(out, array ? FlowGraphBuilder::copied(args[i])
-                                            : FlowGraphBuilder::holding(args[i]));
+        bool isArray = c->args[i]->type && c->args[i]->type->nonOptional()->isArray();
+        FlowGraphBuilder::append(out, isArray ? FlowGraphBuilder::copied(args[i])
+                                              : FlowGraphBuilder::holding(args[i]));
       }
       return out;
     }

@@ -86,7 +86,7 @@ NumberMethods::ResultStaticCallMade NumberMethods::checkNumberStatic(CallExpr *c
 
 NumberMethods::ResultStaticCallMade
 NumberMethods::noSuchProperty(CallExpr *call, llvm::StringRef name, llvm::StringRef owner) {
-  this->argumentChecker->checkArgsLoosely(call);
+  this->argumentChecker->walkArgsLoosely(call);
   std::string message = ErrorTextNumberStatic::noProperty(name, owner);
 
   return err(NumberMethodsCheckStaticCallError{
@@ -97,7 +97,7 @@ NumberMethods::noSuchProperty(CallExpr *call, llvm::StringRef name, llvm::String
 
 NumberMethods::ResultStaticCallMade NumberMethods::checkStringRaw(CallExpr *call) {
   if (!call->tagged) {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextNumberStatic::rawTag();
 
     return err(NumberMethodsCheckStaticCallError{
@@ -117,14 +117,14 @@ NumberMethods::ResultStaticCallMade NumberMethods::checkStringRaw(CallExpr *call
 }
 
 NumberMethods::ResultStaticCallMade NumberMethods::checkFromCodes(CallExpr *call, Builtin builtin) {
-  bool codeUnits = builtin == Builtin::FromCharCode;
+  bool isCodeUnits = builtin == Builtin::FromCharCode;
   for (Expr *&arg : call->args) {
     arg = this->mathChecker->numericArg(arg);
-    if (!codeUnits && arg->type->isNumeric()) {
+    if (!isCodeUnits && arg->type->isNumeric()) {
       this->walkCodePoint(arg);
     }
-    arg = codeUnits ? this->binaryChecker->toInt32(arg)
-                    : this->typeRelations->convert(arg, Type::doubleTy());
+    arg = isCodeUnits ? this->binaryChecker->toInt32(arg)
+                      : this->typeRelations->convert(arg, Type::doubleTy());
   }
   call->target = BuiltinCall{.builtin = builtin};
   call->type = Type::string();
@@ -145,10 +145,10 @@ NumberMethods::ResultStaticCallMade NumberMethods::checkNumberParse(CallExpr *ca
                                                                     MemberExpr *member) {
   GlobalFunctionChecker::ResultFunctionCalled parsed =
       this->globalFunctionChecker->checkGlobalFunction(call, member->name, member->loc());
-  bool reported =
+  bool isReported =
       parsed.isErr() &&
       parsed.error().code == GlobalFunctionCheckerCheckGlobalFunctionErrorCode::ALREADY_REPORTED;
-  if (reported) {
+  if (isReported) {
     return err(NumberMethodsCheckStaticCallError{
         .code = NumberMethodsCheckStaticCallErrorCode::ALREADY_REPORTED,
         .message = "",
@@ -222,8 +222,8 @@ NumberMethods::ResultConversionMade NumberMethods::checkConversion(CallExpr *cal
     });
   }
   auto *rounding = dyn_cast<CallExpr>(member->object);
-  bool rounded = rounding && BuiltinGroups::isRoundingBuiltin(rounding->builtin());
-  if (from->isFloat() && to->isInteger() && !rounded) {
+  bool isRounded = rounding && BuiltinGroups::isRoundingBuiltin(rounding->builtin());
+  if (from->isFloat() && to->isInteger() && !isRounded) {
     std::string message = ErrorTextConversion::toInteger(text, member->name);
 
     return err(NumberMethodsCheckConversionError{
@@ -241,15 +241,16 @@ NumberMethods::ResultConversionMade NumberMethods::checkConversion(CallExpr *cal
 NumberMethods::ResultMethodCallMade NumberMethods::checkNumberMethod(CallExpr *call,
                                                                      MemberExpr *member) {
   ResultConversionMade converted = this->checkConversion(call, member);
-  bool conversion = converted.isOk() || converted.error().code !=
-                                            NumberMethodsCheckConversionErrorCode::NOT_A_CONVERSION;
-  if (converted.isErr() && conversion) {
+  bool isConversion =
+      converted.isOk() ||
+      converted.error().code != NumberMethodsCheckConversionErrorCode::NOT_A_CONVERSION;
+  if (converted.isErr() && isConversion) {
     return err(NumberMethodsCheckNumberMethodError{
         .code = NumberMethodsCheckNumberMethodErrorCode::CONVERSION_FAILED,
         .message = converted.error().message,
     });
   }
-  if (conversion) {
+  if (isConversion) {
     return ok(converted.value());
   }
   if (member->name == "toString" && call->args.size() == 1) {
@@ -263,7 +264,7 @@ NumberMethods::ResultMethodCallMade NumberMethods::checkNumberMethod(CallExpr *c
   if (member->name == "toFixed") {
     return this->checkToFixed(call, member);
   }
-  this->argumentChecker->checkArgsLoosely(call);
+  this->argumentChecker->walkArgsLoosely(call);
   std::string message =
       ErrorTextNumberMethod::noProperty(member->name, member->object->type->name());
 

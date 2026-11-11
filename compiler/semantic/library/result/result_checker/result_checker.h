@@ -30,7 +30,7 @@ public:
   ResultValueGetsUsed usedValue(const Expr *expr, bool callback = false, llvm::SMLoc at = {});
   void addResultFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) const;
   Expr *markCallFailed(CallExpr *call);
-  void checkArgsLoosely(CallExpr *call);
+  void walkArgsLoosely(CallExpr *call);
 
 private:
   using ResultStaticIsKnown = Result<llvm::StringRef, ResultCheckerStaticMethodError>;

@@ -31,8 +31,8 @@ StreamNewChecker::ResultChunkTypeGiven StreamNewChecker::chunksGiven(const NewEx
                                                                      const Type *expected) {
   const Type *want = expected != nullptr ? expected->nonOptional() : nullptr;
   const ClassDecl *wanted = want != nullptr ? ClassDeclarer::classOf(want) : nullptr;
-  bool fromExpected = wanted != nullptr && wanted->generic() == generic;
-  if (expr->typeArgs.empty() && !fromExpected) {
+  bool isFromExpected = wanted != nullptr && wanted->generic() == generic;
+  if (expr->typeArgs.empty() && !isFromExpected) {
     std::string message = ErrorTextStreamNew::untyped(generic->name);
 
     return err(StreamNewCheckerChunksGivenError{
@@ -56,16 +56,16 @@ Expr *StreamNewChecker::failedNew(NewExpr *expr, const std::string &message) {
 
 Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const Type *expected) {
   llvm::StringRef name = generic->name;
-  bool readable = name == "Readable";
-  bool writable = name == "Writable";
-  bool duplex = name == "Duplex" || name == "Transform" || name == "PassThrough";
-  if (!readable && !writable && !duplex) {
+  bool isReadable = name == "Readable";
+  bool isWritable = name == "Writable";
+  bool isDuplex = name == "Duplex" || name == "Transform" || name == "PassThrough";
+  if (!isReadable && !isWritable && !isDuplex) {
     return nullptr;
   }
   if (this->libraryCalls->inLibrary(expr->loc())) {
     return nullptr;
   }
-  ResultConcreteStream concrete = StreamNewChecker::concreteStream(name, readable, writable);
+  ResultConcreteStream concrete = StreamNewChecker::concreteStream(name, isReadable, isWritable);
   if (concrete.isErr()) {
     return this->failedNew(expr, concrete.error().message);
   }

@@ -221,24 +221,24 @@ Expr *ReflectCallChecker::reportReflectName(CallExpr *call, MemberExpr *member,
 
 Expr *ReflectCallChecker::checkMetadataCall(CallExpr *call, MemberExpr *member,
                                             const Type *expected, MetadataFunction function) {
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, function.min, function.max);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, function.min, function.max);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
-  if (rejected || arity.isErr()) {
+  if (isRejected || arity.isErr()) {
     return call;
   }
-  bool define = function.builtin == Builtin::MetaDefine;
-  MetadataKey key = this->readMetadataKey(call, define);
+  bool isDefine = function.builtin == Builtin::MetaDefine;
+  MetadataKey key = this->readMetadataKey(call, isDefine);
   if (key.failed) {
     return this->checkArgsLoosely(call);
   }
-  if (define) {
+  if (isDefine) {
     this->walkMetadataValue(call, key);
   }
-  this->walkMetadataTarget(call, define ? 2 : 1);
+  this->walkMetadataTarget(call, isDefine ? 2 : 1);
   call->target = BuiltinCall{.builtin = function.builtin};
   call->type = this->metadataResultType(function.builtin, key, expected);
 
@@ -294,10 +294,13 @@ void ReflectCallChecker::walkMetadataValue(CallExpr *call, const MetadataKey &ke
 
 Expr *ReflectCallChecker::coerceKnownMetadata(Expr *value, const MetadataType *known,
                                               const std::string &label) {
-  unsigned before = this->state.getDiagnostics().errorCount();
+  Diagnostics &diagnostics = this->state.getDiagnostics();
   std::string records = ErrorTextMetadataValue::label(label);
+  diagnostics.pushList(DiagnosticRoute::PARENT);
   Expr *coerced = this->typeRelations->coerce(value, known->type, records);
-  if (this->state.getDiagnostics().errorCount() > before) {
+  auto coerceDiagnostics = diagnostics.popList();
+  bool isReachingProgram = diagnostics.getCurrentDestination() == DiagnosticRoute::PROGRAM;
+  if (Diagnostics::hasErrors(coerceDiagnostics) && isReachingProgram) {
     std::string message = ErrorTextMetadataValue::since(label, known->type->name());
     this->state.getDiagnostics().note(known->loc, message);
   }
@@ -335,8 +338,8 @@ const Type *ReflectCallChecker::metadataResultType(Builtin builtin, const Metada
   if (builtin == Builtin::MetaDefine) {
     return Type::voidTy();
   }
-  bool reads = builtin == Builtin::MetaGet || builtin == Builtin::MetaGetOwn;
-  if (!reads) {
+  bool isReading = builtin == Builtin::MetaGet || builtin == Builtin::MetaGetOwn;
+  if (!isReading) {
     return Type::boolTy();
   }
   if (key.key == nullptr) {

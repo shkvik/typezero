@@ -15,7 +15,7 @@ public:
 
   JumpChecker(SemanticState &owner, SemanticParts &all);
 
-  void checkLabeled(LabeledStmt *stmt);
+  void walkLabeled(LabeledStmt *stmt);
   ResultJumpTargeted checkJump(Stmt *stmt);
   void pushTarget(JumpTarget::Kind kind);
 

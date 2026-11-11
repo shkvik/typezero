@@ -87,9 +87,9 @@ Range BytesCheckHelpers::bitAndRange(const Range &a, const Range &b) {
 }
 
 Range BytesCheckHelpers::bitOrRange(BinaryOp op, const Range &a, const Range &b) {
-  bool natural =
+  bool isNatural =
       BytesCheckHelpers::known(a) && BytesCheckHelpers::known(b) && *a.lo >= 0 && *b.lo >= 0;
-  if (!natural) {
+  if (!isNatural) {
     return {};
   }
   int64_t lo = op == BinaryOp::BitOr ? std::max(*a.lo, *b.lo) : 0;
@@ -98,10 +98,10 @@ Range BytesCheckHelpers::bitOrRange(BinaryOp op, const Range &a, const Range &b)
 }
 
 Range BytesCheckHelpers::shiftLeftRange(const Range &a, std::optional<int64_t> count, bool isInt) {
-  bool small = count.has_value() && BytesCheckHelpers::known(a) && *count >= 0 &&
-               *count < (isInt ? 32 : 64) && *count < 40 && *a.lo > -(int64_t(1) << 40) &&
-               *a.hi < (int64_t(1) << 40);
-  if (!small) {
+  bool isSmall = count.has_value() && BytesCheckHelpers::known(a) && *count >= 0 &&
+                 *count < (isInt ? 32 : 64) && *count < 40 && *a.lo > -(int64_t(1) << 40) &&
+                 *a.hi < (int64_t(1) << 40);
+  if (!isSmall) {
     return {};
   }
   int64_t factor = int64_t(1) << *count;
@@ -168,11 +168,11 @@ Range BytesCheckHelpers::divisionRange(const Range &a, std::optional<int64_t> co
 }
 
 Range BytesCheckHelpers::arithmeticRange(BinaryOp op, const Range &a, const Range &b) {
-  bool exact = BytesCheckHelpers::known(a) && BytesCheckHelpers::known(b);
-  if (op != BinaryOp::Mul && !exact) {
+  bool isExact = BytesCheckHelpers::known(a) && BytesCheckHelpers::known(b);
+  if (op != BinaryOp::Mul && !isExact) {
     return BytesCheckHelpers::openSumRange(op, a, b);
   }
-  if (!exact) {
+  if (!isExact) {
     return {};
   }
 
@@ -180,17 +180,17 @@ Range BytesCheckHelpers::arithmeticRange(BinaryOp op, const Range &a, const Rang
 }
 
 Range BytesCheckHelpers::openSumRange(BinaryOp op, const Range &a, const Range &b) {
-  bool add = op == BinaryOp::Add;
-  const std::optional<int64_t> &low = add ? b.lo : b.hi;
-  const std::optional<int64_t> &high = add ? b.hi : b.lo;
+  bool isAdd = op == BinaryOp::Add;
+  const std::optional<int64_t> &low = isAdd ? b.lo : b.hi;
+  const std::optional<int64_t> &high = isAdd ? b.hi : b.lo;
   Range r;
   int64_t v = 0;
   if (a.lo.has_value() && low.has_value() &&
-      !(add ? llvm::AddOverflow(*a.lo, *low, v) : llvm::SubOverflow(*a.lo, *low, v))) {
+      !(isAdd ? llvm::AddOverflow(*a.lo, *low, v) : llvm::SubOverflow(*a.lo, *low, v))) {
     r.lo = v;
   }
   if (a.hi.has_value() && high.has_value() &&
-      !(add ? llvm::AddOverflow(*a.hi, *high, v) : llvm::SubOverflow(*a.hi, *high, v))) {
+      !(isAdd ? llvm::AddOverflow(*a.hi, *high, v) : llvm::SubOverflow(*a.hi, *high, v))) {
     r.hi = v;
   }
 
@@ -205,10 +205,10 @@ Range BytesCheckHelpers::cornersRange(BinaryOp op, const Range &a, const Range &
   for (int64_t x : xs) {
     for (int64_t y : ys) {
       int64_t v = 0;
-      bool overflow = op == BinaryOp::Add   ? llvm::AddOverflow(x, y, v)
-                      : op == BinaryOp::Sub ? llvm::SubOverflow(x, y, v)
-                                            : llvm::MulOverflow(x, y, v);
-      if (overflow) {
+      bool isOverflow = op == BinaryOp::Add   ? llvm::AddOverflow(x, y, v)
+                        : op == BinaryOp::Sub ? llvm::SubOverflow(x, y, v)
+                                              : llvm::MulOverflow(x, y, v);
+      if (isOverflow) {
         return {};
       }
       lo = std::min(lo, v);
@@ -317,9 +317,9 @@ std::string BytesCheckHelpers::wrapHint(Bytes kind, const std::string &value) {
 
 Range BytesCheckHelpers::operate(BinaryOp op, const Range &a, const Range &b, bool isInt) {
   Range r = BytesCheckHelpers::operateWide(op, a, b, isInt);
-  bool bitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor ||
-                 op == BinaryOp::Shl || op == BinaryOp::Shr;
-  if (isInt && bitwise && !BytesCheckHelpers::known(r)) {
+  bool isBitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor ||
+                   op == BinaryOp::Shl || op == BinaryOp::Shr;
+  if (isInt && isBitwise && !BytesCheckHelpers::known(r)) {
     return {kInt32Min, kInt32Max};
   }
 
@@ -354,9 +354,9 @@ bool BytesCheckHelpers::numberMethod(llvm::StringRef name, bool dataView, Number
     if (rest != n) {
       continue;
     }
-    bool floatName = n == "Float" || n == "Double";
-    bool dataViewName = n.starts_with("Float") && !floatName;
-    if ((dataView && (floatName || n.starts_with("UInt"))) || (!dataView && dataViewName)) {
+    bool isFloatName = n == "Float" || n == "Double";
+    bool isDataViewName = n.starts_with("Float") && !isFloatName;
+    if ((dataView && (isFloatName || n.starts_with("UInt"))) || (!dataView && isDataViewName)) {
       return false;
     }
     m.kind = kind;

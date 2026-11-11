@@ -57,8 +57,8 @@ SwitchChecker::ResultValueComparable SwitchChecker::valueType(const Type *type) 
 SwitchChecker::ResultTestsComparable SwitchChecker::caseType(const Type *type,
                                                              const Type *testType) {
   const Type *common = TypeRelations::comparisonType(type, testType);
-  bool results = type->holdsResults() || testType->holdsResults();
-  if (!common && results) {
+  bool hasResults = type->holdsResults() || testType->holdsResults();
+  if (!common && hasResults) {
     std::string message = ErrorTextCaseType::results(testType->name(), type->name());
 
     return err(SwitchCheckerCaseTypeError{
@@ -96,7 +96,7 @@ SwitchChecker::casesHandled(const SwitchStmt *stmt, llvm::ArrayRef<const Type *>
   return ok(stmt);
 }
 
-void SwitchChecker::checkSwitch(SwitchStmt *stmt) {
+void SwitchChecker::walkSwitch(SwitchStmt *stmt) {
   stmt->discriminant = this->exprChecker->checkExpr(stmt->discriminant);
   const Type *type = stmt->discriminant->type;
   ResultValueComparable comparable = SwitchChecker::valueType(type);
@@ -179,10 +179,10 @@ void SwitchChecker::walkTypeOfCase(const SwitchStmt *stmt, const SwitchCase &c) 
 void SwitchChecker::addCaseFacts(SwitchStmt *stmt, SwitchCase &c, const Type *type, Flow &whenTrue,
                                  Flow &whenFalse) {
   const Type *testType = c.test->type;
-  bool generic = type->nonOptional()->isParam() || testType->nonOptional()->isParam();
-  bool comparable =
-      !generic && !type->isError() && !testType->isError() && !testType->isUndefined();
-  if (comparable) {
+  bool isGeneric = type->nonOptional()->isParam() || testType->nonOptional()->isParam();
+  bool isComparable =
+      !isGeneric && !type->isError() && !testType->isError() && !testType->isUndefined();
+  if (isComparable) {
     return this->addComparedFacts(stmt, c, type, whenTrue, whenFalse);
   }
   if (!testType->isUndefined() || !isa<UndefinedExpr>(c.test)) {
@@ -207,11 +207,11 @@ void SwitchChecker::addComparedFacts(SwitchStmt *stmt, SwitchCase &c, const Type
   if (common->nonOptional()->isFunction()) {
     this->state.getInventoryStore().markComparesFunctions();
   }
-  bool constant =
+  bool isConstant =
       SwitchChecker::isConstantTest(c.test) && !SwitchChecker::isConstantTest(stmt->discriminant);
   c.test = this->typeRelations->convert(c.test, common);
   c.compareType = common;
-  if (!constant) {
+  if (!isConstant) {
     return;
   }
   Expr *discriminant = this->typeRelations->convert(stmt->discriminant, common);
@@ -248,7 +248,7 @@ Flow SwitchChecker::caseBodiesExit(SwitchStmt *stmt, const SwitchFlows &flows,
     this->state.getFlowState().replaceFlow(FlowChecker::join(fallthrough, entry));
     for (Stmt *s : c.body) {
       this->state.getBlockPosition().rememberBlockPosition(all, position++);
-      this->stmtChecker->checkStmt(s);
+      this->stmtChecker->walkStmt(s);
     }
     fallthrough = this->state.getFlowState().getFlow();
     this->rememberCaseVars(c);

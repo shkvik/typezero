@@ -40,9 +40,9 @@ void MetadataWriters::rememberWriter(FunctionDecl *fn, const Expr *expr) {
   auto *call = dyn_cast<CallExpr>(expr);
   auto *member = call ? dyn_cast<MemberExpr>(call->callee) : nullptr;
   auto *object = member ? dyn_cast<NameExpr>(member->object) : nullptr;
-  bool defines = object && object->name == "Reflect" && member->name == "defineMetadata" &&
-                 !call->args.empty();
-  if (!defines) {
+  bool isDefining = object && object->name == "Reflect" && member->name == "defineMetadata" &&
+                    !call->args.empty();
+  if (!isDefining) {
     return;
   }
   if (auto *key = dyn_cast<NameExpr>(call->args[0])) {

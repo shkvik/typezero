@@ -57,8 +57,8 @@ std::optional<std::u16string> BytesNewChecker::literalText(const Expr *e) {
 bool BytesNewChecker::mayBeFatal(const Expr *options) {
   std::vector<bool> answers;
   for (const Expr *node : ChildrenFirst::order(options, BytesNewChecker::spreadOptions)) {
-    bool fatal = BytesNewChecker::nodeMayBeFatal(node, answers);
-    answers.push_back(fatal);
+    bool isFatal = BytesNewChecker::nodeMayBeFatal(node, answers);
+    answers.push_back(isFatal);
   }
 
   return answers.back();
@@ -91,17 +91,17 @@ bool BytesNewChecker::nodeMayBeFatal(const Expr *options, std::vector<bool> &ans
   size_t spreadCount = BytesNewChecker::spreadOptions(options).size();
   std::vector<bool> spreads = ChildrenFirst::takeAnswers(answers, spreadCount);
   size_t nextSpread = 0;
-  bool fatal = false;
+  bool isFatal = false;
   for (const ObjectLitExpr::Property &prop : literal->props) {
     if (prop.spread()) {
-      fatal = fatal || spreads[nextSpread];
+      isFatal = isFatal || spreads[nextSpread];
       nextSpread += 1;
     } else if (prop.name == "fatal") {
-      fatal = BytesNewChecker::fatalFlag(prop.value);
+      isFatal = BytesNewChecker::fatalFlag(prop.value);
     }
   }
 
-  return fatal;
+  return isFatal;
 }
 
 bool BytesNewChecker::fatalFlag(const Expr *value) {
@@ -245,7 +245,7 @@ void BytesNewChecker::walkView(CallExpr *call, int64_t elementSize, const std::s
   }
   const Expr *offset = call->args.size() > 1 ? call->args[1] : nullptr;
   const Expr *length = call->args.size() > 2 ? call->args[2] : nullptr;
-  this->byteProofs->checkView(call->args[0], offset, length, elementSize, what);
+  this->byteProofs->walkView(call->args[0], offset, length, elementSize, what);
 }
 
 Expr *BytesNewChecker::checkArrayBufferNew(NewExpr *expr, CallExpr *call, const Type *type) {
@@ -300,16 +300,16 @@ Expr *BytesNewChecker::checkTextDecoderNew(CallExpr *call, const Type *type) {
     return call;
   }
   std::vector<Expr *> checked{resolved, *label};
-  bool fatal = false;
+  bool isFatal = false;
   if (call->args.size() == 2) {
     const Type *options = BytesNewChecker::decoderOptionsType();
     Expr *given = this->exprChecker->checkExpr(call->args[1], options);
-    fatal = BytesNewChecker::mayBeFatal(given);
+    isFatal = BytesNewChecker::mayBeFatal(given);
     std::string what = ErrorTextTextDecoder::options();
     checked.push_back(this->typeRelations->coerce(given, options, what));
   }
   call->args = checked;
-  const Type *decoder = fatal ? Type::bytesType(Bytes::FatalTextDecoder) : type;
+  const Type *decoder = isFatal ? Type::bytesType(Bytes::FatalTextDecoder) : type;
 
   return BytesNewChecker::madeBuiltin(call, Builtin::TextDecoderNew, decoder);
 }
@@ -320,8 +320,8 @@ const Type *BytesNewChecker::decoderOptionsType() {
 }
 
 std::optional<Expr *> BytesNewChecker::checkDecoderLabelArg(CallExpr *call, IntLitExpr *resolved) {
-  bool given = !call->args.empty() && !isa<UndefinedExpr>(call->args[0]);
-  if (!given) {
+  bool isGiven = !call->args.empty() && !isa<UndefinedExpr>(call->args[0]);
+  if (!isGiven) {
     if (!call->args.empty()) {
       call->args[0] = this->exprChecker->checkExpr(call->args[0]);
     }
@@ -359,9 +359,9 @@ std::optional<std::u16string> BytesNewChecker::knownDecoderName(const Expr *labe
 }
 
 bool BytesNewChecker::decoderLabelsFit(const Expr *checked, llvm::SMLoc at) {
-  bool skipped = this->state.getBytesStore().isInsideDecoderParse() || checked->type->isError() ||
-                 this->indexProofs->exempt(at);
-  if (skipped) {
+  bool isSkipped = this->state.getBytesStore().isInsideDecoderParse() || checked->type->isError() ||
+                   this->indexProofs->exempt(at);
+  if (isSkipped) {
     return true;
   }
   std::optional<std::vector<std::string>> labels = this->literalTypes->knownTexts(checked);
@@ -455,9 +455,9 @@ Expr *BytesNewChecker::checkBytesValues(CallExpr *call, ArrayLitExpr *lit, const
       type->bytes() == Type::Bytes::Uint8Clamped ? Type::intTy() : type->elementType();
   std::string what = ErrorTextByteView::element(type->name());
   call->type = Type::error();
-  bool spreads =
+  bool isSpreading =
       llvm::any_of(lit->elements, [](const ArrayLitExpr::Element &e) { return e.spread; });
-  if (!spreads) {
+  if (!isSpreading) {
     std::vector<Expr *> values;
     for (ArrayLitExpr::Element &e : lit->elements) {
       if (e.hole) {
@@ -481,7 +481,7 @@ Expr *BytesNewChecker::checkBytesValues(CallExpr *call, ArrayLitExpr *lit, const
   if (array->type->isError()) {
     return call;
   }
-  bool ok = true;
+  bool isOk = true;
   for (const ArrayLitExpr::Element &e : lit->elements) {
     if (!e.spread) {
       ByteProofs::ResultValueFitsType fitting = this->byteProofs->valueFits(e.expr, type, what);
@@ -489,10 +489,10 @@ Expr *BytesNewChecker::checkBytesValues(CallExpr *call, ArrayLitExpr *lit, const
         this->state.getDiagnostics().error(e.expr->loc(), fitting.error().message);
       }
     } else {
-      ok &= this->checkBytesSource(e.expr, type);
+      isOk &= this->checkBytesSource(e.expr, type);
     }
   }
-  if (!ok) {
+  if (!isOk) {
     return call;
   }
   call->args = {array};

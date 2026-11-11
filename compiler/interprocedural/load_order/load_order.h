@@ -45,20 +45,20 @@ private:
   using ResultReadAfterSet = Result<const NameExpr *, LoadOrderEarlyReadError>;
   using ResultSetBeforeRun = Result<const FunctionDecl *, LoadOrderLateUseError>;
 
-  static void spreadEffects(LoadState &loadState);
-  static std::string calleeName(const FunctionDecl *fn);
-  static void need(const FunctionDecl *fn, LoadState &loadState);
-  static const FunctionDecl *directFunction(const Expr *expr);
-  static void functionEffects(const FunctionDecl *fn, LoadState &loadState);
-  static void declarationOrder(SourceFile &program, LoadState &loadState);
-  static void calledFunctions(const CallExpr *call,
-                              llvm::SmallVectorImpl<const FunctionDecl *> &called);
-  static const CallExpr *constructorCall(const Expr *expr,
-                                         llvm::SmallVectorImpl<const FunctionDecl *> &called);
-  static ResultReadAfterSet earlyRead(const NameExpr *name, const Module *module, int time,
-                                      const LoadState &loadState);
-  static ResultSetBeforeRun lateUse(const Site &site, const FunctionDecl *fn, const Use &use,
-                                    const LoadState &loadState);
+  void spreadEffects(LoadState &loadState) const;
+  std::string calleeName(const FunctionDecl *fn) const;
+  void need(const FunctionDecl *fn, LoadState &loadState) const;
+  const FunctionDecl *directFunction(const Expr *expr) const;
+  void functionEffects(const FunctionDecl *fn, LoadState &loadState) const;
+  void declarationOrder(SourceFile &program, LoadState &loadState) const;
+  void calledFunctions(const CallExpr *call,
+                       llvm::SmallVectorImpl<const FunctionDecl *> &called) const;
+  const CallExpr *constructorCall(const Expr *expr,
+                                  llvm::SmallVectorImpl<const FunctionDecl *> &called) const;
+  ResultReadAfterSet earlyRead(const NameExpr *name, const Module *module, int time,
+                               const LoadState &loadState) const;
+  ResultSetBeforeRun lateUse(const Site &site, const FunctionDecl *fn, const Use &use,
+                             const LoadState &loadState) const;
 
   std::vector<Diagnostic> findLateUses(const LoadState &loadState) const;
   std::vector<Diagnostic> topLevelUses(SourceFile &program, LoadState &loadState) const;

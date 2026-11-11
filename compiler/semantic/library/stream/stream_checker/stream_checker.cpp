@@ -69,10 +69,10 @@ Expr *StreamChecker::checkStreamIntrinsic(CallExpr *call, NameExpr *name, const 
 }
 
 Expr *StreamChecker::checkChunkIntrinsic(CallExpr *call, const Type *typeArg) {
-  bool chunk = call->builtin() == Builtin::LibChunk;
+  bool isChunk = call->builtin() == Builtin::LibChunk;
   call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::unknown());
-  call->type = chunk ? typeArg : Type::boolTy();
-  if (!chunk) {
+  call->type = isChunk ? typeArg : Type::boolTy();
+  if (!isChunk) {
     Expr *witness = this->state.getAst().make<UndefinedExpr>(call->loc());
     witness->type = typeArg;
     call->args.push_back(witness);
@@ -259,7 +259,7 @@ Expr *StreamChecker::streamChunkArg(Expr *arg, const Type *chunk, bool eof, bool
   if (type->isError()) {
     return arg;
   }
-  bool onlyStrings = writing && chunk->isString();
+  bool isOnlyStrings = writing && chunk->isString();
   auto fits = [&](const Type *t) {
     if (t->isLiteral()) {
       t = t->literalBase();
@@ -268,13 +268,13 @@ Expr *StreamChecker::streamChunkArg(Expr *arg, const Type *chunk, bool eof, bool
       return true;
     }
 
-    return !onlyStrings && (t->isBuffer() || t->bytes() == Type::Bytes::Uint8);
+    return !isOnlyStrings && (t->isBuffer() || t->bytes() == Type::Bytes::Uint8);
   };
   const Type *value = type;
-  bool ok = value->isUnion() ? llvm::all_of(value->members(), fits) : fits(value);
-  if (!ok) {
+  bool isOk = value->isUnion() ? llvm::all_of(value->members(), fits) : fits(value);
+  if (!isOk) {
     std::string message =
-        ErrorTextStreamCall::chunk(method, chunk->name(), onlyStrings, type->name());
+        ErrorTextStreamCall::chunk(method, chunk->name(), isOnlyStrings, type->name());
     this->state.getDiagnostics().error(arg->loc(), message);
     return arg;
   }
@@ -321,10 +321,10 @@ Expr *StreamChecker::reportPipe(CallExpr *call, MemberExpr *member) {
 Expr *StreamChecker::checkStreamData(CallExpr *call, MemberExpr *member, ClassDecl *cls,
                                      StreamMethod method) {
   StreamChunks chunks = this->chunkTypes->streamChunksOf(cls);
-  bool reading = method == StreamMethod::PUSH || method == StreamMethod::UNSHIFT;
-  const Type *chunk = reading ? chunks.readable : chunks.writable;
+  bool isReading = method == StreamMethod::PUSH || method == StreamMethod::UNSHIFT;
+  const Type *chunk = isReading ? chunks.readable : chunks.writable;
   const Type *receiver = member->object->type;
-  ResultStreamSideOk side = StreamChecker::streamSide(chunk, receiver, member->name, reading);
+  ResultStreamSideOk side = StreamChecker::streamSide(chunk, receiver, member->name, isReading);
   if (side.isErr()) {
     this->state.getDiagnostics().error(member->loc(), side.error().message);
     this->walkArgsFrom(call, 0);
@@ -338,7 +338,7 @@ Expr *StreamChecker::checkStreamData(CallExpr *call, MemberExpr *member, ClassDe
       .method = method,
       .chunk = chunk,
   };
-  if (reading) {
+  if (isReading) {
     return this->checkStreamRead(stream);
   }
   if (method == StreamMethod::WRITE) {
@@ -482,9 +482,9 @@ Expr *StreamChecker::checkStreamEnd(StreamCall &stream) {
   auto *given = this->state.getAst().make<BoolLitExpr>(loc, chunkArg != nullptr);
   args.push_back(this->exprChecker->checkExpr(given));
   if (chunkArg != nullptr) {
-    bool checked = stream.checked.contains(chunkArg);
+    bool isChecked = stream.checked.contains(chunkArg);
     args.push_back(
-        this->streamChunkArg(chunkArg, stream.chunk, false, true, member->name, checked));
+        this->streamChunkArg(chunkArg, stream.chunk, false, true, member->name, isChecked));
   } else {
     args.push_back(this->undefinedOf(loc, Type::unknown()));
   }

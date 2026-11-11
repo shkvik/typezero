@@ -44,9 +44,10 @@ LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool negated)
     }
     expected = expected->nonOptional();
   }
-  bool exact = expected && (expected->isNumeric() || expected->isDecimal());
-  bool tooBig = exact && expected->isInteger() && !LiteralChecker::fitsIn(lit, expected, negated);
-  if (exact) {
+  bool isExact = expected && (expected->isNumeric() || expected->isDecimal());
+  bool isTooBig =
+      isExact && expected->isInteger() && !LiteralChecker::fitsIn(lit, expected, negated);
+  if (isExact) {
     lit->type = expected;
   } else if (LiteralChecker::fitsIn(lit, Type::intTy(), negated)) {
     lit->type = Type::intTy();
@@ -63,7 +64,7 @@ LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool negated)
       lit->type = type;
     }
   }
-  if (tooBig) {
+  if (isTooBig) {
     std::string message = ErrorTextIntLit::tooBig(expected->name());
 
     return err(LiteralCheckerCheckIntLitError{
@@ -77,7 +78,7 @@ LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool negated)
 
 Expr *LiteralChecker::checkTemplate(TemplateExpr *tmpl, const Type *expected) {
   std::vector<const Type *> parts;
-  bool constant = true;
+  bool isConstant = true;
   for (Expr *&e : tmpl->exprs) {
     e = this->exprChecker->checkExpr(e);
     const Expr *part = e;
@@ -85,8 +86,8 @@ Expr *LiteralChecker::checkTemplate(TemplateExpr *tmpl, const Type *expected) {
       part = conv->operand;
     }
     parts.push_back(part->type);
-    constant &= isa<NameExpr>(part) || isa<StringLitExpr>(part) || isa<IntLitExpr>(part) ||
-                isa<BoolLitExpr>(part);
+    isConstant &= isa<NameExpr>(part) || isa<StringLitExpr>(part) || isa<IntLitExpr>(part) ||
+                  isa<BoolLitExpr>(part);
     e = this->concatChecker->toStringOperand(e);
   }
   tmpl->type = Type::string();
@@ -115,7 +116,7 @@ Expr *LiteralChecker::checkTemplate(TemplateExpr *tmpl, const Type *expected) {
   if (type->isPattern() ||
       (type->typeOp() == TypeOp::Template && TypeRelations::isImplicitlyConvertible(type, want))) {
     tmpl->type = type;
-  } else if (type->isStringLiteral() && constant) {
+  } else if (type->isStringLiteral() && isConstant) {
     auto *literal = this->state.getAst().make<StringLitExpr>(tmpl->loc(), type->literalText());
     literal->type = type;
     return literal;

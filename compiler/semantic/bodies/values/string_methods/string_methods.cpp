@@ -61,7 +61,7 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
   ResultStringMethod found = StringMethods::stringMethod(member->name);
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
   const StringMethodInfo *method = found.value();

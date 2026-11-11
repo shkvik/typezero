@@ -41,7 +41,7 @@ private:
   Expr *okOf(Expr *value);
   const Type *reflectError();
   ResultConstructible constructible(ClassDecl *cls, llvm::ArrayRef<const Type *> args);
-  void checkReflectNews();
+  void walkReflectNews();
   static void markReflectMethods(ClassDecl *cls);
 
   struct ReflectGet {

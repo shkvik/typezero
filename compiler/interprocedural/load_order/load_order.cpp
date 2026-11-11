@@ -9,7 +9,7 @@ using llvm::isa;
 
 namespace tz {
 
-const FunctionDecl *LoadOrder::directFunction(const Expr *expr) {
+const FunctionDecl *LoadOrder::directFunction(const Expr *expr) const {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     expr = conv->operand;
   }
@@ -33,7 +33,7 @@ const FunctionDecl *LoadOrder::directFunction(const Expr *expr) {
 }
 
 void LoadOrder::calledFunctions(const CallExpr *call,
-                                llvm::SmallVectorImpl<const FunctionDecl *> &called) {
+                                llvm::SmallVectorImpl<const FunctionDecl *> &called) const {
   if (call->func() && call->func()->decl) {
     called.push_back(call->func()->decl);
   } else if (call->method()) {
@@ -41,18 +41,18 @@ void LoadOrder::calledFunctions(const CallExpr *call,
   }
   for (const UnionMethod &m : call->unionMethods()) {
     const FunctionDecl *direct =
-        !m.method && call->callee ? LoadOrder::directFunction(call->callee) : nullptr;
+        !m.method && call->callee ? this->directFunction(call->callee) : nullptr;
     if (m.method) {
       called.push_back(m.method->decl);
     } else if (direct) {
       called.push_back(direct);
     }
   }
-  bool arrayCallback =
+  bool isArrayCallback =
       call->builtin() >= Builtin::ArrForEach && call->builtin() <= Builtin::ArrSortWith;
-  if (arrayCallback || BuiltinGroups::isResultCallback(call->builtin())) {
+  if (isArrayCallback || BuiltinGroups::isResultCallback(call->builtin())) {
     for (const Expr *arg : call->args) {
-      const FunctionDecl *fn = LoadOrder::directFunction(arg);
+      const FunctionDecl *fn = this->directFunction(arg);
       if (fn) {
         called.push_back(fn);
       }
@@ -60,8 +60,9 @@ void LoadOrder::calledFunctions(const CallExpr *call,
   }
 }
 
-const CallExpr *LoadOrder::constructorCall(const Expr *expr,
-                                           llvm::SmallVectorImpl<const FunctionDecl *> &called) {
+const CallExpr *
+LoadOrder::constructorCall(const Expr *expr,
+                           llvm::SmallVectorImpl<const FunctionDecl *> &called) const {
   auto *create = dyn_cast<NewExpr>(expr);
   if (!create || !create->cls() || !create->ctor()) {
     return nullptr;
@@ -76,7 +77,7 @@ const CallExpr *LoadOrder::constructorCall(const Expr *expr,
   return called.empty() ? nullptr : create->ctor();
 }
 
-std::string LoadOrder::calleeName(const FunctionDecl *fn) {
+std::string LoadOrder::calleeName(const FunctionDecl *fn) const {
   const ClassDecl *cls = fn->cls();
   if (!cls) {
     return ErrorTextLateUse::function(fn->name);
@@ -88,14 +89,14 @@ std::string LoadOrder::calleeName(const FunctionDecl *fn) {
   return ErrorTextLateUse::method(cls->name, fn->name);
 }
 
-void LoadOrder::need(const FunctionDecl *fn, LoadState &loadState) {
-  bool added = loadState.effects.try_emplace(fn).second;
-  if (added) {
+void LoadOrder::need(const FunctionDecl *fn, LoadState &loadState) const {
+  auto [_, isAdded] = loadState.effects.try_emplace(fn);
+  if (isAdded) {
     loadState.queue.push_back(fn);
   }
 }
 
-void LoadOrder::declarationOrder(SourceFile &program, LoadState &loadState) {
+void LoadOrder::declarationOrder(SourceFile &program, LoadState &loadState) const {
   int count = 0;
   for (Module *module : program.modules) {
     for (Stmt *item : module->file.items) {
@@ -115,12 +116,12 @@ void LoadOrder::declarationOrder(SourceFile &program, LoadState &loadState) {
 }
 
 LoadOrder::ResultReadAfterSet LoadOrder::earlyRead(const NameExpr *name, const Module *module,
-                                                   int time, const LoadState &loadState) {
+                                                   int time, const LoadState &loadState) const {
   const VarSymbol *var = name->var();
   auto found = var ? loadState.setAt.find(var) : loadState.setAt.end();
-  bool early = found != loadState.setAt.end() && found->second > time;
-  Module *home = early ? loadState.homes.lookup(var) : nullptr;
-  if (early && home == module) {
+  bool isEarly = found != loadState.setAt.end() && found->second > time;
+  Module *home = isEarly ? loadState.homes.lookup(var) : nullptr;
+  if (isEarly && home == module) {
     std::string message = ErrorTextEarlyRead::sameFile(name->name);
 
     return err(LoadOrderEarlyReadError{
@@ -142,7 +143,7 @@ std::vector<Diagnostic> LoadOrder::visitTopLevel(const std::vector<const Expr *>
       this->rememberSite(e, module, time, loadState);
       continue;
     }
-    auto read = LoadOrder::earlyRead(name, module, time, loadState);
+    auto read = this->earlyRead(name, module, time, loadState);
     if (read.isErr()) {
       earlyReads.push_back({
           .kind = llvm::SourceMgr::DK_Error,
@@ -157,20 +158,20 @@ std::vector<Diagnostic> LoadOrder::visitTopLevel(const std::vector<const Expr *>
 
 void LoadOrder::rememberSite(const Expr *e, Module *module, int time, LoadState &loadState) const {
   llvm::SmallVector<const FunctionDecl *, 2> constructed;
-  const CallExpr *ctor = LoadOrder::constructorCall(e, constructed);
+  const CallExpr *ctor = this->constructorCall(e, constructed);
   const CallExpr *call = ctor ? ctor : dyn_cast<CallExpr>(e);
   if (!call) {
     return;
   }
   Site site{.time = time, .module = module, .call = call, .called = constructed};
   if (constructed.empty()) {
-    LoadOrder::calledFunctions(call, site.called);
+    this->calledFunctions(call, site.called);
   }
   if (site.called.empty()) {
     return;
   }
   for (const FunctionDecl *fn : site.called) {
-    LoadOrder::need(fn, loadState);
+    this->need(fn, loadState);
   }
   loadState.sites.push_back(std::move(site));
 }
@@ -206,24 +207,24 @@ std::vector<Diagnostic> LoadOrder::topLevelUses(SourceFile &program, LoadState &
   return earlyReads;
 }
 
-void LoadOrder::functionEffects(const FunctionDecl *fn, LoadState &loadState) {
+void LoadOrder::functionEffects(const FunctionDecl *fn, LoadState &loadState) const {
   Effects own;
   auto visit = [&](const Expr *e) {
     auto *name = dyn_cast<NameExpr>(e);
     auto *call = dyn_cast<CallExpr>(e);
     if (name) {
       auto found = name->var() ? loadState.setAt.find(name->var()) : loadState.setAt.end();
-      bool later = found != loadState.setAt.end() && found->second > own.latest.setAt;
-      if (later) {
+      bool isLater = found != loadState.setAt.end() && found->second > own.latest.setAt;
+      if (isLater) {
         own.latest = Use{.setAt = found->second, .loc = name->loc(), .var = name->var()};
       }
       return;
     }
     llvm::SmallVector<const FunctionDecl *, 2> called;
     if (call) {
-      LoadOrder::calledFunctions(call, called);
+      this->calledFunctions(call, called);
     } else {
-      LoadOrder::constructorCall(e, called);
+      this->constructorCall(e, called);
     }
     own.calls.insert(own.calls.end(), called.begin(), called.end());
   };
@@ -238,21 +239,21 @@ void LoadOrder::functionEffects(const FunctionDecl *fn, LoadState &loadState) {
     visit(e);
   }
   for (const FunctionDecl *callee : own.calls) {
-    LoadOrder::need(callee, loadState);
+    this->need(callee, loadState);
   }
   loadState.effects[fn] = std::move(own);
 }
 
-void LoadOrder::spreadEffects(LoadState &loadState) {
-  bool changed = true;
-  while (changed) {
-    changed = false;
+void LoadOrder::spreadEffects(LoadState &loadState) const {
+  bool hasChanged = true;
+  while (hasChanged) {
+    hasChanged = false;
     for (auto &entry : loadState.effects) {
       for (const FunctionDecl *callee : entry.second.calls) {
         const Use &theirs = loadState.effects.find(callee)->second.latest;
         if (theirs.setAt > entry.second.latest.setAt) {
           entry.second.latest = theirs;
-          changed = true;
+          hasChanged = true;
         }
       }
     }
@@ -260,11 +261,11 @@ void LoadOrder::spreadEffects(LoadState &loadState) {
 }
 
 LoadOrder::ResultSetBeforeRun LoadOrder::lateUse(const Site &site, const FunctionDecl *fn,
-                                                 const Use &use, const LoadState &loadState) {
-  bool late = use.var && use.setAt > site.time;
-  Module *home = late ? loadState.homes.lookup(use.var) : nullptr;
-  if (late && home == site.module) {
-    std::string callee = LoadOrder::calleeName(fn);
+                                                 const Use &use, const LoadState &loadState) const {
+  bool isLate = use.var && use.setAt > site.time;
+  Module *home = isLate ? loadState.homes.lookup(use.var) : nullptr;
+  if (isLate && home == site.module) {
+    std::string callee = this->calleeName(fn);
     std::string message = ErrorTextLateUse::sameFile(callee, use.var->name);
 
     return err(LoadOrderLateUseError{
@@ -272,8 +273,8 @@ LoadOrder::ResultSetBeforeRun LoadOrder::lateUse(const Site &site, const Functio
         .message = message,
     });
   }
-  if (late) {
-    std::string callee = LoadOrder::calleeName(fn);
+  if (isLate) {
+    std::string callee = this->calleeName(fn);
     std::string chain = LoadChain::describe(site.module, home);
     std::string message =
         ErrorTextLateUse::otherFile(site.module->name, callee, use.var->name, home->name, chain);
@@ -292,7 +293,7 @@ std::vector<Diagnostic> LoadOrder::findLateUses(const LoadState &loadState) cons
   for (const Site &site : loadState.sites) {
     for (const FunctionDecl *fn : site.called) {
       const Use &use = loadState.effects.find(fn)->second.latest;
-      ResultSetBeforeRun used = LoadOrder::lateUse(site, fn, use, loadState);
+      ResultSetBeforeRun used = this->lateUse(site, fn, use, loadState);
       if (used.isOk()) {
         continue;
       }
@@ -322,13 +323,13 @@ std::vector<Diagnostic> LoadOrder::findLateUses(const LoadState &loadState) cons
 
 LoadOrder::ResultLoadOrderChecked LoadOrder::checkLoadOrder(SourceFile &program) const {
   LoadState loadState;
-  LoadOrder::declarationOrder(program, loadState);
+  this->declarationOrder(program, loadState);
   auto earlyReads = this->topLevelUses(program, loadState);
   for (size_t i = 0; i < loadState.queue.size(); ++i) {
     const FunctionDecl *fn = loadState.queue[i];
-    LoadOrder::functionEffects(fn, loadState);
+    this->functionEffects(fn, loadState);
   }
-  LoadOrder::spreadEffects(loadState);
+  this->spreadEffects(loadState);
   auto lateUses = this->findLateUses(loadState);
 
   auto found = std::vector<Diagnostic>();

@@ -60,12 +60,12 @@ void RecordLiteralChecker::reportSpread(const ObjectLitExpr::Property &prop,
 
 Expr *RecordLiteralChecker::checkRecordLit(ObjectLitExpr *lit, const Type *record) {
   const Type *value = record->valueType();
-  bool typed = true;
+  bool isTyped = true;
   for (ObjectLitExpr::Property &prop : lit->props) {
     ResultPlainProperty plain = RecordLiteralChecker::plainProperty(prop);
     if (plain.isErr()) {
       this->state.getDiagnostics().error(prop.loc, plain.error().message);
-      typed = false;
+      isTyped = false;
     }
     if (prop.defaulted()) {
       prop.value = cast<AssignExpr>(prop.value)->value;
@@ -79,13 +79,13 @@ Expr *RecordLiteralChecker::checkRecordLit(ObjectLitExpr *lit, const Type *recor
       prop.value = this->exprChecker->checkExpr(prop.value, record);
       const Type *type = prop.value->type;
       if (type->isError()) {
-        typed = false;
+        isTyped = false;
         continue;
       }
       ResultSpreadIntoMap spread = this->checkRecordSpread(prop, value);
       if (spread.isErr()) {
         this->reportSpread(prop, spread);
-        typed = false;
+        isTyped = false;
       }
       continue;
     }
@@ -100,7 +100,7 @@ Expr *RecordLiteralChecker::checkRecordLit(ObjectLitExpr *lit, const Type *recor
     prop.value =
         this->typeRelations->coerce(this->exprChecker->checkExpr(prop.value, value), value, what);
   }
-  lit->type = typed ? record : Type::error();
+  lit->type = isTyped ? record : Type::error();
 
   return lit;
 }
@@ -135,11 +135,11 @@ RecordLiteralChecker::checkRecordSpread(ObjectLitExpr::Property &prop, const Typ
   if (type->isRecord()) {
     return ok(type);
   }
-  bool object = type->isObject() && !type->isTuple() && !type->isRegExp() && !type->isMatch() &&
-                !type->isAnyObject();
-  if (!object) {
-    bool collection = type->isMap() || type->isSet();
-    std::string message = ErrorTextRecordSpread::notObject(type->name(), collection);
+  bool isObject = type->isObject() && !type->isTuple() && !type->isRegExp() && !type->isMatch() &&
+                  !type->isAnyObject();
+  if (!isObject) {
+    bool isCollection = type->isMap() || type->isSet();
+    std::string message = ErrorTextRecordSpread::notObject(type->name(), isCollection);
 
     return err(RecordLiteralCheckerCheckRecordSpreadError{
         .code = RecordLiteralCheckerCheckRecordSpreadErrorCode::NOT_SPREADABLE,
@@ -164,12 +164,12 @@ RecordLiteralChecker::checkRecordSpread(ObjectLitExpr::Property &prop, const Typ
       });
     }
   }
-  bool methods = false;
+  bool hasMethods = false;
   auto isMethod = [](const ClassField &f) { return f.method(); };
   for (const ClassDecl *c = ClassDeclarer::classOf(type); c; c = c->parent) {
-    methods |= c->literal() || llvm::any_of(c->fields, isMethod);
+    hasMethods |= c->literal() || llvm::any_of(c->fields, isMethod);
   }
-  if (methods) {
+  if (hasMethods) {
     std::string message = ErrorTextRecordSpread::methods();
 
     return err(RecordLiteralCheckerCheckRecordSpreadError{
@@ -211,16 +211,16 @@ RecordLiteralChecker::ResultValueTypeKnow RecordLiteralChecker::valueKnown(const
 
 Expr *RecordLiteralChecker::recordFromSpreads(ObjectLitExpr *lit) {
   const Type *value = nullptr;
-  bool typed = true;
+  bool isTyped = true;
   auto meet = [&](const Type *t, llvm::SMLoc loc) {
     if (!t || t->isError()) {
-      typed = false;
+      isTyped = false;
       return;
     }
     ResultValueTypeJoin joined = RecordLiteralChecker::valuesJoin(value, t);
     if (joined.isErr()) {
       this->state.getDiagnostics().error(loc, joined.error().message);
-      typed = false;
+      isTyped = false;
       return;
     }
     value = joined.value();
@@ -241,7 +241,7 @@ Expr *RecordLiteralChecker::recordFromSpreads(ObjectLitExpr *lit) {
       }
     }
   }
-  if (!typed || !value) {
+  if (!isTyped || !value) {
     lit->type = Type::error();
     return lit;
   }
@@ -260,10 +260,10 @@ Expr *RecordLiteralChecker::recordFromSpreads(ObjectLitExpr *lit) {
     ResultSpreadIntoMap spread = this->checkRecordSpread(prop, value);
     if (spread.isErr()) {
       this->reportSpread(prop, spread);
-      typed = false;
+      isTyped = false;
     }
   }
-  lit->type = typed ? record : Type::error();
+  lit->type = isTyped ? record : Type::error();
 
   return lit;
 }

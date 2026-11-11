@@ -6,41 +6,36 @@
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/SourceMgr.h"
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace tz {
+
+enum class DiagnosticRoute {
+  PARENT,
+  PROGRAM,
+  DISCARD,
+  OWNER,
+};
 
 class Diagnostics {
 public:
   using ResultTaken = Result<void, std::vector<Diagnostic>>;
 
-  explicit Diagnostics(llvm::SourceMgr &sourceMgr) : sourceMgr_(sourceMgr) {}
+  explicit Diagnostics(llvm::SourceMgr &sourceMgr);
 
   void error(llvm::SMLoc loc, const llvm::Twine &message);
+  void errorOutsideTrials(llvm::SMLoc loc, const llvm::Twine &message);
   void note(llvm::SMLoc loc, const llvm::Twine &message);
   void warning(llvm::SMLoc loc, const llvm::Twine &message);
   void hint(llvm::SMLoc loc, const llvm::Twine &message);
   void tool(const llvm::Twine &message);
 
-  bool setMuted(bool silent) {
-    bool old = this->muted;
-    this->muted = silent;
-
-    return old;
-  }
-  bool isMuted() const { return this->muted; }
-
-  struct Captured {
-    llvm::SMLoc loc;
-    std::string message;
-  };
-  std::vector<Captured> *setCapture(std::vector<Captured> *capture) {
-    std::vector<Captured> *old = capture_;
-    capture_ = capture;
-
-    return old;
-  }
-  std::vector<Captured> *capture() const { return capture_; }
+  void pushList(DiagnosticRoute route);
+  std::vector<Diagnostic> popList();
+  DiagnosticRoute getCurrentDestination() const;
+  const Diagnostic *findFirstError(const std::vector<Diagnostic> &found) const;
+  unsigned getWrittenErrorCount() const;
 
   ResultTaken take();
   static bool hasErrors(const std::vector<Diagnostic> &found);
@@ -51,16 +46,17 @@ public:
 
   llvm::SourceMgr &sourceMgr() const { return sourceMgr_; }
 
-  unsigned errorCount() const { return errorCount_; }
-  unsigned errorsSeen() const { return errorsSeen_; }
-
 private:
+  struct DiagnosticList {
+    DiagnosticRoute route;
+    std::vector<Diagnostic> found;
+  };
+
+  DiagnosticRoute destinationOf(size_t index) const;
+
   llvm::SourceMgr &sourceMgr_;
-  unsigned errorCount_ = 0;
-  unsigned errorsSeen_ = 0;
-  bool muted = false;
-  std::vector<Captured> *capture_ = nullptr;
-  std::vector<Diagnostic> found;
+  unsigned writtenErrors = 0;
+  std::vector<DiagnosticList> lists;
   std::vector<std::pair<const char *, const char *>> quiet;
 };
 

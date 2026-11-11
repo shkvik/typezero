@@ -176,9 +176,9 @@ Val AssignEvaluator::evalAssign(const AssignExpr *assign, State &st) {
     write(p, result, st);
     return result;
   }
-  bool bits = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor ||
-              op == BinaryOp::Shl || op == BinaryOp::Shr || op == BinaryOp::UShr;
-  Val v = this->check.evaluator().eval(assign->value, st, bits);
+  bool hasBits = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor ||
+                 op == BinaryOp::Shl || op == BinaryOp::Shr || op == BinaryOp::UShr;
+  Val v = this->check.evaluator().eval(assign->value, st, hasBits);
   const Type *type = assign->target->type;
   Val result;
   if (type && type->nonOptional()->isString()) {
@@ -187,7 +187,7 @@ Val AssignEvaluator::evalAssign(const AssignExpr *assign, State &st) {
             ? ValueRange::someLength()
             : ValueRange::narrowTo(ValueRange::add(old.len, v.len), 0, kLengthMax));
   } else if (ValueRange::isNumberType(type)) {
-    if (bits) {
+    if (hasBits) {
       result = ValueRange::numVal(this->check.evaluator().bitwise(op, old.num, v.num, type));
     } else {
       const VarSymbol *accum = p.kind == OverflowCheck::Place::Kind::Var ? p.var : nullptr;

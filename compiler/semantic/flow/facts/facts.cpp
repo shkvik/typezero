@@ -240,7 +240,7 @@ std::optional<int64_t> Facts::shortestDistance(size_t count, const std::vector<E
   std::vector<int64_t> dist(count, kInf);
   dist[source] = 0;
   for (size_t round = 0; round + 1 < count; ++round) {
-    bool changed = false;
+    bool hasChanged = false;
     for (const Edge &e : edges) {
       if (dist[e.from] == kInf) {
         continue;
@@ -252,10 +252,10 @@ std::optional<int64_t> Facts::shortestDistance(size_t count, const std::vector<E
       int64_t d = *sum;
       if (d < dist[e.to]) {
         dist[e.to] = d;
-        changed = true;
+        hasChanged = true;
       }
     }
-    if (!changed) {
+    if (!hasChanged) {
       break;
     }
   }
@@ -277,10 +277,10 @@ void Facts::forget(const VarSymbol *var) {
 
 void Facts::shift(Term term, int64_t delta) {
   for (Fact &fact : this->facts) {
-    bool lhs = fact.lhs.contains(term), rhs = fact.rhs.contains(term);
-    if (lhs && !rhs) {
+    bool isLhs = fact.lhs.contains(term), rhs = fact.rhs.contains(term);
+    if (isLhs && !rhs) {
       fact.offset = Facts::saturatingAdd(fact.offset, delta);
-    } else if (rhs && !lhs) {
+    } else if (rhs && !isLhs) {
       fact.offset = Facts::saturatingSub(fact.offset, delta);
     }
   }

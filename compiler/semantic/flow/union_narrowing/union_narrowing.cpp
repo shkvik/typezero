@@ -35,7 +35,7 @@ const VarSymbol *UnionNarrowing::readVariable(const Expr *expr) {
 
 const Type *UnionNarrowing::keepMembers(const Type *type,
                                         llvm::function_ref<bool(const Type *)> keep) {
-  bool undefined = type->isOptional();
+  bool isUndefined = type->isOptional();
   const Type *value = type->nonOptional();
   std::vector<const Type *> kept;
   for (const Type *m : UnionNarrowing::membersOf(value)) {
@@ -43,13 +43,13 @@ const Type *UnionNarrowing::keepMembers(const Type *type,
       kept.push_back(m);
     }
   }
-  bool keepsUndefined = undefined && keep(Type::undefinedTy());
+  bool isKeepingUndefined = isUndefined && keep(Type::undefinedTy());
   if (kept.empty()) {
-    return keepsUndefined ? type : nullptr;
+    return isKeepingUndefined ? type : nullptr;
   }
   const Type *result = Type::unionOf(kept);
 
-  return keepsUndefined ? Type::optional(result) : result;
+  return isKeepingUndefined ? Type::optional(result) : result;
 }
 
 void UnionNarrowing::narrowVariable(Flow &flow, const VarSymbol *var, const Type *type) {
@@ -230,9 +230,9 @@ bool UnionNarrowing::mayBe(const Type *t, bool truthy) {
   if (!t->isLiteral()) {
     return true;
   }
-  bool value = t->isStringLiteral() ? !t->literalText().empty() : t->literalNumber() != 0;
+  bool isValue = t->isStringLiteral() ? !t->literalText().empty() : t->literalNumber() != 0;
 
-  return value == truthy;
+  return isValue == truthy;
 }
 
 bool UnionNarrowing::mayBeTruthy(const Type *t) {
@@ -399,12 +399,12 @@ const MemberExpr *UnionNarrowing::taggedMember(const Expr *side) {
 void UnionNarrowing::addLiteralFacts(const Expr *side, const Type *literal, Flow &equal,
                                      Flow &different) const {
   const MemberExpr *member = UnionNarrowing::taggedMember(side);
-  bool tagged =
+  bool isTagged =
       member != nullptr &&
       this->narrowByTag(
           member, equal,
           [&](const Type *t) { return TypeRelations::isImplicitlyConvertible(literal, t); }, false);
-  if (tagged) {
+  if (isTagged) {
     this->narrowByTag(member, different, [&](const Type *t) { return t != literal; }, true);
     return;
   }
@@ -414,11 +414,11 @@ void UnionNarrowing::addLiteralFacts(const Expr *side, const Type *literal, Flow
     return;
   }
   const VarSymbol *var = UnionNarrowing::readVariable(side);
-  bool narrows = var != nullptr && var->type != nullptr &&
-                 literal->literalBase() == var->type->nonOptional() &&
-                 (literal->isStringLiteral() || literal->literalBase()->isInt()) &&
-                 this->literalTypes->typeIn(equal, var) == var->type;
-  if (narrows) {
+  bool isNarrowing = var != nullptr && var->type != nullptr &&
+                     literal->literalBase() == var->type->nonOptional() &&
+                     (literal->isStringLiteral() || literal->literalBase()->isInt()) &&
+                     this->literalTypes->typeIn(equal, var) == var->type;
+  if (isNarrowing) {
     UnionNarrowing::narrowVariable(equal, var, literal);
   }
 }

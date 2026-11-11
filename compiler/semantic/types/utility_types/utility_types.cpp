@@ -103,18 +103,18 @@ UtilityTypes::ResultUtilityApplied UtilityTypes::resolveUtilityType(const TypeRe
     });
   }
 
-  bool function = utility->op == TypeOp::ReturnType || utility->op == TypeOp::Parameters;
-  bool text = utility->op == TypeOp::Uppercase || utility->op == TypeOp::Lowercase ||
-              utility->op == TypeOp::Capitalize || utility->op == TypeOp::Uncapitalize;
+  bool isFunction = utility->op == TypeOp::ReturnType || utility->op == TypeOp::Parameters;
+  bool isText = utility->op == TypeOp::Uppercase || utility->op == TypeOp::Lowercase ||
+                utility->op == TypeOp::Capitalize || utility->op == TypeOp::Uncapitalize;
   std::vector<const Type *> operands;
   for (const TypeRef &arg : ref.args) {
-    const Type *signature = function ? this->conditionalTypes->signatureForUtility(arg) : nullptr;
+    const Type *signature = isFunction ? this->conditionalTypes->signatureForUtility(arg) : nullptr;
     operands.push_back(signature ? signature : this->conditionalTypes->resolveTypeArgument(arg));
     if (operands.back()->isError()) {
       return ok(operands.back());
     }
   }
-  if (function && !TypeQueries::mentionsParam(operands[0]) &&
+  if (isFunction && !TypeQueries::mentionsParam(operands[0]) &&
       !operands[0]->nonOptional()->isFunction()) {
     std::string message = ErrorTextUtility::noFunction(ref.name, operands[0]->name());
 
@@ -123,7 +123,7 @@ UtilityTypes::ResultUtilityApplied UtilityTypes::resolveUtilityType(const TypeRe
         .message = message,
     });
   }
-  if (text && !TypeQueries::mentionsParam(operands[0])) {
+  if (isText && !TypeQueries::mentionsParam(operands[0])) {
     for (const Type *m : TypeopsCheckHelpers::distributedMembers(operands[0])) {
       if (!m->isString() && !m->isStringLiteral()) {
         std::string message = ErrorTextUtility::notString(ref.name, m->name());
@@ -147,14 +147,14 @@ UtilityTypes::ResultGenericIndexed UtilityTypes::checkGenericIndex(IndexExpr *in
   auto genericKey = [&](const Type *key) {
     return key->isParam() && !key->isListParam() && this->wantsLiteral(key);
   };
-  bool open = object->isParam() && !object->isListParam() && !object->iterated();
-  if (!open && !(object->isObject() && isa<NameExpr>(index->index))) {
+  bool isOpen = object->isParam() && !object->isListParam() && !object->iterated();
+  if (!isOpen && !(object->isObject() && isa<NameExpr>(index->index))) {
     return err(UtilityTypesCheckGenericIndexError{
         .code = UtilityTypesCheckGenericIndexErrorCode::NOT_A_GENERIC_INDEX,
         .message = "",
     });
   }
-  if (!open) {
+  if (!isOpen) {
     auto *name = cast<NameExpr>(index->index);
     VarSymbol *var = this->scopes->lookup(name->name).var();
     if (!var || !var->type || !genericKey(var->type)) {

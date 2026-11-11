@@ -23,6 +23,7 @@ public:
             const Num &exceeding, const VarSymbol *accum, const Type *type);
   std::string line(llvm::SMLoc loc, llvm::SMLoc from) const;
   std::string inputText(const Reason *why, llvm::SMLoc from) const;
+  std::string callsText(const Reason *why, llvm::SMLoc from) const;
   std::string fixText(const Expr *site, const VarSymbol *accum) const;
   bool checkConversion(const Expr *site, const Expr *value, const Num &x, const Type *to);
   bool checkDivisor(const Expr *site, BinaryOp op, const Expr *divisor, const Num &l, const Num &r);
@@ -38,11 +39,15 @@ public:
   void checkDate(const Num &time, double limit, llvm::ArrayRef<DatePart> parts);
 
 private:
-  static std::string exprText(const Expr *expr);
-  static std::string subject(const Expr *expr);
-  static std::string numberText(double v);
-  static std::string roughNumber(double v);
-  static std::string replaced(std::string text, llvm::StringRef from, llvm::StringRef to);
+  std::string exprText(const Expr *expr) const;
+  std::vector<const Expr *> textOrder(const Expr *expr) const;
+  std::vector<const Expr *> textParts(const Expr *expr) const;
+  std::string nodeText(const Expr *expr, std::vector<std::string> &answers) const;
+  std::string takeAnswer(std::vector<std::string> &answers) const;
+  std::string subject(const Expr *expr) const;
+  std::string numberText(double v) const;
+  std::string roughNumber(double v) const;
+  std::string replaced(std::string text, llvm::StringRef from, llvm::StringRef to) const;
   OverflowCheck &check;
 };
 

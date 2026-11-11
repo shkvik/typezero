@@ -232,7 +232,7 @@ void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) 
   llvm::StringMap<const char *> mentions;
   const char *subtle = nullptr;
   const char *locale = nullptr;
-  bool muted = this->loader.diags.setMuted(true);
+  this->loader.diags.pushList(DiagnosticRoute::DISCARD);
   Lexer lexer(text, this->loader.diags);
   bool property = false;
   Token before[2];
@@ -261,7 +261,7 @@ void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) 
     before[0] = before[1];
     before[1] = token;
   }
-  this->loader.diags.setMuted(muted);
+  this->loader.diags.popList();
   if (mentions.empty() && !subtle && !locale) {
     return;
   }
@@ -373,13 +373,13 @@ void LibraryModules::importFsStreams(Module *module, llvm::StringRef text) {
     return;
   }
   if (streams.names.empty()) {
-    bool muted = this->loader.diags.setMuted(true);
+    this->loader.diags.pushList(DiagnosticRoute::DISCARD);
     Lexer lexer(text, this->loader.diags);
     std::vector<Token> tokens;
     for (Token token = lexer.next(); !token.is(Tok::Eof); token = lexer.next()) {
       tokens.push_back(token);
     }
-    this->loader.diags.setMuted(muted);
+    this->loader.diags.popList();
     auto is = [&](size_t i, Tok kind, llvm::StringRef text) {
       return i < tokens.size() && tokens[i].is(kind) && (text.empty() || tokens[i].text == text);
     };
@@ -450,7 +450,7 @@ void LibraryModules::importProcessSignals(Module *module, llvm::StringRef text) 
   if (!text.contains("process")) {
     return;
   }
-  bool muted = this->loader.diags.setMuted(true);
+  this->loader.diags.pushList(DiagnosticRoute::DISCARD);
   Lexer lexer(text, this->loader.diags);
   Token before[3];
   const char *at = nullptr;
@@ -465,7 +465,7 @@ void LibraryModules::importProcessSignals(Module *module, llvm::StringRef text) 
     before[1] = before[2];
     before[2] = token;
   }
-  this->loader.diags.setMuted(muted);
+  this->loader.diags.popList();
   if (!at) {
     return;
   }

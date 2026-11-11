@@ -21,7 +21,7 @@ class SwitchChecker {
 public:
   SwitchChecker(SemanticState &owner, SemanticParts &all);
 
-  void checkSwitch(SwitchStmt *stmt);
+  void walkSwitch(SwitchStmt *stmt);
 
 private:
   using ResultValueComparable = Result<const Type *, SwitchCheckerValueTypeError>;

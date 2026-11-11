@@ -95,9 +95,9 @@ AliasInstantiator::ResultAliasDistinct AliasInstantiator::notResolving(const Typ
 AliasInstantiator::ResultDepthInBounds AliasInstantiator::depthInBounds(const TypeAliasDecl *alias,
                                                                         unsigned calls,
                                                                         bool conditional) const {
-  bool deep =
+  bool isDeep =
       this->state.getAliasStore().getAliasDepth() >= kMaxAliasDepth || calls > kMaxTailCalls;
-  if (deep && !conditional) {
+  if (isDeep && !conditional) {
     std::string message = ErrorTextAliasDepth::endless(alias->name);
 
     return err(AliasInstantiatorDepthInBoundsError{
@@ -105,7 +105,7 @@ AliasInstantiator::ResultDepthInBounds AliasInstantiator::depthInBounds(const Ty
         .message = message,
     });
   }
-  if (deep && calls > kMaxTailCalls) {
+  if (isDeep && calls > kMaxTailCalls) {
     std::string message = ErrorTextAliasDepth::tailCalls(alias->name, kMaxTailCalls);
 
     return err(AliasInstantiatorDepthInBoundsError{
@@ -113,7 +113,7 @@ AliasInstantiator::ResultDepthInBounds AliasInstantiator::depthInBounds(const Ty
         .message = message,
     });
   }
-  if (deep) {
+  if (isDeep) {
     std::string message = ErrorTextAliasDepth::nests(alias->name, kMaxAliasDepth, kMaxTailCalls);
 
     return err(AliasInstantiatorDepthInBoundsError{
@@ -244,15 +244,15 @@ bool AliasInstantiator::aliasDepthFits(const TypeAliasDecl *alias, const AliasIn
     this->state.getDiagnostics().error(alias->loc(), distinct.error().message);
     return false;
   }
-  bool conditional = alias->type.kind() == TypeRefKind::CONDITIONAL_REF;
-  ResultDepthInBounds bounded = this->depthInBounds(alias, calls, conditional);
+  bool isConditional = alias->type.kind() == TypeRefKind::CONDITIONAL_REF;
+  ResultDepthInBounds bounded = this->depthInBounds(alias, calls, isConditional);
   if (bounded.isOk()) {
     return true;
   }
   std::string neededHere = ErrorTextAliasDepth::neededHere();
   this->state.getDiagnostics().error(alias->loc(), bounded.error().message);
   llvm::SMLoc use = this->state.getAliasStore().getAliasUse();
-  if (conditional && use.isValid() && use != alias->loc()) {
+  if (isConditional && use.isValid() && use != alias->loc()) {
     this->state.getDiagnostics().note(use, neededHere);
   }
 
@@ -281,8 +281,8 @@ const Type *AliasInstantiator::resolveAliasBody(const AliasRun &run, AliasInstan
   TypeAliasDecl *alias = run.alias;
   this->state.getAliasStore().enterAlias();
   Module *home = this->state.getModuleStates().findDeclModule(alias);
-  bool moved = home != nullptr && home != this->state.getModuleStates().getCurrentModule();
-  if (moved) {
+  bool isMoved = home != nullptr && home != this->state.getModuleStates().getCurrentModule();
+  if (isMoved) {
     this->state.getScopeStack().enterOnlyTypes(
         this->state.getModuleStates().getModuleState(home).types);
   }
@@ -292,7 +292,7 @@ const Type *AliasInstantiator::resolveAliasBody(const AliasRun &run, AliasInstan
                          ? this->objectAliasType(alias, entry, display)
                          : this->aliasTypeInner(alias);
   this->state.getScopeStack().closeTypeScope();
-  if (moved) {
+  if (isMoved) {
     this->state.getScopeStack().leaveOnlyTypes();
   }
   this->state.getAliasStore().leaveAlias();
@@ -325,8 +325,8 @@ const Type *AliasInstantiator::objectAliasType(TypeAliasDecl *alias, AliasInstan
 }
 
 const Type *AliasInstantiator::aliasTypeInner(const TypeAliasDecl *alias) {
-  bool conditional = alias->type.kind() == TypeRefKind::CONDITIONAL_REF;
-  if (conditional) {
+  bool isConditional = alias->type.kind() == TypeRefKind::CONDITIONAL_REF;
+  if (isConditional) {
     this->state.getTypeContext().allowTailCall();
   } else {
     this->state.getTypeContext().forbidTailCall();

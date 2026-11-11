@@ -83,11 +83,11 @@ Diagnostics::ResultTaken SemanticExternalFacade::checkModuleCode() {
 
 Diagnostics::ResultTaken SemanticExternalFacade::checkGenericCopies() {
   do {
-    this->parts->lateClasses.checkLateClasses();
-    this->parts->genericInstantiator.checkInstances();
+    this->parts->lateClasses.walkLateClasses();
+    this->parts->genericInstantiator.walkInstances();
   } while (this->state->getLateClassStore().hasUncheckedLateClasses());
 
-  this->parts->constructorCalls.checkConstructorCalls();
+  this->parts->constructorCalls.walkConstructorCalls();
   this->parts->varChecker.reportUncheckedResults();
 
   return this->state->getDiagnostics().take();
@@ -95,8 +95,8 @@ Diagnostics::ResultTaken SemanticExternalFacade::checkGenericCopies() {
 
 Diagnostics::ResultTaken SemanticExternalFacade::finishProgram() {
   this->parts->reflectChecker.finishReflection();
-  this->parts->emitterChecker.checkErrorListeners();
-  this->parts->emitterChecker.checkDroppedListeners();
+  this->parts->emitterChecker.walkErrorListeners();
+  this->parts->emitterChecker.walkDroppedListeners();
 
   for (Module *module : this->file.modules) {
     this->parts->moduleDeclarer.useModule(module);
@@ -150,7 +150,7 @@ void SemanticExternalFacade::walkClass(ClassDecl *cls) {
   if (cls->type == nullptr || cls->baseExpr != nullptr) {
     return;
   }
-  this->parts->classChecker.checkClassBodies(cls);
+  this->parts->classChecker.walkClassBodies(cls);
 }
 
 void SemanticExternalFacade::walkFunction(FunctionDecl *fn) {

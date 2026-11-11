@@ -373,7 +373,7 @@ std::vector<TypeRef> TypeParser::parseTypeArgs() {
 
 bool TypeParser::tryTypeArgs(std::vector<TypeRef> &args, bool callOnly) {
   Parser::Snapshot start = this->parser.cursor().snapshot();
-  bool muted = this->parser.diags.setMuted(true);
+  this->parser.diags.pushList(DiagnosticRoute::DISCARD);
   this->parser.recovering = false;
   std::vector<TypeRef> parsed = parseTypeArgs();
   bool ok = !this->parser.recovering;
@@ -393,7 +393,7 @@ bool TypeParser::tryTypeArgs(std::vector<TypeRef> &args, bool callOnly) {
       ok = ok && this->parser.tok.newlineBefore && !callOnly;
       break;
   }
-  this->parser.diags.setMuted(muted);
+  this->parser.diags.popList();
   if (!ok) {
     this->parser.cursor().rewind(std::move(start));
     return false;

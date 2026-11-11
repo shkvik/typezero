@@ -170,17 +170,17 @@ std::optional<int64_t> LoopBounds::comparisonBoundsAbove(const Expr *part, const
   };
   const Expr *small = nullptr;
   const Expr *large = nullptr;
-  bool strict = false;
+  bool isStrict = false;
   switch (bin->op) {
   case BinaryOp::Lt:
     small = bin->lhs;
     large = bin->rhs;
-    strict = true;
+    isStrict = true;
     break;
   case BinaryOp::Gt:
     small = bin->rhs;
     large = bin->lhs;
-    strict = true;
+    isStrict = true;
     break;
   case BinaryOp::Le:
     small = bin->lhs;
@@ -194,7 +194,7 @@ std::optional<int64_t> LoopBounds::comparisonBoundsAbove(const Expr *part, const
     return std::nullopt;
   }
   std::optional<int64_t> k = LoopBounds::varPlus(small, var, lookupVar);
-  if (k && this->boundedAbove(large, strict ? kIntMax - (step - 1) : kIntMax - step, scan)) {
+  if (k && this->boundedAbove(large, isStrict ? kIntMax - (step - 1) : kIntMax - step, scan)) {
     return k;
   }
 
@@ -268,8 +268,8 @@ void LoopBounds::forgetChanged(Flow &head, const LoopScan &scan, llvm::StringRef
 LoopBounds::KeptBounds LoopBounds::keptBounds(const LoopScan &scan, const LoopScan::Change &change,
                                               const VarSymbol *var, const Expr *cond) const {
   KeptBounds kept;
-  bool counter = var != nullptr && var->type->isInt() && change.count == 1 && !change.nested;
-  if (!counter) {
+  bool isCounter = var != nullptr && var->type->isInt() && change.count == 1 && !change.nested;
+  if (!isCounter) {
     return kept;
   }
   std::optional<int64_t> k =
@@ -289,15 +289,15 @@ LoopBounds::KeptBounds LoopBounds::keptBounds(const LoopScan &scan, const LoopSc
 
 bool LoopBounds::isStaleFact(const Facts::Fact &f, llvm::StringRef name, const VarSymbol *var,
                              const KeptBounds &kept) {
-  bool lhsHit = LoopBounds::termNames(f.lhs, name);
-  bool rhsHit = LoopBounds::termNames(f.rhs, name);
-  if (!lhsHit && !rhsHit) {
+  bool isLhsHit = LoopBounds::termNames(f.lhs, name);
+  bool isRhsHit = LoopBounds::termNames(f.rhs, name);
+  if (!isLhsHit && !isRhsHit) {
     return false;
   }
-  if (kept.lower && !lhsHit && f.rhs == Term::of(var)) {
+  if (kept.lower && !isLhsHit && f.rhs == Term::of(var)) {
     return false;
   }
-  if (kept.upper && !rhsHit && f.lhs == Term::of(var)) {
+  if (kept.upper && !isRhsHit && f.lhs == Term::of(var)) {
     return false;
   }
 

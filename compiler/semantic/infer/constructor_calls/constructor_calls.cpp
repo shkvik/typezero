@@ -11,10 +11,10 @@ namespace tz {
 ConstructorCalls::ConstructorCalls(SemanticState &owner)
     : state(owner) {}
 
-void ConstructorCalls::checkConstructorCalls() {
+void ConstructorCalls::walkConstructorCalls() {
   for (ClassDecl *cls : this->state.getClassStore().getClasses()) {
-    bool skipped = cls->literal() || cls->children.empty() || cls->generic();
-    if (skipped) {
+    bool isSkipped = cls->literal() || cls->children.empty() || cls->generic();
+    if (isSkipped) {
       continue;
     }
     std::vector<FunctionDecl *> functions = cls->constructors;
@@ -55,12 +55,12 @@ ConstructorCalls::ResultNotOverridden ConstructorCalls::overriddenCall(const Cla
                                                                        const CallExpr *call,
                                                                        const CallExpr *site) {
   FunctionDecl *target = call->method()->decl;
-  bool overridable = call->virtualCall() || !cls->derivesFrom(target->cls());
+  bool isOverridable = call->virtualCall() || !cls->derivesFrom(target->cls());
   const ClassDecl *child =
       call->virtualCall() ? ConstructorCalls::overridingChild(cls, target) : nullptr;
   const ClassDecl *by = child ? child : target->cls();
-  bool direct = site == call;
-  if (overridable && ctor->isConstructor() && direct) {
+  bool isDirect = site == call;
+  if (isOverridable && ctor->isConstructor() && isDirect) {
     std::string message = ErrorTextOverriddenCall::ctorCall(cls->name, target->name, by->name);
 
     return err(ConstructorCallsOverriddenCallError{
@@ -68,7 +68,7 @@ ConstructorCalls::ResultNotOverridden ConstructorCalls::overriddenCall(const Cla
         .message = message,
     });
   }
-  if (overridable && ctor->isConstructor()) {
+  if (isOverridable && ctor->isConstructor()) {
     std::string message = ErrorTextOverriddenCall::ctorReach(cls->name, target->name, by->name);
 
     return err(ConstructorCallsOverriddenCallError{
@@ -76,7 +76,7 @@ ConstructorCalls::ResultNotOverridden ConstructorCalls::overriddenCall(const Cla
         .message = message,
     });
   }
-  if (overridable && direct) {
+  if (isOverridable && isDirect) {
     std::string message = ErrorTextOverriddenCall::fieldsCall(cls->name, target->name, by->name);
 
     return err(ConstructorCallsOverriddenCallError{
@@ -84,7 +84,7 @@ ConstructorCalls::ResultNotOverridden ConstructorCalls::overriddenCall(const Cla
         .message = message,
     });
   }
-  if (overridable) {
+  if (isOverridable) {
     std::string message = ErrorTextOverriddenCall::fieldsReach(cls->name, target->name, by->name);
 
     return err(ConstructorCallsOverriddenCallError{
@@ -116,8 +116,8 @@ void ConstructorCalls::enterScan(std::vector<ScanFrame> &frames, const FunctionD
   if (!fn->body || !fn->thisVar()) {
     return;
   }
-  bool firstVisit = seen.insert(fn).second;
-  if (firstVisit) {
+  auto [_, isFirstVisit] = seen.insert(fn);
+  if (isFirstVisit) {
     std::vector<const Expr *> exprs = AstWalker::exprsIn(fn->body, false);
     frames.push_back(ScanFrame{fn, origin, std::move(exprs), 0});
   }
@@ -152,14 +152,14 @@ ConstructorCalls::takeNextTarget(ScanFrame &frame, const ClassDecl *cls, const F
 
 const CallExpr *ConstructorCalls::selfCall(const ScanFrame &frame, const Expr *e) const {
   auto *call = dyn_cast<CallExpr>(e);
-  bool originReported = frame.origin && this->state.getClassStore().isCallReported(frame.origin);
-  if (!call || !call->method() || originReported) {
+  bool isOriginReported = frame.origin && this->state.getClassStore().isCallReported(frame.origin);
+  if (!call || !call->method() || isOriginReported) {
     return nullptr;
   }
   const NameExpr *name = ConstructorCalls::receiverName(call);
-  bool onSelf = name != nullptr && name->var() == frame.fn->thisVar();
+  bool isOnSelf = name != nullptr && name->var() == frame.fn->thisVar();
 
-  return onSelf ? call : nullptr;
+  return isOnSelf ? call : nullptr;
 }
 
 }

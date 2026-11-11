@@ -13,8 +13,8 @@ public:
   void checkDateParts(const CallExpr *call, const std::vector<Val> &args);
 
 private:
-  static double monthStart(double months);
-  static Num dateTime(const std::array<Num, 7> &parts);
+  double monthStart(double months) const;
+  Num dateTime(const std::array<Num, 7> &parts) const;
   OverflowCheck &check;
 };
 

@@ -26,8 +26,8 @@ public:
 
   StmtChecker(SemanticState &owner, SemanticParts &all);
 
-  void checkIf(IfStmt *stmt);
-  void checkStmt(Stmt *stmt);
+  void walkIf(IfStmt *stmt);
+  void walkStmt(Stmt *stmt);
   ResultBodyIsStatement checkBody(Stmt *body);
 
 private:

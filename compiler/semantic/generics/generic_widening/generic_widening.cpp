@@ -74,9 +74,9 @@ bool GenericWidening::writtenFromOutside(const ClassDecl *generic, llvm::StringR
   }
   for (const FunctionDecl *constructor : generic->constructors) {
     for (const Param &param : constructor->params) {
-      bool open =
+      bool isOpen =
           param.property && param.property->access == Access::Public && !param.property->readonly;
-      if (open && param.type && GenericWidening::mentions(*param.type, name)) {
+      if (isOpen && param.type && GenericWidening::mentions(*param.type, name)) {
         return true;
       }
     }
@@ -147,8 +147,8 @@ void GenericWidening::varianceStep(std::vector<VarianceFrame> &frames) {
       frame.nextArg += 1;
       continue;
     }
-    bool direct = args[i].kind() == TypeRefKind::NAME_REF && args[i].name == name;
-    if (!direct) {
+    bool isDirect = args[i].kind() == TypeRefKind::NAME_REF && args[i].name == name;
+    if (!isDirect) {
       return GenericWidening::finishVariance(frames, false);
     }
     const ClassDecl *baseGeneric = frame.baseGeneric;
@@ -207,8 +207,8 @@ std::string GenericWidening::whyNot(const Type *from, const Type *to) {
       }
       std::string ownName = own->name().str();
       std::string wideName = wide->name().str();
-      bool named = !ownName.empty() && ownName.front() != '{' && !own->isUnion();
-      std::string example = named ? ownName : ErrorTextVariance::sampleName();
+      bool isNamed = !ownName.empty() && ownName.front() != '{' && !own->isUnion();
+      std::string example = isNamed ? ownName : ErrorTextVariance::sampleName();
 
       return ErrorTextVariance::noExtends(ownName, wideName, example);
     }
@@ -272,13 +272,13 @@ Expr *GenericWidening::widenToGeneric(Expr *expr, ClassDecl *generic,
   }
   GenericClassInstantiator::ResultClassMade widened =
       this->genericClassInstantiator->instantiateClass(generic, *args, expr->loc());
-  bool reported =
+  bool isReported =
       widened.isErr() &&
       widened.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED;
-  if (widened.isErr() && !reported) {
-    bool endless = widened.error().code ==
-                   GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES;
-    llvm::SMLoc at = endless ? generic->loc() : expr->loc();
+  if (widened.isErr() && !isReported) {
+    bool isEndless = widened.error().code ==
+                     GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES;
+    llvm::SMLoc at = isEndless ? generic->loc() : expr->loc();
     this->state.getDiagnostics().error(at, widened.error().message);
   }
   if (widened.isErr() ||

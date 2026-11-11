@@ -54,7 +54,7 @@ private:
   static bool hasToJson(const ClassDecl *cls);
   static bool mayStringifyToUndefined(const Type *type);
 
-  void checkConstantJson(const Expr *arg);
+  void walkConstantJson(const Expr *arg);
   void walkArgsLoosely(CallExpr *call);
   Expr *checkJsonParse(CallExpr *call, MemberExpr *member);
   Expr *checkStringify(CallExpr *call, MemberExpr *member);

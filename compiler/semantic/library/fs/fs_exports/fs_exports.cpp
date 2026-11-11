@@ -240,8 +240,9 @@ FsExports::ResultExportFound FsExports::tzFsExport(llvm::StringRef name, llvm::S
   if (name == "replaceSync" || name == "replace") {
     return ok(name);
   }
-  bool inNodeFs = llvm::is_contained(kFsFunctions, name) || llvm::is_contained(kFspFunctions, name);
-  std::string message = ErrorTextFsExport::tzFs(path, name, inNodeFs);
+  bool isInNodeFs =
+      llvm::is_contained(kFsFunctions, name) || llvm::is_contained(kFspFunctions, name);
+  std::string message = ErrorTextFsExport::tzFs(path, name, isInNodeFs);
 
   return err(ModuleExportFoundError{
       .code = ModuleExportFoundErrorCode::NO_EXPORT,

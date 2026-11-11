@@ -222,15 +222,15 @@ void ArgListChecker::expandListSpreads(std::vector<Expr *> &args, std::vector<bo
   }
   std::vector<Expr *> out;
   std::vector<bool> outSpread;
-  bool changed = false;
+  bool hasChanged = false;
   for (size_t i = 0; i < args.size(); ++i) {
-    bool spreads = i < spread.size() && spread[i];
+    bool isSpreading = i < spread.size() && spread[i];
     auto *name = dyn_cast<NameExpr>(args[i]);
-    VarSymbol *var = spreads && name ? this->scopes->lookup(name->name).var() : nullptr;
+    VarSymbol *var = isSpreading && name ? this->scopes->lookup(name->name).var() : nullptr;
     std::optional<std::vector<llvm::StringRef>> found =
         var ? this->state.getExpressionMarks().findArgumentList(var) : std::nullopt;
     if (found) {
-      changed = true;
+      hasChanged = true;
       for (llvm::StringRef part : *found) {
         out.push_back(this->state.getAst().make<NameExpr>(name->loc(), part));
         outSpread.push_back(part.ends_with(".rest"));
@@ -239,7 +239,7 @@ void ArgListChecker::expandListSpreads(std::vector<Expr *> &args, std::vector<bo
     }
     if (var && var->type && var->type->isTuple() && !var->type->tupleRest() &&
         llvm::none_of(var->type->fields(), [](const Field &f) { return f.type->isListParam(); })) {
-      changed = true;
+      hasChanged = true;
       for (size_t k = 0; k < var->type->fields().size(); ++k) {
         auto *index = this->state.getAst().make<IntLitExpr>(name->loc(), k);
         out.push_back(this->state.getAst().make<IndexExpr>(
@@ -249,9 +249,9 @@ void ArgListChecker::expandListSpreads(std::vector<Expr *> &args, std::vector<bo
       continue;
     }
     out.push_back(args[i]);
-    outSpread.push_back(spreads);
+    outSpread.push_back(isSpreading);
   }
-  if (!changed) {
+  if (!hasChanged) {
     return;
   }
   args = std::move(out);
@@ -355,7 +355,7 @@ bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type
     }
   }
   size_t k = 0;
-  bool typed = true;
+  bool isTyped = true;
   for (size_t i = fixed; i < call->args.size(); ++i) {
     Expr *&arg = call->args[i];
     if (!checked || i >= checked->size() || !(*checked)[i]) {
@@ -364,7 +364,7 @@ bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type
           !call->spreads(i) && k < parts.size() && !parts[k]->isListParam() ? parts[k] : nullptr);
     }
     if (arg->type->isError()) {
-      typed = false;
+      isTyped = false;
       continue;
     }
     ResultArgumentFits fits = ArgListChecker::listArgument(list, parts, k, arg, call->spreads(i));
@@ -378,13 +378,13 @@ bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type
     ++k;
   }
   ResultListIsFilled filled = ArgListChecker::listFilled(list, parts, k);
-  if (typed && filled.isErr()) {
+  if (isTyped && filled.isErr()) {
     this->state.getDiagnostics().error(loc, filled.error().message);
     return false;
   }
   this->flowChecker->calledFunction();
 
-  return typed;
+  return isTyped;
 }
 
 }

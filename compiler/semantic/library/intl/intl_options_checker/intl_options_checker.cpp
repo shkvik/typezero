@@ -44,16 +44,16 @@ std::optional<std::u16string> IntlOptionsChecker::literalText(const Expr *e) {
 }
 
 std::optional<double> IntlOptionsChecker::literalNumber(const Expr *e) {
-  bool negative = false;
+  bool isNegative = false;
   const Expr *inner = e;
   auto *negation = dyn_cast<UnaryExpr>(inner);
   while (negation != nullptr && negation->op == UnaryOp::Neg) {
-    negative = !negative;
+    isNegative = !isNegative;
     inner = negation->operand;
     negation = dyn_cast<UnaryExpr>(inner);
   }
   std::optional<double> value = IntlOptionsChecker::plainNumber(inner);
-  if (!value.has_value() || !negative) {
+  if (!value.has_value() || !isNegative) {
     return value;
   }
 
@@ -173,10 +173,11 @@ IntlOptionsChecker::optionsGiven(const Type *type, IntlKind kind, llvm::StringRe
         .message = message,
     });
   }
-  bool object = type->isUndefined() || (type->isObject() && !type->isTuple() && !type->isClass() &&
-                                        !type->isRegExp() && !type->isMatch() && !type->isDate() &&
-                                        !type->isIntl() && !type->isCrypto() && !type->isBytes());
-  if (!object) {
+  bool isObject =
+      type->isUndefined() || (type->isObject() && !type->isTuple() && !type->isClass() &&
+                              !type->isRegExp() && !type->isMatch() && !type->isDate() &&
+                              !type->isIntl() && !type->isCrypto() && !type->isBytes());
+  if (!isObject) {
     std::string message = ErrorTextIntlOptions::notObject(what, type->name());
 
     return err(IntlOptionsCheckerOptionsGivenError{
@@ -192,14 +193,14 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
                                        llvm::StringRef what) {
   const IntlService *service =
       kind == IntlKind::None ? &kSupported : IntlOptionsChecker::serviceOf(kind);
-  bool ok = true;
+  bool isOk = true;
   if (args.size() > from) {
     Expr *&locale = args[from];
     locale = this->exprChecker->checkExpr(locale);
-    ok = this->intlChecker->checkLocaleArg(locale, what);
+    isOk = this->intlChecker->checkLocaleArg(locale, what);
   }
   if (args.size() <= from + 1) {
-    return ok;
+    return isOk;
   }
   Expr *&options = args[from + 1];
   options = this->exprChecker->checkExpr(options);
@@ -213,7 +214,7 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
     return false;
   }
   if (type->isUndefined()) {
-    return ok;
+    return isOk;
   }
   IntlOptionsRun run{
       .type = type,
@@ -222,7 +223,7 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
       .kind = kind,
       .what = what,
       .service = service,
-      .ok = ok,
+      .ok = isOk,
   };
   for (const Field &field : type->fields()) {
     this->walkOptionField(run, field);
@@ -320,10 +321,10 @@ void IntlOptionsChecker::walkOptionField(IntlOptionsRun &run, const Field &field
     return;
   }
   std::optional<std::string> text = IntlOptionsChecker::textOf(run, field.name);
-  bool badText = text.has_value() && !found->values.empty() &&
-                 !llvm::is_contained(found->values, *text) &&
-                 !(found->kind == 'g' && text->empty());
-  if (badText) {
+  bool isBadText = text.has_value() && !found->values.empty() &&
+                   !llvm::is_contained(found->values, *text) &&
+                   !(found->kind == 'g' && text->empty());
+  if (isBadText) {
     std::string message = ErrorTextIntlField::badValue(*text, field.name, found->values);
     this->reportOption(run, field.name, message);
     return;
@@ -378,20 +379,20 @@ bool IntlOptionsChecker::allTextOrBoolean(llvm::ArrayRef<const Type *> members) 
 
 void IntlOptionsChecker::walkOptionValues(IntlOptionsRun &run, const Field &field,
                                           const IntlOption &found, const Type *value) {
-  bool open = false;
-  std::vector<std::string> texts = IntlOptionsChecker::literalTexts(value, open);
+  bool isOpen = false;
+  std::vector<std::string> texts = IntlOptionsChecker::literalTexts(value, isOpen);
   Expr *given = IntlOptionsChecker::valueOf(run, field.name);
   std::optional<std::vector<std::string>> known =
       given != nullptr ? this->literalTypes->knownTexts(given) : std::nullopt;
   if (known.has_value()) {
     texts = *known;
-    open = false;
+    isOpen = false;
   }
   const std::string *wrong = IntlOptionsChecker::wrongText(texts, found);
   if (wrong != nullptr) {
     std::string message = ErrorTextIntlField::badValue(*wrong, field.name, found.values);
     this->reportOption(run, field.name, message);
-  } else if (open) {
+  } else if (isOpen) {
     std::string message = ErrorTextIntlField::open(field.name, found.values);
     this->reportOption(run, field.name, message);
   }
@@ -438,8 +439,8 @@ void IntlOptionsChecker::walkStyleOption(IntlOptionsRun &run) {
   if (style == nullptr || run.kind != IntlKind::NumberFormat) {
     return;
   }
-  bool open = false;
-  std::vector<std::string> styles = IntlOptionsChecker::literalTexts(style->type, open);
+  bool isOpen = false;
+  std::vector<std::string> styles = IntlOptionsChecker::literalTexts(style->type, isOpen);
   std::optional<std::string> text = IntlOptionsChecker::textOf(run, "style");
   if (text.has_value()) {
     styles = {*text};
@@ -526,9 +527,9 @@ void IntlOptionsChecker::walkDigitPairs(IntlOptionsRun &run) {
   for (const char *pair : {"FractionDigits", "SignificantDigits"}) {
     std::string min = std::string("minimum") + pair;
     std::string max = std::string("maximum") + pair;
-    bool skipped = run.literal == nullptr || run.type->field(min) == nullptr ||
-                   run.type->field(max) == nullptr || this->isNotAbove(run, min, max);
-    if (skipped) {
+    bool isSkipped = run.literal == nullptr || run.type->field(min) == nullptr ||
+                     run.type->field(max) == nullptr || this->isNotAbove(run, min, max);
+    if (isSkipped) {
       continue;
     }
     std::optional<double> low = IntlOptionsChecker::constantOf(run, min);
@@ -564,30 +565,30 @@ void IntlOptionsChecker::walkRoundingIncrement(IntlOptionsRun &run) {
     return;
   }
   std::optional<double> n = IntlOptionsChecker::constantOf(run, "roundingIncrement");
-  bool known = n.has_value() || IntlOptionsChecker::allIncrements(increment->type->nonOptional());
-  bool listed = !n.has_value() || IntlOptionsChecker::isIncrement(*n);
-  if (run.literal != nullptr && known && n != 1.0 && listed) {
+  bool isKnown = n.has_value() || IntlOptionsChecker::allIncrements(increment->type->nonOptional());
+  bool isListed = !n.has_value() || IntlOptionsChecker::isIncrement(*n);
+  if (run.literal != nullptr && isKnown && n != 1.0 && isListed) {
     this->walkIncrementDigits(run);
   }
-  if (!known || !listed) {
+  if (!isKnown || !isListed) {
     std::string message = ErrorTextIntlField::increments(n.has_value());
     this->reportOption(run, "roundingIncrement", message);
   }
 }
 
 void IntlOptionsChecker::walkIncrementDigits(IntlOptionsRun &run) {
-  bool significant = run.type->field("minimumSignificantDigits") != nullptr ||
-                     run.type->field("maximumSignificantDigits") != nullptr;
-  if (significant) {
+  bool isSignificant = run.type->field("minimumSignificantDigits") != nullptr ||
+                       run.type->field("maximumSignificantDigits") != nullptr;
+  if (isSignificant) {
     std::string message = ErrorTextIntlField::incSig();
     this->reportOption(run, "roundingIncrement", message);
     return;
   }
-  bool sameDigits = run.type->field("minimumFractionDigits") != nullptr &&
-                    run.type->field("maximumFractionDigits") != nullptr &&
-                    this->isNotAbove(run, "minimumFractionDigits", "maximumFractionDigits") &&
-                    this->isNotAbove(run, "maximumFractionDigits", "minimumFractionDigits");
-  if (!sameDigits) {
+  bool isSameDigits = run.type->field("minimumFractionDigits") != nullptr &&
+                      run.type->field("maximumFractionDigits") != nullptr &&
+                      this->isNotAbove(run, "minimumFractionDigits", "maximumFractionDigits") &&
+                      this->isNotAbove(run, "maximumFractionDigits", "minimumFractionDigits");
+  if (!isSameDigits) {
     std::string message = ErrorTextIntlField::incSame();
     this->reportOption(run, "roundingIncrement", message);
   }

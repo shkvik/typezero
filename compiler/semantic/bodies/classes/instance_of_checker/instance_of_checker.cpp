@@ -87,8 +87,8 @@ InstanceOfChecker::checkCollectionInstanceOf(BinaryExpr *bin, GlobalName global)
   const Type *type = bin->lhs->type;
   const Type *base = type->nonOptional();
   std::string what = ErrorTextFunctionName::quoted(builtin);
-  bool opaque = base->isUnknown() || base->isAnyObject();
-  if (opaque && global != GlobalName::DATE) {
+  bool isOpaque = base->isUnknown() || base->isAnyObject();
+  if (isOpaque && global != GlobalName::DATE) {
     llvm::StringRef example = global == GlobalName::MAP ? "Map<string, int>" : "Set<string>";
     std::string message = ErrorTextInstanceOf::untypedMap(builtin, example);
 
@@ -97,7 +97,7 @@ InstanceOfChecker::checkCollectionInstanceOf(BinaryExpr *bin, GlobalName global)
         .message = message,
     });
   }
-  if (opaque) {
+  if (isOpaque) {
     bin->rhs->type = Type::date();
     return ok(bin);
   }
@@ -169,10 +169,10 @@ const Type *InstanceOfChecker::namedBytesType(const NameExpr *name) const {
   if (name == nullptr) {
     return nullptr;
   }
-  bool local = this->scopes->lookup(name->name).var() != nullptr ||
-               this->scopes->lookup(name->name).func() != nullptr;
+  bool isLocal = this->scopes->lookup(name->name).var() != nullptr ||
+                 this->scopes->lookup(name->name).func() != nullptr;
 
-  return local ? nullptr : BytesChecker::bytesTypeNamed(name->name);
+  return isLocal ? nullptr : BytesChecker::bytesTypeNamed(name->name);
 }
 
 ClassDecl *InstanceOfChecker::knownClassOf(const Type *rhs) {
@@ -185,8 +185,8 @@ InstanceOfChecker::ResultInstanceTested InstanceOfChecker::checkUnknownRight(Bin
   const Type *rhs = bin->rhs->type;
   if (rhs->isConstructor()) {
     const Type *base = bin->lhs->type->nonOptional();
-    bool object = base->isError() || base->isUnknown() || UnknownChecker::isObjectReference(base);
-    if (!object) {
+    bool isObject = base->isError() || base->isUnknown() || UnknownChecker::isObjectReference(base);
+    if (!isObject) {
       std::string message = ErrorTextInstanceOf::notObject(bin->lhs->type->name());
 
       return err(InstanceOfCheckerCheckInstanceOfError{
@@ -239,12 +239,12 @@ InstanceOfChecker::checkGenericInstanceOf(BinaryExpr *bin, const ClassDecl *cls)
 InstanceOfChecker::ResultInstanceTested
 InstanceOfChecker::genericMismatch(const Type *base, llvm::ArrayRef<const Type *> members,
                                    const ClassDecl *cls) {
-  bool related = base->isUnknown() || base->isAnyObject() ||
-                 (base->isObject() && cls->type->isSubtypeOf(base));
+  bool isRelated = base->isUnknown() || base->isAnyObject() ||
+                   (base->isObject() && cls->type->isSubtypeOf(base));
   for (const Type *m : members) {
-    related |= m->isObject() && cls->type->isSubtypeOf(m);
+    isRelated |= m->isObject() && cls->type->isSubtypeOf(m);
   }
-  if (related) {
+  if (isRelated) {
     std::string generic = cls->name.str();
     std::string other =
         base->isUnknown() || base->isAnyObject() ? generic + "<string>" : base->name().str();
@@ -311,8 +311,8 @@ InstanceOfChecker::checkClassInstanceOf(BinaryExpr *bin, const ClassDecl *cls) {
 
 InstanceOfChecker::ResultInstanceTested
 InstanceOfChecker::checkRelatedClass(BinaryExpr *bin, const Type *base, const ClassDecl *cls) {
-  bool related = cls->type->isSubtypeOf(base) || base->isSubtypeOf(cls->type);
-  if (!related && base->isClass()) {
+  bool isRelated = cls->type->isSubtypeOf(base) || base->isSubtypeOf(cls->type);
+  if (!isRelated && base->isClass()) {
     std::string message = ErrorTextInstanceOf::neverClass(base->name(), cls->name);
 
     return err(InstanceOfCheckerCheckInstanceOfError{
@@ -320,7 +320,7 @@ InstanceOfChecker::checkRelatedClass(BinaryExpr *bin, const Type *base, const Cl
         .message = message,
     });
   }
-  if (!related && (!base->bases().empty() || base->isBase())) {
+  if (!isRelated && (!base->bases().empty() || base->isBase())) {
     std::string message = ErrorTextInstanceOf::notImpl(base->name(), cls->name);
 
     return err(InstanceOfCheckerCheckInstanceOfError{
@@ -328,7 +328,7 @@ InstanceOfChecker::checkRelatedClass(BinaryExpr *bin, const Type *base, const Cl
         .message = message,
     });
   }
-  if (!related) {
+  if (!isRelated) {
     std::string message = ErrorTextInstanceOf::neverMade(base->name(), cls->name);
 
     return err(InstanceOfCheckerCheckInstanceOfError{
@@ -360,14 +360,14 @@ InstanceOfChecker::checkBytesInstanceOf(BinaryExpr *bin, const Type *bytes) {
   }
   if (base->isUnion()) {
     std::vector<const Type *> matching;
-    bool maybe = false;
+    bool isMaybe = false;
     for (const Type *m : base->members()) {
       if (is(m)) {
         matching.push_back(m);
       }
-      maybe |= may(m);
+      isMaybe |= may(m);
     }
-    if (matching.empty() && !maybe) {
+    if (matching.empty() && !isMaybe) {
       std::string message = ErrorTextInstanceOf::noneIs(base->name(), what);
 
       return err(InstanceOfCheckerCheckBytesInstanceOfError{

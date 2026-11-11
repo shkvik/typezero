@@ -1,6 +1,6 @@
 #pragma once
 
-#include "compiler/interprocedural/flow_graph_builder/flow_graph_builder.h"
+#include "compiler/interprocedural/wide_writes/flow_graph/flow_graph_builder/flow_graph_builder.h"
 
 namespace tz {
 

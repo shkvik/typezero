@@ -90,7 +90,7 @@ private:
   void bindExplicitTypeArgs(GenericCallBinding &binding, llvm::ArrayRef<TypeRef> typeArgs);
   GenericArgumentForm argumentForm(const GenericCallBinding &binding, size_t i);
   void walkArgument(GenericCallBinding &binding, Inference &inference, size_t i);
-  void checkArgumentNow(GenericCallBinding &binding, size_t i, const Type *hint);
+  void walkArgumentNow(GenericCallBinding &binding, size_t i, const Type *hint);
   void inferFromLiteralText(GenericCallBinding &binding, Inference &inference, size_t i,
                             const StringLitExpr *text);
   void inferFromLiteralShape(GenericCallBinding &binding, Inference &inference, size_t i,

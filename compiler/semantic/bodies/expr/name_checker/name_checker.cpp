@@ -56,10 +56,10 @@ NameChecker::ResultNoTypeArguments NameChecker::typeArgsAbsent(const NameExpr *n
 NameChecker::ResultVariableVisible NameChecker::notCaptured(const NameExpr *name,
                                                             const ScopeEntry &entry) const {
   const ClassDecl *current = this->state.getClassContext().getCurrentClass();
-  bool captured = this->state.getClassContext().isInsideStaticInit() && current &&
-                  current->expression() && !entry.var()->isGlobal() &&
-                  llvm::is_contained(current->locals, name->name);
-  if (captured) {
+  bool isCaptured = this->state.getClassContext().isInsideStaticInit() && current &&
+                    current->expression() && !entry.var()->isGlobal() &&
+                    llvm::is_contained(current->locals, name->name);
+  if (isCaptured) {
     std::string message = ErrorTextNameUse::staticUse(name->name);
 
     return err(NameCheckerNotCapturedError{
@@ -202,11 +202,11 @@ NameChecker::UnknownNameKind NameChecker::laterNameKind(const NameExpr *name,
                                                         std::optional<GlobalName> global) const {
   llvm::StringRef text = name->name;
   const ClassDecl *current = this->state.getClassContext().getCurrentClass();
-  bool expression = current != nullptr && current->expression();
-  if (expression && !current->name.empty() && current->name == text) {
+  bool isExpression = current != nullptr && current->expression();
+  if (isExpression && !current->name.empty() && current->name == text) {
     return UnknownNameKind::OWN_CLASS_EXPRESSION;
   }
-  if (expression && llvm::is_contained(current->locals, text)) {
+  if (isExpression && llvm::is_contained(current->locals, text)) {
     return UnknownNameKind::CAPTURED_LOCAL;
   }
   if (this->topLevelChecker->checkLoaded(name).isErr()) {
@@ -237,9 +237,9 @@ bool NameChecker::isDeclaredAfterCall(llvm::StringRef text) const {
     return false;
   }
   ModuleStates &modules = this->state.getModuleStates();
-  bool topLevel = modules.getModuleState(modules.getCurrentModule()).topLevelNames.contains(text);
+  bool isTopLevel = modules.getModuleState(modules.getCurrentModule()).topLevelNames.contains(text);
 
-  return topLevel || this->state.getScopeStack().findDeclaredLater(text) != nullptr;
+  return isTopLevel || this->state.getScopeStack().findDeclaredLater(text) != nullptr;
 }
 
 bool NameChecker::isConversionName(std::optional<GlobalName> global) {
@@ -284,9 +284,9 @@ NameChecker::ResultResolvedNameUse NameChecker::unknownError(NameCheckerUnknownN
 
 std::string NameChecker::typeOnlyText(const NameExpr *name) const {
   std::optional<GlobalName> result = this->resultTypes->resultName(name->name);
-  bool okType = result == GlobalName::OK_TYPE;
-  llvm::StringRef make = okType ? "ok(value)" : "err(error)";
-  llvm::StringRef test = okType ? "isOk()" : "isErr()";
+  bool isOkType = result == GlobalName::OK_TYPE;
+  llvm::StringRef make = isOkType ? "ok(value)" : "err(error)";
+  llvm::StringRef test = isOkType ? "isOk()" : "isErr()";
 
   return ErrorTextNameUse::typeOnly(name->name, make, test);
 }
@@ -307,8 +307,8 @@ NameChecker::ResultResolvedNameUse NameChecker::reportBigIntName(const NameExpr 
 
 NameChecker::ResultResolvedNameUse NameChecker::notLoadedError(const NameExpr *name) {
   TopLevelChecker::ResultSourceIsLoaded loaded = this->topLevelChecker->checkLoaded(name);
-  bool reported = loaded.error().code == TopLevelCheckerCheckLoadedErrorCode::ALREADY_REPORTED;
-  NameCheckerUnknownNameErrorCode code = reported
+  bool isReported = loaded.error().code == TopLevelCheckerCheckLoadedErrorCode::ALREADY_REPORTED;
+  NameCheckerUnknownNameErrorCode code = isReported
                                              ? NameCheckerUnknownNameErrorCode::ALREADY_REPORTED
                                              : NameCheckerUnknownNameErrorCode::NOT_LOADED;
 
@@ -392,22 +392,22 @@ Expr *NameChecker::narrowedName(NameExpr *name, VarSymbol *var) {
   }
   const Type *narrowed = this->genericChecker->narrowedType(var);
   if (narrowed != nullptr) {
-    bool defined = narrowed->isOptional() && this->state.getFlowState().isDefined(var);
-    return this->typeRelations->convert(name, defined ? narrowed->inner() : narrowed);
+    bool isDefined = narrowed->isOptional() && this->state.getFlowState().isDefined(var);
+    return this->typeRelations->convert(name, isDefined ? narrowed->inner() : narrowed);
   }
-  bool defined = name->type->isOptional() && this->state.getFlowState().isDefined(var);
-  const Type *type = defined ? name->type->inner() : name->type;
+  bool isDefined = name->type->isOptional() && this->state.getFlowState().isDefined(var);
+  const Type *type = isDefined ? name->type->inner() : name->type;
   if (type->isResult()) {
-    bool okKnown = this->state.getFlowState().isOkResult(var) && !type->errType()->isNever();
-    if (okKnown) {
+    bool isOkKnown = this->state.getFlowState().isOkResult(var) && !type->errType()->isNever();
+    if (isOkKnown) {
       return this->typeRelations->convert(name, Type::result(type->okType(), Type::never()));
     }
-    bool errKnown = this->state.getFlowState().isErrResult(var) && !type->okType()->isNever();
-    if (errKnown) {
+    bool isErrKnown = this->state.getFlowState().isErrResult(var) && !type->okType()->isNever();
+    if (isErrKnown) {
       return this->typeRelations->convert(name, Type::result(Type::never(), type->errType()));
     }
   }
-  if (defined) {
+  if (isDefined) {
     return this->typeRelations->convert(name, type);
   }
 

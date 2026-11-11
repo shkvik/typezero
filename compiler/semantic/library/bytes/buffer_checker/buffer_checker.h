@@ -89,7 +89,7 @@ private:
   ConstantFolder *constantFolder = nullptr;
   ArgumentChecker *argumentChecker = nullptr;
 
-  void checkWriteLength(const Expr *object, const Expr *offset, const Expr *length);
+  void walkWriteLength(const Expr *object, const Expr *offset, const Expr *length);
 };
 
 }

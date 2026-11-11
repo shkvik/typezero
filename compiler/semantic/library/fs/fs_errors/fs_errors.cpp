@@ -25,12 +25,12 @@ const Type *FsErrors::ofCall(const CallExpr *call) {
       return this->named("ReadFileError");
     case Builtin::FsWriteFile: {
       std::string flag = FsErrors::textOf(arg(2));
-      bool append = flag.find('a') != std::string::npos;
-      bool fresh = flag.find('x') != std::string::npos;
-      if (append) {
-        return this->named(fresh ? "AppendNewFileError" : "AppendFileError");
+      bool isAppend = flag.find('a') != std::string::npos;
+      bool isFresh = flag.find('x') != std::string::npos;
+      if (isAppend) {
+        return this->named(isFresh ? "AppendNewFileError" : "AppendFileError");
       }
-      return this->named(fresh ? "WriteNewFileError" : "WriteFileError");
+      return this->named(isFresh ? "WriteNewFileError" : "WriteFileError");
     }
     case Builtin::FsAccess:
       return this->named("AccessError");
@@ -39,12 +39,12 @@ const Type *FsErrors::ofCall(const CallExpr *call) {
     case Builtin::FsTruncate:
       return this->named("TruncateError");
     case Builtin::FsStat: {
-      bool follow = FsErrors::literalTrue(arg(1));
-      bool throwIfMissing = FsErrors::literalTrue(arg(2));
-      if (follow) {
-        return this->named(throwIfMissing ? "StatusError" : "StatusIfExistsError");
+      bool isFollow = FsErrors::literalTrue(arg(1));
+      bool isThrowIfMissing = FsErrors::literalTrue(arg(2));
+      if (isFollow) {
+        return this->named(isThrowIfMissing ? "StatusError" : "StatusIfExistsError");
       }
-      return this->named(throwIfMissing ? "LinkStatusError" : "LinkStatusIfExistsError");
+      return this->named(isThrowIfMissing ? "LinkStatusError" : "LinkStatusIfExistsError");
     }
     case Builtin::FsReaddir:
       return this->named("ReadDirectoryError");

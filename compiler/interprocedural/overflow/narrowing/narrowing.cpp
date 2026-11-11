@@ -38,21 +38,28 @@ namespace tz {
 Narrowing::Narrowing(OverflowCheck &check)
     : check(check) {}
 
-std::optional<double> Narrowing::literalValue(const Expr *expr) {
-  expr = OverflowHelpers::stripCasts(expr);
-  if (auto *lit = dyn_cast_or_null<IntLitExpr>(expr)) {
-    return double(lit->value);
+std::optional<double> Narrowing::literalValue(const Expr *expr) const {
+  bool isNegated = false;
+  const Expr *link = OverflowHelpers::stripCasts(expr);
+  const auto *unary = dyn_cast_or_null<UnaryExpr>(link);
+  while (unary != nullptr && unary->op == UnaryOp::Neg) {
+    isNegated = !isNegated;
+    link = OverflowHelpers::stripCasts(unary->operand);
+    unary = dyn_cast_or_null<UnaryExpr>(link);
   }
-  if (auto *lit = dyn_cast_or_null<FloatLitExpr>(expr)) {
-    return lit->value;
+  std::optional<double> value;
+  const auto *intLiteral = dyn_cast_or_null<IntLitExpr>(link);
+  const auto *floatLiteral = dyn_cast_or_null<FloatLitExpr>(link);
+  if (intLiteral != nullptr) {
+    value = double(intLiteral->value);
+  } else if (floatLiteral != nullptr) {
+    value = floatLiteral->value;
   }
-  if (auto *unary = dyn_cast_or_null<UnaryExpr>(expr); unary && unary->op == UnaryOp::Neg) {
-    if (std::optional<double> v = Narrowing::literalValue(unary->operand)) {
-      return -*v;
-    }
+  if (!value.has_value()) {
+    return std::nullopt;
   }
 
-  return std::nullopt;
+  return isNegated ? -*value : *value;
 }
 
 void Narrowing::notePredicate(const FunctionDecl *fn, const State &whenTrue,
@@ -83,6 +90,17 @@ void Narrowing::notePredicate(const FunctionDecl *fn, const State &whenTrue,
 
 std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
                                                                const State &st) const {
+  auto order = this->narrowOrder(expr);
+  auto answers = std::vector<MaybeNarrowable>();
+  for (const Expr *node : order) {
+    MaybeNarrowable answer = this->nodeNarrowable(node, st, answers);
+    answers.push_back(answer);
+  }
+
+  return answers.back();
+}
+
+const Expr *Narrowing::stripNumericCasts(const Expr *expr) const {
   while (auto *conv = dyn_cast_or_null<CastExpr>(expr)) {
     if (!conv->isImplicit() || !conv->operand->type ||
         !conv->operand->type->nonOptional()->isNumeric()) {
@@ -90,68 +108,122 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
     }
     expr = conv->operand;
   }
+
+  return expr;
+}
+
+std::vector<const Expr *> Narrowing::narrowOrder(const Expr *expr) const {
+  auto order = std::vector<const Expr *>();
+  auto pending = std::vector<const Expr *>{this->stripNumericCasts(expr)};
+  while (!pending.empty()) {
+    const Expr *node = pending.back();
+    pending.pop_back();
+    order.push_back(node);
+    for (const Expr *child : this->narrowParts(node)) {
+      pending.push_back(this->stripNumericCasts(child));
+    }
+  }
+  std::reverse(order.begin(), order.end());
+
+  return order;
+}
+
+std::vector<const Expr *> Narrowing::narrowParts(const Expr *expr) const {
+  auto *bin = dyn_cast_or_null<BinaryExpr>(expr);
+  bool isLinear = bin != nullptr && (bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub ||
+                                     bin->op == BinaryOp::Mul);
+  if (isLinear) {
+    return {bin->lhs, bin->rhs};
+  }
+  auto *call = dyn_cast_or_null<CallExpr>(expr);
+  if (call != nullptr && call->builtin() == Builtin::MathAbs && call->args.size() == 1) {
+    return {call->args[0]};
+  }
+
+  return {};
+}
+
+Narrowing::MaybeNarrowable Narrowing::nodeNarrowable(const Expr *expr, const State &st,
+                                                     std::vector<MaybeNarrowable> &answers) const {
   if (!expr) {
     return std::nullopt;
   }
-  if (auto *bin = dyn_cast<BinaryExpr>(expr);
-      bin && (bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub || bin->op == BinaryOp::Mul)) {
-    if (bin->op == BinaryOp::Mul) {
-      std::optional<OverflowCheck::Narrowable> a = narrowable(bin->lhs, st),
-                                               b = narrowable(bin->rhs, st);
-      if (a && b && a->var == b->var && a->length == b->length && a->scale == 1 && a->offset == 0 &&
-          b->scale == 1 && b->offset == 0 && !a->square && !b->square) {
-        a->square = true;
-        return a;
-      }
+  auto *bin = dyn_cast<BinaryExpr>(expr);
+  bool isLinear = bin != nullptr && (bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub ||
+                                     bin->op == BinaryOp::Mul);
+  if (isLinear) {
+    MaybeNarrowable right = this->takeNarrowable(answers);
+    MaybeNarrowable left = this->takeNarrowable(answers);
+    return this->linearNarrowable(bin, left, right);
+  }
+  auto *call = dyn_cast<CallExpr>(expr);
+  if (call != nullptr && call->builtin() == Builtin::MathAbs && call->args.size() == 1) {
+    MaybeNarrowable inner = this->takeNarrowable(answers);
+    return this->absNarrowable(inner);
+  }
+
+  return this->leafNarrowable(expr, st);
+}
+
+Narrowing::MaybeNarrowable Narrowing::linearNarrowable(const BinaryExpr *bin,
+                                                       const MaybeNarrowable &left,
+                                                       const MaybeNarrowable &right) const {
+  if (bin->op == BinaryOp::Mul) {
+    bool isSquare = left && right && left->var == right->var && left->length == right->length &&
+                    left->scale == 1 && left->offset == 0 && right->scale == 1 &&
+                    right->offset == 0 && !left->square && !right->square;
+    if (isSquare) {
+      MaybeNarrowable squared = left;
+      squared->square = true;
+      return squared;
     }
-    std::optional<double> c = Narrowing::literalValue(bin->rhs);
-    const Expr *other = bin->lhs;
-    bool constantFirst = false;
-    if (!c && bin->op != BinaryOp::Sub) {
-      c = Narrowing::literalValue(bin->lhs);
-      other = bin->rhs;
-      constantFirst = true;
-    } else if (!c && bin->op == BinaryOp::Sub) {
-      c = Narrowing::literalValue(bin->lhs);
-      other = bin->rhs;
-      constantFirst = true;
-    }
-    if (!c) {
-      return std::nullopt;
-    }
-    std::optional<OverflowCheck::Narrowable> n = narrowable(other, st);
-    if (!n || n->square) {
-      return std::nullopt;
-    }
-    if (bin->op == BinaryOp::Add) {
-      n->offset += *c;
-    } else if (bin->op == BinaryOp::Sub) {
-      if (constantFirst) {
-        n->scale = -n->scale;
-        n->offset = *c - n->offset;
-      } else {
-        n->offset -= *c;
-      }
+  }
+  std::optional<double> c = this->literalValue(bin->rhs);
+  MaybeNarrowable n = left;
+  bool isConstantFirst = false;
+  if (!c) {
+    c = this->literalValue(bin->lhs);
+    n = right;
+    isConstantFirst = true;
+  }
+  if (!c) {
+    return std::nullopt;
+  }
+  if (!n || n->square) {
+    return std::nullopt;
+  }
+  if (bin->op == BinaryOp::Add) {
+    n->offset += *c;
+  } else if (bin->op == BinaryOp::Sub) {
+    if (isConstantFirst) {
+      n->scale = -n->scale;
+      n->offset = *c - n->offset;
     } else {
-      if (*c == 0) {
-        return std::nullopt;
-      }
-      n->scale *= *c;
-      n->offset *= *c;
+      n->offset -= *c;
     }
-    n->integer = n->integer && *c == std::trunc(*c);
-    return n;
-  }
-  if (auto *call = dyn_cast<CallExpr>(expr);
-      call && call->builtin() == Builtin::MathAbs && call->args.size() == 1) {
-    std::optional<OverflowCheck::Narrowable> inner = narrowable(call->args[0], st);
-    if (!inner || inner->length || inner->square || inner->abs || inner->scale != 1 ||
-        inner->offset != 0) {
+  } else {
+    if (*c == 0) {
       return std::nullopt;
     }
-    inner->abs = true;
-    return inner;
+    n->scale *= *c;
+    n->offset *= *c;
   }
+  n->integer = n->integer && *c == std::trunc(*c);
+
+  return n;
+}
+
+Narrowing::MaybeNarrowable Narrowing::absNarrowable(MaybeNarrowable inner) const {
+  if (!inner || inner->length || inner->square || inner->abs || inner->scale != 1 ||
+      inner->offset != 0) {
+    return std::nullopt;
+  }
+  inner->abs = true;
+
+  return inner;
+}
+
+Narrowing::MaybeNarrowable Narrowing::leafNarrowable(const Expr *expr, const State &st) const {
   OverflowCheck::Narrowable n;
   const NameExpr *name = nullptr;
   if (auto *update = dyn_cast<UpdateExpr>(expr)) {
@@ -188,6 +260,13 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
   n.var = name->var();
 
   return n;
+}
+
+Narrowing::MaybeNarrowable Narrowing::takeNarrowable(std::vector<MaybeNarrowable> &answers) const {
+  MaybeNarrowable answer = answers.back();
+  answers.pop_back();
+
+  return answer;
 }
 
 void Narrowing::constrain(State &s, const OverflowCheck::Narrowable &target, const Bound &lower,
@@ -270,20 +349,20 @@ void Narrowing::narrowComparison(const BinaryExpr *bin, const Val &l, const Val 
     if (!target || other.empty()) {
       return;
     }
-    bool integer =
+    bool isInteger =
         target->integer && target->scale == 1 && target->offset == std::trunc(target->offset);
     auto below = [&](const Bound &b) {
-      return Bound{integer ? std::ceil(b.v) - 1 : std::nextafter(b.v, -kInf), b.origin, b.why};
+      return Bound{isInteger ? std::ceil(b.v) - 1 : std::nextafter(b.v, -kInf), b.origin, b.why};
     };
     auto above = [&](const Bound &b) {
-      return Bound{integer ? std::floor(b.v) + 1 : std::nextafter(b.v, kInf), b.origin, b.why};
+      return Bound{isInteger ? std::floor(b.v) + 1 : std::nextafter(b.v, kInf), b.origin, b.why};
     };
     Bound none{-kInf}, top{kInf};
     auto exclude = [&](State &s) {
       if (s.dead || other.lo != other.hi || target->square || (target->abs && other.lo != 0)) {
         return;
       }
-      if (!integer && !(other.lo == 0 && target->scale == 1 && target->offset == 0)) {
+      if (!isInteger && !(other.lo == 0 && target->scale == 1 && target->offset == 0)) {
         return;
       }
       auto found = s.vars.find(target->var);
@@ -295,7 +374,7 @@ void Narrowing::narrowComparison(const BinaryExpr *bin, const Val &l, const Val 
       if (n.empty()) {
         return;
       }
-      double step = integer ? 1 : std::numeric_limits<double>::denorm_min();
+      double step = isInteger ? 1 : std::numeric_limits<double>::denorm_min();
       if (c == 0 && target->scale == 1 && n.lo < 0 && n.hi > 0) {
         n.away = std::max(n.away, step);
       }

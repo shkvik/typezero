@@ -35,20 +35,33 @@ private:
     const NarrowedPart *narrowing = nullptr;
   };
 
+  struct TypeGoal {
+    const Type *type = nullptr;
+    int depth = 0;
+  };
+
+  struct TypeStep {
+    bool holds = false;
+    std::vector<TypeGoal> needs;
+  };
+
   using WritesAt = std::vector<std::vector<WriteAt>>;
   using ResultWideningSafe = Result<const Conversion *, WideWritesWideningError>;
 
   static constexpr int maxDepth = 6;
 
-  static WritesAt writesByNode(const FlowGraph &graph);
-  static bool mayBe(const Write &write, const NarrowedPart &narrowing);
-  static bool mayHold(const Type *type, const Type *value, int depth);
-  static bool mayBePart(const Type *type, const Type *whole, int depth);
-  static bool breaks(const Write &write, const NarrowedPart &narrowing, int depth);
-  static bool nodeMayHold(const FlowGraph &graph, const Conversion &conv, int node, int off);
-  static WriteBreak breakingNarrowing(const Write &write, const Conversion &conv, int depth);
-  static WriteBreak breakingAt(const FlowGraph &graph, const WritesAt &writesAt,
-                               const Conversion &conv, int node, int off, int md);
+  WritesAt writesByNode(const FlowGraph &graph) const;
+  bool mayBe(const Write &write, const NarrowedPart &narrowing) const;
+  bool mayHold(const Type *type, const Type *value, int depth) const;
+  TypeStep holdStep(const TypeGoal &goal, const Type *value) const;
+  bool mayBePart(const Type *type, const Type *whole, int depth) const;
+  TypeStep partStep(const Type *type, const TypeGoal &goal) const;
+  std::vector<TypeGoal> innerGoals(const Type *type, int depth) const;
+  bool breaks(const Write &write, const NarrowedPart &narrowing, int depth) const;
+  bool nodeMayHold(const FlowGraph &graph, const Conversion &conv, int node, int off) const;
+  WriteBreak breakingNarrowing(const Write &write, const Conversion &conv, int depth) const;
+  WriteBreak breakingAt(const FlowGraph &graph, const WritesAt &writesAt, const Conversion &conv,
+                        int node, int off, int md) const;
 
   std::string writeLine(llvm::SMLoc write, llvm::SMLoc at) const;
   WriteBreak breakingAnywhere(const FlowGraph &graph, const Conversion &conv) const;

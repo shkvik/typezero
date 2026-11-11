@@ -25,7 +25,11 @@ struct BodyState {
   BlockSnapshot blockPosition;
   Module *module = nullptr;
   InstanceRecord *instance = nullptr;
-  std::vector<Diagnostics::Captured> *capture = nullptr;
+};
+
+struct BodyCheck {
+  BodyState saved;
+  InstanceRecord *lateOwner = nullptr;
 };
 
 class ReturnInferrer {
@@ -35,7 +39,8 @@ public:
   static bool returnsValue(const Stmt *body);
 
   void inferReturnType(FuncSymbol *fn);
-  void checkAndInfer(FunctionDecl *decl);
+  void walkBodyNow(FunctionDecl *decl);
+  void inferFromBody(FunctionDecl *decl);
   const Type *returnType(FuncSymbol *fn);
   const Type *functionType(FuncSymbol *fn);
   void leaveBody(BodyState &saved);
@@ -52,6 +57,8 @@ private:
   static bool givesValue(const ReturnStmt *result);
   static std::vector<ReturnStmt *> literalsLast(llvm::ArrayRef<ReturnStmt *> returns);
 
+  BodyCheck startBodyCheck(FuncSymbol *fn);
+  void finishBodyCheck(BodyCheck &check);
   const Type *trialReturn(FuncSymbol *fn);
   const Type *templateReturn(FuncSymbol *fn);
   ResultNotCalledEarly earlyCall(const FuncSymbol *fn) const;

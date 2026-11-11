@@ -196,9 +196,12 @@ void BuiltinModuleChecker::bindNodeName(ModuleState &here, const ImportDecl &dec
     this->state.getDiagnostics().note(own->second, declared);
     return;
   }
-  bool taken = here.imports.count(binding.alias) != 0 ||
-               !here.nodeNames.try_emplace(binding.alias, binding.node).second;
-  if (taken) {
+  bool isTaken = here.imports.count(binding.alias) != 0;
+  if (!isTaken) {
+    auto [_, isEmplaced] = here.nodeNames.try_emplace(binding.alias, binding.node);
+    isTaken = !isEmplaced;
+  }
+  if (isTaken) {
     std::string message = ErrorTextNodeImport::duplicate(binding.alias);
     this->state.getDiagnostics().error(binding.loc, message);
   }
@@ -470,9 +473,10 @@ Expr *BuiltinModuleChecker::checkNodeMemberCall(CallExpr *call, MemberExpr *memb
 
 Expr *BuiltinModuleChecker::checkSchedulerCall(CallExpr *call, MemberExpr *member) {
   TimerChecker::ResultSchedulerAwait awaited = this->timerChecker->checkSchedulerCall(call, member);
-  bool reported = awaited.isErr() &&
-                  awaited.error().code == TimerCheckerCheckSchedulerCallErrorCode::ALREADY_REPORTED;
-  if (awaited.isErr() && !reported) {
+  bool isReported =
+      awaited.isErr() &&
+      awaited.error().code == TimerCheckerCheckSchedulerCallErrorCode::ALREADY_REPORTED;
+  if (awaited.isErr() && !isReported) {
     this->state.getDiagnostics().error(member->loc(), awaited.error().message);
   }
 

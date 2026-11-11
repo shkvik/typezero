@@ -53,8 +53,8 @@ Expr *TimerChecker::checkTaskCallback(Expr *arg, llvm::StringRef fn) {
   if (type->isError()) {
     return arg;
   }
-  bool adaptable = type->isFunction() && type != task && type->minArgs() == 0 && !type->hasRest();
-  Expr *adapted = adaptable ? this->functionValueChecker->adaptFunction(arg, task) : nullptr;
+  bool isAdaptable = type->isFunction() && type != task && type->minArgs() == 0 && !type->hasRest();
+  Expr *adapted = isAdaptable ? this->functionValueChecker->adaptFunction(arg, task) : nullptr;
   ResultTaskCallbackOk fits = TimerChecker::taskCallback(type, task, adapted, fn);
   if (fits.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), fits.error().message);
@@ -160,7 +160,7 @@ bool TimerChecker::isTimerName(const NameExpr *name) const {
 TimerChecker::ResultTimerScheduled
 TimerChecker::checkTimeoutCall(CallExpr *call, llvm::StringRef fn, bool interval) {
   if (call->args.size() > 2) {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextAsyncGlobal::callbackArg();
 
     return err(TimerCheckerCheckAsyncGlobalError{
@@ -196,8 +196,8 @@ TimerChecker::checkTimeoutCall(CallExpr *call, llvm::StringRef fn, bool interval
 int TimerChecker::receiverBits(Expr *callback, bool interval) {
   int bits = 0;
   if (interval) {
-    bool classified = this->emitterChecker->classifyListener(callback, nullptr, bits, true);
-    return classified ? bits : 0;
+    bool isClassified = this->emitterChecker->classifyListener(callback, nullptr, bits, true);
+    return isClassified ? bits : 0;
   }
   if (this->rearms(callback)) {
     this->emitterChecker->classifyListener(callback, nullptr, bits, true);
@@ -219,7 +219,7 @@ void TimerChecker::appendReceiverArgs(CallExpr *call, int bits) {
 TimerChecker::ResultTimerScheduled
 TimerChecker::checkTaskQueueCall(CallExpr *call, llvm::StringRef fn, bool immediate) {
   if (call->args.size() > 1 && immediate) {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextAsyncGlobal::callbackArg();
 
     return err(TimerCheckerCheckAsyncGlobalError{
@@ -287,7 +287,7 @@ TimerChecker::ResultNextTickQueued TimerChecker::checkNextTick(CallExpr *call) {
   this->state.getInventoryStore().markUsesAsync();
   call->type = Type::error();
   if (call->args.size() > 1) {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextAsyncGlobal::callbackArg();
 
     return err(TimerCheckerCheckNextTickError{
@@ -329,7 +329,7 @@ TimerChecker::ResultTimerMethodRun TimerChecker::checkTimerMethod(CallExpr *call
     }
   }
   if (!method) {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextTimerMethod::noMethod(name, type->name(), type->isImmediate());
 
     return err(TimerCheckerCheckTimerMethodError{
@@ -363,7 +363,7 @@ TimerChecker::ResultPromiseOfTimer TimerChecker::checkTimersPromisesCall(CallExp
   this->state.getInventoryStore().markUsesAsync();
   call->type = Type::error();
   if (fn == "scheduler") {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextTimersPromises::scheduler();
 
     return err(TimerCheckerCheckTimersPromisesCallError{
@@ -377,9 +377,9 @@ TimerChecker::ResultPromiseOfTimer TimerChecker::checkTimersPromisesCall(CallExp
         .message = "",
     });
   }
-  bool immediate = fn == "setImmediate";
-  bool interval = fn == "setInterval";
-  size_t valueAt = immediate ? 0 : 1;
+  bool isImmediate = fn == "setImmediate";
+  bool isInterval = fn == "setInterval";
+  size_t valueAt = isImmediate ? 0 : 1;
   ArgumentChecker::ResultArityMatches arity =
       this->argumentChecker->checkArity(call, 0, unsigned(valueAt + 2));
   if (arity.isErr()) {
@@ -390,7 +390,7 @@ TimerChecker::ResultPromiseOfTimer TimerChecker::checkTimersPromisesCall(CallExp
   }
 
   std::vector<Expr *> args;
-  if (!immediate) {
+  if (!isImmediate) {
     args.push_back(this->checkDelayArg(call, loc));
   }
   ResultTimerValueKept kept = this->timerValue(call, valueAt, fn, expected);
@@ -415,12 +415,12 @@ TimerChecker::ResultPromiseOfTimer TimerChecker::checkTimersPromisesCall(CallExp
   call->args = std::move(args);
   call->spread.clear();
 
-  return ok(TimerChecker::promisedTimer(call, value, immediate, interval));
+  return ok(TimerChecker::promisedTimer(call, value, isImmediate, isInterval));
 }
 
 Expr *TimerChecker::checkDelayArg(CallExpr *call, llvm::SMLoc loc) {
-  bool missing = call->args.empty() || isa<UndefinedExpr>(call->args[0]);
-  if (!missing) {
+  bool isMissing = call->args.empty() || isa<UndefinedExpr>(call->args[0]);
+  if (!isMissing) {
     return this->argumentChecker->checkAnyNumber(call->args[0]);
   }
   auto *one = this->state.getAst().make<FloatLitExpr>(loc, 1.0);
@@ -476,9 +476,9 @@ const Type *TimerChecker::promisedHint(const Type *expected) {
     return nullptr;
   }
   const Type *wanted = expected->nonOptional()->promised();
-  bool empty = wanted->isVoid() || wanted->isNever();
+  bool isEmpty = wanted->isVoid() || wanted->isNever();
 
-  return empty ? nullptr : wanted;
+  return isEmpty ? nullptr : wanted;
 }
 
 Expr *TimerChecker::checkRefOption(Expr *ref, llvm::SMLoc loc) {
@@ -509,9 +509,9 @@ TimerChecker::ResultSchedulerAwait TimerChecker::checkSchedulerCall(CallExpr *ca
                                                                     MemberExpr *member) {
   this->state.getInventoryStore().markUsesAsync();
   call->type = Type::error();
-  bool known = member->name == "wait" || member->name == "yield";
-  if (!known) {
-    this->argumentChecker->checkArgsLoosely(call);
+  bool isKnown = member->name == "wait" || member->name == "yield";
+  if (!isKnown) {
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextScheduler::noFunction(member->name);
 
     return err(TimerCheckerCheckSchedulerCallError{
@@ -525,16 +525,16 @@ TimerChecker::ResultSchedulerAwait TimerChecker::checkSchedulerCall(CallExpr *ca
         .message = "",
     });
   }
-  bool wait = member->name == "wait";
+  bool isWait = member->name == "wait";
   ArgumentChecker::ResultArityMatches arity =
-      this->argumentChecker->checkArity(call, wait ? 1 : 0, wait ? 2 : 0);
+      this->argumentChecker->checkArity(call, isWait ? 1 : 0, isWait ? 2 : 0);
   if (arity.isErr()) {
     return err(TimerCheckerCheckSchedulerCallError{
         .code = TimerCheckerCheckSchedulerCallErrorCode::WRONG_ARITY,
         .message = arity.error().message,
     });
   }
-  if (wait) {
+  if (isWait) {
     Expr *options = call->args.size() > 1 ? call->args[1] : nullptr;
     auto *none = this->state.getAst().make<UndefinedExpr>(member->loc());
     call->args = {call->args[0], none};
@@ -544,11 +544,11 @@ TimerChecker::ResultSchedulerAwait TimerChecker::checkSchedulerCall(CallExpr *ca
   }
 
   ResultPromiseOfTimer promised = this->checkTimersPromisesCall(
-      call, wait ? "setTimeout" : "setImmediate", member->loc(), nullptr);
-  bool reported =
+      call, isWait ? "setTimeout" : "setImmediate", member->loc(), nullptr);
+  bool isReported =
       promised.isErr() &&
       promised.error().code == TimerCheckerCheckTimersPromisesCallErrorCode::ALREADY_REPORTED;
-  if (reported) {
+  if (isReported) {
     return err(TimerCheckerCheckSchedulerCallError{
         .code = TimerCheckerCheckSchedulerCallErrorCode::ALREADY_REPORTED,
         .message = "",

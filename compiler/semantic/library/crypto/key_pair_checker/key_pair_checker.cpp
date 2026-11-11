@@ -132,14 +132,14 @@ std::optional<KeyPairChecker::KeyPairKind> KeyPairChecker::keyPairKind(CallExpr 
 
 bool KeyPairChecker::keyPairOptionsRead(CallExpr *call, llvm::StringRef shown,
                                         llvm::StringMap<Expr *> &options) {
-  bool read =
+  bool isRead =
       call->args.size() <= 1 ||
       this->cryptoArgs->cryptoOptions(call->args[1], shown,
                                       {"modulusLength", "publicExponent", "namedCurve",
                                        "publicKeyEncoding", "privateKeyEncoding", "divisorLength",
                                        "hashAlgorithm", "mgf1HashAlgorithm", "saltLength"},
                                       options);
-  if (!read) {
+  if (!isRead) {
     return false;
   }
   for (llvm::StringRef unsupported : {"hashAlgorithm", "mgf1HashAlgorithm", "saltLength"}) {
@@ -166,8 +166,8 @@ KeyPairChecker::keyPairNumbers(llvm::SMLoc loc, int which, const llvm::StringMap
   if (m != nullptr) {
     numbers.modulus = this->cryptoArgs->cryptoNumber(m);
     std::optional<double> bits = this->cryptoArgs->knownNumber(numbers.modulus);
-    bool rsa = which == 0 || which == 1;
-    if (rsa && bits.has_value() && *bits < 512) {
+    bool isRsa = which == 0 || which == 1;
+    if (isRsa && bits.has_value() && *bits < 512) {
       std::string message = ErrorTextKeyPair::small(CryptoArgs::numberText(*bits));
       this->state.getDiagnostics().error(m->loc(), message);
       return std::nullopt;

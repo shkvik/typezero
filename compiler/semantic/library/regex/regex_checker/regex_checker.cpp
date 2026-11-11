@@ -140,8 +140,8 @@ void RegexChecker::noteRegexVariable(VarSymbol *var, const Expr *init, bool isCo
       return;
     }
     std::vector<const Stmt *> following = VarChecker::followingStatements(block, index);
-    bool assigned = RegexChecker::assignsName(following, var->name);
-    if (assigned) {
+    bool isAssigned = RegexChecker::assignsName(following, var->name);
+    if (isAssigned) {
       return;
     }
   }
@@ -310,9 +310,9 @@ Expr *RegexChecker::checkRegExpConstructor(llvm::SMLoc loc, std::vector<Expr *> 
   }
   auto *escaped = dyn_cast<CallExpr>(args[0]);
   auto *escape = escaped ? dyn_cast<MemberExpr>(escaped->callee) : nullptr;
-  bool fromEscape = escape && escape->name == "escape" &&
-                    this->callChecker->isGlobalName(escape->object, GlobalName::REG_EXP);
-  if (!fromEscape || !flags) {
+  bool isFromEscape = escape && escape->name == "escape" &&
+                      this->callChecker->isGlobalName(escape->object, GlobalName::REG_EXP);
+  if (!isFromEscape || !flags) {
     std::string message = ErrorTextRegExpNew::unknown(args.size() > 1);
     this->state.getDiagnostics().error(loc, message);
     return loosely();
@@ -335,13 +335,13 @@ Expr *RegexChecker::checkRegExpConstructor(llvm::SMLoc loc, std::vector<Expr *> 
 Expr *RegexChecker::checkRegExpStatic(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   if (member->name == "parse") {
-    bool rejected = this->callChecker->rejectSpread(call);
+    bool isRejected = this->callChecker->rejectSpread(call);
     ArgumentChecker::ResultArityMatches arity =
-        rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
+        isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
     }
-    if (rejected || arity.isErr()) {
+    if (isRejected || arity.isErr()) {
       return call;
     }
     for (Expr *&arg : call->args) {
@@ -358,13 +358,13 @@ Expr *RegexChecker::checkRegExpStatic(CallExpr *call, MemberExpr *member) {
     }
     return call;
   }
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
-  if (rejected || arity.isErr()) {
+  if (isRejected || arity.isErr()) {
     return call;
   }
   call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
@@ -377,10 +377,10 @@ Expr *RegexChecker::checkRegExpStatic(CallExpr *call, MemberExpr *member) {
 Expr *RegexChecker::checkRegExpStaticMember(MemberExpr *member) {
   member->type = Type::error();
   llvm::StringRef name = member->name;
-  bool legacy = name.starts_with("$") || name == "input" || name == "lastMatch" ||
-                name == "lastParen" || name == "leftContext" || name == "rightContext";
+  bool isLegacy = name.starts_with("$") || name == "input" || name == "lastMatch" ||
+                  name == "lastParen" || name == "leftContext" || name == "rightContext";
   std::string message = name == "escape" ? ErrorTextRegExpStatic::escape()
-                        : legacy         ? ErrorTextRegExpStatic::legacy(name)
+                        : isLegacy       ? ErrorTextRegExpStatic::legacy(name)
                                          : ErrorTextRegExpStatic::noMember(name);
   this->state.getDiagnostics().error(member->loc(), message);
 

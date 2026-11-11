@@ -140,9 +140,9 @@ void Executor::jump(const Stmt *, llvm::StringRef label, bool isBreak, State &st
   size_t floor = this->check.frames.back().targets;
   for (size_t i = this->check.targets.size(); i > floor; --i) {
     OverflowCheck::Target &t = this->check.targets[i - 1];
-    bool matches =
+    bool isMatching =
         label.empty() ? (isBreak ? !t.block : t.loop) : llvm::is_contained(t.labels, label);
-    if (!matches) {
+    if (!isMatching) {
       continue;
     }
     if (t.quiet != this->check.quiet) {

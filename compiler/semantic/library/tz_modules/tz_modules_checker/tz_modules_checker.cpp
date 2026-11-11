@@ -115,7 +115,7 @@ TzModulesChecker::ResultExternalReturn TzModulesChecker::externalReturn(const Ty
   return ok(ret);
 }
 
-void TzModulesChecker::checkExternal(FunctionDecl *fn) {
+void TzModulesChecker::walkExternal(FunctionDecl *fn) {
   FuncSymbol *sym = fn->sym;
   fn->checked = true;
   ResultPlainSignature plain = TzModulesChecker::plainSignature(fn);
@@ -154,7 +154,7 @@ Expr *TzModulesChecker::adaptResult(Expr *expr, const Type *to) {
       to->hasRest() || from->hasThis() != to->hasThis() || (given.size() < to->minArgs())) {
     return nullptr;
   }
-  bool converts = false;
+  bool isConverting = false;
   for (size_t i = 0; i < given.size(); ++i) {
     if (mine[i] == given[i]) {
       continue;
@@ -162,12 +162,12 @@ Expr *TzModulesChecker::adaptResult(Expr *expr, const Type *to) {
     if (!mine[i]->nonOptional()->isUnknown() || given[i]->isVoid()) {
       return nullptr;
     }
-    converts = true;
+    isConverting = true;
   }
-  bool fewer = mine.size() > given.size();
+  bool isFewer = mine.size() > given.size();
   const Type *got = from->ret();
   const Type *wanted = to->ret();
-  if ((got == wanted && !fewer && !converts) || got->isVoid() || wanted->isVoid() ||
+  if ((got == wanted && !isFewer && !isConverting) || got->isVoid() || wanted->isVoid() ||
       got->isError() || wanted->isError() ||
       (got != wanted && !TypeRelations::isImplicitlyConvertible(got, wanted))) {
     return nullptr;
@@ -195,8 +195,8 @@ const Expr *TzModulesChecker::prefixInner(const Expr *expr) {
     return conv->operand;
   }
   if (auto *tmpl = dyn_cast<TemplateExpr>(expr)) {
-    bool startsWithValue = tmpl->quasis[0].empty() && !tmpl->exprs.empty();
-    return startsWithValue ? tmpl->exprs[0] : nullptr;
+    bool isStartingWithValue = tmpl->quasis[0].empty() && !tmpl->exprs.empty();
+    return isStartingWithValue ? tmpl->exprs[0] : nullptr;
   }
   if (auto *bin = dyn_cast<BinaryExpr>(expr)) {
     return bin->op == BinaryOp::Add ? bin->lhs : nullptr;
@@ -208,15 +208,15 @@ const Expr *TzModulesChecker::prefixInner(const Expr *expr) {
 
 const Expr *TzModulesChecker::addressArgument(const NewExpr *made) {
   const ClassDecl *cls = made->cls();
-  bool request = cls != nullptr && cls->library() && cls->name == "Request";
-  bool url = cls != nullptr && cls->library() && cls->name == "URL";
-  if (!request && !url) {
+  bool isRequest = cls != nullptr && cls->library() && cls->name == "Request";
+  bool isUrl = cls != nullptr && cls->library() && cls->name == "URL";
+  if (!isRequest && !isUrl) {
     return nullptr;
   }
   const std::vector<Expr *> &args = made->ctor() ? made->ctor()->args : made->args;
-  bool given = !args.empty() && (request || args.size() == 1);
+  bool isGiven = !args.empty() && (isRequest || args.size() == 1);
 
-  return given ? args[0] : nullptr;
+  return isGiven ? args[0] : nullptr;
 }
 
 std::string TzModulesChecker::ownPrefix(const Expr *expr) const {
@@ -278,9 +278,9 @@ void TzModulesChecker::noteServeOptions(const Expr *options) {
       this->state.getInventoryStore().markUsesTls();
     }
   } else {
-    bool secured = !options->type || !options->type->isObject() ||
-                   options->type->field("transport") != nullptr;
-    if (secured) {
+    bool isSecured = !options->type || !options->type->isObject() ||
+                     options->type->field("transport") != nullptr;
+    if (isSecured) {
       this->state.getInventoryStore().markUsesTls();
     }
   }

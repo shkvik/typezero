@@ -33,8 +33,10 @@ public:
   Expr *checkDateOperands(BinaryExpr *bin);
   Expr *dateTime(Expr *date);
   Expr *dateToString(Expr *date);
-  void checkDateLiteral(const Expr *arg);
-  void checkDateFields(std::vector<Expr *> &args, size_t first = 0, llvm::StringRef setter = "");
+  using ResultDateLiteralChecked = Result<void, DateCheckerLiteralDateError>;
+
+  ResultDateLiteralChecked checkDateLiteral(const Expr *arg);
+  void walkDateFields(std::vector<Expr *> &args, size_t first = 0, llvm::StringRef setter = "");
 
 private:
   using ResultLiteralDate = Result<double, DateCheckerLiteralDateError>;

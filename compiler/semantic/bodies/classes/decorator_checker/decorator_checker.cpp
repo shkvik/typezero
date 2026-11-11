@@ -197,7 +197,7 @@ DecoratorChecker::secondConstructor(const ClassDecl *cls, const FunctionDecl *fi
   return ok(cls);
 }
 
-void DecoratorChecker::checkDecoratedNames(ClassDecl *cls) {
+void DecoratorChecker::walkDecoratedNames(ClassDecl *cls) {
   std::vector<DecoratedName> members;
   auto add = [&](llvm::StringRef name, llvm::SMLoc loc, bool isStatic,
                  llvm::ArrayRef<Decorator> decorators, const FunctionDecl *fn) {
@@ -254,7 +254,7 @@ void DecoratorChecker::checkDecoratedNames(ClassDecl *cls) {
 }
 
 void DecoratorChecker::decorateClass(ClassDecl *cls) {
-  this->checkDecoratedNames(cls);
+  this->walkDecoratedNames(cls);
   struct Member {
     ClassField *field;
     FunctionDecl *method;
@@ -391,8 +391,8 @@ DecoratorChecker::ResultMetadataArgsPair DecoratorChecker::metadataArgs(const Ca
 DecoratorChecker::ResultDecoratorReturns
 DecoratorChecker::decoratorResult(llvm::StringRef label, const Type *result, Place place,
                                   bool descriptor, const ClassDecl *current) {
-  bool nothing = result->isVoid() || result->isUndefined() || result->isError();
-  if (!nothing && place == Place::Class && result->isConstructor()) {
+  bool isNothing = result->isVoid() || result->isUndefined() || result->isError();
+  if (!isNothing && place == Place::Class && result->isConstructor()) {
     std::string message = ErrorTextDecoratorResult::runtime(label, result->name(), current->name);
 
     return err(DecoratorCheckerDecoratorResultError{
@@ -400,7 +400,7 @@ DecoratorChecker::decoratorResult(llvm::StringRef label, const Type *result, Pla
         .message = message,
     });
   }
-  if (!nothing && place == Place::Class) {
+  if (!isNothing && place == Place::Class) {
     std::string message = ErrorTextDecoratorResult::forClass(label, result->name());
 
     return err(DecoratorCheckerDecoratorResultError{
@@ -408,7 +408,7 @@ DecoratorChecker::decoratorResult(llvm::StringRef label, const Type *result, Pla
         .message = message,
     });
   }
-  if (!nothing && place == Place::Method && descriptor) {
+  if (!isNothing && place == Place::Method && descriptor) {
     std::string message = ErrorTextDecoratorResult::forMethod(label, result->name());
 
     return err(DecoratorCheckerDecoratorResultError{
@@ -416,7 +416,7 @@ DecoratorChecker::decoratorResult(llvm::StringRef label, const Type *result, Pla
         .message = message,
     });
   }
-  if (!nothing) {
+  if (!isNothing) {
     std::string where = DecoratorChecker::placeText(place);
     std::string message = ErrorTextDecoratorResult::other(label, result->name(), where);
 
@@ -515,9 +515,9 @@ const Type *DecoratorChecker::methodDescriptor(DecorateRun &run) {
 const Type *DecoratorChecker::factoryHint(DecorateRun &run, const Expr *expr) {
   auto *call = dyn_cast<CallExpr>(expr);
   auto *name = call != nullptr ? dyn_cast<NameExpr>(call->callee) : nullptr;
-  bool factoryShape = name != nullptr && name->typeArgs.empty() && run.own == Place::Method &&
-                      !run.cls->isGeneric();
-  if (!factoryShape) {
+  bool isFactoryShape = name != nullptr && name->typeArgs.empty() && run.own == Place::Method &&
+                        !run.cls->isGeneric();
+  if (!isFactoryShape) {
     return nullptr;
   }
   const FuncSymbol *factory = this->scopes->lookup(name->name).func();
@@ -564,7 +564,7 @@ Expr *DecoratorChecker::hoistDecorator(DecorateRun &run, const DecoratorUse &use
     decl->decls.push_back(std::move(d));
   } else {
     decl->decls.push_back(std::move(d));
-    this->stmtChecker->checkStmt(decl);
+    this->stmtChecker->walkStmt(decl);
   }
   run.cls->decorations.push_back(decl);
 
@@ -572,12 +572,12 @@ Expr *DecoratorChecker::hoistDecorator(DecorateRun &run, const DecoratorUse &use
 }
 
 bool DecoratorChecker::decoratorsFit(DecorateRun &run) {
-  bool fitting = true;
+  bool isFitting = true;
   for (size_t i = 0; i < run.uses.size(); ++i) {
-    fitting &= this->decoratorFitsAt(run, i);
+    isFitting &= this->decoratorFitsAt(run, i);
   }
 
-  return fitting;
+  return isFitting;
 }
 
 bool DecoratorChecker::decoratorFitsAt(DecorateRun &run, size_t i) {
@@ -590,12 +590,12 @@ bool DecoratorChecker::decoratorFitsAt(DecorateRun &run, size_t i) {
   }
   std::vector<const Type *> params;
   size_t required = 0;
-  bool known = this->decoratorParams(run.callees[i], params, required);
-  size_t count = known ? params.size() : given;
-  size_t needs = known ? std::min(required, count) : given;
+  bool isKnown = this->decoratorParams(run.callees[i], params, required);
+  size_t count = isKnown ? params.size() : given;
+  size_t needs = isKnown ? std::min(required, count) : given;
   std::string name = DecoratorChecker::decoratorName(use.decorator->expr);
   std::string label = ErrorTextDecoratorPlace::label(name);
-  const Type *third = known && params.size() >= 3 ? params[2]->nonOptional() : nullptr;
+  const Type *third = isKnown && params.size() >= 3 ? params[2]->nonOptional() : nullptr;
   ResultDecoratorArgsFit fits = DecoratorChecker::decoratorFits(label, place, needs, given, third);
   if (fits.isErr()) {
     this->state.getDiagnostics().error(use.decorator->loc, fits.error().message);

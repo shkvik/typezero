@@ -85,13 +85,13 @@ ResultChecker::ResultOkErrTypeArgs ResultChecker::okErrTypeArgs(const NameExpr *
 
 // TODO: говнокод
 Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const Type *expected) {
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 1);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(name->loc(), arity.error().message);
   }
-  if (rejected || arity.isErr()) {
+  if (isRejected || arity.isErr()) {
     return call;
   }
 
@@ -103,7 +103,7 @@ Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const
     const Type *value = this->typeResolver->resolveType(name->typeArgs[0], true);
     const Type *error = this->typeResolver->resolveType(name->typeArgs[1], true);
     if (value->isError() || error->isError()) {
-      this->checkArgsLoosely(call);
+      this->walkArgsLoosely(call);
       call->type = Type::error();
       return call;
     }
@@ -119,14 +119,14 @@ Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const
   const Type *half = Type::voidTy();
   if (!call->args.empty()) {
     Expr *&arg = call->args[0];
-    bool hinted = wantedHalf && ResultChecker::givesType(wantedHalf);
-    arg = this->exprChecker->checkExpr(arg, hinted ? wantedHalf : nullptr);
+    bool isHinted = wantedHalf && ResultChecker::givesType(wantedHalf);
+    arg = this->exprChecker->checkExpr(arg, isHinted ? wantedHalf : nullptr);
     half = arg->type;
     if (half->isVoid()) {
       std::string message = ErrorTextOkErr::voidValue(name->name);
       this->state.getDiagnostics().error(arg->loc(), message);
       half = Type::error();
-    } else if (hinted && TypeRelations::isImplicitlyConvertible(half, wantedHalf)) {
+    } else if (isHinted && TypeRelations::isImplicitlyConvertible(half, wantedHalf)) {
       arg = this->typeRelations->convert(arg, wantedHalf);
       half = wantedHalf;
     } else if (name->typeArgs.size() == 2 && !half->isError()) {
@@ -141,7 +141,7 @@ Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const
   return call;
 }
 
-void ResultChecker::checkArgsLoosely(CallExpr *call) {
+void ResultChecker::walkArgsLoosely(CallExpr *call) {
   for (Expr *&arg : call->args) {
     auto *fe = dyn_cast<FunctionExpr>(arg);
     if (!fe) {
@@ -156,7 +156,7 @@ void ResultChecker::checkArgsLoosely(CallExpr *call) {
 }
 
 Expr *ResultChecker::markCallFailed(CallExpr *call) {
-  this->checkArgsLoosely(call);
+  this->walkArgsLoosely(call);
   call->type = Type::error();
 
   return call;
@@ -194,13 +194,13 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
   if (!this->combineArityFits(call, member)) {
     return call;
   }
-  bool all = method == "combineWithAllErrors";
+  bool isAll = method == "combineWithAllErrors";
   call->target =
-      BuiltinCall{.builtin = all ? Builtin::ResultCombineWithAllErrors : Builtin::ResultCombine};
+      BuiltinCall{.builtin = isAll ? Builtin::ResultCombineWithAllErrors : Builtin::ResultCombine};
   CombineCall combine{
       .call = call,
       .what = name->name.str() + "." + method.str(),
-      .all = all,
+      .all = isAll,
   };
   auto *lit = dyn_cast<ArrayLitExpr>(call->args[0]);
   if (lit != nullptr && ResultChecker::isPlainList(lit)) {
@@ -211,14 +211,14 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
 }
 
 bool ResultChecker::combineArityFits(CallExpr *call, const MemberExpr *member) {
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
 
-  return !rejected && arity.isOk();
+  return !isRejected && arity.isOk();
 }
 
 bool ResultChecker::isPlainList(const ArrayLitExpr *lit) {
@@ -235,11 +235,11 @@ bool ResultChecker::isPlainList(const ArrayLitExpr *lit) {
 }
 
 bool ResultChecker::holdsValues(const CombineCall &combine, const Type *result, const Expr *at) {
-  bool values = ResultChecker::givesType(result->okType());
-  if (values && !(combine.all && result->errType()->isVoid())) {
+  bool hasValues = ResultChecker::givesType(result->okType());
+  if (hasValues && !(combine.all && result->errType()->isVoid())) {
     return true;
   }
-  std::string message = ErrorTextCombine::holds(combine.what, values, result->name());
+  std::string message = ErrorTextCombine::holds(combine.what, hasValues, result->name());
   this->state.getDiagnostics().error(at->loc(), message);
 
   return false;
@@ -284,9 +284,9 @@ const Type *ResultChecker::sameValues(const Type *a, const Type *b) {
                       : x->isVoid() || y->isVoid() ? nullptr
                                                    : TypeRelations::unify(x, y);
   const Type *error = ResultTypes::unifyHalf(a->errType(), b->errType());
-  bool joined = value != nullptr && !value->isError() && error != nullptr;
+  bool isJoined = value != nullptr && !value->isError() && error != nullptr;
 
-  return joined ? Type::result(value, error) : nullptr;
+  return isJoined ? Type::result(value, error) : nullptr;
 }
 
 const Type *ResultChecker::commonResult(llvm::ArrayRef<const Type *> results) {
@@ -424,16 +424,16 @@ ResultChecker::ResultValueGetsUsed ResultChecker::usedValue(const Expr *expr, bo
     return ok(expr);
   }
   auto *call = dyn_cast<CallExpr>(expr);
-  bool taken =
+  bool isTaken =
       call && (call->builtin() == Builtin::ArrPop || call->builtin() == Builtin::ArrShift ||
                call->builtin() == Builtin::ArrSplice);
-  if (taken) {
+  if (isTaken) {
     return ok(expr);
   }
   if (!type->nonOptional()->isResult()) {
-    bool mapped =
+    bool isMapped =
         call && (call->builtin() == Builtin::ArrMap || call->builtin() == Builtin::ArrFlatMap);
-    if (mapped) {
+    if (isMapped) {
       std::string message = ErrorTextUnusedResult::results();
 
       return err(ResultCheckerUsedValueError{

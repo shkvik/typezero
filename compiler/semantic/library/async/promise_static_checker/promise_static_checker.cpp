@@ -62,8 +62,8 @@ PromiseStaticChecker::ResultValueIsNotVoid PromiseStaticChecker::notVoid(const T
 
 PromiseStaticChecker::ResultPlainValueType PromiseStaticChecker::plainValue(const Type *type,
                                                                             llvm::StringRef fn) {
-  bool mayBePromise = !type->isPromise() && AsyncChecker::awaitedType(type) != type;
-  if (mayBePromise) {
+  bool isMayBePromise = !type->isPromise() && AsyncChecker::awaitedType(type) != type;
+  if (isMayBePromise) {
     std::string message = ErrorTextPromiseList::mayBe(fn, type->name());
 
     return err(PromiseStaticCheckerPlainValueError{
@@ -80,9 +80,9 @@ PromiseStaticChecker::ResultListOfPromises PromiseStaticChecker::promiseArray(co
   const Type *type = arg->type;
   if (!type->isArray() && !type->isTuple()) {
     const auto *name = dyn_cast<NameExpr>(arg);
-    bool iterable = type->isIterator() || type->isDict();
+    bool isIterable = type->isIterator() || type->isDict();
     llvm::StringRef values = name ? name->name : llvm::StringRef("values");
-    std::string message = ErrorTextPromiseList::notArray(fn, type->name(), iterable, values);
+    std::string message = ErrorTextPromiseList::notArray(fn, type->name(), isIterable, values);
 
     return err(PromiseStaticCheckerPromiseArrayError{
         .code = PromiseStaticCheckerPromiseArrayErrorCode::NOT_AN_ARRAY,
@@ -97,9 +97,9 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
                                             const Type *&element, std::vector<const Type *> &tuple,
                                             llvm::StringRef fn) {
   auto *lit = dyn_cast<ArrayLitExpr>(arg);
-  bool plainLiteral =
+  bool isPlainLiteral =
       lit != nullptr && llvm::none_of(lit->elements, PromiseStaticChecker::isSpreadOrHole);
-  if (plainLiteral) {
+  if (isPlainLiteral) {
     return this->checkLiteralPromiseList(lit, wantedElement, element, tuple, fn);
   }
 
@@ -129,16 +129,16 @@ bool PromiseStaticChecker::checkLiteralPromiseList(ArrayLitExpr *lit, const Type
     return false;
   }
   auto sameAsFirst = [&](const Type *type) { return type == types.front(); };
-  bool same = llvm::all_of(types, sameAsFirst);
+  bool isSame = llvm::all_of(types, sameAsFirst);
   const Type *common = PromiseStaticChecker::unifiedType(types);
-  if (!same && common != nullptr && !common->isError()) {
+  if (!isSame && common != nullptr && !common->isError()) {
     for (ArrayLitExpr::Element &item : lit->elements) {
       item.expr = this->typeRelations->convert(item.expr, common);
     }
     types.assign(types.size(), common);
-    same = true;
+    isSame = true;
   }
-  if (same) {
+  if (isSame) {
     lit->type = Type::array(types.front());
     element = PromiseStaticChecker::awaited(types.front());
     return true;
@@ -155,8 +155,8 @@ bool PromiseStaticChecker::literalPromiseTypes(ArrayLitExpr *lit, const Type *wa
                                                llvm::StringRef fn,
                                                std::vector<const Type *> &types) {
   for (ArrayLitExpr::Element &item : lit->elements) {
-    bool shaped = wantedElement != nullptr && Destination::literalShaped(item.expr);
-    item.expr = this->exprChecker->checkExpr(item.expr, shaped ? wantedElement : nullptr);
+    bool isShaped = wantedElement != nullptr && Destination::literalShaped(item.expr);
+    item.expr = this->exprChecker->checkExpr(item.expr, isShaped ? wantedElement : nullptr);
     if (item.expr->type->isError()) {
       return false;
     }
@@ -317,7 +317,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
   if (!method.has_value()) {
     std::string message = ErrorTextPromiseStatic::unknown(member->name);
     this->state.getDiagnostics().error(member->loc(), message);
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
 
@@ -410,9 +410,9 @@ Expr *PromiseStaticChecker::checkWithResolvers(CallExpr *call, MemberExpr *membe
   const Type *value = this->resolverValueType(member, expected);
   member->typeArgs.clear();
   ResultValueTypeKnown known = PromiseStaticChecker::resolverValue(value);
-  bool shown = known.isErr() &&
-               known.error().code != PromiseStaticCheckerResolverValueErrorCode::ALREADY_REPORTED;
-  if (shown) {
+  bool isShown = known.isErr() &&
+                 known.error().code != PromiseStaticCheckerResolverValueErrorCode::ALREADY_REPORTED;
+  if (isShown) {
     this->state.getDiagnostics().error(member->loc(), known.error().message);
   }
   if (known.isErr()) {
@@ -449,11 +449,11 @@ Expr *PromiseStaticChecker::checkCombinator(CallExpr *call, MemberExpr *member, 
     return call;
   }
   call->target = BuiltinCall{.builtin = builtin};
-  bool race = builtin == Builtin::PromiseRace;
+  bool isRace = builtin == Builtin::PromiseRace;
   const Type *wantedElement = nullptr;
-  if (wanted != nullptr && !race && wanted->isArray()) {
+  if (wanted != nullptr && !isRace && wanted->isArray()) {
     wantedElement = wanted->inner();
-  } else if (wanted != nullptr && race) {
+  } else if (wanted != nullptr && isRace) {
     wantedElement = wanted;
   }
   const Type *element = nullptr;
@@ -461,7 +461,7 @@ Expr *PromiseStaticChecker::checkCombinator(CallExpr *call, MemberExpr *member, 
   if (!this->checkPromiseList(call->args[0], wantedElement, element, tuple, fn)) {
     return call;
   }
-  if (!tuple.empty() && race) {
+  if (!tuple.empty() && isRace) {
     element = tuple.front();
     for (const Type *part : tuple) {
       ResultRaceTypeJoined joined = PromiseStaticChecker::raceJoin(element, part, fn);
@@ -475,7 +475,7 @@ Expr *PromiseStaticChecker::checkCombinator(CallExpr *call, MemberExpr *member, 
   if (element != nullptr && element->isNever()) {
     element = wantedElement != nullptr ? wantedElement : Type::voidTy();
   }
-  if (race) {
+  if (isRace) {
     call->type = Type::promise(element);
     return call;
   }

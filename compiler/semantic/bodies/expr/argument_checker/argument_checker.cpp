@@ -34,8 +34,8 @@ ArgumentChecker::ResultSpreadRestFits ArgumentChecker::spreadRest(const Expr *ar
 ArgumentChecker::ResultTupleRestCount ArgumentChecker::tupleRest(const ArrayLitExpr *rest,
                                                                  const Type *listRest, size_t fixed,
                                                                  size_t count) {
-  bool tuple = listRest && listRest->isTuple();
-  if (tuple && rest->elements.size() != listRest->fields().size()) {
+  bool isTuple = listRest && listRest->isTuple();
+  if (isTuple && rest->elements.size() != listRest->fields().size()) {
     std::string message = ErrorTextTupleRest::count(fixed + listRest->fields().size(), count);
 
     return err(ArgumentCheckerTupleRestError{
@@ -60,9 +60,9 @@ Expr *ArgumentChecker::checkArguments(CallExpr *call, llvm::ArrayRef<const Type 
       .checked = checked,
   };
   auto least = static_cast<unsigned>(minArgs);
-  bool listParam =
+  bool isListParam =
       hasRest && (params.back()->isListParam() || ArgListChecker::spreadsLists(params.back()));
-  if (listParam) {
+  if (isListParam) {
     return this->checkListParamArguments(call, shape, least);
   }
   size_t spreadLimit = hasRest ? shape.fixed : call->args.size();
@@ -127,9 +127,9 @@ Expr *ArgumentChecker::checkListParamArguments(CallExpr *call, const ArgumentSha
 Expr *ArgumentChecker::packRestArgs(CallExpr *call, const ArgumentShape &shape) {
   const Type *last = shape.params.back();
   const Type *listRest = last->isTuple() || last->isListParam() ? last : nullptr;
-  bool spreadOnly =
+  bool isSpreadOnly =
       listRest != nullptr && call->args.size() == shape.fixed + 1 && call->spreads(shape.fixed);
-  if (spreadOnly) {
+  if (isSpreadOnly) {
     return this->checkSpreadRest(call, shape, listRest);
   }
 
@@ -205,7 +205,7 @@ Expr *ArgumentChecker::checkedRestElement(CallExpr *call, size_t i, const Argume
   return arg;
 }
 
-void ArgumentChecker::checkArgsLoosely(CallExpr *call) {
+void ArgumentChecker::walkArgsLoosely(CallExpr *call) {
   for (Expr *&arg : call->args) {
     arg = this->exprChecker->checkExpr(arg);
   }
@@ -214,9 +214,9 @@ void ArgumentChecker::checkArgsLoosely(CallExpr *call) {
 ArgumentChecker::ResultArityMatches ArgumentChecker::checkArity(CallExpr *call, unsigned min,
                                                                 unsigned max) {
   size_t count = call->args.size();
-  bool fits = count >= min && count <= max;
-  if (!fits && call->tagged) {
-    this->checkArgsLoosely(call);
+  bool isFitting = count >= min && count <= max;
+  if (!isFitting && call->tagged) {
+    this->walkArgsLoosely(call);
     std::string message = ErrorTextArity::tagged(min, max, count);
 
     return err(ArgumentCheckerCheckArityError{
@@ -224,8 +224,8 @@ ArgumentChecker::ResultArityMatches ArgumentChecker::checkArity(CallExpr *call, 
         .message = message,
     });
   }
-  if (!fits) {
-    this->checkArgsLoosely(call);
+  if (!isFitting) {
+    this->walkArgsLoosely(call);
     std::string message = ErrorTextArity::count(min, max, count);
 
     return err(ArgumentCheckerCheckArityError{

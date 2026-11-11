@@ -112,9 +112,9 @@ std::optional<FlowChecker::NarrowedVar> FlowChecker::narrowedOnBoth(const Narrow
   }
   auto [var, type] = narrowed;
   const NarrowedVar *other = FlowChecker::narrowedIn(b, var);
-  bool generic = other == nullptr || var->type->nonOptional()->isParam() || type->isParam() ||
-                 other->second->isParam();
-  if (generic) {
+  bool isGeneric = other == nullptr || var->type->nonOptional()->isParam() || type->isParam() ||
+                   other->second->isParam();
+  if (isGeneric) {
     return std::nullopt;
   }
   const Type *either = Type::unionOf({type, other->second});
@@ -131,10 +131,10 @@ std::optional<FlowChecker::NarrowedVar> FlowChecker::narrowedOnBoth(const Narrow
 void FlowChecker::widenWithUndefined(const Flow &empty, const Flow &other, Flow &result) {
   for (const VarSymbol *var : empty.undefinedVars) {
     const NarrowedVar *narrowed = FlowChecker::narrowedIn(other, var);
-    bool skipped = narrowed == nullptr || var->type->nonOptional()->isParam() ||
-                   var->type->nonOptional()->isJson() || narrowed->second->isParam() ||
-                   FlowChecker::narrowedIn(result, var) != nullptr;
-    if (skipped) {
+    bool isSkipped = narrowed == nullptr || var->type->nonOptional()->isParam() ||
+                     var->type->nonOptional()->isJson() || narrowed->second->isParam() ||
+                     FlowChecker::narrowedIn(result, var) != nullptr;
+    if (isSkipped) {
       continue;
     }
     const Type *either = Type::unionOf({narrowed->second, Type::undefinedTy()});
@@ -231,9 +231,10 @@ void FlowChecker::resetAssignedFlow(const VarSymbol *var, const Expr *value) {
   }
   flow.narrowed = std::move(kept);
   const Type *base = type->nonOptional();
-  bool narrows = base->isUnion() && value->type != nullptr && !value->type->isError() &&
-                 value->type != type && TypeRelations::isImplicitlyConvertible(value->type, base);
-  if (narrows) {
+  bool isNarrowing = base->isUnion() && value->type != nullptr && !value->type->isError() &&
+                     value->type != type &&
+                     TypeRelations::isImplicitlyConvertible(value->type, base);
+  if (isNarrowing) {
     UnionNarrowing::narrowVariable(flow, var, value->type);
   }
   this->state.getFlowState().replaceFlow(std::move(flow));
@@ -274,10 +275,10 @@ void FlowChecker::assignedInteger(const VarSymbol *var, const Expr *value) {
 
 void FlowChecker::addMinMaxBounds(const VarSymbol *var, const Expr *value) {
   auto *call = dyn_cast<CallExpr>(value);
-  bool minMax = call != nullptr &&
-                (call->builtin() == Builtin::MathMin || call->builtin() == Builtin::MathMax) &&
-                !call->hasSpread();
-  if (!minMax) {
+  bool isMinMax = call != nullptr &&
+                  (call->builtin() == Builtin::MathMin || call->builtin() == Builtin::MathMax) &&
+                  !call->hasSpread();
+  if (!isMinMax) {
     return;
   }
   Linear self{Term::of(var), 0};
@@ -296,9 +297,9 @@ void FlowChecker::addMinMaxBounds(const VarSymbol *var, const Expr *value) {
 
 void FlowChecker::assignedLength(const VarSymbol *var, const Expr *value) {
   const Type *base = var->type->nonOptional();
-  bool sized = base->isString() || base->isArray() || base->isByteView() ||
-               base->bytes() == Type::Bytes::ArrayBuffer;
-  if (!sized || value->type->isOptional() || value->type->isUndefined()) {
+  bool isSized = base->isString() || base->isArray() || base->isByteView() ||
+                 base->bytes() == Type::Bytes::ArrayBuffer;
+  if (!isSized || value->type->isOptional() || value->type->isUndefined()) {
     return;
   }
   Facts &facts = this->state.getFlowState().getFacts();
@@ -323,12 +324,12 @@ void FlowChecker::incremented(const VarSymbol *var, int64_t delta) {
     return;
   }
   Term t = Term::of(var);
-  bool safe =
+  bool isSafe =
       delta == 0 || (delta > 0 ? this->state.getFlowState().getFacts().proves(t, Term::zero(),
                                                                               kIntMax - (delta - 1))
                                : this->state.getFlowState().getFacts().proves(
                                      Term::zero(), t, Facts::saturatingSub(delta + 1, kIntMin)));
-  if (safe) {
+  if (isSafe) {
     this->state.getFlowState().getFacts().shift(t, delta);
   } else {
     this->state.getFlowState().getFacts().forget(var);
@@ -397,8 +398,8 @@ bool FlowChecker::readsElement(const Expr *expr, llvm::StringRef name) {
     return FlowChecker::isName(index->object, name);
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
-    bool length = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH);
-    return length && FlowChecker::isName(member->object, name);
+    bool isLength = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH);
+    return isLength && FlowChecker::isName(member->object, name);
   }
 
   return false;
@@ -438,12 +439,12 @@ bool FlowChecker::callsArrayMethod(const Expr *expr, llvm::StringRef name) {
     return false;
   }
   const CallbackArrayMethod *callback = method->form.as<CallbackArrayMethod>();
-  bool sorts = method->form.is<SortingArrayMethod>();
-  if (callback == nullptr && !sorts) {
+  bool isSorting = method->form.is<SortingArrayMethod>();
+  if (callback == nullptr && !isSorting) {
     return true;
   }
-  bool reduces = callback != nullptr && callback->callback == ArrayCallback::REDUCE;
-  size_t arrayParam = reduces ? 3 : 2;
+  bool isReducing = callback != nullptr && callback->callback == ArrayCallback::REDUCE;
+  size_t arrayParam = isReducing ? 3 : 2;
 
   return FlowChecker::callbacksSkipArray(call, arrayParam);
 }
@@ -488,9 +489,9 @@ const Expr *FlowChecker::unwrapResult(const Expr *value) {
     return value;
   }
   std::optional<GlobalName> global = GlobalNameTable::find(maker->name);
-  bool wraps = global == GlobalName::OK || global == GlobalName::ERR;
+  bool isWrapping = global == GlobalName::OK || global == GlobalName::ERR;
 
-  return wraps ? wrap->args[0] : value;
+  return isWrapping ? wrap->args[0] : value;
 }
 
 void FlowChecker::forgetCallEffects(Flow &flow) const {

@@ -46,8 +46,8 @@ DictChecker::ResultDictTypeResolved DictChecker::resolveDictType(const TypeRef &
     return ok(weak);
   }
   const TypeNameInfo *builtin = TypeNameTable::find(name);
-  bool weakCollection = builtin != nullptr && builtin->form.is<WeakCollectionTypeName>();
-  if (weakCollection) {
+  bool isWeakCollection = builtin != nullptr && builtin->form.is<WeakCollectionTypeName>();
+  if (isWeakCollection) {
     std::string message = ErrorTextDictType::weak(name, name.drop_front(4));
 
     return err(DictCheckerResolveDictTypeError{
@@ -69,13 +69,13 @@ DictChecker::ResultDictTypeResolved DictChecker::resolveDictType(const TypeRef &
 
 DictChecker::ResultDictTypeResolved DictChecker::resolveCollectionType(const TypeRef &ref,
                                                                        Collection collection) {
-  bool map = collection == Collection::MAP;
-  bool set = collection == Collection::SET;
-  size_t wanted = set ? 1 : 2;
+  bool isMap = collection == Collection::MAP;
+  bool isSet = collection == Collection::SET;
+  size_t wanted = isSet ? 1 : 2;
   if (ref.kind() != TypeRefKind::GENERIC_REF || ref.args.size() != wanted) {
-    std::string message = set   ? ErrorTextDictType::setArgs(ref.name)
-                          : map ? ErrorTextDictType::mapArgs(ref.name)
-                                : ErrorTextDictType::recordArgs();
+    std::string message = isSet   ? ErrorTextDictType::setArgs(ref.name)
+                          : isMap ? ErrorTextDictType::mapArgs(ref.name)
+                                  : ErrorTextDictType::recordArgs();
 
     return err(DictCheckerResolveDictTypeError{
         .code = DictCheckerResolveDictTypeErrorCode::WRONG_TYPE_ARGUMENTS,
@@ -83,7 +83,7 @@ DictChecker::ResultDictTypeResolved DictChecker::resolveCollectionType(const Typ
     });
   }
   const Type *key = this->typeResolver->resolveType(ref.args[0], false);
-  const Type *value = set ? Type::voidTy() : this->typeResolver->resolveType(ref.args[1], false);
+  const Type *value = isSet ? Type::voidTy() : this->typeResolver->resolveType(ref.args[1], false);
   if (key->isError() || value->isError()) {
     return ok(Type::error());
   }
@@ -97,7 +97,7 @@ DictChecker::ResultDictTypeResolved DictChecker::resolveCollectionType(const Typ
         .message = allowed.error().message,
     });
   }
-  const Type *dict = Type::dict(map ? Type::DictKind::Map : Type::DictKind::Set, key, value);
+  const Type *dict = Type::dict(isMap ? Type::DictKind::Map : Type::DictKind::Set, key, value);
 
   return ok(dict);
 }
@@ -284,10 +284,10 @@ DictChecker::ResultDictMemberAccess DictChecker::checkDictMember(MemberExpr *mem
   }
   std::string text = DictCheckHelpers::dictText(member->object, type);
   const DictMethodInfo *found = DictMethodTable::find(member->name);
-  bool method = found != nullptr && (type->isMap() ? DictMethodTable::isOnMap(*found)
-                                                   : DictMethodTable::isOnSet(*found));
+  bool isMethod = found != nullptr && (type->isMap() ? DictMethodTable::isOnMap(*found)
+                                                     : DictMethodTable::isOnSet(*found));
   member->type = Type::error();
-  if (method) {
+  if (isMethod) {
     std::string message = ErrorTextDictMember::callOnly(text, member->name);
 
     return err(DictCheckerCheckDictMemberError{
@@ -418,12 +418,12 @@ Expr *DictChecker::checkRecordNullishAssign(AssignExpr *assign, IndexExpr *index
   Expr *value = this->exprChecker->checkExpr(assign->value, valueType);
   this->state.getFlowState().replaceFlow(
       FlowChecker::join(before, this->state.getFlowState().getFlow()));
-  bool definite = !value->type->isOptional() && !value->type->isUndefined();
+  bool isDefinite = !value->type->isOptional() && !value->type->isUndefined();
   value = this->typeRelations->coerce(value, valueType);
 
   return this->dictCall(assign->loc(), index->object, DictMethodTable::getName(DictMethod::SET),
                         Builtin::RecordNullishSet, {key, value},
-                        definite ? valueType->nonOptional() : valueType);
+                        isDefinite ? valueType->nonOptional() : valueType);
 }
 
 DictChecker::ResultRecordKeyDeleted

@@ -43,7 +43,7 @@ private:
                                      llvm::ArrayRef<FunctionDecl *> methods);
   void declareLiteralMethods(ClassDecl *cls, const Type *target);
   void declareLiteralMethod(FunctionDecl *fn, const Type *target);
-  void checkLiteralMethods(ClassDecl *cls);
+  void walkLiteralMethods(ClassDecl *cls);
   Expr *matchLiteralTarget(ObjectLitExpr *lit, const Type *target, const Type *type);
 
   SemanticState &state;

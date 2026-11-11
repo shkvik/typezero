@@ -50,9 +50,9 @@ ClassField *StaticChecker::staticField(ClassDecl *cls, llvm::StringRef name, Cla
 StaticChecker::ResultStaticFieldType StaticChecker::fieldTyped(const ClassDecl *owner,
                                                                const VarSymbol *var,
                                                                llvm::StringRef name) const {
-  bool early = !owner->declared && this->state.getModuleStates().getLoadingModule() &&
-               !this->state.getFunctionStack().isInsideFunction();
-  if (!var->type && early) {
+  bool isEarly = !owner->declared && this->state.getModuleStates().getLoadingModule() &&
+                 !this->state.getFunctionStack().isInsideFunction();
+  if (!var->type && isEarly) {
     std::string message = ErrorTextStaticOrder::usedEarly(var->name, owner->name);
 
     return err(StaticCheckerFieldTypedError{
@@ -74,11 +74,11 @@ StaticChecker::ResultStaticFieldType StaticChecker::fieldTyped(const ClassDecl *
 
 StaticChecker::ResultFieldValueIsSet StaticChecker::fieldReady(const ClassDecl *owner,
                                                                const VarSymbol *var) const {
-  bool early = !owner->declared && this->state.getModuleStates().getLoadingModule() &&
-               !this->state.getFunctionStack().isInsideFunction() &&
-               this->state.getModuleStates().findDeclModule(owner) ==
-                   this->state.getModuleStates().getLoadingModule();
-  if (early) {
+  bool isEarly = !owner->declared && this->state.getModuleStates().getLoadingModule() &&
+                 !this->state.getFunctionStack().isInsideFunction() &&
+                 this->state.getModuleStates().findDeclModule(owner) ==
+                     this->state.getModuleStates().getLoadingModule();
+  if (isEarly) {
     std::string message = ErrorTextStaticOrder::usedEarly(var->name, owner->name);
 
     return err(StaticCheckerFieldReadyError{
@@ -86,10 +86,10 @@ StaticChecker::ResultFieldValueIsSet StaticChecker::fieldReady(const ClassDecl *
         .message = message,
     });
   }
-  bool unset = this->state.getClassContext().isInsideStaticInit() &&
-               this->state.getClassContext().getCurrentClass() == owner &&
-               !this->state.getClassContext().isStaticSet(var);
-  if (unset) {
+  bool isUnset = this->state.getClassContext().isInsideStaticInit() &&
+                 this->state.getClassContext().getCurrentClass() == owner &&
+                 !this->state.getClassContext().isStaticSet(var);
+  if (isUnset) {
     std::string message = ErrorTextStaticOrder::beforeSet(var->name);
 
     return err(StaticCheckerFieldReadyError{
@@ -104,9 +104,9 @@ StaticChecker::ResultFieldValueIsSet StaticChecker::fieldReady(const ClassDecl *
 StaticChecker::ResultStaticFunctions StaticChecker::staticMethods(const ClassDecl *cls,
                                                                   llvm::StringRef name) {
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, true);
-  bool instance = methods.empty() && (ClassBases::findField(cls, name) ||
-                                      !ClassDeclarer::methodsNamed(cls, name, false).empty());
-  if (instance) {
+  bool isInstance = methods.empty() && (ClassBases::findField(cls, name) ||
+                                        !ClassDeclarer::methodsNamed(cls, name, false).empty());
+  if (isInstance) {
     std::string message = ErrorTextStaticMember::instance(name, cls->name);
 
     return err(StaticCheckerStaticMethodsError{
@@ -172,8 +172,8 @@ Expr *StaticChecker::checkStaticMethodValue(MemberExpr *member, ClassDecl *cls,
                                             const Type *expected) {
   llvm::StringRef name = member->name;
   ResultStaticFunctions found = StaticChecker::staticMethods(cls, name);
-  bool classValue = found.isErr() && (name == "name" || name == "prototype");
-  if (classValue) {
+  bool isClassValue = found.isErr() && (name == "name" || name == "prototype");
+  if (isClassValue) {
     return this->checkClassValueMember(member, cls);
   }
   if (found.isErr()) {
@@ -215,8 +215,8 @@ Expr *StaticChecker::checkClassValueMember(MemberExpr *member, ClassDecl *cls) {
 
 StaticChecker::ResultFieldOfTheClass
 StaticChecker::fieldFound(const ClassField *found, const ClassDecl *cls, llvm::StringRef name) {
-  bool method = !found && !ClassDeclarer::methodsNamed(cls, name, true).empty();
-  if (method) {
+  bool isMethod = !found && !ClassDeclarer::methodsNamed(cls, name, true).empty();
+  if (isMethod) {
     std::string message = ErrorTextStaticField::isMethod(name, cls->name);
 
     return err(StaticCheckerFieldFoundError{
@@ -350,9 +350,9 @@ Expr *StaticChecker::checkLibraryStaticCall(CallExpr *call, MemberExpr *member,
                                             const ClassDecl *cls, const Type *expected) {
   static const llvm::StringLiteral eventsFunctions[] = {
       "once", "on", "listenerCount", "getEventListeners"};
-  bool eventsFunction = cls->library() && cls->name == "EventEmitter" &&
-                        llvm::is_contained(eventsFunctions, member->name);
-  if (eventsFunction) {
+  bool hasEventsFunction = cls->library() && cls->name == "EventEmitter" &&
+                           llvm::is_contained(eventsFunctions, member->name);
+  if (hasEventsFunction) {
     Expr *events = this->eventTargetChecker->checkEventsFunction(call, member->name, member->loc());
     if (events != nullptr) {
       return events;
@@ -384,7 +384,7 @@ Expr *StaticChecker::checkStaticFieldCall(CallExpr *call, MemberExpr *member, Cl
   if (callable.error().code != StaticCheckerStaticCallableErrorCode::ALREADY_REPORTED) {
     this->state.getDiagnostics().error(member->loc(), callable.error().message);
   }
-  this->argumentChecker->checkArgsLoosely(call);
+  this->argumentChecker->walkArgsLoosely(call);
 
   return call;
 }
@@ -397,10 +397,10 @@ Expr *StaticChecker::checkStaticMethodCall(CallExpr *call, MemberExpr *member,
   if (accessible.isErr()) {
     this->state.getDiagnostics().error(member->loc(), accessible.error().message);
   }
-  bool checked = false;
+  bool isChecked = false;
   std::vector<const Type *> bound;
   OverloadResolver::ResultVariantChosen picked =
-      this->overloadResolver->chooseVariant(methods, call->args, call->spread, checked, &bound);
+      this->overloadResolver->chooseVariant(methods, call->args, call->spread, isChecked, &bound);
   if (picked.isErr() &&
       picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
     this->state.getDiagnostics().error(member->loc(), picked.error().message);
@@ -413,7 +413,7 @@ Expr *StaticChecker::checkStaticMethodCall(CallExpr *call, MemberExpr *member,
   if (allowed.isErr()) {
     this->state.getDiagnostics().error(member->loc(), allowed.error().message);
   }
-  if (sym->isGeneric() && checked) {
+  if (sym->isGeneric() && isChecked) {
     return this->overloadResolver->callGenericVariant(call, sym, bound, member->loc(), false);
   }
   if (sym->isGeneric()) {
@@ -422,7 +422,7 @@ Expr *StaticChecker::checkStaticMethodCall(CallExpr *call, MemberExpr *member,
   }
   call->target = FunctionCall{.func = sym};
   call->type = sym->getReturnType();
-  std::vector<bool> given(checked ? call->args.size() : 0, true);
+  std::vector<bool> given(isChecked ? call->args.size() : 0, true);
 
   return this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
                                                member->loc(), &given);

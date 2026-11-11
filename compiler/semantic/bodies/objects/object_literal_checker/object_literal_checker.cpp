@@ -129,9 +129,9 @@ ObjectLiteralChecker::sameKeyedType(llvm::StringRef name, const Field &same, con
 
 ObjectLiteralChecker::ResultKeyWithoutSpread
 ObjectLiteralChecker::keyedPlacement(const ObjectLitExpr *lit, const Type *keyType) {
-  bool methods =
+  bool hasMethods =
       llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.method(); });
-  if (lit->hasSpread() || methods) {
+  if (lit->hasSpread() || hasMethods) {
     std::string message = ErrorTextObjectLiteral::keySpread(keyType->name());
 
     return err(ObjectLiteralCheckerKeyedPlacementError{
@@ -190,8 +190,8 @@ ObjectLiteralChecker::targetField(const Type *target, llvm::StringRef name) {
     });
   }
   if (!field) {
-    bool stream = target->name() == "StreamError";
-    std::string message = ErrorTextObjectLiteral::noField(target->name(), name, stream);
+    bool isStream = target->name() == "StreamError";
+    std::string message = ErrorTextObjectLiteral::noField(target->name(), name, isStream);
 
     return err(ObjectLiteralCheckerTargetFieldError{
         .code = ObjectLiteralCheckerTargetFieldErrorCode::NO_SUCH_FIELD,
@@ -226,9 +226,9 @@ ObjectLiteralChecker::valueTyped(const Type *type, llvm::StringRef what, llvm::S
 
 ObjectLiteralChecker::ResultRequiredFieldSet
 ObjectLiteralChecker::fieldGiven(const ObjectLitExpr *lit, const Field &field, const Type *target) {
-  bool given = llvm::any_of(lit->props,
-                            [&](const ObjectLitExpr::Property &p) { return p.name == field.name; });
-  if (!given && !field.type->isOptional()) {
+  bool isGiven = llvm::any_of(
+      lit->props, [&](const ObjectLitExpr::Property &p) { return p.name == field.name; });
+  if (!isGiven && !field.type->isOptional()) {
     std::string message = ErrorTextObjectLiteral::missing(field.name, target->name());
 
     return err(ObjectLiteralCheckerFieldGivenError{
@@ -267,9 +267,9 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
   if (shape.target != nullptr) {
     ObjectLiteralChecker::walkThisMethods(lit, shape.target);
   }
-  bool keyedOnly =
+  bool isKeyedOnly =
       shape.target == nullptr && !lit->props.empty() && ObjectLiteralChecker::isAllKeyed(lit);
-  Expr *inferFailed = keyedOnly ? this->checkInferredKeys(lit, shape) : nullptr;
+  Expr *inferFailed = isKeyedOnly ? this->checkInferredKeys(lit, shape) : nullptr;
   if (inferFailed != nullptr) {
     return inferFailed;
   }
@@ -372,9 +372,9 @@ Expr *ObjectLiteralChecker::pickUnionTarget(ObjectLitExpr *lit, const Type *expe
 void ObjectLiteralChecker::walkThisMethods(ObjectLitExpr *lit, const Type *target) {
   for (ObjectLitExpr::Property &prop : lit->props) {
     const Field *wanted = prop.method() ? target->field(prop.name) : nullptr;
-    bool bound = wanted != nullptr && wanted->type->nonOptional()->isFunction() &&
-                 wanted->type->nonOptional()->hasThis();
-    if (bound) {
+    bool isBound = wanted != nullptr && wanted->type->nonOptional()->isFunction() &&
+                   wanted->type->nonOptional()->hasThis();
+    if (isBound) {
       prop.form = ValueProperty{};
     }
   }
@@ -530,18 +530,18 @@ std::vector<Field> ObjectLiteralChecker::checkNamedProperties(ObjectLitExpr *lit
 }
 
 bool ObjectLiteralChecker::takePrechecked(const Expr *value) {
-  bool prechecked = this->state.getExpressionMarks().isPrechecked(value);
+  bool isPrechecked = this->state.getExpressionMarks().isPrechecked(value);
   this->state.getExpressionMarks().forgetPrechecked(value);
 
-  return prechecked;
+  return isPrechecked;
 }
 
 void ObjectLiteralChecker::walkTargetField(ObjectLitExpr::Property &prop, const Type *target) {
   std::string what = ErrorTextObjectLiteral::fieldName(prop.name);
   ResultTargetFieldFound found = ObjectLiteralChecker::targetField(target, prop.name);
-  bool prechecked = this->takePrechecked(prop.value);
+  bool isPrechecked = this->takePrechecked(prop.value);
   if (found.isErr()) {
-    if (!prechecked) {
+    if (!isPrechecked) {
       prop.value = this->exprChecker->checkExpr(prop.value);
     }
     if (found.error().code != ObjectLiteralCheckerTargetFieldErrorCode::OVERLOAD_NAME) {
@@ -550,14 +550,14 @@ void ObjectLiteralChecker::walkTargetField(ObjectLitExpr::Property &prop, const 
     return;
   }
   const Field *field = found.value();
-  Expr *value = prechecked ? prop.value : this->exprChecker->checkExpr(prop.value, field->type);
+  Expr *value = isPrechecked ? prop.value : this->exprChecker->checkExpr(prop.value, field->type);
   prop.value = this->typeRelations->coerce(value, field->type, what);
 }
 
 Field ObjectLiteralChecker::untargetedField(ObjectLitExpr::Property &prop, ObjectLitShape &shape) {
   std::string what = ErrorTextObjectLiteral::fieldName(prop.name);
-  bool prechecked = this->takePrechecked(prop.value);
-  if (!prechecked) {
+  bool isPrechecked = this->takePrechecked(prop.value);
+  if (!isPrechecked) {
     prop.value = this->exprChecker->checkExpr(prop.value);
   }
   const Type *type = prop.value->type;
@@ -610,12 +610,12 @@ ObjectLiteralChecker::ResultDefinedSpreading ObjectLiteralChecker::spreadDefined
 }
 
 ObjectLiteralChecker::ResultSpreadIsAnObject ObjectLiteralChecker::spreadObject(const Type *type) {
-  bool object = type->isObject() && !type->isTuple() && !type->isRegExp() && !type->isMatch() &&
-                !type->isDate() && !type->isIntl() && !type->isBytes() && !type->isCrypto();
-  if (!object) {
-    bool indices =
+  bool isObject = type->isObject() && !type->isTuple() && !type->isRegExp() && !type->isMatch() &&
+                  !type->isDate() && !type->isIntl() && !type->isBytes() && !type->isCrypto();
+  if (!isObject) {
+    bool hasIndices =
         type->nonOptional()->isArray() || type->nonOptional()->isTuple() || type->isString();
-    std::string message = ErrorTextSpreadLiteral::notObject(type->name(), indices);
+    std::string message = ErrorTextSpreadLiteral::notObject(type->name(), hasIndices);
 
     return err(ObjectLiteralCheckerSpreadObjectError{
         .code = ObjectLiteralCheckerSpreadObjectErrorCode::NOT_AN_OBJECT,
@@ -710,16 +710,16 @@ void ObjectLiteralChecker::walkNamedProp(ObjectLitExpr::Property &prop, bool isN
     collected.typed = false;
     return;
   }
-  bool filled = type->isUndefined() && field != nullptr;
+  bool isFilled = type->isUndefined() && field != nullptr;
   ResultUsableFieldValue usableValue =
-      filled ? ResultUsableFieldValue(ok(type))
-             : ObjectLiteralChecker::valueTyped(type, what, prop.name);
+      isFilled ? ResultUsableFieldValue(ok(type))
+               : ObjectLiteralChecker::valueTyped(type, what, prop.name);
   if (usableValue.isErr()) {
     this->state.getDiagnostics().error(prop.value->loc(), usableValue.error().message);
     collected.typed = false;
     return;
   }
-  if (filled) {
+  if (isFilled) {
     type = Type::optional(field->type);
   }
   if (field != nullptr) {
@@ -823,10 +823,10 @@ const Type *ObjectLiteralChecker::spreadResult(const SpreadFields &collected) {
   if (collected.target == nullptr) {
     return result;
   }
-  bool fits = ObjectLiteralChecker::fieldsFitTarget(collected.fields, collected.target) &&
-              ObjectLiteralChecker::targetFilled(collected.target, collected.fields);
+  bool isFitting = ObjectLiteralChecker::fieldsFitTarget(collected.fields, collected.target) &&
+                   ObjectLiteralChecker::targetFilled(collected.target, collected.fields);
 
-  return fits ? collected.target : result;
+  return isFitting ? collected.target : result;
 }
 
 bool ObjectLiteralChecker::fieldsFitTarget(const std::vector<Field> &fields, const Type *target) {
@@ -869,8 +869,8 @@ void ObjectLiteralChecker::markReplacedFields(ObjectLitExpr *lit, size_t i) {
   ObjectLitExpr::Property &prop = lit->props[i];
   SpreadProperty *spread = prop.form.as<SpreadProperty>();
   for (const Field &f : prop.value->type->fields()) {
-    bool omitted = llvm::is_contained(spread->omit, f.name);
-    if (!omitted && ObjectLiteralChecker::isReplacedLater(lit, i, f.name)) {
+    bool isOmitted = llvm::is_contained(spread->omit, f.name);
+    if (!isOmitted && ObjectLiteralChecker::isReplacedLater(lit, i, f.name)) {
       spread->replacedFields.push_back(f.name);
     }
   }

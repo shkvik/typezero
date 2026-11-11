@@ -49,11 +49,11 @@ bool FieldFacts::holdsField(const MemberExpr *member) {
     return false;
   }
   const Type *holder = member->object->type;
-  bool value = BuiltinPropertyTable::isName(member->name, BuiltinProperty::RESULT_VALUE);
-  bool error = BuiltinPropertyTable::isName(member->name, BuiltinProperty::RESULT_ERROR);
-  bool resultHalf = holder->isResult() && (value || error);
+  bool isValue = BuiltinPropertyTable::isName(member->name, BuiltinProperty::RESULT_VALUE);
+  bool isError = BuiltinPropertyTable::isName(member->name, BuiltinProperty::RESULT_ERROR);
+  bool isResultHalf = holder->isResult() && (isValue || isError);
 
-  return holder->isObject() || holder->isUnion() || holder->nonOptional()->isJson() || resultHalf;
+  return holder->isObject() || holder->isUnion() || holder->nonOptional()->isJson() || isResultHalf;
 }
 
 bool FieldFacts::isFieldDefined(const FieldPath &path) const {

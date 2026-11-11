@@ -65,11 +65,11 @@ bool EventMapInference::holdsClassExpr(const Stmt *where) {
 
 bool EventMapInference::canTryFunction(const FunctionDecl *fn) {
   const ClassDecl *cls = fn->cls();
-  bool generic = fn->sym != nullptr && fn->sym->isGeneric();
-  bool genericClass = cls != nullptr && cls->isGeneric();
-  bool usable = fn->body != nullptr && fn->sym != nullptr && !generic && !genericClass;
+  bool isGeneric = fn->sym != nullptr && fn->sym->isGeneric();
+  bool isGenericClass = cls != nullptr && cls->isGeneric();
+  bool isUsable = fn->body != nullptr && fn->sym != nullptr && !isGeneric && !isGenericClass;
 
-  return usable && !EventMapInference::holdsClassExpr(fn);
+  return isUsable && !EventMapInference::holdsClassExpr(fn);
 }
 
 void EventMapInference::addCandidates(const Stmt *where, Module *module, FunctionDecl *fn,
@@ -85,14 +85,14 @@ void EventMapInference::addCandidates(const Stmt *where, Module *module, Functio
       continue;
     }
     auto *receiver = dyn_cast<NameExpr>(member->object);
-    bool self = receiver != nullptr && (receiver->name == "this" || receiver->name == "super");
+    bool isSelf = receiver != nullptr && (receiver->name == "this" || receiver->name == "super");
     EmitCandidate candidate;
     candidate.call = call;
     candidate.module = module;
     candidate.function = fn;
     candidate.index = index;
     candidate.event = ToUtf8::toUtf8(name->value);
-    candidate.self = self;
+    candidate.self = isSelf;
     found.push_back(std::move(candidate));
   }
 }
@@ -255,13 +255,13 @@ const std::vector<EmitCandidate> &EventMapInference::getModuleCandidates(Module 
 std::vector<EmitCandidate> EventMapInference::getSiteCandidates(const EventSite *site) {
   std::vector<EmitCandidate> found;
   for (Module *module : this->state.getInventoryStore().getModules()) {
-    bool own = module == site->owner;
-    bool skipped = module->builtin || (!own && site->cls == nullptr);
-    if (skipped) {
+    bool isOwn = module == site->owner;
+    bool isSkipped = module->builtin || (!isOwn && site->cls == nullptr);
+    if (isSkipped) {
       continue;
     }
     for (const EmitCandidate &candidate : this->getModuleCandidates(module)) {
-      if (own || EventMapInference::isSubclassEmit(site, candidate)) {
+      if (isOwn || EventMapInference::isSubclassEmit(site, candidate)) {
         found.push_back(candidate);
       }
     }
@@ -299,21 +299,23 @@ void EventMapInference::tryCandidates(EventSite *site, EventRecord *record) {
   llvm::SmallSet<size_t, 4> statements;
   std::string untyped;
   for (const EmitCandidate &candidate : this->getSiteCandidates(site)) {
-    bool unchecked = candidate.event == record->name && candidate.call->type == nullptr;
-    if (!unchecked) {
+    bool isUnchecked = candidate.event == record->name && candidate.call->type == nullptr;
+    if (!isUnchecked) {
       continue;
     }
     if (untyped.empty()) {
       untyped = this->shortPlaceOf(candidate.call->loc());
     }
-    if (candidate.function != nullptr && functions.insert(candidate.function).second &&
-        EventMapInference::canTryFunction(candidate.function)) {
-      this->tryFunction(candidate.function);
+    if (candidate.function != nullptr) {
+      auto [_, isNewFunction] = functions.insert(candidate.function);
+      if (isNewFunction && EventMapInference::canTryFunction(candidate.function)) {
+        this->tryFunction(candidate.function);
+      }
     }
-    if (candidate.function == nullptr && this->canTryStatement(candidate) &&
-        statements.insert(candidate.index).second) {
+    if (candidate.function == nullptr && this->canTryStatement(candidate)) {
+      auto [_, isNewStatement] = statements.insert(candidate.index);
       Stmt *statement = candidate.module->file.items[candidate.index];
-      if (!EventMapInference::holdsClassExpr(statement)) {
+      if (isNewStatement && !EventMapInference::holdsClassExpr(statement)) {
         this->tryStatement(statement);
       }
     }
@@ -335,7 +337,7 @@ bool EventMapInference::canTryStatement(const EmitCandidate &candidate) {
 
 void EventMapInference::tryFunction(FunctionDecl *fn) {
   BodyState saved = this->returnInferrer->enterBody(fn);
-  bool muted = this->state.getDiagnostics().setMuted(true);
+  this->state.getDiagnostics().pushList(DiagnosticRoute::DISCARD);
   FunctionStack &functions = this->state.getFunctionStack();
   std::vector<ReturnStmt *> returns;
   std::vector<YieldExpr *> yields;
@@ -345,22 +347,22 @@ void EventMapInference::tryFunction(FunctionDecl *fn) {
   FunctionDecl *copy = this->returnInferrer->freshCopy(fn);
   this->functionChecker->walkFunctionFromScratch(copy);
   functions.leaveTrial();
-  this->state.getDiagnostics().setMuted(muted);
+  this->state.getDiagnostics().popList();
   this->returnInferrer->leaveBody(saved);
 }
 
 void EventMapInference::tryStatement(Stmt *statement) {
   BodyState saved = this->returnInferrer->enterBody(nullptr);
-  bool muted = this->state.getDiagnostics().setMuted(true);
+  this->state.getDiagnostics().pushList(DiagnosticRoute::DISCARD);
   FunctionStack &functions = this->state.getFunctionStack();
   functions.enterTrial();
   AstCloner cloner(this->state.getAst());
   Stmt *copy = cloner.copyStatement(statement);
   this->scopes->openScope();
-  this->stmtChecker->checkStmt(copy);
+  this->stmtChecker->walkStmt(copy);
   this->scopes->closeScope();
   functions.leaveTrial();
-  this->state.getDiagnostics().setMuted(muted);
+  this->state.getDiagnostics().popList();
   this->returnInferrer->leaveBody(saved);
 }
 

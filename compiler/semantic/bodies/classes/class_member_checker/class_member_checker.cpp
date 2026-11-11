@@ -102,9 +102,9 @@ ClassMemberChecker::ResultMemberAccessible ClassMemberChecker::checkAccess(const
 
 ClassMemberChecker::ResultFieldIsSetBefore
 ClassMemberChecker::fieldSet(const ClassDecl *owner, llvm::StringRef name, bool viaThis) const {
-  bool unset = viaThis && owner == this->state.getClassContext().getInitializer()->cls() &&
-               !this->state.getFlowState().isFieldSet(name);
-  if (unset) {
+  bool isUnset = viaThis && owner == this->state.getClassContext().getInitializer()->cls() &&
+                 !this->state.getFlowState().isFieldSet(name);
+  if (isUnset) {
     std::string message = ErrorTextClassField::readEarly(name);
 
     return err(ClassMemberCheckerFieldSetError{
@@ -133,11 +133,11 @@ ClassMemberChecker::ResultFieldTypeIsKnown ClassMemberChecker::fieldTyped(const 
 ClassMemberChecker::ResultMethodsOfObjects
 ClassMemberChecker::instanceMethods(const ClassDecl *cls, llvm::StringRef name) {
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
-  bool staticMember = !ClassDeclarer::methodsNamed(cls, name, true).empty() ||
-                      llvm::any_of(cls->fields, [&](const ClassField &f) {
-                        return f.isStatic() && f.name == name;
-                      });
-  if (methods.empty() && staticMember) {
+  bool isStaticMember = !ClassDeclarer::methodsNamed(cls, name, true).empty() ||
+                        llvm::any_of(cls->fields, [&](const ClassField &f) {
+                          return f.isStatic() && f.name == name;
+                        });
+  if (methods.empty() && isStaticMember) {
     std::string message = ErrorTextClassField::isStatic(name, cls->name);
 
     return err(ClassMemberCheckerInstanceMethodsError{
@@ -159,9 +159,9 @@ ClassMemberChecker::instanceMethods(const ClassDecl *cls, llvm::StringRef name) 
 
 ClassMemberChecker::ResultObjectReadyToUse
 ClassMemberChecker::objectReady(bool viaThis, llvm::StringRef name) const {
-  bool early = viaThis && !this->state.getFlowState().isBeforeSuper() &&
-               this->classChecker->thisReady(this->state.getFlowState().getFlow()).isErr();
-  if (early) {
+  bool isEarly = viaThis && !this->state.getFlowState().isBeforeSuper() &&
+                 this->classChecker->thisReady(this->state.getFlowState().getFlow()).isErr();
+  if (isEarly) {
     std::string field =
         this->classChecker->firstUnset(this->state.getFlowState().getFlow()).value();
     std::string message = ErrorTextClassField::earlyThis(name, field);
@@ -198,14 +198,14 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
   if (date != nullptr) {
     return date;
   }
-  bool viaThis = this->classChecker->isInitThis(member->object).isOk();
+  bool isViaThis = this->classChecker->isInitThis(member->object).isOk();
   const ClassDecl *owner = nullptr;
   const ClassField *field = ClassBases::findField(cls, member->name, &owner);
   if (field != nullptr && !field->method()) {
-    return this->checkFieldMember(member, field, owner, viaThis);
+    return this->checkFieldMember(member, field, owner, isViaThis);
   }
 
-  return this->checkMethodMember(member, cls, expected, viaThis);
+  return this->checkMethodMember(member, cls, expected, isViaThis);
 }
 
 Expr *ClassMemberChecker::checkFieldMember(MemberExpr *member, const ClassField *field,
@@ -234,8 +234,8 @@ Expr *ClassMemberChecker::checkFieldMember(MemberExpr *member, const ClassField 
     return member;
   }
   std::optional<FieldPath> path = this->fieldFacts->fieldPath(member);
-  bool defined = path.has_value() && this->fieldFacts->isFieldDefined(*path);
-  if (defined) {
+  bool isDefined = path.has_value() && this->fieldFacts->isFieldDefined(*path);
+  if (isDefined) {
     return this->typeRelations->convert(member, field->resolved->inner());
   }
 
@@ -256,9 +256,9 @@ Expr *ClassMemberChecker::checkMethodMember(MemberExpr *member, ClassDecl *cls,
   if (accessible.isErr()) {
     this->state.getDiagnostics().error(member->loc(), accessible.error().message);
   }
-  bool emitterValue = methods[0]->cls()->library() && this->eventMaps->isEmitterClass(cls) &&
-                      !this->libraryCalls->inLibrary(member->loc()) && name != "eventNames";
-  if (emitterValue) {
+  bool isEmitterValue = methods[0]->cls()->library() && this->eventMaps->isEmitterClass(cls) &&
+                        !this->libraryCalls->inLibrary(member->loc()) && name != "eventNames";
+  if (isEmitterValue) {
     this->emitterChecker->reportEmitterMethodValue(member);
 
     return member;
@@ -292,9 +292,9 @@ Expr *ClassMemberChecker::checkMethodMember(MemberExpr *member, ClassDecl *cls,
 
 ClassMemberChecker::ResultStoredFieldValue ClassMemberChecker::statsDate(ClassDecl *cls,
                                                                          MemberExpr *member) {
-  bool derived = this->state.getFileSystemStore().isStatsClass(cls) &&
-                 this->fsDeclarer->checkStatsDate(member, cls);
-  if (derived) {
+  bool isDerived = this->state.getFileSystemStore().isStatsClass(cls) &&
+                   this->fsDeclarer->checkStatsDate(member, cls);
+  if (isDerived) {
     std::string message = ErrorTextFieldTarget::statsDate(member->name);
 
     return err(ClassMemberCheckerStatsDateError{
@@ -309,12 +309,12 @@ ClassMemberChecker::ResultStoredFieldValue ClassMemberChecker::statsDate(ClassDe
 ClassMemberChecker::ResultAssignableMember
 ClassMemberChecker::assignableField(const ClassField *field, const ClassDecl *cls,
                                     llvm::StringRef name, const Type *type) {
-  bool assignable = field && !field->method();
-  if (!assignable) {
+  bool isAssignable = field && !field->method();
+  if (!isAssignable) {
     std::string setter = "set" + std::string(1, llvm::toUpper(name[0])) + name.drop_front().str();
-    bool method = field || !ClassDeclarer::methodsNamed(cls, name, false).empty();
+    bool isMethod = field || !ClassDeclarer::methodsNamed(cls, name, false).empty();
     bool hasSetter = !ClassDeclarer::methodsNamed(cls, setter, false).empty();
-    if (method && cls->library() && hasSetter) {
+    if (isMethod && cls->library() && hasSetter) {
       std::string message = ErrorTextFieldTarget::setter(name, type->name(), setter);
 
       return err(ClassMemberCheckerAssignableFieldError{
@@ -322,7 +322,7 @@ ClassMemberChecker::assignableField(const ClassField *field, const ClassDecl *cl
           .message = message,
       });
     }
-    if (method && cls->library()) {
+    if (isMethod && cls->library()) {
       std::string message = ErrorTextFieldTarget::library(name, type->name());
 
       return err(ClassMemberCheckerAssignableFieldError{
@@ -330,7 +330,7 @@ ClassMemberChecker::assignableField(const ClassField *field, const ClassDecl *cl
           .message = message,
       });
     }
-    if (method) {
+    if (isMethod) {
       std::string message = ErrorTextFieldTarget::method(name, type->name());
 
       return err(ClassMemberCheckerAssignableFieldError{
@@ -352,8 +352,8 @@ ClassMemberChecker::assignableField(const ClassField *field, const ClassDecl *cl
 ClassMemberChecker::ResultFieldNotReadOnly
 ClassMemberChecker::fieldWritable(const ClassField *field, const ClassDecl *owner, bool viaThis,
                                   const Type *type) const {
-  bool initializing = viaThis && owner == this->state.getClassContext().getInitializer()->cls();
-  if (field->readonly && !initializing) {
+  bool isInitializing = viaThis && owner == this->state.getClassContext().getInitializer()->cls();
+  if (field->readonly && !isInitializing) {
     std::string message = ErrorTextFieldTarget::readOnly(field->name, type->name());
 
     return err(ClassMemberCheckerFieldWritableError{
@@ -389,20 +389,20 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
   if (accessible.isErr()) {
     this->state.getDiagnostics().error(member->loc(), accessible.error().message);
   }
-  bool viaThis = this->classChecker->isInitThis(member->object).isOk();
+  bool isViaThis = this->classChecker->isInitThis(member->object).isOk();
   if (compound) {
-    ResultFieldIsSetBefore set = this->fieldSet(owner, name, viaThis);
+    ResultFieldIsSetBefore set = this->fieldSet(owner, name, isViaThis);
     if (set.isErr()) {
       this->state.getDiagnostics().error(member->loc(), set.error().message);
       return Type::error();
     }
   }
-  ResultFieldNotReadOnly writable = this->fieldWritable(field, owner, viaThis, type);
+  ResultFieldNotReadOnly writable = this->fieldWritable(field, owner, isViaThis, type);
   if (writable.isErr()) {
     this->state.getDiagnostics().error(member->loc(), writable.error().message);
   }
-  if (!field->resolved && viaThis && this->state.getClassContext().getInitializer() == cls->init &&
-      owner == cls && !compound) {
+  if (!field->resolved && isViaThis &&
+      this->state.getClassContext().getInitializer() == cls->init && owner == cls && !compound) {
     member->type = nullptr;
     return nullptr;
   }

@@ -74,23 +74,23 @@ bool LoopChecker::continuesLoop(const ContinueStmt *next, const TreePlace &place
   return !place.isInsideLoop();
 }
 
-void LoopChecker::checkWhile(WhileStmt *stmt) {
+void LoopChecker::walkWhile(WhileStmt *stmt) {
   LoopScan scan = this->loopScanner->scanLoop({stmt->body}, {stmt->cond});
   Flow head = this->loopBounds->loopHead(scan, stmt->cond, true);
   this->state.getFlowState().replaceFlow(head);
   Flow whenTrue, whenFalse;
   stmt->cond = this->truthChecker->checkCondition(stmt->cond, whenTrue, whenFalse);
   this->state.getFlowState().replaceFlow(whenTrue);
-  this->checkLoopBody(stmt->body, scan.awaits);
+  this->walkLoopBody(stmt->body, scan.awaits);
   this->state.getFlowState().replaceFlow(scan.breaks ? FlowChecker::join(whenFalse, head)
                                                      : whenFalse);
 }
 
-void LoopChecker::checkDoWhile(DoWhileStmt *stmt) {
+void LoopChecker::walkDoWhile(DoWhileStmt *stmt) {
   LoopScan scan = this->loopScanner->scanLoop({stmt->body}, {stmt->cond});
   Flow head = this->loopBounds->loopHead(scan, nullptr, false);
   this->state.getFlowState().replaceFlow(head);
-  this->checkLoopBody(stmt->body, scan.awaits);
+  this->walkLoopBody(stmt->body, scan.awaits);
   this->state.getFlowState().replaceFlow(
       FlowChecker::join(this->state.getFlowState().getFlow(), head));
   Flow whenTrue, whenFalse;
@@ -99,12 +99,12 @@ void LoopChecker::checkDoWhile(DoWhileStmt *stmt) {
                                                      : whenFalse);
 }
 
-void LoopChecker::checkFor(ForStmt *stmt) {
+void LoopChecker::walkFor(ForStmt *stmt) {
   llvm::SmallVector<llvm::StringRef, 1> labels = this->state.getBlockPosition().getPendingLabels();
   this->state.getScopeStack().openScope();
   this->state.getBlockPosition().forgetBlock();
   if (stmt->init) {
-    this->stmtChecker->checkStmt(stmt->init);
+    this->stmtChecker->walkStmt(stmt->init);
   }
   LoopScan scan = this->loopScanner->scanLoop({stmt->body}, {stmt->cond, stmt->step});
   Flow head = this->loopBounds->loopHead(scan, stmt->cond, true);
@@ -116,7 +116,7 @@ void LoopChecker::checkFor(ForStmt *stmt) {
     stmt->cond = this->truthChecker->checkCondition(stmt->cond, whenTrue, whenFalse);
   }
   this->state.getFlowState().replaceFlow(whenTrue);
-  this->checkLoopBody(stmt->body, scan.awaits);
+  this->walkLoopBody(stmt->body, scan.awaits);
   if (stmt->step) {
     if (LoopChecker::continuesTo(stmt->body, labels)) {
       this->state.getFlowState().replaceFlow(head);
@@ -137,14 +137,14 @@ void LoopChecker::checkFor(ForStmt *stmt) {
   this->scopes->closeScope();
 }
 
-void LoopChecker::checkForOf(ForOfStmt *stmt) {
+void LoopChecker::walkForOf(ForOfStmt *stmt) {
   if (stmt->isAwait) {
-    this->asyncChecker->checkForAwait(stmt);
+    this->asyncChecker->walkForAwait(stmt);
     this->emitterChecker->noteErrorsHandled(stmt->iterable);
     return;
   }
   if (stmt->keys) {
-    this->objectChecker->checkForIn(stmt);
+    this->objectChecker->walkForIn(stmt);
   } else {
     this->walkIterable(stmt);
   }
@@ -174,7 +174,7 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
   stmt->binding.sym =
       this->scopes->declareVar(stmt->binding.name, stmt->binding.loc, element, stmt->isConst);
   this->addLiteralBounds(stmt, element);
-  this->checkLoopBody(stmt->body, scan.awaits);
+  this->walkLoopBody(stmt->body, scan.awaits);
   this->scopes->closeScope();
   this->state.getFlowState().replaceFlow(head);
 }
@@ -195,8 +195,8 @@ void LoopChecker::walkIterable(ForOfStmt *stmt) {
 }
 
 bool LoopChecker::isListParam(const NameExpr *name) {
-  bool tuple = name->var() != nullptr && name->type->isTuple() && !name->type->tupleRest();
-  if (!tuple) {
+  bool isTuple = name->var() != nullptr && name->type->isTuple() && !name->type->tupleRest();
+  if (!isTuple) {
     return false;
   }
   for (const FunctionDecl *fn : this->state.getFunctionStack().getFunctions()) {
@@ -225,9 +225,9 @@ Expr *LoopChecker::listElements(const NameExpr *name) {
     return nullptr;
   }
   const Type *element = kinds.empty() ? nullptr : Type::unionOf(kinds);
-  bool typed = element != nullptr && UnionSlots::unionProblem(element).empty();
+  bool isTyped = element != nullptr && UnionSlots::unionProblem(element).empty();
 
-  return this->exprChecker->checkExpr(elements, typed ? Type::array(element) : nullptr);
+  return this->exprChecker->checkExpr(elements, isTyped ? Type::array(element) : nullptr);
 }
 
 const Type *LoopChecker::iteratedElement(ForOfStmt *stmt) {
@@ -264,9 +264,9 @@ const Type *LoopChecker::iteratedElement(ForOfStmt *stmt) {
 
 void LoopChecker::addLiteralBounds(const ForOfStmt *stmt, const Type *element) {
   auto *lit = dyn_cast<ArrayLitExpr>(stmt->iterable);
-  bool bounded = lit != nullptr && element->isInt() && stmt->binding.sym != nullptr &&
-                 !stmt->binding.destructured() && !lit->elements.empty();
-  if (!bounded) {
+  bool isBounded = lit != nullptr && element->isInt() && stmt->binding.sym != nullptr &&
+                   !stmt->binding.destructured() && !lit->elements.empty();
+  if (!isBounded) {
     return;
   }
   IntegerRange range = this->literalRange(lit);
@@ -370,9 +370,10 @@ LoopChecker::ResultBindingTyped LoopChecker::bindingType(const ForOfStmt *stmt) 
 
 LoopChecker::ResultBindingShape LoopChecker::bindingShape(const ForOfStmt *stmt,
                                                           const Type *element) {
-  bool fits = !stmt->binding.destructured() || stmt->binding.objectPattern() ||
-              element->isArray() || element->isTuple() || element->isMatch() || element->isError();
-  if (!fits) {
+  bool isFitting = !stmt->binding.destructured() || stmt->binding.objectPattern() ||
+                   element->isArray() || element->isTuple() || element->isMatch() ||
+                   element->isError();
+  if (!isFitting) {
     std::string message = ErrorTextLoopShape::notArray(element->name());
 
     return err(LoopCheckerBindingShapeError{
@@ -384,7 +385,7 @@ LoopChecker::ResultBindingShape LoopChecker::bindingShape(const ForOfStmt *stmt,
   return ok(element);
 }
 
-void LoopChecker::checkLoopBody(Stmt *body, bool awaits) {
+void LoopChecker::walkLoopBody(Stmt *body, bool awaits) {
   this->jumpChecker->pushTarget(JumpTarget::Kind::Loop);
   if (awaits) {
     this->state.getFunctionStack().enterAwaitLoop();

@@ -45,15 +45,15 @@ std::optional<Linear> PredicateChecker::argumentTerm(const Expr *expr) {
     }
     expr = conv->operand;
   }
-  bool negated = false;
+  bool isNegated = false;
   if (auto *unary = dyn_cast<UnaryExpr>(expr); unary && unary->op == UnaryOp::Neg) {
-    negated = true;
+    isNegated = true;
     expr = unary->operand;
   }
   if (auto *lit = dyn_cast<IntLitExpr>(expr); lit && lit->value < (uint64_t(1) << 31)) {
-    return Linear{Term::zero(), negated ? -int64_t(lit->value) : int64_t(lit->value)};
+    return Linear{Term::zero(), isNegated ? -int64_t(lit->value) : int64_t(lit->value)};
   }
-  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var() && !negated) {
+  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var() && !isNegated) {
     return Linear{Term::of(name->var()), 0};
   }
 
@@ -89,8 +89,8 @@ PredicateChecker::ResultNotAsserting PredicateChecker::notAsserting(const Functi
 
 PredicateChecker::ResultPredicateArg PredicateChecker::predicateArg(const FunctionDecl *fn,
                                                                     const TypeRef &ref) {
-  bool method = fn->cls() && !fn->isStatic() && !fn->isConstructor();
-  if (ref.name == "this" && !method) {
+  bool isMethod = fn->cls() && !fn->isStatic() && !fn->isConstructor();
+  if (ref.name == "this" && !isMethod) {
     std::string message = ErrorTextPredicateArg::thisOutside();
 
     return err(PredicateCheckerPredicateArgError{
@@ -186,8 +186,8 @@ bool PredicateChecker::looksLikeTest(const Expr *expr) {
 
 void PredicateChecker::beginPredicate(FunctionDecl *fn) {
   const FuncSymbol *sym = fn->sym;
-  bool boolean = !sym->hasReturnType() || sym->getKnownReturnType()->isBool();
-  if (!boolean || fn->isGenerator || fn->isConstructor()) {
+  bool isBoolean = !sym->hasReturnType() || sym->getKnownReturnType()->isBool();
+  if (!isBoolean || fn->isGenerator || fn->isConstructor()) {
     this->state.getPredicateStore().enterPredicateBuild({nullptr, fn, Flow(), Flow()});
     return;
   }
@@ -221,9 +221,9 @@ PredicateChecker::ResultExitNarrowed PredicateChecker::notePredicateExit(const F
     return ok(&whenTrue);
   }
   const Type *shown = this->literalTypes->typeIn(whenTrue, var);
-  bool narrowed = shown->isError() || shown->isNever() ||
-                  TypeRelations::isImplicitlyConvertible(shown, predicate.type);
-  if (!narrowed) {
+  bool isNarrowed = shown->isError() || shown->isNever() ||
+                    TypeRelations::isImplicitlyConvertible(shown, predicate.type);
+  if (!isNarrowed) {
     std::string function = ErrorTextFunctionName::label(sym->name);
     std::string message =
         ErrorTextPredicateExit::mayLie(function, var->name, predicate.type->name(), shown->name());
@@ -306,9 +306,9 @@ bool PredicateChecker::isParamTerm(const FunctionDecl *fn, const Term &t) {
 
 void PredicateChecker::projectFacts(const FunctionDecl *fn, const Flow &flow, PredicateSide &side) {
   for (const Facts::Fact &fact : flow.facts.all()) {
-    bool params =
+    bool hasParams =
         PredicateChecker::isParamTerm(fn, fact.lhs) && PredicateChecker::isParamTerm(fn, fact.rhs);
-    if (params) {
+    if (hasParams) {
       side.facts.push_back(fact);
     }
   }
@@ -321,17 +321,31 @@ const Predicate *PredicateChecker::predicateOf(const FuncSymbol *fn) const {
   }
   FunctionDecl *decl = fn->decl;
   if (!decl || decl->checked || !decl->body || decl->external() || decl->isGenerator ||
-      decl->isInstance || (fn->hasReturnType() && !fn->getKnownReturnType()->isBool()) ||
-      predicates.isSummarizing(fn)) {
+      decl->isInstance || (fn->hasReturnType() && !fn->getKnownReturnType()->isBool())) {
+    return nullptr;
+  }
+  if (fn->inferring) {
+    return this->predicateFromCopy(fn);
+  }
+  this->returnInferrer->walkBodyNow(decl);
+
+  return predicates.findPredicate(fn);
+}
+
+const Predicate *PredicateChecker::predicateFromCopy(const FuncSymbol *fn) const {
+  PredicateStore &predicates = this->state.getPredicateStore();
+  if (predicates.isSummarizing(fn)) {
     return nullptr;
   }
   predicates.markSummarizing(fn);
+  FunctionDecl *decl = fn->decl;
   BodyState saved = this->returnInferrer->enterBody(decl);
-  bool muted = this->state.getDiagnostics().setMuted(true);
+  this->state.getDiagnostics().pushList(DiagnosticRoute::DISCARD);
   FunctionDecl *copy = this->returnInferrer->freshCopy(decl);
-  this->functionChecker->checkFunctionBody(copy);
-  this->state.getDiagnostics().setMuted(muted);
+  this->functionChecker->walkFunctionBody(copy);
+  this->state.getDiagnostics().popList();
   this->returnInferrer->leaveBody(saved);
+
   return predicates.findPredicate(fn);
 }
 
@@ -471,10 +485,10 @@ std::optional<Linear> PredicateChecker::factTerm(const PredicateCall &applied,
     return Linear{Term::lengthOf(var), 0};
   }
   std::optional<Linear> value = PredicateChecker::argumentTerm(arg);
-  bool changed = value.has_value() && value->term.var != nullptr &&
-                 this->flowChecker->changedByCalls(value->term.var);
+  bool hasChanged = value.has_value() && value->term.var != nullptr &&
+                    this->flowChecker->changedByCalls(value->term.var);
 
-  return changed ? std::nullopt : value;
+  return hasChanged ? std::nullopt : value;
 }
 
 const Type *PredicateChecker::filteredType(const Expr *callback, const Type *element) const {

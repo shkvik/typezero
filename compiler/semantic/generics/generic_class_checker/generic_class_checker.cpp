@@ -77,16 +77,16 @@ void GenericClassChecker::declareClassTypeParams(ClassDecl *cls) {
   this->state.getScopeStack().enterOnlyTypes(this->state.getScopeStack().getTopTypes());
   Module *here = this->state.getModuleStates().getCurrentModule();
   Module *home = this->state.getModuleStates().findDeclModule(cls);
-  bool moved = home && home != this->state.getModuleStates().getCurrentModule() &&
-               this->state.getScopeStack().isTopLevel();
-  if (moved) {
+  bool isMoved = home && home != this->state.getModuleStates().getCurrentModule() &&
+                 this->state.getScopeStack().isTopLevel();
+  if (isMoved) {
     this->moduleDeclarer->useModule(home);
   }
   this->state.getScopeStack().openTypeScope();
   std::vector<const Type *> defaults;
   cls->typeArgs = this->typeParams->declareTypeParams(cls->typeParams, &defaults);
   this->state.getScopeStack().closeTypeScope();
-  if (moved) {
+  if (isMoved) {
     this->moduleDeclarer->useModule(here);
   }
   this->state.getScopeStack().leaveOnlyTypes();
@@ -119,13 +119,14 @@ const Type *GenericClassChecker::instanceValueType(const ClassDecl *inst, const 
   return this->typeParams->substituteValue(type, inst->generic()->typeArgs, inst->typeArgs);
 }
 
-void GenericClassChecker::checkClassInstance(InstanceRecord *instance) {
+void GenericClassChecker::walkClassInstance(InstanceRecord *instance) {
   ClassDecl *inst = instance->cls;
   if (instance->checked) {
     return;
   }
   instance->checking = true;
-  std::vector<Diagnostics::Captured> errors;
+  Diagnostics &diagnostics = this->state.getDiagnostics();
+  auto instanceDiagnostics = std::vector<Diagnostic>();
   if (!this->state.getClassStore().isBrokenClass(inst->generic())) {
     this->classDeclarer->completeClass(inst);
     std::vector<FunctionDecl *> bodies;
@@ -147,24 +148,29 @@ void GenericClassChecker::checkClassInstance(InstanceRecord *instance) {
       }
       BodyState saved = this->returnInferrer->enterBody(fn);
       this->state.getGenericStore().rememberCheckingInstance(instance);
-      this->state.getDiagnostics().setCapture(&errors);
+      diagnostics.pushList(DiagnosticRoute::OWNER);
       this->functionChecker->walkFunctionFromScratch(fn);
+      auto bodyDiagnostics = diagnostics.popList();
+      llvm::append_range(instanceDiagnostics, bodyDiagnostics);
       this->returnInferrer->leaveBody(saved);
     }
   }
   instance->checking = false;
   instance->checked = true;
-  if (errors.empty() || instance->failed) {
+  const Diagnostic *firstError = diagnostics.findFirstError(instanceDiagnostics);
+  if (firstError == nullptr || instance->failed) {
     return;
   }
   instance->failed = true;
-  instance->message = errors.front().message;
-  instance->errorLoc = errors.front().loc;
+  instance->message = firstError->message;
+  instance->errorLoc = firstError->loc;
 }
 
 void GenericClassChecker::reportClassInstance(InstanceRecord *instance, llvm::SMLoc use) {
   llvm::SMLoc loc = use.isValid() ? use : instance->cls->generic()->loc();
-  if (this->state.getDiagnostics().capture()) {
+  DiagnosticRoute destination = this->state.getDiagnostics().getCurrentDestination();
+  instance->isReported = destination != DiagnosticRoute::DISCARD;
+  if (destination == DiagnosticRoute::OWNER) {
     this->state.getGenericStore().rememberFailedCall(loc, instance);
     this->state.getDiagnostics().error(loc, instance->message);
     return;
@@ -176,7 +182,11 @@ void GenericClassChecker::reportClassInstance(InstanceRecord *instance, llvm::SM
   const InstanceRecord *at = instance;
   llvm::SmallPtrSet<const char *, 8> shown;
   auto nameOf = [](const InstanceRecord *i) { return i->cls ? i->cls->name : i->generic->name; };
-  while (at && at->errorLoc.isValid() && shown.insert(at->errorLoc.getPointer()).second) {
+  while (at != nullptr && at->errorLoc.isValid()) {
+    auto [_, isFirstShown] = shown.insert(at->errorLoc.getPointer());
+    if (!isFirstShown) {
+      break;
+    }
     const InstanceRecord *next = this->state.getGenericStore().findFailedCall(at->errorLoc);
     std::string where = next ? ErrorTextInstanceUse::usesHere(nameOf(at), nameOf(next))
                              : ErrorTextInstanceUse::here(nameOf(at));
@@ -187,11 +197,11 @@ void GenericClassChecker::reportClassInstance(InstanceRecord *instance, llvm::SM
 
 GenericClassChecker::ResultClassDeclared
 GenericClassChecker::declaredFirst(const ClassDecl *generic) const {
-  bool early = !generic->declared && this->state.getModuleStates().getLoadingModule() &&
-               !this->state.getFunctionStack().isInsideFunction() &&
-               this->state.getModuleStates().findDeclModule(generic) ==
-                   this->state.getModuleStates().getLoadingModule();
-  if (early) {
+  bool isEarly = !generic->declared && this->state.getModuleStates().getLoadingModule() &&
+                 !this->state.getFunctionStack().isInsideFunction() &&
+                 this->state.getModuleStates().findDeclModule(generic) ==
+                     this->state.getModuleStates().getLoadingModule();
+  if (isEarly) {
     std::string message = ErrorTextDeclaredFirst::before(generic->name);
 
     return err(GenericClassCheckerDeclaredFirstError{
@@ -340,9 +350,9 @@ ClassDecl *GenericClassChecker::instantiatedClass(const NewExpr *expr, ClassDecl
       this->genericClassInstantiator->instantiateClass(generic, std::move(args), expr->loc());
   if (made.isErr() &&
       made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
-    bool endless =
+    bool isEndless =
         made.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES;
-    llvm::SMLoc at = endless ? generic->loc() : expr->loc();
+    llvm::SMLoc at = isEndless ? generic->loc() : expr->loc();
     this->state.getDiagnostics().error(at, made.error().message);
   }
 

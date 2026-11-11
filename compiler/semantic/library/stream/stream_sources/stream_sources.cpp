@@ -35,8 +35,8 @@ StreamSources::StreamSources(SemanticState &owner, SemanticParts &all)
 
 Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, llvm::SMLoc loc) {
   llvm::StringRef fn = decl->name;
-  bool reading = fn == "createReadStream";
-  if (!reading && fn != "createWriteStream") {
+  bool isReading = fn == "createReadStream";
+  if (!isReading && fn != "createWriteStream") {
     return nullptr;
   }
   if (this->libraryCalls->inLibrary(call->loc())) {
@@ -47,7 +47,7 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, l
     return call;
   }
   TypeAliasDecl *alias = this->state.getLibraryDeclarations().findLibraryType(
-      reading ? "ReadStreamOptions" : "WriteStreamOptions");
+      isReading ? "ReadStreamOptions" : "WriteStreamOptions");
   if (alias == nullptr) {
     return call;
   }
@@ -69,18 +69,18 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, l
   }
   call->args = {path, args.opts, args.encoding};
 
-  return this->callFsStream(call, args, reading, loc);
+  return this->callFsStream(call, args, isReading, loc);
 }
 
 bool StreamSources::fsStreamArityFits(CallExpr *call, llvm::SMLoc loc) {
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
 
-  return !rejected && arity.isOk();
+  return !isRejected && arity.isOk();
 }
 
 void StreamSources::walkFsStreamOptions(Expr *arg, FsStreamArgs &args) {
@@ -138,14 +138,14 @@ Expr *StreamSources::callFsStream(CallExpr *call, const FsStreamArgs &args, bool
 
 Expr *StreamSources::processStream(MemberExpr *member) {
   llvm::StringRef name = member->name;
-  bool in = name == "stdin";
-  llvm::StringRef fn = in ? "processStdin" : "processStdout";
+  bool isIn = name == "stdin";
+  llvm::StringRef fn = isIn ? "processStdin" : "processStdout";
   if (!this->state.getLibraryDeclarations().findLibraryFunction(fn)) {
     return nullptr;
   }
   llvm::SMLoc loc = member->loc();
   std::vector<Expr *> args;
-  if (!in) {
+  if (!isIn) {
     args.push_back(this->exprChecker->checkExpr(
         this->state.getAst().make<IntLitExpr>(loc, name == "stdout" ? 1 : 2), Type::intTy()));
   }
@@ -154,7 +154,7 @@ Expr *StreamSources::processStream(MemberExpr *member) {
   call->type = Type::error();
   std::vector<bool> given(call->args.size(), true);
   Expr *stream = this->eventTargetChecker->callLibraryFunction(call, fn, {}, given, loc);
-  if (in && this->state.getStreamStore().hasStreamViews()) {
+  if (isIn && this->state.getStreamStore().hasStreamViews()) {
     FieldPath path;
     path.var = this->processStdinVar();
     if (const Type *view = this->state.getStreamStore().findStreamView(path, loc)) {
@@ -200,13 +200,13 @@ StreamSources::ResultValuesIterator StreamSources::valuesIterator(Expr *source) 
 
 Expr *StreamSources::checkStreamFrom(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
-  if (rejected || arity.isErr()) {
+  if (isRejected || arity.isErr()) {
     return call;
   }
   llvm::SMLoc loc = member->loc();

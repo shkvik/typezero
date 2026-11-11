@@ -141,7 +141,7 @@ void DeclarationChecker::walkDeclarationFile(Module *module) {
         this->state.getDiagnostics().error(fn->loc(), exported.error().message);
         continue;
       }
-      this->checkFunction(fn, *exported.value());
+      this->walkDeclaredFunction(fn, *exported.value());
     }
   }
   for (const DeclaredClass &cls : file.classes) {
@@ -151,7 +151,7 @@ void DeclarationChecker::walkDeclarationFile(Module *module) {
       this->state.getDiagnostics().error(cls.loc, exported.error().message);
       continue;
     }
-    this->checkClass(cls, *exported.value());
+    this->walkDeclaredClass(cls, *exported.value());
   }
   std::string declarations = llvm::sys::path::filename(file.path).str();
   for (const auto &entry : this->exportedNames) {
@@ -265,8 +265,8 @@ DeclarationChecker::paramCount(size_t here, size_t there, const std::string &wha
 DeclarationChecker::ResultParamShapeMatches
 DeclarationChecker::paramShape(const Param &mine, const Param &theirs,
                                const std::string &param) const {
-  bool optionalThere = theirs.optional() || theirs.defaultValue();
-  if (mine.optional() != optionalThere || mine.rest() != theirs.rest()) {
+  bool isOptionalThere = theirs.optional() || theirs.defaultValue();
+  if (mine.optional() != isOptionalThere || mine.rest() != theirs.rest()) {
     std::string message = ErrorTextDeclaration::paramKind(param, mine.optional(), this->fileName());
 
     return err(DeclarationCheckerParamShapeError{
@@ -379,7 +379,7 @@ DeclarationChecker::sameReturn(const Type *here, const Type *there, const std::s
   return ok(there);
 }
 
-void DeclarationChecker::checkFunction(FunctionDecl *declared, const Exported &exported) {
+void DeclarationChecker::walkDeclaredFunction(FunctionDecl *declared, const Exported &exported) {
   ScopeEntry entry = this->topLevelChecker->lookupValue(exported.local);
   ResultModuleHasFunction found = this->functionFound(entry, declared->name);
   if (found.isErr()) {
@@ -419,13 +419,13 @@ bool DeclarationChecker::mentionsHidden(const FunctionDecl *fn) const {
     if (!cls) {
       continue;
     }
-    bool shown = false;
+    bool isShown = false;
     for (const auto &entry : this->exportedNames) {
       if (entry.second.local == cls->name) {
-        shown = true;
+        isShown = true;
       }
     }
-    if (!shown && this->state.getModuleStates().findDeclModule(cls) == this->checkedModule) {
+    if (!isShown && this->state.getModuleStates().findDeclModule(cls) == this->checkedModule) {
       return true;
     }
   }
@@ -478,8 +478,8 @@ DeclarationChecker::optionalAgrees(const DeclaredField &declared, const ClassFie
   return ok(&field);
 }
 
-void DeclarationChecker::checkField(const DeclaredMember &member, const ClassField &field,
-                                    const ClassDecl *cls) {
+void DeclarationChecker::walkDeclaredField(const DeclaredMember &member, const ClassField &field,
+                                           const ClassDecl *cls) {
   std::string what = ErrorTextDeclaration::memberOf(member.name, cls->name);
   ResultDeclaredFieldForm form = this->declaredField(member, what);
   if (form.isErr()) {
@@ -528,8 +528,8 @@ DeclarationChecker::methodSignature(const DeclaredMember &member, const std::str
   return ok(signature);
 }
 
-void DeclarationChecker::checkMethod(const DeclaredMember &member, const FunctionDecl *fn,
-                                     const ClassDecl *cls) {
+void DeclarationChecker::walkDeclaredMethod(const DeclaredMember &member, const FunctionDecl *fn,
+                                            const ClassDecl *cls) {
   std::string what = ErrorTextDeclaration::memberOf(member.name, cls->name);
   ResultDeclaredSignature signature = this->methodSignature(member, what);
   if (signature.isErr()) {
@@ -545,8 +545,8 @@ void DeclarationChecker::checkMethod(const DeclaredMember &member, const Functio
     }
     return;
   }
-  bool constructor = member.form.is<DeclaredConstructor>();
-  if (!this->sameParams(declared->params, fn, member.loc, what) || constructor) {
+  bool isConstructor = member.form.is<DeclaredConstructor>();
+  if (!this->sameParams(declared->params, fn, member.loc, what) || isConstructor) {
     return;
   }
   ResultReturnTypeWritten written = DeclarationChecker::returnWritten(member.type, what);
@@ -692,7 +692,8 @@ DeclarationChecker::memberListed(const llvm::StringSet<> &seen, llvm::StringRef 
   return ok(cls);
 }
 
-void DeclarationChecker::checkConstructor(const DeclaredMember &member, const ClassDecl *cls) {
+void DeclarationChecker::walkDeclaredConstructor(const DeclaredMember &member,
+                                                 const ClassDecl *cls) {
   ResultConstructorExists exists = this->callableConstructor(cls);
   if (exists.isErr()) {
     this->state.getDiagnostics().error(member.loc, exists.error().message);
@@ -703,17 +704,17 @@ void DeclarationChecker::checkConstructor(const DeclaredMember &member, const Cl
   if (kept.isErr()) {
     this->state.getDiagnostics().error(member.loc, kept.error().message);
   }
-  this->checkMethod(member, constructor, cls);
+  this->walkDeclaredMethod(member, constructor, cls);
 }
 
-void DeclarationChecker::checkMember(const DeclaredMember &member, const ClassDecl *cls) {
+void DeclarationChecker::walkDeclaredMember(const DeclaredMember &member, const ClassDecl *cls) {
   std::string what = ErrorTextDeclaration::memberOf(member.name, cls->name);
   ResultAccessWordWritten written = DeclarationChecker::accessWritten(member, what);
   if (written.isErr()) {
     this->state.getDiagnostics().error(member.loc, written.error().message);
   }
   if (member.form.is<DeclaredConstructor>()) {
-    this->checkConstructor(member, cls);
+    this->walkDeclaredConstructor(member, cls);
     return;
   }
   const ClassField *field = DeclarationChecker::classField(cls, member);
@@ -734,13 +735,13 @@ void DeclarationChecker::checkMember(const DeclaredMember &member, const ClassDe
     this->state.getDiagnostics().error(member.loc, matches.error().message);
   }
   if (field) {
-    this->checkField(member, *field, cls);
+    this->walkDeclaredField(member, *field, cls);
   } else {
-    this->checkMethod(member, method, cls);
+    this->walkDeclaredMethod(member, method, cls);
   }
 }
 
-void DeclarationChecker::checkListed(const ClassDecl *cls, const llvm::StringSet<> &seen) {
+void DeclarationChecker::walkListed(const ClassDecl *cls, const llvm::StringSet<> &seen) {
   for (const ClassField &field : cls->fields) {
     if (field.method() || field.access == Access::Private) {
       continue;
@@ -771,7 +772,8 @@ void DeclarationChecker::checkListed(const ClassDecl *cls, const llvm::StringSet
   }
 }
 
-void DeclarationChecker::checkClass(const DeclaredClass &declared, const Exported &exported) {
+void DeclarationChecker::walkDeclaredClass(const DeclaredClass &declared,
+                                           const Exported &exported) {
   ResultModuleHasTheClass found = this->classFound(declared, exported);
   if (found.isErr()) {
     this->state.getDiagnostics().error(declared.loc, found.error().message);
@@ -793,9 +795,9 @@ void DeclarationChecker::checkClass(const DeclaredClass &declared, const Exporte
   for (const DeclaredMember &member : declared.members) {
     std::string key = DeclarationChecker::memberKey(member.name, member.isStatic);
     seen.insert(key);
-    this->checkMember(member, cls);
+    this->walkDeclaredMember(member, cls);
   }
-  this->checkListed(cls, seen);
+  this->walkListed(cls, seen);
 }
 
 }

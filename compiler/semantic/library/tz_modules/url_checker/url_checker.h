@@ -13,7 +13,7 @@ class UrlChecker {
 public:
   UrlChecker(SemanticState &owner, SemanticParts &all);
 
-  void checkUrlNew(NewExpr *expr);
+  void walkUrlNew(NewExpr *expr);
   bool checkUrlSetter(MemberExpr *member, const CallExpr *call);
   static bool validUrlText(llvm::StringRef text, bool relative);
   static std::optional<std::string> literalText(const Expr *expr);

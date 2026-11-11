@@ -16,7 +16,7 @@ private:
     unsigned depth;
   };
 
-  static bool poolClass(const ClassDecl *cls);
+  bool poolClass(const ClassDecl *cls) const;
 
   bool used() const override;
   std::vector<Diagnostic> kept(const Expr *value, bool closure, llvm::StringRef where) override;

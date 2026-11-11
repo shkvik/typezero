@@ -74,9 +74,9 @@ JumpChecker::ResultJumpTargeted JumpChecker::checkJump(Stmt *stmt) {
 
 JumpChecker::ResultLabelIsFresh JumpChecker::labelFresh(llvm::ArrayRef<llvm::StringRef> labels,
                                                         const LabeledStmt *labeled) const {
-  bool duplicate = llvm::is_contained(labels, labeled->label) ||
-                   this->state.getBlockPosition().hasLabel(labeled->label);
-  if (duplicate) {
+  bool isDuplicate = llvm::is_contained(labels, labeled->label) ||
+                     this->state.getBlockPosition().hasLabel(labeled->label);
+  if (isDuplicate) {
     std::string message = ErrorTextLabel::duplicate(labeled->label);
 
     return err(JumpCheckerLabelFreshError{
@@ -102,7 +102,7 @@ JumpChecker::ResultBodyCanLabel JumpChecker::labelBody(const Stmt *body) {
   return ok(body);
 }
 
-void JumpChecker::checkLabeled(LabeledStmt *stmt) {
+void JumpChecker::walkLabeled(LabeledStmt *stmt) {
   llvm::SmallVector<llvm::StringRef, 1> labels;
   Stmt *body = stmt;
   while (auto *labeled = dyn_cast<LabeledStmt>(body)) {
@@ -115,7 +115,7 @@ void JumpChecker::checkLabeled(LabeledStmt *stmt) {
   }
   if (JumpChecker::isLoop(body) || isa<SwitchStmt>(body)) {
     this->state.getBlockPosition().rememberPendingLabels(labels);
-    this->stmtChecker->checkStmt(body);
+    this->stmtChecker->walkStmt(body);
     return;
   }
   ResultBodyCanLabel labelable = JumpChecker::labelBody(body);
@@ -125,7 +125,7 @@ void JumpChecker::checkLabeled(LabeledStmt *stmt) {
   }
   this->state.getBlockPosition().rememberPendingLabels(labels);
   this->pushTarget(JumpTarget::Kind::Block);
-  this->stmtChecker->checkStmt(body);
+  this->stmtChecker->walkStmt(body);
   Flow breaks = this->state.getBlockPosition().leaveJumpTarget().breaks;
   this->state.getFlowState().replaceFlow(
       FlowChecker::join(this->state.getFlowState().getFlow(), breaks));

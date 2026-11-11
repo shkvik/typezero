@@ -43,10 +43,10 @@ std::vector<FunctionDecl *>
 CallCycles::unknownReturns(llvm::ArrayRef<FunctionDecl *> functions) const {
   std::vector<FunctionDecl *> nodes;
   for (FunctionDecl *fn : functions) {
-    bool unknown = fn->sym && !fn->sym->hasReturnType() &&
-                   !this->state.getClassStore().findInheritedReturn(fn) &&
-                   !this->state.getClassStore().hasReturnSource(fn);
-    if (unknown) {
+    bool isUnknown = fn->sym && !fn->sym->hasReturnType() &&
+                     !this->state.getClassStore().findInheritedReturn(fn) &&
+                     !this->state.getClassStore().hasReturnSource(fn);
+    if (isUnknown) {
       nodes.push_back(fn);
     }
   }
@@ -180,8 +180,8 @@ void CallCycles::closeIfRoot(int node, CycleSearch &search) {
     return;
   }
   std::vector<FuncSymbol *> cycle = CallCycles::popCycle(node, search);
-  bool callsItself = llvm::is_contained(search.calls[node], node);
-  if (cycle.size() == 1 && !callsItself) {
+  bool isCallingItself = llvm::is_contained(search.calls[node], node);
+  if (cycle.size() == 1 && !isCallingItself) {
     return;
   }
   this->state.getReturnInference().addCycle(std::move(cycle));

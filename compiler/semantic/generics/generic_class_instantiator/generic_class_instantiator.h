@@ -48,7 +48,7 @@ private:
   void fillInstanceFields(ClassDecl *inst);
   void declareInstanceMembers(ClassDecl *inst);
   void makeInstanceInit(ClassDecl *inst);
-  void checkInstanceVariants(ClassDecl *inst);
+  void walkInstanceVariants(ClassDecl *inst);
 
   SemanticState &state;
   ChunkTypes *chunkTypes = nullptr;

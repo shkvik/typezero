@@ -255,11 +255,11 @@ MemberChecker::ResultMemberReadable MemberChecker::unknownObjectMember(MemberExp
   if (checked.isOk()) {
     return ok(checked.value());
   }
-  bool narrow = checked.error().code == UnknownCheckerCheckUnknownMemberErrorCode::NOT_NARROWED;
+  bool isNarrow = checked.error().code == UnknownCheckerCheckUnknownMemberErrorCode::NOT_NARROWED;
 
   return err(MemberCheckerCheckMemberError{
-      .code = narrow ? MemberCheckerCheckMemberErrorCode::UNKNOWN_NOT_NARROWED
-                     : MemberCheckerCheckMemberErrorCode::UNKNOWN_MEMBER,
+      .code = isNarrow ? MemberCheckerCheckMemberErrorCode::UNKNOWN_NOT_NARROWED
+                       : MemberCheckerCheckMemberErrorCode::UNKNOWN_MEMBER,
       .message = checked.error().message,
   });
 }
@@ -368,8 +368,8 @@ MemberChecker::ResultMemberReadable MemberChecker::objectFieldMember(MemberExpr 
 
 MemberChecker::ResultMemberReadable MemberChecker::builtinValueMember(MemberExpr *member,
                                                                       const Type *type) {
-  bool sized = type->isString() || type->isArray() || type->isListParam();
-  if (sized && BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)) {
+  bool isSized = type->isString() || type->isArray() || type->isListParam();
+  if (isSized && BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)) {
     member->type = Type::intTy();
     return ok(member);
   }
@@ -497,16 +497,16 @@ MemberChecker::ResultIndexedElement MemberChecker::enumIndex(IndexExpr *index, E
 
 MemberChecker::ResultIndexedElement MemberChecker::checkTypedIndex(IndexExpr *index) {
   UtilityTypes::ResultGenericIndexed generic = this->utilityTypes->checkGenericIndex(index);
-  bool genericIndex =
+  bool isGenericIndex =
       generic.isOk() ||
       generic.error().code != UtilityTypesCheckGenericIndexErrorCode::NOT_A_GENERIC_INDEX;
-  if (generic.isErr() && genericIndex) {
+  if (generic.isErr() && isGenericIndex) {
     return err(MemberCheckerCheckIndexError{
         .code = MemberCheckerCheckIndexErrorCode::GENERIC_INDEX,
         .message = generic.error().message,
     });
   }
-  if (genericIndex) {
+  if (isGenericIndex) {
     return ok(generic.value());
   }
   const Type *type = index->object->type;
@@ -561,9 +561,9 @@ MemberChecker::ResultIndexedElement MemberChecker::keyedIndex(IndexExpr *index) 
     return ok(keyed.value());
   }
   KeyedFieldCheckerCheckKeyedFieldErrorCode keyedCode = keyed.error().code;
-  bool reported = keyedCode == KeyedFieldCheckerCheckKeyedFieldErrorCode::ALREADY_REPORTED;
+  bool isReported = keyedCode == KeyedFieldCheckerCheckKeyedFieldErrorCode::ALREADY_REPORTED;
   MemberCheckerCheckIndexErrorCode code = MemberCheckerCheckIndexErrorCode::FIELD_REJECTED;
-  if (reported) {
+  if (isReported) {
     code = MemberCheckerCheckIndexErrorCode::ALREADY_REPORTED;
   } else if (KeyedFieldChecker::wrongKey(keyedCode)) {
     code = MemberCheckerCheckIndexErrorCode::KEY_REJECTED;
@@ -597,8 +597,9 @@ MemberChecker::ResultIndexedElement MemberChecker::positionIndex(IndexExpr *inde
     return this->listParamIndex(index, type);
   }
   const Type *element = type->isString() ? type : type->isArray() ? type->inner() : nullptr;
-  bool optionalList = type->isOptional() && (type->inner()->isArray() || type->inner()->isString());
-  if (element == nullptr && optionalList) {
+  bool isOptionalList =
+      type->isOptional() && (type->inner()->isArray() || type->inner()->isString());
+  if (element == nullptr && isOptionalList) {
     std::string message = ErrorTextIndexRead::undefined();
 
     return err(MemberCheckerCheckIndexError{
@@ -614,12 +615,12 @@ MemberChecker::ResultIndexedElement MemberChecker::positionIndex(IndexExpr *inde
         .message = message,
     });
   }
-  bool inRange = this->indexProofs->provesInBounds(index->object, index->index, false);
+  bool isInRange = this->indexProofs->provesInBounds(index->object, index->index, false);
   ElementIndex *access = index->form.as<ElementIndex>();
   if (access != nullptr) {
-    access->mayBeOutOfRange = !inRange;
+    access->mayBeOutOfRange = !isInRange;
   }
-  index->type = inRange ? element : Type::optional(element);
+  index->type = isInRange ? element : Type::optional(element);
 
   return ok(index);
 }

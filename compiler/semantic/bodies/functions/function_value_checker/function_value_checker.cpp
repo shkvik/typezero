@@ -182,12 +182,12 @@ FunctionValueChecker::ResultAsyncCallbackOk
 FunctionValueChecker::asyncCallback(const Expr *arg, const Signature &expected,
                                     llvm::StringRef method) const {
   const Type *type = arg->type;
-  bool promised = type->isFunction() && type->ret()->isPromise() && expected.ret &&
-                  !expected.ret->isPromise() && !expected.voidResult && !expected.ret->isError();
+  bool isPromised = type->isFunction() && type->ret()->isPromise() && expected.ret &&
+                    !expected.ret->isPromise() && !expected.voidResult && !expected.ret->isError();
   const StringMethodInfo *stringMethod = StringMethodTable::find(method);
-  bool replaces = stringMethod != nullptr && (stringMethod->method == StringMethod::REPLACE ||
-                                              stringMethod->method == StringMethod::REPLACE_ALL);
-  if (promised && replaces) {
+  bool isReplacing = stringMethod != nullptr && (stringMethod->method == StringMethod::REPLACE ||
+                                                 stringMethod->method == StringMethod::REPLACE_ALL);
+  if (isPromised && isReplacing) {
     std::string message = ErrorTextAsyncCallback::replace(method, expected.ret->name());
 
     return err(FunctionValueCheckerAsyncCallbackError{
@@ -195,7 +195,7 @@ FunctionValueChecker::asyncCallback(const Expr *arg, const Signature &expected,
         .message = message,
     });
   }
-  if (promised && expected.ret->isBool()) {
+  if (isPromised && expected.ret->isBool()) {
     std::string message = ErrorTextAsyncCallback::test(method, expected.ret->name());
 
     return err(FunctionValueCheckerAsyncCallbackError{
@@ -203,7 +203,7 @@ FunctionValueChecker::asyncCallback(const Expr *arg, const Signature &expected,
         .message = message,
     });
   }
-  if (promised) {
+  if (isPromised) {
     std::string message = ErrorTextAsyncCallback::value(method, expected.ret->name());
 
     return err(FunctionValueCheckerAsyncCallbackError{

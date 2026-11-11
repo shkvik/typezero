@@ -28,10 +28,10 @@ public:
   std::vector<const Type *> exactClassArgs(CallExpr *call, const FuncSymbol *generic);
   FunctionDecl *instanceDecl(FuncSymbol *generic, llvm::ArrayRef<const Type *> args,
                              llvm::ArrayRef<const Type *> exact = {});
-  void checkInstance(InstanceRecord *instance);
+  void walkInstance(InstanceRecord *instance);
   void reportInstance(InstanceRecord *instance, llvm::SMLoc callLoc,
                       llvm::ArrayRef<const Type *> concrete);
-  void checkInstances();
+  void walkInstances();
 
 private:
   using ResultTypeArgsCount = Result<size_t, GenericInstantiatorTypeArgCountError>;

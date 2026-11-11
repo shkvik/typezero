@@ -100,18 +100,18 @@ std::string JsonChecker::refText(const Expr *expr) {
   return text;
 }
 
-void JsonChecker::checkRedundantTests(const BinaryExpr *bin) {
+void JsonChecker::walkRedundantTests(const BinaryExpr *bin) {
   bool isAnd = bin->op == BinaryOp::LogAnd;
   std::vector<const Expr *> terms = ExprParts::sameOperatorParts(bin->lhs, bin->op);
   const Expr *tested = nullptr;
-  bool nullTest = false;
+  bool isNullTest = false;
   const Expr *rhs = JsonChecker::bare(bin->rhs);
   if (auto *eq = dyn_cast<BinaryExpr>(rhs); eq &&
                                             (eq->op == BinaryOp::Eq || eq->op == BinaryOp::Ne) &&
                                             (JsonChecker::nullName(JsonChecker::bare(eq->lhs)) ||
                                              JsonChecker::nullName(JsonChecker::bare(eq->rhs)))) {
     tested = JsonChecker::nullName(JsonChecker::bare(eq->lhs)) ? eq->rhs : eq->lhs;
-    nullTest = true;
+    isNullTest = true;
   } else {
     const Expr *inner = rhs;
     if (auto *unary = dyn_cast<UnaryExpr>(rhs); unary && unary->op == UnaryOp::Not) {
@@ -141,7 +141,7 @@ void JsonChecker::checkRedundantTests(const BinaryExpr *bin) {
       continue;
     }
     std::string name = ToUtf8::toUtf8(text->value);
-    ResultTypeOfAgrees agrees = JsonChecker::typeOfAgrees(tested, name, nullTest, isAnd);
+    ResultTypeOfAgrees agrees = JsonChecker::typeOfAgrees(tested, name, isNullTest, isAnd);
     if (agrees.isErr()) {
       this->state.getDiagnostics().error(rhs->loc(), agrees.error().message);
       return;
@@ -325,16 +325,16 @@ Expr *JsonChecker::checkJsonArrayLit(ArrayLitExpr *lit) {
 }
 
 Expr *JsonChecker::checkNullEquality(BinaryExpr *bin) {
-  bool lhsNull = JsonChecker::isNullName(bin->lhs);
-  bool rhsNull = JsonChecker::isNullName(bin->rhs);
-  if (!lhsNull && !rhsNull) {
+  bool isLhsNull = JsonChecker::isNullName(bin->lhs);
+  bool isRhsNull = JsonChecker::isNullName(bin->rhs);
+  if (!isLhsNull && !isRhsNull) {
     return nullptr;
   }
   bin->type = Type::boolTy();
-  Expr *&null = lhsNull ? bin->lhs : bin->rhs;
-  Expr *&other = lhsNull ? bin->rhs : bin->lhs;
+  Expr *&null = isLhsNull ? bin->lhs : bin->rhs;
+  Expr *&other = isLhsNull ? bin->rhs : bin->lhs;
   const Type *type = Type::undefinedTy();
-  if (!(lhsNull && rhsNull)) {
+  if (!(isLhsNull && isRhsNull)) {
     other = this->exprChecker->checkExpr(other);
     type = other->type;
   }
@@ -352,16 +352,16 @@ Expr *JsonChecker::checkNullEquality(BinaryExpr *bin) {
 Expr *JsonChecker::checkJsonEquality(BinaryExpr *bin) {
   const Type *l = bin->lhs->type;
   const Type *r = bin->rhs->type;
-  bool lhsJson = l->nonOptional()->isJson();
-  bool rhsJson = r->nonOptional()->isJson();
+  bool isLhsJson = l->nonOptional()->isJson();
+  bool isRhsJson = r->nonOptional()->isJson();
   const Type *json =
       l->isOptional() || r->isOptional() ? Type::optional(Type::json()) : Type::json();
-  if (lhsJson && rhsJson) {
+  if (isLhsJson && isRhsJson) {
     bin->lhs = this->typeRelations->convert(bin->lhs, json);
     bin->rhs = this->typeRelations->convert(bin->rhs, json);
     return bin;
   }
-  Expr *&other = lhsJson ? bin->rhs : bin->lhs;
+  Expr *&other = isLhsJson ? bin->rhs : bin->lhs;
   const Type *type = other->type;
   if (type->isString() || type->isBool()) {
     return bin;
@@ -441,8 +441,8 @@ void JsonChecker::addArrayFacts(const Expr *arg, Flow &whenTrue) const {
 
 void JsonChecker::addNothingFacts(const Expr *side, const Expr *other, Flow &equal,
                                   Flow &different) const {
-  bool null = JsonChecker::nullName(other);
-  Flow &defined = null ? equal : different;
+  bool isNull = JsonChecker::nullName(other);
+  Flow &defined = isNull ? equal : different;
   const VarSymbol *var = JsonChecker::jsonVariable(side);
   if (var != nullptr && var->type->isOptional()) {
     defined.defined.insert(var);
@@ -457,7 +457,7 @@ void JsonChecker::addNothingFacts(const Expr *side, const Expr *other, Flow &equ
 void JsonChecker::addTypeOfFacts(const Expr *operand, const std::u16string &text, Flow &equal,
                                  Flow &different) const {
   const Type *narrowed = JsonChecker::typeOfJson(text);
-  bool present = narrowed != nullptr || text == u"object" || text == u"null";
+  bool isPresent = narrowed != nullptr || text == u"object" || text == u"null";
   const VarSymbol *var = JsonChecker::jsonVariable(operand);
   if (var == nullptr) {
     std::optional<FieldPath> path = this->jsonField(operand);
@@ -466,7 +466,7 @@ void JsonChecker::addTypeOfFacts(const Expr *operand, const std::u16string &text
     }
     if (narrowed != nullptr) {
       JsonChecker::narrowJsonField(equal, *path, narrowed);
-    } else if (present) {
+    } else if (isPresent) {
       FieldFacts::defineField(equal, *path);
     } else if (text == u"undefined") {
       FieldFacts::defineField(different, *path);
@@ -479,7 +479,7 @@ void JsonChecker::addTypeOfFacts(const Expr *operand, const std::u16string &text
   if (!var->type->isOptional()) {
     return;
   }
-  if (present) {
+  if (isPresent) {
     equal.defined.insert(var);
   } else if (text == u"undefined") {
     different.defined.insert(var);
@@ -505,13 +505,13 @@ const Type *JsonChecker::typeOfJson(const std::u16string &text) {
 
 Expr *JsonChecker::checkJsonIsJson(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
-  if (rejected || arity.isErr()) {
+  if (isRejected || arity.isErr()) {
     return call;
   }
   call->args[0] = this->exprChecker->checkExpr(call->args[0]);
@@ -532,13 +532,13 @@ Expr *JsonChecker::checkJsonIsJson(CallExpr *call, MemberExpr *member) {
 
 Expr *JsonChecker::checkArrayIsArray(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
-  if (rejected || arity.isErr()) {
+  if (isRejected || arity.isErr()) {
     return call;
   }
   call->args[0] = this->exprChecker->checkExpr(call->args[0]);

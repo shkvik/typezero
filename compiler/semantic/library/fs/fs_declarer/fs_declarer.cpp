@@ -115,13 +115,13 @@ Expr *FsDeclarer::checkFsClassMethod(CallExpr *call, MemberExpr *member, ClassDe
   if (!kind) {
     return nullptr;
   }
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 0);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 0);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
-  if (rejected || arity.isErr()) {
+  if (isRejected || arity.isErr()) {
     return call;
   }
   auto *lit = this->state.getAst().make<IntLitExpr>(member->loc(), uint64_t(*kind));

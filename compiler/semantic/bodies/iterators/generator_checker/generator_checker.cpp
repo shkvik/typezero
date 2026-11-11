@@ -45,9 +45,9 @@ GeneratorChecker::ResultResolvedIterator GeneratorChecker::resolveIteratorType(c
   const TypeNameInfo *builtin = TypeNameTable::find(name);
   const IteratorTypeName *iteratorName =
       builtin != nullptr ? builtin->form.as<IteratorTypeName>() : nullptr;
-  bool shadowed = TypeNameTable::isName(name, TypeName::ITERATOR) &&
-                  this->typeDeclarer->lookupType(name) != nullptr;
-  if (iteratorName == nullptr || shadowed) {
+  bool isShadowed = TypeNameTable::isName(name, TypeName::ITERATOR) &&
+                    this->typeDeclarer->lookupType(name) != nullptr;
+  if (iteratorName == nullptr || isShadowed) {
     return err(GeneratorCheckerResolveIteratorTypeError{
         .code = GeneratorCheckerResolveIteratorTypeErrorCode::NOT_AN_ITERATOR,
         .message = "",
@@ -126,8 +126,8 @@ bool GeneratorChecker::namesNoValue(const TypeRef &arg) {
 
 GeneratorChecker::ResultGeneratorReturns
 GeneratorChecker::generatorReturnType(const FunctionDecl *fn, const Type *declared) {
-  bool plain = !fn->isGenerator || declared->isError();
-  if (!plain && fn->isAsync && !declared->isAsyncIterator()) {
+  bool isPlain = !fn->isGenerator || declared->isError();
+  if (!isPlain && fn->isAsync && !declared->isAsyncIterator()) {
     const Type *yielded = declared->isIterator() ? declared->yielded() : declared;
     std::string shown = yielded->isVoid() ? std::string("int") : yielded->name().str();
     std::string message = ErrorTextGeneratorType::async(shown);
@@ -137,7 +137,7 @@ GeneratorChecker::generatorReturnType(const FunctionDecl *fn, const Type *declar
         .message = message,
     });
   }
-  if (!plain && !fn->isAsync && !declared->isIterator()) {
+  if (!isPlain && !fn->isAsync && !declared->isIterator()) {
     std::string shown = declared->isVoid() ? std::string("int") : declared->name().str();
     std::string message = ErrorTextGeneratorType::sync(shown);
 
@@ -204,19 +204,20 @@ const Type *GeneratorChecker::inferGeneratorType(const FuncSymbol *fn,
                                                  llvm::ArrayRef<YieldExpr *> yields,
                                                  llvm::ArrayRef<ReturnStmt *> returns,
                                                  bool fallsOff, bool report) {
-  bool async = fn->decl != nullptr && fn->decl->isAsync;
-  YieldJoin join = this->joinYields(fn, yields, async, report);
+  bool isAsync = fn->decl != nullptr && fn->decl->isAsync;
+  YieldJoin join = this->joinYields(fn, yields, isAsync, report);
   if (join.failed) {
     return Type::error();
   }
   if (join.yielded == nullptr || join.yielded->isUndefined()) {
     return this->unknownYields(fn, yields, join, report);
   }
-  std::optional<const Type *> returned = this->joinedReturns(fn, returns, fallsOff, async, report);
+  std::optional<const Type *> returned =
+      this->joinedReturns(fn, returns, fallsOff, isAsync, report);
   if (!returned.has_value()) {
     return Type::error();
   }
-  if (async) {
+  if (isAsync) {
     return Type::asyncIterator(join.yielded, *returned, Type::voidTy());
   }
 
@@ -287,10 +288,10 @@ std::optional<const Type *> GeneratorChecker::joinedReturns(const FuncSymbol *fn
                                                             bool fallsOff, bool async,
                                                             bool report) {
   const Type *returned = nullptr;
-  bool undefined = fallsOff;
+  bool isUndefined = fallsOff;
   for (ReturnStmt *ret : returns) {
     if (ret->value == nullptr || ret->value->type->isUndefined()) {
-      undefined = true;
+      isUndefined = true;
       continue;
     }
     const Type *t = ret->value->type;
@@ -301,7 +302,7 @@ std::optional<const Type *> GeneratorChecker::joinedReturns(const FuncSymbol *fn
       t = AsyncChecker::awaitedType(t);
     }
     if (t == nullptr || t->isUndefined()) {
-      undefined = true;
+      isUndefined = true;
       continue;
     }
     ResultReturnsOfOneType joined = GeneratorChecker::returnsJoin(returned, t, fn);
@@ -316,7 +317,7 @@ std::optional<const Type *> GeneratorChecker::joinedReturns(const FuncSymbol *fn
   if (returned == nullptr) {
     return Type::voidTy();
   }
-  if (undefined && !returned->isVoid()) {
+  if (isUndefined && !returned->isVoid()) {
     return Type::optional(returned);
   }
 
@@ -363,8 +364,8 @@ const Type *GeneratorChecker::asyncIteratedType(const Type *type) {
 GeneratorChecker::ResultNextNeedsNoValue GeneratorChecker::checkSendsNothing(const Type *iterator,
                                                                              llvm::StringRef what) {
   const Type *sent = iterator->sent();
-  bool free = sent->isVoid() || sent->isOptional() || sent->isError();
-  if (!free) {
+  bool isFree = sent->isVoid() || sent->isOptional() || sent->isError();
+  if (!isFree) {
     std::string message = ErrorTextSendsNothing::expects(what, iterator->name(), sent->name());
 
     return err(GeneratorCheckerCheckSendsNothingError{
@@ -403,9 +404,9 @@ GeneratorChecker::ResultPromiseYieldFits GeneratorChecker::promiseYield(const Ty
         .message = message,
     });
   }
-  bool other = yielded && !given->isError() && given != t &&
-               !TypeRelations::isImplicitlyConvertible(given, yielded);
-  if (other) {
+  bool isOther = yielded && !given->isError() && given != t &&
+                 !TypeRelations::isImplicitlyConvertible(given, yielded);
+  if (isOther) {
     std::string name = ErrorTextFunctionName::quoted(fn->name);
     std::string message = ErrorTextYield::promise(given->name(), name, yielded->name());
 
@@ -469,9 +470,9 @@ GeneratorChecker::delegateSync(const Type *type, const Type *element, const Type
         .message = message,
     });
   }
-  bool sends =
+  bool isSending =
       element && type->isIterator() && !type->sent()->isVoid() && type->sent() != sent && !loose;
-  if (sends) {
+  if (isSending) {
     std::string name = ErrorTextFunctionName::quoted(fn->name);
     std::string gets =
         sent->isVoid() ? ErrorTextYield::nothing() : ErrorTextFunctionName::quoted(sent->name());
@@ -498,8 +499,8 @@ GeneratorChecker::delegateSync(const Type *type, const Type *element, const Type
 GeneratorChecker::ResultSentTypeDeclared
 GeneratorChecker::sentDeclared(const YieldExpr *yield, bool async, const Type *sent,
                                const Type *yielded, bool loose) {
-  bool untyped = !yield->delegate && !async && sent->isVoid() && !yield->discarded && !loose;
-  if (untyped) {
+  bool isUntyped = !yield->delegate && !async && sent->isVoid() && !yield->discarded && !loose;
+  if (isUntyped) {
     std::string shown = yielded ? yielded->name().str() : std::string("int");
     std::string message = ErrorTextYield::untyped(shown);
 
@@ -543,18 +544,18 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
 }
 
 GeneratorChecker::YieldShape GeneratorChecker::yieldShape(const YieldExpr *yield, FuncSymbol *fn) {
-  bool async = fn->decl->isAsync;
+  bool isAsync = fn->decl->isAsync;
   const Type *known = fn->hasReturnType() ? fn->getKnownReturnType() : nullptr;
-  bool iterates = known != nullptr && (async ? known->isAsyncIterator() : known->isIterator());
-  const Type *generator = iterates ? known : nullptr;
+  bool isIterating = known != nullptr && (isAsync ? known->isAsyncIterator() : known->isIterator());
+  const Type *generator = isIterating ? known : nullptr;
   YieldShape shape{
       .fn = fn,
-      .async = async,
+      .async = isAsync,
       .yielded = generator != nullptr ? generator->yielded() : nullptr,
       .sent = generator != nullptr ? generator->sent() : Type::voidTy(),
       .loose = fn->hasReturnType() && generator == nullptr,
   };
-  if (!async) {
+  if (!isAsync) {
     return shape;
   }
   ResultNothingSentAsync nothing =
@@ -629,8 +630,8 @@ const Type *GeneratorChecker::yieldResultType(const YieldExpr *yield, const Yiel
     if (type->isError()) {
       return Type::error();
     }
-    bool returned = !shape.async && type->isIterator() && !type->returned()->isVoid();
-    return returned ? type->returned() : Type::undefinedTy();
+    bool isReturned = !shape.async && type->isIterator() && !type->returned()->isVoid();
+    return isReturned ? type->returned() : Type::undefinedTy();
   }
   if (shape.async) {
     return Type::undefinedTy();

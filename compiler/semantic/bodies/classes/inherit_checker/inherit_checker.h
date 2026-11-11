@@ -22,8 +22,8 @@ class InheritChecker {
 public:
   InheritChecker(SemanticState &owner, SemanticParts &all);
 
-  void checkAbstract(ClassDecl *cls);
-  void checkImplements(ClassDecl *cls);
+  void walkAbstract(ClassDecl *cls);
+  void walkImplements(ClassDecl *cls);
   Expr *checkSuperCall(CallExpr *call);
   Expr *checkSuperMethodCall(CallExpr *call, MemberExpr *member);
 

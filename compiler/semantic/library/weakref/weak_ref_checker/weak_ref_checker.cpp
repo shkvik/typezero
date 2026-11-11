@@ -35,9 +35,9 @@ WeakRefChecker::ResultTargetIsWritten WeakRefChecker::targetWritten(const TypeRe
 }
 
 WeakRefChecker::ResultWeakTargetValid WeakRefChecker::weakTarget(const Type *target) {
-  bool unsupported = target->isRegExp() || target->isMatch() || target->isDate() ||
-                     target->isDateFormat() || target->isBytes() || target->isTimer();
-  if (unsupported) {
+  bool isUnsupported = target->isRegExp() || target->isMatch() || target->isDate() ||
+                       target->isDateFormat() || target->isBytes() || target->isTimer();
+  if (isUnsupported) {
     std::string message = ErrorTextWeakTarget::notYet(target->name());
 
     return err(WeakRefCheckerWeakTargetError{
@@ -45,8 +45,8 @@ WeakRefChecker::ResultWeakTargetValid WeakRefChecker::weakTarget(const Type *tar
         .message = message,
     });
   }
-  bool object = target->isObject() && !target->isAnyObject() && !target->isWeakRef();
-  if (!object) {
+  bool isObject = target->isObject() && !target->isAnyObject() && !target->isWeakRef();
+  if (!isObject) {
     std::string message = ErrorTextWeakTarget::notObject(target->name(), target->isOptional());
 
     return err(WeakRefCheckerWeakTargetError{
@@ -177,13 +177,13 @@ Expr *WeakRefChecker::checkWeakRefMethod(CallExpr *call, MemberExpr *member) {
     }
     return call;
   }
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 0);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 0);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
-  if (rejected || arity.isErr()) {
+  if (isRejected || arity.isErr()) {
     return call;
   }
   call->target = BuiltinCall{.builtin = Builtin::WeakRefDeref};

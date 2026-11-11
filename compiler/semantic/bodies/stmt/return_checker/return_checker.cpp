@@ -79,9 +79,9 @@ bool Exits::continueLeaves(const ContinueStmt *next, const TreePlace &place) con
   if (place.hasLabel(next->label)) {
     return false;
   }
-  bool ownLabel = llvm::is_contained(this->labels, next->label);
+  bool isOwnLabel = llvm::is_contained(this->labels, next->label);
 
-  return !(this->isLoop && ownLabel);
+  return !(this->isLoop && isOwnLabel);
 }
 }
 
@@ -176,8 +176,8 @@ ReturnChecker::ResultConstructorExits ReturnChecker::constructorReturn(const Ret
         .message = message,
     });
   }
-  bool initializer = this->state.getClassContext().getInitializer() == fn->decl;
-  if (initializer && this->state.getFlowState().isBeforeSuper()) {
+  bool isInitializer = this->state.getClassContext().getInitializer() == fn->decl;
+  if (isInitializer && this->state.getFlowState().isBeforeSuper()) {
     std::string message = ErrorTextConstructorReturn::early();
 
     return err(ReturnCheckerConstructorReturnError{
@@ -185,7 +185,7 @@ ReturnChecker::ResultConstructorExits ReturnChecker::constructorReturn(const Ret
         .message = message,
     });
   }
-  if (initializer) {
+  if (isInitializer) {
     ClassChecker::ResultEveryFieldSet fieldsSet = this->classChecker->checkFieldsSet();
     if (fieldsSet.isErr()) {
       return err(ReturnCheckerConstructorReturnError{
@@ -200,9 +200,9 @@ ReturnChecker::ResultConstructorExits ReturnChecker::constructorReturn(const Ret
 
 ReturnChecker::ResultAwaitNotReturned ReturnChecker::awaitReturned(const ReturnStmt *ret,
                                                                    const FuncSymbol *fn) {
-  bool awaited = fn->decl && fn->decl->isAsync && !fn->decl->isGenerator && ret->value &&
-                 isa<AwaitExpr>(ret->value);
-  if (awaited && fn->decl->concise()) {
+  bool isAwaited = fn->decl && fn->decl->isAsync && !fn->decl->isGenerator && ret->value &&
+                   isa<AwaitExpr>(ret->value);
+  if (isAwaited && fn->decl->concise()) {
     std::string message = ErrorTextReturnAwait::concise();
 
     return err(ReturnCheckerAwaitReturnedError{
@@ -210,7 +210,7 @@ ReturnChecker::ResultAwaitNotReturned ReturnChecker::awaitReturned(const ReturnS
         .message = message,
     });
   }
-  if (awaited) {
+  if (isAwaited) {
     std::string message = ErrorTextReturnAwait::returned();
 
     return err(ReturnCheckerAwaitReturnedError{
@@ -239,9 +239,9 @@ ReturnChecker::ResultValueNotRequired ReturnChecker::valueRequired(const Type *r
 
 ReturnChecker::ResultGeneratorReturns
 ReturnChecker::generatorReturn(const Type *given, const Type *returned, const FuncSymbol *fn) {
-  bool wrong = given && !given->isUndefined() && !given->isVoid() &&
-               (returned->isVoid() || !TypeRelations::isImplicitlyConvertible(given, returned));
-  if (wrong) {
+  bool isWrong = given && !given->isUndefined() && !given->isVoid() &&
+                 (returned->isVoid() || !TypeRelations::isImplicitlyConvertible(given, returned));
+  if (isWrong) {
     std::string label = ErrorTextFunctionName::label(fn->name);
     std::string message = ErrorTextReturnValue::wrong(label, returned->name(), given->name());
 
@@ -284,7 +284,7 @@ ReturnChecker::ResultVoidReturnsEmpty ReturnChecker::voidReturn(const Type *type
   return ok(type);
 }
 
-void ReturnChecker::checkReturn(ReturnStmt *ret) {
+void ReturnChecker::walkReturn(ReturnStmt *ret) {
   ResultInsideOfFunction inside = this->enclosingFunction();
   if (inside.isErr()) {
     this->state.getDiagnostics().error(ret->loc(), inside.error().message);
@@ -318,9 +318,9 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
   }
   ret->value =
       this->checkReturnValue(ret, returned->isVoid() ? nullptr : returned, returned->isBool());
-  bool promised = fn->decl != nullptr && fn->decl->isAsync &&
-                  fn->getKnownReturnType()->isPromise() && ret->value->type->isPromise();
-  if (promised) {
+  bool isPromised = fn->decl != nullptr && fn->decl->isAsync &&
+                    fn->getKnownReturnType()->isPromise() && ret->value->type->isPromise();
+  if (isPromised) {
     return this->walkPromiseReturn(ret, fn, returned);
   }
   if (returned->isVoid()) {
@@ -331,15 +331,15 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
 }
 
 const Type *ReturnChecker::declaredReturn(const FuncSymbol *fn) {
-  bool generator =
+  bool isGenerator =
       fn->hasReturnType() && fn->decl != nullptr && fn->decl->isGenerator &&
       (fn->getKnownReturnType()->isIterator() || fn->getKnownReturnType()->isAsyncIterator());
-  if (generator) {
+  if (isGenerator) {
     return fn->getKnownReturnType()->returned();
   }
-  bool promised = fn->hasReturnType() && fn->decl != nullptr && fn->decl->isAsync &&
-                  fn->getKnownReturnType()->isPromise();
-  if (promised) {
+  bool isPromised = fn->hasReturnType() && fn->decl != nullptr && fn->decl->isAsync &&
+                    fn->getKnownReturnType()->isPromise();
+  if (isPromised) {
     return fn->getKnownReturnType()->promised();
   }
 
@@ -352,18 +352,18 @@ void ReturnChecker::walkConstructorReturn(ReturnStmt *ret, const FuncSymbol *fn)
   }
   ResultConstructorExits exits = this->constructorReturn(ret, fn);
   if (exits.isErr()) {
-    bool valued = exits.error().code == ReturnCheckerConstructorReturnErrorCode::VALUE_RETURNED;
-    llvm::SMLoc at = valued ? ret->value->loc() : ret->loc();
+    bool isValued = exits.error().code == ReturnCheckerConstructorReturnErrorCode::VALUE_RETURNED;
+    llvm::SMLoc at = isValued ? ret->value->loc() : ret->loc();
     this->state.getDiagnostics().error(at, exits.error().message);
   }
 }
 
 void ReturnChecker::walkInferredReturn(ReturnStmt *ret) {
-  bool shaped = ret->value != nullptr && Destination::literalShaped(ret->value);
-  const Type *hint = shaped ? this->earlierReturnShape() : nullptr;
+  bool isShaped = ret->value != nullptr && Destination::literalShaped(ret->value);
+  const Type *hint = isShaped ? this->earlierReturnShape() : nullptr;
   if (ret->value != nullptr) {
-    bool tested = PredicateChecker::looksBoolean(ret->value);
-    ret->value = this->checkReturnValue(ret, hint, tested);
+    bool isTested = PredicateChecker::looksBoolean(ret->value);
+    ret->value = this->checkReturnValue(ret, hint, isTested);
   }
   this->state.getFunctionStack().addCollectedReturn(ret);
 }
@@ -418,14 +418,22 @@ void ReturnChecker::walkVoidReturn(ReturnStmt *ret, const FuncSymbol *fn) {
 }
 
 void ReturnChecker::walkValueReturn(ReturnStmt *ret, const FuncSymbol *fn, const Type *returned) {
-  unsigned errors = this->state.getDiagnostics().errorCount();
+  Diagnostics &diagnostics = this->state.getDiagnostics();
+  diagnostics.pushList(DiagnosticRoute::PARENT);
   ret->value = this->typeRelations->coerce(ret->value, returned);
-  if (this->state.getDiagnostics().errorCount() > errors) {
+  auto coerceDiagnostics = diagnostics.popList();
+  bool isReachingProgram = diagnostics.getCurrentDestination() == DiagnosticRoute::PROGRAM;
+  if (Diagnostics::hasErrors(coerceDiagnostics) && isReachingProgram) {
     this->classLinks->noteInheritedReturn(fn->decl);
     return;
   }
-  if (fn->decl != nullptr) {
-    this->byteProofs->checkByteCallbackResult(fn->decl, ret->value);
+  if (fn->decl == nullptr) {
+    return;
+  }
+  ByteProofs::ResultByteCallbackChecked fits =
+      this->byteProofs->checkByteCallbackResult(fn->decl, ret->value);
+  if (fits.isErr()) {
+    diagnostics.error(ret->value->loc(), fits.error().message);
   }
 }
 
@@ -440,8 +448,8 @@ bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringR
   ReturnPart whole{stmt, std::vector<llvm::StringRef>(labels.begin(), labels.end())};
   std::vector<bool> answers;
   for (const ReturnPart &part : ChildrenFirst::order(whole, ReturnChecker::returnParts)) {
-    bool returns = ReturnChecker::nodeReturns(part, answers);
-    answers.push_back(returns);
+    bool isReturning = ReturnChecker::nodeReturns(part, answers);
+    answers.push_back(isReturning);
   }
 
   return answers.back();

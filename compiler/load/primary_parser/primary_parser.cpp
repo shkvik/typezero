@@ -133,12 +133,12 @@ Expr *PrimaryParser::parsePrimary() {
     case Tok::Less: {
       Parser::Snapshot start = this->parser.cursor().snapshot();
       const char *text = this->parser.tok.text.data();
-      bool muted = this->parser.diags.setMuted(true);
+      this->parser.diags.pushList(DiagnosticRoute::DISCARD);
       this->parser.recovering = false;
       std::vector<TypeParamDecl> typeParams = this->parser.functions().parseTypeParams();
       bool arrow = !this->parser.recovering && this->parser.tok.is(Tok::LParen) &&
                    this->parser.functions().arrowAhead();
-      this->parser.diags.setMuted(muted);
+      this->parser.diags.popList();
       if (arrow) {
         this->parser.recovering = start.recovering;
         return this->parser.functions().parseArrow(std::move(typeParams), text);

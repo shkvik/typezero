@@ -18,6 +18,7 @@ struct InstanceRecord {
   llvm::SMLoc callLoc;
   const InstanceRecord *requester = nullptr;
   bool checking = false, checked = false, failed = false;
+  bool isReported = false;
   std::string message;
   llvm::SMLoc errorLoc;
 };

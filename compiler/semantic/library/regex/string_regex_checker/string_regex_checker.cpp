@@ -67,20 +67,20 @@ std::string StringRegexChecker::argumentText(const Expr *arg) {
 
 Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *member) {
   const StringMethodInfo *found = StringMethodTable::find(member->name);
-  bool takesPattern = found != nullptr && (found->form.is<TextOrPatternStringMethod>() ||
-                                           found->form.is<PatternStringMethod>());
-  if (!takesPattern) {
+  bool isTakingPattern = found != nullptr && (found->form.is<TextOrPatternStringMethod>() ||
+                                              found->form.is<PatternStringMethod>());
+  if (!isTakingPattern) {
     return nullptr;
   }
   StringMethod method = found->method;
-  bool split = method == StringMethod::SPLIT;
-  if (split && call->args.empty()) {
+  bool isSplit = method == StringMethod::SPLIT;
+  if (isSplit && call->args.empty()) {
     return nullptr;
   }
   call->type = Type::error();
-  bool replace = method == StringMethod::REPLACE || method == StringMethod::REPLACE_ALL;
-  unsigned min = replace ? 2 : split ? 0 : 1;
-  unsigned max = split || replace ? 2 : 1;
+  bool isReplace = method == StringMethod::REPLACE || method == StringMethod::REPLACE_ALL;
+  unsigned min = isReplace ? 2 : isSplit ? 0 : 1;
+  unsigned max = isSplit || isReplace ? 2 : 1;
   ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, min, max);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -104,8 +104,8 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
   if (type->isString()) {
     return this->checkTextPattern(patternCall);
   }
-  bool textAllowed = split || method == StringMethod::REPLACE_ALL;
-  std::string message = ErrorTextStringRegex::notRegex(member->name, textAllowed, type->name());
+  bool isTextAllowed = isSplit || method == StringMethod::REPLACE_ALL;
+  std::string message = ErrorTextStringRegex::notRegex(member->name, isTextAllowed, type->name());
   this->state.getDiagnostics().error(pattern->loc(), message);
 
   return this->checkRestLoosely(call);
@@ -134,8 +134,8 @@ Expr *StringRegexChecker::checkRegexPattern(const PatternCall &pattern) {
   if (method == StringMethod::MATCH) {
     return this->checkRegexMatch(pattern, regex);
   }
-  bool needsGlobal = method == StringMethod::MATCH_ALL || method == StringMethod::REPLACE_ALL;
-  if (needsGlobal && StringRegexChecker::lacksGlobalFlag(regex)) {
+  bool isNeedingGlobal = method == StringMethod::MATCH_ALL || method == StringMethod::REPLACE_ALL;
+  if (isNeedingGlobal && StringRegexChecker::lacksGlobalFlag(regex)) {
     return this->reportNeedsGlobal(pattern, regex);
   }
   if (method == StringMethod::MATCH_ALL) {
@@ -169,8 +169,8 @@ Expr *StringRegexChecker::checkRegexMatch(const PatternCall &pattern, const Rege
     return call;
   }
   uint32_t flags = tz_re_flags(regex->program.data());
-  bool global = (flags & TZ_RE_GLOBAL) != 0;
-  if (global) {
+  bool isGlobal = (flags & TZ_RE_GLOBAL) != 0;
+  if (isGlobal) {
     const Type *matches = Type::optional(Type::array(Type::string()));
     return StringRegexChecker::toBuiltinCall(call, Builtin::StrMatchGlobal, matches);
   }
@@ -192,11 +192,11 @@ Expr *StringRegexChecker::checkRegexSplit(CallExpr *call, const RegexLitExpr *re
   if (call->args.size() == 2) {
     call->args[1] = this->memberChecker->checkPosition(call->args[1]);
   }
-  bool undefinedGroups = regex == nullptr;
+  bool isUndefinedGroups = regex == nullptr;
   for (uint32_t k = 1; regex != nullptr && k < tz_re_captures(regex->program.data()); ++k) {
-    undefinedGroups |= !tz_re_mandatory(regex->program.data(), k);
+    isUndefinedGroups |= !tz_re_mandatory(regex->program.data(), k);
   }
-  const Type *part = undefinedGroups ? Type::optional(Type::string()) : Type::string();
+  const Type *part = isUndefinedGroups ? Type::optional(Type::string()) : Type::string();
 
   return StringRegexChecker::toBuiltinCall(call, Builtin::StrSplitRegex, Type::array(part));
 }
@@ -218,14 +218,14 @@ Expr *StringRegexChecker::checkTextPattern(const PatternCall &pattern) {
     return this->checkTextReplaceAll(call, text, escaped);
   }
   std::string regexText = literal != nullptr ? escaped : ErrorTextStringRegex::escapedRe(text);
-  bool written = literal != nullptr;
+  bool isWritten = literal != nullptr;
   std::string message;
   if (pattern.method == StringMethod::REPLACE) {
     message = ErrorTextStringRegex::replaceStr(text, regexText);
   } else if (pattern.method == StringMethod::SEARCH) {
-    message = ErrorTextStringRegex::searchStr(text, regexText, written);
+    message = ErrorTextStringRegex::searchStr(text, regexText, isWritten);
   } else {
-    message = ErrorTextStringRegex::includeStr(pattern.member->name, text, regexText, written);
+    message = ErrorTextStringRegex::includeStr(pattern.member->name, text, regexText, isWritten);
   }
   this->state.getDiagnostics().error(pattern.member->loc(), message);
 
@@ -261,10 +261,10 @@ bool StringRegexChecker::isFunctionReplacement(const Expr *replacement) const {
   }
   ScopeEntry entry = this->scopes->lookup(name->name);
   const VarSymbol *var = entry.var();
-  bool functionVar =
+  bool isFunctionVar =
       var != nullptr && var->type != nullptr && var->type->nonOptional()->isFunction();
 
-  return entry.func() != nullptr || functionVar;
+  return entry.func() != nullptr || isFunctionVar;
 }
 
 Expr *StringRegexChecker::checkTextReplacement(CallExpr *call, const RegexLitExpr *regex) {
@@ -297,8 +297,8 @@ StringRegexChecker::replacementGroups(const RegexLitExpr *regex, const std::u16s
       ++i;
       continue;
     }
-    bool numbered = next >= u'1' && next <= u'9';
-    if (numbered && !StringRegexChecker::numberedGroupKnown(value, i, groups)) {
+    bool isNumbered = next >= u'1' && next <= u'9';
+    if (isNumbered && !StringRegexChecker::numberedGroupKnown(value, i, groups)) {
       uint32_t one = next - u'0';
       std::string message = ErrorTextStringRegex::noGroup(groups, one);
 
@@ -312,8 +312,8 @@ StringRegexChecker::replacementGroups(const RegexLitExpr *regex, const std::u16s
     }
     std::string groupName = StringRegexChecker::groupNameAt(value, i);
     if (!StringRegexChecker::hasNamedGroup(program, groups, groupName)) {
-      bool named = StringRegexChecker::hasNamedGroups(program, groups);
-      std::string message = ErrorTextStringRegex::noNamed(named, groupName);
+      bool isNamed = StringRegexChecker::hasNamedGroups(program, groups);
+      std::string message = ErrorTextStringRegex::noNamed(isNamed, groupName);
 
       return err(StringRegexCheckerReplacementGroupsError{
           .code = StringRegexCheckerReplacementGroupsErrorCode::NO_SUCH_NAMED_GROUP,
@@ -348,9 +348,9 @@ bool StringRegexChecker::hasNamedGroup(const uint32_t *program, uint32_t groups,
   for (uint32_t k = 1; k <= groups; ++k) {
     uint32_t start = 0;
     uint32_t length = tz_re_name(program, k, &start);
-    bool same = length != 0 &&
-                ToUtf8::toUtf8(StringRegexChecker::units(program, start, length)) == groupName;
-    if (same) {
+    bool isSame = length != 0 &&
+                  ToUtf8::toUtf8(StringRegexChecker::units(program, start, length)) == groupName;
+    if (isSame) {
       return true;
     }
   }
@@ -374,8 +374,8 @@ Expr *StringRegexChecker::checkFunctionReplacement(CallExpr *call, MemberExpr *m
   const Type *match = this->regexChecker->matchType(regex);
   Signature signature = StringRegexChecker::replacerSignature(regex, match);
   auto *closure = dyn_cast<FunctionExpr>(call->args[1]);
-  bool extraParams = closure != nullptr && closure->fn->params.size() > signature.params.size();
-  if (extraParams) {
+  bool isExtraParams = closure != nullptr && closure->fn->params.size() > signature.params.size();
+  if (isExtraParams) {
     return this->checkExtraReplacerParams(call, member, regex, match, signature);
   }
   unsigned paramCount = unsigned(signature.params.size());
@@ -400,8 +400,8 @@ Signature StringRegexChecker::replacerSignature(const RegexLitExpr *regex, const
     return signature;
   }
   for (int k = 1; k <= match->matchGroups(); ++k) {
-    bool mandatory = match->captureMandatory(unsigned(k));
-    signature.params.push_back(mandatory ? Type::string() : Type::optional(Type::string()));
+    bool isMandatory = match->captureMandatory(unsigned(k));
+    signature.params.push_back(isMandatory ? Type::string() : Type::optional(Type::string()));
   }
   signature.params.push_back(Type::intTy());
   signature.params.push_back(Type::string());
@@ -421,9 +421,9 @@ Expr *StringRegexChecker::checkExtraReplacerParams(CallExpr *call, MemberExpr *m
     std::string message = ErrorTextStringRegex::onlyMatch();
     this->state.getDiagnostics().error(closure->fn->params[1].loc, message);
   } else {
-    bool groupsObject = signature.params.back()->isObject();
+    bool hasGroupsObject = signature.params.back()->isObject();
     std::string message = ErrorTextStringRegex::passes(member->name, signature.params.size(),
-                                                       match->matchGroups(), groupsObject);
+                                                       match->matchGroups(), hasGroupsObject);
     this->state.getDiagnostics().error(closure->fn->params[signature.params.size()].loc, message);
   }
   while (signature.params.size() < closure->fn->params.size()) {

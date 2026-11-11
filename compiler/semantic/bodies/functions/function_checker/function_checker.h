@@ -33,7 +33,7 @@ class FunctionChecker {
 public:
   FunctionChecker(SemanticState &owner, SemanticParts &all);
 
-  void checkFunctionBody(FunctionDecl *fn);
+  void walkFunctionBody(FunctionDecl *fn);
   void walkFunctionFromScratch(FunctionDecl *fn);
   void declareFunction(FunctionDecl *fn, VarSymbol *var = nullptr, bool scoped = true);
 

@@ -273,8 +273,8 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
   if (StreamPipeline::inModule(place, "node:internal/fs/streams")) {
     return this->streamSources->checkFsStreamFunction(call, decl, loc);
   }
-  bool promises = StreamPipeline::inModule(place, "node:stream/promises");
-  if (!promises && !StreamPipeline::inModule(place, "node:stream")) {
+  bool hasPromises = StreamPipeline::inModule(place, "node:stream/promises");
+  if (!hasPromises && !StreamPipeline::inModule(place, "node:stream")) {
     return nullptr;
   }
   std::optional<StreamFunction> function = StreamFunctionTable::find(decl->name);
@@ -295,7 +295,7 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
       .streamClass = streamClass,
       .streamType = streamClass->type,
       .callback = this->streamChecker->streamCallbackType(),
-      .promises = promises,
+      .promises = hasPromises,
   };
   switch (*function) {
     case StreamFunction::FINISHED:
@@ -398,18 +398,18 @@ std::optional<StreamChunks> StreamPipeline::composedPart(const StreamCall &strea
   if (arg->type->isError()) {
     return std::nullopt;
   }
-  bool streamed =
+  bool isStreamed =
       cls != nullptr && this->chunkTypes->isStreamClass(cls) && !arg->type->isOptional();
-  if (!streamed) {
+  if (!isStreamed) {
     std::string message = ErrorTextCompose::notStream(arg->type->name());
     this->state.getDiagnostics().error(arg->loc(), message);
     this->walkArgsLoosely(call, i + 1);
     return std::nullopt;
   }
   StreamChunks chunks = this->chunkTypes->streamChunksOf(cls);
-  bool fits = i == 0 || chunk == nullptr || chunks.writable == nullptr ||
-              this->streamTakes(chunks.writable, chunk);
-  if (!fits) {
+  bool isFitting = i == 0 || chunk == nullptr || chunks.writable == nullptr ||
+                   this->streamTakes(chunks.writable, chunk);
+  if (!isFitting) {
     std::string message = ErrorTextPipeline::chunkKind("compose", chunk->name(), arg->type->name(),
                                                        chunks.writable->name());
     this->state.getDiagnostics().error(arg->loc(), message);
@@ -480,9 +480,9 @@ StreamPipeline::pipelineStages(const StreamCall &stream, size_t count) {
   const Type *chunk = nullptr;
   for (size_t i = 0; i < count; ++i) {
     bool isStream = false;
-    bool last = i + 1 == count;
+    bool isLast = i + 1 == count;
     Expr *stage =
-        this->streamStage(call->args[i], chunk, i == 0, last, isStream, &result.sinkValue);
+        this->streamStage(call->args[i], chunk, i == 0, isLast, isStream, &result.sinkValue);
     if (stage->type->isError()) {
       this->walkArgsLoosely(call, i + 1);
       return std::nullopt;
@@ -491,7 +491,7 @@ StreamPipeline::pipelineStages(const StreamCall &stream, size_t count) {
     if (isStream) {
       this->emitterChecker->noteErrorsHandled(stage);
     }
-    if (last) {
+    if (isLast) {
       result.lastIsStream = isStream;
     }
   }
@@ -505,8 +505,8 @@ ArrayLitExpr *StreamPipeline::stageList(const StreamCall &stream, PipelineStages
   auto *list = this->state.getAst().make<ArrayLitExpr>(stream.loc);
   for (size_t i = 0; i < stages.stages.size(); ++i) {
     Expr *stage = stages.stages[i];
-    bool tail = i + 1 == stages.stages.size() && stages.lastIsStream && !stream.promises;
-    if (tail) {
+    bool isTail = i + 1 == stages.stages.size() && stages.lastIsStream && !stream.promises;
+    if (isTail) {
       auto *conv = dyn_cast<CastExpr>(stage);
       stages.lastStream = conv != nullptr ? conv->operand : stage;
       continue;

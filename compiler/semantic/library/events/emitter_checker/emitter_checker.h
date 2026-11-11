@@ -34,8 +34,8 @@ public:
   Expr *checkEmitterNew(NewExpr *expr, ClassDecl *generic, const Type *expected);
   void finishSentEmits();
   void reportUnlistenedErrors();
-  void checkErrorListeners();
-  void checkDroppedListeners();
+  void walkErrorListeners();
+  void walkDroppedListeners();
   void noteErrorsHandled(const Expr *emitter);
   bool classifyListener(Expr *arg, const Expr *emitter, int &bits, bool timer = false);
   bool ownsEmitter(const Expr *emitter) const;
@@ -90,7 +90,7 @@ private:
   static std::optional<std::string> rootText(const Expr *expr);
 
   void noteListener(MemberExpr *member, const Type *events, llvm::StringRef event);
-  void checkLooseArgs(CallExpr *call, size_t from);
+  void walkLooseArgs(CallExpr *call, size_t from);
   bool isOwnEmit(const EventSite *site, const SentEmit &emit) const;
   const Type *inferredEmitArgs(EventSite *site, const std::string &event, llvm::SMLoc loc,
                                std::string &first);

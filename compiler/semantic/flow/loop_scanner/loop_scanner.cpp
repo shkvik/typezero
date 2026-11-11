@@ -309,8 +309,8 @@ bool LoopScanner::callsFunctions(const PlacedNodes &nodes,
 bool LoopScanner::iteratesInStmt(const Stmt *stmt) const {
   if (auto *declaration = dyn_cast<VarDeclStmt>(stmt)) {
     for (const VarDeclarator &declarator : declaration->decls) {
-      bool unpacks = declarator.destructured() && declarator.init != nullptr;
-      if (unpacks && this->namesIterator(declarator.init)) {
+      bool isUnpacking = declarator.destructured() && declarator.init != nullptr;
+      if (isUnpacking && this->namesIterator(declarator.init)) {
         return true;
       }
     }
@@ -369,19 +369,19 @@ bool LoopScanner::methodByNameRunsCode(const CallExpr *call, const MemberExpr *m
   if (this->state.getInventoryStore().hasFieldName(name)) {
     return true;
   }
-  bool known =
+  bool isKnown =
       LoopScanner::arrayMethodRunsCode(call, name) || LoopScanner::resultMethodRunsCode(call, name);
-  if (known) {
+  if (isKnown) {
     return true;
   }
   const IteratorMethodInfo *iteratorMethod = IteratorMethodTable::find(name);
-  bool drivesIterator =
+  bool isDrivingIterator =
       iteratorMethod != nullptr && (iteratorMethod->method == IteratorMethod::NEXT ||
                                     iteratorMethod->method == IteratorMethod::TO_ARRAY);
-  bool fromIterable = this->callChecker->isGlobalMember(member, GlobalMember::ARRAY_FROM) ||
-                      this->callChecker->isGlobalMember(member, GlobalMember::ITERATOR_FROM);
+  bool isFromIterable = this->callChecker->isGlobalMember(member, GlobalMember::ARRAY_FROM) ||
+                        this->callChecker->isGlobalMember(member, GlobalMember::ITERATOR_FROM);
 
-  return drivesIterator || fromIterable;
+  return isDrivingIterator || isFromIterable;
 }
 
 bool LoopScanner::arrayMethodRunsCode(const CallExpr *call, llvm::StringRef name) {
@@ -389,10 +389,10 @@ bool LoopScanner::arrayMethodRunsCode(const CallExpr *call, llvm::StringRef name
   if (method == nullptr) {
     return false;
   }
-  bool takesFunction =
+  bool isTakingFunction =
       method->form.is<CallbackArrayMethod>() || method->form.is<SortingArrayMethod>();
 
-  return takesFunction && LoopScanner::passesNamedFunction(call, 1);
+  return isTakingFunction && LoopScanner::passesNamedFunction(call, 1);
 }
 
 bool LoopScanner::resultMethodRunsCode(const CallExpr *call, llvm::StringRef name) {

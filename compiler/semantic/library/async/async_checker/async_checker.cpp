@@ -72,8 +72,8 @@ std::string AsyncChecker::statementText(llvm::SMLoc at) {
 
 AsyncChecker::ResultPromiseTypeRef AsyncChecker::resolvePromiseType(const TypeRef &ref) {
   const TypeNameInfo *builtin = TypeNameTable::find(ref.name);
-  bool promiseName = builtin != nullptr && builtin->form.is<PromiseTypeName>();
-  if (!promiseName) {
+  bool isPromiseName = builtin != nullptr && builtin->form.is<PromiseTypeName>();
+  if (!isPromiseName) {
     return err(AsyncCheckerResolvePromiseTypeError{
         .code = AsyncCheckerResolvePromiseTypeErrorCode::NOT_A_PROMISE,
         .message = "",
@@ -95,8 +95,8 @@ AsyncChecker::ResultPromiseTypeRef AsyncChecker::resolvePromiseType(const TypeRe
 
 AsyncChecker::ResultReturnsPromise AsyncChecker::promiseDeclared(const FunctionDecl *fn,
                                                                  const Type *declared) {
-  bool plain = fn->isAsync && !fn->isGenerator && !declared->isError() && !declared->isPromise();
-  if (plain) {
+  bool isPlain = fn->isAsync && !fn->isGenerator && !declared->isError() && !declared->isPromise();
+  if (isPlain) {
     std::string message = ErrorTextPromiseType::notPromise(declared->name());
 
     return err(AsyncCheckerPromiseDeclaredError{
@@ -137,20 +137,20 @@ AsyncChecker::ResultReturnsOneType AsyncChecker::returnsJoin(const Type *type, c
 const Type *AsyncChecker::inferAsyncType(const FuncSymbol *fn, llvm::ArrayRef<ReturnStmt *> returns,
                                          bool fallsOff, bool report) {
   const Type *type = nullptr;
-  bool undefined = fallsOff;
-  bool unknown = false;
+  bool isUndefined = fallsOff;
+  bool isUnknown = false;
   for (ReturnStmt *ret : returns) {
     if (!ret->value) {
-      undefined = true;
+      isUndefined = true;
       continue;
     }
     const Type *t = AsyncChecker::awaited(ret->value->type);
     if (t->isError()) {
-      unknown = true;
+      isUnknown = true;
       continue;
     }
     if (t->isUndefined() || t->isVoid()) {
-      undefined = true;
+      isUndefined = true;
       continue;
     }
     ResultReturnsOneType joined = AsyncChecker::returnsJoin(type, t, fn);
@@ -163,12 +163,12 @@ const Type *AsyncChecker::inferAsyncType(const FuncSymbol *fn, llvm::ArrayRef<Re
     type = joined.value();
   }
   if (!type) {
-    if (unknown) {
+    if (isUnknown) {
       return report ? Type::error() : nullptr;
     }
     return Type::promise(Type::voidTy());
   }
-  if (undefined) {
+  if (isUndefined) {
     type = Type::optional(type);
   }
 
@@ -216,8 +216,8 @@ void AsyncChecker::finishAsyncReturns(FuncSymbol *fn, llvm::ArrayRef<ReturnStmt 
 
 AsyncChecker::ResultInAsyncContext AsyncChecker::asyncContext(bool loop) const {
   FuncSymbol *fn = this->state.getFunctionStack().getCurrentFunction();
-  bool plain = fn && !(fn->decl && fn->decl->isAsync);
-  if (plain && loop) {
+  bool isPlain = fn && !(fn->decl && fn->decl->isAsync);
+  if (isPlain && loop) {
     std::string message = ErrorTextAsyncContext::forAwait();
 
     return err(AsyncCheckerAsyncContextError{
@@ -225,7 +225,7 @@ AsyncChecker::ResultInAsyncContext AsyncChecker::asyncContext(bool loop) const {
         .message = message,
     });
   }
-  if (plain) {
+  if (isPlain) {
     FunctionDecl *decl = fn->decl;
     std::string hint = decl && decl->isArrow()       ? ErrorTextAsyncContext::arrowHint()
                        : decl && decl->cls()         ? ErrorTextAsyncContext::methodHint(decl->name)
@@ -326,9 +326,9 @@ const Type *AsyncChecker::awaitedPlain(const Type *type) {
 
 AsyncChecker::ResultAwaitedElement AsyncChecker::awaitedElement(const Type *type) const {
   const Type *element = this->generatorChecker->asyncIteratedType(type);
-  bool optional = !element && type->isOptional() &&
-                  this->generatorChecker->asyncIteratedType(type->inner()) != nullptr;
-  if (optional) {
+  bool isOptional = !element && type->isOptional() &&
+                    this->generatorChecker->asyncIteratedType(type->inner()) != nullptr;
+  if (isOptional) {
     std::string message = ErrorTextAwaitedElement::undefined(type->name());
 
     return err(AsyncCheckerAwaitedElementError{
@@ -377,9 +377,9 @@ AsyncChecker::ResultBindingUntyped AsyncChecker::bindingType(const VarDeclarator
 
 AsyncChecker::ResultBindingPattern AsyncChecker::bindingShape(const VarDeclarator &binding,
                                                               const Type *element) {
-  bool fits = !binding.destructured() || binding.objectPattern() || element->isArray() ||
-              element->isTuple() || element->isMatch() || element->isError();
-  if (!fits) {
+  bool isFitting = !binding.destructured() || binding.objectPattern() || element->isArray() ||
+                   element->isTuple() || element->isMatch() || element->isError();
+  if (!isFitting) {
     std::string message = ErrorTextBindingShape::notArray(element->name());
 
     return err(AsyncCheckerBindingShapeError{
@@ -392,7 +392,7 @@ AsyncChecker::ResultBindingPattern AsyncChecker::bindingShape(const VarDeclarato
 }
 
 // TODO: говнокод
-void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
+void AsyncChecker::walkForAwait(ForOfStmt *stmt) {
   this->state.getInventoryStore().markUsesAsync();
   ResultInAsyncContext context = this->asyncContext(true);
   if (context.isErr()) {
@@ -414,11 +414,11 @@ void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
   const Type *type = stmt->iterable->type;
   const Type *element = Type::error();
   ResultAwaitedElement awaited = this->awaitedElement(type);
-  bool reported = awaited.isErr() &&
-                  awaited.error().code == AsyncCheckerAwaitedElementErrorCode::ALREADY_REPORTED;
+  bool isReported = awaited.isErr() &&
+                    awaited.error().code == AsyncCheckerAwaitedElementErrorCode::ALREADY_REPORTED;
   if (awaited.isOk()) {
     element = awaited.value();
-  } else if (!reported) {
+  } else if (!isReported) {
     this->state.getDiagnostics().error(stmt->iterable->loc(), awaited.error().message);
   }
   if (awaited.isOk() && type->isIterator()) {
@@ -447,7 +447,7 @@ void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
   this->state.getScopeStack().openScope();
   stmt->binding.sym =
       this->scopes->declareVar(stmt->binding.name, stmt->binding.loc, element, stmt->isConst);
-  this->loopChecker->checkLoopBody(stmt->body, true);
+  this->loopChecker->walkLoopBody(stmt->body, true);
   this->scopes->closeScope();
   this->state.getFlowState().replaceFlow(head);
   this->flowChecker->calledFunction();
@@ -464,9 +464,9 @@ AsyncChecker::checkDiscardedPromise(const Expr *expr, bool callback, llvm::SMLoc
                call->builtin() == Builtin::ArrSplice)) {
     return ok(expr);
   }
-  bool mapped =
+  bool isMapped =
       call && (call->builtin() == Builtin::ArrMap || call->builtin() == Builtin::ArrFlatMap);
-  if (!type->nonOptional()->isPromise() && mapped) {
+  if (!type->nonOptional()->isPromise() && isMapped) {
     std::string message = ErrorTextDiscarded::mapped();
 
     return err(AsyncCheckerCheckDiscardedPromiseError{

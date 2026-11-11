@@ -27,7 +27,7 @@ FunctionTypeParser::FunctionTypeParser(Parser &parser)
 
 bool FunctionTypeParser::functionTypeAhead() {
   Parser::Snapshot start = this->parser.cursor().snapshot();
-  bool muted = this->parser.diags.setMuted(true);
+  this->parser.diags.pushList(DiagnosticRoute::DISCARD);
   this->parser.recovering = false;
   this->parser.cursor().advance();
   bool ok = true;
@@ -44,7 +44,7 @@ bool FunctionTypeParser::functionTypeAhead() {
     }
   }
   ok = ok && this->parser.cursor().accept(Tok::RParen) && this->parser.tok.is(Tok::Arrow);
-  this->parser.diags.setMuted(muted);
+  this->parser.diags.popList();
   this->parser.cursor().rewind(std::move(start));
 
   return ok;

@@ -22,7 +22,7 @@ class ConstructorCalls {
 public:
   explicit ConstructorCalls(SemanticState &owner);
 
-  void checkConstructorCalls();
+  void walkConstructorCalls();
 
 private:
   using ResultNotOverridden = Result<FunctionDecl *, ConstructorCallsOverriddenCallError>;

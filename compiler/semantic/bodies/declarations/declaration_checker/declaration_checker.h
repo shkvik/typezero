@@ -105,14 +105,16 @@ private:
   ResultClassHasTheMember memberFound(const DeclaredMember &member, const ClassDecl *cls,
                                       const ClassField *field, const FunctionDecl *method) const;
 
-  void checkMember(const DeclaredMember &member, const ClassDecl *cls);
-  void checkFunction(FunctionDecl *declared, const Exported &exported);
-  void checkListed(const ClassDecl *cls, const llvm::StringSet<> &seen);
+  void walkDeclaredMember(const DeclaredMember &member, const ClassDecl *cls);
+  void walkDeclaredFunction(FunctionDecl *declared, const Exported &exported);
+  void walkListed(const ClassDecl *cls, const llvm::StringSet<> &seen);
   const Type *resolve(const std::optional<TypeRef> &ref, bool allowVoid);
-  void checkClass(const DeclaredClass &declared, const Exported &exported);
-  void checkConstructor(const DeclaredMember &member, const ClassDecl *cls);
-  void checkField(const DeclaredMember &member, const ClassField &field, const ClassDecl *cls);
-  void checkMethod(const DeclaredMember &member, const FunctionDecl *fn, const ClassDecl *cls);
+  void walkDeclaredClass(const DeclaredClass &declared, const Exported &exported);
+  void walkDeclaredConstructor(const DeclaredMember &member, const ClassDecl *cls);
+  void walkDeclaredField(const DeclaredMember &member, const ClassField &field,
+                         const ClassDecl *cls);
+  void walkDeclaredMethod(const DeclaredMember &member, const FunctionDecl *fn,
+                          const ClassDecl *cls);
   bool sameParams(const std::vector<Param> &declared, const FunctionDecl *fn, llvm::SMLoc loc,
                   const std::string &what);
 

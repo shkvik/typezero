@@ -42,7 +42,7 @@ void TopLevelChecker::loadTopLevel(Module *module, llvm::StringRef until) {
       continue;
     }
     this->state.getBlockPosition().rememberBlockPosition(items, here.next - 1);
-    this->stmtChecker->checkStmt(item);
+    this->stmtChecker->walkStmt(item);
     auto *decl = dyn_cast<VarDeclStmt>(item);
     if (!until.empty() && decl &&
         llvm::any_of(decl->decls, [&](const VarDeclarator &d) { return d.name == until; })) {
@@ -127,11 +127,11 @@ bool TopLevelChecker::loadEarly(Module *source, llvm::StringRef name) {
   this->state.getFunctionStack().forgetEarlyFunction();
   this->state.getExpressionMarks().enterModuleLoad();
   this->state.getReturnInference().enterModuleLoad();
-  bool muted = this->state.getDiagnostics().setMuted(false);
+  this->state.getDiagnostics().pushList(DiagnosticRoute::PROGRAM);
 
   this->loadTopLevel(source, name);
 
-  this->state.getDiagnostics().setMuted(muted);
+  this->state.getDiagnostics().popList();
   this->state.getReturnInference().leaveModuleLoad();
   this->state.getExpressionMarks().leaveModuleLoad();
   this->returnInferrer->leaveBody(saved);
@@ -167,10 +167,10 @@ TopLevelChecker::ResultSourceIsLoaded TopLevelChecker::checkLoaded(const NameExp
                        ? this->state.getModuleStates().getLoadingModule()
                        : this->state.getModuleStates().getCurrentModule();
   std::string what = source ? this->loadLabel(name->name, declared, source) : "";
-  bool topLevel = !this->state.getFunctionStack().isInsideFunction() &&
-                  this->state.getModuleStates().getCurrentModule() ==
-                      this->state.getModuleStates().getLoadingModule();
-  if (source && topLevel) {
+  bool isTopLevel = !this->state.getFunctionStack().isInsideFunction() &&
+                    this->state.getModuleStates().getCurrentModule() ==
+                        this->state.getModuleStates().getLoadingModule();
+  if (source && isTopLevel) {
     std::string chain = LoadChain::describe(reader, source);
     std::string message =
         ErrorTextNotLoaded::whileLoads(reader->name, what, source->name, chain, declared);

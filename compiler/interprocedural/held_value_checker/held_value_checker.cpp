@@ -18,7 +18,7 @@ HeldValueChecker::HeldValueChecker(Program &checked, const LibraryRanges &librar
       current(nullptr),
       reporting(false) {}
 
-std::string HeldValueChecker::calleeName(const CallExpr *c) {
+std::string HeldValueChecker::calleeName(const CallExpr *c) const {
   const Expr *callee = c->callee;
   if (auto *member = dyn_cast_or_null<MemberExpr>(callee)) {
     return member->name.str();
@@ -161,7 +161,7 @@ std::vector<Diagnostic> HeldValueChecker::applyStep(const WalkStep &step,
       this->startExpr(step.as<StartExpr>()->expr, steps);
       return {};
     case WalkStepKind::MARK_AWAITED:
-      this->awaited.insert(HeldValueChecker::bare(step.as<MarkAwaited>()->value));
+      this->awaited.insert(this->bare(step.as<MarkAwaited>()->value));
       return {};
     case WalkStepKind::START_CALL:
       return this->sawCall(step.as<StartCall>()->call);
@@ -196,7 +196,7 @@ void HeldValueChecker::startTopLevel(const Stmt *s, std::vector<WalkStep> &steps
   if (decl != nullptr && decl->isConst) {
     for (const VarDeclarator &d : decl->decls) {
       if (!d.destructured()) {
-        this->allowedNews.insert(HeldValueChecker::bare(d.init));
+        this->allowedNews.insert(this->bare(d.init));
       }
     }
   }
@@ -468,7 +468,7 @@ std::vector<Diagnostic> HeldValueChecker::finishCall(const CallExpr *c) {
   bool isTakenOver = this->takesOver(c);
   if (this->current != nullptr && !isTakenOver) {
     for (const Expr *arg : c->args) {
-      const auto *function = dyn_cast<FunctionExpr>(HeldValueChecker::bare(arg));
+      const auto *function = dyn_cast<FunctionExpr>(this->bare(arg));
       if (function != nullptr) {
         this->callees[this->current].push_back(function->fn);
       }
@@ -483,7 +483,7 @@ std::vector<Diagnostic> HeldValueChecker::finishCall(const CallExpr *c) {
   if (isTakenOver) {
     return {};
   }
-  std::string name = HeldValueChecker::calleeName(c);
+  std::string name = this->calleeName(c);
 
   return this->passed(c, target, name);
 }
@@ -504,7 +504,7 @@ std::vector<Diagnostic> HeldValueChecker::passed(const CallExpr *c, const Functi
         c->builtin() == Builtin::ResultOk || c->builtin() == Builtin::ResultErr) {
       continue;
     }
-    if (auto *fe = dyn_cast<FunctionExpr>(HeldValueChecker::bare(arg)); fe && fe->fn->nonEscaping) {
+    if (auto *fe = dyn_cast<FunctionExpr>(this->bare(arg)); fe && fe->fn->nonEscaping) {
       continue;
     }
     std::string where =
@@ -548,7 +548,7 @@ std::vector<Diagnostic> HeldValueChecker::finishAssign(const AssignExpr *a) {
   if (a->op || !this->isHeld(a->value)) {
     return {};
   }
-  const Expr *target = HeldValueChecker::bare(a->target);
+  const Expr *target = this->bare(a->target);
   const auto *name = dyn_cast<NameExpr>(target);
   const VarSymbol *var = name != nullptr ? name->var() : nullptr;
   if (var == nullptr) {
@@ -570,7 +570,7 @@ std::vector<Diagnostic> HeldValueChecker::finishAssign(const AssignExpr *a) {
 }
 
 std::vector<Diagnostic> HeldValueChecker::finishUnary(const UnaryExpr *unary) {
-  const auto *call = dyn_cast_or_null<CallExpr>(HeldValueChecker::bare(unary->operand));
+  const auto *call = dyn_cast_or_null<CallExpr>(this->bare(unary->operand));
   if (call == nullptr || unary->op != UnaryOp::Void) {
     return {};
   }
@@ -625,7 +625,7 @@ void HeldValueChecker::finishReturn(const Expr *value) {
 bool HeldValueChecker::isHeld(const Expr *e) const {
   auto pending = std::vector<const Expr *>{e};
   while (!pending.empty()) {
-    const Expr *node = HeldValueChecker::bare(pending.back());
+    const Expr *node = this->bare(pending.back());
     pending.pop_back();
     if (node == nullptr) {
       continue;
@@ -731,7 +731,12 @@ std::vector<Diagnostic> HeldValueChecker::keep(const Expr *value, llvm::StringRe
 }
 
 bool HeldValueChecker::once(const Expr *value) {
-  return this->reporting && value && this->reported.insert(value->loc().getPointer()).second;
+  if (!this->reporting || value == nullptr) {
+    return false;
+  }
+  auto [_, isInserted] = this->reported.insert(value->loc().getPointer());
+
+  return isInserted;
 }
 
 void HeldValueChecker::markParam(const FunctionDecl *fn, unsigned index) {
@@ -764,7 +769,7 @@ void HeldValueChecker::markThis(const FunctionDecl *fn) {
   }
 }
 
-const Expr *HeldValueChecker::bare(const Expr *e) {
+const Expr *HeldValueChecker::bare(const Expr *e) const {
   while (auto *conv = dyn_cast_or_null<CastExpr>(e)) {
     e = conv->operand;
   }
@@ -772,8 +777,8 @@ const Expr *HeldValueChecker::bare(const Expr *e) {
   return e;
 }
 
-const FunctionDecl *HeldValueChecker::callbackOf(const Expr *e) {
-  e = HeldValueChecker::bare(e);
+const FunctionDecl *HeldValueChecker::callbackOf(const Expr *e) const {
+  e = this->bare(e);
   if (auto *fe = dyn_cast_or_null<FunctionExpr>(e)) {
     return fe->fn;
   }
@@ -793,7 +798,7 @@ const FunctionDecl *HeldValueChecker::callbackOf(const Expr *e) {
   return nullptr;
 }
 
-const ClassDecl *HeldValueChecker::storageClass(const ClassDecl *cls) {
+const ClassDecl *HeldValueChecker::storageClass(const ClassDecl *cls) const {
   for (; cls; cls = cls->parent) {
     const ClassDecl *base = cls->generic() ? cls->generic() : cls;
     if ((base->library() || cls->library()) && base->name == "AsyncLocalStorage") {
@@ -804,16 +809,15 @@ const ClassDecl *HeldValueChecker::storageClass(const ClassDecl *cls) {
   return nullptr;
 }
 
-bool HeldValueChecker::storageMethod(const CallExpr *c, llvm::StringRef name) {
+bool HeldValueChecker::storageMethod(const CallExpr *c, llvm::StringRef name) const {
   const FunctionDecl *decl = c->method() ? c->method()->decl : nullptr;
 
-  return decl && decl->name == name && HeldValueChecker::storageClass(decl->cls());
+  return decl && decl->name == name && this->storageClass(decl->cls());
 }
 
-const VarSymbol *HeldValueChecker::storageOf(const CallExpr *c) {
+const VarSymbol *HeldValueChecker::storageOf(const CallExpr *c) const {
   auto *member = dyn_cast_or_null<MemberExpr>(c->callee);
-  auto *name =
-      member ? dyn_cast_or_null<NameExpr>(HeldValueChecker::bare(member->object)) : nullptr;
+  auto *name = member ? dyn_cast_or_null<NameExpr>(this->bare(member->object)) : nullptr;
 
   return name ? name->var() : nullptr;
 }

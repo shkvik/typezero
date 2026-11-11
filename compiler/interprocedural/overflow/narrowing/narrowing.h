@@ -18,7 +18,19 @@ public:
                  const Bound &upper);
 
 private:
-  static std::optional<double> literalValue(const Expr *expr);
+  using MaybeNarrowable = std::optional<OverflowCheck::Narrowable>;
+
+  std::optional<double> literalValue(const Expr *expr) const;
+  const Expr *stripNumericCasts(const Expr *expr) const;
+  std::vector<const Expr *> narrowOrder(const Expr *expr) const;
+  std::vector<const Expr *> narrowParts(const Expr *expr) const;
+  MaybeNarrowable nodeNarrowable(const Expr *expr, const State &st,
+                                 std::vector<MaybeNarrowable> &answers) const;
+  MaybeNarrowable linearNarrowable(const BinaryExpr *bin, const MaybeNarrowable &left,
+                                   const MaybeNarrowable &right) const;
+  MaybeNarrowable absNarrowable(MaybeNarrowable inner) const;
+  MaybeNarrowable leafNarrowable(const Expr *expr, const State &st) const;
+  MaybeNarrowable takeNarrowable(std::vector<MaybeNarrowable> &answers) const;
   OverflowCheck &check;
 };
 

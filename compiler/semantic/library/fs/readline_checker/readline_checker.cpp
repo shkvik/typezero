@@ -86,10 +86,10 @@ Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module, llvm
 
 Expr *ReadlineChecker::checkArgsLoosely(CallExpr *call) {
   for (Expr *&arg : call->args) {
-    bool stream = this->processChecker->isProcessMember(arg, "stdin") ||
-                  this->processChecker->isProcessMember(arg, "stdout") ||
-                  this->processChecker->isProcessMember(arg, "stderr");
-    if (!stream) {
+    bool isStream = this->processChecker->isProcessMember(arg, "stdin") ||
+                    this->processChecker->isProcessMember(arg, "stdout") ||
+                    this->processChecker->isProcessMember(arg, "stderr");
+    if (!isStream) {
       arg = this->exprChecker->checkExpr(arg);
     }
   }
@@ -98,14 +98,14 @@ Expr *ReadlineChecker::checkArgsLoosely(CallExpr *call) {
 }
 
 bool ReadlineChecker::hasRejectedArgs(CallExpr *call, llvm::SMLoc loc) {
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
 
-  return rejected || arity.isErr();
+  return isRejected || arity.isErr();
 }
 
 std::optional<ReadlineChecker::ReadlineStreams>
@@ -123,12 +123,12 @@ ReadlineChecker::readlineStreams(CallExpr *call, llvm::StringRef fn) {
 std::optional<ReadlineChecker::ReadlineStreams> ReadlineChecker::optionStreams(CallExpr *call,
                                                                                llvm::StringRef fn) {
   llvm::StringMap<Expr *> options;
-  bool read = this->fsChecker->nodeOptions(call, 0, fn,
-                                           {"input", "output", "terminal", "crlfDelay",
-                                            "historySize", "removeHistoryDuplicates", "prompt",
-                                            "tabSize", "completer", "escapeCodeTimeout", "history"},
-                                           options);
-  if (!read) {
+  bool isRead = this->fsChecker->nodeOptions(
+      call, 0, fn,
+      {"input", "output", "terminal", "crlfDelay", "historySize", "removeHistoryDuplicates",
+       "prompt", "tabSize", "completer", "escapeCodeTimeout", "history"},
+      options);
+  if (!isRead) {
     return std::nullopt;
   }
   ReadlineStreams streams{

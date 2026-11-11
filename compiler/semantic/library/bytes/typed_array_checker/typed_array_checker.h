@@ -64,7 +64,7 @@ private:
   Expr *checkCallbackCall(const TypedArrayCall &typed, BytesMethod method, const Type *expected);
   Expr *checkSort(const TypedArrayCall &typed, const TypedArraySortMethod &sort,
                   const Type *expected);
-  void checkSetRange(const Expr *target, const Expr *source, const Expr *offset);
+  void walkSetRange(const Expr *target, const Expr *source, const Expr *offset);
 
   SemanticState &state;
   Prelude *prelude = nullptr;

@@ -32,8 +32,8 @@ bool ExtendsRelation::extendsType(const Type *type, const Type *pattern, InferMa
   while (!steps.empty()) {
     ExtendsStep step = std::move(steps.back());
     steps.pop_back();
-    bool holds = this->applyExtendsStep(step, inference, steps);
-    if (!holds && !ExtendsRelation::retryChoice(steps, inference)) {
+    bool isHolding = this->applyExtendsStep(step, inference, steps);
+    if (!isHolding && !ExtendsRelation::retryChoice(steps, inference)) {
       return false;
     }
   }
@@ -67,9 +67,9 @@ bool ExtendsRelation::retryChoice(std::vector<ExtendsStep> &steps, InferMatch *i
     if (inference) {
       inference->bound = choice->saved;
     }
-    bool tried = ExtendsRelation::tryAlternative(
+    bool isTried = ExtendsRelation::tryAlternative(
         ExtendsChoice{choice->type, choice->pattern, choice->next + 1, choice->saved}, steps);
-    if (tried) {
+    if (isTried) {
       return true;
     }
   }
@@ -381,11 +381,11 @@ bool ExtendsRelation::extendsObject(const Type *type, const Type *pattern, Infer
       const ClassDecl *cls = t->classDecl();
       if (cls && (cls->generic() ? cls->generic() : cls) == want &&
           t->typeArgs().size() == pattern->typeArgs().size()) {
-        bool all = true;
-        for (size_t k = 0; all && k < t->typeArgs().size(); ++k) {
-          all = this->extendsType(t->typeArgs()[k], pattern->typeArgs()[k], inference);
+        bool isAll = true;
+        for (size_t k = 0; isAll && k < t->typeArgs().size(); ++k) {
+          isAll = this->extendsType(t->typeArgs()[k], pattern->typeArgs()[k], inference);
         }
-        if (all) {
+        if (isAll) {
           return true;
         }
       }

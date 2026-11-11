@@ -14,8 +14,8 @@ ImportBinder::ImportBinder(SemanticState &owner, SemanticParts &all)
 }
 
 ImportBinder::ResultWholeImportOk ImportBinder::wholeImport(const ImportDecl &decl) {
-  bool whole = !decl.whole.empty() && decl.from && decl.from->builtin;
-  if (whole && decl.wholeIsDefault) {
+  bool isWhole = !decl.whole.empty() && decl.from && decl.from->builtin;
+  if (isWhole && decl.wholeIsDefault) {
     std::string message = ErrorTextWholeImport::byDefault(decl.path);
 
     return err(ImportBinderWholeImportError{
@@ -23,7 +23,7 @@ ImportBinder::ResultWholeImportOk ImportBinder::wholeImport(const ImportDecl &de
         .message = message,
     });
   }
-  if (whole) {
+  if (isWhole) {
     std::string message = ErrorTextWholeImport::star(decl.path);
 
     return err(ImportBinderWholeImportError{
@@ -153,7 +153,7 @@ void ImportBinder::bindImports() {
     llvm::StringRef alias = entry.getKey();
     const ModuleBinding &target = entry.getValue().target;
     Module *source = target.module;
-    bool own = source == this->state.getModuleStates().getCurrentModule();
+    bool isOwn = source == this->state.getModuleStates().getCurrentModule();
     ScopeStack &scopes = this->state.getScopeStack();
     if (!scopes.hasTopType(alias)) {
       Stmt *type = this->exportedType(source, target.name);
@@ -173,7 +173,7 @@ void ImportBinder::bindImports() {
       continue;
     }
     scopes.addTopValue(alias, value);
-    if (value.var() && !own) {
+    if (value.var() && !isOwn) {
       here.importedVars.insert(value.var());
     }
   }

@@ -38,10 +38,10 @@ void LibraryCalls::prepareLibraries(SourceFile &program) {
                                                            buffer->getBufferEnd());
       this->state.getDiagnostics().quietRange(buffer->getBufferStart(), buffer->getBufferEnd());
     }
-    bool intrinsics = module->name == "tz:intrinsics";
+    bool hasIntrinsics = module->name == "tz:intrinsics";
     for (Stmt *item : module->file.items) {
       if (auto *fn = dyn_cast<FunctionDecl>(item)) {
-        if (intrinsics) {
+        if (hasIntrinsics) {
           if (fn->external()) {
             fn->bodySource = FunctionBodySource::INTRINSIC;
           }
@@ -73,9 +73,9 @@ LibraryCalls::ResultIntrinsicShape LibraryCalls::intrinsicShape(const CallExpr *
                                                                 llvm::StringRef intrinsicName,
                                                                 bool known, unsigned args,
                                                                 unsigned typeArgs) {
-  bool wrong =
+  bool isWrong =
       !known || call->args.size() != args || name->typeArgs.size() != typeArgs || call->hasSpread();
-  if (wrong) {
+  if (isWrong) {
     std::string message = ErrorTextIntrinsicCall::wrong(intrinsicName);
 
     return err(LibraryCallsIntrinsicShapeError{
@@ -99,10 +99,10 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     return this->webCryptoChecker->checkSubtleIntrinsic(call, name, intrinsicName);
   }
   const LibraryIntrinsicInfo *intrinsic = LibraryIntrinsicTable::find(intrinsicName);
-  bool known = intrinsic != nullptr;
-  ResultIntrinsicShape shape =
-      LibraryCalls::intrinsicShape(call, name, intrinsicName, known, known ? intrinsic->args : 0,
-                                   known ? intrinsic->typeArgs : 0);
+  bool isKnown = intrinsic != nullptr;
+  ResultIntrinsicShape shape = LibraryCalls::intrinsicShape(call, name, intrinsicName, isKnown,
+                                                            isKnown ? intrinsic->args : 0,
+                                                            isKnown ? intrinsic->typeArgs : 0);
   if (shape.isErr()) {
     this->state.getDiagnostics().error(name->loc(), shape.error().message);
     for (Expr *&arg : call->args) {
@@ -188,9 +188,9 @@ const Type *LibraryCalls::flatListenerType(const Type *typeArg) {
   std::vector<const Type *> flat;
   size_t minArgs = 0;
   bool hasRest = false;
-  bool flattened = typeArg->isFunction() &&
-                   ArgumentLists::flattenArguments(typeArg->params(), minArgs, hasRest, flat);
-  if (!flattened) {
+  bool isFlattened = typeArg->isFunction() &&
+                     ArgumentLists::flattenArguments(typeArg->params(), minArgs, hasRest, flat);
+  if (!isFlattened) {
     return typeArg;
   }
 

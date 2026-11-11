@@ -469,11 +469,6 @@ semantic/                         движок типов: объявления,
 ```
 interprocedural/         межпроцедурные проверки после движка: потоки значений по программе, переполнение; снаружи — только фасад interprocedural_external.h
   async_local_storage_checker/ AsyncLocalStorageChecker: правила AsyncLocalStorage по всей программе (docs/async.md, раздел 10)
-  flow_builtins/         FlowBuiltins: потоки значений через встроенные вызовы
-  flow_calls/            FlowCalls: потоки значений через вызовы
-  flow_exprs/            FlowExprs: потоки значений в выражениях
-  flow_graph_builder/    FlowGraphBuilder: строит граф, куда идут значения (для записи через широкий тип); его части — flow_*/
-  flow_stmts/            FlowStmts: потоки значений в инструкциях
   held_value_checker/    HeldValueChecker: значения, которые живут только внутри вызова (хранилище run, объект Pool.use)
   load_order/            LoadOrder: чтение до загрузки модуля
   overflow/              переполнение целых по всей программе: части OverflowPass
@@ -493,6 +488,12 @@ interprocedural/         межпроцедурные проверки посл�
   pool_checker/          PoolChecker: объект Pool живёт только внутри use (docs/async.md, раздел 11)
   unused_functions/      UnusedFunctions: функции других модулей, до которых не доходит программа
   wide_writes/           WideWrites: запись чужого значения через более широкий тип
+    flow_graph/          граф, куда идут значения; flow_graph.h — узлы, рёбра, записи, конверсии
+      flow_graph_builder/  FlowGraphBuilder: строит граф машиной шагов FlowRun (стек шагов и ответов); его части — flow_*/
+      flow_builtins/     FlowBuiltins: потоки значений через встроенные вызовы
+      flow_calls/        FlowCalls: потоки значений через вызовы (callParts / finishCall)
+      flow_exprs/        FlowExprs: шаги выражений
+      flow_stmts/        FlowStmts: шаги инструкций, функций, классов, присваиваний
 ```
 
 ```

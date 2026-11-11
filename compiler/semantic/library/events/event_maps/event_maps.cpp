@@ -103,10 +103,10 @@ EventMaps::ResultEventMapFits EventMaps::eventMapFits(const Type *events) {
   if (events->isRecord()) {
     return EventMaps::recordMapFits(events);
   }
-  bool notObject = !events->isObject() || events->isClass() || events->isTuple() ||
-                   events->isAnyObject() || events->isBytes() || events->isDate() ||
-                   events->isRegExp() || events->isMatch();
-  if (notObject) {
+  bool isNotObject = !events->isObject() || events->isClass() || events->isTuple() ||
+                     events->isAnyObject() || events->isBytes() || events->isDate() ||
+                     events->isRegExp() || events->isMatch();
+  if (isNotObject) {
     std::string why = ErrorTextEventMap::notOne(events->name());
     std::string message = ErrorTextEventMap::notMap(why);
 
@@ -150,7 +150,7 @@ EventMaps::ResultEventMapFits EventMaps::recordMapFits(const Type *events) {
 }
 
 EventMaps::ResultEventMapFits EventMaps::eventFieldFits(const Field &f) {
-  bool service = EventMaps::isServiceEvent(f.name);
+  bool isService = EventMaps::isServiceEvent(f.name);
   if (f.type->isOptional()) {
     std::string why = ErrorTextEventMap::optional(f.name);
     std::string message = ErrorTextEventMap::notMap(why);
@@ -169,7 +169,7 @@ EventMaps::ResultEventMapFits EventMaps::eventFieldFits(const Field &f) {
         .message = message,
     });
   }
-  if (!service && !EventMaps::carriesOne(f.type)) {
+  if (!isService && !EventMaps::carriesOne(f.type)) {
     std::string event = ErrorTextEventMap::event(f.name);
     std::string message = ErrorTextEventMap::several(event, f.type->name());
 
@@ -178,7 +178,7 @@ EventMaps::ResultEventMapFits EventMaps::eventFieldFits(const Field &f) {
         .message = message,
     });
   }
-  if (service && f.type != EventMaps::serviceEventArgs()) {
+  if (isService && f.type != EventMaps::serviceEventArgs()) {
     std::string message = ErrorTextEventMap::service(f.name, f.type->name());
 
     return err(EventMapsEventMapFitsError{
@@ -325,9 +325,9 @@ const Type *EventMaps::withThis(const ListenerWant &want, const Type *self) {
 Expr *EventMaps::checkListenerLiteral(FunctionExpr *fe, const ListenerWant &want,
                                       ListenerKind &kind) {
   FunctionDecl *fn = fe->fn;
-  bool explicitThis =
+  bool isExplicitThis =
       !fn->params.empty() && fn->params[0].name == "this" && fn->params[0].type.has_value();
-  if (explicitThis) {
+  if (isExplicitThis) {
     return this->checkThisListener(fe, want, kind);
   }
   if (fn->isAsync) {

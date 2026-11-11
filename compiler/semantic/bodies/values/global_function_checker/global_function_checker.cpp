@@ -108,10 +108,10 @@ GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, l
     return ok(made);
   }
   auto *encoded = call->args.size() == 1 ? dyn_cast<CallExpr>(call->args[0]) : nullptr;
-  bool encodedInner =
+  bool isEncodedInner =
       encoded && this->callChecker->isGlobalName(encoded->callee, GlobalName::ENCODE_URI_COMPONENT);
-  if (global == GlobalName::UNESCAPE && encodedInner) {
-    this->argumentChecker->checkArgsLoosely(call);
+  if (global == GlobalName::UNESCAPE && isEncodedInner) {
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextGlobalFunction::toBytes();
 
     return err(GlobalFunctionCheckerCheckGlobalFunctionError{
@@ -120,7 +120,7 @@ GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, l
     });
   }
   if (global == GlobalName::ESCAPE) {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextGlobalFunction::escape();
 
     return err(GlobalFunctionCheckerCheckGlobalFunctionError{
@@ -129,7 +129,7 @@ GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, l
     });
   }
   if (global == GlobalName::UNESCAPE) {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextGlobalFunction::unescape();
 
     return err(GlobalFunctionCheckerCheckGlobalFunctionError{
@@ -184,7 +184,7 @@ GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, l
     std::string quoted = ErrorTextBigInt::quoted(fn);
     std::string bigint = ErrorTextBigInt::none(quoted);
     this->state.getDiagnostics().error(loc, bigint);
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     return err(GlobalFunctionCheckerCheckGlobalFunctionError{
         .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::ALREADY_REPORTED,
         .message = "",

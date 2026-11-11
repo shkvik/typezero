@@ -239,8 +239,8 @@ KeyedFieldChecker::objectKeyName(const Type *type, const Type *keyType,
     });
   }
   if (!type->isClass() && type->field(*key) == nullptr) {
-    bool inherited = KeyedFieldChecker::isInherited(*key);
-    std::string message = ErrorTextKeyedField::noField(*key, type->name(), inherited);
+    bool isInherited = KeyedFieldChecker::isInherited(*key);
+    std::string message = ErrorTextKeyedField::noField(*key, type->name(), isInherited);
 
     return err(KeyedFieldCheckerCheckKeyedFieldError{
         .code = KeyedFieldCheckerCheckKeyedFieldErrorCode::NO_SUCH_FIELD,
@@ -272,7 +272,7 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkKeySetWrite(Inde
                                                                             const Type *field) {
   llvm::ArrayRef<const Type *> names =
       keyType->isUnion() ? keyType->members() : llvm::ArrayRef<const Type *>(keyType);
-  bool known = this->allAssigned(names);
+  bool isKnown = this->allAssigned(names);
   if (KeyedFieldChecker::anyReadonly(type, names)) {
     std::string message = ErrorTextKeyedField::readonly();
 
@@ -281,7 +281,7 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkKeySetWrite(Inde
         .message = message,
     });
   }
-  if ((field->isOptional() || field->isUnion() || field->isLiteral()) && !known) {
+  if ((field->isOptional() || field->isUnion() || field->isLiteral()) && !isKnown) {
     std::string message = ErrorTextKeyedField::byName(field->name());
 
     return err(KeyedFieldCheckerCheckKeyedFieldError{
@@ -323,8 +323,8 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkNamedField(Index
                                                                            const Type *type,
                                                                            const std::string &name,
                                                                            bool write) {
-  bool assigned = this->state.getFlowState().isFieldAssigned(name);
-  if (write && !assigned && type->isTuple()) {
+  bool isAssigned = this->state.getFlowState().isFieldAssigned(name);
+  if (write && !isAssigned && type->isTuple()) {
     std::string message = ErrorTextKeyedField::tupleSet();
 
     return err(KeyedFieldCheckerCheckKeyedFieldError{
@@ -332,7 +332,7 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkNamedField(Index
         .message = message,
     });
   }
-  if (write && !assigned) {
+  if (write && !isAssigned) {
     std::string message = ErrorTextKeyedField::keySet();
 
     return err(KeyedFieldCheckerCheckKeyedFieldError{

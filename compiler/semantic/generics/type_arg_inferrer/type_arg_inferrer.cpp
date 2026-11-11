@@ -69,9 +69,9 @@ bool TypeArgInferrer::growsHere(const Type *type, llvm::ArrayRef<const Type *> p
   if (type->isParam()) {
     return inside && llvm::is_contained(params, type);
   }
-  bool holder = type->isObject() || type->isIterator() || type->isDict();
+  bool isHolder = type->isObject() || type->isIterator() || type->isDict();
 
-  return holder && GenericCheckHelpers::mentionsAnyOf(type, params);
+  return isHolder && GenericCheckHelpers::mentionsAnyOf(type, params);
 }
 
 bool TypeArgInferrer::isContextSensitive(const Expr *arg) {
@@ -155,8 +155,8 @@ TypeArgInferrer::ResultIterableMatch TypeArgInferrer::iterableFits(const FuncSym
                                                                    const Type *bound,
                                                                    const Type *given,
                                                                    const Type *wanted) {
-  bool fits = given == wanted || wanted->isError() || bound->isError();
-  if (!fits && given) {
+  bool isFitting = given == wanted || wanted->isError() || bound->isError();
+  if (!isFitting && given) {
     std::string message = ErrorTextIterableFits::elements(bound->name(), given->name(),
                                                           wanted->name(), generic->name);
 
@@ -165,7 +165,7 @@ TypeArgInferrer::ResultIterableMatch TypeArgInferrer::iterableFits(const FuncSym
         .message = message,
     });
   }
-  if (!fits) {
+  if (!isFitting) {
     std::string message =
         ErrorTextIterableFits::notIter(bound->name(), wanted->name(), generic->name);
 
@@ -267,32 +267,32 @@ TypeArgInferrer::notGrowing(const FuncSymbol *generic, const Type *bound, const 
 bool TypeArgInferrer::finishTypeArgs(FuncSymbol *generic, std::vector<const Type *> &bound,
                                      llvm::SMLoc loc, bool call, bool quiet) {
   llvm::ArrayRef<const Type *> params = generic->typeParams;
-  bool inferred = true;
+  bool isInferred = true;
   for (size_t k = 0; k < params.size(); ++k) {
     if (!bound[k] && k < generic->typeDefaults.size() && generic->typeDefaults[k]) {
       const Type *fallback = this->typeParams->substitute(generic->typeDefaults[k], params, bound);
-      bool open = false;
+      bool isOpen = false;
       for (size_t j = 0; j < params.size(); ++j) {
-        open |= !bound[j] && GenericCheckHelpers::mentionsAnyOf(fallback, params[j]);
+        isOpen |= !bound[j] && GenericCheckHelpers::mentionsAnyOf(fallback, params[j]);
       }
-      if (!open) {
+      if (!isOpen) {
         bound[k] = fallback;
       }
     }
     if (bound[k] && bound[k]->isError()) {
-      inferred = false;
+      isInferred = false;
       continue;
     }
     if (!bound[k] && quiet) {
       bound[k] = Type::error();
-      inferred = false;
+      isInferred = false;
       continue;
     }
     ResultParamInferred paramKnown = TypeArgInferrer::paramInferred(generic, bound[k], k, call);
     if (paramKnown.isErr()) {
       this->state.getDiagnostics().error(loc, paramKnown.error().message);
       bound[k] = Type::error();
-      inferred = false;
+      isInferred = false;
       continue;
     }
     if (const Type *element = params[k]->iterated()) {
@@ -303,7 +303,7 @@ bool TypeArgInferrer::finishTypeArgs(FuncSymbol *generic, std::vector<const Type
       if (matched.isErr()) {
         this->state.getDiagnostics().error(loc, matched.error().message);
         bound[k] = Type::error();
-        inferred = false;
+        isInferred = false;
       }
       continue;
     }
@@ -311,11 +311,11 @@ bool TypeArgInferrer::finishTypeArgs(FuncSymbol *generic, std::vector<const Type
     if (met.isErr()) {
       this->state.getDiagnostics().error(loc, met.error().message);
       bound[k] = Type::error();
-      inferred = false;
+      isInferred = false;
     }
   }
 
-  return inferred;
+  return isInferred;
 }
 
 Expr *TypeArgInferrer::checkGenericCall(CallExpr *call, FuncSymbol *generic, llvm::SMLoc loc,
@@ -326,16 +326,16 @@ Expr *TypeArgInferrer::checkGenericCall(CallExpr *call, FuncSymbol *generic, llv
   }
   call->target = FunctionCall{.func = generic};
   const ClassDecl *cls = generic->decl ? generic->decl->cls() : nullptr;
-  bool concrete =
+  bool isConcrete =
       llvm::none_of(bound, [](const Type *t) { return TypeQueries::mentionsParam(t); }) &&
       (!cls || generic->decl->isStatic() || cls->isEmitted());
-  bool copiesReturn = this->lateClasses->isTemplate(generic) && !generic->hasReturnType();
-  if (concrete && !this->state.getFunctionStack().isInsideTrial() && !generic->inferring &&
-      (generic->hasReturnType() || copiesReturn)) {
+  bool isCopyingReturn = this->lateClasses->isTemplate(generic) && !generic->hasReturnType();
+  if (isConcrete && !this->state.getFunctionStack().isInsideTrial() && !generic->inferring &&
+      (generic->hasReturnType() || isCopyingReturn)) {
     if (FuncSymbol *instance = this->genericInstantiator->instantiate(
             generic, bound, loc, this->genericInstantiator->exactClassArgs(call, generic))) {
       call->target = FunctionCall{.func = instance};
-      if (copiesReturn) {
+      if (isCopyingReturn) {
         call->type = instance->hasReturnType() ? instance->getKnownReturnType() : Type::error();
       }
     }
@@ -349,16 +349,16 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
                                       std::vector<const Type *> &bound) {
   call->type = Type::error();
   const Type *result = generic->getReturnType();
-  bool ownClass = this->genericInstantiator->returnsOwnClass(generic, result);
+  bool isOwnClass = this->genericInstantiator->returnsOwnClass(generic, result);
   GenericCallBinding binding{
       .call = call,
       .generic = generic,
       .loc = loc,
       .typeParams = generic->typeParams,
-      .result = ownClass ? nullptr : result,
+      .result = isOwnClass ? nullptr : result,
       .listRest = TypeArgInferrer::listRestOf(generic),
       .fixed = generic->params.size() - (generic->hasRest ? 1 : 0),
-      .errorsBefore = this->state.getDiagnostics().errorsSeen(),
+      .errorsBefore = this->state.getDiagnostics().getWrittenErrorCount(),
       .bound = bound,
   };
   if (this->hasRejectedSpread(binding)) {
@@ -394,9 +394,9 @@ const Type *TypeArgInferrer::listRestOf(const FuncSymbol *generic) {
     return nullptr;
   }
   const Type *rest = generic->params.back();
-  bool list = rest->isListParam() || ArgListChecker::spreadsLists(rest);
+  bool isList = rest->isListParam() || ArgListChecker::spreadsLists(rest);
 
-  return list ? rest : nullptr;
+  return isList ? rest : nullptr;
 }
 
 const Type *TypeArgInferrer::parameterFor(const GenericCallBinding &binding, size_t i) {
@@ -405,17 +405,17 @@ const Type *TypeArgInferrer::parameterFor(const GenericCallBinding &binding, siz
     return generic->params[i];
   }
   const Type *rest = generic->params.back();
-  bool element = !binding.call->spreads(i) && rest->isArray();
+  bool isElement = !binding.call->spreads(i) && rest->isArray();
 
-  return element ? rest->inner() : rest;
+  return isElement ? rest->inner() : rest;
 }
 
 bool TypeArgInferrer::hasRejectedSpread(const GenericCallBinding &binding) {
   CallExpr *call = binding.call;
   size_t limit = binding.generic->hasRest ? binding.fixed : call->args.size();
   for (size_t i = 0; i < call->args.size() && i < limit; ++i) {
-    bool rejected = call->spreads(i) && this->callChecker->rejectSpread(call);
-    if (rejected) {
+    bool isRejected = call->spreads(i) && this->callChecker->rejectSpread(call);
+    if (isRejected) {
       return true;
     }
   }
@@ -465,9 +465,9 @@ void TypeArgInferrer::walkArgument(GenericCallBinding &binding, Inference &infer
   GenericArgumentForm form = this->argumentForm(binding, i);
   switch (form.kind()) {
     case GenericArgumentKind::LIST_REST:
-      return this->checkArgumentNow(binding, i, nullptr);
+      return this->walkArgumentNow(binding, i, nullptr);
     case GenericArgumentKind::PLAIN:
-      return this->checkArgumentNow(binding, i, TypeArgInferrer::parameterFor(binding, i));
+      return this->walkArgumentNow(binding, i, TypeArgInferrer::parameterFor(binding, i));
     case GenericArgumentKind::LITERAL_TEXT:
       return this->inferFromLiteralText(binding, inference, i,
                                         form.as<LiteralTextArgument>()->text);
@@ -493,14 +493,14 @@ GenericArgumentForm TypeArgInferrer::argumentForm(const GenericCallBinding &bind
     return PlainArgument{};
   }
   auto *text = dyn_cast<StringLitExpr>(arg);
-  bool literalText = text != nullptr && llvm::is_contained(binding.typeParams, pattern) &&
-                     this->utilityTypes->wantsLiteral(pattern);
-  if (literalText) {
+  bool isLiteralText = text != nullptr && llvm::is_contained(binding.typeParams, pattern) &&
+                       this->utilityTypes->wantsLiteral(pattern);
+  if (isLiteralText) {
     return LiteralTextArgument{.text = text};
   }
-  bool contextual = TypeArgInferrer::isContextSensitive(arg) || this->makesResults(arg) ||
-                    this->isBareGenericName(arg);
-  if (contextual) {
+  bool isContextual = TypeArgInferrer::isContextSensitive(arg) || this->makesResults(arg) ||
+                      this->isBareGenericName(arg);
+  if (isContextual) {
     return ContextualArgument{};
   }
   const Type *shape = GenericChecker::literalShape(arg);
@@ -531,7 +531,7 @@ bool TypeArgInferrer::isBareGenericName(Expr *arg) const {
          name->typeArgs.empty();
 }
 
-void TypeArgInferrer::checkArgumentNow(GenericCallBinding &binding, size_t i, const Type *hint) {
+void TypeArgInferrer::walkArgumentNow(GenericCallBinding &binding, size_t i, const Type *hint) {
   Expr *&arg = binding.call->args[i];
   arg = this->exprChecker->checkExpr(arg, hint);
   binding.checked[i] = true;
@@ -540,7 +540,7 @@ void TypeArgInferrer::checkArgumentNow(GenericCallBinding &binding, size_t i, co
 void TypeArgInferrer::inferFromLiteralText(GenericCallBinding &binding, Inference &inference,
                                            size_t i, const StringLitExpr *text) {
   const Type *literal = Type::stringLiteral(text->value);
-  this->checkArgumentNow(binding, i, literal);
+  this->walkArgumentNow(binding, i, literal);
   const Type *pattern = TypeArgInferrer::parameterFor(binding, i);
   inference.from(pattern, literal);
 }
@@ -550,8 +550,8 @@ void TypeArgInferrer::inferFromLiteralShape(GenericCallBinding &binding, Inferen
   const Expr *arg = binding.call->args[i];
   const Type *pattern = TypeArgInferrer::parameterFor(binding, i);
   binding.literals.push_back(i);
-  bool intLiteral = shape->isInteger() && TypeRelations::isIntLiteralTree(arg);
-  inference.markArgument(true, intLiteral);
+  bool isIntLiteral = shape->isInteger() && TypeRelations::isIntLiteralTree(arg);
+  inference.markArgument(true, isIntLiteral);
   inference.from(pattern, shape);
   inference.markArgument(false, false);
 }
@@ -567,11 +567,11 @@ void TypeArgInferrer::deferLiteral(GenericCallBinding &binding, Inference &infer
 
 void TypeArgInferrer::inferFromCheckedArgument(GenericCallBinding &binding, Inference &inference,
                                                size_t i) {
-  this->checkArgumentNow(binding, i, nullptr);
+  this->walkArgumentNow(binding, i, nullptr);
   const Expr *arg = binding.call->args[i];
   const Type *pattern = TypeArgInferrer::parameterFor(binding, i);
-  bool intLiteral = arg->type->isInteger() && TypeRelations::isIntLiteralTree(arg);
-  inference.markArgument(false, intLiteral);
+  bool isIntLiteral = arg->type->isInteger() && TypeRelations::isIntLiteralTree(arg);
+  inference.markArgument(false, isIntLiteral);
   inference.from(pattern, arg->type);
   inference.markArgument(false, false);
 }
@@ -622,7 +622,7 @@ TypeArgInferrer::joinCandidates(const GenericCallBinding &binding, const Inferen
                                 size_t k) {
   const FuncSymbol *generic = binding.generic;
   const Type *param = binding.typeParams[k];
-  bool strong = !inference.getCandidates(k).empty();
+  bool isStrong = !inference.getCandidates(k).empty();
   const Type *type = nullptr;
   for (const Type *candidate : inference.getCandidates(k)) {
     ResultCandidateJoin joined = TypeArgInferrer::candidatesJoin(generic, param, type, candidate);
@@ -636,7 +636,7 @@ TypeArgInferrer::joinCandidates(const GenericCallBinding &binding, const Inferen
   }
   for (const Type *candidate : inference.getWeakCandidates(k)) {
     ResultCandidateJoin joined = TypeArgInferrer::candidatesJoin(generic, param, type, candidate);
-    if (joined.isErr() && strong) {
+    if (joined.isErr() && isStrong) {
       continue;
     }
     if (joined.isErr()) {
@@ -648,9 +648,9 @@ TypeArgInferrer::joinCandidates(const GenericCallBinding &binding, const Inferen
     type = joined.value();
   }
   for (const Type *candidate : inference.getLiteralCandidates(k)) {
-    bool otherNumber =
+    bool isOtherNumber =
         type != nullptr && type != candidate && (type->isNumeric() || type->isDecimal());
-    if (otherNumber) {
+    if (isOtherNumber) {
       continue;
     }
     ResultCandidateJoin joined = TypeArgInferrer::candidatesJoin(generic, param, type, candidate);
@@ -673,11 +673,12 @@ const Type *TypeArgInferrer::widenToConstraint(const GenericCallBinding &binding
   if (constraint != nullptr && constraint->isUnion()) {
     constraint = LiteralTypes::numberMemberOf(constraint, false);
   }
-  bool onlyLiterals = inference.getCandidates(k).empty() && inference.getWeakCandidates(k).empty();
-  bool fractional = constraint != nullptr && (constraint->isFloat() || constraint->isDecimal());
-  bool widens = type != nullptr && type->isInteger() && onlyLiterals && fractional;
+  bool isOnlyLiterals =
+      inference.getCandidates(k).empty() && inference.getWeakCandidates(k).empty();
+  bool isFractional = constraint != nullptr && (constraint->isFloat() || constraint->isDecimal());
+  bool isWidening = type != nullptr && type->isInteger() && isOnlyLiterals && isFractional;
 
-  return widens ? constraint : type;
+  return isWidening ? constraint : type;
 }
 
 const Type *TypeArgInferrer::withUndefined(const Inference &inference, size_t k, const Type *type) {
@@ -690,10 +691,10 @@ const Type *TypeArgInferrer::withUndefined(const Inference &inference, size_t k,
 
 void TypeArgInferrer::inferFromExpected(GenericCallBinding &binding, const Type *expected) {
   const Type *result = binding.result;
-  bool open = llvm::is_contained(binding.bound, nullptr);
-  bool useful = expected != nullptr && open && result != nullptr &&
-                GenericCheckHelpers::mentionsAnyOf(result, binding.typeParams);
-  if (!useful) {
+  bool isOpen = llvm::is_contained(binding.bound, nullptr);
+  bool isUseful = expected != nullptr && isOpen && result != nullptr &&
+                  GenericCheckHelpers::mentionsAnyOf(result, binding.typeParams);
+  if (!isUseful) {
     return;
   }
   Inference fromExpected(binding.typeParams, this->state.getAliasStore(), nullptr);
@@ -759,12 +760,12 @@ Signature TypeArgInferrer::callbackSignature(llvm::ArrayRef<const Type *> typePa
                                              const Type *function) {
   Signature signature;
   for (const Type *param : function->params()) {
-    bool open = GenericCheckHelpers::mentionsAnyOf(param, typeParams);
-    signature.params.push_back(open ? Type::error() : param);
+    bool isOpen = GenericCheckHelpers::mentionsAnyOf(param, typeParams);
+    signature.params.push_back(isOpen ? Type::error() : param);
   }
-  bool openResult = GenericCheckHelpers::mentionsAnyOf(function->ret(), typeParams);
+  bool isOpenResult = GenericCheckHelpers::mentionsAnyOf(function->ret(), typeParams);
   signature.minArgs = function->minArgs();
-  signature.ret = openResult ? nullptr : function->ret();
+  signature.ret = isOpenResult ? nullptr : function->ret();
   signature.voidResult = function->ret()->isVoid();
 
   return signature;
@@ -775,16 +776,16 @@ void TypeArgInferrer::walkCallbackParams(GenericCallBinding &binding, size_t i,
   const Expr *arg = binding.call->args[i];
   auto *closure = dyn_cast<FunctionExpr>(arg);
   for (size_t p = 0; p < function->params().size(); ++p) {
-    bool written = closure != nullptr && p < closure->fn->params.size() &&
-                   closure->fn->params[p].type.has_value();
-    if (written) {
+    bool isWritten = closure != nullptr && p < closure->fn->params.size() &&
+                     closure->fn->params[p].type.has_value();
+    if (isWritten) {
       continue;
     }
     for (size_t k = 0; k < binding.typeParams.size(); ++k) {
       const Type *param = binding.typeParams[k];
-      bool mentioned = GenericCheckHelpers::mentionsAnyOf(function->params()[p], param);
+      bool isMentioned = GenericCheckHelpers::mentionsAnyOf(function->params()[p], param);
       ResultCallbackParam known = TypeArgInferrer::callbackParam(
-          binding.generic, param, binding.bound[k], mentioned, closure, p);
+          binding.generic, param, binding.bound[k], isMentioned, closure, p);
       if (known.isErr()) {
         this->state.getDiagnostics().error(arg->loc(), known.error().message);
         binding.bound[k] = Type::error();
@@ -797,21 +798,21 @@ void TypeArgInferrer::walkCallbackParams(GenericCallBinding &binding, size_t i,
 void TypeArgInferrer::walkArgumentWithDefaults(GenericCallBinding &binding, size_t i,
                                                const Type *pattern, const Type *partial) {
   llvm::ArrayRef<const Type *> params = binding.typeParams;
-  bool open = GenericCheckHelpers::mentionsAnyOf(partial, params);
-  bool defaulted = false;
-  for (size_t k = 0; k < params.size() && open; ++k) {
+  bool isOpen = GenericCheckHelpers::mentionsAnyOf(partial, params);
+  bool isDefaulted = false;
+  for (size_t k = 0; k < params.size() && isOpen; ++k) {
     const Type *fallback = TypeArgInferrer::typeDefault(binding.generic, k);
     if (binding.bound[k] == nullptr && fallback != nullptr) {
       binding.bound[k] = fallback;
-      defaulted = true;
+      isDefaulted = true;
     }
   }
   const Type *hint = partial;
-  if (defaulted) {
+  if (isDefaulted) {
     hint = this->typeParams->substitute(pattern, params, binding.bound);
   }
-  bool stillOpen = GenericCheckHelpers::mentionsAnyOf(hint, params);
-  this->checkArgumentNow(binding, i, stillOpen ? nullptr : hint);
+  bool isStillOpen = GenericCheckHelpers::mentionsAnyOf(hint, params);
+  this->walkArgumentNow(binding, i, isStillOpen ? nullptr : hint);
 }
 
 const Type *TypeArgInferrer::typeDefault(const FuncSymbol *generic, size_t k) {
@@ -820,9 +821,9 @@ const Type *TypeArgInferrer::typeDefault(const FuncSymbol *generic, size_t k) {
     return nullptr;
   }
   const Type *fallback = generic->typeDefaults[k];
-  bool closed = !GenericCheckHelpers::mentionsAnyOf(fallback, generic->typeParams);
+  bool isClosed = !GenericCheckHelpers::mentionsAnyOf(fallback, generic->typeParams);
 
-  return closed ? fallback : nullptr;
+  return isClosed ? fallback : nullptr;
 }
 
 void TypeArgInferrer::adoptArgumentType(GenericCallBinding &binding, Inference &inference, size_t i,
@@ -839,9 +840,10 @@ void TypeArgInferrer::adoptArgumentType(GenericCallBinding &binding, Inference &
 }
 
 void TypeArgInferrer::finishBinding(GenericCallBinding &binding) {
-  bool quiet = this->hasArgumentErrors(binding);
-  bool finished = this->finishTypeArgs(binding.generic, binding.bound, binding.loc, true, quiet);
-  binding.inferred = finished && binding.inferred;
+  bool isQuiet = this->hasArgumentErrors(binding);
+  bool isFinished =
+      this->finishTypeArgs(binding.generic, binding.bound, binding.loc, true, isQuiet);
+  binding.inferred = isFinished && binding.inferred;
   for (size_t k = 0; k < binding.typeParams.size() && binding.inferred; ++k) {
     ResultArgNotGrowing growing =
         TypeArgInferrer::notGrowing(binding.generic, binding.bound[k], binding.typeParams[k]);
@@ -853,19 +855,19 @@ void TypeArgInferrer::finishBinding(GenericCallBinding &binding) {
 }
 
 bool TypeArgInferrer::hasArgumentErrors(const GenericCallBinding &binding) const {
-  bool failed = false;
+  bool isFailed = false;
   for (size_t i = 0; i < binding.call->args.size(); ++i) {
-    failed |= binding.checked[i] && binding.call->args[i]->type->isError();
+    isFailed |= binding.checked[i] && binding.call->args[i]->type->isError();
   }
-  bool reported = this->state.getDiagnostics().errorsSeen() > binding.errorsBefore;
+  bool isReported = this->state.getDiagnostics().getWrittenErrorCount() > binding.errorsBefore;
 
-  return failed && reported;
+  return isFailed && isReported;
 }
 
 void TypeArgInferrer::walkUncheckedArguments(GenericCallBinding &binding) {
   for (size_t i = 0; i < binding.call->args.size(); ++i) {
     if (!binding.checked[i]) {
-      this->checkArgumentNow(binding, i, nullptr);
+      this->walkArgumentNow(binding, i, nullptr);
     }
   }
 }
@@ -882,7 +884,7 @@ bool TypeArgInferrer::instantiateCall(GenericCallBinding &binding, bool inferred
     const Type *pattern = TypeArgInferrer::parameterFor(binding, i);
     const Type *hint =
         this->typeParams->substituteValue(pattern, binding.typeParams, binding.bound);
-    this->checkArgumentNow(binding, i, hint);
+    this->walkArgumentNow(binding, i, hint);
   }
   const Type *result = binding.result;
   call->type = result != nullptr

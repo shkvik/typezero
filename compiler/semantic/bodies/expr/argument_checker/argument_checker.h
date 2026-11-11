@@ -20,7 +20,7 @@ public:
   ArgumentChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkAnyNumber(Expr *arg);
-  void checkArgsLoosely(CallExpr *call);
+  void walkArgsLoosely(CallExpr *call);
   Expr *checkArg(Expr *arg, const Type *to);
   ResultArityMatches checkArity(CallExpr *call, unsigned min, unsigned max);
   Expr *checkArguments(CallExpr *call, llvm::ArrayRef<const Type *> params, size_t minArgs,

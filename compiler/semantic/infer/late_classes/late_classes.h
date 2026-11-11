@@ -28,16 +28,16 @@ class LateClasses {
 public:
   LateClasses(SemanticState &owner, SemanticParts &all);
 
-  void checkLateClasses();
+  void walkLateClasses();
   void rememberEmittedLateClasses();
   void makeLateClass(ClassDecl *cls);
-  void checkStaticFields(ClassDecl *cls);
+  void walkStaticFields(ClassDecl *cls);
   void markLateOverrides(ClassDecl *cls);
   bool isTemplate(const FuncSymbol *generic);
   bool hasClassExpr(const FunctionDecl *fn);
   void markLateOverrides(SourceFile &program);
   void bindOuterTypeParams(const ClassDecl *cls);
-  void checkTemplateInstance(InstanceRecord *instance);
+  void walkTemplateInstance(InstanceRecord *instance);
   Expr *checkClassExpr(ClassExpr *expr, const Type *expected);
   void replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SMLoc loc);
 

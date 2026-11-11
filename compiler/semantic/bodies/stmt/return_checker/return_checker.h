@@ -28,7 +28,7 @@ class ReturnChecker {
 public:
   ReturnChecker(SemanticState &owner, SemanticParts &all);
 
-  void checkReturn(ReturnStmt *ret);
+  void walkReturn(ReturnStmt *ret);
   static bool isExit(const Stmt *stmt);
   Expr *checkReturnValue(ReturnStmt *ret, const Type *hint, bool tested);
   static bool alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels = {});

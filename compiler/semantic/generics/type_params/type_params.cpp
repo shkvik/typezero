@@ -31,8 +31,8 @@ TypeParams::TypeParams(SemanticState &owner, SemanticParts &all)
 bool TypeParams::mentionsInObject(const Type *type, llvm::ArrayRef<const Type *> params) {
   TypeParts parts = TypeParts::collect(type, kMentionsInObjectRoute);
   for (const Type *part : parts.getTypes()) {
-    bool operation = part->isParam() && part->typeOp() != TypeOp::None;
-    if ((operation || part->isObject()) && GenericCheckHelpers::mentionsAnyOf(part, params)) {
+    bool isOperation = part->isParam() && part->typeOp() != TypeOp::None;
+    if ((isOperation || part->isObject()) && GenericCheckHelpers::mentionsAnyOf(part, params)) {
       return true;
     }
   }
@@ -116,15 +116,15 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
   std::vector<Type *> created = this->createTypeParams(decls);
   std::vector<const Type *> params(created.begin(), created.end());
   this->bindTypeParams(decls, params);
-  bool afterDefault = false;
+  bool isAfterDefault = false;
   for (size_t i = 0; i < decls.size(); ++i) {
     const TypeParamDecl &decl = decls[i];
     if (decl.constraint.has_value()) {
       this->constrainTypeParam(created[i], decl);
     }
     const Type *fallback = this->resolvedDefault(decl, params[i]);
-    afterDefault |= decl.defaultType.has_value();
-    ResultDefaultPresent present = TypeParams::defaultGiven(decl, afterDefault);
+    isAfterDefault |= decl.defaultType.has_value();
+    ResultDefaultPresent present = TypeParams::defaultGiven(decl, isAfterDefault);
     if (present.isErr()) {
       this->state.getDiagnostics().error(decl.loc, present.error().message);
     }
@@ -168,10 +168,10 @@ void TypeParams::constrainTypeParam(Type *param, const TypeParamDecl &decl) {
 
 TypeParams::ParamConstraint TypeParams::readConstraint(const TypeRef &ref, Type *param) {
   ParamConstraint found;
-  bool unknownList = ref.kind() == TypeRefKind::ARRAY_REF &&
-                     ref.args[0].kind() == TypeRefKind::NAME_REF &&
-                     TypeNameTable::isName(ref.args[0].name, TypeName::UNKNOWN);
-  if (unknownList) {
+  bool isUnknownList = ref.kind() == TypeRefKind::ARRAY_REF &&
+                       ref.args[0].kind() == TypeRefKind::NAME_REF &&
+                       TypeNameTable::isName(ref.args[0].name, TypeName::UNKNOWN);
+  if (isUnknownList) {
     param->setList();
     return found;
   }
@@ -197,9 +197,9 @@ TypeParams::ParamConstraint TypeParams::unionConstraint(const TypeRef &ref) {
     }
   }
   const std::vector<const Type *> &alternatives = found.alternatives;
-  bool optionalPair = found.resolved && alternatives.size() == 2 &&
-                      (alternatives[0]->isUndefined() || alternatives[1]->isUndefined());
-  if (optionalPair) {
+  bool isOptionalPair = found.resolved && alternatives.size() == 2 &&
+                        (alternatives[0]->isUndefined() || alternatives[1]->isUndefined());
+  if (isOptionalPair) {
     found.constraint = Type::optional(alternatives[alternatives[0]->isUndefined() ? 1 : 0]);
   }
 
@@ -279,9 +279,9 @@ void TypeParams::enterSubstitute(const SubstituteType &enter, llvm::ArrayRef<con
                                  std::vector<SubstituteStep> &steps,
                                  std::vector<const Type *> &answers) {
   const Type *type = enter.type;
-  bool untouched = type == nullptr || !GenericCheckHelpers::mentionsAnyOf(type, params);
-  std::optional<SubstituteForm> form = untouched ? std::nullopt : this->substituteForm(type);
-  if (untouched) {
+  bool isUntouched = type == nullptr || !GenericCheckHelpers::mentionsAnyOf(type, params);
+  std::optional<SubstituteForm> form = isUntouched ? std::nullopt : this->substituteForm(type);
+  if (isUntouched) {
     answers.push_back(type);
   } else if (!form.has_value()) {
     answers.push_back(TypeParams::plainSubstitute(type, params, args, enter.voidOk));
@@ -618,8 +618,8 @@ bool TypeParams::satisfies(const Type *arg, const Type *param, llvm::ArrayRef<co
 bool TypeParams::hasMembersOf(const Type *arg, const Type *constraint) {
   TypeParts parts = TypeParts::collect(arg, kMembersOfRoute);
   for (const Type *part : parts.getTypes()) {
-    bool constrained = part->isParam() && part->constraint() != nullptr;
-    if (constrained || part->isUnion()) {
+    bool isConstrained = part->isParam() && part->constraint() != nullptr;
+    if (isConstrained || part->isUnion()) {
       continue;
     }
     if (!this->objectHasMembersOf(part, constraint)) {
@@ -641,25 +641,25 @@ bool TypeParams::objectHasMembersOf(const Type *arg, const Type *constraint) {
   const ClassDecl *cls = arg->classDecl();
   for (const Field &f : constraint->fields()) {
     if (const Field *have = arg->field(f.name)) {
-      bool literal =
+      bool isLiteral =
           f.type->isString() &&
           (have->type->isStringLiteral() ||
            (have->type->isUnion() && llvm::all_of(have->type->members(), [](const Type *m) {
               return m->isStringLiteral();
             })));
-      if ((have->type != f.type && !literal) || (have->readonly && !f.readonly)) {
+      if ((have->type != f.type && !isLiteral) || (have->readonly && !f.readonly)) {
         return false;
       }
       continue;
     }
-    bool method = false;
+    bool isMethod = false;
     if (cls && f.readonly && f.type->isFunction()) {
       for (FunctionDecl *fn : ClassDeclarer::methodsNamed(cls, f.name, false)) {
-        method |= fn->sym && fn->typeParams.empty() &&
-                  this->returnInferrer->functionType(fn->sym) == f.type;
+        isMethod |= fn->sym && fn->typeParams.empty() &&
+                    this->returnInferrer->functionType(fn->sym) == f.type;
       }
     }
-    if (!method && !f.type->isOptional()) {
+    if (!isMethod && !f.type->isOptional()) {
       return false;
     }
   }

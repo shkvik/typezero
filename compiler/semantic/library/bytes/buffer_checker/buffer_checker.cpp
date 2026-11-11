@@ -129,7 +129,7 @@ Expr *BufferChecker::toBuiltinCall(CallExpr *call, Builtin builtin, const Type *
 Expr *BufferChecker::reportSlice(const BufferCall &buffer) {
   std::string message = ErrorTextBuffer::slice();
   this->state.getDiagnostics().error(buffer.member->loc(), message);
-  this->argumentChecker->checkArgsLoosely(buffer.call);
+  this->argumentChecker->walkArgsLoosely(buffer.call);
 
   return buffer.call;
 }
@@ -189,8 +189,8 @@ Expr *BufferChecker::checkCompare(const BufferCall &buffer) {
   static const char *const names[] = {"", "targetStart", "targetEnd", "sourceStart", "sourceEnd"};
   for (size_t i = 1; i < call->args.size(); ++i) {
     std::string what = ErrorTextBuffer::position(names[i]);
-    bool end = i == 2 || i == 4;
-    if (end) {
+    bool isEnd = i == 2 || i == 4;
+    if (isEnd) {
       const Expr *array = i == 2 ? call->args[0] : buffer.member->object;
       IndexProofs::ResultUpToWasProven upTo =
           this->indexProofs->requireUpTo(call->args[i], array, 0, what);
@@ -246,7 +246,7 @@ Expr *BufferChecker::checkWrite(const BufferCall &buffer) {
         this->indexProofs->requireUpTo(rest.positions[0], buffer.member->object, 0, offsetWhat);
     this->reportUnprovenUpTo(upTo, rest.positions[0]->loc());
     if (upTo.isOk() && rest.positions.size() > 1) {
-      this->checkWriteLength(buffer.member->object, rest.positions[0], rest.positions[1]);
+      this->walkWriteLength(buffer.member->object, rest.positions[0], rest.positions[1]);
     }
   }
   Expr *encoding =
@@ -263,16 +263,16 @@ BufferChecker::EncodingAndPositions BufferChecker::splitWriteArgs(const BufferCa
   EncodingAndPositions rest;
   for (size_t i = 1; i < call->args.size(); ++i) {
     Expr *arg = call->args[i];
-    bool last = i + 1 == call->args.size();
-    bool mayBeEncoding = BufferChecker::literalText(arg).has_value() || last;
-    if (!mayBeEncoding) {
+    bool isLast = i + 1 == call->args.size();
+    bool isMayBeEncoding = BufferChecker::literalText(arg).has_value() || isLast;
+    if (!isMayBeEncoding) {
       rest.positions.push_back(this->memberChecker->checkPosition(arg));
       continue;
     }
     Expr *checked = this->exprChecker->checkExpr(arg);
     if (checked->type->isString()) {
       rest.encoding = this->bytesChecker->checkBufferEncoding(checked);
-      if (!last) {
+      if (!isLast) {
         std::string message = ErrorTextBuffer::encoding(buffer.name);
         this->state.getDiagnostics().error(call->args[i + 1]->loc(), message);
       }
@@ -425,7 +425,7 @@ Expr *BufferChecker::checkNumberMethod(const BufferCall &buffer) {
     std::string quoted = ErrorTextBigInt::quoted(buffer.name);
     std::string bigint = ErrorTextBigInt::none(quoted);
     this->state.getDiagnostics().error(buffer.member->loc(), bigint);
-    this->argumentChecker->checkArgsLoosely(buffer.call);
+    this->argumentChecker->walkArgsLoosely(buffer.call);
     return buffer.call;
   }
   if (number.variable) {
@@ -486,8 +486,8 @@ BufferChecker::ResultVarValueFits BufferChecker::varValueFits(const Expr *value,
   int64_t bits = width * 8;
   int64_t lo = isSigned ? -(int64_t(1) << (bits - 1)) : 0;
   int64_t hi = isSigned ? (int64_t(1) << (bits - 1)) - 1 : (int64_t(1) << bits) - 1;
-  bool unproven = !value->type->isError() && !this->byteProofs->provesFits(value, lo, hi);
-  if (unproven) {
+  bool isUnproven = !value->type->isError() && !this->byteProofs->provesFits(value, lo, hi);
+  if (isUnproven) {
     std::string range = ErrorTextBytes::range(lo, hi);
     std::string message = ErrorTextBuffer::varFits(width, range);
 
@@ -566,17 +566,17 @@ void BufferChecker::walkPositionArgs(CallExpr *call, size_t from) {
 
 void BufferChecker::reportUnprovenUpTo(const IndexProofs::ResultUpToWasProven &upTo,
                                        llvm::SMLoc at) {
-  bool shown = upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT;
-  if (shown) {
+  bool isShown = upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT;
+  if (isShown) {
     this->state.getDiagnostics().error(at, upTo.error().message);
   }
 }
 
 void BufferChecker::reportUnprovenBetween(const IndexProofs::ResultBetweenProven &between,
                                           llvm::SMLoc at) {
-  bool shown =
+  bool isShown =
       between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT;
-  if (shown) {
+  if (isShown) {
     this->state.getDiagnostics().error(at, between.error().message);
   }
 }
@@ -598,18 +598,18 @@ BoolLitExpr *BufferChecker::makeBoolLiteral(llvm::SMLoc loc, bool value) {
 Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
   const Type *type = member->object->type;
   std::optional<BytesMethod> method = BytesMethodTable::findMethod(member->name);
-  bool encoder = type->bytes() == Bytes::TextEncoder;
-  bool decoder = type->bytes() == Bytes::TextDecoder || type->bytes() == Bytes::FatalTextDecoder;
-  if (encoder && method == BytesMethod::ENCODE) {
+  bool isEncoder = type->bytes() == Bytes::TextEncoder;
+  bool isDecoder = type->bytes() == Bytes::TextDecoder || type->bytes() == Bytes::FatalTextDecoder;
+  if (isEncoder && method == BytesMethod::ENCODE) {
     return this->checkEncode(call, member);
   }
-  if (encoder && method == BytesMethod::ENCODE_INTO) {
+  if (isEncoder && method == BytesMethod::ENCODE_INTO) {
     return this->checkEncodeInto(call, member);
   }
-  if (decoder && method == BytesMethod::DECODE) {
+  if (isDecoder && method == BytesMethod::DECODE) {
     return this->checkDecode(call, member);
   }
-  this->argumentChecker->checkArgsLoosely(call);
+  this->argumentChecker->walkArgsLoosely(call);
   std::string message = ErrorTextBuffer::noMember(member->name, type->name());
   this->state.getDiagnostics().error(member->loc(), message);
 
@@ -665,8 +665,8 @@ Expr *BufferChecker::checkDecode(CallExpr *call, MemberExpr *member) {
     std::string what = ErrorTextBufferLabel::options();
     call->args[1] = this->typeRelations->coerce(given, options, what);
   }
-  bool fatal = member->object->type->bytes() == Bytes::FatalTextDecoder;
-  if (!fatal) {
+  bool isFatal = member->object->type->bytes() == Bytes::FatalTextDecoder;
+  if (!isFatal) {
     return BufferChecker::toBuiltinCall(call, Builtin::TextDecode, Type::string());
   }
   const Type *decodeError = this->prelude->builtinType("DecodeError");
@@ -675,7 +675,7 @@ Expr *BufferChecker::checkDecode(CallExpr *call, MemberExpr *member) {
   return BufferChecker::toBuiltinCall(call, Builtin::TextDecode, decoded);
 }
 
-void BufferChecker::checkWriteLength(const Expr *object, const Expr *offset, const Expr *length) {
+void BufferChecker::walkWriteLength(const Expr *object, const Expr *offset, const Expr *length) {
   IndexProofs &proofs = *this->indexProofs;
   std::string what = ErrorTextBufferLabel::length();
   IndexProofs::ResultBetweenProven between = proofs.requireBetween(length, 0, std::nullopt, what);

@@ -146,8 +146,8 @@ NodeChildren<const Expr *> ByteProofs::rangeParts(const Expr *e) {
   switch (e->kind()) {
     case Expr::Kind::Cast: {
       auto *conv = cast<CastExpr>(e);
-      bool integer = conv->operand->type && conv->operand->type->isInteger();
-      if (!conv->isImplicit() || !integer) {
+      bool isInteger = conv->operand->type && conv->operand->type->isInteger();
+      if (!conv->isImplicit() || !isInteger) {
         return {};
       }
       return {conv->operand};
@@ -263,9 +263,9 @@ IntegerRange ByteProofs::castRange(const CastExpr *conv, const IntegerRange &ope
     return {};
   }
   const Type *to = conv->type->nonOptional();
-  bool inside = ByteProofs::known(operand) && *operand.lo >= to->intMin() &&
-                (*operand.hi < 0 || uint64_t(*operand.hi) <= to->intMax());
-  if (!to->holds(from->nonOptional()) && !inside) {
+  bool isInside = ByteProofs::known(operand) && *operand.lo >= to->intMin() &&
+                  (*operand.hi < 0 || uint64_t(*operand.hi) <= to->intMax());
+  if (!to->holds(from->nonOptional()) && !isInside) {
     return {};
   }
 
@@ -292,9 +292,9 @@ IntegerRange ByteProofs::nameRange(const NameExpr *name) const {
 }
 
 IntegerRange ByteProofs::memberRange(const MemberExpr *member) {
-  bool length = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) ||
-                BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH);
-  if (!length) {
+  bool isLength = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) ||
+                  BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH);
+  if (!isLength) {
     return {};
   }
 
@@ -340,10 +340,10 @@ IntegerRange ByteProofs::minMaxRange(const CallExpr *call, llvm::ArrayRef<Intege
   if (call->hasSpread() || call->args.empty()) {
     return {};
   }
-  bool min = call->builtin() == Builtin::MathMin;
+  bool isMin = call->builtin() == Builtin::MathMin;
   IntegerRange r = parts[0];
   for (size_t i = 1; i < call->args.size(); ++i) {
-    r = min ? ByteProofs::lowerOf(r, parts[i]) : ByteProofs::upperOf(r, parts[i]);
+    r = isMin ? ByteProofs::lowerOf(r, parts[i]) : ByteProofs::upperOf(r, parts[i]);
   }
 
   return r;
@@ -413,9 +413,9 @@ ByteProofs::ResultValueFitsType ByteProofs::valueFits(const Expr *value, const T
     return ok(value);
   }
   Bytes kind = target->bytes();
-  bool fits = kind == Bytes::Uint8Clamped || this->provesFits(value, lo, hi) ||
-              (lo >= value->type->intMin() && uint64_t(hi) >= value->type->intMax());
-  if (fits) {
+  bool isFitting = kind == Bytes::Uint8Clamped || this->provesFits(value, lo, hi) ||
+                   (lo >= value->type->intMin() && uint64_t(hi) >= value->type->intMax());
+  if (isFitting) {
     return ok(value);
   }
   std::string range = ErrorTextBytes::range(lo, hi);
@@ -467,8 +467,8 @@ ByteProofs::ResultBufferAligned ByteProofs::bufferAligned(std::optional<int64_t>
   return ok(whole.value_or(0));
 }
 
-void ByteProofs::checkView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size,
-                           llvm::StringRef what) {
+void ByteProofs::walkView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size,
+                          llvm::StringRef what) {
   if (ByteProofs::sameView(buffer, offset, length, size) ||
       this->indexProofs->exempt(buffer->loc(), buffer)) {
     return;
@@ -553,16 +553,19 @@ void ByteProofs::addByteCallbackFacts(const FunctionDecl *fn) {
                                             Facts::saturatingAdd(info.hi, 1));
 }
 
-void ByteProofs::checkByteCallbackResult(const FunctionDecl *fn, const Expr *value) {
+ByteProofs::ResultByteCallbackChecked ByteProofs::checkByteCallbackResult(const FunctionDecl *fn,
+                                                                          const Expr *value) {
   const ByteCallback *found = this->state.getCallbackFacts().findByteCallback(fn);
   if (!found || !found->target) {
-    return;
+    return ok();
   }
   std::string what = ErrorTextByteView::element(found->target->name());
   ByteProofs::ResultValueFitsType fitting = this->valueFits(value, found->target, what);
   if (fitting.isErr()) {
-    this->state.getDiagnostics().error(value->loc(), fitting.error().message);
+    return err(fitting.error());
   }
+
+  return ok();
 }
 
 }

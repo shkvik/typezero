@@ -51,7 +51,7 @@ constexpr size_t kRememberedPerLoop = 16;
 LoopRanges::LoopRanges(OverflowCheck &check)
     : check(check) {}
 
-bool LoopRanges::yields(const Stmt *stmt) {
+bool LoopRanges::yields(const Stmt *stmt) const {
   for (const Expr *e : AstWalker::exprsIn(stmt, false)) {
     if (isa<YieldExpr>(e)) {
       return true;
@@ -61,8 +61,8 @@ bool LoopRanges::yields(const Stmt *stmt) {
   return false;
 }
 
-bool LoopRanges::openEnded(const Expr *cond, const Stmt *body) {
-  if (LoopRanges::yields(body)) {
+bool LoopRanges::openEnded(const Expr *cond, const Stmt *body) const {
+  if (this->yields(body)) {
     return false;
   }
   if (!cond) {
@@ -72,10 +72,10 @@ bool LoopRanges::openEnded(const Expr *cond, const Stmt *body) {
     return lit->value;
   }
 
-  return LoopRanges::readsInput(cond);
+  return this->readsInput(cond);
 }
 
-bool LoopRanges::grows(const Stmt *body, const VarSymbol *var) {
+bool LoopRanges::grows(const Stmt *body, const VarSymbol *var) const {
   auto isVar = [&](const Expr *e) {
     auto *name = dyn_cast_or_null<NameExpr>(OverflowHelpers::stripCasts(e));
 
@@ -105,31 +105,37 @@ bool LoopRanges::grows(const Stmt *body, const VarSymbol *var) {
   return false;
 }
 
-bool LoopRanges::identicalNum(const Num &a, const Num &b) {
+bool LoopRanges::identicalNum(const Num &a, const Num &b) const {
   return (a.lo == b.lo || (std::isnan(a.lo) && std::isnan(b.lo))) &&
          (a.hi == b.hi || (std::isnan(a.hi) && std::isnan(b.hi))) && a.loOrigin == b.loOrigin &&
          a.hiOrigin == b.hiOrigin && a.loWhy == b.loWhy && a.hiWhy == b.hiWhy && a.base == b.base &&
          a.offLo == b.offLo && a.offHi == b.offHi && a.away == b.away;
 }
 
-bool LoopRanges::identicalVal(const Val &a, const Val &b) {
-  if (!LoopRanges::identicalNum(a.num, b.num) || !LoopRanges::identicalNum(a.len, b.len)) {
-    return false;
-  }
-  if (a.elem == b.elem) {
-    return true;
+bool LoopRanges::identicalVal(const Val &a, const Val &b) const {
+  const Val *left = &a;
+  const Val *right = &b;
+  while (this->identicalNum(left->num, right->num) && this->identicalNum(left->len, right->len)) {
+    if (left->elem == right->elem) {
+      return true;
+    }
+    if (left->elem == nullptr || right->elem == nullptr) {
+      return false;
+    }
+    left = left->elem.get();
+    right = right->elem.get();
   }
 
-  return a.elem && b.elem && LoopRanges::identicalVal(*a.elem, *b.elem);
+  return false;
 }
 
-bool LoopRanges::identicalState(const State &a, const State &b) {
+bool LoopRanges::identicalState(const State &a, const State &b) const {
   if (a.dead != b.dead || a.vars.size() != b.vars.size()) {
     return false;
   }
   for (const auto &entry : a.vars) {
     auto found = b.vars.find(entry.first);
-    if (found == b.vars.end() || !LoopRanges::identicalVal(entry.second, found->second)) {
+    if (found == b.vars.end() || !this->identicalVal(entry.second, found->second)) {
       return false;
     }
   }
@@ -137,52 +143,68 @@ bool LoopRanges::identicalState(const State &a, const State &b) {
   return true;
 }
 
-bool LoopRanges::awaitsIn(const Stmt *stmt) {
-  if (!stmt) {
-    return false;
-  }
-  switch (stmt->kind()) {
-  case Stmt::Kind::ForOf:
-    if (cast<ForOfStmt>(stmt)->isAwait) {
+bool LoopRanges::awaitsIn(const Stmt *stmt) const {
+  auto pending = std::vector<const Stmt *>{stmt};
+  while (!pending.empty()) {
+    const Stmt *next = pending.back();
+    pending.pop_back();
+    if (next == nullptr) {
+      continue;
+    }
+    const auto *forOf = dyn_cast<ForOfStmt>(next);
+    if (forOf != nullptr && forOf->isAwait) {
       return true;
     }
-    return LoopRanges::awaitsIn(cast<ForOfStmt>(stmt)->body);
+    auto parts = this->awaitParts(next);
+    pending.insert(pending.end(), parts.rbegin(), parts.rend());
+  }
+
+  return false;
+}
+
+std::vector<const Stmt *> LoopRanges::awaitParts(const Stmt *stmt) const {
+  switch (stmt->kind()) {
+  case Stmt::Kind::ForOf:
+    return {cast<ForOfStmt>(stmt)->body};
   case Stmt::Kind::While:
-    return LoopRanges::awaitsIn(cast<WhileStmt>(stmt)->body);
+    return {cast<WhileStmt>(stmt)->body};
   case Stmt::Kind::DoWhile:
-    return LoopRanges::awaitsIn(cast<DoWhileStmt>(stmt)->body);
+    return {cast<DoWhileStmt>(stmt)->body};
   case Stmt::Kind::For:
-    return LoopRanges::awaitsIn(cast<ForStmt>(stmt)->body);
-  case Stmt::Kind::Block:
-    return llvm::any_of(cast<BlockStmt>(stmt)->body, awaitsIn);
-  case Stmt::Kind::If:
-    return LoopRanges::awaitsIn(cast<IfStmt>(stmt)->thenStmt) ||
-           LoopRanges::awaitsIn(cast<IfStmt>(stmt)->elseStmt);
+    return {cast<ForStmt>(stmt)->body};
+  case Stmt::Kind::Block: {
+    const auto &body = cast<BlockStmt>(stmt)->body;
+    return std::vector<const Stmt *>(body.begin(), body.end());
+  }
+  case Stmt::Kind::If: {
+    const auto *branch = cast<IfStmt>(stmt);
+    return {branch->thenStmt, branch->elseStmt};
+  }
   case Stmt::Kind::Labeled:
-    return LoopRanges::awaitsIn(cast<LabeledStmt>(stmt)->body);
-  case Stmt::Kind::Switch:
+    return {cast<LabeledStmt>(stmt)->body};
+  case Stmt::Kind::Switch: {
+    auto parts = std::vector<const Stmt *>();
     for (const SwitchCase &c : cast<SwitchStmt>(stmt)->cases) {
-      if (llvm::any_of(c.body, awaitsIn)) {
-        return true;
-      }
+      parts.insert(parts.end(), c.body.begin(), c.body.end());
     }
-    return false;
+    return parts;
+  }
   default:
-    return false;
+    return {};
   }
 }
 
-bool LoopRanges::waitsOrYields(const Stmt *stmt) {
+bool LoopRanges::waitsOrYields(const Stmt *stmt) const {
   for (const Expr *e : AstWalker::exprsIn(stmt, false)) {
     if (isa<AwaitExpr, YieldExpr>(e)) {
       return true;
     }
   }
 
-  return LoopRanges::awaitsIn(stmt);
+  return this->awaitsIn(stmt);
 }
 
-bool LoopRanges::readsInput(const Expr *cond) {
+bool LoopRanges::readsInput(const Expr *cond) const {
   if (cond == nullptr) {
     return false;
   }
@@ -191,10 +213,10 @@ bool LoopRanges::readsInput(const Expr *cond) {
     if (call == nullptr) {
       continue;
     }
-    bool input = call->builtin() == Builtin::ReadLine ||
-                 BuiltinGroups::isFsBuiltin(call->builtin()) ||
-                 BuiltinGroups::isChildBuiltin(call->builtin());
-    if (input) {
+    bool isInput = call->builtin() == Builtin::ReadLine ||
+                   BuiltinGroups::isFsBuiltin(call->builtin()) ||
+                   BuiltinGroups::isChildBuiltin(call->builtin());
+    if (isInput) {
       return true;
     }
   }
@@ -202,7 +224,7 @@ bool LoopRanges::readsInput(const Expr *cond) {
   return false;
 }
 
-std::optional<double> LoopRanges::counterStep(const Expr *arg, const VarSymbol *param) {
+std::optional<double> LoopRanges::counterStep(const Expr *arg, const VarSymbol *param) const {
   auto *bin = dyn_cast<BinaryExpr>(OverflowHelpers::stripCasts(arg));
   if (!bin || (bin->op != BinaryOp::Add && bin->op != BinaryOp::Sub)) {
     return std::nullopt;
@@ -231,7 +253,7 @@ std::optional<double> LoopRanges::counterStep(const Expr *arg, const VarSymbol *
   return std::nullopt;
 }
 
-bool LoopRanges::limitedTowards(const Num &n, double step) {
+bool LoopRanges::limitedTowards(const Num &n, double step) const {
   if (n.empty()) {
     return false;
   }
@@ -240,15 +262,17 @@ bool LoopRanges::limitedTowards(const Num &n, double step) {
                   : n.hiOrigin == Origin::Proven && n.hi < kLengthMax;
 }
 
-bool LoopRanges::freshBase(const Val &v, uint64_t before) {
-  if (v.num.base > before || v.len.base > before) {
-    return true;
+bool LoopRanges::freshBase(const Val &v, uint64_t before) const {
+  for (const Val *link = &v; link != nullptr; link = link->elem.get()) {
+    if (link->num.base > before || link->len.base > before) {
+      return true;
+    }
   }
 
-  return v.elem && LoopRanges::freshBase(*v.elem, before);
+  return false;
 }
 
-std::optional<std::pair<double, double>> LoopRanges::stepOf(const Num &end, uint64_t base) {
+std::optional<std::pair<double, double>> LoopRanges::stepOf(const Num &end, uint64_t base) const {
   if (end.empty() || end.base != base || !base) {
     return std::nullopt;
   }
@@ -263,7 +287,7 @@ void LoopRanges::execLoop(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labe
   spec.labels.assign(labels.begin(), labels.end());
   if (auto *s = dyn_cast<WhileStmt>(stmt)) {
     spec.cond = s->cond;
-    spec.openEnded = LoopRanges::openEnded(s->cond, s->body);
+    spec.openEnded = this->openEnded(s->cond, s->body);
     spec.simple = !OverflowHelpers::containsLoop(s->body);
     spec.body = [this, s](State &in) { this->check.executor().exec(s->body, in); };
     runLoop(spec, st);
@@ -271,7 +295,7 @@ void LoopRanges::execLoop(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labe
   }
   if (auto *s = dyn_cast<DoWhileStmt>(stmt)) {
     spec.condAfter = s->cond;
-    spec.openEnded = LoopRanges::openEnded(s->cond, s->body);
+    spec.openEnded = this->openEnded(s->cond, s->body);
     spec.simple = !OverflowHelpers::containsLoop(s->body);
     spec.body = [this, s](State &in) { this->check.executor().exec(s->body, in); };
     runLoop(spec, st);
@@ -281,7 +305,7 @@ void LoopRanges::execLoop(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labe
     this->check.executor().exec(s->init, st);
     spec.cond = s->cond;
     spec.step = s->step;
-    spec.openEnded = LoopRanges::openEnded(s->cond, s->body);
+    spec.openEnded = this->openEnded(s->cond, s->body);
     spec.simple = !OverflowHelpers::containsLoop(s->body);
     spec.body = [this, s](State &in) { this->check.executor().exec(s->body, in); };
     runLoop(spec, st);
@@ -296,7 +320,7 @@ void LoopRanges::execLoop(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labe
   Val element = this->check.overflowWarnings().trusted(bound);
   if (type && type->isArray()) {
     element = this->check.slots().elementsOf(s->iterable, iterable, type);
-    if (!iterated || !LoopRanges::grows(s->body, iterated)) {
+    if (!iterated || !this->grows(s->body, iterated)) {
       spec.passes = ValueRange::add(iterable.len, ValueRange::exactly(1));
     }
   } else if (type && type->isString()) {
@@ -399,7 +423,7 @@ Num LoopRanges::passCount(const OverflowCheck::LoopSpec &spec, const State &entr
     }
     const Num &start = entryVar.second.num;
     if (std::optional<std::pair<double, double>> step =
-            LoopRanges::stepOf(e->second.num, f->second.num.base);
+            this->stepOf(e->second.num, f->second.num.base);
         step && step->first == step->second && step->first != 0 &&
         ValueRange::isIntegerType(var->type) && !start.empty()) {
       double s = step->first;
@@ -413,7 +437,7 @@ Num LoopRanges::passCount(const OverflowCheck::LoopSpec &spec, const State &entr
       }
     }
     if (std::optional<std::pair<double, double>> step =
-            LoopRanges::stepOf(e->second.len, f->second.len.base);
+            this->stepOf(e->second.len, f->second.len.base);
         step && step->second < 0 && !entryVar.second.len.empty()) {
       consider(entryVar.second.len.hi / -step->second + 1, entryVar.second.len.high());
     }
@@ -472,7 +496,7 @@ void LoopRanges::findRecursions() {
       std::optional<double> step;
       for (const CallExpr *call : recursion.self) {
         std::optional<double> s =
-            i < call->args.size() ? LoopRanges::counterStep(call->args[i], param) : std::nullopt;
+            i < call->args.size() ? this->counterStep(call->args[i], param) : std::nullopt;
         if (!s || (step && (*s < 0) != (*step < 0))) {
           step.reset();
           break;
@@ -495,33 +519,33 @@ void LoopRanges::noteCall(const CallExpr *call, const FunctionDecl *target,
     return;
   }
   OverflowCheck::CallArgs &known = this->check.recursiveCalls[call];
-  bool first = !known.target;
+  bool isFirst = !known.target;
   known.target = target;
   known.args.resize(args.size());
   for (size_t i = 0; i < args.size(); ++i) {
-    known.args[i] = first ? args[i].num : ValueRange::join(known.args[i], args[i].num);
+    known.args[i] = isFirst ? args[i].num : ValueRange::join(known.args[i], args[i].num);
   }
 }
 
 std::vector<Diagnostic> LoopRanges::findLongRecursions() {
   auto hints = std::vector<Diagnostic>();
   for (const auto &[fn, recursion] : this->check.recursions) {
-    bool stops = recursion.counter >= 0;
-    bool seen = true;
+    bool isStopping = recursion.counter >= 0;
+    bool isSeen = true;
     for (const CallExpr *call : recursion.self) {
       auto found = this->check.recursiveCalls.find(call);
       if (found == this->check.recursiveCalls.end()) {
-        seen = false;
+        isSeen = false;
         continue;
       }
-      stops = stops && size_t(recursion.counter) < found->second.args.size() &&
-              LoopRanges::limitedTowards(found->second.args[recursion.counter], recursion.step);
+      isStopping = isStopping && size_t(recursion.counter) < found->second.args.size() &&
+                   this->limitedTowards(found->second.args[recursion.counter], recursion.step);
     }
-    if (!seen) {
+    if (!isSeen) {
       continue;
     }
     std::string name = fn->name.empty() ? std::string("this function") : "'" + fn->name.str() + "'";
-    if (!stops) {
+    if (!isStopping) {
       hints.push_back({
           .kind = llvm::SourceMgr::DK_Remark,
           .loc = recursion.self.front()->loc(),
@@ -533,7 +557,7 @@ std::vector<Diagnostic> LoopRanges::findLongRecursions() {
     for (const auto &[call, known] : this->check.recursiveCalls) {
       if (known.target != fn || llvm::is_contained(recursion.self, call) ||
           (size_t(recursion.counter) < known.args.size() &&
-           LoopRanges::limitedTowards(known.args[recursion.counter], -recursion.step))) {
+           this->limitedTowards(known.args[recursion.counter], -recursion.step))) {
         continue;
       }
       hints.push_back({
@@ -551,7 +575,7 @@ std::vector<Diagnostic> LoopRanges::findLongRecursions() {
 std::vector<Diagnostic> LoopRanges::findLongLoops() {
   auto hints = this->findLongRecursions();
   for (const auto &[stmt, loop] : this->check.loops) {
-    if (loop.bounded || LoopRanges::waitsOrYields(stmt)) {
+    if (loop.bounded || this->waitsOrYields(stmt)) {
       continue;
     }
     const Expr *cond = nullptr;
@@ -562,7 +586,7 @@ std::vector<Diagnostic> LoopRanges::findLongLoops() {
     } else if (auto *forLoop = dyn_cast<ForStmt>(stmt)) {
       cond = forLoop->cond;
     }
-    if (LoopRanges::readsInput(cond)) {
+    if (this->readsInput(cond)) {
       continue;
     }
     std::string data =
@@ -596,7 +620,7 @@ std::vector<uint64_t> LoopRanges::contextOf() const {
 
 bool LoopRanges::freshBases(const State &state, uint64_t before) const {
   for (const auto &entry : state.vars) {
-    if (LoopRanges::freshBase(entry.second, before)) {
+    if (this->freshBase(entry.second, before)) {
       return true;
     }
   }
@@ -619,8 +643,8 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
   for (const RememberedLoop &loop : known) {
     if (loop.context != context || this->check.work + loop.work > OverflowCheck::kWorkBudget ||
         loop.source.has_value() != spec.source.has_value() ||
-        (loop.source && !LoopRanges::identicalVal(*loop.source, *spec.source)) ||
-        !LoopRanges::identicalState(loop.entry, st)) {
+        (loop.source && !this->identicalVal(*loop.source, *spec.source)) ||
+        !this->identicalState(loop.entry, st)) {
       continue;
     }
     for (size_t i = 0; i < loop.jumps.size(); ++i) {
@@ -653,12 +677,12 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
   uint64_t basesBefore = this->check.bases_;
   solveLoop(spec, st);
   OverflowCheck::Frame &after = this->check.frames.back();
-  bool fresh = freshBases(st, basesBefore) || freshBases(after.returned, basesBefore) ||
-               LoopRanges::freshBase(after.result, basesBefore);
+  bool isFresh = freshBases(st, basesBefore) || freshBases(after.returned, basesBefore) ||
+                 this->freshBase(after.result, basesBefore);
   for (size_t i = 0; i < saved.size(); ++i) {
     OverflowCheck::Target &target = this->check.targets[floor + i];
-    fresh =
-        fresh || freshBases(target.breaks, basesBefore) || freshBases(target.conts, basesBefore);
+    isFresh =
+        isFresh || freshBases(target.breaks, basesBefore) || freshBases(target.conts, basesBefore);
     loop.jumps.push_back({target.breaks, target.conts});
     target.breaks = ValueRange::join(saved[i].first, target.breaks);
     target.conts = ValueRange::join(saved[i].second, target.conts);
@@ -668,7 +692,7 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
   after.returned = ValueRange::join(savedReturned, after.returned);
   after.result = ValueRange::join(savedResult, after.result);
   loop.work = this->check.work - workBefore;
-  if (fresh || this->check.overBudget()) {
+  if (isFresh || this->check.overBudget()) {
     return;
   }
   loop.exit = st;
@@ -686,18 +710,18 @@ void LoopRanges::solveLoop(const OverflowCheck::LoopSpec &spec, State &st) {
 
   State head = entry;
   State lastHead, lastEnd = ValueRange::deadState();
-  bool comesBack = false;
+  bool isComingBack = false;
   int rounds = this->check.overBudget() ? 2 : 8;
   for (int k = 0; k < rounds; ++k) {
-    bool last = k + 1 == rounds;
+    bool isLast = k + 1 == rounds;
     State from = rebased(head, bases);
     State exits = ValueRange::deadState();
     State end = onePass(spec, from, exits);
     if (end.dead) {
       break;
     }
-    comesBack = true;
-    bool moved = false;
+    isComingBack = true;
+    bool isMoved = false;
     State next = ValueRange::join(entry, end);
     for (auto &headVar : head.vars) {
       const VarSymbol *var = headVar.first;
@@ -711,7 +735,7 @@ void LoopRanges::solveLoop(const OverflowCheck::LoopSpec &spec, State &st) {
         if (!ValueRange::isBottom(n)) {
           h = n;
           h.num.base = h.len.base = 0;
-          moved = true;
+          isMoved = true;
         }
         continue;
       }
@@ -722,7 +746,7 @@ void LoopRanges::solveLoop(const OverflowCheck::LoopSpec &spec, State &st) {
         static constexpr double kSteps[] = {
             0.0, 255.0, 65535.0, 16777215.0, 2147483647.0, 4294967295.0, 9007199254740992.0};
         auto up = [&](double v, double limit) {
-          if (!last) {
+          if (!isLast) {
             for (double t : kSteps) {
               double at = t == 0 ? -1 : t;
               if (v <= at && at < limit) {
@@ -734,7 +758,7 @@ void LoopRanges::solveLoop(const OverflowCheck::LoopSpec &spec, State &st) {
           return limit;
         };
         auto down = [&](double v, double limit) {
-          if (!last) {
+          if (!isLast) {
             for (double t : kSteps) {
               double at = t == 0 ? 0 : -t - 1;
               if (v >= at && at > limit) {
@@ -747,11 +771,11 @@ void LoopRanges::solveLoop(const OverflowCheck::LoopSpec &spec, State &st) {
         };
         if (got.lo < to.lo && to.lo > l.lo) {
           to.setLow({std::max(down(got.lo, l.lo), l.lo), got.loOrigin, got.loWhy});
-          moved = true;
+          isMoved = true;
         }
         if (got.hi > to.hi && to.hi < l.hi) {
           to.setHigh({std::min(up(got.hi, l.hi), l.hi), got.hiOrigin, got.hiWhy});
-          moved = true;
+          isMoved = true;
         }
         to.base = 0;
       };
@@ -762,17 +786,17 @@ void LoopRanges::solveLoop(const OverflowCheck::LoopSpec &spec, State &st) {
       if (h.elem && n.elem && !ValueRange::sameVal(*h.elem, ValueRange::join(*h.elem, *n.elem))) {
         h.elem = ValueRange::share(
             OverflowHelpers::widenVal(*h.elem, ValueRange::join(*h.elem, *n.elem), element));
-        moved = true;
+        isMoved = true;
       } else if (h.elem && !n.elem) {
         h.elem = nullptr;
-        moved = true;
+        isMoved = true;
       }
     }
-    if (!moved) {
+    if (!isMoved) {
       break;
     }
   }
-  if (!comesBack) {
+  if (!isComingBack) {
     --this->check.quiet;
     State exits = ValueRange::deadState();
     onePass(spec, entry, exits);
@@ -812,11 +836,11 @@ void LoopRanges::solveLoop(const OverflowCheck::LoopSpec &spec, State &st) {
     }
   }
 
-  auto limit = [&](const Bound &moving, double at, bool unbounded, bool additive = false) {
+  auto limit = [&](const Bound &moving, double at, bool unbounded, bool isAdditive = false) {
     if (moving.origin == Origin::Trusted || moving.origin == Origin::Input) {
       return Bound{at, moving.origin, moving.why};
     }
-    if (unbounded && additive && !spec.openEnded) {
+    if (unbounded && isAdditive && !spec.openEnded) {
       return Bound{at, Origin::Trusted, nullptr};
     }
 
@@ -829,8 +853,8 @@ void LoopRanges::solveLoop(const OverflowCheck::LoopSpec &spec, State &st) {
       return std::nullopt;
     }
 
-    return length ? LoopRanges::stepOf(end->second.len, from->second.len.base)
-                  : LoopRanges::stepOf(end->second.num, from->second.num.base);
+    return length ? this->stepOf(end->second.len, from->second.len.base)
+                  : this->stepOf(end->second.num, from->second.num.base);
   };
 
   Num passes = passCount(spec, entry, head, lastHead, lastEnd);
@@ -847,7 +871,7 @@ void LoopRanges::solveLoop(const OverflowCheck::LoopSpec &spec, State &st) {
   }
   noteLoop(spec, passes);
   State unrolledExits = ValueRange::deadState();
-  bool unrolled = false;
+  bool isUnrolled = false;
   if (!passes.empty() && passes.hi <= kUnrollPasses && spec.simple && !this->check.overBudget()) {
     State at = entry;
     State all = entry;
@@ -857,7 +881,7 @@ void LoopRanges::solveLoop(const OverflowCheck::LoopSpec &spec, State &st) {
       unrolledExits = ValueRange::join(unrolledExits, exits);
       all = ValueRange::join(all, at);
     }
-    unrolled = at.dead;
+    isUnrolled = at.dead;
     for (auto &headVar : head.vars) {
       auto found = all.vars.find(headVar.first);
       if (found == all.vars.end()) {
@@ -886,7 +910,7 @@ void LoopRanges::solveLoop(const OverflowCheck::LoopSpec &spec, State &st) {
       }
       Val &h = headVar.second;
       const Val &start = entry.vars.lookup(var);
-      bool floating = ValueRange::isFloatType(var->type);
+      bool isFloating = ValueRange::isFloatType(var->type);
       auto grow = [&](Num &n, const Num &startNum, const Num &endNum,
                       std::optional<std::pair<double, double>> step, Limits l) {
         if (n.empty() || startNum.empty() || endNum.empty()) {
@@ -904,7 +928,7 @@ void LoopRanges::solveLoop(const OverflowCheck::LoopSpec &spec, State &st) {
             }
           } else if (step && step->second > 0 &&
                      ((step->second <= 1 && l.hi >= kIntMax) ||
-                      (floating && step->second <= kIntMax))) {
+                      (isFloating && step->second <= kIntMax))) {
             n.setHigh(Bound{l.hi, Origin::Trusted, nullptr});
           } else {
             n.setHigh(limit(endNum.high(), l.hi, passes.empty(), step && step->second > 0));
@@ -922,7 +946,7 @@ void LoopRanges::solveLoop(const OverflowCheck::LoopSpec &spec, State &st) {
             }
           } else if (step && step->first < 0 &&
                      ((step->first >= -1 && l.lo <= kIntMin) ||
-                      (floating && step->first >= -kIntMax))) {
+                      (isFloating && step->first >= -kIntMax))) {
             n.setLow(Bound{l.lo, Origin::Trusted, nullptr});
           } else {
             n.setLow(limit(endNum.low(), l.lo, passes.empty(), step && step->first < 0));
@@ -974,7 +998,7 @@ void LoopRanges::solveLoop(const OverflowCheck::LoopSpec &spec, State &st) {
 
   State exits = ValueRange::deadState();
   onePass(spec, head, exits);
-  st = unrolled ? unrolledExits : exits;
+  st = isUnrolled ? unrolledExits : exits;
 }
 
 }

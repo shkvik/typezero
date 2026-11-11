@@ -29,8 +29,8 @@ void WideningRelations::visitNarrowing(const VisitNarrowing &visit, std::vector<
   if (from == to || depth > WideningRelations::maxDepth) {
     return;
   }
-  bool firstVisit = seen.insert({from, to}).second;
-  if (!firstVisit) {
+  auto [_, isFirstVisit] = seen.insert({from, to});
+  if (!isFirstVisit) {
     return;
   }
   if (from->isArray() && to->isArray()) {
@@ -54,8 +54,9 @@ void WideningRelations::visitNarrowing(const VisitNarrowing &visit, std::vector<
     }
     return;
   }
-  bool objects = from->isObject() && to->isObject() && !from->isAnyObject() && !to->isAnyObject();
-  if (objects) {
+  bool hasObjects =
+      from->isObject() && to->isObject() && !from->isAnyObject() && !to->isAnyObject();
+  if (hasObjects) {
     WideningRelations::pushFieldNarrowings(from, to, depth, steps);
   }
 }
@@ -106,11 +107,11 @@ bool WideningRelations::widensWrites(const Type *from, const Type *to) {
   if (bareFrom == bareTo || GenericWidening::widens(bareFrom, bareTo)) {
     return false;
   }
-  bool arrays = bareFrom->isArray() && bareTo->isArray();
-  bool objects = bareFrom->isObject() && bareTo->isObject() && !bareFrom->isAnyObject() &&
-                 !bareTo->isAnyObject();
-  bool unionToObject = bareFrom->isUnion() && bareTo->isObject();
-  if (!arrays && !objects && !unionToObject) {
+  bool hasArrays = bareFrom->isArray() && bareTo->isArray();
+  bool hasObjects = bareFrom->isObject() && bareTo->isObject() && !bareFrom->isAnyObject() &&
+                    !bareTo->isAnyObject();
+  bool isUnionToObject = bareFrom->isUnion() && bareTo->isObject();
+  if (!hasArrays && !hasObjects && !isUnionToObject) {
     return false;
   }
   WideningStore &widenings = this->state.getWideningStore();
@@ -118,10 +119,10 @@ bool WideningRelations::widensWrites(const Type *from, const Type *to) {
     return widenings.isNarrowingWidening(bareFrom, bareTo);
   }
   std::vector<NarrowedPart> narrowings = WideningRelations::narrowingsOf(bareFrom, bareTo);
-  bool narrowed = !narrowings.empty();
-  widenings.rememberWidening(bareFrom, bareTo, narrowed);
+  bool isNarrowed = !narrowings.empty();
+  widenings.rememberWidening(bareFrom, bareTo, isNarrowed);
 
-  return narrowed;
+  return isNarrowed;
 }
 
 bool WideningRelations::sameReference(const Type *from, const Type *to) {
@@ -173,8 +174,8 @@ ReferenceStep WideningRelations::sameStep(const Type *from, const Type *to) {
   while (own != wide && (wide->isOptional() || (own->isArray() && wide->isArray()))) {
     if (wide->isOptional()) {
       const Type *inner = wide->inner();
-      bool reference = inner->isObject() || inner->isArray();
-      if (!reference) {
+      bool isReference = inner->isObject() || inner->isArray();
+      if (!isReference) {
         return ReferenceStep{false, {}};
       }
       own = own->nonOptional();
@@ -212,8 +213,9 @@ ReferenceStep WideningRelations::membersStep(const Type *own, const Type *wide) 
 }
 
 ReferenceStep WideningRelations::objectsStep(const Type *from, const Type *to) {
-  bool objects = from->isObject() && to->isObject() && !from->isAnyObject() && !to->isAnyObject();
-  if (!objects) {
+  bool hasObjects =
+      from->isObject() && to->isObject() && !from->isAnyObject() && !to->isAnyObject();
+  if (!hasObjects) {
     return ReferenceStep{false, {}};
   }
   if (from->isSubtypeOf(to) || WideningRelations::sameShapeFields(from, to)) {
@@ -224,11 +226,11 @@ ReferenceStep WideningRelations::objectsStep(const Type *from, const Type *to) {
 }
 
 bool WideningRelations::sameShapeFields(const Type *from, const Type *to) {
-  bool otherShape = from->isClass() || to->isClass() || from->isTuple() != to->isTuple() ||
-                    from->fields().size() != to->fields().size() || !from->overloads().empty() ||
-                    !to->overloads().empty() || from->isBytes() || to->isBytes() ||
-                    from->isRuntimeObject() || to->isRuntimeObject();
-  if (otherShape) {
+  bool isOtherShape = from->isClass() || to->isClass() || from->isTuple() != to->isTuple() ||
+                      from->fields().size() != to->fields().size() || !from->overloads().empty() ||
+                      !to->overloads().empty() || from->isBytes() || to->isBytes() ||
+                      from->isRuntimeObject() || to->isRuntimeObject();
+  if (isOtherShape) {
     return false;
   }
   auto sameField = [&](const Field &field) {

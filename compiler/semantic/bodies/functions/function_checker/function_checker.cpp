@@ -71,8 +71,8 @@ FunctionChecker::ResultTopLevelGenerics FunctionChecker::topLevelGeneric(const F
 
 FunctionChecker::ResultDecoratorAllowed FunctionChecker::paramDecorators(const FunctionDecl *fn,
                                                                          const Param &param) {
-  bool classMethod = fn->cls() && !fn->cls()->literal();
-  if (!param.decorators.empty() && !classMethod && !fn->isInstance) {
+  bool isClassMethod = fn->cls() && !fn->cls()->literal();
+  if (!param.decorators.empty() && !isClassMethod && !fn->isInstance) {
     std::string message = ErrorTextFunctionDecl::decorator();
 
     return err(FunctionCheckerParamDecoratorsError{
@@ -107,8 +107,8 @@ FunctionChecker::ResultThisParamAllowed FunctionChecker::thisParam(const Functio
 
 FunctionChecker::ResultRestParamIsArray FunctionChecker::restType(const Type *type,
                                                                   const Param &param) {
-  bool list = type->isArray() || type->isListParam() || type->isTuple() || type->isError();
-  if (!list) {
+  bool isList = type->isArray() || type->isListParam() || type->isTuple() || type->isError();
+  if (!isList) {
     std::string message = ErrorTextFunctionDecl::restArray(param.name);
 
     return err(FunctionCheckerRestTypeError{
@@ -136,8 +136,8 @@ FunctionChecker::ResultParamOrderIsKept FunctionChecker::requiredOrder(const Par
 
 FunctionChecker::ResultParamTypeIsKnown FunctionChecker::paramTypeKnown(const Param &param) {
   const Expr *value = param.defaultValue();
-  bool literal = value != nullptr && SharedHelpers::literalType(value) != nullptr;
-  if (param.type || literal || param.property) {
+  bool isLiteral = value != nullptr && SharedHelpers::literalType(value) != nullptr;
+  if (param.type || isLiteral || param.property) {
     return ok(&param);
   }
   if (value != nullptr) {
@@ -162,27 +162,27 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
   sym->name = fn->name;
   sym->loc = fn->loc();
   sym->decl = fn;
-  bool generic = this->isGenericDeclaration(fn);
-  bool classParams = fn->cls() != nullptr && !fn->isStatic() && !fn->cls()->typeParams.empty();
-  if (generic || classParams) {
+  bool isGeneric = this->isGenericDeclaration(fn);
+  bool isClassParams = fn->cls() != nullptr && !fn->isStatic() && !fn->cls()->typeParams.empty();
+  if (isGeneric || isClassParams) {
     this->state.getScopeStack().openTypeScope();
   }
-  if (classParams) {
+  if (isClassParams) {
     this->genericClassChecker->bindClassTypeParams(fn->cls());
   }
-  if (generic) {
+  if (isGeneric) {
     this->declareFunctionTypeParams(fn, sym, var);
   }
   std::optional<std::vector<const Type *>> hook =
       fn->cls() != nullptr ? this->chunkTypes->streamHookParams(fn) : std::nullopt;
   this->padHookParams(fn, hook);
-  bool afterOptional = false;
+  bool isAfterOptional = false;
   for (size_t i = 0; i < fn->params.size(); ++i) {
     const Type *hooked = hook.has_value() && i < hook->size() ? (*hook)[i] : nullptr;
-    this->declareFunctionParam(fn, sym, i, hooked, afterOptional);
+    this->declareFunctionParam(fn, sym, i, hooked, isAfterOptional);
   }
   this->declareFunctionReturn(fn, sym);
-  if (generic || classParams) {
+  if (isGeneric || isClassParams) {
     this->state.getScopeStack().closeTypeScope();
   }
   this->argListChecker->expandArgumentList(fn, sym);
@@ -267,9 +267,9 @@ void FunctionChecker::declareFunctionParam(FunctionDecl *fn, FuncSymbol *sym, si
     sym->params.push_back(param.declaredType);
     return;
   }
-  bool mayOmit = param.optional() || param.defaultValue();
-  sym->params.push_back(mayOmit ? Type::optional(type) : type);
-  if (!mayOmit) {
+  bool isMayOmit = param.optional() || param.defaultValue();
+  sym->params.push_back(isMayOmit ? Type::optional(type) : type);
+  if (!isMayOmit) {
     ResultParamOrderIsKept order = FunctionChecker::requiredOrder(param, afterOptional);
     if (order.isErr()) {
       this->state.getDiagnostics().error(param.loc, order.error().message);
@@ -401,9 +401,9 @@ FunctionChecker::defaultOrder(const FunctionDecl *fn, size_t i, const llvm::Stri
 
 FunctionChecker::ResultEveryPathReturns FunctionChecker::returnsEverywhere(const FunctionDecl *fn,
                                                                            const Type *ret) {
-  bool missing = ret && !ret->isVoid() && !ret->isError() && !ret->isOptional() &&
-                 !ret->isUnknown() && !ReturnChecker::alwaysReturns(fn->body);
-  if (missing) {
+  bool isMissing = ret && !ret->isVoid() && !ret->isError() && !ret->isOptional() &&
+                   !ret->isUnknown() && !ReturnChecker::alwaysReturns(fn->body);
+  if (isMissing) {
     std::string label = ErrorTextFunctionName::label(fn->name);
     std::string message = ErrorTextFunctionBody::noReturn(label, ret->name());
 
@@ -416,13 +416,13 @@ FunctionChecker::ResultEveryPathReturns FunctionChecker::returnsEverywhere(const
   return ok(fn);
 }
 
-void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
+void FunctionChecker::walkFunctionBody(FunctionDecl *fn) {
   if (fn->intrinsic()) {
     fn->checked = true;
     return;
   }
   if (fn->external()) {
-    return this->tzModulesChecker->checkExternal(fn);
+    return this->tzModulesChecker->walkExternal(fn);
   }
   FuncSymbol *sym = fn->sym;
   fn->checked = true;
@@ -430,12 +430,12 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   FuncSymbol *outer = functions.getCurrentFunction();
   functions.rememberCurrentFunction(sym);
   functions.enterFunction(fn);
-  unsigned errors = this->state.getDiagnostics().errorCount();
+  this->state.getDiagnostics().pushList(DiagnosticRoute::PARENT);
   ClassContext &classContext = this->state.getClassContext();
   classContext.enterClass(fn->isClosure() ? classContext.getCurrentClass() : fn->cls());
   this->state.getScopeStack().openScope();
   this->bindBodyTypeParams(fn);
-  bool initializer = fn->takesThis() && this->entersInitializer(fn);
+  bool isInitializer = fn->takesThis() && this->entersInitializer(fn);
   for (size_t i = 0; i < fn->params.size(); ++i) {
     this->declareBodyParam(fn, i);
   }
@@ -443,7 +443,7 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   this->scopes->closeScope();
   functions.leaveFunction();
   functions.rememberCurrentFunction(outer);
-  if (initializer) {
+  if (isInitializer) {
     classContext.leaveInitializer();
   }
   classContext.leaveClass();
@@ -452,11 +452,14 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   if (returns.isErr()) {
     this->state.getDiagnostics().error(fn->loc(), returns.error().message);
   }
-  bool failed = this->state.getDiagnostics().errorCount() > errors;
-  if (sym->isGeneric() && failed) {
+  auto bodyDiagnostics = this->state.getDiagnostics().popList();
+  DiagnosticRoute destination = this->state.getDiagnostics().getCurrentDestination();
+  bool isReachingProgram = destination == DiagnosticRoute::PROGRAM;
+  bool hasFailed = Diagnostics::hasErrors(bodyDiagnostics) && isReachingProgram;
+  if (sym->isGeneric() && hasFailed) {
     this->state.getGenericStore().markBrokenGeneric(sym);
   }
-  if (fn->cls() != nullptr && fn->cls()->isGeneric() && failed) {
+  if (fn->cls() != nullptr && fn->cls()->isGeneric() && hasFailed) {
     this->state.getClassStore().markBrokenClass(fn->cls());
   }
 }
@@ -484,13 +487,13 @@ bool FunctionChecker::entersInitializer(FunctionDecl *fn) {
   }
   this->state.getClassContext().enterInitializer(fn, self);
   this->state.getFlowState().forgetSetFields();
-  bool derived = fn->cls()->parent != nullptr;
+  bool isDerived = fn->cls()->parent != nullptr;
   for (const ClassField &f : fn->cls()->fields) {
-    if (FunctionChecker::isPresetField(fn, f, derived)) {
+    if (FunctionChecker::isPresetField(fn, f, isDerived)) {
       this->state.getFlowState().addSetField(f.name);
     }
   }
-  if (derived && fn->isConstructor()) {
+  if (isDerived && fn->isConstructor()) {
     this->state.getFlowState().markBeforeSuper();
   } else {
     this->state.getFlowState().markSuperCalled();
@@ -506,9 +509,9 @@ bool FunctionChecker::isPresetField(const FunctionDecl *fn, const ClassField &f,
   if (f.isStatic()) {
     return false;
   }
-  bool ownInit = fn->isConstructor() && !derived && f.init && !f.method();
+  bool isOwnInit = fn->isConstructor() && !derived && f.init && !f.method();
 
-  return f.optional() || ownInit || (!fn->isConstructor() && f.redeclared);
+  return f.optional() || isOwnInit || (!fn->isConstructor() && f.redeclared);
 }
 
 void FunctionChecker::walkRootSupers(FunctionDecl *fn) {
@@ -540,8 +543,8 @@ CallExpr *FunctionChecker::superCallOf(Stmt *stmt) {
 void FunctionChecker::declareBodyParam(FunctionDecl *fn, size_t i) {
   Param &param = fn->params[i];
   const Type *type = param.declaredType;
-  bool untyped = param.defaultValue() && type->isError() && !param.type.has_value();
-  if (untyped) {
+  bool isUntyped = param.defaultValue() && type->isError() && !param.type.has_value();
+  if (isUntyped) {
     param.defaultValue()->type = type;
     param.sym = this->scopes->declareVar(param.name, param.loc, type, false);
     return;
@@ -553,9 +556,9 @@ void FunctionChecker::declareBodyParam(FunctionDecl *fn, size_t i) {
   }
   param.sym = this->scopes->declareVar(param.name, param.loc, type, false);
   Expr *given = param.defaultValue();
-  bool defined = given != nullptr && type->isOptional() && !given->type->isOptional() &&
-                 !given->type->isUndefined();
-  if (defined) {
+  bool isDefined = given != nullptr && type->isOptional() && !given->type->isOptional() &&
+                   !given->type->isUndefined();
+  if (isDefined) {
     this->flowChecker->setDefined(param.sym, true);
   }
 }
@@ -587,15 +590,16 @@ void FunctionChecker::walkBodyStatements(FunctionDecl *fn) {
   this->argListChecker->declareArgumentList(fn);
   this->predicateChecker->beginPredicate(fn);
   this->state.getFlowState().enterErrorWatch();
-  this->closureChecker->checkStatements(fn->body);
+  this->closureChecker->walkStatements(fn->body);
   if (!this->state.getFlowState().isUnreachable()) {
     this->emitterChecker->reportUnlistenedErrors();
   }
   this->state.getFlowState().leaveErrorWatch();
   this->predicateChecker->endPredicate(fn);
-  bool constructor = fn->isConstructor() && this->state.getClassContext().getInitializer() == fn &&
-                     !this->state.getFlowState().isBeforeSuper();
-  if (!constructor) {
+  bool isConstructor = fn->isConstructor() &&
+                       this->state.getClassContext().getInitializer() == fn &&
+                       !this->state.getFlowState().isBeforeSuper();
+  if (!isConstructor) {
     return;
   }
   ClassChecker::ResultEveryFieldSet fieldsSet = this->classChecker->checkFieldsSet();
@@ -606,22 +610,22 @@ void FunctionChecker::walkBodyStatements(FunctionDecl *fn) {
 
 const Type *FunctionChecker::bodyReturnType(const FunctionDecl *fn) {
   FuncSymbol *sym = fn->sym;
-  bool promised = fn->isAsync && sym->hasReturnType() && sym->getKnownReturnType()->isPromise();
-  if (promised) {
+  bool isPromised = fn->isAsync && sym->hasReturnType() && sym->getKnownReturnType()->isPromise();
+  if (isPromised) {
     return sym->getKnownReturnType()->promised();
   }
   if (!fn->isGenerator) {
     return sym->getKnownReturnType();
   }
-  bool iterates = sym->hasReturnType() && (sym->getKnownReturnType()->isIterator() ||
-                                           sym->getKnownReturnType()->isAsyncIterator());
+  bool isIterating = sym->hasReturnType() && (sym->getKnownReturnType()->isIterator() ||
+                                              sym->getKnownReturnType()->isAsyncIterator());
 
-  return iterates ? sym->getKnownReturnType()->returned() : nullptr;
+  return isIterating ? sym->getKnownReturnType()->returned() : nullptr;
 }
 
 void FunctionChecker::walkFunctionFromScratch(FunctionDecl *fn) {
   this->state.getFlowState().replaceFlow(Flow());
-  this->checkFunctionBody(fn);
+  this->walkFunctionBody(fn);
 }
 
 }

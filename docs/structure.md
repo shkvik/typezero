@@ -44,6 +44,14 @@
   `Diagnostics::take()`: `ok()` — ничего не найдено, `err` — всё найденное, ошибка это или
   подсказка, говорит `Diagnostic::kind`; `checkProgram` и `buildProgram` отдают `Result<…, std::vector<Diagnostic>>` через `ok` и `err`,
   как в neverthrow. Класса `Errors` нет (11 ноября).
+- **У каждой проверки свой список найденного** (12 ноября). `Diagnostics` — стек списков:
+  `error()` пишет в верхний, `pushList(route)` кладёт свой, `popList()` снимает и отдаёт его туда,
+  куда сказано при входе: `PARENT` — в список ниже (часть внешней проверки), `PROGRAM` — сразу в
+  итог программы (чужая функция по требованию, верх другого модуля: ошибки — её, откуда бы её ни
+  спросили), `DISCARD` — выбросить (проба: копия тела, пробный разбор), `OWNER` — забирает хозяин
+  (экземпляр обобщённого, поздний класс). Глушения, перехвата и счётчиков «до и после» нет:
+  «провалилась ли проверка» — есть ли ошибка в её списке. Провал экземпляра, сообщённый внутри
+  пробы, сообщается ещё раз на первом настоящем вызове (`InstanceRecord::isReported`).
 
 ## Правила кода
 
@@ -114,7 +122,7 @@ compiler/
                      сборка всех частей; папки по ярусам: infer/ library/ → bodies/ → flow/
                      declare/ → generics/ → types/ names/ → semantic_state/ (закрытое
                      хранилище групп данных); вверх через интерфейс — только Completer
-  interprocedural/   после движка, по всей программе: flow_graph_builder/ flow_*/ wide_writes/
+  interprocedural/   после движка, по всей программе: wide_writes/ (внутри flow_graph/)
                      load_order/ unused_functions/ async_local_storage_checker/ pool_checker/
                      held_value_checker/ overflow/
   cli/               папка на слово команды tz (build/ run/ knowledge/ lsp/ mcp/ licenses/
@@ -297,7 +305,7 @@ ResultCheckedProgram checkProgram(Program &program, const BuildOptions &options)
 | `DeclarePass` | темы | `Program`: классы, функции, типы, импорты | начало `Sema::check`, `sema_decls.cpp`, `sema_modules.cpp` |
 | `InferPass` | — | `Program`: циклы вызовов | `Sema::findCycles`, `sema_infer.cpp` |
 | `CheckPass` | темы | `Program`: тип каждого выражения, чьи вызовы | тела в `Sema::check`, большая часть `sema*.cpp` |
-| `InstancesPass` | — | `Program`: копии generics, поздние классы | `checkLateClasses`, `checkInstances`, `checkConstructorCalls` |
+| `InstancesPass` | — | `Program`: копии generics, поздние классы | `walkLateClasses`, `walkInstances`, `walkConstructorCalls` |
 | `WholeProgramPass` | — | `Program`: порядок загрузки, неиспользуемое, номера классов | конец `Sema::check`, `sema_widen.cpp` |
 | `OverflowPass` | — | предупреждения | `check/overflow/` |
 | `ParallelPass` | — | `ParallelPlan` | `check/parallel/` |
@@ -473,8 +481,8 @@ async/
 ```
 instances/
   instances_pass/     InstancesPass
-  late_classes/       LateClasses: классы из class-выражений (← checkLateClasses)
-  constructor_calls/  ConstructorCalls (← checkConstructorCalls)
+  late_classes/       LateClasses: классы из class-выражений (← walkLateClasses)
+  constructor_calls/  ConstructorCalls (← walkConstructorCalls)
 whole_program/
   whole_program_pass/ WholeProgramPass
   load_order/         LoadOrder: чтение до загрузки файла (← checkLoadOrder)

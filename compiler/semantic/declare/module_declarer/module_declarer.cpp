@@ -211,8 +211,8 @@ ModuleDeclarer::ResultLocalIsKnown ModuleDeclarer::localExport(const Module *mod
            (i.whole == name.name || llvm::any_of(i.names, sameAlias));
   };
   auto importsName = [&](const ImportDecl &i) { return llvm::any_of(i.names, sameAlias); };
-  bool builtin = llvm::any_of(module->file.imports, fromBuiltin);
-  if (!found && builtin) {
+  bool isBuiltin = llvm::any_of(module->file.imports, fromBuiltin);
+  if (!found && isBuiltin) {
     std::string message = ErrorTextLocalExport::builtin(name.name);
 
     return err(ModuleDeclarerLocalExportError{
@@ -220,8 +220,8 @@ ModuleDeclarer::ResultLocalIsKnown ModuleDeclarer::localExport(const Module *mod
         .message = message,
     });
   }
-  bool imported = llvm::any_of(module->file.imports, importsName);
-  if (!found && !imported) {
+  bool isImported = llvm::any_of(module->file.imports, importsName);
+  if (!found && !isImported) {
     std::string message = ErrorTextLocalExport::notFound(name.name);
 
     return err(ModuleDeclarerLocalExportError{
@@ -272,9 +272,9 @@ void ModuleDeclarer::exportName(Module *module, const NamedExportStep &step) {
   } else {
     target = this->readyLocal(module, name.name);
     ResultLocalIsKnown known = ModuleDeclarer::localExport(module, name, target.has_value());
-    bool reported =
+    bool isReported =
         known.isErr() && known.error().code == ModuleDeclarerLocalExportErrorCode::ALREADY_REPORTED;
-    if (known.isErr() && !reported) {
+    if (known.isErr() && !isReported) {
       this->state.getDiagnostics().error(name.loc, known.error().message);
     }
     if (known.isErr()) {
@@ -296,8 +296,8 @@ ModuleDeclarer::ResultStarIsUnique ModuleDeclarer::starExport(llvm::StringRef na
                                                               const ModuleExport *ours,
                                                               const ExportAll *all,
                                                               const ModuleBinding &target) {
-  bool clash = ours && ours->all && !(ours->target == target);
-  if (clash) {
+  bool isClash = ours && ours->all && !(ours->target == target);
+  if (isClash) {
     std::string message =
         ErrorTextStarExport::twice(name, ours->all->source.path, all->source.path);
 
@@ -347,8 +347,8 @@ std::vector<ExportStep> ModuleDeclarer::exportSteps(Module *module) {
   }
   for (const ExportDecl &decl : module->file.exports) {
     const ExportAll *all = decl.form.as<ExportAll>();
-    bool fromOther = all != nullptr && all->source.from != nullptr && all->source.from != module;
-    if (fromOther) {
+    bool isFromOther = all != nullptr && all->source.from != nullptr && all->source.from != module;
+    if (isFromOther) {
       steps.push_back(StarExportStep{&decl, all->source.from});
     }
   }
@@ -371,9 +371,9 @@ Module *ModuleDeclarer::unreadyModule(const ExportsFrame &frame) {
     return nullptr;
   }
   const ModuleState &neededState = this->state.getModuleStates().getModuleState(needed);
-  bool waiting = !neededState.exportsDone && !neededState.exportsBusy;
+  bool isWaiting = !neededState.exportsDone && !neededState.exportsBusy;
 
-  return waiting ? needed : nullptr;
+  return isWaiting ? needed : nullptr;
 }
 
 Module *ModuleDeclarer::stepNeeds(Module *module, const ExportStep &step) {
@@ -392,9 +392,9 @@ Module *ModuleDeclarer::namedExportNeeds(Module *module, const NamedExportStep &
   if (step.source != nullptr) {
     return step.source->from;
   }
-  bool declared =
+  bool isDeclared =
       this->state.getModuleStates().getModuleState(module).declared.count(step.name->name);
-  if (declared) {
+  if (isDeclared) {
     return nullptr;
   }
   std::optional<ImportedName> imported = ModuleDeclarer::findImport(module, step.name->name);
@@ -470,8 +470,8 @@ ModuleDeclarer::ResultExportTarget
 ModuleDeclarer::exportNamed(const llvm::StringMap<ModuleExport> &theirs, Module *from,
                             llvm::StringRef path, const ModuleName &name) {
   auto found = theirs.find(name.name);
-  bool missing = found == theirs.end();
-  if (missing && from->builtin) {
+  bool isMissing = found == theirs.end();
+  if (isMissing && from->builtin) {
     std::string hint = ErrorTextEventsExport::hint(name.name);
     std::string message = ErrorTextFindExport::library(path, name.name, hint);
 
@@ -480,9 +480,9 @@ ModuleDeclarer::exportNamed(const llvm::StringMap<ModuleExport> &theirs, Module 
         .message = message,
     });
   }
-  bool declared =
-      missing && this->state.getModuleStates().getModuleState(from).declared.count(name.name);
-  if (declared) {
+  bool isDeclared =
+      isMissing && this->state.getModuleStates().getModuleState(from).declared.count(name.name);
+  if (isDeclared) {
     std::string message = ErrorTextFindExport::unmarked(path, name.name, from->name);
 
     return err(ModuleDeclarerFindExportError{
@@ -490,7 +490,7 @@ ModuleDeclarer::exportNamed(const llvm::StringMap<ModuleExport> &theirs, Module 
         .message = message,
     });
   }
-  if (missing) {
+  if (isMissing) {
     std::string message = ErrorTextFindExport::missing(path, name.name);
 
     return err(ModuleDeclarerFindExportError{

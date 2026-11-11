@@ -65,10 +65,10 @@ void ConcatChecker::concatParts(const BinaryExpr *bin, Parts &parts) {
 
 const BinaryExpr *ConcatChecker::leftConcat(const BinaryExpr *bin) {
   auto *left = dyn_cast<BinaryExpr>(ConcatChecker::unconverted(bin->lhs));
-  bool concat = left != nullptr && left->op == BinaryOp::Add && left->type != nullptr &&
-                left->type->isString();
+  bool isConcat = left != nullptr && left->op == BinaryOp::Add && left->type != nullptr &&
+                  left->type->isString();
 
-  return concat ? left : nullptr;
+  return isConcat ? left : nullptr;
 }
 
 std::string ConcatChecker::concatTemplate(const Parts &parts, llvm::StringRef &only) {
@@ -78,8 +78,8 @@ std::string ConcatChecker::concatTemplate(const Parts &parts, llvm::StringRef &o
     if (text.empty()) {
       return "";
     }
-    bool quoted = text.size() >= 2 && text.back() == text.front();
-    if (isa<StringLitExpr>(expr) && quoted && (text.front() == '"' || text.front() == '\'')) {
+    bool isQuoted = text.size() >= 2 && text.back() == text.front();
+    if (isa<StringLitExpr>(expr) && isQuoted && (text.front() == '"' || text.front() == '\'')) {
       llvm::StringRef body = text.drop_front().drop_back();
       for (size_t i = 0; i < body.size(); ++i) {
         if (body[i] == '\\' && i + 1 < body.size()) {
@@ -92,7 +92,7 @@ std::string ConcatChecker::concatTemplate(const Parts &parts, llvm::StringRef &o
         }
         result += body[i];
       }
-    } else if (isa<TemplateExpr>(expr) && quoted && text.front() == '`') {
+    } else if (isa<TemplateExpr>(expr) && isQuoted && text.front() == '`') {
       result += text.drop_front().drop_back();
     } else {
       only = SharedHelpers::withoutParens(text);
@@ -175,9 +175,9 @@ const Type *ConcatChecker::heldUnionMember(const Type *base) {
     return nullptr;
   }
   for (const Type *m : base->members()) {
-    bool held = (m->isObject() && !m->isDate() && !m->isRegExp()) || m->isDict() ||
-                m->isFunction() || m->isIterator();
-    if (held) {
+    bool isHeld = (m->isObject() && !m->isDate() && !m->isRegExp()) || m->isDict() ||
+                  m->isFunction() || m->isIterator();
+    if (isHeld) {
       return m;
     }
   }

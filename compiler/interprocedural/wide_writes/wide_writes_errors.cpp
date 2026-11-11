@@ -8,8 +8,8 @@ namespace tz {
 std::string ErrorTextWidening::article(const Type *type) {
   llvm::StringRef name = type->name();
   char first = name.empty() ? 'x' : char(std::tolower(static_cast<unsigned char>(name[0])));
-  bool vowel = llvm::StringRef("aeiou").contains(first);
-  llvm::StringRef prefix = vowel ? "an '" : "a '";
+  bool isVowel = llvm::StringRef("aeiou").contains(first);
+  llvm::StringRef prefix = isVowel ? "an '" : "a '";
 
   return (llvm::Twine(prefix) + name + "'").str();
 }

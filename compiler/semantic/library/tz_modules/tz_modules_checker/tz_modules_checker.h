@@ -14,7 +14,7 @@ public:
   TzModulesChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *adaptResult(Expr *expr, const Type *to);
-  void checkExternal(FunctionDecl *fn);
+  void walkExternal(FunctionDecl *fn);
   void noteHttpsCall(CallExpr *call, const FunctionDecl *fn);
   void noteServer(const NewExpr *made);
   void noteServeOptions(const Expr *options);

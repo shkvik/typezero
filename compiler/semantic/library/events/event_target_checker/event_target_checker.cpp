@@ -85,8 +85,8 @@ EventTargetChecker::emitterEvents(const Type *type, llvm::StringRef fn, bool tar
 }
 
 Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *member, ClassDecl *cls) {
-  bool add = member->name == "addEventListener";
-  if (!add && member->name != "removeEventListener") {
+  bool isAdd = member->name == "addEventListener";
+  if (!isAdd && member->name != "removeEventListener") {
     return nullptr;
   }
   ClassDecl *eventClass = this->state.getLibraryDeclarations().findLibraryClass("Event");
@@ -97,13 +97,13 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
   }
   call->type = Type::error();
   member->type = Type::error();
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 2, 3);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 2, 3);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
-  if (rejected || arity.isErr()) {
+  if (isRejected || arity.isErr()) {
     return call;
   }
   call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
@@ -115,7 +115,7 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
   std::vector<bool> given(call->args.size(), false);
   given[0] = true;
   given[1] = true;
-  if (!add) {
+  if (!isAdd) {
     call->args[1] = this->typeRelations->convert(call->args[1], Type::unknown());
     this->state.getInventoryStore().markComparesFunctions();
     return this->emitterChecker->callLibraryMethod(call, member, cls, "removeListenerWith", {},
@@ -151,8 +151,8 @@ std::optional<const Type *> EventTargetChecker::typedFunctionListener(CallExpr *
   Expr *&listener = call->args[1];
   const Type *kind = eventClass->type;
   std::vector<Param> &params = function->fn->params;
-  bool typedParam = !params.empty() && params[0].type && !params[0].rest();
-  if (typedParam) {
+  bool isTypedParam = !params.empty() && params[0].type && !params[0].rest();
+  if (isTypedParam) {
     const Type *written = this->typeResolver->resolveType(*params[0].type, false);
     kind = this->listenedEvent(written, params[0].loc, eventClass);
   }
@@ -181,11 +181,11 @@ EventTargetChecker::typedValueListener(CallExpr *call, ClassDecl *eventClass, co
     return std::make_optional<const Type *>(nullptr);
   }
   const Type *event = eventClass->type;
-  bool noParams = type->params().empty();
+  bool isNoParams = type->params().empty();
   const Type *kind =
-      noParams ? event : this->listenedEvent(type->params()[0], listener->loc(), eventClass);
+      isNoParams ? event : this->listenedEvent(type->params()[0], listener->loc(), eventClass);
   if (kind != nullptr) {
-    const Type *heard = noParams ? event : kind;
+    const Type *heard = isNoParams ? event : kind;
     const Type *handler = Type::function({heard}, 1, false, Type::voidTy());
     listener = this->typeRelations->coerce(listener, handler);
   }
@@ -286,13 +286,13 @@ bool EventTargetChecker::isEventTarget(const Type *type) const {
 
 Expr *EventTargetChecker::checkListenersFunction(CallExpr *call, llvm::StringRef fn,
                                                  llvm::SMLoc loc, bool listeners) {
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 2, 2);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 2, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
-  if (rejected || arity.isErr()) {
+  if (isRejected || arity.isErr()) {
     return call;
   }
   Expr *object = this->exprChecker->checkExpr(call->args[0]);
@@ -358,13 +358,13 @@ Expr *EventTargetChecker::checkWaitFunction(CallExpr *call, llvm::StringRef fn, 
       .once = once,
       .timed = EventTargetChecker::hasTimeoutOption(call),
   };
-  bool rejected = this->callChecker->rejectSpread(call);
+  bool isRejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, 2, 3);
+      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 2, 3);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
-  if (rejected || arity.isErr()) {
+  if (isRejected || arity.isErr()) {
     return call;
   }
   call->args[0] = this->exprChecker->checkExpr(call->args[0]);
@@ -409,8 +409,8 @@ Expr *EventTargetChecker::checkEmitterWait(WaitCall &wait, const Type *events) {
     this->walkArgsFrom(call, 2);
     return call;
   }
-  bool ends = this->waitEnds(call);
-  if (!wait.timed && !ends) {
+  bool isEnding = this->waitEnds(call);
+  if (!wait.timed && !isEnding) {
     auto *name = dyn_cast<NameExpr>(call->args[0]);
     llvm::StringRef shown = name != nullptr ? name->name : llvm::StringRef();
     std::string message = ErrorTextEventsFunction::endless(shown, wait.fn);
@@ -437,13 +437,13 @@ bool EventTargetChecker::waitEnds(const CallExpr *call) const {
   const ClassDecl *source = ClassDeclarer::classOf(call->args[0]->type);
   const ClassDecl *root =
       source != nullptr && source->generic() != nullptr ? source->generic() : source;
-  bool ends = root != nullptr && root->library() && root->name != "EventEmitter" &&
-              root->name != "EventEmitterBase";
-  bool topLevel = this->state.getFunctionStack().getCurrentDecl() == nullptr &&
-                  !this->state.getFunctionStack().isInsideAwaitLoop();
-  bool runsOnce = topLevel || this->emitterChecker->ownsEmitter(call->args[0]);
+  bool isEnding = root != nullptr && root->library() && root->name != "EventEmitter" &&
+                  root->name != "EventEmitterBase";
+  bool isTopLevel = this->state.getFunctionStack().getCurrentDecl() == nullptr &&
+                    !this->state.getFunctionStack().isInsideAwaitLoop();
+  bool isRunningOnce = isTopLevel || this->emitterChecker->ownsEmitter(call->args[0]);
 
-  return ends || runsOnce;
+  return isEnding || isRunningOnce;
 }
 
 Expr *EventTargetChecker::checkTimedWait(WaitCall &wait, const Type *events, const Type *args,

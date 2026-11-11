@@ -57,13 +57,13 @@ GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::vector<const
         .message = message,
     });
   }
-  bool emitter = generic->library() && generic->name == "EventEmitter";
+  bool isEmitter = generic->library() && generic->name == "EventEmitter";
   // TODO: в storage перенести
   static const llvm::StringLiteral streams[] = {"Readable", "Writable", "Duplex", "Transform",
                                                 "PassThrough"};
-  bool chunked = generic->library() && llvm::is_contained(streams, generic->name);
+  bool isChunked = generic->library() && llvm::is_contained(streams, generic->name);
   for (size_t k = args.size(); k < params.size(); ++k) {
-    if (emitter) {
+    if (isEmitter) {
       std::string message = ErrorTextClassInstance::eventMap();
 
       return err(GenericClassInstantiatorInstantiateClassError{
@@ -71,7 +71,7 @@ GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::vector<const
           .message = message,
       });
     }
-    if ((k >= defaults.size() || !defaults[k]) && chunked) {
+    if ((k >= defaults.size() || !defaults[k]) && isChunked) {
       std::string message = ErrorTextClassInstance::chunks(name);
 
       return err(GenericClassInstantiatorInstantiateClassError{
@@ -124,7 +124,7 @@ GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::vector<const
       });
     }
   }
-  if (emitter) {
+  if (isEmitter) {
     EventMaps::ResultEventMapFits fits = EventMaps::eventMapFits(args[0]);
     if (fits.isErr()) {
       this->state.getDiagnostics().error(loc, fits.error().message);
@@ -137,16 +137,20 @@ GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::vector<const
   }
   GenericStore &generics = this->state.getGenericStore();
   if (ClassDecl *known = generics.findClassInstance(generic, args)) {
-    if (InstanceRecord *check = generics.findClassCheck(known);
-        check && !check->callLoc.isValid()) {
+    InstanceRecord *check = generics.findClassCheck(known);
+    if (check != nullptr && !check->callLoc.isValid()) {
       check->callLoc = use;
+    }
+    bool isReportDue = check != nullptr && check->checked && check->failed && !check->isReported;
+    if (isReportDue) {
+      this->genericClassChecker->reportClassInstance(check, loc);
     }
     return ok(known);
   }
   if (generics.countFillingOf(generic) >= int(kMaxClassChain)) {
-    bool first = !generics.isEndlessReported(generic);
+    bool isFirst = !generics.isEndlessReported(generic);
     generics.markEndlessReported(generic);
-    if (first) {
+    if (isFirst) {
       std::string message = ErrorTextClassInstance::endless(name);
 
       return err(GenericClassInstantiatorInstantiateClassError{
@@ -214,7 +218,7 @@ GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::vector<const
   }
   if (check) {
     if (this->state.getGenericStore().isCheckingInstance()) {
-      this->genericClassChecker->checkClassInstance(check);
+      this->genericClassChecker->walkClassInstance(check);
       if (check->failed) {
         this->genericClassChecker->reportClassInstance(check, loc);
       }
@@ -272,9 +276,9 @@ std::vector<const Type *>
 GenericClassInstantiator::iteratedParams(ClassDecl *inst, llvm::ArrayRef<const Type *> params) {
   std::vector<const Type *> mine(params.begin(), params.end());
   for (const Type *&p : mine) {
-    bool own = p->iterated() != nullptr &&
-               GenericCheckHelpers::mentionsAnyOf(p->iterated(), inst->generic()->typeArgs);
-    if (!own) {
+    bool isOwn = p->iterated() != nullptr &&
+                 GenericCheckHelpers::mentionsAnyOf(p->iterated(), inst->generic()->typeArgs);
+    if (!isOwn) {
       continue;
     }
     const Type *iterated = this->genericClassChecker->instanceType(inst, p->iterated());
@@ -346,7 +350,7 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
   if (inst->generic()->init != nullptr) {
     this->makeInstanceInit(inst);
   }
-  this->checkInstanceVariants(inst);
+  this->walkInstanceVariants(inst);
 }
 
 void GenericClassInstantiator::addInstanceBase(ClassDecl *inst, const Type *base) {
@@ -440,26 +444,27 @@ void GenericClassInstantiator::makeInstanceInit(ClassDecl *inst) {
   inst->init = init;
 }
 
-void GenericClassInstantiator::checkInstanceVariants(ClassDecl *inst) {
-  std::vector<Diagnostics::Captured> errors;
-  std::vector<Diagnostics::Captured> *outer = this->state.getDiagnostics().setCapture(&errors);
-  this->classDeclarer->checkVariants(inst);
-  this->state.getDiagnostics().setCapture(outer);
-  if (errors.empty()) {
+void GenericClassInstantiator::walkInstanceVariants(ClassDecl *inst) {
+  Diagnostics &diagnostics = this->state.getDiagnostics();
+  diagnostics.pushList(DiagnosticRoute::OWNER);
+  this->classDeclarer->walkVariants(inst);
+  auto variantDiagnostics = diagnostics.popList();
+  const Diagnostic *firstError = diagnostics.findFirstError(variantDiagnostics);
+  if (firstError == nullptr) {
     return;
   }
   InstanceRecord *check = this->state.getGenericStore().findClassCheck(inst);
   if (check != nullptr && !check->failed) {
     check->failed = true;
-    check->message = errors.front().message;
-    check->errorLoc = errors.front().loc;
+    check->message = firstError->message;
+    check->errorLoc = firstError->loc;
   }
 }
 
 void GenericClassInstantiator::linkInstance(ClassDecl *inst) {
-  bool muted = this->state.getDiagnostics().setMuted(true);
+  this->state.getDiagnostics().pushList(DiagnosticRoute::DISCARD);
   this->classLinks->linkOverrides(inst);
-  this->state.getDiagnostics().setMuted(muted);
+  this->state.getDiagnostics().popList();
   this->classLinks->buildVtable(inst);
 }
 

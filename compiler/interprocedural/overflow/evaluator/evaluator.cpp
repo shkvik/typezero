@@ -39,7 +39,7 @@ using llvm::dyn_cast;
 Evaluator::Evaluator(OverflowCheck &check)
     : check(check) {}
 
-Num Evaluator::blamed(Num n) {
+Num Evaluator::blamed(Num n) const {
   if (n.loOrigin == Origin::Trusted) {
     n.setLow({std::clamp(n.lo, -1.0, 1.0)});
   }
@@ -53,7 +53,7 @@ Num Evaluator::blamed(Num n) {
   return n;
 }
 
-bool Evaluator::sameVariable(const Expr *a, const Expr *b) {
+bool Evaluator::sameVariable(const Expr *a, const Expr *b) const {
   auto *x = llvm::dyn_cast_or_null<NameExpr>(OverflowHelpers::stripCasts(a));
   auto *y = llvm::dyn_cast_or_null<NameExpr>(OverflowHelpers::stripCasts(b));
 
@@ -91,11 +91,11 @@ Val Evaluator::eval(const Expr *expr, State &st, bool wraps) {
     auto *lit = cast<ArrayLitExpr>(expr);
     Val element;
     double count = 0;
-    bool spreads = false;
+    bool isSpreading = false;
     for (const ArrayLitExpr::Element &e : lit->elements) {
       Val v = eval(e.expr, st);
       if (e.spread) {
-        spreads = true;
+        isSpreading = true;
         const Type *type = e.expr->type ? e.expr->type->nonOptional() : nullptr;
         element = ValueRange::join(
             element, type && type->isArray()
@@ -108,8 +108,8 @@ Val Evaluator::eval(const Expr *expr, State &st, bool wraps) {
       }
     }
     Val v;
-    v.len = spreads ? ValueRange::make({count}, {kLengthMax, Origin::Trusted})
-                    : ValueRange::exactly(count);
+    v.len = isSpreading ? ValueRange::make({count}, {kLengthMax, Origin::Trusted})
+                        : ValueRange::exactly(count);
     v.elem = ValueRange::share(element);
     return v;
   }
@@ -271,17 +271,17 @@ Num Evaluator::bitwise(BinaryOp op, const Num &l, const Num &r, const Type *type
   Limits lim = ValueRange::limitsOf(type);
   unsigned width = type && type->nonOptional()->isInteger() ? type->nonOptional()->bitWidth() : 64;
   Num full = ValueRange::mixed(lim.lo, lim.hi, l, r);
-  bool lPos = l.lo >= 0, rPos = r.lo >= 0;
+  bool isLPos = l.lo >= 0, rPos = r.lo >= 0;
   auto zero = Bound{0};
   switch (op) {
   case BinaryOp::BitAnd:
-    if (lPos && rPos) {
+    if (isLPos && rPos) {
       return ValueRange::make(zero, l.hi < r.hi ? l.high() : r.high());
     }
     if (rPos) {
       return ValueRange::make(zero, r.high());
     }
-    if (lPos) {
+    if (isLPos) {
       return ValueRange::make(zero, l.high());
     }
     return full;
@@ -292,20 +292,20 @@ Num Evaluator::bitwise(BinaryOp op, const Num &l, const Num &r, const Type *type
     if (l.lo == 0 && l.hi == 0) {
       return this->check.overflowWarnings().fit(r, type);
     }
-    if (lPos && rPos) {
+    if (isLPos && rPos) {
       const Bound &top = l.hi > r.hi ? l.high() : r.high();
       return ValueRange::make(l.lo > r.lo ? l.low() : r.low(),
                               {ValueRange::ones(top.v), top.origin, top.why});
     }
     return full;
   case BinaryOp::BitXor:
-    if (lPos && rPos) {
+    if (isLPos && rPos) {
       const Bound &top = l.hi > r.hi ? l.high() : r.high();
       return ValueRange::make(zero, {ValueRange::ones(top.v), top.origin, top.why});
     }
     return full;
   case BinaryOp::Shl:
-    if (r.lo == r.hi && r.lo >= 0 && r.lo < width && lPos) {
+    if (r.lo == r.hi && r.lo >= 0 && r.lo < width && isLPos) {
       double k = std::ldexp(1.0, int(r.lo));
       if (l.hi * k <= lim.hi) {
         return ValueRange::make({l.lo * k, l.loOrigin, l.loWhy}, {l.hi * k, l.hiOrigin, l.hiWhy});
@@ -356,12 +356,12 @@ Val Evaluator::evalBinary(const BinaryExpr *bin, State &st, bool wraps) {
   default:
     break;
   }
-  bool bits = bin->op == BinaryOp::BitAnd || bin->op == BinaryOp::BitOr ||
-              bin->op == BinaryOp::BitXor || bin->op == BinaryOp::Shl || bin->op == BinaryOp::Shr ||
-              bin->op == BinaryOp::UShr;
-  bool operandsWrap = false;
-  Val l = eval(bin->lhs, st, operandsWrap);
-  Val r = eval(bin->rhs, st, operandsWrap);
+  bool hasBits = bin->op == BinaryOp::BitAnd || bin->op == BinaryOp::BitOr ||
+                 bin->op == BinaryOp::BitXor || bin->op == BinaryOp::Shl ||
+                 bin->op == BinaryOp::Shr || bin->op == BinaryOp::UShr;
+  bool isOperandWrapping = false;
+  Val l = eval(bin->lhs, st, isOperandWrapping);
+  Val r = eval(bin->rhs, st, isOperandWrapping);
   const Type *type = bin->type;
   if (type && type->isString()) {
     if (l.len.empty() || r.len.empty()) {
@@ -373,16 +373,16 @@ Val Evaluator::evalBinary(const BinaryExpr *bin, State &st, bool wraps) {
   if (!ValueRange::isNumberType(type)) {
     return Val();
   }
-  bool shift = bin->op == BinaryOp::Shl || bin->op == BinaryOp::Shr || bin->op == BinaryOp::UShr;
+  bool isShift = bin->op == BinaryOp::Shl || bin->op == BinaryOp::Shr || bin->op == BinaryOp::UShr;
   const Type *base = type->nonOptional();
   if (base->isInteger() && base->isWrapping() && bin->op == BinaryOp::Shl) {
     Limits whole = ValueRange::limitsOf(type);
     return ValueRange::numVal(ValueRange::range(whole.lo, whole.hi));
   }
-  if (shift && base->isInteger() && base->isWrapping()) {
+  if (isShift && base->isInteger() && base->isWrapping()) {
     return ValueRange::numVal(bitwise(bin->op, l.num, r.num, type));
   }
-  if (shift && base->isInteger()) {
+  if (isShift && base->isInteger()) {
     this->check.overflowWarnings().checkShiftCount(bin->rhs, r.num, base->bitWidth());
   }
   if (bin->op == BinaryOp::Shl && base->isInteger() && !l.num.empty() && !r.num.empty() &&
@@ -392,7 +392,7 @@ Val Evaluator::evalBinary(const BinaryExpr *bin, State &st, bool wraps) {
     return ValueRange::numVal(
         arithmetic(bin, BinaryOp::Mul, l.num, factor, type, false, bin->lhs, bin->rhs, nullptr));
   }
-  if (bits) {
+  if (hasBits) {
     if (base->isWrapping() && (l.num.empty() || r.num.empty())) {
       Limits whole = ValueRange::limitsOf(type);
       return ValueRange::numVal(ValueRange::range(whole.lo, whole.hi));
@@ -405,10 +405,10 @@ Val Evaluator::evalBinary(const BinaryExpr *bin, State &st, bool wraps) {
     accum = name->var();
   }
 
-  bool square = bin->op == BinaryOp::Mul && Evaluator::sameVariable(bin->lhs, bin->rhs);
+  bool isSquare = bin->op == BinaryOp::Mul && this->sameVariable(bin->lhs, bin->rhs);
 
   return ValueRange::numVal(
-      arithmetic(bin, bin->op, l.num, r.num, type, wraps, bin->lhs, bin->rhs, accum, square));
+      arithmetic(bin, bin->op, l.num, r.num, type, wraps, bin->lhs, bin->rhs, accum, isSquare));
 }
 
 Num Evaluator::floatArithmetic(const Expr *site, BinaryOp op, const Num &l, const Num &r,
@@ -420,15 +420,15 @@ Num Evaluator::floatArithmetic(const Expr *site, BinaryOp op, const Num &l, cons
     warnings.noteProof(site, false);
     return Num();
   }
-  bool ok = true;
+  bool isOk = true;
   if (op == BinaryOp::Div || op == BinaryOp::Rem) {
-    ok = warnings.checkDivisor(site, op, rhs, l, r);
+    isOk = warnings.checkDivisor(site, op, rhs, l, r);
   } else if (op == BinaryOp::Pow) {
-    ok = warnings.checkDivisor(site, op, lhs, l, r);
+    isOk = warnings.checkDivisor(site, op, lhs, l, r);
     const Expr *exponent = OverflowHelpers::stripCasts(rhs);
-    bool integerExponent = (exponent && ValueRange::isIntegerType(exponent->type)) ||
-                           (r.lo == r.hi && std::trunc(r.lo) == r.lo);
-    ok = ok && (integerExponent || warnings.checkPowerBase(site, lhs, l));
+    bool isIntegerExponent = (exponent && ValueRange::isIntegerType(exponent->type)) ||
+                             (r.lo == r.hi && std::trunc(r.lo) == r.lo);
+    isOk = isOk && (isIntegerExponent || warnings.checkPowerBase(site, lhs, l));
   }
   auto apply = [&](const Num &a, const Num &b) {
     switch (op) {
@@ -448,7 +448,7 @@ Num Evaluator::floatArithmetic(const Expr *site, BinaryOp op, const Num &l, cons
       return ValueRange::range(-kInf, kInf);
     }
   };
-  if (!ok) {
+  if (!isOk) {
     warnings.noteProof(site, false);
     return ValueRange::range(lim.lo, lim.hi, Origin::Trusted);
   }
@@ -461,7 +461,7 @@ Num Evaluator::floatArithmetic(const Expr *site, BinaryOp op, const Num &l, cons
   if (this->check.quiet) {
     return exact;
   }
-  Num exceeding = apply(Evaluator::blamed(l), Evaluator::blamed(r));
+  Num exceeding = apply(this->blamed(l), this->blamed(r));
   if (!exceeding.empty() && !ValueRange::fits(exceeding, type)) {
     warnings.warn(site, l, r, lhs, rhs, exceeding, accum, type);
     return ValueRange::range(lim.lo, lim.hi, Origin::Trusted);
@@ -479,7 +479,7 @@ Num Evaluator::floatArithmetic(const Expr *site, BinaryOp op, const Num &l, cons
   return exact;
 }
 
-Num Evaluator::decimalLiteral(const Expr *expr) {
+Num Evaluator::decimalLiteral(const Expr *expr) const {
   std::optional<DecimalLiteral> lit = DecimalLiteral::fromExpr(expr);
   if (!lit) {
     return ValueRange::range(-kInf, kInf, Origin::Trusted);
@@ -501,11 +501,11 @@ Num Evaluator::decimalArithmetic(const Expr *site, BinaryOp op, const Num &given
   OverflowWarnings &warnings = this->check.overflowWarnings();
   Num unknown = ValueRange::range(-kInf, kInf, Origin::Trusted);
   Num l = given.empty() ? unknown : given, r = other.empty() ? unknown : other;
-  bool divides = op == BinaryOp::Div || op == BinaryOp::Rem || (op == BinaryOp::Pow && r.lo < 0);
-  if (divides) {
-    bool ok = warnings.checkDivisor(site, op, op == BinaryOp::Pow ? lhs : rhs, l, r);
-    warnings.noteProof(site, ok);
-    if (!ok) {
+  bool isDividing = op == BinaryOp::Div || op == BinaryOp::Rem || (op == BinaryOp::Pow && r.lo < 0);
+  if (isDividing) {
+    bool isOk = warnings.checkDivisor(site, op, op == BinaryOp::Pow ? lhs : rhs, l, r);
+    warnings.noteProof(site, isOk);
+    if (!isOk) {
       return unknown;
     }
   }
@@ -534,19 +534,20 @@ Num Evaluator::arithmetic(const Expr *site, BinaryOp op, const Num &given, const
   if (ValueRange::isFloatType(type)) {
     return floatArithmetic(site, op, given, other, type, lhs, rhs, accum, square);
   }
-  bool integer = ValueRange::isIntegerType(type);
-  if (integer && type->nonOptional()->isWrapping()) {
+  bool isInteger = ValueRange::isIntegerType(type);
+  if (isInteger && type->nonOptional()->isWrapping()) {
     Limits whole = ValueRange::limitsOf(type);
-    bool divides = op == BinaryOp::Div || op == BinaryOp::Rem;
-    if (divides && !given.empty() && !other.empty()) {
+    bool isDividing = op == BinaryOp::Div || op == BinaryOp::Rem;
+    if (isDividing && !given.empty() && !other.empty()) {
       this->check.overflowWarnings().noteProof(
           site, this->check.overflowWarnings().checkDivisor(site, op, rhs, given, other));
     }
     return ValueRange::range(whole.lo, whole.hi);
   }
-  bool narrow = integer && type->nonOptional()->isInteger() && type->nonOptional()->bitWidth() < 64;
+  bool isNarrow =
+      isInteger && type->nonOptional()->isInteger() && type->nonOptional()->bitWidth() < 64;
   Num l = given, r = other;
-  if (narrow) {
+  if (isNarrow) {
     Limits whole = ValueRange::limitsOf(type);
     if (l.empty()) {
       l = ValueRange::range(whole.lo, whole.hi, Origin::Trusted);
@@ -567,7 +568,7 @@ Num Evaluator::arithmetic(const Expr *site, BinaryOp op, const Num &given, const
     case BinaryOp::Mul:
       return square ? ValueRange::squared(a) : ValueRange::multiply(a, b);
     case BinaryOp::Div:
-      return ValueRange::divide(a, b, integer);
+      return ValueRange::divide(a, b, isInteger);
     case BinaryOp::Rem:
       return ValueRange::remainder(a, b);
     case BinaryOp::Pow:
@@ -576,16 +577,16 @@ Num Evaluator::arithmetic(const Expr *site, BinaryOp op, const Num &given, const
       return ValueRange::range(-kInf, kInf);
     }
   };
-  bool divides =
-      integer && (op == BinaryOp::Div || op == BinaryOp::Rem || (op == BinaryOp::Pow && r.lo < 0));
-  bool divisorOk = !divides || this->check.overflowWarnings().checkDivisor(
-                                   site, op, op == BinaryOp::Pow ? lhs : rhs, l, r);
+  bool isDividing = isInteger && (op == BinaryOp::Div || op == BinaryOp::Rem ||
+                                  (op == BinaryOp::Pow && r.lo < 0));
+  bool isDivisorOk = !isDividing || this->check.overflowWarnings().checkDivisor(
+                                        site, op, op == BinaryOp::Pow ? lhs : rhs, l, r);
   Num exact = apply(l, r);
-  if (divides) {
-    bool minByMinusOne = !type->nonOptional()->isUnsigned() && r.lo <= -1 && r.hi >= -1 &&
-                         l.lo <= ValueRange::limitsOf(type).lo;
-    this->check.overflowWarnings().noteProof(site, divisorOk && !minByMinusOne && !exact.empty() &&
-                                                       ValueRange::fits(exact, type));
+  if (isDividing) {
+    bool isMinByMinusOne = !type->nonOptional()->isUnsigned() && r.lo <= -1 && r.hi >= -1 &&
+                           l.lo <= ValueRange::limitsOf(type).lo;
+    this->check.overflowWarnings().noteProof(
+        site, isDivisorOk && !isMinByMinusOne && !exact.empty() && ValueRange::fits(exact, type));
   }
   if (exact.empty() || !type->nonOptional()->isInteger() || op == BinaryOp::Rem) {
     return this->check.overflowWarnings().fit(exact, type);
@@ -595,11 +596,11 @@ Num Evaluator::arithmetic(const Expr *site, BinaryOp op, const Num &given, const
     return exact;
   }
   if (!wraps && !this->check.quiet) {
-    auto suspect = [&](const Num &n) { return narrow ? n : Evaluator::blamed(n); };
+    auto suspect = [&](const Num &n) { return isNarrow ? n : this->blamed(n); };
     Num exceeding = apply(suspect(l), suspect(r));
-    bool constant = (!lhs || this->check.programScan().isConstantTree(lhs)) &&
-                    (!rhs || this->check.programScan().isConstantTree(rhs)) && (lhs || rhs);
-    if (!exceeding.empty() && !ValueRange::fits(exceeding, type) && !constant) {
+    bool isConstant = (!lhs || this->check.programScan().isConstantTree(lhs)) &&
+                      (!rhs || this->check.programScan().isConstantTree(rhs)) && (lhs || rhs);
+    if (!exceeding.empty() && !ValueRange::fits(exceeding, type) && !isConstant) {
       this->check.overflowWarnings().warn(site, l, r, lhs, rhs, exceeding, accum, type);
       return ValueRange::range(lim.lo, lim.hi, Origin::Trusted);
     }

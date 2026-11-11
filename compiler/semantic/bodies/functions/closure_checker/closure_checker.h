@@ -27,9 +27,9 @@ public:
 
   static Signature signatureOf(const Type *fnType);
   Expr *checkFunctionExpr(FunctionExpr *fe, const Signature *expected);
-  void checkClosureBody(FunctionDecl *fn);
+  void walkClosureBody(FunctionDecl *fn);
   void declareOwnName(FunctionDecl *fn);
-  void checkStatements(BlockStmt *block);
+  void walkStatements(BlockStmt *block);
 
 private:
   using ResultExprNotGeneric = Result<const FunctionDecl *, ClosureCheckerNotGenericError>;

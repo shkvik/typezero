@@ -93,8 +93,8 @@ std::optional<FieldPath> ConditionFacts::definedPath(const Expr *expr, Flow &flo
 
 const Expr *ConditionFacts::pathInner(const Expr *expr) {
   if (auto *link = dyn_cast<CastExpr>(expr)) {
-    bool passes = link->shortCircuit || link->isImplicit();
-    return passes ? link->operand : nullptr;
+    bool isPassing = link->shortCircuit || link->isImplicit();
+    return isPassing ? link->operand : nullptr;
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
     return member->object;
@@ -116,12 +116,12 @@ std::optional<FieldPath> ConditionFacts::pathRoot(const Expr *expr) {
 
 void ConditionFacts::extendPath(const Expr *link, FieldPath &path, Flow &flow) {
   auto *member = dyn_cast<MemberExpr>(link);
-  bool checked = member == nullptr && cast<CastExpr>(link)->shortCircuit;
+  bool isChecked = member == nullptr && cast<CastExpr>(link)->shortCircuit;
   if (member != nullptr) {
     path.names.push_back(member->name);
-  } else if (checked && path.names.empty()) {
+  } else if (isChecked && path.names.empty()) {
     flow.defined.insert(path.var);
-  } else if (checked) {
+  } else if (isChecked) {
     FieldFacts::defineField(flow, path);
   }
 }
@@ -165,25 +165,25 @@ std::optional<FieldPath> ConditionFacts::optionalField(const Expr *expr) const {
 
 void ConditionFacts::addBinaryFacts(const BinaryExpr *bin, Flow &whenTrue, Flow &whenFalse) const {
   BinaryOp op = bin->op;
-  bool equality = op == BinaryOp::Eq || op == BinaryOp::Ne;
-  if (equality) {
+  bool isEquality = op == BinaryOp::Eq || op == BinaryOp::Ne;
+  if (isEquality) {
     this->addChainFacts(bin, whenTrue, whenFalse);
   }
   if (op == BinaryOp::InstanceOf) {
     this->addInstanceOfFacts(bin, whenTrue);
     return;
   }
-  if (equality && (isa<UndefinedExpr>(bin->lhs) || isa<UndefinedExpr>(bin->rhs))) {
+  if (isEquality && (isa<UndefinedExpr>(bin->lhs) || isa<UndefinedExpr>(bin->rhs))) {
     this->addUndefinedFacts(bin, whenTrue, whenFalse);
     return;
   }
-  if (equality) {
+  if (isEquality) {
     ConditionFacts::addConvertedFacts(bin, whenTrue, whenFalse);
     this->addTypeOfFacts(bin, whenTrue, whenFalse);
   }
-  bool comparison = equality || op == BinaryOp::Lt || op == BinaryOp::Le || op == BinaryOp::Gt ||
-                    op == BinaryOp::Ge;
-  if (comparison) {
+  bool isComparison = isEquality || op == BinaryOp::Lt || op == BinaryOp::Le ||
+                      op == BinaryOp::Gt || op == BinaryOp::Ge;
+  if (isComparison) {
     this->addLinearFacts(bin, whenTrue, whenFalse);
   }
 }
@@ -259,9 +259,9 @@ void ConditionFacts::addConvertedFacts(const BinaryExpr *bin, Flow &whenTrue, Fl
   for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
     auto *conv = dyn_cast<CastExpr>(other);
     const NameExpr *name = ConditionFacts::optionalVariable(side);
-    bool plainValue = name != nullptr && conv != nullptr && conv->isImplicit() &&
-                      !conv->operand->type->isOptional() && !conv->operand->type->isUndefined();
-    if (plainValue) {
+    bool isPlainValue = name != nullptr && conv != nullptr && conv->isImplicit() &&
+                        !conv->operand->type->isOptional() && !conv->operand->type->isUndefined();
+    if (isPlainValue) {
       (bin->op == BinaryOp::Eq ? whenTrue : whenFalse).defined.insert(name->var());
     }
   }
@@ -405,12 +405,12 @@ void ConditionFacts::addLinearFacts(const BinaryExpr *bin, Flow &whenTrue, Flow 
     return;
   }
   if (l->term.isZero() && r->term.isZero()) {
-    bool holds = ConditionFacts::constantHolds(op, l->offset, r->offset);
-    (holds ? whenFalse : whenTrue).unreachable = true;
+    bool isHolding = ConditionFacts::constantHolds(op, l->offset, r->offset);
+    (isHolding ? whenFalse : whenTrue).unreachable = true;
     return;
   }
-  bool equality = op == BinaryOp::Ne || op == BinaryOp::Eq;
-  if (equality && (l->term.isZero() || r->term.isZero())) {
+  bool isEquality = op == BinaryOp::Ne || op == BinaryOp::Eq;
+  if (isEquality && (l->term.isZero() || r->term.isZero())) {
     this->addDifferFacts(op, *l, *r, whenTrue.facts, whenFalse.facts);
   }
   ConditionFacts::addOrderFacts(op, *l, *r, whenTrue.facts, whenFalse.facts);

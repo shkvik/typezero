@@ -152,8 +152,8 @@ CallChecker::ResultTypeArgsAbsent CallChecker::noTypeArgs(const MemberExpr *memb
 
 CallChecker::ResultCalleeCallable CallChecker::calleeCallable(const Type *type,
                                                               const NameExpr *calleeName) {
-  bool optional = type->isOptional() && type->inner()->isFunction();
-  if (optional) {
+  bool isOptional = type->isOptional() && type->inner()->isFunction();
+  if (isOptional) {
     std::string message = ErrorTextCallee::undefined();
 
     return err(CallCheckerCalleeCallableError{
@@ -220,11 +220,11 @@ void CallChecker::rewriteSymbolCallee(CallExpr *call) {
     return;
   }
   auto *key = dyn_cast<MemberExpr>(index->index);
-  bool iterator = key != nullptr && this->isGlobalMember(key, GlobalMember::SYMBOL_ITERATOR);
-  bool asyncIterator =
+  bool isIterator = key != nullptr && this->isGlobalMember(key, GlobalMember::SYMBOL_ITERATOR);
+  bool isAsyncIterator =
       key != nullptr && this->isGlobalMember(key, GlobalMember::SYMBOL_ASYNC_ITERATOR);
-  if (iterator || asyncIterator) {
-    llvm::StringRef name = iterator ? "[Symbol.iterator]" : "[Symbol.asyncIterator]";
+  if (isIterator || isAsyncIterator) {
+    llvm::StringRef name = isIterator ? "[Symbol.iterator]" : "[Symbol.asyncIterator]";
     call->callee = this->state.getAst().make<MemberExpr>(index->loc(), index->object, name);
   }
 }
@@ -324,9 +324,9 @@ Expr *CallChecker::checkLanguageStaticCall(CallExpr *call, MemberExpr *member,
     return processCall;
   }
   auto *nested = dyn_cast<MemberExpr>(member->object);
-  bool bitCall = this->isGlobalName(member->object, GlobalName::BIT) ||
-                 (nested != nullptr && this->isGlobalName(nested->object, GlobalName::BIT));
-  if (bitCall) {
+  bool isBitCall = this->isGlobalName(member->object, GlobalName::BIT) ||
+                   (nested != nullptr && this->isGlobalName(nested->object, GlobalName::BIT));
+  if (isBitCall) {
     return this->mathChecker->checkBitCall(call, member);
   }
   if (this->isGlobalName(member->object, GlobalName::MATH)) {
@@ -345,11 +345,11 @@ Expr *CallChecker::checkLibraryStaticCall(CallExpr *call, MemberExpr *member,
     return this->dateFormatChecker->checkIntlCall(call, member);
   }
   auto *nested = dyn_cast<MemberExpr>(member->object);
-  bool intlMember = nested != nullptr && this->isGlobalName(nested->object, GlobalName::INTL);
-  if (intlMember && nested->name == "Locale") {
+  bool isIntlMember = nested != nullptr && this->isGlobalName(nested->object, GlobalName::INTL);
+  if (isIntlMember && nested->name == "Locale") {
     return this->intlChecker->checkLocaleStatic(call, member, expected);
   }
-  if (intlMember) {
+  if (isIntlMember) {
     return this->intlChecker->checkIntlStatic(call, member);
   }
   if (this->isGlobalName(member->object, GlobalName::DECIMAL)) {
@@ -365,9 +365,9 @@ Expr *CallChecker::checkLibraryStaticCall(CallExpr *call, MemberExpr *member,
   if (bytesStatic != nullptr) {
     return bytesStatic;
   }
-  bool numberStatic = this->isGlobalName(member->object, GlobalName::STRING) ||
-                      this->isGlobalName(member->object, GlobalName::NUMBER);
-  if (numberStatic) {
+  bool isNumberStatic = this->isGlobalName(member->object, GlobalName::STRING) ||
+                        this->isGlobalName(member->object, GlobalName::NUMBER);
+  if (isNumberStatic) {
     return this->checkNumberStaticCall(call, member);
   }
   if (this->isGlobalName(member->object, GlobalName::OBJECT)) {
@@ -382,9 +382,9 @@ Expr *CallChecker::checkNumberStaticCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
   NumberMethods::ResultStaticCallMade made = this->numberMethods->checkStaticCall(call, member);
-  bool reported =
+  bool isReported =
       made.isErr() && made.error().code == NumberMethodsCheckStaticCallErrorCode::ALREADY_REPORTED;
-  if (made.isErr() && !reported) {
+  if (made.isErr() && !isReported) {
     this->state.getDiagnostics().error(member->loc(), made.error().message);
   }
 
@@ -579,9 +579,9 @@ Expr *CallChecker::checkCallableReceiverCall(CallExpr *call, MemberExpr *member,
   }
   if (receiver->isTimer()) {
     TimerChecker::ResultTimerMethodRun ran = this->timerChecker->checkTimerMethod(call, member);
-    bool reported =
+    bool isReported =
         ran.isErr() && ran.error().code == TimerCheckerCheckTimerMethodErrorCode::ALREADY_REPORTED;
-    if (ran.isErr() && !reported) {
+    if (ran.isErr() && !isReported) {
       this->state.getDiagnostics().error(member->loc(), ran.error().message);
     }
     return ran.isOk() ? ran.value() : call;
@@ -593,10 +593,10 @@ Expr *CallChecker::checkCallableReceiverCall(CallExpr *call, MemberExpr *member,
 Expr *CallChecker::checkListParamMethod(CallExpr *call, MemberExpr *member) {
   FunctionMethodChecker::ResultParamsJoined joined =
       this->functionMethodChecker->checkListMethod(call, member);
-  bool reported =
+  bool isReported =
       joined.isErr() &&
       joined.error().code == FunctionMethodCheckerCheckListMethodErrorCode::ALREADY_REPORTED;
-  if (joined.isErr() && !reported) {
+  if (joined.isErr() && !isReported) {
     this->state.getDiagnostics().error(member->loc(), joined.error().message);
   }
 
@@ -648,10 +648,10 @@ Expr *CallChecker::checkShapedReceiverCall(CallExpr *call, MemberExpr *member,
     receiver = common;
   }
   const Type *classReceiver = member->object->type;
-  bool subtleCall = classReceiver->isClass() &&
-                    this->webCryptoChecker->isSubtleClass(classReceiver, "SubtleCrypto") &&
-                    !this->libraryCalls->inLibrary(call->loc());
-  if (subtleCall) {
+  bool isSubtleCall = classReceiver->isClass() &&
+                      this->webCryptoChecker->isSubtleClass(classReceiver, "SubtleCrypto") &&
+                      !this->libraryCalls->inLibrary(call->loc());
+  if (isSubtleCall) {
     Expr *subtle = this->subtleCallChecker->checkSubtleCall(call, member, expected);
     if (subtle != nullptr) {
       return subtle;
@@ -678,10 +678,10 @@ Expr *CallChecker::checkUnionReceiverCall(CallExpr *call, MemberExpr *member) {
 
 Expr *CallChecker::checkClassReceiverCall(CallExpr *call, MemberExpr *member,
                                           const Type *expected) {
-  bool proven = this->urlChecker->checkUrlSetter(member, call);
+  bool isProven = this->urlChecker->checkUrlSetter(member, call);
   Expr *checked = this->methodCallChecker->checkMethodCall(call, member, expected);
-  this->httpChecker->checkHeadersCall(call, member);
-  if (proven && checked->type->isResult()) {
+  this->httpChecker->walkHeadersCall(call, member);
+  if (isProven && checked->type->isResult()) {
     auto *dropped = this->state.getAst().make<UnaryExpr>(call->loc(), UnaryOp::Void, checked);
     dropped->type = Type::undefinedTy();
     return dropped;
@@ -707,14 +707,14 @@ Expr *CallChecker::checkValueReceiverCall(CallExpr *call, MemberExpr *member, co
     if (fieldCall.isOk()) {
       return fieldCall.value();
     }
-    bool takesThis = fieldCall.error().code == ObjectCheckerCheckFieldCallErrorCode::TAKES_THIS;
-    llvm::SMLoc at = takesThis ? call->callee->loc() : member->loc();
+    bool isTakingThis = fieldCall.error().code == ObjectCheckerCheckFieldCallErrorCode::TAKES_THIS;
+    llvm::SMLoc at = isTakingThis ? call->callee->loc() : member->loc();
     this->state.getDiagnostics().error(at, fieldCall.error().message);
     return call;
   }
-  bool arrayPush =
+  bool isArrayPush =
       receiver->isArray() && arrayMethod != nullptr && arrayMethod->method == ArrayMethod::PUSH;
-  if (!arrayPush && this->rejectSpread(call)) {
+  if (!isArrayPush && this->rejectSpread(call)) {
     return call;
   }
   Expr *locale = this->checkLocaleMethod(call, member);
@@ -726,11 +726,11 @@ Expr *CallChecker::checkValueReceiverCall(CallExpr *call, MemberExpr *member, co
 }
 
 Expr *CallChecker::tupleArrayCopy(MemberExpr *member, const ArrayMethodInfo *arrayMethod) {
-  bool joins = arrayMethod != nullptr && arrayMethod->method == ArrayMethod::JOIN;
-  bool changes = arrayMethod != nullptr && (arrayMethod->form.is<ResizingArrayMethod>() ||
-                                            arrayMethod->form.is<RewritingArrayMethod>() ||
-                                            arrayMethod->form.is<SortingArrayMethod>());
-  if (changes || joins) {
+  bool isJoining = arrayMethod != nullptr && arrayMethod->method == ArrayMethod::JOIN;
+  bool isChanging = arrayMethod != nullptr && (arrayMethod->form.is<ResizingArrayMethod>() ||
+                                               arrayMethod->form.is<RewritingArrayMethod>() ||
+                                               arrayMethod->form.is<SortingArrayMethod>());
+  if (isChanging || isJoining) {
     return nullptr;
   }
 
@@ -739,9 +739,9 @@ Expr *CallChecker::tupleArrayCopy(MemberExpr *member, const ArrayMethodInfo *arr
 
 Expr *CallChecker::checkTupleReceiverCall(CallExpr *call, MemberExpr *member) {
   TupleChecker::ResultTupleMethod method = this->tupleChecker->checkTupleMethod(call, member);
-  bool reported = method.isErr() &&
-                  method.error().code == TupleCheckerCheckTupleMethodErrorCode::ALREADY_REPORTED;
-  if (method.isErr() && !reported) {
+  bool isReported = method.isErr() &&
+                    method.error().code == TupleCheckerCheckTupleMethodErrorCode::ALREADY_REPORTED;
+  if (method.isErr() && !isReported) {
     this->state.getDiagnostics().error(member->loc(), method.error().message);
   }
 
@@ -751,15 +751,15 @@ Expr *CallChecker::checkTupleReceiverCall(CallExpr *call, MemberExpr *member) {
 Expr *CallChecker::checkLocaleMethod(CallExpr *call, MemberExpr *member) {
   const Type *valueReceiver = member->object->type;
   const StringMethodInfo *stringMethod = StringMethodTable::find(member->name);
-  bool stringLocale = valueReceiver->isString() && stringMethod != nullptr &&
-                      stringMethod->form.is<LocaleStringMethod>();
-  if (stringLocale) {
+  bool isStringLocale = valueReceiver->isString() && stringMethod != nullptr &&
+                        stringMethod->form.is<LocaleStringMethod>();
+  if (isStringLocale) {
     return this->intlMethodChecker->checkStringLocale(call, member);
   }
   std::optional<ObjectMember> localeMember = ObjectMemberTable::find(member->name);
-  bool numberLocale = (valueReceiver->isNumeric() || valueReceiver->isDecimal()) &&
-                      localeMember == ObjectMember::TO_LOCALE_STRING;
-  if (numberLocale) {
+  bool isNumberLocale = (valueReceiver->isNumeric() || valueReceiver->isDecimal()) &&
+                        localeMember == ObjectMember::TO_LOCALE_STRING;
+  if (isNumberLocale) {
     return this->intlMethodChecker->checkNumberLocale(call, member);
   }
   if (valueReceiver->isDecimal()) {
@@ -798,8 +798,8 @@ Expr *CallChecker::checkPlainValueMethod(CallExpr *call, MemberExpr *member, con
     return made.value();
   }
   std::optional<ObjectMember> objectMember = ObjectMemberTable::find(member->name);
-  bool boolToString = receiver->isBool() && objectMember == ObjectMember::TO_STRING;
-  if (boolToString && call->args.empty()) {
+  bool isBoolToString = receiver->isBool() && objectMember == ObjectMember::TO_STRING;
+  if (isBoolToString && call->args.empty()) {
     call->args.push_back(this->concatChecker->toStringOperand(member->object));
     call->target = BuiltinCall{.builtin = Builtin::StringOf};
     call->type = Type::string();
@@ -837,18 +837,18 @@ Expr *CallChecker::checkDictReceiverCall(CallExpr *call, MemberExpr *member) {
 }
 
 Expr *CallChecker::reportNoMethod(CallExpr *call, MemberExpr *member, const Type *receiver) {
-  bool setsThis = member->name == "call" || member->name == "apply" || member->name == "bind";
+  bool isSettingThis = member->name == "call" || member->name == "apply" || member->name == "bind";
   if (receiver->isOptional()) {
     std::string message = ErrorTextCallMethod::undefined(member->name);
     this->state.getDiagnostics().error(member->object->loc(), message);
-  } else if (receiver->isFunction() && setsThis) {
+  } else if (receiver->isFunction() && isSettingThis) {
     std::string message = ErrorTextCallMethod::setsThis(member->name);
     this->state.getDiagnostics().error(member->loc(), message);
   } else if (!receiver->isError()) {
     std::string message = ErrorTextCallMethod::noProperty(member->name, receiver->name());
     this->state.getDiagnostics().error(member->loc(), message);
   }
-  this->argumentChecker->checkArgsLoosely(call);
+  this->argumentChecker->walkArgsLoosely(call);
 
   return call;
 }
@@ -942,9 +942,9 @@ Expr *CallChecker::checkScopedCall(CallExpr *call, NameExpr *name, const Type *e
     return this->checkDirectCall(call, known->sym, name->loc());
   }
   std::optional<GlobalName> calledGlobal = GlobalNameTable::find(name->name);
-  bool arrayCall =
+  bool isArrayCall =
       calledGlobal == GlobalName::ARRAY && var == nullptr && func == nullptr && !entry.cls();
-  if (arrayCall && !call->hasSpread()) {
+  if (isArrayCall && !call->hasSpread()) {
     auto *made =
         this->state.getAst().make<NewExpr>(call->loc(), name->name, name->typeArgs, call->args);
     return this->newChecker->checkNew(made, expected);
@@ -981,7 +981,7 @@ Expr *CallChecker::reportNotCallable(CallExpr *call, NameExpr *name, const Scope
     std::string message = ErrorTextCallName::notFunc(name->name);
     this->state.getDiagnostics().error(name->loc(), message);
   }
-  this->argumentChecker->checkArgsLoosely(call);
+  this->argumentChecker->walkArgsLoosely(call);
 
   return call;
 }
@@ -1003,7 +1003,7 @@ Expr *CallChecker::checkCalleeValueCall(CallExpr *call) {
   if (callable.error().code != CallCheckerCalleeCallableErrorCode::ALREADY_REPORTED) {
     this->state.getDiagnostics().error(call->callee->loc(), callable.error().message);
   }
-  this->argumentChecker->checkArgsLoosely(call);
+  this->argumentChecker->walkArgsLoosely(call);
 
   return call;
 }
@@ -1044,7 +1044,7 @@ Expr *CallChecker::checkDirectCall(CallExpr *call, FuncSymbol *func, llvm::SMLoc
 CallChecker::ResultValueCallTyped CallChecker::checkValueCall(CallExpr *call, const Type *type) {
   call->type = type->ret();
   if (type->hasThis()) {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextValueCall::takesThis();
 
     return err(CallCheckerCheckValueCallError{
@@ -1078,7 +1078,7 @@ bool CallChecker::rejectSpread(CallExpr *call) {
       continue;
     }
     this->state.getDiagnostics().error(call->args[i]->loc(), plain.error().message);
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     call->type = Type::error();
 
     return true;
@@ -1097,8 +1097,8 @@ bool CallChecker::isUnshadowedGlobal(const NameExpr *name) const {
 }
 
 bool CallChecker::isGlobalName(const Expr *expr, GlobalName global) const {
-  bool throughGlobalThis = global == GlobalName::CRYPTO && this->isGlobalThisMember(expr, global);
-  if (throughGlobalThis) {
+  bool isThroughGlobalThis = global == GlobalName::CRYPTO && this->isGlobalThisMember(expr, global);
+  if (isThroughGlobalThis) {
     return true;
   }
 

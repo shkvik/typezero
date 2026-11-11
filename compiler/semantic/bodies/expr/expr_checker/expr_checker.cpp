@@ -159,8 +159,8 @@ Expr *ExprChecker::checkFunctionValue(Expr *expr, const Type *expected) {
     return this->genericInstantiator->checkGenericValue(name, generic,
                                                         sig.has_value() ? &*sig : nullptr);
   }
-  bool named = isa<NameExpr>(expr) || isa<MemberExpr>(expr);
-  std::optional<Signature> sig = named ? ExprChecker::expectedSignature(expected) : std::nullopt;
+  bool isNamed = isa<NameExpr>(expr) || isa<MemberExpr>(expr);
+  std::optional<Signature> sig = isNamed ? ExprChecker::expectedSignature(expected) : std::nullopt;
   if (!sig.has_value()) {
     return nullptr;
   }
@@ -191,11 +191,15 @@ Expr *ExprChecker::checkFloatLiteral(FloatLitExpr *lit, const Type *expected) {
     return lit;
   }
   const Type *member = LiteralTypes::numberMemberOf(expected, true);
-  bool decimal = expected != nullptr && (expected->nonOptional()->isDecimal() ||
-                                         (member != nullptr && member->isDecimal()));
-  if (decimal) {
+  bool isDecimal = expected != nullptr && (expected->nonOptional()->isDecimal() ||
+                                           (member != nullptr && member->isDecimal()));
+  if (isDecimal) {
     lit->type = Type::decimalTy();
-    this->decimalChecker->checkDecimalLiteralRange(lit);
+    DecimalChecker::ResultDecimalLiteralChecked range =
+        this->decimalChecker->checkDecimalLiteralRange(lit);
+    if (range.isErr()) {
+      this->state.getDiagnostics().error(lit->loc(), range.error().message);
+    }
     return lit;
   }
   lit->type = Type::doubleTy();
@@ -236,9 +240,9 @@ Expr *ExprChecker::checkMemberValue(MemberExpr *member, const Type *expected) {
   if (read.isOk()) {
     return read.value();
   }
-  bool onObject = read.error().code == MemberCheckerCheckMemberErrorCode::MAY_BE_UNDEFINED ||
-                  read.error().code == MemberCheckerCheckMemberErrorCode::UNKNOWN_NOT_NARROWED;
-  llvm::SMLoc at = onObject ? member->object->loc() : member->loc();
+  bool isOnObject = read.error().code == MemberCheckerCheckMemberErrorCode::MAY_BE_UNDEFINED ||
+                    read.error().code == MemberCheckerCheckMemberErrorCode::UNKNOWN_NOT_NARROWED;
+  llvm::SMLoc at = isOnObject ? member->object->loc() : member->loc();
   this->state.getDiagnostics().error(at, read.error().message);
 
   return member;
@@ -372,12 +376,12 @@ ExprChecker::ResultBranchesMatch ExprChecker::checkConditional(ConditionalExpr *
     Expr *chosen = this->checkExpr(*constant ? cond->thenExpr : cond->elseExpr, expected);
     return ok(chosen);
   }
-  bool thenWaits = ExprChecker::waitsForOther(cond->thenExpr);
-  bool elseWaits = ExprChecker::waitsForOther(cond->elseExpr);
-  if (thenWaits && !elseWaits) {
+  bool isThenWaiting = ExprChecker::waitsForOther(cond->thenExpr);
+  bool isElseWaiting = ExprChecker::waitsForOther(cond->elseExpr);
+  if (isThenWaiting && !isElseWaiting) {
     this->walkElseFirst(cond, expected, flows);
   } else {
-    this->walkThenFirst(cond, expected, flows, elseWaits && !thenWaits);
+    this->walkThenFirst(cond, expected, flows, isElseWaiting && !isThenWaiting);
   }
 
   return this->joinBranches(cond);
@@ -466,10 +470,10 @@ ExprChecker::ResultBranchesMatch ExprChecker::joinBranches(ConditionalExpr *cond
 
 ExprChecker::ResultCastSupported ExprChecker::checkCast(CastExpr *cast) {
   const Type *to = this->typeResolver->resolveType(*cast->target, false);
-  bool arrayLiteral = isa<ArrayLitExpr>(cast->operand);
-  cast->operand = this->checkExpr(cast->operand, arrayLiteral && !to->isError() ? to : nullptr);
+  bool isArrayLiteral = isa<ArrayLitExpr>(cast->operand);
+  cast->operand = this->checkExpr(cast->operand, isArrayLiteral && !to->isError() ? to : nullptr);
   cast->type = to;
-  ExprCheckerCheckCastErrorCode code = ExprChecker::castProblem(cast->operand, to, arrayLiteral);
+  ExprCheckerCheckCastErrorCode code = ExprChecker::castProblem(cast->operand, to, isArrayLiteral);
   std::string message = ExprChecker::castMessage(code, cast->operand, to);
 
   return err(ExprCheckerCheckCastError{

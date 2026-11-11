@@ -35,9 +35,9 @@ std::vector<const Expr *> ExprParts::logicParts(const Expr *expr) {
     const Expr *next = stack.back();
     stack.pop_back();
     auto *logic = dyn_cast_or_null<BinaryExpr>(next);
-    bool split =
+    bool isSplit =
         logic != nullptr && (logic->op == BinaryOp::LogAnd || logic->op == BinaryOp::LogOr);
-    if (split) {
+    if (isSplit) {
       stack.push_back(logic->rhs);
       stack.push_back(logic->lhs);
       continue;

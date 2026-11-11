@@ -58,10 +58,10 @@ JumpTarget BlockPosition::leaveJumpTarget() {
 
 JumpTarget *BlockPosition::findJumpTarget(llvm::StringRef label, bool isBreak) {
   for (JumpTarget &target : llvm::reverse(this->targets)) {
-    bool matches = label.empty() ? (isBreak ? target.kind != JumpTarget::Kind::Block
-                                            : target.kind == JumpTarget::Kind::Loop)
-                                 : llvm::is_contained(target.labels, label);
-    if (matches) {
+    bool isMatching = label.empty() ? (isBreak ? target.kind != JumpTarget::Kind::Block
+                                               : target.kind == JumpTarget::Kind::Loop)
+                                    : llvm::is_contained(target.labels, label);
+    if (isMatching) {
       return &target;
     }
   }

@@ -189,20 +189,20 @@ Expr *ResultMethodChecker::checkResultMatch(const ResultCall &run, const Type *e
 
 const Type *ResultMethodChecker::callbackReturn(const ResultCall &run, const Type *expected) {
   Builtin builtin = run.builtin;
-  bool onError = builtin == Builtin::ResultMapErr || builtin == Builtin::ResultOrElse ||
-                 builtin == Builtin::ResultOrTee;
+  bool isOnError = builtin == Builtin::ResultMapErr || builtin == Builtin::ResultOrElse ||
+                   builtin == Builtin::ResultOrTee;
   const Type *wanted = ResultMethodChecker::wantedType(expected);
   const Type *wantedResult = wanted != nullptr && wanted->isResult() ? wanted : nullptr;
-  const Type *half = onError ? run.error : run.value;
+  const Type *half = isOnError ? run.error : run.value;
   Expr *&arg = run.call->args[0];
   if (builtin == Builtin::ResultMap || builtin == Builtin::ResultMapErr) {
     const Type *wantedHalf = nullptr;
     if (wantedResult != nullptr) {
-      wantedHalf = onError ? wantedResult->errType() : wantedResult->okType();
+      wantedHalf = isOnError ? wantedResult->errType() : wantedResult->okType();
     }
-    bool shaped =
+    bool isShaped =
         wantedHalf != nullptr && (wantedHalf->holdsObjects() || wantedHalf->holdsResults());
-    return this->halfCallbackReturn(run, arg, half, shaped ? wantedHalf : nullptr);
+    return this->halfCallbackReturn(run, arg, half, isShaped ? wantedHalf : nullptr);
   }
   if (builtin == Builtin::ResultAndThen || builtin == Builtin::ResultOrElse) {
     return this->halfCallbackReturn(run, arg, half, wantedResult);
@@ -236,8 +236,8 @@ bool ResultMethodChecker::returnsResult(const ResultCall &run, const Type *ret) 
   if (ret->isResult()) {
     return true;
   }
-  bool andThen = run.builtin == Builtin::ResultAndThen;
-  std::string message = ErrorTextResultMethod::result(run.name, ret->name(), andThen);
+  bool isAndThen = run.builtin == Builtin::ResultAndThen;
+  std::string message = ErrorTextResultMethod::result(run.name, ret->name(), isAndThen);
   this->state.getDiagnostics().error(run.call->args[0]->loc(), message);
 
   return false;

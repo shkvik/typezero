@@ -129,12 +129,12 @@ Expr *RuntimeObjectChecker::checkReadlineClose(CallExpr *call, MemberExpr *membe
 }
 
 Expr *RuntimeObjectChecker::checkQuestion(CallExpr *call, MemberExpr *member) {
-  bool promises = member->object->type->runtimeKind() == Type::Runtime::ReadlinePromises;
-  if (this->hasWrongArity(call, member, 1, promises ? 1 : 3)) {
+  bool hasPromises = member->object->type->runtimeKind() == Type::Runtime::ReadlinePromises;
+  if (this->hasWrongArity(call, member, 1, hasPromises ? 1 : 3)) {
     return call;
   }
   Expr *query = this->argumentChecker->checkArg(call->args[0], Type::string());
-  if (!promises) {
+  if (!hasPromises) {
     return this->checkQuestionCallback(call, member, query);
   }
   call->args = {query};

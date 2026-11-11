@@ -267,9 +267,9 @@ std::optional<ConversionStep> TypeRelations::sourceStep(const Type *from, const 
     return TypeRelations::unionSourceStep(from, to);
   }
   if (to->isPattern()) {
-    bool matches =
+    bool isMatching =
         from->isStringLiteral() && TemplatePatterns::matchesPattern(from->literalText(), to);
-    return TypeRelations::stepDecided(matches);
+    return TypeRelations::stepDecided(isMatching);
   }
   if (from->isPattern()) {
     return TypeRelations::stepDecided(to == Type::string());
@@ -314,15 +314,15 @@ ConversionStep TypeRelations::stepNeeds(std::vector<ConversionGoal> goals) {
 }
 
 ConversionStep TypeRelations::jsonStep(const Type *from, const Type *to) {
-  bool plain = from->isString() || from->isNumeric() || from->isBool() || from->isLiteral() ||
-               (from->isArray() && from->inner()->isJson());
-  if (plain) {
+  bool isPlain = from->isString() || from->isNumeric() || from->isBool() || from->isLiteral() ||
+                 (from->isArray() && from->inner()->isJson());
+  if (isPlain) {
     return TypeRelations::stepHolds();
   }
-  bool record = from->isRecord() && from->keyType()->isString() &&
-                !TypeRelations::holdsWideInteger(from->valueType());
-  return record ? TypeRelations::stepNeeds({{from->valueType()->nonOptional(), to}})
-                : TypeRelations::stepDecided(false);
+  bool isRecord = from->isRecord() && from->keyType()->isString() &&
+                  !TypeRelations::holdsWideInteger(from->valueType());
+  return isRecord ? TypeRelations::stepNeeds({{from->valueType()->nonOptional(), to}})
+                  : TypeRelations::stepDecided(false);
 }
 
 ConversionStep TypeRelations::resultStep(const Type *from, const Type *to) {
@@ -464,7 +464,7 @@ Expr *TypeRelations::adaptLiteral(Expr *expr, const Type *to) {
 
 std::string TypeRelations::operandText(llvm::StringRef text) {
   int depth = 0;
-  bool plain = !text.empty() && text.front() != '-' && text.front() != '+';
+  bool isPlain = !text.empty() && text.front() != '-' && text.front() != '+';
   for (char c : text) {
     if (c == '(' || c == '[') {
       ++depth;
@@ -472,23 +472,23 @@ std::string TypeRelations::operandText(llvm::StringRef text) {
       --depth;
     } else if (depth == 0 && !std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '.' &&
                c != '#' && c != '$' && c != '"' && c != '\'') {
-      plain = false;
+      isPlain = false;
     }
   }
   if (text.size() >= 2 && text.front() == '(' && text.back() == ')') {
     int level = 0;
-    bool outer = true;
+    bool isOuter = true;
     for (size_t i = 0; i < text.size(); ++i) {
       level += text[i] == '(' ? 1 : text[i] == ')' ? -1 : 0;
       if (level == 0 && i + 1 < text.size()) {
-        outer = false;
+        isOuter = false;
       }
     }
-    plain |= outer;
+    isPlain |= isOuter;
   }
-  bool literal = !text.empty() && std::isdigit(static_cast<unsigned char>(text.front()));
+  bool isLiteral = !text.empty() && std::isdigit(static_cast<unsigned char>(text.front()));
 
-  return plain && !literal ? text.str() : "(" + text.str() + ")";
+  return isPlain && !isLiteral ? text.str() : "(" + text.str() + ")";
 }
 
 std::string TypeRelations::conversionHint(const Expr *expr, const Type *to) {
@@ -671,9 +671,9 @@ UnifyShortcut TypeRelations::shortUnify(const Type *a, const Type *b) {
 // TODO: говнокод
 const Type *TypeRelations::baseUnify(const Type *x, const Type *y) {
   auto number = [](const Type *t) { return t->isNumeric() || t->isDecimal(); };
-  bool related = (number(x) && number(y)) || (x->isObject() && y->isObject()) ||
-                 (x->isIterator() && y->isIterator());
-  const Type *base = x == y ? x : related ? TypeRelations::commonNumericType(x, y) : nullptr;
+  bool isRelated = (number(x) && number(y)) || (x->isObject() && y->isObject()) ||
+                   (x->isIterator() && y->isIterator());
+  const Type *base = x == y ? x : isRelated ? TypeRelations::commonNumericType(x, y) : nullptr;
   if (!base && (x->isJson() || y->isJson())) {
     base = TypeRelations::isImplicitlyConvertible(y, x)   ? x
            : TypeRelations::isImplicitlyConvertible(x, y) ? y
@@ -713,9 +713,9 @@ Expr *TypeRelations::convert(Expr *expr, const Type *to) {
     return expr;
   }
   const Type *reflected = to->nonOptional();
-  bool reflects = reflected->isConstructor() || reflected->isAnyObject() ||
-                  reflected->isUnknown() ||
-                  (reflected->isArray() && reflected->inner()->isUnknown());
+  bool isReflecting = reflected->isConstructor() || reflected->isAnyObject() ||
+                      reflected->isUnknown() ||
+                      (reflected->isArray() && reflected->inner()->isUnknown());
   if (expr->type->isParam() && !TypeQueries::mentionsParam(to)) {
     this->genericChecker->noteForced(expr, to);
   }
@@ -746,7 +746,7 @@ Expr *TypeRelations::convert(Expr *expr, const Type *to) {
   if (this->wideningRelations->widensWrites(expr->type, to)) {
     this->state.getWideningStore().rememberWideningCast(cast);
   }
-  if (reflects) {
+  if (isReflecting) {
     this->reflectChecker->noteReflectedConversion(expr->type, to, cast);
   }
   this->reflectChecker->noteConstructorFlow(expr->type, to);
@@ -813,18 +813,18 @@ Expr *TypeRelations::iteratorValue(Expr *expr, const Type *to) {
   if (iterator == nullptr) {
     iterator = this->iterableChecker->userIterator(expr);
   }
-  bool fits = iterator != nullptr && iterator->type->isIterator() &&
-              TypeRelations::isImplicitlyConvertible(iterator->type, to);
+  bool isFitting = iterator != nullptr && iterator->type->isIterator() &&
+                   TypeRelations::isImplicitlyConvertible(iterator->type, to);
 
-  return fits ? this->convert(iterator, to) : nullptr;
+  return isFitting ? this->convert(iterator, to) : nullptr;
 }
 
 Expr *TypeRelations::asyncIteratorValue(Expr *expr, const Type *to) {
   Expr *iterator = this->iterableChecker->asyncUserIterator(expr);
-  bool fits = iterator != nullptr && iterator->type->isAsyncIterator() &&
-              TypeRelations::isImplicitlyConvertible(iterator->type, to);
+  bool isFitting = iterator != nullptr && iterator->type->isAsyncIterator() &&
+                   TypeRelations::isImplicitlyConvertible(iterator->type, to);
 
-  return fits ? this->convert(iterator, to) : nullptr;
+  return isFitting ? this->convert(iterator, to) : nullptr;
 }
 
 Expr *TypeRelations::adaptedFunction(Expr *expr, const Type *function, const Type *to) {
@@ -880,11 +880,11 @@ TypeRelations::ResultRangeWasProven
 TypeRelations::rangeProven(const Expr *expr, const Type *to, llvm::StringRef what,
                            llvm::ArrayRef<std::pair<int64_t, int64_t>> intervals) {
   const Type *from = expr->type;
-  bool integer = from->isInt() || (from->isLiteral() && from->literalBase()->isInt());
-  bool outside = !intervals.empty() && integer;
+  bool isInteger = from->isInt() || (from->isLiteral() && from->literalBase()->isInt());
+  bool isOutside = !intervals.empty() && isInteger;
   std::string prefix = ErrorTextAssignable::notTo(from->name(), to->name(), what);
   std::string holds = ErrorTextRange::holds(intervals);
-  if (outside && !from->isInt()) {
+  if (isOutside && !from->isInt()) {
     std::string message = prefix + holds;
 
     return err(TypeRelationsRangeProvenError{
@@ -892,7 +892,7 @@ TypeRelations::rangeProven(const Expr *expr, const Type *to, llvm::StringRef wha
         .message = message,
     });
   }
-  if (outside) {
+  if (isOutside) {
     std::string check = TypeRelations::rangeCheck(expr, to->nonOptional(), intervals);
     std::string message = prefix + holds + ErrorTextRange::outside(check);
 
@@ -994,16 +994,16 @@ TypeRelationsAssignableErrorCode TypeRelations::mismatchOf(const AssignAttempt &
   const Type *toObject = attempt.toObject;
   const ClassDecl *fromClass = fromObject->classDecl();
   const ClassDecl *genericClass = from->classRef();
-  bool genericValue =
+  bool isGenericValue =
       genericClass != nullptr && genericClass->isGeneric() && toObject->isConstructor();
-  if (genericValue) {
+  if (isGenericValue) {
     return TypeRelationsAssignableErrorCode::GENERIC_CLASS_VALUE;
   }
   if (from->isUnknown() || from->isAnyObject()) {
     return TypeRelationsAssignableErrorCode::UNKNOWN_VALUE;
   }
-  bool literalObject = fromClass == nullptr || fromClass->literal();
-  if (fromObject->isObject() && toObject->isClass() && literalObject) {
+  bool isLiteralObject = fromClass == nullptr || fromClass->literal();
+  if (fromObject->isObject() && toObject->isClass() && isLiteralObject) {
     return TypeRelationsAssignableErrorCode::LITERAL_NOT_INSTANCE;
   }
   if (fromClass != nullptr && fromClass->literal() && toObject->isObject()) {
@@ -1013,24 +1013,25 @@ TypeRelationsAssignableErrorCode TypeRelations::mismatchOf(const AssignAttempt &
   if (!widening.empty()) {
     return TypeRelationsAssignableErrorCode::GENERIC_WIDENING;
   }
-  bool classValue = fromObject->isClass() && toObject->isObject() && fromObject != toObject;
-  if (classValue && toObject->isClass()) {
+  bool isClassValue = fromObject->isClass() && toObject->isObject() && fromObject != toObject;
+  if (isClassValue && toObject->isClass()) {
     return TypeRelationsAssignableErrorCode::CLASS_NOT_EXTENDED;
   }
-  if (classValue) {
+  if (isClassValue) {
     return TypeRelationsAssignableErrorCode::CLASS_NOT_IMPLEMENTED;
   }
-  bool objectIntoUnion = fromObject->isObject() && !fromObject->isClass() && toObject->isUnion() &&
-                         llvm::any_of(toObject->members(), TypeRelations::isObjectType);
-  if (objectIntoUnion) {
+  bool isObjectIntoUnion = fromObject->isObject() && !fromObject->isClass() &&
+                           toObject->isUnion() &&
+                           llvm::any_of(toObject->members(), TypeRelations::isObjectType);
+  if (isObjectIntoUnion) {
     return TypeRelationsAssignableErrorCode::OBJECT_INTO_UNION;
   }
   if (fromObject->isTuple() && toObject->isArray()) {
     return TypeRelationsAssignableErrorCode::TUPLE_NOT_ARRAY;
   }
-  bool objectsDiffer = fromObject->isObject() && toObject->isObject() &&
-                       !TypeRelations::isImplicitlyConvertible(fromObject, toObject);
-  if (objectsDiffer) {
+  bool hasDifferentObjects = fromObject->isObject() && toObject->isObject() &&
+                             !TypeRelations::isImplicitlyConvertible(fromObject, toObject);
+  if (hasDifferentObjects) {
     return TypeRelationsAssignableErrorCode::OBJECT_MISMATCH;
   }
   if (from->isOptional() && TypeRelations::isImplicitlyConvertible(from->inner(), to)) {
@@ -1043,14 +1044,14 @@ TypeRelationsAssignableErrorCode TypeRelations::mismatchOf(const AssignAttempt &
     return TypeRelationsAssignableErrorCode::NOT_AN_OBJECT;
   }
   const Type *value = from->nonOptional();
-  bool intoJson = to->nonOptional()->isJson();
-  if (intoJson && (fromObject->isObject() || value->isArray())) {
+  bool isIntoJson = to->nonOptional()->isJson();
+  if (isIntoJson && (fromObject->isObject() || value->isArray())) {
     return TypeRelationsAssignableErrorCode::OBJECT_INTO_JSON;
   }
-  if (intoJson && value->isRecord() && TypeRelations::holdsWideInteger(value->valueType())) {
+  if (isIntoJson && value->isRecord() && TypeRelations::holdsWideInteger(value->valueType())) {
     return TypeRelationsAssignableErrorCode::WIDE_INTEGERS_INTO_JSON;
   }
-  if (intoJson && value->isDecimal()) {
+  if (isIntoJson && value->isDecimal()) {
     return TypeRelationsAssignableErrorCode::DECIMAL_INTO_JSON;
   }
   if (from->isFloat() && to->isDecimal()) {
@@ -1193,8 +1194,8 @@ bool TypeRelations::allHaveLiteralField(llvm::ArrayRef<const Type *> members,
                                         llvm::StringRef name) {
   for (const Type *member : members) {
     const Field *field = member->isObject() ? member->field(name) : nullptr;
-    bool literal = field != nullptr && field->type->isLiteral();
-    if (!literal) {
+    bool isLiteral = field != nullptr && field->type->isLiteral();
+    if (!isLiteral) {
       return false;
     }
   }

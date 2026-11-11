@@ -164,7 +164,7 @@ ClosureChecker::ResultPromiseAwaited ClosureChecker::promiseAwaited(const Signat
 Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Signature *sig) {
   FunctionDecl *fn = fe->fn;
   FuncSymbol *sym = this->makeClosureSymbol(fn);
-  bool generic = this->reportsGenericClosure(fe);
+  bool isGeneric = this->reportsGenericClosure(fe);
   ClosureParams params{
       .sym = sym,
       .thisFromContext = this->addsContextThis(fe, sig),
@@ -177,7 +177,7 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Signature *sig) 
   this->padHiddenParams(fe, sym, sig);
   this->argListChecker->expandArgumentList(fn, sym);
   this->walkClosureReturn(fe, sym, sig);
-  if (generic) {
+  if (isGeneric) {
     this->state.getScopeStack().closeTypeScope();
   }
   this->inferRecursiveReturn(fn, sym);
@@ -216,9 +216,9 @@ bool ClosureChecker::reportsGenericClosure(FunctionExpr *fe) {
 
 bool ClosureChecker::addsContextThis(FunctionExpr *fe, const Signature *sig) {
   FunctionDecl *fn = fe->fn;
-  bool wanted = sig != nullptr && sig->hasThis && !sig->params.empty() &&
-                (fn->params.empty() || fn->params[0].name != "this" || fn->isArrow());
-  if (!wanted) {
+  bool isWanted = sig != nullptr && sig->hasThis && !sig->params.empty() &&
+                  (fn->params.empty() || fn->params[0].name != "this" || fn->isArrow());
+  if (!isWanted) {
     return false;
   }
   Param self;
@@ -234,10 +234,10 @@ void ClosureChecker::walkClosureParam(FunctionDecl *fn, size_t i, const Signatur
   FuncSymbol *sym = params.sym;
   Param &param = fn->params[i];
   const Type *given = sig != nullptr && i < sig->params.size() ? sig->params[i] : nullptr;
-  bool mayOmit = param.optional() || param.defaultValue();
+  bool isMayOmit = param.optional() || param.defaultValue();
   ParamTypes types = this->closureParamTypes(param, given);
   if (i == 0) {
-    this->walkClosureThis(fn, param, mayOmit, params);
+    this->walkClosureThis(fn, param, isMayOmit, params);
   }
   if (param.rest()) {
     ResultRestParamArray array = ClosureChecker::restParam(param, types.type);
@@ -246,14 +246,14 @@ void ClosureChecker::walkClosureParam(FunctionDecl *fn, size_t i, const Signatur
     }
     sym->hasRest = true;
     types.passed = types.type;
-  } else if (!mayOmit) {
+  } else if (!isMayOmit) {
     ResultParamOrderGood order = ClosureChecker::paramOrder(param, params.afterOptional);
     if (order.isErr()) {
       this->state.getDiagnostics().error(param.loc, order.error().message);
     }
     sym->minArgs = i + 1;
   }
-  params.afterOptional |= mayOmit;
+  params.afterOptional |= isMayOmit;
   param.declaredType = types.type;
   sym->params.push_back(types.passed);
 }
@@ -294,14 +294,14 @@ ClosureChecker::ParamTypes ClosureChecker::closureParamTypes(const Param &param,
 
 ClosureChecker::ParamTypes ClosureChecker::writtenParamTypes(const Param &param,
                                                              const Type *given) {
-  bool mayOmit = param.optional() || param.defaultValue();
+  bool isMayOmit = param.optional() || param.defaultValue();
   this->state.getTypeContext().enterListContext(param.rest());
   const Type *type = this->typeResolver->resolveType(*param.type, false);
   this->state.getTypeContext().leaveListContext();
   if (param.optional()) {
     type = Type::optional(type);
   }
-  const Type *passed = mayOmit ? Type::optional(type) : type;
+  const Type *passed = isMayOmit ? Type::optional(type) : type;
   ResultParamTypeAgree agrees = ClosureChecker::paramAgrees(param, passed, given);
   if (agrees.isErr()) {
     this->state.getDiagnostics().error(param.loc, agrees.error().message);
@@ -374,9 +374,9 @@ void ClosureChecker::walkGeneratorReturn(FunctionDecl *fn, FuncSymbol *sym, cons
     sym->setReturnType(generator.isOk() ? generator.value() : Type::error());
     return;
   }
-  bool fits = sig != nullptr && sig->ret != nullptr &&
-              (fn->isAsync ? sig->ret->isAsyncIterator() : sig->ret->isIterator());
-  if (fits) {
+  bool isFitting = sig != nullptr && sig->ret != nullptr &&
+                   (fn->isAsync ? sig->ret->isAsyncIterator() : sig->ret->isIterator());
+  if (isFitting) {
     sym->setReturnType(sig->ret);
   }
 }
@@ -432,12 +432,12 @@ void ClosureChecker::inferRecursiveReturn(FunctionDecl *fn, FuncSymbol *sym) {
   }
   this->state.getReturnInference().addCycle({sym});
   BodyState saved = this->returnInferrer->enterBody(fn);
-  bool ownScope = !fn->ownName().empty();
-  if (ownScope) {
+  bool isOwnScope = !fn->ownName().empty();
+  if (isOwnScope) {
     this->declareOwnName(fn);
   }
   this->returnInferrer->inferCycle(this->state.getReturnInference().getCycleOf(sym));
-  if (ownScope) {
+  if (isOwnScope) {
     this->scopes->closeScope();
   }
   this->returnInferrer->leaveBody(saved);
@@ -446,26 +446,26 @@ void ClosureChecker::inferRecursiveReturn(FunctionDecl *fn, FuncSymbol *sym) {
 bool ClosureChecker::isRecursiveClosure(FunctionDecl *fn) {
   llvm::StringSet<> names;
   AstWalker::collectNames(fn->body, names);
-  bool recursive = !fn->ownName().empty() && names.contains(fn->ownName());
+  bool isRecursive = !fn->ownName().empty() && names.contains(fn->ownName());
   for (const auto &entry : names) {
     VarSymbol *var = this->scopes->lookup(entry.getKey()).var();
-    recursive |= var != nullptr && var->lambda() == fn;
+    isRecursive |= var != nullptr && var->lambda() == fn;
   }
 
-  return recursive;
+  return isRecursive;
 }
 
 void ClosureChecker::walkInitializerBody(FunctionDecl *fn) {
   ClassContext &classContext = this->state.getClassContext();
   FunctionDecl *initializer = classContext.getInitializer();
-  bool inInitializer =
+  bool isInInitializer =
       initializer != nullptr && this->state.getFunctionStack().getCurrentDecl() == initializer;
-  if (!inInitializer) {
-    return this->checkClosureBody(fn);
+  if (!isInInitializer) {
+    return this->walkClosureBody(fn);
   }
-  bool thisReady = this->classChecker->thisReady(this->state.getFlowState().getFlow()).isOk();
-  classContext.enterInitializerClosure(thisReady);
-  this->checkClosureBody(fn);
+  bool isThisReady = this->classChecker->thisReady(this->state.getFlowState().getFlow()).isOk();
+  classContext.enterInitializerClosure(isThisReady);
+  this->walkClosureBody(fn);
   classContext.leaveInitializerClosure();
 }
 
@@ -489,7 +489,7 @@ void ClosureChecker::declareOwnName(FunctionDecl *fn) {
   }
 }
 
-void ClosureChecker::checkClosureBody(FunctionDecl *fn) {
+void ClosureChecker::walkClosureBody(FunctionDecl *fn) {
   BodyState saved = this->returnInferrer->enterBody(fn);
   auto fixed = [](Term t) {
     return (!t.var || (t.var->isConst && !t.length)) && (!t.var2 || (t.var2->isConst && !t.length2));
@@ -519,22 +519,22 @@ void ClosureChecker::checkClosureBody(FunctionDecl *fn) {
       this->state.getFlowState().markErrResult(var);
     }
   }
-  bool ownScope = fn->isExpression() && !fn->ownName().empty();
-  if (ownScope) {
+  bool isOwnScope = fn->isExpression() && !fn->ownName().empty();
+  if (isOwnScope) {
     this->declareOwnName(fn);
   }
   if (fn->sym->hasReturnType()) {
-    this->functionChecker->checkFunctionBody(fn);
+    this->functionChecker->walkFunctionBody(fn);
   } else {
-    this->returnInferrer->checkAndInfer(fn);
+    this->returnInferrer->inferFromBody(fn);
   }
-  if (ownScope) {
+  if (isOwnScope) {
     this->scopes->closeScope();
   }
   this->returnInferrer->leaveBody(saved);
 }
 
-void ClosureChecker::checkStatements(BlockStmt *block) {
+void ClosureChecker::walkStatements(BlockStmt *block) {
   this->typeDeclarer->declareTypes(block->body);
   NestedGroup *group = this->nestedFunctions->declareNested(block);
   if (group) {
@@ -559,7 +559,7 @@ void ClosureChecker::checkStatements(BlockStmt *block) {
       }
     }
     this->state.getBlockPosition().rememberBlockPosition(block->body, i);
-    this->stmtChecker->checkStmt(block->body[i]);
+    this->stmtChecker->walkStmt(block->body[i]);
     auto *decided = dyn_cast<IfStmt>(block->body[i]);
     if (this->state.getGenericStore().isCheckingInstance() && decided &&
         isa<BoolLitExpr>(decided->cond) && this->state.getFlowState().isUnreachable() &&

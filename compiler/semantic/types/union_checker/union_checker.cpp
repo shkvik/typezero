@@ -48,11 +48,11 @@ std::string UnionChecker::lackingHint(const MemberExpr *member, const Type *type
   };
   std::string fallback;
   for (const Field &f : type->members().front()->fields()) {
-    bool tags = llvm::all_of(type->members(), [&](const Type *m) {
+    bool hasTags = llvm::all_of(type->members(), [&](const Type *m) {
       const Field *g = m->field(f.name);
       return g && literals(g->type);
     });
-    if (!tags) {
+    if (!hasTags) {
       continue;
     }
     for (const Type *m : type->members()) {
@@ -62,10 +62,10 @@ std::string UnionChecker::lackingHint(const MemberExpr *member, const Type *type
       }
       std::string field = ObjectChecker::fieldText(member->object, f.name);
       std::string hint = ErrorTextUnionMember::tagHint(field, tag->name());
-      bool unique = llvm::none_of(type->members(), [&](const Type *other) {
+      bool isUnique = llvm::none_of(type->members(), [&](const Type *other) {
         return !other->field(member->name) && holds(other->field(f.name)->type, tag);
       });
-      if (unique) {
+      if (isUnique) {
         return hint;
       }
       if (fallback.empty()) {
@@ -191,14 +191,14 @@ const Field *UnionChecker::unionMemberField(const MemberExpr *member, const Type
 
 UnionChecker::ResultUnionMemberTyped
 UnionChecker::lackingFieldError(const MemberExpr *member, const Type *type, const Type *lacking) {
-  bool nowhere = true;
-  bool plainObjects = true;
+  bool isNowhere = true;
+  bool isPlainObjects = true;
   for (const Type *m : type->members()) {
-    bool plain = m->isObject() && !m->isClass();
-    nowhere &= !(plain && m->field(member->name) != nullptr);
-    plainObjects &= plain;
+    bool isPlain = m->isObject() && !m->isClass();
+    isNowhere &= !(isPlain && m->field(member->name) != nullptr);
+    isPlainObjects &= isPlain;
   }
-  if (nowhere && plainObjects) {
+  if (isNowhere && isPlainObjects) {
     std::string message = ErrorTextUnionMember::noField(type->name(), member->name);
 
     return err(UnionCheckerCheckUnionMemberError{
@@ -227,8 +227,8 @@ UnionChecker::ResultUnionFieldTarget UnionChecker::checkUnionFieldTarget(MemberE
     const ClassDecl *cls = ClassDeclarer::classOf(m);
     const ClassDecl *owner = nullptr;
     const ClassField *declared = cls ? ClassBases::findField(cls, member->name, &owner) : nullptr;
-    bool missing = !f || (cls && (!declared || declared->method()));
-    if (missing) {
+    bool isMissing = !f || (cls && (!declared || declared->method()));
+    if (isMissing) {
       std::string message =
           ErrorTextUnionMember::mayLack(member->name, m->name(), type->name(), "");
 
@@ -292,9 +292,9 @@ const Type *UnionChecker::commonBaseWith(const Type *type, llvm::StringRef name)
     if (llvm::is_contained(members, candidate) && members.size() > 1) {
       continue;
     }
-    bool all = llvm::all_of(members.drop_front(),
-                            [&](const Type *m) { return m->isSubtypeOf(candidate); });
-    if (!all) {
+    bool isAll = llvm::all_of(members.drop_front(),
+                              [&](const Type *m) { return m->isSubtypeOf(candidate); });
+    if (!isAll) {
       continue;
     }
     if (const ClassDecl *cls = ClassDeclarer::classOf(candidate)) {
@@ -343,7 +343,7 @@ UnionChecker::ResultUnionMethodTyped UnionChecker::checkUnionMethodCall(CallExpr
   call->type = Type::error();
   member->type = Type::error();
   if (receiver->isTagged() || !UnionChecker::isAllObjects(receiver)) {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     const char *typeOf = TypeSpelling::typeOfName(receiver->members().front());
     std::string message = ErrorTextUnionMember::narrow(member->name, receiver->name(), typeOf);
 
@@ -357,15 +357,15 @@ UnionChecker::ResultUnionMethodTyped UnionChecker::checkUnionMethodCall(CallExpr
   for (const Type *m : receiver->members()) {
     ResultUnionMethodPart part = this->memberMethod(member, m);
     if (part.isErr()) {
-      this->argumentChecker->checkArgsLoosely(call);
+      this->argumentChecker->walkArgsLoosely(call);
       return err(part.error());
     }
     const Type *type = part.value().type;
     if (type == nullptr || !type->isFunction()) {
-      this->argumentChecker->checkArgsLoosely(call);
-      bool field = type != nullptr;
+      this->argumentChecker->walkArgsLoosely(call);
+      bool isField = type != nullptr;
       std::string message =
-          ErrorTextUnionMethod::notMethod(receiver->name(), m->name(), member->name, field);
+          ErrorTextUnionMethod::notMethod(receiver->name(), m->name(), member->name, isField);
 
       return err(UnionCheckerCheckUnionMethodCallError{
           .code = UnionCheckerCheckUnionMethodCallErrorCode::NOT_A_METHOD,
@@ -373,7 +373,7 @@ UnionChecker::ResultUnionMethodTyped UnionChecker::checkUnionMethodCall(CallExpr
       });
     }
     if (fnType != nullptr && type != fnType) {
-      this->argumentChecker->checkArgsLoosely(call);
+      this->argumentChecker->walkArgsLoosely(call);
       std::string message = ErrorTextUnionMethod::differ(receiver->name(), member->name,
                                                          fnType->name(), type->name());
 

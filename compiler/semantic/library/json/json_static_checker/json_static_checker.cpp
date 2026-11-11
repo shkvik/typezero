@@ -198,7 +198,7 @@ Expr *JsonStaticChecker::checkJsonParse(CallExpr *call, MemberExpr *member) {
     return call;
   }
   call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
-  this->checkConstantJson(call->args[0]);
+  this->walkConstantJson(call->args[0]);
   call->target = BuiltinCall{.builtin = Builtin::JsonParse};
   call->type = Type::result(Type::json(), this->prelude->builtinType("JsonError"));
 
@@ -213,11 +213,11 @@ Expr *JsonStaticChecker::checkStringify(CallExpr *call, MemberExpr *member) {
   }
   call->args[0] = this->exprChecker->checkExpr(call->args[0]);
   Expr *value = call->args[0];
-  bool ok = this->stringifiedValueFits(value);
+  bool isOk = this->stringifiedValueFits(value);
   std::vector<Expr *> args{value};
-  ok &= this->stringifyReplacerFits(call);
-  ok &= this->stringifySpaceFits(call, args);
-  if (!ok) {
+  isOk &= this->stringifyReplacerFits(call);
+  isOk &= this->stringifySpaceFits(call, args);
+  if (!isOk) {
     return call;
   }
   call->args = std::move(args);
@@ -225,9 +225,9 @@ Expr *JsonStaticChecker::checkStringify(CallExpr *call, MemberExpr *member) {
   call->type = JsonStaticChecker::mayStringifyToUndefined(value->type)
                    ? Type::optional(Type::string())
                    : Type::string();
-  bool cyclic =
+  bool isCyclic =
       !this->libraryCalls->inLibrary(call->loc()) && JsonStaticChecker::mayHoldItself(value->type);
-  if (cyclic) {
+  if (isCyclic) {
     call->type = Type::result(call->type, this->prelude->builtinType("JsonError"));
   }
 
@@ -235,20 +235,20 @@ Expr *JsonStaticChecker::checkStringify(CallExpr *call, MemberExpr *member) {
 }
 
 bool JsonStaticChecker::stringifiedValueFits(const Expr *value) {
-  bool ok = !value->type->isError();
+  bool isOk = !value->type->isError();
   if (value->type->isVoid()) {
     std::string message = ErrorTextJsonStatic::voidValue();
     this->state.getDiagnostics().error(value->loc(), message);
-    ok = false;
+    isOk = false;
   }
-  const ClassDecl *cls = ok ? JsonStaticChecker::classWithToJson(value->type) : nullptr;
+  const ClassDecl *cls = isOk ? JsonStaticChecker::classWithToJson(value->type) : nullptr;
   if (cls != nullptr) {
     std::string message = ErrorTextJsonStatic::toJson(cls->name);
     this->state.getDiagnostics().error(value->loc(), message);
-    ok = false;
+    isOk = false;
   }
 
-  return ok;
+  return isOk;
 }
 
 bool JsonStaticChecker::stringifyReplacerFits(CallExpr *call) {
@@ -336,7 +336,7 @@ bool JsonStaticChecker::readEmbedded(CallExpr *call, llvm::StringRef fn, std::st
   return true;
 }
 
-void JsonStaticChecker::checkConstantJson(const Expr *arg) {
+void JsonStaticChecker::walkConstantJson(const Expr *arg) {
   while (auto *conv = llvm::dyn_cast<CastExpr>(arg)) {
     if (!conv->isImplicit()) {
       return;
@@ -409,9 +409,9 @@ JsonStaticChecker::ResultConstantJson JsonStaticChecker::constantJson(llvm::Stri
 }
 
 Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
-  bool embedsText = this->callChecker->isGlobalName(name, GlobalName::EMBED_TEXT);
-  bool embedsBytes = this->callChecker->isGlobalName(name, GlobalName::EMBED_BYTES);
-  if (!embedsText && !embedsBytes) {
+  bool isEmbedingText = this->callChecker->isGlobalName(name, GlobalName::EMBED_TEXT);
+  bool isEmbedingBytes = this->callChecker->isGlobalName(name, GlobalName::EMBED_BYTES);
+  if (!isEmbedingText && !isEmbedingBytes) {
     return nullptr;
   }
   llvm::StringRef fn = name->name;
@@ -430,7 +430,7 @@ Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
     this->state.getDiagnostics().error(name->loc(), message);
   }
 
-  if (embedsBytes) {
+  if (isEmbedingBytes) {
     return this->bufferStaticChecker->checkEmbedBytes(call, name);
   }
   ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);

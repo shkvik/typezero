@@ -70,8 +70,8 @@ VarSymbol *Scopes::declareVar(llvm::StringRef name, llvm::SMLoc loc, const Type 
   var->type = type;
   var->isConst = isConst;
   if (this->state.getScopeStack().isTopLevel()) {
-    bool usedInFunction = this->state.getScopeStack().isUsedInFunction(name);
-    var->place = GlobalVar{.usedInFunction = usedInFunction};
+    bool isUsedInFunction = this->state.getScopeStack().isUsedInFunction(name);
+    var->place = GlobalVar{.usedInFunction = isUsedInFunction};
   } else {
     unsigned declSeq = this->state.getReturnInference().takeSequenceNumber();
     var->place = VarSymbol::localPlace(this->state.getFunctionStack().getCurrentDecl(), declSeq);

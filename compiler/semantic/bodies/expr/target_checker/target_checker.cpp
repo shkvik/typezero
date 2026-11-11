@@ -45,8 +45,8 @@ TargetChecker::TargetChecker(SemanticState &owner, SemanticParts &all)
 
 TargetChecker::ResultIndexIsNotBytes TargetChecker::indexNotBytes(const Type *type) {
   if (type->isBytes()) {
-    bool dataView = type->bytes() == Type::Bytes::DataView;
-    std::string message = ErrorTextIndexTarget::bytes(type->name(), dataView);
+    bool isDataView = type->bytes() == Type::Bytes::DataView;
+    std::string message = ErrorTextIndexTarget::bytes(type->name(), isDataView);
 
     return err(TargetCheckerIndexNotBytesError{
         .code = TargetCheckerIndexNotBytesErrorCode::BYTES_INDEXED,
@@ -116,9 +116,9 @@ TargetChecker::ResultDefinedDictType TargetChecker::dictDefined(const Type *type
 TargetChecker::ResultNoBytesProperty TargetChecker::bytesMember(const Type *type,
                                                                 const MemberExpr *member) {
   const Type *bytes = type->nonOptional();
-  bool length = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) ||
-                BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH);
-  if (bytes->isBytes() && length) {
+  bool isLength = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) ||
+                  BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH);
+  if (bytes->isBytes() && isLength) {
     std::string message = ErrorTextMemberTarget::fixedSize(bytes->name());
 
     return err(TargetCheckerBytesMemberError{
@@ -140,9 +140,9 @@ TargetChecker::ResultNoBytesProperty TargetChecker::bytesMember(const Type *type
 
 TargetChecker::ResultFieldIsWritable
 TargetChecker::memberWritable(const Type *type, const MemberExpr *member, bool compound) {
-  bool length = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH);
-  bool arrayLength = type->isArray() && length;
-  if (arrayLength && compound) {
+  bool isLength = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH);
+  bool isArrayLength = type->isArray() && isLength;
+  if (isArrayLength && compound) {
     std::string message = ErrorTextMemberTarget::onlyAssign();
 
     return err(TargetCheckerMemberWritableError{
@@ -150,7 +150,7 @@ TargetChecker::memberWritable(const Type *type, const MemberExpr *member, bool c
         .message = message,
     });
   }
-  if (type->isString() && length) {
+  if (type->isString() && isLength) {
     std::string message = ErrorTextMemberTarget::textLength();
 
     return err(TargetCheckerMemberWritableError{
@@ -158,7 +158,7 @@ TargetChecker::memberWritable(const Type *type, const MemberExpr *member, bool c
         .message = message,
     });
   }
-  if (!arrayLength) {
+  if (!isArrayLength) {
     std::string message = ErrorTextMemberTarget::noAssign(member->name, type->name());
 
     return err(TargetCheckerMemberWritableError{
@@ -186,8 +186,8 @@ TargetChecker::ResultTargetIsNotThis TargetChecker::notThis(const NameExpr *name
 TargetChecker::ResultVariableMutable TargetChecker::variableMutable(const NameExpr *name,
                                                                     const VarSymbol *var) {
   if (var->isConst) {
-    bool function = var->function() != nullptr;
-    std::string message = ErrorTextVarTarget::constant(name->name, function);
+    bool isFunction = var->function() != nullptr;
+    std::string message = ErrorTextVarTarget::constant(name->name, isFunction);
 
     return err(TargetCheckerVariableMutableError{
         .code = TargetCheckerVariableMutableErrorCode::CONSTANT,
@@ -273,10 +273,10 @@ const Type *TargetChecker::indexTargetType(Expr *&target, IndexExpr *index, bool
 
 std::optional<const Type *> TargetChecker::genericIndexType(IndexExpr *index) {
   UtilityTypes::ResultGenericIndexed generic = this->utilityTypes->checkGenericIndex(index);
-  bool genericIndex =
+  bool isGenericIndex =
       generic.isOk() ||
       generic.error().code != UtilityTypesCheckGenericIndexErrorCode::NOT_A_GENERIC_INDEX;
-  if (!genericIndex) {
+  if (!isGenericIndex) {
     return std::nullopt;
   }
   if (generic.isErr()) {
@@ -291,8 +291,8 @@ const Type *TargetChecker::keyedTargetType(Expr *&target, IndexExpr *index, bool
       this->keyedFieldChecker->checkKeyedField(index, true);
   if (written.isErr() &&
       written.error().code != KeyedFieldCheckerCheckKeyedFieldErrorCode::ALREADY_REPORTED) {
-    bool wrongKey = KeyedFieldChecker::wrongKey(written.error().code);
-    llvm::SMLoc at = wrongKey ? index->index->loc() : index->loc();
+    bool isWrongKey = KeyedFieldChecker::wrongKey(written.error().code);
+    llvm::SMLoc at = isWrongKey ? index->index->loc() : index->loc();
     this->state.getDiagnostics().error(at, written.error().message);
   }
   Expr *checked = written.isOk() ? written.value() : index;
@@ -322,9 +322,9 @@ const Type *TargetChecker::arrayTargetType(IndexExpr *index) {
   }
   ResultIndexIsWritable writable = TargetChecker::indexWritable(type);
   if (writable.isErr()) {
-    bool arrayUndefined =
+    bool isArrayUndefined =
         writable.error().code == TargetCheckerIndexWritableErrorCode::ARRAY_MAY_BE_UNDEFINED;
-    llvm::SMLoc at = arrayUndefined ? index->object->loc() : index->loc();
+    llvm::SMLoc at = isArrayUndefined ? index->object->loc() : index->loc();
     this->state.getDiagnostics().error(at, writable.error().message);
     return Type::error();
   }

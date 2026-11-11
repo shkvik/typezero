@@ -42,22 +42,22 @@ Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *lit, const Type *t
   }
   Type *type = this->makeLiteralClass(lit);
   ClassDecl *cls = lit->cls;
-  bool fieldsTyped = true;
+  bool hasFieldsTyped = true;
   std::vector<Field> fields;
   for (ObjectLitExpr::Property &prop : lit->props) {
     if (prop.method()) {
       this->addLiteralMethod(cls, prop);
       continue;
     }
-    fieldsTyped &= this->addLiteralField(cls, prop, target, fields);
+    hasFieldsTyped &= this->addLiteralField(cls, prop, target, fields);
   }
-  if (!fieldsTyped) {
+  if (!hasFieldsTyped) {
     return lit;
   }
   type->defineFields(fields);
   type->rename(MethodLiteralChecker::literalTypeName(fields, cls->methods));
   this->declareLiteralMethods(cls, target);
-  this->checkLiteralMethods(cls);
+  this->walkLiteralMethods(cls);
   lit->type = type;
   if (target == nullptr) {
     return lit;
@@ -167,7 +167,7 @@ void MethodLiteralChecker::declareLiteralMethod(FunctionDecl *fn, const Type *ta
   }
 }
 
-void MethodLiteralChecker::checkLiteralMethods(ClassDecl *cls) {
+void MethodLiteralChecker::walkLiteralMethods(ClassDecl *cls) {
   this->callCycles->findCycles(
       cls->methods, [](FunctionDecl *, llvm::StringRef) -> FunctionDecl * { return nullptr; });
   for (FunctionDecl *fn : cls->methods) {
@@ -178,7 +178,7 @@ void MethodLiteralChecker::checkLiteralMethods(ClassDecl *cls) {
       continue;
     }
     BodyState saved = this->returnInferrer->enterBody(fn);
-    this->functionChecker->checkFunctionBody(fn);
+    this->functionChecker->walkFunctionBody(fn);
     this->returnInferrer->leaveBody(saved);
   }
 }

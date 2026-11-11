@@ -1,8 +1,8 @@
-#include "compiler/interprocedural/flow_graph_builder/flow_graph_builder.h"
-#include "compiler/interprocedural/flow_builtins/flow_builtins.h"
-#include "compiler/interprocedural/flow_calls/flow_calls.h"
-#include "compiler/interprocedural/flow_exprs/flow_exprs.h"
-#include "compiler/interprocedural/flow_stmts/flow_stmts.h"
+#include "compiler/interprocedural/wide_writes/flow_graph/flow_graph_builder/flow_graph_builder.h"
+#include "compiler/interprocedural/wide_writes/flow_graph/flow_builtins/flow_builtins.h"
+#include "compiler/interprocedural/wide_writes/flow_graph/flow_calls/flow_calls.h"
+#include "compiler/interprocedural/wide_writes/flow_graph/flow_exprs/flow_exprs.h"
+#include "compiler/interprocedural/wide_writes/flow_graph/flow_stmts/flow_stmts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SourceMgr.h"
@@ -39,16 +39,16 @@ FlowGraphBuilder::~FlowGraphBuilder() = default;
 
 FlowGraph FlowGraphBuilder::buildGraph(SourceFile &file) {
   for (Stmt *item : file.items) {
-    this->getFlowStmts().stmt(item);
+    this->walk(FlowRun::WalkStmt{item});
   }
   for (FunctionDecl *fn : file.inventory.instances) {
-    this->getFlowStmts().function(fn);
+    this->walk(FlowRun::WalkFunction{fn});
   }
   for (const ValueCall &call : this->valueCalls) {
     for (const FunctionDecl *fn : this->functionValues) {
       size_t count = fn->params.size();
-      bool rest = count > 0 && fn->params.back().rest();
-      if (call.args.size() > count && !rest) {
+      bool hasRest = count > 0 && fn->params.back().rest();
+      if (call.args.size() > count && !hasRest) {
         continue;
       }
       const Type *calleeType = call.call->callee ? call.call->callee->type : nullptr;
@@ -62,6 +62,103 @@ FlowGraph FlowGraphBuilder::buildGraph(SourceFile &file) {
   }
 
   return std::move(this->graph);
+}
+
+void FlowGraphBuilder::walk(FlowRun::Step first) {
+  auto run = FlowRun{.steps = {std::move(first)}, .answers = {}};
+  while (!run.steps.empty()) {
+    auto step = std::move(run.steps.back());
+    run.steps.pop_back();
+    this->applyStep(step, run);
+  }
+}
+
+void FlowGraphBuilder::applyStep(const FlowRun::Step &step, FlowRun &run) {
+  FlowStmts &stmts = this->getFlowStmts();
+  FlowExprs &exprs = this->getFlowExprs();
+  switch (step.kind()) {
+    case FlowRun::StepKind::WALK_STMT:
+      return stmts.startStmt(step.as<FlowRun::WalkStmt>()->stmt, run);
+    case FlowRun::StepKind::WALK_FUNCTION:
+      return stmts.startFunction(step.as<FlowRun::WalkFunction>()->fn, run);
+    case FlowRun::StepKind::WALK_CLASS:
+      return stmts.startClass(step.as<FlowRun::WalkClass>()->cls, run);
+    case FlowRun::StepKind::LEAVE_FUNCTION:
+      return this->leaveFunction();
+    case FlowRun::StepKind::WALK_EXPR:
+      return exprs.startExpr(step.as<FlowRun::WalkExpr>()->expr, run);
+    case FlowRun::StepKind::DROP_ANSWER:
+      return run.answers.pop_back();
+    case FlowRun::StepKind::EMPTY_ANSWER:
+      return run.answers.push_back(Refs());
+    case FlowRun::StepKind::BIND_VAR:
+      return stmts.bindVar(step.as<FlowRun::BindVar>()->var, run);
+    case FlowRun::StepKind::BIND_FIELD:
+      return stmts.bindField(step.as<FlowRun::BindField>()->field, run);
+    case FlowRun::StepKind::BIND_FOR_OF:
+      return stmts.bindForOf(step.as<FlowRun::BindForOf>()->loop, run);
+    case FlowRun::StepKind::FINISH_RETURN:
+      return stmts.finishReturn(run);
+    case FlowRun::StepKind::FINISH_ARRAY:
+      return exprs.finishArray(step.as<FlowRun::FinishArray>()->literal, run);
+    case FlowRun::StepKind::FINISH_PROPERTY:
+      return exprs.finishProperty(step.as<FlowRun::FinishProperty>()->property, run);
+    case FlowRun::StepKind::PASS_OBJECT_THIS:
+      return exprs.passObjectThis(step.as<FlowRun::PassObjectThis>()->fn, run);
+    case FlowRun::StepKind::FINISH_FILTER:
+      return exprs.finishFilter(step.as<FlowRun::FinishFilter>()->expr, run);
+    case FlowRun::StepKind::FINISH_MEMBER:
+      return exprs.finishMember(step.as<FlowRun::FinishMember>()->member, run);
+    case FlowRun::StepKind::FINISH_INDEX:
+      return exprs.finishIndex(step.as<FlowRun::FinishIndex>()->index, run);
+    case FlowRun::StepKind::FINISH_JOIN:
+      return exprs.finishJoin(step.as<FlowRun::FinishJoin>()->expr, run);
+    case FlowRun::StepKind::START_ASSIGN:
+      return stmts.startAssign(step.as<FlowRun::StartAssign>()->assign, run);
+    case FlowRun::StepKind::FINISH_ASSIGN:
+      return stmts.finishAssign(step.as<FlowRun::FinishAssign>()->assign, run);
+    case FlowRun::StepKind::FINISH_CALL:
+      return this->getFlowCalls().finishCall(step.as<FlowRun::FinishCall>()->call, run);
+    case FlowRun::StepKind::FINISH_NEW:
+      return exprs.finishNew(step.as<FlowRun::FinishNew>()->create, run);
+    case FlowRun::StepKind::FINISH_CAST:
+      return exprs.finishCast(step.as<FlowRun::FinishCast>()->conversion, run);
+    case FlowRun::StepKind::FINISH_FUNCTION_EXPR:
+      return exprs.finishFunctionExpr(step.as<FlowRun::FinishFunctionExpr>()->fn, run);
+    case FlowRun::StepKind::FINISH_YIELD:
+      return exprs.finishYield(step.as<FlowRun::FinishYield>()->yield, run);
+    case FlowRun::StepKind::FINISH_AWAIT:
+      return exprs.finishAwait(step.as<FlowRun::FinishAwait>()->await, run);
+  }
+}
+
+void FlowGraphBuilder::pushSteps(FlowRun &run, const std::vector<FlowRun::Step> &parts) const {
+  run.steps.insert(run.steps.end(), parts.rbegin(), parts.rend());
+}
+
+void FlowGraphBuilder::pushAnswer(FlowRun &run, const Expr *expr, Refs refs) const {
+  bool isPlain =
+      expr != nullptr && expr->type != nullptr && !FlowGraphBuilder::holdsReferences(expr->type);
+  if (isPlain) {
+    refs.clear();
+  }
+  run.answers.push_back(std::move(refs));
+}
+
+Refs FlowGraphBuilder::takeAnswer(FlowRun &run) const {
+  Refs answer = std::move(run.answers.back());
+  run.answers.pop_back();
+
+  return answer;
+}
+
+std::vector<Refs> FlowGraphBuilder::takeAnswers(FlowRun &run, size_t count) const {
+  auto taken = std::vector<Refs>(count);
+  for (size_t i = count; i > 0; --i) {
+    taken[i - 1] = this->takeAnswer(run);
+  }
+
+  return taken;
 }
 
 FlowStmts &FlowGraphBuilder::getFlowStmts() const {
@@ -86,8 +183,8 @@ int FlowGraphBuilder::getUnknownNode() const {
 
 int FlowGraphBuilder::findNode(NodeKind kind, const void *key, llvm::StringRef name) {
   std::tuple<int, const void *, std::string> id = std::make_tuple(int(kind), key, name.str());
-  auto [it, added] = this->ids.try_emplace(id, int(this->graph.edges.size()));
-  if (added) {
+  auto [it, isAdded] = this->ids.try_emplace(id, int(this->graph.edges.size()));
+  if (isAdded) {
     this->graph.edges.emplace_back();
   }
 
@@ -208,7 +305,11 @@ const VarSymbol *FlowGraphBuilder::findCurrentThis() const {
 }
 
 void FlowGraphBuilder::rememberFunctionValue(const FunctionDecl *fn) {
-  if (fn && this->functionSet.insert(fn).second) {
+  if (fn == nullptr) {
+    return;
+  }
+  auto [_, isInserted] = this->functionSet.insert(fn);
+  if (isInserted) {
     this->functionValues.push_back(fn);
   }
 }

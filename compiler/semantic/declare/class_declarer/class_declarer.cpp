@@ -57,8 +57,8 @@ std::vector<FunctionDecl *> ClassDeclarer::methodsNamed(const ClassDecl *cls, ll
         return a && b && a->params == b->params && a->minArgs == b->minArgs &&
                a->hasRest == b->hasRest;
       };
-      bool replaced = llvm::any_of(found, overridden);
-      if (!replaced) {
+      bool isReplaced = llvm::any_of(found, overridden);
+      if (!isReplaced) {
         found.push_back(fn);
       }
     }
@@ -122,7 +122,7 @@ ClassDeclarer::fieldOrMethod(const ClassDecl *cls, const ClassField &f, const Fu
   return ok(&f);
 }
 
-void ClassDeclarer::checkMemberName(const ClassDecl *cls, size_t index) {
+void ClassDeclarer::walkMemberName(const ClassDecl *cls, size_t index) {
   const ClassField &f = cls->fields[index];
   const ClassField *earlier = ClassDeclarer::earlierField(cls, index);
   ResultFieldNameUnique unique = ClassDeclarer::uniqueField(cls, f, earlier);
@@ -155,8 +155,9 @@ ClassDeclarer::ResultFieldNotLateSet ClassDeclarer::setLater(const ClassField &f
 }
 
 ClassDeclarer::ResultFieldTypeIsSeen ClassDeclarer::typeSeen(const ClassField &f) {
-  bool untypedValue = !f.type && f.init != nullptr && SharedHelpers::literalType(f.init) == nullptr;
-  if (untypedValue && f.isStatic()) {
+  bool isUntypedValue =
+      !f.type && f.init != nullptr && SharedHelpers::literalType(f.init) == nullptr;
+  if (isUntypedValue && f.isStatic()) {
     std::string message = ErrorTextTypeSeen::shared(f.name);
 
     return err(ClassDeclarerTypeSeenError{
@@ -164,8 +165,8 @@ ClassDeclarer::ResultFieldTypeIsSeen ClassDeclarer::typeSeen(const ClassField &f
         .message = message,
     });
   }
-  bool function = llvm::isa_and_nonnull<FunctionExpr>(f.init);
-  if (untypedValue && function && f.method() == nullptr) {
+  bool isFunction = llvm::isa_and_nonnull<FunctionExpr>(f.init);
+  if (isUntypedValue && isFunction && f.method() == nullptr) {
     std::string message = ErrorTextTypeSeen::function(f.name);
 
     return err(ClassDeclarerTypeSeenError{
@@ -179,9 +180,9 @@ ClassDeclarer::ResultFieldTypeIsSeen ClassDeclarer::typeSeen(const ClassField &f
 
 ClassDeclarer::ResultFieldHasNoValue ClassDeclarer::fieldValue(const ClassDecl *cls,
                                                                const ClassField &f) {
-  bool function = llvm::isa_and_nonnull<FunctionExpr>(f.init);
-  bool valued = !f.isStatic() && f.init != nullptr && !function;
-  if (!valued) {
+  bool isFunction = llvm::isa_and_nonnull<FunctionExpr>(f.init);
+  bool isValued = !f.isStatic() && f.init != nullptr && !isFunction;
+  if (!isValued) {
     return ok(&f);
   }
   if (!cls->constructors.empty()) {
@@ -192,8 +193,8 @@ ClassDeclarer::ResultFieldHasNoValue ClassDeclarer::fieldValue(const ClassDecl *
         .message = message,
     });
   }
-  bool literal = SharedHelpers::literalType(f.init) != nullptr;
-  if (!f.type || !literal) {
+  bool isLiteral = SharedHelpers::literalType(f.init) != nullptr;
+  if (!f.type || !isLiteral) {
     std::string message = ErrorTextDeclaredValue::literal(f.name);
 
     return err(ClassDeclarerFieldValueError{
@@ -252,8 +253,8 @@ const Type *ClassDeclarer::declaredFieldType(const ClassDecl *cls, ClassField &f
     return this->typeResolver->resolveType(*f.type, false);
   }
   const Type *literal = SharedHelpers::literalType(f.init);
-  bool fromValueLater = f.isStatic() || llvm::isa<FunctionExpr>(f.init);
-  if (literal != nullptr || fromValueLater) {
+  bool isFromValueLater = f.isStatic() || llvm::isa<FunctionExpr>(f.init);
+  if (literal != nullptr || isFromValueLater) {
     return literal;
   }
 
@@ -265,11 +266,11 @@ void ClassDeclarer::arrowMethod(ClassDecl *cls, ClassField &f, const Type *type)
   if (function && function->fn->name.empty()) {
     function->fn->name = f.name;
   }
-  bool method = function && function->fn->isArrow() && !f.isStatic() && !f.parameter() &&
-                !f.optional() && !f.redeclared &&
-                !this->state.getFlowState().isFieldAssigned(f.name) &&
-                (!type || type->isFunction());
-  if (!method) {
+  bool isMethod = function && function->fn->isArrow() && !f.isStatic() && !f.parameter() &&
+                  !f.optional() && !f.redeclared &&
+                  !this->state.getFlowState().isFieldAssigned(f.name) &&
+                  (!type || type->isFunction());
+  if (!isMethod) {
     return;
   }
   FunctionDecl *fn = function->fn;
@@ -326,8 +327,8 @@ void ClassDeclarer::declareStaticVar(const ClassDecl *cls, const ClassField &f, 
   var->place = GlobalVar{.usedInFunction = true};
   shared->var = var;
   auto *literal = f.readonly ? llvm::dyn_cast_or_null<IntLitExpr>(f.init) : nullptr;
-  bool fitsInt = literal && literal->value <= uint64_t(std::numeric_limits<int64_t>::max());
-  if (fitsInt) {
+  bool isFittingInt = literal && literal->value <= uint64_t(std::numeric_limits<int64_t>::max());
+  if (isFittingInt) {
     this->state.getConstantStore().rememberConstVar(var, int64_t(literal->value));
   }
   ResultStaticGetsValue valued = ClassDeclarer::staticValue(f, type);
@@ -387,7 +388,7 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
   this->genericClassChecker->bindClassTypeParams(cls);
   this->classBases->resolveClassBases(cls);
   for (size_t i = 0; i < cls->fields.size(); ++i) {
-    this->checkMemberName(cls, i);
+    this->walkMemberName(cls, i);
   }
   for (ClassField &f : cls->fields) {
     this->resolveField(cls, f);
@@ -460,8 +461,8 @@ ClassDeclarer::ResultAbstractReturns ClassDeclarer::abstractReturn(const ClassDe
 }
 
 ClassDeclarer::ResultGenericIsDirect ClassDeclarer::genericMethod(const FunctionDecl *fn) {
-  bool generic = !fn->typeParams.empty();
-  if (generic && fn->isAbstract()) {
+  bool isGeneric = !fn->typeParams.empty();
+  if (isGeneric && fn->isAbstract()) {
     std::string message = ErrorTextGenericMethod::abstract();
 
     return err(ClassDeclarerGenericMethodError{
@@ -469,7 +470,7 @@ ClassDeclarer::ResultGenericIsDirect ClassDeclarer::genericMethod(const Function
         .message = message,
     });
   }
-  if (generic && fn->isOverride()) {
+  if (isGeneric && fn->isOverride()) {
     std::string message = ErrorTextGenericMethod::overrides();
 
     return err(ClassDeclarerGenericMethodError{
@@ -484,9 +485,9 @@ ClassDeclarer::ResultGenericIsDirect ClassDeclarer::genericMethod(const Function
 void ClassDeclarer::numberVariants(llvm::ArrayRef<FunctionDecl *> functions) {
   for (size_t i = 0; i < functions.size(); ++i) {
     for (size_t j = 0; j < i; ++j) {
-      bool sameName = functions[j]->name == functions[i]->name &&
-                      functions[j]->isStatic() == functions[i]->isStatic();
-      if (sameName) {
+      bool isSameName = functions[j]->name == functions[i]->name &&
+                        functions[j]->isStatic() == functions[i]->isStatic();
+      if (isSameName) {
         functions[i]->member()->variant = functions[j]->variant() + 1;
       }
     }
@@ -512,7 +513,7 @@ void ClassDeclarer::declareMethods(ClassDecl *cls) {
   this->makeFieldInit(cls);
   ClassDeclarer::numberVariants(cls->methods);
   ClassDeclarer::numberVariants(cls->constructors);
-  this->checkVariants(cls);
+  this->walkVariants(cls);
 }
 
 void ClassDeclarer::declareClassMethod(const ClassDecl *cls, FunctionDecl *fn) {
@@ -545,9 +546,9 @@ void ClassDeclarer::declareFieldMethod(ClassDecl *cls, const ClassField &f) {
 
 void ClassDeclarer::fillDefaultValues(ClassDecl *cls) {
   for (ClassField &f : cls->fields) {
-    bool skipped = f.isStatic() || f.init != nullptr || f.method() != nullptr || f.optional() ||
-                   f.parameter() || f.definite() || f.resolved == nullptr;
-    if (skipped) {
+    bool isSkipped = f.isStatic() || f.init != nullptr || f.method() != nullptr || f.optional() ||
+                     f.parameter() || f.definite() || f.resolved == nullptr;
+    if (isSkipped) {
       continue;
     }
     llvm::SmallPtrSet<const ClassDecl *, 4> visiting;
@@ -606,8 +607,8 @@ Expr *ClassDeclarer::defaultValue(const Type *type, const TypeRef *ref, llvm::SM
   while (!run.steps.empty()) {
     DefaultStep step = run.steps.back();
     run.steps.pop_back();
-    bool fits = this->applyDefaultStep(step, run);
-    if (!fits) {
+    bool isFitting = this->applyDefaultStep(step, run);
+    if (!isFitting) {
       return nullptr;
     }
   }
@@ -692,9 +693,9 @@ Expr *ClassDeclarer::simpleDefault(const Type *type, const TypeRef *ref, llvm::S
   if (type->isArray() && !type->isTuple()) {
     return ctx.make<ArrayLitExpr>(loc);
   }
-  bool collection =
+  bool isCollection =
       (type->isMap() || type->isSet()) && ref && ref->kind() == TypeRefKind::GENERIC_REF;
-  if (collection) {
+  if (isCollection) {
     const char *name = type->isMap() ? "Map" : "Set";
     return ctx.make<NewExpr>(loc, name, ref->args, std::vector<Expr *>());
   }
@@ -702,9 +703,9 @@ Expr *ClassDeclarer::simpleDefault(const Type *type, const TypeRef *ref, llvm::S
     return this->literalValue(type, loc);
   }
   auto literal = [](const Type *member) { return member->isLiteral(); };
-  bool literals =
+  bool hasLiterals =
       type->isUnion() && !type->members().empty() && llvm::all_of(type->members(), literal);
-  if (literals) {
+  if (hasLiterals) {
     return this->literalValue(type->members().front(), loc);
   }
 
@@ -720,13 +721,13 @@ bool ClassDeclarer::isPlainObject(const Type *type) {
 }
 
 bool ClassDeclarer::checkEmpty(const ClassDecl *cls, DefaultRun &run) {
-  bool madeByConstructor = cls->isAbstract || cls->builtin() || cls->isGeneric() ||
-                           cls->typeParams.size() || !ClassLinks::constructorsOf(cls).empty();
-  if (madeByConstructor) {
+  bool isMadeByConstructor = cls->isAbstract || cls->builtin() || cls->isGeneric() ||
+                             cls->typeParams.size() || !ClassLinks::constructorsOf(cls).empty();
+  if (isMadeByConstructor) {
     return false;
   }
-  bool firstVisit = run.visiting.insert(cls).second;
-  if (!firstVisit) {
+  auto [_, isFirstVisit] = run.visiting.insert(cls);
+  if (!isFirstVisit) {
     return false;
   }
   run.steps.push_back(LeaveEmpty{cls});
@@ -742,8 +743,8 @@ void ClassDeclarer::resolveFamily(const ClassDecl *c, DefaultRun &run) {
   }
   std::vector<const ClassDecl *> inner;
   for (const ClassField &f : c->fields) {
-    bool skipped = f.isStatic() || f.init || f.method() || f.optional() || !f.resolved;
-    const ClassDecl *held = skipped ? nullptr : f.resolved->classDecl();
+    bool isSkipped = f.isStatic() || f.init || f.method() || f.optional() || !f.resolved;
+    const ClassDecl *held = isSkipped ? nullptr : f.resolved->classDecl();
     if (held) {
       inner.push_back(held);
     }
@@ -771,21 +772,21 @@ void ClassDeclarer::fillObject(const FillObject &fill, DefaultRun &run) {
   run.values.push_back(fill.object);
 }
 
-void ClassDeclarer::checkVariantList(llvm::ArrayRef<FunctionDecl *> functions) {
+void ClassDeclarer::walkVariantList(llvm::ArrayRef<FunctionDecl *> functions) {
   for (size_t i = 0; i < functions.size(); ++i) {
     for (size_t j = 0; j < i; ++j) {
-      bool sameName = functions[j]->name == functions[i]->name &&
-                      functions[j]->isStatic() == functions[i]->isStatic();
-      if (sameName) {
-        this->checkVariantPair(functions[j], functions[i]);
+      bool isSameName = functions[j]->name == functions[i]->name &&
+                        functions[j]->isStatic() == functions[i]->isStatic();
+      if (isSameName) {
+        this->reportVariantPair(functions[j], functions[i]);
       }
     }
   }
 }
 
-void ClassDeclarer::checkVariants(ClassDecl *cls) {
-  this->checkVariantList(cls->methods);
-  this->checkVariantList(cls->constructors);
+void ClassDeclarer::walkVariants(ClassDecl *cls) {
+  this->walkVariantList(cls->methods);
+  this->walkVariantList(cls->constructors);
 }
 
 int ClassDeclarer::ambiguousCount(const FuncSymbol *x, const FuncSymbol *y) {
@@ -793,11 +794,11 @@ int ClassDeclarer::ambiguousCount(const FuncSymbol *x, const FuncSymbol *y) {
   size_t fixedY = y->params.size() - y->hasRest;
   size_t last = std::min(fixedX, fixedY);
   for (size_t n = std::max(x->minArgs, y->minArgs); n <= last; ++n) {
-    bool same = true;
-    for (size_t k = 0; k < n && same; ++k) {
-      same = x->params[k] == y->params[k];
+    bool isSame = true;
+    for (size_t k = 0; k < n && isSame; ++k) {
+      isSame = x->params[k] == y->params[k];
     }
-    if (same) {
+    if (isSame) {
       return int(n);
     }
   }
@@ -809,11 +810,11 @@ ClassDeclarer::ResultVariantsUnequal ClassDeclarer::variantPair(const FunctionDe
                                                                 const FunctionDecl *b) {
   const FuncSymbol *x = a->sym;
   const FuncSymbol *y = b->sym;
-  bool typed =
+  bool isTyped =
       x && y && !llvm::is_contained(x->params, nullptr) && !llvm::is_contained(y->params, nullptr);
-  bool sameParams =
-      typed && x->params == y->params && x->minArgs == y->minArgs && x->hasRest == y->hasRest;
-  if (sameParams && x->hasReturnType() && y->hasReturnType() &&
+  bool isSameParams =
+      isTyped && x->params == y->params && x->minArgs == y->minArgs && x->hasRest == y->hasRest;
+  if (isSameParams && x->hasReturnType() && y->hasReturnType() &&
       x->getKnownReturnType() != y->getKnownReturnType()) {
     std::string message = ErrorTextVariantPair::returnOnly(a->isConstructor(), a->name);
 
@@ -822,7 +823,7 @@ ClassDeclarer::ResultVariantsUnequal ClassDeclarer::variantPair(const FunctionDe
         .message = message,
     });
   }
-  if (sameParams) {
+  if (isSameParams) {
     std::string variant = ErrorTextVariant::text(b);
     std::string message = ErrorTextVariantPair::duplicate(variant);
 
@@ -831,7 +832,7 @@ ClassDeclarer::ResultVariantsUnequal ClassDeclarer::variantPair(const FunctionDe
         .message = message,
     });
   }
-  int count = typed ? ClassDeclarer::ambiguousCount(x, y) : -1;
+  int count = isTyped ? ClassDeclarer::ambiguousCount(x, y) : -1;
   if (count >= 0) {
     std::string first = ErrorTextVariant::text(a);
     std::string second = ErrorTextVariant::text(b);
@@ -846,7 +847,7 @@ ClassDeclarer::ResultVariantsUnequal ClassDeclarer::variantPair(const FunctionDe
   return ok(b);
 }
 
-void ClassDeclarer::checkVariantPair(FunctionDecl *a, FunctionDecl *b) {
+void ClassDeclarer::reportVariantPair(FunctionDecl *a, FunctionDecl *b) {
   ResultVariantsUnequal unequal = ClassDeclarer::variantPair(a, b);
   if (unequal.isErr()) {
     std::string other = ErrorTextVariantPair::other();
@@ -857,8 +858,8 @@ void ClassDeclarer::checkVariantPair(FunctionDecl *a, FunctionDecl *b) {
 
 ClassDeclarer::ResultNotParentMethod ClassDeclarer::parentMethod(const ClassDecl *cls,
                                                                  const ClassField &f) {
-  bool clash = cls->parent && !ClassDeclarer::methodsNamed(cls->parent, f.name, false).empty();
-  if (clash) {
+  bool isClash = cls->parent && !ClassDeclarer::methodsNamed(cls->parent, f.name, false).empty();
+  if (isClash) {
     std::string message = ErrorTextParentMethod::clash(f.name, cls->parent->name);
 
     return err(ClassDeclarerParentMethodError{
@@ -874,9 +875,9 @@ ClassDeclarer::ResultNarrowingLayout ClassDeclarer::narrowedField(const ClassDec
                                                                   const ClassField &f,
                                                                   const Field &inherited,
                                                                   const ClassDecl *owner) {
-  bool otherLayout =
+  bool isOtherLayout =
       inherited.type != f.resolved && !WideningRelations::sameReference(f.resolved, inherited.type);
-  if (otherLayout) {
+  if (isOtherLayout) {
     std::string message = ErrorTextNarrowedField::layout(f.name, cls->name, f.resolved->name(),
                                                          owner->name, inherited.type->name());
 
@@ -903,8 +904,8 @@ void ClassDeclarer::completeClass(ClassDecl *cls) {
 }
 
 void ClassDeclarer::startCompletion(ClassDecl *cls, std::vector<CompletionStep> &steps) {
-  bool incomplete = cls->type->isIncomplete() && !cls->literal();
-  if (!incomplete || this->state.getClassStore().isCompleting(cls)) {
+  bool isIncomplete = cls->type->isIncomplete() && !cls->literal();
+  if (!isIncomplete || this->state.getClassStore().isCompleting(cls)) {
     return;
   }
   this->state.getClassStore().enterCompletion(cls);
@@ -919,7 +920,6 @@ void ClassDeclarer::startCompletion(ClassDecl *cls, std::vector<CompletionStep> 
 
 void ClassDeclarer::finishCompletion(ClassDecl *cls) {
   auto *type = const_cast<Type *>(cls->type);
-  bool muted = false;
   ClassDecl *generic = cls->generic();
   if (generic) {
     for (size_t i = 0; i < cls->fields.size() && i < generic->fields.size(); ++i) {
@@ -931,7 +931,7 @@ void ClassDeclarer::finishCompletion(ClassDecl *cls) {
       f.resolved =
           original ? this->genericClassChecker->instanceValueType(cls, original) : Type::error();
     }
-    muted = this->state.getDiagnostics().setMuted(true);
+    this->state.getDiagnostics().pushList(DiagnosticRoute::DISCARD);
   }
   std::vector<Field> fields;
   if (cls->parent) {
@@ -973,7 +973,7 @@ void ClassDeclarer::finishCompletion(ClassDecl *cls) {
   type->defineFields(std::move(fields));
   this->state.getClassStore().leaveCompletion(cls);
   if (cls->generic()) {
-    this->state.getDiagnostics().setMuted(muted);
+    this->state.getDiagnostics().popList();
   }
 }
 

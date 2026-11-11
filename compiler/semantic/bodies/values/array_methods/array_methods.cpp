@@ -124,8 +124,9 @@ std::optional<ArrayMethodsSortableErrorCode> ArrayMethods::sortProblem(const Typ
   if (u->isUnion() && !ArrayMethods::allTextual(u->members())) {
     return ArrayMethodsSortableErrorCode::MIXED_UNION;
   }
-  bool numbers = u->isNumeric() || u->isDecimal() || GenericChecker::apparentType(u)->isNumeric();
-  if (numbers) {
+  bool hasNumbers =
+      u->isNumeric() || u->isDecimal() || GenericChecker::apparentType(u)->isNumeric();
+  if (hasNumbers) {
     return ArrayMethodsSortableErrorCode::NUMBERS;
   }
 
@@ -176,7 +177,7 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
     if (count >= min && count <= max) {
       return ok(call);
     }
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextArity::count(min, max, count);
 
     return err(ArrayMethodsCheckArrayMethodError{
@@ -187,7 +188,7 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
   auto textArity = [&](unsigned max) -> ResultArrayMethodCall {
     ResultElementsAreText text = ArrayMethods::textElements(element, name);
     if (text.isErr()) {
-      this->argumentChecker->checkArgsLoosely(call);
+      this->argumentChecker->walkArgsLoosely(call);
       return err(ArrayMethodsCheckArrayMethodError{
           .code = ArrayMethodsCheckArrayMethodErrorCode::ELEMENTS_NOT_TEXT,
           .message = text.error().message,
@@ -208,7 +209,7 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
 
   const ArrayMethodInfo *method = ArrayMethodTable::find(name);
   if (method == nullptr) {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextArrayMethod::noProperty(name, arrayType->name());
 
     return err(ArrayMethodsCheckArrayMethodError{
@@ -248,7 +249,7 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
     }
     case ArrayMethod::PUSH:
     case ArrayMethod::UNSHIFT: {
-      bool spreads = call->hasSpread();
+      bool isSpreading = call->hasSpread();
       for (size_t i = 0; i < count; ++i) {
         if (call->spreads(i)) {
           call->args[i] = this->typeRelations->coerce(
@@ -259,11 +260,11 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
       }
       call->target = BuiltinCall{.builtin = method->builtin};
       call->type = Type::intTy();
-      if (self && !spreads) {
+      if (self && !isSpreading) {
         this->state.getFlowState().getFacts().shift(Term::lengthOf(self),
                                                     static_cast<int64_t>(count));
       }
-      this->flowChecker->arrayResized(arrayType, true, false, spreads ? nullptr : self);
+      this->flowChecker->arrayResized(arrayType, true, false, isSpreading ? nullptr : self);
       return ok(call);
     }
     case ArrayMethod::POP:
@@ -273,11 +274,11 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
         return counted;
       }
       call->target = BuiltinCall{.builtin = method->builtin};
-      bool notEmpty = this->indexProofs->provesNotEmpty(member->object);
-      call->mayBeOutOfRange = !notEmpty;
-      call->type = notEmpty ? element : Type::optional(element);
+      bool isNotEmpty = this->indexProofs->provesNotEmpty(member->object);
+      call->mayBeOutOfRange = !isNotEmpty;
+      call->type = isNotEmpty ? element : Type::optional(element);
       if (self) {
-        if (notEmpty) {
+        if (isNotEmpty) {
           this->state.getFlowState().getFacts().shift(Term::lengthOf(self), -1);
         } else {
           this->state.getFlowState().getFacts().forgetIf(
@@ -326,7 +327,7 @@ ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *e
         return counted;
       }
       if (element->holdsResults()) {
-        this->argumentChecker->checkArgsLoosely(call);
+        this->argumentChecker->walkArgsLoosely(call);
         std::string message = ErrorTextArrayMethod::results(name);
 
         return err(ArrayMethodsCheckArrayMethodError{

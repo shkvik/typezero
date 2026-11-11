@@ -177,30 +177,34 @@ bool HttpChecker::inProgram(const Expr *expr) const {
   return !this->libraryCalls->inLibrary(expr->loc());
 }
 
-void HttpChecker::checkHeaderName(const Expr *name) {
+HttpChecker::ResultHeaderNameChecked HttpChecker::checkHeaderName(const Expr *name) {
   const std::u16string *text = HttpChecker::stringLiteral(name);
   if (!text) {
-    return;
+    return ok();
   }
   std::string written = ToUtf8::toUtf8(*text);
   ResultHeaderName header = HttpChecker::headerName(written);
   if (header.isErr()) {
-    this->state.getDiagnostics().error(name->loc(), header.error().message);
+    return err(header.error());
   }
+
+  return ok();
 }
 
-void HttpChecker::checkHeaderValue(const Expr *value) {
+HttpChecker::ResultHeaderValueChecked HttpChecker::checkHeaderValue(const Expr *value) {
   const std::u16string *text = HttpChecker::stringLiteral(value);
   if (!text) {
-    return;
+    return ok();
   }
   ResultHeaderText header = HttpChecker::headerText(*text);
   if (header.isErr()) {
-    this->state.getDiagnostics().error(value->loc(), header.error().message);
+    return err(header.error());
   }
+
+  return ok();
 }
 
-void HttpChecker::checkHeadersInit(const Expr *init) {
+void HttpChecker::walkHeadersInit(const Expr *init) {
   init = UrlChecker::unconverted(init);
   if (auto *lit = dyn_cast<ObjectLitExpr>(init)) {
     for (const ObjectLitExpr::Property &p : lit->props) {
@@ -211,7 +215,10 @@ void HttpChecker::checkHeadersInit(const Expr *init) {
       if (header.isErr()) {
         this->state.getDiagnostics().error(p.loc, header.error().message);
       }
-      this->checkHeaderValue(p.value);
+      ResultHeaderValueChecked value = this->checkHeaderValue(p.value);
+      if (value.isErr()) {
+        this->state.getDiagnostics().error(p.value->loc(), value.error().message);
+      }
     }
     return;
   }
@@ -221,35 +228,49 @@ void HttpChecker::checkHeadersInit(const Expr *init) {
           e.spread || !e.expr ? nullptr : dyn_cast<ArrayLitExpr>(UrlChecker::unconverted(e.expr));
       if (pair && pair->elements.size() == 2 && !pair->elements[0].spread &&
           !pair->elements[1].spread) {
-        this->checkHeaderName(pair->elements[0].expr);
-        this->checkHeaderValue(pair->elements[1].expr);
+        const Expr *nameExpr = pair->elements[0].expr;
+        const Expr *valueExpr = pair->elements[1].expr;
+        ResultHeaderNameChecked name = this->checkHeaderName(nameExpr);
+        if (name.isErr()) {
+          this->state.getDiagnostics().error(nameExpr->loc(), name.error().message);
+        }
+        ResultHeaderValueChecked value = this->checkHeaderValue(valueExpr);
+        if (value.isErr()) {
+          this->state.getDiagnostics().error(valueExpr->loc(), value.error().message);
+        }
       }
     }
   }
 }
 
-void HttpChecker::checkHeadersNew(NewExpr *expr) {
+void HttpChecker::walkHeadersNew(NewExpr *expr) {
   const std::vector<Expr *> &args = expr->ctor() ? expr->ctor()->args : expr->args;
   if (this->inProgram(expr) && !args.empty()) {
-    this->checkHeadersInit(args[0]);
+    this->walkHeadersInit(args[0]);
   }
 }
 
-void HttpChecker::checkHeadersCall(const CallExpr *call, const MemberExpr *member) {
+void HttpChecker::walkHeadersCall(const CallExpr *call, const MemberExpr *member) {
   if (!HttpChecker::isLibraryClass(member->object->type, "Headers") || !this->inProgram(call) ||
       call->args.empty()) {
     return;
   }
   llvm::StringRef name = member->name;
   if (name == "append" || name == "set" || name == "get" || name == "has" || name == "delete") {
-    this->checkHeaderName(call->args[0]);
+    ResultHeaderNameChecked header = this->checkHeaderName(call->args[0]);
+    if (header.isErr()) {
+      this->state.getDiagnostics().error(call->args[0]->loc(), header.error().message);
+    }
   }
   if ((name == "append" || name == "set") && call->args.size() > 1) {
-    this->checkHeaderValue(call->args[1]);
+    ResultHeaderValueChecked value = this->checkHeaderValue(call->args[1]);
+    if (value.isErr()) {
+      this->state.getDiagnostics().error(call->args[1]->loc(), value.error().message);
+    }
   }
 }
 
-void HttpChecker::checkResponseNew(NewExpr *expr) {
+void HttpChecker::walkResponseNew(NewExpr *expr) {
   if (!this->inProgram(expr)) {
     return;
   }
@@ -283,12 +304,12 @@ void HttpChecker::checkResponseNew(NewExpr *expr) {
         this->state.getDiagnostics().error(value->loc(), message);
       }
     } else if (p.name == "headers") {
-      this->checkHeadersInit(value);
+      this->walkHeadersInit(value);
     }
   }
 }
 
-void HttpChecker::checkRequestNew(NewExpr *expr) {
+void HttpChecker::walkRequestNew(NewExpr *expr) {
   if (!this->inProgram(expr)) {
     return;
   }
@@ -317,13 +338,13 @@ void HttpChecker::checkRequestNew(NewExpr *expr) {
     return;
   }
   std::string method = "GET";
-  bool knownMethod = !HttpChecker::isLibraryClass(input->type, "Request");
+  bool isKnownMethod = !HttpChecker::isLibraryClass(input->type, "Request");
   if (const ObjectLitExpr::Property *p = HttpChecker::property(init, "method")) {
-    knownMethod = false;
+    isKnownMethod = false;
     if (const std::u16string *text = HttpChecker::stringLiteral(p->value)) {
       method = ToUtf8::toUtf8(*text);
       std::string upper = llvm::StringRef(method).upper();
-      knownMethod = true;
+      isKnownMethod = true;
       ResultMethodName made = HttpChecker::methodName(method);
       if (made.isErr()) {
         this->state.getDiagnostics().error(p->value->loc(), made.error().message);
@@ -332,14 +353,14 @@ void HttpChecker::checkRequestNew(NewExpr *expr) {
     }
   }
   const ObjectLitExpr::Property *body = HttpChecker::property(init, "body");
-  if (body && knownMethod && (method == "GET" || method == "HEAD") &&
+  if (body && isKnownMethod && (method == "GET" || method == "HEAD") &&
       HttpChecker::hasBody(body->value)) {
-    bool given = HttpChecker::property(init, "method") != nullptr;
-    std::string message = ErrorTextHttpRequest::getBody(method, given);
+    bool isGiven = HttpChecker::property(init, "method") != nullptr;
+    std::string message = ErrorTextHttpRequest::getBody(method, isGiven);
     this->state.getDiagnostics().error(body->value->loc(), message);
   }
   if (const ObjectLitExpr::Property *headers = HttpChecker::property(init, "headers")) {
-    this->checkHeadersInit(headers->value);
+    this->walkHeadersInit(headers->value);
   }
 }
 

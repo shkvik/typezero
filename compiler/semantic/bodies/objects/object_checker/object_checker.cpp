@@ -69,11 +69,11 @@ std::optional<std::string> ObjectChecker::chainText(const Expr *expr) {
 std::string ObjectChecker::fieldText(const Expr *object, llvm::StringRef field) {
   std::optional<std::string> chain = ObjectChecker::chainText(object);
   std::string text = chain.has_value() ? *chain : "o";
-  bool identifier = !field.empty() && !llvm::isDigit(field[0]) && llvm::all_of(field, [](char c) {
+  bool isIdentifier = !field.empty() && !llvm::isDigit(field[0]) && llvm::all_of(field, [](char c) {
     return llvm::isAlnum(c) || c == '_' || c == '$';
   });
 
-  return identifier ? text + "." + field.str() : text + "[\"" + field.str() + "\"]";
+  return isIdentifier ? text + "." + field.str() : text + "[\"" + field.str() + "\"]";
 }
 
 std::u16string ObjectChecker::utf16(llvm::StringRef text) {
@@ -103,9 +103,9 @@ bool ObjectChecker::isInherited(llvm::StringRef name) {
 }
 
 std::string ObjectChecker::noFieldText(const Type *type, llvm::StringRef name) {
-  bool inherited = ObjectChecker::isInherited(name);
+  bool isInherited = ObjectChecker::isInherited(name);
 
-  return ErrorTextObjectField::noField(name, type->name(), inherited);
+  return ErrorTextObjectField::noField(name, type->name(), isInherited);
 }
 
 ObjectChecker::ResultObjectStaticCall
@@ -167,7 +167,7 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
   }
   if (objectMember != GlobalMember::OBJECT_KEYS && objectMember != GlobalMember::OBJECT_VALUES &&
       objectMember != GlobalMember::OBJECT_ENTRIES) {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextObjectCall::noSupport(fn);
 
     return err(ObjectCheckerCheckObjectCallError{
@@ -236,9 +236,9 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
     }
     return ok(listed.value());
   }
-  bool notObject = !type->isObject() || type->isTuple() || type->isRegExp() || type->isMatch() ||
-                   type->isDate() || type->isIntl() || type->isBytes() || type->isCrypto();
-  if (notObject) {
+  bool isNotObject = !type->isObject() || type->isTuple() || type->isRegExp() || type->isMatch() ||
+                     type->isDate() || type->isIntl() || type->isBytes() || type->isCrypto();
+  if (isNotObject) {
     std::string message = ErrorTextObjectCall::needObject(fn, type->name());
 
     return err(ObjectCheckerCheckObjectCallError{
@@ -423,10 +423,10 @@ ObjectChecker::ResultForInKeysAllowed ObjectChecker::walkable(const Type *type,
         .message = message,
     });
   }
-  bool notObject = (!type->isObject() || type->isRegExp() || type->isMatch() || type->isDate() ||
-                    type->isIntl() || type->isBytes() || type->isCrypto()) &&
-                   !type->isError();
-  if (notObject) {
+  bool isNotObject = (!type->isObject() || type->isRegExp() || type->isMatch() || type->isDate() ||
+                      type->isIntl() || type->isBytes() || type->isCrypto()) &&
+                     !type->isError();
+  if (isNotObject) {
     std::string message = ErrorTextForIn::notObject(type->name());
 
     return err(ObjectCheckerWalkableError{
@@ -438,12 +438,12 @@ ObjectChecker::ResultForInKeysAllowed ObjectChecker::walkable(const Type *type,
   return ok(type);
 }
 
-void ObjectChecker::checkForIn(ForOfStmt *stmt) {
+void ObjectChecker::walkForIn(ForOfStmt *stmt) {
   auto *variable = dyn_cast<NameExpr>(stmt->iterable);
-  bool env = this->processChecker->isProcessMember(stmt->iterable, "env");
+  bool isEnv = this->processChecker->isProcessMember(stmt->iterable, "env");
   Expr *object = this->exprChecker->checkExpr(stmt->iterable);
   const Type *type = object->type;
-  if (type->isRecord() && (variable || env) && !isa<VarDeclStmt>(stmt->body) &&
+  if (type->isRecord() && (variable || isEnv) && !isa<VarDeclStmt>(stmt->body) &&
       !isa<FunctionDecl>(stmt->body)) {
     llvm::SMLoc loc = stmt->body->loc();
     Expr *again =
@@ -474,7 +474,7 @@ void ObjectChecker::checkForIn(ForOfStmt *stmt) {
   if (allowed.isErr()) {
     this->state.getDiagnostics().error(object->loc(), allowed.error().message);
   }
-  bool walks = allowed.isOk() && !type->isError();
+  bool isWalking = allowed.isOk() && !type->isError();
   llvm::SMLoc loc = object->loc();
   llvm::StringRef objectName = GlobalNameTable::getName(GlobalName::OBJECT);
   llvm::StringRef keysName = GlobalMemberTable::getName(GlobalMember::OBJECT_KEYS);
@@ -482,7 +482,7 @@ void ObjectChecker::checkForIn(ForOfStmt *stmt) {
       loc, this->state.getAst().make<NameExpr>(loc, objectName), keysName);
   auto *keys = this->state.getAst().make<CallExpr>(loc, callee, std::vector<Expr *>{object});
   keys->target = BuiltinCall{.builtin = Builtin::ObjectKeys};
-  keys->type = walks ? Type::array(Type::string()) : Type::error();
+  keys->type = isWalking ? Type::array(Type::string()) : Type::error();
   keys->forIn = true;
   stmt->iterable = keys;
 }
@@ -530,7 +530,7 @@ ObjectChecker::ResultFieldCallIsTyped ObjectChecker::checkFieldCall(CallExpr *ca
   ResultObjectFieldValue field = this->checkField(member);
   if (field.isErr()) {
     call->callee = member;
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     call->type = Type::error();
     return err(ObjectCheckerCheckFieldCallError{
         .code = ObjectCheckerCheckFieldCallErrorCode::NO_SUCH_FIELD,
@@ -549,7 +549,7 @@ ObjectChecker::ResultFieldCallIsTyped ObjectChecker::checkFieldCall(CallExpr *ca
     }
     return ok(valued.value());
   }
-  this->argumentChecker->checkArgsLoosely(call);
+  this->argumentChecker->walkArgsLoosely(call);
   call->type = Type::error();
   if (type->isOptional() && type->inner()->isFunction()) {
     std::string message = ErrorTextObjectField::maybeUndef();

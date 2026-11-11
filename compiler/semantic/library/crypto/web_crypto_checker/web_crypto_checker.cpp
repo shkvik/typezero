@@ -53,9 +53,9 @@ WebCryptoChecker::ResultSubtleCallShape
 WebCryptoChecker::subtleShape(const CallExpr *call, llvm::StringRef intrinsicName) {
   auto named = [&](const SubtleIntrinsic &i) { return i.name == intrinsicName; };
   const SubtleIntrinsic *intrinsic = llvm::find_if(kSubtleIntrinsics, named);
-  bool wrong = intrinsic == std::end(kSubtleIntrinsics) ||
-               call->args.size() != intrinsic->params.size() || call->hasSpread();
-  if (wrong) {
+  bool isWrong = intrinsic == std::end(kSubtleIntrinsics) ||
+                 call->args.size() != intrinsic->params.size() || call->hasSpread();
+  if (isWrong) {
     std::string message = ErrorTextIntrinsicCall::wrong(intrinsicName);
 
     return err(WebCryptoCheckerSubtleShapeError{
@@ -108,14 +108,14 @@ Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name,
   }
   const SubtleIntrinsic *intrinsic = shape.value();
   std::vector<Expr *> args;
-  bool allChecked = true;
+  bool isAllChecked = true;
   for (size_t i = 0; i < call->args.size(); ++i) {
     Expr *arg = call->args[i];
     Expr *checked = this->checkSubtleArg(arg, intrinsic->params[i], intrinsicName);
-    allChecked &= checked != nullptr && !checked->type->isError();
+    isAllChecked &= checked != nullptr && !checked->type->isError();
     args.push_back(checked != nullptr ? checked : arg);
   }
-  if (!allChecked) {
+  if (!isAllChecked) {
     return call;
   }
   const Type *value = WebCryptoChecker::subtleResult(intrinsic->result);

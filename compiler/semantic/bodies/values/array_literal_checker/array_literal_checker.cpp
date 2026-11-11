@@ -98,10 +98,10 @@ ArrayLiteralChecker::typesJoin(const ArrayLitExpr *lit, llvm::ArrayRef<const Typ
       return cls && cls->literal();
     };
     auto failed = [](const Type *t) { return t->isError(); };
-    bool spreads = llvm::any_of(lit->elements, spread);
+    bool isSpreading = llvm::any_of(lit->elements, spread);
     if (literalClass(element) && literalClass(type)) {
       message += ErrorTextArrayTypes::literals();
-    } else if (!spreads && llvm::none_of(types, failed)) {
+    } else if (!isSpreading && llvm::none_of(types, failed)) {
       std::string tuple;
       for (const Type *t : types) {
         tuple += (tuple.empty() ? "" : ", ") + t->name().str();
@@ -136,7 +136,7 @@ ArrayLiteralChecker::spreadFits(const Type *type, const Type *element, const Typ
   auto convertible = [&](const Field &f) {
     return TypeRelations::isImplicitlyConvertible(f.type, element);
   };
-  bool fits =
+  bool isFitting =
       type == arrayType || type->isError() || (type->isString() && element->isString()) ||
       (type->isArray() && UnknownChecker::isObjectReference(type->inner()->nonOptional()) &&
        element->nonOptional()->isObject() &&
@@ -146,7 +146,7 @@ ArrayLiteralChecker::spreadFits(const Type *type, const Type *element, const Typ
       (type->isTypedArray() &&
        TypeRelations::isImplicitlyConvertible(type->elementType(), element)) ||
       (type->isTuple() && llvm::all_of(type->fields(), convertible));
-  if (!fits) {
+  if (!isFitting) {
     std::string message = ErrorTextSpreadFits::into(type->name(), arrayType->name());
 
     return err(ArrayLiteralCheckerSpreadFitsError{
@@ -159,9 +159,9 @@ ArrayLiteralChecker::spreadFits(const Type *type, const Type *element, const Typ
 }
 
 Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected) {
-  bool pairLiteral = this->state.getExpressionMarks().isPairLiteral(lit);
+  bool isPairLiteral = this->state.getExpressionMarks().isPairLiteral(lit);
   this->state.getExpressionMarks().forgetPairLiteral(lit);
-  if (pairLiteral && expected == nullptr) {
+  if (isPairLiteral && expected == nullptr) {
     return this->checkPairLiteral(lit);
   }
   if (expected != nullptr && expected->nonOptional()->isJson()) {
@@ -207,14 +207,14 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
 
 Expr *ArrayLiteralChecker::checkPairLiteral(ArrayLitExpr *lit) {
   std::vector<const Type *> parts;
-  bool bad = false;
+  bool isBad = false;
   for (ArrayLitExpr::Element &e : lit->elements) {
     e.expr = this->exprChecker->checkExpr(e.expr);
     const Type *part = e.expr->type;
     parts.push_back(part);
-    bad |= part->isError() || part->isVoid() || part->isUndefined();
+    isBad |= part->isError() || part->isVoid() || part->isUndefined();
   }
-  lit->type = bad ? Type::error() : Type::tuple(parts);
+  lit->type = isBad ? Type::error() : Type::tuple(parts);
 
   return lit;
 }
@@ -259,8 +259,8 @@ Expr *ArrayLiteralChecker::checkTupleValue(ArrayLitExpr *lit, const Type *tupleT
   if (tuple.isOk()) {
     return tuple.value();
   }
-  bool spread = tuple.error().code == TupleCheckerCheckTupleLitErrorCode::SPREAD_IN_TUPLE;
-  llvm::SMLoc at = spread ? ArrayLiteralChecker::firstSpread(lit)->loc() : lit->loc();
+  bool isSpread = tuple.error().code == TupleCheckerCheckTupleLitErrorCode::SPREAD_IN_TUPLE;
+  llvm::SMLoc at = isSpread ? ArrayLiteralChecker::firstSpread(lit)->loc() : lit->loc();
   this->state.getDiagnostics().error(at, tuple.error().message);
 
   return lit;
@@ -292,9 +292,9 @@ void ArrayLiteralChecker::walkArrayElement(ArrayLitExpr *lit, size_t i, const Ty
 void ArrayLiteralChecker::walkPlainElement(ArrayLitExpr::Element &e, size_t i,
                                            const Type *expectedElement, ArrayElements &elements) {
   const Type *hint = expectedElement;
-  bool shaped = hint == nullptr && elements.seen != nullptr && elements.seen->holdsObjects() &&
-                Destination::literalShaped(e.expr);
-  if (shaped) {
+  bool isShaped = hint == nullptr && elements.seen != nullptr && elements.seen->holdsObjects() &&
+                  Destination::literalShaped(e.expr);
+  if (isShaped) {
     hint = elements.seen;
   }
   e.expr = this->exprChecker->checkExpr(e.expr, hint);
@@ -389,9 +389,9 @@ const Type *ArrayLiteralChecker::literalHint(const ArrayLitExpr *lit,
     }
   }
   for (size_t i = 0; i < lit->elements.size(); ++i) {
-    bool fractional =
+    bool isFractional =
         elements.types[i] == nullptr && !TypeRelations::isIntLiteralTree(lit->elements[i].expr);
-    if (fractional) {
+    if (isFractional) {
       return Type::doubleTy();
     }
   }

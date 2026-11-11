@@ -22,7 +22,7 @@ FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(C
   call->type = Type::error();
   llvm::StringRef name = member->name;
   if (name == "bind") {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextThisCall::noBind();
 
     return err(FunctionMethodCheckerCheckThisCallError{
@@ -31,7 +31,7 @@ FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(C
     });
   }
   if (name != "call" && name != "apply") {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextThisCall::noProperty(name);
 
     return err(FunctionMethodCheckerCheckThisCallError{
@@ -48,7 +48,7 @@ FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(C
     });
   }
   if (name == "apply" && (call->args.size() != 2 || call->hasSpread())) {
-    this->argumentChecker->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextThisCall::applyArgs();
 
     return err(FunctionMethodCheckerCheckThisCallError{
@@ -73,9 +73,9 @@ FunctionMethodChecker::ResultParamsJoined
 FunctionMethodChecker::checkListMethod(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
-  bool joins = method != nullptr && method->method == ArrayMethod::JOIN;
-  if (!joins) {
-    this->argumentChecker->checkArgsLoosely(call);
+  bool isJoining = method != nullptr && method->method == ArrayMethod::JOIN;
+  if (!isJoining) {
+    this->argumentChecker->walkArgsLoosely(call);
     std::string message = ErrorTextListMethod::noMethod(member->name);
 
     return err(FunctionMethodCheckerCheckListMethodError{
