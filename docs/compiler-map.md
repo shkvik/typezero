@@ -16,8 +16,7 @@
 ```
 pipeline/                   конвейер проходов
   build_options/            BuildOptions: вход, выход, пакеты, текст редактора, уровень проверки
-  check_program/            checkProgram: загрузка и проходы проверки — зовут фасад движка
-  pipeline/                 buildProgram: от проверенной программы до exe
+  check_program/            checkProgram: загрузка и шаги двух фасадов — semantic и interprocedural
   runtime_files/            RuntimeFiles: где лежат tzrt.lib, tzrt.bc и lib/
 ```
 
@@ -775,8 +774,8 @@ cli/                     команды tz: папка на слово кома�
   add/                   tz add
     add_command/         AddCommand: tz add — пакеты в package.json
   build/                 tz build и tz build --explain-parallel
-    build_command/       BuildCommand: tz build
-    explain_command/     ExplainCommand: --explain-parallel — что идёт параллельно и почему
+    build_command/       BuildCommand: tz build (buildProgram — от проверенной программы до exe) и
+                         --explain-parallel — что идёт параллельно и почему
   command_line/          разбор команды и общие помощники
     args/                Args: разбор командной строки, текст справки
     command_line/        разбор команды и общие помощники

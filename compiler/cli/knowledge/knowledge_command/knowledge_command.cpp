@@ -10,7 +10,6 @@
 #include "compiler/packages/project_packages/project_packages.h"
 #include "compiler/pipeline/build_options/build_options.h"
 #include "compiler/pipeline/check_program/check_program.h"
-#include "compiler/pipeline/pipeline/pipeline.h"
 #include "compiler/pipeline/runtime_files/runtime_files.h"
 #include "compiler/program/program/program.h"
 #include "compiler/program/source_places/source_places.h"

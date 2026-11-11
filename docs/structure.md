@@ -26,8 +26,8 @@
 
 ## Коротко
 
-- **Конвейер проходов.** `compiler/pipeline/pipeline.cpp` — весь путь от файла до exe: по
-  проходу на несколько строк. Проход — класс с `run`.
+- **Конвейер проходов.** `checkProgram` (`compiler/pipeline/check_program/`) и
+  `BuildCommand::buildProgram` (`compiler/cli/build/build_command/`) — весь путь от файла до exe: по проходу на несколько строк. Проход — класс с `run`.
 - **Три дерева по виду кода.** `compiler/` — весь C++ (`tz.exe`), `runtime/` — весь C (`tzrt.lib`,
   `tzrt.bc`, `tzcrypto.lib`), `library/` — весь код на tz (`bin/lib`).
 - **Библиотека — темы.** Всё, что программа берёт из глобального имени или модуля (`Math`,
@@ -57,7 +57,7 @@
   `"runtime/core/tzrt/tzrt.h"`.
 - **Класс — одна работа.** Если в описании класса нужно «и», это два класса. Файл класса —
   до ~400 строк; больше — значит, внутри два класса.
-- **Папки проходов без номеров**: порядок записан в `pipeline.cpp`.
+- **Папки проходов без номеров**: порядок записан в `check_program.cpp` и `build_command.cpp`.
 - **Заголовок подключает только то, без чего не обойтись**, остальное — объявления
   (`class Type;`). `#include` — одним блоком, без пустых строк: свой заголовок, файлы проекта,
   системные.
@@ -79,7 +79,7 @@
 ```
 compiler/         весь C++ → tz.exe
   cli/            команды tz: разбор аргументов, build, run, init, add, port, licenses
-  pipeline/       конвейер проходов от .tz до exe
+  pipeline/       checkProgram и настройки сборки; buildProgram — в cli/build/build_command/
   program/        что идёт по конвейеру
   load/ pipeline/check_program/ (прогоны declare … overflow) parallel/ memory/ lower/
   optimize/ emit/ link/                                                       проходы
@@ -106,7 +106,7 @@ tests/ docs/ bench/ examples/ third_party/
 ```
 compiler/
   CMakeLists.txt     все .cpp под compiler/ по маске; main.cpp — вход tz
-  pipeline/          pipeline/ — buildProgram; build_options/, runtime_files/;
+  pipeline/          build_options/, runtime_files/;
                      check_program/ — checkProgram: загрузка и шаги двух фасадов —
                        semantic (проверка по месту) и interprocedural (проверки всей программы)
   semantic/          движок типов; semantic_external.{h,cpp} — фасад SemanticExternalFacade;
@@ -117,7 +117,9 @@ compiler/
   interprocedural/   после движка, по всей программе: flows/ flow_*/ wide_writes/ load_order/
                      unused/ async_local_storage_checker/ pool_checker/ held_value_checker/ overflow/
   cli/               папка на слово команды tz (build/ run/ knowledge/ lsp/ mcp/ licenses/
-                     version/ init/ add/ remove/ update/ port/); разбор и помощники — command_line/
+                     version/ init/ add/ remove/ update/ port/); разбор и помощники — command_line/;
+                     build/build_command/ — BuildCommand: tz build, buildProgram (от
+                     проверенной программы до exe) и --explain-parallel
   program/           program/, module/, source_file/, program_inventory/ (опись после проверки),
                      builtin_declarations/ (встроенные тексты из library/*.tz), ast/ (по папке на
                      узел; ast.h — все разом; ast_cloner/ — копии generic), ast_walker/,
@@ -234,8 +236,8 @@ library/             по теме на папку; stream/stream.tz (класс
 
 ## Конвейер
 
-Сборка — две функции: `checkProgram` (`pipeline/check_program/`) и `buildProgram`
-(`pipeline/pipeline/`). Решено 11 ноября, пример — `tmp/check_program_example.cpp`.
+Сборка — две функции: `checkProgram` (`pipeline/check_program/`) и `BuildCommand::buildProgram`
+(`cli/build/build_command/`). Решено 11 ноября, пример — `tmp/check_program_example.cpp`.
 
 ```cpp
 ResultCheckedProgram checkProgram(Program &program, const BuildOptions &options) {

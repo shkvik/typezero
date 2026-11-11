@@ -4149,10 +4149,10 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 
 Весь путь — две функции: `checkProgram`
 ([check_program.cpp](compiler/pipeline/check_program/check_program.cpp): от загрузки до проверки
-переполнений; круги карт событий из `emit` повторяют её начало) и `buildProgram`
-([pipeline.cpp](compiler/pipeline/pipeline/pipeline.cpp): от планов до exe). Прогоны проверки зовут
-движок типов `compiler/semantic/` только через его фасад `SemanticExternalFacade`. Проход — класс с `run`; ошибки он отдаёт значением,
-`Errors`, а не печатает.
+переполнений) и `BuildCommand::buildProgram`
+([build_command.cpp](compiler/cli/build/build_command/build_command.cpp): от планов до exe). `checkProgram` зовёт движок типов `compiler/semantic/` только через его фасад
+`SemanticExternalFacade`, а проверки всей программы — через `InterproceduralExternalFacade`. Ошибки
+отдаются значением, `Result` со списком `Diagnostic`, а не печатаются.
 
 Быстрые пути рантайма, которые программы вызывают в циклах (выделение и освобождение памяти,
 сравнение строк, `charCodeAt`, `startsWith`, `shift` и т.п., в C помечены `TZ_HOT`), перед
@@ -4181,8 +4181,8 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 
 | Каталог | Что внутри |
 |---|---|
-| `compiler/pipeline` | `buildProgram` (`pipeline/`), `checkProgram` и тонкие прогоны проверки (`check_program/`), опции сборки (`build_options/`), где лежат рантайм и библиотеки (`runtime_files/`) |
-| `compiler/cli` | команды `tz`, папка на слово команды: `build/`, `run/`, `init/`, `add/`, `remove/`, `update/`, `port/`, `licenses/`, `lsp/`, `mcp/`, `version/`, `knowledge/` (`map` / `context` / `query` / `impact`); разбор командной строки и общие помощники — `command_line/`. Вход `tz` — `compiler/main.cpp` |
+| `compiler/pipeline` | `checkProgram` (`check_program/`), опции сборки (`build_options/`), где лежат рантайм и библиотеки (`runtime_files/`) |
+| `compiler/cli` | команды `tz`, папка на слово команды: `build/` (`BuildCommand`: `tz build`, `buildProgram` и `--explain-parallel`), `run/`, `init/`, `add/`, `remove/`, `update/`, `port/`, `licenses/`, `lsp/`, `mcp/`, `version/`, `knowledge/` (`map` / `context` / `query` / `impact`); разбор командной строки и общие помощники — `command_line/`. Вход `tz` — `compiler/main.cpp` |
 | `compiler/knowledge` | записи модулей и ответы по ним ([docs/lsp.md](docs/lsp.md), шаг 2): данные — символы, ссылки, типы в точках, импорты (`knowledge/`), `KnowledgePass` — записи из проверенной программы (`knowledge_pass/`, обход AST — `knowledge_walk/`, сигнатуры — `symbol_text/`), разбор цели `имя` / `Класс.член` / `файл.tz:строка:столбец` (`knowledge_target/`), разделы docs и тесты по тексту (`project_text/`), ответы `map`, `context`, `query`, `impact` текстом и JSON (`knowledge_answers/`) |
 | `compiler/mcp` | `tz mcp`: сервер MCP для ИИ-агентов (`mcp_server/`): инструменты зовут дочерний `tz` (`map`, `context`, `query`, `impact`; `check_edit` — `tz lsp --check` с текстом правки) |
 | `compiler/lsp` | `tz lsp`, языковой сервер ([docs/lsp.md](docs/lsp.md)): кадры JSON-RPC через stdin / stdout (`lsp_channel/`), открытые файлы и их правки в столбцах UTF-16 (`text_document/`), `file://`-адреса (`file_uri/`), сервер: какие программы проверять, пауза в наборе, публикация ошибок (`lsp_server/`); проверка идёт в дочернем `tz lsp --check` (`check_process/`, `lsp_check/`), ошибки как данные — файл, строка, столбцы UTF-16, заметки (`check_report/`, `source_places/`) |

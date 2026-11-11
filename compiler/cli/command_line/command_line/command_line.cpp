@@ -1,7 +1,6 @@
 #include "compiler/cli/command_line/command_line/command_line.h"
 #include "compiler/cli/add/add_command/add_command.h"
 #include "compiler/cli/build/build_command/build_command.h"
-#include "compiler/cli/build/explain_command/explain_command.h"
 #include "compiler/cli/command_line/args/args.h"
 #include "compiler/cli/command_line/entry_file/entry_file.h"
 #include "compiler/cli/init/init_command/init_command.h"
@@ -90,8 +89,8 @@ int CommandLine::run(int argc, char **argv) const {
     return licenses.run(args);
   }
   if (args.explainParallel) {
-    ExplainCommand explain(runtime);
-    return explain.run(args);
+    BuildCommand build(runtime);
+    return build.explain(args);
   }
   if (args.command == Args::Command::Run) {
     RunCommand run(runtime);
