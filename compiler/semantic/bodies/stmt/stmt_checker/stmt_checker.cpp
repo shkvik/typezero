@@ -25,18 +25,18 @@ namespace tz {
 
 StmtChecker::StmtChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->varChecker = &all.getVarChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->jumpChecker = &all.getJumpChecker();
-  this->loopChecker = &all.getLoopChecker();
-  this->classChecker = &all.getClassChecker();
-  this->truthChecker = &all.getTruthChecker();
-  this->resultChecker = &all.getResultChecker();
-  this->returnChecker = &all.getReturnChecker();
-  this->switchChecker = &all.getSwitchChecker();
-  this->closureChecker = &all.getClosureChecker();
-  this->genericChecker = &all.getGenericChecker();
+  this->scopes = &all.scopes;
+  this->varChecker = &all.varChecker;
+  this->exprChecker = &all.exprChecker;
+  this->jumpChecker = &all.jumpChecker;
+  this->loopChecker = &all.loopChecker;
+  this->classChecker = &all.classChecker;
+  this->truthChecker = &all.truthChecker;
+  this->resultChecker = &all.resultChecker;
+  this->returnChecker = &all.returnChecker;
+  this->switchChecker = &all.switchChecker;
+  this->closureChecker = &all.closureChecker;
+  this->genericChecker = &all.genericChecker;
 }
 
 void StmtChecker::checkStmt(Stmt *stmt) {

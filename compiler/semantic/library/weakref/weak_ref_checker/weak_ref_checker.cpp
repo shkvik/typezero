@@ -12,13 +12,13 @@ namespace tz {
 
 WeakRefChecker::WeakRefChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->typeResolver = &all.getTypeResolver();
-  this->typeRelations = &all.getTypeRelations();
-  this->genericChecker = &all.getGenericChecker();
-  this->processChecker = &all.getProcessChecker();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->typeResolver = &all.typeResolver;
+  this->typeRelations = &all.typeRelations;
+  this->genericChecker = &all.genericChecker;
+  this->processChecker = &all.processChecker;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 WeakRefChecker::ResultTargetIsWritten WeakRefChecker::targetWritten(const TypeRef &ref) {

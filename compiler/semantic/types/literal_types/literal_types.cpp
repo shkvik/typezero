@@ -17,10 +17,10 @@ namespace tz {
 
 LiteralTypes::LiteralTypes(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->typeRelations = &all.getTypeRelations();
-  this->conditionalTypes = &all.getConditionalTypes();
+  this->scopes = &all.scopes;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->typeRelations = &all.typeRelations;
+  this->conditionalTypes = &all.conditionalTypes;
 }
 
 llvm::ArrayRef<const Type *> LiteralTypes::membersOf(const Type *&type) {

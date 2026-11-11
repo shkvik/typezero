@@ -29,15 +29,15 @@ namespace tz {
 
 CryptoFunctionChecker::CryptoFunctionChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->cryptoArgs = &all.getCryptoArgs();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->bytesChecker = &all.getBytesChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->constantFolder = &all.getConstantFolder();
-  this->keyPairChecker = &all.getKeyPairChecker();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->cryptoArgs = &all.cryptoArgs;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->indexProofs = &all.indexProofs;
+  this->bytesChecker = &all.bytesChecker;
+  this->typeRelations = &all.typeRelations;
+  this->constantFolder = &all.constantFolder;
+  this->keyPairChecker = &all.keyPairChecker;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 std::optional<std::string> CryptoFunctionChecker::literalOf(const Expr *e) {

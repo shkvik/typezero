@@ -37,21 +37,21 @@ constexpr int kDedupeBit = 32;
 
 EmitterChecker::EmitterChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->eventMaps = &all.getEventMaps();
-  this->fieldFacts = &all.getFieldFacts();
-  this->typeParams = &all.getTypeParams();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->libraryCalls = &all.getLibraryCalls();
-  this->typeResolver = &all.getTypeResolver();
-  this->typeRelations = &all.getTypeRelations();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->eventMapInference = &all.getEventMapInference();
-  this->methodCallChecker = &all.getMethodCallChecker();
-  this->genericInstantiator = &all.getGenericInstantiator();
-  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+  this->scopes = &all.scopes;
+  this->eventMaps = &all.eventMaps;
+  this->fieldFacts = &all.fieldFacts;
+  this->typeParams = &all.typeParams;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->libraryCalls = &all.libraryCalls;
+  this->typeResolver = &all.typeResolver;
+  this->typeRelations = &all.typeRelations;
+  this->returnInferrer = &all.returnInferrer;
+  this->argumentChecker = &all.argumentChecker;
+  this->eventMapInference = &all.eventMapInference;
+  this->methodCallChecker = &all.methodCallChecker;
+  this->genericInstantiator = &all.genericInstantiator;
+  this->genericClassInstantiator = &all.genericClassInstantiator;
 }
 
 std::optional<std::string> EmitterChecker::chainText(const Expr *expr) {

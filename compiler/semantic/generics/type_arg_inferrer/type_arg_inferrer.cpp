@@ -31,19 +31,19 @@ namespace tz {
 
 TypeArgInferrer::TypeArgInferrer(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->typeParams = &all.getTypeParams();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->lateClasses = &all.getLateClasses();
-  this->resultTypes = &all.getResultTypes();
-  this->typeResolver = &all.getTypeResolver();
-  this->utilityTypes = &all.getUtilityTypes();
-  this->closureChecker = &all.getClosureChecker();
-  this->genericChecker = &all.getGenericChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->iterableChecker = &all.getIterableChecker();
-  this->genericInstantiator = &all.getGenericInstantiator();
-  this->functionValueChecker = &all.getFunctionValueChecker();
+  this->typeParams = &all.typeParams;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->lateClasses = &all.lateClasses;
+  this->resultTypes = &all.resultTypes;
+  this->typeResolver = &all.typeResolver;
+  this->utilityTypes = &all.utilityTypes;
+  this->closureChecker = &all.closureChecker;
+  this->genericChecker = &all.genericChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->iterableChecker = &all.iterableChecker;
+  this->genericInstantiator = &all.genericInstantiator;
+  this->functionValueChecker = &all.functionValueChecker;
 }
 
 bool TypeArgInferrer::grows(const Type *type, llvm::ArrayRef<const Type *> params, bool inside) {

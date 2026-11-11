@@ -10,7 +10,7 @@ namespace tz {
 
 FsErrors::FsErrors(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->builtinModuleTypes = &all.getBuiltinModuleTypes();
+  this->builtinModuleTypes = &all.builtinModuleTypes;
 }
 
 void FsErrors::declare() {

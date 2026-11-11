@@ -24,9 +24,9 @@ constexpr uint64_t kMaxConstant = uint64_t(1) << 40;
 
 IndexProofs::IndexProofs(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->byteProofs = &all.getByteProofs();
-  this->libraryCalls = &all.getLibraryCalls();
-  this->constantFolder = &all.getConstantFolder();
+  this->byteProofs = &all.byteProofs;
+  this->libraryCalls = &all.libraryCalls;
+  this->constantFolder = &all.constantFolder;
 }
 
 const VarSymbol *IndexProofs::variableOf(const Expr *expr) {

@@ -16,12 +16,12 @@ namespace tz {
 
 TopLevelChecker::TopLevelChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->stmtChecker = &all.getStmtChecker();
-  this->importBinder = &all.getImportBinder();
-  this->emitterChecker = &all.getEmitterChecker();
-  this->moduleDeclarer = &all.getModuleDeclarer();
-  this->returnInferrer = &all.getReturnInferrer();
+  this->scopes = &all.scopes;
+  this->stmtChecker = &all.stmtChecker;
+  this->importBinder = &all.importBinder;
+  this->emitterChecker = &all.emitterChecker;
+  this->moduleDeclarer = &all.moduleDeclarer;
+  this->returnInferrer = &all.returnInferrer;
 }
 
 void TopLevelChecker::loadTopLevel(Module *module, llvm::StringRef until) {

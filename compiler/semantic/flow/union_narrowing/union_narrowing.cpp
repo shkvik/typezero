@@ -13,8 +13,8 @@ namespace tz {
 
 UnionNarrowing::UnionNarrowing(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->fieldFacts = &all.getFieldFacts();
-  this->literalTypes = &all.getLiteralTypes();
+  this->fieldFacts = &all.fieldFacts;
+  this->literalTypes = &all.literalTypes;
 }
 
 llvm::ArrayRef<const Type *> UnionNarrowing::membersOf(const Type *&type) {

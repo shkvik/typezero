@@ -20,12 +20,12 @@ namespace tz {
 
 SetEncodingChecker::SetEncodingChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->chunkTypes = &all.getChunkTypes();
-  this->fieldFacts = &all.getFieldFacts();
-  this->streamSources = &all.getStreamSources();
-  this->emitterChecker = &all.getEmitterChecker();
-  this->processChecker = &all.getProcessChecker();
-  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+  this->chunkTypes = &all.chunkTypes;
+  this->fieldFacts = &all.fieldFacts;
+  this->streamSources = &all.streamSources;
+  this->emitterChecker = &all.emitterChecker;
+  this->processChecker = &all.processChecker;
+  this->genericClassInstantiator = &all.genericClassInstantiator;
 }
 
 const Type *SetEncodingChecker::encodedStreamType(ClassDecl *cls, llvm::SMLoc loc) {

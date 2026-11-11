@@ -24,18 +24,18 @@ namespace tz {
 
 ClassMemberChecker::ClassMemberChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->eventMaps = &all.getEventMaps();
-  this->fieldFacts = &all.getFieldFacts();
-  this->fsDeclarer = &all.getFsDeclarer();
-  this->classChecker = &all.getClassChecker();
-  this->libraryCalls = &all.getLibraryCalls();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->objectChecker = &all.getObjectChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->emitterChecker = &all.getEmitterChecker();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->overloadResolver = &all.getOverloadResolver();
-  this->tzModulesChecker = &all.getTzModulesChecker();
+  this->eventMaps = &all.eventMaps;
+  this->fieldFacts = &all.fieldFacts;
+  this->fsDeclarer = &all.fsDeclarer;
+  this->classChecker = &all.classChecker;
+  this->libraryCalls = &all.libraryCalls;
+  this->classDeclarer = &all.classDeclarer;
+  this->objectChecker = &all.objectChecker;
+  this->typeRelations = &all.typeRelations;
+  this->emitterChecker = &all.emitterChecker;
+  this->returnInferrer = &all.returnInferrer;
+  this->overloadResolver = &all.overloadResolver;
+  this->tzModulesChecker = &all.tzModulesChecker;
 }
 
 const char *ClassMemberChecker::accessWord(Access access) {

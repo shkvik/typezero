@@ -111,16 +111,16 @@ bool ReturnChecker::breaksTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> l
 
 ReturnChecker::ReturnChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->byteProofs = &all.getByteProofs();
-  this->classLinks = &all.getClassLinks();
-  this->exprChecker = &all.getExprChecker();
-  this->classChecker = &all.getClassChecker();
-  this->truthChecker = &all.getTruthChecker();
-  this->resultChecker = &all.getResultChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->conditionFacts = &all.getConditionFacts();
-  this->emitterChecker = &all.getEmitterChecker();
-  this->predicateChecker = &all.getPredicateChecker();
+  this->byteProofs = &all.byteProofs;
+  this->classLinks = &all.classLinks;
+  this->exprChecker = &all.exprChecker;
+  this->classChecker = &all.classChecker;
+  this->truthChecker = &all.truthChecker;
+  this->resultChecker = &all.resultChecker;
+  this->typeRelations = &all.typeRelations;
+  this->conditionFacts = &all.conditionFacts;
+  this->emitterChecker = &all.emitterChecker;
+  this->predicateChecker = &all.predicateChecker;
 }
 
 Expr *ReturnChecker::checkReturnValue(ReturnStmt *ret, const Type *hint, bool tested) {

@@ -18,13 +18,13 @@ namespace tz {
 
 ModuleDeclarer::ModuleDeclarer(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->classLinks = &all.getClassLinks();
-  this->lateClasses = &all.getLateClasses();
-  this->importBinder = &all.getImportBinder();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->functionChecker = &all.getFunctionChecker();
-  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+  this->classLinks = &all.classLinks;
+  this->lateClasses = &all.lateClasses;
+  this->importBinder = &all.importBinder;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->classDeclarer = &all.classDeclarer;
+  this->functionChecker = &all.functionChecker;
+  this->genericClassInstantiator = &all.genericClassInstantiator;
 }
 
 void ModuleDeclarer::useModule(Module *module) {

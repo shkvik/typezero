@@ -19,12 +19,12 @@ namespace tz {
 
 ResultMethodChecker::ResultMethodChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->callbackChecker = &all.getCallbackChecker();
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->typeRelations = &all.typeRelations;
+  this->argumentChecker = &all.argumentChecker;
+  this->callbackChecker = &all.callbackChecker;
 }
 
 const Type *ResultMethodChecker::halfParam(const Type *half) {

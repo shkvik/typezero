@@ -35,26 +35,26 @@ namespace tz {
 
 AssignChecker::AssignChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->fieldFacts = &all.getFieldFacts();
-  this->varChecker = &all.getVarChecker();
-  this->dictChecker = &all.getDictChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->bytesChecker = &all.getBytesChecker();
-  this->classChecker = &all.getClassChecker();
-  this->truthChecker = &all.getTruthChecker();
-  this->binaryChecker = &all.getBinaryChecker();
-  this->concatChecker = &all.getConcatChecker();
-  this->targetChecker = &all.getTargetChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->constantFolder = &all.getConstantFolder();
-  this->decimalChecker = &all.getDecimalChecker();
-  this->genericChecker = &all.getGenericChecker();
-  this->processChecker = &all.getProcessChecker();
-  this->topLevelChecker = &all.getTopLevelChecker();
-  this->builtinModuleChecker = &all.getBuiltinModuleChecker();
+  this->scopes = &all.scopes;
+  this->fieldFacts = &all.fieldFacts;
+  this->varChecker = &all.varChecker;
+  this->dictChecker = &all.dictChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->indexProofs = &all.indexProofs;
+  this->bytesChecker = &all.bytesChecker;
+  this->classChecker = &all.classChecker;
+  this->truthChecker = &all.truthChecker;
+  this->binaryChecker = &all.binaryChecker;
+  this->concatChecker = &all.concatChecker;
+  this->targetChecker = &all.targetChecker;
+  this->typeRelations = &all.typeRelations;
+  this->constantFolder = &all.constantFolder;
+  this->decimalChecker = &all.decimalChecker;
+  this->genericChecker = &all.genericChecker;
+  this->processChecker = &all.processChecker;
+  this->topLevelChecker = &all.topLevelChecker;
+  this->builtinModuleChecker = &all.builtinModuleChecker;
 }
 
 std::pair<llvm::StringRef, llvm::StringRef>

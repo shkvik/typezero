@@ -20,12 +20,12 @@ namespace tz {
 
 PromiseStaticChecker::PromiseStaticChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->typeResolver = &all.getTypeResolver();
-  this->resultChecker = &all.getResultChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->typeResolver = &all.typeResolver;
+  this->resultChecker = &all.resultChecker;
+  this->typeRelations = &all.typeRelations;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 const Type *PromiseStaticChecker::awaited(const Type *type) {

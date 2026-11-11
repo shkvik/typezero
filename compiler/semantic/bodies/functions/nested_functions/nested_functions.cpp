@@ -15,9 +15,9 @@ namespace tz {
 
 NestedFunctions::NestedFunctions(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callCycles = &all.getCallCycles();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->functionChecker = &all.getFunctionChecker();
+  this->callCycles = &all.callCycles;
+  this->returnInferrer = &all.returnInferrer;
+  this->functionChecker = &all.functionChecker;
 }
 
 void NestedFunctions::collectAssigned(const Stmt *stmt, std::vector<llvm::StringRef> &names) {

@@ -34,26 +34,26 @@ namespace tz {
 
 FunctionChecker::FunctionChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->byteProofs = &all.getByteProofs();
-  this->chunkTypes = &all.getChunkTypes();
-  this->typeParams = &all.getTypeParams();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->lateClasses = &all.getLateClasses();
-  this->asyncChecker = &all.getAsyncChecker();
-  this->classChecker = &all.getClassChecker();
-  this->typeResolver = &all.getTypeResolver();
-  this->typeRelations = &all.getTypeRelations();
-  this->argListChecker = &all.getArgListChecker();
-  this->closureChecker = &all.getClosureChecker();
-  this->emitterChecker = &all.getEmitterChecker();
-  this->iterableChecker = &all.getIterableChecker();
-  this->generatorChecker = &all.getGeneratorChecker();
-  this->predicateChecker = &all.getPredicateChecker();
-  this->tzModulesChecker = &all.getTzModulesChecker();
-  this->genericClassChecker = &all.getGenericClassChecker();
+  this->scopes = &all.scopes;
+  this->byteProofs = &all.byteProofs;
+  this->chunkTypes = &all.chunkTypes;
+  this->typeParams = &all.typeParams;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->indexProofs = &all.indexProofs;
+  this->lateClasses = &all.lateClasses;
+  this->asyncChecker = &all.asyncChecker;
+  this->classChecker = &all.classChecker;
+  this->typeResolver = &all.typeResolver;
+  this->typeRelations = &all.typeRelations;
+  this->argListChecker = &all.argListChecker;
+  this->closureChecker = &all.closureChecker;
+  this->emitterChecker = &all.emitterChecker;
+  this->iterableChecker = &all.iterableChecker;
+  this->generatorChecker = &all.generatorChecker;
+  this->predicateChecker = &all.predicateChecker;
+  this->tzModulesChecker = &all.tzModulesChecker;
+  this->genericClassChecker = &all.genericClassChecker;
 }
 
 FunctionChecker::ResultTopLevelGenerics FunctionChecker::topLevelGeneric(const FunctionDecl *fn) {

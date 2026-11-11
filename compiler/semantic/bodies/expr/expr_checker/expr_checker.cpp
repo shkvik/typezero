@@ -39,32 +39,32 @@ namespace tz {
 
 ExprChecker::ExprChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->newChecker = &all.getNewChecker();
-  this->callChecker = &all.getCallChecker();
-  this->jsonChecker = &all.getJsonChecker();
-  this->lateClasses = &all.getLateClasses();
-  this->nameChecker = &all.getNameChecker();
-  this->asyncChecker = &all.getAsyncChecker();
-  this->literalTypes = &all.getLiteralTypes();
-  this->regexChecker = &all.getRegexChecker();
-  this->truthChecker = &all.getTruthChecker();
-  this->typeResolver = &all.getTypeResolver();
-  this->unaryChecker = &all.getUnaryChecker();
-  this->assignChecker = &all.getAssignChecker();
-  this->binaryChecker = &all.getBinaryChecker();
-  this->memberChecker = &all.getMemberChecker();
-  this->objectChecker = &all.getObjectChecker();
-  this->resultChecker = &all.getResultChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->closureChecker = &all.getClosureChecker();
-  this->decimalChecker = &all.getDecimalChecker();
-  this->genericChecker = &all.getGenericChecker();
-  this->literalChecker = &all.getLiteralChecker();
-  this->generatorChecker = &all.getGeneratorChecker();
-  this->arrayLiteralChecker = &all.getArrayLiteralChecker();
-  this->genericInstantiator = &all.getGenericInstantiator();
-  this->functionValueChecker = &all.getFunctionValueChecker();
-  this->objectLiteralChecker = &all.getObjectLiteralChecker();
+  this->newChecker = &all.newChecker;
+  this->callChecker = &all.callChecker;
+  this->jsonChecker = &all.jsonChecker;
+  this->lateClasses = &all.lateClasses;
+  this->nameChecker = &all.nameChecker;
+  this->asyncChecker = &all.asyncChecker;
+  this->literalTypes = &all.literalTypes;
+  this->regexChecker = &all.regexChecker;
+  this->truthChecker = &all.truthChecker;
+  this->typeResolver = &all.typeResolver;
+  this->unaryChecker = &all.unaryChecker;
+  this->assignChecker = &all.assignChecker;
+  this->binaryChecker = &all.binaryChecker;
+  this->memberChecker = &all.memberChecker;
+  this->objectChecker = &all.objectChecker;
+  this->resultChecker = &all.resultChecker;
+  this->typeRelations = &all.typeRelations;
+  this->closureChecker = &all.closureChecker;
+  this->decimalChecker = &all.decimalChecker;
+  this->genericChecker = &all.genericChecker;
+  this->literalChecker = &all.literalChecker;
+  this->generatorChecker = &all.generatorChecker;
+  this->arrayLiteralChecker = &all.arrayLiteralChecker;
+  this->genericInstantiator = &all.genericInstantiator;
+  this->functionValueChecker = &all.functionValueChecker;
+  this->objectLiteralChecker = &all.objectLiteralChecker;
 }
 
 Expr *ExprChecker::checkExpr(Expr *expr, const Type *expected, bool wraps) {

@@ -13,9 +13,9 @@ namespace tz {
 
 UnknownChecker::UnknownChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->staticChecker = &all.getStaticChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->classValueChecker = &all.getClassValueChecker();
+  this->staticChecker = &all.staticChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->classValueChecker = &all.classValueChecker;
 }
 
 const Type *UnknownChecker::typeOfNarrowed(const std::u16string &name) {

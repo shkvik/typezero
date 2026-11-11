@@ -25,15 +25,15 @@ namespace tz {
 
 DateChecker::DateChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->prelude = &all.getPrelude();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->constantFolder = &all.getConstantFolder();
-  this->genericChecker = &all.getGenericChecker();
-  this->processChecker = &all.getProcessChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->dateFormatChecker = &all.getDateFormatChecker();
+  this->prelude = &all.prelude;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->typeRelations = &all.typeRelations;
+  this->constantFolder = &all.constantFolder;
+  this->genericChecker = &all.genericChecker;
+  this->processChecker = &all.processChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->dateFormatChecker = &all.dateFormatChecker;
 }
 
 std::optional<std::u16string> DateChecker::literalText(const Expr *e) {

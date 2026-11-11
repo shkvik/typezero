@@ -22,14 +22,14 @@ namespace tz {
 
 ArrayMethods::ArrayMethods(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->memberChecker = &all.getMemberChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->callbackChecker = &all.getCallbackChecker();
-  this->iteratorMethods = &all.getIteratorMethods();
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->indexProofs = &all.indexProofs;
+  this->memberChecker = &all.memberChecker;
+  this->typeRelations = &all.typeRelations;
+  this->argumentChecker = &all.argumentChecker;
+  this->callbackChecker = &all.callbackChecker;
+  this->iteratorMethods = &all.iteratorMethods;
 }
 
 const VarSymbol *ArrayMethods::arrayVariable(const Expr *object) {

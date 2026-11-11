@@ -10,8 +10,8 @@ namespace tz {
 
 GenericWidening::GenericWidening(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->typeRelations = &all.getTypeRelations();
-  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+  this->typeRelations = &all.typeRelations;
+  this->genericClassInstantiator = &all.genericClassInstantiator;
 }
 
 bool GenericWidening::mentions(const TypeRef &ref, llvm::StringRef name) {

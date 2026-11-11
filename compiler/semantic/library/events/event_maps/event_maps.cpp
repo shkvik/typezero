@@ -22,16 +22,16 @@ namespace tz {
 
 EventMaps::EventMaps(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->exprChecker = &all.getExprChecker();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->typeResolver = &all.getTypeResolver();
-  this->typeRelations = &all.getTypeRelations();
-  this->closureChecker = &all.getClosureChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->eventMapInference = &all.getEventMapInference();
-  this->keyedFieldChecker = &all.getKeyedFieldChecker();
-  this->functionValueChecker = &all.getFunctionValueChecker();
-  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+  this->exprChecker = &all.exprChecker;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->typeResolver = &all.typeResolver;
+  this->typeRelations = &all.typeRelations;
+  this->closureChecker = &all.closureChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->eventMapInference = &all.eventMapInference;
+  this->keyedFieldChecker = &all.keyedFieldChecker;
+  this->functionValueChecker = &all.functionValueChecker;
+  this->genericClassInstantiator = &all.genericClassInstantiator;
 }
 
 bool EventMaps::isServiceEvent(llvm::StringRef name) {

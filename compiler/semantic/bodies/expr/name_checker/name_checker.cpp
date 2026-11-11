@@ -25,18 +25,18 @@ namespace tz {
 
 NameChecker::NameChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->resultTypes = &all.getResultTypes();
-  this->classChecker = &all.getClassChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->genericChecker = &all.getGenericChecker();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->metadataChecker = &all.getMetadataChecker();
-  this->nestedFunctions = &all.getNestedFunctions();
-  this->topLevelChecker = &all.getTopLevelChecker();
-  this->tzModulesChecker = &all.getTzModulesChecker();
-  this->classValueChecker = &all.getClassValueChecker();
-  this->builtinModuleChecker = &all.getBuiltinModuleChecker();
+  this->scopes = &all.scopes;
+  this->resultTypes = &all.resultTypes;
+  this->classChecker = &all.classChecker;
+  this->typeRelations = &all.typeRelations;
+  this->genericChecker = &all.genericChecker;
+  this->returnInferrer = &all.returnInferrer;
+  this->metadataChecker = &all.metadataChecker;
+  this->nestedFunctions = &all.nestedFunctions;
+  this->topLevelChecker = &all.topLevelChecker;
+  this->tzModulesChecker = &all.tzModulesChecker;
+  this->classValueChecker = &all.classValueChecker;
+  this->builtinModuleChecker = &all.builtinModuleChecker;
 }
 
 NameChecker::ResultNoTypeArguments NameChecker::typeArgsAbsent(const NameExpr *name,

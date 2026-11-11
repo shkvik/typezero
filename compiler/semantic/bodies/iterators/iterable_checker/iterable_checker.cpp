@@ -26,15 +26,15 @@ constexpr llvm::StringLiteral kAsyncIteratorMethod = "[Symbol.asyncIterator]";
 
 IterableChecker::IterableChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->flowChecker = &all.getFlowChecker();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->typeResolver = &all.getTypeResolver();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->typeRelations = &all.getTypeRelations();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->functionChecker = &all.getFunctionChecker();
-  this->methodCallChecker = &all.getMethodCallChecker();
-  this->genericInstantiator = &all.getGenericInstantiator();
+  this->flowChecker = &all.flowChecker;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->typeResolver = &all.typeResolver;
+  this->classDeclarer = &all.classDeclarer;
+  this->typeRelations = &all.typeRelations;
+  this->returnInferrer = &all.returnInferrer;
+  this->functionChecker = &all.functionChecker;
+  this->methodCallChecker = &all.methodCallChecker;
+  this->genericInstantiator = &all.genericInstantiator;
 }
 
 FuncSymbol *IterableChecker::iterateFunction() {

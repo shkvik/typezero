@@ -30,15 +30,15 @@ namespace tz {
 
 IntlChecker::IntlChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->newChecker = &all.getNewChecker();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->literalTypes = &all.getLiteralTypes();
-  this->typeRelations = &all.getTypeRelations();
-  this->processChecker = &all.getProcessChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->topLevelChecker = &all.getTopLevelChecker();
-  this->intlOptionsChecker = &all.getIntlOptionsChecker();
+  this->newChecker = &all.newChecker;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->literalTypes = &all.literalTypes;
+  this->typeRelations = &all.typeRelations;
+  this->processChecker = &all.processChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->topLevelChecker = &all.topLevelChecker;
+  this->intlOptionsChecker = &all.intlOptionsChecker;
 }
 
 Expr *IntlChecker::kindArg(AstContext &ctx, llvm::SMLoc loc, int kind) {

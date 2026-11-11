@@ -20,12 +20,12 @@ namespace tz {
 
 DictNewChecker::DictNewChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->dictChecker = &all.getDictChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->iteratorMethods = &all.getIteratorMethods();
-  this->generatorChecker = &all.getGeneratorChecker();
+  this->dictChecker = &all.dictChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->typeRelations = &all.typeRelations;
+  this->iteratorMethods = &all.iteratorMethods;
+  this->generatorChecker = &all.generatorChecker;
 }
 
 void DictNewChecker::markPairs(Expr *arg) {

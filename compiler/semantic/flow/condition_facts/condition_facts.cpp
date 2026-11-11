@@ -19,14 +19,14 @@ namespace tz {
 
 ConditionFacts::ConditionFacts(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->fieldFacts = &all.getFieldFacts();
-  this->indexProofs = &all.getIndexProofs();
-  this->jsonChecker = &all.getJsonChecker();
-  this->resultChecker = &all.getResultChecker();
-  this->genericChecker = &all.getGenericChecker();
-  this->unionNarrowing = &all.getUnionNarrowing();
-  this->unknownChecker = &all.getUnknownChecker();
-  this->predicateChecker = &all.getPredicateChecker();
+  this->fieldFacts = &all.fieldFacts;
+  this->indexProofs = &all.indexProofs;
+  this->jsonChecker = &all.jsonChecker;
+  this->resultChecker = &all.resultChecker;
+  this->genericChecker = &all.genericChecker;
+  this->unionNarrowing = &all.unionNarrowing;
+  this->unknownChecker = &all.unknownChecker;
+  this->predicateChecker = &all.predicateChecker;
 }
 
 const VarSymbol *ConditionFacts::variableOf(const Expr *expr) {

@@ -22,16 +22,16 @@ namespace tz {
 
 StaticChecker::StaticChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->streamSources = &all.getStreamSources();
-  this->typeRelations = &all.getTypeRelations();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->typeArgInferrer = &all.getTypeArgInferrer();
-  this->overloadResolver = &all.getOverloadResolver();
-  this->classValueChecker = &all.getClassValueChecker();
-  this->classMemberChecker = &all.getClassMemberChecker();
-  this->eventTargetChecker = &all.getEventTargetChecker();
+  this->callChecker = &all.callChecker;
+  this->streamSources = &all.streamSources;
+  this->typeRelations = &all.typeRelations;
+  this->returnInferrer = &all.returnInferrer;
+  this->argumentChecker = &all.argumentChecker;
+  this->typeArgInferrer = &all.typeArgInferrer;
+  this->overloadResolver = &all.overloadResolver;
+  this->classValueChecker = &all.classValueChecker;
+  this->classMemberChecker = &all.classMemberChecker;
+  this->eventTargetChecker = &all.eventTargetChecker;
 }
 
 ClassField *StaticChecker::staticField(ClassDecl *cls, llvm::StringRef name, ClassDecl **owner) {

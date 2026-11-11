@@ -15,9 +15,9 @@ namespace tz {
 
 ExtendsRelation::ExtendsRelation(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->classDeclarer = &all.getClassDeclarer();
-  this->templateTypes = &all.getTemplateTypes();
-  this->returnInferrer = &all.getReturnInferrer();
+  this->classDeclarer = &all.classDeclarer;
+  this->templateTypes = &all.templateTypes;
+  this->returnInferrer = &all.returnInferrer;
 }
 
 std::vector<const Type *> ExtendsRelation::distributed(const Type *type) {

@@ -21,16 +21,16 @@ namespace tz {
 
 StreamSources::StreamSources(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->prelude = &all.getPrelude();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->libraryCalls = &all.getLibraryCalls();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->typeRelations = &all.getTypeRelations();
-  this->streamPipeline = &all.getStreamPipeline();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->iterableChecker = &all.getIterableChecker();
-  this->eventTargetChecker = &all.getEventTargetChecker();
+  this->prelude = &all.prelude;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->libraryCalls = &all.libraryCalls;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->typeRelations = &all.typeRelations;
+  this->streamPipeline = &all.streamPipeline;
+  this->argumentChecker = &all.argumentChecker;
+  this->iterableChecker = &all.iterableChecker;
+  this->eventTargetChecker = &all.eventTargetChecker;
 }
 
 Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, llvm::SMLoc loc) {

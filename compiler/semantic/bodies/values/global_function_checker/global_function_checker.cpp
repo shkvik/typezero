@@ -24,18 +24,18 @@ namespace tz {
 
 GlobalFunctionChecker::GlobalFunctionChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->prelude = &all.getPrelude();
-  this->callChecker = &all.getCallChecker();
-  this->dateChecker = &all.getDateChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->mathChecker = &all.getMathChecker();
-  this->regexChecker = &all.getRegexChecker();
-  this->truthChecker = &all.getTruthChecker();
-  this->binaryChecker = &all.getBinaryChecker();
-  this->concatChecker = &all.getConcatChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->decimalChecker = &all.getDecimalChecker();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->prelude = &all.prelude;
+  this->callChecker = &all.callChecker;
+  this->dateChecker = &all.dateChecker;
+  this->exprChecker = &all.exprChecker;
+  this->mathChecker = &all.mathChecker;
+  this->regexChecker = &all.regexChecker;
+  this->truthChecker = &all.truthChecker;
+  this->binaryChecker = &all.binaryChecker;
+  this->concatChecker = &all.concatChecker;
+  this->typeRelations = &all.typeRelations;
+  this->decimalChecker = &all.decimalChecker;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 GlobalFunctionChecker::ResultGlobalCallMade GlobalFunctionChecker::checkGlobalCall(CallExpr *call,

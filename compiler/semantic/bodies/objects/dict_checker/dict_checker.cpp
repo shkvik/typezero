@@ -22,13 +22,13 @@ namespace tz {
 
 DictChecker::DictChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->exprChecker = &all.getExprChecker();
-  this->intlChecker = &all.getIntlChecker();
-  this->typeResolver = &all.getTypeResolver();
-  this->typeRelations = &all.getTypeRelations();
-  this->argListChecker = &all.getArgListChecker();
-  this->weakRefChecker = &all.getWeakRefChecker();
-  this->iterableChecker = &all.getIterableChecker();
+  this->exprChecker = &all.exprChecker;
+  this->intlChecker = &all.intlChecker;
+  this->typeResolver = &all.typeResolver;
+  this->typeRelations = &all.typeRelations;
+  this->argListChecker = &all.argListChecker;
+  this->weakRefChecker = &all.weakRefChecker;
+  this->iterableChecker = &all.iterableChecker;
 }
 
 std::u16string DictChecker::toUtf16(llvm::StringRef text) {

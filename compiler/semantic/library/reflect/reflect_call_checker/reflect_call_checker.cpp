@@ -20,13 +20,13 @@ namespace tz {
 
 ReflectCallChecker::ReflectCallChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->reflectChecker = &all.getReflectChecker();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->metadataChecker = &all.getMetadataChecker();
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->typeRelations = &all.typeRelations;
+  this->reflectChecker = &all.reflectChecker;
+  this->returnInferrer = &all.returnInferrer;
+  this->argumentChecker = &all.argumentChecker;
+  this->metadataChecker = &all.metadataChecker;
 }
 
 ReflectCallChecker::ResultKeyOfRecords ReflectCallChecker::keyOfRecords(const Type *type) {

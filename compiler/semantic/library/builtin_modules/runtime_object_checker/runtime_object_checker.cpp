@@ -17,11 +17,11 @@ namespace tz {
 
 RuntimeObjectChecker::RuntimeObjectChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->prelude = &all.getPrelude();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->callbackChecker = &all.getCallbackChecker();
+  this->prelude = &all.prelude;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->callbackChecker = &all.callbackChecker;
 }
 
 Expr *RuntimeObjectChecker::checkRuntimeMember(MemberExpr *member) {

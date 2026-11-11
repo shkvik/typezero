@@ -26,23 +26,23 @@ namespace tz {
 
 MethodCallChecker::MethodCallChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->eventMaps = &all.getEventMaps();
-  this->fsDeclarer = &all.getFsDeclarer();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->classChecker = &all.getClassChecker();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->streamChecker = &all.getStreamChecker();
-  this->emitterChecker = &all.getEmitterChecker();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->typeArgInferrer = &all.getTypeArgInferrer();
-  this->overloadResolver = &all.getOverloadResolver();
-  this->tzModulesChecker = &all.getTzModulesChecker();
-  this->classMemberChecker = &all.getClassMemberChecker();
-  this->eventTargetChecker = &all.getEventTargetChecker();
-  this->genericClassChecker = &all.getGenericClassChecker();
+  this->eventMaps = &all.eventMaps;
+  this->fsDeclarer = &all.fsDeclarer;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->classChecker = &all.classChecker;
+  this->classDeclarer = &all.classDeclarer;
+  this->streamChecker = &all.streamChecker;
+  this->emitterChecker = &all.emitterChecker;
+  this->returnInferrer = &all.returnInferrer;
+  this->argumentChecker = &all.argumentChecker;
+  this->typeArgInferrer = &all.typeArgInferrer;
+  this->overloadResolver = &all.overloadResolver;
+  this->tzModulesChecker = &all.tzModulesChecker;
+  this->classMemberChecker = &all.classMemberChecker;
+  this->eventTargetChecker = &all.eventTargetChecker;
+  this->genericClassChecker = &all.genericClassChecker;
 }
 
 MethodCallChecker::ResultFieldIsCallable MethodCallChecker::fieldCallable(const Type *type,

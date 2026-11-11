@@ -27,21 +27,21 @@ namespace tz {
 
 LateClasses::LateClasses(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->classBases = &all.getClassBases();
-  this->classLinks = &all.getClassLinks();
-  this->fsDeclarer = &all.getFsDeclarer();
-  this->typeParams = &all.getTypeParams();
-  this->exprChecker = &all.getExprChecker();
-  this->classChecker = &all.getClassChecker();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->typeRelations = &all.getTypeRelations();
-  this->moduleDeclarer = &all.getModuleDeclarer();
-  this->reflectChecker = &all.getReflectChecker();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->functionChecker = &all.getFunctionChecker();
-  this->decoratorChecker = &all.getDecoratorChecker();
-  this->classValueChecker = &all.getClassValueChecker();
-  this->genericInstantiator = &all.getGenericInstantiator();
+  this->classBases = &all.classBases;
+  this->classLinks = &all.classLinks;
+  this->fsDeclarer = &all.fsDeclarer;
+  this->typeParams = &all.typeParams;
+  this->exprChecker = &all.exprChecker;
+  this->classChecker = &all.classChecker;
+  this->classDeclarer = &all.classDeclarer;
+  this->typeRelations = &all.typeRelations;
+  this->moduleDeclarer = &all.moduleDeclarer;
+  this->reflectChecker = &all.reflectChecker;
+  this->returnInferrer = &all.returnInferrer;
+  this->functionChecker = &all.functionChecker;
+  this->decoratorChecker = &all.decoratorChecker;
+  this->classValueChecker = &all.classValueChecker;
+  this->genericInstantiator = &all.genericInstantiator;
 }
 
 bool LateClasses::holdsType(const Type *type, const Type *target) {

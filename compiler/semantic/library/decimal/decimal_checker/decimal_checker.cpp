@@ -71,14 +71,14 @@ const Replacement kReplacements[] = {
 
 DecimalChecker::DecimalChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->prelude = &all.getPrelude();
-  this->exprChecker = &all.getExprChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->literalTypes = &all.getLiteralTypes();
-  this->typeRelations = &all.getTypeRelations();
-  this->constantFolder = &all.getConstantFolder();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->scopes = &all.scopes;
+  this->prelude = &all.prelude;
+  this->exprChecker = &all.exprChecker;
+  this->indexProofs = &all.indexProofs;
+  this->literalTypes = &all.literalTypes;
+  this->typeRelations = &all.typeRelations;
+  this->constantFolder = &all.constantFolder;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 DecimalChecker::ResultRoundingMode DecimalChecker::roundingMode(const std::u16string &text) {

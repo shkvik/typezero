@@ -18,10 +18,10 @@ namespace tz {
 
 InstanceOfChecker::InstanceOfChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->topLevelChecker = &all.getTopLevelChecker();
+  this->scopes = &all.scopes;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->topLevelChecker = &all.topLevelChecker;
 }
 
 InstanceOfChecker::ResultInstanceTested InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {

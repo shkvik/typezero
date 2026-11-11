@@ -11,7 +11,7 @@ namespace tz {
 
 AssignedFields::AssignedFields(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->keyedFieldChecker = &all.getKeyedFieldChecker();
+  this->keyedFieldChecker = &all.keyedFieldChecker;
 }
 
 void AssignedFields::rememberAssigned(SourceFile &program) {

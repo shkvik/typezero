@@ -28,13 +28,13 @@ namespace tz {
 
 JsonStaticChecker::JsonStaticChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->prelude = &all.getPrelude();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->libraryCalls = &all.getLibraryCalls();
-  this->typeRelations = &all.getTypeRelations();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->bufferStaticChecker = &all.getBufferStaticChecker();
+  this->prelude = &all.prelude;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->libraryCalls = &all.libraryCalls;
+  this->typeRelations = &all.typeRelations;
+  this->argumentChecker = &all.argumentChecker;
+  this->bufferStaticChecker = &all.bufferStaticChecker;
 }
 
 bool JsonStaticChecker::mayHoldItself(const Type *type) {

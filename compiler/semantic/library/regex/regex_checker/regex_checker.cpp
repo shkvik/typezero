@@ -22,13 +22,13 @@ namespace tz {
 
 RegexChecker::RegexChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->prelude = &all.getPrelude();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->objectChecker = &all.getObjectChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->processChecker = &all.getProcessChecker();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->prelude = &all.prelude;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->objectChecker = &all.objectChecker;
+  this->typeRelations = &all.typeRelations;
+  this->processChecker = &all.processChecker;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 std::u16string RegexChecker::units(const uint32_t *program, uint32_t start, uint32_t length) {

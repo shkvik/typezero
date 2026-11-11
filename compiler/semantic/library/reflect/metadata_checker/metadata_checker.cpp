@@ -14,12 +14,12 @@ namespace tz {
 
 MetadataChecker::MetadataChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->typeRelations = &all.getTypeRelations();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->functionChecker = &all.getFunctionChecker();
-  this->classValueChecker = &all.getClassValueChecker();
+  this->scopes = &all.scopes;
+  this->classDeclarer = &all.classDeclarer;
+  this->typeRelations = &all.typeRelations;
+  this->returnInferrer = &all.returnInferrer;
+  this->functionChecker = &all.functionChecker;
+  this->classValueChecker = &all.classValueChecker;
 }
 
 ClassDecl *MetadataChecker::builtinConstructor(llvm::StringRef name) {

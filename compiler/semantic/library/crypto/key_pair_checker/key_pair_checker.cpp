@@ -16,9 +16,9 @@ namespace tz {
 
 KeyPairChecker::KeyPairChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->cryptoArgs = &all.getCryptoArgs();
-  this->cryptoErrors = &all.getCryptoErrors();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->cryptoArgs = &all.cryptoArgs;
+  this->cryptoErrors = &all.cryptoErrors;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 std::optional<std::string> KeyPairChecker::literalOf(const Expr *e) {

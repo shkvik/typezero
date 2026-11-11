@@ -29,19 +29,19 @@ namespace tz {
 
 BinaryChecker::BinaryChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->dateChecker = &all.getDateChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->jsonChecker = &all.getJsonChecker();
-  this->resultTypes = &all.getResultTypes();
-  this->matchChecker = &all.getMatchChecker();
-  this->truthChecker = &all.getTruthChecker();
-  this->unaryChecker = &all.getUnaryChecker();
-  this->concatChecker = &all.getConcatChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->constantFolder = &all.getConstantFolder();
-  this->decimalChecker = &all.getDecimalChecker();
-  this->genericChecker = &all.getGenericChecker();
-  this->instanceOfChecker = &all.getInstanceOfChecker();
+  this->dateChecker = &all.dateChecker;
+  this->exprChecker = &all.exprChecker;
+  this->jsonChecker = &all.jsonChecker;
+  this->resultTypes = &all.resultTypes;
+  this->matchChecker = &all.matchChecker;
+  this->truthChecker = &all.truthChecker;
+  this->unaryChecker = &all.unaryChecker;
+  this->concatChecker = &all.concatChecker;
+  this->typeRelations = &all.typeRelations;
+  this->constantFolder = &all.constantFolder;
+  this->decimalChecker = &all.decimalChecker;
+  this->genericChecker = &all.genericChecker;
+  this->instanceOfChecker = &all.instanceOfChecker;
 }
 
 bool BinaryChecker::onlyIntLiterals(const Expr *expr) {

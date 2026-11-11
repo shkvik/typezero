@@ -20,7 +20,7 @@ namespace tz {
 
 ConstantFolder::ConstantFolder(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
+  this->scopes = &all.scopes;
 }
 
 int32_t ConstantFolder::jsToInt32(double x) {

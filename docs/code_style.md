@@ -114,7 +114,8 @@ ResultThisComesFrom found = this->thisOf(this->checker.currentDecl());
 `SemanticExternalFacade`. Части зовут друг друга по кругу, поэтому сами друг друга не создают.
 
 1. **Соседей часть берёт у сборки в теле своего конструктора:** конструктор получает
-   `SemanticParts &all`, каждый сосед — поле-указатель, которое тело заполняет геттером сборки.
+   `SemanticParts &all`, каждый сосед — поле-указатель, которое тело заполняет адресом поля
+   сборки.
    Сборка создаёт части строкой `имя(state, *this)`; часть без соседей — `имя(state)` и конструктор
    с одним `SemanticState &owner`.
 
@@ -131,8 +132,8 @@ ResultThisComesFrom found = this->thisOf(this->checker.currentDecl());
 
    LoopChecker::LoopChecker(SemanticState &owner, SemanticParts &all)
        : state(owner) {
-     this->scopes = &all.getScopes();
-     this->loopScanner = &all.getLoopScanner();
+     this->scopes = &all.scopes;
+     this->loopScanner = &all.loopScanner;
    }
    ```
 
@@ -144,11 +145,14 @@ ResultThisComesFrom found = this->thisOf(this->checker.currentDecl());
    поле части прошло бы мимо снимка. Исключение — `DeclarationChecker`: `checkedModule` и
    `exportedNames` живут один обход файла `.d.tz` и обнуляются в его начале.
 4. **Части создаёт только `SemanticParts`.** Создать часть на месте
-   (`ExprChecker(this->state).checkExpr(...)`) или локальной переменной нельзя. Новая часть — поле,
-   строка в конструкторе и геттер в `SemanticParts`; новый сосед — поле-указатель и строка в теле
-   конструктора части.
-5. **Геттеры сборки зовут только конструкторы частей и фасад** (`this->parts->getScopes()`). В
-   методах части соседа берут из своего поля, а не из сборки.
+   (`ExprChecker(this->state).checkExpr(...)`) или локальной переменной нельзя. Новая часть —
+   открытое поле и строка в конструкторе `SemanticParts`; новый сосед — поле-указатель и строка в
+   теле конструктора части.
+5. **Поля сборки берут только конструкторы частей и фасад** (`this->parts->scopes`). В методах
+   части соседа берут из своего поля, а не из сборки.
+6. **Поля `SemanticParts` открыты, геттеров нет** — исключение из правила «у класса поля
+   закрыты»: сборка — склад частей, а не объект с правилами. Подменить часть нельзя: у частей
+   есть поле-ссылка `SemanticState &state`, поэтому присваивание компилятор запрещает сам.
 
 Проверка правил 2–5: `python tmp/check_parts.py` печатает нарушения и выходит с кодом 1.
 

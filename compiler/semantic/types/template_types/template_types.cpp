@@ -19,9 +19,9 @@ constexpr size_t kMaxTemplateStrings = 100000;
 
 TemplateTypes::TemplateTypes(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->typeResolver = &all.getTypeResolver();
-  this->typeOperators = &all.getTypeOperators();
-  this->extendsRelation = &all.getExtendsRelation();
+  this->typeResolver = &all.typeResolver;
+  this->typeOperators = &all.typeOperators;
+  this->extendsRelation = &all.extendsRelation;
 }
 
 std::u16string TemplateTypes::utf16(llvm::StringRef text) {

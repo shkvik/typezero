@@ -16,7 +16,7 @@ const llvm::StringLiteral kChildTypeNames[] = {
 
 ChildErrorTypes::ChildErrorTypes(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->builtinModuleTypes = &all.getBuiltinModuleTypes();
+  this->builtinModuleTypes = &all.builtinModuleTypes;
 }
 
 void ChildErrorTypes::declare() {

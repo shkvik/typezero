@@ -32,18 +32,18 @@ namespace tz {
 
 BuiltinModuleChecker::BuiltinModuleChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->fsChecker = &all.getFsChecker();
-  this->osChecker = &all.getOsChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->pathChecker = &all.getPathChecker();
-  this->childChecker = &all.getChildChecker();
-  this->timerChecker = &all.getTimerChecker();
-  this->cryptoChecker = &all.getCryptoChecker();
-  this->readlineChecker = &all.getReadlineChecker();
-  this->fsPromisesChecker = &all.getFsPromisesChecker();
-  this->builtinModuleTypes = &all.getBuiltinModuleTypes();
-  this->cryptoFunctionChecker = &all.getCryptoFunctionChecker();
+  this->scopes = &all.scopes;
+  this->fsChecker = &all.fsChecker;
+  this->osChecker = &all.osChecker;
+  this->exprChecker = &all.exprChecker;
+  this->pathChecker = &all.pathChecker;
+  this->childChecker = &all.childChecker;
+  this->timerChecker = &all.timerChecker;
+  this->cryptoChecker = &all.cryptoChecker;
+  this->readlineChecker = &all.readlineChecker;
+  this->fsPromisesChecker = &all.fsPromisesChecker;
+  this->builtinModuleTypes = &all.builtinModuleTypes;
+  this->cryptoFunctionChecker = &all.cryptoFunctionChecker;
 }
 
 llvm::StringRef BuiltinModuleChecker::typicalName(NodeModule module) {

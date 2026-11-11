@@ -206,8 +206,8 @@ library/             по теме на папку; stream/stream.tz (класс
   Общее у движка и `LoadOrder` — в `program/`: цепочка загрузки `LoadChain`
   (`program/module/load_chain/`), литерал decimal — `DecimalLiteral::fromExpr`.
 - **Части создаёт сборка.** `SemanticParts` (`semantic/semantic_parts/`) один раз создаёт все 165
-  частей полями; каждая часть берёт соседей у сборки в теле своего конструктора (поля-указатели),
-  геттеры сборки зовут только конструкторы частей и фасад. Правила — [code_style.md](code_style.md),
+  частей открытыми полями; каждая часть берёт соседей у сборки в теле своего конструктора
+  (поля-указатели), поля сборки берут только конструкторы частей и фасад. Правила — [code_style.md](code_style.md),
   раздел «Части движка `semantic/`»; проверка — `tmp/check_parts.py`.
 - **Ярусы — раскладка, а не направление вызовов.** Папки: `infer/`, `library/` → `bodies/` →
   `flow/`, `declare/` → `generics/` → `types/`, `names/` → `semantic_state/`. Части зовут друг

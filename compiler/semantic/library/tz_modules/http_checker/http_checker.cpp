@@ -13,9 +13,9 @@ namespace tz {
 
 HttpChecker::HttpChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->urlChecker = &all.getUrlChecker();
-  this->libraryCalls = &all.getLibraryCalls();
-  this->constantFolder = &all.getConstantFolder();
+  this->urlChecker = &all.urlChecker;
+  this->libraryCalls = &all.libraryCalls;
+  this->constantFolder = &all.constantFolder;
 }
 
 bool HttpChecker::isTokenChar(unsigned char c) {

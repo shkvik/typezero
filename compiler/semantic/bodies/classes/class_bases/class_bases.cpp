@@ -16,13 +16,13 @@ namespace tz {
 
 ClassBases::ClassBases(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->fsDeclarer = &all.getFsDeclarer();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->typeResolver = &all.getTypeResolver();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->moduleDeclarer = &all.getModuleDeclarer();
-  this->eventMapInference = &all.getEventMapInference();
-  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+  this->fsDeclarer = &all.fsDeclarer;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->typeResolver = &all.typeResolver;
+  this->classDeclarer = &all.classDeclarer;
+  this->moduleDeclarer = &all.moduleDeclarer;
+  this->eventMapInference = &all.eventMapInference;
+  this->genericClassInstantiator = &all.genericClassInstantiator;
 }
 
 bool ClassBases::isErrorClass(llvm::StringRef name) {

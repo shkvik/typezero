@@ -8,7 +8,7 @@ namespace tz {
 
 BuiltinModuleTypes::BuiltinModuleTypes(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->typeDeclarer = &all.getTypeDeclarer();
+  this->typeDeclarer = &all.typeDeclarer;
 }
 
 void BuiltinModuleTypes::declare(BuiltinText builtin) {

@@ -10,9 +10,9 @@ namespace tz {
 
 OsChecker::OsChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 const Type *OsChecker::cpuInfoType() {

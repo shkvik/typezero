@@ -28,21 +28,21 @@ namespace tz {
 
 AsyncChecker::AsyncChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->loopBounds = &all.getLoopBounds();
-  this->dictChecker = &all.getDictChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->loopChecker = &all.getLoopChecker();
-  this->loopScanner = &all.getLoopScanner();
-  this->matchChecker = &all.getMatchChecker();
-  this->typeResolver = &all.getTypeResolver();
-  this->typeRelations = &all.getTypeRelations();
-  this->genericChecker = &all.getGenericChecker();
-  this->genericWidening = &all.getGenericWidening();
-  this->iterableChecker = &all.getIterableChecker();
-  this->iteratorMethods = &all.getIteratorMethods();
-  this->generatorChecker = &all.getGeneratorChecker();
+  this->scopes = &all.scopes;
+  this->loopBounds = &all.loopBounds;
+  this->dictChecker = &all.dictChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->loopChecker = &all.loopChecker;
+  this->loopScanner = &all.loopScanner;
+  this->matchChecker = &all.matchChecker;
+  this->typeResolver = &all.typeResolver;
+  this->typeRelations = &all.typeRelations;
+  this->genericChecker = &all.genericChecker;
+  this->genericWidening = &all.genericWidening;
+  this->iterableChecker = &all.iterableChecker;
+  this->iteratorMethods = &all.iteratorMethods;
+  this->generatorChecker = &all.generatorChecker;
 }
 
 const Type *AsyncChecker::awaited(const Type *type) {

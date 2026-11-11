@@ -26,14 +26,14 @@ constexpr unsigned kMaxInstanceChain = 16;
 
 GenericInstantiator::GenericInstantiator(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->typeParams = &all.getTypeParams();
-  this->lateClasses = &all.getLateClasses();
-  this->typeResolver = &all.getTypeResolver();
-  this->argListChecker = &all.getArgListChecker();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->functionChecker = &all.getFunctionChecker();
-  this->typeArgInferrer = &all.getTypeArgInferrer();
-  this->genericClassChecker = &all.getGenericClassChecker();
+  this->typeParams = &all.typeParams;
+  this->lateClasses = &all.lateClasses;
+  this->typeResolver = &all.typeResolver;
+  this->argListChecker = &all.argListChecker;
+  this->returnInferrer = &all.returnInferrer;
+  this->functionChecker = &all.functionChecker;
+  this->typeArgInferrer = &all.typeArgInferrer;
+  this->genericClassChecker = &all.genericClassChecker;
 }
 
 const ClassDecl *GenericInstantiator::literalClassIn(const Type *type) {

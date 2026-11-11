@@ -14,11 +14,11 @@ namespace tz {
 
 ReadlineChecker::ReadlineChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->fsChecker = &all.getFsChecker();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->processChecker = &all.getProcessChecker();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->fsChecker = &all.fsChecker;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->processChecker = &all.processChecker;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 ReadlineChecker::ResultReadlineUsed ReadlineChecker::readlineFunction(llvm::StringRef fn,

@@ -12,7 +12,7 @@ namespace tz {
 
 TzModulesChecker::TzModulesChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->libraryCalls = &all.getLibraryCalls();
+  this->libraryCalls = &all.libraryCalls;
 }
 
 const Expr *TzModulesChecker::uncast(const Expr *expr) {

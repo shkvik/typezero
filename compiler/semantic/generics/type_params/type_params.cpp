@@ -19,13 +19,13 @@ namespace tz {
 
 TypeParams::TypeParams(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->typeResolver = &all.getTypeResolver();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->typeOperators = &all.getTypeOperators();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->decoratorChecker = &all.getDecoratorChecker();
-  this->aliasInstantiator = &all.getAliasInstantiator();
-  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+  this->typeResolver = &all.typeResolver;
+  this->classDeclarer = &all.classDeclarer;
+  this->typeOperators = &all.typeOperators;
+  this->returnInferrer = &all.returnInferrer;
+  this->decoratorChecker = &all.decoratorChecker;
+  this->aliasInstantiator = &all.aliasInstantiator;
+  this->genericClassInstantiator = &all.genericClassInstantiator;
 }
 
 bool TypeParams::mentionsInObject(const Type *type, llvm::ArrayRef<const Type *> params) {

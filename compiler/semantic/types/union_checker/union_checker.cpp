@@ -16,12 +16,12 @@ namespace tz {
 
 UnionChecker::UnionChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->fieldFacts = &all.getFieldFacts();
-  this->bytesChecker = &all.getBytesChecker();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->classMemberChecker = &all.getClassMemberChecker();
+  this->fieldFacts = &all.fieldFacts;
+  this->bytesChecker = &all.bytesChecker;
+  this->classDeclarer = &all.classDeclarer;
+  this->returnInferrer = &all.returnInferrer;
+  this->argumentChecker = &all.argumentChecker;
+  this->classMemberChecker = &all.classMemberChecker;
 }
 
 llvm::ArrayRef<const Type *> UnionChecker::membersOf(const Type *&type) {

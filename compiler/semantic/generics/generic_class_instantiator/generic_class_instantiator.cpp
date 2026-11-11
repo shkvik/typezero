@@ -24,12 +24,12 @@ constexpr unsigned kMaxClassChain = 16;
 
 GenericClassInstantiator::GenericClassInstantiator(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->chunkTypes = &all.getChunkTypes();
-  this->classBases = &all.getClassBases();
-  this->classLinks = &all.getClassLinks();
-  this->typeParams = &all.getTypeParams();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->genericClassChecker = &all.getGenericClassChecker();
+  this->chunkTypes = &all.chunkTypes;
+  this->classBases = &all.classBases;
+  this->classLinks = &all.classLinks;
+  this->typeParams = &all.typeParams;
+  this->classDeclarer = &all.classDeclarer;
+  this->genericClassChecker = &all.genericClassChecker;
 }
 
 std::string GenericClassInstantiator::typeNames(llvm::ArrayRef<const Type *> types) {

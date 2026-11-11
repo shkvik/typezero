@@ -17,14 +17,14 @@ namespace tz {
 
 MethodLiteralChecker::MethodLiteralChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callCycles = &all.getCallCycles();
-  this->classBases = &all.getClassBases();
-  this->exprChecker = &all.getExprChecker();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->typeRelations = &all.getTypeRelations();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->functionChecker = &all.getFunctionChecker();
-  this->predicateChecker = &all.getPredicateChecker();
+  this->callCycles = &all.callCycles;
+  this->classBases = &all.classBases;
+  this->exprChecker = &all.exprChecker;
+  this->classDeclarer = &all.classDeclarer;
+  this->typeRelations = &all.typeRelations;
+  this->returnInferrer = &all.returnInferrer;
+  this->functionChecker = &all.functionChecker;
+  this->predicateChecker = &all.predicateChecker;
 }
 
 Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *lit, const Type *target) {

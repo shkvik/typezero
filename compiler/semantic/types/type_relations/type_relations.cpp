@@ -31,17 +31,17 @@ namespace tz {
 
 TypeRelations::TypeRelations(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->byteProofs = &all.getByteProofs();
-  this->objectChecker = &all.getObjectChecker();
-  this->constantFolder = &all.getConstantFolder();
-  this->genericChecker = &all.getGenericChecker();
-  this->reflectChecker = &all.getReflectChecker();
-  this->unknownChecker = &all.getUnknownChecker();
-  this->iterableChecker = &all.getIterableChecker();
-  this->conditionalTypes = &all.getConditionalTypes();
-  this->tzModulesChecker = &all.getTzModulesChecker();
-  this->wideningRelations = &all.getWideningRelations();
-  this->functionValueChecker = &all.getFunctionValueChecker();
+  this->byteProofs = &all.byteProofs;
+  this->objectChecker = &all.objectChecker;
+  this->constantFolder = &all.constantFolder;
+  this->genericChecker = &all.genericChecker;
+  this->reflectChecker = &all.reflectChecker;
+  this->unknownChecker = &all.unknownChecker;
+  this->iterableChecker = &all.iterableChecker;
+  this->conditionalTypes = &all.conditionalTypes;
+  this->tzModulesChecker = &all.tzModulesChecker;
+  this->wideningRelations = &all.wideningRelations;
+  this->functionValueChecker = &all.functionValueChecker;
 }
 
 bool TypeRelations::holdsWideInteger(const Type *type) {

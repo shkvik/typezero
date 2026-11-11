@@ -18,10 +18,10 @@ namespace tz {
 
 CryptoMethodChecker::CryptoMethodChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->cryptoArgs = &all.getCryptoArgs();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->cryptoArgs = &all.cryptoArgs;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 CryptoMethodChecker::ResultIssuerChecked CryptoMethodChecker::issuer(const Expr *other) {

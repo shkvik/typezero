@@ -24,16 +24,16 @@ namespace tz {
 
 NumberMethods::NumberMethods(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->mathChecker = &all.getMathChecker();
-  this->binaryChecker = &all.getBinaryChecker();
-  this->concatChecker = &all.getConcatChecker();
-  this->memberChecker = &all.getMemberChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->literalChecker = &all.getLiteralChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->globalFunctionChecker = &all.getGlobalFunctionChecker();
+  this->callChecker = &all.callChecker;
+  this->indexProofs = &all.indexProofs;
+  this->mathChecker = &all.mathChecker;
+  this->binaryChecker = &all.binaryChecker;
+  this->concatChecker = &all.concatChecker;
+  this->memberChecker = &all.memberChecker;
+  this->typeRelations = &all.typeRelations;
+  this->literalChecker = &all.literalChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->globalFunctionChecker = &all.globalFunctionChecker;
 }
 
 NumberMethods::ResultStaticCallMade NumberMethods::checkStaticCall(CallExpr *call,

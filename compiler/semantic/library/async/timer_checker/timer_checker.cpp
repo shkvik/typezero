@@ -28,14 +28,14 @@ constexpr int kTimerReceiver = 16;
 
 TimerChecker::TimerChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->fsChecker = &all.getFsChecker();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->closureChecker = &all.getClosureChecker();
-  this->emitterChecker = &all.getEmitterChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->functionValueChecker = &all.getFunctionValueChecker();
+  this->fsChecker = &all.fsChecker;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->typeRelations = &all.typeRelations;
+  this->closureChecker = &all.closureChecker;
+  this->emitterChecker = &all.emitterChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->functionValueChecker = &all.functionValueChecker;
 }
 
 Expr *TimerChecker::checkTaskCallback(Expr *arg, llvm::StringRef fn) {

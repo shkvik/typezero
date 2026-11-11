@@ -14,11 +14,11 @@ namespace tz {
 
 MatchChecker::MatchChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->exprChecker = &all.getExprChecker();
-  this->memberChecker = &all.getMemberChecker();
-  this->objectChecker = &all.getObjectChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->constantFolder = &all.getConstantFolder();
+  this->exprChecker = &all.exprChecker;
+  this->memberChecker = &all.memberChecker;
+  this->objectChecker = &all.objectChecker;
+  this->typeRelations = &all.typeRelations;
+  this->constantFolder = &all.constantFolder;
 }
 
 Expr *MatchChecker::matchItems(Expr *match) {

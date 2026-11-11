@@ -20,13 +20,13 @@ namespace tz {
 
 ChildChecker::ChildChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->fsChecker = &all.getFsChecker();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->bytesChecker = &all.getBytesChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->childErrorTypes = &all.getChildErrorTypes();
+  this->fsChecker = &all.fsChecker;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->bytesChecker = &all.bytesChecker;
+  this->typeRelations = &all.typeRelations;
+  this->argumentChecker = &all.argumentChecker;
+  this->childErrorTypes = &all.childErrorTypes;
 }
 
 const Type *ChildChecker::bufferType() {

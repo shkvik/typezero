@@ -12,7 +12,7 @@ namespace tz {
 
 CallCycles::CallCycles(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->importBinder = &all.getImportBinder();
+  this->importBinder = &all.importBinder;
 }
 
 void CallCycles::findCycles(llvm::ArrayRef<FunctionDecl *> functions, ResolveCall resolve) {

@@ -13,10 +13,10 @@ namespace tz {
 
 RecordLiteralChecker::RecordLiteralChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->dictChecker = &all.getDictChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->typeRelations = &all.getTypeRelations();
+  this->dictChecker = &all.dictChecker;
+  this->exprChecker = &all.exprChecker;
+  this->classDeclarer = &all.classDeclarer;
+  this->typeRelations = &all.typeRelations;
 }
 
 RecordLiteralChecker::ResultPlainProperty

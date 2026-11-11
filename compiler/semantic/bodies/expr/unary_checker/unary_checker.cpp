@@ -24,18 +24,18 @@ namespace tz {
 
 UnaryChecker::UnaryChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->dateChecker = &all.getDateChecker();
-  this->dictChecker = &all.getDictChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->libraryCalls = &all.getLibraryCalls();
-  this->literalTypes = &all.getLiteralTypes();
-  this->truthChecker = &all.getTruthChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->constantFolder = &all.getConstantFolder();
-  this->genericChecker = &all.getGenericChecker();
-  this->literalChecker = &all.getLiteralChecker();
-  this->keyedFieldChecker = &all.getKeyedFieldChecker();
+  this->dateChecker = &all.dateChecker;
+  this->dictChecker = &all.dictChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->libraryCalls = &all.libraryCalls;
+  this->literalTypes = &all.literalTypes;
+  this->truthChecker = &all.truthChecker;
+  this->typeRelations = &all.typeRelations;
+  this->constantFolder = &all.constantFolder;
+  this->genericChecker = &all.genericChecker;
+  this->literalChecker = &all.literalChecker;
+  this->keyedFieldChecker = &all.keyedFieldChecker;
 }
 
 std::optional<std::string> UnaryChecker::simpleText(const Expr *expr) {

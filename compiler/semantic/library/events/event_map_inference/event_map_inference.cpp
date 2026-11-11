@@ -18,10 +18,10 @@ namespace tz {
 
 EventMapInference::EventMapInference(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->stmtChecker = &all.getStmtChecker();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->functionChecker = &all.getFunctionChecker();
+  this->scopes = &all.scopes;
+  this->stmtChecker = &all.stmtChecker;
+  this->returnInferrer = &all.returnInferrer;
+  this->functionChecker = &all.functionChecker;
 }
 
 EventRecord *EventMapInference::findEvent(EventSite *site, llvm::StringRef name) {

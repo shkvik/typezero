@@ -25,18 +25,18 @@ namespace tz {
 
 MathChecker::MathChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->dictChecker = &all.getDictChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->binaryChecker = &all.getBinaryChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->constantFolder = &all.getConstantFolder();
-  this->genericChecker = &all.getGenericChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->iteratorMethods = &all.getIteratorMethods();
-  this->generatorChecker = &all.getGeneratorChecker();
+  this->callChecker = &all.callChecker;
+  this->dictChecker = &all.dictChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->indexProofs = &all.indexProofs;
+  this->binaryChecker = &all.binaryChecker;
+  this->typeRelations = &all.typeRelations;
+  this->constantFolder = &all.constantFolder;
+  this->genericChecker = &all.genericChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->iteratorMethods = &all.iteratorMethods;
+  this->generatorChecker = &all.generatorChecker;
 }
 
 MathChecker::ResultWrapBitsWidth MathChecker::wrapBitsWidth(llvm::StringRef name) {

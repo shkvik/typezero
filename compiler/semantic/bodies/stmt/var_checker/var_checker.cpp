@@ -33,25 +33,25 @@ namespace tz {
 
 VarChecker::VarChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->callCycles = &all.getCallCycles();
-  this->destination = &all.getDestination();
-  this->dictChecker = &all.getDictChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->regexChecker = &all.getRegexChecker();
-  this->timerChecker = &all.getTimerChecker();
-  this->typeResolver = &all.getTypeResolver();
-  this->typeRelations = &all.getTypeRelations();
-  this->closureChecker = &all.getClosureChecker();
-  this->constantFolder = &all.getConstantFolder();
-  this->genericChecker = &all.getGenericChecker();
-  this->functionChecker = &all.getFunctionChecker();
-  this->iteratorMethods = &all.getIteratorMethods();
-  this->generatorChecker = &all.getGeneratorChecker();
-  this->tzModulesChecker = &all.getTzModulesChecker();
-  this->keyedFieldChecker = &all.getKeyedFieldChecker();
+  this->scopes = &all.scopes;
+  this->callCycles = &all.callCycles;
+  this->destination = &all.destination;
+  this->dictChecker = &all.dictChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->indexProofs = &all.indexProofs;
+  this->regexChecker = &all.regexChecker;
+  this->timerChecker = &all.timerChecker;
+  this->typeResolver = &all.typeResolver;
+  this->typeRelations = &all.typeRelations;
+  this->closureChecker = &all.closureChecker;
+  this->constantFolder = &all.constantFolder;
+  this->genericChecker = &all.genericChecker;
+  this->functionChecker = &all.functionChecker;
+  this->iteratorMethods = &all.iteratorMethods;
+  this->generatorChecker = &all.generatorChecker;
+  this->tzModulesChecker = &all.tzModulesChecker;
+  this->keyedFieldChecker = &all.keyedFieldChecker;
 }
 
 bool VarChecker::isTextChoice(const Expr *expr) {

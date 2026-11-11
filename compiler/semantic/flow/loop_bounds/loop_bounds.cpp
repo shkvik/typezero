@@ -24,8 +24,8 @@ constexpr uint64_t kMaxConstant = uint64_t(1) << 40;
 
 LoopBounds::LoopBounds(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->flowChecker = &all.getFlowChecker();
+  this->scopes = &all.scopes;
+  this->flowChecker = &all.flowChecker;
 }
 
 std::optional<int64_t>

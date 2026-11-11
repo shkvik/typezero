@@ -23,21 +23,21 @@ namespace tz {
 
 GenericClassChecker::GenericClassChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->chunkTypes = &all.getChunkTypes();
-  this->typeParams = &all.getTypeParams();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->typeResolver = &all.getTypeResolver();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->emitterChecker = &all.getEmitterChecker();
-  this->moduleDeclarer = &all.getModuleDeclarer();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->functionChecker = &all.getFunctionChecker();
-  this->typeArgInferrer = &all.getTypeArgInferrer();
-  this->streamNewChecker = &all.getStreamNewChecker();
-  this->methodCallChecker = &all.getMethodCallChecker();
-  this->classMemberChecker = &all.getClassMemberChecker();
-  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+  this->chunkTypes = &all.chunkTypes;
+  this->typeParams = &all.typeParams;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->typeResolver = &all.typeResolver;
+  this->classDeclarer = &all.classDeclarer;
+  this->emitterChecker = &all.emitterChecker;
+  this->moduleDeclarer = &all.moduleDeclarer;
+  this->returnInferrer = &all.returnInferrer;
+  this->functionChecker = &all.functionChecker;
+  this->typeArgInferrer = &all.typeArgInferrer;
+  this->streamNewChecker = &all.streamNewChecker;
+  this->methodCallChecker = &all.methodCallChecker;
+  this->classMemberChecker = &all.classMemberChecker;
+  this->genericClassInstantiator = &all.genericClassInstantiator;
 }
 
 std::string GenericClassChecker::typeNames(llvm::ArrayRef<const Type *> types) {

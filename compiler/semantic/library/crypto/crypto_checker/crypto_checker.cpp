@@ -18,11 +18,11 @@ namespace tz {
 
 CryptoChecker::CryptoChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->cryptoArgs = &all.getCryptoArgs();
-  this->exprChecker = &all.getExprChecker();
-  this->webCryptoChecker = &all.getWebCryptoChecker();
-  this->builtinModuleChecker = &all.getBuiltinModuleChecker();
-  this->cryptoFunctionChecker = &all.getCryptoFunctionChecker();
+  this->cryptoArgs = &all.cryptoArgs;
+  this->exprChecker = &all.exprChecker;
+  this->webCryptoChecker = &all.webCryptoChecker;
+  this->builtinModuleChecker = &all.builtinModuleChecker;
+  this->cryptoFunctionChecker = &all.cryptoFunctionChecker;
 }
 
 Expr *CryptoChecker::checkCryptoValue(llvm::StringRef name, Expr *expr) {

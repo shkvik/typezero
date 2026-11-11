@@ -27,8 +27,8 @@ constexpr int64_t kIntMax = std::numeric_limits<int64_t>::max();
 
 FlowChecker::FlowChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->byteProofs = &all.getByteProofs();
-  this->indexProofs = &all.getIndexProofs();
+  this->byteProofs = &all.byteProofs;
+  this->indexProofs = &all.indexProofs;
 }
 
 void FlowChecker::addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual) {

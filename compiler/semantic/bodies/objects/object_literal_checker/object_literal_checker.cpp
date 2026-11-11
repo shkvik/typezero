@@ -20,14 +20,14 @@ namespace tz {
 
 ObjectLiteralChecker::ObjectLiteralChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->exprChecker = &all.getExprChecker();
-  this->jsonChecker = &all.getJsonChecker();
-  this->literalTypes = &all.getLiteralTypes();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->typeRelations = &all.getTypeRelations();
-  this->keyedFieldChecker = &all.getKeyedFieldChecker();
-  this->methodLiteralChecker = &all.getMethodLiteralChecker();
-  this->recordLiteralChecker = &all.getRecordLiteralChecker();
+  this->exprChecker = &all.exprChecker;
+  this->jsonChecker = &all.jsonChecker;
+  this->literalTypes = &all.literalTypes;
+  this->classDeclarer = &all.classDeclarer;
+  this->typeRelations = &all.typeRelations;
+  this->keyedFieldChecker = &all.keyedFieldChecker;
+  this->methodLiteralChecker = &all.methodLiteralChecker;
+  this->recordLiteralChecker = &all.recordLiteralChecker;
 }
 
 bool ObjectLiteralChecker::hasMethodFields(const ClassDecl *cls) {

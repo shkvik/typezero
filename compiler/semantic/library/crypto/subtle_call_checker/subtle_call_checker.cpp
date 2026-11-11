@@ -24,12 +24,12 @@ namespace tz {
 
 SubtleCallChecker::SubtleCallChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->methodCallChecker = &all.getMethodCallChecker();
-  this->eventTargetChecker = &all.getEventTargetChecker();
+  this->scopes = &all.scopes;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->methodCallChecker = &all.methodCallChecker;
+  this->eventTargetChecker = &all.eventTargetChecker;
 }
 
 SubtleCallChecker::ResultKeyFormatKnown SubtleCallChecker::knownFormat(llvm::StringRef format) {

@@ -24,14 +24,14 @@ namespace tz {
 
 FsChecker::FsChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->fsErrors = &all.getFsErrors();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->bytesChecker = &all.getBytesChecker();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->typeRelations = &all.getTypeRelations();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->builtinModuleChecker = &all.getBuiltinModuleChecker();
+  this->fsErrors = &all.fsErrors;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->bytesChecker = &all.bytesChecker;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->typeRelations = &all.typeRelations;
+  this->argumentChecker = &all.argumentChecker;
+  this->builtinModuleChecker = &all.builtinModuleChecker;
 }
 
 std::u16string FsChecker::utf16(llvm::StringRef text) {

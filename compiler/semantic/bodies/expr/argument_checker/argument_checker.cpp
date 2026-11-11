@@ -11,11 +11,11 @@ namespace tz {
 
 ArgumentChecker::ArgumentChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->argListChecker = &all.getArgListChecker();
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->typeRelations = &all.typeRelations;
+  this->argListChecker = &all.argListChecker;
 }
 
 ArgumentChecker::ResultSpreadRestFits ArgumentChecker::spreadRest(const Expr *arg, const Type *to) {

@@ -21,15 +21,15 @@ namespace tz {
 
 ClassChecker::ClassChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->lateClasses = &all.getLateClasses();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->typeRelations = &all.getTypeRelations();
-  this->genericChecker = &all.getGenericChecker();
-  this->inheritChecker = &all.getInheritChecker();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->functionChecker = &all.getFunctionChecker();
-  this->nestedFunctions = &all.getNestedFunctions();
-  this->decoratorChecker = &all.getDecoratorChecker();
+  this->lateClasses = &all.lateClasses;
+  this->classDeclarer = &all.classDeclarer;
+  this->typeRelations = &all.typeRelations;
+  this->genericChecker = &all.genericChecker;
+  this->inheritChecker = &all.inheritChecker;
+  this->returnInferrer = &all.returnInferrer;
+  this->functionChecker = &all.functionChecker;
+  this->nestedFunctions = &all.nestedFunctions;
+  this->decoratorChecker = &all.decoratorChecker;
 }
 
 ClassChecker::ResultClassDeclared ClassChecker::checkClassStmt(ClassDecl *cls) {

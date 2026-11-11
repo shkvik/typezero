@@ -29,19 +29,19 @@ namespace tz {
 
 ObjectChecker::ObjectChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->eventMaps = &all.getEventMaps();
-  this->fieldFacts = &all.getFieldFacts();
-  this->callChecker = &all.getCallChecker();
-  this->dictMethods = &all.getDictMethods();
-  this->exprChecker = &all.getExprChecker();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->typeRelations = &all.getTypeRelations();
-  this->processChecker = &all.getProcessChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->overloadResolver = &all.getOverloadResolver();
-  this->classMemberChecker = &all.getClassMemberChecker();
+  this->scopes = &all.scopes;
+  this->eventMaps = &all.eventMaps;
+  this->fieldFacts = &all.fieldFacts;
+  this->callChecker = &all.callChecker;
+  this->dictMethods = &all.dictMethods;
+  this->exprChecker = &all.exprChecker;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->classDeclarer = &all.classDeclarer;
+  this->typeRelations = &all.typeRelations;
+  this->processChecker = &all.processChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->overloadResolver = &all.overloadResolver;
+  this->classMemberChecker = &all.classMemberChecker;
 }
 
 std::optional<std::string> ObjectChecker::chainText(const Expr *expr) {

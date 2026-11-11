@@ -11,10 +11,10 @@ namespace tz {
 
 PathChecker::PathChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->typeRelations = &all.typeRelations;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 const Type *PathChecker::parsedPathType() {

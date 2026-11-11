@@ -22,15 +22,15 @@ namespace tz {
 
 ResultChecker::ResultChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->fieldFacts = &all.getFieldFacts();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->resultTypes = &all.getResultTypes();
-  this->asyncChecker = &all.getAsyncChecker();
-  this->typeResolver = &all.getTypeResolver();
-  this->typeRelations = &all.getTypeRelations();
-  this->closureChecker = &all.getClosureChecker();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->fieldFacts = &all.fieldFacts;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->resultTypes = &all.resultTypes;
+  this->asyncChecker = &all.asyncChecker;
+  this->typeResolver = &all.typeResolver;
+  this->typeRelations = &all.typeRelations;
+  this->closureChecker = &all.closureChecker;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 const Type *ResultChecker::halfParam(const Type *half) {

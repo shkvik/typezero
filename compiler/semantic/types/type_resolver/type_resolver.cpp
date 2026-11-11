@@ -34,21 +34,21 @@ namespace tz {
 
 TypeResolver::TypeResolver(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->dictChecker = &all.getDictChecker();
-  this->resultTypes = &all.getResultTypes();
-  this->asyncChecker = &all.getAsyncChecker();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->utilityTypes = &all.getUtilityTypes();
-  this->cryptoChecker = &all.getCryptoChecker();
-  this->templateTypes = &all.getTemplateTypes();
-  this->typeOperators = &all.getTypeOperators();
-  this->conditionalTypes = &all.getConditionalTypes();
-  this->decoratorChecker = &all.getDecoratorChecker();
-  this->generatorChecker = &all.getGeneratorChecker();
-  this->aliasInstantiator = &all.getAliasInstantiator();
-  this->classValueChecker = &all.getClassValueChecker();
-  this->builtinModuleChecker = &all.getBuiltinModuleChecker();
-  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+  this->dictChecker = &all.dictChecker;
+  this->resultTypes = &all.resultTypes;
+  this->asyncChecker = &all.asyncChecker;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->utilityTypes = &all.utilityTypes;
+  this->cryptoChecker = &all.cryptoChecker;
+  this->templateTypes = &all.templateTypes;
+  this->typeOperators = &all.typeOperators;
+  this->conditionalTypes = &all.conditionalTypes;
+  this->decoratorChecker = &all.decoratorChecker;
+  this->generatorChecker = &all.generatorChecker;
+  this->aliasInstantiator = &all.aliasInstantiator;
+  this->classValueChecker = &all.classValueChecker;
+  this->builtinModuleChecker = &all.builtinModuleChecker;
+  this->genericClassInstantiator = &all.genericClassInstantiator;
 }
 
 const Type *TypeResolver::literalType(const TypeRef &ref) {

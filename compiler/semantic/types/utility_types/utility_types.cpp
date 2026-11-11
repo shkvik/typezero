@@ -22,14 +22,14 @@ namespace tz {
 
 UtilityTypes::UtilityTypes(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->typeParams = &all.getTypeParams();
-  this->exprChecker = &all.getExprChecker();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->typeOperators = &all.getTypeOperators();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->conditionalTypes = &all.getConditionalTypes();
-  this->classValueChecker = &all.getClassValueChecker();
+  this->scopes = &all.scopes;
+  this->typeParams = &all.typeParams;
+  this->exprChecker = &all.exprChecker;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->typeOperators = &all.typeOperators;
+  this->returnInferrer = &all.returnInferrer;
+  this->conditionalTypes = &all.conditionalTypes;
+  this->classValueChecker = &all.classValueChecker;
 }
 
 llvm::ArrayRef<const Type *> UtilityTypes::membersOf(const Type *&type) {

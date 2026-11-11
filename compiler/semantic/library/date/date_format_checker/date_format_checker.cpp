@@ -54,15 +54,15 @@ const DateOption kOptions[TZ_DTO_COUNT] = {
 
 DateFormatChecker::DateFormatChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->intlChecker = &all.getIntlChecker();
-  this->literalTypes = &all.getLiteralTypes();
-  this->typeRelations = &all.getTypeRelations();
-  this->genericChecker = &all.getGenericChecker();
-  this->processChecker = &all.getProcessChecker();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->indexProofs = &all.indexProofs;
+  this->intlChecker = &all.intlChecker;
+  this->literalTypes = &all.literalTypes;
+  this->typeRelations = &all.typeRelations;
+  this->genericChecker = &all.genericChecker;
+  this->processChecker = &all.processChecker;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 std::optional<std::u16string> DateFormatChecker::literalText(const Expr *e) {

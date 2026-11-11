@@ -26,18 +26,18 @@ namespace tz {
 
 EventTargetChecker::EventTargetChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->eventMaps = &all.getEventMaps();
-  this->typeParams = &all.getTypeParams();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->libraryCalls = &all.getLibraryCalls();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->typeResolver = &all.getTypeResolver();
-  this->typeRelations = &all.getTypeRelations();
-  this->closureChecker = &all.getClosureChecker();
-  this->emitterChecker = &all.getEmitterChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->genericInstantiator = &all.getGenericInstantiator();
+  this->eventMaps = &all.eventMaps;
+  this->typeParams = &all.typeParams;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->libraryCalls = &all.libraryCalls;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->typeResolver = &all.typeResolver;
+  this->typeRelations = &all.typeRelations;
+  this->closureChecker = &all.closureChecker;
+  this->emitterChecker = &all.emitterChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->genericInstantiator = &all.genericInstantiator;
 }
 
 EventTargetChecker::ResultListenerEvent

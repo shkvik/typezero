@@ -20,14 +20,14 @@ namespace tz {
 
 DecoratorChecker::DecoratorChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->lateClasses = &all.getLateClasses();
-  this->stmtChecker = &all.getStmtChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->metadataChecker = &all.getMetadataChecker();
-  this->classValueChecker = &all.getClassValueChecker();
+  this->scopes = &all.scopes;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->lateClasses = &all.lateClasses;
+  this->stmtChecker = &all.stmtChecker;
+  this->typeRelations = &all.typeRelations;
+  this->metadataChecker = &all.metadataChecker;
+  this->classValueChecker = &all.classValueChecker;
 }
 
 size_t DecoratorChecker::argumentsOf(Place place) {

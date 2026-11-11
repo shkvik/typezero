@@ -13,7 +13,7 @@ namespace tz {
 
 FieldFacts::FieldFacts(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->typeRelations = &all.getTypeRelations();
+  this->typeRelations = &all.typeRelations;
 }
 
 std::optional<FieldPath> FieldFacts::fieldPath(const Expr *expr) const {

@@ -16,8 +16,8 @@ namespace tz {
 
 ByteProofs::ByteProofs(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->indexProofs = &all.getIndexProofs();
-  this->constantFolder = &all.getConstantFolder();
+  this->indexProofs = &all.indexProofs;
+  this->constantFolder = &all.constantFolder;
 }
 
 const VarSymbol *ByteProofs::viewOwner(const Expr *expr, BuiltinProperty field, const Type **type) {

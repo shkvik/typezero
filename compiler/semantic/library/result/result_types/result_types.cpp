@@ -13,10 +13,10 @@ namespace tz {
 
 ResultTypes::ResultTypes(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->typeResolver = &all.getTypeResolver();
-  this->typeRelations = &all.getTypeRelations();
+  this->scopes = &all.scopes;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->typeResolver = &all.typeResolver;
+  this->typeRelations = &all.typeRelations;
 }
 
 std::optional<GlobalName> ResultTypes::resultName(llvm::StringRef name) const {

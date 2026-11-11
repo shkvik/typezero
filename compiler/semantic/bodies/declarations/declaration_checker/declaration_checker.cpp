@@ -14,11 +14,11 @@ namespace tz {
 
 DeclarationChecker::DeclarationChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->typeResolver = &all.getTypeResolver();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->moduleDeclarer = &all.getModuleDeclarer();
-  this->topLevelChecker = &all.getTopLevelChecker();
+  this->typeDeclarer = &all.typeDeclarer;
+  this->typeResolver = &all.typeResolver;
+  this->classDeclarer = &all.classDeclarer;
+  this->moduleDeclarer = &all.moduleDeclarer;
+  this->topLevelChecker = &all.topLevelChecker;
 }
 
 const char *DeclarationChecker::accessWord(Access access) {

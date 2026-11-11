@@ -11,9 +11,9 @@ namespace tz {
 
 FunctionMethodChecker::FunctionMethodChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->argListChecker = &all.getArgListChecker();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->callChecker = &all.callChecker;
+  this->argListChecker = &all.argListChecker;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(CallExpr *call,

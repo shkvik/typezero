@@ -24,14 +24,14 @@ namespace tz {
 
 IntlMethodChecker::IntlMethodChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->mathChecker = &all.getMathChecker();
-  this->literalTypes = &all.getLiteralTypes();
-  this->typeRelations = &all.getTypeRelations();
-  this->genericChecker = &all.getGenericChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->intlOptionsChecker = &all.getIntlOptionsChecker();
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->mathChecker = &all.mathChecker;
+  this->literalTypes = &all.literalTypes;
+  this->typeRelations = &all.typeRelations;
+  this->genericChecker = &all.genericChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->intlOptionsChecker = &all.intlOptionsChecker;
 }
 
 std::optional<std::u16string> IntlMethodChecker::literalText(const Expr *e) {

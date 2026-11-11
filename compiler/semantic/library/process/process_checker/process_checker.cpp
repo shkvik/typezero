@@ -21,15 +21,15 @@ namespace tz {
 
 ProcessChecker::ProcessChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->dateChecker = &all.getDateChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->timerChecker = &all.getTimerChecker();
-  this->resultChecker = &all.getResultChecker();
-  this->streamSources = &all.getStreamSources();
-  this->typeRelations = &all.getTypeRelations();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->eventTargetChecker = &all.getEventTargetChecker();
+  this->callChecker = &all.callChecker;
+  this->dateChecker = &all.dateChecker;
+  this->exprChecker = &all.exprChecker;
+  this->timerChecker = &all.timerChecker;
+  this->resultChecker = &all.resultChecker;
+  this->streamSources = &all.streamSources;
+  this->typeRelations = &all.typeRelations;
+  this->argumentChecker = &all.argumentChecker;
+  this->eventTargetChecker = &all.eventTargetChecker;
 }
 
 std::u16string ProcessChecker::toUtf16(llvm::StringRef text) {

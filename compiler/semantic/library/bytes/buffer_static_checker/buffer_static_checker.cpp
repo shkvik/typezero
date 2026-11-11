@@ -38,20 +38,20 @@ namespace tz {
 
 BufferStaticChecker::BufferStaticChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->byteProofs = &all.getByteProofs();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->bytesChecker = &all.getBytesChecker();
-  this->memberChecker = &all.getMemberChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->bytesNewChecker = &all.getBytesNewChecker();
-  this->callbackChecker = &all.getCallbackChecker();
-  this->iteratorMethods = &all.getIteratorMethods();
-  this->generatorChecker = &all.getGeneratorChecker();
-  this->jsonStaticChecker = &all.getJsonStaticChecker();
+  this->byteProofs = &all.byteProofs;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->indexProofs = &all.indexProofs;
+  this->bytesChecker = &all.bytesChecker;
+  this->memberChecker = &all.memberChecker;
+  this->typeRelations = &all.typeRelations;
+  this->argumentChecker = &all.argumentChecker;
+  this->bytesNewChecker = &all.bytesNewChecker;
+  this->callbackChecker = &all.callbackChecker;
+  this->iteratorMethods = &all.iteratorMethods;
+  this->generatorChecker = &all.generatorChecker;
+  this->jsonStaticChecker = &all.jsonStaticChecker;
 }
 
 std::optional<std::u16string> BufferStaticChecker::literalText(const Expr *e) {

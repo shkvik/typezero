@@ -13,9 +13,9 @@ namespace tz {
 
 ClassLinks::ClassLinks(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->chunkTypes = &all.getChunkTypes();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+  this->chunkTypes = &all.chunkTypes;
+  this->classDeclarer = &all.classDeclarer;
+  this->genericClassInstantiator = &all.genericClassInstantiator;
 }
 
 bool ClassLinks::sameParams(const FuncSymbol *a, const FuncSymbol *b) {

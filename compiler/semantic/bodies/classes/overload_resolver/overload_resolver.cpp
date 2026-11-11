@@ -22,14 +22,14 @@ namespace tz {
 
 OverloadResolver::OverloadResolver(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->typeParams = &all.getTypeParams();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->typeArgInferrer = &all.getTypeArgInferrer();
-  this->genericInstantiator = &all.getGenericInstantiator();
+  this->typeParams = &all.typeParams;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->typeRelations = &all.typeRelations;
+  this->returnInferrer = &all.returnInferrer;
+  this->argumentChecker = &all.argumentChecker;
+  this->typeArgInferrer = &all.typeArgInferrer;
+  this->genericInstantiator = &all.genericInstantiator;
 }
 
 int OverloadResolver::conversionRank(const Type *from, const Type *to) {

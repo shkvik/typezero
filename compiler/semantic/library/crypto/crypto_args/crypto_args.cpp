@@ -27,14 +27,14 @@ namespace tz {
 
 CryptoArgs::CryptoArgs(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->exprChecker = &all.getExprChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->bytesChecker = &all.getBytesChecker();
-  this->cryptoErrors = &all.getCryptoErrors();
-  this->typeRelations = &all.getTypeRelations();
-  this->constantFolder = &all.getConstantFolder();
-  this->processChecker = &all.getProcessChecker();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->exprChecker = &all.exprChecker;
+  this->indexProofs = &all.indexProofs;
+  this->bytesChecker = &all.bytesChecker;
+  this->cryptoErrors = &all.cryptoErrors;
+  this->typeRelations = &all.typeRelations;
+  this->constantFolder = &all.constantFolder;
+  this->processChecker = &all.processChecker;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 std::u16string CryptoArgs::utf16Of(llvm::StringRef text) {

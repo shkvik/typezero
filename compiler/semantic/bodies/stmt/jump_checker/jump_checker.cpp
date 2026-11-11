@@ -13,7 +13,7 @@ namespace tz {
 
 JumpChecker::JumpChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->stmtChecker = &all.getStmtChecker();
+  this->stmtChecker = &all.stmtChecker;
 }
 
 bool JumpChecker::isLoop(const Stmt *stmt) {

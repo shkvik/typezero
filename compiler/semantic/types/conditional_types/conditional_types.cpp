@@ -18,14 +18,14 @@ namespace tz {
 
 ConditionalTypes::ConditionalTypes(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->typeParams = &all.getTypeParams();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->typeResolver = &all.getTypeResolver();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->typeOperators = &all.getTypeOperators();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->extendsRelation = &all.getExtendsRelation();
-  this->topLevelChecker = &all.getTopLevelChecker();
+  this->typeParams = &all.typeParams;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->typeResolver = &all.typeResolver;
+  this->classDeclarer = &all.classDeclarer;
+  this->typeOperators = &all.typeOperators;
+  this->returnInferrer = &all.returnInferrer;
+  this->extendsRelation = &all.extendsRelation;
+  this->topLevelChecker = &all.topLevelChecker;
 }
 
 bool ConditionalTypes::isBinding(const Stmt *decl) {

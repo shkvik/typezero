@@ -26,17 +26,17 @@ namespace tz {
 
 IteratorMethods::IteratorMethods(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->dictChecker = &all.getDictChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->memberChecker = &all.getMemberChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->callbackChecker = &all.getCallbackChecker();
-  this->generatorChecker = &all.getGeneratorChecker();
-  this->predicateChecker = &all.getPredicateChecker();
+  this->callChecker = &all.callChecker;
+  this->dictChecker = &all.dictChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->indexProofs = &all.indexProofs;
+  this->memberChecker = &all.memberChecker;
+  this->typeRelations = &all.typeRelations;
+  this->argumentChecker = &all.argumentChecker;
+  this->callbackChecker = &all.callbackChecker;
+  this->generatorChecker = &all.generatorChecker;
+  this->predicateChecker = &all.predicateChecker;
 }
 
 void IteratorMethods::markFused(Expr *expr) const {

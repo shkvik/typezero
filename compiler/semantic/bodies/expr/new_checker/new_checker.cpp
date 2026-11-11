@@ -36,28 +36,28 @@ namespace tz {
 
 NewChecker::NewChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->urlChecker = &all.getUrlChecker();
-  this->dateChecker = &all.getDateChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->httpChecker = &all.getHttpChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->intlChecker = &all.getIntlChecker();
-  this->libraryCalls = &all.getLibraryCalls();
-  this->regexChecker = &all.getRegexChecker();
-  this->typeResolver = &all.getTypeResolver();
-  this->cryptoChecker = &all.getCryptoChecker();
-  this->memberChecker = &all.getMemberChecker();
-  this->dictNewChecker = &all.getDictNewChecker();
-  this->promiseChecker = &all.getPromiseChecker();
-  this->weakRefChecker = &all.getWeakRefChecker();
-  this->bytesNewChecker = &all.getBytesNewChecker();
-  this->topLevelChecker = &all.getTopLevelChecker();
-  this->tzModulesChecker = &all.getTzModulesChecker();
-  this->classValueChecker = &all.getClassValueChecker();
-  this->dateFormatChecker = &all.getDateFormatChecker();
-  this->methodCallChecker = &all.getMethodCallChecker();
-  this->builtinModuleChecker = &all.getBuiltinModuleChecker();
+  this->scopes = &all.scopes;
+  this->urlChecker = &all.urlChecker;
+  this->dateChecker = &all.dateChecker;
+  this->exprChecker = &all.exprChecker;
+  this->httpChecker = &all.httpChecker;
+  this->indexProofs = &all.indexProofs;
+  this->intlChecker = &all.intlChecker;
+  this->libraryCalls = &all.libraryCalls;
+  this->regexChecker = &all.regexChecker;
+  this->typeResolver = &all.typeResolver;
+  this->cryptoChecker = &all.cryptoChecker;
+  this->memberChecker = &all.memberChecker;
+  this->dictNewChecker = &all.dictNewChecker;
+  this->promiseChecker = &all.promiseChecker;
+  this->weakRefChecker = &all.weakRefChecker;
+  this->bytesNewChecker = &all.bytesNewChecker;
+  this->topLevelChecker = &all.topLevelChecker;
+  this->tzModulesChecker = &all.tzModulesChecker;
+  this->classValueChecker = &all.classValueChecker;
+  this->dateFormatChecker = &all.dateFormatChecker;
+  this->methodCallChecker = &all.methodCallChecker;
+  this->builtinModuleChecker = &all.builtinModuleChecker;
 }
 
 NewChecker::ResultNamespaceNew NewChecker::namespaceNew(const NewExpr *expr) {

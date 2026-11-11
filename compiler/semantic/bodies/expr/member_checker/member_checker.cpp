@@ -43,36 +43,36 @@ namespace tz {
 
 MemberChecker::MemberChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->callChecker = &all.getCallChecker();
-  this->dateChecker = &all.getDateChecker();
-  this->dictChecker = &all.getDictChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->intlChecker = &all.getIntlChecker();
-  this->jsonChecker = &all.getJsonChecker();
-  this->bytesChecker = &all.getBytesChecker();
-  this->matchChecker = &all.getMatchChecker();
-  this->regexChecker = &all.getRegexChecker();
-  this->tupleChecker = &all.getTupleChecker();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->unionChecker = &all.getUnionChecker();
-  this->utilityTypes = &all.getUtilityTypes();
-  this->cryptoChecker = &all.getCryptoChecker();
-  this->objectChecker = &all.getObjectChecker();
-  this->resultChecker = &all.getResultChecker();
-  this->staticChecker = &all.getStaticChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->argListChecker = &all.getArgListChecker();
-  this->constantFolder = &all.getConstantFolder();
-  this->genericChecker = &all.getGenericChecker();
-  this->processChecker = &all.getProcessChecker();
-  this->unknownChecker = &all.getUnknownChecker();
-  this->overloadResolver = &all.getOverloadResolver();
-  this->keyedFieldChecker = &all.getKeyedFieldChecker();
-  this->classMemberChecker = &all.getClassMemberChecker();
-  this->builtinModuleChecker = &all.getBuiltinModuleChecker();
-  this->runtimeObjectChecker = &all.getRuntimeObjectChecker();
+  this->scopes = &all.scopes;
+  this->callChecker = &all.callChecker;
+  this->dateChecker = &all.dateChecker;
+  this->dictChecker = &all.dictChecker;
+  this->exprChecker = &all.exprChecker;
+  this->indexProofs = &all.indexProofs;
+  this->intlChecker = &all.intlChecker;
+  this->jsonChecker = &all.jsonChecker;
+  this->bytesChecker = &all.bytesChecker;
+  this->matchChecker = &all.matchChecker;
+  this->regexChecker = &all.regexChecker;
+  this->tupleChecker = &all.tupleChecker;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->unionChecker = &all.unionChecker;
+  this->utilityTypes = &all.utilityTypes;
+  this->cryptoChecker = &all.cryptoChecker;
+  this->objectChecker = &all.objectChecker;
+  this->resultChecker = &all.resultChecker;
+  this->staticChecker = &all.staticChecker;
+  this->typeRelations = &all.typeRelations;
+  this->argListChecker = &all.argListChecker;
+  this->constantFolder = &all.constantFolder;
+  this->genericChecker = &all.genericChecker;
+  this->processChecker = &all.processChecker;
+  this->unknownChecker = &all.unknownChecker;
+  this->overloadResolver = &all.overloadResolver;
+  this->keyedFieldChecker = &all.keyedFieldChecker;
+  this->classMemberChecker = &all.classMemberChecker;
+  this->builtinModuleChecker = &all.builtinModuleChecker;
+  this->runtimeObjectChecker = &all.runtimeObjectChecker;
 }
 
 MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *member,

@@ -26,14 +26,14 @@ namespace tz {
 
 PromiseChecker::PromiseChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->typeResolver = &all.getTypeResolver();
-  this->closureChecker = &all.getClosureChecker();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->callbackChecker = &all.getCallbackChecker();
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->typeResolver = &all.typeResolver;
+  this->closureChecker = &all.closureChecker;
+  this->returnInferrer = &all.returnInferrer;
+  this->argumentChecker = &all.argumentChecker;
+  this->callbackChecker = &all.callbackChecker;
 }
 
 const Type *PromiseChecker::awaited(const Type *type) {

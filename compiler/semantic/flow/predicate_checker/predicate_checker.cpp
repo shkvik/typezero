@@ -19,11 +19,11 @@ namespace tz {
 
 PredicateChecker::PredicateChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->flowChecker = &all.getFlowChecker();
-  this->literalTypes = &all.getLiteralTypes();
-  this->typeResolver = &all.getTypeResolver();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->functionChecker = &all.getFunctionChecker();
+  this->flowChecker = &all.flowChecker;
+  this->literalTypes = &all.literalTypes;
+  this->typeResolver = &all.typeResolver;
+  this->returnInferrer = &all.returnInferrer;
+  this->functionChecker = &all.functionChecker;
 }
 
 const VarSymbol *PredicateChecker::argumentVariable(const Expr *expr) {

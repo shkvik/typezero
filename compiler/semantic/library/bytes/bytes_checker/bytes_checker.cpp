@@ -51,16 +51,16 @@ const std::pair<llvm::StringLiteral, Bytes> kNames[] = {
 
 BytesChecker::BytesChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->literalTypes = &all.getLiteralTypes();
-  this->bufferChecker = &all.getBufferChecker();
-  this->memberChecker = &all.getMemberChecker();
-  this->constantFolder = &all.getConstantFolder();
-  this->processChecker = &all.getProcessChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->typedArrayChecker = &all.getTypedArrayChecker();
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->indexProofs = &all.indexProofs;
+  this->literalTypes = &all.literalTypes;
+  this->bufferChecker = &all.bufferChecker;
+  this->memberChecker = &all.memberChecker;
+  this->constantFolder = &all.constantFolder;
+  this->processChecker = &all.processChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->typedArrayChecker = &all.typedArrayChecker;
 }
 
 std::optional<std::u16string> BytesChecker::literalText(const Expr *e) {

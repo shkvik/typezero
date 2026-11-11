@@ -11,7 +11,7 @@ namespace tz {
 
 UrlChecker::UrlChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->libraryCalls = &all.getLibraryCalls();
+  this->libraryCalls = &all.libraryCalls;
 }
 
 bool UrlChecker::isLibraryClass(const Type *type, llvm::StringRef name) {

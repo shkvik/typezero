@@ -26,21 +26,21 @@ namespace tz {
 
 TargetChecker::TargetChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->dictChecker = &all.getDictChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->jsonChecker = &all.getJsonChecker();
-  this->nameChecker = &all.getNameChecker();
-  this->unionChecker = &all.getUnionChecker();
-  this->utilityTypes = &all.getUtilityTypes();
-  this->memberChecker = &all.getMemberChecker();
-  this->staticChecker = &all.getStaticChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->nestedFunctions = &all.getNestedFunctions();
-  this->topLevelChecker = &all.getTopLevelChecker();
-  this->keyedFieldChecker = &all.getKeyedFieldChecker();
-  this->classMemberChecker = &all.getClassMemberChecker();
-  this->runtimeObjectChecker = &all.getRuntimeObjectChecker();
+  this->scopes = &all.scopes;
+  this->dictChecker = &all.dictChecker;
+  this->exprChecker = &all.exprChecker;
+  this->jsonChecker = &all.jsonChecker;
+  this->nameChecker = &all.nameChecker;
+  this->unionChecker = &all.unionChecker;
+  this->utilityTypes = &all.utilityTypes;
+  this->memberChecker = &all.memberChecker;
+  this->staticChecker = &all.staticChecker;
+  this->typeRelations = &all.typeRelations;
+  this->nestedFunctions = &all.nestedFunctions;
+  this->topLevelChecker = &all.topLevelChecker;
+  this->keyedFieldChecker = &all.keyedFieldChecker;
+  this->classMemberChecker = &all.classMemberChecker;
+  this->runtimeObjectChecker = &all.runtimeObjectChecker;
 }
 
 TargetChecker::ResultIndexIsNotBytes TargetChecker::indexNotBytes(const Type *type) {

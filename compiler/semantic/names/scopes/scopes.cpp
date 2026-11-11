@@ -9,8 +9,8 @@ namespace tz {
 
 Scopes::Scopes(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->varChecker = &all.getVarChecker();
-  this->returnInferrer = &all.getReturnInferrer();
+  this->varChecker = &all.varChecker;
+  this->returnInferrer = &all.returnInferrer;
 }
 
 Scopes::ResultEntryDeclared Scopes::declare(llvm::StringRef name, ScopeEntry entry) {

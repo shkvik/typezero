@@ -11,8 +11,8 @@ namespace tz {
 
 Prelude::Prelude(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->aliasInstantiator = &all.getAliasInstantiator();
+  this->typeDeclarer = &all.typeDeclarer;
+  this->aliasInstantiator = &all.aliasInstantiator;
 }
 
 void Prelude::declarePrelude() {

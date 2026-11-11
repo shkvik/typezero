@@ -12,10 +12,10 @@ namespace tz {
 
 ChunkTypes::ChunkTypes(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->prelude = &all.getPrelude();
-  this->classBases = &all.getClassBases();
-  this->aliasInstantiator = &all.getAliasInstantiator();
-  this->genericClassInstantiator = &all.getGenericClassInstantiator();
+  this->prelude = &all.prelude;
+  this->classBases = &all.classBases;
+  this->aliasInstantiator = &all.aliasInstantiator;
+  this->genericClassInstantiator = &all.genericClassInstantiator;
 }
 
 bool ChunkTypes::isStreamClass(const ClassDecl *cls) const {

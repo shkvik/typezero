@@ -11,9 +11,9 @@ namespace tz {
 
 FsDeclarer::FsDeclarer(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->processChecker = &all.getProcessChecker();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->callChecker = &all.callChecker;
+  this->processChecker = &all.processChecker;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 std::optional<int> FsDeclarer::fileKind(llvm::StringRef method) {

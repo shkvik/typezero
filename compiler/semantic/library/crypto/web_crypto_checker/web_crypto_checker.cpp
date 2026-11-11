@@ -43,10 +43,10 @@ const SubtleIntrinsic kSubtleIntrinsics[] = {
 
 WebCryptoChecker::WebCryptoChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->cryptoArgs = &all.getCryptoArgs();
-  this->exprChecker = &all.getExprChecker();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->scopes = &all.scopes;
+  this->cryptoArgs = &all.cryptoArgs;
+  this->exprChecker = &all.exprChecker;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 WebCryptoChecker::ResultSubtleCallShape

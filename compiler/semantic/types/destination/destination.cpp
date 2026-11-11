@@ -20,11 +20,11 @@ namespace tz {
 
 Destination::Destination(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->literalTypes = &all.getLiteralTypes();
-  this->typeResolver = &all.getTypeResolver();
-  this->iterableChecker = &all.getIterableChecker();
-  this->destinationScanner = &all.getDestinationScanner();
+  this->scopes = &all.scopes;
+  this->literalTypes = &all.literalTypes;
+  this->typeResolver = &all.typeResolver;
+  this->iterableChecker = &all.iterableChecker;
+  this->destinationScanner = &all.destinationScanner;
 }
 
 std::vector<const Expr *> Destination::findReturnValues(const Stmt *body) {

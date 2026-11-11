@@ -12,7 +12,7 @@ namespace tz {
 
 NamesInFunctions::NamesInFunctions(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->importBinder = &all.getImportBinder();
+  this->importBinder = &all.importBinder;
 }
 
 void NamesInFunctions::rememberNames(SourceFile &program) {

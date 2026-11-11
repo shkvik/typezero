@@ -30,9 +30,9 @@ const GlobalName kGlobalFunctions[] = {GlobalName::STRING,     GlobalName::NUMBE
 
 LoopScanner::LoopScanner(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->callChecker = &all.getCallChecker();
-  this->keyedFieldChecker = &all.getKeyedFieldChecker();
+  this->scopes = &all.scopes;
+  this->callChecker = &all.callChecker;
+  this->keyedFieldChecker = &all.keyedFieldChecker;
 }
 
 LoopScan LoopScanner::scanForOfLoop(const ForOfStmt *loop) const {

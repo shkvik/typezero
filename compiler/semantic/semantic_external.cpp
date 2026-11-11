@@ -11,70 +11,70 @@ SemanticExternalFacade::SemanticExternalFacade(Program &program)
     : file(program.file),
       state(std::make_unique<SemanticState>(program.ast, program.diags, program.file)),
       parts(std::make_unique<SemanticParts>(*this->state)) {
-  this->state->rememberCompleter(&this->parts->getReturnCompleter());
+  this->state->rememberCompleter(&this->parts->returnCompleter);
 }
 
 SemanticExternalFacade::~SemanticExternalFacade() = default;
 
 Diagnostics::ResultTaken SemanticExternalFacade::collectDeclarations() {
-  this->parts->getScopes().openScope();
-  this->parts->getLibraryCalls().prepareLibraries(this->file);
-  this->parts->getCryptoErrors().declare();
-  this->parts->getFsDeclarer().declareFsClasses();
-  this->parts->getFsErrors().declare();
-  this->parts->getChildErrorTypes().declare();
-  this->parts->getPrelude().declarePrelude();
-  this->parts->getAssignedFields().rememberAssigned(this->file);
-  this->parts->getModuleDeclarer().declareModules(this->file);
-  this->parts->getMetadataWriters().rememberWriters(this->file);
-  this->parts->getNamesInFunctions().rememberNames(this->file);
+  this->parts->scopes.openScope();
+  this->parts->libraryCalls.prepareLibraries(this->file);
+  this->parts->cryptoErrors.declare();
+  this->parts->fsDeclarer.declareFsClasses();
+  this->parts->fsErrors.declare();
+  this->parts->childErrorTypes.declare();
+  this->parts->prelude.declarePrelude();
+  this->parts->assignedFields.rememberAssigned(this->file);
+  this->parts->moduleDeclarer.declareModules(this->file);
+  this->parts->metadataWriters.rememberWriters(this->file);
+  this->parts->namesInFunctions.rememberNames(this->file);
 
   return this->state->getDiagnostics().take();
 }
 
 Diagnostics::ResultTaken SemanticExternalFacade::findRecursion() {
-  this->parts->getCallCycles().findProgramCycles();
+  this->parts->callCycles.findProgramCycles();
 
   return this->state->getDiagnostics().take();
 }
 
 Diagnostics::ResultTaken SemanticExternalFacade::checkModuleCode() {
-  this->parts->getTopLevelChecker().loadAllTopLevels(this->file.modules);
-  this->parts->getImportBinder().bindAllImports(this->file.modules);
+  this->parts->topLevelChecker.loadAllTopLevels(this->file.modules);
+  this->parts->importBinder.bindAllImports(this->file.modules);
   this->walkModuleItems();
   this->walkLiftedFunctions();
   this->walkDeclarationFiles();
-  this->parts->getEmitterChecker().finishSentEmits();
+  this->parts->emitterChecker.finishSentEmits();
 
   return this->state->getDiagnostics().take();
 }
 
 Diagnostics::ResultTaken SemanticExternalFacade::checkGenericCopies() {
   do {
-    this->parts->getLateClasses().checkLateClasses();
-    this->parts->getGenericInstantiator().checkInstances();
+    this->parts->lateClasses.checkLateClasses();
+    this->parts->genericInstantiator.checkInstances();
   } while (this->state->getLateClassStore().hasUncheckedLateClasses());
 
-  this->parts->getConstructorCalls().checkConstructorCalls();
-  this->parts->getVarChecker().reportUncheckedResults();
+  this->parts->constructorCalls.checkConstructorCalls();
+  this->parts->varChecker.reportUncheckedResults();
 
   return this->state->getDiagnostics().take();
 }
 
 Diagnostics::ResultTaken SemanticExternalFacade::finishProgram() {
-  this->parts->getReflectChecker().finishReflection();
-  this->parts->getEmitterChecker().checkErrorListeners();
-  this->parts->getEmitterChecker().checkDroppedListeners();
+  this->parts->reflectChecker.finishReflection();
+  this->parts->emitterChecker.checkErrorListeners();
+  this->parts->emitterChecker.checkDroppedListeners();
 
   for (Module *module : this->file.modules) {
-    this->parts->getModuleDeclarer().useModule(module);
-    this->parts->getVarChecker().reportUntyped();
+    this->parts->moduleDeclarer.useModule(module);
+    this->parts->varChecker.reportUntyped();
   }
-  this->parts->getScopes().closeScope();
+  this->parts->scopes.closeScope();
 
-  this->parts->getFsChecker().rememberNativeError();
-  this->parts->getClassLinks().numberClasses();
-  this->parts->getLateClasses().rememberEmittedLateClasses();
+  this->parts->fsChecker.rememberNativeError();
+  this->parts->classLinks.numberClasses();
+  this->parts->lateClasses.rememberEmittedLateClasses();
   this->file.inventory = this->state->getInventoryStore().takeInventory();
   this->file.inventory.widenings = this->state->takeWideningStore();
 
@@ -86,7 +86,7 @@ Diagnostics::ResultTaken SemanticExternalFacade::finishProgram() {
 
 void SemanticExternalFacade::walkModuleItems() {
   for (Module *module : this->file.modules) {
-    this->parts->getModuleDeclarer().useModule(module);
+    this->parts->moduleDeclarer.useModule(module);
     for (Stmt *item : module->file.items) {
       ClassDecl *cls = dyn_cast<ClassDecl>(item);
       if (cls != nullptr) {
@@ -109,7 +109,7 @@ void SemanticExternalFacade::walkLiftedFunctions() {
 void SemanticExternalFacade::walkDeclarationFiles() {
   for (Module *module : this->file.modules) {
     if (module->declaration != nullptr) {
-      this->parts->getDeclarationChecker().walkDeclarationFile(module);
+      this->parts->declarationChecker.walkDeclarationFile(module);
     }
   }
 }
@@ -118,27 +118,27 @@ void SemanticExternalFacade::walkClass(ClassDecl *cls) {
   if (cls->type == nullptr || cls->baseExpr != nullptr) {
     return;
   }
-  this->parts->getClassChecker().checkClassBodies(cls);
+  this->parts->classChecker.checkClassBodies(cls);
 }
 
 void SemanticExternalFacade::walkFunction(FunctionDecl *fn) {
-  if (this->parts->getLateClasses().isTemplate(fn->sym)) {
+  if (this->parts->lateClasses.isTemplate(fn->sym)) {
     return;
   }
   if (!fn->sym->hasReturnType()) {
-    this->parts->getReturnInferrer().inferReturnType(fn->sym);
+    this->parts->returnInferrer.inferReturnType(fn->sym);
   }
   if (fn->checked) {
     return;
   }
-  this->parts->getFunctionChecker().walkFunctionFromScratch(fn);
+  this->parts->functionChecker.walkFunctionFromScratch(fn);
 }
 
 void SemanticExternalFacade::walkLiftedFunction(FunctionDecl *fn) {
-  if (this->parts->getLateClasses().isTemplate(fn->sym)) {
+  if (this->parts->lateClasses.isTemplate(fn->sym)) {
     return;
   }
-  this->parts->getImportBinder().enterHomeModule(fn);
+  this->parts->importBinder.enterHomeModule(fn);
   this->walkFunction(fn);
 }
 

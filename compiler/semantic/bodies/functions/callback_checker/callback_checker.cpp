@@ -28,19 +28,19 @@ namespace tz {
 
 CallbackChecker::CallbackChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->typeRelations = &all.getTypeRelations();
-  this->closureChecker = &all.getClosureChecker();
-  this->conditionFacts = &all.getConditionFacts();
-  this->constantFolder = &all.getConstantFolder();
-  this->genericChecker = &all.getGenericChecker();
-  this->nestedFunctions = &all.getNestedFunctions();
-  this->predicateChecker = &all.getPredicateChecker();
-  this->genericInstantiator = &all.getGenericInstantiator();
-  this->functionValueChecker = &all.getFunctionValueChecker();
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->indexProofs = &all.indexProofs;
+  this->typeRelations = &all.typeRelations;
+  this->closureChecker = &all.closureChecker;
+  this->conditionFacts = &all.conditionFacts;
+  this->constantFolder = &all.constantFolder;
+  this->genericChecker = &all.genericChecker;
+  this->nestedFunctions = &all.nestedFunctions;
+  this->predicateChecker = &all.predicateChecker;
+  this->genericInstantiator = &all.genericInstantiator;
+  this->functionValueChecker = &all.functionValueChecker;
 }
 
 CallbackChecker::ResultFunctionIsPassed CallbackChecker::functionGiven(const Type *type,

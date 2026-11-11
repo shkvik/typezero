@@ -16,9 +16,9 @@ namespace tz {
 
 FunctionValueChecker::FunctionValueChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->resultTypes = &all.getResultTypes();
-  this->nestedFunctions = &all.getNestedFunctions();
+  this->callChecker = &all.callChecker;
+  this->resultTypes = &all.resultTypes;
+  this->nestedFunctions = &all.nestedFunctions;
 }
 
 Expr *FunctionValueChecker::adaptFunction(Expr *expr, const Type *to) {

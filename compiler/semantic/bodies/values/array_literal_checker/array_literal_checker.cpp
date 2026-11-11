@@ -20,15 +20,15 @@ namespace tz {
 
 ArrayLiteralChecker::ArrayLiteralChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->dictChecker = &all.getDictChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->jsonChecker = &all.getJsonChecker();
-  this->matchChecker = &all.getMatchChecker();
-  this->tupleChecker = &all.getTupleChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->iteratorMethods = &all.getIteratorMethods();
-  this->generatorChecker = &all.getGeneratorChecker();
+  this->dictChecker = &all.dictChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->jsonChecker = &all.jsonChecker;
+  this->matchChecker = &all.matchChecker;
+  this->tupleChecker = &all.tupleChecker;
+  this->typeRelations = &all.typeRelations;
+  this->iteratorMethods = &all.iteratorMethods;
+  this->generatorChecker = &all.generatorChecker;
 }
 
 ArrayLiteralChecker::ResultElementGiven

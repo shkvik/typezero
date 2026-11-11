@@ -26,12 +26,12 @@ namespace tz {
 
 DestinationScanner::DestinationScanner(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->callChecker = &all.getCallChecker();
-  this->destination = &all.getDestination();
-  this->typeResolver = &all.getTypeResolver();
-  this->iterableChecker = &all.getIterableChecker();
-  this->predicateChecker = &all.getPredicateChecker();
+  this->scopes = &all.scopes;
+  this->callChecker = &all.callChecker;
+  this->destination = &all.destination;
+  this->typeResolver = &all.typeResolver;
+  this->iterableChecker = &all.iterableChecker;
+  this->predicateChecker = &all.predicateChecker;
 }
 
 bool DestinationScanner::isResultLiteral(const CallExpr *call) {

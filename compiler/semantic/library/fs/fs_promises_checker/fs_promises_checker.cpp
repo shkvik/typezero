@@ -10,9 +10,9 @@ namespace tz {
 
 FsPromisesChecker::FsPromisesChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->fsErrors = &all.getFsErrors();
-  this->fsChecker = &all.getFsChecker();
-  this->exprChecker = &all.getExprChecker();
+  this->fsErrors = &all.fsErrors;
+  this->fsChecker = &all.fsChecker;
+  this->exprChecker = &all.exprChecker;
 }
 
 FsPromisesChecker::ResultPromiseFunction FsPromisesChecker::promiseFunction(llvm::StringRef fn) {

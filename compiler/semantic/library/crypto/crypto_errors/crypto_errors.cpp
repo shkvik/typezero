@@ -9,7 +9,7 @@ namespace tz {
 
 CryptoErrors::CryptoErrors(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->builtinModuleTypes = &all.getBuiltinModuleTypes();
+  this->builtinModuleTypes = &all.builtinModuleTypes;
 }
 
 void CryptoErrors::declare() {

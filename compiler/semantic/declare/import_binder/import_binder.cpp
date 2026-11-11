@@ -9,8 +9,8 @@ namespace tz {
 
 ImportBinder::ImportBinder(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->moduleDeclarer = &all.getModuleDeclarer();
-  this->builtinModuleChecker = &all.getBuiltinModuleChecker();
+  this->moduleDeclarer = &all.moduleDeclarer;
+  this->builtinModuleChecker = &all.builtinModuleChecker;
 }
 
 ImportBinder::ResultWholeImportOk ImportBinder::wholeImport(const ImportDecl &decl) {

@@ -25,19 +25,19 @@ namespace tz {
 
 ClosureChecker::ClosureChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->typeParams = &all.getTypeParams();
-  this->stmtChecker = &all.getStmtChecker();
-  this->asyncChecker = &all.getAsyncChecker();
-  this->classChecker = &all.getClassChecker();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->typeResolver = &all.getTypeResolver();
-  this->argListChecker = &all.getArgListChecker();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->functionChecker = &all.getFunctionChecker();
-  this->nestedFunctions = &all.getNestedFunctions();
-  this->generatorChecker = &all.getGeneratorChecker();
-  this->predicateChecker = &all.getPredicateChecker();
+  this->scopes = &all.scopes;
+  this->typeParams = &all.typeParams;
+  this->stmtChecker = &all.stmtChecker;
+  this->asyncChecker = &all.asyncChecker;
+  this->classChecker = &all.classChecker;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->typeResolver = &all.typeResolver;
+  this->argListChecker = &all.argListChecker;
+  this->returnInferrer = &all.returnInferrer;
+  this->functionChecker = &all.functionChecker;
+  this->nestedFunctions = &all.nestedFunctions;
+  this->generatorChecker = &all.generatorChecker;
+  this->predicateChecker = &all.predicateChecker;
 }
 
 Signature ClosureChecker::signatureOf(const Type *fnType) {

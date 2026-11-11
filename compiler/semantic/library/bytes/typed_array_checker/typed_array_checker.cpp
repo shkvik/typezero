@@ -30,17 +30,17 @@ namespace tz {
 
 TypedArrayChecker::TypedArrayChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->prelude = &all.getPrelude();
-  this->byteProofs = &all.getByteProofs();
-  this->exprChecker = &all.getExprChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->mathChecker = &all.getMathChecker();
-  this->memberChecker = &all.getMemberChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->bytesNewChecker = &all.getBytesNewChecker();
-  this->callbackChecker = &all.getCallbackChecker();
-  this->iteratorMethods = &all.getIteratorMethods();
+  this->prelude = &all.prelude;
+  this->byteProofs = &all.byteProofs;
+  this->exprChecker = &all.exprChecker;
+  this->indexProofs = &all.indexProofs;
+  this->mathChecker = &all.mathChecker;
+  this->memberChecker = &all.memberChecker;
+  this->typeRelations = &all.typeRelations;
+  this->argumentChecker = &all.argumentChecker;
+  this->bytesNewChecker = &all.bytesNewChecker;
+  this->callbackChecker = &all.callbackChecker;
+  this->iteratorMethods = &all.iteratorMethods;
 }
 
 TypedArrayChecker::ResultSetSourceOk TypedArrayChecker::setSource(const Expr *source) {

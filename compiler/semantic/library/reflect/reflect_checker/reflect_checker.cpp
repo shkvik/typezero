@@ -26,16 +26,16 @@ namespace tz {
 
 ReflectChecker::ReflectChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->prelude = &all.getPrelude();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->typeRelations = &all.getTypeRelations();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->classValueChecker = &all.getClassValueChecker();
-  this->classMemberChecker = &all.getClassMemberChecker();
-  this->reflectCallChecker = &all.getReflectCallChecker();
+  this->prelude = &all.prelude;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->classDeclarer = &all.classDeclarer;
+  this->typeRelations = &all.typeRelations;
+  this->argumentChecker = &all.argumentChecker;
+  this->classValueChecker = &all.classValueChecker;
+  this->classMemberChecker = &all.classMemberChecker;
+  this->reflectCallChecker = &all.reflectCallChecker;
 }
 
 void ReflectChecker::classesIn(const Type *type, llvm::SmallPtrSetImpl<ClassDecl *> &out) {

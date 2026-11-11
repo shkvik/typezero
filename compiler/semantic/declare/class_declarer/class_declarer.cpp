@@ -17,11 +17,11 @@ namespace tz {
 
 ClassDeclarer::ClassDeclarer(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->classBases = &all.getClassBases();
-  this->typeResolver = &all.getTypeResolver();
-  this->functionChecker = &all.getFunctionChecker();
-  this->genericClassChecker = &all.getGenericClassChecker();
+  this->scopes = &all.scopes;
+  this->classBases = &all.classBases;
+  this->typeResolver = &all.typeResolver;
+  this->functionChecker = &all.functionChecker;
+  this->genericClassChecker = &all.genericClassChecker;
 }
 
 ClassDecl *ClassDeclarer::classOf(const Type *type) {

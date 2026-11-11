@@ -23,12 +23,12 @@ namespace tz {
 
 JsonChecker::JsonChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->fieldFacts = &all.getFieldFacts();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->arrayLiteralChecker = &all.getArrayLiteralChecker();
+  this->fieldFacts = &all.fieldFacts;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->typeRelations = &all.typeRelations;
+  this->argumentChecker = &all.argumentChecker;
+  this->arrayLiteralChecker = &all.arrayLiteralChecker;
 }
 
 const VarSymbol *JsonChecker::jsonVariable(const Expr *expr) {

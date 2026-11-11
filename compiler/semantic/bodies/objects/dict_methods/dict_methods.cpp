@@ -19,13 +19,13 @@ namespace tz {
 
 DictMethods::DictMethods(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->dictChecker = &all.getDictChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->dictNewChecker = &all.getDictNewChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->callbackChecker = &all.getCallbackChecker();
+  this->callChecker = &all.callChecker;
+  this->dictChecker = &all.dictChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->dictNewChecker = &all.dictNewChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->callbackChecker = &all.callbackChecker;
 }
 
 DictMethods::ResultDictMethodCalled DictMethods::checkDictMethod(CallExpr *call,

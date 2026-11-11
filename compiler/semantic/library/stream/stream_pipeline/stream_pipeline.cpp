@@ -26,20 +26,20 @@ namespace tz {
 
 StreamPipeline::StreamPipeline(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->chunkTypes = &all.getChunkTypes();
-  this->callChecker = &all.getCallChecker();
-  this->dictChecker = &all.getDictChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->streamChecker = &all.getStreamChecker();
-  this->streamSources = &all.getStreamSources();
-  this->typeRelations = &all.getTypeRelations();
-  this->closureChecker = &all.getClosureChecker();
-  this->emitterChecker = &all.getEmitterChecker();
-  this->processChecker = &all.getProcessChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->eventMapInference = &all.getEventMapInference();
-  this->eventTargetChecker = &all.getEventTargetChecker();
+  this->chunkTypes = &all.chunkTypes;
+  this->callChecker = &all.callChecker;
+  this->dictChecker = &all.dictChecker;
+  this->exprChecker = &all.exprChecker;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->streamChecker = &all.streamChecker;
+  this->streamSources = &all.streamSources;
+  this->typeRelations = &all.typeRelations;
+  this->closureChecker = &all.closureChecker;
+  this->emitterChecker = &all.emitterChecker;
+  this->processChecker = &all.processChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->eventMapInference = &all.eventMapInference;
+  this->eventTargetChecker = &all.eventTargetChecker;
 }
 
 bool StreamPipeline::inModule(const std::string &place, llvm::StringRef module) {

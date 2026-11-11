@@ -17,9 +17,9 @@ namespace tz {
 
 GenericChecker::GenericChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->concatChecker = &all.getConcatChecker();
-  this->typeRelations = &all.getTypeRelations();
+  this->scopes = &all.scopes;
+  this->concatChecker = &all.concatChecker;
+  this->typeRelations = &all.typeRelations;
 }
 
 const Type *GenericChecker::apparentType(const Type *type) {

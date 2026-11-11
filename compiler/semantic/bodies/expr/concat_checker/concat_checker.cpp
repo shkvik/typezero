@@ -21,11 +21,11 @@ namespace tz {
 
 ConcatChecker::ConcatChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->dateChecker = &all.getDateChecker();
-  this->bytesChecker = &all.getBytesChecker();
-  this->regexChecker = &all.getRegexChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->genericChecker = &all.getGenericChecker();
+  this->dateChecker = &all.dateChecker;
+  this->bytesChecker = &all.bytesChecker;
+  this->regexChecker = &all.regexChecker;
+  this->typeRelations = &all.typeRelations;
+  this->genericChecker = &all.genericChecker;
 }
 
 std::pair<llvm::StringRef, llvm::StringRef>

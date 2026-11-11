@@ -8,8 +8,8 @@ namespace tz {
 
 StreamNewChecker::StreamNewChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->exprChecker = &all.getExprChecker();
-  this->libraryCalls = &all.getLibraryCalls();
+  this->exprChecker = &all.exprChecker;
+  this->libraryCalls = &all.libraryCalls;
 }
 
 StreamNewChecker::ResultConcreteStream

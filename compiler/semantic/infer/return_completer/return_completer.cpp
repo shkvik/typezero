@@ -6,7 +6,7 @@ namespace tz {
 
 ReturnCompleter::ReturnCompleter(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->returnInferrer = &all.getReturnInferrer();
+  this->returnInferrer = &all.returnInferrer;
 }
 
 const Type *ReturnCompleter::completeReturnType(FuncSymbol *fn) {

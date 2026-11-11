@@ -14,12 +14,12 @@ namespace tz {
 
 StringMethods::StringMethods(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->exprChecker = &all.getExprChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->concatChecker = &all.getConcatChecker();
-  this->memberChecker = &all.getMemberChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->stringRegexChecker = &all.getStringRegexChecker();
+  this->exprChecker = &all.exprChecker;
+  this->indexProofs = &all.indexProofs;
+  this->concatChecker = &all.concatChecker;
+  this->memberChecker = &all.memberChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->stringRegexChecker = &all.stringRegexChecker;
 }
 
 const Type *StringMethods::resultType(StringResult result) {

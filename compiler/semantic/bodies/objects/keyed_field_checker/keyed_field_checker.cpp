@@ -20,12 +20,12 @@ namespace tz {
 
 KeyedFieldChecker::KeyedFieldChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->fieldFacts = &all.getFieldFacts();
-  this->exprChecker = &all.getExprChecker();
-  this->literalTypes = &all.getLiteralTypes();
-  this->objectChecker = &all.getObjectChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->constantFolder = &all.getConstantFolder();
+  this->fieldFacts = &all.fieldFacts;
+  this->exprChecker = &all.exprChecker;
+  this->literalTypes = &all.literalTypes;
+  this->objectChecker = &all.objectChecker;
+  this->typeRelations = &all.typeRelations;
+  this->constantFolder = &all.constantFolder;
 }
 
 bool KeyedFieldChecker::isInherited(llvm::StringRef name) {

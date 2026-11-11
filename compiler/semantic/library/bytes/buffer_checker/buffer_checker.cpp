@@ -26,15 +26,15 @@ namespace tz {
 
 BufferChecker::BufferChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->prelude = &all.getPrelude();
-  this->byteProofs = &all.getByteProofs();
-  this->exprChecker = &all.getExprChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->bytesChecker = &all.getBytesChecker();
-  this->memberChecker = &all.getMemberChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->constantFolder = &all.getConstantFolder();
-  this->argumentChecker = &all.getArgumentChecker();
+  this->prelude = &all.prelude;
+  this->byteProofs = &all.byteProofs;
+  this->exprChecker = &all.exprChecker;
+  this->indexProofs = &all.indexProofs;
+  this->bytesChecker = &all.bytesChecker;
+  this->memberChecker = &all.memberChecker;
+  this->typeRelations = &all.typeRelations;
+  this->constantFolder = &all.constantFolder;
+  this->argumentChecker = &all.argumentChecker;
 }
 
 std::optional<std::u16string> BufferChecker::literalText(const Expr *e) {

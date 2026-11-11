@@ -11,8 +11,8 @@ namespace tz {
 
 ConsoleChecker::ConsoleChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
 }
 
 ConsoleChecker::ResultPrintableItem ConsoleChecker::printable(const Expr *arg) {

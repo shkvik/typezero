@@ -28,18 +28,18 @@ namespace tz {
 
 TypeOperators::TypeOperators(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->eventMaps = &all.getEventMaps();
-  this->typeParams = &all.getTypeParams();
-  this->typeResolver = &all.getTypeResolver();
-  this->utilityTypes = &all.getUtilityTypes();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->templateTypes = &all.getTemplateTypes();
-  this->argListChecker = &all.getArgListChecker();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->extendsRelation = &all.getExtendsRelation();
-  this->topLevelChecker = &all.getTopLevelChecker();
-  this->conditionalTypes = &all.getConditionalTypes();
-  this->classValueChecker = &all.getClassValueChecker();
+  this->eventMaps = &all.eventMaps;
+  this->typeParams = &all.typeParams;
+  this->typeResolver = &all.typeResolver;
+  this->utilityTypes = &all.utilityTypes;
+  this->classDeclarer = &all.classDeclarer;
+  this->templateTypes = &all.templateTypes;
+  this->argListChecker = &all.argListChecker;
+  this->returnInferrer = &all.returnInferrer;
+  this->extendsRelation = &all.extendsRelation;
+  this->topLevelChecker = &all.topLevelChecker;
+  this->conditionalTypes = &all.conditionalTypes;
+  this->classValueChecker = &all.classValueChecker;
 }
 
 std::u16string TypeOperators::utf16(llvm::StringRef text) {

@@ -17,13 +17,13 @@ namespace tz {
 
 ClassValueChecker::ClassValueChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->typeResolver = &all.getTypeResolver();
-  this->staticChecker = &all.getStaticChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->reflectChecker = &all.getReflectChecker();
-  this->methodCallChecker = &all.getMethodCallChecker();
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->typeResolver = &all.typeResolver;
+  this->staticChecker = &all.staticChecker;
+  this->typeRelations = &all.typeRelations;
+  this->reflectChecker = &all.reflectChecker;
+  this->methodCallChecker = &all.methodCallChecker;
 }
 
 const Type *ClassValueChecker::constructedBy(const Type *type) {

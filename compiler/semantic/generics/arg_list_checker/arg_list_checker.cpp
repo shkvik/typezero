@@ -19,11 +19,11 @@ namespace tz {
 
 ArgListChecker::ArgListChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->typeRelations = &all.getTypeRelations();
+  this->scopes = &all.scopes;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->classDeclarer = &all.classDeclarer;
+  this->typeRelations = &all.typeRelations;
 }
 
 bool ArgListChecker::usedAsValue(const Stmt *body, llvm::StringRef name, bool known) {

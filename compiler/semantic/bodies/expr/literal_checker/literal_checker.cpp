@@ -15,10 +15,10 @@ namespace tz {
 
 LiteralChecker::LiteralChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->exprChecker = &all.getExprChecker();
-  this->literalTypes = &all.getLiteralTypes();
-  this->concatChecker = &all.getConcatChecker();
-  this->typeOperators = &all.getTypeOperators();
+  this->exprChecker = &all.exprChecker;
+  this->literalTypes = &all.literalTypes;
+  this->concatChecker = &all.concatChecker;
+  this->typeOperators = &all.typeOperators;
 }
 
 bool LiteralChecker::fitsIn(const IntLitExpr *lit, const Type *type, bool negated) {

@@ -17,12 +17,12 @@ namespace tz {
 
 LibraryCalls::LibraryCalls(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->exprChecker = &all.getExprChecker();
-  this->typeResolver = &all.getTypeResolver();
-  this->streamChecker = &all.getStreamChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->webCryptoChecker = &all.getWebCryptoChecker();
+  this->scopes = &all.scopes;
+  this->exprChecker = &all.exprChecker;
+  this->typeResolver = &all.typeResolver;
+  this->streamChecker = &all.streamChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->webCryptoChecker = &all.webCryptoChecker;
 }
 
 void LibraryCalls::prepareLibraries(SourceFile &program) {

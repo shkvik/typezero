@@ -18,9 +18,9 @@ constexpr unsigned kMaxTailCalls = 1000;
 
 AliasInstantiator::AliasInstantiator(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->classBases = &all.getClassBases();
-  this->typeParams = &all.getTypeParams();
-  this->typeResolver = &all.getTypeResolver();
+  this->classBases = &all.classBases;
+  this->typeParams = &all.typeParams;
+  this->typeResolver = &all.typeResolver;
 }
 
 std::string AliasInstantiator::typeList(llvm::ArrayRef<const Type *> types) {

@@ -30,24 +30,24 @@ namespace tz {
 
 LoopChecker::LoopChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->loopBounds = &all.getLoopBounds();
-  this->dictChecker = &all.getDictChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->jumpChecker = &all.getJumpChecker();
-  this->loopScanner = &all.getLoopScanner();
-  this->stmtChecker = &all.getStmtChecker();
-  this->asyncChecker = &all.getAsyncChecker();
-  this->matchChecker = &all.getMatchChecker();
-  this->truthChecker = &all.getTruthChecker();
-  this->tupleChecker = &all.getTupleChecker();
-  this->objectChecker = &all.getObjectChecker();
-  this->resultChecker = &all.getResultChecker();
-  this->constantFolder = &all.getConstantFolder();
-  this->emitterChecker = &all.getEmitterChecker();
-  this->genericChecker = &all.getGenericChecker();
-  this->iteratorMethods = &all.getIteratorMethods();
-  this->generatorChecker = &all.getGeneratorChecker();
+  this->scopes = &all.scopes;
+  this->loopBounds = &all.loopBounds;
+  this->dictChecker = &all.dictChecker;
+  this->exprChecker = &all.exprChecker;
+  this->jumpChecker = &all.jumpChecker;
+  this->loopScanner = &all.loopScanner;
+  this->stmtChecker = &all.stmtChecker;
+  this->asyncChecker = &all.asyncChecker;
+  this->matchChecker = &all.matchChecker;
+  this->truthChecker = &all.truthChecker;
+  this->tupleChecker = &all.tupleChecker;
+  this->objectChecker = &all.objectChecker;
+  this->resultChecker = &all.resultChecker;
+  this->constantFolder = &all.constantFolder;
+  this->emitterChecker = &all.emitterChecker;
+  this->genericChecker = &all.genericChecker;
+  this->iteratorMethods = &all.iteratorMethods;
+  this->generatorChecker = &all.generatorChecker;
 }
 
 bool LoopChecker::continuesTo(const Stmt *body, llvm::ArrayRef<llvm::StringRef> labels) {

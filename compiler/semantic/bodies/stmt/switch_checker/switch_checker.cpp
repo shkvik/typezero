@@ -21,15 +21,15 @@ namespace tz {
 
 SwitchChecker::SwitchChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->exprChecker = &all.getExprChecker();
-  this->jumpChecker = &all.getJumpChecker();
-  this->stmtChecker = &all.getStmtChecker();
-  this->typeDeclarer = &all.getTypeDeclarer();
-  this->unionChecker = &all.getUnionChecker();
-  this->binaryChecker = &all.getBinaryChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->conditionFacts = &all.getConditionFacts();
+  this->scopes = &all.scopes;
+  this->exprChecker = &all.exprChecker;
+  this->jumpChecker = &all.jumpChecker;
+  this->stmtChecker = &all.stmtChecker;
+  this->typeDeclarer = &all.typeDeclarer;
+  this->unionChecker = &all.unionChecker;
+  this->binaryChecker = &all.binaryChecker;
+  this->typeRelations = &all.typeRelations;
+  this->conditionFacts = &all.conditionFacts;
 }
 
 bool SwitchChecker::isConstantTest(const Expr *test) {

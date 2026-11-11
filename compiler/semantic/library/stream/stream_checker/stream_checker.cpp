@@ -24,17 +24,17 @@ namespace tz {
 
 StreamChecker::StreamChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->prelude = &all.getPrelude();
-  this->fsChecker = &all.getFsChecker();
-  this->chunkTypes = &all.getChunkTypes();
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->resultChecker = &all.getResultChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->emitterChecker = &all.getEmitterChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->setEncodingChecker = &all.getSetEncodingChecker();
+  this->prelude = &all.prelude;
+  this->fsChecker = &all.fsChecker;
+  this->chunkTypes = &all.chunkTypes;
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->resultChecker = &all.resultChecker;
+  this->typeRelations = &all.typeRelations;
+  this->emitterChecker = &all.emitterChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->setEncodingChecker = &all.setEncodingChecker;
 }
 
 bool StreamChecker::isByteChunk(const Type *type) {

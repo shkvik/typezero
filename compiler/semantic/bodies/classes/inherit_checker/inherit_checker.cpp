@@ -21,15 +21,15 @@ namespace tz {
 
 InheritChecker::InheritChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->eventMaps = &all.getEventMaps();
-  this->flowChecker = &all.getFlowChecker();
-  this->classChecker = &all.getClassChecker();
-  this->emitterChecker = &all.getEmitterChecker();
-  this->returnInferrer = &all.getReturnInferrer();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->typeArgInferrer = &all.getTypeArgInferrer();
-  this->overloadResolver = &all.getOverloadResolver();
-  this->classMemberChecker = &all.getClassMemberChecker();
+  this->eventMaps = &all.eventMaps;
+  this->flowChecker = &all.flowChecker;
+  this->classChecker = &all.classChecker;
+  this->emitterChecker = &all.emitterChecker;
+  this->returnInferrer = &all.returnInferrer;
+  this->argumentChecker = &all.argumentChecker;
+  this->typeArgInferrer = &all.typeArgInferrer;
+  this->overloadResolver = &all.overloadResolver;
+  this->classMemberChecker = &all.classMemberChecker;
 }
 
 bool InheritChecker::takesParams(const Type *fnType, const FuncSymbol *sym) {

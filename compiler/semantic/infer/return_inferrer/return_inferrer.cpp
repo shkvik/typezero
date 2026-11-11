@@ -21,15 +21,15 @@ namespace tz {
 
 ReturnInferrer::ReturnInferrer(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->classLinks = &all.getClassLinks();
-  this->typeParams = &all.getTypeParams();
-  this->lateClasses = &all.getLateClasses();
-  this->asyncChecker = &all.getAsyncChecker();
-  this->importBinder = &all.getImportBinder();
-  this->typeRelations = &all.getTypeRelations();
-  this->functionChecker = &all.getFunctionChecker();
-  this->generatorChecker = &all.getGeneratorChecker();
-  this->genericClassChecker = &all.getGenericClassChecker();
+  this->classLinks = &all.classLinks;
+  this->typeParams = &all.typeParams;
+  this->lateClasses = &all.lateClasses;
+  this->asyncChecker = &all.asyncChecker;
+  this->importBinder = &all.importBinder;
+  this->typeRelations = &all.typeRelations;
+  this->functionChecker = &all.functionChecker;
+  this->generatorChecker = &all.generatorChecker;
+  this->genericClassChecker = &all.genericClassChecker;
 }
 
 bool ReturnInferrer::returnsValue(const Stmt *body) {

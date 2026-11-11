@@ -30,19 +30,19 @@ namespace tz {
 
 TypeDeclarer::TypeDeclarer(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->classBases = &all.getClassBases();
-  this->exprChecker = &all.getExprChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->literalTypes = &all.getLiteralTypes();
-  this->typeResolver = &all.getTypeResolver();
-  this->classDeclarer = &all.getClassDeclarer();
-  this->typeRelations = &all.getTypeRelations();
-  this->constantFolder = &all.getConstantFolder();
-  this->moduleDeclarer = &all.getModuleDeclarer();
-  this->aliasInstantiator = &all.getAliasInstantiator();
-  this->builtinModuleTypes = &all.getBuiltinModuleTypes();
-  this->builtinModuleChecker = &all.getBuiltinModuleChecker();
+  this->scopes = &all.scopes;
+  this->classBases = &all.classBases;
+  this->exprChecker = &all.exprChecker;
+  this->indexProofs = &all.indexProofs;
+  this->literalTypes = &all.literalTypes;
+  this->typeResolver = &all.typeResolver;
+  this->classDeclarer = &all.classDeclarer;
+  this->typeRelations = &all.typeRelations;
+  this->constantFolder = &all.constantFolder;
+  this->moduleDeclarer = &all.moduleDeclarer;
+  this->aliasInstantiator = &all.aliasInstantiator;
+  this->builtinModuleTypes = &all.builtinModuleTypes;
+  this->builtinModuleChecker = &all.builtinModuleChecker;
 }
 
 std::u16string TypeDeclarer::toUtf16(llvm::StringRef text) {

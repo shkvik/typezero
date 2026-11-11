@@ -19,12 +19,12 @@ namespace tz {
 
 TruthChecker::TruthChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->callChecker = &all.getCallChecker();
-  this->exprChecker = &all.getExprChecker();
-  this->jsonChecker = &all.getJsonChecker();
-  this->typeRelations = &all.getTypeRelations();
-  this->conditionFacts = &all.getConditionFacts();
-  this->genericChecker = &all.getGenericChecker();
+  this->callChecker = &all.callChecker;
+  this->exprChecker = &all.exprChecker;
+  this->jsonChecker = &all.jsonChecker;
+  this->typeRelations = &all.typeRelations;
+  this->conditionFacts = &all.conditionFacts;
+  this->genericChecker = &all.genericChecker;
 }
 
 std::string TruthChecker::sourceText(const Expr *expr) {

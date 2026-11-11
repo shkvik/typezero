@@ -25,11 +25,11 @@ const IntlService kSupported = {IntlKind::None, "supportedLocalesOf", 0, {kMatch
 
 IntlOptionsChecker::IntlOptionsChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->byteProofs = &all.getByteProofs();
-  this->exprChecker = &all.getExprChecker();
-  this->indexProofs = &all.getIndexProofs();
-  this->intlChecker = &all.getIntlChecker();
-  this->literalTypes = &all.getLiteralTypes();
+  this->byteProofs = &all.byteProofs;
+  this->exprChecker = &all.exprChecker;
+  this->indexProofs = &all.indexProofs;
+  this->intlChecker = &all.intlChecker;
+  this->literalTypes = &all.literalTypes;
 }
 
 std::optional<std::u16string> IntlOptionsChecker::literalText(const Expr *e) {

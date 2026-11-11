@@ -21,13 +21,13 @@ namespace tz {
 
 StringRegexChecker::StringRegexChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
-  this->scopes = &all.getScopes();
-  this->exprChecker = &all.getExprChecker();
-  this->flowChecker = &all.getFlowChecker();
-  this->regexChecker = &all.getRegexChecker();
-  this->memberChecker = &all.getMemberChecker();
-  this->argumentChecker = &all.getArgumentChecker();
-  this->callbackChecker = &all.getCallbackChecker();
+  this->scopes = &all.scopes;
+  this->exprChecker = &all.exprChecker;
+  this->flowChecker = &all.flowChecker;
+  this->regexChecker = &all.regexChecker;
+  this->memberChecker = &all.memberChecker;
+  this->argumentChecker = &all.argumentChecker;
+  this->callbackChecker = &all.callbackChecker;
 }
 
 std::u16string StringRegexChecker::units(const uint32_t *program, uint32_t start, uint32_t length) {
