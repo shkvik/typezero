@@ -11,7 +11,6 @@ class ChildErrorTypes {
 public:
   ChildErrorTypes(SemanticState &owner, SemanticParts &all);
 
-  void declare();
   const Type *errorOf(llvm::StringRef fn, bool text, bool shell);
   const Type *spawnResult(bool text);
 

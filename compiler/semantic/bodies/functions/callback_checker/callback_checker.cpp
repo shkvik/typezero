@@ -700,4 +700,5 @@ Expr *CallbackChecker::checkCompareResult(const ArrayCallbackShape &shape, const
 
   return call;
 }
+
 }

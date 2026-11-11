@@ -707,4 +707,5 @@ Expr *ReflectChecker::checkDynamicConstruct(CallExpr *call, const Type *type) {
 
   return call;
 }
+
 }

@@ -795,4 +795,5 @@ void DecoratorChecker::storeDescriptorValue(const DecorateRun &run) {
   Expr *checked = this->exprChecker->checkExpr(assign);
   run.cls->decorations.push_back(this->state.getAst().make<ExprStmt>(at, checked));
 }
+
 }

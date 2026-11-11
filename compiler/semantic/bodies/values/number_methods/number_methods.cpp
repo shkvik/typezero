@@ -328,4 +328,5 @@ void NumberMethods::walkDigitsArg(CallExpr *call, int64_t lo, int64_t hi, const 
     this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
   }
 }
+
 }

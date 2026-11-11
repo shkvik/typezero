@@ -443,4 +443,5 @@ Expr *ArrayLiteralChecker::finishArrayLit(ArrayLitExpr *lit, const Type *element
 
   return lit;
 }
+
 }

@@ -56,10 +56,6 @@ TypeAliasDecl *LibraryDeclarations::findModuleAlias(llvm::StringRef name) const 
   return this->moduleAliases.lookup(name);
 }
 
-bool LibraryDeclarations::hasModuleAlias(llvm::StringRef name) const {
-  return this->moduleAliases.count(name) != 0;
-}
-
 void LibraryDeclarations::addModuleExport(NodeModule module, llvm::StringRef name) {
   this->moduleExports.insert({module, name.str()});
 }

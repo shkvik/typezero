@@ -1154,4 +1154,5 @@ Expr *CryptoFunctionChecker::checkCheckPrime(SyncCall &sync) {
   return this->cryptoArgs->cryptoResult(call, CryptoFn::CheckPrime, {candidate, checks},
                                         Type::boolTy());
 }
+
 }

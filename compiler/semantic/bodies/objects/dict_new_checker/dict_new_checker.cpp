@@ -508,4 +508,5 @@ std::optional<const Type *> DictNewChecker::sourceElementDict(const NewExpr *exp
 
   return Type::dict(Type::DictKind::Set, k, Type::voidTy());
 }
+
 }

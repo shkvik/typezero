@@ -723,4 +723,5 @@ UnaryChecker::ResultInOperatorSuited UnaryChecker::checkObjectIn(BinaryExpr *bin
       .message = message,
   });
 }
+
 }

@@ -502,4 +502,5 @@ Expr *PromiseStaticChecker::typeAllCall(CallExpr *call, const Type *element,
 
   return call;
 }
+
 }

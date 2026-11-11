@@ -377,4 +377,5 @@ void SetEncodingChecker::reportFirstEscape(const EncodingRun &run, llvm::SMLoc l
   this->state.getDiagnostics().error(loc, message);
   this->state.getDiagnostics().note(first->loc, usedHere);
 }
+
 }

@@ -380,4 +380,5 @@ void NewChecker::walkArrayLength(NewExpr *expr, const Type *element) {
     this->state.getDiagnostics().error(expr->args[0]->loc(), between.error().message);
   }
 }
+
 }

@@ -288,4 +288,5 @@ void SwitchChecker::forgetCaseVars(const SwitchStmt *stmt) {
     }
   }
 }
+
 }

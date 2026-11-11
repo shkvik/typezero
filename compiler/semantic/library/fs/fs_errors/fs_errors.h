@@ -12,7 +12,6 @@ class FsErrors {
 public:
   FsErrors(SemanticState &owner, SemanticParts &all);
 
-  void declare();
   const Type *named(llvm::StringRef name);
   const Type *ofCall(const CallExpr *call);
 

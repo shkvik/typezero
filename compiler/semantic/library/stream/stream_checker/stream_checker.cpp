@@ -510,4 +510,5 @@ Expr *StreamChecker::finishStreamCall(StreamCall &stream, std::vector<Expr *> ar
 
   return call;
 }
+
 }

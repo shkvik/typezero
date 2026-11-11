@@ -434,4 +434,5 @@ bool MethodCallChecker::hasInitializer(const ClassDecl *cls) {
 
   return false;
 }
+
 }

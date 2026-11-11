@@ -4,30 +4,9 @@
 
 namespace tz {
 
-namespace {
-
-const llvm::StringLiteral kChildTypeNames[] = {
-    "ExecTextError",          "ExecBytesError",          "ExecFileTextError",
-    "ExecFileBytesError",     "SpawnTextError",          "SpawnBytesError",
-    "ExecFileShellTextError", "ExecFileShellBytesError", "SpawnShellTextError",
-    "SpawnShellBytesError",   "SpawnTextResult",         "SpawnBytesResult"};
-
-}
-
 ChildErrorTypes::ChildErrorTypes(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->builtinModuleTypes = &all.builtinModuleTypes;
-}
-
-void ChildErrorTypes::declare() {
-  BuiltinModuleTypes &types = *this->builtinModuleTypes;
-  if (types.declared("ExecTextError")) {
-    return;
-  }
-  types.declare(BuiltinText::CHILD_PROCESS_ERRORS);
-  for (llvm::StringLiteral name : kChildTypeNames) {
-    types.exportFrom(NodeModule::ChildProcess, name);
-  }
 }
 
 const Type *ChildErrorTypes::errorOf(llvm::StringRef fn, bool text, bool shell) {

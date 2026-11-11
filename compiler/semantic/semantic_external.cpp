@@ -19,10 +19,8 @@ SemanticExternalFacade::~SemanticExternalFacade() = default;
 Diagnostics::ResultTaken SemanticExternalFacade::collectDeclarations() {
   this->parts->scopes.openScope();
   this->parts->libraryCalls.prepareLibraries(this->file);
-  this->parts->cryptoErrors.declare();
+  this->parts->builtinModuleTypes.declareErrorTypes();
   this->parts->fsDeclarer.declareFsClasses();
-  this->parts->fsErrors.declare();
-  this->parts->childErrorTypes.declare();
   this->parts->prelude.declarePrelude();
   this->parts->assignedFields.rememberAssigned(this->file);
   this->parts->moduleDeclarer.declareModules(this->file);

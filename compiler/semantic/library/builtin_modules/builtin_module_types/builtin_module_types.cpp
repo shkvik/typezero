@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/builtin_modules/builtin_module_types/builtin_module_types.h"
+#include "compiler/program/library/builtin_modules/error_export_table/error_export_table.h"
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 
@@ -9,6 +10,18 @@ namespace tz {
 BuiltinModuleTypes::BuiltinModuleTypes(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->typeDeclarer = &all.typeDeclarer;
+}
+
+void BuiltinModuleTypes::declareErrorTypes() {
+  for (BuiltinText text : ErrorExportTable::getTexts()) {
+    this->declare(text);
+  }
+  for (const ErrorExportInfo &exports : ErrorExportTable::getExports()) {
+    std::vector<llvm::StringRef> names = exports.names();
+    for (llvm::StringRef name : names) {
+      this->exportFrom(exports.module, name);
+    }
+  }
 }
 
 void BuiltinModuleTypes::declare(BuiltinText builtin) {
@@ -23,10 +36,6 @@ void BuiltinModuleTypes::declare(BuiltinText builtin) {
 
 void BuiltinModuleTypes::exportFrom(NodeModule module, llvm::StringRef name) {
   this->state.getLibraryDeclarations().addModuleExport(module, name);
-}
-
-bool BuiltinModuleTypes::declared(llvm::StringRef name) const {
-  return this->state.getLibraryDeclarations().hasModuleAlias(name);
 }
 
 TypeAliasDecl *BuiltinModuleTypes::alias(llvm::StringRef name) const {

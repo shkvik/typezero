@@ -592,4 +592,5 @@ void IntlOptionsChecker::walkIncrementDigits(IntlOptionsRun &run) {
     this->reportOption(run, "roundingIncrement", message);
   }
 }
+
 }

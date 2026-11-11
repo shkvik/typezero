@@ -431,4 +431,5 @@ bool GenericClassChecker::hasInitializer(const ClassDecl *inst) {
 
   return false;
 }
+
 }

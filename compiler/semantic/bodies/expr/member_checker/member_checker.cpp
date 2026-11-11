@@ -642,4 +642,5 @@ MemberChecker::ResultIndexedElement MemberChecker::listParamIndex(IndexExpr *ind
 
   return ok(index);
 }
+
 }

@@ -1,5 +1,4 @@
 #include "compiler/semantic/library/fs/fs_errors/fs_errors.h"
-#include "compiler/program/library/fs/fs_error_types/fs_error_types.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/library/builtin_modules/builtin_module_types/builtin_module_types.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -11,31 +10,6 @@ namespace tz {
 FsErrors::FsErrors(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->builtinModuleTypes = &all.builtinModuleTypes;
-}
-
-void FsErrors::declare() {
-  BuiltinModuleTypes &types = *this->builtinModuleTypes;
-  if (types.declared("ReadFileError")) {
-    return;
-  }
-  types.declare(BuiltinText::FILE_SYSTEM_ERRORS);
-  for (llvm::StringRef type : FsErrorTypes::getTypeNames()) {
-    if (type == "ReplaceError") {
-      types.exportFrom(NodeModule::TzFs, type);
-      continue;
-    }
-    types.exportFrom(NodeModule::Fs, type);
-    types.exportFrom(NodeModule::FsPromises, type);
-  }
-  for (llvm::StringRef side : {"Read", "Write", "WriteNew"}) {
-    for (llvm::StringRef reason : {"NotFound", "Exists", "WrongType", "Permission", "Busy", "Full",
-                                   "Path", "System", "InvalidRange"}) {
-      std::string name = (side + "StreamError" + reason).str();
-      if (types.declared(name)) {
-        types.exportFrom(NodeModule::Fs, name);
-      }
-    }
-  }
 }
 
 const Type *FsErrors::named(llvm::StringRef name) {

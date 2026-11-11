@@ -356,4 +356,5 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkNamedField(Index
 
   return ok(read.value());
 }
+
 }

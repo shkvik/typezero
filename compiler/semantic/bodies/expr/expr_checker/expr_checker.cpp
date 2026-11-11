@@ -542,4 +542,5 @@ std::string ExprChecker::hintedCastMessage(const Expr *operand, const Type *to) 
 
   return ErrorTextCast::hinted(hint);
 }
+
 }

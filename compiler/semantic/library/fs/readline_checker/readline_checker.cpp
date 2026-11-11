@@ -174,4 +174,5 @@ std::optional<int> ReadlineChecker::outputStream(const Expr *output) {
 
   return std::nullopt;
 }
+
 }

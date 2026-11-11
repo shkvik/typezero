@@ -32,7 +32,6 @@ public:
   bool isInsideLibrary(llvm::SMLoc loc) const;
   void rememberModuleAlias(TypeAliasDecl *alias);
   TypeAliasDecl *findModuleAlias(llvm::StringRef name) const;
-  bool hasModuleAlias(llvm::StringRef name) const;
   void addModuleExport(NodeModule module, llvm::StringRef name);
   bool isModuleExport(NodeModule module, llvm::StringRef name) const;
 

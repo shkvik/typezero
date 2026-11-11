@@ -355,4 +355,5 @@ bool LoopBounds::isArrayPart(const Term &t) {
   return (t.length && LoopBounds::isArrayLength(t.first())) ||
          (t.length2 && LoopBounds::isArrayLength(t.second()));
 }
+
 }

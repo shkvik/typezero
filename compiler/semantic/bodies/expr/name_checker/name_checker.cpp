@@ -434,4 +434,5 @@ Expr *NameChecker::reportUnknownName(NameExpr *name, const ScopeEntry &entry) {
 
   return name;
 }
+
 }

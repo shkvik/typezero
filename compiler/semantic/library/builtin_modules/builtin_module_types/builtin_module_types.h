@@ -14,14 +14,15 @@ class BuiltinModuleTypes {
 public:
   BuiltinModuleTypes(SemanticState &owner, SemanticParts &all);
 
-  void declare(BuiltinText builtin);
-  void exportFrom(NodeModule module, llvm::StringRef name);
-  bool declared(llvm::StringRef name) const;
+  void declareErrorTypes();
   TypeAliasDecl *alias(llvm::StringRef name) const;
   TypeAliasDecl *exported(NodeModule module, llvm::StringRef name) const;
   const Type *named(llvm::StringRef name);
 
 private:
+  void declare(BuiltinText builtin);
+  void exportFrom(NodeModule module, llvm::StringRef name);
+
   SemanticState &state;
   TypeDeclarer *typeDeclarer = nullptr;
 };

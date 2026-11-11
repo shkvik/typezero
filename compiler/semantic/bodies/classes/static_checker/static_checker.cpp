@@ -427,4 +427,5 @@ Expr *StaticChecker::checkStaticMethodCall(CallExpr *call, MemberExpr *member,
   return this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
                                                member->loc(), &given);
 }
+
 }

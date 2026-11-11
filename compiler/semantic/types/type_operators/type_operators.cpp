@@ -674,4 +674,5 @@ const Type *TypeOperators::nonStringKey(const Type *keys) {
 
   return nullptr;
 }
+
 }

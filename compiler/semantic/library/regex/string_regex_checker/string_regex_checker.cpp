@@ -435,4 +435,5 @@ Expr *StringRegexChecker::checkExtraReplacerParams(CallExpr *call, MemberExpr *m
 
   return call;
 }
+
 }

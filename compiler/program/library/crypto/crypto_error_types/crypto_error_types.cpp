@@ -222,4 +222,5 @@ std::optional<llvm::StringRef> CryptoErrorTypes::callErrorName(CryptoFn fn) {
 
   return std::nullopt;
 }
+
 }

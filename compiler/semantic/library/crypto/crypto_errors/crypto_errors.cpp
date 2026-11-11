@@ -12,17 +12,6 @@ CryptoErrors::CryptoErrors(SemanticState &owner, SemanticParts &all)
   this->builtinModuleTypes = &all.builtinModuleTypes;
 }
 
-void CryptoErrors::declare() {
-  BuiltinModuleTypes &types = *this->builtinModuleTypes;
-  if (types.declared("CreateHashError")) {
-    return;
-  }
-  types.declare(BuiltinText::CRYPTO_ERRORS);
-  for (llvm::StringRef name : CryptoErrorTypes::getTypeNames()) {
-    types.exportFrom(NodeModule::Crypto, name);
-  }
-}
-
 const Type *CryptoErrors::named(llvm::StringRef name) {
   return this->builtinModuleTypes->named(name);
 }

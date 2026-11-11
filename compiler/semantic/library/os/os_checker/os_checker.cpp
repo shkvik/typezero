@@ -174,4 +174,5 @@ Expr *OsChecker::reportNotYet(CallExpr *call, llvm::StringRef fn, llvm::SMLoc lo
 
   return call;
 }
+
 }

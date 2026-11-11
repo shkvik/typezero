@@ -897,4 +897,5 @@ bool ObjectLiteralChecker::isReplacedLater(const ObjectLitExpr *lit, size_t i,
 
   return false;
 }
+
 }

@@ -12,7 +12,6 @@ class CryptoErrors {
 public:
   CryptoErrors(SemanticState &owner, SemanticParts &all);
 
-  void declare();
   const Type *named(llvm::StringRef name);
   const Type *ofCall(CryptoFn fn, llvm::ArrayRef<Expr *> args);
 

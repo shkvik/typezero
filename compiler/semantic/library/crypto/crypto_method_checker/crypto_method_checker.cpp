@@ -685,4 +685,5 @@ Expr *CryptoMethodChecker::checkX509Verify(const CryptoMethodCall &crypto) {
                                             : CryptoFn::X509Verify,
                                         {self, other}, Type::boolTy());
 }
+
 }

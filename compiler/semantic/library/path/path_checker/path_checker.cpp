@@ -200,4 +200,5 @@ const Type *PathChecker::pathResultType(PathFunctionForm form) {
 
   return Type::string();
 }
+
 }

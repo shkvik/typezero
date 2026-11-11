@@ -494,4 +494,5 @@ UnionChecker::ResultUnionMethodPart UnionChecker::classVariantMethod(const Membe
       .entry = entry,
   });
 }
+
 }

@@ -312,4 +312,5 @@ const Type *KeyPairChecker::encodedKeyType(int format) {
 
   return Type::json();
 }
+
 }

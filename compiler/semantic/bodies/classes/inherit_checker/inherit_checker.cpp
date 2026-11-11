@@ -701,4 +701,5 @@ Expr *InheritChecker::checkGenericSuperCall(CallExpr *call, MemberExpr *member, 
 
   return call;
 }
+
 }

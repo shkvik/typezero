@@ -470,4 +470,5 @@ void ConditionFacts::addOrderFacts(BinaryOp op, const Linear &l, const Linear &r
     ConditionFacts::addLess(f, r, l, true);
   }
 }
+
 }

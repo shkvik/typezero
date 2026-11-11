@@ -437,4 +437,5 @@ void UnionNarrowing::narrowToLiteral(const NarrowTarget &target, const Type *lit
     this->narrowTargetTo(different, target, opposite);
   }
 }
+
 }

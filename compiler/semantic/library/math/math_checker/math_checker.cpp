@@ -487,4 +487,5 @@ Expr *MathChecker::spreadIteratorValues(Expr *arg) {
 
   return values;
 }
+
 }

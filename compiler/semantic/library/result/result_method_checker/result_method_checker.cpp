@@ -269,4 +269,5 @@ void ResultMethodChecker::typeOrElseCall(const ResultCall &run, const Type *ret)
   }
   run.call->type = Type::result(common, ret->errType());
 }
+
 }

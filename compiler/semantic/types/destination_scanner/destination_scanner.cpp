@@ -745,4 +745,5 @@ std::vector<const Type *> DestinationScanner::dictMethodParams(const Type *objec
 
   return {};
 }
+
 }

@@ -585,4 +585,5 @@ const Type *DecimalChecker::decimalResultType(DecimalResult result) {
 
   return Type::decimalTy();
 }
+
 }

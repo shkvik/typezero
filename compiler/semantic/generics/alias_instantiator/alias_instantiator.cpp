@@ -347,4 +347,5 @@ void AliasInstantiator::rememberAliasType(const AliasRun &run, const Type *type,
     Type::nameUnion(type, display);
   }
 }
+
 }

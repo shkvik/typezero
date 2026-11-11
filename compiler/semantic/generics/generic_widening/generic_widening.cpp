@@ -311,4 +311,5 @@ GenericWidening::joinedArgs(const ClassDecl *generic, llvm::ArrayRef<const Class
 
   return args;
 }
+
 }
