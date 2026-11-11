@@ -491,7 +491,7 @@ interprocedural/         межпроцедурные проверки посл�
     slots/               Slots: пределы переменных, полей, элементов
     value_range/         Val, Bound: предел значения и откуда он
   pool_checker/          PoolChecker: объект Pool живёт только внутри use (docs/async.md, раздел 11)
-  unused/                Unused: неиспользуемые функции
+  unused_functions/      UnusedFunctions: функции других модулей, до которых не доходит программа
   wide_writes/           WideWrites: запись чужого значения через более широкий тип
 ```
 

@@ -3,7 +3,7 @@
 #include "compiler/interprocedural/load_order/load_order.h"
 #include "compiler/interprocedural/overflow/overflow_check/overflow_check.h"
 #include "compiler/interprocedural/pool_checker/pool_checker.h"
-#include "compiler/interprocedural/unused/unused.h"
+#include "compiler/interprocedural/unused_functions/unused_functions.h"
 #include "compiler/interprocedural/wide_writes/wide_writes.h"
 #include "compiler/program/program/program.h"
 
@@ -15,32 +15,38 @@ InterproceduralExternalFacade::InterproceduralExternalFacade(Program &checked, b
       overflow(checksOverflow) {}
 
 InterproceduralExternalFacade::ResultProgramChecked InterproceduralExternalFacade::run() {
-  ItemList<Diagnostic> found;
+  auto found = ItemList<Diagnostic>();
 
-  auto earlyReads = this->checkReadsBeforeInit();
+  auto loadOrder = LoadOrder(this->program.sourceMgr);
+  auto earlyReads = loadOrder.checkLoadOrder(this->program.file);
   if (earlyReads.isErr()) {
     found.append(earlyReads.error());
   }
 
-  this->markUnreachableFunctions();
+  auto unusedFunctions = UnusedFunctions(this->program.file);
+  this->program.file.unusedFunctions = unusedFunctions.findUnused();
 
-  auto storages = this->checkAsyncLocalStorages();
+  auto asyncLocalStorageChecker = AsyncLocalStorageChecker(this->program, this->library);
+  auto storages = asyncLocalStorageChecker.run();
   if (storages.isErr()) {
     found.append(storages.error());
   }
 
-  auto poolObjects = this->checkPoolObjects();
+  auto poolChecker = PoolChecker(this->program, this->library);
+  auto poolObjects = poolChecker.run();
   if (poolObjects.isErr()) {
     found.append(poolObjects.error());
   }
 
-  auto wideWrites = this->checkWideWrites();
-  if (wideWrites.isErr()) {
-    found.append(wideWrites.error());
+  auto wideWrites = WideWrites(this->program, this->library);
+  auto widenings = wideWrites.checkWidenings();
+  if (widenings.isErr()) {
+    found.append(widenings.error());
   }
 
   if (this->overflow) {
-    auto overflows = this->checkOverflows();
+    auto overflowCheck = OverflowCheck(this->program, this->library);
+    auto overflows = overflowCheck.run();
     if (overflows.isErr()) {
       found.append(overflows.error());
     }
@@ -50,40 +56,6 @@ InterproceduralExternalFacade::ResultProgramChecked InterproceduralExternalFacad
   }
 
   return ok();
-}
-
-Diagnostics::ResultTaken InterproceduralExternalFacade::checkReadsBeforeInit() {
-  LoadOrder order(this->program.sourceMgr);
-
-  return order.checkLoadOrder(this->program.file);
-}
-
-void InterproceduralExternalFacade::markUnreachableFunctions() {
-  Unused::markUnusedFunctions(this->program.file);
-}
-
-Diagnostics::ResultTaken InterproceduralExternalFacade::checkAsyncLocalStorages() {
-  AsyncLocalStorageChecker storages(this->program, this->library);
-
-  return storages.run();
-}
-
-Diagnostics::ResultTaken InterproceduralExternalFacade::checkPoolObjects() {
-  PoolChecker pools(this->program, this->library);
-
-  return pools.run();
-}
-
-Diagnostics::ResultTaken InterproceduralExternalFacade::checkWideWrites() {
-  WideWrites writes(this->program, this->library);
-
-  return writes.checkWidenings();
-}
-
-Diagnostics::ResultTaken InterproceduralExternalFacade::checkOverflows() {
-  OverflowCheck overflows(this->program, this->library);
-
-  return overflows.run();
 }
 
 }

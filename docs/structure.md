@@ -115,7 +115,7 @@ compiler/
                      declare/ → generics/ → types/ names/ → semantic_state/ (закрытое
                      хранилище групп данных); вверх через интерфейс — только Completer
   interprocedural/   после движка, по всей программе: flow_graph_builder/ flow_*/ wide_writes/
-                     load_order/ unused/ async_local_storage_checker/ pool_checker/
+                     load_order/ unused_functions/ async_local_storage_checker/ pool_checker/
                      held_value_checker/ overflow/
   cli/               папка на слово команды tz (build/ run/ knowledge/ lsp/ mcp/ licenses/
                      version/ init/ add/ remove/ update/ port/); разбор и помощники — command_line/;
@@ -203,14 +203,14 @@ library/             по теме на папку; stream/stream.tz (класс
   `Diagnostics::ResultTaken`; `run()` складывает найденное шагами. `finishProgram` ещё отдаёт
   инвентарь и хранилище расширений в `SourceFile::inventory` и дописывает поздние классы в
   `file.items`. Фасад только перечисляет шаги, пишут в хранилища части.
-  `InterproceduralExternalFacade` (`interprocedural/interprocedural_external.h`) устроен так же:
-  берёт `Program` и флаг проверки переполнений; `run()` — `checkReadsBeforeInit`,
-  `markUnreachableFunctions`, `checkAsyncLocalStorages`, `checkPoolObjects`, `checkWideWrites` и,
-  если флаг включён, `checkOverflows`. Отдаёт `Result<void, ItemList<Diagnostic>>`: `err` — всё
-  найденное (ошибки и за ними подсказки переполнений), `ok()` — ничего не найдено. Каждый
-  проверяльщик (`LoadOrder`, `HeldValueChecker`, `WideWrites`, `OverflowCheck`) держит свой
-  `Diagnostics` и сам отдаёт `Diagnostics::ResultTaken` с тем, что нашёл; общий `program.diags`
-  они не трогают, код библиотеки отсеивают по `LibraryRanges`.
+  `InterproceduralExternalFacade` (`interprocedural/interprocedural_external.h`) берёт `Program` и
+  флаг проверки переполнений; закрытых шагов у него нет: `run()` сам по очереди создаёт
+  проверяльщиков — `LoadOrder`, `UnusedFunctions`, `AsyncLocalStorageChecker`, `PoolChecker`, `WideWrites`
+  и, если флаг включён, `OverflowCheck` — и складывает их результаты. Отдаёт
+  `Result<void, ItemList<Diagnostic>>`: `err` — всё найденное (ошибки и за ними подсказки
+  переполнений), `ok()` — ничего не найдено. Каждый проверяльщик сам отдаёт `Result` только с тем,
+  что нашёл: `WideWrites` собирает список в своём цикле, остальные держат свой `Diagnostics`;
+  общий `program.diags` они не трогают, код библиотеки отсеивают по `LibraryRanges`.
 - **Вопросы о типах снаружи** — `SemanticTypes` (`semantic/semantic_types.h`: `awaitedType`,
   `copiesIntoRecord`, `isImplicitlyConvertible`, `narrowingsOf`) для `lower/` и `interprocedural/`.
   Общее у движка и `LoadOrder` — в `program/`: цепочка загрузки `LoadChain`

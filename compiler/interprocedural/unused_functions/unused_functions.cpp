@@ -1,4 +1,4 @@
-#include "compiler/interprocedural/unused/unused.h"
+#include "compiler/interprocedural/unused_functions/unused_functions.h"
 #include "compiler/program/ast_walker/ast_walker.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -7,52 +7,71 @@ using llvm::isa;
 
 namespace tz {
 
-void Unused::markUnusedFunctions(SourceFile &program) {
-  if (program.modules.size() < 2) {
-    return;
+UnusedFunctions::UnusedFunctions(SourceFile &checked)
+    : file(checked) {}
+
+llvm::SmallPtrSet<const FunctionDecl *, 8> UnusedFunctions::findUnused() {
+  auto unused = llvm::SmallPtrSet<const FunctionDecl *, 8>();
+  if (this->file.modules.size() < 2) {
+    return unused;
   }
-  llvm::SmallPtrSet<const FunctionDecl *, 16> used;
-  std::vector<const FunctionDecl *> queue;
-  auto reach = [&](const Expr *e) {
-    auto *call = dyn_cast<CallExpr>(e);
-    auto *name = dyn_cast<NameExpr>(e);
-    const FuncSymbol *fn = nullptr;
-    if (call) {
-      fn = call->func();
-    } else if (name) {
-      fn = name->func();
-    }
-    bool reached = fn && fn->decl && used.insert(fn->decl).second;
-    if (reached) {
-      queue.push_back(fn->decl);
-    }
-  };
-  for (Module *module : program.modules) {
-    for (Stmt *item : module->file.items) {
-      if (module->isEntry || !isa<FunctionDecl>(item)) {
-        for (const Expr *e : AstWalker::exprsIn(item, true)) {
-          reach(e);
-        }
-      }
-    }
-  }
-  while (!queue.empty()) {
-    const FunctionDecl *fn = queue.back();
-    queue.pop_back();
-    for (const Expr *e : AstWalker::exprsIn(fn, true)) {
-      reach(e);
-    }
-  }
-  for (Module *module : program.modules) {
+  this->reachFromRoots();
+  this->reachFromQueue();
+
+  for (Module *module : this->file.modules) {
     if (module->isEntry) {
       continue;
     }
     for (Stmt *item : module->file.items) {
       auto *fn = dyn_cast<FunctionDecl>(item);
-      if (fn && !used.contains(fn)) {
-        program.unusedFunctions.insert(fn);
+      if (fn != nullptr && !this->used.contains(fn)) {
+        unused.insert(fn);
       }
     }
+  }
+
+  return unused;
+}
+
+void UnusedFunctions::reachFromRoots() {
+  for (Module *module : this->file.modules) {
+    for (Stmt *item : module->file.items) {
+      bool isRoot = module->isEntry || !isa<FunctionDecl>(item);
+      if (!isRoot) {
+        continue;
+      }
+      for (const Expr *e : AstWalker::exprsIn(item, true)) {
+        this->reach(e);
+      }
+    }
+  }
+}
+
+void UnusedFunctions::reachFromQueue() {
+  while (!this->queue.empty()) {
+    const auto *fn = this->queue.back();
+    this->queue.pop_back();
+    for (const Expr *e : AstWalker::exprsIn(fn, true)) {
+      this->reach(e);
+    }
+  }
+}
+
+void UnusedFunctions::reach(const Expr *e) {
+  const FuncSymbol *fn = nullptr;
+  const auto *call = dyn_cast<CallExpr>(e);
+  const auto *name = dyn_cast<NameExpr>(e);
+  if (call != nullptr) {
+    fn = call->func();
+  } else if (name != nullptr) {
+    fn = name->func();
+  }
+  if (fn == nullptr || fn->decl == nullptr) {
+    return;
+  }
+  auto [_, isInserted] = this->used.insert(fn->decl);
+  if (isInserted) {
+    this->queue.push_back(fn->decl);
   }
 }
 
