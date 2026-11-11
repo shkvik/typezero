@@ -31,3 +31,24 @@ private:
   std::optional<T> value_;
   std::optional<E> error_;
 };
+
+template <class E> class Result<void, E> {
+public:
+  Result(Ok<void>) {}
+  template <class F>
+  Result(Err<F> err)
+      : error_(std::move(err.error)) {}
+
+  bool isOk() const {
+    return !error_.has_value();
+  }
+  bool isErr() const {
+    return error_.has_value();
+  }
+  const E &error() const {
+    return *error_;
+  }
+
+private:
+  std::optional<E> error_;
+};

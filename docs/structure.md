@@ -196,11 +196,14 @@ library/             по теме на папку; stream/stream.tz (класс
 Раскладка — по образцу `tmp/project_struct/`, правки сверх переносов — `tmp/project_struct.md`.
 
 - **Фасад.** `SemanticExternalFacade` (`semantic/semantic_external.h`) — единственный вход в движок,
-  берёт `Program`; только шаги конвейера: `collectDeclarations`, `findRecursion`,
-  `checkModuleCode`, `checkGenericCopies`, `finishProgram`. Каждый отдаёт `Diagnostics::ResultTaken`.
-  `finishProgram` ещё отдаёт инвентарь и хранилище расширений в `SourceFile::inventory` и
-  дописывает поздние классы в `file.items`. Фасад только перечисляет шаги, пишут в хранилища
-  части. Так же устроен `InterproceduralExternalFacade` (`interprocedural/interprocedural_external.h`).
+  берёт `Program`; наружу один метод `run()` — `Result<void, ItemList<Diagnostic>>`: `ok()` без
+  значения, `err` — ошибки движка. Внутри закрытые шаги `collectDeclarations`, `findRecursion`,
+  `checkModuleCode`, `checkGenericCopies`, `finishProgram`, каждый отдаёт
+  `Diagnostics::ResultTaken`; `run()` складывает ошибки шагов. `finishProgram` ещё отдаёт
+  инвентарь и хранилище расширений в `SourceFile::inventory` и дописывает поздние классы в
+  `file.items`. Фасад только перечисляет шаги, пишут в хранилища части.
+  `InterproceduralExternalFacade` (`interprocedural/interprocedural_external.h`) пока отдаёт шаги
+  наружу по одному.
 - **Вопросы о типах снаружи** — `SemanticTypes` (`semantic/semantic_types.h`: `awaitedType`,
   `copiesIntoRecord`, `isImplicitlyConvertible`, `narrowingsOf`) для `lower/` и `interprocedural/`.
   Общее у движка и `LoadOrder` — в `program/`: цепочка загрузки `LoadChain`
@@ -249,12 +252,10 @@ ResultCheckedProgram checkProgram(Program &program, const BuildOptions &options)
 
   ItemList<Diagnostic> diagnostics;
   SemanticExternalFacade semantic(program);
-
-  auto declarations = semantic.collectDeclarations();
-  if (declarations.isErr()) {
-    diagnostics.append(declarations.error());
+  auto semanticChecked = semantic.run();
+  if (semanticChecked.isErr()) {
+    diagnostics.append(semanticChecked.error());
   }
-  // … findRecursion, checkModuleCode, checkGenericCopies, finishProgram — так же
 
   InterproceduralExternalFacade interprocedural(program);
   // … checkReadsBeforeInit, markUnreachableFunctions, checkAsyncLocalStorages,

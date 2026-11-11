@@ -16,6 +16,40 @@ SemanticExternalFacade::SemanticExternalFacade(Program &program)
 
 SemanticExternalFacade::~SemanticExternalFacade() = default;
 
+SemanticExternalFacade::ResultProgramChecked SemanticExternalFacade::run() {
+  ItemList<Diagnostic> errors;
+
+  auto declarations = this->collectDeclarations();
+  if (declarations.isErr()) {
+    errors.append(declarations.error());
+  }
+
+  auto recursion = this->findRecursion();
+  if (recursion.isErr()) {
+    errors.append(recursion.error());
+  }
+
+  auto moduleCode = this->checkModuleCode();
+  if (moduleCode.isErr()) {
+    errors.append(moduleCode.error());
+  }
+
+  auto genericCopies = this->checkGenericCopies();
+  if (genericCopies.isErr()) {
+    errors.append(genericCopies.error());
+  }
+
+  auto finished = this->finishProgram();
+  if (finished.isErr()) {
+    errors.append(finished.error());
+  }
+  if (!errors.empty()) {
+    return err(errors);
+  }
+
+  return ok();
+}
+
 Diagnostics::ResultTaken SemanticExternalFacade::collectDeclarations() {
   this->parts->scopes.openScope();
   this->parts->libraryCalls.prepareLibraries(this->file);

@@ -17,30 +17,9 @@ ResultCheckedProgram checkProgram(Program &program, const BuildOptions &options)
 
   ItemList<Diagnostic> diagnostics;
   SemanticExternalFacade semantic(program);
-
-  auto declarations = semantic.collectDeclarations();
-  if (declarations.isErr()) {
-    diagnostics.append(declarations.error());
-  }
-
-  auto recursion = semantic.findRecursion();
-  if (recursion.isErr()) {
-    diagnostics.append(recursion.error());
-  }
-
-  auto moduleCode = semantic.checkModuleCode();
-  if (moduleCode.isErr()) {
-    diagnostics.append(moduleCode.error());
-  }
-
-  auto genericCopies = semantic.checkGenericCopies();
-  if (genericCopies.isErr()) {
-    diagnostics.append(genericCopies.error());
-  }
-
-  auto finished = semantic.finishProgram();
-  if (finished.isErr()) {
-    diagnostics.append(finished.error());
+  auto semanticChecked = semantic.run();
+  if (semanticChecked.isErr()) {
+    diagnostics.append(semanticChecked.error());
   }
 
   InterproceduralExternalFacade interprocedural(program);
