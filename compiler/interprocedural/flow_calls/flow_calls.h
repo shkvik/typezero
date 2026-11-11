@@ -1,12 +1,12 @@
 #pragma once
 
-#include "compiler/interprocedural/flows/flows.h"
+#include "compiler/interprocedural/flow_graph_builder/flow_graph_builder.h"
 
 namespace tz {
 
 class FlowCalls {
 public:
-  explicit FlowCalls(Flows &owner);
+  explicit FlowCalls(FlowGraphBuilder &owner);
 
   bool mayCall(const Type *type, const FunctionDecl *fn) const;
   Refs receiverConversion(const Expr *at, const Type *from, const FunctionDecl *method,
@@ -19,7 +19,7 @@ public:
   void callback(const Expr *arg, const Refs &values);
 
 private:
-  Flows &flows;
+  FlowGraphBuilder &builder;
 };
 
 }

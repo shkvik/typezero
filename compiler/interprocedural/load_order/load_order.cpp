@@ -9,8 +9,8 @@ using llvm::isa;
 
 namespace tz {
 
-LoadOrder::LoadOrder(Diagnostics &target)
-    : diagnostics(target) {}
+LoadOrder::LoadOrder(llvm::SourceMgr &sourceMgr)
+    : diagnostics(sourceMgr) {}
 
 const FunctionDecl *LoadOrder::directFunction(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
@@ -291,7 +291,7 @@ void LoadOrder::reportSites(const LoadState &loadState) {
   }
 }
 
-void LoadOrder::checkLoadOrder(SourceFile &program) {
+Diagnostics::ResultTaken LoadOrder::checkLoadOrder(SourceFile &program) {
   LoadState loadState;
   LoadOrder::declarationOrder(program, loadState);
   this->topLevelUses(program, loadState);
@@ -301,6 +301,8 @@ void LoadOrder::checkLoadOrder(SourceFile &program) {
   }
   LoadOrder::spreadEffects(loadState);
   this->reportSites(loadState);
+
+  return this->diagnostics.take();
 }
 
 }

@@ -521,9 +521,9 @@ void LoopRanges::reportRecursions() {
     }
     std::string name = fn->name.empty() ? std::string("this function") : "'" + fn->name.str() + "'";
     if (!stops) {
-      this->check.diags.hint(recursion.self.front()->loc(),
-                             "how deep this tail recursion goes depends on data" +
-                                 std::string(kWhileItRuns));
+      this->reportHint(recursion.self.front()->loc(),
+                       "how deep this tail recursion goes depends on data" +
+                           std::string(kWhileItRuns));
       continue;
     }
     for (const auto &[call, known] : this->check.recursiveCalls) {
@@ -532,10 +532,17 @@ void LoopRanges::reportRecursions() {
            LoopRanges::limitedTowards(known.args[recursion.counter], -recursion.step))) {
         continue;
       }
-      this->check.diags.hint(call->loc(), "how deep the tail recursion of " + name +
-                                              " goes depends on this argument" + kWhileItRuns);
+      this->reportHint(call->loc(), "how deep the tail recursion of " + name +
+                                        " goes depends on this argument" + kWhileItRuns);
     }
   }
+}
+
+void LoopRanges::reportHint(llvm::SMLoc loc, const std::string &message) {
+  if (this->check.library.contains(loc)) {
+    return;
+  }
+  this->check.diags.hint(loc, message);
 }
 
 void LoopRanges::reportLong() {
@@ -558,8 +565,8 @@ void LoopRanges::reportLong() {
     std::string data =
         loop.why ? " (" + this->check.overflowWarnings().inputText(loop.why, stmt->loc()) + ")"
                  : "";
-    this->check.diags.hint(stmt->loc(),
-                           "how many times this loop runs depends on data" + data + kWhileItRuns);
+    this->reportHint(stmt->loc(),
+                     "how many times this loop runs depends on data" + data + kWhileItRuns);
   }
 }
 

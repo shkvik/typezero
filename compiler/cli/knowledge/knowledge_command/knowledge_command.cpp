@@ -45,7 +45,7 @@ bool KnowledgeCommand::learn(const std::string &entry, Knowledge &out) const {
   options.overflow = false;
   Program program;
   ResultCheckedProgram checked = checkProgram(program, options);
-  std::vector<Diagnostic> found = checked.isOk() ? checked.value().warnings : checked.error();
+  std::vector<Diagnostic> found = checked.isErr() ? checked.error() : std::vector<Diagnostic>();
   if (program.file.modules.empty()) {
     ErrorPrinter printer(program.sourceMgr);
     printer.print(found);

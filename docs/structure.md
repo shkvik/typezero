@@ -41,8 +41,8 @@
   (`semantic/semantic_external.h`). Хранилище движка `semantic_state/` закрыто.
 - **Каждый класс — в своей папке.** Маленькие классы вместо `Sema` и `CodeGen`.
 - **Ошибки — значения.** Найденное — `std::vector<Diagnostic>`. Шаг проверки отдаёт `Result` из
-  `Diagnostics::take()` (ok — предупреждения и подсказки, err — всё найденное с ошибками);
-  `checkProgram` и `buildProgram` отдают `Result<…, std::vector<Diagnostic>>` через `ok` и `err`,
+  `Diagnostics::take()`: `ok()` — ничего не найдено, `err` — всё найденное, ошибка это или
+  подсказка, говорит `Diagnostic::kind`; `checkProgram` и `buildProgram` отдают `Result<…, std::vector<Diagnostic>>` через `ok` и `err`,
   как в neverthrow. Класса `Errors` нет (11 ноября).
 
 ## Правила кода
@@ -114,8 +114,9 @@ compiler/
                      сборка всех частей; папки по ярусам: infer/ library/ → bodies/ → flow/
                      declare/ → generics/ → types/ names/ → semantic_state/ (закрытое
                      хранилище групп данных); вверх через интерфейс — только Completer
-  interprocedural/   после движка, по всей программе: flows/ flow_*/ wide_writes/ load_order/
-                     unused/ async_local_storage_checker/ pool_checker/ held_value_checker/ overflow/
+  interprocedural/   после движка, по всей программе: flow_graph_builder/ flow_*/ wide_writes/
+                     load_order/ unused/ async_local_storage_checker/ pool_checker/
+                     held_value_checker/ overflow/
   cli/               папка на слово команды tz (build/ run/ knowledge/ lsp/ mcp/ licenses/
                      version/ init/ add/ remove/ update/ port/); разбор и помощники — command_line/;
                      build/build_command/ — BuildCommand: tz build, buildProgram (от
@@ -197,13 +198,19 @@ library/             по теме на папку; stream/stream.tz (класс
 
 - **Фасад.** `SemanticExternalFacade` (`semantic/semantic_external.h`) — единственный вход в движок,
   берёт `Program`; наружу один метод `run()` — `Result<void, ItemList<Diagnostic>>`: `ok()` без
-  значения, `err` — ошибки движка. Внутри закрытые шаги `collectDeclarations`, `findRecursion`,
-  `checkModuleCode`, `checkGenericCopies`, `finishProgram`, каждый отдаёт
-  `Diagnostics::ResultTaken`; `run()` складывает ошибки шагов. `finishProgram` ещё отдаёт
+  значения, `err` — всё найденное движком. Внутри закрытые шаги `collectDeclarations`,
+  `findRecursion`, `checkModuleCode`, `checkGenericCopies`, `finishProgram`, каждый отдаёт
+  `Diagnostics::ResultTaken`; `run()` складывает найденное шагами. `finishProgram` ещё отдаёт
   инвентарь и хранилище расширений в `SourceFile::inventory` и дописывает поздние классы в
   `file.items`. Фасад только перечисляет шаги, пишут в хранилища части.
-  `InterproceduralExternalFacade` (`interprocedural/interprocedural_external.h`) пока отдаёт шаги
-  наружу по одному.
+  `InterproceduralExternalFacade` (`interprocedural/interprocedural_external.h`) устроен так же:
+  берёт `Program` и флаг проверки переполнений; `run()` — `checkReadsBeforeInit`,
+  `markUnreachableFunctions`, `checkAsyncLocalStorages`, `checkPoolObjects`, `checkWideWrites` и,
+  если флаг включён, `checkOverflows`. Отдаёт `Result<void, ItemList<Diagnostic>>`: `err` — всё
+  найденное (ошибки и за ними подсказки переполнений), `ok()` — ничего не найдено. Каждый
+  проверяльщик (`LoadOrder`, `HeldValueChecker`, `WideWrites`, `OverflowCheck`) держит свой
+  `Diagnostics` и сам отдаёт `Diagnostics::ResultTaken` с тем, что нашёл; общий `program.diags`
+  они не трогают, код библиотеки отсеивают по `LibraryRanges`.
 - **Вопросы о типах снаружи** — `SemanticTypes` (`semantic/semantic_types.h`: `awaitedType`,
   `copiesIntoRecord`, `isImplicitlyConvertible`, `narrowingsOf`) для `lower/` и `interprocedural/`.
   Общее у движка и `LoadOrder` — в `program/`: цепочка загрузки `LoadChain`
@@ -257,18 +264,16 @@ ResultCheckedProgram checkProgram(Program &program, const BuildOptions &options)
     diagnostics.append(semanticChecked.error());
   }
 
-  InterproceduralExternalFacade interprocedural(program);
-  // … checkReadsBeforeInit, markUnreachableFunctions, checkAsyncLocalStorages,
-  //   checkPoolObjects, checkWideWrites (только без ошибок), checkOverflows (если включена)
-
+  InterproceduralExternalFacade interprocedural(program, options.overflow);
+  auto interproceduralChecked = interprocedural.run();
+  if (interproceduralChecked.isErr()) {
+    diagnostics.append(interproceduralChecked.error());
+  }
   if (!diagnostics.empty()) {
-    diagnostics.append(warnings);
     return err(diagnostics);
   }
 
-  return ok(CheckedProgram{
-      .warnings = std::move(warnings),
-  });
+  return ok();
 }
 ```
 
@@ -278,8 +283,11 @@ ResultCheckedProgram checkProgram(Program &program, const BuildOptions &options)
   каждого добавляются в общий список: за один запуск видно ошибки объявлений, тел, копий и
   проверок всей программы, и тесты `tests/errors` ждут их в одном прогоне.
 - **Кругов нет.** Карты событий без явного типа выводятся за один проход (docs/events.md, раздел 2).
-- **Предупреждения и подсказки** дают только проверка переполнений и компоновщик; они в
-  `CheckedProgram::warnings` и `BuiltProgram::warnings`, при ошибках — в конце списка ошибок.
+- **Предупреждения и подсказки** дают только проверка переполнений и компоновщик. `checkProgram`
+  отдаёт `Result<void, std::vector<Diagnostic>>`: в `err` лежит всё найденное, и вид у каждой
+  записи свой (`Diagnostic::kind`: ошибка, предупреждение, подсказка), подсказки — в конце.
+  Провал — только если среди них есть ошибка: `Diagnostics::hasErrors`. Компоновщик пока отдаёт
+  `BuiltProgram::warnings`.
 - **Проходы без ошибок** (`parallel`, `memory`) отдают свой результат.
 
 | Проход | Берёт | Меняет или отдаёт | Откуда сейчас |

@@ -18,38 +18,38 @@ using llvm::isa;
 
 namespace tz {
 
-FlowBuiltins::FlowBuiltins(Flows &owner)
-    : flows(owner) {}
+FlowBuiltins::FlowBuiltins(FlowGraphBuilder &owner)
+    : builder(owner) {}
 
 Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver,
                            const std::vector<Refs> &args) {
   const Type *receiverType = member ? member->object->type : nullptr;
-  int held = this->flows.contentsNode(receiverType);
-  Refs parts = Flows::shifted(receiver, 1);
+  int held = this->builder.contentsNode(receiverType);
+  Refs parts = FlowGraphBuilder::shifted(receiver, 1);
   if (held >= 0) {
     parts.push_back({held, 0, 0});
   }
   auto insert = [&](size_t from) {
     for (size_t i = from; i < args.size(); ++i) {
-      Refs value = c->spreads(i) ? Flows::shifted(args[i], 1) : args[i];
-      this->flows.getFlowStmts().recordWrite(
+      Refs value = c->spreads(i) ? FlowGraphBuilder::shifted(args[i], 1) : args[i];
+      this->builder.getFlowStmts().recordWrite(
           receiver, true, "", c->spreads(i) ? nullptr : c->args[i],
           receiverType ? receiverType->nonOptional() : nullptr, c->loc());
       if (held >= 0) {
-        this->flows.addFlow(value, held);
+        this->builder.addFlow(value, held);
       }
     }
   };
   Refs given = parts;
-  Flows::append(given, receiver);
+  FlowGraphBuilder::append(given, receiver);
   for (const Refs &a : args) {
-    Flows::append(given, a);
+    FlowGraphBuilder::append(given, a);
   }
   Refs results;
   for (const Expr *arg : c->args) {
-    this->flows.getFlowCalls().callback(arg, given);
+    this->builder.getFlowCalls().callback(arg, given);
     if (auto *f = llvm::dyn_cast<FunctionExpr>(FlowExprs::ownExpr(arg))) {
-      results.push_back({this->flows.returnNode(f->fn), 0, 0});
+      results.push_back({this->builder.returnNode(f->fn), 0, 0});
     }
   }
   switch (c->builtin()) {
@@ -60,7 +60,7 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
     case Builtin::LibBoundListener: {
       Refs both = args.empty() ? Refs() : args[0];
       if (args.size() > 1) {
-        Flows::append(both, args[1]);
+        FlowGraphBuilder::append(both, args[1]);
       }
       return both;
     }
@@ -84,8 +84,9 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
       break;
   }
   if (c->builtin() == Builtin::DictNew && args.size() == 1) {
-    if (int into = this->flows.contentsNode(c->type); into >= 0) {
-      this->flows.addFlow(Flows::shifted(args[0], c->type->nonOptional()->isSet() ? 1 : 2), into);
+    if (int into = this->builder.contentsNode(c->type); into >= 0) {
+      this->builder.addFlow(
+          FlowGraphBuilder::shifted(args[0], c->type->nonOptional()->isSet() ? 1 : 2), into);
       return {};
     }
   }
@@ -116,14 +117,14 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
     case Builtin::ResultErr: {
       Refs out;
       for (const Refs &a : args) {
-        Flows::append(out, Flows::holding(a));
+        FlowGraphBuilder::append(out, FlowGraphBuilder::holding(a));
       }
       return out;
     }
     case Builtin::ResultUnwrapOr: {
       Refs out = parts;
       for (const Refs &a : args) {
-        Flows::append(out, a);
+        FlowGraphBuilder::append(out, a);
       }
       return out;
     }
@@ -136,7 +137,7 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
       return receiver;
     case Builtin::ArrSplice:
       insert(2);
-      return Flows::copied(receiver);
+      return FlowGraphBuilder::copied(receiver);
     case Builtin::ArrReverse:
     case Builtin::ArrSort:
     case Builtin::ArrSortWith:
@@ -159,27 +160,28 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
     case Builtin::SetEntries:
     case Builtin::ArrValues:
     case Builtin::ArrEntries:
-      return Flows::copied(receiver);
+      return FlowGraphBuilder::copied(receiver);
     case Builtin::ArrConcat: {
-      Refs out = Flows::copied(receiver);
+      Refs out = FlowGraphBuilder::copied(receiver);
       for (size_t i = 0; i < args.size(); ++i) {
         bool array = c->args[i]->type && c->args[i]->type->nonOptional()->isArray();
-        Flows::append(out, array ? Flows::copied(args[i]) : Flows::holding(args[i]));
+        FlowGraphBuilder::append(out, array ? FlowGraphBuilder::copied(args[i])
+                                            : FlowGraphBuilder::holding(args[i]));
       }
       return out;
     }
     case Builtin::ArrMap:
     case Builtin::ArrFlatMap: {
-      Refs out = Flows::copied(receiver);
-      Flows::append(out, Flows::holding(results));
+      Refs out = FlowGraphBuilder::copied(receiver);
+      FlowGraphBuilder::append(out, FlowGraphBuilder::holding(results));
       return out;
     }
     case Builtin::ArrReduce:
     case Builtin::ArrReduceRight: {
       Refs out = parts;
-      Flows::append(out, results);
+      FlowGraphBuilder::append(out, results);
       for (const Refs &a : args) {
-        Flows::append(out, a);
+        FlowGraphBuilder::append(out, a);
       }
       return out;
     }
@@ -189,25 +191,25 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
     case Builtin::RecordNullishSet:
       if (held >= 0) {
         for (const Refs &a : args) {
-          this->flows.addFlow(a, held);
+          this->builder.addFlow(a, held);
         }
       } else {
         for (const Refs &a : args) {
-          this->flows.escape(a);
+          this->builder.escape(a);
         }
       }
       return receiver;
     default: {
       Refs out = receiver;
-      Flows::append(out, parts);
+      FlowGraphBuilder::append(out, parts);
       for (const Refs &a : args) {
-        Flows::append(out, a);
-        Flows::append(out, Flows::shifted(a, 1));
+        FlowGraphBuilder::append(out, a);
+        FlowGraphBuilder::append(out, FlowGraphBuilder::shifted(a, 1));
       }
-      Flows::append(out, results);
+      FlowGraphBuilder::append(out, results);
       for (size_t i = 0; i < args.size(); ++i) {
-        if (Flows::holdsReferences(c->args[i]->type)) {
-          this->flows.escape(args[i]);
+        if (FlowGraphBuilder::holdsReferences(c->args[i]->type)) {
+          this->builder.escape(args[i]);
         }
       }
       return out;

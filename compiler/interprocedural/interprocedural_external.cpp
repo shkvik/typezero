@@ -9,15 +9,53 @@
 
 namespace tz {
 
-InterproceduralExternalFacade::InterproceduralExternalFacade(Program &checked)
+InterproceduralExternalFacade::InterproceduralExternalFacade(Program &checked, bool checksOverflow)
     : program(checked),
-      library(LibraryRanges::collect(checked.file, checked.sourceMgr)) {}
+      library(LibraryRanges::collect(checked.file, checked.sourceMgr)),
+      overflow(checksOverflow) {}
+
+InterproceduralExternalFacade::ResultProgramChecked InterproceduralExternalFacade::run() {
+  ItemList<Diagnostic> found;
+
+  auto earlyReads = this->checkReadsBeforeInit();
+  if (earlyReads.isErr()) {
+    found.append(earlyReads.error());
+  }
+
+  this->markUnreachableFunctions();
+
+  auto storages = this->checkAsyncLocalStorages();
+  if (storages.isErr()) {
+    found.append(storages.error());
+  }
+
+  auto poolObjects = this->checkPoolObjects();
+  if (poolObjects.isErr()) {
+    found.append(poolObjects.error());
+  }
+
+  auto wideWrites = this->checkWideWrites();
+  if (wideWrites.isErr()) {
+    found.append(wideWrites.error());
+  }
+
+  if (this->overflow) {
+    auto overflows = this->checkOverflows();
+    if (overflows.isErr()) {
+      found.append(overflows.error());
+    }
+  }
+  if (!found.empty()) {
+    return err(found);
+  }
+
+  return ok();
+}
 
 Diagnostics::ResultTaken InterproceduralExternalFacade::checkReadsBeforeInit() {
-  LoadOrder order(this->program.diags);
-  order.checkLoadOrder(this->program.file);
+  LoadOrder order(this->program.sourceMgr);
 
-  return this->program.diags.take();
+  return order.checkLoadOrder(this->program.file);
 }
 
 void InterproceduralExternalFacade::markUnreachableFunctions() {
@@ -26,29 +64,26 @@ void InterproceduralExternalFacade::markUnreachableFunctions() {
 
 Diagnostics::ResultTaken InterproceduralExternalFacade::checkAsyncLocalStorages() {
   AsyncLocalStorageChecker storages(this->program, this->library);
-  storages.run();
 
-  return this->program.diags.take();
+  return storages.run();
 }
 
 Diagnostics::ResultTaken InterproceduralExternalFacade::checkPoolObjects() {
   PoolChecker pools(this->program, this->library);
-  pools.run();
 
-  return this->program.diags.take();
+  return pools.run();
 }
 
 Diagnostics::ResultTaken InterproceduralExternalFacade::checkWideWrites() {
   WideWrites writes(this->program, this->library);
-  writes.checkWidenings();
 
-  return this->program.diags.take();
+  return writes.checkWidenings();
 }
 
 Diagnostics::ResultTaken InterproceduralExternalFacade::checkOverflows() {
-  checkIntOverflow(this->program.file, this->program.diags);
+  OverflowCheck overflows(this->program, this->library);
 
-  return this->program.diags.take();
+  return overflows.run();
 }
 
 }

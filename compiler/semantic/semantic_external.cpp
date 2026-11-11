@@ -17,34 +17,34 @@ SemanticExternalFacade::SemanticExternalFacade(Program &program)
 SemanticExternalFacade::~SemanticExternalFacade() = default;
 
 SemanticExternalFacade::ResultProgramChecked SemanticExternalFacade::run() {
-  ItemList<Diagnostic> errors;
+  ItemList<Diagnostic> found;
 
   auto declarations = this->collectDeclarations();
   if (declarations.isErr()) {
-    errors.append(declarations.error());
+    found.append(declarations.error());
   }
 
   auto recursion = this->findRecursion();
   if (recursion.isErr()) {
-    errors.append(recursion.error());
+    found.append(recursion.error());
   }
 
   auto moduleCode = this->checkModuleCode();
   if (moduleCode.isErr()) {
-    errors.append(moduleCode.error());
+    found.append(moduleCode.error());
   }
 
   auto genericCopies = this->checkGenericCopies();
   if (genericCopies.isErr()) {
-    errors.append(genericCopies.error());
+    found.append(genericCopies.error());
   }
 
   auto finished = this->finishProgram();
   if (finished.isErr()) {
-    errors.append(finished.error());
+    found.append(finished.error());
   }
-  if (!errors.empty()) {
-    return err(errors);
+  if (!found.empty()) {
+    return err(found);
   }
 
   return ok();
@@ -108,7 +108,7 @@ Diagnostics::ResultTaken SemanticExternalFacade::finishProgram() {
   this->parts->classLinks.numberClasses();
   this->parts->lateClasses.rememberEmittedLateClasses();
   this->file.inventory = this->state->getInventoryStore().takeInventory();
-  this->file.inventory.widenings = this->state->takeWideningStore();
+  this->file.inventory.wideningStore = this->state->takeWideningStore();
 
   std::vector<ClassDecl *> &late = this->file.inventory.lateClasses;
   this->file.items.insert(this->file.items.end(), late.begin(), late.end());

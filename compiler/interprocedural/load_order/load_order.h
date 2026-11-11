@@ -11,9 +11,9 @@ namespace tz {
 
 class LoadOrder {
 public:
-  explicit LoadOrder(Diagnostics &target);
+  explicit LoadOrder(llvm::SourceMgr &sourceMgr);
 
-  void checkLoadOrder(SourceFile &program);
+  Diagnostics::ResultTaken checkLoadOrder(SourceFile &program);
 
 private:
   struct Use {
@@ -64,7 +64,7 @@ private:
   void topLevelUses(SourceFile &program, LoadState &loadState);
   void visitTopLevel(const Expr *e, Module *module, int time, LoadState &loadState);
 
-  Diagnostics &diagnostics;
+  Diagnostics diagnostics;
 };
 
 }

@@ -40,9 +40,10 @@ int BuildCommand::run(const Args &args, llvm::StringRef output) const {
   ResultCheckedProgram checked = checkProgram(program, options);
   if (checked.isErr()) {
     printer.print(checked.error());
+  }
+  if (checked.isErr() && Diagnostics::hasErrors(checked.error())) {
     return kExitError;
   }
-  printer.print(checked.value().warnings);
 
   llvm::StringRef dir = llvm::sys::path::parent_path(output);
   if (!dir.empty()) {
@@ -73,9 +74,10 @@ int BuildCommand::explain(const Args &args) const {
   ResultCheckedProgram checked = checkProgram(program, options);
   if (checked.isErr()) {
     printer.print(checked.error());
+  }
+  if (checked.isErr() && Diagnostics::hasErrors(checked.error())) {
     return kExitError;
   }
-  printer.print(checked.value().warnings);
   explainParallel(program.file, program.sourceMgr, program.ast, llvm::outs());
 
   return 0;

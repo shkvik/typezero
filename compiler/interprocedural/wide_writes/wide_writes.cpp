@@ -1,5 +1,5 @@
 #include "compiler/interprocedural/wide_writes/wide_writes.h"
-#include "compiler/interprocedural/flows/flows.h"
+#include "compiler/interprocedural/flow_graph_builder/flow_graph_builder.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SourceMgr.h"
@@ -9,8 +9,7 @@ namespace tz {
 
 WideWrites::WideWrites(Program &checked, const LibraryRanges &library)
     : program(checked),
-      library(library),
-      diagnostics(checked.diags) {}
+      library(library) {}
 
 bool WideWrites::breaks(const Write &write, const NarrowedPart &narrowing, int depth) {
   bool otherDepth = depth >= 0 && narrowing.depth != depth;
@@ -55,7 +54,7 @@ bool WideWrites::mayHold(const Type *type, const Type *value, int depth) {
   if (depth == 0) {
     return SemanticTypes::isImplicitlyConvertible(value, type);
   }
-  if (!Flows::holdsReferences(type)) {
+  if (!FlowGraphBuilder::holdsReferences(type)) {
     return false;
   }
   if (type->isArray()) {
@@ -93,7 +92,7 @@ bool WideWrites::mayBePart(const Type *type, const Type *whole, int depth) {
   if (open) {
     return true;
   }
-  if (!Flows::holdsReferences(whole)) {
+  if (!FlowGraphBuilder::holdsReferences(whole)) {
     return false;
   }
   if (whole->isArray()) {
@@ -168,7 +167,7 @@ WideWrites::WriteBreak WideWrites::breakingAt(const FlowGraph &graph, const Writ
     if (node == conv.initializes && depth == 0) {
       continue;
     }
-    WriteBreak found = WideWrites::breakingNarrowing(write, conv, depth);
+    auto found = WideWrites::breakingNarrowing(write, conv, depth);
     if (found.write) {
       return found;
     }
@@ -183,7 +182,7 @@ WideWrites::WriteBreak WideWrites::breakingAnywhere(const FlowGraph &graph,
     if (this->library.contains(write.loc)) {
       continue;
     }
-    WriteBreak found = WideWrites::breakingNarrowing(write, conv, -1);
+    auto found = WideWrites::breakingNarrowing(write, conv, -1);
     if (found.write) {
       return found;
     }
@@ -227,7 +226,7 @@ WideWrites::WriteBreak WideWrites::breakingWrite(const FlowGraph &graph, const W
 }
 
 std::string WideWrites::writeLine(llvm::SMLoc write, llvm::SMLoc at) const {
-  llvm::SourceMgr &sources = this->diagnostics.sourceMgr();
+  llvm::SourceMgr &sources = this->program.sourceMgr;
   unsigned id = sources.FindBufferContainingLoc(write);
   if (!id) {
     return ErrorTextWidening::someLine();
@@ -287,40 +286,59 @@ WideWrites::ResultWideningSafe WideWrites::widening(const Conversion &conv,
   return ok(&conv);
 }
 
-void WideWrites::checkWidenings() {
-  const WideningStore &widenings = this->program.file.inventory.widenings;
-  if (!widenings.hasWideningCasts() && !widenings.hasNarrowedFields()) {
-    return;
+WideWrites::ResultWideningsChecked WideWrites::checkWidenings() {
+  const auto &wideningStore = this->program.file.inventory.wideningStore;
+  if (!wideningStore.hasWideningCasts() && !wideningStore.hasNarrowedFields()) {
+    return ok();
   }
+
   auto narrowings = [](const Type *from, const Type *to) {
     return SemanticTypes::narrowingsOf(from, to);
   };
   auto convertible = [](const Type *from, const Type *to) {
     return SemanticTypes::isImplicitlyConvertible(from, to);
   };
-  Flows flows(widenings, narrowings, convertible);
-  flows.walkProgram(this->program.file);
-  const FlowGraph &graph = flows.getFlowGraph();
 
-  WritesAt writesAt = WideWrites::writesByNode(graph);
-  std::set<const char *> reported;
+  auto builder = FlowGraphBuilder(wideningStore, narrowings, convertible);
+  auto graph = builder.buildGraph(this->program.file);
+
+  auto reportedConversions = std::set<const char *>();
+  auto nodeWrites = WideWrites::writesByNode(graph);
+  auto diagnostics = std::vector<Diagnostic>();
+
   for (const Conversion &conv : graph.conversions) {
     if (conv.narrowings.empty()) {
       continue;
     }
-    bool firstReport = reported.insert(conv.loc.getPointer()).second;
+    bool firstReport = reportedConversions.insert(conv.loc.getPointer()).second;
     if (!firstReport) {
       continue;
     }
-    WriteBreak breaking = this->breakingWrite(graph, writesAt, conv);
-    ResultWideningSafe safe = this->widening(conv, breaking);
+
+    auto breaking = this->breakingWrite(graph, nodeWrites, conv);
+    auto safe = this->widening(conv, breaking);
+
     if (safe.isErr()) {
-      const Type *through = breaking.write->through ? breaking.write->through : conv.to;
-      std::string note = ErrorTextWidening::through(through);
-      this->diagnostics.error(conv.loc, safe.error().message);
-      this->diagnostics.note(breaking.write->loc, note);
+      const auto *through = breaking.write->through ? breaking.write->through : conv.to;
+      auto note = ErrorTextWidening::through(through);
+
+      diagnostics.push_back({
+          .kind = llvm::SourceMgr::DK_Error,
+          .loc = conv.loc,
+          .message = safe.error().message,
+      });
+      diagnostics.push_back({
+          .kind = llvm::SourceMgr::DK_Note,
+          .loc = breaking.write->loc,
+          .message = note,
+      });
     }
   }
+  if (!diagnostics.empty()) {
+    return err(diagnostics);
+  }
+
+  return ok();
 }
 
 }

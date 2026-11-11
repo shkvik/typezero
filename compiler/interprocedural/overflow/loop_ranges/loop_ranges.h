@@ -46,6 +46,7 @@ private:
   void solveLoop(const OverflowCheck::LoopSpec &spec, State &st);
   void noteLoop(const OverflowCheck::LoopSpec &spec, const Num &passes);
   void reportRecursions();
+  void reportHint(llvm::SMLoc loc, const std::string &message);
   std::vector<uint64_t> contextOf() const;
   bool freshBases(const State &state, uint64_t before) const;
 

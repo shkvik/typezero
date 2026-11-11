@@ -15,6 +15,7 @@ namespace tz {
 HeldValueChecker::HeldValueChecker(Program &checked, const LibraryRanges &library)
     : program(checked),
       library(library),
+      diagnostics(checked.sourceMgr),
       current(nullptr),
       reporting(false) {}
 
@@ -122,9 +123,9 @@ bool HeldValueChecker::inLibrary(llvm::SMLoc loc) const {
   return this->library.contains(loc);
 }
 
-void HeldValueChecker::run() {
+Diagnostics::ResultTaken HeldValueChecker::run() {
   if (!this->used()) {
-    return;
+    return ok();
   }
   auto known = [&] {
     return this->heldVars.size() + this->heldParams.size() + this->returnsHeld.size() +
@@ -140,6 +141,8 @@ void HeldValueChecker::run() {
   this->reporting = true;
   this->walkProgram();
   this->finish();
+
+  return this->diagnostics.take();
 }
 
 void HeldValueChecker::walkProgram() {

@@ -33,7 +33,7 @@ struct ProgramInventory {
   std::vector<const Type *> listenerReceivers;
   llvm::DenseMap<const Expr *, NamedUse> namedUses;
   std::vector<std::pair<const Type *, const Type *>> views;
-  WideningStore widenings;
+  WideningStore wideningStore;
 };
 
 }

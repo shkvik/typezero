@@ -22,50 +22,16 @@ ResultCheckedProgram checkProgram(Program &program, const BuildOptions &options)
     diagnostics.append(semanticChecked.error());
   }
 
-  InterproceduralExternalFacade interprocedural(program);
-
-  auto earlyReads = interprocedural.checkReadsBeforeInit();
-  if (earlyReads.isErr()) {
-    diagnostics.append(earlyReads.error());
+  InterproceduralExternalFacade interprocedural(program, options.overflow);
+  auto interproceduralChecked = interprocedural.run();
+  if (interproceduralChecked.isErr()) {
+    diagnostics.append(interproceduralChecked.error());
   }
-
-  interprocedural.markUnreachableFunctions();
-
-  auto storages = interprocedural.checkAsyncLocalStorages();
-  if (storages.isErr()) {
-    diagnostics.append(storages.error());
-  }
-
-  auto poolObjects = interprocedural.checkPoolObjects();
-  if (poolObjects.isErr()) {
-    diagnostics.append(poolObjects.error());
-  }
-
-  if (diagnostics.empty()) {
-    auto wideWrites = interprocedural.checkWideWrites();
-    if (wideWrites.isErr()) {
-      diagnostics.append(wideWrites.error());
-    }
-  }
-
-  ItemList<Diagnostic> warnings;
-  if (options.overflow) {
-    auto overflows = interprocedural.checkOverflows();
-    if (overflows.isErr()) {
-      diagnostics.append(overflows.error());
-    } else {
-      warnings.append(overflows.value());
-    }
-  }
-
   if (!diagnostics.empty()) {
-    diagnostics.append(warnings);
     return err(diagnostics);
   }
 
-  return ok(CheckedProgram{
-      .warnings = std::move(warnings),
-  });
+  return ok();
 }
 
 }

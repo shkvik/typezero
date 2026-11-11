@@ -472,8 +472,8 @@ interprocedural/         межпроцедурные проверки посл�
   flow_builtins/         FlowBuiltins: потоки значений через встроенные вызовы
   flow_calls/            FlowCalls: потоки значений через вызовы
   flow_exprs/            FlowExprs: потоки значений в выражениях
+  flow_graph_builder/    FlowGraphBuilder: строит граф, куда идут значения (для записи через широкий тип); его части — flow_*/
   flow_stmts/            FlowStmts: потоки значений в инструкциях
-  flows/                 Flows: граф, куда идут значения (для записи через широкий тип)
   held_value_checker/    HeldValueChecker: значения, которые живут только внутри вызова (хранилище run, объект Pool.use)
   load_order/            LoadOrder: чтение до загрузки модуля
   overflow/              переполнение целых по всей программе: части OverflowPass

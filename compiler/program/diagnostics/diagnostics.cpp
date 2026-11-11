@@ -58,12 +58,21 @@ void Diagnostics::tool(const llvm::Twine &message) {
 Diagnostics::ResultTaken Diagnostics::take() {
   std::vector<Diagnostic> taken = std::move(this->found);
   this->found.clear();
-  auto isError = [](const Diagnostic &d) { return d.kind == llvm::SourceMgr::DK_Error; };
-  if (llvm::any_of(taken, isError)) {
+  if (!taken.empty()) {
     return err(taken);
   }
 
-  return ok(taken);
+  return ok();
+}
+
+bool Diagnostics::hasErrors(const std::vector<Diagnostic> &found) {
+  for (const Diagnostic &diagnostic : found) {
+    if (diagnostic.kind == llvm::SourceMgr::DK_Error) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 }

@@ -292,7 +292,7 @@ if (fieldsSet.isErr()) {
   кодом, а текст берёт у внутренней: `.message = found.error().message`.
 - **`Result` и на вопросы да/нет**, если так решили для класса: `isInitThis(...).isOk()`.
 - **Структура для `ok`** собирается прямо в вызове так же, как для `err`, с запятой после
-  последнего поля: `return ok(CheckedProgram{ .warnings = std::move(warnings), });` (11 ноября).
+  последнего поля: `return ok(BuiltProgram{ .warnings = std::move(warnings), });` (11 ноября).
 - **Внутренняя ошибка компилятора** — тоже код, текст начинается с `internal error:`.
 
 ### Псевдонимы и порядок объявлений

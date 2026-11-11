@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/interprocedural/wide_writes/wide_writes_errors.h"
+#include "compiler/program/diagnostic/diagnostic.h"
 #include "compiler/program/library_ranges/library_ranges.h"
 #include "compiler/program/program/program.h"
 #include "compiler/result/result/result.h"
@@ -17,9 +18,11 @@ struct FlowGraph;
 
 class WideWrites {
 public:
+  using ResultWideningsChecked = Result<void, std::vector<Diagnostic>>;
+
   WideWrites(Program &checked, const LibraryRanges &library);
 
-  void checkWidenings();
+  ResultWideningsChecked checkWidenings();
 
 private:
   struct WriteAt {
@@ -55,7 +58,6 @@ private:
 
   Program &program;
   const LibraryRanges &library;
-  Diagnostics &diagnostics;
 };
 
 }

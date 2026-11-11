@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/program/ast/ast.h"
+#include "compiler/program/diagnostics/diagnostics.h"
 #include "compiler/program/library_ranges/library_ranges.h"
 #include "compiler/program/program/program.h"
 #include "llvm/ADT/DenseMap.h"
@@ -17,7 +18,7 @@ public:
   HeldValueChecker(Program &checked, const LibraryRanges &library);
   virtual ~HeldValueChecker() = default;
 
-  void run();
+  Diagnostics::ResultTaken run();
 
 protected:
   static const Expr *bare(const Expr *e);
@@ -51,6 +52,7 @@ protected:
 
   Program &program;
   const LibraryRanges &library;
+  Diagnostics diagnostics;
   const FunctionDecl *current;
   llvm::DenseSet<const Expr *> awaited;
   llvm::DenseSet<const Expr *> allowedNews;

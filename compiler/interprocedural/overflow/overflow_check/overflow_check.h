@@ -3,6 +3,7 @@
 #include "compiler/interprocedural/overflow/value_range/value_range.h"
 #include "compiler/program/ast/ast.h"
 #include "compiler/program/diagnostics/diagnostics.h"
+#include "compiler/program/library_ranges/library_ranges.h"
 #include "llvm/ADT/MapVector.h"
 #include <memory>
 #include <set>
@@ -12,7 +13,7 @@
 
 namespace tz {
 
-void checkIntOverflow(SourceFile &program, Diagnostics &diags);
+struct Program;
 
 class ProgramScan;
 class Slots;
@@ -27,8 +28,8 @@ class OverflowWarnings;
 
 class OverflowCheck {
 public:
-  OverflowCheck(SourceFile &program, Diagnostics &diags);
-  void run();
+  OverflowCheck(Program &checked, const LibraryRanges &library);
+  Diagnostics::ResultTaken run();
 
 private:
   struct VarInfo {
@@ -41,7 +42,8 @@ private:
     bool isConst = false;
   };
   SourceFile &program_;
-  Diagnostics &diags;
+  const LibraryRanges &library;
+  Diagnostics diags;
   bool declaring = true;
   const FunctionDecl *scanOwner = nullptr;
   std::vector<const FunctionDecl *> functions_;

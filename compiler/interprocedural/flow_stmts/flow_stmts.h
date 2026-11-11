@@ -1,12 +1,12 @@
 #pragma once
 
-#include "compiler/interprocedural/flows/flows.h"
+#include "compiler/interprocedural/flow_graph_builder/flow_graph_builder.h"
 
 namespace tz {
 
 class FlowStmts {
 public:
-  explicit FlowStmts(Flows &owner);
+  explicit FlowStmts(FlowGraphBuilder &owner);
 
   void function(FunctionDecl *fn);
   void classDecl(ClassDecl *cls);
@@ -17,7 +17,7 @@ public:
   void assignTo(Expr *target, const Refs &value, const Expr *valueExpr, bool compound);
 
 private:
-  Flows &flows;
+  FlowGraphBuilder &builder;
 };
 
 }

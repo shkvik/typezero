@@ -1,4 +1,4 @@
-#include "compiler/interprocedural/flows/flows.h"
+#include "compiler/interprocedural/flow_graph_builder/flow_graph_builder.h"
 #include "compiler/interprocedural/flow_builtins/flow_builtins.h"
 #include "compiler/interprocedural/flow_calls/flow_calls.h"
 #include "compiler/interprocedural/flow_exprs/flow_exprs.h"
@@ -11,6 +11,7 @@
 #include <map>
 #include <set>
 #include <tuple>
+#include <utility>
 
 namespace tz {
 
@@ -22,8 +23,8 @@ using llvm::isa;
 
 using llvm::dyn_cast_or_null;
 
-Flows::Flows(const WideningStore &wideningStore, NarrowingsOf narrowingsOf,
-             ConvertibleTo convertibleTo)
+FlowGraphBuilder::FlowGraphBuilder(const WideningStore &wideningStore, NarrowingsOf narrowingsOf,
+                                   ConvertibleTo convertibleTo)
     : narrowings(narrowingsOf),
       convertible(convertibleTo),
       widenings(wideningStore) {
@@ -34,9 +35,9 @@ Flows::Flows(const WideningStore &wideningStore, NarrowingsOf narrowingsOf,
   this->graph.unknownNode = this->findNode(NodeKind::Unknown, nullptr, "");
 }
 
-Flows::~Flows() = default;
+FlowGraphBuilder::~FlowGraphBuilder() = default;
 
-void Flows::walkProgram(SourceFile &file) {
+FlowGraph FlowGraphBuilder::buildGraph(SourceFile &file) {
   for (Stmt *item : file.items) {
     this->getFlowStmts().stmt(item);
   }
@@ -59,33 +60,31 @@ void Flows::walkProgram(SourceFile &file) {
       this->graph.edges[size_t(returned)].push_back({call.result, 0, 0});
     }
   }
+
+  return std::move(this->graph);
 }
 
-const FlowGraph &Flows::getFlowGraph() const {
-  return this->graph;
-}
-
-FlowStmts &Flows::getFlowStmts() const {
+FlowStmts &FlowGraphBuilder::getFlowStmts() const {
   return *this->flowStmts;
 }
 
-FlowCalls &Flows::getFlowCalls() const {
+FlowCalls &FlowGraphBuilder::getFlowCalls() const {
   return *this->flowCalls;
 }
 
-FlowExprs &Flows::getFlowExprs() const {
+FlowExprs &FlowGraphBuilder::getFlowExprs() const {
   return *this->flowExprs;
 }
 
-FlowBuiltins &Flows::getFlowBuiltins() const {
+FlowBuiltins &FlowGraphBuilder::getFlowBuiltins() const {
   return *this->flowBuiltins;
 }
 
-int Flows::getUnknownNode() const {
+int FlowGraphBuilder::getUnknownNode() const {
   return this->graph.unknownNode;
 }
 
-int Flows::findNode(NodeKind kind, const void *key, llvm::StringRef name) {
+int FlowGraphBuilder::findNode(NodeKind kind, const void *key, llvm::StringRef name) {
   std::tuple<int, const void *, std::string> id = std::make_tuple(int(kind), key, name.str());
   auto [it, added] = this->ids.try_emplace(id, int(this->graph.edges.size()));
   if (added) {
@@ -95,17 +94,17 @@ int Flows::findNode(NodeKind kind, const void *key, llvm::StringRef name) {
   return it->second;
 }
 
-int Flows::varNode(const VarSymbol *var) {
+int FlowGraphBuilder::varNode(const VarSymbol *var) {
   int id = this->findNode(NodeKind::Var, var, "");
 
   return this->markHolder(id, var->type);
 }
 
-int Flows::fieldNode(llvm::StringRef name) {
+int FlowGraphBuilder::fieldNode(llvm::StringRef name) {
   return this->findNode(NodeKind::Field, nullptr, name);
 }
 
-int Flows::contentsNode(const Type *type) {
+int FlowGraphBuilder::contentsNode(const Type *type) {
   if (!type) {
     return -1;
   }
@@ -122,18 +121,18 @@ int Flows::contentsNode(const Type *type) {
   return -1;
 }
 
-int Flows::returnNode(const FunctionDecl *fn) {
+int FlowGraphBuilder::returnNode(const FunctionDecl *fn) {
   int id = this->findNode(NodeKind::Return, fn, "");
 
   return this->markHolder(id, fn->sym ? fn->sym->getKnownReturnType() : nullptr);
 }
 
-int Flows::markHolder(int id, const Type *type) {
+int FlowGraphBuilder::markHolder(int id, const Type *type) {
   if (size_t(id) >= this->plainNodes.size()) {
     this->plainNodes.resize(this->graph.edges.size());
     this->graph.types.resize(this->graph.edges.size());
   }
-  if (!Flows::holdsReferences(type)) {
+  if (!FlowGraphBuilder::holdsReferences(type)) {
     this->plainNodes[size_t(id)] = true;
   }
   this->graph.types[size_t(id)] = type;
@@ -141,7 +140,7 @@ int Flows::markHolder(int id, const Type *type) {
   return id;
 }
 
-void Flows::addFlow(const Refs &refs, int to) {
+void FlowGraphBuilder::addFlow(const Refs &refs, int to) {
   if (size_t(to) < this->plainNodes.size() && this->plainNodes[size_t(to)]) {
     return;
   }
@@ -150,55 +149,55 @@ void Flows::addFlow(const Refs &refs, int to) {
   }
 }
 
-void Flows::escape(const Refs &refs) {
+void FlowGraphBuilder::escape(const Refs &refs) {
   this->addFlow(refs, this->graph.unknownNode);
 }
 
-void Flows::addWrite(const Write &write) {
+void FlowGraphBuilder::addWrite(const Write &write) {
   this->graph.writes.push_back(write);
 }
 
-void Flows::addConversion(const Conversion &conversion) {
+void FlowGraphBuilder::addConversion(const Conversion &conversion) {
   this->graph.conversions.push_back(conversion);
 }
 
-bool Flows::isConvertible(const Type *from, const Type *to) const {
+bool FlowGraphBuilder::isConvertible(const Type *from, const Type *to) const {
   return this->convertible(from, to);
 }
 
-bool Flows::isWideningCast(const CastExpr *cast) const {
+bool FlowGraphBuilder::isWideningCast(const CastExpr *cast) const {
   return this->widenings.isWideningCast(cast);
 }
 
-std::vector<NarrowedPart> Flows::findNarrowings(const Type *from, const Type *to) const {
+std::vector<NarrowedPart> FlowGraphBuilder::findNarrowings(const Type *from, const Type *to) const {
   return this->narrowings(from, to);
 }
 
-bool Flows::isWalked(const FunctionDecl *fn) const {
+bool FlowGraphBuilder::isWalked(const FunctionDecl *fn) const {
   return this->walked.count(fn) > 0;
 }
 
-void Flows::markWalked(const FunctionDecl *fn) {
+void FlowGraphBuilder::markWalked(const FunctionDecl *fn) {
   this->walked.insert(fn);
 }
 
-void Flows::enterFunction(const FunctionDecl *fn) {
+void FlowGraphBuilder::enterFunction(const FunctionDecl *fn) {
   this->functions.push_back(fn);
 }
 
-void Flows::leaveFunction() {
+void FlowGraphBuilder::leaveFunction() {
   this->functions.pop_back();
 }
 
-bool Flows::isInsideFunction() const {
+bool FlowGraphBuilder::isInsideFunction() const {
   return !this->functions.empty();
 }
 
-const FunctionDecl *Flows::getCurrentFunction() const {
+const FunctionDecl *FlowGraphBuilder::getCurrentFunction() const {
   return this->functions.empty() ? nullptr : this->functions.back();
 }
 
-const VarSymbol *Flows::findCurrentThis() const {
+const VarSymbol *FlowGraphBuilder::findCurrentThis() const {
   for (const FunctionDecl *fn : llvm::reverse(this->functions)) {
     if (fn->thisVar()) {
       return fn->thisVar();
@@ -208,25 +207,25 @@ const VarSymbol *Flows::findCurrentThis() const {
   return nullptr;
 }
 
-void Flows::rememberFunctionValue(const FunctionDecl *fn) {
+void FlowGraphBuilder::rememberFunctionValue(const FunctionDecl *fn) {
   if (fn && this->functionSet.insert(fn).second) {
     this->functionValues.push_back(fn);
   }
 }
 
-void Flows::rememberValueCall(const ValueCall &call) {
+void FlowGraphBuilder::rememberValueCall(const ValueCall &call) {
   this->valueCalls.push_back(call);
 }
 
-void Flows::markRuntimeFunction(const VarSymbol *var) {
+void FlowGraphBuilder::markRuntimeFunction(const VarSymbol *var) {
   this->runtimeFunctions.insert(var);
 }
 
-bool Flows::isRuntimeFunction(const VarSymbol *var) const {
+bool FlowGraphBuilder::isRuntimeFunction(const VarSymbol *var) const {
   return this->runtimeFunctions.count(var) > 0;
 }
 
-Refs Flows::shifted(const Refs &refs, int levels) {
+Refs FlowGraphBuilder::shifted(const Refs &refs, int levels) {
   Refs out;
   for (const Ref &r : refs) {
     out.push_back({r.node, r.off + levels, std::max(r.md - levels, 0)});
@@ -235,7 +234,7 @@ Refs Flows::shifted(const Refs &refs, int levels) {
   return out;
 }
 
-Refs Flows::copied(const Refs &refs) {
+Refs FlowGraphBuilder::copied(const Refs &refs) {
   Refs out;
   for (const Ref &r : refs) {
     out.push_back({r.node, r.off, std::max(r.md, 1)});
@@ -244,7 +243,7 @@ Refs Flows::copied(const Refs &refs) {
   return out;
 }
 
-Refs Flows::holding(const Refs &refs) {
+Refs FlowGraphBuilder::holding(const Refs &refs) {
   Refs out;
   for (const Ref &r : refs) {
     out.push_back({r.node, r.off - 1, r.md + 1});
@@ -253,11 +252,11 @@ Refs Flows::holding(const Refs &refs) {
   return out;
 }
 
-void Flows::append(Refs &to, const Refs &from) {
+void FlowGraphBuilder::append(Refs &to, const Refs &from) {
   to.insert(to.end(), from.begin(), from.end());
 }
 
-bool Flows::holdsReferences(const Type *type) {
+bool FlowGraphBuilder::holdsReferences(const Type *type) {
   if (!type) {
     return true;
   }
@@ -269,7 +268,7 @@ bool Flows::holdsReferences(const Type *type) {
            type->isCrypto());
 }
 
-const Type *Flows::ownType(const Expr *expr) {
+const Type *FlowGraphBuilder::ownType(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
       break;

@@ -11,6 +11,7 @@
 #include "compiler/interprocedural/overflow/program_scan/program_scan.h"
 #include "compiler/interprocedural/overflow/slots/slots.h"
 #include "compiler/interprocedural/overflow/value_range/value_range.h"
+#include "compiler/program/program/program.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -40,9 +41,10 @@ using llvm::dyn_cast_or_null;
 
 using llvm::isa;
 
-OverflowCheck::OverflowCheck(SourceFile &program, Diagnostics &diags)
-    : program_(program),
-      diags(diags) {
+OverflowCheck::OverflowCheck(Program &checked, const LibraryRanges &library)
+    : program_(checked.file),
+      library(library),
+      diags(checked.sourceMgr) {
   this->programScanPart = std::make_unique<ProgramScan>(*this);
   this->slotsPart = std::make_unique<Slots>(*this);
   this->callRangesPart = std::make_unique<CallRanges>(*this);
@@ -55,7 +57,7 @@ OverflowCheck::OverflowCheck(SourceFile &program, Diagnostics &diags)
   this->overflowWarningsPart = std::make_unique<OverflowWarnings>(*this);
 }
 
-void OverflowCheck::run() {
+Diagnostics::ResultTaken OverflowCheck::run() {
   programScan().scanProgram();
   callRanges().analyzeAll();
   for (auto &entry : this->next.params) {
@@ -118,10 +120,12 @@ void OverflowCheck::run() {
   loopRanges().reportLong();
   std::set<const char *> shown;
   for (const Warning &w : this->warnings) {
-    if (shown.insert(w.loc.getPointer()).second && !this->diags.isQuiet(w.loc)) {
+    if (shown.insert(w.loc.getPointer()).second && !this->library.contains(w.loc)) {
       this->diags.error(w.loc, w.message);
     }
   }
+
+  return this->diags.take();
 }
 
 void OverflowCheck::joinInto(Summaries &into, const Summaries &from) {
@@ -171,10 +175,6 @@ void OverflowCheck::joinInto(Summaries &into, const Summaries &from) {
   for (const auto &[key, calls] : from.dangerousCalls) {
     llvm::append_range(into.dangerousCalls[key], calls);
   }
-}
-
-void checkIntOverflow(SourceFile &program, Diagnostics &diags) {
-  OverflowCheck(program, diags).run();
 }
 
 OverflowCheck::~OverflowCheck() = default;

@@ -50,7 +50,7 @@ void AsyncLocalStorageChecker::startWalk() {
 
 void AsyncLocalStorageChecker::kept(const Expr *value, bool, llvm::StringRef where) {
   std::string message = ErrorTextAsyncStore::kept(where);
-  this->program.diags.error(value->loc(), message);
+  this->diagnostics.error(value->loc(), message);
 }
 
 void AsyncLocalStorageChecker::finish() {
@@ -65,7 +65,7 @@ void AsyncLocalStorageChecker::checkNews() {
       continue;
     }
     std::string message = ErrorTextAsyncStore::made();
-    this->program.diags.error(n->loc(), message);
+    this->diagnostics.error(n->loc(), message);
   }
 }
 
@@ -79,7 +79,7 @@ void AsyncLocalStorageChecker::checkRuns() {
       continue;
     }
     std::string message = ErrorTextAsyncStore::runStore();
-    this->program.diags.error(store->loc(), message);
+    this->diagnostics.error(store->loc(), message);
   }
 }
 
@@ -119,7 +119,7 @@ void AsyncLocalStorageChecker::checkIntervals() {
     std::string how = ErrorTextAsyncStore::readsIt(through);
     std::string message = c->builtin() == Builtin::SetInterval ? ErrorTextAsyncStore::interval(how)
                                                                : ErrorTextAsyncStore::restart(how);
-    this->program.diags.error(c->args[0]->loc(), message);
+    this->diagnostics.error(c->args[0]->loc(), message);
   }
 }
 

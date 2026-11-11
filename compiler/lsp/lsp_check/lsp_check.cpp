@@ -38,7 +38,7 @@ LspCheck::ResultResponseFile LspCheck::run(llvm::StringRef requestPath,
     std::optional<int64_t> level = object.getInteger("level");
     options.overflow = level.value_or(2) != 1;
     ResultCheckedProgram checked = checkProgram(program, options);
-    found = checked.isOk() ? checked.value().warnings : checked.error();
+    found = checked.isErr() ? checked.error() : std::vector<Diagnostic>();
   } else {
     std::string message = ErrorTextLspCheck::packages();
     found.push_back({.form = Diagnostic::Form::Tool, .message = message});

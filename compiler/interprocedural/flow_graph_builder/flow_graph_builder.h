@@ -72,16 +72,16 @@ class FlowCalls;
 class FlowBuiltins;
 class FlowExprs;
 
-class Flows {
+class FlowGraphBuilder {
 public:
   using NarrowingsOf = llvm::function_ref<std::vector<NarrowedPart>(const Type *, const Type *)>;
   using ConvertibleTo = llvm::function_ref<bool(const Type *, const Type *)>;
 
-  Flows(const WideningStore &wideningStore, NarrowingsOf narrowingsOf, ConvertibleTo convertibleTo);
-  ~Flows();
+  FlowGraphBuilder(const WideningStore &wideningStore, NarrowingsOf narrowingsOf,
+                   ConvertibleTo convertibleTo);
+  ~FlowGraphBuilder();
 
-  void walkProgram(SourceFile &file);
-  const FlowGraph &getFlowGraph() const;
+  FlowGraph buildGraph(SourceFile &file);
 
   FlowStmts &getFlowStmts() const;
   FlowCalls &getFlowCalls() const;

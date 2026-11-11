@@ -12,7 +12,7 @@ namespace tz {
 
 class Diagnostics {
 public:
-  using ResultTaken = Result<std::vector<Diagnostic>, std::vector<Diagnostic>>;
+  using ResultTaken = Result<void, std::vector<Diagnostic>>;
 
   explicit Diagnostics(llvm::SourceMgr &sourceMgr) : sourceMgr_(sourceMgr) {}
 
@@ -43,6 +43,7 @@ public:
   std::vector<Captured> *capture() const { return capture_; }
 
   ResultTaken take();
+  static bool hasErrors(const std::vector<Diagnostic> &found);
   void quietRange(const char *begin, const char *end) {
     this->quiet.push_back({begin, end});
   }
