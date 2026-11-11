@@ -209,7 +209,8 @@ library/             по теме на папку; stream/stream.tz (класс
   и, если флаг включён, `OverflowCheck` — и складывает их результаты. Отдаёт
   `Result<void, ItemList<Diagnostic>>`: `err` — всё найденное (ошибки и за ними подсказки
   переполнений), `ok()` — ничего не найдено. Каждый проверяльщик сам отдаёт `Result` только с тем,
-  что нашёл: `WideWrites` собирает список в своём цикле, остальные держат свой `Diagnostics`;
+  что нашёл: функции отдают найденное обычным списком, своего `Diagnostics` ни у кого нет
+  (`HeldValueChecker` обходит программу стеком шагов, найденное отдают шаги и хуки наследников);
   общий `program.diags` они не трогают, код библиотеки отсеивают по `LibraryRanges`.
 - **Вопросы о типах снаружи** — `SemanticTypes` (`semantic/semantic_types.h`: `awaitedType`,
   `copiesIntoRecord`, `isImplicitlyConvertible`, `narrowingsOf`) для `lower/` и `interprocedural/`.

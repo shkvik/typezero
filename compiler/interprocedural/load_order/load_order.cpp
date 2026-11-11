@@ -9,9 +9,6 @@ using llvm::isa;
 
 namespace tz {
 
-LoadOrder::LoadOrder(llvm::SourceMgr &sourceMgr)
-    : diagnostics(sourceMgr) {}
-
 const FunctionDecl *LoadOrder::directFunction(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     expr = conv->operand;
@@ -135,16 +132,30 @@ LoadOrder::ResultReadAfterSet LoadOrder::earlyRead(const NameExpr *name, const M
   return ok(name);
 }
 
-void LoadOrder::visitTopLevel(const Expr *e, Module *module, int time, LoadState &loadState) {
-  auto *name = dyn_cast<NameExpr>(e);
-  if (name) {
-    ResultReadAfterSet read = LoadOrder::earlyRead(name, module, time, loadState);
-    if (read.isErr()) {
-      this->diagnostics.error(name->loc(), read.error().message);
+std::vector<Diagnostic> LoadOrder::visitTopLevel(const std::vector<const Expr *> &exprs,
+                                                 Module *module, int time,
+                                                 LoadState &loadState) const {
+  auto earlyReads = std::vector<Diagnostic>();
+  for (const Expr *e : exprs) {
+    const auto *name = dyn_cast<NameExpr>(e);
+    if (name == nullptr) {
+      this->rememberSite(e, module, time, loadState);
+      continue;
     }
-    return;
+    auto read = LoadOrder::earlyRead(name, module, time, loadState);
+    if (read.isErr()) {
+      earlyReads.push_back({
+          .kind = llvm::SourceMgr::DK_Error,
+          .loc = name->loc(),
+          .message = read.error().message,
+      });
+    }
   }
 
+  return earlyReads;
+}
+
+void LoadOrder::rememberSite(const Expr *e, Module *module, int time, LoadState &loadState) const {
   llvm::SmallVector<const FunctionDecl *, 2> constructed;
   const CallExpr *ctor = LoadOrder::constructorCall(e, constructed);
   const CallExpr *call = ctor ? ctor : dyn_cast<CallExpr>(e);
@@ -164,7 +175,8 @@ void LoadOrder::visitTopLevel(const Expr *e, Module *module, int time, LoadState
   loadState.sites.push_back(std::move(site));
 }
 
-void LoadOrder::topLevelUses(SourceFile &program, LoadState &loadState) {
+std::vector<Diagnostic> LoadOrder::topLevelUses(SourceFile &program, LoadState &loadState) const {
+  auto earlyReads = std::vector<Diagnostic>();
   int time = 0;
   for (Module *module : program.modules) {
     for (Stmt *item : module->file.items) {
@@ -173,16 +185,16 @@ void LoadOrder::topLevelUses(SourceFile &program, LoadState &loadState) {
       }
       auto *decl = dyn_cast<VarDeclStmt>(item);
       if (!decl) {
-        for (const Expr *e : AstWalker::exprsIn(item, false)) {
-          this->visitTopLevel(e, module, time, loadState);
-        }
+        auto exprs = AstWalker::exprsIn(item, false);
+        auto found = this->visitTopLevel(exprs, module, time, loadState);
+        llvm::append_range(earlyReads, found);
         continue;
       }
       for (const VarDeclarator &d : decl->decls) {
         if (d.init) {
-          for (const Expr *e : AstWalker::exprsIn(d.init, false)) {
-            this->visitTopLevel(e, module, time, loadState);
-          }
+          auto exprs = AstWalker::exprsIn(d.init, false);
+          auto found = this->visitTopLevel(exprs, module, time, loadState);
+          llvm::append_range(earlyReads, found);
         }
         if (d.sym) {
           ++time;
@@ -190,6 +202,8 @@ void LoadOrder::topLevelUses(SourceFile &program, LoadState &loadState) {
       }
     }
   }
+
+  return earlyReads;
 }
 
 void LoadOrder::functionEffects(const FunctionDecl *fn, LoadState &loadState) {
@@ -273,7 +287,8 @@ LoadOrder::ResultSetBeforeRun LoadOrder::lateUse(const Site &site, const Functio
   return ok(fn);
 }
 
-void LoadOrder::reportSites(const LoadState &loadState) {
+std::vector<Diagnostic> LoadOrder::findLateUses(const LoadState &loadState) const {
+  auto lateUses = std::vector<Diagnostic>();
   for (const Site &site : loadState.sites) {
     for (const FunctionDecl *fn : site.called) {
       const Use &use = loadState.effects.find(fn)->second.latest;
@@ -283,26 +298,47 @@ void LoadOrder::reportSites(const LoadState &loadState) {
       }
       std::string usedHere = ErrorTextLateUse::usedHere(use.var->name);
       std::string declared = ErrorTextLateUse::declared(use.var->name);
-      this->diagnostics.error(site.call->loc(), used.error().message);
-      this->diagnostics.note(use.loc, usedHere);
-      this->diagnostics.note(use.var->loc, declared);
+      lateUses.push_back({
+          .kind = llvm::SourceMgr::DK_Error,
+          .loc = site.call->loc(),
+          .message = used.error().message,
+      });
+      lateUses.push_back({
+          .kind = llvm::SourceMgr::DK_Note,
+          .loc = use.loc,
+          .message = usedHere,
+      });
+      lateUses.push_back({
+          .kind = llvm::SourceMgr::DK_Note,
+          .loc = use.var->loc,
+          .message = declared,
+      });
       break;
     }
   }
+
+  return lateUses;
 }
 
-Diagnostics::ResultTaken LoadOrder::checkLoadOrder(SourceFile &program) {
+LoadOrder::ResultLoadOrderChecked LoadOrder::checkLoadOrder(SourceFile &program) const {
   LoadState loadState;
   LoadOrder::declarationOrder(program, loadState);
-  this->topLevelUses(program, loadState);
+  auto earlyReads = this->topLevelUses(program, loadState);
   for (size_t i = 0; i < loadState.queue.size(); ++i) {
     const FunctionDecl *fn = loadState.queue[i];
     LoadOrder::functionEffects(fn, loadState);
   }
   LoadOrder::spreadEffects(loadState);
-  this->reportSites(loadState);
+  auto lateUses = this->findLateUses(loadState);
 
-  return this->diagnostics.take();
+  auto found = std::vector<Diagnostic>();
+  llvm::append_range(found, earlyReads);
+  llvm::append_range(found, lateUses);
+  if (!found.empty()) {
+    return err(found);
+  }
+
+  return ok();
 }
 
 }

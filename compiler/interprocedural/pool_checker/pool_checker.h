@@ -11,26 +11,33 @@ public:
 private:
   using Site = std::pair<const CallExpr *, const FunctionDecl *>;
 
+  struct PassedCallback {
+    const Expr *callback;
+    unsigned depth;
+  };
+
   static bool poolClass(const ClassDecl *cls);
 
   bool used() const override;
-  void kept(const Expr *value, bool closure, llvm::StringRef where) override;
+  std::vector<Diagnostic> kept(const Expr *value, bool closure, llvm::StringRef where) override;
   bool produces(const CallExpr *c) const override;
   bool takesOver(const CallExpr *c) override;
   void sawNew(const NewExpr *n) override;
-  void sawVoid(const CallExpr *c) override;
-  void sawCall(const CallExpr *c) override;
-  bool heldMember(const MemberExpr *m) const override;
-  void spreadKept(const Expr *value) override;
+  std::vector<Diagnostic> sawVoid(const CallExpr *c) override;
+  std::vector<Diagnostic> sawCall(const CallExpr *c) override;
+  bool heldWithObject(const MemberExpr *m) const override;
+  std::vector<Diagnostic> spreadKept(const Expr *value) override;
   size_t extraKnown() const override;
   bool closuresCarry() const override;
-  void finish() override;
+  std::vector<Diagnostic> finish() override;
   void startWalk() override;
 
-  void checkStoreRuns();
+  std::vector<Diagnostic> findLateStoreReads();
+  std::vector<Diagnostic> findReturnedItems();
   bool storeValue(const Expr *value) const;
   const FunctionDecl *storeReader(const FunctionDecl *fn) const;
-  void runRoots(const Expr *callback, unsigned depth, std::vector<const FunctionDecl *> &roots);
+  std::vector<const FunctionDecl *> runRoots(const Expr *runCallback) const;
+  std::vector<const Expr *> argsAtCallSites(const VarSymbol *param) const;
 
   std::vector<Site> runs;
   std::vector<Site> voids;

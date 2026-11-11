@@ -10,13 +10,12 @@ namespace tz {
 UnusedFunctions::UnusedFunctions(SourceFile &checked)
     : file(checked) {}
 
-llvm::SmallPtrSet<const FunctionDecl *, 8> UnusedFunctions::findUnused() {
+llvm::SmallPtrSet<const FunctionDecl *, 8> UnusedFunctions::findUnused() const {
   auto unused = llvm::SmallPtrSet<const FunctionDecl *, 8>();
   if (this->file.modules.size() < 2) {
     return unused;
   }
-  this->reachFromRoots();
-  this->reachFromQueue();
+  auto used = this->findUsed();
 
   for (Module *module : this->file.modules) {
     if (module->isEntry) {
@@ -24,7 +23,7 @@ llvm::SmallPtrSet<const FunctionDecl *, 8> UnusedFunctions::findUnused() {
     }
     for (Stmt *item : module->file.items) {
       auto *fn = dyn_cast<FunctionDecl>(item);
-      if (fn != nullptr && !this->used.contains(fn)) {
+      if (fn != nullptr && !used.contains(fn)) {
         unused.insert(fn);
       }
     }
@@ -33,46 +32,66 @@ llvm::SmallPtrSet<const FunctionDecl *, 8> UnusedFunctions::findUnused() {
   return unused;
 }
 
-void UnusedFunctions::reachFromRoots() {
+llvm::SmallPtrSet<const FunctionDecl *, 16> UnusedFunctions::findUsed() const {
+  auto used = llvm::SmallPtrSet<const FunctionDecl *, 16>();
+  auto queue = this->rootFunctions();
+
+  while (!queue.empty()) {
+    const auto *fn = queue.back();
+    queue.pop_back();
+    auto [_, isInserted] = used.insert(fn);
+    if (!isInserted) {
+      continue;
+    }
+    auto referenced = this->referencedFunctions(fn);
+    llvm::append_range(queue, referenced);
+  }
+
+  return used;
+}
+
+std::vector<const FunctionDecl *> UnusedFunctions::rootFunctions() const {
+  auto roots = std::vector<const FunctionDecl *>();
   for (Module *module : this->file.modules) {
     for (Stmt *item : module->file.items) {
       bool isRoot = module->isEntry || !isa<FunctionDecl>(item);
       if (!isRoot) {
         continue;
       }
-      for (const Expr *e : AstWalker::exprsIn(item, true)) {
-        this->reach(e);
-      }
+      auto referenced = this->referencedFunctions(item);
+      llvm::append_range(roots, referenced);
     }
   }
+
+  return roots;
 }
 
-void UnusedFunctions::reachFromQueue() {
-  while (!this->queue.empty()) {
-    const auto *fn = this->queue.back();
-    this->queue.pop_back();
-    for (const Expr *e : AstWalker::exprsIn(fn, true)) {
-      this->reach(e);
+std::vector<const FunctionDecl *> UnusedFunctions::referencedFunctions(const Stmt *stmt) const {
+  auto referenced = std::vector<const FunctionDecl *>();
+  for (const Expr *e : AstWalker::exprsIn(stmt, true)) {
+    const auto *fn = this->referencedFunction(e);
+    if (fn != nullptr) {
+      referenced.push_back(fn);
     }
   }
+
+  return referenced;
 }
 
-void UnusedFunctions::reach(const Expr *e) {
-  const FuncSymbol *fn = nullptr;
+const FunctionDecl *UnusedFunctions::referencedFunction(const Expr *e) const {
+  const FuncSymbol *symbol = nullptr;
   const auto *call = dyn_cast<CallExpr>(e);
   const auto *name = dyn_cast<NameExpr>(e);
   if (call != nullptr) {
-    fn = call->func();
+    symbol = call->func();
   } else if (name != nullptr) {
-    fn = name->func();
+    symbol = name->func();
   }
-  if (fn == nullptr || fn->decl == nullptr) {
-    return;
+  if (symbol == nullptr) {
+    return nullptr;
   }
-  auto [_, isInserted] = this->used.insert(fn->decl);
-  if (isInserted) {
-    this->queue.push_back(fn->decl);
-  }
+
+  return symbol->decl;
 }
 
 }

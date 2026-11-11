@@ -15,7 +15,7 @@ public:
                 const State &from, const State &end);
   State rebased(const State &state, llvm::DenseMap<const VarSymbol *, uint64_t> &bases);
   void forget();
-  void reportLong();
+  std::vector<Diagnostic> findLongLoops();
   void findRecursions();
   void noteCall(const CallExpr *call, const FunctionDecl *target, llvm::ArrayRef<Val> args);
 
@@ -45,8 +45,7 @@ private:
   };
   void solveLoop(const OverflowCheck::LoopSpec &spec, State &st);
   void noteLoop(const OverflowCheck::LoopSpec &spec, const Num &passes);
-  void reportRecursions();
-  void reportHint(llvm::SMLoc loc, const std::string &message);
+  std::vector<Diagnostic> findLongRecursions();
   std::vector<uint64_t> contextOf() const;
   bool freshBases(const State &state, uint64_t before) const;
 

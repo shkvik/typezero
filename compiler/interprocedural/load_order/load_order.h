@@ -2,7 +2,7 @@
 
 #include "compiler/interprocedural/load_order/load_order_errors.h"
 #include "compiler/program/ast/ast.h"
-#include "compiler/program/diagnostics/diagnostics.h"
+#include "compiler/program/diagnostic/diagnostic.h"
 #include "compiler/program/source_file/source_file.h"
 #include "compiler/result/result/result.h"
 #include <vector>
@@ -11,9 +11,9 @@ namespace tz {
 
 class LoadOrder {
 public:
-  explicit LoadOrder(llvm::SourceMgr &sourceMgr);
+  using ResultLoadOrderChecked = Result<void, std::vector<Diagnostic>>;
 
-  Diagnostics::ResultTaken checkLoadOrder(SourceFile &program);
+  ResultLoadOrderChecked checkLoadOrder(SourceFile &program) const;
 
 private:
   struct Use {
@@ -60,11 +60,11 @@ private:
   static ResultSetBeforeRun lateUse(const Site &site, const FunctionDecl *fn, const Use &use,
                                     const LoadState &loadState);
 
-  void reportSites(const LoadState &loadState);
-  void topLevelUses(SourceFile &program, LoadState &loadState);
-  void visitTopLevel(const Expr *e, Module *module, int time, LoadState &loadState);
-
-  Diagnostics diagnostics;
+  std::vector<Diagnostic> findLateUses(const LoadState &loadState) const;
+  std::vector<Diagnostic> topLevelUses(SourceFile &program, LoadState &loadState) const;
+  std::vector<Diagnostic> visitTopLevel(const std::vector<const Expr *> &exprs, Module *module,
+                                        int time, LoadState &loadState) const;
+  void rememberSite(const Expr *e, Module *module, int time, LoadState &loadState) const;
 };
 
 }

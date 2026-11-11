@@ -2,8 +2,9 @@
 
 #include "compiler/interprocedural/overflow/value_range/value_range.h"
 #include "compiler/program/ast/ast.h"
-#include "compiler/program/diagnostics/diagnostics.h"
+#include "compiler/program/diagnostic/diagnostic.h"
 #include "compiler/program/library_ranges/library_ranges.h"
+#include "compiler/result/result/result.h"
 #include "llvm/ADT/MapVector.h"
 #include <memory>
 #include <set>
@@ -28,8 +29,10 @@ class OverflowWarnings;
 
 class OverflowCheck {
 public:
+  using ResultOverflowChecked = Result<void, std::vector<Diagnostic>>;
+
   OverflowCheck(Program &checked, const LibraryRanges &library);
-  Diagnostics::ResultTaken run();
+  ResultOverflowChecked run();
 
 private:
   struct VarInfo {
@@ -42,8 +45,8 @@ private:
     bool isConst = false;
   };
   SourceFile &program_;
+  llvm::SourceMgr &sourceMgr;
   const LibraryRanges &library;
-  Diagnostics diags;
   bool declaring = true;
   const FunctionDecl *scanOwner = nullptr;
   std::vector<const FunctionDecl *> functions_;

@@ -1,8 +1,8 @@
 #include "compiler/interprocedural/async_local_storage_checker/async_local_storage_checker.h"
 #include "compiler/interprocedural/async_local_storage_checker/async_local_storage_checker_errors.h"
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
-#include "compiler/program/diagnostics/diagnostics.h"
 #include "compiler/program/types/types.h"
+#include "llvm/ADT/STLExtras.h"
 
 using llvm::isa;
 
@@ -41,6 +41,30 @@ void AsyncLocalStorageChecker::sawNew(const NewExpr *n) {
   }
 }
 
+std::vector<Diagnostic> AsyncLocalStorageChecker::sawVoid(const CallExpr *) {
+  return {};
+}
+
+std::vector<Diagnostic> AsyncLocalStorageChecker::sawCall(const CallExpr *) {
+  return {};
+}
+
+bool AsyncLocalStorageChecker::heldWithObject(const MemberExpr *) const {
+  return false;
+}
+
+std::vector<Diagnostic> AsyncLocalStorageChecker::spreadKept(const Expr *) {
+  return {};
+}
+
+size_t AsyncLocalStorageChecker::extraKnown() const {
+  return 0;
+}
+
+bool AsyncLocalStorageChecker::closuresCarry() const {
+  return false;
+}
+
 void AsyncLocalStorageChecker::startWalk() {
   this->readsDirectly.clear();
   this->intervals.clear();
@@ -48,28 +72,50 @@ void AsyncLocalStorageChecker::startWalk() {
   this->news.clear();
 }
 
-void AsyncLocalStorageChecker::kept(const Expr *value, bool, llvm::StringRef where) {
+std::vector<Diagnostic> AsyncLocalStorageChecker::kept(const Expr *value, bool,
+                                                       llvm::StringRef where) {
   std::string message = ErrorTextAsyncStore::kept(where);
-  this->diagnostics.error(value->loc(), message);
+  auto error = Diagnostic{
+      .kind = llvm::SourceMgr::DK_Error,
+      .loc = value->loc(),
+      .message = message,
+  };
+
+  return {error};
 }
 
-void AsyncLocalStorageChecker::finish() {
-  this->checkNews();
-  this->checkRuns();
-  this->checkIntervals();
+std::vector<Diagnostic> AsyncLocalStorageChecker::finish() {
+  auto misplacedNews = this->findMisplacedNews();
+  auto reusedStores = this->findReusedStores();
+  auto readingTimers = this->findStoreReadingTimers();
+
+  auto found = std::vector<Diagnostic>();
+  llvm::append_range(found, misplacedNews);
+  llvm::append_range(found, reusedStores);
+  llvm::append_range(found, readingTimers);
+
+  return found;
 }
 
-void AsyncLocalStorageChecker::checkNews() {
+std::vector<Diagnostic> AsyncLocalStorageChecker::findMisplacedNews() const {
+  auto found = std::vector<Diagnostic>();
   for (const NewExpr *n : this->news) {
     if (this->allowedNews.contains(n)) {
       continue;
     }
     std::string message = ErrorTextAsyncStore::made();
-    this->diagnostics.error(n->loc(), message);
+    found.push_back({
+        .kind = llvm::SourceMgr::DK_Error,
+        .loc = n->loc(),
+        .message = message,
+    });
   }
+
+  return found;
 }
 
-void AsyncLocalStorageChecker::checkRuns() {
+std::vector<Diagnostic> AsyncLocalStorageChecker::findReusedStores() const {
+  auto found = std::vector<Diagnostic>();
   for (const CallExpr *c : this->runs) {
     if (c->args.empty() || !parallel::ParallelHelpers::holdsReferences(c->args[0]->type)) {
       continue;
@@ -79,8 +125,14 @@ void AsyncLocalStorageChecker::checkRuns() {
       continue;
     }
     std::string message = ErrorTextAsyncStore::runStore();
-    this->diagnostics.error(store->loc(), message);
+    found.push_back({
+        .kind = llvm::SourceMgr::DK_Error,
+        .loc = store->loc(),
+        .message = message,
+    });
   }
+
+  return found;
 }
 
 const FunctionDecl *AsyncLocalStorageChecker::reader(const FunctionDecl *fn) const {
@@ -108,7 +160,8 @@ const FunctionDecl *AsyncLocalStorageChecker::reader(const FunctionDecl *fn) con
   return found == via.end() ? nullptr : found->second;
 }
 
-void AsyncLocalStorageChecker::checkIntervals() {
+std::vector<Diagnostic> AsyncLocalStorageChecker::findStoreReadingTimers() const {
+  auto found = std::vector<Diagnostic>();
   for (const CallExpr *c : this->intervals) {
     const FunctionDecl *fn = c->args.empty() ? nullptr : HeldValueChecker::callbackOf(c->args[0]);
     const FunctionDecl *reads = fn ? this->reader(fn) : nullptr;
@@ -119,8 +172,14 @@ void AsyncLocalStorageChecker::checkIntervals() {
     std::string how = ErrorTextAsyncStore::readsIt(through);
     std::string message = c->builtin() == Builtin::SetInterval ? ErrorTextAsyncStore::interval(how)
                                                                : ErrorTextAsyncStore::restart(how);
-    this->diagnostics.error(c->args[0]->loc(), message);
+    found.push_back({
+        .kind = llvm::SourceMgr::DK_Error,
+        .loc = c->args[0]->loc(),
+        .message = message,
+    });
   }
+
+  return found;
 }
 
 }

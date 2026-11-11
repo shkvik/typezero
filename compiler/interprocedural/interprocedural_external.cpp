@@ -17,7 +17,7 @@ InterproceduralExternalFacade::InterproceduralExternalFacade(Program &checked, b
 InterproceduralExternalFacade::ResultProgramChecked InterproceduralExternalFacade::run() {
   auto found = ItemList<Diagnostic>();
 
-  auto loadOrder = LoadOrder(this->program.sourceMgr);
+  auto loadOrder = LoadOrder();
   auto earlyReads = loadOrder.checkLoadOrder(this->program.file);
   if (earlyReads.isErr()) {
     found.append(earlyReads.error());

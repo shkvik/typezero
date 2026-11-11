@@ -43,8 +43,8 @@ using llvm::isa;
 
 OverflowCheck::OverflowCheck(Program &checked, const LibraryRanges &library)
     : program_(checked.file),
-      library(library),
-      diags(checked.sourceMgr) {
+      sourceMgr(checked.sourceMgr),
+      library(library) {
   this->programScanPart = std::make_unique<ProgramScan>(*this);
   this->slotsPart = std::make_unique<Slots>(*this);
   this->callRangesPart = std::make_unique<CallRanges>(*this);
@@ -57,7 +57,7 @@ OverflowCheck::OverflowCheck(Program &checked, const LibraryRanges &library)
   this->overflowWarningsPart = std::make_unique<OverflowWarnings>(*this);
 }
 
-Diagnostics::ResultTaken OverflowCheck::run() {
+OverflowCheck::ResultOverflowChecked OverflowCheck::run() {
   programScan().scanProgram();
   callRanges().analyzeAll();
   for (auto &entry : this->next.params) {
@@ -103,7 +103,7 @@ Diagnostics::ResultTaken OverflowCheck::run() {
   this->next = Summaries();
   callRanges().analyzeAll();
 
-  llvm::SourceMgr &sources = this->diags.sourceMgr();
+  llvm::SourceMgr &sources = this->sourceMgr;
   std::stable_sort(this->warnings.begin(), this->warnings.end(),
                    [&](const Warning &a, const Warning &b) {
                      unsigned fa = sources.FindBufferContainingLoc(a.loc),
@@ -117,15 +117,31 @@ Diagnostics::ResultTaken OverflowCheck::run() {
   for (auto [expr, proven] : this->proofs) {
     expr->rangeProven = proven;
   }
-  loopRanges().reportLong();
-  std::set<const char *> shown;
-  for (const Warning &w : this->warnings) {
-    if (shown.insert(w.loc.getPointer()).second && !this->library.contains(w.loc)) {
-      this->diags.error(w.loc, w.message);
+  auto hints = this->loopRanges().findLongLoops();
+
+  auto found = std::vector<Diagnostic>();
+  for (const Diagnostic &hint : hints) {
+    if (!this->library.contains(hint.loc)) {
+      found.push_back(hint);
     }
   }
+  auto shown = std::set<const char *>();
+  for (const Warning &warning : this->warnings) {
+    auto [_, isInserted] = shown.insert(warning.loc.getPointer());
+    if (!isInserted || this->library.contains(warning.loc)) {
+      continue;
+    }
+    found.push_back({
+        .kind = llvm::SourceMgr::DK_Error,
+        .loc = warning.loc,
+        .message = warning.message,
+    });
+  }
+  if (!found.empty()) {
+    return err(found);
+  }
 
-  return this->diags.take();
+  return ok();
 }
 
 void OverflowCheck::joinInto(Summaries &into, const Summaries &from) {

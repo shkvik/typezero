@@ -1,6 +1,5 @@
 #include "compiler/interprocedural/pool_checker/pool_checker.h"
 #include "compiler/interprocedural/pool_checker/pool_checker_errors.h"
-#include "compiler/program/diagnostics/diagnostics.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -47,8 +46,8 @@ bool PoolChecker::produces(const CallExpr *c) const {
          this->poolStores.contains(HeldValueChecker::storageOf(c));
 }
 
-bool PoolChecker::heldMember(const MemberExpr *m) const {
-  return m->type && this->itemTypes.contains(m->type->nonOptional()) && this->isHeld(m->object);
+bool PoolChecker::heldWithObject(const MemberExpr *m) const {
+  return m->type && this->itemTypes.contains(m->type->nonOptional());
 }
 
 bool PoolChecker::storeValue(const Expr *value) const {
@@ -61,7 +60,7 @@ size_t PoolChecker::extraKnown() const {
   return this->poolStores.size() + this->itemTypes.size() + this->storeTypes.size();
 }
 
-void PoolChecker::sawCall(const CallExpr *c) {
+std::vector<Diagnostic> PoolChecker::sawCall(const CallExpr *c) {
   if (HeldValueChecker::storageMethod(c, "getStore") && this->current &&
       this->poolStores.contains(HeldValueChecker::storageOf(c))) {
     this->readsStore.insert(this->current);
@@ -71,26 +70,32 @@ void PoolChecker::sawCall(const CallExpr *c) {
     this->timers.push_back({c, this->current});
   }
   if (!HeldValueChecker::storageMethod(c, "run") || c->args.empty()) {
-    return;
+    return {};
   }
   const Expr *store = HeldValueChecker::bare(c->args[0]);
   if (auto *n = dyn_cast<NewExpr>(store)) {
     const std::vector<Expr *> &args = n->ctor() ? n->ctor()->args : n->args;
     if (llvm::none_of(args, [&](const Expr *a) { return this->isHeld(a); })) {
-      return;
+      return {};
     }
     this->allowedStores.insert(n);
-    if (this->once(n)) {
-      std::string message = ErrorTextPoolObject::runStore();
-      this->diagnostics.error(n->loc(), message);
+    if (!this->once(n)) {
+      return {};
     }
-    return;
+    std::string message = ErrorTextPoolObject::runStore();
+    auto error = Diagnostic{
+        .kind = llvm::SourceMgr::DK_Error,
+        .loc = n->loc(),
+        .message = message,
+    };
+
+    return {error};
   }
   auto *literal = dyn_cast<ObjectLitExpr>(store);
   if (!literal || llvm::none_of(literal->props, [&](const ObjectLitExpr::Property &p) {
         return !p.spread() && this->isHeld(p.value);
       })) {
-    return;
+    return {};
   }
   if (const VarSymbol *storage = HeldValueChecker::storageOf(c)) {
     this->poolStores.insert(storage);
@@ -100,18 +105,31 @@ void PoolChecker::sawCall(const CallExpr *c) {
   }
   this->allowedStores.insert(literal);
   this->runs.push_back({c, this->current});
-  if (!this->awaited.contains(c) && this->once(c)) {
-    std::string message = ErrorTextPoolObject::awaitRun();
-    this->diagnostics.error(c->loc(), message);
+  if (this->awaited.contains(c) || !this->once(c)) {
+    return {};
   }
+  std::string message = ErrorTextPoolObject::awaitRun();
+  auto error = Diagnostic{
+      .kind = llvm::SourceMgr::DK_Error,
+      .loc = c->loc(),
+      .message = message,
+  };
+
+  return {error};
 }
 
-void PoolChecker::spreadKept(const Expr *value) {
+std::vector<Diagnostic> PoolChecker::spreadKept(const Expr *value) {
   if (!this->storeValue(value) || !this->once(value)) {
-    return;
+    return {};
   }
   std::string message = ErrorTextPoolObject::storeCopy();
-  this->diagnostics.error(value->loc(), message);
+  auto error = Diagnostic{
+      .kind = llvm::SourceMgr::DK_Error,
+      .loc = value->loc(),
+      .message = message,
+  };
+
+  return {error};
 }
 
 void PoolChecker::sawNew(const NewExpr *n) {
@@ -133,7 +151,7 @@ void PoolChecker::sawNew(const NewExpr *n) {
   }
 }
 
-void PoolChecker::sawVoid(const CallExpr *c) {
+std::vector<Diagnostic> PoolChecker::sawVoid(const CallExpr *c) {
   this->voids.push_back({c, this->current});
   bool usesObject = false;
   if (auto *member = dyn_cast_or_null<MemberExpr>(c->callee)) {
@@ -143,56 +161,87 @@ void PoolChecker::sawVoid(const CallExpr *c) {
     usesObject = usesObject || this->isHeld(arg);
   }
   if (!usesObject || !this->once(c)) {
-    return;
+    return {};
   }
   std::string message = ErrorTextPoolObject::voidCall();
-  this->diagnostics.error(c->loc(), message);
+  auto error = Diagnostic{
+      .kind = llvm::SourceMgr::DK_Error,
+      .loc = c->loc(),
+      .message = message,
+  };
+
+  return {error};
 }
 
 bool PoolChecker::closuresCarry() const {
   return true;
 }
 
-void PoolChecker::kept(const Expr *value, bool closure, llvm::StringRef where) {
+std::vector<Diagnostic> PoolChecker::kept(const Expr *value, bool closure, llvm::StringRef where) {
   if (this->storeValue(value)) {
-    return;
+    return {};
   }
   std::string message =
       closure ? ErrorTextPoolObject::keptFn(where) : ErrorTextPoolObject::kept(where);
-  this->diagnostics.error(value->loc(), message);
+  auto error = Diagnostic{
+      .kind = llvm::SourceMgr::DK_Error,
+      .loc = value->loc(),
+      .message = message,
+  };
+
+  return {error};
 }
 
-void PoolChecker::runRoots(const Expr *callback, unsigned depth,
-                           std::vector<const FunctionDecl *> &roots) {
-  callback = HeldValueChecker::bare(callback);
-  if (depth > 8 || !callback) {
-    return;
+std::vector<const FunctionDecl *> PoolChecker::runRoots(const Expr *runCallback) const {
+  auto roots = std::vector<const FunctionDecl *>();
+  auto pending = std::vector<PassedCallback>{PassedCallback{runCallback, 0}};
+  while (!pending.empty()) {
+    auto [callback, depth] = pending.back();
+    pending.pop_back();
+    const Expr *bareCallback = HeldValueChecker::bare(callback);
+    if (depth > 8 || bareCallback == nullptr) {
+      continue;
+    }
+    const auto *name = dyn_cast<NameExpr>(bareCallback);
+    const VarSymbol *var = name != nullptr ? name->var() : nullptr;
+    bool isParam = var != nullptr && var->owner() != nullptr && !var->lambda() && !var->function();
+    if (isParam) {
+      auto args = this->argsAtCallSites(var);
+      for (const Expr *arg : llvm::reverse(args)) {
+        pending.push_back(PassedCallback{arg, depth + 1});
+      }
+      continue;
+    }
+    const FunctionDecl *fn = HeldValueChecker::callbackOf(bareCallback);
+    if (fn != nullptr) {
+      roots.push_back(fn);
+    }
   }
-  if (auto *name = dyn_cast<NameExpr>(callback); name && name->var() && name->var()->owner() &&
-                                                 !name->var()->lambda() &&
-                                                 !name->var()->function()) {
-    const FunctionDecl *owner = name->var()->owner();
-    for (unsigned i = 0; i < owner->params.size(); ++i) {
-      if (owner->params[i].sym != name->var()) {
+
+  return roots;
+}
+
+std::vector<const Expr *> PoolChecker::argsAtCallSites(const VarSymbol *param) const {
+  auto args = std::vector<const Expr *>();
+  const FunctionDecl *owner = param->owner();
+  for (unsigned i = 0; i < owner->params.size(); ++i) {
+    if (owner->params[i].sym != param) {
+      continue;
+    }
+    for (const FunctionDecl *key : {owner, static_cast<const FunctionDecl *>(owner->generic)}) {
+      auto sites = key ? this->callSites.find(key) : this->callSites.end();
+      if (sites == this->callSites.end()) {
         continue;
       }
-      for (const FunctionDecl *key : {owner, static_cast<const FunctionDecl *>(owner->generic)}) {
-        auto sites = key ? this->callSites.find(key) : this->callSites.end();
-        if (sites == this->callSites.end()) {
-          continue;
-        }
-        for (const CallExpr *site : sites->second) {
-          if (i < site->args.size()) {
-            this->runRoots(site->args[i], depth + 1, roots);
-          }
+      for (const CallExpr *site : sites->second) {
+        if (i < site->args.size()) {
+          args.push_back(site->args[i]);
         }
       }
     }
-    return;
   }
-  if (const FunctionDecl *fn = HeldValueChecker::callbackOf(callback)) {
-    roots.push_back(fn);
-  }
+
+  return args;
 }
 
 const FunctionDecl *PoolChecker::storeReader(const FunctionDecl *fn) const {
@@ -220,14 +269,15 @@ const FunctionDecl *PoolChecker::storeReader(const FunctionDecl *fn) const {
   return found == via.end() ? nullptr : found->second;
 }
 
-void PoolChecker::checkStoreRuns() {
+std::vector<Diagnostic> PoolChecker::findLateStoreReads() {
   if (this->runs.empty()) {
-    return;
+    return {};
   }
   std::vector<const FunctionDecl *> pending;
   for (const auto &[run, at] : this->runs) {
     if (run->args.size() > 1) {
-      this->runRoots(run->args[1], 0, pending);
+      auto roots = this->runRoots(run->args[1]);
+      llvm::append_range(pending, roots);
     }
   }
   llvm::DenseSet<const FunctionDecl *> inside;
@@ -246,6 +296,8 @@ void PoolChecker::checkStoreRuns() {
 
     return ErrorTextPoolObject::readsIt(through);
   };
+
+  auto found = std::vector<Diagnostic>();
   for (const auto &[c, at] : this->voids) {
     if (!at || !inside.contains(at)) {
       continue;
@@ -260,7 +312,11 @@ void PoolChecker::checkStoreRuns() {
     }
     std::string reading = how(target, reads);
     std::string message = ErrorTextPoolObject::voidStore(reading);
-    this->diagnostics.error(c->loc(), message);
+    found.push_back({
+        .kind = llvm::SourceMgr::DK_Error,
+        .loc = c->loc(),
+        .message = message,
+    });
   }
   for (const auto &[c, at] : this->timers) {
     if (!at || !inside.contains(at) || c->args.empty()) {
@@ -273,19 +329,42 @@ void PoolChecker::checkStoreRuns() {
     }
     std::string reading = how(fn, reads);
     std::string message = ErrorTextPoolObject::later(reading);
-    this->diagnostics.error(c->args[0]->loc(), message);
+    found.push_back({
+        .kind = llvm::SourceMgr::DK_Error,
+        .loc = c->args[0]->loc(),
+        .message = message,
+    });
   }
+
+  return found;
 }
 
-void PoolChecker::finish() {
-  this->checkStoreRuns();
+std::vector<Diagnostic> PoolChecker::findReturnedItems() {
+  auto found = std::vector<Diagnostic>();
   for (const auto &[at, fn] : this->uses) {
     if (!fn || !this->returnsHeld.contains(fn) || !this->once(at)) {
       continue;
     }
     std::string message = ErrorTextPoolObject::returned();
-    this->diagnostics.error(at->loc(), message);
+    found.push_back({
+        .kind = llvm::SourceMgr::DK_Error,
+        .loc = at->loc(),
+        .message = message,
+    });
   }
+
+  return found;
+}
+
+std::vector<Diagnostic> PoolChecker::finish() {
+  auto lateStoreReads = this->findLateStoreReads();
+  auto returnedItems = this->findReturnedItems();
+
+  auto found = std::vector<Diagnostic>();
+  llvm::append_range(found, lateStoreReads);
+  llvm::append_range(found, returnedItems);
+
+  return found;
 }
 
 void PoolChecker::startWalk() {

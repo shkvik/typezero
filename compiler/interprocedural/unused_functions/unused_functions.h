@@ -11,16 +11,15 @@ class UnusedFunctions {
 public:
   explicit UnusedFunctions(SourceFile &checked);
 
-  llvm::SmallPtrSet<const FunctionDecl *, 8> findUnused();
+  llvm::SmallPtrSet<const FunctionDecl *, 8> findUnused() const;
 
 private:
-  void reachFromRoots();
-  void reachFromQueue();
-  void reach(const Expr *e);
+  const FunctionDecl *referencedFunction(const Expr *e) const;
+  std::vector<const FunctionDecl *> referencedFunctions(const Stmt *stmt) const;
+  std::vector<const FunctionDecl *> rootFunctions() const;
+  llvm::SmallPtrSet<const FunctionDecl *, 16> findUsed() const;
 
   SourceFile &file;
-  llvm::SmallPtrSet<const FunctionDecl *, 16> used;
-  std::vector<const FunctionDecl *> queue;
 };
 
 }

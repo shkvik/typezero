@@ -503,7 +503,8 @@ void LoopRanges::noteCall(const CallExpr *call, const FunctionDecl *target,
   }
 }
 
-void LoopRanges::reportRecursions() {
+std::vector<Diagnostic> LoopRanges::findLongRecursions() {
+  auto hints = std::vector<Diagnostic>();
   for (const auto &[fn, recursion] : this->check.recursions) {
     bool stops = recursion.counter >= 0;
     bool seen = true;
@@ -521,9 +522,12 @@ void LoopRanges::reportRecursions() {
     }
     std::string name = fn->name.empty() ? std::string("this function") : "'" + fn->name.str() + "'";
     if (!stops) {
-      this->reportHint(recursion.self.front()->loc(),
-                       "how deep this tail recursion goes depends on data" +
-                           std::string(kWhileItRuns));
+      hints.push_back({
+          .kind = llvm::SourceMgr::DK_Remark,
+          .loc = recursion.self.front()->loc(),
+          .message =
+              "how deep this tail recursion goes depends on data" + std::string(kWhileItRuns),
+      });
       continue;
     }
     for (const auto &[call, known] : this->check.recursiveCalls) {
@@ -532,21 +536,20 @@ void LoopRanges::reportRecursions() {
            LoopRanges::limitedTowards(known.args[recursion.counter], -recursion.step))) {
         continue;
       }
-      this->reportHint(call->loc(), "how deep the tail recursion of " + name +
-                                        " goes depends on this argument" + kWhileItRuns);
+      hints.push_back({
+          .kind = llvm::SourceMgr::DK_Remark,
+          .loc = call->loc(),
+          .message = "how deep the tail recursion of " + name + " goes depends on this argument" +
+                     kWhileItRuns,
+      });
     }
   }
+
+  return hints;
 }
 
-void LoopRanges::reportHint(llvm::SMLoc loc, const std::string &message) {
-  if (this->check.library.contains(loc)) {
-    return;
-  }
-  this->check.diags.hint(loc, message);
-}
-
-void LoopRanges::reportLong() {
-  reportRecursions();
+std::vector<Diagnostic> LoopRanges::findLongLoops() {
+  auto hints = this->findLongRecursions();
   for (const auto &[stmt, loop] : this->check.loops) {
     if (loop.bounded || LoopRanges::waitsOrYields(stmt)) {
       continue;
@@ -565,9 +568,14 @@ void LoopRanges::reportLong() {
     std::string data =
         loop.why ? " (" + this->check.overflowWarnings().inputText(loop.why, stmt->loc()) + ")"
                  : "";
-    this->reportHint(stmt->loc(),
-                     "how many times this loop runs depends on data" + data + kWhileItRuns);
+    hints.push_back({
+        .kind = llvm::SourceMgr::DK_Remark,
+        .loc = stmt->loc(),
+        .message = "how many times this loop runs depends on data" + data + kWhileItRuns,
+    });
   }
+
+  return hints;
 }
 
 std::vector<uint64_t> LoopRanges::contextOf() const {

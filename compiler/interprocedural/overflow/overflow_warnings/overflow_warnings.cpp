@@ -232,7 +232,7 @@ Val OverflowWarnings::fitVal(Val v, const Type *type) const {
 }
 
 std::string OverflowWarnings::line(llvm::SMLoc loc, llvm::SMLoc from) const {
-  llvm::SourceMgr &sources = this->check.diags.sourceMgr();
+  llvm::SourceMgr &sources = this->check.sourceMgr;
   unsigned id = sources.FindBufferContainingLoc(loc);
   if (!id) {
     return "an unknown line";
