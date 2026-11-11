@@ -310,8 +310,8 @@ WideWrites::ResultWideningsChecked WideWrites::checkWidenings() {
     if (conv.narrowings.empty()) {
       continue;
     }
-    bool firstReport = reportedConversions.insert(conv.loc.getPointer()).second;
-    if (!firstReport) {
+    auto [_, isInserted] = reportedConversions.insert(conv.loc.getPointer());
+    if (!isInserted) {
       continue;
     }
 

@@ -170,7 +170,9 @@ ResultThisComesFrom found = this->thisOf(this->checker.currentDecl());
 - **Геттер — `get` + имя типа:** метод, который только отдаёт хранимый объект, —
   `getScopeStack()`, `getDiagnostics()`, `getCurrentFunction()`; голое существительное
   (`scopes()`, `program()`) непонятно. Поле при этом называется просто: `scopeStack`.
-- **`bool` — `is…`/`has…`/`can…`:** `isInsideFunction()`, а не `insideFunction()`.
+- **`bool` — `is…`/`has…`/`can…`, и у методов, и у переменных:** `isInsideFunction()`, а не
+  `insideFunction()`; `bool isInserted`, а не `bool inserted`; `bool hasNarrowings`, а не
+  `bool narrowed`.
 - **Остальные методы — действием по смыслу:** `rememberStatsClass`, `findClassNamed`,
   `markUsesAsync`, `openScope`; флаг «мы сейчас внутри …» — парой `enterPromiseCall()` /
   `leavePromiseCall()` над счётчиком глубины и проверкой `isInsidePromiseCall()`; метод, который
@@ -211,7 +213,7 @@ ResultThisComesFrom found = this->thisOf(this->checker.currentDecl());
 
 ```cpp
 const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
-bool resizes = method != nullptr && (method->grows || method->shrinks);
+bool isResizing = method != nullptr && (method->grows || method->shrinks);
 ```
 
 Не так: `static const char *const resizing[] = {"push", "pop", "shift", "unshift", "splice"};` —
@@ -254,9 +256,9 @@ public:
 
 ```cpp
 ClassChecker::ResultThisReadiness ClassChecker::readyThis(VarSymbol *var) const {
-  bool inInit = var == this->checker.initThis_;
-  bool inConstructor = inInit && this->checker.currentDecl() == this->checker.initFn_;
-  if (inConstructor && this->checker.flow_.beforeSuper) {
+  bool isInInit = var == this->checker.initThis_;
+  bool isInConstructor = isInInit && this->checker.currentDecl() == this->checker.initFn_;
+  if (isInConstructor && this->checker.flow_.beforeSuper) {
     std::string message =
         ErrorTextReadyThis::noSuper(this->checker.initFn_->cls()->parent->name);
 
@@ -398,12 +400,12 @@ auto decorated = [](const FunctionDecl *fn) {
 };
 auto decoratedField = [](const ClassField &f) { return !f.decorators.empty(); };
 
-bool decoratedAnywhere = !cls->decorators.empty() || llvm::any_of(cls->methods, decorated) ||
-                         llvm::any_of(cls->constructors, decorated) ||
-                         llvm::any_of(cls->fields, decoratedField);
+bool isDecoratedAnywhere = !cls->decorators.empty() || llvm::any_of(cls->methods, decorated) ||
+                           llvm::any_of(cls->constructors, decorated) ||
+                           llvm::any_of(cls->fields, decoratedField);
 ```
 
-Длинное условие тоже получает имя: `bool topLevel = ...; if (!topLevel) { ... }`.
+Длинное условие тоже получает имя: `bool isTopLevel = ...; if (!isTopLevel) { ... }`.
 
 ## Обходы без рекурсии
 
