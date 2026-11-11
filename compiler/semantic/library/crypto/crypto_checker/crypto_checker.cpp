@@ -1,5 +1,6 @@
 #include "compiler/semantic/library/crypto/crypto_checker/crypto_checker.h"
 #include "compiler/program/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/program/library/crypto/crypto_property_table/crypto_property_table.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
 #include "compiler/semantic/library/crypto/crypto_args/crypto_args.h"
@@ -97,87 +98,96 @@ Expr *CryptoChecker::cryptoConstant(MemberExpr *member) {
 }
 
 Expr *CryptoChecker::checkCryptoMember(MemberExpr *member) {
-  const Type *type = member->object->type;
-  Crypto kind = type->crypto();
-  llvm::StringRef name = member->name;
-  llvm::SMLoc loc = member->loc();
-  auto read = [&](CryptoFn fn, const Type *result, std::vector<Expr *> args = {}) {
-    args.insert(args.begin(), member->object);
-    auto *call = this->state.getAst().make<CallExpr>(loc, member, std::vector<Expr *>{});
-    return this->cryptoArgs->cryptoCall(call, fn, std::move(args), result);
-  };
-  if (kind == Crypto::KeyObject) {
-    if (name == "type") {
-      return read(CryptoFn::KeyType, Type::string());
-    }
-    if (name == "asymmetricKeyType") {
-      return read(CryptoFn::KeyAsymmetricType, Type::optional(Type::string()));
-    }
-    if (name == "symmetricKeySize") {
-      return read(CryptoFn::KeySymmetricSize, Type::optional(Type::intTy()));
-    }
-    if (name == "asymmetricKeyDetails") {
-      std::string message = ErrorTextCryptoMember::keyDetails();
-      this->state.getDiagnostics().error(loc, message);
-      member->type = Type::error();
-      return member;
-    }
+  const CryptoPropertyInfo *found =
+      CryptoPropertyTable::find(member->object->type->crypto(), member->name);
+  if (found == nullptr) {
+    return this->reportOnlyCalled(member);
   }
-  if (kind == Crypto::X509) {
-    struct Property {
-      llvm::StringLiteral name;
-      CryptoFn fn;
-      int bits;
-    };
-    static const Property properties[] = {
-        {"subject", CryptoFn::X509Subject, 0},
-        {"issuer", CryptoFn::X509Issuer, 0},
-        {"validFrom", CryptoFn::X509ValidFrom, 0},
-        {"validTo", CryptoFn::X509ValidTo, 0},
-        {"validFromDate", CryptoFn::X509ValidFromDate, 0},
-        {"validToDate", CryptoFn::X509ValidToDate, 0},
-        {"serialNumber", CryptoFn::X509SerialNumber, 0},
-        {"fingerprint", CryptoFn::X509Fingerprint, 1},
-        {"fingerprint256", CryptoFn::X509Fingerprint, 256},
-        {"fingerprint512", CryptoFn::X509Fingerprint, 512},
-        {"subjectAltName", CryptoFn::X509SubjectAltName, 0},
-        {"infoAccess", CryptoFn::X509InfoAccess, 0},
-        {"keyUsage", CryptoFn::X509KeyUsage, 0},
-        {"ca", CryptoFn::X509Ca, 0},
-        {"raw", CryptoFn::X509Raw, 0},
-        {"publicKey", CryptoFn::X509PublicKey, 0},
-    };
-    for (const Property &p : properties) {
-      if (p.name != name) {
-        continue;
-      }
-      const Type *result =
-          p.fn == CryptoFn::X509ValidFromDate || p.fn == CryptoFn::X509ValidToDate ? Type::date()
-          : p.fn == CryptoFn::X509SubjectAltName || p.fn == CryptoFn::X509InfoAccess
-              ? Type::optional(Type::string())
-          : p.fn == CryptoFn::X509KeyUsage  ? Type::optional(Type::array(Type::string()))
-          : p.fn == CryptoFn::X509Ca        ? Type::boolTy()
-          : p.fn == CryptoFn::X509Raw       ? Type::bytesType(Type::Bytes::Buffer)
-          : p.fn == CryptoFn::X509PublicKey ? Type::cryptoType(Crypto::KeyObject)
-                                            : Type::string();
-      if (p.bits) {
-        return read(p.fn, result, {this->cryptoArgs->cryptoInt(loc, p.bits)});
-      }
-      return read(p.fn, result);
-    }
-    if (name == "issuerCertificate") {
-      std::string message = ErrorTextCryptoMember::issuerCert();
-      this->state.getDiagnostics().error(loc, message);
-      member->type = Type::error();
-      return member;
-    }
+  switch (found->property) {
+    case CryptoProperty::KEY_TYPE:
+      return this->readCryptoProperty(member, CryptoFn::KeyType, Type::string());
+    case CryptoProperty::KEY_ASYMMETRIC_KEY_TYPE:
+      return this->readCryptoProperty(member, CryptoFn::KeyAsymmetricType,
+                                      Type::optional(Type::string()));
+    case CryptoProperty::KEY_SYMMETRIC_KEY_SIZE:
+      return this->readCryptoProperty(member, CryptoFn::KeySymmetricSize,
+                                      Type::optional(Type::intTy()));
+    case CryptoProperty::KEY_ASYMMETRIC_KEY_DETAILS:
+      return this->reportCryptoMember(member, ErrorTextCryptoMember::keyDetails());
+    case CryptoProperty::X509_SUBJECT:
+      return this->readCryptoProperty(member, CryptoFn::X509Subject, Type::string());
+    case CryptoProperty::X509_ISSUER:
+      return this->readCryptoProperty(member, CryptoFn::X509Issuer, Type::string());
+    case CryptoProperty::X509_VALID_FROM:
+      return this->readCryptoProperty(member, CryptoFn::X509ValidFrom, Type::string());
+    case CryptoProperty::X509_VALID_TO:
+      return this->readCryptoProperty(member, CryptoFn::X509ValidTo, Type::string());
+    case CryptoProperty::X509_VALID_FROM_DATE:
+      return this->readCryptoProperty(member, CryptoFn::X509ValidFromDate, Type::date());
+    case CryptoProperty::X509_VALID_TO_DATE:
+      return this->readCryptoProperty(member, CryptoFn::X509ValidToDate, Type::date());
+    case CryptoProperty::X509_SERIAL_NUMBER:
+      return this->readCryptoProperty(member, CryptoFn::X509SerialNumber, Type::string());
+    case CryptoProperty::X509_FINGERPRINT:
+      return this->readFingerprint(member, 1);
+    case CryptoProperty::X509_FINGERPRINT256:
+      return this->readFingerprint(member, 256);
+    case CryptoProperty::X509_FINGERPRINT512:
+      return this->readFingerprint(member, 512);
+    case CryptoProperty::X509_SUBJECT_ALT_NAME:
+      return this->readCryptoProperty(member, CryptoFn::X509SubjectAltName,
+                                      Type::optional(Type::string()));
+    case CryptoProperty::X509_INFO_ACCESS:
+      return this->readCryptoProperty(member, CryptoFn::X509InfoAccess,
+                                      Type::optional(Type::string()));
+    case CryptoProperty::X509_KEY_USAGE:
+      return this->readCryptoProperty(member, CryptoFn::X509KeyUsage,
+                                      Type::optional(Type::array(Type::string())));
+    case CryptoProperty::X509_CA:
+      return this->readCryptoProperty(member, CryptoFn::X509Ca, Type::boolTy());
+    case CryptoProperty::X509_RAW:
+      return this->readCryptoProperty(member, CryptoFn::X509Raw,
+                                      Type::bytesType(Type::Bytes::Buffer));
+    case CryptoProperty::X509_PUBLIC_KEY:
+      return this->readCryptoProperty(member, CryptoFn::X509PublicKey,
+                                      Type::cryptoType(Type::Crypto::KeyObject));
+    case CryptoProperty::X509_ISSUER_CERTIFICATE:
+      return this->reportCryptoMember(member, ErrorTextCryptoMember::issuerCert());
   }
-  std::string message =
-      ErrorTextCryptoMember::onlyCalled(name, type->name(), CryptoNames::methodsOf(kind));
-  this->state.getDiagnostics().error(loc, message);
+
+  return this->reportOnlyCalled(member);
+}
+
+Expr *CryptoChecker::readCryptoProperty(MemberExpr *member, CryptoFn fn, const Type *result) {
+  std::vector<Expr *> args{member->object};
+  auto *call = this->state.getAst().make<CallExpr>(member->loc(), member, std::vector<Expr *>{});
+
+  return this->cryptoArgs->cryptoCall(call, fn, std::move(args), result);
+}
+
+Expr *CryptoChecker::readFingerprint(MemberExpr *member, int bits) {
+  Expr *size = this->cryptoArgs->cryptoInt(member->loc(), bits);
+  std::vector<Expr *> args{member->object, size};
+  auto *call = this->state.getAst().make<CallExpr>(member->loc(), member, std::vector<Expr *>{});
+
+  return this->cryptoArgs->cryptoCall(call, CryptoFn::X509Fingerprint, std::move(args),
+                                      Type::string());
+}
+
+Expr *CryptoChecker::reportCryptoMember(MemberExpr *member, const std::string &message) {
+  this->state.getDiagnostics().error(member->loc(), message);
   member->type = Type::error();
 
   return member;
+}
+
+Expr *CryptoChecker::reportOnlyCalled(MemberExpr *member) {
+  const Type *type = member->object->type;
+  Type::Crypto kind = type->crypto();
+  std::string message =
+      ErrorTextCryptoMember::onlyCalled(member->name, type->name(), CryptoNames::methodsOf(kind));
+
+  return this->reportCryptoMember(member, message);
 }
 
 Expr *CryptoChecker::checkCryptoNew(NewExpr *expr, llvm::StringRef cls) {

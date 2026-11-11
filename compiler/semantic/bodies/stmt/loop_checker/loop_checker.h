@@ -48,6 +48,12 @@ private:
   ResultIterableType iterableType(const Type *type) const;
   static ResultBindingTyped bindingType(const ForOfStmt *stmt);
   static ResultBindingShape bindingShape(const ForOfStmt *stmt, const Type *element);
+  void walkIterable(ForOfStmt *stmt);
+  bool isListParam(const NameExpr *name);
+  Expr *listElements(const NameExpr *name);
+  const Type *iteratedElement(ForOfStmt *stmt);
+  void addLiteralBounds(const ForOfStmt *stmt, const Type *element);
+  IntegerRange literalRange(const ArrayLitExpr *lit) const;
 
   SemanticState &state;
   Scopes *scopes = nullptr;

@@ -54,6 +54,7 @@ Diagnostics::ResultTaken SemanticExternalFacade::checkGenericCopies() {
     this->parts->getLateClasses().checkLateClasses();
     this->parts->getGenericInstantiator().checkInstances();
   } while (this->state->getLateClassStore().hasUncheckedLateClasses());
+
   this->parts->getConstructorCalls().checkConstructorCalls();
   this->parts->getVarChecker().reportUncheckedResults();
 
@@ -64,6 +65,7 @@ Diagnostics::ResultTaken SemanticExternalFacade::finishProgram() {
   this->parts->getReflectChecker().finishReflection();
   this->parts->getEmitterChecker().checkErrorListeners();
   this->parts->getEmitterChecker().checkDroppedListeners();
+
   for (Module *module : this->file.modules) {
     this->parts->getModuleDeclarer().useModule(module);
     this->parts->getVarChecker().reportUntyped();
@@ -75,6 +77,7 @@ Diagnostics::ResultTaken SemanticExternalFacade::finishProgram() {
   this->parts->getLateClasses().rememberEmittedLateClasses();
   this->file.inventory = this->state->getInventoryStore().takeInventory();
   this->file.inventory.widenings = this->state->takeWideningStore();
+
   std::vector<ClassDecl *> &late = this->file.inventory.lateClasses;
   this->file.items.insert(this->file.items.end(), late.begin(), late.end());
 

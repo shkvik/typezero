@@ -7,6 +7,7 @@
 namespace tz {
 
 class SemanticParts;
+class Inference;
 class TypeParams;
 class LateClasses;
 class TypeResolver;
@@ -47,6 +48,23 @@ private:
                                    llvm::ArrayRef<const Type *> args) const;
   ResultParamsMeaning paramsMeaningful(const FuncSymbol *generic, llvm::ArrayRef<const Type *> reps,
                                        llvm::ArrayRef<const Type *> args);
+  bool writtenTypeArgsFit(const NameExpr *name, const FuncSymbol *generic,
+                          std::vector<const Type *> &bound);
+  void bindFromExpected(const FuncSymbol *generic, const Type *ret, const Signature &expected,
+                        std::vector<const Type *> &bound);
+  static const Type *unifiedCandidates(const Inference &inference, size_t k);
+  void typeGenericValue(NameExpr *name, FuncSymbol *generic, const Type *ret,
+                        const std::vector<const Type *> &bound);
+  static bool isConcrete(llvm::ArrayRef<const Type *> bound);
+  static bool hasErrorArg(llvm::ArrayRef<const Type *> args);
+  std::vector<const Type *> instanceReps(FuncSymbol *generic, llvm::ArrayRef<const Type *> args);
+  FuncSymbol *reuseInstance(InstanceRecord *instance, llvm::SMLoc loc,
+                            llvm::ArrayRef<const Type *> args);
+  bool instanceArgsFit(const FuncSymbol *generic, llvm::ArrayRef<const Type *> reps,
+                       llvm::ArrayRef<const Type *> args, llvm::SMLoc loc);
+  void placeInstance(const InstanceRecord &instance);
+  FuncSymbol *checkNewInstance(InstanceRecord *instance, llvm::SMLoc loc,
+                               llvm::ArrayRef<const Type *> args);
   static const ClassDecl *literalClassIn(const Type *type);
   static std::string typeList(llvm::ArrayRef<const Type *> types);
   static std::string bindingList(llvm::ArrayRef<const Type *> params,

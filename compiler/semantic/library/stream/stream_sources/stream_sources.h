@@ -31,6 +31,20 @@ public:
 private:
   using ResultValuesIterator = Result<Expr *, StreamSourcesValuesIteratorError>;
 
+  struct FsStreamArgs {
+    const Type *options = nullptr;
+    const Type *encodingType = nullptr;
+    Expr *opts = nullptr;
+    Expr *encoding = nullptr;
+    bool text = false;
+    bool fresh = false;
+  };
+
+  bool fsStreamArityFits(CallExpr *call, llvm::SMLoc loc);
+  void walkFsStreamOptions(Expr *arg, FsStreamArgs &args);
+  static void scanOptionsLiteral(const ObjectLitExpr *lit, FsStreamArgs &args);
+  Expr *undefinedArg(const Type *type, llvm::SMLoc loc);
+  Expr *callFsStream(CallExpr *call, const FsStreamArgs &args, bool reading, llvm::SMLoc loc);
   ResultValuesIterator valuesIterator(Expr *source);
 
   SemanticState &state;

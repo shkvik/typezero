@@ -104,7 +104,7 @@ UnionChecker::ResultUnionMemberTyped UnionChecker::checkUnionMember(MemberExpr *
         .message = message,
     });
   }
-  if (llvm::all_of(type->members(), [](const Type *m) { return m->isBytes(); })) {
+  if (UnionChecker::isAllBytes(type)) {
     Expr *bytes = this->bytesChecker->checkBytesUnionMember(member);
 
     return ok(bytes);
@@ -112,27 +112,19 @@ UnionChecker::ResultUnionMemberTyped UnionChecker::checkUnionMember(MemberExpr *
   std::vector<const Type *> fieldTypes;
   const Type *lacking = nullptr;
   for (const Type *m : type->members()) {
-    if (ClassDecl *cls = ClassDeclarer::classOf(m)) {
+    ClassDecl *cls = ClassDeclarer::classOf(m);
+    if (cls != nullptr) {
       this->classDeclarer->completeClass(cls);
     }
-    const Field *f = m->isObject() ? m->field(member->name) : nullptr;
-    if (const ClassDecl *cls = ClassDeclarer::classOf(m)) {
-      const ClassDecl *owner = nullptr;
-      const ClassField *field = ClassBases::findField(cls, member->name, &owner);
-      ClassMemberChecker::ResultMemberAccessible accessible =
-          field ? this->classMemberChecker->checkAccess(owner, field->access, member->name)
-                : ClassMemberChecker::ResultMemberAccessible(ok(cls));
-      if (accessible.isErr()) {
-        return err(UnionCheckerCheckUnionMemberError{
-            .code = UnionCheckerCheckUnionMemberErrorCode::NOT_ACCESSIBLE,
-            .message = accessible.error().message,
-        });
-      }
-      if (!field) {
-        f = nullptr;
-      }
+    std::optional<std::string> hidden = this->accessProblem(member, cls);
+    if (hidden.has_value()) {
+      return err(UnionCheckerCheckUnionMemberError{
+          .code = UnionCheckerCheckUnionMemberErrorCode::NOT_ACCESSIBLE,
+          .message = *hidden,
+      });
     }
-    if (!f) {
+    const Field *f = UnionChecker::unionMemberField(member, m, cls);
+    if (f == nullptr) {
       lacking = m;
       break;
     }
@@ -140,28 +132,8 @@ UnionChecker::ResultUnionMemberTyped UnionChecker::checkUnionMember(MemberExpr *
       fieldTypes.push_back(f->type);
     }
   }
-  bool nowhere = llvm::none_of(type->members(), [&](const Type *m) {
-    return m->isObject() && !m->isClass() && m->field(member->name);
-  });
-  bool plainObjects =
-      llvm::all_of(type->members(), [](const Type *m) { return m->isObject() && !m->isClass(); });
-  if (lacking && nowhere && plainObjects) {
-    std::string message = ErrorTextUnionMember::noField(type->name(), member->name);
-
-    return err(UnionCheckerCheckUnionMemberError{
-        .code = UnionCheckerCheckUnionMemberErrorCode::NO_SUCH_FIELD,
-        .message = message,
-    });
-  }
-  if (lacking) {
-    std::string hint = UnionChecker::lackingHint(member, type);
-    std::string message =
-        ErrorTextUnionMember::mayLack(member->name, lacking->name(), type->name(), hint);
-
-    return err(UnionCheckerCheckUnionMemberError{
-        .code = UnionCheckerCheckUnionMemberErrorCode::MAY_LACK_FIELD,
-        .message = message,
-    });
+  if (lacking != nullptr) {
+    return UnionChecker::lackingFieldError(member, type, lacking);
   }
   const Type *result = Type::unionOf(fieldTypes);
   std::string problem = UnionSlots::unionProblem(result);
@@ -176,6 +148,72 @@ UnionChecker::ResultUnionMemberTyped UnionChecker::checkUnionMember(MemberExpr *
   member->type = result;
 
   return ok(member);
+}
+
+bool UnionChecker::isAllBytes(const Type *type) {
+  for (const Type *m : type->members()) {
+    if (!m->isBytes()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+std::optional<std::string> UnionChecker::accessProblem(const MemberExpr *member,
+                                                       const ClassDecl *cls) {
+  if (cls == nullptr) {
+    return std::nullopt;
+  }
+  const ClassDecl *owner = nullptr;
+  const ClassField *field = ClassBases::findField(cls, member->name, &owner);
+  if (field == nullptr) {
+    return std::nullopt;
+  }
+  ClassMemberChecker::ResultMemberAccessible accessible =
+      this->classMemberChecker->checkAccess(owner, field->access, member->name);
+  if (accessible.isOk()) {
+    return std::nullopt;
+  }
+
+  return accessible.error().message;
+}
+
+const Field *UnionChecker::unionMemberField(const MemberExpr *member, const Type *m,
+                                            const ClassDecl *cls) {
+  const Field *f = m->isObject() ? m->field(member->name) : nullptr;
+  if (cls == nullptr) {
+    return f;
+  }
+
+  return ClassBases::findField(cls, member->name) != nullptr ? f : nullptr;
+}
+
+UnionChecker::ResultUnionMemberTyped
+UnionChecker::lackingFieldError(const MemberExpr *member, const Type *type, const Type *lacking) {
+  bool nowhere = true;
+  bool plainObjects = true;
+  for (const Type *m : type->members()) {
+    bool plain = m->isObject() && !m->isClass();
+    nowhere &= !(plain && m->field(member->name) != nullptr);
+    plainObjects &= plain;
+  }
+  if (nowhere && plainObjects) {
+    std::string message = ErrorTextUnionMember::noField(type->name(), member->name);
+
+    return err(UnionCheckerCheckUnionMemberError{
+        .code = UnionCheckerCheckUnionMemberErrorCode::NO_SUCH_FIELD,
+        .message = message,
+    });
+  }
+  std::string hint = UnionChecker::lackingHint(member, type);
+  std::string message =
+      ErrorTextUnionMember::mayLack(member->name, lacking->name(), type->name(), hint);
+
+  return err(UnionCheckerCheckUnionMemberError{
+      .code = UnionCheckerCheckUnionMemberErrorCode::MAY_LACK_FIELD,
+      .message = message,
+  });
 }
 
 UnionChecker::ResultUnionFieldTarget UnionChecker::checkUnionFieldTarget(MemberExpr *member) {
@@ -302,16 +340,12 @@ UnionChecker::unhandledCases(const SwitchStmt *stmt) const {
 UnionChecker::ResultUnionMethodTyped UnionChecker::checkUnionMethodCall(CallExpr *call,
                                                                         MemberExpr *member) {
   const Type *receiver = member->object->type;
-  llvm::StringRef name = member->name;
   call->type = Type::error();
   member->type = Type::error();
-  bool notNarrowed = receiver->isTagged() || llvm::any_of(receiver->members(), [](const Type *m) {
-                       return !m->isObject();
-                     });
-  if (notNarrowed) {
+  if (receiver->isTagged() || !UnionChecker::isAllObjects(receiver)) {
     this->argumentChecker->checkArgsLoosely(call);
     const char *typeOf = TypeSpelling::typeOfName(receiver->members().front());
-    std::string message = ErrorTextUnionMember::narrow(name, receiver->name(), typeOf);
+    std::string message = ErrorTextUnionMember::narrow(member->name, receiver->name(), typeOf);
 
     return err(UnionCheckerCheckUnionMethodCallError{
         .code = UnionCheckerCheckUnionMethodCallErrorCode::NOT_NARROWED,
@@ -321,77 +355,27 @@ UnionChecker::ResultUnionMethodTyped UnionChecker::checkUnionMethodCall(CallExpr
   const Type *fnType = nullptr;
   std::vector<UnionMethod> methods;
   for (const Type *m : receiver->members()) {
-    const Type *type = nullptr;
-    UnionMethod entry{m, nullptr, false};
-    if (ClassDecl *cls = ClassDeclarer::classOf(m)) {
-      this->classDeclarer->completeClass(cls);
-      const ClassDecl *owner = nullptr;
-      const ClassField *field = ClassBases::findField(cls, name, &owner);
-      if (field && !field->method()) {
-        ClassMemberChecker::ResultMemberAccessible accessible =
-            this->classMemberChecker->checkAccess(owner, field->access, name);
-        if (accessible.isErr()) {
-          this->argumentChecker->checkArgsLoosely(call);
-          return err(UnionCheckerCheckUnionMethodCallError{
-              .code = UnionCheckerCheckUnionMethodCallErrorCode::NOT_ACCESSIBLE,
-              .message = accessible.error().message,
-          });
-        }
-        type = m->field(name) ? m->field(name)->type : nullptr;
-      } else if (std::vector<FunctionDecl *> variants =
-                     ClassDeclarer::methodsNamed(cls, name, false);
-                 variants.size() > 1) {
-        this->argumentChecker->checkArgsLoosely(call);
-        std::string message = ErrorTextUnionMethod::variants(name, m->name(), receiver->name());
-
-        return err(UnionCheckerCheckUnionMethodCallError{
-            .code = UnionCheckerCheckUnionMethodCallErrorCode::SEVERAL_VARIANTS,
-            .message = message,
-        });
-      } else if (!variants.empty()) {
-        ClassMemberChecker::ResultMemberAccessible accessible =
-            this->classMemberChecker->checkAccess(variants[0]->cls(), variants[0]->access(), name);
-        if (accessible.isErr()) {
-          this->argumentChecker->checkArgsLoosely(call);
-          return err(UnionCheckerCheckUnionMethodCallError{
-              .code = UnionCheckerCheckUnionMethodCallErrorCode::NOT_ACCESSIBLE,
-              .message = accessible.error().message,
-          });
-        }
-        FuncSymbol *sym = variants[0]->sym;
-        if (FunctionDecl *impl = ClassLinks::soleImplementation(cls, sym->decl)) {
-          entry.method = impl->sym;
-        } else {
-          entry.method = sym, entry.virtualCall = true;
-        }
-        type = this->returnInferrer->functionType(sym);
-      }
-    } else if (const Field *f = m->field(name); f && m->isBase()) {
+    ResultUnionMethodPart part = this->memberMethod(member, m);
+    if (part.isErr()) {
       this->argumentChecker->checkArgsLoosely(call);
-      std::string message = ErrorTextUnionMethod::isBase(name, receiver->name(), m->name());
-
-      return err(UnionCheckerCheckUnionMethodCallError{
-          .code = UnionCheckerCheckUnionMethodCallErrorCode::INTERFACE_MEMBER,
-          .message = message,
-      });
-    } else if (f) {
-      type = f->type;
+      return err(part.error());
     }
-    if (!type || !type->isFunction()) {
+    const Type *type = part.value().type;
+    if (type == nullptr || !type->isFunction()) {
       this->argumentChecker->checkArgsLoosely(call);
       bool field = type != nullptr;
       std::string message =
-          ErrorTextUnionMethod::notMethod(receiver->name(), m->name(), name, field);
+          ErrorTextUnionMethod::notMethod(receiver->name(), m->name(), member->name, field);
 
       return err(UnionCheckerCheckUnionMethodCallError{
           .code = UnionCheckerCheckUnionMethodCallErrorCode::NOT_A_METHOD,
           .message = message,
       });
     }
-    if (fnType && type != fnType) {
+    if (fnType != nullptr && type != fnType) {
       this->argumentChecker->checkArgsLoosely(call);
-      std::string message =
-          ErrorTextUnionMethod::differ(receiver->name(), name, fnType->name(), type->name());
+      std::string message = ErrorTextUnionMethod::differ(receiver->name(), member->name,
+                                                         fnType->name(), type->name());
 
       return err(UnionCheckerCheckUnionMethodCallError{
           .code = UnionCheckerCheckUnionMethodCallErrorCode::METHOD_TYPES_DIFFER,
@@ -399,7 +383,7 @@ UnionChecker::ResultUnionMethodTyped UnionChecker::checkUnionMethodCall(CallExpr
       });
     }
     fnType = type;
-    methods.push_back(entry);
+    methods.push_back(part.value().entry);
   }
   call->target = UnionMethodCall{.unionMethods = std::move(methods)};
   member->type = fnType;
@@ -410,4 +394,104 @@ UnionChecker::ResultUnionMethodTyped UnionChecker::checkUnionMethodCall(CallExpr
   return ok(call);
 }
 
+bool UnionChecker::isAllObjects(const Type *type) {
+  for (const Type *m : type->members()) {
+    if (!m->isObject()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+UnionChecker::ResultUnionMethodPart UnionChecker::memberMethod(const MemberExpr *member,
+                                                               const Type *m) {
+  ClassDecl *cls = ClassDeclarer::classOf(m);
+  if (cls != nullptr) {
+    return this->classMemberMethod(member, m, cls);
+  }
+  const Field *f = m->field(member->name);
+  if (f != nullptr && m->isBase()) {
+    const Type *receiver = member->object->type;
+    std::string message = ErrorTextUnionMethod::isBase(member->name, receiver->name(), m->name());
+
+    return err(UnionCheckerCheckUnionMethodCallError{
+        .code = UnionCheckerCheckUnionMethodCallErrorCode::INTERFACE_MEMBER,
+        .message = message,
+    });
+  }
+
+  return ok(UnionMethodPart{
+      .type = f != nullptr ? f->type : nullptr,
+      .entry = UnionMethod{m, nullptr, false},
+  });
+}
+
+UnionChecker::ResultUnionMethodPart UnionChecker::classMemberMethod(const MemberExpr *member,
+                                                                    const Type *m, ClassDecl *cls) {
+  llvm::StringRef name = member->name;
+  this->classDeclarer->completeClass(cls);
+  const ClassDecl *owner = nullptr;
+  const ClassField *field = ClassBases::findField(cls, name, &owner);
+  if (field != nullptr && !field->method()) {
+    ClassMemberChecker::ResultMemberAccessible accessible =
+        this->classMemberChecker->checkAccess(owner, field->access, name);
+    if (accessible.isErr()) {
+      return err(UnionCheckerCheckUnionMethodCallError{
+          .code = UnionCheckerCheckUnionMethodCallErrorCode::NOT_ACCESSIBLE,
+          .message = accessible.error().message,
+      });
+    }
+    const Field *f = m->field(name);
+    return ok(UnionMethodPart{
+        .type = f != nullptr ? f->type : nullptr,
+        .entry = UnionMethod{m, nullptr, false},
+    });
+  }
+  std::vector<FunctionDecl *> variants = ClassDeclarer::methodsNamed(cls, name, false);
+  if (variants.size() > 1) {
+    const Type *receiver = member->object->type;
+    std::string message = ErrorTextUnionMethod::variants(name, m->name(), receiver->name());
+
+    return err(UnionCheckerCheckUnionMethodCallError{
+        .code = UnionCheckerCheckUnionMethodCallErrorCode::SEVERAL_VARIANTS,
+        .message = message,
+    });
+  }
+  if (variants.empty()) {
+    return ok(UnionMethodPart{
+        .type = nullptr,
+        .entry = UnionMethod{m, nullptr, false},
+    });
+  }
+
+  return this->classVariantMethod(member, m, cls, variants[0]);
+}
+
+UnionChecker::ResultUnionMethodPart UnionChecker::classVariantMethod(const MemberExpr *member,
+                                                                     const Type *m, ClassDecl *cls,
+                                                                     FunctionDecl *variant) {
+  ClassMemberChecker::ResultMemberAccessible accessible =
+      this->classMemberChecker->checkAccess(variant->cls(), variant->access(), member->name);
+  if (accessible.isErr()) {
+    return err(UnionCheckerCheckUnionMethodCallError{
+        .code = UnionCheckerCheckUnionMethodCallErrorCode::NOT_ACCESSIBLE,
+        .message = accessible.error().message,
+    });
+  }
+  FuncSymbol *sym = variant->sym;
+  UnionMethod entry{m, nullptr, false};
+  FunctionDecl *impl = ClassLinks::soleImplementation(cls, sym->decl);
+  if (impl != nullptr) {
+    entry.method = impl->sym;
+  } else {
+    entry.method = sym;
+    entry.virtualCall = true;
+  }
+
+  return ok(UnionMethodPart{
+      .type = this->returnInferrer->functionType(sym),
+      .entry = entry,
+  });
+}
 }

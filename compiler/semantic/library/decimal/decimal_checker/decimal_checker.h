@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/program/library/decimal/decimal_literal/decimal_literal.h"
+#include "compiler/program/library/decimal/decimal_method_table/decimal_method_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/decimal/decimal_checker/decimal_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -45,6 +46,9 @@ private:
   static bool isLiteralNode(const Expr *expr);
   static ResultLiteralRange literalRange(const Expr *lit);
   static ResultRoundingMode roundingMode(const std::u16string &text);
+  Expr *reportDecimalMember(CallExpr *call, MemberExpr *member);
+  Expr *checkDecimalArg(Expr *arg, DecimalArg kind, Builtin builtin);
+  static const Type *decimalResultType(DecimalResult result);
 
   SemanticState &state;
   Scopes *scopes = nullptr;

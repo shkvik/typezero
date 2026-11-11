@@ -66,232 +66,322 @@ std::string StringRegexChecker::argumentText(const Expr *arg) {
 }
 
 Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *member) {
-  llvm::StringRef name = member->name;
-  const StringMethodInfo *found = StringMethodTable::find(name);
+  const StringMethodInfo *found = StringMethodTable::find(member->name);
   bool takesPattern = found != nullptr && (found->form.is<TextOrPatternStringMethod>() ||
                                            found->form.is<PatternStringMethod>());
   if (!takesPattern) {
     return nullptr;
   }
   StringMethod method = found->method;
-  if (method == StringMethod::SPLIT && call->args.empty()) {
+  bool split = method == StringMethod::SPLIT;
+  if (split && call->args.empty()) {
     return nullptr;
   }
   call->type = Type::error();
   bool replace = method == StringMethod::REPLACE || method == StringMethod::REPLACE_ALL;
-  unsigned min = replace ? 2 : method == StringMethod::SPLIT ? 0 : 1;
-  unsigned max = method == StringMethod::SPLIT ? 2 : replace ? 2 : 1;
+  unsigned min = replace ? 2 : split ? 0 : 1;
+  unsigned max = split || replace ? 2 : 1;
   ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, min, max);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
-  auto restLoosely = [&] {
-    for (size_t i = 1; i < call->args.size(); ++i) {
-      call->args[i] = this->exprChecker->checkExpr(call->args[i]);
-    }
-
-    return call;
-  };
-  Expr *&pattern = call->args[0];
-  pattern = this->exprChecker->checkExpr(pattern);
+  Expr *pattern = this->exprChecker->checkExpr(call->args[0]);
+  call->args[0] = pattern;
   const Type *type = pattern->type;
   if (type->isError()) {
-    return restLoosely();
+    return this->checkRestLoosely(call);
   }
 
+  PatternCall patternCall{
+      .call = call,
+      .member = member,
+      .method = method,
+  };
   if (type->isRegExp()) {
-    const RegexLitExpr *regex = RegexChecker::knownRegex(pattern);
-    call->regex = regex;
-    std::optional<uint32_t> flags;
-    if (regex) {
-      flags = tz_re_flags(regex->program.data());
-    }
-    bool global = flags && (*flags & TZ_RE_GLOBAL);
-    if (method == StringMethod::MATCH) {
-      if (!flags) {
-        std::string message = ErrorTextStringRegex::matchFlag();
-        this->state.getDiagnostics().error(member->loc(), message);
-        return call;
-      }
-      call->target = BuiltinCall{.builtin = global ? Builtin::StrMatchGlobal : Builtin::StrMatch};
-      call->type = Type::optional(global ? Type::array(Type::string())
-                                         : this->regexChecker->matchType(regex));
-      return call;
-    }
-    if (method == StringMethod::MATCH_ALL || method == StringMethod::REPLACE_ALL) {
-      if (flags && !global) {
-        std::string source = ToUtf8::toUtf8(regex->pattern);
-        std::string flagsText = ToUtf8::toUtf8(regex->flags);
-        std::string message = ErrorTextStringRegex::needsG(name, source, flagsText);
-        this->state.getDiagnostics().error(pattern->loc(), message);
-        return restLoosely();
-      }
-      if (method == StringMethod::MATCH_ALL) {
-        call->target = BuiltinCall{.builtin = Builtin::StrMatchAll};
-        call->type = Type::iterator(this->regexChecker->matchType(regex));
-        return call;
-      }
-    }
-    if (method == StringMethod::SEARCH) {
-      call->target = BuiltinCall{.builtin = Builtin::StrSearch};
-      call->type = Type::intTy();
-      return call;
-    }
-    if (method == StringMethod::SPLIT) {
-      if (call->args.size() == 2) {
-        call->args[1] = this->memberChecker->checkPosition(call->args[1]);
-      }
-      bool undefinedGroups = !regex;
-      for (uint32_t k = 1; regex && k < tz_re_captures(regex->program.data()); ++k) {
-        undefinedGroups |= !tz_re_mandatory(regex->program.data(), k);
-      }
-      call->target = BuiltinCall{.builtin = Builtin::StrSplitRegex};
-      call->type = Type::array(undefinedGroups ? Type::optional(Type::string()) : Type::string());
-      return call;
-    }
-    return this->checkReplacement(call, member, regex);
+    return this->checkRegexPattern(patternCall);
   }
-
   if (type->isString()) {
-    std::string text = StringRegexChecker::argumentText(pattern);
-    auto *lit = dyn_cast<StringLitExpr>(pattern);
-    std::string escaped = lit ? StringRegexChecker::escapedLiteral(lit->value) : std::string();
-    std::string regexText = lit ? escaped : ErrorTextStringRegex::escapedRe(text);
-    if (method == StringMethod::SPLIT) {
-      if (call->args.size() == 2) {
-        call->args[1] = this->memberChecker->checkPosition(call->args[1]);
-      }
-      call->target = BuiltinCall{.builtin = Builtin::StrSplit};
-      call->type = Type::array(Type::string());
-      return call;
-    }
-    if (method == StringMethod::REPLACE_ALL) {
-      Expr *&replacement = call->args[1];
-      if (isa<FunctionExpr>(replacement)) {
-        std::string message = ErrorTextStringRegex::functionRe(escaped, text);
-        this->state.getDiagnostics().error(replacement->loc(), message);
-        return restLoosely();
-      }
-      replacement = this->argumentChecker->checkArg(replacement, Type::string());
-      call->target = BuiltinCall{.builtin = Builtin::StrReplaceAll};
-      call->type = Type::string();
-      return call;
-    }
-    std::string message =
-        method == StringMethod::REPLACE ? ErrorTextStringRegex::replaceStr(text, regexText)
-        : method == StringMethod::SEARCH
-            ? ErrorTextStringRegex::searchStr(text, regexText, lit != nullptr)
-            : ErrorTextStringRegex::includeStr(name, text, regexText, lit != nullptr);
-    this->state.getDiagnostics().error(member->loc(), message);
-    return restLoosely();
+    return this->checkTextPattern(patternCall);
   }
-  std::string message = ErrorTextStringRegex::notRegex(
-      name, method == StringMethod::SPLIT || method == StringMethod::REPLACE_ALL, type->name());
+  bool textAllowed = split || method == StringMethod::REPLACE_ALL;
+  std::string message = ErrorTextStringRegex::notRegex(member->name, textAllowed, type->name());
   this->state.getDiagnostics().error(pattern->loc(), message);
 
-  return restLoosely();
+  return this->checkRestLoosely(call);
+}
+
+Expr *StringRegexChecker::checkRestLoosely(CallExpr *call) {
+  for (size_t i = 1; i < call->args.size(); ++i) {
+    call->args[i] = this->exprChecker->checkExpr(call->args[i]);
+  }
+
+  return call;
+}
+
+Expr *StringRegexChecker::toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result) {
+  call->target = BuiltinCall{.builtin = builtin};
+  call->type = result;
+
+  return call;
+}
+
+Expr *StringRegexChecker::checkRegexPattern(const PatternCall &pattern) {
+  CallExpr *call = pattern.call;
+  const RegexLitExpr *regex = RegexChecker::knownRegex(call->args[0]);
+  call->regex = regex;
+  StringMethod method = pattern.method;
+  if (method == StringMethod::MATCH) {
+    return this->checkRegexMatch(pattern, regex);
+  }
+  bool needsGlobal = method == StringMethod::MATCH_ALL || method == StringMethod::REPLACE_ALL;
+  if (needsGlobal && StringRegexChecker::lacksGlobalFlag(regex)) {
+    return this->reportNeedsGlobal(pattern, regex);
+  }
+  if (method == StringMethod::MATCH_ALL) {
+    const Type *matches = Type::iterator(this->regexChecker->matchType(regex));
+    return StringRegexChecker::toBuiltinCall(call, Builtin::StrMatchAll, matches);
+  }
+  if (method == StringMethod::SEARCH) {
+    return StringRegexChecker::toBuiltinCall(call, Builtin::StrSearch, Type::intTy());
+  }
+  if (method == StringMethod::SPLIT) {
+    return this->checkRegexSplit(call, regex);
+  }
+
+  return this->checkReplacement(call, pattern.member, regex);
+}
+
+bool StringRegexChecker::lacksGlobalFlag(const RegexLitExpr *regex) {
+  if (regex == nullptr) {
+    return false;
+  }
+  uint32_t flags = tz_re_flags(regex->program.data());
+
+  return (flags & TZ_RE_GLOBAL) == 0;
+}
+
+Expr *StringRegexChecker::checkRegexMatch(const PatternCall &pattern, const RegexLitExpr *regex) {
+  CallExpr *call = pattern.call;
+  if (regex == nullptr) {
+    std::string message = ErrorTextStringRegex::matchFlag();
+    this->state.getDiagnostics().error(pattern.member->loc(), message);
+    return call;
+  }
+  uint32_t flags = tz_re_flags(regex->program.data());
+  bool global = (flags & TZ_RE_GLOBAL) != 0;
+  if (global) {
+    const Type *matches = Type::optional(Type::array(Type::string()));
+    return StringRegexChecker::toBuiltinCall(call, Builtin::StrMatchGlobal, matches);
+  }
+  const Type *match = Type::optional(this->regexChecker->matchType(regex));
+
+  return StringRegexChecker::toBuiltinCall(call, Builtin::StrMatch, match);
+}
+
+Expr *StringRegexChecker::reportNeedsGlobal(const PatternCall &pattern, const RegexLitExpr *regex) {
+  std::string source = ToUtf8::toUtf8(regex->pattern);
+  std::string flagsText = ToUtf8::toUtf8(regex->flags);
+  std::string message = ErrorTextStringRegex::needsG(pattern.member->name, source, flagsText);
+  this->state.getDiagnostics().error(pattern.call->args[0]->loc(), message);
+
+  return this->checkRestLoosely(pattern.call);
+}
+
+Expr *StringRegexChecker::checkRegexSplit(CallExpr *call, const RegexLitExpr *regex) {
+  if (call->args.size() == 2) {
+    call->args[1] = this->memberChecker->checkPosition(call->args[1]);
+  }
+  bool undefinedGroups = regex == nullptr;
+  for (uint32_t k = 1; regex != nullptr && k < tz_re_captures(regex->program.data()); ++k) {
+    undefinedGroups |= !tz_re_mandatory(regex->program.data(), k);
+  }
+  const Type *part = undefinedGroups ? Type::optional(Type::string()) : Type::string();
+
+  return StringRegexChecker::toBuiltinCall(call, Builtin::StrSplitRegex, Type::array(part));
+}
+
+Expr *StringRegexChecker::checkTextPattern(const PatternCall &pattern) {
+  CallExpr *call = pattern.call;
+  if (pattern.method == StringMethod::SPLIT) {
+    if (call->args.size() == 2) {
+      call->args[1] = this->memberChecker->checkPosition(call->args[1]);
+    }
+    return StringRegexChecker::toBuiltinCall(call, Builtin::StrSplit, Type::array(Type::string()));
+  }
+  const Expr *patternExpr = call->args[0];
+  std::string text = StringRegexChecker::argumentText(patternExpr);
+  auto *literal = dyn_cast<StringLitExpr>(patternExpr);
+  std::string escaped =
+      literal != nullptr ? StringRegexChecker::escapedLiteral(literal->value) : std::string();
+  if (pattern.method == StringMethod::REPLACE_ALL) {
+    return this->checkTextReplaceAll(call, text, escaped);
+  }
+  std::string regexText = literal != nullptr ? escaped : ErrorTextStringRegex::escapedRe(text);
+  bool written = literal != nullptr;
+  std::string message;
+  if (pattern.method == StringMethod::REPLACE) {
+    message = ErrorTextStringRegex::replaceStr(text, regexText);
+  } else if (pattern.method == StringMethod::SEARCH) {
+    message = ErrorTextStringRegex::searchStr(text, regexText, written);
+  } else {
+    message = ErrorTextStringRegex::includeStr(pattern.member->name, text, regexText, written);
+  }
+  this->state.getDiagnostics().error(pattern.member->loc(), message);
+
+  return this->checkRestLoosely(call);
+}
+
+Expr *StringRegexChecker::checkTextReplaceAll(CallExpr *call, const std::string &text,
+                                              const std::string &escaped) {
+  Expr *&replacement = call->args[1];
+  if (isa<FunctionExpr>(replacement)) {
+    std::string message = ErrorTextStringRegex::functionRe(escaped, text);
+    this->state.getDiagnostics().error(replacement->loc(), message);
+    return this->checkRestLoosely(call);
+  }
+  replacement = this->argumentChecker->checkArg(replacement, Type::string());
+
+  return StringRegexChecker::toBuiltinCall(call, Builtin::StrReplaceAll, Type::string());
 }
 
 Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
                                            const RegexLitExpr *regex) {
-  Expr *&replacement = call->args[1];
-  bool function = isa<FunctionExpr>(replacement);
-  if (auto *name = dyn_cast<NameExpr>(replacement)) {
-    ScopeEntry entry = this->scopes->lookup(name->name);
-    function = entry.func() ||
-               (entry.var() && entry.var()->type && entry.var()->type->nonOptional()->isFunction());
-  }
-  if (!function) {
-    replacement = this->argumentChecker->checkArg(replacement, Type::string());
-    call->target = BuiltinCall{.builtin = Builtin::StrReplaceRegex};
-    call->type = Type::string();
-    auto *text = dyn_cast<StringLitExpr>(replacement);
-    if (!regex || !text) {
-      return call;
-    }
-    const uint32_t *program = regex->program.data();
-    uint32_t groups = tz_re_captures(program) - 1;
-    bool named = false;
-    for (uint32_t k = 1; k <= groups; ++k) {
-      uint32_t start;
-      named |= tz_re_name(program, k, &start) != 0;
-    }
-    const std::u16string &value = text->value;
-    for (size_t i = 0; i + 1 < value.size(); ++i) {
-      if (value[i] != u'$') {
-        continue;
-      }
-      char16_t c = value[i + 1];
-      if (c == u'$') {
-        ++i;
-      } else if (c >= u'1' && c <= u'9') {
-        uint32_t one = c - u'0';
-        char16_t next = i + 2 < value.size() ? value[i + 2] : 0;
-        uint32_t two = next >= u'0' && next <= u'9' ? one * 10 + (next - u'0') : 0;
-        if ((two && two <= groups) || one <= groups) {
-          continue;
-        }
-        std::string message = ErrorTextStringRegex::noGroup(groups, one);
-        this->state.getDiagnostics().error(text->loc(), message);
-        return call;
-      } else if (c == u'<') {
-        size_t close = value.find(u'>', i + 2);
-        std::string groupName =
-            close == std::u16string::npos ? "" : ToUtf8::toUtf8(value.substr(i + 2, close - i - 2));
-        bool found = false;
-        for (uint32_t k = 1; k <= groups && !found; ++k) {
-          uint32_t start, length = tz_re_name(program, k, &start);
-          found = length &&
-                  ToUtf8::toUtf8(StringRegexChecker::units(program, start, length)) == groupName;
-        }
-        if (found) {
-          continue;
-        }
-        std::string message = ErrorTextStringRegex::noNamed(named, groupName);
-        this->state.getDiagnostics().error(text->loc(), message);
-        return call;
-      }
-    }
-    return call;
+  if (this->isFunctionReplacement(call->args[1])) {
+    return this->checkFunctionReplacement(call, member, regex);
   }
 
-  Signature sig;
-  sig.pad = false;
-  sig.ret = Type::string();
-  sig.params.push_back(Type::string());
-  const Type *match = this->regexChecker->matchType(regex);
-  if (regex) {
-    for (int k = 1; k <= match->matchGroups(); ++k) {
-      sig.params.push_back(match->captureMandatory(unsigned(k)) ? Type::string()
-                                                                : Type::optional(Type::string()));
-    }
-    sig.params.push_back(Type::intTy());
-    sig.params.push_back(Type::string());
-    if (const Type *named = match->field("groups")->type; !named->isOptional()) {
-      sig.params.push_back(named);
-    }
+  return this->checkTextReplacement(call, regex);
+}
+
+bool StringRegexChecker::isFunctionReplacement(const Expr *replacement) const {
+  auto *name = dyn_cast<NameExpr>(replacement);
+  if (name == nullptr) {
+    return isa<FunctionExpr>(replacement);
   }
-  if (auto *fe = dyn_cast<FunctionExpr>(replacement);
-      fe && fe->fn->params.size() > sig.params.size()) {
-    if (!regex) {
-      std::string message = ErrorTextStringRegex::onlyMatch();
-      this->state.getDiagnostics().error(fe->fn->params[1].loc, message);
-    } else {
-      std::string message = ErrorTextStringRegex::passes(
-          member->name, sig.params.size(), match->matchGroups(), sig.params.back()->isObject());
-      this->state.getDiagnostics().error(fe->fn->params[sig.params.size()].loc, message);
-    }
-    while (sig.params.size() < fe->fn->params.size()) {
-      sig.params.push_back(Type::string());
-    }
-    replacement = this->callbackChecker->checkFunctionArg(
-        replacement, sig, unsigned(sig.params.size()), member->name);
+  ScopeEntry entry = this->scopes->lookup(name->name);
+  const VarSymbol *var = entry.var();
+  bool functionVar =
+      var != nullptr && var->type != nullptr && var->type->nonOptional()->isFunction();
+
+  return entry.func() != nullptr || functionVar;
+}
+
+Expr *StringRegexChecker::checkTextReplacement(CallExpr *call, const RegexLitExpr *regex) {
+  Expr *replacement = this->argumentChecker->checkArg(call->args[1], Type::string());
+  call->args[1] = replacement;
+  call->target = BuiltinCall{.builtin = Builtin::StrReplaceRegex};
+  call->type = Type::string();
+  auto *text = dyn_cast<StringLitExpr>(replacement);
+  if (regex == nullptr || text == nullptr) {
     return call;
   }
-  replacement = this->callbackChecker->checkFunctionArg(replacement, sig,
-                                                        unsigned(sig.params.size()), member->name);
-  if (!replacement->type->isFunction()) {
+  ResultGroupsReferenced groups = StringRegexChecker::replacementGroups(regex, text->value);
+  if (groups.isErr()) {
+    this->state.getDiagnostics().error(text->loc(), groups.error().message);
+  }
+
+  return call;
+}
+
+StringRegexChecker::ResultGroupsReferenced
+StringRegexChecker::replacementGroups(const RegexLitExpr *regex, const std::u16string &value) {
+  const uint32_t *program = regex->program.data();
+  uint32_t groups = tz_re_captures(program) - 1;
+  for (size_t i = 0; i + 1 < value.size(); ++i) {
+    if (value[i] != u'$') {
+      continue;
+    }
+    char16_t next = value[i + 1];
+    if (next == u'$') {
+      ++i;
+      continue;
+    }
+    bool numbered = next >= u'1' && next <= u'9';
+    if (numbered && !StringRegexChecker::numberedGroupKnown(value, i, groups)) {
+      uint32_t one = next - u'0';
+      std::string message = ErrorTextStringRegex::noGroup(groups, one);
+
+      return err(StringRegexCheckerReplacementGroupsError{
+          .code = StringRegexCheckerReplacementGroupsErrorCode::NO_SUCH_GROUP,
+          .message = message,
+      });
+    }
+    if (next != u'<') {
+      continue;
+    }
+    std::string groupName = StringRegexChecker::groupNameAt(value, i);
+    if (!StringRegexChecker::hasNamedGroup(program, groups, groupName)) {
+      bool named = StringRegexChecker::hasNamedGroups(program, groups);
+      std::string message = ErrorTextStringRegex::noNamed(named, groupName);
+
+      return err(StringRegexCheckerReplacementGroupsError{
+          .code = StringRegexCheckerReplacementGroupsErrorCode::NO_SUCH_NAMED_GROUP,
+          .message = message,
+      });
+    }
+  }
+
+  return ok(&value);
+}
+
+bool StringRegexChecker::numberedGroupKnown(const std::u16string &value, size_t at,
+                                            uint32_t groups) {
+  uint32_t one = value[at + 1] - u'0';
+  char16_t next = at + 2 < value.size() ? value[at + 2] : 0;
+  uint32_t two = next >= u'0' && next <= u'9' ? one * 10 + (next - u'0') : 0;
+
+  return (two != 0 && two <= groups) || one <= groups;
+}
+
+std::string StringRegexChecker::groupNameAt(const std::u16string &value, size_t at) {
+  size_t close = value.find(u'>', at + 2);
+  if (close == std::u16string::npos) {
+    return "";
+  }
+
+  return ToUtf8::toUtf8(value.substr(at + 2, close - at - 2));
+}
+
+bool StringRegexChecker::hasNamedGroup(const uint32_t *program, uint32_t groups,
+                                       const std::string &groupName) {
+  for (uint32_t k = 1; k <= groups; ++k) {
+    uint32_t start = 0;
+    uint32_t length = tz_re_name(program, k, &start);
+    bool same = length != 0 &&
+                ToUtf8::toUtf8(StringRegexChecker::units(program, start, length)) == groupName;
+    if (same) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool StringRegexChecker::hasNamedGroups(const uint32_t *program, uint32_t groups) {
+  for (uint32_t k = 1; k <= groups; ++k) {
+    uint32_t start = 0;
+    if (tz_re_name(program, k, &start) != 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+Expr *StringRegexChecker::checkFunctionReplacement(CallExpr *call, MemberExpr *member,
+                                                   const RegexLitExpr *regex) {
+  const Type *match = this->regexChecker->matchType(regex);
+  Signature signature = StringRegexChecker::replacerSignature(regex, match);
+  auto *closure = dyn_cast<FunctionExpr>(call->args[1]);
+  bool extraParams = closure != nullptr && closure->fn->params.size() > signature.params.size();
+  if (extraParams) {
+    return this->checkExtraReplacerParams(call, member, regex, match, signature);
+  }
+  unsigned paramCount = unsigned(signature.params.size());
+  call->args[1] =
+      this->callbackChecker->checkFunctionArg(call->args[1], signature, paramCount, member->name);
+  if (!call->args[1]->type->isFunction()) {
     return call;
   }
   call->target = BuiltinCall{.builtin = Builtin::StrReplaceRegexFn};
@@ -301,4 +391,48 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
   return call;
 }
 
+Signature StringRegexChecker::replacerSignature(const RegexLitExpr *regex, const Type *match) {
+  Signature signature;
+  signature.pad = false;
+  signature.ret = Type::string();
+  signature.params.push_back(Type::string());
+  if (regex == nullptr) {
+    return signature;
+  }
+  for (int k = 1; k <= match->matchGroups(); ++k) {
+    bool mandatory = match->captureMandatory(unsigned(k));
+    signature.params.push_back(mandatory ? Type::string() : Type::optional(Type::string()));
+  }
+  signature.params.push_back(Type::intTy());
+  signature.params.push_back(Type::string());
+  const Type *named = match->field("groups")->type;
+  if (!named->isOptional()) {
+    signature.params.push_back(named);
+  }
+
+  return signature;
+}
+
+Expr *StringRegexChecker::checkExtraReplacerParams(CallExpr *call, MemberExpr *member,
+                                                   const RegexLitExpr *regex, const Type *match,
+                                                   Signature signature) {
+  auto *closure = llvm::cast<FunctionExpr>(call->args[1]);
+  if (regex == nullptr) {
+    std::string message = ErrorTextStringRegex::onlyMatch();
+    this->state.getDiagnostics().error(closure->fn->params[1].loc, message);
+  } else {
+    bool groupsObject = signature.params.back()->isObject();
+    std::string message = ErrorTextStringRegex::passes(member->name, signature.params.size(),
+                                                       match->matchGroups(), groupsObject);
+    this->state.getDiagnostics().error(closure->fn->params[signature.params.size()].loc, message);
+  }
+  while (signature.params.size() < closure->fn->params.size()) {
+    signature.params.push_back(Type::string());
+  }
+  unsigned paramCount = unsigned(signature.params.size());
+  call->args[1] =
+      this->callbackChecker->checkFunctionArg(call->args[1], signature, paramCount, member->name);
+
+  return call;
+}
 }

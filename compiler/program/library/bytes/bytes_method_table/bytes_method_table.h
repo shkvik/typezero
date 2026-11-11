@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/ast/builtin/builtin.h"
 #include "compiler/union/union/union.h"
 #include "llvm/ADT/StringRef.h"
 #include <optional>
@@ -68,23 +69,92 @@ enum class BytesMethod {
 
 enum class BytesMethodKind {
   TYPED_ARRAY_CALLBACK,
-  TYPED_ARRAY,
+  TYPED_ARRAY_SORT,
+  TYPED_ARRAY_REVERSE,
+  TYPED_ARRAY_AT,
+  TYPED_ARRAY_SEARCH,
+  TYPED_ARRAY_JOIN,
+  TYPED_ARRAY_FILL,
+  TYPED_ARRAY_SET,
+  TYPED_ARRAY_POSITIONS,
+  TYPED_ARRAY_WITH,
+  TYPED_ARRAY_ITERATOR,
   NOT_ON_TYPED_ARRAY,
+};
+
+enum class ReorderPlace {
+  IN_PLACE,
+  NEW_COPY,
+};
+
+enum class BytesSearchMode {
+  INDEX_OF,
+  LAST_INDEX_OF,
+  INCLUDES,
 };
 
 struct TypedArrayCallbackMethod {
   static constexpr BytesMethodKind kind = BytesMethodKind::TYPED_ARRAY_CALLBACK;
 };
 
-struct TypedArrayMethod {
-  static constexpr BytesMethodKind kind = BytesMethodKind::TYPED_ARRAY;
+struct TypedArraySortMethod {
+  static constexpr BytesMethodKind kind = BytesMethodKind::TYPED_ARRAY_SORT;
+  Builtin builtin;
+  ReorderPlace place;
+};
+
+struct TypedArrayReverseMethod {
+  static constexpr BytesMethodKind kind = BytesMethodKind::TYPED_ARRAY_REVERSE;
+  Builtin builtin;
+  ReorderPlace place;
+};
+
+struct TypedArrayAtMethod {
+  static constexpr BytesMethodKind kind = BytesMethodKind::TYPED_ARRAY_AT;
+};
+
+struct TypedArraySearchMethod {
+  static constexpr BytesMethodKind kind = BytesMethodKind::TYPED_ARRAY_SEARCH;
+  BytesSearchMode mode;
+};
+
+struct TypedArrayJoinMethod {
+  static constexpr BytesMethodKind kind = BytesMethodKind::TYPED_ARRAY_JOIN;
+  int maxArgs;
+};
+
+struct TypedArrayFillMethod {
+  static constexpr BytesMethodKind kind = BytesMethodKind::TYPED_ARRAY_FILL;
+};
+
+struct TypedArraySetMethod {
+  static constexpr BytesMethodKind kind = BytesMethodKind::TYPED_ARRAY_SET;
+};
+
+struct TypedArrayPositionsMethod {
+  static constexpr BytesMethodKind kind = BytesMethodKind::TYPED_ARRAY_POSITIONS;
+  Builtin builtin;
+  int minArgs;
+  int maxArgs;
+};
+
+struct TypedArrayWithMethod {
+  static constexpr BytesMethodKind kind = BytesMethodKind::TYPED_ARRAY_WITH;
+};
+
+struct TypedArrayIteratorMethod {
+  static constexpr BytesMethodKind kind = BytesMethodKind::TYPED_ARRAY_ITERATOR;
 };
 
 struct NotOnTypedArrayMethod {
   static constexpr BytesMethodKind kind = BytesMethodKind::NOT_ON_TYPED_ARRAY;
 };
 
-using BytesMethodForm = Union<TypedArrayCallbackMethod, TypedArrayMethod, NotOnTypedArrayMethod>;
+using BytesMethodForm =
+    Union<TypedArrayCallbackMethod, TypedArraySortMethod, TypedArrayReverseMethod,
+          TypedArrayAtMethod, TypedArraySearchMethod, TypedArrayJoinMethod, TypedArrayFillMethod,
+          TypedArraySetMethod, TypedArrayPositionsMethod, TypedArrayWithMethod,
+          TypedArrayIteratorMethod, NotOnTypedArrayMethod>;
 
 struct BytesMethodInfo {
   llvm::StringLiteral name;

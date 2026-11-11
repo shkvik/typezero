@@ -77,258 +77,472 @@ std::vector<const Stmt *> VarChecker::followingStatements(llvm::ArrayRef<Stmt *>
 }
 
 void VarChecker::checkVarDecl(VarDeclStmt *decl) {
-  llvm::ArrayRef<Stmt *> block = this->state.getBlockPosition().getBlock();
-  size_t index = this->state.getBlockPosition().getBlockIndex();
-  this->state.getBlockPosition().forgetBlock();
-  for (size_t k = 0; k < decl->decls.size(); ++k) {
-    VarDeclarator &d = decl->decls[k];
-    const Type *declared = d.typeAnn ? this->typeResolver->resolveType(*d.typeAnn, false) : nullptr;
-    if (auto *name = llvm::dyn_cast_or_null<NameExpr>(d.init);
-        name && decl->isConst && !declared && !d.destructured() && name->typeArgs.empty()) {
-      if (FuncSymbol *generic = this->genericChecker->genericNamed(name)) {
-        Scopes::ResultEntryDeclared added =
-            this->scopes->declare(d.name, {FunctionEntry{.func = generic}});
-        if (added.isErr()) {
-          this->state.getDiagnostics().error(d.loc, added.error().message);
-        }
-        if (added.isErr() && added.error().code != ScopesDeclareErrorCode::UNDEFINED_AS_NAME) {
-          ScopeEntry previousEntry = this->scopes->lookup(d.name);
-          std::string declaredHere = ErrorTextDeclare::previous();
-          this->state.getDiagnostics().note(previousEntry.loc(), declaredHere);
-        }
-        d.alias = true;
-        continue;
-      }
-    }
-    if (auto *fe = llvm::dyn_cast_or_null<FunctionExpr>(d.init);
-        fe && !fe->fn->typeParams.empty() && decl->isConst && !declared && !d.destructured() &&
-        this->state.getScopeStack().isTopLevel()) {
-      FunctionDecl *fn = fe->fn;
-      fn->place = FunctionPlace::LIFTED;
-      fn->name = d.name;
-      if (this->state.getModuleStates().getCurrentModule()) {
-        this->state.getModuleStates().rememberDeclModule(
-            fn, this->state.getModuleStates().getCurrentModule());
-      }
-      this->functionChecker->declareFunction(fn);
-      this->callCycles->findCycles({fn});
-      this->state.getReturnInference().addLiftedFunction(fn);
-      d.alias = true;
-      continue;
-    }
-    if (auto *fe = llvm::dyn_cast_or_null<FunctionExpr>(d.init)) {
-      if (fe->fn->name.empty()) {
-        fe->fn->name = d.name;
-      }
-      if (decl->isConst && !d.destructured()) {
-        VarSymbol *var = this->scopes->declareVar(d.name, d.loc, nullptr, true);
-        var->holds = Lambda{.lambda = fe->fn};
-        d.sym = var;
-        const Type *function =
-            declared && declared->nonOptional()->isFunction() ? declared->nonOptional() : nullptr;
-        Signature sig = function ? ClosureChecker::signatureOf(function) : Signature();
-        d.init = this->closureChecker->checkFunctionExpr(fe, function ? &sig : nullptr);
-        if (declared) {
-          d.init = this->typeRelations->coerce(d.init, declared);
-        }
-        if (auto *cast = dyn_cast<CastExpr>(d.init); cast && cast->adaptsResult) {
-          var->holds = OrdinaryValue{};
-        }
-        var->type = declared ? declared : d.init->type;
-        continue;
-      }
-    }
-    const Type *type = declared;
-    Expr *value = nullptr;
-    bool untyped = false;
-    const Type *hint = declared;
-    std::vector<std::pair<const Type *, llvm::SMLoc>> places;
-    if (!declared && d.init && !d.destructured() && Destination::literalShaped(d.init)) {
-      this->state.getBlockPosition().rememberFollowing(
-          block.empty() ? std::vector<const Stmt *>()
-                        : VarChecker::followingStatements(block, index));
-      hint =
-          this->destination->literalDestination(d, llvm::ArrayRef(decl->decls).drop_front(k + 1));
-      places = this->state.getTypeContext().takeDestinationConflict();
-    }
-    VarSymbol *early = nullptr;
-    if (const Type *timer =
-            d.init && !d.destructured() ? this->timerChecker->timerCallType(d.init) : nullptr) {
-      early = this->scopes->declareVar(d.name, d.loc, declared ? declared : timer, decl->isConst);
-      if (LocalVarState *localState = early->local()) {
-        localState->declSeq = ~0u;
-      }
-    }
-    if (d.init) {
-      if (!early) {
-        this->state.getExpressionMarks().enterVariableInit(d.name);
-      }
-      if (d.destructured() && !d.objectPattern()) {
-        this->iteratorMethods->markFused(d.init);
-      }
-      d.init = value = this->exprChecker->checkExpr(d.init, hint);
-      if (d.destructured() && !d.objectPattern()) {
-        d.init = value = this->dictChecker->iterableOf(d.init);
-      }
-      if (!early) {
-        this->state.getExpressionMarks().leaveVariableInit();
-      }
-      if (declared) {
-        d.init = this->typeRelations->coerce(d.init, declared);
-      } else {
-        type = d.init->type;
-        ResultInitHasType typed = VarChecker::initHasType(decl, d, type);
-        if (typed.isErr()) {
-          this->state.getDiagnostics().error(d.init->loc(), typed.error().message);
-          type = Type::error();
-        } else if (type->isUndefined()) {
-          untyped = true;
-          type = Type::error();
-        }
-      }
-    } else if (decl->isConst) {
-      ResultConstValued valued = VarChecker::constValue(decl, d);
-      if (valued.isErr()) {
-        this->state.getDiagnostics().error(d.loc, valued.error().message);
-      }
-      if (!type) {
-        type = Type::error();
-      }
-    } else if (!declared) {
-      untyped = true;
-      type = Type::error();
-    }
+  BlockPosition &position = this->state.getBlockPosition();
+  llvm::ArrayRef<Stmt *> block = position.getBlock();
+  size_t blockIndex = position.getBlockIndex();
+  position.forgetBlock();
+  for (size_t number = 0; number < decl->decls.size(); ++number) {
+    VarDeclarator &d = decl->decls[number];
+    const Type *declared =
+        d.typeAnn.has_value() ? this->typeResolver->resolveType(*d.typeAnn, false) : nullptr;
+    DeclaratorPlace place{
+        .decl = decl,
+        .declarator = &d,
+        .number = number,
+        .declared = declared,
+        .block = block,
+        .blockIndex = blockIndex,
+    };
+    this->walkDeclarator(place);
+  }
+}
 
-    if (d.destructured() && d.objectPattern()) {
-    } else if (d.destructured() && (type->isString() || type->isTypedArray()) && !declared) {
-      auto *chars = this->state.getAst().make<ArrayLitExpr>(d.init->loc());
-      chars->elements.push_back({d.init, true});
-      chars->type = Type::array(type->isString() ? Type::string() : type->elementType());
-      d.init = value = chars;
-      type = chars->type;
-    } else if (d.destructured() && type->isIterator() && !declared) {
-      d.init = value = this->generatorChecker->destructuredIterator(d.init, d);
-      type = d.init->type;
-    } else {
-      ResultDestructure shaped = VarChecker::destructurable(d, type);
-      if (shaped.isErr()) {
-        this->state.getDiagnostics().error(d.init ? d.init->loc() : d.loc, shaped.error().message);
-        type = Type::error();
-      }
-    }
+void VarChecker::walkDeclarator(const DeclaratorPlace &place) {
+  DeclaratorForm form = this->declaratorForm(place);
+  switch (form.kind()) {
+    case DeclaratorKind::GENERIC_ALIAS:
+      return this->declareGenericAlias(place, form.as<GenericAliasDeclarator>()->generic);
+    case DeclaratorKind::GENERIC_FUNCTION:
+      return this->liftGenericFunction(place, form.as<GenericFunctionDeclarator>()->function);
+    case DeclaratorKind::CONST_FUNCTION:
+      return this->declareConstFunction(place, form.as<ConstFunctionDeclarator>()->function);
+    case DeclaratorKind::VALUE:
+      return this->walkValueDeclarator(place);
+  }
+}
 
-    if (early) {
-      if (LocalVarState *localState = early->local()) {
-        localState->declSeq = this->state.getReturnInference().takeSequenceNumber();
-      }
-      d.sym = early;
-    } else {
-      d.sym = this->scopes->declareVar(d.name, d.loc, type, decl->isConst);
+DeclaratorForm VarChecker::declaratorForm(const DeclaratorPlace &place) {
+  const VarDeclStmt *decl = place.decl;
+  const VarDeclarator &d = *place.declarator;
+  bool plainConst = decl->isConst && place.declared == nullptr && !d.destructured();
+  auto *name = dyn_cast_or_null<NameExpr>(d.init);
+  if (name != nullptr && plainConst && name->typeArgs.empty()) {
+    FuncSymbol *generic = this->genericChecker->genericNamed(name);
+    if (generic != nullptr) {
+      return GenericAliasDeclarator{.generic = generic};
     }
-    this->regexChecker->noteRegexVariable(d.sym, value, decl->isConst, block, index);
-    if (decl->isConst && !d.destructured()) {
-      if (auto *got = llvm::dyn_cast_or_null<CallExpr>(value);
-          got && got->builtin() == Builtin::ReflectMethod &&
-          !this->state.getExpressionMarks().hasSeveralVariants(got)) {
-        d.sym->holds = ReflectedMethod{.method = got->method()->decl};
-      }
-      if (auto *got = llvm::dyn_cast_or_null<CallExpr>(value);
-          got && got->builtin() == Builtin::ReflectGet && got->args.size() == 2) {
-        const Expr *key = got->args[1];
-        while (auto *conv = llvm::dyn_cast<CastExpr>(key)) {
-          if (!conv->isImplicit()) {
-            break;
-          }
-          key = conv->operand;
-        }
-        std::vector<std::u16string> names;
-        if (auto *lit = llvm::dyn_cast<StringLitExpr>(key)) {
-          names.push_back(lit->value);
-        } else if (const Type *keyType = key->type ? key->type->nonOptional() : nullptr) {
-          std::vector<const Type *> members;
-          if (keyType->isUnion()) {
-            members.assign(keyType->members().begin(), keyType->members().end());
-          } else {
-            members.push_back(keyType);
-          }
-          for (const Type *m : members) {
-            if (!m->isLiteral() || !m->literalBase()->isString()) {
-              names.clear();
-              break;
-            }
-            names.push_back(m->literalText());
-          }
-        }
-        std::vector<llvm::StringRef> kept;
-        for (const std::u16string &name : names) {
-          kept.push_back(this->state.getAst().keepName(ToUtf8::toUtf8(name)));
-        }
-        if (!kept.empty()) {
-          d.sym->holds = ReflectedNames{.names = std::move(kept)};
-        }
-      }
-      auto *made = llvm::dyn_cast_or_null<CallExpr>(value);
-      bool fresh =
-          llvm::isa_and_nonnull<ArrayLitExpr>(value) ||
-          (made &&
-           (made->builtin() == Builtin::ArrMap || made->builtin() == Builtin::ArrFilter ||
-            made->builtin() == Builtin::ArrSlice || made->builtin() == Builtin::ArrConcat ||
-            made->builtin() == Builtin::ArrFlatMap || made->builtin() == Builtin::ArrayFrom));
-      if (LocalVarState *localState = d.sym->local()) {
-        localState->unshared =
-            fresh && type->isArray() && FlowChecker::staysLocal(d.sym->owner(), d.name);
-      }
+  }
+  auto *function = dyn_cast_or_null<FunctionExpr>(d.init);
+  bool genericFunction = function != nullptr && !function->fn->typeParams.empty() && plainConst &&
+                         this->state.getScopeStack().isTopLevel();
+  if (genericFunction) {
+    return GenericFunctionDeclarator{.function = function->fn};
+  }
+  bool constFunction = function != nullptr && decl->isConst && !d.destructured();
+  if (constFunction) {
+    return ConstFunctionDeclarator{.function = function};
+  }
+
+  return ValueDeclarator{};
+}
+
+void VarChecker::declareGenericAlias(const DeclaratorPlace &place, FuncSymbol *generic) {
+  VarDeclarator &d = *place.declarator;
+  Scopes::ResultEntryDeclared added =
+      this->scopes->declare(d.name, {FunctionEntry{.func = generic}});
+  if (added.isErr()) {
+    this->state.getDiagnostics().error(d.loc, added.error().message);
+  }
+  bool showPrevious =
+      added.isErr() && added.error().code != ScopesDeclareErrorCode::UNDEFINED_AS_NAME;
+  if (showPrevious) {
+    ScopeEntry previousEntry = this->scopes->lookup(d.name);
+    std::string declaredHere = ErrorTextDeclare::previous();
+    this->state.getDiagnostics().note(previousEntry.loc(), declaredHere);
+  }
+  d.alias = true;
+}
+
+void VarChecker::liftGenericFunction(const DeclaratorPlace &place, FunctionDecl *fn) {
+  fn->place = FunctionPlace::LIFTED;
+  fn->name = place.declarator->name;
+  Module *module = this->state.getModuleStates().getCurrentModule();
+  if (module != nullptr) {
+    this->state.getModuleStates().rememberDeclModule(fn, module);
+  }
+  this->functionChecker->declareFunction(fn);
+  this->callCycles->findCycles({fn});
+  this->state.getReturnInference().addLiftedFunction(fn);
+  place.declarator->alias = true;
+}
+
+void VarChecker::declareConstFunction(const DeclaratorPlace &place, FunctionExpr *function) {
+  VarDeclarator &d = *place.declarator;
+  const Type *declared = place.declared;
+  VarChecker::nameFunctionValue(d);
+  VarSymbol *var = this->scopes->declareVar(d.name, d.loc, nullptr, true);
+  var->holds = Lambda{.lambda = function->fn};
+  d.sym = var;
+  bool functionDeclared = declared != nullptr && declared->nonOptional()->isFunction();
+  const Type *functionType = functionDeclared ? declared->nonOptional() : nullptr;
+  Signature signature =
+      functionType != nullptr ? ClosureChecker::signatureOf(functionType) : Signature();
+  const Signature *expectedSignature = functionType != nullptr ? &signature : nullptr;
+  d.init = this->closureChecker->checkFunctionExpr(function, expectedSignature);
+  if (declared != nullptr) {
+    d.init = this->typeRelations->coerce(d.init, declared);
+  }
+  auto *adapted = dyn_cast<CastExpr>(d.init);
+  if (adapted != nullptr && adapted->adaptsResult) {
+    var->holds = OrdinaryValue{};
+  }
+  var->type = declared != nullptr ? declared : d.init->type;
+}
+
+void VarChecker::nameFunctionValue(VarDeclarator &d) {
+  auto *function = dyn_cast_or_null<FunctionExpr>(d.init);
+  if (function != nullptr && function->fn->name.empty()) {
+    function->fn->name = d.name;
+  }
+}
+
+void VarChecker::walkValueDeclarator(const DeclaratorPlace &place) {
+  VarDeclarator &d = *place.declarator;
+  VarChecker::nameFunctionValue(d);
+  VariableValue variable{
+      .type = place.declared,
+      .hint = place.declared,
+  };
+  this->findDestination(place, variable);
+  this->declareTimerEarly(place, variable);
+  this->walkVariableValue(place, variable);
+  this->walkDestructuring(place, variable);
+  this->declareVariable(place, variable);
+  this->regexChecker->noteRegexVariable(d.sym, variable.value, place.decl->isConst, place.block,
+                                        place.blockIndex);
+  if (place.decl->isConst && !d.destructured()) {
+    this->rememberReflection(d, variable.value);
+    this->markUnsharedArray(d, variable);
+  }
+  this->rememberConstLiteral(place, variable);
+  if (!variable.places.empty()) {
+    this->state.getTypeContext().rememberDestinations(d.sym, std::move(variable.places));
+  }
+  this->rememberResultVariable(place, variable);
+  if (variable.untyped) {
+    this->noteUntyped(d.sym, d.init != nullptr);
+  }
+  if (variable.value != nullptr) {
+    this->flowChecker->assigned(d.sym, variable.value);
+  }
+  this->rememberFixedLength(place, variable);
+  this->rememberConstNumber(place, variable);
+  this->rememberConstText(place, variable);
+}
+
+void VarChecker::findDestination(const DeclaratorPlace &place, VariableValue &variable) {
+  const VarDeclarator &d = *place.declarator;
+  bool literalShaped = place.declared == nullptr && d.init != nullptr && !d.destructured() &&
+                       Destination::literalShaped(d.init);
+  if (literalShaped) {
+    std::vector<const Stmt *> following =
+        place.block.empty() ? std::vector<const Stmt *>()
+                            : VarChecker::followingStatements(place.block, place.blockIndex);
+    this->state.getBlockPosition().rememberFollowing(std::move(following));
+    llvm::ArrayRef<VarDeclarator> later =
+        llvm::ArrayRef(place.decl->decls).drop_front(place.number + 1);
+    variable.hint = this->destination->literalDestination(d, later);
+    variable.places = this->state.getTypeContext().takeDestinationConflict();
+  }
+}
+
+void VarChecker::declareTimerEarly(const DeclaratorPlace &place, VariableValue &variable) {
+  const VarDeclarator &d = *place.declarator;
+  bool plainInit = d.init != nullptr && !d.destructured();
+  const Type *timer = plainInit ? this->timerChecker->timerCallType(d.init) : nullptr;
+  if (timer != nullptr) {
+    const Type *type = place.declared != nullptr ? place.declared : timer;
+    variable.early = this->scopes->declareVar(d.name, d.loc, type, place.decl->isConst);
+    LocalVarState *localState = variable.early->local();
+    if (localState != nullptr) {
+      localState->declSeq = ~0u;
     }
-    if (decl->isConst && value &&
-        (isa<ObjectLitExpr>(value) || isa<StringLitExpr>(value) ||
-         (isa<ConditionalExpr>(value) && VarChecker::isTextChoice(value)))) {
-      this->state.getConstantStore().rememberConstLiteral(d.sym, value);
-      d.sym->literalConst = !declared && type->isString();
+  }
+}
+
+void VarChecker::walkVariableValue(const DeclaratorPlace &place, VariableValue &variable) {
+  if (place.declarator->init != nullptr) {
+    this->walkInit(place, variable);
+  } else if (place.decl->isConst) {
+    this->typeConstWithoutValue(place, variable);
+  } else if (place.declared == nullptr) {
+    variable.untyped = true;
+    variable.type = Type::error();
+  }
+}
+
+void VarChecker::walkInit(const DeclaratorPlace &place, VariableValue &variable) {
+  VarDeclarator &d = *place.declarator;
+  ExpressionMarks &marks = this->state.getExpressionMarks();
+  bool arrayPattern = d.destructured() && !d.objectPattern();
+  bool marksInit = variable.early == nullptr;
+  if (marksInit) {
+    marks.enterVariableInit(d.name);
+  }
+  if (arrayPattern) {
+    this->iteratorMethods->markFused(d.init);
+  }
+  d.init = this->exprChecker->checkExpr(d.init, variable.hint);
+  if (arrayPattern) {
+    d.init = this->dictChecker->iterableOf(d.init);
+  }
+  variable.value = d.init;
+  if (marksInit) {
+    marks.leaveVariableInit();
+  }
+  if (place.declared != nullptr) {
+    d.init = this->typeRelations->coerce(d.init, place.declared);
+  } else {
+    this->typeFromInit(place, variable);
+  }
+}
+
+void VarChecker::typeFromInit(const DeclaratorPlace &place, VariableValue &variable) {
+  const VarDeclarator &d = *place.declarator;
+  variable.type = d.init->type;
+  ResultInitHasType typed = VarChecker::initHasType(place.decl, d, variable.type);
+  if (typed.isErr()) {
+    this->state.getDiagnostics().error(d.init->loc(), typed.error().message);
+    variable.type = Type::error();
+  } else if (variable.type->isUndefined()) {
+    variable.untyped = true;
+    variable.type = Type::error();
+  }
+}
+
+void VarChecker::typeConstWithoutValue(const DeclaratorPlace &place, VariableValue &variable) {
+  const VarDeclarator &d = *place.declarator;
+  ResultConstValued valued = VarChecker::constValue(place.decl, d);
+  if (valued.isErr()) {
+    this->state.getDiagnostics().error(d.loc, valued.error().message);
+  }
+  if (variable.type == nullptr) {
+    variable.type = Type::error();
+  }
+}
+
+void VarChecker::walkDestructuring(const DeclaratorPlace &place, VariableValue &variable) {
+  const VarDeclarator &d = *place.declarator;
+  if (d.destructured() && d.objectPattern()) {
+    return;
+  }
+  bool undeclaredPattern = d.destructured() && place.declared == nullptr;
+  bool text = variable.type->isString() || variable.type->isTypedArray();
+  if (undeclaredPattern && text) {
+    return this->spreadTextIntoArray(place, variable);
+  }
+  if (undeclaredPattern && variable.type->isIterator()) {
+    return this->destructureIterator(place, variable);
+  }
+
+  return this->reportPatternShape(place, variable);
+}
+
+void VarChecker::spreadTextIntoArray(const DeclaratorPlace &place, VariableValue &variable) {
+  VarDeclarator &d = *place.declarator;
+  const Type *element = variable.type->isString() ? Type::string() : variable.type->elementType();
+  auto *characters = this->state.getAst().make<ArrayLitExpr>(d.init->loc());
+  characters->elements.push_back({d.init, true});
+  characters->type = Type::array(element);
+  d.init = characters;
+  variable.value = characters;
+  variable.type = characters->type;
+}
+
+void VarChecker::destructureIterator(const DeclaratorPlace &place, VariableValue &variable) {
+  VarDeclarator &d = *place.declarator;
+  d.init = this->generatorChecker->destructuredIterator(d.init, d);
+  variable.value = d.init;
+  variable.type = d.init->type;
+}
+
+void VarChecker::reportPatternShape(const DeclaratorPlace &place, VariableValue &variable) {
+  const VarDeclarator &d = *place.declarator;
+  ResultDestructure shaped = VarChecker::destructurable(d, variable.type);
+  if (shaped.isErr()) {
+    llvm::SMLoc at = d.init != nullptr ? d.init->loc() : d.loc;
+    this->state.getDiagnostics().error(at, shaped.error().message);
+    variable.type = Type::error();
+  }
+}
+
+void VarChecker::declareVariable(const DeclaratorPlace &place, const VariableValue &variable) {
+  VarDeclarator &d = *place.declarator;
+  if (variable.early != nullptr) {
+    LocalVarState *localState = variable.early->local();
+    if (localState != nullptr) {
+      localState->declSeq = this->state.getReturnInference().takeSequenceNumber();
     }
-    if (auto *alias = dyn_cast_or_null<NameExpr>(value); decl->isConst && alias && alias->var() &&
-                                                         alias->var()->literalConst && !declared &&
-                                                         type->isString()) {
-      const Expr *literal = this->state.getConstantStore().findConstLiteral(alias->var());
-      this->state.getConstantStore().rememberConstLiteral(d.sym, literal);
-      d.sym->literalConst = true;
+    d.sym = variable.early;
+  } else {
+    d.sym = this->scopes->declareVar(d.name, d.loc, variable.type, place.decl->isConst);
+  }
+}
+
+void VarChecker::rememberReflection(VarDeclarator &d, const Expr *value) {
+  auto *call = dyn_cast_or_null<CallExpr>(value);
+  bool singleMethod = call != nullptr && call->builtin() == Builtin::ReflectMethod &&
+                      !this->state.getExpressionMarks().hasSeveralVariants(call);
+  if (singleMethod) {
+    d.sym->holds = ReflectedMethod{.method = call->method()->decl};
+  }
+  bool readsByKey =
+      call != nullptr && call->builtin() == Builtin::ReflectGet && call->args.size() == 2;
+  if (readsByKey) {
+    std::vector<llvm::StringRef> names = this->reflectedNames(call->args[1]);
+    if (!names.empty()) {
+      d.sym->holds = ReflectedNames{.names = std::move(names)};
     }
-    if (!places.empty()) {
-      this->state.getTypeContext().rememberDestinations(d.sym, std::move(places));
+  }
+}
+
+std::vector<llvm::StringRef> VarChecker::reflectedNames(const Expr *key) {
+  const Expr *bare = VarChecker::withoutImplicitCasts(key);
+  std::vector<std::u16string> texts = VarChecker::literalKeyTexts(bare);
+  std::vector<llvm::StringRef> names;
+  for (const std::u16string &text : texts) {
+    std::string utf8 = ToUtf8::toUtf8(text);
+    names.push_back(this->state.getAst().keepName(utf8));
+  }
+
+  return names;
+}
+
+const Expr *VarChecker::withoutImplicitCasts(const Expr *expr) {
+  const Expr *bare = expr;
+  auto *cast = dyn_cast<CastExpr>(bare);
+  while (cast != nullptr && cast->isImplicit()) {
+    bare = cast->operand;
+    cast = dyn_cast<CastExpr>(bare);
+  }
+
+  return bare;
+}
+
+std::vector<std::u16string> VarChecker::literalKeyTexts(const Expr *key) {
+  auto *literal = dyn_cast<StringLitExpr>(key);
+  if (literal != nullptr) {
+    return {literal->value};
+  }
+  if (key->type == nullptr) {
+    return {};
+  }
+  const Type *keyType = key->type->nonOptional();
+  std::vector<const Type *> members;
+  if (keyType->isUnion()) {
+    members.assign(keyType->members().begin(), keyType->members().end());
+  } else {
+    members.push_back(keyType);
+  }
+  std::vector<std::u16string> texts;
+  for (const Type *member : members) {
+    bool literalText = member->isLiteral() && member->literalBase()->isString();
+    if (!literalText) {
+      return {};
     }
-    if (const Type *held = type->nonOptional();
-        !d.destructured() && !this->state.getGenericStore().isCheckingInstance() &&
-        (held->isResult() || (held->isPromise() && held->promised()->isResult())) &&
-        !this->exported(d.name)) {
-      this->state.getExpressionMarks().addResultVar(d.sym);
+    texts.push_back(member->literalText());
+  }
+
+  return texts;
+}
+
+void VarChecker::markUnsharedArray(const VarDeclarator &d, const VariableValue &variable) {
+  LocalVarState *localState = d.sym->local();
+  if (localState != nullptr) {
+    bool fresh = VarChecker::isFreshArray(variable.value);
+    localState->unshared =
+        fresh && variable.type->isArray() && FlowChecker::staysLocal(d.sym->owner(), d.name);
+  }
+}
+
+bool VarChecker::isFreshArray(const Expr *value) {
+  if (llvm::isa_and_nonnull<ArrayLitExpr>(value)) {
+    return true;
+  }
+  auto *made = dyn_cast_or_null<CallExpr>(value);
+  if (made == nullptr) {
+    return false;
+  }
+  Builtin builtin = made->builtin();
+
+  return builtin == Builtin::ArrMap || builtin == Builtin::ArrFilter ||
+         builtin == Builtin::ArrSlice || builtin == Builtin::ArrConcat ||
+         builtin == Builtin::ArrFlatMap || builtin == Builtin::ArrayFrom;
+}
+
+void VarChecker::rememberConstLiteral(const DeclaratorPlace &place, const VariableValue &variable) {
+  VarDeclarator &d = *place.declarator;
+  const Expr *value = variable.value;
+  ConstantStore &constants = this->state.getConstantStore();
+  bool literal = place.decl->isConst && value != nullptr &&
+                 (isa<ObjectLitExpr>(value) || isa<StringLitExpr>(value) ||
+                  (isa<ConditionalExpr>(value) && VarChecker::isTextChoice(value)));
+  if (literal) {
+    constants.rememberConstLiteral(d.sym, value);
+    d.sym->literalConst = place.declared == nullptr && variable.type->isString();
+  }
+  auto *alias = dyn_cast_or_null<NameExpr>(value);
+  bool textAlias = place.decl->isConst && alias != nullptr && alias->var() != nullptr &&
+                   alias->var()->literalConst && place.declared == nullptr &&
+                   variable.type->isString();
+  if (textAlias) {
+    const Expr *aliased = constants.findConstLiteral(alias->var());
+    constants.rememberConstLiteral(d.sym, aliased);
+    d.sym->literalConst = true;
+  }
+}
+
+void VarChecker::rememberResultVariable(const DeclaratorPlace &place,
+                                        const VariableValue &variable) {
+  const VarDeclarator &d = *place.declarator;
+  const Type *held = variable.type->nonOptional();
+  bool holdsResult = held->isResult() || (held->isPromise() && held->promised()->isResult());
+  bool tracked = !d.destructured() && !this->state.getGenericStore().isCheckingInstance() &&
+                 holdsResult && !this->exported(d.name);
+  if (tracked) {
+    this->state.getExpressionMarks().addResultVar(d.sym);
+  }
+}
+
+void VarChecker::rememberFixedLength(const DeclaratorPlace &place, const VariableValue &variable) {
+  const VarDeclarator &d = *place.declarator;
+  const Type *base = variable.type->nonOptional();
+  bool bytes = base->isByteView() || base->bytes() == Type::Bytes::ArrayBuffer;
+  bool fixed = place.decl->isConst && variable.value != nullptr && !d.destructured() && bytes;
+  if (fixed) {
+    std::optional<Linear> length = this->indexProofs->knownLength(variable.value);
+    bool constantLength = length.has_value() && length->term.isZero();
+    if (constantLength) {
+      this->state.getFlowState().rememberFixedLength(d.sym, length->offset);
     }
-    if (untyped) {
-      this->noteUntyped(d.sym, d.init != nullptr);
+  }
+}
+
+void VarChecker::rememberConstNumber(const DeclaratorPlace &place, const VariableValue &variable) {
+  const VarDeclarator &d = *place.declarator;
+  bool integer = place.decl->isConst && d.init != nullptr && variable.type->isInteger();
+  if (integer) {
+    this->constantFolder->noteUnsignedVar(d.sym, d.init);
+    std::optional<int64_t> constant = this->constantFolder->intConstant(d.init);
+    if (constant.has_value()) {
+      this->state.getConstantStore().rememberConstVar(d.sym, *constant);
+      d.sym->literalConst = place.declared == nullptr && variable.type->isInt() &&
+                            TypeRelations::isIntLiteralTree(d.init);
     }
-    if (value) {
-      this->flowChecker->assigned(d.sym, value);
+  }
+}
+
+void VarChecker::rememberConstText(const DeclaratorPlace &place, const VariableValue &variable) {
+  const VarDeclarator &d = *place.declarator;
+  bool text = place.decl->isConst && d.init != nullptr && variable.type->isString();
+  if (text) {
+    std::optional<std::string> key = this->keyedFieldChecker->constantKey(d.init);
+    if (key.has_value()) {
+      this->state.getConstantStore().rememberConstKey(d.sym, std::move(*key));
     }
-    if (const Type *base = type->nonOptional();
-        decl->isConst && value && !d.destructured() &&
-        (base->isByteView() || base->bytes() == Type::Bytes::ArrayBuffer)) {
-      if (std::optional<Linear> length = this->indexProofs->knownLength(value);
-          length && length->term.isZero()) {
-        this->state.getFlowState().rememberFixedLength(d.sym, length->offset);
-      }
-    }
-    if (decl->isConst && d.init && type->isInteger()) {
-      this->constantFolder->noteUnsignedVar(d.sym, d.init);
-      if (std::optional<int64_t> constant = this->constantFolder->intConstant(d.init)) {
-        this->state.getConstantStore().rememberConstVar(d.sym, *constant);
-        d.sym->literalConst = !declared && type->isInt() && TypeRelations::isIntLiteralTree(d.init);
-      }
-    }
-    if (decl->isConst && d.init && type->isString()) {
-      if (std::optional<std::string> key = this->keyedFieldChecker->constantKey(d.init)) {
-        this->state.getConstantStore().rememberConstKey(d.sym, std::move(*key));
-      }
-      if (std::string prefix = this->tzModulesChecker->knownPrefix(d.init); !prefix.empty()) {
-        this->state.getConstantStore().rememberConstPrefix(d.sym, std::move(prefix));
-      }
+    std::string prefix = this->tzModulesChecker->knownPrefix(d.init);
+    if (!prefix.empty()) {
+      this->state.getConstantStore().rememberConstPrefix(d.sym, std::move(prefix));
     }
   }
 }

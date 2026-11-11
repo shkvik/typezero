@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/events/events_function_table/events_function_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/events/event_target_checker/event_target_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -44,6 +45,36 @@ private:
   static ResultListenerEvent listenerEvent(const Type *type, const ClassDecl *eventClass);
   Expr *callLibrarySymbol(CallExpr *call, FuncSymbol *sym, llvm::ArrayRef<const Type *> bound,
                           const std::vector<bool> &given, llvm::SMLoc loc);
+
+  struct WaitCall {
+    CallExpr *call = nullptr;
+    llvm::StringRef fn;
+    llvm::SMLoc loc;
+    bool once = false;
+    bool timed = false;
+    std::vector<bool> given;
+  };
+
+  static bool hasTimeoutOption(const CallExpr *call);
+  bool waitEnds(const CallExpr *call) const;
+  bool isEventTarget(const Type *type) const;
+  void walkArgsFrom(CallExpr *call, size_t from);
+  Expr *checkTargetWait(WaitCall &wait);
+  void appendErrorsFlag(WaitCall &wait, bool listensErrors);
+  Expr *targetListeners(CallExpr *call, Expr *object);
+  Expr *checkEmitterWait(WaitCall &wait, const Type *events);
+  Expr *checkWaitFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc, bool once);
+  Expr *checkListenersFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc, bool listeners);
+  Expr *checkTimedWait(WaitCall &wait, const Type *events, const Type *args, const Type *errors);
+  Expr *checkPlainWait(WaitCall &wait, const Type *events, const Type *args, const Type *errors);
+  const Type *listenedEvent(const Type *type, llvm::SMLoc loc, ClassDecl *eventClass);
+  std::optional<const Type *> typedListener(CallExpr *call, ClassDecl *eventClass,
+                                            const Type *object);
+  std::optional<const Type *> typedValueListener(CallExpr *call, ClassDecl *eventClass,
+                                                 const Type *object);
+  std::optional<const Type *> typedFunctionListener(CallExpr *call, FunctionExpr *function,
+                                                    ClassDecl *eventClass);
+
   SemanticState &state;
   EventMaps *eventMaps = nullptr;
   TypeParams *typeParams = nullptr;

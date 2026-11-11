@@ -231,64 +231,84 @@ Expr *GenericWidening::joined(Expr *expr) {
   }
   llvm::ArrayRef<const Type *> members = type->members();
   const ClassDecl *first = members.front()->classDecl();
-  if (!members.front()->isClass() || !first) {
+  if (!members.front()->isClass() || first == nullptr) {
     return expr;
   }
-  for (const ClassDecl *candidate = first; candidate; candidate = candidate->parent) {
-    if (!candidate->generic()) {
-      continue;
-    }
+  for (const ClassDecl *candidate = first; candidate != nullptr; candidate = candidate->parent) {
     ClassDecl *generic = candidate->generic();
-    std::vector<const ClassDecl *> instances;
-    for (const Type *member : members) {
-      const ClassDecl *cls = member->isClass() ? member->classDecl() : nullptr;
-      const ClassDecl *instance = cls ? GenericWidening::instanceOf(cls, generic) : nullptr;
-      if (!instance || instance->typeArgs.size() != generic->typeParams.size()) {
-        break;
-      }
-      instances.push_back(instance);
-    }
-    if (instances.size() != members.size()) {
+    if (generic == nullptr) {
       continue;
     }
-    std::vector<const Type *> args;
-    bool joinable = true;
-    for (size_t i = 0; i < generic->typeParams.size() && joinable; ++i) {
-      std::vector<const Type *> seen;
-      for (const ClassDecl *instance : instances) {
-        if (!llvm::is_contained(seen, instance->typeArgs[i])) {
-          seen.push_back(instance->typeArgs[i]);
-        }
-      }
-      if (seen.size() == 1) {
-        args.push_back(seen.front());
-        continue;
-      }
-      joinable = GenericWidening::covariant(generic, i);
-      args.push_back(Type::unionOf(seen));
+    std::vector<const ClassDecl *> instances = GenericWidening::instancesOf(members, generic);
+    if (instances.size() == members.size()) {
+      return this->widenToGeneric(expr, generic, instances);
     }
-    if (!joinable) {
-      return expr;
-    }
-    GenericClassInstantiator::ResultClassMade widened =
-        this->genericClassInstantiator->instantiateClass(generic, args, expr->loc());
-    if (widened.isErr() &&
-        widened.error().code !=
-            GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
-      llvm::SMLoc at = widened.error().code ==
-                               GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
-                           ? generic->loc()
-                           : expr->loc();
-      this->state.getDiagnostics().error(at, widened.error().message);
-    }
-    if (widened.isErr() || !TypeRelations::isImplicitlyConvertible(type, widened.value()->type)) {
-      return expr;
-    }
-
-    return this->typeRelations->convert(expr, widened.value()->type);
   }
 
   return expr;
 }
 
+std::vector<const ClassDecl *> GenericWidening::instancesOf(llvm::ArrayRef<const Type *> members,
+                                                            const ClassDecl *generic) {
+  std::vector<const ClassDecl *> instances;
+  for (const Type *member : members) {
+    const ClassDecl *cls = member->isClass() ? member->classDecl() : nullptr;
+    const ClassDecl *instance =
+        cls != nullptr ? GenericWidening::instanceOf(cls, generic) : nullptr;
+    if (instance == nullptr || instance->typeArgs.size() != generic->typeParams.size()) {
+      break;
+    }
+    instances.push_back(instance);
+  }
+
+  return instances;
+}
+
+Expr *GenericWidening::widenToGeneric(Expr *expr, ClassDecl *generic,
+                                      llvm::ArrayRef<const ClassDecl *> instances) {
+  std::optional<std::vector<const Type *>> args = GenericWidening::joinedArgs(generic, instances);
+  if (!args.has_value()) {
+    return expr;
+  }
+  GenericClassInstantiator::ResultClassMade widened =
+      this->genericClassInstantiator->instantiateClass(generic, *args, expr->loc());
+  bool reported =
+      widened.isErr() &&
+      widened.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED;
+  if (widened.isErr() && !reported) {
+    bool endless = widened.error().code ==
+                   GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES;
+    llvm::SMLoc at = endless ? generic->loc() : expr->loc();
+    this->state.getDiagnostics().error(at, widened.error().message);
+  }
+  if (widened.isErr() ||
+      !TypeRelations::isImplicitlyConvertible(expr->type, widened.value()->type)) {
+    return expr;
+  }
+
+  return this->typeRelations->convert(expr, widened.value()->type);
+}
+
+std::optional<std::vector<const Type *>>
+GenericWidening::joinedArgs(const ClassDecl *generic, llvm::ArrayRef<const ClassDecl *> instances) {
+  std::vector<const Type *> args;
+  for (size_t i = 0; i < generic->typeParams.size(); ++i) {
+    std::vector<const Type *> seen;
+    for (const ClassDecl *instance : instances) {
+      if (!llvm::is_contained(seen, instance->typeArgs[i])) {
+        seen.push_back(instance->typeArgs[i]);
+      }
+    }
+    if (seen.size() == 1) {
+      args.push_back(seen.front());
+      continue;
+    }
+    if (!GenericWidening::covariant(generic, i)) {
+      return std::nullopt;
+    }
+    args.push_back(Type::unionOf(seen));
+  }
+
+  return args;
+}
 }

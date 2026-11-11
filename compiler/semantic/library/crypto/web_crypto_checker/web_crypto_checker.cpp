@@ -108,60 +108,68 @@ Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name,
   }
   const SubtleIntrinsic *intrinsic = shape.value();
   std::vector<Expr *> args;
-  bool ok = true;
+  bool allChecked = true;
   for (size_t i = 0; i < call->args.size(); ++i) {
     Expr *arg = call->args[i];
-    Expr *checked = nullptr;
-    switch (intrinsic->params[i]) {
-    case 'm':
-      checked = this->cryptoArgs->cryptoMd(arg, true);
-      break;
-    case 'c':
-      checked = this->cryptoArgs->cryptoCipher(arg);
-      break;
-    case 'd':
-      checked = this->cryptoArgs->cryptoData(arg, "data", false, true, true);
-      break;
-    case 'o':
-      checked = this->cryptoArgs->cryptoKeyObject(arg, "key");
-      break;
-    case 'b':
-      checked = this->argumentChecker->checkArg(arg, Type::boolTy());
-      break;
-    case 'i':
-      checked = this->argumentChecker->checkArg(arg, Type::intTy());
-      break;
-    case 'f':
-      checked = this->argumentChecker->checkArg(arg, Type::doubleTy());
-      break;
-    default:
-      checked = this->argumentChecker->checkArg(arg, Type::string());
-      break;
-    }
-    char kind = intrinsic->params[i];
-    ResultAlgorithmChosen literal =
-        WebCryptoChecker::literalAlgorithm(checked, kind, intrinsicName);
-    if (literal.isErr()) {
-      this->state.getDiagnostics().error(arg->loc(), literal.error().message);
-      checked = nullptr;
-    }
-    if (!checked || checked->type->isError()) {
-      ok = false;
-      checked = checked ? checked : arg;
-    }
-    args.push_back(checked);
+    Expr *checked = this->checkSubtleArg(arg, intrinsic->params[i], intrinsicName);
+    allChecked &= checked != nullptr && !checked->type->isError();
+    args.push_back(checked != nullptr ? checked : arg);
   }
-  if (!ok) {
+  if (!allChecked) {
     return call;
   }
-  const Type *buffer = Type::bytesType(Type::Bytes::ArrayBuffer);
-  const Type *value = intrinsic->result == 'B'   ? buffer
-                      : intrinsic->result == 'U' ? Type::optional(buffer)
-                      : intrinsic->result == 'I'
-                          ? Type::intTy()
-                          : Type::optional(Type::cryptoType(Type::Crypto::KeyObject));
+  const Type *value = WebCryptoChecker::subtleResult(intrinsic->result);
+  const Type *promise = Type::promise(value);
 
-  return this->cryptoArgs->cryptoCall(call, intrinsic->fn, std::move(args), Type::promise(value));
+  return this->cryptoArgs->cryptoCall(call, intrinsic->fn, std::move(args), promise);
+}
+
+Expr *WebCryptoChecker::checkSubtleArg(Expr *arg, char kind, llvm::StringRef intrinsicName) {
+  Expr *checked = this->checkSubtleArgKind(arg, kind);
+  ResultAlgorithmChosen literal = WebCryptoChecker::literalAlgorithm(checked, kind, intrinsicName);
+  if (literal.isErr()) {
+    this->state.getDiagnostics().error(arg->loc(), literal.error().message);
+    return nullptr;
+  }
+
+  return checked;
+}
+
+Expr *WebCryptoChecker::checkSubtleArgKind(Expr *arg, char kind) {
+  switch (kind) {
+    case 'm':
+      return this->cryptoArgs->cryptoMd(arg, true);
+    case 'c':
+      return this->cryptoArgs->cryptoCipher(arg);
+    case 'd':
+      return this->cryptoArgs->cryptoData(arg, "data", false, true, true);
+    case 'o':
+      return this->cryptoArgs->cryptoKeyObject(arg, "key");
+    case 'b':
+      return this->argumentChecker->checkArg(arg, Type::boolTy());
+    case 'i':
+      return this->argumentChecker->checkArg(arg, Type::intTy());
+    case 'f':
+      return this->argumentChecker->checkArg(arg, Type::doubleTy());
+  }
+
+  return this->argumentChecker->checkArg(arg, Type::string());
+}
+
+const Type *WebCryptoChecker::subtleResult(char result) {
+  const Type *buffer = Type::bytesType(Type::Bytes::ArrayBuffer);
+  switch (result) {
+    case 'B':
+      return buffer;
+    case 'U':
+      return Type::optional(buffer);
+    case 'I':
+      return Type::intTy();
+  }
+
+  const Type *keyObject = Type::cryptoType(Type::Crypto::KeyObject);
+
+  return Type::optional(keyObject);
 }
 
 bool WebCryptoChecker::isSubtleClass(const Type *type, llvm::StringRef name) const {

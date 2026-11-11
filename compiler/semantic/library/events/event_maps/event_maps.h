@@ -45,7 +45,24 @@ private:
 
   static ResultListenerThis listenerThis(const Type *self, const Type *receiver);
   static bool carriesOne(const Type *args);
+  static ResultEventMapFits recordMapFits(const Type *events);
+  static ResultEventMapFits eventFieldFits(const Field &f);
   static std::string nearestEvent(const Type *events, llvm::StringRef name);
+
+  struct ListenerWant {
+    const Type *args = nullptr;
+    llvm::StringRef event;
+    const Type *receiver = nullptr;
+    const Type *sync = nullptr;
+    const Type *async = nullptr;
+  };
+
+  bool listenerTakesThis(const ListenerWant &want, const Type *self, llvm::SMLoc loc);
+  static const Type *withThis(const ListenerWant &want, const Type *self);
+  Expr *checkListenerLiteral(FunctionExpr *fe, const ListenerWant &want, ListenerKind &kind);
+  Expr *checkThisListener(FunctionExpr *fe, const ListenerWant &want, ListenerKind &kind);
+  Expr *checkListenerValue(Expr *arg, const ListenerWant &want, ListenerKind &kind);
+  Expr *checkThisValue(Expr *arg, const ListenerWant &want, ListenerKind &kind);
 
   const Type *inferredEventArgs(EventSite *site, const std::string &key, llvm::SMLoc loc);
 

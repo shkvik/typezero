@@ -132,80 +132,126 @@ const Type *IntlChecker::segmentDataType() {
 }
 
 const Type *IntlChecker::resolvedIntlOptionsType(IntlKind kind) {
-  const Type *text = Type::string();
-  const Type *maybe = Type::optional(Type::string());
-  const Type *integer = Type::intTy();
-  const Type *maybeInt = Type::optional(Type::intTy());
-  const Type *flag = Type::boolTy();
-  std::vector<Field> digits = {{"minimumIntegerDigits", integer, false},
-                               {"minimumFractionDigits", maybeInt, false},
-                               {"maximumFractionDigits", maybeInt, false},
-                               {"minimumSignificantDigits", maybeInt, false},
-                               {"maximumSignificantDigits", maybeInt, false}};
-  std::vector<Field> rounding = {{"roundingIncrement", integer, false},
-                                 {"roundingMode", text, false},
-                                 {"roundingPriority", text, false},
-                                 {"trailingZeroDisplay", text, false}};
-  std::vector<Field> fields = {{"locale", text, false}};
-  const char *name = "";
   switch (kind) {
-  case IntlKind::NumberFormat:
-    name = "Intl.ResolvedNumberFormatOptions";
-    fields.insert(fields.end(), {{"numberingSystem", text, false},
-                                 {"style", text, false},
-                                 {"currency", maybe, false},
-                                 {"currencyDisplay", maybe, false},
-                                 {"currencySign", maybe, false},
-                                 {"unit", maybe, false},
-                                 {"unitDisplay", maybe, false}});
-    fields.insert(fields.end(), digits.begin(), digits.end());
-    fields.insert(fields.end(),
-                  {{"useGrouping", Type::unionOf({Type::string(), Type::boolTy()}), false},
-                   {"notation", text, false},
-                   {"compactDisplay", maybe, false},
-                   {"signDisplay", text, false}});
-    fields.insert(fields.end(), rounding.begin(), rounding.end());
-    break;
-  case IntlKind::Collator:
-    name = "Intl.ResolvedCollatorOptions";
-    fields.insert(fields.end(), {{"usage", text, false},
-                                 {"sensitivity", text, false},
-                                 {"ignorePunctuation", flag, false},
-                                 {"collation", text, false},
-                                 {"numeric", flag, false},
-                                 {"caseFirst", text, false}});
-    break;
-  case IntlKind::PluralRules:
-    name = "Intl.ResolvedPluralRulesOptions";
-    fields.push_back({"type", text, false});
-    fields.insert(fields.end(), digits.begin(), digits.end());
-    fields.push_back({"pluralCategories", Type::array(Type::string()), false});
-    fields.insert(fields.end(), rounding.begin(), rounding.end());
-    break;
-  case IntlKind::RelativeTimeFormat:
-    name = "Intl.ResolvedRelativeTimeFormatOptions";
-    fields.insert(
-        fields.end(),
-        {{"style", text, false}, {"numeric", text, false}, {"numberingSystem", text, false}});
-    break;
-  case IntlKind::ListFormat:
-    name = "Intl.ResolvedListFormatOptions";
-    fields.insert(fields.end(), {{"type", text, false}, {"style", text, false}});
-    break;
-  case IntlKind::DisplayNames:
-    name = "Intl.ResolvedDisplayNamesOptions";
-    fields.insert(fields.end(), {{"style", text, false},
-                                 {"type", text, false},
-                                 {"fallback", text, false},
-                                 {"languageDisplay", maybe, false}});
-    break;
-  default:
-    name = "Intl.ResolvedSegmenterOptions";
-    fields.push_back({"granularity", text, false});
-    break;
+    case IntlKind::NumberFormat:
+      return IntlChecker::resolvedNumberOptionsType();
+    case IntlKind::Collator:
+      return IntlChecker::resolvedCollatorOptionsType();
+    case IntlKind::PluralRules:
+      return IntlChecker::resolvedPluralOptionsType();
+    case IntlKind::RelativeTimeFormat:
+      return IntlChecker::resolvedRelativeTimeOptionsType();
+    case IntlKind::ListFormat:
+      return IntlChecker::resolvedListOptionsType();
+    case IntlKind::DisplayNames:
+      return IntlChecker::resolvedDisplayNamesOptionsType();
+    case IntlKind::None:
+    case IntlKind::DateTimeFormat:
+    case IntlKind::Segmenter:
+    case IntlKind::Segments:
+      return IntlChecker::resolvedSegmenterOptionsType();
   }
 
-  return Type::object(std::move(fields), name);
+  return IntlChecker::resolvedSegmenterOptionsType();
+}
+
+std::vector<Field> IntlChecker::resolvedDigitFields() {
+  const Type *maybeInt = Type::optional(Type::intTy());
+
+  return {{"minimumIntegerDigits", Type::intTy(), false},
+          {"minimumFractionDigits", maybeInt, false},
+          {"maximumFractionDigits", maybeInt, false},
+          {"minimumSignificantDigits", maybeInt, false},
+          {"maximumSignificantDigits", maybeInt, false}};
+}
+
+std::vector<Field> IntlChecker::resolvedRoundingFields() {
+  const Type *text = Type::string();
+
+  return {{"roundingIncrement", Type::intTy(), false},
+          {"roundingMode", text, false},
+          {"roundingPriority", text, false},
+          {"trailingZeroDisplay", text, false}};
+}
+
+const Type *IntlChecker::resolvedNumberOptionsType() {
+  const Type *text = Type::string();
+  const Type *maybe = Type::optional(Type::string());
+  std::vector<Field> fields = {
+      {"locale", text, false},    {"numberingSystem", text, false},  {"style", text, false},
+      {"currency", maybe, false}, {"currencyDisplay", maybe, false}, {"currencySign", maybe, false},
+      {"unit", maybe, false},     {"unitDisplay", maybe, false}};
+  std::vector<Field> digits = IntlChecker::resolvedDigitFields();
+  fields.insert(fields.end(), digits.begin(), digits.end());
+  fields.insert(fields.end(),
+                {{"useGrouping", Type::unionOf({Type::string(), Type::boolTy()}), false},
+                 {"notation", text, false},
+                 {"compactDisplay", maybe, false},
+                 {"signDisplay", text, false}});
+  std::vector<Field> rounding = IntlChecker::resolvedRoundingFields();
+  fields.insert(fields.end(), rounding.begin(), rounding.end());
+
+  return Type::object(std::move(fields), "Intl.ResolvedNumberFormatOptions");
+}
+
+const Type *IntlChecker::resolvedCollatorOptionsType() {
+  const Type *text = Type::string();
+  const Type *flag = Type::boolTy();
+  std::vector<Field> fields = {{"locale", text, false},      {"usage", text, false},
+                               {"sensitivity", text, false}, {"ignorePunctuation", flag, false},
+                               {"collation", text, false},   {"numeric", flag, false},
+                               {"caseFirst", text, false}};
+
+  return Type::object(std::move(fields), "Intl.ResolvedCollatorOptions");
+}
+
+const Type *IntlChecker::resolvedPluralOptionsType() {
+  const Type *text = Type::string();
+  std::vector<Field> fields = {{"locale", text, false}, {"type", text, false}};
+  std::vector<Field> digits = IntlChecker::resolvedDigitFields();
+  fields.insert(fields.end(), digits.begin(), digits.end());
+  fields.push_back({"pluralCategories", Type::array(Type::string()), false});
+  std::vector<Field> rounding = IntlChecker::resolvedRoundingFields();
+  fields.insert(fields.end(), rounding.begin(), rounding.end());
+
+  return Type::object(std::move(fields), "Intl.ResolvedPluralRulesOptions");
+}
+
+const Type *IntlChecker::resolvedRelativeTimeOptionsType() {
+  const Type *text = Type::string();
+  std::vector<Field> fields = {{"locale", text, false},
+                               {"style", text, false},
+                               {"numeric", text, false},
+                               {"numberingSystem", text, false}};
+
+  return Type::object(std::move(fields), "Intl.ResolvedRelativeTimeFormatOptions");
+}
+
+const Type *IntlChecker::resolvedListOptionsType() {
+  const Type *text = Type::string();
+  std::vector<Field> fields = {
+      {"locale", text, false}, {"type", text, false}, {"style", text, false}};
+
+  return Type::object(std::move(fields), "Intl.ResolvedListFormatOptions");
+}
+
+const Type *IntlChecker::resolvedDisplayNamesOptionsType() {
+  const Type *text = Type::string();
+  const Type *maybe = Type::optional(Type::string());
+  std::vector<Field> fields = {{"locale", text, false},
+                               {"style", text, false},
+                               {"type", text, false},
+                               {"fallback", text, false},
+                               {"languageDisplay", maybe, false}};
+
+  return Type::object(std::move(fields), "Intl.ResolvedDisplayNamesOptions");
+}
+
+const Type *IntlChecker::resolvedSegmenterOptionsType() {
+  const Type *text = Type::string();
+  std::vector<Field> fields = {{"locale", text, false}, {"granularity", text, false}};
+
+  return Type::object(std::move(fields), "Intl.ResolvedSegmenterOptions");
 }
 
 const Type *IntlChecker::intlTypeNamed(llvm::StringRef name) {

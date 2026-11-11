@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/crypto/subtle_dictionary_table/subtle_dictionary_table.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -7,11 +8,6 @@
 #include <functional>
 
 namespace tz {
-
-struct Dictionary {
-  llvm::StringLiteral name;
-  std::vector<llvm::StringLiteral> required;
-};
 
 inline const llvm::StringLiteral kUsages[] = {"encrypt",   "decrypt",    "sign",    "verify",
                                               "deriveKey", "deriveBits", "wrapKey", "unwrapKey"};

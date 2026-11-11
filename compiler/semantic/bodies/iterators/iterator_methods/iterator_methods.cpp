@@ -351,219 +351,308 @@ IteratorMethods::ResultFlatMapInnerType IteratorMethods::flatMapInner(const Type
 }
 
 Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
-  const Type *iterator = member->object->type;
-  const Type *element = iterator->yielded();
-  llvm::StringRef name = member->name;
-  size_t count = call->args.size();
-
-  const IteratorMethodInfo *method = IteratorMethodTable::find(name);
-  const IteratorStepMethod *step = nullptr;
-  if (method != nullptr) {
-    step = method->form.as<IteratorStepMethod>();
-  }
+  const IteratorMethodInfo *method = IteratorMethodTable::find(member->name);
+  const IteratorStepMethod *step =
+      method != nullptr ? method->form.as<IteratorStepMethod>() : nullptr;
   if (step != nullptr) {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), arity.error().message);
-      return call;
-    }
-    ResultNextValueOneType next = IteratorMethods::nextValue(iterator);
-    if (next.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), next.error().message);
-      this->argumentChecker->checkArgsLoosely(call);
-      return call;
-    }
-    const Type *value = next.value();
-    if (count == 1) {
-      const Type *sent = iterator->sent();
-      call->args[0] = sent->isVoid() ? this->exprChecker->checkExpr(call->args[0])
-                                     : this->argumentChecker->checkArg(call->args[0], sent);
-    }
-    call->target = BuiltinCall{.builtin = step->builtin};
-    call->type =
-        Type::object({{"value", Type::optional(value), false}, {"done", Type::boolTy(), false}},
-                     "IteratorResult<" + value->name().str() + ">");
-    this->flowChecker->calledFunction();
+    return this->checkIteratorStep(call, member, step->builtin);
+  }
+  std::optional<Builtin> helper = this->helperBuiltin(call, member);
+  if (!helper.has_value()) {
     return call;
   }
+  switch (method->method) {
+    case IteratorMethod::TAKE:
+    case IteratorMethod::DROP:
+      return this->checkTakeDrop(call, member, *helper);
+    case IteratorMethod::TO_ARRAY:
+      return this->checkToArray(call, member, *helper);
+    case IteratorMethod::MAP:
+    case IteratorMethod::FILTER:
+    case IteratorMethod::FLAT_MAP:
+    case IteratorMethod::FOR_EACH:
+    case IteratorMethod::REDUCE:
+    case IteratorMethod::SOME:
+    case IteratorMethod::EVERY:
+    case IteratorMethod::FIND:
+      return this->checkIteratorCallback(call, member, method->method, *helper);
+    case IteratorMethod::NEXT:
+    case IteratorMethod::RETURN:
+    case IteratorMethod::THROW:
+      return call;
+  }
+
+  return call;
+}
+
+bool IteratorMethods::hasWrongArity(CallExpr *call, MemberExpr *member, unsigned min,
+                                    unsigned max) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, min, max);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+  }
+
+  return arity.isErr();
+}
+
+Expr *IteratorMethods::checkIteratorStep(CallExpr *call, MemberExpr *member, Builtin builtin) {
+  const Type *iterator = member->object->type;
+  if (this->hasWrongArity(call, member, 0, 1)) {
+    return call;
+  }
+  ResultNextValueOneType next = IteratorMethods::nextValue(iterator);
+  if (next.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), next.error().message);
+    this->argumentChecker->checkArgsLoosely(call);
+    return call;
+  }
+  const Type *value = next.value();
+  if (call->args.size() == 1) {
+    const Type *sent = iterator->sent();
+    call->args[0] = sent->isVoid() ? this->exprChecker->checkExpr(call->args[0])
+                                   : this->argumentChecker->checkArg(call->args[0], sent);
+  }
+  call->target = BuiltinCall{.builtin = builtin};
+  call->type =
+      Type::object({{"value", Type::optional(value), false}, {"done", Type::boolTy(), false}},
+                   "IteratorResult<" + value->name().str() + ">");
+  this->flowChecker->calledFunction();
+
+  return call;
+}
+
+std::optional<Builtin> IteratorMethods::helperBuiltin(CallExpr *call, MemberExpr *member) {
+  const Type *iterator = member->object->type;
+  llvm::StringRef name = member->name;
   ResultNotThrowOrReturn plain = IteratorMethods::plainMethod(name);
   if (plain.isErr()) {
     this->state.getDiagnostics().error(member->loc(), plain.error().message);
     this->argumentChecker->checkArgsLoosely(call);
-    return call;
+    return std::nullopt;
   }
   ResultKnownHelperFound found = IteratorMethods::iteratorHelper(name, iterator);
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
     this->argumentChecker->checkArgsLoosely(call);
-    return call;
+    return std::nullopt;
   }
-  Builtin builtin = found.value();
   std::string what = ErrorTextFunctionName::quoted(name);
   GeneratorChecker::ResultNextNeedsNoValue nothing =
       this->generatorChecker->checkSendsNothing(iterator, what);
   if (nothing.isErr()) {
     this->state.getDiagnostics().error(member->loc(), nothing.error().message);
     this->argumentChecker->checkArgsLoosely(call);
-    return call;
+    return std::nullopt;
   }
 
-  if (builtin == Builtin::IterTake || builtin == Builtin::IterDrop) {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), arity.error().message);
-      return call;
-    }
-    call->args[0] = this->memberChecker->checkPosition(call->args[0]);
-    std::string counted = ErrorTextIteratorMethod::countOf(name);
-    IndexProofs::ResultBetweenProven between =
-        this->indexProofs->requireBetween(call->args[0], 0, std::nullopt, counted);
-    if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
-      this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
-    }
-    call->target = BuiltinCall{.builtin = builtin};
-    call->type = Type::iterator(element);
-    return call;
-  }
-  if (builtin == Builtin::IterToArray) {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), arity.error().message);
-      return call;
-    }
-    call->target = BuiltinCall{.builtin = builtin};
-    call->type = Type::array(element);
-    this->flowChecker->calledFunction();
-    return call;
-  }
+  return found.value();
+}
 
-  bool reduce = builtin == Builtin::IterReduce;
+Expr *IteratorMethods::checkTakeDrop(CallExpr *call, MemberExpr *member, Builtin builtin) {
+  if (this->hasWrongArity(call, member, 1, 1)) {
+    return call;
+  }
+  call->args[0] = this->memberChecker->checkPosition(call->args[0]);
+  std::string counted = ErrorTextIteratorMethod::countOf(member->name);
+  IndexProofs::ResultBetweenProven between =
+      this->indexProofs->requireBetween(call->args[0], 0, std::nullopt, counted);
+  if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+    this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
+  }
+  call->target = BuiltinCall{.builtin = builtin};
+  call->type = Type::iterator(member->object->type->yielded());
+
+  return call;
+}
+
+Expr *IteratorMethods::checkToArray(CallExpr *call, MemberExpr *member, Builtin builtin) {
+  if (this->hasWrongArity(call, member, 0, 0)) {
+    return call;
+  }
+  call->target = BuiltinCall{.builtin = builtin};
+  call->type = Type::array(member->object->type->yielded());
+  this->flowChecker->calledFunction();
+
+  return call;
+}
+
+Expr *IteratorMethods::checkIteratorCallback(CallExpr *call, MemberExpr *member,
+                                             IteratorMethod method, Builtin builtin) {
+  const Type *element = member->object->type->yielded();
+  llvm::StringRef name = member->name;
+  size_t count = call->args.size();
+  bool reduce = method == IteratorMethod::REDUCE;
   ResultCallbackIsPassed passed = IteratorMethods::callbackGiven(count, name, reduce);
   if (passed.isErr()) {
     this->state.getDiagnostics().error(member->loc(), passed.error().message);
     this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
-  Signature sig;
-  sig.pad = false;
-  unsigned primary = 1;
-  const Type *accumulator = element;
-  switch (builtin) {
-  case Builtin::IterForEach:
-    sig.voidResult = true;
-    break;
-  case Builtin::IterFilter:
-  case Builtin::IterSome:
-  case Builtin::IterEvery:
-  case Builtin::IterFind:
-    sig.ret = Type::boolTy();
-    break;
-  case Builtin::IterReduce:
-    primary = 2;
-    if (count == 2) {
-      Expr *&init = call->args[1];
-      auto *unary = dyn_cast<UnaryExpr>(init);
-      bool literal = isa<IntLitExpr>(init) ||
-                     (unary && unary->op == UnaryOp::Neg && isa<IntLitExpr>(unary->operand));
-      init = this->exprChecker->checkExpr(
-          init, literal && GenericChecker::apparentType(element)->isNumeric()
-                    ? GenericChecker::apparentType(element)
-                    : nullptr);
-      accumulator = init->type;
-      ResultInitialValueType initial = IteratorMethods::initialValue(accumulator);
-      if (initial.isErr()) {
-        this->state.getDiagnostics().error(init->loc(), initial.error().message);
-        accumulator = Type::error();
-      }
-    }
-    sig.ret = accumulator;
-    break;
-  default:
-    break;
-  }
+  const Type *accumulator = reduce && count == 2 ? this->reduceInitType(call, element) : element;
   if (accumulator->isError()) {
     call->args[0] = this->exprChecker->checkExpr(call->args[0]);
     return call;
   }
-  sig.params = reduce ? std::vector<const Type *>{accumulator, element, Type::intTy()}
-                      : std::vector<const Type *>{element, Type::intTy()};
+  Signature sig = IteratorMethods::callbackSignature(method, element, accumulator);
   bool isBoolean = this->callChecker->isGlobalName(call->args[0], GlobalName::BOOLEAN);
-  if (auto *fe = dyn_cast<FunctionExpr>(call->args[0])) {
-    this->state.getCallbackFacts().rememberIndexCallback(fe->fn, reduce ? 2 : 1);
+  auto *given = dyn_cast<FunctionExpr>(call->args[0]);
+  if (given != nullptr) {
+    this->state.getCallbackFacts().rememberIndexCallback(given->fn, reduce ? 2 : 1);
   }
+  unsigned primary = reduce ? 2 : 1;
   call->args[0] = this->callbackChecker->checkFunctionArg(call->args[0], sig, primary, name);
-  if (BuiltinGroups::isIteratorStage(builtin)) {
-    if (auto *fe = dyn_cast<FunctionExpr>(call->args[0])) {
-      fe->fn->nonEscaping = call->fused;
-    }
+  auto *checked = dyn_cast<FunctionExpr>(call->args[0]);
+  if (BuiltinGroups::isIteratorStage(builtin) && checked != nullptr) {
+    checked->fn->nonEscaping = call->fused;
   }
   call->target = BuiltinCall{.builtin = builtin};
   if (BuiltinGroups::isIteratorSink(builtin)) {
     this->flowChecker->calledFunction();
   }
-  const Type *callback = call->args[0]->type;
-  if (!callback->isFunction()) {
+  if (!call->args[0]->type->isFunction()) {
     return call;
   }
-  const Type *result = callback->ret();
-  switch (builtin) {
-    case Builtin::IterMap: {
-      ResultCallbackHasValue value = IteratorMethods::callbackValue(result, name);
-      if (value.isErr()) {
-        this->state.getDiagnostics().error(call->args[0]->loc(), value.error().message);
-        return call;
-      }
-      call->type = Type::iterator(result);
-      break;
-    }
-  case Builtin::IterFlatMap: {
-    ResultFlatMapInnerType inner = IteratorMethods::flatMapInner(result);
-    if (inner.isErr()) {
-      this->state.getDiagnostics().error(call->args[0]->loc(), inner.error().message);
-      return call;
-    }
-    if (result->isIterator()) {
-      GeneratorChecker::ResultNextNeedsNoValue flatSends =
-          this->generatorChecker->checkSendsNothing(result, "'flatMap'");
-      if (flatSends.isErr()) {
-        this->state.getDiagnostics().error(call->args[0]->loc(), flatSends.error().message);
-        return call;
-      }
-    }
-    call->type = Type::iterator(inner.value());
-    break;
+  IteratorCallback callback{
+      .call = call,
+      .name = name,
+      .element = element,
+      .accumulator = accumulator,
+      .isBoolean = isBoolean,
+      .count = count,
+  };
+
+  return this->checkCallbackResult(callback, method);
+}
+
+const Type *IteratorMethods::reduceInitType(CallExpr *call, const Type *element) {
+  Expr *init = call->args[1];
+  auto *unary = dyn_cast<UnaryExpr>(init);
+  bool negative = unary != nullptr && unary->op == UnaryOp::Neg && isa<IntLitExpr>(unary->operand);
+  bool literal = isa<IntLitExpr>(init) || negative;
+  const Type *apparent = GenericChecker::apparentType(element);
+  const Type *hint = literal && apparent->isNumeric() ? apparent : nullptr;
+  call->args[1] = this->exprChecker->checkExpr(init, hint);
+  const Type *accumulator = call->args[1]->type;
+  ResultInitialValueType initial = IteratorMethods::initialValue(accumulator);
+  if (initial.isErr()) {
+    this->state.getDiagnostics().error(call->args[1]->loc(), initial.error().message);
+    return Type::error();
   }
-  case Builtin::IterFilter:
-    if (const Type *kept = this->predicateChecker->filteredType(call->args[0], element)) {
-      call->type = Type::iterator(kept);
-    } else {
-      call->type = Type::iterator(
-          element->isOptional() && (isBoolean || this->callbackChecker->keepsDefined(call->args[0]))
-              ? element->inner()
-              : element);
-    }
-    break;
-  case Builtin::IterForEach:
-    call->type = Type::voidTy();
-    break;
-  case Builtin::IterReduce:
-    call->type = count == 2 ? accumulator : Type::optional(accumulator);
-    if (count == 2 && call->args.size() == 2) {
-      call->args[1] = this->typeRelations->coerce(call->args[1], accumulator);
-    }
-    break;
-  case Builtin::IterSome:
-  case Builtin::IterEvery:
-    call->type = Type::boolTy();
-    break;
-  case Builtin::IterFind:
-    call->type = Type::optional(element);
-    break;
-  default:
-    break;
+
+  return accumulator;
+}
+
+Signature IteratorMethods::callbackSignature(IteratorMethod method, const Type *element,
+                                             const Type *accumulator) {
+  Signature sig;
+  sig.pad = false;
+  if (method == IteratorMethod::FOR_EACH) {
+    sig.voidResult = true;
+  }
+  bool predicate = method == IteratorMethod::FILTER || method == IteratorMethod::SOME ||
+                   method == IteratorMethod::EVERY || method == IteratorMethod::FIND;
+  if (predicate) {
+    sig.ret = Type::boolTy();
+  }
+  bool reduce = method == IteratorMethod::REDUCE;
+  if (reduce) {
+    sig.ret = accumulator;
+  }
+  sig.params = reduce ? std::vector<const Type *>{accumulator, element, Type::intTy()}
+                      : std::vector<const Type *>{element, Type::intTy()};
+
+  return sig;
+}
+
+Expr *IteratorMethods::checkCallbackResult(const IteratorCallback &callback,
+                                           IteratorMethod method) {
+  CallExpr *call = callback.call;
+  const Type *element = callback.element;
+  const Type *result = call->args[0]->type->ret();
+  switch (method) {
+    case IteratorMethod::MAP:
+      return this->checkMapResult(callback, result);
+    case IteratorMethod::FLAT_MAP:
+      return this->checkFlatMapResult(call, result);
+    case IteratorMethod::FILTER:
+      call->type = Type::iterator(this->filteredElement(callback));
+      return call;
+    case IteratorMethod::FOR_EACH:
+      call->type = Type::voidTy();
+      return call;
+    case IteratorMethod::REDUCE:
+      return this->finishReduce(callback);
+    case IteratorMethod::SOME:
+    case IteratorMethod::EVERY:
+      call->type = Type::boolTy();
+      return call;
+    case IteratorMethod::FIND:
+      call->type = Type::optional(element);
+      return call;
+    case IteratorMethod::NEXT:
+    case IteratorMethod::RETURN:
+    case IteratorMethod::THROW:
+    case IteratorMethod::TAKE:
+    case IteratorMethod::DROP:
+    case IteratorMethod::TO_ARRAY:
+      return call;
   }
 
   return call;
 }
 
+Expr *IteratorMethods::checkMapResult(const IteratorCallback &callback, const Type *result) {
+  CallExpr *call = callback.call;
+  ResultCallbackHasValue value = IteratorMethods::callbackValue(result, callback.name);
+  if (value.isErr()) {
+    this->state.getDiagnostics().error(call->args[0]->loc(), value.error().message);
+    return call;
+  }
+  call->type = Type::iterator(result);
+
+  return call;
+}
+
+Expr *IteratorMethods::checkFlatMapResult(CallExpr *call, const Type *result) {
+  ResultFlatMapInnerType inner = IteratorMethods::flatMapInner(result);
+  if (inner.isErr()) {
+    this->state.getDiagnostics().error(call->args[0]->loc(), inner.error().message);
+    return call;
+  }
+  if (result->isIterator()) {
+    GeneratorChecker::ResultNextNeedsNoValue flatSends =
+        this->generatorChecker->checkSendsNothing(result, "'flatMap'");
+    if (flatSends.isErr()) {
+      this->state.getDiagnostics().error(call->args[0]->loc(), flatSends.error().message);
+      return call;
+    }
+  }
+  call->type = Type::iterator(inner.value());
+
+  return call;
+}
+
+const Type *IteratorMethods::filteredElement(const IteratorCallback &callback) {
+  const Expr *predicate = callback.call->args[0];
+  const Type *element = callback.element;
+  const Type *kept = this->predicateChecker->filteredType(predicate, element);
+  if (kept != nullptr) {
+    return kept;
+  }
+  bool defined = element->isOptional() &&
+                 (callback.isBoolean || this->callbackChecker->keepsDefined(predicate));
+
+  return defined ? element->inner() : element;
+}
+
+Expr *IteratorMethods::finishReduce(const IteratorCallback &callback) {
+  CallExpr *call = callback.call;
+  const Type *accumulator = callback.accumulator;
+  call->type = callback.count == 2 ? accumulator : Type::optional(accumulator);
+  if (callback.count == 2 && call->args.size() == 2) {
+    call->args[1] = this->typeRelations->coerce(call->args[1], accumulator);
+  }
+
+  return call;
+}
 }

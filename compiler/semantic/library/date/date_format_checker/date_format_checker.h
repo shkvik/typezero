@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/date/date_format_option_table/date_format_option_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/date/date_format_checker/date_format_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -32,6 +33,29 @@ public:
 
 private:
   using ResultOptionsObject = Result<const Type *, DateFormatCheckerOptionsObjectError>;
+
+  enum class DateOptionRole {
+    Setting,
+    Component,
+    Style,
+  };
+
+  struct DateOptionPlace {
+    const Expr *given;
+    llvm::SMLoc at;
+    bool exempt;
+  };
+
+  bool optionKindsFit(const Expr *options, int kind);
+  bool optionKindFits(const Expr *options, const Field &field,
+                      std::optional<DateFormatOption> option, int kind);
+  static const Type *wantedOptionType(DateFormatOption option, const Type *value);
+  static DateOptionRole optionRole(DateFormatOption option);
+  bool styleFitsMethod(const Expr *options, llvm::StringRef name, int kind);
+  bool optionValuesFit(const Expr *options);
+  static const Expr *givenProperty(const ObjectLitExpr *literal, llvm::StringRef name);
+  bool digitsFit(const Field &field, const DateOptionPlace &place);
+  bool optionTextFits(const Field &field, const DateOptionPlace &place);
 
   static ResultOptionsObject optionsObject(const Type *type, int kind);
   static std::optional<std::u16string> literalText(const Expr *e);

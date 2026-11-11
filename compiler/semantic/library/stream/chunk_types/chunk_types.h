@@ -27,6 +27,21 @@ public:
   void addStreamBases(ClassDecl *inst, llvm::SMLoc loc);
 
 private:
+  struct StreamSides {
+    const Type *readable;
+    const Type *writable;
+    const Type *error;
+    bool transform;
+  };
+
+  static const ClassDecl *libraryBase(const ClassDecl *cls);
+  std::optional<StreamSides> streamSides(const ClassDecl *lib);
+  std::vector<const Type *> hookParamTypes(const FunctionDecl *fn, const StreamSides &sides);
+  std::vector<const Type *> destroyParamTypes();
+  std::vector<const Type *> writevParamTypes(const FunctionDecl *fn, const StreamSides &sides,
+                                             const Type *callback);
+  const Type *libraryAliasOf(llvm::StringRef name, const Type *arg, llvm::SMLoc loc);
+
   SemanticState &state;
   Prelude *prelude = nullptr;
   ClassBases *classBases = nullptr;

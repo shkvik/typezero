@@ -126,400 +126,529 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
   call->type = Type::error();
   std::string syncName =
       this->state.getFileSystemStore().isInsidePromiseCall() ? (fn + "Sync").str() : fn.str();
-  llvm::StringRef op = syncName;
-  auto loosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-
-    return call;
-  };
-  if (op == "constants" || op == "Stats" || op == "Dirent") {
-    std::string message = ErrorTextFsCall::notFunc(fn);
-    this->state.getDiagnostics().error(loc, message);
-    return loosely();
+  std::optional<FsFunction> function = FsFunctionTable::find(syncName);
+  bool value = function == FsFunction::CONSTANTS || function == FsFunction::STATS ||
+               function == FsFunction::DIRENT;
+  if (value) {
+    return this->reportNotFunction(call, fn, loc);
   }
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  const Type *string = Type::string();
-  auto boolLit = [&](bool value) {
-    auto *lit = this->state.getAst().make<BoolLitExpr>(loc, value);
-    lit->type = Type::boolTy();
+  if (!function.has_value()) {
+    return this->reportUnknownFsFunction(call, fn, loc);
+  }
 
-    return lit;
+  FsCall fs{
+      .call = call,
+      .function = *function,
+      .fn = fn,
+      .loc = loc,
   };
-  auto intLit = [&](uint64_t value) {
-    auto *lit = this->state.getAst().make<IntLitExpr>(loc, value);
-    lit->type = Type::intTy();
+  switch (fs.function) {
+    case FsFunction::CONSTANTS:
+    case FsFunction::STATS:
+    case FsFunction::DIRENT:
+      return this->reportNotFunction(call, fn, loc);
+    case FsFunction::READ_FILE_SYNC:
+      return this->checkReadFile(fs);
+    case FsFunction::WRITE_FILE_SYNC:
+    case FsFunction::APPEND_FILE_SYNC:
+      return this->checkWriteFile(fs);
+    case FsFunction::EXISTS_SYNC:
+    case FsFunction::UNLINK_SYNC:
+    case FsFunction::REALPATH_SYNC:
+    case FsFunction::MKDTEMP_SYNC:
+      return this->checkPathCall(fs);
+    case FsFunction::ACCESS_SYNC:
+    case FsFunction::CHMOD_SYNC:
+    case FsFunction::TRUNCATE_SYNC:
+      return this->checkPathWithArgument(fs);
+    case FsFunction::STAT_SYNC:
+    case FsFunction::LSTAT_SYNC:
+      return this->checkStat(fs);
+    case FsFunction::READDIR_SYNC:
+      return this->checkReaddir(fs);
+    case FsFunction::MKDIR_SYNC:
+      return this->checkMkdir(fs);
+    case FsFunction::RMDIR_SYNC:
+      return this->checkRmdir(fs);
+    case FsFunction::RM_SYNC:
+      return this->checkRm(fs);
+    case FsFunction::RENAME_SYNC:
+    case FsFunction::COPY_FILE_SYNC:
+    case FsFunction::REPLACE_SYNC:
+      return this->checkTwoPaths(fs);
+  }
 
-    return lit;
-  };
-  auto stringLit = [&](llvm::StringRef text) {
-    auto *lit = this->state.getAst().make<StringLitExpr>(loc, FsChecker::utf16(text));
-    lit->type = Type::string();
+  return call;
+}
 
-    return lit;
-  };
-  auto path = [&](Expr *arg, bool fd) {
-    arg = this->exprChecker->checkExpr(arg, string);
-    if (auto *lit = dyn_cast<StringLitExpr>(arg);
-        lit && lit->value.find(u'\0') != std::u16string::npos) {
-      std::string message = ErrorTextFsCall::zeroPath();
-      this->state.getDiagnostics().error(arg->loc(), message);
-    }
-    if (fd && !this->state.getFileSystemStore().isInsidePromiseCall() && arg->type->isInt()) {
-      return arg;
-    }
+Expr *FsChecker::reportNotFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
+  std::string message = ErrorTextFsCall::notFunc(fn);
+  this->state.getDiagnostics().error(loc, message);
 
-    return this->typeRelations->coerce(arg, string);
-  };
-  auto literalFlag = [&](Expr *value, llvm::StringRef option, bool &out) {
-    if (auto *lit = dyn_cast<BoolLitExpr>(value)) {
-      lit->type = Type::boolTy();
-      out = lit->value;
-      return true;
-    }
-    std::string message = ErrorTextFsOptions::flag(fn, option);
-    this->state.getDiagnostics().error(value->loc(), message);
-    this->exprChecker->checkExpr(value);
+  return this->checkLoosely(call);
+}
 
-    return false;
-  };
-  auto openFlag = [&](Expr *flag, llvm::StringRef fallback) -> Expr * {
-    if (!flag) {
-      return stringLit(fallback);
-    }
-    static constexpr llvm::StringLiteral flags[] = {
-        "r",   "rs", "sr", "r+", "rs+", "sr+", "w",  "wx",  "xw",  "w+",  "wx+",
-        "xw+", "a",  "ax", "xa", "as",  "sa",  "a+", "ax+", "xa+", "as+", "sa+"};
-    auto *lit = dyn_cast<StringLitExpr>(flag);
-    if (lit && llvm::is_contained(flags, llvm::StringRef(ToUtf8::toUtf8(lit->value)))) {
-      lit->type = string;
-      return lit;
-    }
-    this->exprChecker->checkExpr(flag);
-    std::string written = lit ? ToUtf8::toUtf8(lit->value) : std::string();
-    std::string message = ErrorTextFsCall::flag(fn, written, lit != nullptr);
-    this->state.getDiagnostics().error(flag->loc(), message);
-
-    return nullptr;
-  };
-  llvm::StringMap<Expr *> options;
-  auto encodingOrOptions = [&](size_t index, llvm::ArrayRef<llvm::StringRef> allowed) {
-    if (index >= call->args.size()) {
-      return true;
-    }
-    Expr *arg = call->args[index];
-    if (isa<StringLitExpr>(arg)) {
-      options["encoding"] = arg;
-      return true;
-    }
-    if (isa<ObjectLitExpr>(arg) || isa<UndefinedExpr>(arg)) {
-      return this->nodeOptions(call, index, fn, allowed, options);
-    }
-    arg = this->exprChecker->checkExpr(arg);
-    if (arg->type->isString()) {
-      std::string message = ErrorTextFsEncoding::dependsOn(fn);
-      this->state.getDiagnostics().error(arg->loc(), message);
-    } else if (!arg->type->isError()) {
-      std::string message = ErrorTextFsOptions::literal(fn, allowed[0]);
-      this->state.getDiagnostics().error(arg->loc(), message);
-    }
-
-    return false;
-  };
-
-  if (op == "readFileSync") {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(loc, arity.error().message);
-      return call;
-    }
-    Expr *file = path(call->args[0], true);
-    if (!encodingOrOptions(1, {"encoding", "flag"})) {
-      return call;
-    }
-    Expr *encoding = options.lookup("encoding");
-    Expr *number = nullptr;
-    if (encoding && !isa<UndefinedExpr>(encoding) &&
-        !(number = this->checkEncoding(encoding, fn, true))) {
-      return call;
-    }
-    Expr *flag = openFlag(options.lookup("flag"), "r");
-    if (!flag) {
-      return call;
-    }
-    call->args = {file, flag};
-    call->target = BuiltinCall{.builtin = Builtin::FsReadFile};
-    call->type = number ? string : Type::bytesType(Type::Bytes::Buffer);
-    if (number) {
-      call->args.push_back(number);
-    }
-    return call;
-  }
-  if (op == "writeFileSync" || op == "appendFileSync") {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 3);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(loc, arity.error().message);
-      return call;
-    }
-    Expr *file = path(call->args[0], true);
-    Expr *data = this->exprChecker->checkExpr(call->args[1], string);
-    auto view = [](const Type *t) { return t->isByteView(); };
-    bool bytes =
-        view(data->type) || (data->type->isUnion() && llvm::all_of(data->type->members(), view));
-    if (!data->type->isString() && !bytes && !data->type->isError()) {
-      std::string message = ErrorTextFsCall::data(fn, data->type);
-      this->state.getDiagnostics().error(data->loc(), message);
-      return loosely();
-    }
-    if (!encodingOrOptions(2, {"encoding", "flag", "mode"})) {
-      return call;
-    }
-    Expr *number = nullptr;
-    if (Expr *encoding = options.lookup("encoding"); encoding && !isa<UndefinedExpr>(encoding)) {
-      if (bytes) {
-        std::string message = ErrorTextFsEncoding::forText(fn);
-        this->state.getDiagnostics().error(encoding->loc(), message);
-        return call;
-      }
-      if (!(number = this->checkEncoding(encoding, fn, true))) {
-        return call;
-      }
-    }
-    Expr *flag = openFlag(options.lookup("flag"), op == "writeFileSync" ? "w" : "a");
-    if (!flag) {
-      return call;
-    }
-    Expr *mode = options.lookup("mode");
-    call->args = {file, data, flag,
-                  mode ? this->argumentChecker->checkArg(mode, Type::intTy()) : intLit(0666)};
-    if (!bytes) {
-      call->args.push_back(number ? number : intLit(0));
-    }
-    call->target = BuiltinCall{.builtin = Builtin::FsWriteFile};
-    call->type = Type::voidTy();
-    return call;
-  }
-  if (op == "existsSync" || op == "unlinkSync" || op == "realpathSync" || op == "mkdtempSync") {
-    unsigned max = op == "existsSync" || op == "unlinkSync" ? 1 : 2;
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, max);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(loc, arity.error().message);
-      return call;
-    }
-    Expr *file = path(call->args[0], false);
-    if (max == 2 && !encodingOrOptions(1, {"encoding"})) {
-      return call;
-    }
-    if (Expr *encoding = options.lookup("encoding"); encoding && !isa<UndefinedExpr>(encoding)) {
-      if (!this->checkEncoding(encoding, fn, false)) {
-        return call;
-      }
-    }
-    call->args = {file};
-    call->target = BuiltinCall{.builtin = op == "existsSync"     ? Builtin::FsExists
-                                          : op == "unlinkSync"   ? Builtin::FsUnlink
-                                          : op == "realpathSync" ? Builtin::FsRealpath
-                                                                 : Builtin::FsMkdtemp};
-    call->type = op == "existsSync" ? Type::boolTy() : op == "unlinkSync" ? Type::voidTy() : string;
-    return call;
-  }
-  if (op == "accessSync" || op == "chmodSync" || op == "truncateSync") {
-    ArgumentChecker::ResultArityMatches arity =
-        this->argumentChecker->checkArity(call, op == "chmodSync" ? 2 : 1, 2);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(loc, arity.error().message);
-      return call;
-    }
-    Expr *file = path(call->args[0], false);
-    Expr *value;
-    if (op == "truncateSync") {
-      value = call->args.size() > 1 ? this->argumentChecker->checkArg(call->args[1], Type::intTy())
-                                    : nullptr;
-      if (!value) {
-        auto *zero = this->state.getAst().make<IntLitExpr>(loc, 0);
-        zero->type = Type::intTy();
-        value = zero;
-      }
-    } else if (op == "chmodSync" && isa<StringLitExpr>(call->args[1])) {
-      std::string text = ToUtf8::toUtf8(cast<StringLitExpr>(call->args[1])->value);
-      ResultOctalMode mode = FsChecker::octalMode(text);
-      if (mode.isErr()) {
-        this->state.getDiagnostics().error(call->args[1]->loc(), mode.error().message);
-        return call;
-      }
-      value = intLit(mode.value());
-    } else {
-      value = call->args.size() > 1 ? this->argumentChecker->checkArg(call->args[1], Type::intTy())
-                                    : intLit(0);
-    }
-    call->args = {file, value};
-    call->target = BuiltinCall{.builtin = op == "accessSync"  ? Builtin::FsAccess
-                                          : op == "chmodSync" ? Builtin::FsChmod
-                                                              : Builtin::FsTruncate};
-    call->type = Type::voidTy();
-    return call;
-  }
-  if (op == "statSync" || op == "lstatSync") {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(loc, arity.error().message);
-      return call;
-    }
-    Expr *file = path(call->args[0], false);
-    if (!this->nodeOptions(call, 1, fn,
-                           this->state.getFileSystemStore().isInsidePromiseCall()
-                               ? llvm::ArrayRef<llvm::StringRef>{"bigint"}
-                               : llvm::ArrayRef<llvm::StringRef>{"throwIfNoEntry", "bigint"},
-                           options)) {
-      return call;
-    }
-    bool throwIfMissing = true;
-    bool big = false;
-    if (Expr *value = options.lookup("throwIfNoEntry");
-        value && !literalFlag(value, "throwIfNoEntry", throwIfMissing)) {
-      return call;
-    }
-    if (Expr *value = options.lookup("bigint"); value && !literalFlag(value, "bigint", big)) {
-      return call;
-    }
-    if (big) {
-      std::string message = ErrorTextFsCall::bigint();
-      this->state.getDiagnostics().error(options.lookup("bigint")->loc(), message);
-      return call;
-    }
-    call->args = {file, boolLit(op == "statSync"), boolLit(throwIfMissing)};
-    call->target = BuiltinCall{.builtin = Builtin::FsStat};
-    const Type *stats = this->state.getFileSystemStore().getStatsClass()->type;
-    call->type = throwIfMissing ? stats : Type::optional(stats);
-    return call;
-  }
-  if (op == "readdirSync") {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(loc, arity.error().message);
-      return call;
-    }
-    Expr *dir = path(call->args[0], false);
-    if (!encodingOrOptions(1, {"encoding", "withFileTypes", "recursive"})) {
-      return call;
-    }
-    if (Expr *encoding = options.lookup("encoding"); encoding && !isa<UndefinedExpr>(encoding)) {
-      if (!this->checkEncoding(encoding, fn, false)) {
-        return call;
-      }
-    }
-    bool types = false;
-    if (Expr *value = options.lookup("withFileTypes");
-        value && !literalFlag(value, "withFileTypes", types)) {
-      return call;
-    }
-    Expr *recursive = options.lookup("recursive");
-    call->args = {dir, recursive ? this->argumentChecker->checkArg(recursive, Type::boolTy())
-                                 : boolLit(false)};
-    call->target = BuiltinCall{.builtin = Builtin::FsReaddir};
-    const Type *dirent = this->state.getFileSystemStore().getDirentClass()->type;
-    call->type = Type::array(types ? dirent : string);
-    return call;
-  }
-  if (op == "mkdirSync") {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(loc, arity.error().message);
-      return call;
-    }
-    Expr *dir = path(call->args[0], false);
-    Expr *mode = nullptr;
-    if (call->args.size() > 1 && !isa<ObjectLitExpr>(call->args[1]) &&
-        !isa<UndefinedExpr>(call->args[1])) {
-      mode = this->argumentChecker->checkArg(call->args[1], Type::intTy());
-    } else {
-      if (!this->nodeOptions(call, 1, fn, {"recursive", "mode"}, options)) {
-        return call;
-      }
-      if (Expr *value = options.lookup("mode")) {
-        mode = this->argumentChecker->checkArg(value, Type::intTy());
-      }
-    }
-    Expr *recursive = options.lookup("recursive");
-    call->args = {dir,
-                  recursive ? this->argumentChecker->checkArg(recursive, Type::boolTy())
-                            : boolLit(false),
-                  mode ? mode : intLit(0777)};
-    call->target = BuiltinCall{.builtin = Builtin::FsMkdir};
-    call->type = Type::optional(string);
-    return call;
-  }
-  if (op == "rmdirSync") {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(loc, arity.error().message);
-      return call;
-    }
-    Expr *dir = path(call->args[0], false);
-    if (call->args.size() > 1 && !isa<UndefinedExpr>(call->args[1])) {
-      std::string message = ErrorTextFsCall::rmdir();
-      this->state.getDiagnostics().error(call->args[1]->loc(), message);
-      return loosely();
-    }
-    call->args = {dir};
-    call->target = BuiltinCall{.builtin = Builtin::FsRmdir};
-    call->type = Type::voidTy();
-    return call;
-  }
-  if (op == "rmSync") {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(loc, arity.error().message);
-      return call;
-    }
-    Expr *target = path(call->args[0], false);
-    if (!this->nodeOptions(call, 1, fn, {"recursive", "force", "maxRetries", "retryDelay"},
-                           options)) {
-      return call;
-    }
-    Expr *recursive = options.lookup("recursive");
-    Expr *force = options.lookup("force");
-    for (llvm::StringRef retry : {"maxRetries", "retryDelay"}) {
-      if (Expr *value = options.lookup(retry)) {
-        this->argumentChecker->checkArg(value, Type::intTy());
-      }
-    }
-    call->args = {target,
-                  recursive ? this->argumentChecker->checkArg(recursive, Type::boolTy())
-                            : boolLit(false),
-                  force ? this->argumentChecker->checkArg(force, Type::boolTy()) : boolLit(false)};
-    call->target = BuiltinCall{.builtin = Builtin::FsRm};
-    call->type = Type::voidTy();
-    return call;
-  }
-  if (op == "renameSync" || op == "copyFileSync" || op == "replaceSync") {
-    if (op == "copyFileSync" && call->args.size() == 3) {
-      std::string message = ErrorTextFsCall::copyMode(fn);
-      this->state.getDiagnostics().error(call->args[2]->loc(), message);
-      return loosely();
-    }
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 2);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(loc, arity.error().message);
-      return call;
-    }
-    Expr *from = path(call->args[0], false);
-    Expr *to = path(call->args[1], false);
-    call->args = {from, to};
-    call->target = BuiltinCall{.builtin = op == "renameSync"    ? Builtin::FsRename
-                                          : op == "replaceSync" ? Builtin::FsReplace
-                                                                : Builtin::FsCopyFile};
-    call->type = Type::voidTy();
-    return call;
-  }
+Expr *FsChecker::reportUnknownFsFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   FsExports::ResultExportFound found = FsExports::fsExport(fn, "node:fs");
   std::string message = found.isErr() ? found.error().message : std::string();
   this->state.getDiagnostics().error(loc, message);
 
-  return loosely();
+  return this->checkLoosely(call);
+}
+
+Expr *FsChecker::checkLoosely(CallExpr *call) {
+  for (Expr *&arg : call->args) {
+    arg = this->exprChecker->checkExpr(arg);
+  }
+
+  return call;
+}
+
+BoolLitExpr *FsChecker::makeBoolLiteral(llvm::SMLoc loc, bool value) {
+  auto *literal = this->state.getAst().make<BoolLitExpr>(loc, value);
+  literal->type = Type::boolTy();
+
+  return literal;
+}
+
+IntLitExpr *FsChecker::makeIntLiteral(llvm::SMLoc loc, uint64_t value) {
+  auto *literal = this->state.getAst().make<IntLitExpr>(loc, value);
+  literal->type = Type::intTy();
+
+  return literal;
+}
+
+StringLitExpr *FsChecker::makeStringLiteral(llvm::SMLoc loc, llvm::StringRef text) {
+  auto *literal = this->state.getAst().make<StringLitExpr>(loc, FsChecker::utf16(text));
+  literal->type = Type::string();
+
+  return literal;
+}
+
+Expr *FsChecker::checkPath(Expr *arg, bool fd) {
+  const Type *string = Type::string();
+  Expr *checked = this->exprChecker->checkExpr(arg, string);
+  auto *literal = dyn_cast<StringLitExpr>(checked);
+  if (literal != nullptr && literal->value.find(u'\0') != std::u16string::npos) {
+    std::string message = ErrorTextFsCall::zeroPath();
+    this->state.getDiagnostics().error(checked->loc(), message);
+  }
+  bool descriptor =
+      fd && !this->state.getFileSystemStore().isInsidePromiseCall() && checked->type->isInt();
+  if (descriptor) {
+    return checked;
+  }
+
+  return this->typeRelations->coerce(checked, string);
+}
+
+bool FsChecker::literalFlag(FsCall &fs, Expr *value, llvm::StringRef option, bool &out) {
+  auto *literal = dyn_cast<BoolLitExpr>(value);
+  if (literal != nullptr) {
+    literal->type = Type::boolTy();
+    out = literal->value;
+    return true;
+  }
+  std::string message = ErrorTextFsOptions::flag(fs.fn, option);
+  this->state.getDiagnostics().error(value->loc(), message);
+  this->exprChecker->checkExpr(value);
+
+  return false;
+}
+
+Expr *FsChecker::openFlag(FsCall &fs, Expr *flag, llvm::StringRef fallback) {
+  if (flag == nullptr) {
+    return this->makeStringLiteral(fs.loc, fallback);
+  }
+  static constexpr llvm::StringLiteral flags[] = {
+      "r",   "rs", "sr", "r+", "rs+", "sr+", "w",  "wx",  "xw",  "w+",  "wx+",
+      "xw+", "a",  "ax", "xa", "as",  "sa",  "a+", "ax+", "xa+", "as+", "sa+"};
+  auto *literal = dyn_cast<StringLitExpr>(flag);
+  std::string written = literal != nullptr ? ToUtf8::toUtf8(literal->value) : std::string();
+  if (literal != nullptr && llvm::is_contained(flags, llvm::StringRef(written))) {
+    literal->type = Type::string();
+    return literal;
+  }
+  this->exprChecker->checkExpr(flag);
+  std::string message = ErrorTextFsCall::flag(fs.fn, written, literal != nullptr);
+  this->state.getDiagnostics().error(flag->loc(), message);
+
+  return nullptr;
+}
+
+bool FsChecker::encodingOrOptions(FsCall &fs, size_t index,
+                                  llvm::ArrayRef<llvm::StringRef> allowed) {
+  CallExpr *call = fs.call;
+  if (index >= call->args.size()) {
+    return true;
+  }
+  Expr *arg = call->args[index];
+  if (isa<StringLitExpr>(arg)) {
+    fs.options["encoding"] = arg;
+    return true;
+  }
+  if (isa<ObjectLitExpr>(arg) || isa<UndefinedExpr>(arg)) {
+    return this->nodeOptions(call, index, fs.fn, allowed, fs.options);
+  }
+  Expr *checked = this->exprChecker->checkExpr(arg);
+  if (checked->type->isString()) {
+    std::string message = ErrorTextFsEncoding::dependsOn(fs.fn);
+    this->state.getDiagnostics().error(checked->loc(), message);
+  } else if (!checked->type->isError()) {
+    std::string message = ErrorTextFsOptions::literal(fs.fn, allowed[0]);
+    this->state.getDiagnostics().error(checked->loc(), message);
+  }
+
+  return false;
+}
+
+Expr *FsChecker::checkReadFile(FsCall &fs) {
+  CallExpr *call = fs.call;
+  llvm::StringRef fn = fs.fn;
+  llvm::SMLoc loc = fs.loc;
+  llvm::StringMap<Expr *> &options = fs.options;
+  const Type *string = Type::string();
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(loc, arity.error().message);
+    return call;
+  }
+  Expr *file = this->checkPath(call->args[0], true);
+  if (!this->encodingOrOptions(fs, 1, {"encoding", "flag"})) {
+    return call;
+  }
+  Expr *encoding = options.lookup("encoding");
+  Expr *number = nullptr;
+  if (encoding && !isa<UndefinedExpr>(encoding) &&
+      !(number = this->checkEncoding(encoding, fn, true))) {
+    return call;
+  }
+  Expr *flag = this->openFlag(fs, options.lookup("flag"), "r");
+  if (!flag) {
+    return call;
+  }
+  call->args = {file, flag};
+  call->target = BuiltinCall{.builtin = Builtin::FsReadFile};
+  call->type = number ? string : Type::bytesType(Type::Bytes::Buffer);
+  if (number) {
+    call->args.push_back(number);
+  }
+  return call;
+}
+
+Expr *FsChecker::checkWriteFile(FsCall &fs) {
+  CallExpr *call = fs.call;
+  llvm::StringRef fn = fs.fn;
+  llvm::SMLoc loc = fs.loc;
+  llvm::StringMap<Expr *> &options = fs.options;
+  const Type *string = Type::string();
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 3);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(loc, arity.error().message);
+    return call;
+  }
+  Expr *file = this->checkPath(call->args[0], true);
+  Expr *data = this->exprChecker->checkExpr(call->args[1], string);
+  auto view = [](const Type *t) { return t->isByteView(); };
+  bool bytes =
+      view(data->type) || (data->type->isUnion() && llvm::all_of(data->type->members(), view));
+  if (!data->type->isString() && !bytes && !data->type->isError()) {
+    std::string message = ErrorTextFsCall::data(fn, data->type);
+    this->state.getDiagnostics().error(data->loc(), message);
+    return this->checkLoosely(call);
+  }
+  if (!this->encodingOrOptions(fs, 2, {"encoding", "flag", "mode"})) {
+    return call;
+  }
+  Expr *number = nullptr;
+  if (Expr *encoding = options.lookup("encoding"); encoding && !isa<UndefinedExpr>(encoding)) {
+    if (bytes) {
+      std::string message = ErrorTextFsEncoding::forText(fn);
+      this->state.getDiagnostics().error(encoding->loc(), message);
+      return call;
+    }
+    if (!(number = this->checkEncoding(encoding, fn, true))) {
+      return call;
+    }
+  }
+  Expr *flag = this->openFlag(fs, options.lookup("flag"),
+                              fs.function == FsFunction::WRITE_FILE_SYNC ? "w" : "a");
+  if (!flag) {
+    return call;
+  }
+  Expr *mode = options.lookup("mode");
+  call->args = {file, data, flag,
+                mode ? this->argumentChecker->checkArg(mode, Type::intTy())
+                     : this->makeIntLiteral(loc, 0666)};
+  if (!bytes) {
+    call->args.push_back(number ? number : this->makeIntLiteral(loc, 0));
+  }
+  call->target = BuiltinCall{.builtin = Builtin::FsWriteFile};
+  call->type = Type::voidTy();
+  return call;
+}
+
+Expr *FsChecker::checkPathCall(FsCall &fs) {
+  CallExpr *call = fs.call;
+  llvm::StringRef fn = fs.fn;
+  llvm::SMLoc loc = fs.loc;
+  llvm::StringMap<Expr *> &options = fs.options;
+  const Type *string = Type::string();
+  unsigned max =
+      fs.function == FsFunction::EXISTS_SYNC || fs.function == FsFunction::UNLINK_SYNC ? 1 : 2;
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, max);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(loc, arity.error().message);
+    return call;
+  }
+  Expr *file = this->checkPath(call->args[0], false);
+  if (max == 2 && !this->encodingOrOptions(fs, 1, {"encoding"})) {
+    return call;
+  }
+  if (Expr *encoding = options.lookup("encoding"); encoding && !isa<UndefinedExpr>(encoding)) {
+    if (!this->checkEncoding(encoding, fn, false)) {
+      return call;
+    }
+  }
+  call->args = {file};
+  call->target =
+      BuiltinCall{.builtin = fs.function == FsFunction::EXISTS_SYNC     ? Builtin::FsExists
+                             : fs.function == FsFunction::UNLINK_SYNC   ? Builtin::FsUnlink
+                             : fs.function == FsFunction::REALPATH_SYNC ? Builtin::FsRealpath
+                                                                        : Builtin::FsMkdtemp};
+  call->type = fs.function == FsFunction::EXISTS_SYNC   ? Type::boolTy()
+               : fs.function == FsFunction::UNLINK_SYNC ? Type::voidTy()
+                                                        : string;
+  return call;
+}
+
+Expr *FsChecker::checkPathWithArgument(FsCall &fs) {
+  CallExpr *call = fs.call;
+  llvm::SMLoc loc = fs.loc;
+  ArgumentChecker::ResultArityMatches arity =
+      this->argumentChecker->checkArity(call, fs.function == FsFunction::CHMOD_SYNC ? 2 : 1, 2);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(loc, arity.error().message);
+    return call;
+  }
+  Expr *file = this->checkPath(call->args[0], false);
+  Expr *value;
+  if (fs.function == FsFunction::TRUNCATE_SYNC) {
+    value = call->args.size() > 1 ? this->argumentChecker->checkArg(call->args[1], Type::intTy())
+                                  : nullptr;
+    if (!value) {
+      auto *zero = this->state.getAst().make<IntLitExpr>(loc, 0);
+      zero->type = Type::intTy();
+      value = zero;
+    }
+  } else if (fs.function == FsFunction::CHMOD_SYNC && isa<StringLitExpr>(call->args[1])) {
+    std::string text = ToUtf8::toUtf8(cast<StringLitExpr>(call->args[1])->value);
+    ResultOctalMode mode = FsChecker::octalMode(text);
+    if (mode.isErr()) {
+      this->state.getDiagnostics().error(call->args[1]->loc(), mode.error().message);
+      return call;
+    }
+    value = this->makeIntLiteral(loc, mode.value());
+  } else {
+    value = call->args.size() > 1 ? this->argumentChecker->checkArg(call->args[1], Type::intTy())
+                                  : this->makeIntLiteral(loc, 0);
+  }
+  call->args = {file, value};
+  call->target =
+      BuiltinCall{.builtin = fs.function == FsFunction::ACCESS_SYNC  ? Builtin::FsAccess
+                             : fs.function == FsFunction::CHMOD_SYNC ? Builtin::FsChmod
+                                                                     : Builtin::FsTruncate};
+  call->type = Type::voidTy();
+  return call;
+}
+
+Expr *FsChecker::checkStat(FsCall &fs) {
+  CallExpr *call = fs.call;
+  llvm::StringRef fn = fs.fn;
+  llvm::SMLoc loc = fs.loc;
+  llvm::StringMap<Expr *> &options = fs.options;
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(loc, arity.error().message);
+    return call;
+  }
+  Expr *file = this->checkPath(call->args[0], false);
+  if (!this->nodeOptions(call, 1, fn,
+                         this->state.getFileSystemStore().isInsidePromiseCall()
+                             ? llvm::ArrayRef<llvm::StringRef>{"bigint"}
+                             : llvm::ArrayRef<llvm::StringRef>{"throwIfNoEntry", "bigint"},
+                         options)) {
+    return call;
+  }
+  bool throwIfMissing = true;
+  bool big = false;
+  if (Expr *value = options.lookup("throwIfNoEntry");
+      value && !this->literalFlag(fs, value, "throwIfNoEntry", throwIfMissing)) {
+    return call;
+  }
+  if (Expr *value = options.lookup("bigint");
+      value && !this->literalFlag(fs, value, "bigint", big)) {
+    return call;
+  }
+  if (big) {
+    std::string message = ErrorTextFsCall::bigint();
+    this->state.getDiagnostics().error(options.lookup("bigint")->loc(), message);
+    return call;
+  }
+  call->args = {file, this->makeBoolLiteral(loc, fs.function == FsFunction::STAT_SYNC),
+                this->makeBoolLiteral(loc, throwIfMissing)};
+  call->target = BuiltinCall{.builtin = Builtin::FsStat};
+  const Type *stats = this->state.getFileSystemStore().getStatsClass()->type;
+  call->type = throwIfMissing ? stats : Type::optional(stats);
+  return call;
+}
+
+Expr *FsChecker::checkReaddir(FsCall &fs) {
+  CallExpr *call = fs.call;
+  llvm::StringRef fn = fs.fn;
+  llvm::SMLoc loc = fs.loc;
+  llvm::StringMap<Expr *> &options = fs.options;
+  const Type *string = Type::string();
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(loc, arity.error().message);
+    return call;
+  }
+  Expr *dir = this->checkPath(call->args[0], false);
+  if (!this->encodingOrOptions(fs, 1, {"encoding", "withFileTypes", "recursive"})) {
+    return call;
+  }
+  if (Expr *encoding = options.lookup("encoding"); encoding && !isa<UndefinedExpr>(encoding)) {
+    if (!this->checkEncoding(encoding, fn, false)) {
+      return call;
+    }
+  }
+  bool types = false;
+  if (Expr *value = options.lookup("withFileTypes");
+      value && !this->literalFlag(fs, value, "withFileTypes", types)) {
+    return call;
+  }
+  Expr *recursive = options.lookup("recursive");
+  call->args = {dir, recursive ? this->argumentChecker->checkArg(recursive, Type::boolTy())
+                               : this->makeBoolLiteral(loc, false)};
+  call->target = BuiltinCall{.builtin = Builtin::FsReaddir};
+  const Type *dirent = this->state.getFileSystemStore().getDirentClass()->type;
+  call->type = Type::array(types ? dirent : string);
+  return call;
+}
+
+Expr *FsChecker::checkMkdir(FsCall &fs) {
+  CallExpr *call = fs.call;
+  llvm::StringRef fn = fs.fn;
+  llvm::SMLoc loc = fs.loc;
+  llvm::StringMap<Expr *> &options = fs.options;
+  const Type *string = Type::string();
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(loc, arity.error().message);
+    return call;
+  }
+  Expr *dir = this->checkPath(call->args[0], false);
+  Expr *mode = nullptr;
+  if (call->args.size() > 1 && !isa<ObjectLitExpr>(call->args[1]) &&
+      !isa<UndefinedExpr>(call->args[1])) {
+    mode = this->argumentChecker->checkArg(call->args[1], Type::intTy());
+  } else {
+    if (!this->nodeOptions(call, 1, fn, {"recursive", "mode"}, options)) {
+      return call;
+    }
+    if (Expr *value = options.lookup("mode")) {
+      mode = this->argumentChecker->checkArg(value, Type::intTy());
+    }
+  }
+  Expr *recursive = options.lookup("recursive");
+  call->args = {dir,
+                recursive ? this->argumentChecker->checkArg(recursive, Type::boolTy())
+                          : this->makeBoolLiteral(loc, false),
+                mode ? mode : this->makeIntLiteral(loc, 0777)};
+  call->target = BuiltinCall{.builtin = Builtin::FsMkdir};
+  call->type = Type::optional(string);
+  return call;
+}
+
+Expr *FsChecker::checkRmdir(FsCall &fs) {
+  CallExpr *call = fs.call;
+  llvm::SMLoc loc = fs.loc;
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(loc, arity.error().message);
+    return call;
+  }
+  Expr *dir = this->checkPath(call->args[0], false);
+  if (call->args.size() > 1 && !isa<UndefinedExpr>(call->args[1])) {
+    std::string message = ErrorTextFsCall::rmdir();
+    this->state.getDiagnostics().error(call->args[1]->loc(), message);
+    return this->checkLoosely(call);
+  }
+  call->args = {dir};
+  call->target = BuiltinCall{.builtin = Builtin::FsRmdir};
+  call->type = Type::voidTy();
+  return call;
+}
+
+Expr *FsChecker::checkRm(FsCall &fs) {
+  CallExpr *call = fs.call;
+  llvm::StringRef fn = fs.fn;
+  llvm::SMLoc loc = fs.loc;
+  llvm::StringMap<Expr *> &options = fs.options;
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(loc, arity.error().message);
+    return call;
+  }
+  Expr *target = this->checkPath(call->args[0], false);
+  if (!this->nodeOptions(call, 1, fn, {"recursive", "force", "maxRetries", "retryDelay"},
+                         options)) {
+    return call;
+  }
+  Expr *recursive = options.lookup("recursive");
+  Expr *force = options.lookup("force");
+  for (llvm::StringRef retry : {"maxRetries", "retryDelay"}) {
+    if (Expr *value = options.lookup(retry)) {
+      this->argumentChecker->checkArg(value, Type::intTy());
+    }
+  }
+  call->args = {target,
+                recursive ? this->argumentChecker->checkArg(recursive, Type::boolTy())
+                          : this->makeBoolLiteral(loc, false),
+                force ? this->argumentChecker->checkArg(force, Type::boolTy())
+                      : this->makeBoolLiteral(loc, false)};
+  call->target = BuiltinCall{.builtin = Builtin::FsRm};
+  call->type = Type::voidTy();
+  return call;
+}
+
+Expr *FsChecker::checkTwoPaths(FsCall &fs) {
+  CallExpr *call = fs.call;
+  llvm::StringRef fn = fs.fn;
+  llvm::SMLoc loc = fs.loc;
+  if (fs.function == FsFunction::COPY_FILE_SYNC && call->args.size() == 3) {
+    std::string message = ErrorTextFsCall::copyMode(fn);
+    this->state.getDiagnostics().error(call->args[2]->loc(), message);
+    return this->checkLoosely(call);
+  }
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 2);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(loc, arity.error().message);
+    return call;
+  }
+  Expr *from = this->checkPath(call->args[0], false);
+  Expr *to = this->checkPath(call->args[1], false);
+  call->args = {from, to};
+  call->target =
+      BuiltinCall{.builtin = fs.function == FsFunction::RENAME_SYNC    ? Builtin::FsRename
+                             : fs.function == FsFunction::REPLACE_SYNC ? Builtin::FsReplace
+                                                                       : Builtin::FsCopyFile};
+  call->type = Type::voidTy();
+  return call;
 }
 
 Expr *FsChecker::checkFsModuleCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {

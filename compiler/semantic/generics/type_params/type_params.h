@@ -79,6 +79,19 @@ private:
   using ResultDefaultSatisfy = Result<const Type *, TypeParamsDefaultFitsError>;
   using ResultDefaultPresent = Result<const TypeParamDecl *, TypeParamsDefaultGivenError>;
 
+  struct ParamConstraint {
+    const Type *constraint = nullptr;
+    std::vector<const Type *> alternatives;
+    bool resolved = true;
+  };
+
+  std::vector<Type *> createTypeParams(llvm::ArrayRef<TypeParamDecl> decls);
+  void constrainTypeParam(Type *param, const TypeParamDecl &decl);
+  ParamConstraint readConstraint(const TypeRef &ref, Type *param);
+  ParamConstraint unionConstraint(const TypeRef &ref);
+  bool constraintsAlone(const ParamConstraint &found, const TypeParamDecl &decl,
+                        const TypeRef &ref);
+  const Type *resolvedDefault(const TypeParamDecl &decl, const Type *param);
   static ResultNotBuiltInName ownName(const TypeParamDecl &decl);
   static ResultConstraintKept constraintAlone(const Type *type, const TypeParamDecl &decl);
   static ResultDefaultPresent defaultGiven(const TypeParamDecl &decl, bool afterDefault);

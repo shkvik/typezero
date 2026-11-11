@@ -82,6 +82,21 @@ private:
   static ResultVariantForParams variantFound(llvm::StringRef prefix, const Field &member,
                                              llvm::ArrayRef<FunctionDecl *> methods,
                                              const ClassDecl *cls, bool found);
+  FunctionDecl *enclosingMethod();
+  bool superObjectReady(MemberExpr *member);
+  Expr *callSuperMethod(CallExpr *call, MemberExpr *member, llvm::ArrayRef<FunctionDecl *> methods);
+  Expr *checkGenericSuperCall(CallExpr *call, MemberExpr *member, FuncSymbol *sym);
+  ClassDecl *superCallClass(const CallExpr *call);
+  void walkParentConstructor(CallExpr *call, llvm::ArrayRef<FunctionDecl *> ctors);
+  void walkImplementedMember(ClassDecl *cls, const Type *iface, const Field &member,
+                             const std::string &prefix);
+  void walkImplementedField(const ClassDecl *cls, const Field &member, const ClassField *field,
+                            const std::string &prefix);
+  bool hasMatchingVariant(const ClassDecl *cls, const Type *iface, const Field &member,
+                          llvm::ArrayRef<FunctionDecl *> methods);
+  void walkImplementedOverload(ClassDecl *cls, const Type *iface, const Overload &overload,
+                               const std::string &prefix);
+  static FunctionDecl *methodTaking(llvm::ArrayRef<FunctionDecl *> methods, const Type *signature);
 
   SemanticState &state;
   EventMaps *eventMaps = nullptr;

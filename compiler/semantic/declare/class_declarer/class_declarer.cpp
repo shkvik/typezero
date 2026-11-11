@@ -499,50 +499,68 @@ void ClassDeclarer::declareMethods(ClassDecl *cls) {
     ctor->sym->setReturnType(Type::voidTy());
   }
   for (FunctionDecl *fn : cls->methods) {
-    this->functionChecker->declareFunction(fn, nullptr, false);
-    ResultAbstractReturns returns = ClassDeclarer::abstractReturn(cls, fn);
-    if (returns.isErr()) {
-      this->state.getDiagnostics().error(fn->loc(), returns.error().message);
-    } else if (fn->isAbstract() && !fn->returnType) {
-      fn->sym->setReturnType(nullptr);
-    }
-    ResultGenericIsDirect direct = ClassDeclarer::genericMethod(fn);
-    if (direct.isErr()) {
-      this->state.getDiagnostics().error(fn->loc(), direct.error().message);
+    this->declareClassMethod(cls, fn);
+  }
+  for (const ClassField &f : cls->fields) {
+    if (f.method() != nullptr) {
+      this->declareFieldMethod(cls, f);
     }
   }
-  for (ClassField &f : cls->fields) {
-    if (!f.method()) {
-      continue;
-    }
-    FunctionDecl *fn = f.method();
-    this->state.getScopeStack().openTypeScope();
-    this->genericClassChecker->bindClassTypeParams(cls);
-    const Type *declared = f.type ? this->typeResolver->resolveType(*f.type, false) : nullptr;
-    this->state.getScopeStack().closeTypeScope();
-    if (!declared || !declared->isFunction()) {
-      this->functionChecker->declareFunction(fn, nullptr, false);
-      continue;
-    }
-    this->declareTyped(fn, declared);
-  }
-
   if (ClassLinks::constructorsOf(cls).empty()) {
-    for (ClassField &f : cls->fields) {
-      bool skipped = f.isStatic() || f.init || f.method() || f.optional() || f.parameter() ||
-                     f.definite() || !f.resolved;
-      if (skipped) {
-        continue;
-      }
-      llvm::SmallPtrSet<const ClassDecl *, 4> visiting;
-      visiting.insert(cls);
-      const TypeRef *ref = f.type ? &*f.type : nullptr;
-      f.init = this->defaultValue(f.resolved, ref, f.loc, visiting);
-    }
+    this->fillDefaultValues(cls);
   }
+  this->makeFieldInit(cls);
+  ClassDeclarer::numberVariants(cls->methods);
+  ClassDeclarer::numberVariants(cls->constructors);
+  this->checkVariants(cls);
+}
+
+void ClassDeclarer::declareClassMethod(const ClassDecl *cls, FunctionDecl *fn) {
+  this->functionChecker->declareFunction(fn, nullptr, false);
+  ResultAbstractReturns returns = ClassDeclarer::abstractReturn(cls, fn);
+  if (returns.isErr()) {
+    this->state.getDiagnostics().error(fn->loc(), returns.error().message);
+  } else if (fn->isAbstract() && !fn->returnType.has_value()) {
+    fn->sym->setReturnType(nullptr);
+  }
+  ResultGenericIsDirect direct = ClassDeclarer::genericMethod(fn);
+  if (direct.isErr()) {
+    this->state.getDiagnostics().error(fn->loc(), direct.error().message);
+  }
+}
+
+void ClassDeclarer::declareFieldMethod(ClassDecl *cls, const ClassField &f) {
+  FunctionDecl *fn = f.method();
+  this->state.getScopeStack().openTypeScope();
+  this->genericClassChecker->bindClassTypeParams(cls);
+  const Type *declared =
+      f.type.has_value() ? this->typeResolver->resolveType(*f.type, false) : nullptr;
+  this->state.getScopeStack().closeTypeScope();
+  if (declared == nullptr || !declared->isFunction()) {
+    this->functionChecker->declareFunction(fn, nullptr, false);
+    return;
+  }
+  this->declareTyped(fn, declared);
+}
+
+void ClassDeclarer::fillDefaultValues(ClassDecl *cls) {
+  for (ClassField &f : cls->fields) {
+    bool skipped = f.isStatic() || f.init != nullptr || f.method() != nullptr || f.optional() ||
+                   f.parameter() || f.definite() || f.resolved == nullptr;
+    if (skipped) {
+      continue;
+    }
+    llvm::SmallPtrSet<const ClassDecl *, 4> visiting;
+    visiting.insert(cls);
+    const TypeRef *ref = f.type.has_value() ? &*f.type : nullptr;
+    f.init = this->defaultValue(f.resolved, ref, f.loc, visiting);
+  }
+}
+
+void ClassDeclarer::makeFieldInit(ClassDecl *cls) {
   std::vector<Stmt *> sets;
   for (const ClassField &f : cls->fields) {
-    if (f.isStatic() || !f.init || f.method()) {
+    if (f.isStatic() || f.init == nullptr || f.method() != nullptr) {
       continue;
     }
     auto *self = this->state.getAst().make<NameExpr>(f.loc, "this");
@@ -550,19 +568,16 @@ void ClassDeclarer::declareMethods(ClassDecl *cls) {
     auto *set = this->state.getAst().make<AssignExpr>(f.loc, std::nullopt, target, f.init);
     sets.push_back(this->state.getAst().make<ExprStmt>(f.loc, set));
   }
-  if (!sets.empty()) {
-    auto *init = this->state.getAst().make<FunctionDecl>(cls->loc(), "init");
-    init->role = ClassMember{.cls = cls};
-    init->body = this->state.getAst().make<BlockStmt>(cls->loc());
-    init->body->body = std::move(sets);
-    this->functionChecker->declareFunction(init, nullptr, false);
-    init->sym->setReturnType(Type::voidTy());
-    cls->init = init;
+  if (sets.empty()) {
+    return;
   }
-
-  ClassDeclarer::numberVariants(cls->methods);
-  ClassDeclarer::numberVariants(cls->constructors);
-  this->checkVariants(cls);
+  auto *init = this->state.getAst().make<FunctionDecl>(cls->loc(), "init");
+  init->role = ClassMember{.cls = cls};
+  init->body = this->state.getAst().make<BlockStmt>(cls->loc());
+  init->body->body = std::move(sets);
+  this->functionChecker->declareFunction(init, nullptr, false);
+  init->sym->setReturnType(Type::voidTy());
+  cls->init = init;
 }
 
 Expr *ClassDeclarer::literalValue(const Type *literal, llvm::SMLoc loc) {

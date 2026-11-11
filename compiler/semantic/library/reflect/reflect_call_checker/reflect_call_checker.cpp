@@ -172,103 +172,152 @@ bool ReflectCallChecker::acceptsPlain(const Type *arg, const Type *param) {
 Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
                                            const Type *expected) {
   call->type = Type::error();
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-  };
-  struct Function {
-    llvm::StringLiteral name;
-    Builtin builtin;
-    unsigned min, max;
-  };
-  static const Function functions[] = {
-      {"defineMetadata", Builtin::MetaDefine, 3, 4}, {"getMetadata", Builtin::MetaGet, 2, 3},
-      {"getOwnMetadata", Builtin::MetaGetOwn, 2, 3}, {"hasMetadata", Builtin::MetaHas, 2, 3},
-      {"hasOwnMetadata", Builtin::MetaHasOwn, 2, 3}, {"deleteMetadata", Builtin::MetaDelete, 2, 3}};
-  llvm::StringRef fn = member->name;
-  if (fn == "get" || fn == "apply" || fn == "construct" || fn == "fill") {
-    return this->reflectChecker->checkReflection(call, member, expected);
+  std::optional<ReflectFunction> function = ReflectFunctionTable::find(member->name);
+  if (!function.has_value()) {
+    return this->reportReflectName(call, member, ErrorTextReflectCall::unknown(member->name));
   }
-  const Function *function =
-      llvm::find_if(functions, [&](const Function &f) { return f.name == fn; });
-  if (function == std::end(functions)) {
-    std::string message = fn == "metadata" ? ErrorTextReflectCall::decorator()
-                          : fn == "getMetadataKeys" || fn == "getOwnMetadataKeys"
-                              ? ErrorTextReflectCall::keys(fn)
-                              : ErrorTextReflectCall::unknown(fn);
-    this->state.getDiagnostics().error(member->loc(), message);
-    checkArgsLoosely();
-    return call;
+  switch (*function) {
+    case ReflectFunction::GET:
+    case ReflectFunction::APPLY:
+    case ReflectFunction::CONSTRUCT:
+    case ReflectFunction::FILL:
+      return this->reflectChecker->checkReflection(call, member, expected);
+    case ReflectFunction::METADATA:
+      return this->reportReflectName(call, member, ErrorTextReflectCall::decorator());
+    case ReflectFunction::GET_METADATA_KEYS:
+    case ReflectFunction::GET_OWN_METADATA_KEYS:
+      return this->reportReflectName(call, member, ErrorTextReflectCall::keys(member->name));
+    case ReflectFunction::DEFINE_METADATA:
+      return this->checkMetadataCall(call, member, expected, {Builtin::MetaDefine, 3, 4});
+    case ReflectFunction::GET_METADATA:
+      return this->checkMetadataCall(call, member, expected, {Builtin::MetaGet, 2, 3});
+    case ReflectFunction::GET_OWN_METADATA:
+      return this->checkMetadataCall(call, member, expected, {Builtin::MetaGetOwn, 2, 3});
+    case ReflectFunction::HAS_METADATA:
+      return this->checkMetadataCall(call, member, expected, {Builtin::MetaHas, 2, 3});
+    case ReflectFunction::HAS_OWN_METADATA:
+      return this->checkMetadataCall(call, member, expected, {Builtin::MetaHasOwn, 2, 3});
+    case ReflectFunction::DELETE_METADATA:
+      return this->checkMetadataCall(call, member, expected, {Builtin::MetaDelete, 2, 3});
   }
+
+  return call;
+}
+
+Expr *ReflectCallChecker::checkArgsLoosely(CallExpr *call) {
+  for (Expr *&arg : call->args) {
+    arg = this->exprChecker->checkExpr(arg);
+  }
+
+  return call;
+}
+
+Expr *ReflectCallChecker::reportReflectName(CallExpr *call, MemberExpr *member,
+                                            const std::string &message) {
+  this->state.getDiagnostics().error(member->loc(), message);
+
+  return this->checkArgsLoosely(call);
+}
+
+Expr *ReflectCallChecker::checkMetadataCall(CallExpr *call, MemberExpr *member,
+                                            const Type *expected, MetadataFunction function) {
   bool rejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->argumentChecker->checkArity(call, function->min, function->max);
+      rejected ? ok(call) : this->argumentChecker->checkArity(call, function.min, function.max);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
   if (rejected || arity.isErr()) {
     return call;
   }
-  bool define = function->builtin == Builtin::MetaDefine;
-
-  Expr *&keyArg = call->args[0];
-  llvm::SMLoc keyLoc = keyArg->loc();
-  std::string label;
-  const void *key = this->metadataChecker->metadataKey(keyArg, label);
-  const Type *design = ReflectCallChecker::designType(keyArg);
-  if (key) {
-    call->metaKey = key;
-    keyArg = this->state.getAst().make<StringLitExpr>(keyLoc, u"");
-    keyArg->type = Type::string();
-  } else {
-    keyArg = this->exprChecker->checkExpr(keyArg);
-    ResultKeyOfRecords records = ReflectCallChecker::keyOfRecords(keyArg->type);
-    if (records.isErr()) {
-      this->state.getDiagnostics().error(keyLoc, records.error().message);
-      checkArgsLoosely();
-      return call;
-    }
-    if (define && ReflectCallChecker::isDesignKey(keyArg)) {
-      std::string message = ErrorTextMetadataKey::design();
-      this->state.getDiagnostics().error(keyLoc, message);
-    }
+  bool define = function.builtin == Builtin::MetaDefine;
+  MetadataKey key = this->readMetadataKey(call, define);
+  if (key.failed) {
+    return this->checkArgsLoosely(call);
   }
-
   if (define) {
-    Expr *&value = call->args[1];
-    const MetadataType *known = key ? this->state.getReflectStore().findMetadataType(key) : nullptr;
-    value = this->exprChecker->checkExpr(value, known ? known->type : nullptr);
-    const Type *type = value->type;
-    if (type->isVoid()) {
-      std::string message = ErrorTextMetadataValue::voidValue();
-      this->state.getDiagnostics().error(value->loc(), message);
-    } else if (known && !type->isError()) {
-      unsigned before = this->state.getDiagnostics().errorCount();
-      std::string records = ErrorTextMetadataValue::label(label);
-      value = this->typeRelations->coerce(value, known->type, records);
-      if (this->state.getDiagnostics().errorCount() > before) {
-        std::string message = ErrorTextMetadataValue::since(label, known->type->name());
-        this->state.getDiagnostics().note(known->loc, message);
-      }
-    } else if (key && !type->isError() && !TypeQueries::mentionsParam(type)) {
-      if (type->isUndefined()) {
-        std::string message = ErrorTextMetadataValue::undefined(label);
-        this->state.getDiagnostics().error(value->loc(), message);
-      } else {
-        this->state.getReflectStore().rememberMetadataType(key, type, value->loc());
-      }
-    }
-    if (!value->type->isVoid()) {
-      value = this->typeRelations->convert(value, Type::unknown());
-    }
+    this->walkMetadataValue(call, key);
+  }
+  this->walkMetadataTarget(call, define ? 2 : 1);
+  call->target = BuiltinCall{.builtin = function.builtin};
+  call->type = this->metadataResultType(function.builtin, key, expected);
+
+  return call;
+}
+
+ReflectCallChecker::MetadataKey ReflectCallChecker::readMetadataKey(CallExpr *call, bool define) {
+  Expr *&keyArg = call->args[0];
+  MetadataKey key{
+      .loc = keyArg->loc(),
+  };
+  key.key = this->metadataChecker->metadataKey(keyArg, key.label);
+  key.design = ReflectCallChecker::designType(keyArg);
+  if (key.key != nullptr) {
+    call->metaKey = key.key;
+    keyArg = this->state.getAst().make<StringLitExpr>(key.loc, u"");
+    keyArg->type = Type::string();
+    return key;
+  }
+  keyArg = this->exprChecker->checkExpr(keyArg);
+  ResultKeyOfRecords records = ReflectCallChecker::keyOfRecords(keyArg->type);
+  if (records.isErr()) {
+    this->state.getDiagnostics().error(key.loc, records.error().message);
+    key.failed = true;
+    return key;
+  }
+  if (define && ReflectCallChecker::isDesignKey(keyArg)) {
+    std::string message = ErrorTextMetadataKey::design();
+    this->state.getDiagnostics().error(key.loc, message);
   }
 
-  size_t at = define ? 2 : 1;
+  return key;
+}
+
+void ReflectCallChecker::walkMetadataValue(CallExpr *call, const MetadataKey &key) {
+  Expr *&value = call->args[1];
+  const MetadataType *known =
+      key.key != nullptr ? this->state.getReflectStore().findMetadataType(key.key) : nullptr;
+  value = this->exprChecker->checkExpr(value, known != nullptr ? known->type : nullptr);
+  const Type *type = value->type;
+  if (type->isVoid()) {
+    std::string message = ErrorTextMetadataValue::voidValue();
+    this->state.getDiagnostics().error(value->loc(), message);
+  } else if (known != nullptr && !type->isError()) {
+    value = this->coerceKnownMetadata(value, known, key.label);
+  } else if (key.key != nullptr && !type->isError() && !TypeQueries::mentionsParam(type)) {
+    this->rememberMetadataType(value, key);
+  }
+  if (!value->type->isVoid()) {
+    value = this->typeRelations->convert(value, Type::unknown());
+  }
+}
+
+Expr *ReflectCallChecker::coerceKnownMetadata(Expr *value, const MetadataType *known,
+                                              const std::string &label) {
+  unsigned before = this->state.getDiagnostics().errorCount();
+  std::string records = ErrorTextMetadataValue::label(label);
+  Expr *coerced = this->typeRelations->coerce(value, known->type, records);
+  if (this->state.getDiagnostics().errorCount() > before) {
+    std::string message = ErrorTextMetadataValue::since(label, known->type->name());
+    this->state.getDiagnostics().note(known->loc, message);
+  }
+
+  return coerced;
+}
+
+void ReflectCallChecker::rememberMetadataType(const Expr *value, const MetadataKey &key) {
+  if (value->type->isUndefined()) {
+    std::string message = ErrorTextMetadataValue::undefined(key.label);
+    this->state.getDiagnostics().error(value->loc(), message);
+    return;
+  }
+  this->state.getReflectStore().rememberMetadataType(key.key, value->type, value->loc());
+}
+
+void ReflectCallChecker::walkMetadataTarget(CallExpr *call, size_t at) {
   Expr *&target = call->args[at];
   target = this->exprChecker->checkExpr(target);
-  const Type *targetType = target->type;
-  ResultTargetObject object = ReflectCallChecker::targetObject(targetType);
+  ResultTargetObject object = ReflectCallChecker::targetObject(target->type);
   if (object.isErr()) {
     this->state.getDiagnostics().error(target->loc(), object.error().message);
   } else {
@@ -279,33 +328,28 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
   }
   call->args[at + 1] =
       this->argumentChecker->checkArg(call->args[at + 1], Type::optional(Type::string()));
+}
 
-  call->target = BuiltinCall{.builtin = function->builtin};
-  switch (function->builtin) {
-  case Builtin::MetaDefine:
-    call->type = Type::voidTy();
-    break;
-  case Builtin::MetaGet:
-  case Builtin::MetaGetOwn: {
-    if (!key) {
-      call->type = design ? design : Type::unknown();
-      break;
-    }
-    MetadataChecker::ResultMetadataTyped typed =
-        this->metadataChecker->metadataType(key, label, keyLoc, expected);
-    if (typed.isErr()) {
-      this->state.getDiagnostics().error(keyLoc, typed.error().message);
-    }
-    const Type *records = typed.isOk() ? typed.value() : Type::error();
-    call->type = Type::optional(records);
-    break;
+const Type *ReflectCallChecker::metadataResultType(Builtin builtin, const MetadataKey &key,
+                                                   const Type *expected) {
+  if (builtin == Builtin::MetaDefine) {
+    return Type::voidTy();
   }
-  default:
-    call->type = Type::boolTy();
-    break;
+  bool reads = builtin == Builtin::MetaGet || builtin == Builtin::MetaGetOwn;
+  if (!reads) {
+    return Type::boolTy();
   }
+  if (key.key == nullptr) {
+    return key.design != nullptr ? key.design : Type::unknown();
+  }
+  MetadataChecker::ResultMetadataTyped typed =
+      this->metadataChecker->metadataType(key.key, key.label, key.loc, expected);
+  if (typed.isErr()) {
+    this->state.getDiagnostics().error(key.loc, typed.error().message);
+  }
+  const Type *records = typed.isOk() ? typed.value() : Type::error();
 
-  return call;
+  return Type::optional(records);
 }
 
 FunctionDecl *ReflectCallChecker::knownReflectMethod(ClassDecl *cls, llvm::StringRef name,

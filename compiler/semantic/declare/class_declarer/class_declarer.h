@@ -110,6 +110,10 @@ private:
   using ResultGenericIsDirect = Result<const FunctionDecl *, ClassDeclarerGenericMethodError>;
   using ResultAbstractReturns = Result<const FunctionDecl *, ClassDeclarerAbstractReturnError>;
 
+  void declareClassMethod(const ClassDecl *cls, FunctionDecl *fn);
+  void declareFieldMethod(ClassDecl *cls, const ClassField &f);
+  void fillDefaultValues(ClassDecl *cls);
+  void makeFieldInit(ClassDecl *cls);
   static ResultFieldNotLateSet setLater(const ClassField &f);
   static ResultFieldTypeIsSeen typeSeen(const ClassField &f);
   static ResultGenericIsDirect genericMethod(const FunctionDecl *fn);

@@ -14,6 +14,24 @@ struct TypedArrayCheckerSetSourceError {
   std::string message;
 };
 
+enum class TypedArrayCheckerMapResultFitsErrorCode {
+  RESULT_MAY_NOT_FIT,
+};
+
+struct TypedArrayCheckerMapResultFitsError {
+  TypedArrayCheckerMapResultFitsErrorCode code;
+  std::string message;
+};
+
+enum class TypedArrayCheckerWithIndexErrorCode {
+  INDEX_NOT_PROVEN,
+};
+
+struct TypedArrayCheckerWithIndexError {
+  TypedArrayCheckerWithIndexErrorCode code;
+  std::string message;
+};
+
 class ErrorTextTypedArray {
 public:
   static std::string mapFits(llvm::StringRef what, llvm::StringRef range, llvm::StringRef hint);

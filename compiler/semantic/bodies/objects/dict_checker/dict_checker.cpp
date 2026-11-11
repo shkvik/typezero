@@ -63,13 +63,18 @@ DictChecker::ResultDictTypeResolved DictChecker::resolveDictType(const TypeRef &
         .message = "",
     });
   }
-  bool record = collectionName->collection == Collection::RECORD;
-  bool map = collectionName->collection == Collection::MAP;
-  bool set = collectionName->collection == Collection::SET;
+
+  return this->resolveCollectionType(ref, collectionName->collection);
+}
+
+DictChecker::ResultDictTypeResolved DictChecker::resolveCollectionType(const TypeRef &ref,
+                                                                       Collection collection) {
+  bool map = collection == Collection::MAP;
+  bool set = collection == Collection::SET;
   size_t wanted = set ? 1 : 2;
   if (ref.kind() != TypeRefKind::GENERIC_REF || ref.args.size() != wanted) {
-    std::string message = set   ? ErrorTextDictType::setArgs(name)
-                          : map ? ErrorTextDictType::mapArgs(name)
+    std::string message = set   ? ErrorTextDictType::setArgs(ref.name)
+                          : map ? ErrorTextDictType::mapArgs(ref.name)
                                 : ErrorTextDictType::recordArgs();
 
     return err(DictCheckerResolveDictTypeError{
@@ -82,41 +87,8 @@ DictChecker::ResultDictTypeResolved DictChecker::resolveDictType(const TypeRef &
   if (key->isError() || value->isError()) {
     return ok(Type::error());
   }
-  if (record) {
-    llvm::ArrayRef<const Type *> literals =
-        key->isUnion() ? key->members() : llvm::ArrayRef<const Type *>(key);
-    if (key->isStringLiteral() || (key->isUnion() && llvm::all_of(literals, [](const Type *m) {
-                                     return m->isStringLiteral();
-                                   }))) {
-      std::vector<Field> fields;
-      for (const Type *m : literals) {
-        const std::u16string &literal = m->literalText();
-        std::string text = ToUtf8::toUtf8(literal);
-        fields.push_back({text, value, false});
-      }
-      const Type *object = Type::object(std::move(fields));
-
-      return ok(object);
-    }
-    if (!key->isString() && key->nonOptional()->isNumeric()) {
-      std::string message = ErrorTextDictType::numberKeys(key->name(), value->name());
-
-      return err(DictCheckerResolveDictTypeError{
-          .code = DictCheckerResolveDictTypeErrorCode::NUMBER_KEYS,
-          .message = message,
-      });
-    }
-    if (!key->isString()) {
-      std::string message = ErrorTextDictType::otherKeys(key->name(), value->name());
-
-      return err(DictCheckerResolveDictTypeError{
-          .code = DictCheckerResolveDictTypeErrorCode::OTHER_KEYS,
-          .message = message,
-      });
-    }
-    const Type *dict = Type::dict(Type::DictKind::Record, key, value);
-
-    return ok(dict);
+  if (collection == Collection::RECORD) {
+    return DictChecker::recordType(key, value);
   }
   ResultKeyTypeIsAllowed allowed = this->checkKeyType(key);
   if (allowed.isErr()) {
@@ -128,6 +100,61 @@ DictChecker::ResultDictTypeResolved DictChecker::resolveDictType(const TypeRef &
   const Type *dict = Type::dict(map ? Type::DictKind::Map : Type::DictKind::Set, key, value);
 
   return ok(dict);
+}
+
+DictChecker::ResultDictTypeResolved DictChecker::recordType(const Type *key, const Type *value) {
+  if (DictChecker::isLiteralKeys(key)) {
+    const Type *object = DictChecker::literalKeysObject(key, value);
+
+    return ok(object);
+  }
+  if (!key->isString() && key->nonOptional()->isNumeric()) {
+    std::string message = ErrorTextDictType::numberKeys(key->name(), value->name());
+
+    return err(DictCheckerResolveDictTypeError{
+        .code = DictCheckerResolveDictTypeErrorCode::NUMBER_KEYS,
+        .message = message,
+    });
+  }
+  if (!key->isString()) {
+    std::string message = ErrorTextDictType::otherKeys(key->name(), value->name());
+
+    return err(DictCheckerResolveDictTypeError{
+        .code = DictCheckerResolveDictTypeErrorCode::OTHER_KEYS,
+        .message = message,
+    });
+  }
+  const Type *dict = Type::dict(Type::DictKind::Record, key, value);
+
+  return ok(dict);
+}
+
+bool DictChecker::isLiteralKeys(const Type *key) {
+  if (key->isStringLiteral()) {
+    return true;
+  }
+  if (!key->isUnion()) {
+    return false;
+  }
+  for (const Type *m : key->members()) {
+    if (!m->isStringLiteral()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+const Type *DictChecker::literalKeysObject(const Type *key, const Type *value) {
+  llvm::ArrayRef<const Type *> literals =
+      key->isUnion() ? key->members() : llvm::ArrayRef<const Type *>(key);
+  std::vector<Field> fields;
+  for (const Type *m : literals) {
+    std::string text = ToUtf8::toUtf8(m->literalText());
+    fields.push_back({text, value, false});
+  }
+
+  return Type::object(std::move(fields));
 }
 
 bool DictChecker::keyArgument(DictCheckerResolveDictTypeErrorCode code) {

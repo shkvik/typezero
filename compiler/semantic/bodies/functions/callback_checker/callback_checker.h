@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/array/array_method_table/array_method_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/functions/callback_checker/callback_checker_errors.h"
 #include "compiler/semantic/flow/children_first/children_first.h"
@@ -49,6 +50,14 @@ private:
   using ResultReturnedTypeFits = Result<const Type *, CallbackCheckerReturnMatchesError>;
   using ResultArgumentsSuffice = Result<const Type *, CallbackCheckerArgumentsEnoughError>;
 
+  Expr *checkLiteralCallback(FunctionExpr *fe, const Signature &expected, llvm::StringRef method);
+  Expr *checkCallbackValue(Expr *arg, const Signature &expected);
+  Expr *checkPassedFunction(Expr *arg, const Signature &expected, unsigned primary,
+                            llvm::StringRef method);
+  bool callbackParamsFit(const Expr *arg, const Signature &expected, unsigned primary,
+                         const FunctionDecl *known, llvm::StringRef name, llvm::StringRef method);
+  Expr *checkCallbackResult(Expr *arg, const Signature &expected, llvm::StringRef name,
+                            llvm::StringRef method);
   static ResultComparisonNumber comparison(const Type *result);
   static ResultCallbackIsPassed callbackGiven(size_t count, llvm::StringRef name);
   static ResultWithoutRestParam fixedParams(const Type *type, llvm::StringRef name);
@@ -73,6 +82,32 @@ private:
   static ResultParameterMatches callbackParam(const Type *type, const Signature &expected, size_t i,
                                               unsigned primary, const FunctionDecl *known,
                                               llvm::StringRef name, llvm::StringRef method);
+
+  struct ArrayCallbackShape {
+    CallExpr *call;
+    MemberExpr *member;
+    const Type *arrayType;
+    const Type *element;
+    ArrayCallback kind;
+    bool typed;
+    size_t count;
+    const Type *accumulator;
+    bool someValue;
+    bool isBoolean;
+  };
+
+  void walkExtraCallbackArgs(ArrayCallbackShape &shape);
+  const Type *reduceInitType(const ArrayCallbackShape &shape);
+  static Signature callbackSignature(const ArrayCallbackShape &shape, const Type *expected);
+  static const Type *mappedReturn(const ArrayCallbackShape &shape, const Type *expected);
+  static std::vector<const Type *> callbackParams(const ArrayCallbackShape &shape);
+  void rememberCallbackFacts(const ArrayCallbackShape &shape);
+  std::optional<ElementCallback> literalElements(const ArrayLitExpr *lit, unsigned param);
+  Expr *checkArrayCallbackResult(const ArrayCallbackShape &shape);
+  Expr *checkMappedResult(const ArrayCallbackShape &shape, const Type *result);
+  const Type *filteredArray(const ArrayCallbackShape &shape);
+  Expr *finishArrayReduce(const ArrayCallbackShape &shape);
+  Expr *checkCompareResult(const ArrayCallbackShape &shape, const Type *result);
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

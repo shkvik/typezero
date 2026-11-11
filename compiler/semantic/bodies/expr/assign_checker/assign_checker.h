@@ -50,6 +50,41 @@ private:
   using ResultCompoundOperands = Result<const Type *, AssignCheckerCompoundOperandsError>;
   using ResultElementWriteSafe = Result<const IndexExpr *, AssignCheckerElementWritableError>;
 
+  struct AssignPlace {
+    IndexExpr *index;
+    MemberExpr *member;
+    NameExpr *name;
+    const VarSymbol *var;
+    bool compound;
+    bool reportedRange;
+    bool definite;
+  };
+
+  void walkTargetAlias(AssignExpr *assign);
+  Expr *reportImportedTarget(AssignExpr *assign);
+  Expr *checkLogicalAssignValue(AssignExpr *assign);
+  Expr *checkNullishAssign(AssignExpr *assign);
+  Expr *checkRecordFieldNullish(AssignExpr *assign);
+  Expr *checkVariableNullish(AssignExpr *assign);
+  bool unfoldsNarrowedCompound(AssignExpr *assign, BinaryOp op);
+  Expr *checkPlainAssign(AssignExpr *assign, BinaryOp op, bool compound);
+  bool reportsCompoundRange(const AssignPlace &place);
+  void walkInferredField(AssignExpr *assign, AssignPlace &place);
+  void walkPlainValue(AssignExpr *assign, const Type *type, AssignPlace &place);
+  void walkCompoundValue(AssignExpr *assign, BinaryOp op, const Type *type,
+                         const AssignPlace &place);
+  void walkStringCompound(AssignExpr *assign, BinaryOp op, const std::string &spelling,
+                          const Type *type, const VarSymbol *var);
+  void walkNumericCompound(AssignExpr *assign, BinaryOp op, const std::string &spelling,
+                           const Type *type);
+  void walkCompoundOperands(AssignExpr *assign, BinaryOp op, const std::string &spelling,
+                            const Type *type, bool shift);
+  void walkDivisor(AssignExpr *assign, BinaryOp op);
+  void walkCompoundFacts(AssignExpr *assign, BinaryOp op, const VarSymbol *var);
+  void walkAssignedElement(AssignExpr *assign, const AssignPlace &place);
+  void walkAssignedLength(AssignExpr *assign, const AssignPlace &place);
+  void walkLengthValue(const MemberExpr *member, const Expr *value);
+  void walkAssignedField(const AssignPlace &place);
   Expr *copyRoot(const Expr *e);
   Expr *copyChain(const Expr *e);
   Expr *checkFieldLogicalAssign(AssignExpr *assign);

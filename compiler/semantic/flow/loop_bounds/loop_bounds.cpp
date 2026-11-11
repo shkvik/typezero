@@ -241,85 +241,118 @@ Flow LoopBounds::loopHead(const LoopScan &scan, const Expr *cond, bool induction
   Flow head = this->state.getFlowState().getFlow();
   head.unreachable = false;
   for (const auto &entry : scan.changes) {
-    llvm::StringRef name = entry.first();
-    const LoopScan::Change &change = entry.second;
-    const VarSymbol *var = this->scopes->lookup(name).var();
-
-    bool keepLower = false;
-    bool keepUpper = false;
-    std::optional<int64_t> invariant;
-    if (induction && var && var->type->isInt() && change.count == 1 && !change.nested) {
-      if (change.delta > 0) {
-        if (std::optional<int64_t> k = this->condBoundsAbove(cond, var, scan, change.delta)) {
-          if (*k == 0) {
-            keepLower = true;
-          } else if (this->state.getFlowState().getFacts().proves(
-                         Term::of(var), Term::zero(), Facts::saturatingAdd(kIntMax - *k, 1))) {
-            keepLower = true;
-            invariant = *k;
-          }
-        }
-      }
-      keepUpper = change.delta < 0 && this->condBoundsBelow(cond, var, scan, -change.delta);
-    }
-    head.facts.forgetIf([&](const Facts::Fact &f) {
-      auto hits = [&](const Term &t) {
-        return (t.var && t.var->name == name) || (t.var2 && t.var2->name == name);
-      };
-      bool lhsHit = hits(f.lhs);
-      bool rhsHit = hits(f.rhs);
-      if (!lhsHit && !rhsHit) {
-        return false;
-      }
-      if (keepLower && !lhsHit && f.rhs == Term::of(var)) {
-        return false;
-      }
-      if (keepUpper && !rhsHit && f.lhs == Term::of(var)) {
-        return false;
-      }
-
-      return true;
-    });
-    if (invariant) {
-      head.facts.add(Term::of(var), Term::zero(), Facts::saturatingAdd(kIntMax - *invariant, 1));
-    }
-    for (const VarSymbol *defined : llvm::to_vector(head.defined)) {
-      if (defined->name == name) {
-        head.defined.erase(defined);
-      }
-    }
-    llvm::erase_if(head.narrowed,
-                   [&](const auto &narrowed) { return narrowed.first->name == name; });
-    for (auto *results : {&head.okResults, &head.errResults}) {
-      for (const VarSymbol *result : llvm::to_vector(*results)) {
-        if (result->name == name) {
-          results->erase(result);
-        }
-      }
-    }
-    llvm::erase_if(head.definedFields,
-                   [&](const FieldPath &path) { return path.var->name == name; });
-    llvm::erase_if(head.narrowedFields,
-                   [&](const auto &entry) { return entry.first.var->name == name; });
+    this->forgetChanged(head, scan, entry.first(), entry.second, cond, induction);
   }
-  auto written = [&](const FieldPath &path) {
-    return llvm::any_of(path.names,
-                        [&](llvm::StringRef field) { return scan.fieldWrites.contains(field); });
-  };
-  llvm::erase_if(head.definedFields, written);
-  llvm::erase_if(head.narrowedFields, [&](const auto &entry) { return written(entry.first); });
+  LoopBounds::forgetWrittenFields(head, scan);
   if (scan.callsFunctions) {
     this->flowChecker->forgetCallEffects(head);
   }
-  auto arrayPart = [](const Term &t) {
-    return (t.length && LoopBounds::isArrayLength(t.first())) ||
-           (t.length2 && LoopBounds::isArrayLength(t.second()));
-  };
-  head.facts.forgetIf([&](const Facts::Fact &f) {
-    return (scan.growsArrays && arrayPart(f.lhs)) || (scan.shrinksArrays && arrayPart(f.rhs));
-  });
+  LoopBounds::forgetArrayFacts(head, scan);
 
   return head;
 }
 
+void LoopBounds::forgetChanged(Flow &head, const LoopScan &scan, llvm::StringRef name,
+                               const LoopScan::Change &change, const Expr *cond,
+                               bool induction) const {
+  const VarSymbol *var = this->scopes->lookup(name).var();
+  KeptBounds kept = induction ? this->keptBounds(scan, change, var, cond) : KeptBounds{};
+  head.facts.forgetIf(
+      [&](const Facts::Fact &f) { return LoopBounds::isStaleFact(f, name, var, kept); });
+  if (kept.invariant.has_value()) {
+    head.facts.add(Term::of(var), Term::zero(), Facts::saturatingAdd(kIntMax - *kept.invariant, 1));
+  }
+  LoopBounds::forgetNamed(head, name);
+}
+
+LoopBounds::KeptBounds LoopBounds::keptBounds(const LoopScan &scan, const LoopScan::Change &change,
+                                              const VarSymbol *var, const Expr *cond) const {
+  KeptBounds kept;
+  bool counter = var != nullptr && var->type->isInt() && change.count == 1 && !change.nested;
+  if (!counter) {
+    return kept;
+  }
+  std::optional<int64_t> k =
+      change.delta > 0 ? this->condBoundsAbove(cond, var, scan, change.delta) : std::nullopt;
+  if (k.has_value() && *k == 0) {
+    kept.lower = true;
+  } else if (k.has_value() &&
+             this->state.getFlowState().getFacts().proves(Term::of(var), Term::zero(),
+                                                          Facts::saturatingAdd(kIntMax - *k, 1))) {
+    kept.lower = true;
+    kept.invariant = *k;
+  }
+  kept.upper = change.delta < 0 && this->condBoundsBelow(cond, var, scan, -change.delta);
+
+  return kept;
+}
+
+bool LoopBounds::isStaleFact(const Facts::Fact &f, llvm::StringRef name, const VarSymbol *var,
+                             const KeptBounds &kept) {
+  bool lhsHit = LoopBounds::termNames(f.lhs, name);
+  bool rhsHit = LoopBounds::termNames(f.rhs, name);
+  if (!lhsHit && !rhsHit) {
+    return false;
+  }
+  if (kept.lower && !lhsHit && f.rhs == Term::of(var)) {
+    return false;
+  }
+  if (kept.upper && !rhsHit && f.lhs == Term::of(var)) {
+    return false;
+  }
+
+  return true;
+}
+
+bool LoopBounds::termNames(const Term &t, llvm::StringRef name) {
+  return (t.var != nullptr && t.var->name == name) || (t.var2 != nullptr && t.var2->name == name);
+}
+
+void LoopBounds::forgetNamed(Flow &head, llvm::StringRef name) {
+  for (const VarSymbol *defined : llvm::to_vector(head.defined)) {
+    if (defined->name == name) {
+      head.defined.erase(defined);
+    }
+  }
+  llvm::erase_if(head.narrowed, [&](const auto &narrowed) { return narrowed.first->name == name; });
+  for (auto *results : {&head.okResults, &head.errResults}) {
+    for (const VarSymbol *result : llvm::to_vector(*results)) {
+      if (result->name == name) {
+        results->erase(result);
+      }
+    }
+  }
+  llvm::erase_if(head.definedFields, [&](const FieldPath &path) { return path.var->name == name; });
+  llvm::erase_if(head.narrowedFields,
+                 [&](const auto &entry) { return entry.first.var->name == name; });
+}
+
+void LoopBounds::forgetWrittenFields(Flow &head, const LoopScan &scan) {
+  llvm::erase_if(head.definedFields,
+                 [&](const FieldPath &path) { return LoopBounds::isWrittenPath(path, scan); });
+  llvm::erase_if(head.narrowedFields,
+                 [&](const auto &entry) { return LoopBounds::isWrittenPath(entry.first, scan); });
+}
+
+bool LoopBounds::isWrittenPath(const FieldPath &path, const LoopScan &scan) {
+  for (llvm::StringRef field : path.names) {
+    if (scan.fieldWrites.contains(field)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+void LoopBounds::forgetArrayFacts(Flow &head, const LoopScan &scan) {
+  head.facts.forgetIf([&](const Facts::Fact &f) {
+    return (scan.growsArrays && LoopBounds::isArrayPart(f.lhs)) ||
+           (scan.shrinksArrays && LoopBounds::isArrayPart(f.rhs));
+  });
+}
+
+bool LoopBounds::isArrayPart(const Term &t) {
+  return (t.length && LoopBounds::isArrayLength(t.first())) ||
+         (t.length2 && LoopBounds::isArrayLength(t.second()));
+}
 }

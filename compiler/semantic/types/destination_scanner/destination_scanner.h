@@ -135,6 +135,30 @@ private:
   static void forOfRest(const ForOfStmt *loop, ScanRun &run);
   static void functionEnd(const Type *outerReturns, ScanRun &run);
   static std::vector<ScanExpr> arrayParts(const ArrayLitExpr *lit, const Type *object);
+  static void pushIfParts(const IfStmt *s, ScanRun &run);
+  static void pushForParts(const ForStmt *s, ScanRun &run);
+  static void pushWhileParts(const WhileStmt *s, ScanRun &run);
+  static void pushForOfParts(const ForOfStmt *s, ScanRun &run);
+  static void pushReturnValue(const ReturnStmt *s, ScanRun &run);
+  static void pushDoWhileParts(const DoWhileStmt *s, ScanRun &run);
+  static void pushDeclarators(const VarDeclStmt *decl, ScanRun &run);
+  static std::vector<ScanExpr> templateParts(const TemplateExpr *tmpl);
+  static std::vector<ScanExpr> binaryParts(const BinaryExpr *bin, const Type *sink);
+  static std::vector<ScanExpr> objectParts(const ObjectLitExpr *lit, const Type *object);
+  static std::vector<ScanExpr> sequenceParts(const SequenceExpr *seq, const Type *sink);
+  static std::vector<ScanExpr> nameParts(const NameExpr *name, const Type *sink, ScanRun &run);
+  static std::vector<ScanExpr> conditionalParts(const ConditionalExpr *cond, const Type *sink);
+  static std::vector<const Type *> dictMethodParams(const Type *object, llvm::StringRef name);
+  static std::vector<const Type *> arrayMethodParams(const Type *array, llvm::StringRef name,
+                                                     size_t argCount);
+  static std::vector<const Type *> spreadParams(llvm::ArrayRef<const Type *> params, bool hasRest,
+                                                size_t argCount);
+  static std::vector<const Type *> methodParams(const ClassDecl *cls, llvm::StringRef name,
+                                                bool isStatic, size_t argCount);
+  std::vector<const Type *> nameCalleeParams(const CallExpr *call, const NameExpr *name,
+                                             const DestinationScan &scan);
+  std::vector<const Type *> memberCalleeParams(const CallExpr *call, const MemberExpr *member,
+                                               const DestinationScan &scan);
 
   void runScan(ScanStep first, DestinationScan &scan);
   void applyStep(const ScanStep &step, ScanRun &run);

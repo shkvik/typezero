@@ -54,6 +54,17 @@ private:
   static ResultArgumentsAbsent argumentsAbsent(const CallExpr *call, const ClassDecl *cls);
   static ResultMethodsAreFound instanceMethods(const ClassDecl *cls, llvm::StringRef name);
   static ResultTypeArgsAllowed methodTypeArgs(const FuncSymbol *sym, const MemberExpr *member);
+  Expr *checkLibraryMethodCall(CallExpr *call, MemberExpr *member, ClassDecl *cls);
+  Expr *checkFieldCall(CallExpr *call, MemberExpr *member);
+  void walkMethodAccess(MemberExpr *member, FunctionDecl *method);
+  Expr *checkGenericMethodCall(CallExpr *call, MemberExpr *member, FuncSymbol *sym,
+                               const Type *expected);
+  Expr *checkPlainMethodCall(CallExpr *call, MemberExpr *member, ClassDecl *cls, FuncSymbol *sym,
+                             bool checked);
+  void walkNewClass(const NewExpr *expr, const ClassDecl *cls);
+  bool noArgumentsFit(const NewExpr *expr, CallExpr *call, const ClassDecl *cls);
+  bool constructorChosen(const NewExpr *expr, CallExpr *call, llvm::ArrayRef<FunctionDecl *> ctors);
+  static bool hasInitializer(const ClassDecl *cls);
 
   SemanticState &state;
   EventMaps *eventMaps = nullptr;

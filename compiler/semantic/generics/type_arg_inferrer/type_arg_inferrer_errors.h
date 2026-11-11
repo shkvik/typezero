@@ -75,6 +75,15 @@ struct TypeArgInferrerCandidatesJoinError {
   std::string message;
 };
 
+enum class TypeArgInferrerJoinCandidatesErrorCode {
+  CANDIDATES_CLASH,
+};
+
+struct TypeArgInferrerJoinCandidatesError {
+  TypeArgInferrerJoinCandidatesErrorCode code;
+  std::string message;
+};
+
 class ErrorTextCandidates {
 public:
   static std::string conflict(llvm::StringRef param, llvm::StringRef name, llvm::StringRef type,

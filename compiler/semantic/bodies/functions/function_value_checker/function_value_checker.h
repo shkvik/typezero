@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/functions/function_value_checker/function_value_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -25,6 +26,18 @@ public:
 
 private:
   using ResultArgumentsMatch = Result<size_t, FunctionValueCheckerExtraArgumentsError>;
+
+  struct FunctionValueShape {
+    llvm::StringRef name;
+    unsigned maxArgs;
+    bool returnsNothing;
+  };
+
+  std::optional<FunctionValueShape> functionValueShape(const Expr *arg) const;
+  std::optional<FunctionValueShape> globalFunctionShape(const NameExpr *named) const;
+  std::optional<FunctionValueShape> staticFunctionShape(const MemberExpr *member) const;
+  std::optional<GlobalName> namedGlobal(const Expr *expr) const;
+  FunctionExpr *forwardingFunction(Expr *arg, const FunctionValueShape &shape, size_t count);
 
   static ResultArgumentsMatch extraArguments(const Expr *arg, llvm::StringRef name,
                                              llvm::StringRef method, size_t count,

@@ -1,7 +1,12 @@
 #pragma once
 
+#include "compiler/program/library/child_process/child_function_table/child_function_table.h"
 #include "compiler/semantic/library/child_process/child_checker/child_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
+#include "llvm/ADT/StringMap.h"
+#include <array>
+#include <optional>
+#include <vector>
 
 namespace tz {
 
@@ -24,6 +29,40 @@ private:
   static const Type *bufferType();
   static bool knownSignal(llvm::StringRef name);
   static bool hasZero(const Expr *expr);
+
+  struct ChildRun {
+    CallExpr *call = nullptr;
+    ChildFunction function = ChildFunction::SPAWN_SYNC;
+    llvm::StringRef fn;
+    llvm::SMLoc loc;
+    bool exec = false;
+    bool failed = false;
+    std::vector<Expr *> args;
+    llvm::StringMap<Expr *> options;
+    unsigned encoding = 0;
+    std::array<unsigned, 3> stdio{};
+    bool stdioGiven = false;
+    bool viaShell = false;
+  };
+
+  void walkFileArgument(ChildRun &run);
+  void fillPlainOptions(ChildRun &run);
+  void walkInputOption(ChildRun &run);
+  void walkShellOption(ChildRun &run);
+  void walkStdioOption(ChildRun &run);
+  void walkOptionLimits(ChildRun &run);
+  Expr *finishChildCall(ChildRun &run);
+  void walkEncodingOption(ChildRun &run);
+  void walkKillSignalOption(ChildRun &run);
+  void walkExecShell(ChildRun &run, Expr *shell);
+  void walkStdioText(ChildRun &run, Expr *value);
+  std::optional<size_t> walkArgumentList(ChildRun &run);
+  Expr *absentValue(llvm::SMLoc loc, const Type *type);
+  std::optional<unsigned> stdioKind(Expr *given, unsigned i);
+  IntLitExpr *makeIntLiteral(llvm::SMLoc loc, uint64_t value);
+  void walkZeroArguments(ChildRun &run, const Expr *given);
+  void walkStdioList(ChildRun &run, const ArrayLitExpr *list);
+  Expr *optionValue(ChildRun &run, llvm::StringRef name, const Type *type);
 
   SemanticState &state;
   FsChecker *fsChecker = nullptr;

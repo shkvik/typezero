@@ -59,6 +59,14 @@ private:
                                               const FuncSymbol *fn);
   static ResultGeneratorReturns generatorReturn(const Type *given, const Type *returned,
                                                 const FuncSymbol *fn);
+  static const Type *declaredReturn(const FuncSymbol *fn);
+  void walkConstructorReturn(ReturnStmt *ret, const FuncSymbol *fn);
+  void walkInferredReturn(ReturnStmt *ret);
+  const Type *earlierReturnShape() const;
+  void walkAsyncGeneratorReturn(ReturnStmt *ret, const FuncSymbol *fn, const Type *returned);
+  void walkPromiseReturn(ReturnStmt *ret, const FuncSymbol *fn, const Type *returned);
+  void walkVoidReturn(ReturnStmt *ret, const FuncSymbol *fn);
+  void walkValueReturn(ReturnStmt *ret, const FuncSymbol *fn, const Type *returned);
 
   SemanticState &state;
   ByteProofs *byteProofs = nullptr;

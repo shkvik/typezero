@@ -52,6 +52,16 @@ private:
   static IntegerRange clampToType(const Expr *e, IntegerRange r);
   IntegerRange nodeRange(const Expr *e, std::vector<IntegerRange> &answers) const;
   IntegerRange computedRange(const Expr *e, llvm::ArrayRef<IntegerRange> parts) const;
+  static IntegerRange castRange(const CastExpr *conv, const IntegerRange &operand);
+  IntegerRange nameRange(const NameExpr *name) const;
+  static IntegerRange memberRange(const MemberExpr *member);
+  static IntegerRange elementRangeOf(const Type *type);
+  static IntegerRange callRange(const CallExpr *call, llvm::ArrayRef<IntegerRange> parts);
+  static IntegerRange minMaxRange(const CallExpr *call, llvm::ArrayRef<IntegerRange> parts);
+  static IntegerRange lowerOf(const IntegerRange &a, const IntegerRange &b);
+  static IntegerRange upperOf(const IntegerRange &a, const IntegerRange &b);
+  static IntegerRange unaryRange(const UnaryExpr *unary, const IntegerRange &operand);
+  static IntegerRange binaryRange(const BinaryExpr *bin, llvm::ArrayRef<IntegerRange> parts);
 
   SemanticState &state;
   IndexProofs *indexProofs = nullptr;

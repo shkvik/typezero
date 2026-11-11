@@ -30,6 +30,9 @@ private:
   static ResultSubtleCallShape subtleShape(const CallExpr *call, llvm::StringRef intrinsicName);
   static ResultAlgorithmChosen literalAlgorithm(const Expr *checked, char kind,
                                                 llvm::StringRef intrinsicName);
+  Expr *checkSubtleArg(Expr *arg, char kind, llvm::StringRef intrinsicName);
+  Expr *checkSubtleArgKind(Expr *arg, char kind);
+  static const Type *subtleResult(char result);
   ResultSubtleAvailable subtleAvailable() const;
 
   SemanticState &state;

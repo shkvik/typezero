@@ -125,17 +125,39 @@ LateClasses::ResultBaseClassUsable LateClasses::baseClass(const Type *type) cons
 
 void LateClasses::makeLateClass(ClassDecl *cls) {
   cls->checkOnly = this->reflectChecker->onlyChecked();
-  if (!cls->type) {
+  this->registerLateClass(cls);
+  this->rememberLateScope(cls);
+  this->linkLateBase(cls);
+  LateClasses::nameAnonymousClass(cls);
+  this->declareLateMembers(cls);
+  this->rememberMethodModules(cls);
+  this->markLateOverrides(cls);
+  if (this->state.getClassStore().hasLinkedClasses()) {
+    this->classLinks->linkOverrides(cls);
+    this->classLinks->buildVtable(cls);
+  }
+  LateClassStore &late = this->state.getLateClassStore();
+  InstanceRecord *instance = this->state.getGenericStore().getCheckingInstance();
+  if (instance != nullptr && instance->generic != nullptr) {
+    late.rememberLateOwner(cls, instance);
+  }
+  late.addLateClass(cls);
+}
+
+void LateClasses::registerLateClass(ClassDecl *cls) {
+  if (cls->type == nullptr) {
     cls->id = this->state.getClassStore().takeClassId();
     llvm::StringRef typeName = cls->name.empty() ? "(anonymous class)" : cls->name;
     cls->type = Type::classType(typeName, cls);
     this->state.getClassStore().addClass(cls);
   }
-  if (this->state.getModuleStates().getCurrentModule() &&
-      !this->state.getModuleStates().hasDeclModule(cls)) {
-    this->state.getModuleStates().rememberDeclModule(
-        cls, this->state.getModuleStates().getCurrentModule());
+  Module *current = this->state.getModuleStates().getCurrentModule();
+  if (current != nullptr && !this->state.getModuleStates().hasDeclModule(cls)) {
+    this->state.getModuleStates().rememberDeclModule(cls, current);
   }
+}
+
+void LateClasses::rememberLateScope(ClassDecl *cls) {
   std::vector<FunctionDecl *> functions = this->state.getFunctionStack().getFunctions();
   for (FunctionDecl *fn : llvm::reverse(functions)) {
     if (fn->isInstance && !fn->typeArgs.empty()) {
@@ -146,31 +168,40 @@ void LateClasses::makeLateClass(ClassDecl *cls) {
   for (llvm::StringRef local : this->state.getScopeStack().getLocalVarNames()) {
     cls->locals.push_back(local);
   }
+}
 
-  if (cls->baseExpr) {
-    cls->baseExpr = this->exprChecker->checkExpr(cls->baseExpr);
-    ResultBaseClassUsable base = this->baseClass(cls->baseExpr->type);
-    bool reported =
-        base.isErr() && base.error().code == LateClassesBaseClassErrorCode::ALREADY_REPORTED;
-    if (base.isErr() && !reported) {
-      this->state.getDiagnostics().error(cls->baseExpr->loc(), base.error().message);
-    }
-    ClassDecl *parent = base.isOk() ? base.value() : nullptr;
-    if (parent && cls->checkOnly) {
-      cls->parent = parent;
-      const_cast<Type *>(cls->type)->addBase(parent->type);
-    } else if (parent) {
-      cls->parent = parent;
-      parent->children.push_back(cls);
-      this->classBases->addBase(cls->type, parent->type);
-    }
-    cls->base.reset();
+void LateClasses::linkLateBase(ClassDecl *cls) {
+  if (cls->baseExpr == nullptr) {
+    return;
   }
-  if (cls->name.empty() && cls->parent) {
-    std::string extendsName = "(class extends " + cls->parent->type->name().str() + ")";
-    const_cast<Type *>(cls->type)->rename(extendsName);
+  cls->baseExpr = this->exprChecker->checkExpr(cls->baseExpr);
+  ResultBaseClassUsable base = this->baseClass(cls->baseExpr->type);
+  bool reported =
+      base.isErr() && base.error().code == LateClassesBaseClassErrorCode::ALREADY_REPORTED;
+  if (base.isErr() && !reported) {
+    this->state.getDiagnostics().error(cls->baseExpr->loc(), base.error().message);
   }
+  ClassDecl *parent = base.isOk() ? base.value() : nullptr;
+  if (parent != nullptr && cls->checkOnly) {
+    cls->parent = parent;
+    const_cast<Type *>(cls->type)->addBase(parent->type);
+  } else if (parent != nullptr) {
+    cls->parent = parent;
+    parent->children.push_back(cls);
+    this->classBases->addBase(cls->type, parent->type);
+  }
+  cls->base.reset();
+}
 
+void LateClasses::nameAnonymousClass(ClassDecl *cls) {
+  if (!cls->name.empty() || cls->parent == nullptr) {
+    return;
+  }
+  std::string extendsName = "(class extends " + cls->parent->type->name().str() + ")";
+  const_cast<Type *>(cls->type)->rename(extendsName);
+}
+
+void LateClasses::declareLateMembers(ClassDecl *cls) {
   LateClassStore &late = this->state.getLateClassStore();
   late.enterDeclaringClass(cls);
   this->state.getClassContext().enterClass(cls);
@@ -178,32 +209,26 @@ void LateClasses::makeLateClass(ClassDecl *cls) {
   this->classDeclarer->declareMethods(cls);
   this->state.getClassContext().leaveClass();
   late.leaveDeclaringClass();
+}
+
+void LateClasses::rememberMethodModules(const ClassDecl *cls) {
+  Module *home = this->state.getModuleStates().findDeclModule(cls);
+  if (home == nullptr) {
+    return;
+  }
   std::vector<FunctionDecl *> methods = cls->methods;
   methods.insert(methods.end(), cls->constructors.begin(), cls->constructors.end());
-  if (cls->init) {
+  if (cls->init != nullptr) {
     methods.push_back(cls->init);
   }
   for (const ClassField &f : cls->fields) {
-    if (f.method()) {
+    if (f.method() != nullptr) {
       methods.push_back(f.method());
     }
   }
-  Module *home = this->state.getModuleStates().findDeclModule(cls);
-  if (home) {
-    for (FunctionDecl *fn : methods) {
-      this->state.getModuleStates().rememberDeclModule(fn, home);
-    }
+  for (FunctionDecl *fn : methods) {
+    this->state.getModuleStates().rememberDeclModule(fn, home);
   }
-  this->markLateOverrides(cls);
-  if (this->state.getClassStore().hasLinkedClasses()) {
-    this->classLinks->linkOverrides(cls);
-    this->classLinks->buildVtable(cls);
-  }
-  InstanceRecord *instance = this->state.getGenericStore().getCheckingInstance();
-  if (instance && instance->generic) {
-    late.rememberLateOwner(cls, instance);
-  }
-  late.addLateClass(cls);
 }
 
 LateClasses::ResultStaticTypeKnown LateClasses::staticType(const ClassField &field,

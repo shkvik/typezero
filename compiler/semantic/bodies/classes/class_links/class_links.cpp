@@ -394,72 +394,100 @@ void ClassLinks::linkOverrides(ClassDecl *cls) {
   bool muted = this->state.getDiagnostics().setMuted(false);
   this->state.getDiagnostics().setMuted(muted || cls->generic() != nullptr);
   for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
-    if (!fn->sym) {
-      continue;
-    }
-    FunctionDecl *base = nullptr;
-    std::vector<FunctionDecl *> inherited;
-    if (cls->parent) {
-      inherited = ClassDeclarer::methodsNamed(cls->parent, fn->name, false);
-      for (FunctionDecl *v : inherited) {
-        if (v->sym && ClassLinks::sameParams(v->sym, fn->sym)) {
-          base = v;
-        }
-      }
-    }
-    ResultMethodNotField method = ClassLinks::notAField(cls, fn);
-    if (method.isErr()) {
-      this->state.getDiagnostics().error(fn->loc(), method.error().message);
-      continue;
-    }
-    if (!base) {
-      ResultOverrideTarget target = ClassLinks::overrideTarget(cls, fn, inherited);
-      if (target.isErr()) {
-        this->state.getDiagnostics().error(fn->loc(), target.error().message);
-      }
-      if (!inherited.empty() && this->chunkTypes->isStreamHook(fn, true)) {
-        ChunkTypes::ResultHookParamsMatch params = this->chunkTypes->hookParams(fn, inherited);
-        if (params.isErr() &&
-            params.error().code == ChunkTypesHookParamsErrorCode::OTHER_PARAMETERS) {
-          this->state.getDiagnostics().error(fn->loc(), params.error().message);
-        }
-        continue;
-      }
-      for (FunctionDecl *v : inherited) {
-        this->classDeclarer->checkVariantPair(v, fn);
-      }
-      continue;
-    }
-    ResultBaseIsNotArrow notArrow = ClassLinks::arrowOverride(fn, base);
-    if (notArrow.isErr()) {
-      this->state.getDiagnostics().error(fn->loc(), notArrow.error().message);
-      continue;
-    }
-    ResultBaseNotPrivate visible = ClassLinks::baseVisible(fn, base);
-    if (visible.isErr()) {
-      this->state.getDiagnostics().error(fn->loc(), visible.error().message);
-      continue;
-    }
-    ResultAccessNotLower access = ClassLinks::accessKept(fn, base);
-    if (access.isErr()) {
-      this->state.getDiagnostics().error(fn->loc(), access.error().message);
-    }
-    ResultBodyIsRetained body = ClassLinks::bodyKept(cls, fn, base);
-    if (body.isErr()) {
-      this->state.getDiagnostics().error(fn->loc(), body.error().message);
-    }
-    fn->overriding()->overrides = base;
-    for (FunctionDecl *p = base; p; p = p->overrides()) {
-      ResultSameTypeParams same = this->sameTypeArgs(cls, fn, p);
-      if (same.isErr()) {
-        bool outer = this->state.getDiagnostics().setMuted(false);
-        this->state.getDiagnostics().error(fn->loc(), same.error().message);
-        this->state.getDiagnostics().setMuted(outer);
-      }
-      this->genericClassInstantiator->markOverridden(p);
+    if (fn->sym != nullptr) {
+      this->linkOverride(cls, fn);
     }
   }
   this->state.getDiagnostics().setMuted(muted);
+}
+
+void ClassLinks::linkOverride(ClassDecl *cls, FunctionDecl *fn) {
+  std::vector<FunctionDecl *> inherited;
+  if (cls->parent != nullptr) {
+    inherited = ClassDeclarer::methodsNamed(cls->parent, fn->name, false);
+  }
+  FunctionDecl *base = ClassLinks::sameParamsBase(inherited, fn);
+  ResultMethodNotField method = ClassLinks::notAField(cls, fn);
+  if (method.isErr()) {
+    this->state.getDiagnostics().error(fn->loc(), method.error().message);
+    return;
+  }
+  if (base == nullptr) {
+    this->walkNewMethod(cls, fn, inherited);
+    return;
+  }
+  if (!this->overrideFits(cls, fn, base)) {
+    return;
+  }
+  fn->overriding()->overrides = base;
+  this->walkOverrideChain(cls, fn, base);
+}
+
+FunctionDecl *ClassLinks::sameParamsBase(llvm::ArrayRef<FunctionDecl *> inherited,
+                                         const FunctionDecl *fn) {
+  FunctionDecl *base = nullptr;
+  for (FunctionDecl *v : inherited) {
+    if (v->sym != nullptr && ClassLinks::sameParams(v->sym, fn->sym)) {
+      base = v;
+    }
+  }
+
+  return base;
+}
+
+void ClassLinks::walkNewMethod(const ClassDecl *cls, FunctionDecl *fn,
+                               llvm::ArrayRef<FunctionDecl *> inherited) {
+  ResultOverrideTarget target = ClassLinks::overrideTarget(cls, fn, inherited);
+  if (target.isErr()) {
+    this->state.getDiagnostics().error(fn->loc(), target.error().message);
+  }
+  if (!inherited.empty() && this->chunkTypes->isStreamHook(fn, true)) {
+    ChunkTypes::ResultHookParamsMatch params = this->chunkTypes->hookParams(fn, inherited);
+    if (params.isErr() && params.error().code == ChunkTypesHookParamsErrorCode::OTHER_PARAMETERS) {
+      this->state.getDiagnostics().error(fn->loc(), params.error().message);
+    }
+    return;
+  }
+  for (FunctionDecl *v : inherited) {
+    this->classDeclarer->checkVariantPair(v, fn);
+  }
+}
+
+bool ClassLinks::overrideFits(const ClassDecl *cls, const FunctionDecl *fn,
+                              const FunctionDecl *base) {
+  ResultBaseIsNotArrow notArrow = ClassLinks::arrowOverride(fn, base);
+  if (notArrow.isErr()) {
+    this->state.getDiagnostics().error(fn->loc(), notArrow.error().message);
+    return false;
+  }
+  ResultBaseNotPrivate visible = ClassLinks::baseVisible(fn, base);
+  if (visible.isErr()) {
+    this->state.getDiagnostics().error(fn->loc(), visible.error().message);
+    return false;
+  }
+  ResultAccessNotLower access = ClassLinks::accessKept(fn, base);
+  if (access.isErr()) {
+    this->state.getDiagnostics().error(fn->loc(), access.error().message);
+  }
+  ResultBodyIsRetained body = ClassLinks::bodyKept(cls, fn, base);
+  if (body.isErr()) {
+    this->state.getDiagnostics().error(fn->loc(), body.error().message);
+  }
+
+  return true;
+}
+
+void ClassLinks::walkOverrideChain(const ClassDecl *cls, const FunctionDecl *fn,
+                                   FunctionDecl *base) {
+  for (FunctionDecl *p = base; p != nullptr; p = p->overrides()) {
+    ResultSameTypeParams same = this->sameTypeArgs(cls, fn, p);
+    if (same.isErr()) {
+      bool outer = this->state.getDiagnostics().setMuted(false);
+      this->state.getDiagnostics().error(fn->loc(), same.error().message);
+      this->state.getDiagnostics().setMuted(outer);
+    }
+    this->genericClassInstantiator->markOverridden(p);
+  }
 }
 
 const Type *ClassLinks::inheritedReturnType(FuncSymbol *fn) {

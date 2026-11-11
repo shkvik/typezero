@@ -156,67 +156,86 @@ bool DestinationScanner::declaresName(const Stmt *stmt, llvm::StringRef name) {
 }
 
 void DestinationScanner::scanStmt(const Stmt *stmt, ScanRun &run) {
-  if (!stmt) {
+  if (stmt == nullptr) {
     return;
   }
   switch (stmt->kind()) {
-  case Stmt::Kind::Block:
-    run.steps.push_back(StartList{cast<BlockStmt>(stmt)->body});
-    break;
-  case Stmt::Kind::VarDecl:
-    for (const VarDeclarator &d : llvm::reverse(cast<VarDeclStmt>(stmt)->decls)) {
-      run.steps.push_back(VarDeclare{&d});
-    }
-    break;
-  case Stmt::Kind::Function:
-    run.steps.push_back(ScanFunction{cast<FunctionDecl>(stmt)});
-    break;
-  case Stmt::Kind::Expr:
-    run.steps.push_back(ScanExpr{cast<ExprStmt>(stmt)->expr, nullptr});
-    break;
-  case Stmt::Kind::If: {
-    auto *s = cast<IfStmt>(stmt);
-    run.steps.push_back(ScanStmt{s->elseStmt});
-    run.steps.push_back(ScanStmt{s->thenStmt});
-    run.steps.push_back(ScanExpr{s->cond, nullptr});
-    break;
+    case Stmt::Kind::Block:
+      return run.steps.push_back(StartList{cast<BlockStmt>(stmt)->body});
+    case Stmt::Kind::VarDecl:
+      return DestinationScanner::pushDeclarators(cast<VarDeclStmt>(stmt), run);
+    case Stmt::Kind::Function:
+      return run.steps.push_back(ScanFunction{cast<FunctionDecl>(stmt)});
+    case Stmt::Kind::Expr:
+      return run.steps.push_back(ScanExpr{cast<ExprStmt>(stmt)->expr, nullptr});
+    case Stmt::Kind::If:
+      return DestinationScanner::pushIfParts(cast<IfStmt>(stmt), run);
+    case Stmt::Kind::While:
+      return DestinationScanner::pushWhileParts(cast<WhileStmt>(stmt), run);
+    case Stmt::Kind::DoWhile:
+      return DestinationScanner::pushDoWhileParts(cast<DoWhileStmt>(stmt), run);
+    case Stmt::Kind::For:
+      return DestinationScanner::pushForParts(cast<ForStmt>(stmt), run);
+    case Stmt::Kind::ForOf:
+      return DestinationScanner::pushForOfParts(cast<ForOfStmt>(stmt), run);
+    case Stmt::Kind::Switch:
+      return DestinationScanner::scanSwitch(cast<SwitchStmt>(stmt), run);
+    case Stmt::Kind::Labeled:
+      return run.steps.push_back(ScanStmt{cast<LabeledStmt>(stmt)->body});
+    case Stmt::Kind::Return:
+      return DestinationScanner::pushReturnValue(cast<ReturnStmt>(stmt), run);
+    case Stmt::Kind::Break:
+    case Stmt::Kind::Continue:
+    case Stmt::Kind::Empty:
+    case Stmt::Kind::TypeAlias:
+    case Stmt::Kind::Enum:
+    case Stmt::Kind::Debugger:
+    case Stmt::Kind::Class:
+      return;
   }
-  case Stmt::Kind::While:
-    run.steps.push_back(ScanStmt{cast<WhileStmt>(stmt)->body});
-    run.steps.push_back(ScanExpr{cast<WhileStmt>(stmt)->cond, nullptr});
-    break;
-  case Stmt::Kind::DoWhile:
-    run.steps.push_back(ScanExpr{cast<DoWhileStmt>(stmt)->cond, nullptr});
-    run.steps.push_back(ScanStmt{cast<DoWhileStmt>(stmt)->body});
-    break;
-  case Stmt::Kind::For: {
-    auto *s = cast<ForStmt>(stmt);
-    run.scan.enterScope();
-    run.steps.push_back(ForRest{s});
-    run.steps.push_back(ScanStmt{s->init});
-    break;
+}
+
+void DestinationScanner::pushDeclarators(const VarDeclStmt *decl, ScanRun &run) {
+  for (const VarDeclarator &d : llvm::reverse(decl->decls)) {
+    run.steps.push_back(VarDeclare{&d});
   }
-  case Stmt::Kind::ForOf: {
-    auto *s = cast<ForOfStmt>(stmt);
-    run.steps.push_back(ForOfRest{s});
-    run.steps.push_back(ScanExpr{s->iterable, nullptr});
-    break;
+}
+
+void DestinationScanner::pushIfParts(const IfStmt *s, ScanRun &run) {
+  run.steps.push_back(ScanStmt{s->elseStmt});
+  run.steps.push_back(ScanStmt{s->thenStmt});
+  run.steps.push_back(ScanExpr{s->cond, nullptr});
+}
+
+void DestinationScanner::pushWhileParts(const WhileStmt *s, ScanRun &run) {
+  run.steps.push_back(ScanStmt{s->body});
+  run.steps.push_back(ScanExpr{s->cond, nullptr});
+}
+
+void DestinationScanner::pushDoWhileParts(const DoWhileStmt *s, ScanRun &run) {
+  run.steps.push_back(ScanExpr{s->cond, nullptr});
+  run.steps.push_back(ScanStmt{s->body});
+}
+
+void DestinationScanner::pushForParts(const ForStmt *s, ScanRun &run) {
+  run.scan.enterScope();
+  run.steps.push_back(ForRest{s});
+  run.steps.push_back(ScanStmt{s->init});
+}
+
+void DestinationScanner::pushForOfParts(const ForOfStmt *s, ScanRun &run) {
+  run.steps.push_back(ForOfRest{s});
+  run.steps.push_back(ScanExpr{s->iterable, nullptr});
+}
+
+void DestinationScanner::pushReturnValue(const ReturnStmt *s, ScanRun &run) {
+  if (s->value == nullptr) {
+    return;
   }
-  case Stmt::Kind::Switch:
-    DestinationScanner::scanSwitch(cast<SwitchStmt>(stmt), run);
-    break;
-  case Stmt::Kind::Labeled:
-    run.steps.push_back(ScanStmt{cast<LabeledStmt>(stmt)->body});
-    break;
-  case Stmt::Kind::Return:
-    if (const Expr *value = cast<ReturnStmt>(stmt)->value) {
-      const Type *returns = run.scan.getReturns();
-      run.steps.push_back(ScanExpr{value, returns && !returns->isVoid() ? returns : nullptr});
-    }
-    break;
-  default:
-    break;
-  }
+  const Type *returns = run.scan.getReturns();
+  const Type *sink = returns != nullptr && !returns->isVoid() ? returns : nullptr;
+
+  return run.steps.push_back(ScanExpr{s->value, sink});
 }
 
 void DestinationScanner::scanSwitch(const SwitchStmt *s, ScanRun &run) {
@@ -312,83 +331,116 @@ void DestinationScanner::scanExpr(const ScanExpr &scanned, ScanRun &run) {
 
 std::vector<ScanExpr> DestinationScanner::exprParts(const Expr *expr, const Type *sink,
                                                     ScanRun &run) {
-  const Type *object = sink ? sink->nonOptional() : nullptr;
+  const Type *object = sink != nullptr ? sink->nonOptional() : nullptr;
   switch (expr->kind()) {
-  case Expr::Kind::Name: {
-    auto *name = cast<NameExpr>(expr);
-    if (sink && name->name == run.scan.getName() && !run.scan.isHidden(name->name)) {
-      run.scan.addFound(sink, name->loc());
-    }
-    return {};
+    case Expr::Kind::Name:
+      return DestinationScanner::nameParts(cast<NameExpr>(expr), sink, run);
+    case Expr::Kind::ObjectLit:
+      return DestinationScanner::objectParts(cast<ObjectLitExpr>(expr), object);
+    case Expr::Kind::ArrayLit:
+      return DestinationScanner::arrayParts(cast<ArrayLitExpr>(expr), object);
+    case Expr::Kind::Conditional:
+      return DestinationScanner::conditionalParts(cast<ConditionalExpr>(expr), sink);
+    case Expr::Kind::Binary:
+      return DestinationScanner::binaryParts(cast<BinaryExpr>(expr), sink);
+    case Expr::Kind::Sequence:
+      return DestinationScanner::sequenceParts(cast<SequenceExpr>(expr), sink);
+    case Expr::Kind::Assign:
+      return this->assignParts(cast<AssignExpr>(expr), run);
+    case Expr::Kind::Call:
+      return this->callParts(cast<CallExpr>(expr), run);
+    case Expr::Kind::Function:
+      run.steps.push_back(ScanFunction{cast<FunctionExpr>(expr)->fn});
+      return {};
+    case Expr::Kind::Template:
+      return DestinationScanner::templateParts(cast<TemplateExpr>(expr));
+    case Expr::Kind::Member:
+      return {ScanExpr{cast<MemberExpr>(expr)->object, nullptr}};
+    case Expr::Kind::Index:
+      return {ScanExpr{cast<IndexExpr>(expr)->object, nullptr},
+              ScanExpr{cast<IndexExpr>(expr)->index, nullptr}};
+    case Expr::Kind::Unary:
+      return {ScanExpr{cast<UnaryExpr>(expr)->operand, nullptr}};
+    case Expr::Kind::Update:
+      return {ScanExpr{cast<UpdateExpr>(expr)->target, nullptr}};
+    case Expr::Kind::New:
+      return this->newParts(cast<NewExpr>(expr), run);
+    case Expr::Kind::Cast:
+      return {ScanExpr{cast<CastExpr>(expr)->operand, nullptr}};
+    case Expr::Kind::OptionalChain:
+      return {ScanExpr{cast<OptionalChainExpr>(expr)->chain, nullptr}};
+    case Expr::Kind::Yield:
+      return {ScanExpr{cast<YieldExpr>(expr)->value, nullptr}};
+    case Expr::Kind::Await:
+      return {ScanExpr{cast<AwaitExpr>(expr)->value, nullptr}};
+    case Expr::Kind::IntLit:
+    case Expr::Kind::FloatLit:
+    case Expr::Kind::BoolLit:
+    case Expr::Kind::StringLit:
+    case Expr::Kind::Undefined:
+    case Expr::Kind::RegexLit:
+    case Expr::Kind::Class:
+      return {};
   }
-  case Expr::Kind::ObjectLit: {
-    std::vector<ScanExpr> parts;
-    for (const ObjectLitExpr::Property &prop : cast<ObjectLitExpr>(expr)->props) {
-      parts.push_back(ScanExpr{prop.key(), nullptr});
-      const Field *field =
-          object && object->isObject() && !prop.spread() ? object->field(prop.name) : nullptr;
-      parts.push_back(ScanExpr{prop.value, field ? field->type : nullptr});
-    }
-    return parts;
+
+  return {};
+}
+
+std::vector<ScanExpr> DestinationScanner::nameParts(const NameExpr *name, const Type *sink,
+                                                    ScanRun &run) {
+  bool found =
+      sink != nullptr && name->name == run.scan.getName() && !run.scan.isHidden(name->name);
+  if (found) {
+    run.scan.addFound(sink, name->loc());
   }
-  case Expr::Kind::ArrayLit:
-    return DestinationScanner::arrayParts(cast<ArrayLitExpr>(expr), object);
-  case Expr::Kind::Conditional: {
-    auto *cond = cast<ConditionalExpr>(expr);
-    return {ScanExpr{cond->cond, nullptr}, ScanExpr{cond->thenExpr, sink},
-            ScanExpr{cond->elseExpr, sink}};
+
+  return {};
+}
+
+std::vector<ScanExpr> DestinationScanner::objectParts(const ObjectLitExpr *lit,
+                                                      const Type *object) {
+  std::vector<ScanExpr> parts;
+  for (const ObjectLitExpr::Property &prop : lit->props) {
+    parts.push_back(ScanExpr{prop.key(), nullptr});
+    bool typedField = object != nullptr && object->isObject() && !prop.spread();
+    const Field *field = typedField ? object->field(prop.name) : nullptr;
+    parts.push_back(ScanExpr{prop.value, field != nullptr ? field->type : nullptr});
   }
-  case Expr::Kind::Binary: {
-    auto *bin = cast<BinaryExpr>(expr);
-    bool passes =
-        bin->op == BinaryOp::Nullish || bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr;
-    return {ScanExpr{bin->lhs, bin->op == BinaryOp::Nullish ? sink : nullptr},
-            ScanExpr{bin->rhs, passes ? sink : nullptr}};
+
+  return parts;
+}
+
+std::vector<ScanExpr> DestinationScanner::conditionalParts(const ConditionalExpr *cond,
+                                                           const Type *sink) {
+  return {ScanExpr{cond->cond, nullptr}, ScanExpr{cond->thenExpr, sink},
+          ScanExpr{cond->elseExpr, sink}};
+}
+
+std::vector<ScanExpr> DestinationScanner::binaryParts(const BinaryExpr *bin, const Type *sink) {
+  bool nullish = bin->op == BinaryOp::Nullish;
+  bool passes = nullish || bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr;
+
+  return {ScanExpr{bin->lhs, nullish ? sink : nullptr},
+          ScanExpr{bin->rhs, passes ? sink : nullptr}};
+}
+
+std::vector<ScanExpr> DestinationScanner::sequenceParts(const SequenceExpr *seq, const Type *sink) {
+  std::vector<ScanExpr> parts;
+  for (size_t i = 0; i < seq->exprs.size(); ++i) {
+    bool last = i + 1 == seq->exprs.size();
+    parts.push_back(ScanExpr{seq->exprs[i], last ? sink : nullptr});
   }
-  case Expr::Kind::Sequence: {
-    auto *seq = cast<SequenceExpr>(expr);
-    std::vector<ScanExpr> parts;
-    for (size_t i = 0; i < seq->exprs.size(); ++i) {
-      parts.push_back(ScanExpr{seq->exprs[i], i + 1 == seq->exprs.size() ? sink : nullptr});
-    }
-    return parts;
+
+  return parts;
+}
+
+std::vector<ScanExpr> DestinationScanner::templateParts(const TemplateExpr *tmpl) {
+  std::vector<ScanExpr> parts;
+  for (const Expr *part : tmpl->exprs) {
+    parts.push_back(ScanExpr{part, nullptr});
   }
-  case Expr::Kind::Assign:
-    return this->assignParts(cast<AssignExpr>(expr), run);
-  case Expr::Kind::Call:
-    return this->callParts(cast<CallExpr>(expr), run);
-  case Expr::Kind::Function:
-    run.steps.push_back(ScanFunction{cast<FunctionExpr>(expr)->fn});
-    return {};
-  case Expr::Kind::Template: {
-    std::vector<ScanExpr> parts;
-    for (const Expr *e : cast<TemplateExpr>(expr)->exprs) {
-      parts.push_back(ScanExpr{e, nullptr});
-    }
-    return parts;
-  }
-  case Expr::Kind::Member:
-    return {ScanExpr{cast<MemberExpr>(expr)->object, nullptr}};
-  case Expr::Kind::Index:
-    return {ScanExpr{cast<IndexExpr>(expr)->object, nullptr},
-            ScanExpr{cast<IndexExpr>(expr)->index, nullptr}};
-  case Expr::Kind::Unary:
-    return {ScanExpr{cast<UnaryExpr>(expr)->operand, nullptr}};
-  case Expr::Kind::Update:
-    return {ScanExpr{cast<UpdateExpr>(expr)->target, nullptr}};
-  case Expr::Kind::New:
-    return this->newParts(cast<NewExpr>(expr), run);
-  case Expr::Kind::Cast:
-    return {ScanExpr{cast<CastExpr>(expr)->operand, nullptr}};
-  case Expr::Kind::OptionalChain:
-    return {ScanExpr{cast<OptionalChainExpr>(expr)->chain, nullptr}};
-  case Expr::Kind::Yield:
-    return {ScanExpr{cast<YieldExpr>(expr)->value, nullptr}};
-  case Expr::Kind::Await:
-    return {ScanExpr{cast<AwaitExpr>(expr)->value, nullptr}};
-  default:
-    return {};
-  }
+
+  return parts;
 }
 
 std::vector<ScanExpr> DestinationScanner::arrayParts(const ArrayLitExpr *lit, const Type *object) {
@@ -554,98 +606,143 @@ const Type *DestinationScanner::resultPeekType(const CallExpr *call,
 
 std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,
                                                            const DestinationScan &scan) {
-  auto spread = [&](llvm::ArrayRef<const Type *> params, bool hasRest) {
-    std::vector<const Type *> types(params.begin(), params.end());
-    if (hasRest && !types.empty()) {
-      const Type *rest = types.back();
-      types.pop_back();
-      while (types.size() < call->args.size()) {
-        types.push_back(rest && rest->isArray() ? rest->inner() : nullptr);
-      }
-    }
-
-    return types;
-  };
-  if (auto *name = dyn_cast<NameExpr>(call->callee)) {
-    if (scan.isHidden(name->name)) {
-      const Type *type = this->peekName(name->name, scan);
-      return type && type->isFunction() ? spread(type->params(), type->hasRest())
-                                        : std::vector<const Type *>{};
-    }
-    ScopeEntry entry = this->scopes->lookup(name->name);
-    FuncSymbol *func = entry.func();
-    if (entry.var() && entry.var()->function()) {
-      func = entry.var()->function()->sym;
-    }
-    if (func) {
-      return spread(func->params, func->hasRest);
-    }
-    if (entry.var() && entry.var()->type && entry.var()->type->isFunction()) {
-      return spread(entry.var()->type->params(), entry.var()->type->hasRest());
-    }
-    return {};
+  auto *name = dyn_cast<NameExpr>(call->callee);
+  if (name != nullptr) {
+    return this->nameCalleeParams(call, name, scan);
   }
-  if (auto *member = dyn_cast<MemberExpr>(call->callee)) {
-    auto variant = [&](const ClassDecl *cls, bool isStatic) -> std::vector<const Type *> {
-      std::vector<FunctionDecl *> methods =
-          ClassDeclarer::methodsNamed(cls, member->name, isStatic);
-      if (methods.size() != 1 || !methods[0]->sym) {
-        return {};
-      }
-
-      return spread(methods[0]->sym->params, methods[0]->sym->hasRest);
-    };
-    if (auto *name = dyn_cast<NameExpr>(member->object); name && !scan.isHidden(name->name)) {
-      if (ClassDecl *cls = this->scopes->lookup(name->name).cls()) {
-        return variant(cls, true);
-      }
-    }
-    const Type *object = this->peekType(member->object, scan);
-    if (!object) {
-      return {};
-    }
-    if (ClassDecl *cls = ClassDeclarer::classOf(object->nonOptional())) {
-      return variant(cls, false);
-    }
-    object = object->nonOptional();
-    if (object->isArray()) {
-      const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
-      if (method == nullptr) {
-        return {};
-      }
-      ArrayMethod which = method->method;
-      bool adds = which == ArrayMethod::PUSH || which == ArrayMethod::UNSHIFT;
-      bool searches = which == ArrayMethod::INCLUDES || which == ArrayMethod::INDEX_OF ||
-                      which == ArrayMethod::LAST_INDEX_OF;
-      if (adds || searches) {
-        return std::vector<const Type *>(call->args.size(), object->inner());
-      }
-      if (which == ArrayMethod::FILL) {
-        return {object->inner()};
-      }
-      return {};
-    }
-    if (object->isObject()) {
-      if (const Field *field = object->field(member->name); field && field->type->isFunction()) {
-        return spread(field->type->params(), field->type->hasRest());
-      }
-    }
-    const DictMethodInfo *dictMethod = DictMethodTable::find(member->name);
-    std::optional<DictMethod> method = std::nullopt;
-    if (dictMethod != nullptr) {
-      method = dictMethod->method;
-    }
-    if (object->isMap() && method == DictMethod::SET) {
-      return {object->keyType(), object->valueType()};
-    }
-    bool takesKey = method == DictMethod::GET || method == DictMethod::HAS ||
-                    method == DictMethod::DELETE_KEY || method == DictMethod::ADD;
-    if (object->isDict() && !object->isRecord() && takesKey) {
-      return {object->keyType()};
-    }
+  auto *member = dyn_cast<MemberExpr>(call->callee);
+  if (member != nullptr) {
+    return this->memberCalleeParams(call, member, scan);
   }
 
   return {};
 }
 
+std::vector<const Type *> DestinationScanner::spreadParams(llvm::ArrayRef<const Type *> params,
+                                                           bool hasRest, size_t argCount) {
+  std::vector<const Type *> types(params.begin(), params.end());
+  if (hasRest && !types.empty()) {
+    const Type *rest = types.back();
+    types.pop_back();
+    const Type *element = rest != nullptr && rest->isArray() ? rest->inner() : nullptr;
+    while (types.size() < argCount) {
+      types.push_back(element);
+    }
+  }
+
+  return types;
+}
+
+std::vector<const Type *> DestinationScanner::nameCalleeParams(const CallExpr *call,
+                                                               const NameExpr *name,
+                                                               const DestinationScan &scan) {
+  size_t argCount = call->args.size();
+  if (scan.isHidden(name->name)) {
+    const Type *type = this->peekName(name->name, scan);
+    if (type == nullptr || !type->isFunction()) {
+      return {};
+    }
+    return DestinationScanner::spreadParams(type->params(), type->hasRest(), argCount);
+  }
+  ScopeEntry entry = this->scopes->lookup(name->name);
+  VarSymbol *var = entry.var();
+  FuncSymbol *func = entry.func();
+  if (var != nullptr && var->function() != nullptr) {
+    func = var->function()->sym;
+  }
+  if (func != nullptr) {
+    return DestinationScanner::spreadParams(func->params, func->hasRest, argCount);
+  }
+  bool functionVar = var != nullptr && var->type != nullptr && var->type->isFunction();
+  if (functionVar) {
+    return DestinationScanner::spreadParams(var->type->params(), var->type->hasRest(), argCount);
+  }
+
+  return {};
+}
+
+std::vector<const Type *> DestinationScanner::memberCalleeParams(const CallExpr *call,
+                                                                 const MemberExpr *member,
+                                                                 const DestinationScan &scan) {
+  size_t argCount = call->args.size();
+  auto *owner = dyn_cast<NameExpr>(member->object);
+  if (owner != nullptr && !scan.isHidden(owner->name)) {
+    ClassDecl *cls = this->scopes->lookup(owner->name).cls();
+    if (cls != nullptr) {
+      return DestinationScanner::methodParams(cls, member->name, true, argCount);
+    }
+  }
+  const Type *peeked = this->peekType(member->object, scan);
+  if (peeked == nullptr) {
+    return {};
+  }
+  ClassDecl *cls = ClassDeclarer::classOf(peeked->nonOptional());
+  if (cls != nullptr) {
+    return DestinationScanner::methodParams(cls, member->name, false, argCount);
+  }
+  const Type *object = peeked->nonOptional();
+  if (object->isArray()) {
+    return DestinationScanner::arrayMethodParams(object, member->name, argCount);
+  }
+  if (object->isObject()) {
+    const Field *field = object->field(member->name);
+    if (field != nullptr && field->type->isFunction()) {
+      const Type *function = field->type;
+      return DestinationScanner::spreadParams(function->params(), function->hasRest(), argCount);
+    }
+  }
+
+  return DestinationScanner::dictMethodParams(object, member->name);
+}
+
+std::vector<const Type *> DestinationScanner::methodParams(const ClassDecl *cls,
+                                                           llvm::StringRef name, bool isStatic,
+                                                           size_t argCount) {
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, isStatic);
+  if (methods.size() != 1 || methods[0]->sym == nullptr) {
+    return {};
+  }
+  const FuncSymbol *method = methods[0]->sym;
+
+  return DestinationScanner::spreadParams(method->params, method->hasRest, argCount);
+}
+
+std::vector<const Type *>
+DestinationScanner::arrayMethodParams(const Type *array, llvm::StringRef name, size_t argCount) {
+  const ArrayMethodInfo *method = ArrayMethodTable::find(name);
+  if (method == nullptr) {
+    return {};
+  }
+  ArrayMethod which = method->method;
+  bool adds = which == ArrayMethod::PUSH || which == ArrayMethod::UNSHIFT;
+  bool searches = which == ArrayMethod::INCLUDES || which == ArrayMethod::INDEX_OF ||
+                  which == ArrayMethod::LAST_INDEX_OF;
+  if (adds || searches) {
+    return std::vector<const Type *>(argCount, array->inner());
+  }
+  if (which == ArrayMethod::FILL) {
+    return {array->inner()};
+  }
+
+  return {};
+}
+
+std::vector<const Type *> DestinationScanner::dictMethodParams(const Type *object,
+                                                               llvm::StringRef name) {
+  const DictMethodInfo *dictMethod = DictMethodTable::find(name);
+  std::optional<DictMethod> method = std::nullopt;
+  if (dictMethod != nullptr) {
+    method = dictMethod->method;
+  }
+  if (object->isMap() && method == DictMethod::SET) {
+    return {object->keyType(), object->valueType()};
+  }
+  bool takesKey = method == DictMethod::GET || method == DictMethod::HAS ||
+                  method == DictMethod::DELETE_KEY || method == DictMethod::ADD;
+  if (object->isDict() && !object->isRecord() && takesKey) {
+    return {object->keyType()};
+  }
+
+  return {};
+}
 }

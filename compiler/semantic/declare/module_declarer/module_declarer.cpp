@@ -50,37 +50,11 @@ void ModuleDeclarer::declareModules(SourceFile &program) {
   this->state.getModuleStates().prepareModules(int(program.modules.size()));
   for (Module *module : program.modules) {
     ModuleState &here = this->state.getModuleStates().getModuleState(module);
-    auto declared = [&](llvm::StringRef name, llvm::SMLoc loc) {
-      if (!name.empty()) {
-        here.declared.try_emplace(name, loc);
-      }
-    };
     for (Stmt *item : module->file.items) {
-      if (auto *fn = dyn_cast<FunctionDecl>(item)) {
-        declared(fn->name, fn->loc());
-      } else if (auto *alias = dyn_cast<TypeAliasDecl>(item)) {
-        declared(alias->name, alias->loc());
-      } else if (auto *e = dyn_cast<EnumDecl>(item)) {
-        declared(e->name, e->loc());
-      } else if (auto *cls = dyn_cast<ClassDecl>(item)) {
-        declared(cls->name, cls->loc());
-      } else if (auto *decl = dyn_cast<VarDeclStmt>(item)) {
-        for (const VarDeclarator &d : decl->decls) {
-          declared(d.name, d.loc);
-          here.topLevelNames.insert(d.name);
-        }
-      }
+      ModuleDeclarer::addDeclaredItem(here, item);
     }
   }
-
-  std::vector<std::vector<Stmt *>> types(program.modules.size());
-  for (Module *module : program.modules) {
-    this->useModule(module);
-    types[module->order] = this->typeDeclarer->declareTypes(module->file.items, false);
-    for (Stmt *type : types[module->order]) {
-      this->state.getModuleStates().rememberDeclModule(type, module);
-    }
-  }
+  std::vector<std::vector<Stmt *>> types = this->declareModuleTypes(program);
   for (Module *module : program.modules) {
     this->importBinder->resolveImports(module);
   }
@@ -92,51 +66,120 @@ void ModuleDeclarer::declareModules(SourceFile &program) {
     this->useModule(module);
     this->typeDeclarer->resolveTypes(types[module->order]);
   }
-
   std::vector<FunctionDecl *> functions;
   for (Module *module : program.modules) {
     this->useModule(module);
-    for (Stmt *item : module->file.items) {
-      if (auto *fn = dyn_cast<FunctionDecl>(item)) {
-        this->functionChecker->declareFunction(fn);
-        this->state.getModuleStates().rememberDeclModule(fn, module);
-        functions.push_back(fn);
-      }
-      auto *cls = dyn_cast<ClassDecl>(item);
-      if (!cls || !cls->type || cls->baseExpr) {
-        continue;
-      }
-      this->classDeclarer->declareMethods(cls);
-      std::vector<FunctionDecl *> methods = cls->methods;
-      methods.insert(methods.end(), cls->constructors.begin(), cls->constructors.end());
-      if (cls->init) {
-        methods.push_back(cls->init);
-      }
-      for (const ClassField &f : cls->fields) {
-        if (f.method()) {
-          methods.push_back(f.method());
-        }
-      }
-      for (FunctionDecl *fn : methods) {
-        this->state.getModuleStates().rememberDeclModule(fn, module);
-        functions.push_back(fn);
-      }
-    }
+    this->declareModuleFunctions(module, functions);
   }
   this->importBinder->bindAllImports(program.modules);
   this->state.getClassStore().markMethodsDeclared();
-  GenericStore &generics = this->state.getGenericStore();
-  for (ClassDecl *instance : generics.takeUnfilledClasses()) {
-    generics.enterFilling(instance);
-    this->genericClassInstantiator->fillInstance(instance);
-    generics.leaveFilling();
-  }
+  this->fillUnfilledInstances();
   this->lateClasses->markLateOverrides(program);
   this->classLinks->linkClasses();
   for (Module *module : program.modules) {
     this->exportsOf(module);
   }
   this->state.getReturnInference().rememberDeclaredFunctions(std::move(functions));
+}
+
+void ModuleDeclarer::addDeclaredItem(ModuleState &here, const Stmt *item) {
+  auto *decl = dyn_cast<VarDeclStmt>(item);
+  if (decl != nullptr) {
+    for (const VarDeclarator &d : decl->decls) {
+      ModuleDeclarer::addDeclared(here, d.name, d.loc);
+      here.topLevelNames.insert(d.name);
+    }
+    return;
+  }
+  std::optional<llvm::StringRef> name = ModuleDeclarer::itemName(item);
+  if (name.has_value()) {
+    ModuleDeclarer::addDeclared(here, *name, item->loc());
+  }
+}
+
+void ModuleDeclarer::addDeclared(ModuleState &here, llvm::StringRef name, llvm::SMLoc loc) {
+  if (!name.empty()) {
+    here.declared.try_emplace(name, loc);
+  }
+}
+
+std::optional<llvm::StringRef> ModuleDeclarer::itemName(const Stmt *item) {
+  auto *fn = dyn_cast<FunctionDecl>(item);
+  if (fn != nullptr) {
+    return llvm::StringRef(fn->name);
+  }
+  auto *alias = dyn_cast<TypeAliasDecl>(item);
+  if (alias != nullptr) {
+    return llvm::StringRef(alias->name);
+  }
+  auto *e = dyn_cast<EnumDecl>(item);
+  if (e != nullptr) {
+    return llvm::StringRef(e->name);
+  }
+  auto *cls = dyn_cast<ClassDecl>(item);
+  if (cls != nullptr) {
+    return llvm::StringRef(cls->name);
+  }
+
+  return std::nullopt;
+}
+
+std::vector<std::vector<Stmt *>> ModuleDeclarer::declareModuleTypes(SourceFile &program) {
+  std::vector<std::vector<Stmt *>> types(program.modules.size());
+  for (Module *module : program.modules) {
+    this->useModule(module);
+    types[module->order] = this->typeDeclarer->declareTypes(module->file.items, false);
+    for (Stmt *type : types[module->order]) {
+      this->state.getModuleStates().rememberDeclModule(type, module);
+    }
+  }
+
+  return types;
+}
+
+void ModuleDeclarer::declareModuleFunctions(Module *module,
+                                            std::vector<FunctionDecl *> &functions) {
+  for (Stmt *item : module->file.items) {
+    auto *fn = dyn_cast<FunctionDecl>(item);
+    if (fn != nullptr) {
+      this->functionChecker->declareFunction(fn);
+      this->state.getModuleStates().rememberDeclModule(fn, module);
+      functions.push_back(fn);
+    }
+    auto *cls = dyn_cast<ClassDecl>(item);
+    if (cls == nullptr || cls->type == nullptr || cls->baseExpr) {
+      continue;
+    }
+    this->classDeclarer->declareMethods(cls);
+    for (FunctionDecl *method : ModuleDeclarer::classFunctions(cls)) {
+      this->state.getModuleStates().rememberDeclModule(method, module);
+      functions.push_back(method);
+    }
+  }
+}
+
+std::vector<FunctionDecl *> ModuleDeclarer::classFunctions(const ClassDecl *cls) {
+  std::vector<FunctionDecl *> methods = cls->methods;
+  methods.insert(methods.end(), cls->constructors.begin(), cls->constructors.end());
+  if (cls->init != nullptr) {
+    methods.push_back(cls->init);
+  }
+  for (const ClassField &f : cls->fields) {
+    if (f.method()) {
+      methods.push_back(f.method());
+    }
+  }
+
+  return methods;
+}
+
+void ModuleDeclarer::fillUnfilledInstances() {
+  GenericStore &generics = this->state.getGenericStore();
+  for (ClassDecl *instance : generics.takeUnfilledClasses()) {
+    generics.enterFilling(instance);
+    this->genericClassInstantiator->fillInstance(instance);
+    generics.leaveFilling();
+  }
 }
 
 ModuleDeclarer::ResultSourceUsable ModuleDeclarer::exportSource(const ExportSource *source) {

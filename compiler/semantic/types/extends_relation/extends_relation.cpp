@@ -97,15 +97,8 @@ void ExtendsRelation::bindInfer(const BindInfer &bind, InferMatch *inference) {
 
 bool ExtendsRelation::extendsStep(const Type *type, const Type *pattern, InferMatch *inference,
                                   std::vector<ExtendsStep> &steps) {
-  if (inference) {
-    auto found = llvm::find(inference->params, pattern);
-    if (found != inference->params.end()) {
-      steps.push_back(BindInfer{size_t(found - inference->params.begin()), type});
-      if (const Type *constraint = pattern->constraint()) {
-        steps.push_back(ExtendsGoal{type, constraint});
-      }
-      return true;
-    }
+  if (inference != nullptr && ExtendsRelation::bindsInferred(type, pattern, inference, steps)) {
+    return true;
   }
   if (type == pattern || type->isError() || pattern->isError() || type->isNever()) {
     return true;
@@ -130,10 +123,32 @@ bool ExtendsRelation::extendsStep(const Type *type, const Type *pattern, InferMa
     return false;
   }
   if (pattern->isUnion()) {
-    std::vector<const Type *> saved = inference ? inference->bound : std::vector<const Type *>();
-    return ExtendsRelation::tryAlternative(ExtendsChoice{type, pattern, 0, std::move(saved)},
-                                           steps);
+    std::vector<const Type *> saved =
+        inference != nullptr ? inference->bound : std::vector<const Type *>();
+    ExtendsChoice choice{type, pattern, 0, std::move(saved)};
+    return ExtendsRelation::tryAlternative(std::move(choice), steps);
   }
+
+  return this->leafStep(type, pattern, inference, steps);
+}
+
+bool ExtendsRelation::bindsInferred(const Type *type, const Type *pattern, InferMatch *inference,
+                                    std::vector<ExtendsStep> &steps) {
+  auto found = llvm::find(inference->params, pattern);
+  if (found == inference->params.end()) {
+    return false;
+  }
+  steps.push_back(BindInfer{size_t(found - inference->params.begin()), type});
+  const Type *constraint = pattern->constraint();
+  if (constraint != nullptr) {
+    steps.push_back(ExtendsGoal{type, constraint});
+  }
+
+  return true;
+}
+
+bool ExtendsRelation::leafStep(const Type *type, const Type *pattern, InferMatch *inference,
+                               std::vector<ExtendsStep> &steps) {
   if (pattern->typeOp() == TypeOp::Template) {
     return type->isStringLiteral() &&
            this->templateTypes->matchTemplate(type->literalText(), pattern->operands(), inference);
@@ -145,10 +160,10 @@ bool ExtendsRelation::extendsStep(const Type *type, const Type *pattern, InferMa
   if (type->isPattern()) {
     return pattern == Type::string();
   }
+  if (type->isLiteral() && pattern->isLiteral()) {
+    return false;
+  }
   if (type->isLiteral()) {
-    if (pattern->isLiteral()) {
-      return false;
-    }
     steps.push_back(ExtendsGoal{type->literalBase(), pattern});
     return true;
   }

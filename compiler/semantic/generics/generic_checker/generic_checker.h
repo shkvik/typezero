@@ -29,6 +29,13 @@ private:
   static bool isBoolPass(const CastExpr *conv);
   static std::optional<bool> nodeCondition(const Expr *cond,
                                            std::vector<std::optional<bool>> &answers);
+  static std::optional<bool> isJsonCondition(const CallExpr *call);
+  static std::optional<bool> logicalCondition(const BinaryExpr *bin,
+                                              std::vector<std::optional<bool>> &answers);
+  static std::optional<bool> undefinedCondition(const BinaryExpr *bin);
+  static std::optional<bool> typeOfCondition(const BinaryExpr *bin);
+  static std::optional<bool> typeOfAnswer(const BinaryExpr *bin, const Type *type,
+                                          const StringLitExpr *text);
   static NodeChildren<const Expr *> shapeParts(const Expr *expr);
   static bool hasGaps(const ArrayLitExpr *lit);
   static const Type *nodeShape(const Expr *expr, std::vector<const Type *> &answers);

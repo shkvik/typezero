@@ -39,6 +39,15 @@ private:
   using ResultStaticFunctions =
       Result<std::vector<FunctionDecl *>, StaticCheckerStaticMethodsError>;
 
+  Expr *checkStaticFieldRead(MemberExpr *member, ClassDecl *cls, const ClassField &f,
+                             const ClassDecl *owner);
+  Expr *checkStaticMethodValue(MemberExpr *member, ClassDecl *cls, const Type *expected);
+  Expr *checkClassValueMember(MemberExpr *member, ClassDecl *cls);
+  Expr *checkLibraryStaticCall(CallExpr *call, MemberExpr *member, const ClassDecl *cls,
+                               const Type *expected);
+  Expr *checkStaticFieldCall(CallExpr *call, MemberExpr *member, ClassDecl *cls);
+  Expr *checkStaticMethodCall(CallExpr *call, MemberExpr *member,
+                              const std::vector<FunctionDecl *> &methods, const Type *expected);
   static ResultFieldIsWritable fieldWritable(const VarSymbol *var);
   ResultFieldValueIsSet fieldReady(const ClassDecl *owner, const VarSymbol *var) const;
   static ResultFieldTypeStated typeDeclared(const VarSymbol *var, llvm::StringRef name);

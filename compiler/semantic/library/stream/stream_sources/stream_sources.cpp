@@ -43,75 +43,95 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, l
     return nullptr;
   }
   call->type = Type::error();
+  if (!this->fsStreamArityFits(call, loc)) {
+    return call;
+  }
+  TypeAliasDecl *alias = this->state.getLibraryDeclarations().findLibraryType(
+      reading ? "ReadStreamOptions" : "WriteStreamOptions");
+  if (alias == nullptr) {
+    return call;
+  }
+  FsStreamArgs args;
+  args.options = Type::optional(this->typeDeclarer->resolveAlias(alias));
+  args.encodingType = Type::optional(this->prelude->builtinType("BufferEncoding"));
+  Expr *path = this->argumentChecker->checkArg(call->args[0], Type::string());
+  if (call->args.size() == 2) {
+    this->walkFsStreamOptions(call->args[1], args);
+  }
+  if (args.opts == nullptr) {
+    args.opts = this->undefinedArg(args.options, loc);
+  }
+  if (args.encoding == nullptr) {
+    args.encoding = this->undefinedArg(args.encodingType, loc);
+  }
+  if (path->type->isError() || args.opts->type->isError() || args.encoding->type->isError()) {
+    return call;
+  }
+  call->args = {path, args.opts, args.encoding};
+
+  return this->callFsStream(call, args, reading, loc);
+}
+
+bool StreamSources::fsStreamArityFits(CallExpr *call, llvm::SMLoc loc) {
   bool rejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
       rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
-  if (rejected || arity.isErr()) {
-    return call;
+
+  return !rejected && arity.isOk();
+}
+
+void StreamSources::walkFsStreamOptions(Expr *arg, FsStreamArgs &args) {
+  if (isa<ObjectLitExpr>(arg)) {
+    StreamSources::scanOptionsLiteral(cast<ObjectLitExpr>(arg), args);
+    args.opts = this->argumentChecker->checkArg(arg, args.options);
+    return;
   }
-  TypeAliasDecl *alias = this->state.getLibraryDeclarations().findLibraryType(
-      reading ? "ReadStreamOptions" : "WriteStreamOptions");
-  if (!alias) {
-    return call;
+  if (isa<StringLitExpr>(arg)) {
+    args.encoding = this->argumentChecker->checkArg(arg, args.encodingType);
+    args.text = true;
+    return;
   }
-  const Type *options = Type::optional(this->typeDeclarer->resolveAlias(alias));
-  const Type *encodingType = Type::optional(this->prelude->builtinType("BufferEncoding"));
-  auto undefinedOf = [&](const Type *type) {
-    return this->typeRelations->convert(
-        this->exprChecker->checkExpr(this->state.getAst().make<UndefinedExpr>(loc)), type);
-  };
-  Expr *path = this->argumentChecker->checkArg(call->args[0], Type::string());
-  Expr *opts = nullptr;
-  Expr *encoding = nullptr;
-  bool text = false;
-  bool fresh = false;
-  if (call->args.size() == 2) {
-    Expr *arg = call->args[1];
-    if (isa<ObjectLitExpr>(arg)) {
-      auto *lit = cast<ObjectLitExpr>(arg);
-      for (const ObjectLitExpr::Property &prop : lit->props) {
-        if (!prop.spread() && prop.name == "encoding" && !isa<UndefinedExpr>(prop.value)) {
-          text = true;
-        }
-        auto *flags =
-            prop.spread() || prop.name != "flags" ? nullptr : dyn_cast<StringLitExpr>(prop.value);
-        if (flags && flags->value.find(u'x') != std::u16string::npos) {
-          fresh = true;
-        }
-      }
-      opts = this->argumentChecker->checkArg(arg, options);
-    } else if (isa<StringLitExpr>(arg)) {
-      encoding = this->argumentChecker->checkArg(arg, encodingType);
-      text = true;
-    } else {
-      arg = this->exprChecker->checkExpr(arg);
-      if (arg->type->isSubtypeOf(Type::string())) {
-        encoding = this->typeRelations->coerce(arg, encodingType);
-        text = true;
-      } else {
-        opts = this->typeRelations->coerce(arg, options);
-      }
+  Expr *checked = this->exprChecker->checkExpr(arg);
+  if (checked->type->isSubtypeOf(Type::string())) {
+    args.encoding = this->typeRelations->coerce(checked, args.encodingType);
+    args.text = true;
+    return;
+  }
+  args.opts = this->typeRelations->coerce(checked, args.options);
+}
+
+void StreamSources::scanOptionsLiteral(const ObjectLitExpr *lit, FsStreamArgs &args) {
+  for (const ObjectLitExpr::Property &prop : lit->props) {
+    if (!prop.spread() && prop.name == "encoding" && !isa<UndefinedExpr>(prop.value)) {
+      args.text = true;
+    }
+    auto *flags =
+        prop.spread() || prop.name != "flags" ? nullptr : dyn_cast<StringLitExpr>(prop.value);
+    if (flags != nullptr && flags->value.find(u'x') != std::u16string::npos) {
+      args.fresh = true;
     }
   }
-  if (!opts) {
-    opts = undefinedOf(options);
-  }
-  if (!encoding) {
-    encoding = undefinedOf(encodingType);
-  }
-  if (path->type->isError() || opts->type->isError() || encoding->type->isError()) {
-    return call;
-  }
-  call->args = {path, opts, encoding};
+}
+
+Expr *StreamSources::undefinedArg(const Type *type, llvm::SMLoc loc) {
+  Expr *undefined = this->state.getAst().make<UndefinedExpr>(loc);
+  Expr *checked = this->exprChecker->checkExpr(undefined);
+
+  return this->typeRelations->convert(checked, type);
+}
+
+Expr *StreamSources::callFsStream(CallExpr *call, const FsStreamArgs &args, bool reading,
+                                  llvm::SMLoc loc) {
   std::vector<bool> given(3, true);
   if (!reading) {
-    return this->eventTargetChecker->callLibraryFunction(
-        call, fresh ? "streamWriteNewFile" : "streamWriteFile", {}, given, loc);
+    llvm::StringRef name = args.fresh ? "streamWriteNewFile" : "streamWriteFile";
+
+    return this->eventTargetChecker->callLibraryFunction(call, name, {}, given, loc);
   }
-  const Type *chunk = text ? Type::string() : Type::bytesType(Type::Bytes::Buffer);
+  const Type *chunk = args.text ? Type::string() : Type::bytesType(Type::Bytes::Buffer);
 
   return this->eventTargetChecker->callLibraryFunction(call, "streamReadFile", {chunk}, given, loc);
 }

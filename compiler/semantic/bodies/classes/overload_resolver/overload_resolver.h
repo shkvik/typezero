@@ -73,6 +73,11 @@ private:
   static int conversionRank(const Type *from, const Type *to);
   static void enterRank(const Type *from, const Type *to, RankRun &run);
   static std::optional<int> rankLeaf(const Type *from, const Type *to);
+  static int jsonRank(const Type *from);
+  static int iteratorRank(const Type *from, const Type *to);
+  static bool isOpaqueRanked(const Type *t);
+  static std::optional<int> objectRank(const Type *from, const Type *to);
+  static bool sameFieldObjects(const Type *from, const Type *to);
   static bool sameShapeObjects(const Type *from, const Type *to);
   static RankJoin rankJoin(const Type *from, const Type *to);
   static void joinRanks(const RankJoin &join, RankRun &run);

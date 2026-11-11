@@ -282,63 +282,123 @@ const Type *Destination::literalDestination(const VarDeclarator &d,
   DestinationScan scan(d.name, returned);
   scan.enterScope();
   bool muted = this->state.getDiagnostics().setMuted(true);
-  bool visible = true;
-  for (const VarDeclarator &next : later) {
-    if (next.init) {
-      this->destinationScanner->scanDestinations(
-          next.init, next.typeAnn ? this->typeResolver->resolveType(*next.typeAnn, false) : nullptr,
-          scan);
-    }
-    if (next.name == d.name) {
-      visible = false;
-    }
-    scan.declare(next.name,
-                 next.typeAnn ? this->typeResolver->resolveType(*next.typeAnn, false) : nullptr);
+  this->scanLaterDeclarators(later, scan);
+  bool visible = !Destination::isRedeclaredIn(later, d.name);
+  this->scanFollowing(d.name, visible, scan);
+  this->state.getDiagnostics().setMuted(muted);
+  std::vector<DestinationPlace> places = this->fittingPlaces(d.init, scan);
+  const Type *chosen = Destination::chooseDestination(places);
+  if (chosen == nullptr && !places.empty()) {
+    this->state.getTypeContext().rememberDestinationConflict(std::move(places));
   }
+
+  return chosen;
+}
+
+void Destination::scanLaterDeclarators(llvm::ArrayRef<VarDeclarator> later, DestinationScan &scan) {
+  for (const VarDeclarator &next : later) {
+    if (next.init != nullptr) {
+      const Type *wanted = this->annotatedType(next);
+      this->destinationScanner->scanDestinations(next.init, wanted, scan);
+    }
+    const Type *declared = this->annotatedType(next);
+    scan.declare(next.name, declared);
+  }
+}
+
+const Type *Destination::annotatedType(const VarDeclarator &decl) {
+  if (!decl.typeAnn.has_value()) {
+    return nullptr;
+  }
+
+  return this->typeResolver->resolveType(*decl.typeAnn, false);
+}
+
+bool Destination::isRedeclaredIn(llvm::ArrayRef<VarDeclarator> decls, llvm::StringRef name) {
+  for (const VarDeclarator &v : decls) {
+    if (v.name == name) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+void Destination::scanFollowing(llvm::StringRef name, bool visible, DestinationScan &scan) {
   std::vector<const Stmt *> following = this->state.getBlockPosition().takeFollowing();
   for (const Stmt *stmt : following) {
     if (!visible && !isa<FunctionDecl>(stmt)) {
       continue;
     }
-    if (auto *decl = dyn_cast<VarDeclStmt>(stmt);
-        decl &&
-        llvm::any_of(decl->decls, [&](const VarDeclarator &v) { return v.name == d.name; })) {
+    auto *decl = dyn_cast<VarDeclStmt>(stmt);
+    if (decl != nullptr && Destination::isRedeclaredIn(decl->decls, name)) {
       visible = false;
     }
     this->destinationScanner->scanDestinations(stmt, scan);
   }
-  this->state.getDiagnostics().setMuted(muted);
+}
 
-  std::vector<std::pair<const Type *, llvm::SMLoc>> places;
+std::vector<Destination::DestinationPlace> Destination::fittingPlaces(const Expr *init,
+                                                                      const DestinationScan &scan) {
+  std::vector<DestinationPlace> places;
   for (auto [type, loc] : scan.getFound()) {
-    if (!type->isError() && !type->isVoid() && !TypeQueries::mentionsParam(type) &&
-        this->literalFits(d.init, type)) {
+    bool fits = !type->isError() && !type->isVoid() && !TypeQueries::mentionsParam(type) &&
+                this->literalFits(init, type);
+    if (fits) {
       places.push_back({type, loc});
     }
   }
-  const Type *chosen = nullptr;
+
+  return places;
+}
+
+const Type *Destination::chooseDestination(llvm::ArrayRef<DestinationPlace> places) {
+  const Type *chosen = Destination::commonPlace(places);
+  if (chosen != nullptr || !Destination::allResults(places)) {
+    return chosen;
+  }
+
+  return Destination::unifiedResults(places);
+}
+
+const Type *Destination::commonPlace(llvm::ArrayRef<DestinationPlace> places) {
   for (auto [type, loc] : places) {
     const Type *candidate = Destination::writable(type);
-    if (llvm::all_of(places, [&](const std::pair<const Type *, llvm::SMLoc> &other) {
-          return TypeRelations::isImplicitlyConvertible(candidate, other.first);
-        })) {
-      chosen = candidate;
-      break;
+    if (Destination::acceptsAll(candidate, places)) {
+      return candidate;
     }
   }
-  if (!chosen && llvm::all_of(places, [](const std::pair<const Type *, llvm::SMLoc> &place) {
-        return place.first->isResult();
-      })) {
-    for (auto [type, loc] : places) {
-      chosen = chosen ? TypeRelations::unify(chosen, type) : type;
-      if (!chosen || chosen->isError()) {
-        chosen = nullptr;
-        break;
-      }
+
+  return nullptr;
+}
+
+bool Destination::acceptsAll(const Type *candidate, llvm::ArrayRef<DestinationPlace> places) {
+  for (const DestinationPlace &other : places) {
+    if (!TypeRelations::isImplicitlyConvertible(candidate, other.first)) {
+      return false;
     }
   }
-  if (!chosen && !places.empty()) {
-    this->state.getTypeContext().rememberDestinationConflict(std::move(places));
+
+  return true;
+}
+
+bool Destination::allResults(llvm::ArrayRef<DestinationPlace> places) {
+  for (const DestinationPlace &place : places) {
+    if (!place.first->isResult()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+const Type *Destination::unifiedResults(llvm::ArrayRef<DestinationPlace> places) {
+  const Type *chosen = nullptr;
+  for (auto [type, loc] : places) {
+    chosen = chosen != nullptr ? TypeRelations::unify(chosen, type) : type;
+    if (chosen == nullptr || chosen->isError()) {
+      return nullptr;
+    }
   }
 
   return chosen;

@@ -113,6 +113,30 @@ TypeParams::ResultDefaultPresent TypeParams::defaultGiven(const TypeParamDecl &d
 
 std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParamDecl> decls,
                                                         std::vector<const Type *> *defaults) {
+  std::vector<Type *> created = this->createTypeParams(decls);
+  std::vector<const Type *> params(created.begin(), created.end());
+  this->bindTypeParams(decls, params);
+  bool afterDefault = false;
+  for (size_t i = 0; i < decls.size(); ++i) {
+    const TypeParamDecl &decl = decls[i];
+    if (decl.constraint.has_value()) {
+      this->constrainTypeParam(created[i], decl);
+    }
+    const Type *fallback = this->resolvedDefault(decl, params[i]);
+    afterDefault |= decl.defaultType.has_value();
+    ResultDefaultPresent present = TypeParams::defaultGiven(decl, afterDefault);
+    if (present.isErr()) {
+      this->state.getDiagnostics().error(decl.loc, present.error().message);
+    }
+    if (defaults != nullptr) {
+      defaults->push_back(fallback);
+    }
+  }
+
+  return params;
+}
+
+std::vector<Type *> TypeParams::createTypeParams(llvm::ArrayRef<TypeParamDecl> decls) {
   std::vector<Type *> created;
   for (size_t i = 0; i < decls.size(); ++i) {
     for (size_t j = 0; j < i; ++j) {
@@ -127,75 +151,89 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
     }
     created.push_back(Type::param(decls[i].name));
   }
-  std::vector<const Type *> params(created.begin(), created.end());
-  this->bindTypeParams(decls, params);
 
-  bool afterDefault = false;
-  for (size_t i = 0; i < decls.size(); ++i) {
-    const TypeParamDecl &decl = decls[i];
-    if (decl.constraint) {
-      const TypeRef &ref = *decl.constraint;
-      const Type *constraint = nullptr;
-      std::vector<const Type *> alternatives;
-      bool resolved = true;
-      if (ref.kind() == TypeRefKind::ARRAY_REF && ref.args[0].kind() == TypeRefKind::NAME_REF &&
-          TypeNameTable::isName(ref.args[0].name, TypeName::UNKNOWN)) {
-        created[i]->setList();
-      } else if (ref.kind() == TypeRefKind::NAME_REF &&
-                 TypeNameTable::isName(ref.name, TypeName::UNKNOWN)) {
-      } else if (ref.kind() == TypeRefKind::UNION_REF) {
-        for (const TypeRef &member : ref.args) {
-          const Type *type = this->typeResolver->resolveType(member, false);
-          resolved &= !type->isError();
-          if (!llvm::is_contained(alternatives, type)) {
-            alternatives.push_back(type);
-          }
-        }
-        auto isUndefined = [](const Type *t) { return t->isUndefined(); };
-        if (resolved && alternatives.size() == 2 && llvm::any_of(alternatives, isUndefined)) {
-          constraint = Type::optional(alternatives[alternatives[0]->isUndefined() ? 1 : 0]);
-        }
-      } else {
-        constraint = this->typeResolver->resolveType(ref, false);
-        resolved &= !constraint->isError();
-      }
-      llvm::ArrayRef<const Type *> all = constraint ? llvm::ArrayRef<const Type *>(constraint)
-                                                    : llvm::ArrayRef<const Type *>(alternatives);
-      for (const Type *type : all) {
-        if (!resolved) {
-          break;
-        }
-        ResultConstraintKept kept = TypeParams::constraintAlone(type, decl);
-        if (kept.isErr()) {
-          this->state.getDiagnostics().error(ref.loc, kept.error().message);
-          resolved = false;
-        }
-      }
-      if (resolved) {
-        created[i]->setConstraint(constraint,
-                                  constraint ? std::vector<const Type *>() : alternatives);
-      }
+  return created;
+}
+
+void TypeParams::constrainTypeParam(Type *param, const TypeParamDecl &decl) {
+  const TypeRef &ref = *decl.constraint;
+  ParamConstraint found = this->readConstraint(ref, param);
+  if (!found.resolved || !this->constraintsAlone(found, decl, ref)) {
+    return;
+  }
+  std::vector<const Type *> alternatives =
+      found.constraint != nullptr ? std::vector<const Type *>() : found.alternatives;
+  param->setConstraint(found.constraint, alternatives);
+}
+
+TypeParams::ParamConstraint TypeParams::readConstraint(const TypeRef &ref, Type *param) {
+  ParamConstraint found;
+  bool unknownList = ref.kind() == TypeRefKind::ARRAY_REF &&
+                     ref.args[0].kind() == TypeRefKind::NAME_REF &&
+                     TypeNameTable::isName(ref.args[0].name, TypeName::UNKNOWN);
+  if (unknownList) {
+    param->setList();
+    return found;
+  }
+  if (ref.kind() == TypeRefKind::NAME_REF && TypeNameTable::isName(ref.name, TypeName::UNKNOWN)) {
+    return found;
+  }
+  if (ref.kind() == TypeRefKind::UNION_REF) {
+    return this->unionConstraint(ref);
+  }
+  found.constraint = this->typeResolver->resolveType(ref, false);
+  found.resolved = !found.constraint->isError();
+
+  return found;
+}
+
+TypeParams::ParamConstraint TypeParams::unionConstraint(const TypeRef &ref) {
+  ParamConstraint found;
+  for (const TypeRef &member : ref.args) {
+    const Type *type = this->typeResolver->resolveType(member, false);
+    found.resolved &= !type->isError();
+    if (!llvm::is_contained(found.alternatives, type)) {
+      found.alternatives.push_back(type);
     }
-    const Type *fallback = nullptr;
-    if (decl.defaultType) {
-      fallback = this->typeResolver->resolveType(*decl.defaultType, false);
-      ResultDefaultSatisfy satisfied = this->defaultFits(fallback, params[i], decl);
-      if (satisfied.isErr()) {
-        this->state.getDiagnostics().error(decl.defaultType->loc, satisfied.error().message);
-        fallback = Type::error();
-      }
-      afterDefault = true;
-    }
-    ResultDefaultPresent present = TypeParams::defaultGiven(decl, afterDefault);
-    if (present.isErr()) {
-      this->state.getDiagnostics().error(decl.loc, present.error().message);
-    }
-    if (defaults) {
-      defaults->push_back(fallback);
+  }
+  const std::vector<const Type *> &alternatives = found.alternatives;
+  bool optionalPair = found.resolved && alternatives.size() == 2 &&
+                      (alternatives[0]->isUndefined() || alternatives[1]->isUndefined());
+  if (optionalPair) {
+    found.constraint = Type::optional(alternatives[alternatives[0]->isUndefined() ? 1 : 0]);
+  }
+
+  return found;
+}
+
+bool TypeParams::constraintsAlone(const ParamConstraint &found, const TypeParamDecl &decl,
+                                  const TypeRef &ref) {
+  llvm::ArrayRef<const Type *> all = found.constraint != nullptr
+                                         ? llvm::ArrayRef<const Type *>(found.constraint)
+                                         : llvm::ArrayRef<const Type *>(found.alternatives);
+  for (const Type *type : all) {
+    ResultConstraintKept kept = TypeParams::constraintAlone(type, decl);
+    if (kept.isErr()) {
+      this->state.getDiagnostics().error(ref.loc, kept.error().message);
+      return false;
     }
   }
 
-  return params;
+  return true;
+}
+
+const Type *TypeParams::resolvedDefault(const TypeParamDecl &decl, const Type *param) {
+  if (!decl.defaultType.has_value()) {
+    return nullptr;
+  }
+  const Type *fallback = this->typeResolver->resolveType(*decl.defaultType, false);
+  ResultDefaultSatisfy satisfied = this->defaultFits(fallback, param, decl);
+  if (satisfied.isErr()) {
+    this->state.getDiagnostics().error(decl.defaultType->loc, satisfied.error().message);
+    return Type::error();
+  }
+
+  return fallback;
 }
 
 void TypeParams::bindTypeParams(llvm::ArrayRef<TypeParamDecl> decls,

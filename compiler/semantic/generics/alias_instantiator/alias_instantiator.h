@@ -36,6 +36,26 @@ private:
                                     llvm::ArrayRef<const Type *> args, size_t k);
   static std::string typeList(llvm::ArrayRef<const Type *> types);
 
+  struct AliasRun {
+    TypeAliasDecl *alias = nullptr;
+    std::vector<const Type *> args;
+    llvm::SMLoc loc;
+    std::vector<const Type *> defaults;
+    std::vector<AliasInstance *> chain;
+  };
+
+  const Type *aliasStep(AliasRun &run, unsigned calls);
+  const Type *failedAliasArgs(AliasRun &run);
+  static const Type *reusedInstance(AliasInstance &entry);
+  bool aliasDepthFits(const TypeAliasDecl *alias, const AliasInstance &entry, unsigned calls);
+  static std::string aliasDisplay(const AliasRun &run);
+  const Type *resolveAliasBody(const AliasRun &run, AliasInstance &entry,
+                               const std::string &display);
+  const Type *objectAliasType(TypeAliasDecl *alias, AliasInstance &entry,
+                              const std::string &display);
+  const Type *aliasTypeInner(const TypeAliasDecl *alias);
+  void rememberAliasType(const AliasRun &run, const Type *type, const std::string &display);
+
   SemanticState &state;
   ClassBases *classBases = nullptr;
   TypeParams *typeParams = nullptr;

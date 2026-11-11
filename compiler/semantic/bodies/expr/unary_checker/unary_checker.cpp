@@ -200,141 +200,196 @@ UnaryChecker::ResultNonNullAssertion UnaryChecker::nonNullOperand(const Type *ty
 }
 
 Expr *UnaryChecker::checkUnary(UnaryExpr *unary, const Type *expected, bool wraps) {
-  const char *op = Operators::opSpelling(unary->op);
   switch (unary->op) {
-  case UnaryOp::Neg:
-  case UnaryOp::Plus: {
-    if (auto *lit = dyn_cast<IntLitExpr>(unary->operand); lit && unary->op == UnaryOp::Neg) {
-      if (const Type *literal =
-              this->literalTypes->numberLiteralFor(expected, -double(lit->value), false);
-          literal && lit->value != 0) {
-        LiteralChecker::ResultIntLiteralTyped typed =
-            this->literalChecker->checkIntLit(lit, literal->literalBase(), true);
-        if (typed.isErr()) {
-          this->state.getDiagnostics().error(lit->loc(), typed.error().message);
-        }
-        unary->operand = typed.isOk() ? typed.value() : lit;
-        unary->type = literal;
-        return unary;
-      }
-    }
-    if (auto *lit = dyn_cast<FloatLitExpr>(unary->operand); lit && unary->op == UnaryOp::Neg) {
-      if (const Type *literal = this->literalTypes->numberLiteralFor(expected, -lit->value, true)) {
-        lit->type = Type::doubleTy();
-        unary->type = literal;
-        return unary;
-      }
-    }
-    const Type *wanted = expected ? expected->nonOptional() : nullptr;
-    if (const Type *member =
-            LiteralTypes::numberMemberOf(expected, isa<FloatLitExpr>(unary->operand))) {
-      wanted = member;
-    }
-    const Type *hint = wanted && (wanted->isNumeric() || wanted->isDecimal()) ? wanted : nullptr;
-    if (auto *lit = dyn_cast<IntLitExpr>(unary->operand)) {
-      LiteralChecker::ResultIntLiteralTyped typed =
-          this->literalChecker->checkIntLit(lit, hint, unary->op == UnaryOp::Neg);
-      if (typed.isErr()) {
-        this->state.getDiagnostics().error(lit->loc(), typed.error().message);
-      }
-      unary->operand = typed.isOk() ? typed.value() : lit;
-    } else {
-      unary->operand =
-          this->genericChecker->apparent(this->exprChecker->checkExpr(unary->operand, hint, wraps));
-    }
-    const Type *type = unary->operand->type;
-    if (type->isNever()) {
-      unary->operand = this->typeRelations->convert(unary->operand, Type::doubleTy());
-      type = Type::doubleTy();
-    }
-    ResultNumberForTheSign sign = UnaryChecker::signOperand(op, type);
-    if (sign.isErr()) {
-      this->state.getDiagnostics().error(unary->loc(), sign.error().message);
-      unary->type = Type::error();
-      break;
-    }
-    if (type->isDate() && unary->op == UnaryOp::Plus) {
-      return this->dateChecker->dateTime(unary->operand);
-    }
-    bool literal = isa<IntLitExpr>(unary->operand) || isa<FloatLitExpr>(unary->operand);
-    ResultOperandIsNumeric numeric = UnaryChecker::numberOperand(unary, op, type, literal);
-    if (numeric.isErr()) {
-      this->state.getDiagnostics().error(unary->loc(), numeric.error().message);
-      type = Type::error();
-    }
-    unary->type = type;
-    break;
+    case UnaryOp::Neg:
+    case UnaryOp::Plus:
+      return this->checkSign(unary, expected, wraps);
+    case UnaryOp::Not:
+      return this->checkNot(unary, wraps);
+    case UnaryOp::BitNot:
+      return this->checkBitNot(unary, expected, wraps);
+    case UnaryOp::TypeOf:
+      unary->operand = this->exprChecker->checkExpr(unary->operand);
+      unary->type = Type::string();
+      return this->foldedUnary(unary, wraps);
+    case UnaryOp::Void:
+      return this->checkVoid(unary, wraps);
+    case UnaryOp::Delete:
+      return this->checkDeleteValue(unary);
+    case UnaryOp::NonNull:
+      return this->checkNonNull(unary, expected);
   }
-  case UnaryOp::Not: {
-    Flow whenTrue, whenFalse;
-    this->truthChecker->checkBranching(unary, whenTrue, whenFalse);
-    this->state.getFlowState().replaceFlow(FlowChecker::join(whenTrue, whenFalse));
-    break;
+
+  return unary;
+}
+
+Expr *UnaryChecker::foldedUnary(UnaryExpr *unary, bool wraps) {
+  if (unary->type != nullptr && unary->type->isInteger()) {
+    this->constantFolder->foldUnary(unary, wraps);
   }
-  case UnaryOp::BitNot: {
-    const Type *hint =
-        expected && expected->nonOptional()->isInteger() ? expected->nonOptional() : nullptr;
-    unary->operand =
-        this->genericChecker->apparent(this->exprChecker->checkExpr(unary->operand, hint));
-    const Type *type = unary->operand->type;
-    ResultOperandIsInteger integer = UnaryChecker::bitsOperand(type);
-    if (integer.isErr()) {
-      this->state.getDiagnostics().error(unary->loc(), integer.error().message);
-      type = Type::error();
+
+  return unary;
+}
+
+Expr *UnaryChecker::checkSign(UnaryExpr *unary, const Type *expected, bool wraps) {
+  if (unary->op == UnaryOp::Neg) {
+    Expr *negative = this->checkNegativeLiteral(unary, expected);
+    if (negative != nullptr) {
+      return negative;
     }
-    unary->type = type;
-    break;
   }
-  case UnaryOp::TypeOf:
-    unary->operand = this->exprChecker->checkExpr(unary->operand);
-    unary->type = Type::string();
-    break;
-  case UnaryOp::Void: {
-    unary->operand = this->exprChecker->checkExpr(unary->operand);
-    unary->type = Type::undefinedTy();
-    const Type *dropped = unary->operand->type;
-    bool promised = dropped->isPromise();
-    if (promised) {
-      dropped = dropped->promised();
-    }
-    ResultResultNotDropped kept = this->resultKept(unary, dropped, promised);
-    if (kept.isErr()) {
-      this->state.getDiagnostics().error(unary->loc(), kept.error().message);
-    }
-    break;
+  const Type *hint = UnaryChecker::signHint(unary, expected);
+  auto *lit = dyn_cast<IntLitExpr>(unary->operand);
+  if (lit != nullptr) {
+    unary->operand = this->checkIntLiteral(lit, hint, unary->op == UnaryOp::Neg);
+  } else {
+    Expr *checked = this->exprChecker->checkExpr(unary->operand, hint, wraps);
+    unary->operand = this->genericChecker->apparent(checked);
   }
-  case UnaryOp::Delete: {
-    ResultDeleteIsPossible deleted = this->checkDelete(unary);
-    if (deleted.isErr()) {
-      this->state.getDiagnostics().error(unary->loc(), deleted.error().message);
-      return unary;
-    }
-    return deleted.value();
+  const Type *type = unary->operand->type;
+  if (type->isNever()) {
+    unary->operand = this->typeRelations->convert(unary->operand, Type::doubleTy());
+    type = Type::doubleTy();
   }
-  case UnaryOp::NonNull: {
-    unary->operand = this->exprChecker->checkExpr(unary->operand, expected);
-    const Type *type = unary->operand->type;
-    std::string text = UnaryChecker::assertedText(unary->operand).value_or("x");
-    unary->type = type->isUndefined() ? Type::error() : type->nonOptional();
-    if (type->isError()) {
-      return unary;
+  const char *op = Operators::opSpelling(unary->op);
+  ResultNumberForTheSign sign = UnaryChecker::signOperand(op, type);
+  if (sign.isErr()) {
+    this->state.getDiagnostics().error(unary->loc(), sign.error().message);
+    unary->type = Type::error();
+    return this->foldedUnary(unary, wraps);
+  }
+  if (type->isDate() && unary->op == UnaryOp::Plus) {
+    return this->dateChecker->dateTime(unary->operand);
+  }
+  bool literal = isa<IntLitExpr>(unary->operand) || isa<FloatLitExpr>(unary->operand);
+  ResultOperandIsNumeric numeric = UnaryChecker::numberOperand(unary, op, type, literal);
+  if (numeric.isErr()) {
+    this->state.getDiagnostics().error(unary->loc(), numeric.error().message);
+    type = Type::error();
+  }
+  unary->type = type;
+
+  return this->foldedUnary(unary, wraps);
+}
+
+Expr *UnaryChecker::checkNegativeLiteral(UnaryExpr *unary, const Type *expected) {
+  auto *integer = dyn_cast<IntLitExpr>(unary->operand);
+  if (integer != nullptr) {
+    const Type *literal =
+        this->literalTypes->numberLiteralFor(expected, -double(integer->value), false);
+    if (literal == nullptr || integer->value == 0) {
+      return nullptr;
     }
-    ResultNonNullAssertion asserted = UnaryChecker::nonNullOperand(type, text);
-    if (asserted.isErr()) {
-      this->state.getDiagnostics().error(unary->loc(), asserted.error().message);
-    }
-    if (asserted.isErr() &&
-        asserted.error().code != UnaryCheckerNonNullOperandErrorCode::NOT_SUPPORTED) {
-      return unary;
-    }
-    if (auto *name = dyn_cast<NameExpr>(unary->operand); name && name->var()) {
-      this->flowChecker->setDefined(name->var(), true);
-    }
+    unary->operand = this->checkIntLiteral(integer, literal->literalBase(), true);
+    unary->type = literal;
     return unary;
   }
+  auto *real = dyn_cast<FloatLitExpr>(unary->operand);
+  if (real == nullptr) {
+    return nullptr;
   }
-  if (unary->type && unary->type->isInteger()) {
-    this->constantFolder->foldUnary(unary, wraps);
+  const Type *literal = this->literalTypes->numberLiteralFor(expected, -real->value, true);
+  if (literal == nullptr) {
+    return nullptr;
+  }
+  real->type = Type::doubleTy();
+  unary->type = literal;
+
+  return unary;
+}
+
+Expr *UnaryChecker::checkIntLiteral(IntLitExpr *lit, const Type *hint, bool negative) {
+  LiteralChecker::ResultIntLiteralTyped typed =
+      this->literalChecker->checkIntLit(lit, hint, negative);
+  if (typed.isErr()) {
+    this->state.getDiagnostics().error(lit->loc(), typed.error().message);
+    return lit;
+  }
+
+  return typed.value();
+}
+
+const Type *UnaryChecker::signHint(const UnaryExpr *unary, const Type *expected) {
+  const Type *wanted = expected != nullptr ? expected->nonOptional() : nullptr;
+  const Type *member = LiteralTypes::numberMemberOf(expected, isa<FloatLitExpr>(unary->operand));
+  if (member != nullptr) {
+    wanted = member;
+  }
+  bool numeric = wanted != nullptr && (wanted->isNumeric() || wanted->isDecimal());
+
+  return numeric ? wanted : nullptr;
+}
+
+Expr *UnaryChecker::checkNot(UnaryExpr *unary, bool wraps) {
+  Flow whenTrue;
+  Flow whenFalse;
+  this->truthChecker->checkBranching(unary, whenTrue, whenFalse);
+  this->state.getFlowState().replaceFlow(FlowChecker::join(whenTrue, whenFalse));
+
+  return this->foldedUnary(unary, wraps);
+}
+
+Expr *UnaryChecker::checkBitNot(UnaryExpr *unary, const Type *expected, bool wraps) {
+  const Type *wanted = expected != nullptr ? expected->nonOptional() : nullptr;
+  const Type *hint = wanted != nullptr && wanted->isInteger() ? wanted : nullptr;
+  Expr *checked = this->exprChecker->checkExpr(unary->operand, hint);
+  unary->operand = this->genericChecker->apparent(checked);
+  const Type *type = unary->operand->type;
+  ResultOperandIsInteger integer = UnaryChecker::bitsOperand(type);
+  if (integer.isErr()) {
+    this->state.getDiagnostics().error(unary->loc(), integer.error().message);
+    type = Type::error();
+  }
+  unary->type = type;
+
+  return this->foldedUnary(unary, wraps);
+}
+
+Expr *UnaryChecker::checkVoid(UnaryExpr *unary, bool wraps) {
+  unary->operand = this->exprChecker->checkExpr(unary->operand);
+  unary->type = Type::undefinedTy();
+  const Type *dropped = unary->operand->type;
+  bool promised = dropped->isPromise();
+  if (promised) {
+    dropped = dropped->promised();
+  }
+  ResultResultNotDropped kept = this->resultKept(unary, dropped, promised);
+  if (kept.isErr()) {
+    this->state.getDiagnostics().error(unary->loc(), kept.error().message);
+  }
+
+  return this->foldedUnary(unary, wraps);
+}
+
+Expr *UnaryChecker::checkDeleteValue(UnaryExpr *unary) {
+  ResultDeleteIsPossible deleted = this->checkDelete(unary);
+  if (deleted.isErr()) {
+    this->state.getDiagnostics().error(unary->loc(), deleted.error().message);
+    return unary;
+  }
+
+  return deleted.value();
+}
+
+Expr *UnaryChecker::checkNonNull(UnaryExpr *unary, const Type *expected) {
+  unary->operand = this->exprChecker->checkExpr(unary->operand, expected);
+  const Type *type = unary->operand->type;
+  std::string text = UnaryChecker::assertedText(unary->operand).value_or("x");
+  unary->type = type->isUndefined() ? Type::error() : type->nonOptional();
+  if (type->isError()) {
+    return unary;
+  }
+  ResultNonNullAssertion asserted = UnaryChecker::nonNullOperand(type, text);
+  if (asserted.isErr()) {
+    this->state.getDiagnostics().error(unary->loc(), asserted.error().message);
+  }
+  if (asserted.isErr() &&
+      asserted.error().code != UnaryCheckerNonNullOperandErrorCode::NOT_SUPPORTED) {
+    return unary;
+  }
+  auto *name = dyn_cast<NameExpr>(unary->operand);
+  if (name != nullptr && name->var() != nullptr) {
+    this->flowChecker->setDefined(name->var(), true);
   }
 
   return unary;
@@ -362,69 +417,93 @@ UnaryChecker::ResultDeleteIsPossible UnaryChecker::fieldDeleted(const Expr *obje
 UnaryChecker::ResultDeleteIsPossible UnaryChecker::checkDelete(UnaryExpr *unary) {
   unary->type = Type::boolTy();
   auto *index = dyn_cast<IndexExpr>(unary->operand);
-  if (auto *member = dyn_cast<MemberExpr>(unary->operand); member && !member->optional) {
-    member->object = this->exprChecker->checkExpr(member->object);
-    const Type *object = member->object->type;
-    if (object->isDict()) {
-      DictChecker::ResultRecordKeyDeleted deleted =
-          this->dictChecker->checkDictDelete(unary, member->object, nullptr, member->name);
-      if (deleted.isErr()) {
-        return err(UnaryCheckerCheckDeleteError{
-            .code = UnaryCheckerCheckDeleteErrorCode::DICT_DELETE,
-            .message = deleted.error().message,
-        });
-      }
-      return ok(deleted.value());
-    }
-    if (object->isError()) {
-      return ok(unary);
-    }
-    const Field *field =
-        object->nonOptional()->isObject() ? object->nonOptional()->field(member->name) : nullptr;
-    if (field) {
-      return UnaryChecker::fieldDeleted(member->object, field);
-    }
-    std::string message = ErrorTextDelete::notField();
+  auto *member = dyn_cast<MemberExpr>(unary->operand);
+  if (member != nullptr && !member->optional) {
+    return this->checkMemberDelete(unary, member);
+  }
+  if (index == nullptr) {
+    return this->checkOtherDelete(unary);
+  }
 
+  return this->checkIndexDelete(unary, index);
+}
+
+UnaryChecker::ResultDeleteIsPossible
+UnaryChecker::dictDeleted(Result<Expr *, DictCheckerCheckDictDeleteError> deleted) {
+  if (deleted.isErr()) {
     return err(UnaryCheckerCheckDeleteError{
-        .code = UnaryCheckerCheckDeleteErrorCode::NOT_A_FIELD,
-        .message = message,
+        .code = UnaryCheckerCheckDeleteErrorCode::DICT_DELETE,
+        .message = deleted.error().message,
     });
   }
-  if (!index) {
-    unary->operand = this->exprChecker->checkExpr(unary->operand);
-    const Type *type = unary->operand->type;
-    auto *member = dyn_cast<MemberExpr>(unary->operand);
-    if (type->isError()) {
-      return ok(unary);
-    }
-    const Type *object = member ? member->object->type->nonOptional() : nullptr;
-    if (object && object->isObject() && object->field(member->name)) {
-      return UnaryChecker::fieldDeleted(member->object, object->field(member->name));
-    }
-    std::string message = ErrorTextDelete::notField();
 
-    return err(UnaryCheckerCheckDeleteError{
-        .code = UnaryCheckerCheckDeleteErrorCode::NOT_A_FIELD,
-        .message = message,
-    });
+  return ok(deleted.value());
+}
+
+UnaryChecker::ResultDeleteIsPossible UnaryChecker::checkMemberDelete(UnaryExpr *unary,
+                                                                     MemberExpr *member) {
+  member->object = this->exprChecker->checkExpr(member->object);
+  const Type *object = member->object->type;
+  if (object->isDict()) {
+    DictChecker::ResultRecordKeyDeleted deleted =
+        this->dictChecker->checkDictDelete(unary, member->object, nullptr, member->name);
+    return UnaryChecker::dictDeleted(deleted);
   }
+  if (object->isError()) {
+    return ok(unary);
+  }
+  const Type *own = object->nonOptional();
+  const Field *field = own->isObject() ? own->field(member->name) : nullptr;
+  if (field != nullptr) {
+    return UnaryChecker::fieldDeleted(member->object, field);
+  }
+  std::string message = ErrorTextDelete::notField();
+
+  return err(UnaryCheckerCheckDeleteError{
+      .code = UnaryCheckerCheckDeleteErrorCode::NOT_A_FIELD,
+      .message = message,
+  });
+}
+
+UnaryChecker::ResultDeleteIsPossible UnaryChecker::checkOtherDelete(UnaryExpr *unary) {
+  unary->operand = this->exprChecker->checkExpr(unary->operand);
+  const Type *type = unary->operand->type;
+  auto *member = dyn_cast<MemberExpr>(unary->operand);
+  if (type->isError()) {
+    return ok(unary);
+  }
+  const Type *object = member != nullptr ? member->object->type->nonOptional() : nullptr;
+  if (object != nullptr && object->isObject() && object->field(member->name) != nullptr) {
+    return UnaryChecker::fieldDeleted(member->object, object->field(member->name));
+  }
+  std::string message = ErrorTextDelete::notField();
+
+  return err(UnaryCheckerCheckDeleteError{
+      .code = UnaryCheckerCheckDeleteErrorCode::NOT_A_FIELD,
+      .message = message,
+  });
+}
+
+UnaryChecker::ResultDeleteIsPossible UnaryChecker::checkIndexDelete(UnaryExpr *unary,
+                                                                    IndexExpr *index) {
   std::string array = UnaryChecker::simpleText(index->object).value_or("a");
   std::string position = UnaryChecker::simpleText(index->index).value_or("i");
   index->object = this->exprChecker->checkExpr(index->object);
   if (index->object->type->isDict()) {
     DictChecker::ResultRecordKeyDeleted deleted =
         this->dictChecker->checkDictDelete(unary, index->object, index->index, {});
-    if (deleted.isErr()) {
-      return err(UnaryCheckerCheckDeleteError{
-          .code = UnaryCheckerCheckDeleteErrorCode::DICT_DELETE,
-          .message = deleted.error().message,
-      });
-    }
-    return ok(deleted.value());
+    return UnaryChecker::dictDeleted(deleted);
   }
   index->index = this->exprChecker->checkExpr(index->index);
   index->type = Type::error();
+
+  return this->checkKeyDelete(unary, index, array, position);
+}
+
+UnaryChecker::ResultDeleteIsPossible UnaryChecker::checkKeyDelete(UnaryExpr *unary,
+                                                                  const IndexExpr *index,
+                                                                  const std::string &array,
+                                                                  const std::string &position) {
   const Type *type = index->object->type->nonOptional();
   if (type->isArray()) {
     std::string message = ErrorTextDelete::hole(array, position);
@@ -452,7 +531,7 @@ UnaryChecker::ResultDeleteIsPossible UnaryChecker::checkDelete(UnaryExpr *unary)
   }
   std::optional<std::string> key =
       type->isObject() ? this->keyedFieldChecker->constantKey(index->index) : std::nullopt;
-  if (key && type->field(*key)) {
+  if (key.has_value() && type->field(*key) != nullptr) {
     return UnaryChecker::fieldDeleted(index->object, type->field(*key));
   }
   if (type->isObject()) {
@@ -487,123 +566,17 @@ UnaryChecker::ResultInOperatorSuited UnaryChecker::checkIn(BinaryExpr *bin) {
   if (l->isError() || r->isError()) {
     return ok(bin);
   }
-  if (r->nonOptional()->isDict()) {
-    DictChecker::ResultRecordKeyChecked has = this->dictChecker->checkDictIn(bin);
-    if (has.isOk()) {
-      return ok(has.value());
-    }
-    UnaryCheckerCheckInErrorCode code = UnaryCheckerCheckInErrorCode::DICT_NOT_RECORD;
-    switch (has.error().code) {
-      case DictCheckerCheckDictInErrorCode::MAY_BE_UNDEFINED:
-        code = UnaryCheckerCheckInErrorCode::DICT_UNDEFINED;
-        break;
-      case DictCheckerCheckDictInErrorCode::NUMBER_KEY:
-        code = UnaryCheckerCheckInErrorCode::DICT_NUMBER_KEY;
-        break;
-      case DictCheckerCheckDictInErrorCode::NOT_A_RECORD:
-        code = UnaryCheckerCheckInErrorCode::DICT_NOT_RECORD;
-        break;
-    }
-
-    return err(UnaryCheckerCheckInError{
-        .code = code,
-        .message = has.error().message,
-    });
+  const Type *right = r->nonOptional();
+  if (right->isDict()) {
+    return this->checkDictKeyIn(bin);
   }
-  if (const Type *u = r->nonOptional(); u->isUnion()) {
-    if (r->isOptional()) {
-      std::string message = ErrorTextIn::undefined();
-
-      return err(UnaryCheckerCheckInError{
-          .code = UnaryCheckerCheckInErrorCode::UNION_UNDEFINED,
-          .message = message,
-      });
-    }
-    auto *text = dyn_cast<StringLitExpr>(bin->lhs);
-    std::optional<std::string> name =
-        text ? this->keyedFieldChecker->constantKey(bin->lhs) : std::nullopt;
-    const Type *objects = u->slotPart(UnionSlot::Object);
-    if (!name || !objects) {
-      std::string message = ErrorTextIn::byLiteral();
-
-      return err(UnaryCheckerCheckInError{
-          .code = UnaryCheckerCheckInErrorCode::UNION_NO_KEY,
-          .message = message,
-      });
-    }
-    const Type *holder = objects;
-    size_t with = 0;
-    size_t total = 0;
-    for (const Type *m :
-         objects->isUnion() ? objects->members() : llvm::ArrayRef<const Type *>(holder)) {
-      ++total;
-      const Field *f = m->field(*name);
-      with += f != nullptr;
-      if (f && f->type->isOptional()) {
-        std::string field = ObjectChecker::fieldText(bin->rhs, *name);
-        std::string message = ErrorTextIn::maybeUndef(*name, m->name(), field);
-
-        return err(UnaryCheckerCheckInError{
-            .code = UnaryCheckerCheckInErrorCode::OPTIONAL_FIELD,
-            .message = message,
-        });
-      }
-    }
-    if (with == 0 || (with == total && objects == u)) {
-      std::string message = ErrorTextIn::always(with != 0, u->name(), *name);
-
-      return err(UnaryCheckerCheckInError{
-          .code = UnaryCheckerCheckInErrorCode::ALWAYS_SAME,
-          .message = message,
-      });
-    }
-    return ok(bin);
+  if (right->isUnion()) {
+    return this->checkUnionIn(bin, r);
   }
-  if (const Type *object = r->nonOptional(); object->isObject()) {
-    std::optional<std::string> name =
-        object->isTuple() ? std::nullopt : this->keyedFieldChecker->constantKey(bin->lhs);
-    const Field *field = name ? object->field(*name) : nullptr;
-    if (object->isTuple()) {
-      std::string message = ErrorTextIn::tuple();
-
-      return err(UnaryCheckerCheckInError{
-          .code = UnaryCheckerCheckInErrorCode::TUPLE_IN,
-          .message = message,
-      });
-    }
-    if (field && field->type->isOptional()) {
-      std::string text = ObjectChecker::fieldText(bin->rhs, *name);
-      std::string message = ErrorTextIn::objMaybe(text);
-
-      return err(UnaryCheckerCheckInError{
-          .code = UnaryCheckerCheckInErrorCode::OBJECT_OPTIONAL,
-          .message = message,
-      });
-    }
-    if (field) {
-      std::string message = ErrorTextIn::objTrue();
-
-      return err(UnaryCheckerCheckInError{
-          .code = UnaryCheckerCheckInErrorCode::OBJECT_ALWAYS_TRUE,
-          .message = message,
-      });
-    }
-    if (name) {
-      std::string message = ErrorTextIn::objFalse(object->name(), *name);
-
-      return err(UnaryCheckerCheckInError{
-          .code = UnaryCheckerCheckInErrorCode::OBJECT_ALWAYS_FALSE,
-          .message = message,
-      });
-    }
-    std::string message = ErrorTextIn::objPlain();
-
-    return err(UnaryCheckerCheckInError{
-        .code = UnaryCheckerCheckInErrorCode::OBJECT_IN,
-        .message = message,
-    });
+  if (right->isObject()) {
+    return this->checkObjectIn(bin, right);
   }
-  if (!r->nonOptional()->isArray()) {
+  if (!right->isArray()) {
     std::string message = BinaryChecker::operandTypesText("in", l, r);
 
     return err(UnaryCheckerCheckInError{
@@ -611,7 +584,7 @@ UnaryChecker::ResultInOperatorSuited UnaryChecker::checkIn(BinaryExpr *bin) {
         .message = message,
     });
   }
-  std::string i = l->isInteger() && key ? *key : "i";
+  std::string i = l->isInteger() && key.has_value() ? *key : "i";
   std::string check =
       literalKey ? i + " < " + array + ".length" : i + " >= 0 && " + i + " < " + array + ".length";
   std::string message = ErrorTextIn::array(check);
@@ -622,4 +595,132 @@ UnaryChecker::ResultInOperatorSuited UnaryChecker::checkIn(BinaryExpr *bin) {
   });
 }
 
+UnaryChecker::ResultInOperatorSuited UnaryChecker::checkDictKeyIn(BinaryExpr *bin) {
+  DictChecker::ResultRecordKeyChecked has = this->dictChecker->checkDictIn(bin);
+  if (has.isOk()) {
+    return ok(has.value());
+  }
+  UnaryCheckerCheckInErrorCode code = UnaryChecker::dictInCode(has.error().code);
+
+  return err(UnaryCheckerCheckInError{
+      .code = code,
+      .message = has.error().message,
+  });
+}
+
+UnaryCheckerCheckInErrorCode UnaryChecker::dictInCode(DictCheckerCheckDictInErrorCode code) {
+  switch (code) {
+    case DictCheckerCheckDictInErrorCode::MAY_BE_UNDEFINED:
+      return UnaryCheckerCheckInErrorCode::DICT_UNDEFINED;
+    case DictCheckerCheckDictInErrorCode::NUMBER_KEY:
+      return UnaryCheckerCheckInErrorCode::DICT_NUMBER_KEY;
+    case DictCheckerCheckDictInErrorCode::NOT_A_RECORD:
+      return UnaryCheckerCheckInErrorCode::DICT_NOT_RECORD;
+  }
+
+  return UnaryCheckerCheckInErrorCode::DICT_NOT_RECORD;
+}
+
+UnaryChecker::ResultInOperatorSuited UnaryChecker::checkUnionIn(BinaryExpr *bin, const Type *r) {
+  if (r->isOptional()) {
+    std::string message = ErrorTextIn::undefined();
+
+    return err(UnaryCheckerCheckInError{
+        .code = UnaryCheckerCheckInErrorCode::UNION_UNDEFINED,
+        .message = message,
+    });
+  }
+  const Type *u = r->nonOptional();
+  auto *text = dyn_cast<StringLitExpr>(bin->lhs);
+  std::optional<std::string> name =
+      text != nullptr ? this->keyedFieldChecker->constantKey(bin->lhs) : std::nullopt;
+  const Type *objects = u->slotPart(UnionSlot::Object);
+  if (!name.has_value() || objects == nullptr) {
+    std::string message = ErrorTextIn::byLiteral();
+
+    return err(UnaryCheckerCheckInError{
+        .code = UnaryCheckerCheckInErrorCode::UNION_NO_KEY,
+        .message = message,
+    });
+  }
+
+  return UnaryChecker::unionKeyIn(bin, u, objects, *name);
+}
+
+UnaryChecker::ResultInOperatorSuited UnaryChecker::unionKeyIn(BinaryExpr *bin, const Type *u,
+                                                              const Type *objects,
+                                                              const std::string &name) {
+  const Type *holder = objects;
+  llvm::ArrayRef<const Type *> members =
+      objects->isUnion() ? objects->members() : llvm::ArrayRef<const Type *>(holder);
+  size_t with = 0;
+  for (const Type *m : members) {
+    const Field *f = m->field(name);
+    with += f != nullptr;
+    if (f != nullptr && f->type->isOptional()) {
+      std::string field = ObjectChecker::fieldText(bin->rhs, name);
+      std::string message = ErrorTextIn::maybeUndef(name, m->name(), field);
+
+      return err(UnaryCheckerCheckInError{
+          .code = UnaryCheckerCheckInErrorCode::OPTIONAL_FIELD,
+          .message = message,
+      });
+    }
+  }
+  if (with == 0 || (with == members.size() && objects == u)) {
+    std::string message = ErrorTextIn::always(with != 0, u->name(), name);
+
+    return err(UnaryCheckerCheckInError{
+        .code = UnaryCheckerCheckInErrorCode::ALWAYS_SAME,
+        .message = message,
+    });
+  }
+
+  return ok(bin);
+}
+
+UnaryChecker::ResultInOperatorSuited UnaryChecker::checkObjectIn(BinaryExpr *bin,
+                                                                 const Type *object) {
+  if (object->isTuple()) {
+    std::string message = ErrorTextIn::tuple();
+
+    return err(UnaryCheckerCheckInError{
+        .code = UnaryCheckerCheckInErrorCode::TUPLE_IN,
+        .message = message,
+    });
+  }
+  std::optional<std::string> name = this->keyedFieldChecker->constantKey(bin->lhs);
+  const Field *field = name.has_value() ? object->field(*name) : nullptr;
+  if (field != nullptr && field->type->isOptional()) {
+    std::string text = ObjectChecker::fieldText(bin->rhs, *name);
+    std::string message = ErrorTextIn::objMaybe(text);
+
+    return err(UnaryCheckerCheckInError{
+        .code = UnaryCheckerCheckInErrorCode::OBJECT_OPTIONAL,
+        .message = message,
+    });
+  }
+  if (field != nullptr) {
+    std::string message = ErrorTextIn::objTrue();
+
+    return err(UnaryCheckerCheckInError{
+        .code = UnaryCheckerCheckInErrorCode::OBJECT_ALWAYS_TRUE,
+        .message = message,
+    });
+  }
+  if (name.has_value()) {
+    std::string message = ErrorTextIn::objFalse(object->name(), *name);
+
+    return err(UnaryCheckerCheckInError{
+        .code = UnaryCheckerCheckInErrorCode::OBJECT_ALWAYS_FALSE,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextIn::objPlain();
+
+  return err(UnaryCheckerCheckInError{
+      .code = UnaryCheckerCheckInErrorCode::OBJECT_IN,
+      .message = message,
+  });
+}
 }

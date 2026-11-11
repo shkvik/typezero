@@ -59,6 +59,28 @@ private:
   static ResultDecoratorAllowed paramDecorators(const FunctionDecl *fn, const Param &param);
   static ResultDefaultUsesPrior defaultOrder(const FunctionDecl *fn, size_t i,
                                              const llvm::StringSet<> &names);
+  bool isGenericDeclaration(const FunctionDecl *fn);
+  void declareFunctionTypeParams(FunctionDecl *fn, FuncSymbol *sym, VarSymbol *var);
+  void padHookParams(FunctionDecl *fn, const std::optional<std::vector<const Type *>> &hook);
+  static bool hasRestParam(const FunctionDecl *fn);
+  void declareFunctionParam(FunctionDecl *fn, FuncSymbol *sym, size_t i, const Type *hooked,
+                            bool &afterOptional);
+  const Type *declaredParamType(FunctionDecl *fn, FuncSymbol *sym, const Param &param,
+                                const Type *hooked);
+  const Type *writtenParamType(FunctionDecl *fn, FuncSymbol *sym, const Param &param,
+                               const Type *hooked);
+  void walkThisParam(const FunctionDecl *fn, FuncSymbol *sym, const Param &param);
+  void declareFunctionReturn(FunctionDecl *fn, FuncSymbol *sym);
+  void declareFunctionName(FunctionDecl *fn, FuncSymbol *sym, VarSymbol *var);
+  void bindBodyTypeParams(FunctionDecl *fn);
+  bool entersInitializer(FunctionDecl *fn);
+  static bool isPresetField(const FunctionDecl *fn, const ClassField &f, bool derived);
+  void walkRootSupers(FunctionDecl *fn);
+  static CallExpr *superCallOf(Stmt *stmt);
+  void declareBodyParam(FunctionDecl *fn, size_t i);
+  bool defaultValueChecked(FunctionDecl *fn, size_t i, DefaultedParam *defaulted, const Type *type);
+  void walkBodyStatements(FunctionDecl *fn);
+  static const Type *bodyReturnType(const FunctionDecl *fn);
 
   SemanticState &state;
   Scopes *scopes = nullptr;

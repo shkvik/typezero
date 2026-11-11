@@ -96,6 +96,11 @@ public:
 private:
   static ConversionStep taskStep(const ConversionTask &task);
   static ConversionStep conversionStep(const Type *from, const Type *to);
+  static std::optional<ConversionStep> targetStep(const Type *from, const Type *to);
+  static ConversionStep anyObjectStep(const Type *from, const Type *to);
+  static ConversionStep classRefStep(const Type *from, const Type *to);
+  static std::optional<ConversionStep> sourceStep(const Type *from, const Type *to);
+  static ConversionStep unionSourceStep(const Type *from, const Type *to);
   static ConversionStep stepHolds();
   static ConversionStep stepDecided(bool possible);
   static ConversionStep stepNeeds(std::vector<ConversionGoal> goals);
@@ -129,6 +134,36 @@ private:
   static const Type *innerObject(const Type *type, const Type *other);
   ResultTypeAssignable assignable(const Expr *expr, const Type *to, llvm::StringRef what) const;
   const Type *otherPlace(const Expr *expr, const Type *to) const;
+  Expr *adaptedValue(Expr *expr, const Type *to);
+  Expr *iteratorValue(Expr *expr, const Type *to);
+  Expr *asyncIteratorValue(Expr *expr, const Type *to);
+  Expr *adaptedFunction(Expr *expr, const Type *function, const Type *to);
+  static std::vector<std::pair<int64_t, int64_t>> targetIntervals(const Type *to);
+  bool provesSomeInterval(const Expr *expr, llvm::ArrayRef<std::pair<int64_t, int64_t>> intervals);
+  void walkAssignable(const Expr *expr, const Type *to, llvm::StringRef what);
+
+  struct AssignAttempt {
+    const Expr *expr = nullptr;
+    const Type *from = nullptr;
+    const Type *to = nullptr;
+    const Type *fromObject = nullptr;
+    const Type *toObject = nullptr;
+  };
+
+  static bool isFormData(const Type *type);
+  static bool isObjectType(const Type *type);
+  static bool isWebStream(const Type *type);
+  static bool isRequestInit(const AssignAttempt &attempt);
+  static bool isStreamIntoBody(const AssignAttempt &attempt);
+  static std::string unionText(const Type *toObject);
+  static std::string genericClassText(const ClassDecl *generic);
+  static AssignAttempt describeAttempt(const Expr *expr, const Type *to);
+  static std::string mismatchPrefix(const AssignAttempt &attempt, llvm::StringRef what);
+  static bool allHaveLiteralField(llvm::ArrayRef<const Type *> members, llvm::StringRef name);
+  std::string objectMismatchText(const AssignAttempt &attempt) const;
+  TypeRelationsAssignableErrorCode mismatchOf(const AssignAttempt &attempt) const;
+  std::string mismatchReason(const AssignAttempt &attempt,
+                             TypeRelationsAssignableErrorCode code) const;
   llvm::SMLoc placeLoc(const Expr *expr, const Type *place) const;
 
   SemanticState &state;

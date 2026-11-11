@@ -23,6 +23,15 @@ struct BufferStaticCheckerConcatSourcesError {
   std::string message;
 };
 
+enum class BufferStaticCheckerMapResultFitsErrorCode {
+  RESULT_MAY_NOT_FIT,
+};
+
+struct BufferStaticCheckerMapResultFitsError {
+  BufferStaticCheckerMapResultFitsErrorCode code;
+  std::string message;
+};
+
 class ErrorTextBytesStatic {
 public:
   static std::string missing(llvm::StringRef object, llvm::StringRef name);

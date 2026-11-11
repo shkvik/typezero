@@ -61,12 +61,46 @@ private:
                                            const ClassDecl *owner, const ClassDecl *cls);
   ResultParentClassFound baseClass(const ClassDecl *cls, const TypeRef &ref, bool named,
                                    bool instance, ClassDecl *parent, const Stmt *found) const;
+  ResultParentClassFound usableParent(const ClassDecl *cls, ClassDecl *parent) const;
+  static ResultParentClassFound missingParent(const ClassDecl *cls, const TypeRef &ref,
+                                              const Stmt *found);
   static ResultUnusedMethodName newOverload(const TypeAliasDecl *alias, const Overload &overload,
                                             llvm::ArrayRef<Field> fields,
                                             llvm::ArrayRef<Overload> overloads);
   static ResultFieldTypesAreOne sameFieldType(const TypeAliasDecl *alias, const Field &known,
                                               const Field &field, llvm::StringRef origin,
                                               llvm::StringRef baseName);
+
+  struct ParentLookup {
+    ClassDecl *parent;
+    Stmt *found;
+    bool instance;
+  };
+
+  void resolveParentClass(ClassDecl *cls, const TypeRef &ref);
+  ParentLookup parentOf(ClassDecl *cls, const TypeRef &ref, Stmt *found);
+  ParentLookup emitterParent(ClassDecl *cls, const TypeRef &ref, ClassDecl *emitter, Stmt *found);
+  void linkParent(ClassDecl *cls, ClassDecl *parent);
+  void addImplemented(ClassDecl *cls, const TypeRef &ref);
+  void walkRedeclaredField(ClassDecl *cls, ClassField &f);
+
+  struct InterfaceShape {
+    std::vector<Field> fields;
+    std::vector<std::string> origins;
+  };
+
+  const Type *interfaceBaseType(const TypeAliasDecl *alias, const TypeRef &ref,
+                                llvm::ArrayRef<const Type *> bases);
+  void mergeBaseOverloads(const TypeAliasDecl *alias, const TypeRef &ref, const Type *base,
+                          std::vector<Overload> &overloads);
+  static const Overload *overloadNamed(const std::vector<Overload> &overloads,
+                                       llvm::StringRef name);
+  static size_t fieldIndex(const std::vector<Field> &fields, llvm::StringRef name);
+  void mergeBaseFields(const TypeAliasDecl *alias, const TypeRef &ref, const Type *base,
+                       InterfaceShape &shape);
+  void addOwnField(const TypeAliasDecl *alias, const Field &f, llvm::ArrayRef<Overload> overloads,
+                   InterfaceShape &shape);
+  static llvm::SMLoc ownFieldLoc(const TypeAliasDecl *alias, llvm::StringRef name);
 
   SemanticState &state;
   FsDeclarer *fsDeclarer = nullptr;

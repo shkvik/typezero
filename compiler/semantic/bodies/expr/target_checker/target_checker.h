@@ -49,6 +49,15 @@ private:
   static ResultVariableMutable variableMutable(const NameExpr *name, const VarSymbol *var);
   static ResultFieldIsWritable memberWritable(const Type *type, const MemberExpr *member,
                                               bool compound);
+  static std::string wrongTargetMessage(const Expr *target);
+  const Type *dictTargetType(Expr *target, bool compound);
+  const Type *indexTargetType(Expr *&target, IndexExpr *index, bool compound);
+  std::optional<const Type *> genericIndexType(IndexExpr *index);
+  const Type *keyedTargetType(Expr *&target, IndexExpr *index, bool compound);
+  const Type *arrayTargetType(IndexExpr *index);
+  const Type *memberTargetType(Expr *&target, MemberExpr *member, bool compound);
+  const Type *unionTargetType(MemberExpr *member, const Type *type, bool compound);
+  const Type *plainMemberTargetType(MemberExpr *member, const Type *type, bool compound);
 
   SemanticState &state;
   Scopes *scopes = nullptr;

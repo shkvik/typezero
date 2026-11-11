@@ -34,6 +34,22 @@ private:
   static ResultTupleRestCount tupleRest(const ArrayLitExpr *rest, const Type *listRest,
                                         size_t fixed, size_t count);
 
+  struct ArgumentShape {
+    llvm::ArrayRef<const Type *> params;
+    size_t fixed;
+    llvm::SMLoc loc;
+    const std::vector<bool> *checked;
+  };
+
+  static bool isChecked(const ArgumentShape &shape, size_t i);
+  bool rejectsSpreadBefore(CallExpr *call, size_t limit);
+  Expr *checkListParamArguments(CallExpr *call, const ArgumentShape &shape, unsigned least);
+  Expr *packRestArgs(CallExpr *call, const ArgumentShape &shape);
+  Expr *checkSpreadRest(CallExpr *call, const ArgumentShape &shape, const Type *listRest);
+  Expr *packRestElements(CallExpr *call, const ArgumentShape &shape, const Type *listRest);
+  Expr *checkedRestElement(CallExpr *call, size_t i, const ArgumentShape &shape,
+                           const Type *listRest);
+
   SemanticState &state;
   CallChecker *callChecker = nullptr;
   ExprChecker *exprChecker = nullptr;

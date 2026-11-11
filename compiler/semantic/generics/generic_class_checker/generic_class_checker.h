@@ -48,6 +48,19 @@ private:
   static std::string typeNames(llvm::ArrayRef<const Type *> types);
   static std::string bindings(llvm::ArrayRef<const Type *> params,
                               llvm::ArrayRef<const Type *> args);
+  void walkArgsLoosely(std::vector<Expr *> &args);
+  Expr *checkLibraryGenericNew(NewExpr *expr, ClassDecl *generic, const Type *expected);
+  Expr *checkExplicitGenericNew(NewExpr *expr, ClassDecl *generic, const Type *expected);
+  ClassDecl *instantiatedClass(const NewExpr *expr, ClassDecl *generic,
+                               std::vector<const Type *> args);
+  std::optional<FunctionDecl *> pickedConstructor(const NewExpr *expr, const ClassDecl *generic,
+                                                  llvm::ArrayRef<FunctionDecl *> ctors);
+  FuncSymbol *constructorFunction(ClassDecl *generic, FunctionDecl *ctor);
+  Expr *finishGenericNew(NewExpr *expr, ClassDecl *inst, CallExpr *call, FunctionDecl *ctor,
+                         llvm::ArrayRef<FunctionDecl *> ctors);
+  void linkInstanceConstructor(const NewExpr *expr, ClassDecl *inst, CallExpr *call,
+                               FunctionDecl *ctor, llvm::ArrayRef<FunctionDecl *> ctors);
+  static bool hasInitializer(const ClassDecl *inst);
 
   SemanticState &state;
   ChunkTypes *chunkTypes = nullptr;

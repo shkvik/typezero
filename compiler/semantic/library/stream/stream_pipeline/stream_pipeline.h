@@ -41,6 +41,62 @@ private:
   static ResultReadableEnd readableEnd(const StreamChunks &chunks, const Type *type);
   static bool inModule(const std::string &place, llvm::StringRef module);
 
+  struct StageShape {
+    llvm::SMLoc loc;
+    const Type *stageType;
+    bool first;
+    bool last;
+  };
+
+  Expr *checkStageValue(Expr *arg, const Type *chunk, bool first);
+  Expr *stageCall(const StageShape &stage, llvm::StringRef fn, std::vector<const Type *> bound,
+                  Expr *value);
+  Expr *asPipelineStage(const StageShape &stage, Expr *made);
+  Expr *streamClassStage(Expr *arg, const Type *&chunk, const StageShape &stage, ClassDecl *cls);
+  Expr *functionStage(Expr *arg, const Type *&chunk, const StageShape &stage,
+                      const Type **sinkValue);
+  Expr *sourceFunctionStage(Expr *arg, const Type *&chunk, const StageShape &stage);
+  Expr *sinkFunctionStage(Expr *arg, const Type *chunk, const StageShape &stage, const Type *fn,
+                          const Type **sinkValue);
+  Expr *iterableSourceStage(Expr *arg, const Type *&chunk, const StageShape &stage);
+
+  struct StreamCall {
+    CallExpr *call;
+    llvm::SMLoc loc;
+    ClassDecl *streamClass;
+    const Type *streamType;
+    const Type *callback;
+    bool promises;
+  };
+
+  struct PipelineArgs {
+    size_t count;
+    Expr *callback;
+    Expr *options;
+  };
+
+  struct PipelineStages {
+    std::vector<Expr *> stages;
+    bool lastIsStream;
+    Expr *lastStream;
+    const Type *sinkValue;
+  };
+
+  void walkArgsLoosely(CallExpr *call, size_t from);
+  Expr *undefinedOf(llvm::SMLoc loc, const Type *type);
+  Expr *checkFinished(const StreamCall &stream);
+  Expr *checkCompose(const StreamCall &stream);
+  std::optional<StreamChunks> composedPart(const StreamCall &stream, size_t i, const Type *chunk,
+                                           std::vector<Expr *> &streams);
+  Expr *checkPipeline(const StreamCall &stream);
+  std::optional<PipelineArgs> pipelineArgs(const StreamCall &stream);
+  std::optional<PipelineStages> pipelineStages(const StreamCall &stream, size_t count);
+  ArrayLitExpr *stageList(const StreamCall &stream, PipelineStages &stages);
+  Expr *finishCallbackPipeline(const StreamCall &stream, ArrayLitExpr *list, Expr *lastStream,
+                               Expr *callbackArg);
+  Expr *finishPromisePipeline(const StreamCall &stream, ArrayLitExpr *list, Expr *optionsArg,
+                              const Type *sinkValue);
+
   SemanticState &state;
   ChunkTypes *chunkTypes = nullptr;
   CallChecker *callChecker = nullptr;

@@ -55,6 +55,12 @@ public:
 private:
   static llvm::ArrayRef<const Type *> membersOf(const Type *&type);
   static bool isLiteralSet(const Type *type);
+  static bool hasSpread(const ObjectLitExpr *lit);
+  static bool isPlainObjectMember(const Type *m);
+  static bool namesFit(const ObjectLitExpr *lit, const Type *m);
+  static bool hasProperty(const ObjectLitExpr *lit, llvm::StringRef name);
+  std::optional<int> memberScore(const ObjectLitExpr *lit, const Type *m) const;
+  const Type *propertyTag(const ObjectLitExpr::Property &p, const Field *f) const;
   static const Type *literalPart(const Type *expected, UnionSlot slot);
   static std::optional<std::u16string> writtenText(const Expr *e);
   static std::optional<std::vector<std::string>> typeTexts(const Type *type);

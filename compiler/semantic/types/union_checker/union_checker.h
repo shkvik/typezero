@@ -32,6 +32,25 @@ private:
   static bool isLiteralSet(const Type *type);
   static llvm::ArrayRef<const Type *> membersOf(const Type *&type);
   static std::string lackingHint(const MemberExpr *member, const Type *type);
+  static bool isAllBytes(const Type *type);
+  std::optional<std::string> accessProblem(const MemberExpr *member, const ClassDecl *cls);
+  static const Field *unionMemberField(const MemberExpr *member, const Type *m,
+                                       const ClassDecl *cls);
+  static ResultUnionMemberTyped lackingFieldError(const MemberExpr *member, const Type *type,
+                                                  const Type *lacking);
+
+  struct UnionMethodPart {
+    const Type *type;
+    UnionMethod entry;
+  };
+
+  using ResultUnionMethodPart = Result<UnionMethodPart, UnionCheckerCheckUnionMethodCallError>;
+
+  static bool isAllObjects(const Type *type);
+  ResultUnionMethodPart memberMethod(const MemberExpr *member, const Type *m);
+  ResultUnionMethodPart classMemberMethod(const MemberExpr *member, const Type *m, ClassDecl *cls);
+  ResultUnionMethodPart classVariantMethod(const MemberExpr *member, const Type *m, ClassDecl *cls,
+                                           FunctionDecl *variant);
 
   SemanticState &state;
   FieldFacts *fieldFacts = nullptr;

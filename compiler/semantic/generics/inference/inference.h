@@ -64,6 +64,28 @@ private:
   void runInference(InferStep first);
   std::vector<InferStep> applyInferStep(const InferStep &step);
   std::vector<InferStep> inferPair(const Type *pattern, const Type *actual);
+  std::optional<size_t> paramIndex(const Type *type) const;
+  std::vector<InferStep> inferParam(size_t k, const Type *pattern, const Type *actual);
+  std::vector<const Type *> &candidatesFor(size_t k);
+  std::vector<InferStep> inferInside(const Type *pattern, const Type *actual);
+  std::vector<InferStep> inferFunction(const Type *pattern, const Type *actual);
+  static std::vector<InferStep> iteratorParts(const Type *pattern, const Type *actual);
+  static std::vector<InferStep> inferDict(const Type *pattern, const Type *actual);
+  static std::vector<InferStep> inferConstructor(const Type *pattern, const Type *actual);
+  std::vector<InferStep> inferObject(const Type *pattern, const Type *actual);
+  std::vector<InferStep> inferAsyncIterator(const Type *pattern, const Type *actual);
+  static std::vector<InferStep> inferClassArgs(const Type *pattern, const ClassDecl *cls,
+                                               const Type *actual);
+  std::optional<std::vector<InferStep>> inferAliasArgs(const AliasOrigin *origin,
+                                                       const Type *actual);
+  static std::vector<InferStep> pairArgs(llvm::ArrayRef<const Type *> want,
+                                         llvm::ArrayRef<const Type *> have);
+  static std::vector<InferStep> inferFields(const Type *pattern, const Type *actual);
+  std::vector<InferStep> inferUnion(const Type *pattern, const Type *actual);
+  static std::vector<InferStep> inferGenericMember(llvm::ArrayRef<const Type *> open,
+                                                   const Type *actual);
+  static std::vector<const Type *> membersOutside(const Type *value,
+                                                  llvm::ArrayRef<const Type *> fixed);
   std::vector<InferStep> inferHeld(const Type *pattern, const Type *actual);
   std::vector<InferStep> inferList(const Type *pattern, const Type *actual,
                                    const std::vector<const Type *> *bound);

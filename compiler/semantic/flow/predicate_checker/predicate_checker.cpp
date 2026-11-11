@@ -239,66 +239,79 @@ PredicateChecker::ResultExitNarrowed PredicateChecker::notePredicateExit(const F
 
 void PredicateChecker::endPredicate(FunctionDecl *fn) {
   PredicateBuild build = this->state.getPredicateStore().leavePredicateBuild();
-  if (!build.fn) {
+  if (build.fn == nullptr) {
     return;
   }
   Predicate summary;
-  auto position = [&](const VarSymbol *var) -> int {
-    if (!var || var->reassigned) {
-      return -2;
-    }
-    if (var == fn->thisVar()) {
-      return -1;
-    }
-    for (size_t i = 0; i < fn->params.size(); ++i) {
-      if (fn->params[i].sym == var) {
-        return int(i);
-      }
-    }
-
-    return -2;
-  };
-  auto project = [&](const Flow &flow, PredicateSide &side) {
-    side.unreachable = flow.unreachable;
-    if (flow.unreachable) {
-      return;
-    }
-    for (const auto &[var, type] : flow.narrowed) {
-      if (int i = position(var); i != -2) {
-        side.narrowed.push_back({i, type});
-      }
-    }
-    for (const VarSymbol *var : flow.defined) {
-      if (int i = position(var); i != -2) {
-        side.defined.push_back(i);
-      }
-    }
-    for (const FieldPath &path : flow.definedFields) {
-      if (int i = position(path.var); i != -2) {
-        side.fields.push_back({i, path.names});
-      }
-    }
-    for (const auto &[path, type] : flow.narrowedFields) {
-      if (int i = position(path.var); i != -2) {
-        side.narrowedFields.push_back({i, path.names, type});
-      }
-    }
-    for (const Facts::Fact &fact : flow.facts.all()) {
-      auto param = [&](const Term &t) {
-        return t.isZero() || (!t.isSum() && position(t.var) != -2);
-      };
-      if (param(fact.lhs) && param(fact.rhs)) {
-        side.facts.push_back(fact);
-      }
-    }
-  };
-  project(build.whenTrue, summary.whenTrue);
-  project(build.whenFalse, summary.whenFalse);
+  PredicateChecker::projectSide(fn, build.whenTrue, summary.whenTrue);
+  PredicateChecker::projectSide(fn, build.whenFalse, summary.whenFalse);
   for (const Param &p : fn->params) {
     summary.params.push_back(p.sym);
   }
   summary.self = fn->thisVar();
   this->state.getPredicateStore().rememberPredicate(build.fn, std::move(summary));
+}
+
+int PredicateChecker::paramPosition(const FunctionDecl *fn, const VarSymbol *var) {
+  if (var == nullptr || var->reassigned) {
+    return -2;
+  }
+  if (var == fn->thisVar()) {
+    return -1;
+  }
+  for (size_t i = 0; i < fn->params.size(); ++i) {
+    if (fn->params[i].sym == var) {
+      return int(i);
+    }
+  }
+
+  return -2;
+}
+
+void PredicateChecker::projectSide(const FunctionDecl *fn, const Flow &flow, PredicateSide &side) {
+  side.unreachable = flow.unreachable;
+  if (flow.unreachable) {
+    return;
+  }
+  for (const auto &[var, type] : flow.narrowed) {
+    int i = PredicateChecker::paramPosition(fn, var);
+    if (i != -2) {
+      side.narrowed.push_back({i, type});
+    }
+  }
+  for (const VarSymbol *var : flow.defined) {
+    int i = PredicateChecker::paramPosition(fn, var);
+    if (i != -2) {
+      side.defined.push_back(i);
+    }
+  }
+  for (const FieldPath &path : flow.definedFields) {
+    int i = PredicateChecker::paramPosition(fn, path.var);
+    if (i != -2) {
+      side.fields.push_back({i, path.names});
+    }
+  }
+  for (const auto &[path, type] : flow.narrowedFields) {
+    int i = PredicateChecker::paramPosition(fn, path.var);
+    if (i != -2) {
+      side.narrowedFields.push_back({i, path.names, type});
+    }
+  }
+  PredicateChecker::projectFacts(fn, flow, side);
+}
+
+bool PredicateChecker::isParamTerm(const FunctionDecl *fn, const Term &t) {
+  return t.isZero() || (!t.isSum() && PredicateChecker::paramPosition(fn, t.var) != -2);
+}
+
+void PredicateChecker::projectFacts(const FunctionDecl *fn, const Flow &flow, PredicateSide &side) {
+  for (const Facts::Fact &fact : flow.facts.all()) {
+    bool params =
+        PredicateChecker::isParamTerm(fn, fact.lhs) && PredicateChecker::isParamTerm(fn, fact.rhs);
+    if (params) {
+      side.facts.push_back(fact);
+    }
+  }
 }
 
 const Predicate *PredicateChecker::predicateOf(const FuncSymbol *fn) const {
@@ -323,120 +336,145 @@ const Predicate *PredicateChecker::predicateOf(const FuncSymbol *fn) const {
 }
 
 void PredicateChecker::applyPredicate(const CallExpr *call, Flow &whenTrue, Flow &whenFalse) const {
-  const FuncSymbol *fn = call->func() ? call->func() : call->method();
-  if (!fn || call->virtualCall() || !call->unionMethods().empty()) {
+  const FuncSymbol *fn = call->func() != nullptr ? call->func() : call->method();
+  if (fn == nullptr || call->virtualCall() || !call->unionMethods().empty()) {
     return;
   }
-  auto *member = dyn_cast<MemberExpr>(call->callee);
-  auto argument = [&](int i) -> const Expr * {
-    if (i == -1) {
-      return call->method() && member ? member->object : nullptr;
-    }
-
-    return size_t(i) < call->args.size() ? call->args[size_t(i)] : nullptr;
+  PredicateCall applied{
+      .call = call,
+      .member = dyn_cast<MemberExpr>(call->callee),
+      .summary = this->predicateOf(fn),
   };
-  auto variable = [&](int i) -> const VarSymbol * {
-    const Expr *arg = argument(i);
-    const VarSymbol *var = arg ? PredicateChecker::argumentVariable(arg) : nullptr;
-
-    return var && !this->flowChecker->changedByCalls(var) ? var : nullptr;
-  };
-  auto narrowTo = [&](Flow &flow, const VarSymbol *var, const Type *type) {
-    const Type *now = this->literalTypes->typeIn(flow, var);
-    if (TypeRelations::isImplicitlyConvertible(now, type)) {
-      return;
-    }
-    if (TypeRelations::isImplicitlyConvertible(type, now)) {
-      UnionNarrowing::narrowVariable(flow, var, type);
-      return;
-    }
-    if (const Type *value = now->nonOptional(); value->isUnion()) {
-      std::vector<const Type *> kept;
-      for (const Type *m : value->members()) {
-        if (TypeRelations::isImplicitlyConvertible(m, type)) {
-          kept.push_back(m);
-        }
-      }
-      UnionNarrowing::narrowVariable(flow, var, kept.empty() ? nullptr : Type::unionOf(kept));
-    }
-  };
-
-  const Predicate *summary = this->predicateOf(fn);
-  auto apply = [&](const PredicateSide &side, Flow &flow) {
-    if (side.unreachable) {
-      flow.unreachable = true;
-      return;
-    }
-    for (auto [i, type] : side.narrowed) {
-      if (const VarSymbol *var = variable(i)) {
-        narrowTo(flow, var, type);
-      }
-    }
-    for (int i : side.defined) {
-      if (const VarSymbol *var = variable(i); var && var->type->isOptional()) {
-        flow.defined.insert(var);
-      }
-    }
-    for (const auto &[i, names] : side.fields) {
-      if (const VarSymbol *var = variable(i)) {
-        FieldFacts::defineField(flow, FieldPath{var, names});
-      }
-    }
-    for (const PredicateSide::NarrowedField &field : side.narrowedFields) {
-      if (const VarSymbol *var = variable(field.param)) {
-        FieldPath path{var, field.names};
-        llvm::erase_if(flow.narrowedFields, [&](const auto &entry) { return entry.first == path; });
-        flow.narrowedFields.push_back({path, field.type});
-      }
-    }
-    auto term = [&](const Term &t) -> std::optional<Linear> {
-      if (t.isZero()) {
-        return Linear{Term::zero(), 0};
-      }
-      int i = -2;
-      for (size_t k = 0; k < summary->params.size(); ++k) {
-        if (summary->params[k] == t.var) {
-          i = int(k);
-        }
-      }
-      if (i == -2) {
-        return std::nullopt;
-      }
-      const Expr *arg = argument(i);
-      if (!arg) {
-        return std::nullopt;
-      }
-      if (t.length) {
-        const VarSymbol *var = variable(i);
-        if (!var) {
-          return std::nullopt;
-        }
-        return Linear{Term::lengthOf(var), 0};
-      }
-      std::optional<Linear> value = PredicateChecker::argumentTerm(arg);
-      if (value && value->term.var && this->flowChecker->changedByCalls(value->term.var)) {
-        return std::nullopt;
-      }
-
-      return value;
-    };
-    for (const Facts::Fact &fact : side.facts) {
-      std::optional<Linear> l = term(fact.lhs);
-      std::optional<Linear> r = term(fact.rhs);
-      if (l && r) {
-        flow.facts.add(l->term, r->term, fact.offset + r->offset - l->offset);
-      }
-    }
-  };
-  if (summary) {
-    apply(summary->whenTrue, whenTrue);
-    apply(summary->whenFalse, whenFalse);
+  if (applied.summary != nullptr) {
+    this->applySide(applied, applied.summary->whenTrue, whenTrue);
+    this->applySide(applied, applied.summary->whenFalse, whenFalse);
   }
-  if (fn->predicate) {
-    if (const VarSymbol *var = variable(fn->predicate->param)) {
-      narrowTo(whenTrue, var, fn->predicate->type);
+  if (!fn->predicate.has_value()) {
+    return;
+  }
+  const VarSymbol *var = this->predicateVariable(applied, fn->predicate->param);
+  if (var != nullptr) {
+    this->narrowParamTo(whenTrue, var, fn->predicate->type);
+  }
+}
+
+const Expr *PredicateChecker::predicateArgument(const PredicateCall &applied, int i) {
+  const CallExpr *call = applied.call;
+  if (i == -1) {
+    return call->method() != nullptr && applied.member != nullptr ? applied.member->object
+                                                                  : nullptr;
+  }
+
+  return size_t(i) < call->args.size() ? call->args[size_t(i)] : nullptr;
+}
+
+const VarSymbol *PredicateChecker::predicateVariable(const PredicateCall &applied, int i) const {
+  const Expr *arg = PredicateChecker::predicateArgument(applied, i);
+  const VarSymbol *var = arg != nullptr ? PredicateChecker::argumentVariable(arg) : nullptr;
+
+  return var != nullptr && !this->flowChecker->changedByCalls(var) ? var : nullptr;
+}
+
+void PredicateChecker::narrowParamTo(Flow &flow, const VarSymbol *var, const Type *type) const {
+  const Type *now = this->literalTypes->typeIn(flow, var);
+  if (TypeRelations::isImplicitlyConvertible(now, type)) {
+    return;
+  }
+  if (TypeRelations::isImplicitlyConvertible(type, now)) {
+    UnionNarrowing::narrowVariable(flow, var, type);
+    return;
+  }
+  const Type *value = now->nonOptional();
+  if (!value->isUnion()) {
+    return;
+  }
+  std::vector<const Type *> kept;
+  for (const Type *m : value->members()) {
+    if (TypeRelations::isImplicitlyConvertible(m, type)) {
+      kept.push_back(m);
     }
   }
+  UnionNarrowing::narrowVariable(flow, var, kept.empty() ? nullptr : Type::unionOf(kept));
+}
+
+void PredicateChecker::applySide(const PredicateCall &applied, const PredicateSide &side,
+                                 Flow &flow) const {
+  if (side.unreachable) {
+    flow.unreachable = true;
+    return;
+  }
+  for (auto [i, type] : side.narrowed) {
+    const VarSymbol *var = this->predicateVariable(applied, i);
+    if (var != nullptr) {
+      this->narrowParamTo(flow, var, type);
+    }
+  }
+  for (int i : side.defined) {
+    const VarSymbol *var = this->predicateVariable(applied, i);
+    if (var != nullptr && var->type->isOptional()) {
+      flow.defined.insert(var);
+    }
+  }
+  for (const auto &[i, names] : side.fields) {
+    const VarSymbol *var = this->predicateVariable(applied, i);
+    if (var != nullptr) {
+      FieldFacts::defineField(flow, FieldPath{var, names});
+    }
+  }
+  for (const PredicateSide::NarrowedField &field : side.narrowedFields) {
+    const VarSymbol *var = this->predicateVariable(applied, field.param);
+    if (var == nullptr) {
+      continue;
+    }
+    FieldPath path{var, field.names};
+    llvm::erase_if(flow.narrowedFields, [&](const auto &entry) { return entry.first == path; });
+    flow.narrowedFields.push_back({path, field.type});
+  }
+  for (const Facts::Fact &fact : side.facts) {
+    std::optional<Linear> l = this->factTerm(applied, fact.lhs);
+    std::optional<Linear> r = this->factTerm(applied, fact.rhs);
+    if (l.has_value() && r.has_value()) {
+      flow.facts.add(l->term, r->term, fact.offset + r->offset - l->offset);
+    }
+  }
+}
+
+int PredicateChecker::summaryParam(const Predicate *summary, const VarSymbol *var) {
+  int i = -2;
+  for (size_t k = 0; k < summary->params.size(); ++k) {
+    if (summary->params[k] == var) {
+      i = int(k);
+    }
+  }
+
+  return i;
+}
+
+std::optional<Linear> PredicateChecker::factTerm(const PredicateCall &applied,
+                                                 const Term &t) const {
+  if (t.isZero()) {
+    return Linear{Term::zero(), 0};
+  }
+  int i = PredicateChecker::summaryParam(applied.summary, t.var);
+  if (i == -2) {
+    return std::nullopt;
+  }
+  const Expr *arg = PredicateChecker::predicateArgument(applied, i);
+  if (arg == nullptr) {
+    return std::nullopt;
+  }
+  if (t.length) {
+    const VarSymbol *var = this->predicateVariable(applied, i);
+    if (var == nullptr) {
+      return std::nullopt;
+    }
+    return Linear{Term::lengthOf(var), 0};
+  }
+  std::optional<Linear> value = PredicateChecker::argumentTerm(arg);
+  bool changed = value.has_value() && value->term.var != nullptr &&
+                 this->flowChecker->changedByCalls(value->term.var);
+
+  return changed ? std::nullopt : value;
 }
 
 const Type *PredicateChecker::filteredType(const Expr *callback, const Type *element) const {

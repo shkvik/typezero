@@ -63,6 +63,38 @@ private:
                                              const Type *yielded, const Type *sent, bool loose,
                                              const FuncSymbol *fn);
 
+  struct YieldShape {
+    FuncSymbol *fn;
+    bool async;
+    const Type *yielded;
+    const Type *sent;
+    bool loose;
+  };
+
+  YieldShape yieldShape(const YieldExpr *yield, FuncSymbol *fn);
+  ResultResolvedIterator resolveIteratorResult(const TypeRef &ref);
+  ResultResolvedIterator resolveIteratorArgs(const TypeRef &ref, bool async);
+  const Type *typeArgOr(const TypeRef &ref, size_t i, const Type *fallback);
+
+  struct YieldJoin {
+    const Type *yielded;
+    bool broken;
+    bool failed;
+  };
+
+  YieldJoin joinYields(const FuncSymbol *fn, llvm::ArrayRef<YieldExpr *> yields, bool async,
+                       bool report);
+  static const Type *yieldedValueType(const YieldExpr *yield, bool async);
+  const Type *unknownYields(const FuncSymbol *fn, llvm::ArrayRef<YieldExpr *> yields,
+                            const YieldJoin &join, bool report);
+  std::optional<const Type *> joinedReturns(const FuncSymbol *fn,
+                                            llvm::ArrayRef<ReturnStmt *> returns, bool fallsOff,
+                                            bool async, bool report);
+  void walkYieldValue(YieldExpr *yield, const YieldShape &shape);
+  void walkAsyncYieldValue(YieldExpr *yield, const YieldShape &shape);
+  void walkDelegate(YieldExpr *yield, const YieldShape &shape);
+  static const Type *yieldResultType(const YieldExpr *yield, const YieldShape &shape);
+
   SemanticState &state;
   DictChecker *dictChecker = nullptr;
   ExprChecker *exprChecker = nullptr;

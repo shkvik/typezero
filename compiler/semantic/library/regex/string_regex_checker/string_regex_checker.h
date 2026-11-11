@@ -1,6 +1,9 @@
 #pragma once
 
+#include "compiler/program/library/string/string_method_table/string_method_table.h"
+#include "compiler/result/result/result.h"
 #include "compiler/semantic/library/regex/string_regex_checker/string_regex_checker_errors.h"
+#include "compiler/semantic/semantic_state/function_stack/function_stack_types.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
@@ -22,9 +25,40 @@ public:
   Expr *checkReplacement(CallExpr *call, MemberExpr *member, const RegexLitExpr *regex);
 
 private:
+  struct PatternCall {
+    CallExpr *call = nullptr;
+    MemberExpr *member = nullptr;
+    StringMethod method = StringMethod::SPLIT;
+  };
+
+  using ResultGroupsReferenced =
+      Result<const std::u16string *, StringRegexCheckerReplacementGroupsError>;
+
   static std::u16string units(const uint32_t *program, uint32_t start, uint32_t length);
   static std::string escapedLiteral(const std::u16string &text);
   static std::string argumentText(const Expr *arg);
+  static bool lacksGlobalFlag(const RegexLitExpr *regex);
+  static Expr *toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result);
+  static std::string groupNameAt(const std::u16string &value, size_t at);
+  static bool hasNamedGroups(const uint32_t *program, uint32_t groups);
+  static bool numberedGroupKnown(const std::u16string &value, size_t at, uint32_t groups);
+  static bool hasNamedGroup(const uint32_t *program, uint32_t groups, const std::string &groupName);
+  static Signature replacerSignature(const RegexLitExpr *regex, const Type *match);
+  static ResultGroupsReferenced replacementGroups(const RegexLitExpr *regex,
+                                                  const std::u16string &value);
+
+  Expr *checkRestLoosely(CallExpr *call);
+  Expr *checkTextPattern(const PatternCall &pattern);
+  Expr *checkRegexPattern(const PatternCall &pattern);
+  bool isFunctionReplacement(const Expr *replacement) const;
+  Expr *checkRegexSplit(CallExpr *call, const RegexLitExpr *regex);
+  Expr *checkTextReplacement(CallExpr *call, const RegexLitExpr *regex);
+  Expr *checkRegexMatch(const PatternCall &pattern, const RegexLitExpr *regex);
+  Expr *reportNeedsGlobal(const PatternCall &pattern, const RegexLitExpr *regex);
+  Expr *checkTextReplaceAll(CallExpr *call, const std::string &text, const std::string &escaped);
+  Expr *checkFunctionReplacement(CallExpr *call, MemberExpr *member, const RegexLitExpr *regex);
+  Expr *checkExtraReplacerParams(CallExpr *call, MemberExpr *member, const RegexLitExpr *regex,
+                                 const Type *match, Signature signature);
 
   SemanticState &state;
   Scopes *scopes = nullptr;

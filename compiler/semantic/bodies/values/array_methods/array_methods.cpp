@@ -92,71 +92,76 @@ ArrayMethods::ResultElementsAreText ArrayMethods::textElements(const Type *eleme
 }
 
 ArrayMethods::ResultSortableElement ArrayMethods::sortable(const Type *element) {
-  if (element->holdsFunctions()) {
-    std::string message = ErrorTextArraySort::functions();
+  std::optional<ArrayMethodsSortableErrorCode> problem = ArrayMethods::sortProblem(element);
+  if (!problem.has_value()) {
+    return ok(element);
+  }
+  std::string message = ArrayMethods::sortMessage(*problem, element);
 
-    return err(ArrayMethodsSortableError{
-        .code = ArrayMethodsSortableErrorCode::FUNCTIONS,
-        .message = message,
-    });
+  return err(ArrayMethodsSortableError{
+      .code = *problem,
+      .message = message,
+  });
+}
+
+std::optional<ArrayMethodsSortableErrorCode> ArrayMethods::sortProblem(const Type *element) {
+  if (element->holdsFunctions()) {
+    return ArrayMethodsSortableErrorCode::FUNCTIONS;
   }
   if (UnknownChecker::holdsUnknown(element)) {
-    std::string message = ErrorTextArraySort::unknown();
-
-    return err(ArrayMethodsSortableError{
-        .code = ArrayMethodsSortableErrorCode::UNKNOWN,
-        .message = message,
-    });
+    return ArrayMethodsSortableErrorCode::UNKNOWN;
   }
   if (JsonChecker::holdsJson(element)) {
-    std::string message = ErrorTextArraySort::json();
-
-    return err(ArrayMethodsSortableError{
-        .code = ArrayMethodsSortableErrorCode::JSON,
-        .message = message,
-    });
+    return ArrayMethodsSortableErrorCode::JSON;
   }
   if (element->holdsDates()) {
-    std::string message = ErrorTextArraySort::dates();
-
-    return err(ArrayMethodsSortableError{
-        .code = ArrayMethodsSortableErrorCode::DATES,
-        .message = message,
-    });
+    return ArrayMethodsSortableErrorCode::DATES;
   }
   if (element->holdsObjects() || element->holdsResults()) {
-    std::string message = ErrorTextArraySort::objects();
-
-    return err(ArrayMethodsSortableError{
-        .code = ArrayMethodsSortableErrorCode::OBJECTS,
-        .message = message,
-    });
+    return ArrayMethodsSortableErrorCode::OBJECTS;
   }
-  auto textual = [](const Type *m) {
-    const Type *b = m->isLiteral() ? m->literalBase() : m;
-
-    return b->isString() || b->isBool();
-  };
   const Type *u = element->nonOptional();
-  if (u->isUnion() && !llvm::all_of(u->members(), textual)) {
-    std::string message = ErrorTextArraySort::mixed(u->name());
-
-    return err(ArrayMethodsSortableError{
-        .code = ArrayMethodsSortableErrorCode::MIXED_UNION,
-        .message = message,
-    });
+  if (u->isUnion() && !ArrayMethods::allTextual(u->members())) {
+    return ArrayMethodsSortableErrorCode::MIXED_UNION;
   }
   bool numbers = u->isNumeric() || u->isDecimal() || GenericChecker::apparentType(u)->isNumeric();
   if (numbers) {
-    std::string message = ErrorTextArraySort::numbers(element->isOptional());
-
-    return err(ArrayMethodsSortableError{
-        .code = ArrayMethodsSortableErrorCode::NUMBERS,
-        .message = message,
-    });
+    return ArrayMethodsSortableErrorCode::NUMBERS;
   }
 
-  return ok(element);
+  return std::nullopt;
+}
+
+bool ArrayMethods::allTextual(llvm::ArrayRef<const Type *> members) {
+  for (const Type *m : members) {
+    const Type *b = m->isLiteral() ? m->literalBase() : m;
+    if (!b->isString() && !b->isBool()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+std::string ArrayMethods::sortMessage(ArrayMethodsSortableErrorCode code, const Type *element) {
+  switch (code) {
+    case ArrayMethodsSortableErrorCode::FUNCTIONS:
+      return ErrorTextArraySort::functions();
+    case ArrayMethodsSortableErrorCode::UNKNOWN:
+      return ErrorTextArraySort::unknown();
+    case ArrayMethodsSortableErrorCode::JSON:
+      return ErrorTextArraySort::json();
+    case ArrayMethodsSortableErrorCode::DATES:
+      return ErrorTextArraySort::dates();
+    case ArrayMethodsSortableErrorCode::OBJECTS:
+      return ErrorTextArraySort::objects();
+    case ArrayMethodsSortableErrorCode::MIXED_UNION:
+      return ErrorTextArraySort::mixed(element->nonOptional()->name());
+    case ArrayMethodsSortableErrorCode::NUMBERS:
+      return ErrorTextArraySort::numbers(element->isOptional());
+  }
+
+  return ErrorTextArraySort::objects();
 }
 
 ArrayMethods::ResultArrayMethodCall

@@ -176,10 +176,9 @@ ResultChecker::ResultStaticIsKnown ResultChecker::staticMethod(const NameExpr *n
   return ok(method);
 }
 
-// TODO: говнокод
 Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
   auto *name = dyn_cast<NameExpr>(member->object);
-  if (!name || call->optional || member->optional) {
+  if (name == nullptr || call->optional || member->optional) {
     return nullptr;
   }
   std::optional<GlobalName> which = this->resultTypes->resultName(name->name);
@@ -192,114 +191,176 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
     this->state.getDiagnostics().error(member->loc(), staticMethod.error().message);
     return this->markCallFailed(call);
   }
+  if (!this->combineArityFits(call, member)) {
+    return call;
+  }
+  bool all = method == "combineWithAllErrors";
+  call->target =
+      BuiltinCall{.builtin = all ? Builtin::ResultCombineWithAllErrors : Builtin::ResultCombine};
+  CombineCall combine{
+      .call = call,
+      .what = name->name.str() + "." + method.str(),
+      .all = all,
+  };
+  auto *lit = dyn_cast<ArrayLitExpr>(call->args[0]);
+  if (lit != nullptr && ResultChecker::isPlainList(lit)) {
+    return this->checkCombineList(combine, lit);
+  }
+
+  return this->checkCombineArray(combine);
+}
+
+bool ResultChecker::combineArityFits(CallExpr *call, const MemberExpr *member) {
   bool rejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
       rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
-  if (rejected || arity.isErr()) {
-    return call;
-  }
-  bool all = method == "combineWithAllErrors";
-  call->target =
-      BuiltinCall{.builtin = all ? Builtin::ResultCombineWithAllErrors : Builtin::ResultCombine};
-  std::string what = name->name.str() + "." + method.str();
-  auto holds = [&](const Type *result, const Expr *at) {
-    if (ResultChecker::givesType(result->okType()) && !(all && result->errType()->isVoid())) {
-      return true;
-    }
-    bool values = ResultChecker::givesType(result->okType());
-    std::string message = ErrorTextCombine::holds(what, values, result->name());
-    this->state.getDiagnostics().error(at->loc(), message);
 
+  return !rejected && arity.isOk();
+}
+
+bool ResultChecker::isPlainList(const ArrayLitExpr *lit) {
+  if (lit->elements.empty()) {
     return false;
-  };
-  auto errorsOf = [&](const Type *error) {
-    return !all || error->isNever() ? error : Type::array(error);
-  };
-
-  Expr *&arg = call->args[0];
-  if (auto *lit = dyn_cast<ArrayLitExpr>(arg);
-      lit && !lit->elements.empty() &&
-      llvm::none_of(lit->elements,
-                    [](const ArrayLitExpr::Element &e) { return e.spread || e.hole; })) {
-    std::vector<const Type *> results;
-    for (ArrayLitExpr::Element &e : lit->elements) {
-      e.expr = this->exprChecker->checkExpr(e.expr);
-      results.push_back(e.expr->type);
+  }
+  for (const ArrayLitExpr::Element &e : lit->elements) {
+    if (e.spread || e.hole) {
+      return false;
     }
-    if (llvm::any_of(results, [](const Type *t) { return t->isError(); })) {
-      return call;
-    }
-    auto other = llvm::find_if(results, [](const Type *t) { return !t->isResult(); });
-    if (other != results.end()) {
-      std::string message = ErrorTextCombine::notResult(what, (*other)->name());
-      this->state.getDiagnostics().error(lit->elements[other - results.begin()].expr->loc(),
-                                         message);
-      return call;
-    }
-    auto sameValues = [](const Type *a, const Type *b) -> const Type * {
-      const Type *x = a->okType();
-      const Type *y = b->okType();
-      const Type *value = x == y || y->isNever()       ? x
-                          : x->isNever()               ? y
-                          : x->isVoid() || y->isVoid() ? nullptr
-                                                       : TypeRelations::unify(x, y);
-      const Type *error = ResultTypes::unifyHalf(a->errType(), b->errType());
-
-      return value && !value->isError() && error ? Type::result(value, error) : nullptr;
-    };
-    const Type *common = results[0];
-    for (const Type *t : results) {
-      common = common ? sameValues(common, t) : nullptr;
-    }
-    if (common && !common->isError()) {
-      if (!holds(common, arg)) {
-        return call;
-      }
-      for (ArrayLitExpr::Element &e : lit->elements) {
-        e.expr = this->typeRelations->convert(e.expr, common);
-      }
-      lit->type = Type::array(common);
-      call->type = Type::result(Type::array(common->okType()), errorsOf(common->errType()));
-      return call;
-    }
-    std::vector<const Type *> values;
-    const Type *error = Type::never();
-    for (size_t i = 0; i < results.size(); ++i) {
-      if (!holds(results[i], lit->elements[i].expr)) {
-        return call;
-      }
-      values.push_back(results[i]->okType());
-      const Type *before = error;
-      if (!(error = ResultTypes::unifyHalf(error, results[i]->errType()))) {
-        std::string message = ErrorTextCombine::noUnion(what, before, results[i]->errType());
-        this->state.getDiagnostics().error(lit->elements[i].expr->loc(), message);
-
-        return call;
-      }
-    }
-    lit->type = Type::tuple(results);
-    call->type = Type::result(Type::tuple(values), errorsOf(error));
-    return call;
   }
 
+  return true;
+}
+
+bool ResultChecker::holdsValues(const CombineCall &combine, const Type *result, const Expr *at) {
+  bool values = ResultChecker::givesType(result->okType());
+  if (values && !(combine.all && result->errType()->isVoid())) {
+    return true;
+  }
+  std::string message = ErrorTextCombine::holds(combine.what, values, result->name());
+  this->state.getDiagnostics().error(at->loc(), message);
+
+  return false;
+}
+
+const Type *ResultChecker::errorsOf(const CombineCall &combine, const Type *error) {
+  return !combine.all || error->isNever() ? error : Type::array(error);
+}
+
+Expr *ResultChecker::checkCombineList(const CombineCall &combine, ArrayLitExpr *lit) {
+  CallExpr *call = combine.call;
+  std::vector<const Type *> results;
+  for (ArrayLitExpr::Element &e : lit->elements) {
+    e.expr = this->exprChecker->checkExpr(e.expr);
+    results.push_back(e.expr->type);
+  }
+  for (const Type *t : results) {
+    if (t->isError()) {
+      return call;
+    }
+  }
+  for (size_t i = 0; i < results.size(); ++i) {
+    if (!results[i]->isResult()) {
+      std::string message = ErrorTextCombine::notResult(combine.what, results[i]->name());
+      this->state.getDiagnostics().error(lit->elements[i].expr->loc(), message);
+      return call;
+    }
+  }
+  const Type *common = ResultChecker::commonResult(results);
+  if (common != nullptr && !common->isError()) {
+    return this->checkSameCombine(combine, lit, common);
+  }
+
+  return this->checkTupleCombine(combine, lit, results);
+}
+
+const Type *ResultChecker::sameValues(const Type *a, const Type *b) {
+  const Type *x = a->okType();
+  const Type *y = b->okType();
+  const Type *value = x == y || y->isNever()       ? x
+                      : x->isNever()               ? y
+                      : x->isVoid() || y->isVoid() ? nullptr
+                                                   : TypeRelations::unify(x, y);
+  const Type *error = ResultTypes::unifyHalf(a->errType(), b->errType());
+  bool joined = value != nullptr && !value->isError() && error != nullptr;
+
+  return joined ? Type::result(value, error) : nullptr;
+}
+
+const Type *ResultChecker::commonResult(llvm::ArrayRef<const Type *> results) {
+  const Type *common = results[0];
+  for (const Type *t : results) {
+    common = common != nullptr ? ResultChecker::sameValues(common, t) : nullptr;
+  }
+
+  return common;
+}
+
+Expr *ResultChecker::checkSameCombine(const CombineCall &combine, ArrayLitExpr *lit,
+                                      const Type *common) {
+  CallExpr *call = combine.call;
+  if (!this->holdsValues(combine, common, call->args[0])) {
+    return call;
+  }
+  for (ArrayLitExpr::Element &e : lit->elements) {
+    e.expr = this->typeRelations->convert(e.expr, common);
+  }
+  lit->type = Type::array(common);
+  const Type *values = Type::array(common->okType());
+  const Type *errors = ResultChecker::errorsOf(combine, common->errType());
+  call->type = Type::result(values, errors);
+
+  return call;
+}
+
+Expr *ResultChecker::checkTupleCombine(const CombineCall &combine, ArrayLitExpr *lit,
+                                       const std::vector<const Type *> &results) {
+  CallExpr *call = combine.call;
+  std::vector<const Type *> values;
+  const Type *error = Type::never();
+  for (size_t i = 0; i < results.size(); ++i) {
+    if (!this->holdsValues(combine, results[i], lit->elements[i].expr)) {
+      return call;
+    }
+    values.push_back(results[i]->okType());
+    const Type *before = error;
+    error = ResultTypes::unifyHalf(error, results[i]->errType());
+    if (error == nullptr) {
+      std::string message = ErrorTextCombine::noUnion(combine.what, before, results[i]->errType());
+      this->state.getDiagnostics().error(lit->elements[i].expr->loc(), message);
+      return call;
+    }
+  }
+  lit->type = Type::tuple(results);
+  const Type *tuple = Type::tuple(values);
+  const Type *errors = ResultChecker::errorsOf(combine, error);
+  call->type = Type::result(tuple, errors);
+
+  return call;
+}
+
+Expr *ResultChecker::checkCombineArray(const CombineCall &combine) {
+  CallExpr *call = combine.call;
+  Expr *&arg = call->args[0];
   arg = this->exprChecker->checkExpr(arg);
   const Type *type = arg->type;
   if (type->isError()) {
     return call;
   }
   if (!type->isArray() || !type->inner()->isResult()) {
-    std::string message = ErrorTextCombine::notArray(what, type->name());
+    std::string message = ErrorTextCombine::notArray(combine.what, type->name());
     this->state.getDiagnostics().error(arg->loc(), message);
     return call;
   }
   const Type *element = type->inner();
-  if (!holds(element, arg)) {
+  if (!this->holdsValues(combine, element, arg)) {
     return call;
   }
-  call->type = Type::result(Type::array(element->okType()), errorsOf(element->errType()));
+  const Type *values = Type::array(element->okType());
+  const Type *errors = ResultChecker::errorsOf(combine, element->errType());
+  call->type = Type::result(values, errors);
 
   return call;
 }

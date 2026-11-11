@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/semantic/library/crypto/crypto_checker/crypto_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
@@ -28,6 +29,11 @@ public:
   const Type *cryptoTypeNamed(llvm::StringRef name) const;
 
 private:
+  Expr *readCryptoProperty(MemberExpr *member, CryptoFn fn, const Type *result);
+  Expr *readFingerprint(MemberExpr *member, int bits);
+  Expr *reportCryptoMember(MemberExpr *member, const std::string &message);
+  Expr *reportOnlyCalled(MemberExpr *member);
+
   SemanticState &state;
   CryptoArgs *cryptoArgs = nullptr;
   ExprChecker *exprChecker = nullptr;

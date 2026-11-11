@@ -160,67 +160,12 @@ std::vector<llvm::StringLiteral> SubtleAlgorithms::formatsOf(llvm::StringRef fam
 }
 
 Dictionary SubtleAlgorithms::dictionaryOf(llvm::StringRef op, llvm::StringRef name) {
-  bool aes = name.starts_with("AES-"), rsa = name.starts_with("RSA");
-  bool ec = name == "ECDSA" || name == "ECDH";
-  if (op == "generateKey") {
-    if (aes) {
-      return {"AesKeyGenParams", {"length"}};
-    }
-    if (ec) {
-      return {"EcKeyGenParams", {"namedCurve"}};
-    }
-    if (name == "HMAC") {
-      return {"HmacKeyGenParams", {"hash"}};
-    }
-    if (rsa) {
-      return {"RsaHashedKeyGenParams", {"hash", "modulusLength", "publicExponent"}};
-    }
-  } else if (op == "importKey") {
-    if (ec) {
-      return {"EcKeyImportParams", {"namedCurve"}};
-    }
-    if (name == "HMAC") {
-      return {"HmacImportParams", {"hash"}};
-    }
-    if (rsa) {
-      return {"RsaHashedImportParams", {"hash"}};
-    }
-  } else if (op == "encrypt" || op == "decrypt") {
-    if (name == "AES-CBC") {
-      return {"AesCbcParams", {"iv"}};
-    }
-    if (name == "AES-CTR") {
-      return {"AesCtrParams", {"counter", "length"}};
-    }
-    if (name == "AES-GCM") {
-      return {"AeadParams", {"iv"}};
-    }
-    return {"RsaOaepParams", {}};
-  } else if (op == "sign" || op == "verify") {
-    if (name == "ECDSA") {
-      return {"EcdsaParams", {"hash"}};
-    }
-    if (name == "RSA-PSS") {
-      return {"RsaPssParams", {"saltLength"}};
-    }
-  } else if (op == "deriveBits") {
-    if (name == "HKDF") {
-      return {"HkdfParams", {"hash", "info", "salt"}};
-    }
-    if (name == "PBKDF2") {
-      return {"Pbkdf2Params", {"hash", "iterations", "salt"}};
-    }
-    return {"EcdhKeyDeriveParams", {"public"}};
-  } else if (op == "get key length") {
-    if (aes) {
-      return {"AesDerivedKeyParams", {"length"}};
-    }
-    if (name == "HMAC") {
-      return {"HmacImportParams", {"hash"}};
-    }
+  const SubtleDictionaryInfo *info = SubtleDictionaryTable::find(op, name);
+  if (info == nullptr) {
+    return {"", {}};
   }
 
-  return {"", {}};
+  return info->dictionary;
 }
 
 std::string SubtleAlgorithms::verbOf(llvm::StringRef op) {

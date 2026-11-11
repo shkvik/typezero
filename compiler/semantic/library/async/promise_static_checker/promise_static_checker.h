@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/async/promise_static_table/promise_static_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/async/promise_static_checker/promise_static_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -45,6 +46,23 @@ private:
   static ResultRaceTypeJoined raceJoin(const Type *element, const Type *type, llvm::StringRef fn);
   bool checkPromiseList(Expr *&arg, const Type *wantedElement, const Type *&element,
                         std::vector<const Type *> &tuple, llvm::StringRef fn);
+
+  static const Type *wantedValue(const Type *expected);
+  static bool isSpreadOrHole(const ArrayLitExpr::Element &element);
+  static const Type *unifiedType(const std::vector<const Type *> &types);
+  Expr *typeAllCall(CallExpr *call, const Type *element, const std::vector<const Type *> &tuple);
+  Expr *reportNoReject(CallExpr *call, MemberExpr *member, const std::string &message);
+  const Type *resolverValueType(const MemberExpr *member, const Type *expected);
+  Expr *checkWithResolvers(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkResolve(CallExpr *call, MemberExpr *member, const Type *wanted, const std::string &fn);
+  Expr *checkCombinator(CallExpr *call, MemberExpr *member, const Type *wanted,
+                        const std::string &fn, Builtin builtin);
+  bool literalPromiseTypes(ArrayLitExpr *lit, const Type *wantedElement, llvm::StringRef fn,
+                           std::vector<const Type *> &types);
+  bool checkValuePromiseList(Expr *&arg, const Type *&element, std::vector<const Type *> &tuple,
+                             llvm::StringRef fn);
+  bool checkLiteralPromiseList(ArrayLitExpr *lit, const Type *wantedElement, const Type *&element,
+                               std::vector<const Type *> &tuple, llvm::StringRef fn);
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

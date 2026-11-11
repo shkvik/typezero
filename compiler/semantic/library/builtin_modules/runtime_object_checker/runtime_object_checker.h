@@ -21,6 +21,16 @@ public:
   const Type *checkRuntimeTarget(MemberExpr *member, bool compound);
 
 private:
+  Expr *checkArgsLoosely(CallExpr *call);
+  Expr *reportNoMember(CallExpr *call, MemberExpr *member);
+  bool hasWrongArity(CallExpr *call, MemberExpr *member, unsigned min, unsigned max);
+  Expr *checkReadlineMethod(CallExpr *call, MemberExpr *member);
+  Expr *reportReadlineEvents(CallExpr *call, MemberExpr *member);
+  Expr *checkReadlineClose(CallExpr *call, MemberExpr *member);
+  Expr *checkQuestion(CallExpr *call, MemberExpr *member);
+  Expr *checkQuestionCallback(CallExpr *call, MemberExpr *member, Expr *query);
+  Expr *checkAsyncIteratorMethod(CallExpr *call, MemberExpr *member);
+
   SemanticState &state;
   Prelude *prelude = nullptr;
   CallChecker *callChecker = nullptr;

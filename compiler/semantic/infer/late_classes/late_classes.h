@@ -54,6 +54,12 @@ private:
   static ResultFieldNameIsFree replacedField(const ClassDecl *cls, const ClassDecl *replacement,
                                              const ClassDecl *child, const ClassField &field);
 
+  void registerLateClass(ClassDecl *cls);
+  void rememberLateScope(ClassDecl *cls);
+  void linkLateBase(ClassDecl *cls);
+  static void nameAnonymousClass(ClassDecl *cls);
+  void declareLateMembers(ClassDecl *cls);
+  void rememberMethodModules(const ClassDecl *cls);
   void relink(ClassDecl *cls);
   void relinkClass(ClassDecl *cls);
   void noteMethodNames(const ClassDecl *cls);

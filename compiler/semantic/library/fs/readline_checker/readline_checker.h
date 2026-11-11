@@ -26,6 +26,17 @@ private:
   ResultInputIsStdin stdinInput(const Expr *input);
   static ResultReadlineUsed readlineFunction(llvm::StringRef fn, NodeModule module);
 
+  struct ReadlineStreams {
+    Expr *input;
+    Expr *output;
+  };
+
+  Expr *checkArgsLoosely(CallExpr *call);
+  bool hasRejectedArgs(CallExpr *call, llvm::SMLoc loc);
+  std::optional<ReadlineStreams> readlineStreams(CallExpr *call, llvm::StringRef fn);
+  std::optional<ReadlineStreams> optionStreams(CallExpr *call, llvm::StringRef fn);
+  std::optional<int> outputStream(const Expr *output);
+
   SemanticState &state;
   FsChecker *fsChecker = nullptr;
   CallChecker *callChecker = nullptr;

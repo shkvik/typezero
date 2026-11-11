@@ -101,30 +101,12 @@ EventMaps::ResultEventMapFits EventMaps::eventMapFits(const Type *events) {
     return ok(events);
   }
   if (events->isRecord()) {
-    const Type *args = events->valueType();
-    if (!args->isTuple()) {
-      std::string why = ErrorTextEventMap::notTuple(args->name());
-      std::string message = ErrorTextEventMap::notMap(why);
-
-      return err(EventMapsEventMapFitsError{
-          .code = EventMapsEventMapFitsErrorCode::NOT_A_MAP,
-          .message = message,
-      });
-    }
-    if (!EventMaps::carriesOne(args)) {
-      std::string event = ErrorTextEventMap::eachEvent();
-      std::string message = ErrorTextEventMap::several(event, args->name());
-
-      return err(EventMapsEventMapFitsError{
-          .code = EventMapsEventMapFitsErrorCode::SEVERAL_VALUES,
-          .message = message,
-      });
-    }
-
-    return ok(events);
+    return EventMaps::recordMapFits(events);
   }
-  if (!events->isObject() || events->isClass() || events->isTuple() || events->isAnyObject() ||
-      events->isBytes() || events->isDate() || events->isRegExp() || events->isMatch()) {
+  bool notObject = !events->isObject() || events->isClass() || events->isTuple() ||
+                   events->isAnyObject() || events->isBytes() || events->isDate() ||
+                   events->isRegExp() || events->isMatch();
+  if (notObject) {
     std::string why = ErrorTextEventMap::notOne(events->name());
     std::string message = ErrorTextEventMap::notMap(why);
 
@@ -134,45 +116,78 @@ EventMaps::ResultEventMapFits EventMaps::eventMapFits(const Type *events) {
     });
   }
   for (const Field &f : events->fields()) {
-    bool service = EventMaps::isServiceEvent(f.name);
-    if (f.type->isOptional()) {
-      std::string why = ErrorTextEventMap::optional(f.name);
-      std::string message = ErrorTextEventMap::notMap(why);
-
-      return err(EventMapsEventMapFitsError{
-          .code = EventMapsEventMapFitsErrorCode::NOT_A_MAP,
-          .message = message,
-      });
-    }
-    if (!f.type->isTuple()) {
-      std::string why = ErrorTextEventMap::fieldTuple(f.name, f.type->name());
-      std::string message = ErrorTextEventMap::notMap(why);
-
-      return err(EventMapsEventMapFitsError{
-          .code = EventMapsEventMapFitsErrorCode::NOT_A_MAP,
-          .message = message,
-      });
-    }
-    if (!service && !EventMaps::carriesOne(f.type)) {
-      std::string event = ErrorTextEventMap::event(f.name);
-      std::string message = ErrorTextEventMap::several(event, f.type->name());
-
-      return err(EventMapsEventMapFitsError{
-          .code = EventMapsEventMapFitsErrorCode::SEVERAL_VALUES,
-          .message = message,
-      });
-    }
-    if (service && f.type != EventMaps::serviceEventArgs()) {
-      std::string message = ErrorTextEventMap::service(f.name, f.type->name());
-
-      return err(EventMapsEventMapFitsError{
-          .code = EventMapsEventMapFitsErrorCode::SERVICE_EVENT,
-          .message = message,
-      });
+    ResultEventMapFits fits = EventMaps::eventFieldFits(f);
+    if (fits.isErr()) {
+      return fits;
     }
   }
 
   return ok(events);
+}
+
+EventMaps::ResultEventMapFits EventMaps::recordMapFits(const Type *events) {
+  const Type *args = events->valueType();
+  if (!args->isTuple()) {
+    std::string why = ErrorTextEventMap::notTuple(args->name());
+    std::string message = ErrorTextEventMap::notMap(why);
+
+    return err(EventMapsEventMapFitsError{
+        .code = EventMapsEventMapFitsErrorCode::NOT_A_MAP,
+        .message = message,
+    });
+  }
+  if (!EventMaps::carriesOne(args)) {
+    std::string event = ErrorTextEventMap::eachEvent();
+    std::string message = ErrorTextEventMap::several(event, args->name());
+
+    return err(EventMapsEventMapFitsError{
+        .code = EventMapsEventMapFitsErrorCode::SEVERAL_VALUES,
+        .message = message,
+    });
+  }
+
+  return ok(events);
+}
+
+EventMaps::ResultEventMapFits EventMaps::eventFieldFits(const Field &f) {
+  bool service = EventMaps::isServiceEvent(f.name);
+  if (f.type->isOptional()) {
+    std::string why = ErrorTextEventMap::optional(f.name);
+    std::string message = ErrorTextEventMap::notMap(why);
+
+    return err(EventMapsEventMapFitsError{
+        .code = EventMapsEventMapFitsErrorCode::NOT_A_MAP,
+        .message = message,
+    });
+  }
+  if (!f.type->isTuple()) {
+    std::string why = ErrorTextEventMap::fieldTuple(f.name, f.type->name());
+    std::string message = ErrorTextEventMap::notMap(why);
+
+    return err(EventMapsEventMapFitsError{
+        .code = EventMapsEventMapFitsErrorCode::NOT_A_MAP,
+        .message = message,
+    });
+  }
+  if (!service && !EventMaps::carriesOne(f.type)) {
+    std::string event = ErrorTextEventMap::event(f.name);
+    std::string message = ErrorTextEventMap::several(event, f.type->name());
+
+    return err(EventMapsEventMapFitsError{
+        .code = EventMapsEventMapFitsErrorCode::SEVERAL_VALUES,
+        .message = message,
+    });
+  }
+  if (service && f.type != EventMaps::serviceEventArgs()) {
+    std::string message = ErrorTextEventMap::service(f.name, f.type->name());
+
+    return err(EventMapsEventMapFitsError{
+        .code = EventMapsEventMapFitsErrorCode::SERVICE_EVENT,
+        .message = message,
+    });
+  }
+
+  return ok(f.type);
 }
 
 std::optional<std::string> EventMaps::eventKey(Expr *&name, llvm::StringRef method) {
@@ -269,65 +284,92 @@ const Type *EventMaps::listenerType(const Type *args, const Type *ret) {
 
 Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef event,
                                const Type *receiver, ListenerKind &kind) {
-  const Type *sync = EventMaps::listenerType(args, Type::voidTy());
-  const Type *async = EventMaps::listenerType(args, Type::promise(Type::voidTy()));
+  ListenerWant want{
+      .args = args,
+      .event = event,
+      .receiver = receiver,
+      .sync = EventMaps::listenerType(args, Type::voidTy()),
+      .async = EventMaps::listenerType(args, Type::promise(Type::voidTy())),
+  };
   kind = ListenerKind::Plain;
-  auto takesThis = [&](const Type *self, llvm::SMLoc loc) {
-    if (self->isError()) {
-      return false;
-    }
-    ResultListenerThis taken = EventMaps::listenerThis(self, receiver);
-    if (taken.isErr()) {
-      this->state.getDiagnostics().error(loc, taken.error().message);
-      return false;
-    }
-
-    return true;
-  };
-  auto withThis = [&](const Type *self) {
-    std::vector<const Type *> params{self};
-    params.insert(params.end(), sync->params().begin(), sync->params().end());
-
-    return Type::function(params, sync->minArgs() + 1, sync->hasRest(), Type::voidTy(), true);
-  };
-  if (auto *fe = dyn_cast<FunctionExpr>(arg)) {
-    FunctionDecl *fn = fe->fn;
-    if (!fn->params.empty() && fn->params[0].name == "this" && fn->params[0].type) {
-      const Type *self = this->typeResolver->resolveType(*fn->params[0].type, false);
-      if (!takesThis(self, fn->params[0].loc)) {
-        arg = this->exprChecker->checkExpr(arg);
-        return arg;
-      }
-      if (fn->isAsync) {
-        std::string message = ErrorTextListener::asyncThis();
-        this->state.getDiagnostics().error(fe->loc(), message);
-        arg = this->exprChecker->checkExpr(arg);
-        return arg;
-      }
-      kind = ListenerKind::This;
-      const Type *wanted = withThis(self);
-      Signature sig = ClosureChecker::signatureOf(wanted);
-      sig.voidResult = true;
-      arg = this->closureChecker->checkFunctionExpr(fe, &sig);
-      if (arg->type->isError()) {
-        return arg;
-      }
-      return this->typeRelations->convert(this->typeRelations->coerce(arg, wanted),
-                                          Type::unknown());
-    }
-    if (fn->isAsync) {
-      kind = ListenerKind::Async;
-    }
-    Signature sig = ClosureChecker::signatureOf(fn->isAsync ? async : sync);
-    sig.voidResult = !fn->isAsync;
-    arg = this->closureChecker->checkFunctionExpr(fe, &sig);
-    if (arg->type->isError()) {
-      return arg;
-    }
-    return this->typeRelations->convert(
-        this->typeRelations->coerce(arg, fn->isAsync ? async : sync), Type::unknown());
+  auto *fe = dyn_cast<FunctionExpr>(arg);
+  if (fe != nullptr) {
+    return this->checkListenerLiteral(fe, want, kind);
   }
-  arg = this->exprChecker->checkExpr(arg);
+  Expr *checked = this->exprChecker->checkExpr(arg);
+
+  return this->checkListenerValue(checked, want, kind);
+}
+
+bool EventMaps::listenerTakesThis(const ListenerWant &want, const Type *self, llvm::SMLoc loc) {
+  if (self->isError()) {
+    return false;
+  }
+  ResultListenerThis taken = EventMaps::listenerThis(self, want.receiver);
+  if (taken.isErr()) {
+    this->state.getDiagnostics().error(loc, taken.error().message);
+    return false;
+  }
+
+  return true;
+}
+
+const Type *EventMaps::withThis(const ListenerWant &want, const Type *self) {
+  const Type *sync = want.sync;
+  std::vector<const Type *> params{self};
+  params.insert(params.end(), sync->params().begin(), sync->params().end());
+
+  return Type::function(params, sync->minArgs() + 1, sync->hasRest(), Type::voidTy(), true);
+}
+
+Expr *EventMaps::checkListenerLiteral(FunctionExpr *fe, const ListenerWant &want,
+                                      ListenerKind &kind) {
+  FunctionDecl *fn = fe->fn;
+  bool explicitThis =
+      !fn->params.empty() && fn->params[0].name == "this" && fn->params[0].type.has_value();
+  if (explicitThis) {
+    return this->checkThisListener(fe, want, kind);
+  }
+  if (fn->isAsync) {
+    kind = ListenerKind::Async;
+  }
+  const Type *wanted = fn->isAsync ? want.async : want.sync;
+  Signature sig = ClosureChecker::signatureOf(wanted);
+  sig.voidResult = !fn->isAsync;
+  Expr *checked = this->closureChecker->checkFunctionExpr(fe, &sig);
+  if (checked->type->isError()) {
+    return checked;
+  }
+  Expr *coerced = this->typeRelations->coerce(checked, wanted);
+
+  return this->typeRelations->convert(coerced, Type::unknown());
+}
+
+Expr *EventMaps::checkThisListener(FunctionExpr *fe, const ListenerWant &want, ListenerKind &kind) {
+  FunctionDecl *fn = fe->fn;
+  const Type *self = this->typeResolver->resolveType(*fn->params[0].type, false);
+  if (!this->listenerTakesThis(want, self, fn->params[0].loc)) {
+    return this->exprChecker->checkExpr(fe);
+  }
+  if (fn->isAsync) {
+    std::string message = ErrorTextListener::asyncThis();
+    this->state.getDiagnostics().error(fe->loc(), message);
+    return this->exprChecker->checkExpr(fe);
+  }
+  kind = ListenerKind::This;
+  const Type *wanted = EventMaps::withThis(want, self);
+  Signature sig = ClosureChecker::signatureOf(wanted);
+  sig.voidResult = true;
+  Expr *checked = this->closureChecker->checkFunctionExpr(fe, &sig);
+  if (checked->type->isError()) {
+    return checked;
+  }
+  Expr *coerced = this->typeRelations->coerce(checked, wanted);
+
+  return this->typeRelations->convert(coerced, Type::unknown());
+}
+
+Expr *EventMaps::checkListenerValue(Expr *arg, const ListenerWant &want, ListenerKind &kind) {
   const Type *type = arg->type;
   if (type->isError()) {
     return arg;
@@ -338,34 +380,42 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
     return arg;
   }
   if (type->hasThis()) {
-    if (!takesThis(type->params()[0], arg->loc())) {
-      return arg;
-    }
-    kind = ListenerKind::This;
-    if (type == withThis(type->params()[0])) {
-      return this->typeRelations->convert(arg, Type::unknown());
-    }
-    std::string message = ErrorTextListener::gets(event, args->name(), type->name());
-    this->state.getDiagnostics().error(arg->loc(), message);
-    return arg;
+    return this->checkThisValue(arg, want, kind);
   }
   bool isAsync = type->ret()->isPromise();
   if (isAsync) {
     kind = ListenerKind::Async;
   }
-  const Type *wanted = isAsync ? async : sync;
+  const Type *wanted = isAsync ? want.async : want.sync;
   if (type == wanted) {
     return this->typeRelations->convert(arg, Type::unknown());
   }
-  if (isAsync && type->ret() != async->ret()) {
+  if (isAsync && type->ret() != want.async->ret()) {
     std::string message = ErrorTextListener::asyncRet(type->ret()->name());
     this->state.getDiagnostics().error(arg->loc(), message);
     return arg;
   }
-  if (Expr *adapted = this->functionValueChecker->adaptFunction(arg, wanted)) {
+  Expr *adapted = this->functionValueChecker->adaptFunction(arg, wanted);
+  if (adapted != nullptr) {
     return this->typeRelations->convert(adapted, Type::unknown());
   }
-  std::string message = ErrorTextListener::getsArrow(event, args->name(), type->name());
+  std::string message = ErrorTextListener::getsArrow(want.event, want.args->name(), type->name());
+  this->state.getDiagnostics().error(arg->loc(), message);
+
+  return arg;
+}
+
+Expr *EventMaps::checkThisValue(Expr *arg, const ListenerWant &want, ListenerKind &kind) {
+  const Type *type = arg->type;
+  const Type *self = type->params()[0];
+  if (!this->listenerTakesThis(want, self, arg->loc())) {
+    return arg;
+  }
+  kind = ListenerKind::This;
+  if (type == EventMaps::withThis(want, self)) {
+    return this->typeRelations->convert(arg, Type::unknown());
+  }
+  std::string message = ErrorTextListener::gets(want.event, want.args->name(), type->name());
   this->state.getDiagnostics().error(arg->loc(), message);
 
   return arg;

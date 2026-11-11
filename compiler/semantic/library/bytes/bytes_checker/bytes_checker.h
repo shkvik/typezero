@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/bytes/bytes_checker/bytes_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -39,6 +40,18 @@ private:
   static ResultBytesIndexing bytesIndexing(const Type *type);
   static ResultKnownEncoding knownEncoding(llvm::StringRef name);
   static std::optional<std::u16string> literalText(const Expr *e);
+
+  Expr *reportNoMember(MemberExpr *member);
+  Expr *keepObject(MemberExpr *member, Expr *value);
+  IntLitExpr *makeIntLiteral(llvm::SMLoc loc, int64_t value);
+  BoolLitExpr *makeBoolLiteral(llvm::SMLoc loc, bool value);
+  Expr *checkViewMember(MemberExpr *member, std::optional<BuiltinProperty> property);
+  Expr *checkDataViewMember(MemberExpr *member, std::optional<BuiltinProperty> property);
+  Expr *checkArrayBufferMember(MemberExpr *member, std::optional<BuiltinProperty> property);
+  Expr *checkTextEncoderMember(MemberExpr *member, std::optional<BuiltinProperty> property);
+  Expr *checkTextDecoderMember(MemberExpr *member, std::optional<BuiltinProperty> property);
+  Expr *readBuiltin(MemberExpr *member, Builtin builtin, const Type *result,
+                    std::vector<Expr *> args = {});
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

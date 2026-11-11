@@ -66,6 +66,41 @@ private:
                                               llvm::StringRef cls);
   void decorate(ClassDecl *cls, ClassField *field, FunctionDecl *method,
                 llvm::ArrayRef<DecoratorUse> uses);
+  struct DecorateRun {
+    ClassDecl *cls = nullptr;
+    ClassField *field = nullptr;
+    FunctionDecl *method = nullptr;
+    llvm::ArrayRef<DecoratorUse> uses;
+    Place own = Place::Class;
+    llvm::StringRef memberName;
+    llvm::SMLoc at;
+    const Type *earlyDescriptor = nullptr;
+    std::vector<Expr *> callees;
+    std::vector<size_t> takes;
+    bool descriptor = false;
+    VarSymbol *descVar = nullptr;
+    const Type *descType = nullptr;
+    ClassDecl *current = nullptr;
+  };
+
+  static bool hasKnownSignature(FuncSymbol *sym);
+  bool isMetadataCall(const Expr *expr) const;
+  const Type *methodDescriptor(DecorateRun &run);
+  const Type *factoryHint(DecorateRun &run, const Expr *expr);
+  void hoistDecorators(DecorateRun &run);
+  Expr *hoistDecorator(DecorateRun &run, const DecoratorUse &use);
+  bool decoratorsFit(DecorateRun &run);
+  bool decoratorFitsAt(DecorateRun &run, size_t i);
+  void declareDescriptor(DecorateRun &run);
+  VarSymbol *declareMethodImpl(const DecorateRun &run);
+  Expr *descriptorInit(const DecorateRun &run, const VarSymbol *impl);
+  static void addProperty(ObjectLitExpr *lit, llvm::StringRef name, Expr *value, llvm::SMLoc at);
+  static const FunctionDecl *designConstructor(const DecorateRun &run);
+  void applyDecorator(DecorateRun &run, size_t i);
+  void applyMetadata(DecorateRun &run, const DecoratorUse &use);
+  std::vector<Expr *> decoratorArgs(const DecorateRun &run, const DecoratorUse &use, Place place);
+  Expr *decoratorOutcome(DecorateRun &run, const DecoratorUse &use, Place place, Expr *applied);
+  void storeDescriptorValue(const DecorateRun &run);
   static ResultDecoratorArgsFit decoratorFits(llvm::StringRef label, Place place, size_t needs,
                                               size_t given, const Type *third);
   static ResultDecoratorReturns decoratorResult(llvm::StringRef label, const Type *result,

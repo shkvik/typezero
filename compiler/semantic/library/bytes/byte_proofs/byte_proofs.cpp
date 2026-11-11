@@ -208,145 +208,198 @@ Range ByteProofs::clampToType(const Expr *e, Range r) {
 }
 
 IntegerRange ByteProofs::computedRange(const Expr *e, llvm::ArrayRef<Range> parts) const {
-  if (!e->type || !e->type->nonOptional()->isInteger()) {
+  if (e->type == nullptr || !e->type->nonOptional()->isInteger()) {
     return {};
   }
-  if (std::optional<int64_t> c = this->constantFolder->intConstant(e)) {
-    return ByteProofs::exact(*c);
+  std::optional<int64_t> constant = this->constantFolder->intConstant(e);
+  if (constant.has_value()) {
+    return ByteProofs::exact(*constant);
   }
   switch (e->kind()) {
-  case Expr::Kind::Cast: {
-    auto *conv = cast<CastExpr>(e);
-    if (!conv->isImplicit() || !conv->operand->type || !conv->operand->type->isInteger()) {
-      return {};
-    }
-    Range r = parts[0];
-    const Type *to = conv->type->nonOptional();
-    if (!to->holds(conv->operand->type->nonOptional()) &&
-        !(ByteProofs::known(r) && *r.lo >= to->intMin() &&
-          (*r.hi < 0 || uint64_t(*r.hi) <= to->intMax()))) {
-      return {};
-    }
-    return r;
-  }
-  case Expr::Kind::Name: {
-    const VarSymbol *var = cast<NameExpr>(e)->var();
-    if (!var || !var->type->isInteger() || var->type->isWrapping()) {
-      return {};
-    }
-    Range r;
-    Term self = Term::of(var);
-    if (std::optional<int64_t> above =
-            this->state.getFlowState().getFacts().bound(self, Term::zero())) {
-      r.hi = std::min(*above - 1, kIntMax);
-    }
-    if (std::optional<int64_t> below =
-            this->state.getFlowState().getFacts().bound(Term::zero(), self)) {
-      r.lo = std::max(1 - *below, kIntMin);
-    }
-    return r;
-  }
-  case Expr::Kind::Member: {
-    auto *member = cast<MemberExpr>(e);
-    if (BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) ||
-        BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH)) {
-      return {0, Type::kMaxLength};
-    }
-    return {};
-  }
-  case Expr::Kind::Index: {
-    auto *index = cast<IndexExpr>(e);
-    int64_t lo, hi;
-    if (index->object->type && index->object->type->elementRange(lo, hi)) {
-      return {lo, hi};
-    }
-    return {};
-  }
-  case Expr::Kind::Call: {
-    auto *call = cast<CallExpr>(e);
-    int64_t lo, hi;
-    switch (call->builtin()) {
-      case Builtin::StrCharCodeAt:
-        return {0, 0xFFFF};
-      case Builtin::StrCodePointAt:
-        return {0, 0x10FFFF};
-      case Builtin::BytesAt:
-        if (cast<MemberExpr>(call->callee)->object->type->elementRange(lo, hi)) {
-          return {lo, hi};
-        }
-        return {};
-      case Builtin::NumConvert:
-        return parts[0];
-      case Builtin::DataViewGet:
-      case Builtin::BufferRead:
-        if (Type::bytesType(Bytes(cast<IntLitExpr>(call->args[0])->value))->elementRange(lo, hi)) {
-          return {lo, hi};
-        }
-        return {};
-      case Builtin::MathMin:
-      case Builtin::MathMax: {
-        if (call->hasSpread() || call->args.empty()) {
-          return {};
-        }
-        bool min = call->builtin() == Builtin::MathMin;
-        Range r = parts[0];
-        for (size_t i = 1; i < call->args.size(); ++i) {
-          Range next = parts[i];
-          Range both;
-          if (min) {
-            if (r.hi || next.hi) {
-              both.hi = r.hi && next.hi ? std::min(*r.hi, *next.hi) : r.hi ? *r.hi : *next.hi;
-            }
-            if (r.lo && next.lo) {
-              both.lo = std::min(*r.lo, *next.lo);
-            }
-          } else {
-            if (r.lo || next.lo) {
-              both.lo = r.lo && next.lo ? std::max(*r.lo, *next.lo) : r.lo ? *r.lo : *next.lo;
-            }
-            if (r.hi && next.hi) {
-              both.hi = std::max(*r.hi, *next.hi);
-            }
-          }
-          r = both;
-        }
-        return r;
-      }
-      default:
-        return {};
-    }
-  }
-  case Expr::Kind::Unary: {
-    auto *unary = cast<UnaryExpr>(e);
-    Range r = parts[0];
-    if (unary->op == UnaryOp::Plus) {
-      return r;
-    }
-    if (!ByteProofs::known(r)) {
-      return {};
-    }
-    if (unary->op == UnaryOp::Neg) {
-      return BytesCheckHelpers::operate(BinaryOp::Sub, ByteProofs::exact(0), r, false);
-    }
-    if (unary->op == UnaryOp::BitNot) {
-      return {-*r.hi - 1, -*r.lo - 1};
-    }
-    return {};
-  }
-  case Expr::Kind::Binary: {
-    auto *bin = cast<BinaryExpr>(e);
-    if (bin->op == BinaryOp::Nullish) {
+    case Expr::Kind::Cast:
+      return ByteProofs::castRange(cast<CastExpr>(e), parts[0]);
+    case Expr::Kind::Name:
+      return this->nameRange(cast<NameExpr>(e));
+    case Expr::Kind::Member:
+      return ByteProofs::memberRange(cast<MemberExpr>(e));
+    case Expr::Kind::Index:
+      return ByteProofs::elementRangeOf(cast<IndexExpr>(e)->object->type);
+    case Expr::Kind::Call:
+      return ByteProofs::callRange(cast<CallExpr>(e), parts);
+    case Expr::Kind::Unary:
+      return ByteProofs::unaryRange(cast<UnaryExpr>(e), parts[0]);
+    case Expr::Kind::Binary:
+      return ByteProofs::binaryRange(cast<BinaryExpr>(e), parts);
+    case Expr::Kind::Conditional:
       return ByteProofs::unite(parts[0], parts[1]);
-    }
-    return BytesCheckHelpers::operate(bin->op, parts[0], parts[1], false);
+    case Expr::Kind::Sequence:
+      return parts[0];
+    case Expr::Kind::IntLit:
+    case Expr::Kind::FloatLit:
+    case Expr::Kind::BoolLit:
+    case Expr::Kind::StringLit:
+    case Expr::Kind::Undefined:
+    case Expr::Kind::Template:
+    case Expr::Kind::ArrayLit:
+    case Expr::Kind::ObjectLit:
+    case Expr::Kind::Assign:
+    case Expr::Kind::Update:
+    case Expr::Kind::New:
+    case Expr::Kind::OptionalChain:
+    case Expr::Kind::Function:
+    case Expr::Kind::Yield:
+    case Expr::Kind::RegexLit:
+    case Expr::Kind::Await:
+    case Expr::Kind::Class:
+      return {};
   }
-  case Expr::Kind::Conditional:
-    return ByteProofs::unite(parts[0], parts[1]);
-  case Expr::Kind::Sequence:
-    return parts[0];
-  default:
+
+  return {};
+}
+
+IntegerRange ByteProofs::castRange(const CastExpr *conv, const IntegerRange &operand) {
+  const Type *from = conv->operand->type;
+  if (!conv->isImplicit() || from == nullptr || !from->isInteger()) {
     return {};
   }
+  const Type *to = conv->type->nonOptional();
+  bool inside = ByteProofs::known(operand) && *operand.lo >= to->intMin() &&
+                (*operand.hi < 0 || uint64_t(*operand.hi) <= to->intMax());
+  if (!to->holds(from->nonOptional()) && !inside) {
+    return {};
+  }
+
+  return operand;
+}
+
+IntegerRange ByteProofs::nameRange(const NameExpr *name) const {
+  const VarSymbol *var = name->var();
+  if (var == nullptr || !var->type->isInteger() || var->type->isWrapping()) {
+    return {};
+  }
+  IntegerRange r;
+  Term self = Term::of(var);
+  std::optional<int64_t> above = this->state.getFlowState().getFacts().bound(self, Term::zero());
+  if (above.has_value()) {
+    r.hi = std::min(*above - 1, kIntMax);
+  }
+  std::optional<int64_t> below = this->state.getFlowState().getFacts().bound(Term::zero(), self);
+  if (below.has_value()) {
+    r.lo = std::max(1 - *below, kIntMin);
+  }
+
+  return r;
+}
+
+IntegerRange ByteProofs::memberRange(const MemberExpr *member) {
+  bool length = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) ||
+                BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH);
+  if (!length) {
+    return {};
+  }
+
+  return {0, Type::kMaxLength};
+}
+
+IntegerRange ByteProofs::elementRangeOf(const Type *type) {
+  int64_t lo = 0;
+  int64_t hi = 0;
+  if (type == nullptr || !type->elementRange(lo, hi)) {
+    return {};
+  }
+
+  return {lo, hi};
+}
+
+IntegerRange ByteProofs::callRange(const CallExpr *call, llvm::ArrayRef<IntegerRange> parts) {
+  Builtin builtin = call->builtin();
+  if (builtin == Builtin::StrCharCodeAt) {
+    return {0, 0xFFFF};
+  }
+  if (builtin == Builtin::StrCodePointAt) {
+    return {0, 0x10FFFF};
+  }
+  if (builtin == Builtin::BytesAt) {
+    return ByteProofs::elementRangeOf(cast<MemberExpr>(call->callee)->object->type);
+  }
+  if (builtin == Builtin::NumConvert) {
+    return parts[0];
+  }
+  if (builtin == Builtin::DataViewGet || builtin == Builtin::BufferRead) {
+    auto *kind = cast<IntLitExpr>(call->args[0]);
+    return ByteProofs::elementRangeOf(Type::bytesType(Bytes(kind->value)));
+  }
+  if (builtin == Builtin::MathMin || builtin == Builtin::MathMax) {
+    return ByteProofs::minMaxRange(call, parts);
+  }
+
+  return {};
+}
+
+IntegerRange ByteProofs::minMaxRange(const CallExpr *call, llvm::ArrayRef<IntegerRange> parts) {
+  if (call->hasSpread() || call->args.empty()) {
+    return {};
+  }
+  bool min = call->builtin() == Builtin::MathMin;
+  IntegerRange r = parts[0];
+  for (size_t i = 1; i < call->args.size(); ++i) {
+    r = min ? ByteProofs::lowerOf(r, parts[i]) : ByteProofs::upperOf(r, parts[i]);
+  }
+
+  return r;
+}
+
+IntegerRange ByteProofs::lowerOf(const IntegerRange &a, const IntegerRange &b) {
+  IntegerRange both;
+  if (a.hi.has_value() && b.hi.has_value()) {
+    both.hi = std::min(*a.hi, *b.hi);
+  } else if (a.hi.has_value() || b.hi.has_value()) {
+    both.hi = a.hi.has_value() ? *a.hi : *b.hi;
+  }
+  if (a.lo.has_value() && b.lo.has_value()) {
+    both.lo = std::min(*a.lo, *b.lo);
+  }
+
+  return both;
+}
+
+IntegerRange ByteProofs::upperOf(const IntegerRange &a, const IntegerRange &b) {
+  IntegerRange both;
+  if (a.lo.has_value() && b.lo.has_value()) {
+    both.lo = std::max(*a.lo, *b.lo);
+  } else if (a.lo.has_value() || b.lo.has_value()) {
+    both.lo = a.lo.has_value() ? *a.lo : *b.lo;
+  }
+  if (a.hi.has_value() && b.hi.has_value()) {
+    both.hi = std::max(*a.hi, *b.hi);
+  }
+
+  return both;
+}
+
+IntegerRange ByteProofs::unaryRange(const UnaryExpr *unary, const IntegerRange &operand) {
+  if (unary->op == UnaryOp::Plus) {
+    return operand;
+  }
+  if (!ByteProofs::known(operand)) {
+    return {};
+  }
+  if (unary->op == UnaryOp::Neg) {
+    return BytesCheckHelpers::operate(BinaryOp::Sub, ByteProofs::exact(0), operand, false);
+  }
+  if (unary->op == UnaryOp::BitNot) {
+    return {-*operand.hi - 1, -*operand.lo - 1};
+  }
+
+  return {};
+}
+
+IntegerRange ByteProofs::binaryRange(const BinaryExpr *bin, llvm::ArrayRef<IntegerRange> parts) {
+  if (bin->op == BinaryOp::Nullish) {
+    return ByteProofs::unite(parts[0], parts[1]);
+  }
+
+  return BytesCheckHelpers::operate(bin->op, parts[0], parts[1], false);
 }
 
 bool ByteProofs::provesFits(const Expr *expr, int64_t lo, int64_t hi) const {

@@ -2,6 +2,7 @@
 
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/stmt/var_checker/var_checker_errors.h"
+#include "compiler/semantic/bodies/stmt/var_checker/var_checker_types.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
@@ -53,6 +54,36 @@ private:
   static ResultResultCheck resultChecked(const VarSymbol *var);
   static ResultVarHasTypes varTyped(const Untyped &u, const Type *type);
   static bool isTextChoice(const Expr *expr);
+
+  static bool isFreshArray(const Expr *value);
+  static void nameFunctionValue(VarDeclarator &d);
+  static const Expr *withoutImplicitCasts(const Expr *expr);
+  static std::vector<std::u16string> literalKeyTexts(const Expr *key);
+  std::vector<llvm::StringRef> reflectedNames(const Expr *key);
+  void walkDeclarator(const DeclaratorPlace &place);
+  void walkValueDeclarator(const DeclaratorPlace &place);
+  DeclaratorForm declaratorForm(const DeclaratorPlace &place);
+  void rememberReflection(VarDeclarator &d, const Expr *value);
+  void liftGenericFunction(const DeclaratorPlace &place, FunctionDecl *fn);
+  void declareGenericAlias(const DeclaratorPlace &place, FuncSymbol *generic);
+  void declareConstFunction(const DeclaratorPlace &place, FunctionExpr *function);
+  void findDestination(const DeclaratorPlace &place, VariableValue &variable);
+  void declareTimerEarly(const DeclaratorPlace &place, VariableValue &variable);
+  void walkVariableValue(const DeclaratorPlace &place, VariableValue &variable);
+  void walkInit(const DeclaratorPlace &place, VariableValue &variable);
+  void typeFromInit(const DeclaratorPlace &place, VariableValue &variable);
+  void typeConstWithoutValue(const DeclaratorPlace &place, VariableValue &variable);
+  void walkDestructuring(const DeclaratorPlace &place, VariableValue &variable);
+  void spreadTextIntoArray(const DeclaratorPlace &place, VariableValue &variable);
+  void destructureIterator(const DeclaratorPlace &place, VariableValue &variable);
+  void reportPatternShape(const DeclaratorPlace &place, VariableValue &variable);
+  void declareVariable(const DeclaratorPlace &place, const VariableValue &variable);
+  void markUnsharedArray(const VarDeclarator &d, const VariableValue &variable);
+  void rememberConstLiteral(const DeclaratorPlace &place, const VariableValue &variable);
+  void rememberResultVariable(const DeclaratorPlace &place, const VariableValue &variable);
+  void rememberFixedLength(const DeclaratorPlace &place, const VariableValue &variable);
+  void rememberConstNumber(const DeclaratorPlace &place, const VariableValue &variable);
+  void rememberConstText(const DeclaratorPlace &place, const VariableValue &variable);
 
   bool exported(llvm::StringRef name) const;
   SemanticState &state;

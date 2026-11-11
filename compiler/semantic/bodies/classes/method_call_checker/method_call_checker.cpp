@@ -137,44 +137,15 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   this->tzModulesChecker->noteTlsMethod(member, cls);
   call->type = Type::error();
   member->type = Type::error();
-  llvm::StringRef name = member->name;
-  if (Expr *checked = this->fsDeclarer->checkFsClassMethod(call, member, cls)) {
-    return checked;
+  Expr *library = this->checkLibraryMethodCall(call, member, cls);
+  if (library != nullptr) {
+    return library;
   }
-  if (Expr *checked = this->streamChecker->checkStreamCall(call, member, cls)) {
-    return checked;
+  const ClassField *field = ClassBases::findField(cls, member->name);
+  if (field != nullptr && !field->method()) {
+    return this->checkFieldCall(call, member);
   }
-  if (this->eventMaps->isEmitterClass(cls)) {
-    if (Expr *checked = this->emitterChecker->checkEmitterCall(call, member, cls, false)) {
-      return checked;
-    }
-  }
-  if (ClassDecl *target = this->state.getLibraryDeclarations().findLibraryClass("EventTarget");
-      target && cls->derivesFrom(target)) {
-    if (Expr *checked = this->eventTargetChecker->checkEventTargetCall(call, member, cls)) {
-      return checked;
-    }
-  }
-  const ClassField *field = ClassBases::findField(cls, name);
-  if (field && !field->method()) {
-    call->callee = this->classMemberChecker->checkClassMember(member, nullptr);
-    ResultFieldIsCallable callable = MethodCallChecker::fieldCallable(call->callee->type, name);
-    if (callable.isOk()) {
-      CallChecker::ResultValueCallTyped valued =
-          this->callChecker->checkValueCall(call, callable.value());
-      if (valued.isErr()) {
-        this->state.getDiagnostics().error(call->callee->loc(), valued.error().message);
-        return call;
-      }
-      return valued.value();
-    }
-    if (callable.error().code != MethodCallCheckerFieldCallableErrorCode::ALREADY_REPORTED) {
-      this->state.getDiagnostics().error(member->loc(), callable.error().message);
-    }
-    this->argumentChecker->checkArgsLoosely(call);
-    return call;
-  }
-  ResultMethodsAreFound found = MethodCallChecker::instanceMethods(cls, name);
+  ResultMethodsAreFound found = MethodCallChecker::instanceMethods(cls, member->name);
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
     this->argumentChecker->checkArgsLoosely(call);
@@ -182,11 +153,7 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   }
   std::vector<FunctionDecl *> methods = found.value();
   if (methods.size() == 1) {
-    ClassMemberChecker::ResultMemberAccessible accessible = this->classMemberChecker->checkAccess(
-        methods[0]->cls(), methods[0]->access(), name, member->object);
-    if (accessible.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), accessible.error().message);
-    }
+    this->walkMethodAccess(member, methods[0]);
   }
   ResultFieldsAreAllSet ready = this->fieldsSet(member);
   if (ready.isErr()) {
@@ -204,12 +171,8 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
     return call;
   }
   FuncSymbol *sym = picked.value();
-  if (methods.size() > 1 && sym->decl) {
-    ClassMemberChecker::ResultMemberAccessible accessible = this->classMemberChecker->checkAccess(
-        sym->decl->cls(), sym->decl->access(), name, member->object);
-    if (accessible.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), accessible.error().message);
-    }
+  if (methods.size() > 1 && sym->decl != nullptr) {
+    this->walkMethodAccess(member, sym->decl);
   }
   ResultTypeArgsAllowed allowed = MethodCallChecker::methodTypeArgs(sym, member);
   if (allowed.isErr()) {
@@ -219,14 +182,80 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
     return this->overloadResolver->callGenericVariant(call, sym, bound, member->loc(), true);
   }
   if (sym->isGeneric()) {
-    this->typeArgInferrer->checkGenericCall(call, sym, member->loc(), expected, member->typeArgs);
-    call->target = MethodCall{.method = call->func()};
-    if (call->method()) {
-      member->type = this->returnInferrer->functionType(call->method());
-    }
-    return call;
+    return this->checkGenericMethodCall(call, member, sym, expected);
   }
-  if (FunctionDecl *impl = ClassLinks::soleImplementation(cls, sym->decl)) {
+
+  return this->checkPlainMethodCall(call, member, cls, sym, checked);
+}
+
+Expr *MethodCallChecker::checkLibraryMethodCall(CallExpr *call, MemberExpr *member,
+                                                ClassDecl *cls) {
+  Expr *fs = this->fsDeclarer->checkFsClassMethod(call, member, cls);
+  if (fs != nullptr) {
+    return fs;
+  }
+  Expr *stream = this->streamChecker->checkStreamCall(call, member, cls);
+  if (stream != nullptr) {
+    return stream;
+  }
+  Expr *emitter = this->eventMaps->isEmitterClass(cls)
+                      ? this->emitterChecker->checkEmitterCall(call, member, cls, false)
+                      : nullptr;
+  if (emitter != nullptr) {
+    return emitter;
+  }
+  ClassDecl *target = this->state.getLibraryDeclarations().findLibraryClass("EventTarget");
+  if (target == nullptr || !cls->derivesFrom(target)) {
+    return nullptr;
+  }
+
+  return this->eventTargetChecker->checkEventTargetCall(call, member, cls);
+}
+
+Expr *MethodCallChecker::checkFieldCall(CallExpr *call, MemberExpr *member) {
+  call->callee = this->classMemberChecker->checkClassMember(member, nullptr);
+  ResultFieldIsCallable callable =
+      MethodCallChecker::fieldCallable(call->callee->type, member->name);
+  if (callable.isOk()) {
+    CallChecker::ResultValueCallTyped valued =
+        this->callChecker->checkValueCall(call, callable.value());
+    if (valued.isErr()) {
+      this->state.getDiagnostics().error(call->callee->loc(), valued.error().message);
+      return call;
+    }
+    return valued.value();
+  }
+  if (callable.error().code != MethodCallCheckerFieldCallableErrorCode::ALREADY_REPORTED) {
+    this->state.getDiagnostics().error(member->loc(), callable.error().message);
+  }
+  this->argumentChecker->checkArgsLoosely(call);
+
+  return call;
+}
+
+void MethodCallChecker::walkMethodAccess(MemberExpr *member, FunctionDecl *method) {
+  ClassMemberChecker::ResultMemberAccessible accessible = this->classMemberChecker->checkAccess(
+      method->cls(), method->access(), member->name, member->object);
+  if (accessible.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), accessible.error().message);
+  }
+}
+
+Expr *MethodCallChecker::checkGenericMethodCall(CallExpr *call, MemberExpr *member, FuncSymbol *sym,
+                                                const Type *expected) {
+  this->typeArgInferrer->checkGenericCall(call, sym, member->loc(), expected, member->typeArgs);
+  call->target = MethodCall{.method = call->func()};
+  if (call->method() != nullptr) {
+    member->type = this->returnInferrer->functionType(call->method());
+  }
+
+  return call;
+}
+
+Expr *MethodCallChecker::checkPlainMethodCall(CallExpr *call, MemberExpr *member, ClassDecl *cls,
+                                              FuncSymbol *sym, bool checked) {
+  FunctionDecl *impl = ClassLinks::soleImplementation(cls, sym->decl);
+  if (impl != nullptr) {
     call->target = MethodCall{.method = impl->sym};
   } else {
     call->target = MethodCall{.method = sym, .virtualCall = true};
@@ -324,6 +353,26 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
     }
     return expr;
   }
+  this->walkNewClass(expr, cls);
+  this->classDeclarer->completeClass(cls);
+  auto *call = this->state.getAst().make<CallExpr>(expr->loc(), nullptr, std::move(expr->args));
+  expr->form = ClassNew{.cls = cls, .ctor = call};
+  call->type = Type::voidTy();
+  std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(cls);
+  bool made = ctors.empty() ? this->noArgumentsFit(expr, call, cls)
+                            : this->constructorChosen(expr, call, ctors);
+  if (!made) {
+    return expr;
+  }
+  if (MethodCallChecker::hasInitializer(cls)) {
+    this->flowChecker->calledFunction();
+  }
+  expr->type = cls->type;
+
+  return expr;
+}
+
+void MethodCallChecker::walkNewClass(const NewExpr *expr, const ClassDecl *cls) {
   ResultNoTypeArguments plain = MethodCallChecker::classTypeArgs(expr, cls);
   if (plain.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), plain.error().message);
@@ -336,50 +385,53 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
   if (concrete.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), concrete.error().message);
   }
-  this->classDeclarer->completeClass(cls);
-  auto *call = this->state.getAst().make<CallExpr>(expr->loc(), nullptr, std::move(expr->args));
-  expr->form = ClassNew{.cls = cls, .ctor = call};
-  call->type = Type::voidTy();
-  std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(cls);
-  if (ctors.empty()) {
-    ResultArgumentsAbsent absent = MethodCallChecker::argumentsAbsent(call, cls);
-    if (absent.isErr()) {
-      this->state.getDiagnostics().error(expr->loc(), absent.error().message);
-      this->argumentChecker->checkArgsLoosely(call);
-      return expr;
-    }
-  } else {
-    bool checked = false;
-    OverloadResolver::ResultVariantChosen picked =
-        this->overloadResolver->chooseVariant(ctors, call->args, {}, checked);
-    if (picked.isErr() &&
-        picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
-      this->state.getDiagnostics().error(expr->loc(), picked.error().message);
-    }
-    if (picked.isErr()) {
-      return expr;
-    }
-    FuncSymbol *sym = picked.value();
-    const FunctionDecl *chosen = sym->decl ? sym->decl : ctors[0];
-    ClassMemberChecker::ResultMemberAccessible accessible =
-        this->classMemberChecker->checkAccess(chosen->cls(), chosen->access(), "constructor");
-    if (accessible.isErr()) {
-      this->state.getDiagnostics().error(expr->loc(), accessible.error().message);
-    }
-    call->target = FunctionCall{.func = sym};
-    std::vector<bool> given(checked ? call->args.size() : 0, true);
-    this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
-                                          expr->loc(), &given);
-  }
-  for (const ClassDecl *c = cls; c; c = c->parent) {
-    if (c->init || !c->constructors.empty()) {
-      this->flowChecker->calledFunction();
-      break;
-    }
-  }
-  expr->type = cls->type;
-
-  return expr;
 }
 
+bool MethodCallChecker::noArgumentsFit(const NewExpr *expr, CallExpr *call, const ClassDecl *cls) {
+  ResultArgumentsAbsent absent = MethodCallChecker::argumentsAbsent(call, cls);
+  if (absent.isOk()) {
+    return true;
+  }
+  this->state.getDiagnostics().error(expr->loc(), absent.error().message);
+  this->argumentChecker->checkArgsLoosely(call);
+
+  return false;
+}
+
+bool MethodCallChecker::constructorChosen(const NewExpr *expr, CallExpr *call,
+                                          llvm::ArrayRef<FunctionDecl *> ctors) {
+  bool checked = false;
+  OverloadResolver::ResultVariantChosen picked =
+      this->overloadResolver->chooseVariant(ctors, call->args, {}, checked);
+  if (picked.isErr() &&
+      picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
+    this->state.getDiagnostics().error(expr->loc(), picked.error().message);
+  }
+  if (picked.isErr()) {
+    return false;
+  }
+  FuncSymbol *sym = picked.value();
+  const FunctionDecl *chosen = sym->decl != nullptr ? sym->decl : ctors[0];
+  ClassMemberChecker::ResultMemberAccessible accessible =
+      this->classMemberChecker->checkAccess(chosen->cls(), chosen->access(), "constructor");
+  if (accessible.isErr()) {
+    this->state.getDiagnostics().error(expr->loc(), accessible.error().message);
+  }
+  call->target = FunctionCall{.func = sym};
+  std::vector<bool> given(checked ? call->args.size() : 0, true);
+  this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest, expr->loc(),
+                                        &given);
+
+  return true;
+}
+
+bool MethodCallChecker::hasInitializer(const ClassDecl *cls) {
+  for (const ClassDecl *c = cls; c != nullptr; c = c->parent) {
+    if (c->init != nullptr || !c->constructors.empty()) {
+      return true;
+    }
+  }
+
+  return false;
+}
 }

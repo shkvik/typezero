@@ -39,6 +39,23 @@ private:
   static NodeChildren<const Expr *> spreadOptions(const Expr *options);
   static bool nodeMayBeFatal(const Expr *options, std::vector<bool> &answers);
   static bool fatalFlag(const Expr *value);
+  static Expr *madeBuiltin(CallExpr *call, Builtin builtin, const Type *result);
+  Expr *reportBytesNew(NewExpr *expr, const std::string &message);
+  void walkArgsLoosely(NewExpr *expr);
+  bool hasWrongArity(CallExpr *call, unsigned min, unsigned max);
+  void walkNonNegative(const Expr *value, const std::string &what);
+  void walkView(CallExpr *call, int64_t elementSize, const std::string &what);
+  Expr *checkArrayBufferNew(NewExpr *expr, CallExpr *call, const Type *type);
+  Expr *checkDataViewNew(CallExpr *call, const Type *type);
+  Expr *checkTextEncoderNew(CallExpr *call, const Type *type);
+  Expr *checkTextDecoderNew(CallExpr *call, const Type *type);
+  static const Type *decoderOptionsType();
+  std::optional<Expr *> checkDecoderLabelArg(CallExpr *call, IntLitExpr *resolved);
+  std::optional<std::u16string> knownDecoderName(const Expr *label, const std::u16string &text);
+  bool decoderLabelsFit(const Expr *checked, llvm::SMLoc at);
+  Expr *decoderNameLiteral(llvm::SMLoc loc, const std::u16string &name);
+  Expr *checkTypedArrayNew(CallExpr *call, const Type *type);
+  Expr *checkLengthNew(CallExpr *call, const Type *type);
 
   SemanticState &state;
   Prelude *prelude = nullptr;

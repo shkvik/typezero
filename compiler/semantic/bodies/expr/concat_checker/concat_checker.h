@@ -26,6 +26,13 @@ private:
 
   static const Expr *unconverted(const Expr *expr);
   static ResultConvertsToText convertible(const Expr *expr);
+  static std::optional<ConcatCheckerConvertibleErrorCode> textProblem(const Expr *expr);
+  static bool hasOwnToString(const Type *base);
+  static const Type *heldUnionMember(const Type *base);
+  static std::string textProblemMessage(const Expr *expr,
+                                        ConcatCheckerConvertibleErrorCode problem);
+  static std::string ownStringMessage(const Expr *expr);
+  static std::string dictMessage(const Type *base);
   static void concatParts(const BinaryExpr *bin, Parts &parts);
   static const BinaryExpr *leftConcat(const BinaryExpr *bin);
   static std::string concatTemplate(const Parts &parts, llvm::StringRef &only);

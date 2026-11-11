@@ -63,13 +63,22 @@ ClassBases::ResultParentClassFound ClassBases::baseClass(const ClassDecl *cls, c
         .message = message,
     });
   }
-  if (instance && !parent) {
+  if (instance && parent == nullptr) {
     return err(ClassBasesBaseClassError{
         .code = ClassBasesBaseClassErrorCode::ALREADY_REPORTED,
         .message = "",
     });
   }
-  if (parent && (parent == cls || parent->stage == ClassStage::RESOLVING_BASE)) {
+  if (parent != nullptr) {
+    return this->usableParent(cls, parent);
+  }
+
+  return ClassBases::missingParent(cls, ref, found);
+}
+
+ClassBases::ResultParentClassFound ClassBases::usableParent(const ClassDecl *cls,
+                                                            ClassDecl *parent) const {
+  if (parent == cls || parent->stage == ClassStage::RESOLVING_BASE) {
     llvm::StringRef through = parent == cls ? llvm::StringRef() : parent->name;
     std::string message = ErrorTextExtends::itself(cls->name, through);
 
@@ -86,7 +95,7 @@ ClassBases::ResultParentClassFound ClassBases::baseClass(const ClassDecl *cls, c
         .message = message,
     });
   }
-  if (parent && parent->baseExpr && parent->stage == ClassStage::UNRESOLVED) {
+  if (parent->baseExpr && parent->stage == ClassStage::UNRESOLVED) {
     std::string message = ErrorTextExtends::valueBase(cls->name, parent->name);
 
     return err(ClassBasesBaseClassError{
@@ -94,10 +103,13 @@ ClassBases::ResultParentClassFound ClassBases::baseClass(const ClassDecl *cls, c
         .message = message,
     });
   }
-  if (parent) {
-    return ok(parent);
-  }
-  if (!found && ClassBases::isErrorClass(ref.name)) {
+
+  return ok(parent);
+}
+
+ClassBases::ResultParentClassFound
+ClassBases::missingParent(const ClassDecl *cls, const TypeRef &ref, const Stmt *found) {
+  if (found == nullptr && ClassBases::isErrorClass(ref.name)) {
     std::string message = ErrorTextExtends::errorClass(ref.name, cls->name);
 
     return err(ClassBasesBaseClassError{
@@ -105,7 +117,7 @@ ClassBases::ResultParentClassFound ClassBases::baseClass(const ClassDecl *cls, c
         .message = message,
     });
   }
-  if (found) {
+  if (found != nullptr) {
     bool alias = isa<TypeAliasDecl>(found);
     std::string message = ErrorTextExtends::notClass(ref.name, cls->name, alias);
 
@@ -220,108 +232,146 @@ ClassBases::ResultValueOnRedeclare ClassBases::valueGiven(const ClassDecl *cls,
 void ClassBases::resolveClassBases(ClassDecl *cls) {
   cls->stage = ClassStage::RESOLVING_BASE;
   if (cls->base) {
-    const TypeRef &ref = *cls->base;
-    bool named = ref.kind() == TypeRefKind::NAME_REF || ref.kind() == TypeRefKind::GENERIC_REF;
-    Stmt *found = named ? this->typeDeclarer->lookupType(ref.name) : nullptr;
-    auto *parent = llvm::dyn_cast_or_null<ClassDecl>(found);
-    bool instance = false;
-    if (parent && parent->library() && parent->name == "EventEmitter" &&
-        ref.kind() == TypeRefKind::NAME_REF) {
-      Type *events = this->eventMapInference->classEventMap(cls);
-      ClassDecl *emitter = parent;
-      GenericClassInstantiator::ResultClassMade made =
-          this->genericClassInstantiator->instantiateClass(emitter, {events}, ref.loc);
-      if (made.isErr() && made.error().code !=
-                              GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
-        llvm::SMLoc at =
-            made.error().code ==
-                    GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
-                ? emitter->loc()
-                : ref.loc;
-        this->state.getDiagnostics().error(at, made.error().message);
-      }
-      parent = made.isOk() ? made.value() : nullptr;
-      instance = true;
-      if (!parent) {
-        found = nullptr;
-      }
-    } else if (parent && (parent->isGeneric() || ref.kind() == TypeRefKind::GENERIC_REF)) {
-      const Type *type = this->typeResolver->resolveType(ref, false);
-      parent = ClassDeclarer::classOf(type);
-      instance = true;
-      if (!parent) {
-        found = nullptr;
-      }
-    }
-    ResultParentClassFound base = this->baseClass(cls, ref, named, instance, parent, found);
-    if (base.isErr() && base.error().code != ClassBasesBaseClassErrorCode::ALREADY_REPORTED) {
-      this->state.getDiagnostics().error(ref.loc, base.error().message);
-    }
-    if (base.isOk()) {
-      this->state.getScopeStack().enterOnlyTypes(this->state.getScopeStack().getTopTypes());
-      if (Module *home = this->state.getModuleStates().findDeclModule(parent);
-          home && home != this->state.getModuleStates().getCurrentModule() &&
-          this->state.getScopeStack().isTopLevel()) {
-        Module *here = this->state.getModuleStates().getCurrentModule();
-        this->moduleDeclarer->useModule(home);
-        this->classDeclarer->resolveClass(parent);
-        this->moduleDeclarer->useModule(here);
-      } else {
-        this->classDeclarer->resolveClass(parent);
-      }
-      this->state.getScopeStack().leaveOnlyTypes();
-      cls->parent = parent;
-      parent->children.push_back(cls);
-      this->addBase(cls->type, parent->type);
-    }
+    this->resolveParentClass(cls, *cls->base);
   }
   for (const TypeRef &ref : cls->interfaces) {
-    const Type *type = this->typeResolver->resolveType(ref, false);
-    if (type->isError()) {
-      continue;
-    }
-    ResultImplementedShape shape = ClassBases::implementedType(type, cls);
-    if (shape.isErr()) {
-      this->state.getDiagnostics().error(ref.loc, shape.error().message);
-    } else if (!llvm::is_contained(cls->implemented, type)) {
-      cls->implemented.push_back(type);
-      this->addBase(cls->type, type);
-    }
+    this->addImplemented(cls, ref);
   }
   cls->stage = ClassStage::RESOLVED;
-
   for (ClassField &f : cls->fields) {
-    if (f.isStatic()) {
-      continue;
-    }
-    const ClassDecl *owner = nullptr;
-    const ClassField *inherited =
-        cls->parent ? ClassBases::findField(cls->parent, f.name, &owner) : nullptr;
-    if (inherited && inherited->method()) {
-      continue;
-    }
-    if (!inherited) {
-      ResultOverrideTargeted target = ClassBases::overrideTarget(cls, f);
-      if (target.isErr()) {
-        this->state.getDiagnostics().error(f.loc, target.error().message);
-      }
-      continue;
-    }
-    ResultInheritedVisible visible = ClassBases::inheritedVisible(f, inherited, owner);
-    if (visible.isErr()) {
-      this->state.getDiagnostics().error(f.loc, visible.error().message);
-      continue;
-    }
-    ResultAccessIsNotLower access = ClassBases::accessKept(f, inherited, owner, cls);
-    if (access.isErr()) {
-      this->state.getDiagnostics().error(f.loc, access.error().message);
-    }
-    ResultValueOnRedeclare valued = ClassBases::valueGiven(cls, f, owner);
-    if (valued.isErr()) {
-      this->state.getDiagnostics().error(f.loc, valued.error().message);
-    }
-    f.redeclared = true;
+    this->walkRedeclaredField(cls, f);
   }
+}
+
+void ClassBases::resolveParentClass(ClassDecl *cls, const TypeRef &ref) {
+  bool named = ref.kind() == TypeRefKind::NAME_REF || ref.kind() == TypeRefKind::GENERIC_REF;
+  Stmt *found = named ? this->typeDeclarer->lookupType(ref.name) : nullptr;
+  ParentLookup lookup = this->parentOf(cls, ref, found);
+  ResultParentClassFound base =
+      this->baseClass(cls, ref, named, lookup.instance, lookup.parent, lookup.found);
+  if (base.isErr() && base.error().code != ClassBasesBaseClassErrorCode::ALREADY_REPORTED) {
+    this->state.getDiagnostics().error(ref.loc, base.error().message);
+  }
+  if (base.isErr()) {
+    return;
+  }
+
+  return this->linkParent(cls, lookup.parent);
+}
+
+ClassBases::ParentLookup ClassBases::parentOf(ClassDecl *cls, const TypeRef &ref, Stmt *found) {
+  auto *parent = llvm::dyn_cast_or_null<ClassDecl>(found);
+  bool emitter = parent != nullptr && parent->library() && parent->name == "EventEmitter" &&
+                 ref.kind() == TypeRefKind::NAME_REF;
+  if (emitter) {
+    return this->emitterParent(cls, ref, parent, found);
+  }
+  bool generic =
+      parent != nullptr && (parent->isGeneric() || ref.kind() == TypeRefKind::GENERIC_REF);
+  if (!generic) {
+    return ParentLookup{
+        .parent = parent,
+        .found = found,
+        .instance = false,
+    };
+  }
+  const Type *type = this->typeResolver->resolveType(ref, false);
+  ClassDecl *inst = ClassDeclarer::classOf(type);
+
+  return ParentLookup{
+      .parent = inst,
+      .found = inst != nullptr ? found : nullptr,
+      .instance = true,
+  };
+}
+
+ClassBases::ParentLookup ClassBases::emitterParent(ClassDecl *cls, const TypeRef &ref,
+                                                   ClassDecl *emitter, Stmt *found) {
+  Type *events = this->eventMapInference->classEventMap(cls);
+  GenericClassInstantiator::ResultClassMade made =
+      this->genericClassInstantiator->instantiateClass(emitter, {events}, ref.loc);
+  if (made.isErr() &&
+      made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+    bool endless =
+        made.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES;
+    llvm::SMLoc at = endless ? emitter->loc() : ref.loc;
+    this->state.getDiagnostics().error(at, made.error().message);
+  }
+  ClassDecl *parent = made.isOk() ? made.value() : nullptr;
+
+  return ParentLookup{
+      .parent = parent,
+      .found = parent != nullptr ? found : nullptr,
+      .instance = true,
+  };
+}
+
+void ClassBases::linkParent(ClassDecl *cls, ClassDecl *parent) {
+  this->state.getScopeStack().enterOnlyTypes(this->state.getScopeStack().getTopTypes());
+  Module *home = this->state.getModuleStates().findDeclModule(parent);
+  Module *here = this->state.getModuleStates().getCurrentModule();
+  bool foreign = home != nullptr && home != here && this->state.getScopeStack().isTopLevel();
+  if (foreign) {
+    this->moduleDeclarer->useModule(home);
+    this->classDeclarer->resolveClass(parent);
+    this->moduleDeclarer->useModule(here);
+  } else {
+    this->classDeclarer->resolveClass(parent);
+  }
+  this->state.getScopeStack().leaveOnlyTypes();
+  cls->parent = parent;
+  parent->children.push_back(cls);
+  this->addBase(cls->type, parent->type);
+}
+
+void ClassBases::addImplemented(ClassDecl *cls, const TypeRef &ref) {
+  const Type *type = this->typeResolver->resolveType(ref, false);
+  if (type->isError()) {
+    return;
+  }
+  ResultImplementedShape shape = ClassBases::implementedType(type, cls);
+  if (shape.isErr()) {
+    this->state.getDiagnostics().error(ref.loc, shape.error().message);
+    return;
+  }
+  if (llvm::is_contained(cls->implemented, type)) {
+    return;
+  }
+  cls->implemented.push_back(type);
+  this->addBase(cls->type, type);
+}
+
+void ClassBases::walkRedeclaredField(ClassDecl *cls, ClassField &f) {
+  if (f.isStatic()) {
+    return;
+  }
+  const ClassDecl *owner = nullptr;
+  const ClassField *inherited =
+      cls->parent != nullptr ? ClassBases::findField(cls->parent, f.name, &owner) : nullptr;
+  if (inherited != nullptr && inherited->method()) {
+    return;
+  }
+  if (inherited == nullptr) {
+    ResultOverrideTargeted target = ClassBases::overrideTarget(cls, f);
+    if (target.isErr()) {
+      this->state.getDiagnostics().error(f.loc, target.error().message);
+    }
+    return;
+  }
+  ResultInheritedVisible visible = ClassBases::inheritedVisible(f, inherited, owner);
+  if (visible.isErr()) {
+    this->state.getDiagnostics().error(f.loc, visible.error().message);
+    return;
+  }
+  ResultAccessIsNotLower access = ClassBases::accessKept(f, inherited, owner, cls);
+  if (access.isErr()) {
+    this->state.getDiagnostics().error(f.loc, access.error().message);
+  }
+  ResultValueOnRedeclare valued = ClassBases::valueGiven(cls, f, owner);
+  if (valued.isErr()) {
+    this->state.getDiagnostics().error(f.loc, valued.error().message);
+  }
+  f.redeclared = true;
 }
 
 ClassBases::ResultInterfaceNotSelf ClassBases::notSelf(const TypeAliasDecl *alias,
@@ -448,101 +498,153 @@ ClassBases::ResultFieldNarrowsDown ClassBases::narrowsField(const TypeAliasDecl 
 std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias,
                                                std::vector<const Type *> &bases,
                                                std::vector<Overload> &overloads) {
-  std::vector<Field> fields;
-  std::vector<std::string> origins;
+  InterfaceShape shape;
   for (const TypeRef &ref : alias->bases) {
-    Stmt *found =
-        ref.kind() == TypeRefKind::NAME_REF ? this->typeDeclarer->lookupType(ref.name) : nullptr;
-    auto *other = llvm::dyn_cast_or_null<TypeAliasDecl>(found);
-    ResultInterfaceNotSelf self = ClassBases::notSelf(alias, other);
-    if (self.isErr()) {
-      this->state.getDiagnostics().error(ref.loc, self.error().message);
-      continue;
-    }
-    const Type *base = this->typeResolver->resolveType(ref, false);
-    if (base->isError()) {
-      continue;
-    }
-    ResultObjectTypeAsBase shape = ClassBases::interfaceBase(base);
-    if (shape.isErr()) {
-      this->state.getDiagnostics().error(ref.loc, shape.error().message);
-      continue;
-    }
-    if (llvm::is_contained(bases, base)) {
+    const Type *base = this->interfaceBaseType(alias, ref, bases);
+    if (base == nullptr) {
       continue;
     }
     bases.push_back(base);
-    for (const Overload &o : base->overloads()) {
-      auto it = llvm::find_if(overloads, [&](const Overload &p) { return p.name == o.name; });
-      if (it == overloads.end()) {
-        overloads.push_back(o);
-        continue;
-      }
-      ResultMethodSignatures signatures = ClassBases::sameSignatures(alias, *it, o);
-      if (signatures.isErr()) {
-        this->state.getDiagnostics().error(ref.loc, signatures.error().message);
-      }
-    }
-    std::string baseName = ref.name.str();
-    for (const Field &f : base->fields()) {
-      auto it = llvm::find_if(fields, [&](const Field &g) { return g.name == f.name; });
-      if (it == fields.end()) {
-        fields.push_back(f);
-        origins.push_back(baseName);
-        continue;
-      }
-      const std::string &origin = origins[size_t(it - fields.begin())];
-      ResultFieldTypesAreOne one = ClassBases::sameFieldType(alias, *it, f, origin, baseName);
-      if (one.isErr()) {
-        this->state.getDiagnostics().error(ref.loc, one.error().message);
-      } else {
-        it->readonly = it->readonly && f.readonly;
-      }
-    }
+    this->mergeBaseOverloads(alias, ref, base, overloads);
+    this->mergeBaseFields(alias, ref, base, shape);
   }
-  const TypeRef &own = alias->type;
   std::vector<Overload> ownOverloads;
-  std::vector<Field> ownFields = this->typeResolver->resolveFields(own, &ownOverloads);
+  std::vector<Field> ownFields = this->typeResolver->resolveFields(alias->type, &ownOverloads);
   for (const Overload &o : ownOverloads) {
-    ResultUnusedMethodName unused = ClassBases::newOverload(alias, o, fields, overloads);
+    ResultUnusedMethodName unused = ClassBases::newOverload(alias, o, shape.fields, overloads);
     if (unused.isErr()) {
       this->state.getDiagnostics().error(alias->loc(), unused.error().message);
     } else {
       overloads.push_back(o);
     }
   }
-  for (Field &f : ownFields) {
-    ResultUnusedMemberName unused = ClassBases::newField(alias, f, overloads);
-    if (unused.isErr()) {
-      this->state.getDiagnostics().error(alias->loc(), unused.error().message);
-      continue;
-    }
-    llvm::SMLoc loc = alias->loc();
-    for (size_t i = 0; i < own.names().size(); ++i) {
-      if (own.names()[i] == f.name) {
-        loc = own.locs()[i];
-      }
-    }
-    auto it = llvm::find_if(fields, [&](const Field &g) { return g.name == f.name; });
-    if (it == fields.end()) {
-      fields.push_back(f);
-      origins.push_back(alias->name.str());
-      continue;
-    }
-    const std::string &origin = origins[size_t(it - fields.begin())];
-    ResultFieldNarrowsDown narrows = ClassBases::narrowsField(alias, f, *it, origin);
-    if (narrows.isErr()) {
-      this->state.getDiagnostics().error(loc, narrows.error().message);
-      continue;
-    }
-    if (it->type != f.type || (f.readonly && !it->readonly)) {
-      this->state.getWideningStore().markFieldsNarrowed();
-    }
-    it->type = f.type;
-    it->readonly = f.readonly;
+  for (const Field &f : ownFields) {
+    this->addOwnField(alias, f, overloads, shape);
   }
 
-  return fields;
+  return shape.fields;
+}
+
+const Type *ClassBases::interfaceBaseType(const TypeAliasDecl *alias, const TypeRef &ref,
+                                          llvm::ArrayRef<const Type *> bases) {
+  Stmt *found =
+      ref.kind() == TypeRefKind::NAME_REF ? this->typeDeclarer->lookupType(ref.name) : nullptr;
+  auto *other = llvm::dyn_cast_or_null<TypeAliasDecl>(found);
+  ResultInterfaceNotSelf self = ClassBases::notSelf(alias, other);
+  if (self.isErr()) {
+    this->state.getDiagnostics().error(ref.loc, self.error().message);
+    return nullptr;
+  }
+  const Type *base = this->typeResolver->resolveType(ref, false);
+  if (base->isError()) {
+    return nullptr;
+  }
+  ResultObjectTypeAsBase shape = ClassBases::interfaceBase(base);
+  if (shape.isErr()) {
+    this->state.getDiagnostics().error(ref.loc, shape.error().message);
+    return nullptr;
+  }
+  if (llvm::is_contained(bases, base)) {
+    return nullptr;
+  }
+
+  return base;
+}
+
+void ClassBases::mergeBaseOverloads(const TypeAliasDecl *alias, const TypeRef &ref,
+                                    const Type *base, std::vector<Overload> &overloads) {
+  for (const Overload &o : base->overloads()) {
+    const Overload *known = ClassBases::overloadNamed(overloads, o.name);
+    if (known == nullptr) {
+      overloads.push_back(o);
+      continue;
+    }
+    ResultMethodSignatures signatures = ClassBases::sameSignatures(alias, *known, o);
+    if (signatures.isErr()) {
+      this->state.getDiagnostics().error(ref.loc, signatures.error().message);
+    }
+  }
+}
+
+const Overload *ClassBases::overloadNamed(const std::vector<Overload> &overloads,
+                                          llvm::StringRef name) {
+  for (const Overload &o : overloads) {
+    if (o.name == name) {
+      return &o;
+    }
+  }
+
+  return nullptr;
+}
+
+size_t ClassBases::fieldIndex(const std::vector<Field> &fields, llvm::StringRef name) {
+  for (size_t i = 0; i < fields.size(); ++i) {
+    if (fields[i].name == name) {
+      return i;
+    }
+  }
+
+  return fields.size();
+}
+
+void ClassBases::mergeBaseFields(const TypeAliasDecl *alias, const TypeRef &ref, const Type *base,
+                                 InterfaceShape &shape) {
+  std::string baseName = ref.name.str();
+  for (const Field &f : base->fields()) {
+    size_t at = ClassBases::fieldIndex(shape.fields, f.name);
+    if (at == shape.fields.size()) {
+      shape.fields.push_back(f);
+      shape.origins.push_back(baseName);
+      continue;
+    }
+    Field &known = shape.fields[at];
+    ResultFieldTypesAreOne one =
+        ClassBases::sameFieldType(alias, known, f, shape.origins[at], baseName);
+    if (one.isErr()) {
+      this->state.getDiagnostics().error(ref.loc, one.error().message);
+    } else {
+      known.readonly = known.readonly && f.readonly;
+    }
+  }
+}
+
+void ClassBases::addOwnField(const TypeAliasDecl *alias, const Field &f,
+                             llvm::ArrayRef<Overload> overloads, InterfaceShape &shape) {
+  ResultUnusedMemberName unused = ClassBases::newField(alias, f, overloads);
+  if (unused.isErr()) {
+    this->state.getDiagnostics().error(alias->loc(), unused.error().message);
+    return;
+  }
+  llvm::SMLoc loc = ClassBases::ownFieldLoc(alias, f.name);
+  size_t at = ClassBases::fieldIndex(shape.fields, f.name);
+  if (at == shape.fields.size()) {
+    shape.fields.push_back(f);
+    shape.origins.push_back(alias->name.str());
+    return;
+  }
+  Field &known = shape.fields[at];
+  ResultFieldNarrowsDown narrows = ClassBases::narrowsField(alias, f, known, shape.origins[at]);
+  if (narrows.isErr()) {
+    this->state.getDiagnostics().error(loc, narrows.error().message);
+    return;
+  }
+  if (known.type != f.type || (f.readonly && !known.readonly)) {
+    this->state.getWideningStore().markFieldsNarrowed();
+  }
+  known.type = f.type;
+  known.readonly = f.readonly;
+}
+
+llvm::SMLoc ClassBases::ownFieldLoc(const TypeAliasDecl *alias, llvm::StringRef name) {
+  const TypeRef &own = alias->type;
+  llvm::SMLoc loc = alias->loc();
+  for (size_t i = 0; i < own.names().size(); ++i) {
+    if (own.names()[i] == name) {
+      loc = own.locs()[i];
+    }
+  }
+
+  return loc;
 }
 
 const ClassField *ClassBases::findField(const ClassDecl *cls, llvm::StringRef name,

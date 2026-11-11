@@ -1,10 +1,10 @@
 #include "compiler/semantic/library/os/os_checker/os_checker.h"
+#include "compiler/program/library/os/os_function_table/os_function_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/library/builtin_modules/node_check_helpers/node_check_helpers.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
-#include "llvm/ADT/STLExtras.h"
 
 namespace tz {
 
@@ -73,69 +73,105 @@ Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     }
     return call;
   }
+  if (this->hasRejectedArgs(call, loc)) {
+    return call;
+  }
+  std::optional<OsFunction> found = OsFunctionTable::find(fn);
+  if (!found.has_value()) {
+    return this->reportNotYet(call, fn, loc);
+  }
+
+  return this->checkOsFunction(call, *found, loc);
+}
+
+bool OsChecker::hasRejectedArgs(CallExpr *call, llvm::SMLoc loc) {
   bool rejected = this->callChecker->rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
       rejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 0);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
-  if (rejected || arity.isErr()) {
-    return call;
+
+  return rejected || arity.isErr();
+}
+
+Expr *OsChecker::checkOsFunction(CallExpr *call, OsFunction function, llvm::SMLoc loc) {
+  switch (function) {
+    case OsFunction::HOMEDIR:
+      return this->osStringCall(call, loc, 0);
+    case OsFunction::TMPDIR:
+      return this->osStringCall(call, loc, 1);
+    case OsFunction::HOSTNAME:
+      return this->osStringCall(call, loc, 2);
+    case OsFunction::ARCH:
+      return this->osStringCall(call, loc, 3);
+    case OsFunction::TYPE:
+      return this->osStringCall(call, loc, 4);
+    case OsFunction::RELEASE:
+      return this->osStringCall(call, loc, 5);
+    case OsFunction::VERSION:
+      return this->osStringCall(call, loc, 6);
+    case OsFunction::MACHINE:
+      return this->osStringCall(call, loc, 7);
+    case OsFunction::TOTALMEM:
+      return this->osNumberCall(call, loc, 0);
+    case OsFunction::FREEMEM:
+      return this->osNumberCall(call, loc, 1);
+    case OsFunction::UPTIME:
+      return this->osNumberCall(call, loc, 2);
+    case OsFunction::PLATFORM:
+      return OsChecker::builtinOsCall(call, Builtin::ProcessPlatform, Type::string());
+    case OsFunction::ENDIANNESS:
+      return this->endiannessLiteral(loc);
+    case OsFunction::AVAILABLE_PARALLELISM:
+      return OsChecker::builtinOsCall(call, Builtin::OsAvailableParallelism, Type::intTy());
+    case OsFunction::CPUS:
+      return OsChecker::builtinOsCall(call, Builtin::OsCpus, Type::array(OsChecker::cpuInfoType()));
+    case OsFunction::LOADAVG:
+      return OsChecker::builtinOsCall(call, Builtin::OsLoadavg, Type::array(Type::doubleTy()));
+    case OsFunction::USER_INFO:
+      return OsChecker::builtinOsCall(call, Builtin::OsUserInfo, OsChecker::userInfoType());
   }
-  auto which = [&](int value) {
-    auto *lit = this->state.getAst().make<IntLitExpr>(loc, uint64_t(value));
-    lit->type = Type::intTy();
-    call->args = {lit};
-  };
-  static const llvm::StringLiteral strings[] = {"homedir", "tmpdir",  "hostname", "arch",
-                                                "type",    "release", "version",  "machine"};
-  if (const auto *s = llvm::find(strings, fn); s != std::end(strings)) {
-    which(int(s - std::begin(strings)));
-    call->target = BuiltinCall{.builtin = Builtin::OsString};
-    call->type = Type::string();
-    return call;
-  }
-  static const llvm::StringLiteral numbers[] = {"totalmem", "freemem", "uptime"};
-  if (const auto *n = llvm::find(numbers, fn); n != std::end(numbers)) {
-    which(int(n - std::begin(numbers)));
-    call->target = BuiltinCall{.builtin = Builtin::OsNumber};
-    call->type = Type::doubleTy();
-    return call;
-  }
-  if (fn == "platform") {
-    call->target = BuiltinCall{.builtin = Builtin::ProcessPlatform};
-    call->type = Type::string();
-    return call;
-  }
-  if (fn == "endianness") {
-    auto *lit = this->state.getAst().make<StringLitExpr>(loc, u"LE");
-    lit->type = Type::string();
-    return lit;
-  }
-  if (fn == "availableParallelism") {
-    call->target = BuiltinCall{.builtin = Builtin::OsAvailableParallelism};
-    call->type = Type::intTy();
-    return call;
-  }
-  if (fn == "cpus") {
-    call->target = BuiltinCall{.builtin = Builtin::OsCpus};
-    call->type = Type::array(OsChecker::cpuInfoType());
-    return call;
-  }
-  if (fn == "loadavg") {
-    call->target = BuiltinCall{.builtin = Builtin::OsLoadavg};
-    call->type = Type::array(Type::doubleTy());
-    return call;
-  }
-  if (fn == "userInfo") {
-    call->target = BuiltinCall{.builtin = Builtin::OsUserInfo};
-    call->type = OsChecker::userInfoType();
-    return call;
-  }
+
+  return call;
+}
+
+Expr *OsChecker::osStringCall(CallExpr *call, llvm::SMLoc loc, int which) {
+  this->setWhichArg(call, loc, which);
+
+  return OsChecker::builtinOsCall(call, Builtin::OsString, Type::string());
+}
+
+Expr *OsChecker::osNumberCall(CallExpr *call, llvm::SMLoc loc, int which) {
+  this->setWhichArg(call, loc, which);
+
+  return OsChecker::builtinOsCall(call, Builtin::OsNumber, Type::doubleTy());
+}
+
+void OsChecker::setWhichArg(CallExpr *call, llvm::SMLoc loc, int which) {
+  auto *lit = this->state.getAst().make<IntLitExpr>(loc, uint64_t(which));
+  lit->type = Type::intTy();
+  call->args = {lit};
+}
+
+Expr *OsChecker::builtinOsCall(CallExpr *call, Builtin builtin, const Type *result) {
+  call->target = BuiltinCall{.builtin = builtin};
+  call->type = result;
+
+  return call;
+}
+
+Expr *OsChecker::endiannessLiteral(llvm::SMLoc loc) {
+  auto *lit = this->state.getAst().make<StringLitExpr>(loc, u"LE");
+  lit->type = Type::string();
+
+  return lit;
+}
+
+Expr *OsChecker::reportNotYet(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   std::string message = ErrorTextOs::notYet(fn);
   this->state.getDiagnostics().error(loc, message);
 
   return call;
 }
-
 }

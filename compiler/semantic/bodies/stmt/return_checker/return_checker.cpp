@@ -288,102 +288,143 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
   ResultInsideOfFunction inside = this->enclosingFunction();
   if (inside.isErr()) {
     this->state.getDiagnostics().error(ret->loc(), inside.error().message);
-    if (ret->value) {
+    if (ret->value != nullptr) {
       ret->value = this->exprChecker->checkExpr(ret->value);
     }
     return;
   }
-
   this->emitterChecker->reportUnlistenedErrors();
   const FuncSymbol *fn = inside.value();
-  if (fn->decl && fn->decl->isConstructor()) {
-    if (ret->value) {
-      ret->value = this->exprChecker->checkExpr(ret->value);
-    }
-    ResultConstructorExits exits = this->constructorReturn(ret, fn);
-    if (exits.isErr()) {
-      bool valued = exits.error().code == ReturnCheckerConstructorReturnErrorCode::VALUE_RETURNED;
-      llvm::SMLoc at = valued ? ret->value->loc() : ret->loc();
-      this->state.getDiagnostics().error(at, exits.error().message);
-    }
-    return;
+  if (fn->decl != nullptr && fn->decl->isConstructor()) {
+    return this->walkConstructorReturn(ret, fn);
   }
   ResultAwaitNotReturned awaited = ReturnChecker::awaitReturned(ret, fn);
   if (awaited.isErr()) {
     this->state.getDiagnostics().error(ret->value->loc(), awaited.error().message);
   }
-  const Type *returned = fn->hasReturnType() && fn->decl && fn->decl->isGenerator &&
-                                 (fn->getKnownReturnType()->isIterator() ||
-                                  fn->getKnownReturnType()->isAsyncIterator())
-                             ? fn->getKnownReturnType()->returned()
-                         : fn->hasReturnType() && fn->decl && fn->decl->isAsync &&
-                                 fn->getKnownReturnType()->isPromise()
-                             ? fn->getKnownReturnType()->promised()
-                             : fn->getKnownReturnType();
+  const Type *returned = ReturnChecker::declaredReturn(fn);
   if (!fn->hasReturnType()) {
-    const Type *hint = nullptr;
-    if (ret->value && Destination::literalShaped(ret->value)) {
-      for (const ReturnStmt *earlier : this->state.getFunctionStack().getCollectedReturns()) {
-        if (earlier->value && !earlier->value->type->isError() &&
-            (earlier->value->type->holdsObjects() || earlier->value->type->isResult())) {
-          hint = earlier->value->type;
-          break;
-        }
-      }
-    }
-    if (ret->value) {
-      ret->value = this->checkReturnValue(ret, hint, PredicateChecker::looksBoolean(ret->value));
-    }
-    this->state.getFunctionStack().addCollectedReturn(ret);
-    return;
+    return this->walkInferredReturn(ret);
   }
-  if (!ret->value) {
+  if (ret->value == nullptr) {
     ResultValueNotRequired bare = ReturnChecker::valueRequired(returned, fn);
     if (bare.isErr()) {
       this->state.getDiagnostics().error(ret->loc(), bare.error().message);
     }
     return;
   }
-
-  if (fn->decl && fn->decl->isAsync && fn->decl->isGenerator) {
-    ret->value = this->exprChecker->checkExpr(ret->value, returned->isVoid() ? nullptr : returned);
-    const Type *given =
-        ret->value->type->isError() ? nullptr : AsyncChecker::awaitedType(ret->value->type);
-    ResultGeneratorReturns gives = ReturnChecker::generatorReturn(given, returned, fn);
-    if (gives.isErr()) {
-      this->state.getDiagnostics().error(ret->value->loc(), gives.error().message);
-    }
-    return;
+  if (fn->decl != nullptr && fn->decl->isAsync && fn->decl->isGenerator) {
+    return this->walkAsyncGeneratorReturn(ret, fn, returned);
   }
   ret->value =
       this->checkReturnValue(ret, returned->isVoid() ? nullptr : returned, returned->isBool());
-  if (fn->decl && fn->decl->isAsync && fn->getKnownReturnType()->isPromise() &&
-      ret->value->type->isPromise()) {
-    const Type *given = ret->value->type->promised();
-    ResultPromiseTypeMatch match = ReturnChecker::promiseReturn(given, returned, fn);
-    if (match.isErr()) {
-      this->state.getDiagnostics().error(ret->value->loc(), match.error().message);
-    }
-    return;
+  bool promised = fn->decl != nullptr && fn->decl->isAsync &&
+                  fn->getKnownReturnType()->isPromise() && ret->value->type->isPromise();
+  if (promised) {
+    return this->walkPromiseReturn(ret, fn, returned);
   }
   if (returned->isVoid()) {
-    ResultVoidReturnsEmpty empty = ReturnChecker::voidReturn(ret->value->type, fn);
-    if (empty.isErr()) {
-      this->state.getDiagnostics().error(ret->value->loc(), empty.error().message);
-      this->classLinks->noteInheritedReturn(fn->decl);
-    } else if (fn->discardsResult) {
-      ResultChecker::ResultValueGetsUsed used = this->resultChecker->usedValue(ret->value, true);
-      if (used.isErr()) {
-        this->state.getDiagnostics().error(ret->value->loc(), used.error().message);
-      }
+    return this->walkVoidReturn(ret, fn);
+  }
+
+  return this->walkValueReturn(ret, fn, returned);
+}
+
+const Type *ReturnChecker::declaredReturn(const FuncSymbol *fn) {
+  bool generator =
+      fn->hasReturnType() && fn->decl != nullptr && fn->decl->isGenerator &&
+      (fn->getKnownReturnType()->isIterator() || fn->getKnownReturnType()->isAsyncIterator());
+  if (generator) {
+    return fn->getKnownReturnType()->returned();
+  }
+  bool promised = fn->hasReturnType() && fn->decl != nullptr && fn->decl->isAsync &&
+                  fn->getKnownReturnType()->isPromise();
+  if (promised) {
+    return fn->getKnownReturnType()->promised();
+  }
+
+  return fn->getKnownReturnType();
+}
+
+void ReturnChecker::walkConstructorReturn(ReturnStmt *ret, const FuncSymbol *fn) {
+  if (ret->value != nullptr) {
+    ret->value = this->exprChecker->checkExpr(ret->value);
+  }
+  ResultConstructorExits exits = this->constructorReturn(ret, fn);
+  if (exits.isErr()) {
+    bool valued = exits.error().code == ReturnCheckerConstructorReturnErrorCode::VALUE_RETURNED;
+    llvm::SMLoc at = valued ? ret->value->loc() : ret->loc();
+    this->state.getDiagnostics().error(at, exits.error().message);
+  }
+}
+
+void ReturnChecker::walkInferredReturn(ReturnStmt *ret) {
+  bool shaped = ret->value != nullptr && Destination::literalShaped(ret->value);
+  const Type *hint = shaped ? this->earlierReturnShape() : nullptr;
+  if (ret->value != nullptr) {
+    bool tested = PredicateChecker::looksBoolean(ret->value);
+    ret->value = this->checkReturnValue(ret, hint, tested);
+  }
+  this->state.getFunctionStack().addCollectedReturn(ret);
+}
+
+const Type *ReturnChecker::earlierReturnShape() const {
+  for (const ReturnStmt *earlier : this->state.getFunctionStack().getCollectedReturns()) {
+    if (earlier->value == nullptr || earlier->value->type->isError()) {
+      continue;
     }
+    const Type *type = earlier->value->type;
+    if (type->holdsObjects() || type->isResult()) {
+      return type;
+    }
+  }
+
+  return nullptr;
+}
+
+void ReturnChecker::walkAsyncGeneratorReturn(ReturnStmt *ret, const FuncSymbol *fn,
+                                             const Type *returned) {
+  ret->value = this->exprChecker->checkExpr(ret->value, returned->isVoid() ? nullptr : returned);
+  const Type *given =
+      ret->value->type->isError() ? nullptr : AsyncChecker::awaitedType(ret->value->type);
+  ResultGeneratorReturns gives = ReturnChecker::generatorReturn(given, returned, fn);
+  if (gives.isErr()) {
+    this->state.getDiagnostics().error(ret->value->loc(), gives.error().message);
+  }
+}
+
+void ReturnChecker::walkPromiseReturn(ReturnStmt *ret, const FuncSymbol *fn, const Type *returned) {
+  const Type *given = ret->value->type->promised();
+  ResultPromiseTypeMatch match = ReturnChecker::promiseReturn(given, returned, fn);
+  if (match.isErr()) {
+    this->state.getDiagnostics().error(ret->value->loc(), match.error().message);
+  }
+}
+
+void ReturnChecker::walkVoidReturn(ReturnStmt *ret, const FuncSymbol *fn) {
+  ResultVoidReturnsEmpty empty = ReturnChecker::voidReturn(ret->value->type, fn);
+  if (empty.isErr()) {
+    this->state.getDiagnostics().error(ret->value->loc(), empty.error().message);
+    this->classLinks->noteInheritedReturn(fn->decl);
     return;
   }
+  if (!fn->discardsResult) {
+    return;
+  }
+  ResultChecker::ResultValueGetsUsed used = this->resultChecker->usedValue(ret->value, true);
+  if (used.isErr()) {
+    this->state.getDiagnostics().error(ret->value->loc(), used.error().message);
+  }
+}
+
+void ReturnChecker::walkValueReturn(ReturnStmt *ret, const FuncSymbol *fn, const Type *returned) {
   unsigned errors = this->state.getDiagnostics().errorCount();
   ret->value = this->typeRelations->coerce(ret->value, returned);
   if (this->state.getDiagnostics().errorCount() > errors) {
     this->classLinks->noteInheritedReturn(fn->decl);
-  } else if (fn->decl) {
+    return;
+  }
+  if (fn->decl != nullptr) {
     this->byteProofs->checkByteCallbackResult(fn->decl, ret->value);
   }
 }

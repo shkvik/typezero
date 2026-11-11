@@ -1,5 +1,7 @@
 #include "compiler/semantic/bodies/values/number_methods/number_methods.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/number/number_static_table/number_static_table.h"
+#include "compiler/program/library/string/string_static_table/string_static_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/binary_checker/binary_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -37,9 +39,64 @@ NumberMethods::NumberMethods(SemanticState &owner, SemanticParts &all)
 NumberMethods::ResultStaticCallMade NumberMethods::checkStaticCall(CallExpr *call,
                                                                    MemberExpr *member) {
   bool isString = this->callChecker->isGlobalName(member->object, GlobalName::STRING);
-  llvm::StringRef fn = member->name;
   call->type = Type::error();
-  if (isString && fn == "raw" && !call->tagged) {
+  if (isString) {
+    return this->checkStringStatic(call, member);
+  }
+
+  return this->checkNumberStatic(call, member);
+}
+
+NumberMethods::ResultStaticCallMade NumberMethods::checkStringStatic(CallExpr *call,
+                                                                     MemberExpr *member) {
+  std::optional<StringStatic> found = StringStaticTable::find(member->name);
+  if (!found.has_value()) {
+    return this->noSuchProperty(call, member->name, "String");
+  }
+  switch (*found) {
+    case StringStatic::RAW:
+      return this->checkStringRaw(call);
+    case StringStatic::FROM_CHAR_CODE:
+      return this->checkFromCodes(call, Builtin::FromCharCode);
+    case StringStatic::FROM_CODE_POINT:
+      return this->checkFromCodes(call, Builtin::FromCodePoint);
+  }
+
+  return this->noSuchProperty(call, member->name, "String");
+}
+
+NumberMethods::ResultStaticCallMade NumberMethods::checkNumberStatic(CallExpr *call,
+                                                                     MemberExpr *member) {
+  std::optional<NumberStatic> found = NumberStaticTable::find(member->name);
+  if (!found.has_value()) {
+    return this->noSuchProperty(call, member->name, "Number");
+  }
+  switch (*found) {
+    case NumberStatic::PARSE_INT:
+    case NumberStatic::PARSE_FLOAT:
+      return this->checkNumberParse(call, member);
+    case NumberStatic::IS_INTEGER:
+      return this->checkNumberPredicate(call, Builtin::IsInteger);
+    case NumberStatic::IS_SAFE_INTEGER:
+      return this->checkNumberPredicate(call, Builtin::IsSafeInteger);
+  }
+
+  return this->noSuchProperty(call, member->name, "Number");
+}
+
+NumberMethods::ResultStaticCallMade
+NumberMethods::noSuchProperty(CallExpr *call, llvm::StringRef name, llvm::StringRef owner) {
+  this->argumentChecker->checkArgsLoosely(call);
+  std::string message = ErrorTextNumberStatic::noProperty(name, owner);
+
+  return err(NumberMethodsCheckStaticCallError{
+      .code = NumberMethodsCheckStaticCallErrorCode::NO_SUCH_PROPERTY,
+      .message = message,
+  });
+}
+
+NumberMethods::ResultStaticCallMade NumberMethods::checkStringRaw(CallExpr *call) {
+  if (!call->tagged) {
     this->argumentChecker->checkArgsLoosely(call);
     std::string message = ErrorTextNumberStatic::rawTag();
 
@@ -48,86 +105,79 @@ NumberMethods::ResultStaticCallMade NumberMethods::checkStaticCall(CallExpr *cal
         .message = message,
     });
   }
-  if (isString && fn == "raw") {
-    auto *texts = cast<ArrayLitExpr>(call->args[0]);
-    auto *tmpl = this->state.getAst().make<TemplateExpr>(texts->loc());
-    for (const ArrayLitExpr::Element &e : texts->elements) {
-      tmpl->quasis.push_back(cast<StringLitExpr>(e.expr)->value);
-    }
-    tmpl->exprs.assign(call->args.begin() + 1, call->args.end());
-    Expr *raw = this->literalChecker->checkTemplate(tmpl);
-    return ok(raw);
+  auto *texts = cast<ArrayLitExpr>(call->args[0]);
+  auto *tmpl = this->state.getAst().make<TemplateExpr>(texts->loc());
+  for (const ArrayLitExpr::Element &e : texts->elements) {
+    tmpl->quasis.push_back(cast<StringLitExpr>(e.expr)->value);
   }
-  if (isString && (fn == "fromCharCode" || fn == "fromCodePoint")) {
-    bool codeUnits = fn == "fromCharCode";
-    for (Expr *&arg : call->args) {
-      arg = this->mathChecker->numericArg(arg);
-      if (!codeUnits && arg->type->isNumeric()) {
-        std::string what = ErrorTextNumberMethod::codePoint();
-        IndexProofs::ResultBetweenProven between =
-            this->indexProofs->requireBetween(arg, 0, 0x10FFFF, what);
-        if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
-          this->state.getDiagnostics().error(arg->loc(), between.error().message);
-        }
-      }
-      arg = codeUnits ? this->binaryChecker->toInt32(arg)
-                      : this->typeRelations->convert(arg, Type::doubleTy());
+  tmpl->exprs.assign(call->args.begin() + 1, call->args.end());
+  Expr *raw = this->literalChecker->checkTemplate(tmpl);
+
+  return ok(raw);
+}
+
+NumberMethods::ResultStaticCallMade NumberMethods::checkFromCodes(CallExpr *call, Builtin builtin) {
+  bool codeUnits = builtin == Builtin::FromCharCode;
+  for (Expr *&arg : call->args) {
+    arg = this->mathChecker->numericArg(arg);
+    if (!codeUnits && arg->type->isNumeric()) {
+      this->walkCodePoint(arg);
     }
-    call->target =
-        BuiltinCall{.builtin = codeUnits ? Builtin::FromCharCode : Builtin::FromCodePoint};
-    call->type = Type::string();
-    return ok(call);
+    arg = codeUnits ? this->binaryChecker->toInt32(arg)
+                    : this->typeRelations->convert(arg, Type::doubleTy());
   }
-  if (!isString && (fn == "parseInt" || fn == "parseFloat")) {
-    GlobalFunctionChecker::ResultFunctionCalled parsed =
-        this->globalFunctionChecker->checkGlobalFunction(call, fn, member->loc());
-    bool reported =
-        parsed.isErr() &&
-        parsed.error().code == GlobalFunctionCheckerCheckGlobalFunctionErrorCode::ALREADY_REPORTED;
-    if (reported) {
-      return err(NumberMethodsCheckStaticCallError{
-          .code = NumberMethodsCheckStaticCallErrorCode::ALREADY_REPORTED,
-          .message = "",
-      });
-    }
-    if (parsed.isErr()) {
-      return err(NumberMethodsCheckStaticCallError{
-          .code = NumberMethodsCheckStaticCallErrorCode::PARSE_FAILED,
-          .message = parsed.error().message,
-      });
-    }
-    return ok(parsed.value());
+  call->target = BuiltinCall{.builtin = builtin};
+  call->type = Type::string();
+
+  return ok(call);
+}
+
+void NumberMethods::walkCodePoint(const Expr *arg) {
+  std::string what = ErrorTextNumberMethod::codePoint();
+  IndexProofs::ResultBetweenProven between =
+      this->indexProofs->requireBetween(arg, 0, 0x10FFFF, what);
+  if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+    this->state.getDiagnostics().error(arg->loc(), between.error().message);
   }
-  static const std::pair<llvm::StringLiteral, Builtin> predicates[] = {
-      {"isInteger", Builtin::IsInteger},
-      {"isSafeInteger", Builtin::IsSafeInteger},
-  };
-  if (!isString) {
-    for (const auto &[name, builtin] : predicates) {
-      if (fn != name) {
-        continue;
-      }
-      ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
-      if (arity.isErr()) {
-        return err(NumberMethodsCheckStaticCallError{
-            .code = NumberMethodsCheckStaticCallErrorCode::WRONG_ARITY,
-            .message = arity.error().message,
-        });
-      }
-      call->args[0] = this->mathChecker->numericArg(call->args[0]);
-      call->target = BuiltinCall{.builtin = builtin};
-      call->type = Type::boolTy();
-      return ok(call);
-    }
+}
+
+NumberMethods::ResultStaticCallMade NumberMethods::checkNumberParse(CallExpr *call,
+                                                                    MemberExpr *member) {
+  GlobalFunctionChecker::ResultFunctionCalled parsed =
+      this->globalFunctionChecker->checkGlobalFunction(call, member->name, member->loc());
+  bool reported =
+      parsed.isErr() &&
+      parsed.error().code == GlobalFunctionCheckerCheckGlobalFunctionErrorCode::ALREADY_REPORTED;
+  if (reported) {
+    return err(NumberMethodsCheckStaticCallError{
+        .code = NumberMethodsCheckStaticCallErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
+  }
+  if (parsed.isErr()) {
+    return err(NumberMethodsCheckStaticCallError{
+        .code = NumberMethodsCheckStaticCallErrorCode::PARSE_FAILED,
+        .message = parsed.error().message,
+    });
   }
 
-  this->argumentChecker->checkArgsLoosely(call);
-  std::string message = ErrorTextNumberStatic::noProperty(fn, isString ? "String" : "Number");
+  return ok(parsed.value());
+}
 
-  return err(NumberMethodsCheckStaticCallError{
-      .code = NumberMethodsCheckStaticCallErrorCode::NO_SUCH_PROPERTY,
-      .message = message,
-  });
+NumberMethods::ResultStaticCallMade NumberMethods::checkNumberPredicate(CallExpr *call,
+                                                                        Builtin builtin) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    return err(NumberMethodsCheckStaticCallError{
+        .code = NumberMethodsCheckStaticCallErrorCode::WRONG_ARITY,
+        .message = arity.error().message,
+    });
+  }
+  call->args[0] = this->mathChecker->numericArg(call->args[0]);
+  call->target = BuiltinCall{.builtin = builtin};
+  call->type = Type::boolTy();
+
+  return ok(call);
 }
 
 NumberMethods::ResultConversionMade NumberMethods::checkConversion(CallExpr *call,
@@ -203,54 +253,16 @@ NumberMethods::ResultMethodCallMade NumberMethods::checkNumberMethod(CallExpr *c
     return ok(converted.value());
   }
   if (member->name == "toString" && call->args.size() == 1) {
-    member->object = this->typeRelations->convert(member->object, Type::doubleTy());
-    call->args[0] = this->memberChecker->checkPosition(call->args[0]);
-    std::string what = ErrorTextNumberMethod::radix();
-    IndexProofs::ResultBetweenProven between =
-        this->indexProofs->requireBetween(call->args[0], 2, 36, what);
-    if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
-      this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
-    }
-    call->target = BuiltinCall{.builtin = Builtin::NumToRadix};
-    call->type = Type::string();
-    return ok(call);
+    Expr *radix = this->checkRadixString(call, member);
+
+    return ok(radix);
   }
   if (member->name == "toString") {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
-    if (arity.isErr()) {
-      return err(NumberMethodsCheckNumberMethodError{
-          .code = NumberMethodsCheckNumberMethodErrorCode::WRONG_ARITY,
-          .message = arity.error().message,
-      });
-    }
-    call->args.push_back(this->concatChecker->toStringOperand(member->object));
-    call->target = BuiltinCall{.builtin = Builtin::StringOf};
-    call->type = Type::string();
-    return ok(call);
+    return this->checkPlainString(call, member);
   }
   if (member->name == "toFixed") {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
-    if (arity.isErr()) {
-      return err(NumberMethodsCheckNumberMethodError{
-          .code = NumberMethodsCheckNumberMethodErrorCode::WRONG_ARITY,
-          .message = arity.error().message,
-      });
-    }
-    member->object = this->typeRelations->convert(member->object, Type::doubleTy());
-    if (!call->args.empty()) {
-      call->args[0] = this->memberChecker->checkPosition(call->args[0]);
-      std::string what = ErrorTextNumberMethod::digits();
-      IndexProofs::ResultBetweenProven between =
-          this->indexProofs->requireBetween(call->args[0], 0, 100, what);
-      if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
-        this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
-      }
-    }
-    call->target = BuiltinCall{.builtin = Builtin::NumToFixed};
-    call->type = Type::string();
-    return ok(call);
+    return this->checkToFixed(call, member);
   }
-
   this->argumentChecker->checkArgsLoosely(call);
   std::string message =
       ErrorTextNumberMethod::noProperty(member->name, member->object->type->name());
@@ -261,4 +273,59 @@ NumberMethods::ResultMethodCallMade NumberMethods::checkNumberMethod(CallExpr *c
   });
 }
 
+Expr *NumberMethods::checkRadixString(CallExpr *call, MemberExpr *member) {
+  member->object = this->typeRelations->convert(member->object, Type::doubleTy());
+  std::string what = ErrorTextNumberMethod::radix();
+  this->walkDigitsArg(call, 2, 36, what);
+  call->target = BuiltinCall{.builtin = Builtin::NumToRadix};
+  call->type = Type::string();
+
+  return call;
+}
+
+NumberMethods::ResultMethodCallMade NumberMethods::checkPlainString(CallExpr *call,
+                                                                    MemberExpr *member) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
+  if (arity.isErr()) {
+    return err(NumberMethodsCheckNumberMethodError{
+        .code = NumberMethodsCheckNumberMethodErrorCode::WRONG_ARITY,
+        .message = arity.error().message,
+    });
+  }
+  Expr *text = this->concatChecker->toStringOperand(member->object);
+  call->args.push_back(text);
+  call->target = BuiltinCall{.builtin = Builtin::StringOf};
+  call->type = Type::string();
+
+  return ok(call);
+}
+
+NumberMethods::ResultMethodCallMade NumberMethods::checkToFixed(CallExpr *call,
+                                                                MemberExpr *member) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
+  if (arity.isErr()) {
+    return err(NumberMethodsCheckNumberMethodError{
+        .code = NumberMethodsCheckNumberMethodErrorCode::WRONG_ARITY,
+        .message = arity.error().message,
+    });
+  }
+  member->object = this->typeRelations->convert(member->object, Type::doubleTy());
+  if (!call->args.empty()) {
+    std::string what = ErrorTextNumberMethod::digits();
+    this->walkDigitsArg(call, 0, 100, what);
+  }
+  call->target = BuiltinCall{.builtin = Builtin::NumToFixed};
+  call->type = Type::string();
+
+  return ok(call);
+}
+
+void NumberMethods::walkDigitsArg(CallExpr *call, int64_t lo, int64_t hi, const std::string &what) {
+  call->args[0] = this->memberChecker->checkPosition(call->args[0]);
+  IndexProofs::ResultBetweenProven between =
+      this->indexProofs->requireBetween(call->args[0], lo, hi, what);
+  if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+    this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
+  }
+}
 }

@@ -416,152 +416,255 @@ void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
     return;
   }
   if (type->isUnsigned() && type->bitWidth() == 64) {
-    std::optional<uint64_t> l = this->unsignedConstant(bin->lhs),
-                            r = this->unsignedConstant(bin->rhs);
-    if (!l || !r) {
-      return;
-    }
-    uint64_t ua = *l, ub = *r;
-    std::optional<uint64_t> result;
-    switch (bin->op) {
-      case BinaryOp::Add:
-        result = llvm::checkedAddUnsigned(ua, ub);
-        break;
-      case BinaryOp::Sub:
-        result = ua >= ub ? std::optional<uint64_t>(ua - ub) : std::nullopt;
-        break;
-      case BinaryOp::Mul:
-        result = llvm::checkedMulUnsigned(ua, ub);
-        break;
-      default:
-        return;
-    }
-    if (!result) {
-      llvm::APInt x(128, ua), y(128, ub);
-      llvm::APInt wide = bin->op == BinaryOp::Add   ? x + y
-                         : bin->op == BinaryOp::Sub ? x - y
-                                                    : x * y;
-      llvm::SmallString<48> digits;
-      wide.toString(digits, 10, true);
-      std::string shown(digits);
-      std::string message = ConstantFolder::overflowText(type, shown, 0, wraps);
-      this->state.getDiagnostics().error(bin->loc(), message);
-    } else if (*result <= uint64_t(std::numeric_limits<int64_t>::max())) {
-      this->state.getConstantStore().rememberIntConstant(bin, static_cast<int64_t>(*result));
-    } else {
-      this->state.getConstantStore().rememberBigUnsigned(bin, *result);
-    }
+    return this->foldUnsigned64(bin, wraps);
+  }
+  std::optional<int64_t> l = this->intConstant(bin->lhs);
+  std::optional<int64_t> r = this->intConstant(bin->rhs);
+  if (!l.has_value() || !r.has_value()) {
     return;
   }
-  std::optional<int64_t> l = this->intConstant(bin->lhs), r = this->intConstant(bin->rhs);
-  if (!l || !r) {
+  std::optional<IntFold> folded = this->foldIntOp(bin, *l, *r);
+  if (!folded.has_value()) {
     return;
   }
-  int64_t a = *l, b = *r;
-  auto ua = static_cast<uint64_t>(a), ub = static_cast<uint64_t>(b);
-  std::optional<int64_t> exact;
-  int64_t wrapped = 0;
-  double value = 0;
-  std::string text;
+
+  return this->rememberFolded(bin, *folded, wraps);
+}
+
+void ConstantFolder::foldUnsigned64(BinaryExpr *bin, bool wraps) {
+  std::optional<uint64_t> l = this->unsignedConstant(bin->lhs);
+  std::optional<uint64_t> r = this->unsignedConstant(bin->rhs);
+  if (!l.has_value() || !r.has_value()) {
+    return;
+  }
+  bool supported = bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub || bin->op == BinaryOp::Mul;
+  if (!supported) {
+    return;
+  }
+  std::optional<uint64_t> result = ConstantFolder::unsignedResult(bin->op, *l, *r);
+  if (!result.has_value()) {
+    llvm::APInt x(128, *l);
+    llvm::APInt y(128, *r);
+    llvm::APInt wide = bin->op == BinaryOp::Add ? x + y : bin->op == BinaryOp::Sub ? x - y : x * y;
+    std::string shown = ConstantFolder::decimalText(wide);
+    std::string message = ConstantFolder::overflowText(bin->type, shown, 0, wraps);
+    this->state.getDiagnostics().error(bin->loc(), message);
+    return;
+  }
+  if (*result <= uint64_t(std::numeric_limits<int64_t>::max())) {
+    this->state.getConstantStore().rememberIntConstant(bin, static_cast<int64_t>(*result));
+    return;
+  }
+  this->state.getConstantStore().rememberBigUnsigned(bin, *result);
+}
+
+std::optional<uint64_t> ConstantFolder::unsignedResult(BinaryOp op, uint64_t a, uint64_t b) {
+  if (op == BinaryOp::Add) {
+    return llvm::checkedAddUnsigned(a, b);
+  }
+  if (op == BinaryOp::Sub) {
+    return a >= b ? std::optional<uint64_t>(a - b) : std::nullopt;
+  }
+
+  return llvm::checkedMulUnsigned(a, b);
+}
+
+std::string ConstantFolder::decimalText(const llvm::APInt &wide) {
+  llvm::SmallString<48> digits;
+  wide.toString(digits, 10, true);
+
+  return std::string(digits);
+}
+
+std::optional<ConstantFolder::IntFold> ConstantFolder::foldIntOp(BinaryExpr *bin, int64_t a,
+                                                                 int64_t b) {
   switch (bin->op) {
     case BinaryOp::Add:
-      exact = llvm::checkedAdd(a, b);
-      wrapped = static_cast<int64_t>(ua + ub);
-      text = ConstantFolder::wideText(a, b, bin->op);
-      break;
     case BinaryOp::Sub:
-      exact = llvm::checkedSub(a, b);
-      wrapped = static_cast<int64_t>(ua - ub);
-      text = ConstantFolder::wideText(a, b, bin->op);
-      break;
     case BinaryOp::Mul:
-      exact = llvm::checkedMul(a, b);
-      wrapped = static_cast<int64_t>(ua * ub);
-      text = ConstantFolder::wideText(a, b, bin->op);
-      break;
+      return ConstantFolder::foldArithmetic(bin->op, a, b);
     case BinaryOp::Div:
-    case BinaryOp::Rem: {
-      if (b == 0) {
-        return;
-      }
-      int64_t min = type->intMin();
-      if (b == -1 && !type->isUnsigned()) {
-        exact = bin->op == BinaryOp::Rem ? 0 : llvm::checkedSub(int64_t(0), a);
-        wrapped = bin->op == BinaryOp::Rem ? 0 : (a == min ? min : -a);
-        text = ConstantFolder::wideText(0, a, BinaryOp::Sub);
-      } else {
-        exact = wrapped = bin->op == BinaryOp::Div ? a / b : a % b;
-      }
-      break;
-    }
-    case BinaryOp::Pow: {
-      if (b < 0) {
-        return;
-      }
-      auto [low, product] = ConstantFolder::intPower(a, b);
-      exact = product;
-      wrapped = low;
-      value = std::pow(static_cast<double>(a), static_cast<double>(b));
-      break;
-    }
+    case BinaryOp::Rem:
+      return ConstantFolder::foldDivision(bin->op, bin->type, a, b);
+    case BinaryOp::Pow:
+      return ConstantFolder::foldPower(a, b);
     case BinaryOp::BitAnd:
-      exact = ConstantFolder::wrapTo(type, a) & ConstantFolder::wrapTo(type, b);
-      break;
     case BinaryOp::BitOr:
-      exact = ConstantFolder::wrapTo(type, a) | ConstantFolder::wrapTo(type, b);
-      break;
     case BinaryOp::BitXor:
-      exact = ConstantFolder::wrapTo(type, a) ^ ConstantFolder::wrapTo(type, b);
-      break;
+      return ConstantFolder::foldBits(bin->op, bin->type, a, b);
     case BinaryOp::Shl:
     case BinaryOp::Shr:
-    case BinaryOp::UShr: {
-      const Type *shifted = bin->lhs->type;
-      int width = int(shifted->bitWidth());
-      ResultShiftCountFits counted = ConstantFolder::shiftCount(shifted, b);
-      if (counted.isErr()) {
-        this->state.getDiagnostics().error(bin->rhs->loc(), counted.error().message);
-      }
-      if (b < 0 || b >= int64_t(width)) {
-        return;
-      }
-      int count = int(b);
-      int64_t x = ConstantFolder::wrapTo(shifted, a);
-      uint64_t pattern = width == 64 ? static_cast<uint64_t>(x)
-                                     : static_cast<uint64_t>(x) & ((uint64_t(1) << width) - 1);
-      if (bin->op == BinaryOp::Shl) {
-        llvm::APInt start(128, uint64_t(a), !shifted->isUnsigned());
-        llvm::APInt wide = start.shl(unsigned(count));
-        int bitsUsed =
-            shifted->isUnsigned() ? int(wide.getActiveBits()) : int(wide.getSignificantBits());
-        bool fits = bitsUsed <= width;
-        if (!fits && !shifted->isWrapping()) {
-          llvm::SmallString<48> digits;
-          wide.toString(digits, 10, true);
-          std::string shown(digits);
-          std::string message = ConstantFolder::overflowText(bin->type, shown, 0, false);
-          this->state.getDiagnostics().error(bin->loc(), message);
-          return;
-        }
-        exact = ConstantFolder::wrapTo(shifted, static_cast<int64_t>(pattern << count));
-      } else if (bin->op == BinaryOp::Shr && !shifted->isUnsigned()) {
-        exact = x >> count;
-      } else if ((pattern >> count) > uint64_t(std::numeric_limits<int64_t>::max())) {
-        return;
-      } else {
-        exact = static_cast<int64_t>(pattern >> count);
-      }
-      break;
-    }
-    default:
-      return;
+    case BinaryOp::UShr:
+      return this->foldShift(bin, a, b);
+    case BinaryOp::Lt:
+    case BinaryOp::Le:
+    case BinaryOp::Gt:
+    case BinaryOp::Ge:
+    case BinaryOp::Eq:
+    case BinaryOp::Ne:
+    case BinaryOp::LogAnd:
+    case BinaryOp::LogOr:
+    case BinaryOp::Nullish:
+    case BinaryOp::In:
+    case BinaryOp::InstanceOf:
+      return std::nullopt;
   }
-  if (exact && ConstantFolder::exactEnough(type, *exact, wraps)) {
-    this->state.getConstantStore().rememberIntConstant(bin, *exact);
+
+  return std::nullopt;
+}
+
+ConstantFolder::IntFold ConstantFolder::foldArithmetic(BinaryOp op, int64_t a, int64_t b) {
+  auto ua = static_cast<uint64_t>(a);
+  auto ub = static_cast<uint64_t>(b);
+  std::string text = ConstantFolder::wideText(a, b, op);
+  if (op == BinaryOp::Add) {
+    return IntFold{
+        .exact = llvm::checkedAdd(a, b),
+        .wrapped = static_cast<int64_t>(ua + ub),
+        .value = 0,
+        .text = text,
+    };
+  }
+  if (op == BinaryOp::Sub) {
+    return IntFold{
+        .exact = llvm::checkedSub(a, b),
+        .wrapped = static_cast<int64_t>(ua - ub),
+        .value = 0,
+        .text = text,
+    };
+  }
+
+  return IntFold{
+      .exact = llvm::checkedMul(a, b),
+      .wrapped = static_cast<int64_t>(ua * ub),
+      .value = 0,
+      .text = text,
+  };
+}
+
+std::optional<ConstantFolder::IntFold> ConstantFolder::foldDivision(BinaryOp op, const Type *type,
+                                                                    int64_t a, int64_t b) {
+  if (b == 0) {
+    return std::nullopt;
+  }
+  bool rem = op == BinaryOp::Rem;
+  int64_t min = type->intMin();
+  if (b == -1 && !type->isUnsigned()) {
+    return IntFold{
+        .exact = rem ? std::optional<int64_t>(0) : llvm::checkedSub(int64_t(0), a),
+        .wrapped = rem ? 0 : (a == min ? min : -a),
+        .value = 0,
+        .text = ConstantFolder::wideText(0, a, BinaryOp::Sub),
+    };
+  }
+  int64_t quotient = rem ? a % b : a / b;
+
+  return IntFold{
+      .exact = quotient,
+      .wrapped = quotient,
+      .value = 0,
+      .text = "",
+  };
+}
+
+std::optional<ConstantFolder::IntFold> ConstantFolder::foldPower(int64_t a, int64_t b) {
+  if (b < 0) {
+    return std::nullopt;
+  }
+  auto [low, product] = ConstantFolder::intPower(a, b);
+
+  return IntFold{
+      .exact = product,
+      .wrapped = low,
+      .value = std::pow(static_cast<double>(a), static_cast<double>(b)),
+      .text = "",
+  };
+}
+
+ConstantFolder::IntFold ConstantFolder::foldBits(BinaryOp op, const Type *type, int64_t a,
+                                                 int64_t b) {
+  int64_t x = ConstantFolder::wrapTo(type, a);
+  int64_t y = ConstantFolder::wrapTo(type, b);
+  int64_t bits = op == BinaryOp::BitAnd ? (x & y) : op == BinaryOp::BitOr ? (x | y) : (x ^ y);
+
+  return IntFold{
+      .exact = bits,
+      .wrapped = 0,
+      .value = 0,
+      .text = "",
+  };
+}
+
+std::optional<ConstantFolder::IntFold> ConstantFolder::foldShift(BinaryExpr *bin, int64_t a,
+                                                                 int64_t b) {
+  const Type *shifted = bin->lhs->type;
+  int width = int(shifted->bitWidth());
+  ResultShiftCountFits counted = ConstantFolder::shiftCount(shifted, b);
+  if (counted.isErr()) {
+    this->state.getDiagnostics().error(bin->rhs->loc(), counted.error().message);
+  }
+  if (b < 0 || b >= int64_t(width)) {
+    return std::nullopt;
+  }
+  int count = int(b);
+  int64_t x = ConstantFolder::wrapTo(shifted, a);
+  uint64_t pattern = width == 64 ? static_cast<uint64_t>(x)
+                                 : static_cast<uint64_t>(x) & ((uint64_t(1) << width) - 1);
+  if (bin->op == BinaryOp::Shl) {
+    return this->foldShiftLeft(bin, a, count, pattern);
+  }
+  if (bin->op == BinaryOp::Shr && !shifted->isUnsigned()) {
+    return IntFold{
+        .exact = x >> count,
+        .wrapped = 0,
+        .value = 0,
+        .text = "",
+    };
+  }
+  if ((pattern >> count) > uint64_t(std::numeric_limits<int64_t>::max())) {
+    return std::nullopt;
+  }
+
+  return IntFold{
+      .exact = static_cast<int64_t>(pattern >> count),
+      .wrapped = 0,
+      .value = 0,
+      .text = "",
+  };
+}
+
+std::optional<ConstantFolder::IntFold> ConstantFolder::foldShiftLeft(BinaryExpr *bin, int64_t a,
+                                                                     int count, uint64_t pattern) {
+  const Type *shifted = bin->lhs->type;
+  int width = int(shifted->bitWidth());
+  llvm::APInt start(128, uint64_t(a), !shifted->isUnsigned());
+  llvm::APInt wide = start.shl(unsigned(count));
+  int bitsUsed = shifted->isUnsigned() ? int(wide.getActiveBits()) : int(wide.getSignificantBits());
+  bool fits = bitsUsed <= width;
+  if (!fits && !shifted->isWrapping()) {
+    std::string shown = ConstantFolder::decimalText(wide);
+    std::string message = ConstantFolder::overflowText(bin->type, shown, 0, false);
+    this->state.getDiagnostics().error(bin->loc(), message);
+    return std::nullopt;
+  }
+
+  return IntFold{
+      .exact = ConstantFolder::wrapTo(shifted, static_cast<int64_t>(pattern << count)),
+      .wrapped = 0,
+      .value = 0,
+      .text = "",
+  };
+}
+
+void ConstantFolder::rememberFolded(BinaryExpr *bin, const IntFold &fold, bool wraps) {
+  const Type *type = bin->type;
+  if (fold.exact.has_value() && ConstantFolder::exactEnough(type, *fold.exact, wraps)) {
+    this->state.getConstantStore().rememberIntConstant(bin, *fold.exact);
     return;
   }
-  std::string shown = text.empty() ? ConstantFolder::constantText(exact, value) : text;
-  int64_t wrappedValue = ConstantFolder::wrapTo(type, wrapped);
+  std::string shown =
+      fold.text.empty() ? ConstantFolder::constantText(fold.exact, fold.value) : fold.text;
+  int64_t wrappedValue = ConstantFolder::wrapTo(type, fold.wrapped);
   std::string message = ConstantFolder::overflowText(bin->type, shown, wrappedValue, wraps);
   this->state.getDiagnostics().error(bin->loc(), message);
 }

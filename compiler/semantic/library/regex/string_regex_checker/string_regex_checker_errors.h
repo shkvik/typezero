@@ -7,6 +7,16 @@
 
 namespace tz {
 
+enum class StringRegexCheckerReplacementGroupsErrorCode {
+  NO_SUCH_GROUP,
+  NO_SUCH_NAMED_GROUP,
+};
+
+struct StringRegexCheckerReplacementGroupsError {
+  StringRegexCheckerReplacementGroupsErrorCode code;
+  std::string message;
+};
+
 class ErrorTextStringRegex {
 public:
   static std::string matchFlag();

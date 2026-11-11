@@ -4,10 +4,13 @@
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
+#include <optional>
 
 namespace tz {
 
 class SemanticParts;
+struct ScopeEntry;
+struct ArrayMethodInfo;
 class Scopes;
 class NewChecker;
 class UrlChecker;
@@ -96,6 +99,43 @@ private:
   static ResultCalleeCallable calleeCallable(const Type *type, const NameExpr *calleeName);
   static ResultTypeArgsUsable directTypeArgs(const FuncSymbol *func,
                                              llvm::ArrayRef<TypeRef> typeArgs);
+
+  void rewriteSymbolCallee(CallExpr *call);
+  void rejectTypeArgs(MemberExpr *member);
+  void rejectGlobalTypeArgs(MemberExpr *member);
+  Expr *checkCalleeValueCall(CallExpr *call);
+  Expr *checkMapStaticCall(CallExpr *call, MemberExpr *member);
+  Expr *checkListParamMethod(CallExpr *call, MemberExpr *member);
+  Expr *checkIteratorFromCall(CallExpr *call, MemberExpr *member);
+  Expr *checkNumberStaticCall(CallExpr *call, MemberExpr *member);
+  Expr *checkLocaleMethod(CallExpr *call, MemberExpr *member);
+  Expr *checkDictReceiverCall(CallExpr *call, MemberExpr *member);
+  Expr *checkUnionReceiverCall(CallExpr *call, MemberExpr *member);
+  Expr *checkTupleReceiverCall(CallExpr *call, MemberExpr *member);
+  Expr *checkCollectionStaticCall(CallExpr *call, MemberExpr *member);
+  Expr *tupleArrayCopy(MemberExpr *member, const ArrayMethodInfo *arrayMethod);
+  std::optional<Expr *> checkTimerCall(CallExpr *call, NameExpr *name);
+  std::optional<Expr *> checkGlobalFunctionCall(CallExpr *call, NameExpr *name);
+  Expr *reportNoMethod(CallExpr *call, MemberExpr *member, const Type *receiver);
+  Expr *checkNamedCall(CallExpr *call, NameExpr *name, const Type *expected);
+  Expr *checkScopedCall(CallExpr *call, NameExpr *name, const Type *expected);
+  Expr *reportNotCallable(CallExpr *call, NameExpr *name, const ScopeEntry &entry);
+  Expr *checkMemberCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkObjectStaticCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkClassReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkLanguageStaticCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkLibraryStaticCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkShapedReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkLibraryReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkPromiseReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkCallableReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkFunctionNameCall(CallExpr *call, NameExpr *name, FuncSymbol *func,
+                              const Type *expected);
+  Expr *checkValueReceiverCall(CallExpr *call, MemberExpr *member, const Type *receiver,
+                               const Type *expected);
+  Expr *checkPlainValueMethod(CallExpr *call, MemberExpr *member, const Type *receiver,
+                              const Type *expected);
 
   SemanticState &state;
   Scopes *scopes = nullptr;

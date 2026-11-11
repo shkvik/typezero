@@ -494,57 +494,16 @@ Expr *DecimalChecker::checkDecimalCount(Expr *arg, llvm::StringRef what, int64_t
 }
 
 Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
-  struct Method {
-    llvm::StringLiteral name;
-    Builtin builtin;
-    unsigned minArgs, maxArgs;
-    const char *args;
-    const Type *ret;
-  };
-  const Type *decimal = Type::decimalTy();
-  const Method methods[] = {
-      {"div", Builtin::DecDiv, 1, 3, "dpm", decimal},
-      {"round", Builtin::DecRound, 0, 2, "pm", decimal},
-      {"toFixed", Builtin::DecToFixed, 0, 2, "pm", Type::string()},
-      {"toFormat", Builtin::DecToFormat, 0, 2, "pm", Type::string()},
-      {"toExponential", Builtin::DecToExponential, 0, 2, "pm", Type::string()},
-      {"toPrecision", Builtin::DecToPrecision, 0, 2, "sm", Type::string()},
-      {"toString", Builtin::DecToString, 0, 1, "b", Type::string()},
-      {"sqrt", Builtin::DecSqrt, 0, 0, "", decimal},
-      {"abs", Builtin::DecAbs, 0, 0, "", decimal},
-      {"isInteger", Builtin::DecIsInteger, 0, 0, "", Type::boolTy()},
-      {"decimalPlaces", Builtin::DecDecimalPlaces, 0, 0, "", Type::intTy()},
-      {"shiftedBy", Builtin::DecShiftedBy, 1, 1, "k", decimal},
-      {"toFraction", Builtin::DecToFraction, 0, 1, "d", Type::array(decimal)},
-  };
-  llvm::StringRef name = member->name;
-  const Method *method = nullptr;
-  for (const Method &m : methods) {
-    if (m.name == name) {
-      method = &m;
-    }
-  }
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-  };
-  if (!method) {
-    llvm::StringRef use;
-    for (const Replacement &r : kReplacements) {
-      if (r.name == name) {
-        use = r.use;
-      }
-    }
-    std::string message = ErrorTextDecimalMethod::noMember(name, use);
-    this->state.getDiagnostics().error(member->loc(), message);
-    checkArgsLoosely();
-    return call;
+  const DecimalMethodInfo *method = DecimalMethodTable::find(member->name);
+  if (method == nullptr) {
+    return this->reportDecimalMember(call, member);
   }
   if (method->builtin == Builtin::DecDecimalPlaces && !call->args.empty()) {
     std::string message = ErrorTextDecimalMethod::places();
     this->state.getDiagnostics().error(member->loc(), message);
-    checkArgsLoosely();
+    for (Expr *&arg : call->args) {
+      arg = this->exprChecker->checkExpr(arg);
+    }
     return call;
   }
   ArgumentChecker::ResultArityMatches arity =
@@ -554,45 +513,76 @@ Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
     return call;
   }
   for (size_t i = 0; i < call->args.size(); ++i) {
-    Expr *&arg = call->args[i];
-    switch (method->args[i]) {
-    case 'd':
-      arg = this->argumentChecker->checkArg(arg, decimal);
-      break;
-    case 'p': {
-      bool positive =
-          method->builtin == Builtin::DecDiv || method->builtin == Builtin::DecToExponential;
-      std::string places = ErrorTextDecimalCount::places();
-      arg = this->checkDecimalCount(arg, places, positive ? 0 : -1000000000, 1000000000);
-      break;
-    }
-    case 's': {
-      std::string digits = ErrorTextDecimalCount::digits();
-      arg = this->checkDecimalCount(arg, digits, 1, 1000000000);
-      break;
-    }
-    case 'b': {
-      std::string base = ErrorTextDecimalCount::base();
-      arg = this->checkDecimalCount(arg, base, 2, 36);
-      break;
-    }
-    case 'k': {
-      std::string power = ErrorTextDecimalCount::power();
-      arg = this->checkDecimalCount(arg, power, -9007199254740991, 9007199254740991);
-      break;
-    }
-    default:
-      arg = this->checkRoundingMode(arg);
-      break;
-    }
+    call->args[i] = this->checkDecimalArg(call->args[i], method->args[i], method->builtin);
   }
   if (method->builtin == Builtin::DecDiv) {
     this->checkDecimalDivisor(BinaryOp::Div, call->args[0]);
   }
   call->target = BuiltinCall{.builtin = method->builtin};
-  call->type = method->ret;
+  call->type = DecimalChecker::decimalResultType(method->result);
 
   return call;
 }
 
+Expr *DecimalChecker::reportDecimalMember(CallExpr *call, MemberExpr *member) {
+  llvm::StringRef use;
+  for (const Replacement &r : kReplacements) {
+    if (r.name == member->name) {
+      use = r.use;
+    }
+  }
+  std::string message = ErrorTextDecimalMethod::noMember(member->name, use);
+  this->state.getDiagnostics().error(member->loc(), message);
+  for (Expr *&arg : call->args) {
+    arg = this->exprChecker->checkExpr(arg);
+  }
+
+  return call;
+}
+
+Expr *DecimalChecker::checkDecimalArg(Expr *arg, DecimalArg kind, Builtin builtin) {
+  switch (kind) {
+    case DecimalArg::DECIMAL:
+      return this->argumentChecker->checkArg(arg, Type::decimalTy());
+    case DecimalArg::PLACES: {
+      bool positive = builtin == Builtin::DecDiv || builtin == Builtin::DecToExponential;
+      std::string places = ErrorTextDecimalCount::places();
+      return this->checkDecimalCount(arg, places, positive ? 0 : -1000000000, 1000000000);
+    }
+    case DecimalArg::DIGITS: {
+      std::string digits = ErrorTextDecimalCount::digits();
+      return this->checkDecimalCount(arg, digits, 1, 1000000000);
+    }
+    case DecimalArg::BASE: {
+      std::string base = ErrorTextDecimalCount::base();
+      return this->checkDecimalCount(arg, base, 2, 36);
+    }
+    case DecimalArg::POWER: {
+      std::string power = ErrorTextDecimalCount::power();
+      return this->checkDecimalCount(arg, power, -9007199254740991, 9007199254740991);
+    }
+    case DecimalArg::NONE:
+    case DecimalArg::ROUNDING:
+      return this->checkRoundingMode(arg);
+  }
+
+  return this->checkRoundingMode(arg);
+}
+
+const Type *DecimalChecker::decimalResultType(DecimalResult result) {
+  switch (result) {
+    case DecimalResult::DECIMAL:
+      return Type::decimalTy();
+    case DecimalResult::STRING:
+      return Type::string();
+    case DecimalResult::BOOL:
+      return Type::boolTy();
+    case DecimalResult::INT:
+      return Type::intTy();
+    case DecimalResult::DECIMAL_LIST:
+      return Type::array(Type::decimalTy());
+  }
+
+  return Type::decimalTy();
+}
 }

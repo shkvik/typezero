@@ -45,6 +45,11 @@ private:
                                          bool isAnd);
   ResultTestsUnknown testsUnknown(const Type *type);
   static ResultNullPossible nullPossible(const Type *type, llvm::StringRef op);
+  void addArrayFacts(const Expr *arg, Flow &whenTrue) const;
+  void addNothingFacts(const Expr *side, const Expr *other, Flow &equal, Flow &different) const;
+  void addTypeOfFacts(const Expr *operand, const std::u16string &text, Flow &equal,
+                      Flow &different) const;
+  static const Type *typeOfJson(const std::u16string &text);
   static const VarSymbol *jsonVariable(const Expr *expr);
   static bool nullName(const Expr *expr);
   static bool isNothing(const Expr *expr);

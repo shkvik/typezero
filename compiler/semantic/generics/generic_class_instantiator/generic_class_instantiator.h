@@ -30,6 +30,26 @@ public:
 private:
   static std::string typeNames(llvm::ArrayRef<const Type *> types);
 
+  struct MemberTypes {
+    ClassDecl *inst = nullptr;
+    std::vector<const Type *> own;
+    std::vector<const Type *> mine;
+  };
+
+  FuncSymbol *makeInstanceSymbol(FunctionDecl *fn, FunctionDecl *generic);
+  std::vector<const Type *> iteratedParams(ClassDecl *inst, llvm::ArrayRef<const Type *> params);
+  const Type *substituted(const MemberTypes &types, const Type *t);
+  const Type *substitutedValue(const MemberTypes &types, const Type *t);
+  void fillInstanceSignature(const MemberTypes &types, FunctionDecl *fn, FunctionDecl *generic,
+                             FuncSymbol *sym);
+  void fillInstanceParams(const MemberTypes &types, FunctionDecl *fn, const FunctionDecl *generic);
+  void addInstanceBase(ClassDecl *inst, const Type *base);
+  void linkInstanceBases(ClassDecl *inst);
+  void fillInstanceFields(ClassDecl *inst);
+  void declareInstanceMembers(ClassDecl *inst);
+  void makeInstanceInit(ClassDecl *inst);
+  void checkInstanceVariants(ClassDecl *inst);
+
   SemanticState &state;
   ChunkTypes *chunkTypes = nullptr;
   ClassBases *classBases = nullptr;

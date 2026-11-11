@@ -45,6 +45,23 @@ private:
   static ResultDefinedType elementsKnown(const NewExpr *expr, const Type *key, const Type *element,
                                          bool isMap);
 
+  struct DictSource {
+    const Type *type;
+    Expr *arg;
+  };
+
+  Expr *failDictNew(NewExpr *expr);
+  Expr *reportWeakDict(NewExpr *expr);
+  std::optional<const Type *> statedDictType(NewExpr *expr, const Type *expected, bool isMap);
+  static const Type *wantedDict(const Type *expected, bool isMap);
+  static const Type *onlyDictMember(const Type *expected, bool isMap);
+  std::optional<DictSource> sourcedDict(NewExpr *expr, const Type *type, bool isMap);
+  std::optional<DictSource> inferredPairsDict(Expr *arg, const Type *key, const Type *value);
+  std::optional<DictSource> checkedSourceDict(NewExpr *expr, Expr *arg, const Type *type,
+                                              bool isMap);
+  std::optional<const Type *> sourceElementDict(const NewExpr *expr, const Expr *arg,
+                                                const Type *element, bool isMap);
+
   SemanticState &state;
   DictChecker *dictChecker = nullptr;
   ExprChecker *exprChecker = nullptr;

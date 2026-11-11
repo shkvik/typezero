@@ -34,6 +34,26 @@ private:
   static ResultCasesAllHandled casesHandled(const SwitchStmt *stmt,
                                             llvm::ArrayRef<const Type *> left);
 
+  struct SwitchFlows {
+    const Type *type;
+    const Type *hint;
+    Flow tests;
+    std::vector<Flow> matched;
+  };
+
+  static std::vector<Stmt *> caseStatements(const SwitchStmt *stmt);
+  static const Type *switchHint(const Type *type);
+  void walkCaseTest(SwitchStmt *stmt, size_t i, SwitchFlows &flows);
+  void walkTypeOfCase(const SwitchStmt *stmt, const SwitchCase &c);
+  void addCaseFacts(SwitchStmt *stmt, SwitchCase &c, const Type *type, Flow &whenTrue,
+                    Flow &whenFalse);
+  void addComparedFacts(SwitchStmt *stmt, SwitchCase &c, const Type *type, Flow &whenTrue,
+                        Flow &whenFalse);
+  void walkExhaustive(SwitchStmt *stmt, SwitchFlows &flows);
+  Flow caseBodiesExit(SwitchStmt *stmt, const SwitchFlows &flows, const std::vector<Stmt *> &all);
+  void rememberCaseVars(const SwitchCase &c);
+  void forgetCaseVars(const SwitchStmt *stmt);
+
   SemanticState &state;
   Scopes *scopes = nullptr;
   ExprChecker *exprChecker = nullptr;

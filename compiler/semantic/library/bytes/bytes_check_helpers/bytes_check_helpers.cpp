@@ -14,134 +14,209 @@ using llvm::isa;
 namespace tz {
 
 Range BytesCheckHelpers::operateWide(BinaryOp op, const Range &a, const Range &b, bool isInt) {
+  std::optional<int64_t> count = BytesCheckHelpers::exactValue(b);
+  switch (op) {
+    case BinaryOp::BitAnd:
+      return BytesCheckHelpers::bitAndRange(a, b);
+    case BinaryOp::BitOr:
+    case BinaryOp::BitXor:
+      return BytesCheckHelpers::bitOrRange(op, a, b);
+    case BinaryOp::Shl:
+      return BytesCheckHelpers::shiftLeftRange(a, count, isInt);
+    case BinaryOp::Shr:
+      return BytesCheckHelpers::shiftRightRange(a, count, isInt);
+    case BinaryOp::UShr:
+      return BytesCheckHelpers::unsignedShiftRange(a, count, isInt);
+    case BinaryOp::Rem:
+      return BytesCheckHelpers::remainderRange(a, count);
+    case BinaryOp::Div:
+      return BytesCheckHelpers::divisionRange(a, count);
+    case BinaryOp::Add:
+    case BinaryOp::Sub:
+    case BinaryOp::Mul:
+      return BytesCheckHelpers::arithmeticRange(op, a, b);
+    case BinaryOp::Pow:
+    case BinaryOp::Lt:
+    case BinaryOp::Le:
+    case BinaryOp::Gt:
+    case BinaryOp::Ge:
+    case BinaryOp::Eq:
+    case BinaryOp::Ne:
+    case BinaryOp::LogAnd:
+    case BinaryOp::LogOr:
+    case BinaryOp::Nullish:
+    case BinaryOp::In:
+    case BinaryOp::InstanceOf:
+      return {};
+  }
+
+  return {};
+}
+
+std::optional<int64_t> BytesCheckHelpers::exactValue(const Range &r) {
+  if (!r.lo.has_value() || !r.hi.has_value() || *r.lo != *r.hi) {
+    return std::nullopt;
+  }
+
+  return *r.lo;
+}
+
+Range BytesCheckHelpers::withinBounds(const Range &r, bool isInt) {
   int64_t min = isInt ? kInt32Min : kIntMin;
   int64_t max = isInt ? kInt32Max : kIntMax;
-  auto within = [&](Range r) -> Range {
-    if (!BytesCheckHelpers::known(r) || *r.lo < min || *r.hi > max) {
-      return {};
-    }
+  if (!BytesCheckHelpers::known(r) || *r.lo < min || *r.hi > max) {
+    return {};
+  }
 
-    return r;
-  };
-  std::optional<int64_t> count;
-  if (b.lo && b.hi && *b.lo == *b.hi) {
-    count = *b.lo;
+  return r;
+}
+
+Range BytesCheckHelpers::bitAndRange(const Range &a, const Range &b) {
+  Range r;
+  for (const Range *side : {&a, &b}) {
+    if (!side->lo.has_value() || *side->lo < 0) {
+      continue;
+    }
+    r.lo = 0;
+    if (side->hi.has_value()) {
+      r.hi = r.hi.has_value() ? std::min(*r.hi, *side->hi) : *side->hi;
+    }
   }
-  switch (op) {
-  case BinaryOp::BitAnd: {
-    Range r;
-    for (const Range *side : {&a, &b}) {
-      if (side->lo && *side->lo >= 0) {
-        r.lo = 0;
-        if (side->hi) {
-          r.hi = r.hi ? std::min(*r.hi, *side->hi) : *side->hi;
-        }
+
+  return r;
+}
+
+Range BytesCheckHelpers::bitOrRange(BinaryOp op, const Range &a, const Range &b) {
+  bool natural =
+      BytesCheckHelpers::known(a) && BytesCheckHelpers::known(b) && *a.lo >= 0 && *b.lo >= 0;
+  if (!natural) {
+    return {};
+  }
+  int64_t lo = op == BinaryOp::BitOr ? std::max(*a.lo, *b.lo) : 0;
+
+  return {lo, BytesCheckHelpers::allOnes(std::max(*a.hi, *b.hi))};
+}
+
+Range BytesCheckHelpers::shiftLeftRange(const Range &a, std::optional<int64_t> count, bool isInt) {
+  bool small = count.has_value() && BytesCheckHelpers::known(a) && *count >= 0 &&
+               *count < (isInt ? 32 : 64) && *count < 40 && *a.lo > -(int64_t(1) << 40) &&
+               *a.hi < (int64_t(1) << 40);
+  if (!small) {
+    return {};
+  }
+  int64_t factor = int64_t(1) << *count;
+
+  return BytesCheckHelpers::withinBounds({*a.lo * factor, *a.hi * factor}, isInt);
+}
+
+Range BytesCheckHelpers::shiftRightRange(const Range &a, std::optional<int64_t> count, bool isInt) {
+  if (!count.has_value()) {
+    return {};
+  }
+  int64_t n = *count & (isInt ? 31 : 63);
+  if (BytesCheckHelpers::known(a)) {
+    return {BytesCheckHelpers::floorShift(*a.lo, n), BytesCheckHelpers::floorShift(*a.hi, n)};
+  }
+  if (isInt) {
+    return {BytesCheckHelpers::floorShift(kInt32Min, n),
+            BytesCheckHelpers::floorShift(kInt32Max, n)};
+  }
+
+  return {};
+}
+
+Range BytesCheckHelpers::unsignedShiftRange(const Range &a, std::optional<int64_t> count,
+                                            bool isInt) {
+  if (!count.has_value()) {
+    return {};
+  }
+  int64_t n = *count & (isInt ? 31 : 63);
+  if (a.lo.has_value() && *a.lo >= 0 && a.hi.has_value()) {
+    return {*a.lo >> n, *a.hi >> n};
+  }
+  if (isInt) {
+    return {0, int64_t(0xFFFFFFFF) >> n};
+  }
+  if (n > 0) {
+    return {0, std::numeric_limits<int64_t>::max() >> (n - 1)};
+  }
+
+  return {};
+}
+
+Range BytesCheckHelpers::remainderRange(const Range &a, std::optional<int64_t> count) {
+  if (!count.has_value() || *count == 0) {
+    return {};
+  }
+  int64_t m = (*count < 0 ? -*count : *count) - 1;
+  if (a.lo.has_value() && *a.lo >= 0) {
+    return {0, a.hi.has_value() ? std::min(m, *a.hi) : m};
+  }
+  if (a.hi.has_value() && *a.hi <= 0) {
+    return {a.lo.has_value() ? std::max(-m, *a.lo) : -m, 0};
+  }
+
+  return {-m, m};
+}
+
+Range BytesCheckHelpers::divisionRange(const Range &a, std::optional<int64_t> count) {
+  if (!count.has_value() || *count <= 0 || !BytesCheckHelpers::known(a)) {
+    return {};
+  }
+
+  return {*a.lo / *count, *a.hi / *count};
+}
+
+Range BytesCheckHelpers::arithmeticRange(BinaryOp op, const Range &a, const Range &b) {
+  bool exact = BytesCheckHelpers::known(a) && BytesCheckHelpers::known(b);
+  if (op != BinaryOp::Mul && !exact) {
+    return BytesCheckHelpers::openSumRange(op, a, b);
+  }
+  if (!exact) {
+    return {};
+  }
+
+  return BytesCheckHelpers::cornersRange(op, a, b);
+}
+
+Range BytesCheckHelpers::openSumRange(BinaryOp op, const Range &a, const Range &b) {
+  bool add = op == BinaryOp::Add;
+  const std::optional<int64_t> &low = add ? b.lo : b.hi;
+  const std::optional<int64_t> &high = add ? b.hi : b.lo;
+  Range r;
+  int64_t v = 0;
+  if (a.lo.has_value() && low.has_value() &&
+      !(add ? llvm::AddOverflow(*a.lo, *low, v) : llvm::SubOverflow(*a.lo, *low, v))) {
+    r.lo = v;
+  }
+  if (a.hi.has_value() && high.has_value() &&
+      !(add ? llvm::AddOverflow(*a.hi, *high, v) : llvm::SubOverflow(*a.hi, *high, v))) {
+    r.hi = v;
+  }
+
+  return r;
+}
+
+Range BytesCheckHelpers::cornersRange(BinaryOp op, const Range &a, const Range &b) {
+  int64_t xs[2] = {*a.lo, *a.hi};
+  int64_t ys[2] = {*b.lo, *b.hi};
+  int64_t lo = std::numeric_limits<int64_t>::max();
+  int64_t hi = std::numeric_limits<int64_t>::min();
+  for (int64_t x : xs) {
+    for (int64_t y : ys) {
+      int64_t v = 0;
+      bool overflow = op == BinaryOp::Add   ? llvm::AddOverflow(x, y, v)
+                      : op == BinaryOp::Sub ? llvm::SubOverflow(x, y, v)
+                                            : llvm::MulOverflow(x, y, v);
+      if (overflow) {
+        return {};
       }
+      lo = std::min(lo, v);
+      hi = std::max(hi, v);
     }
-    return r;
   }
-  case BinaryOp::BitOr:
-  case BinaryOp::BitXor:
-    if (BytesCheckHelpers::known(a) && BytesCheckHelpers::known(b) && *a.lo >= 0 && *b.lo >= 0) {
-      return {op == BinaryOp::BitOr ? std::max(*a.lo, *b.lo) : 0,
-              BytesCheckHelpers::allOnes(std::max(*a.hi, *b.hi))};
-    }
-    return {};
-  case BinaryOp::Shl:
-    if (count && BytesCheckHelpers::known(a) && *count >= 0 && *count < (isInt ? 32 : 64) &&
-        *count < 40 && *a.lo > -(int64_t(1) << 40) && *a.hi < (int64_t(1) << 40)) {
-      return within({*a.lo * (int64_t(1) << *count), *a.hi * (int64_t(1) << *count)});
-    }
-    return {};
-  case BinaryOp::Shr: {
-    if (!count) {
-      return {};
-    }
-    int64_t n = *count & (isInt ? 31 : 63);
-    if (BytesCheckHelpers::known(a)) {
-      return {BytesCheckHelpers::floorShift(*a.lo, n), BytesCheckHelpers::floorShift(*a.hi, n)};
-    }
-    if (isInt) {
-      return {BytesCheckHelpers::floorShift(kInt32Min, n),
-              BytesCheckHelpers::floorShift(kInt32Max, n)};
-    }
-    return {};
-  }
-  case BinaryOp::UShr: {
-    if (!count) {
-      return {};
-    }
-    int64_t n = *count & (isInt ? 31 : 63);
-    if (a.lo && *a.lo >= 0 && a.hi) {
-      return {*a.lo >> n, *a.hi >> n};
-    }
-    if (isInt) {
-      return {0, int64_t(0xFFFFFFFF) >> n};
-    }
-    if (n > 0) {
-      return {0, std::numeric_limits<int64_t>::max() >> (n - 1)};
-    }
-    return {};
-  }
-  case BinaryOp::Rem: {
-    if (!count || *count == 0) {
-      return {};
-    }
-    int64_t m = (*count < 0 ? -*count : *count) - 1;
-    if (a.lo && *a.lo >= 0) {
-      return {0, a.hi ? std::min(m, *a.hi) : m};
-    }
-    if (a.hi && *a.hi <= 0) {
-      return {a.lo ? std::max(-m, *a.lo) : -m, 0};
-    }
-    return {-m, m};
-  }
-  case BinaryOp::Div:
-    if (count && *count > 0 && BytesCheckHelpers::known(a)) {
-      return {*a.lo / *count, *a.hi / *count};
-    }
-    return {};
-  case BinaryOp::Add:
-  case BinaryOp::Sub:
-  case BinaryOp::Mul: {
-    if (op != BinaryOp::Mul && (!BytesCheckHelpers::known(a) || !BytesCheckHelpers::known(b))) {
-      bool add = op == BinaryOp::Add;
-      const std::optional<int64_t> &low = add ? b.lo : b.hi, &high = add ? b.hi : b.lo;
-      Range r;
-      int64_t v;
-      if (a.lo && low &&
-          !(add ? llvm::AddOverflow(*a.lo, *low, v) : llvm::SubOverflow(*a.lo, *low, v))) {
-        r.lo = v;
-      }
-      if (a.hi && high &&
-          !(add ? llvm::AddOverflow(*a.hi, *high, v) : llvm::SubOverflow(*a.hi, *high, v))) {
-        r.hi = v;
-      }
-      return r;
-    }
-    if (!BytesCheckHelpers::known(a) || !BytesCheckHelpers::known(b)) {
-      return {};
-    }
-    int64_t xs[2] = {*a.lo, *a.hi}, ys[2] = {*b.lo, *b.hi};
-    int64_t lo = std::numeric_limits<int64_t>::max(), hi = std::numeric_limits<int64_t>::min();
-    for (int64_t x : xs) {
-      for (int64_t y : ys) {
-        int64_t v;
-        bool overflow = op == BinaryOp::Add   ? llvm::AddOverflow(x, y, v)
-                        : op == BinaryOp::Sub ? llvm::SubOverflow(x, y, v)
-                                              : llvm::MulOverflow(x, y, v);
-        if (overflow) {
-          return {};
-        }
-        lo = std::min(lo, v);
-        hi = std::max(hi, v);
-      }
-    }
-    return Range{lo, hi};
-  }
-  default:
-    return {};
-  }
+
+  return Range{lo, hi};
 }
 
 bool BytesCheckHelpers::known(const Range &r) {

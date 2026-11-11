@@ -365,23 +365,20 @@ switch (member->method.kind()) {
 }
 ```
 
-Если `switch` выбирает значение, `case` кладёт его в переменную, а `return` стоит после
-`switch`: `return` внутри каждого `case` MSVC считает путём без возврата (C4715).
+Если `switch` выбирает значение или ветку, `return` стоит в каждом `case`, а после `switch` —
+запасной `return` (без него MSVC считает функцию путём без возврата, C4715). `default` нет.
 
 ```cpp
-LocalVarState *state = nullptr;
 switch (this->place.kind()) {
   case VarPlaceKind::GLOBAL_VAR:
-    break;
+    return nullptr;
   case VarPlaceKind::TOP_LEVEL_LOCAL_VAR:
-    state = &this->place.as<TopLevelLocalVar>()->state;
-    break;
+    return &this->place.as<TopLevelLocalVar>()->state;
   case VarPlaceKind::FUNCTION_LOCAL_VAR:
-    state = &this->place.as<FunctionLocalVar>()->state;
-    break;
+    return &this->place.as<FunctionLocalVar>()->state;
 }
 
-return state;
+return nullptr;
 ```
 
 ## Имена у промежуточных значений

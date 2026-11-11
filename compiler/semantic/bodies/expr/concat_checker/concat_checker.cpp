@@ -108,110 +108,127 @@ std::string ConcatChecker::concatTemplate(const Parts &parts, llvm::StringRef &o
 }
 
 ConcatChecker::ResultConvertsToText ConcatChecker::convertible(const Expr *expr) {
+  std::optional<ConcatCheckerConvertibleErrorCode> problem = ConcatChecker::textProblem(expr);
+  if (!problem.has_value()) {
+    return ok(expr);
+  }
+  std::string message = ConcatChecker::textProblemMessage(expr, *problem);
+
+  return err(ConcatCheckerConvertibleError{
+      .code = *problem,
+      .message = message,
+  });
+}
+
+std::optional<ConcatCheckerConvertibleErrorCode> ConcatChecker::textProblem(const Expr *expr) {
   const Type *type = expr->type;
   const Type *base = type->nonOptional();
   if (type->isVoid()) {
-    std::string message = ErrorTextToString::voidValue();
-
-    return err(ConcatCheckerConvertibleError{
-        .code = ConcatCheckerConvertibleErrorCode::VOID_VALUE,
-        .message = message,
-    });
+    return ConcatCheckerConvertibleErrorCode::VOID_VALUE;
   }
   if (type->holdsFunctions()) {
-    std::string message = ErrorTextToString::function();
-
-    return err(ConcatCheckerConvertibleError{
-        .code = ConcatCheckerConvertibleErrorCode::FUNCTION_VALUE,
-        .message = message,
-    });
+    return ConcatCheckerConvertibleErrorCode::FUNCTION_VALUE;
   }
   if (base->isTuple()) {
-    std::string message = ErrorTextToString::tuple();
-
-    return err(ConcatCheckerConvertibleError{
-        .code = ConcatCheckerConvertibleErrorCode::TUPLE_VALUE,
-        .message = message,
-    });
+    return ConcatCheckerConvertibleErrorCode::TUPLE_VALUE;
   }
   if (type->holdsResults()) {
-    std::string message = ErrorTextToString::result();
-
-    return err(ConcatCheckerConvertibleError{
-        .code = ConcatCheckerConvertibleErrorCode::RESULT_VALUE,
-        .message = message,
-    });
+    return ConcatCheckerConvertibleErrorCode::RESULT_VALUE;
   }
-  ClassDecl *cls = ClassDeclarer::classOf(base);
-  llvm::StringRef toStringName = ObjectMemberTable::getName(ObjectMember::TO_STRING);
-  bool ownToString = cls && !ClassDeclarer::methodsNamed(cls, toStringName, false).empty();
-  if (ownToString) {
-    auto *name = dyn_cast<NameExpr>(expr);
-    std::string text = name ? name->name.str() : "o";
-    std::string message = ErrorTextToString::ownString(text);
-
-    return err(ConcatCheckerConvertibleError{
-        .code = ConcatCheckerConvertibleErrorCode::OBJECT_TO_STRING,
-        .message = message,
-    });
+  if (ConcatChecker::hasOwnToString(base)) {
+    return ConcatCheckerConvertibleErrorCode::OBJECT_TO_STRING;
   }
   if (base->isDict()) {
-    const char *kind = base->isRecord() ? "Record" : base->isMap() ? "Map" : "Set";
-    const char *shown = base->isRecord() ? "Object" : kind;
-    std::string message = ErrorTextToString::dict(kind, shown);
-
-    return err(ConcatCheckerConvertibleError{
-        .code = ConcatCheckerConvertibleErrorCode::DICT_VALUE,
-        .message = message,
-    });
+    return ConcatCheckerConvertibleErrorCode::DICT_VALUE;
   }
   if (base->isIterator()) {
-    std::string message = ErrorTextToString::iterator();
-
-    return err(ConcatCheckerConvertibleError{
-        .code = ConcatCheckerConvertibleErrorCode::ITERATOR_VALUE,
-        .message = message,
-    });
+    return ConcatCheckerConvertibleErrorCode::ITERATOR_VALUE;
   }
   if (UnknownChecker::holdsUnknown(type)) {
-    std::string message = ErrorTextToString::unknown();
-
-    return err(ConcatCheckerConvertibleError{
-        .code = ConcatCheckerConvertibleErrorCode::UNKNOWN_VALUE,
-        .message = message,
-    });
+    return ConcatCheckerConvertibleErrorCode::UNKNOWN_VALUE;
   }
   if (JsonChecker::holdsJson(type)) {
-    std::string message = ErrorTextToString::json();
-
-    return err(ConcatCheckerConvertibleError{
-        .code = ConcatCheckerConvertibleErrorCode::JSON_VALUE,
-        .message = message,
-    });
+    return ConcatCheckerConvertibleErrorCode::JSON_VALUE;
   }
   if (type->holdsObjects()) {
-    std::string message = ErrorTextToString::object();
-
-    return err(ConcatCheckerConvertibleError{
-        .code = ConcatCheckerConvertibleErrorCode::OBJECT_VALUE,
-        .message = message,
-    });
+    return ConcatCheckerConvertibleErrorCode::OBJECT_VALUE;
   }
-  bool tagged = base->isUnion() && base->isTagged();
-  for (const Type *m : tagged ? base->members() : llvm::ArrayRef<const Type *>()) {
+  if (ConcatChecker::heldUnionMember(base) != nullptr) {
+    return ConcatCheckerConvertibleErrorCode::UNION_MEMBER;
+  }
+
+  return std::nullopt;
+}
+
+bool ConcatChecker::hasOwnToString(const Type *base) {
+  ClassDecl *cls = ClassDeclarer::classOf(base);
+  if (cls == nullptr) {
+    return false;
+  }
+  llvm::StringRef toStringName = ObjectMemberTable::getName(ObjectMember::TO_STRING);
+
+  return !ClassDeclarer::methodsNamed(cls, toStringName, false).empty();
+}
+
+const Type *ConcatChecker::heldUnionMember(const Type *base) {
+  if (!base->isUnion() || !base->isTagged()) {
+    return nullptr;
+  }
+  for (const Type *m : base->members()) {
     bool held = (m->isObject() && !m->isDate() && !m->isRegExp()) || m->isDict() ||
                 m->isFunction() || m->isIterator();
     if (held) {
-      std::string message = ErrorTextToString::member(type->name(), m->name());
-
-      return err(ConcatCheckerConvertibleError{
-          .code = ConcatCheckerConvertibleErrorCode::UNION_MEMBER,
-          .message = message,
-      });
+      return m;
     }
   }
 
-  return ok(expr);
+  return nullptr;
+}
+
+std::string ConcatChecker::textProblemMessage(const Expr *expr,
+                                              ConcatCheckerConvertibleErrorCode problem) {
+  const Type *type = expr->type;
+  const Type *base = type->nonOptional();
+  switch (problem) {
+    case ConcatCheckerConvertibleErrorCode::VOID_VALUE:
+      return ErrorTextToString::voidValue();
+    case ConcatCheckerConvertibleErrorCode::FUNCTION_VALUE:
+      return ErrorTextToString::function();
+    case ConcatCheckerConvertibleErrorCode::TUPLE_VALUE:
+      return ErrorTextToString::tuple();
+    case ConcatCheckerConvertibleErrorCode::RESULT_VALUE:
+      return ErrorTextToString::result();
+    case ConcatCheckerConvertibleErrorCode::OBJECT_TO_STRING:
+      return ConcatChecker::ownStringMessage(expr);
+    case ConcatCheckerConvertibleErrorCode::DICT_VALUE:
+      return ConcatChecker::dictMessage(base);
+    case ConcatCheckerConvertibleErrorCode::ITERATOR_VALUE:
+      return ErrorTextToString::iterator();
+    case ConcatCheckerConvertibleErrorCode::UNKNOWN_VALUE:
+      return ErrorTextToString::unknown();
+    case ConcatCheckerConvertibleErrorCode::JSON_VALUE:
+      return ErrorTextToString::json();
+    case ConcatCheckerConvertibleErrorCode::OBJECT_VALUE:
+      return ErrorTextToString::object();
+    case ConcatCheckerConvertibleErrorCode::UNION_MEMBER:
+      return ErrorTextToString::member(type->name(), ConcatChecker::heldUnionMember(base)->name());
+  }
+
+  return ErrorTextToString::object();
+}
+
+std::string ConcatChecker::ownStringMessage(const Expr *expr) {
+  auto *name = dyn_cast<NameExpr>(expr);
+  std::string text = name != nullptr ? name->name.str() : "o";
+
+  return ErrorTextToString::ownString(text);
+}
+
+std::string ConcatChecker::dictMessage(const Type *base) {
+  const char *kind = base->isRecord() ? "Record" : base->isMap() ? "Map" : "Set";
+  const char *shown = base->isRecord() ? "Object" : kind;
+
+  return ErrorTextToString::dict(kind, shown);
 }
 
 Expr *ConcatChecker::toStringOperand(Expr *expr) {

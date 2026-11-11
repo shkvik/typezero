@@ -305,72 +305,117 @@ const Type *LiteralTypes::numberMemberOf(const Type *expected, bool fraction) {
 }
 
 const Type *LiteralTypes::literalMember(const ObjectLitExpr *lit, const Type *target) const {
-  if (llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.spread(); })) {
+  if (LiteralTypes::hasSpread(lit)) {
     return nullptr;
   }
   const Type *best = nullptr;
   int bestScore = -1;
   bool ambiguous = false;
   for (const Type *m : target->members()) {
-    if (!m->isObject() || m->isClass() || m->isTuple() || m->isRegExp() || m->isMatch() ||
-        m->isAnyObject() || m->isIncomplete()) {
+    if (!LiteralTypes::isPlainObjectMember(m) || !LiteralTypes::namesFit(lit, m)) {
       continue;
     }
-    bool fits = llvm::all_of(lit->props, [&](const ObjectLitExpr::Property &p) {
-      return m->field(p.name) || m->overload(p.name);
-    });
-    for (const Field &f : m->fields()) {
-      fits &= f.type->isOptional() ||
-              llvm::any_of(lit->props,
-                           [&](const ObjectLitExpr::Property &p) { return p.name == f.name; });
-    }
-    if (!fits) {
+    std::optional<int> score = this->memberScore(lit, m);
+    if (!score.has_value()) {
       continue;
     }
-    int score = 0;
-    bool mismatch = false;
-    for (const ObjectLitExpr::Property &p : lit->props) {
-      const Field *f = m->field(p.name);
-      const Type *tag = f && p.value ? UnionCheckHelpers::writtenLiteral(p.value) : nullptr;
-      if (!tag && f && p.value) {
-        tag = this->enumTag(p.value);
-      }
-      if (auto *named = !tag && f ? dyn_cast_or_null<NameExpr>(p.value) : nullptr) {
-        const VarSymbol *var = this->scopes->lookup(named->name).var();
-        const Type *known =
-            var && var->type ? this->typeIn(this->state.getFlowState().getFlow(), var) : nullptr;
-        if (known && LiteralTypes::isLiteralSet(known)) {
-          tag = known;
-        }
-      }
-      if (!tag) {
-        continue;
-      }
-      const Type *field = f->type->nonOptional();
-      if (TypeRelations::isImplicitlyConvertible(tag, field) ||
-          (tag->isLiteral() && tag->literalBase()->isInt() &&
-           TypeRelations::isImplicitlyConvertible(tag->literalBase(), field))) {
-        score += LiteralTypes::isLiteralSet(field) ||
-                         (field->isUnion() && field->slotPart(UnionSlot::Atom))
-                     ? 1
-                     : 0;
-      } else if (LiteralTypes::isLiteralSet(field) || field->isUnion()) {
-        mismatch = true;
-      }
-    }
-    if (mismatch) {
-      continue;
-    }
-    if (score > bestScore) {
+    if (*score > bestScore) {
       best = m;
-      bestScore = score;
+      bestScore = *score;
       ambiguous = false;
-    } else if (score == bestScore) {
+    } else if (*score == bestScore) {
       ambiguous = true;
     }
   }
 
   return ambiguous ? nullptr : best;
+}
+
+bool LiteralTypes::hasSpread(const ObjectLitExpr *lit) {
+  for (const ObjectLitExpr::Property &p : lit->props) {
+    if (p.spread()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool LiteralTypes::isPlainObjectMember(const Type *m) {
+  return m->isObject() && !m->isClass() && !m->isTuple() && !m->isRegExp() && !m->isMatch() &&
+         !m->isAnyObject() && !m->isIncomplete();
+}
+
+bool LiteralTypes::namesFit(const ObjectLitExpr *lit, const Type *m) {
+  for (const ObjectLitExpr::Property &p : lit->props) {
+    if (m->field(p.name) == nullptr && m->overload(p.name) == nullptr) {
+      return false;
+    }
+  }
+  for (const Field &f : m->fields()) {
+    if (!f.type->isOptional() && !LiteralTypes::hasProperty(lit, f.name)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool LiteralTypes::hasProperty(const ObjectLitExpr *lit, llvm::StringRef name) {
+  for (const ObjectLitExpr::Property &p : lit->props) {
+    if (p.name == name) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+std::optional<int> LiteralTypes::memberScore(const ObjectLitExpr *lit, const Type *m) const {
+  int score = 0;
+  for (const ObjectLitExpr::Property &p : lit->props) {
+    const Field *f = m->field(p.name);
+    const Type *tag = this->propertyTag(p, f);
+    if (tag == nullptr) {
+      continue;
+    }
+    const Type *field = f->type->nonOptional();
+    bool convertible = TypeRelations::isImplicitlyConvertible(tag, field) ||
+                       (tag->isLiteral() && tag->literalBase()->isInt() &&
+                        TypeRelations::isImplicitlyConvertible(tag->literalBase(), field));
+    if (convertible) {
+      bool tagged = LiteralTypes::isLiteralSet(field) ||
+                    (field->isUnion() && field->slotPart(UnionSlot::Atom) != nullptr);
+      score += tagged ? 1 : 0;
+    } else if (LiteralTypes::isLiteralSet(field) || field->isUnion()) {
+      return std::nullopt;
+    }
+  }
+
+  return score;
+}
+
+const Type *LiteralTypes::propertyTag(const ObjectLitExpr::Property &p, const Field *f) const {
+  if (f == nullptr || p.value == nullptr) {
+    return nullptr;
+  }
+  const Type *tag = UnionCheckHelpers::writtenLiteral(p.value);
+  if (tag == nullptr) {
+    tag = this->enumTag(p.value);
+  }
+  if (tag != nullptr) {
+    return tag;
+  }
+  auto *named = dyn_cast<NameExpr>(p.value);
+  if (named == nullptr) {
+    return nullptr;
+  }
+  const VarSymbol *var = this->scopes->lookup(named->name).var();
+  const Type *known = var != nullptr && var->type != nullptr
+                          ? this->typeIn(this->state.getFlowState().getFlow(), var)
+                          : nullptr;
+
+  return known != nullptr && LiteralTypes::isLiteralSet(known) ? known : nullptr;
 }
 
 const Type *LiteralTypes::typeIn(const Flow &flow, const VarSymbol *var) const {

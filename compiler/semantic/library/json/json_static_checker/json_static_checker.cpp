@@ -1,6 +1,7 @@
 #include "compiler/semantic/library/json/json_static_checker/json_static_checker.h"
 #include "compiler/packages/json_text/json_text.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/json/json_static_table/json_static_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -149,96 +150,73 @@ bool JsonStaticChecker::mayStringifyToUndefined(const Type *type) {
 
 Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : call->args) {
-      if (!JsonChecker::isNullName(arg)) {
-        arg = this->exprChecker->checkExpr(arg);
-      }
-    }
-  };
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  llvm::StringRef fn = member->name;
-  if (fn == "parse") {
-    if (call->args.size() == 2) {
-      std::string message = ErrorTextJsonStatic::reviver();
-      this->state.getDiagnostics().error(call->args[1]->loc(), message);
-      checkArgsLoosely();
-      return call;
+  std::optional<JsonStatic> fn = JsonStaticTable::find(member->name);
+  if (fn == JsonStatic::PARSE) {
+    return this->checkJsonParse(call, member);
+  }
+  if (!member->typeArgs.empty()) {
+    std::string message = ErrorTextJsonStatic::typeArgs(member->name);
+    this->state.getDiagnostics().error(member->loc(), message);
+  }
+  if (fn != JsonStatic::STRINGIFY) {
+    std::string message = ErrorTextJsonStatic::noMember(member->name);
+    this->state.getDiagnostics().error(member->loc(), message);
+    this->walkArgsLoosely(call);
+    return call;
+  }
+
+  return this->checkStringify(call, member);
+}
+
+void JsonStaticChecker::walkArgsLoosely(CallExpr *call) {
+  for (Expr *&arg : call->args) {
+    if (!JsonChecker::isNullName(arg)) {
+      arg = this->exprChecker->checkExpr(arg);
     }
-    if (!member->typeArgs.empty()) {
-      std::string message = ErrorTextJsonStatic::parseTypes();
-      this->state.getDiagnostics().error(member->loc(), message);
-      checkArgsLoosely();
-      return call;
-    }
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), arity.error().message);
-      return call;
-    }
-    call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
-    this->checkConstantJson(call->args[0]);
-    call->target = BuiltinCall{.builtin = Builtin::JsonParse};
-    call->type = Type::result(Type::json(), this->prelude->builtinType("JsonError"));
+  }
+}
+
+Expr *JsonStaticChecker::checkJsonParse(CallExpr *call, MemberExpr *member) {
+  if (call->args.size() == 2) {
+    std::string message = ErrorTextJsonStatic::reviver();
+    this->state.getDiagnostics().error(call->args[1]->loc(), message);
+    this->walkArgsLoosely(call);
     return call;
   }
   if (!member->typeArgs.empty()) {
-    std::string message = ErrorTextJsonStatic::typeArgs(fn);
+    std::string message = ErrorTextJsonStatic::parseTypes();
     this->state.getDiagnostics().error(member->loc(), message);
-  }
-  if (fn != "stringify") {
-    std::string message = ErrorTextJsonStatic::noMember(fn);
-    this->state.getDiagnostics().error(member->loc(), message);
-    checkArgsLoosely();
+    this->walkArgsLoosely(call);
     return call;
   }
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+    return call;
+  }
+  call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
+  this->checkConstantJson(call->args[0]);
+  call->target = BuiltinCall{.builtin = Builtin::JsonParse};
+  call->type = Type::result(Type::json(), this->prelude->builtinType("JsonError"));
+
+  return call;
+}
+
+Expr *JsonStaticChecker::checkStringify(CallExpr *call, MemberExpr *member) {
   ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 3);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
-  Expr *value = call->args[0] = this->exprChecker->checkExpr(call->args[0]);
-  bool ok = !value->type->isError();
-  if (value->type->isVoid()) {
-    std::string message = ErrorTextJsonStatic::voidValue();
-    this->state.getDiagnostics().error(value->loc(), message);
-    ok = false;
-  }
-  if (const ClassDecl *cls = ok ? JsonStaticChecker::classWithToJson(value->type) : nullptr) {
-    std::string message = ErrorTextJsonStatic::toJson(cls->name);
-    this->state.getDiagnostics().error(value->loc(), message);
-    ok = false;
-  }
+  call->args[0] = this->exprChecker->checkExpr(call->args[0]);
+  Expr *value = call->args[0];
+  bool ok = this->stringifiedValueFits(value);
   std::vector<Expr *> args{value};
-  if (call->args.size() >= 2) {
-    Expr *replacer = call->args[1];
-    if (!JsonChecker::isNullName(replacer) && !isa<UndefinedExpr>(replacer)) {
-      replacer = this->exprChecker->checkExpr(replacer);
-      if (!replacer->type->isError()) {
-        std::string message = ErrorTextJsonStatic::replacer();
-        this->state.getDiagnostics().error(replacer->loc(), message);
-      }
-      ok = false;
-    }
-  }
-  if (call->args.size() == 3) {
-    Expr *space = call->args[2];
-    if (!JsonChecker::isNullName(space) && !isa<UndefinedExpr>(space)) {
-      space = this->exprChecker->checkExpr(space);
-      const Type *type = space->type;
-      if (type->isNumeric()) {
-        args.push_back(this->typeRelations->convert(space, Type::doubleTy()));
-      } else if (type->isString()) {
-        args.push_back(space);
-      } else if (!type->isError()) {
-        std::string message = ErrorTextJsonStatic::space(type->name());
-        this->state.getDiagnostics().error(space->loc(), message);
-        ok = false;
-      }
-    }
-  }
+  ok &= this->stringifyReplacerFits(call);
+  ok &= this->stringifySpaceFits(call, args);
   if (!ok) {
     return call;
   }
@@ -247,12 +225,74 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
   call->type = JsonStaticChecker::mayStringifyToUndefined(value->type)
                    ? Type::optional(Type::string())
                    : Type::string();
-  if (!this->libraryCalls->inLibrary(call->loc()) &&
-      JsonStaticChecker::mayHoldItself(value->type)) {
+  bool cyclic =
+      !this->libraryCalls->inLibrary(call->loc()) && JsonStaticChecker::mayHoldItself(value->type);
+  if (cyclic) {
     call->type = Type::result(call->type, this->prelude->builtinType("JsonError"));
   }
 
   return call;
+}
+
+bool JsonStaticChecker::stringifiedValueFits(const Expr *value) {
+  bool ok = !value->type->isError();
+  if (value->type->isVoid()) {
+    std::string message = ErrorTextJsonStatic::voidValue();
+    this->state.getDiagnostics().error(value->loc(), message);
+    ok = false;
+  }
+  const ClassDecl *cls = ok ? JsonStaticChecker::classWithToJson(value->type) : nullptr;
+  if (cls != nullptr) {
+    std::string message = ErrorTextJsonStatic::toJson(cls->name);
+    this->state.getDiagnostics().error(value->loc(), message);
+    ok = false;
+  }
+
+  return ok;
+}
+
+bool JsonStaticChecker::stringifyReplacerFits(CallExpr *call) {
+  if (call->args.size() < 2) {
+    return true;
+  }
+  Expr *replacer = call->args[1];
+  if (JsonChecker::isNullName(replacer) || isa<UndefinedExpr>(replacer)) {
+    return true;
+  }
+  replacer = this->exprChecker->checkExpr(replacer);
+  if (!replacer->type->isError()) {
+    std::string message = ErrorTextJsonStatic::replacer();
+    this->state.getDiagnostics().error(replacer->loc(), message);
+  }
+
+  return false;
+}
+
+bool JsonStaticChecker::stringifySpaceFits(CallExpr *call, std::vector<Expr *> &args) {
+  if (call->args.size() != 3) {
+    return true;
+  }
+  Expr *space = call->args[2];
+  if (JsonChecker::isNullName(space) || isa<UndefinedExpr>(space)) {
+    return true;
+  }
+  space = this->exprChecker->checkExpr(space);
+  const Type *type = space->type;
+  if (type->isNumeric()) {
+    args.push_back(this->typeRelations->convert(space, Type::doubleTy()));
+    return true;
+  }
+  if (type->isString()) {
+    args.push_back(space);
+    return true;
+  }
+  if (type->isError()) {
+    return true;
+  }
+  std::string message = ErrorTextJsonStatic::space(type->name());
+  this->state.getDiagnostics().error(space->loc(), message);
+
+  return false;
 }
 
 bool JsonStaticChecker::readEmbedded(CallExpr *call, llvm::StringRef fn, std::string &bytes,

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/os/os_function_table/os_function_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/os/os_checker/os_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -24,6 +25,14 @@ private:
   static ResultOsFunction osFunction(llvm::StringRef fn);
   static const Type *cpuInfoType();
   static const Type *userInfoType();
+  bool hasRejectedArgs(CallExpr *call, llvm::SMLoc loc);
+  Expr *checkOsFunction(CallExpr *call, OsFunction function, llvm::SMLoc loc);
+  Expr *osStringCall(CallExpr *call, llvm::SMLoc loc, int which);
+  Expr *osNumberCall(CallExpr *call, llvm::SMLoc loc, int which);
+  void setWhichArg(CallExpr *call, llvm::SMLoc loc, int which);
+  static Expr *builtinOsCall(CallExpr *call, Builtin builtin, const Type *result);
+  Expr *endiannessLiteral(llvm::SMLoc loc);
+  Expr *reportNotYet(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

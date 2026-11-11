@@ -25,6 +25,42 @@ private:
 
   static std::optional<std::string> literalOf(const Expr *e);
 
+  struct KeyPairKind {
+    int which;
+    Expr *name;
+  };
+
+  struct KeyPairNumbers {
+    Expr *modulus;
+    Expr *exponent;
+    Expr *curve;
+    int has;
+  };
+
+  struct KeyEncoding {
+    int format;
+    int flags;
+    Expr *type;
+    Expr *cipher;
+    Expr *passphrase;
+  };
+
+  static llvm::ArrayRef<llvm::StringRef> pairTypeNames();
+  std::optional<KeyPairKind> keyPairKind(CallExpr *call, llvm::SMLoc loc);
+  bool keyPairOptionsRead(CallExpr *call, llvm::StringRef shown, llvm::StringMap<Expr *> &options);
+  std::optional<KeyPairNumbers> keyPairNumbers(llvm::SMLoc loc, int which,
+                                               const llvm::StringMap<Expr *> &options);
+  Expr *generateKeyCall(CallExpr *call, llvm::SMLoc loc, const KeyPairKind &kind,
+                        const KeyPairNumbers &numbers);
+  const Type *appendedEncoding(llvm::SMLoc loc, const llvm::StringMap<Expr *> &options,
+                               bool isPrivate, std::vector<Expr *> &parts);
+  bool encodingRead(Expr *encoding, llvm::StringRef option, bool isPrivate, KeyEncoding &chosen);
+  bool encodingTypeRead(const Expr *encoding, llvm::StringRef option, bool isPrivate,
+                        const llvm::StringMap<Expr *> &e, KeyEncoding &chosen);
+  bool encodingCipherRead(const Expr *encoding, const llvm::StringMap<Expr *> &e,
+                          KeyEncoding &chosen);
+  static const Type *encodedKeyType(int format);
+
   SemanticState &state;
   CryptoArgs *cryptoArgs = nullptr;
   CryptoErrors *cryptoErrors = nullptr;

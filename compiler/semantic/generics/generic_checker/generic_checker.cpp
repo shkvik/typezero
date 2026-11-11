@@ -149,57 +149,86 @@ bool GenericChecker::isBoolPass(const CastExpr *conv) {
 
 std::optional<bool> GenericChecker::nodeCondition(const Expr *cond,
                                                   std::vector<std::optional<bool>> &answers) {
-  if (auto *conv = dyn_cast<CastExpr>(cond); conv && GenericChecker::isBoolPass(conv)) {
+  auto *conv = dyn_cast<CastExpr>(cond);
+  if (conv != nullptr && GenericChecker::isBoolPass(conv)) {
     return ChildrenFirst::takeAnswer(answers);
   }
-  if (auto *lit = dyn_cast<BoolLitExpr>(cond)) {
+  auto *lit = dyn_cast<BoolLitExpr>(cond);
+  if (lit != nullptr) {
     return lit->value;
   }
-  if (auto *unary = dyn_cast<UnaryExpr>(cond); unary && unary->op == UnaryOp::Not) {
+  auto *unary = dyn_cast<UnaryExpr>(cond);
+  if (unary != nullptr && unary->op == UnaryOp::Not) {
     std::optional<bool> value = ChildrenFirst::takeAnswer(answers);
     return value.has_value() ? std::optional<bool>(!*value) : std::nullopt;
   }
-  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin() == Builtin::JsonIsJson) {
-    const Type *type = call->args[0]->type;
-    if (type->isUnknown() || type->nonOptional()->isParam()) {
-      return std::nullopt;
-    }
-    return type->nonOptional()->isJson();
+  auto *call = dyn_cast<CallExpr>(cond);
+  if (call != nullptr && call->builtin() == Builtin::JsonIsJson) {
+    return GenericChecker::isJsonCondition(call);
   }
   auto *bin = dyn_cast<BinaryExpr>(cond);
-  if (!bin) {
+  if (bin == nullptr) {
     return std::nullopt;
   }
   if (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr) {
-    std::optional<bool> r = ChildrenFirst::takeAnswer(answers);
-    std::optional<bool> l = ChildrenFirst::takeAnswer(answers);
-    bool isAnd = bin->op == BinaryOp::LogAnd;
-    if (l && *l != isAnd) {
-      return l;
-    }
-    if (l) {
-      return r;
-    }
-    return std::nullopt;
+    return GenericChecker::logicalCondition(bin, answers);
   }
   if (bin->op != BinaryOp::Eq && bin->op != BinaryOp::Ne) {
     return std::nullopt;
   }
+  std::optional<bool> undefinedCheck = GenericChecker::undefinedCondition(bin);
+  if (undefinedCheck.has_value()) {
+    return undefinedCheck;
+  }
+
+  return GenericChecker::typeOfCondition(bin);
+}
+
+std::optional<bool> GenericChecker::isJsonCondition(const CallExpr *call) {
+  const Type *type = call->args[0]->type;
+  if (type->isUnknown() || type->nonOptional()->isParam()) {
+    return std::nullopt;
+  }
+
+  return type->nonOptional()->isJson();
+}
+
+std::optional<bool> GenericChecker::logicalCondition(const BinaryExpr *bin,
+                                                     std::vector<std::optional<bool>> &answers) {
+  std::optional<bool> r = ChildrenFirst::takeAnswer(answers);
+  std::optional<bool> l = ChildrenFirst::takeAnswer(answers);
+  bool isAnd = bin->op == BinaryOp::LogAnd;
+  if (l.has_value() && *l != isAnd) {
+    return l;
+  }
+  if (l.has_value()) {
+    return r;
+  }
+
+  return std::nullopt;
+}
+
+std::optional<bool> GenericChecker::undefinedCondition(const BinaryExpr *bin) {
   for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
     const Expr *operand = side;
     while (isa<CastExpr>(operand) && cast<CastExpr>(operand)->isImplicit()) {
       operand = cast<CastExpr>(operand)->operand;
     }
     const Type *type = operand->type;
-    if (isa<UndefinedExpr>(other) && isa<NameExpr>(operand) &&
-        (type->isUndefined() || (type->isOptional() && type->inner()->isNever()))) {
+    bool alwaysUndefined = type->isUndefined() || (type->isOptional() && type->inner()->isNever());
+    if (isa<UndefinedExpr>(other) && isa<NameExpr>(operand) && alwaysUndefined) {
       return bin->op == BinaryOp::Eq;
     }
   }
+
+  return std::nullopt;
+}
+
+std::optional<bool> GenericChecker::typeOfCondition(const BinaryExpr *bin) {
   for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
     auto *typeOf = dyn_cast<UnaryExpr>(side);
     auto *text = dyn_cast<StringLitExpr>(other);
-    if (!typeOf || typeOf->op != UnaryOp::TypeOf || !text) {
+    if (typeOf == nullptr || typeOf->op != UnaryOp::TypeOf || text == nullptr) {
       continue;
     }
     const Expr *operand = typeOf->operand;
@@ -209,25 +238,28 @@ std::optional<bool> GenericChecker::nodeCondition(const Expr *cond,
     if (!isa<NameExpr>(operand)) {
       return std::nullopt;
     }
-    const Type *type = typeOf->operand->type;
-    llvm::StringRef name = TypeSpelling::typeOfName(type->nonOptional());
-    if (name.empty()) {
-      return std::nullopt;
-    }
-    std::u16string wanted(name.begin(), name.end());
-    bool equal;
-    if (type->isOptional()) {
-      if (text->value == u"undefined" || text->value == wanted) {
-        return std::nullopt;
-      }
-      equal = false;
-    } else {
-      equal = text->value == wanted;
-    }
-    return bin->op == BinaryOp::Eq ? equal : !equal;
+    return GenericChecker::typeOfAnswer(bin, typeOf->operand->type, text);
   }
 
   return std::nullopt;
+}
+
+std::optional<bool> GenericChecker::typeOfAnswer(const BinaryExpr *bin, const Type *type,
+                                                 const StringLitExpr *text) {
+  llvm::StringRef name = TypeSpelling::typeOfName(type->nonOptional());
+  if (name.empty()) {
+    return std::nullopt;
+  }
+  std::u16string wanted(name.begin(), name.end());
+  bool equal = text->value == wanted;
+  if (type->isOptional()) {
+    if (text->value == u"undefined" || equal) {
+      return std::nullopt;
+    }
+    equal = false;
+  }
+
+  return bin->op == BinaryOp::Eq ? equal : !equal;
 }
 
 const Type *GenericChecker::literalShape(const Expr *expr) {

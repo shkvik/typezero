@@ -92,6 +92,33 @@ private:
                                    TruthUse use, llvm::StringRef x, llvm::StringRef y);
   static std::string objectMessage(const Expr *expr, const Type *base, TruthUse use,
                                    llvm::StringRef x, llvm::StringRef y);
+
+  struct ObjectTruth {
+    const NameExpr *narrowed = nullptr;
+    bool isArray = false;
+    bool isPromise = false;
+    bool isClass = false;
+    bool isObject = false;
+    bool className = false;
+  };
+
+  static ObjectTruth objectTruth(const Expr *expr, const Type *base);
+  static std::string objectHead(const ObjectTruth &truth, TruthUse use);
+  static std::string useConsequence(TruthUse use);
+  static std::string objectAdvice(const ObjectTruth &truth, const Type *base, TruthUse use,
+                                  llvm::StringRef x, llvm::StringRef y);
+  static std::optional<TruthCheckerCheckTruthyErrorCode> truthProblem(const Type *type,
+                                                                      const Type *base);
+  static bool isTestable(const Type *type, const Type *base);
+  static bool allBoolOrString(llvm::ArrayRef<const Type *> types);
+  static std::optional<TruthCheckerCheckTruthyErrorCode> unionProblem(const Type *type,
+                                                                      const Type *base);
+  static const Type *unionNumber(const Type *base);
+  static bool hasFalsyMember(const Type *base);
+  static std::string truthMessage(TruthCheckerCheckTruthyErrorCode code, const Expr *expr,
+                                  TruthUse use, const Expr *other, const Type *base);
+  static std::string unionNumberMessage(const Type *type, const Type *base, llvm::StringRef value);
+  Expr *checkLogicalType(BinaryExpr *bin, const Type *l, bool truthy, TruthUse use);
   static std::string sourceText(const Expr *expr);
   static NodeChildren<const Expr *> sourceParts(const Expr *expr);
   static std::string nodeSource(const Expr *expr, std::vector<std::string> &answers);

@@ -32,6 +32,18 @@ private:
   using ResultConversionMade = Result<Expr *, NumberMethodsCheckConversionError>;
 
   ResultConversionMade checkConversion(CallExpr *call, MemberExpr *member);
+  Expr *checkRadixString(CallExpr *call, MemberExpr *member);
+  ResultMethodCallMade checkPlainString(CallExpr *call, MemberExpr *member);
+  ResultMethodCallMade checkToFixed(CallExpr *call, MemberExpr *member);
+  void walkDigitsArg(CallExpr *call, int64_t lo, int64_t hi, const std::string &what);
+  ResultStaticCallMade checkStringStatic(CallExpr *call, MemberExpr *member);
+  ResultStaticCallMade checkNumberStatic(CallExpr *call, MemberExpr *member);
+  ResultStaticCallMade noSuchProperty(CallExpr *call, llvm::StringRef name, llvm::StringRef owner);
+  ResultStaticCallMade checkStringRaw(CallExpr *call);
+  ResultStaticCallMade checkFromCodes(CallExpr *call, Builtin builtin);
+  void walkCodePoint(const Expr *arg);
+  ResultStaticCallMade checkNumberParse(CallExpr *call, MemberExpr *member);
+  ResultStaticCallMade checkNumberPredicate(CallExpr *call, Builtin builtin);
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

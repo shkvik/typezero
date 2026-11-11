@@ -56,6 +56,10 @@ private:
                         std::vector<ExtendsStep> &steps);
   bool extendsStep(const Type *type, const Type *pattern, InferMatch *inference,
                    std::vector<ExtendsStep> &steps);
+  static bool bindsInferred(const Type *type, const Type *pattern, InferMatch *inference,
+                            std::vector<ExtendsStep> &steps);
+  bool leafStep(const Type *type, const Type *pattern, InferMatch *inference,
+                std::vector<ExtendsStep> &steps);
   bool structureStep(const Type *type, const Type *pattern, InferMatch *inference,
                      std::vector<ExtendsStep> &steps);
 

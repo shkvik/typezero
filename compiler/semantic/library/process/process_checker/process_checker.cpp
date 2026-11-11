@@ -67,148 +67,176 @@ Expr *ProcessChecker::checkExitCode(Expr *code) {
 }
 
 Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-  };
-  llvm::StringRef name = member->name;
-
   bool isDate = this->callChecker->isGlobalName(member->object, GlobalName::DATE);
-  if (isDate && name != "now") {
+  if (isDate && member->name != "now") {
     return this->dateChecker->checkDateStatic(call, member);
   }
   if (isDate || this->callChecker->isGlobalName(member->object, GlobalName::PERFORMANCE)) {
-    llvm::StringRef object = isDate ? "Date" : "performance";
-    if (name != "now") {
-      std::string message = ErrorTextProcessCall::onlyNow(object, name);
-      this->state.getDiagnostics().error(member->loc(), message);
-      checkArgsLoosely();
-      return call;
-    }
-    bool rejected = this->callChecker->rejectSpread(call);
-    ArgumentChecker::ResultArityMatches arity =
-        rejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 0);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), arity.error().message);
-    }
-    if (rejected || arity.isErr()) {
-      return call;
-    }
-    call->target = BuiltinCall{.builtin = isDate ? Builtin::DateNow : Builtin::PerformanceNow};
-    call->type = isDate ? Type::intTy() : Type::doubleTy();
-    return call;
+    return this->checkClockNow(call, member, isDate);
   }
-
   bool isStdout = this->isProcessMember(member->object, "stdout");
   if (isStdout || this->isProcessMember(member->object, "stderr")) {
-    std::string stream = ErrorTextProcessStream::name(isStdout);
-    if (name != "isTTY" &&
-        this->state.getLibraryDeclarations().findLibraryFunction("processStdout")) {
-      return nullptr;
-    }
-    if (name != "write") {
-      std::string message = name == "isTTY" ? ErrorTextProcessCall::ttyValue(stream)
-                                            : ErrorTextProcessCall::streamCall(stream, name);
-      this->state.getDiagnostics().error(member->loc(), message);
-      checkArgsLoosely();
-      return call;
-    }
-    bool rejected = this->callChecker->rejectSpread(call);
-    ArgumentChecker::ResultArityMatches arity =
-        rejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), arity.error().message);
-    }
-    if (rejected || arity.isErr()) {
-      return call;
-    }
-    Expr *chunk = this->exprChecker->checkExpr(call->args[0], Type::string());
-    const Type *type = chunk->type;
-    if (!type->isBuffer() && type->bytes() != Type::Bytes::Uint8) {
-      chunk = this->typeRelations->coerce(chunk, Type::string());
-    }
-    call->args[0] = chunk;
-    call->target = BuiltinCall{.builtin = isStdout ? Builtin::ProcessStdoutWrite
-                                                   : Builtin::ProcessStderrWrite};
-    call->type = Type::boolTy();
-    return call;
+    return this->checkStdStreamCall(call, member, isStdout);
   }
-
   if (!this->callChecker->isGlobalName(member->object, GlobalName::PROCESS)) {
     return nullptr;
   }
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  if (name == "nextTick") {
-    TimerChecker::ResultNextTickQueued queued = this->timerChecker->checkNextTick(call);
-    if (queued.isOk()) {
-      return queued.value();
-    }
-    llvm::SMLoc at = member->loc();
-    switch (queued.error().code) {
-      case TimerCheckerCheckNextTickErrorCode::CALLBACK_ARGUMENTS:
-        at = call->args[1]->loc();
-        break;
-      case TimerCheckerCheckNextTickErrorCode::WRONG_ARITY:
-        break;
-    }
-    this->state.getDiagnostics().error(at, queued.error().message);
+  std::optional<ProcessMember> found = ProcessMemberTable::find(member->name);
+  if (found == ProcessMember::NEXT_TICK) {
+    return this->checkNextTick(call, member);
+  }
+  if (found == ProcessMember::EXIT) {
+    return this->checkExit(call, member);
+  }
+  if (found == ProcessMember::CWD) {
+    return this->checkNoArgCall(call, member, Builtin::ProcessCwd, Type::string());
+  }
+  if (found == ProcessMember::UPTIME) {
+    return this->checkNoArgCall(call, member, Builtin::ProcessUptime, Type::doubleTy());
+  }
+
+  return this->checkProcessListenerCall(call, member, found);
+}
+
+void ProcessChecker::walkArgsLoosely(CallExpr *call) {
+  for (Expr *&arg : call->args) {
+    arg = this->exprChecker->checkExpr(arg);
+  }
+}
+
+bool ProcessChecker::hasRejectedArgs(CallExpr *call, MemberExpr *member, unsigned count) {
+  bool rejected = this->callChecker->rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : this->argumentChecker->checkArity(call, count, count);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+  }
+
+  return rejected || arity.isErr();
+}
+
+Expr *ProcessChecker::checkClockNow(CallExpr *call, MemberExpr *member, bool isDate) {
+  if (member->name != "now") {
+    llvm::StringRef object = isDate ? "Date" : "performance";
+    std::string message = ErrorTextProcessCall::onlyNow(object, member->name);
+    this->state.getDiagnostics().error(member->loc(), message);
+    this->walkArgsLoosely(call);
     return call;
   }
-  if (name == "exit") {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), arity.error().message);
-      return call;
-    }
-    if (!call->args.empty()) {
-      call->args[0] = this->checkExitCode(call->args[0]);
-    }
-    call->target = BuiltinCall{.builtin = Builtin::ProcessExit};
-    call->type = Type::voidTy();
+  if (this->hasRejectedArgs(call, member, 0)) {
     return call;
   }
-  if (name == "cwd") {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), arity.error().message);
-      return call;
-    }
-    call->target = BuiltinCall{.builtin = Builtin::ProcessCwd};
-    call->type = Type::string();
+  call->target = BuiltinCall{.builtin = isDate ? Builtin::DateNow : Builtin::PerformanceNow};
+  call->type = isDate ? Type::intTy() : Type::doubleTy();
+
+  return call;
+}
+
+Expr *ProcessChecker::checkStdStreamCall(CallExpr *call, MemberExpr *member, bool isStdout) {
+  std::optional<StdStreamMember> found = StdStreamMemberTable::find(member->name);
+  bool tty = found == StdStreamMember::IS_TTY;
+  if (!tty && this->state.getLibraryDeclarations().findLibraryFunction("processStdout")) {
+    return nullptr;
+  }
+  if (found != StdStreamMember::WRITE) {
+    std::string stream = ErrorTextProcessStream::name(isStdout);
+    std::string message = tty ? ErrorTextProcessCall::ttyValue(stream)
+                              : ErrorTextProcessCall::streamCall(stream, member->name);
+    this->state.getDiagnostics().error(member->loc(), message);
+    this->walkArgsLoosely(call);
     return call;
   }
-  if (name == "uptime") {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), arity.error().message);
-      return call;
-    }
-    call->target = BuiltinCall{.builtin = Builtin::ProcessUptime};
-    call->type = Type::doubleTy();
+  if (this->hasRejectedArgs(call, member, 1)) {
     return call;
   }
-  // TODO: говнокод
-  static const llvm::StringLiteral properties[] = {"argv",     "env",    "exitCode", "execPath",
-                                                   "platform", "stdout", "stderr"};
+  Expr *chunk = this->exprChecker->checkExpr(call->args[0], Type::string());
+  const Type *type = chunk->type;
+  if (!type->isBuffer() && type->bytes() != Type::Bytes::Uint8) {
+    chunk = this->typeRelations->coerce(chunk, Type::string());
+  }
+  call->args[0] = chunk;
+  Builtin builtin = isStdout ? Builtin::ProcessStdoutWrite : Builtin::ProcessStderrWrite;
+  call->target = BuiltinCall{.builtin = builtin};
+  call->type = Type::boolTy();
+
+  return call;
+}
+
+Expr *ProcessChecker::checkNextTick(CallExpr *call, MemberExpr *member) {
+  TimerChecker::ResultNextTickQueued queued = this->timerChecker->checkNextTick(call);
+  if (queued.isOk()) {
+    return queued.value();
+  }
+  llvm::SMLoc at = member->loc();
+  switch (queued.error().code) {
+    case TimerCheckerCheckNextTickErrorCode::CALLBACK_ARGUMENTS:
+      at = call->args[1]->loc();
+      break;
+    case TimerCheckerCheckNextTickErrorCode::WRONG_ARITY:
+      break;
+  }
+  this->state.getDiagnostics().error(at, queued.error().message);
+
+  return call;
+}
+
+Expr *ProcessChecker::checkExit(CallExpr *call, MemberExpr *member) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+    return call;
+  }
+  if (!call->args.empty()) {
+    call->args[0] = this->checkExitCode(call->args[0]);
+  }
+  call->target = BuiltinCall{.builtin = Builtin::ProcessExit};
+  call->type = Type::voidTy();
+
+  return call;
+}
+
+Expr *ProcessChecker::checkNoArgCall(CallExpr *call, MemberExpr *member, Builtin builtin,
+                                     const Type *result) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+    return call;
+  }
+  call->target = BuiltinCall{.builtin = builtin};
+  call->type = result;
+
+  return call;
+}
+
+Expr *ProcessChecker::checkProcessListenerCall(CallExpr *call, MemberExpr *member,
+                                               std::optional<ProcessMember> found) {
+  bool subscribes = found == ProcessMember::ON || found == ProcessMember::ONCE ||
+                    found == ProcessMember::ADD_LISTENER ||
+                    found == ProcessMember::PREPEND_LISTENER;
   auto *event = call->args.empty() ? nullptr : dyn_cast<StringLitExpr>(call->args[0]);
-  if (event && (event->value == u"uncaughtException" || event->value == u"unhandledRejection") &&
-      (name == "on" || name == "once" || name == "addListener" || name == "prependListener")) {
+  bool thrown = event != nullptr &&
+                (event->value == u"uncaughtException" || event->value == u"unhandledRejection");
+  if (thrown && subscribes) {
     std::string message = ErrorTextProcessEvent::noThrown();
     this->state.getDiagnostics().error(call->args[0]->loc(), message);
-
     return this->resultChecker->markCallFailed(call);
   }
-  if ((name == "on" || name == "once" || name == "off") &&
-      this->state.getLibraryDeclarations().findLibraryFunction("processOn")) {
+  bool signals =
+      found == ProcessMember::ON || found == ProcessMember::ONCE || found == ProcessMember::OFF;
+  if (signals && this->state.getLibraryDeclarations().findLibraryFunction("processOn")) {
     return this->checkSignalCall(call, member);
   }
-  std::string message = llvm::is_contained(properties, name) ? ErrorTextProcessCall::notFunc(name)
-                                                             : ErrorTextProcessCall::notYet(name);
+  bool property = found == ProcessMember::ARGV || found == ProcessMember::ENV ||
+                  found == ProcessMember::EXIT_CODE || found == ProcessMember::EXEC_PATH ||
+                  found == ProcessMember::PLATFORM || found == ProcessMember::STDOUT ||
+                  found == ProcessMember::STDERR;
+  std::string message = property ? ErrorTextProcessCall::notFunc(member->name)
+                                 : ErrorTextProcessCall::notYet(member->name);
   this->state.getDiagnostics().error(member->loc(), message);
-  checkArgsLoosely();
+  this->walkArgsLoosely(call);
 
   return call;
 }
@@ -265,84 +293,121 @@ Expr *ProcessChecker::checkSignalCall(CallExpr *call, MemberExpr *member) {
   return this->eventTargetChecker->callLibraryFunction(call, fn, {}, given, member->loc());
 }
 
-// TODO: говнокод
 Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
-  llvm::StringRef name = member->name;
   if (this->isProcessMember(member->object, "env")) {
-    auto *key =
-        this->state.getAst().make<StringLitExpr>(member->loc(), ProcessChecker::toUtf16(name));
+    std::u16string name = ProcessChecker::toUtf16(member->name);
+    auto *key = this->state.getAst().make<StringLitExpr>(member->loc(), name);
     key->type = Type::string();
     return this->builtinCall(member->loc(), member, Builtin::ProcessEnv, {key},
                              Type::optional(Type::string()));
   }
-
   bool isStdout = this->isProcessMember(member->object, "stdout");
   if (isStdout || this->isProcessMember(member->object, "stderr")) {
-    std::string stream = ErrorTextProcessStream::name(isStdout);
-    if (name != "isTTY" && name != "columns" && name != "rows" &&
-        this->state.getLibraryDeclarations().findLibraryFunction("processStdout")) {
-      return nullptr;
-    }
-    if (name == "isTTY") {
-      auto *fd = this->state.getAst().make<IntLitExpr>(member->loc(), isStdout ? 1 : 2);
-      fd->type = Type::intTy();
-      return this->builtinCall(member->loc(), member, Builtin::ProcessIsTTY, {fd}, Type::boolTy());
-    }
-    std::string message = name == "write" ? ErrorTextProcessMember::writeCall(stream)
-                                          : ErrorTextProcessMember::streamPart(stream, name);
-    this->state.getDiagnostics().error(member->loc(), message);
-    member->type = Type::error();
-    return member;
+    return this->checkStdStreamMember(member, isStdout);
   }
-
   if (this->callChecker->isGlobalName(member->object, GlobalName::DATE)) {
     return this->dateChecker->checkDateStaticMember(member);
   }
   if (this->callChecker->isGlobalName(member->object, GlobalName::PERFORMANCE)) {
-    std::string message =
-        name == "now" ? ErrorTextProcessMember::perfNow() : ErrorTextProcessMember::perfOther(name);
+    std::string message = member->name == "now" ? ErrorTextProcessMember::perfNow()
+                                                : ErrorTextProcessMember::perfOther(member->name);
     this->state.getDiagnostics().error(member->loc(), message);
     member->type = Type::error();
     return member;
   }
-
   if (!this->callChecker->isGlobalName(member->object, GlobalName::PROCESS)) {
     return nullptr;
   }
-  if (name == "stdin" || name == "stdout" || name == "stderr") {
-    if (Expr *stream = this->streamSources->processStream(member)) {
-      return stream;
+
+  std::optional<ProcessMember> found = ProcessMemberTable::find(member->name);
+  bool stream = found == ProcessMember::STDIN || found == ProcessMember::STDOUT ||
+                found == ProcessMember::STDERR;
+  if (stream) {
+    Expr *source = this->streamSources->processStream(member);
+    if (source != nullptr) {
+      return source;
     }
   }
-  if (name == "argv") {
-    return this->builtinCall(member->loc(), member, Builtin::ProcessArgv, {},
-                             Type::array(Type::string()));
-  }
-  if (name == "exitCode") {
-    return this->builtinCall(member->loc(), member, Builtin::ProcessExitCode, {},
-                             Type::optional(Type::intTy()));
-  }
-  if (name == "execPath") {
-    return this->builtinCall(member->loc(), member, Builtin::ProcessExecPath, {}, Type::string());
-  }
-  if (name == "platform") {
-    return this->builtinCall(member->loc(), member, Builtin::ProcessPlatform, {}, Type::string());
-  }
-  if (name == "pid") {
-    return this->builtinCall(member->loc(), member, Builtin::ProcessPid, {}, Type::intTy());
-  }
-  if (name == "env") {
-    return this->builtinCall(member->loc(), member, Builtin::EnvMap, {},
-                             Type::dict(Type::DictKind::Record, Type::string(), Type::string()));
+  Expr *value = found.has_value() ? this->processValue(member, *found) : nullptr;
+  if (value != nullptr) {
+    return value;
   }
   member->type = Type::error();
-  std::string message =
-      name == "exit" || name == "cwd" || name == "uptime" ? ErrorTextProcessMember::onlyCalled(name)
-      : name == "stdout" || name == "stderr"              ? ErrorTextProcessMember::streamUse(name)
-                                                          : ErrorTextProcessCall::notYet(name);
+  std::string message = ProcessChecker::processMemberMessage(member->name, found);
   this->state.getDiagnostics().error(member->loc(), message);
 
   return member;
+}
+
+Expr *ProcessChecker::checkStdStreamMember(MemberExpr *member, bool isStdout) {
+  std::optional<StdStreamMember> found = StdStreamMemberTable::find(member->name);
+  bool known = found == StdStreamMember::IS_TTY || found == StdStreamMember::COLUMNS ||
+               found == StdStreamMember::ROWS;
+  if (!known && this->state.getLibraryDeclarations().findLibraryFunction("processStdout")) {
+    return nullptr;
+  }
+  if (found == StdStreamMember::IS_TTY) {
+    auto *fd = this->state.getAst().make<IntLitExpr>(member->loc(), isStdout ? 1 : 2);
+    fd->type = Type::intTy();
+    return this->builtinCall(member->loc(), member, Builtin::ProcessIsTTY, {fd}, Type::boolTy());
+  }
+  std::string stream = ErrorTextProcessStream::name(isStdout);
+  std::string message = found == StdStreamMember::WRITE
+                            ? ErrorTextProcessMember::writeCall(stream)
+                            : ErrorTextProcessMember::streamPart(stream, member->name);
+  this->state.getDiagnostics().error(member->loc(), message);
+  member->type = Type::error();
+
+  return member;
+}
+
+Expr *ProcessChecker::processValue(MemberExpr *member, ProcessMember found) {
+  llvm::SMLoc loc = member->loc();
+  switch (found) {
+    case ProcessMember::ARGV:
+      return this->builtinCall(loc, member, Builtin::ProcessArgv, {}, Type::array(Type::string()));
+    case ProcessMember::EXIT_CODE:
+      return this->builtinCall(loc, member, Builtin::ProcessExitCode, {},
+                               Type::optional(Type::intTy()));
+    case ProcessMember::EXEC_PATH:
+      return this->builtinCall(loc, member, Builtin::ProcessExecPath, {}, Type::string());
+    case ProcessMember::PLATFORM:
+      return this->builtinCall(loc, member, Builtin::ProcessPlatform, {}, Type::string());
+    case ProcessMember::PID:
+      return this->builtinCall(loc, member, Builtin::ProcessPid, {}, Type::intTy());
+    case ProcessMember::ENV:
+      return this->builtinCall(loc, member, Builtin::EnvMap, {},
+                               Type::dict(Type::DictKind::Record, Type::string(), Type::string()));
+    case ProcessMember::NEXT_TICK:
+    case ProcessMember::EXIT:
+    case ProcessMember::CWD:
+    case ProcessMember::UPTIME:
+    case ProcessMember::ON:
+    case ProcessMember::ONCE:
+    case ProcessMember::OFF:
+    case ProcessMember::ADD_LISTENER:
+    case ProcessMember::PREPEND_LISTENER:
+    case ProcessMember::STDIN:
+    case ProcessMember::STDOUT:
+    case ProcessMember::STDERR:
+      return nullptr;
+  }
+
+  return nullptr;
+}
+
+std::string ProcessChecker::processMemberMessage(llvm::StringRef name,
+                                                 std::optional<ProcessMember> found) {
+  bool function =
+      found == ProcessMember::EXIT || found == ProcessMember::CWD || found == ProcessMember::UPTIME;
+  if (function) {
+    return ErrorTextProcessMember::onlyCalled(name);
+  }
+  if (found == ProcessMember::STDOUT || found == ProcessMember::STDERR) {
+    return ErrorTextProcessMember::streamUse(name);
+  }
+
+  return ErrorTextProcessCall::notYet(name);
 }
 
 Expr *ProcessChecker::checkProcessEnvIndex(IndexExpr *index) {

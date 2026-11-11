@@ -54,6 +54,31 @@ private:
   static ResultKnownHelperFound iteratorHelper(llvm::StringRef name, const Type *iterator);
   static ResultCallbackIsPassed callbackGiven(size_t count, llvm::StringRef name, bool reduce);
 
+  struct IteratorCallback {
+    CallExpr *call;
+    llvm::StringRef name;
+    const Type *element;
+    const Type *accumulator;
+    bool isBoolean;
+    size_t count;
+  };
+
+  bool hasWrongArity(CallExpr *call, MemberExpr *member, unsigned min, unsigned max);
+  Expr *checkIteratorStep(CallExpr *call, MemberExpr *member, Builtin builtin);
+  std::optional<Builtin> helperBuiltin(CallExpr *call, MemberExpr *member);
+  Expr *checkTakeDrop(CallExpr *call, MemberExpr *member, Builtin builtin);
+  Expr *checkToArray(CallExpr *call, MemberExpr *member, Builtin builtin);
+  Expr *checkIteratorCallback(CallExpr *call, MemberExpr *member, IteratorMethod method,
+                              Builtin builtin);
+  const Type *reduceInitType(CallExpr *call, const Type *element);
+  static Signature callbackSignature(IteratorMethod method, const Type *element,
+                                     const Type *accumulator);
+  Expr *checkCallbackResult(const IteratorCallback &callback, IteratorMethod method);
+  Expr *checkMapResult(const IteratorCallback &callback, const Type *result);
+  Expr *checkFlatMapResult(CallExpr *call, const Type *result);
+  const Type *filteredElement(const IteratorCallback &callback);
+  Expr *finishReduce(const IteratorCallback &callback);
+
   SemanticState &state;
   CallChecker *callChecker = nullptr;
   DictChecker *dictChecker = nullptr;

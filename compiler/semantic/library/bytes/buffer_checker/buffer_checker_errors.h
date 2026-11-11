@@ -25,6 +25,15 @@ struct BufferCheckerDecodedInputError {
   std::string message;
 };
 
+enum class BufferCheckerVarValueFitsErrorCode {
+  VALUE_MAY_NOT_FIT,
+};
+
+struct BufferCheckerVarValueFitsError {
+  BufferCheckerVarValueFitsErrorCode code;
+  std::string message;
+};
+
 class ErrorTextBuffer {
 public:
   static std::string valueArg(llvm::StringRef name, llvm::StringRef type);

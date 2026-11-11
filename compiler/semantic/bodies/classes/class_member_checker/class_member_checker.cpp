@@ -194,41 +194,57 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
   this->classDeclarer->completeClass(cls);
   this->tzModulesChecker->noteTlsMethod(member, cls);
   member->type = Type::error();
-  llvm::StringRef name = member->name;
-  if (Expr *date = this->fsDeclarer->checkStatsDate(member, cls)) {
+  Expr *date = this->fsDeclarer->checkStatsDate(member, cls);
+  if (date != nullptr) {
     return date;
   }
   bool viaThis = this->classChecker->isInitThis(member->object).isOk();
   const ClassDecl *owner = nullptr;
-  const ClassField *field = ClassBases::findField(cls, name, &owner);
-  if (field && !field->method()) {
-    ResultMemberAccessible accessible =
-        this->checkAccess(owner, field->access, name, member->object);
-    if (accessible.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), accessible.error().message);
-    }
-    ResultFieldIsSetBefore set = this->fieldSet(owner, name, viaThis);
-    if (set.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), set.error().message);
-      return member;
-    }
-    ResultFieldTypeIsKnown typed = ClassMemberChecker::fieldTyped(field, name);
-    if (typed.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), typed.error().message);
-      return member;
-    }
-    member->type = typed.value();
-    if (Expr *narrowed = this->fieldFacts->narrowedField(member); narrowed != member) {
-      return narrowed;
-    }
-    if (field->resolved->isOptional()) {
-      if (std::optional<FieldPath> path = this->fieldFacts->fieldPath(member);
-          path && this->fieldFacts->isFieldDefined(*path)) {
-        return this->typeRelations->convert(member, field->resolved->inner());
-      }
-    }
+  const ClassField *field = ClassBases::findField(cls, member->name, &owner);
+  if (field != nullptr && !field->method()) {
+    return this->checkFieldMember(member, field, owner, viaThis);
+  }
+
+  return this->checkMethodMember(member, cls, expected, viaThis);
+}
+
+Expr *ClassMemberChecker::checkFieldMember(MemberExpr *member, const ClassField *field,
+                                           const ClassDecl *owner, bool viaThis) {
+  llvm::StringRef name = member->name;
+  ResultMemberAccessible accessible = this->checkAccess(owner, field->access, name, member->object);
+  if (accessible.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), accessible.error().message);
+  }
+  ResultFieldIsSetBefore set = this->fieldSet(owner, name, viaThis);
+  if (set.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), set.error().message);
     return member;
   }
+  ResultFieldTypeIsKnown typed = ClassMemberChecker::fieldTyped(field, name);
+  if (typed.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), typed.error().message);
+    return member;
+  }
+  member->type = typed.value();
+  Expr *narrowed = this->fieldFacts->narrowedField(member);
+  if (narrowed != member) {
+    return narrowed;
+  }
+  if (!field->resolved->isOptional()) {
+    return member;
+  }
+  std::optional<FieldPath> path = this->fieldFacts->fieldPath(member);
+  bool defined = path.has_value() && this->fieldFacts->isFieldDefined(*path);
+  if (defined) {
+    return this->typeRelations->convert(member, field->resolved->inner());
+  }
+
+  return member;
+}
+
+Expr *ClassMemberChecker::checkMethodMember(MemberExpr *member, ClassDecl *cls,
+                                            const Type *expected, bool viaThis) {
+  llvm::StringRef name = member->name;
   ResultMethodsOfObjects found = ClassMemberChecker::instanceMethods(cls, name);
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
@@ -240,8 +256,9 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
   if (accessible.isErr()) {
     this->state.getDiagnostics().error(member->loc(), accessible.error().message);
   }
-  if (methods[0]->cls()->library() && this->eventMaps->isEmitterClass(cls) &&
-      !this->libraryCalls->inLibrary(member->loc()) && name != "eventNames") {
+  bool emitterValue = methods[0]->cls()->library() && this->eventMaps->isEmitterClass(cls) &&
+                      !this->libraryCalls->inLibrary(member->loc()) && name != "eventNames";
+  if (emitterValue) {
     this->emitterChecker->reportEmitterMethodValue(member);
 
     return member;
@@ -262,7 +279,8 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
     this->state.getDiagnostics().error(member->loc(), plain.error().message);
     return member;
   }
-  if (FunctionDecl *impl = ClassLinks::soleImplementation(cls, sym->decl)) {
+  FunctionDecl *impl = ClassLinks::soleImplementation(cls, sym->decl);
+  if (impl != nullptr) {
     member->form = MethodMember{.method = impl->sym};
   } else {
     member->form = MethodMember{.method = sym, .virtualCall = true};

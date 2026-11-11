@@ -9,17 +9,22 @@ const BytesMethodInfo kBytesMethods[] = {
     {
         .name = "at",
         .method = BytesMethod::AT,
-        .form = TypedArrayMethod{},
+        .form = TypedArrayAtMethod{},
     },
     {
         .name = "copyWithin",
         .method = BytesMethod::COPY_WITHIN,
-        .form = TypedArrayMethod{},
+        .form =
+            TypedArrayPositionsMethod{
+                .builtin = Builtin::BytesCopyWithin,
+                .minArgs = 2,
+                .maxArgs = 3,
+            },
     },
     {
         .name = "entries",
         .method = BytesMethod::ENTRIES,
-        .form = TypedArrayMethod{},
+        .form = TypedArrayIteratorMethod{},
     },
     {
         .name = "every",
@@ -29,7 +34,7 @@ const BytesMethodInfo kBytesMethods[] = {
     {
         .name = "fill",
         .method = BytesMethod::FILL,
-        .form = TypedArrayMethod{},
+        .form = TypedArrayFillMethod{},
     },
     {
         .name = "filter",
@@ -64,27 +69,27 @@ const BytesMethodInfo kBytesMethods[] = {
     {
         .name = "includes",
         .method = BytesMethod::INCLUDES,
-        .form = TypedArrayMethod{},
+        .form = TypedArraySearchMethod{.mode = BytesSearchMode::INCLUDES},
     },
     {
         .name = "indexOf",
         .method = BytesMethod::INDEX_OF,
-        .form = TypedArrayMethod{},
+        .form = TypedArraySearchMethod{.mode = BytesSearchMode::INDEX_OF},
     },
     {
         .name = "join",
         .method = BytesMethod::JOIN,
-        .form = TypedArrayMethod{},
+        .form = TypedArrayJoinMethod{.maxArgs = 1},
     },
     {
         .name = "keys",
         .method = BytesMethod::KEYS,
-        .form = TypedArrayMethod{},
+        .form = TypedArrayIteratorMethod{},
     },
     {
         .name = "lastIndexOf",
         .method = BytesMethod::LAST_INDEX_OF,
-        .form = TypedArrayMethod{},
+        .form = TypedArraySearchMethod{.mode = BytesSearchMode::LAST_INDEX_OF},
     },
     {
         .name = "map",
@@ -104,17 +109,26 @@ const BytesMethodInfo kBytesMethods[] = {
     {
         .name = "reverse",
         .method = BytesMethod::REVERSE,
-        .form = TypedArrayMethod{},
+        .form =
+            TypedArrayReverseMethod{
+                .builtin = Builtin::BytesReverse,
+                .place = ReorderPlace::IN_PLACE,
+            },
     },
     {
         .name = "set",
         .method = BytesMethod::SET,
-        .form = TypedArrayMethod{},
+        .form = TypedArraySetMethod{},
     },
     {
         .name = "slice",
         .method = BytesMethod::SLICE,
-        .form = TypedArrayMethod{},
+        .form =
+            TypedArrayPositionsMethod{
+                .builtin = Builtin::BytesSlice,
+                .minArgs = 0,
+                .maxArgs = 2,
+            },
     },
     {
         .name = "some",
@@ -124,37 +138,54 @@ const BytesMethodInfo kBytesMethods[] = {
     {
         .name = "sort",
         .method = BytesMethod::SORT,
-        .form = TypedArrayMethod{},
+        .form =
+            TypedArraySortMethod{
+                .builtin = Builtin::BytesSort,
+                .place = ReorderPlace::IN_PLACE,
+            },
     },
     {
         .name = "subarray",
         .method = BytesMethod::SUBARRAY,
-        .form = TypedArrayMethod{},
+        .form =
+            TypedArrayPositionsMethod{
+                .builtin = Builtin::BytesSubarray,
+                .minArgs = 0,
+                .maxArgs = 2,
+            },
     },
     {
         .name = "toReversed",
         .method = BytesMethod::TO_REVERSED,
-        .form = TypedArrayMethod{},
+        .form =
+            TypedArrayReverseMethod{
+                .builtin = Builtin::BytesToReversed,
+                .place = ReorderPlace::NEW_COPY,
+            },
     },
     {
         .name = "toSorted",
         .method = BytesMethod::TO_SORTED,
-        .form = TypedArrayMethod{},
+        .form =
+            TypedArraySortMethod{
+                .builtin = Builtin::BytesToSorted,
+                .place = ReorderPlace::NEW_COPY,
+            },
     },
     {
         .name = "toString",
         .method = BytesMethod::TO_STRING,
-        .form = TypedArrayMethod{},
+        .form = TypedArrayJoinMethod{.maxArgs = 0},
     },
     {
         .name = "values",
         .method = BytesMethod::VALUES,
-        .form = TypedArrayMethod{},
+        .form = TypedArrayIteratorMethod{},
     },
     {
         .name = "with",
         .method = BytesMethod::WITH,
-        .form = TypedArrayMethod{},
+        .form = TypedArrayWithMethod{},
     },
     {
         .name = "flatMap",
@@ -292,7 +323,6 @@ const BytesMethodInfo kBytesMethods[] = {
         .form = NotOnTypedArrayMethod{},
     },
 };
-
 }
 
 const BytesMethodInfo *BytesMethodTable::find(llvm::StringRef name) {

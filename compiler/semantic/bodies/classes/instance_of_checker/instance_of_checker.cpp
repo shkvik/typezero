@@ -28,91 +28,14 @@ InstanceOfChecker::ResultInstanceTested InstanceOfChecker::checkInstanceOf(Binar
   bin->lhs = this->exprChecker->checkExpr(bin->lhs);
   bin->type = Type::boolTy();
   auto *name = dyn_cast<NameExpr>(bin->rhs);
-  ClassDecl *cls = name ? this->topLevelChecker->lookupValue(name->name).cls() : nullptr;
-  static const GlobalName collections[] = {GlobalName::DATE, GlobalName::MAP, GlobalName::SET};
-  for (GlobalName global : collections) {
-    if (cls || !this->callChecker->isGlobalName(bin->rhs, global)) {
-      continue;
-    }
-    llvm::StringRef builtin = GlobalNameTable::getName(global);
-    auto is = [&](const Type *t) {
-      return global == GlobalName::DATE  ? t->isDate()
-             : global == GlobalName::MAP ? t->isMap()
-                                         : t->isSet();
-    };
-    const Type *type = bin->lhs->type;
-    const Type *base = type->nonOptional();
-    std::string what = ErrorTextFunctionName::quoted(builtin);
-    bool opaque = base->isUnknown() || base->isAnyObject();
-    if (opaque && global != GlobalName::DATE) {
-      llvm::StringRef example = global == GlobalName::MAP ? "Map<string, int>" : "Set<string>";
-      std::string message = ErrorTextInstanceOf::untypedMap(builtin, example);
-
-      return err(InstanceOfCheckerCheckInstanceOfError{
-          .code = InstanceOfCheckerCheckInstanceOfErrorCode::UNTYPED_COLLECTION,
-          .message = message,
-      });
-    }
-    if (opaque) {
-      bin->rhs->type = Type::date();
-      return ok(bin);
-    }
-    if (base->isUnion()) {
-      std::vector<const Type *> matching;
-      for (const Type *m : base->members()) {
-        if (is(m)) {
-          matching.push_back(m);
-        }
-      }
-      if (matching.empty()) {
-        std::string message = ErrorTextInstanceOf::noneIs(base->name(), what);
-
-        return err(InstanceOfCheckerCheckInstanceOfError{
-            .code = InstanceOfCheckerCheckInstanceOfErrorCode::NONE_MATCHES,
-            .message = message,
-        });
-      }
-      if (matching.size() == base->members().size() && !type->isOptional()) {
-        std::string message = ErrorTextInstanceOf::allAre(base->name(), what, builtin);
-
-        return err(InstanceOfCheckerCheckInstanceOfError{
-            .code = InstanceOfCheckerCheckInstanceOfErrorCode::ALL_MATCH,
-            .message = message,
-        });
-      }
-      bin->rhs->type = Type::unionOf(matching);
-      return ok(bin);
-    }
-    if (is(type)) {
-      std::string message = ErrorTextInstanceOf::alwaysTrue(type->name(), builtin);
-
-      return err(InstanceOfCheckerCheckInstanceOfError{
-          .code = InstanceOfCheckerCheckInstanceOfErrorCode::ALWAYS_TRUE,
-          .message = message,
-      });
-    }
-    if (type->isOptional() && is(type->inner())) {
-      std::string message = ErrorTextInstanceOf::orUndef(type->inner()->name());
-
-      return err(InstanceOfCheckerCheckInstanceOfError{
-          .code = InstanceOfCheckerCheckInstanceOfErrorCode::TEST_UNDEFINED,
-          .message = message,
-      });
-    }
-    if (!type->isError()) {
-      std::string message = ErrorTextInstanceOf::neverIs(type->name(), what, builtin);
-
-      return err(InstanceOfCheckerCheckInstanceOfError{
-          .code = InstanceOfCheckerCheckInstanceOfErrorCode::ALWAYS_FALSE,
-          .message = message,
-      });
-    }
-    return ok(bin);
+  ClassDecl *cls = name != nullptr ? this->topLevelChecker->lookupValue(name->name).cls() : nullptr;
+  std::optional<GlobalName> global =
+      cls == nullptr ? this->collectionGlobal(bin->rhs) : std::nullopt;
+  if (global.has_value()) {
+    return InstanceOfChecker::checkCollectionInstanceOf(bin, *global);
   }
-  if (const Type *bytes = !cls && name && !this->scopes->lookup(name->name).var() &&
-                                  !this->scopes->lookup(name->name).func()
-                              ? BytesChecker::bytesTypeNamed(name->name)
-                              : nullptr) {
+  const Type *bytes = cls == nullptr ? this->namedBytesType(name) : nullptr;
+  if (bytes != nullptr) {
     ResultBytesKindTested tested = this->checkBytesInstanceOf(bin, bytes);
     if (tested.isErr()) {
       return err(InstanceOfCheckerCheckInstanceOfError{
@@ -122,83 +45,238 @@ InstanceOfChecker::ResultInstanceTested InstanceOfChecker::checkInstanceOf(Binar
     }
     return ok(tested.value());
   }
-  if (!cls) {
+  if (cls == nullptr) {
     bin->rhs = this->exprChecker->checkExpr(bin->rhs);
-    const Type *rhs = bin->rhs->type;
-    ClassDecl *known = const_cast<ClassDecl *>(rhs->classRef());
-    if (known && known->type) {
-      cls = known;
-    } else if (rhs->isConstructor()) {
-      const Type *base = bin->lhs->type->nonOptional();
-      bool object = base->isError() || base->isUnknown() || UnknownChecker::isObjectReference(base);
-      if (!object) {
-        std::string message = ErrorTextInstanceOf::notObject(bin->lhs->type->name());
-
-        return err(InstanceOfCheckerCheckInstanceOfError{
-            .code = InstanceOfCheckerCheckInstanceOfErrorCode::NOT_AN_OBJECT,
-            .message = message,
-        });
-      }
-      return ok(bin);
-    } else if (!rhs->isError()) {
-      std::string message = ErrorTextInstanceOf::notClass();
-
-      return err(InstanceOfCheckerCheckInstanceOfError{
-          .code = InstanceOfCheckerCheckInstanceOfErrorCode::NOT_A_CLASS,
-          .message = message,
-      });
-    } else {
-      return ok(bin);
+    cls = InstanceOfChecker::knownClassOf(bin->rhs->type);
+    if (cls == nullptr) {
+      return InstanceOfChecker::checkUnknownRight(bin);
     }
   }
   if (cls->isGeneric()) {
-    const Type *type = bin->lhs->type;
-    bin->rhs->type = Type::error();
-    if (type->isError()) {
-      return ok(bin);
-    }
-    const Type *base = type->nonOptional();
-    llvm::ArrayRef<const Type *> members =
-        base->isUnion() ? base->members() : llvm::ArrayRef<const Type *>(base);
-    std::vector<const Type *> matching;
-    for (const Type *m : members) {
-      if (GenericClassChecker::genericInstanceOf(m, cls)) {
-        matching.push_back(m);
-      }
-    }
-    if (matching.empty()) {
-      bool related = base->isUnknown() || base->isAnyObject() ||
-                     (base->isObject() && cls->type->isSubtypeOf(base));
-      for (const Type *m : members) {
-        related |= m->isObject() && cls->type->isSubtypeOf(m);
-      }
-      if (related) {
-        std::string generic = cls->name.str();
-        std::string other =
-            base->isUnknown() || base->isAnyObject() ? generic + "<string>" : base->name().str();
-        std::string hint = cls->library() ? ErrorTextInstanceOf::extendHint(generic)
-                                          : ErrorTextInstanceOf::unionHint(generic, other);
-        std::string message = ErrorTextInstanceOf::cantTell(generic, base->name(), hint);
+    return InstanceOfChecker::checkGenericInstanceOf(bin, cls);
+  }
 
-        return err(InstanceOfCheckerCheckInstanceOfError{
-            .code = InstanceOfCheckerCheckInstanceOfErrorCode::GENERIC_UNKNOWN,
-            .message = message,
-        });
-      }
-      std::string message = ErrorTextInstanceOf::neverThat(base->name(), cls->name);
+  return InstanceOfChecker::checkClassInstanceOf(bin, cls);
+}
+
+std::optional<GlobalName> InstanceOfChecker::collectionGlobal(const Expr *rhs) const {
+  static const GlobalName collections[] = {GlobalName::DATE, GlobalName::MAP, GlobalName::SET};
+  for (GlobalName global : collections) {
+    if (this->callChecker->isGlobalName(rhs, global)) {
+      return global;
+    }
+  }
+
+  return std::nullopt;
+}
+
+bool InstanceOfChecker::isCollection(GlobalName global, const Type *t) {
+  if (global == GlobalName::DATE) {
+    return t->isDate();
+  }
+  if (global == GlobalName::MAP) {
+    return t->isMap();
+  }
+
+  return t->isSet();
+}
+
+InstanceOfChecker::ResultInstanceTested
+InstanceOfChecker::checkCollectionInstanceOf(BinaryExpr *bin, GlobalName global) {
+  llvm::StringRef builtin = GlobalNameTable::getName(global);
+  const Type *type = bin->lhs->type;
+  const Type *base = type->nonOptional();
+  std::string what = ErrorTextFunctionName::quoted(builtin);
+  bool opaque = base->isUnknown() || base->isAnyObject();
+  if (opaque && global != GlobalName::DATE) {
+    llvm::StringRef example = global == GlobalName::MAP ? "Map<string, int>" : "Set<string>";
+    std::string message = ErrorTextInstanceOf::untypedMap(builtin, example);
+
+    return err(InstanceOfCheckerCheckInstanceOfError{
+        .code = InstanceOfCheckerCheckInstanceOfErrorCode::UNTYPED_COLLECTION,
+        .message = message,
+    });
+  }
+  if (opaque) {
+    bin->rhs->type = Type::date();
+    return ok(bin);
+  }
+  if (base->isUnion()) {
+    return InstanceOfChecker::checkCollectionUnion(bin, global);
+  }
+  if (InstanceOfChecker::isCollection(global, type)) {
+    std::string message = ErrorTextInstanceOf::alwaysTrue(type->name(), builtin);
+
+    return err(InstanceOfCheckerCheckInstanceOfError{
+        .code = InstanceOfCheckerCheckInstanceOfErrorCode::ALWAYS_TRUE,
+        .message = message,
+    });
+  }
+  if (type->isOptional() && InstanceOfChecker::isCollection(global, type->inner())) {
+    std::string message = ErrorTextInstanceOf::orUndef(type->inner()->name());
+
+    return err(InstanceOfCheckerCheckInstanceOfError{
+        .code = InstanceOfCheckerCheckInstanceOfErrorCode::TEST_UNDEFINED,
+        .message = message,
+    });
+  }
+  if (!type->isError()) {
+    std::string message = ErrorTextInstanceOf::neverIs(type->name(), what, builtin);
+
+    return err(InstanceOfCheckerCheckInstanceOfError{
+        .code = InstanceOfCheckerCheckInstanceOfErrorCode::ALWAYS_FALSE,
+        .message = message,
+    });
+  }
+
+  return ok(bin);
+}
+
+InstanceOfChecker::ResultInstanceTested InstanceOfChecker::checkCollectionUnion(BinaryExpr *bin,
+                                                                                GlobalName global) {
+  llvm::StringRef builtin = GlobalNameTable::getName(global);
+  const Type *type = bin->lhs->type;
+  const Type *base = type->nonOptional();
+  std::string what = ErrorTextFunctionName::quoted(builtin);
+  std::vector<const Type *> matching;
+  for (const Type *m : base->members()) {
+    if (InstanceOfChecker::isCollection(global, m)) {
+      matching.push_back(m);
+    }
+  }
+  if (matching.empty()) {
+    std::string message = ErrorTextInstanceOf::noneIs(base->name(), what);
+
+    return err(InstanceOfCheckerCheckInstanceOfError{
+        .code = InstanceOfCheckerCheckInstanceOfErrorCode::NONE_MATCHES,
+        .message = message,
+    });
+  }
+  if (matching.size() == base->members().size() && !type->isOptional()) {
+    std::string message = ErrorTextInstanceOf::allAre(base->name(), what, builtin);
+
+    return err(InstanceOfCheckerCheckInstanceOfError{
+        .code = InstanceOfCheckerCheckInstanceOfErrorCode::ALL_MATCH,
+        .message = message,
+    });
+  }
+  bin->rhs->type = Type::unionOf(matching);
+
+  return ok(bin);
+}
+
+const Type *InstanceOfChecker::namedBytesType(const NameExpr *name) const {
+  if (name == nullptr) {
+    return nullptr;
+  }
+  bool local = this->scopes->lookup(name->name).var() != nullptr ||
+               this->scopes->lookup(name->name).func() != nullptr;
+
+  return local ? nullptr : BytesChecker::bytesTypeNamed(name->name);
+}
+
+ClassDecl *InstanceOfChecker::knownClassOf(const Type *rhs) {
+  auto *known = const_cast<ClassDecl *>(rhs->classRef());
+
+  return known != nullptr && known->type != nullptr ? known : nullptr;
+}
+
+InstanceOfChecker::ResultInstanceTested InstanceOfChecker::checkUnknownRight(BinaryExpr *bin) {
+  const Type *rhs = bin->rhs->type;
+  if (rhs->isConstructor()) {
+    const Type *base = bin->lhs->type->nonOptional();
+    bool object = base->isError() || base->isUnknown() || UnknownChecker::isObjectReference(base);
+    if (!object) {
+      std::string message = ErrorTextInstanceOf::notObject(bin->lhs->type->name());
 
       return err(InstanceOfCheckerCheckInstanceOfError{
-          .code = InstanceOfCheckerCheckInstanceOfErrorCode::NEVER_GENERIC,
+          .code = InstanceOfCheckerCheckInstanceOfErrorCode::NOT_AN_OBJECT,
           .message = message,
       });
     }
-    if (base->isUnion()) {
-      bin->rhs->type = matching.size() == 1 ? matching[0] : Type::unionOf(matching);
-    } else {
-      bin->rhs->type = GenericClassChecker::genericInstanceOf(base, cls)->type;
-    }
     return ok(bin);
   }
+  if (!rhs->isError()) {
+    std::string message = ErrorTextInstanceOf::notClass();
+
+    return err(InstanceOfCheckerCheckInstanceOfError{
+        .code = InstanceOfCheckerCheckInstanceOfErrorCode::NOT_A_CLASS,
+        .message = message,
+    });
+  }
+
+  return ok(bin);
+}
+
+InstanceOfChecker::ResultInstanceTested
+InstanceOfChecker::checkGenericInstanceOf(BinaryExpr *bin, const ClassDecl *cls) {
+  const Type *type = bin->lhs->type;
+  bin->rhs->type = Type::error();
+  if (type->isError()) {
+    return ok(bin);
+  }
+  const Type *base = type->nonOptional();
+  llvm::ArrayRef<const Type *> members =
+      base->isUnion() ? base->members() : llvm::ArrayRef<const Type *>(base);
+  std::vector<const Type *> matching;
+  for (const Type *m : members) {
+    if (GenericClassChecker::genericInstanceOf(m, cls) != nullptr) {
+      matching.push_back(m);
+    }
+  }
+  if (matching.empty()) {
+    return InstanceOfChecker::genericMismatch(base, members, cls);
+  }
+  if (base->isUnion()) {
+    bin->rhs->type = matching.size() == 1 ? matching[0] : Type::unionOf(matching);
+  } else {
+    bin->rhs->type = GenericClassChecker::genericInstanceOf(base, cls)->type;
+  }
+
+  return ok(bin);
+}
+
+InstanceOfChecker::ResultInstanceTested
+InstanceOfChecker::genericMismatch(const Type *base, llvm::ArrayRef<const Type *> members,
+                                   const ClassDecl *cls) {
+  bool related = base->isUnknown() || base->isAnyObject() ||
+                 (base->isObject() && cls->type->isSubtypeOf(base));
+  for (const Type *m : members) {
+    related |= m->isObject() && cls->type->isSubtypeOf(m);
+  }
+  if (related) {
+    std::string generic = cls->name.str();
+    std::string other =
+        base->isUnknown() || base->isAnyObject() ? generic + "<string>" : base->name().str();
+    std::string hint = cls->library() ? ErrorTextInstanceOf::extendHint(generic)
+                                      : ErrorTextInstanceOf::unionHint(generic, other);
+    std::string message = ErrorTextInstanceOf::cantTell(generic, base->name(), hint);
+
+    return err(InstanceOfCheckerCheckInstanceOfError{
+        .code = InstanceOfCheckerCheckInstanceOfErrorCode::GENERIC_UNKNOWN,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextInstanceOf::neverThat(base->name(), cls->name);
+
+  return err(InstanceOfCheckerCheckInstanceOfError{
+      .code = InstanceOfCheckerCheckInstanceOfErrorCode::NEVER_GENERIC,
+      .message = message,
+  });
+}
+
+bool InstanceOfChecker::mayHoldClass(const Type *base, const ClassDecl *cls) {
+  for (const Type *m : base->members()) {
+    if (m->isObject() && (cls->type->isSubtypeOf(m) || m->isSubtypeOf(cls->type))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+InstanceOfChecker::ResultInstanceTested
+InstanceOfChecker::checkClassInstanceOf(BinaryExpr *bin, const ClassDecl *cls) {
   bin->rhs->type = cls->type;
   const Type *type = bin->lhs->type;
   if (type->isError()) {
@@ -208,18 +286,15 @@ InstanceOfChecker::ResultInstanceTested InstanceOfChecker::checkInstanceOf(Binar
   if (base->isUnknown() || base->isAnyObject()) {
     return ok(bin);
   }
-  if (base->isUnion()) {
-    bool may = llvm::any_of(base->members(), [&](const Type *m) {
-      return m->isObject() && (cls->type->isSubtypeOf(m) || m->isSubtypeOf(cls->type));
-    });
-    if (!may) {
-      std::string message = ErrorTextInstanceOf::neverUnion(base->name(), cls->name);
+  if (base->isUnion() && !InstanceOfChecker::mayHoldClass(base, cls)) {
+    std::string message = ErrorTextInstanceOf::neverUnion(base->name(), cls->name);
 
-      return err(InstanceOfCheckerCheckInstanceOfError{
-          .code = InstanceOfCheckerCheckInstanceOfErrorCode::NEVER_IN_UNION,
-          .message = message,
-      });
-    }
+    return err(InstanceOfCheckerCheckInstanceOfError{
+        .code = InstanceOfCheckerCheckInstanceOfErrorCode::NEVER_IN_UNION,
+        .message = message,
+    });
+  }
+  if (base->isUnion()) {
     return ok(bin);
   }
   if (!base->isObject()) {
@@ -230,6 +305,12 @@ InstanceOfChecker::ResultInstanceTested InstanceOfChecker::checkInstanceOf(Binar
         .message = message,
     });
   }
+
+  return InstanceOfChecker::checkRelatedClass(bin, base, cls);
+}
+
+InstanceOfChecker::ResultInstanceTested
+InstanceOfChecker::checkRelatedClass(BinaryExpr *bin, const Type *base, const ClassDecl *cls) {
   bool related = cls->type->isSubtypeOf(base) || base->isSubtypeOf(cls->type);
   if (!related && base->isClass()) {
     std::string message = ErrorTextInstanceOf::neverClass(base->name(), cls->name);

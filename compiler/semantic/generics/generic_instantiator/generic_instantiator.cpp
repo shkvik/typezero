@@ -158,67 +158,106 @@ Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic
   if (this->returnsOwnClass(generic, ret)) {
     ret = nullptr;
   }
-  llvm::ArrayRef<const Type *> genericTypeParams = generic->typeParams;
-  std::vector<const Type *> bound(genericTypeParams.size(), nullptr);
+  std::vector<const Type *> bound(generic->typeParams.size(), nullptr);
   ResultTypeArgsGiven given = GenericInstantiator::typeArgsGiven(generic, name, expected);
   if (given.isErr()) {
     this->state.getDiagnostics().error(name->loc(), given.error().message);
     return name;
   }
   if (!name->typeArgs.empty()) {
-    ResultTypeArgsCount counted = GenericInstantiator::typeArgCount(generic, name);
-    if (counted.isErr()) {
-      this->state.getDiagnostics().error(name->loc(), counted.error().message);
+    if (!this->writtenTypeArgsFit(name, generic, bound)) {
       return name;
     }
-    for (size_t k = 0; k < name->typeArgs.size(); ++k) {
-      bound[k] = this->typeResolver->resolveType(name->typeArgs[k], true);
-    }
-  } else if (expected) {
-    Inference fromParams(genericTypeParams, this->state.getAliasStore(), nullptr),
-        fromResult(genericTypeParams, this->state.getAliasStore(), nullptr);
-    for (size_t i = 0; i < generic->params.size() && i < expected->params.size(); ++i) {
-      if (expected->params[i]) {
-        fromParams.from(generic->params[i], expected->params[i]);
-      }
-    }
-    if (ret && expected->ret && !expected->voidResult) {
-      fromResult.from(ret, expected->ret);
-    }
-    for (size_t k = 0; k < genericTypeParams.size(); ++k) {
-      for (const Inference *inference : {&fromParams, &fromResult}) {
-        const Type *type = nullptr;
-        for (const Type *c : inference->getCandidates(k)) {
-          type = type ? TypeRelations::unify(type, c) : c;
-          if (!type) {
-            break;
-          }
-        }
-        if (type && !bound[k]) {
-          bound[k] = type;
-        }
-      }
-    }
+  } else if (expected != nullptr) {
+    this->bindFromExpected(generic, ret, *expected, bound);
   }
-  if (!this->typeArgInferrer->finishTypeArgs(generic, bound, name->loc(), false) || !ret) {
+  if (!this->typeArgInferrer->finishTypeArgs(generic, bound, name->loc(), false) ||
+      ret == nullptr) {
     return name;
   }
+  this->typeGenericValue(name, generic, ret, bound);
+
+  return name;
+}
+
+bool GenericInstantiator::writtenTypeArgsFit(const NameExpr *name, const FuncSymbol *generic,
+                                             std::vector<const Type *> &bound) {
+  ResultTypeArgsCount counted = GenericInstantiator::typeArgCount(generic, name);
+  if (counted.isErr()) {
+    this->state.getDiagnostics().error(name->loc(), counted.error().message);
+    return false;
+  }
+  for (size_t k = 0; k < name->typeArgs.size(); ++k) {
+    bound[k] = this->typeResolver->resolveType(name->typeArgs[k], true);
+  }
+
+  return true;
+}
+
+void GenericInstantiator::bindFromExpected(const FuncSymbol *generic, const Type *ret,
+                                           const Signature &expected,
+                                           std::vector<const Type *> &bound) {
+  llvm::ArrayRef<const Type *> genericTypeParams = generic->typeParams;
+  Inference fromParams(genericTypeParams, this->state.getAliasStore(), nullptr);
+  Inference fromResult(genericTypeParams, this->state.getAliasStore(), nullptr);
+  for (size_t i = 0; i < generic->params.size() && i < expected.params.size(); ++i) {
+    if (expected.params[i] != nullptr) {
+      fromParams.from(generic->params[i], expected.params[i]);
+    }
+  }
+  if (ret != nullptr && expected.ret != nullptr && !expected.voidResult) {
+    fromResult.from(ret, expected.ret);
+  }
+  for (size_t k = 0; k < genericTypeParams.size(); ++k) {
+    for (const Inference *inference : {&fromParams, &fromResult}) {
+      const Type *type = GenericInstantiator::unifiedCandidates(*inference, k);
+      if (type != nullptr && bound[k] == nullptr) {
+        bound[k] = type;
+      }
+    }
+  }
+}
+
+const Type *GenericInstantiator::unifiedCandidates(const Inference &inference, size_t k) {
+  const Type *type = nullptr;
+  for (const Type *c : inference.getCandidates(k)) {
+    type = type != nullptr ? TypeRelations::unify(type, c) : c;
+    if (type == nullptr) {
+      break;
+    }
+  }
+
+  return type;
+}
+
+void GenericInstantiator::typeGenericValue(NameExpr *name, FuncSymbol *generic, const Type *ret,
+                                           const std::vector<const Type *> &bound) {
+  llvm::ArrayRef<const Type *> genericTypeParams = generic->typeParams;
   std::vector<const Type *> params;
   for (const Type *p : generic->params) {
     params.push_back(this->typeParams->substituteValue(p, genericTypeParams, bound));
   }
+  const Type *result = this->typeParams->substitute(ret, genericTypeParams, bound);
   name->binding = NamedFunction{.func = generic};
-  name->type =
-      Type::function(params, generic->minArgs, generic->hasRest,
-                     this->typeParams->substitute(ret, genericTypeParams, bound), generic->hasThis);
-  bool concrete = llvm::none_of(bound, [](const Type *t) { return TypeQueries::mentionsParam(t); });
-  if (concrete && !this->state.getFunctionStack().isInsideTrial() && !generic->inferring) {
-    if (FuncSymbol *instance = this->instantiate(generic, bound, name->loc())) {
-      name->binding = NamedFunction{.func = instance};
+  name->type = Type::function(params, generic->minArgs, generic->hasRest, result, generic->hasThis);
+  bool concrete = GenericInstantiator::isConcrete(bound);
+  if (!concrete || this->state.getFunctionStack().isInsideTrial() || generic->inferring) {
+    return;
+  }
+  FuncSymbol *instance = this->instantiate(generic, bound, name->loc());
+  if (instance != nullptr) {
+    name->binding = NamedFunction{.func = instance};
+  }
+}
+
+bool GenericInstantiator::isConcrete(llvm::ArrayRef<const Type *> bound) {
+  for (const Type *t : bound) {
+    if (TypeQueries::mentionsParam(t)) {
+      return false;
     }
   }
 
-  return name;
+  return true;
 }
 
 bool GenericInstantiator::returnsOwnClass(const FuncSymbol *generic, const Type *ret) {
@@ -273,41 +312,21 @@ std::vector<const Type *> GenericInstantiator::exactClassArgs(CallExpr *call,
 
 FuncSymbol *GenericInstantiator::instantiate(FuncSymbol *generic, llvm::ArrayRef<const Type *> args,
                                              llvm::SMLoc loc, llvm::ArrayRef<const Type *> exact) {
-  if (llvm::any_of(args, [](const Type *t) { return t->isError(); })) {
+  if (GenericInstantiator::hasErrorArg(args)) {
     return nullptr;
   }
-  std::vector<const Type *> reps;
-  for (size_t k = 0; k < args.size(); ++k) {
-    reps.push_back(this->typeParams->exactTypeParam(generic, k)
-                       ? args[k]
-                       : TypeParams::representation(args[k]));
-  }
+  std::vector<const Type *> reps = this->instanceReps(generic, args);
   std::vector<const Type *> keyTypes = reps;
   if (!exact.empty()) {
     keyTypes.push_back(nullptr);
     keyTypes.insert(keyTypes.end(), exact.begin(), exact.end());
   }
   GenericStore &generics = this->state.getGenericStore();
-  if (InstanceRecord *instance = generics.findFunctionInstance(generic, keyTypes)) {
-    if (this->state.getGenericStore().isCheckingInstance() && !instance->checked &&
-        !instance->checking) {
-      this->checkInstance(instance);
-    }
-    if (this->state.getGenericStore().isCheckingInstance() && instance->failed) {
-      this->reportInstance(instance, loc, args);
-    }
-    return instance->decl->sym;
+  InstanceRecord *known = generics.findFunctionInstance(generic, keyTypes);
+  if (known != nullptr) {
+    return this->reuseInstance(known, loc, args);
   }
-  ResultChainIsFinite bounded = this->chainBounded(generic, args);
-  if (bounded.isErr()) {
-    this->state.getDiagnostics().error(loc, bounded.error().message);
-    return nullptr;
-  }
-  ResultParamsMeaning meaningful = this->paramsMeaningful(generic, reps, args);
-  if (meaningful.isErr() && !this->state.getGenericStore().isCheckingInstance()) {
-    this->state.getDiagnostics().error(loc, meaningful.error().message);
-  }
-  if (meaningful.isErr()) {
+  if (!this->instanceArgsFit(generic, reps, args, loc)) {
     return nullptr;
   }
   InstanceRecord &instance = *generics.addInstanceRecord();
@@ -319,28 +338,90 @@ FuncSymbol *GenericInstantiator::instantiate(FuncSymbol *generic, llvm::ArrayRef
   instance.requester = this->state.getGenericStore().getCheckingInstance();
   instance.decl = this->instanceDecl(generic, reps, exact);
   generics.rememberFunctionInstance(generic, keyTypes, &instance);
-  if (ClassDecl *cls = generic->decl->cls(); cls && !generic->decl->isStatic()) {
-    cls->methodInstances.push_back(instance.decl);
-  } else {
-    this->state.getInventoryStore().addInstance(instance.decl);
-  }
-  if (this->lateClasses->isTemplate(generic)) {
-    this->lateClasses->checkTemplateInstance(&instance);
-    if (instance.failed) {
-      this->reportInstance(&instance, loc, args);
+  this->placeInstance(instance);
+
+  return this->checkNewInstance(&instance, loc, args);
+}
+
+bool GenericInstantiator::hasErrorArg(llvm::ArrayRef<const Type *> args) {
+  for (const Type *t : args) {
+    if (t->isError()) {
+      return true;
     }
-    return instance.decl->sym;
-  }
-  if (this->state.getGenericStore().isCheckingInstance()) {
-    this->checkInstance(&instance);
-    if (instance.failed) {
-      this->reportInstance(&instance, loc, args);
-    }
-  } else {
-    generics.addPendingInstance(&instance);
   }
 
-  return instance.decl->sym;
+  return false;
+}
+
+std::vector<const Type *> GenericInstantiator::instanceReps(FuncSymbol *generic,
+                                                            llvm::ArrayRef<const Type *> args) {
+  std::vector<const Type *> reps;
+  for (size_t k = 0; k < args.size(); ++k) {
+    bool exactParam = this->typeParams->exactTypeParam(generic, k);
+    reps.push_back(exactParam ? args[k] : TypeParams::representation(args[k]));
+  }
+
+  return reps;
+}
+
+FuncSymbol *GenericInstantiator::reuseInstance(InstanceRecord *instance, llvm::SMLoc loc,
+                                               llvm::ArrayRef<const Type *> args) {
+  bool checking = this->state.getGenericStore().isCheckingInstance();
+  if (checking && !instance->checked && !instance->checking) {
+    this->checkInstance(instance);
+  }
+  if (this->state.getGenericStore().isCheckingInstance() && instance->failed) {
+    this->reportInstance(instance, loc, args);
+  }
+
+  return instance->decl->sym;
+}
+
+bool GenericInstantiator::instanceArgsFit(const FuncSymbol *generic,
+                                          llvm::ArrayRef<const Type *> reps,
+                                          llvm::ArrayRef<const Type *> args, llvm::SMLoc loc) {
+  ResultChainIsFinite bounded = this->chainBounded(generic, args);
+  if (bounded.isErr()) {
+    this->state.getDiagnostics().error(loc, bounded.error().message);
+    return false;
+  }
+  ResultParamsMeaning meaningful = this->paramsMeaningful(generic, reps, args);
+  if (meaningful.isErr() && !this->state.getGenericStore().isCheckingInstance()) {
+    this->state.getDiagnostics().error(loc, meaningful.error().message);
+  }
+
+  return meaningful.isOk();
+}
+
+void GenericInstantiator::placeInstance(const InstanceRecord &instance) {
+  FunctionDecl *original = instance.generic->decl;
+  ClassDecl *cls = original->cls();
+  if (cls != nullptr && !original->isStatic()) {
+    cls->methodInstances.push_back(instance.decl);
+    return;
+  }
+  this->state.getInventoryStore().addInstance(instance.decl);
+}
+
+FuncSymbol *GenericInstantiator::checkNewInstance(InstanceRecord *instance, llvm::SMLoc loc,
+                                                  llvm::ArrayRef<const Type *> args) {
+  if (this->lateClasses->isTemplate(instance->generic)) {
+    this->lateClasses->checkTemplateInstance(instance);
+    if (instance->failed) {
+      this->reportInstance(instance, loc, args);
+    }
+    return instance->decl->sym;
+  }
+  if (this->state.getGenericStore().isCheckingInstance()) {
+    this->checkInstance(instance);
+    if (instance->failed) {
+      this->reportInstance(instance, loc, args);
+    }
+  } else {
+    this->state.getGenericStore().addPendingInstance(instance);
+  }
+
+  return instance->decl->sym;
 }
 
 FunctionDecl *GenericInstantiator::instanceDecl(FuncSymbol *generic,

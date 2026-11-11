@@ -46,6 +46,15 @@ private:
   static const Type *relativePartType();
   static const Expr *unconverted(const Expr *expr);
   static bool isStringLike(const Type *type);
+  static std::vector<Field> resolvedDigitFields();
+  static std::vector<Field> resolvedRoundingFields();
+  static const Type *resolvedNumberOptionsType();
+  static const Type *resolvedCollatorOptionsType();
+  static const Type *resolvedPluralOptionsType();
+  static const Type *resolvedRelativeTimeOptionsType();
+  static const Type *resolvedListOptionsType();
+  static const Type *resolvedDisplayNamesOptionsType();
+  static const Type *resolvedSegmenterOptionsType();
   static const Type *numberOptionType(llvm::StringRef name);
 
   ResultLanguageTags languageTags(const Expr *arg, llvm::StringRef what, bool constructor);

@@ -165,171 +165,248 @@ Expr *BytesNewChecker::checkTextDecoderParse(CallExpr *call, MemberExpr *member)
 
 Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
   llvm::SMLoc loc = expr->loc();
-  std::vector<Expr *> &args = expr->args;
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-  };
   auto *callee = this->state.getAst().make<NameExpr>(loc, type->name());
-  auto *call = this->state.getAst().make<CallExpr>(loc, callee, args);
+  auto *call = this->state.getAst().make<CallExpr>(loc, callee, expr->args);
   if (!expr->typeArgs.empty()) {
     std::string message = ErrorTextBytesNew::typeArgs(type->name());
     this->state.getDiagnostics().error(loc, message);
   }
-  auto made = [&](Builtin builtin, const Type *result) {
-    call->target = BuiltinCall{.builtin = builtin};
-    call->type = result;
-
-    return call;
-  };
   call->type = Type::error();
   switch (type->bytes()) {
-    case Bytes::Buffer: {
-      std::string message = ErrorTextBytesNew::buffer();
-      this->state.getDiagnostics().error(loc, message);
-      checkArgsLoosely();
-      return expr;
-    }
-  case Bytes::ArrayBuffer: {
-    if (args.size() == 2) {
-      std::string message = ErrorTextBytesNew::resizable();
-      this->state.getDiagnostics().error(args[1]->loc(), message);
-      checkArgsLoosely();
-      return expr;
-    }
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(loc, arity.error().message);
-      return call;
-    }
-    call->args[0] = this->memberChecker->checkPosition(call->args[0]);
-    std::string what = ErrorTextBytesNew::bufferLen();
-    IndexProofs::ResultBetweenProven between =
-        this->indexProofs->requireBetween(call->args[0], 0, std::nullopt, what);
-    if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
-      this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
-    }
-    return made(Builtin::ArrayBufferNew, type);
-  }
-  case Bytes::DataView: {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 3);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(loc, arity.error().message);
-      return call;
-    }
-    call->args[0] = this->exprChecker->checkExpr(call->args[0]);
-    ResultViewedBuffer viewed = BytesNewChecker::viewedBuffer(call->args[0]->type);
-    if (viewed.isErr()) {
-      this->state.getDiagnostics().error(call->args[0]->loc(), viewed.error().message);
-      return call;
-    }
-    for (size_t i = 1; i < call->args.size(); ++i) {
-      call->args[i] = this->memberChecker->checkPosition(call->args[i]);
-    }
-    std::string what = ErrorTextBytesNew::dataView();
-    this->byteProofs->checkView(call->args[0], call->args.size() > 1 ? call->args[1] : nullptr,
-                                call->args.size() > 2 ? call->args[2] : nullptr, 1, what);
-    return made(Builtin::DataViewNew, type);
-  }
-  case Bytes::TextEncoder: {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(loc, arity.error().message);
-      return call;
-    }
-    return made(Builtin::TextEncoderNew, type);
-  }
-  case Bytes::TextDecoder: {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 2);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(loc, arity.error().message);
-      return call;
-    }
-    auto *resolved = this->state.getAst().make<IntLitExpr>(loc, 1);
-    resolved->type = Type::intTy();
-    std::u16string name = u"utf-8";
-    std::vector<Expr *> checked{resolved, nullptr};
-    if (!call->args.empty() && !isa<UndefinedExpr>(call->args[0])) {
-      Expr *label = call->args[0];
-      if (std::optional<std::u16string> text = BytesNewChecker::literalText(label)) {
-        std::string written = ToUtf8::toUtf8(*text);
-        ResultDecoderLabel decoded = BytesNewChecker::decoderLabel(written);
-        if (decoded.isErr()) {
-          this->state.getDiagnostics().error(label->loc(), decoded.error().message);
-          return call;
-        }
-        const char *found = decoded.value();
-        name = std::u16string(found, found + strlen(found));
-      } else {
-        call->args[0] = this->argumentChecker->checkArg(label, Type::string());
-        resolved->value = 0;
-        checked[1] = call->args[0];
-        if (!this->state.getBytesStore().isInsideDecoderParse() &&
-            !call->args[0]->type->isError() && !this->indexProofs->exempt(label->loc())) {
-          std::optional<std::vector<std::string>> labels =
-              this->literalTypes->knownTexts(call->args[0]);
-          if (!labels) {
-            std::string message = ErrorTextTextDecoder::notKnown();
-            this->state.getDiagnostics().error(label->loc(), message);
-            return call;
-          }
-          for (const std::string &each : *labels) {
-            ResultDecoderLabel decoded = BytesNewChecker::decoderLabel(each);
-            if (decoded.isErr()) {
-              this->state.getDiagnostics().error(label->loc(), decoded.error().message);
-              return call;
-            }
-          }
-        }
-      }
-    } else if (!call->args.empty()) {
-      call->args[0] = this->exprChecker->checkExpr(call->args[0]);
-    }
-    if (!checked[1]) {
-      auto *lit = this->state.getAst().make<StringLitExpr>(loc, name);
-      lit->type = Type::string();
-      checked[1] = lit;
-    }
-    bool fatal = false;
-    if (call->args.size() == 2) {
-      const Type *options = Type::object({{"fatal", Type::optional(Type::boolTy()), false},
-                                          {"ignoreBOM", Type::optional(Type::boolTy()), false}});
-      Expr *given = this->exprChecker->checkExpr(call->args[1], options);
-      fatal = BytesNewChecker::mayBeFatal(given);
-      std::string what = ErrorTextTextDecoder::options();
-      checked.push_back(this->typeRelations->coerce(given, options, what));
-    }
-    call->args = checked;
-    return made(Builtin::TextDecoderNew, fatal ? Type::bytesType(Bytes::FatalTextDecoder) : type);
-  }
-  case Bytes::FatalTextDecoder: {
-    std::string message = ErrorTextBytesNew::fatal();
-    this->state.getDiagnostics().error(loc, message);
-    checkArgsLoosely();
-    return expr;
-  }
-  default:
-    break;
+    case Bytes::Buffer:
+      return this->reportBytesNew(expr, ErrorTextBytesNew::buffer());
+    case Bytes::ArrayBuffer:
+      return this->checkArrayBufferNew(expr, call, type);
+    case Bytes::DataView:
+      return this->checkDataViewNew(call, type);
+    case Bytes::TextEncoder:
+      return this->checkTextEncoderNew(call, type);
+    case Bytes::TextDecoder:
+      return this->checkTextDecoderNew(call, type);
+    case Bytes::FatalTextDecoder:
+      return this->reportBytesNew(expr, ErrorTextBytesNew::fatal());
+    case Bytes::None:
+    case Bytes::Uint8:
+    case Bytes::Int8:
+    case Bytes::Uint8Clamped:
+    case Bytes::Int16:
+    case Bytes::Uint16:
+    case Bytes::Int32:
+    case Bytes::Uint32:
+    case Bytes::Float16:
+    case Bytes::Float32:
+    case Bytes::Float64:
+      return this->checkTypedArrayNew(call, type);
   }
 
-  if (args.empty()) {
-    auto *zero = this->state.getAst().make<IntLitExpr>(loc, 0);
+  return this->checkTypedArrayNew(call, type);
+}
+
+Expr *BytesNewChecker::madeBuiltin(CallExpr *call, Builtin builtin, const Type *result) {
+  call->target = BuiltinCall{.builtin = builtin};
+  call->type = result;
+
+  return call;
+}
+
+Expr *BytesNewChecker::reportBytesNew(NewExpr *expr, const std::string &message) {
+  this->state.getDiagnostics().error(expr->loc(), message);
+  this->walkArgsLoosely(expr);
+
+  return expr;
+}
+
+void BytesNewChecker::walkArgsLoosely(NewExpr *expr) {
+  for (Expr *&arg : expr->args) {
+    arg = this->exprChecker->checkExpr(arg);
+  }
+}
+
+bool BytesNewChecker::hasWrongArity(CallExpr *call, unsigned min, unsigned max) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, min, max);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(call->loc(), arity.error().message);
+  }
+
+  return arity.isErr();
+}
+
+void BytesNewChecker::walkNonNegative(const Expr *value, const std::string &what) {
+  IndexProofs::ResultBetweenProven between =
+      this->indexProofs->requireBetween(value, 0, std::nullopt, what);
+  if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+    this->state.getDiagnostics().error(value->loc(), between.error().message);
+  }
+}
+
+void BytesNewChecker::walkView(CallExpr *call, int64_t elementSize, const std::string &what) {
+  for (size_t i = 1; i < call->args.size(); ++i) {
+    call->args[i] = this->memberChecker->checkPosition(call->args[i]);
+  }
+  const Expr *offset = call->args.size() > 1 ? call->args[1] : nullptr;
+  const Expr *length = call->args.size() > 2 ? call->args[2] : nullptr;
+  this->byteProofs->checkView(call->args[0], offset, length, elementSize, what);
+}
+
+Expr *BytesNewChecker::checkArrayBufferNew(NewExpr *expr, CallExpr *call, const Type *type) {
+  if (expr->args.size() == 2) {
+    std::string message = ErrorTextBytesNew::resizable();
+    this->state.getDiagnostics().error(expr->args[1]->loc(), message);
+    this->walkArgsLoosely(expr);
+    return expr;
+  }
+  if (this->hasWrongArity(call, 1, 1)) {
+    return call;
+  }
+  call->args[0] = this->memberChecker->checkPosition(call->args[0]);
+  std::string what = ErrorTextBytesNew::bufferLen();
+  this->walkNonNegative(call->args[0], what);
+
+  return BytesNewChecker::madeBuiltin(call, Builtin::ArrayBufferNew, type);
+}
+
+Expr *BytesNewChecker::checkDataViewNew(CallExpr *call, const Type *type) {
+  if (this->hasWrongArity(call, 1, 3)) {
+    return call;
+  }
+  call->args[0] = this->exprChecker->checkExpr(call->args[0]);
+  ResultViewedBuffer viewed = BytesNewChecker::viewedBuffer(call->args[0]->type);
+  if (viewed.isErr()) {
+    this->state.getDiagnostics().error(call->args[0]->loc(), viewed.error().message);
+    return call;
+  }
+  std::string what = ErrorTextBytesNew::dataView();
+  this->walkView(call, 1, what);
+
+  return BytesNewChecker::madeBuiltin(call, Builtin::DataViewNew, type);
+}
+
+Expr *BytesNewChecker::checkTextEncoderNew(CallExpr *call, const Type *type) {
+  if (this->hasWrongArity(call, 0, 0)) {
+    return call;
+  }
+
+  return BytesNewChecker::madeBuiltin(call, Builtin::TextEncoderNew, type);
+}
+
+Expr *BytesNewChecker::checkTextDecoderNew(CallExpr *call, const Type *type) {
+  if (this->hasWrongArity(call, 0, 2)) {
+    return call;
+  }
+  auto *resolved = this->state.getAst().make<IntLitExpr>(call->loc(), 1);
+  resolved->type = Type::intTy();
+  std::optional<Expr *> label = this->checkDecoderLabelArg(call, resolved);
+  if (!label.has_value()) {
+    return call;
+  }
+  std::vector<Expr *> checked{resolved, *label};
+  bool fatal = false;
+  if (call->args.size() == 2) {
+    const Type *options = BytesNewChecker::decoderOptionsType();
+    Expr *given = this->exprChecker->checkExpr(call->args[1], options);
+    fatal = BytesNewChecker::mayBeFatal(given);
+    std::string what = ErrorTextTextDecoder::options();
+    checked.push_back(this->typeRelations->coerce(given, options, what));
+  }
+  call->args = checked;
+  const Type *decoder = fatal ? Type::bytesType(Bytes::FatalTextDecoder) : type;
+
+  return BytesNewChecker::madeBuiltin(call, Builtin::TextDecoderNew, decoder);
+}
+
+const Type *BytesNewChecker::decoderOptionsType() {
+  return Type::object({{"fatal", Type::optional(Type::boolTy()), false},
+                       {"ignoreBOM", Type::optional(Type::boolTy()), false}});
+}
+
+std::optional<Expr *> BytesNewChecker::checkDecoderLabelArg(CallExpr *call, IntLitExpr *resolved) {
+  bool given = !call->args.empty() && !isa<UndefinedExpr>(call->args[0]);
+  if (!given) {
+    if (!call->args.empty()) {
+      call->args[0] = this->exprChecker->checkExpr(call->args[0]);
+    }
+    return this->decoderNameLiteral(call->loc(), u"utf-8");
+  }
+  Expr *label = call->args[0];
+  std::optional<std::u16string> text = BytesNewChecker::literalText(label);
+  if (text.has_value()) {
+    std::optional<std::u16string> name = this->knownDecoderName(label, *text);
+    if (!name.has_value()) {
+      return std::nullopt;
+    }
+    return this->decoderNameLiteral(call->loc(), *name);
+  }
+  call->args[0] = this->argumentChecker->checkArg(label, Type::string());
+  resolved->value = 0;
+  if (!this->decoderLabelsFit(call->args[0], label->loc())) {
+    return std::nullopt;
+  }
+
+  return call->args[0];
+}
+
+std::optional<std::u16string> BytesNewChecker::knownDecoderName(const Expr *label,
+                                                                const std::u16string &text) {
+  std::string written = ToUtf8::toUtf8(text);
+  ResultDecoderLabel decoded = BytesNewChecker::decoderLabel(written);
+  if (decoded.isErr()) {
+    this->state.getDiagnostics().error(label->loc(), decoded.error().message);
+    return std::nullopt;
+  }
+  const char *found = decoded.value();
+
+  return std::u16string(found, found + strlen(found));
+}
+
+bool BytesNewChecker::decoderLabelsFit(const Expr *checked, llvm::SMLoc at) {
+  bool skipped = this->state.getBytesStore().isInsideDecoderParse() || checked->type->isError() ||
+                 this->indexProofs->exempt(at);
+  if (skipped) {
+    return true;
+  }
+  std::optional<std::vector<std::string>> labels = this->literalTypes->knownTexts(checked);
+  if (!labels.has_value()) {
+    std::string message = ErrorTextTextDecoder::notKnown();
+    this->state.getDiagnostics().error(at, message);
+    return false;
+  }
+  for (const std::string &each : *labels) {
+    ResultDecoderLabel decoded = BytesNewChecker::decoderLabel(each);
+    if (decoded.isErr()) {
+      this->state.getDiagnostics().error(at, decoded.error().message);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+Expr *BytesNewChecker::decoderNameLiteral(llvm::SMLoc loc, const std::u16string &name) {
+  auto *lit = this->state.getAst().make<StringLitExpr>(loc, name);
+  lit->type = Type::string();
+
+  return lit;
+}
+
+Expr *BytesNewChecker::checkTypedArrayNew(CallExpr *call, const Type *type) {
+  if (call->args.empty()) {
+    auto *zero = this->state.getAst().make<IntLitExpr>(call->loc(), 0);
     zero->type = Type::intTy();
     call->args = {zero};
-    return made(Builtin::BytesNew, type);
+    return BytesNewChecker::madeBuiltin(call, Builtin::BytesNew, type);
   }
-  if (args.size() > 3) {
+  if (call->args.size() > 3) {
     ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 3);
     if (arity.isErr()) {
-      this->state.getDiagnostics().error(loc, arity.error().message);
+      this->state.getDiagnostics().error(call->loc(), arity.error().message);
     }
     return call;
   }
-  Expr *&source = call->args[0];
-  if (auto *lit = dyn_cast<ArrayLitExpr>(source); lit && args.size() == 1) {
-    return this->checkBytesValues(call, lit, type);
+  auto *values = dyn_cast<ArrayLitExpr>(call->args[0]);
+  if (values != nullptr && call->args.size() == 1) {
+    return this->checkBytesValues(call, values, type);
   }
+  Expr *&source = call->args[0];
   this->iteratorMethods->markFused(source);
   source = this->exprChecker->checkExpr(source);
   const Type *from = source->type;
@@ -337,14 +414,9 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
     return call;
   }
   if (from->bytes() == Bytes::ArrayBuffer) {
-    for (size_t i = 1; i < call->args.size(); ++i) {
-      call->args[i] = this->memberChecker->checkPosition(call->args[i]);
-    }
     std::string what = ErrorTextBytesNew::the(type->name());
-    this->byteProofs->checkView(source, call->args.size() > 1 ? call->args[1] : nullptr,
-                                call->args.size() > 2 ? call->args[2] : nullptr,
-                                type->elementSize(), what);
-    return made(Builtin::BytesView, type);
+    this->walkView(call, type->elementSize(), what);
+    return BytesNewChecker::madeBuiltin(call, Builtin::BytesView, type);
   }
   if (call->args.size() > 1) {
     std::string message = ErrorTextBytesNew::offsetOnly(type->name(), from->name());
@@ -352,17 +424,7 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
     return call;
   }
   if (from->isInteger()) {
-    source = this->typeRelations->convert(source, Type::intTy());
-    std::string what = ErrorTextBytesNew::lengthOf(type->name());
-    IndexProofs::ResultBetweenProven between =
-        this->indexProofs->requireBetween(source, 0, std::nullopt, what);
-    if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
-      this->state.getDiagnostics().error(source->loc(), between.error().message);
-    }
-    auto *zeroed = this->state.getAst().make<BoolLitExpr>(loc, true);
-    zeroed->type = Type::boolTy();
-    call->args.push_back(zeroed);
-    return made(Builtin::BytesNew, type);
+    return this->checkLengthNew(call, type);
   }
   if (from->isFloat()) {
     std::string message = ErrorTextBytesNew::floatLen();
@@ -372,8 +434,20 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
   if (!this->checkBytesSource(source, type)) {
     return call;
   }
+  Builtin builtin = from->isTypedArray() ? Builtin::BytesFromBytes : Builtin::BytesFromArray;
 
-  return made(from->isTypedArray() ? Builtin::BytesFromBytes : Builtin::BytesFromArray, type);
+  return BytesNewChecker::madeBuiltin(call, builtin, type);
+}
+
+Expr *BytesNewChecker::checkLengthNew(CallExpr *call, const Type *type) {
+  call->args[0] = this->typeRelations->convert(call->args[0], Type::intTy());
+  std::string what = ErrorTextBytesNew::lengthOf(type->name());
+  this->walkNonNegative(call->args[0], what);
+  auto *zeroed = this->state.getAst().make<BoolLitExpr>(call->loc(), true);
+  zeroed->type = Type::boolTy();
+  call->args.push_back(zeroed);
+
+  return BytesNewChecker::madeBuiltin(call, Builtin::BytesNew, type);
 }
 
 Expr *BytesNewChecker::checkBytesValues(CallExpr *call, ArrayLitExpr *lit, const Type *type) {

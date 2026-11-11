@@ -36,6 +36,13 @@ private:
   using ResultBodyIsRetained = Result<const FunctionDecl *, ClassLinksBodyKeptError>;
   using ResultSameTypeParams = Result<const FunctionDecl *, ClassLinksSameTypeArgsError>;
 
+  void linkOverride(ClassDecl *cls, FunctionDecl *fn);
+  static FunctionDecl *sameParamsBase(llvm::ArrayRef<FunctionDecl *> inherited,
+                                      const FunctionDecl *fn);
+  void walkNewMethod(const ClassDecl *cls, FunctionDecl *fn,
+                     llvm::ArrayRef<FunctionDecl *> inherited);
+  bool overrideFits(const ClassDecl *cls, const FunctionDecl *fn, const FunctionDecl *base);
+  void walkOverrideChain(const ClassDecl *cls, const FunctionDecl *fn, FunctionDecl *base);
   static ResultMethodNotField notAField(const ClassDecl *cls, const FunctionDecl *fn);
   static ResultOverrideTarget overrideTarget(const ClassDecl *cls, const FunctionDecl *fn,
                                              llvm::ArrayRef<FunctionDecl *> inherited);

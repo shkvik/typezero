@@ -253,75 +253,106 @@ void InheritChecker::checkImplements(ClassDecl *cls) {
     }
     std::string prefix = ErrorTextImplements::prefix(cls->name, iface->name());
     for (const Field &member : iface->fields()) {
-      const ClassField *field = ClassBases::findField(cls, member.name);
-      if (field && !field->method()) {
-        const Field *actual = cls->type->field(member.name);
-        if (!actual || actual->type->isError() || member.type->isError()) {
-          continue;
-        }
-        llvm::SMLoc loc = cls->field(member.name) ? field->loc : cls->loc();
-        ResultFieldTypeMatches matches = InheritChecker::fieldMatches(prefix, member, actual, cls);
-        if (matches.isErr()) {
-          this->state.getDiagnostics().error(loc, matches.error().message);
-        }
-        continue;
-      }
-      std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member.name, false);
-      ResultMemberIsDeclared declared = InheritChecker::memberDeclared(prefix, member, methods);
-      if (declared.isErr()) {
-        this->state.getDiagnostics().error(cls->loc(), declared.error().message);
-        continue;
-      }
-      ResultMemberIsFunction function = InheritChecker::methodForField(member, iface, cls);
-      if (function.isErr()) {
-        this->state.getDiagnostics().error(methods[0]->loc(), function.error().message);
-        continue;
-      }
-      ResultReplaceableField replaced = InheritChecker::replaceable(member, methods, iface, cls);
-      if (replaced.isErr()) {
-        this->state.getDiagnostics().error(methods[0]->loc(), replaced.error().message);
-        continue;
-      }
-      bool found = false;
-      for (FunctionDecl *fn : methods) {
-        if (!fn->sym || !InheritChecker::takesParams(member.type, fn->sym)) {
-          continue;
-        }
-        found = true;
-        const Type *ret = fn->sym->getReturnType();
-        ResultReturnTypeAgrees agrees =
-            InheritChecker::returnMatches(fn->name, ret, member.type->ret(), iface, cls);
-        if (agrees.isErr()) {
-          this->state.getDiagnostics().error(fn->loc(), agrees.error().message);
-        }
-      }
-      ResultVariantForParams variant =
-          InheritChecker::variantFound(prefix, member, methods, cls, found);
-      if (variant.isErr()) {
-        this->state.getDiagnostics().error(methods[0]->loc(), variant.error().message);
-      }
+      this->walkImplementedMember(cls, iface, member, prefix);
     }
     for (const Overload &overload : iface->overloads()) {
-      std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, overload.name, false);
-      for (const Type *signature : overload.signatures) {
-        auto fn = llvm::find_if(methods, [&](const FunctionDecl *m) {
-          return m->sym && InheritChecker::takesParams(signature, m->sym);
-        });
-        ResultSignatureVariant variant =
-            InheritChecker::signatureVariant(prefix, overload.name, signature, fn != methods.end());
-        if (variant.isErr()) {
-          this->state.getDiagnostics().error(cls->loc(), variant.error().message);
-          continue;
-        }
-        const Type *ret = (*fn)->sym->getReturnType();
-        ResultReturnTypeAgrees agrees =
-            InheritChecker::returnMatches(overload.name, ret, signature->ret(), iface, cls);
-        if (agrees.isErr()) {
-          this->state.getDiagnostics().error((*fn)->loc(), agrees.error().message);
-        }
-      }
+      this->walkImplementedOverload(cls, iface, overload, prefix);
     }
   }
+}
+
+void InheritChecker::walkImplementedMember(ClassDecl *cls, const Type *iface, const Field &member,
+                                           const std::string &prefix) {
+  const ClassField *field = ClassBases::findField(cls, member.name);
+  if (field != nullptr && !field->method()) {
+    return this->walkImplementedField(cls, member, field, prefix);
+  }
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member.name, false);
+  ResultMemberIsDeclared declared = InheritChecker::memberDeclared(prefix, member, methods);
+  if (declared.isErr()) {
+    this->state.getDiagnostics().error(cls->loc(), declared.error().message);
+    return;
+  }
+  ResultMemberIsFunction function = InheritChecker::methodForField(member, iface, cls);
+  if (function.isErr()) {
+    this->state.getDiagnostics().error(methods[0]->loc(), function.error().message);
+    return;
+  }
+  ResultReplaceableField replaced = InheritChecker::replaceable(member, methods, iface, cls);
+  if (replaced.isErr()) {
+    this->state.getDiagnostics().error(methods[0]->loc(), replaced.error().message);
+    return;
+  }
+  bool found = this->hasMatchingVariant(cls, iface, member, methods);
+  ResultVariantForParams variant =
+      InheritChecker::variantFound(prefix, member, methods, cls, found);
+  if (variant.isErr()) {
+    this->state.getDiagnostics().error(methods[0]->loc(), variant.error().message);
+  }
+}
+
+void InheritChecker::walkImplementedField(const ClassDecl *cls, const Field &member,
+                                          const ClassField *field, const std::string &prefix) {
+  const Field *actual = cls->type->field(member.name);
+  if (actual == nullptr || actual->type->isError() || member.type->isError()) {
+    return;
+  }
+  llvm::SMLoc loc = cls->field(member.name) != nullptr ? field->loc : cls->loc();
+  ResultFieldTypeMatches matches = InheritChecker::fieldMatches(prefix, member, actual, cls);
+  if (matches.isErr()) {
+    this->state.getDiagnostics().error(loc, matches.error().message);
+  }
+}
+
+bool InheritChecker::hasMatchingVariant(const ClassDecl *cls, const Type *iface,
+                                        const Field &member,
+                                        llvm::ArrayRef<FunctionDecl *> methods) {
+  bool found = false;
+  for (FunctionDecl *fn : methods) {
+    if (fn->sym == nullptr || !InheritChecker::takesParams(member.type, fn->sym)) {
+      continue;
+    }
+    found = true;
+    const Type *ret = fn->sym->getReturnType();
+    ResultReturnTypeAgrees agrees =
+        InheritChecker::returnMatches(fn->name, ret, member.type->ret(), iface, cls);
+    if (agrees.isErr()) {
+      this->state.getDiagnostics().error(fn->loc(), agrees.error().message);
+    }
+  }
+
+  return found;
+}
+
+void InheritChecker::walkImplementedOverload(ClassDecl *cls, const Type *iface,
+                                             const Overload &overload, const std::string &prefix) {
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, overload.name, false);
+  for (const Type *signature : overload.signatures) {
+    FunctionDecl *fn = InheritChecker::methodTaking(methods, signature);
+    ResultSignatureVariant variant =
+        InheritChecker::signatureVariant(prefix, overload.name, signature, fn != nullptr);
+    if (variant.isErr()) {
+      this->state.getDiagnostics().error(cls->loc(), variant.error().message);
+      continue;
+    }
+    const Type *ret = fn->sym->getReturnType();
+    ResultReturnTypeAgrees agrees =
+        InheritChecker::returnMatches(overload.name, ret, signature->ret(), iface, cls);
+    if (agrees.isErr()) {
+      this->state.getDiagnostics().error(fn->loc(), agrees.error().message);
+    }
+  }
+}
+
+FunctionDecl *InheritChecker::methodTaking(llvm::ArrayRef<FunctionDecl *> methods,
+                                           const Type *signature) {
+  for (FunctionDecl *m : methods) {
+    if (m->sym != nullptr && InheritChecker::takesParams(signature, m->sym)) {
+      return m;
+    }
+  }
+
+  return nullptr;
 }
 
 InheritChecker::ResultConstructorScope InheritChecker::superAllowed(FunctionDecl *ctor) {
@@ -400,31 +431,8 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
   call->type = Type::voidTy();
   call->callee->type = Type::voidTy();
   call->target = SuperCall{};
-  ResultConstructorScope scope =
-      InheritChecker::superAllowed(this->state.getFunctionStack().getCurrentDecl());
-  if (scope.isErr()) {
-    this->state.getDiagnostics().error(call->loc(), scope.error().message);
-    this->argumentChecker->checkArgsLoosely(call);
-    return call;
-  }
-  ClassDecl *cls = scope.value()->cls();
-  ResultParentClassFound parent = InheritChecker::parentClass(cls);
-  if (parent.isErr()) {
-    if (parent.error().code != InheritCheckerParentClassErrorCode::BASE_ONLY) {
-      this->state.getDiagnostics().error(call->loc(), parent.error().message);
-    }
-    this->argumentChecker->checkArgsLoosely(call);
-    return call;
-  }
-  ResultSuperIsStatement statement = this->rootSuper(call);
-  if (statement.isErr()) {
-    this->state.getDiagnostics().error(call->loc(), statement.error().message);
-    this->argumentChecker->checkArgsLoosely(call);
-    return call;
-  }
-  ResultSuperNotRepeated once = this->superOnce(cls);
-  if (once.isErr()) {
-    this->state.getDiagnostics().error(call->loc(), once.error().message);
+  ClassDecl *cls = this->superCallClass(call);
+  if (cls == nullptr) {
     this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
@@ -436,26 +444,7 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
     }
     this->argumentChecker->checkArgsLoosely(call);
   } else {
-    bool checked = false;
-    OverloadResolver::ResultVariantChosen picked =
-        this->overloadResolver->chooseVariant(ctors, call->args, call->spread, checked);
-    if (picked.isErr() &&
-        picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
-      this->state.getDiagnostics().error(call->loc(), picked.error().message);
-    }
-    if (picked.isOk()) {
-      FuncSymbol *sym = picked.value();
-      const FunctionDecl *chosen = sym->decl ? sym->decl : ctors[0];
-      ClassMemberChecker::ResultMemberAccessible accessible =
-          this->classMemberChecker->checkAccess(chosen->cls(), chosen->access(), "constructor");
-      if (accessible.isErr()) {
-        this->state.getDiagnostics().error(call->loc(), accessible.error().message);
-      }
-      call->target = SuperCall{.method = sym};
-      std::vector<bool> given(checked ? call->args.size() : 0, true);
-      this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
-                                            call->loc(), &given);
-    }
+    this->walkParentConstructor(call, ctors);
   }
   this->state.getFlowState().markSuperCalled();
   for (const ClassField &f : cls->fields) {
@@ -466,6 +455,59 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
   this->flowChecker->calledFunction();
 
   return call;
+}
+
+ClassDecl *InheritChecker::superCallClass(const CallExpr *call) {
+  ResultConstructorScope scope =
+      InheritChecker::superAllowed(this->state.getFunctionStack().getCurrentDecl());
+  if (scope.isErr()) {
+    this->state.getDiagnostics().error(call->loc(), scope.error().message);
+    return nullptr;
+  }
+  ClassDecl *cls = scope.value()->cls();
+  ResultParentClassFound parent = InheritChecker::parentClass(cls);
+  if (parent.isErr()) {
+    if (parent.error().code != InheritCheckerParentClassErrorCode::BASE_ONLY) {
+      this->state.getDiagnostics().error(call->loc(), parent.error().message);
+    }
+    return nullptr;
+  }
+  ResultSuperIsStatement statement = this->rootSuper(call);
+  if (statement.isErr()) {
+    this->state.getDiagnostics().error(call->loc(), statement.error().message);
+    return nullptr;
+  }
+  ResultSuperNotRepeated once = this->superOnce(cls);
+  if (once.isErr()) {
+    this->state.getDiagnostics().error(call->loc(), once.error().message);
+    return nullptr;
+  }
+
+  return cls;
+}
+
+void InheritChecker::walkParentConstructor(CallExpr *call, llvm::ArrayRef<FunctionDecl *> ctors) {
+  bool checked = false;
+  OverloadResolver::ResultVariantChosen picked =
+      this->overloadResolver->chooseVariant(ctors, call->args, call->spread, checked);
+  if (picked.isErr() &&
+      picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
+    this->state.getDiagnostics().error(call->loc(), picked.error().message);
+  }
+  if (picked.isErr()) {
+    return;
+  }
+  FuncSymbol *sym = picked.value();
+  const FunctionDecl *chosen = sym->decl != nullptr ? sym->decl : ctors[0];
+  ClassMemberChecker::ResultMemberAccessible accessible =
+      this->classMemberChecker->checkAccess(chosen->cls(), chosen->access(), "constructor");
+  if (accessible.isErr()) {
+    this->state.getDiagnostics().error(call->loc(), accessible.error().message);
+  }
+  call->target = SuperCall{.method = sym};
+  std::vector<bool> given(checked ? call->args.size() : 0, true);
+  this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest, call->loc(),
+                                        &given);
 }
 
 InheritChecker::ResultSuperMethodScope InheritChecker::superContext(FunctionDecl *method) {
@@ -546,17 +588,7 @@ InheritChecker::ResultMethodHasItsBody InheritChecker::methodBody(FuncSymbol *sy
 Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   member->type = Type::error();
-  FunctionDecl *method = nullptr;
-  std::vector<FunctionDecl *> functions = this->state.getFunctionStack().getFunctions();
-  for (FunctionDecl *fn : llvm::reverse(functions)) {
-    if (fn->isArrow()) {
-      continue;
-    }
-    if (fn->takesThis() && !fn->cls()->literal()) {
-      method = fn;
-    }
-    break;
-  }
+  FunctionDecl *method = this->enclosingMethod();
   ResultSuperMethodScope scope = InheritChecker::superContext(method);
   if (scope.isErr()) {
     if (scope.error().code != InheritCheckerSuperContextErrorCode::BASE_ONLY) {
@@ -566,15 +598,7 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
   ClassDecl *parent = method->cls()->parent;
-  auto *self = this->state.getAst().make<NameExpr>(member->object->loc(), "this");
-  this->state.getClassContext().rememberThisMember(member->name);
-  ClassChecker::ResultThisReference reference = this->classChecker->checkThis(self);
-  this->state.getClassContext().forgetThisMember();
-  if (reference.isErr()) {
-    this->state.getDiagnostics().error(self->loc(), reference.error().message);
-  }
-  member->object = reference.isOk() ? reference.value() : self;
-  if (member->object->type->isError()) {
+  if (!this->superObjectReady(member)) {
     this->argumentChecker->checkArgsLoosely(call);
     return call;
   }
@@ -594,11 +618,46 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   if (accessible.isErr()) {
     this->state.getDiagnostics().error(member->loc(), accessible.error().message);
   }
-  if (this->eventMaps->isEmitterClass(parent)) {
-    if (Expr *checked = this->emitterChecker->checkEmitterCall(call, member, parent, true)) {
-      return checked;
-    }
+  Expr *emitter = this->eventMaps->isEmitterClass(parent)
+                      ? this->emitterChecker->checkEmitterCall(call, member, parent, true)
+                      : nullptr;
+  if (emitter != nullptr) {
+    return emitter;
   }
+
+  return this->callSuperMethod(call, member, methods);
+}
+
+FunctionDecl *InheritChecker::enclosingMethod() {
+  std::vector<FunctionDecl *> functions = this->state.getFunctionStack().getFunctions();
+  for (FunctionDecl *fn : llvm::reverse(functions)) {
+    if (fn->isArrow()) {
+      continue;
+    }
+    if (fn->takesThis() && !fn->cls()->literal()) {
+      return fn;
+    }
+    return nullptr;
+  }
+
+  return nullptr;
+}
+
+bool InheritChecker::superObjectReady(MemberExpr *member) {
+  auto *self = this->state.getAst().make<NameExpr>(member->object->loc(), "this");
+  this->state.getClassContext().rememberThisMember(member->name);
+  ClassChecker::ResultThisReference reference = this->classChecker->checkThis(self);
+  this->state.getClassContext().forgetThisMember();
+  if (reference.isErr()) {
+    this->state.getDiagnostics().error(self->loc(), reference.error().message);
+  }
+  member->object = reference.isOk() ? reference.value() : self;
+
+  return !member->object->type->isError();
+}
+
+Expr *InheritChecker::callSuperMethod(CallExpr *call, MemberExpr *member,
+                                      llvm::ArrayRef<FunctionDecl *> methods) {
   bool checked = false;
   std::vector<const Type *> bound;
   OverloadResolver::ResultVariantChosen picked =
@@ -622,12 +681,7 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
     return this->overloadResolver->callGenericVariant(call, sym, bound, member->loc(), true);
   }
   if (sym->isGeneric()) {
-    this->typeArgInferrer->checkGenericCall(call, sym, member->loc(), nullptr, member->typeArgs);
-    call->target = SuperCall{.method = call->func()};
-    if (call->method()) {
-      member->type = this->returnInferrer->functionType(call->method());
-    }
-    return call;
+    return this->checkGenericSuperCall(call, member, sym);
   }
   call->target = SuperCall{.method = sym};
   member->type = this->returnInferrer->functionType(sym);
@@ -638,4 +692,13 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
                                                member->loc(), &given);
 }
 
+Expr *InheritChecker::checkGenericSuperCall(CallExpr *call, MemberExpr *member, FuncSymbol *sym) {
+  this->typeArgInferrer->checkGenericCall(call, sym, member->loc(), nullptr, member->typeArgs);
+  call->target = SuperCall{.method = call->func()};
+  if (call->method() != nullptr) {
+    member->type = this->returnInferrer->functionType(call->method());
+  }
+
+  return call;
+}
 }

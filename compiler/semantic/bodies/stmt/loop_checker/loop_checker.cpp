@@ -146,63 +146,13 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
   if (stmt->keys) {
     this->objectChecker->checkForIn(stmt);
   } else {
-    this->iteratorMethods->markFused(stmt->iterable);
-    stmt->iterable = this->dictChecker->iterableOf(
-        this->genericChecker->apparent(this->exprChecker->checkExpr(stmt->iterable)));
-    auto *name = dyn_cast<NameExpr>(stmt->iterable);
-    bool list =
-        name && name->var() && name->type->isTuple() && !name->type->tupleRest() &&
-        llvm::any_of(this->state.getFunctionStack().getFunctions(), [&](const FunctionDecl *fn) {
-          return fn->listName == name->name && name->var()->owner() == fn;
-        });
-    if (list) {
-      auto *elements = this->state.getAst().make<ArrayLitExpr>(name->loc());
-      std::vector<const Type *> kinds;
-      for (const Field &f : name->type->fields()) {
-        kinds.push_back(f.type);
-      }
-      for (size_t k = 0; k < name->type->fields().size(); ++k) {
-        elements->elements.push_back(
-            {this->state.getAst().make<IndexExpr>(
-                 name->loc(), this->state.getAst().make<NameExpr>(name->loc(), name->name),
-                 this->state.getAst().make<IntLitExpr>(name->loc(), k)),
-             false});
-      }
-      const Type *element = kinds.empty() ? nullptr : Type::unionOf(kinds);
-      if (!elements->elements.empty()) {
-        stmt->iterable = this->exprChecker->checkExpr(
-            elements,
-            element && UnionSlots::unionProblem(element).empty() ? Type::array(element) : nullptr);
-      }
-    }
+    this->walkIterable(stmt);
   }
   if (stmt->iterable->type->isMatch()) {
     stmt->iterable = this->matchChecker->matchItems(stmt->iterable);
   }
   const Type *type = stmt->iterable->type;
-  const Type *element = Type::error();
-  if (type->isArray()) {
-    element = type->inner();
-  } else if (type->isString()) {
-    element = Type::string();
-  } else if (type->isTypedArray()) {
-    element = type->elementType();
-  } else if (type->isIterator()) {
-    element = type->yielded();
-    GeneratorChecker::ResultNextNeedsNoValue nothing =
-        this->generatorChecker->checkSendsNothing(type, "'for...of'");
-    if (nothing.isErr()) {
-      this->state.getDiagnostics().error(stmt->iterable->loc(), nothing.error().message);
-    }
-  } else if (Expr *copy = this->tupleChecker->arrayCopy(stmt->iterable)) {
-    stmt->iterable = copy;
-    element = copy->type->inner();
-  } else {
-    ResultIterableType iterable = this->iterableType(type);
-    if (iterable.isErr()) {
-      this->state.getDiagnostics().error(stmt->iterable->loc(), iterable.error().message);
-    }
-  }
+  const Type *element = this->iteratedElement(stmt);
   ResultBindingTyped typed = LoopChecker::bindingType(stmt);
   if (typed.isErr()) {
     this->state.getDiagnostics().error(stmt->binding.typeAnn->loc, typed.error().message);
@@ -212,7 +162,6 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
     this->state.getDiagnostics().error(stmt->binding.loc, shape.error().message);
     element = Type::error();
   }
-
   LoopScan scan = this->loopScanner->scanForOfLoop(stmt);
   if (type->isIterator()) {
     scan.callsFunctions = true;
@@ -224,30 +173,124 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
   this->state.getScopeStack().openScope();
   stmt->binding.sym =
       this->scopes->declareVar(stmt->binding.name, stmt->binding.loc, element, stmt->isConst);
-  if (auto *lit = dyn_cast<ArrayLitExpr>(stmt->iterable);
-      lit && element->isInt() && stmt->binding.sym && !stmt->binding.destructured() &&
-      !lit->elements.empty()) {
-    std::optional<int64_t> lo, hi;
-    for (const ArrayLitExpr::Element &e : lit->elements) {
-      std::optional<int64_t> c =
-          e.spread || e.hole ? std::nullopt : this->constantFolder->intConstant(e.expr);
-      if (!c) {
-        lo.reset();
-        break;
-      }
-      lo = lo ? std::min(*lo, *c) : *c;
-      hi = hi ? std::max(*hi, *c) : *c;
-    }
-    if (lo) {
-      this->state.getFlowState().getFacts().add(Term::zero(), Term::of(stmt->binding.sym),
-                                                Facts::saturatingSub(1, *lo));
-      this->state.getFlowState().getFacts().add(Term::of(stmt->binding.sym), Term::zero(),
-                                                Facts::saturatingAdd(*hi, 1));
-    }
-  }
+  this->addLiteralBounds(stmt, element);
   this->checkLoopBody(stmt->body, scan.awaits);
   this->scopes->closeScope();
   this->state.getFlowState().replaceFlow(head);
+}
+
+void LoopChecker::walkIterable(ForOfStmt *stmt) {
+  this->iteratorMethods->markFused(stmt->iterable);
+  Expr *checked = this->exprChecker->checkExpr(stmt->iterable);
+  Expr *apparent = this->genericChecker->apparent(checked);
+  stmt->iterable = this->dictChecker->iterableOf(apparent);
+  auto *name = dyn_cast<NameExpr>(stmt->iterable);
+  if (name == nullptr || !this->isListParam(name)) {
+    return;
+  }
+  Expr *elements = this->listElements(name);
+  if (elements != nullptr) {
+    stmt->iterable = elements;
+  }
+}
+
+bool LoopChecker::isListParam(const NameExpr *name) {
+  bool tuple = name->var() != nullptr && name->type->isTuple() && !name->type->tupleRest();
+  if (!tuple) {
+    return false;
+  }
+  for (const FunctionDecl *fn : this->state.getFunctionStack().getFunctions()) {
+    if (fn->listName == name->name && name->var()->owner() == fn) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+Expr *LoopChecker::listElements(const NameExpr *name) {
+  llvm::SMLoc loc = name->loc();
+  auto *elements = this->state.getAst().make<ArrayLitExpr>(loc);
+  std::vector<const Type *> kinds;
+  for (const Field &f : name->type->fields()) {
+    kinds.push_back(f.type);
+  }
+  for (size_t k = 0; k < name->type->fields().size(); ++k) {
+    auto *root = this->state.getAst().make<NameExpr>(loc, name->name);
+    auto *position = this->state.getAst().make<IntLitExpr>(loc, k);
+    auto *item = this->state.getAst().make<IndexExpr>(loc, root, position);
+    elements->elements.push_back({item, false});
+  }
+  if (elements->elements.empty()) {
+    return nullptr;
+  }
+  const Type *element = kinds.empty() ? nullptr : Type::unionOf(kinds);
+  bool typed = element != nullptr && UnionSlots::unionProblem(element).empty();
+
+  return this->exprChecker->checkExpr(elements, typed ? Type::array(element) : nullptr);
+}
+
+const Type *LoopChecker::iteratedElement(ForOfStmt *stmt) {
+  const Type *type = stmt->iterable->type;
+  if (type->isArray()) {
+    return type->inner();
+  }
+  if (type->isString()) {
+    return Type::string();
+  }
+  if (type->isTypedArray()) {
+    return type->elementType();
+  }
+  if (type->isIterator()) {
+    GeneratorChecker::ResultNextNeedsNoValue nothing =
+        this->generatorChecker->checkSendsNothing(type, "'for...of'");
+    if (nothing.isErr()) {
+      this->state.getDiagnostics().error(stmt->iterable->loc(), nothing.error().message);
+    }
+    return type->yielded();
+  }
+  Expr *copy = this->tupleChecker->arrayCopy(stmt->iterable);
+  if (copy != nullptr) {
+    stmt->iterable = copy;
+    return copy->type->inner();
+  }
+  ResultIterableType iterable = this->iterableType(type);
+  if (iterable.isErr()) {
+    this->state.getDiagnostics().error(stmt->iterable->loc(), iterable.error().message);
+  }
+
+  return Type::error();
+}
+
+void LoopChecker::addLiteralBounds(const ForOfStmt *stmt, const Type *element) {
+  auto *lit = dyn_cast<ArrayLitExpr>(stmt->iterable);
+  bool bounded = lit != nullptr && element->isInt() && stmt->binding.sym != nullptr &&
+                 !stmt->binding.destructured() && !lit->elements.empty();
+  if (!bounded) {
+    return;
+  }
+  IntegerRange range = this->literalRange(lit);
+  if (!range.lo.has_value()) {
+    return;
+  }
+  Term self = Term::of(stmt->binding.sym);
+  this->state.getFlowState().getFacts().add(Term::zero(), self, Facts::saturatingSub(1, *range.lo));
+  this->state.getFlowState().getFacts().add(self, Term::zero(), Facts::saturatingAdd(*range.hi, 1));
+}
+
+IntegerRange LoopChecker::literalRange(const ArrayLitExpr *lit) const {
+  IntegerRange range;
+  for (const ArrayLitExpr::Element &e : lit->elements) {
+    std::optional<int64_t> c =
+        e.spread || e.hole ? std::nullopt : this->constantFolder->intConstant(e.expr);
+    if (!c.has_value()) {
+      return {};
+    }
+    range.lo = range.lo.has_value() ? std::min(*range.lo, *c) : *c;
+    range.hi = range.hi.has_value() ? std::max(*range.hi, *c) : *c;
+  }
+
+  return range;
 }
 
 LoopChecker::ResultIterableType LoopChecker::iterableType(const Type *type) const {

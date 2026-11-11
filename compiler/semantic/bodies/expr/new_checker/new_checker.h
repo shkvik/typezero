@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/expr/new_checker/new_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -54,6 +55,16 @@ private:
   ResultArrayElement arrayElement(const NewExpr *expr, const Type *expected);
   static ResultArrayArgsFit arrayArgs(const NewExpr *expr);
   static ResultHasZeroValue zeroValue(const Type *element);
+
+  void bindValueCallee(NewExpr *expr);
+  Expr *checkArgsLoosely(NewExpr *expr);
+  void rejectTypeArgs(const NewExpr *expr);
+  void walkArrayLength(NewExpr *expr, const Type *element);
+  Expr *checkArrayNew(NewExpr *expr, const Type *expected);
+  void noteLibraryInstance(NewExpr *made, const ClassDecl *cls);
+  Expr *checkClassInstanceNew(NewExpr *expr, ClassDecl *cls, const Type *expected);
+  Expr *checkBuiltinNew(NewExpr *expr, const Type *expected, std::optional<GlobalName> global);
+  Expr *checkNamespaceNew(NewExpr *expr, const Type *expected, std::optional<GlobalName> global);
 
   SemanticState &state;
   Scopes *scopes = nullptr;

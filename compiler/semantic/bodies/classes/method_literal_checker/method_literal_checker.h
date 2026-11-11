@@ -35,6 +35,16 @@ private:
   static ResultValueIsTyped fieldValue(const Type *valueType, llvm::StringRef label);
   static ResultMembersMatch membersMatch(const ObjectLitExpr *lit, const Type *target);
   ResultPropertyFits propertyFits(const ObjectLitExpr::Property &prop, const Type *target) const;
+  Type *makeLiteralClass(ObjectLitExpr *lit);
+  void addLiteralMethod(ClassDecl *cls, const ObjectLitExpr::Property &prop);
+  bool addLiteralField(ClassDecl *cls, ObjectLitExpr::Property &prop, const Type *target,
+                       std::vector<Field> &fields);
+  static std::string literalTypeName(const std::vector<Field> &fields,
+                                     llvm::ArrayRef<FunctionDecl *> methods);
+  void declareLiteralMethods(ClassDecl *cls, const Type *target);
+  void declareLiteralMethod(FunctionDecl *fn, const Type *target);
+  void checkLiteralMethods(ClassDecl *cls);
+  Expr *matchLiteralTarget(ObjectLitExpr *lit, const Type *target, const Type *type);
 
   SemanticState &state;
   CallCycles *callCycles = nullptr;

@@ -41,101 +41,103 @@ StmtChecker::StmtChecker(SemanticState &owner, SemanticParts &all)
 
 void StmtChecker::checkStmt(Stmt *stmt) {
   switch (stmt->kind()) {
-  case Stmt::Kind::Block:
-    this->state.getScopeStack().openScope();
-    this->closureChecker->checkStatements(cast<BlockStmt>(stmt));
-    this->scopes->closeScope();
-    break;
-  case Stmt::Kind::VarDecl:
-    this->varChecker->checkVarDecl(cast<VarDeclStmt>(stmt));
-    break;
-  case Stmt::Kind::TypeAlias:
-  case Stmt::Kind::Enum:
-    break;
-  case Stmt::Kind::Class: {
-    auto *cls = cast<ClassDecl>(stmt);
-    ClassChecker::ResultClassDeclared declared = this->classChecker->checkClassStmt(cls);
-    if (declared.isErr()) {
-      this->state.getDiagnostics().error(cls->loc(), declared.error().message);
-    }
-    break;
+    case Stmt::Kind::Block:
+      return this->walkBlock(cast<BlockStmt>(stmt));
+    case Stmt::Kind::VarDecl:
+      return this->varChecker->checkVarDecl(cast<VarDeclStmt>(stmt));
+    case Stmt::Kind::TypeAlias:
+    case Stmt::Kind::Enum:
+      return;
+    case Stmt::Kind::Class:
+      return this->walkClassStmt(cast<ClassDecl>(stmt));
+    case Stmt::Kind::Function:
+      return this->walkFunctionStmt(cast<FunctionDecl>(stmt));
+    case Stmt::Kind::Expr:
+      return this->walkExprStmt(cast<ExprStmt>(stmt));
+    case Stmt::Kind::If:
+      this->state.getScopeStack().enterBranch();
+      this->checkIf(cast<IfStmt>(stmt));
+      return this->state.getScopeStack().leaveBranch();
+    case Stmt::Kind::While:
+      this->state.getScopeStack().enterBranch();
+      this->loopChecker->checkWhile(cast<WhileStmt>(stmt));
+      return this->state.getScopeStack().leaveBranch();
+    case Stmt::Kind::DoWhile:
+      this->state.getScopeStack().enterBranch();
+      this->loopChecker->checkDoWhile(cast<DoWhileStmt>(stmt));
+      return this->state.getScopeStack().leaveBranch();
+    case Stmt::Kind::For:
+      this->state.getScopeStack().enterBranch();
+      this->loopChecker->checkFor(cast<ForStmt>(stmt));
+      return this->state.getScopeStack().leaveBranch();
+    case Stmt::Kind::ForOf:
+      this->state.getScopeStack().enterBranch();
+      this->loopChecker->checkForOf(cast<ForOfStmt>(stmt));
+      return this->state.getScopeStack().leaveBranch();
+    case Stmt::Kind::Switch:
+      this->state.getScopeStack().enterBranch();
+      this->switchChecker->checkSwitch(cast<SwitchStmt>(stmt));
+      return this->state.getScopeStack().leaveBranch();
+    case Stmt::Kind::Labeled:
+      return this->jumpChecker->checkLabeled(cast<LabeledStmt>(stmt));
+    case Stmt::Kind::Return:
+      this->returnChecker->checkReturn(cast<ReturnStmt>(stmt));
+      return this->state.getFlowState().markUnreachable();
+    case Stmt::Kind::Break:
+    case Stmt::Kind::Continue:
+      return this->walkJump(stmt);
+    case Stmt::Kind::Empty:
+    case Stmt::Kind::Debugger:
+      return;
   }
-  case Stmt::Kind::Function: {
-    ResultFunctionInBlock placed = this->checkFunctionStmt(cast<FunctionDecl>(stmt));
-    if (placed.isErr()) {
-      this->state.getDiagnostics().error(stmt->loc(), placed.error().message);
-    }
-    break;
+}
+
+void StmtChecker::walkBlock(BlockStmt *block) {
+  this->state.getScopeStack().openScope();
+  this->closureChecker->checkStatements(block);
+  this->scopes->closeScope();
+}
+
+void StmtChecker::walkClassStmt(ClassDecl *cls) {
+  ClassChecker::ResultClassDeclared declared = this->classChecker->checkClassStmt(cls);
+  if (declared.isErr()) {
+    this->state.getDiagnostics().error(cls->loc(), declared.error().message);
   }
-  case Stmt::Kind::Expr: {
-    auto *s = cast<ExprStmt>(stmt);
-    if (auto *yield = dyn_cast<YieldExpr>(s->expr)) {
-      yield->discarded = true;
-    }
-    s->expr = this->exprChecker->checkExpr(s->expr);
-    ResultChecker::ResultValueGetsUsed used =
-        this->resultChecker->usedValue(s->expr, false, s->loc());
-    if (used.isErr()) {
-      this->state.getDiagnostics().error(s->expr->loc(), used.error().message);
-    }
-    if (auto *made = dyn_cast<NewExpr>(s->expr); made && made->cls()) {
-      this->state.getEventStore().addDroppedNew(made->cls(), made->loc());
-    }
-    if (ReturnChecker::isExit(s)) {
-      this->state.getFlowState().markUnreachable();
-    }
-    break;
+}
+
+void StmtChecker::walkFunctionStmt(FunctionDecl *fn) {
+  ResultFunctionInBlock placed = this->checkFunctionStmt(fn);
+  if (placed.isErr()) {
+    this->state.getDiagnostics().error(fn->loc(), placed.error().message);
   }
-  case Stmt::Kind::If:
-    this->state.getScopeStack().enterBranch();
-    this->checkIf(cast<IfStmt>(stmt));
-    this->state.getScopeStack().leaveBranch();
-    break;
-  case Stmt::Kind::While:
-    this->state.getScopeStack().enterBranch();
-    this->loopChecker->checkWhile(cast<WhileStmt>(stmt));
-    this->state.getScopeStack().leaveBranch();
-    break;
-  case Stmt::Kind::DoWhile:
-    this->state.getScopeStack().enterBranch();
-    this->loopChecker->checkDoWhile(cast<DoWhileStmt>(stmt));
-    this->state.getScopeStack().leaveBranch();
-    break;
-  case Stmt::Kind::For:
-    this->state.getScopeStack().enterBranch();
-    this->loopChecker->checkFor(cast<ForStmt>(stmt));
-    this->state.getScopeStack().leaveBranch();
-    break;
-  case Stmt::Kind::ForOf:
-    this->state.getScopeStack().enterBranch();
-    this->loopChecker->checkForOf(cast<ForOfStmt>(stmt));
-    this->state.getScopeStack().leaveBranch();
-    break;
-  case Stmt::Kind::Switch:
-    this->state.getScopeStack().enterBranch();
-    this->switchChecker->checkSwitch(cast<SwitchStmt>(stmt));
-    this->state.getScopeStack().leaveBranch();
-    break;
-  case Stmt::Kind::Labeled:
-    this->jumpChecker->checkLabeled(cast<LabeledStmt>(stmt));
-    break;
-  case Stmt::Kind::Return:
-    this->returnChecker->checkReturn(cast<ReturnStmt>(stmt));
+}
+
+void StmtChecker::walkExprStmt(ExprStmt *s) {
+  auto *yield = dyn_cast<YieldExpr>(s->expr);
+  if (yield != nullptr) {
+    yield->discarded = true;
+  }
+  s->expr = this->exprChecker->checkExpr(s->expr);
+  ResultChecker::ResultValueGetsUsed used =
+      this->resultChecker->usedValue(s->expr, false, s->loc());
+  if (used.isErr()) {
+    this->state.getDiagnostics().error(s->expr->loc(), used.error().message);
+  }
+  auto *made = dyn_cast<NewExpr>(s->expr);
+  if (made != nullptr && made->cls() != nullptr) {
+    this->state.getEventStore().addDroppedNew(made->cls(), made->loc());
+  }
+  if (ReturnChecker::isExit(s)) {
     this->state.getFlowState().markUnreachable();
-    break;
-  case Stmt::Kind::Break:
-  case Stmt::Kind::Continue: {
-    JumpChecker::ResultJumpTargeted jumped = this->jumpChecker->checkJump(stmt);
-    if (jumped.isErr()) {
-      this->state.getDiagnostics().error(stmt->loc(), jumped.error().message);
-    }
-    this->state.getFlowState().markUnreachable();
-    break;
   }
-  case Stmt::Kind::Empty:
-  case Stmt::Kind::Debugger:
-    break;
+}
+
+void StmtChecker::walkJump(Stmt *stmt) {
+  JumpChecker::ResultJumpTargeted jumped = this->jumpChecker->checkJump(stmt);
+  if (jumped.isErr()) {
+    this->state.getDiagnostics().error(stmt->loc(), jumped.error().message);
   }
+  this->state.getFlowState().markUnreachable();
 }
 
 void StmtChecker::checkIf(IfStmt *stmt) {

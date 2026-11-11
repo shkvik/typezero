@@ -42,6 +42,30 @@ private:
   static ResultElementsJoin typesJoin(const ArrayLitExpr *lit, llvm::ArrayRef<const Type *> types,
                                       const Type *element, const Type *type);
 
+  struct ArrayElements {
+    std::vector<const Type *> types;
+    bool someDecimal;
+    const Type *seen;
+  };
+
+  Expr *checkPairLiteral(ArrayLitExpr *lit);
+  static const Type *wantedArray(const Type *expected);
+  Expr *reportHoles(ArrayLitExpr *lit);
+  Expr *checkTupleValue(ArrayLitExpr *lit, const Type *tupleType);
+  static const Expr *firstSpread(const ArrayLitExpr *lit);
+  void walkArrayElement(ArrayLitExpr *lit, size_t i, const Type *expectedElement,
+                        ArrayElements &elements);
+  void walkPlainElement(ArrayLitExpr::Element &e, size_t i, const Type *expectedElement,
+                        ArrayElements &elements);
+  void walkSpreadElement(ArrayLitExpr::Element &e, size_t i, const Type *expectedElement,
+                         ArrayElements &elements);
+  const Type *iteratedSpread(const Expr *spread);
+  const Type *tupleSpreadType(const Expr *spread);
+  const Type *arraySpreadType(const Expr *spread);
+  static const Type *literalHint(const ArrayLitExpr *lit, const ArrayElements &elements);
+  const Type *joinedElement(const ArrayLitExpr *lit, llvm::ArrayRef<const Type *> types);
+  Expr *finishArrayLit(ArrayLitExpr *lit, const Type *element);
+
   SemanticState &state;
   DictChecker *dictChecker = nullptr;
   ExprChecker *exprChecker = nullptr;

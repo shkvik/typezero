@@ -10,6 +10,7 @@ class Scopes;
 class LiteralTypes;
 class TypeResolver;
 class IterableChecker;
+class DestinationScan;
 class DestinationScanner;
 
 struct LiteralGoal {
@@ -27,6 +28,18 @@ public:
   const Type *declaredFunctionType(const FunctionDecl *fn);
 
 private:
+  using DestinationPlace = std::pair<const Type *, llvm::SMLoc>;
+
+  void scanLaterDeclarators(llvm::ArrayRef<VarDeclarator> later, DestinationScan &scan);
+  const Type *annotatedType(const VarDeclarator &decl);
+  static bool isRedeclaredIn(llvm::ArrayRef<VarDeclarator> decls, llvm::StringRef name);
+  void scanFollowing(llvm::StringRef name, bool visible, DestinationScan &scan);
+  std::vector<DestinationPlace> fittingPlaces(const Expr *init, const DestinationScan &scan);
+  static const Type *chooseDestination(llvm::ArrayRef<DestinationPlace> places);
+  static const Type *commonPlace(llvm::ArrayRef<DestinationPlace> places);
+  static bool acceptsAll(const Type *candidate, llvm::ArrayRef<DestinationPlace> places);
+  static bool allResults(llvm::ArrayRef<DestinationPlace> places);
+  static const Type *unifiedResults(llvm::ArrayRef<DestinationPlace> places);
   static std::vector<const Expr *> findReturnValues(const Stmt *body);
   static std::optional<std::vector<LiteralGoal>> arrayNeeds(const ArrayLitExpr *lit,
                                                             const Type *type);

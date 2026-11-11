@@ -312,135 +312,44 @@ Expr *DictNewChecker::checkDictSource(Expr *arg, bool pairs, const Type *&elemen
 
 Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
   std::optional<GlobalName> global = GlobalNameTable::find(expr->name);
-  bool isMap = global == GlobalName::MAP;
   llvm::SMLoc loc = expr->loc();
   if (global == GlobalName::WEAK_MAP || global == GlobalName::WEAK_SET) {
-    TypeRef ref;
-    ref.name = expr->name;
-    ref.loc = loc;
-    DictChecker::ResultDictTypeResolved weak = this->dictChecker->resolveDictType(ref);
-    if (weak.isErr()) {
-      this->state.getDiagnostics().error(loc, weak.error().message);
-    }
-    for (Expr *&arg : expr->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-    expr->type = Type::error();
-    return expr;
+    return this->reportWeakDict(expr);
   }
-  auto fail = [&] {
-    for (Expr *&arg : expr->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-    expr->type = Type::error();
-
-    return expr;
-  };
-  const Type *type = nullptr;
-  if (expected && expected->nonOptional()->isUnion()) {
-    const Type *only = nullptr;
-    int count = 0;
-    for (const Type *m : expected->nonOptional()->members()) {
-      if (m->isDict() && !m->isRecord() && m->isMap() == isMap) {
-        only = m;
-        ++count;
-      }
-    }
-    expected = count == 1 ? only : nullptr;
+  bool isMap = global == GlobalName::MAP;
+  std::optional<const Type *> stated = this->statedDictType(expr, expected, isMap);
+  if (!stated.has_value()) {
+    return this->failDictNew(expr);
   }
-  if (!expr->typeArgs.empty()) {
-    TypeRef ref;
-    ref.form = GenericTypeRef{};
-    ref.name = expr->name;
-    ref.loc = loc;
-    ref.args = expr->typeArgs;
-    DictChecker::ResultDictTypeResolved given = this->dictChecker->resolveDictType(ref);
-    if (given.isErr()) {
-      bool onKey = DictChecker::keyArgument(given.error().code);
-      llvm::SMLoc at = onKey ? ref.args[0].loc : ref.loc;
-      this->state.getDiagnostics().error(at, given.error().message);
-      return fail();
-    }
-    type = given.value();
-    if (type->isError()) {
-      return fail();
-    }
-  } else if (const Type *wanted = expected ? expected->nonOptional() : nullptr;
-             wanted && wanted->isDict() && wanted->isMap() == isMap && !wanted->isRecord()) {
-    type = wanted;
-  }
+  const Type *type = *stated;
   ResultOneArgument single = DictNewChecker::argumentCount(expr, isMap);
   if (single.isErr()) {
     this->state.getDiagnostics().error(expr->args[1]->loc(), single.error().message);
-    return fail();
+    return this->failDictNew(expr);
   }
   std::vector<Expr *> args;
   if (expr->args.empty() || isa<UndefinedExpr>(expr->args[0])) {
-    ResultTypesStated stated = DictNewChecker::typesGiven(expr, type, isMap, !expr->args.empty());
-    if (stated.isErr()) {
-      this->state.getDiagnostics().error(loc, stated.error().message);
-      return fail();
+    ResultTypesStated given = DictNewChecker::typesGiven(expr, type, isMap, !expr->args.empty());
+    if (given.isErr()) {
+      this->state.getDiagnostics().error(loc, given.error().message);
+      return this->failDictNew(expr);
     }
   } else {
-    Expr *arg = expr->args[0];
-    const Type *key = nullptr;
-    const Type *value = nullptr;
-    if (!type && isMap && this->inferPairs(arg, key, value)) {
-      if (key->isError()) {
-        expr->type = Type::error();
-        return expr;
-      }
-      DictChecker::ResultKeyTypeIsAllowed allowed = this->dictChecker->checkKeyType(key);
-      if (allowed.isErr()) {
-        this->state.getDiagnostics().error(arg->loc(), allowed.error().message);
-        expr->type = Type::error();
-        return expr;
-      }
-      type = Type::dict(Type::DictKind::Map, key, value);
-      args.push_back(arg);
-    } else {
-      const Type *element =
-          type ? (isMap ? Type::tuple({type->keyType(), type->valueType()}) : type->keyType())
-               : nullptr;
-      std::string what = ErrorTextDictSource::newName(expr->name);
-      arg = this->checkDictSource(arg, isMap, element, what);
-      if (element->isError()) {
-        expr->type = Type::error();
-        return expr;
-      }
-      if (!type) {
-        ResultPairsShaped shaped = DictNewChecker::pairShape(element);
-        if (isMap && shaped.isErr()) {
-          this->state.getDiagnostics().error(arg->loc(), shaped.error().message);
-          expr->type = Type::error();
-          return expr;
-        }
-        const Type *k = isMap ? element->fields()[0].type : element;
-        DictChecker::ResultKeyTypeIsAllowed allowed = this->dictChecker->checkKeyType(k);
-        if (allowed.isErr()) {
-          this->state.getDiagnostics().error(arg->loc(), allowed.error().message);
-          expr->type = Type::error();
-          return expr;
-        }
-        ResultDefinedType defined = DictNewChecker::elementsKnown(expr, k, element, isMap);
-        if (defined.isErr()) {
-          this->state.getDiagnostics().error(arg->loc(), defined.error().message);
-          expr->type = Type::error();
-          return expr;
-        }
-        type = isMap ? Type::dict(Type::DictKind::Map, k, element->fields()[1].type)
-                     : Type::dict(Type::DictKind::Set, k, Type::voidTy());
-      }
-      args.push_back(arg);
+    std::optional<DictSource> source = this->sourcedDict(expr, type, isMap);
+    if (!source.has_value()) {
+      expr->type = Type::error();
+      return expr;
     }
+    type = source->type;
+    args.push_back(source->arg);
   }
   DictChecker::ResultKeyTypeIsAllowed keyAllowed = this->dictChecker->checkKeyType(type->keyType());
   if (keyAllowed.isErr()) {
     this->state.getDiagnostics().error(loc, keyAllowed.error().message);
-    return fail();
+    return this->failDictNew(expr);
   }
-  auto *call = this->state.getAst().make<CallExpr>(
-      loc, this->state.getAst().make<NameExpr>(loc, expr->name), std::move(args));
+  auto *callee = this->state.getAst().make<NameExpr>(loc, expr->name);
+  auto *call = this->state.getAst().make<CallExpr>(loc, callee, std::move(args));
   call->callee->type = type;
   call->target = BuiltinCall{.builtin = Builtin::DictNew};
   call->type = type;
@@ -448,4 +357,155 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
   return call;
 }
 
+Expr *DictNewChecker::failDictNew(NewExpr *expr) {
+  for (Expr *&arg : expr->args) {
+    arg = this->exprChecker->checkExpr(arg);
+  }
+  expr->type = Type::error();
+
+  return expr;
+}
+
+Expr *DictNewChecker::reportWeakDict(NewExpr *expr) {
+  TypeRef ref;
+  ref.name = expr->name;
+  ref.loc = expr->loc();
+  DictChecker::ResultDictTypeResolved weak = this->dictChecker->resolveDictType(ref);
+  if (weak.isErr()) {
+    this->state.getDiagnostics().error(expr->loc(), weak.error().message);
+  }
+
+  return this->failDictNew(expr);
+}
+
+std::optional<const Type *> DictNewChecker::statedDictType(NewExpr *expr, const Type *expected,
+                                                           bool isMap) {
+  if (expr->typeArgs.empty()) {
+    return DictNewChecker::wantedDict(expected, isMap);
+  }
+  TypeRef ref;
+  ref.form = GenericTypeRef{};
+  ref.name = expr->name;
+  ref.loc = expr->loc();
+  ref.args = expr->typeArgs;
+  DictChecker::ResultDictTypeResolved given = this->dictChecker->resolveDictType(ref);
+  if (given.isErr()) {
+    bool onKey = DictChecker::keyArgument(given.error().code);
+    llvm::SMLoc at = onKey ? ref.args[0].loc : ref.loc;
+    this->state.getDiagnostics().error(at, given.error().message);
+    return std::nullopt;
+  }
+  if (given.value()->isError()) {
+    return std::nullopt;
+  }
+
+  return given.value();
+}
+
+const Type *DictNewChecker::wantedDict(const Type *expected, bool isMap) {
+  const Type *target = expected;
+  if (target != nullptr && target->nonOptional()->isUnion()) {
+    target = DictNewChecker::onlyDictMember(target->nonOptional(), isMap);
+  }
+  const Type *wanted = target != nullptr ? target->nonOptional() : nullptr;
+  bool fits =
+      wanted != nullptr && wanted->isDict() && wanted->isMap() == isMap && !wanted->isRecord();
+
+  return fits ? wanted : nullptr;
+}
+
+const Type *DictNewChecker::onlyDictMember(const Type *expected, bool isMap) {
+  const Type *only = nullptr;
+  int count = 0;
+  for (const Type *m : expected->members()) {
+    if (m->isDict() && !m->isRecord() && m->isMap() == isMap) {
+      only = m;
+      ++count;
+    }
+  }
+
+  return count == 1 ? only : nullptr;
+}
+
+std::optional<DictNewChecker::DictSource>
+DictNewChecker::sourcedDict(NewExpr *expr, const Type *type, bool isMap) {
+  Expr *arg = expr->args[0];
+  const Type *key = nullptr;
+  const Type *value = nullptr;
+  if (type == nullptr && isMap && this->inferPairs(arg, key, value)) {
+    return this->inferredPairsDict(arg, key, value);
+  }
+
+  return this->checkedSourceDict(expr, arg, type, isMap);
+}
+
+std::optional<DictNewChecker::DictSource>
+DictNewChecker::inferredPairsDict(Expr *arg, const Type *key, const Type *value) {
+  if (key->isError()) {
+    return std::nullopt;
+  }
+  DictChecker::ResultKeyTypeIsAllowed allowed = this->dictChecker->checkKeyType(key);
+  if (allowed.isErr()) {
+    this->state.getDiagnostics().error(arg->loc(), allowed.error().message);
+    return std::nullopt;
+  }
+
+  return DictSource{
+      .type = Type::dict(Type::DictKind::Map, key, value),
+      .arg = arg,
+  };
+}
+
+std::optional<DictNewChecker::DictSource>
+DictNewChecker::checkedSourceDict(NewExpr *expr, Expr *arg, const Type *type, bool isMap) {
+  const Type *element = nullptr;
+  if (type != nullptr) {
+    element = isMap ? Type::tuple({type->keyType(), type->valueType()}) : type->keyType();
+  }
+  std::string what = ErrorTextDictSource::newName(expr->name);
+  Expr *checked = this->checkDictSource(arg, isMap, element, what);
+  if (element->isError()) {
+    return std::nullopt;
+  }
+  if (type != nullptr) {
+    return DictSource{
+        .type = type,
+        .arg = checked,
+    };
+  }
+  std::optional<const Type *> made = this->sourceElementDict(expr, checked, element, isMap);
+  if (!made.has_value()) {
+    return std::nullopt;
+  }
+
+  return DictSource{
+      .type = *made,
+      .arg = checked,
+  };
+}
+
+std::optional<const Type *> DictNewChecker::sourceElementDict(const NewExpr *expr, const Expr *arg,
+                                                              const Type *element, bool isMap) {
+  ResultPairsShaped shaped = DictNewChecker::pairShape(element);
+  if (isMap && shaped.isErr()) {
+    this->state.getDiagnostics().error(arg->loc(), shaped.error().message);
+    return std::nullopt;
+  }
+  const Type *k = isMap ? element->fields()[0].type : element;
+  DictChecker::ResultKeyTypeIsAllowed allowed = this->dictChecker->checkKeyType(k);
+  if (allowed.isErr()) {
+    this->state.getDiagnostics().error(arg->loc(), allowed.error().message);
+    return std::nullopt;
+  }
+  ResultDefinedType defined = DictNewChecker::elementsKnown(expr, k, element, isMap);
+  if (defined.isErr()) {
+    this->state.getDiagnostics().error(arg->loc(), defined.error().message);
+    return std::nullopt;
+  }
+  if (isMap) {
+    return Type::dict(Type::DictKind::Map, k, element->fields()[1].type);
+  }
+
+  return Type::dict(Type::DictKind::Set, k, Type::voidTy());
+}
 }

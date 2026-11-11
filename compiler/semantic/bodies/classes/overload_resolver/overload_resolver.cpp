@@ -68,7 +68,6 @@ void OverloadResolver::enterRank(const Type *from, const Type *to, RankRun &run)
   }
 }
 
-// TODO: говнокод
 std::optional<int> OverloadResolver::rankLeaf(const Type *from, const Type *to) {
   if (from == to || from->isError() || to->isError()) {
     return 0;
@@ -83,44 +82,54 @@ std::optional<int> OverloadResolver::rankLeaf(const Type *from, const Type *to) 
     return std::nullopt;
   }
   if (to->isJson()) {
-    return from->isString() || from->isNumeric() || from->isBool() ||
-                   (from->isArray() && from->inner()->isJson())
-               ? 3
-               : -1;
+    return OverloadResolver::jsonRank(from);
   }
-  if (from->isParam() && from->constraint()) {
+  if (from->isParam() && from->constraint() != nullptr) {
     return std::nullopt;
   }
   if (from->isIterator() && to->isIterator()) {
-    return from->yielded() == to->yielded() &&
-                   (from->returned() == to->returned() || to->returned()->isVoid()) &&
-                   (from->sent() == to->sent() || to->sent()->isVoid())
-               ? 1
-               : -1;
+    return OverloadResolver::iteratorRank(from, to);
   }
   if (from->isBytes() || to->isBytes()) {
     return from->isBuffer() && to->bytes() == Type::Bytes::Uint8 ? 1 : -1;
   }
-  if (from->isMatch() || to->isMatch() || from->isRegExp() || to->isRegExp() || from->isDate() ||
-      to->isDate() || from->isIntl() || to->isIntl() || from->isCrypto() || to->isCrypto() ||
-      from->isWeakRef() || to->isWeakRef()) {
-    return from->isMatch() && to->isMatch() && to->matchGroups() < 0 && !from->field("indices")
-               ? 1
-               : -1;
+  if (OverloadResolver::isOpaqueRanked(from) || OverloadResolver::isOpaqueRanked(to)) {
+    bool plainMatch = from->isMatch() && to->isMatch() && to->matchGroups() < 0 &&
+                      from->field("indices") == nullptr;
+    return plainMatch ? 1 : -1;
   }
+
+  return OverloadResolver::objectRank(from, to);
+}
+
+int OverloadResolver::jsonRank(const Type *from) {
+  bool jsonValue = from->isString() || from->isNumeric() || from->isBool() ||
+                   (from->isArray() && from->inner()->isJson());
+
+  return jsonValue ? 3 : -1;
+}
+
+int OverloadResolver::iteratorRank(const Type *from, const Type *to) {
+  bool same = from->yielded() == to->yielded() &&
+              (from->returned() == to->returned() || to->returned()->isVoid()) &&
+              (from->sent() == to->sent() || to->sent()->isVoid());
+
+  return same ? 1 : -1;
+}
+
+bool OverloadResolver::isOpaqueRanked(const Type *t) {
+  return t->isMatch() || t->isRegExp() || t->isDate() || t->isIntl() || t->isCrypto() ||
+         t->isWeakRef();
+}
+
+std::optional<int> OverloadResolver::objectRank(const Type *from, const Type *to) {
   if (from->isObject() && to->isObject()) {
     int distance = TypeQueries::subtypeDistance(from, to);
     if (distance > 0) {
       return distance;
     }
   }
-  if (from->isObject() && to->isObject() && !from->isClass() && !to->isClass() &&
-      !from->isAnyObject() && !to->isAnyObject() && from->isTuple() == to->isTuple() &&
-      from->fields().size() == to->fields().size() && from->overloads().empty() &&
-      to->overloads().empty() && llvm::all_of(from->fields(), [&](const Field &f) {
-        const Field *t = to->field(f.name);
-        return t && t->type == f.type && (!f.readonly || t->readonly);
-      })) {
+  if (OverloadResolver::sameFieldObjects(from, to)) {
     return 1;
   }
   if (OverloadResolver::sameShapeObjects(from, to)) {
@@ -131,6 +140,24 @@ std::optional<int> OverloadResolver::rankLeaf(const Type *from, const Type *to) 
   }
 
   return -1;
+}
+
+bool OverloadResolver::sameFieldObjects(const Type *from, const Type *to) {
+  bool plain = from->isObject() && to->isObject() && !from->isClass() && !to->isClass() &&
+               !from->isAnyObject() && !to->isAnyObject() && from->isTuple() == to->isTuple() &&
+               from->fields().size() == to->fields().size() && from->overloads().empty() &&
+               to->overloads().empty();
+  if (!plain) {
+    return false;
+  }
+  for (const Field &f : from->fields()) {
+    const Field *t = to->field(f.name);
+    if (t == nullptr || t->type != f.type || (f.readonly && !t->readonly)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 // TODO: говнокод

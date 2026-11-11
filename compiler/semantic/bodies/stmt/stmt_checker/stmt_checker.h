@@ -34,6 +34,11 @@ private:
   using ResultFunctionInBlock = Result<FunctionDecl *, StmtCheckerCheckFunctionStmtError>;
 
   ResultFunctionInBlock checkFunctionStmt(FunctionDecl *fn) const;
+  void walkBlock(BlockStmt *block);
+  void walkClassStmt(ClassDecl *cls);
+  void walkFunctionStmt(FunctionDecl *fn);
+  void walkExprStmt(ExprStmt *s);
+  void walkJump(Stmt *stmt);
 
   SemanticState &state;
   Scopes *scopes = nullptr;

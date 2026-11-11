@@ -27,6 +27,11 @@ public:
   Expr *joined(Expr *expr);
 
 private:
+  static std::vector<const ClassDecl *> instancesOf(llvm::ArrayRef<const Type *> members,
+                                                    const ClassDecl *generic);
+  Expr *widenToGeneric(Expr *expr, ClassDecl *generic, llvm::ArrayRef<const ClassDecl *> instances);
+  static std::optional<std::vector<const Type *>>
+  joinedArgs(const ClassDecl *generic, llvm::ArrayRef<const ClassDecl *> instances);
   static bool mentions(const TypeRef &ref, llvm::StringRef name);
   static std::map<std::pair<const ClassDecl *, size_t>, bool> &knownVariance();
   static std::string writerOf(const ClassDecl *generic, llvm::StringRef name);

@@ -39,6 +39,23 @@ private:
   static ResultOkErrTypeArgs okErrTypeArgs(const NameExpr *name);
   static ResultStaticIsKnown staticMethod(const NameExpr *name, llvm::StringRef method);
 
+  struct CombineCall {
+    CallExpr *call = nullptr;
+    std::string what;
+    bool all = false;
+  };
+
+  bool combineArityFits(CallExpr *call, const MemberExpr *member);
+  static bool isPlainList(const ArrayLitExpr *lit);
+  bool holdsValues(const CombineCall &combine, const Type *result, const Expr *at);
+  static const Type *errorsOf(const CombineCall &combine, const Type *error);
+  Expr *checkCombineList(const CombineCall &combine, ArrayLitExpr *lit);
+  static const Type *sameValues(const Type *a, const Type *b);
+  static const Type *commonResult(llvm::ArrayRef<const Type *> results);
+  Expr *checkSameCombine(const CombineCall &combine, ArrayLitExpr *lit, const Type *common);
+  Expr *checkTupleCombine(const CombineCall &combine, ArrayLitExpr *lit,
+                          const std::vector<const Type *> &results);
+  Expr *checkCombineArray(const CombineCall &combine);
   static const Type *halfParam(const Type *half);
   static bool givesType(const Type *half);
   static std::string receiverText(const Expr *expr);

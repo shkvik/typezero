@@ -90,6 +90,13 @@ private:
   ResultExportTarget exportNamed(const llvm::StringMap<ModuleExport> &theirs, Module *from,
                                  llvm::StringRef path, const ModuleName &name);
   std::optional<ModuleBinding> readyLocal(Module *module, llvm::StringRef name);
+  static void addDeclaredItem(ModuleState &here, const Stmt *item);
+  static void addDeclared(ModuleState &here, llvm::StringRef name, llvm::SMLoc loc);
+  static std::optional<llvm::StringRef> itemName(const Stmt *item);
+  std::vector<std::vector<Stmt *>> declareModuleTypes(SourceFile &program);
+  void declareModuleFunctions(Module *module, std::vector<FunctionDecl *> &functions);
+  static std::vector<FunctionDecl *> classFunctions(const ClassDecl *cls);
+  void fillUnfilledInstances();
 
   SemanticState &state;
   ClassLinks *classLinks = nullptr;

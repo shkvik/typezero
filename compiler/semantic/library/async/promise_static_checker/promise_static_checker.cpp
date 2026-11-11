@@ -96,66 +96,100 @@ PromiseStaticChecker::ResultListOfPromises PromiseStaticChecker::promiseArray(co
 bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElement,
                                             const Type *&element, std::vector<const Type *> &tuple,
                                             llvm::StringRef fn) {
-  if (auto *lit = dyn_cast<ArrayLitExpr>(arg);
-      lit && llvm::none_of(lit->elements,
-                           [](const ArrayLitExpr::Element &e) { return e.spread || e.hole; })) {
-    if (lit->elements.empty()) {
-      ResultEmptyListTyped typed = PromiseStaticChecker::emptyList(wantedElement, fn);
-      if (typed.isErr()) {
-        this->state.getDiagnostics().error(lit->loc(), typed.error().message);
-        return false;
-      }
-      lit->type = Type::array(Type::promise(typed.value()));
-      element = typed.value();
-      return true;
+  auto *lit = dyn_cast<ArrayLitExpr>(arg);
+  bool plainLiteral =
+      lit != nullptr && llvm::none_of(lit->elements, PromiseStaticChecker::isSpreadOrHole);
+  if (plainLiteral) {
+    return this->checkLiteralPromiseList(lit, wantedElement, element, tuple, fn);
+  }
+
+  return this->checkValuePromiseList(arg, element, tuple, fn);
+}
+
+bool PromiseStaticChecker::isSpreadOrHole(const ArrayLitExpr::Element &element) {
+  return element.spread || element.hole;
+}
+
+bool PromiseStaticChecker::checkLiteralPromiseList(ArrayLitExpr *lit, const Type *wantedElement,
+                                                   const Type *&element,
+                                                   std::vector<const Type *> &tuple,
+                                                   llvm::StringRef fn) {
+  if (lit->elements.empty()) {
+    ResultEmptyListTyped typed = PromiseStaticChecker::emptyList(wantedElement, fn);
+    if (typed.isErr()) {
+      this->state.getDiagnostics().error(lit->loc(), typed.error().message);
+      return false;
     }
-    std::vector<const Type *> types;
-    bool same = true;
-    for (ArrayLitExpr::Element &e : lit->elements) {
-      e.expr = this->exprChecker->checkExpr(
-          e.expr, wantedElement && Destination::literalShaped(e.expr) ? wantedElement : nullptr);
-      if (e.expr->type->isError()) {
-        return false;
-      }
-      ResultValueIsNotVoid value = PromiseStaticChecker::notVoid(e.expr->type, fn);
-      if (value.isErr()) {
-        this->state.getDiagnostics().error(e.expr->loc(), value.error().message);
-        return false;
-      }
-      ResultPlainValueType plain = PromiseStaticChecker::plainValue(e.expr->type, fn);
-      if (plain.isErr()) {
-        this->state.getDiagnostics().error(e.expr->loc(), plain.error().message);
-        return false;
-      }
-      if (!types.empty() && types.front() != e.expr->type) {
-        same = false;
-      }
-      types.push_back(e.expr->type);
-    }
-    const Type *common = types.front();
-    for (const Type *t : types) {
-      if (common) {
-        common = TypeRelations::unify(common, t);
-      }
-    }
-    if (!same && common && !common->isError()) {
-      for (ArrayLitExpr::Element &e : lit->elements) {
-        e.expr = this->typeRelations->convert(e.expr, common);
-      }
-      types.assign(types.size(), common);
-      same = true;
-    }
-    if (same) {
-      lit->type = Type::array(types.front());
-      element = PromiseStaticChecker::awaited(types.front());
-      return true;
-    }
-    lit->type = Type::tuple(types);
-    for (const Type *t : types) {
-      tuple.push_back(PromiseStaticChecker::awaited(t));
-    }
+    lit->type = Type::array(Type::promise(typed.value()));
+    element = typed.value();
     return true;
   }
+  std::vector<const Type *> types;
+  if (!this->literalPromiseTypes(lit, wantedElement, fn, types)) {
+    return false;
+  }
+  auto sameAsFirst = [&](const Type *type) { return type == types.front(); };
+  bool same = llvm::all_of(types, sameAsFirst);
+  const Type *common = PromiseStaticChecker::unifiedType(types);
+  if (!same && common != nullptr && !common->isError()) {
+    for (ArrayLitExpr::Element &item : lit->elements) {
+      item.expr = this->typeRelations->convert(item.expr, common);
+    }
+    types.assign(types.size(), common);
+    same = true;
+  }
+  if (same) {
+    lit->type = Type::array(types.front());
+    element = PromiseStaticChecker::awaited(types.front());
+    return true;
+  }
+  lit->type = Type::tuple(types);
+  for (const Type *type : types) {
+    tuple.push_back(PromiseStaticChecker::awaited(type));
+  }
+
+  return true;
+}
+
+bool PromiseStaticChecker::literalPromiseTypes(ArrayLitExpr *lit, const Type *wantedElement,
+                                               llvm::StringRef fn,
+                                               std::vector<const Type *> &types) {
+  for (ArrayLitExpr::Element &item : lit->elements) {
+    bool shaped = wantedElement != nullptr && Destination::literalShaped(item.expr);
+    item.expr = this->exprChecker->checkExpr(item.expr, shaped ? wantedElement : nullptr);
+    if (item.expr->type->isError()) {
+      return false;
+    }
+    ResultValueIsNotVoid value = PromiseStaticChecker::notVoid(item.expr->type, fn);
+    if (value.isErr()) {
+      this->state.getDiagnostics().error(item.expr->loc(), value.error().message);
+      return false;
+    }
+    ResultPlainValueType plain = PromiseStaticChecker::plainValue(item.expr->type, fn);
+    if (plain.isErr()) {
+      this->state.getDiagnostics().error(item.expr->loc(), plain.error().message);
+      return false;
+    }
+    types.push_back(item.expr->type);
+  }
+
+  return true;
+}
+
+const Type *PromiseStaticChecker::unifiedType(const std::vector<const Type *> &types) {
+  const Type *common = types.front();
+  for (const Type *type : types) {
+    if (common != nullptr) {
+      common = TypeRelations::unify(common, type);
+    }
+  }
+
+  return common;
+}
+
+bool PromiseStaticChecker::checkValuePromiseList(Expr *&arg, const Type *&element,
+                                                 std::vector<const Type *> &tuple,
+                                                 llvm::StringRef fn) {
   arg = this->exprChecker->checkExpr(arg);
   const Type *type = arg->type;
   if (type->isError()) {
@@ -175,13 +209,13 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
     element = PromiseStaticChecker::awaited(type->inner());
     return true;
   }
-  for (const Field &f : type->fields()) {
-    ResultPlainValueType plain = PromiseStaticChecker::plainValue(f.type, fn);
+  for (const Field &field : type->fields()) {
+    ResultPlainValueType plain = PromiseStaticChecker::plainValue(field.type, fn);
     if (plain.isErr()) {
       this->state.getDiagnostics().error(arg->loc(), plain.error().message);
       return false;
     }
-    tuple.push_back(PromiseStaticChecker::awaited(f.type));
+    tuple.push_back(PromiseStaticChecker::awaited(field.type));
   }
 
   return true;
@@ -267,7 +301,6 @@ PromiseStaticChecker::allValues(llvm::ArrayRef<const Type *> tuple) {
 
 Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *member,
                                                const Type *expected) {
-  llvm::StringRef name = member->name;
   this->state.getInventoryStore().markUsesAsync();
   call->type = Type::error();
   if (this->callChecker->rejectSpread(call)) {
@@ -278,153 +311,195 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     this->state.getDiagnostics().error(member->loc(), plain.error().message);
     member->typeArgs.clear();
   }
-  const Type *wanted = expected && expected->nonOptional()->isPromise()
-                           ? expected->nonOptional()->promised()
-                           : nullptr;
-  if (wanted && wanted->isNever()) {
-    wanted = nullptr;
-  }
-  std::string fn = "Promise." + name.str();
-
-  if (name == "resolve") {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), arity.error().message);
-      return call;
-    }
-    call->target = BuiltinCall{.builtin = Builtin::PromiseResolve};
-    if (call->args.empty()) {
-      call->type = Type::promise(Type::voidTy());
-      return call;
-    }
-    Expr *&arg = call->args[0];
-    arg = this->exprChecker->checkExpr(arg, wanted && !isa<UndefinedExpr>(arg) ? wanted : nullptr);
-    const Type *type = arg->type;
-    if (type->isError()) {
-      return call;
-    }
-    if (type->isPromise()) {
-      call->type = type;
-      return call;
-    }
-    if (type->isUndefined()) {
-      call->type = Type::promise(Type::voidTy());
-      return call;
-    }
-    ResultValueIsNotVoid value = PromiseStaticChecker::notVoid(type, fn);
-    if (value.isErr()) {
-      this->state.getDiagnostics().error(arg->loc(), value.error().message);
-      return call;
-    }
-    call->type = Type::promise(type);
-    return call;
-  }
-  if (name == "reject" || name == "allSettled" || name == "any") {
-    std::string message = name == "reject"       ? ErrorTextNoReject::rejected()
-                          : name == "allSettled" ? ErrorTextNoReject::settled()
-                                                 : ErrorTextNoReject::any();
+  const Type *wanted = PromiseStaticChecker::wantedValue(expected);
+  std::string fn = "Promise." + member->name.str();
+  std::optional<PromiseStatic> method = PromiseStaticTable::find(member->name);
+  if (!method.has_value()) {
+    std::string message = ErrorTextPromiseStatic::unknown(member->name);
     this->state.getDiagnostics().error(member->loc(), message);
+    this->argumentChecker->checkArgsLoosely(call);
+    return call;
+  }
 
-    return this->resultChecker->markCallFailed(call);
+  switch (*method) {
+    case PromiseStatic::RESOLVE:
+      return this->checkResolve(call, member, wanted, fn);
+    case PromiseStatic::REJECT:
+      return this->reportNoReject(call, member, ErrorTextNoReject::rejected());
+    case PromiseStatic::ALL_SETTLED:
+      return this->reportNoReject(call, member, ErrorTextNoReject::settled());
+    case PromiseStatic::ANY:
+      return this->reportNoReject(call, member, ErrorTextNoReject::any());
+    case PromiseStatic::WITH_RESOLVERS:
+      return this->checkWithResolvers(call, member, expected);
+    case PromiseStatic::ALL:
+      return this->checkCombinator(call, member, wanted, fn, Builtin::PromiseAll);
+    case PromiseStatic::RACE:
+      return this->checkCombinator(call, member, wanted, fn, Builtin::PromiseRace);
   }
-  if (name == "withResolvers") {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), arity.error().message);
-      return call;
-    }
-    call->target = BuiltinCall{.builtin = Builtin::PromiseWithResolvers};
-    ResultOneTypeArgOnly single = PromiseStaticChecker::resolverTypeArgs(member);
-    if (single.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), single.error().message);
-      return call;
-    }
-    const Type *value = nullptr;
-    if (member->typeArgs.size() == 1) {
-      value =
-          PromiseStaticChecker::awaited(this->typeResolver->resolveType(member->typeArgs[0], true));
-    } else if (expected && expected->isObject()) {
-      if (const Field *promise = expected->field("promise");
-          promise && promise->type->isPromise()) {
-        value = promise->type->promised();
-      }
-    }
-    member->typeArgs.clear();
-    ResultValueTypeKnown known = PromiseStaticChecker::resolverValue(value);
-    if (known.isErr() &&
-        known.error().code != PromiseStaticCheckerResolverValueErrorCode::ALREADY_REPORTED) {
-      this->state.getDiagnostics().error(member->loc(), known.error().message);
-    }
-    if (known.isErr()) {
-      return call;
-    }
-    call->type = Type::object({{"promise", Type::promise(value), false},
-                               {"resolve", PromiseChecker::resolverType(value), false}});
-    return call;
-  }
-  static const std::pair<llvm::StringLiteral, Builtin> lists[] = {{"all", Builtin::PromiseAll},
-                                                                  {"race", Builtin::PromiseRace}};
-  for (const auto &[listName, builtin] : lists) {
-    if (name != listName) {
-      continue;
-    }
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), arity.error().message);
-      return call;
-    }
-    call->target = BuiltinCall{.builtin = builtin};
-    const Type *wantedElement = nullptr;
-    if (wanted && builtin == Builtin::PromiseAll && wanted->isArray()) {
-      wantedElement = wanted->inner();
-    } else if (wanted && builtin == Builtin::PromiseRace) {
-      wantedElement = wanted;
-    }
-    const Type *element = nullptr;
-    std::vector<const Type *> tuple;
-    if (!this->checkPromiseList(call->args[0], wantedElement, element, tuple, fn)) {
-      return call;
-    }
-    if (!tuple.empty() && builtin == Builtin::PromiseRace) {
-      element = tuple.front();
-      for (const Type *t : tuple) {
-        ResultRaceTypeJoined joined = PromiseStaticChecker::raceJoin(element, t, fn);
-        if (joined.isErr()) {
-          this->state.getDiagnostics().error(call->args[0]->loc(), joined.error().message);
-          return call;
-        }
-        element = joined.value();
-      }
-    }
-    if (element && element->isNever()) {
-      element = wantedElement ? wantedElement : Type::voidTy();
-    }
-    switch (builtin) {
-    case Builtin::PromiseAll:
-      if (!tuple.empty()) {
-        ResultTupleHasValues values = PromiseStaticChecker::allValues(tuple);
-        if (values.isErr()) {
-          this->state.getDiagnostics().error(call->args[0]->loc(), values.error().message);
-          return call;
-        }
-        call->type = Type::promise(values.value());
-      } else if (element->isVoid()) {
-        call->type = Type::promise(Type::voidTy());
-      } else {
-        call->type = Type::promise(Type::array(element));
-      }
-      break;
-    default:
-      call->type = Type::promise(element);
-      break;
-    }
-    return call;
-  }
-  std::string message = ErrorTextPromiseStatic::unknown(name);
-  this->state.getDiagnostics().error(member->loc(), message);
-  this->argumentChecker->checkArgsLoosely(call);
 
   return call;
 }
 
+const Type *PromiseStaticChecker::wantedValue(const Type *expected) {
+  if (expected == nullptr || !expected->nonOptional()->isPromise()) {
+    return nullptr;
+  }
+  const Type *wanted = expected->nonOptional()->promised();
+
+  return wanted->isNever() ? nullptr : wanted;
+}
+
+Expr *PromiseStaticChecker::reportNoReject(CallExpr *call, MemberExpr *member,
+                                           const std::string &message) {
+  this->state.getDiagnostics().error(member->loc(), message);
+
+  return this->resultChecker->markCallFailed(call);
+}
+
+Expr *PromiseStaticChecker::checkResolve(CallExpr *call, MemberExpr *member, const Type *wanted,
+                                         const std::string &fn) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+    return call;
+  }
+  call->target = BuiltinCall{.builtin = Builtin::PromiseResolve};
+  if (call->args.empty()) {
+    call->type = Type::promise(Type::voidTy());
+    return call;
+  }
+  Expr *&arg = call->args[0];
+  const Type *hint = wanted != nullptr && !isa<UndefinedExpr>(arg) ? wanted : nullptr;
+  arg = this->exprChecker->checkExpr(arg, hint);
+  const Type *type = arg->type;
+  if (type->isError()) {
+    return call;
+  }
+  if (type->isPromise()) {
+    call->type = type;
+    return call;
+  }
+  if (type->isUndefined()) {
+    call->type = Type::promise(Type::voidTy());
+    return call;
+  }
+  ResultValueIsNotVoid value = PromiseStaticChecker::notVoid(type, fn);
+  if (value.isErr()) {
+    this->state.getDiagnostics().error(arg->loc(), value.error().message);
+    return call;
+  }
+  call->type = Type::promise(type);
+
+  return call;
+}
+
+Expr *PromiseStaticChecker::checkWithResolvers(CallExpr *call, MemberExpr *member,
+                                               const Type *expected) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+    return call;
+  }
+  call->target = BuiltinCall{.builtin = Builtin::PromiseWithResolvers};
+  ResultOneTypeArgOnly single = PromiseStaticChecker::resolverTypeArgs(member);
+  if (single.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), single.error().message);
+    return call;
+  }
+  const Type *value = this->resolverValueType(member, expected);
+  member->typeArgs.clear();
+  ResultValueTypeKnown known = PromiseStaticChecker::resolverValue(value);
+  bool shown = known.isErr() &&
+               known.error().code != PromiseStaticCheckerResolverValueErrorCode::ALREADY_REPORTED;
+  if (shown) {
+    this->state.getDiagnostics().error(member->loc(), known.error().message);
+  }
+  if (known.isErr()) {
+    return call;
+  }
+  call->type = Type::object({{"promise", Type::promise(value), false},
+                             {"resolve", PromiseChecker::resolverType(value), false}});
+
+  return call;
+}
+
+const Type *PromiseStaticChecker::resolverValueType(const MemberExpr *member,
+                                                    const Type *expected) {
+  if (member->typeArgs.size() == 1) {
+    const Type *written = this->typeResolver->resolveType(member->typeArgs[0], true);
+    return PromiseStaticChecker::awaited(written);
+  }
+  if (expected == nullptr || !expected->isObject()) {
+    return nullptr;
+  }
+  const Field *promise = expected->field("promise");
+  if (promise == nullptr || !promise->type->isPromise()) {
+    return nullptr;
+  }
+
+  return promise->type->promised();
+}
+
+Expr *PromiseStaticChecker::checkCombinator(CallExpr *call, MemberExpr *member, const Type *wanted,
+                                            const std::string &fn, Builtin builtin) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+    return call;
+  }
+  call->target = BuiltinCall{.builtin = builtin};
+  bool race = builtin == Builtin::PromiseRace;
+  const Type *wantedElement = nullptr;
+  if (wanted != nullptr && !race && wanted->isArray()) {
+    wantedElement = wanted->inner();
+  } else if (wanted != nullptr && race) {
+    wantedElement = wanted;
+  }
+  const Type *element = nullptr;
+  std::vector<const Type *> tuple;
+  if (!this->checkPromiseList(call->args[0], wantedElement, element, tuple, fn)) {
+    return call;
+  }
+  if (!tuple.empty() && race) {
+    element = tuple.front();
+    for (const Type *part : tuple) {
+      ResultRaceTypeJoined joined = PromiseStaticChecker::raceJoin(element, part, fn);
+      if (joined.isErr()) {
+        this->state.getDiagnostics().error(call->args[0]->loc(), joined.error().message);
+        return call;
+      }
+      element = joined.value();
+    }
+  }
+  if (element != nullptr && element->isNever()) {
+    element = wantedElement != nullptr ? wantedElement : Type::voidTy();
+  }
+  if (race) {
+    call->type = Type::promise(element);
+    return call;
+  }
+
+  return this->typeAllCall(call, element, tuple);
+}
+
+Expr *PromiseStaticChecker::typeAllCall(CallExpr *call, const Type *element,
+                                        const std::vector<const Type *> &tuple) {
+  if (!tuple.empty()) {
+    ResultTupleHasValues values = PromiseStaticChecker::allValues(tuple);
+    if (values.isErr()) {
+      this->state.getDiagnostics().error(call->args[0]->loc(), values.error().message);
+      return call;
+    }
+    call->type = Type::promise(values.value());
+    return call;
+  }
+  if (element->isVoid()) {
+    call->type = Type::promise(Type::voidTy());
+    return call;
+  }
+  call->type = Type::promise(Type::array(element));
+
+  return call;
+}
 }

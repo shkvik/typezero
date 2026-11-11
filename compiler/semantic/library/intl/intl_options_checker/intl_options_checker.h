@@ -37,6 +37,43 @@ private:
   static const Expr *unconverted(const Expr *expr);
   static bool isStringLike(const Type *type);
 
+  struct IntlOptionsRun {
+    const Type *type = nullptr;
+    const ObjectLitExpr *literal = nullptr;
+    Expr *options = nullptr;
+    IntlKind kind = IntlKind::None;
+    llvm::StringRef what;
+    const IntlService *service = nullptr;
+    bool ok = true;
+  };
+
+  static Expr *valueOf(const IntlOptionsRun &run, llvm::StringRef name);
+  static std::optional<std::string> textOf(const IntlOptionsRun &run, llvm::StringRef name);
+  static std::optional<double> constantOf(const IntlOptionsRun &run, llvm::StringRef name);
+  static const Expr *valueExpr(const IntlOptionsRun &run, llvm::StringRef name);
+  void reportOption(IntlOptionsRun &run, llvm::StringRef name, const std::string &message);
+  static const IntlOption *findOption(const IntlService *service, llvm::StringRef name);
+  void walkOptionField(IntlOptionsRun &run, const Field &field);
+  static bool optionKindFits(char kind, const Type *value);
+  static bool isBooleanLike(const Type *t);
+  static bool isNumberLike(const Type *t);
+  static bool allNumberLike(llvm::ArrayRef<const Type *> members);
+  static bool allTextOrBoolean(llvm::ArrayRef<const Type *> members);
+  void walkOptionValues(IntlOptionsRun &run, const Field &field, const IntlOption &found,
+                        const Type *value);
+  static const std::string *wrongText(const std::vector<std::string> &texts,
+                                      const IntlOption &found);
+  void walkOptionTexts(IntlOptionsRun &run);
+  void walkStyleOption(IntlOptionsRun &run);
+  void walkDigitRanges(IntlOptionsRun &run);
+  void walkDigitRange(IntlOptionsRun &run, const char *name, int min, int max);
+  bool isNotAbove(const IntlOptionsRun &run, llvm::StringRef low, llvm::StringRef high);
+  void walkDigitPairs(IntlOptionsRun &run);
+  static bool isIncrement(double value);
+  static bool allIncrements(const Type *t);
+  void walkRoundingIncrement(IntlOptionsRun &run);
+  void walkIncrementDigits(IntlOptionsRun &run);
+
   SemanticState &state;
   ByteProofs *byteProofs = nullptr;
   ExprChecker *exprChecker = nullptr;

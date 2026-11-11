@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/objects/dict_checker/dict_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -49,6 +50,10 @@ private:
 
   static std::u16string toUtf16(llvm::StringRef text);
   static ResultTextKeyForRecord stringKey(const Type *type);
+  ResultDictTypeResolved resolveCollectionType(const TypeRef &ref, Collection collection);
+  static ResultDictTypeResolved recordType(const Type *key, const Type *value);
+  static bool isLiteralKeys(const Type *key);
+  static const Type *literalKeysObject(const Type *key, const Type *value);
 
   SemanticState &state;
   ExprChecker *exprChecker = nullptr;

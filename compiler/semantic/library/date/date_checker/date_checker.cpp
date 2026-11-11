@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/date/date_checker/date_checker.h"
+#include "compiler/program/library/date/date_method_table/date_method_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/binary_checker/binary_checker.h"
@@ -21,63 +22,6 @@
 using llvm::dyn_cast;
 
 namespace tz {
-
-namespace {
-
-struct DateMethod {
-  llvm::StringLiteral name;
-  Builtin builtin;
-  int field;
-  unsigned min, max;
-};
-
-const DateMethod kMethods[] = {
-    {"getTime", Builtin::DateGetTime, 0, 0, 0},
-    {"valueOf", Builtin::DateGetTime, 0, 0, 0},
-    {"getFullYear", Builtin::DateGetLocal, TZ_DATE_YEAR, 0, 0},
-    {"getMonth", Builtin::DateGetLocal, TZ_DATE_MONTH, 0, 0},
-    {"getDate", Builtin::DateGetLocal, TZ_DATE_DATE, 0, 0},
-    {"getDay", Builtin::DateGetLocal, TZ_DATE_DAY, 0, 0},
-    {"getHours", Builtin::DateGetLocal, TZ_DATE_HOURS, 0, 0},
-    {"getMinutes", Builtin::DateGetLocal, TZ_DATE_MINUTES, 0, 0},
-    {"getSeconds", Builtin::DateGetLocal, TZ_DATE_SECONDS, 0, 0},
-    {"getMilliseconds", Builtin::DateGetLocal, TZ_DATE_MS, 0, 0},
-    {"getTimezoneOffset", Builtin::DateGetLocal, TZ_DATE_OFFSET, 0, 0},
-    {"getUTCFullYear", Builtin::DateGetUTC, TZ_DATE_YEAR, 0, 0},
-    {"getUTCMonth", Builtin::DateGetUTC, TZ_DATE_MONTH, 0, 0},
-    {"getUTCDate", Builtin::DateGetUTC, TZ_DATE_DATE, 0, 0},
-    {"getUTCDay", Builtin::DateGetUTC, TZ_DATE_DAY, 0, 0},
-    {"getUTCHours", Builtin::DateGetUTC, TZ_DATE_HOURS, 0, 0},
-    {"getUTCMinutes", Builtin::DateGetUTC, TZ_DATE_MINUTES, 0, 0},
-    {"getUTCSeconds", Builtin::DateGetUTC, TZ_DATE_SECONDS, 0, 0},
-    {"getUTCMilliseconds", Builtin::DateGetUTC, TZ_DATE_MS, 0, 0},
-    {"setTime", Builtin::DateSetTime, 0, 1, 1},
-    {"setMilliseconds", Builtin::DateSetLocal, TZ_DATE_MS, 1, 1},
-    {"setSeconds", Builtin::DateSetLocal, TZ_DATE_SECONDS, 1, 2},
-    {"setMinutes", Builtin::DateSetLocal, TZ_DATE_MINUTES, 1, 3},
-    {"setHours", Builtin::DateSetLocal, TZ_DATE_HOURS, 1, 4},
-    {"setDate", Builtin::DateSetLocal, TZ_DATE_DATE, 1, 1},
-    {"setMonth", Builtin::DateSetLocal, TZ_DATE_MONTH, 1, 2},
-    {"setFullYear", Builtin::DateSetLocal, TZ_DATE_YEAR, 1, 3},
-    {"setUTCMilliseconds", Builtin::DateSetUTC, TZ_DATE_MS, 1, 1},
-    {"setUTCSeconds", Builtin::DateSetUTC, TZ_DATE_SECONDS, 1, 2},
-    {"setUTCMinutes", Builtin::DateSetUTC, TZ_DATE_MINUTES, 1, 3},
-    {"setUTCHours", Builtin::DateSetUTC, TZ_DATE_HOURS, 1, 4},
-    {"setUTCDate", Builtin::DateSetUTC, TZ_DATE_DATE, 1, 1},
-    {"setUTCMonth", Builtin::DateSetUTC, TZ_DATE_MONTH, 1, 2},
-    {"setUTCFullYear", Builtin::DateSetUTC, TZ_DATE_YEAR, 1, 3},
-    {"toISOString", Builtin::DateToISOString, 0, 0, 0},
-    {"toJSON", Builtin::DateToJSON, 0, 0, 1},
-    {"toUTCString", Builtin::DateToUTCString, 0, 0, 0},
-    {"toString", Builtin::DateToLocalString, TZ_DATE_TEXT_FULL, 0, 0},
-    {"toDateString", Builtin::DateToLocalString, TZ_DATE_TEXT_DATE, 0, 0},
-    {"toTimeString", Builtin::DateToLocalString, TZ_DATE_TEXT_TIME, 0, 0},
-    {"toLocaleString", Builtin::DateToLocale, TZ_DATE_LOCALE_ALL, 0, 2},
-    {"toLocaleDateString", Builtin::DateToLocale, TZ_DATE_LOCALE_DATE, 0, 2},
-    {"toLocaleTimeString", Builtin::DateToLocale, TZ_DATE_LOCALE_TIME, 0, 2},
-};
-
-}
 
 DateChecker::DateChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -215,67 +159,104 @@ void DateChecker::checkDateLiteral(const Expr *arg) {
 }
 
 void DateChecker::checkDateFields(std::vector<Expr *> &args, size_t first, llvm::StringRef setter) {
-  std::optional<int64_t> constant[7];
+  DateFieldValues fields{.first = first, .setter = setter, .constant = {}};
   for (size_t i = 0; i < args.size(); ++i) {
     args[i] = this->timeArg(args[i]);
     if (args[i]->type->isInteger()) {
-      constant[first + i] = this->constantFolder->intConstant(args[i]);
+      fields.constant[first + i] = this->constantFolder->intConstant(args[i]);
     }
   }
-  size_t end = first + args.size();
-  auto report = [&](size_t field, const std::string &message) {
-    this->state.getDiagnostics().error(args[field - first]->loc(), message);
-  };
-  bool shortYears = setter.empty();
-  if (std::optional<int64_t> year = constant[0]; shortYears && year && *year >= 0 && *year <= 99) {
+  this->walkYearField(args, fields);
+  std::optional<int64_t> month = this->validMonth(args, fields);
+  this->walkDayField(args, fields, month);
+  this->walkTimeFields(args, fields);
+}
+
+void DateChecker::reportField(llvm::ArrayRef<Expr *> args, const DateFieldValues &fields,
+                              size_t field, const std::string &message) {
+  this->state.getDiagnostics().error(args[field - fields.first]->loc(), message);
+}
+
+void DateChecker::walkYearField(llvm::ArrayRef<Expr *> args, const DateFieldValues &fields) {
+  std::optional<int64_t> year = fields.constant[0];
+  bool shortYear = fields.setter.empty() && year.has_value() && *year >= 0 && *year <= 99;
+  if (shortYear) {
     std::string message = ErrorTextDateFields::shortYear(*year);
-    report(0, message);
+    this->reportField(args, fields, 0, message);
   }
-  std::optional<int64_t> month = constant[1];
-  if (month && (*month < 0 || *month > 11)) {
-    std::string message =
-        *month == 12 ? ErrorTextDateFields::month12() : ErrorTextDateFields::month(*month);
-    report(1, message);
-    month.reset();
+}
+
+std::optional<int64_t> DateChecker::validMonth(llvm::ArrayRef<Expr *> args,
+                                               const DateFieldValues &fields) {
+  std::optional<int64_t> month = fields.constant[1];
+  if (!month.has_value() || (*month >= 0 && *month <= 11)) {
+    return month;
   }
-  if (std::optional<int64_t> day = constant[2]) {
-    if (*day < 0) {
-      std::string message = ErrorTextDateFields::dayBelow(*day);
-      report(2, message);
-    } else if (month) {
-      std::optional<int64_t> year = constant[0];
-      int64_t fullYear =
-          shortYears && year && *year >= 0 && *year <= 99 ? 1900 + *year : year.value_or(0);
-      int last = year          ? DateChecker::daysInMonth(fullYear, *month)
-                 : *month == 1 ? 29
-                               : DateChecker::daysInMonth(2001, *month);
-      std::optional<int64_t> known = year ? std::optional<int64_t>(fullYear) : std::nullopt;
-      if (*day > last) {
-        std::string missing = DateChecker::missingDay(known, *month, *day);
-        std::optional<int64_t> nextYear =
-            year ? std::optional<int64_t>(*month == 11 ? fullYear + 1 : fullYear) : std::nullopt;
-        int64_t next = *month == 11 ? 0 : *month + 1;
-        std::string message = setter.empty()
-                                  ? ErrorTextDateFields::lastDay(missing, *month, nextYear, next)
-                              : *month == 1 ? ErrorTextDateFields::february(missing, setter, known)
-                                            : ErrorTextDateFields::monthDays(missing, *month, last);
-        report(2, message);
-      }
-    } else if (*day > 31) {
-      std::string message = ErrorTextDateFields::dayAbove(*day);
-      report(2, message);
-    }
+  std::string message =
+      *month == 12 ? ErrorTextDateFields::month12() : ErrorTextDateFields::month(*month);
+  this->reportField(args, fields, 1, message);
+
+  return std::nullopt;
+}
+
+void DateChecker::walkDayField(llvm::ArrayRef<Expr *> args, const DateFieldValues &fields,
+                               std::optional<int64_t> month) {
+  std::optional<int64_t> day = fields.constant[2];
+  if (!day.has_value()) {
+    return;
   }
+  if (*day < 0) {
+    std::string message = ErrorTextDateFields::dayBelow(*day);
+    this->reportField(args, fields, 2, message);
+    return;
+  }
+  if (month.has_value()) {
+    this->walkDayInMonth(args, fields, *day, *month);
+    return;
+  }
+  if (*day > 31) {
+    std::string message = ErrorTextDateFields::dayAbove(*day);
+    this->reportField(args, fields, 2, message);
+  }
+}
+
+void DateChecker::walkDayInMonth(llvm::ArrayRef<Expr *> args, const DateFieldValues &fields,
+                                 int64_t day, int64_t month) {
+  llvm::StringRef setter = fields.setter;
+  std::optional<int64_t> year = fields.constant[0];
+  bool shortYear = setter.empty() && year.has_value() && *year >= 0 && *year <= 99;
+  int64_t fullYear = shortYear ? 1900 + *year : year.value_or(0);
+  int last = year.has_value() ? DateChecker::daysInMonth(fullYear, month)
+             : month == 1     ? 29
+                              : DateChecker::daysInMonth(2001, month);
+  if (day <= last) {
+    return;
+  }
+  std::optional<int64_t> known = year.has_value() ? std::optional<int64_t>(fullYear) : std::nullopt;
+  std::string missing = DateChecker::missingDay(known, month, day);
+  std::optional<int64_t> nextYear =
+      year.has_value() ? std::optional<int64_t>(month == 11 ? fullYear + 1 : fullYear)
+                       : std::nullopt;
+  int64_t next = month == 11 ? 0 : month + 1;
+  std::string message = setter.empty()
+                            ? ErrorTextDateFields::lastDay(missing, month, nextYear, next)
+                        : month == 1 ? ErrorTextDateFields::february(missing, setter, known)
+                                     : ErrorTextDateFields::monthDays(missing, month, last);
+  this->reportField(args, fields, 2, message);
+}
+
+void DateChecker::walkTimeFields(llvm::ArrayRef<Expr *> args, const DateFieldValues &fields) {
   static const struct {
     const char *what;
     int64_t max;
   } limits[] = {{"hours", 23}, {"minutes", 59}, {"seconds", 59}, {"milliseconds", 999}};
-  for (size_t i = std::max<size_t>(first, 3); i < end; ++i) {
-    std::optional<int64_t> value = constant[i];
-    if (value && (*value < 0 || *value > limits[i - 3].max)) {
+  size_t end = fields.first + args.size();
+  for (size_t i = std::max<size_t>(fields.first, 3); i < end; ++i) {
+    std::optional<int64_t> value = fields.constant[i];
+    if (value.has_value() && (*value < 0 || *value > limits[i - 3].max)) {
       std::string message =
           ErrorTextDateFields::range(*value, limits[i - 3].what, limits[i - 3].max);
-      report(i, message);
+      this->reportField(args, fields, i, message);
     }
   }
 }
@@ -412,31 +393,18 @@ Expr *DateChecker::checkDateStaticMember(MemberExpr *member) {
 }
 
 Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
-  llvm::StringRef name = member->name;
   call->type = Type::error();
-  auto loosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-
-    return call;
-  };
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  const DateMethod *method = nullptr;
-  for (const DateMethod &m : kMethods) {
-    if (m.name == name) {
-      method = &m;
-    }
-  }
-  if (!method) {
-    std::string message = name == "getYear"       ? ErrorTextDateMethod::getYear()
-                          : name == "setYear"     ? ErrorTextDateMethod::setYear()
-                          : name == "toGMTString" ? ErrorTextDateMethod::gmt()
-                                                  : ErrorTextDateMethod::noMember(name);
+  const DateMethodInfo *method = DateMethodTable::find(member->name);
+  if (method == nullptr) {
+    std::string message = DateChecker::unknownMethodMessage(member->name);
     this->state.getDiagnostics().error(member->loc(), message);
-    return loosely();
+    for (Expr *&arg : call->args) {
+      arg = this->exprChecker->checkExpr(arg);
+    }
+    return call;
   }
   ArgumentChecker::ResultArityMatches arity =
       this->argumentChecker->checkArity(call, method->min, method->max);
@@ -444,58 +412,87 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
-  auto field = [&](int value) {
-    auto *lit = this->state.getAst().make<IntLitExpr>(member->loc(), uint64_t(value));
-    lit->type = Type::intTy();
-
-    return lit;
-  };
   call->target = BuiltinCall{.builtin = method->builtin};
-  switch (method->builtin) {
-  case Builtin::DateGetTime:
-    call->type = Type::intTy();
-    break;
-  case Builtin::DateGetUTC:
-  case Builtin::DateGetLocal:
-    call->args.push_back(field(method->field));
-    call->type = Type::intTy();
-    break;
-  case Builtin::DateSetTime:
-    call->args[0] = this->timeArg(this->exprChecker->checkExpr(call->args[0], Type::intTy()));
-    call->type = Type::intTy();
-    break;
-  case Builtin::DateSetUTC:
-  case Builtin::DateSetLocal:
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg, Type::intTy());
-    }
-    this->checkDateFields(
-        call->args, size_t(method->field >= TZ_DATE_HOURS ? method->field - 1 : method->field),
-        name);
-    call->args.insert(call->args.begin(), field(method->field));
-    call->type = Type::intTy();
-    break;
-  case Builtin::DateToJSON:
-    if (!call->args.empty()) {
-      call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
-    }
-    call->type = Type::string();
-    break;
-  case Builtin::DateToLocalString:
-    call->args.push_back(field(method->field));
-    call->type = Type::string();
-    break;
-  case Builtin::DateToLocale:
-    if (!this->dateFormatChecker->checkLocaleArgs(call->args, method->field)) {
-      return call;
-    }
-    call->args.insert(call->args.begin(), field(method->field));
-    call->type = Type::string();
-    break;
-  default:
-    call->type = Type::string();
-    break;
+
+  return this->checkDateMethodForm(call, member, *method);
+}
+
+std::string DateChecker::unknownMethodMessage(llvm::StringRef name) {
+  if (name == "getYear") {
+    return ErrorTextDateMethod::getYear();
   }
+  if (name == "setYear") {
+    return ErrorTextDateMethod::setYear();
+  }
+  if (name == "toGMTString") {
+    return ErrorTextDateMethod::gmt();
+  }
+
+  return ErrorTextDateMethod::noMember(name);
+}
+
+Expr *DateChecker::checkDateMethodForm(CallExpr *call, MemberExpr *member,
+                                       const DateMethodInfo &method) {
+  switch (method.form) {
+    case DateMethodForm::GET_TIME:
+      call->type = Type::intTy();
+      return call;
+    case DateMethodForm::GET_FIELD:
+      call->args.push_back(this->fieldLiteral(member, method.field));
+      call->type = Type::intTy();
+      return call;
+    case DateMethodForm::SET_TIME:
+      call->args[0] = this->timeArg(this->exprChecker->checkExpr(call->args[0], Type::intTy()));
+      call->type = Type::intTy();
+      return call;
+    case DateMethodForm::SET_FIELDS:
+      return this->checkDateSetter(call, member, method);
+    case DateMethodForm::TO_JSON:
+      if (!call->args.empty()) {
+        call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
+      }
+      call->type = Type::string();
+      return call;
+    case DateMethodForm::TO_TEXT:
+      call->type = Type::string();
+      return call;
+    case DateMethodForm::TO_FIELD_TEXT:
+      call->args.push_back(this->fieldLiteral(member, method.field));
+      call->type = Type::string();
+      return call;
+    case DateMethodForm::TO_LOCALE:
+      return this->checkToLocale(call, member, method);
+  }
+
+  return call;
+}
+
+Expr *DateChecker::fieldLiteral(const MemberExpr *member, int value) {
+  auto *lit = this->state.getAst().make<IntLitExpr>(member->loc(), uint64_t(value));
+  lit->type = Type::intTy();
+
+  return lit;
+}
+
+Expr *DateChecker::checkDateSetter(CallExpr *call, MemberExpr *member,
+                                   const DateMethodInfo &method) {
+  for (Expr *&arg : call->args) {
+    arg = this->exprChecker->checkExpr(arg, Type::intTy());
+  }
+  size_t first = size_t(method.field >= TZ_DATE_HOURS ? method.field - 1 : method.field);
+  this->checkDateFields(call->args, first, member->name);
+  call->args.insert(call->args.begin(), this->fieldLiteral(member, method.field));
+  call->type = Type::intTy();
+
+  return call;
+}
+
+Expr *DateChecker::checkToLocale(CallExpr *call, MemberExpr *member, const DateMethodInfo &method) {
+  if (!this->dateFormatChecker->checkLocaleArgs(call->args, method.field)) {
+    return call;
+  }
+  call->args.insert(call->args.begin(), this->fieldLiteral(member, method.field));
+  call->type = Type::string();
 
   return call;
 }
@@ -503,7 +500,7 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
 Expr *DateChecker::checkDateMember(MemberExpr *member) {
   member->type = Type::error();
   llvm::StringRef name = member->name;
-  bool method = llvm::any_of(kMethods, [&](const DateMethod &m) { return m.name == name; });
+  bool method = DateMethodTable::find(name) != nullptr;
   std::string message = method              ? ErrorTextDateMethod::onlyCalled(name)
                         : name == "getYear" ? ErrorTextDateMethod::getYearVal()
                                             : ErrorTextDateMethod::noMember(name);

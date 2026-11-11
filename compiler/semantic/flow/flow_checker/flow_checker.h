@@ -37,6 +37,21 @@ private:
   static size_t countLocalUses(const PlacedNodes &nodes, llvm::StringRef name);
   static void addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual);
 
+  using NarrowedVar = std::pair<const VarSymbol *, const Type *>;
+
+  static void joinDefined(const Flow &a, const Flow &b, Flow &result);
+  static const NarrowedVar *narrowedIn(const Flow &flow, const VarSymbol *var);
+  static std::optional<NarrowedVar> narrowedOnBoth(const NarrowedVar &narrowed, const Flow &b);
+  static void widenWithUndefined(const Flow &empty, const Flow &other, Flow &result);
+  static void joinMarks(const Flow &a, const Flow &b, Flow &result);
+  static bool hasPending(llvm::ArrayRef<std::pair<EmitterKey, llvm::SMLoc>> pending,
+                         const EmitterKey &key);
+  void resetAssignedFlow(const VarSymbol *var, const Expr *value);
+  void rememberResultState(const VarSymbol *var, const Type *given);
+  void assignedInteger(const VarSymbol *var, const Expr *value);
+  void addMinMaxBounds(const VarSymbol *var, const Expr *value);
+  void assignedLength(const VarSymbol *var, const Expr *value);
+
   SemanticState &state;
   ByteProofs *byteProofs = nullptr;
   IndexProofs *indexProofs = nullptr;

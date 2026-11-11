@@ -43,6 +43,9 @@ private:
   using ResultMethodsOfObjects =
       Result<std::vector<FunctionDecl *>, ClassMemberCheckerInstanceMethodsError>;
 
+  Expr *checkFieldMember(MemberExpr *member, const ClassField *field, const ClassDecl *owner,
+                         bool viaThis);
+  Expr *checkMethodMember(MemberExpr *member, ClassDecl *cls, const Type *expected, bool viaThis);
   static const char *accessWord(Access access);
   static bool sameClass(const ClassDecl *a, const ClassDecl *b);
   ResultStoredFieldValue statsDate(ClassDecl *cls, MemberExpr *member);

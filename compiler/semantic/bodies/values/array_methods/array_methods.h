@@ -30,6 +30,9 @@ private:
 
   static const VarSymbol *arrayVariable(const Expr *object);
   static ResultSortableElement sortable(const Type *element);
+  static std::optional<ArrayMethodsSortableErrorCode> sortProblem(const Type *element);
+  static bool allTextual(llvm::ArrayRef<const Type *> members);
+  static std::string sortMessage(ArrayMethodsSortableErrorCode code, const Type *element);
   static ResultElementsAreText textElements(const Type *element, llvm::StringRef name);
 
   SemanticState &state;

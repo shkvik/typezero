@@ -37,32 +37,15 @@ bool ResultMethodChecker::givesType(const Type *half) {
 
 Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
                                              const Type *expected) {
-  const Type *type = member->object->type;
-  const Type *value = type->okType();
-  const Type *error = type->errType();
-  if (auto *conv = dyn_cast<CastExpr>(member->object);
-      conv && conv->isImplicit() && conv->operand->type->isResult()) {
-    if (value->isNever()) {
-      value = conv->operand->type->okType();
-    }
-    if (error->isNever()) {
-      error = conv->operand->type->errType();
-    }
-  }
-  llvm::StringRef name = member->name;
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-  };
+  ResultCall run = ResultMethodChecker::resultCall(call, member);
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  const ResultMethodInfo *method = ResultMethodTable::find(name);
+  const ResultMethodInfo *method = ResultMethodTable::find(run.name);
   if (method == nullptr) {
-    std::string message = ErrorTextResultMethod::noMember(name, type->name());
+    std::string message = ErrorTextResultMethod::noMember(run.name, run.type->name());
     this->state.getDiagnostics().error(member->loc(), message);
-    checkArgsLoosely();
+    this->walkArgsPlainly(call);
     return call;
   }
   int args = ResultMethodTable::countArgs(*method);
@@ -71,168 +54,219 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
-  Builtin builtin = method->builtin;
-  call->target = BuiltinCall{.builtin = builtin};
-
-  if (builtin == Builtin::ResultIsOk || builtin == Builtin::ResultIsErr) {
+  run.builtin = method->builtin;
+  call->target = BuiltinCall{.builtin = run.builtin};
+  if (run.builtin == Builtin::ResultIsOk || run.builtin == Builtin::ResultIsErr) {
     call->type = Type::boolTy();
     return call;
   }
-
-  if (builtin == Builtin::ResultUnwrapOr) {
-    Expr *&arg = call->args[0];
-    arg =
-        this->exprChecker->checkExpr(arg, ResultMethodChecker::givesType(value) ? value : nullptr);
-    const Type *other = arg->type;
-    if (other->isError()) {
-      return call;
-    }
-    const Type *result = other->isVoid() ? nullptr : LiteralTypes::unionUnify(value, other);
-    if (!result || result->isError()) {
-      std::string message = ErrorTextResultMethod::unwrapOr(value->name(), other->name());
-      this->state.getDiagnostics().error(arg->loc(), message);
-      return call;
-    }
-    arg = this->typeRelations->convert(arg, result);
-    call->type = result;
-    return call;
+  if (run.builtin == Builtin::ResultUnwrapOr) {
+    return this->checkUnwrapOr(run);
   }
-
-  bool onError = builtin == Builtin::ResultMapErr || builtin == Builtin::ResultOrElse ||
-                 builtin == Builtin::ResultOrTee;
-  const Type *wanted = expected ? expected->nonOptional() : nullptr;
-  if (wanted && wanted->isError()) {
-    wanted = nullptr;
+  if (run.builtin == Builtin::ResultMatch) {
+    return this->checkResultMatch(run, expected);
   }
-  auto check = [&](Expr *&arg, const Type *half, const Type *ret) -> const Type * {
-    if (half->isNever() && !isa<FunctionExpr>(arg)) {
-      arg = this->exprChecker->checkExpr(arg);
-      if (arg->type->isFunction()) {
-        return arg->type->ret();
-      }
-      if (!arg->type->isError()) {
-        std::string message = ErrorTextResultMethod::function(name, arg->type->name());
-        this->state.getDiagnostics().error(arg->loc(), message);
-      }
-      return nullptr;
-    }
-    Signature sig;
-    sig.pad = false;
-    sig.params = {ResultMethodChecker::halfParam(half)};
-    sig.voidResult = builtin == Builtin::ResultAndTee || builtin == Builtin::ResultOrTee;
-    if (isa<FunctionExpr>(arg) && !sig.voidResult) {
-      sig.ret = ret;
-    }
-    arg = this->callbackChecker->checkFunctionArg(arg, sig, 1, name);
-
-    return arg->type->isFunction() ? arg->type->ret() : nullptr;
-  };
-  const Type *wantedResult = wanted && wanted->isResult() ? wanted : nullptr;
-  const Type *ret = nullptr;
-  switch (builtin) {
-  case Builtin::ResultMap:
-  case Builtin::ResultMapErr: {
-    const Type *half =
-        wantedResult ? (onError ? wantedResult->errType() : wantedResult->okType()) : nullptr;
-    ret = check(call->args[0], onError ? error : value,
-                half && (half->holdsObjects() || half->holdsResults()) ? half : nullptr);
-    break;
-  }
-  case Builtin::ResultAndThen:
-  case Builtin::ResultOrElse:
-    ret = check(call->args[0], onError ? error : value, wantedResult);
-    break;
-  case Builtin::ResultMatch: {
-    const Type *both = wanted && !wanted->isVoid() ? wanted : nullptr;
-    const Type *a = check(call->args[0], value, both);
-    const Type *b = check(call->args[1], error, both);
-    this->flowChecker->calledFunction();
-    if (!a || !b) {
-      return call;
-    }
-    if (a->isVoid() && b->isVoid()) {
-      call->type = a;
-      return call;
-    }
-    const Type *result = a->isVoid() || b->isVoid() ? nullptr : LiteralTypes::unionUnify(a, b);
-    if (!result || result->isError()) {
-      std::string message = ErrorTextResultMethod::match(a->name(), b->name());
-      this->state.getDiagnostics().error(member->loc(), message);
-      return call;
-    }
-    call->type = result;
-    return call;
-  }
-  default:
-    ret = check(call->args[0], onError ? error : value, nullptr);
-    break;
-  }
+  const Type *ret = this->callbackReturn(run, expected);
   this->flowChecker->calledFunction();
-  if (!ret) {
-    return call;
-  }
-
-  auto needsResult = [&]() {
-    if (ret->isResult()) {
-      return true;
-    }
-    bool andThen = builtin == Builtin::ResultAndThen;
-    std::string message = ErrorTextResultMethod::result(name, ret->name(), andThen);
-    this->state.getDiagnostics().error(call->args[0]->loc(), message);
-
-    return false;
-  };
-  auto oneError = [&](const Type *a, const Type *b) {
-    const Type *common = ResultTypes::unifyHalf(a, b);
-    if (!common) {
-      std::string message = ErrorTextResultMethod::errors(a, name, b);
-      this->state.getDiagnostics().error(call->args[0]->loc(), message);
-    }
-
-    return common;
-  };
-  switch (builtin) {
-  case Builtin::ResultMap:
-    call->type = Type::result(ret, error);
-    break;
-  case Builtin::ResultMapErr:
-    call->type = Type::result(value, ret);
-    break;
-  case Builtin::ResultAndThen:
-    if (!needsResult()) {
-      return call;
-    }
-    if (const Type *common = oneError(error, ret->errType())) {
-      call->type = Type::result(ret->okType(), common);
-    }
-    break;
-  case Builtin::ResultAndThrough:
-    if (!needsResult()) {
-      return call;
-    }
-    if (const Type *common = oneError(error, ret->errType())) {
-      call->type = Type::result(value, common);
-    }
-    break;
-  case Builtin::ResultOrElse: {
-    if (!needsResult()) {
-      return call;
-    }
-    const Type *common = ResultTypes::unifyHalf(value, ret->okType());
-    if (!common) {
-      std::string message = ErrorTextResultMethod::values(value, ret->okType());
-      this->state.getDiagnostics().error(call->args[0]->loc(), message);
-      return call;
-    }
-    call->type = Type::result(common, ret->errType());
-    break;
-  }
-  default:
-    call->type = type;
-    break;
+  if (ret != nullptr) {
+    this->typeResultCall(run, ret);
   }
 
   return call;
 }
 
+ResultMethodChecker::ResultCall ResultMethodChecker::resultCall(CallExpr *call,
+                                                                MemberExpr *member) {
+  const Type *type = member->object->type;
+  const Type *value = type->okType();
+  const Type *error = type->errType();
+  auto *conv = dyn_cast<CastExpr>(member->object);
+  if (conv != nullptr && conv->isImplicit() && conv->operand->type->isResult()) {
+    if (value->isNever()) {
+      value = conv->operand->type->okType();
+    }
+    if (error->isNever()) {
+      error = conv->operand->type->errType();
+    }
+  }
+
+  return ResultCall{
+      .call = call,
+      .member = member,
+      .type = type,
+      .value = value,
+      .error = error,
+      .builtin = Builtin::None,
+      .name = member->name,
+  };
+}
+
+void ResultMethodChecker::walkArgsPlainly(CallExpr *call) {
+  for (Expr *&arg : call->args) {
+    arg = this->exprChecker->checkExpr(arg);
+  }
+}
+
+const Type *ResultMethodChecker::wantedType(const Type *expected) {
+  const Type *wanted = expected != nullptr ? expected->nonOptional() : nullptr;
+  if (wanted != nullptr && wanted->isError()) {
+    return nullptr;
+  }
+
+  return wanted;
+}
+
+Expr *ResultMethodChecker::checkUnwrapOr(const ResultCall &run) {
+  CallExpr *call = run.call;
+  Expr *&arg = call->args[0];
+  const Type *hint = ResultMethodChecker::givesType(run.value) ? run.value : nullptr;
+  arg = this->exprChecker->checkExpr(arg, hint);
+  const Type *other = arg->type;
+  if (other->isError()) {
+    return call;
+  }
+  const Type *result = other->isVoid() ? nullptr : LiteralTypes::unionUnify(run.value, other);
+  if (result == nullptr || result->isError()) {
+    std::string message = ErrorTextResultMethod::unwrapOr(run.value->name(), other->name());
+    this->state.getDiagnostics().error(arg->loc(), message);
+    return call;
+  }
+  arg = this->typeRelations->convert(arg, result);
+  call->type = result;
+
+  return call;
+}
+
+const Type *ResultMethodChecker::halfCallbackReturn(const ResultCall &run, Expr *&arg,
+                                                    const Type *half, const Type *ret) {
+  if (half->isNever() && !isa<FunctionExpr>(arg)) {
+    arg = this->exprChecker->checkExpr(arg);
+    if (arg->type->isFunction()) {
+      return arg->type->ret();
+    }
+    if (!arg->type->isError()) {
+      std::string message = ErrorTextResultMethod::function(run.name, arg->type->name());
+      this->state.getDiagnostics().error(arg->loc(), message);
+    }
+    return nullptr;
+  }
+  Signature sig;
+  sig.pad = false;
+  sig.params = {ResultMethodChecker::halfParam(half)};
+  sig.voidResult = run.builtin == Builtin::ResultAndTee || run.builtin == Builtin::ResultOrTee;
+  if (isa<FunctionExpr>(arg) && !sig.voidResult) {
+    sig.ret = ret;
+  }
+  arg = this->callbackChecker->checkFunctionArg(arg, sig, 1, run.name);
+
+  return arg->type->isFunction() ? arg->type->ret() : nullptr;
+}
+
+Expr *ResultMethodChecker::checkResultMatch(const ResultCall &run, const Type *expected) {
+  CallExpr *call = run.call;
+  const Type *wanted = ResultMethodChecker::wantedType(expected);
+  const Type *both = wanted != nullptr && !wanted->isVoid() ? wanted : nullptr;
+  const Type *a = this->halfCallbackReturn(run, call->args[0], run.value, both);
+  const Type *b = this->halfCallbackReturn(run, call->args[1], run.error, both);
+  this->flowChecker->calledFunction();
+  if (a == nullptr || b == nullptr) {
+    return call;
+  }
+  if (a->isVoid() && b->isVoid()) {
+    call->type = a;
+    return call;
+  }
+  const Type *result = a->isVoid() || b->isVoid() ? nullptr : LiteralTypes::unionUnify(a, b);
+  if (result == nullptr || result->isError()) {
+    std::string message = ErrorTextResultMethod::match(a->name(), b->name());
+    this->state.getDiagnostics().error(run.member->loc(), message);
+    return call;
+  }
+  call->type = result;
+
+  return call;
+}
+
+const Type *ResultMethodChecker::callbackReturn(const ResultCall &run, const Type *expected) {
+  Builtin builtin = run.builtin;
+  bool onError = builtin == Builtin::ResultMapErr || builtin == Builtin::ResultOrElse ||
+                 builtin == Builtin::ResultOrTee;
+  const Type *wanted = ResultMethodChecker::wantedType(expected);
+  const Type *wantedResult = wanted != nullptr && wanted->isResult() ? wanted : nullptr;
+  const Type *half = onError ? run.error : run.value;
+  Expr *&arg = run.call->args[0];
+  if (builtin == Builtin::ResultMap || builtin == Builtin::ResultMapErr) {
+    const Type *wantedHalf = nullptr;
+    if (wantedResult != nullptr) {
+      wantedHalf = onError ? wantedResult->errType() : wantedResult->okType();
+    }
+    bool shaped =
+        wantedHalf != nullptr && (wantedHalf->holdsObjects() || wantedHalf->holdsResults());
+    return this->halfCallbackReturn(run, arg, half, shaped ? wantedHalf : nullptr);
+  }
+  if (builtin == Builtin::ResultAndThen || builtin == Builtin::ResultOrElse) {
+    return this->halfCallbackReturn(run, arg, half, wantedResult);
+  }
+
+  return this->halfCallbackReturn(run, arg, half, nullptr);
+}
+
+void ResultMethodChecker::typeResultCall(const ResultCall &run, const Type *ret) {
+  Builtin builtin = run.builtin;
+  if (builtin == Builtin::ResultMap) {
+    run.call->type = Type::result(ret, run.error);
+    return;
+  }
+  if (builtin == Builtin::ResultMapErr) {
+    run.call->type = Type::result(run.value, ret);
+    return;
+  }
+  if (builtin == Builtin::ResultAndThen || builtin == Builtin::ResultAndThrough) {
+    this->typeChainedCall(run, ret);
+    return;
+  }
+  if (builtin == Builtin::ResultOrElse) {
+    this->typeOrElseCall(run, ret);
+    return;
+  }
+  run.call->type = run.type;
+}
+
+bool ResultMethodChecker::returnsResult(const ResultCall &run, const Type *ret) {
+  if (ret->isResult()) {
+    return true;
+  }
+  bool andThen = run.builtin == Builtin::ResultAndThen;
+  std::string message = ErrorTextResultMethod::result(run.name, ret->name(), andThen);
+  this->state.getDiagnostics().error(run.call->args[0]->loc(), message);
+
+  return false;
+}
+
+void ResultMethodChecker::typeChainedCall(const ResultCall &run, const Type *ret) {
+  if (!this->returnsResult(run, ret)) {
+    return;
+  }
+  const Type *common = ResultTypes::unifyHalf(run.error, ret->errType());
+  if (common == nullptr) {
+    std::string message = ErrorTextResultMethod::errors(run.error, run.name, ret->errType());
+    this->state.getDiagnostics().error(run.call->args[0]->loc(), message);
+    return;
+  }
+  const Type *okType = run.builtin == Builtin::ResultAndThen ? ret->okType() : run.value;
+  run.call->type = Type::result(okType, common);
+}
+
+void ResultMethodChecker::typeOrElseCall(const ResultCall &run, const Type *ret) {
+  if (!this->returnsResult(run, ret)) {
+    return;
+  }
+  const Type *common = ResultTypes::unifyHalf(run.value, ret->okType());
+  if (common == nullptr) {
+    std::string message = ErrorTextResultMethod::values(run.value, ret->okType());
+    this->state.getDiagnostics().error(run.call->args[0]->loc(), message);
+    return;
+  }
+  run.call->type = Type::result(common, ret->errType());
+}
 }

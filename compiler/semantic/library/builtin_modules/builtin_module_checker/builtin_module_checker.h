@@ -50,6 +50,30 @@ private:
   Expr *moduleValue(NodeModule module, llvm::StringRef name, Expr *expr);
   ResultExportFound exportFound(NodeModule module, llvm::StringRef name,
                                 llvm::StringRef path) const;
+  static bool isProcessAlias(const NodeName &n);
+
+  struct NodeBinding {
+    llvm::StringRef alias;
+    llvm::SMLoc loc;
+    NodeName node;
+    llvm::StringRef name;
+  };
+
+  void bindNodeName(ModuleState &here, const ImportDecl &decl, const NodeBinding &binding);
+  void reportWholeImport(Module *module, const ImportDecl &decl, NodeModule which,
+                         ModuleState &here);
+  static std::vector<llvm::StringRef> wholeImportUses(Module *module, llvm::StringRef whole);
+  static std::string wholeImportMessage(const ImportDecl &decl, NodeModule which,
+                                        const std::string &names, const std::string &form);
+  void bindNamedImport(const ImportDecl &decl, const ModuleName &name, NodeModule which,
+                       ModuleState &here);
+  static NodeName importedNode(NodeModule which, llvm::StringRef name);
+  Expr *failNodeCall(CallExpr *call);
+  Expr *checkNodeNameCall(CallExpr *call, NameExpr *name, const Type *expected);
+  Expr *checkNodeMemberCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkSchedulerCall(CallExpr *call, MemberExpr *member);
+  Expr *dispatchNodeCall(CallExpr *call, const NodeName &target, llvm::SMLoc loc,
+                         const Type *expected);
 
   SemanticState &state;
   Scopes *scopes = nullptr;

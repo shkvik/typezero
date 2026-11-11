@@ -105,173 +105,220 @@ Expr *IntlMethodChecker::checkIntlNumber(Expr *arg, llvm::StringRef method) {
 }
 
 Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
-  llvm::StringRef name = member->name;
   IntlKind kind = member->object->type->intlKind();
   call->type = Type::error();
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  auto loosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-
-    return call;
-  };
-  auto done = [&](Builtin builtin, const Type *type) {
-    call->target = BuiltinCall{.builtin = builtin};
-    call->type = type;
-
-    return call;
-  };
-  std::string service = member->object->type->name().str();
-  if (name == "resolvedOptions" && kind != IntlKind::Segments) {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), arity.error().message);
-      return call;
-    }
-    return done(Builtin::IntlResolvedOptions, IntlChecker::resolvedIntlOptionsType(kind));
+  const IntlMethodInfo *found = IntlMethodTable::find(kind, member->name);
+  if (found == nullptr) {
+    std::string service = member->object->type->name().str();
+    std::string message = ErrorTextIntlMethod::noMember(member->name, service);
+    this->state.getDiagnostics().error(member->loc(), message);
+    return this->checkLoosely(call);
   }
-  switch (kind) {
-  case IntlKind::NumberFormat:
-    if (name == "format" || name == "formatToParts") {
-      ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
-      if (arity.isErr()) {
-        this->state.getDiagnostics().error(member->loc(), arity.error().message);
-        return call;
-      }
-      call->args[0] = this->checkIntlNumber(call->args[0], name);
-      return name == "format" ? done(Builtin::NfFormat, Type::string())
-                              : done(Builtin::NfFormatToParts,
-                                     Type::array(DateFormatChecker::dateFormatPartType()));
-    }
-    if (name == "formatRange" || name == "formatRangeToParts") {
-      std::string message = ErrorTextIntlMethod::range(name);
-      this->state.getDiagnostics().error(member->loc(), message);
-      return loosely();
-    }
-    break;
-  case IntlKind::Collator:
-    if (name == "compare") {
-      ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 2);
-      if (arity.isErr()) {
-        this->state.getDiagnostics().error(member->loc(), arity.error().message);
-        return call;
-      }
-      for (Expr *&arg : call->args) {
-        arg = this->argumentChecker->checkArg(arg, Type::string());
-      }
-      return done(Builtin::CollatorCompare, Type::intTy());
-    }
-    break;
-  case IntlKind::PluralRules:
-    if (name == "select") {
-      ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
-      if (arity.isErr()) {
-        this->state.getDiagnostics().error(member->loc(), arity.error().message);
-        return call;
-      }
-      call->args[0] = this->checkIntlNumber(call->args[0], name);
-      return done(Builtin::PrSelect, Type::string());
-    }
-    if (name == "selectRange") {
-      std::string message = ErrorTextIntlMethod::selectSpan();
-      this->state.getDiagnostics().error(member->loc(), message);
-      return loosely();
-    }
-    break;
-  case IntlKind::RelativeTimeFormat:
-    if (name == "format" || name == "formatToParts") {
-      ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 2);
-      if (arity.isErr()) {
-        this->state.getDiagnostics().error(member->loc(), arity.error().message);
-        return call;
-      }
-      call->args[0] = this->mathChecker->numericArg(call->args[0]);
-      if (call->args[0]->type->isNumeric()) {
-        call->args[0] = this->typeRelations->convert(call->args[0], Type::doubleTy());
-      }
-      std::optional<std::u16string> unit = IntlMethodChecker::literalText(call->args[1]);
-      call->args[1] = this->argumentChecker->checkArg(call->args[1], Type::string());
-      static const llvm::StringLiteral units[] = {
-          "year", "years", "quarter", "quarters", "month",  "months",  "week",   "weeks",
-          "day",  "days",  "hour",    "hours",    "minute", "minutes", "second", "seconds"};
-      if (unit && !llvm::is_contained(units, ToUtf8::toUtf8(*unit))) {
-        std::string message = ErrorTextIntlMethod::badUnit(ToUtf8::toUtf8(*unit));
-        this->state.getDiagnostics().error(call->args[1]->loc(), message);
-      } else if (!unit) {
-        std::optional<std::vector<std::string>> texts =
-            this->literalTypes->knownTexts(call->args[1]);
-        std::string what = ErrorTextClosedArg::unit();
-        ResultClosedText closed = IntlMethodChecker::closedArg(call->args[1], texts, units, what);
-        if (closed.isErr()) {
-          this->state.getDiagnostics().error(call->args[1]->loc(), closed.error().message);
-        }
-      }
-      return name == "format" ? done(Builtin::RtfFormat, Type::string())
-                              : done(Builtin::RtfFormatToParts,
-                                     Type::array(IntlMethodChecker::relativePartType()));
-    }
-    break;
-  case IntlKind::ListFormat:
-    if (name == "format" || name == "formatToParts") {
-      ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
-      if (arity.isErr()) {
-        this->state.getDiagnostics().error(member->loc(), arity.error().message);
-        return call;
-      }
-      call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::array(Type::string()));
-      return name == "format" ? done(Builtin::LfFormat, Type::string())
-                              : done(Builtin::LfFormatToParts,
-                                     Type::array(DateFormatChecker::dateFormatPartType()));
-    }
-    break;
-  case IntlKind::DisplayNames:
-    if (name == "of") {
-      ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
-      if (arity.isErr()) {
-        this->state.getDiagnostics().error(member->loc(), arity.error().message);
-        return call;
-      }
-      call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
-      return done(Builtin::DnOf, Type::optional(Type::string()));
-    }
-    break;
-  case IntlKind::Segmenter:
-    if (name == "segment") {
-      ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
-      if (arity.isErr()) {
-        this->state.getDiagnostics().error(member->loc(), arity.error().message);
-        return call;
-      }
-      call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
-      return done(Builtin::SegSegment, Type::intl(IntlKind::Segments));
-    }
-    break;
-  case IntlKind::Segments:
-    if (name == "containing") {
-      ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
-      if (arity.isErr()) {
-        this->state.getDiagnostics().error(member->loc(), arity.error().message);
-        return call;
-      }
-      if (!call->args.empty()) {
-        call->args[0] = this->mathChecker->numericArg(call->args[0]);
-        if (call->args[0]->type->isNumeric()) {
-          call->args[0] = this->typeRelations->convert(call->args[0], Type::doubleTy());
-        }
-      }
-      return done(Builtin::SegmentsContaining, Type::optional(IntlChecker::segmentDataType()));
-    }
-    break;
-  default:
-    break;
+
+  switch (found->method) {
+    case IntlMethod::RESOLVED_OPTIONS:
+      return this->checkResolvedOptions(call, member, kind);
+    case IntlMethod::NUMBER_FORMAT:
+      return this->checkNumberFormat(call, member, false);
+    case IntlMethod::NUMBER_FORMAT_TO_PARTS:
+      return this->checkNumberFormat(call, member, true);
+    case IntlMethod::NUMBER_FORMAT_RANGE:
+      return this->reportUnsupported(call, member, ErrorTextIntlMethod::range(member->name));
+    case IntlMethod::COLLATOR_COMPARE:
+      return this->checkCollatorCompare(call, member);
+    case IntlMethod::PLURAL_SELECT:
+      return this->checkPluralSelect(call, member);
+    case IntlMethod::PLURAL_SELECT_RANGE:
+      return this->reportUnsupported(call, member, ErrorTextIntlMethod::selectSpan());
+    case IntlMethod::RELATIVE_FORMAT:
+      return this->checkRelativeFormat(call, member, false);
+    case IntlMethod::RELATIVE_FORMAT_TO_PARTS:
+      return this->checkRelativeFormat(call, member, true);
+    case IntlMethod::LIST_FORMAT:
+      return this->checkListFormat(call, member, false);
+    case IntlMethod::LIST_FORMAT_TO_PARTS:
+      return this->checkListFormat(call, member, true);
+    case IntlMethod::DISPLAY_NAME_OF:
+      return this->checkDisplayNameOf(call, member);
+    case IntlMethod::SEGMENTER_SEGMENT:
+      return this->checkSegment(call, member);
+    case IntlMethod::SEGMENTS_CONTAINING:
+      return this->checkSegmentsContaining(call, member);
   }
-  std::string message = ErrorTextIntlMethod::noMember(name, service);
+
+  return call;
+}
+
+Expr *IntlMethodChecker::checkLoosely(CallExpr *call) {
+  for (Expr *&arg : call->args) {
+    arg = this->exprChecker->checkExpr(arg);
+  }
+
+  return call;
+}
+
+Expr *IntlMethodChecker::toBuiltinCall(CallExpr *call, Builtin builtin, const Type *type) {
+  call->target = BuiltinCall{.builtin = builtin};
+  call->type = type;
+
+  return call;
+}
+
+Expr *IntlMethodChecker::reportUnsupported(CallExpr *call, MemberExpr *member,
+                                           const std::string &message) {
   this->state.getDiagnostics().error(member->loc(), message);
 
-  return loosely();
+  return this->checkLoosely(call);
+}
+
+Expr *IntlMethodChecker::checkResolvedOptions(CallExpr *call, MemberExpr *member, IntlKind kind) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+    return call;
+  }
+  const Type *options = IntlChecker::resolvedIntlOptionsType(kind);
+
+  return IntlMethodChecker::toBuiltinCall(call, Builtin::IntlResolvedOptions, options);
+}
+
+Expr *IntlMethodChecker::checkNumberFormat(CallExpr *call, MemberExpr *member, bool toParts) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+    return call;
+  }
+  call->args[0] = this->checkIntlNumber(call->args[0], member->name);
+  if (!toParts) {
+    return IntlMethodChecker::toBuiltinCall(call, Builtin::NfFormat, Type::string());
+  }
+  const Type *parts = Type::array(DateFormatChecker::dateFormatPartType());
+
+  return IntlMethodChecker::toBuiltinCall(call, Builtin::NfFormatToParts, parts);
+}
+
+Expr *IntlMethodChecker::checkCollatorCompare(CallExpr *call, MemberExpr *member) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 2);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+    return call;
+  }
+  for (Expr *&arg : call->args) {
+    arg = this->argumentChecker->checkArg(arg, Type::string());
+  }
+
+  return IntlMethodChecker::toBuiltinCall(call, Builtin::CollatorCompare, Type::intTy());
+}
+
+Expr *IntlMethodChecker::checkPluralSelect(CallExpr *call, MemberExpr *member) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+    return call;
+  }
+  call->args[0] = this->checkIntlNumber(call->args[0], member->name);
+
+  return IntlMethodChecker::toBuiltinCall(call, Builtin::PrSelect, Type::string());
+}
+
+Expr *IntlMethodChecker::checkRelativeFormat(CallExpr *call, MemberExpr *member, bool toParts) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 2);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+    return call;
+  }
+  call->args[0] = this->mathChecker->numericArg(call->args[0]);
+  if (call->args[0]->type->isNumeric()) {
+    call->args[0] = this->typeRelations->convert(call->args[0], Type::doubleTy());
+  }
+  this->walkRelativeUnit(call);
+  if (!toParts) {
+    return IntlMethodChecker::toBuiltinCall(call, Builtin::RtfFormat, Type::string());
+  }
+  const Type *parts = Type::array(IntlMethodChecker::relativePartType());
+
+  return IntlMethodChecker::toBuiltinCall(call, Builtin::RtfFormatToParts, parts);
+}
+
+void IntlMethodChecker::walkRelativeUnit(CallExpr *call) {
+  std::optional<std::u16string> unit = IntlMethodChecker::literalText(call->args[1]);
+  call->args[1] = this->argumentChecker->checkArg(call->args[1], Type::string());
+  static const llvm::StringLiteral units[] = {
+      "year", "years", "quarter", "quarters", "month",  "months",  "week",   "weeks",
+      "day",  "days",  "hour",    "hours",    "minute", "minutes", "second", "seconds"};
+  if (unit.has_value()) {
+    std::string written = ToUtf8::toUtf8(*unit);
+    if (!llvm::is_contained(units, written)) {
+      std::string message = ErrorTextIntlMethod::badUnit(written);
+      this->state.getDiagnostics().error(call->args[1]->loc(), message);
+    }
+    return;
+  }
+  std::optional<std::vector<std::string>> texts = this->literalTypes->knownTexts(call->args[1]);
+  std::string what = ErrorTextClosedArg::unit();
+  ResultClosedText closed = IntlMethodChecker::closedArg(call->args[1], texts, units, what);
+  if (closed.isErr()) {
+    this->state.getDiagnostics().error(call->args[1]->loc(), closed.error().message);
+  }
+}
+
+Expr *IntlMethodChecker::checkListFormat(CallExpr *call, MemberExpr *member, bool toParts) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+    return call;
+  }
+  call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::array(Type::string()));
+  if (!toParts) {
+    return IntlMethodChecker::toBuiltinCall(call, Builtin::LfFormat, Type::string());
+  }
+  const Type *parts = Type::array(DateFormatChecker::dateFormatPartType());
+
+  return IntlMethodChecker::toBuiltinCall(call, Builtin::LfFormatToParts, parts);
+}
+
+Expr *IntlMethodChecker::checkDisplayNameOf(CallExpr *call, MemberExpr *member) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+    return call;
+  }
+  call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
+  const Type *name = Type::optional(Type::string());
+
+  return IntlMethodChecker::toBuiltinCall(call, Builtin::DnOf, name);
+}
+
+Expr *IntlMethodChecker::checkSegment(CallExpr *call, MemberExpr *member) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+    return call;
+  }
+  call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
+  const Type *segments = Type::intl(IntlKind::Segments);
+
+  return IntlMethodChecker::toBuiltinCall(call, Builtin::SegSegment, segments);
+}
+
+Expr *IntlMethodChecker::checkSegmentsContaining(CallExpr *call, MemberExpr *member) {
+  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+    return call;
+  }
+  if (!call->args.empty()) {
+    call->args[0] = this->mathChecker->numericArg(call->args[0]);
+    if (call->args[0]->type->isNumeric()) {
+      call->args[0] = this->typeRelations->convert(call->args[0], Type::doubleTy());
+    }
+  }
+  const Type *segment = Type::optional(IntlChecker::segmentDataType());
+
+  return IntlMethodChecker::toBuiltinCall(call, Builtin::SegmentsContaining, segment);
 }
 
 Expr *IntlMethodChecker::checkNumberLocale(CallExpr *call, MemberExpr *member) {

@@ -45,6 +45,18 @@ private:
   static NodeChildren<const Expr *> valueParts(const Expr *e);
   static std::string nodeValueText(const Expr *e, std::vector<std::string> &answers);
   static Range operateWide(BinaryOp op, const Range &a, const Range &b, bool isInt);
+  static std::optional<int64_t> exactValue(const Range &r);
+  static Range withinBounds(const Range &r, bool isInt);
+  static Range bitAndRange(const Range &a, const Range &b);
+  static Range bitOrRange(BinaryOp op, const Range &a, const Range &b);
+  static Range shiftLeftRange(const Range &a, std::optional<int64_t> count, bool isInt);
+  static Range shiftRightRange(const Range &a, std::optional<int64_t> count, bool isInt);
+  static Range unsignedShiftRange(const Range &a, std::optional<int64_t> count, bool isInt);
+  static Range remainderRange(const Range &a, std::optional<int64_t> count);
+  static Range divisionRange(const Range &a, std::optional<int64_t> count);
+  static Range arithmeticRange(BinaryOp op, const Range &a, const Range &b);
+  static Range openSumRange(BinaryOp op, const Range &a, const Range &b);
+  static Range cornersRange(BinaryOp op, const Range &a, const Range &b);
   static bool known(const Range &r);
   static int64_t allOnes(int64_t v);
   static int64_t floorShift(int64_t v, int64_t n);

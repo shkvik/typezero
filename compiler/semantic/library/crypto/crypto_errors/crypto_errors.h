@@ -18,6 +18,8 @@ public:
 
 private:
   static bool flag(llvm::ArrayRef<Expr *> args, size_t i);
+  static llvm::StringRef errorNameOf(CryptoFn fn, llvm::ArrayRef<Expr *> args);
+  static bool isDecipher(llvm::ArrayRef<Expr *> args);
 
   SemanticState &state;
   BuiltinModuleTypes *builtinModuleTypes = nullptr;

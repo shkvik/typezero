@@ -1,4 +1,6 @@
 #include "compiler/semantic/library/stream/chunk_types/chunk_types.h"
+#include "compiler/program/library/stream/stream_hook_table/stream_hook_table.h"
+#include "compiler/program/library/stream/stream_kind_table/stream_kind_table.h"
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/declare/prelude/prelude.h"
 #include "compiler/semantic/generics/alias_instantiator/alias_instantiator.h"
@@ -70,65 +72,12 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
   if (!this->isStreamHook(fn, false)) {
     return std::nullopt;
   }
-  const ClassDecl *lib = fn->cls()->parent;
-  while (lib && !lib->library()) {
-    lib = lib->parent;
-  }
-  if (!lib || !lib->generic()) {
+  const ClassDecl *lib = ChunkTypes::libraryBase(fn->cls()->parent);
+  std::optional<StreamSides> sides = lib != nullptr ? this->streamSides(lib) : std::nullopt;
+  if (!sides.has_value()) {
     return std::nullopt;
   }
-  llvm::StringRef kind = lib->generic()->name;
-  bool transform = kind == "Transform" || kind == "PassThrough";
-  const Type *readable = nullptr;
-  const Type *writable = nullptr;
-  const Type *error = this->prelude->builtinType("StreamError");
-  if (kind == "Readable" && lib->typeArgs.size() == 2) {
-    readable = lib->typeArgs[0];
-    error = lib->typeArgs[1];
-  } else if (kind == "Writable" && lib->typeArgs.size() == 2) {
-    writable = lib->typeArgs[0];
-    error = lib->typeArgs[1];
-  } else if ((kind == "Duplex" || kind == "Transform") && lib->typeArgs.size() == 3) {
-    writable = lib->typeArgs[0];
-    readable = lib->typeArgs[1];
-    error = lib->typeArgs[2];
-  } else if (kind == "PassThrough" && lib->typeArgs.size() == 2) {
-    writable = lib->typeArgs[0];
-    readable = lib->typeArgs[1];
-  } else {
-    return std::nullopt;
-  }
-  auto alias = [&](llvm::StringRef name) -> const Type * {
-    TypeAliasDecl *decl = this->state.getLibraryDeclarations().findLibraryType(name);
-
-    return decl ? decl->resolved : nullptr;
-  };
-  auto generic = [&](llvm::StringRef name, const Type *arg) -> const Type * {
-    TypeAliasDecl *decl = this->state.getLibraryDeclarations().findLibraryType(name);
-
-    return decl ? this->aliasInstantiator->instantiateAlias(decl, {arg}, fn->loc()) : nullptr;
-  };
-  const Type *callback = generic("HookCallback", error);
-  const Type *transformCallback = generic("TransformHookCallback", error);
-  llvm::StringRef name = fn->name;
-  std::vector<const Type *> params;
-  if (name == "onRead" && readable) {
-    params = {Type::intTy()};
-  } else if (name == "onFinal" || name == "onConstruct") {
-    params = {callback};
-  } else if (name == "onDestroy") {
-    params = {Type::optional(this->prelude->builtinType("StreamError")), alias("StreamCallback")};
-  } else if (name == "onFlush" && transform) {
-    params = {transformCallback};
-  } else if (name == "onTransform" && transform) {
-    params = {writable, Type::string(), transformCallback};
-  } else if (name == "onWrite" && writable) {
-    params = {writable, Type::string(), callback};
-  } else if (name == "onWritev" && writable) {
-    if (const Type *chunk = generic("WriteChunk", writable)) {
-      params = {Type::array(chunk), callback};
-    }
-  }
+  std::vector<const Type *> params = this->hookParamTypes(fn, *sides);
   if (params.empty() || llvm::is_contained(params, nullptr)) {
     return std::nullopt;
   }
@@ -136,13 +85,151 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
   return params;
 }
 
+const ClassDecl *ChunkTypes::libraryBase(const ClassDecl *cls) {
+  const ClassDecl *lib = cls;
+  while (lib != nullptr && !lib->library()) {
+    lib = lib->parent;
+  }
+  if (lib == nullptr || lib->generic() == nullptr) {
+    return nullptr;
+  }
+
+  return lib;
+}
+
+std::optional<ChunkTypes::StreamSides> ChunkTypes::streamSides(const ClassDecl *lib) {
+  const Type *streamError = this->prelude->builtinType("StreamError");
+  std::optional<StreamKind> kind = StreamKindTable::find(lib->generic()->name);
+  if (!kind.has_value()) {
+    return std::nullopt;
+  }
+  const std::vector<const Type *> &args = lib->typeArgs;
+  switch (*kind) {
+    case StreamKind::READABLE:
+      if (args.size() != 2) {
+        return std::nullopt;
+      }
+      return StreamSides{
+          .readable = args[0],
+          .writable = nullptr,
+          .error = args[1],
+          .transform = false,
+      };
+    case StreamKind::WRITABLE:
+      if (args.size() != 2) {
+        return std::nullopt;
+      }
+      return StreamSides{
+          .readable = nullptr,
+          .writable = args[0],
+          .error = args[1],
+          .transform = false,
+      };
+    case StreamKind::DUPLEX:
+    case StreamKind::TRANSFORM:
+      if (args.size() != 3) {
+        return std::nullopt;
+      }
+      return StreamSides{
+          .readable = args[1],
+          .writable = args[0],
+          .error = args[2],
+          .transform = *kind == StreamKind::TRANSFORM,
+      };
+    case StreamKind::PASS_THROUGH:
+      if (args.size() != 2) {
+        return std::nullopt;
+      }
+      return StreamSides{
+          .readable = args[1],
+          .writable = args[0],
+          .error = streamError,
+          .transform = true,
+      };
+  }
+
+  return std::nullopt;
+}
+
+std::vector<const Type *> ChunkTypes::hookParamTypes(const FunctionDecl *fn,
+                                                     const StreamSides &sides) {
+  const Type *callback = this->libraryAliasOf("HookCallback", sides.error, fn->loc());
+  const Type *transformCallback =
+      this->libraryAliasOf("TransformHookCallback", sides.error, fn->loc());
+  std::optional<StreamHook> hook = StreamHookTable::find(fn->name);
+  if (!hook.has_value()) {
+    return {};
+  }
+  switch (*hook) {
+    case StreamHook::ON_READ:
+      if (sides.readable == nullptr) {
+        return {};
+      }
+      return {Type::intTy()};
+    case StreamHook::ON_FINAL:
+    case StreamHook::ON_CONSTRUCT:
+      return {callback};
+    case StreamHook::ON_DESTROY:
+      return this->destroyParamTypes();
+    case StreamHook::ON_FLUSH:
+      if (!sides.transform) {
+        return {};
+      }
+      return {transformCallback};
+    case StreamHook::ON_TRANSFORM:
+      if (!sides.transform) {
+        return {};
+      }
+      return {sides.writable, Type::string(), transformCallback};
+    case StreamHook::ON_WRITE:
+      if (sides.writable == nullptr) {
+        return {};
+      }
+      return {sides.writable, Type::string(), callback};
+    case StreamHook::ON_WRITEV:
+      return this->writevParamTypes(fn, sides, callback);
+  }
+
+  return {};
+}
+
+std::vector<const Type *> ChunkTypes::destroyParamTypes() {
+  const Type *error = this->prelude->builtinType("StreamError");
+  TypeAliasDecl *decl = this->state.getLibraryDeclarations().findLibraryType("StreamCallback");
+  const Type *callback = decl != nullptr ? decl->resolved : nullptr;
+
+  return {Type::optional(error), callback};
+}
+
+std::vector<const Type *> ChunkTypes::writevParamTypes(const FunctionDecl *fn,
+                                                       const StreamSides &sides,
+                                                       const Type *callback) {
+  if (sides.writable == nullptr) {
+    return {};
+  }
+  const Type *chunk = this->libraryAliasOf("WriteChunk", sides.writable, fn->loc());
+  if (chunk == nullptr) {
+    return {};
+  }
+
+  return {Type::array(chunk), callback};
+}
+
+const Type *ChunkTypes::libraryAliasOf(llvm::StringRef name, const Type *arg, llvm::SMLoc loc) {
+  TypeAliasDecl *decl = this->state.getLibraryDeclarations().findLibraryType(name);
+  if (decl == nullptr) {
+    return nullptr;
+  }
+
+  return this->aliasInstantiator->instantiateAlias(decl, {arg}, loc);
+}
+
 bool ChunkTypes::isStreamHook(const FunctionDecl *fn, bool linked) const {
-  static const llvm::StringLiteral hooks[] = {"onRead",  "onWrite", "onWritev",  "onTransform",
-                                              "onFlush", "onFinal", "onDestroy", "onConstruct"};
   const ClassDecl *cls = fn->cls();
 
   return cls && !fn->isStatic() && !cls->library() && !cls->literal() && cls->parent &&
-         llvm::is_contained(hooks, fn->name) && (!linked || this->isStreamClass(cls->parent));
+         StreamHookTable::find(fn->name).has_value() &&
+         (!linked || this->isStreamClass(cls->parent));
 }
 
 ChunkTypes::ResultHookParamsMatch

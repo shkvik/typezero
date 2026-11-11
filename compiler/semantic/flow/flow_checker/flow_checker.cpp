@@ -62,6 +62,22 @@ Flow FlowChecker::join(const Flow &a, const Flow &b) {
   }
   Flow result;
   result.facts = Facts::meet(a.facts, b.facts);
+  FlowChecker::joinDefined(a, b, result);
+  for (const NarrowedVar &narrowed : a.narrowed) {
+    std::optional<NarrowedVar> both = FlowChecker::narrowedOnBoth(narrowed, b);
+    if (both.has_value()) {
+      result.narrowed.push_back(*both);
+    }
+  }
+  FlowChecker::widenWithUndefined(a, b, result);
+  FlowChecker::widenWithUndefined(b, a, result);
+  FlowChecker::joinMarks(a, b, result);
+  result.beforeSuper = a.beforeSuper || b.beforeSuper;
+
+  return result;
+}
+
+void FlowChecker::joinDefined(const Flow &a, const Flow &b, Flow &result) {
   for (const VarSymbol *var : a.defined) {
     if (b.defined.contains(var)) {
       result.defined.insert(var);
@@ -77,43 +93,59 @@ Flow FlowChecker::join(const Flow &a, const Flow &b) {
       result.narrowedFields.push_back(narrowed);
     }
   }
-  for (const auto &narrowed : a.narrowed) {
-    if (llvm::is_contained(b.narrowed, narrowed)) {
-      result.narrowed.push_back(narrowed);
+}
+
+const FlowChecker::NarrowedVar *FlowChecker::narrowedIn(const Flow &flow, const VarSymbol *var) {
+  for (const NarrowedVar &narrowed : flow.narrowed) {
+    if (narrowed.first == var) {
+      return &narrowed;
+    }
+  }
+
+  return nullptr;
+}
+
+std::optional<FlowChecker::NarrowedVar> FlowChecker::narrowedOnBoth(const NarrowedVar &narrowed,
+                                                                    const Flow &b) {
+  if (llvm::is_contained(b.narrowed, narrowed)) {
+    return narrowed;
+  }
+  auto [var, type] = narrowed;
+  const NarrowedVar *other = FlowChecker::narrowedIn(b, var);
+  bool generic = other == nullptr || var->type->nonOptional()->isParam() || type->isParam() ||
+                 other->second->isParam();
+  if (generic) {
+    return std::nullopt;
+  }
+  const Type *either = Type::unionOf({type, other->second});
+  if (either->isError() || !UnionSlots::unionProblem(either).empty() || either == var->type) {
+    return std::nullopt;
+  }
+  if (var->type->isOptional() && either == var->type->inner()) {
+    return std::nullopt;
+  }
+
+  return NarrowedVar{var, either};
+}
+
+void FlowChecker::widenWithUndefined(const Flow &empty, const Flow &other, Flow &result) {
+  for (const VarSymbol *var : empty.undefinedVars) {
+    const NarrowedVar *narrowed = FlowChecker::narrowedIn(other, var);
+    bool skipped = narrowed == nullptr || var->type->nonOptional()->isParam() ||
+                   var->type->nonOptional()->isJson() || narrowed->second->isParam() ||
+                   FlowChecker::narrowedIn(result, var) != nullptr;
+    if (skipped) {
       continue;
     }
-    auto [var, type] = narrowed;
-    auto other = llvm::find_if(b.narrowed, [&](const auto &n) { return n.first == var; });
-    if (other == b.narrowed.end() || var->type->nonOptional()->isParam() || type->isParam() ||
-        other->second->isParam()) {
-      continue;
-    }
-    const Type *either = Type::unionOf({type, other->second});
+    const Type *either = Type::unionOf({narrowed->second, Type::undefinedTy()});
     if (either->isError() || !UnionSlots::unionProblem(either).empty() || either == var->type) {
-      continue;
-    }
-    if (var->type->isOptional() && either == var->type->inner()) {
       continue;
     }
     result.narrowed.push_back({var, either});
   }
-  auto widenWithUndefined = [&](const Flow &empty, const Flow &other) {
-    for (const VarSymbol *var : empty.undefinedVars) {
-      auto narrowed = llvm::find_if(other.narrowed, [&](const auto &n) { return n.first == var; });
-      if (narrowed == other.narrowed.end() || var->type->nonOptional()->isParam() ||
-          var->type->nonOptional()->isJson() || narrowed->second->isParam() ||
-          llvm::any_of(result.narrowed, [&](const auto &n) { return n.first == var; })) {
-        continue;
-      }
-      const Type *either = Type::unionOf({narrowed->second, Type::undefinedTy()});
-      if (either->isError() || !UnionSlots::unionProblem(either).empty() || either == var->type) {
-        continue;
-      }
-      result.narrowed.push_back({var, either});
-    }
-  };
-  widenWithUndefined(a, b);
-  widenWithUndefined(b, a);
+}
+
+void FlowChecker::joinMarks(const Flow &a, const Flow &b, Flow &result) {
   for (const VarSymbol *var : a.undefinedVars) {
     if (b.undefinedVars.contains(var)) {
       result.undefinedVars.insert(var);
@@ -141,14 +173,21 @@ Flow FlowChecker::join(const Flow &a, const Flow &b) {
   }
   result.errorPending = a.errorPending;
   for (const auto &pending : b.errorPending) {
-    if (llvm::none_of(result.errorPending,
-                      [&](const auto &p) { return p.first == pending.first; })) {
+    if (!FlowChecker::hasPending(result.errorPending, pending.first)) {
       result.errorPending.push_back(pending);
     }
   }
-  result.beforeSuper = a.beforeSuper || b.beforeSuper;
+}
 
-  return result;
+bool FlowChecker::hasPending(llvm::ArrayRef<std::pair<EmitterKey, llvm::SMLoc>> pending,
+                             const EmitterKey &key) {
+  for (const auto &p : pending) {
+    if (p.first == key) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 void FlowChecker::setDefined(const VarSymbol *var, bool defined) {
@@ -164,91 +203,118 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
   if (type->isError()) {
     return;
   }
-  Flow flow = this->state.getFlowState().takeFlow();
-  FieldFacts::forgetFieldsOf(flow, var);
-  flow.undefinedVars.erase(var);
-  llvm::erase_if(flow.narrowed, [&](const auto &narrowed) { return narrowed.first == var; });
-  if (const Type *base = type->nonOptional();
-      base->isUnion() && value->type && !value->type->isError() && value->type != type &&
-      TypeRelations::isImplicitlyConvertible(value->type, base)) {
-    UnionNarrowing::narrowVariable(flow, var, value->type);
-  }
-  this->state.getFlowState().replaceFlow(std::move(flow));
+  this->resetAssignedFlow(var, value);
   if (type->isOptional()) {
     this->setDefined(var, !value->type->isOptional() && !value->type->isUndefined());
   }
   if (type->isResult()) {
-    const Type *given = value->type;
-    this->state.getFlowState().forgetResultState(var);
-    if (given->isResult() && given->errType()->isNever()) {
-      this->state.getFlowState().markOkResult(var);
-    } else if (given->isResult() && given->okType()->isNever()) {
-      this->state.getFlowState().markErrResult(var);
-    }
-    return;
+    return this->rememberResultState(var, value->type);
   }
-
   if (type->isInteger() && !type->isWrapping()) {
-    std::optional<Linear> v = this->indexProofs->linear(value);
-    if (v && v->term == Term::of(var)) {
-      this->incremented(var, v->offset);
-      return;
+    return this->assignedInteger(var, value);
+  }
+  this->state.getFlowState().getFacts().forget(var);
+
+  return this->assignedLength(var, value);
+}
+
+void FlowChecker::resetAssignedFlow(const VarSymbol *var, const Expr *value) {
+  const Type *type = var->type;
+  Flow flow = this->state.getFlowState().takeFlow();
+  FieldFacts::forgetFieldsOf(flow, var);
+  flow.undefinedVars.erase(var);
+  std::vector<NarrowedVar> kept;
+  for (const NarrowedVar &narrowed : flow.narrowed) {
+    if (narrowed.first != var) {
+      kept.push_back(narrowed);
     }
-    IntegerRange range = v ? IntegerRange{} : this->byteProofs->valueRange(value);
-    this->state.getFlowState().getFacts().forget(var);
-    if (v) {
-      this->state.getFlowState().getFacts().addEqual(Term::of(var), v->term, v->offset);
-    }
-    if (range.lo) {
-      this->state.getFlowState().getFacts().add(Term::zero(), Term::of(var),
-                                                Facts::saturatingSub(1, *range.lo));
-    }
-    if (range.hi) {
-      this->state.getFlowState().getFacts().add(Term::of(var), Term::zero(),
-                                                Facts::saturatingAdd(*range.hi, 1));
-    }
-    if (auto *call = dyn_cast<CallExpr>(value);
-        call && (call->builtin() == Builtin::MathMin || call->builtin() == Builtin::MathMax) &&
-        !call->hasSpread()) {
-      for (const Expr *arg : call->args) {
-        if (std::optional<Linear> bound = this->indexProofs->linear(arg)) {
-          if (call->builtin() == Builtin::MathMin) {
-            FlowChecker::addLess(this->state.getFlowState().getFacts(), Linear{Term::of(var), 0},
-                                 *bound, true);
-          } else {
-            FlowChecker::addLess(this->state.getFlowState().getFacts(), *bound,
-                                 Linear{Term::of(var), 0}, true);
-          }
-        }
-      }
-    }
+  }
+  flow.narrowed = std::move(kept);
+  const Type *base = type->nonOptional();
+  bool narrows = base->isUnion() && value->type != nullptr && !value->type->isError() &&
+                 value->type != type && TypeRelations::isImplicitlyConvertible(value->type, base);
+  if (narrows) {
+    UnionNarrowing::narrowVariable(flow, var, value->type);
+  }
+  this->state.getFlowState().replaceFlow(std::move(flow));
+}
+
+void FlowChecker::rememberResultState(const VarSymbol *var, const Type *given) {
+  this->state.getFlowState().forgetResultState(var);
+  if (!given->isResult()) {
     return;
+  }
+  if (given->errType()->isNever()) {
+    this->state.getFlowState().markOkResult(var);
+  } else if (given->okType()->isNever()) {
+    this->state.getFlowState().markErrResult(var);
+  }
+}
+
+void FlowChecker::assignedInteger(const VarSymbol *var, const Expr *value) {
+  std::optional<Linear> v = this->indexProofs->linear(value);
+  if (v.has_value() && v->term == Term::of(var)) {
+    return this->incremented(var, v->offset);
+  }
+  IntegerRange range = v.has_value() ? IntegerRange{} : this->byteProofs->valueRange(value);
+  Facts &facts = this->state.getFlowState().getFacts();
+  facts.forget(var);
+  if (v.has_value()) {
+    facts.addEqual(Term::of(var), v->term, v->offset);
+  }
+  if (range.lo.has_value()) {
+    facts.add(Term::zero(), Term::of(var), Facts::saturatingSub(1, *range.lo));
+  }
+  if (range.hi.has_value()) {
+    facts.add(Term::of(var), Term::zero(), Facts::saturatingAdd(*range.hi, 1));
   }
 
-  this->state.getFlowState().getFacts().forget(var);
-  const Type *base = type->nonOptional();
-  if (!base->isString() && !base->isArray() && !base->isByteView() &&
-      base->bytes() != Type::Bytes::ArrayBuffer) {
+  return this->addMinMaxBounds(var, value);
+}
+
+void FlowChecker::addMinMaxBounds(const VarSymbol *var, const Expr *value) {
+  auto *call = dyn_cast<CallExpr>(value);
+  bool minMax = call != nullptr &&
+                (call->builtin() == Builtin::MathMin || call->builtin() == Builtin::MathMax) &&
+                !call->hasSpread();
+  if (!minMax) {
     return;
   }
-  if (value->type->isOptional() || value->type->isUndefined()) {
+  Linear self{Term::of(var), 0};
+  for (const Expr *arg : call->args) {
+    std::optional<Linear> bound = this->indexProofs->linear(arg);
+    if (!bound.has_value()) {
+      continue;
+    }
+    if (call->builtin() == Builtin::MathMin) {
+      FlowChecker::addLess(this->state.getFlowState().getFacts(), self, *bound, true);
+    } else {
+      FlowChecker::addLess(this->state.getFlowState().getFacts(), *bound, self, true);
+    }
+  }
+}
+
+void FlowChecker::assignedLength(const VarSymbol *var, const Expr *value) {
+  const Type *base = var->type->nonOptional();
+  bool sized = base->isString() || base->isArray() || base->isByteView() ||
+               base->bytes() == Type::Bytes::ArrayBuffer;
+  if (!sized || value->type->isOptional() || value->type->isUndefined()) {
     return;
   }
-  if (std::optional<Linear> length = this->indexProofs->knownLength(value)) {
+  Facts &facts = this->state.getFlowState().getFacts();
+  std::optional<Linear> length = this->indexProofs->knownLength(value);
+  if (length.has_value()) {
     if (length->term != Term::lengthOf(var)) {
-      this->state.getFlowState().getFacts().addEqual(Term::lengthOf(var), length->term,
-                                                     length->offset);
+      facts.addEqual(Term::lengthOf(var), length->term, length->offset);
     }
     return;
   }
   IntegerRange range = this->indexProofs->lengthRange(value);
-  if (range.lo) {
-    this->state.getFlowState().getFacts().add(Term::zero(), Term::lengthOf(var),
-                                              Facts::saturatingSub(1, *range.lo));
+  if (range.lo.has_value()) {
+    facts.add(Term::zero(), Term::lengthOf(var), Facts::saturatingSub(1, *range.lo));
   }
-  if (range.hi) {
-    this->state.getFlowState().getFacts().add(Term::lengthOf(var), Term::zero(),
-                                              Facts::saturatingAdd(*range.hi, 1));
+  if (range.hi.has_value()) {
+    facts.add(Term::lengthOf(var), Term::zero(), Facts::saturatingAdd(*range.hi, 1));
   }
 }
 

@@ -37,6 +37,23 @@ private:
   ResultNotAsserting notAsserting(const FunctionDecl *fn, const TypeRef &ref);
   static const VarSymbol *argumentVariable(const Expr *expr);
   static std::optional<Linear> argumentTerm(const Expr *expr);
+  static int paramPosition(const FunctionDecl *fn, const VarSymbol *var);
+  static void projectSide(const FunctionDecl *fn, const Flow &flow, PredicateSide &side);
+  static bool isParamTerm(const FunctionDecl *fn, const Term &t);
+  static void projectFacts(const FunctionDecl *fn, const Flow &flow, PredicateSide &side);
+
+  struct PredicateCall {
+    const CallExpr *call = nullptr;
+    const MemberExpr *member = nullptr;
+    const Predicate *summary = nullptr;
+  };
+
+  static const Expr *predicateArgument(const PredicateCall &applied, int i);
+  const VarSymbol *predicateVariable(const PredicateCall &applied, int i) const;
+  void narrowParamTo(Flow &flow, const VarSymbol *var, const Type *type) const;
+  void applySide(const PredicateCall &applied, const PredicateSide &side, Flow &flow) const;
+  static int summaryParam(const Predicate *summary, const VarSymbol *var);
+  std::optional<Linear> factTerm(const PredicateCall &applied, const Term &t) const;
 
   SemanticState &state;
   FlowChecker *flowChecker = nullptr;
