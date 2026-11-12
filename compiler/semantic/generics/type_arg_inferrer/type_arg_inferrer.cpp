@@ -494,7 +494,7 @@ GenericArgumentForm TypeArgInferrer::argumentForm(const GenericCallBinding &bind
   }
   auto *text = dyn_cast<StringLitExpr>(arg);
   bool isLiteralText = text != nullptr && llvm::is_contained(binding.typeParams, pattern) &&
-                       this->utilityTypes->wantsLiteral(pattern);
+                       this->utilityTypes->isExpectingLiteral(pattern);
   if (isLiteralText) {
     return LiteralTextArgument{.text = text};
   }

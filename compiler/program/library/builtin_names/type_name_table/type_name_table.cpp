@@ -61,6 +61,16 @@ const TypeNameInfo kTypeNames[] = {
         .form = PlainTypeName{},
     },
     {
+        .name = "Capitalize",
+        .type = TypeName::CAPITALIZE,
+        .form =
+            UtilityTypeName{
+                .op = TypeOp::Capitalize,
+                .argumentCount = 1,
+                .operand = UtilityOperand::TEXT_TYPE,
+            },
+    },
+    {
         .name = "Constructor",
         .type = TypeName::CONSTRUCTOR,
         .form = PlainTypeName{},
@@ -79,6 +89,26 @@ const TypeNameInfo kTypeNames[] = {
         .name = "Err",
         .type = TypeName::ERR,
         .form = ResultTypeName{},
+    },
+    {
+        .name = "Exclude",
+        .type = TypeName::EXCLUDE,
+        .form =
+            UtilityTypeName{
+                .op = TypeOp::Exclude,
+                .argumentCount = 2,
+                .operand = UtilityOperand::ANY_TYPE,
+            },
+    },
+    {
+        .name = "Extract",
+        .type = TypeName::EXTRACT,
+        .form =
+            UtilityTypeName{
+                .op = TypeOp::Extract,
+                .argumentCount = 2,
+                .operand = UtilityOperand::ANY_TYPE,
+            },
     },
     {
         .name = "Generator",
@@ -131,6 +161,16 @@ const TypeNameInfo kTypeNames[] = {
         .form = PlainTypeName{},
     },
     {
+        .name = "Lowercase",
+        .type = TypeName::LOWERCASE,
+        .form =
+            UtilityTypeName{
+                .op = TypeOp::Lowercase,
+                .argumentCount = 1,
+                .operand = UtilityOperand::TEXT_TYPE,
+            },
+    },
+    {
         .name = "Map",
         .type = TypeName::MAP,
         .form = CollectionTypeName{.collection = Collection::MAP},
@@ -146,6 +186,16 @@ const TypeNameInfo kTypeNames[] = {
         .form = PlainTypeName{},
     },
     {
+        .name = "NonNullable",
+        .type = TypeName::NON_NULLABLE,
+        .form =
+            UtilityTypeName{
+                .op = TypeOp::NonNullable,
+                .argumentCount = 1,
+                .operand = UtilityOperand::ANY_TYPE,
+            },
+    },
+    {
         .name = "null",
         .type = TypeName::NULL_TYPE,
         .form = PlainTypeName{},
@@ -159,6 +209,16 @@ const TypeNameInfo kTypeNames[] = {
         .name = "Ok",
         .type = TypeName::OK,
         .form = ResultTypeName{},
+    },
+    {
+        .name = "Parameters",
+        .type = TypeName::PARAMETERS,
+        .form =
+            UtilityTypeName{
+                .op = TypeOp::Parameters,
+                .argumentCount = 1,
+                .operand = UtilityOperand::FUNCTION_TYPE,
+            },
     },
     {
         .name = "Promise",
@@ -211,6 +271,16 @@ const TypeNameInfo kTypeNames[] = {
         .form = ResultTypeName{},
     },
     {
+        .name = "ReturnType",
+        .type = TypeName::RETURN_TYPE,
+        .form =
+            UtilityTypeName{
+                .op = TypeOp::ReturnType,
+                .argumentCount = 1,
+                .operand = UtilityOperand::FUNCTION_TYPE,
+            },
+    },
+    {
         .name = "Set",
         .type = TypeName::SET,
         .form = CollectionTypeName{.collection = Collection::SET},
@@ -241,6 +311,16 @@ const TypeNameInfo kTypeNames[] = {
         .form = PlainTypeName{},
     },
     {
+        .name = "Uncapitalize",
+        .type = TypeName::UNCAPITALIZE,
+        .form =
+            UtilityTypeName{
+                .op = TypeOp::Uncapitalize,
+                .argumentCount = 1,
+                .operand = UtilityOperand::TEXT_TYPE,
+            },
+    },
+    {
         .name = "undefined",
         .type = TypeName::UNDEFINED,
         .form = PlainTypeName{},
@@ -249,6 +329,16 @@ const TypeNameInfo kTypeNames[] = {
         .name = "unknown",
         .type = TypeName::UNKNOWN,
         .form = PlainTypeName{},
+    },
+    {
+        .name = "Uppercase",
+        .type = TypeName::UPPERCASE,
+        .form =
+            UtilityTypeName{
+                .op = TypeOp::Uppercase,
+                .argumentCount = 1,
+                .operand = UtilityOperand::TEXT_TYPE,
+            },
     },
     {
         .name = "void",
@@ -282,6 +372,15 @@ const TypeNameInfo *TypeNameTable::find(llvm::StringRef name) {
   }
 
   return nullptr;
+}
+
+const UtilityTypeName *TypeNameTable::findUtility(llvm::StringRef name) {
+  const TypeNameInfo *info = TypeNameTable::find(name);
+  if (info == nullptr) {
+    return nullptr;
+  }
+
+  return info->form.as<UtilityTypeName>();
 }
 
 bool TypeNameTable::isName(llvm::StringRef name, TypeName type) {

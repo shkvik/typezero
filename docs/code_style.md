@@ -25,7 +25,11 @@
   `ErrorText…` в `<имя>_errors.cpp`.
 - **Вид вместо флагов — `Union`**: противоречивое состояние нельзя записать; ветвление —
   `switch` по `kind()` со всеми вариантами, без лямбд-обработчиков.
-- **Промежуточный результат — в переменной с именем**, лямбда — именованной переменной выше.
+- **Промежуточный результат — в переменной с именем**, тип — `auto`, если он виден справа;
+  вместо лямбды — метод с именем.
+- **Указатель сравниваем явно** (`!= nullptr`), приведение (`dyn_cast`) — в переменной над `if`.
+- **Функция с несколькими ошибками — список шагов**, каждый шаг — маленькая проверка `check…`
+  с одной ошибкой. Ветки цикла — одной формы: `if` и один `return`.
 - **Объявления в блоке — по длине строки**, псевдонимы `Result…` — одной длины.
 - **Части движка `semantic/` создаёт только сборка `SemanticParts`**, соседей часть берёт у неё в
   теле своего конструктора.
@@ -263,8 +267,7 @@ ClassChecker::ResultThisReadiness ClassChecker::readyThis(VarSymbol *var) const 
   bool isInInit = var == this->checker.initThis_;
   bool isInConstructor = isInInit && this->checker.currentDecl() == this->checker.initFn_;
   if (isInConstructor && this->checker.flow_.beforeSuper) {
-    std::string message =
-        ErrorTextReadyThis::noSuper(this->checker.initFn_->cls()->parent->name);
+    auto message = ErrorTextReadyThis::noSuper(this->checker.initFn_->cls()->parent->name);
 
     return err(ClassCheckerReadyThisError{
         .code = ClassCheckerReadyThisErrorCode::BEFORE_SUPER,
@@ -279,7 +282,7 @@ ClassChecker::ResultThisReadiness ClassChecker::readyThis(VarSymbol *var) const 
 Вызывающий:
 
 ```cpp
-ClassChecker::ResultEveryFieldSet fieldsSet = checker_.classChecker().checkFieldsSet();
+auto fieldsSet = checker_.classChecker().checkFieldsSet();
 if (fieldsSet.isErr()) {
   checker_.diags_.error(fn->loc(), fieldsSet.error().message);
 }
@@ -295,7 +298,8 @@ if (fieldsSet.isErr()) {
 - **«Не моё»** у функции-распознавателя — отдельный код без текста (`NOT_A_TIMER`), вызывающий
   идёт к следующему. Если сообщение уже выдано раньше, — код без текста (`ALREADY_REPORTED`).
 - **Ошибка, которая передаёт текст внутренней ошибки дальше**, собирает свою структуру со своим
-  кодом, а текст берёт у внутренней: `.message = found.error().message`.
+  кодом, а текст берёт у внутренней: `.message = found.error().message`. Это про чужую функцию;
+  шаги своей функции отдают её же ошибку (см. «Функция с несколькими ошибками — список шагов»).
 - **`Result` и на вопросы да/нет**, если так решили для класса: `isInitThis(...).isOk()`.
 - **Структура для `ok`** собирается прямо в вызове так же, как для `err`, с запятой после
   последнего поля: `return ok(BuiltProgram{ .warnings = std::move(warnings), });` (11 ноября).
@@ -317,6 +321,59 @@ private:
   ResultThisComesFrom thisOf(const FunctionDecl *current) const;
   ResultReturnMatches overrideReturn(const ClassDecl *cls, const FunctionDecl *method);
   ResultFieldHasValue fieldStartValue(const ClassDecl *cls, const ClassField &field) const;
+```
+
+### Функция с несколькими ошибками — список шагов
+
+Если функция может закончиться одной из нескольких ошибок, её тело — шаги по порядку, а
+проверки лежат под ней в порядке вызова (12 ноября, образец — `UtilityTypes::resolveUtilityType`).
+
+```cpp
+UtilityTypes::ResultUtilityApplied UtilityTypes::resolveUtilityType(const TypeRef &ref) {
+  const auto *utility = this->findUtility(ref.name);
+  if (utility == nullptr) {
+    return err(UtilityTypesResolveUtilityTypeError{
+        .code = UtilityTypesResolveUtilityTypeErrorCode::NOT_A_UTILITY,
+        .message = "",
+    });
+  }
+  auto argumentCount = this->checkArgumentCount(ref, *utility);
+  if (argumentCount.isErr()) {
+    return err(argumentCount.error());
+  }
+  auto operands = this->utilityOperands(ref, *utility);
+  if (operands.back()->isError()) {
+    return ok(operands.back());
+  }
+  auto operand = this->checkOperand(ref, *utility, operands.front());
+  if (operand.isErr()) {
+    return err(operand.error());
+  }
+  const auto *unevaluated = Type::typeOp(utility->op, operands);
+  const auto *evaluated = this->typeOperators->evalTypeOp(unevaluated, operands);
+
+  return ok(evaluated);
+}
+```
+
+- **Шаг — маленькая проверка `check…` с одной ошибкой**; текст ошибки собирается в ней.
+- **Шаги отдают ту же структуру ошибки, что и сама функция** (`Result<void, …Error>` с тем же
+  типом ошибки), и функция передаёт её как есть: `return err(step.error());`. Свою структуру
+  на каждый шаг не заводим: пришлось бы пересобирать ошибку в каждом `if`.
+- **Что проверять, решает вид из таблицы, а не пачка `bool`**: вместо `isFunctionExpected`,
+  `isTextExpected`, `isFunctionMissing` — `switch` по полю строки таблицы.
+
+```cpp
+switch (utility.operand) {
+  case UtilityOperand::ANY_TYPE:
+    return ok();
+  case UtilityOperand::FUNCTION_TYPE:
+    return this->checkFunctionOperand(ref, operand);
+  case UtilityOperand::TEXT_TYPE:
+    return this->checkTextOperand(ref, operand);
+}
+
+return ok();
 ```
 
 ## Вид вместо флагов — `Union`
@@ -394,22 +451,81 @@ return nullptr;
 ## Имена у промежуточных значений
 
 Результат вызова, который дальше куда-то передаётся, сначала кладём в переменную с именем;
-вложенных вызовов в аргументах избегаем. Лямбду, которую передаём в `any_of` и подобное,
-объявляем выше как переменную, а не пишем на месте.
+вложенных вызовов в аргументах избегаем.
 
 ```cpp
-auto decorated = [](const FunctionDecl *fn) {
-  return !fn->decorators().empty() ||
-         llvm::any_of(fn->params, [](const Param &p) { return !p.decorators.empty(); });
-};
-auto decoratedField = [](const ClassField &f) { return !f.decorators.empty(); };
-
-bool isDecoratedAnywhere = !cls->decorators.empty() || llvm::any_of(cls->methods, decorated) ||
-                           llvm::any_of(cls->constructors, decorated) ||
-                           llvm::any_of(cls->fields, decoratedField);
+const auto *unevaluated = Type::typeOp(utility->op, operands);
+const auto *evaluated = this->typeOperators->evalTypeOp(unevaluated, operands);
 ```
 
 Длинное условие тоже получает имя: `bool isTopLevel = ...; if (!isTopLevel) { ... }`.
+
+**Тип — `auto`**, если он виден из правой части: `auto message = ErrorTextUtility::count(...)`,
+`auto operands = std::vector<const Type *>()`, `const auto *utility = this->findUtility(name)`,
+`const auto &store = this->state.getClassStore()`. Тип пишем, когда справа его не видно и он
+важен для чтения (`const Type *subject = operands[0];`), и у `bool`.
+
+**Вместо лямбды — метод с именем** (12 ноября). Лямбда внутри функции прячет кусок логики и
+захватывает всё подряд; метод виден в заголовке и зовётся через `this->`.
+
+```cpp
+bool UtilityTypes::isGenericKey(const Type *key) const {
+  return key->isParam() && !key->isListParam() && this->isExpectingLiteral(key);
+}
+
+if (!key->isStringLiteral() && !this->isGenericKey(key)) {
+```
+
+## Указатели, приведения, ветки
+
+**Указатель сравниваем явно:** `x != nullptr`, `x == nullptr`, а не `if (x)` и `if (!x)`. Так
+видно, что это указатель, а не `bool`.
+
+**Приведение — в переменной над `if`**, без `if` с инициализатором (8 ноября).
+
+```cpp
+auto *functionDecl = dyn_cast<FunctionDecl>(item);
+if (functionDecl != nullptr && functionDecl->name == name) {
+  return this->functionDeclType(functionDecl);
+}
+```
+
+**Ветки цикла — одной формы** (12 ноября). Если цикл перебирает несколько случаев, каждый случай —
+один `if` и один `return`; подробности случая — в методе с именем. `continue` вперемешку с
+`return` и вложенный цикл внутри такого цикла не пишем.
+
+```cpp
+for (Stmt *item : from->file.items) {
+  auto *functionDecl = dyn_cast<FunctionDecl>(item);
+  auto *classDecl = dyn_cast<ClassDecl>(item);
+  auto *varDecl = dyn_cast<VarDeclStmt>(item);
+
+  if (functionDecl != nullptr && functionDecl->name == name) {
+    return this->functionDeclType(functionDecl);
+  }
+  if (classDecl != nullptr && classDecl->name == name) {
+    return this->classDeclType(classDecl);
+  }
+  if (varDecl != nullptr && this->hasDeclarator(varDecl, name)) {
+    return this->varDeclType(varDecl, name);
+  }
+}
+```
+
+**Без «завели пустую, потом заполнили, потом проверили».** Вместо
+
+```cpp
+const VarDeclarator *declarator = nullptr;
+if (varDecl != nullptr) {
+  declarator = this->declaratorNamed(varDecl, name);
+}
+if (declarator != nullptr) {
+  return this->declaratorType(declarator);
+}
+```
+
+— один `if` с вопросом (`hasDeclarator`) и метод, который отдаёт ответ (`varDeclType`), как в
+цикле выше. Повторный короткий поиск внутри двух методов — нормально.
 
 ## Обходы без рекурсии
 
@@ -418,8 +534,8 @@ bool isDecoratedAnywhere = !cls->decorators.empty() || llvm::any_of(cls->methods
 
 - **«Есть ли где-то X» по телу** — тело один раз раскладывается в список узлов с их местом
   (`PlacedNodes`, обход в ширину: очередь — сами списки), вопрос — обычный `for` с ранним
-  `return`. Детей добавляют маленькие функции по смыслу (`addLoopParts`, `addBranchParts`) из
-  `if (auto *x = dyn_cast<X>(node))` без пустых `case`.
+  `return`. Детей добавляют маленькие функции по смыслу (`addLoopParts`, `addBranchParts`):
+  `dyn_cast` в переменную и `if (x != nullptr)`, без `switch` с пустыми `case`.
 - **Цепочка** (`a.b.c`, снятие приведений, минусов, `T | undefined`) — `while` по одному ребёнку.
   Рекурсия на один уровень уходит выносом ветки в отдельную функцию.
 - **Однородное дерево** (`&&`, `?:`, арифметика) — раскладка стеком в список слева направо
@@ -461,7 +577,7 @@ void CallCycles::tarjanSearch(int start, CycleSearch &search) {
 ## Пустые строки
 
 - Перед итоговым `return` функции — пустая строка, если до него есть код.
-- В блоке ошибки — пустая строка между `std::string message = ...;` и `return err(...)`.
+- В блоке ошибки — пустая строка между `auto message = ...;` и `return err(...)`.
 - Группы объявлений (псевдонимы, функции, поля) разделены пустой строкой.
 
 ## Форматирование

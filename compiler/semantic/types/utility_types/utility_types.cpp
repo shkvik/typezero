@@ -32,70 +32,124 @@ UtilityTypes::UtilityTypes(SemanticState &owner, SemanticParts &all)
   this->classValueChecker = &all.classValueChecker;
 }
 
-llvm::ArrayRef<const Type *> UtilityTypes::membersOf(const Type *&type) {
+llvm::ArrayRef<const Type *> UtilityTypes::membersOf(const Type *&type) const {
   return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
 }
 
-const Type *UtilityTypes::functionValueType(FuncSymbol *fn) {
-  if (!fn->isGeneric()) {
-    return this->returnInferrer->functionType(fn);
+const Type *UtilityTypes::functionValueType(FuncSymbol *function) {
+  if (!function->isGeneric()) {
+    return this->returnInferrer->functionType(function);
   }
-  if (fn->typeDefaults.size() != fn->typeParams.size() ||
-      llvm::is_contained(fn->typeDefaults, nullptr)) {
+  bool hasAllDefaults = function->typeDefaults.size() == function->typeParams.size() &&
+                        !llvm::is_contained(function->typeDefaults, nullptr);
+  if (!hasAllDefaults) {
     return nullptr;
   }
-  const Type *type = this->returnInferrer->functionType(fn);
+  const auto *type = this->returnInferrer->functionType(function);
 
-  return this->typeParams->substitute(type, fn->typeParams, fn->typeDefaults);
+  return this->typeParams->substitute(type, function->typeParams, function->typeDefaults);
 }
 
 const Type *UtilityTypes::importedValueType(Module *from, llvm::StringRef name) {
   for (Stmt *item : from->file.items) {
-    if (auto *fn = dyn_cast<FunctionDecl>(item); fn && fn->name == name) {
-      return fn->sym ? this->functionValueType(fn->sym) : nullptr;
+    auto *functionDecl = dyn_cast<FunctionDecl>(item);
+    auto *classDecl = dyn_cast<ClassDecl>(item);
+    auto *varDecl = dyn_cast<VarDeclStmt>(item);
+
+    if (functionDecl != nullptr && functionDecl->name == name) {
+      return this->functionDeclType(functionDecl);
     }
-    if (auto *cls = dyn_cast<ClassDecl>(item); cls && cls->name == name) {
-      return cls->isGeneric() ? nullptr : this->classValueChecker->classValueType(cls);
+    if (classDecl != nullptr && classDecl->name == name) {
+      return this->classDeclType(classDecl);
     }
-    if (auto *decl = dyn_cast<VarDeclStmt>(item)) {
-      for (const VarDeclarator &d : decl->decls) {
-        if (d.name == name) {
-          return d.sym ? d.sym->type : nullptr;
-        }
-      }
+    if (varDecl != nullptr && this->hasDeclarator(varDecl, name)) {
+      return this->varDeclType(varDecl, name);
     }
   }
 
   return nullptr;
 }
 
-const UtilityTypes::Utility *UtilityTypes::utilityNamed(llvm::StringRef name) {
-  static const Utility utilities[] = {
-      {"Exclude", TypeOp::Exclude, 2},           {"Extract", TypeOp::Extract, 2},
-      {"NonNullable", TypeOp::NonNullable, 1},   {"ReturnType", TypeOp::ReturnType, 1},
-      {"Parameters", TypeOp::Parameters, 1},     {"Uppercase", TypeOp::Uppercase, 1},
-      {"Lowercase", TypeOp::Lowercase, 1},       {"Capitalize", TypeOp::Capitalize, 1},
-      {"Uncapitalize", TypeOp::Uncapitalize, 1},
-  };
-  for (const Utility &utility : utilities) {
-    if (utility.name == name) {
-      return &utility;
+const Type *UtilityTypes::functionDeclType(FunctionDecl *functionDecl) {
+  if (functionDecl->sym == nullptr) {
+    return nullptr;
+  }
+
+  return this->functionValueType(functionDecl->sym);
+}
+
+const Type *UtilityTypes::classDeclType(ClassDecl *classDecl) {
+  if (classDecl->isGeneric()) {
+    return nullptr;
+  }
+
+  return this->classValueChecker->classValueType(classDecl);
+}
+
+const VarDeclarator *UtilityTypes::declaratorNamed(const VarDeclStmt *varDecl,
+                                                   llvm::StringRef name) const {
+  for (const VarDeclarator &declarator : varDecl->decls) {
+    if (declarator.name == name) {
+      return &declarator;
     }
   }
 
   return nullptr;
+}
+
+bool UtilityTypes::hasDeclarator(const VarDeclStmt *varDecl, llvm::StringRef name) const {
+  return this->declaratorNamed(varDecl, name) != nullptr;
+}
+
+const Type *UtilityTypes::varDeclType(const VarDeclStmt *varDecl, llvm::StringRef name) const {
+  const VarDeclarator *declarator = this->declaratorNamed(varDecl, name);
+  if (declarator == nullptr || declarator->sym == nullptr) {
+    return nullptr;
+  }
+
+  return declarator->sym->type;
 }
 
 UtilityTypes::ResultUtilityApplied UtilityTypes::resolveUtilityType(const TypeRef &ref) {
-  const Utility *utility = UtilityTypes::utilityNamed(ref.name);
-  if (!utility || this->typeDeclarer->lookupType(ref.name)) {
+  const auto *utility = this->findUtility(ref.name);
+  if (utility == nullptr) {
     return err(UtilityTypesResolveUtilityTypeError{
         .code = UtilityTypesResolveUtilityTypeErrorCode::NOT_A_UTILITY,
         .message = "",
     });
   }
-  if (int(ref.args.size()) != utility->count) {
-    std::string message = ErrorTextUtility::count(ref.name, utility->count);
+  auto argumentCount = this->checkArgumentCount(ref, *utility);
+  if (argumentCount.isErr()) {
+    return err(argumentCount.error());
+  }
+  auto operands = this->utilityOperands(ref, *utility);
+  if (operands.back()->isError()) {
+    return ok(operands.back());
+  }
+  auto operand = this->checkOperand(ref, *utility, operands.front());
+  if (operand.isErr()) {
+    return err(operand.error());
+  }
+  const auto *unevaluated = Type::typeOp(utility->op, operands);
+  const auto *evaluated = this->typeOperators->evalTypeOp(unevaluated, operands);
+
+  return ok(evaluated);
+}
+
+const UtilityTypeName *UtilityTypes::findUtility(llvm::StringRef name) const {
+  const auto *utility = TypeNameTable::findUtility(name);
+  bool isShadowed = utility != nullptr && this->typeDeclarer->lookupType(name) != nullptr;
+  if (isShadowed) {
+    return nullptr;
+  }
+
+  return utility;
+}
+
+UtilityTypes::ResultUtilityAllowed
+UtilityTypes::checkArgumentCount(const TypeRef &ref, const UtilityTypeName &utility) const {
+  if (int(ref.args.size()) != utility.argumentCount) {
+    auto message = ErrorTextUtility::count(ref.name, utility.argumentCount);
 
     return err(UtilityTypesResolveUtilityTypeError{
         .code = UtilityTypesResolveUtilityTypeErrorCode::WRONG_ARGUMENT_COUNT,
@@ -103,61 +157,113 @@ UtilityTypes::ResultUtilityApplied UtilityTypes::resolveUtilityType(const TypeRe
     });
   }
 
-  bool isFunction = utility->op == TypeOp::ReturnType || utility->op == TypeOp::Parameters;
-  bool isText = utility->op == TypeOp::Uppercase || utility->op == TypeOp::Lowercase ||
-                utility->op == TypeOp::Capitalize || utility->op == TypeOp::Uncapitalize;
-  std::vector<const Type *> operands;
+  return ok();
+}
+
+std::vector<const Type *> UtilityTypes::utilityOperands(const TypeRef &ref,
+                                                        const UtilityTypeName &utility) {
+  auto operands = std::vector<const Type *>();
   for (const TypeRef &arg : ref.args) {
-    const Type *signature = isFunction ? this->conditionalTypes->signatureForUtility(arg) : nullptr;
-    operands.push_back(signature ? signature : this->conditionalTypes->resolveTypeArgument(arg));
-    if (operands.back()->isError()) {
-      return ok(operands.back());
+    const Type *operand = nullptr;
+    if (utility.operand == UtilityOperand::FUNCTION_TYPE) {
+      operand = this->conditionalTypes->signatureForUtility(arg);
+    }
+    if (operand == nullptr) {
+      operand = this->conditionalTypes->resolveTypeArgument(arg);
+    }
+    operands.push_back(operand);
+    if (operand->isError()) {
+      break;
     }
   }
-  if (isFunction && !TypeQueries::mentionsParam(operands[0]) &&
-      !operands[0]->nonOptional()->isFunction()) {
-    std::string message = ErrorTextUtility::noFunction(ref.name, operands[0]->name());
+
+  return operands;
+}
+
+UtilityTypes::ResultUtilityAllowed UtilityTypes::checkOperand(const TypeRef &ref,
+                                                              const UtilityTypeName &utility,
+                                                              const Type *operand) const {
+  if (TypeQueries::mentionsParam(operand)) {
+    return ok();
+  }
+  switch (utility.operand) {
+    case UtilityOperand::ANY_TYPE:
+      return ok();
+    case UtilityOperand::FUNCTION_TYPE:
+      return this->checkFunctionOperand(ref, operand);
+    case UtilityOperand::TEXT_TYPE:
+      return this->checkTextOperand(ref, operand);
+  }
+
+  return ok();
+}
+
+UtilityTypes::ResultUtilityAllowed UtilityTypes::checkFunctionOperand(const TypeRef &ref,
+                                                                      const Type *operand) const {
+  if (!operand->nonOptional()->isFunction()) {
+    auto message = ErrorTextUtility::noFunction(ref.name, operand->name());
 
     return err(UtilityTypesResolveUtilityTypeError{
         .code = UtilityTypesResolveUtilityTypeErrorCode::NOT_A_FUNCTION_TYPE,
         .message = message,
     });
   }
-  if (isText && !TypeQueries::mentionsParam(operands[0])) {
-    for (const Type *m : TypeopsCheckHelpers::distributedMembers(operands[0])) {
-      if (!m->isString() && !m->isStringLiteral()) {
-        std::string message = ErrorTextUtility::notString(ref.name, m->name());
 
-        return err(UtilityTypesResolveUtilityTypeError{
-            .code = UtilityTypesResolveUtilityTypeErrorCode::NOT_A_STRING_TYPE,
-            .message = message,
-        });
-      }
+  return ok();
+}
+
+UtilityTypes::ResultUtilityAllowed UtilityTypes::checkTextOperand(const TypeRef &ref,
+                                                                  const Type *operand) const {
+  const Type *nonString = this->firstNonString(operand);
+  if (nonString != nullptr) {
+    auto message = ErrorTextUtility::notString(ref.name, nonString->name());
+
+    return err(UtilityTypesResolveUtilityTypeError{
+        .code = UtilityTypesResolveUtilityTypeErrorCode::NOT_A_STRING_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok();
+}
+
+const Type *UtilityTypes::firstNonString(const Type *operand) const {
+  for (const Type *member : TypeopsCheckHelpers::distributedMembers(operand)) {
+    if (!member->isString() && !member->isStringLiteral()) {
+      return member;
     }
   }
 
-  const Type *evaluated =
-      this->typeOperators->evalTypeOp(Type::typeOp(utility->op, operands), operands);
+  return nullptr;
+}
 
-  return ok(evaluated);
+bool UtilityTypes::isGenericKey(const Type *key) const {
+  return key->isParam() && !key->isListParam() && this->isExpectingLiteral(key);
+}
+
+bool UtilityTypes::isGenericKeyName(const NameExpr *keyName) const {
+  auto entry = this->scopes->lookup(keyName->name);
+  const VarSymbol *variable = entry.var();
+  if (variable == nullptr || variable->type == nullptr) {
+    return false;
+  }
+
+  return this->isGenericKey(variable->type);
 }
 
 UtilityTypes::ResultGenericIndexed UtilityTypes::checkGenericIndex(IndexExpr *index) {
   const Type *object = index->object->type;
-  auto genericKey = [&](const Type *key) {
-    return key->isParam() && !key->isListParam() && this->wantsLiteral(key);
-  };
-  bool isOpen = object->isParam() && !object->isListParam() && !object->iterated();
-  if (!isOpen && !(object->isObject() && isa<NameExpr>(index->index))) {
+  bool isOpenObject = object->isParam() && !object->isListParam() && !object->iterated();
+  bool isNamedKey = object->isObject() && isa<NameExpr>(index->index);
+  if (!isOpenObject && !isNamedKey) {
     return err(UtilityTypesCheckGenericIndexError{
         .code = UtilityTypesCheckGenericIndexErrorCode::NOT_A_GENERIC_INDEX,
         .message = "",
     });
   }
-  if (!isOpen) {
-    auto *name = cast<NameExpr>(index->index);
-    VarSymbol *var = this->scopes->lookup(name->name).var();
-    if (!var || !var->type || !genericKey(var->type)) {
+  if (!isOpenObject) {
+    const auto *keyName = cast<NameExpr>(index->index);
+    if (!this->isGenericKeyName(keyName)) {
       return err(UtilityTypesCheckGenericIndexError{
           .code = UtilityTypesCheckGenericIndexErrorCode::NOT_A_GENERIC_INDEX,
           .message = "",
@@ -169,31 +275,38 @@ UtilityTypes::ResultGenericIndexed UtilityTypes::checkGenericIndex(IndexExpr *in
   if (key->isError()) {
     return ok(index);
   }
-  if (!key->isStringLiteral() && !genericKey(key)) {
-    std::string message = ErrorTextGenericIndex::notByKey(object->name(), key->name());
+  if (!key->isStringLiteral() && !this->isGenericKey(key)) {
+    auto message = ErrorTextGenericIndex::notByKey(object->name(), key->name());
 
     return err(UtilityTypesCheckGenericIndexError{
         .code = UtilityTypesCheckGenericIndexErrorCode::NOT_INDEXED_BY_KEY,
         .message = message,
     });
   }
-  index->type = this->typeOperators->evalTypeOp(Type::indexedAccess(object, key), {object, key});
+  const auto *indexed = Type::indexedAccess(object, key);
+  index->type = this->typeOperators->evalTypeOp(indexed, {object, key});
 
   return ok(index);
 }
 
-bool UtilityTypes::wantsLiteral(const Type *param) const {
-  const Type *constraint = param->isParam() ? param->constraint() : nullptr;
-  if (!constraint) {
+bool UtilityTypes::isExpectingLiteral(const Type *param) const {
+  if (!param->isParam()) {
+    return false;
+  }
+  const Type *constraint = param->constraint();
+  if (constraint == nullptr) {
     return false;
   }
   if (constraint->typeOp() == TypeOp::KeyOf) {
     return true;
   }
-  const Type *c = constraint;
+  for (const Type *member : this->membersOf(constraint)) {
+    if (!member->isStringLiteral()) {
+      return false;
+    }
+  }
 
-  return llvm::all_of(UtilityTypes::membersOf(c),
-                      [](const Type *m) { return m->isStringLiteral(); });
+  return true;
 }
 
 }
