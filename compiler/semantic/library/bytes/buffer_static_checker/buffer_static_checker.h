@@ -45,14 +45,14 @@ private:
   using ResultConcatSources = Result<const Type *, BufferStaticCheckerConcatSourcesError>;
   using ResultMapResultFits = Result<const Type *, BufferStaticCheckerMapResultFitsError>;
 
-  ResultConcatSources concatSources(const Type *list, const Type *buffer) const;
-  ResultSourceElement sourceElement(const Type *from, llvm::StringRef what) const;
+  ResultConcatSources checkConcatSources(const Type *list, const Type *buffer) const;
+  ResultSourceElement checkSourceElement(const Type *from, llvm::StringRef what) const;
   std::optional<std::u16string> literalText(const Expr *expr) const;
-  ResultMapResultFits mapResultFits(const Type *type, bool arrow) const;
+  ResultMapResultFits checkMapResultFits(const Type *type, bool arrow) const;
   Signature mapperSignature(const Type *element, const Type *type) const;
   Expr *toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result) const;
   static bool isBuffer(const Type *type);
-  static bool mayBeBuffer(const Type *type);
+  static bool canBeBuffer(const Type *type);
 
   Expr *convertByteFill(Expr *fill);
   void walkAllocSize(CallExpr *call);

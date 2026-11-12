@@ -20,7 +20,7 @@ public:
 private:
   using ResultPromiseFunction = Result<llvm::StringRef, FsPromisesCheckerPromiseFunctionError>;
 
-  ResultPromiseFunction promiseFunction(llvm::StringRef functionName) const;
+  ResultPromiseFunction checkPromiseFunction(llvm::StringRef functionName) const;
 
   SemanticState &state;
   FsErrors *fsErrors = nullptr;

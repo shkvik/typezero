@@ -38,6 +38,23 @@ ClassDecl *ClassDeclarer::classOf(const Type *type) const {
   return type != nullptr ? const_cast<ClassDecl *>(type->classDecl()) : nullptr;
 }
 
+bool ClassDeclarer::hasMethodFields(const ClassDecl *classDecl) const {
+  if (classDecl->literal() != nullptr) {
+    return true;
+  }
+  for (const ClassDecl *owner = classDecl; owner != nullptr; owner = owner->parent) {
+    if (llvm::any_of(owner->fields, std::bind_front(&ClassDeclarer::isMethodMember, this))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool ClassDeclarer::isMethodMember(const ClassField &field) const {
+  return field.method() != nullptr;
+}
+
 std::vector<FunctionDecl *> ClassDeclarer::methodsNamed(const ClassDecl *classDecl,
                                                         llvm::StringRef name) const {
   auto found = std::vector<FunctionDecl *>();
@@ -113,7 +130,7 @@ std::vector<FunctionDecl *> ClassDeclarer::ownStaticMethodsNamed(const ClassDecl
 bool ClassDeclarer::isOverriddenByAny(llvm::ArrayRef<FunctionDecl *> found,
                                       const FunctionDecl *method) const {
   for (const FunctionDecl *lower : found) {
-    if (this->classLinks->overridesTransitively(lower, method)) {
+    if (this->classLinks->isOverridingTransitively(lower, method)) {
       return true;
     }
   }

@@ -95,12 +95,12 @@ MemberExpr *BuiltinModuleChecker::processMember(AstContext &context, llvm::SMLoc
 }
 
 BuiltinModuleChecker::ResultExportFound
-BuiltinModuleChecker::exportFound(NodeModule module, llvm::StringRef name,
-                                  llvm::StringRef path) const {
+BuiltinModuleChecker::checkExportFound(NodeModule module, llvm::StringRef name,
+                                       llvm::StringRef path) const {
   if (this->builtinModuleTypes->exported(module, name) != nullptr) {
     return ok(module);
   }
-  auto found = this->moduleExport(module, name, path);
+  auto found = this->checkModuleExport(module, name, path);
   if (found.isErr()) {
     std::string message = found.error().message;
 
@@ -114,38 +114,38 @@ BuiltinModuleChecker::exportFound(NodeModule module, llvm::StringRef name,
 }
 
 BuiltinModuleChecker::ResultModuleExport
-BuiltinModuleChecker::moduleExport(NodeModule module, llvm::StringRef name,
-                                   llvm::StringRef path) const {
+BuiltinModuleChecker::checkModuleExport(NodeModule module, llvm::StringRef name,
+                                        llvm::StringRef path) const {
   switch (module) {
     case NodeModule::Fs:
-      return FsExports::fsExport(name, path);
+      return FsExports::checkFsExport(name, path);
     case NodeModule::FsPromises:
-      return FsExports::promisesExport(name, path);
+      return FsExports::checkPromisesExport(name, path);
     case NodeModule::Readline:
     case NodeModule::ReadlinePromises:
-      return FsExports::readlineExport(name, path, module == NodeModule::Readline);
+      return FsExports::checkReadlineExport(name, path, module == NodeModule::Readline);
     case NodeModule::TzIo:
-      return FsExports::tzIoExport(name, path);
+      return FsExports::checkTzIoExport(name, path);
     case NodeModule::TzFs:
-      return FsExports::tzFsExport(name, path);
+      return FsExports::checkTzFsExport(name, path);
     case NodeModule::Path:
     case NodeModule::PathPosix:
     case NodeModule::PathWin32:
-      return PathExports::pathExport(name, path);
+      return PathExports::checkPathExport(name, path);
     case NodeModule::Os:
-      return OsExports::osExport(name, path);
+      return OsExports::checkOsExport(name, path);
     case NodeModule::Process:
-      return ProcessExports::processExport(name, path);
+      return ProcessExports::checkProcessExport(name, path);
     case NodeModule::Buffer:
-      return BufferExports::bufferExport(name, path);
+      return BufferExports::checkBufferExport(name, path);
     case NodeModule::TimersPromises:
-      return TimersExports::timersExport(name, path);
+      return TimersExports::checkTimersExport(name, path);
     case NodeModule::ChildProcess:
-      return ChildExports::childExport(name, path);
+      return ChildExports::checkChildExport(name, path);
     case NodeModule::Crypto:
-      return CryptoExports::cryptoExport(name, path);
+      return CryptoExports::checkCryptoExport(name, path);
     case NodeModule::TzCrypto:
-      return CryptoExports::tzCryptoExport(name, path);
+      return CryptoExports::checkTzCryptoExport(name, path);
   }
   llvm_unreachable("unknown node module");
 }
@@ -228,7 +228,7 @@ std::vector<llvm::StringRef> BuiltinModuleChecker::wholeImportUses(Module *modul
                                                                    llvm::StringRef whole) const {
   auto used = std::vector<llvm::StringRef>();
   for (Stmt *item : module->file.items) {
-    for (const Expr *expr : AstWalker::exprsIn(item, true)) {
+    for (const Expr *expr : AstWalker::allExprsIn(item)) {
       auto *member = dyn_cast<MemberExpr>(expr);
       auto *object = member != nullptr ? dyn_cast<NameExpr>(member->object) : nullptr;
       if (object != nullptr && object->name == whole && !llvm::is_contained(used, member->name)) {
@@ -259,7 +259,7 @@ std::string BuiltinModuleChecker::wholeImportMessage(const ImportDecl &importDec
 
 void BuiltinModuleChecker::bindNamedImport(const ImportDecl &importDecl, const ModuleName &name,
                                            NodeModule which, ModuleState &here) {
-  auto found = this->exportFound(which, name.name, importDecl.path);
+  auto found = this->checkExportFound(which, name.name, importDecl.path);
   if (found.isErr()) {
     this->state.getDiagnostics().error(name.loc, found.error().message);
     here.badImports.insert(name.as);
@@ -377,8 +377,8 @@ Expr *BuiltinModuleChecker::checkNodeMember(MemberExpr *member) {
   if (!nodeName->name.empty()) {
     return nullptr;
   }
-  auto found = this->exportFound(nodeName->module, member->name,
-                                 NodeCheckHelpers::moduleLabel(nodeName->module));
+  auto found = this->checkExportFound(nodeName->module, member->name,
+                                      NodeCheckHelpers::moduleLabel(nodeName->module));
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
     member->type = Type::error();
@@ -463,8 +463,8 @@ Expr *BuiltinModuleChecker::checkNodeMemberCall(CallExpr *call, MemberExpr *memb
   if (!nodeName->name.empty()) {
     return nullptr;
   }
-  auto found = this->exportFound(nodeName->module, member->name,
-                                 NodeCheckHelpers::moduleLabel(nodeName->module));
+  auto found = this->checkExportFound(nodeName->module, member->name,
+                                      NodeCheckHelpers::moduleLabel(nodeName->module));
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
     return this->failNodeCall(call);

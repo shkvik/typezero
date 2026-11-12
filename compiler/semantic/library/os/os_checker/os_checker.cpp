@@ -1,5 +1,6 @@
 #include "compiler/semantic/library/os/os_checker/os_checker.h"
 #include "compiler/program/library/os/os_function_table/os_function_table.h"
+#include "compiler/program/library/os/os_value_table/os_value_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -16,15 +17,16 @@ OsChecker::OsChecker(SemanticState &owner, SemanticParts &all)
 }
 
 const Type *OsChecker::cpuInfoType() const {
-  const auto *d = Type::doubleTy();
-  const auto *times = Type::object({{"user", d, false},
-                                    {"nice", d, false},
-                                    {"sys", d, false},
-                                    {"idle", d, false},
-                                    {"irq", d, false}});
+  const auto *doubleType = Type::doubleTy();
+  const auto *times = Type::object({{"user", doubleType, false},
+                                    {"nice", doubleType, false},
+                                    {"sys", doubleType, false},
+                                    {"idle", doubleType, false},
+                                    {"irq", doubleType, false}});
 
   return Type::object(
-      {{"model", Type::string(), false}, {"speed", d, false}, {"times", times, false}}, "CpuInfo");
+      {{"model", Type::string(), false}, {"speed", doubleType, false}, {"times", times, false}},
+      "CpuInfo");
 }
 
 const Type *OsChecker::userInfoType() const {
@@ -37,21 +39,30 @@ const Type *OsChecker::userInfoType() const {
 }
 
 Expr *OsChecker::checkOsValue(llvm::StringRef name, Expr *expr) {
-  if (name == "EOL") {
-    return NodeCheckHelpers::stringLiteral(this->state.getAst(), expr->loc(),
-                                           NodeCheckHelpers::targetIsWindows() ? "\r\n" : "\n");
+  auto value = OsValueTable::find(name);
+  if (!value.has_value()) {
+    return nullptr;
   }
-  if (name == "devNull") {
-    return NodeCheckHelpers::stringLiteral(this->state.getAst(), expr->loc(),
-                                           NodeCheckHelpers::targetIsWindows() ? "\\\\.\\nul"
-                                                                               : "/dev/null");
-  }
+  auto text = this->osValueText(value.value());
 
-  return nullptr;
+  return NodeCheckHelpers::stringLiteral(this->state.getAst(), expr->loc(), text);
 }
 
-OsChecker::ResultOsFunction OsChecker::osFunction(llvm::StringRef functionName) const {
-  if (functionName == "EOL" || functionName == "devNull") {
+llvm::StringRef OsChecker::osValueText(OsValue value) const {
+  bool isWindows = NodeCheckHelpers::isTargetWindows();
+  switch (value) {
+    case OsValue::END_OF_LINE:
+      return isWindows ? "\r\n" : "\n";
+    case OsValue::DEV_NULL:
+      return isWindows ? "\\\\.\\nul" : "/dev/null";
+  }
+
+  return "";
+}
+
+OsChecker::ResultOsFunction OsChecker::checkKnownOsFunction(llvm::StringRef functionName) const {
+  auto value = OsValueTable::find(functionName);
+  if (value.has_value()) {
     auto message = ErrorTextOs::notCalled(functionName);
 
     return err(OsCheckerOsFunctionError{
@@ -65,12 +76,10 @@ OsChecker::ResultOsFunction OsChecker::osFunction(llvm::StringRef functionName) 
 
 Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc) {
   call->type = Type::error();
-  auto function = this->osFunction(functionName);
+  auto function = this->checkKnownOsFunction(functionName);
   if (function.isErr()) {
     this->state.getDiagnostics().error(loc, function.error().message);
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
+    this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
   if (this->hasRejectedArgs(call, loc)) {

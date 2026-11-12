@@ -21,9 +21,10 @@ private:
   using ResultConcreteStream = Result<llvm::StringRef, StreamNewCheckerConcreteStreamError>;
   using ResultChunkTypeGiven = Result<const NewExpr *, StreamNewCheckerChunksGivenError>;
 
-  ResultConcreteStream concreteStream(llvm::StringRef name, bool readable, bool writable) const;
-  ResultChunkTypeGiven chunksGiven(const NewExpr *expr, const ClassDecl *generic,
-                                   const Type *expected) const;
+  ResultConcreteStream checkConcreteStream(llvm::StringRef name, bool readable,
+                                           bool writable) const;
+  ResultChunkTypeGiven checkChunksGiven(const NewExpr *expr, const ClassDecl *generic,
+                                        const Type *expected) const;
 
   Expr *failedNew(NewExpr *expr, const std::string &message);
 

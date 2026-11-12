@@ -47,25 +47,31 @@ private:
   using ResultMethodsAreFound =
       Result<std::vector<FunctionDecl *>, MethodCallCheckerInstanceMethodsError>;
 
-  ResultClassNotRuntime notRuntime(const ClassDecl *classDecl) const;
-  ResultClassIsDeclared classDeclared(const ClassDecl *classDecl) const;
-  ResultFieldsAreAllSet fieldsSet(const MemberExpr *member) const;
-  ResultClassIsConcrete classConcrete(const ClassDecl *classDecl) const;
-  ResultFieldIsCallable fieldCallable(const Type *type, llvm::StringRef name) const;
-  ResultNoTypeArguments classTypeArgs(const NewExpr *expr, const ClassDecl *classDecl) const;
-  ResultArgumentsAbsent argumentsAbsent(const CallExpr *call, const ClassDecl *classDecl) const;
-  ResultMethodsAreFound instanceMethods(const ClassDecl *classDecl, llvm::StringRef name) const;
-  ResultTypeArgsAllowed methodTypeArgs(const FuncSymbol *function, const MemberExpr *member) const;
+  ResultFieldIsCallable checkFieldCallable(const Type *type, llvm::StringRef name) const;
+  ResultMethodsAreFound checkInstanceMethods(const ClassDecl *classDecl,
+                                             llvm::StringRef name) const;
+  ResultFieldsAreAllSet checkFieldsSet(const MemberExpr *member) const;
+  ResultTypeArgsAllowed checkMethodTypeArgs(const FuncSymbol *function,
+                                            const MemberExpr *member) const;
   Expr *checkLibraryMethodCall(CallExpr *call, MemberExpr *member, ClassDecl *classDecl);
   Expr *checkFieldCall(CallExpr *call, MemberExpr *member);
+  Expr *checkFieldValueCall(CallExpr *call, const Type *type);
   void walkMethodAccess(MemberExpr *member, FunctionDecl *method);
   Expr *checkGenericMethodCall(CallExpr *call, MemberExpr *member, FuncSymbol *function,
                                const Type *expected);
   Expr *checkPlainMethodCall(CallExpr *call, MemberExpr *member, ClassDecl *classDecl,
-                             FuncSymbol *function, bool checked);
+                             FuncSymbol *function, bool isChecked);
+  MethodCall methodTarget(ClassDecl *classDecl, FuncSymbol *function) const;
+  ResultClassNotRuntime checkNotRuntime(const ClassDecl *classDecl) const;
+  ResultNoTypeArguments checkClassTypeArgs(const NewExpr *expr, const ClassDecl *classDecl) const;
+  ResultClassIsDeclared checkClassDeclared(const ClassDecl *classDecl) const;
+  ResultClassIsConcrete checkClassConcrete(const ClassDecl *classDecl) const;
+  ResultArgumentsAbsent checkArgumentsAbsent(const CallExpr *call,
+                                             const ClassDecl *classDecl) const;
+  Expr *failClassNew(NewExpr *expr);
   void walkNewClass(const NewExpr *expr, const ClassDecl *classDecl);
-  bool noArgumentsFit(const NewExpr *expr, CallExpr *call, const ClassDecl *classDecl);
-  bool constructorChosen(const NewExpr *expr, CallExpr *call,
+  bool reportUnexpectedArgs(const NewExpr *expr, CallExpr *call, const ClassDecl *classDecl);
+  bool chooseConstructor(const NewExpr *expr, CallExpr *call,
                          llvm::ArrayRef<FunctionDecl *> constructors);
   bool hasInitializer(const ClassDecl *classDecl) const;
 

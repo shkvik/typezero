@@ -24,14 +24,20 @@ class MethodCallChecker;
 class GenericInstantiator;
 class GenericClassInstantiator;
 
+enum class ListenerOwner {
+  EMITTER,
+  TIMER,
+};
+
 class EmitterChecker {
 public:
   EmitterChecker(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkEmitterCall(CallExpr *call, MemberExpr *member, ClassDecl *classDecl, bool super);
+  Expr *checkEmitterCall(CallExpr *call, MemberExpr *member, ClassDecl *classDecl,
+                         CallReceiver callReceiver);
   Expr *callLibraryMethod(CallExpr *call, MemberExpr *member, ClassDecl *classDecl,
                           llvm::StringRef name, llvm::ArrayRef<const Type *> bound,
-                          const std::vector<bool> *given, bool super);
+                          const std::vector<bool> *given, CallReceiver receiver);
   void reportEmitterMethodValue(MemberExpr *member);
   Expr *checkEmitterNew(NewExpr *expr, ClassDecl *generic, const Type *expected);
   void finishSentEmits();
@@ -39,8 +45,15 @@ public:
   void walkErrorListeners();
   void walkDroppedListeners();
   void noteErrorsHandled(const Expr *emitter);
-  bool classifyListener(Expr *arg, const Expr *emitter, int &bits, bool timer = false);
-  bool ownsEmitter(const Expr *emitter) const;
+  bool classifyListener(Expr *arg, const Expr *emitter, int &bits, ListenerOwner owner);
+  bool isOwningEmitter(const Expr *emitter) const;
+  bool isMentioningParam(const Type *type) const;
+  const Expr *emitterRoot(const Expr *emitter) const;
+  const Expr *emitterLink(const Expr *expr) const;
+  bool isParamOf(const VarSymbol *variable, const Param &param) const;
+  bool hasSelfListener(const ClassDecl *classDecl) const;
+  const Type *newEventMap(NewExpr *expr, const ClassDecl *generic, const Type *expected);
+  Expr *failEmitterNew(NewExpr *expr);
   bool canReceive(const Type *type) const;
 
 private:
@@ -61,7 +74,7 @@ private:
     ClassDecl *cls;
     const Type *receiver;
     const Type *events;
-    bool super;
+    CallReceiver callReceiver;
   };
 
   struct EmitShape {
@@ -84,9 +97,9 @@ private:
   ListenerShape closureShape(FunctionDecl *functionDecl) const;
   ListenerShape functionShape(FunctionDecl *functionDecl) const;
   bool addListenerReceiver(const ListenerShape &shape, bool topLevel, int &bits);
-  bool reportsUnknownListener(const Expr *arg, bool timer);
-  bool reportsCapturesKept(const Expr *arg, const std::vector<const VarSymbol *> &captured,
-                           bool timer);
+  bool reportUnknownListener(const Expr *arg, bool timer);
+  bool reportCapturesKept(const Expr *arg, const std::vector<const VarSymbol *> &captured,
+                          bool timer);
   EmitterMethod emitterMethod(llvm::StringRef name) const;
   std::optional<std::string> chainText(const Expr *expr) const;
   std::optional<std::string> rootText(const Expr *expr) const;
@@ -105,7 +118,7 @@ private:
   Expr *checkEmit(const EmitterCall &emitter, bool library);
   Expr *checkSiteEmit(const EmitterCall &emitter, EventSite *site, bool library);
   Expr *checkEmitShape(const EmitterCall &emitter, const EmitShape &shape, bool library);
-  bool emitValuesFit(CallExpr *call, const EmitShape &shape, std::vector<bool> &given);
+  bool matchEmitValues(CallExpr *call, const EmitShape &shape, std::vector<bool> &given);
   Expr *checkListenCall(const EmitterCall &emitter, EmitterMethod kind);
   bool addListenerBits(const EmitterCall &emitter, llvm::StringRef event, ListenerKind listener);
   Expr *checkListenersCall(const EmitterCall &emitter, EmitterMethod kind);

@@ -41,7 +41,7 @@ const std::pair<GlobalName, Builtin> kUriBuiltins[] = {
     {GlobalName::DECODE_URI, Builtin::UriDecode},
 };
 
-constexpr size_t kMaxParseIntArgs = 2;
+constexpr unsigned kMaxParseIntArgs = 2;
 
 }
 
@@ -413,7 +413,7 @@ GlobalFunctionChecker::ResultFunctionCalled GlobalFunctionChecker::numberOf(Call
 GlobalFunctionChecker::ResultFunctionCalled
 GlobalFunctionChecker::checkParseCall(CallExpr *call, std::optional<GlobalName> global) {
   bool isInt = global == GlobalName::PARSE_INT;
-  size_t maxArgs = isInt ? kMaxParseIntArgs : 1;
+  unsigned maxArgs = isInt ? kMaxParseIntArgs : 1;
   auto arity = this->argumentChecker->checkArity(call, 1, maxArgs);
   if (arity.isErr()) {
     return err(GlobalFunctionCheckerCheckGlobalFunctionError{

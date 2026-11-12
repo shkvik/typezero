@@ -38,7 +38,7 @@ public:
   ResultClassDeclared checkClassStmt(ClassDecl *classDecl);
   ResultInitThisFound isInitThis(const Expr *expr) const;
   ResultHasDecorators hasDecorators(const ClassDecl *classDecl) const;
-  ResultObjectIsReady thisReady(const Flow &flow) const;
+  ResultObjectIsReady checkThisReady(const Flow &flow) const;
   ResultFieldUnsetYet firstUnset(const Flow &flow) const;
 
 private:
@@ -47,10 +47,20 @@ private:
   using ResultFieldHasValue = Result<const ClassField *, ClassCheckerFieldStartValueError>;
   using ResultReturnMatches = Result<const FunctionDecl *, ClassCheckerOverrideReturnError>;
 
-  ResultThisReadiness readyThis(VarSymbol *variable) const;
-  ResultThisComesFrom thisOf(const FunctionDecl *current) const;
-  ResultReturnMatches overrideReturn(const ClassDecl *classDecl, const FunctionDecl *method);
-  ResultFieldHasValue fieldStartValue(const ClassDecl *classDecl, const ClassField &field) const;
+  bool isDecoratedFunction(const FunctionDecl *functionDecl) const;
+  bool isDecoratedParam(const Param &param) const;
+  bool isDecoratedField(const ClassField &field) const;
+  ResultFieldHasValue checkFieldStartValue(const ClassDecl *classDecl,
+                                           const ClassField &field) const;
+  ResultReturnMatches checkOverrideReturn(const ClassDecl *classDecl, const FunctionDecl *method);
+  void walkFieldStarts(const ClassDecl *classDecl);
+  std::vector<FunctionDecl *> classMethods(const ClassDecl *classDecl) const;
+  void walkClassMethod(FunctionDecl *functionDecl);
+  void walkOverrideReturns(const ClassDecl *classDecl);
+  bool isUnsetField(const Flow &flow, const ClassField &field) const;
+  ResultThisComesFrom checkThisOf(const FunctionDecl *current) const;
+  std::string thisMemberText() const;
+  ResultThisReadiness checkReadyThis(VarSymbol *variable) const;
 
   SemanticState &state;
   ClassLinks *classLinks = nullptr;

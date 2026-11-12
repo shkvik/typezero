@@ -16,7 +16,7 @@ FsPromisesChecker::FsPromisesChecker(SemanticState &owner, SemanticParts &all)
 }
 
 FsPromisesChecker::ResultPromiseFunction
-FsPromisesChecker::promiseFunction(llvm::StringRef functionName) const {
+FsPromisesChecker::checkPromiseFunction(llvm::StringRef functionName) const {
   if (functionName == "constants") {
     auto message = ErrorTextFsPromises::constants();
 
@@ -41,7 +41,7 @@ Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef fun
                                              llvm::SMLoc loc) {
   this->state.getInventoryStore().markUsesAsync();
   call->type = Type::error();
-  auto function = this->promiseFunction(functionName);
+  auto function = this->checkPromiseFunction(functionName);
   if (function.isErr()) {
     this->state.getDiagnostics().error(loc, function.error().message);
     for (Expr *&arg : call->args) {

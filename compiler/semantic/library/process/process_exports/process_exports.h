@@ -11,7 +11,7 @@ class ProcessExports {
 public:
   using ResultExportFound = Result<llvm::StringRef, ModuleExportFoundError>;
 
-  static ResultExportFound processExport(llvm::StringRef name, llvm::StringRef path);
+  static ResultExportFound checkProcessExport(llvm::StringRef name, llvm::StringRef path);
 };
 
 }

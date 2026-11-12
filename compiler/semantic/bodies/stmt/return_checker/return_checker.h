@@ -33,7 +33,7 @@ public:
 
   void walkReturn(ReturnStmt *returnStmt);
   bool isExit(const Stmt *stmt) const;
-  bool alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels = {}) const;
+  bool isAlwaysReturning(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels = {}) const;
 
 private:
   using ResultVoidReturnsEmpty = Result<const Type *, ReturnCheckerVoidReturnError>;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/builtin_names/global_member_table/global_member_table.h"
 #include "compiler/program/library/dict/dict_method_table/dict_method_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/objects/dict_methods/dict_methods_errors.h"
@@ -16,6 +17,11 @@ class DictNewChecker;
 class ArgumentChecker;
 class CallbackChecker;
 
+enum class GroupByOwner {
+  MAP,
+  OBJECT,
+};
+
 class DictMethods {
 public:
   using ResultGroupByCallTyped = Result<Expr *, DictMethodsCheckGroupByError>;
@@ -26,11 +32,13 @@ public:
 
   DictMethods(SemanticState &owner, SemanticParts &all);
 
-  ResultGroupByCallTyped checkGroupBy(CallExpr *call, bool map);
+  ResultGroupByCallTyped checkGroupBy(CallExpr *call, GroupByOwner owner);
   ResultMapFunctionTyped checkMapStatic(CallExpr *call, MemberExpr *member);
   ResultDictMethodCalled checkDictMethod(CallExpr *call, MemberExpr *member);
   ResultFromEntriesTyped checkFromEntries(CallExpr *call, const Type *expected);
   ResultDictObjectCalled checkDictObjectCall(CallExpr *call, llvm::StringRef functionName);
+  Builtin objectCallBuiltin(std::optional<GlobalMember> member) const;
+  const Type *objectCallType(std::optional<GlobalMember> member, const Type *value) const;
 
 private:
   struct DictCall {
@@ -43,22 +51,25 @@ private:
     bool isMap = false;
   };
 
-  const Type *iteratedType(const DictCall &dict, DictMethod method) const;
+  ResultDictMethodCalled checkRecordMethod(CallExpr *call, MemberExpr *member,
+                                           const std::string &text);
+  ResultDictMethodCalled checkDictArity(CallExpr *call, unsigned min, unsigned max);
   ResultDictMethodCalled toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result) const;
-
   ResultDictMethodCalled checkGet(const DictCall &dict);
   ResultDictMethodCalled checkSet(const DictCall &dict);
   ResultDictMethodCalled checkAdd(const DictCall &dict);
-  ResultDictMethodCalled checkClear(const DictCall &dict);
-  ResultDictMethodCalled checkForEach(const DictCall &dict);
   ResultDictMethodCalled checkKeyTest(const DictCall &dict);
+  ResultDictMethodCalled checkClear(const DictCall &dict);
   ResultDictMethodCalled checkIterating(const DictCall &dict, DictMethod method);
-  ResultDictMethodCalled checkDictArity(CallExpr *call, unsigned min, unsigned max);
-  ResultFromEntriesTyped recordFromEntries(CallExpr *call, const Type *element);
+  const Type *iteratedType(const DictCall &dict, DictMethod method) const;
+  ResultDictMethodCalled checkForEach(const DictCall &dict);
   ResultDictMethodCalled checkSetCombine(const DictCall &dict, const DictMethodInfo &found);
-  ResultDictMethodCalled recordMethod(CallExpr *call, MemberExpr *member, const std::string &text);
-  ResultGroupByCallTyped groupByKey(CallExpr *call, const Type *element, bool map,
-                                    const std::string &fn);
+  const Type *walkEntriesSource(CallExpr *call, const Type *record);
+  ResultFromEntriesTyped checkEntriesRecord(CallExpr *call, const Type *element);
+  ResultGroupByCallTyped checkGroupKey(CallExpr *call, const Type *element, GroupByOwner owner,
+                                       const std::string &functionName);
+  ResultMapFunctionTyped checkMapGroupBy(CallExpr *call);
+  DictMethodsCheckMapStaticErrorCode mapStaticCode(DictMethodsCheckGroupByErrorCode code) const;
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

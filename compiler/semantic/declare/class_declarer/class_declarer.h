@@ -89,6 +89,7 @@ public:
   std::vector<FunctionDecl *> staticMethodsNamed(const ClassDecl *classDecl,
                                                  llvm::StringRef name) const;
   std::vector<FunctionDecl *> memberFunctions(const ClassDecl *classDecl) const;
+  bool hasMethodFields(const ClassDecl *classDecl) const;
 
   void declareClass(ClassDecl *classDecl);
   void resolveClass(ClassDecl *classDecl);
@@ -101,6 +102,7 @@ public:
   FunctionDecl *makeInitDecl(ClassDecl *classDecl, std::vector<Stmt *> sets);
 
 private:
+  bool isMethodMember(const ClassField &field) const;
   using ResultStaticTypeFixed = Result<const Type *, ClassDeclarerStaticTypeParamsError>;
   using ResultParamTypePassed = Result<const Type *, ClassDeclarerParamTypeError>;
   using ResultFieldNameUnique = Result<const ClassField *, ClassDeclarerUniqueFieldError>;

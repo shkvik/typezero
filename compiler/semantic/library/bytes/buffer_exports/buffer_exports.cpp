@@ -20,8 +20,8 @@ const llvm::StringLiteral kBufferExports[] = {"Blob",
                                               "INSPECT_MAX_BYTES"};
 }
 
-BufferExports::ResultExportFound BufferExports::bufferExport(llvm::StringRef name,
-                                                             llvm::StringRef path) {
+BufferExports::ResultExportFound BufferExports::checkBufferExport(llvm::StringRef name,
+                                                                  llvm::StringRef path) {
   if (name == "Buffer") {
     return ok(name);
   }

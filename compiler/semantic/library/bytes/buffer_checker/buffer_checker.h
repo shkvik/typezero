@@ -19,7 +19,7 @@ class MemberChecker;
 class TypeRelations;
 class ConstantFolder;
 class ArgumentChecker;
-struct NumberMethod;
+struct BytesNumberMethod;
 
 class BufferChecker {
 public:
@@ -45,8 +45,8 @@ private:
   using ResultDecodedInput = Result<const Type *, BufferCheckerDecodedInputError>;
   using ResultVarValueFits = Result<const Expr *, BufferCheckerVarValueFitsError>;
 
-  ResultDecodedInput decodedInput(const Type *type) const;
-  ResultCountOfBytes countOfBytes(std::optional<int64_t> count, llvm::StringRef name) const;
+  ResultDecodedInput checkDecodedInput(const Type *type) const;
+  ResultCountOfBytes checkCountOfBytes(std::optional<int64_t> count, llvm::StringRef name) const;
   std::optional<std::u16string> literalText(const Expr *expr) const;
   Expr *toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result) const;
 
@@ -72,9 +72,9 @@ private:
   EncodingAndPositions splitWriteArgs(const BufferCall &buffer);
   EncodingAndPositions splitValueArgs(const BufferCall &buffer);
   void reportEncodingWithoutText(const Expr *value, const Expr *encoding);
-  Expr *checkFixedNumber(const BufferCall &buffer, const NumberMethod &number);
-  Expr *checkVariableNumber(const BufferCall &buffer, const NumberMethod &number);
-  ResultVarValueFits varValueFits(const Expr *value, int64_t width, bool isSigned);
+  Expr *checkFixedNumber(const BufferCall &buffer, const BytesNumberMethod &number);
+  Expr *checkVariableNumber(const BufferCall &buffer, const BytesNumberMethod &number);
+  ResultVarValueFits checkVarValueFits(const Expr *value, int64_t width, bool isSigned);
   void reportUnprovenUpTo(const IndexProofs::ResultUpToWasProven &upTo, llvm::SMLoc at);
   void reportUnprovenBetween(const IndexProofs::ResultBetweenProven &between, llvm::SMLoc at);
 

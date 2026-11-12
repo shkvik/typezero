@@ -306,7 +306,7 @@ const Type *TargetChecker::keyedTargetType(Expr *&target, IndexExpr *index, Assi
       written.isErr() &&
       written.error().code != KeyedFieldCheckerCheckKeyedFieldErrorCode::ALREADY_REPORTED;
   if (isReportable) {
-    bool isWrongKey = this->keyedFieldChecker->wrongKey(written.error().code);
+    bool isWrongKey = this->keyedFieldChecker->isWrongKey(written.error().code);
     llvm::SMLoc at = isWrongKey ? index->index->loc() : index->loc();
     this->state.getDiagnostics().error(at, written.error().message);
   }

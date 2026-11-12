@@ -29,8 +29,8 @@ public:
 
   NamedKey metadataKey(const Expr *key) const;
   ClassDecl *builtinConstructorNamed(llvm::StringRef name);
-  ResultMetadataTyped metadataType(const void *key, llvm::StringRef label, llvm::SMLoc loc,
-                                   const Type *expected);
+  ResultMetadataTyped checkMetadataType(const void *key, llvm::StringRef label, llvm::SMLoc loc,
+                                        const Type *expected);
   void writeDesignRecords(ClassDecl *classDecl, ClassField *field, FunctionDecl *method,
                           const FunctionDecl *constructor, llvm::SMLoc loc);
 

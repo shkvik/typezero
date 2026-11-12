@@ -29,21 +29,40 @@ public:
   void noteReflectedConversion(const Type *from, const Type *to, const CastExpr *castExpr);
   void noteConstructorFlow(const Type *from, const Type *to);
   void finishReflection();
-  bool onlyChecked() const;
+  bool isOnlyChecked() const;
 
 private:
   using ResultConstructible = Result<ClassDecl *, ReflectCheckerConstructibleError>;
   using ResultFillableClass = Result<ClassDecl *, ReflectCheckerFillableClassError>;
 
-  ResultFillableClass fillableClass(ClassDecl *made) const;
+  ResultFillableClass checkFillableClass(ClassDecl *made) const;
   void classesIn(const Type *type, llvm::SmallPtrSetImpl<ClassDecl *> &out) const;
   void constructorsIn(const Type *type, llvm::SmallVectorImpl<const Type *> &out) const;
-  bool instanceOf(const Type *made, const Type *of) const;
+  bool isInstanceOf(const Type *made, const Type *of) const;
   Expr *stripImplicit(Expr *expr) const;
+  bool isCheckOnlyFunction(const FunctionDecl *functionDecl) const;
+  void noteWidening(const Type *source, const Type *target);
+
+  struct ConstructorEntry {
+    ClassDecl *classDecl;
+    const Type *constructed;
+  };
+
+  using TypeSet = llvm::SmallPtrSet<const Type *, 8>;
+  using ReachMap = llvm::DenseMap<const Type *, TypeSet>;
+
+  std::vector<ConstructorEntry> constructorEntries() const;
+  void walkReflectedNew(const ReflectedNew &reflected, llvm::ArrayRef<ConstructorEntry> entries,
+                        ReachMap &reach);
+  std::vector<ClassDecl *> reachingClasses(const Type *made,
+                                           llvm::ArrayRef<ConstructorEntry> entries,
+                                           ReachMap &reach) const;
+  const TypeSet &reachableFrom(const Type *start, ReachMap &reach) const;
+  void fillReachable(const Type *start, TypeSet &reached) const;
 
   Expr *okOf(Expr *value);
   const Type *reflectError();
-  ResultConstructible constructible(ClassDecl *classDecl, llvm::ArrayRef<const Type *> args);
+  ResultConstructible checkConstructible(ClassDecl *classDecl, llvm::ArrayRef<const Type *> args);
   void walkReflectNews();
   void markReflectMethods(ClassDecl *classDecl) const;
 

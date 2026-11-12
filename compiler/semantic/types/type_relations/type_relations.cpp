@@ -1163,7 +1163,7 @@ std::vector<std::pair<int64_t, int64_t>> TypeRelations::targetIntervals(const Ty
 bool TypeRelations::canProveSomeInterval(const Expr *expr,
                                          llvm::ArrayRef<std::pair<int64_t, int64_t>> intervals) {
   for (const std::pair<int64_t, int64_t> &interval : intervals) {
-    if (this->byteProofs->provesFits(expr, interval.first, interval.second)) {
+    if (this->byteProofs->canProveFits(expr, interval.first, interval.second)) {
       return true;
     }
   }

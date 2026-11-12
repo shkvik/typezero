@@ -46,7 +46,7 @@ std::optional<TypeName> ResultTypes::findResultType(llvm::StringRef name) const 
   return builtin->type;
 }
 
-ResultTypes::ResultImportSource ResultTypes::importSource(const ImportDecl &importDecl) const {
+ResultTypes::ResultImportSource ResultTypes::checkImportSource(const ImportDecl &importDecl) const {
   if (importDecl.path == "neverthrow") {
     auto message = ErrorTextResultType::neverthrow();
 
@@ -59,7 +59,7 @@ ResultTypes::ResultImportSource ResultTypes::importSource(const ImportDecl &impo
   return ok(&importDecl);
 }
 
-ResultTypes::ResultTypeArgsPair ResultTypes::resultTypeArgs(const TypeRef &ref) const {
+ResultTypes::ResultTypeArgsPair ResultTypes::checkResultTypeArgs(const TypeRef &ref) const {
   if (ref.args.size() != 2) {
     auto message = ErrorTextResultType::typeArgs(ref.name);
 
@@ -73,40 +73,39 @@ ResultTypes::ResultTypeArgsPair ResultTypes::resultTypeArgs(const TypeRef &ref) 
 }
 
 const Type *ResultTypes::resolveResultType(const TypeRef &ref, TypeName result) {
-  auto args = this->resultTypeArgs(ref);
+  auto args = this->checkResultTypeArgs(ref);
   if (args.isErr()) {
     this->state.getDiagnostics().error(ref.loc, args.error().message);
     return Type::error();
   }
-  auto half = [&](const TypeRef &arg) -> const Type * {
-    if (arg.kind() == TypeRefKind::NAME_REF && TypeNameTable::isName(arg.name, TypeName::NEVER)) {
-      return Type::never();
-    }
+  const auto *valueHalf = this->resolveResultHalf(ref.args[0]);
+  const auto *errorHalf = this->resolveResultHalf(ref.args[1]);
+  const auto *value = result == TypeName::ERR ? Type::never() : valueHalf;
+  const auto *error = result == TypeName::OK ? Type::never() : errorHalf;
 
-    return this->typeResolver->resolveTypeInner(arg);
-  };
-  const Type *value = half(ref.args[0]);
-  const Type *error = half(ref.args[1]);
-  if (result == TypeName::OK) {
-    error = Type::never();
-  } else if (result == TypeName::ERR) {
-    value = Type::never();
-  }
   return Type::result(value, error);
 }
 
-const Type *ResultTypes::unifyHalf(const Type *a, const Type *b) const {
-  return TypeRelations::unifyAs(UnifyForm::HALF, a, b);
+const Type *ResultTypes::resolveResultHalf(const TypeRef &arg) {
+  if (arg.kind() == TypeRefKind::NAME_REF && TypeNameTable::isName(arg.name, TypeName::NEVER)) {
+    return Type::never();
+  }
+
+  return this->typeResolver->resolveTypeInner(arg);
 }
 
-UnifyShortcut ResultTypes::halfShortcut(const Type *a, const Type *b) {
-  if (a == b || b->isNever()) {
-    return {true, a};
+const Type *ResultTypes::unifyHalf(const Type *first, const Type *second) const {
+  return TypeRelations::unifyAs(UnifyForm::HALF, first, second);
+}
+
+UnifyShortcut ResultTypes::halfShortcut(const Type *first, const Type *second) {
+  if (first == second || second->isNever()) {
+    return {true, first};
   }
-  if (a->isNever()) {
-    return {true, b};
+  if (first->isNever()) {
+    return {true, second};
   }
-  if (a->isVoid() || b->isVoid()) {
+  if (first->isVoid() || second->isVoid()) {
     return {true, nullptr};
   }
 
@@ -114,15 +113,15 @@ UnifyShortcut ResultTypes::halfShortcut(const Type *a, const Type *b) {
 }
 
 void ResultTypes::neverOperands(BinaryExpr *binary) {
-  const Type *l = binary->lhs->type;
-  const Type *r = binary->rhs->type;
-  if (l->isNever() && r->isNever()) {
+  const Type *leftType = binary->lhs->type;
+  const Type *rightType = binary->rhs->type;
+  if (leftType->isNever() && rightType->isNever()) {
     binary->lhs = this->typeRelations->convert(binary->lhs, Type::doubleTy());
     binary->rhs = this->typeRelations->convert(binary->rhs, Type::doubleTy());
-  } else if (l->isNever() && !r->isError() && !r->isVoid()) {
-    binary->lhs = this->typeRelations->convert(binary->lhs, r);
-  } else if (r->isNever() && !l->isError() && !l->isVoid()) {
-    binary->rhs = this->typeRelations->convert(binary->rhs, l);
+  } else if (leftType->isNever() && !rightType->isError() && !rightType->isVoid()) {
+    binary->lhs = this->typeRelations->convert(binary->lhs, rightType);
+  } else if (rightType->isNever() && !leftType->isError() && !leftType->isVoid()) {
+    binary->rhs = this->typeRelations->convert(binary->rhs, leftType);
   }
 }
 

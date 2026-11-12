@@ -24,25 +24,35 @@ public:
   ReflectCallChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkReflectArgs(Expr *args);
-  FunctionDecl *knownReflectMethod(ClassDecl *classDecl, llvm::StringRef name, bool &several);
-  const FunctionDecl *heldReflectMethod(const Expr *f);
+  struct KnownMethod {
+    FunctionDecl *method;
+    bool hasSeveral;
+  };
+
+  std::optional<KnownMethod> knownReflectMethod(ClassDecl *classDecl, llvm::StringRef name);
+  const FunctionDecl *heldReflectMethod(const Expr *expr);
   Expr *directReflectApply(CallExpr *call, const FunctionDecl *functionDecl);
   Expr *checkReflectCall(CallExpr *call, MemberExpr *member, const Type *expected);
-  bool reflectAccepts(const Type *arg, const Type *param) const;
+  bool isReflectAccepting(const Type *arg, const Type *param) const;
 
 private:
   using ResultKeyOfRecords = Result<const Type *, ReflectCallCheckerKeyOfRecordsError>;
   using ResultTargetObject = Result<const Type *, ReflectCallCheckerTargetObjectError>;
   using ResultArgumentList = Result<const Type *, ReflectCallCheckerArgumentListError>;
 
-  ResultKeyOfRecords keyOfRecords(const Type *type) const;
-  ResultTargetObject targetObject(const Type *type) const;
-  ResultArgumentList argumentList(const Type *type) const;
+  ResultKeyOfRecords checkKeyOfRecords(const Type *type) const;
+  ResultTargetObject checkTargetObject(const Type *type) const;
+  ResultArgumentList checkArgumentList(const Type *type) const;
   const Type *designType(const Expr *key) const;
   bool isDesignKey(const Expr *key) const;
   Expr *stripImplicit(Expr *expr) const;
-  bool declaredBelow(const ClassDecl *classDecl, llvm::StringRef name) const;
-  bool acceptsPlain(const Type *arg, const Type *param) const;
+  bool isDeclaredBelow(const ClassDecl *classDecl, llvm::StringRef name) const;
+  bool isPlainAccepting(const Type *arg, const Type *param) const;
+  bool isClassRefAccepting(const Type *arg, const Type *param) const;
+  bool isObjectAccepting(const Type *arg, const Type *param) const;
+  bool isGenericMethod(const FunctionDecl *functionDecl) const;
+  bool isReflectCallable(ClassDecl *classDecl, FunctionDecl *functionDecl) const;
+  bool hasOwnMethodNamed(const ClassDecl *owner, llvm::StringRef name) const;
 
   struct MetadataFunction {
     Builtin builtin = Builtin::None;

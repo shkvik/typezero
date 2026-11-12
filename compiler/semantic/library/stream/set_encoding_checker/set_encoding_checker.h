@@ -26,8 +26,8 @@ private:
   using ResultStdinIsPlaced = Result<const Module *, SetEncodingCheckerStdinPlaceError>;
   using ResultDecodedChunks = Result<const Type *, SetEncodingCheckerDecodedChunksError>;
 
-  ResultStdinIsPlaced stdinPlace() const;
-  ResultDecodedChunks decodedChunks(const Type *readable, const Type *receiver) const;
+  ResultStdinIsPlaced checkStdinPlace() const;
+  ResultDecodedChunks checkDecodedChunks(const Type *readable, const Type *receiver) const;
 
   struct StreamEscape {
     llvm::SMLoc loc;
@@ -52,6 +52,9 @@ private:
   std::optional<std::string> encodingPathProblem(const std::optional<FieldPath> &path,
                                                  bool stdinStream) const;
   std::optional<llvm::StringRef> writableField(const FieldPath &path) const;
+  std::vector<const Type *> encodedArgs(const ClassDecl *classDecl) const;
+  const Type *instantiateEncoded(ClassDecl *generic, const std::vector<const Type *> &args,
+                                 llvm::SMLoc loc);
   bool isOwnBlock(const VarSymbol *root, bool stdinStream) const;
   void markEscapeWindow(EncodingRun &run) const;
   bool isBefore(const EncodingRun &run, const Expr *expr) const;

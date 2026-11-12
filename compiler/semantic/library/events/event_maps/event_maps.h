@@ -29,7 +29,7 @@ public:
 
   bool isEmitterClass(const ClassDecl *classDecl) const;
   const Type *eventMapOf(const Type *type) const;
-  ResultEventMapFits eventMapFits(const Type *events) const;
+  ResultEventMapFits checkEventMapFits(const Type *events) const;
   bool isServiceEvent(llvm::StringRef name) const;
   const Type *serviceEventArgs() const;
   std::optional<std::string> eventKey(Expr *&name, llvm::StringRef method);
@@ -44,10 +44,10 @@ public:
 private:
   using ResultListenerThis = Result<const Type *, EventMapsListenerThisError>;
 
-  ResultListenerThis listenerThis(const Type *self, const Type *receiver) const;
-  bool carriesOne(const Type *args) const;
-  ResultEventMapFits recordMapFits(const Type *events) const;
-  ResultEventMapFits eventFieldFits(const Field &field) const;
+  ResultListenerThis checkListenerThis(const Type *self, const Type *receiver) const;
+  bool isCarryingOne(const Type *args) const;
+  ResultEventMapFits checkRecordMapFits(const Type *events) const;
+  ResultEventMapFits checkEventFieldFits(const Field &field) const;
   std::string nearestEvent(const Type *events, llvm::StringRef name) const;
 
   struct ListenerWant {
@@ -58,7 +58,7 @@ private:
     const Type *async = nullptr;
   };
 
-  bool listenerTakesThis(const ListenerWant &want, const Type *self, llvm::SMLoc loc);
+  bool isListenerTakingThis(const ListenerWant &want, const Type *self, llvm::SMLoc loc);
   const Type *withThis(const ListenerWant &want, const Type *self) const;
   Expr *checkListenerLiteral(FunctionExpr *functionExpr, const ListenerWant &want,
                              ListenerKind &kind);

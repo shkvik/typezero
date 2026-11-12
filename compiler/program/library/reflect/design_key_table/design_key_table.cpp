@@ -4,6 +4,8 @@ namespace tz {
 
 namespace {
 
+constexpr llvm::StringLiteral kDesignPrefix = "design:";
+
 const DesignKeyInfo kRows[] = {
     {
         .name = "design:type",
@@ -39,6 +41,10 @@ std::optional<DesignKey> DesignKeyTable::find(llvm::StringRef name) {
   }
 
   return std::nullopt;
+}
+
+llvm::StringRef DesignKeyTable::getPrefix() {
+  return kDesignPrefix;
 }
 
 }

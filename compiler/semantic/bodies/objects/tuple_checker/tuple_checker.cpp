@@ -16,6 +16,12 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+constexpr const char *kTuplePlaceholder = "t";
+
+}
+
 TupleChecker::TupleChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->callChecker = &all.callChecker;
@@ -37,7 +43,7 @@ Expr *TupleChecker::arrayCopy(Expr *tuple) {
     }
   }
   auto *copy = this->state.getAst().make<ArrayLitExpr>(tuple->loc());
-  copy->elements.push_back({tuple, true});
+  copy->elements.push_back(ArrayLitExpr::Element{.expr = tuple, .spread = true});
   copy->type = Type::array(element);
 
   return copy;
@@ -64,21 +70,24 @@ TupleChecker::ResultTupleJoined TupleChecker::checkTupleJoin(CallExpr *call, Mem
   const Type *tuple = member->object->type;
   for (size_t index = 0; index < tuple->fields().size(); ++index) {
     const Type *element = tuple->fields()[index].type->nonOptional();
-    if (element->isNumeric() || element->isDecimal() || element->isBool() || element->isString() ||
-        element->isUndefined()) {
-      continue;
-    }
-    auto message = ErrorTextTupleJoin::notText(index, tuple->name(), element->name());
+    if (!this->isJoinableElement(element)) {
+      auto message = ErrorTextTupleJoin::notText(index, tuple->name(), element->name());
 
-    return err(TupleCheckerCheckTupleJoinError{
-        .code = TupleCheckerCheckTupleJoinErrorCode::ELEMENT_NOT_TEXT,
-        .message = message,
-    });
+      return err(TupleCheckerCheckTupleJoinError{
+          .code = TupleCheckerCheckTupleJoinErrorCode::ELEMENT_NOT_TEXT,
+          .message = message,
+      });
+    }
   }
   call->target = BuiltinCall{.builtin = Builtin::TupleJoin};
   call->type = Type::string();
 
   return ok(call);
+}
+
+bool TupleChecker::isJoinableElement(const Type *element) const {
+  return element->isNumeric() || element->isDecimal() || element->isBool() || element->isString() ||
+         element->isUndefined();
 }
 
 const Type *TupleChecker::tupleElement(const Type *tuple) const {
@@ -119,32 +128,13 @@ TupleChecker::ResultTupleMember TupleChecker::checkTupleMember(MemberExpr *membe
 TupleChecker::ResultTupleMethod TupleChecker::checkTupleMethod(CallExpr *call, MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
-  std::string text = "t";
-  auto *object = dyn_cast<NameExpr>(ObjectCheckHelpers::unnarrowed(member->object));
-  if (object != nullptr) {
-    text = object->name.str();
-  }
   const auto *method = ArrayMethodTable::find(name);
   bool isJoining = method != nullptr && method->method == ArrayMethod::JOIN;
-  bool isResizing = method != nullptr && method->form.is<ResizingArrayMethod>();
   if (isJoining) {
-    auto joined = this->checkTupleJoin(call, member);
-    bool isReported = joined.isErr() &&
-                      joined.error().code == TupleCheckerCheckTupleJoinErrorCode::ALREADY_REPORTED;
-    if (isReported) {
-      return err(TupleCheckerCheckTupleMethodError{
-          .code = TupleCheckerCheckTupleMethodErrorCode::ALREADY_REPORTED,
-          .message = "",
-      });
-    }
-    if (joined.isErr()) {
-      return err(TupleCheckerCheckTupleMethodError{
-          .code = TupleCheckerCheckTupleMethodErrorCode::JOIN_FAILED,
-          .message = joined.error().message,
-      });
-    }
-    return ok(joined.value());
+    return this->checkJoinMethod(call, member);
   }
+  bool isResizing = method != nullptr && method->form.is<ResizingArrayMethod>();
+  auto text = this->tupleText(member);
   this->argumentChecker->walkArgsLoosely(call);
   call->type = Type::error();
   if (isResizing) {
@@ -163,7 +153,6 @@ TupleChecker::ResultTupleMethod TupleChecker::checkTupleMethod(CallExpr *call, M
         .message = message,
     });
   }
-
   auto message = ErrorTextTupleMethod::destruct(name, text);
 
   return err(TupleCheckerCheckTupleMethodError{
@@ -172,16 +161,50 @@ TupleChecker::ResultTupleMethod TupleChecker::checkTupleMethod(CallExpr *call, M
   });
 }
 
+TupleChecker::ResultTupleMethod TupleChecker::checkJoinMethod(CallExpr *call, MemberExpr *member) {
+  auto joined = this->checkTupleJoin(call, member);
+  if (joined.isOk()) {
+    return ok(joined.value());
+  }
+  auto code = this->joinMethodCode(joined.error().code);
+
+  return err(TupleCheckerCheckTupleMethodError{
+      .code = code,
+      .message = joined.error().message,
+  });
+}
+
+TupleCheckerCheckTupleMethodErrorCode
+TupleChecker::joinMethodCode(TupleCheckerCheckTupleJoinErrorCode code) const {
+  switch (code) {
+    case TupleCheckerCheckTupleJoinErrorCode::ALREADY_REPORTED:
+      return TupleCheckerCheckTupleMethodErrorCode::ALREADY_REPORTED;
+    case TupleCheckerCheckTupleJoinErrorCode::WRONG_ARITY:
+    case TupleCheckerCheckTupleJoinErrorCode::ELEMENT_NOT_TEXT:
+      return TupleCheckerCheckTupleMethodErrorCode::JOIN_FAILED;
+  }
+
+  return TupleCheckerCheckTupleMethodErrorCode::JOIN_FAILED;
+}
+
+std::string TupleChecker::tupleText(const MemberExpr *member) const {
+  const Expr *unnarrowed = ObjectCheckHelpers::unnarrowed(member->object);
+  auto *object = dyn_cast<NameExpr>(unnarrowed);
+  if (object == nullptr) {
+    return kTuplePlaceholder;
+  }
+
+  return object->name.str();
+}
+
 TupleChecker::ResultTupleFilled TupleChecker::checkTupleLit(ArrayLitExpr *literal,
                                                             const Type *tuple) {
   llvm::ArrayRef<Field> fields = tuple->fields();
   literal->type = Type::error();
-  auto spreads = [](const ArrayLitExpr::Element &element) { return element.spread; };
-  bool isSpread = llvm::any_of(literal->elements, spreads);
+  bool isSpread =
+      llvm::any_of(literal->elements, std::bind_front(&TupleChecker::isSpreadElement, this));
   if (isSpread || literal->elements.size() != fields.size()) {
-    for (ArrayLitExpr::Element &element : literal->elements) {
-      element.expr = this->exprChecker->checkExpr(element.expr);
-    }
+    this->walkLooseElements(literal);
   }
   if (isSpread) {
     auto message = ErrorTextTupleLit::spread(tuple->name());
@@ -200,16 +223,25 @@ TupleChecker::ResultTupleFilled TupleChecker::checkTupleLit(ArrayLitExpr *litera
         .message = message,
     });
   }
-
   for (size_t index = 0; index < fields.size(); ++index) {
     Expr *&expr = literal->elements[index].expr;
     auto what = ErrorTextTupleLit::element(index);
-    expr = this->typeRelations->coerce(this->exprChecker->checkExpr(expr, fields[index].type),
-                                       fields[index].type, what);
+    auto *checked = this->exprChecker->checkExpr(expr, fields[index].type);
+    expr = this->typeRelations->coerce(checked, fields[index].type, what);
   }
   literal->type = tuple;
 
   return ok(literal);
+}
+
+bool TupleChecker::isSpreadElement(const ArrayLitExpr::Element &element) const {
+  return element.spread;
+}
+
+void TupleChecker::walkLooseElements(ArrayLitExpr *literal) {
+  for (ArrayLitExpr::Element &element : literal->elements) {
+    element.expr = this->exprChecker->checkExpr(element.expr);
+  }
 }
 
 }

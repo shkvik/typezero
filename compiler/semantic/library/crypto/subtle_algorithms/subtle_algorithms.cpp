@@ -1,6 +1,7 @@
 #include "compiler/semantic/library/crypto/subtle_algorithms/subtle_algorithms.h"
 #include "compiler/program/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/program/to_utf8/to_utf8.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -14,17 +15,12 @@ using llvm::isa;
 namespace tz {
 
 std::optional<std::string> SubtleAlgorithms::stringLiteral(const Expr *expr) {
-  while (auto *conversion = dyn_cast_or_null<CastExpr>(expr)) {
-    if (!conversion->isImplicit()) {
-      break;
-    }
-    expr = conversion->operand;
-  }
-  auto *literal = dyn_cast_or_null<StringLitExpr>(expr);
+  const Expr *bare = expr != nullptr ? ExprParts::withoutImplicitCasts(expr) : nullptr;
+  const auto *literal = dyn_cast_or_null<StringLitExpr>(bare);
   if (literal != nullptr) {
     return ToUtf8::toUtf8(literal->value);
   }
-  auto *templateExpr = dyn_cast_or_null<TemplateExpr>(expr);
+  const auto *templateExpr = dyn_cast_or_null<TemplateExpr>(bare);
   if (templateExpr != nullptr && templateExpr->exprs.empty()) {
     return ToUtf8::toUtf8(templateExpr->quasis[0]);
   }
@@ -78,7 +74,7 @@ const std::vector<llvm::StringLiteral> &SubtleAlgorithms::algorithmsOf(llvm::Str
   return none;
 }
 
-bool SubtleAlgorithms::experimentalAlgorithm(llvm::StringRef upper) {
+bool SubtleAlgorithms::isExperimentalAlgorithm(llvm::StringRef upper) {
   static const llvm::StringLiteral names[] = {
       "SHA3-256",  "SHA3-384",  "SHA3-512",   "CSHAKE128",         "CSHAKE256",
       "ED448",     "X448",      "AES-OCB",    "CHACHA20-POLY1305", "KMAC128",

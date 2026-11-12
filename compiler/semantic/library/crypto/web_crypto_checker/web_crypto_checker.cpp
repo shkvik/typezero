@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/crypto/web_crypto_checker/web_crypto_checker.h"
+#include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
 #include "compiler/program/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/program/library/library_module_names/library_module_names.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
@@ -51,9 +52,9 @@ WebCryptoChecker::WebCryptoChecker(SemanticState &owner, SemanticParts &all)
 }
 
 WebCryptoChecker::ResultSubtleCallShape
-WebCryptoChecker::subtleShape(const CallExpr *call, llvm::StringRef intrinsicName) const {
-  auto named = [&](const SubtleIntrinsic &i) { return i.name == intrinsicName; };
-  const SubtleIntrinsic *intrinsic = llvm::find_if(kSubtleIntrinsics, named);
+WebCryptoChecker::checkSubtleShape(const CallExpr *call, llvm::StringRef intrinsicName) const {
+  auto isNamed = std::bind_front(&WebCryptoChecker::isIntrinsicNamed, this, intrinsicName);
+  const SubtleIntrinsic *intrinsic = llvm::find_if(kSubtleIntrinsics, isNamed);
   bool isWrong = intrinsic == std::end(kSubtleIntrinsics) ||
                  call->args.size() != intrinsic->params.size() || call->hasSpread();
   if (isWrong) {
@@ -69,8 +70,8 @@ WebCryptoChecker::subtleShape(const CallExpr *call, llvm::StringRef intrinsicNam
 }
 
 WebCryptoChecker::ResultAlgorithmChosen
-WebCryptoChecker::literalAlgorithm(const Expr *checked, char kind,
-                                   llvm::StringRef intrinsicName) const {
+WebCryptoChecker::checkLiteralAlgorithm(const Expr *checked, char kind,
+                                        llvm::StringRef intrinsicName) const {
   if (checked != nullptr && (kind == 'm' || kind == 'c') && !isa<IntLitExpr>(checked)) {
     auto message = ErrorTextSubtle::literal(intrinsicName);
 
@@ -83,7 +84,7 @@ WebCryptoChecker::literalAlgorithm(const Expr *checked, char kind,
   return ok(checked);
 }
 
-WebCryptoChecker::ResultSubtleAvailable WebCryptoChecker::subtleAvailable() const {
+WebCryptoChecker::ResultSubtleAvailable WebCryptoChecker::checkSubtleAvailable() const {
   VarSymbol *subtle = this->scopes->lookup(LibraryModuleNames::kSubtleName).var();
   if (subtle == nullptr) {
     auto message = ErrorTextSubtle::noSubtle();
@@ -100,7 +101,7 @@ WebCryptoChecker::ResultSubtleAvailable WebCryptoChecker::subtleAvailable() cons
 Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name,
                                              llvm::StringRef intrinsicName) {
   call->type = Type::error();
-  auto shape = this->subtleShape(call, intrinsicName);
+  auto shape = this->checkSubtleShape(call, intrinsicName);
   if (shape.isErr()) {
     this->state.getDiagnostics().error(name->loc(), shape.error().message);
     for (Expr *&arg : call->args) {
@@ -128,7 +129,7 @@ Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name,
 
 Expr *WebCryptoChecker::checkSubtleArg(Expr *arg, char kind, llvm::StringRef intrinsicName) {
   auto *checked = this->checkSubtleArgKind(arg, kind);
-  auto literal = this->literalAlgorithm(checked, kind, intrinsicName);
+  auto literal = this->checkLiteralAlgorithm(checked, kind, intrinsicName);
   if (literal.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), literal.error().message);
     return nullptr;
@@ -140,11 +141,11 @@ Expr *WebCryptoChecker::checkSubtleArg(Expr *arg, char kind, llvm::StringRef int
 Expr *WebCryptoChecker::checkSubtleArgKind(Expr *arg, char kind) {
   switch (kind) {
     case 'm':
-      return this->cryptoArgs->cryptoMd(arg, true);
+      return this->cryptoArgs->cryptoMd(arg, DigestUse::HMAC);
     case 'c':
       return this->cryptoArgs->cryptoCipher(arg);
     case 'd':
-      return this->cryptoArgs->cryptoData(arg, "data", false, true, true);
+      return this->cryptoArgs->cryptoData(arg, "data", kKeysOrBuffers);
     case 'o':
       return this->cryptoArgs->cryptoKeyObject(arg, "key");
     case 'b':
@@ -174,7 +175,8 @@ const Type *WebCryptoChecker::subtleResult(char result) const {
   return Type::optional(keyObject);
 }
 
-bool WebCryptoChecker::isSubtleClass(const Type *type, llvm::StringRef name) const {
+bool WebCryptoChecker::isSubtleClass(const Type *type) const {
+  auto name = LibraryClassTable::getName(LibraryClass::SUBTLE_CRYPTO);
   const ClassDecl *classDecl = type != nullptr ? this->classDeclarer->classOf(type) : nullptr;
 
   return classDecl != nullptr && classDecl->library() && classDecl->name == name &&
@@ -182,7 +184,7 @@ bool WebCryptoChecker::isSubtleClass(const Type *type, llvm::StringRef name) con
 }
 
 Expr *WebCryptoChecker::subtleObject(MemberExpr *member) {
-  auto subtle = this->subtleAvailable();
+  auto subtle = this->checkSubtleAvailable();
   if (subtle.isErr()) {
     this->state.getDiagnostics().error(member->loc(), subtle.error().message);
     member->type = Type::error();
@@ -191,6 +193,12 @@ Expr *WebCryptoChecker::subtleObject(MemberExpr *member) {
   auto *name = this->state.getAst().make<NameExpr>(member->loc(), LibraryModuleNames::kSubtleName);
 
   return this->exprChecker->checkExpr(name);
+}
+
+
+bool WebCryptoChecker::isIntrinsicNamed(llvm::StringRef name,
+                                        const SubtleIntrinsic &intrinsic) const {
+  return intrinsic.name == name;
 }
 
 }

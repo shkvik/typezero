@@ -18,12 +18,12 @@ class IntlOptionsChecker {
 public:
   IntlOptionsChecker(SemanticState &owner, SemanticParts &all);
 
-  bool checkIntlArgs(std::vector<Expr *> &args, size_t from, IntlKind kind, llvm::StringRef what);
+  bool prepareIntlArgs(std::vector<Expr *> &args, size_t from, IntlKind kind, llvm::StringRef what);
 
 private:
   using ResultOptionsGiven = Result<const Type *, IntlOptionsCheckerOptionsGivenError>;
 
-  ResultOptionsGiven optionsGiven(const Type *type, IntlKind kind, llvm::StringRef what) const;
+  ResultOptionsGiven checkOptionsGiven(const Type *type, IntlKind kind, llvm::StringRef what) const;
 
   std::optional<std::u16string> literalText(const Expr *expr) const;
   std::optional<double> literalNumber(const Expr *expr) const;
@@ -32,6 +32,8 @@ private:
   bool isSanctionedUnit(llvm::StringRef unit) const;
   bool isWellFormedUnit(llvm::StringRef unit) const;
   bool isKeywordType(llvm::StringRef text) const;
+  bool isKeywordPart(llvm::StringRef part) const;
+  bool isStringLiteralMember(const Type *member) const;
   std::optional<std::string> knownText(const Expr *value, const Type *type) const;
   std::vector<std::string> literalTexts(const Type *type, bool &open) const;
   const Expr *unconverted(const Expr *expr) const;
@@ -54,11 +56,11 @@ private:
   void reportOption(IntlOptionsRun &run, llvm::StringRef name, const std::string &message);
   const IntlOption *findOption(const IntlService *service, llvm::StringRef name) const;
   void walkOptionField(IntlOptionsRun &run, const Field &field);
-  bool optionKindFits(char kind, const Type *value) const;
+  bool isOptionKindFitting(char kind, const Type *value) const;
   bool isBooleanLike(const Type *type) const;
   bool isNumberLike(const Type *type) const;
-  bool allNumberLike(llvm::ArrayRef<const Type *> members) const;
-  bool allTextOrBoolean(llvm::ArrayRef<const Type *> members) const;
+  bool areAllNumberLike(llvm::ArrayRef<const Type *> members) const;
+  bool areAllTextOrBoolean(llvm::ArrayRef<const Type *> members) const;
   void walkOptionValues(IntlOptionsRun &run, const Field &field, const IntlOption &found,
                         const Type *value);
   const std::string *wrongText(const std::vector<std::string> &texts,
@@ -68,9 +70,11 @@ private:
   void walkDigitRanges(IntlOptionsRun &run);
   void walkDigitRange(IntlOptionsRun &run, const char *name, int min, int max);
   bool isNotAbove(const IntlOptionsRun &run, llvm::StringRef low, llvm::StringRef high);
+  std::optional<Linear> optionLinear(const IntlOptionsRun &run, llvm::StringRef name,
+                                     std::optional<double> constant);
   void walkDigitPairs(IntlOptionsRun &run);
   bool isIncrement(double value) const;
-  bool allIncrements(const Type *type) const;
+  bool areAllIncrements(const Type *type) const;
   void walkRoundingIncrement(IntlOptionsRun &run);
   void walkIncrementDigits(IntlOptionsRun &run);
 

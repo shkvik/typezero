@@ -93,7 +93,7 @@ Expr *ResultChecker::checkResultCall(CallExpr *call, NameExpr *name, const Type 
   return nullptr;
 }
 
-ResultChecker::ResultOkErrTypeArgs ResultChecker::writtenResult(const NameExpr *name) {
+ResultChecker::ResultOkErrTypeArgs ResultChecker::checkWrittenResult(const NameExpr *name) {
   if (name->typeArgs.empty()) {
     return ok<const Type *>(nullptr);
   }
@@ -130,7 +130,7 @@ Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, Half half, const
   if (!this->hasFittingArgs(call, name->loc(), 0, 1)) {
     return call;
   }
-  auto written = this->writtenResult(name);
+  auto written = this->checkWrittenResult(name);
   bool isShown = written.isErr() &&
                  written.error().code != ResultCheckerOkErrTypeArgsErrorCode::ALREADY_REPORTED;
   if (isShown) {
@@ -212,8 +212,8 @@ Expr *ResultChecker::markCallFailed(CallExpr *call) {
   return call;
 }
 
-ResultChecker::ResultStaticIsKnown ResultChecker::staticMethod(const NameExpr *name,
-                                                               llvm::StringRef method) const {
+ResultChecker::ResultStaticIsKnown ResultChecker::checkStaticMethod(const NameExpr *name,
+                                                                    llvm::StringRef method) const {
   auto found = ResultStaticTable::find(method);
   if (!found.has_value()) {
     auto message = ErrorTextCombine::noStatic(name->name, method);
@@ -236,7 +236,7 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
   if (which != GlobalName::RESULT) {
     return nullptr;
   }
-  auto known = this->staticMethod(name, member->name);
+  auto known = this->checkStaticMethod(name, member->name);
   if (known.isErr()) {
     this->state.getDiagnostics().error(member->loc(), known.error().message);
 
@@ -484,15 +484,15 @@ Expr *ResultChecker::definedHalf(MemberExpr *half) {
   return half;
 }
 
-ResultChecker::ResultValueGetsUsed ResultChecker::usedValue(const Expr *expr) {
+ResultChecker::ResultValueGetsUsed ResultChecker::checkUsedValue(const Expr *expr) {
   return this->checkUsed(expr, Discarded::BY_STATEMENT, llvm::SMLoc());
 }
 
-ResultChecker::ResultValueGetsUsed ResultChecker::usedValue(const Expr *expr, llvm::SMLoc at) {
+ResultChecker::ResultValueGetsUsed ResultChecker::checkUsedValue(const Expr *expr, llvm::SMLoc at) {
   return this->checkUsed(expr, Discarded::BY_STATEMENT, at);
 }
 
-ResultChecker::ResultValueGetsUsed ResultChecker::usedCallbackValue(const Expr *expr) {
+ResultChecker::ResultValueGetsUsed ResultChecker::checkUsedCallbackValue(const Expr *expr) {
   return this->checkUsed(expr, Discarded::BY_CALLBACK, llvm::SMLoc());
 }
 

@@ -43,14 +43,14 @@ StreamPipeline::StreamPipeline(SemanticState &owner, SemanticParts &all)
   this->eventTargetChecker = &all.eventTargetChecker;
 }
 
-bool StreamPipeline::inModule(const std::string &place, llvm::StringRef module) const {
+bool StreamPipeline::isInModule(const std::string &place, llvm::StringRef module) const {
   llvm::StringRef at(place);
 
   return at.consume_front(module) && at.consume_front(":");
 }
 
-StreamPipeline::ResultWritableEnd StreamPipeline::writableEnd(const StreamChunks &chunks,
-                                                              const Type *type) const {
+StreamPipeline::ResultWritableEnd StreamPipeline::checkWritableEnd(const StreamChunks &chunks,
+                                                                   const Type *type) const {
   if (chunks.writable == nullptr) {
     auto message = ErrorTextPipeline::notWritten(type->name());
 
@@ -63,8 +63,8 @@ StreamPipeline::ResultWritableEnd StreamPipeline::writableEnd(const StreamChunks
   return ok(chunks.writable);
 }
 
-StreamPipeline::ResultReadableEnd StreamPipeline::readableEnd(const StreamChunks &chunks,
-                                                              const Type *type) const {
+StreamPipeline::ResultReadableEnd StreamPipeline::checkReadableEnd(const StreamChunks &chunks,
+                                                                   const Type *type) const {
   if (chunks.readable == nullptr) {
     auto message = ErrorTextPipeline::notRead(type->name());
 
@@ -79,7 +79,8 @@ StreamPipeline::ResultReadableEnd StreamPipeline::readableEnd(const StreamChunks
 
 Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bool last,
                                   bool &stream, const Type **sinkValue) {
-  auto *stageClass = this->state.getLibraryDeclarations().findLibraryClass("PipelineStage");
+  auto *stageClass =
+      this->state.getLibraryDeclarations().findLibraryClass(LibraryClass::PIPELINE_STAGE);
   StageShape stage{
       .loc = arg->loc(),
       .stageType = stageClass != nullptr ? stageClass->type : Type::error(),
@@ -141,7 +142,8 @@ Expr *StreamPipeline::asPipelineStage(const StageShape &stage, Expr *made) {
   if (made->type->isError()) {
     return made;
   }
-  const Type *streamType = this->state.getLibraryDeclarations().findLibraryClass("Stream")->type;
+  const Type *streamType =
+      this->state.getLibraryDeclarations().findLibraryClass(LibraryClass::STREAM)->type;
 
   return this->typeRelations->convert(made, Type::unionOf({streamType, stage.stageType}));
 }
@@ -151,12 +153,12 @@ Expr *StreamPipeline::streamClassStage(Expr *arg, const Type *&chunk, const Stag
   const Type *type = arg->type;
   auto chunks = this->chunkTypes->streamChunksOf(classDecl);
   if (!stage.first) {
-    auto writable = this->writableEnd(chunks, type);
+    auto writable = this->checkWritableEnd(chunks, type);
     if (writable.isErr()) {
       this->state.getDiagnostics().error(stage.loc, writable.error().message);
       return arg;
     }
-    if (chunk != nullptr && !this->streamTakes(chunks.writable, chunk)) {
+    if (chunk != nullptr && !this->isStreamTaking(chunks.writable, chunk)) {
       auto message = ErrorTextPipeline::chunkKind("pipeline", chunk->name(), type->name(),
                                                   chunks.writable->name());
       this->state.getDiagnostics().error(stage.loc, message);
@@ -164,7 +166,7 @@ Expr *StreamPipeline::streamClassStage(Expr *arg, const Type *&chunk, const Stag
     }
   }
   if (!stage.last) {
-    auto readable = this->readableEnd(chunks, type);
+    auto readable = this->checkReadableEnd(chunks, type);
     if (readable.isErr()) {
       this->state.getDiagnostics().error(stage.loc, readable.error().message);
       return arg;
@@ -260,7 +262,7 @@ Expr *StreamPipeline::valuesIteratorOf(Expr *collection) {
   return iterator != collection && iterator->type->isIterator() ? iterator : nullptr;
 }
 
-bool StreamPipeline::streamTakes(const Type *writable, const Type *chunk) {
+bool StreamPipeline::isStreamTaking(const Type *writable, const Type *chunk) {
   if (writable == chunk) {
     return true;
   }
@@ -274,11 +276,11 @@ bool StreamPipeline::streamTakes(const Type *writable, const Type *chunk) {
 Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *functionDecl,
                                           llvm::SMLoc loc) {
   auto place = this->eventMapInference->placeOf(functionDecl->loc());
-  if (this->inModule(place, "node:internal/fs/streams")) {
+  if (this->isInModule(place, "node:internal/fs/streams")) {
     return this->streamSources->checkFsStreamFunction(call, functionDecl, loc);
   }
-  bool hasPromises = this->inModule(place, "node:stream/promises");
-  if (!hasPromises && !this->inModule(place, "node:stream")) {
+  bool hasPromises = this->isInModule(place, "node:stream/promises");
+  if (!hasPromises && !this->isInModule(place, "node:stream")) {
     return nullptr;
   }
   auto function = StreamFunctionTable::find(functionDecl->name);
@@ -289,7 +291,7 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *function
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  auto *streamClass = this->state.getLibraryDeclarations().findLibraryClass("Stream");
+  auto *streamClass = this->state.getLibraryDeclarations().findLibraryClass(LibraryClass::STREAM);
   if (streamClass == nullptr) {
     return nullptr;
   }
@@ -334,7 +336,7 @@ Expr *StreamPipeline::checkFinished(const StreamCall &stream) {
     this->state.getDiagnostics().error(stream.loc, arity.error().message);
     return call;
   }
-  auto *alias = this->state.getLibraryDeclarations().findLibraryType("FinishedOptions");
+  auto *alias = this->state.getLibraryDeclarations().findLibraryType(LibraryType::FINISHED_OPTIONS);
   const Type *options =
       alias != nullptr ? Type::optional(this->typeDeclarer->resolveAlias(alias)) : Type::error();
   auto *target = this->argumentChecker->checkArg(call->args[0], stream.streamType);
@@ -378,18 +380,18 @@ Expr *StreamPipeline::checkCompose(const StreamCall &stream) {
     chunk = chunks->readable;
   }
   auto *list = this->state.getAst().make<ArrayLitExpr>(stream.loc);
-  for (Expr *s : streams) {
-    list->elements.push_back({s, false});
+  for (Expr *part : streams) {
+    list->elements.push_back({part, false});
   }
   list->type = Type::array(stream.streamType);
   const auto *buffer = Type::bytesType(Type::Bytes::Buffer);
-  const Type *w = head.writable != nullptr ? head.writable : buffer;
-  const Type *r = tail.readable != nullptr ? tail.readable : buffer;
+  const Type *writable = head.writable != nullptr ? head.writable : buffer;
+  const Type *readable = tail.readable != nullptr ? tail.readable : buffer;
   call->args = {list};
   std::vector<bool> given{true};
 
-  return this->eventTargetChecker->callLibraryStatic(call, stream.streamClass, "composeAll", {w, r},
-                                                     given, stream.loc);
+  return this->eventTargetChecker->callLibraryStatic(call, stream.streamClass, "composeAll",
+                                                     {writable, readable}, given, stream.loc);
 }
 
 std::optional<StreamChunks> StreamPipeline::composedPart(const StreamCall &stream, size_t index,
@@ -411,7 +413,7 @@ std::optional<StreamChunks> StreamPipeline::composedPart(const StreamCall &strea
   }
   auto chunks = this->chunkTypes->streamChunksOf(classDecl);
   bool isFitting = index == 0 || chunk == nullptr || chunks.writable == nullptr ||
-                   this->streamTakes(chunks.writable, chunk);
+                   this->isStreamTaking(chunks.writable, chunk);
   if (!isFitting) {
     auto message = ErrorTextPipeline::chunkKind("compose", chunk->name(), arg->type->name(),
                                                 chunks.writable->name());
@@ -503,7 +505,8 @@ StreamPipeline::pipelineStages(const StreamCall &stream, size_t count) {
 }
 
 ArrayLitExpr *StreamPipeline::stageList(const StreamCall &stream, PipelineStages &stages) {
-  auto *stageClass = this->state.getLibraryDeclarations().findLibraryClass("PipelineStage");
+  auto *stageClass =
+      this->state.getLibraryDeclarations().findLibraryClass(LibraryClass::PIPELINE_STAGE);
   const auto *element = Type::unionOf({stream.streamType, stageClass->type});
   auto *list = this->state.getAst().make<ArrayLitExpr>(stream.loc);
   for (size_t index = 0; index < stages.stages.size(); ++index) {
@@ -512,9 +515,9 @@ ArrayLitExpr *StreamPipeline::stageList(const StreamCall &stream, PipelineStages
     if (isTail) {
       auto *conversion = dyn_cast<CastExpr>(stage);
       stages.lastStream = conversion != nullptr ? conversion->operand : stage;
-      continue;
+    } else {
+      list->elements.push_back({stage, false});
     }
-    list->elements.push_back({stage, false});
   }
   list->type = Type::array(element);
 

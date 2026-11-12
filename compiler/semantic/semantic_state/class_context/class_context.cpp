@@ -32,8 +32,8 @@ const VarSymbol *ClassContext::getInitializerThis() const {
   return this->initializers.empty() ? nullptr : this->initializers.back().self;
 }
 
-void ClassContext::enterInitializerClosure(bool thisReady) {
-  this->closureThisReady.push_back(thisReady);
+void ClassContext::enterInitializerClosure(bool isThisReady) {
+  this->closureThisReady.push_back(isThisReady);
 }
 
 void ClassContext::leaveInitializerClosure() {

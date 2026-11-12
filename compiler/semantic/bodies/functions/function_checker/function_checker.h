@@ -52,18 +52,14 @@ private:
   using ResultEveryPathReturns =
       Result<const FunctionDecl *, FunctionCheckerReturnsEverywhereError>;
 
-  ResultThisParamAllowed thisParam(const FunctionDecl *functionDecl) const;
-  ResultParamTypeIsKnown paramTypeKnown(const Param &param) const;
-  ResultTopLevelGenerics topLevelGeneric(const FunctionDecl *functionDecl) const;
-  ResultRestParamIsArray restType(const Type *type, const Param &param) const;
-  ResultConstructorSuper superCalled(const FunctionDecl *functionDecl, unsigned supers) const;
-  ResultParamOrderIsKept requiredOrder(const Param &param, bool afterOptional) const;
-  ResultEveryPathReturns returnsEverywhere(const FunctionDecl *functionDecl,
-                                           const Type *returnType) const;
-  ResultDecoratorAllowed paramDecorators(const FunctionDecl *functionDecl,
-                                         const Param &param) const;
-  ResultDefaultUsesPrior defaultOrder(const FunctionDecl *functionDecl, size_t index,
-                                      const llvm::StringSet<> &names) const;
+  ResultTopLevelGenerics checkTopLevelGeneric(const FunctionDecl *functionDecl) const;
+  ResultDecoratorAllowed checkParamDecorators(const FunctionDecl *functionDecl,
+                                              const Param &param) const;
+  ResultThisParamAllowed checkThisParam(const FunctionDecl *functionDecl) const;
+  ResultRestParamIsArray checkRestType(const Type *type, const Param &param) const;
+  ResultParamOrderIsKept checkRequiredOrder(const Param &param, bool isAfterOptional) const;
+  ResultParamTypeIsKnown checkParamTypeKnown(const Param &param) const;
+  void declareSymbol(FunctionDecl *functionDecl, VarSymbol *variable);
   bool isGenericDeclaration(const FunctionDecl *functionDecl);
   void declareFunctionTypeParams(FunctionDecl *functionDecl, FuncSymbol *function,
                                  VarSymbol *variable);
@@ -71,23 +67,36 @@ private:
                      const std::optional<std::vector<const Type *>> &hook);
   bool hasRestParam(const FunctionDecl *functionDecl) const;
   void declareFunctionParam(FunctionDecl *functionDecl, FuncSymbol *function, size_t index,
-                            const Type *hooked, bool &afterOptional);
+                            const Type *hooked);
+  void declareRestParam(FuncSymbol *function, Param &param, const Type *type);
+  bool hasOptionalBefore(const FunctionDecl *functionDecl, size_t index) const;
   const Type *declaredParamType(FunctionDecl *functionDecl, FuncSymbol *function,
                                 const Param &param, const Type *hooked);
   const Type *writtenParamType(FunctionDecl *functionDecl, FuncSymbol *function, const Param &param,
                                const Type *hooked);
+  const Type *resolvedParamType(FunctionDecl *functionDecl, FuncSymbol *function,
+                                const Param &param);
   void walkThisParam(const FunctionDecl *functionDecl, FuncSymbol *function, const Param &param);
   void declareFunctionReturn(FunctionDecl *functionDecl, FuncSymbol *function);
-  void declareSymbol(FunctionDecl *functionDecl, VarSymbol *variable);
+  void declareWrittenReturn(FunctionDecl *functionDecl, FuncSymbol *function);
   void declareFunctionName(FunctionDecl *functionDecl, FuncSymbol *function, VarSymbol *variable);
+  ResultConstructorSuper checkSuperCalled(const FunctionDecl *functionDecl, unsigned supers) const;
+  ResultDefaultUsesPrior checkDefaultOrder(const FunctionDecl *functionDecl, size_t index,
+                                           const llvm::StringSet<> &names) const;
+  ResultEveryPathReturns checkReturnsEverywhere(const FunctionDecl *functionDecl,
+                                                const Type *returnType) const;
+  void walkBodyReturns(const FunctionDecl *functionDecl);
+  void markBrokenOwners(const FunctionDecl *functionDecl,
+                        const std::vector<Diagnostic> &bodyDiagnostics);
   void bindBodyTypeParams(FunctionDecl *functionDecl);
-  bool entersInitializer(FunctionDecl *functionDecl);
-  bool isPresetField(const FunctionDecl *functionDecl, const ClassField &field, bool derived) const;
+  bool enterInitializer(FunctionDecl *functionDecl);
+  bool isPresetField(const FunctionDecl *functionDecl, const ClassField &field,
+                     bool isDerived) const;
   void walkRootSupers(FunctionDecl *functionDecl);
   CallExpr *superCallOf(Stmt *stmt) const;
   void declareBodyParam(FunctionDecl *functionDecl, size_t index);
-  bool defaultValueChecked(FunctionDecl *functionDecl, size_t index, DefaultedParam *defaulted,
-                           const Type *type);
+  void declareDefaultedParam(FunctionDecl *functionDecl, size_t index, DefaultedParam *defaulted);
+  void walkDefaultValue(FunctionDecl *functionDecl, size_t index, DefaultedParam *defaulted);
   void walkBodyStatements(FunctionDecl *functionDecl);
   const Type *bodyReturnType(const FunctionDecl *functionDecl) const;
 

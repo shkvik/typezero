@@ -41,9 +41,10 @@ private:
   using ResultEmitterEvents = Result<const Type *, EventTargetCheckerEmitterEventsError>;
   using ResultOneErrorValue = Result<const Type *, EventTargetCheckerOneErrorValueError>;
 
-  ResultOneErrorValue oneErrorValue(const Type *errors, llvm::StringRef functionName) const;
-  ResultEmitterEvents emitterEvents(const Type *type, llvm::StringRef functionName, bool target);
-  ResultListenerEvent listenerEvent(const Type *type, const ClassDecl *eventClass) const;
+  ResultOneErrorValue checkOneErrorValue(const Type *errors, llvm::StringRef functionName) const;
+  ResultEmitterEvents checkEmitterEvents(const Type *type, llvm::StringRef functionName,
+                                         bool target);
+  ResultListenerEvent checkListenerEvent(const Type *type, const ClassDecl *eventClass) const;
   Expr *callLibrarySymbol(CallExpr *call, FuncSymbol *function, llvm::ArrayRef<const Type *> bound,
                           const std::vector<bool> &given, llvm::SMLoc loc);
 
@@ -57,7 +58,8 @@ private:
   };
 
   bool hasTimeoutOption(const CallExpr *call) const;
-  bool waitEnds(const CallExpr *call) const;
+  bool isWaitEnding(const CallExpr *call) const;
+  bool isMentioningParam(const Type *type) const;
   bool isEventTarget(const Type *type) const;
   void walkArgsFrom(CallExpr *call, size_t from);
   Expr *checkTargetWait(WaitCall &wait);
@@ -65,8 +67,13 @@ private:
   Expr *targetListeners(CallExpr *call, Expr *object);
   Expr *checkEmitterWait(WaitCall &wait, const Type *events);
   Expr *checkWaitFunction(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc, bool once);
+  enum class ListenersQuery {
+    LISTENERS,
+    COUNT,
+  };
+
   Expr *checkListenersFunction(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc,
-                               bool listeners);
+                               ListenersQuery query);
   Expr *checkTimedWait(WaitCall &wait, const Type *events, const Type *args, const Type *errors);
   Expr *checkPlainWait(WaitCall &wait, const Type *events, const Type *args, const Type *errors);
   const Type *listenedEvent(const Type *type, llvm::SMLoc loc, ClassDecl *eventClass);

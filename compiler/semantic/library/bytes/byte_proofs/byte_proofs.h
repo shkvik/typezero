@@ -20,9 +20,9 @@ public:
   ByteProofs(SemanticState &owner, SemanticParts &all);
 
   IntegerRange valueRange(const Expr *expr) const;
-  bool provesFits(const Expr *expr, int64_t low, int64_t high) const;
-  ResultValueFitsType valueFits(const Expr *value, const Type *target, llvm::StringRef what);
-  bool provesWithin(const Expr *object, const Expr *offset, int64_t size) const;
+  bool canProveFits(const Expr *expr, int64_t low, int64_t high) const;
+  ResultValueFitsType checkValueFits(const Expr *value, const Type *target, llvm::StringRef what);
+  bool canProveWithin(const Expr *object, const Expr *offset, int64_t size) const;
   void walkView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size,
                 llvm::StringRef what);
   void addByteCallbackFacts(const FunctionDecl *functionDecl);
@@ -35,17 +35,17 @@ private:
   const VarSymbol *viewOwner(const Expr *expr, BuiltinProperty field,
                              const Type **type = nullptr) const;
   const Expr *withoutCasts(const Expr *expr) const;
-  bool sameView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size) const;
+  bool isSameView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size) const;
   using ResultOffsetAligned = Result<int64_t, ByteProofsOffsetAlignedError>;
   using ResultBufferAligned = Result<int64_t, ByteProofsBufferAlignedError>;
 
-  ResultOffsetAligned offsetAligned(std::optional<int64_t> start, int64_t size,
-                                    llvm::StringRef what) const;
-  ResultBufferAligned bufferAligned(std::optional<int64_t> whole, int64_t size,
-                                    llvm::StringRef what) const;
+  ResultOffsetAligned checkOffsetAligned(std::optional<int64_t> start, int64_t size,
+                                         llvm::StringRef what) const;
+  ResultBufferAligned checkBufferAligned(std::optional<int64_t> whole, int64_t size,
+                                         llvm::StringRef what) const;
   int64_t wrapped(Type::Bytes kind, int64_t v) const;
   IntegerRange exact(int64_t v) const;
-  bool known(const IntegerRange &r) const;
+  bool isKnownRange(const IntegerRange &r) const;
   IntegerRange unite(const IntegerRange &a, const IntegerRange &b) const;
   int64_t allOnes(int64_t v) const;
   int64_t floorShift(int64_t v, int64_t n) const;

@@ -17,7 +17,11 @@ struct DictNewCheckerPartsJoinError {
 
 class ErrorTextPairParts {
 public:
-  static std::string differ(bool keys, llvm::StringRef type, llvm::StringRef other);
+  static std::string keysDiffer(llvm::StringRef type, llvm::StringRef other);
+  static std::string valuesDiffer(llvm::StringRef type, llvm::StringRef other);
+
+private:
+  static std::string differ(llvm::StringRef parts, llvm::StringRef type, llvm::StringRef other);
 };
 
 enum class DictNewCheckerPairsKnownErrorCode {

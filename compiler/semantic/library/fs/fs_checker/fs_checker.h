@@ -16,6 +16,7 @@ class TypeDeclarer;
 class TypeRelations;
 class ArgumentChecker;
 class BuiltinModuleChecker;
+struct NodeName;
 
 class FsChecker {
 public:
@@ -26,45 +27,70 @@ public:
   Expr *checkTzIoCall(CallExpr *call, llvm::SMLoc loc);
   Expr *checkFsValue(llvm::StringRef name, Expr *expr);
   Expr *checkFsConstant(MemberExpr *member);
-  bool nodeOptions(CallExpr *call, size_t index, llvm::StringRef functionName,
-                   llvm::ArrayRef<llvm::StringRef> allowed, llvm::StringMap<Expr *> &options);
-  Expr *checkEncoding(Expr *encoding, llvm::StringRef functionName, bool any);
+  enum class EncodingSet {
+    ANY,
+    UTF8_ONLY,
+  };
+
+  bool readNodeOptions(CallExpr *call, size_t index, llvm::StringRef functionName,
+                       llvm::ArrayRef<llvm::StringRef> allowed, llvm::StringMap<Expr *> &options);
+  Expr *checkEncoding(Expr *encoding, llvm::StringRef functionName, EncodingSet encodings);
   const Type *nativeError() const;
   void rememberNativeError();
 
 private:
   using ResultOctalMode = Result<unsigned, FsCheckerOctalModeError>;
 
+  enum class PathForm {
+    PATH_OR_DESCRIPTOR,
+    PATH_ONLY,
+  };
+
   struct FsCall {
     CallExpr *call = nullptr;
     FsFunction function = FsFunction::READ_FILE_SYNC;
-    llvm::StringRef fn;
+    llvm::StringRef functionName;
     llvm::SMLoc loc;
     llvm::StringMap<Expr *> options;
   };
 
-  ResultOctalMode octalMode(llvm::StringRef text) const;
+  struct FlagRead {
+    bool isFailed;
+    std::optional<bool> value;
+  };
 
-  Expr *checkLoosely(CallExpr *call);
-  Expr *checkPath(Expr *arg, bool fd);
+  ResultOctalMode checkOctalMode(llvm::StringRef text) const;
+  Expr *checkPath(Expr *arg, PathForm form);
   BoolLitExpr *makeBoolLiteral(llvm::SMLoc loc, bool value);
   IntLitExpr *makeIntLiteral(llvm::SMLoc loc, uint64_t value);
   StringLitExpr *makeStringLiteral(llvm::SMLoc loc, llvm::StringRef text);
   Expr *openFlag(FsCall &fs, Expr *flag, llvm::StringRef fallback);
   Expr *reportNotFunction(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc);
   Expr *reportUnknownFsFunction(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc);
-  bool literalFlag(FsCall &fs, Expr *value, llvm::StringRef option, bool &out);
-  bool encodingOrOptions(FsCall &fs, size_t index, llvm::ArrayRef<llvm::StringRef> allowed);
+  FlagRead readFlag(FsCall &fs, llvm::StringRef option);
+  bool readEncodingOrOptions(FsCall &fs, size_t index, llvm::ArrayRef<llvm::StringRef> allowed);
+  Expr *givenEncoding(FsCall &fs) const;
+  Expr *boolOption(FsCall &fs, llvm::StringRef option);
   Expr *checkReadFile(FsCall &fs);
   Expr *checkWriteFile(FsCall &fs);
+  bool isBytesData(const Type *type) const;
+  bool isByteViewType(const Type *type) const;
   Expr *checkPathCall(FsCall &fs);
+  Builtin pathCallBuiltin(FsFunction function) const;
+  const Type *pathCallType(FsFunction function) const;
   Expr *checkPathWithArgument(FsCall &fs);
+  Expr *pathArgument(FsCall &fs);
+  Expr *octalModeArgument(Expr *arg, llvm::SMLoc loc);
+  Builtin pathArgumentBuiltin(FsFunction function) const;
   Expr *checkStat(FsCall &fs);
   Expr *checkReaddir(FsCall &fs);
   Expr *checkMkdir(FsCall &fs);
   Expr *checkRmdir(FsCall &fs);
   Expr *checkRm(FsCall &fs);
   Expr *checkTwoPaths(FsCall &fs);
+  Builtin twoPathsBuiltin(FsFunction function) const;
+  bool isFsConstants(const Expr *object) const;
+  bool isFsModuleName(const NodeName *nodeName) const;
 
   SemanticState &state;
   FsErrors *fsErrors = nullptr;

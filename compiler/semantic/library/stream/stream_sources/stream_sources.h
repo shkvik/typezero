@@ -40,12 +40,12 @@ private:
     bool fresh = false;
   };
 
-  bool fsStreamArityFits(CallExpr *call, llvm::SMLoc loc);
+  bool matchFsStreamArity(CallExpr *call, llvm::SMLoc loc);
   void walkFsStreamOptions(Expr *arg, FsStreamArgs &args);
   void scanOptionsLiteral(const ObjectLitExpr *literal, FsStreamArgs &args) const;
   Expr *undefinedArg(const Type *type, llvm::SMLoc loc);
   Expr *callFsStream(CallExpr *call, const FsStreamArgs &args, bool reading, llvm::SMLoc loc);
-  ResultValuesIterator valuesIterator(Expr *source);
+  ResultValuesIterator checkValuesIterator(Expr *source);
 
   SemanticState &state;
   Prelude *prelude = nullptr;

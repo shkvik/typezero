@@ -247,8 +247,8 @@ inline constexpr llvm::StringLiteral kCurveNames[] = {
 class CryptoNames {
 public:
   static const std::vector<HashNames> &hashNames();
-  static bool turnedOffHash(llvm::StringRef name);
-  static bool turnedOffCipher(llvm::StringRef name);
+  static bool isTurnedOffHash(llvm::StringRef name);
+  static bool isTurnedOffCipher(llvm::StringRef name);
   static llvm::StringRef methodsOf(Crypto kind);
 };
 

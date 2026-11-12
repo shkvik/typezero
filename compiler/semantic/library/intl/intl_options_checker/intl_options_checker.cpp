@@ -20,6 +20,12 @@ namespace tz {
 
 namespace {
 
+constexpr llvm::StringLiteral kRoundingIncrementOption = "roundingIncrement";
+
+}
+
+namespace {
+
 const IntlService kSupported = {IntlKind::None, "supportedLocalesOf", 0, {kMatcher}, true};
 
 }
@@ -64,20 +70,22 @@ std::optional<double> IntlOptionsChecker::literalNumber(const Expr *expr) const 
 }
 
 std::optional<double> IntlOptionsChecker::plainNumber(const Expr *expr) const {
-  if (auto *literal = dyn_cast<IntLitExpr>(expr)) {
-    return double(literal->value);
+  const auto *integer = dyn_cast<IntLitExpr>(expr);
+  if (integer != nullptr) {
+    return double(integer->value);
   }
-  if (auto *literal = dyn_cast<FloatLitExpr>(expr)) {
-    return literal->value;
+  const auto *fraction = dyn_cast<FloatLitExpr>(expr);
+  if (fraction != nullptr) {
+    return fraction->value;
   }
 
   return std::nullopt;
 }
 
 const IntlService *IntlOptionsChecker::serviceOf(IntlKind kind) const {
-  for (const IntlService &s : IntlCheckHelpers::services()) {
-    if (s.kind == kind) {
-      return &s;
+  for (const IntlService &service : IntlCheckHelpers::services()) {
+    if (service.kind == kind) {
+      return &service;
     }
   }
 
@@ -115,10 +123,13 @@ bool IntlOptionsChecker::isWellFormedUnit(llvm::StringRef unit) const {
 bool IntlOptionsChecker::isKeywordType(llvm::StringRef text) const {
   auto parts = llvm::SmallVector<llvm::StringRef, 4>();
   text.split(parts, '-');
+  auto isKeyword = std::bind_front(&IntlOptionsChecker::isKeywordPart, this);
 
-  return llvm::all_of(parts, [](llvm::StringRef part) {
-    return part.size() >= 3 && part.size() <= 8 && llvm::all_of(part, llvm::isAlnum);
-  });
+  return llvm::all_of(parts, isKeyword);
+}
+
+bool IntlOptionsChecker::isKeywordPart(llvm::StringRef part) const {
+  return part.size() >= 3 && part.size() <= 8 && llvm::all_of(part, llvm::isAlnum);
 }
 
 std::optional<std::string> IntlOptionsChecker::knownText(const Expr *value,
@@ -157,14 +168,18 @@ const Expr *IntlOptionsChecker::unconverted(const Expr *expr) const {
 }
 
 bool IntlOptionsChecker::isStringLike(const Type *type) const {
+  auto isStringLiteral = std::bind_front(&IntlOptionsChecker::isStringLiteralMember, this);
+
   return type->isString() || type->isStringLiteral() ||
-         (type->isUnion() && llvm::all_of(type->members(), [](const Type *member) {
-            return member->isStringLiteral();
-          }));
+         (type->isUnion() && llvm::all_of(type->members(), isStringLiteral));
+}
+
+bool IntlOptionsChecker::isStringLiteralMember(const Type *member) const {
+  return member->isStringLiteral();
 }
 
 IntlOptionsChecker::ResultOptionsGiven
-IntlOptionsChecker::optionsGiven(const Type *type, IntlKind kind, llvm::StringRef what) const {
+IntlOptionsChecker::checkOptionsGiven(const Type *type, IntlKind kind, llvm::StringRef what) const {
   if (type->isUndefined() && kind == IntlKind::DisplayNames) {
     auto message = ErrorTextIntlOptions::noType();
 
@@ -189,14 +204,14 @@ IntlOptionsChecker::optionsGiven(const Type *type, IntlKind kind, llvm::StringRe
   return ok(type);
 }
 
-bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, IntlKind kind,
-                                       llvm::StringRef what) {
+bool IntlOptionsChecker::prepareIntlArgs(std::vector<Expr *> &args, size_t from, IntlKind kind,
+                                         llvm::StringRef what) {
   const IntlService *service = kind == IntlKind::None ? &kSupported : this->serviceOf(kind);
   bool isOk = true;
   if (args.size() > from) {
     Expr *&locale = args[from];
     locale = this->exprChecker->checkExpr(locale);
-    isOk = this->intlChecker->checkLocaleArg(locale, what);
+    isOk = this->intlChecker->prepareLocaleArg(locale, what);
   }
   if (args.size() <= from + 1) {
     return isOk;
@@ -207,7 +222,7 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
   if (type->isError()) {
     return false;
   }
-  auto passed = this->optionsGiven(type, kind, what);
+  auto passed = this->checkOptionsGiven(type, kind, what);
   if (passed.isErr()) {
     this->state.getDiagnostics().error(options->loc(), passed.error().message);
     return false;
@@ -265,9 +280,9 @@ std::optional<std::string> IntlOptionsChecker::textOf(const IntlOptionsRun &run,
 std::optional<double> IntlOptionsChecker::constantOf(const IntlOptionsRun &run,
                                                      llvm::StringRef name) const {
   auto *value = this->valueOf(run, name);
-  std::optional<double> n = value != nullptr ? this->literalNumber(value) : std::nullopt;
-  if (n.has_value()) {
-    return n;
+  std::optional<double> literal = value != nullptr ? this->literalNumber(value) : std::nullopt;
+  if (literal.has_value()) {
+    return literal;
   }
   const auto *field = run.type->field(name);
   const Type *type = field != nullptr ? field->type->nonOptional() : nullptr;
@@ -314,7 +329,7 @@ void IntlOptionsChecker::walkOptionField(IntlOptionsRun &run, const Field &field
   if (value->isUndefined()) {
     return;
   }
-  if (!this->optionKindFits(found->kind, value)) {
+  if (!this->isOptionKindFitting(found->kind, value)) {
     auto message = ErrorTextIntlField::kind(field.name, found->kind, field.type->name());
     this->reportOption(run, field.name, message);
     return;
@@ -333,19 +348,19 @@ void IntlOptionsChecker::walkOptionField(IntlOptionsRun &run, const Field &field
   }
 }
 
-bool IntlOptionsChecker::optionKindFits(char kind, const Type *value) const {
+bool IntlOptionsChecker::isOptionKindFitting(char kind, const Type *value) const {
   switch (kind) {
     case 's':
       return this->isStringLike(value);
     case 'n':
       return this->isNumberLike(value) ||
-             (value->isUnion() && this->allNumberLike(value->members()));
+             (value->isUnion() && this->areAllNumberLike(value->members()));
     case 'b':
       return this->isBooleanLike(value);
   }
 
   return this->isStringLike(value) || this->isBooleanLike(value) ||
-         (value->isUnion() && this->allTextOrBoolean(value->members()));
+         (value->isUnion() && this->areAllTextOrBoolean(value->members()));
 }
 
 bool IntlOptionsChecker::isBooleanLike(const Type *type) const {
@@ -356,7 +371,7 @@ bool IntlOptionsChecker::isNumberLike(const Type *type) const {
   return type->isNumeric() || (type->isLiteral() && type->literalBase()->isNumeric());
 }
 
-bool IntlOptionsChecker::allNumberLike(llvm::ArrayRef<const Type *> members) const {
+bool IntlOptionsChecker::areAllNumberLike(llvm::ArrayRef<const Type *> members) const {
   for (const Type *member : members) {
     if (!this->isNumberLike(member)) {
       return false;
@@ -366,7 +381,7 @@ bool IntlOptionsChecker::allNumberLike(llvm::ArrayRef<const Type *> members) con
   return true;
 }
 
-bool IntlOptionsChecker::allTextOrBoolean(llvm::ArrayRef<const Type *> members) const {
+bool IntlOptionsChecker::areAllTextOrBoolean(llvm::ArrayRef<const Type *> members) const {
   for (const Type *member : members) {
     if (!this->isStringLike(member) && !this->isBooleanLike(member)) {
       return false;
@@ -399,9 +414,9 @@ void IntlOptionsChecker::walkOptionValues(IntlOptionsRun &run, const Field &fiel
 
 const std::string *IntlOptionsChecker::wrongText(const std::vector<std::string> &texts,
                                                  const IntlOption &found) const {
-  for (const std::string &t : texts) {
-    if (!llvm::is_contained(found.values, t) && !(found.kind == 'g' && t.empty())) {
-      return &t;
+  for (const std::string &text : texts) {
+    if (!llvm::is_contained(found.values, text) && !(found.kind == 'g' && text.empty())) {
+      return &text;
     }
   }
 
@@ -473,12 +488,12 @@ void IntlOptionsChecker::walkDigitRange(IntlOptionsRun &run, const char *name, i
   if (field == nullptr) {
     return;
   }
-  auto n = this->constantOf(run, name);
-  if (n.has_value()) {
-    if (!(*n >= min && *n <= max)) {
-      auto message = ErrorTextIntlField::range(name, min, max);
-      this->reportOption(run, name, message);
-    }
+  auto constant = this->constantOf(run, name);
+  if (constant.has_value() && !(*constant >= min && *constant <= max)) {
+    auto message = ErrorTextIntlField::range(name, min, max);
+    this->reportOption(run, name, message);
+  }
+  if (constant.has_value()) {
     return;
   }
   auto held = this->literalTypes->intRange(field->type->nonOptional());
@@ -486,7 +501,7 @@ void IntlOptionsChecker::walkDigitRange(IntlOptionsRun &run, const char *name, i
     return;
   }
   const auto *value = this->valueExpr(run, name);
-  if (value != nullptr && value->type->isInt() && this->byteProofs->provesFits(value, min, max)) {
+  if (value != nullptr && value->type->isInt() && this->byteProofs->canProveFits(value, min, max)) {
     return;
   }
   auto message = ErrorTextIntlField::rangeOpen(name, min, max);
@@ -495,30 +510,37 @@ void IntlOptionsChecker::walkDigitRange(IntlOptionsRun &run, const char *name, i
 
 bool IntlOptionsChecker::isNotAbove(const IntlOptionsRun &run, llvm::StringRef low,
                                     llvm::StringRef high) {
-  auto a = this->constantOf(run, low);
-  auto b = this->constantOf(run, high);
-  if (a.has_value() && b.has_value()) {
-    return std::floor(*a) <= std::floor(*b);
+  auto lowConstant = this->constantOf(run, low);
+  auto highConstant = this->constantOf(run, high);
+  if (lowConstant.has_value() && highConstant.has_value()) {
+    return std::floor(*lowConstant) <= std::floor(*highConstant);
   }
-  const auto *x = this->valueExpr(run, low);
-  const auto *y = this->valueExpr(run, high);
-  std::optional<Linear> lx = x != nullptr ? this->indexProofs->linear(x) : std::nullopt;
-  std::optional<Linear> ly = y != nullptr ? this->indexProofs->linear(y) : std::nullopt;
-  if (!lx.has_value() && a.has_value() && *a == std::floor(*a)) {
-    lx = Linear{Term::zero(), int64_t(*a)};
-  }
-  if (!ly.has_value() && b.has_value() && *b == std::floor(*b)) {
-    ly = Linear{Term::zero(), int64_t(*b)};
-  }
-  if (!lx.has_value() || !ly.has_value()) {
+  auto lowLinear = this->optionLinear(run, low, lowConstant);
+  auto highLinear = this->optionLinear(run, high, highConstant);
+  if (!lowLinear.has_value() || !highLinear.has_value()) {
     return false;
   }
-  if (lx->term == ly->term) {
-    return lx->offset <= ly->offset;
+  if (lowLinear->term == highLinear->term) {
+    return lowLinear->offset <= highLinear->offset;
+  }
+  int64_t gap = highLinear->offset - lowLinear->offset + 1;
+
+  return this->state.getFlowState().getFacts().canProve(lowLinear->term, highLinear->term, gap);
+}
+
+std::optional<Linear> IntlOptionsChecker::optionLinear(const IntlOptionsRun &run,
+                                                       llvm::StringRef name,
+                                                       std::optional<double> constant) {
+  const auto *value = this->valueExpr(run, name);
+  std::optional<Linear> linear = value != nullptr ? this->indexProofs->linear(value) : std::nullopt;
+  if (linear.has_value()) {
+    return linear;
+  }
+  if (constant.has_value() && *constant == std::floor(*constant)) {
+    return Linear{Term::zero(), int64_t(*constant)};
   }
 
-  return this->state.getFlowState().getFacts().canProve(lx->term, ly->term,
-                                                        ly->offset - lx->offset + 1);
+  return std::nullopt;
 }
 
 void IntlOptionsChecker::walkDigitPairs(IntlOptionsRun &run) {
@@ -527,13 +549,12 @@ void IntlOptionsChecker::walkDigitPairs(IntlOptionsRun &run) {
     std::string max = std::string("maximum") + pair;
     bool isSkipped = run.literal == nullptr || run.type->field(min) == nullptr ||
                      run.type->field(max) == nullptr || this->isNotAbove(run, min, max);
-    if (isSkipped) {
-      continue;
+    if (!isSkipped) {
+      auto low = this->constantOf(run, min);
+      auto high = this->constantOf(run, max);
+      auto message = ErrorTextIntlField::above(min, max, low.has_value() && high.has_value());
+      this->reportOption(run, max, message);
     }
-    auto low = this->constantOf(run, min);
-    auto high = this->constantOf(run, max);
-    auto message = ErrorTextIntlField::above(min, max, low.has_value() && high.has_value());
-    this->reportOption(run, max, message);
   }
 }
 
@@ -544,7 +565,7 @@ bool IntlOptionsChecker::isIncrement(double value) const {
   return llvm::is_contained(increments, value);
 }
 
-bool IntlOptionsChecker::allIncrements(const Type *type) const {
+bool IntlOptionsChecker::areAllIncrements(const Type *type) const {
   if (!type->isUnion()) {
     return false;
   }
@@ -558,19 +579,19 @@ bool IntlOptionsChecker::allIncrements(const Type *type) const {
 }
 
 void IntlOptionsChecker::walkRoundingIncrement(IntlOptionsRun &run) {
-  const auto *increment = run.type->field("roundingIncrement");
+  const auto *increment = run.type->field(kRoundingIncrementOption);
   if (increment == nullptr) {
     return;
   }
-  auto n = this->constantOf(run, "roundingIncrement");
-  bool isKnown = n.has_value() || this->allIncrements(increment->type->nonOptional());
-  bool isListed = !n.has_value() || this->isIncrement(*n);
-  if (run.literal != nullptr && isKnown && n != 1.0 && isListed) {
+  auto constant = this->constantOf(run, kRoundingIncrementOption);
+  bool isKnown = constant.has_value() || this->areAllIncrements(increment->type->nonOptional());
+  bool isListed = !constant.has_value() || this->isIncrement(*constant);
+  if (run.literal != nullptr && isKnown && constant != 1.0 && isListed) {
     this->walkIncrementDigits(run);
   }
   if (!isKnown || !isListed) {
-    auto message = ErrorTextIntlField::increments(n.has_value());
-    this->reportOption(run, "roundingIncrement", message);
+    auto message = ErrorTextIntlField::increments(constant.has_value());
+    this->reportOption(run, kRoundingIncrementOption, message);
   }
 }
 

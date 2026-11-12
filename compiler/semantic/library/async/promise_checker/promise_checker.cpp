@@ -148,7 +148,7 @@ const Type *PromiseChecker::resolvedValueType(const Stmt *body, llvm::StringRef 
 std::vector<const CallExpr *> PromiseChecker::resolveCalls(const Stmt *body,
                                                            llvm::StringRef resolve) const {
   auto calls = std::vector<const CallExpr *>();
-  for (const Expr *expr : AstWalker::exprsIn(body, true)) {
+  for (const Expr *expr : AstWalker::allExprsIn(body)) {
     const auto *call = this->resolveCall(expr, resolve);
     if (call != nullptr) {
       calls.push_back(call);
@@ -173,8 +173,8 @@ const Type *PromiseChecker::joinedValue(const Type *found, const Type *type) con
   return common;
 }
 
-PromiseChecker::ResultValueTypeKnown PromiseChecker::valueType(NewExpr *expr, const CallExpr *call,
-                                                               const Type *expected) {
+PromiseChecker::ResultValueTypeKnown
+PromiseChecker::checkValueType(NewExpr *expr, const CallExpr *call, const Type *expected) {
   if (expr->typeArgs.size() > 1) {
     auto message = ErrorTextPromiseValue::typeArgs();
 
@@ -209,7 +209,8 @@ PromiseChecker::ResultValueTypeKnown PromiseChecker::valueType(NewExpr *expr, co
   return ok(inferred);
 }
 
-PromiseChecker::ResultExecutorShaped PromiseChecker::executorShape(const Expr *executor) const {
+PromiseChecker::ResultExecutorShaped
+PromiseChecker::checkExecutorShape(const Expr *executor) const {
   auto *function = dyn_cast<FunctionExpr>(executor);
   if (function != nullptr && function->fn->params.size() > 1) {
     auto message = ErrorTextExecutor::rejects();
@@ -228,7 +229,7 @@ Expr *PromiseChecker::checkPromiseNew(NewExpr *expr, const Type *expected) {
   auto *call = this->state.getAst().make<CallExpr>(expr->loc(), expr, expr->args);
   call->target = BuiltinCall{.builtin = Builtin::PromiseNew};
   call->type = Type::error();
-  auto known = this->valueType(expr, call, expected);
+  auto known = this->checkValueType(expr, call, expected);
   if (known.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), known.error().message);
   }
@@ -267,7 +268,7 @@ Expr *PromiseChecker::looseExecutor(Expr *executor) {
 Expr *PromiseChecker::typedExecutor(Expr *executor, const Type *value) {
   const auto *resolver = this->resolverType(value);
   auto params = std::vector<const Type *>{resolver};
-  auto shaped = this->executorShape(executor);
+  auto shaped = this->checkExecutorShape(executor);
   if (shaped.isErr()) {
     llvm::SMLoc rejectLoc = cast<FunctionExpr>(executor)->fn->params[1].loc;
     this->state.getDiagnostics().error(rejectLoc, shaped.error().message);
@@ -310,7 +311,7 @@ PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Typ
     });
   }
 
-  return this->chainThen(call, member, expected);
+  return this->checkChainThen(call, member, expected);
 }
 
 PromiseChecker::ResultMethodAccepted
@@ -380,7 +381,7 @@ PromiseChecker::ResultMethodAccepted PromiseChecker::checkIsThen(CallExpr *call,
 }
 
 PromiseChecker::ResultPromiseChained
-PromiseChecker::chainThen(CallExpr *call, const MemberExpr *member, const Type *expected) {
+PromiseChecker::checkChainThen(CallExpr *call, const MemberExpr *member, const Type *expected) {
   const Type *value = member->object->type->promised();
   call->target = BuiltinCall{.builtin = Builtin::PromiseThen};
   auto returned = this->checkThenCallback(call, member, expected);

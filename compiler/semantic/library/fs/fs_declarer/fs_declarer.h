@@ -19,6 +19,9 @@ public:
   bool isRuntimeClass(const ClassDecl *classDecl) const;
 
 private:
+  ClassDecl *declareFsClass(llvm::StringRef name,
+                            llvm::ArrayRef<std::pair<llvm::StringRef, const Type *>> fields,
+                            size_t privateFrom);
   std::optional<int> fileKind(llvm::StringRef method) const;
 
   SemanticState &state;

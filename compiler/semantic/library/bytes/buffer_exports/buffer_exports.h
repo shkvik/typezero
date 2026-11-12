@@ -11,7 +11,7 @@ class BufferExports {
 public:
   using ResultExportFound = Result<llvm::StringRef, ModuleExportFoundError>;
 
-  static ResultExportFound bufferExport(llvm::StringRef name, llvm::StringRef path);
+  static ResultExportFound checkBufferExport(llvm::StringRef name, llvm::StringRef path);
 };
 
 }

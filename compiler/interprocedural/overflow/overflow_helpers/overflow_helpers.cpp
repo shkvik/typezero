@@ -168,7 +168,7 @@ std::vector<const Stmt *> OverflowHelpers::loopParts(const Stmt *stmt) {
 }
 
 bool OverflowHelpers::passesCallback(const Stmt *stmt) {
-  for (const Expr *e : AstWalker::exprsIn(stmt, false)) {
+  for (const Expr *e : AstWalker::ownExprsIn(stmt)) {
     auto *call = dyn_cast<CallExpr>(e);
     if (call == nullptr) {
       continue;

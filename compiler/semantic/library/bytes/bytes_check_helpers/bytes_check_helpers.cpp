@@ -332,7 +332,7 @@ Range BytesCheckHelpers::operate(BinaryOp op, const Range &a, const Range &b, bo
   return r;
 }
 
-bool BytesCheckHelpers::numberMethod(llvm::StringRef name, bool dataView, NumberMethod &m) {
+bool BytesCheckHelpers::numberMethod(llvm::StringRef name, bool dataView, BytesNumberMethod &m) {
   llvm::StringRef rest = name;
   if (dataView) {
     if (!rest.consume_front("get") && !(m.write = rest.consume_front("set"))) {

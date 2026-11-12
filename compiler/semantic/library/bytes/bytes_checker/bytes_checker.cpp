@@ -80,7 +80,7 @@ std::optional<std::u16string> BytesChecker::literalText(const Expr *expr) const 
   return std::nullopt;
 }
 
-BytesChecker::ResultKnownEncoding BytesChecker::knownEncoding(llvm::StringRef name) const {
+BytesChecker::ResultKnownEncoding BytesChecker::checkKnownEncoding(llvm::StringRef name) const {
   auto encoding = BytesCheckHelpers::encodingNamed(name);
   if (!encoding) {
     auto message = ErrorTextBufferEncoding::unknown(name);
@@ -94,7 +94,7 @@ BytesChecker::ResultKnownEncoding BytesChecker::knownEncoding(llvm::StringRef na
   return ok(*encoding);
 }
 
-BytesChecker::ResultBytesIndexing BytesChecker::bytesIndexing(const Type *type) const {
+BytesChecker::ResultBytesIndexing BytesChecker::checkBytesIndexing(const Type *type) const {
   if (!type->isTypedArray()) {
     auto message = ErrorTextBytesIndex::notIndexed(type);
 
@@ -120,7 +120,7 @@ const Type *BytesChecker::bytesTypeNamed(llvm::StringRef name) const {
 Expr *BytesChecker::checkBytesIndex(IndexExpr *index) {
   const Type *type = index->object->type;
   index->index = this->memberChecker->checkPosition(index->index);
-  auto indexing = this->bytesIndexing(type);
+  auto indexing = this->checkBytesIndexing(type);
   if (indexing.isErr()) {
     this->state.getDiagnostics().error(index->loc(), indexing.error().message);
     return index;
@@ -321,16 +321,6 @@ Expr *BytesChecker::checkBytesUnionMember(MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
   auto property = BuiltinPropertyTable::find(name);
-  auto has = [&](const Type *memberType) {
-    if (property == BuiltinProperty::BYTE_LENGTH) {
-      return memberType->isByteView() || memberType->bytes() == Bytes::ArrayBuffer;
-    }
-    if (property == BuiltinProperty::BYTE_OFFSET || property == BuiltinProperty::BUFFER) {
-      return memberType->isByteView();
-    }
-
-    return property == BuiltinProperty::LENGTH && memberType->isTypedArray();
-  };
   static const BuiltinProperty others[] = {
       BuiltinProperty::BYTES_PER_ELEMENT, BuiltinProperty::MAX_BYTE_LENGTH,
       BuiltinProperty::RESIZABLE,         BuiltinProperty::DETACHED,
@@ -342,7 +332,9 @@ Expr *BytesChecker::checkBytesUnionMember(MemberExpr *member) {
     return member;
   }
   llvm::ArrayRef<const Type *> members = type->members();
-  if (const Type *const *lacking = llvm::find_if_not(members, has); lacking != members.end()) {
+  auto has = std::bind_front(&BytesChecker::hasUnionProperty, this, property);
+  const Type *const *lacking = llvm::find_if_not(members, has);
+  if (lacking != members.end()) {
     const Type *const *with = llvm::find_if(members, has);
     llvm::StringRef withName = with != members.end() ? (*with)->name() : llvm::StringRef();
     auto message = ErrorTextBytesMember::lacking(name, (*lacking)->name(), type->name(), withName);
@@ -415,7 +407,7 @@ Expr *BytesChecker::bytesToString(Expr *expr) {
 Expr *BytesChecker::checkBufferEncoding(Expr *arg) {
   if (std::optional<std::u16string> text = this->literalText(arg)) {
     auto written = ToUtf8::toUtf8(*text);
-    auto encoding = this->knownEncoding(written);
+    auto encoding = this->checkKnownEncoding(written);
     if (encoding.isErr()) {
       this->state.getDiagnostics().error(arg->loc(), encoding.error().message);
       arg->type = Type::error();
@@ -436,7 +428,7 @@ Expr *BytesChecker::checkBufferEncoding(Expr *arg) {
     return arg;
   }
   for (const std::string &name : *names) {
-    auto encoding = this->knownEncoding(name);
+    auto encoding = this->checkKnownEncoding(name);
     if (encoding.isErr()) {
       this->state.getDiagnostics().error(arg->loc(), encoding.error().message);
       break;
@@ -485,7 +477,18 @@ Expr *BytesChecker::checkBytesMethod(CallExpr *call, MemberExpr *member, const T
   case Bytes::TextDecoder:
   case Bytes::FatalTextDecoder:
     return this->bufferChecker->checkTextMethod(call, member);
-  default:
+  case Bytes::None:
+  case Bytes::Uint8:
+  case Bytes::Int8:
+  case Bytes::Uint8Clamped:
+  case Bytes::Int16:
+  case Bytes::Uint16:
+  case Bytes::Int32:
+  case Bytes::Uint32:
+  case Bytes::Float16:
+  case Bytes::Float32:
+  case Bytes::Float64:
+  case Bytes::Buffer:
     break;
   }
   if (type->isBuffer()) {
@@ -496,6 +499,19 @@ Expr *BytesChecker::checkBytesMethod(CallExpr *call, MemberExpr *member, const T
   }
 
   return this->typedArrayChecker->checkTypedArrayMethod(call, member, expected);
+}
+
+
+bool BytesChecker::hasUnionProperty(std::optional<BuiltinProperty> property,
+                                    const Type *memberType) const {
+  if (property == BuiltinProperty::BYTE_LENGTH) {
+    return memberType->isByteView() || memberType->bytes() == Bytes::ArrayBuffer;
+  }
+  if (property == BuiltinProperty::BYTE_OFFSET || property == BuiltinProperty::BUFFER) {
+    return memberType->isByteView();
+  }
+
+  return property == BuiltinProperty::LENGTH && memberType->isTypedArray();
 }
 
 }

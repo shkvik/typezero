@@ -9,6 +9,7 @@
 namespace tz {
 
 class FlowChecker;
+struct DictMethodInfo;
 class SemanticParts;
 class ExprChecker;
 class IntlChecker;
@@ -39,22 +40,29 @@ public:
   ResultDictIndexedValue checkDictIndex(IndexExpr *index);
   ResultDictMemberAccess checkDictMember(MemberExpr *member);
   ResultDictTypeResolved resolveDictType(const TypeRef &ref);
-  bool keyArgument(DictCheckerResolveDictTypeErrorCode code) const;
+  bool isKeyArgument(DictCheckerResolveDictTypeErrorCode code) const;
   ResultRecordTargetType checkDictTarget(Expr *target, AssignForm form);
   Expr *checkRecordNullishAssign(AssignExpr *assign, IndexExpr *index);
   ResultRecordKeyDeleted checkDictDelete(UnaryExpr *unary, Expr *object, Expr *keyExpr,
                                          llvm::StringRef name);
   Expr *dictCall(llvm::SMLoc loc, Expr *receiver, llvm::StringRef name, Builtin builtin,
                  std::vector<Expr *> args, const Type *type);
+  bool isMethodOn(const DictMethodInfo &method, const Type *type) const;
 
 private:
   using ResultTextKeyForRecord = Result<const Type *, DictCheckerStringKeyError>;
 
-  ResultTextKeyForRecord stringKey(const Type *type) const;
+  ResultTextKeyForRecord checkStringKey(const Type *type) const;
   ResultDictTypeResolved resolveCollectionType(const TypeRef &ref, Collection collection);
-  ResultDictTypeResolved recordType(const Type *key, const Type *value) const;
+  std::string typeArgumentsText(const TypeRef &ref, Collection collection) const;
+  ResultDictTypeResolved checkRecordType(const Type *key, const Type *value) const;
   bool isLiteralKeys(const Type *key) const;
   const Type *literalKeysObject(const Type *key, const Type *value) const;
+  ResultRecordTargetType checkCollectionTarget(IndexExpr *index, const MemberExpr *member,
+                                               const Expr *object);
+  std::string missingHint(const std::string &key, const Type *value) const;
+  Expr *targetObject(const IndexExpr *index, const MemberExpr *member) const;
+  llvm::StringRef collectionName(const Type *type) const;
 
   SemanticState &state;
   ExprChecker *exprChecker = nullptr;

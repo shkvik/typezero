@@ -22,11 +22,14 @@ public:
   void linkOverrides(ClassDecl *classDecl);
   std::vector<FunctionDecl *> constructorsOf(const ClassDecl *classDecl) const;
   std::vector<FunctionDecl *> ownMethods(const ClassDecl *classDecl) const;
-  bool overridesTransitively(const FunctionDecl *functionDecl, const FunctionDecl *base) const;
+  bool isOverridingTransitively(const FunctionDecl *functionDecl, const FunctionDecl *base) const;
   FunctionDecl *soleImplementation(const ClassDecl *classDecl, FunctionDecl *variant) const;
   const Type *inheritedReturnType(FuncSymbol *function);
   void noteInheritedReturn(const FunctionDecl *functionDecl);
-  static const Type *commonClass(const Type *a, const Type *b);
+  static const Type *commonClass(const Type *first, const Type *second);
+  bool isTakingParams(const Type *functionType, const FuncSymbol *function) const;
+  bool isArrowMethod(const FunctionDecl *functionDecl) const;
+  void interfacesOf(const ClassDecl *classDecl, std::vector<const Type *> &out) const;
 
 private:
   using ResultMethodNotField = Result<const FunctionDecl *, ClassLinksNotAFieldError>;
@@ -37,36 +40,60 @@ private:
   using ResultBodyIsRetained = Result<const FunctionDecl *, ClassLinksBodyKeptError>;
   using ResultSameTypeParams = Result<const FunctionDecl *, ClassLinksSameTypeArgsError>;
 
+  struct OwnedMethod {
+    FunctionDecl *method;
+    const ClassDecl *owner;
+  };
+
+  bool isSameParams(const FuncSymbol *first, const FuncSymbol *second) const;
+  bool isDeclaringReturn(const FunctionDecl *functionDecl) const;
+  void addInterface(const Type *interfaceType, std::vector<const Type *> &queue,
+                    std::vector<const Type *> &out) const;
+  std::vector<OwnedMethod> implementationsBelow(const ClassDecl *classDecl,
+                                                const FunctionDecl *variant) const;
+  void addImplementations(const ClassDecl *child, const FunctionDecl *variant,
+                          std::vector<OwnedMethod> &implementations) const;
+  FunctionDecl *firstImplementation(const ClassDecl *classDecl,
+                                    const FunctionDecl *functionDecl) const;
+  FunctionDecl *ownImplementation(const ClassDecl *child, const FunctionDecl *functionDecl) const;
+  void linkReturnTypes(const ClassDecl *classDecl,
+                       llvm::SmallPtrSet<const FunctionDecl *, 4> &sources);
+  void linkReturnType(const ClassDecl *classDecl, FunctionDecl *functionDecl,
+                      llvm::SmallPtrSet<const FunctionDecl *, 4> &sources);
+  void linkAbstractReturn(const ClassDecl *classDecl, FunctionDecl *functionDecl,
+                          llvm::SmallPtrSet<const FunctionDecl *, 4> &sources);
+  void linkOverrideReturn(FunctionDecl *functionDecl);
+  void linkInterfaceReturn(const ClassDecl *classDecl, FunctionDecl *functionDecl);
+  bool linkInterfaceField(const Type *interfaceType, FunctionDecl *functionDecl);
+  void linkInterfaceOverloads(const Type *interfaceType, FunctionDecl *functionDecl);
+  unsigned lastDescendantId(const ClassDecl *classDecl) const;
+  void placeInVtable(ClassDecl *classDecl, FunctionDecl *functionDecl);
+  ResultMethodNotField checkNotAField(const ClassDecl *classDecl,
+                                      const FunctionDecl *functionDecl) const;
+  ResultOverrideTarget checkOverrideTarget(const ClassDecl *classDecl,
+                                           const FunctionDecl *functionDecl,
+                                           llvm::ArrayRef<FunctionDecl *> inherited) const;
+  ResultBaseIsNotArrow checkArrowOverride(const FunctionDecl *functionDecl,
+                                          const FunctionDecl *base) const;
+  ResultBaseNotPrivate checkBaseVisible(const FunctionDecl *functionDecl,
+                                        const FunctionDecl *base) const;
+  ResultAccessNotLower checkAccessKept(const FunctionDecl *functionDecl,
+                                       const FunctionDecl *base) const;
+  ResultBodyIsRetained checkBodyKept(const ClassDecl *classDecl, const FunctionDecl *functionDecl,
+                                     const FunctionDecl *base) const;
+  ResultSameTypeParams checkSameTypeArgs(const ClassDecl *classDecl,
+                                         const FunctionDecl *functionDecl,
+                                         const FunctionDecl *base) const;
   void linkOverride(ClassDecl *classDecl, FunctionDecl *functionDecl);
   FunctionDecl *sameParamsBase(llvm::ArrayRef<FunctionDecl *> inherited,
                                const FunctionDecl *functionDecl) const;
   void walkNewMethod(const ClassDecl *classDecl, FunctionDecl *functionDecl,
                      llvm::ArrayRef<FunctionDecl *> inherited);
-  bool overrideFits(const ClassDecl *classDecl, const FunctionDecl *functionDecl,
-                    const FunctionDecl *base);
+  void walkHookParams(const FunctionDecl *functionDecl, llvm::ArrayRef<FunctionDecl *> inherited);
+  bool reportBadOverride(const ClassDecl *classDecl, const FunctionDecl *functionDecl,
+                         const FunctionDecl *base);
   void walkOverrideChain(const ClassDecl *classDecl, const FunctionDecl *functionDecl,
                          FunctionDecl *base);
-  ResultMethodNotField notAField(const ClassDecl *classDecl,
-                                 const FunctionDecl *functionDecl) const;
-  ResultOverrideTarget overrideTarget(const ClassDecl *classDecl, const FunctionDecl *functionDecl,
-                                      llvm::ArrayRef<FunctionDecl *> inherited) const;
-  ResultBaseIsNotArrow arrowOverride(const FunctionDecl *functionDecl,
-                                     const FunctionDecl *base) const;
-  ResultBaseNotPrivate baseVisible(const FunctionDecl *functionDecl,
-                                   const FunctionDecl *base) const;
-  ResultAccessNotLower accessKept(const FunctionDecl *functionDecl, const FunctionDecl *base) const;
-  ResultBodyIsRetained bodyKept(const ClassDecl *classDecl, const FunctionDecl *functionDecl,
-                                const FunctionDecl *base) const;
-  ResultSameTypeParams sameTypeArgs(const ClassDecl *classDecl, const FunctionDecl *functionDecl,
-                                    const FunctionDecl *base) const;
-  bool sameParams(const FuncSymbol *a, const FuncSymbol *b) const;
-  bool takesParams(const Type *functionType, const FuncSymbol *function) const;
-  const char *accessName(Access access) const;
-  bool isArrowMethod(const FunctionDecl *functionDecl) const;
-  bool declaresReturn(const FunctionDecl *functionDecl) const;
-  FunctionDecl *firstImplementation(const ClassDecl *classDecl,
-                                    const FunctionDecl *functionDecl) const;
-  void interfacesOf(const ClassDecl *classDecl, std::vector<const Type *> &out) const;
 
   SemanticState &state;
   ChunkTypes *chunkTypes = nullptr;

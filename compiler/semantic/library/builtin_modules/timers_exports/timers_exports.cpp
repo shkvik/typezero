@@ -2,8 +2,8 @@
 
 namespace tz {
 
-TimersExports::ResultExportFound TimersExports::timersExport(llvm::StringRef name,
-                                                             llvm::StringRef path) {
+TimersExports::ResultExportFound TimersExports::checkTimersExport(llvm::StringRef name,
+                                                                  llvm::StringRef path) {
   if (name == "setTimeout" || name == "setImmediate" || name == "setInterval" ||
       name == "scheduler") {
     return ok(name);

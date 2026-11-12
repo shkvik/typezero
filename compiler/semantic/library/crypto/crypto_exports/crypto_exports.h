@@ -11,8 +11,8 @@ class CryptoExports {
 public:
   using ResultExportFound = Result<llvm::StringRef, ModuleExportFoundError>;
 
-  static ResultExportFound cryptoExport(llvm::StringRef name, llvm::StringRef path);
-  static ResultExportFound tzCryptoExport(llvm::StringRef name, llvm::StringRef path);
+  static ResultExportFound checkCryptoExport(llvm::StringRef name, llvm::StringRef path);
+  static ResultExportFound checkTzCryptoExport(llvm::StringRef name, llvm::StringRef path);
 };
 
 }

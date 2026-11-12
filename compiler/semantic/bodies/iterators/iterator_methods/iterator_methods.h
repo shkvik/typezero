@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/builtin_names/global_member_table/global_member_table.h"
 #include "compiler/program/library/iterator/iterator_method_table/iterator_method_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/iterators/iterator_methods/iterator_methods_errors.h"
@@ -20,6 +21,7 @@ class ArgumentChecker;
 class CallbackChecker;
 class GeneratorChecker;
 class PredicateChecker;
+struct ArrayMethodInfo;
 
 class IteratorMethods {
 public:
@@ -45,16 +47,6 @@ private:
   using ResultKnownHelperFound = Result<Builtin, IteratorMethodsIteratorHelperError>;
   using ResultArrayStaticKnown = Result<const MemberExpr *, IteratorMethodsArrayStaticError>;
 
-  ResultNextValueOneType nextValue(const Type *iterator) const;
-  ResultFlatMapInnerType flatMapInner(const Type *result) const;
-  ResultNotThrowOrReturn plainMethod(llvm::StringRef name) const;
-  ResultInitialValueType initialValue(const Type *accumulator) const;
-  ResultArrayStaticKnown arrayStatic(const MemberExpr *member) const;
-  ResultSourceIsIterable iteratedSource(const Type *type, llvm::StringRef functionName) const;
-  ResultCallbackHasValue callbackValue(const Type *result, llvm::StringRef functionName) const;
-  ResultKnownHelperFound iteratorHelper(llvm::StringRef name, const Type *iterator) const;
-  ResultCallbackIsPassed callbackGiven(size_t count, llvm::StringRef name, bool reduce) const;
-
   struct IteratorCallback {
     CallExpr *call;
     llvm::StringRef name;
@@ -64,19 +56,44 @@ private:
     size_t count;
   };
 
-  bool hasWrongArity(CallExpr *call, MemberExpr *member, unsigned min, unsigned max);
+  Expr *markStageFused(CallExpr *call) const;
+  Builtin arrayIteratorBuiltin(const ArrayMethodInfo *method) const;
+  const Type *arrayIteratorType(const ArrayMethodInfo *method, const Type *element) const;
+  ResultSourceIsIterable checkIteratedSource(const Type *type, llvm::StringRef functionName) const;
+  IteratorMethodsCheckIteratorFromErrorCode
+  iteratorFromCode(IteratorMethodsIteratedSourceErrorCode code) const;
+  ResultArrayStaticKnown checkArrayStatic(const MemberExpr *member) const;
+  ResultCallbackHasValue checkCallbackValue(const Type *result, llvm::StringRef functionName) const;
+  Expr *reportArrayFromSource(CallExpr *call, const IteratorMethodsIteratedSourceError &error);
+  void walkArrayFromSends(const CallExpr *call, const Type *type);
+  Expr *checkArrayFromMapper(CallExpr *call, const Type *element);
+  ResultNextValueOneType checkNextValue(const Type *iterator) const;
+  ResultNotThrowOrReturn checkPlainMethod(llvm::StringRef name) const;
+  ResultKnownHelperFound checkIteratorHelper(llvm::StringRef name, const Type *iterator) const;
+  ResultCallbackIsPassed checkCallbackGiven(size_t count, llvm::StringRef name,
+                                            bool isReduce) const;
+  ResultInitialValueType checkInitialValue(const Type *accumulator) const;
+  ResultFlatMapInnerType checkFlatMapInner(const Type *result) const;
+  bool reportWrongArity(CallExpr *call, MemberExpr *member, unsigned min, unsigned max);
   Expr *checkIteratorStep(CallExpr *call, MemberExpr *member, Builtin builtin);
+  void walkSentArgument(CallExpr *call, const Type *iterator);
+  const Type *stepResultType(const Type *value) const;
   std::optional<Builtin> helperBuiltin(CallExpr *call, MemberExpr *member);
   Expr *checkTakeDrop(CallExpr *call, MemberExpr *member, Builtin builtin);
   Expr *checkToArray(CallExpr *call, MemberExpr *member, Builtin builtin);
   Expr *checkIteratorCallback(CallExpr *call, MemberExpr *member, IteratorMethod method,
                               Builtin builtin);
+  void walkCallbackArgument(CallExpr *call, const Signature &signature, IteratorMethod method,
+                            Builtin builtin, llvm::StringRef name);
   const Type *reduceInitType(CallExpr *call, const Type *element);
   Signature callbackSignature(IteratorMethod method, const Type *element,
                               const Type *accumulator) const;
+  const Type *callbackReturn(IteratorMethod method, const Type *accumulator) const;
   Expr *checkCallbackResult(const IteratorCallback &callback, IteratorMethod method);
+  Expr *checkFilterResult(const IteratorCallback &callback);
   Expr *checkMapResult(const IteratorCallback &callback, const Type *result);
-  Expr *checkFlatMapResult(CallExpr *call, const Type *result);
+  Expr *checkFlatMapResult(const IteratorCallback &callback, const Type *result);
+  bool reportFlatSends(const IteratorCallback &callback, const Type *result);
   const Type *filteredElement(const IteratorCallback &callback);
   Expr *finishReduce(const IteratorCallback &callback);
 

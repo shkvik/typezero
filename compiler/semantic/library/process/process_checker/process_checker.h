@@ -36,7 +36,7 @@ public:
 private:
   using ResultListenedSignal = Result<llvm::StringRef, ProcessCheckerListenedSignalError>;
 
-  ResultListenedSignal listenedSignal(llvm::StringRef name, const Expr *event) const;
+  ResultListenedSignal checkListenedSignal(llvm::StringRef name, const Expr *event) const;
 
   bool hasStreamLibrary() const;
   bool hasSignalLibrary() const;

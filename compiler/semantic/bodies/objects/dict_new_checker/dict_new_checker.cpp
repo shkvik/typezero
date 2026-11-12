@@ -37,12 +37,13 @@ void DictNewChecker::markPairs(Expr *arg) {
   const ArrayMethodInfo *method =
       member != nullptr ? ArrayMethodTable::find(member->name) : nullptr;
   bool isMapping = method != nullptr && method->method == ArrayMethod::MAP;
-  if (!isMapping || functionExpr == nullptr || functionExpr->fn->returnType ||
-      !functionExpr->fn->body) {
+  bool isInferredCallback = functionExpr != nullptr && !functionExpr->fn->returnType.has_value() &&
+                            functionExpr->fn->body != nullptr;
+  if (!isMapping || !isInferredCallback) {
     return;
   }
   auto returns = this->branchReturns(functionExpr->fn->body);
-  bool isPlain = llvm::all_of(returns, DictNewChecker::returnsPair);
+  bool isPlain = llvm::all_of(returns, std::bind_front(&DictNewChecker::isPairReturn, this));
   if (!isPlain || returns.empty()) {
     return;
   }
@@ -53,18 +54,20 @@ void DictNewChecker::markPairs(Expr *arg) {
 
 std::vector<const ReturnStmt *> DictNewChecker::branchReturns(const Stmt *body) const {
   auto returns = std::vector<const ReturnStmt *>();
-  std::vector<const Stmt *> stack = {body};
+  auto stack = std::vector<const Stmt *>{body};
   while (!stack.empty()) {
     const Stmt *next = stack.back();
     stack.pop_back();
     auto *returnStmt = dyn_cast_or_null<ReturnStmt>(next);
+    auto *block = dyn_cast_or_null<BlockStmt>(next);
+    auto *branch = dyn_cast_or_null<IfStmt>(next);
     if (returnStmt != nullptr) {
       returns.push_back(returnStmt);
-    } else if (auto *block = dyn_cast_or_null<BlockStmt>(next)) {
-      for (const Stmt *inner : llvm::reverse(block->body)) {
-        stack.push_back(inner);
-      }
-    } else if (auto *branch = dyn_cast_or_null<IfStmt>(next)) {
+    }
+    if (block != nullptr) {
+      this->pushBlockStatements(block, stack);
+    }
+    if (branch != nullptr) {
       stack.push_back(branch->elseStmt);
       stack.push_back(branch->thenStmt);
     }
@@ -73,18 +76,25 @@ std::vector<const ReturnStmt *> DictNewChecker::branchReturns(const Stmt *body) 
   return returns;
 }
 
-bool DictNewChecker::returnsPair(const ReturnStmt *returnStmt) {
+void DictNewChecker::pushBlockStatements(const BlockStmt *block,
+                                         std::vector<const Stmt *> &stack) const {
+  for (const Stmt *inner : llvm::reverse(block->body)) {
+    stack.push_back(inner);
+  }
+}
+
+bool DictNewChecker::isPairReturn(const ReturnStmt *returnStmt) const {
   auto *pair = dyn_cast_or_null<ArrayLitExpr>(returnStmt->value);
 
   return pair != nullptr && pair->elements.size() == 2 && !pair->elements[0].spread &&
          !pair->elements[1].spread;
 }
 
-DictNewChecker::ResultPartsJoined DictNewChecker::partsJoin(bool keys, const Type *common,
-                                                            const Type *type) const {
+DictNewChecker::ResultPartsJoined DictNewChecker::checkPartsJoin(PairPart part, const Type *common,
+                                                                 const Type *type) const {
   const Type *next = common != nullptr ? this->typeRelations->unify(common, type) : type;
-  if (next == nullptr && keys) {
-    auto message = ErrorTextPairParts::differ(true, common->name(), type->name());
+  if (next == nullptr && part == PairPart::KEY) {
+    auto message = ErrorTextPairParts::keysDiffer(common->name(), type->name());
 
     return err(DictNewCheckerPartsJoinError{
         .code = DictNewCheckerPartsJoinErrorCode::KEYS_DIFFER,
@@ -92,7 +102,7 @@ DictNewChecker::ResultPartsJoined DictNewChecker::partsJoin(bool keys, const Typ
     });
   }
   if (next == nullptr) {
-    auto message = ErrorTextPairParts::differ(false, common->name(), type->name());
+    auto message = ErrorTextPairParts::valuesDiffer(common->name(), type->name());
 
     return err(DictNewCheckerPartsJoinError{
         .code = DictNewCheckerPartsJoinErrorCode::VALUES_DIFFER,
@@ -103,8 +113,8 @@ DictNewChecker::ResultPartsJoined DictNewChecker::partsJoin(bool keys, const Typ
   return ok(next);
 }
 
-DictNewChecker::ResultPairTypesOk DictNewChecker::pairsKnown(const Type *key,
-                                                             const Type *value) const {
+DictNewChecker::ResultPairTypesOk DictNewChecker::checkPairsKnown(const Type *key,
+                                                                  const Type *value) const {
   if (key->isUndefined() || value->isUndefined() || key->isVoid() || value->isVoid()) {
     auto message = ErrorTextPairsKnown::undefined();
 
@@ -117,9 +127,9 @@ DictNewChecker::ResultPairTypesOk DictNewChecker::pairsKnown(const Type *key,
   return ok(key);
 }
 
-DictNewChecker::ResultSourceShape DictNewChecker::sourceShape(const Type *type, const Type *given,
-                                                              const Type *wanted, bool pairs,
-                                                              llvm::StringRef what) const {
+DictNewChecker::ResultSourceShape
+DictNewChecker::checkSourceShape(const Type *type, const Type *given, const Type *wanted,
+                                 SourceItems items, llvm::StringRef what) const {
   if (given == nullptr) {
     auto message = ErrorTextDictSource::notIter(what, type->name(), type->isRecord());
 
@@ -128,13 +138,7 @@ DictNewChecker::ResultSourceShape DictNewChecker::sourceShape(const Type *type, 
         .message = message,
     });
   }
-  bool isPair = given->isTuple() && given->fields().size() == 2;
-  bool isPairFits =
-      isPair &&
-      (wanted == nullptr ||
-       (TypeRelations::isImplicitlyConvertible(given->fields()[0].type, wanted->fields()[0].type) &&
-        TypeRelations::isImplicitlyConvertible(given->fields()[1].type, wanted->fields()[1].type)));
-  if (pairs && !isPairFits) {
+  if (items == SourceItems::PAIRS && !this->isFittingPair(given, wanted)) {
     llvm::StringRef wantedName = wanted != nullptr ? wanted->name() : llvm::StringRef();
     auto message = ErrorTextDictSource::notPairs(what, wantedName, given->name(), given->isArray());
 
@@ -143,7 +147,9 @@ DictNewChecker::ResultSourceShape DictNewChecker::sourceShape(const Type *type, 
         .message = message,
     });
   }
-  if (!pairs && wanted != nullptr && !TypeRelations::isImplicitlyConvertible(given, wanted)) {
+  bool isWrongValue = items == SourceItems::VALUES && wanted != nullptr &&
+                      !TypeRelations::isImplicitlyConvertible(given, wanted);
+  if (isWrongValue) {
     auto message = ErrorTextDictSource::values(what, wanted->name(), given->name());
 
     return err(DictNewCheckerSourceShapeError{
@@ -155,8 +161,21 @@ DictNewChecker::ResultSourceShape DictNewChecker::sourceShape(const Type *type, 
   return ok(given);
 }
 
-DictNewChecker::ResultOneArgument DictNewChecker::argumentCount(const NewExpr *expr,
-                                                                bool isMap) const {
+bool DictNewChecker::isFittingPair(const Type *given, const Type *wanted) const {
+  bool isPair = given->isTuple() && given->fields().size() == 2;
+  if (!isPair || wanted == nullptr) {
+    return isPair;
+  }
+  bool isKeyFitting =
+      TypeRelations::isImplicitlyConvertible(given->fields()[0].type, wanted->fields()[0].type);
+  bool isValueFitting =
+      TypeRelations::isImplicitlyConvertible(given->fields()[1].type, wanted->fields()[1].type);
+
+  return isKeyFitting && isValueFitting;
+}
+
+DictNewChecker::ResultOneArgument DictNewChecker::checkArgumentCount(const NewExpr *expr,
+                                                                     bool isMap) const {
   if (expr->args.size() > 1) {
     auto message = ErrorTextDictArgs::oneArg(expr->name, isMap);
 
@@ -169,9 +188,10 @@ DictNewChecker::ResultOneArgument DictNewChecker::argumentCount(const NewExpr *e
   return ok(expr);
 }
 
-DictNewChecker::ResultTypesStated DictNewChecker::typesGiven(const NewExpr *expr, const Type *type,
-                                                             bool isMap, bool undefinedArg) const {
-  if (type == nullptr && undefinedArg) {
+DictNewChecker::ResultTypesStated DictNewChecker::checkTypesGiven(const NewExpr *expr,
+                                                                  const Type *type, bool isMap,
+                                                                  bool isUndefinedArg) const {
+  if (type == nullptr && isUndefinedArg) {
     auto message = ErrorTextDictTypes::undefinedArg(expr->name, isMap);
 
     return err(DictNewCheckerTypesGivenError{
@@ -199,7 +219,7 @@ DictNewChecker::ResultTypesStated DictNewChecker::typesGiven(const NewExpr *expr
   return ok(type);
 }
 
-DictNewChecker::ResultPairsShaped DictNewChecker::pairShape(const Type *element) const {
+DictNewChecker::ResultPairsShaped DictNewChecker::checkPairShape(const Type *element) const {
   if (!element->isTuple() || element->fields().size() != 2) {
     auto message = ErrorTextDictPairs::pairs(element->name());
 
@@ -212,10 +232,10 @@ DictNewChecker::ResultPairsShaped DictNewChecker::pairShape(const Type *element)
   return ok(element);
 }
 
-DictNewChecker::ResultDefinedType DictNewChecker::elementsKnown(const NewExpr *expr,
-                                                                const Type *key,
-                                                                const Type *element,
-                                                                bool isMap) const {
+DictNewChecker::ResultDefinedType DictNewChecker::checkElementsKnown(const NewExpr *expr,
+                                                                     const Type *key,
+                                                                     const Type *element,
+                                                                     bool isMap) const {
   if (key->isUndefined() || (isMap && element->fields()[1].type->isUndefined())) {
     auto message = ErrorTextDictElements::undefined(expr->name);
 
@@ -228,52 +248,90 @@ DictNewChecker::ResultDefinedType DictNewChecker::elementsKnown(const NewExpr *e
   return ok(element);
 }
 
-bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value) {
+std::optional<DictNewChecker::InferredPairs> DictNewChecker::inferPairs(Expr *arg) {
   this->markPairs(arg);
   auto *literal = dyn_cast<ArrayLitExpr>(arg);
   if (literal == nullptr || literal->elements.empty()) {
-    return false;
+    return std::nullopt;
   }
-  for (const ArrayLitExpr::Element &element : literal->elements) {
-    auto *pair = dyn_cast<ArrayLitExpr>(element.expr);
-    if (element.spread || pair == nullptr || pair->elements.size() != 2 ||
-        pair->elements[0].spread || pair->elements[1].spread) {
-      return false;
-    }
+  bool isPairList =
+      llvm::all_of(literal->elements, std::bind_front(&DictNewChecker::isPairElement, this));
+  if (!isPairList) {
+    return std::nullopt;
   }
-  key = value = nullptr;
-  bool isTyped = true;
+  auto join = PairJoin{
+      .key = nullptr,
+      .value = nullptr,
+      .isTyped = true,
+  };
   for (const ArrayLitExpr::Element &element : literal->elements) {
     auto *pair = cast<ArrayLitExpr>(element.expr);
-    for (size_t index = 0; index < 2; ++index) {
-      Expr *&part = pair->elements[index].expr;
-      const Type *&common = index == 0 ? key : value;
-      part = this->exprChecker->checkExpr(
-          part, common && this->decimalChecker->isLiteralTree(part) ? common : nullptr);
-      const Type *type = part->type;
-      if (type->isError()) {
-        isTyped = false;
-        continue;
-      }
-      auto joined = this->partsJoin(index == 0, common, type);
-      if (joined.isErr()) {
-        this->state.getDiagnostics().error(part->loc(), joined.error().message);
-        isTyped = false;
-        continue;
-      }
-      common = joined.value();
-    }
+    join = this->joinPart(join, pair->elements[0].expr, PairPart::KEY);
+    join = this->joinPart(join, pair->elements[1].expr, PairPart::VALUE);
   }
-  if (!isTyped || !key || !value) {
-    key = value = Type::error();
-    return true;
+  auto failed = InferredPairs{
+      .key = Type::error(),
+      .value = Type::error(),
+  };
+  if (!join.isTyped || join.key == nullptr || join.value == nullptr) {
+    return failed;
   }
-  auto known = this->pairsKnown(key, value);
+  auto known = this->checkPairsKnown(join.key, join.value);
   if (known.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), known.error().message);
-    key = value = Type::error();
-    return true;
+    return failed;
   }
+  this->typePairs(literal, join.key, join.value);
+
+  return InferredPairs{
+      .key = join.key,
+      .value = join.value,
+  };
+}
+
+bool DictNewChecker::isPairElement(const ArrayLitExpr::Element &element) const {
+  auto *pair = dyn_cast<ArrayLitExpr>(element.expr);
+
+  return !element.spread && pair != nullptr && pair->elements.size() == 2 &&
+         !pair->elements[0].spread && !pair->elements[1].spread;
+}
+
+DictNewChecker::PairJoin DictNewChecker::joinPart(const PairJoin &join, Expr *&part,
+                                                  PairPart which) {
+  const Type *common = which == PairPart::KEY ? join.key : join.value;
+  const Type *hint =
+      common != nullptr && this->decimalChecker->isLiteralTree(part) ? common : nullptr;
+  part = this->exprChecker->checkExpr(part, hint);
+  const Type *type = part->type;
+  auto failed = PairJoin{
+      .key = join.key,
+      .value = join.value,
+      .isTyped = false,
+  };
+  if (type->isError()) {
+    return failed;
+  }
+  auto joined = this->checkPartsJoin(which, common, type);
+  if (joined.isErr()) {
+    this->state.getDiagnostics().error(part->loc(), joined.error().message);
+    return failed;
+  }
+  if (which == PairPart::KEY) {
+    return PairJoin{
+        .key = joined.value(),
+        .value = join.value,
+        .isTyped = join.isTyped,
+    };
+  }
+
+  return PairJoin{
+      .key = join.key,
+      .value = joined.value(),
+      .isTyped = join.isTyped,
+  };
+}
+
+void DictNewChecker::typePairs(ArrayLitExpr *literal, const Type *key, const Type *value) {
   const auto *pairType = Type::tuple({key, value});
   for (const ArrayLitExpr::Element &element : literal->elements) {
     auto *pair = cast<ArrayLitExpr>(element.expr);
@@ -282,42 +340,49 @@ bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value)
     pair->type = pairType;
   }
   literal->type = Type::array(pairType);
-
-  return true;
 }
 
-Expr *DictNewChecker::checkDictSource(Expr *arg, bool pairs, const Type *&element,
-                                      llvm::StringRef what) {
+DictNewChecker::SourceElement DictNewChecker::checkDictSource(Expr *arg, SourceItems items,
+                                                              const Type *wanted,
+                                                              llvm::StringRef what) {
   this->iteratorMethods->markFused(arg);
-  arg = this->dictChecker->iterableOf(
-      this->exprChecker->checkExpr(arg, element ? Type::array(element) : nullptr));
-  const Type *type = arg->type;
-  const Type *wanted = element;
-  element = Type::error();
+  const Type *hint = wanted != nullptr ? Type::array(wanted) : nullptr;
+  auto *checked = this->exprChecker->checkExpr(arg, hint);
+  auto *iterable = this->dictChecker->iterableOf(checked);
+  const Type *type = iterable->type;
+  auto failed = SourceElement{
+      .arg = iterable,
+      .element = Type::error(),
+  };
   if (type->isError()) {
-    return arg;
+    return failed;
   }
   const auto *given = this->generatorChecker->iteratedType(type);
   if (given != nullptr && type->isIterator()) {
-    auto nothing = this->generatorChecker->checkSendsNothing(type, what);
-    if (nothing.isErr()) {
-      this->state.getDiagnostics().error(arg->loc(), nothing.error().message);
-    }
-    this->flowChecker->calledFunction();
+    this->walkSourceSends(iterable, type, what);
   }
-  auto shaped = this->sourceShape(type, given, wanted, pairs, what);
+  auto shaped = this->checkSourceShape(type, given, wanted, items, what);
   if (shaped.isErr()) {
-    this->state.getDiagnostics().error(arg->loc(), shaped.error().message);
-    return arg;
+    this->state.getDiagnostics().error(iterable->loc(), shaped.error().message);
+    return failed;
   }
-  element = given;
 
-  return arg;
+  return SourceElement{
+      .arg = iterable,
+      .element = given,
+  };
+}
+
+void DictNewChecker::walkSourceSends(const Expr *arg, const Type *type, llvm::StringRef what) {
+  auto nothing = this->generatorChecker->checkSendsNothing(type, what);
+  if (nothing.isErr()) {
+    this->state.getDiagnostics().error(arg->loc(), nothing.error().message);
+  }
+  this->flowChecker->calledFunction();
 }
 
 Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
   auto global = GlobalNameTable::find(expr->name);
-  llvm::SMLoc loc = expr->loc();
   if (global == GlobalName::WEAK_MAP || global == GlobalName::WEAK_SET) {
     return this->reportWeakDict(expr);
   }
@@ -326,28 +391,36 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
   if (!stated.has_value()) {
     return this->failDictNew(expr);
   }
-  const Type *type = *stated;
-  auto single = this->argumentCount(expr, isMap);
+  auto single = this->checkArgumentCount(expr, isMap);
   if (single.isErr()) {
     this->state.getDiagnostics().error(expr->args[1]->loc(), single.error().message);
     return this->failDictNew(expr);
   }
-  auto args = std::vector<Expr *>();
-  if (expr->args.empty() || isa<UndefinedExpr>(expr->args[0])) {
-    auto given = this->typesGiven(expr, type, isMap, !expr->args.empty());
-    if (given.isErr()) {
-      this->state.getDiagnostics().error(loc, given.error().message);
-      return this->failDictNew(expr);
-    }
-  } else {
-    std::optional<DictSource> source = this->sourcedDict(expr, type, isMap);
-    if (!source.has_value()) {
-      expr->type = Type::error();
-      return expr;
-    }
-    type = source->type;
-    args.push_back(source->arg);
+  bool isEmpty = expr->args.empty() || isa<UndefinedExpr>(expr->args[0]);
+  if (isEmpty) {
+    return this->checkEmptyDictNew(expr, *stated, isMap);
   }
+  auto source = this->sourcedDict(expr, *stated, isMap);
+  if (!source.has_value()) {
+    expr->type = Type::error();
+    return expr;
+  }
+
+  return this->finishDictNew(expr, source->type, {source->arg});
+}
+
+Expr *DictNewChecker::checkEmptyDictNew(NewExpr *expr, const Type *type, bool isMap) {
+  auto given = this->checkTypesGiven(expr, type, isMap, !expr->args.empty());
+  if (given.isErr()) {
+    this->state.getDiagnostics().error(expr->loc(), given.error().message);
+    return this->failDictNew(expr);
+  }
+
+  return this->finishDictNew(expr, type, {});
+}
+
+Expr *DictNewChecker::finishDictNew(NewExpr *expr, const Type *type, std::vector<Expr *> args) {
+  llvm::SMLoc loc = expr->loc();
   auto keyAllowed = this->dictChecker->checkKeyType(type->keyType());
   if (keyAllowed.isErr()) {
     this->state.getDiagnostics().error(loc, keyAllowed.error().message);
@@ -372,9 +445,10 @@ Expr *DictNewChecker::failDictNew(NewExpr *expr) {
 }
 
 Expr *DictNewChecker::reportWeakDict(NewExpr *expr) {
-  TypeRef ref;
-  ref.name = expr->name;
-  ref.loc = expr->loc();
+  auto ref = TypeRef{
+      .name = expr->name,
+      .loc = expr->loc(),
+  };
   auto weak = this->dictChecker->resolveDictType(ref);
   if (weak.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), weak.error().message);
@@ -388,14 +462,15 @@ std::optional<const Type *> DictNewChecker::statedDictType(NewExpr *expr, const 
   if (expr->typeArgs.empty()) {
     return this->wantedDict(expected, isMap);
   }
-  TypeRef ref;
-  ref.form = GenericTypeRef{};
-  ref.name = expr->name;
-  ref.loc = expr->loc();
-  ref.args = expr->typeArgs;
+  auto ref = TypeRef{
+      .form = GenericTypeRef{},
+      .name = expr->name,
+      .loc = expr->loc(),
+      .args = expr->typeArgs,
+  };
   auto given = this->dictChecker->resolveDictType(ref);
   if (given.isErr()) {
-    bool isOnKey = this->dictChecker->keyArgument(given.error().code);
+    bool isOnKey = this->dictChecker->isKeyArgument(given.error().code);
     llvm::SMLoc at = isOnKey ? ref.args[0].loc : ref.loc;
     this->state.getDiagnostics().error(at, given.error().message);
     return std::nullopt;
@@ -408,10 +483,8 @@ std::optional<const Type *> DictNewChecker::statedDictType(NewExpr *expr, const 
 }
 
 const Type *DictNewChecker::wantedDict(const Type *expected, bool isMap) const {
-  const Type *target = expected;
-  if (target != nullptr && target->nonOptional()->isUnion()) {
-    target = this->onlyDictMember(target->nonOptional(), isMap);
-  }
+  bool isUnion = expected != nullptr && expected->nonOptional()->isUnion();
+  const Type *target = isUnion ? this->onlyDictMember(expected->nonOptional(), isMap) : expected;
   const Type *wanted = target != nullptr ? target->nonOptional() : nullptr;
   bool isFitting =
       wanted != nullptr && wanted->isDict() && wanted->isMap() == isMap && !wanted->isRecord();
@@ -435,83 +508,91 @@ const Type *DictNewChecker::onlyDictMember(const Type *expected, bool isMap) con
 std::optional<DictNewChecker::DictSource>
 DictNewChecker::sourcedDict(NewExpr *expr, const Type *type, bool isMap) {
   Expr *arg = expr->args[0];
-  const Type *key = nullptr;
-  const Type *value = nullptr;
-  if (type == nullptr && isMap && this->inferPairs(arg, key, value)) {
-    return this->inferredPairsDict(arg, key, value);
+  auto inferred = type == nullptr && isMap ? this->inferPairs(arg) : std::nullopt;
+  if (inferred.has_value()) {
+    return this->inferredPairsDict(arg, *inferred);
   }
 
   return this->checkedSourceDict(expr, arg, type, isMap);
 }
 
 std::optional<DictNewChecker::DictSource>
-DictNewChecker::inferredPairsDict(Expr *arg, const Type *key, const Type *value) {
-  if (key->isError()) {
+DictNewChecker::inferredPairsDict(Expr *arg, const InferredPairs &pairs) {
+  if (pairs.key->isError()) {
     return std::nullopt;
   }
-  auto allowed = this->dictChecker->checkKeyType(key);
+  auto allowed = this->dictChecker->checkKeyType(pairs.key);
   if (allowed.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), allowed.error().message);
     return std::nullopt;
   }
 
   return DictSource{
-      .type = Type::dict(Type::DictKind::Map, key, value),
+      .type = Type::dict(Type::DictKind::Map, pairs.key, pairs.value),
       .arg = arg,
   };
 }
 
 std::optional<DictNewChecker::DictSource>
 DictNewChecker::checkedSourceDict(NewExpr *expr, Expr *arg, const Type *type, bool isMap) {
-  const Type *element = nullptr;
-  if (type != nullptr) {
-    element = isMap ? Type::tuple({type->keyType(), type->valueType()}) : type->keyType();
-  }
+  const auto *wanted = this->wantedElement(type, isMap);
   auto what = ErrorTextDictSource::newName(expr->name);
-  auto *checked = this->checkDictSource(arg, isMap, element, what);
-  if (element->isError()) {
+  auto items = isMap ? SourceItems::PAIRS : SourceItems::VALUES;
+  auto source = this->checkDictSource(arg, items, wanted, what);
+  if (source.element->isError()) {
     return std::nullopt;
   }
   if (type != nullptr) {
     return DictSource{
         .type = type,
-        .arg = checked,
+        .arg = source.arg,
     };
   }
-  auto made = this->sourceElementDict(expr, checked, element, isMap);
+  auto made = this->sourceElementDict(expr, source.arg, source.element, isMap);
   if (!made.has_value()) {
     return std::nullopt;
   }
 
   return DictSource{
       .type = *made,
-      .arg = checked,
+      .arg = source.arg,
   };
+}
+
+const Type *DictNewChecker::wantedElement(const Type *type, bool isMap) const {
+  if (type == nullptr) {
+    return nullptr;
+  }
+  if (isMap) {
+    return Type::tuple({type->keyType(), type->valueType()});
+  }
+
+  return type->keyType();
 }
 
 std::optional<const Type *> DictNewChecker::sourceElementDict(const NewExpr *expr, const Expr *arg,
                                                               const Type *element, bool isMap) {
-  auto shaped = this->pairShape(element);
+  auto shaped = this->checkPairShape(element);
   if (isMap && shaped.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), shaped.error().message);
     return std::nullopt;
   }
-  const Type *k = isMap ? element->fields()[0].type : element;
-  auto allowed = this->dictChecker->checkKeyType(k);
+  const Type *key = isMap ? element->fields()[0].type : element;
+  auto allowed = this->dictChecker->checkKeyType(key);
   if (allowed.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), allowed.error().message);
     return std::nullopt;
   }
-  auto defined = this->elementsKnown(expr, k, element, isMap);
+  auto defined = this->checkElementsKnown(expr, key, element, isMap);
   if (defined.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), defined.error().message);
     return std::nullopt;
   }
   if (isMap) {
-    return Type::dict(Type::DictKind::Map, k, element->fields()[1].type);
+    return Type::dict(Type::DictKind::Map, key, element->fields()[1].type);
   }
 
-  return Type::dict(Type::DictKind::Set, k, Type::voidTy());
+  return Type::dict(Type::DictKind::Set, key, Type::voidTy());
 }
 
 }

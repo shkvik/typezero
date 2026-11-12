@@ -26,19 +26,21 @@ public:
   Expr *checkBytesNew(NewExpr *expr, const Type *type);
   Expr *checkTextDecoderParse(CallExpr *call, MemberExpr *member);
   Expr *checkBytesValues(CallExpr *call, ArrayLitExpr *literal, const Type *type);
-  bool checkBytesSource(Expr *source, const Type *target);
+  bool matchBytesSource(Expr *source, const Type *target);
+  const Type *sourceElement(const Type *from) const;
+  bool isSpreadElement(const ArrayLitExpr::Element &element) const;
 
 private:
   using ResultDecoderLabel = Result<const char *, BytesNewCheckerDecoderLabelError>;
   using ResultViewedBuffer = Result<const Type *, BytesNewCheckerViewedBufferError>;
 
-  ResultViewedBuffer viewedBuffer(const Type *buffer) const;
-  ResultDecoderLabel decoderLabel(llvm::StringRef label) const;
+  ResultViewedBuffer checkViewedBuffer(const Type *buffer) const;
+  ResultDecoderLabel checkDecoderLabel(llvm::StringRef label) const;
   std::optional<std::u16string> literalText(const Expr *expr) const;
-  bool mayBeFatal(const Expr *options) const;
+  bool canBeFatal(const Expr *options) const;
   NodeChildren<const Expr *> spreadOptions(const Expr *options) const;
-  bool nodeMayBeFatal(const Expr *options, std::vector<bool> &answers) const;
-  bool fatalFlag(const Expr *value) const;
+  bool canNodeBeFatal(const Expr *options, std::vector<bool> &answers) const;
+  bool isFatalFlag(const Expr *value) const;
   Expr *madeBuiltin(CallExpr *call, Builtin builtin, const Type *result) const;
   Expr *reportBytesNew(NewExpr *expr, const std::string &message);
   void walkArgsLoosely(NewExpr *expr);
@@ -52,7 +54,7 @@ private:
   const Type *decoderOptionsType() const;
   std::optional<Expr *> checkDecoderLabelArg(CallExpr *call, IntLitExpr *resolved);
   std::optional<std::u16string> knownDecoderName(const Expr *label, const std::u16string &text);
-  bool decoderLabelsFit(const Expr *checked, llvm::SMLoc at);
+  bool matchDecoderLabels(const Expr *checked, llvm::SMLoc at);
   Expr *decoderNameLiteral(llvm::SMLoc loc, const std::u16string &name);
   Expr *checkTypedArrayNew(CallExpr *call, const Type *type);
   Expr *checkLengthNew(CallExpr *call, const Type *type);

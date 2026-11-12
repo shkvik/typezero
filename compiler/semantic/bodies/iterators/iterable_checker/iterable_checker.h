@@ -34,16 +34,28 @@ public:
   const Type *elementTypeOf(const Type *type);
   FuncSymbol *iterateFunction();
   const Type *iteratorResultType(const Type *value, const Type *returned) const;
-  ResultIterableParam iterableParam(FunctionDecl *functionDecl, FuncSymbol *function,
-                                    const TypeRef &ref);
+  ResultIterableParam checkIterableParam(FunctionDecl *functionDecl, FuncSymbol *function,
+                                         const TypeRef &ref);
   bool isIterableRef(const TypeRef &ref) const;
 
 private:
   using ResultIteratorGiven = Result<const Expr *, IterableCheckerIteratorGivenError>;
   using ResultAsyncIterator = Result<const Expr *, IterableCheckerAsyncIteratorGivenError>;
 
-  ResultIteratorGiven iteratorGiven(const Type *type, const Expr *result) const;
-  ResultAsyncIterator asyncIteratorGiven(const Type *type, const Expr *result) const;
+  const Type *nextFunctionType(const Type *object);
+  const Type *nextMethodType(const Type *object);
+  bool isPlainNext(const FunctionDecl *functionDecl) const;
+  const Type *nextResultValue(const Type *result) const;
+  bool isIteratorResultShape(const Type *member) const;
+  bool isFinishedResult(const Type *member) const;
+  FuncSymbol *iterateTarget(FuncSymbol *iterate, const Type *type, const Type *value,
+                            llvm::SMLoc loc);
+  Expr *callSymbolMethod(Expr *expr, llvm::StringRef name);
+  const Type *soleMethodReturn(const Type *type, llvm::StringRef name);
+  const Type *addIterableTypeParam(FunctionDecl *functionDecl, FuncSymbol *function,
+                                   const Type *element, const TypeRef &ref);
+  ResultIteratorGiven checkIteratorGiven(const Type *type, const Expr *result) const;
+  ResultAsyncIterator checkAsyncIteratorGiven(const Type *type, const Expr *result) const;
 
   SemanticState &state;
   ClassBases *classBases = nullptr;

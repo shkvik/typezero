@@ -119,7 +119,7 @@ void StmtChecker::walkExprStmt(ExprStmt *statement) {
     yield->discarded = true;
   }
   statement->expr = this->exprChecker->checkExpr(statement->expr);
-  auto used = this->resultChecker->usedValue(statement->expr, statement->loc());
+  auto used = this->resultChecker->checkUsedValue(statement->expr, statement->loc());
   if (used.isErr()) {
     this->state.getDiagnostics().error(statement->expr->loc(), used.error().message);
   }

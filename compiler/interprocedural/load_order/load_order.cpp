@@ -186,14 +186,14 @@ std::vector<Diagnostic> LoadOrder::topLevelUses(SourceFile &program, LoadState &
       }
       auto *decl = dyn_cast<VarDeclStmt>(item);
       if (!decl) {
-        auto exprs = AstWalker::exprsIn(item, false);
+        auto exprs = AstWalker::ownExprsIn(item);
         auto found = this->visitTopLevel(exprs, module, time, loadState);
         llvm::append_range(earlyReads, found);
         continue;
       }
       for (const VarDeclarator &d : decl->decls) {
         if (d.init) {
-          auto exprs = AstWalker::exprsIn(d.init, false);
+          auto exprs = AstWalker::ownExprsIn(d.init);
           auto found = this->visitTopLevel(exprs, module, time, loadState);
           llvm::append_range(earlyReads, found);
         }
@@ -230,12 +230,12 @@ void LoadOrder::functionEffects(const FunctionDecl *fn, LoadState &loadState) co
   };
   for (const Param &param : fn->params) {
     if (param.defaultValue()) {
-      for (const Expr *e : AstWalker::exprsIn(param.defaultValue(), false)) {
+      for (const Expr *e : AstWalker::ownExprsIn(param.defaultValue())) {
         visit(e);
       }
     }
   }
-  for (const Expr *e : AstWalker::exprsIn(fn->body, false)) {
+  for (const Expr *e : AstWalker::ownExprsIn(fn->body)) {
     visit(e);
   }
   for (const FunctionDecl *callee : own.calls) {

@@ -174,7 +174,7 @@ ConcatChecker::textProblem(const Expr *expr) const {
   if (this->unknownChecker->isHoldingUnknown(type)) {
     return ConcatCheckerConvertibleErrorCode::UNKNOWN_VALUE;
   }
-  if (this->jsonChecker->holdsJson(type)) {
+  if (this->jsonChecker->isHoldingJson(type)) {
     return ConcatCheckerConvertibleErrorCode::JSON_VALUE;
   }
   if (type->holdsObjects()) {

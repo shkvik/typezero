@@ -229,7 +229,7 @@ Expr *CryptoChecker::checkX509Parse(CallExpr *call, MemberExpr *member) {
     return call;
   }
   auto what = ErrorTextX509::data();
-  auto *data = this->cryptoArgs->cryptoData(call->args[0], what, true, false, true);
+  auto *data = this->cryptoArgs->cryptoData(call->args[0], what, kTextOrBuffers);
   if (data->type->isError()) {
     return call;
   }

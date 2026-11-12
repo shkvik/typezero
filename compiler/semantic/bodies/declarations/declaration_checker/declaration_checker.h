@@ -58,7 +58,6 @@ private:
       Result<const DeclaredSignature *, DeclarationCheckerMethodSignatureError>;
   using ResultFieldsAreSame = Result<const Type *, DeclarationCheckerCheckAliasError>;
 
-  const char *accessWord(Access access) const;
   bool typesAgree(const Type *here, const Type *there) const;
   bool typesAgreeWidened(const Type *here, const Type *there) const;
   std::string memberKey(llvm::StringRef name, bool isStatic) const;

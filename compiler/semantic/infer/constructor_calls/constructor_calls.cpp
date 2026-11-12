@@ -52,7 +52,7 @@ const ClassDecl *ConstructorCalls::overridingChild(const ClassDecl *classDecl,
                                                    const FunctionDecl *method) const {
   for (const ClassDecl *child : ClassTree::descendants(classDecl)) {
     for (FunctionDecl *other : this->classLinks->ownMethods(child)) {
-      if (this->classLinks->overridesTransitively(other, method)) {
+      if (this->classLinks->isOverridingTransitively(other, method)) {
         return child;
       }
     }
@@ -137,7 +137,7 @@ void ConstructorCalls::enterScan(std::vector<ScanFrame> &frames, const FunctionD
   auto frame = ScanFrame{
       .functionDecl = functionDecl,
       .origin = origin,
-      .exprs = AstWalker::exprsIn(functionDecl->body, false),
+      .exprs = AstWalker::ownExprsIn(functionDecl->body),
       .next = 0,
   };
   frames.push_back(std::move(frame));

@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/decimal/decimal_checker/decimal_checker.h"
+#include "compiler/program/library/decimal/decimal_static_table/decimal_static_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/binary_checker/binary_checker.h"
@@ -28,6 +29,11 @@ namespace {
 struct Replacement {
   llvm::StringLiteral name, use;
 };
+
+constexpr int64_t kCountLimit = 1000000000;
+constexpr int64_t kLowestBase = 2;
+constexpr int64_t kHighestBase = 36;
+constexpr int64_t kSafeIntegerLimit = 9007199254740991;
 
 const Replacement kReplacements[] = {
     {"plus", "the operator: 'a + b'"},
@@ -82,7 +88,8 @@ DecimalChecker::DecimalChecker(SemanticState &owner, SemanticParts &all)
   this->argumentChecker = &all.argumentChecker;
 }
 
-DecimalChecker::ResultRoundingMode DecimalChecker::roundingMode(const std::u16string &text) const {
+DecimalChecker::ResultRoundingMode
+DecimalChecker::checkRoundingModeText(const std::u16string &text) const {
   int mode = DecimalLiteral::roundingMode(text);
   if (mode < 0) {
     auto written = ToUtf8::toUtf8(text);
@@ -97,9 +104,9 @@ DecimalChecker::ResultRoundingMode DecimalChecker::roundingMode(const std::u16st
   return ok(mode);
 }
 
-DecimalChecker::ResultLiteralRange DecimalChecker::literalRange(const Expr *literal) const {
+DecimalChecker::ResultLiteralRange DecimalChecker::checkLiteralRange(const Expr *literal) const {
   auto value = DecimalLiteral::fromExpr(literal);
-  if (!value) {
+  if (!value.has_value()) {
     auto message = ErrorTextDecimalLit::unreadable();
 
     return err(DecimalCheckerLiteralRangeError{
@@ -116,7 +123,7 @@ DecimalChecker::ResultLiteralRange DecimalChecker::literalRange(const Expr *lite
     });
   }
 
-  return ok(*value);
+  return ok(value.value());
 }
 
 std::pair<llvm::StringRef, llvm::StringRef>
@@ -146,35 +153,28 @@ bool DecimalChecker::isLiteralNode(const Expr *expr) const {
   if (isa<IntLitExpr>(expr) || isa<FloatLitExpr>(expr)) {
     return true;
   }
-  auto *unary = dyn_cast<UnaryExpr>(expr);
+  const auto *unary = dyn_cast<UnaryExpr>(expr);
   if (unary != nullptr) {
     return unary->op == UnaryOp::Neg || unary->op == UnaryOp::Plus;
   }
-  auto *binary = dyn_cast<BinaryExpr>(expr);
+  const auto *binary = dyn_cast<BinaryExpr>(expr);
   if (binary == nullptr) {
     return false;
   }
-  switch (binary->op) {
-    case BinaryOp::Add:
-    case BinaryOp::Sub:
-    case BinaryOp::Mul:
-    case BinaryOp::Div:
-    case BinaryOp::Rem:
-    case BinaryOp::Pow:
-      return true;
-    default:
-      return false;
-  }
+
+  return this->isArithmeticOperator(binary->op);
 }
 
-bool DecimalChecker::fitsLiteral(const Expr *expr, const Type *type) const {
-  bool isNegated = false;
-  auto *unary = dyn_cast<UnaryExpr>(expr);
-  if (unary != nullptr && unary->op == UnaryOp::Neg) {
-    expr = unary->operand;
-    isNegated = true;
-  }
-  auto *literal = dyn_cast<IntLitExpr>(expr);
+bool DecimalChecker::isArithmeticOperator(BinaryOp op) const {
+  return op == BinaryOp::Add || op == BinaryOp::Sub || op == BinaryOp::Mul || op == BinaryOp::Div ||
+         op == BinaryOp::Rem || op == BinaryOp::Pow;
+}
+
+bool DecimalChecker::isFittingLiteral(const Expr *expr, const Type *type) const {
+  const auto *unary = dyn_cast<UnaryExpr>(expr);
+  bool isNegated = unary != nullptr && unary->op == UnaryOp::Neg;
+  const Expr *operand = isNegated ? unary->operand : expr;
+  const auto *literal = dyn_cast<IntLitExpr>(operand);
   if (literal == nullptr) {
     return false;
   }
@@ -192,43 +192,45 @@ const Type *DecimalChecker::literalHint(const Expr *other, const Type *hint) con
 }
 
 void DecimalChecker::walkComparisonOperands(BinaryExpr *binary) {
-  auto literal = [&](const Expr *expr) {
-    auto *unary = dyn_cast<UnaryExpr>(expr);
-    if (unary != nullptr && unary->op == UnaryOp::Neg) {
-      expr = unary->operand;
-    }
-
-    auto *member = dyn_cast<MemberExpr>(expr);
-    auto *owner = member != nullptr ? dyn_cast<NameExpr>(member->object) : nullptr;
-
-    return this->isLiteralTree(expr) || isa<StringLitExpr>(expr) || isa<BoolLitExpr>(expr) ||
-           (owner != nullptr && this->scopes->lookup(owner->name).enumDecl() != nullptr);
-  };
-  auto hint = [&](const Expr *other, const Expr *self) {
-    const Type *type = other->type != nullptr ? other->type->nonOptional() : nullptr;
-    if (type != nullptr && (type->isLiteral() || type->isUnion())) {
-      return other->type;
-    }
-    if (type != nullptr && type->isNumeric() &&
-        (type->isFloat() || this->fitsLiteral(self, type))) {
-      return type;
-    }
-
-    return this->literalHint(other, nullptr);
-  };
-  if (literal(binary->lhs) && !literal(binary->rhs)) {
+  if (this->isComparedLiteral(binary->lhs) && !this->isComparedLiteral(binary->rhs)) {
     binary->rhs = this->exprChecker->checkExpr(binary->rhs);
-    binary->lhs = this->exprChecker->checkExpr(binary->lhs, hint(binary->rhs, binary->lhs));
+    const auto *leftHint = this->comparisonHint(binary->rhs, binary->lhs);
+    binary->lhs = this->exprChecker->checkExpr(binary->lhs, leftHint);
     return;
   }
   binary->lhs = this->exprChecker->checkExpr(binary->lhs);
-  binary->rhs = this->exprChecker->checkExpr(
-      binary->rhs, literal(binary->rhs) ? hint(binary->lhs, binary->rhs) : nullptr);
+  bool isLiteral = this->isComparedLiteral(binary->rhs);
+  const auto *rightHint = isLiteral ? this->comparisonHint(binary->lhs, binary->rhs) : nullptr;
+  binary->rhs = this->exprChecker->checkExpr(binary->rhs, rightHint);
+}
+
+bool DecimalChecker::isComparedLiteral(const Expr *expr) const {
+  const auto *unary = dyn_cast<UnaryExpr>(expr);
+  bool isNegated = unary != nullptr && unary->op == UnaryOp::Neg;
+  const Expr *operand = isNegated ? unary->operand : expr;
+  const auto *member = dyn_cast<MemberExpr>(operand);
+  const auto *owner = member != nullptr ? dyn_cast<NameExpr>(member->object) : nullptr;
+
+  return this->isLiteralTree(operand) || isa<StringLitExpr>(operand) || isa<BoolLitExpr>(operand) ||
+         (owner != nullptr && this->scopes->lookup(owner->name).enumDecl() != nullptr);
+}
+
+const Type *DecimalChecker::comparisonHint(const Expr *other, const Expr *self) const {
+  const Type *type = other->type != nullptr ? other->type->nonOptional() : nullptr;
+  if (type != nullptr && (type->isLiteral() || type->isUnion())) {
+    return other->type;
+  }
+  if (type != nullptr && type->isNumeric() &&
+      (type->isFloat() || this->isFittingLiteral(self, type))) {
+    return type;
+  }
+
+  return this->literalHint(other, nullptr);
 }
 
 DecimalChecker::ResultDecimalLiteralChecked
 DecimalChecker::checkDecimalLiteralRange(const Expr *literal) {
-  auto range = this->literalRange(literal);
+  auto range = this->checkLiteralRange(literal);
   if (range.isErr()) {
     return err(range.error());
   }
@@ -237,97 +239,103 @@ DecimalChecker::checkDecimalLiteralRange(const Expr *literal) {
 }
 
 void DecimalChecker::reportDecimalMix(const BinaryExpr *binary) {
-  const Type *l = binary->lhs->type;
-  const Type *r = binary->rhs->type;
-  bool isLeftDecimal = l->nonOptional()->isDecimal();
-  const Type *other = isLeftDecimal ? r : l;
+  const Type *leftType = binary->lhs->type;
+  const Type *rightType = binary->rhs->type;
+  const char *spelling = Operators::opSpelling(binary->op);
+  bool isLeftDecimal = leftType->nonOptional()->isDecimal();
+  const Type *other = isLeftDecimal ? rightType : leftType;
   if (other->isInteger()) {
     auto [lhs, rhs] = this->sidesOf(binary);
-    auto message = ErrorTextDecimalMix::integer(Operators::opSpelling(binary->op), l->name(),
-                                                r->name(), lhs, rhs, isLeftDecimal);
+    auto message = ErrorTextDecimalMix::integer(spelling, leftType->name(), rightType->name(), lhs,
+                                                rhs, isLeftDecimal);
     this->state.getDiagnostics().error(binary->loc(), message);
     return;
   }
   if (!other->nonOptional()->isFloat()) {
-    auto message = this->binaryChecker->operandTypesText(Operators::opSpelling(binary->op), l, r);
+    auto message = this->binaryChecker->operandTypesText(spelling, leftType, rightType);
     this->state.getDiagnostics().error(binary->loc(), message);
     return;
   }
   auto [lhs, rhs] = this->sidesOf(binary);
-  auto message = ErrorTextDecimalMix::inexact(Operators::opSpelling(binary->op), l->name(),
-                                              r->name(), lhs, rhs, isLeftDecimal, other->isFloat());
+  auto message = ErrorTextDecimalMix::inexact(spelling, leftType->name(), rightType->name(), lhs,
+                                              rhs, isLeftDecimal, other->isFloat());
   this->state.getDiagnostics().error(binary->loc(), message);
 }
 
 Expr *DecimalChecker::checkDecimalArithmetic(BinaryExpr *binary) {
-  const auto *decimal = Type::decimalTy();
-  const Type *l = binary->lhs->type;
-  const Type *r = binary->rhs->type;
   binary->type = Type::error();
   if (binary->op == BinaryOp::Pow) {
-    if (!l->isDecimal()) {
-      auto message = this->binaryChecker->operandTypesText("**", l, r);
-      this->state.getDiagnostics().error(binary->loc(), message);
-      return binary;
-    }
-    if (!r->isInteger()) {
-      auto message = ErrorTextDecimalPower::exponent(r);
-      this->state.getDiagnostics().error(binary->rhs->loc(), message);
-      return binary;
-    }
-    binary->rhs = this->typeRelations->convert(binary->rhs, Type::intTy());
-    binary->type = decimal;
+    return this->checkDecimalPower(binary);
+  }
+  if (!this->convertDecimalSides(binary)) {
     return binary;
   }
-  for (Expr **side : {&binary->lhs, &binary->rhs}) {
-    const Type *type = (*side)->type;
-    if (type->isDecimal()) {
-      continue;
-    }
-    if (!type->isInteger() || !this->typeRelations->isIntLiteralTree(*side)) {
-      this->reportDecimalMix(binary);
-      return binary;
-    }
-    *side = this->typeRelations->convert(*side, decimal);
-  }
   this->walkDecimalDivisor(binary->op, binary->rhs);
-  binary->type = decimal;
+  binary->type = Type::decimalTy();
 
   return binary;
 }
 
+Expr *DecimalChecker::checkDecimalPower(BinaryExpr *binary) {
+  const Type *leftType = binary->lhs->type;
+  const Type *rightType = binary->rhs->type;
+  if (!leftType->isDecimal()) {
+    const char *spelling = Operators::opSpelling(BinaryOp::Pow);
+    auto message = this->binaryChecker->operandTypesText(spelling, leftType, rightType);
+    this->state.getDiagnostics().error(binary->loc(), message);
+    return binary;
+  }
+  if (!rightType->isInteger()) {
+    auto message = ErrorTextDecimalPower::exponent(rightType);
+    this->state.getDiagnostics().error(binary->rhs->loc(), message);
+    return binary;
+  }
+  binary->rhs = this->typeRelations->convert(binary->rhs, Type::intTy());
+  binary->type = Type::decimalTy();
+
+  return binary;
+}
+
+bool DecimalChecker::convertDecimalSides(BinaryExpr *binary) {
+  for (Expr **side : {&binary->lhs, &binary->rhs}) {
+    if (!this->convertDecimalSide(*side)) {
+      this->reportDecimalMix(binary);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool DecimalChecker::convertDecimalSide(Expr *&side) {
+  const Type *type = side->type;
+  if (type->isDecimal()) {
+    return true;
+  }
+  if (!type->isInteger() || !this->typeRelations->isIntLiteralTree(side)) {
+    return false;
+  }
+  side = this->typeRelations->convert(side, Type::decimalTy());
+
+  return true;
+}
+
 Expr *DecimalChecker::checkDecimalComparison(BinaryExpr *binary) {
   binary->type = Type::boolTy();
-  for (Expr **side : {&binary->lhs, &binary->rhs}) {
-    const Type *type = (*side)->type;
-    if (type->isDecimal()) {
-      continue;
-    }
-    if (!type->isInteger() || !this->typeRelations->isIntLiteralTree(*side)) {
-      this->reportDecimalMix(binary);
-      return binary;
-    }
-    *side = this->typeRelations->convert(*side, Type::decimalTy());
-  }
+  this->convertDecimalSides(binary);
 
   return binary;
 }
 
 void DecimalChecker::walkDecimalAssign(AssignExpr *assign, BinaryOp op) {
-  const Type *valueType = assign->value->type;
   if (op == BinaryOp::Pow) {
-    if (!valueType->isInteger()) {
-      auto message = ErrorTextDecimalPower::exponent(valueType);
-      this->state.getDiagnostics().error(assign->value->loc(), message);
-      return;
-    }
-    assign->value = this->typeRelations->convert(assign->value, Type::intTy());
-    return;
+    return this->walkDecimalPowerAssign(assign);
   }
   bool isArithmetic = op == BinaryOp::Add || op == BinaryOp::Sub || op == BinaryOp::Mul ||
                       op == BinaryOp::Div || op == BinaryOp::Rem;
   if (!isArithmetic) {
     std::string spelling = std::string(Operators::opSpelling(op)) + "=";
+    const Type *valueType = assign->value->type;
     auto message = this->binaryChecker->operandTypesText(spelling, assign->type, valueType);
     this->state.getDiagnostics().error(assign->loc(), message);
     return;
@@ -336,17 +344,24 @@ void DecimalChecker::walkDecimalAssign(AssignExpr *assign, BinaryOp op) {
   this->walkDecimalDivisor(op, assign->value);
 }
 
+void DecimalChecker::walkDecimalPowerAssign(AssignExpr *assign) {
+  const Type *valueType = assign->value->type;
+  if (!valueType->isInteger()) {
+    auto message = ErrorTextDecimalPower::exponent(valueType);
+    this->state.getDiagnostics().error(assign->value->loc(), message);
+    return;
+  }
+  assign->value = this->typeRelations->convert(assign->value, Type::intTy());
+}
+
 void DecimalChecker::walkDecimalDivisor(BinaryOp op, const Expr *divisor) {
   if (op != BinaryOp::Div && op != BinaryOp::Rem) {
     return;
   }
-  const Expr *value = divisor;
-  for (auto *conversion = dyn_cast<CastExpr>(value);
-       conversion != nullptr && conversion->isImplicit(); conversion = dyn_cast<CastExpr>(value)) {
-    value = conversion->operand;
-  }
+  const auto *value = ExprParts::withoutImplicitCasts(divisor);
   auto literal = DecimalLiteral::fromExpr(value);
-  bool isZero = literal ? literal->isZero() : this->constantFolder->intConstant(value) == 0;
+  bool isZero =
+      literal.has_value() ? literal->isZero() : this->constantFolder->intConstant(value) == 0;
   if (isZero) {
     auto message = ErrorTextDecimalPower::divZero();
     this->state.getDiagnostics().error(divisor->loc(), message);
@@ -362,42 +377,23 @@ Expr *DecimalChecker::checkDecimalCall(CallExpr *call, llvm::SMLoc loc) {
   }
   Expr *&arg = call->args[0];
   bool isLiteral = DecimalLiteral::fromExpr(arg).has_value();
-  arg = this->exprChecker->checkExpr(arg, isLiteral ? Type::decimalTy() : nullptr);
+  const Type *hint = isLiteral ? Type::decimalTy() : nullptr;
+  arg = this->exprChecker->checkExpr(arg, hint);
   const Type *type = arg->type;
   if (type->isError()) {
     return call;
   }
-  const Type *text = type->nonOptional();
-  bool isTextual = !type->isOptional() &&
-                   (text->isString() || text->isStringLiteral() ||
-                    (text->isUnion() && llvm::all_of(text->members(), [](const Type *member) {
-                       return member->isStringLiteral();
-                     })));
-  if (type->isInteger() || type->isDecimal()) {
-    arg = this->typeRelations->convert(arg, Type::decimalTy());
-  } else if (isTextual) {
-    auto texts = this->literalTypes->knownTexts(arg);
-    for (const std::string &t : texts ? *texts : std::vector<std::string>()) {
-      auto units = llvm::SmallVector<llvm::UTF16, 32>();
-      llvm::convertUTF8ToUTF16String(t, units);
-      if (!tz_decimal_text_ok(reinterpret_cast<const uint16_t *>(units.data()), units.size())) {
-        auto message = ErrorTextDecimalOf::notNumber(t);
-        this->state.getDiagnostics().error(arg->loc(), message);
-        return call;
-      }
-    }
-    if (!text->isString()) {
-      arg = this->typeRelations->convert(arg, Type::string());
-    }
-    call->target = BuiltinCall{.builtin = Builtin::DecimalOf};
-    call->type = texts ? Type::decimalTy()
-                       : Type::result(Type::decimalTy(),
-                                      this->prelude->builtinType(PreludeType::DECIMAL_ERROR));
-    return call;
-  } else if (!type->isFloat()) {
+  if (this->isDecimalText(type)) {
+    return this->checkDecimalText(call);
+  }
+  bool isNumber = type->isInteger() || type->isDecimal() || type->isFloat();
+  if (!isNumber) {
     auto message = ErrorTextDecimalOf::takes(type->name(), type->isOptional());
     this->state.getDiagnostics().error(arg->loc(), message);
     return call;
+  }
+  if (type->isInteger() || type->isDecimal()) {
+    arg = this->typeRelations->convert(arg, Type::decimalTy());
   }
   call->target = BuiltinCall{.builtin = Builtin::DecimalOf};
   call->type = Type::decimalTy();
@@ -405,39 +401,83 @@ Expr *DecimalChecker::checkDecimalCall(CallExpr *call, llvm::SMLoc loc) {
   return call;
 }
 
+bool DecimalChecker::isDecimalText(const Type *type) const {
+  if (type->isOptional()) {
+    return false;
+  }
+  const Type *text = type->nonOptional();
+  auto isStringLiteral = std::bind_front(&DecimalChecker::isStringLiteralType, this);
+
+  return text->isString() || text->isStringLiteral() ||
+         (text->isUnion() && llvm::all_of(text->members(), isStringLiteral));
+}
+
+bool DecimalChecker::isStringLiteralType(const Type *type) const {
+  return type->isStringLiteral();
+}
+
+Expr *DecimalChecker::checkDecimalText(CallExpr *call) {
+  Expr *&arg = call->args[0];
+  auto texts = this->literalTypes->knownTexts(arg);
+  if (texts.has_value() && this->reportBadDecimalText(texts.value(), arg)) {
+    return call;
+  }
+  if (!arg->type->nonOptional()->isString()) {
+    arg = this->typeRelations->convert(arg, Type::string());
+  }
+  call->target = BuiltinCall{.builtin = Builtin::DecimalOf};
+  if (texts.has_value()) {
+    call->type = Type::decimalTy();
+    return call;
+  }
+  const auto *decimalError = this->prelude->builtinType(PreludeType::DECIMAL_ERROR);
+  call->type = Type::result(Type::decimalTy(), decimalError);
+
+  return call;
+}
+
+bool DecimalChecker::reportBadDecimalText(llvm::ArrayRef<std::string> texts, const Expr *arg) {
+  for (const std::string &text : texts) {
+    if (!this->isDecimalNumberText(text)) {
+      auto message = ErrorTextDecimalOf::notNumber(text);
+      this->state.getDiagnostics().error(arg->loc(), message);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool DecimalChecker::isDecimalNumberText(const std::string &text) const {
+  auto units = llvm::SmallVector<llvm::UTF16, 32>();
+  llvm::convertUTF8ToUTF16String(text, units);
+  const auto *data = reinterpret_cast<const uint16_t *>(units.data());
+
+  return tz_decimal_text_ok(data, units.size());
+}
+
 Expr *DecimalChecker::checkDecimalStatic(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
   call->type = Type::error();
-  Builtin builtin = name == "max"   ? Builtin::DecMax
-                    : name == "min" ? Builtin::DecMin
-                    : name == "sum" ? Builtin::DecSum
-                                    : Builtin::None;
-  if (builtin == Builtin::None) {
+  const auto *function = DecimalStaticTable::find(name);
+  if (function == nullptr) {
     auto message = ErrorTextDecimalStatic::noMember(name);
     this->state.getDiagnostics().error(member->loc(), message);
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
+    this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
+  Builtin builtin = function->builtin;
   const auto *decimal = Type::decimalTy();
-  const auto *array = Type::array(decimal);
   bool isSomeValue = false;
   bool isOk = true;
   for (size_t index = 0; index < call->args.size(); ++index) {
-    Expr *&arg = call->args[index];
-    if (!call->spreads(index)) {
-      arg = this->argumentChecker->checkArg(arg, decimal);
+    if (call->spreads(index)) {
+      isOk &= this->takeDecimalSpread(call->args[index]);
+      isSomeValue |= this->indexProofs->canProveNotEmpty(call->args[index]);
+    } else {
+      call->args[index] = this->argumentChecker->checkArg(call->args[index], decimal);
       isSomeValue = true;
-      continue;
     }
-    arg = this->exprChecker->checkExpr(arg, array);
-    if (arg->type != array && !arg->type->isError()) {
-      auto message = ErrorTextDecimalStatic::spread(arg->type->name());
-      this->state.getDiagnostics().error(arg->loc(), message);
-      isOk = false;
-    }
-    isSomeValue |= this->indexProofs->canProveNotEmpty(arg);
   }
   if (!isOk) {
     return call;
@@ -453,35 +493,51 @@ Expr *DecimalChecker::checkDecimalStatic(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-Expr *DecimalChecker::checkRoundingMode(Expr *arg) {
-  arg = this->argumentChecker->checkArg(arg, Type::string());
-  if (arg->type->isError()) {
-    return arg;
-  }
-  auto *literal = dyn_cast<StringLitExpr>(arg);
-  if (literal != nullptr) {
-    auto mode = this->roundingMode(literal->value);
-    if (mode.isErr()) {
-      this->state.getDiagnostics().error(arg->loc(), mode.error().message);
-    }
-    return arg;
-  }
-  auto modes = this->literalTypes->knownTexts(arg);
-  if (!modes) {
-    auto message = ErrorTextRoundingMode::notKnown();
+bool DecimalChecker::takeDecimalSpread(Expr *&arg) {
+  const auto *array = Type::array(Type::decimalTy());
+  arg = this->exprChecker->checkExpr(arg, array);
+  bool isFitting = arg->type == array || arg->type->isError();
+  if (!isFitting) {
+    auto message = ErrorTextDecimalStatic::spread(arg->type->name());
     this->state.getDiagnostics().error(arg->loc(), message);
-    return arg;
-  }
-  for (const std::string &mode : *modes) {
-    std::u16string text(mode.begin(), mode.end());
-    auto known = this->roundingMode(text);
-    if (known.isErr()) {
-      this->state.getDiagnostics().error(arg->loc(), known.error().message);
-      break;
-    }
   }
 
-  return arg;
+  return isFitting;
+}
+
+Expr *DecimalChecker::checkRoundingMode(Expr *arg) {
+  auto *checked = this->argumentChecker->checkArg(arg, Type::string());
+  if (checked->type->isError()) {
+    return checked;
+  }
+  auto *literal = dyn_cast<StringLitExpr>(checked);
+  if (literal != nullptr) {
+    auto mode = this->checkRoundingModeText(literal->value);
+    if (mode.isErr()) {
+      this->state.getDiagnostics().error(checked->loc(), mode.error().message);
+    }
+    return checked;
+  }
+  auto modes = this->literalTypes->knownTexts(checked);
+  if (!modes.has_value()) {
+    auto message = ErrorTextRoundingMode::notKnown();
+    this->state.getDiagnostics().error(checked->loc(), message);
+    return checked;
+  }
+  this->walkKnownModes(modes.value(), checked);
+
+  return checked;
+}
+
+void DecimalChecker::walkKnownModes(llvm::ArrayRef<std::string> modes, const Expr *arg) {
+  for (const std::string &mode : modes) {
+    std::u16string text(mode.begin(), mode.end());
+    auto known = this->checkRoundingModeText(text);
+    if (known.isErr()) {
+      this->state.getDiagnostics().error(arg->loc(), known.error().message);
+      return;
+    }
+  }
 }
 
 Expr *DecimalChecker::checkDecimalCount(Expr *arg, llvm::StringRef what, int64_t low,
@@ -512,9 +568,7 @@ Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
   if (method->builtin == Builtin::DecDecimalPlaces && !call->args.empty()) {
     auto message = ErrorTextDecimalMethod::places();
     this->state.getDiagnostics().error(member->loc(), message);
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
+    this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
   auto arity = this->argumentChecker->checkArity(call, method->minArgs, method->maxArgs);
@@ -536,19 +590,22 @@ Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
 }
 
 Expr *DecimalChecker::reportDecimalMember(CallExpr *call, MemberExpr *member) {
-  llvm::StringRef use;
-  for (const Replacement &r : kReplacements) {
-    if (r.name == member->name) {
-      use = r.use;
-    }
-  }
+  auto use = this->replacementFor(member->name);
   auto message = ErrorTextDecimalMethod::noMember(member->name, use);
   this->state.getDiagnostics().error(member->loc(), message);
-  for (Expr *&arg : call->args) {
-    arg = this->exprChecker->checkExpr(arg);
-  }
+  this->argumentChecker->walkArgsLoosely(call);
 
   return call;
+}
+
+llvm::StringRef DecimalChecker::replacementFor(llvm::StringRef name) const {
+  for (const Replacement &replacement : llvm::reverse(kReplacements)) {
+    if (replacement.name == name) {
+      return replacement.use;
+    }
+  }
+
+  return llvm::StringRef();
 }
 
 Expr *DecimalChecker::checkDecimalArg(Expr *arg, DecimalArg kind, Builtin builtin) {
@@ -558,19 +615,20 @@ Expr *DecimalChecker::checkDecimalArg(Expr *arg, DecimalArg kind, Builtin builti
     case DecimalArg::PLACES: {
       bool isPositive = builtin == Builtin::DecDiv || builtin == Builtin::DecToExponential;
       auto places = ErrorTextDecimalCount::places();
-      return this->checkDecimalCount(arg, places, isPositive ? 0 : -1000000000, 1000000000);
+      int64_t low = isPositive ? 0 : -kCountLimit;
+      return this->checkDecimalCount(arg, places, low, kCountLimit);
     }
     case DecimalArg::DIGITS: {
       auto digits = ErrorTextDecimalCount::digits();
-      return this->checkDecimalCount(arg, digits, 1, 1000000000);
+      return this->checkDecimalCount(arg, digits, 1, kCountLimit);
     }
     case DecimalArg::BASE: {
       auto base = ErrorTextDecimalCount::base();
-      return this->checkDecimalCount(arg, base, 2, 36);
+      return this->checkDecimalCount(arg, base, kLowestBase, kHighestBase);
     }
     case DecimalArg::POWER: {
       auto power = ErrorTextDecimalCount::power();
-      return this->checkDecimalCount(arg, power, -9007199254740991, 9007199254740991);
+      return this->checkDecimalCount(arg, power, -kSafeIntegerLimit, kSafeIntegerLimit);
     }
     case DecimalArg::NONE:
     case DecimalArg::ROUNDING:

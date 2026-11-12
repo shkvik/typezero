@@ -41,27 +41,36 @@ private:
   using ResultStaticFunctions =
       Result<std::vector<FunctionDecl *>, StaticCheckerStaticMethodsError>;
 
+  struct OwnedStaticField {
+    ClassField *field;
+    ClassDecl *owner;
+  };
+
+  OwnedStaticField staticField(ClassDecl *classDecl, llvm::StringRef name) const;
+  ClassField *ownStaticField(ClassDecl *owner, llvm::StringRef name) const;
+  ResultStaticFieldType checkFieldTyped(const ClassDecl *owner, const VarSymbol *variable,
+                                        llvm::StringRef name) const;
+  ResultFieldValueIsSet checkFieldReady(const ClassDecl *owner, const VarSymbol *variable) const;
+  ResultStaticFunctions checkStaticMethods(const ClassDecl *classDecl, llvm::StringRef name) const;
   Expr *checkStaticFieldRead(MemberExpr *member, ClassDecl *classDecl, const ClassField &field,
                              const ClassDecl *owner);
   Expr *checkStaticMethodValue(MemberExpr *member, ClassDecl *classDecl, const Type *expected);
   Expr *checkClassValueMember(MemberExpr *member, ClassDecl *classDecl);
+  ResultFieldOfTheClass checkFieldFound(const ClassField *found, const ClassDecl *classDecl,
+                                        llvm::StringRef name) const;
+  ResultFieldIsWritable checkFieldWritable(const VarSymbol *variable) const;
+  ResultFieldTypeStated checkTypeDeclared(const VarSymbol *variable, llvm::StringRef name) const;
+  ResultFieldIsCallable checkStaticCallable(const Type *type, const ClassDecl *classDecl,
+                                            llvm::StringRef name) const;
+  ResultTypeArgsAllowed checkMethodTypeArgs(const FuncSymbol *function,
+                                            const MemberExpr *member) const;
   Expr *checkLibraryStaticCall(CallExpr *call, MemberExpr *member, const ClassDecl *classDecl,
                                const Type *expected);
+  Expr *checkEventsStaticCall(CallExpr *call, MemberExpr *member, const Type *expected);
   Expr *checkStaticFieldCall(CallExpr *call, MemberExpr *member, ClassDecl *classDecl);
+  Expr *checkStaticValueCall(CallExpr *call, const Type *type);
   Expr *checkStaticMethodCall(CallExpr *call, MemberExpr *member,
                               const std::vector<FunctionDecl *> &methods, const Type *expected);
-  ResultFieldIsWritable fieldWritable(const VarSymbol *variable) const;
-  ResultFieldValueIsSet fieldReady(const ClassDecl *owner, const VarSymbol *variable) const;
-  ResultFieldTypeStated typeDeclared(const VarSymbol *variable, llvm::StringRef name) const;
-  ResultStaticFunctions staticMethods(const ClassDecl *classDecl, llvm::StringRef name) const;
-  ClassField *staticField(ClassDecl *classDecl, llvm::StringRef name, ClassDecl **owner) const;
-  ResultTypeArgsAllowed methodTypeArgs(const FuncSymbol *function, const MemberExpr *member) const;
-  ResultFieldIsCallable staticCallable(const Type *type, const ClassDecl *classDecl,
-                                       llvm::StringRef name) const;
-  ResultStaticFieldType fieldTyped(const ClassDecl *owner, const VarSymbol *variable,
-                                   llvm::StringRef name) const;
-  ResultFieldOfTheClass fieldFound(const ClassField *found, const ClassDecl *classDecl,
-                                   llvm::StringRef name) const;
 
   SemanticState &state;
   ClassBases *classBases = nullptr;

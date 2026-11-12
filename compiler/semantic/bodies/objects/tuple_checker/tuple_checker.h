@@ -30,6 +30,13 @@ private:
   using ResultTupleJoined = Result<Expr *, TupleCheckerCheckTupleJoinError>;
 
   ResultTupleJoined checkTupleJoin(CallExpr *call, MemberExpr *member);
+  bool isJoinableElement(const Type *element) const;
+  ResultTupleMethod checkJoinMethod(CallExpr *call, MemberExpr *member);
+  TupleCheckerCheckTupleMethodErrorCode
+  joinMethodCode(TupleCheckerCheckTupleJoinErrorCode code) const;
+  std::string tupleText(const MemberExpr *member) const;
+  bool isSpreadElement(const ArrayLitExpr::Element &element) const;
+  void walkLooseElements(ArrayLitExpr *literal);
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

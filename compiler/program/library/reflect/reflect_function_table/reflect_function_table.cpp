@@ -1,4 +1,5 @@
 #include "compiler/program/library/reflect/reflect_function_table/reflect_function_table.h"
+#include "llvm/Support/ErrorHandling.h"
 
 namespace tz {
 
@@ -69,6 +70,15 @@ std::optional<ReflectFunction> ReflectFunctionTable::find(llvm::StringRef name) 
   }
 
   return std::nullopt;
+}
+
+llvm::StringRef ReflectFunctionTable::getName(ReflectFunction function) {
+  for (const ReflectFunctionInfo &info : kRows) {
+    if (info.value == function) {
+      return info.name;
+    }
+  }
+  llvm_unreachable("reflect function missing from the table");
 }
 
 }

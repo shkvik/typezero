@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/console/console_method_table/console_method_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/console/console_checker/console_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -20,11 +21,11 @@ public:
 private:
   using ResultPrintableItem = Result<const Expr *, ConsoleCheckerPrintableError>;
   using ResultSpreadableArg = Result<const Expr *, ConsoleCheckerSpreadableError>;
-  using ResultConsoleMethod = Result<const MemberExpr *, ConsoleCheckerConsoleMethodError>;
+  using ResultConsoleMethod = Result<ConsoleMethod, ConsoleCheckerConsoleMethodError>;
 
-  ResultPrintableItem printable(const Expr *arg) const;
-  ResultConsoleMethod consoleMethod(const MemberExpr *member) const;
-  ResultSpreadableArg spreadable(const CallExpr *call, size_t index) const;
+  ResultPrintableItem checkPrintable(const Expr *arg) const;
+  ResultConsoleMethod checkConsoleMethod(const MemberExpr *member) const;
+  ResultSpreadableArg checkSpreadable(const CallExpr *call, size_t index) const;
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

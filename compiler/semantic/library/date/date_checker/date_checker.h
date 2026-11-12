@@ -58,12 +58,20 @@ private:
                       int64_t month);
   void walkTimeFields(llvm::ArrayRef<Expr *> args, const DateFieldValues &fields);
 
-  ResultLiteralDate literalDate(const std::u16string &text) const;
+  ResultLiteralDate checkLiteralDate(const std::u16string &text) const;
   std::optional<std::u16string> literalText(const Expr *expr) const;
   bool isLeap(int64_t year) const;
   int daysInMonth(int64_t year, int64_t month) const;
   std::string missingDay(std::optional<int64_t> year, int64_t month, int64_t day) const;
   std::pair<int64_t, int64_t> carriedDay(int64_t year, int64_t month, int64_t day) const;
+  int lastDayOf(std::optional<int64_t> year, int64_t month) const;
+  std::string dayOverflowText(llvm::StringRef setter, const std::string &missing, int64_t month,
+                              std::optional<int64_t> year, int last) const;
+  std::optional<int64_t> nextMonthYear(std::optional<int64_t> year, int64_t month) const;
+  Expr *checkDateFromValue(llvm::SMLoc loc, Expr *callee, Expr *given);
+  Expr *checkDateFromString(llvm::SMLoc loc, Expr *callee, const Expr *given, Expr *arg);
+  Expr *failedDate(llvm::SMLoc loc);
+  std::string dateOperatorText(const BinaryExpr *binary, bool isCompare) const;
   std::string unknownMethodMessage(llvm::StringRef name) const;
   Expr *checkDateMethodForm(CallExpr *call, MemberExpr *member, const DateMethodInfo &method);
   Expr *fieldLiteral(const MemberExpr *member, int value);

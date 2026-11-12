@@ -29,7 +29,7 @@ private:
     CryptoMethod method = CryptoMethod::HASH_UPDATE;
   };
 
-  ResultIssuerChecked issuer(const Expr *other) const;
+  ResultIssuerChecked checkIssuer(const Expr *other) const;
   bool isPresent(const std::vector<Expr *> &args, size_t index) const;
 
   Expr *checkLoosely(CallExpr *call);

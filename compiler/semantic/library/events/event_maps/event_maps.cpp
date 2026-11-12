@@ -44,12 +44,12 @@ const Type *EventMaps::serviceEventArgs() const {
       {Type::object({{"event", Type::string(), false}, {"listener", Type::unknown(), false}})});
 }
 
-bool EventMaps::carriesOne(const Type *args) const {
+bool EventMaps::isCarryingOne(const Type *args) const {
   return args->fields().size() <= 1 && args->tupleRest() == nullptr;
 }
 
-EventMaps::ResultListenerThis EventMaps::listenerThis(const Type *self,
-                                                      const Type *receiver) const {
+EventMaps::ResultListenerThis EventMaps::checkListenerThis(const Type *self,
+                                                           const Type *receiver) const {
   if (!self->isUnknown() && !receiver->isSubtypeOf(self)) {
     auto message = ErrorTextListener::thisType(self->name(), receiver->name());
 
@@ -77,17 +77,20 @@ std::string EventMaps::nearestEvent(const Type *events, llvm::StringRef name) co
 }
 
 bool EventMaps::isEmitterClass(const ClassDecl *classDecl) const {
-  auto *base = this->state.getLibraryDeclarations().findLibraryClass("EventEmitterBase");
+  auto *base =
+      this->state.getLibraryDeclarations().findLibraryClass(LibraryClass::EVENT_EMITTER_BASE);
 
   return classDecl != nullptr && base != nullptr && classDecl->derivesFrom(base);
 }
 
 const Type *EventMaps::eventMapOf(const Type *type) const {
-  const auto *emitter = this->state.getLibraryDeclarations().findLibraryClass("EventEmitter");
+  const auto *emitter =
+      this->state.getLibraryDeclarations().findLibraryClass(LibraryClass::EVENT_EMITTER);
   if (emitter == nullptr) {
     return nullptr;
   }
-  const auto *streams = this->state.getLibraryDeclarations().findLibraryClass("StreamEmitter");
+  const auto *streams =
+      this->state.getLibraryDeclarations().findLibraryClass(LibraryClass::STREAM_EMITTER);
   for (const ClassDecl *classDecl = this->classDeclarer->classOf(type); classDecl != nullptr;
        classDecl = classDecl->parent) {
     if (classDecl->generic() != nullptr &&
@@ -100,12 +103,12 @@ const Type *EventMaps::eventMapOf(const Type *type) const {
   return nullptr;
 }
 
-EventMaps::ResultEventMapFits EventMaps::eventMapFits(const Type *events) const {
+EventMaps::ResultEventMapFits EventMaps::checkEventMapFits(const Type *events) const {
   if (events->isError() || TypeQueries::mentionsParam(events)) {
     return ok(events);
   }
   if (events->isRecord()) {
-    return this->recordMapFits(events);
+    return this->checkRecordMapFits(events);
   }
   bool isNotObject = !events->isObject() || events->isClass() || events->isTuple() ||
                      events->isAnyObject() || events->isBytes() || events->isDate() ||
@@ -120,7 +123,7 @@ EventMaps::ResultEventMapFits EventMaps::eventMapFits(const Type *events) const 
     });
   }
   for (const Field &field : events->fields()) {
-    auto fits = this->eventFieldFits(field);
+    auto fits = this->checkEventFieldFits(field);
     if (fits.isErr()) {
       return fits;
     }
@@ -129,7 +132,7 @@ EventMaps::ResultEventMapFits EventMaps::eventMapFits(const Type *events) const 
   return ok(events);
 }
 
-EventMaps::ResultEventMapFits EventMaps::recordMapFits(const Type *events) const {
+EventMaps::ResultEventMapFits EventMaps::checkRecordMapFits(const Type *events) const {
   const Type *args = events->valueType();
   if (!args->isTuple()) {
     auto why = ErrorTextEventMap::notTuple(args->name());
@@ -140,7 +143,7 @@ EventMaps::ResultEventMapFits EventMaps::recordMapFits(const Type *events) const
         .message = message,
     });
   }
-  if (!this->carriesOne(args)) {
+  if (!this->isCarryingOne(args)) {
     auto event = ErrorTextEventMap::eachEvent();
     auto message = ErrorTextEventMap::several(event, args->name());
 
@@ -153,7 +156,7 @@ EventMaps::ResultEventMapFits EventMaps::recordMapFits(const Type *events) const
   return ok(events);
 }
 
-EventMaps::ResultEventMapFits EventMaps::eventFieldFits(const Field &field) const {
+EventMaps::ResultEventMapFits EventMaps::checkEventFieldFits(const Field &field) const {
   bool isService = this->isServiceEvent(field.name);
   if (field.type->isOptional()) {
     auto why = ErrorTextEventMap::optional(field.name);
@@ -173,7 +176,7 @@ EventMaps::ResultEventMapFits EventMaps::eventFieldFits(const Field &field) cons
         .message = message,
     });
   }
-  if (!isService && !this->carriesOne(field.type)) {
+  if (!isService && !this->isCarryingOne(field.type)) {
     auto event = ErrorTextEventMap::event(field.name);
     auto message = ErrorTextEventMap::several(event, field.type->name());
 
@@ -307,11 +310,11 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
   return this->checkListenerValue(checked, want, kind);
 }
 
-bool EventMaps::listenerTakesThis(const ListenerWant &want, const Type *self, llvm::SMLoc loc) {
+bool EventMaps::isListenerTakingThis(const ListenerWant &want, const Type *self, llvm::SMLoc loc) {
   if (self->isError()) {
     return false;
   }
-  auto taken = this->listenerThis(self, want.receiver);
+  auto taken = this->checkListenerThis(self, want.receiver);
   if (taken.isErr()) {
     this->state.getDiagnostics().error(loc, taken.error().message);
     return false;
@@ -355,7 +358,7 @@ Expr *EventMaps::checkThisListener(FunctionExpr *functionExpr, const ListenerWan
                                    ListenerKind &kind) {
   FunctionDecl *functionDecl = functionExpr->fn;
   const auto *self = this->typeResolver->resolveType(*functionDecl->params[0].type);
-  if (!this->listenerTakesThis(want, self, functionDecl->params[0].loc)) {
+  if (!this->isListenerTakingThis(want, self, functionDecl->params[0].loc)) {
     return this->exprChecker->checkExpr(functionExpr);
   }
   if (functionDecl->isAsync) {
@@ -415,7 +418,7 @@ Expr *EventMaps::checkListenerValue(Expr *arg, const ListenerWant &want, Listene
 Expr *EventMaps::checkThisValue(Expr *arg, const ListenerWant &want, ListenerKind &kind) {
   const Type *type = arg->type;
   const Type *self = type->params()[0];
-  if (!this->listenerTakesThis(want, self, arg->loc())) {
+  if (!this->isListenerTakingThis(want, self, arg->loc())) {
     return arg;
   }
   kind = ListenerKind::This;

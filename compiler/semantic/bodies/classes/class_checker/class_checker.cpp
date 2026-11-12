@@ -20,6 +20,13 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+constexpr const char *kThisName = "this";
+constexpr const char *kMemberPlaceholder = "x";
+
+}
+
 ClassChecker::ClassChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->classLinks = &all.classLinks;
@@ -61,18 +68,12 @@ ClassChecker::ResultClassDeclared ClassChecker::checkClassStmt(ClassDecl *classD
 }
 
 ClassChecker::ResultHasDecorators ClassChecker::hasDecorators(const ClassDecl *classDecl) const {
-  auto decorated = [](const FunctionDecl *functionDecl) {
-    return !functionDecl->decorators().empty() ||
-           llvm::any_of(functionDecl->params,
-                        [](const Param &param) { return !param.decorators.empty(); });
-  };
-  auto decoratedField = [](const ClassField &field) { return !field.decorators.empty(); };
-
+  auto functionTest = std::bind_front(&ClassChecker::isDecoratedFunction, this);
+  auto fieldTest = std::bind_front(&ClassChecker::isDecoratedField, this);
   bool isDecoratedAnywhere = !classDecl->decorators.empty() ||
-                             llvm::any_of(classDecl->methods, decorated) ||
-                             llvm::any_of(classDecl->constructors, decorated) ||
-                             llvm::any_of(classDecl->fields, decoratedField);
-
+                             llvm::any_of(classDecl->methods, functionTest) ||
+                             llvm::any_of(classDecl->constructors, functionTest) ||
+                             llvm::any_of(classDecl->fields, fieldTest);
   if (!isDecoratedAnywhere) {
     auto message = ErrorTextDecorators::none(classDecl->name);
 
@@ -85,8 +86,24 @@ ClassChecker::ResultHasDecorators ClassChecker::hasDecorators(const ClassDecl *c
   return ok(classDecl);
 }
 
-ClassChecker::ResultFieldHasValue ClassChecker::fieldStartValue(const ClassDecl *classDecl,
-                                                                const ClassField &field) const {
+bool ClassChecker::isDecoratedFunction(const FunctionDecl *functionDecl) const {
+  if (!functionDecl->decorators().empty()) {
+    return true;
+  }
+
+  return llvm::any_of(functionDecl->params, std::bind_front(&ClassChecker::isDecoratedParam, this));
+}
+
+bool ClassChecker::isDecoratedParam(const Param &param) const {
+  return !param.decorators.empty();
+}
+
+bool ClassChecker::isDecoratedField(const ClassField &field) const {
+  return !field.decorators.empty();
+}
+
+ClassChecker::ResultFieldHasValue
+ClassChecker::checkFieldStartValue(const ClassDecl *classDecl, const ClassField &field) const {
   bool isNeedingValue = !field.isStatic() && field.method() == nullptr && !field.optional() &&
                         field.init == nullptr && !field.definite() && field.resolved != nullptr &&
                         !field.resolved->isError();
@@ -110,8 +127,8 @@ ClassChecker::ResultFieldHasValue ClassChecker::fieldStartValue(const ClassDecl 
   return ok(&field);
 }
 
-ClassChecker::ResultReturnMatches ClassChecker::overrideReturn(const ClassDecl *classDecl,
-                                                               const FunctionDecl *method) {
+ClassChecker::ResultReturnMatches ClassChecker::checkOverrideReturn(const ClassDecl *classDecl,
+                                                                    const FunctionDecl *method) {
   const FunctionDecl *overridden = method->overrides();
   const Type *mine = overridden != nullptr ? method->sym->getReturnType() : nullptr;
   const Type *theirs = overridden != nullptr ? overridden->sym->getReturnType() : nullptr;
@@ -140,40 +157,57 @@ void ClassChecker::walkClassBodies(ClassDecl *classDecl) {
     this->functionChecker->walkFunctionFromScratch(classDecl->init);
   }
   if (classDecl->constructors.empty()) {
-    for (const ClassField &field : classDecl->fields) {
-      auto started = this->fieldStartValue(classDecl, field);
-      if (started.isErr()) {
-        this->state.getDiagnostics().error(field.loc, started.error().message);
-      }
-    }
+    this->walkFieldStarts(classDecl);
   }
   for (FunctionDecl *constructor : classDecl->constructors) {
     if (!constructor->checked) {
       this->functionChecker->walkFunctionFromScratch(constructor);
     }
   }
+  for (FunctionDecl *functionDecl : this->classMethods(classDecl)) {
+    this->walkClassMethod(functionDecl);
+  }
+  this->inheritChecker->walkAbstract(classDecl);
+  this->inheritChecker->walkImplements(classDecl);
+  this->walkOverrideReturns(classDecl);
+}
+
+void ClassChecker::walkFieldStarts(const ClassDecl *classDecl) {
+  for (const ClassField &field : classDecl->fields) {
+    auto started = this->checkFieldStartValue(classDecl, field);
+    if (started.isErr()) {
+      this->state.getDiagnostics().error(field.loc, started.error().message);
+    }
+  }
+}
+
+std::vector<FunctionDecl *> ClassChecker::classMethods(const ClassDecl *classDecl) const {
   std::vector<FunctionDecl *> methods = classDecl->methods;
   for (const ClassField &field : classDecl->fields) {
     if (field.method() != nullptr) {
       methods.push_back(field.method());
     }
   }
-  for (FunctionDecl *functionDecl : methods) {
-    if (this->lateClasses->isTemplate(functionDecl->sym)) {
-      continue;
-    }
-    if (!functionDecl->sym->hasReturnType()) {
-      this->returnInferrer->inferReturnType(functionDecl->sym);
-    }
-    if (functionDecl->checked || functionDecl->isAbstract()) {
-      continue;
-    }
-    this->functionChecker->walkFunctionFromScratch(functionDecl);
+
+  return methods;
+}
+
+void ClassChecker::walkClassMethod(FunctionDecl *functionDecl) {
+  if (this->lateClasses->isTemplate(functionDecl->sym)) {
+    return;
   }
-  this->inheritChecker->walkAbstract(classDecl);
-  this->inheritChecker->walkImplements(classDecl);
+  if (!functionDecl->sym->hasReturnType()) {
+    this->returnInferrer->inferReturnType(functionDecl->sym);
+  }
+  if (functionDecl->checked || functionDecl->isAbstract()) {
+    return;
+  }
+  this->functionChecker->walkFunctionFromScratch(functionDecl);
+}
+
+void ClassChecker::walkOverrideReturns(const ClassDecl *classDecl) {
   for (FunctionDecl *functionDecl : this->classLinks->ownMethods(classDecl)) {
-    auto returned = this->overrideReturn(classDecl, functionDecl);
+    auto returned = this->checkOverrideReturn(classDecl, functionDecl);
     if (returned.isErr()) {
       this->state.getDiagnostics().error(functionDecl->loc(), returned.error().message);
     }
@@ -189,16 +223,14 @@ ClassChecker::ResultNewThisSymbol ClassChecker::declareThis(FunctionDecl *functi
         .message = message,
     });
   }
-
   auto *self = this->state.getAst().newVar();
-  self->name = "this";
+  self->name = kThisName;
   self->loc = functionDecl->loc();
   self->type = functionDecl->cls()->type;
   self->isConst = true;
   unsigned declSeq = this->state.getReturnInference().takeSequenceNumber();
   self->place = FunctionLocalVar{.owner = functionDecl, .state = {.declSeq = declSeq}};
   ClassMember *member = functionDecl->member();
-
   switch (member->method.kind()) {
     case MethodKind::INSTANCE_METHOD:
       member->method.as<InstanceMethod>()->thisVar = self;
@@ -217,8 +249,8 @@ ClassChecker::ResultNewThisSymbol ClassChecker::declareThis(FunctionDecl *functi
 }
 
 ClassChecker::ResultInitThisFound ClassChecker::isInitThis(const Expr *expr) const {
-  expr = ExprParts::withoutImplicitCasts(expr);
-  auto *name = dyn_cast<NameExpr>(expr);
+  const Expr *plain = ExprParts::withoutImplicitCasts(expr);
+  auto *name = dyn_cast<NameExpr>(plain);
   bool isInConstructor = this->state.getClassContext().getInitializerThis() != nullptr &&
                          this->state.getFunctionStack().getCurrentDecl() ==
                              this->state.getClassContext().getInitializer();
@@ -242,7 +274,7 @@ ClassChecker::ResultInitThisFound ClassChecker::isInitThis(const Expr *expr) con
   return ok(name);
 }
 
-ClassChecker::ResultObjectIsReady ClassChecker::thisReady(const Flow &flow) const {
+ClassChecker::ResultObjectIsReady ClassChecker::checkThisReady(const Flow &flow) const {
   auto unset = this->firstUnset(flow);
   if (flow.beforeSuper) {
     auto message = ErrorTextThisReady::noSuper();
@@ -273,16 +305,12 @@ ClassChecker::ResultFieldUnsetYet ClassChecker::firstUnset(const Flow &flow) con
         .message = message,
     });
   }
-
-  const std::vector<ClassField> &fields =
-      this->state.getClassContext().getInitializer()->cls()->fields;
-  auto unset = llvm::find_if(fields, [&](const ClassField &field) {
-    return !field.isStatic() && field.method() == nullptr && !field.optional() &&
-           !llvm::is_contained(flow.setFields, field.name);
-  });
+  const ClassDecl *initialized = this->state.getClassContext().getInitializer()->cls();
+  const std::vector<ClassField> &fields = initialized->fields;
+  auto unset =
+      llvm::find_if(fields, std::bind_front(&ClassChecker::isUnsetField, this, std::cref(flow)));
   if (unset == fields.end()) {
-    auto message =
-        ErrorTextFirstUnset::allSet(this->state.getClassContext().getInitializer()->cls()->name);
+    auto message = ErrorTextFirstUnset::allSet(initialized->name);
 
     return err(ClassCheckerFirstUnsetError{
         .code = ClassCheckerFirstUnsetErrorCode::ALL_FIELDS_SET,
@@ -293,11 +321,17 @@ ClassChecker::ResultFieldUnsetYet ClassChecker::firstUnset(const Flow &flow) con
   return ok(unset->name.str());
 }
 
+bool ClassChecker::isUnsetField(const Flow &flow, const ClassField &field) const {
+  return !field.isStatic() && field.method() == nullptr && !field.optional() &&
+         !llvm::is_contained(flow.setFields, field.name);
+}
+
 ClassChecker::ResultEveryFieldSet ClassChecker::checkFieldsSet() const {
-  auto unset = this->firstUnset(this->state.getFlowState().getFlow());
+  const Flow &flow = this->state.getFlowState().getFlow();
+  auto unset = this->firstUnset(flow);
+  const FunctionDecl *initializer = this->state.getClassContext().getInitializer();
   if (!this->state.getFlowState().isUnreachable() && unset.isOk()) {
-    auto message = ErrorTextFieldsSet::pathUnset(
-        this->state.getClassContext().getInitializer()->cls()->name, unset.value());
+    auto message = ErrorTextFieldsSet::pathUnset(initializer->cls()->name, unset.value());
 
     return err(ClassCheckerCheckFieldsSetError{
         .code = ClassCheckerCheckFieldsSetErrorCode::FIELD_NOT_SET_ON_EVERY_PATH,
@@ -305,18 +339,17 @@ ClassChecker::ResultEveryFieldSet ClassChecker::checkFieldsSet() const {
     });
   }
 
-  return ok(this->state.getClassContext().getInitializer());
+  return ok(initializer);
 }
 
-ClassChecker::ResultThisComesFrom ClassChecker::thisOf(const FunctionDecl *current) const {
-  std::string member = this->state.getClassContext().getThisMember().empty()
-                           ? "x"
-                           : this->state.getClassContext().getThisMember().str();
+ClassChecker::ResultThisComesFrom ClassChecker::checkThisOf(const FunctionDecl *current) const {
+  auto member = this->thisMemberText();
   const FunctionDecl *source = current != nullptr ? current->thisSource() : nullptr;
-  if (source == nullptr && this->state.getClassContext().isInsideStaticInit() &&
-      this->state.getClassContext().getCurrentClass() != nullptr) {
-    auto message =
-        ErrorTextThisOf::inField(this->state.getClassContext().getCurrentClass()->name, member);
+  const ClassDecl *currentClass = this->state.getClassContext().getCurrentClass();
+  bool isInStaticField = source == nullptr && this->state.getClassContext().isInsideStaticInit() &&
+                         currentClass != nullptr;
+  if (isInStaticField) {
+    auto message = ErrorTextThisOf::inField(currentClass->name, member);
 
     return err(ClassCheckerThisOfError{
         .code = ClassCheckerThisOfErrorCode::IN_STATIC_FIELD,
@@ -331,7 +364,6 @@ ClassChecker::ResultThisComesFrom ClassChecker::thisOf(const FunctionDecl *curre
         .message = message,
     });
   }
-
   bool hasThis = source->takesThis() || source->hasThisParam();
   if (!hasThis && source->cls() != nullptr && source->isStatic()) {
     auto message = ErrorTextThisOf::inStatic(source->cls()->name, member);
@@ -353,12 +385,21 @@ ClassChecker::ResultThisComesFrom ClassChecker::thisOf(const FunctionDecl *curre
   return ok(source);
 }
 
-ClassChecker::ResultThisReadiness ClassChecker::readyThis(VarSymbol *variable) const {
+std::string ClassChecker::thisMemberText() const {
+  llvm::StringRef member = this->state.getClassContext().getThisMember();
+  if (member.empty()) {
+    return kMemberPlaceholder;
+  }
+
+  return member.str();
+}
+
+ClassChecker::ResultThisReadiness ClassChecker::checkReadyThis(VarSymbol *variable) const {
+  const FunctionDecl *initializer = this->state.getClassContext().getInitializer();
+  const FunctionDecl *currentDecl = this->state.getFunctionStack().getCurrentDecl();
   bool isInInit = variable == this->state.getClassContext().getInitializerThis();
-  bool isInConstructor = isInInit && this->state.getFunctionStack().getCurrentDecl() ==
-                                         this->state.getClassContext().getInitializer();
-  bool isInClosure = isInInit && this->state.getFunctionStack().getCurrentDecl() !=
-                                     this->state.getClassContext().getInitializer();
+  bool isInConstructor = isInInit && currentDecl == initializer;
+  bool isInClosure = isInInit && currentDecl != initializer;
   if (isInClosure && !this->state.getClassContext().isClosureThisReady()) {
     auto message = ErrorTextReadyThis::inClosure();
 
@@ -368,17 +409,16 @@ ClassChecker::ResultThisReadiness ClassChecker::readyThis(VarSymbol *variable) c
     });
   }
   if (isInConstructor && this->state.getFlowState().isBeforeSuper()) {
-    auto message = ErrorTextReadyThis::noSuper(
-        this->state.getClassContext().getInitializer()->cls()->parent->name);
+    auto message = ErrorTextReadyThis::noSuper(initializer->cls()->parent->name);
 
     return err(ClassCheckerReadyThisError{
         .code = ClassCheckerReadyThisErrorCode::BEFORE_SUPER,
         .message = message,
     });
   }
-
   bool hasFieldsMatter = isInConstructor && this->state.getClassContext().getThisMember().empty();
-  auto unset = this->firstUnset(this->state.getFlowState().getFlow());
+  const Flow &flow = this->state.getFlowState().getFlow();
+  auto unset = this->firstUnset(flow);
   if (hasFieldsMatter && unset.isOk()) {
     auto message = ErrorTextReadyThis::unset(unset.value());
 
@@ -393,14 +433,14 @@ ClassChecker::ResultThisReadiness ClassChecker::readyThis(VarSymbol *variable) c
 
 ClassChecker::ResultThisReference ClassChecker::checkThis(NameExpr *name) {
   name->type = Type::error();
-  auto found = this->thisOf(this->state.getFunctionStack().getCurrentDecl());
+  const FunctionDecl *currentDecl = this->state.getFunctionStack().getCurrentDecl();
+  auto found = this->checkThisOf(currentDecl);
   if (found.isErr()) {
     return err(ClassCheckerCheckThisError{
         .code = ClassCheckerCheckThisErrorCode::THIS_NOT_FOUND,
         .message = found.error().message,
     });
   }
-
   const FunctionDecl *source = found.value();
   VarSymbol *variable = source->takesThis() ? source->thisVar() : source->params[0].sym;
   if (variable == nullptr) {
@@ -411,11 +451,10 @@ ClassChecker::ResultThisReference ClassChecker::checkThis(NameExpr *name) {
         .message = message,
     });
   }
-
   name->binding = NamedVar{.var = variable};
   this->nestedFunctions->noteUse(variable, name->loc());
   name->type = variable->type;
-  auto ready = this->readyThis(variable);
+  auto ready = this->checkReadyThis(variable);
   if (ready.isErr() && ready.error().code == ClassCheckerReadyThisErrorCode::BEFORE_SUPER) {
     name->type = Type::error();
   }
@@ -425,7 +464,6 @@ ClassChecker::ResultThisReference ClassChecker::checkThis(NameExpr *name) {
         .message = ready.error().message,
     });
   }
-
   const Type *narrowed =
       source->takesThis() ? nullptr : this->genericChecker->narrowedType(variable);
   Expr *reference = narrowed != nullptr ? this->typeRelations->convert(name, narrowed) : name;

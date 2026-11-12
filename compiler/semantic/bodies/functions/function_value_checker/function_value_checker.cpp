@@ -28,10 +28,9 @@ Expr *FunctionValueChecker::adaptFunction(Expr *expr, const Type *to) {
   }
   llvm::ArrayRef<const Type *> params = from->params();
   llvm::ArrayRef<const Type *> wanted = to->params();
-  for (size_t index = 0; index < wanted.size() && index < params.size(); ++index) {
-    if (params[index] != wanted[index] &&
-        !(params[index]->isOptional() && params[index]->inner() == wanted[index]) &&
-        !(params[index]->nonOptional()->isUnknown() && !wanted[index]->isVoid())) {
+  size_t shared = std::min(params.size(), wanted.size());
+  for (size_t index = 0; index < shared; ++index) {
+    if (!this->isParamFitting(params[index], wanted[index])) {
       return nullptr;
     }
   }
@@ -47,20 +46,27 @@ Expr *FunctionValueChecker::adaptFunction(Expr *expr, const Type *to) {
   return castExpr;
 }
 
+bool FunctionValueChecker::isParamFitting(const Type *param, const Type *wanted) const {
+  bool isOptionalWanted = param->isOptional() && param->inner() == wanted;
+  bool isUnknownTaken = param->nonOptional()->isUnknown() && !wanted->isVoid();
+
+  return param == wanted || isOptionalWanted || isUnknownTaken;
+}
+
 FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg, const Signature &expected,
                                                          unsigned primary, llvm::StringRef method) {
-  std::optional<FunctionValueShape> shape = this->functionValueShape(arg);
+  auto shape = this->functionValueShape(arg);
   if (!shape.has_value()) {
     return nullptr;
   }
-  size_t count = std::min<size_t>(shape->maxArgs, expected.params.size());
-  auto matched = this->extraArguments(arg, shape->name, method, count, primary);
+  size_t offered = std::min<size_t>(shape->maxArgs, expected.params.size());
+  auto matched = this->checkExtraArguments(arg, shape->name, method, offered, primary);
   if (matched.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), matched.error().message);
-    count = primary;
+    return this->forwardingFunction(arg, *shape, primary);
   }
 
-  return this->forwardingFunction(arg, *shape, count);
+  return this->forwardingFunction(arg, *shape, matched.value());
 }
 
 std::optional<FunctionValueChecker::FunctionValueShape>
@@ -84,7 +90,7 @@ FunctionValueChecker::globalFunctionShape(const NameExpr *named) const {
     return FunctionValueShape{
         .name = named->name,
         .maxArgs = 1,
-        .returnsNothing = false,
+        .isReturningNothing = false,
     };
   }
   auto global = this->namedGlobal(named);
@@ -97,7 +103,7 @@ FunctionValueChecker::globalFunctionShape(const NameExpr *named) const {
   return FunctionValueShape{
       .name = GlobalNameTable::getName(info->global),
       .maxArgs = info->maxArgs,
-      .returnsNothing = false,
+      .isReturningNothing = false,
   };
 }
 
@@ -113,7 +119,7 @@ FunctionValueChecker::staticFunctionShape(const MemberExpr *member) const {
   return FunctionValueShape{
       .name = member->name,
       .maxArgs = info->maxArgs,
-      .returnsNothing = info->returnsNothing,
+      .isReturningNothing = info->isReturningNothing,
   };
 }
 
@@ -137,49 +143,63 @@ FunctionExpr *FunctionValueChecker::forwardingFunction(Expr *arg, const Function
   functionDecl->syntax = ArrowFunction{.concise = true};
   auto args = std::vector<Expr *>();
   for (size_t index = 0; index < count; ++index) {
-    Param param;
-    param.name = this->state.getAst().hiddenName();
-    param.loc = arg->loc();
+    auto param = Param{
+        .name = this->state.getAst().hiddenName(),
+        .loc = arg->loc(),
+    };
     functionDecl->params.push_back(param);
-    args.push_back(this->state.getAst().make<NameExpr>(arg->loc(), param.name));
+    auto *forwarded = this->state.getAst().make<NameExpr>(arg->loc(), param.name);
+    args.push_back(forwarded);
   }
   auto *call = this->state.getAst().make<CallExpr>(arg->loc(), arg, std::move(args));
   functionDecl->body = this->state.getAst().make<BlockStmt>(arg->loc());
-  if (shape.returnsNothing) {
-    functionDecl->body->body.push_back(this->state.getAst().make<ExprStmt>(arg->loc(), call));
-  } else {
-    functionDecl->body->body.push_back(this->state.getAst().make<ReturnStmt>(arg->loc(), call));
-  }
+  auto *statement = this->forwardingStatement(arg, call, shape);
+  functionDecl->body->body.push_back(statement);
 
   return this->state.getAst().make<FunctionExpr>(arg->loc(), functionDecl);
 }
 
-FunctionValueChecker::ResultArgumentsMatch
-FunctionValueChecker::extraArguments(const Expr *arg, llvm::StringRef name, llvm::StringRef method,
-                                     size_t count, unsigned primary) const {
-  if (count > primary) {
-    std::string qualified = name.str();
-    auto *member = dyn_cast<MemberExpr>(arg);
-    if (member != nullptr) {
-      qualified = cast<NameExpr>(member->object)->name.str() + "." + qualified;
-    }
-    auto argument = ErrorTextCallbackArg::argName(method, primary);
-    auto ordinal = ErrorTextCallbackArg::position(primary);
-    auto passes = ErrorTextCallbackArg::argsShape(method);
-    auto message = ErrorTextExtraArguments::passed(qualified, argument, ordinal, method, passes);
-
-    return err(FunctionValueCheckerExtraArgumentsError{
-        .code = FunctionValueCheckerExtraArgumentsErrorCode::MORE_ARGUMENTS,
-        .message = message,
-    });
+Stmt *FunctionValueChecker::forwardingStatement(const Expr *arg, CallExpr *call,
+                                                const FunctionValueShape &shape) {
+  if (shape.isReturningNothing) {
+    return this->state.getAst().make<ExprStmt>(arg->loc(), call);
   }
 
-  return ok(count);
+  return this->state.getAst().make<ReturnStmt>(arg->loc(), call);
+}
+
+FunctionValueChecker::ResultArgumentsMatch
+FunctionValueChecker::checkExtraArguments(const Expr *arg, llvm::StringRef name,
+                                          llvm::StringRef method, size_t count,
+                                          unsigned primary) const {
+  if (count <= primary) {
+    return ok(count);
+  }
+  auto qualified = this->qualifiedName(arg, name);
+  auto argument = ErrorTextCallbackArg::argName(method, primary);
+  auto ordinal = ErrorTextCallbackArg::position(primary);
+  auto passes = ErrorTextCallbackArg::argsShape(method);
+  auto message = ErrorTextExtraArguments::passed(qualified, argument, ordinal, method, passes);
+
+  return err(FunctionValueCheckerExtraArgumentsError{
+      .code = FunctionValueCheckerExtraArgumentsErrorCode::MORE_ARGUMENTS,
+      .message = message,
+  });
+}
+
+std::string FunctionValueChecker::qualifiedName(const Expr *arg, llvm::StringRef name) const {
+  auto *member = dyn_cast<MemberExpr>(arg);
+  if (member == nullptr) {
+    return name.str();
+  }
+  auto *owner = cast<NameExpr>(member->object);
+
+  return owner->name.str() + "." + name.str();
 }
 
 FunctionValueChecker::ResultAsyncCallbackOk
-FunctionValueChecker::asyncCallback(const Expr *arg, const Signature &expected,
-                                    llvm::StringRef method) const {
+FunctionValueChecker::checkAsyncCallback(const Expr *arg, const Signature &expected,
+                                         llvm::StringRef method) const {
   const Type *type = arg->type;
   bool isPromised = type->isFunction() && type->ret()->isPromise() && expected.ret != nullptr &&
                     !expected.ret->isPromise() && !expected.voidResult && !expected.ret->isError();

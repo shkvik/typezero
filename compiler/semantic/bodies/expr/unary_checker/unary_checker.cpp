@@ -192,7 +192,7 @@ UnaryChecker::ResultOperandIsInteger UnaryChecker::checkBitsOperand(const Type *
 
 UnaryChecker::ResultResultNotDropped
 UnaryChecker::checkResultKept(const UnaryExpr *unary, const Type *dropped, bool isPromised) const {
-  bool isLibrary = this->libraryCalls->inLibrary(unary->loc());
+  bool isLibrary = this->libraryCalls->isInLibrary(unary->loc());
   if (dropped->holdsResults() && !isLibrary) {
     std::string message = isPromised ? ErrorTextUnary::dropsAsync() : ErrorTextUnary::drops();
 

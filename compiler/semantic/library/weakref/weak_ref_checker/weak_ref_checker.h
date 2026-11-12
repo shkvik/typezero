@@ -30,11 +30,13 @@ private:
   using ResultTargetIsWritten = Result<const TypeRef *, WeakRefCheckerTargetWrittenError>;
   using ResultMethodIsDerefed = Result<const MemberExpr *, WeakRefCheckerMethodNameError>;
 
-  ResultNewTakesOneArgs newArgs(const NewExpr *expr) const;
-  ResultWeakTargetValid weakTarget(const Type *target) const;
-  ResultNewTypeArgsFits newTypeArgs(const NewExpr *expr) const;
-  ResultTargetIsWritten targetWritten(const TypeRef &ref) const;
-  ResultMethodIsDerefed methodName(const MemberExpr *member, const Type *type) const;
+  ResultNewTakesOneArgs checkNewArgs(const NewExpr *expr) const;
+  ResultWeakTargetValid checkWeakTarget(const Type *target) const;
+  ResultNewTypeArgsFits checkNewTypeArgs(const NewExpr *expr) const;
+  ResultTargetIsWritten checkTargetWritten(const TypeRef &ref) const;
+  ResultMethodIsDerefed checkMethodName(const MemberExpr *member, const Type *type) const;
+  const Type *writtenTarget(const NewExpr *expr, const Type *expected);
+  Expr *failWeakRefNew(NewExpr *expr);
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

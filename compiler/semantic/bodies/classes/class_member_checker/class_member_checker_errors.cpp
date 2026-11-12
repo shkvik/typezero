@@ -10,16 +10,17 @@ std::string ErrorTextAccess::elsewhere(llvm::StringRef name, llvm::StringRef cls
       .str();
 }
 
-std::string ErrorTextAccess::hidden(llvm::StringRef name, llvm::StringRef word, llvm::StringRef cls,
-                                    bool isProtected) {
-  std::string message =
-      (llvm::Twine("'") + name + "' is " + word + " in class '" + cls + "'").str();
-  if (isProtected) {
-    message +=
-        (llvm::Twine("; only '") + cls + "' and the classes that extend it can use it").str();
-  }
+std::string ErrorTextAccess::hiddenPrivate(llvm::StringRef name, llvm::StringRef word,
+                                           llvm::StringRef cls) {
+  return (llvm::Twine("'") + name + "' is " + word + " in class '" + cls + "'").str();
+}
 
-  return message;
+std::string ErrorTextAccess::hiddenProtected(llvm::StringRef name, llvm::StringRef word,
+                                             llvm::StringRef cls) {
+  auto message = ErrorTextAccess::hiddenPrivate(name, word, cls);
+
+  return message +
+         (llvm::Twine("; only '") + cls + "' and the classes that extend it can use it").str();
 }
 
 std::string ErrorTextClassField::readEarly(llvm::StringRef name) {

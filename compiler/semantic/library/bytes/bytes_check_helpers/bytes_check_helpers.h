@@ -24,7 +24,7 @@ inline constexpr int64_t kIntMax = std::numeric_limits<int64_t>::max();
 
 enum Encoding { Utf8, Utf16le, Latin1, Ascii, Base64, Base64url, Hex };
 
-struct NumberMethod {
+struct BytesNumberMethod {
   bool write = false;
   Bytes kind = Bytes::None;
   bool big = false;
@@ -38,7 +38,7 @@ public:
   static std::string valueText(const Expr *expr);
   static std::string wrapHint(Bytes kind, const std::string &value);
   static Range operate(BinaryOp op, const Range &a, const Range &b, bool isInt);
-  static bool numberMethod(llvm::StringRef name, bool dataView, NumberMethod &m);
+  static bool numberMethod(llvm::StringRef name, bool dataView, BytesNumberMethod &m);
   static std::string numberWhat(Bytes kind);
 
 private:

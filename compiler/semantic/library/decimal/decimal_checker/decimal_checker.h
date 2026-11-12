@@ -26,7 +26,7 @@ public:
   bool isLiteralTree(const Expr *expr) const;
   std::pair<llvm::StringRef, llvm::StringRef> sidesOf(const BinaryExpr *binary) const;
   const Type *literalHint(const Expr *other, const Type *hint) const;
-  bool fitsLiteral(const Expr *expr, const Type *type) const;
+  bool isFittingLiteral(const Expr *expr, const Type *type) const;
   void walkComparisonOperands(BinaryExpr *binary);
   using ResultDecimalLiteralChecked = Result<void, DecimalCheckerLiteralRangeError>;
 
@@ -47,9 +47,24 @@ private:
   using ResultLiteralRange = Result<DecimalLiteral, DecimalCheckerLiteralRangeError>;
 
   bool isLiteralNode(const Expr *expr) const;
-  ResultLiteralRange literalRange(const Expr *literal) const;
-  ResultRoundingMode roundingMode(const std::u16string &text) const;
+  bool isArithmeticOperator(BinaryOp op) const;
+  bool isComparedLiteral(const Expr *expr) const;
+  const Type *comparisonHint(const Expr *other, const Expr *self) const;
+  ResultLiteralRange checkLiteralRange(const Expr *literal) const;
+  ResultRoundingMode checkRoundingModeText(const std::u16string &text) const;
+  Expr *checkDecimalPower(BinaryExpr *binary);
+  bool convertDecimalSides(BinaryExpr *binary);
+  bool convertDecimalSide(Expr *&side);
+  void walkDecimalPowerAssign(AssignExpr *assign);
+  bool isDecimalText(const Type *type) const;
+  bool isStringLiteralType(const Type *type) const;
+  Expr *checkDecimalText(CallExpr *call);
+  bool reportBadDecimalText(llvm::ArrayRef<std::string> texts, const Expr *arg);
+  bool isDecimalNumberText(const std::string &text) const;
+  bool takeDecimalSpread(Expr *&arg);
+  void walkKnownModes(llvm::ArrayRef<std::string> modes, const Expr *arg);
   Expr *reportDecimalMember(CallExpr *call, MemberExpr *member);
+  llvm::StringRef replacementFor(llvm::StringRef name) const;
   Expr *checkDecimalArg(Expr *arg, DecimalArg kind, Builtin builtin);
   const Type *decimalResultType(DecimalResult result) const;
 

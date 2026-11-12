@@ -23,16 +23,17 @@ public:
 
   std::optional<GlobalName> resultName(llvm::StringRef name) const;
   std::optional<TypeName> findResultType(llvm::StringRef name) const;
-  ResultImportSource importSource(const ImportDecl &importDecl) const;
+  ResultImportSource checkImportSource(const ImportDecl &importDecl) const;
   const Type *resolveResultType(const TypeRef &ref, TypeName result);
-  const Type *unifyHalf(const Type *a, const Type *b) const;
-  static UnifyShortcut halfShortcut(const Type *a, const Type *b);
+  const Type *unifyHalf(const Type *first, const Type *second) const;
+  static UnifyShortcut halfShortcut(const Type *first, const Type *second);
   void neverOperands(BinaryExpr *binary);
 
 private:
   using ResultTypeArgsPair = Result<const TypeRef *, ResultTypesResultTypeArgsError>;
 
-  ResultTypeArgsPair resultTypeArgs(const TypeRef &ref) const;
+  ResultTypeArgsPair checkResultTypeArgs(const TypeRef &ref) const;
+  const Type *resolveResultHalf(const TypeRef &arg);
 
   SemanticState &state;
   Scopes *scopes = nullptr;

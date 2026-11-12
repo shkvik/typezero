@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/path/path_checker/path_checker.h"
+#include "compiler/program/library/path/path_value_table/path_value_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -18,31 +19,61 @@ PathChecker::PathChecker(SemanticState &owner, SemanticParts &all)
 }
 
 const Type *PathChecker::parsedPathType() const {
-  const auto *s = Type::string();
+  const auto *stringType = Type::string();
 
-  return Type::object({{"root", s, false},
-                       {"dir", s, false},
-                       {"base", s, false},
-                       {"ext", s, false},
-                       {"name", s, false}},
+  return Type::object({{"root", stringType, false},
+                       {"dir", stringType, false},
+                       {"base", stringType, false},
+                       {"ext", stringType, false},
+                       {"name", stringType, false}},
                       "ParsedPath");
 }
 
 const Type *PathChecker::formatInputType() const {
-  const auto *s = Type::optional(Type::string());
+  const auto *optionalString = Type::optional(Type::string());
 
-  return Type::object({{"root", s, false},
-                       {"dir", s, false},
-                       {"base", s, false},
-                       {"ext", s, false},
-                       {"name", s, false}},
+  return Type::object({{"root", optionalString, false},
+                       {"dir", optionalString, false},
+                       {"base", optionalString, false},
+                       {"ext", optionalString, false},
+                       {"name", optionalString, false}},
                       "FormatInputPathObject");
 }
 
-PathChecker::ResultPathProperty PathChecker::pathValue(llvm::StringRef name,
-                                                       NodeModule module) const {
-  if (name == "posix" || name == "win32") {
-    auto message = ErrorTextPath::throughFns(name, NodeCheckHelpers::moduleLabel(module));
+bool PathChecker::isWin32Style(NodeModule module) const {
+  return module == NodeModule::PathWin32 ||
+         (module == NodeModule::Path && NodeCheckHelpers::isTargetWindows());
+}
+
+bool PathChecker::isPathString(std::optional<PathValue> value) const {
+  return value == PathValue::SEPARATOR || value == PathValue::DELIMITER;
+}
+
+bool PathChecker::isPathModule(std::optional<PathValue> value) const {
+  return value == PathValue::POSIX_MODULE || value == PathValue::WIN32_MODULE;
+}
+
+llvm::StringRef PathChecker::pathStringText(PathValue value, NodeModule module) const {
+  bool isWin32 = this->isWin32Style(module);
+  switch (value) {
+    case PathValue::SEPARATOR:
+      return isWin32 ? "\\" : "/";
+    case PathValue::DELIMITER:
+      return isWin32 ? ";" : ":";
+    case PathValue::POSIX_MODULE:
+    case PathValue::WIN32_MODULE:
+      return "";
+  }
+
+  return "";
+}
+
+PathChecker::ResultPathProperty PathChecker::checkPathProperty(llvm::StringRef name,
+                                                               NodeModule module) const {
+  auto value = PathValueTable::find(name);
+  if (this->isPathModule(value)) {
+    auto label = NodeCheckHelpers::moduleLabel(module);
+    auto message = ErrorTextPath::throughFns(name, label);
 
     return err(PathCheckerPathValueError{
         .code = PathCheckerPathValueErrorCode::MODULE_AS_VALUE,
@@ -53,8 +84,9 @@ PathChecker::ResultPathProperty PathChecker::pathValue(llvm::StringRef name,
   return ok(name);
 }
 
-PathChecker::ResultPathFunction PathChecker::pathFunction(llvm::StringRef functionName) const {
-  if (functionName == "sep" || functionName == "delimiter") {
+PathChecker::ResultPathFunction PathChecker::checkPathFunction(llvm::StringRef functionName) const {
+  auto value = PathValueTable::find(functionName);
+  if (this->isPathString(value)) {
     auto message = ErrorTextPath::notCalled(functionName);
 
     return err(PathCheckerPathFunctionError{
@@ -62,7 +94,7 @@ PathChecker::ResultPathFunction PathChecker::pathFunction(llvm::StringRef functi
         .message = message,
     });
   }
-  if (functionName == "posix" || functionName == "win32") {
+  if (this->isPathModule(value)) {
     auto message = ErrorTextPath::module(functionName);
 
     return err(PathCheckerPathFunctionError{
@@ -75,17 +107,14 @@ PathChecker::ResultPathFunction PathChecker::pathFunction(llvm::StringRef functi
 }
 
 Expr *PathChecker::checkPathValue(NodeModule module, llvm::StringRef name, Expr *expr) {
-  bool isWin32 = module == NodeModule::PathWin32 ||
-                 (module == NodeModule::Path && NodeCheckHelpers::targetIsWindows());
-  if (name == "sep") {
-    return NodeCheckHelpers::stringLiteral(this->state.getAst(), expr->loc(), isWin32 ? "\\" : "/");
+  auto value = PathValueTable::find(name);
+  if (this->isPathString(value)) {
+    auto text = this->pathStringText(value.value(), module);
+    return NodeCheckHelpers::stringLiteral(this->state.getAst(), expr->loc(), text);
   }
-  if (name == "delimiter") {
-    return NodeCheckHelpers::stringLiteral(this->state.getAst(), expr->loc(), isWin32 ? ";" : ":");
-  }
-  auto value = this->pathValue(name, module);
-  if (value.isErr()) {
-    this->state.getDiagnostics().error(expr->loc(), value.error().message);
+  auto property = this->checkPathProperty(name, module);
+  if (property.isErr()) {
+    this->state.getDiagnostics().error(expr->loc(), property.error().message);
     return expr;
   }
 
@@ -95,13 +124,13 @@ Expr *PathChecker::checkPathValue(NodeModule module, llvm::StringRef name, Expr 
 Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::StringRef functionName,
                                  llvm::SMLoc loc) {
   call->type = Type::error();
-  auto function = this->pathFunction(functionName);
+  auto function = this->checkPathFunction(functionName);
   if (function.isErr()) {
     this->state.getDiagnostics().error(loc, function.error().message);
-    return this->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
+    return call;
   }
-  bool isWin32 = module == NodeModule::PathWin32 ||
-                 (module == NodeModule::Path && NodeCheckHelpers::targetIsWindows());
+  bool isWin32 = this->isWin32Style(module);
   auto *style = this->state.getAst().make<IntLitExpr>(loc, isWin32 ? 1 : 0);
   style->type = Type::intTy();
   const auto *path = PathFunctionTable::find(functionName);
@@ -112,9 +141,11 @@ Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::String
     return call;
   }
   if (path == nullptr) {
-    auto message = ErrorTextPath::notYet(functionName, NodeCheckHelpers::moduleLabel(module));
+    auto label = NodeCheckHelpers::moduleLabel(module);
+    auto message = ErrorTextPath::notYet(functionName, label);
     this->state.getDiagnostics().error(loc, message);
-    return this->checkArgsLoosely(call);
+    this->argumentChecker->walkArgsLoosely(call);
+    return call;
   }
   auto arity = this->argumentChecker->checkArity(call, path->min, path->max);
   if (arity.isErr()) {
@@ -128,21 +159,14 @@ Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::String
   return this->checkTextPath(call, style, *path);
 }
 
-Expr *PathChecker::checkArgsLoosely(CallExpr *call) {
-  for (Expr *&arg : call->args) {
-    arg = this->exprChecker->checkExpr(arg);
-  }
-
-  return call;
-}
-
 Expr *PathChecker::checkJoinedPath(CallExpr *call, Expr *style, Builtin builtin, llvm::SMLoc loc) {
   llvm::SMLoc at = call->args.empty() ? loc : call->args[0]->loc();
   auto *paths = this->state.getAst().make<ArrayLitExpr>(at);
   for (size_t index = 0; index < call->args.size(); ++index) {
     paths->elements.push_back({call->args[index], call->spreads(index)});
   }
-  auto *array = this->argumentChecker->checkArg(paths, Type::array(Type::string()));
+  const auto *stringArray = Type::array(Type::string());
+  auto *array = this->argumentChecker->checkArg(paths, stringArray);
   call->args = {style, array};
   call->spread.clear();
   call->target = BuiltinCall{.builtin = builtin};
@@ -152,10 +176,11 @@ Expr *PathChecker::checkJoinedPath(CallExpr *call, Expr *style, Builtin builtin,
 }
 
 Expr *PathChecker::checkFormatPath(CallExpr *call, Expr *style) {
-  auto *arg = this->exprChecker->checkExpr(call->args[0], this->formatInputType());
+  const auto *input = this->formatInputType();
+  auto *arg = this->exprChecker->checkExpr(call->args[0], input);
   const Type *type = arg->type;
-  if (!this->fitsFormatInput(type) && !type->isError()) {
-    arg = this->typeRelations->coerce(arg, this->formatInputType());
+  if (!this->isFormatInput(type) && !type->isError()) {
+    arg = this->typeRelations->coerce(arg, input);
   }
   call->args = {style, arg};
   call->target = BuiltinCall{.builtin = Builtin::PathFormat};
@@ -164,14 +189,16 @@ Expr *PathChecker::checkFormatPath(CallExpr *call, Expr *style) {
   return call;
 }
 
-bool PathChecker::fitsFormatInput(const Type *type) const {
+bool PathChecker::isFormatInput(const Type *type) const {
   if (!type->isObject() || type->isClass() || type->isTuple()) {
     return false;
   }
-  const auto *string = Type::string();
+  const auto *input = this->formatInputType();
+  const auto *stringType = Type::string();
+  const auto *optionalString = Type::optional(stringType);
   for (const Field &field : type->fields()) {
-    bool isKnown = this->formatInputType()->field(field.name) != nullptr;
-    if (!isKnown || (field.type != string && field.type != Type::optional(string))) {
+    bool isKnown = input->field(field.name) != nullptr;
+    if (!isKnown || (field.type != stringType && field.type != optionalString)) {
       return false;
     }
   }

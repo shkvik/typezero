@@ -1,4 +1,6 @@
 #include "compiler/semantic/library/reflect/reflect_call_checker/reflect_call_checker.h"
+#include "compiler/program/library/reflect/design_key_table/design_key_table.h"
+#include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/classes/class_links/class_links.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -32,7 +34,8 @@ ReflectCallChecker::ReflectCallChecker(SemanticState &owner, SemanticParts &all)
   this->metadataChecker = &all.metadataChecker;
 }
 
-ReflectCallChecker::ResultKeyOfRecords ReflectCallChecker::keyOfRecords(const Type *type) const {
+ReflectCallChecker::ResultKeyOfRecords
+ReflectCallChecker::checkKeyOfRecords(const Type *type) const {
   if (!type->isString() && !type->isError()) {
     auto message = ErrorTextMetadataKey::type(type->name());
 
@@ -45,7 +48,8 @@ ReflectCallChecker::ResultKeyOfRecords ReflectCallChecker::keyOfRecords(const Ty
   return ok(type);
 }
 
-ReflectCallChecker::ResultTargetObject ReflectCallChecker::targetObject(const Type *type) const {
+ReflectCallChecker::ResultTargetObject
+ReflectCallChecker::checkTargetObject(const Type *type) const {
   if (!type->isError() && !UnknownChecker::isObjectReference(type) && !type->isAnyObject()) {
     auto message = ErrorTextMetadataTarget::notObject(type->name());
 
@@ -58,7 +62,8 @@ ReflectCallChecker::ResultTargetObject ReflectCallChecker::targetObject(const Ty
   return ok(type);
 }
 
-ReflectCallChecker::ResultArgumentList ReflectCallChecker::argumentList(const Type *type) const {
+ReflectCallChecker::ResultArgumentList
+ReflectCallChecker::checkArgumentList(const Type *type) const {
   if (type->isError() || type->isArray()) {
     return ok(type);
   }
@@ -79,34 +84,42 @@ ReflectCallChecker::ResultArgumentList ReflectCallChecker::argumentList(const Ty
 }
 
 const Type *ReflectCallChecker::designType(const Expr *key) const {
-  auto *literal = dyn_cast<StringLitExpr>(key);
+  const auto *literal = dyn_cast<StringLitExpr>(key);
   if (literal == nullptr) {
     return nullptr;
   }
-  const auto *any = Type::constructorOf(Type::anyObject());
-  if (literal->value == u"design:type" || literal->value == u"design:returntype") {
-    return Type::optional(any);
+  auto written = ToUtf8::toUtf8(literal->value);
+  auto designKey = DesignKeyTable::find(written);
+  if (!designKey.has_value()) {
+    return nullptr;
   }
-  if (literal->value == u"design:paramtypes") {
-    return Type::optional(Type::array(any));
+  const auto *any = Type::constructorOf(Type::anyObject());
+  switch (designKey.value()) {
+    case DesignKey::TYPE:
+    case DesignKey::RETURN_TYPE:
+      return Type::optional(any);
+    case DesignKey::PARAM_TYPES:
+      return Type::optional(Type::array(any));
   }
 
   return nullptr;
 }
 
 bool ReflectCallChecker::isDesignKey(const Expr *key) const {
-  auto *literal = dyn_cast<StringLitExpr>(key);
+  const auto *literal = dyn_cast<StringLitExpr>(key);
+  if (literal == nullptr) {
+    return false;
+  }
+  auto written = ToUtf8::toUtf8(literal->value);
 
-  return literal != nullptr && literal->value.rfind(u"design:", 0) == 0;
+  return llvm::StringRef(written).starts_with(DesignKeyTable::getPrefix());
 }
 
 Expr *ReflectCallChecker::stripImplicit(Expr *expr) const {
-  expr = ExprParts::withoutImplicitCasts(expr);
-
-  return expr;
+  return ExprParts::withoutImplicitCasts(expr);
 }
 
-bool ReflectCallChecker::reflectAccepts(const Type *arg, const Type *param) const {
+bool ReflectCallChecker::isReflectAccepting(const Type *arg, const Type *param) const {
   const Type *given = arg;
   const Type *wanted = param;
   while (wanted->isOptional()) {
@@ -117,56 +130,77 @@ bool ReflectCallChecker::reflectAccepts(const Type *arg, const Type *param) cons
     wanted = wanted->inner();
   }
 
-  return wanted->isUnknown() || this->acceptsPlain(given, wanted);
+  return wanted->isUnknown() || this->isPlainAccepting(given, wanted);
 }
 
-bool ReflectCallChecker::acceptsPlain(const Type *arg, const Type *param) const {
+bool ReflectCallChecker::isPlainAccepting(const Type *arg, const Type *param) const {
   if (arg->isOptional() || arg->isUnion() || param->isUnion()) {
     return false;
   }
   const Type *value = arg->isLiteral() ? arg->literalBase() : arg;
   switch (param->kind()) {
-  case Type::Kind::Int:
-    return value->isInteger() && param->holds(value);
-  case Type::Kind::Double:
-    return value->isInteger() || value->isFloat();
-  case Type::Kind::Bool:
-    return value->isBool();
-  case Type::Kind::String:
-    return value->isString();
-  case Type::Kind::Array:
-  case Type::Kind::Function:
-  case Type::Kind::Decimal:
-  case Type::Kind::Result:
-  case Type::Kind::Json:
-    return arg == param;
-  case Type::Kind::ClassRef: {
-    const ClassDecl *classDecl = arg->classRef();
-    if (classDecl == nullptr || classDecl->type == nullptr) {
+    case Type::Kind::Int:
+      return value->isInteger() && param->holds(value);
+    case Type::Kind::Double:
+      return value->isInteger() || value->isFloat();
+    case Type::Kind::Bool:
+      return value->isBool();
+    case Type::Kind::String:
+      return value->isString();
+    case Type::Kind::Array:
+    case Type::Kind::Function:
+    case Type::Kind::Decimal:
+    case Type::Kind::Result:
+    case Type::Kind::Json:
+      return arg == param;
+    case Type::Kind::ClassRef:
+      return this->isClassRefAccepting(arg, param);
+    case Type::Kind::Object:
+      return this->isObjectAccepting(arg, param);
+    case Type::Kind::Error:
+    case Type::Kind::Void:
+    case Type::Kind::Undefined:
+    case Type::Kind::Optional:
+    case Type::Kind::Param:
+    case Type::Kind::Never:
+    case Type::Kind::Iterator:
+    case Type::Kind::Dict:
+    case Type::Kind::Literal:
+    case Type::Kind::Union:
+    case Type::Kind::Promise:
+    case Type::Kind::Unknown:
       return false;
-    }
-    if (param->classRef() != nullptr) {
-      return classDecl == param->classRef();
-    }
-    const Type *made = param->constructed();
-    return made->isAnyObject() ||
-           (made->classDecl() != nullptr && classDecl->type->isSubtypeOf(made));
   }
-  case Type::Kind::Object: {
-    const ClassDecl *classDecl = arg->classDecl();
-    if (classDecl == nullptr || classDecl->literal() != nullptr || classDecl->builtin() ||
-        !arg->isClass()) {
-      return param->isDate() && arg->isDate();
-    }
-    if (param->isAnyObject()) {
-      return true;
-    }
-    return (param->isClass() || param->isBase() || !param->bases().empty()) &&
-           arg->isSubtypeOf(param);
-  }
-  default:
+
+  return false;
+}
+
+bool ReflectCallChecker::isClassRefAccepting(const Type *arg, const Type *param) const {
+  const ClassDecl *classDecl = arg->classRef();
+  if (classDecl == nullptr || classDecl->type == nullptr) {
     return false;
   }
+  if (param->classRef() != nullptr) {
+    return classDecl == param->classRef();
+  }
+  const Type *made = param->constructed();
+
+  return made->isAnyObject() ||
+         (made->classDecl() != nullptr && classDecl->type->isSubtypeOf(made));
+}
+
+bool ReflectCallChecker::isObjectAccepting(const Type *arg, const Type *param) const {
+  const ClassDecl *classDecl = arg->classDecl();
+  if (classDecl == nullptr || classDecl->literal() != nullptr || classDecl->builtin() ||
+      !arg->isClass()) {
+    return param->isDate() && arg->isDate();
+  }
+  if (param->isAnyObject()) {
+    return true;
+  }
+
+  return (param->isClass() || param->isBase() || !param->bases().empty()) &&
+         arg->isSubtypeOf(param);
 }
 
 Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
@@ -261,7 +295,7 @@ ReflectCallChecker::MetadataKey ReflectCallChecker::readMetadataKey(CallExpr *ca
     return key;
   }
   keyArg = this->exprChecker->checkExpr(keyArg);
-  auto records = this->keyOfRecords(keyArg->type);
+  auto records = this->checkKeyOfRecords(keyArg->type);
   if (records.isErr()) {
     this->state.getDiagnostics().error(key.loc, records.error().message);
     key.failed = true;
@@ -322,7 +356,7 @@ void ReflectCallChecker::rememberMetadataType(const Expr *value, const MetadataK
 void ReflectCallChecker::walkMetadataTarget(CallExpr *call, size_t at) {
   Expr *&target = call->args[at];
   target = this->exprChecker->checkExpr(target);
-  auto object = this->targetObject(target->type);
+  auto object = this->checkTargetObject(target->type);
   if (object.isErr()) {
     this->state.getDiagnostics().error(target->loc(), object.error().message);
   } else {
@@ -347,7 +381,7 @@ const Type *ReflectCallChecker::metadataResultType(Builtin builtin, const Metada
   if (key.key == nullptr) {
     return key.design != nullptr ? key.design : Type::unknown();
   }
-  auto typed = this->metadataChecker->metadataType(key.key, key.label, key.loc, expected);
+  auto typed = this->metadataChecker->checkMetadataType(key.key, key.label, key.loc, expected);
   if (typed.isErr()) {
     this->state.getDiagnostics().error(key.loc, typed.error().message);
   }
@@ -356,59 +390,76 @@ const Type *ReflectCallChecker::metadataResultType(Builtin builtin, const Metada
   return Type::optional(records);
 }
 
-FunctionDecl *ReflectCallChecker::knownReflectMethod(ClassDecl *classDecl, llvm::StringRef name,
-                                                     bool &several) {
+std::optional<ReflectCallChecker::KnownMethod>
+ReflectCallChecker::knownReflectMethod(ClassDecl *classDecl, llvm::StringRef name) {
   auto methods = this->classDeclarer->methodsNamed(classDecl, name);
-  llvm::erase_if(
-      methods, [](const FunctionDecl *functionDecl) { return !functionDecl->typeParams.empty(); });
+  auto isGeneric = std::bind_front(&ReflectCallChecker::isGenericMethod, this);
+  llvm::erase_if(methods, isGeneric);
   if (methods.empty()) {
-    return nullptr;
+    return std::nullopt;
   }
-  for (FunctionDecl *functionDecl : methods) {
-    if (!functionDecl->sym || functionDecl->isAbstract() ||
-        functionDecl->access() != Access::Public ||
-        this->classLinks->soleImplementation(classDecl, functionDecl) != functionDecl) {
-      return nullptr;
-    }
-    const Type *returnType = functionDecl->sym->getReturnType();
-    if (returnType == nullptr || returnType->isError()) {
-      return nullptr;
-    }
+  auto isCallable = std::bind_front(&ReflectCallChecker::isReflectCallable, this, classDecl);
+  if (!llvm::all_of(methods, isCallable)) {
+    return std::nullopt;
   }
-  if (this->declaredBelow(classDecl, name)) {
-    return nullptr;
+  if (this->isDeclaredBelow(classDecl, name)) {
+    return std::nullopt;
   }
-  several = methods.size() > 1;
+  bool hasSeveral = methods.size() > 1;
 
-  return methods.front();
+  return KnownMethod{.method = methods.front(), .hasSeveral = hasSeveral};
 }
 
-bool ReflectCallChecker::declaredBelow(const ClassDecl *classDecl, llvm::StringRef name) const {
+bool ReflectCallChecker::isGenericMethod(const FunctionDecl *functionDecl) const {
+  return !functionDecl->typeParams.empty();
+}
+
+bool ReflectCallChecker::isReflectCallable(ClassDecl *classDecl, FunctionDecl *functionDecl) const {
+  bool isOpen = functionDecl->sym != nullptr && !functionDecl->isAbstract() &&
+                functionDecl->access() == Access::Public &&
+                this->classLinks->soleImplementation(classDecl, functionDecl) == functionDecl;
+  if (!isOpen) {
+    return false;
+  }
+  const Type *returnType = functionDecl->sym->getReturnType();
+
+  return returnType != nullptr && !returnType->isError();
+}
+
+bool ReflectCallChecker::isDeclaredBelow(const ClassDecl *classDecl, llvm::StringRef name) const {
   for (const ClassDecl *child : ClassTree::descendants(classDecl)) {
-    for (const FunctionDecl *method : this->classLinks->ownMethods(child)) {
-      if (method->name == name) {
-        return true;
-      }
+    if (this->hasOwnMethodNamed(child, name)) {
+      return true;
     }
   }
 
   return false;
 }
 
-const FunctionDecl *ReflectCallChecker::heldReflectMethod(const Expr *f) {
-  f = this->stripImplicit(const_cast<Expr *>(f));
-  auto *name = dyn_cast<NameExpr>(f);
+bool ReflectCallChecker::hasOwnMethodNamed(const ClassDecl *owner, llvm::StringRef name) const {
+  for (const FunctionDecl *method : this->classLinks->ownMethods(owner)) {
+    if (method->name == name) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+const FunctionDecl *ReflectCallChecker::heldReflectMethod(const Expr *expr) {
+  const auto *bare = ExprParts::withoutImplicitCasts(expr);
+  const auto *name = dyn_cast<NameExpr>(bare);
   if (name != nullptr) {
     return name->var() != nullptr ? name->var()->reflectMethod() : nullptr;
   }
-  auto *got = dyn_cast<CallExpr>(f);
-  if (got != nullptr && got->builtin() == Builtin::ReflectMethod &&
-      !this->state.getExpressionMarks().hasSeveralVariants(got) &&
-      isa<NameExpr>(this->stripImplicit(got->args[0]))) {
-    return got->method()->decl;
+  const auto *got = dyn_cast<CallExpr>(bare);
+  if (got == nullptr || got->builtin() != Builtin::ReflectMethod ||
+      this->state.getExpressionMarks().hasSeveralVariants(got)) {
+    return nullptr;
   }
+  const auto *object = ExprParts::withoutImplicitCasts(got->args[0]);
 
-  return nullptr;
+  return isa<NameExpr>(object) ? got->method()->decl : nullptr;
 }
 
 Expr *ReflectCallChecker::directReflectApply(CallExpr *call, const FunctionDecl *functionDecl) {
@@ -428,7 +479,8 @@ Expr *ReflectCallChecker::directReflectApply(CallExpr *call, const FunctionDecl 
     if (element.spread || element.hole) {
       return nullptr;
     }
-    args.push_back(this->stripImplicit(element.expr));
+    auto *arg = this->stripImplicit(element.expr);
+    args.push_back(arg);
   }
   size_t fixed = function->hasRest ? function->params.size() - 1 : function->params.size();
   if (args.size() < function->minArgs || (!function->hasRest && args.size() > fixed)) {
@@ -436,7 +488,7 @@ Expr *ReflectCallChecker::directReflectApply(CallExpr *call, const FunctionDecl 
   }
   for (size_t index = 0; index < args.size(); ++index) {
     const Type *param = index < fixed ? function->params[index] : function->params.back()->inner();
-    if (param == nullptr || !this->reflectAccepts(args[index]->type, param)) {
+    if (param == nullptr || !this->isReflectAccepting(args[index]->type, param)) {
       return nullptr;
     }
   }
@@ -451,9 +503,9 @@ Expr *ReflectCallChecker::directReflectApply(CallExpr *call, const FunctionDecl 
   if (!result->type->isVoid()) {
     return this->typeRelations->convert(result, Type::unknown());
   }
-  auto *nothing = this->typeRelations->convert(
-      this->exprChecker->checkExpr(this->state.getAst().make<UndefinedExpr>(call->loc())),
-      Type::unknown());
+  auto *undefined = this->state.getAst().make<UndefinedExpr>(call->loc());
+  auto *checked = this->exprChecker->checkExpr(undefined);
+  auto *nothing = this->typeRelations->convert(checked, Type::unknown());
   auto *sequence =
       this->state.getAst().make<SequenceExpr>(call->loc(), std::vector<Expr *>{result, nothing});
   sequence->type = Type::unknown();
@@ -466,7 +518,7 @@ Expr *ReflectCallChecker::checkReflectArgs(Expr *args) {
     return this->exprChecker->checkExpr(args, Type::array(Type::unknown()));
   }
   args = this->exprChecker->checkExpr(args);
-  auto list = this->argumentList(args->type);
+  auto list = this->checkArgumentList(args->type);
   if (list.isOk()) {
     return args;
   }

@@ -27,7 +27,7 @@ namespace tz {
 
 namespace {
 
-constexpr llvm::StringLiteral kAnonymousClassName = "(anonymous class)";
+constexpr const char *kAnonymousClassName = "(anonymous class)";
 
 }
 
@@ -134,7 +134,7 @@ LateClasses::ResultBaseClassUsable LateClasses::baseClass(const Type *type) cons
 }
 
 void LateClasses::makeLateClass(ClassDecl *classDecl) {
-  classDecl->checkOnly = this->reflectChecker->onlyChecked();
+  classDecl->checkOnly = this->reflectChecker->isOnlyChecked();
   this->registerLateClass(classDecl);
   this->rememberLateScope(classDecl);
   this->linkLateBase(classDecl);

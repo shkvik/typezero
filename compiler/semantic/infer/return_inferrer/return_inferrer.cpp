@@ -268,7 +268,7 @@ void ReturnInferrer::inferFromBody(FunctionDecl *functionDecl) {
   function->inferring = false;
   functions.rememberReturnCollector(outerReturns);
   functions.rememberYieldCollector(outerYields);
-  bool isFallingOff = !this->returnChecker->alwaysReturns(functionDecl->body);
+  bool isFallingOff = !this->returnChecker->isAlwaysReturning(functionDecl->body);
   const auto *type =
       this->collectedType(functionDecl, function, collected, isFallingOff, ReturnErrors::REPORTED);
   function->setReturnType(type != nullptr ? type : Type::error());
@@ -359,7 +359,7 @@ const Type *ReturnInferrer::trialReturn(FuncSymbol *function) {
   functions.leaveTrial();
   functions.rememberReturnCollector(nullptr);
   functions.rememberYieldCollector(nullptr);
-  bool isFallingOff = !this->returnChecker->alwaysReturns(copy->body);
+  bool isFallingOff = !this->returnChecker->isAlwaysReturning(copy->body);
 
   return this->collectedType(function->decl, function, collected, isFallingOff,
                              ReturnErrors::IGNORED);

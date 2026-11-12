@@ -68,7 +68,7 @@ std::vector<const FunctionDecl *> UnusedFunctions::rootFunctions() const {
 
 std::vector<const FunctionDecl *> UnusedFunctions::referencedFunctions(const Stmt *stmt) const {
   auto referenced = std::vector<const FunctionDecl *>();
-  for (const Expr *e : AstWalker::exprsIn(stmt, true)) {
+  for (const Expr *e : AstWalker::allExprsIn(stmt)) {
     const auto *fn = this->referencedFunction(e);
     if (fn != nullptr) {
       referenced.push_back(fn);

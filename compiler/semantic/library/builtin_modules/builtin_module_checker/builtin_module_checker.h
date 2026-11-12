@@ -44,12 +44,12 @@ private:
 
   llvm::StringRef typicalName(NodeModule module) const;
   bool isPathModule(NodeModule module) const;
-  ResultModuleExport moduleExport(NodeModule module, llvm::StringRef name,
-                                  llvm::StringRef path) const;
+  ResultModuleExport checkModuleExport(NodeModule module, llvm::StringRef name,
+                                       llvm::StringRef path) const;
 
   Expr *moduleValue(NodeModule module, llvm::StringRef name, Expr *expr);
-  ResultExportFound exportFound(NodeModule module, llvm::StringRef name,
-                                llvm::StringRef path) const;
+  ResultExportFound checkExportFound(NodeModule module, llvm::StringRef name,
+                                     llvm::StringRef path) const;
   bool isProcessAlias(const NodeName &nodeName) const;
 
   struct NodeBinding {

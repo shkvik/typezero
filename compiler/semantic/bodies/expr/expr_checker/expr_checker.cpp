@@ -316,7 +316,7 @@ Expr *ExprChecker::checkFunctionLiteral(FunctionExpr *functionExpr, const Type *
 Expr *ExprChecker::checkSequence(SequenceExpr *sequence, const Type *expected) {
   for (size_t index = 0; index + 1 < sequence->exprs.size(); ++index) {
     sequence->exprs[index] = this->checkExpr(sequence->exprs[index]);
-    auto used = this->resultChecker->usedValue(sequence->exprs[index]);
+    auto used = this->resultChecker->checkUsedValue(sequence->exprs[index]);
     if (used.isErr()) {
       this->state.getDiagnostics().error(sequence->exprs[index]->loc(), used.error().message);
     }

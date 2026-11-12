@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/regex/string_regex_checker/string_regex_checker.h"
+#include "compiler/program/library/regex/match_member_table/match_member_table.h"
 #include "compiler/program/library/string/string_method_table/string_method_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
@@ -19,6 +20,13 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+constexpr const char *kRegexSpecials = "^$\\.*+?()[]{}|/";
+constexpr llvm::StringLiteral kStringPlaceholder = "s";
+
+}
+
 StringRegexChecker::StringRegexChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->scopes = &all.scopes;
@@ -30,42 +38,48 @@ StringRegexChecker::StringRegexChecker(SemanticState &owner, SemanticParts &all)
   this->callbackChecker = &all.callbackChecker;
 }
 
-std::u16string StringRegexChecker::units(const uint32_t *program, uint32_t start,
-                                         uint32_t length) const {
-  auto text = std::u16string();
-  for (uint32_t i = 0; i < length; ++i) {
-    text += static_cast<char16_t>(tz_re_name_unit(program, start, i));
-  }
-
-  return text;
-}
-
 std::string StringRegexChecker::escapedLiteral(const std::u16string &text) const {
   auto escaped = std::u16string();
-  for (char16_t c : text) {
-    if (c < 128 && std::strchr("^$\\.*+?()[]{}|/", static_cast<int>(c))) {
+  for (char16_t unit : text) {
+    if (unit < 128 && std::strchr(kRegexSpecials, static_cast<int>(unit)) != nullptr) {
       escaped += u'\\';
     }
-    escaped += c;
+    escaped += unit;
   }
 
   return "/" + ToUtf8::toUtf8(escaped) + "/";
 }
 
 std::string StringRegexChecker::argumentText(const Expr *arg) const {
-  auto *literal = dyn_cast<StringLitExpr>(arg);
+  const auto *literal = dyn_cast<StringLitExpr>(arg);
   if (literal != nullptr) {
     auto text = ToUtf8::toUtf8(literal->value);
-    if (llvm::all_of(text, [](char c) { return c >= 0x20 && c != '"' && c != '\\'; })) {
+    auto isPlain = std::bind_front(&StringRegexChecker::isPlainQuotedChar, this);
+    if (llvm::all_of(text, isPlain)) {
       return "\"" + text + "\"";
     }
   }
-  auto *name = dyn_cast<NameExpr>(arg);
+  const auto *name = dyn_cast<NameExpr>(arg);
   if (name != nullptr) {
     return name->name.str();
   }
 
-  return "s";
+  return kStringPlaceholder.str();
+}
+
+bool StringRegexChecker::isPlainQuotedChar(char character) const {
+  return character >= 0x20 && character != '"' && character != '\\';
+}
+
+unsigned StringRegexChecker::patternMinArgs(StringMethod method) const {
+  if (method == StringMethod::REPLACE || method == StringMethod::REPLACE_ALL) {
+    return 2;
+  }
+  if (method == StringMethod::SPLIT) {
+    return 0;
+  }
+
+  return 1;
 }
 
 Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *member) {
@@ -82,7 +96,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
   }
   call->type = Type::error();
   bool isReplace = method == StringMethod::REPLACE || method == StringMethod::REPLACE_ALL;
-  unsigned min = isReplace ? 2 : isSplit ? 0 : 1;
+  unsigned min = this->patternMinArgs(method);
   unsigned max = isSplit || isReplace ? 2 : 1;
   auto arity = this->argumentChecker->checkArity(call, min, max);
   if (arity.isErr()) {
@@ -138,7 +152,7 @@ Expr *StringRegexChecker::checkRegexPattern(const PatternCall &pattern) {
     return this->checkRegexMatch(pattern, regex);
   }
   bool isNeedingGlobal = method == StringMethod::MATCH_ALL || method == StringMethod::REPLACE_ALL;
-  if (isNeedingGlobal && this->lacksGlobalFlag(regex)) {
+  if (isNeedingGlobal && this->isMissingGlobalFlag(regex)) {
     return this->reportNeedsGlobal(pattern, regex);
   }
   if (method == StringMethod::MATCH_ALL) {
@@ -155,7 +169,7 @@ Expr *StringRegexChecker::checkRegexPattern(const PatternCall &pattern) {
   return this->checkReplacement(call, pattern.member, regex);
 }
 
-bool StringRegexChecker::lacksGlobalFlag(const RegexLitExpr *regex) const {
+bool StringRegexChecker::isMissingGlobalFlag(const RegexLitExpr *regex) const {
   if (regex == nullptr) {
     return false;
   }
@@ -195,13 +209,25 @@ Expr *StringRegexChecker::checkRegexSplit(CallExpr *call, const RegexLitExpr *re
   if (call->args.size() == 2) {
     call->args[1] = this->memberChecker->checkPosition(call->args[1]);
   }
-  bool isUndefinedGroups = regex == nullptr;
-  for (uint32_t k = 1; regex != nullptr && k < tz_re_captures(regex->program.data()); ++k) {
-    isUndefinedGroups |= !tz_re_mandatory(regex->program.data(), k);
-  }
+  bool isUndefinedGroups = this->hasOptionalGroups(regex);
   const Type *part = isUndefinedGroups ? Type::optional(Type::string()) : Type::string();
 
   return this->toBuiltinCall(call, Builtin::StrSplitRegex, Type::array(part));
+}
+
+bool StringRegexChecker::hasOptionalGroups(const RegexLitExpr *regex) const {
+  if (regex == nullptr) {
+    return true;
+  }
+  const uint32_t *program = regex->program.data();
+  uint32_t captures = tz_re_captures(program);
+  for (uint32_t group = 1; group < captures; ++group) {
+    if (!tz_re_mandatory(program, group)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 Expr *StringRegexChecker::checkTextPattern(const PatternCall &pattern) {
@@ -278,7 +304,7 @@ Expr *StringRegexChecker::checkTextReplacement(CallExpr *call, const RegexLitExp
   if (regex == nullptr || text == nullptr) {
     return call;
   }
-  auto groups = this->replacementGroups(regex, text->value);
+  auto groups = this->checkReplacementGroups(regex, text->value);
   if (groups.isErr()) {
     this->state.getDiagnostics().error(text->loc(), groups.error().message);
   }
@@ -287,49 +313,68 @@ Expr *StringRegexChecker::checkTextReplacement(CallExpr *call, const RegexLitExp
 }
 
 StringRegexChecker::ResultGroupsReferenced
-StringRegexChecker::replacementGroups(const RegexLitExpr *regex,
-                                      const std::u16string &value) const {
+StringRegexChecker::checkReplacementGroups(const RegexLitExpr *regex,
+                                           const std::u16string &value) const {
   const uint32_t *program = regex->program.data();
   uint32_t groups = tz_re_captures(program) - 1;
-  for (size_t index = 0; index + 1 < value.size(); ++index) {
-    if (value[index] != u'$') {
-      continue;
-    }
-    char16_t next = value[index + 1];
-    if (next == u'$') {
-      ++index;
-      continue;
-    }
-    bool isNumbered = next >= u'1' && next <= u'9';
-    if (isNumbered && !this->numberedGroupKnown(value, index, groups)) {
-      uint32_t one = next - u'0';
-      auto message = ErrorTextStringRegex::noGroup(groups, one);
-
-      return err(StringRegexCheckerReplacementGroupsError{
-          .code = StringRegexCheckerReplacementGroupsErrorCode::NO_SUCH_GROUP,
-          .message = message,
-      });
-    }
-    if (next != u'<') {
-      continue;
-    }
-    auto groupName = this->groupNameAt(value, index);
-    if (!this->hasNamedGroup(program, groups, groupName)) {
-      bool isNamed = this->hasNamedGroups(program, groups);
-      auto message = ErrorTextStringRegex::noNamed(isNamed, groupName);
-
-      return err(StringRegexCheckerReplacementGroupsError{
-          .code = StringRegexCheckerReplacementGroupsErrorCode::NO_SUCH_NAMED_GROUP,
-          .message = message,
-      });
+  for (size_t at : this->groupReferences(value)) {
+    auto reference = this->checkGroupReference(program, groups, value, at);
+    if (reference.isErr()) {
+      return err(reference.error());
     }
   }
 
   return ok(&value);
 }
 
-bool StringRegexChecker::numberedGroupKnown(const std::u16string &value, size_t at,
-                                            uint32_t groups) const {
+std::vector<size_t> StringRegexChecker::groupReferences(const std::u16string &value) const {
+  auto positions = std::vector<size_t>();
+  size_t index = 0;
+  while (index + 1 < value.size()) {
+    bool isDollar = value[index] == u'$';
+    bool isEscaped = isDollar && value[index + 1] == u'$';
+    if (isDollar && !isEscaped) {
+      positions.push_back(index);
+    }
+    index += isEscaped ? 2 : 1;
+  }
+
+  return positions;
+}
+
+StringRegexChecker::ResultGroupsReferenced
+StringRegexChecker::checkGroupReference(const uint32_t *program, uint32_t groups,
+                                        const std::u16string &value, size_t at) const {
+  char16_t next = value[at + 1];
+  bool isNumbered = next >= u'1' && next <= u'9';
+  if (isNumbered && !this->isNumberedGroupKnown(value, at, groups)) {
+    uint32_t digit = next - u'0';
+    auto message = ErrorTextStringRegex::noGroup(groups, digit);
+
+    return err(StringRegexCheckerReplacementGroupsError{
+        .code = StringRegexCheckerReplacementGroupsErrorCode::NO_SUCH_GROUP,
+        .message = message,
+    });
+  }
+  if (next != u'<') {
+    return ok(&value);
+  }
+  auto groupName = this->groupNameAt(value, at);
+  if (!this->hasNamedGroup(program, groups, groupName)) {
+    bool isNamed = this->hasNamedGroups(program, groups);
+    auto message = ErrorTextStringRegex::noNamed(isNamed, groupName);
+
+    return err(StringRegexCheckerReplacementGroupsError{
+        .code = StringRegexCheckerReplacementGroupsErrorCode::NO_SUCH_NAMED_GROUP,
+        .message = message,
+    });
+  }
+
+  return ok(&value);
+}
+
+bool StringRegexChecker::isNumberedGroupKnown(const std::u16string &value, size_t at,
+                                              uint32_t groups) const {
   uint32_t one = value[at + 1] - u'0';
   char16_t next = at + 2 < value.size() ? value[at + 2] : 0;
   uint32_t two = next >= u'0' && next <= u'9' ? one * 10 + (next - u'0') : 0;
@@ -348,11 +393,10 @@ std::string StringRegexChecker::groupNameAt(const std::u16string &value, size_t 
 
 bool StringRegexChecker::hasNamedGroup(const uint32_t *program, uint32_t groups,
                                        const std::string &groupName) const {
-  for (uint32_t k = 1; k <= groups; ++k) {
+  for (uint32_t group = 1; group <= groups; ++group) {
     uint32_t start = 0;
-    uint32_t length = tz_re_name(program, k, &start);
-    bool isSame = length != 0 && ToUtf8::toUtf8(this->units(program, start, length)) == groupName;
-    if (isSame) {
+    uint32_t length = tz_re_name(program, group, &start);
+    if (length != 0 && this->groupName(program, start, length) == groupName) {
       return true;
     }
   }
@@ -360,10 +404,17 @@ bool StringRegexChecker::hasNamedGroup(const uint32_t *program, uint32_t groups,
   return false;
 }
 
+std::string StringRegexChecker::groupName(const uint32_t *program, uint32_t start,
+                                          uint32_t length) const {
+  auto units = this->regexChecker->units(program, start, length);
+
+  return ToUtf8::toUtf8(units);
+}
+
 bool StringRegexChecker::hasNamedGroups(const uint32_t *program, uint32_t groups) const {
-  for (uint32_t k = 1; k <= groups; ++k) {
+  for (uint32_t group = 1; group <= groups; ++group) {
     uint32_t start = 0;
-    if (tz_re_name(program, k, &start) != 0) {
+    if (tz_re_name(program, group, &start) != 0) {
       return true;
     }
   }
@@ -402,13 +453,14 @@ Signature StringRegexChecker::replacerSignature(const RegexLitExpr *regex,
   if (regex == nullptr) {
     return signature;
   }
-  for (int k = 1; k <= match->matchGroups(); ++k) {
-    bool isMandatory = match->captureMandatory(unsigned(k));
+  for (int group = 1; group <= match->matchGroups(); ++group) {
+    bool isMandatory = match->captureMandatory(unsigned(group));
     signature.params.push_back(isMandatory ? Type::string() : Type::optional(Type::string()));
   }
   signature.params.push_back(Type::intTy());
   signature.params.push_back(Type::string());
-  const Type *named = match->field("groups")->type;
+  auto groupsName = MatchMemberTable::getName(MatchMember::GROUPS);
+  const Type *named = match->field(groupsName)->type;
   if (!named->isOptional()) {
     signature.params.push_back(named);
   }

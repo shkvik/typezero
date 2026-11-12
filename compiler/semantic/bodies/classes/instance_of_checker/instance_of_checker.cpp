@@ -38,22 +38,40 @@ InstanceOfChecker::ResultInstanceTested InstanceOfChecker::checkInstanceOf(Binar
   }
   const Type *bytes = classDecl == nullptr ? this->namedBytesType(name) : nullptr;
   if (bytes != nullptr) {
-    auto tested = this->checkBytesInstanceOf(binary, bytes);
-    if (tested.isErr()) {
-      return err(InstanceOfCheckerCheckInstanceOfError{
-          .code = InstanceOfCheckerCheckInstanceOfErrorCode::BYTES_INSTANCE,
-          .message = tested.error().message,
-      });
-    }
-    return ok(tested.value());
+    return this->checkBytesTest(binary, bytes);
   }
   if (classDecl == nullptr) {
-    binary->rhs = this->exprChecker->checkExpr(binary->rhs);
-    classDecl = this->knownClassOf(binary->rhs->type);
-    if (classDecl == nullptr) {
-      return this->checkUnknownRight(binary);
-    }
+    return this->checkValueRight(binary);
   }
+
+  return this->checkKnownClass(binary, classDecl);
+}
+
+InstanceOfChecker::ResultInstanceTested InstanceOfChecker::checkBytesTest(BinaryExpr *binary,
+                                                                          const Type *bytes) {
+  auto tested = this->checkBytesInstanceOf(binary, bytes);
+  if (tested.isErr()) {
+    return err(InstanceOfCheckerCheckInstanceOfError{
+        .code = InstanceOfCheckerCheckInstanceOfErrorCode::BYTES_INSTANCE,
+        .message = tested.error().message,
+    });
+  }
+
+  return ok(tested.value());
+}
+
+InstanceOfChecker::ResultInstanceTested InstanceOfChecker::checkValueRight(BinaryExpr *binary) {
+  binary->rhs = this->exprChecker->checkExpr(binary->rhs);
+  auto *known = this->knownClassOf(binary->rhs->type);
+  if (known == nullptr) {
+    return this->checkUnknownRight(binary);
+  }
+
+  return this->checkKnownClass(binary, known);
+}
+
+InstanceOfChecker::ResultInstanceTested
+InstanceOfChecker::checkKnownClass(BinaryExpr *binary, const ClassDecl *classDecl) const {
   if (classDecl->isGeneric()) {
     return this->checkGenericInstanceOf(binary, classDecl);
   }
@@ -171,8 +189,8 @@ const Type *InstanceOfChecker::namedBytesType(const NameExpr *name) const {
   if (name == nullptr) {
     return nullptr;
   }
-  bool isLocal = this->scopes->lookup(name->name).var() != nullptr ||
-                 this->scopes->lookup(name->name).func() != nullptr;
+  auto entry = this->scopes->lookup(name->name);
+  bool isLocal = entry.var() != nullptr || entry.func() != nullptr;
 
   return isLocal ? nullptr : this->bytesChecker->bytesTypeNamed(name->name);
 }
@@ -187,23 +205,29 @@ InstanceOfChecker::ResultInstanceTested
 InstanceOfChecker::checkUnknownRight(BinaryExpr *binary) const {
   const Type *rhs = binary->rhs->type;
   if (rhs->isConstructor()) {
-    const Type *base = binary->lhs->type->nonOptional();
-    bool isObject = base->isError() || base->isUnknown() || UnknownChecker::isObjectReference(base);
-    if (!isObject) {
-      auto message = ErrorTextInstanceOf::notObject(binary->lhs->type->name());
-
-      return err(InstanceOfCheckerCheckInstanceOfError{
-          .code = InstanceOfCheckerCheckInstanceOfErrorCode::NOT_AN_OBJECT,
-          .message = message,
-      });
-    }
-    return ok(binary);
+    return this->checkConstructorRight(binary);
   }
   if (!rhs->isError()) {
     auto message = ErrorTextInstanceOf::notClass();
 
     return err(InstanceOfCheckerCheckInstanceOfError{
         .code = InstanceOfCheckerCheckInstanceOfErrorCode::NOT_A_CLASS,
+        .message = message,
+    });
+  }
+
+  return ok(binary);
+}
+
+InstanceOfChecker::ResultInstanceTested
+InstanceOfChecker::checkConstructorRight(BinaryExpr *binary) const {
+  const Type *base = binary->lhs->type->nonOptional();
+  bool isObject = base->isError() || base->isUnknown() || UnknownChecker::isObjectReference(base);
+  if (!isObject) {
+    auto message = ErrorTextInstanceOf::notObject(binary->lhs->type->name());
+
+    return err(InstanceOfCheckerCheckInstanceOfError{
+        .code = InstanceOfCheckerCheckInstanceOfErrorCode::NOT_AN_OBJECT,
         .message = message,
     });
   }
@@ -228,29 +252,33 @@ InstanceOfChecker::checkGenericInstanceOf(BinaryExpr *binary, const ClassDecl *c
     }
   }
   if (matching.empty()) {
-    return this->genericMismatch(base, members, classDecl);
+    return this->checkGenericRelation(base, members, classDecl);
   }
-  if (base->isUnion()) {
-    binary->rhs->type = matching.size() == 1 ? matching[0] : Type::unionOf(matching);
-  } else {
-    binary->rhs->type = GenericClassChecker::genericInstanceOf(base, classDecl)->type;
-  }
+  binary->rhs->type = this->genericTestType(base, matching, classDecl);
 
   return ok(binary);
 }
 
-InstanceOfChecker::ResultInstanceTested
-InstanceOfChecker::genericMismatch(const Type *base, llvm::ArrayRef<const Type *> members,
-                                   const ClassDecl *classDecl) const {
-  bool isRelated = base->isUnknown() || base->isAnyObject() ||
-                   (base->isObject() && classDecl->type->isSubtypeOf(base));
-  for (const Type *member : members) {
-    isRelated |= member->isObject() && classDecl->type->isSubtypeOf(member);
+const Type *InstanceOfChecker::genericTestType(const Type *base,
+                                               llvm::ArrayRef<const Type *> matching,
+                                               const ClassDecl *classDecl) const {
+  if (!base->isUnion()) {
+    return GenericClassChecker::genericInstanceOf(base, classDecl)->type;
   }
-  if (isRelated) {
+  if (matching.size() == 1) {
+    return matching[0];
+  }
+
+  return Type::unionOf(matching);
+}
+
+InstanceOfChecker::ResultInstanceTested
+InstanceOfChecker::checkGenericRelation(const Type *base, llvm::ArrayRef<const Type *> members,
+                                        const ClassDecl *classDecl) const {
+  if (this->isRelatedToGeneric(base, members, classDecl)) {
     std::string generic = classDecl->name.str();
-    std::string other =
-        base->isUnknown() || base->isAnyObject() ? generic + "<string>" : base->name().str();
+    bool isOpaque = base->isUnknown() || base->isAnyObject();
+    std::string other = isOpaque ? generic + "<string>" : base->name().str();
     std::string hint = classDecl->library() ? ErrorTextInstanceOf::extendHint(generic)
                                             : ErrorTextInstanceOf::unionHint(generic, other);
     auto message = ErrorTextInstanceOf::cantTell(generic, base->name(), hint);
@@ -268,10 +296,26 @@ InstanceOfChecker::genericMismatch(const Type *base, llvm::ArrayRef<const Type *
   });
 }
 
-bool InstanceOfChecker::mayHoldClass(const Type *base, const ClassDecl *classDecl) const {
+bool InstanceOfChecker::isRelatedToGeneric(const Type *base, llvm::ArrayRef<const Type *> members,
+                                           const ClassDecl *classDecl) const {
+  bool isBaseRelated = base->isUnknown() || base->isAnyObject() ||
+                       (base->isObject() && classDecl->type->isSubtypeOf(base));
+  if (isBaseRelated) {
+    return true;
+  }
+  for (const Type *member : members) {
+    if (member->isObject() && classDecl->type->isSubtypeOf(member)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool InstanceOfChecker::canHoldClass(const Type *base, const ClassDecl *classDecl) const {
   for (const Type *member : base->members()) {
-    if (member->isObject() &&
-        (classDecl->type->isSubtypeOf(member) || member->isSubtypeOf(classDecl->type))) {
+    bool isRelated = classDecl->type->isSubtypeOf(member) || member->isSubtypeOf(classDecl->type);
+    if (member->isObject() && isRelated) {
       return true;
     }
   }
@@ -290,7 +334,7 @@ InstanceOfChecker::checkClassInstanceOf(BinaryExpr *binary, const ClassDecl *cla
   if (base->isUnknown() || base->isAnyObject()) {
     return ok(binary);
   }
-  if (base->isUnion() && !this->mayHoldClass(base, classDecl)) {
+  if (base->isUnion() && !this->canHoldClass(base, classDecl)) {
     auto message = ErrorTextInstanceOf::neverUnion(base->name(), classDecl->name);
 
     return err(InstanceOfCheckerCheckInstanceOfError{
@@ -347,14 +391,6 @@ InstanceOfChecker::checkRelatedClass(BinaryExpr *binary, const Type *base,
 
 InstanceOfChecker::ResultBytesKindTested
 InstanceOfChecker::checkBytesInstanceOf(BinaryExpr *binary, const Type *bytes) {
-  using Bytes = Type::Bytes;
-  auto is = [&](const Type *candidate) {
-    return candidate->isBytes() && (candidate->bytes() == bytes->bytes() ||
-                                    (bytes->bytes() == Bytes::Uint8 && candidate->isBuffer()));
-  };
-  auto may = [&](const Type *candidate) {
-    return bytes->isBuffer() && candidate->bytes() == Bytes::Uint8;
-  };
   const Type *type = binary->lhs->type;
   if (type->isError()) {
     return ok(binary);
@@ -366,36 +402,9 @@ InstanceOfChecker::checkBytesInstanceOf(BinaryExpr *binary, const Type *bytes) {
     return ok(binary);
   }
   if (base->isUnion()) {
-    auto matching = std::vector<const Type *>();
-    bool isMaybe = false;
-    for (const Type *member : base->members()) {
-      if (is(member)) {
-        matching.push_back(member);
-      }
-      isMaybe |= may(member);
-    }
-    if (matching.empty() && !isMaybe) {
-      auto message = ErrorTextInstanceOf::noneIs(base->name(), what);
-
-      return err(InstanceOfCheckerCheckBytesInstanceOfError{
-          .code = InstanceOfCheckerCheckBytesInstanceOfErrorCode::NONE_MATCHES,
-          .message = message,
-      });
-    }
-    if (matching.size() == base->members().size() && !type->isOptional()) {
-      auto message = ErrorTextInstanceOf::allAre(base->name(), what, bytes->name());
-
-      return err(InstanceOfCheckerCheckBytesInstanceOfError{
-          .code = InstanceOfCheckerCheckBytesInstanceOfErrorCode::ALL_MATCH,
-          .message = message,
-      });
-    }
-    if (!bytes->isBuffer()) {
-      binary->rhs->type = Type::unionOf(matching);
-    }
-    return ok(binary);
+    return this->checkBytesUnion(binary, bytes);
   }
-  if (is(type)) {
+  if (this->isBytesKind(bytes, type)) {
     auto message = ErrorTextInstanceOf::alwaysTrue(type->name(), bytes->name());
 
     return err(InstanceOfCheckerCheckBytesInstanceOfError{
@@ -403,7 +412,7 @@ InstanceOfChecker::checkBytesInstanceOf(BinaryExpr *binary, const Type *bytes) {
         .message = message,
     });
   }
-  if (type->isOptional() && is(type->inner())) {
+  if (type->isOptional() && this->isBytesKind(bytes, type->inner())) {
     auto message = ErrorTextInstanceOf::orUndef(type->inner()->name());
 
     return err(InstanceOfCheckerCheckBytesInstanceOfError{
@@ -411,7 +420,7 @@ InstanceOfChecker::checkBytesInstanceOf(BinaryExpr *binary, const Type *bytes) {
         .message = message,
     });
   }
-  if (!may(base)) {
+  if (!this->canBeBufferOf(bytes, base)) {
     auto message = ErrorTextInstanceOf::neverIs(type->name(), what, bytes->name());
 
     return err(InstanceOfCheckerCheckBytesInstanceOfError{
@@ -421,6 +430,52 @@ InstanceOfChecker::checkBytesInstanceOf(BinaryExpr *binary, const Type *bytes) {
   }
 
   return ok(binary);
+}
+
+InstanceOfChecker::ResultBytesKindTested InstanceOfChecker::checkBytesUnion(BinaryExpr *binary,
+                                                                            const Type *bytes) {
+  const Type *type = binary->lhs->type;
+  const Type *base = type->nonOptional();
+  auto what = ErrorTextFunctionName::quoted(bytes->name());
+  auto matching = std::vector<const Type *>();
+  bool isMaybe = false;
+  for (const Type *member : base->members()) {
+    if (this->isBytesKind(bytes, member)) {
+      matching.push_back(member);
+    }
+    isMaybe = isMaybe || this->canBeBufferOf(bytes, member);
+  }
+  if (matching.empty() && !isMaybe) {
+    auto message = ErrorTextInstanceOf::noneIs(base->name(), what);
+
+    return err(InstanceOfCheckerCheckBytesInstanceOfError{
+        .code = InstanceOfCheckerCheckBytesInstanceOfErrorCode::NONE_MATCHES,
+        .message = message,
+    });
+  }
+  if (matching.size() == base->members().size() && !type->isOptional()) {
+    auto message = ErrorTextInstanceOf::allAre(base->name(), what, bytes->name());
+
+    return err(InstanceOfCheckerCheckBytesInstanceOfError{
+        .code = InstanceOfCheckerCheckBytesInstanceOfErrorCode::ALL_MATCH,
+        .message = message,
+    });
+  }
+  if (!bytes->isBuffer()) {
+    binary->rhs->type = Type::unionOf(matching);
+  }
+
+  return ok(binary);
+}
+
+bool InstanceOfChecker::isBytesKind(const Type *bytes, const Type *candidate) const {
+  bool isBufferOfUint8 = bytes->bytes() == Type::Bytes::Uint8 && candidate->isBuffer();
+
+  return candidate->isBytes() && (candidate->bytes() == bytes->bytes() || isBufferOfUint8);
+}
+
+bool InstanceOfChecker::canBeBufferOf(const Type *bytes, const Type *candidate) const {
+  return bytes->isBuffer() && candidate->bytes() == Type::Bytes::Uint8;
 }
 
 }

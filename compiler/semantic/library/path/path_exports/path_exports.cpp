@@ -14,7 +14,8 @@ const llvm::StringLiteral kPathExports[] = {"sep",   "delimiter",   "posix",
 
 }
 
-PathExports::ResultExportFound PathExports::pathExport(llvm::StringRef name, llvm::StringRef path) {
+PathExports::ResultExportFound PathExports::checkPathExport(llvm::StringRef name,
+                                                            llvm::StringRef path) {
   if (llvm::is_contained(kPathFunctions, name) || name == "sep" || name == "delimiter" ||
       name == "posix" || name == "win32") {
     return ok(name);

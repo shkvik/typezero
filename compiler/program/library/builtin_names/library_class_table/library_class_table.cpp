@@ -66,6 +66,10 @@ const LibraryClassInfo kRows[] = {
         .value = LibraryClass::STREAM,
     },
     {
+        .name = "Readable",
+        .value = LibraryClass::READABLE,
+    },
+    {
         .name = "StreamEmitter",
         .value = LibraryClass::STREAM_EMITTER,
     },
@@ -76,6 +80,22 @@ const LibraryClassInfo kRows[] = {
     {
         .name = "URL",
         .value = LibraryClass::URL,
+    },
+    {
+        .name = "Writable",
+        .value = LibraryClass::WRITABLE,
+    },
+    {
+        .name = "Duplex",
+        .value = LibraryClass::DUPLEX,
+    },
+    {
+        .name = "Transform",
+        .value = LibraryClass::TRANSFORM,
+    },
+    {
+        .name = "PassThrough",
+        .value = LibraryClass::PASS_THROUGH,
     },
 };
 

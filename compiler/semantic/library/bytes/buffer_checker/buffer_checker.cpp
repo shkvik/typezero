@@ -54,8 +54,8 @@ std::optional<std::u16string> BufferChecker::literalText(const Expr *expr) const
   return std::nullopt;
 }
 
-BufferChecker::ResultCountOfBytes BufferChecker::countOfBytes(std::optional<int64_t> count,
-                                                              llvm::StringRef name) const {
+BufferChecker::ResultCountOfBytes BufferChecker::checkCountOfBytes(std::optional<int64_t> count,
+                                                                   llvm::StringRef name) const {
   if (!count || *count < 1 || *count > 6) {
     auto message = ErrorTextBuffer::byteCount(name);
 
@@ -68,7 +68,7 @@ BufferChecker::ResultCountOfBytes BufferChecker::countOfBytes(std::optional<int6
   return ok(*count);
 }
 
-BufferChecker::ResultDecodedInput BufferChecker::decodedInput(const Type *type) const {
+BufferChecker::ResultDecodedInput BufferChecker::checkDecodedInput(const Type *type) const {
   if (!type->isError() && !type->isUndefined() && !type->isByteView() &&
       type->bytes() != Bytes::ArrayBuffer) {
     auto message = ErrorTextBuffer::decode(type->name());
@@ -296,7 +296,7 @@ Expr *BufferChecker::checkFill(const BufferCall &buffer) {
   }
   if (value->type->isInt()) {
     auto byte = ErrorTextBufferLabel::byte();
-    auto fitting = this->byteProofs->valueFits(value, buffer.bufferType, byte);
+    auto fitting = this->byteProofs->checkValueFits(value, buffer.bufferType, byte);
     if (fitting.isErr()) {
       this->state.getDiagnostics().error(value->loc(), fitting.error().message);
     }
@@ -415,7 +415,7 @@ Expr *BufferChecker::checkSwap(const BufferCall &buffer, int width) {
 }
 
 Expr *BufferChecker::checkNumberMethod(const BufferCall &buffer) {
-  NumberMethod number;
+  BytesNumberMethod number;
   if (!BytesCheckHelpers::numberMethod(buffer.name, false, number)) {
     return nullptr;
   }
@@ -433,7 +433,8 @@ Expr *BufferChecker::checkNumberMethod(const BufferCall &buffer) {
   return this->checkFixedNumber(buffer, number);
 }
 
-Expr *BufferChecker::checkVariableNumber(const BufferCall &buffer, const NumberMethod &number) {
+Expr *BufferChecker::checkVariableNumber(const BufferCall &buffer,
+                                         const BytesNumberMethod &number) {
   CallExpr *call = buffer.call;
   unsigned argCount = number.write ? 3 : 2;
   auto arity = this->argumentChecker->checkArity(call, argCount, argCount);
@@ -454,7 +455,7 @@ Expr *BufferChecker::checkVariableNumber(const BufferCall &buffer, const NumberM
   args.push_back(offset);
   args.push_back(count);
   auto written = this->constantFolder->intConstant(count);
-  auto bytes = this->countOfBytes(written, buffer.name);
+  auto bytes = this->checkCountOfBytes(written, buffer.name);
   if (bytes.isErr()) {
     this->state.getDiagnostics().error(count->loc(), bytes.error().message);
     return call;
@@ -466,7 +467,7 @@ Expr *BufferChecker::checkVariableNumber(const BufferCall &buffer, const NumberM
   this->reportUnprovenUpTo(upTo, offset->loc());
   call->mayBeOutOfRange = upTo.isErr();
   if (number.write) {
-    auto fits = this->varValueFits(args[2], width, number.isSigned);
+    auto fits = this->checkVarValueFits(args[2], width, number.isSigned);
     if (fits.isErr()) {
       this->state.getDiagnostics().error(args[2]->loc(), fits.error().message);
     }
@@ -477,12 +478,12 @@ Expr *BufferChecker::checkVariableNumber(const BufferCall &buffer, const NumberM
   return this->toBuiltinCall(call, builtin, Type::intTy());
 }
 
-BufferChecker::ResultVarValueFits BufferChecker::varValueFits(const Expr *value, int64_t width,
-                                                              bool isSigned) {
+BufferChecker::ResultVarValueFits BufferChecker::checkVarValueFits(const Expr *value, int64_t width,
+                                                                   bool isSigned) {
   int64_t bits = width * 8;
   int64_t low = isSigned ? -(int64_t(1) << (bits - 1)) : 0;
   int64_t high = isSigned ? (int64_t(1) << (bits - 1)) - 1 : (int64_t(1) << bits) - 1;
-  bool isUnproven = !value->type->isError() && !this->byteProofs->provesFits(value, low, high);
+  bool isUnproven = !value->type->isError() && !this->byteProofs->canProveFits(value, low, high);
   if (isUnproven) {
     auto range = ErrorTextBytes::range(low, high);
     auto message = ErrorTextBuffer::varFits(width, range);
@@ -496,7 +497,7 @@ BufferChecker::ResultVarValueFits BufferChecker::varValueFits(const Expr *value,
   return ok(value);
 }
 
-Expr *BufferChecker::checkFixedNumber(const BufferCall &buffer, const NumberMethod &number) {
+Expr *BufferChecker::checkFixedNumber(const BufferCall &buffer, const BytesNumberMethod &number) {
   CallExpr *call = buffer.call;
   Bytes kind = number.kind;
   const auto *kindType = Type::bytesType(kind);
@@ -515,7 +516,7 @@ Expr *BufferChecker::checkFixedNumber(const BufferCall &buffer, const NumberMeth
   if (number.write) {
     auto *value = this->argumentChecker->checkArg(call->args[0], element);
     auto what = BytesCheckHelpers::numberWhat(kind);
-    auto fitting = this->byteProofs->valueFits(value, kindType, what);
+    auto fitting = this->byteProofs->checkValueFits(value, kindType, what);
     if (fitting.isErr()) {
       this->state.getDiagnostics().error(value->loc(), fitting.error().message);
     }
@@ -647,7 +648,7 @@ Expr *BufferChecker::checkDecode(CallExpr *call, MemberExpr *member) {
   if (!call->args.empty()) {
     auto *input = this->exprChecker->checkExpr(call->args[0]);
     call->args[0] = input;
-    auto decoded = this->decodedInput(input->type);
+    auto decoded = this->checkDecodedInput(input->type);
     if (decoded.isErr()) {
       this->state.getDiagnostics().error(input->loc(), decoded.error().message);
       return call;

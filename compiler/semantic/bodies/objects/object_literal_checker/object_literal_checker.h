@@ -41,61 +41,41 @@ private:
   using ResultPlainSpreadClass = Result<const ClassDecl *, ObjectLiteralCheckerSpreadFieldsError>;
   using ResultSpreadFieldJoins = Result<const Type *, ObjectLiteralCheckerSpreadJoinError>;
 
-  bool hasMethodFields(const ClassDecl *classDecl) const;
-  ResultSpreadIsAnObject spreadObject(const Type *type) const;
-  ResultDefinedSpreading spreadDefined(const Type *type) const;
-  ResultComputedKeyKnown computedKey(const Type *keyType) const;
-  ResultValueTypeIsKnown inferredValue(const Type *value) const;
-  ResultPlainSpreadClass spreadFields(const ClassDecl *classDecl) const;
-  ResultKeyedObjectTyped keyedTarget(const Type *target, const Type *keyType) const;
-  ResultKeyedFieldsAgree keyedField(const Type *target, const Type *keyType) const;
-  ResultKeyWithoutSpread keyedPlacement(const ObjectLitExpr *literal, const Type *keyType) const;
-  ResultTargetFieldFound targetField(const Type *target, llvm::StringRef name) const;
-  ResultPropertyHasValue propertyPlain(const ObjectLitExpr::Property &property) const;
-  ResultRequiredFieldSet fieldGiven(const ObjectLitExpr *literal, const Field &field,
-                                    const Type *target) const;
-  ResultUsableFieldValue valueTyped(const Type *type, llvm::StringRef what,
-                                    llvm::StringRef name) const;
-  ResultKeyedValuesAgree sameKeyedType(llvm::StringRef name, const Field &same,
-                                       const Type *value) const;
-  ResultFieldNameIsFresh uniqueName(const ObjectLitExpr *literal, size_t index,
-                                    llvm::ArrayRef<bool> named) const;
-  ResultSpreadFieldJoins spreadJoin(const Field &spread, const Field &field,
-                                    const Type *type) const;
-  Expr *checkSpreadLit(ObjectLitExpr *literal, const Type *target, llvm::ArrayRef<bool> named,
-                       bool typed);
-
   struct SpreadFields {
     const Type *target = nullptr;
     std::vector<Field> fields;
-    bool records = false;
-    bool typed = false;
+    bool hasRecords = false;
+    bool isTyped = false;
   };
-
-  Field *findSlot(std::vector<Field> &fields, llvm::StringRef name) const;
-  void walkNamedProp(ObjectLitExpr::Property &property, bool isNamed, SpreadFields &collected);
-  void walkSpreadProp(ObjectLitExpr::Property &property, SpreadFields &collected);
-  bool spreadTypeFits(const ObjectLitExpr::Property &property, const Type *type);
-  void takeOmitKeys(ObjectLitExpr::Property &property) const;
-  bool spreadClassFits(const ObjectLitExpr::Property &property, const Type *type);
-  void mergeSpreadFields(const ObjectLitExpr::Property &property, const Type *type,
-                         SpreadFields &collected);
-  const Type *spreadResult(const SpreadFields &collected) const;
-  bool fieldsFitTarget(const std::vector<Field> &fields, const Type *target) const;
-  bool targetFilled(const Type *target, const std::vector<Field> &fields) const;
-  void convertSpreadProps(ObjectLitExpr *literal, const Type *result);
-  void markReplacedFields(ObjectLitExpr *literal, size_t index) const;
-  bool isReplacedLater(const ObjectLitExpr *literal, size_t index, llvm::StringRef name) const;
 
   struct ObjectLitShape {
     const Type *target;
     llvm::SmallVector<bool, 8> named;
-    bool typed;
-    bool inferred;
+    bool isTyped;
+    bool isInferred;
   };
 
+  ResultPropertyHasValue checkPropertyPlain(const ObjectLitExpr::Property &property) const;
+  ResultComputedKeyKnown checkComputedKey(const Type *keyType) const;
+  ResultFieldNameIsFresh checkUniqueName(const ObjectLitExpr *literal, size_t index,
+                                         llvm::ArrayRef<bool> named) const;
+  ResultValueTypeIsKnown checkInferredValue(const Type *value) const;
+  ResultKeyedValuesAgree checkSameKeyedType(llvm::StringRef name, const Field &same,
+                                            const Type *value) const;
+  ResultKeyWithoutSpread checkKeyedPlacement(const ObjectLitExpr *literal,
+                                             const Type *keyType) const;
+  ResultKeyedObjectTyped checkKeyedTarget(const Type *target, const Type *keyType) const;
+  ResultKeyedFieldsAgree checkKeyedField(const Type *target, const Type *keyType) const;
+  ResultTargetFieldFound checkTargetField(const Type *target, llvm::StringRef name) const;
+  ResultUsableFieldValue checkValueTyped(const Type *type, llvm::StringRef what,
+                                         llvm::StringRef name) const;
+  ResultRequiredFieldSet checkFieldGiven(const ObjectLitExpr *literal, const Field &field,
+                                         const Type *target) const;
+  bool hasPropertyNamed(const ObjectLitExpr *literal, llvm::StringRef name) const;
   bool isUsableTarget(const Type *type) const;
   void walkPropertyKey(ObjectLitExpr *literal, size_t index, ObjectLitShape &shape);
+  void walkComputedKey(ObjectLitExpr::Property &property, ComputedProperty &computed, size_t index,
+                       ObjectLitShape &shape);
   bool isLiteralKeys(const Type *keyType) const;
   void walkUniqueNames(ObjectLitExpr *literal, ObjectLitShape &shape);
   Expr *pickUnionTarget(ObjectLitExpr *literal, const Type *expectedUnion, ObjectLitShape &shape);
@@ -103,18 +83,52 @@ private:
   bool isAllKeyed(const ObjectLitExpr *literal) const;
   bool hasMethod(const ObjectLitExpr *literal) const;
   Expr *checkInferredKeys(ObjectLitExpr *literal, ObjectLitShape &shape);
-  bool keyedFieldsAgree(const ObjectLitExpr::Property &property, const Type *value,
-                        std::vector<Field> &fields);
+  bool reportInferredProperty(ObjectLitExpr::Property &property, std::vector<Field> &fields);
+  bool reportKeyedFields(const ObjectLitExpr::Property &property, const Type *value,
+                         std::vector<Field> &fields);
+  bool reportKeyedClash(const ObjectLitExpr::Property &property, llvm::StringRef name,
+                        const Field &same, const Type *value);
   const Field *fieldNamed(const std::vector<Field> &fields, llvm::StringRef name) const;
   Expr *checkKeyedProperties(ObjectLitExpr *literal, const ObjectLitShape &shape);
   Expr *checkKeyedProperty(ObjectLitExpr *literal, ObjectLitExpr::Property &property,
                            const ObjectLitShape &shape);
   std::vector<Field> checkNamedProperties(ObjectLitExpr *literal, ObjectLitShape &shape);
+  void walkLiteralProperty(ObjectLitExpr::Property &property, bool isNamed, ObjectLitShape &shape,
+                           std::vector<Field> &fields);
+  void nameFunctionValue(ObjectLitExpr::Property &property) const;
   bool takePrechecked(const Expr *value);
   void walkTargetField(ObjectLitExpr::Property &property, const Type *target);
+  void walkMissingField(ObjectLitExpr::Property &property,
+                        const ObjectLiteralCheckerTargetFieldError &error, bool isPrechecked);
   Field untargetedField(ObjectLitExpr::Property &property, ObjectLitShape &shape);
+  bool reportUnusableValue(const ObjectLitExpr::Property &property, const Type *type);
   Expr *finishObjectLit(ObjectLitExpr *literal, const ObjectLitShape &shape,
                         std::vector<Field> fields);
+  ResultDefinedSpreading checkSpreadDefined(const Type *type) const;
+  ResultSpreadIsAnObject checkSpreadObject(const Type *type) const;
+  ResultPlainSpreadClass checkSpreadFields(const ClassDecl *classDecl) const;
+  ResultSpreadFieldJoins checkSpreadJoin(const Field &spread, const Field &field,
+                                         const Type *type) const;
+  Expr *checkSpreadLit(ObjectLitExpr *literal, const Type *target, llvm::ArrayRef<bool> named,
+                       bool isTyped);
+  Field *findSlot(std::vector<Field> &fields, llvm::StringRef name) const;
+  void walkNamedProp(ObjectLitExpr::Property &property, bool isNamed, SpreadFields &collected);
+  void walkSpreadProp(ObjectLitExpr::Property &property, SpreadFields &collected);
+  bool reportSpreadType(const ObjectLitExpr::Property &property, const Type *type);
+  void takeOmitKeys(ObjectLitExpr::Property &property) const;
+  bool reportSpreadClass(const ObjectLitExpr::Property &property, const Type *type);
+  void mergeSpreadFields(const ObjectLitExpr::Property &property, const Type *type,
+                         SpreadFields &collected);
+  void mergeSpreadField(const ObjectLitExpr::Property &property, const Field &spreadField,
+                        const Type *type, SpreadFields &collected);
+  const Type *spreadResult(const SpreadFields &collected) const;
+  bool isEveryFieldFitting(const std::vector<Field> &fields, const Type *target) const;
+  bool isTargetFilled(const Type *target, const std::vector<Field> &fields) const;
+  void convertSpreadProps(ObjectLitExpr *literal, const Type *result);
+  void convertSpreadProp(ObjectLitExpr *literal, size_t index, const Type *result);
+  void markReplacedFields(ObjectLitExpr *literal, size_t index) const;
+  bool isReplacedLater(const ObjectLitExpr *literal, size_t index, llvm::StringRef name) const;
+  bool isReplacing(const ObjectLitExpr::Property &later, llvm::StringRef name) const;
 
   SemanticState &state;
   ExprChecker *exprChecker = nullptr;

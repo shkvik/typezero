@@ -39,8 +39,8 @@ std::optional<std::string> KeyPairChecker::literalOf(const Expr *expr) const {
 }
 
 KeyPairChecker::ResultKeyOptionsGiven
-KeyPairChecker::keyOptions(int which, llvm::StringRef type,
-                           const llvm::StringMap<Expr *> &options) const {
+KeyPairChecker::checkKeyOptions(int which, llvm::StringRef type,
+                                const llvm::StringMap<Expr *> &options) const {
   if (which >= 0 && which <= 2 && !options.lookup("modulusLength")) {
     auto message = ErrorTextKeyPair::modulus(type);
 
@@ -73,12 +73,12 @@ Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc,
     return call;
   }
   auto options = llvm::StringMap<Expr *>();
-  if (!this->keyPairOptionsRead(call, shown, options)) {
+  if (!this->readKeyPairOptions(call, shown, options)) {
     return call;
   }
   llvm::StringRef typeName =
       kind->which >= 0 ? this->pairTypeNames()[kind->which] : llvm::StringRef();
-  auto given = this->keyOptions(kind->which, typeName, options);
+  auto given = this->checkKeyOptions(kind->which, typeName, options);
   if (given.isErr()) {
     this->state.getDiagnostics().error(loc, given.error().message);
     return call;
@@ -133,15 +133,15 @@ std::optional<KeyPairChecker::KeyPairKind> KeyPairChecker::keyPairKind(CallExpr 
   return kind;
 }
 
-bool KeyPairChecker::keyPairOptionsRead(CallExpr *call, llvm::StringRef shown,
+bool KeyPairChecker::readKeyPairOptions(CallExpr *call, llvm::StringRef shown,
                                         llvm::StringMap<Expr *> &options) {
   bool isRead =
-      call->args.size() <= 1 ||
-      this->cryptoArgs->cryptoOptions(call->args[1], shown,
-                                      {"modulusLength", "publicExponent", "namedCurve",
-                                       "publicKeyEncoding", "privateKeyEncoding", "divisorLength",
-                                       "hashAlgorithm", "mgf1HashAlgorithm", "saltLength"},
-                                      options);
+      call->args.size() <= 1 || this->cryptoArgs->readCryptoOptions(
+                                    call->args[1], shown,
+                                    {"modulusLength", "publicExponent", "namedCurve",
+                                     "publicKeyEncoding", "privateKeyEncoding", "divisorLength",
+                                     "hashAlgorithm", "mgf1HashAlgorithm", "saltLength"},
+                                    options);
   if (!isRead) {
     return false;
   }
@@ -219,7 +219,7 @@ const Type *KeyPairChecker::appendedEncoding(llvm::SMLoc loc,
       .cipher = this->cryptoArgs->cryptoString(loc, ""),
       .passphrase = this->cryptoArgs->cryptoUndefined(loc),
   };
-  if (encoding != nullptr && !this->encodingRead(encoding, option, isPrivate, chosen)) {
+  if (encoding != nullptr && !this->readEncoding(encoding, option, isPrivate, chosen)) {
     return nullptr;
   }
   auto *format = this->cryptoArgs->cryptoInt(loc, chosen.format < 0 ? 0xffffffff : chosen.format);
@@ -229,14 +229,14 @@ const Type *KeyPairChecker::appendedEncoding(llvm::SMLoc loc,
   return this->encodedKeyType(chosen.format);
 }
 
-bool KeyPairChecker::encodingRead(Expr *encoding, llvm::StringRef option, bool isPrivate,
+bool KeyPairChecker::readEncoding(Expr *encoding, llvm::StringRef option, bool isPrivate,
                                   KeyEncoding &chosen) {
   auto e = llvm::StringMap<Expr *>();
   llvm::SmallVector<llvm::StringRef, 4> allowed = {"type", "format"};
   if (isPrivate) {
     allowed.append({"cipher", "passphrase"});
   }
-  if (!this->cryptoArgs->cryptoOptions(encoding, option, allowed, e)) {
+  if (!this->cryptoArgs->readCryptoOptions(encoding, option, allowed, e)) {
     return false;
   }
   Expr *format = e.lookup("format");
@@ -250,14 +250,14 @@ bool KeyPairChecker::encodingRead(Expr *encoding, llvm::StringRef option, bool i
   if (chosen.format < 0) {
     return false;
   }
-  if (!this->encodingTypeRead(encoding, option, isPrivate, e, chosen)) {
+  if (!this->readEncodingType(encoding, option, isPrivate, e, chosen)) {
     return false;
   }
 
-  return this->encodingCipherRead(encoding, e, chosen);
+  return this->readEncodingCipher(encoding, e, chosen);
 }
 
-bool KeyPairChecker::encodingTypeRead(const Expr *encoding, llvm::StringRef option, bool isPrivate,
+bool KeyPairChecker::readEncodingType(const Expr *encoding, llvm::StringRef option, bool isPrivate,
                                       const llvm::StringMap<Expr *> &e, KeyEncoding &chosen) {
   Expr *t = e.lookup("type");
   if (t == nullptr && chosen.format == 2) {
@@ -280,7 +280,7 @@ bool KeyPairChecker::encodingTypeRead(const Expr *encoding, llvm::StringRef opti
   return true;
 }
 
-bool KeyPairChecker::encodingCipherRead(const Expr *encoding, const llvm::StringMap<Expr *> &e,
+bool KeyPairChecker::readEncodingCipher(const Expr *encoding, const llvm::StringMap<Expr *> &e,
                                         KeyEncoding &chosen) {
   Expr *c = e.lookup("cipher");
   if (c != nullptr) {
@@ -296,7 +296,7 @@ bool KeyPairChecker::encodingCipherRead(const Expr *encoding, const llvm::String
   if (p == nullptr) {
     return true;
   }
-  chosen.passphrase = this->cryptoArgs->cryptoData(p, "passphrase", true, false, true);
+  chosen.passphrase = this->cryptoArgs->cryptoData(p, "passphrase", kTextOrBuffers);
   chosen.flags |= 4;
 
   return !chosen.passphrase->type->isError();

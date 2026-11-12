@@ -11,12 +11,12 @@ class FsExports {
 public:
   using ResultExportFound = Result<llvm::StringRef, ModuleExportFoundError>;
 
-  static ResultExportFound fsExport(llvm::StringRef name, llvm::StringRef path);
-  static ResultExportFound tzIoExport(llvm::StringRef name, llvm::StringRef path);
-  static ResultExportFound tzFsExport(llvm::StringRef name, llvm::StringRef path);
-  static ResultExportFound promisesExport(llvm::StringRef name, llvm::StringRef path);
-  static ResultExportFound readlineExport(llvm::StringRef name, llvm::StringRef path,
-                                          bool hasPromises);
+  static ResultExportFound checkFsExport(llvm::StringRef name, llvm::StringRef path);
+  static ResultExportFound checkTzIoExport(llvm::StringRef name, llvm::StringRef path);
+  static ResultExportFound checkTzFsExport(llvm::StringRef name, llvm::StringRef path);
+  static ResultExportFound checkPromisesExport(llvm::StringRef name, llvm::StringRef path);
+  static ResultExportFound checkReadlineExport(llvm::StringRef name, llvm::StringRef path,
+                                               bool hasPromises);
 };
 
 }

@@ -43,7 +43,7 @@ TypedArrayChecker::TypedArrayChecker(SemanticState &owner, SemanticParts &all)
   this->iteratorMethods = &all.iteratorMethods;
 }
 
-TypedArrayChecker::ResultSetSourceOk TypedArrayChecker::setSource(const Expr *source) const {
+TypedArrayChecker::ResultSetSourceOk TypedArrayChecker::checkSetSource(const Expr *source) const {
   if (source->type->isIterator()) {
     auto message = ErrorTextTypedArray::iterator();
 
@@ -125,7 +125,7 @@ Expr *TypedArrayChecker::checkCallbackCall(const TypedArrayCall &typed, BytesMet
   auto *checked = this->callbackChecker->checkCallbackMethod(call, typed.member, expected);
   bool isMappingNamedFunction = method == BytesMethod::MAP && !call->args.empty() && !isArrow;
   if (isMappingNamedFunction) {
-    auto fits = this->mapResultFits(typed);
+    auto fits = this->checkMapResultFits(typed);
     if (fits.isErr()) {
       this->state.getDiagnostics().error(call->args[0]->loc(), fits.error().message);
     }
@@ -135,7 +135,7 @@ Expr *TypedArrayChecker::checkCallbackCall(const TypedArrayCall &typed, BytesMet
 }
 
 TypedArrayChecker::ResultMapFitsType
-TypedArrayChecker::mapResultFits(const TypedArrayCall &typed) const {
+TypedArrayChecker::checkMapResultFits(const TypedArrayCall &typed) const {
   const Expr *callback = typed.call->args[0];
   int64_t low = 0;
   int64_t high = 0;
@@ -262,7 +262,7 @@ Expr *TypedArrayChecker::checkFill(const TypedArrayCall &typed) {
     return call;
   }
   auto *value = this->argumentChecker->checkArg(call->args[0], typed.element);
-  auto fitting = this->byteProofs->valueFits(value, typed.arrayType, typed.what);
+  auto fitting = this->byteProofs->checkValueFits(value, typed.arrayType, typed.what);
   if (fitting.isErr()) {
     this->state.getDiagnostics().error(value->loc(), fitting.error().message);
   }
@@ -290,24 +290,24 @@ Expr *TypedArrayChecker::checkSet(const TypedArrayCall &typed) {
     }
     for (const ArrayLitExpr::Element &item : literal->elements) {
       if (item.spread) {
-        if (!this->bytesNewChecker->checkBytesSource(item.expr, typed.arrayType)) {
+        if (!this->bytesNewChecker->matchBytesSource(item.expr, typed.arrayType)) {
           return call;
         }
         continue;
       }
-      auto fitting = this->byteProofs->valueFits(item.expr, typed.arrayType, typed.what);
+      auto fitting = this->byteProofs->checkValueFits(item.expr, typed.arrayType, typed.what);
       if (fitting.isErr()) {
         this->state.getDiagnostics().error(item.expr->loc(), fitting.error().message);
       }
     }
   } else {
     source = this->exprChecker->checkExpr(source);
-    auto set = this->setSource(source);
+    auto set = this->checkSetSource(source);
     if (set.isErr()) {
       this->state.getDiagnostics().error(source->loc(), set.error().message);
       return call;
     }
-    if (!this->bytesNewChecker->checkBytesSource(source, typed.arrayType)) {
+    if (!this->bytesNewChecker->matchBytesSource(source, typed.arrayType)) {
       return call;
     }
   }
@@ -343,12 +343,12 @@ Expr *TypedArrayChecker::checkWith(const TypedArrayCall &typed) {
   }
   auto *index = this->memberChecker->checkPosition(call->args[0]);
   call->args[0] = index;
-  auto proven = this->withIndex(typed.member->object, index);
+  auto proven = this->checkWithIndex(typed.member->object, index);
   if (proven.isErr()) {
     this->state.getDiagnostics().error(index->loc(), proven.error().message);
   }
   auto *value = this->argumentChecker->checkArg(call->args[1], typed.element);
-  auto fitting = this->byteProofs->valueFits(value, typed.arrayType, typed.what);
+  auto fitting = this->byteProofs->checkValueFits(value, typed.arrayType, typed.what);
   if (fitting.isErr()) {
     this->state.getDiagnostics().error(value->loc(), fitting.error().message);
   }
@@ -357,8 +357,8 @@ Expr *TypedArrayChecker::checkWith(const TypedArrayCall &typed) {
   return this->toBuiltinCall(call, Builtin::BytesWith, typed.copyType);
 }
 
-TypedArrayChecker::ResultIndexProven TypedArrayChecker::withIndex(const Expr *array,
-                                                                  const Expr *index) const {
+TypedArrayChecker::ResultIndexProven TypedArrayChecker::checkWithIndex(const Expr *array,
+                                                                       const Expr *index) const {
   bool isUnproven = !index->type->isError() &&
                     !this->indexProofs->canProveAtInBounds(array, index) &&
                     !this->indexProofs->isExempt(index->loc(), array);
@@ -445,7 +445,7 @@ IntLitExpr *TypedArrayChecker::makeIntLiteral(llvm::SMLoc loc, int value) {
 
 Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
-  NumberMethod m;
+  BytesNumberMethod m;
   if (!BytesCheckHelpers::numberMethod(name, true, m)) {
     for (Expr *&arg : call->args) {
       arg = this->exprChecker->checkExpr(arg);
@@ -479,7 +479,7 @@ Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member)
   if (m.write) {
     auto *value = this->argumentChecker->checkArg(call->args[1], element);
     auto fitting =
-        this->byteProofs->valueFits(value, kindType, BytesCheckHelpers::numberWhat(m.kind));
+        this->byteProofs->checkValueFits(value, kindType, BytesCheckHelpers::numberWhat(m.kind));
     if (fitting.isErr()) {
       this->state.getDiagnostics().error(value->loc(), fitting.error().message);
     }

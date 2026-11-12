@@ -15,13 +15,29 @@ class DecimalChecker;
 class IteratorMethods;
 class GeneratorChecker;
 
+enum class SourceItems {
+  PAIRS,
+  VALUES,
+};
+
 class DictNewChecker {
 public:
+  struct InferredPairs {
+    const Type *key;
+    const Type *value;
+  };
+
+  struct SourceElement {
+    Expr *arg;
+    const Type *element;
+  };
+
   DictNewChecker(SemanticState &owner, SemanticParts &all);
 
   void markPairs(Expr *arg);
-  bool inferPairs(Expr *arg, const Type *&key, const Type *&value);
-  Expr *checkDictSource(Expr *arg, bool pairs, const Type *&element, llvm::StringRef what);
+  std::optional<InferredPairs> inferPairs(Expr *arg);
+  SourceElement checkDictSource(Expr *arg, SourceItems items, const Type *wanted,
+                                llvm::StringRef what);
   Expr *checkDictNew(NewExpr *expr, const Type *expected);
 
 private:
@@ -33,33 +49,52 @@ private:
   using ResultPairsShaped = Result<const Type *, DictNewCheckerPairShapeError>;
   using ResultDefinedType = Result<const Type *, DictNewCheckerElementsKnownError>;
 
-  ResultPartsJoined partsJoin(bool keys, const Type *common, const Type *type) const;
-  std::vector<const ReturnStmt *> branchReturns(const Stmt *body) const;
-  static bool returnsPair(const ReturnStmt *returnStmt);
-  ResultPairTypesOk pairsKnown(const Type *key, const Type *value) const;
-  ResultSourceShape sourceShape(const Type *type, const Type *given, const Type *wanted, bool pairs,
-                                llvm::StringRef what) const;
-  ResultOneArgument argumentCount(const NewExpr *expr, bool isMap) const;
-  ResultTypesStated typesGiven(const NewExpr *expr, const Type *type, bool isMap,
-                               bool undefinedArg) const;
-  ResultPairsShaped pairShape(const Type *element) const;
-  ResultDefinedType elementsKnown(const NewExpr *expr, const Type *key, const Type *element,
-                                  bool isMap) const;
+  enum class PairPart {
+    KEY,
+    VALUE,
+  };
+
+  struct PairJoin {
+    const Type *key;
+    const Type *value;
+    bool isTyped;
+  };
 
   struct DictSource {
     const Type *type;
     Expr *arg;
   };
 
+  std::vector<const ReturnStmt *> branchReturns(const Stmt *body) const;
+  void pushBlockStatements(const BlockStmt *block, std::vector<const Stmt *> &stack) const;
+  bool isPairReturn(const ReturnStmt *returnStmt) const;
+  ResultPartsJoined checkPartsJoin(PairPart part, const Type *common, const Type *type) const;
+  ResultPairTypesOk checkPairsKnown(const Type *key, const Type *value) const;
+  ResultSourceShape checkSourceShape(const Type *type, const Type *given, const Type *wanted,
+                                     SourceItems items, llvm::StringRef what) const;
+  bool isFittingPair(const Type *given, const Type *wanted) const;
+  ResultOneArgument checkArgumentCount(const NewExpr *expr, bool isMap) const;
+  ResultTypesStated checkTypesGiven(const NewExpr *expr, const Type *type, bool isMap,
+                                    bool isUndefinedArg) const;
+  ResultPairsShaped checkPairShape(const Type *element) const;
+  ResultDefinedType checkElementsKnown(const NewExpr *expr, const Type *key, const Type *element,
+                                       bool isMap) const;
+  bool isPairElement(const ArrayLitExpr::Element &element) const;
+  PairJoin joinPart(const PairJoin &join, Expr *&part, PairPart which);
+  void typePairs(ArrayLitExpr *literal, const Type *key, const Type *value);
+  void walkSourceSends(const Expr *arg, const Type *type, llvm::StringRef what);
+  Expr *checkEmptyDictNew(NewExpr *expr, const Type *type, bool isMap);
+  Expr *finishDictNew(NewExpr *expr, const Type *type, std::vector<Expr *> args);
   Expr *failDictNew(NewExpr *expr);
   Expr *reportWeakDict(NewExpr *expr);
   std::optional<const Type *> statedDictType(NewExpr *expr, const Type *expected, bool isMap);
   const Type *wantedDict(const Type *expected, bool isMap) const;
   const Type *onlyDictMember(const Type *expected, bool isMap) const;
   std::optional<DictSource> sourcedDict(NewExpr *expr, const Type *type, bool isMap);
-  std::optional<DictSource> inferredPairsDict(Expr *arg, const Type *key, const Type *value);
+  std::optional<DictSource> inferredPairsDict(Expr *arg, const InferredPairs &pairs);
   std::optional<DictSource> checkedSourceDict(NewExpr *expr, Expr *arg, const Type *type,
                                               bool isMap);
+  const Type *wantedElement(const Type *type, bool isMap) const;
   std::optional<const Type *> sourceElementDict(const NewExpr *expr, const Expr *arg,
                                                 const Type *element, bool isMap);
 

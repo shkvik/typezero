@@ -23,7 +23,7 @@ public:
   bool isLanguageTag(const std::string &tag) const;
   DateFormatChecker(SemanticState &owner, SemanticParts &all);
 
-  bool checkLocaleArgs(std::vector<Expr *> &args, int kind);
+  bool prepareLocaleArgs(std::vector<Expr *> &args, int kind);
   Expr *checkDateFormatNew(llvm::SMLoc loc, std::vector<Expr *> &args);
   Expr *checkIntlCall(CallExpr *call, MemberExpr *member);
   Expr *checkDateFormatMethod(CallExpr *call, MemberExpr *member);
@@ -43,21 +43,32 @@ private:
   struct DateOptionPlace {
     const Expr *given;
     llvm::SMLoc at;
-    bool exempt;
+    bool isExempt;
   };
 
-  bool optionKindsFit(const Expr *options, int kind);
-  bool optionKindFits(const Expr *options, const Field &field,
-                      std::optional<DateFormatOption> option, int kind);
+  struct OptionRoles {
+    bool hasStyle;
+    bool hasComponent;
+  };
+
+  bool matchOptionKinds(const Expr *options, int kind);
+  bool matchOptionRole(const Expr *options, const Field &field, DateFormatOption option, int kind,
+                       OptionRoles &roles);
+  bool matchOptionKind(const Expr *options, const Field &field,
+                       std::optional<DateFormatOption> option, int kind);
   const Type *wantedOptionType(DateFormatOption option, const Type *value) const;
   DateOptionRole optionRole(DateFormatOption option) const;
-  bool styleFitsMethod(const Expr *options, llvm::StringRef name, int kind);
-  bool optionValuesFit(const Expr *options);
+  bool matchStyleMethod(const Expr *options, llvm::StringRef name, int kind);
+  bool matchOptionValues(const Expr *options);
   const Expr *givenProperty(const ObjectLitExpr *literal, llvm::StringRef name) const;
-  bool digitsFit(const Field &field, const DateOptionPlace &place);
-  bool optionTextFits(const Field &field, const DateOptionPlace &place);
+  bool matchDigits(const Field &field, const DateOptionPlace &place);
+  bool isOutsideDigits(double digits) const;
+  bool matchOptionText(const Field &field, const DateOptionPlace &place);
+  llvm::ArrayRef<llvm::StringLiteral> optionValues(llvm::StringRef name) const;
+  std::optional<std::vector<std::string>> optionTexts(const Field &field,
+                                                      const DateOptionPlace &place);
 
-  ResultOptionsObject optionsObject(const Type *type, int kind) const;
+  ResultOptionsObject checkOptionsObject(const Type *type, int kind) const;
   std::optional<std::u16string> literalText(const Expr *expr) const;
   std::optional<std::vector<std::string>> textsOf(const Type *type) const;
   std::optional<std::vector<double>> numbersOf(const Type *type) const;

@@ -31,24 +31,27 @@ public:
   std::vector<std::string> keyNames(const Expr *key) const;
   ResultKeyedFieldRead checkKeyedField(IndexExpr *index, KeyedAccess access);
   const Type *keyedFieldType(const Type *type, const Type *keyType) const;
-  bool wrongKey(KeyedFieldCheckerCheckKeyedFieldErrorCode code) const;
+  bool isWrongKey(KeyedFieldCheckerCheckKeyedFieldErrorCode code) const;
 
 private:
   using ResultKeyedFieldName = Result<std::string, KeyedFieldCheckerCheckKeyedFieldError>;
 
   bool isInherited(llvm::StringRef name) const;
   std::vector<std::string> memberConstants(const MemberExpr *member) const;
-  ResultKeyedFieldName tupleKeyName(IndexExpr *index, const Type *type);
-  ResultKeyedFieldName objectKeyName(const Type *type, const Type *keyType,
-                                     const std::optional<std::string> &key) const;
+  bool isPublicField(const ClassDecl *classDecl, const std::string &name) const;
+  ResultKeyedFieldRead checkTupleField(IndexExpr *index, const Type *type, KeyedAccess access);
+  ResultKeyedFieldName checkTupleKeyName(IndexExpr *index, const Type *type);
+  ResultKeyedFieldName checkObjectKeyName(const Type *type, const Type *keyType,
+                                          const std::optional<std::string> &key) const;
   ResultKeyedFieldRead checkKeySetField(IndexExpr *index, const Type *type, const Type *keyType,
-                                        const Type *field, bool write);
+                                        const Type *field, KeyedAccess access);
+  Expr *keySetIndex(IndexExpr *index, const Type *field) const;
   ResultKeyedFieldRead checkKeySetWrite(IndexExpr *index, const Type *type, const Type *keyType,
                                         const Type *field);
-  bool allAssigned(llvm::ArrayRef<const Type *> names) const;
-  bool anyReadonly(const Type *type, llvm::ArrayRef<const Type *> names) const;
+  bool isAllAssigned(llvm::ArrayRef<const Type *> names) const;
+  bool hasReadonly(const Type *type, llvm::ArrayRef<const Type *> names) const;
   ResultKeyedFieldRead checkNamedField(IndexExpr *index, const Type *type, const std::string &name,
-                                       bool write);
+                                       KeyedAccess access);
 
   SemanticState &state;
   FieldFacts *fieldFacts = nullptr;

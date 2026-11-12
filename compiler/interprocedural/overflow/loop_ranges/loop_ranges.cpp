@@ -52,7 +52,7 @@ LoopRanges::LoopRanges(OverflowCheck &check)
     : check(check) {}
 
 bool LoopRanges::yields(const Stmt *stmt) const {
-  for (const Expr *e : AstWalker::exprsIn(stmt, false)) {
+  for (const Expr *e : AstWalker::ownExprsIn(stmt)) {
     if (isa<YieldExpr>(e)) {
       return true;
     }
@@ -81,7 +81,7 @@ bool LoopRanges::grows(const Stmt *body, const VarSymbol *var) const {
 
     return name && name->var() == var;
   };
-  for (const Expr *e : AstWalker::exprsIn(body, true)) {
+  for (const Expr *e : AstWalker::allExprsIn(body)) {
     if (auto *call = dyn_cast<CallExpr>(e)) {
       auto *member = dyn_cast<MemberExpr>(call->callee);
       if (member && isVar(member->object) &&
@@ -195,7 +195,7 @@ std::vector<const Stmt *> LoopRanges::awaitParts(const Stmt *stmt) const {
 }
 
 bool LoopRanges::waitsOrYields(const Stmt *stmt) const {
-  for (const Expr *e : AstWalker::exprsIn(stmt, false)) {
+  for (const Expr *e : AstWalker::ownExprsIn(stmt)) {
     if (isa<AwaitExpr, YieldExpr>(e)) {
       return true;
     }
@@ -208,7 +208,7 @@ bool LoopRanges::readsInput(const Expr *cond) const {
   if (cond == nullptr) {
     return false;
   }
-  for (const Expr *e : AstWalker::exprsIn(cond, true)) {
+  for (const Expr *e : AstWalker::allExprsIn(cond)) {
     auto *call = dyn_cast<CallExpr>(e);
     if (call == nullptr) {
       continue;
@@ -479,7 +479,7 @@ void LoopRanges::findRecursions() {
     if (recursion.self.empty()) {
       continue;
     }
-    std::vector<const Expr *> exprs = AstWalker::exprsIn(fn->body, false);
+    std::vector<const Expr *> exprs = AstWalker::ownExprsIn(fn->body);
     auto otherSelfCall = [&](const Expr *e) {
       auto *call = dyn_cast<CallExpr>(e);
       return call != nullptr && call->func() != nullptr && call->func()->decl == fn &&

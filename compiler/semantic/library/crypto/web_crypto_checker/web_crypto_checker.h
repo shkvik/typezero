@@ -21,20 +21,21 @@ public:
 
   Expr *checkSubtleIntrinsic(CallExpr *call, NameExpr *name, llvm::StringRef intrinsicName);
   Expr *subtleObject(MemberExpr *member);
-  bool isSubtleClass(const Type *type, llvm::StringRef name) const;
+  bool isSubtleClass(const Type *type) const;
 
 private:
+  bool isIntrinsicNamed(llvm::StringRef name, const SubtleIntrinsic &intrinsic) const;
   using ResultSubtleAvailable = Result<VarSymbol *, WebCryptoCheckerSubtleAvailableError>;
   using ResultAlgorithmChosen = Result<const Expr *, WebCryptoCheckerLiteralAlgorithmError>;
   using ResultSubtleCallShape = Result<const SubtleIntrinsic *, WebCryptoCheckerSubtleShapeError>;
 
-  ResultSubtleCallShape subtleShape(const CallExpr *call, llvm::StringRef intrinsicName) const;
-  ResultAlgorithmChosen literalAlgorithm(const Expr *checked, char kind,
-                                         llvm::StringRef intrinsicName) const;
+  ResultSubtleCallShape checkSubtleShape(const CallExpr *call, llvm::StringRef intrinsicName) const;
+  ResultAlgorithmChosen checkLiteralAlgorithm(const Expr *checked, char kind,
+                                              llvm::StringRef intrinsicName) const;
   Expr *checkSubtleArg(Expr *arg, char kind, llvm::StringRef intrinsicName);
   Expr *checkSubtleArgKind(Expr *arg, char kind);
   const Type *subtleResult(char result) const;
-  ResultSubtleAvailable subtleAvailable() const;
+  ResultSubtleAvailable checkSubtleAvailable() const;
 
   SemanticState &state;
   Scopes *scopes = nullptr;

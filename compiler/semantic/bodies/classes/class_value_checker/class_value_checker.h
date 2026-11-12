@@ -25,7 +25,7 @@ public:
 
   ClassValueChecker(SemanticState &owner, SemanticParts &all);
 
-  ResultConstructorArgs constructorArgs();
+  ResultConstructorArgs checkConstructorArgs();
   const Type *classValueType(ClassDecl *classDecl);
   ClassDecl *finalClass(ClassDecl *classDecl) const;
   Expr *classValueAt(ClassDecl *classDecl, llvm::SMLoc loc);
@@ -42,12 +42,18 @@ private:
   using ResultClassIsDeclared = Result<const ClassDecl *, ClassValueCheckerClassDeclaredError>;
   using ResultNoTypeArguments = Result<const NewExpr *, ClassValueCheckerRuntimeTypeArgsError>;
 
+  const Type *classRefType(const ClassDecl *classDecl) const;
   Expr *afterClassValue(Expr *object, Expr *result);
-  ResultClassHasItsType typedClass(ClassDecl *classDecl) const;
-  ResultArgumentNotVoid argumentValue(const Expr *arg) const;
-  ResultNewOfClassValue valueNewClass(const Type *type) const;
-  ResultClassIsDeclared classDeclared(const ClassDecl *classDecl) const;
-  ResultNoTypeArguments runtimeTypeArgs(const NewExpr *expr) const;
+  ResultNewOfClassValue checkValueNewClass(const Type *type) const;
+  ResultClassHasItsType checkTypedClass(ClassDecl *classDecl) const;
+  ResultNoTypeArguments checkRuntimeTypeArgs(const NewExpr *expr) const;
+  ResultArgumentNotVoid checkArgumentValue(const Expr *arg) const;
+  Expr *failValueNew(NewExpr *expr);
+  Expr *checkClassValueNew(NewExpr *expr, ClassDecl *classDecl, const Type *expected);
+  std::vector<const Type *> reflectedArgTypes(NewExpr *expr);
+  ResultClassIsDeclared checkClassDeclared(const ClassDecl *classDecl) const;
+  bool hasOwnNameMethod(const ClassDecl *classDecl) const;
+  Expr *classNameText(MemberExpr *member, const ClassDecl *classDecl);
 
   SemanticState &state;
   ClassLinks *classLinks = nullptr;

@@ -72,7 +72,7 @@ std::optional<std::u16string> BufferStaticChecker::literalText(const Expr *expr)
 }
 
 BufferStaticChecker::ResultSourceElement
-BufferStaticChecker::sourceElement(const Type *from, llvm::StringRef what) const {
+BufferStaticChecker::checkSourceElement(const Type *from, llvm::StringRef what) const {
   const auto *element = this->generatorChecker->iteratedType(from);
   if (element == nullptr || from->isString()) {
     auto message = ErrorTextBytesStatic::source(what, from->name());
@@ -87,7 +87,7 @@ BufferStaticChecker::sourceElement(const Type *from, llvm::StringRef what) const
 }
 
 BufferStaticChecker::ResultConcatSources
-BufferStaticChecker::concatSources(const Type *list, const Type *buffer) const {
+BufferStaticChecker::checkConcatSources(const Type *list, const Type *buffer) const {
   const auto *uint8 = Type::bytesType(Bytes::Uint8);
   if (!list->isArray() || (list->inner() != uint8 && list->inner() != buffer)) {
     auto message = ErrorTextBufferStatic::concat(list->name());
@@ -211,7 +211,7 @@ Expr *BufferStaticChecker::checkTypedArrayFrom(const StaticCall &bytes) {
   }
   this->iteratorMethods->markFused(source);
   source = this->exprChecker->checkExpr(source);
-  if (!this->bytesNewChecker->checkBytesSource(source, bytes.type)) {
+  if (!this->bytesNewChecker->matchBytesSource(source, bytes.type)) {
     return call;
   }
   Builtin builtin =
@@ -229,7 +229,7 @@ Expr *BufferStaticChecker::checkBytesFromWith(CallExpr *call, const Type *type,
   if (from->isError()) {
     return call;
   }
-  auto iterated = this->sourceElement(from, what);
+  auto iterated = this->checkSourceElement(from, what);
   if (iterated.isErr()) {
     this->state.getDiagnostics().error(source->loc(), iterated.error().message);
     return call;
@@ -248,7 +248,7 @@ Expr *BufferStaticChecker::checkBytesFromWith(CallExpr *call, const Type *type,
   if (!call->args[1]->type->isFunction()) {
     return call;
   }
-  auto fits = this->mapResultFits(type, isArrow);
+  auto fits = this->checkMapResultFits(type, isArrow);
   if (fits.isErr()) {
     this->state.getDiagnostics().error(call->args[1]->loc(), fits.error().message);
     return call;
@@ -283,8 +283,8 @@ void BufferStaticChecker::rememberByteCallback(const Expr *arg, const Type *from
   }
 }
 
-BufferStaticChecker::ResultMapResultFits BufferStaticChecker::mapResultFits(const Type *type,
-                                                                            bool arrow) const {
+BufferStaticChecker::ResultMapResultFits BufferStaticChecker::checkMapResultFits(const Type *type,
+                                                                                 bool arrow) const {
   int64_t low = 0;
   int64_t high = 0;
   bool isBounded = !arrow && type->elementRange(low, high) && type->bytes() != Bytes::Uint8Clamped;
@@ -375,7 +375,7 @@ Expr *BufferStaticChecker::checkBufferFrom(CallExpr *call, MemberExpr *member) {
     this->state.getDiagnostics().error(call->args[1]->loc(), message);
     return call;
   }
-  if (!this->bytesNewChecker->checkBytesSource(source, buffer)) {
+  if (!this->bytesNewChecker->matchBytesSource(source, buffer)) {
     return call;
   }
   Builtin builtin = from->isTypedArray() ? Builtin::BytesFromBytes : Builtin::BytesFromArray;
@@ -449,7 +449,7 @@ Expr *BufferStaticChecker::convertByteFill(Expr *fill) {
   const auto *buffer = Type::bytesType(Bytes::Buffer);
   auto *converted = this->typeRelations->convert(fill, Type::intTy());
   auto byte = ErrorTextBufferLabel::byte();
-  auto fitting = this->byteProofs->valueFits(converted, buffer, byte);
+  auto fitting = this->byteProofs->checkValueFits(converted, buffer, byte);
   if (fitting.isErr()) {
     this->state.getDiagnostics().error(converted->loc(), fitting.error().message);
   }
@@ -503,7 +503,7 @@ Expr *BufferStaticChecker::checkConcat(CallExpr *call, MemberExpr *member) {
   if (list->type->isError()) {
     return call;
   }
-  auto sources = this->concatSources(list->type, buffer);
+  auto sources = this->checkConcatSources(list->type, buffer);
   if (sources.isErr()) {
     this->state.getDiagnostics().error(list->loc(), sources.error().message);
     return call;
@@ -568,7 +568,7 @@ Expr *BufferStaticChecker::checkIsBuffer(CallExpr *call, MemberExpr *member) {
   llvm::ArrayRef<const Type *> members =
       base->isUnion() ? base->members() : llvm::ArrayRef<const Type *>(base);
   bool isUndecided =
-      !tested->isError() && llvm::any_of(members, BufferStaticChecker::mayBeBuffer) &&
+      !tested->isError() && llvm::any_of(members, BufferStaticChecker::canBeBuffer) &&
       (tested->isOptional() || !llvm::all_of(members, BufferStaticChecker::isBuffer));
   if (isUndecided) {
     return this->makeBufferTest(call, member);
@@ -577,7 +577,7 @@ Expr *BufferStaticChecker::checkIsBuffer(CallExpr *call, MemberExpr *member) {
   return this->toBuiltinCall(call, Builtin::BufferIsBuffer, Type::boolTy());
 }
 
-bool BufferStaticChecker::mayBeBuffer(const Type *type) {
+bool BufferStaticChecker::canBeBuffer(const Type *type) {
   return type->isBuffer() || type->bytes() == Bytes::Uint8;
 }
 
@@ -659,13 +659,14 @@ Expr *BufferStaticChecker::checkEmbedBytes(CallExpr *call, NameExpr *name) {
     this->state.getDiagnostics().error(name->loc(), arity.error().message);
     return call;
   }
-  std::string bytes, shown, full;
   auto functionName = GlobalNameTable::getName(GlobalName::EMBED_BYTES);
-  if (!this->jsonStaticChecker->readEmbedded(call, functionName, bytes, shown, full)) {
+  auto embedded = this->jsonStaticChecker->readEmbedded(call, functionName);
+  if (!embedded.has_value()) {
     return call;
   }
+  const std::string &bytes = embedded->bytes;
   if (int64_t(bytes.size()) > Type::kMaxLength) {
-    auto message = ErrorTextBufferStatic::embedSize(shown);
+    auto message = ErrorTextBufferStatic::embedSize(embedded->shown);
     this->state.getDiagnostics().error(call->args[0]->loc(), message);
     return call;
   }
@@ -677,7 +678,7 @@ Expr *BufferStaticChecker::checkEmbedBytes(CallExpr *call, NameExpr *name) {
   auto *literal = this->state.getAst().make<StringLitExpr>(loc, std::move(units));
   literal->type = Type::string();
   auto path = llvm::SmallVector<llvm::UTF16, 64>();
-  llvm::convertUTF8ToUTF16String(full, path);
+  llvm::convertUTF8ToUTF16String(embedded->full, path);
   auto *file =
       this->state.getAst().make<StringLitExpr>(loc, std::u16string(path.begin(), path.end()));
   file->type = Type::string();

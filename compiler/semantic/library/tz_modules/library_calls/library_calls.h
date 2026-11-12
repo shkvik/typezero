@@ -20,15 +20,15 @@ public:
   LibraryCalls(SemanticState &owner, SemanticParts &all);
 
   void prepareLibraries(SourceFile &program);
-  bool inLibrary(llvm::SMLoc loc) const;
+  bool isInLibrary(llvm::SMLoc loc) const;
   Expr *checkLibCall(CallExpr *call, NameExpr *name);
 
 private:
   using ResultIntrinsicShape = Result<const CallExpr *, LibraryCallsIntrinsicShapeError>;
 
-  ResultIntrinsicShape intrinsicShape(const CallExpr *call, const NameExpr *name,
-                                      llvm::StringRef intrinsicName, bool known, unsigned args,
-                                      unsigned typeArgs) const;
+  ResultIntrinsicShape checkIntrinsicShape(const CallExpr *call, const NameExpr *name,
+                                           llvm::StringRef intrinsicName, bool known, unsigned args,
+                                           unsigned typeArgs) const;
 
   struct IntrinsicCall {
     CallExpr *call;
@@ -38,7 +38,15 @@ private:
   };
 
   Expr *checkIntrinsic(const IntrinsicCall &made, LibraryIntrinsic intrinsic);
-  Expr *checkListenerIntrinsic(const IntrinsicCall &made, bool bound);
+  enum class ListenerBinding {
+    PLAIN,
+    BOUND,
+  };
+
+  void prepareLibrary(Module *module);
+  void rememberLibraryItem(Stmt *item, bool hasIntrinsics);
+  void rememberLibraryFunction(FunctionDecl *functionDecl, bool hasIntrinsics);
+  Expr *checkListenerIntrinsic(const IntrinsicCall &made, ListenerBinding binding);
   const Type *flatListenerType(const Type *typeArg) const;
   Expr *checkAsClass(const IntrinsicCall &made);
   Expr *checkAhead(const IntrinsicCall &made);

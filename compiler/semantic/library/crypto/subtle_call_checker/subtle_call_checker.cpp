@@ -34,7 +34,7 @@ SubtleCallChecker::SubtleCallChecker(SemanticState &owner, SemanticParts &all)
 }
 
 SubtleCallChecker::ResultKeyFormatKnown
-SubtleCallChecker::knownFormat(llvm::StringRef format) const {
+SubtleCallChecker::checkKnownFormat(llvm::StringRef format) const {
   static const llvm::StringLiteral formats[] = {"raw", "pkcs8", "spki", "jwk"};
   if (!llvm::is_contained(formats, format)) {
     auto message = ErrorTextKeyFormat::unknown(format);
@@ -49,11 +49,13 @@ SubtleCallChecker::knownFormat(llvm::StringRef format) const {
 }
 
 std::optional<double> SubtleCallChecker::numberLiteral(const Expr *expr) const {
-  if (auto *literal = dyn_cast_or_null<IntLitExpr>(expr)) {
-    return double(literal->value);
+  const auto *integer = dyn_cast_or_null<IntLitExpr>(expr);
+  if (integer != nullptr) {
+    return double(integer->value);
   }
-  if (auto *literal = dyn_cast_or_null<FloatLitExpr>(expr)) {
-    return literal->value;
+  const auto *fraction = dyn_cast_or_null<FloatLitExpr>(expr);
+  if (fraction != nullptr) {
+    return fraction->value;
   }
 
   return std::nullopt;
@@ -81,8 +83,8 @@ std::string SubtleCallChecker::algorithmIn(llvm::StringRef op, llvm::StringRef u
 }
 
 SubtleCallChecker::ResultAlgorithmKnown
-SubtleCallChecker::knownAlgorithm(llvm::StringRef written, llvm::StringRef op,
-                                  llvm::StringRef fallback) const {
+SubtleCallChecker::checkKnownAlgorithm(llvm::StringRef written, llvm::StringRef op,
+                                       llvm::StringRef fallback) const {
   std::string upper = written.upper();
   auto name = this->algorithmIn(op, upper);
   if (name.empty() && !fallback.empty()) {
@@ -93,7 +95,7 @@ SubtleCallChecker::knownAlgorithm(llvm::StringRef written, llvm::StringRef op,
   }
   auto list = SubtleAlgorithms::quotedList(SubtleAlgorithms::algorithmsOf(op), "or");
   auto verb = SubtleAlgorithms::verbOf(op);
-  if (SubtleAlgorithms::experimentalAlgorithm(upper)) {
+  if (SubtleAlgorithms::isExperimentalAlgorithm(upper)) {
     auto message = ErrorTextAlgorithm::experiment(written, verb, list);
 
     return err(SubtleCallCheckerKnownAlgorithmError{
@@ -125,8 +127,8 @@ SubtleCallChecker::knownAlgorithm(llvm::StringRef written, llvm::StringRef op,
 }
 
 SubtleCallChecker::ResultParamsAsObject
-SubtleCallChecker::paramsAsObject(llvm::StringRef name, llvm::StringRef op,
-                                  const Dictionary &dictionary) const {
+SubtleCallChecker::checkParamsAsObject(llvm::StringRef name, llvm::StringRef op,
+                                       const Dictionary &dictionary) const {
   if (!dictionary.required.empty()) {
     llvm::StringRef member = dictionary.required[0];
     auto example = SubtleAlgorithms::exampleOf(member);
@@ -142,9 +144,9 @@ SubtleCallChecker::paramsAsObject(llvm::StringRef name, llvm::StringRef op,
 }
 
 SubtleCallChecker::ResultMembersPresent
-SubtleCallChecker::membersPresent(llvm::StringRef name, llvm::StringRef op,
-                                  const Dictionary &dictionary,
-                                  const ObjectLitExpr *literal) const {
+SubtleCallChecker::checkMembersPresent(llvm::StringRef name, llvm::StringRef op,
+                                       const Dictionary &dictionary,
+                                       const ObjectLitExpr *literal) const {
   for (llvm::StringRef member : dictionary.required) {
     if (this->property(literal, member) == nullptr) {
       auto example = SubtleAlgorithms::exampleOf(member);
@@ -161,7 +163,7 @@ SubtleCallChecker::membersPresent(llvm::StringRef name, llvm::StringRef op,
 }
 
 SubtleCallChecker::ResultShaHashIsKnown
-SubtleCallChecker::knownShaHash(llvm::StringRef hash, llvm::StringRef dictionary) const {
+SubtleCallChecker::checkKnownShaHash(llvm::StringRef hash, llvm::StringRef dictionary) const {
   bool isSha = llvm::StringRef(hash.lower()).starts_with("sha");
   bool isKnownHash = false;
   for (llvm::StringRef a : SubtleAlgorithms::algorithmsOf("digest")) {
@@ -170,7 +172,7 @@ SubtleCallChecker::knownShaHash(llvm::StringRef hash, llvm::StringRef dictionary
   if (isSha && isKnownHash) {
     return ok(hash);
   }
-  if (isSha || SubtleAlgorithms::experimentalAlgorithm(hash.upper())) {
+  if (isSha || SubtleAlgorithms::isExperimentalAlgorithm(hash.upper())) {
     auto list = SubtleAlgorithms::quotedList(SubtleAlgorithms::algorithmsOf("digest"), "or");
     auto message = ErrorTextAlgorithm::hash(hash, dictionary, list);
 
@@ -187,7 +189,8 @@ SubtleCallChecker::knownShaHash(llvm::StringRef hash, llvm::StringRef dictionary
   });
 }
 
-SubtleCallChecker::ResultCurveNameKnown SubtleCallChecker::knownCurve(llvm::StringRef curve) const {
+SubtleCallChecker::ResultCurveNameKnown
+SubtleCallChecker::checkKnownCurve(llvm::StringRef curve) const {
   if (curve != "P-256" && curve != "P-384" && curve != "P-521") {
     auto message = ErrorTextAlgorithm::curve(curve);
 
@@ -200,7 +203,7 @@ SubtleCallChecker::ResultCurveNameKnown SubtleCallChecker::knownCurve(llvm::Stri
   return ok(curve);
 }
 
-SubtleCallChecker::ResultAesLengthValid SubtleCallChecker::aesLength(double bits) const {
+SubtleCallChecker::ResultAesLengthValid SubtleCallChecker::checkAesLength(double bits) const {
   if (bits != 128 && bits != 192 && bits != 256) {
     auto message = ErrorTextAlgorithm::aesLength();
 
@@ -213,7 +216,7 @@ SubtleCallChecker::ResultAesLengthValid SubtleCallChecker::aesLength(double bits
   return ok(bits);
 }
 
-SubtleCallChecker::ResultGcmTagLengthOk SubtleCallChecker::gcmTagLength(double bits) const {
+SubtleCallChecker::ResultGcmTagLengthOk SubtleCallChecker::checkGcmTagLength(double bits) const {
   if (bits != 32 && bits != 64 && bits != 96 && bits != 104 && bits != 112 && bits != 120 &&
       bits != 128) {
     auto message = ErrorTextAlgorithm::gcmTag();
@@ -238,7 +241,7 @@ std::string SubtleCallChecker::literalAlgorithm(const Expr *arg, llvm::StringRef
   if (!written.has_value()) {
     return "";
   }
-  auto known = this->knownAlgorithm(*written, op, fallback);
+  auto known = this->checkKnownAlgorithm(*written, op, fallback);
   if (known.isErr()) {
     bad = true;
     this->state.getDiagnostics().error(nameExpr->loc(), known.error().message);
@@ -247,22 +250,22 @@ std::string SubtleCallChecker::literalAlgorithm(const Expr *arg, llvm::StringRef
   std::string name = known.value();
   auto dictionary = SubtleAlgorithms::dictionaryOf(op, name);
   if (literal == nullptr) {
-    auto object = this->paramsAsObject(name, op, dictionary);
+    auto object = this->checkParamsAsObject(name, op, dictionary);
     if (object.isErr()) {
       bad = true;
       this->state.getDiagnostics().error(nameExpr->loc(), object.error().message);
     }
     return bad ? "" : name;
   }
-  auto present = this->membersPresent(name, op, dictionary, literal);
+  auto present = this->checkMembersPresent(name, op, dictionary, literal);
   if (present.isErr()) {
     bad = true;
     this->state.getDiagnostics().error(literal->loc(), present.error().message);
     return "";
   }
-  bool isReported =
-      this->reportsBadHash(literal, dictionary.name) || this->reportsBadCurve(literal) ||
-      this->reportsBadAesLength(literal, name, op) || this->reportsBadGcmTag(literal, name);
+  bool isReported = this->reportBadHash(literal, dictionary.name) ||
+                    this->reportBadCurve(literal) || this->reportBadAesLength(literal, name, op) ||
+                    this->reportBadGcmTag(literal, name);
   if (isReported) {
     bad = true;
     return "";
@@ -287,7 +290,7 @@ const Expr *SubtleCallChecker::algorithmNameExpr(const Expr *arg,
   return name->value;
 }
 
-bool SubtleCallChecker::reportsBadHash(const ObjectLitExpr *literal, llvm::StringRef dictionary) {
+bool SubtleCallChecker::reportBadHash(const ObjectLitExpr *literal, llvm::StringRef dictionary) {
   const auto *hash = this->property(literal, "hash");
   if (hash == nullptr) {
     return false;
@@ -304,7 +307,7 @@ bool SubtleCallChecker::reportsBadHash(const ObjectLitExpr *literal, llvm::Strin
   if (!written.has_value()) {
     return false;
   }
-  auto sha = this->knownShaHash(*written, dictionary);
+  auto sha = this->checkKnownShaHash(*written, dictionary);
   if (sha.isErr()) {
     this->state.getDiagnostics().error(value->loc(), sha.error().message);
     return true;
@@ -313,7 +316,7 @@ bool SubtleCallChecker::reportsBadHash(const ObjectLitExpr *literal, llvm::Strin
   return false;
 }
 
-bool SubtleCallChecker::reportsBadCurve(const ObjectLitExpr *literal) {
+bool SubtleCallChecker::reportBadCurve(const ObjectLitExpr *literal) {
   const auto *curve = this->property(literal, "namedCurve");
   if (curve == nullptr) {
     return false;
@@ -322,7 +325,7 @@ bool SubtleCallChecker::reportsBadCurve(const ObjectLitExpr *literal) {
   if (!written.has_value()) {
     return false;
   }
-  auto named = this->knownCurve(*written);
+  auto named = this->checkKnownCurve(*written);
   if (named.isErr()) {
     this->state.getDiagnostics().error(curve->value->loc(), named.error().message);
     return true;
@@ -331,8 +334,8 @@ bool SubtleCallChecker::reportsBadCurve(const ObjectLitExpr *literal) {
   return false;
 }
 
-bool SubtleCallChecker::reportsBadAesLength(const ObjectLitExpr *literal, llvm::StringRef name,
-                                            llvm::StringRef op) {
+bool SubtleCallChecker::reportBadAesLength(const ObjectLitExpr *literal, llvm::StringRef name,
+                                           llvm::StringRef op) {
   bool isSized = name.starts_with("AES-") && (op == "generateKey" || op == "get key length");
   const ObjectLitExpr::Property *length = isSized ? this->property(literal, "length") : nullptr;
   if (length == nullptr) {
@@ -342,7 +345,7 @@ bool SubtleCallChecker::reportsBadAesLength(const ObjectLitExpr *literal, llvm::
   if (!bits.has_value()) {
     return false;
   }
-  auto valid = this->aesLength(*bits);
+  auto valid = this->checkAesLength(*bits);
   if (valid.isErr()) {
     this->state.getDiagnostics().error(length->value->loc(), valid.error().message);
     return true;
@@ -351,7 +354,7 @@ bool SubtleCallChecker::reportsBadAesLength(const ObjectLitExpr *literal, llvm::
   return false;
 }
 
-bool SubtleCallChecker::reportsBadGcmTag(const ObjectLitExpr *literal, llvm::StringRef name) {
+bool SubtleCallChecker::reportBadGcmTag(const ObjectLitExpr *literal, llvm::StringRef name) {
   const ObjectLitExpr::Property *tag =
       name == "AES-GCM" ? this->property(literal, "tagLength") : nullptr;
   if (tag == nullptr) {
@@ -361,7 +364,7 @@ bool SubtleCallChecker::reportsBadGcmTag(const ObjectLitExpr *literal, llvm::Str
   if (!bits.has_value()) {
     return false;
   }
-  auto valid = this->gcmTagLength(*bits);
+  auto valid = this->checkGcmTagLength(*bits);
   if (valid.isErr()) {
     this->state.getDiagnostics().error(tag->value->loc(), valid.error().message);
     return true;
@@ -454,7 +457,7 @@ std::string SubtleCallChecker::keyFormatAt(SubtleCall &subtle, size_t index) {
   if (!written.has_value()) {
     return "";
   }
-  auto known = this->knownFormat(*written);
+  auto known = this->checkKnownFormat(*written);
   if (known.isErr()) {
     subtle.bad = true;
     this->state.getDiagnostics().error(given->loc(), known.error().message);
@@ -652,16 +655,16 @@ Expr *SubtleCallChecker::checkRejectedSubtleCall(SubtleCall &subtle) {
   CallExpr *call = subtle.call;
   std::vector<Expr *> &args = call->args;
   call->type = Type::error();
-  const auto *subtleClass = this->state.getLibraryDeclarations().findLibraryClass("SubtleCrypto");
+  const auto *subtleClass =
+      this->state.getLibraryDeclarations().findLibraryClass(LibraryClass::SUBTLE_CRYPTO);
   auto methods = this->classDeclarer->methodsNamed(subtleClass, subtle.member->name);
   FuncSymbol *function = methods.size() == 1 ? methods[0]->sym : nullptr;
   for (size_t index = 0; index < args.size(); ++index) {
-    if (subtle.checkedArgs[index]) {
-      continue;
+    if (!subtle.checkedArgs[index]) {
+      bool isTyped = function != nullptr && index < function->params.size();
+      args[index] = isTyped ? this->argumentChecker->checkArg(args[index], function->params[index])
+                            : this->exprChecker->checkExpr(args[index]);
     }
-    bool isTyped = function != nullptr && index < function->params.size();
-    args[index] = isTyped ? this->argumentChecker->checkArg(args[index], function->params[index])
-                          : this->exprChecker->checkExpr(args[index]);
   }
 
   return call;
@@ -680,14 +683,14 @@ Expr *SubtleCallChecker::finishSubtleCall(SubtleCall &subtle, const Type *expect
   } else {
     checked = this->methodCallChecker->checkMethodCall(subtle.call, member, expected);
   }
-  if (!this->keyDataFits(subtle)) {
+  if (!this->matchKeyData(subtle)) {
     checked->type = Type::error();
   }
 
   return checked;
 }
 
-bool SubtleCallChecker::keyDataFits(const SubtleCall &subtle) {
+bool SubtleCallChecker::matchKeyData(const SubtleCall &subtle) {
   auto *data = this->argAt(subtle.call, 1);
   bool isUnknown =
       data == nullptr || subtle.keyFormat.empty() || data->type == nullptr || data->type->isError();
@@ -700,7 +703,7 @@ bool SubtleCallChecker::keyDataFits(const SubtleCall &subtle) {
     return true;
   }
   bool isJwkFormat = subtle.keyFormat == "jwk";
-  if (isJwkFormat && this->holdsBytes(type)) {
+  if (isJwkFormat && this->isHoldingBytes(type)) {
     auto message = ErrorTextSubtleKeyData::jwk(type->name());
     this->state.getDiagnostics().error(bare->loc(), message);
     return false;
@@ -725,7 +728,7 @@ const Expr *SubtleCallChecker::withoutImplicitCasts(const Expr *expr) const {
   return bare;
 }
 
-bool SubtleCallChecker::holdsBytes(const Type *type) const {
+bool SubtleCallChecker::isHoldingBytes(const Type *type) const {
   if (type->isBytes()) {
     return true;
   }

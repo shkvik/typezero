@@ -476,7 +476,7 @@ void ReturnChecker::walkVoidReturn(ReturnStmt *returnStmt, const FuncSymbol *fun
   if (!function->discardsResult) {
     return;
   }
-  auto used = this->resultChecker->usedCallbackValue(returnStmt->value);
+  auto used = this->resultChecker->checkUsedCallbackValue(returnStmt->value);
   if (used.isErr()) {
     this->state.getDiagnostics().error(returnStmt->value->loc(), used.error().message);
   }
@@ -514,7 +514,8 @@ bool ReturnChecker::isExit(const Stmt *stmt) const {
   return isStopping;
 }
 
-bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels) const {
+bool ReturnChecker::isAlwaysReturning(const Stmt *stmt,
+                                      llvm::ArrayRef<llvm::StringRef> labels) const {
   auto whole = ReturnPart{
       .stmt = stmt,
       .labels = std::vector<llvm::StringRef>(labels.begin(), labels.end()),

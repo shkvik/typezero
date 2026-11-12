@@ -27,6 +27,13 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+constexpr llvm::StringLiteral kFatalOption = "fatal";
+constexpr llvm::StringLiteral kValuePlaceholder = "x";
+
+}
+
 BytesNewChecker::BytesNewChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->prelude = &all.prelude;
@@ -58,10 +65,10 @@ std::optional<std::u16string> BytesNewChecker::literalText(const Expr *expr) con
   return std::nullopt;
 }
 
-bool BytesNewChecker::mayBeFatal(const Expr *options) const {
+bool BytesNewChecker::canBeFatal(const Expr *options) const {
   auto answers = std::vector<bool>();
   for (const Expr *node : ChildrenFirst::order(options, this, &BytesNewChecker::spreadOptions)) {
-    bool isFatal = this->nodeMayBeFatal(node, answers);
+    bool isFatal = this->canNodeBeFatal(node, answers);
     answers.push_back(isFatal);
   }
 
@@ -83,13 +90,13 @@ NodeChildren<const Expr *> BytesNewChecker::spreadOptions(const Expr *options) c
   return spreads;
 }
 
-bool BytesNewChecker::nodeMayBeFatal(const Expr *options, std::vector<bool> &answers) const {
+bool BytesNewChecker::canNodeBeFatal(const Expr *options, std::vector<bool> &answers) const {
   if (options->type->isError()) {
     return false;
   }
   auto *literal = dyn_cast<ObjectLitExpr>(options);
   if (literal == nullptr) {
-    const auto *field = options->type->field("fatal");
+    const auto *field = options->type->field(kFatalOption);
     return field != nullptr && !field->type->isUndefined();
   }
   size_t spreadCount = this->spreadOptions(options).size();
@@ -100,23 +107,23 @@ bool BytesNewChecker::nodeMayBeFatal(const Expr *options, std::vector<bool> &ans
     if (property.spread()) {
       isFatal = isFatal || spreads[nextSpread];
       nextSpread += 1;
-    } else if (property.name == "fatal") {
-      isFatal = this->fatalFlag(property.value);
+    } else if (property.name == kFatalOption) {
+      isFatal = this->isFatalFlag(property.value);
     }
   }
 
   return isFatal;
 }
 
-bool BytesNewChecker::fatalFlag(const Expr *value) const {
-  const Expr *plain = value;
-  plain = ExprParts::withoutImplicitCasts(plain);
-  auto *flag = dyn_cast<BoolLitExpr>(plain);
+bool BytesNewChecker::isFatalFlag(const Expr *value) const {
+  const auto *plain = ExprParts::withoutImplicitCasts(value);
+  const auto *flag = dyn_cast<BoolLitExpr>(plain);
 
   return !isa<UndefinedExpr>(plain) && !(flag != nullptr && !flag->value);
 }
 
-BytesNewChecker::ResultDecoderLabel BytesNewChecker::decoderLabel(llvm::StringRef label) const {
+BytesNewChecker::ResultDecoderLabel
+BytesNewChecker::checkDecoderLabel(llvm::StringRef label) const {
   std::string lower = label.trim(" \t\n\f\r").lower();
   const char *found = tz_encoding_name(lower.c_str());
   if (found == nullptr) {
@@ -131,7 +138,7 @@ BytesNewChecker::ResultDecoderLabel BytesNewChecker::decoderLabel(llvm::StringRe
   return ok(found);
 }
 
-BytesNewChecker::ResultViewedBuffer BytesNewChecker::viewedBuffer(const Type *buffer) const {
+BytesNewChecker::ResultViewedBuffer BytesNewChecker::checkViewedBuffer(const Type *buffer) const {
   if (buffer->bytes() != Bytes::ArrayBuffer && !buffer->isError()) {
     auto message = ErrorTextBytesNew::viewOver(buffer->name(), buffer->isTypedArray());
 
@@ -269,7 +276,7 @@ Expr *BytesNewChecker::checkDataViewNew(CallExpr *call, const Type *type) {
     return call;
   }
   call->args[0] = this->exprChecker->checkExpr(call->args[0]);
-  auto viewed = this->viewedBuffer(call->args[0]->type);
+  auto viewed = this->checkViewedBuffer(call->args[0]->type);
   if (viewed.isErr()) {
     this->state.getDiagnostics().error(call->args[0]->loc(), viewed.error().message);
     return call;
@@ -303,7 +310,7 @@ Expr *BytesNewChecker::checkTextDecoderNew(CallExpr *call, const Type *type) {
   if (call->args.size() == 2) {
     const auto *options = this->decoderOptionsType();
     auto *given = this->exprChecker->checkExpr(call->args[1], options);
-    isFatal = this->mayBeFatal(given);
+    isFatal = this->canBeFatal(given);
     auto what = ErrorTextTextDecoder::options();
     checked.push_back(this->typeRelations->coerce(given, options, what));
   }
@@ -337,7 +344,7 @@ std::optional<Expr *> BytesNewChecker::checkDecoderLabelArg(CallExpr *call, IntL
   }
   call->args[0] = this->argumentChecker->checkArg(label, Type::string());
   resolved->value = 0;
-  if (!this->decoderLabelsFit(call->args[0], label->loc())) {
+  if (!this->matchDecoderLabels(call->args[0], label->loc())) {
     return std::nullopt;
   }
 
@@ -347,7 +354,7 @@ std::optional<Expr *> BytesNewChecker::checkDecoderLabelArg(CallExpr *call, IntL
 std::optional<std::u16string> BytesNewChecker::knownDecoderName(const Expr *label,
                                                                 const std::u16string &text) {
   auto written = ToUtf8::toUtf8(text);
-  auto decoded = this->decoderLabel(written);
+  auto decoded = this->checkDecoderLabel(written);
   if (decoded.isErr()) {
     this->state.getDiagnostics().error(label->loc(), decoded.error().message);
     return std::nullopt;
@@ -357,7 +364,7 @@ std::optional<std::u16string> BytesNewChecker::knownDecoderName(const Expr *labe
   return std::u16string(found, found + strlen(found));
 }
 
-bool BytesNewChecker::decoderLabelsFit(const Expr *checked, llvm::SMLoc at) {
+bool BytesNewChecker::matchDecoderLabels(const Expr *checked, llvm::SMLoc at) {
   bool isSkipped = this->state.getBytesStore().isInsideDecoderParse() || checked->type->isError() ||
                    this->indexProofs->isExempt(at);
   if (isSkipped) {
@@ -370,7 +377,7 @@ bool BytesNewChecker::decoderLabelsFit(const Expr *checked, llvm::SMLoc at) {
     return false;
   }
   for (const std::string &each : *labels) {
-    auto decoded = this->decoderLabel(each);
+    auto decoded = this->checkDecoderLabel(each);
     if (decoded.isErr()) {
       this->state.getDiagnostics().error(at, decoded.error().message);
       return false;
@@ -430,7 +437,7 @@ Expr *BytesNewChecker::checkTypedArrayNew(CallExpr *call, const Type *type) {
     this->state.getDiagnostics().error(source->loc(), message);
     return call;
   }
-  if (!this->checkBytesSource(source, type)) {
+  if (!this->matchBytesSource(source, type)) {
     return call;
   }
   Builtin builtin = from->isTypedArray() ? Builtin::BytesFromBytes : Builtin::BytesFromArray;
@@ -454,18 +461,18 @@ Expr *BytesNewChecker::checkBytesValues(CallExpr *call, ArrayLitExpr *literal, c
       type->bytes() == Type::Bytes::Uint8Clamped ? Type::intTy() : type->elementType();
   auto what = ErrorTextByteView::element(type->name());
   call->type = Type::error();
-  bool isSpreading =
-      llvm::any_of(literal->elements, [](const ArrayLitExpr::Element &e) { return e.spread; });
+  auto isSpread = std::bind_front(&BytesNewChecker::isSpreadElement, this);
+  bool isSpreading = llvm::any_of(literal->elements, isSpread);
   if (!isSpreading) {
     auto values = std::vector<Expr *>();
-    for (ArrayLitExpr::Element &e : literal->elements) {
-      if (e.hole) {
+    for (ArrayLitExpr::Element &item : literal->elements) {
+      if (item.hole) {
         auto message = ErrorTextArrayHole::hole();
-        this->state.getDiagnostics().error(e.expr->loc(), message);
+        this->state.getDiagnostics().error(item.expr->loc(), message);
         return call;
       }
-      auto *value = this->argumentChecker->checkArg(e.expr, element);
-      auto fitting = this->byteProofs->valueFits(value, type, what);
+      auto *value = this->argumentChecker->checkArg(item.expr, element);
+      auto fitting = this->byteProofs->checkValueFits(value, type, what);
       if (fitting.isErr()) {
         this->state.getDiagnostics().error(value->loc(), fitting.error().message);
       }
@@ -481,14 +488,14 @@ Expr *BytesNewChecker::checkBytesValues(CallExpr *call, ArrayLitExpr *literal, c
     return call;
   }
   bool isOk = true;
-  for (const ArrayLitExpr::Element &e : literal->elements) {
-    if (!e.spread) {
-      auto fitting = this->byteProofs->valueFits(e.expr, type, what);
+  for (const ArrayLitExpr::Element &item : literal->elements) {
+    if (!item.spread) {
+      auto fitting = this->byteProofs->checkValueFits(item.expr, type, what);
       if (fitting.isErr()) {
-        this->state.getDiagnostics().error(e.expr->loc(), fitting.error().message);
+        this->state.getDiagnostics().error(item.expr->loc(), fitting.error().message);
       }
     } else {
-      isOk &= this->checkBytesSource(e.expr, type);
+      isOk &= this->matchBytesSource(item.expr, type);
     }
   }
   if (!isOk) {
@@ -501,15 +508,12 @@ Expr *BytesNewChecker::checkBytesValues(CallExpr *call, ArrayLitExpr *literal, c
   return call;
 }
 
-bool BytesNewChecker::checkBytesSource(Expr *source, const Type *target) {
+bool BytesNewChecker::matchBytesSource(Expr *source, const Type *target) {
   const Type *from = source->type;
   if (from->isError()) {
     return false;
   }
-  const Type *element = from->isTypedArray() ? from->elementType()
-                        : from->isArray()    ? from->inner()
-                        : from->isIterator() ? from->yielded()
-                                             : nullptr;
+  const auto *element = this->sourceElement(from);
   if (element == nullptr) {
     auto message = ErrorTextBytesSource::notSource(target->name(), from->name(), from->isString());
     this->state.getDiagnostics().error(source->loc(), message);
@@ -527,13 +531,14 @@ bool BytesNewChecker::checkBytesSource(Expr *source, const Type *target) {
     this->state.getDiagnostics().error(source->loc(), message);
     return false;
   }
-  int64_t low, hi;
-  if (!target->elementRange(low, hi)) {
+  int64_t low = 0;
+  int64_t high = 0;
+  if (!target->elementRange(low, high)) {
     return true;
   }
   Bytes kind = target->bytes();
   auto text = BytesCheckHelpers::valueText(source);
-  auto wrap = BytesCheckHelpers::wrapHint(kind, "x");
+  auto wrap = BytesCheckHelpers::wrapHint(kind, kValuePlaceholder.str());
   auto hint = ErrorTextBytesSource::hint(target->name(), text, wrap);
   if (element->isFloat()) {
     auto message = ErrorTextBytesSource::doubles(from->name(), target->name(), text);
@@ -543,23 +548,42 @@ bool BytesNewChecker::checkBytesSource(Expr *source, const Type *target) {
   if (kind == Bytes::Uint8Clamped) {
     return true;
   }
-  int64_t slo, shi;
-  if (from->isTypedArray() && from->elementRange(slo, shi)) {
-    if (slo >= low && shi <= hi) {
+  int64_t sourceLow = 0;
+  int64_t sourceHigh = 0;
+  if (from->isTypedArray() && from->elementRange(sourceLow, sourceHigh)) {
+    if (sourceLow >= low && sourceHigh <= high) {
       return true;
     }
-    auto fromRange = ErrorTextBytes::range(slo, shi);
-    auto range = ErrorTextBytes::range(low, hi);
+    auto fromRange = ErrorTextBytes::range(sourceLow, sourceHigh);
+    auto range = ErrorTextBytes::range(low, high);
     auto message =
         ErrorTextBytesSource::mayNotFit(from->name(), fromRange, target->name(), range, hint);
     this->state.getDiagnostics().error(source->loc(), message);
     return false;
   }
-  auto range = ErrorTextBytes::range(low, hi);
+  auto range = ErrorTextBytes::range(low, high);
   auto message = ErrorTextBytesSource::unproven(from->name(), target->name(), range, hint);
   this->state.getDiagnostics().error(source->loc(), message);
 
   return false;
+}
+
+const Type *BytesNewChecker::sourceElement(const Type *from) const {
+  if (from->isTypedArray()) {
+    return from->elementType();
+  }
+  if (from->isArray()) {
+    return from->inner();
+  }
+  if (from->isIterator()) {
+    return from->yielded();
+  }
+
+  return nullptr;
+}
+
+bool BytesNewChecker::isSpreadElement(const ArrayLitExpr::Element &element) const {
+  return element.spread;
 }
 
 }

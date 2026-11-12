@@ -32,13 +32,13 @@ const Type *ResultMethodChecker::halfParam(const Type *half) const {
   return half->isVoid() ? Type::undefinedTy() : half;
 }
 
-bool ResultMethodChecker::givesType(const Type *half) const {
+bool ResultMethodChecker::isGivingType(const Type *half) const {
   return !half->isNever() && !half->isVoid();
 }
 
 Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
                                              const Type *expected) {
-  auto run = this->resultCall(call, member);
+  auto run = this->checkResultCall(call, member);
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
@@ -76,8 +76,8 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
   return call;
 }
 
-ResultMethodChecker::ResultCall ResultMethodChecker::resultCall(CallExpr *call,
-                                                                MemberExpr *member) const {
+ResultMethodChecker::ResultCall ResultMethodChecker::checkResultCall(CallExpr *call,
+                                                                     MemberExpr *member) const {
   const Type *type = member->object->type;
   const Type *value = type->okType();
   const Type *error = type->errType();
@@ -120,7 +120,7 @@ const Type *ResultMethodChecker::wantedType(const Type *expected) const {
 Expr *ResultMethodChecker::checkUnwrapOr(const ResultCall &run) {
   CallExpr *call = run.call;
   Expr *&arg = call->args[0];
-  const Type *hint = this->givesType(run.value) ? run.value : nullptr;
+  const Type *hint = this->isGivingType(run.value) ? run.value : nullptr;
   arg = this->exprChecker->checkExpr(arg, hint);
   const Type *other = arg->type;
   if (other->isError()) {
@@ -168,19 +168,20 @@ Expr *ResultMethodChecker::checkResultMatch(const ResultCall &run, const Type *e
   CallExpr *call = run.call;
   const auto *wanted = this->wantedType(expected);
   const Type *both = wanted != nullptr && !wanted->isVoid() ? wanted : nullptr;
-  const auto *a = this->halfCallbackReturn(run, call->args[0], run.value, both);
-  const auto *b = this->halfCallbackReturn(run, call->args[1], run.error, both);
+  const auto *valueReturn = this->halfCallbackReturn(run, call->args[0], run.value, both);
+  const auto *errorReturn = this->halfCallbackReturn(run, call->args[1], run.error, both);
   this->flowChecker->calledFunction();
-  if (a == nullptr || b == nullptr) {
+  if (valueReturn == nullptr || errorReturn == nullptr) {
     return call;
   }
-  if (a->isVoid() && b->isVoid()) {
-    call->type = a;
+  if (valueReturn->isVoid() && errorReturn->isVoid()) {
+    call->type = valueReturn;
     return call;
   }
-  const Type *result = a->isVoid() || b->isVoid() ? nullptr : LiteralTypes::unionUnify(a, b);
+  bool isOneVoid = valueReturn->isVoid() || errorReturn->isVoid();
+  const Type *result = isOneVoid ? nullptr : LiteralTypes::unionUnify(valueReturn, errorReturn);
   if (result == nullptr || result->isError()) {
-    auto message = ErrorTextResultMethod::match(a->name(), b->name());
+    auto message = ErrorTextResultMethod::match(valueReturn->name(), errorReturn->name());
     this->state.getDiagnostics().error(run.member->loc(), message);
     return call;
   }
@@ -234,19 +235,19 @@ void ResultMethodChecker::typeResultCall(const ResultCall &run, const Type *retu
   run.call->type = run.type;
 }
 
-bool ResultMethodChecker::returnsResult(const ResultCall &run, const Type *returnType) {
+bool ResultMethodChecker::reportNotResult(const ResultCall &run, const Type *returnType) {
   if (returnType->isResult()) {
-    return true;
+    return false;
   }
   bool isAndThen = run.builtin == Builtin::ResultAndThen;
   auto message = ErrorTextResultMethod::result(run.name, returnType->name(), isAndThen);
   this->state.getDiagnostics().error(run.call->args[0]->loc(), message);
 
-  return false;
+  return true;
 }
 
 void ResultMethodChecker::typeChainedCall(const ResultCall &run, const Type *returnType) {
-  if (!this->returnsResult(run, returnType)) {
+  if (this->reportNotResult(run, returnType)) {
     return;
   }
   const auto *common = this->resultTypes->unifyHalf(run.error, returnType->errType());
@@ -260,7 +261,7 @@ void ResultMethodChecker::typeChainedCall(const ResultCall &run, const Type *ret
 }
 
 void ResultMethodChecker::typeOrElseCall(const ResultCall &run, const Type *returnType) {
-  if (!this->returnsResult(run, returnType)) {
+  if (this->reportNotResult(run, returnType)) {
     return;
   }
   const auto *common = this->resultTypes->unifyHalf(run.value, returnType->okType());

@@ -17,6 +17,43 @@ class ConstantFolder;
 class ProcessChecker;
 class ArgumentChecker;
 
+struct CryptoDataKinds {
+  bool isString;
+  bool isKey;
+  bool isArrayBuffer;
+};
+
+inline constexpr CryptoDataKinds kAnyCryptoData{
+    .isString = true,
+    .isKey = true,
+    .isArrayBuffer = true,
+};
+inline constexpr CryptoDataKinds kTextOrBuffers{
+    .isString = true,
+    .isKey = false,
+    .isArrayBuffer = true,
+};
+inline constexpr CryptoDataKinds kTextOrViews{
+    .isString = true,
+    .isKey = false,
+    .isArrayBuffer = false,
+};
+inline constexpr CryptoDataKinds kBuffersOnly{
+    .isString = false,
+    .isKey = false,
+    .isArrayBuffer = true,
+};
+inline constexpr CryptoDataKinds kKeysOrBuffers{
+    .isString = false,
+    .isKey = true,
+    .isArrayBuffer = true,
+};
+
+enum class DigestUse {
+  HASH,
+  HMAC,
+};
+
 class CryptoArgs {
 public:
   CryptoArgs(SemanticState &owner, SemanticParts &all);
@@ -28,30 +65,35 @@ public:
   Expr *cryptoBool(llvm::SMLoc loc, bool value);
   Expr *cryptoString(llvm::SMLoc loc, llvm::StringRef text);
   Expr *cryptoUndefined(llvm::SMLoc loc);
-  Expr *cryptoData(Expr *arg, llvm::StringRef what, bool strings, bool keys, bool buffers);
+  Expr *cryptoData(Expr *arg, llvm::StringRef what, CryptoDataKinds kinds);
   Expr *cryptoEncoding(CallExpr *call, size_t index, llvm::StringRef functionName, int fallback);
   Expr *cryptoText(Expr *made, Expr *encoding);
-  bool cryptoOptions(Expr *arg, llvm::StringRef functionName,
-                     llvm::ArrayRef<llvm::StringRef> allowed, llvm::StringMap<Expr *> &options);
+  bool readCryptoOptions(Expr *arg, llvm::StringRef functionName,
+                         llvm::ArrayRef<llvm::StringRef> allowed, llvm::StringMap<Expr *> &options);
   int cryptoChoice(Expr *arg, llvm::StringRef what, llvm::ArrayRef<llvm::StringRef> values);
-  Expr *cryptoMd(Expr *arg, bool hmac);
+  Expr *cryptoMd(Expr *arg, DigestUse use);
   Expr *cryptoCipher(Expr *arg);
   Expr *cryptoNumber(Expr *arg);
   std::optional<double> knownNumber(const Expr *arg) const;
   std::string numberText(double value) const;
-  bool checkWhole(const Expr *arg, llvm::StringRef name, double least);
-  bool checkCipherLengths(const Expr *cipher, const Expr *key, const Expr *iv);
+  bool matchWhole(const Expr *arg, llvm::StringRef name, double least);
+  bool matchCipherLengths(const Expr *cipher, const Expr *key, const Expr *iv);
   Expr *cryptoKey(Expr *arg, llvm::StringRef what);
   Expr *cryptoKeyObject(Expr *arg, llvm::StringRef what);
-  bool cryptoSignKey(Expr *arg, llvm::StringRef functionName, bool priv, std::vector<Expr *> &args);
+  bool appendSignKey(Expr *arg, llvm::StringRef functionName, bool priv, std::vector<Expr *> &args);
   bool rejectCryptoCallback(CallExpr *call, size_t index, llvm::StringRef functionName,
                             llvm::StringRef hint);
 
 private:
+  bool isCryptoData(CryptoDataKinds kinds, const Type *candidate) const;
+  bool isAnyLengthHash(llvm::StringRef name) const;
+  int64_t cipherKeyBytes(llvm::StringRef name) const;
+  std::optional<int64_t> bytesOf(const Expr *expr) const;
+  std::optional<size_t> directMdIndex(llvm::StringRef name) const;
   using ResultKeyObjectType = Result<const Type *, CryptoArgsKeyObjectTypeError>;
 
   std::optional<double> plainNumber(const Expr *arg) const;
-  ResultKeyObjectType keyObjectType(const Type *type, llvm::StringRef what) const;
+  ResultKeyObjectType checkKeyObjectType(const Type *type, llvm::StringRef what) const;
   std::optional<std::string> literalOf(const Expr *expr) const;
 
   SemanticState &state;

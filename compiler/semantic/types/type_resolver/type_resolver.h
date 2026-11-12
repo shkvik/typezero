@@ -25,6 +25,8 @@ class ClassValueChecker;
 class BuiltinModuleChecker;
 class GenericClassInstantiator;
 
+enum class TypeOperatorsResolveTypeOpErrorCode;
+
 class TypeResolver {
 public:
   TypeResolver(SemanticState &owner, SemanticParts &all);

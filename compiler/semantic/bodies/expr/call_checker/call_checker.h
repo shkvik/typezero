@@ -71,6 +71,13 @@ class RuntimeObjectChecker;
 class FunctionMethodChecker;
 class GlobalFunctionChecker;
 
+enum class DictMethodsCheckMapStaticErrorCode;
+enum class DictMethodsCheckDictMethodErrorCode;
+enum class ObjectCheckerCheckObjectCallErrorCode;
+enum class IteratorMethodsCheckIteratorFromErrorCode;
+enum class PromiseCheckerCheckPromiseMethodErrorCode;
+enum class UnknownCheckerCheckUnknownMethodErrorCode;
+
 class CallChecker {
 public:
   using ResultValueCallTyped = Result<Expr *, CallCheckerCheckValueCallError>;
@@ -92,50 +99,79 @@ private:
   using ResultTypeArgsAbsent = Result<const MemberExpr *, CallCheckerNoTypeArgsError>;
   using ResultTypeArgsUsable = Result<const FuncSymbol *, CallCheckerDirectTypeArgsError>;
 
-  bool namesGlobal(const Expr *expr, GlobalName global) const;
-  bool isGlobalThisMember(const Expr *expr, GlobalName global) const;
-  ResultTypeArgsAbsent noTypeArgs(const MemberExpr *member) const;
-  ResultNoSpreadPassed spreadFree(const CallExpr *call, size_t index) const;
-  ResultCalleeCallable calleeCallable(const Type *type, const NameExpr *calleeName) const;
-  ResultTypeArgsUsable directTypeArgs(const FuncSymbol *function,
-                                      llvm::ArrayRef<TypeRef> typeArgs) const;
-
+  ResultTypeArgsAbsent checkNoTypeArgs(const MemberExpr *member) const;
+  ResultCalleeCallable checkCalleeCallable(const Type *type, const NameExpr *calleeName) const;
   void rewriteSymbolCallee(CallExpr *call);
   void rejectTypeArgs(MemberExpr *member);
   void rejectGlobalTypeArgs(MemberExpr *member);
-  Expr *checkCalleeValueCall(CallExpr *call);
-  Expr *checkMapStaticCall(CallExpr *call, MemberExpr *member);
-  Expr *checkListParamMethod(CallExpr *call, MemberExpr *member);
-  Expr *checkIteratorFromCall(CallExpr *call, MemberExpr *member);
-  Expr *checkNumberStaticCall(CallExpr *call, MemberExpr *member);
-  Expr *checkLocaleMethod(CallExpr *call, MemberExpr *member);
-  Expr *checkDictReceiverCall(CallExpr *call, MemberExpr *member);
-  Expr *checkUnionReceiverCall(CallExpr *call, MemberExpr *member);
-  Expr *checkTupleReceiverCall(CallExpr *call, MemberExpr *member);
-  Expr *checkCollectionStaticCall(CallExpr *call, MemberExpr *member);
-  Expr *tupleArrayCopy(MemberExpr *member, const ArrayMethodInfo *arrayMethod);
-  std::optional<Expr *> checkTimerCall(CallExpr *call, NameExpr *name);
-  std::optional<Expr *> checkGlobalFunctionCall(CallExpr *call, NameExpr *name);
-  Expr *reportNoMethod(CallExpr *call, MemberExpr *member, const Type *receiver);
-  Expr *checkNamedCall(CallExpr *call, NameExpr *name, const Type *expected);
-  Expr *checkScopedCall(CallExpr *call, NameExpr *name, const Type *expected);
-  Expr *reportNotCallable(CallExpr *call, NameExpr *name, const ScopeEntry &entry);
   Expr *checkMemberCall(CallExpr *call, MemberExpr *member, const Type *expected);
-  Expr *checkReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
-  Expr *checkObjectStaticCall(CallExpr *call, MemberExpr *member, const Type *expected);
-  Expr *checkClassReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
   Expr *checkLanguageStaticCall(CallExpr *call, MemberExpr *member, const Type *expected);
   Expr *checkLibraryStaticCall(CallExpr *call, MemberExpr *member, const Type *expected);
-  Expr *checkShapedReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkNumberStaticCall(CallExpr *call, MemberExpr *member);
+  Expr *checkObjectStaticCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  llvm::SMLoc objectCallErrorPlace(const CallExpr *call, const MemberExpr *member,
+                                   ObjectCheckerCheckObjectCallErrorCode code) const;
+  llvm::SMLoc firstArgumentPlace(const CallExpr *call, const MemberExpr *member) const;
+  Expr *checkCollectionStaticCall(CallExpr *call, MemberExpr *member);
+  Expr *checkIteratorFromCall(CallExpr *call, MemberExpr *member);
+  llvm::SMLoc iteratorFromErrorPlace(const CallExpr *call, const MemberExpr *member,
+                                     IteratorMethodsCheckIteratorFromErrorCode code) const;
+  Expr *checkMapStaticCall(CallExpr *call, MemberExpr *member);
+  llvm::SMLoc mapStaticErrorPlace(const CallExpr *call, const MemberExpr *member,
+                                  DictMethodsCheckMapStaticErrorCode code) const;
+  Expr *checkReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  std::optional<Expr *> checkUnknownReceiverCall(CallExpr *call, MemberExpr *member);
+  llvm::SMLoc unknownMethodErrorPlace(const MemberExpr *member,
+                                      UnknownCheckerCheckUnknownMethodErrorCode code) const;
   Expr *checkLibraryReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
-  Expr *checkPromiseReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
   Expr *checkCallableReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
-  Expr *checkFunctionNameCall(CallExpr *call, NameExpr *name, FuncSymbol *function,
-                              const Type *expected);
+  Expr *checkThisReceiverCall(CallExpr *call, MemberExpr *member);
+  Expr *checkTimerReceiverCall(CallExpr *call, MemberExpr *member);
+  Expr *checkListParamMethod(CallExpr *call, MemberExpr *member);
+  Expr *checkPromiseReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  llvm::SMLoc promiseMethodErrorPlace(const CallExpr *call, const MemberExpr *member,
+                                      PromiseCheckerCheckPromiseMethodErrorCode code) const;
+  Expr *checkShapedReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  void walkMatchReceiver(MemberExpr *member);
+  Expr *checkSettledReceiverCall(CallExpr *call, MemberExpr *member, const Type *receiver,
+                                 const Type *expected);
+  Expr *checkUnionReceiverCall(CallExpr *call, MemberExpr *member);
+  Expr *checkClassReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
   Expr *checkValueReceiverCall(CallExpr *call, MemberExpr *member, const Type *receiver,
                                const Type *expected);
+  Expr *checkNonTupleReceiverCall(CallExpr *call, MemberExpr *member, const Type *receiver,
+                                  const Type *expected);
+  Expr *checkFieldReceiverCall(CallExpr *call, MemberExpr *member);
+  Expr *tupleArrayCopy(MemberExpr *member, const ArrayMethodInfo *arrayMethod);
+  Expr *checkTupleReceiverCall(CallExpr *call, MemberExpr *member);
+  Expr *checkLocaleMethod(CallExpr *call, MemberExpr *member);
   Expr *checkPlainValueMethod(CallExpr *call, MemberExpr *member, const Type *receiver,
                               const Type *expected);
+  Expr *checkArrayReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkNumberReceiverCall(CallExpr *call, MemberExpr *member);
+  Expr *checkBoolToString(CallExpr *call, MemberExpr *member);
+  Expr *checkDictReceiverCall(CallExpr *call, MemberExpr *member);
+  llvm::SMLoc dictMethodErrorPlace(const CallExpr *call, const MemberExpr *member,
+                                   DictMethodsCheckDictMethodErrorCode code) const;
+  Expr *reportNoMethod(CallExpr *call, MemberExpr *member, const Type *receiver);
+  void reportMissingMethod(const MemberExpr *member, const Type *receiver);
+  Expr *checkNamedCall(CallExpr *call, NameExpr *name, const Type *expected);
+  std::optional<Expr *> checkTimerCall(CallExpr *call, NameExpr *name);
+  std::optional<Expr *> checkGlobalFunctionCall(CallExpr *call, NameExpr *name);
+  Expr *checkScopedCall(CallExpr *call, NameExpr *name, const Type *expected);
+  Expr *checkKnownFunctionCall(CallExpr *call, NameExpr *name, VarSymbol *variable,
+                               const FunctionDecl *known);
+  Expr *checkFunctionNameCall(CallExpr *call, NameExpr *name, FuncSymbol *function,
+                              const Type *expected);
+  Expr *reportNotCallable(CallExpr *call, NameExpr *name, const ScopeEntry &entry);
+  void reportNotFunction(NameExpr *name, const ScopeEntry &entry);
+  Expr *checkCalleeValueCall(CallExpr *call);
+  Expr *checkTypedValueCall(CallExpr *call, const Type *type);
+  ResultTypeArgsUsable checkDirectTypeArgs(const FuncSymbol *function,
+                                           llvm::ArrayRef<TypeRef> typeArgs) const;
+  ResultNoSpreadPassed checkSpreadFree(const CallExpr *call, size_t index) const;
+  bool isNamingGlobal(const Expr *expr, GlobalName global) const;
+  bool isGlobalThisMember(const Expr *expr, GlobalName global) const;
 
   SemanticState &state;
   Scopes *scopes = nullptr;

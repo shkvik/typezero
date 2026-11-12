@@ -34,11 +34,12 @@ private:
   using ResultMethodAccepted = Result<void, PromiseCheckerCheckPromiseMethodError>;
   using ResultThenReturnType = Result<const Type *, PromiseCheckerCheckPromiseMethodError>;
 
-  ResultExecutorShaped executorShape(const Expr *executor) const;
+  ResultExecutorShaped checkExecutorShape(const Expr *executor) const;
   ResultMethodAccepted checkIsThen(CallExpr *call, const MemberExpr *member);
   ResultMethodAccepted checkNotResultMethod(CallExpr *call, const MemberExpr *member);
-  ResultValueTypeKnown valueType(NewExpr *expr, const CallExpr *call, const Type *expected);
-  ResultPromiseChained chainThen(CallExpr *call, const MemberExpr *member, const Type *expected);
+  ResultValueTypeKnown checkValueType(NewExpr *expr, const CallExpr *call, const Type *expected);
+  ResultPromiseChained checkChainThen(CallExpr *call, const MemberExpr *member,
+                                      const Type *expected);
   ResultThenReturnType checkThenCallback(CallExpr *call, const MemberExpr *member,
                                          const Type *expected);
 

@@ -37,8 +37,8 @@ private:
   using ResultKnownEncoding = Result<int, BytesCheckerKnownEncodingError>;
   using ResultBytesIndexing = Result<const Type *, BytesCheckerBytesIndexingError>;
 
-  ResultBytesIndexing bytesIndexing(const Type *type) const;
-  ResultKnownEncoding knownEncoding(llvm::StringRef name) const;
+  ResultBytesIndexing checkBytesIndexing(const Type *type) const;
+  ResultKnownEncoding checkKnownEncoding(llvm::StringRef name) const;
   std::optional<std::u16string> literalText(const Expr *expr) const;
 
   Expr *reportNoMember(MemberExpr *member);
@@ -50,6 +50,7 @@ private:
   Expr *checkArrayBufferMember(MemberExpr *member, std::optional<BuiltinProperty> property);
   Expr *checkTextEncoderMember(MemberExpr *member, std::optional<BuiltinProperty> property);
   Expr *checkTextDecoderMember(MemberExpr *member, std::optional<BuiltinProperty> property);
+  bool hasUnionProperty(std::optional<BuiltinProperty> property, const Type *memberType) const;
   Expr *readBuiltin(MemberExpr *member, Builtin builtin, const Type *result,
                     std::vector<Expr *> args = {});
 

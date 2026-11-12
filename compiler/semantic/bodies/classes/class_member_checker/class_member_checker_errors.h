@@ -20,8 +20,9 @@ class ErrorTextAccess {
 public:
   static std::string elsewhere(llvm::StringRef name, llvm::StringRef cls, llvm::StringRef current,
                                llvm::StringRef other);
-  static std::string hidden(llvm::StringRef name, llvm::StringRef word, llvm::StringRef cls,
-                            bool isProtected);
+  static std::string hiddenPrivate(llvm::StringRef name, llvm::StringRef word, llvm::StringRef cls);
+  static std::string hiddenProtected(llvm::StringRef name, llvm::StringRef word,
+                                     llvm::StringRef cls);
 };
 
 enum class ClassMemberCheckerFieldSetErrorCode {

@@ -9,6 +9,9 @@ namespace tz {
 class DictCheckHelpers {
 public:
   static std::string dictText(const Expr *expr, const Type *type);
+
+private:
+  static const char *dictPlaceholder(const Type *type);
 };
 
 }

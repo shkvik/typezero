@@ -23,6 +23,12 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+constexpr const char *kThisName = "this";
+
+}
+
 ClosureChecker::ClosureChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->scopes = &all.scopes;
@@ -41,18 +47,19 @@ ClosureChecker::ClosureChecker(SemanticState &owner, SemanticParts &all)
 }
 
 Signature ClosureChecker::signatureOf(const Type *functionType) const {
-  Signature signature;
-  signature.params.assign(functionType->params().begin(), functionType->params().end());
-  signature.minArgs = functionType->minArgs();
-  signature.ret = functionType->ret();
-  signature.voidResult = functionType->ret()->isVoid();
-  signature.hasThis = functionType->hasThis();
+  llvm::ArrayRef<const Type *> params = functionType->params();
 
-  return signature;
+  return Signature{
+      .params = std::vector<const Type *>(params.begin(), params.end()),
+      .minArgs = functionType->minArgs(),
+      .ret = functionType->ret(),
+      .voidResult = functionType->ret()->isVoid(),
+      .hasThis = functionType->hasThis(),
+  };
 }
 
 ClosureChecker::ResultExprNotGeneric
-ClosureChecker::notGeneric(const FunctionDecl *functionDecl) const {
+ClosureChecker::checkNotGeneric(const FunctionDecl *functionDecl) const {
   if (!functionDecl->typeParams.empty()) {
     auto message = ErrorTextNotGeneric::generic();
 
@@ -66,7 +73,7 @@ ClosureChecker::notGeneric(const FunctionDecl *functionDecl) const {
 }
 
 ClosureChecker::ResultParamTypeAgree
-ClosureChecker::paramAgrees(const Param &param, const Type *passed, const Type *given) const {
+ClosureChecker::checkParamAgrees(const Param &param, const Type *passed, const Type *given) const {
   if (given != nullptr && passed != given && !passed->isError() && !given->isError() &&
       !param.rest()) {
     auto message = ErrorTextParamAgrees::declared(param.label(), passed->name(), given->name());
@@ -80,8 +87,8 @@ ClosureChecker::paramAgrees(const Param &param, const Type *passed, const Type *
   return ok(passed);
 }
 
-ClosureChecker::ResultDefaultMatters ClosureChecker::defaultMatters(const Param &param,
-                                                                    const Type *given) const {
+ClosureChecker::ResultDefaultMatters ClosureChecker::checkDefaultMatters(const Param &param,
+                                                                         const Type *given) const {
   if (param.defaultValue() != nullptr && !given->isOptional()) {
     auto message = ErrorTextDefaultMatters::unused(param.label());
 
@@ -94,7 +101,7 @@ ClosureChecker::ResultDefaultMatters ClosureChecker::defaultMatters(const Param 
   return ok(&param);
 }
 
-ClosureChecker::ResultParamTypeKnown ClosureChecker::paramTypeKnown(const Param &param) const {
+ClosureChecker::ResultParamTypeKnown ClosureChecker::checkParamTypeKnown(const Param &param) const {
   if (!param.type) {
     auto message = ErrorTextParamTypeKnown::needsType(param.label());
 
@@ -107,8 +114,8 @@ ClosureChecker::ResultParamTypeKnown ClosureChecker::paramTypeKnown(const Param 
   return ok(&param);
 }
 
-ClosureChecker::ResultThisParamValid ClosureChecker::thisParam(const FunctionDecl *functionDecl,
-                                                               const Param &param) const {
+ClosureChecker::ResultThisParamValid
+ClosureChecker::checkThisParam(const FunctionDecl *functionDecl, const Param &param) const {
   if (functionDecl->isArrow()) {
     auto message = ErrorTextThisParam::arrowThis();
 
@@ -121,8 +128,8 @@ ClosureChecker::ResultThisParamValid ClosureChecker::thisParam(const FunctionDec
   return ok(&param);
 }
 
-ClosureChecker::ResultRestParamArray ClosureChecker::restParam(const Param &param,
-                                                               const Type *type) const {
+ClosureChecker::ResultRestParamArray ClosureChecker::checkRestParam(const Param &param,
+                                                                    const Type *type) const {
   if (!type->isArray() && !type->isListParam() && !type->isTuple() && !type->isError()) {
     auto message = ErrorTextRestParam::notArray(param.name);
 
@@ -135,9 +142,9 @@ ClosureChecker::ResultRestParamArray ClosureChecker::restParam(const Param &para
   return ok(type);
 }
 
-ClosureChecker::ResultParamOrderGood ClosureChecker::paramOrder(const Param &param,
-                                                                bool afterOptional) const {
-  if (afterOptional) {
+ClosureChecker::ResultParamOrderGood ClosureChecker::checkParamOrder(const Param &param,
+                                                                     bool isAfterOptional) const {
+  if (isAfterOptional) {
     auto message = ErrorTextParamOrder::order();
 
     return err(ClosureCheckerParamOrderError{
@@ -150,7 +157,7 @@ ClosureChecker::ResultParamOrderGood ClosureChecker::paramOrder(const Param &par
 }
 
 ClosureChecker::ResultPromiseAwaited
-ClosureChecker::promiseAwaited(const Signature *signature) const {
+ClosureChecker::checkPromiseAwaited(const Signature *signature) const {
   if (!signature->asyncVoid) {
     auto message = ErrorTextPromiseAwaited::dropped();
 
@@ -166,11 +173,10 @@ ClosureChecker::promiseAwaited(const Signature *signature) const {
 Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *functionExpr, const Signature *signature) {
   FunctionDecl *functionDecl = functionExpr->fn;
   auto *function = this->makeClosureSymbol(functionDecl);
-  bool isGeneric = this->reportsGenericClosure(functionExpr);
-  ClosureParams params{
-      .sym = function,
-      .thisFromContext = this->addsContextThis(functionExpr, signature),
-      .afterOptional = false,
+  bool isGeneric = this->reportGenericClosure(functionExpr);
+  auto params = ClosureParams{
+      .function = function,
+      .isThisFromContext = this->addContextThis(functionExpr, signature),
   };
   size_t named = functionDecl->params.size();
   for (size_t index = 0; index < named; ++index) {
@@ -202,9 +208,9 @@ FuncSymbol *ClosureChecker::makeClosureSymbol(FunctionDecl *functionDecl) {
   return function;
 }
 
-bool ClosureChecker::reportsGenericClosure(FunctionExpr *functionExpr) {
+bool ClosureChecker::reportGenericClosure(FunctionExpr *functionExpr) {
   FunctionDecl *functionDecl = functionExpr->fn;
-  auto plain = this->notGeneric(functionDecl);
+  auto plain = this->checkNotGeneric(functionDecl);
   if (plain.isOk()) {
     return false;
   }
@@ -216,50 +222,79 @@ bool ClosureChecker::reportsGenericClosure(FunctionExpr *functionExpr) {
   return true;
 }
 
-bool ClosureChecker::addsContextThis(FunctionExpr *functionExpr, const Signature *signature) {
+bool ClosureChecker::addContextThis(FunctionExpr *functionExpr, const Signature *signature) {
   FunctionDecl *functionDecl = functionExpr->fn;
-  bool isWanted = signature != nullptr && signature->hasThis && !signature->params.empty() &&
-                  (functionDecl->params.empty() || functionDecl->params[0].name != "this" ||
-                   functionDecl->isArrow());
+  bool isThisWritten = !functionDecl->params.empty() && functionDecl->params[0].name == kThisName &&
+                       !functionDecl->isArrow();
+  bool isWanted =
+      signature != nullptr && signature->hasThis && !signature->params.empty() && !isThisWritten;
   if (!isWanted) {
     return false;
   }
-  Param self;
-  self.name = functionDecl->isArrow() ? this->state.getAst().hiddenName() : llvm::StringRef("this");
-  self.loc = functionExpr->loc();
+  llvm::StringRef name =
+      functionDecl->isArrow() ? this->state.getAst().hiddenName() : llvm::StringRef(kThisName);
+  auto self = Param{
+      .name = name,
+      .loc = functionExpr->loc(),
+  };
   functionDecl->params.insert(functionDecl->params.begin(), self);
 
   return true;
 }
 
 void ClosureChecker::walkClosureParam(FunctionDecl *functionDecl, size_t index,
-                                      const Signature *signature, ClosureParams &params) {
-  FuncSymbol *function = params.sym;
+                                      const Signature *signature, const ClosureParams &params) {
+  FuncSymbol *function = params.function;
   Param &param = functionDecl->params[index];
   const Type *given =
       signature != nullptr && index < signature->params.size() ? signature->params[index] : nullptr;
-  bool isMayOmit = param.optional() || param.defaultValue() != nullptr;
+  bool isOmittable = this->isOmittableParam(param);
   auto types = this->closureParamTypes(param, given);
   if (index == 0) {
-    this->walkClosureThis(functionDecl, param, isMayOmit, params);
+    this->walkClosureThis(functionDecl, param, isOmittable, params);
   }
-  if (param.rest()) {
-    auto array = this->restParam(param, types.type);
-    if (array.isErr()) {
-      this->state.getDiagnostics().error(param.loc, array.error().message);
-    }
-    function->hasRest = true;
-    types.passed = types.type;
-  } else if (!isMayOmit) {
-    auto order = this->paramOrder(param, params.afterOptional);
-    if (order.isErr()) {
-      this->state.getDiagnostics().error(param.loc, order.error().message);
-    }
-    function->minArgs = index + 1;
-  }
-  params.afterOptional |= isMayOmit;
   param.declaredType = types.type;
+  if (param.rest()) {
+    return this->walkClosureRest(function, param, types.type);
+  }
+  if (!isOmittable) {
+    this->walkRequiredParam(functionDecl, function, index);
+  }
   function->params.push_back(types.passed);
+}
+
+bool ClosureChecker::isOmittableParam(const Param &param) const {
+  return param.optional() || param.defaultValue() != nullptr;
+}
+
+void ClosureChecker::walkClosureRest(FuncSymbol *function, const Param &param, const Type *type) {
+  auto array = this->checkRestParam(param, type);
+  if (array.isErr()) {
+    this->state.getDiagnostics().error(param.loc, array.error().message);
+  }
+  function->hasRest = true;
+  function->params.push_back(type);
+}
+
+void ClosureChecker::walkRequiredParam(const FunctionDecl *functionDecl, FuncSymbol *function,
+                                       size_t index) {
+  const Param &param = functionDecl->params[index];
+  bool isAfterOptional = this->hasOmittableBefore(functionDecl, index);
+  auto order = this->checkParamOrder(param, isAfterOptional);
+  if (order.isErr()) {
+    this->state.getDiagnostics().error(param.loc, order.error().message);
+  }
+  function->minArgs = index + 1;
+}
+
+bool ClosureChecker::hasOmittableBefore(const FunctionDecl *functionDecl, size_t index) const {
+  for (size_t earlier = 0; earlier < index; ++earlier) {
+    if (this->isOmittableParam(functionDecl->params[earlier])) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 ClosureChecker::ParamTypes ClosureChecker::closureParamTypes(const Param &param,
@@ -268,14 +303,7 @@ ClosureChecker::ParamTypes ClosureChecker::closureParamTypes(const Param &param,
     return this->writtenParamTypes(param, given);
   }
   if (given != nullptr) {
-    auto matters = this->defaultMatters(param, given);
-    if (matters.isErr()) {
-      this->state.getDiagnostics().error(param.defaultValue()->loc(), matters.error().message);
-    }
-    return ParamTypes{
-        .type = param.defaultValue() != nullptr ? given->nonOptional() : given,
-        .passed = given,
-    };
+    return this->givenParamTypes(param, given);
   }
   const Type *literal =
       param.defaultValue() != nullptr ? SharedHelpers::literalType(param.defaultValue()) : nullptr;
@@ -285,7 +313,7 @@ ClosureChecker::ParamTypes ClosureChecker::closureParamTypes(const Param &param,
         .passed = Type::optional(literal),
     };
   }
-  auto known = this->paramTypeKnown(param);
+  auto known = this->checkParamTypeKnown(param);
   if (known.isErr()) {
     this->state.getDiagnostics().error(param.loc, known.error().message);
   }
@@ -296,21 +324,38 @@ ClosureChecker::ParamTypes ClosureChecker::closureParamTypes(const Param &param,
   };
 }
 
+ClosureChecker::ParamTypes ClosureChecker::givenParamTypes(const Param &param, const Type *given) {
+  auto matters = this->checkDefaultMatters(param, given);
+  if (matters.isErr()) {
+    this->state.getDiagnostics().error(param.defaultValue()->loc(), matters.error().message);
+  }
+
+  return ParamTypes{
+      .type = this->givenInnerType(param, given),
+      .passed = given,
+  };
+}
+
+const Type *ClosureChecker::givenInnerType(const Param &param, const Type *given) const {
+  if (param.defaultValue() != nullptr) {
+    return given->nonOptional();
+  }
+
+  return given;
+}
+
 ClosureChecker::ParamTypes ClosureChecker::writtenParamTypes(const Param &param,
                                                              const Type *given) {
-  bool isMayOmit = param.optional() || param.defaultValue() != nullptr;
   this->state.getTypeContext().enterListContext(param.rest());
-  const auto *type = this->typeResolver->resolveType(*param.type);
+  const auto *written = this->typeResolver->resolveType(*param.type);
   this->state.getTypeContext().leaveListContext();
-  if (param.optional()) {
-    type = Type::optional(type);
-  }
-  const Type *passed = isMayOmit ? Type::optional(type) : type;
-  auto agrees = this->paramAgrees(param, passed, given);
+  const Type *type = param.optional() ? Type::optional(written) : written;
+  const Type *passed = this->isOmittableParam(param) ? Type::optional(type) : type;
+  auto agrees = this->checkParamAgrees(param, passed, given);
   if (agrees.isErr()) {
     this->state.getDiagnostics().error(param.loc, agrees.error().message);
     return ParamTypes{
-        .type = param.defaultValue() != nullptr ? given->nonOptional() : given,
+        .type = this->givenInnerType(param, given),
         .passed = given,
     };
   }
@@ -322,20 +367,20 @@ ClosureChecker::ParamTypes ClosureChecker::writtenParamTypes(const Param &param,
 }
 
 void ClosureChecker::walkClosureThis(const FunctionDecl *functionDecl, const Param &param,
-                                     bool mayOmit, ClosureParams &params) {
-  if (params.thisFromContext) {
-    params.sym->hasThis = true;
+                                     bool isParamOmittable, const ClosureParams &params) {
+  if (params.isThisFromContext) {
+    params.function->hasThis = true;
     return;
   }
-  if (param.name != "this" || !param.type.has_value() || param.rest()) {
+  if (param.name != kThisName || !param.type.has_value() || param.rest()) {
     return;
   }
-  auto valid = this->thisParam(functionDecl, param);
+  auto valid = this->checkThisParam(functionDecl, param);
   if (valid.isErr()) {
     this->state.getDiagnostics().error(param.loc, valid.error().message);
     return;
   }
-  params.sym->hasThis = !mayOmit;
+  params.function->hasThis = !isParamOmittable;
 }
 
 void ClosureChecker::padHiddenParams(FunctionExpr *functionExpr, FuncSymbol *function,
@@ -346,10 +391,11 @@ void ClosureChecker::padHiddenParams(FunctionExpr *functionExpr, FuncSymbol *fun
   }
   size_t named = functionDecl->params.size();
   for (size_t index = named; index < signature->params.size(); ++index) {
-    Param hidden;
-    hidden.name = this->state.getAst().hiddenName();
-    hidden.loc = functionExpr->loc();
-    hidden.declaredType = signature->params[index];
+    auto hidden = Param{
+        .name = this->state.getAst().hiddenName(),
+        .loc = functionExpr->loc(),
+        .declaredType = signature->params[index],
+    };
     functionDecl->params.push_back(hidden);
     function->params.push_back(signature->params[index]);
   }
@@ -372,27 +418,33 @@ void ClosureChecker::walkClosureReturn(FunctionExpr *functionExpr, FuncSymbol *f
 void ClosureChecker::walkGeneratorReturn(FunctionDecl *functionDecl, FuncSymbol *function,
                                          const Signature *signature) {
   if (functionDecl->returnType.has_value()) {
-    const auto *declared = this->typeResolver->resolveTypeOrVoid(*functionDecl->returnType);
-    auto generator = this->generatorChecker->generatorReturnType(functionDecl, declared);
-    if (generator.isErr()) {
-      this->state.getDiagnostics().error(functionDecl->returnType->loc, generator.error().message);
-    }
-    function->setReturnType(generator.isOk() ? generator.value() : Type::error());
+    return this->walkWrittenGeneratorReturn(functionDecl, function);
+  }
+  if (signature == nullptr || signature->ret == nullptr) {
     return;
   }
-  bool isFitting =
-      signature != nullptr && signature->ret != nullptr &&
-      (functionDecl->isAsync ? signature->ret->isAsyncIterator() : signature->ret->isIterator());
-  if (isFitting) {
+  bool isIteratorResult =
+      functionDecl->isAsync ? signature->ret->isAsyncIterator() : signature->ret->isIterator();
+  if (isIteratorResult) {
     function->setReturnType(signature->ret);
   }
+}
+
+void ClosureChecker::walkWrittenGeneratorReturn(FunctionDecl *functionDecl, FuncSymbol *function) {
+  const auto *declared = this->typeResolver->resolveTypeOrVoid(*functionDecl->returnType);
+  auto generator = this->generatorChecker->checkGeneratorReturnType(functionDecl, declared);
+  if (generator.isErr()) {
+    this->state.getDiagnostics().error(functionDecl->returnType->loc, generator.error().message);
+  }
+  const Type *returned = generator.isOk() ? generator.value() : Type::error();
+  function->setReturnType(returned);
 }
 
 void ClosureChecker::walkAsyncReturn(FunctionExpr *functionExpr, FuncSymbol *function,
                                      const Signature *signature) {
   FunctionDecl *functionDecl = functionExpr->fn;
   if (signature != nullptr && signature->voidResult) {
-    auto awaited = this->promiseAwaited(signature);
+    auto awaited = this->checkPromiseAwaited(signature);
     if (awaited.isErr()) {
       this->state.getDiagnostics().error(functionExpr->loc(), awaited.error().message);
     }
@@ -423,7 +475,8 @@ void ClosureChecker::walkPlainReturn(FunctionDecl *functionDecl, FuncSymbol *fun
     return;
   }
   if (functionDecl->returnType.has_value()) {
-    function->setReturnType(this->predicateChecker->resolveReturnType(functionDecl, function));
+    const auto *declared = this->predicateChecker->resolveReturnType(functionDecl, function);
+    function->setReturnType(declared);
     return;
   }
   if (signature != nullptr && signature->ret != nullptr) {
@@ -445,7 +498,8 @@ void ClosureChecker::inferRecursiveReturn(FunctionDecl *functionDecl, FuncSymbol
   if (isOwnScope) {
     this->declareOwnName(functionDecl);
   }
-  this->returnInferrer->inferCycle(this->state.getReturnInference().getCycleOf(function));
+  auto cycle = this->state.getReturnInference().getCycleOf(function);
+  this->returnInferrer->inferCycle(cycle);
   if (isOwnScope) {
     this->scopes->closeScope();
   }
@@ -455,13 +509,18 @@ void ClosureChecker::inferRecursiveReturn(FunctionDecl *functionDecl, FuncSymbol
 bool ClosureChecker::isRecursiveClosure(FunctionDecl *functionDecl) {
   auto names = llvm::StringSet<>();
   AstWalker::collectNames(functionDecl->body, names);
-  bool isRecursive = !functionDecl->ownName().empty() && names.contains(functionDecl->ownName());
+  if (!functionDecl->ownName().empty() && names.contains(functionDecl->ownName())) {
+    return true;
+  }
   for (const auto &entry : names) {
-    VarSymbol *variable = this->scopes->lookup(entry.getKey()).var();
-    isRecursive |= variable != nullptr && variable->lambda() == functionDecl;
+    auto found = this->scopes->lookup(entry.getKey());
+    VarSymbol *variable = found.var();
+    if (variable != nullptr && variable->lambda() == functionDecl) {
+      return true;
+    }
   }
 
-  return isRecursive;
+  return false;
 }
 
 void ClosureChecker::walkInitializerBody(FunctionDecl *functionDecl) {
@@ -472,8 +531,9 @@ void ClosureChecker::walkInitializerBody(FunctionDecl *functionDecl) {
   if (!isInInitializer) {
     return this->walkClosureBody(functionDecl);
   }
-  bool isThisReady = this->classChecker->thisReady(this->state.getFlowState().getFlow()).isOk();
-  classContext.enterInitializerClosure(isThisReady);
+  const Flow &flow = this->state.getFlowState().getFlow();
+  auto ready = this->classChecker->checkThisReady(flow);
+  classContext.enterInitializerClosure(ready.isOk());
   this->walkClosureBody(functionDecl);
   classContext.leaveInitializerClosure();
 }
@@ -488,47 +548,21 @@ void ClosureChecker::declareOwnName(FunctionDecl *functionDecl) {
   unsigned declSeq = this->state.getReturnInference().takeSequenceNumber();
   self->place = FunctionLocalVar{.owner = functionDecl, .state = {.declSeq = declSeq}};
   auto added = this->scopes->declare(functionDecl->ownName(), {VarEntry{.var = self}});
-  if (added.isErr()) {
-    this->state.getDiagnostics().error(functionDecl->loc(), added.error().message);
+  if (added.isOk()) {
+    return;
   }
-  if (added.isErr() && added.error().code != ScopesDeclareErrorCode::UNDEFINED_AS_NAME) {
-    auto previousEntry = this->scopes->lookup(functionDecl->ownName());
-    auto declaredHere = ErrorTextDeclare::previous();
-    this->state.getDiagnostics().note(previousEntry.loc(), declaredHere);
+  this->state.getDiagnostics().error(functionDecl->loc(), added.error().message);
+  if (added.error().code == ScopesDeclareErrorCode::UNDEFINED_AS_NAME) {
+    return;
   }
+  auto previousEntry = this->scopes->lookup(functionDecl->ownName());
+  auto declaredHere = ErrorTextDeclare::previous();
+  this->state.getDiagnostics().note(previousEntry.loc(), declaredHere);
 }
 
 void ClosureChecker::walkClosureBody(FunctionDecl *functionDecl) {
   auto saved = this->returnInferrer->enterBody(functionDecl);
-  auto fixed = [](Term term) {
-    return (term.var == nullptr || (term.var->isConst && !term.length)) &&
-           (term.var2 == nullptr || (term.var2->isConst && !term.length2));
-  };
-  for (const Facts::Fact &fact : saved.flow.facts.all()) {
-    if (fixed(fact.lhs) && fixed(fact.rhs)) {
-      this->state.getFlowState().getFacts().add(fact.lhs, fact.rhs, fact.offset);
-    }
-  }
-  for (const VarSymbol *variable : saved.flow.defined) {
-    if (variable->isConst) {
-      this->state.getFlowState().markDefined(variable);
-    }
-  }
-  for (const auto &[var, type] : saved.flow.narrowed) {
-    if (var->isConst) {
-      this->state.getFlowState().addNarrowed(var, type);
-    }
-  }
-  for (const VarSymbol *variable : saved.flow.okResults) {
-    if (variable->isConst) {
-      this->state.getFlowState().markOkResult(variable);
-    }
-  }
-  for (const VarSymbol *variable : saved.flow.errResults) {
-    if (variable->isConst) {
-      this->state.getFlowState().markErrResult(variable);
-    }
-  }
+  this->keepConstantFlow(saved.flow);
   bool isOwnScope = functionDecl->isExpression() && !functionDecl->ownName().empty();
   if (isOwnScope) {
     this->declareOwnName(functionDecl);
@@ -544,40 +578,57 @@ void ClosureChecker::walkClosureBody(FunctionDecl *functionDecl) {
   this->returnInferrer->leaveBody(saved);
 }
 
+void ClosureChecker::keepConstantFlow(const Flow &outer) {
+  auto &flowState = this->state.getFlowState();
+  for (const Facts::Fact &fact : outer.facts.all()) {
+    if (this->isFixedTerm(fact.lhs) && this->isFixedTerm(fact.rhs)) {
+      flowState.getFacts().add(fact.lhs, fact.rhs, fact.offset);
+    }
+  }
+  for (const VarSymbol *variable : outer.defined) {
+    if (variable->isConst) {
+      flowState.markDefined(variable);
+    }
+  }
+  for (const auto &[variable, type] : outer.narrowed) {
+    if (variable->isConst) {
+      flowState.addNarrowed(variable, type);
+    }
+  }
+  for (const VarSymbol *variable : outer.okResults) {
+    if (variable->isConst) {
+      flowState.markOkResult(variable);
+    }
+  }
+  for (const VarSymbol *variable : outer.errResults) {
+    if (variable->isConst) {
+      flowState.markErrResult(variable);
+    }
+  }
+}
+
+bool ClosureChecker::isFixedTerm(const Term &term) const {
+  bool isFirstFixed = term.var == nullptr || (term.var->isConst && !term.length);
+  bool isSecondFixed = term.var2 == nullptr || (term.var2->isConst && !term.length2);
+
+  return isFirstFixed && isSecondFixed;
+}
+
 void ClosureChecker::walkStatements(BlockStmt *block) {
   this->typeDeclarer->declareTypes(block->body);
   auto *group = this->nestedFunctions->declareNested(block);
   if (group != nullptr) {
     this->state.getFunctionStack().enterGroup(group);
   }
-  BlockNames names{this->state.getFunctionStack().getFunctionDepth(), {}};
-  for (Stmt *stmt : block->body) {
-    auto *varDecl = dyn_cast<VarDeclStmt>(stmt);
-    if (varDecl != nullptr) {
-      for (const VarDeclarator &declarator : varDecl->decls) {
-        names.names.push_back(declarator.name);
-      }
-    }
-  }
+  auto names = this->blockNames(block);
   this->state.getScopeStack().enterBlockNames(std::move(names));
   for (size_t index = 0; index < block->body.size(); ++index) {
     if (group != nullptr && index == group->firstUse) {
-      group->creationSeq = this->state.getReturnInference().takeSequenceNumber();
-      for (FunctionDecl *functionDecl : group->members) {
-        LocalVarState *localState = functionDecl->var->local();
-        if (localState != nullptr) {
-          localState->declSeq = group->creationSeq;
-        }
-      }
+      this->markGroupCreated(group);
     }
     this->state.getBlockPosition().rememberBlockPosition(block->body, index);
     this->stmtChecker->walkStmt(block->body[index]);
-    auto *decided = dyn_cast<IfStmt>(block->body[index]);
-    if (this->state.getGenericStore().isCheckingInstance() && decided != nullptr &&
-        isa<BoolLitExpr>(decided->cond) && this->state.getFlowState().isUnreachable() &&
-        (group == nullptr || group->firstUse <= index) &&
-        llvm::none_of(llvm::ArrayRef<Stmt *>(block->body).drop_front(index + 1),
-                      [](const Stmt *s) { return isa<FunctionDecl>(s) || isa<ClassDecl>(s); })) {
+    if (this->isDecidedEnd(block, index, group)) {
       block->body.resize(index + 1);
       break;
     }
@@ -587,6 +638,53 @@ void ClosureChecker::walkStatements(BlockStmt *block) {
     this->nestedFunctions->finishGroup(group);
     this->state.getFunctionStack().leaveGroup();
   }
+}
+
+BlockNames ClosureChecker::blockNames(const BlockStmt *block) const {
+  auto names = BlockNames{this->state.getFunctionStack().getFunctionDepth(), {}};
+  for (Stmt *stmt : block->body) {
+    auto *varDecl = dyn_cast<VarDeclStmt>(stmt);
+    if (varDecl != nullptr) {
+      this->addDeclaratorNames(varDecl, names);
+    }
+  }
+
+  return names;
+}
+
+void ClosureChecker::addDeclaratorNames(const VarDeclStmt *varDecl, BlockNames &names) const {
+  for (const VarDeclarator &declarator : varDecl->decls) {
+    names.names.push_back(declarator.name);
+  }
+}
+
+void ClosureChecker::markGroupCreated(NestedGroup *group) {
+  group->creationSeq = this->state.getReturnInference().takeSequenceNumber();
+  for (FunctionDecl *functionDecl : group->members) {
+    LocalVarState *localState = functionDecl->var->local();
+    if (localState != nullptr) {
+      localState->declSeq = group->creationSeq;
+    }
+  }
+}
+
+bool ClosureChecker::isDecidedEnd(const BlockStmt *block, size_t index,
+                                  const NestedGroup *group) const {
+  auto *decided = dyn_cast<IfStmt>(block->body[index]);
+  bool isConstantIf = decided != nullptr && isa<BoolLitExpr>(decided->cond);
+  bool isGroupCreated = group == nullptr || group->firstUse <= index;
+  bool isEndReached = this->state.getGenericStore().isCheckingInstance() && isConstantIf &&
+                      this->state.getFlowState().isUnreachable() && isGroupCreated;
+  if (!isEndReached) {
+    return false;
+  }
+  auto rest = llvm::ArrayRef<Stmt *>(block->body).drop_front(index + 1);
+
+  return llvm::none_of(rest, std::bind_front(&ClosureChecker::isDeclarationStmt, this));
+}
+
+bool ClosureChecker::isDeclarationStmt(const Stmt *stmt) const {
+  return isa<FunctionDecl>(stmt) || isa<ClassDecl>(stmt);
 }
 
 }

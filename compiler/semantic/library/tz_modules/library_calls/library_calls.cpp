@@ -15,6 +15,12 @@ using llvm::dyn_cast;
 
 namespace tz {
 
+namespace {
+
+constexpr llvm::StringLiteral kIntrinsicsModule = "tz:intrinsics";
+
+}
+
 LibraryCalls::LibraryCalls(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->scopes = &all.scopes;
@@ -27,54 +33,61 @@ LibraryCalls::LibraryCalls(SemanticState &owner, SemanticParts &all)
 
 void LibraryCalls::prepareLibraries(SourceFile &program) {
   for (Module *module : program.modules) {
-    if (!module->builtin) {
-      continue;
-    }
-    this->state.getInventoryStore().markComparesFunctions();
-    llvm::SourceMgr &sm = this->state.getDiagnostics().sourceMgr();
-    for (unsigned id : module->buffers) {
-      const llvm::MemoryBuffer *buffer = sm.getMemoryBuffer(id);
-      this->state.getLibraryDeclarations().addLibraryRange(buffer->getBufferStart(),
-                                                           buffer->getBufferEnd());
-      this->state.getDiagnostics().quietRange(buffer->getBufferStart(), buffer->getBufferEnd());
-    }
-    bool hasIntrinsics = module->name == "tz:intrinsics";
-    for (Stmt *item : module->file.items) {
-      auto *functionDecl = dyn_cast<FunctionDecl>(item);
-      if (functionDecl != nullptr) {
-        if (hasIntrinsics) {
-          if (functionDecl->external()) {
-            functionDecl->bodySource = FunctionBodySource::INTRINSIC;
-          }
-        } else {
-          this->state.getLibraryDeclarations().rememberLibraryFunction(functionDecl);
-        }
-        continue;
-      }
-      auto *alias = dyn_cast<TypeAliasDecl>(item);
-      if (alias != nullptr) {
-        this->state.getLibraryDeclarations().rememberLibraryType(alias);
-        continue;
-      }
-      auto *classDecl = dyn_cast<ClassDecl>(item);
-      if (classDecl == nullptr) {
-        continue;
-      }
-      classDecl->origin = ClassOrigin::LIBRARY;
-      this->state.getLibraryDeclarations().rememberLibraryClass(classDecl);
+    if (module->builtin) {
+      this->prepareLibrary(module);
     }
   }
 }
 
-bool LibraryCalls::inLibrary(llvm::SMLoc loc) const {
+void LibraryCalls::prepareLibrary(Module *module) {
+  this->state.getInventoryStore().markComparesFunctions();
+  llvm::SourceMgr &sources = this->state.getDiagnostics().sourceMgr();
+  for (unsigned id : module->buffers) {
+    const llvm::MemoryBuffer *buffer = sources.getMemoryBuffer(id);
+    this->state.getLibraryDeclarations().addLibraryRange(buffer->getBufferStart(),
+                                                         buffer->getBufferEnd());
+    this->state.getDiagnostics().quietRange(buffer->getBufferStart(), buffer->getBufferEnd());
+  }
+  bool hasIntrinsics = module->name == kIntrinsicsModule;
+  for (Stmt *item : module->file.items) {
+    this->rememberLibraryItem(item, hasIntrinsics);
+  }
+}
+
+void LibraryCalls::rememberLibraryItem(Stmt *item, bool hasIntrinsics) {
+  auto *functionDecl = dyn_cast<FunctionDecl>(item);
+  if (functionDecl != nullptr) {
+    return this->rememberLibraryFunction(functionDecl, hasIntrinsics);
+  }
+  auto *alias = dyn_cast<TypeAliasDecl>(item);
+  if (alias != nullptr) {
+    return this->state.getLibraryDeclarations().rememberLibraryType(alias);
+  }
+  auto *classDecl = dyn_cast<ClassDecl>(item);
+  if (classDecl != nullptr) {
+    classDecl->origin = ClassOrigin::LIBRARY;
+    this->state.getLibraryDeclarations().rememberLibraryClass(classDecl);
+  }
+}
+
+void LibraryCalls::rememberLibraryFunction(FunctionDecl *functionDecl, bool hasIntrinsics) {
+  if (!hasIntrinsics) {
+    return this->state.getLibraryDeclarations().rememberLibraryFunction(functionDecl);
+  }
+  if (functionDecl->external()) {
+    functionDecl->bodySource = FunctionBodySource::INTRINSIC;
+  }
+}
+
+bool LibraryCalls::isInLibrary(llvm::SMLoc loc) const {
   return this->state.getLibraryDeclarations().isInsideLibrary(loc);
 }
 
-LibraryCalls::ResultIntrinsicShape LibraryCalls::intrinsicShape(const CallExpr *call,
-                                                                const NameExpr *name,
-                                                                llvm::StringRef intrinsicName,
-                                                                bool known, unsigned args,
-                                                                unsigned typeArgs) const {
+LibraryCalls::ResultIntrinsicShape LibraryCalls::checkIntrinsicShape(const CallExpr *call,
+                                                                     const NameExpr *name,
+                                                                     llvm::StringRef intrinsicName,
+                                                                     bool known, unsigned args,
+                                                                     unsigned typeArgs) const {
   bool isWrong =
       !known || call->args.size() != args || name->typeArgs.size() != typeArgs || call->hasSpread();
   if (isWrong) {
@@ -103,8 +116,8 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
   const auto *intrinsic = LibraryIntrinsicTable::find(intrinsicName);
   bool isKnown = intrinsic != nullptr;
   auto shape =
-      this->intrinsicShape(call, name, intrinsicName, isKnown, isKnown ? intrinsic->args : 0,
-                           isKnown ? intrinsic->typeArgs : 0);
+      this->checkIntrinsicShape(call, name, intrinsicName, isKnown, isKnown ? intrinsic->args : 0,
+                                isKnown ? intrinsic->typeArgs : 0);
   if (shape.isErr()) {
     this->state.getDiagnostics().error(name->loc(), shape.error().message);
     for (Expr *&arg : call->args) {
@@ -129,9 +142,9 @@ Expr *LibraryCalls::checkIntrinsic(const IntrinsicCall &made, LibraryIntrinsic i
   CallExpr *call = made.call;
   switch (intrinsic) {
     case LibraryIntrinsic::AS_LISTENER:
-      return this->checkListenerIntrinsic(made, false);
+      return this->checkListenerIntrinsic(made, ListenerBinding::PLAIN);
     case LibraryIntrinsic::AS_BOUND_LISTENER:
-      return this->checkListenerIntrinsic(made, true);
+      return this->checkListenerIntrinsic(made, ListenerBinding::BOUND);
     case LibraryIntrinsic::AS_CLASS:
       return this->checkAsClass(made);
     case LibraryIntrinsic::AHEAD:
@@ -169,11 +182,11 @@ Expr *LibraryCalls::checkIntrinsic(const IntrinsicCall &made, LibraryIntrinsic i
   return call;
 }
 
-Expr *LibraryCalls::checkListenerIntrinsic(const IntrinsicCall &made, bool bound) {
+Expr *LibraryCalls::checkListenerIntrinsic(const IntrinsicCall &made, ListenerBinding binding) {
   CallExpr *call = made.call;
   const auto *functionType = this->flatListenerType(made.typeArg);
   call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::unknown());
-  if (bound) {
+  if (binding == ListenerBinding::BOUND) {
     call->args[1] = this->argumentChecker->checkArg(call->args[1], Type::anyObject());
   }
   call->type = functionType;

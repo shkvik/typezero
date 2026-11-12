@@ -34,10 +34,11 @@ private:
   using ResultClosedText = Result<const Expr *, IntlMethodCheckerClosedArgError>;
   using ResultIntlNumber = Result<const Type *, IntlMethodCheckerIntlNumberError>;
 
-  ResultIntlNumber intlNumber(const Type *type, llvm::StringRef method) const;
-  ResultClosedText closedArg(const Expr *arg, const std::optional<std::vector<std::string>> &texts,
-                             llvm::ArrayRef<llvm::StringLiteral> allowed,
-                             llvm::StringRef what) const;
+  ResultIntlNumber checkIntlNumberType(const Type *type, llvm::StringRef method) const;
+  ResultClosedText checkClosedArg(const Expr *arg,
+                                  const std::optional<std::vector<std::string>> &texts,
+                                  llvm::ArrayRef<llvm::StringLiteral> allowed,
+                                  llvm::StringRef what) const;
   Expr *toBuiltinCall(CallExpr *call, Builtin builtin, const Type *type) const;
 
   Expr *checkLoosely(CallExpr *call);
@@ -47,9 +48,14 @@ private:
   Expr *checkDisplayNameOf(CallExpr *call, MemberExpr *member);
   Expr *checkCollatorCompare(CallExpr *call, MemberExpr *member);
   Expr *checkSegmentsContaining(CallExpr *call, MemberExpr *member);
-  Expr *checkListFormat(CallExpr *call, MemberExpr *member, bool toParts);
-  Expr *checkNumberFormat(CallExpr *call, MemberExpr *member, bool toParts);
-  Expr *checkRelativeFormat(CallExpr *call, MemberExpr *member, bool toParts);
+  enum class FormatOutput {
+    TEXT,
+    PARTS,
+  };
+
+  Expr *checkListFormat(CallExpr *call, MemberExpr *member, FormatOutput output);
+  Expr *checkNumberFormat(CallExpr *call, MemberExpr *member, FormatOutput output);
+  Expr *checkRelativeFormat(CallExpr *call, MemberExpr *member, FormatOutput output);
   Expr *checkResolvedOptions(CallExpr *call, MemberExpr *member, IntlKind kind);
   Expr *reportUnsupported(CallExpr *call, MemberExpr *member, const std::string &message);
 

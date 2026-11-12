@@ -52,7 +52,7 @@ const std::vector<HashNames> &CryptoNames::hashNames() {
   return table;
 }
 
-bool CryptoNames::turnedOffHash(llvm::StringRef name) {
+bool CryptoNames::isTurnedOffHash(llvm::StringRef name) {
   static const llvm::StringLiteral names[] = {"md4",      "md2",
                                               "mdc2",     "whirlpool",
                                               "rsa-md4",  "md4withrsaencryption",
@@ -62,7 +62,7 @@ bool CryptoNames::turnedOffHash(llvm::StringRef name) {
   return llvm::is_contained(names, name);
 }
 
-bool CryptoNames::turnedOffCipher(llvm::StringRef name) {
+bool CryptoNames::isTurnedOffCipher(llvm::StringRef name) {
   for (llvm::StringRef prefix : {"bf", "blowfish", "cast", "rc2", "rc4", "rc5", "idea", "seed"}) {
     if (name.starts_with(prefix)) {
       return true;

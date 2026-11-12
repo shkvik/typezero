@@ -21,9 +21,10 @@ public:
   bool isStreamClass(const ClassDecl *classDecl) const;
   StreamChunks streamChunksOf(const ClassDecl *classDecl) const;
   std::optional<std::vector<const Type *>> streamHookParams(const FunctionDecl *functionDecl);
-  bool isStreamHook(const FunctionDecl *functionDecl, bool linked) const;
-  ResultHookParamsMatch hookParams(const FunctionDecl *functionDecl,
-                                   llvm::ArrayRef<FunctionDecl *> inherited) const;
+  bool isStreamHook(const FunctionDecl *functionDecl) const;
+  bool isLinkedStreamHook(const FunctionDecl *functionDecl) const;
+  ResultHookParamsMatch checkHookParams(const FunctionDecl *functionDecl,
+                                        llvm::ArrayRef<FunctionDecl *> inherited) const;
   void addStreamBases(ClassDecl *instance, llvm::SMLoc loc);
 
 private:
@@ -41,7 +42,11 @@ private:
   std::vector<const Type *> destroyParamTypes();
   std::vector<const Type *> writevParamTypes(const FunctionDecl *functionDecl,
                                              const StreamSides &sides, const Type *callback);
-  const Type *libraryAliasOf(llvm::StringRef name, const Type *arg, llvm::SMLoc loc);
+  const Type *libraryAliasOf(LibraryType libraryType, const Type *arg, llvm::SMLoc loc);
+  bool isTypedLibraryStream(const ClassDecl *classDecl) const;
+  void addStreamChunk(StreamChunks &chunks, const ClassDecl *classDecl) const;
+  const FuncSymbol *libraryHook(llvm::ArrayRef<FunctionDecl *> inherited) const;
+  bool isUntypedParam(const Type *type) const;
 
   SemanticState &state;
   Prelude *prelude = nullptr;

@@ -605,7 +605,7 @@ MemberChecker::keyedIndexCode(KeyedFieldCheckerCheckKeyedFieldErrorCode code) co
   if (code == KeyedFieldCheckerCheckKeyedFieldErrorCode::ALREADY_REPORTED) {
     return MemberCheckerCheckIndexErrorCode::ALREADY_REPORTED;
   }
-  if (this->keyedFieldChecker->wrongKey(code)) {
+  if (this->keyedFieldChecker->isWrongKey(code)) {
     return MemberCheckerCheckIndexErrorCode::KEY_REJECTED;
   }
 

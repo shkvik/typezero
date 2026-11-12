@@ -1,4 +1,6 @@
 #include "compiler/semantic/bodies/classes/method_call_checker/method_call_checker.h"
+#include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
+#include "compiler/program/library/object/object_member_table/object_member_table.h"
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/bodies/classes/class_checker/class_checker.h"
 #include "compiler/semantic/bodies/classes/class_links/class_links.h"
@@ -48,7 +50,7 @@ MethodCallChecker::MethodCallChecker(SemanticState &owner, SemanticParts &all)
 }
 
 MethodCallChecker::ResultFieldIsCallable
-MethodCallChecker::fieldCallable(const Type *type, llvm::StringRef name) const {
+MethodCallChecker::checkFieldCallable(const Type *type, llvm::StringRef name) const {
   bool isOptional = type->isOptional() && type->inner()->isFunction();
   if (isOptional) {
     auto message = ErrorTextFieldCall::undefined();
@@ -77,7 +79,7 @@ MethodCallChecker::fieldCallable(const Type *type, llvm::StringRef name) const {
 }
 
 MethodCallChecker::ResultMethodsAreFound
-MethodCallChecker::instanceMethods(const ClassDecl *classDecl, llvm::StringRef name) const {
+MethodCallChecker::checkInstanceMethods(const ClassDecl *classDecl, llvm::StringRef name) const {
   auto methods = this->classDeclarer->methodsNamed(classDecl, name);
   bool isStatic =
       methods.empty() && !this->classDeclarer->staticMethodsNamed(classDecl, name).empty();
@@ -102,14 +104,14 @@ MethodCallChecker::instanceMethods(const ClassDecl *classDecl, llvm::StringRef n
 }
 
 MethodCallChecker::ResultFieldsAreAllSet
-MethodCallChecker::fieldsSet(const MemberExpr *member) const {
+MethodCallChecker::checkFieldsSet(const MemberExpr *member) const {
+  const Flow &flow = this->state.getFlowState().getFlow();
   bool isEarly = this->classChecker->isInitThis(member->object).isOk() &&
                  !this->state.getFlowState().isBeforeSuper() &&
-                 this->classChecker->thisReady(this->state.getFlowState().getFlow()).isErr();
+                 this->classChecker->checkThisReady(flow).isErr();
   if (isEarly) {
-    std::string field =
-        this->classChecker->firstUnset(this->state.getFlowState().getFlow()).value();
-    auto message = ErrorTextUnsetCall::beforeSet(member->name, field);
+    auto unset = this->classChecker->firstUnset(flow);
+    auto message = ErrorTextUnsetCall::beforeSet(member->name, unset.value());
 
     return err(MethodCallCheckerFieldsSetError{
         .code = MethodCallCheckerFieldsSetErrorCode::CALLED_BEFORE_SET,
@@ -121,7 +123,7 @@ MethodCallChecker::fieldsSet(const MemberExpr *member) const {
 }
 
 MethodCallChecker::ResultTypeArgsAllowed
-MethodCallChecker::methodTypeArgs(const FuncSymbol *function, const MemberExpr *member) const {
+MethodCallChecker::checkMethodTypeArgs(const FuncSymbol *function, const MemberExpr *member) const {
   if (!function->isGeneric() && !member->typeArgs.empty()) {
     auto message = ErrorTextMethodTypeArgs::notGeneric(member->name);
 
@@ -148,7 +150,7 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   if (field != nullptr && field->method() == nullptr) {
     return this->checkFieldCall(call, member);
   }
-  auto found = this->instanceMethods(classDecl, member->name);
+  auto found = this->checkInstanceMethods(classDecl, member->name);
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
     this->argumentChecker->walkArgsLoosely(call);
@@ -158,7 +160,7 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   if (methods.size() == 1) {
     this->walkMethodAccess(member, methods[0]);
   }
-  auto ready = this->fieldsSet(member);
+  auto ready = this->checkFieldsSet(member);
   if (ready.isErr()) {
     this->state.getDiagnostics().error(member->loc(), ready.error().message);
   }
@@ -176,7 +178,7 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   if (methods.size() > 1 && function->decl != nullptr) {
     this->walkMethodAccess(member, function->decl);
   }
-  auto allowed = this->methodTypeArgs(function, member);
+  auto allowed = this->checkMethodTypeArgs(function, member);
   if (allowed.isErr()) {
     this->state.getDiagnostics().error(member->loc(), allowed.error().message);
   }
@@ -192,21 +194,23 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
 
 Expr *MethodCallChecker::checkLibraryMethodCall(CallExpr *call, MemberExpr *member,
                                                 ClassDecl *classDecl) {
-  auto *fs = this->fsDeclarer->checkFsClassMethod(call, member, classDecl);
-  if (fs != nullptr) {
-    return fs;
+  auto *fileSystem = this->fsDeclarer->checkFsClassMethod(call, member, classDecl);
+  if (fileSystem != nullptr) {
+    return fileSystem;
   }
   auto *stream = this->streamChecker->checkStreamCall(call, member, classDecl);
   if (stream != nullptr) {
     return stream;
   }
-  Expr *emitter = this->eventMaps->isEmitterClass(classDecl)
-                      ? this->emitterChecker->checkEmitterCall(call, member, classDecl, false)
-                      : nullptr;
+  Expr *emitter =
+      this->eventMaps->isEmitterClass(classDecl)
+          ? this->emitterChecker->checkEmitterCall(call, member, classDecl, CallReceiver::OWN)
+          : nullptr;
   if (emitter != nullptr) {
     return emitter;
   }
-  auto *target = this->state.getLibraryDeclarations().findLibraryClass("EventTarget");
+  auto targetName = LibraryClassTable::getName(LibraryClass::EVENT_TARGET);
+  auto *target = this->state.getLibraryDeclarations().findLibraryClass(targetName);
   if (target == nullptr || !classDecl->derivesFrom(target)) {
     return nullptr;
   }
@@ -216,14 +220,9 @@ Expr *MethodCallChecker::checkLibraryMethodCall(CallExpr *call, MemberExpr *memb
 
 Expr *MethodCallChecker::checkFieldCall(CallExpr *call, MemberExpr *member) {
   call->callee = this->classMemberChecker->checkClassMember(member, nullptr);
-  auto callable = this->fieldCallable(call->callee->type, member->name);
+  auto callable = this->checkFieldCallable(call->callee->type, member->name);
   if (callable.isOk()) {
-    auto valued = this->callChecker->checkValueCall(call, callable.value());
-    if (valued.isErr()) {
-      this->state.getDiagnostics().error(call->callee->loc(), valued.error().message);
-      return call;
-    }
-    return valued.value();
+    return this->checkFieldValueCall(call, callable.value());
   }
   if (callable.error().code != MethodCallCheckerFieldCallableErrorCode::ALREADY_REPORTED) {
     this->state.getDiagnostics().error(member->loc(), callable.error().message);
@@ -231,6 +230,16 @@ Expr *MethodCallChecker::checkFieldCall(CallExpr *call, MemberExpr *member) {
   this->argumentChecker->walkArgsLoosely(call);
 
   return call;
+}
+
+Expr *MethodCallChecker::checkFieldValueCall(CallExpr *call, const Type *type) {
+  auto valued = this->callChecker->checkValueCall(call, type);
+  if (valued.isErr()) {
+    this->state.getDiagnostics().error(call->callee->loc(), valued.error().message);
+    return call;
+  }
+
+  return valued.value();
 }
 
 void MethodCallChecker::walkMethodAccess(MemberExpr *member, FunctionDecl *method) {
@@ -255,23 +264,27 @@ Expr *MethodCallChecker::checkGenericMethodCall(CallExpr *call, MemberExpr *memb
 
 Expr *MethodCallChecker::checkPlainMethodCall(CallExpr *call, MemberExpr *member,
                                               ClassDecl *classDecl, FuncSymbol *function,
-                                              bool checked) {
-  auto *implementation = this->classLinks->soleImplementation(classDecl, function->decl);
-  if (implementation != nullptr) {
-    call->target = MethodCall{.method = implementation->sym};
-  } else {
-    call->target = MethodCall{.method = function, .virtualCall = true};
-  }
+                                              bool isChecked) {
+  call->target = this->methodTarget(classDecl, function);
   member->type = this->returnInferrer->functionType(function);
   call->type = function->getReturnType();
-  std::vector<bool> given(checked ? call->args.size() : 0, true);
+  std::vector<bool> given(isChecked ? call->args.size() : 0, true);
 
   return this->argumentChecker->checkArguments(call, function->params, function->minArgs,
                                                function->hasRest, member->loc(), &given);
 }
 
+MethodCall MethodCallChecker::methodTarget(ClassDecl *classDecl, FuncSymbol *function) const {
+  auto *implementation = this->classLinks->soleImplementation(classDecl, function->decl);
+  if (implementation != nullptr) {
+    return MethodCall{.method = implementation->sym};
+  }
+
+  return MethodCall{.method = function, .virtualCall = true};
+}
+
 MethodCallChecker::ResultClassNotRuntime
-MethodCallChecker::notRuntime(const ClassDecl *classDecl) const {
+MethodCallChecker::checkNotRuntime(const ClassDecl *classDecl) const {
   if (this->fsDeclarer->isRuntimeClass(classDecl)) {
     auto message = ErrorTextRuntimeNew::onlyFs(classDecl->name);
 
@@ -285,7 +298,7 @@ MethodCallChecker::notRuntime(const ClassDecl *classDecl) const {
 }
 
 MethodCallChecker::ResultNoTypeArguments
-MethodCallChecker::classTypeArgs(const NewExpr *expr, const ClassDecl *classDecl) const {
+MethodCallChecker::checkClassTypeArgs(const NewExpr *expr, const ClassDecl *classDecl) const {
   if (!expr->typeArgs.empty()) {
     auto message = ErrorTextClassTypeArgs::notGeneric(classDecl->name);
 
@@ -299,7 +312,7 @@ MethodCallChecker::classTypeArgs(const NewExpr *expr, const ClassDecl *classDecl
 }
 
 MethodCallChecker::ResultClassIsDeclared
-MethodCallChecker::classDeclared(const ClassDecl *classDecl) const {
+MethodCallChecker::checkClassDeclared(const ClassDecl *classDecl) const {
   bool isEarly = !classDecl->staticOwner()->declared &&
                  this->state.getModuleStates().getLoadingModule() != nullptr &&
                  !this->state.getFunctionStack().isInsideFunction() &&
@@ -318,7 +331,7 @@ MethodCallChecker::classDeclared(const ClassDecl *classDecl) const {
 }
 
 MethodCallChecker::ResultClassIsConcrete
-MethodCallChecker::classConcrete(const ClassDecl *classDecl) const {
+MethodCallChecker::checkClassConcrete(const ClassDecl *classDecl) const {
   if (classDecl->isAbstract) {
     auto message = ErrorTextAbstractNew::abstract(classDecl->name);
 
@@ -332,7 +345,7 @@ MethodCallChecker::classConcrete(const ClassDecl *classDecl) const {
 }
 
 MethodCallChecker::ResultArgumentsAbsent
-MethodCallChecker::argumentsAbsent(const CallExpr *call, const ClassDecl *classDecl) const {
+MethodCallChecker::checkArgumentsAbsent(const CallExpr *call, const ClassDecl *classDecl) const {
   if (!call->args.empty()) {
     auto message = ErrorTextNoConstructor::noArgs(classDecl->name);
 
@@ -350,13 +363,10 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *classDecl, cons
   if (classDecl->isGeneric()) {
     return this->genericClassChecker->checkGenericNew(expr, classDecl, expected);
   }
-  auto possible = this->notRuntime(classDecl);
+  auto possible = this->checkNotRuntime(classDecl);
   if (possible.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), possible.error().message);
-    for (Expr *&arg : expr->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-    return expr;
+    return this->failClassNew(expr);
   }
   this->walkNewClass(expr, classDecl);
   this->classDeclarer->completeClass(classDecl);
@@ -364,8 +374,8 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *classDecl, cons
   expr->form = ClassNew{.cls = classDecl, .ctor = call};
   call->type = Type::voidTy();
   auto constructors = this->classLinks->constructorsOf(classDecl);
-  bool isMade = constructors.empty() ? this->noArgumentsFit(expr, call, classDecl)
-                                     : this->constructorChosen(expr, call, constructors);
+  bool isMade = constructors.empty() ? !this->reportUnexpectedArgs(expr, call, classDecl)
+                                     : this->chooseConstructor(expr, call, constructors);
   if (!isMade) {
     return expr;
   }
@@ -377,34 +387,42 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *classDecl, cons
   return expr;
 }
 
+Expr *MethodCallChecker::failClassNew(NewExpr *expr) {
+  for (Expr *&arg : expr->args) {
+    arg = this->exprChecker->checkExpr(arg);
+  }
+
+  return expr;
+}
+
 void MethodCallChecker::walkNewClass(const NewExpr *expr, const ClassDecl *classDecl) {
-  auto plain = this->classTypeArgs(expr, classDecl);
+  auto plain = this->checkClassTypeArgs(expr, classDecl);
   if (plain.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), plain.error().message);
   }
-  auto declared = this->classDeclared(classDecl);
+  auto declared = this->checkClassDeclared(classDecl);
   if (declared.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), declared.error().message);
   }
-  auto concrete = this->classConcrete(classDecl);
+  auto concrete = this->checkClassConcrete(classDecl);
   if (concrete.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), concrete.error().message);
   }
 }
 
-bool MethodCallChecker::noArgumentsFit(const NewExpr *expr, CallExpr *call,
-                                       const ClassDecl *classDecl) {
-  auto absent = this->argumentsAbsent(call, classDecl);
+bool MethodCallChecker::reportUnexpectedArgs(const NewExpr *expr, CallExpr *call,
+                                             const ClassDecl *classDecl) {
+  auto absent = this->checkArgumentsAbsent(call, classDecl);
   if (absent.isOk()) {
-    return true;
+    return false;
   }
   this->state.getDiagnostics().error(expr->loc(), absent.error().message);
   this->argumentChecker->walkArgsLoosely(call);
 
-  return false;
+  return true;
 }
 
-bool MethodCallChecker::constructorChosen(const NewExpr *expr, CallExpr *call,
+bool MethodCallChecker::chooseConstructor(const NewExpr *expr, CallExpr *call,
                                           llvm::ArrayRef<FunctionDecl *> constructors) {
   auto picked = this->overloadResolver->choosePlainVariant(constructors, call->args, {});
   if (picked.isErr() &&
@@ -417,8 +435,9 @@ bool MethodCallChecker::constructorChosen(const NewExpr *expr, CallExpr *call,
   FuncSymbol *function = picked.value().function;
   bool isChecked = picked.value().isChecked;
   const FunctionDecl *chosen = function->decl != nullptr ? function->decl : constructors[0];
+  auto constructorName = ObjectMemberTable::getName(ObjectMember::CONSTRUCTOR);
   auto accessible =
-      this->classMemberChecker->checkAccess(chosen->cls(), chosen->access(), "constructor");
+      this->classMemberChecker->checkAccess(chosen->cls(), chosen->access(), constructorName);
   if (accessible.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), accessible.error().message);
   }
@@ -431,8 +450,8 @@ bool MethodCallChecker::constructorChosen(const NewExpr *expr, CallExpr *call,
 }
 
 bool MethodCallChecker::hasInitializer(const ClassDecl *classDecl) const {
-  for (const ClassDecl *c = classDecl; c != nullptr; c = c->parent) {
-    if (c->init != nullptr || !c->constructors.empty()) {
+  for (const ClassDecl *current = classDecl; current != nullptr; current = current->parent) {
+    if (current->init != nullptr || !current->constructors.empty()) {
       return true;
     }
   }

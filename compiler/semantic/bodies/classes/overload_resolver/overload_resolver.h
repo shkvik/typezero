@@ -110,17 +110,20 @@ private:
       Result<std::vector<FunctionDecl *>, OverloadResolverChooseVariantError>;
   using ResultCandidatesFit = Result<std::vector<Candidate>, OverloadResolverChooseVariantError>;
 
-  ResultBestCandidate soleBest(llvm::StringRef what, llvm::ArrayRef<Candidate> applicable) const;
+  ResultBestCandidate checkSoleBest(llvm::StringRef what,
+                                    llvm::ArrayRef<Candidate> applicable) const;
   ResultChoiceAllowed checkGenericAllowed(const Candidate &candidate,
                                           GenericVariants generics) const;
   ResultChoiceAllowed checkArgumentsFor(llvm::ArrayRef<FunctionDecl *> fit,
                                         std::vector<Expr *> &args);
   ResultChoiceAllowed checkNoSpread(llvm::StringRef what, std::vector<Expr *> &args,
                                     const std::vector<bool> &spread);
-  ResultCandidatesFit rankedCandidates(llvm::StringRef what, llvm::ArrayRef<FunctionDecl *> fit,
-                                       std::vector<Expr *> &args);
-  ResultVariantsFound fittingVariants(llvm::StringRef what, llvm::ArrayRef<FunctionDecl *> variants,
-                                      std::vector<Expr *> &args);
+  ResultCandidatesFit checkRankedCandidates(llvm::StringRef what,
+                                            llvm::ArrayRef<FunctionDecl *> fit,
+                                            std::vector<Expr *> &args);
+  ResultVariantsFound checkFittingVariants(llvm::StringRef what,
+                                           llvm::ArrayRef<FunctionDecl *> variants,
+                                           std::vector<Expr *> &args);
   ResultVariantChosen chooseAmong(llvm::ArrayRef<FunctionDecl *> variants,
                                   std::vector<Expr *> &args, const std::vector<bool> &spread,
                                   GenericVariants generics);
@@ -183,6 +186,7 @@ private:
                             llvm::SMLoc loc);
   const Type *soleObjectShape(llvm::ArrayRef<FunctionDecl *> fit, const Expr *arg,
                               size_t index) const;
+  std::vector<const Type *> objectShapes(llvm::ArrayRef<FunctionDecl *> fit, size_t index) const;
   const Type *expectedArgument(llvm::ArrayRef<FunctionDecl *> fit, const Expr *arg,
                                size_t index) const;
   const Type *decimalForLiteral(llvm::ArrayRef<FunctionDecl *> fit, const Expr *arg,

@@ -10,7 +10,7 @@ class OsExports {
 public:
   using ResultExportFound = Result<llvm::StringRef, ModuleExportFoundError>;
 
-  static ResultExportFound osExport(llvm::StringRef name, llvm::StringRef path);
+  static ResultExportFound checkOsExport(llvm::StringRef name, llvm::StringRef path);
 };
 
 }

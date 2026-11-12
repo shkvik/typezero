@@ -11,8 +11,8 @@ const llvm::StringLiteral kChildExports[] = {"ChildProcess", "_forkChild",   "ex
 
 }
 
-ChildExports::ResultExportFound ChildExports::childExport(llvm::StringRef name,
-                                                          llvm::StringRef path) {
+ChildExports::ResultExportFound ChildExports::checkChildExport(llvm::StringRef name,
+                                                               llvm::StringRef path) {
   if (name == "spawnSync" || name == "execFileSync" || name == "execSync") {
     return ok(name);
   }

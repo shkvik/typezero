@@ -29,9 +29,9 @@ private:
   using ResultFilledTarget = Result<const Type *, CryptoFunctionCheckerFilledTargetError>;
   using ResultCurveIsKnown = Result<llvm::StringRef, CryptoFunctionCheckerCurveIsKnownError>;
 
-  ResultFilledTarget filledTarget(const Type *type, llvm::StringRef functionName,
-                                  llvm::StringRef shown) const;
-  ResultCurveIsKnown curveIsKnown(llvm::StringRef curve) const;
+  ResultFilledTarget checkFilledTarget(const Type *type, llvm::StringRef functionName,
+                                       llvm::StringRef shown) const;
+  ResultCurveIsKnown checkCurveIsKnown(llvm::StringRef curve) const;
   std::optional<std::string> literalOf(const Expr *expr) const;
 
   struct SyncCall {
@@ -63,10 +63,10 @@ private:
   Expr *reportConstants(CallExpr *call, llvm::SMLoc loc);
   Expr *provenFillOffset(Expr *arg, const Expr *target);
   Expr *provenFillSize(Expr *arg, Expr *at, const Expr *target);
-  bool keyOptionsRead(SyncCall &sync, bool priv, KeyInput &input);
-  bool keyDetailsRead(llvm::StringMap<Expr *> &options, KeyInput &input);
+  bool readKeyOptions(SyncCall &sync, bool priv, KeyInput &input);
+  bool readKeyDetails(llvm::StringMap<Expr *> &options, KeyInput &input);
   Expr *reportUnknownFunction(CallExpr *call, llvm::StringRef shown, llvm::SMLoc loc);
-  bool optionsReadAt(SyncCall &sync, size_t index, llvm::ArrayRef<llvm::StringRef> allowed);
+  bool readOptionsAt(SyncCall &sync, size_t index, llvm::ArrayRef<llvm::StringRef> allowed);
   Expr *provenNumber(Expr *arg, int64_t low, std::optional<int64_t> high, llvm::StringRef what);
   Expr *checkCreateHash(SyncCall &sync);
   Expr *checkCreateHmac(SyncCall &sync);
@@ -79,7 +79,7 @@ private:
   Expr *checkPbkdf2(SyncCall &sync);
   Expr *checkHkdf(SyncCall &sync);
   Expr *checkScrypt(SyncCall &sync);
-  bool argonOptionsGiven(SyncCall &sync);
+  bool readArgonOptions(SyncCall &sync);
   Expr *checkArgon2(SyncCall &sync);
   Expr *checkCreateCipher(SyncCall &sync);
   Expr *checkNameList(SyncCall &sync);

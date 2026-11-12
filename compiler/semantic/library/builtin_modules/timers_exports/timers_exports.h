@@ -11,7 +11,7 @@ class TimersExports {
 public:
   using ResultExportFound = Result<llvm::StringRef, ModuleExportFoundError>;
 
-  static ResultExportFound timersExport(llvm::StringRef name, llvm::StringRef path);
+  static ResultExportFound checkTimersExport(llvm::StringRef name, llvm::StringRef path);
 };
 
 }

@@ -25,7 +25,9 @@ public:
 private:
   using ResultBytesKindTested = Result<Expr *, InstanceOfCheckerCheckBytesInstanceOfError>;
 
-  ResultBytesKindTested checkBytesInstanceOf(BinaryExpr *binary, const Type *bytes);
+  ResultInstanceTested checkBytesTest(BinaryExpr *binary, const Type *bytes);
+  ResultInstanceTested checkValueRight(BinaryExpr *binary);
+  ResultInstanceTested checkKnownClass(BinaryExpr *binary, const ClassDecl *classDecl) const;
   std::optional<GlobalName> collectionGlobal(const Expr *rhs) const;
   bool isCollection(GlobalName global, const Type *type) const;
   ResultInstanceTested checkCollectionInstanceOf(BinaryExpr *binary, GlobalName global) const;
@@ -33,13 +35,22 @@ private:
   const Type *namedBytesType(const NameExpr *name) const;
   ClassDecl *knownClassOf(const Type *rhs) const;
   ResultInstanceTested checkUnknownRight(BinaryExpr *binary) const;
+  ResultInstanceTested checkConstructorRight(BinaryExpr *binary) const;
   ResultInstanceTested checkGenericInstanceOf(BinaryExpr *binary, const ClassDecl *classDecl) const;
-  ResultInstanceTested genericMismatch(const Type *base, llvm::ArrayRef<const Type *> members,
-                                       const ClassDecl *classDecl) const;
-  bool mayHoldClass(const Type *base, const ClassDecl *classDecl) const;
+  const Type *genericTestType(const Type *base, llvm::ArrayRef<const Type *> matching,
+                              const ClassDecl *classDecl) const;
+  ResultInstanceTested checkGenericRelation(const Type *base, llvm::ArrayRef<const Type *> members,
+                                            const ClassDecl *classDecl) const;
+  bool isRelatedToGeneric(const Type *base, llvm::ArrayRef<const Type *> members,
+                          const ClassDecl *classDecl) const;
+  bool canHoldClass(const Type *base, const ClassDecl *classDecl) const;
   ResultInstanceTested checkClassInstanceOf(BinaryExpr *binary, const ClassDecl *classDecl) const;
   ResultInstanceTested checkRelatedClass(BinaryExpr *binary, const Type *base,
                                          const ClassDecl *classDecl) const;
+  ResultBytesKindTested checkBytesInstanceOf(BinaryExpr *binary, const Type *bytes);
+  ResultBytesKindTested checkBytesUnion(BinaryExpr *binary, const Type *bytes);
+  bool isBytesKind(const Type *bytes, const Type *candidate) const;
+  bool canBeBufferOf(const Type *bytes, const Type *candidate) const;
 
   SemanticState &state;
   Scopes *scopes = nullptr;

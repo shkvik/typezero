@@ -28,8 +28,18 @@ public:
 
   Expr *checkStreamIntrinsic(CallExpr *call, NameExpr *name, const Type *typeArg);
   const Type *streamCallbackType();
-  Expr *streamChunkArg(Expr *arg, const Type *chunk, bool eof, bool writing, llvm::StringRef method,
-                       bool checked);
+  enum class ChunkSide {
+    PUSHED,
+    WRITTEN,
+  };
+
+  enum class ChunkState {
+    UNCHECKED,
+    CHECKED,
+  };
+
+  Expr *streamChunkArg(Expr *arg, const Type *chunk, ChunkSide side, llvm::StringRef method,
+                       ChunkState chunkState);
   Expr *checkStreamCall(CallExpr *call, MemberExpr *member, ClassDecl *classDecl);
 
 private:
@@ -38,13 +48,17 @@ private:
   using ResultOverrideArgs = Result<const ClassDecl *, StreamCheckerOverridesArgsError>;
   using ResultMethodExists = Result<const FunctionDecl *, StreamCheckerOverriddenMethodError>;
 
-  ResultOverrideArgs overridesArgs(const ClassDecl *classDecl, const StringLitExpr *literal) const;
-  ResultMethodExists overriddenMethod(const ClassDecl *classDecl,
-                                      llvm::ArrayRef<FunctionDecl *> methods,
-                                      llvm::StringRef method) const;
-  ResultChunkIsGiven chunkNotUndefined(const Expr *arg, bool eof, llvm::StringRef method) const;
-  ResultStreamSideOk streamSide(const Type *chunk, const Type *receiver, llvm::StringRef name,
-                                bool reading) const;
+  ResultOverrideArgs checkOverridesArgs(const ClassDecl *classDecl,
+                                        const StringLitExpr *literal) const;
+  ResultMethodExists checkOverriddenMethod(const ClassDecl *classDecl,
+                                           llvm::ArrayRef<FunctionDecl *> methods,
+                                           llvm::StringRef method) const;
+  bool isChunkValue(bool isOnlyStrings, const Type *candidate) const;
+  unsigned chunkKind(const Type *typeArg) const;
+  ResultChunkIsGiven checkChunkNotUndefined(const Expr *arg, ChunkSide side,
+                                            llvm::StringRef method) const;
+  ResultStreamSideOk checkStreamSide(const Type *chunk, const Type *receiver, llvm::StringRef name,
+                                     bool reading) const;
 
   bool isByteChunk(const Type *type) const;
 

@@ -119,7 +119,7 @@ void ImportBinder::resolveImports(Module *module) {
 
 void ImportBinder::resolveImport(Module *module, const ImportDecl &importDecl) {
   auto &here = this->state.getModuleStates().getModuleState(module);
-  auto source = this->resultTypes->importSource(importDecl);
+  auto source = this->resultTypes->checkImportSource(importDecl);
   if (source.isErr()) {
     this->state.getDiagnostics().error(importDecl.pathLoc, source.error().message);
     for (const ModuleName &name : importDecl.names) {

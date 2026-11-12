@@ -21,8 +21,8 @@ ReadlineChecker::ReadlineChecker(SemanticState &owner, SemanticParts &all)
   this->argumentChecker = &all.argumentChecker;
 }
 
-ReadlineChecker::ResultReadlineUsed ReadlineChecker::readlineFunction(llvm::StringRef functionName,
-                                                                      NodeModule module) const {
+ReadlineChecker::ResultReadlineUsed
+ReadlineChecker::checkReadlineFunction(llvm::StringRef functionName, NodeModule module) const {
   if (functionName != "createInterface") {
     auto message = ErrorTextReadline::typeOnly(functionName, module != NodeModule::Readline);
 
@@ -35,7 +35,7 @@ ReadlineChecker::ResultReadlineUsed ReadlineChecker::readlineFunction(llvm::Stri
   return ok(functionName);
 }
 
-ReadlineChecker::ResultInputIsStdin ReadlineChecker::stdinInput(const Expr *input) {
+ReadlineChecker::ResultInputIsStdin ReadlineChecker::checkStdinInput(const Expr *input) {
   if (!this->processChecker->isProcessMember(input, ProcessMember::STDIN)) {
     auto message = ErrorTextReadline::notStdin();
 
@@ -52,7 +52,7 @@ Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module,
                                          llvm::StringRef functionName, llvm::SMLoc loc) {
   this->state.getInventoryStore().markUsesAsync();
   call->type = Type::error();
-  auto function = this->readlineFunction(functionName, module);
+  auto function = this->checkReadlineFunction(functionName, module);
   if (function.isErr()) {
     this->state.getDiagnostics().error(loc, function.error().message);
     return this->checkArgsLoosely(call);
@@ -64,7 +64,7 @@ Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module,
   if (!streams.has_value()) {
     return call;
   }
-  auto stdinInput = this->stdinInput(streams->input);
+  auto stdinInput = this->checkStdinInput(streams->input);
   if (stdinInput.isErr()) {
     this->state.getDiagnostics().error(streams->input->loc(), stdinInput.error().message);
     return call;
@@ -122,7 +122,7 @@ ReadlineChecker::readlineStreams(CallExpr *call, llvm::StringRef functionName) {
 std::optional<ReadlineChecker::ReadlineStreams>
 ReadlineChecker::optionStreams(CallExpr *call, llvm::StringRef functionName) {
   auto options = llvm::StringMap<Expr *>();
-  bool isRead = this->fsChecker->nodeOptions(
+  bool isRead = this->fsChecker->readNodeOptions(
       call, 0, functionName,
       {"input", "output", "terminal", "crlfDelay", "historySize", "removeHistoryDuplicates",
        "prompt", "tabSize", "completer", "escapeCodeTimeout", "history"},

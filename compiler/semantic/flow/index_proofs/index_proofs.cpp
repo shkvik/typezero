@@ -676,7 +676,7 @@ bool IndexProofs::isExempt(llvm::SMLoc loc, const Expr *object) const {
     return true;
   }
 
-  return this->state.getFlowState().isUnreachable() || this->libraryCalls->inLibrary(loc);
+  return this->state.getFlowState().isUnreachable() || this->libraryCalls->isInLibrary(loc);
 }
 
 bool IndexProofs::isNeverObject(const Expr *object) const {

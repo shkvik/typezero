@@ -20,6 +20,7 @@ class DesignKeyTable {
 public:
   static llvm::StringRef getName(DesignKey value);
   static std::optional<DesignKey> find(llvm::StringRef name);
+  static llvm::StringRef getPrefix();
 };
 
 }

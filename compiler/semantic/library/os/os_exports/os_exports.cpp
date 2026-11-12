@@ -15,7 +15,7 @@ const llvm::StringLiteral kOsExports[] = {"EOL",         "devNull",           "g
 
 }
 
-OsExports::ResultExportFound OsExports::osExport(llvm::StringRef name, llvm::StringRef path) {
+OsExports::ResultExportFound OsExports::checkOsExport(llvm::StringRef name, llvm::StringRef path) {
   if (llvm::is_contained(kOsFunctions, name) || name == "EOL" || name == "devNull") {
     return ok(name);
   }

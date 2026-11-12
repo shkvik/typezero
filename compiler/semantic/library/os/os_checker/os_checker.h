@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/program/library/os/os_function_table/os_function_table.h"
+#include "compiler/program/library/os/os_value_table/os_value_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/os/os_checker/os_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -22,8 +23,9 @@ public:
 private:
   using ResultOsFunction = Result<llvm::StringRef, OsCheckerOsFunctionError>;
 
-  ResultOsFunction osFunction(llvm::StringRef functionName) const;
+  ResultOsFunction checkKnownOsFunction(llvm::StringRef functionName) const;
   const Type *cpuInfoType() const;
+  llvm::StringRef osValueText(OsValue value) const;
   const Type *userInfoType() const;
   bool hasRejectedArgs(CallExpr *call, llvm::SMLoc loc);
   Expr *checkOsFunction(CallExpr *call, OsFunction function, llvm::SMLoc loc);

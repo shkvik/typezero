@@ -26,8 +26,10 @@ class AstWalker {
 public:
   static void collectNames(const Stmt *stmt, llvm::StringSet<> &names, bool inFunction = true);
   static void collectNames(const Expr *expr, llvm::StringSet<> &names, bool inFunction = true);
-  static std::vector<const Expr *> exprsIn(const Stmt *stmt, bool intoFunctions);
-  static std::vector<const Expr *> exprsIn(const Expr *expr, bool intoFunctions);
+  static std::vector<const Expr *> ownExprsIn(const Stmt *stmt);
+  static std::vector<const Expr *> ownExprsIn(const Expr *expr);
+  static std::vector<const Expr *> allExprsIn(const Stmt *stmt);
+  static std::vector<const Expr *> allExprsIn(const Expr *expr);
   static std::vector<CallExpr *> tailCallsOf(Expr *value);
   static std::vector<Stmt *> tailStatementsOf(Stmt *body);
   static std::vector<CallExpr *> tailCallsIn(FunctionDecl *fn);

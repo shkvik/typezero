@@ -9,17 +9,28 @@ ChildErrorTypes::ChildErrorTypes(SemanticState &owner, SemanticParts &all)
   this->builtinModuleTypes = &all.builtinModuleTypes;
 }
 
-const Type *ChildErrorTypes::errorOf(llvm::StringRef functionName, bool text, bool shell) {
-  std::string name = functionName == "execSync"       ? "Exec"
-                     : functionName == "execFileSync" ? (shell ? "ExecFileShell" : "ExecFile")
-                                                      : (shell ? "SpawnShell" : "Spawn");
-  name += text ? "TextError" : "BytesError";
+const Type *ChildErrorTypes::errorOf(ChildFunction function, bool isText, bool isShell) {
+  std::string name = this->errorBaseName(function, isShell);
+  name += isText ? "TextError" : "BytesError";
 
   return this->builtinModuleTypes->named(name);
 }
 
-const Type *ChildErrorTypes::spawnResult(bool text) {
-  return this->builtinModuleTypes->named(text ? "SpawnTextResult" : "SpawnBytesResult");
+std::string ChildErrorTypes::errorBaseName(ChildFunction function, bool isShell) const {
+  switch (function) {
+    case ChildFunction::EXEC_SYNC:
+      return "Exec";
+    case ChildFunction::EXEC_FILE_SYNC:
+      return isShell ? "ExecFileShell" : "ExecFile";
+    case ChildFunction::SPAWN_SYNC:
+      return isShell ? "SpawnShell" : "Spawn";
+  }
+
+  return isShell ? "SpawnShell" : "Spawn";
+}
+
+const Type *ChildErrorTypes::spawnResult(bool isText) {
+  return this->builtinModuleTypes->named(isText ? "SpawnTextResult" : "SpawnBytesResult");
 }
 
 }

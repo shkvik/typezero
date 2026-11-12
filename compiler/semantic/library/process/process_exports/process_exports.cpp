@@ -11,8 +11,8 @@ const llvm::StringLiteral kProcessNames[] = {"argv",     "env",      "exit",   "
 
 }
 
-ProcessExports::ResultExportFound ProcessExports::processExport(llvm::StringRef name,
-                                                                llvm::StringRef path) {
+ProcessExports::ResultExportFound ProcessExports::checkProcessExport(llvm::StringRef name,
+                                                                     llvm::StringRef path) {
   if (llvm::is_contained(kProcessNames, name)) {
     return ok(name);
   }

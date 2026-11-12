@@ -1,4 +1,7 @@
 #include "compiler/semantic/library/intl/intl_checker/intl_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
+#include "compiler/program/library/intl/intl_function_table/intl_function_table.h"
 #include "compiler/program/library/library_module_names/library_module_names.h"
 #include "compiler/program/to_utf16/to_utf16.h"
 #include "compiler/program/to_utf8/to_utf8.h"
@@ -29,6 +32,19 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+namespace {
+
+constexpr llvm::StringLiteral kRoundingIncrementOption = "roundingIncrement";
+constexpr llvm::StringLiteral kFractionDigitsSuffix = "FractionDigits";
+constexpr llvm::StringLiteral kDateTimeFormatName = "DateTimeFormat";
+constexpr llvm::StringLiteral kLocaleTagField = "tag";
+constexpr llvm::StringLiteral kFormatMethod = "format";
+constexpr llvm::StringLiteral kCompareMethod = "compare";
+constexpr int64_t kRoundingIncrements[] = {1,   2,   5,   10,   20,   25,   50,  100,
+                                           200, 250, 500, 1000, 2000, 2500, 5000};
+
+}
 
 IntlChecker::IntlChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -66,9 +82,9 @@ std::optional<std::u16string> IntlChecker::literalText(const Expr *expr) const {
 }
 
 const IntlService *IntlChecker::serviceNamed(llvm::StringRef name) const {
-  for (const IntlService &s : IntlCheckHelpers::services()) {
-    if (s.name == name) {
-      return &s;
+  for (const IntlService &service : IntlCheckHelpers::services()) {
+    if (service.name == name) {
+      return &service;
     }
   }
 
@@ -83,39 +99,49 @@ const Type *IntlChecker::relativePartType() const {
 }
 
 const Expr *IntlChecker::unconverted(const Expr *expr) const {
-  expr = ExprParts::withoutImplicitCasts(expr);
-
-  return expr;
+  return ExprParts::withoutImplicitCasts(expr);
 }
 
 bool IntlChecker::isStringLike(const Type *type) const {
+  auto isStringLiteral = std::bind_front(&IntlChecker::isStringLiteralMember, this);
+
   return type->isString() || type->isStringLiteral() ||
-         (type->isUnion() && llvm::all_of(type->members(), [](const Type *member) {
-            return member->isStringLiteral();
-          }));
+         (type->isUnion() && llvm::all_of(type->members(), isStringLiteral));
+}
+
+bool IntlChecker::isStringLiteralMember(const Type *member) const {
+  return member->isStringLiteral();
 }
 
 const Type *IntlChecker::numberOptionType(llvm::StringRef name) const {
-  auto values = std::vector<int64_t>();
-  if (name == "roundingIncrement") {
-    values = {1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000};
-  } else {
-    int64_t low = name.ends_with("FractionDigits") ? 0 : 1;
-    int64_t high = name.ends_with("FractionDigits") ? 100 : 21;
-    for (int64_t v = low; v <= high; ++v) {
-      values.push_back(v);
-    }
-  }
+  bool isIncrement = name == kRoundingIncrementOption;
+  auto values = isIncrement ? std::vector<int64_t>(std::begin(kRoundingIncrements),
+                                                   std::end(kRoundingIncrements))
+                            : this->digitRange(name);
   auto members = std::vector<const Type *>();
-  for (int64_t v : values) {
-    members.push_back(Type::numberLiteral(double(v), Type::intTy()));
+  for (int64_t value : values) {
+    const auto *literal = Type::numberLiteral(double(value), Type::intTy());
+    members.push_back(literal);
   }
   const auto *type = Type::unionOf(members);
-  if (name != "roundingIncrement") {
-    Type::nameUnion(type, std::to_string(values.front()) + ".." + std::to_string(values.back()));
+  if (!isIncrement) {
+    auto rangeName = std::to_string(values.front()) + ".." + std::to_string(values.back());
+    Type::nameUnion(type, rangeName);
   }
 
   return type;
+}
+
+std::vector<int64_t> IntlChecker::digitRange(llvm::StringRef name) const {
+  bool isFraction = name.ends_with(kFractionDigitsSuffix);
+  int64_t low = isFraction ? 0 : 1;
+  int64_t high = isFraction ? 100 : 21;
+  auto values = std::vector<int64_t>();
+  for (int64_t value = low; value <= high; ++value) {
+    values.push_back(value);
+  }
+
+  return values;
 }
 
 const Type *IntlChecker::segmentDataType() const {
@@ -250,10 +276,11 @@ const Type *IntlChecker::resolvedSegmenterOptionsType() const {
 }
 
 const Type *IntlChecker::intlTypeNamed(llvm::StringRef name) const {
-  if (name == "DateTimeFormat") {
+  if (name == kDateTimeFormatName) {
     return Type::dateFormat();
   }
-  if (const IntlService *service = this->serviceNamed(name)) {
+  const auto *service = this->serviceNamed(name);
+  if (service != nullptr) {
     return Type::intl(service->kind);
   }
   if (name == "Segments") {
@@ -278,92 +305,118 @@ const Type *IntlChecker::intlTypeNamed(llvm::StringRef name) const {
       name == "UnicodeBCP47LocaleIdentifier" || name == "BCP47LanguageTag") {
     return Type::string();
   }
+
+  return this->serviceTypeNamed(name);
+}
+
+const Type *IntlChecker::serviceTypeNamed(llvm::StringRef name) const {
   for (const IntlService &service : IntlCheckHelpers::services()) {
     if (name == "Resolved" + service.name.str() + "Options") {
       return this->resolvedIntlOptionsType(service.kind);
     }
-    if (name != service.name.str() + "Options") {
-      continue;
+    if (name == service.name.str() + "Options") {
+      return this->serviceOptionsType(service);
     }
-    auto fields = std::vector<Field>();
-    for (const IntlOption &option : service.options) {
-      const Type *type = option.kind == 's'   ? Type::string()
-                         : option.kind == 'n' ? Type::doubleTy()
-                         : option.kind == 'b' ? Type::boolTy()
-                                              : Type::unionOf({Type::string(), Type::boolTy()});
-      if (option.kind == 'n') {
-        type = this->numberOptionType(option.name);
-      }
-      if ((option.kind == 's' || option.kind == 'g') && !option.values.empty()) {
-        auto members = std::vector<const Type *>();
-        for (llvm::StringLiteral value : option.values) {
-          members.push_back(Type::stringLiteral(ToUtf16::toUtf16(value)));
-        }
-        if (option.kind == 'g') {
-          members.push_back(Type::boolTy());
-        }
-        type = Type::unionOf(members);
-      }
-      fields.push_back({option.name.str(), Type::optional(type), false});
-    }
-    return Type::object(std::move(fields), "Intl." + service.name.str() + "Options");
   }
 
   return nullptr;
 }
 
+const Type *IntlChecker::serviceOptionsType(const IntlService &service) const {
+  auto fields = std::vector<Field>();
+  for (const IntlOption &option : service.options) {
+    const auto *type = this->optionType(option);
+    fields.push_back({.name = option.name.str(), .type = Type::optional(type)});
+  }
+  auto typeName = "Intl." + service.name.str() + "Options";
+
+  return Type::object(std::move(fields), typeName);
+}
+
+const Type *IntlChecker::optionType(const IntlOption &option) const {
+  if (option.kind == 'n') {
+    return this->numberOptionType(option.name);
+  }
+  bool isListed = (option.kind == 's' || option.kind == 'g') && !option.values.empty();
+  if (isListed) {
+    return this->listedOptionType(option);
+  }
+  if (option.kind == 's') {
+    return Type::string();
+  }
+  if (option.kind == 'b') {
+    return Type::boolTy();
+  }
+
+  return Type::unionOf({Type::string(), Type::boolTy()});
+}
+
+const Type *IntlChecker::listedOptionType(const IntlOption &option) const {
+  auto members = std::vector<const Type *>();
+  for (llvm::StringLiteral value : option.values) {
+    auto text = ToUtf16::toUtf16(value);
+    members.push_back(Type::stringLiteral(text));
+  }
+  if (option.kind == 'g') {
+    members.push_back(Type::boolTy());
+  }
+
+  return Type::unionOf(members);
+}
+
 Expr *IntlChecker::checkIntlNew(llvm::SMLoc loc, llvm::StringRef name, std::vector<Expr *> &args,
                                 IntlCreation creation) {
-  bool withNew = creation == IntlCreation::NEW;
-  auto failed = [&] {
-    for (Expr *&arg : args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-    auto *error = this->state.getAst().make<UndefinedExpr>(loc);
-    error->type = Type::error();
-
-    return error;
-  };
   const auto *service = this->serviceNamed(name);
   if (service == nullptr) {
     auto message = ErrorTextIntlNew::unknown(name);
     this->state.getDiagnostics().error(loc, message);
-    return failed();
+    return this->failIntlNew(loc, args);
   }
-  if (!withNew && !service->callable) {
+  if (creation == IntlCreation::CALL && !service->callable) {
     auto message = ErrorTextIntlNew::withNew(name);
     this->state.getDiagnostics().error(loc, message);
-    return failed();
+    return this->failIntlNew(loc, args);
   }
   if (args.size() > 2) {
     auto message = ErrorTextDateFormat::arity(args.size());
     this->state.getDiagnostics().error(loc, message);
-    return failed();
+    return this->failIntlNew(loc, args);
   }
   if (service->kind == IntlKind::DisplayNames && args.size() < 2) {
     auto message = ErrorTextIntlNew::noType();
     this->state.getDiagnostics().error(loc, message);
-    return failed();
+    return this->failIntlNew(loc, args);
   }
   auto what = ErrorTextIntlNew::label(name);
-  if (!this->intlOptionsChecker->checkIntlArgs(args, 0, service->kind, what)) {
+  if (!this->intlOptionsChecker->prepareIntlArgs(args, 0, service->kind, what)) {
     auto *error = this->state.getAst().make<UndefinedExpr>(loc);
     error->type = Type::error();
     return error;
   }
-  std::vector<Expr *> all{this->kindArg(this->state.getAst(), loc, service->runtimeKind)};
+  auto *kind = this->kindArg(this->state.getAst(), loc, service->runtimeKind);
+  std::vector<Expr *> all{kind};
   all.insert(all.end(), args.begin(), args.end());
+  auto intlName = GlobalNameTable::getName(GlobalName::INTL);
+  auto *callee = this->state.getAst().make<NameExpr>(loc, intlName);
+  const auto *intlType = Type::intl(service->kind);
 
-  return this->processChecker->builtinCall(loc, this->state.getAst().make<NameExpr>(loc, "Intl"),
-                                           Builtin::IntlNew, std::move(all),
-                                           Type::intl(service->kind));
+  return this->processChecker->builtinCall(loc, callee, Builtin::IntlNew, std::move(all), intlType);
 }
 
-IntlChecker::ResultLanguageTags IntlChecker::languageTags(const Expr *arg, llvm::StringRef what,
-                                                          bool constructor) {
+Expr *IntlChecker::failIntlNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
+  this->walkArgsLoosely(args);
+  auto *error = this->state.getAst().make<UndefinedExpr>(loc);
+  error->type = Type::error();
+
+  return error;
+}
+
+IntlChecker::ResultLanguageTags
+IntlChecker::checkLanguageTags(const Expr *arg, llvm::StringRef what, LanguageTagUse use) {
   auto tags = this->literalTypes->knownTexts(arg);
-  if (!tags) {
-    auto message = ErrorTextLanguageTag::unknown(constructor, what);
+  if (!tags.has_value()) {
+    bool isConstructor = use == LanguageTagUse::LOCALE_CONSTRUCTOR;
+    auto message = ErrorTextLanguageTag::unknown(isConstructor, what);
 
     return err(IntlCheckerLanguageTagsError{
         .code = IntlCheckerLanguageTagsErrorCode::UNKNOWN_TAGS,
@@ -384,7 +437,7 @@ IntlChecker::ResultLanguageTags IntlChecker::languageTags(const Expr *arg, llvm:
   return ok(*tags);
 }
 
-bool IntlChecker::checkLocaleArg(Expr *&arg, llvm::StringRef what) {
+bool IntlChecker::prepareLocaleArg(Expr *&arg, llvm::StringRef what) {
   const Type *type = arg->type;
   if (type->isError()) {
     return false;
@@ -392,9 +445,9 @@ bool IntlChecker::checkLocaleArg(Expr *&arg, llvm::StringRef what) {
   if (type->isUndefined()) {
     return true;
   }
-  auto *locale = this->state.getLibraryDeclarations().findLibraryClass("Locale");
+  auto *locale = this->state.getLibraryDeclarations().findLibraryClass(LibraryClass::LOCALE);
   if (locale != nullptr && !type->isOptional() && this->classDeclarer->classOf(type) == locale) {
-    auto *tag = this->state.getAst().make<MemberExpr>(arg->loc(), arg, "tag");
+    auto *tag = this->state.getAst().make<MemberExpr>(arg->loc(), arg, kLocaleTagField);
     tag->type = Type::string();
     arg = tag;
     return true;
@@ -404,14 +457,14 @@ bool IntlChecker::checkLocaleArg(Expr *&arg, llvm::StringRef what) {
     this->state.getDiagnostics().error(arg->loc(), message);
     return false;
   }
-  auto tags = this->languageTags(arg, what, false);
+  auto tags = this->checkLanguageTags(arg, what, LanguageTagUse::LOCALE_ARGUMENT);
   if (tags.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), tags.error().message);
     return false;
   }
   if (!type->nonOptional()->isString()) {
-    arg = this->typeRelations->convert(arg, type->isOptional() ? Type::optional(Type::string())
-                                                               : Type::string());
+    const Type *text = type->isOptional() ? Type::optional(Type::string()) : Type::string();
+    arg = this->typeRelations->convert(arg, text);
   }
 
   return true;
@@ -419,75 +472,90 @@ bool IntlChecker::checkLocaleArg(Expr *&arg, llvm::StringRef what) {
 
 Expr *IntlChecker::checkLocaleList(Expr *arg, llvm::StringRef what) {
   bool isArray = isa<ArrayLitExpr>(arg);
-  arg = this->exprChecker->checkExpr(arg, isArray ? Type::array(Type::string()) : nullptr);
-  const Type *type = arg->type;
+  const Type *hint = isArray ? Type::array(Type::string()) : nullptr;
+  auto *checked = this->exprChecker->checkExpr(arg, hint);
+  const Type *type = checked->type;
   if (type->isError()) {
-    return arg;
+    return checked;
   }
   if (!type->isArray()) {
-    this->checkLocaleArg(arg, what);
-    return arg;
+    this->prepareLocaleArg(checked, what);
+    return checked;
   }
   if (type != Type::array(Type::string())) {
     auto message = ErrorTextLanguageTag::list(what, type->name());
-    this->state.getDiagnostics().error(arg->loc(), message);
-    return arg;
+    this->state.getDiagnostics().error(checked->loc(), message);
+    return checked;
   }
-  auto *list = dyn_cast<ArrayLitExpr>(this->unconverted(arg));
+  const auto *list = dyn_cast<ArrayLitExpr>(this->unconverted(checked));
   if (list == nullptr) {
     auto message = ErrorTextLanguageTag::listOpen(what);
-    this->state.getDiagnostics().error(arg->loc(), message);
-    return arg;
+    this->state.getDiagnostics().error(checked->loc(), message);
+    return checked;
   }
+  this->walkLocaleElements(list, what);
+
+  return checked;
+}
+
+void IntlChecker::walkLocaleElements(const ArrayLitExpr *list, llvm::StringRef what) {
   for (const ArrayLitExpr::Element &element : list->elements) {
     if (element.spread) {
       auto message = ErrorTextLanguageTag::spread(what);
       this->state.getDiagnostics().error(element.expr->loc(), message);
-      return arg;
+      return;
     }
-    auto tags = this->languageTags(element.expr, what, false);
+    auto tags = this->checkLanguageTags(element.expr, what, LanguageTagUse::LOCALE_ARGUMENT);
     if (tags.isErr()) {
       this->state.getDiagnostics().error(element.expr->loc(), tags.error().message);
-      return arg;
+      return;
     }
   }
-
-  return arg;
 }
 
 Expr *IntlChecker::checkLocaleNew(NewExpr *expr, const Type *expected) {
   if (this->topLevelChecker->lookupValue(LibraryModuleNames::kIntlLocaleName).cls() == nullptr) {
     auto message = ErrorTextIntlLocale::missing();
     this->state.getDiagnostics().error(expr->loc(), message);
-    for (Expr *&arg : expr->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
+    this->walkArgsLoosely(expr->args);
     return expr;
   }
   if (expr->args.size() == 2) {
     auto message = ErrorTextIntlLocale::options();
     this->state.getDiagnostics().error(expr->args[1]->loc(), message);
-    for (Expr *&arg : expr->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
+    this->walkArgsLoosely(expr->args);
     return expr;
   }
   expr->name = LibraryModuleNames::kIntlLocaleName;
   expr->member = "";
   auto *checked = this->newChecker->checkNew(expr, expected);
   auto *made = dyn_cast<NewExpr>(checked);
-  std::vector<Expr *> *args =
-      made != nullptr ? (made->ctor() != nullptr ? &made->ctor()->args : &made->args) : nullptr;
-  if (args != nullptr && args->size() == 1 && args->front()->type &&
-      !args->front()->type->isError()) {
+  auto *args = made != nullptr ? this->constructedArgs(made) : nullptr;
+  bool isOneTag = args != nullptr && args->size() == 1 && args->front()->type != nullptr &&
+                  !args->front()->type->isError();
+  if (isOneTag) {
     auto what = ErrorTextIntlLocale::label();
-    auto tags = this->languageTags(args->front(), what, true);
+    auto tags = this->checkLanguageTags(args->front(), what, LanguageTagUse::LOCALE_CONSTRUCTOR);
     if (tags.isErr()) {
       this->state.getDiagnostics().error(args->front()->loc(), tags.error().message);
     }
   }
 
   return checked;
+}
+
+std::vector<Expr *> *IntlChecker::constructedArgs(NewExpr *made) const {
+  if (made->ctor() != nullptr) {
+    return &made->ctor()->args;
+  }
+
+  return &made->args;
+}
+
+void IntlChecker::walkArgsLoosely(std::vector<Expr *> &args) {
+  for (Expr *&arg : args) {
+    arg = this->exprChecker->checkExpr(arg);
+  }
 }
 
 Expr *IntlChecker::checkLocaleStatic(CallExpr *call, MemberExpr *member, const Type *expected) {
@@ -511,38 +579,40 @@ Expr *IntlChecker::checkIntlFunction(CallExpr *call, MemberExpr *member) {
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  if (member->name == "getCanonicalLocales") {
-    auto arity = this->argumentChecker->checkArity(call, 0, 1);
-    if (arity.isErr()) {
-      this->state.getDiagnostics().error(member->loc(), arity.error().message);
-      return call;
-    }
-    if (!call->args.empty()) {
-      auto what = ErrorTextIntlFunction::canonical();
-      call->args[0] = this->checkLocaleList(call->args[0], what);
-    }
-    call->target = BuiltinCall{.builtin = Builtin::IntlCanonicalLocales};
-    call->type = Type::array(Type::string());
-    return call;
+  auto function = IntlFunctionTable::find(member->name);
+  if (function == IntlFunction::GET_CANONICAL_LOCALES) {
+    return this->checkCanonicalLocales(call, member);
   }
-  if (member->name == "supportedValuesOf") {
+  if (function == IntlFunction::SUPPORTED_VALUES_OF) {
     auto message = ErrorTextIntlFunction::values();
     this->state.getDiagnostics().error(member->loc(), message);
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
+    this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
-  if (member->name == "Locale") {
+  if (LibraryClassTable::isName(member->name, LibraryClass::LOCALE)) {
     auto message = ErrorTextIntlLocale::withNew();
     this->state.getDiagnostics().error(member->loc(), message);
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
+    this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
 
   return this->checkIntlNew(member->loc(), member->name, call->args, IntlCreation::CALL);
+}
+
+Expr *IntlChecker::checkCanonicalLocales(CallExpr *call, MemberExpr *member) {
+  auto arity = this->argumentChecker->checkArity(call, 0, 1);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), arity.error().message);
+    return call;
+  }
+  if (!call->args.empty()) {
+    auto what = ErrorTextIntlFunction::canonical();
+    call->args[0] = this->checkLocaleList(call->args[0], what);
+  }
+  call->target = BuiltinCall{.builtin = Builtin::IntlCanonicalLocales};
+  call->type = Type::array(Type::string());
+
+  return call;
 }
 
 Expr *IntlChecker::checkIntlStatic(CallExpr *call, MemberExpr *member) {
@@ -552,13 +622,13 @@ Expr *IntlChecker::checkIntlStatic(CallExpr *call, MemberExpr *member) {
     return call;
   }
   auto what = ErrorTextIntlFunction::staticOf(service->name, member->name);
-  if ((service->name != "DateTimeFormat" && this->serviceNamed(service->name) == nullptr) ||
-      member->name != "supportedLocalesOf") {
+  bool isService =
+      service->name == kDateTimeFormatName || this->serviceNamed(service->name) != nullptr;
+  bool isLocales = IntlFunctionTable::find(member->name) == IntlFunction::SUPPORTED_LOCALES_OF;
+  if (!isService || !isLocales) {
     auto message = ErrorTextIntlFunction::onlyLocale(what);
     this->state.getDiagnostics().error(member->loc(), message);
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
+    this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
   auto arity = this->argumentChecker->checkArity(call, 1, 2);
@@ -570,56 +640,36 @@ Expr *IntlChecker::checkIntlStatic(CallExpr *call, MemberExpr *member) {
   if (call->args[0]->type->isError()) {
     return call;
   }
-  if (call->args.size() == 2) {
-    std::vector<Expr *> pair{this->state.getAst().make<UndefinedExpr>(member->loc()),
-                             call->args[1]};
-    if (!this->intlOptionsChecker->checkIntlArgs(pair, 0, IntlKind::None, what)) {
-      return call;
-    }
-    call->args[1] = pair[1];
+  if (call->args.size() == 2 && !this->prepareStaticOptions(call, member, what)) {
+    return call;
   }
-  call->args.insert(call->args.begin(), this->state.getAst().make<StringLitExpr>(
-                                            member->loc(), ToUtf16::toUtf16(what)));
-  call->args[0]->type = Type::string();
+  auto units = ToUtf16::toUtf16(what);
+  auto *label = this->state.getAst().make<StringLitExpr>(member->loc(), units);
+  label->type = Type::string();
+  call->args.insert(call->args.begin(), label);
   call->target = BuiltinCall{.builtin = Builtin::IntlSupportedLocales};
   call->type = Type::array(Type::string());
 
   return call;
 }
 
+bool IntlChecker::prepareStaticOptions(CallExpr *call, MemberExpr *member, llvm::StringRef what) {
+  auto *none = this->state.getAst().make<UndefinedExpr>(member->loc());
+  std::vector<Expr *> pair{none, call->args[1]};
+  if (!this->intlOptionsChecker->prepareIntlArgs(pair, 0, IntlKind::None, what)) {
+    return false;
+  }
+  call->args[1] = pair[1];
+
+  return true;
+}
+
 Expr *IntlChecker::checkIntlMember(MemberExpr *member, const Type *expected) {
   member->type = Type::error();
   IntlKind kind = member->object->type->intlKind();
   llvm::StringRef name = member->name;
-  const Type *wantedParam = nullptr;
-  const Type *wantedRet = nullptr;
-  if (this->state.getFunctionStack().getExpectedCallback() != nullptr &&
-      !this->state.getFunctionStack().getExpectedCallback()->params.empty()) {
-    wantedParam = this->state.getFunctionStack().getExpectedCallback()->params[0];
-    wantedRet = this->state.getFunctionStack().getExpectedCallback()->ret;
-  } else if (expected != nullptr && expected->nonOptional()->isFunction()) {
-    const Type *functionType = expected->nonOptional();
-    wantedParam = functionType->params().empty() ? nullptr : functionType->params()[0];
-    wantedRet = functionType->ret();
-  }
-  const Type *functionType = nullptr;
-  if (kind == IntlKind::NumberFormat && name == "format") {
-    const auto *param = Type::doubleTy();
-    if (wantedParam != nullptr && (wantedParam->isNumeric() || wantedParam->isDecimal())) {
-      param = wantedParam;
-    }
-    functionType = Type::function({param}, 1, false, Type::string());
-  } else if (kind == IntlKind::DateTimeFormat && name == "format") {
-    const auto *param = Type::date();
-    if (wantedParam != nullptr && wantedParam->isNumeric()) {
-      param = wantedParam;
-    }
-    functionType = Type::function({param}, 1, false, Type::string());
-  } else if (kind == IntlKind::Collator && name == "compare") {
-    const Type *returnType =
-        wantedRet != nullptr && wantedRet->isFloat() ? Type::doubleTy() : Type::intTy();
-    functionType = Type::function({Type::string(), Type::string()}, 2, false, returnType);
-  }
+  auto wanted = this->wantedCallback(expected);
+  const auto *functionType = this->boundFunctionType(kind, name, wanted);
   if (functionType == nullptr) {
     std::string message = kind == IntlKind::DateTimeFormat
                               ? ErrorTextIntlMember::dateFormat(name)
@@ -631,6 +681,43 @@ Expr *IntlChecker::checkIntlMember(MemberExpr *member, const Type *expected) {
 
   return this->processChecker->builtinCall(member->loc(), member, Builtin::IntlBound, {},
                                            functionType);
+}
+
+IntlChecker::WantedCallback IntlChecker::wantedCallback(const Type *expected) const {
+  const auto *callback = this->state.getFunctionStack().getExpectedCallback();
+  if (callback != nullptr && !callback->params.empty()) {
+    return WantedCallback{.param = callback->params[0], .ret = callback->ret};
+  }
+  if (expected != nullptr && expected->nonOptional()->isFunction()) {
+    const Type *functionType = expected->nonOptional();
+    const Type *param = functionType->params().empty() ? nullptr : functionType->params()[0];
+    return WantedCallback{.param = param, .ret = functionType->ret()};
+  }
+
+  return WantedCallback{.param = nullptr, .ret = nullptr};
+}
+
+const Type *IntlChecker::boundFunctionType(IntlKind kind, llvm::StringRef name,
+                                           const WantedCallback &wanted) const {
+  bool isFormat = name == kFormatMethod;
+  if (kind == IntlKind::NumberFormat && isFormat) {
+    bool isNumber =
+        wanted.param != nullptr && (wanted.param->isNumeric() || wanted.param->isDecimal());
+    const Type *param = isNumber ? wanted.param : Type::doubleTy();
+    return Type::function({param}, 1, false, Type::string());
+  }
+  if (kind == IntlKind::DateTimeFormat && isFormat) {
+    bool isNumber = wanted.param != nullptr && wanted.param->isNumeric();
+    const Type *param = isNumber ? wanted.param : Type::date();
+    return Type::function({param}, 1, false, Type::string());
+  }
+  if (kind == IntlKind::Collator && name == kCompareMethod) {
+    bool isFloat = wanted.ret != nullptr && wanted.ret->isFloat();
+    const Type *returnType = isFloat ? Type::doubleTy() : Type::intTy();
+    return Type::function({Type::string(), Type::string()}, 2, false, returnType);
+  }
+
+  return nullptr;
 }
 
 Expr *IntlChecker::segmentsArray(Expr *segments) {

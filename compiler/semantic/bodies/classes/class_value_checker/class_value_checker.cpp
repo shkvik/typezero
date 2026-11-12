@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
+#include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/semantic/bodies/classes/class_links/class_links.h"
 #include "compiler/semantic/bodies/classes/method_call_checker/method_call_checker.h"
 #include "compiler/semantic/bodies/classes/static_checker/static_checker.h"
@@ -38,19 +39,34 @@ const Type *ClassValueChecker::constructedBy(const Type *type) {
 }
 
 ClassDecl *ClassValueChecker::finalClass(ClassDecl *classDecl) const {
-  while (classDecl != nullptr && classDecl->replacement != nullptr) {
-    classDecl = classDecl->replacement;
+  ClassDecl *current = classDecl;
+  while (current != nullptr && current->replacement != nullptr) {
+    current = current->replacement;
   }
 
-  return classDecl;
+  return current;
 }
 
 const Type *ClassValueChecker::classValueType(ClassDecl *classDecl) {
-  classDecl = this->finalClass(classDecl);
+  auto *finalDecl = this->finalClass(classDecl);
 
-  return Type::classRef(classDecl, classDecl->name.empty() && classDecl->type != nullptr
-                                       ? classDecl->type->name()
-                                       : classDecl->name);
+  return this->classRefType(finalDecl);
+}
+
+const Type *ClassValueChecker::classRefType(const ClassDecl *classDecl) const {
+  bool isAnonymous = classDecl->name.empty() && classDecl->type != nullptr;
+  llvm::StringRef name = isAnonymous ? classDecl->type->name() : classDecl->name;
+
+  return Type::classRef(classDecl, name);
+}
+
+Expr *ClassValueChecker::classValueAt(ClassDecl *classDecl, llvm::SMLoc loc) {
+  auto *name = this->state.getAst().make<NameExpr>(loc, classDecl->name);
+  name->binding = NamedClass{.cls = classDecl};
+  name->type = this->classRefType(classDecl);
+  classDecl->usedAsValue = true;
+
+  return name;
 }
 
 Expr *ClassValueChecker::afterClassValue(Expr *object, Expr *result) {
@@ -92,7 +108,7 @@ ClassValueChecker::resolveConstructorType(const TypeRef &ref) {
   return ok(constructor);
 }
 
-ClassValueChecker::ResultConstructorArgs ClassValueChecker::constructorArgs() {
+ClassValueChecker::ResultConstructorArgs ClassValueChecker::checkConstructorArgs() {
   const auto *classDecl = this->state.getLateClassStore().getDeclaringClass();
   if (classDecl == nullptr || classDecl->parent == nullptr) {
     auto message = ErrorTextConstructorArgs::subclass();
@@ -108,7 +124,7 @@ ClassValueChecker::ResultConstructorArgs ClassValueChecker::constructorArgs() {
 
     return ok(none);
   }
-  const std::string parent = classDecl->parent->type->name().str();
+  auto parent = classDecl->parent->type->name().str();
   if (constructors.size() > 1) {
     auto message = ErrorTextConstructorArgs::several(parent);
 
@@ -129,18 +145,17 @@ ClassValueChecker::ResultConstructorArgs ClassValueChecker::constructorArgs() {
   if (llvm::is_contained(function->params, nullptr)) {
     return ok(Type::error());
   }
-  std::vector<const Type *> elements(function->params.begin(), function->params.end());
-  const Type *rest = nullptr;
-  if (function->hasRest) {
-    rest = elements.back();
-    elements.pop_back();
-  }
+  llvm::ArrayRef<const Type *> params = function->params;
+  const Type *rest = function->hasRest ? params.back() : nullptr;
+  auto fixed = function->hasRest ? params.drop_back() : params;
+  auto elements = std::vector<const Type *>(fixed.begin(), fixed.end());
   const auto *list = Type::argumentList(elements, function->minArgs, rest);
 
   return ok(list);
 }
 
-ClassValueChecker::ResultNewOfClassValue ClassValueChecker::valueNewClass(const Type *type) const {
+ClassValueChecker::ResultNewOfClassValue
+ClassValueChecker::checkValueNewClass(const Type *type) const {
   if (!type->isClassRef()) {
     auto message = ErrorTextValueNew::notClass(type->name());
 
@@ -153,7 +168,8 @@ ClassValueChecker::ResultNewOfClassValue ClassValueChecker::valueNewClass(const 
   return ok(type);
 }
 
-ClassValueChecker::ResultClassHasItsType ClassValueChecker::typedClass(ClassDecl *classDecl) const {
+ClassValueChecker::ResultClassHasItsType
+ClassValueChecker::checkTypedClass(ClassDecl *classDecl) const {
   if (classDecl->type == nullptr) {
     auto message = ErrorTextValueNew::valueOnly(classDecl->name);
 
@@ -167,7 +183,7 @@ ClassValueChecker::ResultClassHasItsType ClassValueChecker::typedClass(ClassDecl
 }
 
 ClassValueChecker::ResultNoTypeArguments
-ClassValueChecker::runtimeTypeArgs(const NewExpr *expr) const {
+ClassValueChecker::checkRuntimeTypeArgs(const NewExpr *expr) const {
   if (!expr->typeArgs.empty()) {
     auto message = ErrorTextValueNew::typeArgs();
 
@@ -180,7 +196,8 @@ ClassValueChecker::runtimeTypeArgs(const NewExpr *expr) const {
   return ok(expr);
 }
 
-ClassValueChecker::ResultArgumentNotVoid ClassValueChecker::argumentValue(const Expr *arg) const {
+ClassValueChecker::ResultArgumentNotVoid
+ClassValueChecker::checkArgumentValue(const Expr *arg) const {
   if (arg->type->isVoid()) {
     auto message = ErrorTextValueNew::voidArg();
 
@@ -198,52 +215,28 @@ Expr *ClassValueChecker::checkValueNew(NewExpr *expr, const Type *expected) {
   expr->callee = this->exprChecker->checkExpr(expr->callee);
   const Type *type = expr->callee->type;
   if (type->isError()) {
-    for (Expr *&arg : expr->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-    return expr;
+    return this->failValueNew(expr);
   }
-  auto classValue = this->valueNewClass(type);
+  auto classValue = this->checkValueNewClass(type);
   if (classValue.isErr()) {
     this->state.getDiagnostics().error(expr->callee->loc(), classValue.error().message);
-    for (Expr *&arg : expr->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-    return expr;
+    return this->failValueNew(expr);
   }
   auto *classDecl = const_cast<ClassDecl *>(type->classRef());
   if (classDecl != nullptr) {
-    auto typed = this->typedClass(classDecl);
-    if (typed.isErr()) {
-      this->state.getDiagnostics().error(expr->callee->loc(), typed.error().message);
-      for (Expr *&arg : expr->args) {
-        arg = this->exprChecker->checkExpr(arg);
-      }
-      return expr;
-    }
-    return this->methodCallChecker->checkClassNew(expr, typed.value(), expected);
+    return this->checkClassValueNew(expr, classDecl, expected);
   }
-  auto plain = this->runtimeTypeArgs(expr);
+  auto plain = this->checkRuntimeTypeArgs(expr);
   if (plain.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), plain.error().message);
   }
   expr->form = ReflectNew{};
-  auto argTypes = std::vector<const Type *>();
-  for (Expr *&arg : expr->args) {
-    arg = this->exprChecker->checkExpr(arg);
-    argTypes.push_back(arg->type);
-    auto value = this->argumentValue(arg);
-    if (value.isErr()) {
-      this->state.getDiagnostics().error(arg->loc(), value.error().message);
-    } else {
-      arg = this->typeRelations->convert(arg, Type::unknown());
-    }
-  }
-  if (!this->reflectChecker->onlyChecked()) {
+  auto argTypes = this->reflectedArgTypes(expr);
+  if (!this->reflectChecker->isOnlyChecked()) {
     this->state.getReflectStore().addReflectedNew(expr, std::move(argTypes));
   }
   this->flowChecker->calledFunction();
-  if (!this->reflectChecker->onlyChecked()) {
+  if (!this->reflectChecker->isOnlyChecked()) {
     this->state.getReflectStore().markReflectionUsed();
   }
   expr->type = type->constructed();
@@ -251,8 +244,43 @@ Expr *ClassValueChecker::checkValueNew(NewExpr *expr, const Type *expected) {
   return expr;
 }
 
+Expr *ClassValueChecker::failValueNew(NewExpr *expr) {
+  for (Expr *&arg : expr->args) {
+    arg = this->exprChecker->checkExpr(arg);
+  }
+
+  return expr;
+}
+
+Expr *ClassValueChecker::checkClassValueNew(NewExpr *expr, ClassDecl *classDecl,
+                                            const Type *expected) {
+  auto typed = this->checkTypedClass(classDecl);
+  if (typed.isErr()) {
+    this->state.getDiagnostics().error(expr->callee->loc(), typed.error().message);
+    return this->failValueNew(expr);
+  }
+
+  return this->methodCallChecker->checkClassNew(expr, typed.value(), expected);
+}
+
+std::vector<const Type *> ClassValueChecker::reflectedArgTypes(NewExpr *expr) {
+  auto argTypes = std::vector<const Type *>();
+  for (Expr *&arg : expr->args) {
+    arg = this->exprChecker->checkExpr(arg);
+    argTypes.push_back(arg->type);
+    auto value = this->checkArgumentValue(arg);
+    if (value.isErr()) {
+      this->state.getDiagnostics().error(arg->loc(), value.error().message);
+    } else {
+      arg = this->typeRelations->convert(arg, Type::unknown());
+    }
+  }
+
+  return argTypes;
+}
+
 ClassValueChecker::ResultClassIsDeclared
-ClassValueChecker::classDeclared(const ClassDecl *classDecl) const {
+ClassValueChecker::checkClassDeclared(const ClassDecl *classDecl) const {
   bool isEarly = !classDecl->declared &&
                  this->state.getModuleStates().getLoadingModule() != nullptr &&
                  !this->state.getFunctionStack().isInsideFunction() &&
@@ -271,14 +299,14 @@ ClassValueChecker::classDeclared(const ClassDecl *classDecl) const {
 }
 
 Expr *ClassValueChecker::checkClassValue(NameExpr *name, ClassDecl *classDecl) {
-  auto declared = this->classDeclared(classDecl);
+  auto declared = this->checkClassDeclared(classDecl);
   if (declared.isErr()) {
     this->state.getDiagnostics().error(name->loc(), declared.error().message);
   }
-  classDecl = this->finalClass(classDecl);
-  name->binding = NamedClass{.cls = classDecl};
-  name->type = this->classValueType(classDecl);
-  classDecl->usedAsValue = true;
+  auto *finalDecl = this->finalClass(classDecl);
+  name->binding = NamedClass{.cls = finalDecl};
+  name->type = this->classValueType(finalDecl);
+  finalDecl->usedAsValue = true;
 
   return name;
 }
@@ -288,7 +316,7 @@ ClassValueChecker::checkClassRefMember(MemberExpr *member) {
   const Type *type = member->object->type;
   const ClassDecl *classDecl = type->classRef();
   member->type = Type::error();
-  if (member->name == "prototype") {
+  if (BuiltinPropertyTable::isName(member->name, BuiltinProperty::PROTOTYPE)) {
     auto message = ErrorTextClassRefMember::prototype();
 
     return err(ClassValueCheckerCheckClassRefMemberError{
@@ -296,7 +324,8 @@ ClassValueChecker::checkClassRefMember(MemberExpr *member) {
         .message = message,
     });
   }
-  if (classDecl == nullptr && member->name == "name") {
+  bool isName = BuiltinPropertyTable::isName(member->name, BuiltinProperty::NAME);
+  if (classDecl == nullptr && isName) {
     auto *call = this->state.getAst().make<CallExpr>(member->loc(), member,
                                                      std::vector<Expr *>{member->object});
     call->target = BuiltinCall{.builtin = Builtin::ClassName};
@@ -311,16 +340,8 @@ ClassValueChecker::checkClassRefMember(MemberExpr *member) {
         .message = message,
     });
   }
-  bool isPlainName = member->name == "name" &&
-                     (classDecl->type == nullptr ||
-                      this->classDeclarer->staticMethodsNamed(classDecl, "name").empty());
-  if (isPlainName) {
-    auto *text = this->state.getAst().make<StringLitExpr>(
-        member->loc(), std::u16string(classDecl->name.begin(), classDecl->name.end()));
-    text->type = Type::string();
-    auto *named = this->afterClassValue(member->object, text);
-
-    return ok(named);
+  if (isName && !this->hasOwnNameMethod(classDecl)) {
+    return ok(this->classNameText(member, classDecl));
   }
   if (classDecl->type == nullptr) {
     auto message = ErrorTextClassRefMember::nameOnly(classDecl->name);
@@ -338,15 +359,22 @@ ClassValueChecker::checkClassRefMember(MemberExpr *member) {
   return ok(value);
 }
 
-Expr *ClassValueChecker::classValueAt(ClassDecl *classDecl, llvm::SMLoc loc) {
-  auto *name = this->state.getAst().make<NameExpr>(loc, classDecl->name);
-  name->binding = NamedClass{.cls = classDecl};
-  name->type = Type::classRef(classDecl, classDecl->name.empty() && classDecl->type != nullptr
-                                             ? classDecl->type->name()
-                                             : classDecl->name);
-  classDecl->usedAsValue = true;
+bool ClassValueChecker::hasOwnNameMethod(const ClassDecl *classDecl) const {
+  if (classDecl->type == nullptr) {
+    return false;
+  }
+  auto nameName = BuiltinPropertyTable::getName(BuiltinProperty::NAME);
+  auto methods = this->classDeclarer->staticMethodsNamed(classDecl, nameName);
 
-  return name;
+  return !methods.empty();
+}
+
+Expr *ClassValueChecker::classNameText(MemberExpr *member, const ClassDecl *classDecl) {
+  auto text = std::u16string(classDecl->name.begin(), classDecl->name.end());
+  auto *literal = this->state.getAst().make<StringLitExpr>(member->loc(), text);
+  literal->type = Type::string();
+
+  return this->afterClassValue(member->object, literal);
 }
 
 }

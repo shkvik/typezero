@@ -1,4 +1,6 @@
 #include "compiler/semantic/library/weakref/weak_ref_checker/weak_ref_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/weakref/weak_ref_method_table/weak_ref_method_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -21,7 +23,7 @@ WeakRefChecker::WeakRefChecker(SemanticState &owner, SemanticParts &all)
   this->argumentChecker = &all.argumentChecker;
 }
 
-WeakRefChecker::ResultTargetIsWritten WeakRefChecker::targetWritten(const TypeRef &ref) const {
+WeakRefChecker::ResultTargetIsWritten WeakRefChecker::checkTargetWritten(const TypeRef &ref) const {
   if (ref.kind() != TypeRefKind::GENERIC_REF || ref.args.size() != 1) {
     auto message = ErrorTextWeakRef::noTarget();
 
@@ -34,7 +36,7 @@ WeakRefChecker::ResultTargetIsWritten WeakRefChecker::targetWritten(const TypeRe
   return ok(&ref.args[0]);
 }
 
-WeakRefChecker::ResultWeakTargetValid WeakRefChecker::weakTarget(const Type *target) const {
+WeakRefChecker::ResultWeakTargetValid WeakRefChecker::checkWeakTarget(const Type *target) const {
   bool isUnsupported = target->isRegExp() || target->isMatch() || target->isDate() ||
                        target->isDateFormat() || target->isBytes() || target->isTimer();
   if (isUnsupported) {
@@ -58,7 +60,7 @@ WeakRefChecker::ResultWeakTargetValid WeakRefChecker::weakTarget(const Type *tar
   return ok(target);
 }
 
-WeakRefChecker::ResultNewTakesOneArgs WeakRefChecker::newArgs(const NewExpr *expr) const {
+WeakRefChecker::ResultNewTakesOneArgs WeakRefChecker::checkNewArgs(const NewExpr *expr) const {
   if (expr->args.size() != 1) {
     auto message = ErrorTextWeakRef::oneObject();
 
@@ -71,7 +73,7 @@ WeakRefChecker::ResultNewTakesOneArgs WeakRefChecker::newArgs(const NewExpr *exp
   return ok(expr);
 }
 
-WeakRefChecker::ResultNewTypeArgsFits WeakRefChecker::newTypeArgs(const NewExpr *expr) const {
+WeakRefChecker::ResultNewTypeArgsFits WeakRefChecker::checkNewTypeArgs(const NewExpr *expr) const {
   if (expr->typeArgs.size() > 1) {
     auto message = ErrorTextWeakRef::typeArgs();
 
@@ -84,9 +86,10 @@ WeakRefChecker::ResultNewTypeArgsFits WeakRefChecker::newTypeArgs(const NewExpr 
   return ok(expr);
 }
 
-WeakRefChecker::ResultMethodIsDerefed WeakRefChecker::methodName(const MemberExpr *member,
-                                                                 const Type *type) const {
-  if (member->name != "deref") {
+WeakRefChecker::ResultMethodIsDerefed WeakRefChecker::checkMethodName(const MemberExpr *member,
+                                                                      const Type *type) const {
+  auto method = WeakRefMethodTable::find(member->name);
+  if (method != WeakRefMethod::DEREF) {
     auto message = ErrorTextWeakRef::noMethod(member->name, type->name());
 
     return err(WeakRefCheckerMethodNameError{
@@ -99,7 +102,7 @@ WeakRefChecker::ResultMethodIsDerefed WeakRefChecker::methodName(const MemberExp
 }
 
 const Type *WeakRefChecker::resolveWeakRefType(const TypeRef &ref) {
-  auto written = this->targetWritten(ref);
+  auto written = this->checkTargetWritten(ref);
   if (written.isErr()) {
     this->state.getDiagnostics().error(ref.loc, written.error().message);
     return Type::error();
@@ -109,7 +112,7 @@ const Type *WeakRefChecker::resolveWeakRefType(const TypeRef &ref) {
   if (target->isError()) {
     return target;
   }
-  auto object = this->weakTarget(target);
+  auto object = this->checkWeakTarget(target);
   if (object.isErr()) {
     this->state.getDiagnostics().error(targetRef.loc, object.error().message);
     return Type::error();
@@ -120,61 +123,68 @@ const Type *WeakRefChecker::resolveWeakRefType(const TypeRef &ref) {
 
 Expr *WeakRefChecker::checkWeakRefNew(NewExpr *expr, const Type *expected) {
   llvm::SMLoc loc = expr->loc();
-  auto *callee = this->state.getAst().make<NameExpr>(loc, "WeakRef");
-  auto failed = [&] {
-    for (Expr *&arg : expr->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-    auto *error = this->state.getAst().make<UndefinedExpr>(loc);
-    error->type = Type::error();
-
-    return error;
-  };
-  auto args = this->newArgs(expr);
+  auto weakRefName = GlobalNameTable::getName(GlobalName::WEAK_REF);
+  auto *callee = this->state.getAst().make<NameExpr>(loc, weakRefName);
+  auto args = this->checkNewArgs(expr);
   if (args.isErr()) {
     this->state.getDiagnostics().error(loc, args.error().message);
-    return failed();
+    return this->failWeakRefNew(expr);
   }
-  const Type *target = nullptr;
-  auto typeArgs = this->newTypeArgs(expr);
-  if (typeArgs.isErr()) {
-    this->state.getDiagnostics().error(loc, typeArgs.error().message);
-  } else if (expr->typeArgs.size() == 1) {
-    target = this->typeResolver->resolveType(expr->typeArgs[0]);
-  } else if (expected != nullptr && expected->nonOptional()->isWeakRef()) {
-    target = expected->nonOptional()->weakTarget();
+  const auto *written = this->writtenTarget(expr, expected);
+  if (written != nullptr && written->isError()) {
+    return this->failWeakRefNew(expr);
   }
-  if (target != nullptr && target->isError()) {
-    return failed();
-  }
-  auto *checked = this->exprChecker->checkExpr(expr->args[0], target);
+  auto *checked = this->exprChecker->checkExpr(expr->args[0], written);
   auto *arg = this->genericChecker->apparent(checked);
   if (arg->type->isError()) {
     return arg;
   }
-  if (target == nullptr) {
-    target = arg->type;
-  }
-  auto object = this->weakTarget(target);
+  const auto *target = written != nullptr ? written : arg->type;
+  auto object = this->checkWeakTarget(target);
   if (object.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), object.error().message);
     return arg;
   }
-  arg = this->typeRelations->coerce(arg, target);
+  auto *coerced = this->typeRelations->coerce(arg, target);
+  const auto *weakRefType = Type::weakRef(target);
 
-  return this->processChecker->builtinCall(loc, callee, Builtin::WeakRefNew, {arg},
-                                           Type::weakRef(target));
+  return this->processChecker->builtinCall(loc, callee, Builtin::WeakRefNew, {coerced},
+                                           weakRefType);
+}
+
+const Type *WeakRefChecker::writtenTarget(const NewExpr *expr, const Type *expected) {
+  auto typeArgs = this->checkNewTypeArgs(expr);
+  if (typeArgs.isErr()) {
+    this->state.getDiagnostics().error(expr->loc(), typeArgs.error().message);
+    return nullptr;
+  }
+  if (expr->typeArgs.size() == 1) {
+    return this->typeResolver->resolveType(expr->typeArgs[0]);
+  }
+  if (expected != nullptr && expected->nonOptional()->isWeakRef()) {
+    return expected->nonOptional()->weakTarget();
+  }
+
+  return nullptr;
+}
+
+Expr *WeakRefChecker::failWeakRefNew(NewExpr *expr) {
+  for (Expr *&arg : expr->args) {
+    arg = this->exprChecker->checkExpr(arg);
+  }
+  auto *error = this->state.getAst().make<UndefinedExpr>(expr->loc());
+  error->type = Type::error();
+
+  return error;
 }
 
 Expr *WeakRefChecker::checkWeakRefMethod(CallExpr *call, MemberExpr *member) {
   const Type *type = member->object->type;
   call->type = Type::error();
-  auto deref = this->methodName(member, type);
+  auto deref = this->checkMethodName(member, type);
   if (deref.isErr()) {
     this->state.getDiagnostics().error(member->loc(), deref.error().message);
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
+    this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
   bool isRejected = this->callChecker->rejectSpread(call);

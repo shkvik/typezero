@@ -36,37 +36,53 @@ private:
   using ResultOneTypeArgOnly =
       Result<const MemberExpr *, PromiseStaticCheckerResolverTypeArgsError>;
 
-  const Type *awaited(const Type *type) const;
-  ResultValueTypeKnown resolverValue(const Type *value) const;
-  ResultTypeArgsAbsent staticTypeArgs(const MemberExpr *member) const;
-  ResultOneTypeArgOnly resolverTypeArgs(const MemberExpr *member) const;
-  ResultValueIsNotVoid notVoid(const Type *type, llvm::StringRef functionName) const;
-  ResultTupleHasValues allValues(llvm::ArrayRef<const Type *> tuple) const;
-  ResultPlainValueType plainValue(const Type *type, llvm::StringRef functionName) const;
-  ResultListOfPromises promiseArray(const Expr *arg, llvm::StringRef functionName) const;
-  ResultEmptyListTyped emptyList(const Type *wantedElement, llvm::StringRef functionName) const;
-  ResultRaceTypeJoined raceJoin(const Type *element, const Type *type,
-                                llvm::StringRef functionName) const;
-  bool checkPromiseList(Expr *&arg, const Type *wantedElement, const Type *&element,
-                        std::vector<const Type *> &tuple, llvm::StringRef functionName);
+  struct PromiseList {
+    const Type *element = nullptr;
+    std::vector<const Type *> tuple;
+  };
 
+  const Type *awaited(const Type *type) const;
+  ResultValueTypeKnown checkResolverValue(const Type *value) const;
+  ResultTypeArgsAbsent checkStaticTypeArgs(const MemberExpr *member) const;
+  ResultOneTypeArgOnly checkResolverTypeArgs(const MemberExpr *member) const;
+  ResultValueIsNotVoid checkNotVoid(const Type *type, llvm::StringRef functionName) const;
+  ResultTupleHasValues checkAllValues(llvm::ArrayRef<const Type *> tuple) const;
+  ResultPlainValueType checkPlainValue(const Type *type, llvm::StringRef functionName) const;
+  ResultListOfPromises checkPromiseArray(const Expr *arg, llvm::StringRef functionName) const;
+  ResultEmptyListTyped checkEmptyList(const Type *wantedElement,
+                                      llvm::StringRef functionName) const;
+  ResultRaceTypeJoined checkRaceJoin(const Type *element, const Type *type,
+                                     llvm::StringRef functionName) const;
+  ResultRaceTypeJoined checkRaceElement(const PromiseList &list,
+                                        llvm::StringRef functionName) const;
+  bool isVoidValue(const Type *type) const;
+  std::optional<PromiseList> promiseList(Expr *&arg, const Type *wantedElement,
+                                         llvm::StringRef functionName);
+  bool isSpreadOrHole(const ArrayLitExpr::Element &element) const;
+  std::optional<PromiseList> literalPromiseList(ArrayLitExpr *literal, const Type *wantedElement,
+                                                llvm::StringRef functionName);
+  std::optional<PromiseList> emptyPromiseList(ArrayLitExpr *literal, const Type *wantedElement,
+                                              llvm::StringRef functionName);
+  const Type *sameLiteralType(ArrayLitExpr *literal, llvm::ArrayRef<const Type *> types);
+  std::optional<std::vector<const Type *>> literalPromiseTypes(ArrayLitExpr *literal,
+                                                               const Type *wantedElement,
+                                                               llvm::StringRef functionName);
+  const Type *unifiedType(llvm::ArrayRef<const Type *> types) const;
+  std::optional<PromiseList> valuePromiseList(Expr *&arg, llvm::StringRef functionName);
+  std::optional<PromiseList> tuplePromiseList(const Expr *arg, llvm::StringRef functionName);
   const Type *wantedValue(const Type *expected) const;
-  static bool isSpreadOrHole(const ArrayLitExpr::Element &element);
-  const Type *unifiedType(const std::vector<const Type *> &types) const;
   Expr *typeAllCall(CallExpr *call, const Type *element, const std::vector<const Type *> &tuple);
   Expr *reportNoReject(CallExpr *call, MemberExpr *member, const std::string &message);
   const Type *resolverValueType(const MemberExpr *member, const Type *expected);
   Expr *checkWithResolvers(CallExpr *call, MemberExpr *member, const Type *expected);
-  Expr *checkResolve(CallExpr *call, MemberExpr *member, const Type *wanted, const std::string &fn);
+  Expr *checkResolve(CallExpr *call, MemberExpr *member, const Type *wanted,
+                     const std::string &functionName);
   Expr *checkCombinator(CallExpr *call, MemberExpr *member, const Type *wanted,
-                        const std::string &fn, Builtin builtin);
-  bool literalPromiseTypes(ArrayLitExpr *literal, const Type *wantedElement,
-                           llvm::StringRef functionName, std::vector<const Type *> &types);
-  bool checkValuePromiseList(Expr *&arg, const Type *&element, std::vector<const Type *> &tuple,
-                             llvm::StringRef functionName);
-  bool checkLiteralPromiseList(ArrayLitExpr *literal, const Type *wantedElement,
-                               const Type *&element, std::vector<const Type *> &tuple,
-                               llvm::StringRef functionName);
+                        const std::string &functionName, Builtin builtin);
+  const Type *combinatorElement(const Type *wanted, bool isRace) const;
+  const Type *settledElement(const Type *element, const Type *wantedElement) const;
+  Expr *typeRaceCall(CallExpr *call, const PromiseList &list, const Type *wantedElement,
+                     llvm::StringRef functionName);
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

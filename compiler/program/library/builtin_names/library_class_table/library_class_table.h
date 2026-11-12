@@ -15,6 +15,7 @@ enum class LibraryClass {
   HEADERS,
   LOCALE,
   PIPELINE_STAGE,
+  READABLE,
   REQUEST,
   RESPONSE,
   SERVER,
@@ -23,6 +24,10 @@ enum class LibraryClass {
   STREAM_EMITTER,
   SUBTLE_CRYPTO,
   URL,
+  WRITABLE,
+  DUPLEX,
+  TRANSFORM,
+  PASS_THROUGH,
 };
 
 struct LibraryClassInfo {

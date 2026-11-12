@@ -223,7 +223,7 @@ GenericClassInstantiator::checkEventMap(const ClassDecl *generic, llvm::ArrayRef
   if (!this->isEmitterClass(generic)) {
     return ok();
   }
-  auto fits = this->eventMaps->eventMapFits(args[0]);
+  auto fits = this->eventMaps->checkEventMapFits(args[0]);
   if (fits.isErr()) {
     this->state.getDiagnostics().error(loc, fits.error().message);
 

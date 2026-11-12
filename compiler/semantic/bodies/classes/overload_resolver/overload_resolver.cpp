@@ -28,7 +28,7 @@ constexpr int kDirectRank = 1;
 constexpr int kFieldsRank = 2;
 constexpr int kJsonRank = 3;
 constexpr llvm::StringLiteral kMatchIndices = "indices";
-
+constexpr llvm::StringLiteral kObjectPlaceholder = "o";
 }
 
 OverloadResolver::OverloadResolver(SemanticState &owner, SemanticParts &all)
@@ -425,7 +425,7 @@ OverloadResolver::chooseAmong(llvm::ArrayRef<FunctionDecl *> variants, std::vect
   if (plain.isErr()) {
     return err(plain.error());
   }
-  auto fit = this->fittingVariants(what, variants, args);
+  auto fit = this->checkFittingVariants(what, variants, args);
   if (fit.isErr()) {
     return err(fit.error());
   }
@@ -436,11 +436,11 @@ OverloadResolver::chooseAmong(llvm::ArrayRef<FunctionDecl *> variants, std::vect
   if (typed.isErr()) {
     return err(typed.error());
   }
-  auto ranked = this->rankedCandidates(what, fit.value(), args);
+  auto ranked = this->checkRankedCandidates(what, fit.value(), args);
   if (ranked.isErr()) {
     return err(ranked.error());
   }
-  auto best = this->soleBest(what, ranked.value());
+  auto best = this->checkSoleBest(what, ranked.value());
   if (best.isErr()) {
     return err(best.error());
   }
@@ -496,9 +496,8 @@ OverloadResolver::checkNoSpread(llvm::StringRef what, std::vector<Expr *> &args,
   return ok();
 }
 
-OverloadResolver::ResultVariantsFound
-OverloadResolver::fittingVariants(llvm::StringRef what, llvm::ArrayRef<FunctionDecl *> variants,
-                                  std::vector<Expr *> &args) {
+OverloadResolver::ResultVariantsFound OverloadResolver::checkFittingVariants(
+    llvm::StringRef what, llvm::ArrayRef<FunctionDecl *> variants, std::vector<Expr *> &args) {
   size_t count = args.size();
   auto fit = std::vector<FunctionDecl *>();
   for (FunctionDecl *variant : variants) {
@@ -532,7 +531,8 @@ OverloadResolver::checkArgumentsFor(llvm::ArrayRef<FunctionDecl *> fit, std::vec
   for (size_t index = 0; index < args.size(); ++index) {
     const Type *expected = this->expectedArgument(fit, args[index], index);
     bool isUsable = expected != nullptr && !expected->isError();
-    args[index] = this->exprChecker->checkExpr(args[index], isUsable ? expected : nullptr);
+    const Type *wanted = isUsable ? expected : nullptr;
+    args[index] = this->exprChecker->checkExpr(args[index], wanted);
   }
   for (const Expr *arg : args) {
     if (arg->type->isError()) {
@@ -580,20 +580,23 @@ const Type *OverloadResolver::soleObjectShape(llvm::ArrayRef<FunctionDecl *> fit
   if (!isa<ObjectLitExpr>(arg)) {
     return nullptr;
   }
-  const Type *shape = nullptr;
-  int changes = 0;
+  auto shapes = this->objectShapes(fit, index);
+  bool isSole = !shapes.empty() && llvm::all_equal(shapes);
+
+  return isSole ? shapes[0] : nullptr;
+}
+
+std::vector<const Type *> OverloadResolver::objectShapes(llvm::ArrayRef<FunctionDecl *> fit,
+                                                         size_t index) const {
+  auto shapes = std::vector<const Type *>();
   for (FunctionDecl *variant : fit) {
     const Type *param = this->parameterAt(variant->sym, index);
-    if (this->isPlainObjectParam(param) && param != shape) {
-      shape = param;
-      changes += 1;
+    if (this->isPlainObjectParam(param)) {
+      shapes.push_back(param);
     }
   }
-  if (changes != 1) {
-    return nullptr;
-  }
 
-  return shape;
+  return shapes;
 }
 
 bool OverloadResolver::isPlainObjectParam(const Type *param) const {
@@ -625,8 +628,8 @@ const Type *OverloadResolver::decimalForLiteral(llvm::ArrayRef<FunctionDecl *> f
 }
 
 OverloadResolver::ResultCandidatesFit
-OverloadResolver::rankedCandidates(llvm::StringRef what, llvm::ArrayRef<FunctionDecl *> fit,
-                                   std::vector<Expr *> &args) {
+OverloadResolver::checkRankedCandidates(llvm::StringRef what, llvm::ArrayRef<FunctionDecl *> fit,
+                                        std::vector<Expr *> &args) {
   auto ranking = VariantRanking();
   for (FunctionDecl *variant : fit) {
     this->rankVariant(variant, args, ranking);
@@ -656,7 +659,8 @@ void OverloadResolver::rankVariant(FunctionDecl *variant, std::vector<Expr *> &a
   bool isInferred = !function->isGeneric() ||
                     this->typeArgInferrer->inferFromArguments(function, args, candidate.typeArgs);
   if (!isInferred) {
-    ranking.why += ErrorTextVariant::typeParams(ErrorTextVariant::text(variant));
+    auto shown = ErrorTextVariant::text(variant);
+    ranking.why += ErrorTextVariant::typeParams(shown);
     return;
   }
   for (size_t index = 0; index < args.size(); ++index) {
@@ -702,7 +706,7 @@ void OverloadResolver::noteMismatch(const FunctionDecl *variant, const Expr *arg
 }
 
 OverloadResolver::ResultBestCandidate
-OverloadResolver::soleBest(llvm::StringRef what, llvm::ArrayRef<Candidate> applicable) const {
+OverloadResolver::checkSoleBest(llvm::StringRef what, llvm::ArrayRef<Candidate> applicable) const {
   for (const Candidate &candidate : applicable) {
     if (this->isBetterThanOthers(candidate, applicable)) {
       return ok(candidate);
@@ -935,7 +939,7 @@ std::string OverloadResolver::signatureText(const FunctionDecl *variant) const {
 std::string OverloadResolver::shownObject(const MemberExpr *member) const {
   auto *name = dyn_cast<NameExpr>(member->object);
   if (name == nullptr) {
-    return "o";
+    return kObjectPlaceholder.str();
   }
 
   return name->name.str();
@@ -950,7 +954,8 @@ std::vector<FunctionDecl *> OverloadResolver::signatureVariants(const Type *inte
   }
   auto variants = std::vector<FunctionDecl *>();
   for (const Type *signature : overload.signatures) {
-    variants.push_back(this->signatureVariant(overload, signature));
+    auto *variant = this->signatureVariant(overload, signature);
+    variants.push_back(variant);
   }
   classes.rememberSignatureVariants(interfaceType, overload.name, variants);
 
@@ -969,7 +974,8 @@ FunctionDecl *OverloadResolver::signatureVariant(const Overload &overload, const
   function->hasRest = signature->hasRest();
   function->setReturnType(signature->ret());
   for (size_t index = 0; index < signature->params().size(); ++index) {
-    functionDecl->params.push_back(this->signatureParam(signature, index));
+    auto param = this->signatureParam(signature, index);
+    functionDecl->params.push_back(param);
   }
   functionDecl->sym = function;
 
@@ -994,7 +1000,8 @@ Param OverloadResolver::signatureParam(const Type *signature, size_t index) {
 Expr *OverloadResolver::checkOverloadCall(CallExpr *call, MemberExpr *member) {
   const Type *interfaceType = member->object->type;
   const Overload &overload = *interfaceType->overload(member->name);
-  call->type = member->type = Type::error();
+  call->type = Type::error();
+  member->type = Type::error();
   auto variants = this->signatureVariants(interfaceType, overload);
   auto chosen = this->choosePlainVariant(variants, call->args, call->spread);
   if (chosen.isErr() &&

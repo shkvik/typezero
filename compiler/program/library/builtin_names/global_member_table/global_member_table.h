@@ -35,6 +35,7 @@ public:
   static std::optional<GlobalMember> find(GlobalName owner, llvm::StringRef name);
   static llvm::StringRef getName(GlobalMember member);
   static GlobalName getOwner(GlobalMember member);
+  static std::string getQualifiedName(GlobalMember member);
 };
 
 }

@@ -40,15 +40,15 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *functio
   if (!isReading && functionName != "createWriteStream") {
     return nullptr;
   }
-  if (this->libraryCalls->inLibrary(call->loc())) {
+  if (this->libraryCalls->isInLibrary(call->loc())) {
     return nullptr;
   }
   call->type = Type::error();
-  if (!this->fsStreamArityFits(call, loc)) {
+  if (!this->matchFsStreamArity(call, loc)) {
     return call;
   }
-  auto *alias = this->state.getLibraryDeclarations().findLibraryType(
-      isReading ? "ReadStreamOptions" : "WriteStreamOptions");
+  auto options = isReading ? LibraryType::READ_STREAM_OPTIONS : LibraryType::WRITE_STREAM_OPTIONS;
+  auto *alias = this->state.getLibraryDeclarations().findLibraryType(options);
   if (alias == nullptr) {
     return call;
   }
@@ -73,7 +73,7 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *functio
   return this->callFsStream(call, args, isReading, loc);
 }
 
-bool StreamSources::fsStreamArityFits(CallExpr *call, llvm::SMLoc loc) {
+bool StreamSources::matchFsStreamArity(CallExpr *call, llvm::SMLoc loc) {
   bool isRejected = this->callChecker->rejectSpread(call);
   auto arity = isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
@@ -84,8 +84,9 @@ bool StreamSources::fsStreamArityFits(CallExpr *call, llvm::SMLoc loc) {
 }
 
 void StreamSources::walkFsStreamOptions(Expr *arg, FsStreamArgs &args) {
-  if (isa<ObjectLitExpr>(arg)) {
-    this->scanOptionsLiteral(cast<ObjectLitExpr>(arg), args);
+  auto *literal = dyn_cast<ObjectLitExpr>(arg);
+  if (literal != nullptr) {
+    this->scanOptionsLiteral(literal, args);
     args.opts = this->argumentChecker->checkArg(arg, args.options);
     return;
   }
@@ -180,12 +181,13 @@ VarSymbol *StreamSources::processStdinVar() {
 }
 
 const Type *StreamSources::streamFromOptionsType() {
-  auto *alias = this->state.getLibraryDeclarations().findLibraryType("ReadableFromOptions");
+  auto *alias =
+      this->state.getLibraryDeclarations().findLibraryType(LibraryType::READABLE_FROM_OPTIONS);
 
   return alias != nullptr ? this->typeDeclarer->resolveAlias(alias) : nullptr;
 }
 
-StreamSources::ResultValuesIterator StreamSources::valuesIterator(Expr *source) {
+StreamSources::ResultValuesIterator StreamSources::checkValuesIterator(Expr *source) {
   auto *iterator = this->streamPipeline->valuesIteratorOf(source);
   if (iterator == nullptr) {
     auto message = ErrorTextStreamFrom::source(source->type->name());
@@ -246,7 +248,7 @@ Expr *StreamSources::checkStreamFrom(CallExpr *call, MemberExpr *member) {
     return this->eventTargetChecker->callLibraryFunction(call, "streamFromAsyncIterator",
                                                          {async->type->yielded()}, given, loc);
   }
-  auto values = this->valuesIterator(source);
+  auto values = this->checkValuesIterator(source);
   if (values.isErr()) {
     this->state.getDiagnostics().error(source->loc(), values.error().message);
     return call;

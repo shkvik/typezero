@@ -602,7 +602,7 @@ const Type *TypeResolver::resolveDict(const TypeRef &ref) {
   if (dict.error().code == DictCheckerResolveDictTypeErrorCode::NOT_A_DICT) {
     return nullptr;
   }
-  bool isOnKey = this->dictChecker->keyArgument(dict.error().code);
+  bool isOnKey = this->dictChecker->isKeyArgument(dict.error().code);
   llvm::SMLoc at = isOnKey ? ref.args[0].loc : ref.loc;
   this->state.getDiagnostics().error(at, dict.error().message);
 
@@ -739,7 +739,7 @@ const Type *TypeResolver::resolveIntl(const TypeRef &ref) {
 }
 
 const Type *TypeResolver::resolveConstructorArgs(const TypeRef &ref) {
-  auto args = this->classValueChecker->constructorArgs();
+  auto args = this->classValueChecker->checkConstructorArgs();
   if (args.isErr()) {
     this->state.getDiagnostics().error(ref.loc, args.error().message);
 

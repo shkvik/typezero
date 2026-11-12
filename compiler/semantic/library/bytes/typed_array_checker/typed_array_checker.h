@@ -42,7 +42,7 @@ private:
   using ResultIndexProven = Result<const Expr *, TypedArrayCheckerWithIndexError>;
   using ResultMapFitsType = Result<const Expr *, TypedArrayCheckerMapResultFitsError>;
 
-  ResultSetSourceOk setSource(const Expr *source) const;
+  ResultSetSourceOk checkSetSource(const Expr *source) const;
   TypedArrayCall describeCall(CallExpr *call, MemberExpr *member) const;
   Expr *toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result) const;
 
@@ -54,8 +54,8 @@ private:
   CallExpr *makeArrayFrom(const TypedArrayCall &typed);
   void walkPositionArgs(CallExpr *call, size_t from);
   IntLitExpr *makeIntLiteral(llvm::SMLoc loc, int value);
-  ResultMapFitsType mapResultFits(const TypedArrayCall &typed) const;
-  ResultIndexProven withIndex(const Expr *array, const Expr *index) const;
+  ResultMapFitsType checkMapResultFits(const TypedArrayCall &typed) const;
+  ResultIndexProven checkWithIndex(const Expr *array, const Expr *index) const;
   Expr *checkJoin(const TypedArrayCall &typed, const TypedArrayJoinMethod &join);
   Expr *checkSearch(const TypedArrayCall &typed, const TypedArraySearchMethod &search);
   Expr *checkReverse(const TypedArrayCall &typed, const TypedArrayReverseMethod &reverse);

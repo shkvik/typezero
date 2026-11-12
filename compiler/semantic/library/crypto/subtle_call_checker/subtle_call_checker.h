@@ -33,18 +33,18 @@ private:
   using ResultMembersPresent = Result<const ObjectLitExpr *, SubtleCallCheckerMembersPresentError>;
   using ResultAlgorithmKnown = Result<std::string, SubtleCallCheckerKnownAlgorithmError>;
 
-  ResultAesLengthValid aesLength(double bits) const;
-  ResultGcmTagLengthOk gcmTagLength(double bits) const;
-  ResultCurveNameKnown knownCurve(llvm::StringRef curve) const;
-  ResultKeyFormatKnown knownFormat(llvm::StringRef format) const;
-  ResultShaHashIsKnown knownShaHash(llvm::StringRef hash, llvm::StringRef dictionary) const;
-  ResultParamsAsObject paramsAsObject(llvm::StringRef name, llvm::StringRef op,
-                                      const Dictionary &dictionary) const;
-  ResultMembersPresent membersPresent(llvm::StringRef name, llvm::StringRef op,
-                                      const Dictionary &dictionary,
-                                      const ObjectLitExpr *literal) const;
-  ResultAlgorithmKnown knownAlgorithm(llvm::StringRef written, llvm::StringRef op,
-                                      llvm::StringRef fallback) const;
+  ResultAesLengthValid checkAesLength(double bits) const;
+  ResultGcmTagLengthOk checkGcmTagLength(double bits) const;
+  ResultCurveNameKnown checkKnownCurve(llvm::StringRef curve) const;
+  ResultKeyFormatKnown checkKnownFormat(llvm::StringRef format) const;
+  ResultShaHashIsKnown checkKnownShaHash(llvm::StringRef hash, llvm::StringRef dictionary) const;
+  ResultParamsAsObject checkParamsAsObject(llvm::StringRef name, llvm::StringRef op,
+                                           const Dictionary &dictionary) const;
+  ResultMembersPresent checkMembersPresent(llvm::StringRef name, llvm::StringRef op,
+                                           const Dictionary &dictionary,
+                                           const ObjectLitExpr *literal) const;
+  ResultAlgorithmKnown checkKnownAlgorithm(llvm::StringRef written, llvm::StringRef op,
+                                           llvm::StringRef fallback) const;
   std::string algorithmIn(llvm::StringRef op, llvm::StringRef upper) const;
   std::optional<double> numberLiteral(const Expr *expr) const;
   const ObjectLitExpr::Property *property(const ObjectLitExpr *literal, llvm::StringRef name) const;
@@ -64,14 +64,14 @@ private:
   std::string literalAlgorithm(const Expr *arg, llvm::StringRef op, llvm::StringRef fallback,
                                bool &bad);
 
-  bool holdsBytes(const Type *type) const;
+  bool isHoldingBytes(const Type *type) const;
   bool isJwkObject(const Type *type) const;
   Expr *argAt(const CallExpr *call, size_t index) const;
   const Expr *withoutImplicitCasts(const Expr *expr) const;
   const Expr *algorithmNameExpr(const Expr *arg, const ObjectLitExpr *literal) const;
   int importedPublicness(const std::string &format, const std::string &name) const;
   std::vector<llvm::StringLiteral> allowedUsages(llvm::StringRef name, int isPublic) const;
-  bool keyDataFits(const SubtleCall &subtle);
+  bool matchKeyData(const SubtleCall &subtle);
   void walkWrapKey(SubtleCall &subtle);
   void walkDeriveKey(SubtleCall &subtle);
   void walkExportKey(SubtleCall &subtle);
@@ -80,15 +80,15 @@ private:
   void walkGenerateKey(SubtleCall &subtle);
   void wrapJwkArgument(SubtleCall &subtle);
   void walkSubtleArguments(SubtleCall &subtle);
-  bool reportsBadCurve(const ObjectLitExpr *literal);
+  bool reportBadCurve(const ObjectLitExpr *literal);
   Expr *checkRejectedSubtleCall(SubtleCall &subtle);
   std::string keyFormatAt(SubtleCall &subtle, size_t index);
   void walkAlgorithmOnly(SubtleCall &subtle, llvm::StringRef op);
   const Expr *algorithmAt(const CallExpr *call, size_t index) const;
   Expr *finishSubtleCall(SubtleCall &subtle, const Type *expected);
-  bool reportsBadGcmTag(const ObjectLitExpr *literal, llvm::StringRef name);
-  bool reportsBadHash(const ObjectLitExpr *literal, llvm::StringRef dictionary);
-  bool reportsBadAesLength(const ObjectLitExpr *literal, llvm::StringRef name, llvm::StringRef op);
+  bool reportBadGcmTag(const ObjectLitExpr *literal, llvm::StringRef name);
+  bool reportBadHash(const ObjectLitExpr *literal, llvm::StringRef dictionary);
+  bool reportBadAesLength(const ObjectLitExpr *literal, llvm::StringRef name, llvm::StringRef op);
   void walkOwnUsage(SubtleCall &subtle, const ArrayLitExpr *literal, llvm::StringRef name,
                     int isPublic);
   void walkUsages(SubtleCall &subtle, size_t index, llvm::StringRef name, int isPublic,

@@ -46,22 +46,30 @@ private:
   using ResultMethodsOfObjects =
       Result<std::vector<FunctionDecl *>, ClassMemberCheckerInstanceMethodsError>;
 
+  bool isSameClass(const ClassDecl *first, const ClassDecl *second) const;
+  bool isDerivedFrom(const ClassDecl *from, const ClassDecl *base) const;
+  ResultMemberAccessible checkProtectedReceiver(const ClassDecl *classDecl, llvm::StringRef name,
+                                                const Expr *receiver) const;
+  ResultFieldIsSetBefore checkFieldSet(const ClassDecl *owner, llvm::StringRef name,
+                                       bool isViaThis) const;
+  ResultFieldTypeIsKnown checkFieldTyped(const ClassField *field, llvm::StringRef name) const;
+  ResultMethodsOfObjects checkInstanceMethods(const ClassDecl *classDecl,
+                                              llvm::StringRef name) const;
+  bool hasStaticField(const ClassDecl *classDecl, llvm::StringRef name) const;
+  ResultObjectReadyToUse checkObjectReady(bool isViaThis, llvm::StringRef name) const;
+  ResultPlainMethodValue checkMethodValue(const FuncSymbol *function, llvm::StringRef name) const;
   Expr *checkFieldMember(MemberExpr *member, const ClassField *field, const ClassDecl *owner,
-                         bool viaThis);
+                         bool isViaThis);
   Expr *checkMethodMember(MemberExpr *member, ClassDecl *classDecl, const Type *expected,
-                          bool viaThis);
-  const char *accessWord(Access access) const;
-  bool sameClass(const ClassDecl *a, const ClassDecl *b) const;
-  ResultStoredFieldValue statsDate(ClassDecl *classDecl, MemberExpr *member);
-  ResultObjectReadyToUse objectReady(bool viaThis, llvm::StringRef name) const;
-  ResultPlainMethodValue methodValue(const FuncSymbol *function, llvm::StringRef name) const;
-  ResultFieldTypeIsKnown fieldTyped(const ClassField *field, llvm::StringRef name) const;
-  ResultMethodsOfObjects instanceMethods(const ClassDecl *classDecl, llvm::StringRef name) const;
-  ResultFieldIsSetBefore fieldSet(const ClassDecl *owner, llvm::StringRef name, bool viaThis) const;
-  ResultFieldNotReadOnly fieldWritable(const ClassField *field, const ClassDecl *owner,
-                                       bool viaThis, const Type *type) const;
-  ResultAssignableMember assignableField(const ClassField *field, const ClassDecl *classDecl,
-                                         llvm::StringRef name, const Type *type) const;
+                          bool isViaThis);
+  MethodMember methodForm(ClassDecl *classDecl, FuncSymbol *function) const;
+  ResultStoredFieldValue checkStatsDate(ClassDecl *classDecl, MemberExpr *member);
+  ResultAssignableMember checkAssignableField(const ClassField *field, const ClassDecl *classDecl,
+                                              llvm::StringRef name, const Type *type) const;
+  std::string setterName(llvm::StringRef name) const;
+  ResultFieldNotReadOnly checkFieldWritable(const ClassField *field, const ClassDecl *owner,
+                                            bool isViaThis, const Type *type) const;
+  bool reportUnsetField(const MemberExpr *member, const ClassDecl *owner, bool isViaThis);
 
   SemanticState &state;
   EventMaps *eventMaps = nullptr;

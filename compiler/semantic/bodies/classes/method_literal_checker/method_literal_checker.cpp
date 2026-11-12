@@ -29,16 +29,11 @@ MethodLiteralChecker::MethodLiteralChecker(SemanticState &owner, SemanticParts &
 
 Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *literal, const Type *target) {
   literal->type = Type::error();
-  if (target != nullptr && target->isAnyObject()) {
-    target = nullptr;
-  }
-  auto spreadless = this->noSpread(literal);
+  const Type *wanted = target != nullptr && target->isAnyObject() ? nullptr : target;
+  auto spreadless = this->checkNoSpread(literal);
   if (spreadless.isErr()) {
     this->state.getDiagnostics().error(literal->loc(), spreadless.error().message);
-    for (ObjectLitExpr::Property &property : literal->props) {
-      property.value = this->exprChecker->checkExpr(property.value);
-    }
-    return literal;
+    return this->failMethodLiteral(literal);
   }
   auto *type = this->makeLiteralClass(literal);
   ClassDecl *classDecl = literal->cls;
@@ -47,23 +42,33 @@ Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *literal, const Typ
   for (ObjectLitExpr::Property &property : literal->props) {
     if (property.method()) {
       this->addLiteralMethod(classDecl, property);
-      continue;
+    } else {
+      bool isFieldTyped = this->addLiteralField(classDecl, property, wanted, fields);
+      hasFieldsTyped = hasFieldsTyped && isFieldTyped;
     }
-    hasFieldsTyped &= this->addLiteralField(classDecl, property, target, fields);
   }
   if (!hasFieldsTyped) {
     return literal;
   }
   type->defineFields(fields);
-  type->rename(this->literalTypeName(fields, classDecl->methods));
-  this->declareLiteralMethods(classDecl, target);
+  auto typeName = this->literalTypeName(fields, classDecl->methods);
+  type->rename(typeName);
+  this->declareLiteralMethods(classDecl, wanted);
   this->walkLiteralMethods(classDecl);
   literal->type = type;
-  if (target == nullptr) {
+  if (wanted == nullptr) {
     return literal;
   }
 
-  return this->matchLiteralTarget(literal, target, type);
+  return this->matchLiteralTarget(literal, wanted, type);
+}
+
+Expr *MethodLiteralChecker::failMethodLiteral(ObjectLitExpr *literal) {
+  for (ObjectLitExpr::Property &property : literal->props) {
+    property.value = this->exprChecker->checkExpr(property.value);
+  }
+
+  return literal;
 }
 
 Type *MethodLiteralChecker::makeLiteralClass(ObjectLitExpr *literal) {
@@ -90,7 +95,7 @@ void MethodLiteralChecker::addLiteralMethod(ClassDecl *classDecl,
   } else {
     functionDecl->role = ClassMember{.cls = classDecl};
   }
-  auto simple = this->plainMethod(functionDecl);
+  auto simple = this->checkPlainMethod(functionDecl);
   if (simple.isErr()) {
     this->state.getDiagnostics().error(functionDecl->loc(), simple.error().message);
     functionDecl->typeParams.clear();
@@ -106,21 +111,22 @@ bool MethodLiteralChecker::addLiteralField(ClassDecl *classDecl, ObjectLitExpr::
   }
   auto what = ErrorTextFieldValue::label(property.name);
   const Field *wanted = target != nullptr ? target->field(property.name) : nullptr;
-  property.value =
-      this->exprChecker->checkExpr(property.value, wanted != nullptr ? wanted->type : nullptr);
+  const Type *hint = wanted != nullptr ? wanted->type : nullptr;
+  property.value = this->exprChecker->checkExpr(property.value, hint);
   if (wanted != nullptr) {
     property.value = this->typeRelations->coerce(property.value, wanted->type, what);
   }
   const Type *valueType =
       wanted != nullptr && !property.value->type->isError() ? wanted->type : property.value->type;
-  auto typed = this->fieldValue(valueType, what);
+  auto typed = this->checkFieldValue(valueType, what);
   if (typed.isErr()) {
     this->state.getDiagnostics().error(property.value->loc(), typed.error().message);
   }
-  ClassField field;
-  field.name = property.name;
-  field.loc = property.loc;
-  field.resolved = valueType;
+  auto field = ClassField{
+      .name = property.name,
+      .loc = property.loc,
+      .resolved = valueType,
+  };
   classDecl->fields.push_back(field);
   fields.push_back({property.name.str(), valueType, false});
 
@@ -165,8 +171,9 @@ void MethodLiteralChecker::declareLiteralMethod(FunctionDecl *functionDecl, cons
   }
   this->classDeclarer->declareTyped(functionDecl, wanted->type);
   if (functionDecl->returnType.has_value()) {
-    functionDecl->sym->setReturnType(
-        this->predicateChecker->resolveReturnType(functionDecl, functionDecl->sym));
+    const auto *declared =
+        this->predicateChecker->resolveReturnType(functionDecl, functionDecl->sym);
+    functionDecl->sym->setReturnType(declared);
   }
 }
 
@@ -176,26 +183,29 @@ void MethodLiteralChecker::walkLiteralMethods(ClassDecl *classDecl) {
     if (!functionDecl->sym->hasReturnType()) {
       this->returnInferrer->inferReturnType(functionDecl->sym);
     }
-    if (functionDecl->checked) {
-      continue;
+    if (!functionDecl->checked) {
+      this->walkLiteralMethod(functionDecl);
     }
-    auto saved = this->returnInferrer->enterBody(functionDecl);
-    this->functionChecker->walkFunctionBody(functionDecl);
-    this->returnInferrer->leaveBody(saved);
   }
+}
+
+void MethodLiteralChecker::walkLiteralMethod(FunctionDecl *functionDecl) {
+  auto saved = this->returnInferrer->enterBody(functionDecl);
+  this->functionChecker->walkFunctionBody(functionDecl);
+  this->returnInferrer->leaveBody(saved);
 }
 
 Expr *MethodLiteralChecker::matchLiteralTarget(ObjectLitExpr *literal, const Type *target,
                                                const Type *type) {
   for (const ObjectLitExpr::Property &property : literal->props) {
-    auto fits = this->propertyFits(property, target);
+    auto fits = this->checkPropertyFits(property, target);
     if (fits.isErr()) {
       this->state.getDiagnostics().error(property.loc, fits.error().message);
       literal->type = Type::error();
       return literal;
     }
   }
-  auto matched = this->membersMatch(literal, target);
+  auto matched = this->checkMembersMatch(literal, target);
   if (matched.isErr()) {
     this->state.getDiagnostics().error(literal->loc(), matched.error().message);
     literal->type = Type::error();
@@ -207,7 +217,7 @@ Expr *MethodLiteralChecker::matchLiteralTarget(ObjectLitExpr *literal, const Typ
 }
 
 MethodLiteralChecker::ResultSpreadAbsent
-MethodLiteralChecker::noSpread(const ObjectLitExpr *literal) const {
+MethodLiteralChecker::checkNoSpread(const ObjectLitExpr *literal) const {
   if (literal->hasSpread()) {
     auto message = ErrorTextLiteralSpread::spread();
 
@@ -221,7 +231,7 @@ MethodLiteralChecker::noSpread(const ObjectLitExpr *literal) const {
 }
 
 MethodLiteralChecker::ResultMethodSimple
-MethodLiteralChecker::plainMethod(const FunctionDecl *functionDecl) const {
+MethodLiteralChecker::checkPlainMethod(const FunctionDecl *functionDecl) const {
   if (!functionDecl->typeParams.empty()) {
     auto message = ErrorTextPlainMethod::generic();
 
@@ -235,7 +245,7 @@ MethodLiteralChecker::plainMethod(const FunctionDecl *functionDecl) const {
 }
 
 MethodLiteralChecker::ResultValueIsTyped
-MethodLiteralChecker::fieldValue(const Type *valueType, llvm::StringRef label) const {
+MethodLiteralChecker::checkFieldValue(const Type *valueType, llvm::StringRef label) const {
   if (valueType->isVoid()) {
     auto message = ErrorTextFieldValue::isVoid(label);
 
@@ -257,8 +267,8 @@ MethodLiteralChecker::fieldValue(const Type *valueType, llvm::StringRef label) c
 }
 
 MethodLiteralChecker::ResultPropertyFits
-MethodLiteralChecker::propertyFits(const ObjectLitExpr::Property &property,
-                                   const Type *target) const {
+MethodLiteralChecker::checkPropertyFits(const ObjectLitExpr::Property &property,
+                                        const Type *target) const {
   const auto *member = target->field(property.name);
   if (member == nullptr) {
     auto message = ErrorTextLiteralFits::noField(target->name(), property.name);
@@ -305,13 +315,12 @@ MethodLiteralChecker::propertyFits(const ObjectLitExpr::Property &property,
 }
 
 MethodLiteralChecker::ResultMembersMatch
-MethodLiteralChecker::membersMatch(const ObjectLitExpr *literal, const Type *target) const {
+MethodLiteralChecker::checkMembersMatch(const ObjectLitExpr *literal, const Type *target) const {
   const ClassDecl *classDecl = literal->cls;
   for (const Field &member : target->fields()) {
-    auto named = [&](const FunctionDecl *functionDecl) {
-      return functionDecl->name == member.name;
-    };
-    if (classDecl->field(member.name) == nullptr && !llvm::any_of(classDecl->methods, named)) {
+    bool isGiven =
+        classDecl->field(member.name) != nullptr || this->hasMethodNamed(classDecl, member.name);
+    if (!isGiven) {
       auto message = ErrorTextLiteralMembers::missing(target->name(), member.name);
 
       return err(MethodLiteralCheckerMembersMatchError{
@@ -330,6 +339,16 @@ MethodLiteralChecker::membersMatch(const ObjectLitExpr *literal, const Type *tar
   }
 
   return ok(literal);
+}
+
+bool MethodLiteralChecker::hasMethodNamed(const ClassDecl *classDecl, llvm::StringRef name) const {
+  for (const FunctionDecl *functionDecl : classDecl->methods) {
+    if (functionDecl->name == name) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 }

@@ -31,16 +31,16 @@ public:
   Expr *checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *function);
   Expr *streamStage(Expr *&arg, const Type *&chunk, bool first, bool last, bool &stream,
                     const Type **sinkValue);
-  bool streamTakes(const Type *writable, const Type *chunk);
+  bool isStreamTaking(const Type *writable, const Type *chunk);
   Expr *valuesIteratorOf(Expr *collection);
 
 private:
   using ResultWritableEnd = Result<const Type *, StreamPipelineWritableEndError>;
   using ResultReadableEnd = Result<const Type *, StreamPipelineReadableEndError>;
 
-  ResultWritableEnd writableEnd(const StreamChunks &chunks, const Type *type) const;
-  ResultReadableEnd readableEnd(const StreamChunks &chunks, const Type *type) const;
-  bool inModule(const std::string &place, llvm::StringRef module) const;
+  ResultWritableEnd checkWritableEnd(const StreamChunks &chunks, const Type *type) const;
+  ResultReadableEnd checkReadableEnd(const StreamChunks &chunks, const Type *type) const;
+  bool isInModule(const std::string &place, llvm::StringRef module) const;
 
   struct StageShape {
     llvm::SMLoc loc;

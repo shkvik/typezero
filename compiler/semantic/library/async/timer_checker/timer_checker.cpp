@@ -1,4 +1,7 @@
 #include "compiler/semantic/library/async/timer_checker/timer_checker.h"
+#include "compiler/program/library/async/scheduler_function_table/scheduler_function_table.h"
+#include "compiler/program/library/async/timer_method_table/timer_method_table.h"
+#include "compiler/program/library/async/timers_promises_function_table/timers_promises_function_table.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -45,9 +48,9 @@ Expr *TimerChecker::checkTaskCallback(Expr *arg, llvm::StringRef functionName) {
   signature.voidResult = true;
   signature.asyncVoid = true;
   const auto *task = Type::function({}, 0, false, Type::voidTy());
-  if (isa<FunctionExpr>(arg)) {
-    arg = this->closureChecker->checkFunctionExpr(cast<FunctionExpr>(arg), &signature);
-    return arg;
+  auto *functionExpr = dyn_cast<FunctionExpr>(arg);
+  if (functionExpr != nullptr) {
+    return this->closureChecker->checkFunctionExpr(functionExpr, &signature);
   }
   arg = this->exprChecker->checkExpr(arg);
   const Type *type = arg->type;
@@ -56,7 +59,7 @@ Expr *TimerChecker::checkTaskCallback(Expr *arg, llvm::StringRef functionName) {
   }
   bool isAdaptable = type->isFunction() && type != task && type->minArgs() == 0 && !type->hasRest();
   Expr *adapted = isAdaptable ? this->functionValueChecker->adaptFunction(arg, task) : nullptr;
-  auto fits = this->taskCallback(type, task, adapted, functionName);
+  auto fits = this->checkTaskCallbackType(type, task, adapted, functionName);
   if (fits.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), fits.error().message);
     return arg;
@@ -65,9 +68,9 @@ Expr *TimerChecker::checkTaskCallback(Expr *arg, llvm::StringRef functionName) {
   return adapted != nullptr ? adapted : arg;
 }
 
-TimerChecker::ResultTaskCallbackOk TimerChecker::taskCallback(const Type *type, const Type *task,
-                                                              const Expr *adapted,
-                                                              llvm::StringRef functionName) const {
+TimerChecker::ResultTaskCallbackOk
+TimerChecker::checkTaskCallbackType(const Type *type, const Type *task, const Expr *adapted,
+                                    llvm::StringRef functionName) const {
   if (!type->isFunction()) {
     auto message = ErrorTextTaskCallback::notFunction(functionName, type->name());
 
@@ -88,32 +91,39 @@ TimerChecker::ResultTaskCallbackOk TimerChecker::taskCallback(const Type *type, 
   return ok(type);
 }
 
-bool TimerChecker::rearms(const Expr *callback) const {
+bool TimerChecker::isRearming(const Expr *callback) const {
   const auto *current = this->state.getFunctionStack().getCurrentDecl();
   if (current == nullptr || current->sym == nullptr) {
     return false;
   }
-  callback = ExprParts::withoutImplicitCasts(callback);
-  auto *member = dyn_cast<MemberExpr>(callback);
+  const auto *bare = ExprParts::withoutImplicitCasts(callback);
+  const auto *member = dyn_cast<MemberExpr>(bare);
   if (member != nullptr) {
     return member->method() == current->sym;
   }
-  auto *functionExpr = dyn_cast<FunctionExpr>(callback);
+  const auto *functionExpr = dyn_cast<FunctionExpr>(bare);
   if (functionExpr == nullptr || functionExpr->fn->body == nullptr ||
       functionExpr->fn->body->body.size() != 1) {
     return false;
   }
   const Stmt *only = functionExpr->fn->body->body.front();
-  const Expr *value = nullptr;
-  auto *s = dyn_cast<ExprStmt>(only);
-  if (s != nullptr) {
-    value = s->expr;
-  } else if (auto *r = dyn_cast<ReturnStmt>(only)) {
-    value = r->value;
-  }
-  auto *call = dyn_cast_or_null<CallExpr>(value);
+  const auto *value = this->soleStatementValue(only);
+  const auto *call = dyn_cast_or_null<CallExpr>(value);
 
   return call != nullptr && call->method() == current->sym;
+}
+
+const Expr *TimerChecker::soleStatementValue(const Stmt *statement) const {
+  const auto *exprStmt = dyn_cast<ExprStmt>(statement);
+  if (exprStmt != nullptr) {
+    return exprStmt->expr;
+  }
+  const auto *returnStmt = dyn_cast<ReturnStmt>(statement);
+  if (returnStmt != nullptr) {
+    return returnStmt->value;
+  }
+
+  return nullptr;
 }
 
 TimerChecker::ResultTimerScheduled TimerChecker::checkAsyncGlobal(CallExpr *call, NameExpr *name) {
@@ -157,7 +167,7 @@ bool TimerChecker::isTimerName(const NameExpr *name) const {
 }
 
 TimerChecker::ResultTimerScheduled
-TimerChecker::checkTimeoutCall(CallExpr *call, llvm::StringRef functionName, bool interval) {
+TimerChecker::checkTimeoutCall(CallExpr *call, llvm::StringRef functionName, bool isInterval) {
   if (call->args.size() > 2) {
     this->argumentChecker->walkArgsLoosely(call);
     auto message = ErrorTextAsyncGlobal::callbackArg();
@@ -175,7 +185,7 @@ TimerChecker::checkTimeoutCall(CallExpr *call, llvm::StringRef functionName, boo
     });
   }
 
-  call->target = BuiltinCall{.builtin = interval ? Builtin::SetInterval : Builtin::SetTimeout};
+  call->target = BuiltinCall{.builtin = isInterval ? Builtin::SetInterval : Builtin::SetTimeout};
   call->args[0] = this->checkTaskCallback(call->args[0], functionName);
   if (call->args.size() > 1) {
     call->args[1] = this->argumentChecker->checkAnyNumber(call->args[1]);
@@ -184,7 +194,7 @@ TimerChecker::checkTimeoutCall(CallExpr *call, llvm::StringRef functionName, boo
   if (call->args[0]->type->isError()) {
     return ok(call);
   }
-  int bits = this->receiverBits(call->args[0], interval);
+  int bits = this->receiverBits(call->args[0], isInterval);
   if (bits != 0) {
     this->appendReceiverArgs(call, bits);
   }
@@ -192,14 +202,15 @@ TimerChecker::checkTimeoutCall(CallExpr *call, llvm::StringRef functionName, boo
   return ok(call);
 }
 
-int TimerChecker::receiverBits(Expr *callback, bool interval) {
+int TimerChecker::receiverBits(Expr *callback, bool isInterval) {
   int bits = 0;
-  if (interval) {
-    bool isClassified = this->emitterChecker->classifyListener(callback, nullptr, bits, true);
+  if (isInterval) {
+    bool isClassified =
+        this->emitterChecker->classifyListener(callback, nullptr, bits, ListenerOwner::TIMER);
     return isClassified ? bits : 0;
   }
-  if (this->rearms(callback)) {
-    this->emitterChecker->classifyListener(callback, nullptr, bits, true);
+  if (this->isRearming(callback)) {
+    this->emitterChecker->classifyListener(callback, nullptr, bits, ListenerOwner::TIMER);
     bits &= kTimerReceiver;
   }
 
@@ -216,8 +227,8 @@ void TimerChecker::appendReceiverArgs(CallExpr *call, int bits) {
 }
 
 TimerChecker::ResultTimerScheduled
-TimerChecker::checkTaskQueueCall(CallExpr *call, llvm::StringRef functionName, bool immediate) {
-  if (call->args.size() > 1 && immediate) {
+TimerChecker::checkTaskQueueCall(CallExpr *call, llvm::StringRef functionName, bool isImmediate) {
+  if (call->args.size() > 1 && isImmediate) {
     this->argumentChecker->walkArgsLoosely(call);
     auto message = ErrorTextAsyncGlobal::callbackArg();
 
@@ -235,14 +246,14 @@ TimerChecker::checkTaskQueueCall(CallExpr *call, llvm::StringRef functionName, b
   }
 
   call->target =
-      BuiltinCall{.builtin = immediate ? Builtin::SetImmediate : Builtin::QueueMicrotask};
+      BuiltinCall{.builtin = isImmediate ? Builtin::SetImmediate : Builtin::QueueMicrotask};
   call->args[0] = this->checkTaskCallback(call->args[0], functionName);
-  call->type = immediate ? Type::immediate() : Type::voidTy();
+  call->type = isImmediate ? Type::immediate() : Type::voidTy();
 
   return ok(call);
 }
 
-TimerChecker::ResultTimerScheduled TimerChecker::checkClearCall(CallExpr *call, bool immediate) {
+TimerChecker::ResultTimerScheduled TimerChecker::checkClearCall(CallExpr *call, bool isImmediate) {
   auto arity = this->argumentChecker->checkArity(call, 0, 1);
   if (arity.isErr()) {
     return err(TimerCheckerCheckAsyncGlobalError{
@@ -252,13 +263,13 @@ TimerChecker::ResultTimerScheduled TimerChecker::checkClearCall(CallExpr *call, 
   }
 
   call->target =
-      BuiltinCall{.builtin = immediate ? Builtin::ClearImmediate : Builtin::ClearTimeout};
+      BuiltinCall{.builtin = isImmediate ? Builtin::ClearImmediate : Builtin::ClearTimeout};
   if (call->args.empty()) {
     auto *none = this->state.getAst().make<UndefinedExpr>(call->loc());
     none->type = Type::undefinedTy();
     call->args.push_back(none);
   }
-  const auto *handle = Type::optional(immediate ? Type::immediate() : Type::timeout());
+  const auto *handle = Type::optional(isImmediate ? Type::immediate() : Type::timeout());
   call->args[0] = this->argumentChecker->checkArg(call->args[0], handle);
   call->type = Type::voidTy();
 
@@ -313,21 +324,9 @@ TimerChecker::ResultTimerMethodRun TimerChecker::checkTimerMethod(CallExpr *call
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
   call->type = Type::error();
-  struct Method {
-    llvm::StringLiteral name;
-    Builtin builtin;
-  };
-  static const Method methods[] = {{"ref", Builtin::TimerRef},
-                                   {"unref", Builtin::TimerUnref},
-                                   {"hasRef", Builtin::TimerHasRef},
-                                   {"refresh", Builtin::TimerRefresh}};
-  const Method *method = nullptr;
-  for (const Method &m : methods) {
-    if (m.name == name && (m.builtin != Builtin::TimerRefresh || !type->isImmediate())) {
-      method = &m;
-    }
-  }
-  if (method == nullptr) {
+  auto method = TimerMethodTable::find(name);
+  bool isAvailable = method.has_value() && (method != TimerMethod::REFRESH || !type->isImmediate());
+  if (!isAvailable) {
     this->argumentChecker->walkArgsLoosely(call);
     auto message = ErrorTextTimerMethod::noMethod(name, type->name(), type->isImmediate());
 
@@ -349,10 +348,26 @@ TimerChecker::ResultTimerMethodRun TimerChecker::checkTimerMethod(CallExpr *call
         .message = arity.error().message,
     });
   }
-  call->target = BuiltinCall{.builtin = method->builtin};
-  call->type = method->builtin == Builtin::TimerHasRef ? Type::boolTy() : type;
+  Builtin builtin = this->timerMethodBuiltin(method.value());
+  call->target = BuiltinCall{.builtin = builtin};
+  call->type = method == TimerMethod::HAS_REF ? Type::boolTy() : type;
 
   return ok(call);
+}
+
+Builtin TimerChecker::timerMethodBuiltin(TimerMethod method) const {
+  switch (method) {
+    case TimerMethod::REF:
+      return Builtin::TimerRef;
+    case TimerMethod::UNREF:
+      return Builtin::TimerUnref;
+    case TimerMethod::HAS_REF:
+      return Builtin::TimerHasRef;
+    case TimerMethod::REFRESH:
+      return Builtin::TimerRefresh;
+  }
+
+  return Builtin::TimerRef;
 }
 
 TimerChecker::ResultPromiseOfTimer
@@ -360,7 +375,8 @@ TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef functionNa
                                       const Type *expected) {
   this->state.getInventoryStore().markUsesAsync();
   call->type = Type::error();
-  if (functionName == "scheduler") {
+  auto function = TimersPromisesFunctionTable::find(functionName);
+  if (function == TimersPromisesFunction::SCHEDULER) {
     this->argumentChecker->walkArgsLoosely(call);
     auto message = ErrorTextTimersPromises::scheduler();
 
@@ -375,8 +391,8 @@ TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef functionNa
         .message = "",
     });
   }
-  bool isImmediate = functionName == "setImmediate";
-  bool isInterval = functionName == "setInterval";
+  bool isImmediate = function == TimersPromisesFunction::SET_IMMEDIATE;
+  bool isInterval = function == TimersPromisesFunction::SET_INTERVAL;
   size_t valueAt = isImmediate ? 0 : 1;
   auto arity = this->argumentChecker->checkArity(call, 0, unsigned(valueAt + 2));
   if (arity.isErr()) {
@@ -388,9 +404,10 @@ TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef functionNa
 
   auto args = std::vector<Expr *>();
   if (!isImmediate) {
-    args.push_back(this->checkDelayArg(call, loc));
+    auto *delay = this->checkDelayArg(call, loc);
+    args.push_back(delay);
   }
-  auto kept = this->timerValue(call, valueAt, functionName, expected);
+  auto kept = this->checkTimerValue(call, valueAt, functionName, expected);
   if (kept.isErr()) {
     return err(TimerCheckerCheckTimersPromisesCallError{
         .code = kept.error().code,
@@ -402,13 +419,14 @@ TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef functionNa
     args.push_back(kept.value().argument);
   }
   auto options = llvm::StringMap<Expr *>();
-  if (!this->fsChecker->nodeOptions(call, valueAt + 1, functionName, {"ref"}, options)) {
+  if (!this->fsChecker->readNodeOptions(call, valueAt + 1, functionName, {"ref"}, options)) {
     return err(TimerCheckerCheckTimersPromisesCallError{
         .code = TimerCheckerCheckTimersPromisesCallErrorCode::ALREADY_REPORTED,
         .message = "",
     });
   }
-  args.push_back(this->checkRefOption(options.lookup("ref"), loc));
+  auto *ref = this->checkRefOption(options.lookup("ref"), loc);
+  args.push_back(ref);
   call->args = std::move(args);
   call->spread.clear();
 
@@ -426,9 +444,9 @@ Expr *TimerChecker::checkDelayArg(CallExpr *call, llvm::SMLoc loc) {
   return one;
 }
 
-TimerChecker::ResultTimerValueKept TimerChecker::timerValue(CallExpr *call, size_t valueAt,
-                                                            llvm::StringRef functionName,
-                                                            const Type *expected) {
+TimerChecker::ResultTimerValueKept TimerChecker::checkTimerValue(CallExpr *call, size_t valueAt,
+                                                                 llvm::StringRef functionName,
+                                                                 const Type *expected) {
   TimerValue nothing{
       .value = Type::voidTy(),
       .argument = nullptr,
@@ -489,15 +507,15 @@ Expr *TimerChecker::checkRefOption(Expr *ref, llvm::SMLoc loc) {
   return yes;
 }
 
-Expr *TimerChecker::promisedTimer(CallExpr *call, const Type *value, bool immediate,
-                                  bool interval) const {
-  if (interval) {
+Expr *TimerChecker::promisedTimer(CallExpr *call, const Type *value, bool isImmediate,
+                                  bool isInterval) const {
+  if (isInterval) {
     call->target = BuiltinCall{.builtin = Builtin::TimersSetInterval};
     call->type = Type::asyncIterator(value->isVoid() ? Type::undefinedTy() : value);
     return call;
   }
   call->target =
-      BuiltinCall{.builtin = immediate ? Builtin::TimersSetImmediate : Builtin::TimersSetTimeout};
+      BuiltinCall{.builtin = isImmediate ? Builtin::TimersSetImmediate : Builtin::TimersSetTimeout};
   call->type = Type::promise(value);
 
   return call;
@@ -507,8 +525,8 @@ TimerChecker::ResultSchedulerAwait TimerChecker::checkSchedulerCall(CallExpr *ca
                                                                     MemberExpr *member) {
   this->state.getInventoryStore().markUsesAsync();
   call->type = Type::error();
-  bool isKnown = member->name == "wait" || member->name == "yield";
-  if (!isKnown) {
+  auto function = SchedulerFunctionTable::find(member->name);
+  if (!function.has_value()) {
     this->argumentChecker->walkArgsLoosely(call);
     auto message = ErrorTextScheduler::noFunction(member->name);
 
@@ -523,8 +541,10 @@ TimerChecker::ResultSchedulerAwait TimerChecker::checkSchedulerCall(CallExpr *ca
         .message = "",
     });
   }
-  bool isWait = member->name == "wait";
-  auto arity = this->argumentChecker->checkArity(call, isWait ? 1 : 0, isWait ? 2 : 0);
+  bool isWait = function == SchedulerFunction::WAIT;
+  unsigned minArgs = isWait ? 1 : 0;
+  unsigned maxArgs = isWait ? 2 : 0;
+  auto arity = this->argumentChecker->checkArity(call, minArgs, maxArgs);
   if (arity.isErr()) {
     return err(TimerCheckerCheckSchedulerCallError{
         .code = TimerCheckerCheckSchedulerCallErrorCode::WRONG_ARITY,
@@ -540,8 +560,9 @@ TimerChecker::ResultSchedulerAwait TimerChecker::checkSchedulerCall(CallExpr *ca
     }
   }
 
-  auto promised = this->checkTimersPromisesCall(call, isWait ? "setTimeout" : "setImmediate",
-                                                member->loc(), nullptr);
+  auto timer = isWait ? TimersPromisesFunction::SET_TIMEOUT : TimersPromisesFunction::SET_IMMEDIATE;
+  auto timerName = TimersPromisesFunctionTable::getName(timer);
+  auto promised = this->checkTimersPromisesCall(call, timerName, member->loc(), nullptr);
   bool isReported =
       promised.isErr() &&
       promised.error().code == TimerCheckerCheckTimersPromisesCallErrorCode::ALREADY_REPORTED;

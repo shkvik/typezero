@@ -60,12 +60,14 @@ EmitterChecker::EmitterChecker(SemanticState &owner, SemanticParts &all)
 std::optional<std::string> EmitterChecker::chainText(const Expr *expr) const {
   auto names = std::vector<llvm::StringRef>();
   const Expr *link = expr;
-  while (auto *member = dyn_cast<MemberExpr>(link)) {
+  const auto *member = dyn_cast<MemberExpr>(link);
+  while (member != nullptr) {
     if (member->optional) {
       return std::nullopt;
     }
     names.push_back(member->name);
     link = member->object;
+    member = dyn_cast<MemberExpr>(link);
   }
   auto root = this->rootText(link);
   if (!root.has_value()) {
@@ -163,46 +165,59 @@ bool EmitterChecker::canReceive(const Type *type) const {
          !type->isBytes();
 }
 
-bool EmitterChecker::ownsEmitter(const Expr *emitter) const {
-  while (true) {
-    auto *conversion = dyn_cast<CastExpr>(emitter);
-    if (conversion != nullptr && conversion->isImplicit()) {
-      emitter = conversion->operand;
-      continue;
-    }
-    auto *call = dyn_cast<CallExpr>(emitter);
-    auto *chained = call != nullptr ? dyn_cast<MemberExpr>(call->callee) : nullptr;
-    if (chained != nullptr && this->emitterMethod(chained->name) == EmitterMethod::Listen) {
-      emitter = chained->object;
-      continue;
-    }
-    break;
-  }
-  if (isa<NewExpr>(emitter)) {
+bool EmitterChecker::isOwningEmitter(const Expr *emitter) const {
+  const auto *root = this->emitterRoot(emitter);
+  if (isa<NewExpr>(root)) {
     return true;
   }
-  auto *name = dyn_cast<NameExpr>(emitter);
+  const auto *name = dyn_cast<NameExpr>(root);
   const auto *functionDecl = this->state.getFunctionStack().getCurrentDecl();
   if (name == nullptr || name->var() == nullptr || functionDecl == nullptr ||
       name->var()->owner() != functionDecl || name->var()->isGlobal() ||
       name->var() == functionDecl->thisVar()) {
     return false;
   }
+  auto isParam = std::bind_front(&EmitterChecker::isParamOf, this, name->var());
 
-  return llvm::none_of(functionDecl->params,
-                       [&](const Param &param) { return param.sym == name->var(); });
+  return llvm::none_of(functionDecl->params, isParam);
 }
 
-bool EmitterChecker::classifyListener(Expr *arg, const Expr *emitter, int &bits, bool timer) {
-  Expr *expr = arg;
-  auto *conversion = dyn_cast<CastExpr>(expr);
-  while (conversion != nullptr && conversion->isImplicit()) {
-    expr = conversion->operand;
-    conversion = dyn_cast<CastExpr>(expr);
+const Expr *EmitterChecker::emitterRoot(const Expr *emitter) const {
+  const Expr *current = emitter;
+  const Expr *next = this->emitterLink(current);
+  while (next != nullptr) {
+    current = next;
+    next = this->emitterLink(current);
   }
+
+  return current;
+}
+
+const Expr *EmitterChecker::emitterLink(const Expr *expr) const {
+  const auto *conversion = dyn_cast<CastExpr>(expr);
+  if (conversion != nullptr && conversion->isImplicit()) {
+    return conversion->operand;
+  }
+  const auto *call = dyn_cast<CallExpr>(expr);
+  const auto *chained = call != nullptr ? dyn_cast<MemberExpr>(call->callee) : nullptr;
+  if (chained != nullptr && this->emitterMethod(chained->name) == EmitterMethod::Listen) {
+    return chained->object;
+  }
+
+  return nullptr;
+}
+
+bool EmitterChecker::isParamOf(const VarSymbol *variable, const Param &param) const {
+  return param.sym == variable;
+}
+
+bool EmitterChecker::classifyListener(Expr *arg, const Expr *emitter, int &bits,
+                                      ListenerOwner owner) {
+  bool isTimer = owner == ListenerOwner::TIMER;
+  Expr *expr = ExprParts::withoutImplicitCasts(arg);
   bool isTopLevel = (this->state.getFunctionStack().getCurrentDecl() == nullptr &&
                      !this->state.getFunctionStack().isInsideAwaitLoop()) ||
-                    (emitter != nullptr && this->ownsEmitter(emitter));
+                    (emitter != nullptr && this->isOwningEmitter(emitter));
   auto shape = this->listenerShape(expr);
   switch (shape.form) {
     case ListenerForm::Free:
@@ -214,9 +229,9 @@ bool EmitterChecker::classifyListener(Expr *arg, const Expr *emitter, int &bits,
       }
       return this->addListenerReceiver(shape, isTopLevel, bits);
     case ListenerForm::Captures:
-      return isTopLevel || this->reportsCapturesKept(arg, shape.captured, timer);
+      return isTopLevel || this->reportCapturesKept(arg, shape.captured, isTimer);
     case ListenerForm::Unknown:
-      return isTopLevel || this->reportsUnknownListener(arg, timer);
+      return isTopLevel || this->reportUnknownListener(arg, isTimer);
   }
 
   return false;
@@ -316,16 +331,16 @@ bool EmitterChecker::addListenerReceiver(const ListenerShape &shape, bool topLev
   return true;
 }
 
-bool EmitterChecker::reportsUnknownListener(const Expr *arg, bool timer) {
+bool EmitterChecker::reportUnknownListener(const Expr *arg, bool timer) {
   auto message = ErrorTextListenerLife::unknown(timer);
   this->state.getDiagnostics().error(arg->loc(), message);
 
   return false;
 }
 
-bool EmitterChecker::reportsCapturesKept(const Expr *arg,
-                                         const std::vector<const VarSymbol *> &captured,
-                                         bool timer) {
+bool EmitterChecker::reportCapturesKept(const Expr *arg,
+                                        const std::vector<const VarSymbol *> &captured,
+                                        bool timer) {
   for (const VarSymbol *variable : captured) {
     if (variable->boxed() || !this->canReceive(variable->type)) {
       auto message = ErrorTextListenerLife::keeps(timer, variable->name);
@@ -405,29 +420,34 @@ void EmitterChecker::reportUnlistenedErrors() {
   bool isDiscarded = destination == DiagnosticRoute::DISCARD;
   for (const auto &[key, loc] : this->state.getFlowState().takePendingErrors()) {
     auto &store = this->state.getEventStore();
-    if (isDiscarded || store.isErrorSubscriptionReported(loc)) {
-      continue;
+    if (!isDiscarded && !store.isErrorSubscriptionReported(loc)) {
+      store.markErrorSubscriptionReported(loc);
+      auto path = this->emitterPath(key);
+      auto message = ErrorTextUnlistened::mayEmit(path);
+      this->state.getDiagnostics().error(loc, message);
     }
-    store.markErrorSubscriptionReported(loc);
-    auto path = this->emitterPath(key);
-    auto message = ErrorTextUnlistened::mayEmit(path);
-    this->state.getDiagnostics().error(loc, message);
   }
 }
 
 void EmitterChecker::walkDroppedListeners() {
   auto &store = this->state.getEventStore();
   for (const DroppedNew &dropped : store.getDroppedNews()) {
-    const ClassDecl *classDecl = dropped.cls;
-    llvm::SMLoc loc = dropped.loc;
-    for (const ClassDecl *c = classDecl; c != nullptr; c = c->parent) {
-      if (store.isSelfListener(c)) {
-        auto message = ErrorTextEmitterNew::dropped(classDecl->name);
-        this->state.getDiagnostics().error(loc, message);
-        break;
-      }
+    if (this->hasSelfListener(dropped.cls)) {
+      auto message = ErrorTextEmitterNew::dropped(dropped.cls->name);
+      this->state.getDiagnostics().error(dropped.loc, message);
     }
   }
+}
+
+bool EmitterChecker::hasSelfListener(const ClassDecl *classDecl) const {
+  auto &store = this->state.getEventStore();
+  for (const ClassDecl *current = classDecl; current != nullptr; current = current->parent) {
+    if (store.isSelfListener(current)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 void EmitterChecker::walkErrorListeners() {
@@ -441,30 +461,12 @@ void EmitterChecker::walkErrorListeners() {
 }
 
 Expr *EmitterChecker::checkEmitterNew(NewExpr *expr, ClassDecl *generic, const Type *expected) {
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : expr->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-
-    return expr;
-  };
-  const Type *events = nullptr;
-  if (!expr->typeArgs.empty()) {
-    if (expr->typeArgs.size() == 1) {
-      events = this->typeResolver->resolveType(expr->typeArgs[0]);
-    }
-  } else if (const Type *want = expected != nullptr ? expected->nonOptional() : nullptr;
-             want != nullptr && this->classDeclarer->classOf(want) != nullptr &&
-             this->classDeclarer->classOf(want)->generic() == generic) {
-    events = this->classDeclarer->classOf(want)->typeArgs[0];
-  } else {
-    events = this->eventMapInference->newEventMap(expr->loc());
-  }
+  const auto *events = this->newEventMap(expr, generic, expected);
   if (events == nullptr) {
     return nullptr;
   }
   if (events->isError()) {
-    return checkArgsLoosely();
+    return this->failEmitterNew(expr);
   }
   auto made = this->genericClassInstantiator->instantiateClass(generic, {events}, expr->loc());
   if (made.isErr() &&
@@ -477,10 +479,34 @@ Expr *EmitterChecker::checkEmitterNew(NewExpr *expr, ClassDecl *generic, const T
   }
   ClassDecl *instance = made.isOk() ? made.value() : nullptr;
   if (instance == nullptr) {
-    return checkArgsLoosely();
+    return this->failEmitterNew(expr);
   }
   expr->typeArgs.clear();
+
   return this->methodCallChecker->checkClassNew(expr, instance, expected);
+}
+
+const Type *EmitterChecker::newEventMap(NewExpr *expr, const ClassDecl *generic,
+                                        const Type *expected) {
+  if (!expr->typeArgs.empty()) {
+    bool isOne = expr->typeArgs.size() == 1;
+    return isOne ? this->typeResolver->resolveType(expr->typeArgs[0]) : nullptr;
+  }
+  const Type *wanted = expected != nullptr ? expected->nonOptional() : nullptr;
+  const auto *wantedClass = wanted != nullptr ? this->classDeclarer->classOf(wanted) : nullptr;
+  if (wantedClass != nullptr && wantedClass->generic() == generic) {
+    return wantedClass->typeArgs[0];
+  }
+
+  return this->eventMapInference->newEventMap(expr->loc());
+}
+
+Expr *EmitterChecker::failEmitterNew(NewExpr *expr) {
+  for (Expr *&arg : expr->args) {
+    arg = this->exprChecker->checkExpr(arg);
+  }
+
+  return expr;
 }
 
 void EmitterChecker::walkLooseArgs(CallExpr *call, size_t from) {
@@ -490,7 +516,7 @@ void EmitterChecker::walkLooseArgs(CallExpr *call, size_t from) {
 }
 
 bool EmitterChecker::isOwnEmit(const EventSite *site, const SentEmit &emit) const {
-  if (emit.super) {
+  if (emit.callReceiver == CallReceiver::SUPER) {
     return true;
   }
   const Expr *object = emit.member->object;
@@ -593,7 +619,8 @@ std::optional<const Type *> EmitterChecker::emittedValueType(CallExpr *call,
   bool isFitting = wanted != nullptr && TypeRelations::isImplicitlyConvertible(type, wanted);
   const Type *wider =
       wanted != nullptr && !isFitting ? this->typeRelations->unify(wanted, found) : nullptr;
-  const Type *element = isFitting ? wanted : wanted != nullptr ? wider : found;
+  const Type *notFitting = wanted != nullptr ? wider : found;
+  const Type *element = isFitting ? wanted : notFitting;
   if (element == nullptr) {
     auto message = ErrorTextEmitted::typeAt(event, before->name(), record->where, type->name());
     this->state.getDiagnostics().error(call->args[1]->loc(), message);
@@ -609,7 +636,7 @@ void EmitterChecker::finishEmit(const SentEmit &emit, const Type *args) {
     call->args[1] = this->typeRelations->coerce(call->args[1], args->fields()[0].type);
   }
   std::vector<bool> given(call->args.size(), true);
-  this->callLibraryMethod(call, emit.member, emit.cls, "emit", {args}, &given, emit.super);
+  this->callLibraryMethod(call, emit.member, emit.cls, "emit", {args}, &given, emit.callReceiver);
 }
 
 void EmitterChecker::finishSentEmits() {
@@ -628,7 +655,7 @@ void EmitterChecker::finishSentEmits() {
 
 Expr *EmitterChecker::callLibraryMethod(CallExpr *call, MemberExpr *member, ClassDecl *classDecl,
                                         llvm::StringRef name, llvm::ArrayRef<const Type *> bound,
-                                        const std::vector<bool> *given, bool super) {
+                                        const std::vector<bool> *given, CallReceiver receiver) {
   auto methods = this->classDeclarer->methodsNamed(classDecl, name);
   assert(!methods.empty() && "a method of the emitter's code");
   FuncSymbol *function = methods[0]->sym;
@@ -638,22 +665,22 @@ Expr *EmitterChecker::callLibraryMethod(CallExpr *call, MemberExpr *member, Clas
   FuncSymbol *callee = function;
   if (function->isGeneric()) {
     this->state.getGenericStore().enterInstanceLoc(loc);
-    for (const Type *&p : params) {
-      p = this->typeParams->substitute(p, function->typeParams, bound);
+    for (const Type *&param : params) {
+      param = this->typeParams->substitute(param, function->typeParams, bound);
     }
     returnType = returnType != nullptr
                      ? this->typeParams->substitute(returnType, function->typeParams, bound)
                      : Type::error();
     this->state.getGenericStore().leaveInstanceLoc();
     if (!this->state.getFunctionStack().isInsideTrial() &&
-        llvm::none_of(bound, [](const Type *type) { return TypeQueries::mentionsParam(type); })) {
+        llvm::none_of(bound, std::bind_front(&EmitterChecker::isMentioningParam, this))) {
       auto *instance = this->genericInstantiator->instantiate(function, bound, loc);
       if (instance != nullptr) {
         callee = instance;
       }
     }
   }
-  if (super) {
+  if (receiver == CallReceiver::SUPER) {
     call->target = SuperCall{.method = callee};
   } else if (function->isGeneric()) {
     call->target = MethodCall{.method = callee};
@@ -675,9 +702,9 @@ Expr *EmitterChecker::callLibraryMethod(CallExpr *call, MemberExpr *member, Clas
 }
 
 Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, ClassDecl *classDecl,
-                                       bool super) {
+                                       CallReceiver callReceiver) {
   auto kind = this->emitterMethod(member->name);
-  bool isLibrary = this->libraryCalls->inLibrary(call->loc());
+  bool isLibrary = this->libraryCalls->isInLibrary(call->loc());
   if (kind == EmitterMethod::None || (isLibrary && kind != EmitterMethod::Emit)) {
     return nullptr;
   }
@@ -706,7 +733,7 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
       .cls = classDecl,
       .receiver = receiver,
       .events = events,
-      .super = super,
+      .callReceiver = callReceiver,
   };
   switch (kind) {
     case EmitterMethod::Emit:
@@ -771,7 +798,7 @@ Expr *EmitterChecker::checkSiteEmit(const EmitterCall &emitter, EventSite *site,
       .call = call,
       .member = emitter.member,
       .cls = emitter.cls,
-      .super = emitter.super,
+      .callReceiver = emitter.callReceiver,
   };
   auto *record = this->eventMapInference->findEvent(site, *key);
   bool isService = this->eventMaps->isServiceEvent(*key);
@@ -821,16 +848,16 @@ Expr *EmitterChecker::checkEmitShape(const EmitterCall &emitter, const EmitShape
   }
   std::vector<bool> given(call->args.size(), false);
   given[0] = true;
-  if (!shape.first.empty() && !this->emitValuesFit(call, shape, given)) {
+  if (!shape.first.empty() && !this->matchEmitValues(call, shape, given)) {
     return call;
   }
 
   return this->callLibraryMethod(call, member, emitter.cls, "emit", {shape.args}, &given,
-                                 emitter.super);
+                                 emitter.callReceiver);
 }
 
-bool EmitterChecker::emitValuesFit(CallExpr *call, const EmitShape &shape,
-                                   std::vector<bool> &given) {
+bool EmitterChecker::matchEmitValues(CallExpr *call, const EmitShape &shape,
+                                     std::vector<bool> &given) {
   for (size_t index = 1; index < call->args.size() && index - 1 < shape.args->fields().size();
        ++index) {
     const Type *wanted = shape.args->fields()[index - 1].type;
@@ -878,7 +905,8 @@ Expr *EmitterChecker::checkListenCall(const EmitterCall &emitter, EmitterMethod 
     this->state.getInventoryStore().markComparesFunctions();
   }
   std::vector<bool> given(call->args.size(), true);
-  this->callLibraryMethod(call, member, emitter.cls, member->name, {}, &given, emitter.super);
+  this->callLibraryMethod(call, member, emitter.cls, member->name, {}, &given,
+                          emitter.callReceiver);
   call->type = emitter.receiver;
 
   return call;
@@ -889,7 +917,8 @@ bool EmitterChecker::addListenerBits(const EmitterCall &emitter, llvm::StringRef
   CallExpr *call = emitter.call;
   this->noteListener(emitter.member, emitter.events, event);
   int bits = int(listener);
-  if (!this->classifyListener(call->args[1], emitter.member->object, bits)) {
+  if (!this->classifyListener(call->args[1], emitter.member->object, bits,
+                              ListenerOwner::EMITTER)) {
     return false;
   }
   auto *flags = this->state.getAst().make<IntLitExpr>(call->loc(), uint64_t(bits));
@@ -914,7 +943,7 @@ Expr *EmitterChecker::checkListenersCall(const EmitterCall &emitter, EmitterMeth
   call->args.push_back(this->exprChecker->checkExpr(raw));
   std::vector<bool> given(call->args.size(), true);
   this->callLibraryMethod(call, emitter.member, emitter.cls, "listenersOf", {args}, &given,
-                          emitter.super);
+                          emitter.callReceiver);
   call->type = Type::array(this->eventMaps->listenerType(args, Type::voidTy()));
 
   return call;
@@ -945,7 +974,7 @@ Expr *EmitterChecker::checkCountCall(const EmitterCall &emitter) {
   std::vector<bool> given(call->args.size(), true);
 
   return this->callLibraryMethod(call, member, emitter.cls, member->name, {}, &given,
-                                 emitter.super);
+                                 emitter.callReceiver);
 }
 
 Expr *EmitterChecker::checkRemoveAllCall(const EmitterCall &emitter) {
@@ -962,7 +991,8 @@ Expr *EmitterChecker::checkRemoveAllCall(const EmitterCall &emitter) {
     return call;
   }
   std::vector<bool> given(call->args.size(), true);
-  this->callLibraryMethod(call, member, emitter.cls, member->name, {}, &given, emitter.super);
+  this->callLibraryMethod(call, member, emitter.cls, member->name, {}, &given,
+                          emitter.callReceiver);
   call->type = emitter.receiver;
 
   return call;
@@ -971,6 +1001,10 @@ Expr *EmitterChecker::checkRemoveAllCall(const EmitterCall &emitter) {
 void EmitterChecker::reportEmitterMethodValue(MemberExpr *member) {
   auto message = ErrorTextEmitted::methodVal(member->name);
   this->state.getDiagnostics().error(member->loc(), message);
+}
+
+bool EmitterChecker::isMentioningParam(const Type *type) const {
+  return TypeQueries::mentionsParam(type);
 }
 
 }

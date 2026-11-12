@@ -308,8 +308,8 @@ bool ProcessChecker::isThrownEvent(const CallExpr *call) const {
   return known != nullptr && known->kind == ProcessEventKind::THROWN;
 }
 
-ProcessChecker::ResultListenedSignal ProcessChecker::listenedSignal(llvm::StringRef name,
-                                                                    const Expr *event) const {
+ProcessChecker::ResultListenedSignal ProcessChecker::checkListenedSignal(llvm::StringRef name,
+                                                                         const Expr *event) const {
   auto *literal = dyn_cast<StringLitExpr>(event);
   if (literal == nullptr) {
     return ok(name);
@@ -337,7 +337,7 @@ Expr *ProcessChecker::checkSignalCall(CallExpr *call, MemberExpr *member, Proces
 
     return call;
   }
-  auto listened = this->listenedSignal(member->name, call->args[0]);
+  auto listened = this->checkListenedSignal(member->name, call->args[0]);
   if (listened.isErr()) {
     this->state.getDiagnostics().error(call->args[0]->loc(), listened.error().message);
     call->args[1] = this->exprChecker->checkExpr(call->args[1]);

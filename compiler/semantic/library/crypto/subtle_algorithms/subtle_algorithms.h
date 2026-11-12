@@ -16,7 +16,7 @@ class SubtleAlgorithms {
 public:
   static std::optional<std::string> stringLiteral(const Expr *expr);
   static const std::vector<llvm::StringLiteral> &algorithmsOf(llvm::StringRef op);
-  static bool experimentalAlgorithm(llvm::StringRef upper);
+  static bool isExperimentalAlgorithm(llvm::StringRef upper);
   static std::string quotedList(llvm::ArrayRef<llvm::StringLiteral> names, llvm::StringRef last);
   static llvm::StringRef familyOf(llvm::StringRef name);
   static std::vector<llvm::StringLiteral> usagesOf(llvm::StringRef name, bool isPublic);

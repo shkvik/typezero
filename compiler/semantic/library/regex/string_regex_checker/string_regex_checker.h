@@ -34,18 +34,24 @@ private:
   using ResultGroupsReferenced =
       Result<const std::u16string *, StringRegexCheckerReplacementGroupsError>;
 
-  std::u16string units(const uint32_t *program, uint32_t start, uint32_t length) const;
   std::string escapedLiteral(const std::u16string &text) const;
   std::string argumentText(const Expr *arg) const;
-  bool lacksGlobalFlag(const RegexLitExpr *regex) const;
+  bool isMissingGlobalFlag(const RegexLitExpr *regex) const;
+  bool isPlainQuotedChar(char character) const;
+  unsigned patternMinArgs(StringMethod method) const;
+  bool hasOptionalGroups(const RegexLitExpr *regex) const;
+  std::vector<size_t> groupReferences(const std::u16string &value) const;
+  ResultGroupsReferenced checkGroupReference(const uint32_t *program, uint32_t groups,
+                                             const std::u16string &value, size_t at) const;
+  std::string groupName(const uint32_t *program, uint32_t start, uint32_t length) const;
   Expr *toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result) const;
   std::string groupNameAt(const std::u16string &value, size_t at) const;
   bool hasNamedGroups(const uint32_t *program, uint32_t groups) const;
-  bool numberedGroupKnown(const std::u16string &value, size_t at, uint32_t groups) const;
+  bool isNumberedGroupKnown(const std::u16string &value, size_t at, uint32_t groups) const;
   bool hasNamedGroup(const uint32_t *program, uint32_t groups, const std::string &groupName) const;
   Signature replacerSignature(const RegexLitExpr *regex, const Type *match) const;
-  ResultGroupsReferenced replacementGroups(const RegexLitExpr *regex,
-                                           const std::u16string &value) const;
+  ResultGroupsReferenced checkReplacementGroups(const RegexLitExpr *regex,
+                                                const std::u16string &value) const;
 
   Expr *checkRestLoosely(CallExpr *call);
   Expr *checkTextPattern(const PatternCall &pattern);

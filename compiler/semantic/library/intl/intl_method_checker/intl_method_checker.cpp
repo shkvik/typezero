@@ -56,8 +56,8 @@ const Type *IntlMethodChecker::relativePartType() const {
                       "Intl.RelativeTimeFormatPart");
 }
 
-IntlMethodChecker::ResultIntlNumber IntlMethodChecker::intlNumber(const Type *type,
-                                                                  llvm::StringRef method) const {
+IntlMethodChecker::ResultIntlNumber
+IntlMethodChecker::checkIntlNumberType(const Type *type, llvm::StringRef method) const {
   if (!type->isNumeric() && !type->isDecimal() && !type->isError()) {
     auto message = ErrorTextIntlNumber::notNumber(method, type);
 
@@ -70,10 +70,9 @@ IntlMethodChecker::ResultIntlNumber IntlMethodChecker::intlNumber(const Type *ty
   return ok(type);
 }
 
-IntlMethodChecker::ResultClosedText
-IntlMethodChecker::closedArg(const Expr *arg, const std::optional<std::vector<std::string>> &texts,
-                             llvm::ArrayRef<llvm::StringLiteral> allowed,
-                             llvm::StringRef what) const {
+IntlMethodChecker::ResultClosedText IntlMethodChecker::checkClosedArg(
+    const Expr *arg, const std::optional<std::vector<std::string>> &texts,
+    llvm::ArrayRef<llvm::StringLiteral> allowed, llvm::StringRef what) const {
   if (arg->type == nullptr || arg->type->isError()) {
     return ok(arg);
   }
@@ -101,7 +100,7 @@ IntlMethodChecker::closedArg(const Expr *arg, const std::optional<std::vector<st
 
 Expr *IntlMethodChecker::checkIntlNumber(Expr *arg, llvm::StringRef method) {
   arg = this->genericChecker->apparent(this->exprChecker->checkExpr(arg));
-  auto number = this->intlNumber(arg->type, method);
+  auto number = this->checkIntlNumberType(arg->type, method);
   if (number.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), number.error().message);
   }
@@ -127,9 +126,9 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
     case IntlMethod::RESOLVED_OPTIONS:
       return this->checkResolvedOptions(call, member, kind);
     case IntlMethod::NUMBER_FORMAT:
-      return this->checkNumberFormat(call, member, false);
+      return this->checkNumberFormat(call, member, FormatOutput::TEXT);
     case IntlMethod::NUMBER_FORMAT_TO_PARTS:
-      return this->checkNumberFormat(call, member, true);
+      return this->checkNumberFormat(call, member, FormatOutput::PARTS);
     case IntlMethod::NUMBER_FORMAT_RANGE:
       return this->reportUnsupported(call, member, ErrorTextIntlMethod::range(member->name));
     case IntlMethod::COLLATOR_COMPARE:
@@ -139,13 +138,13 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
     case IntlMethod::PLURAL_SELECT_RANGE:
       return this->reportUnsupported(call, member, ErrorTextIntlMethod::selectSpan());
     case IntlMethod::RELATIVE_FORMAT:
-      return this->checkRelativeFormat(call, member, false);
+      return this->checkRelativeFormat(call, member, FormatOutput::TEXT);
     case IntlMethod::RELATIVE_FORMAT_TO_PARTS:
-      return this->checkRelativeFormat(call, member, true);
+      return this->checkRelativeFormat(call, member, FormatOutput::PARTS);
     case IntlMethod::LIST_FORMAT:
-      return this->checkListFormat(call, member, false);
+      return this->checkListFormat(call, member, FormatOutput::TEXT);
     case IntlMethod::LIST_FORMAT_TO_PARTS:
-      return this->checkListFormat(call, member, true);
+      return this->checkListFormat(call, member, FormatOutput::PARTS);
     case IntlMethod::DISPLAY_NAME_OF:
       return this->checkDisplayNameOf(call, member);
     case IntlMethod::SEGMENTER_SEGMENT:
@@ -190,14 +189,15 @@ Expr *IntlMethodChecker::checkResolvedOptions(CallExpr *call, MemberExpr *member
   return this->toBuiltinCall(call, Builtin::IntlResolvedOptions, options);
 }
 
-Expr *IntlMethodChecker::checkNumberFormat(CallExpr *call, MemberExpr *member, bool toParts) {
+Expr *IntlMethodChecker::checkNumberFormat(CallExpr *call, MemberExpr *member,
+                                           FormatOutput output) {
   auto arity = this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
   call->args[0] = this->checkIntlNumber(call->args[0], member->name);
-  if (!toParts) {
+  if (output == FormatOutput::TEXT) {
     return this->toBuiltinCall(call, Builtin::NfFormat, Type::string());
   }
   const auto *parts = Type::array(this->dateFormatChecker->dateFormatPartType());
@@ -229,7 +229,8 @@ Expr *IntlMethodChecker::checkPluralSelect(CallExpr *call, MemberExpr *member) {
   return this->toBuiltinCall(call, Builtin::PrSelect, Type::string());
 }
 
-Expr *IntlMethodChecker::checkRelativeFormat(CallExpr *call, MemberExpr *member, bool toParts) {
+Expr *IntlMethodChecker::checkRelativeFormat(CallExpr *call, MemberExpr *member,
+                                             FormatOutput output) {
   auto arity = this->argumentChecker->checkArity(call, 2, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -240,7 +241,7 @@ Expr *IntlMethodChecker::checkRelativeFormat(CallExpr *call, MemberExpr *member,
     call->args[0] = this->typeRelations->convert(call->args[0], Type::doubleTy());
   }
   this->walkRelativeUnit(call);
-  if (!toParts) {
+  if (output == FormatOutput::TEXT) {
     return this->toBuiltinCall(call, Builtin::RtfFormat, Type::string());
   }
   const auto *parts = Type::array(this->relativePartType());
@@ -264,20 +265,20 @@ void IntlMethodChecker::walkRelativeUnit(CallExpr *call) {
   }
   auto texts = this->literalTypes->knownTexts(call->args[1]);
   auto what = ErrorTextClosedArg::unit();
-  auto closed = this->closedArg(call->args[1], texts, units, what);
+  auto closed = this->checkClosedArg(call->args[1], texts, units, what);
   if (closed.isErr()) {
     this->state.getDiagnostics().error(call->args[1]->loc(), closed.error().message);
   }
 }
 
-Expr *IntlMethodChecker::checkListFormat(CallExpr *call, MemberExpr *member, bool toParts) {
+Expr *IntlMethodChecker::checkListFormat(CallExpr *call, MemberExpr *member, FormatOutput output) {
   auto arity = this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
   call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::array(Type::string()));
-  if (!toParts) {
+  if (output == FormatOutput::TEXT) {
     return this->toBuiltinCall(call, Builtin::LfFormat, Type::string());
   }
   const auto *parts = Type::array(this->dateFormatChecker->dateFormatPartType());
@@ -336,8 +337,8 @@ Expr *IntlMethodChecker::checkNumberLocale(CallExpr *call, MemberExpr *member) {
   if (isRejected || arity.isErr()) {
     return call;
   }
-  if (!this->intlOptionsChecker->checkIntlArgs(call->args, 0, IntlKind::NumberFormat,
-                                               "toLocaleString")) {
+  if (!this->intlOptionsChecker->prepareIntlArgs(call->args, 0, IntlKind::NumberFormat,
+                                                 "toLocaleString")) {
     return call;
   }
   call->target = BuiltinCall{.builtin = Builtin::NumToLocale};
@@ -368,7 +369,7 @@ Expr *IntlMethodChecker::checkStringLocale(CallExpr *call, MemberExpr *member) {
       } else if (!form) {
         auto texts = this->literalTypes->knownTexts(call->args[0]);
         auto what = ErrorTextClosedArg::form();
-        auto closed = this->closedArg(call->args[0], texts, forms, what);
+        auto closed = this->checkClosedArg(call->args[0], texts, forms, what);
         if (closed.isErr()) {
           this->state.getDiagnostics().error(call->args[0]->loc(), closed.error().message);
         }
@@ -385,7 +386,7 @@ Expr *IntlMethodChecker::checkStringLocale(CallExpr *call, MemberExpr *member) {
   }
   call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
   std::vector<Expr *> rest(call->args.begin() + 1, call->args.end());
-  if (!this->intlOptionsChecker->checkIntlArgs(rest, 0, IntlKind::Collator, "localeCompare")) {
+  if (!this->intlOptionsChecker->prepareIntlArgs(rest, 0, IntlKind::Collator, "localeCompare")) {
     return call;
   }
   std::copy(rest.begin(), rest.end(), call->args.begin() + 1);

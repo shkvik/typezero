@@ -92,7 +92,7 @@ llvm::StringSet<> CallCycles::namesUsed(const FunctionDecl *functionDecl) const 
 }
 
 CallCycles::NodeIndex CallCycles::indexNodes(llvm::ArrayRef<FunctionDecl *> nodes) const {
-  auto index = NodeIndex{.byName = {}, .byDecl = {}};
+  auto index = NodeIndex();
   for (int node = 0; node < int(nodes.size()); ++node) {
     index.byName[nodes[node]->name] = node;
     index.byDecl[nodes[node]] = node;

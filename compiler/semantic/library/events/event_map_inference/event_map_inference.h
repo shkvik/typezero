@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/semantic/semantic_state/semantic_state.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallSet.h"
 
 namespace tz {
 
@@ -30,7 +32,7 @@ public:
 private:
   std::string fileOfPlace(const std::string &place) const;
   std::vector<FunctionDecl *> classMethods(const ClassDecl *classDecl) const;
-  bool holdsClassExpr(const Stmt *where) const;
+  bool isHoldingClassExpr(const Stmt *where) const;
   bool canTryFunction(const FunctionDecl *functionDecl) const;
   void addCandidates(const Stmt *where, Module *module, FunctionDecl *functionDecl, size_t index,
                      std::vector<EmitCandidate> &found) const;
@@ -41,6 +43,13 @@ private:
                 const ClassDecl *classDecl);
   const std::vector<EmitCandidate> &getModuleCandidates(Module *module);
   std::vector<EmitCandidate> getSiteCandidates(const EventSite *site);
+  void addModuleCandidates(const EventSite *site, Module *module,
+                           std::vector<EmitCandidate> &found);
+  std::optional<EmitCandidate> emitCandidate(const Expr *expr) const;
+  bool isClassExpr(const Expr *expr) const;
+  void tryCandidate(const EmitCandidate &candidate,
+                    llvm::SmallPtrSetImpl<const FunctionDecl *> &functions,
+                    llvm::SmallSet<size_t, 4> &statements);
   std::vector<EmitCandidate> getLateCandidates();
   void tryCandidates(EventSite *site, EventRecord *record);
   bool canTryStatement(const EmitCandidate &candidate);

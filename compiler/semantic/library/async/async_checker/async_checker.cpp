@@ -113,8 +113,8 @@ AsyncChecker::ResultPromiseTypeRef AsyncChecker::resolvePromiseType(const TypeRe
   return ok(promise);
 }
 
-AsyncChecker::ResultReturnsPromise AsyncChecker::promiseDeclared(const FunctionDecl *functionDecl,
-                                                                 const Type *declared) const {
+AsyncChecker::ResultReturnsPromise
+AsyncChecker::checkPromiseDeclared(const FunctionDecl *functionDecl, const Type *declared) const {
   bool isPlainAsync = functionDecl->isAsync && !functionDecl->isGenerator;
   if (isPlainAsync && !declared->isError() && !declared->isPromise()) {
     auto message = ErrorTextPromiseType::notPromise(declared->name());
@@ -129,7 +129,7 @@ AsyncChecker::ResultReturnsPromise AsyncChecker::promiseDeclared(const FunctionD
 }
 
 const Type *AsyncChecker::asyncReturnType(const FunctionDecl *functionDecl, const Type *declared) {
-  auto promise = this->promiseDeclared(functionDecl, declared);
+  auto promise = this->checkPromiseDeclared(functionDecl, declared);
   if (promise.isOk()) {
     return declared;
   }
@@ -138,9 +138,9 @@ const Type *AsyncChecker::asyncReturnType(const FunctionDecl *functionDecl, cons
   return Type::promise(declared);
 }
 
-AsyncChecker::ResultReturnsOneType AsyncChecker::returnsJoin(const Type *type,
-                                                             const Type *candidate,
-                                                             const FuncSymbol *function) const {
+AsyncChecker::ResultReturnsOneType
+AsyncChecker::checkReturnsJoin(const Type *type, const Type *candidate,
+                               const FuncSymbol *function) const {
   const Type *common = type != nullptr ? this->typeRelations->unify(type, candidate) : candidate;
   if (common == nullptr || common->isError()) {
     auto name = ErrorTextFunctionName::quoted(function->name);
@@ -162,7 +162,7 @@ const Type *AsyncChecker::inferAsyncType(const FuncSymbol *function,
   const Type *type = nullptr;
   for (const ReturnStmt *returnStmt : sorted.valued) {
     const auto *candidate = this->withoutPromise(returnStmt->value->type);
-    auto joined = this->returnsJoin(type, candidate, function);
+    auto joined = this->checkReturnsJoin(type, candidate, function);
     if (joined.isErr() && errors == ReturnErrors::REPORTED) {
       this->state.getDiagnostics().error(returnStmt->value->loc(), joined.error().message);
     }
@@ -219,9 +219,9 @@ AsyncChecker::Returned AsyncChecker::returnedKind(const ReturnStmt *returnStmt) 
   return Returned::VALUE;
 }
 
-AsyncChecker::ResultPromiseMatches AsyncChecker::promiseMatches(const Type *given,
-                                                                const Type *value,
-                                                                const FuncSymbol *function) const {
+AsyncChecker::ResultPromiseMatches
+AsyncChecker::checkPromiseMatches(const Type *given, const Type *value,
+                                  const FuncSymbol *function) const {
   if (given != value && !given->isNever()) {
     auto name = ErrorTextFunctionName::quoted(function->name);
     auto message = ErrorTextAsyncReturns::promise(given->name(), name, value->name());
@@ -256,7 +256,7 @@ void AsyncChecker::finishAsyncReturn(const FuncSymbol *function, ReturnStmt *ret
                                      const Type *value) {
   const Type *type = returnStmt->value->type;
   if (type->isPromise()) {
-    auto matches = this->promiseMatches(type->promised(), value, function);
+    auto matches = this->checkPromiseMatches(type->promised(), value, function);
     if (matches.isErr()) {
       this->state.getDiagnostics().error(returnStmt->value->loc(), matches.error().message);
     }
@@ -267,7 +267,7 @@ void AsyncChecker::finishAsyncReturn(const FuncSymbol *function, ReturnStmt *ret
   }
 }
 
-AsyncChecker::ResultInAsyncContext AsyncChecker::awaitContext() const {
+AsyncChecker::ResultInAsyncContext AsyncChecker::checkAwaitContext() const {
   auto *function = this->state.getFunctionStack().getCurrentFunction();
   if (this->isPlainFunction(function)) {
     auto hint = this->asyncHint(function->decl);
@@ -282,7 +282,7 @@ AsyncChecker::ResultInAsyncContext AsyncChecker::awaitContext() const {
   return ok(function);
 }
 
-AsyncChecker::ResultInAsyncContext AsyncChecker::forAwaitContext() const {
+AsyncChecker::ResultInAsyncContext AsyncChecker::checkForAwaitContext() const {
   auto *function = this->state.getFunctionStack().getCurrentFunction();
   if (this->isPlainFunction(function)) {
     auto message = ErrorTextAsyncContext::forAwait();
@@ -332,7 +332,7 @@ void AsyncChecker::walkContext(ResultInAsyncContext context, llvm::SMLoc loc) {
   }
 }
 
-AsyncChecker::ResultAwaitedOneType AsyncChecker::awaitable(const Type *type) const {
+AsyncChecker::ResultAwaitedOneType AsyncChecker::checkAwaitable(const Type *type) const {
   const auto *result = AsyncChecker::awaitedType(type);
   if (result == nullptr) {
     auto message = ErrorTextAwaited::mixed(type->name());
@@ -349,7 +349,7 @@ AsyncChecker::ResultAwaitedOneType AsyncChecker::awaitable(const Type *type) con
 Expr *AsyncChecker::checkAwait(AwaitExpr *await, const Type *expected) {
   await->type = Type::error();
   this->state.getInventoryStore().markUsesAsync();
-  auto context = this->awaitContext();
+  auto context = this->checkAwaitContext();
   this->walkContext(context, await->loc());
   const Type *hint = this->promiseHint(await->value, expected);
   await->value = this->exprChecker->checkExpr(await->value, hint);
@@ -358,7 +358,7 @@ Expr *AsyncChecker::checkAwait(AwaitExpr *await, const Type *expected) {
   if (type->isError()) {
     return await;
   }
-  auto result = this->awaitable(type);
+  auto result = this->checkAwaitable(type);
   if (result.isErr()) {
     this->state.getDiagnostics().error(await->value->loc(), result.error().message);
 
@@ -426,7 +426,7 @@ bool AsyncChecker::hasPromiseMember(const Type *type) {
   return false;
 }
 
-AsyncChecker::ResultAwaitedElement AsyncChecker::awaitedElement(const Type *type) const {
+AsyncChecker::ResultAwaitedElement AsyncChecker::checkAwaitedElement(const Type *type) const {
   const auto *element = this->generatorChecker->asyncIteratedType(type);
   if (element != nullptr) {
     return ok(element);
@@ -471,7 +471,8 @@ bool AsyncChecker::isOptionalAsyncIterable(const Type *type) const {
   return element != nullptr;
 }
 
-AsyncChecker::ResultBindingUntyped AsyncChecker::bindingType(const VarDeclarator &binding) const {
+AsyncChecker::ResultBindingUntyped
+AsyncChecker::checkBindingType(const VarDeclarator &binding) const {
   if (binding.typeAnn.has_value()) {
     auto message = ErrorTextBindingType::annotated();
 
@@ -484,8 +485,8 @@ AsyncChecker::ResultBindingUntyped AsyncChecker::bindingType(const VarDeclarator
   return ok(&binding);
 }
 
-AsyncChecker::ResultBindingPattern AsyncChecker::bindingShape(const VarDeclarator &binding,
-                                                              const Type *element) const {
+AsyncChecker::ResultBindingPattern AsyncChecker::checkBindingShape(const VarDeclarator &binding,
+                                                                   const Type *element) const {
   bool isListLike =
       element->isArray() || element->isTuple() || element->isMatch() || element->isError();
   bool isFitting = !binding.destructured() || binding.objectPattern() || isListLike;
@@ -503,7 +504,7 @@ AsyncChecker::ResultBindingPattern AsyncChecker::bindingShape(const VarDeclarato
 
 void AsyncChecker::walkForAwait(ForOfStmt *stmt) {
   this->state.getInventoryStore().markUsesAsync();
-  auto context = this->forAwaitContext();
+  auto context = this->checkForAwaitContext();
   this->walkContext(context, stmt->loc());
   stmt->iterable = this->checkedIterable(stmt->iterable);
   const Type *element = this->loopElement(stmt->iterable);
@@ -534,7 +535,7 @@ Expr *AsyncChecker::asyncSource(Expr *iterable) {
 }
 
 const Type *AsyncChecker::loopElement(const Expr *iterable) {
-  auto awaited = this->awaitedElement(iterable->type);
+  auto awaited = this->checkAwaitedElement(iterable->type);
   if (awaited.isOk()) {
     this->walkSendsNothing(iterable);
 
@@ -560,11 +561,11 @@ void AsyncChecker::walkSendsNothing(const Expr *iterable) {
 }
 
 const Type *AsyncChecker::boundElement(const VarDeclarator &binding, const Type *element) {
-  auto typed = this->bindingType(binding);
+  auto typed = this->checkBindingType(binding);
   if (typed.isErr()) {
     this->state.getDiagnostics().error(binding.typeAnn->loc, typed.error().message);
   }
-  auto shape = this->bindingShape(binding, element);
+  auto shape = this->checkBindingShape(binding, element);
   if (shape.isErr()) {
     this->state.getDiagnostics().error(binding.loc, shape.error().message);
 

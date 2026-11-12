@@ -26,10 +26,10 @@ public:
 
   Expr *markCallFailed(CallExpr *call);
   Expr *checkResultMember(MemberExpr *member);
-  ResultValueGetsUsed usedValue(const Expr *expr);
-  ResultValueGetsUsed usedCallbackValue(const Expr *expr);
+  ResultValueGetsUsed checkUsedValue(const Expr *expr);
+  ResultValueGetsUsed checkUsedCallbackValue(const Expr *expr);
   Expr *checkResultStatic(CallExpr *call, MemberExpr *member);
-  ResultValueGetsUsed usedValue(const Expr *expr, llvm::SMLoc at);
+  ResultValueGetsUsed checkUsedValue(const Expr *expr, llvm::SMLoc at);
   Expr *checkResultCall(CallExpr *call, NameExpr *name, const Type *expected);
   void addResultFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) const;
 
@@ -53,9 +53,9 @@ private:
   using ResultStaticIsKnown = Result<ResultStatic, ResultCheckerStaticMethodError>;
   using ResultOkErrTypeArgs = Result<const Type *, ResultCheckerOkErrTypeArgsError>;
 
-  ResultOkErrTypeArgs writtenResult(const NameExpr *name);
+  ResultOkErrTypeArgs checkWrittenResult(const NameExpr *name);
   ResultValueGetsUsed checkUsed(const Expr *expr, Discarded how, llvm::SMLoc at);
-  ResultStaticIsKnown staticMethod(const NameExpr *name, llvm::StringRef method) const;
+  ResultStaticIsKnown checkStaticMethod(const NameExpr *name, llvm::StringRef method) const;
   ResultValueGetsUsed checkPromiseUsed(const Expr *expr, Discarded how, llvm::SMLoc at);
 
   Expr *looselyChecked(Expr *arg);

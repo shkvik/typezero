@@ -24,7 +24,9 @@ public:
 
 private:
   const Expr *uncast(const Expr *expr) const;
-  bool plainTransport(const Expr *transport) const;
+  bool isPlainTransport(const Expr *transport) const;
+  bool isInsecureValue(const Expr *value) const;
+  bool isSecuredProperty(const ObjectLitExpr::Property &property) const;
   const Expr *prefixInner(const Expr *expr) const;
   const Expr *addressArgument(const NewExpr *made) const;
   std::string asciiPrefix(const std::u16string &text) const;
@@ -33,12 +35,13 @@ private:
   using ResultExternalReturn = Result<const Type *, TzModulesCheckerExternalReturnError>;
   using ResultPlainSignature = Result<const FunctionDecl *, TzModulesCheckerPlainSignatureError>;
 
-  ResultPlainSignature plainSignature(const FunctionDecl *functionDecl) const;
-  ResultExternalParams externalParam(const Param &param, const Type *type) const;
-  ResultExternalReturn externalReturn(const Type *returnType, const Type *declared) const;
+  ResultPlainSignature checkPlainSignature(const FunctionDecl *functionDecl) const;
+  ResultExternalParams checkExternalParam(const Param &param, const Type *type) const;
+  ResultExternalReturn checkExternalReturn(const Type *returnType, const Type *declared) const;
 
   bool isExternalReference(const Type *type) const;
   bool isExternalCallback(const Type *type) const;
+  bool isPlainCallbackParam(const Type *param) const;
   bool isExternalValue(const Type *type) const;
 
   SemanticState &state;

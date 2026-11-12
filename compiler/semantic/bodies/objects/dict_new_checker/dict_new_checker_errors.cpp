@@ -3,9 +3,18 @@
 
 namespace tz {
 
-std::string ErrorTextPairParts::differ(bool keys, llvm::StringRef type, llvm::StringRef other) {
-  return (llvm::Twine(std::string("the ")) + (keys ? "keys" : "values") +
-          " of a Map have one type; found '" + type + "' and '" + other + "'")
+std::string ErrorTextPairParts::keysDiffer(llvm::StringRef type, llvm::StringRef other) {
+  return ErrorTextPairParts::differ("keys", type, other);
+}
+
+std::string ErrorTextPairParts::valuesDiffer(llvm::StringRef type, llvm::StringRef other) {
+  return ErrorTextPairParts::differ("values", type, other);
+}
+
+std::string ErrorTextPairParts::differ(llvm::StringRef parts, llvm::StringRef type,
+                                       llvm::StringRef other) {
+  return (llvm::Twine(std::string("the ")) + parts + " of a Map have one type; found '" + type +
+          "' and '" + other + "'")
       .str();
 }
 

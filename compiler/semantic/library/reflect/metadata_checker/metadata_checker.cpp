@@ -86,10 +86,10 @@ void MetadataChecker::walkBodyEarly(FunctionDecl *functionDecl) {
   }
 }
 
-MetadataChecker::ResultMetadataTyped MetadataChecker::metadataType(const void *key,
-                                                                   llvm::StringRef label,
-                                                                   llvm::SMLoc loc,
-                                                                   const Type *expected) {
+MetadataChecker::ResultMetadataTyped MetadataChecker::checkMetadataType(const void *key,
+                                                                        llvm::StringRef label,
+                                                                        llvm::SMLoc loc,
+                                                                        const Type *expected) {
   const auto *known = this->recordedType(key, label);
   if (known != nullptr) {
     return ok(known->type);

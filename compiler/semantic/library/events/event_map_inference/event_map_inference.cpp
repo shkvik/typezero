@@ -1,6 +1,7 @@
 #include "compiler/semantic/library/events/event_map_inference/event_map_inference.h"
 #include "compiler/program/ast/ast_cloner/ast_cloner.h"
 #include "compiler/program/ast_walker/ast_walker.h"
+#include "compiler/program/library/events/emitter_member_table/emitter_member_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker.h"
 #include "compiler/semantic/bodies/stmt/stmt_checker/stmt_checker.h"
@@ -15,6 +16,13 @@
 using llvm::dyn_cast;
 
 namespace tz {
+
+namespace {
+
+constexpr llvm::StringLiteral kThisName = "this";
+constexpr llvm::StringLiteral kSuperName = "super";
+
+}
 
 EventMapInference::EventMapInference(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -57,10 +65,16 @@ std::vector<FunctionDecl *> EventMapInference::classMethods(const ClassDecl *cla
   return methods;
 }
 
-bool EventMapInference::holdsClassExpr(const Stmt *where) const {
-  auto exprs = AstWalker::exprsIn(where, true);
+bool EventMapInference::isHoldingClassExpr(const Stmt *where) const {
+  auto exprs = AstWalker::allExprsIn(where);
 
-  return llvm::any_of(exprs, [](const Expr *expr) { return llvm::isa<ClassExpr>(expr); });
+  auto isClass = std::bind_front(&EventMapInference::isClassExpr, this);
+
+  return llvm::any_of(exprs, isClass);
+}
+
+bool EventMapInference::isClassExpr(const Expr *expr) const {
+  return llvm::isa<ClassExpr>(expr);
 }
 
 bool EventMapInference::canTryFunction(const FunctionDecl *functionDecl) const {
@@ -70,39 +84,51 @@ bool EventMapInference::canTryFunction(const FunctionDecl *functionDecl) const {
   bool isUsable = functionDecl->body != nullptr && functionDecl->sym != nullptr && !isGeneric &&
                   !isGenericClass;
 
-  return isUsable && !this->holdsClassExpr(functionDecl);
+  return isUsable && !this->isHoldingClassExpr(functionDecl);
 }
 
 void EventMapInference::addCandidates(const Stmt *where, Module *module, FunctionDecl *functionDecl,
                                       size_t index, std::vector<EmitCandidate> &found) const {
-  for (const Expr *expr : AstWalker::exprsIn(where, true)) {
-    auto *call = dyn_cast<CallExpr>(expr);
-    auto *member = call != nullptr ? dyn_cast<MemberExpr>(call->callee) : nullptr;
-    if (member == nullptr || member->name != "emit" || call->args.empty()) {
-      continue;
+  for (const Expr *expr : AstWalker::allExprsIn(where)) {
+    auto candidate = this->emitCandidate(expr);
+    if (candidate.has_value()) {
+      candidate->module = module;
+      candidate->function = functionDecl;
+      candidate->index = index;
+      found.push_back(std::move(candidate.value()));
     }
-    auto *name = dyn_cast<StringLitExpr>(call->args[0]);
-    if (name == nullptr) {
-      continue;
-    }
-    auto *receiver = dyn_cast<NameExpr>(member->object);
-    bool isSelf = receiver != nullptr && (receiver->name == "this" || receiver->name == "super");
-    EmitCandidate candidate;
-    candidate.call = call;
-    candidate.module = module;
-    candidate.function = functionDecl;
-    candidate.index = index;
-    candidate.event = ToUtf8::toUtf8(name->value);
-    candidate.self = isSelf;
-    found.push_back(std::move(candidate));
   }
+}
+
+std::optional<EmitCandidate> EventMapInference::emitCandidate(const Expr *expr) const {
+  const auto *call = dyn_cast<CallExpr>(expr);
+  const auto *member = call != nullptr ? dyn_cast<MemberExpr>(call->callee) : nullptr;
+  bool isEmit = member != nullptr &&
+                EmitterMemberTable::find(member->name) == EmitterMember::EMIT &&
+                !call->args.empty();
+  if (!isEmit) {
+    return std::nullopt;
+  }
+  const auto *name = dyn_cast<StringLitExpr>(call->args[0]);
+  if (name == nullptr) {
+    return std::nullopt;
+  }
+  const auto *receiver = dyn_cast<NameExpr>(member->object);
+  bool isSelf =
+      receiver != nullptr && (receiver->name == kThisName || receiver->name == kSuperName);
+  EmitCandidate candidate;
+  candidate.call = call;
+  candidate.event = ToUtf8::toUtf8(name->value);
+  candidate.self = isSelf;
+
+  return candidate;
 }
 
 void EventMapInference::defineMapFields(EventSite *site) const {
   auto fields = std::vector<Field>();
   for (const EventRecord &record : site->events) {
     if (record.args != nullptr) {
-      fields.push_back({record.name, record.args, false});
+      fields.push_back({.name = record.name, .type = record.args});
     }
   }
   site->map->defineFields(std::move(fields));
@@ -258,13 +284,8 @@ std::vector<EmitCandidate> EventMapInference::getSiteCandidates(const EventSite 
   for (Module *module : this->state.getInventoryStore().getModules()) {
     bool isOwn = module == site->owner;
     bool isSkipped = module->builtin || (!isOwn && site->cls == nullptr);
-    if (isSkipped) {
-      continue;
-    }
-    for (const EmitCandidate &candidate : this->getModuleCandidates(module)) {
-      if (isOwn || this->isSubclassEmit(site, candidate)) {
-        found.push_back(candidate);
-      }
+    if (!isSkipped) {
+      this->addModuleCandidates(site, module, found);
     }
   }
   auto late = this->getLateCandidates();
@@ -275,6 +296,16 @@ std::vector<EmitCandidate> EventMapInference::getSiteCandidates(const EventSite 
   }
 
   return found;
+}
+
+void EventMapInference::addModuleCandidates(const EventSite *site, Module *module,
+                                            std::vector<EmitCandidate> &found) {
+  bool isOwn = module == site->owner;
+  for (const EmitCandidate &candidate : this->getModuleCandidates(module)) {
+    if (isOwn || this->isSubclassEmit(site, candidate)) {
+      found.push_back(candidate);
+    }
+  }
 }
 
 std::vector<EmitCandidate> EventMapInference::getLateCandidates() {
@@ -303,28 +334,33 @@ void EventMapInference::tryCandidates(EventSite *site, EventRecord *record) {
   auto untyped = std::string();
   for (const EmitCandidate &candidate : this->getSiteCandidates(site)) {
     bool isUnchecked = candidate.event == record->name && candidate.call->type == nullptr;
-    if (!isUnchecked) {
-      continue;
-    }
-    if (untyped.empty()) {
+    if (isUnchecked && untyped.empty()) {
       untyped = this->shortPlaceOf(candidate.call->loc());
     }
-    if (candidate.function != nullptr) {
-      auto [_, isNewFunction] = functions.insert(candidate.function);
-      if (isNewFunction && this->canTryFunction(candidate.function)) {
-        this->tryFunction(candidate.function);
-      }
-    }
-    if (candidate.function == nullptr && this->canTryStatement(candidate)) {
-      auto [_, isNewStatement] = statements.insert(candidate.index);
-      Stmt *statement = candidate.module->file.items[candidate.index];
-      if (isNewStatement && !this->holdsClassExpr(statement)) {
-        this->tryStatement(statement);
-      }
+    if (isUnchecked) {
+      this->tryCandidate(candidate, functions, statements);
     }
   }
   if (record->args == nullptr) {
     record->untyped = untyped;
+  }
+}
+
+void EventMapInference::tryCandidate(const EmitCandidate &candidate,
+                                     llvm::SmallPtrSetImpl<const FunctionDecl *> &functions,
+                                     llvm::SmallSet<size_t, 4> &statements) {
+  if (candidate.function != nullptr) {
+    bool isNewFunction = functions.insert(candidate.function).second;
+    if (isNewFunction && this->canTryFunction(candidate.function)) {
+      this->tryFunction(candidate.function);
+    }
+  }
+  if (candidate.function == nullptr && this->canTryStatement(candidate)) {
+    bool isNewStatement = statements.insert(candidate.index).second;
+    Stmt *statement = candidate.module->file.items[candidate.index];
+    if (isNewStatement && !this->isHoldingClassExpr(statement)) {
+      this->tryStatement(statement);
+    }
   }
 }
 

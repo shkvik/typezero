@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/stream/stream_new_checker/stream_new_checker.h"
+#include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
@@ -14,8 +15,8 @@ StreamNewChecker::StreamNewChecker(SemanticState &owner, SemanticParts &all)
 }
 
 StreamNewChecker::ResultConcreteStream
-StreamNewChecker::concreteStream(llvm::StringRef name, bool readable, bool writable) const {
-  if (name != "PassThrough") {
+StreamNewChecker::checkConcreteStream(llvm::StringRef name, bool readable, bool writable) const {
+  if (!LibraryClassTable::isName(name, LibraryClass::PASS_THROUGH)) {
     auto message = ErrorTextStreamNew::abstract(name, readable, writable);
 
     return err(StreamNewCheckerConcreteStreamError{
@@ -27,9 +28,9 @@ StreamNewChecker::concreteStream(llvm::StringRef name, bool readable, bool writa
   return ok(name);
 }
 
-StreamNewChecker::ResultChunkTypeGiven StreamNewChecker::chunksGiven(const NewExpr *expr,
-                                                                     const ClassDecl *generic,
-                                                                     const Type *expected) const {
+StreamNewChecker::ResultChunkTypeGiven
+StreamNewChecker::checkChunksGiven(const NewExpr *expr, const ClassDecl *generic,
+                                   const Type *expected) const {
   const Type *want = expected != nullptr ? expected->nonOptional() : nullptr;
   const ClassDecl *wanted = want != nullptr ? this->classDeclarer->classOf(want) : nullptr;
   bool isFromExpected = wanted != nullptr && wanted->generic() == generic;
@@ -57,20 +58,22 @@ Expr *StreamNewChecker::failedNew(NewExpr *expr, const std::string &message) {
 
 Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const Type *expected) {
   llvm::StringRef name = generic->name;
-  bool isReadable = name == "Readable";
-  bool isWritable = name == "Writable";
-  bool isDuplex = name == "Duplex" || name == "Transform" || name == "PassThrough";
+  bool isReadable = LibraryClassTable::isName(name, LibraryClass::READABLE);
+  bool isWritable = LibraryClassTable::isName(name, LibraryClass::WRITABLE);
+  bool isDuplex = LibraryClassTable::isName(name, LibraryClass::DUPLEX) ||
+                  LibraryClassTable::isName(name, LibraryClass::TRANSFORM) ||
+                  LibraryClassTable::isName(name, LibraryClass::PASS_THROUGH);
   if (!isReadable && !isWritable && !isDuplex) {
     return nullptr;
   }
-  if (this->libraryCalls->inLibrary(expr->loc())) {
+  if (this->libraryCalls->isInLibrary(expr->loc())) {
     return nullptr;
   }
-  auto concrete = this->concreteStream(name, isReadable, isWritable);
+  auto concrete = this->checkConcreteStream(name, isReadable, isWritable);
   if (concrete.isErr()) {
     return this->failedNew(expr, concrete.error().message);
   }
-  auto given = this->chunksGiven(expr, generic, expected);
+  auto given = this->checkChunksGiven(expr, generic, expected);
   if (given.isErr()) {
     return this->failedNew(expr, given.error().message);
   }

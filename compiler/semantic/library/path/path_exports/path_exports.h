@@ -10,7 +10,7 @@ class PathExports {
 public:
   using ResultExportFound = Result<llvm::StringRef, ModuleExportFoundError>;
 
-  static ResultExportFound pathExport(llvm::StringRef name, llvm::StringRef path);
+  static ResultExportFound checkPathExport(llvm::StringRef name, llvm::StringRef path);
 };
 
 }

@@ -32,6 +32,13 @@ using llvm::dyn_cast;
 
 namespace tz {
 
+namespace {
+
+constexpr const char *kThisName = "this";
+constexpr const char *kSuperName = "super";
+
+}
+
 FunctionChecker::FunctionChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->scopes = &all.scopes;
@@ -59,7 +66,7 @@ FunctionChecker::FunctionChecker(SemanticState &owner, SemanticParts &all)
 }
 
 FunctionChecker::ResultTopLevelGenerics
-FunctionChecker::topLevelGeneric(const FunctionDecl *functionDecl) const {
+FunctionChecker::checkTopLevelGeneric(const FunctionDecl *functionDecl) const {
   if (!functionDecl->typeParams.empty()) {
     auto message = ErrorTextFunctionDecl::nested();
 
@@ -73,7 +80,7 @@ FunctionChecker::topLevelGeneric(const FunctionDecl *functionDecl) const {
 }
 
 FunctionChecker::ResultDecoratorAllowed
-FunctionChecker::paramDecorators(const FunctionDecl *functionDecl, const Param &param) const {
+FunctionChecker::checkParamDecorators(const FunctionDecl *functionDecl, const Param &param) const {
   bool isClassMethod = functionDecl->cls() != nullptr && functionDecl->cls()->literal() == nullptr;
   if (!param.decorators.empty() && !isClassMethod && !functionDecl->isInstance) {
     auto message = ErrorTextFunctionDecl::decorator();
@@ -88,7 +95,7 @@ FunctionChecker::paramDecorators(const FunctionDecl *functionDecl, const Param &
 }
 
 FunctionChecker::ResultThisParamAllowed
-FunctionChecker::thisParam(const FunctionDecl *functionDecl) const {
+FunctionChecker::checkThisParam(const FunctionDecl *functionDecl) const {
   if (functionDecl->isArrow()) {
     auto message = ErrorTextFunctionDecl::arrowThis();
 
@@ -109,8 +116,8 @@ FunctionChecker::thisParam(const FunctionDecl *functionDecl) const {
   return ok(functionDecl);
 }
 
-FunctionChecker::ResultRestParamIsArray FunctionChecker::restType(const Type *type,
-                                                                  const Param &param) const {
+FunctionChecker::ResultRestParamIsArray FunctionChecker::checkRestType(const Type *type,
+                                                                       const Param &param) const {
   bool isList = type->isArray() || type->isListParam() || type->isTuple() || type->isError();
   if (!isList) {
     auto message = ErrorTextFunctionDecl::restArray(param.name);
@@ -124,9 +131,9 @@ FunctionChecker::ResultRestParamIsArray FunctionChecker::restType(const Type *ty
   return ok(type);
 }
 
-FunctionChecker::ResultParamOrderIsKept FunctionChecker::requiredOrder(const Param &param,
-                                                                       bool afterOptional) const {
-  if (afterOptional) {
+FunctionChecker::ResultParamOrderIsKept
+FunctionChecker::checkRequiredOrder(const Param &param, bool isAfterOptional) const {
+  if (isAfterOptional) {
     auto message = ErrorTextFunctionDecl::required();
 
     return err(FunctionCheckerRequiredOrderError{
@@ -138,7 +145,8 @@ FunctionChecker::ResultParamOrderIsKept FunctionChecker::requiredOrder(const Par
   return ok(&param);
 }
 
-FunctionChecker::ResultParamTypeIsKnown FunctionChecker::paramTypeKnown(const Param &param) const {
+FunctionChecker::ResultParamTypeIsKnown
+FunctionChecker::checkParamTypeKnown(const Param &param) const {
   const Expr *value = param.defaultValue();
   bool isLiteral = value != nullptr && SharedHelpers::literalType(value) != nullptr;
   if (param.type || isLiteral || param.property) {
@@ -193,10 +201,9 @@ void FunctionChecker::declareSymbol(FunctionDecl *functionDecl, VarSymbol *varia
       functionDecl->cls() != nullptr ? this->chunkTypes->streamHookParams(functionDecl)
                                      : std::nullopt;
   this->padHookParams(functionDecl, hook);
-  bool isAfterOptional = false;
   for (size_t index = 0; index < functionDecl->params.size(); ++index) {
     const Type *hooked = hook.has_value() && index < hook->size() ? (*hook)[index] : nullptr;
-    this->declareFunctionParam(functionDecl, function, index, hooked, isAfterOptional);
+    this->declareFunctionParam(functionDecl, function, index, hooked);
   }
   this->declareFunctionReturn(functionDecl, function);
   if (isGeneric || isClassParams) {
@@ -227,7 +234,7 @@ void FunctionChecker::declareFunctionTypeParams(FunctionDecl *functionDecl, Func
     functionDecl->typeArgs = function->typeParams;
     return;
   }
-  auto topLevel = this->topLevelGeneric(functionDecl);
+  auto topLevel = this->checkTopLevelGeneric(functionDecl);
   if (topLevel.isErr()) {
     this->state.getDiagnostics().error(functionDecl->loc(), topLevel.error().message);
   }
@@ -241,9 +248,10 @@ void FunctionChecker::padHookParams(FunctionDecl *functionDecl,
     return;
   }
   for (size_t index = functionDecl->params.size(); index < hook->size(); ++index) {
-    Param hidden;
-    hidden.name = this->state.getAst().hiddenName();
-    hidden.loc = functionDecl->loc();
+    auto hidden = Param{
+        .name = this->state.getAst().hiddenName(),
+        .loc = functionDecl->loc(),
+    };
     functionDecl->params.push_back(hidden);
   }
 }
@@ -259,40 +267,54 @@ bool FunctionChecker::hasRestParam(const FunctionDecl *functionDecl) const {
 }
 
 void FunctionChecker::declareFunctionParam(FunctionDecl *functionDecl, FuncSymbol *function,
-                                           size_t index, const Type *hooked, bool &afterOptional) {
+                                           size_t index, const Type *hooked) {
   Param &param = functionDecl->params[index];
-  auto decorated = this->paramDecorators(functionDecl, param);
+  auto decorated = this->checkParamDecorators(functionDecl, param);
   if (decorated.isErr()) {
     this->state.getDiagnostics().error(param.decorators[0].loc, decorated.error().message);
   }
-  const auto *type = this->declaredParamType(functionDecl, function, param, hooked);
-  if (param.optional()) {
-    type = Type::optional(type);
-  }
+  const auto *declared = this->declaredParamType(functionDecl, function, param, hooked);
+  const Type *type = param.optional() ? Type::optional(declared) : declared;
   param.declaredType = type;
   if (index == 0) {
     this->walkThisParam(functionDecl, function, param);
   }
   if (param.rest()) {
-    auto rest = this->restType(type, param);
-    if (rest.isErr()) {
-      this->state.getDiagnostics().error(param.loc, rest.error().message);
-      param.declaredType = Type::error();
-    }
-    function->hasRest = true;
-    function->params.push_back(param.declaredType);
+    return this->declareRestParam(function, param, type);
+  }
+  bool isOmittable = param.optional() || param.defaultValue() != nullptr;
+  const Type *passed = isOmittable ? Type::optional(type) : type;
+  function->params.push_back(passed);
+  if (isOmittable) {
     return;
   }
-  bool isMayOmit = param.optional() || param.defaultValue() != nullptr;
-  function->params.push_back(isMayOmit ? Type::optional(type) : type);
-  if (!isMayOmit) {
-    auto order = this->requiredOrder(param, afterOptional);
-    if (order.isErr()) {
-      this->state.getDiagnostics().error(param.loc, order.error().message);
-    }
-    function->minArgs = index + 1;
+  bool isAfterOptional = this->hasOptionalBefore(functionDecl, index);
+  auto order = this->checkRequiredOrder(param, isAfterOptional);
+  if (order.isErr()) {
+    this->state.getDiagnostics().error(param.loc, order.error().message);
   }
-  afterOptional |= param.optional();
+  function->minArgs = index + 1;
+}
+
+void FunctionChecker::declareRestParam(FuncSymbol *function, Param &param, const Type *type) {
+  auto rest = this->checkRestType(type, param);
+  if (rest.isErr()) {
+    this->state.getDiagnostics().error(param.loc, rest.error().message);
+    param.declaredType = Type::error();
+  }
+  function->hasRest = true;
+  function->params.push_back(param.declaredType);
+}
+
+bool FunctionChecker::hasOptionalBefore(const FunctionDecl *functionDecl, size_t index) const {
+  for (size_t earlier = 0; earlier < index; ++earlier) {
+    const Param &param = functionDecl->params[earlier];
+    if (!param.rest() && param.optional()) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 const Type *FunctionChecker::declaredParamType(FunctionDecl *functionDecl, FuncSymbol *function,
@@ -308,7 +330,7 @@ const Type *FunctionChecker::declaredParamType(FunctionDecl *functionDecl, FuncS
   if (literal != nullptr) {
     return literal;
   }
-  auto known = this->paramTypeKnown(param);
+  auto known = this->checkParamTypeKnown(param);
   if (known.isErr()) {
     this->state.getDiagnostics().error(param.loc, known.error().message);
   }
@@ -318,32 +340,35 @@ const Type *FunctionChecker::declaredParamType(FunctionDecl *functionDecl, FuncS
 
 const Type *FunctionChecker::writtenParamType(FunctionDecl *functionDecl, FuncSymbol *function,
                                               const Param &param, const Type *hooked) {
-  const Type *type = nullptr;
-  auto iterable = this->iterableChecker->iterableParam(functionDecl, function, *param.type);
+  const auto *type = this->resolvedParamType(functionDecl, function, param);
+  bool isIntHook = hooked != nullptr && type != nullptr && type->isFloat() && hooked->isInt();
+
+  return isIntHook ? hooked : type;
+}
+
+const Type *FunctionChecker::resolvedParamType(FunctionDecl *functionDecl, FuncSymbol *function,
+                                               const Param &param) {
+  auto iterable = this->iterableChecker->checkIterableParam(functionDecl, function, *param.type);
   if (iterable.isOk()) {
-    type = iterable.value();
-  } else if (iterable.error().code != IterableCheckerIterableParamErrorCode::NOT_ITERABLE) {
+    return iterable.value();
+  }
+  if (iterable.error().code != IterableCheckerIterableParamErrorCode::NOT_ITERABLE) {
     this->state.getDiagnostics().error(param.type->loc, iterable.error().message);
-    type = Type::error();
+    return Type::error();
   }
   this->state.getTypeContext().enterListContext(param.rest());
-  if (type == nullptr) {
-    type = this->typeResolver->resolveType(*param.type);
-  }
+  const auto *type = this->typeResolver->resolveType(*param.type);
   this->state.getTypeContext().leaveListContext();
-  if (hooked != nullptr && type != nullptr && type->isFloat() && hooked->isInt()) {
-    type = hooked;
-  }
 
   return type;
 }
 
 void FunctionChecker::walkThisParam(const FunctionDecl *functionDecl, FuncSymbol *function,
                                     const Param &param) {
-  if (param.name != "this" || param.rest() || !param.type.has_value()) {
+  if (param.name != kThisName || param.rest() || !param.type.has_value()) {
     return;
   }
-  auto thisAllowed = this->thisParam(functionDecl);
+  auto thisAllowed = this->checkThisParam(functionDecl);
   if (thisAllowed.isErr()) {
     this->state.getDiagnostics().error(param.loc, thisAllowed.error().message);
     return;
@@ -353,19 +378,24 @@ void FunctionChecker::walkThisParam(const FunctionDecl *functionDecl, FuncSymbol
 
 void FunctionChecker::declareFunctionReturn(FunctionDecl *functionDecl, FuncSymbol *function) {
   if (functionDecl->returnType.has_value()) {
-    const auto *declared = this->predicateChecker->resolveReturnType(functionDecl, function);
-    auto generator = this->generatorChecker->generatorReturnType(functionDecl, declared);
-    if (generator.isErr()) {
-      this->state.getDiagnostics().error(functionDecl->returnType->loc, generator.error().message);
-    }
-    const Type *returned = generator.isOk() ? generator.value() : Type::error();
-    function->setReturnType(this->asyncChecker->asyncReturnType(functionDecl, returned));
-    return;
+    return this->declareWrittenReturn(functionDecl, function);
   }
   if (functionDecl->isGenerator || this->returnInferrer->isReturningValue(functionDecl->body)) {
     return;
   }
-  function->setReturnType(functionDecl->isAsync ? Type::promise(Type::voidTy()) : Type::voidTy());
+  const Type *nothing = functionDecl->isAsync ? Type::promise(Type::voidTy()) : Type::voidTy();
+  function->setReturnType(nothing);
+}
+
+void FunctionChecker::declareWrittenReturn(FunctionDecl *functionDecl, FuncSymbol *function) {
+  const auto *declared = this->predicateChecker->resolveReturnType(functionDecl, function);
+  auto generator = this->generatorChecker->checkGeneratorReturnType(functionDecl, declared);
+  if (generator.isErr()) {
+    this->state.getDiagnostics().error(functionDecl->returnType->loc, generator.error().message);
+  }
+  const Type *returned = generator.isOk() ? generator.value() : Type::error();
+  const auto *returnType = this->asyncChecker->asyncReturnType(functionDecl, returned);
+  function->setReturnType(returnType);
 }
 
 void FunctionChecker::declareFunctionName(FunctionDecl *functionDecl, FuncSymbol *function,
@@ -385,7 +415,7 @@ void FunctionChecker::declareFunctionName(FunctionDecl *functionDecl, FuncSymbol
 }
 
 FunctionChecker::ResultConstructorSuper
-FunctionChecker::superCalled(const FunctionDecl *functionDecl, unsigned supers) const {
+FunctionChecker::checkSuperCalled(const FunctionDecl *functionDecl, unsigned supers) const {
   if (supers == 0) {
     auto message = ErrorTextFunctionBody::noSuper(functionDecl->cls()->name,
                                                   functionDecl->cls()->parent->name);
@@ -400,12 +430,13 @@ FunctionChecker::superCalled(const FunctionDecl *functionDecl, unsigned supers) 
 }
 
 FunctionChecker::ResultDefaultUsesPrior
-FunctionChecker::defaultOrder(const FunctionDecl *functionDecl, size_t index,
-                              const llvm::StringSet<> &names) const {
-  for (size_t j = index; j < functionDecl->params.size(); ++j) {
-    if (names.contains(functionDecl->params[j].name)) {
-      auto message = ErrorTextFunctionBody::forward(functionDecl->params[index].label(),
-                                                    functionDecl->params[j].name);
+FunctionChecker::checkDefaultOrder(const FunctionDecl *functionDecl, size_t index,
+                                   const llvm::StringSet<> &names) const {
+  for (size_t later = index; later < functionDecl->params.size(); ++later) {
+    const Param &laterParam = functionDecl->params[later];
+    if (names.contains(laterParam.name)) {
+      auto message =
+          ErrorTextFunctionBody::forward(functionDecl->params[index].label(), laterParam.name);
 
       return err(FunctionCheckerDefaultOrderError{
           .code = FunctionCheckerDefaultOrderErrorCode::FORWARD_REFERENCE,
@@ -418,10 +449,11 @@ FunctionChecker::defaultOrder(const FunctionDecl *functionDecl, size_t index,
 }
 
 FunctionChecker::ResultEveryPathReturns
-FunctionChecker::returnsEverywhere(const FunctionDecl *functionDecl, const Type *returnType) const {
+FunctionChecker::checkReturnsEverywhere(const FunctionDecl *functionDecl,
+                                        const Type *returnType) const {
   bool isMissing = returnType != nullptr && !returnType->isVoid() && !returnType->isError() &&
                    !returnType->isOptional() && !returnType->isUnknown() &&
-                   !this->returnChecker->alwaysReturns(functionDecl->body);
+                   !this->returnChecker->isAlwaysReturning(functionDecl->body);
   if (isMissing) {
     auto label = ErrorTextFunctionName::label(functionDecl->name);
     auto message = ErrorTextFunctionBody::noReturn(label, returnType->name());
@@ -443,19 +475,19 @@ void FunctionChecker::walkFunctionBody(FunctionDecl *functionDecl) {
   if (functionDecl->external()) {
     return this->tzModulesChecker->walkExternal(functionDecl);
   }
-  FuncSymbol *function = functionDecl->sym;
   functionDecl->checked = true;
   auto &functions = this->state.getFunctionStack();
   auto *outer = functions.getCurrentFunction();
-  functions.rememberCurrentFunction(function);
+  functions.rememberCurrentFunction(functionDecl->sym);
   functions.enterFunction(functionDecl);
   this->state.getDiagnostics().pushList(DiagnosticRoute::PARENT);
   auto &classContext = this->state.getClassContext();
-  classContext.enterClass(functionDecl->isClosure() ? classContext.getCurrentClass()
-                                                    : functionDecl->cls());
+  auto *ownerClass =
+      functionDecl->isClosure() ? classContext.getCurrentClass() : functionDecl->cls();
+  classContext.enterClass(ownerClass);
   this->state.getScopeStack().openScope();
   this->bindBodyTypeParams(functionDecl);
-  bool isInitializer = functionDecl->takesThis() && this->entersInitializer(functionDecl);
+  bool isInitializer = functionDecl->takesThis() && this->enterInitializer(functionDecl);
   for (size_t index = 0; index < functionDecl->params.size(); ++index) {
     this->declareBodyParam(functionDecl, index);
   }
@@ -467,17 +499,26 @@ void FunctionChecker::walkFunctionBody(FunctionDecl *functionDecl) {
     classContext.leaveInitializer();
   }
   classContext.leaveClass();
+  this->walkBodyReturns(functionDecl);
+  auto bodyDiagnostics = this->state.getDiagnostics().popList();
+  this->markBrokenOwners(functionDecl, bodyDiagnostics);
+}
+
+void FunctionChecker::walkBodyReturns(const FunctionDecl *functionDecl) {
   const auto *returnType = this->bodyReturnType(functionDecl);
-  auto returns = this->returnsEverywhere(functionDecl, returnType);
+  auto returns = this->checkReturnsEverywhere(functionDecl, returnType);
   if (returns.isErr()) {
     this->state.getDiagnostics().error(functionDecl->loc(), returns.error().message);
   }
-  auto bodyDiagnostics = this->state.getDiagnostics().popList();
+}
+
+void FunctionChecker::markBrokenOwners(const FunctionDecl *functionDecl,
+                                       const std::vector<Diagnostic> &bodyDiagnostics) {
   auto destination = this->state.getDiagnostics().getCurrentDestination();
   bool isReachingProgram = destination == DiagnosticRoute::PROGRAM;
   bool hasFailed = Diagnostics::hasErrors(bodyDiagnostics) && isReachingProgram;
-  if (function->isGeneric() && hasFailed) {
-    this->state.getGenericStore().markBrokenGeneric(function);
+  if (functionDecl->sym->isGeneric() && hasFailed) {
+    this->state.getGenericStore().markBrokenGeneric(functionDecl->sym);
   }
   if (functionDecl->cls() != nullptr && functionDecl->cls()->isGeneric() && hasFailed) {
     this->state.getClassStore().markBrokenClass(functionDecl->cls());
@@ -496,7 +537,7 @@ void FunctionChecker::bindBodyTypeParams(FunctionDecl *functionDecl) {
   }
 }
 
-bool FunctionChecker::entersInitializer(FunctionDecl *functionDecl) {
+bool FunctionChecker::enterInitializer(FunctionDecl *functionDecl) {
   auto declared = this->classChecker->declareThis(functionDecl);
   if (declared.isErr()) {
     this->state.getDiagnostics().error(functionDecl->loc(), declared.error().message);
@@ -526,11 +567,11 @@ bool FunctionChecker::entersInitializer(FunctionDecl *functionDecl) {
 }
 
 bool FunctionChecker::isPresetField(const FunctionDecl *functionDecl, const ClassField &field,
-                                    bool derived) const {
+                                    bool isDerived) const {
   if (field.isStatic()) {
     return false;
   }
-  bool isOwnInit = functionDecl->isConstructor() && !derived && field.init != nullptr &&
+  bool isOwnInit = functionDecl->isConstructor() && !isDerived && field.init != nullptr &&
                    field.method() == nullptr;
 
   return field.optional() || isOwnInit || (!functionDecl->isConstructor() && field.redeclared);
@@ -545,7 +586,7 @@ void FunctionChecker::walkRootSupers(FunctionDecl *functionDecl) {
       ++supers;
     }
   }
-  auto called = this->superCalled(functionDecl, supers);
+  auto called = this->checkSuperCalled(functionDecl, supers);
   if (called.isErr()) {
     this->state.getDiagnostics().error(functionDecl->loc(), called.error().message);
   }
@@ -555,7 +596,7 @@ CallExpr *FunctionChecker::superCallOf(Stmt *stmt) const {
   auto *expr = dyn_cast<ExprStmt>(stmt);
   auto *call = expr != nullptr ? dyn_cast<CallExpr>(expr->expr) : nullptr;
   auto *callee = call != nullptr ? dyn_cast<NameExpr>(call->callee) : nullptr;
-  if (callee == nullptr || callee->name != "super") {
+  if (callee == nullptr || callee->name != kSuperName) {
     return nullptr;
   }
 
@@ -572,38 +613,44 @@ void FunctionChecker::declareBodyParam(FunctionDecl *functionDecl, size_t index)
     return;
   }
   auto *defaulted = param.form.as<DefaultedParam>();
-  if (defaulted != nullptr && !this->defaultValueChecked(functionDecl, index, defaulted, type)) {
+  if (defaulted != nullptr) {
+    return this->declareDefaultedParam(functionDecl, index, defaulted);
+  }
+  param.sym = this->scopes->declareLet(param.name, param.loc, type);
+}
+
+void FunctionChecker::declareDefaultedParam(FunctionDecl *functionDecl, size_t index,
+                                            DefaultedParam *defaulted) {
+  Param &param = functionDecl->params[index];
+  const Type *type = param.declaredType;
+  auto names = llvm::StringSet<>();
+  AstWalker::collectNames(defaulted->defaultValue, names);
+  auto prior = this->checkDefaultOrder(functionDecl, index, names);
+  if (prior.isErr()) {
+    this->state.getDiagnostics().error(defaulted->defaultValue->loc(), prior.error().message);
+    defaulted->defaultValue->type = Type::error();
     param.sym = this->scopes->declareLet(param.name, param.loc, type);
     return;
   }
+  this->walkDefaultValue(functionDecl, index, defaulted);
   param.sym = this->scopes->declareLet(param.name, param.loc, type);
-  Expr *given = param.defaultValue();
-  bool isDefined = given != nullptr && type->isOptional() && !given->type->isOptional() &&
-                   !given->type->isUndefined();
+  const Expr *given = defaulted->defaultValue;
+  bool isDefined = type->isOptional() && !given->type->isOptional() && !given->type->isUndefined();
   if (isDefined) {
     this->flowChecker->markDefined(param.sym);
   }
 }
 
-bool FunctionChecker::defaultValueChecked(FunctionDecl *functionDecl, size_t index,
-                                          DefaultedParam *defaulted, const Type *type) {
-  auto names = llvm::StringSet<>();
-  AstWalker::collectNames(defaulted->defaultValue, names);
-  auto prior = this->defaultOrder(functionDecl, index, names);
-  if (prior.isErr()) {
-    this->state.getDiagnostics().error(defaulted->defaultValue->loc(), prior.error().message);
-    defaulted->defaultValue->type = Type::error();
-    return false;
-  }
+void FunctionChecker::walkDefaultValue(FunctionDecl *functionDecl, size_t index,
+                                       DefaultedParam *defaulted) {
+  const Type *type = functionDecl->params[index].declaredType;
   auto *functionExpr = dyn_cast<FunctionExpr>(defaulted->defaultValue);
   if (functionExpr != nullptr && functionExpr->fn->name.empty()) {
     functionExpr->fn->name = functionDecl->params[index].name;
   }
-  auto *checked =
-      this->exprChecker->checkExpr(defaulted->defaultValue, type->isError() ? nullptr : type);
+  const Type *hint = type->isError() ? nullptr : type;
+  auto *checked = this->exprChecker->checkExpr(defaulted->defaultValue, hint);
   defaulted->defaultValue = this->typeRelations->coerce(checked, type);
-
-  return true;
 }
 
 void FunctionChecker::walkBodyStatements(FunctionDecl *functionDecl) {

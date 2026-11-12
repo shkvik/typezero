@@ -82,6 +82,30 @@ const BuiltinPropertyInfo kBuiltinProperties[] = {
         .name = "raw",
         .property = BuiltinProperty::RAW_TEXTS,
     },
+    {
+        .name = "name",
+        .property = BuiltinProperty::NAME,
+    },
+    {
+        .name = "prototype",
+        .property = BuiltinProperty::PROTOTYPE,
+    },
+    {
+        .name = "value",
+        .property = BuiltinProperty::DESCRIPTOR_VALUE,
+    },
+    {
+        .name = "writable",
+        .property = BuiltinProperty::DESCRIPTOR_WRITABLE,
+    },
+    {
+        .name = "enumerable",
+        .property = BuiltinProperty::DESCRIPTOR_ENUMERABLE,
+    },
+    {
+        .name = "configurable",
+        .property = BuiltinProperty::DESCRIPTOR_CONFIGURABLE,
+    },
 };
 
 }

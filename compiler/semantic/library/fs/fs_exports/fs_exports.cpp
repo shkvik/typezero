@@ -131,7 +131,7 @@ const llvm::StringLiteral kFspExports[] = {
 
 }
 
-FsExports::ResultExportFound FsExports::fsExport(llvm::StringRef name, llvm::StringRef path) {
+FsExports::ResultExportFound FsExports::checkFsExport(llvm::StringRef name, llvm::StringRef path) {
   if (llvm::is_contained(kFsFunctions, name) || name == "constants" || name == "Stats" ||
       name == "Dirent" || name == "promises") {
     return ok(name);
@@ -177,7 +177,8 @@ FsExports::ResultExportFound FsExports::fsExport(llvm::StringRef name, llvm::Str
   });
 }
 
-FsExports::ResultExportFound FsExports::promisesExport(llvm::StringRef name, llvm::StringRef path) {
+FsExports::ResultExportFound FsExports::checkPromisesExport(llvm::StringRef name,
+                                                            llvm::StringRef path) {
   if (llvm::is_contained(kFspFunctions, name) || name == "constants") {
     return ok(name);
   }
@@ -213,8 +214,8 @@ FsExports::ResultExportFound FsExports::promisesExport(llvm::StringRef name, llv
   });
 }
 
-FsExports::ResultExportFound FsExports::readlineExport(llvm::StringRef name, llvm::StringRef path,
-                                                       bool hasPromises) {
+FsExports::ResultExportFound
+FsExports::checkReadlineExport(llvm::StringRef name, llvm::StringRef path, bool hasPromises) {
   if (name == "createInterface" || name == "Interface") {
     return ok(name);
   }
@@ -236,7 +237,8 @@ FsExports::ResultExportFound FsExports::readlineExport(llvm::StringRef name, llv
   });
 }
 
-FsExports::ResultExportFound FsExports::tzFsExport(llvm::StringRef name, llvm::StringRef path) {
+FsExports::ResultExportFound FsExports::checkTzFsExport(llvm::StringRef name,
+                                                        llvm::StringRef path) {
   if (name == "replaceSync" || name == "replace") {
     return ok(name);
   }
@@ -250,7 +252,8 @@ FsExports::ResultExportFound FsExports::tzFsExport(llvm::StringRef name, llvm::S
   });
 }
 
-FsExports::ResultExportFound FsExports::tzIoExport(llvm::StringRef name, llvm::StringRef path) {
+FsExports::ResultExportFound FsExports::checkTzIoExport(llvm::StringRef name,
+                                                        llvm::StringRef path) {
   if (name == "readLine") {
     return ok(name);
   }

@@ -81,7 +81,7 @@ ArrayMethods::ResultElementsAreText ArrayMethods::checkTextElements(const Type *
         .message = message,
     });
   }
-  if (this->jsonChecker->holdsJson(element)) {
+  if (this->jsonChecker->isHoldingJson(element)) {
     auto message = ErrorTextArrayText::json(name);
 
     return err(ArrayMethodsTextElementsError{
@@ -121,7 +121,7 @@ std::optional<ArrayMethodsSortableErrorCode> ArrayMethods::sortProblem(const Typ
   if (this->unknownChecker->isHoldingUnknown(element)) {
     return ArrayMethodsSortableErrorCode::UNKNOWN;
   }
-  if (this->jsonChecker->holdsJson(element)) {
+  if (this->jsonChecker->isHoldingJson(element)) {
     return ArrayMethodsSortableErrorCode::JSON;
   }
   if (element->holdsDates()) {

@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/declarations/declaration_checker/declaration_checker.h"
+#include "compiler/program/library/builtin_names/access_keyword_table/access_keyword_table.h"
 #include "compiler/program/library/object/object_member_table/object_member_table.h"
 #include "compiler/semantic/bodies/top_level_checker/top_level_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
@@ -27,19 +28,6 @@ DeclarationChecker::DeclarationChecker(SemanticState &owner, SemanticParts &all)
   this->classDeclarer = &all.classDeclarer;
   this->moduleDeclarer = &all.moduleDeclarer;
   this->topLevelChecker = &all.topLevelChecker;
-}
-
-const char *DeclarationChecker::accessWord(Access access) const {
-  switch (access) {
-    case Access::Public:
-      return "public";
-    case Access::Protected:
-      return "protected";
-    case Access::Private:
-      return "private";
-  }
-
-  return "private";
 }
 
 bool DeclarationChecker::typesAgree(const Type *here, const Type *there) const {
@@ -780,7 +768,7 @@ DeclarationChecker::checkConstructorAccess(const DeclaredMember &member,
                                            const FunctionDecl *constructor,
                                            const ClassDecl *classDecl) const {
   if (member.access != constructor->access()) {
-    const char *word = this->accessWord(constructor->access());
+    auto word = AccessKeywordTable::getName(constructor->access());
     auto message = ErrorTextDeclaredClass::newAccess(classDecl->name, word, this->fileName());
 
     return err(DeclarationCheckerConstructorAccessError{
@@ -826,7 +814,7 @@ DeclarationChecker::ResultAccessWordMatches
 DeclarationChecker::checkAccessAgrees(const DeclaredMember &member, Access access,
                                       const std::string &what) const {
   if (member.accessWritten && member.access != access) {
-    const char *word = this->accessWord(access);
+    auto word = AccessKeywordTable::getName(access);
     auto message = ErrorTextDeclaredClass::accessIs(what, word, this->fileName());
 
     return err(DeclarationCheckerAccessAgreesError{

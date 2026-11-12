@@ -25,11 +25,23 @@ TypeAliasDecl *LibraryDeclarations::findLibraryType(llvm::StringRef name) const 
   return this->libraryTypes.lookup(name);
 }
 
+TypeAliasDecl *LibraryDeclarations::findLibraryType(LibraryType libraryType) const {
+  auto name = LibraryTypeTable::getName(libraryType);
+
+  return this->libraryTypes.lookup(name);
+}
+
 void LibraryDeclarations::rememberLibraryClass(ClassDecl *classDecl) {
   this->libraryClasses[classDecl->name] = classDecl;
 }
 
 ClassDecl *LibraryDeclarations::findLibraryClass(llvm::StringRef name) const {
+  return this->libraryClasses.lookup(name);
+}
+
+ClassDecl *LibraryDeclarations::findLibraryClass(LibraryClass libraryClass) const {
+  auto name = LibraryClassTable::getName(libraryClass);
+
   return this->libraryClasses.lookup(name);
 }
 

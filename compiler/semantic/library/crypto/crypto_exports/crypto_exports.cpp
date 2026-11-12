@@ -4,8 +4,8 @@
 
 namespace tz {
 
-CryptoExports::ResultExportFound CryptoExports::cryptoExport(llvm::StringRef name,
-                                                             llvm::StringRef path) {
+CryptoExports::ResultExportFound CryptoExports::checkCryptoExport(llvm::StringRef name,
+                                                                  llvm::StringRef path) {
   if (llvm::is_contained(kFunctions, name) || llvm::is_contained(kClasses, name) ||
       name == "constants") {
     return ok(name);
@@ -42,8 +42,8 @@ CryptoExports::ResultExportFound CryptoExports::cryptoExport(llvm::StringRef nam
   });
 }
 
-CryptoExports::ResultExportFound CryptoExports::tzCryptoExport(llvm::StringRef name,
-                                                               llvm::StringRef path) {
+CryptoExports::ResultExportFound CryptoExports::checkTzCryptoExport(llvm::StringRef name,
+                                                                    llvm::StringRef path) {
   for (const auto &form : kTzCryptoAsyncForms) {
     if (name == form.first) {
       return ok(name);

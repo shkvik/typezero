@@ -21,7 +21,7 @@ public:
   void leaveInitializer();
   FunctionDecl *getInitializer() const;
   const VarSymbol *getInitializerThis() const;
-  void enterInitializerClosure(bool thisReady);
+  void enterInitializerClosure(bool isThisReady);
   void leaveInitializerClosure();
   bool isClosureThisReady() const;
   void enterStaticInit();

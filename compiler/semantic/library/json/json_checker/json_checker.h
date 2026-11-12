@@ -19,7 +19,7 @@ class JsonChecker {
 public:
   JsonChecker(SemanticState &owner, SemanticParts &all);
 
-  bool holdsJson(const Type *type) const;
+  bool isHoldingJson(const Type *type) const;
   bool isNullName(const Expr *expr) const;
   Expr *checkNull(NameExpr *name, const Type *expected);
   Expr *checkJsonMember(MemberExpr *member);
@@ -42,21 +42,42 @@ private:
   using ResultNullPossible = Result<const Type *, JsonCheckerNullPossibleError>;
   using ResultTestsUnknown = Result<const Type *, JsonCheckerTestsUnknownError>;
 
-  ResultTypeOfAgrees typeOfAgrees(const Expr *tested, llvm::StringRef name, bool nullTest,
-                                  bool isAnd) const;
-  ResultTestsUnknown testsUnknown(const Type *type);
-  ResultNullPossible nullPossible(const Type *type, llvm::StringRef op) const;
+  ResultTypeOfAgrees checkTypeOfAgrees(const Expr *tested, llvm::StringRef name, bool nullTest,
+                                       bool isAnd) const;
+  ResultTestsUnknown checkTestsUnknown(const Type *type);
+  ResultNullPossible checkNullPossible(const Type *type, llvm::StringRef op) const;
   void addArrayFacts(const Expr *arg, Flow &whenTrue) const;
   void addNothingFacts(const Expr *side, const Expr *other, Flow &equal, Flow &different) const;
   void addTypeOfFacts(const Expr *operand, const std::u16string &text, Flow &equal,
                       Flow &different) const;
   const Type *typeOfJson(const std::u16string &text) const;
   const VarSymbol *jsonVariable(const Expr *expr) const;
-  bool nullName(const Expr *expr) const;
   bool isNothing(const Expr *expr) const;
   const Expr *bare(const Expr *expr) const;
-  bool sameRef(const Expr *a, const Expr *b) const;
+  bool isSameRef(const Expr *first, const Expr *second) const;
   std::string refText(const Expr *expr) const;
+
+  struct JsonTest {
+    const Expr *tested;
+    bool isNullTest;
+  };
+
+  struct TypeOfPair {
+    const UnaryExpr *typeOf;
+    const StringLitExpr *text;
+  };
+
+  std::optional<JsonTest> jsonTest(const Expr *rhs) const;
+  std::optional<JsonTest> testedSide(const Expr *rhs) const;
+  bool isNullComparison(const BinaryExpr *equality) const;
+  const Expr *withoutNot(const Expr *expr) const;
+  bool reportRedundantTest(const Expr *term, const JsonTest &test, bool isAnd, const Expr *rhs);
+  const StringLitExpr *typeOfTextFor(const Expr *term, const Expr *tested, bool isAnd) const;
+  TypeOfPair typeOfPair(const BinaryExpr *comparison) const;
+  void walkJsonProperty(ObjectLitExpr::Property &property, const Type *json);
+  void walkJsonKey(ObjectLitExpr::Property &property, ComputedProperty *computed);
+  bool isNarrowedPath(const FieldPath &path, const std::pair<FieldPath, const Type *> &entry) const;
+  void addSideFacts(const Expr *side, const Expr *other, Flow &equal, Flow &different) const;
 
   SemanticState &state;
   FieldFacts *fieldFacts = nullptr;

@@ -20,11 +20,12 @@ public:
   NestedGroup *declareNested(BlockStmt *block);
   void noteUse(VarSymbol *variable, llvm::SMLoc loc);
   FunctionDecl *namedFunction(const Expr *expr) const;
+  FunctionDecl *variableFunction(const VarSymbol *variable) const;
 
 private:
   using ResultUseInOrder = Result<const NestedGroup::Use *, NestedFunctionsUseOrderError>;
 
-  ResultUseInOrder useOrder(const NestedGroup *group, const NestedGroup::Use &use) const;
+  ResultUseInOrder checkUseOrder(const NestedGroup *group, const NestedGroup::Use &use) const;
 
   void walkMemberBody(FunctionDecl *functionDecl);
   const NameExpr *assignedName(const Expr *expr) const;

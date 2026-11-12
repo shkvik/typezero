@@ -27,22 +27,22 @@ public:
 
 private:
   const Type *bufferType() const;
-  bool knownSignal(llvm::StringRef name) const;
+  bool isKnownSignal(llvm::StringRef name) const;
   bool hasZero(const Expr *expr) const;
 
   struct ChildRun {
     CallExpr *call = nullptr;
     ChildFunction function = ChildFunction::SPAWN_SYNC;
-    llvm::StringRef fn;
+    llvm::StringRef functionName;
     llvm::SMLoc loc;
-    bool exec = false;
-    bool failed = false;
+    bool isExec = false;
+    bool isFailed = false;
     std::vector<Expr *> args;
     llvm::StringMap<Expr *> options;
     unsigned encoding = 0;
     std::array<unsigned, 3> stdio{};
-    bool stdioGiven = false;
-    bool viaShell = false;
+    bool isStdioGiven = false;
+    bool isViaShell = false;
   };
 
   void walkFileArgument(ChildRun &run);

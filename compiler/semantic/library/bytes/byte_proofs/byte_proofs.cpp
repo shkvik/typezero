@@ -55,8 +55,8 @@ const Expr *ByteProofs::withoutCasts(const Expr *expr) const {
   return expr;
 }
 
-bool ByteProofs::sameView(const Expr *buffer, const Expr *offset, const Expr *length,
-                          int64_t size) const {
+bool ByteProofs::isSameView(const Expr *buffer, const Expr *offset, const Expr *length,
+                            int64_t size) const {
   const Type *ownerType = nullptr;
   const auto *owner = this->viewOwner(buffer, BuiltinProperty::BUFFER, &ownerType);
   if (owner == nullptr || offset == nullptr ||
@@ -96,7 +96,7 @@ Range ByteProofs::exact(int64_t v) const {
   return {v, v};
 }
 
-bool ByteProofs::known(const Range &r) const {
+bool ByteProofs::isKnownRange(const Range &r) const {
   return r.lo && r.hi;
 }
 
@@ -260,7 +260,7 @@ IntegerRange ByteProofs::castRange(const CastExpr *conversion, const IntegerRang
     return {};
   }
   const Type *to = conversion->type->nonOptional();
-  bool isInside = this->known(operand) && *operand.lo >= to->intMin() &&
+  bool isInside = this->isKnownRange(operand) && *operand.lo >= to->intMin() &&
                   (*operand.hi < 0 || uint64_t(*operand.hi) <= to->intMax());
   if (!to->holds(from->nonOptional()) && !isInside) {
     return {};
@@ -379,7 +379,7 @@ IntegerRange ByteProofs::unaryRange(const UnaryExpr *unary, const IntegerRange &
   if (unary->op == UnaryOp::Plus) {
     return operand;
   }
-  if (!this->known(operand)) {
+  if (!this->isKnownRange(operand)) {
     return {};
   }
   if (unary->op == UnaryOp::Neg) {
@@ -401,18 +401,18 @@ IntegerRange ByteProofs::binaryRange(const BinaryExpr *binary,
   return BytesCheckHelpers::operate(binary->op, parts[0], parts[1], false);
 }
 
-bool ByteProofs::provesFits(const Expr *expr, int64_t low, int64_t high) const {
+bool ByteProofs::canProveFits(const Expr *expr, int64_t low, int64_t high) const {
   return this->indexProofs->canProveBetween(expr, low, high);
 }
 
-ByteProofs::ResultValueFitsType ByteProofs::valueFits(const Expr *value, const Type *target,
-                                                      llvm::StringRef what) {
+ByteProofs::ResultValueFitsType ByteProofs::checkValueFits(const Expr *value, const Type *target,
+                                                           llvm::StringRef what) {
   int64_t low, hi;
   if (!value->type->isInteger() || !target->elementRange(low, hi)) {
     return ok(value);
   }
   Bytes kind = target->bytes();
-  bool isFitting = kind == Bytes::Uint8Clamped || this->provesFits(value, low, hi) ||
+  bool isFitting = kind == Bytes::Uint8Clamped || this->canProveFits(value, low, hi) ||
                    (low >= value->type->intMin() && uint64_t(hi) >= value->type->intMax());
   if (isFitting) {
     return ok(value);
@@ -438,8 +438,9 @@ ByteProofs::ResultValueFitsType ByteProofs::valueFits(const Expr *value, const T
   });
 }
 
-ByteProofs::ResultOffsetAligned
-ByteProofs::offsetAligned(std::optional<int64_t> start, int64_t size, llvm::StringRef what) const {
+ByteProofs::ResultOffsetAligned ByteProofs::checkOffsetAligned(std::optional<int64_t> start,
+                                                               int64_t size,
+                                                               llvm::StringRef what) const {
   if (size > 1 && (!start || *start % size != 0)) {
     auto message = ErrorTextByteView::offset(what, size);
 
@@ -452,8 +453,9 @@ ByteProofs::offsetAligned(std::optional<int64_t> start, int64_t size, llvm::Stri
   return ok(start.value_or(0));
 }
 
-ByteProofs::ResultBufferAligned
-ByteProofs::bufferAligned(std::optional<int64_t> whole, int64_t size, llvm::StringRef what) const {
+ByteProofs::ResultBufferAligned ByteProofs::checkBufferAligned(std::optional<int64_t> whole,
+                                                               int64_t size,
+                                                               llvm::StringRef what) const {
   if (size > 1 && (!whole || *whole % size != 0)) {
     auto message = ErrorTextByteView::size(what, size);
 
@@ -468,7 +470,7 @@ ByteProofs::bufferAligned(std::optional<int64_t> whole, int64_t size, llvm::Stri
 
 void ByteProofs::walkView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size,
                           llvm::StringRef what) {
-  if (this->sameView(buffer, offset, length, size) ||
+  if (this->isSameView(buffer, offset, length, size) ||
       this->indexProofs->isExempt(buffer->loc(), buffer)) {
     return;
   }
@@ -485,14 +487,14 @@ void ByteProofs::walkView(const Expr *buffer, const Expr *offset, const Expr *le
   }
   std::optional<int64_t> start =
       offset != nullptr ? this->constantFolder->intConstant(offset) : std::optional<int64_t>(0);
-  auto aligned = this->offsetAligned(start, size, what);
+  auto aligned = this->checkOffsetAligned(start, size, what);
   if (aligned.isErr()) {
     this->state.getDiagnostics().error(offset->loc(), aligned.error().message);
     return;
   }
   if (length == nullptr) {
     auto whole = proofs.exactLength(buffer);
-    auto sized = this->bufferAligned(whole, size, what);
+    auto sized = this->checkBufferAligned(whole, size, what);
     if (sized.isErr()) {
       this->state.getDiagnostics().error(buffer->loc(), sized.error().message);
     }
@@ -522,7 +524,7 @@ void ByteProofs::walkView(const Expr *buffer, const Expr *offset, const Expr *le
   }
 }
 
-bool ByteProofs::provesWithin(const Expr *object, const Expr *offset, int64_t size) const {
+bool ByteProofs::canProveWithin(const Expr *object, const Expr *offset, int64_t size) const {
   std::optional<Linear> at =
       offset != nullptr ? this->indexProofs->linear(offset) : Linear{Term::zero(), 0};
   auto length = this->indexProofs->lengthOf(object);
@@ -559,7 +561,7 @@ ByteProofs::checkByteCallbackResult(const FunctionDecl *functionDecl, const Expr
     return ok();
   }
   auto what = ErrorTextByteView::element(found->target->name());
-  auto fitting = this->valueFits(value, found->target, what);
+  auto fitting = this->checkValueFits(value, found->target, what);
   if (fitting.isErr()) {
     return err(fitting.error());
   }

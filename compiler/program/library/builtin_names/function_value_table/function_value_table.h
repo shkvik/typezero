@@ -14,7 +14,7 @@ struct FunctionValueStaticInfo {
   GlobalName owner;
   llvm::StringLiteral name;
   unsigned maxArgs;
-  bool returnsNothing;
+  bool isReturningNothing;
 };
 
 class FunctionValueTable {

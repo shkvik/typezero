@@ -53,53 +53,65 @@ private:
   using ResultParentHasMethods =
       Result<std::vector<FunctionDecl *>, InheritCheckerParentMethodsError>;
 
-  static bool isArrowMethod(const FunctionDecl *functionDecl);
-  ResultParentClassFound parentClass(ClassDecl *classDecl) const;
-  ResultSuperIsStatement rootSuper(const CallExpr *call) const;
-  ResultSuperNotRepeated superOnce(const ClassDecl *classDecl) const;
-  ResultConstructorScope superAllowed(FunctionDecl *constructor) const;
-  ResultSuperMethodScope superContext(FunctionDecl *method) const;
-  bool takesParams(const Type *functionType, const FuncSymbol *function) const;
-  ResultObjectIsComplete objectComplete(const MemberExpr *member) const;
-  void interfacesOf(const ClassDecl *classDecl, std::vector<const Type *> &out) const;
-  ResultMethodHasItsBody methodBody(FuncSymbol *function, llvm::StringRef name) const;
-  ResultParentHasMethods parentMethods(const ClassDecl *parent, llvm::StringRef name) const;
-  ResultNoSuperArguments superArguments(const CallExpr *call, const ClassDecl *parent) const;
-  ResultAbstractHasClass abstractNeedsClass(const ClassDecl *classDecl,
-                                            const FunctionDecl *functionDecl) const;
-  ResultAbstractOverride abstractImplemented(const ClassDecl *classDecl,
-                                             const FunctionDecl *found) const;
-  ResultMemberIsFunction methodForField(const Field &member, const Type *interfaceType,
-                                        const ClassDecl *classDecl) const;
-  ResultSignatureVariant signatureVariant(llvm::StringRef prefix, llvm::StringRef name,
-                                          const Type *signature, bool found) const;
-  ResultMemberIsDeclared memberDeclared(llvm::StringRef prefix, const Field &member,
-                                        llvm::ArrayRef<FunctionDecl *> methods) const;
-  ResultFieldTypeMatches fieldMatches(llvm::StringRef prefix, const Field &member,
-                                      const Field *actual, const ClassDecl *classDecl) const;
-  ResultReplaceableField replaceable(const Field &member, llvm::ArrayRef<FunctionDecl *> methods,
-                                     const Type *interfaceType, const ClassDecl *classDecl) const;
-  ResultReturnTypeAgrees returnMatches(llvm::StringRef name, const Type *returnType,
-                                       const Type *expected, const Type *interfaceType,
-                                       const ClassDecl *classDecl) const;
-  ResultVariantForParams variantFound(llvm::StringRef prefix, const Field &member,
-                                      llvm::ArrayRef<FunctionDecl *> methods,
-                                      const ClassDecl *classDecl, bool found) const;
-  FunctionDecl *enclosingMethod();
-  bool superObjectReady(MemberExpr *member);
-  Expr *callSuperMethod(CallExpr *call, MemberExpr *member, llvm::ArrayRef<FunctionDecl *> methods);
-  Expr *checkGenericSuperCall(CallExpr *call, MemberExpr *member, FuncSymbol *function);
-  ClassDecl *superCallClass(const CallExpr *call);
-  void walkParentConstructor(CallExpr *call, llvm::ArrayRef<FunctionDecl *> constructors);
+  ResultAbstractHasClass checkAbstractNeedsClass(const ClassDecl *classDecl,
+                                                 const FunctionDecl *functionDecl) const;
+  ResultAbstractOverride checkAbstractImplemented(const ClassDecl *classDecl,
+                                                  const FunctionDecl *found) const;
+  void walkEmptySlot(const ClassDecl *classDecl, size_t slot);
+  FunctionDecl *slotMethod(const ClassDecl *classDecl, size_t slot) const;
+  FunctionDecl *ownSlotMethod(const ClassDecl *owner, size_t slot) const;
+  ResultFieldTypeMatches checkFieldMatches(llvm::StringRef prefix, const Field &member,
+                                           const Field *actual, const ClassDecl *classDecl) const;
+  ResultMemberIsDeclared checkMemberDeclared(llvm::StringRef prefix, const Field &member,
+                                             llvm::ArrayRef<FunctionDecl *> methods) const;
+  ResultMemberIsFunction checkMethodForField(const Field &member, const Type *interfaceType,
+                                             const ClassDecl *classDecl) const;
+  ResultReplaceableField checkReplaceable(const Field &member,
+                                          llvm::ArrayRef<FunctionDecl *> methods,
+                                          const Type *interfaceType,
+                                          const ClassDecl *classDecl) const;
+  ResultReturnTypeAgrees checkReturnMatches(llvm::StringRef name, const Type *returnType,
+                                            const Type *expected, const Type *interfaceType,
+                                            const ClassDecl *classDecl) const;
+  ResultVariantForParams checkVariantFound(llvm::StringRef prefix, const Field &member,
+                                           llvm::ArrayRef<FunctionDecl *> methods,
+                                           const ClassDecl *classDecl, bool isFound) const;
+  ResultSignatureVariant checkSignatureVariant(llvm::StringRef prefix, llvm::StringRef name,
+                                               const Type *signature, bool isFound) const;
+  void walkImplementedInterface(ClassDecl *classDecl, const Type *interfaceType);
   void walkImplementedMember(ClassDecl *classDecl, const Type *interfaceType, const Field &member,
                              const std::string &prefix);
   void walkImplementedField(const ClassDecl *classDecl, const Field &member,
                             const ClassField *field, const std::string &prefix);
-  bool hasMatchingVariant(const ClassDecl *classDecl, const Type *interfaceType,
+  void walkVariantReturns(const ClassDecl *classDecl, const Type *interfaceType,
                           const Field &member, llvm::ArrayRef<FunctionDecl *> methods);
+  void walkVariantReturn(const ClassDecl *classDecl, const Type *interfaceType, const Field &member,
+                         const FunctionDecl *functionDecl);
+  bool hasMatchingVariant(const Field &member, llvm::ArrayRef<FunctionDecl *> methods) const;
+  bool isTakingMember(const Field &member, const FunctionDecl *functionDecl) const;
   void walkImplementedOverload(ClassDecl *classDecl, const Type *interfaceType,
                                const Overload &overload, const std::string &prefix);
+  void walkOverloadSignature(ClassDecl *classDecl, const Type *interfaceType,
+                             const Overload &overload, llvm::ArrayRef<FunctionDecl *> methods,
+                             const Type *signature, const std::string &prefix);
   FunctionDecl *methodTaking(llvm::ArrayRef<FunctionDecl *> methods, const Type *signature) const;
+  ResultConstructorScope checkSuperAllowed(FunctionDecl *constructor) const;
+  ResultParentClassFound checkParentClass(ClassDecl *classDecl) const;
+  ResultSuperIsStatement checkRootSuper(const CallExpr *call) const;
+  ResultSuperNotRepeated checkSuperOnce(const ClassDecl *classDecl) const;
+  ResultNoSuperArguments checkSuperArguments(const CallExpr *call, const ClassDecl *parent) const;
+  void walkSuperWithoutConstructor(CallExpr *call, const ClassDecl *parent);
+  ClassDecl *superCallClass(const CallExpr *call);
+  void walkParentConstructor(CallExpr *call, llvm::ArrayRef<FunctionDecl *> constructors);
+  ResultSuperMethodScope checkSuperContext(FunctionDecl *method) const;
+  ResultObjectIsComplete checkObjectComplete(const MemberExpr *member) const;
+  ResultParentHasMethods checkParentMethods(const ClassDecl *parent, llvm::StringRef name) const;
+  ResultMethodHasItsBody checkMethodBody(FuncSymbol *function, llvm::StringRef name) const;
+  FunctionDecl *enclosingMethod();
+  FunctionDecl *methodWithThis(FunctionDecl *functionDecl) const;
+  bool prepareSuperObject(MemberExpr *member);
+  Expr *callSuperMethod(CallExpr *call, MemberExpr *member, llvm::ArrayRef<FunctionDecl *> methods);
+  Expr *checkGenericSuperCall(CallExpr *call, MemberExpr *member, FuncSymbol *function);
 
   SemanticState &state;
   EventMaps *eventMaps = nullptr;

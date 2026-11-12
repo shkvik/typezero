@@ -30,12 +30,14 @@ private:
       Result<const ObjectLitExpr::Property *, MethodLiteralCheckerPropertyFitsError>;
   using ResultMembersMatch = Result<const ObjectLitExpr *, MethodLiteralCheckerMembersMatchError>;
 
-  ResultSpreadAbsent noSpread(const ObjectLitExpr *literal) const;
-  ResultMethodSimple plainMethod(const FunctionDecl *functionDecl) const;
-  ResultValueIsTyped fieldValue(const Type *valueType, llvm::StringRef label) const;
-  ResultMembersMatch membersMatch(const ObjectLitExpr *literal, const Type *target) const;
-  ResultPropertyFits propertyFits(const ObjectLitExpr::Property &property,
-                                  const Type *target) const;
+  ResultSpreadAbsent checkNoSpread(const ObjectLitExpr *literal) const;
+  ResultMethodSimple checkPlainMethod(const FunctionDecl *functionDecl) const;
+  ResultValueIsTyped checkFieldValue(const Type *valueType, llvm::StringRef label) const;
+  ResultMembersMatch checkMembersMatch(const ObjectLitExpr *literal, const Type *target) const;
+  bool hasMethodNamed(const ClassDecl *classDecl, llvm::StringRef name) const;
+  ResultPropertyFits checkPropertyFits(const ObjectLitExpr::Property &property,
+                                       const Type *target) const;
+  Expr *failMethodLiteral(ObjectLitExpr *literal);
   Type *makeLiteralClass(ObjectLitExpr *literal);
   void addLiteralMethod(ClassDecl *classDecl, const ObjectLitExpr::Property &property);
   bool addLiteralField(ClassDecl *classDecl, ObjectLitExpr::Property &property, const Type *target,
@@ -45,6 +47,7 @@ private:
   void declareLiteralMethods(ClassDecl *classDecl, const Type *target);
   void declareLiteralMethod(FunctionDecl *functionDecl, const Type *target);
   void walkLiteralMethods(ClassDecl *classDecl);
+  void walkLiteralMethod(FunctionDecl *functionDecl);
   Expr *matchLiteralTarget(ObjectLitExpr *literal, const Type *target, const Type *type);
 
   SemanticState &state;

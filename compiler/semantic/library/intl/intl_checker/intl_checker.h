@@ -37,7 +37,7 @@ public:
   Expr *checkLocaleList(Expr *arg, llvm::StringRef what);
   Expr *checkLocaleNew(NewExpr *expr, const Type *expected);
   Expr *checkLocaleStatic(CallExpr *call, MemberExpr *member, const Type *expected);
-  bool checkLocaleArg(Expr *&arg, llvm::StringRef what);
+  bool prepareLocaleArg(Expr *&arg, llvm::StringRef what);
   Expr *segmentsArray(Expr *segments);
   const Type *segmentDataType() const;
   const Type *resolvedIntlOptionsType(IntlKind kind) const;
@@ -63,7 +63,32 @@ private:
   const Type *resolvedSegmenterOptionsType() const;
   const Type *numberOptionType(llvm::StringRef name) const;
 
-  ResultLanguageTags languageTags(const Expr *arg, llvm::StringRef what, bool constructor);
+  enum class LanguageTagUse {
+    LOCALE_CONSTRUCTOR,
+    LOCALE_ARGUMENT,
+  };
+
+  struct WantedCallback {
+    const Type *param;
+    const Type *ret;
+  };
+
+  ResultLanguageTags checkLanguageTags(const Expr *arg, llvm::StringRef what, LanguageTagUse use);
+  bool isStringLiteralMember(const Type *member) const;
+  std::vector<int64_t> digitRange(llvm::StringRef name) const;
+  const Type *serviceTypeNamed(llvm::StringRef name) const;
+  const Type *serviceOptionsType(const IntlService &service) const;
+  const Type *optionType(const IntlOption &option) const;
+  const Type *listedOptionType(const IntlOption &option) const;
+  Expr *failIntlNew(llvm::SMLoc loc, std::vector<Expr *> &args);
+  void walkLocaleElements(const ArrayLitExpr *list, llvm::StringRef what);
+  std::vector<Expr *> *constructedArgs(NewExpr *made) const;
+  void walkArgsLoosely(std::vector<Expr *> &args);
+  Expr *checkCanonicalLocales(CallExpr *call, MemberExpr *member);
+  bool prepareStaticOptions(CallExpr *call, MemberExpr *member, llvm::StringRef what);
+  WantedCallback wantedCallback(const Type *expected) const;
+  const Type *boundFunctionType(IntlKind kind, llvm::StringRef name,
+                                const WantedCallback &wanted) const;
 
   SemanticState &state;
   NewChecker *newChecker = nullptr;

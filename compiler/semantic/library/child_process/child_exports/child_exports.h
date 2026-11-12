@@ -11,7 +11,7 @@ class ChildExports {
 public:
   using ResultExportFound = Result<llvm::StringRef, ModuleExportFoundError>;
 
-  static ResultExportFound childExport(llvm::StringRef name, llvm::StringRef path);
+  static ResultExportFound checkChildExport(llvm::StringRef name, llvm::StringRef path);
 };
 
 }

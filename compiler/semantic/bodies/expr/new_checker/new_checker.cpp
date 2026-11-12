@@ -84,7 +84,7 @@ NewChecker::ResultNamespaceNew NewChecker::checkNotNamespaced(const NewExpr *exp
 NewChecker::ResultCryptoMadeOk NewChecker::checkCryptoClassNew(const NewExpr *expr,
                                                                const ClassDecl *classDecl) const {
   bool isCryptoKey = LibraryClassTable::isName(classDecl->name, LibraryClass::CRYPTO_KEY);
-  bool isHidden = classDecl->library() && !this->libraryCalls->inLibrary(expr->loc()) &&
+  bool isHidden = classDecl->library() && !this->libraryCalls->isInLibrary(expr->loc()) &&
                   this->isCryptoClass(classDecl);
   if (isHidden && isCryptoKey) {
     auto message = ErrorTextCryptoNew::cryptoKey();

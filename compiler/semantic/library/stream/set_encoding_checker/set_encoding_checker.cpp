@@ -1,5 +1,6 @@
 #include "compiler/semantic/library/stream/set_encoding_checker/set_encoding_checker.h"
 #include "compiler/program/ast_walker/ast_walker.h"
+#include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
@@ -29,42 +30,52 @@ SetEncodingChecker::SetEncodingChecker(SemanticState &owner, SemanticParts &all)
 }
 
 const Type *SetEncodingChecker::encodedStreamType(ClassDecl *classDecl, llvm::SMLoc loc) {
-  for (ClassDecl *c = classDecl; c != nullptr; c = c->parent) {
-    if (!c->library() || c->generic() == nullptr || c->typeArgs.empty()) {
-      continue;
+  for (ClassDecl *current = classDecl; current != nullptr; current = current->parent) {
+    auto args = this->encodedArgs(current);
+    if (!args.empty()) {
+      return this->instantiateEncoded(current->generic(), args, loc);
     }
-    llvm::StringRef name = c->generic()->name;
-    auto args = std::vector<const Type *>();
-    ClassDecl *generic = c->generic();
-    if (name == "Readable") {
-      args = {Type::string()};
-    } else if (name == "Duplex" || name == "Transform") {
-      args = {c->typeArgs[0], Type::string()};
-    } else if (name == "PassThrough") {
-      args = {c->typeArgs[0], Type::string()};
-    } else {
-      continue;
-    }
-    if (generic == nullptr) {
-      return nullptr;
-    }
-    auto made = this->genericClassInstantiator->instantiateClass(generic, args, loc);
-    if (made.isErr() &&
-        made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
-      llvm::SMLoc at =
-          made.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
-              ? generic->loc()
-              : (loc.isValid() ? loc : generic->loc());
-      this->state.getDiagnostics().error(at, made.error().message);
-    }
-    return made.isOk() ? made.value()->type : nullptr;
   }
 
   return nullptr;
 }
 
+std::vector<const Type *> SetEncodingChecker::encodedArgs(const ClassDecl *classDecl) const {
+  if (!classDecl->library() || classDecl->generic() == nullptr || classDecl->typeArgs.empty()) {
+    return {};
+  }
+  llvm::StringRef name = classDecl->generic()->name;
+  if (LibraryClassTable::isName(name, LibraryClass::READABLE)) {
+    return {Type::string()};
+  }
+  bool isDuplex = LibraryClassTable::isName(name, LibraryClass::DUPLEX) ||
+                  LibraryClassTable::isName(name, LibraryClass::TRANSFORM) ||
+                  LibraryClassTable::isName(name, LibraryClass::PASS_THROUGH);
+  if (isDuplex) {
+    return {classDecl->typeArgs[0], Type::string()};
+  }
+
+  return {};
+}
+
+const Type *SetEncodingChecker::instantiateEncoded(ClassDecl *generic,
+                                                   const std::vector<const Type *> &args,
+                                                   llvm::SMLoc loc) {
+  auto made = this->genericClassInstantiator->instantiateClass(generic, args, loc);
+  if (made.isErr() &&
+      made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+    llvm::SMLoc at =
+        made.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
+            ? generic->loc()
+            : (loc.isValid() ? loc : generic->loc());
+    this->state.getDiagnostics().error(at, made.error().message);
+  }
+
+  return made.isOk() ? made.value()->type : nullptr;
+}
+
 SetEncodingChecker::ResultDecodedChunks
-SetEncodingChecker::decodedChunks(const Type *readable, const Type *receiver) const {
+SetEncodingChecker::checkDecodedChunks(const Type *readable, const Type *receiver) const {
   if (readable == nullptr) {
     auto message = ErrorTextSetEncoding::unreadable(receiver->name());
 
@@ -85,7 +96,7 @@ SetEncodingChecker::decodedChunks(const Type *readable, const Type *receiver) co
   return ok(readable);
 }
 
-SetEncodingChecker::ResultStdinIsPlaced SetEncodingChecker::stdinPlace() const {
+SetEncodingChecker::ResultStdinIsPlaced SetEncodingChecker::checkStdinPlace() const {
   const auto *module = this->state.getModuleStates().getCurrentModule();
   bool isTopLevel = module != nullptr && module->isEntry &&
                     !this->state.getFunctionStack().isInsideFunction() &&
@@ -107,7 +118,7 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member,
   const Type *receiver = member->object->type;
   auto chunks = this->chunkTypes->streamChunksOf(classDecl);
   llvm::SMLoc loc = member->loc();
-  auto decoded = this->decodedChunks(chunks.readable, receiver);
+  auto decoded = this->checkDecodedChunks(chunks.readable, receiver);
   if (decoded.isErr()) {
     this->state.getDiagnostics().error(loc, decoded.error().message);
     return call;
@@ -118,7 +129,7 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member,
   const auto *object = this->withoutImplicit(member->object);
   bool isStdinStream = this->isStdinCall(object);
   if (isStdinStream) {
-    auto placed = this->stdinPlace();
+    auto placed = this->checkStdinPlace();
     if (placed.isErr()) {
       this->state.getDiagnostics().error(loc, placed.error().message);
       return call;
@@ -161,7 +172,7 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member,
 Expr *SetEncodingChecker::plainSetEncoding(CallExpr *call, MemberExpr *member, ClassDecl *classDecl,
                                            const Type *receiver) {
   this->emitterChecker->callLibraryMethod(call, member, classDecl, "setEncoding", {}, nullptr,
-                                          false);
+                                          CallReceiver::OWN);
   if (!call->type->isError()) {
     call->type = receiver;
   }
@@ -224,13 +235,13 @@ SetEncodingChecker::encodingPathProblem(const std::optional<FieldPath> &path,
 }
 
 std::optional<llvm::StringRef> SetEncodingChecker::writableField(const FieldPath &path) const {
-  const Type *at = path.var->type;
+  const Type *current = path.var->type;
   for (llvm::StringRef field : path.names) {
-    const Field *f = at != nullptr ? at->nonOptional()->field(field) : nullptr;
-    if (f == nullptr || !f->readonly) {
+    const Field *found = current != nullptr ? current->nonOptional()->field(field) : nullptr;
+    if (found == nullptr || !found->readonly) {
       return field;
     }
-    at = f->type;
+    current = found->type;
   }
 
   return std::nullopt;
@@ -287,25 +298,25 @@ bool SetEncodingChecker::isEncodingPath(const EncodingRun &run, const Expr *expr
     return name != nullptr &&
            (name->var() == root || (name->var() == nullptr && name->name == root->name));
   }
-  auto p = this->fieldFacts->fieldPath(bare);
+  auto path = this->fieldFacts->fieldPath(bare);
 
-  return p.has_value() && *p == run.path;
+  return path.has_value() && *path == run.path;
 }
 
 void SetEncodingChecker::collectEscapes(EncodingRun &run) {
   auto body = this->encodingBody(run);
   for (const Stmt *stmt : body) {
-    for (const Expr *expr : AstWalker::exprsIn(stmt, true)) {
+    for (const Expr *expr : AstWalker::allExprsIn(stmt)) {
       this->classifyUse(run, expr);
     }
   }
   auto direct = llvm::SmallPtrSet<const Expr *, 32>();
   for (const Stmt *stmt : body) {
-    auto exprs = AstWalker::exprsIn(stmt, false);
+    auto exprs = AstWalker::ownExprsIn(stmt);
     direct.insert(exprs.begin(), exprs.end());
   }
   for (const Stmt *stmt : body) {
-    for (const Expr *expr : AstWalker::exprsIn(stmt, true)) {
+    for (const Expr *expr : AstWalker::allExprsIn(stmt)) {
       this->noteEscape(run, expr, direct);
     }
   }
@@ -369,9 +380,9 @@ void SetEncodingChecker::noteEscape(EncodingRun &run, const Expr *expr,
 
 void SetEncodingChecker::reportFirstEscape(const EncodingRun &run, llvm::SMLoc loc) {
   const StreamEscape *first = &run.escapes[0];
-  for (const StreamEscape &e : run.escapes) {
-    if (e.loc.getPointer() < first->loc.getPointer()) {
-      first = &e;
+  for (const StreamEscape &escape : run.escapes) {
+    if (escape.loc.getPointer() < first->loc.getPointer()) {
+      first = &escape;
     }
   }
   auto message = ErrorTextSetEncoding::usedBefore(first->how);

@@ -43,53 +43,55 @@ std::optional<int> FsDeclarer::fileKind(llvm::StringRef method) const {
 }
 
 void FsDeclarer::declareFsClasses() {
-  auto declare = [&](llvm::StringRef name,
-                     llvm::ArrayRef<std::pair<llvm::StringRef, const Type *>> fields,
-                     size_t privateFrom) {
-    auto *classDecl = this->state.getAst().make<ClassDecl>(llvm::SMLoc(), name);
-    classDecl->origin = ClassOrigin::BUILTIN;
-    classDecl->stage = ClassStage::RESOLVED;
-    classDecl->declared = true;
-    this->state.getClassStore().addClass(classDecl);
-    auto *type = Type::classType(name, classDecl);
-    classDecl->type = type;
-    auto typeFields = std::vector<Field>();
-    for (const auto &[fieldName, fieldType] : fields) {
-      ClassField field;
-      field.name = fieldName;
-      field.resolved = fieldType;
-      field.access = classDecl->fields.size() < privateFrom ? Access::Public : Access::Private;
-      classDecl->fields.push_back(field);
-      typeFields.push_back({fieldName.str(), fieldType, false});
-    }
-    type->defineFields(std::move(typeFields));
-
-    return classDecl;
-  };
-  const auto *d = Type::doubleTy();
-  const auto *i = Type::intTy();
-  ClassDecl *stats = declare("Stats",
-                             {{"dev", i},
-                              {"mode", i},
-                              {"nlink", i},
-                              {"uid", i},
-                              {"gid", i},
-                              {"rdev", i},
-                              {"blksize", i},
-                              {"ino", i},
-                              {"size", i},
-                              {"blocks", i},
-                              {"atimeMs", d},
-                              {"mtimeMs", d},
-                              {"ctimeMs", d},
-                              {"birthtimeMs", d}},
-                             14);
+  const auto *doubleType = Type::doubleTy();
+  const auto *intType = Type::intTy();
+  ClassDecl *stats = this->declareFsClass("Stats",
+                                          {{"dev", intType},
+                                           {"mode", intType},
+                                           {"nlink", intType},
+                                           {"uid", intType},
+                                           {"gid", intType},
+                                           {"rdev", intType},
+                                           {"blksize", intType},
+                                           {"ino", intType},
+                                           {"size", intType},
+                                           {"blocks", intType},
+                                           {"atimeMs", doubleType},
+                                           {"mtimeMs", doubleType},
+                                           {"ctimeMs", doubleType},
+                                           {"birthtimeMs", doubleType}},
+                                          14);
   this->state.getFileSystemStore().rememberStatsClass(stats);
-  ClassDecl *dirent = declare(
+  ClassDecl *dirent = this->declareFsClass(
       "Dirent",
       {{"name", Type::string()}, {"parentPath", Type::string()}, {"Symbol(type)", Type::intTy()}},
       2);
   this->state.getFileSystemStore().rememberDirentClass(dirent);
+}
+
+ClassDecl *
+FsDeclarer::declareFsClass(llvm::StringRef name,
+                           llvm::ArrayRef<std::pair<llvm::StringRef, const Type *>> fields,
+                           size_t privateFrom) {
+  auto *classDecl = this->state.getAst().make<ClassDecl>(llvm::SMLoc(), name);
+  classDecl->origin = ClassOrigin::BUILTIN;
+  classDecl->stage = ClassStage::RESOLVED;
+  classDecl->declared = true;
+  this->state.getClassStore().addClass(classDecl);
+  auto *type = Type::classType(name, classDecl);
+  classDecl->type = type;
+  auto typeFields = std::vector<Field>();
+  for (const auto &[fieldName, fieldType] : fields) {
+    ClassField field;
+    field.name = fieldName;
+    field.resolved = fieldType;
+    field.access = classDecl->fields.size() < privateFrom ? Access::Public : Access::Private;
+    classDecl->fields.push_back(field);
+    typeFields.push_back({.name = fieldName.str(), .type = fieldType});
+  }
+  type->defineFields(std::move(typeFields));
+
+  return classDecl;
 }
 
 Expr *FsDeclarer::checkStatsDate(MemberExpr *member, ClassDecl *classDecl) {

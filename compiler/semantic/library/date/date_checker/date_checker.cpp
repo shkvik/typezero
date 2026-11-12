@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/date/date_checker/date_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/program/library/date/date_method_table/date_method_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
@@ -22,6 +23,12 @@
 using llvm::dyn_cast;
 
 namespace tz {
+
+namespace {
+
+constexpr size_t kMostDateArgs = 7;
+
+}
 
 DateChecker::DateChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -62,28 +69,28 @@ int DateChecker::daysInMonth(int64_t year, int64_t month) const {
 
 std::pair<int64_t, int64_t> DateChecker::carriedDay(int64_t year, int64_t month,
                                                     int64_t day) const {
-  int64_t y = year;
-  int64_t m = month;
-  int64_t d = day;
-  while (d > this->daysInMonth(y, m)) {
-    d -= this->daysInMonth(y, m);
-    if (++m == 12) {
-      m = 0;
-      ++y;
+  int64_t currentYear = year;
+  int64_t currentMonth = month;
+  int64_t currentDay = day;
+  while (currentDay > this->daysInMonth(currentYear, currentMonth)) {
+    currentDay -= this->daysInMonth(currentYear, currentMonth);
+    if (++currentMonth == 12) {
+      currentMonth = 0;
+      ++currentYear;
     }
   }
 
-  return {m, d};
+  return {currentMonth, currentDay};
 }
 
 std::string DateChecker::missingDay(std::optional<int64_t> year, int64_t month, int64_t day) const {
-  std::pair<int64_t, int64_t> carried =
-      year ? this->carriedDay(*year, month, day) : std::pair<int64_t, int64_t>(month, day);
+  std::pair<int64_t, int64_t> carried = year.has_value() ? this->carriedDay(*year, month, day)
+                                                         : std::pair<int64_t, int64_t>(month, day);
 
   return ErrorTextDateDay::missing(year, month, day, carried.first, carried.second);
 }
 
-DateChecker::ResultLiteralDate DateChecker::literalDate(const std::u16string &text) const {
+DateChecker::ResultLiteralDate DateChecker::checkLiteralDate(const std::u16string &text) const {
   std::vector<uint16_t> units(text.begin(), text.end());
   TzDateFields fields;
   auto shown = ToUtf8::toUtf8(text);
@@ -156,7 +163,7 @@ DateChecker::ResultDateLiteralChecked DateChecker::checkDateLiteral(const Expr *
   if (!text) {
     return ok();
   }
-  auto date = this->literalDate(*text);
+  auto date = this->checkLiteralDate(*text);
   if (date.isErr()) {
     return err(date.error());
   }
@@ -228,27 +235,52 @@ void DateChecker::walkDayField(llvm::ArrayRef<Expr *> args, const DateFieldValue
 
 void DateChecker::walkDayInMonth(llvm::ArrayRef<Expr *> args, const DateFieldValues &fields,
                                  int64_t day, int64_t month) {
-  llvm::StringRef setter = fields.setter;
   std::optional<int64_t> year = fields.constant[0];
-  bool isShortYear = setter.empty() && year.has_value() && *year >= 0 && *year <= 99;
+  bool isShortYear = fields.setter.empty() && year.has_value() && *year >= 0 && *year <= 99;
   int64_t fullYear = isShortYear ? 1900 + *year : year.value_or(0);
-  int last = year.has_value() ? this->daysInMonth(fullYear, month)
-             : month == 1     ? 29
-                              : this->daysInMonth(2001, month);
+  std::optional<int64_t> known = year.has_value() ? std::optional<int64_t>(fullYear) : std::nullopt;
+  int last = this->lastDayOf(known, month);
   if (day <= last) {
     return;
   }
-  std::optional<int64_t> known = year.has_value() ? std::optional<int64_t>(fullYear) : std::nullopt;
   auto missing = this->missingDay(known, month, day);
-  std::optional<int64_t> nextYear =
-      year.has_value() ? std::optional<int64_t>(month == 11 ? fullYear + 1 : fullYear)
-                       : std::nullopt;
-  int64_t next = month == 11 ? 0 : month + 1;
-  std::string message = setter.empty()
-                            ? ErrorTextDateFields::lastDay(missing, month, nextYear, next)
-                        : month == 1 ? ErrorTextDateFields::february(missing, setter, known)
-                                     : ErrorTextDateFields::monthDays(missing, month, last);
+  auto message = this->dayOverflowText(fields.setter, missing, month, known, last);
   this->reportField(args, fields, 2, message);
+}
+
+int DateChecker::lastDayOf(std::optional<int64_t> year, int64_t month) const {
+  if (year.has_value()) {
+    return this->daysInMonth(*year, month);
+  }
+  if (month == 1) {
+    return 29;
+  }
+
+  return this->daysInMonth(2001, month);
+}
+
+std::string DateChecker::dayOverflowText(llvm::StringRef setter, const std::string &missing,
+                                         int64_t month, std::optional<int64_t> year,
+                                         int last) const {
+  if (setter.empty()) {
+    auto nextYear = this->nextMonthYear(year, month);
+    int64_t next = month == 11 ? 0 : month + 1;
+    return ErrorTextDateFields::lastDay(missing, month, nextYear, next);
+  }
+  if (month == 1) {
+    return ErrorTextDateFields::february(missing, setter, year);
+  }
+
+  return ErrorTextDateFields::monthDays(missing, month, last);
+}
+
+std::optional<int64_t> DateChecker::nextMonthYear(std::optional<int64_t> year,
+                                                  int64_t month) const {
+  if (!year.has_value()) {
+    return std::nullopt;
+  }
+
+  return month == 11 ? *year + 1 : *year;
 }
 
 void DateChecker::walkTimeFields(llvm::ArrayRef<Expr *> args, const DateFieldValues &fields) {
@@ -280,58 +312,72 @@ Expr *DateChecker::timeArg(Expr *arg) {
 }
 
 Expr *DateChecker::checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
-  auto *callee = this->state.getAst().make<NameExpr>(loc, "Date");
-  auto failed = [&] {
-    auto *error = this->state.getAst().make<UndefinedExpr>(loc);
-    error->type = Type::error();
-
-    return error;
-  };
-  if (args.size() > 7) {
+  auto dateName = GlobalNameTable::getName(GlobalName::DATE);
+  auto *callee = this->state.getAst().make<NameExpr>(loc, dateName);
+  if (args.size() > kMostDateArgs) {
     auto message = ErrorTextDateNew::arity(args.size());
     this->state.getDiagnostics().error(loc, message);
     for (Expr *&arg : args) {
       arg = this->exprChecker->checkExpr(arg);
     }
-    return failed();
+    return this->failedDate(loc);
   }
   if (args.empty()) {
     return this->processChecker->builtinCall(loc, callee, Builtin::DateNew, {}, Type::date());
   }
   if (args.size() == 1) {
-    auto literal = this->checkDateLiteral(args[0]);
-    if (literal.isErr()) {
-      this->state.getDiagnostics().error(args[0]->loc(), literal.error().message);
-    }
-    auto *arg = this->genericChecker->apparent(this->exprChecker->checkExpr(args[0]));
-    const Type *type = arg->type;
-    if (type->isError()) {
-      return failed();
-    }
-    if (type->isDate()) {
-      return this->processChecker->builtinCall(loc, callee, Builtin::DateCopy, {arg}, Type::date());
-    }
-    if (type->isString()) {
-      if (!this->literalText(args[0])) {
-        auto message = ErrorTextDateNew::unknown();
-        this->state.getDiagnostics().error(arg->loc(), message);
-        return failed();
-      }
-      return this->processChecker->builtinCall(loc, callee, Builtin::DateFromString, {arg},
-                                               Type::date());
-    }
-    if (type->isNumeric()) {
-      return this->processChecker->builtinCall(loc, callee, Builtin::DateNew, {this->timeArg(arg)},
-                                               Type::date());
-    }
-    auto message = ErrorTextDateValue::takes(type);
-    this->state.getDiagnostics().error(arg->loc(), message);
-    return failed();
+    return this->checkDateFromValue(loc, callee, args[0]);
   }
   this->walkDateFields(args);
 
   return this->processChecker->builtinCall(loc, callee, Builtin::DateFromFields, args,
                                            Type::date());
+}
+
+Expr *DateChecker::checkDateFromValue(llvm::SMLoc loc, Expr *callee, Expr *given) {
+  auto literal = this->checkDateLiteral(given);
+  if (literal.isErr()) {
+    this->state.getDiagnostics().error(given->loc(), literal.error().message);
+  }
+  auto *checked = this->exprChecker->checkExpr(given);
+  auto *arg = this->genericChecker->apparent(checked);
+  const Type *type = arg->type;
+  if (type->isError()) {
+    return this->failedDate(loc);
+  }
+  if (type->isDate()) {
+    return this->processChecker->builtinCall(loc, callee, Builtin::DateCopy, {arg}, Type::date());
+  }
+  if (type->isString()) {
+    return this->checkDateFromString(loc, callee, given, arg);
+  }
+  if (type->isNumeric()) {
+    auto *time = this->timeArg(arg);
+    return this->processChecker->builtinCall(loc, callee, Builtin::DateNew, {time}, Type::date());
+  }
+  auto message = ErrorTextDateValue::takes(type);
+  this->state.getDiagnostics().error(arg->loc(), message);
+
+  return this->failedDate(loc);
+}
+
+Expr *DateChecker::checkDateFromString(llvm::SMLoc loc, Expr *callee, const Expr *given,
+                                       Expr *arg) {
+  if (!this->literalText(given)) {
+    auto message = ErrorTextDateNew::unknown();
+    this->state.getDiagnostics().error(arg->loc(), message);
+    return this->failedDate(loc);
+  }
+
+  return this->processChecker->builtinCall(loc, callee, Builtin::DateFromString, {arg},
+                                           Type::date());
+}
+
+Expr *DateChecker::failedDate(llvm::SMLoc loc) {
+  auto *error = this->state.getAst().make<UndefinedExpr>(loc);
+  error->type = Type::error();
+
+  return error;
 }
 
 Expr *DateChecker::checkDateFunction(CallExpr *call, NameExpr *name) {
@@ -342,9 +388,7 @@ Expr *DateChecker::checkDateFunction(CallExpr *call, NameExpr *name) {
   if (!call->args.empty()) {
     auto message = ErrorTextDateNew::call();
     this->state.getDiagnostics().error(name->loc(), message);
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
+    this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
   call->target = BuiltinCall{.builtin = Builtin::DateText};
@@ -499,7 +543,7 @@ Expr *DateChecker::checkDateSetter(CallExpr *call, MemberExpr *member,
 }
 
 Expr *DateChecker::checkToLocale(CallExpr *call, MemberExpr *member, const DateMethodInfo &method) {
-  if (!this->dateFormatChecker->checkLocaleArgs(call->args, method.field)) {
+  if (!this->dateFormatChecker->prepareLocaleArgs(call->args, method.field)) {
     return call;
   }
   call->args.insert(call->args.begin(), this->fieldLiteral(member, method.field));
@@ -521,28 +565,39 @@ Expr *DateChecker::checkDateMember(MemberExpr *member) {
 }
 
 Expr *DateChecker::checkDateOperands(BinaryExpr *binary) {
-  const Type *l = binary->lhs->type;
-  const Type *r = binary->rhs->type;
-  if (!l->isDate() && !r->isDate()) {
+  const Type *leftType = binary->lhs->type;
+  const Type *rightType = binary->rhs->type;
+  if (!leftType->isDate() && !rightType->isDate()) {
     return nullptr;
   }
   binary->type = Type::error();
   bool isCompare = binary->op == BinaryOp::Lt || binary->op == BinaryOp::Le ||
                    binary->op == BinaryOp::Gt || binary->op == BinaryOp::Ge;
-  if (l->isDate() && r->isDate() && (isCompare || binary->op == BinaryOp::Sub)) {
+  if (leftType->isDate() && rightType->isDate() && (isCompare || binary->op == BinaryOp::Sub)) {
     binary->lhs = this->dateTime(binary->lhs);
     binary->rhs = this->dateTime(binary->rhs);
     binary->type = isCompare ? Type::boolTy() : Type::intTy();
     return binary;
   }
-  const char *op = Operators::opSpelling(binary->op);
-  std::string message = binary->op == BinaryOp::Add   ? ErrorTextDateOperator::plus()
-                        : binary->op == BinaryOp::Sub ? ErrorTextDateOperator::minus()
-                        : isCompare ? ErrorTextDateOperator::compare(op)
-                                    : this->binaryChecker->operandTypesText(op, l, r);
+  auto message = this->dateOperatorText(binary, isCompare);
   this->state.getDiagnostics().error(binary->loc(), message);
 
   return binary;
+}
+
+std::string DateChecker::dateOperatorText(const BinaryExpr *binary, bool isCompare) const {
+  const char *op = Operators::opSpelling(binary->op);
+  if (binary->op == BinaryOp::Add) {
+    return ErrorTextDateOperator::plus();
+  }
+  if (binary->op == BinaryOp::Sub) {
+    return ErrorTextDateOperator::minus();
+  }
+  if (isCompare) {
+    return ErrorTextDateOperator::compare(op);
+  }
+
+  return this->binaryChecker->operandTypesText(op, binary->lhs->type, binary->rhs->type);
 }
 
 }

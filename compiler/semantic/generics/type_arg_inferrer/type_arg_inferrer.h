@@ -127,7 +127,7 @@ private:
   void applyTypeDefault(const FuncSymbol *generic, std::vector<const Type *> &bound, size_t index);
   bool isFittingArgument(const FuncSymbol *generic, std::vector<const Type *> &bound, size_t index);
   void deferLiteral(GenericCallBinding &binding, Inference &inference, size_t index);
-  Signature callbackSignature(llvm::ArrayRef<const Type *> typeParams, const Type *function) const;
+  Signature callbackSignature(llvm::ArrayRef<const Type *> openParams, const Type *function) const;
   Expr *checkCallbackValue(Expr *arg, FuncSymbol *other, Signature &signature);
   const Type *withUndefined(const Inference &inference, size_t index, const Type *type) const;
   bool isGrowingAt(const Type *type, llvm::ArrayRef<const Type *> params, GrowthPlace place) const;

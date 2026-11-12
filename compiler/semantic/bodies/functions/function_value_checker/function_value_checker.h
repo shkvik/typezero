@@ -18,8 +18,8 @@ public:
 
   FunctionValueChecker(SemanticState &owner, SemanticParts &all);
 
-  ResultAsyncCallbackOk asyncCallback(const Expr *arg, const Signature &expected,
-                                      llvm::StringRef method) const;
+  ResultAsyncCallbackOk checkAsyncCallback(const Expr *arg, const Signature &expected,
+                                           llvm::StringRef method) const;
   FunctionExpr *builtinFunctionValue(Expr *arg, const Signature &expected, unsigned primary,
                                      llvm::StringRef method);
   Expr *adaptFunction(Expr *expr, const Type *to);
@@ -30,17 +30,20 @@ private:
   struct FunctionValueShape {
     llvm::StringRef name;
     unsigned maxArgs;
-    bool returnsNothing;
+    bool isReturningNothing;
   };
 
+  bool isParamFitting(const Type *param, const Type *wanted) const;
   std::optional<FunctionValueShape> functionValueShape(const Expr *arg) const;
   std::optional<FunctionValueShape> globalFunctionShape(const NameExpr *named) const;
   std::optional<FunctionValueShape> staticFunctionShape(const MemberExpr *member) const;
   std::optional<GlobalName> namedGlobal(const Expr *expr) const;
   FunctionExpr *forwardingFunction(Expr *arg, const FunctionValueShape &shape, size_t count);
-
-  ResultArgumentsMatch extraArguments(const Expr *arg, llvm::StringRef name, llvm::StringRef method,
-                                      size_t count, unsigned primary) const;
+  Stmt *forwardingStatement(const Expr *arg, CallExpr *call, const FunctionValueShape &shape);
+  ResultArgumentsMatch checkExtraArguments(const Expr *arg, llvm::StringRef name,
+                                           llvm::StringRef method, size_t count,
+                                           unsigned primary) const;
+  std::string qualifiedName(const Expr *arg, llvm::StringRef name) const;
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

@@ -20,7 +20,7 @@ NestedFunctions::NestedFunctions(SemanticState &owner, SemanticParts &all)
 }
 
 void NestedFunctions::collectAssigned(const Stmt *stmt, std::vector<llvm::StringRef> &names) const {
-  for (const Expr *expr : AstWalker::exprsIn(stmt, true)) {
+  for (const Expr *expr : AstWalker::allExprsIn(stmt)) {
     const NameExpr *name = this->assignedName(expr);
     if (name != nullptr && !llvm::is_contained(names, name->name)) {
       names.push_back(name->name);
@@ -156,7 +156,7 @@ void NestedFunctions::walkMemberBody(FunctionDecl *functionDecl) {
 }
 
 void NestedFunctions::walkUseOrder(const NestedGroup *group, const NestedGroup::Use &use) {
-  auto ordered = this->useOrder(group, use);
+  auto ordered = this->checkUseOrder(group, use);
   if (ordered.isErr()) {
     auto *later = this->capturedLater(group, use);
     auto declared = ErrorTextUseOrder::declared(later->name);
@@ -201,8 +201,8 @@ VarSymbol *NestedFunctions::laterCapture(const FunctionDecl *functionDecl, const
   return nullptr;
 }
 
-NestedFunctions::ResultUseInOrder NestedFunctions::useOrder(const NestedGroup *group,
-                                                            const NestedGroup::Use &use) const {
+NestedFunctions::ResultUseInOrder
+NestedFunctions::checkUseOrder(const NestedGroup *group, const NestedGroup::Use &use) const {
   auto *later = this->capturedLater(group, use);
   if (later != nullptr) {
     auto message = ErrorTextUseOrder::early(use.fn->name, later->name);
@@ -293,7 +293,11 @@ FunctionDecl *NestedFunctions::namedFunction(const Expr *expr) const {
   if (name->func() != nullptr) {
     return name->func()->decl;
   }
-  VarSymbol *variable = name->var();
+
+  return this->variableFunction(name->var());
+}
+
+FunctionDecl *NestedFunctions::variableFunction(const VarSymbol *variable) const {
   if (variable == nullptr) {
     return nullptr;
   }

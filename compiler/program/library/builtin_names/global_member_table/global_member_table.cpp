@@ -113,4 +113,12 @@ GlobalName GlobalMemberTable::getOwner(GlobalMember member) {
   llvm_unreachable("global member missing from the table");
 }
 
+std::string GlobalMemberTable::getQualifiedName(GlobalMember member) {
+  auto owner = GlobalMemberTable::getOwner(member);
+  auto ownerName = GlobalNameTable::getName(owner);
+  auto memberName = GlobalMemberTable::getName(member);
+
+  return ownerName.str() + "." + memberName.str();
+}
+
 }

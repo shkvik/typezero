@@ -24,8 +24,8 @@ private:
   using ResultInputIsStdin = Result<const Expr *, ReadlineCheckerStdinInputError>;
   using ResultReadlineUsed = Result<llvm::StringRef, ReadlineCheckerReadlineFunctionError>;
 
-  ResultInputIsStdin stdinInput(const Expr *input);
-  ResultReadlineUsed readlineFunction(llvm::StringRef functionName, NodeModule module) const;
+  ResultInputIsStdin checkStdinInput(const Expr *input);
+  ResultReadlineUsed checkReadlineFunction(llvm::StringRef functionName, NodeModule module) const;
 
   struct ReadlineStreams {
     Expr *input;

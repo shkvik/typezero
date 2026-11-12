@@ -1,5 +1,6 @@
 #include "compiler/semantic/bodies/functions/function_method_checker/function_method_checker.h"
 #include "compiler/program/library/array/array_method_table/array_method_table.h"
+#include "compiler/program/library/function/function_method_table/function_method_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -18,10 +19,24 @@ FunctionMethodChecker::FunctionMethodChecker(SemanticState &owner, SemanticParts
 
 FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(CallExpr *call,
                                                                                MemberExpr *member) {
-  const Type *type = member->object->type;
   call->type = Type::error();
-  llvm::StringRef name = member->name;
-  if (name == "bind") {
+  auto method = this->checkThisMethod(call, member);
+  if (method.isErr()) {
+    return err(method.error());
+  }
+  auto arguments = this->checkThisArguments(call, member, method.value());
+  if (arguments.isErr()) {
+    return err(arguments.error());
+  }
+  auto *checked = this->checkThisArgumentTypes(call, member, method.value());
+
+  return ok(checked);
+}
+
+FunctionMethodChecker::ResultThisMethodKnown
+FunctionMethodChecker::checkThisMethod(CallExpr *call, const MemberExpr *member) {
+  auto method = FunctionMethodTable::find(member->name);
+  if (method == FunctionMethod::BIND) {
     this->argumentChecker->walkArgsLoosely(call);
     auto message = ErrorTextThisCall::noBind();
 
@@ -30,24 +45,32 @@ FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(C
         .message = message,
     });
   }
-  if (name != "call" && name != "apply") {
+  if (!method.has_value()) {
     this->argumentChecker->walkArgsLoosely(call);
-    auto message = ErrorTextThisCall::noProperty(name);
+    auto message = ErrorTextThisCall::noProperty(member->name);
 
     return err(FunctionMethodCheckerCheckThisCallError{
         .code = FunctionMethodCheckerCheckThisCallErrorCode::NO_SUCH_PROPERTY,
         .message = message,
     });
   }
+
+  return ok(*method);
+}
+
+FunctionMethodChecker::ResultThisArgumentsFit
+FunctionMethodChecker::checkThisArguments(CallExpr *call, const MemberExpr *member,
+                                          FunctionMethod method) {
   if (call->args.empty()) {
-    auto message = ErrorTextThisCall::thisFirst(name);
+    auto message = ErrorTextThisCall::thisFirst(member->name);
 
     return err(FunctionMethodCheckerCheckThisCallError{
         .code = FunctionMethodCheckerCheckThisCallErrorCode::NO_THIS_ARGUMENT,
         .message = message,
     });
   }
-  if (name == "apply" && (call->args.size() != 2 || call->hasSpread())) {
+  bool isApplyShape = call->args.size() == 2 && !call->hasSpread();
+  if (method == FunctionMethod::APPLY && !isApplyShape) {
     this->argumentChecker->walkArgsLoosely(call);
     auto message = ErrorTextThisCall::applyArgs();
 
@@ -57,16 +80,21 @@ FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(C
     });
   }
 
-  if (name == "apply") {
+  return ok(call);
+}
+
+Expr *FunctionMethodChecker::checkThisArgumentTypes(CallExpr *call, MemberExpr *member,
+                                                    FunctionMethod method) {
+  const Type *type = member->object->type;
+  if (method == FunctionMethod::APPLY) {
     call->spread = {false, true};
     this->argListChecker->expandListSpreads(call->args, call->spread);
   }
   call->callee = member->object;
   call->type = type->ret();
-  auto *checked = this->argumentChecker->checkArguments(call, type->params(), type->minArgs(),
-                                                        type->hasRest(), member->loc());
 
-  return ok(checked);
+  return this->argumentChecker->checkArguments(call, type->params(), type->minArgs(),
+                                               type->hasRest(), member->loc());
 }
 
 FunctionMethodChecker::ResultParamsJoined

@@ -19,11 +19,16 @@ enum class ListenerKind { Plain, Async, This };
 
 enum class EventState { COLLECTING, COMPLETING, DONE };
 
+enum class CallReceiver {
+  OWN,
+  SUPER,
+};
+
 struct SentEmit {
   CallExpr *call = nullptr;
   MemberExpr *member = nullptr;
   ClassDecl *cls = nullptr;
-  bool super = false;
+  CallReceiver callReceiver = CallReceiver::OWN;
 };
 
 struct EventRecord {

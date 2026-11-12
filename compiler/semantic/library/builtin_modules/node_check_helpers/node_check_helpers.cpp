@@ -44,7 +44,7 @@ std::string NodeCheckHelpers::moduleLabel(NodeModule module) {
   return "";
 }
 
-bool NodeCheckHelpers::targetIsWindows() {
+bool NodeCheckHelpers::isTargetWindows() {
   return llvm::Triple(llvm::sys::getDefaultTargetTriple()).isOSWindows();
 }
 

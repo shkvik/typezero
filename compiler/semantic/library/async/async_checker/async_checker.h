@@ -64,18 +64,18 @@ private:
   using ResultInAsyncContext = Result<const FuncSymbol *, AsyncCheckerAsyncContextError>;
   using ResultBindingUntyped = Result<const VarDeclarator *, AsyncCheckerBindingTypeError>;
 
-  ResultInAsyncContext awaitContext() const;
-  ResultInAsyncContext forAwaitContext() const;
-  ResultAwaitedOneType awaitable(const Type *type) const;
-  ResultAwaitedElement awaitedElement(const Type *type) const;
-  ResultBindingUntyped bindingType(const VarDeclarator &binding) const;
-  ResultReturnsPromise promiseDeclared(const FunctionDecl *functionDecl,
-                                       const Type *declared) const;
-  ResultBindingPattern bindingShape(const VarDeclarator &binding, const Type *element) const;
-  ResultReturnsOneType returnsJoin(const Type *type, const Type *candidate,
-                                   const FuncSymbol *function) const;
-  ResultPromiseMatches promiseMatches(const Type *given, const Type *value,
-                                      const FuncSymbol *function) const;
+  ResultInAsyncContext checkAwaitContext() const;
+  ResultInAsyncContext checkForAwaitContext() const;
+  ResultAwaitedOneType checkAwaitable(const Type *type) const;
+  ResultAwaitedElement checkAwaitedElement(const Type *type) const;
+  ResultBindingUntyped checkBindingType(const VarDeclarator &binding) const;
+  ResultReturnsPromise checkPromiseDeclared(const FunctionDecl *functionDecl,
+                                            const Type *declared) const;
+  ResultBindingPattern checkBindingShape(const VarDeclarator &binding, const Type *element) const;
+  ResultReturnsOneType checkReturnsJoin(const Type *type, const Type *candidate,
+                                        const FuncSymbol *function) const;
+  ResultPromiseMatches checkPromiseMatches(const Type *given, const Type *value,
+                                           const FuncSymbol *function) const;
 
   int depthChange(char symbol) const;
   Expr *asyncSource(Expr *iterable);

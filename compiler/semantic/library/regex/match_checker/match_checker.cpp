@@ -1,5 +1,6 @@
 #include "compiler/semantic/library/regex/match_checker/match_checker.h"
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
+#include "compiler/program/library/regex/match_member_table/match_member_table.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/expr/member_checker/member_checker.h"
 #include "compiler/semantic/bodies/objects/object_checker/object_checker.h"
@@ -65,7 +66,8 @@ Expr *MatchChecker::checkMatchMember(MemberExpr *member) {
     member->type = Type::intTy();
     return member;
   }
-  if (name == "index" || name == "input") {
+  auto known = MatchMemberTable::find(name);
+  if (known == MatchMember::INDEX || known == MatchMember::INPUT) {
     auto field = this->objectChecker->checkField(member);
     if (field.isErr()) {
       this->state.getDiagnostics().error(member->loc(), field.error().message);
@@ -74,8 +76,9 @@ Expr *MatchChecker::checkMatchMember(MemberExpr *member) {
     return field.value();
   }
   member->type = Type::error();
-  if (name == "groups") {
-    const Type *groups = type->field("groups")->type;
+  if (known == MatchMember::GROUPS) {
+    auto groupsName = MatchMemberTable::getName(MatchMember::GROUPS);
+    const Type *groups = type->field(groupsName)->type;
     if (!groups->isOptional()) {
       auto field = this->objectChecker->checkField(member);
       if (field.isErr()) {
@@ -88,8 +91,9 @@ Expr *MatchChecker::checkMatchMember(MemberExpr *member) {
     this->state.getDiagnostics().error(member->loc(), message);
     return member;
   }
-  if (name == "indices") {
-    if (type->field("indices") != nullptr) {
+  if (known == MatchMember::INDICES) {
+    auto indicesName = MatchMemberTable::getName(MatchMember::INDICES);
+    if (type->field(indicesName) != nullptr) {
       auto field = this->objectChecker->checkField(member);
       if (field.isErr()) {
         this->state.getDiagnostics().error(member->loc(), field.error().message);
@@ -107,7 +111,7 @@ Expr *MatchChecker::checkMatchMember(MemberExpr *member) {
   return member;
 }
 
-MatchChecker::ResultGroupIndex MatchChecker::groupIndex(int64_t index, int groups) const {
+MatchChecker::ResultGroupIndex MatchChecker::checkGroupIndex(int64_t index, int groups) const {
   if (index < 0 || index > groups) {
     auto message = ErrorTextMatch::noGroup(groups, index);
 
@@ -129,22 +133,22 @@ Expr *MatchChecker::checkMatchIndex(IndexExpr *index) {
   }
   index->object = this->matchItems(index->object);
   const auto *item = Type::optional(Type::string());
-  auto k = this->constantFolder->intConstant(index->index);
+  auto position = this->constantFolder->intConstant(index->index);
   int groups = type->matchGroups();
-  if (k && *k == 0) {
+  if (position.has_value() && *position == 0) {
     index->form = ElementIndex{.mayBeOutOfRange = false};
     index->type = item;
     return this->typeRelations->convert(index, Type::string());
   }
-  if (k && groups >= 0) {
-    auto group = this->groupIndex(*k, groups);
+  if (position.has_value() && groups >= 0) {
+    auto group = this->checkGroupIndex(*position, groups);
     if (group.isErr()) {
       this->state.getDiagnostics().error(index->index->loc(), group.error().message);
       return index;
     }
     index->form = ElementIndex{.mayBeOutOfRange = false};
     index->type = item;
-    if (type->captureMandatory(unsigned(*k))) {
+    if (type->captureMandatory(unsigned(*position))) {
       return this->typeRelations->convert(index, Type::string());
     }
     return index;

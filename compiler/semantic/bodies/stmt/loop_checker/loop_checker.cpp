@@ -154,7 +154,7 @@ void LoopChecker::walkForStep(ForStmt *stmt) {
     yield->discarded = true;
   }
   stmt->step = this->exprChecker->checkExpr(stmt->step);
-  auto used = this->resultChecker->usedValue(stmt->step);
+  auto used = this->resultChecker->checkUsedValue(stmt->step);
   if (used.isErr()) {
     this->state.getDiagnostics().error(stmt->step->loc(), used.error().message);
   }

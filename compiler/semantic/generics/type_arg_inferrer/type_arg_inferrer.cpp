@@ -924,14 +924,14 @@ Expr *TypeArgInferrer::checkCallbackValue(Expr *arg, FuncSymbol *other, Signatur
   return this->exprChecker->checkExpr(arg);
 }
 
-Signature TypeArgInferrer::callbackSignature(llvm::ArrayRef<const Type *> typeParams,
+Signature TypeArgInferrer::callbackSignature(llvm::ArrayRef<const Type *> openParams,
                                              const Type *function) const {
   Signature signature;
   for (const Type *param : function->params()) {
-    bool isOpen = GenericCheckHelpers::mentionsAnyOf(param, typeParams);
+    bool isOpen = GenericCheckHelpers::mentionsAnyOf(param, openParams);
     signature.params.push_back(isOpen ? Type::error() : param);
   }
-  bool isOpenResult = GenericCheckHelpers::mentionsAnyOf(function->ret(), typeParams);
+  bool isOpenResult = GenericCheckHelpers::mentionsAnyOf(function->ret(), openParams);
   signature.minArgs = function->minArgs();
   signature.ret = isOpenResult ? nullptr : function->ret();
   signature.voidResult = function->ret()->isVoid();

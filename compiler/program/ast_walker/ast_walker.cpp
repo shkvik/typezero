@@ -224,12 +224,20 @@ void AstWalker::addNameChildren(const Expr *expr, bool inFunction, std::vector<N
   }
 }
 
-std::vector<const Expr *> AstWalker::exprsIn(const Stmt *stmt, bool intoFunctions) {
-  return AstWalker::exprsFrom(AstPart{stmt, nullptr}, intoFunctions);
+std::vector<const Expr *> AstWalker::ownExprsIn(const Stmt *stmt) {
+  return AstWalker::exprsFrom(AstPart{stmt, nullptr}, false);
 }
 
-std::vector<const Expr *> AstWalker::exprsIn(const Expr *expr, bool intoFunctions) {
-  return AstWalker::exprsFrom(AstPart{nullptr, expr}, intoFunctions);
+std::vector<const Expr *> AstWalker::ownExprsIn(const Expr *expr) {
+  return AstWalker::exprsFrom(AstPart{nullptr, expr}, false);
+}
+
+std::vector<const Expr *> AstWalker::allExprsIn(const Stmt *stmt) {
+  return AstWalker::exprsFrom(AstPart{stmt, nullptr}, true);
+}
+
+std::vector<const Expr *> AstWalker::allExprsIn(const Expr *expr) {
+  return AstWalker::exprsFrom(AstPart{nullptr, expr}, true);
 }
 
 std::vector<const Expr *> AstWalker::exprsFrom(AstPart root, bool intoFunctions) {

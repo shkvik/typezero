@@ -29,6 +29,7 @@ struct ReflectFunctionInfo {
 class ReflectFunctionTable {
 public:
   static std::optional<ReflectFunction> find(llvm::StringRef name);
+  static llvm::StringRef getName(ReflectFunction function);
 };
 
 }

@@ -22,6 +22,11 @@ constexpr llvm::StringLiteral kIteratorMethod = "[Symbol.iterator]";
 
 constexpr llvm::StringLiteral kAsyncIteratorMethod = "[Symbol.asyncIterator]";
 
+constexpr const char *kNextMethod = "next";
+
+constexpr const char *kDoneField = "done";
+
+constexpr const char *kValueField = "value";
 }
 
 IterableChecker::IterableChecker(SemanticState &owner, SemanticParts &all)
@@ -47,7 +52,8 @@ FuncSymbol *IterableChecker::iterateFunction() {
   }
   auto items = this->state.getLibraryDeclarations().getBuiltinItems(BuiltinText::ITERATE);
   auto *functionDecl = llvm::cast<FunctionDecl>(items.front());
-  this->state.getScopeStack().enterOnlyTypes(this->state.getScopeStack().getTopTypes());
+  auto topTypes = this->state.getScopeStack().getTopTypes();
+  this->state.getScopeStack().enterOnlyTypes(topTypes);
   this->functionChecker->declareSignature(functionDecl);
   this->state.getScopeStack().leaveOnlyTypes();
   this->state.getExpressionMarks().rememberIterateSymbol(functionDecl->sym);
@@ -57,54 +63,78 @@ FuncSymbol *IterableChecker::iterateFunction() {
 }
 
 const Type *IterableChecker::iteratorResultType(const Type *value, const Type *returned) const {
-  if (returned == nullptr || returned->isVoid()) {
-    returned = Type::undefinedTy();
-  }
+  bool isNothingReturned = returned == nullptr || returned->isVoid();
+  const Type *ending = isNothingReturned ? Type::undefinedTy() : returned;
+  const auto *going =
+      Type::object({{kDoneField, Type::boolLiteral(false), false}, {kValueField, value, false}});
+  const auto *finished =
+      Type::object({{kDoneField, Type::boolLiteral(true), false}, {kValueField, ending, false}});
 
-  return Type::unionOf(
-      {Type::object({{"done", Type::boolLiteral(false), false}, {"value", value, false}}),
-       Type::object({{"done", Type::boolLiteral(true), false}, {"value", returned, false}})});
+  return Type::unionOf({going, finished});
 }
 
 const Type *IterableChecker::nextValueType(const Type *type) {
-  type = type->nonOptional();
-  if (!type->isObject() || type->isTuple()) {
+  const Type *object = type->nonOptional();
+  if (!object->isObject() || object->isTuple()) {
     return nullptr;
   }
-  const Type *next = nullptr;
-  auto *classDecl = this->classDeclarer->classOf(type);
-  if (classDecl != nullptr) {
-    this->classDeclarer->completeClass(classDecl);
-    for (FunctionDecl *functionDecl : this->classDeclarer->methodsNamed(classDecl, "next")) {
-      if (functionDecl->sym != nullptr && functionDecl->sym->minArgs == 0 &&
-          functionDecl->typeParams.empty()) {
-        next = this->returnInferrer->functionType(functionDecl->sym);
-      }
-    }
-  }
-  const auto *field = type->field("next");
-  if (next == nullptr && field != nullptr && field->type->isFunction()) {
-    next = field->type;
-  }
+  const auto *next = this->nextFunctionType(object);
   if (next == nullptr || next->minArgs() != 0 || next->ret()->isError()) {
     return nullptr;
   }
-  const Type *result = next->ret();
+
+  return this->nextResultValue(next->ret());
+}
+
+const Type *IterableChecker::nextFunctionType(const Type *object) {
+  const auto *method = this->nextMethodType(object);
+  if (method != nullptr) {
+    return method;
+  }
+  const auto *field = object->field(kNextMethod);
+  if (field != nullptr && field->type->isFunction()) {
+    return field->type;
+  }
+
+  return nullptr;
+}
+
+const Type *IterableChecker::nextMethodType(const Type *object) {
+  auto *classDecl = this->classDeclarer->classOf(object);
+  if (classDecl == nullptr) {
+    return nullptr;
+  }
+  this->classDeclarer->completeClass(classDecl);
+  auto methods = this->classDeclarer->methodsNamed(classDecl, kNextMethod);
+  auto methodTypes = std::vector<const Type *>();
+  for (FunctionDecl *functionDecl : methods) {
+    if (this->isPlainNext(functionDecl)) {
+      const auto *methodType = this->returnInferrer->functionType(functionDecl->sym);
+      methodTypes.push_back(methodType);
+    }
+  }
+
+  return methodTypes.empty() ? nullptr : methodTypes.back();
+}
+
+bool IterableChecker::isPlainNext(const FunctionDecl *functionDecl) const {
+  return functionDecl->sym != nullptr && functionDecl->sym->minArgs == 0 &&
+         functionDecl->typeParams.empty();
+}
+
+const Type *IterableChecker::nextResultValue(const Type *result) const {
   llvm::ArrayRef<const Type *> members =
       result->isUnion() ? result->members() : llvm::ArrayRef<const Type *>(result);
+  bool isResultShaped =
+      llvm::all_of(members, std::bind_front(&IterableChecker::isIteratorResultShape, this));
+  if (!isResultShaped) {
+    return nullptr;
+  }
   auto values = std::vector<const Type *>();
   for (const Type *member : members) {
-    const Field *done = member->isObject() ? member->field("done") : nullptr;
-    const Field *value = member->isObject() ? member->field("value") : nullptr;
-    if (done == nullptr || value == nullptr ||
-        !(done->type->isBool() ||
-          (done->type->isLiteral() && done->type->literalBase()->isBool()))) {
-      return nullptr;
+    if (!this->isFinishedResult(member)) {
+      values.push_back(member->field(kValueField)->type);
     }
-    if (done->type->isLiteral() && done->type->literalNumber() != 0) {
-      continue;
-    }
-    values.push_back(value->type);
   }
   if (values.empty()) {
     return nullptr;
@@ -112,6 +142,26 @@ const Type *IterableChecker::nextValueType(const Type *type) {
   const auto *value = Type::unionOf(values);
 
   return value->isUndefined() || value->isVoid() ? nullptr : value;
+}
+
+bool IterableChecker::isIteratorResultShape(const Type *member) const {
+  if (!member->isObject()) {
+    return false;
+  }
+  const Field *done = member->field(kDoneField);
+  const Field *value = member->field(kValueField);
+  if (done == nullptr || value == nullptr) {
+    return false;
+  }
+  bool isBoolLiteral = done->type->isLiteral() && done->type->literalBase()->isBool();
+
+  return done->type->isBool() || isBoolLiteral;
+}
+
+bool IterableChecker::isFinishedResult(const Type *member) const {
+  const Field *done = member->field(kDoneField);
+
+  return done->type->isLiteral() && done->type->literalNumber() != 0;
 }
 
 Expr *IterableChecker::iteratorOf(Expr *it) {
@@ -127,14 +177,8 @@ Expr *IterableChecker::iteratorOf(Expr *it) {
   llvm::SMLoc loc = it->loc();
   auto *callee = this->state.getAst().make<NameExpr>(loc, iterate->name);
   auto *call = this->state.getAst().make<CallExpr>(loc, callee, std::vector<Expr *>{it});
-  call->target = FunctionCall{.func = iterate};
-  if (!this->state.getFunctionStack().isInsideTrial()) {
-    auto *instance =
-        this->genericInstantiator->instantiate(iterate, {type->nonOptional(), value}, loc);
-    if (instance != nullptr) {
-      call->target = FunctionCall{.func = instance};
-    }
-  }
+  auto *target = this->iterateTarget(iterate, type, value, loc);
+  call->target = FunctionCall{.func = target};
   callee->binding = NamedFunction{.func = call->func()};
   call->type = Type::iterator(value);
   callee->type = Type::function({type->nonOptional()}, 1, false, call->type);
@@ -146,75 +190,87 @@ Expr *IterableChecker::iteratorOf(Expr *it) {
   return call;
 }
 
+FuncSymbol *IterableChecker::iterateTarget(FuncSymbol *iterate, const Type *type, const Type *value,
+                                           llvm::SMLoc loc) {
+  if (this->state.getFunctionStack().isInsideTrial()) {
+    return iterate;
+  }
+  auto *instance =
+      this->genericInstantiator->instantiate(iterate, {type->nonOptional(), value}, loc);
+
+  return instance != nullptr ? instance : iterate;
+}
+
 Expr *IterableChecker::userIterator(Expr *expr) {
   const Type *type = expr->type;
-  ClassDecl *classDecl = type != nullptr ? this->classDeclarer->classOf(type) : nullptr;
-  if (classDecl == nullptr) {
-    return nullptr;
-  }
-  this->classDeclarer->completeClass(classDecl);
-  if (this->classDeclarer->methodsNamed(classDecl, kIteratorMethod).empty() &&
-      this->classBases->findField(classDecl, kIteratorMethod) == nullptr) {
-    return nullptr;
-  }
-  auto *member = this->state.getAst().make<MemberExpr>(expr->loc(), expr, kIteratorMethod);
-  auto *call = this->state.getAst().make<CallExpr>(expr->loc(), member, std::vector<Expr *>{});
-  auto *result = this->methodCallChecker->checkMethodCall(call, member);
-  if (result->type->isError() || result->type->isIterator()) {
+  auto *result = this->callSymbolMethod(expr, kIteratorMethod);
+  if (result == nullptr || result->type->isError() || result->type->isIterator()) {
     return result;
   }
-  auto *it = this->iteratorOf(result);
-  if (it != nullptr) {
-    return it;
+  auto *iterator = this->iteratorOf(result);
+  if (iterator != nullptr) {
+    return iterator;
   }
-  auto given = this->iteratorGiven(type, result);
+  auto given = this->checkIteratorGiven(type, result);
   if (given.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), given.error().message);
   }
   result->type = Type::error();
 
   return result;
-}
-
-const Type *IterableChecker::asyncIterableType(const Type *type) {
-  ClassDecl *classDecl = type != nullptr ? this->classDeclarer->classOf(type) : nullptr;
-  if (classDecl == nullptr) {
-    return nullptr;
-  }
-  this->classDeclarer->completeClass(classDecl);
-  auto methods = this->classDeclarer->methodsNamed(classDecl, kAsyncIteratorMethod);
-  if (methods.size() != 1 || methods[0]->sym == nullptr) {
-    return nullptr;
-  }
-  const auto *result = methods[0]->sym->getReturnType();
-
-  return result != nullptr && result->isAsyncIterator() ? result : nullptr;
 }
 
 Expr *IterableChecker::asyncUserIterator(Expr *expr) {
   const Type *type = expr->type;
-  ClassDecl *classDecl = type != nullptr ? this->classDeclarer->classOf(type) : nullptr;
-  if (classDecl == nullptr) {
-    return nullptr;
-  }
-  this->classDeclarer->completeClass(classDecl);
-  if (this->classDeclarer->methodsNamed(classDecl, kAsyncIteratorMethod).empty() &&
-      this->classBases->findField(classDecl, kAsyncIteratorMethod) == nullptr) {
-    return nullptr;
-  }
-  auto *member = this->state.getAst().make<MemberExpr>(expr->loc(), expr, kAsyncIteratorMethod);
-  auto *call = this->state.getAst().make<CallExpr>(expr->loc(), member, std::vector<Expr *>{});
-  auto *result = this->methodCallChecker->checkMethodCall(call, member);
-  if (result->type->isError() || result->type->isAsyncIterator()) {
+  auto *result = this->callSymbolMethod(expr, kAsyncIteratorMethod);
+  if (result == nullptr || result->type->isError() || result->type->isAsyncIterator()) {
     return result;
   }
-  auto given = this->asyncIteratorGiven(type, result);
+  auto given = this->checkAsyncIteratorGiven(type, result);
   if (given.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), given.error().message);
   }
   result->type = Type::error();
 
   return result;
+}
+
+Expr *IterableChecker::callSymbolMethod(Expr *expr, llvm::StringRef name) {
+  const Type *type = expr->type;
+  ClassDecl *classDecl = type != nullptr ? this->classDeclarer->classOf(type) : nullptr;
+  if (classDecl == nullptr) {
+    return nullptr;
+  }
+  this->classDeclarer->completeClass(classDecl);
+  auto methods = this->classDeclarer->methodsNamed(classDecl, name);
+  bool hasMethod = !methods.empty() || this->classBases->findField(classDecl, name) != nullptr;
+  if (!hasMethod) {
+    return nullptr;
+  }
+  auto *member = this->state.getAst().make<MemberExpr>(expr->loc(), expr, name);
+  auto *call = this->state.getAst().make<CallExpr>(expr->loc(), member, std::vector<Expr *>{});
+
+  return this->methodCallChecker->checkMethodCall(call, member);
+}
+
+const Type *IterableChecker::asyncIterableType(const Type *type) {
+  const auto *result = this->soleMethodReturn(type, kAsyncIteratorMethod);
+
+  return result != nullptr && result->isAsyncIterator() ? result : nullptr;
+}
+
+const Type *IterableChecker::soleMethodReturn(const Type *type, llvm::StringRef name) {
+  ClassDecl *classDecl = type != nullptr ? this->classDeclarer->classOf(type) : nullptr;
+  if (classDecl == nullptr) {
+    return nullptr;
+  }
+  this->classDeclarer->completeClass(classDecl);
+  auto methods = this->classDeclarer->methodsNamed(classDecl, name);
+  if (methods.size() != 1 || methods[0]->sym == nullptr) {
+    return nullptr;
+  }
+
+  return methods[0]->sym->getReturnType();
 }
 
 const Type *IterableChecker::elementTypeOf(const Type *type) {
@@ -237,16 +293,7 @@ const Type *IterableChecker::elementTypeOf(const Type *type) {
   if (element != nullptr) {
     return element;
   }
-  auto *classDecl = this->classDeclarer->classOf(type);
-  if (classDecl == nullptr) {
-    return nullptr;
-  }
-  this->classDeclarer->completeClass(classDecl);
-  auto methods = this->classDeclarer->methodsNamed(classDecl, kIteratorMethod);
-  if (methods.size() != 1 || methods[0]->sym == nullptr) {
-    return nullptr;
-  }
-  const auto *result = methods[0]->sym->getReturnType();
+  const auto *result = this->soleMethodReturn(type, kIteratorMethod);
   if (result == nullptr || result->isError()) {
     return nullptr;
   }
@@ -260,8 +307,8 @@ bool IterableChecker::isIterableRef(const TypeRef &ref) const {
          this->typeDeclarer->lookupType(ref.name) == nullptr;
 }
 
-IterableChecker::ResultIteratorGiven IterableChecker::iteratorGiven(const Type *type,
-                                                                    const Expr *result) const {
+IterableChecker::ResultIteratorGiven IterableChecker::checkIteratorGiven(const Type *type,
+                                                                         const Expr *result) const {
   if (!result->type->isError() && !result->type->isIterator()) {
     auto message = ErrorTextIteratorGiven::notIterator(type->name(), result->type->name());
 
@@ -274,8 +321,8 @@ IterableChecker::ResultIteratorGiven IterableChecker::iteratorGiven(const Type *
   return ok(result);
 }
 
-IterableChecker::ResultAsyncIterator IterableChecker::asyncIteratorGiven(const Type *type,
-                                                                         const Expr *result) const {
+IterableChecker::ResultAsyncIterator
+IterableChecker::checkAsyncIteratorGiven(const Type *type, const Expr *result) const {
   if (!result->type->isError() && !result->type->isAsyncIterator()) {
     auto message = ErrorTextAsyncGiven::notAsync(type->name(), result->type->name());
 
@@ -288,9 +335,9 @@ IterableChecker::ResultAsyncIterator IterableChecker::asyncIteratorGiven(const T
   return ok(result);
 }
 
-IterableChecker::ResultIterableParam IterableChecker::iterableParam(FunctionDecl *functionDecl,
-                                                                    FuncSymbol *function,
-                                                                    const TypeRef &ref) {
+IterableChecker::ResultIterableParam IterableChecker::checkIterableParam(FunctionDecl *functionDecl,
+                                                                         FuncSymbol *function,
+                                                                         const TypeRef &ref) {
   if (!this->isIterableRef(ref)) {
     return err(IterableCheckerIterableParamError{
         .code = IterableCheckerIterableParamErrorCode::NOT_ITERABLE,
@@ -328,18 +375,26 @@ IterableChecker::ResultIterableParam IterableChecker::iterableParam(FunctionDecl
         .message = message,
     });
   }
+  auto *param = this->addIterableTypeParam(functionDecl, function, element, ref);
 
-  auto *param = Type::param("Iterable<" + element->name().str() + ">");
+  return ok(param);
+}
+
+const Type *IterableChecker::addIterableTypeParam(FunctionDecl *functionDecl, FuncSymbol *function,
+                                                  const Type *element, const TypeRef &ref) {
+  auto iterable = TypeNameTable::getName(TypeName::ITERABLE);
+  auto *param = Type::param(iterable.str() + "<" + element->name().str() + ">");
   param->setIterated(element);
-  TypeParamDecl typeParam;
-  typeParam.name = this->state.getAst().hiddenName();
-  typeParam.loc = ref.loc;
+  auto typeParam = TypeParamDecl{
+      .name = this->state.getAst().hiddenName(),
+      .loc = ref.loc,
+  };
   functionDecl->typeParams.push_back(typeParam);
   functionDecl->typeArgs.push_back(param);
   function->typeParams.push_back(param);
   function->typeDefaults.push_back(nullptr);
 
-  return ok(param);
+  return param;
 }
 
 }

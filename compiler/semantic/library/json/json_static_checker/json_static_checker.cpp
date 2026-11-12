@@ -7,6 +7,7 @@
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/declare/prelude/prelude.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/library/bytes/buffer_static_checker/buffer_static_checker.h"
 #include "compiler/semantic/library/json/json_checker/json_checker.h"
 #include "compiler/semantic/library/reflect/reflect_checker/reflect_checker.h"
@@ -26,6 +27,12 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+constexpr llvm::StringLiteral kToJsonMethod = "toJSON";
+
+}
+
 JsonStaticChecker::JsonStaticChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->prelude = &all.prelude;
@@ -38,7 +45,7 @@ JsonStaticChecker::JsonStaticChecker(SemanticState &owner, SemanticParts &all)
   this->bufferStaticChecker = &all.bufferStaticChecker;
 }
 
-bool JsonStaticChecker::mayHoldItself(const Type *type) const {
+bool JsonStaticChecker::canHoldItself(const Type *type) const {
   auto open = std::vector<const Type *>();
   std::vector<HoldStep> steps = {EnterHold{type}};
   while (!steps.empty()) {
@@ -137,7 +144,7 @@ const ClassDecl *JsonStaticChecker::classWithToJson(const Type *type) const {
 
 bool JsonStaticChecker::hasToJson(const ClassDecl *classDecl) const {
   for (const FunctionDecl *functionDecl : classDecl->methods) {
-    if (functionDecl->name == "toJSON" && !functionDecl->isStatic()) {
+    if (functionDecl->name == kToJsonMethod && !functionDecl->isStatic()) {
       return true;
     }
   }
@@ -145,7 +152,7 @@ bool JsonStaticChecker::hasToJson(const ClassDecl *classDecl) const {
   return false;
 }
 
-bool JsonStaticChecker::mayStringifyToUndefined(const Type *type) const {
+bool JsonStaticChecker::canStringifyToUndefined(const Type *type) const {
   return type->isUndefined() || type->isOptional() || type->isFunction() || type->isNever() ||
          type->isUnknown();
 }
@@ -155,15 +162,15 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  auto fn = JsonStaticTable::find(member->name);
-  if (fn == JsonStatic::PARSE) {
+  auto function = JsonStaticTable::find(member->name);
+  if (function == JsonStatic::PARSE) {
     return this->checkJsonParse(call, member);
   }
   if (!member->typeArgs.empty()) {
     auto message = ErrorTextJsonStatic::typeArgs(member->name);
     this->state.getDiagnostics().error(member->loc(), message);
   }
-  if (fn != JsonStatic::STRINGIFY) {
+  if (function != JsonStatic::STRINGIFY) {
     auto message = ErrorTextJsonStatic::noMember(member->name);
     this->state.getDiagnostics().error(member->loc(), message);
     this->walkArgsLoosely(call);
@@ -215,18 +222,18 @@ Expr *JsonStaticChecker::checkStringify(CallExpr *call, MemberExpr *member) {
   }
   call->args[0] = this->exprChecker->checkExpr(call->args[0]);
   Expr *value = call->args[0];
-  bool isOk = this->stringifiedValueFits(value);
+  bool isOk = this->matchStringifiedValue(value);
   std::vector<Expr *> args{value};
-  isOk &= this->stringifyReplacerFits(call);
-  isOk &= this->stringifySpaceFits(call, args);
+  isOk &= this->matchStringifyReplacer(call);
+  isOk &= this->matchStringifySpace(call, args);
   if (!isOk) {
     return call;
   }
   call->args = std::move(args);
   call->target = BuiltinCall{.builtin = Builtin::JsonStringify};
   call->type =
-      this->mayStringifyToUndefined(value->type) ? Type::optional(Type::string()) : Type::string();
-  bool isCyclic = !this->libraryCalls->inLibrary(call->loc()) && this->mayHoldItself(value->type);
+      this->canStringifyToUndefined(value->type) ? Type::optional(Type::string()) : Type::string();
+  bool isCyclic = !this->libraryCalls->isInLibrary(call->loc()) && this->canHoldItself(value->type);
   if (isCyclic) {
     call->type = Type::result(call->type, this->prelude->builtinType(PreludeType::JSON_ERROR));
   }
@@ -234,7 +241,7 @@ Expr *JsonStaticChecker::checkStringify(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-bool JsonStaticChecker::stringifiedValueFits(const Expr *value) {
+bool JsonStaticChecker::matchStringifiedValue(const Expr *value) {
   bool isOk = !value->type->isError();
   if (value->type->isVoid()) {
     auto message = ErrorTextJsonStatic::voidValue();
@@ -251,7 +258,7 @@ bool JsonStaticChecker::stringifiedValueFits(const Expr *value) {
   return isOk;
 }
 
-bool JsonStaticChecker::stringifyReplacerFits(CallExpr *call) {
+bool JsonStaticChecker::matchStringifyReplacer(CallExpr *call) {
   if (call->args.size() < 2) {
     return true;
   }
@@ -259,16 +266,16 @@ bool JsonStaticChecker::stringifyReplacerFits(CallExpr *call) {
   if (this->jsonChecker->isNullName(replacer) || isa<UndefinedExpr>(replacer)) {
     return true;
   }
-  replacer = this->exprChecker->checkExpr(replacer);
-  if (!replacer->type->isError()) {
+  auto *checked = this->exprChecker->checkExpr(replacer);
+  if (!checked->type->isError()) {
     auto message = ErrorTextJsonStatic::replacer();
-    this->state.getDiagnostics().error(replacer->loc(), message);
+    this->state.getDiagnostics().error(checked->loc(), message);
   }
 
   return false;
 }
 
-bool JsonStaticChecker::stringifySpaceFits(CallExpr *call, std::vector<Expr *> &args) {
+bool JsonStaticChecker::matchStringifySpace(CallExpr *call, std::vector<Expr *> &args) {
   if (call->args.size() != 3) {
     return true;
   }
@@ -276,88 +283,96 @@ bool JsonStaticChecker::stringifySpaceFits(CallExpr *call, std::vector<Expr *> &
   if (this->jsonChecker->isNullName(space) || isa<UndefinedExpr>(space)) {
     return true;
   }
-  space = this->exprChecker->checkExpr(space);
-  const Type *type = space->type;
+  auto *checked = this->exprChecker->checkExpr(space);
+  const Type *type = checked->type;
   if (type->isNumeric()) {
-    args.push_back(this->typeRelations->convert(space, Type::doubleTy()));
+    auto *number = this->typeRelations->convert(checked, Type::doubleTy());
+    args.push_back(number);
     return true;
   }
   if (type->isString()) {
-    args.push_back(space);
+    args.push_back(checked);
     return true;
   }
   if (type->isError()) {
     return true;
   }
   auto message = ErrorTextJsonStatic::space(type->name());
-  this->state.getDiagnostics().error(space->loc(), message);
+  this->state.getDiagnostics().error(checked->loc(), message);
 
   return false;
 }
 
-bool JsonStaticChecker::readEmbedded(CallExpr *call, llvm::StringRef functionName,
-                                     std::string &bytes, std::string &shown, std::string &full) {
+std::optional<JsonStaticChecker::EmbeddedFile>
+JsonStaticChecker::readEmbedded(CallExpr *call, llvm::StringRef functionName) {
   Expr *arg = call->args[0];
-  auto example = ErrorTextEmbed::example(functionName);
-  auto path = std::u16string();
-  auto *literal = dyn_cast<StringLitExpr>(arg);
-  if (literal != nullptr) {
-    path = literal->value;
-  } else if (auto *templateExpr = dyn_cast<TemplateExpr>(arg);
-             templateExpr != nullptr && templateExpr->exprs.empty()) {
-    path = templateExpr->quasis[0];
-  } else {
+  auto path = this->constantPath(arg);
+  if (!path.has_value()) {
     call->args[0] = this->exprChecker->checkExpr(arg);
+    auto example = ErrorTextEmbed::example(functionName);
     auto message = ErrorTextEmbed::literal(functionName, example);
     this->state.getDiagnostics().error(arg->loc(), message);
-    return false;
+    return std::nullopt;
   }
-  shown = ToUtf8::toUtf8(path);
-  auto relative = this->embeddedPath(functionName, shown);
+  auto shown = ToUtf8::toUtf8(path.value());
+  auto relative = this->checkEmbeddedPath(functionName, shown);
   if (relative.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), relative.error().message);
-    return false;
+    return std::nullopt;
   }
-  llvm::SourceMgr &sources = this->state.getDiagnostics().sourceMgr();
-  unsigned id = sources.FindBufferContainingLoc(call->loc());
-  llvm::StringRef source = id ? sources.getMemoryBuffer(id)->getBufferIdentifier() : "";
-  llvm::SmallString<256> path8(llvm::sys::path::parent_path(source));
-  llvm::sys::path::append(path8, shown);
-  llvm::sys::path::remove_dots(path8, true);
-  llvm::sys::path::native(path8);
-  full = std::string(path8);
+  auto full = this->embeddedFullPath(call, shown);
   auto buffer = llvm::MemoryBuffer::getFile(full, false, false);
   if (!buffer) {
     std::string why = buffer.getError().message();
     auto message = ErrorTextEmbed::unread(shown, why);
     this->state.getDiagnostics().error(arg->loc(), message);
-    return false;
+    return std::nullopt;
   }
-  bytes = (*buffer)->getBuffer().str();
+  auto bytes = (*buffer)->getBuffer().str();
 
-  return true;
+  return EmbeddedFile{.bytes = bytes, .shown = shown, .full = full};
+}
+
+std::optional<std::u16string> JsonStaticChecker::constantPath(const Expr *arg) const {
+  const auto *literal = dyn_cast<StringLitExpr>(arg);
+  if (literal != nullptr) {
+    return literal->value;
+  }
+  const auto *templateExpr = dyn_cast<TemplateExpr>(arg);
+  if (templateExpr != nullptr && templateExpr->exprs.empty()) {
+    return templateExpr->quasis[0];
+  }
+
+  return std::nullopt;
+}
+
+std::string JsonStaticChecker::embeddedFullPath(const CallExpr *call, llvm::StringRef shown) const {
+  llvm::SourceMgr &sources = this->state.getDiagnostics().sourceMgr();
+  unsigned id = sources.FindBufferContainingLoc(call->loc());
+  llvm::StringRef source = id != 0 ? sources.getMemoryBuffer(id)->getBufferIdentifier() : "";
+  llvm::SmallString<256> nativePath(llvm::sys::path::parent_path(source));
+  llvm::sys::path::append(nativePath, shown);
+  llvm::sys::path::remove_dots(nativePath, true);
+  llvm::sys::path::native(nativePath);
+
+  return std::string(nativePath);
 }
 
 void JsonStaticChecker::walkConstantJson(const Expr *arg) {
-  while (auto *conversion = llvm::dyn_cast<CastExpr>(arg)) {
-    if (!conversion->isImplicit()) {
-      return;
-    }
-    arg = conversion->operand;
-  }
-  auto *literal = llvm::dyn_cast<StringLitExpr>(arg);
+  const auto *bare = ExprParts::withoutImplicitCasts(arg);
+  const auto *literal = llvm::dyn_cast<StringLitExpr>(bare);
   if (literal == nullptr) {
     return;
   }
   auto text = ToUtf8::toUtf8(literal->value);
-  auto json = this->constantJson(text);
+  auto json = this->checkConstantJson(text);
   if (json.isErr()) {
     this->state.getDiagnostics().error(literal->loc(), json.error().message);
   }
 }
 
-JsonStaticChecker::ResultEmbeddedPath JsonStaticChecker::embeddedPath(llvm::StringRef functionName,
-                                                                      llvm::StringRef shown) const {
+JsonStaticChecker::ResultEmbeddedPath
+JsonStaticChecker::checkEmbeddedPath(llvm::StringRef functionName, llvm::StringRef shown) const {
   if (shown.contains('\\')) {
     auto message = ErrorTextEmbed::backslash();
 
@@ -379,7 +394,8 @@ JsonStaticChecker::ResultEmbeddedPath JsonStaticChecker::embeddedPath(llvm::Stri
   return ok(shown);
 }
 
-JsonStaticChecker::ResultConstantJson JsonStaticChecker::constantJson(llvm::StringRef text) const {
+JsonStaticChecker::ResultConstantJson
+JsonStaticChecker::checkConstantJson(llvm::StringRef text) const {
   if (text.starts_with("\xEF\xBB\xBF")) {
     auto message = ErrorTextConstantJson::bom();
 
@@ -418,11 +434,6 @@ Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
   }
   llvm::StringRef functionName = name->name;
   call->type = Type::error();
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->exprChecker->checkExpr(arg);
-    }
-  };
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
@@ -440,14 +451,14 @@ Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
     this->state.getDiagnostics().error(name->loc(), arity.error().message);
     return call;
   }
-  std::string bytes, shown, full;
-  if (!this->readEmbedded(call, functionName, bytes, shown, full)) {
+  auto embedded = this->readEmbedded(call, functionName);
+  if (!embedded.has_value()) {
     return call;
   }
-  llvm::StringRef text(bytes);
+  llvm::StringRef text(embedded->bytes);
   auto units = llvm::SmallVector<llvm::UTF16, 64>();
   if (!llvm::convertUTF8ToUTF16String(text, units)) {
-    auto message = ErrorTextEmbed::notUtf8(shown);
+    auto message = ErrorTextEmbed::notUtf8(embedded->shown);
     this->state.getDiagnostics().error(call->args[0]->loc(), message);
     return call;
   }

@@ -22,7 +22,7 @@ public:
 
 private:
   const Type *halfParam(const Type *half) const;
-  bool givesType(const Type *half) const;
+  bool isGivingType(const Type *half) const;
 
   struct ResultCall {
     CallExpr *call = nullptr;
@@ -34,7 +34,7 @@ private:
     llvm::StringRef name;
   };
 
-  ResultCall resultCall(CallExpr *call, MemberExpr *member) const;
+  ResultCall checkResultCall(CallExpr *call, MemberExpr *member) const;
   void walkArgsPlainly(CallExpr *call);
   const Type *wantedType(const Type *expected) const;
   Expr *checkUnwrapOr(const ResultCall &run);
@@ -43,7 +43,7 @@ private:
   Expr *checkResultMatch(const ResultCall &run, const Type *expected);
   const Type *callbackReturn(const ResultCall &run, const Type *expected);
   void typeResultCall(const ResultCall &run, const Type *returnType);
-  bool returnsResult(const ResultCall &run, const Type *returnType);
+  bool reportNotResult(const ResultCall &run, const Type *returnType);
   void typeChainedCall(const ResultCall &run, const Type *returnType);
   void typeOrElseCall(const ResultCall &run, const Type *returnType);
 
