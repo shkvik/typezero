@@ -1,5 +1,6 @@
 #include "compiler/semantic/bodies/expr/new_checker/new_checker.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
 #include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
 #include "compiler/semantic/bodies/classes/method_call_checker/method_call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -34,6 +35,12 @@ using llvm::dyn_cast;
 
 namespace tz {
 
+namespace {
+
+constexpr llvm::StringLiteral kDateTimeFormatName = "DateTimeFormat";
+
+}
+
 NewChecker::NewChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->scopes = &all.scopes;
@@ -46,6 +53,7 @@ NewChecker::NewChecker(SemanticState &owner, SemanticParts &all)
   this->libraryCalls = &all.libraryCalls;
   this->regexChecker = &all.regexChecker;
   this->typeResolver = &all.typeResolver;
+  this->bytesChecker = &all.bytesChecker;
   this->cryptoChecker = &all.cryptoChecker;
   this->memberChecker = &all.memberChecker;
   this->dictNewChecker = &all.dictNewChecker;
@@ -60,9 +68,9 @@ NewChecker::NewChecker(SemanticState &owner, SemanticParts &all)
   this->builtinModuleChecker = &all.builtinModuleChecker;
 }
 
-NewChecker::ResultNamespaceNew NewChecker::namespaceNew(const NewExpr *expr) {
+NewChecker::ResultNamespaceNew NewChecker::checkNotNamespaced(const NewExpr *expr) const {
   if (!expr->member.empty()) {
-    std::string message = ErrorTextNamespaceNew::namespaced(expr->name, expr->member);
+    auto message = ErrorTextNamespaceNew::namespaced(expr->name, expr->member);
 
     return err(NewCheckerNamespaceNewError{
         .code = NewCheckerNamespaceNewErrorCode::NAMESPACE_CLASS,
@@ -73,13 +81,13 @@ NewChecker::ResultNamespaceNew NewChecker::namespaceNew(const NewExpr *expr) {
   return ok(expr);
 }
 
-NewChecker::ResultCryptoMadeOk NewChecker::cryptoNew(const NewExpr *expr,
-                                                     const ClassDecl *cls) const {
-  bool isHidden = cls->library() && !this->libraryCalls->inLibrary(expr->loc()) &&
-                  (cls == this->state.getLibraryDeclarations().findLibraryClass("CryptoKey") ||
-                   cls == this->state.getLibraryDeclarations().findLibraryClass("SubtleCrypto"));
-  if (isHidden && cls->name == "CryptoKey") {
-    std::string message = ErrorTextCryptoNew::cryptoKey();
+NewChecker::ResultCryptoMadeOk NewChecker::checkCryptoClassNew(const NewExpr *expr,
+                                                               const ClassDecl *classDecl) const {
+  bool isCryptoKey = LibraryClassTable::isName(classDecl->name, LibraryClass::CRYPTO_KEY);
+  bool isHidden = classDecl->library() && !this->libraryCalls->inLibrary(expr->loc()) &&
+                  this->isCryptoClass(classDecl);
+  if (isHidden && isCryptoKey) {
+    auto message = ErrorTextCryptoNew::cryptoKey();
 
     return err(NewCheckerCryptoNewError{
         .code = NewCheckerCryptoNewErrorCode::CRYPTO_KEY,
@@ -87,7 +95,7 @@ NewChecker::ResultCryptoMadeOk NewChecker::cryptoNew(const NewExpr *expr,
     });
   }
   if (isHidden) {
-    std::string message = ErrorTextCryptoNew::subtle();
+    auto message = ErrorTextCryptoNew::subtle();
 
     return err(NewCheckerCryptoNewError{
         .code = NewCheckerCryptoNewErrorCode::SUBTLE_CRYPTO,
@@ -95,13 +103,22 @@ NewChecker::ResultCryptoMadeOk NewChecker::cryptoNew(const NewExpr *expr,
     });
   }
 
-  return ok(cls);
+  return ok(classDecl);
 }
 
-NewChecker::ResultSupportedNew NewChecker::supportedNew(const NewExpr *expr) {
-  std::string why = ErrorTextUnsupported::why(expr->name);
+bool NewChecker::isCryptoClass(const ClassDecl *classDecl) const {
+  auto &declarations = this->state.getLibraryDeclarations();
+  auto keyName = LibraryClassTable::getName(LibraryClass::CRYPTO_KEY);
+  auto subtleName = LibraryClassTable::getName(LibraryClass::SUBTLE_CRYPTO);
+
+  return classDecl == declarations.findLibraryClass(keyName) ||
+         classDecl == declarations.findLibraryClass(subtleName);
+}
+
+NewChecker::ResultSupportedNew NewChecker::checkSupportedNew(const NewExpr *expr) const {
+  auto why = ErrorTextUnsupported::why(expr->name);
   if (!why.empty()) {
-    std::string message = ErrorTextSupportedNew::unsupported(expr->name, why);
+    auto message = ErrorTextSupportedNew::unsupported(expr->name, why);
 
     return err(NewCheckerSupportedNewError{
         .code = NewCheckerSupportedNewErrorCode::UNSUPPORTED,
@@ -112,9 +129,9 @@ NewChecker::ResultSupportedNew NewChecker::supportedNew(const NewExpr *expr) {
   return ok(expr);
 }
 
-NewChecker::ResultNoTypeArgsOk NewChecker::noTypeArgs(const NewExpr *expr) {
+NewChecker::ResultNoTypeArgsOk NewChecker::checkNoTypeArgs(const NewExpr *expr) const {
   if (!expr->typeArgs.empty()) {
-    std::string message = ErrorTextNoTypeArgs::given(expr->name);
+    auto message = ErrorTextNoTypeArgs::given(expr->name);
 
     return err(NewCheckerNoTypeArgsError{
         .code = NewCheckerNoTypeArgsErrorCode::TYPE_ARGUMENTS_GIVEN,
@@ -125,10 +142,10 @@ NewChecker::ResultNoTypeArgsOk NewChecker::noTypeArgs(const NewExpr *expr) {
   return ok(expr);
 }
 
-NewChecker::ResultClassIsFound NewChecker::classFound(const NewExpr *expr) {
-  std::optional<GlobalName> global = GlobalNameTable::find(expr->name);
+NewChecker::ResultClassIsFound NewChecker::checkClassFound(const NewExpr *expr) const {
+  auto global = GlobalNameTable::find(expr->name);
   if (global != GlobalName::ARRAY) {
-    std::string message = ErrorTextClassFound::notFound(expr->name);
+    auto message = ErrorTextClassFound::notFound(expr->name);
 
     return err(NewCheckerClassFoundError{
         .code = NewCheckerClassFoundErrorCode::CLASS_NOT_FOUND,
@@ -139,10 +156,12 @@ NewChecker::ResultClassIsFound NewChecker::classFound(const NewExpr *expr) {
   return ok(expr);
 }
 
-NewChecker::ResultArrayElement NewChecker::arrayElement(const NewExpr *expr, const Type *expected) {
-  bool isFromExpected = expr->typeArgs.empty() && expected && expected->nonOptional()->isArray();
+NewChecker::ResultArrayElement NewChecker::checkArrayElement(const NewExpr *expr,
+                                                             const Type *expected) {
+  bool isFromExpected =
+      expr->typeArgs.empty() && expected != nullptr && expected->nonOptional()->isArray();
   if (expr->typeArgs.size() > 1) {
-    std::string message = ErrorTextNewArray::oneArg();
+    auto message = ErrorTextNewArray::oneArg();
 
     return err(NewCheckerArrayElementError{
         .code = NewCheckerArrayElementErrorCode::TOO_MANY_TYPE_ARGUMENTS,
@@ -150,7 +169,7 @@ NewChecker::ResultArrayElement NewChecker::arrayElement(const NewExpr *expr, con
     });
   }
   if (expr->typeArgs.empty() && !isFromExpected) {
-    std::string message = ErrorTextNewArray::needs();
+    auto message = ErrorTextNewArray::needs();
 
     return err(NewCheckerArrayElementError{
         .code = NewCheckerArrayElementErrorCode::NEEDS_ELEMENT_TYPE,
@@ -161,14 +180,14 @@ NewChecker::ResultArrayElement NewChecker::arrayElement(const NewExpr *expr, con
     return ok(expected->nonOptional()->inner());
   }
 
-  const Type *element = this->typeResolver->resolveType(expr->typeArgs[0], false);
+  const auto *element = this->typeResolver->resolveType(expr->typeArgs[0]);
 
   return ok(element);
 }
 
-NewChecker::ResultArrayArgsFit NewChecker::arrayArgs(const NewExpr *expr) {
+NewChecker::ResultArrayArgsFit NewChecker::checkArrayArgs(const NewExpr *expr) const {
   if (expr->args.size() > 1) {
-    std::string message = ErrorTextArrayArgs::literal();
+    auto message = ErrorTextArrayArgs::literal();
 
     return err(NewCheckerArrayArgsError{
         .code = NewCheckerArrayArgsErrorCode::VALUES_NEED_LITERAL,
@@ -179,9 +198,9 @@ NewChecker::ResultArrayArgsFit NewChecker::arrayArgs(const NewExpr *expr) {
   return ok(expr);
 }
 
-NewChecker::ResultHasZeroValue NewChecker::zeroValue(const Type *element) {
+NewChecker::ResultHasZeroValue NewChecker::checkZeroValue(const Type *element) const {
   if (!element->isError() && !element->hasZeroValue()) {
-    std::string message = ErrorTextZeroValue::none(element->name());
+    auto message = ErrorTextZeroValue::none(element->name());
 
     return err(NewCheckerZeroValueError{
         .code = NewCheckerZeroValueErrorCode::NO_ZERO_VALUE,
@@ -198,28 +217,28 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
   if (expr->callee != nullptr) {
     return this->classValueChecker->checkValueNew(expr, expected);
   }
-  std::optional<GlobalName> global = GlobalNameTable::find(expr->name);
+  auto global = GlobalNameTable::find(expr->name);
   if (!expr->member.empty()) {
     return this->checkNamespaceNew(expr, expected, global);
   }
-  ClassDecl *cls = this->topLevelChecker->lookupValue(expr->name).cls();
-  if (cls != nullptr) {
-    return this->checkClassInstanceNew(expr, cls, expected);
+  ClassDecl *classDecl = this->topLevelChecker->lookupValue(expr->name).cls();
+  if (classDecl != nullptr) {
+    return this->checkClassInstanceNew(expr, classDecl, expected);
   }
-  const NodeName *node = this->builtinModuleChecker->nodeName(expr->name);
+  const auto *node = this->builtinModuleChecker->nodeName(expr->name);
   if (node != nullptr && node->module == NodeModule::Crypto) {
     return this->cryptoChecker->checkCryptoNew(expr, node->name);
   }
-  ResultSupportedNew supported = NewChecker::supportedNew(expr);
+  auto supported = this->checkSupportedNew(expr);
   if (supported.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), supported.error().message);
     return this->checkArgsLoosely(expr);
   }
-  Expr *builtin = this->checkBuiltinNew(expr, expected, global);
+  auto *builtin = this->checkBuiltinNew(expr, expected, global);
   if (builtin != nullptr) {
     return builtin;
   }
-  ResultClassIsFound found = NewChecker::classFound(expr);
+  auto found = this->checkClassFound(expr);
   if (found.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), found.error().message);
     return this->checkArgsLoosely(expr);
@@ -250,19 +269,21 @@ void NewChecker::bindValueCallee(NewExpr *expr) {
 
 Expr *NewChecker::checkNamespaceNew(NewExpr *expr, const Type *expected,
                                     std::optional<GlobalName> global) {
-  ScopeEntry intl = this->scopes->lookup(expr->name);
+  auto intl = this->scopes->lookup(expr->name);
   bool isGlobalIntl = global == GlobalName::INTL && intl.var() == nullptr &&
                       intl.func() == nullptr && intl.cls() == nullptr;
-  if (isGlobalIntl && expr->member == "Locale") {
+  bool isLocale = LibraryClassTable::isName(expr->member, LibraryClass::LOCALE);
+  if (isGlobalIntl && isLocale) {
     return this->intlChecker->checkLocaleNew(expr, expected);
   }
-  if (isGlobalIntl && expr->member == "DateTimeFormat") {
+  if (isGlobalIntl && expr->member == kDateTimeFormatName) {
     return this->dateFormatChecker->checkDateFormatNew(expr->loc(), expr->args);
   }
   if (isGlobalIntl) {
-    return this->intlChecker->checkIntlNew(expr->loc(), expr->member, expr->args, true);
+    return this->intlChecker->checkIntlNew(expr->loc(), expr->member, expr->args,
+                                           IntlCreation::NEW);
   }
-  ResultNamespaceNew plain = NewChecker::namespaceNew(expr);
+  auto plain = this->checkNotNamespaced(expr);
   if (plain.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), plain.error().message);
   }
@@ -270,41 +291,46 @@ Expr *NewChecker::checkNamespaceNew(NewExpr *expr, const Type *expected,
   return this->checkArgsLoosely(expr);
 }
 
-Expr *NewChecker::checkClassInstanceNew(NewExpr *expr, ClassDecl *cls, const Type *expected) {
-  ResultCryptoMadeOk crypto = this->cryptoNew(expr, cls);
+Expr *NewChecker::checkClassInstanceNew(NewExpr *expr, ClassDecl *classDecl, const Type *expected) {
+  auto crypto = this->checkCryptoClassNew(expr, classDecl);
   if (crypto.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), crypto.error().message);
     return this->checkArgsLoosely(expr);
   }
-  ClassDecl *finalClass = ClassValueChecker::finalClass(cls);
-  Expr *checked = this->methodCallChecker->checkClassNew(expr, finalClass, expected);
+  auto *finalClass = this->classValueChecker->finalClass(classDecl);
+  auto *checked = this->methodCallChecker->checkClassNew(expr, finalClass, expected);
   auto *made = dyn_cast<NewExpr>(checked);
-  if (made != nullptr && cls->library()) {
-    this->noteLibraryInstance(made, cls);
+  if (made != nullptr && classDecl->library()) {
+    this->noteLibraryInstance(made, classDecl);
   }
 
   return checked;
 }
 
-void NewChecker::noteLibraryInstance(NewExpr *made, const ClassDecl *cls) {
-  if (cls->name == "URL") {
+void NewChecker::noteLibraryInstance(NewExpr *made, const ClassDecl *classDecl) {
+  llvm::StringRef name = classDecl->name;
+  bool isServer = LibraryClassTable::isName(name, LibraryClass::SERVER) ||
+                  LibraryClassTable::isName(name, LibraryClass::SOCKET);
+  if (LibraryClassTable::isName(name, LibraryClass::URL)) {
     this->urlChecker->walkUrlNew(made);
   }
-  if (cls->name == "Server" || cls->name == "Socket") {
+  if (isServer) {
     this->tzModulesChecker->noteServer(made);
   }
-  if (cls->name == "Response") {
+  if (LibraryClassTable::isName(name, LibraryClass::RESPONSE)) {
     this->httpChecker->walkResponseNew(made);
-  } else if (cls->name == "Request") {
+  }
+  if (LibraryClassTable::isName(name, LibraryClass::REQUEST)) {
     this->httpChecker->walkRequestNew(made);
-  } else if (cls->name == "Headers") {
+  }
+  if (LibraryClassTable::isName(name, LibraryClass::HEADERS)) {
     this->httpChecker->walkHeadersNew(made);
   }
 }
 
 Expr *NewChecker::checkBuiltinNew(NewExpr *expr, const Type *expected,
                                   std::optional<GlobalName> global) {
-  ScopeEntry named = this->scopes->lookup(expr->name);
+  auto named = this->scopes->lookup(expr->name);
   bool isUnshadowed = named.var() == nullptr && named.func() == nullptr;
   if (global == GlobalName::REG_EXP && isUnshadowed) {
     this->rejectTypeArgs(expr);
@@ -325,13 +351,13 @@ Expr *NewChecker::checkBuiltinNew(NewExpr *expr, const Type *expected,
   if (global == GlobalName::WEAK_REF && isUnshadowed) {
     return this->weakRefChecker->checkWeakRefNew(expr, expected);
   }
-  const Type *bytes = BytesChecker::bytesTypeNamed(expr->name);
+  const auto *bytes = this->bytesChecker->bytesTypeNamed(expr->name);
   if (bytes != nullptr && isUnshadowed) {
     return this->bytesNewChecker->checkBytesNew(expr, bytes);
   }
   if (global == GlobalName::BIG_INT64_ARRAY || global == GlobalName::BIG_UINT64_ARRAY) {
-    std::string what = ErrorTextFunctionName::quoted(expr->name);
-    std::string bigint = ErrorTextBigInt::none(what);
+    auto what = ErrorTextFunctionName::quoted(expr->name);
+    auto bigint = ErrorTextBigInt::none(what);
     this->state.getDiagnostics().error(expr->loc(), bigint);
     return this->checkArgsLoosely(expr);
   }
@@ -340,19 +366,19 @@ Expr *NewChecker::checkBuiltinNew(NewExpr *expr, const Type *expected,
 }
 
 void NewChecker::rejectTypeArgs(const NewExpr *expr) {
-  ResultNoTypeArgsOk plainNew = NewChecker::noTypeArgs(expr);
+  auto plainNew = this->checkNoTypeArgs(expr);
   if (plainNew.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), plainNew.error().message);
   }
 }
 
 Expr *NewChecker::checkArrayNew(NewExpr *expr, const Type *expected) {
-  ResultArrayElement given = this->arrayElement(expr, expected);
+  auto given = this->checkArrayElement(expr, expected);
   if (given.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), given.error().message);
   }
   const Type *element = given.isOk() ? given.value() : Type::error();
-  ResultArrayArgsFit fits = NewChecker::arrayArgs(expr);
+  auto fits = this->checkArrayArgs(expr);
   if (fits.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), fits.error().message);
     return this->checkArgsLoosely(expr);
@@ -369,13 +395,12 @@ Expr *NewChecker::checkArrayNew(NewExpr *expr, const Type *expected) {
 
 void NewChecker::walkArrayLength(NewExpr *expr, const Type *element) {
   expr->args[0] = this->memberChecker->checkPosition(expr->args[0]);
-  ResultHasZeroValue zero = NewChecker::zeroValue(element);
+  auto zero = this->checkZeroValue(element);
   if (zero.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), zero.error().message);
   }
-  std::string what = ErrorTextNewArray::length();
-  IndexProofs::ResultBetweenProven between =
-      this->indexProofs->requireBetween(expr->args[0], 0, std::nullopt, what);
+  auto what = ErrorTextNewArray::length();
+  auto between = this->indexProofs->requireBetween(expr->args[0], 0, std::nullopt, what);
   if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
     this->state.getDiagnostics().error(expr->args[0]->loc(), between.error().message);
   }

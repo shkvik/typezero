@@ -8,6 +8,7 @@
 
 namespace tz {
 
+class FlowChecker;
 class SemanticParts;
 class CallChecker;
 class ExprChecker;
@@ -26,12 +27,12 @@ struct BranchExpr {
 
 struct LeftDone {
   static constexpr BranchStepKind kind = BranchStepKind::LEFT_DONE;
-  BinaryExpr *bin;
+  BinaryExpr *binary;
 };
 
 struct RightDone {
   static constexpr BranchStepKind kind = BranchStepKind::RIGHT_DONE;
-  BinaryExpr *bin;
+  BinaryExpr *binary;
   Flow lhsTrue;
   Flow lhsFalse;
 };
@@ -54,6 +55,11 @@ struct BranchRun {
   std::vector<BranchResult> results;
 };
 
+enum class RightSide {
+  TESTED,
+  VALUE,
+};
+
 class TruthChecker {
 public:
   TruthChecker(SemanticState &owner, SemanticParts &all);
@@ -63,35 +69,15 @@ public:
                        TruthUse use = TruthUse::Condition);
   Expr *checkTestedValue(Expr *expr, const Type *expected, Flow &whenTrue, Flow &whenFalse,
                          TruthUse use);
-  Expr *checkLogical(BinaryExpr *bin, const Type *expected, Flow &whenTrue, Flow &whenFalse,
-                     bool tested, TruthUse use);
+  Expr *checkLogical(BinaryExpr *binary, const Type *expected, Flow &whenTrue, Flow &whenFalse,
+                     RightSide side, TruthUse use);
   Expr *checkBooleanCall(CallExpr *call, Flow &whenTrue, Flow &whenFalse);
   bool isBooleanCall(const Expr *expr) const;
 
 private:
-  static void notDone(UnaryExpr *unary, BranchRun &run);
-  void applyBranchStep(BranchStep &step, BranchRun &run);
-  void enterBranch(const BranchExpr &branch, BranchRun &run);
-  void leftDone(BinaryExpr *bin, BranchRun &run);
-  void rightDone(RightDone &done, BranchRun &run);
-  Expr *branchLeaf(Expr *expr, Flow &whenTrue, Flow &whenFalse, TruthUse use);
   using ResultTruthIsTested = Result<const Expr *, TruthCheckerCheckTruthyError>;
   using ResultLogicalJoined = Result<const Type *, TruthCheckerLogicalValueError>;
   using ResultConditionForm = Result<const AssignExpr *, TruthCheckerAssignmentConditionError>;
-
-  static ResultLogicalJoined logicalValue(const BinaryExpr *bin, llvm::StringRef op, bool isAnd,
-                                          const Type *kept);
-  static ResultConditionForm assignmentCondition(const AssignExpr *assign, TruthUse use);
-  ResultTruthIsTested checkTruthy(const Expr *expr, TruthUse use, const Expr *other = nullptr);
-  static llvm::StringRef useOperator(TruthUse use);
-  static std::string paramMessage(const Type *type, const Type *base, TruthUse use,
-                                  llvm::StringRef x, llvm::StringRef y);
-  static std::string jsonMessage(TruthUse use, llvm::StringRef x, llvm::StringRef y);
-  static std::string unknownMessage(TruthUse use, llvm::StringRef x, llvm::StringRef y);
-  static std::string numberMessage(const Expr *expr, const Type *type, const Type *base,
-                                   TruthUse use, llvm::StringRef x, llvm::StringRef y);
-  static std::string objectMessage(const Expr *expr, const Type *base, TruthUse use,
-                                   llvm::StringRef x, llvm::StringRef y);
 
   struct ObjectTruth {
     const NameExpr *narrowed = nullptr;
@@ -99,41 +85,79 @@ private:
     bool isPromise = false;
     bool isClass = false;
     bool isObject = false;
-    bool className = false;
+    bool isClassName = false;
   };
 
-  static ObjectTruth objectTruth(const Expr *expr, const Type *base);
-  static std::string objectHead(const ObjectTruth &truth, TruthUse use);
-  static std::string useConsequence(TruthUse use);
-  static std::string objectAdvice(const ObjectTruth &truth, const Type *base, TruthUse use,
-                                  llvm::StringRef x, llvm::StringRef y);
-  static std::optional<TruthCheckerCheckTruthyErrorCode> truthProblem(const Type *type,
-                                                                      const Type *base);
-  static bool isTestable(const Type *type, const Type *base);
-  static bool allBoolOrString(llvm::ArrayRef<const Type *> types);
-  static std::optional<TruthCheckerCheckTruthyErrorCode> unionProblem(const Type *type,
-                                                                      const Type *base);
-  static const Type *unionNumber(const Type *base);
-  static bool hasFalsyMember(const Type *base);
-  static std::string truthMessage(TruthCheckerCheckTruthyErrorCode code, const Expr *expr,
-                                  TruthUse use, const Expr *other, const Type *base);
-  static std::string unionNumberMessage(const Type *type, const Type *base, llvm::StringRef value);
-  Expr *checkLogicalType(BinaryExpr *bin, const Type *l, bool truthy, TruthUse use);
-  static std::string sourceText(const Expr *expr);
-  static NodeChildren<const Expr *> sourceParts(const Expr *expr);
-  static std::string nodeSource(const Expr *expr, std::vector<std::string> &answers);
-  static std::string stringSource(const StringLitExpr *lit);
-  static std::string callSource(const CallExpr *call, std::vector<std::string> &answers);
-  static std::string hintText(const Expr *expr, const char *placeholder = "x");
-  static const NameExpr *narrowedVariable(const Expr *expr);
-  static bool isLength(const Expr *expr);
-  static bool isLiteral(const Expr *expr);
-  static const Type *falsyType(const Type *type);
+  std::string sourceText(const Expr *expr) const;
+  NodeChildren<const Expr *> sourceParts(const Expr *expr) const;
+  std::string nodeSource(const Expr *expr, std::vector<std::string> &answers) const;
+  std::string memberSource(const MemberExpr *member, std::vector<std::string> &answers) const;
+  std::string indexSource(const IndexExpr *index, std::vector<std::string> &answers) const;
+  std::string stringSource(const StringLitExpr *literal) const;
+  std::string callSource(const CallExpr *call, std::vector<std::string> &answers) const;
+  std::string hintText(const Expr *expr, const char *placeholder = "x") const;
+  const NameExpr *narrowedVariable(const Expr *expr) const;
+  bool isLength(const Expr *expr) const;
+  const Expr *withoutWrappers(const Expr *expr) const;
+  const Expr *wrappedExpr(const Expr *expr) const;
+  bool isLiteral(const Expr *expr) const;
+  const Type *falsyType(const Type *type) const;
+  void applyBranchStep(BranchStep &step, BranchRun &run);
+  void enterBranch(const BranchExpr &branch, BranchRun &run);
+  void leftDone(BinaryExpr *binary, BranchRun &run);
+  void rightDone(RightDone &done, BranchRun &run);
+  void notDone(UnaryExpr *unary, BranchRun &run) const;
+  Expr *branchLeaf(Expr *expr, Flow &whenTrue, Flow &whenFalse, TruthUse use);
+  Expr *assignedLeaf(AssignExpr *assign, Flow &whenTrue, Flow &whenFalse, TruthUse use);
+  void addValueFacts(Expr *value, Flow &whenTrue, Flow &whenFalse);
+  bool walkTestedRight(BinaryExpr *binary, const Type *hint, Flow &rhsTrue, Flow &rhsFalse);
+  Expr *checkLogicalType(BinaryExpr *binary, const Type *leftType, bool isTruthy, TruthUse use);
+  std::string logicalSpelling(BinaryOp op, bool isAssign) const;
+  const Type *keptLeftType(const Type *leftType, bool isAnd) const;
+  const Type *failedLogicalType(const Type *leftType, const Type *rightType,
+                                const Type *kept) const;
+  llvm::StringRef useOperator(TruthUse use) const;
+  std::string paramMessage(const Type *type, const Type *base, TruthUse use,
+                           llvm::StringRef valueText, llvm::StringRef otherText) const;
+  std::string jsonMessage(TruthUse use, llvm::StringRef valueText, llvm::StringRef otherText) const;
+  std::string unknownMessage(TruthUse use, llvm::StringRef valueText,
+                             llvm::StringRef otherText) const;
+  std::string numberMessage(const Expr *expr, const Type *type, const Type *base, TruthUse use,
+                            llvm::StringRef valueText, llvm::StringRef otherText) const;
+  std::string optionalNumberAdvice(TruthUse use, bool isLength, llvm::StringRef valueText,
+                                   llvm::StringRef otherText) const;
+  std::string objectMessage(const Expr *expr, const Type *base, TruthUse use,
+                            llvm::StringRef valueText, llvm::StringRef otherText) const;
+  ObjectTruth objectTruth(const Expr *expr, const Type *base) const;
+  std::string objectHead(const ObjectTruth &truth, TruthUse use) const;
+  std::string objectSubject(const ObjectTruth &truth, llvm::StringRef what) const;
+  std::string useConsequence(TruthUse use) const;
+  std::string objectAdvice(const ObjectTruth &truth, const Type *base, TruthUse use,
+                           llvm::StringRef valueText, llvm::StringRef otherText) const;
+  ResultTruthIsTested checkTruthy(const Expr *expr, TruthUse use, const Expr *other = nullptr);
+  std::optional<TruthCheckerCheckTruthyErrorCode> truthProblem(const Type *type,
+                                                               const Type *base) const;
+  bool isTestable(const Type *type, const Type *base) const;
+  bool areAllBoolOrString(llvm::ArrayRef<const Type *> types) const;
+  std::optional<TruthCheckerCheckTruthyErrorCode> unionProblem(const Type *type,
+                                                               const Type *base) const;
+  std::vector<const Type *> unionMembers(const Type *base) const;
+  const Type *unionNumber(const Type *base) const;
+  bool isNumberMember(const Type *member) const;
+  bool hasFalsyMember(const Type *base) const;
+  bool isFalsyMember(const Type *member) const;
+  std::string truthMessage(TruthCheckerCheckTruthyErrorCode code, const Expr *expr, TruthUse use,
+                           const Expr *other, const Type *base) const;
+  std::string unionNumberMessage(const Type *type, const Type *base, llvm::StringRef value) const;
+  ResultConditionForm checkAssignmentCondition(const AssignExpr *assign, TruthUse use) const;
+  ResultLogicalJoined checkLogicalValue(const BinaryExpr *binary, llvm::StringRef op, bool isAnd,
+                                        const Type *kept) const;
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;
   ExprChecker *exprChecker = nullptr;
   JsonChecker *jsonChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
   ConditionFacts *conditionFacts = nullptr;
   GenericChecker *genericChecker = nullptr;

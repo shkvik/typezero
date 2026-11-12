@@ -6,6 +6,7 @@
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/functions/closure_checker/closure_checker.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/flow/field_facts/field_facts.h"
 #include "compiler/semantic/library/async/async_checker/async_checker.h"
 #include "compiler/semantic/library/result/result_types/result_types.h"
@@ -20,6 +21,13 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+constexpr llvm::StringLiteral kInternalPrefix = "%";
+constexpr llvm::StringLiteral kResultPlaceholder = "r";
+
+}
+
 ResultChecker::ResultChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->fieldFacts = &all.fieldFacts;
@@ -33,126 +41,168 @@ ResultChecker::ResultChecker(SemanticState &owner, SemanticParts &all)
   this->argumentChecker = &all.argumentChecker;
 }
 
-const Type *ResultChecker::halfParam(const Type *half) {
+const Type *ResultChecker::halfParam(const Type *half) const {
   return half->isVoid() ? Type::undefinedTy() : half;
 }
 
-bool ResultChecker::givesType(const Type *half) {
+bool ResultChecker::isGivingType(const Type *half) const {
   return !half->isNever() && !half->isVoid();
 }
 
-std::string ResultChecker::receiverText(const Expr *expr) {
-  if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit()) {
-    expr = conv->operand;
-  }
-  auto *name = dyn_cast<NameExpr>(expr);
-
-  return name && !name->name.starts_with("%") ? name->name.str() : "r";
+const Type *ResultChecker::halfType(const Type *result, Half half) const {
+  return half == Half::OK ? result->okType() : result->errType();
 }
 
-const Expr *ResultChecker::unconverted(const Expr *expr) {
-  while (auto *conv = dyn_cast<CastExpr>(expr)) {
-    if (!conv->isImplicit()) {
-      break;
-    }
-    expr = conv->operand;
+const Type *ResultChecker::otherHalfType(const Type *result, Half half) const {
+  return half == Half::OK ? result->errType() : result->okType();
+}
+
+std::string ResultChecker::receiverText(const Expr *expr) const {
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  bool isConverted = conversion != nullptr && conversion->isImplicit();
+  const Expr *bare = isConverted ? conversion->operand : expr;
+  auto *name = dyn_cast<NameExpr>(bare);
+  if (name == nullptr || name->name.starts_with(kInternalPrefix)) {
+    return kResultPlaceholder.str();
   }
 
-  return expr;
+  return name->name.str();
+}
+
+bool ResultChecker::hasFittingArgs(CallExpr *call, llvm::SMLoc loc, unsigned min, unsigned max) {
+  if (this->callChecker->rejectSpread(call)) {
+    return false;
+  }
+  auto arity = this->argumentChecker->checkArity(call, min, max);
+  if (arity.isErr()) {
+    this->state.getDiagnostics().error(loc, arity.error().message);
+  }
+
+  return arity.isOk();
 }
 
 Expr *ResultChecker::checkResultCall(CallExpr *call, NameExpr *name, const Type *expected) {
-  std::optional<GlobalName> which = this->resultTypes->resultName(name->name);
-  if (which != GlobalName::OK && which != GlobalName::ERR) {
-    return nullptr;
+  auto which = this->resultTypes->resultName(name->name);
+  if (which == GlobalName::OK) {
+    return this->checkOkErr(call, name, Half::OK, expected);
+  }
+  if (which == GlobalName::ERR) {
+    return this->checkOkErr(call, name, Half::ERR, expected);
   }
 
-  return this->checkOkErr(call, name, which == GlobalName::OK, expected);
+  return nullptr;
 }
 
-ResultChecker::ResultOkErrTypeArgs ResultChecker::okErrTypeArgs(const NameExpr *name) {
-  if (!name->typeArgs.empty()) {
-    std::string message = ErrorTextOkErr::typeArgs(name->name);
+ResultChecker::ResultOkErrTypeArgs ResultChecker::writtenResult(const NameExpr *name) {
+  if (name->typeArgs.empty()) {
+    return ok<const Type *>(nullptr);
+  }
+  if (name->typeArgs.size() != 2) {
+    auto message = ErrorTextOkErr::typeArgs(name->name);
 
     return err(ResultCheckerOkErrTypeArgsError{
         .code = ResultCheckerOkErrTypeArgsErrorCode::NOT_TWO_TYPE_ARGUMENTS,
         .message = message,
     });
   }
+  const auto *value = this->typeResolver->resolveTypeOrVoid(name->typeArgs[0]);
+  const auto *error = this->typeResolver->resolveTypeOrVoid(name->typeArgs[1]);
+  if (value->isError() || error->isError()) {
+    return err(ResultCheckerOkErrTypeArgsError{
+        .code = ResultCheckerOkErrTypeArgsErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
+  }
+  const auto *written = Type::result(value, error);
 
-  return ok(name);
+  return ok(written);
 }
 
-// TODO: говнокод
-Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const Type *expected) {
-  bool isRejected = this->callChecker->rejectSpread(call);
-  ArgumentChecker::ResultArityMatches arity =
-      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 1);
-  if (arity.isErr()) {
-    this->state.getDiagnostics().error(name->loc(), arity.error().message);
-  }
-  if (isRejected || arity.isErr()) {
-    return call;
+const Type *ResultChecker::expectedResult(const Type *expected) const {
+  if (expected == nullptr || !expected->nonOptional()->isResult()) {
+    return nullptr;
   }
 
-  const Type *wanted = expected ? expected->nonOptional() : nullptr;
-  if (wanted && !wanted->isResult()) {
-    wanted = nullptr;
+  return expected->nonOptional();
+}
+
+Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, Half half, const Type *expected) {
+  if (!this->hasFittingArgs(call, name->loc(), 0, 1)) {
+    return call;
   }
-  if (name->typeArgs.size() == 2) {
-    const Type *value = this->typeResolver->resolveType(name->typeArgs[0], true);
-    const Type *error = this->typeResolver->resolveType(name->typeArgs[1], true);
-    if (value->isError() || error->isError()) {
-      this->walkArgsLoosely(call);
-      call->type = Type::error();
-      return call;
-    }
-    wanted = Type::result(value, error);
-  } else {
-    ResultOkErrTypeArgs typeArgs = ResultChecker::okErrTypeArgs(name);
-    if (typeArgs.isErr()) {
-      this->state.getDiagnostics().error(name->loc(), typeArgs.error().message);
-      return this->markCallFailed(call);
-    }
+  auto written = this->writtenResult(name);
+  bool isShown = written.isErr() &&
+                 written.error().code != ResultCheckerOkErrTypeArgsErrorCode::ALREADY_REPORTED;
+  if (isShown) {
+    this->state.getDiagnostics().error(name->loc(), written.error().message);
   }
-  const Type *wantedHalf = wanted ? (isOk ? wanted->okType() : wanted->errType()) : nullptr;
-  const Type *half = Type::voidTy();
-  if (!call->args.empty()) {
-    Expr *&arg = call->args[0];
-    bool isHinted = wantedHalf && ResultChecker::givesType(wantedHalf);
-    arg = this->exprChecker->checkExpr(arg, isHinted ? wantedHalf : nullptr);
-    half = arg->type;
-    if (half->isVoid()) {
-      std::string message = ErrorTextOkErr::voidValue(name->name);
-      this->state.getDiagnostics().error(arg->loc(), message);
-      half = Type::error();
-    } else if (isHinted && TypeRelations::isImplicitlyConvertible(half, wantedHalf)) {
-      arg = this->typeRelations->convert(arg, wantedHalf);
-      half = wantedHalf;
-    } else if (name->typeArgs.size() == 2 && !half->isError()) {
-      arg = this->typeRelations->coerce(arg, wantedHalf);
-      half = wantedHalf;
-    }
+  if (written.isErr()) {
+    return this->markCallFailed(call);
   }
-  const Type *other = wanted ? (isOk ? wanted->errType() : wanted->okType()) : Type::never();
-  call->target = BuiltinCall{.builtin = isOk ? Builtin::ResultOk : Builtin::ResultErr};
-  call->type = isOk ? Type::result(half, other) : Type::result(other, half);
+  const Type *wanted =
+      written.value() != nullptr ? written.value() : this->expectedResult(expected);
+  const Type *wantedHalf = wanted != nullptr ? this->halfType(wanted, half) : nullptr;
+  const Type *given = this->checkHalfValue(call, name, wantedHalf);
+  const Type *other = wanted != nullptr ? this->otherHalfType(wanted, half) : Type::never();
+  if (half == Half::OK) {
+    call->target = BuiltinCall{.builtin = Builtin::ResultOk};
+    call->type = Type::result(given, other);
+
+    return call;
+  }
+  call->target = BuiltinCall{.builtin = Builtin::ResultErr};
+  call->type = Type::result(other, given);
 
   return call;
 }
 
+const Type *ResultChecker::checkHalfValue(CallExpr *call, const NameExpr *name,
+                                          const Type *wantedHalf) {
+  if (call->args.empty()) {
+    return Type::voidTy();
+  }
+  bool isHinted = wantedHalf != nullptr && this->isGivingType(wantedHalf);
+  auto *arg = this->exprChecker->checkExpr(call->args[0], isHinted ? wantedHalf : nullptr);
+  call->args[0] = arg;
+  const Type *given = arg->type;
+  if (given->isVoid()) {
+    auto message = ErrorTextOkErr::voidValue(name->name);
+    this->state.getDiagnostics().error(arg->loc(), message);
+
+    return Type::error();
+  }
+  if (isHinted && TypeRelations::isImplicitlyConvertible(given, wantedHalf)) {
+    call->args[0] = this->typeRelations->convert(arg, wantedHalf);
+
+    return wantedHalf;
+  }
+  if (name->typeArgs.size() == 2 && !given->isError()) {
+    call->args[0] = this->typeRelations->coerce(arg, wantedHalf);
+
+    return wantedHalf;
+  }
+
+  return given;
+}
+
 void ResultChecker::walkArgsLoosely(CallExpr *call) {
   for (Expr *&arg : call->args) {
-    auto *fe = dyn_cast<FunctionExpr>(arg);
-    if (!fe) {
-      arg = this->exprChecker->checkExpr(arg);
-      continue;
-    }
-    Signature loose;
-    loose.params.assign(fe->fn->params.size(), Type::error());
-    loose.pad = false;
-    arg = this->closureChecker->checkFunctionExpr(fe, &loose);
+    arg = this->looselyChecked(arg);
   }
+}
+
+Expr *ResultChecker::looselyChecked(Expr *arg) {
+  auto *functionExpr = dyn_cast<FunctionExpr>(arg);
+  if (functionExpr == nullptr) {
+    return this->exprChecker->checkExpr(arg);
+  }
+  auto params = std::vector<const Type *>(functionExpr->fn->params.size(), Type::error());
+  auto loose = Signature{
+      .params = params,
+      .pad = false,
+  };
+
+  return this->closureChecker->checkFunctionExpr(functionExpr, &loose);
 }
 
 Expr *ResultChecker::markCallFailed(CallExpr *call) {
@@ -163,9 +213,10 @@ Expr *ResultChecker::markCallFailed(CallExpr *call) {
 }
 
 ResultChecker::ResultStaticIsKnown ResultChecker::staticMethod(const NameExpr *name,
-                                                               llvm::StringRef method) {
-  if (method != "combine" && method != "combineWithAllErrors") {
-    std::string message = ErrorTextCombine::noStatic(name->name, method);
+                                                               llvm::StringRef method) const {
+  auto found = ResultStaticTable::find(method);
+  if (!found.has_value()) {
+    auto message = ErrorTextCombine::noStatic(name->name, method);
 
     return err(ResultCheckerStaticMethodError{
         .code = ResultCheckerStaticMethodErrorCode::NO_SUCH_STATIC_METHOD,
@@ -173,7 +224,7 @@ ResultChecker::ResultStaticIsKnown ResultChecker::staticMethod(const NameExpr *n
     });
   }
 
-  return ok(method);
+  return ok(*found);
 }
 
 Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
@@ -181,52 +232,41 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
   if (name == nullptr || call->optional || member->optional) {
     return nullptr;
   }
-  std::optional<GlobalName> which = this->resultTypes->resultName(name->name);
+  auto which = this->resultTypes->resultName(name->name);
   if (which != GlobalName::RESULT) {
     return nullptr;
   }
-  llvm::StringRef method = member->name;
-  ResultStaticIsKnown staticMethod = ResultChecker::staticMethod(name, method);
-  if (staticMethod.isErr()) {
-    this->state.getDiagnostics().error(member->loc(), staticMethod.error().message);
+  auto known = this->staticMethod(name, member->name);
+  if (known.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), known.error().message);
+
     return this->markCallFailed(call);
   }
-  if (!this->combineArityFits(call, member)) {
+  if (!this->hasFittingArgs(call, member->loc(), 1, 1)) {
     return call;
   }
-  bool isAll = method == "combineWithAllErrors";
-  call->target =
-      BuiltinCall{.builtin = isAll ? Builtin::ResultCombineWithAllErrors : Builtin::ResultCombine};
-  CombineCall combine{
+  bool isAll = known.value() == ResultStatic::COMBINE_WITH_ALL_ERRORS;
+  Builtin builtin = isAll ? Builtin::ResultCombineWithAllErrors : Builtin::ResultCombine;
+  call->target = BuiltinCall{.builtin = builtin};
+  auto combine = CombineCall{
       .call = call,
-      .what = name->name.str() + "." + method.str(),
-      .all = isAll,
+      .what = name->name.str() + "." + member->name.str(),
+      .isAll = isAll,
   };
-  auto *lit = dyn_cast<ArrayLitExpr>(call->args[0]);
-  if (lit != nullptr && ResultChecker::isPlainList(lit)) {
-    return this->checkCombineList(combine, lit);
+  auto *literal = dyn_cast<ArrayLitExpr>(call->args[0]);
+  if (literal != nullptr && this->isPlainList(literal)) {
+    return this->checkCombineList(combine, literal);
   }
 
   return this->checkCombineArray(combine);
 }
 
-bool ResultChecker::combineArityFits(CallExpr *call, const MemberExpr *member) {
-  bool isRejected = this->callChecker->rejectSpread(call);
-  ArgumentChecker::ResultArityMatches arity =
-      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
-  if (arity.isErr()) {
-    this->state.getDiagnostics().error(member->loc(), arity.error().message);
-  }
-
-  return !isRejected && arity.isOk();
-}
-
-bool ResultChecker::isPlainList(const ArrayLitExpr *lit) {
-  if (lit->elements.empty()) {
+bool ResultChecker::isPlainList(const ArrayLitExpr *literal) const {
+  if (literal->elements.empty()) {
     return false;
   }
-  for (const ArrayLitExpr::Element &e : lit->elements) {
-    if (e.spread || e.hole) {
+  for (const ArrayLitExpr::Element &element : literal->elements) {
+    if (element.spread || element.hole) {
       return false;
     }
   }
@@ -234,108 +274,133 @@ bool ResultChecker::isPlainList(const ArrayLitExpr *lit) {
   return true;
 }
 
-bool ResultChecker::holdsValues(const CombineCall &combine, const Type *result, const Expr *at) {
-  bool hasValues = ResultChecker::givesType(result->okType());
-  if (hasValues && !(combine.all && result->errType()->isVoid())) {
-    return true;
-  }
-  std::string message = ErrorTextCombine::holds(combine.what, hasValues, result->name());
+bool ResultChecker::isHoldingValues(const CombineCall &combine, const Type *result) const {
+  bool isLosingErrors = combine.isAll && result->errType()->isVoid();
+
+  return this->isGivingType(result->okType()) && !isLosingErrors;
+}
+
+void ResultChecker::reportNoValues(const CombineCall &combine, const Type *result, const Expr *at) {
+  bool hasValues = this->isGivingType(result->okType());
+  auto message = ErrorTextCombine::holds(combine.what, hasValues, result->name());
   this->state.getDiagnostics().error(at->loc(), message);
-
-  return false;
 }
 
-const Type *ResultChecker::errorsOf(const CombineCall &combine, const Type *error) {
-  return !combine.all || error->isNever() ? error : Type::array(error);
+const Type *ResultChecker::errorsOf(const CombineCall &combine, const Type *error) const {
+  if (!combine.isAll || error->isNever()) {
+    return error;
+  }
+
+  return Type::array(error);
 }
 
-Expr *ResultChecker::checkCombineList(const CombineCall &combine, ArrayLitExpr *lit) {
+Expr *ResultChecker::checkCombineList(const CombineCall &combine, ArrayLitExpr *literal) {
   CallExpr *call = combine.call;
-  std::vector<const Type *> results;
-  for (ArrayLitExpr::Element &e : lit->elements) {
-    e.expr = this->exprChecker->checkExpr(e.expr);
-    results.push_back(e.expr->type);
+  auto results = std::vector<const Type *>();
+  for (ArrayLitExpr::Element &element : literal->elements) {
+    element.expr = this->exprChecker->checkExpr(element.expr);
+    results.push_back(element.expr->type);
   }
-  for (const Type *t : results) {
-    if (t->isError()) {
+  for (const Type *type : results) {
+    if (type->isError()) {
       return call;
     }
   }
-  for (size_t i = 0; i < results.size(); ++i) {
-    if (!results[i]->isResult()) {
-      std::string message = ErrorTextCombine::notResult(combine.what, results[i]->name());
-      this->state.getDiagnostics().error(lit->elements[i].expr->loc(), message);
+  for (size_t index = 0; index < results.size(); ++index) {
+    if (!results[index]->isResult()) {
+      auto message = ErrorTextCombine::notResult(combine.what, results[index]->name());
+      this->state.getDiagnostics().error(literal->elements[index].expr->loc(), message);
+
       return call;
     }
   }
-  const Type *common = ResultChecker::commonResult(results);
+  const auto *common = this->commonResult(results);
   if (common != nullptr && !common->isError()) {
-    return this->checkSameCombine(combine, lit, common);
+    return this->checkSameCombine(combine, literal, common);
   }
 
-  return this->checkTupleCombine(combine, lit, results);
+  return this->checkTupleCombine(combine, literal, results);
 }
 
-const Type *ResultChecker::sameValues(const Type *a, const Type *b) {
-  const Type *x = a->okType();
-  const Type *y = b->okType();
-  const Type *value = x == y || y->isNever()       ? x
-                      : x->isNever()               ? y
-                      : x->isVoid() || y->isVoid() ? nullptr
-                                                   : TypeRelations::unify(x, y);
-  const Type *error = ResultTypes::unifyHalf(a->errType(), b->errType());
+const Type *ResultChecker::sameValues(const Type *first, const Type *second) const {
+  const auto *value = this->joinedValue(first->okType(), second->okType());
+  const auto *error = this->resultTypes->unifyHalf(first->errType(), second->errType());
   bool isJoined = value != nullptr && !value->isError() && error != nullptr;
 
   return isJoined ? Type::result(value, error) : nullptr;
 }
 
-const Type *ResultChecker::commonResult(llvm::ArrayRef<const Type *> results) {
+const Type *ResultChecker::joinedValue(const Type *first, const Type *second) const {
+  if (first == second || second->isNever()) {
+    return first;
+  }
+  if (first->isNever()) {
+    return second;
+  }
+  if (first->isVoid() || second->isVoid()) {
+    return nullptr;
+  }
+
+  return this->typeRelations->unify(first, second);
+}
+
+const Type *ResultChecker::commonResult(llvm::ArrayRef<const Type *> results) const {
   const Type *common = results[0];
-  for (const Type *t : results) {
-    common = common != nullptr ? ResultChecker::sameValues(common, t) : nullptr;
+  for (const Type *type : results) {
+    if (common == nullptr) {
+      return nullptr;
+    }
+    common = this->sameValues(common, type);
   }
 
   return common;
 }
 
-Expr *ResultChecker::checkSameCombine(const CombineCall &combine, ArrayLitExpr *lit,
+Expr *ResultChecker::checkSameCombine(const CombineCall &combine, ArrayLitExpr *literal,
                                       const Type *common) {
   CallExpr *call = combine.call;
-  if (!this->holdsValues(combine, common, call->args[0])) {
+  if (!this->isHoldingValues(combine, common)) {
+    this->reportNoValues(combine, common, call->args[0]);
+
     return call;
   }
-  for (ArrayLitExpr::Element &e : lit->elements) {
-    e.expr = this->typeRelations->convert(e.expr, common);
+  for (ArrayLitExpr::Element &element : literal->elements) {
+    element.expr = this->typeRelations->convert(element.expr, common);
   }
-  lit->type = Type::array(common);
-  const Type *values = Type::array(common->okType());
-  const Type *errors = ResultChecker::errorsOf(combine, common->errType());
+  literal->type = Type::array(common);
+  const auto *values = Type::array(common->okType());
+  const auto *errors = this->errorsOf(combine, common->errType());
   call->type = Type::result(values, errors);
 
   return call;
 }
 
-Expr *ResultChecker::checkTupleCombine(const CombineCall &combine, ArrayLitExpr *lit,
+Expr *ResultChecker::checkTupleCombine(const CombineCall &combine, ArrayLitExpr *literal,
                                        const std::vector<const Type *> &results) {
   CallExpr *call = combine.call;
-  std::vector<const Type *> values;
-  const Type *error = Type::never();
-  for (size_t i = 0; i < results.size(); ++i) {
-    if (!this->holdsValues(combine, results[i], lit->elements[i].expr)) {
+  auto values = std::vector<const Type *>();
+  const auto *error = Type::never();
+  for (size_t index = 0; index < results.size(); ++index) {
+    const Type *result = results[index];
+    const Expr *element = literal->elements[index].expr;
+    if (!this->isHoldingValues(combine, result)) {
+      this->reportNoValues(combine, result, element);
+
       return call;
     }
-    values.push_back(results[i]->okType());
-    const Type *before = error;
-    error = ResultTypes::unifyHalf(error, results[i]->errType());
-    if (error == nullptr) {
-      std::string message = ErrorTextCombine::noUnion(combine.what, before, results[i]->errType());
-      this->state.getDiagnostics().error(lit->elements[i].expr->loc(), message);
+    values.push_back(result->okType());
+    const auto *joined = this->resultTypes->unifyHalf(error, result->errType());
+    if (joined == nullptr) {
+      auto message = ErrorTextCombine::noUnion(combine.what, error, result->errType());
+      this->state.getDiagnostics().error(element->loc(), message);
+
       return call;
     }
+    error = joined;
   }
-  lit->type = Type::tuple(results);
-  const Type *tuple = Type::tuple(values);
-  const Type *errors = ResultChecker::errorsOf(combine, error);
+  literal->type = Type::tuple(results);
+  const auto *tuple = Type::tuple(values);
+  const auto *errors = this->errorsOf(combine, error);
   call->type = Type::result(tuple, errors);
 
   return call;
@@ -343,116 +408,127 @@ Expr *ResultChecker::checkTupleCombine(const CombineCall &combine, ArrayLitExpr 
 
 Expr *ResultChecker::checkCombineArray(const CombineCall &combine) {
   CallExpr *call = combine.call;
-  Expr *&arg = call->args[0];
-  arg = this->exprChecker->checkExpr(arg);
-  const Type *type = arg->type;
+  auto *list = this->exprChecker->checkExpr(call->args[0]);
+  call->args[0] = list;
+  const Type *type = list->type;
   if (type->isError()) {
     return call;
   }
   if (!type->isArray() || !type->inner()->isResult()) {
-    std::string message = ErrorTextCombine::notArray(combine.what, type->name());
-    this->state.getDiagnostics().error(arg->loc(), message);
+    auto message = ErrorTextCombine::notArray(combine.what, type->name());
+    this->state.getDiagnostics().error(list->loc(), message);
+
     return call;
   }
   const Type *element = type->inner();
-  if (!this->holdsValues(combine, element, arg)) {
+  if (!this->isHoldingValues(combine, element)) {
+    this->reportNoValues(combine, element, list);
+
     return call;
   }
-  const Type *values = Type::array(element->okType());
-  const Type *errors = ResultChecker::errorsOf(combine, element->errType());
+  const auto *values = Type::array(element->okType());
+  const auto *errors = this->errorsOf(combine, element->errType());
   call->type = Type::result(values, errors);
 
   return call;
 }
 
 Expr *ResultChecker::checkResultMember(MemberExpr *member) {
-  const Type *type = member->object->type;
-  llvm::StringRef name = member->name;
-  std::string r = ResultChecker::receiverText(member->object);
-  auto defined = [&](MemberExpr *half) -> Expr * {
-    if (Expr *narrowed = this->fieldFacts->narrowedField(half); narrowed != half) {
-      return narrowed;
-    }
-    if (half->type->isOptional()) {
-      if (std::optional<FieldPath> path = this->fieldFacts->fieldPath(half);
-          path && this->fieldFacts->isFieldDefined(*path)) {
-        return this->typeRelations->convert(half, half->type->inner());
-      }
-    }
-    return half;
-  };
-  std::optional<BuiltinProperty> property = BuiltinPropertyTable::find(name);
+  auto property = BuiltinPropertyTable::find(member->name);
   if (property == BuiltinProperty::RESULT_VALUE) {
-    if (type->errType()->isNever()) {
-      member->type = ResultChecker::halfParam(type->okType());
-      return defined(member);
-    }
-    std::string message = ErrorTextResultMember::value(r);
-    this->state.getDiagnostics().error(member->loc(), message);
-  } else if (property == BuiltinProperty::RESULT_ERROR) {
-    if (type->okType()->isNever()) {
-      member->type = ResultChecker::halfParam(type->errType());
-      return defined(member);
-    }
-    std::string message = ErrorTextResultMember::error(r);
-    this->state.getDiagnostics().error(member->loc(), message);
-  } else {
-    const ResultMethodInfo *method = ResultMethodTable::find(name);
-    std::string message = method != nullptr ? ErrorTextResultMember::method(name, r)
-                                            : ErrorTextResultMember::noMember(name, type->name());
-    this->state.getDiagnostics().error(member->loc(), message);
+    return this->checkHalfMember(member, Half::OK);
   }
+  if (property == BuiltinProperty::RESULT_ERROR) {
+    return this->checkHalfMember(member, Half::ERR);
+  }
+  auto receiver = this->receiverText(member->object);
+  const auto *method = ResultMethodTable::find(member->name);
+  std::string message =
+      method != nullptr
+          ? ErrorTextResultMember::method(member->name, receiver)
+          : ErrorTextResultMember::noMember(member->name, member->object->type->name());
+  this->state.getDiagnostics().error(member->loc(), message);
 
   return member;
 }
 
-ResultChecker::ResultValueGetsUsed ResultChecker::usedValue(const Expr *expr, bool callback,
+Expr *ResultChecker::checkHalfMember(MemberExpr *member, Half half) {
+  const Type *type = member->object->type;
+  if (this->otherHalfType(type, half)->isNever()) {
+    const auto *own = this->halfType(type, half);
+    member->type = this->halfParam(own);
+
+    return this->definedHalf(member);
+  }
+  auto receiver = this->receiverText(member->object);
+  std::string message = half == Half::OK ? ErrorTextResultMember::value(receiver)
+                                         : ErrorTextResultMember::error(receiver);
+  this->state.getDiagnostics().error(member->loc(), message);
+
+  return member;
+}
+
+Expr *ResultChecker::definedHalf(MemberExpr *half) {
+  auto *narrowed = this->fieldFacts->narrowedField(half);
+  if (narrowed != half) {
+    return narrowed;
+  }
+  if (!half->type->isOptional()) {
+    return half;
+  }
+  auto path = this->fieldFacts->fieldPath(half);
+  if (path.has_value() && this->fieldFacts->isFieldDefined(*path)) {
+    return this->typeRelations->convert(half, half->type->inner());
+  }
+
+  return half;
+}
+
+ResultChecker::ResultValueGetsUsed ResultChecker::usedValue(const Expr *expr) {
+  return this->checkUsed(expr, Discarded::BY_STATEMENT, llvm::SMLoc());
+}
+
+ResultChecker::ResultValueGetsUsed ResultChecker::usedValue(const Expr *expr, llvm::SMLoc at) {
+  return this->checkUsed(expr, Discarded::BY_STATEMENT, at);
+}
+
+ResultChecker::ResultValueGetsUsed ResultChecker::usedCallbackValue(const Expr *expr) {
+  return this->checkUsed(expr, Discarded::BY_CALLBACK, llvm::SMLoc());
+}
+
+ResultChecker::ResultValueGetsUsed ResultChecker::checkUsed(const Expr *expr, Discarded how,
                                                             llvm::SMLoc at) {
   const Type *type = expr->type;
-  if (type && type->holdsPromises()) {
-    AsyncChecker::ResultPromiseHandled handled =
-        this->asyncChecker->checkDiscardedPromise(expr, callback, at);
-    if (handled.isErr()) {
-      return err(ResultCheckerUsedValueError{
-          .code = ResultCheckerUsedValueErrorCode::PROMISE_DROPPED,
-          .message = handled.error().message,
-      });
-    }
+  if (type != nullptr && type->holdsPromises()) {
+    return this->checkPromiseUsed(expr, how, at);
+  }
+  if (type == nullptr || !type->holdsResults() || isa<AssignExpr>(expr)) {
     return ok(expr);
   }
-  if (!type || !type->holdsResults() || isa<AssignExpr>(expr)) {
+  if (this->asyncChecker->isTakingElement(expr)) {
     return ok(expr);
   }
-  auto *call = dyn_cast<CallExpr>(expr);
-  bool isTaken =
-      call && (call->builtin() == Builtin::ArrPop || call->builtin() == Builtin::ArrShift ||
-               call->builtin() == Builtin::ArrSplice);
-  if (isTaken) {
-    return ok(expr);
-  }
-  if (!type->nonOptional()->isResult()) {
-    bool isMapped =
-        call && (call->builtin() == Builtin::ArrMap || call->builtin() == Builtin::ArrFlatMap);
-    if (isMapped) {
-      std::string message = ErrorTextUnusedResult::results();
+  bool isResult = type->nonOptional()->isResult();
+  if (!isResult && this->asyncChecker->isMappingCall(expr)) {
+    auto message = ErrorTextUnusedResult::results();
 
-      return err(ResultCheckerUsedValueError{
-          .code = ResultCheckerUsedValueErrorCode::RESULTS_UNUSED,
-          .message = message,
-      });
-    }
+    return err(ResultCheckerUsedValueError{
+        .code = ResultCheckerUsedValueErrorCode::RESULTS_UNUSED,
+        .message = message,
+    });
+  }
+  if (!isResult) {
     return ok(expr);
   }
-  if (callback) {
-    std::string message = ErrorTextUnusedResult::callback();
+  if (how == Discarded::BY_CALLBACK) {
+    auto message = ErrorTextUnusedResult::callback();
 
     return err(ResultCheckerUsedValueError{
         .code = ResultCheckerUsedValueErrorCode::CALLBACK_RESULT_DROPPED,
         .message = message,
     });
   }
-
-  std::string message = ErrorTextUnusedResult::result();
+  auto message = ErrorTextUnusedResult::result();
 
   return err(ResultCheckerUsedValueError{
       .code = ResultCheckerUsedValueErrorCode::RESULT_UNUSED,
@@ -460,25 +536,59 @@ ResultChecker::ResultValueGetsUsed ResultChecker::usedValue(const Expr *expr, bo
   });
 }
 
+ResultChecker::ResultValueGetsUsed ResultChecker::checkPromiseUsed(const Expr *expr, Discarded how,
+                                                                   llvm::SMLoc at) {
+  bool isCallback = how == Discarded::BY_CALLBACK;
+  auto handled = this->asyncChecker->checkDiscardedPromise(expr, isCallback, at);
+  if (handled.isErr()) {
+    return err(ResultCheckerUsedValueError{
+        .code = ResultCheckerUsedValueErrorCode::PROMISE_DROPPED,
+        .message = handled.error().message,
+    });
+  }
+
+  return ok(expr);
+}
+
 void ResultChecker::addResultFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) const {
   auto *call = dyn_cast<CallExpr>(cond);
-  if (!call ||
-      (call->builtin() != Builtin::ResultIsOk && call->builtin() != Builtin::ResultIsErr)) {
+  if (call == nullptr) {
     return;
   }
-  auto *name =
-      dyn_cast<NameExpr>(ResultChecker::unconverted(cast<MemberExpr>(call->callee)->object));
-  if (!name || !name->var() || !name->var()->type ||
-      !name->var()->type->nonOptional()->isResult()) {
+  Builtin builtin = call->builtin();
+  if (builtin != Builtin::ResultIsOk && builtin != Builtin::ResultIsErr) {
     return;
   }
-  bool isOk = call->builtin() == Builtin::ResultIsOk;
-  Flow &ok = isOk ? whenTrue : whenFalse;
-  Flow &err = isOk ? whenFalse : whenTrue;
-  ok.okResults.insert(name->var());
-  ok.errResults.erase(name->var());
-  err.errResults.insert(name->var());
-  err.okResults.erase(name->var());
+  const VarSymbol *tested = this->testedResult(call);
+  if (tested == nullptr) {
+    return;
+  }
+  if (builtin == Builtin::ResultIsOk) {
+    return this->splitResultFlows(tested, whenTrue, whenFalse);
+  }
+
+  return this->splitResultFlows(tested, whenFalse, whenTrue);
+}
+
+const VarSymbol *ResultChecker::testedResult(const CallExpr *test) const {
+  const Expr *receiver = cast<MemberExpr>(test->callee)->object;
+  const auto *bare = ExprParts::withoutImplicitCasts(receiver);
+  auto *name = dyn_cast<NameExpr>(bare);
+  if (name == nullptr || name->var() == nullptr || name->var()->type == nullptr) {
+    return nullptr;
+  }
+  if (!name->var()->type->nonOptional()->isResult()) {
+    return nullptr;
+  }
+
+  return name->var();
+}
+
+void ResultChecker::splitResultFlows(const VarSymbol *tested, Flow &whenOk, Flow &whenErr) const {
+  whenOk.okResults.insert(tested);
+  whenOk.errResults.erase(tested);
+  whenErr.errResults.insert(tested);
+  whenErr.okResults.erase(tested);
 }
 
 }

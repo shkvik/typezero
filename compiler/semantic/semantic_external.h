@@ -31,9 +31,9 @@ private:
   void walkModuleItems();
   void walkLiftedFunctions();
   void walkDeclarationFiles();
-  void walkClass(ClassDecl *cls);
-  void walkFunction(FunctionDecl *fn);
-  void walkLiftedFunction(FunctionDecl *fn);
+  void walkClass(ClassDecl *classDecl);
+  void walkFunction(FunctionDecl *functionDecl);
+  void walkLiftedFunction(FunctionDecl *functionDecl);
 
   SourceFile &file;
   std::unique_ptr<SemanticState> state;

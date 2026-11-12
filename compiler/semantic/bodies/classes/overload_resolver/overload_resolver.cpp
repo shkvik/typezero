@@ -20,6 +20,17 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+constexpr int kNoRank = -1;
+constexpr int kExactRank = 0;
+constexpr int kDirectRank = 1;
+constexpr int kFieldsRank = 2;
+constexpr int kJsonRank = 3;
+constexpr llvm::StringLiteral kMatchIndices = "indices";
+
+}
+
 OverloadResolver::OverloadResolver(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->typeParams = &all.typeParams;
@@ -27,40 +38,44 @@ OverloadResolver::OverloadResolver(SemanticState &owner, SemanticParts &all)
   this->flowChecker = &all.flowChecker;
   this->typeRelations = &all.typeRelations;
   this->returnInferrer = &all.returnInferrer;
+  this->decimalChecker = &all.decimalChecker;
   this->argumentChecker = &all.argumentChecker;
   this->typeArgInferrer = &all.typeArgInferrer;
   this->genericInstantiator = &all.genericInstantiator;
 }
 
-int OverloadResolver::conversionRank(const Type *from, const Type *to) {
-  RankRun run;
-  run.steps.push_back(RankGoal{from, to});
+int OverloadResolver::conversionRank(const Type *from, const Type *to) const {
+  auto run = RankRun();
+  run.steps.push_back(RankGoal{.from = from, .to = to});
   while (!run.steps.empty()) {
     RankStep step = std::move(run.steps.back());
     run.steps.pop_back();
-    if (const RankGoal *goal = step.as<RankGoal>()) {
-      OverloadResolver::enterRank(goal->from, goal->to, run);
-    } else {
-      OverloadResolver::joinRanks(*step.as<RankJoin>(), run);
+    switch (step.kind()) {
+      case RankStepKind::GOAL:
+        this->enterRank(*step.as<RankGoal>(), run);
+        break;
+      case RankStepKind::JOIN:
+        this->joinRanks(*step.as<RankJoin>(), run);
+        break;
     }
   }
 
   return run.answers.back();
 }
 
-void OverloadResolver::enterRank(const Type *from, const Type *to, RankRun &run) {
-  std::pair<const Type *, const Type *> pair{from, to};
+void OverloadResolver::enterRank(const RankGoal &goal, RankRun &run) const {
+  auto pair = std::pair<const Type *, const Type *>{goal.from, goal.to};
   if (llvm::is_contained(run.path, pair)) {
-    run.answers.push_back(-1);
+    run.answers.push_back(kNoRank);
     return;
   }
-  std::optional<int> rank = OverloadResolver::rankLeaf(from, to);
+  auto rank = this->rankLeaf(goal.from, goal.to);
   if (rank.has_value()) {
     run.answers.push_back(*rank);
     return;
   }
-  RankJoin join = OverloadResolver::rankJoin(from, to);
-  std::vector<RankGoal> parts = join.parts;
+  auto join = this->rankJoin(goal.from, goal.to);
+  auto parts = join.parts;
   run.path.push_back(pair);
   run.steps.push_back(std::move(join));
   for (const RankGoal &part : llvm::reverse(parts)) {
@@ -68,91 +83,126 @@ void OverloadResolver::enterRank(const Type *from, const Type *to, RankRun &run)
   }
 }
 
-std::optional<int> OverloadResolver::rankLeaf(const Type *from, const Type *to) {
+std::optional<int> OverloadResolver::rankLeaf(const Type *from, const Type *to) const {
   if (from == to || from->isError() || to->isError()) {
-    return 0;
+    return kExactRank;
+  }
+  if (to->isOptional() && from->isUndefined()) {
+    return kDirectRank;
   }
   if (to->isOptional()) {
-    return from->isUndefined() ? std::optional<int>(1) : std::nullopt;
+    return std::nullopt;
   }
   if (from->isNever()) {
-    return 1;
+    return kDirectRank;
   }
   if (to->isUnion()) {
     return std::nullopt;
   }
   if (to->isJson()) {
-    return OverloadResolver::jsonRank(from);
+    return this->jsonRank(from);
   }
   if (from->isParam() && from->constraint() != nullptr) {
     return std::nullopt;
   }
   if (from->isIterator() && to->isIterator()) {
-    return OverloadResolver::iteratorRank(from, to);
+    return this->iteratorRank(from, to);
   }
   if (from->isBytes() || to->isBytes()) {
-    return from->isBuffer() && to->bytes() == Type::Bytes::Uint8 ? 1 : -1;
+    return this->bytesRank(from, to);
   }
-  if (OverloadResolver::isOpaqueRanked(from) || OverloadResolver::isOpaqueRanked(to)) {
-    bool isPlainMatch = from->isMatch() && to->isMatch() && to->matchGroups() < 0 &&
-                        from->field("indices") == nullptr;
-    return isPlainMatch ? 1 : -1;
+  if (this->isOpaqueRanked(from) || this->isOpaqueRanked(to)) {
+    return this->matchRank(from, to);
   }
 
-  return OverloadResolver::objectRank(from, to);
+  return this->objectRank(from, to);
 }
 
-int OverloadResolver::jsonRank(const Type *from) {
-  bool isJsonValue = from->isString() || from->isNumeric() || from->isBool() ||
-                     (from->isArray() && from->inner()->isJson());
-
-  return isJsonValue ? 3 : -1;
-}
-
-int OverloadResolver::iteratorRank(const Type *from, const Type *to) {
-  bool isSame = from->yielded() == to->yielded() &&
-                (from->returned() == to->returned() || to->returned()->isVoid()) &&
-                (from->sent() == to->sent() || to->sent()->isVoid());
-
-  return isSame ? 1 : -1;
-}
-
-bool OverloadResolver::isOpaqueRanked(const Type *t) {
-  return t->isMatch() || t->isRegExp() || t->isDate() || t->isIntl() || t->isCrypto() ||
-         t->isWeakRef();
-}
-
-std::optional<int> OverloadResolver::objectRank(const Type *from, const Type *to) {
-  if (from->isObject() && to->isObject()) {
-    int distance = TypeQueries::subtypeDistance(from, to);
-    if (distance > 0) {
-      return distance;
-    }
+int OverloadResolver::jsonRank(const Type *from) const {
+  bool isJsonArray = from->isArray() && from->inner()->isJson();
+  bool isJsonValue = from->isString() || from->isNumeric() || from->isBool() || isJsonArray;
+  if (!isJsonValue) {
+    return kNoRank;
   }
-  if (OverloadResolver::sameFieldObjects(from, to)) {
-    return 1;
+
+  return kJsonRank;
+}
+
+int OverloadResolver::iteratorRank(const Type *from, const Type *to) const {
+  bool isSameReturn = from->returned() == to->returned() || to->returned()->isVoid();
+  bool isSameSent = from->sent() == to->sent() || to->sent()->isVoid();
+  bool isSame = from->yielded() == to->yielded() && isSameReturn && isSameSent;
+  if (!isSame) {
+    return kNoRank;
   }
-  if (OverloadResolver::sameShapeObjects(from, to)) {
+
+  return kDirectRank;
+}
+
+int OverloadResolver::bytesRank(const Type *from, const Type *to) const {
+  bool isBufferView = from->isBuffer() && to->bytes() == Type::Bytes::Uint8;
+  if (!isBufferView) {
+    return kNoRank;
+  }
+
+  return kDirectRank;
+}
+
+int OverloadResolver::matchRank(const Type *from, const Type *to) const {
+  bool isPlainMatch = from->isMatch() && to->isMatch() && to->matchGroups() < 0 &&
+                      from->field(kMatchIndices) == nullptr;
+  if (!isPlainMatch) {
+    return kNoRank;
+  }
+
+  return kDirectRank;
+}
+
+bool OverloadResolver::isOpaqueRanked(const Type *type) const {
+  return type->isMatch() || type->isRegExp() || type->isDate() || type->isIntl() ||
+         type->isCrypto() || type->isWeakRef();
+}
+
+std::optional<int> OverloadResolver::objectRank(const Type *from, const Type *to) const {
+  int distance = this->subtypeDistance(from, to);
+  if (distance > 0) {
+    return distance;
+  }
+  if (this->hasSameFields(from, to)) {
+    return kDirectRank;
+  }
+  if (this->isSameShape(from, to)) {
     return std::nullopt;
   }
   if (from->isResult() && to->isResult()) {
     return std::nullopt;
   }
 
-  return -1;
+  return kNoRank;
 }
 
-bool OverloadResolver::sameFieldObjects(const Type *from, const Type *to) {
-  bool isPlain = from->isObject() && to->isObject() && !from->isClass() && !to->isClass() &&
-                 !from->isAnyObject() && !to->isAnyObject() && from->isTuple() == to->isTuple() &&
-                 from->fields().size() == to->fields().size() && from->overloads().empty() &&
-                 to->overloads().empty();
-  if (!isPlain) {
+int OverloadResolver::subtypeDistance(const Type *from, const Type *to) const {
+  if (!from->isObject() || !to->isObject()) {
+    return 0;
+  }
+
+  return TypeQueries::subtypeDistance(from, to);
+}
+
+bool OverloadResolver::hasSameFields(const Type *from, const Type *to) const {
+  bool isPlainPair = from->isObject() && to->isObject() && !from->isClass() && !to->isClass() &&
+                     !from->isAnyObject() && !to->isAnyObject();
+  bool isSameLayout = from->isTuple() == to->isTuple() &&
+                      from->fields().size() == to->fields().size() && from->overloads().empty() &&
+                      to->overloads().empty();
+  if (!isPlainPair || !isSameLayout) {
     return false;
   }
-  for (const Field &f : from->fields()) {
-    const Field *t = to->field(f.name);
-    if (t == nullptr || t->type != f.type || (f.readonly && !t->readonly)) {
+  for (const Field &field : from->fields()) {
+    const Field *same = to->field(field.name);
+    bool isSame = same != nullptr && same->type == field.type;
+    bool isLosingReadonly = same != nullptr && field.readonly && !same->readonly;
+    if (!isSame || isLosingReadonly) {
       return false;
     }
   }
@@ -160,81 +210,127 @@ bool OverloadResolver::sameFieldObjects(const Type *from, const Type *to) {
   return true;
 }
 
-// TODO: говнокод
-bool OverloadResolver::sameShapeObjects(const Type *from, const Type *to) {
-  return from->isObject() && to->isObject() && !from->isClass() && !to->isClass() &&
-         !from->isAnyObject() && !to->isAnyObject() && !from->isTuple() && !to->isTuple() &&
-         from->overloads().empty() && to->overloads().empty() &&
-         llvm::all_of(from->fields(), [&](const Field &f) { return to->field(f.name); }) &&
-         llvm::all_of(to->fields(), [&](const Field &t) {
-           return from->field(t.name) || t.type->isOptional() || t.type->isUndefined();
-         });
+bool OverloadResolver::isShapeObject(const Type *type) const {
+  return type->isObject() && !type->isClass() && !type->isAnyObject() && !type->isTuple() &&
+         type->overloads().empty();
 }
 
-// TODO: говнокод
-RankJoin OverloadResolver::rankJoin(const Type *from, const Type *to) {
-  RankJoin join{from, to, RankForm::SAME, {}};
+bool OverloadResolver::isSameShape(const Type *from, const Type *to) const {
+  if (!this->isShapeObject(from) || !this->isShapeObject(to)) {
+    return false;
+  }
+  for (const Field &field : from->fields()) {
+    if (to->field(field.name) == nullptr) {
+      return false;
+    }
+  }
+  for (const Field &wanted : to->fields()) {
+    bool isOmittable = wanted.type->isOptional() || wanted.type->isUndefined();
+    if (from->field(wanted.name) == nullptr && !isOmittable) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+RankJoin OverloadResolver::rankJoin(const Type *from, const Type *to) const {
   if (to->isOptional()) {
-    bool isBoth = from->isOptional();
-    join.form = isBoth ? RankForm::OPTIONAL_SAME : RankForm::OPTIONAL_WRAP;
-    join.parts = {RankGoal{isBoth ? from->inner() : from, to->inner()}};
-  } else if (to->isUnion() && from->isUnion()) {
-    join.form = RankForm::WORST_MEMBER;
-    for (const Type *member : from->members()) {
-      join.parts.push_back(RankGoal{member, to});
-    }
-  } else if (to->isUnion()) {
-    join.form = RankForm::BEST_TARGET;
-    for (const Type *member : to->members()) {
-      join.parts.push_back(RankGoal{from, member});
-    }
-  } else if (from->isParam() && from->constraint()) {
-    join.parts = {RankGoal{from->constraint(), to}};
-  } else if (from->isResult() && to->isResult()) {
-    join.form = RankForm::RESULT;
-    join.parts = {RankGoal{from->okType(), to->okType()}, RankGoal{from->errType(), to->errType()}};
-  } else {
-    join.form = RankForm::FIELDS;
-    for (const Field &f : from->fields()) {
-      join.parts.push_back(RankGoal{f.type, to->field(f.name)->type});
-    }
+    return this->optionalJoin(from, to);
+  }
+  if (to->isUnion() && from->isUnion()) {
+    return this->membersJoin(from, to);
+  }
+  if (to->isUnion()) {
+    return this->targetsJoin(from, to);
+  }
+  if (from->isParam() && from->constraint() != nullptr) {
+    auto constraint = RankGoal{.from = from->constraint(), .to = to};
+
+    return RankJoin{.from = from, .to = to, .form = RankForm::SAME, .parts = {constraint}};
+  }
+  if (from->isResult() && to->isResult()) {
+    return this->resultJoin(from, to);
   }
 
-  return join;
+  return this->fieldsJoin(from, to);
 }
 
-void OverloadResolver::joinRanks(const RankJoin &join, RankRun &run) {
-  run.path.pop_back();
-  std::vector<int> ranks = ChildrenFirst::takeAnswers(run.answers, join.parts.size());
-  bool isFailed = llvm::is_contained(ranks, -1);
-  int rank = -1;
-  switch (join.form) {
-    case RankForm::SAME:
-      rank = ranks[0];
-      break;
-    case RankForm::OPTIONAL_SAME:
-      rank = ranks[0] < 0 ? -1 : ranks[0];
-      break;
-    case RankForm::OPTIONAL_WRAP:
-      rank = ranks[0] < 0 ? -1 : ranks[0] + 1;
-      break;
-    case RankForm::WORST_MEMBER:
-      rank = isFailed ? -1 : OverloadResolver::worstRank(ranks);
-      break;
-    case RankForm::BEST_TARGET:
-      rank = OverloadResolver::bestRank(ranks);
-      break;
-    case RankForm::RESULT:
-      rank = OverloadResolver::resultRank(join, ranks);
-      break;
-    case RankForm::FIELDS:
-      rank = isFailed ? -1 : 2;
-      break;
+RankJoin OverloadResolver::optionalJoin(const Type *from, const Type *to) const {
+  if (from->isOptional()) {
+    auto inner = RankGoal{.from = from->inner(), .to = to->inner()};
+
+    return RankJoin{.from = from, .to = to, .form = RankForm::OPTIONAL_SAME, .parts = {inner}};
   }
+  auto wrapped = RankGoal{.from = from, .to = to->inner()};
+
+  return RankJoin{.from = from, .to = to, .form = RankForm::OPTIONAL_WRAP, .parts = {wrapped}};
+}
+
+RankJoin OverloadResolver::membersJoin(const Type *from, const Type *to) const {
+  auto parts = std::vector<RankGoal>();
+  for (const Type *member : from->members()) {
+    parts.push_back(RankGoal{.from = member, .to = to});
+  }
+
+  return RankJoin{.from = from, .to = to, .form = RankForm::WORST_MEMBER, .parts = parts};
+}
+
+RankJoin OverloadResolver::targetsJoin(const Type *from, const Type *to) const {
+  auto parts = std::vector<RankGoal>();
+  for (const Type *member : to->members()) {
+    parts.push_back(RankGoal{.from = from, .to = member});
+  }
+
+  return RankJoin{.from = from, .to = to, .form = RankForm::BEST_TARGET, .parts = parts};
+}
+
+RankJoin OverloadResolver::resultJoin(const Type *from, const Type *to) const {
+  auto value = RankGoal{.from = from->okType(), .to = to->okType()};
+  auto error = RankGoal{.from = from->errType(), .to = to->errType()};
+
+  return RankJoin{.from = from, .to = to, .form = RankForm::RESULT, .parts = {value, error}};
+}
+
+RankJoin OverloadResolver::fieldsJoin(const Type *from, const Type *to) const {
+  auto parts = std::vector<RankGoal>();
+  for (const Field &field : from->fields()) {
+    parts.push_back(RankGoal{.from = field.type, .to = to->field(field.name)->type});
+  }
+
+  return RankJoin{.from = from, .to = to, .form = RankForm::FIELDS, .parts = parts};
+}
+
+void OverloadResolver::joinRanks(const RankJoin &join, RankRun &run) const {
+  run.path.pop_back();
+  auto ranks = ChildrenFirst::takeAnswers(run.answers, join.parts.size());
+  int rank = this->joinedRank(join, ranks);
   run.answers.push_back(rank);
 }
 
-int OverloadResolver::worstRank(llvm::ArrayRef<int> ranks) {
+int OverloadResolver::joinedRank(const RankJoin &join, llvm::ArrayRef<int> ranks) const {
+  bool isFailed = llvm::is_contained(ranks, kNoRank);
+  switch (join.form) {
+    case RankForm::SAME:
+      return ranks[0];
+    case RankForm::OPTIONAL_SAME:
+      return ranks[0] < 0 ? kNoRank : ranks[0];
+    case RankForm::OPTIONAL_WRAP:
+      return ranks[0] < 0 ? kNoRank : ranks[0] + 1;
+    case RankForm::WORST_MEMBER:
+      return isFailed ? kNoRank : this->worstRank(ranks);
+    case RankForm::BEST_TARGET:
+      return this->bestRank(ranks);
+    case RankForm::RESULT:
+      return this->resultRank(join, ranks);
+    case RankForm::FIELDS:
+      return isFailed ? kNoRank : kFieldsRank;
+  }
+
+  return kNoRank;
+}
+
+int OverloadResolver::worstRank(llvm::ArrayRef<int> ranks) const {
   int rank = 0;
   for (int inner : ranks) {
     rank = std::max(rank, inner);
@@ -243,47 +339,60 @@ int OverloadResolver::worstRank(llvm::ArrayRef<int> ranks) {
   return rank;
 }
 
-int OverloadResolver::bestRank(llvm::ArrayRef<int> ranks) {
-  int rank = -1;
+int OverloadResolver::bestRank(llvm::ArrayRef<int> ranks) const {
+  int best = kNoRank;
   for (int inner : ranks) {
-    if (inner >= 0 && (rank < 0 || inner < rank)) {
-      rank = inner;
+    bool isBetter = inner >= 0 && (best < 0 || inner < best);
+    if (isBetter) {
+      best = inner;
     }
   }
-
-  return rank < 0 ? -1 : rank + 1;
-}
-
-int OverloadResolver::resultRank(const RankJoin &join, llvm::ArrayRef<int> ranks) {
-  std::pair<const Type *, const Type *> halves[2] = {{join.from->okType(), join.to->okType()},
-                                                     {join.from->errType(), join.to->errType()}};
-  int values[2] = {0, 0};
-  for (size_t i = 0; i < 2; ++i) {
-    auto [a, b] = halves[i];
-    if (a == b) {
-      values[i] = 0;
-    } else if (a->isNever()) {
-      values[i] = 1;
-    } else if (a->isVoid() || b->isVoid()) {
-      values[i] = -1;
-    } else {
-      values[i] = ranks[i];
-    }
+  if (best < 0) {
+    return kNoRank;
   }
 
-  return values[0] < 0 || values[1] < 0 ? -1 : std::max(values[0], values[1]);
+  return best + 1;
 }
 
-const Type *OverloadResolver::parameterAt(const FuncSymbol *sym, size_t i) {
-  if (sym->hasRest && i + 1 >= sym->params.size()) {
-    const Type *rest = sym->params.back();
+int OverloadResolver::resultRank(const RankJoin &join, llvm::ArrayRef<int> ranks) const {
+  int valueRank = this->halfRank(join.from->okType(), join.to->okType(), ranks[0]);
+  int errorRank = this->halfRank(join.from->errType(), join.to->errType(), ranks[1]);
+  if (valueRank < 0 || errorRank < 0) {
+    return kNoRank;
+  }
+
+  return std::max(valueRank, errorRank);
+}
+
+int OverloadResolver::halfRank(const Type *from, const Type *to, int rank) const {
+  if (from == to) {
+    return kExactRank;
+  }
+  if (from->isNever()) {
+    return kDirectRank;
+  }
+  if (from->isVoid() || to->isVoid()) {
+    return kNoRank;
+  }
+
+  return rank;
+}
+
+const Type *OverloadResolver::parameterAt(const FuncSymbol *function, size_t index) const {
+  bool isRest = function->hasRest && index + 1 >= function->params.size();
+  if (isRest) {
+    const Type *rest = function->params.back();
+
     return rest->isArray() ? rest->inner() : rest;
   }
+  if (index >= function->params.size()) {
+    return nullptr;
+  }
 
-  return i < sym->params.size() ? sym->params[i] : nullptr;
+  return function->params[index];
 }
 
-bool OverloadResolver::hasFloatLiteral(const Expr *expr) {
+bool OverloadResolver::hasFloatLiteral(const Expr *expr) const {
   for (const Expr *node : ExprParts::operatorTree(expr)) {
     if (isa<FloatLitExpr>(node)) {
       return true;
@@ -295,189 +404,318 @@ bool OverloadResolver::hasFloatLiteral(const Expr *expr) {
 
 OverloadResolver::ResultVariantChosen
 OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::vector<Expr *> &args,
-                                const std::vector<bool> &spread, bool &checked,
-                                std::vector<const Type *> *bound) {
-  checked = false;
-  auto checkLoosely = [&] {
-    for (Expr *&arg : args) {
-      if (!arg->type) {
-        arg = this->exprChecker->checkExpr(arg);
-      }
-    }
-  };
+                                const std::vector<bool> &spread) {
+  return this->chooseAmong(variants, args, spread, GenericVariants::ALLOWED);
+}
+
+OverloadResolver::ResultVariantChosen
+OverloadResolver::choosePlainVariant(llvm::ArrayRef<FunctionDecl *> variants,
+                                     std::vector<Expr *> &args, const std::vector<bool> &spread) {
+  return this->chooseAmong(variants, args, spread, GenericVariants::REJECTED);
+}
+
+OverloadResolver::ResultVariantChosen
+OverloadResolver::chooseAmong(llvm::ArrayRef<FunctionDecl *> variants, std::vector<Expr *> &args,
+                              const std::vector<bool> &spread, GenericVariants generics) {
   if (variants.size() == 1) {
-    return ok(variants[0]->sym);
+    return ok(this->uncheckedChoice(variants[0]));
   }
-  const FunctionDecl *first = variants[0];
-  std::string what = first->isConstructor() ? ErrorTextVariant::ctorOf(first->cls()->name)
-                                            : ErrorTextVariant::quoted(first->name);
+  auto what = this->variantsName(variants[0]);
+  auto plain = this->checkNoSpread(what, args, spread);
+  if (plain.isErr()) {
+    return err(plain.error());
+  }
+  auto fit = this->fittingVariants(what, variants, args);
+  if (fit.isErr()) {
+    return err(fit.error());
+  }
+  if (fit.value().size() == 1) {
+    return ok(this->uncheckedChoice(fit.value()[0]));
+  }
+  auto typed = this->checkArgumentsFor(fit.value(), args);
+  if (typed.isErr()) {
+    return err(typed.error());
+  }
+  auto ranked = this->rankedCandidates(what, fit.value(), args);
+  if (ranked.isErr()) {
+    return err(ranked.error());
+  }
+  auto best = this->soleBest(what, ranked.value());
+  if (best.isErr()) {
+    return err(best.error());
+  }
+  auto allowed = this->checkGenericAllowed(best.value(), generics);
+  if (allowed.isErr()) {
+    return err(allowed.error());
+  }
+
+  return ok(ChosenVariant{
+      .function = best.value().functionDecl->sym,
+      .isChecked = true,
+      .typeArgs = best.value().typeArgs,
+  });
+}
+
+OverloadResolver::ChosenVariant OverloadResolver::uncheckedChoice(FunctionDecl *variant) const {
+  return ChosenVariant{
+      .function = variant->sym,
+      .isChecked = false,
+      .typeArgs = {},
+  };
+}
+
+std::string OverloadResolver::variantsName(const FunctionDecl *first) const {
+  if (first->isConstructor()) {
+    return ErrorTextVariant::ctorOf(first->cls()->name);
+  }
+
+  return ErrorTextVariant::quoted(first->name);
+}
+
+void OverloadResolver::walkLoosely(std::vector<Expr *> &args) {
+  for (Expr *&arg : args) {
+    if (arg->type == nullptr) {
+      arg = this->exprChecker->checkExpr(arg);
+    }
+  }
+}
+
+OverloadResolver::ResultChoiceAllowed
+OverloadResolver::checkNoSpread(llvm::StringRef what, std::vector<Expr *> &args,
+                                const std::vector<bool> &spread) {
   if (llvm::is_contained(spread, true)) {
-    checkLoosely();
-    std::string message = ErrorTextVariant::spread(what);
+    this->walkLoosely(args);
+    auto message = ErrorTextVariant::spread(what);
 
     return err(OverloadResolverChooseVariantError{
         .code = OverloadResolverChooseVariantErrorCode::SPREAD_ARGUMENT,
         .message = message,
     });
   }
+
+  return ok();
+}
+
+OverloadResolver::ResultVariantsFound
+OverloadResolver::fittingVariants(llvm::StringRef what, llvm::ArrayRef<FunctionDecl *> variants,
+                                  std::vector<Expr *> &args) {
   size_t count = args.size();
-  std::vector<FunctionDecl *> fit;
-  for (FunctionDecl *v : variants) {
-    const FuncSymbol *sym = v->sym;
-    if (count >= sym->minArgs && (sym->hasRest || count <= sym->params.size())) {
-      fit.push_back(v);
+  auto fit = std::vector<FunctionDecl *>();
+  for (FunctionDecl *variant : variants) {
+    if (this->isTakingCount(variant->sym, count)) {
+      fit.push_back(variant);
     }
   }
   if (fit.empty()) {
-    std::string list = ErrorTextVariant::list(variants);
-    checkLoosely();
-    std::string message = ErrorTextVariant::count(what, count, list);
+    auto list = ErrorTextVariant::list(variants);
+    this->walkLoosely(args);
+    auto message = ErrorTextVariant::count(what, count, list);
 
     return err(OverloadResolverChooseVariantError{
         .code = OverloadResolverChooseVariantErrorCode::NO_VARIANT_FOR_COUNT,
         .message = message,
     });
   }
-  if (fit.size() == 1) {
-    return ok(fit[0]->sym);
+
+  return ok(fit);
+}
+
+bool OverloadResolver::isTakingCount(const FuncSymbol *function, size_t count) const {
+  bool isEnough = count >= function->minArgs;
+  bool isNotTooMany = function->hasRest || count <= function->params.size();
+
+  return isEnough && isNotTooMany;
+}
+
+OverloadResolver::ResultChoiceAllowed
+OverloadResolver::checkArgumentsFor(llvm::ArrayRef<FunctionDecl *> fit, std::vector<Expr *> &args) {
+  for (size_t index = 0; index < args.size(); ++index) {
+    const Type *expected = this->expectedArgument(fit, args[index], index);
+    bool isUsable = expected != nullptr && !expected->isError();
+    args[index] = this->exprChecker->checkExpr(args[index], isUsable ? expected : nullptr);
+  }
+  for (const Expr *arg : args) {
+    if (arg->type->isError()) {
+      return err(OverloadResolverChooseVariantError{
+          .code = OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED,
+          .message = "",
+      });
+    }
   }
 
-  for (size_t i = 0; i < count; ++i) {
-    const Type *expected = OverloadResolver::parameterAt(fit[0]->sym, i);
-    for (FunctionDecl *v : fit) {
-      if (OverloadResolver::parameterAt(v->sym, i) != expected ||
-          (expected && GenericCheckHelpers::mentionsAnyOf(expected, v->sym->typeParams))) {
-        expected = nullptr;
-      }
-    }
-    if (!expected && isa<ObjectLitExpr>(args[i])) {
-      int shapes = 0;
-      for (FunctionDecl *v : fit) {
-        const Type *param = OverloadResolver::parameterAt(v->sym, i);
-        const Type *bare = param ? param->nonOptional() : nullptr;
-        if (bare && bare->isObject() && !bare->isClass() && !bare->isAnyObject() &&
-            !bare->isTuple() && param != expected) {
-          expected = param;
-          ++shapes;
-        }
-      }
-      if (shapes != 1) {
-        expected = nullptr;
-      }
-    }
-    if (!expected && DecimalChecker::isLiteralTree(args[i]) &&
-        OverloadResolver::hasFloatLiteral(args[i])) {
-      bool isDecimal = false;
-      bool isDbl = false;
-      for (FunctionDecl *v : fit) {
-        const Type *param = OverloadResolver::parameterAt(v->sym, i)->nonOptional();
-        isDecimal |= param->isDecimal();
-        isDbl |= param->isFloat();
-      }
-      if (isDecimal && !isDbl) {
-        expected = Type::decimalTy();
-      }
-    }
-    args[i] = this->exprChecker->checkExpr(args[i],
-                                           expected && !expected->isError() ? expected : nullptr);
+  return ok();
+}
+
+const Type *OverloadResolver::expectedArgument(llvm::ArrayRef<FunctionDecl *> fit, const Expr *arg,
+                                               size_t index) const {
+  const Type *common = this->commonParameter(fit, index);
+  if (common != nullptr) {
+    return common;
   }
-  checked = true;
-  auto failed = [](const Expr *arg) { return arg->type->isError(); };
-  if (llvm::any_of(args, failed)) {
-    return err(OverloadResolverChooseVariantError{
-        .code = OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED,
-        .message = "",
-    });
+  const Type *shape = this->soleObjectShape(fit, arg, index);
+  if (shape != nullptr) {
+    return shape;
   }
-  // TODO: говнокод
-  struct Candidate {
-    FunctionDecl *fn;
-    std::vector<int> ranks;
-    bool leavesOut;
-    std::vector<const Type *> typeArgs;
-    bool adapted = false;
-  };
-  std::vector<Candidate> applicable;
-  std::string why, numberHint;
-  for (FunctionDecl *v : fit) {
-    Candidate c{v, {}, v->sym->hasRest || count < v->sym->params.size(), {}};
-    if (v->sym->isGeneric() &&
-        !this->typeArgInferrer->inferFromArguments(v->sym, args, c.typeArgs)) {
-      why += ErrorTextVariant::typeParams(ErrorTextVariant::text(v));
-      continue;
-    }
-    std::string mismatch;
-    for (size_t i = 0; i < count && mismatch.empty(); ++i) {
-      const Type *param = OverloadResolver::parameterAt(v->sym, i);
-      if (v->sym->isGeneric()) {
-        param = this->typeParams->substituteValue(param, v->sym->typeParams, c.typeArgs);
-      }
-      int rank = OverloadResolver::conversionRank(args[i]->type, param);
-      if (rank < 0 && this->typeRelations->literalAdapts(args[i], param)) {
-        rank = 1;
-        c.adapted = true;
-      }
-      if (rank < 0) {
-        mismatch = ErrorTextVariant::mismatch(ErrorTextVariant::text(v), param->name(), i + 1,
-                                              args[i]->type->name());
-        if (numberHint.empty()) {
-          numberHint = TypeRelations::conversionHint(args[i], param);
-        }
-      }
-      c.ranks.push_back(rank);
-    }
-    if (mismatch.empty()) {
-      applicable.push_back(std::move(c));
-    } else {
-      why += "; " + mismatch;
+
+  return this->decimalForLiteral(fit, arg, index);
+}
+
+const Type *OverloadResolver::commonParameter(llvm::ArrayRef<FunctionDecl *> fit,
+                                              size_t index) const {
+  const Type *common = this->parameterAt(fit[0]->sym, index);
+  for (FunctionDecl *variant : fit) {
+    bool isSame = this->parameterAt(variant->sym, index) == common;
+    bool isOpen =
+        common != nullptr && GenericCheckHelpers::mentionsAnyOf(common, variant->sym->typeParams);
+    if (!isSame || isOpen) {
+      return nullptr;
     }
   }
-  if (applicable.empty()) {
-    std::string message = ErrorTextVariant::noFit(what, why, numberHint);
+
+  return common;
+}
+
+const Type *OverloadResolver::soleObjectShape(llvm::ArrayRef<FunctionDecl *> fit, const Expr *arg,
+                                              size_t index) const {
+  if (!isa<ObjectLitExpr>(arg)) {
+    return nullptr;
+  }
+  const Type *shape = nullptr;
+  int changes = 0;
+  for (FunctionDecl *variant : fit) {
+    const Type *param = this->parameterAt(variant->sym, index);
+    if (this->isPlainObjectParam(param) && param != shape) {
+      shape = param;
+      changes += 1;
+    }
+  }
+  if (changes != 1) {
+    return nullptr;
+  }
+
+  return shape;
+}
+
+bool OverloadResolver::isPlainObjectParam(const Type *param) const {
+  if (param == nullptr) {
+    return false;
+  }
+  const Type *bare = param->nonOptional();
+
+  return bare->isObject() && !bare->isClass() && !bare->isAnyObject() && !bare->isTuple();
+}
+
+const Type *OverloadResolver::decimalForLiteral(llvm::ArrayRef<FunctionDecl *> fit, const Expr *arg,
+                                                size_t index) const {
+  if (!this->decimalChecker->isLiteralTree(arg) || !this->hasFloatLiteral(arg)) {
+    return nullptr;
+  }
+  bool hasDecimal = false;
+  bool hasDouble = false;
+  for (FunctionDecl *variant : fit) {
+    const Type *param = this->parameterAt(variant->sym, index)->nonOptional();
+    hasDecimal = hasDecimal || param->isDecimal();
+    hasDouble = hasDouble || param->isFloat();
+  }
+  if (hasDecimal && !hasDouble) {
+    return Type::decimalTy();
+  }
+
+  return nullptr;
+}
+
+OverloadResolver::ResultCandidatesFit
+OverloadResolver::rankedCandidates(llvm::StringRef what, llvm::ArrayRef<FunctionDecl *> fit,
+                                   std::vector<Expr *> &args) {
+  auto ranking = VariantRanking();
+  for (FunctionDecl *variant : fit) {
+    this->rankVariant(variant, args, ranking);
+  }
+  if (ranking.applicable.empty()) {
+    auto message = ErrorTextVariant::noFit(what, ranking.why, ranking.numberHint);
 
     return err(OverloadResolverChooseVariantError{
         .code = OverloadResolverChooseVariantErrorCode::NO_VARIANT_FITS,
         .message = message,
     });
   }
-  auto better = [&](const Candidate &a, const Candidate &b) {
-    bool isStrictly = false;
-    for (size_t i = 0; i < count; ++i) {
-      if (a.ranks[i] > b.ranks[i]) {
-        return false;
-      }
-      isStrictly |= a.ranks[i] < b.ranks[i];
-    }
-    bool isGeneric = a.fn->sym->isGeneric();
-    bool isOtherGeneric = b.fn->sym->isGeneric();
 
-    return isStrictly || (!a.leavesOut && b.leavesOut) || (!isGeneric && isOtherGeneric);
+  return ok(ranking.applicable);
+}
+
+void OverloadResolver::rankVariant(FunctionDecl *variant, std::vector<Expr *> &args,
+                                   VariantRanking &ranking) {
+  FuncSymbol *function = variant->sym;
+  auto candidate = Candidate{
+      .functionDecl = variant,
+      .ranks = {},
+      .isLeavingOut = function->hasRest || args.size() < function->params.size(),
+      .typeArgs = {},
+      .isAdapted = false,
   };
-  for (const Candidate &c : applicable) {
-    if (llvm::all_of(applicable,
-                     [&](const Candidate &other) { return &other == &c || better(c, other); })) {
-      if (c.fn->sym->isGeneric()) {
-        if (!bound) {
-          std::string message = ErrorTextVariant::generic(ErrorTextVariant::text(c.fn));
+  bool isInferred = !function->isGeneric() ||
+                    this->typeArgInferrer->inferFromArguments(function, args, candidate.typeArgs);
+  if (!isInferred) {
+    ranking.why += ErrorTextVariant::typeParams(ErrorTextVariant::text(variant));
+    return;
+  }
+  for (size_t index = 0; index < args.size(); ++index) {
+    const Type *param = this->candidateParam(candidate, index);
+    int rank = this->argumentRank(args[index], param, candidate);
+    if (rank < 0) {
+      this->noteMismatch(variant, args[index], param, index, ranking);
+      return;
+    }
+    candidate.ranks.push_back(rank);
+  }
+  ranking.applicable.push_back(std::move(candidate));
+}
 
-          return err(OverloadResolverChooseVariantError{
-              .code = OverloadResolverChooseVariantErrorCode::GENERIC_VARIANT,
-              .message = message,
-          });
-        }
-        *bound = c.typeArgs;
-      }
-      return ok(c.fn->sym);
+const Type *OverloadResolver::candidateParam(const Candidate &candidate, size_t index) const {
+  const FuncSymbol *function = candidate.functionDecl->sym;
+  const Type *param = this->parameterAt(function, index);
+  if (!function->isGeneric()) {
+    return param;
+  }
+
+  return this->typeParams->substituteValue(param, function->typeParams, candidate.typeArgs);
+}
+
+int OverloadResolver::argumentRank(const Expr *arg, const Type *param, Candidate &candidate) const {
+  int rank = this->conversionRank(arg->type, param);
+  if (rank >= 0 || !this->typeRelations->isLiteralAdapting(arg, param)) {
+    return rank;
+  }
+  candidate.isAdapted = true;
+
+  return kDirectRank;
+}
+
+void OverloadResolver::noteMismatch(const FunctionDecl *variant, const Expr *arg, const Type *param,
+                                    size_t index, VariantRanking &ranking) const {
+  auto shown = ErrorTextVariant::text(variant);
+  auto mismatch = ErrorTextVariant::mismatch(shown, param->name(), index + 1, arg->type->name());
+  if (ranking.numberHint.empty()) {
+    ranking.numberHint = this->typeRelations->conversionHint(arg, param);
+  }
+  ranking.why += "; " + mismatch;
+}
+
+OverloadResolver::ResultBestCandidate
+OverloadResolver::soleBest(llvm::StringRef what, llvm::ArrayRef<Candidate> applicable) const {
+  for (const Candidate &candidate : applicable) {
+    if (this->isBetterThanOthers(candidate, applicable)) {
+      return ok(candidate);
     }
   }
-  std::vector<FunctionDecl *> tied;
-  for (const Candidate &c : applicable) {
-    tied.push_back(c.fn);
+  auto tied = std::vector<FunctionDecl *>();
+  bool hasOnlyAdapted = true;
+  for (const Candidate &candidate : applicable) {
+    tied.push_back(candidate.functionDecl);
+    hasOnlyAdapted = hasOnlyAdapted && candidate.isAdapted;
   }
-  auto adapted = [](const Candidate &c) { return c.adapted; };
-  bool hasLiterals = llvm::all_of(applicable, adapted);
-  std::string list = ErrorTextVariant::list(tied);
-  std::string message = ErrorTextVariant::tie(what, list, hasLiterals);
+  auto list = ErrorTextVariant::list(tied);
+  auto message = ErrorTextVariant::tie(what, list, hasOnlyAdapted);
 
   return err(OverloadResolverChooseVariantError{
       .code = OverloadResolverChooseVariantErrorCode::SEVERAL_VARIANTS_FIT,
@@ -485,40 +723,135 @@ OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::ve
   });
 }
 
-Expr *OverloadResolver::callGenericVariant(CallExpr *call, FuncSymbol *sym,
-                                           llvm::ArrayRef<const Type *> bound, llvm::SMLoc loc,
-                                           bool method) {
-  llvm::ArrayRef<const Type *> genericTypeParams = sym->typeParams;
-  std::vector<const Type *> params;
-  this->state.getGenericStore().enterInstanceLoc(loc);
-  for (const Type *p : sym->params) {
-    params.push_back(this->typeParams->substituteValue(p, genericTypeParams, bound));
-  }
-  const Type *ret = sym->getReturnType();
-  call->type = ret ? this->typeParams->substitute(ret, genericTypeParams, bound) : Type::error();
-  this->state.getGenericStore().leaveInstanceLoc();
-  FuncSymbol *callee = sym;
-  const ClassDecl *cls = sym->decl->cls();
-  if (!this->state.getFunctionStack().isInsideTrial() && !sym->inferring && sym->hasReturnType() &&
-      (!cls || sym->decl->isStatic() || cls->isEmitted())) {
-    if (FuncSymbol *instance = this->genericInstantiator->instantiate(sym, bound, loc)) {
-      callee = instance;
+bool OverloadResolver::isBetterThanOthers(const Candidate &candidate,
+                                          llvm::ArrayRef<Candidate> applicable) const {
+  for (const Candidate &other : applicable) {
+    if (&other != &candidate && !this->isBetter(candidate, other)) {
+      return false;
     }
   }
-  if (call->superCall()) {
-    call->target = SuperCall{.method = callee};
-  } else if (method) {
-    call->target = MethodCall{.method = callee};
-  } else {
-    call->target = FunctionCall{.func = callee};
+
+  return true;
+}
+
+bool OverloadResolver::isBetter(const Candidate &candidate, const Candidate &other) const {
+  bool isStrictly = false;
+  for (size_t index = 0; index < candidate.ranks.size(); ++index) {
+    if (candidate.ranks[index] > other.ranks[index]) {
+      return false;
+    }
+    isStrictly = isStrictly || candidate.ranks[index] < other.ranks[index];
   }
-  if (auto *member = dyn_cast<MemberExpr>(call->callee); member && method) {
+  bool isFullerCall = !candidate.isLeavingOut && other.isLeavingOut;
+  bool isPlainOverGeneric =
+      !candidate.functionDecl->sym->isGeneric() && other.functionDecl->sym->isGeneric();
+
+  return isStrictly || isFullerCall || isPlainOverGeneric;
+}
+
+OverloadResolver::ResultChoiceAllowed
+OverloadResolver::checkGenericAllowed(const Candidate &candidate, GenericVariants generics) const {
+  bool isRejected = generics == GenericVariants::REJECTED;
+  if (isRejected && candidate.functionDecl->sym->isGeneric()) {
+    auto shown = ErrorTextVariant::text(candidate.functionDecl);
+    auto message = ErrorTextVariant::generic(shown);
+
+    return err(OverloadResolverChooseVariantError{
+        .code = OverloadResolverChooseVariantErrorCode::GENERIC_VARIANT,
+        .message = message,
+    });
+  }
+
+  return ok();
+}
+
+Expr *OverloadResolver::callGenericMethod(CallExpr *call, FuncSymbol *function,
+                                          llvm::ArrayRef<const Type *> bound, llvm::SMLoc loc) {
+  return this->callGeneric(call, function, bound, loc, GenericCallee::METHOD);
+}
+
+Expr *OverloadResolver::callGenericFunction(CallExpr *call, FuncSymbol *function,
+                                            llvm::ArrayRef<const Type *> bound, llvm::SMLoc loc) {
+  return this->callGeneric(call, function, bound, loc, GenericCallee::FUNCTION);
+}
+
+Expr *OverloadResolver::callGeneric(CallExpr *call, FuncSymbol *function,
+                                    llvm::ArrayRef<const Type *> bound, llvm::SMLoc loc,
+                                    GenericCallee kind) {
+  this->state.getGenericStore().enterInstanceLoc(loc);
+  auto params = this->boundParams(function, bound);
+  call->type = this->boundReturnType(function, bound);
+  this->state.getGenericStore().leaveInstanceLoc();
+  FuncSymbol *callee = this->emittedCallee(function, bound, loc);
+  this->setGenericTarget(call, callee, kind);
+  auto *member = dyn_cast<MemberExpr>(call->callee);
+  if (member != nullptr && kind == GenericCallee::METHOD) {
     member->type = this->returnInferrer->functionType(callee);
   }
-  std::vector<bool> given(call->args.size(), true);
+  auto given = std::vector<bool>(call->args.size(), true);
 
-  return this->argumentChecker->checkArguments(call, params, sym->minArgs, sym->hasRest, loc,
-                                               &given);
+  return this->argumentChecker->checkArguments(call, params, function->minArgs, function->hasRest,
+                                               loc, &given);
+}
+
+std::vector<const Type *> OverloadResolver::boundParams(const FuncSymbol *function,
+                                                        llvm::ArrayRef<const Type *> bound) {
+  auto params = std::vector<const Type *>();
+  for (const Type *param : function->params) {
+    const auto *type = this->typeParams->substituteValue(param, function->typeParams, bound);
+    params.push_back(type);
+  }
+
+  return params;
+}
+
+const Type *OverloadResolver::boundReturnType(FuncSymbol *function,
+                                              llvm::ArrayRef<const Type *> bound) {
+  const auto *returnType = function->getReturnType();
+  if (returnType == nullptr) {
+    return Type::error();
+  }
+
+  return this->typeParams->substitute(returnType, function->typeParams, bound);
+}
+
+FuncSymbol *OverloadResolver::emittedCallee(FuncSymbol *function,
+                                            llvm::ArrayRef<const Type *> bound, llvm::SMLoc loc) {
+  if (!this->isInstantiatedNow(function)) {
+    return function;
+  }
+  auto *instance = this->genericInstantiator->instantiate(function, bound, loc);
+  if (instance == nullptr) {
+    return function;
+  }
+
+  return instance;
+}
+
+bool OverloadResolver::isInstantiatedNow(const FuncSymbol *function) const {
+  const ClassDecl *classDecl = function->decl->cls();
+  bool isOwnerEmitted =
+      classDecl == nullptr || function->decl->isStatic() || classDecl->isEmitted();
+  bool isSettled = !this->state.getFunctionStack().isInsideTrial() && !function->inferring &&
+                   function->hasReturnType();
+
+  return isSettled && isOwnerEmitted;
+}
+
+void OverloadResolver::setGenericTarget(CallExpr *call, FuncSymbol *callee,
+                                        GenericCallee kind) const {
+  if (call->superCall()) {
+    call->target = SuperCall{.method = callee};
+    return;
+  }
+  switch (kind) {
+    case GenericCallee::METHOD:
+      call->target = MethodCall{.method = callee};
+      break;
+    case GenericCallee::FUNCTION:
+      call->target = FunctionCall{.func = callee};
+      break;
+  }
 }
 
 OverloadResolver::ResultVariantOfType
@@ -527,47 +860,14 @@ OverloadResolver::variantForType(llvm::ArrayRef<FunctionDecl *> variants, const 
   if (variants.size() == 1) {
     return ok(variants[0]->sym);
   }
-  std::vector<FunctionDecl *> matching;
-  const Type *wanted = expected ? expected->nonOptional() : nullptr;
-  if (wanted && wanted->isFunction()) {
-    for (FunctionDecl *v : variants) {
-      if (this->returnInferrer->functionType(v->sym) == wanted) {
-        matching.push_back(v);
-      }
-    }
-  } else if (this->state.getFunctionStack().getExpectedCallback()) {
-    for (FunctionDecl *v : variants) {
-      const FuncSymbol *sym = v->sym;
-      bool isFitting =
-          !sym->hasRest &&
-          sym->minArgs <= this->state.getFunctionStack().getExpectedCallback()->params.size() &&
-          sym->params.size() <= this->state.getFunctionStack().getExpectedCallback()->params.size();
-      for (size_t i = 0; i < sym->params.size() && isFitting; ++i) {
-        const Type *param = sym->params[i];
-        const Type *given = this->state.getFunctionStack().getExpectedCallback()->params[i];
-        isFitting = param == given || (param->isOptional() && param->inner() == given);
-      }
-      if (isFitting) {
-        matching.push_back(v);
-      }
-    }
-  }
+  auto matching = this->variantsOfType(variants, expected);
   if (matching.size() == 1) {
     return ok(matching[0]->sym);
   }
-  const FunctionDecl *last = variants.back();
-  std::string type = "(";
-  for (size_t i = 0; i < last->params.size() && i < last->sym->params.size(); ++i) {
-    type += (i == 0 ? "" : ", ") + last->params[i].label().str() + ": " +
-            last->sym->params[i]->name().str();
-  }
-  type += ") => " + last->sym->getReturnType()->name().str();
-  std::string object = "o";
-  if (auto *name = dyn_cast<NameExpr>(member->object)) {
-    object = name->name.str();
-  }
-  std::string list = ErrorTextVariant::list(variants);
-  std::string message = ErrorTextVariantType::several(member->name, list, type, object);
+  auto type = this->signatureText(variants.back());
+  auto object = this->shownObject(member);
+  auto list = ErrorTextVariant::list(variants);
+  auto message = ErrorTextVariantType::several(member->name, list, type, object);
 
   return err(OverloadResolverVariantForTypeError{
       .code = OverloadResolverVariantForTypeErrorCode::SEVERAL_VARIANTS,
@@ -575,52 +875,128 @@ OverloadResolver::variantForType(llvm::ArrayRef<FunctionDecl *> variants, const 
   });
 }
 
-std::vector<FunctionDecl *> OverloadResolver::signatureVariants(const Type *iface,
+std::vector<FunctionDecl *>
+OverloadResolver::variantsOfType(llvm::ArrayRef<FunctionDecl *> variants, const Type *expected) {
+  const auto *callback = this->state.getFunctionStack().getExpectedCallback();
+  bool isFunctionWanted = expected != nullptr && expected->nonOptional()->isFunction();
+  auto matching = std::vector<FunctionDecl *>();
+  for (FunctionDecl *variant : variants) {
+    bool isMatching = isFunctionWanted ? this->isOfType(variant, expected->nonOptional())
+                                       : this->isFittingCallback(variant->sym, callback);
+    if (isMatching) {
+      matching.push_back(variant);
+    }
+  }
+
+  return matching;
+}
+
+bool OverloadResolver::isOfType(const FunctionDecl *variant, const Type *wanted) {
+  return this->returnInferrer->functionType(variant->sym) == wanted;
+}
+
+bool OverloadResolver::isFittingCallback(const FuncSymbol *function,
+                                         const Signature *callback) const {
+  if (callback == nullptr) {
+    return false;
+  }
+  size_t given = callback->params.size();
+  bool isCountFitting =
+      !function->hasRest && function->minArgs <= given && function->params.size() <= given;
+  if (!isCountFitting) {
+    return false;
+  }
+  for (size_t index = 0; index < function->params.size(); ++index) {
+    const Type *param = function->params[index];
+    const Type *passed = callback->params[index];
+    bool isSame = param == passed || (param->isOptional() && param->inner() == passed);
+    if (!isSame) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+std::string OverloadResolver::signatureText(const FunctionDecl *variant) const {
+  FuncSymbol *function = variant->sym;
+  size_t count = std::min(variant->params.size(), function->params.size());
+  std::string text = "(";
+  for (size_t index = 0; index < count; ++index) {
+    if (index > 0) {
+      text += ", ";
+    }
+    text += variant->params[index].label().str() + ": " + function->params[index]->name().str();
+  }
+
+  return text + ") => " + function->getReturnType()->name().str();
+}
+
+std::string OverloadResolver::shownObject(const MemberExpr *member) const {
+  auto *name = dyn_cast<NameExpr>(member->object);
+  if (name == nullptr) {
+    return "o";
+  }
+
+  return name->name.str();
+}
+
+std::vector<FunctionDecl *> OverloadResolver::signatureVariants(const Type *interfaceType,
                                                                 const Overload &overload) {
-  ClassStore &classes = this->state.getClassStore();
-  std::vector<FunctionDecl *> known = classes.getSignatureVariants(iface, overload.name);
+  auto &classes = this->state.getClassStore();
+  auto known = classes.getSignatureVariants(interfaceType, overload.name);
   if (!known.empty()) {
     return known;
   }
-  std::vector<FunctionDecl *> variants;
+  auto variants = std::vector<FunctionDecl *>();
   for (const Type *signature : overload.signatures) {
-    auto *fn = this->state.getAst().make<FunctionDecl>(
-        llvm::SMLoc(), this->state.getAst().keepName(overload.name));
-    FuncSymbol *sym = this->state.getAst().newFunc();
-    sym->setCompleter(this->state.getCompleter());
-    sym->name = fn->name;
-    sym->decl = fn;
-    sym->params.assign(signature->params().begin(), signature->params().end());
-    sym->minArgs = signature->minArgs();
-    sym->hasRest = signature->hasRest();
-    sym->setReturnType(signature->ret());
-    for (size_t i = 0; i < signature->params().size(); ++i) {
-      Param param;
-      param.name = this->state.getAst().keepName(std::string(1, char('a' + i % 26)));
-      bool hasRest = sym->hasRest && i + 1 == signature->params().size();
-      if (hasRest) {
-        param.form = RestParam{};
-      } else if (i >= sym->minArgs) {
-        param.form = OptionalParam{};
-      }
-      param.declaredType = signature->params()[i];
-      fn->params.push_back(param);
-    }
-    fn->sym = sym;
-    variants.push_back(fn);
+    variants.push_back(this->signatureVariant(overload, signature));
   }
-  classes.rememberSignatureVariants(iface, overload.name, variants);
+  classes.rememberSignatureVariants(interfaceType, overload.name, variants);
 
   return variants;
 }
 
+FunctionDecl *OverloadResolver::signatureVariant(const Overload &overload, const Type *signature) {
+  auto name = this->state.getAst().keepName(overload.name);
+  auto *functionDecl = this->state.getAst().make<FunctionDecl>(llvm::SMLoc(), name);
+  auto *function = this->state.getAst().newFunc();
+  function->setCompleter(this->state.getCompleter());
+  function->name = functionDecl->name;
+  function->decl = functionDecl;
+  function->params.assign(signature->params().begin(), signature->params().end());
+  function->minArgs = signature->minArgs();
+  function->hasRest = signature->hasRest();
+  function->setReturnType(signature->ret());
+  for (size_t index = 0; index < signature->params().size(); ++index) {
+    functionDecl->params.push_back(this->signatureParam(signature, index));
+  }
+  functionDecl->sym = function;
+
+  return functionDecl;
+}
+
+Param OverloadResolver::signatureParam(const Type *signature, size_t index) {
+  auto letter = std::string(1, char('a' + index % 26));
+  auto param = Param();
+  param.name = this->state.getAst().keepName(letter);
+  param.declaredType = signature->params()[index];
+  bool isRest = signature->hasRest() && index + 1 == signature->params().size();
+  if (isRest) {
+    param.form = RestParam{};
+  } else if (index >= signature->minArgs()) {
+    param.form = OptionalParam{};
+  }
+
+  return param;
+}
+
 Expr *OverloadResolver::checkOverloadCall(CallExpr *call, MemberExpr *member) {
-  const Type *iface = member->object->type;
-  const Overload &overload = *iface->overload(member->name);
+  const Type *interfaceType = member->object->type;
+  const Overload &overload = *interfaceType->overload(member->name);
   call->type = member->type = Type::error();
-  std::vector<FunctionDecl *> variants = this->signatureVariants(iface, overload);
-  bool isChecked = false;
-  ResultVariantChosen chosen = this->chooseVariant(variants, call->args, call->spread, isChecked);
+  auto variants = this->signatureVariants(interfaceType, overload);
+  auto chosen = this->choosePlainVariant(variants, call->args, call->spread);
   if (chosen.isErr() &&
       chosen.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
     this->state.getDiagnostics().error(member->loc(), chosen.error().message);
@@ -628,31 +1004,38 @@ Expr *OverloadResolver::checkOverloadCall(CallExpr *call, MemberExpr *member) {
   if (chosen.isErr()) {
     return call;
   }
-  FuncSymbol *sym = chosen.value();
-  auto found = llvm::find(variants, sym->decl);
-  int signature = int(found - variants.begin());
+  FuncSymbol *function = chosen.value().function;
+  int signature = this->signatureIndex(variants, function);
   call->target = OverloadCall{.signature = signature};
   member->type = overload.signatures[size_t(signature)];
-  call->type = sym->getKnownReturnType();
+  call->type = function->getKnownReturnType();
   this->flowChecker->calledFunction();
-  std::vector<bool> given(isChecked ? call->args.size() : 0, true);
+  size_t checkedCount = chosen.value().isChecked ? call->args.size() : 0;
+  auto given = std::vector<bool>(checkedCount, true);
 
-  return this->argumentChecker->checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
-                                               member->loc(), &given);
+  return this->argumentChecker->checkArguments(call, function->params, function->minArgs,
+                                               function->hasRest, member->loc(), &given);
+}
+
+int OverloadResolver::signatureIndex(llvm::ArrayRef<FunctionDecl *> variants,
+                                     const FuncSymbol *function) const {
+  auto found = llvm::find(variants, function->decl);
+
+  return int(found - variants.begin());
 }
 
 Expr *OverloadResolver::checkOverloadMember(MemberExpr *member, const Type *expected) {
-  const Type *iface = member->object->type;
-  const Overload &overload = *iface->overload(member->name);
+  const Type *interfaceType = member->object->type;
+  const Overload &overload = *interfaceType->overload(member->name);
   member->type = Type::error();
-  std::vector<FunctionDecl *> variants = this->signatureVariants(iface, overload);
-  ResultVariantOfType variant = this->variantForType(variants, expected, member);
+  auto variants = this->signatureVariants(interfaceType, overload);
+  auto variant = this->variantForType(variants, expected, member);
   if (variant.isErr()) {
     this->state.getDiagnostics().error(member->loc(), variant.error().message);
+
     return member;
   }
-  FuncSymbol *sym = variant.value();
-  int signature = int(llvm::find(variants, sym->decl) - variants.begin());
+  int signature = this->signatureIndex(variants, variant.value());
   member->form = OverloadMember{.signature = signature};
   member->type = overload.signatures[size_t(signature)];
 

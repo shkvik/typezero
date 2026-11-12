@@ -23,7 +23,7 @@ public:
   void rememberStreamView(const FieldPath &path, llvm::SMLoc from, const Type *view);
   bool hasStreamViews() const;
   const Type *findStreamView(const FieldPath &path, llvm::SMLoc loc) const;
-  void rememberProcessStdin(VarSymbol *var);
+  void rememberProcessStdin(VarSymbol *variable);
   VarSymbol *getProcessStdin() const;
 
 private:

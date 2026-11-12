@@ -26,15 +26,14 @@ private:
   using ResultAliasDistinct = Result<const TypeAliasDecl *, AliasInstantiatorNotResolvingError>;
   using ResultDepthInBounds = Result<unsigned, AliasInstantiatorDepthInBoundsError>;
 
-  static ResultDefaultExists defaultExists(const TypeAliasDecl *alias, size_t count,
-                                           const Type *fallback);
-  static ResultArgumentCount argumentCount(const TypeAliasDecl *alias, size_t count, size_t got);
-  static ResultAliasDistinct notResolving(const TypeAliasDecl *alias, const AliasInstance &entry);
+  ResultDefaultExists defaultExists(const TypeAliasDecl *alias, size_t count,
+                                    const Type *fallback) const;
+  ResultArgumentCount argumentCount(const TypeAliasDecl *alias, size_t count, size_t got) const;
+  ResultAliasDistinct notResolving(const TypeAliasDecl *alias, const AliasInstance &entry) const;
   ResultDepthInBounds depthInBounds(const TypeAliasDecl *alias, unsigned calls,
-                                    bool conditional) const;
+                                    bool isConditional) const;
   ResultArgumentMatch argumentMatch(const TypeAliasDecl *alias, llvm::ArrayRef<const Type *> params,
-                                    llvm::ArrayRef<const Type *> args, size_t k);
-  static std::string typeList(llvm::ArrayRef<const Type *> types);
+                                    llvm::ArrayRef<const Type *> args, size_t index);
 
   struct AliasRun {
     TypeAliasDecl *alias = nullptr;
@@ -46,14 +45,16 @@ private:
 
   const Type *aliasStep(AliasRun &run, unsigned calls);
   const Type *failedAliasArgs(AliasRun &run);
-  static const Type *reusedInstance(AliasInstance &entry);
-  bool aliasDepthFits(const TypeAliasDecl *alias, const AliasInstance &entry, unsigned calls);
-  static std::string aliasDisplay(const AliasRun &run);
+  const Type *reusedInstance(AliasInstance &entry) const;
+  bool isAliasDepthFitting(const TypeAliasDecl *alias, const AliasInstance &entry, unsigned calls);
+  std::string aliasDisplay(const AliasRun &run) const;
   const Type *resolveAliasBody(const AliasRun &run, AliasInstance &entry,
                                const std::string &display);
   const Type *objectAliasType(TypeAliasDecl *alias, AliasInstance &entry,
                               const std::string &display);
   const Type *aliasTypeInner(const TypeAliasDecl *alias);
+  const Type *definedObject(const AliasInstance &entry, std::vector<Field> fields,
+                            std::vector<Overload> overloads, const std::string &display) const;
   void rememberAliasType(const AliasRun &run, const Type *type, const std::string &display);
 
   SemanticState &state;

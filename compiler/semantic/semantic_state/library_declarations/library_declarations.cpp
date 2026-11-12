@@ -9,8 +9,8 @@ llvm::ArrayRef<Stmt *> LibraryDeclarations::getBuiltinItems(BuiltinText text) co
   return this->builtins.getItems(text);
 }
 
-void LibraryDeclarations::rememberLibraryFunction(FunctionDecl *fn) {
-  this->libraryFunctions[fn->name] = fn;
+void LibraryDeclarations::rememberLibraryFunction(FunctionDecl *functionDecl) {
+  this->libraryFunctions[functionDecl->name] = functionDecl;
 }
 
 FunctionDecl *LibraryDeclarations::findLibraryFunction(llvm::StringRef name) const {
@@ -25,8 +25,8 @@ TypeAliasDecl *LibraryDeclarations::findLibraryType(llvm::StringRef name) const 
   return this->libraryTypes.lookup(name);
 }
 
-void LibraryDeclarations::rememberLibraryClass(ClassDecl *cls) {
-  this->libraryClasses[cls->name] = cls;
+void LibraryDeclarations::rememberLibraryClass(ClassDecl *classDecl) {
+  this->libraryClasses[classDecl->name] = classDecl;
 }
 
 ClassDecl *LibraryDeclarations::findLibraryClass(llvm::StringRef name) const {

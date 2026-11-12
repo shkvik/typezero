@@ -24,7 +24,7 @@ EventMapInference::EventMapInference(SemanticState &owner, SemanticParts &all)
   this->functionChecker = &all.functionChecker;
 }
 
-EventRecord *EventMapInference::findEvent(EventSite *site, llvm::StringRef name) {
+EventRecord *EventMapInference::findEvent(EventSite *site, llvm::StringRef name) const {
   for (EventRecord &record : site->events) {
     if (record.name == name) {
       return &record;
@@ -34,11 +34,11 @@ EventRecord *EventMapInference::findEvent(EventSite *site, llvm::StringRef name)
   return nullptr;
 }
 
-bool EventMapInference::isFrozen(const EventRecord *record) {
+bool EventMapInference::isFrozen(const EventRecord *record) const {
   return record != nullptr && record->state == EventState::DONE && record->args != nullptr;
 }
 
-std::string EventMapInference::fileOfPlace(const std::string &place) {
+std::string EventMapInference::fileOfPlace(const std::string &place) const {
   size_t column = place.rfind(':');
   size_t line =
       column == std::string::npos || column == 0 ? std::string::npos : place.rfind(':', column - 1);
@@ -46,9 +46,9 @@ std::string EventMapInference::fileOfPlace(const std::string &place) {
   return line == std::string::npos ? place : place.substr(0, line);
 }
 
-std::vector<FunctionDecl *> EventMapInference::classMethods(const ClassDecl *cls) {
-  std::vector<FunctionDecl *> methods = cls->methods;
-  for (const ClassField &field : cls->fields) {
+std::vector<FunctionDecl *> EventMapInference::classMethods(const ClassDecl *classDecl) const {
+  std::vector<FunctionDecl *> methods = classDecl->methods;
+  for (const ClassField &field : classDecl->fields) {
     if (field.method() != nullptr) {
       methods.push_back(field.method());
     }
@@ -57,23 +57,24 @@ std::vector<FunctionDecl *> EventMapInference::classMethods(const ClassDecl *cls
   return methods;
 }
 
-bool EventMapInference::holdsClassExpr(const Stmt *where) {
-  std::vector<const Expr *> exprs = AstWalker::exprsIn(where, true);
+bool EventMapInference::holdsClassExpr(const Stmt *where) const {
+  auto exprs = AstWalker::exprsIn(where, true);
 
   return llvm::any_of(exprs, [](const Expr *expr) { return llvm::isa<ClassExpr>(expr); });
 }
 
-bool EventMapInference::canTryFunction(const FunctionDecl *fn) {
-  const ClassDecl *cls = fn->cls();
-  bool isGeneric = fn->sym != nullptr && fn->sym->isGeneric();
-  bool isGenericClass = cls != nullptr && cls->isGeneric();
-  bool isUsable = fn->body != nullptr && fn->sym != nullptr && !isGeneric && !isGenericClass;
+bool EventMapInference::canTryFunction(const FunctionDecl *functionDecl) const {
+  const ClassDecl *classDecl = functionDecl->cls();
+  bool isGeneric = functionDecl->sym != nullptr && functionDecl->sym->isGeneric();
+  bool isGenericClass = classDecl != nullptr && classDecl->isGeneric();
+  bool isUsable = functionDecl->body != nullptr && functionDecl->sym != nullptr && !isGeneric &&
+                  !isGenericClass;
 
-  return isUsable && !EventMapInference::holdsClassExpr(fn);
+  return isUsable && !this->holdsClassExpr(functionDecl);
 }
 
-void EventMapInference::addCandidates(const Stmt *where, Module *module, FunctionDecl *fn,
-                                      size_t index, std::vector<EmitCandidate> &found) {
+void EventMapInference::addCandidates(const Stmt *where, Module *module, FunctionDecl *functionDecl,
+                                      size_t index, std::vector<EmitCandidate> &found) const {
   for (const Expr *expr : AstWalker::exprsIn(where, true)) {
     auto *call = dyn_cast<CallExpr>(expr);
     auto *member = call != nullptr ? dyn_cast<MemberExpr>(call->callee) : nullptr;
@@ -89,7 +90,7 @@ void EventMapInference::addCandidates(const Stmt *where, Module *module, Functio
     EmitCandidate candidate;
     candidate.call = call;
     candidate.module = module;
-    candidate.function = fn;
+    candidate.function = functionDecl;
     candidate.index = index;
     candidate.event = ToUtf8::toUtf8(name->value);
     candidate.self = isSelf;
@@ -97,8 +98,8 @@ void EventMapInference::addCandidates(const Stmt *where, Module *module, Functio
   }
 }
 
-void EventMapInference::defineMapFields(EventSite *site) {
-  std::vector<Field> fields;
+void EventMapInference::defineMapFields(EventSite *site) const {
+  auto fields = std::vector<Field>();
   for (const EventRecord &record : site->events) {
     if (record.args != nullptr) {
       fields.push_back({record.name, record.args, false});
@@ -120,8 +121,8 @@ std::string EventMapInference::placeOf(llvm::SMLoc loc) const {
 }
 
 std::string EventMapInference::shortPlaceOf(llvm::SMLoc loc) const {
-  std::string place = this->placeOf(loc);
-  std::string file = EventMapInference::fileOfPlace(place);
+  auto place = this->placeOf(loc);
+  auto file = this->fileOfPlace(place);
   std::string name = llvm::sys::path::filename(file).str();
 
   return name + place.substr(file.size());
@@ -143,37 +144,37 @@ Module *EventMapInference::findModuleAt(llvm::SMLoc loc) const {
 }
 
 Type *EventMapInference::siteMap(const std::string &key, const std::string &name, Module *owner,
-                                 const ClassDecl *cls) {
-  EventStore &store = this->state.getEventStore();
-  EventSite *known = store.findSite(key);
+                                 const ClassDecl *classDecl) {
+  auto &store = this->state.getEventStore();
+  auto *known = store.findSite(key);
   if (known != nullptr) {
     return known->map;
   }
-  Type *map = Type::declareObject(name);
+  auto *map = Type::declareObject(name);
   map->defineFields({});
   EventSite site;
   site.key = key;
   site.map = map;
   site.owner = owner;
-  site.cls = cls;
-  EventSite *added = store.addSite(std::move(site));
+  site.cls = classDecl;
+  auto *added = store.addSite(std::move(site));
 
   return added->map;
 }
 
-Type *EventMapInference::classEventMap(const ClassDecl *cls) {
-  std::string key = "class " + this->placeOf(cls->loc()) + " " + cls->name.str();
-  std::string name = "events of " + cls->name.str();
-  Module *declared = this->state.getModuleStates().findDeclModule(cls);
-  Module *owner = declared != nullptr ? declared : this->findModuleAt(cls->loc());
+Type *EventMapInference::classEventMap(const ClassDecl *classDecl) {
+  std::string key = "class " + this->placeOf(classDecl->loc()) + " " + classDecl->name.str();
+  std::string name = "events of " + classDecl->name.str();
+  auto *declared = this->state.getModuleStates().findDeclModule(classDecl);
+  Module *owner = declared != nullptr ? declared : this->findModuleAt(classDecl->loc());
 
-  return this->siteMap(key, name, owner, cls);
+  return this->siteMap(key, name, owner, classDecl);
 }
 
 Type *EventMapInference::newEventMap(llvm::SMLoc loc) {
   std::string key = "new " + this->placeOf(loc);
   std::string name = "events at " + this->shortPlaceOf(loc);
-  Module *owner = this->findModuleAt(loc);
+  auto *owner = this->findModuleAt(loc);
 
   return this->siteMap(key, name, owner, nullptr);
 }
@@ -192,11 +193,11 @@ void EventMapInference::rememberEventArgs(EventSite *site, EventRecord *record, 
   if (record->where.empty()) {
     record->where = this->shortPlaceOf(loc);
   }
-  EventMapInference::defineMapFields(site);
+  this->defineMapFields(site);
 }
 
 EventRecord *EventMapInference::completeEvent(EventSite *site, llvm::StringRef name) {
-  EventRecord *record = EventMapInference::findEvent(site, name);
+  auto *record = this->findEvent(site, name);
   if (record != nullptr && record->state != EventState::COLLECTING) {
     return record;
   }
@@ -215,7 +216,7 @@ void EventMapInference::completeSite(EventSite *site) {
     return;
   }
   site->complete = true;
-  std::vector<std::string> names;
+  auto names = std::vector<std::string>();
   for (const EmitCandidate &candidate : this->getSiteCandidates(site)) {
     if (!llvm::is_contained(names, candidate.event)) {
       names.push_back(candidate.event);
@@ -227,24 +228,24 @@ void EventMapInference::completeSite(EventSite *site) {
 }
 
 const std::vector<EmitCandidate> &EventMapInference::getModuleCandidates(Module *module) {
-  EventStore &store = this->state.getEventStore();
+  auto &store = this->state.getEventStore();
   if (store.hasCandidates(module)) {
     return store.getCandidates(module);
   }
-  std::vector<EmitCandidate> found;
+  auto found = std::vector<EmitCandidate>();
   std::vector<Stmt *> &items = module->file.items;
-  for (size_t i = 0; i < items.size(); ++i) {
-    Stmt *item = items[i];
-    auto *fn = dyn_cast<FunctionDecl>(item);
-    auto *cls = dyn_cast<ClassDecl>(item);
-    if (fn != nullptr) {
-      EventMapInference::addCandidates(fn, module, fn, i, found);
-    } else if (cls != nullptr) {
-      for (FunctionDecl *method : EventMapInference::classMethods(cls)) {
-        EventMapInference::addCandidates(method, module, method, i, found);
+  for (size_t index = 0; index < items.size(); ++index) {
+    Stmt *item = items[index];
+    auto *functionDecl = dyn_cast<FunctionDecl>(item);
+    auto *classDecl = dyn_cast<ClassDecl>(item);
+    if (functionDecl != nullptr) {
+      this->addCandidates(functionDecl, module, functionDecl, index, found);
+    } else if (classDecl != nullptr) {
+      for (FunctionDecl *method : this->classMethods(classDecl)) {
+        this->addCandidates(method, module, method, index, found);
       }
     } else {
-      EventMapInference::addCandidates(item, module, nullptr, i, found);
+      this->addCandidates(item, module, nullptr, index, found);
     }
   }
   store.rememberCandidates(module, std::move(found));
@@ -253,7 +254,7 @@ const std::vector<EmitCandidate> &EventMapInference::getModuleCandidates(Module 
 }
 
 std::vector<EmitCandidate> EventMapInference::getSiteCandidates(const EventSite *site) {
-  std::vector<EmitCandidate> found;
+  auto found = std::vector<EmitCandidate>();
   for (Module *module : this->state.getInventoryStore().getModules()) {
     bool isOwn = module == site->owner;
     bool isSkipped = module->builtin || (!isOwn && site->cls == nullptr);
@@ -261,14 +262,14 @@ std::vector<EmitCandidate> EventMapInference::getSiteCandidates(const EventSite 
       continue;
     }
     for (const EmitCandidate &candidate : this->getModuleCandidates(module)) {
-      if (isOwn || EventMapInference::isSubclassEmit(site, candidate)) {
+      if (isOwn || this->isSubclassEmit(site, candidate)) {
         found.push_back(candidate);
       }
     }
   }
-  std::vector<EmitCandidate> late = this->getLateCandidates();
+  auto late = this->getLateCandidates();
   for (const EmitCandidate &candidate : late) {
-    if (EventMapInference::isSubclassEmit(site, candidate)) {
+    if (this->isSubclassEmit(site, candidate)) {
       found.push_back(candidate);
     }
   }
@@ -277,27 +278,29 @@ std::vector<EmitCandidate> EventMapInference::getSiteCandidates(const EventSite 
 }
 
 std::vector<EmitCandidate> EventMapInference::getLateCandidates() {
-  std::vector<EmitCandidate> found;
-  for (ClassDecl *cls : this->state.getLateClassStore().getUncheckedLateClasses()) {
-    Module *module = this->findModuleAt(cls->loc());
-    for (FunctionDecl *method : EventMapInference::classMethods(cls)) {
-      EventMapInference::addCandidates(method, module, method, 0, found);
+  auto found = std::vector<EmitCandidate>();
+  for (ClassDecl *classDecl : this->state.getLateClassStore().getUncheckedLateClasses()) {
+    auto *module = this->findModuleAt(classDecl->loc());
+    for (FunctionDecl *method : this->classMethods(classDecl)) {
+      this->addCandidates(method, module, method, 0, found);
     }
   }
 
   return found;
 }
 
-bool EventMapInference::isSubclassEmit(const EventSite *site, const EmitCandidate &candidate) {
-  const ClassDecl *cls = candidate.function != nullptr ? candidate.function->cls() : nullptr;
+bool EventMapInference::isSubclassEmit(const EventSite *site,
+                                       const EmitCandidate &candidate) const {
+  const ClassDecl *classDecl = candidate.function != nullptr ? candidate.function->cls() : nullptr;
 
-  return site->cls != nullptr && candidate.self && cls != nullptr && cls->derivesFrom(site->cls);
+  return site->cls != nullptr && candidate.self && classDecl != nullptr &&
+         classDecl->derivesFrom(site->cls);
 }
 
 void EventMapInference::tryCandidates(EventSite *site, EventRecord *record) {
-  llvm::SmallPtrSet<const FunctionDecl *, 4> functions;
+  auto functions = llvm::SmallPtrSet<const FunctionDecl *, 4>();
   llvm::SmallSet<size_t, 4> statements;
-  std::string untyped;
+  auto untyped = std::string();
   for (const EmitCandidate &candidate : this->getSiteCandidates(site)) {
     bool isUnchecked = candidate.event == record->name && candidate.call->type == nullptr;
     if (!isUnchecked) {
@@ -308,14 +311,14 @@ void EventMapInference::tryCandidates(EventSite *site, EventRecord *record) {
     }
     if (candidate.function != nullptr) {
       auto [_, isNewFunction] = functions.insert(candidate.function);
-      if (isNewFunction && EventMapInference::canTryFunction(candidate.function)) {
+      if (isNewFunction && this->canTryFunction(candidate.function)) {
         this->tryFunction(candidate.function);
       }
     }
     if (candidate.function == nullptr && this->canTryStatement(candidate)) {
       auto [_, isNewStatement] = statements.insert(candidate.index);
       Stmt *statement = candidate.module->file.items[candidate.index];
-      if (isNewStatement && !EventMapInference::holdsClassExpr(statement)) {
+      if (isNewStatement && !this->holdsClassExpr(statement)) {
         this->tryStatement(statement);
       }
     }
@@ -326,25 +329,25 @@ void EventMapInference::tryCandidates(EventSite *site, EventRecord *record) {
 }
 
 bool EventMapInference::canTryStatement(const EmitCandidate &candidate) {
-  ModuleStates &modules = this->state.getModuleStates();
+  auto &modules = this->state.getModuleStates();
   if (modules.getCurrentModule() != candidate.module) {
     return false;
   }
-  ModuleState &here = modules.getModuleState(candidate.module);
+  auto &here = modules.getModuleState(candidate.module);
 
   return here.busy && candidate.index >= here.next;
 }
 
-void EventMapInference::tryFunction(FunctionDecl *fn) {
-  BodyState saved = this->returnInferrer->enterBody(fn);
+void EventMapInference::tryFunction(FunctionDecl *functionDecl) {
+  auto saved = this->returnInferrer->enterBody(functionDecl);
   this->state.getDiagnostics().pushList(DiagnosticRoute::DISCARD);
-  FunctionStack &functions = this->state.getFunctionStack();
-  std::vector<ReturnStmt *> returns;
-  std::vector<YieldExpr *> yields;
+  auto &functions = this->state.getFunctionStack();
+  auto returns = std::vector<ReturnStmt *>();
+  auto yields = std::vector<YieldExpr *>();
   functions.rememberReturnCollector(&returns);
   functions.rememberYieldCollector(&yields);
   functions.enterTrial();
-  FunctionDecl *copy = this->returnInferrer->freshCopy(fn);
+  auto *copy = this->returnInferrer->freshCopy(functionDecl);
   this->functionChecker->walkFunctionFromScratch(copy);
   functions.leaveTrial();
   this->state.getDiagnostics().popList();
@@ -352,9 +355,9 @@ void EventMapInference::tryFunction(FunctionDecl *fn) {
 }
 
 void EventMapInference::tryStatement(Stmt *statement) {
-  BodyState saved = this->returnInferrer->enterBody(nullptr);
+  auto saved = this->returnInferrer->enterBody(nullptr);
   this->state.getDiagnostics().pushList(DiagnosticRoute::DISCARD);
-  FunctionStack &functions = this->state.getFunctionStack();
+  auto &functions = this->state.getFunctionStack();
   functions.enterTrial();
   AstCloner cloner(this->state.getAst());
   Stmt *copy = cloner.copyStatement(statement);

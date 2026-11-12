@@ -24,6 +24,12 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+constexpr llvm::StringLiteral kThisName = "this";
+
+}
+
 TargetChecker::TargetChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->scopes = &all.scopes;
@@ -43,10 +49,10 @@ TargetChecker::TargetChecker(SemanticState &owner, SemanticParts &all)
   this->runtimeObjectChecker = &all.runtimeObjectChecker;
 }
 
-TargetChecker::ResultIndexIsNotBytes TargetChecker::indexNotBytes(const Type *type) {
+TargetChecker::ResultIndexIsNotBytes TargetChecker::checkIndexNotBytes(const Type *type) const {
   if (type->isBytes()) {
     bool isDataView = type->bytes() == Type::Bytes::DataView;
-    std::string message = ErrorTextIndexTarget::bytes(type->name(), isDataView);
+    auto message = ErrorTextIndexTarget::bytes(type->name(), isDataView);
 
     return err(TargetCheckerIndexNotBytesError{
         .code = TargetCheckerIndexNotBytesErrorCode::BYTES_INDEXED,
@@ -57,9 +63,10 @@ TargetChecker::ResultIndexIsNotBytes TargetChecker::indexNotBytes(const Type *ty
   return ok(type);
 }
 
-TargetChecker::ResultObjectIsDefined TargetChecker::objectDefined(const Type *type) {
-  if (type->isOptional() && (type->inner()->isObject() || type->inner()->isDict())) {
-    std::string message = ErrorTextIndexTarget::undefined();
+TargetChecker::ResultObjectIsDefined TargetChecker::checkObjectDefined(const Type *type) const {
+  bool isHolder = type->isOptional() && (type->inner()->isObject() || type->inner()->isDict());
+  if (isHolder) {
+    auto message = ErrorTextIndexTarget::undefined();
 
     return err(TargetCheckerObjectDefinedError{
         .code = TargetCheckerObjectDefinedErrorCode::MAY_BE_UNDEFINED,
@@ -70,9 +77,9 @@ TargetChecker::ResultObjectIsDefined TargetChecker::objectDefined(const Type *ty
   return ok(type);
 }
 
-TargetChecker::ResultIndexIsWritable TargetChecker::indexWritable(const Type *type) {
+TargetChecker::ResultIndexIsWritable TargetChecker::checkIndexWritable(const Type *type) const {
   if (type->isString()) {
-    std::string message = ErrorTextIndexTarget::immutable();
+    auto message = ErrorTextIndexTarget::immutable();
 
     return err(TargetCheckerIndexWritableError{
         .code = TargetCheckerIndexWritableErrorCode::STRING_IMMUTABLE,
@@ -80,7 +87,7 @@ TargetChecker::ResultIndexIsWritable TargetChecker::indexWritable(const Type *ty
     });
   }
   if (type->isOptional() && type->inner()->isArray()) {
-    std::string message = ErrorTextIndexTarget::arrayUndef();
+    auto message = ErrorTextIndexTarget::arrayUndef();
 
     return err(TargetCheckerIndexWritableError{
         .code = TargetCheckerIndexWritableErrorCode::ARRAY_MAY_BE_UNDEFINED,
@@ -88,7 +95,7 @@ TargetChecker::ResultIndexIsWritable TargetChecker::indexWritable(const Type *ty
     });
   }
   if (!type->isArray()) {
-    std::string message = ErrorTextIndexTarget::notIndexed(type->name());
+    auto message = ErrorTextIndexTarget::notIndexed(type->name());
 
     return err(TargetCheckerIndexWritableError{
         .code = TargetCheckerIndexWritableErrorCode::NOT_INDEXABLE,
@@ -99,10 +106,10 @@ TargetChecker::ResultIndexIsWritable TargetChecker::indexWritable(const Type *ty
   return ok(type);
 }
 
-TargetChecker::ResultDefinedDictType TargetChecker::dictDefined(const Type *type,
-                                                                const MemberExpr *member) {
+TargetChecker::ResultDefinedDictType
+TargetChecker::checkDictDefined(const Type *type, const MemberExpr *member) const {
   if (type->isOptional() && type->inner()->isDict()) {
-    std::string message = ErrorTextMemberTarget::undefined(member->name);
+    auto message = ErrorTextMemberTarget::undefined(member->name);
 
     return err(TargetCheckerDictDefinedError{
         .code = TargetCheckerDictDefinedErrorCode::MAY_BE_UNDEFINED,
@@ -113,13 +120,13 @@ TargetChecker::ResultDefinedDictType TargetChecker::dictDefined(const Type *type
   return ok(type);
 }
 
-TargetChecker::ResultNoBytesProperty TargetChecker::bytesMember(const Type *type,
-                                                                const MemberExpr *member) {
+TargetChecker::ResultNoBytesProperty
+TargetChecker::checkBytesMember(const Type *type, const MemberExpr *member) const {
   const Type *bytes = type->nonOptional();
   bool isLength = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) ||
                   BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH);
   if (bytes->isBytes() && isLength) {
-    std::string message = ErrorTextMemberTarget::fixedSize(bytes->name());
+    auto message = ErrorTextMemberTarget::fixedSize(bytes->name());
 
     return err(TargetCheckerBytesMemberError{
         .code = TargetCheckerBytesMemberErrorCode::LENGTH_FIXED,
@@ -127,7 +134,7 @@ TargetChecker::ResultNoBytesProperty TargetChecker::bytesMember(const Type *type
     });
   }
   if (bytes->isBytes()) {
-    std::string message = ErrorTextMemberTarget::noAssign(member->name, bytes->name());
+    auto message = ErrorTextMemberTarget::noAssign(member->name, bytes->name());
 
     return err(TargetCheckerBytesMemberError{
         .code = TargetCheckerBytesMemberErrorCode::NOT_WRITABLE,
@@ -138,12 +145,13 @@ TargetChecker::ResultNoBytesProperty TargetChecker::bytesMember(const Type *type
   return ok(type);
 }
 
-TargetChecker::ResultFieldIsWritable
-TargetChecker::memberWritable(const Type *type, const MemberExpr *member, bool compound) {
+TargetChecker::ResultFieldIsWritable TargetChecker::checkMemberWritable(const Type *type,
+                                                                        const MemberExpr *member,
+                                                                        AssignForm form) const {
   bool isLength = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH);
   bool isArrayLength = type->isArray() && isLength;
-  if (isArrayLength && compound) {
-    std::string message = ErrorTextMemberTarget::onlyAssign();
+  if (isArrayLength && form == AssignForm::COMPOUND) {
+    auto message = ErrorTextMemberTarget::onlyAssign();
 
     return err(TargetCheckerMemberWritableError{
         .code = TargetCheckerMemberWritableErrorCode::COMPOUND_LENGTH,
@@ -151,7 +159,7 @@ TargetChecker::memberWritable(const Type *type, const MemberExpr *member, bool c
     });
   }
   if (type->isString() && isLength) {
-    std::string message = ErrorTextMemberTarget::textLength();
+    auto message = ErrorTextMemberTarget::textLength();
 
     return err(TargetCheckerMemberWritableError{
         .code = TargetCheckerMemberWritableErrorCode::STRING_LENGTH,
@@ -159,7 +167,7 @@ TargetChecker::memberWritable(const Type *type, const MemberExpr *member, bool c
     });
   }
   if (!isArrayLength) {
-    std::string message = ErrorTextMemberTarget::noAssign(member->name, type->name());
+    auto message = ErrorTextMemberTarget::noAssign(member->name, type->name());
 
     return err(TargetCheckerMemberWritableError{
         .code = TargetCheckerMemberWritableErrorCode::NOT_WRITABLE,
@@ -170,9 +178,9 @@ TargetChecker::memberWritable(const Type *type, const MemberExpr *member, bool c
   return ok(Type::intTy());
 }
 
-TargetChecker::ResultTargetIsNotThis TargetChecker::notThis(const NameExpr *name) {
-  if (name->name == "this") {
-    std::string message = ErrorTextVarTarget::toThis();
+TargetChecker::ResultTargetIsNotThis TargetChecker::checkNotThis(const NameExpr *name) const {
+  if (name->name == kThisName) {
+    auto message = ErrorTextVarTarget::toThis();
 
     return err(TargetCheckerNotThisError{
         .code = TargetCheckerNotThisErrorCode::ASSIGN_TO_THIS,
@@ -183,11 +191,11 @@ TargetChecker::ResultTargetIsNotThis TargetChecker::notThis(const NameExpr *name
   return ok(name);
 }
 
-TargetChecker::ResultVariableMutable TargetChecker::variableMutable(const NameExpr *name,
-                                                                    const VarSymbol *var) {
-  if (var->isConst) {
-    bool isFunction = var->function() != nullptr;
-    std::string message = ErrorTextVarTarget::constant(name->name, isFunction);
+TargetChecker::ResultVariableMutable
+TargetChecker::checkVariableMutable(const NameExpr *name, const VarSymbol *variable) const {
+  if (variable->isConst) {
+    bool isFunction = variable->function() != nullptr;
+    auto message = ErrorTextVarTarget::constant(name->name, isFunction);
 
     return err(TargetCheckerVariableMutableError{
         .code = TargetCheckerVariableMutableErrorCode::CONSTANT,
@@ -195,30 +203,30 @@ TargetChecker::ResultVariableMutable TargetChecker::variableMutable(const NameEx
     });
   }
 
-  return ok(var);
+  return ok(variable);
 }
 
-const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
+const Type *TargetChecker::checkAssignTarget(Expr *&target, AssignForm form) {
   auto *name = dyn_cast<NameExpr>(target);
-  if (name != nullptr) {
-    VarSymbol *var = this->checkVarTarget(name);
-    return var != nullptr ? var->type : Type::error();
-  }
   auto *index = dyn_cast<IndexExpr>(target);
-  if (index != nullptr) {
-    return this->indexTargetType(target, index, compound);
-  }
   auto *member = dyn_cast<MemberExpr>(target);
-  if (member != nullptr) {
-    return this->memberTargetType(target, member, compound);
+  if (name != nullptr) {
+    auto *variable = this->checkVarTarget(name);
+    return variable != nullptr ? variable->type : Type::error();
   }
-  std::string message = TargetChecker::wrongTargetMessage(target);
+  if (index != nullptr) {
+    return this->indexTargetType(target, index, form);
+  }
+  if (member != nullptr) {
+    return this->memberTargetType(target, member, form);
+  }
+  auto message = this->wrongTargetMessage(target);
   this->state.getDiagnostics().error(target->loc(), message);
 
   return Type::error();
 }
 
-std::string TargetChecker::wrongTargetMessage(const Expr *target) {
+std::string TargetChecker::wrongTargetMessage(const Expr *target) const {
   if (isa<ArrayLitExpr>(target)) {
     return ErrorTextAssignTarget::arrayForm();
   }
@@ -229,8 +237,8 @@ std::string TargetChecker::wrongTargetMessage(const Expr *target) {
   return ErrorTextAssignTarget::notTarget();
 }
 
-const Type *TargetChecker::dictTargetType(Expr *target, bool compound) {
-  DictChecker::ResultRecordTargetType value = this->dictChecker->checkDictTarget(target, compound);
+const Type *TargetChecker::dictTargetType(Expr *target, AssignForm form) {
+  auto value = this->dictChecker->checkDictTarget(target, form);
   if (value.isErr()) {
     this->state.getDiagnostics().error(target->loc(), value.error().message);
     return Type::error();
@@ -239,11 +247,11 @@ const Type *TargetChecker::dictTargetType(Expr *target, bool compound) {
   return value.value();
 }
 
-const Type *TargetChecker::indexTargetType(Expr *&target, IndexExpr *index, bool compound) {
+const Type *TargetChecker::indexTargetType(Expr *&target, IndexExpr *index, AssignForm form) {
   index->object = this->exprChecker->checkExpr(index->object);
   const Type *type = index->object->type;
   index->type = Type::error();
-  std::optional<const Type *> generic = this->genericIndexType(index);
+  auto generic = this->genericIndexType(index);
   if (generic.has_value()) {
     return *generic;
   }
@@ -251,28 +259,34 @@ const Type *TargetChecker::indexTargetType(Expr *&target, IndexExpr *index, bool
     return this->jsonChecker->checkJsonTarget(index);
   }
   if (type->isDict()) {
-    return this->dictTargetType(index, compound);
+    return this->dictTargetType(index, form);
   }
   if (type->isTypedArray()) {
-    index->index = this->memberChecker->checkPosition(index->index);
-    index->type = type->bytes() == Type::Bytes::Uint8Clamped ? Type::intTy() : type->elementType();
-    return index->type;
+    return this->typedArrayTargetType(index, type);
   }
-  ResultIndexIsNotBytes notBytes = TargetChecker::indexNotBytes(type);
+  auto notBytes = this->checkIndexNotBytes(type);
   if (notBytes.isErr()) {
     index->index = this->exprChecker->checkExpr(index->index);
     this->state.getDiagnostics().error(index->loc(), notBytes.error().message);
     return Type::error();
   }
   if (type->isObject()) {
-    return this->keyedTargetType(target, index, compound);
+    return this->keyedTargetType(target, index, form);
   }
 
   return this->arrayTargetType(index);
 }
 
+const Type *TargetChecker::typedArrayTargetType(IndexExpr *index, const Type *type) {
+  index->index = this->memberChecker->checkPosition(index->index);
+  bool isClamped = type->bytes() == Type::Bytes::Uint8Clamped;
+  index->type = isClamped ? Type::intTy() : type->elementType();
+
+  return index->type;
+}
+
 std::optional<const Type *> TargetChecker::genericIndexType(IndexExpr *index) {
-  UtilityTypes::ResultGenericIndexed generic = this->utilityTypes->checkGenericIndex(index);
+  auto generic = this->utilityTypes->checkGenericIndex(index);
   bool isGenericIndex =
       generic.isOk() ||
       generic.error().code != UtilityTypesCheckGenericIndexErrorCode::NOT_A_GENERIC_INDEX;
@@ -286,12 +300,13 @@ std::optional<const Type *> TargetChecker::genericIndexType(IndexExpr *index) {
   return index->type;
 }
 
-const Type *TargetChecker::keyedTargetType(Expr *&target, IndexExpr *index, bool compound) {
-  KeyedFieldChecker::ResultKeyedFieldRead written =
-      this->keyedFieldChecker->checkKeyedField(index, true);
-  if (written.isErr() &&
-      written.error().code != KeyedFieldCheckerCheckKeyedFieldErrorCode::ALREADY_REPORTED) {
-    bool isWrongKey = KeyedFieldChecker::wrongKey(written.error().code);
+const Type *TargetChecker::keyedTargetType(Expr *&target, IndexExpr *index, AssignForm form) {
+  auto written = this->keyedFieldChecker->checkKeyedField(index, KeyedAccess::WRITE);
+  bool isReportable =
+      written.isErr() &&
+      written.error().code != KeyedFieldCheckerCheckKeyedFieldErrorCode::ALREADY_REPORTED;
+  if (isReportable) {
+    bool isWrongKey = this->keyedFieldChecker->wrongKey(written.error().code);
     llvm::SMLoc at = isWrongKey ? index->index->loc() : index->loc();
     this->state.getDiagnostics().error(at, written.error().message);
   }
@@ -305,12 +320,12 @@ const Type *TargetChecker::keyedTargetType(Expr *&target, IndexExpr *index, bool
   }
   target = member;
 
-  return this->classMemberChecker->checkFieldTarget(member, compound);
+  return this->classMemberChecker->checkFieldTarget(member, form);
 }
 
 const Type *TargetChecker::arrayTargetType(IndexExpr *index) {
   const Type *type = index->object->type;
-  ResultObjectIsDefined defined = TargetChecker::objectDefined(type);
+  auto defined = this->checkObjectDefined(type);
   if (defined.isErr()) {
     index->index = this->exprChecker->checkExpr(index->index);
     this->state.getDiagnostics().error(index->object->loc(), defined.error().message);
@@ -320,7 +335,7 @@ const Type *TargetChecker::arrayTargetType(IndexExpr *index) {
   if (type->isError()) {
     return type;
   }
-  ResultIndexIsWritable writable = TargetChecker::indexWritable(type);
+  auto writable = this->checkIndexWritable(type);
   if (writable.isErr()) {
     bool isArrayUndefined =
         writable.error().code == TargetCheckerIndexWritableErrorCode::ARRAY_MAY_BE_UNDEFINED;
@@ -333,13 +348,13 @@ const Type *TargetChecker::arrayTargetType(IndexExpr *index) {
   return index->type;
 }
 
-const Type *TargetChecker::memberTargetType(Expr *&target, MemberExpr *member, bool compound) {
+const Type *TargetChecker::memberTargetType(Expr *&target, MemberExpr *member, AssignForm form) {
   auto *name = dyn_cast<NameExpr>(member->object);
   ClassDecl *named = name != nullptr ? this->scopes->lookup(name->name).cls() : nullptr;
   if (named != nullptr) {
     return this->staticChecker->checkStaticTarget(target, named);
   }
-  if (name != nullptr && name->name == "this") {
+  if (name != nullptr && name->name == kThisName) {
     this->state.getClassContext().rememberThisMember(member->name);
   }
   member->object = this->exprChecker->checkExpr(member->object);
@@ -352,33 +367,32 @@ const Type *TargetChecker::memberTargetType(Expr *&target, MemberExpr *member, b
   if (type->nonOptional()->isJson()) {
     return this->jsonChecker->checkJsonTarget(member);
   }
-  auto *cls = const_cast<ClassDecl *>(type->classRef());
-  if (cls != nullptr && cls->type != nullptr && isa<NameExpr>(member->object)) {
-    return this->staticChecker->checkStaticTarget(target, cls);
+  auto *classDecl = const_cast<ClassDecl *>(type->classRef());
+  if (classDecl != nullptr && classDecl->type != nullptr && isa<NameExpr>(member->object)) {
+    return this->staticChecker->checkStaticTarget(target, classDecl);
   }
   if (type->isDict()) {
-    return this->dictTargetType(member, compound);
+    return this->dictTargetType(member, form);
   }
-  ResultDefinedDictType dict = TargetChecker::dictDefined(type, member);
+  auto dict = this->checkDictDefined(type, member);
   if (dict.isErr()) {
     this->state.getDiagnostics().error(member->object->loc(), dict.error().message);
     return Type::error();
   }
   if (type->isUnion()) {
-    return this->unionTargetType(member, type, compound);
+    return this->unionTargetType(member, type, form);
   }
 
-  return this->plainMemberTargetType(member, type, compound);
+  return this->plainMemberTargetType(member, type, form);
 }
 
-const Type *TargetChecker::unionTargetType(MemberExpr *member, const Type *type, bool compound) {
-  const Type *common = this->unionChecker->commonBaseWith(type, member->name);
+const Type *TargetChecker::unionTargetType(MemberExpr *member, const Type *type, AssignForm form) {
+  const auto *common = this->unionChecker->commonBaseWith(type, member->name);
   if (common != nullptr) {
     member->object = this->typeRelations->convert(member->object, common);
-    return this->classMemberChecker->checkFieldTarget(member, compound);
+    return this->classMemberChecker->checkFieldTarget(member, form);
   }
-  UnionChecker::ResultUnionFieldTarget unionField =
-      this->unionChecker->checkUnionFieldTarget(member);
+  auto unionField = this->unionChecker->checkUnionFieldTarget(member);
   if (unionField.isErr()) {
     this->state.getDiagnostics().error(member->loc(), unionField.error().message);
     return Type::error();
@@ -388,19 +402,19 @@ const Type *TargetChecker::unionTargetType(MemberExpr *member, const Type *type,
 }
 
 const Type *TargetChecker::plainMemberTargetType(MemberExpr *member, const Type *type,
-                                                 bool compound) {
-  ResultNoBytesProperty notBytes = TargetChecker::bytesMember(type, member);
+                                                 AssignForm form) {
+  auto notBytes = this->checkBytesMember(type, member);
   if (notBytes.isErr()) {
     this->state.getDiagnostics().error(member->loc(), notBytes.error().message);
     return Type::error();
   }
   if (type->isRuntimeObject()) {
-    return this->runtimeObjectChecker->checkRuntimeTarget(member, compound);
+    return this->runtimeObjectChecker->checkRuntimeTarget(member);
   }
   if (type->isObject() || (type->isOptional() && type->inner()->isObject())) {
-    return this->classMemberChecker->checkFieldTarget(member, compound);
+    return this->classMemberChecker->checkFieldTarget(member, form);
   }
-  ResultFieldIsWritable writable = TargetChecker::memberWritable(type, member, compound);
+  auto writable = this->checkMemberWritable(type, member, form);
   if (writable.isErr()) {
     this->state.getDiagnostics().error(member->loc(), writable.error().message);
     return Type::error();
@@ -411,36 +425,40 @@ const Type *TargetChecker::plainMemberTargetType(MemberExpr *member, const Type 
 }
 
 VarSymbol *TargetChecker::checkVarTarget(NameExpr *name) {
-  ResultTargetIsNotThis thisTarget = TargetChecker::notThis(name);
+  auto thisTarget = this->checkNotThis(name);
   if (thisTarget.isErr()) {
     this->state.getDiagnostics().error(name->loc(), thisTarget.error().message);
     return nullptr;
   }
-  ScopeEntry entry = this->topLevelChecker->lookupValue(name->name);
-  if (!entry.var()) {
+  auto entry = this->topLevelChecker->lookupValue(name->name);
+  VarSymbol *variable = entry.var();
+  if (variable == nullptr) {
     this->nameChecker->checkName(name);
     return nullptr;
   }
-  name->binding = NamedVar{.var = entry.var()};
-  name->type = this->scopes->varType(entry.var());
-  Scopes::ResultNameIsVisible visible = this->scopes->checkVisible(name, entry.var());
+  name->binding = NamedVar{.var = variable};
+  name->type = this->scopes->varType(variable);
+  auto visible = this->scopes->checkVisible(name, variable);
   if (visible.isErr()) {
     this->state.getDiagnostics().error(name->loc(), visible.error().message);
   }
-  ResultVariableMutable mutableVar = TargetChecker::variableMutable(name, entry.var());
+  this->walkVariableWritable(name, variable);
+  variable->reassigned = true;
+  this->nestedFunctions->noteUse(variable, name->loc());
+
+  return variable;
+}
+
+void TargetChecker::walkVariableWritable(const NameExpr *name, VarSymbol *variable) {
+  auto mutableVar = this->checkVariableMutable(name, variable);
   if (mutableVar.isErr()) {
     this->state.getDiagnostics().error(name->loc(), mutableVar.error().message);
-  } else {
-    TopLevelChecker::ResultVarNotImported writable =
-        this->topLevelChecker->checkImportAssign(name, entry.var());
-    if (writable.isErr()) {
-      this->state.getDiagnostics().error(name->loc(), writable.error().message);
-    }
+    return;
   }
-  entry.var()->reassigned = true;
-  this->nestedFunctions->noteUse(entry.var(), name->loc());
-
-  return entry.var();
+  auto writable = this->topLevelChecker->checkImportAssign(name, variable);
+  if (writable.isErr()) {
+    this->state.getDiagnostics().error(name->loc(), writable.error().message);
+  }
 }
 
 }

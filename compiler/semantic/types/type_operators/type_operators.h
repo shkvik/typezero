@@ -6,6 +6,7 @@
 
 namespace tz {
 
+class ClassBases;
 class SemanticParts;
 class EventMaps;
 class TypeParams;
@@ -15,6 +16,7 @@ class ClassDeclarer;
 class TemplateTypes;
 class ArgListChecker;
 class ReturnInferrer;
+class GenericChecker;
 class ExtendsRelation;
 class TopLevelChecker;
 class ConditionalTypes;
@@ -41,58 +43,74 @@ private:
     int readonly;
   };
 
-  static bool mentionsAnyParam(llvm::ArrayRef<const Type *> operands);
-  static const Type *firstError(llvm::ArrayRef<const Type *> operands);
-  const Type *evalReadyTypeOp(TypeOp kind, llvm::ArrayRef<const Type *> operands);
-  const Type *evalKeyOf(const Type *operand);
-  const Type *evalIndexed(const Type *object, const Type *key);
-  static const Type *lengthType(const Type *object);
-  const Type *evalFiltered(TypeOp kind, const Type *members, const Type *filter);
-  static const Type *evalSpread(llvm::ArrayRef<const Type *> operands);
-  static const Type *evalFunctionPart(TypeOp kind, const Type *operand);
-  const Type *evalMapped(const Type *op, llvm::ArrayRef<const Type *> operands);
-  static bool isOpenMapped(const MappedOperands &mapped);
-  const Type *addMappedField(const MappedOperands &mapped, const Type *name,
-                             std::vector<Field> &fields);
-  const Type *renamedFields(const MappedOperands &mapped, const Type *name,
-                            std::vector<std::string> &names);
-  static void mergeMappedField(std::vector<Field> &fields, const std::string &field,
-                               const Type *type, bool readonly);
-
   struct MappedParts {
     Type *key;
     const Type *value;
     const Type *rename;
   };
 
-  const Type *ownKeys(const Type *type);
+  using ResultTypeOpAllowed = Result<void, TypeOperatorsResolveTypeOpError>;
+
   ResultTypeOpResolved resolveKeyOf(const TypeRef &ref);
-  ResultTypeOpResolved resolveIndexed(const TypeRef &ref);
   ResultTypeOpResolved resolveTypeOf(const TypeRef &ref);
-  const Type *typeOfName(llvm::StringRef name);
-  const Type *scopedValueType(llvm::StringRef name);
-  const Type *declaredValueType(Stmt *item, llvm::StringRef name);
-  const Type *declaredVarType(const VarDeclStmt *decl, llvm::StringRef name);
-  const Type *declaredFunctionType(const FunctionDecl *fn, llvm::StringRef name);
-  const Type *importedNameType(const std::vector<ImportDecl> &imports, llvm::StringRef name);
-  const Type *singleMethodType(const Type *type, llvm::StringRef name);
   ResultTypeOpResolved resolveMapped(const TypeRef &ref);
+  ResultTypeOpResolved resolveIndexed(const TypeRef &ref);
+  ResultTypeOpAllowed checkKeysAreStrings(const Type *keys) const;
+  ResultTypeOpAllowed checkRenameIsString(const Type *rename) const;
+
+  const Type *ownKeys(const Type *type);
+  bool isLengthKey(const Type *key) const;
+  const Type *evalKeyOf(const Type *operand);
+  const Type *typeOfName(llvm::StringRef name);
+  const Type *widerKeys(const Type *keys) const;
+  const Type *writtenRename(const TypeRef &ref);
+  const Type *lengthType(const Type *object) const;
+  const Type *nonStringKey(const Type *keys) const;
+  const Type *scopedValueType(llvm::StringRef name);
+  bool isOpenMapped(const MappedOperands &mapped) const;
+  const Type *nonStringRename(const Type *rename) const;
+  const Type *evalIndexed(const Type *object, const Type *key);
   const Type *mappedSource(const TypeRef &ref, const Type *keys);
+  const Type *declaredValueType(Stmt *item, llvm::StringRef name);
+  llvm::ArrayRef<const Type *> membersOf(const Type *&type) const;
+  const Type *memberValueType(const Type *type, llvm::StringRef name);
+  const Type *firstError(llvm::ArrayRef<const Type *> operands) const;
+  const Type *evalSpread(llvm::ArrayRef<const Type *> operands) const;
+  const Type *evalFunctionPart(TypeOp kind, const Type *operand) const;
+  const Type *singleMethodType(const Type *type, llvm::StringRef name);
   MappedParts resolveMappedParts(const TypeRef &ref, const Type *keys);
-  static const Type *nonStringRename(const Type *rename);
-  static const Type *nonStringKey(const Type *keys);
-  static std::u16string utf16(llvm::StringRef text);
-  static llvm::ArrayRef<const Type *> membersOf(const Type *&type);
+  bool isMentioningAnyParam(llvm::ArrayRef<const Type *> operands) const;
+  bool isPublicKey(const ClassDecl *classDecl, llvm::StringRef name) const;
+  const Type *importedFrom(const ImportDecl &importDecl, llvm::StringRef name);
+  const Type *evalMapped(const Type *op, llvm::ArrayRef<const Type *> operands);
+  const Type *declaredVarType(const VarDeclStmt *varDecl, llvm::StringRef name);
+  const Type *evalFiltered(TypeOp kind, const Type *members, const Type *filter);
+  bool isMappedReadonly(const MappedOperands &mapped, llvm::StringRef name) const;
+  const Type *evalReadyTypeOp(TypeOp kind, llvm::ArrayRef<const Type *> operands);
+  const Type *writtenVarType(const VarDeclarator &declarator, llvm::StringRef name);
+  const Type *mappedFieldType(const MappedOperands &mapped, const Type *value) const;
+  const Type *declaredFunctionType(const FunctionDecl *functionDecl, llvm::StringRef name);
+  const Type *importedNameType(const std::vector<ImportDecl> &imports, llvm::StringRef name);
+  const Type *addMappedField(const MappedOperands &mapped, const Type *name,
+                             std::vector<Field> &fields);
+  const Type *renamedFields(const MappedOperands &mapped, const Type *name,
+                            std::vector<std::string> &names);
+  std::vector<const Type *> sharedKeys(llvm::ArrayRef<const Type *> common, const Type *keys,
+                                       bool isFirst) const;
+  void mergeMappedField(std::vector<Field> &fields, const std::string &name, const Type *type,
+                        bool isReadonly) const;
 
   SemanticState &state;
   EventMaps *eventMaps = nullptr;
   TypeParams *typeParams = nullptr;
+  ClassBases *classBases = nullptr;
   TypeResolver *typeResolver = nullptr;
   UtilityTypes *utilityTypes = nullptr;
   ClassDeclarer *classDeclarer = nullptr;
   TemplateTypes *templateTypes = nullptr;
   ArgListChecker *argListChecker = nullptr;
   ReturnInferrer *returnInferrer = nullptr;
+  GenericChecker *genericChecker = nullptr;
   ExtendsRelation *extendsRelation = nullptr;
   TopLevelChecker *topLevelChecker = nullptr;
   ConditionalTypes *conditionalTypes = nullptr;

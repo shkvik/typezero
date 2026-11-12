@@ -14,31 +14,34 @@ namespace tz {
 ClassLinks::ClassLinks(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->chunkTypes = &all.chunkTypes;
+  this->classBases = &all.classBases;
   this->classDeclarer = &all.classDeclarer;
   this->genericClassInstantiator = &all.genericClassInstantiator;
 }
 
-bool ClassLinks::sameParams(const FuncSymbol *a, const FuncSymbol *b) {
+bool ClassLinks::sameParams(const FuncSymbol *a, const FuncSymbol *b) const {
   return a->params == b->params && a->minArgs == b->minArgs && a->hasRest == b->hasRest;
 }
 
-bool ClassLinks::takesParams(const Type *fnType, const FuncSymbol *sym) {
-  return fnType->isFunction() && fnType->params() == llvm::ArrayRef<const Type *>(sym->params) &&
-         fnType->minArgs() == sym->minArgs && fnType->hasRest() == sym->hasRest;
+bool ClassLinks::takesParams(const Type *functionType, const FuncSymbol *function) const {
+  return functionType->isFunction() &&
+         functionType->params() == llvm::ArrayRef<const Type *>(function->params) &&
+         functionType->minArgs() == function->minArgs &&
+         functionType->hasRest() == function->hasRest;
 }
 
-const char *ClassLinks::accessName(Access access) {
+const char *ClassLinks::accessName(Access access) const {
   return access == Access::Public      ? "public"
          : access == Access::Protected ? "protected"
                                        : "private";
 }
 
-bool ClassLinks::isArrowMethod(const FunctionDecl *fn) {
-  if (!fn->cls()) {
+bool ClassLinks::isArrowMethod(const FunctionDecl *functionDecl) const {
+  if (functionDecl->cls() == nullptr) {
     return false;
   }
-  for (const ClassField &f : fn->cls()->fields) {
-    if (f.method() == fn) {
+  for (const ClassField &field : functionDecl->cls()->fields) {
+    if (field.method() == functionDecl) {
       return true;
     }
   }
@@ -46,15 +49,15 @@ bool ClassLinks::isArrowMethod(const FunctionDecl *fn) {
   return false;
 }
 
-bool ClassLinks::declaresReturn(const FunctionDecl *fn) {
-  if (fn->returnType) {
+bool ClassLinks::declaresReturn(const FunctionDecl *functionDecl) const {
+  if (functionDecl->returnType) {
     return true;
   }
-  if (!fn->cls()) {
+  if (functionDecl->cls() == nullptr) {
     return false;
   }
-  for (const ClassField &f : fn->cls()->fields) {
-    if (f.method() == fn && f.type) {
+  for (const ClassField &field : functionDecl->cls()->fields) {
+    if (field.method() == functionDecl && field.type) {
       return true;
     }
   }
@@ -62,21 +65,21 @@ bool ClassLinks::declaresReturn(const FunctionDecl *fn) {
   return false;
 }
 
-void ClassLinks::interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out) {
-  std::vector<const Type *> queue(cls->implemented.begin(), cls->implemented.end());
-  for (size_t i = 0; i < queue.size(); ++i) {
-    if (llvm::is_contained(out, queue[i])) {
+void ClassLinks::interfacesOf(const ClassDecl *classDecl, std::vector<const Type *> &out) const {
+  std::vector<const Type *> queue(classDecl->implemented.begin(), classDecl->implemented.end());
+  for (size_t index = 0; index < queue.size(); ++index) {
+    if (llvm::is_contained(out, queue[index])) {
       continue;
     }
-    out.push_back(queue[i]);
-    for (const Type *base : queue[i]->bases()) {
+    out.push_back(queue[index]);
+    for (const Type *base : queue[index]->bases()) {
       queue.push_back(base);
     }
   }
 }
 
-std::vector<FunctionDecl *> ClassLinks::constructorsOf(const ClassDecl *cls) {
-  for (const ClassDecl *c = cls; c; c = c->parent) {
+std::vector<FunctionDecl *> ClassLinks::constructorsOf(const ClassDecl *classDecl) const {
+  for (const ClassDecl *c = classDecl; c != nullptr; c = c->parent) {
     if (!c->constructors.empty()) {
       return c->constructors;
     }
@@ -85,24 +88,25 @@ std::vector<FunctionDecl *> ClassLinks::constructorsOf(const ClassDecl *cls) {
   return {};
 }
 
-std::vector<FunctionDecl *> ClassLinks::ownMethods(const ClassDecl *cls) {
-  std::vector<FunctionDecl *> methods;
-  for (FunctionDecl *fn : cls->methods) {
-    if (!fn->isStatic()) {
-      methods.push_back(fn);
+std::vector<FunctionDecl *> ClassLinks::ownMethods(const ClassDecl *classDecl) const {
+  auto methods = std::vector<FunctionDecl *>();
+  for (FunctionDecl *functionDecl : classDecl->methods) {
+    if (!functionDecl->isStatic()) {
+      methods.push_back(functionDecl);
     }
   }
-  for (const ClassField &f : cls->fields) {
-    if (f.method()) {
-      methods.push_back(f.method());
+  for (const ClassField &field : classDecl->fields) {
+    if (field.method() != nullptr) {
+      methods.push_back(field.method());
     }
   }
 
   return methods;
 }
 
-bool ClassLinks::overridesTransitively(const FunctionDecl *fn, const FunctionDecl *base) {
-  for (const FunctionDecl *p = fn; p; p = p->overrides()) {
+bool ClassLinks::overridesTransitively(const FunctionDecl *functionDecl,
+                                       const FunctionDecl *base) const {
+  for (const FunctionDecl *p = functionDecl; p != nullptr; p = p->overrides()) {
     if (p == base) {
       return true;
     }
@@ -111,24 +115,26 @@ bool ClassLinks::overridesTransitively(const FunctionDecl *fn, const FunctionDec
   return false;
 }
 
-FunctionDecl *ClassLinks::soleImplementation(const ClassDecl *cls, FunctionDecl *variant) {
+FunctionDecl *ClassLinks::soleImplementation(const ClassDecl *classDecl,
+                                             FunctionDecl *variant) const {
   if (variant->openToLate()) {
     return nullptr;
   }
   if (!variant->overridden() && !variant->isAbstract()) {
     return variant;
   }
-  if (variant->generic && variant->overridden()) {
+  if (variant->generic != nullptr && variant->overridden()) {
     return nullptr;
   }
   FunctionDecl *only = variant->isAbstract() ? nullptr : variant;
-  unsigned count = only ? 1 : 0;
+  unsigned count = only != nullptr ? 1 : 0;
   std::vector<ClassDecl *> below =
-      cls != nullptr ? ClassTree::descendants(cls) : std::vector<ClassDecl *>();
+      classDecl != nullptr ? ClassTree::descendants(classDecl) : std::vector<ClassDecl *>();
   for (const ClassDecl *child : below) {
-    for (FunctionDecl *fn : ClassLinks::ownMethods(child)) {
-      if (!fn->isAbstract() && fn != variant && ClassLinks::overridesTransitively(fn, variant)) {
-        only = fn;
+    for (FunctionDecl *functionDecl : this->ownMethods(child)) {
+      if (!functionDecl->isAbstract() && functionDecl != variant &&
+          this->overridesTransitively(functionDecl, variant)) {
+        only = functionDecl;
         count += child->isEmitted() ? 1 : 2;
       }
     }
@@ -137,11 +143,13 @@ FunctionDecl *ClassLinks::soleImplementation(const ClassDecl *cls, FunctionDecl 
   return count == 1 ? only : nullptr;
 }
 
-FunctionDecl *ClassLinks::firstImplementation(const ClassDecl *cls, const FunctionDecl *fn) {
-  for (const ClassDecl *child : ClassTree::descendants(cls)) {
-    for (FunctionDecl *impl : ClassLinks::ownMethods(child)) {
-      if (!impl->isAbstract() && ClassLinks::overridesTransitively(impl, fn)) {
-        return impl;
+FunctionDecl *ClassLinks::firstImplementation(const ClassDecl *classDecl,
+                                              const FunctionDecl *functionDecl) const {
+  for (const ClassDecl *child : ClassTree::descendants(classDecl)) {
+    for (FunctionDecl *implementation : this->ownMethods(child)) {
+      if (!implementation->isAbstract() &&
+          this->overridesTransitively(implementation, functionDecl)) {
+        return implementation;
       }
     }
   }
@@ -152,12 +160,12 @@ FunctionDecl *ClassLinks::firstImplementation(const ClassDecl *cls, const Functi
 const Type *ClassLinks::commonClass(const Type *a, const Type *b) {
   const ClassDecl *x = a->classDecl();
   const ClassDecl *y = b->classDecl();
-  if (!x || !y) {
+  if (x == nullptr || y == nullptr) {
     return nullptr;
   }
-  for (const ClassDecl *c = x; c; c = c->parent) {
-    if (y->derivesFrom(c)) {
-      return c->type;
+  for (const ClassDecl *classDecl = x; classDecl != nullptr; classDecl = classDecl->parent) {
+    if (y->derivesFrom(classDecl)) {
+      return classDecl->type;
     }
   }
 
@@ -165,60 +173,62 @@ const Type *ClassLinks::commonClass(const Type *a, const Type *b) {
 }
 
 void ClassLinks::linkClasses() {
-  std::vector<ClassDecl *> order = ClassTree::treeOrder(this->state.getClassStore().getClasses());
+  auto order = ClassTree::treeOrder(this->state.getClassStore().getClasses());
 
-  for (ClassDecl *cls : order) {
-    this->linkOverrides(cls);
+  for (ClassDecl *classDecl : order) {
+    this->linkOverrides(classDecl);
   }
   this->numberClasses();
 
-  for (ClassDecl *cls : order) {
-    this->buildVtable(cls);
+  for (ClassDecl *classDecl : order) {
+    this->buildVtable(classDecl);
   }
   this->state.getClassStore().markClassesLinked();
 
-  llvm::SmallPtrSet<const FunctionDecl *, 4> sources;
-  for (ClassDecl *cls : order) {
-    if (cls->generic()) {
+  auto sources = llvm::SmallPtrSet<const FunctionDecl *, 4>();
+  for (ClassDecl *classDecl : order) {
+    if (classDecl->generic() != nullptr) {
       continue;
     }
-    for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
-      if (!fn->sym || ClassLinks::declaresReturn(fn) || sources.contains(fn)) {
+    for (FunctionDecl *functionDecl : this->ownMethods(classDecl)) {
+      if (functionDecl->sym == nullptr || this->declaresReturn(functionDecl) ||
+          sources.contains(functionDecl)) {
         continue;
       }
-      if (fn->isAbstract() && !fn->overrides()) {
-        FunctionDecl *source = ClassLinks::firstImplementation(cls, fn);
-        fn->sym->setReturnType(nullptr);
-        this->state.getClassStore().rememberReturnSource(fn, source);
-        if (source) {
+      if (functionDecl->isAbstract() && functionDecl->overrides() == nullptr) {
+        auto *source = this->firstImplementation(classDecl, functionDecl);
+        functionDecl->sym->setReturnType(nullptr);
+        this->state.getClassStore().rememberReturnSource(functionDecl, source);
+        if (source != nullptr) {
           sources.insert(source);
         }
         continue;
       }
-      if (fn->overrides()) {
-        FunctionDecl *base = fn->overrides();
-        if (ClassLinks::declaresReturn(base) && base->sym && base->sym->hasReturnType()) {
-          fn->sym->setReturnType(base->sym->getKnownReturnType());
+      if (functionDecl->overrides() != nullptr) {
+        FunctionDecl *base = functionDecl->overrides();
+        if (this->declaresReturn(base) && base->sym != nullptr && base->sym->hasReturnType()) {
+          functionDecl->sym->setReturnType(base->sym->getKnownReturnType());
         } else {
-          fn->sym->setReturnType(nullptr);
-          this->state.getClassStore().rememberInheritedReturn(fn, base);
+          functionDecl->sym->setReturnType(nullptr);
+          this->state.getClassStore().rememberInheritedReturn(functionDecl, base);
         }
         continue;
       }
-      std::vector<const Type *> interfaces;
-      for (const ClassDecl *c = cls; c; c = c->parent) {
-        ClassLinks::interfacesOf(c, interfaces);
+      auto interfaces = std::vector<const Type *>();
+      for (const ClassDecl *c = classDecl; c != nullptr; c = c->parent) {
+        this->interfacesOf(c, interfaces);
       }
-      for (const Type *iface : interfaces) {
-        const Field *member = iface->field(fn->name);
-        if (member && ClassLinks::takesParams(member->type, fn->sym)) {
-          fn->sym->setReturnType(member->type->ret());
+      for (const Type *interfaceType : interfaces) {
+        const auto *member = interfaceType->field(functionDecl->name);
+        if (member != nullptr && this->takesParams(member->type, functionDecl->sym)) {
+          functionDecl->sym->setReturnType(member->type->ret());
           break;
         }
-        if (const Overload *overload = iface->overload(fn->name)) {
+        const auto *overload = interfaceType->overload(functionDecl->name);
+        if (overload != nullptr) {
           for (const Type *signature : overload->signatures) {
-            if (ClassLinks::takesParams(signature, fn->sym)) {
-              fn->sym->setReturnType(signature->ret());
+            if (this->takesParams(signature, functionDecl->sym)) {
+              functionDecl->sym->setReturnType(signature->ret());
             }
           }
         }
@@ -228,50 +238,54 @@ void ClassLinks::linkClasses() {
 }
 
 void ClassLinks::numberClasses() {
-  std::vector<ClassDecl *> order = ClassTree::treeOrder(this->state.getClassStore().getClasses());
+  auto order = ClassTree::treeOrder(this->state.getClassStore().getClasses());
   unsigned next = 0;
-  for (ClassDecl *cls : order) {
-    cls->id = ++next;
+  for (ClassDecl *classDecl : order) {
+    classDecl->id = ++next;
   }
-  for (ClassDecl *cls : llvm::reverse(order)) {
-    cls->lastId = cls->id;
-    for (const ClassDecl *child : cls->children) {
-      cls->lastId = std::max(cls->lastId, child->lastId);
+  for (ClassDecl *classDecl : llvm::reverse(order)) {
+    classDecl->lastId = classDecl->id;
+    for (const ClassDecl *child : classDecl->children) {
+      classDecl->lastId = std::max(classDecl->lastId, child->lastId);
     }
   }
-  for (ClassDecl *cls : this->state.getClassStore().getClasses()) {
-    if (cls->literal()) {
-      cls->id = cls->lastId = ++next;
+  for (ClassDecl *classDecl : this->state.getClassStore().getClasses()) {
+    if (classDecl->literal() != nullptr) {
+      classDecl->id = classDecl->lastId = ++next;
     }
   }
   this->state.getClassStore().rememberClassCount(next);
 }
 
-void ClassLinks::buildVtable(ClassDecl *cls) {
-  cls->vtable = cls->parent ? cls->parent->vtable : std::vector<FunctionDecl *>();
-  for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
-    Overriding *overriding = fn->overriding();
-    if (fn->overrides()) {
-      overriding->slot = fn->overrides()->slot();
-      if (fn->slot() >= 0 && size_t(fn->slot()) < cls->vtable.size()) {
-        cls->vtable[size_t(fn->slot())] = fn->isAbstract() ? nullptr : fn;
+void ClassLinks::buildVtable(ClassDecl *classDecl) {
+  classDecl->vtable =
+      classDecl->parent != nullptr ? classDecl->parent->vtable : std::vector<FunctionDecl *>();
+  for (FunctionDecl *functionDecl : this->ownMethods(classDecl)) {
+    Overriding *overriding = functionDecl->overriding();
+    if (functionDecl->overrides() != nullptr) {
+      overriding->slot = functionDecl->overrides()->slot();
+      if (functionDecl->slot() >= 0 && size_t(functionDecl->slot()) < classDecl->vtable.size()) {
+        classDecl->vtable[size_t(functionDecl->slot())] =
+            functionDecl->isAbstract() ? nullptr : functionDecl;
       }
       continue;
     }
-    if (fn->overridden() || fn->isAbstract()) {
-      overriding->slot = int(cls->vtable.size());
-      cls->vtable.push_back(fn->isAbstract() ? nullptr : fn);
+    if (functionDecl->overridden() || functionDecl->isAbstract()) {
+      overriding->slot = int(classDecl->vtable.size());
+      classDecl->vtable.push_back(functionDecl->isAbstract() ? nullptr : functionDecl);
     }
   }
 }
 
-ClassLinks::ResultMethodNotField ClassLinks::notAField(const ClassDecl *cls,
-                                                       const FunctionDecl *fn) {
+ClassLinks::ResultMethodNotField ClassLinks::notAField(const ClassDecl *classDecl,
+                                                       const FunctionDecl *functionDecl) const {
   const ClassDecl *owner = nullptr;
   const ClassField *field =
-      cls->parent ? ClassBases::findField(cls->parent, fn->name, &owner) : nullptr;
-  if (field && !field->method()) {
-    std::string message = ErrorTextNotAField::fieldOf(fn->name, owner->name);
+      classDecl->parent != nullptr
+          ? this->classBases->findField(classDecl->parent, functionDecl->name, &owner)
+          : nullptr;
+  if (field != nullptr && field->method() == nullptr) {
+    auto message = ErrorTextNotAField::fieldOf(functionDecl->name, owner->name);
 
     return err(ClassLinksNotAFieldError{
         .code = ClassLinksNotAFieldErrorCode::FIELD_OF_PARENT,
@@ -279,32 +293,32 @@ ClassLinks::ResultMethodNotField ClassLinks::notAField(const ClassDecl *cls,
     });
   }
 
-  return ok(fn);
+  return ok(functionDecl);
 }
 
 ClassLinks::ResultOverrideTarget
-ClassLinks::overrideTarget(const ClassDecl *cls, const FunctionDecl *fn,
-                           llvm::ArrayRef<FunctionDecl *> inherited) {
-  if (fn->isOverride() && !cls->parent) {
-    std::string message = ErrorTextOverrideTarget::noParent(fn->name, cls->name);
+ClassLinks::overrideTarget(const ClassDecl *classDecl, const FunctionDecl *functionDecl,
+                           llvm::ArrayRef<FunctionDecl *> inherited) const {
+  if (functionDecl->isOverride() && classDecl->parent == nullptr) {
+    auto message = ErrorTextOverrideTarget::noParent(functionDecl->name, classDecl->name);
 
     return err(ClassLinksOverrideTargetError{
         .code = ClassLinksOverrideTargetErrorCode::NO_PARENT,
         .message = message,
     });
   }
-  if (fn->isOverride() && inherited.empty()) {
-    std::string message = ErrorTextOverrideTarget::noMethod(fn->name, cls->parent->name);
+  if (functionDecl->isOverride() && inherited.empty()) {
+    auto message = ErrorTextOverrideTarget::noMethod(functionDecl->name, classDecl->parent->name);
 
     return err(ClassLinksOverrideTargetError{
         .code = ClassLinksOverrideTargetErrorCode::NO_SUCH_METHOD,
         .message = message,
     });
   }
-  if (fn->isOverride()) {
-    std::string list = ErrorTextVariant::list(inherited);
-    std::string message =
-        ErrorTextOverrideTarget::noParams(fn->name, cls->parent->name, inherited.size() == 1, list);
+  if (functionDecl->isOverride()) {
+    auto list = ErrorTextVariant::list(inherited);
+    auto message = ErrorTextOverrideTarget::noParams(functionDecl->name, classDecl->parent->name,
+                                                     inherited.size() == 1, list);
 
     return err(ClassLinksOverrideTargetError{
         .code = ClassLinksOverrideTargetErrorCode::NO_MATCHING_PARAMS,
@@ -312,13 +326,13 @@ ClassLinks::overrideTarget(const ClassDecl *cls, const FunctionDecl *fn,
     });
   }
 
-  return ok(fn);
+  return ok(functionDecl);
 }
 
-ClassLinks::ResultBaseIsNotArrow ClassLinks::arrowOverride(const FunctionDecl *fn,
-                                                           const FunctionDecl *base) {
-  if (ClassLinks::isArrowMethod(base) && !ClassLinks::isArrowMethod(fn)) {
-    std::string message = ErrorTextArrowOverride::arrow(fn->name, base->cls()->name);
+ClassLinks::ResultBaseIsNotArrow ClassLinks::arrowOverride(const FunctionDecl *functionDecl,
+                                                           const FunctionDecl *base) const {
+  if (this->isArrowMethod(base) && !this->isArrowMethod(functionDecl)) {
+    auto message = ErrorTextArrowOverride::arrow(functionDecl->name, base->cls()->name);
 
     return err(ClassLinksArrowOverrideError{
         .code = ClassLinksArrowOverrideErrorCode::ARROW_IN_BASE,
@@ -329,10 +343,10 @@ ClassLinks::ResultBaseIsNotArrow ClassLinks::arrowOverride(const FunctionDecl *f
   return ok(base);
 }
 
-ClassLinks::ResultBaseNotPrivate ClassLinks::baseVisible(const FunctionDecl *fn,
-                                                         const FunctionDecl *base) {
+ClassLinks::ResultBaseNotPrivate ClassLinks::baseVisible(const FunctionDecl *functionDecl,
+                                                         const FunctionDecl *base) const {
   if (base->access() == Access::Private) {
-    std::string message = ErrorTextBaseVisible::hidden(fn->name, base->cls()->name);
+    auto message = ErrorTextBaseVisible::hidden(functionDecl->name, base->cls()->name);
 
     return err(ClassLinksBaseVisibleError{
         .code = ClassLinksBaseVisibleErrorCode::PRIVATE_IN_BASE,
@@ -343,13 +357,13 @@ ClassLinks::ResultBaseNotPrivate ClassLinks::baseVisible(const FunctionDecl *fn,
   return ok(base);
 }
 
-ClassLinks::ResultAccessNotLower ClassLinks::accessKept(const FunctionDecl *fn,
-                                                        const FunctionDecl *base) {
-  if (fn->access() > base->access()) {
-    llvm::StringRef baseAccess = ClassLinks::accessName(base->access());
-    llvm::StringRef access = ClassLinks::accessName(fn->access());
-    std::string message =
-        ErrorTextAccessKept::narrower(fn->name, baseAccess, base->cls()->name, access);
+ClassLinks::ResultAccessNotLower ClassLinks::accessKept(const FunctionDecl *functionDecl,
+                                                        const FunctionDecl *base) const {
+  if (functionDecl->access() > base->access()) {
+    llvm::StringRef baseAccess = this->accessName(base->access());
+    llvm::StringRef access = this->accessName(functionDecl->access());
+    auto message =
+        ErrorTextAccessKept::narrower(functionDecl->name, baseAccess, base->cls()->name, access);
 
     return err(ClassLinksAccessKeptError{
         .code = ClassLinksAccessKeptErrorCode::NARROWER_ACCESS,
@@ -357,13 +371,14 @@ ClassLinks::ResultAccessNotLower ClassLinks::accessKept(const FunctionDecl *fn,
     });
   }
 
-  return ok(fn);
+  return ok(functionDecl);
 }
 
-ClassLinks::ResultBodyIsRetained ClassLinks::bodyKept(const ClassDecl *cls, const FunctionDecl *fn,
-                                                      const FunctionDecl *base) {
-  if (fn->isAbstract() && !base->isAbstract()) {
-    std::string message = ErrorTextBodyKept::again(fn->name, base->cls()->name, cls->name);
+ClassLinks::ResultBodyIsRetained ClassLinks::bodyKept(const ClassDecl *classDecl,
+                                                      const FunctionDecl *functionDecl,
+                                                      const FunctionDecl *base) const {
+  if (functionDecl->isAbstract() && !base->isAbstract()) {
+    auto message = ErrorTextBodyKept::again(functionDecl->name, base->cls()->name, classDecl->name);
 
     return err(ClassLinksBodyKeptError{
         .code = ClassLinksBodyKeptErrorCode::ABSTRACT_AGAIN,
@@ -371,15 +386,16 @@ ClassLinks::ResultBodyIsRetained ClassLinks::bodyKept(const ClassDecl *cls, cons
     });
   }
 
-  return ok(fn);
+  return ok(functionDecl);
 }
 
-ClassLinks::ResultSameTypeParams ClassLinks::sameTypeArgs(const ClassDecl *cls,
-                                                          const FunctionDecl *fn,
+ClassLinks::ResultSameTypeParams ClassLinks::sameTypeArgs(const ClassDecl *classDecl,
+                                                          const FunctionDecl *functionDecl,
                                                           const FunctionDecl *base) const {
   if (this->state.getClassStore().hasLinkedClasses() && !base->overridden() && base->slot() < 0) {
-    std::string message = ErrorTextSameTypeArgs::typeArgs(
-        fn->name, cls->type->name(), base->cls()->type->name(), base->name, base->cls()->name);
+    auto message =
+        ErrorTextSameTypeArgs::typeArgs(functionDecl->name, classDecl->type->name(),
+                                        base->cls()->type->name(), base->name, base->cls()->name);
 
     return err(ClassLinksSameTypeArgsError{
         .code = ClassLinksSameTypeArgsErrorCode::OVERRIDE_WITH_TYPE_ARGUMENTS,
@@ -387,17 +403,17 @@ ClassLinks::ResultSameTypeParams ClassLinks::sameTypeArgs(const ClassDecl *cls,
     });
   }
 
-  return ok(fn);
+  return ok(functionDecl);
 }
 
-void ClassLinks::linkOverrides(ClassDecl *cls) {
-  bool isInstance = cls->generic() != nullptr;
+void ClassLinks::linkOverrides(ClassDecl *classDecl) {
+  bool isInstance = classDecl->generic() != nullptr;
   if (isInstance) {
     this->state.getDiagnostics().pushList(DiagnosticRoute::DISCARD);
   }
-  for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
-    if (fn->sym != nullptr) {
-      this->linkOverride(cls, fn);
+  for (FunctionDecl *functionDecl : this->ownMethods(classDecl)) {
+    if (functionDecl->sym != nullptr) {
+      this->linkOverride(classDecl, functionDecl);
     }
   }
   if (isInstance) {
@@ -405,33 +421,33 @@ void ClassLinks::linkOverrides(ClassDecl *cls) {
   }
 }
 
-void ClassLinks::linkOverride(ClassDecl *cls, FunctionDecl *fn) {
-  std::vector<FunctionDecl *> inherited;
-  if (cls->parent != nullptr) {
-    inherited = ClassDeclarer::methodsNamed(cls->parent, fn->name, false);
+void ClassLinks::linkOverride(ClassDecl *classDecl, FunctionDecl *functionDecl) {
+  auto inherited = std::vector<FunctionDecl *>();
+  if (classDecl->parent != nullptr) {
+    inherited = this->classDeclarer->methodsNamed(classDecl->parent, functionDecl->name);
   }
-  FunctionDecl *base = ClassLinks::sameParamsBase(inherited, fn);
-  ResultMethodNotField method = ClassLinks::notAField(cls, fn);
+  auto *base = this->sameParamsBase(inherited, functionDecl);
+  auto method = this->notAField(classDecl, functionDecl);
   if (method.isErr()) {
-    this->state.getDiagnostics().error(fn->loc(), method.error().message);
+    this->state.getDiagnostics().error(functionDecl->loc(), method.error().message);
     return;
   }
   if (base == nullptr) {
-    this->walkNewMethod(cls, fn, inherited);
+    this->walkNewMethod(classDecl, functionDecl, inherited);
     return;
   }
-  if (!this->overrideFits(cls, fn, base)) {
+  if (!this->overrideFits(classDecl, functionDecl, base)) {
     return;
   }
-  fn->overriding()->overrides = base;
-  this->walkOverrideChain(cls, fn, base);
+  functionDecl->overriding()->overrides = base;
+  this->walkOverrideChain(classDecl, functionDecl, base);
 }
 
 FunctionDecl *ClassLinks::sameParamsBase(llvm::ArrayRef<FunctionDecl *> inherited,
-                                         const FunctionDecl *fn) {
+                                         const FunctionDecl *functionDecl) const {
   FunctionDecl *base = nullptr;
   for (FunctionDecl *v : inherited) {
-    if (v->sym != nullptr && ClassLinks::sameParams(v->sym, fn->sym)) {
+    if (v->sym != nullptr && this->sameParams(v->sym, functionDecl->sym)) {
       base = v;
     }
   }
@@ -439,83 +455,86 @@ FunctionDecl *ClassLinks::sameParamsBase(llvm::ArrayRef<FunctionDecl *> inherite
   return base;
 }
 
-void ClassLinks::walkNewMethod(const ClassDecl *cls, FunctionDecl *fn,
+void ClassLinks::walkNewMethod(const ClassDecl *classDecl, FunctionDecl *functionDecl,
                                llvm::ArrayRef<FunctionDecl *> inherited) {
-  ResultOverrideTarget target = ClassLinks::overrideTarget(cls, fn, inherited);
+  auto target = this->overrideTarget(classDecl, functionDecl, inherited);
   if (target.isErr()) {
-    this->state.getDiagnostics().error(fn->loc(), target.error().message);
+    this->state.getDiagnostics().error(functionDecl->loc(), target.error().message);
   }
-  if (!inherited.empty() && this->chunkTypes->isStreamHook(fn, true)) {
-    ChunkTypes::ResultHookParamsMatch params = this->chunkTypes->hookParams(fn, inherited);
+  if (!inherited.empty() && this->chunkTypes->isStreamHook(functionDecl, true)) {
+    auto params = this->chunkTypes->hookParams(functionDecl, inherited);
     if (params.isErr() && params.error().code == ChunkTypesHookParamsErrorCode::OTHER_PARAMETERS) {
-      this->state.getDiagnostics().error(fn->loc(), params.error().message);
+      this->state.getDiagnostics().error(functionDecl->loc(), params.error().message);
     }
     return;
   }
   for (FunctionDecl *v : inherited) {
-    this->classDeclarer->reportVariantPair(v, fn);
+    this->classDeclarer->reportVariantPair(v, functionDecl);
   }
 }
 
-bool ClassLinks::overrideFits(const ClassDecl *cls, const FunctionDecl *fn,
+bool ClassLinks::overrideFits(const ClassDecl *classDecl, const FunctionDecl *functionDecl,
                               const FunctionDecl *base) {
-  ResultBaseIsNotArrow notArrow = ClassLinks::arrowOverride(fn, base);
+  auto notArrow = this->arrowOverride(functionDecl, base);
   if (notArrow.isErr()) {
-    this->state.getDiagnostics().error(fn->loc(), notArrow.error().message);
+    this->state.getDiagnostics().error(functionDecl->loc(), notArrow.error().message);
     return false;
   }
-  ResultBaseNotPrivate visible = ClassLinks::baseVisible(fn, base);
+  auto visible = this->baseVisible(functionDecl, base);
   if (visible.isErr()) {
-    this->state.getDiagnostics().error(fn->loc(), visible.error().message);
+    this->state.getDiagnostics().error(functionDecl->loc(), visible.error().message);
     return false;
   }
-  ResultAccessNotLower access = ClassLinks::accessKept(fn, base);
+  auto access = this->accessKept(functionDecl, base);
   if (access.isErr()) {
-    this->state.getDiagnostics().error(fn->loc(), access.error().message);
+    this->state.getDiagnostics().error(functionDecl->loc(), access.error().message);
   }
-  ResultBodyIsRetained body = ClassLinks::bodyKept(cls, fn, base);
+  auto body = this->bodyKept(classDecl, functionDecl, base);
   if (body.isErr()) {
-    this->state.getDiagnostics().error(fn->loc(), body.error().message);
+    this->state.getDiagnostics().error(functionDecl->loc(), body.error().message);
   }
 
   return true;
 }
 
-void ClassLinks::walkOverrideChain(const ClassDecl *cls, const FunctionDecl *fn,
+void ClassLinks::walkOverrideChain(const ClassDecl *classDecl, const FunctionDecl *functionDecl,
                                    FunctionDecl *base) {
   for (FunctionDecl *p = base; p != nullptr; p = p->overrides()) {
-    ResultSameTypeParams same = this->sameTypeArgs(cls, fn, p);
+    auto same = this->sameTypeArgs(classDecl, functionDecl, p);
     if (same.isErr()) {
-      this->state.getDiagnostics().errorOutsideTrials(fn->loc(), same.error().message);
+      this->state.getDiagnostics().errorOutsideTrials(functionDecl->loc(), same.error().message);
     }
     this->genericClassInstantiator->markOverridden(p);
   }
 }
 
-const Type *ClassLinks::inheritedReturnType(FuncSymbol *fn) {
-  FunctionDecl *decl = fn->decl;
-  if (!decl) {
+const Type *ClassLinks::inheritedReturnType(FuncSymbol *function) {
+  FunctionDecl *functionDecl = function->decl;
+  if (functionDecl == nullptr) {
     return nullptr;
   }
-  ClassStore &classes = this->state.getClassStore();
-  if (classes.hasReturnSource(decl)) {
-    FunctionDecl *source = classes.findReturnSource(decl);
-    return source ? source->sym->getReturnType() : Type::voidTy();
+  auto &classes = this->state.getClassStore();
+  if (classes.hasReturnSource(functionDecl)) {
+    auto *source = classes.findReturnSource(functionDecl);
+    return source != nullptr ? source->sym->getReturnType() : Type::voidTy();
   }
-  if (FunctionDecl *base = classes.findInheritedReturn(decl)) {
+  auto *base = classes.findInheritedReturn(functionDecl);
+  if (base != nullptr) {
     return base->sym->getReturnType();
   }
 
   return nullptr;
 }
 
-void ClassLinks::noteInheritedReturn(const FunctionDecl *fn) {
-  if (!fn || !fn->cls() || fn->returnType || !fn->sym || !fn->sym->hasReturnType()) {
+void ClassLinks::noteInheritedReturn(const FunctionDecl *functionDecl) {
+  if (functionDecl == nullptr || functionDecl->cls() == nullptr || functionDecl->returnType ||
+      functionDecl->sym == nullptr || !functionDecl->sym->hasReturnType()) {
     return;
   }
-  std::string type = fn->sym->getKnownReturnType()->name().str();
-  if (const FunctionDecl *base = fn->overrides()) {
-    std::string returns = ErrorTextInheritedReturn::returns(fn->name, base->cls()->name, type);
+  std::string type = functionDecl->sym->getKnownReturnType()->name().str();
+  const FunctionDecl *base = functionDecl->overrides();
+  if (base != nullptr) {
+    auto returns = ErrorTextInheritedReturn::returns(functionDecl->name, base->cls()->name, type);
     this->state.getDiagnostics().note(base->loc(), returns);
   }
 }

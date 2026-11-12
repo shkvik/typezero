@@ -6,6 +6,7 @@
 
 namespace tz {
 
+class ClassLinks;
 class SemanticParts;
 class LateClasses;
 class ClassDeclarer;
@@ -30,13 +31,13 @@ public:
 
   ClassChecker(SemanticState &owner, SemanticParts &all);
 
-  void walkClassBodies(ClassDecl *cls);
+  void walkClassBodies(ClassDecl *classDecl);
   ResultEveryFieldSet checkFieldsSet() const;
   ResultThisReference checkThis(NameExpr *name);
-  ResultNewThisSymbol declareThis(FunctionDecl *fn);
-  ResultClassDeclared checkClassStmt(ClassDecl *cls);
+  ResultNewThisSymbol declareThis(FunctionDecl *functionDecl);
+  ResultClassDeclared checkClassStmt(ClassDecl *classDecl);
   ResultInitThisFound isInitThis(const Expr *expr) const;
-  ResultHasDecorators hasDecorators(const ClassDecl *cls) const;
+  ResultHasDecorators hasDecorators(const ClassDecl *classDecl) const;
   ResultObjectIsReady thisReady(const Flow &flow) const;
   ResultFieldUnsetYet firstUnset(const Flow &flow) const;
 
@@ -46,12 +47,13 @@ private:
   using ResultFieldHasValue = Result<const ClassField *, ClassCheckerFieldStartValueError>;
   using ResultReturnMatches = Result<const FunctionDecl *, ClassCheckerOverrideReturnError>;
 
-  ResultThisReadiness readyThis(VarSymbol *var) const;
+  ResultThisReadiness readyThis(VarSymbol *variable) const;
   ResultThisComesFrom thisOf(const FunctionDecl *current) const;
-  ResultReturnMatches overrideReturn(const ClassDecl *cls, const FunctionDecl *method);
-  ResultFieldHasValue fieldStartValue(const ClassDecl *cls, const ClassField &field) const;
+  ResultReturnMatches overrideReturn(const ClassDecl *classDecl, const FunctionDecl *method);
+  ResultFieldHasValue fieldStartValue(const ClassDecl *classDecl, const ClassField &field) const;
 
   SemanticState &state;
+  ClassLinks *classLinks = nullptr;
   LateClasses *lateClasses = nullptr;
   ClassDeclarer *classDeclarer = nullptr;
   TypeRelations *typeRelations = nullptr;

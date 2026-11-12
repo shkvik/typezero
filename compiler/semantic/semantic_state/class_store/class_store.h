@@ -16,27 +16,28 @@ class ClassStore {
 public:
   unsigned takeClassId();
   void rememberClassCount(unsigned count);
-  void addClass(ClassDecl *cls);
+  void addClass(ClassDecl *classDecl);
   std::vector<ClassDecl *> getClasses() const;
   void markClassesLinked();
   bool hasLinkedClasses() const;
   void markMethodsDeclared();
   bool hasDeclaredMethods() const;
-  void rememberReturnSource(const FunctionDecl *fn, FunctionDecl *source);
-  bool hasReturnSource(const FunctionDecl *fn) const;
-  FunctionDecl *findReturnSource(const FunctionDecl *fn) const;
-  void rememberInheritedReturn(const FunctionDecl *fn, FunctionDecl *base);
-  FunctionDecl *findInheritedReturn(const FunctionDecl *fn) const;
+  void rememberReturnSource(const FunctionDecl *functionDecl, FunctionDecl *source);
+  bool hasReturnSource(const FunctionDecl *functionDecl) const;
+  FunctionDecl *findReturnSource(const FunctionDecl *functionDecl) const;
+  void rememberInheritedReturn(const FunctionDecl *functionDecl, FunctionDecl *base);
+  FunctionDecl *findInheritedReturn(const FunctionDecl *functionDecl) const;
   void markRootSuper(const CallExpr *call);
   bool isRootSuper(const CallExpr *call) const;
-  void markBrokenClass(const ClassDecl *cls);
-  bool isBrokenClass(const ClassDecl *cls) const;
-  void enterCompletion(const ClassDecl *cls);
-  void leaveCompletion(const ClassDecl *cls);
-  bool isCompleting(const ClassDecl *cls) const;
-  void rememberSignatureVariants(const Type *iface, llvm::StringRef name,
+  void markBrokenClass(const ClassDecl *classDecl);
+  bool isBrokenClass(const ClassDecl *classDecl) const;
+  void enterCompletion(const ClassDecl *classDecl);
+  void leaveCompletion(const ClassDecl *classDecl);
+  bool isCompleting(const ClassDecl *classDecl) const;
+  void rememberSignatureVariants(const Type *interfaceType, llvm::StringRef name,
                                  std::vector<FunctionDecl *> variants);
-  std::vector<FunctionDecl *> getSignatureVariants(const Type *iface, llvm::StringRef name) const;
+  std::vector<FunctionDecl *> getSignatureVariants(const Type *interfaceType,
+                                                   llvm::StringRef name) const;
   void markCallReported(const CallExpr *call);
   bool isCallReported(const CallExpr *call) const;
 

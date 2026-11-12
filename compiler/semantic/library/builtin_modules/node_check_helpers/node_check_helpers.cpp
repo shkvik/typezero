@@ -48,13 +48,13 @@ bool NodeCheckHelpers::targetIsWindows() {
   return llvm::Triple(llvm::sys::getDefaultTargetTriple()).isOSWindows();
 }
 
-Expr *NodeCheckHelpers::stringLiteral(AstContext &ctx, llvm::SMLoc loc, llvm::StringRef text) {
-  llvm::SmallVector<llvm::UTF16, 32> units;
+Expr *NodeCheckHelpers::stringLiteral(AstContext &context, llvm::SMLoc loc, llvm::StringRef text) {
+  auto units = llvm::SmallVector<llvm::UTF16, 32>();
   llvm::convertUTF8ToUTF16String(text, units);
-  auto *lit = ctx.make<StringLitExpr>(loc, std::u16string(units.begin(), units.end()));
-  lit->type = Type::string();
+  auto *literal = context.make<StringLitExpr>(loc, std::u16string(units.begin(), units.end()));
+  literal->type = Type::string();
 
-  return lit;
+  return literal;
 }
 
 }

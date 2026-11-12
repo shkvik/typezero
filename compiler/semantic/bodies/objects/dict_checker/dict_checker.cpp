@@ -2,6 +2,7 @@
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/program/library/dict/dict_method_table/dict_method_table.h"
+#include "compiler/program/to_utf16/to_utf16.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/iterators/iterable_checker/iterable_checker.h"
@@ -24,6 +25,7 @@ DictChecker::DictChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->exprChecker = &all.exprChecker;
   this->intlChecker = &all.intlChecker;
+  this->flowChecker = &all.flowChecker;
   this->typeResolver = &all.typeResolver;
   this->typeRelations = &all.typeRelations;
   this->argListChecker = &all.argListChecker;
@@ -31,24 +33,17 @@ DictChecker::DictChecker(SemanticState &owner, SemanticParts &all)
   this->iterableChecker = &all.iterableChecker;
 }
 
-std::u16string DictChecker::toUtf16(llvm::StringRef text) {
-  llvm::SmallVector<llvm::UTF16, 32> units;
-  llvm::convertUTF8ToUTF16String(text, units);
-
-  return std::u16string(units.begin(), units.end());
-}
-
 DictChecker::ResultDictTypeResolved DictChecker::resolveDictType(const TypeRef &ref) {
   llvm::StringRef name = ref.name;
   if (TypeNameTable::isName(name, TypeName::WEAK_REF)) {
-    const Type *weak = this->weakRefChecker->resolveWeakRefType(ref);
+    const auto *weak = this->weakRefChecker->resolveWeakRefType(ref);
 
     return ok(weak);
   }
-  const TypeNameInfo *builtin = TypeNameTable::find(name);
+  const auto *builtin = TypeNameTable::find(name);
   bool isWeakCollection = builtin != nullptr && builtin->form.is<WeakCollectionTypeName>();
   if (isWeakCollection) {
-    std::string message = ErrorTextDictType::weak(name, name.drop_front(4));
+    auto message = ErrorTextDictType::weak(name, name.drop_front(4));
 
     return err(DictCheckerResolveDictTypeError{
         .code = DictCheckerResolveDictTypeErrorCode::WEAK_COLLECTION,
@@ -82,34 +77,35 @@ DictChecker::ResultDictTypeResolved DictChecker::resolveCollectionType(const Typ
         .message = message,
     });
   }
-  const Type *key = this->typeResolver->resolveType(ref.args[0], false);
-  const Type *value = isSet ? Type::voidTy() : this->typeResolver->resolveType(ref.args[1], false);
+  const auto *key = this->typeResolver->resolveType(ref.args[0]);
+  const Type *value = isSet ? Type::voidTy() : this->typeResolver->resolveType(ref.args[1]);
   if (key->isError() || value->isError()) {
     return ok(Type::error());
   }
   if (collection == Collection::RECORD) {
-    return DictChecker::recordType(key, value);
+    return this->recordType(key, value);
   }
-  ResultKeyTypeIsAllowed allowed = this->checkKeyType(key);
+  auto allowed = this->checkKeyType(key);
   if (allowed.isErr()) {
     return err(DictCheckerResolveDictTypeError{
         .code = DictCheckerResolveDictTypeErrorCode::BAD_KEY_TYPE,
         .message = allowed.error().message,
     });
   }
-  const Type *dict = Type::dict(isMap ? Type::DictKind::Map : Type::DictKind::Set, key, value);
+  const auto *dict = Type::dict(isMap ? Type::DictKind::Map : Type::DictKind::Set, key, value);
 
   return ok(dict);
 }
 
-DictChecker::ResultDictTypeResolved DictChecker::recordType(const Type *key, const Type *value) {
-  if (DictChecker::isLiteralKeys(key)) {
-    const Type *object = DictChecker::literalKeysObject(key, value);
+DictChecker::ResultDictTypeResolved DictChecker::recordType(const Type *key,
+                                                            const Type *value) const {
+  if (this->isLiteralKeys(key)) {
+    const auto *object = this->literalKeysObject(key, value);
 
     return ok(object);
   }
   if (!key->isString() && key->nonOptional()->isNumeric()) {
-    std::string message = ErrorTextDictType::numberKeys(key->name(), value->name());
+    auto message = ErrorTextDictType::numberKeys(key->name(), value->name());
 
     return err(DictCheckerResolveDictTypeError{
         .code = DictCheckerResolveDictTypeErrorCode::NUMBER_KEYS,
@@ -117,27 +113,27 @@ DictChecker::ResultDictTypeResolved DictChecker::recordType(const Type *key, con
     });
   }
   if (!key->isString()) {
-    std::string message = ErrorTextDictType::otherKeys(key->name(), value->name());
+    auto message = ErrorTextDictType::otherKeys(key->name(), value->name());
 
     return err(DictCheckerResolveDictTypeError{
         .code = DictCheckerResolveDictTypeErrorCode::OTHER_KEYS,
         .message = message,
     });
   }
-  const Type *dict = Type::dict(Type::DictKind::Record, key, value);
+  const auto *dict = Type::dict(Type::DictKind::Record, key, value);
 
   return ok(dict);
 }
 
-bool DictChecker::isLiteralKeys(const Type *key) {
+bool DictChecker::isLiteralKeys(const Type *key) const {
   if (key->isStringLiteral()) {
     return true;
   }
   if (!key->isUnion()) {
     return false;
   }
-  for (const Type *m : key->members()) {
-    if (!m->isStringLiteral()) {
+  for (const Type *member : key->members()) {
+    if (!member->isStringLiteral()) {
       return false;
     }
   }
@@ -145,19 +141,19 @@ bool DictChecker::isLiteralKeys(const Type *key) {
   return true;
 }
 
-const Type *DictChecker::literalKeysObject(const Type *key, const Type *value) {
+const Type *DictChecker::literalKeysObject(const Type *key, const Type *value) const {
   llvm::ArrayRef<const Type *> literals =
       key->isUnion() ? key->members() : llvm::ArrayRef<const Type *>(key);
-  std::vector<Field> fields;
-  for (const Type *m : literals) {
-    std::string text = ToUtf8::toUtf8(m->literalText());
+  auto fields = std::vector<Field>();
+  for (const Type *member : literals) {
+    auto text = ToUtf8::toUtf8(member->literalText());
     fields.push_back({text, value, false});
   }
 
   return Type::object(std::move(fields));
 }
 
-bool DictChecker::keyArgument(DictCheckerResolveDictTypeErrorCode code) {
+bool DictChecker::keyArgument(DictCheckerResolveDictTypeErrorCode code) const {
   switch (code) {
     case DictCheckerResolveDictTypeErrorCode::NUMBER_KEYS:
     case DictCheckerResolveDictTypeErrorCode::OTHER_KEYS:
@@ -174,7 +170,7 @@ bool DictChecker::keyArgument(DictCheckerResolveDictTypeErrorCode code) {
 
 DictChecker::ResultKeyTypeIsAllowed DictChecker::checkKeyType(const Type *type) {
   if (type->isUnknown()) {
-    std::string message = ErrorTextKeyType::unknown();
+    auto message = ErrorTextKeyType::unknown();
 
     return err(DictCheckerCheckKeyTypeError{
         .code = DictCheckerCheckKeyTypeErrorCode::UNKNOWN_KEY,
@@ -182,7 +178,7 @@ DictChecker::ResultKeyTypeIsAllowed DictChecker::checkKeyType(const Type *type) 
     });
   }
   if (type->nonOptional()->isResult()) {
-    std::string message = ErrorTextKeyType::result();
+    auto message = ErrorTextKeyType::result();
 
     return err(DictCheckerCheckKeyTypeError{
         .code = DictCheckerCheckKeyTypeErrorCode::RESULT_KEY,
@@ -209,17 +205,17 @@ Expr *DictChecker::iterableOf(Expr *expr) {
   if (Expr *iterator = this->iterableChecker->userIterator(expr)) {
     return iterator;
   }
-  if (type && type->isParam() && type->iterated()) {
+  if (type != nullptr && type->isParam() && type->iterated() != nullptr) {
     return this->typeRelations->convert(expr, Type::iterator(type->iterated()));
   }
-  if (type && type->isListParam()) {
+  if (type != nullptr && type->isListParam()) {
     return this->typeRelations->convert(expr,
                                         Type::iterator(this->argListChecker->listElement(type)));
   }
-  if (type && type->intlKind() == IntlKind::Segments) {
+  if (type != nullptr && type->intlKind() == IntlKind::Segments) {
     return this->intlChecker->segmentsArray(expr);
   }
-  if (!type || (!type->isMap() && !type->isSet())) {
+  if (type == nullptr || (!type->isMap() && !type->isSet())) {
     return expr;
   }
   if (type->isMap()) {
@@ -233,15 +229,15 @@ Expr *DictChecker::iterableOf(Expr *expr) {
 }
 
 Expr *DictChecker::keyLiteral(llvm::SMLoc loc, llvm::StringRef name) {
-  auto *key = this->state.getAst().make<StringLitExpr>(loc, DictChecker::toUtf16(name));
+  auto *key = this->state.getAst().make<StringLitExpr>(loc, ToUtf16::toUtf16(name));
   key->type = Type::string();
 
   return key;
 }
 
-DictChecker::ResultTextKeyForRecord DictChecker::stringKey(const Type *type) {
+DictChecker::ResultTextKeyForRecord DictChecker::stringKey(const Type *type) const {
   if (type->nonOptional()->isNumeric()) {
-    std::string message = ErrorTextRecordKey::number(type->name());
+    auto message = ErrorTextRecordKey::number(type->name());
 
     return err(DictCheckerStringKeyError{
         .code = DictCheckerStringKeyErrorCode::NUMBER_KEY,
@@ -254,13 +250,13 @@ DictChecker::ResultTextKeyForRecord DictChecker::stringKey(const Type *type) {
 
 Expr *DictChecker::checkRecordKey(Expr *key) {
   key = this->exprChecker->checkExpr(key, Type::string());
-  ResultTextKeyForRecord text = DictChecker::stringKey(key->type);
+  auto text = this->stringKey(key->type);
   if (text.isErr()) {
     this->state.getDiagnostics().error(key->loc(), text.error().message);
     return key;
   }
 
-  std::string what = ErrorTextKeyType::keyLabel();
+  auto what = ErrorTextKeyType::keyLabel();
 
   return this->typeRelations->coerce(key, Type::string(), what);
 }
@@ -269,33 +265,33 @@ DictChecker::ResultDictMemberAccess DictChecker::checkDictMember(MemberExpr *mem
   const Type *type = member->object->type;
   llvm::SMLoc loc = member->loc();
   if (type->isRecord()) {
-    Expr *key = this->keyLiteral(loc, member->name);
-    Expr *read = this->dictCall(loc, member->object, DictMethodTable::getName(DictMethod::GET),
+    auto *key = this->keyLiteral(loc, member->name);
+    auto *read = this->dictCall(loc, member->object, DictMethodTable::getName(DictMethod::GET),
                                 Builtin::MapGet, {key}, Type::optional(type->valueType()));
 
     return ok(read);
   }
   if (BuiltinPropertyTable::isName(member->name, BuiltinProperty::SIZE)) {
-    Expr *size =
+    auto *size =
         this->dictCall(loc, member->object, BuiltinPropertyTable::getName(BuiltinProperty::SIZE),
                        Builtin::MapSize, {}, Type::intTy());
 
     return ok(size);
   }
-  std::string text = DictCheckHelpers::dictText(member->object, type);
-  const DictMethodInfo *found = DictMethodTable::find(member->name);
+  auto text = DictCheckHelpers::dictText(member->object, type);
+  const auto *found = DictMethodTable::find(member->name);
   bool isMethod = found != nullptr && (type->isMap() ? DictMethodTable::isOnMap(*found)
                                                      : DictMethodTable::isOnSet(*found));
   member->type = Type::error();
   if (isMethod) {
-    std::string message = ErrorTextDictMember::callOnly(text, member->name);
+    auto message = ErrorTextDictMember::callOnly(text, member->name);
 
     return err(DictCheckerCheckDictMemberError{
         .code = DictCheckerCheckDictMemberErrorCode::METHOD_VALUE,
         .message = message,
     });
   }
-  std::string message = ErrorTextDictMember::noProperty(member->name, type->name(), text);
+  auto message = ErrorTextDictMember::noProperty(member->name, type->name(), text);
 
   return err(DictCheckerCheckDictMemberError{
       .code = DictCheckerCheckDictMemberErrorCode::NO_SUCH_PROPERTY,
@@ -306,25 +302,25 @@ DictChecker::ResultDictMemberAccess DictChecker::checkDictMember(MemberExpr *mem
 DictChecker::ResultDictIndexedValue DictChecker::checkDictIndex(IndexExpr *index) {
   const Type *type = index->object->type;
   if (type->isRecord()) {
-    Expr *key = this->checkRecordKey(index->index);
-    Expr *read =
+    auto *key = this->checkRecordKey(index->index);
+    auto *read =
         this->dictCall(index->loc(), index->object, DictMethodTable::getName(DictMethod::GET),
                        Builtin::MapGet, {key}, Type::optional(type->valueType()));
 
     return ok(read);
   }
   index->index = this->exprChecker->checkExpr(index->index);
-  std::string text = DictCheckHelpers::dictText(index->object, type);
+  auto text = DictCheckHelpers::dictText(index->object, type);
   index->type = Type::error();
   if (type->isMap()) {
-    std::string message = ErrorTextDictIndex::mapIndex(text);
+    auto message = ErrorTextDictIndex::mapIndex(text);
 
     return err(DictCheckerCheckDictIndexError{
         .code = DictCheckerCheckDictIndexErrorCode::MAP_INDEX,
         .message = message,
     });
   }
-  std::string message = ErrorTextDictIndex::setIndex(text);
+  auto message = ErrorTextDictIndex::setIndex(text);
 
   return err(DictCheckerCheckDictIndexError{
       .code = DictCheckerCheckDictIndexErrorCode::SET_INDEX,
@@ -332,28 +328,28 @@ DictChecker::ResultDictIndexedValue DictChecker::checkDictIndex(IndexExpr *index
   });
 }
 
-DictChecker::ResultRecordTargetType DictChecker::checkDictTarget(Expr *target, bool compound) {
+DictChecker::ResultRecordTargetType DictChecker::checkDictTarget(Expr *target, AssignForm form) {
   auto *index = dyn_cast<IndexExpr>(target);
   auto *member = dyn_cast<MemberExpr>(target);
-  Expr *object = index ? index->object : member->object;
+  Expr *object = index != nullptr ? index->object : member->object;
   const Type *type = object->type;
   target->type = Type::error();
-  std::string text = DictCheckHelpers::dictText(object, type);
-  if (!type->isRecord() && index) {
+  auto text = DictCheckHelpers::dictText(object, type);
+  if (!type->isRecord() && index != nullptr) {
     index->index = this->exprChecker->checkExpr(index->index);
   }
   if (type->isMap()) {
-    std::string access = index ? std::string("[key]") : "." + member->name.str();
-    std::string message = ErrorTextDictTarget::mapSet(text, access);
+    std::string access = index != nullptr ? std::string("[key]") : "." + member->name.str();
+    auto message = ErrorTextDictTarget::mapSet(text, access);
 
     return err(DictCheckerCheckDictTargetError{
         .code = DictCheckerCheckDictTargetErrorCode::MAP_TARGET,
         .message = message,
     });
   }
-  if (!type->isRecord() && member &&
+  if (!type->isRecord() && member != nullptr &&
       BuiltinPropertyTable::isName(member->name, BuiltinProperty::SIZE)) {
-    std::string message = ErrorTextDictTarget::setSize(text);
+    auto message = ErrorTextDictTarget::setSize(text);
 
     return err(DictCheckerCheckDictTargetError{
         .code = DictCheckerCheckDictTargetErrorCode::SET_SIZE,
@@ -361,24 +357,24 @@ DictChecker::ResultRecordTargetType DictChecker::checkDictTarget(Expr *target, b
     });
   }
   if (!type->isRecord()) {
-    std::string message = ErrorTextDictTarget::setIndex(text);
+    auto message = ErrorTextDictTarget::setIndex(text);
 
     return err(DictCheckerCheckDictTargetError{
         .code = DictCheckerCheckDictTargetErrorCode::SET_INDEX,
         .message = message,
     });
   }
-  if (index) {
+  if (index != nullptr) {
     index->index = this->checkRecordKey(index->index);
   }
-  if (compound) {
-    std::string key = index ? text + "[k]" : text + "." + member->name.str();
+  if (form == AssignForm::COMPOUND) {
+    std::string key = index != nullptr ? text + "[k]" : text + "." + member->name.str();
     const Type *value = type->valueType();
     std::string hint = value->isNumeric() || value->isDecimal()
                            ? ErrorTextDictTarget::numberHint(key)
                        : value->isString() ? ErrorTextDictTarget::textHint(key)
                                            : "";
-    std::string message = ErrorTextDictTarget::missing(key, hint);
+    auto message = ErrorTextDictTarget::missing(key, hint);
 
     return err(DictCheckerCheckDictTargetError{
         .code = DictCheckerCheckDictTargetErrorCode::MAY_BE_MISSING,
@@ -393,12 +389,12 @@ DictChecker::ResultRecordTargetType DictChecker::checkDictTarget(Expr *target, b
 Expr *DictChecker::recordAssign(AssignExpr *assign) {
   auto *index = dyn_cast<IndexExpr>(assign->target);
   auto *member = dyn_cast<MemberExpr>(assign->target);
-  Expr *object = index ? index->object : member ? member->object : nullptr;
-  if (!object || !object->type || !object->type->isRecord() || assign->op) {
+  Expr *object = index != nullptr ? index->object : member != nullptr ? member->object : nullptr;
+  if (object == nullptr || object->type == nullptr || !object->type->isRecord() || assign->op) {
     return nullptr;
   }
-  Expr *key = index ? index->index : nullptr;
-  if (!key) {
+  Expr *key = index != nullptr ? index->index : nullptr;
+  if (key == nullptr) {
     key = this->keyLiteral(member->loc(), member->name);
   }
 
@@ -412,12 +408,12 @@ Expr *DictChecker::checkRecordNullishAssign(AssignExpr *assign, IndexExpr *index
   if (!type->isRecord()) {
     return nullptr;
   }
-  Expr *key = this->checkRecordKey(index->index);
+  auto *key = this->checkRecordKey(index->index);
   const Type *valueType = type->valueType();
-  Flow before = this->state.getFlowState().getFlow();
-  Expr *value = this->exprChecker->checkExpr(assign->value, valueType);
+  auto before = this->state.getFlowState().getFlow();
+  auto *value = this->exprChecker->checkExpr(assign->value, valueType);
   this->state.getFlowState().replaceFlow(
-      FlowChecker::join(before, this->state.getFlowState().getFlow()));
+      this->flowChecker->join(before, this->state.getFlowState().getFlow()));
   bool isDefinite = !value->type->isOptional() && !value->type->isUndefined();
   value = this->typeRelations->coerce(value, valueType);
 
@@ -431,37 +427,38 @@ DictChecker::checkDictDelete(UnaryExpr *unary, Expr *object, Expr *keyExpr, llvm
   const Type *type = object->type;
   unary->type = Type::boolTy();
   if (!type->isRecord()) {
-    std::string text = DictCheckHelpers::dictText(object, type);
-    if (keyExpr) {
+    auto text = DictCheckHelpers::dictText(object, type);
+    if (keyExpr != nullptr) {
       keyExpr = this->exprChecker->checkExpr(keyExpr);
     }
     const char *kind = type->isMap() ? "Map" : "Set";
     const char *what = type->isMap() ? "key" : "value";
-    std::string message = ErrorTextDictDelete::property(kind, text, what);
+    auto message = ErrorTextDictDelete::property(kind, text, what);
 
     return err(DictCheckerCheckDictDeleteError{
         .code = DictCheckerCheckDictDeleteErrorCode::NOT_A_RECORD,
         .message = message,
     });
   }
-  Expr *key = keyExpr ? this->checkRecordKey(keyExpr) : this->keyLiteral(unary->loc(), name);
+  Expr *key =
+      keyExpr != nullptr ? this->checkRecordKey(keyExpr) : this->keyLiteral(unary->loc(), name);
   auto *yes = this->state.getAst().make<BoolLitExpr>(unary->loc(), true);
   yes->type = Type::boolTy();
-  auto *seq = this->state.getAst().make<SequenceExpr>(
+  auto *sequence = this->state.getAst().make<SequenceExpr>(
       unary->loc(),
       std::vector<Expr *>{this->dictCall(unary->loc(), object,
                                          DictMethodTable::getName(DictMethod::DELETE_KEY),
                                          Builtin::MapDelete, {key}, Type::boolTy()),
                           yes});
-  seq->type = Type::boolTy();
+  sequence->type = Type::boolTy();
 
-  return ok(seq);
+  return ok(sequence);
 }
 
-DictChecker::ResultRecordKeyChecked DictChecker::checkDictIn(BinaryExpr *bin) {
-  const Type *type = bin->rhs->type->nonOptional();
-  if (bin->rhs->type->isOptional()) {
-    std::string message = ErrorTextDictIn::undefined();
+DictChecker::ResultRecordKeyChecked DictChecker::checkDictIn(BinaryExpr *binary) {
+  const Type *type = binary->rhs->type->nonOptional();
+  if (binary->rhs->type->isOptional()) {
+    auto message = ErrorTextDictIn::undefined();
 
     return err(DictCheckerCheckDictInError{
         .code = DictCheckerCheckDictInErrorCode::MAY_BE_UNDEFINED,
@@ -469,28 +466,28 @@ DictChecker::ResultRecordKeyChecked DictChecker::checkDictIn(BinaryExpr *bin) {
     });
   }
   if (!type->isRecord()) {
-    std::string text = DictCheckHelpers::dictText(bin->rhs, type);
+    auto text = DictCheckHelpers::dictText(binary->rhs, type);
     const char *kind = type->isMap() ? "Map" : "Set";
     const char *what = type->isMap() ? "key" : "value";
-    std::string message = ErrorTextDictIn::property(kind, text, what);
+    auto message = ErrorTextDictIn::property(kind, text, what);
 
     return err(DictCheckerCheckDictInError{
         .code = DictCheckerCheckDictInErrorCode::NOT_A_RECORD,
         .message = message,
     });
   }
-  Expr *key = bin->lhs;
+  Expr *key = binary->lhs;
   if (key->type->nonOptional()->isNumeric()) {
-    std::string message = ErrorTextRecordKey::numberIn(key->type->name());
+    auto message = ErrorTextRecordKey::numberIn(key->type->name());
 
     return err(DictCheckerCheckDictInError{
         .code = DictCheckerCheckDictInErrorCode::NUMBER_KEY,
         .message = message,
     });
   }
-  std::string what = ErrorTextKeyType::keyLabel();
+  auto what = ErrorTextKeyType::keyLabel();
   key = this->typeRelations->coerce(key, Type::string(), what);
-  Expr *has = this->dictCall(bin->loc(), bin->rhs, DictMethodTable::getName(DictMethod::HAS),
+  auto *has = this->dictCall(binary->loc(), binary->rhs, DictMethodTable::getName(DictMethod::HAS),
                              Builtin::MapHas, {key}, Type::boolTy());
 
   return ok(has);

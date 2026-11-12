@@ -2,12 +2,12 @@
 
 namespace tz {
 
-void FileSystemStore::rememberStatsClass(ClassDecl *cls) {
-  this->statsClass = cls;
+void FileSystemStore::rememberStatsClass(ClassDecl *classDecl) {
+  this->statsClass = classDecl;
 }
 
-void FileSystemStore::rememberDirentClass(ClassDecl *cls) {
-  this->direntClass = cls;
+void FileSystemStore::rememberDirentClass(ClassDecl *classDecl) {
+  this->direntClass = classDecl;
 }
 
 ClassDecl *FileSystemStore::getStatsClass() const {
@@ -19,22 +19,22 @@ ClassDecl *FileSystemStore::getDirentClass() const {
 }
 
 ClassDecl *FileSystemStore::findClassNamed(llvm::StringRef name) const {
-  if (this->statsClass && this->statsClass->name == name) {
+  if (this->statsClass != nullptr && this->statsClass->name == name) {
     return this->statsClass;
   }
-  if (this->direntClass && this->direntClass->name == name) {
+  if (this->direntClass != nullptr && this->direntClass->name == name) {
     return this->direntClass;
   }
 
   return nullptr;
 }
 
-bool FileSystemStore::isStatsClass(const ClassDecl *cls) const {
-  return cls && cls == this->statsClass;
+bool FileSystemStore::isStatsClass(const ClassDecl *classDecl) const {
+  return classDecl != nullptr && classDecl == this->statsClass;
 }
 
-bool FileSystemStore::isFileClass(const ClassDecl *cls) const {
-  return cls && (cls == this->statsClass || cls == this->direntClass);
+bool FileSystemStore::isFileClass(const ClassDecl *classDecl) const {
+  return classDecl != nullptr && (classDecl == this->statsClass || classDecl == this->direntClass);
 }
 
 void FileSystemStore::enterPromiseCall() {

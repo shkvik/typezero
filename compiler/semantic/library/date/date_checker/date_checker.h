@@ -13,6 +13,7 @@ class Prelude;
 class CallChecker;
 class ExprChecker;
 class TypeRelations;
+class BinaryChecker;
 class ConstantFolder;
 class GenericChecker;
 class ProcessChecker;
@@ -30,7 +31,7 @@ public:
   Expr *checkDateStaticMember(MemberExpr *member);
   Expr *checkDateMethod(CallExpr *call, MemberExpr *member);
   Expr *checkDateMember(MemberExpr *member);
-  Expr *checkDateOperands(BinaryExpr *bin);
+  Expr *checkDateOperands(BinaryExpr *binary);
   Expr *dateTime(Expr *date);
   Expr *dateToString(Expr *date);
   using ResultDateLiteralChecked = Result<void, DateCheckerLiteralDateError>;
@@ -57,13 +58,13 @@ private:
                       int64_t month);
   void walkTimeFields(llvm::ArrayRef<Expr *> args, const DateFieldValues &fields);
 
-  static ResultLiteralDate literalDate(const std::u16string &text);
-  static std::optional<std::u16string> literalText(const Expr *e);
-  static bool isLeap(int64_t year);
-  static int daysInMonth(int64_t year, int64_t month);
-  static std::string missingDay(std::optional<int64_t> year, int64_t month, int64_t day);
-  static std::pair<int64_t, int64_t> carriedDay(int64_t year, int64_t month, int64_t day);
-  static std::string unknownMethodMessage(llvm::StringRef name);
+  ResultLiteralDate literalDate(const std::u16string &text) const;
+  std::optional<std::u16string> literalText(const Expr *expr) const;
+  bool isLeap(int64_t year) const;
+  int daysInMonth(int64_t year, int64_t month) const;
+  std::string missingDay(std::optional<int64_t> year, int64_t month, int64_t day) const;
+  std::pair<int64_t, int64_t> carriedDay(int64_t year, int64_t month, int64_t day) const;
+  std::string unknownMethodMessage(llvm::StringRef name) const;
   Expr *checkDateMethodForm(CallExpr *call, MemberExpr *member, const DateMethodInfo &method);
   Expr *fieldLiteral(const MemberExpr *member, int value);
   Expr *checkDateSetter(CallExpr *call, MemberExpr *member, const DateMethodInfo &method);
@@ -74,6 +75,7 @@ private:
   CallChecker *callChecker = nullptr;
   ExprChecker *exprChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
+  BinaryChecker *binaryChecker = nullptr;
   ConstantFolder *constantFolder = nullptr;
   GenericChecker *genericChecker = nullptr;
   ProcessChecker *processChecker = nullptr;

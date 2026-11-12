@@ -27,7 +27,7 @@ std::string ErrorTextCombine::notResult(llvm::StringRef what, llvm::StringRef ty
 }
 
 std::string ErrorTextCombine::noUnion(llvm::StringRef what, const Type *before, const Type *error) {
-  std::string why = ErrorTextResultUnion::why(before, error);
+  auto why = ErrorTextResultUnion::why(before, error);
 
   return "the Results given to '" + what.str() + "' have errors that no union holds" + why +
          "; convert them with 'mapErr'";
@@ -76,7 +76,7 @@ std::string ErrorTextResultUnion::why(const Type *a, const Type *b) {
   if (a->isVoid() || b->isVoid()) {
     return ": one of them is nothing, 'ok()'";
   }
-  std::string problem = UnionSlots::unionProblem(Type::unionOf({a, b}));
+  auto problem = UnionSlots::unionProblem(Type::unionOf({a, b}));
 
   return problem.empty() ? "" : ": " + problem;
 }

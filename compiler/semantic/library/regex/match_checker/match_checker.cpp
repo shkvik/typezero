@@ -22,14 +22,14 @@ MatchChecker::MatchChecker(SemanticState &owner, SemanticParts &all)
 }
 
 Expr *MatchChecker::matchItems(Expr *match) {
-  std::vector<Expr *> optionals;
+  auto optionals = std::vector<Expr *>();
   Expr *link = match;
   while (link->type->isOptional()) {
     this->state.getFunctionStack().enterOptionalChain();
     optionals.push_back(link);
     link = this->exprChecker->chainLink(link);
   }
-  Expr *items = this->itemsMember(link);
+  auto *items = this->itemsMember(link);
   for (Expr *optional : llvm::reverse(optionals)) {
     items = this->optionalItems(optional, items);
   }
@@ -39,7 +39,7 @@ Expr *MatchChecker::matchItems(Expr *match) {
 
 Expr *MatchChecker::itemsMember(Expr *match) {
   auto *items = this->state.getAst().make<MemberExpr>(match->loc(), match, "%items");
-  items->type = MatchChecker::itemsType();
+  items->type = this->itemsType();
 
   return items;
 }
@@ -47,13 +47,13 @@ Expr *MatchChecker::itemsMember(Expr *match) {
 Expr *MatchChecker::optionalItems(Expr *match, Expr *items) {
   auto *chain = this->state.getAst().make<OptionalChainExpr>(match->loc(), items);
   chain->mayShortCircuit = this->state.getFunctionStack().isShortCircuiting();
-  chain->type = Type::optional(MatchChecker::itemsType());
+  chain->type = Type::optional(this->itemsType());
   this->state.getFunctionStack().leaveOptionalChain();
 
   return chain;
 }
 
-const Type *MatchChecker::itemsType() {
+const Type *MatchChecker::itemsType() const {
   return Type::array(Type::optional(Type::string()));
 }
 
@@ -66,7 +66,7 @@ Expr *MatchChecker::checkMatchMember(MemberExpr *member) {
     return member;
   }
   if (name == "index" || name == "input") {
-    ObjectChecker::ResultObjectFieldValue field = this->objectChecker->checkField(member);
+    auto field = this->objectChecker->checkField(member);
     if (field.isErr()) {
       this->state.getDiagnostics().error(member->loc(), field.error().message);
       return member;
@@ -77,39 +77,39 @@ Expr *MatchChecker::checkMatchMember(MemberExpr *member) {
   if (name == "groups") {
     const Type *groups = type->field("groups")->type;
     if (!groups->isOptional()) {
-      ObjectChecker::ResultObjectFieldValue field = this->objectChecker->checkField(member);
+      auto field = this->objectChecker->checkField(member);
       if (field.isErr()) {
         this->state.getDiagnostics().error(member->loc(), field.error().message);
         return member;
       }
       return field.value();
     }
-    std::string message = ErrorTextMatch::groups(type->matchGroups() >= 0);
+    auto message = ErrorTextMatch::groups(type->matchGroups() >= 0);
     this->state.getDiagnostics().error(member->loc(), message);
     return member;
   }
   if (name == "indices") {
-    if (type->field("indices")) {
-      ObjectChecker::ResultObjectFieldValue field = this->objectChecker->checkField(member);
+    if (type->field("indices") != nullptr) {
+      auto field = this->objectChecker->checkField(member);
       if (field.isErr()) {
         this->state.getDiagnostics().error(member->loc(), field.error().message);
         return member;
       }
       return field.value();
     }
-    std::string message = ErrorTextMatch::indices(type->matchGroups() >= 0);
+    auto message = ErrorTextMatch::indices(type->matchGroups() >= 0);
     this->state.getDiagnostics().error(member->loc(), message);
     return member;
   }
-  std::string message = ErrorTextMatch::noMember(name, type->name());
+  auto message = ErrorTextMatch::noMember(name, type->name());
   this->state.getDiagnostics().error(member->loc(), message);
 
   return member;
 }
 
-MatchChecker::ResultGroupIndex MatchChecker::groupIndex(int64_t index, int groups) {
+MatchChecker::ResultGroupIndex MatchChecker::groupIndex(int64_t index, int groups) const {
   if (index < 0 || index > groups) {
-    std::string message = ErrorTextMatch::noGroup(groups, index);
+    auto message = ErrorTextMatch::noGroup(groups, index);
 
     return err(MatchCheckerGroupIndexError{
         .code = MatchCheckerGroupIndexErrorCode::NO_SUCH_GROUP,
@@ -128,8 +128,8 @@ Expr *MatchChecker::checkMatchIndex(IndexExpr *index) {
     return index;
   }
   index->object = this->matchItems(index->object);
-  const Type *item = Type::optional(Type::string());
-  std::optional<int64_t> k = this->constantFolder->intConstant(index->index);
+  const auto *item = Type::optional(Type::string());
+  auto k = this->constantFolder->intConstant(index->index);
   int groups = type->matchGroups();
   if (k && *k == 0) {
     index->form = ElementIndex{.mayBeOutOfRange = false};
@@ -137,7 +137,7 @@ Expr *MatchChecker::checkMatchIndex(IndexExpr *index) {
     return this->typeRelations->convert(index, Type::string());
   }
   if (k && groups >= 0) {
-    ResultGroupIndex group = MatchChecker::groupIndex(*k, groups);
+    auto group = this->groupIndex(*k, groups);
     if (group.isErr()) {
       this->state.getDiagnostics().error(index->index->loc(), group.error().message);
       return index;

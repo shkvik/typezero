@@ -10,12 +10,13 @@ StreamNewChecker::StreamNewChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->exprChecker = &all.exprChecker;
   this->libraryCalls = &all.libraryCalls;
+  this->classDeclarer = &all.classDeclarer;
 }
 
 StreamNewChecker::ResultConcreteStream
-StreamNewChecker::concreteStream(llvm::StringRef name, bool readable, bool writable) {
+StreamNewChecker::concreteStream(llvm::StringRef name, bool readable, bool writable) const {
   if (name != "PassThrough") {
-    std::string message = ErrorTextStreamNew::abstract(name, readable, writable);
+    auto message = ErrorTextStreamNew::abstract(name, readable, writable);
 
     return err(StreamNewCheckerConcreteStreamError{
         .code = StreamNewCheckerConcreteStreamErrorCode::ABSTRACT_STREAM,
@@ -28,12 +29,12 @@ StreamNewChecker::concreteStream(llvm::StringRef name, bool readable, bool writa
 
 StreamNewChecker::ResultChunkTypeGiven StreamNewChecker::chunksGiven(const NewExpr *expr,
                                                                      const ClassDecl *generic,
-                                                                     const Type *expected) {
+                                                                     const Type *expected) const {
   const Type *want = expected != nullptr ? expected->nonOptional() : nullptr;
-  const ClassDecl *wanted = want != nullptr ? ClassDeclarer::classOf(want) : nullptr;
+  const ClassDecl *wanted = want != nullptr ? this->classDeclarer->classOf(want) : nullptr;
   bool isFromExpected = wanted != nullptr && wanted->generic() == generic;
   if (expr->typeArgs.empty() && !isFromExpected) {
-    std::string message = ErrorTextStreamNew::untyped(generic->name);
+    auto message = ErrorTextStreamNew::untyped(generic->name);
 
     return err(StreamNewCheckerChunksGivenError{
         .code = StreamNewCheckerChunksGivenErrorCode::CHUNK_TYPE_MISSING,
@@ -65,11 +66,11 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
   if (this->libraryCalls->inLibrary(expr->loc())) {
     return nullptr;
   }
-  ResultConcreteStream concrete = StreamNewChecker::concreteStream(name, isReadable, isWritable);
+  auto concrete = this->concreteStream(name, isReadable, isWritable);
   if (concrete.isErr()) {
     return this->failedNew(expr, concrete.error().message);
   }
-  ResultChunkTypeGiven given = StreamNewChecker::chunksGiven(expr, generic, expected);
+  auto given = this->chunksGiven(expr, generic, expected);
   if (given.isErr()) {
     return this->failedNew(expr, given.error().message);
   }

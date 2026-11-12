@@ -20,17 +20,17 @@ RecordLiteralChecker::RecordLiteralChecker(SemanticState &owner, SemanticParts &
 }
 
 RecordLiteralChecker::ResultPlainProperty
-RecordLiteralChecker::plainProperty(const ObjectLitExpr::Property &prop) {
-  if (prop.defaulted()) {
-    std::string message = ErrorTextRecordProperty::defaulted(prop.name);
+RecordLiteralChecker::plainProperty(const ObjectLitExpr::Property &property) const {
+  if (property.defaulted()) {
+    auto message = ErrorTextRecordProperty::defaulted(property.name);
 
     return err(RecordLiteralCheckerPlainPropertyError{
         .code = RecordLiteralCheckerPlainPropertyErrorCode::DEFAULT_IN_LITERAL,
         .message = message,
     });
   }
-  if (prop.method()) {
-    std::string message = ErrorTextRecordProperty::method(prop.name);
+  if (property.method()) {
+    auto message = ErrorTextRecordProperty::method(property.name);
 
     return err(RecordLiteralCheckerPlainPropertyError{
         .code = RecordLiteralCheckerPlainPropertyErrorCode::METHOD_IN_RECORD,
@@ -38,15 +38,15 @@ RecordLiteralChecker::plainProperty(const ObjectLitExpr::Property &prop) {
     });
   }
 
-  return ok(&prop);
+  return ok(&property);
 }
 
-void RecordLiteralChecker::reportSpread(const ObjectLitExpr::Property &prop,
+void RecordLiteralChecker::reportSpread(const ObjectLitExpr::Property &property,
                                         const ResultSpreadIntoMap &spread) {
-  llvm::SMLoc at = prop.value->loc();
+  llvm::SMLoc at = property.value->loc();
   switch (spread.error().code) {
     case RecordLiteralCheckerCheckRecordSpreadErrorCode::KEYED_REST:
-      at = prop.loc;
+      at = property.loc;
       break;
     case RecordLiteralCheckerCheckRecordSpreadErrorCode::MAY_BE_UNDEFINED:
     case RecordLiteralCheckerCheckRecordSpreadErrorCode::OTHER_VALUES:
@@ -58,66 +58,68 @@ void RecordLiteralChecker::reportSpread(const ObjectLitExpr::Property &prop,
   this->state.getDiagnostics().error(at, spread.error().message);
 }
 
-Expr *RecordLiteralChecker::checkRecordLit(ObjectLitExpr *lit, const Type *record) {
+Expr *RecordLiteralChecker::checkRecordLit(ObjectLitExpr *literal, const Type *record) {
   const Type *value = record->valueType();
   bool isTyped = true;
-  for (ObjectLitExpr::Property &prop : lit->props) {
-    ResultPlainProperty plain = RecordLiteralChecker::plainProperty(prop);
+  for (ObjectLitExpr::Property &property : literal->props) {
+    auto plain = this->plainProperty(property);
     if (plain.isErr()) {
-      this->state.getDiagnostics().error(prop.loc, plain.error().message);
+      this->state.getDiagnostics().error(property.loc, plain.error().message);
       isTyped = false;
     }
-    if (prop.defaulted()) {
-      prop.value = cast<AssignExpr>(prop.value)->value;
-      prop.form = ValueProperty{};
+    if (property.defaulted()) {
+      property.value = cast<AssignExpr>(property.value)->value;
+      property.form = ValueProperty{};
     }
-    if (prop.method()) {
-      prop.value = this->exprChecker->checkExpr(prop.value);
+    if (property.method()) {
+      property.value = this->exprChecker->checkExpr(property.value);
       continue;
     }
-    if (prop.spread()) {
-      prop.value = this->exprChecker->checkExpr(prop.value, record);
-      const Type *type = prop.value->type;
+    if (property.spread()) {
+      property.value = this->exprChecker->checkExpr(property.value, record);
+      const Type *type = property.value->type;
       if (type->isError()) {
         isTyped = false;
         continue;
       }
-      ResultSpreadIntoMap spread = this->checkRecordSpread(prop, value);
+      auto spread = this->checkRecordSpread(property, value);
       if (spread.isErr()) {
-        this->reportSpread(prop, spread);
+        this->reportSpread(property, spread);
         isTyped = false;
       }
       continue;
     }
-    if (ComputedProperty *computed = prop.form.as<ComputedProperty>()) {
+    ComputedProperty *computed = property.form.as<ComputedProperty>();
+    if (computed != nullptr) {
       computed->key = this->dictChecker->checkRecordKey(computed->key);
     }
-    if (auto *fe = dyn_cast<FunctionExpr>(prop.value); fe && fe->fn->name.empty()) {
-      fe->fn->name = prop.name;
+    auto *functionExpr = dyn_cast<FunctionExpr>(property.value);
+    if (functionExpr != nullptr && functionExpr->fn->name.empty()) {
+      functionExpr->fn->name = property.name;
     }
-    std::string what = prop.key() ? ErrorTextRecordProperty::valueLabel()
-                                  : ErrorTextRecordProperty::keyLabel(prop.name);
-    prop.value =
-        this->typeRelations->coerce(this->exprChecker->checkExpr(prop.value, value), value, what);
+    std::string what = property.key() ? ErrorTextRecordProperty::valueLabel()
+                                      : ErrorTextRecordProperty::keyLabel(property.name);
+    property.value = this->typeRelations->coerce(
+        this->exprChecker->checkExpr(property.value, value), value, what);
   }
-  lit->type = isTyped ? record : Type::error();
+  literal->type = isTyped ? record : Type::error();
 
-  return lit;
+  return literal;
 }
 
 RecordLiteralChecker::ResultSpreadIntoMap
-RecordLiteralChecker::checkRecordSpread(ObjectLitExpr::Property &prop, const Type *value) {
-  const Type *type = prop.value->type;
+RecordLiteralChecker::checkRecordSpread(ObjectLitExpr::Property &property, const Type *value) {
+  const Type *type = property.value->type;
   if (type->isOptional() && (type->inner()->isRecord() || type->inner()->isObject())) {
-    std::string message = ErrorTextRecordSpread::undefined();
+    auto message = ErrorTextRecordSpread::undefined();
 
     return err(RecordLiteralCheckerCheckRecordSpreadError{
         .code = RecordLiteralCheckerCheckRecordSpreadErrorCode::MAY_BE_UNDEFINED,
         .message = message,
     });
   }
-  if (!prop.omitKeys().empty()) {
-    std::string message = ErrorTextRecordSpread::keyedRest();
+  if (!property.omitKeys().empty()) {
+    auto message = ErrorTextRecordSpread::keyedRest();
 
     return err(RecordLiteralCheckerCheckRecordSpreadError{
         .code = RecordLiteralCheckerCheckRecordSpreadErrorCode::KEYED_REST,
@@ -125,7 +127,7 @@ RecordLiteralChecker::checkRecordSpread(ObjectLitExpr::Property &prop, const Typ
     });
   }
   if (type->isRecord() && !TypeRelations::isImplicitlyConvertible(type->valueType(), value)) {
-    std::string message = ErrorTextRecordSpread::values(type->name(), value->name());
+    auto message = ErrorTextRecordSpread::values(type->name(), value->name());
 
     return err(RecordLiteralCheckerCheckRecordSpreadError{
         .code = RecordLiteralCheckerCheckRecordSpreadErrorCode::OTHER_VALUES,
@@ -139,24 +141,25 @@ RecordLiteralChecker::checkRecordSpread(ObjectLitExpr::Property &prop, const Typ
                   !type->isAnyObject();
   if (!isObject) {
     bool isCollection = type->isMap() || type->isSet();
-    std::string message = ErrorTextRecordSpread::notObject(type->name(), isCollection);
+    auto message = ErrorTextRecordSpread::notObject(type->name(), isCollection);
 
     return err(RecordLiteralCheckerCheckRecordSpreadError{
         .code = RecordLiteralCheckerCheckRecordSpreadErrorCode::NOT_SPREADABLE,
         .message = message,
     });
   }
-  if (ClassDecl *cls = ClassDeclarer::classOf(type)) {
-    this->classDeclarer->completeClass(cls);
+  if (ClassDecl *classDecl = this->classDeclarer->classOf(type)) {
+    this->classDeclarer->completeClass(classDecl);
   }
-  for (const Field &f : type->fields()) {
-    if (llvm::is_contained(prop.omit(), f.name)) {
+  for (const Field &field : type->fields()) {
+    if (llvm::is_contained(property.omit(), field.name)) {
       continue;
     }
-    const Type *t = f.type->isOptional() && !value->isOptional() ? f.type->inner() : f.type;
-    if (!TypeRelations::isImplicitlyConvertible(t, value)) {
-      std::string message =
-          ErrorTextRecordSpread::field(f.name, type->name(), f.type->name(), value->name());
+    const Type *candidate =
+        field.type->isOptional() && !value->isOptional() ? field.type->inner() : field.type;
+    if (!TypeRelations::isImplicitlyConvertible(candidate, value)) {
+      auto message =
+          ErrorTextRecordSpread::field(field.name, type->name(), field.type->name(), value->name());
 
       return err(RecordLiteralCheckerCheckRecordSpreadError{
           .code = RecordLiteralCheckerCheckRecordSpreadErrorCode::FIELD_TYPE_DIFFERS,
@@ -165,12 +168,13 @@ RecordLiteralChecker::checkRecordSpread(ObjectLitExpr::Property &prop, const Typ
     }
   }
   bool hasMethods = false;
-  auto isMethod = [](const ClassField &f) { return f.method(); };
-  for (const ClassDecl *c = ClassDeclarer::classOf(type); c; c = c->parent) {
-    hasMethods |= c->literal() || llvm::any_of(c->fields, isMethod);
+  auto isMethod = [](const ClassField &field) { return field.method(); };
+  for (const ClassDecl *classDecl = this->classDeclarer->classOf(type); classDecl != nullptr;
+       classDecl = classDecl->parent) {
+    hasMethods |= classDecl->literal() || llvm::any_of(classDecl->fields, isMethod);
   }
   if (hasMethods) {
-    std::string message = ErrorTextRecordSpread::methods();
+    auto message = ErrorTextRecordSpread::methods();
 
     return err(RecordLiteralCheckerCheckRecordSpreadError{
         .code = RecordLiteralCheckerCheckRecordSpreadErrorCode::HAS_METHODS,
@@ -182,10 +186,10 @@ RecordLiteralChecker::checkRecordSpread(ObjectLitExpr::Property &prop, const Typ
 }
 
 RecordLiteralChecker::ResultValueTypeJoin RecordLiteralChecker::valuesJoin(const Type *value,
-                                                                           const Type *type) {
-  const Type *next = value ? TypeRelations::unify(value, type) : type;
-  if (!next || next->isError()) {
-    std::string message = ErrorTextRecordValues::differ(value->name(), type->name());
+                                                                           const Type *type) const {
+  const Type *next = value != nullptr ? this->typeRelations->unify(value, type) : type;
+  if (next == nullptr || next->isError()) {
+    auto message = ErrorTextRecordValues::differ(value->name(), type->name());
 
     return err(RecordLiteralCheckerValuesJoinError{
         .code = RecordLiteralCheckerValuesJoinErrorCode::VALUE_TYPES_DIFFER,
@@ -196,9 +200,10 @@ RecordLiteralChecker::ResultValueTypeJoin RecordLiteralChecker::valuesJoin(const
   return ok(next);
 }
 
-RecordLiteralChecker::ResultValueTypeKnow RecordLiteralChecker::valueKnown(const Type *value) {
+RecordLiteralChecker::ResultValueTypeKnow
+RecordLiteralChecker::valueKnown(const Type *value) const {
   if (value->isUndefined() || value->isVoid()) {
-    std::string message = ErrorTextRecordValue::undefined();
+    auto message = ErrorTextRecordValue::undefined();
 
     return err(RecordLiteralCheckerValueKnownError{
         .code = RecordLiteralCheckerValueKnownErrorCode::ONLY_UNDEFINED,
@@ -209,15 +214,15 @@ RecordLiteralChecker::ResultValueTypeKnow RecordLiteralChecker::valueKnown(const
   return ok(value);
 }
 
-Expr *RecordLiteralChecker::recordFromSpreads(ObjectLitExpr *lit) {
+Expr *RecordLiteralChecker::recordFromSpreads(ObjectLitExpr *literal) {
   const Type *value = nullptr;
   bool isTyped = true;
-  auto meet = [&](const Type *t, llvm::SMLoc loc) {
-    if (!t || t->isError()) {
+  auto meet = [&](const Type *candidate, llvm::SMLoc loc) {
+    if (candidate == nullptr || candidate->isError()) {
       isTyped = false;
       return;
     }
-    ResultValueTypeJoin joined = RecordLiteralChecker::valuesJoin(value, t);
+    auto joined = this->valuesJoin(value, candidate);
     if (joined.isErr()) {
       this->state.getDiagnostics().error(loc, joined.error().message);
       isTyped = false;
@@ -225,47 +230,47 @@ Expr *RecordLiteralChecker::recordFromSpreads(ObjectLitExpr *lit) {
     }
     value = joined.value();
   };
-  for (const ObjectLitExpr::Property &prop : lit->props) {
-    const Type *type = prop.value->type;
-    if (!prop.spread()) {
-      meet(type, prop.value->loc());
+  for (const ObjectLitExpr::Property &property : literal->props) {
+    const Type *type = property.value->type;
+    if (!property.spread()) {
+      meet(type, property.value->loc());
       continue;
     }
     if (type->isRecord()) {
-      meet(type->valueType(), prop.value->loc());
+      meet(type->valueType(), property.value->loc());
     } else if (type->isObject()) {
-      for (const Field &f : type->fields()) {
-        if (!llvm::is_contained(prop.omit(), f.name)) {
-          meet(f.type->isOptional() ? f.type->inner() : f.type, prop.value->loc());
+      for (const Field &field : type->fields()) {
+        if (!llvm::is_contained(property.omit(), field.name)) {
+          meet(field.type->isOptional() ? field.type->inner() : field.type, property.value->loc());
         }
       }
     }
   }
-  if (!isTyped || !value) {
-    lit->type = Type::error();
-    return lit;
+  if (!isTyped || value == nullptr) {
+    literal->type = Type::error();
+    return literal;
   }
-  ResultValueTypeKnow known = RecordLiteralChecker::valueKnown(value);
+  auto known = this->valueKnown(value);
   if (known.isErr()) {
-    this->state.getDiagnostics().error(lit->loc(), known.error().message);
-    lit->type = Type::error();
-    return lit;
+    this->state.getDiagnostics().error(literal->loc(), known.error().message);
+    literal->type = Type::error();
+    return literal;
   }
-  const Type *record = Type::dict(Type::DictKind::Record, Type::string(), value);
-  for (ObjectLitExpr::Property &prop : lit->props) {
-    if (!prop.spread()) {
-      prop.value = this->typeRelations->convert(prop.value, value);
+  const auto *record = Type::dict(Type::DictKind::Record, Type::string(), value);
+  for (ObjectLitExpr::Property &property : literal->props) {
+    if (!property.spread()) {
+      property.value = this->typeRelations->convert(property.value, value);
       continue;
     }
-    ResultSpreadIntoMap spread = this->checkRecordSpread(prop, value);
+    auto spread = this->checkRecordSpread(property, value);
     if (spread.isErr()) {
-      this->reportSpread(prop, spread);
+      this->reportSpread(property, spread);
       isTyped = false;
     }
   }
-  lit->type = isTyped ? record : Type::error();
+  literal->type = isTyped ? record : Type::error();
 
-  return lit;
+  return literal;
 }
 
 }

@@ -15,12 +15,12 @@ class FsPromisesChecker {
 public:
   FsPromisesChecker(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkFsPromisesCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
+  Expr *checkFsPromisesCall(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc);
 
 private:
   using ResultPromiseFunction = Result<llvm::StringRef, FsPromisesCheckerPromiseFunctionError>;
 
-  static ResultPromiseFunction promiseFunction(llvm::StringRef fn);
+  ResultPromiseFunction promiseFunction(llvm::StringRef functionName) const;
 
   SemanticState &state;
   FsErrors *fsErrors = nullptr;

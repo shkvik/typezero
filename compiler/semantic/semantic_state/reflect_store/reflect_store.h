@@ -35,21 +35,21 @@ public:
   bool isAnyObjectFilled() const;
   void rememberMetadataType(const void *key, const Type *type, llvm::SMLoc loc);
   const MetadataType *findMetadataType(const void *key) const;
-  void addMetadataWriter(llvm::StringRef key, FunctionDecl *fn);
+  void addMetadataWriter(llvm::StringRef key, FunctionDecl *functionDecl);
   std::vector<FunctionDecl *> getMetadataWriters(llvm::StringRef key) const;
-  void rememberBuiltinConstructor(llvm::StringRef name, ClassDecl *cls);
+  void rememberBuiltinConstructor(llvm::StringRef name, ClassDecl *classDecl);
   ClassDecl *findBuiltinConstructor(llvm::StringRef name) const;
   void addReflectedNew(const NewExpr *expr, std::vector<const Type *> args);
   bool hasReflectedNews() const;
   std::vector<ReflectedNew> getReflectedNews() const;
-  void rememberConstructorCast(const CastExpr *cast, ClassDecl *cls);
-  void forgetConstructorCast(const CastExpr *cast);
+  void rememberConstructorCast(const CastExpr *castExpr, ClassDecl *classDecl);
+  void forgetConstructorCast(const CastExpr *castExpr);
   std::vector<ConstructorCast> getConstructorCasts() const;
   void addConstructorWidening(const Type *from, const Type *to);
   std::vector<const Type *> getConstructorWidenings(const Type *from) const;
-  void addEscapedClass(ClassDecl *cls);
+  void addEscapedClass(ClassDecl *classDecl);
   std::vector<ClassDecl *> getEscapedClasses() const;
-  void addReflectedObject(ClassDecl *cls);
+  void addReflectedObject(ClassDecl *classDecl);
   std::vector<ClassDecl *> getReflectedObjects() const;
 
 private:

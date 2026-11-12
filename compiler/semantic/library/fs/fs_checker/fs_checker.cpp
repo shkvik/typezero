@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/fs/fs_checker/fs_checker.h"
+#include "compiler/program/to_utf16/to_utf16.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -34,17 +35,10 @@ FsChecker::FsChecker(SemanticState &owner, SemanticParts &all)
   this->builtinModuleChecker = &all.builtinModuleChecker;
 }
 
-std::u16string FsChecker::utf16(llvm::StringRef text) {
-  llvm::SmallVector<llvm::UTF16, 32> units;
-  llvm::convertUTF8ToUTF16String(text, units);
-
-  return std::u16string(units.begin(), units.end());
-}
-
-FsChecker::ResultOctalMode FsChecker::octalMode(llvm::StringRef text) {
+FsChecker::ResultOctalMode FsChecker::octalMode(llvm::StringRef text) const {
   unsigned mode = 0;
   if (text.empty() || text.getAsInteger(8, mode)) {
-    std::string message = ErrorTextFsCall::chmod();
+    auto message = ErrorTextFsCall::chmod();
 
     return err(FsCheckerOctalModeError{
         .code = FsCheckerOctalModeErrorCode::NOT_OCTAL,
@@ -55,65 +49,65 @@ FsChecker::ResultOctalMode FsChecker::octalMode(llvm::StringRef text) {
   return ok(mode);
 }
 
-bool FsChecker::nodeOptions(CallExpr *call, size_t index, llvm::StringRef fn,
+bool FsChecker::nodeOptions(CallExpr *call, size_t index, llvm::StringRef functionName,
                             llvm::ArrayRef<llvm::StringRef> allowed,
                             llvm::StringMap<Expr *> &options) {
   if (index >= call->args.size() || isa<UndefinedExpr>(call->args[index])) {
     return true;
   }
   Expr *arg = call->args[index];
-  auto *lit = dyn_cast<ObjectLitExpr>(arg);
-  if (!lit) {
-    std::string message = ErrorTextFsOptions::literal(fn, allowed[0]);
+  auto *literal = dyn_cast<ObjectLitExpr>(arg);
+  if (literal == nullptr) {
+    auto message = ErrorTextFsOptions::literal(functionName, allowed[0]);
     this->state.getDiagnostics().error(arg->loc(), message);
     call->args[index] = this->exprChecker->checkExpr(arg);
     return false;
   }
-  for (const ObjectLitExpr::Property &prop : lit->props) {
-    if (prop.spread() || prop.key() || prop.method() || prop.name.empty()) {
-      std::string message = ErrorTextFsOptions::byName(fn, allowed[0]);
-      this->state.getDiagnostics().error(prop.loc, message);
+  for (const ObjectLitExpr::Property &property : literal->props) {
+    if (property.spread() || property.key() || property.method() || property.name.empty()) {
+      auto message = ErrorTextFsOptions::byName(functionName, allowed[0]);
+      this->state.getDiagnostics().error(property.loc, message);
       return false;
     }
-    if (!llvm::is_contained(allowed, prop.name)) {
-      std::string message = ErrorTextFsOptions::unknown(fn, prop.name, allowed);
-      this->state.getDiagnostics().error(prop.loc, message);
+    if (!llvm::is_contained(allowed, property.name)) {
+      auto message = ErrorTextFsOptions::unknown(functionName, property.name, allowed);
+      this->state.getDiagnostics().error(property.loc, message);
       return false;
     }
-    options[prop.name] = prop.value;
+    options[property.name] = property.value;
   }
 
   return true;
 }
 
 const Type *FsChecker::nativeError() const {
-  TypeAliasDecl *alias = this->state.getLibraryDeclarations().findLibraryType("NativeError");
+  auto *alias = this->state.getLibraryDeclarations().findLibraryType("NativeError");
 
-  return alias ? this->typeDeclarer->resolveAlias(alias) : Type::error();
+  return alias != nullptr ? this->typeDeclarer->resolveAlias(alias) : Type::error();
 }
 
 void FsChecker::rememberNativeError() {
-  const Type *native = this->nativeError();
+  const auto *native = this->nativeError();
   const Type *nativeError = native->isError() ? nullptr : native;
   this->state.getInventoryStore().rememberNativeError(nativeError);
 }
 
-Expr *FsChecker::checkEncoding(Expr *encoding, llvm::StringRef fn, bool any) {
-  auto *lit = dyn_cast<StringLitExpr>(encoding);
-  if (!lit) {
-    std::string message = ErrorTextFsEncoding::literal(fn);
+Expr *FsChecker::checkEncoding(Expr *encoding, llvm::StringRef functionName, bool any) {
+  auto *literal = dyn_cast<StringLitExpr>(encoding);
+  if (literal == nullptr) {
+    auto message = ErrorTextFsEncoding::literal(functionName);
     this->state.getDiagnostics().error(encoding->loc(), message);
     this->exprChecker->checkExpr(encoding);
     return nullptr;
   }
-  lit->type = Type::string();
-  Expr *number = this->bytesChecker->checkBufferEncoding(lit);
+  literal->type = Type::string();
+  auto *number = this->bytesChecker->checkBufferEncoding(literal);
   if (number->type->isError()) {
     return nullptr;
   }
   if (!any && cast<IntLitExpr>(number)->value != 0) {
-    std::string written = ToUtf8::toUtf8(lit->value);
-    std::string message = ErrorTextFsEncoding::utf8Only(fn, written);
+    auto written = ToUtf8::toUtf8(literal->value);
+    auto message = ErrorTextFsEncoding::utf8Only(functionName, written);
     this->state.getDiagnostics().error(encoding->loc(), message);
 
     return nullptr;
@@ -122,34 +116,35 @@ Expr *FsChecker::checkEncoding(Expr *encoding, llvm::StringRef fn, bool any) {
   return number;
 }
 
-Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
+Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc) {
   call->type = Type::error();
-  std::string syncName =
-      this->state.getFileSystemStore().isInsidePromiseCall() ? (fn + "Sync").str() : fn.str();
-  std::optional<FsFunction> function = FsFunctionTable::find(syncName);
+  std::string syncName = this->state.getFileSystemStore().isInsidePromiseCall()
+                             ? (functionName + "Sync").str()
+                             : functionName.str();
+  auto function = FsFunctionTable::find(syncName);
   bool isValue = function == FsFunction::CONSTANTS || function == FsFunction::STATS ||
                  function == FsFunction::DIRENT;
   if (isValue) {
-    return this->reportNotFunction(call, fn, loc);
+    return this->reportNotFunction(call, functionName, loc);
   }
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
   if (!function.has_value()) {
-    return this->reportUnknownFsFunction(call, fn, loc);
+    return this->reportUnknownFsFunction(call, functionName, loc);
   }
 
   FsCall fs{
       .call = call,
       .function = *function,
-      .fn = fn,
+      .fn = functionName,
       .loc = loc,
   };
   switch (fs.function) {
     case FsFunction::CONSTANTS:
     case FsFunction::STATS:
     case FsFunction::DIRENT:
-      return this->reportNotFunction(call, fn, loc);
+      return this->reportNotFunction(call, functionName, loc);
     case FsFunction::READ_FILE_SYNC:
       return this->checkReadFile(fs);
     case FsFunction::WRITE_FILE_SYNC:
@@ -184,15 +179,16 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
   return call;
 }
 
-Expr *FsChecker::reportNotFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
-  std::string message = ErrorTextFsCall::notFunc(fn);
+Expr *FsChecker::reportNotFunction(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc) {
+  auto message = ErrorTextFsCall::notFunc(functionName);
   this->state.getDiagnostics().error(loc, message);
 
   return this->checkLoosely(call);
 }
 
-Expr *FsChecker::reportUnknownFsFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
-  FsExports::ResultExportFound found = FsExports::fsExport(fn, "node:fs");
+Expr *FsChecker::reportUnknownFsFunction(CallExpr *call, llvm::StringRef functionName,
+                                         llvm::SMLoc loc) {
+  auto found = FsExports::fsExport(functionName, "node:fs");
   std::string message = found.isErr() ? found.error().message : std::string();
   this->state.getDiagnostics().error(loc, message);
 
@@ -222,18 +218,18 @@ IntLitExpr *FsChecker::makeIntLiteral(llvm::SMLoc loc, uint64_t value) {
 }
 
 StringLitExpr *FsChecker::makeStringLiteral(llvm::SMLoc loc, llvm::StringRef text) {
-  auto *literal = this->state.getAst().make<StringLitExpr>(loc, FsChecker::utf16(text));
+  auto *literal = this->state.getAst().make<StringLitExpr>(loc, ToUtf16::toUtf16(text));
   literal->type = Type::string();
 
   return literal;
 }
 
 Expr *FsChecker::checkPath(Expr *arg, bool fd) {
-  const Type *string = Type::string();
-  Expr *checked = this->exprChecker->checkExpr(arg, string);
+  const auto *string = Type::string();
+  auto *checked = this->exprChecker->checkExpr(arg, string);
   auto *literal = dyn_cast<StringLitExpr>(checked);
   if (literal != nullptr && literal->value.find(u'\0') != std::u16string::npos) {
-    std::string message = ErrorTextFsCall::zeroPath();
+    auto message = ErrorTextFsCall::zeroPath();
     this->state.getDiagnostics().error(checked->loc(), message);
   }
   bool isDescriptor =
@@ -252,7 +248,7 @@ bool FsChecker::literalFlag(FsCall &fs, Expr *value, llvm::StringRef option, boo
     out = literal->value;
     return true;
   }
-  std::string message = ErrorTextFsOptions::flag(fs.fn, option);
+  auto message = ErrorTextFsOptions::flag(fs.fn, option);
   this->state.getDiagnostics().error(value->loc(), message);
   this->exprChecker->checkExpr(value);
 
@@ -273,7 +269,7 @@ Expr *FsChecker::openFlag(FsCall &fs, Expr *flag, llvm::StringRef fallback) {
     return literal;
   }
   this->exprChecker->checkExpr(flag);
-  std::string message = ErrorTextFsCall::flag(fs.fn, written, literal != nullptr);
+  auto message = ErrorTextFsCall::flag(fs.fn, written, literal != nullptr);
   this->state.getDiagnostics().error(flag->loc(), message);
 
   return nullptr;
@@ -293,12 +289,12 @@ bool FsChecker::encodingOrOptions(FsCall &fs, size_t index,
   if (isa<ObjectLitExpr>(arg) || isa<UndefinedExpr>(arg)) {
     return this->nodeOptions(call, index, fs.fn, allowed, fs.options);
   }
-  Expr *checked = this->exprChecker->checkExpr(arg);
+  auto *checked = this->exprChecker->checkExpr(arg);
   if (checked->type->isString()) {
-    std::string message = ErrorTextFsEncoding::dependsOn(fs.fn);
+    auto message = ErrorTextFsEncoding::dependsOn(fs.fn);
     this->state.getDiagnostics().error(checked->loc(), message);
   } else if (!checked->type->isError()) {
-    std::string message = ErrorTextFsOptions::literal(fs.fn, allowed[0]);
+    auto message = ErrorTextFsOptions::literal(fs.fn, allowed[0]);
     this->state.getDiagnostics().error(checked->loc(), message);
   }
 
@@ -307,33 +303,33 @@ bool FsChecker::encodingOrOptions(FsCall &fs, size_t index,
 
 Expr *FsChecker::checkReadFile(FsCall &fs) {
   CallExpr *call = fs.call;
-  llvm::StringRef fn = fs.fn;
+  llvm::StringRef functionName = fs.fn;
   llvm::SMLoc loc = fs.loc;
   llvm::StringMap<Expr *> &options = fs.options;
-  const Type *string = Type::string();
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  const auto *string = Type::string();
+  auto arity = this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  Expr *file = this->checkPath(call->args[0], true);
+  auto *file = this->checkPath(call->args[0], true);
   if (!this->encodingOrOptions(fs, 1, {"encoding", "flag"})) {
     return call;
   }
   Expr *encoding = options.lookup("encoding");
   Expr *number = nullptr;
-  if (encoding && !isa<UndefinedExpr>(encoding) &&
-      !(number = this->checkEncoding(encoding, fn, true))) {
+  if (encoding != nullptr && !isa<UndefinedExpr>(encoding) &&
+      !(number = this->checkEncoding(encoding, functionName, true))) {
     return call;
   }
-  Expr *flag = this->openFlag(fs, options.lookup("flag"), "r");
-  if (!flag) {
+  auto *flag = this->openFlag(fs, options.lookup("flag"), "r");
+  if (flag == nullptr) {
     return call;
   }
   call->args = {file, flag};
   call->target = BuiltinCall{.builtin = Builtin::FsReadFile};
-  call->type = number ? string : Type::bytesType(Type::Bytes::Buffer);
-  if (number) {
+  call->type = number != nullptr ? string : Type::bytesType(Type::Bytes::Buffer);
+  if (number != nullptr) {
     call->args.push_back(number);
   }
   return call;
@@ -341,22 +337,22 @@ Expr *FsChecker::checkReadFile(FsCall &fs) {
 
 Expr *FsChecker::checkWriteFile(FsCall &fs) {
   CallExpr *call = fs.call;
-  llvm::StringRef fn = fs.fn;
+  llvm::StringRef functionName = fs.fn;
   llvm::SMLoc loc = fs.loc;
   llvm::StringMap<Expr *> &options = fs.options;
-  const Type *string = Type::string();
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 3);
+  const auto *string = Type::string();
+  auto arity = this->argumentChecker->checkArity(call, 2, 3);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  Expr *file = this->checkPath(call->args[0], true);
-  Expr *data = this->exprChecker->checkExpr(call->args[1], string);
-  auto view = [](const Type *t) { return t->isByteView(); };
+  auto *file = this->checkPath(call->args[0], true);
+  auto *data = this->exprChecker->checkExpr(call->args[1], string);
+  auto view = [](const Type *type) { return type->isByteView(); };
   bool hasBytes =
       view(data->type) || (data->type->isUnion() && llvm::all_of(data->type->members(), view));
   if (!data->type->isString() && !hasBytes && !data->type->isError()) {
-    std::string message = ErrorTextFsCall::data(fn, data->type);
+    auto message = ErrorTextFsCall::data(functionName, data->type);
     this->state.getDiagnostics().error(data->loc(), message);
     return this->checkLoosely(call);
   }
@@ -364,27 +360,28 @@ Expr *FsChecker::checkWriteFile(FsCall &fs) {
     return call;
   }
   Expr *number = nullptr;
-  if (Expr *encoding = options.lookup("encoding"); encoding && !isa<UndefinedExpr>(encoding)) {
+  Expr *encoding = options.lookup("encoding");
+  if (encoding != nullptr && !isa<UndefinedExpr>(encoding)) {
     if (hasBytes) {
-      std::string message = ErrorTextFsEncoding::forText(fn);
+      auto message = ErrorTextFsEncoding::forText(functionName);
       this->state.getDiagnostics().error(encoding->loc(), message);
       return call;
     }
-    if (!(number = this->checkEncoding(encoding, fn, true))) {
+    if (!(number = this->checkEncoding(encoding, functionName, true))) {
       return call;
     }
   }
-  Expr *flag = this->openFlag(fs, options.lookup("flag"),
+  auto *flag = this->openFlag(fs, options.lookup("flag"),
                               fs.function == FsFunction::WRITE_FILE_SYNC ? "w" : "a");
-  if (!flag) {
+  if (flag == nullptr) {
     return call;
   }
   Expr *mode = options.lookup("mode");
   call->args = {file, data, flag,
-                mode ? this->argumentChecker->checkArg(mode, Type::intTy())
-                     : this->makeIntLiteral(loc, 0666)};
+                mode != nullptr ? this->argumentChecker->checkArg(mode, Type::intTy())
+                                : this->makeIntLiteral(loc, 0666)};
   if (!hasBytes) {
-    call->args.push_back(number ? number : this->makeIntLiteral(loc, 0));
+    call->args.push_back(number != nullptr ? number : this->makeIntLiteral(loc, 0));
   }
   call->target = BuiltinCall{.builtin = Builtin::FsWriteFile};
   call->type = Type::voidTy();
@@ -393,23 +390,24 @@ Expr *FsChecker::checkWriteFile(FsCall &fs) {
 
 Expr *FsChecker::checkPathCall(FsCall &fs) {
   CallExpr *call = fs.call;
-  llvm::StringRef fn = fs.fn;
+  llvm::StringRef functionName = fs.fn;
   llvm::SMLoc loc = fs.loc;
   llvm::StringMap<Expr *> &options = fs.options;
-  const Type *string = Type::string();
+  const auto *string = Type::string();
   unsigned max =
       fs.function == FsFunction::EXISTS_SYNC || fs.function == FsFunction::UNLINK_SYNC ? 1 : 2;
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, max);
+  auto arity = this->argumentChecker->checkArity(call, 1, max);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  Expr *file = this->checkPath(call->args[0], false);
+  auto *file = this->checkPath(call->args[0], false);
   if (max == 2 && !this->encodingOrOptions(fs, 1, {"encoding"})) {
     return call;
   }
-  if (Expr *encoding = options.lookup("encoding"); encoding && !isa<UndefinedExpr>(encoding)) {
-    if (!this->checkEncoding(encoding, fn, false)) {
+  Expr *encoding = options.lookup("encoding");
+  if (encoding != nullptr && !isa<UndefinedExpr>(encoding)) {
+    if (this->checkEncoding(encoding, functionName, false) == nullptr) {
       return call;
     }
   }
@@ -428,25 +426,25 @@ Expr *FsChecker::checkPathCall(FsCall &fs) {
 Expr *FsChecker::checkPathWithArgument(FsCall &fs) {
   CallExpr *call = fs.call;
   llvm::SMLoc loc = fs.loc;
-  ArgumentChecker::ResultArityMatches arity =
+  auto arity =
       this->argumentChecker->checkArity(call, fs.function == FsFunction::CHMOD_SYNC ? 2 : 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  Expr *file = this->checkPath(call->args[0], false);
+  auto *file = this->checkPath(call->args[0], false);
   Expr *value;
   if (fs.function == FsFunction::TRUNCATE_SYNC) {
     value = call->args.size() > 1 ? this->argumentChecker->checkArg(call->args[1], Type::intTy())
                                   : nullptr;
-    if (!value) {
+    if (value == nullptr) {
       auto *zero = this->state.getAst().make<IntLitExpr>(loc, 0);
       zero->type = Type::intTy();
       value = zero;
     }
   } else if (fs.function == FsFunction::CHMOD_SYNC && isa<StringLitExpr>(call->args[1])) {
-    std::string text = ToUtf8::toUtf8(cast<StringLitExpr>(call->args[1])->value);
-    ResultOctalMode mode = FsChecker::octalMode(text);
+    auto text = ToUtf8::toUtf8(cast<StringLitExpr>(call->args[1])->value);
+    auto mode = this->octalMode(text);
     if (mode.isErr()) {
       this->state.getDiagnostics().error(call->args[1]->loc(), mode.error().message);
       return call;
@@ -467,16 +465,16 @@ Expr *FsChecker::checkPathWithArgument(FsCall &fs) {
 
 Expr *FsChecker::checkStat(FsCall &fs) {
   CallExpr *call = fs.call;
-  llvm::StringRef fn = fs.fn;
+  llvm::StringRef functionName = fs.fn;
   llvm::SMLoc loc = fs.loc;
   llvm::StringMap<Expr *> &options = fs.options;
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  auto arity = this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  Expr *file = this->checkPath(call->args[0], false);
-  if (!this->nodeOptions(call, 1, fn,
+  auto *file = this->checkPath(call->args[0], false);
+  if (!this->nodeOptions(call, 1, functionName,
                          this->state.getFileSystemStore().isInsidePromiseCall()
                              ? llvm::ArrayRef<llvm::StringRef>{"bigint"}
                              : llvm::ArrayRef<llvm::StringRef>{"throwIfNoEntry", "bigint"},
@@ -486,15 +484,15 @@ Expr *FsChecker::checkStat(FsCall &fs) {
   bool isThrowIfMissing = true;
   bool isBig = false;
   if (Expr *value = options.lookup("throwIfNoEntry");
-      value && !this->literalFlag(fs, value, "throwIfNoEntry", isThrowIfMissing)) {
+      value != nullptr && !this->literalFlag(fs, value, "throwIfNoEntry", isThrowIfMissing)) {
     return call;
   }
   if (Expr *value = options.lookup("bigint");
-      value && !this->literalFlag(fs, value, "bigint", isBig)) {
+      value != nullptr && !this->literalFlag(fs, value, "bigint", isBig)) {
     return call;
   }
   if (isBig) {
-    std::string message = ErrorTextFsCall::bigint();
+    auto message = ErrorTextFsCall::bigint();
     this->state.getDiagnostics().error(options.lookup("bigint")->loc(), message);
     return call;
   }
@@ -508,32 +506,34 @@ Expr *FsChecker::checkStat(FsCall &fs) {
 
 Expr *FsChecker::checkReaddir(FsCall &fs) {
   CallExpr *call = fs.call;
-  llvm::StringRef fn = fs.fn;
+  llvm::StringRef functionName = fs.fn;
   llvm::SMLoc loc = fs.loc;
   llvm::StringMap<Expr *> &options = fs.options;
-  const Type *string = Type::string();
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  const auto *string = Type::string();
+  auto arity = this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  Expr *dir = this->checkPath(call->args[0], false);
+  auto *dir = this->checkPath(call->args[0], false);
   if (!this->encodingOrOptions(fs, 1, {"encoding", "withFileTypes", "recursive"})) {
     return call;
   }
-  if (Expr *encoding = options.lookup("encoding"); encoding && !isa<UndefinedExpr>(encoding)) {
-    if (!this->checkEncoding(encoding, fn, false)) {
+  Expr *encoding = options.lookup("encoding");
+  if (encoding != nullptr && !isa<UndefinedExpr>(encoding)) {
+    if (this->checkEncoding(encoding, functionName, false) == nullptr) {
       return call;
     }
   }
   bool hasTypes = false;
-  if (Expr *value = options.lookup("withFileTypes");
-      value && !this->literalFlag(fs, value, "withFileTypes", hasTypes)) {
+  Expr *value = options.lookup("withFileTypes");
+  if (value != nullptr && !this->literalFlag(fs, value, "withFileTypes", hasTypes)) {
     return call;
   }
   Expr *recursive = options.lookup("recursive");
-  call->args = {dir, recursive ? this->argumentChecker->checkArg(recursive, Type::boolTy())
-                               : this->makeBoolLiteral(loc, false)};
+  call->args = {dir, recursive != nullptr
+                         ? this->argumentChecker->checkArg(recursive, Type::boolTy())
+                         : this->makeBoolLiteral(loc, false)};
   call->target = BuiltinCall{.builtin = Builtin::FsReaddir};
   const Type *dirent = this->state.getFileSystemStore().getDirentClass()->type;
   call->type = Type::array(hasTypes ? dirent : string);
@@ -542,33 +542,34 @@ Expr *FsChecker::checkReaddir(FsCall &fs) {
 
 Expr *FsChecker::checkMkdir(FsCall &fs) {
   CallExpr *call = fs.call;
-  llvm::StringRef fn = fs.fn;
+  llvm::StringRef functionName = fs.fn;
   llvm::SMLoc loc = fs.loc;
   llvm::StringMap<Expr *> &options = fs.options;
-  const Type *string = Type::string();
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  const auto *string = Type::string();
+  auto arity = this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  Expr *dir = this->checkPath(call->args[0], false);
+  auto *dir = this->checkPath(call->args[0], false);
   Expr *mode = nullptr;
   if (call->args.size() > 1 && !isa<ObjectLitExpr>(call->args[1]) &&
       !isa<UndefinedExpr>(call->args[1])) {
     mode = this->argumentChecker->checkArg(call->args[1], Type::intTy());
   } else {
-    if (!this->nodeOptions(call, 1, fn, {"recursive", "mode"}, options)) {
+    if (!this->nodeOptions(call, 1, functionName, {"recursive", "mode"}, options)) {
       return call;
     }
-    if (Expr *value = options.lookup("mode")) {
+    Expr *value = options.lookup("mode");
+    if (value != nullptr) {
       mode = this->argumentChecker->checkArg(value, Type::intTy());
     }
   }
   Expr *recursive = options.lookup("recursive");
   call->args = {dir,
-                recursive ? this->argumentChecker->checkArg(recursive, Type::boolTy())
-                          : this->makeBoolLiteral(loc, false),
-                mode ? mode : this->makeIntLiteral(loc, 0777)};
+                recursive != nullptr ? this->argumentChecker->checkArg(recursive, Type::boolTy())
+                                     : this->makeBoolLiteral(loc, false),
+                mode != nullptr ? mode : this->makeIntLiteral(loc, 0777)};
   call->target = BuiltinCall{.builtin = Builtin::FsMkdir};
   call->type = Type::optional(string);
   return call;
@@ -577,14 +578,14 @@ Expr *FsChecker::checkMkdir(FsCall &fs) {
 Expr *FsChecker::checkRmdir(FsCall &fs) {
   CallExpr *call = fs.call;
   llvm::SMLoc loc = fs.loc;
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  auto arity = this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  Expr *dir = this->checkPath(call->args[0], false);
+  auto *dir = this->checkPath(call->args[0], false);
   if (call->args.size() > 1 && !isa<UndefinedExpr>(call->args[1])) {
-    std::string message = ErrorTextFsCall::rmdir();
+    auto message = ErrorTextFsCall::rmdir();
     this->state.getDiagnostics().error(call->args[1]->loc(), message);
     return this->checkLoosely(call);
   }
@@ -596,31 +597,32 @@ Expr *FsChecker::checkRmdir(FsCall &fs) {
 
 Expr *FsChecker::checkRm(FsCall &fs) {
   CallExpr *call = fs.call;
-  llvm::StringRef fn = fs.fn;
+  llvm::StringRef functionName = fs.fn;
   llvm::SMLoc loc = fs.loc;
   llvm::StringMap<Expr *> &options = fs.options;
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  auto arity = this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  Expr *target = this->checkPath(call->args[0], false);
-  if (!this->nodeOptions(call, 1, fn, {"recursive", "force", "maxRetries", "retryDelay"},
+  auto *target = this->checkPath(call->args[0], false);
+  if (!this->nodeOptions(call, 1, functionName, {"recursive", "force", "maxRetries", "retryDelay"},
                          options)) {
     return call;
   }
   Expr *recursive = options.lookup("recursive");
   Expr *force = options.lookup("force");
   for (llvm::StringRef retry : {"maxRetries", "retryDelay"}) {
-    if (Expr *value = options.lookup(retry)) {
+    Expr *value = options.lookup(retry);
+    if (value != nullptr) {
       this->argumentChecker->checkArg(value, Type::intTy());
     }
   }
   call->args = {target,
-                recursive ? this->argumentChecker->checkArg(recursive, Type::boolTy())
-                          : this->makeBoolLiteral(loc, false),
-                force ? this->argumentChecker->checkArg(force, Type::boolTy())
-                      : this->makeBoolLiteral(loc, false)};
+                recursive != nullptr ? this->argumentChecker->checkArg(recursive, Type::boolTy())
+                                     : this->makeBoolLiteral(loc, false),
+                force != nullptr ? this->argumentChecker->checkArg(force, Type::boolTy())
+                                 : this->makeBoolLiteral(loc, false)};
   call->target = BuiltinCall{.builtin = Builtin::FsRm};
   call->type = Type::voidTy();
   return call;
@@ -628,20 +630,20 @@ Expr *FsChecker::checkRm(FsCall &fs) {
 
 Expr *FsChecker::checkTwoPaths(FsCall &fs) {
   CallExpr *call = fs.call;
-  llvm::StringRef fn = fs.fn;
+  llvm::StringRef functionName = fs.fn;
   llvm::SMLoc loc = fs.loc;
   if (fs.function == FsFunction::COPY_FILE_SYNC && call->args.size() == 3) {
-    std::string message = ErrorTextFsCall::copyMode(fn);
+    auto message = ErrorTextFsCall::copyMode(functionName);
     this->state.getDiagnostics().error(call->args[2]->loc(), message);
     return this->checkLoosely(call);
   }
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 2);
+  auto arity = this->argumentChecker->checkArity(call, 2, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  Expr *from = this->checkPath(call->args[0], false);
-  Expr *to = this->checkPath(call->args[1], false);
+  auto *from = this->checkPath(call->args[0], false);
+  auto *to = this->checkPath(call->args[1], false);
   call->args = {from, to};
   call->target =
       BuiltinCall{.builtin = fs.function == FsFunction::RENAME_SYNC    ? Builtin::FsRename
@@ -651,9 +653,9 @@ Expr *FsChecker::checkTwoPaths(FsCall &fs) {
   return call;
 }
 
-Expr *FsChecker::checkFsModuleCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
-  Expr *checked = this->checkFsCall(call, fn, loc);
-  CallExpr *done = llvm::dyn_cast<CallExpr>(checked);
+Expr *FsChecker::checkFsModuleCall(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc) {
+  auto *checked = this->checkFsCall(call, functionName, loc);
+  auto *done = llvm::dyn_cast<CallExpr>(checked);
   bool isTyped =
       done != nullptr && BuiltinGroups::isFsBuiltin(done->builtin()) && !done->type->isError();
   if (isTyped) {
@@ -665,8 +667,7 @@ Expr *FsChecker::checkFsModuleCall(CallExpr *call, llvm::StringRef fn, llvm::SML
 
 Expr *FsChecker::checkTzIoCall(CallExpr *call, llvm::SMLoc loc) {
   bool isRejected = this->callChecker->rejectSpread(call);
-  ArgumentChecker::ResultArityMatches arity =
-      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 1);
+  auto arity = isRejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
@@ -686,26 +687,28 @@ Expr *FsChecker::checkFsValue(llvm::StringRef name, Expr *expr) {
   if (name != "constants") {
     return nullptr;
   }
-  std::string message = ErrorTextFsConstant::value();
+  auto message = ErrorTextFsConstant::value();
   this->state.getDiagnostics().error(expr->loc(), message);
 
   return expr;
 }
 
 Expr *FsChecker::checkFsConstant(MemberExpr *member) {
-  auto isFs = [](const NodeName *n) {
-    return n && (n->module == NodeModule::Fs || n->module == NodeModule::FsPromises);
+  auto isFs = [](const NodeName *nodeName) {
+    return nodeName != nullptr &&
+           (nodeName->module == NodeModule::Fs || nodeName->module == NodeModule::FsPromises);
   };
   auto constantOf = [&](const Expr *object) {
     if (auto *name = dyn_cast<NameExpr>(object)) {
-      const NodeName *n = this->builtinModuleChecker->nodeName(name->name);
-      return isFs(n) && n->name == "constants";
+      const auto *nodeName = this->builtinModuleChecker->nodeName(name->name);
+      return isFs(nodeName) && nodeName->name == "constants";
     }
     auto *inner = dyn_cast<MemberExpr>(object);
-    auto *name = inner ? dyn_cast<NameExpr>(inner->object) : nullptr;
-    const NodeName *n = name ? this->builtinModuleChecker->nodeName(name->name) : nullptr;
+    auto *name = inner != nullptr ? dyn_cast<NameExpr>(inner->object) : nullptr;
+    const NodeName *nodeName =
+        name != nullptr ? this->builtinModuleChecker->nodeName(name->name) : nullptr;
 
-    return isFs(n) && n->name.empty() && inner->name == "constants";
+    return isFs(nodeName) && nodeName->name.empty() && inner->name == "constants";
   };
   if (!constantOf(member->object)) {
     return nullptr;
@@ -719,12 +722,12 @@ Expr *FsChecker::checkFsConstant(MemberExpr *member) {
                                                                   {"COPYFILE_FICLONE_FORCE", 4}};
   for (const auto &[name, value] : constants) {
     if (name == member->name) {
-      auto *lit = this->state.getAst().make<IntLitExpr>(member->loc(), uint64_t(value));
-      lit->type = Type::intTy();
-      return lit;
+      auto *literal = this->state.getAst().make<IntLitExpr>(member->loc(), uint64_t(value));
+      literal->type = Type::intTy();
+      return literal;
     }
   }
-  std::string message = ErrorTextFsConstant::notYet(member->name);
+  auto message = ErrorTextFsConstant::notYet(member->name);
   this->state.getDiagnostics().error(member->loc(), message);
   member->type = Type::error();
 

@@ -36,7 +36,6 @@ public:
 
 class ErrorTextOverflow {
 public:
-  static std::string pastExact(llvm::StringRef value);
   static std::string inInt(llvm::StringRef value, llvm::StringRef type, int64_t wrapped);
   static std::string inDouble(llvm::StringRef value, llvm::StringRef type, int64_t wrapped);
 };

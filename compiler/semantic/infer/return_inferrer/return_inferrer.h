@@ -14,6 +14,7 @@ class LateClasses;
 class AsyncChecker;
 class ImportBinder;
 class TypeRelations;
+class ReturnChecker;
 class FunctionChecker;
 class GeneratorChecker;
 class GenericClassChecker;
@@ -36,41 +37,72 @@ class ReturnInferrer {
 public:
   ReturnInferrer(SemanticState &owner, SemanticParts &all);
 
-  static bool returnsValue(const Stmt *body);
-
-  void inferReturnType(FuncSymbol *fn);
-  void walkBodyNow(FunctionDecl *decl);
-  void inferFromBody(FunctionDecl *decl);
-  const Type *returnType(FuncSymbol *fn);
-  const Type *functionType(FuncSymbol *fn);
   void leaveBody(BodyState &saved);
-  FunctionDecl *freshCopy(const FunctionDecl *fn);
+  bool isReturningValue(const Stmt *body) const;
+  void inferReturnType(FuncSymbol *function);
+  void walkBodyNow(FunctionDecl *functionDecl);
+  const Type *returnType(FuncSymbol *function);
+  void inferFromBody(FunctionDecl *functionDecl);
+  const Type *functionType(FuncSymbol *function);
+  BodyState enterBody(const FunctionDecl *functionDecl);
   void inferCycle(llvm::ArrayRef<FuncSymbol *> cycle);
-  BodyState enterBody(const FunctionDecl *fn);
+  FunctionDecl *freshCopy(const FunctionDecl *functionDecl);
 
 private:
+  enum class CycleStep {
+    KEPT,
+    CHANGED,
+    FAILED,
+  };
+
+  struct CollectedReturns {
+    std::vector<ReturnStmt *> returns;
+    std::vector<YieldExpr *> yields;
+  };
+
   using ResultCycleTypeKnown = Result<const Type *, ReturnInferrerCycleTypeError>;
   using ResultReturnsUnified = Result<const Type *, ReturnInferrerCommonReturnError>;
   using ResultNotCalledEarly = Result<const FuncSymbol *, ReturnInferrerEarlyCallError>;
   using ResultReturnsDefined = Result<const FuncSymbol *, ReturnInferrerDefinedReturnError>;
 
-  static bool givesValue(const ReturnStmt *result);
-  static std::vector<ReturnStmt *> literalsLast(llvm::ArrayRef<ReturnStmt *> returns);
+  ResultNotCalledEarly earlyCall(const FuncSymbol *function) const;
+  ResultCycleTypeKnown cycleType(const FuncSymbol *function, int cycleSize, bool isFailed) const;
+  ResultReturnsUnified commonReturn(const FuncSymbol *function, const Type *before,
+                                    const ReturnStmt *returnStmt) const;
+  ResultReturnsDefined definedReturn(const FuncSymbol *function,
+                                     llvm::ArrayRef<ReturnStmt *> returns, bool isUndefined) const;
 
-  BodyCheck startBodyCheck(FuncSymbol *fn);
+  bool isSettled(const Type *type) const;
   void finishBodyCheck(BodyCheck &check);
-  const Type *trialReturn(FuncSymbol *fn);
-  const Type *templateReturn(FuncSymbol *fn);
-  ResultNotCalledEarly earlyCall(const FuncSymbol *fn) const;
-  ResultCycleTypeKnown cycleType(const FuncSymbol *fn, int cycleSize, bool failed) const;
-  ResultReturnsUnified commonReturn(const FuncSymbol *fn, const Type *before,
-                                    const ReturnStmt *ret) const;
-  const Type *unifyReturns(const FuncSymbol *fn, llvm::ArrayRef<ReturnStmt *> returns,
-                           bool fallsOff, bool report);
-  ResultReturnsDefined definedReturn(const FuncSymbol *fn, llvm::ArrayRef<ReturnStmt *> returns,
-                                     bool undefined) const;
-  void convertReturns(const FunctionDecl *decl, llvm::ArrayRef<ReturnStmt *> returns,
+  CycleStep nextAssumption(FuncSymbol *function);
+  BodyCheck startBodyCheck(FuncSymbol *function);
+  const Type *trialReturn(FuncSymbol *function);
+  const Type *templateReturn(FuncSymbol *function);
+  bool isTemplateCopy(const FunctionDecl *functionDecl);
+  void enterTopLevelBody(const FunctionDecl *functionDecl);
+  CycleStep cycleRound(llvm::ArrayRef<FuncSymbol *> cycle);
+  CycleStep settleCycle(llvm::ArrayRef<FuncSymbol *> cycle);
+  bool isGivingValue(const ReturnStmt *returnStmt) const;
+  bool isUndefinedReturn(const ReturnStmt *returnStmt) const;
+  bool isIntLiteralReturn(const ReturnStmt *returnStmt) const;
+  bool hasValuedReturn(llvm::ArrayRef<ReturnStmt *> returns) const;
+  bool isConvertibleYield(const YieldExpr *yield, bool isAsync) const;
+  void reportCycleTypes(llvm::ArrayRef<FuncSymbol *> cycle, bool isFailed);
+  bool hasUndefinedReturn(llvm::ArrayRef<ReturnStmt *> returns) const;
+  InstanceRecord *lateOwnerOf(const FunctionDecl *functionDecl) const;
+  bool isConvertibleReturn(const ReturnStmt *returnStmt, bool isAsync) const;
+  void copyParams(const FunctionDecl *functionDecl, FunctionDecl *copy) const;
+  void copyMemberRole(const FunctionDecl *functionDecl, FunctionDecl *copy) const;
+  DiagnosticRoute bodyRoute(bool isClosure, const InstanceRecord *lateOwner) const;
+  std::vector<ReturnStmt *> literalsLast(llvm::ArrayRef<ReturnStmt *> returns) const;
+  std::vector<const ReturnStmt *> typedReturns(llvm::ArrayRef<ReturnStmt *> returns) const;
+  void convertReturns(const FunctionDecl *functionDecl, llvm::ArrayRef<ReturnStmt *> returns,
                       llvm::ArrayRef<YieldExpr *> yields);
+  const Type *unifyReturns(const FuncSymbol *function, llvm::ArrayRef<ReturnStmt *> returns,
+                           bool isFallingOff, ReturnErrors errors);
+  const Type *collectedType(const FunctionDecl *functionDecl, const FuncSymbol *function,
+                            const CollectedReturns &collected, bool isFallingOff,
+                            ReturnErrors errors);
 
   SemanticState &state;
   ClassLinks *classLinks = nullptr;
@@ -79,6 +111,7 @@ private:
   AsyncChecker *asyncChecker = nullptr;
   ImportBinder *importBinder = nullptr;
   TypeRelations *typeRelations = nullptr;
+  ReturnChecker *returnChecker = nullptr;
   FunctionChecker *functionChecker = nullptr;
   GeneratorChecker *generatorChecker = nullptr;
   GenericClassChecker *genericClassChecker = nullptr;

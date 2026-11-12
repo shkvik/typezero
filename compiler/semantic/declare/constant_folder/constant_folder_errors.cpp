@@ -13,13 +13,6 @@ std::string ErrorTextShiftCount::outside(int64_t count, int last, llvm::StringRe
       .str();
 }
 
-std::string ErrorTextOverflow::pastExact(llvm::StringRef value) {
-  return (llvm::Twine("this constant is ") + value +
-          ", beyond 2^53, where JavaScript rounds it before taking its low bits; for a 32-bit "
-          "product use Math.imul")
-      .str();
-}
-
 std::string ErrorTextOverflow::inInt(llvm::StringRef value, llvm::StringRef type, int64_t wrapped) {
   return (llvm::Twine("this constant is ") + value + ", which does not fit in '" + type +
           "' and would wrap around to " + llvm::Twine(wrapped) +

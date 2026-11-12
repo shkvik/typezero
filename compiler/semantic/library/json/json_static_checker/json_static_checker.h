@@ -7,6 +7,7 @@
 
 namespace tz {
 
+class JsonChecker;
 class SemanticParts;
 class Prelude;
 class CallChecker;
@@ -35,24 +36,24 @@ public:
 
   Expr *checkJsonStatic(CallExpr *call, MemberExpr *member);
   Expr *checkJsonGlobal(CallExpr *call, NameExpr *name);
-  bool readEmbedded(CallExpr *call, llvm::StringRef fn, std::string &bytes, std::string &shown,
-                    std::string &full);
+  bool readEmbedded(CallExpr *call, llvm::StringRef functionName, std::string &bytes,
+                    std::string &shown, std::string &full);
 
 private:
   using ResultEmbeddedPath = Result<llvm::StringRef, JsonStaticCheckerEmbeddedPathError>;
   using ResultConstantJson = Result<llvm::StringRef, JsonStaticCheckerConstantJsonError>;
 
-  static ResultConstantJson constantJson(llvm::StringRef text);
-  static ResultEmbeddedPath embeddedPath(llvm::StringRef fn, llvm::StringRef shown);
-  static bool mayHoldItself(const Type *type);
-  static bool enterHold(const Type *type, std::vector<const Type *> &open,
-                        std::vector<HoldStep> &steps);
-  static std::vector<const Type *> heldParts(const Type *type);
-  static std::vector<const Type *> familyFields(const ClassDecl *cls);
-  static std::vector<const Type *> fieldTypes(const Type *type);
-  static const ClassDecl *classWithToJson(const Type *type);
-  static bool hasToJson(const ClassDecl *cls);
-  static bool mayStringifyToUndefined(const Type *type);
+  ResultConstantJson constantJson(llvm::StringRef text) const;
+  ResultEmbeddedPath embeddedPath(llvm::StringRef functionName, llvm::StringRef shown) const;
+  bool mayHoldItself(const Type *type) const;
+  bool enterHold(const Type *type, std::vector<const Type *> &open,
+                 std::vector<HoldStep> &steps) const;
+  std::vector<const Type *> heldParts(const Type *type) const;
+  std::vector<const Type *> familyFields(const ClassDecl *classDecl) const;
+  std::vector<const Type *> fieldTypes(const Type *type) const;
+  const ClassDecl *classWithToJson(const Type *type) const;
+  bool hasToJson(const ClassDecl *classDecl) const;
+  bool mayStringifyToUndefined(const Type *type) const;
 
   void walkConstantJson(const Expr *arg);
   void walkArgsLoosely(CallExpr *call);
@@ -66,6 +67,7 @@ private:
   Prelude *prelude = nullptr;
   CallChecker *callChecker = nullptr;
   ExprChecker *exprChecker = nullptr;
+  JsonChecker *jsonChecker = nullptr;
   LibraryCalls *libraryCalls = nullptr;
   TypeRelations *typeRelations = nullptr;
   ArgumentChecker *argumentChecker = nullptr;

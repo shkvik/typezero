@@ -14,6 +14,7 @@ class TypeDeclarer;
 class TypeResolver;
 class TypeRelations;
 class IteratorMethods;
+class IterableChecker;
 
 class GeneratorChecker {
 public:
@@ -25,16 +26,18 @@ public:
 
   Expr *checkYield(YieldExpr *yield);
   const Type *asyncIteratedType(const Type *type);
-  static const Type *iteratedType(const Type *type);
+  const Type *iteratedType(const Type *type) const;
   ResultResolvedIterator resolveIteratorType(const TypeRef &ref);
-  Expr *destructuredIterator(Expr *init, const VarDeclarator &d);
+  Expr *destructuredIterator(Expr *init, const VarDeclarator &declarator);
   ResultNextNeedsNoValue checkSendsNothing(const Type *iterator, llvm::StringRef what);
-  ResultGeneratorReturns generatorReturnType(const FunctionDecl *fn, const Type *declared);
-  const Type *inferGeneratorType(const FuncSymbol *fn, llvm::ArrayRef<YieldExpr *> yields,
-                                 llvm::ArrayRef<ReturnStmt *> returns, bool fallsOff, bool report);
+  ResultGeneratorReturns generatorReturnType(const FunctionDecl *functionDecl,
+                                             const Type *declared);
+  const Type *inferGeneratorType(const FuncSymbol *function, llvm::ArrayRef<YieldExpr *> yields,
+                                 llvm::ArrayRef<ReturnStmt *> returns, bool isFallingOff,
+                                 ReturnErrors errors);
 
 private:
-  static bool namesNoValue(const TypeRef &arg);
+  bool namesNoValue(const TypeRef &arg) const;
   using ResultNothingSentAsync = Result<const Type *, GeneratorCheckerAsyncSentError>;
   using ResultYieldedTypesJoin = Result<const Type *, GeneratorCheckerYieldsJoinError>;
   using ResultReturnsOfOneType = Result<const Type *, GeneratorCheckerReturnsJoinError>;
@@ -45,23 +48,23 @@ private:
   using ResultSentTypeDeclared = Result<const Type *, GeneratorCheckerSentDeclaredError>;
   using ResultDelegateAsyncFit = Result<const Type *, GeneratorCheckerDelegateAsyncError>;
 
-  static ResultYieldGivesAValue valueYielded(const Type *yielded, const FuncSymbol *fn);
-  static ResultNothingSentAsync asyncSent(const Type *sent, const Type *yielded, bool loose);
-  static ResultYieldedTypesJoin yieldsJoin(const Type *yielded, const Type *t,
-                                           const FuncSymbol *fn);
-  static ResultYieldedTypeKnown yieldsKnown(const Type *yielded, const FuncSymbol *fn,
-                                            bool noYields);
-  static ResultReturnsOfOneType returnsJoin(const Type *returned, const Type *t,
-                                            const FuncSymbol *fn);
-  static ResultPromiseYieldFits promiseYield(const Type *t, const Type *given, const Type *yielded,
-                                             const FuncSymbol *fn);
-  static ResultDelegateAsyncFit delegateAsync(const Type *type, const Type *element,
-                                              const Type *yielded, const FuncSymbol *fn);
-  static ResultSentTypeDeclared sentDeclared(const YieldExpr *yield, bool async, const Type *sent,
-                                             const Type *yielded, bool loose);
-  static ResultDelegateSyncFits delegateSync(const Type *type, const Type *element,
-                                             const Type *yielded, const Type *sent, bool loose,
-                                             const FuncSymbol *fn);
+  ResultYieldGivesAValue valueYielded(const Type *yielded, const FuncSymbol *function) const;
+  ResultNothingSentAsync asyncSent(const Type *sent, const Type *yielded, bool loose) const;
+  ResultYieldedTypesJoin yieldsJoin(const Type *yielded, const Type *type,
+                                    const FuncSymbol *function) const;
+  ResultYieldedTypeKnown yieldsKnown(const Type *yielded, const FuncSymbol *function,
+                                     bool noYields) const;
+  ResultReturnsOfOneType returnsJoin(const Type *returned, const Type *type,
+                                     const FuncSymbol *function) const;
+  ResultPromiseYieldFits promiseYield(const Type *type, const Type *given, const Type *yielded,
+                                      const FuncSymbol *function) const;
+  ResultDelegateAsyncFit delegateAsync(const Type *type, const Type *element, const Type *yielded,
+                                       const FuncSymbol *function) const;
+  ResultSentTypeDeclared sentDeclared(const YieldExpr *yield, bool async, const Type *sent,
+                                      const Type *yielded, bool loose) const;
+  ResultDelegateSyncFits delegateSync(const Type *type, const Type *element, const Type *yielded,
+                                      const Type *sent, bool loose,
+                                      const FuncSymbol *function) const;
 
   struct YieldShape {
     FuncSymbol *fn;
@@ -71,10 +74,10 @@ private:
     bool loose;
   };
 
-  YieldShape yieldShape(const YieldExpr *yield, FuncSymbol *fn);
+  YieldShape yieldShape(const YieldExpr *yield, FuncSymbol *function);
   ResultResolvedIterator resolveIteratorResult(const TypeRef &ref);
   ResultResolvedIterator resolveIteratorArgs(const TypeRef &ref, bool async);
-  const Type *typeArgOr(const TypeRef &ref, size_t i, const Type *fallback);
+  const Type *typeArgOr(const TypeRef &ref, size_t index, const Type *fallback);
 
   struct YieldJoin {
     const Type *yielded;
@@ -82,18 +85,18 @@ private:
     bool failed;
   };
 
-  YieldJoin joinYields(const FuncSymbol *fn, llvm::ArrayRef<YieldExpr *> yields, bool async,
-                       bool report);
-  static const Type *yieldedValueType(const YieldExpr *yield, bool async);
-  const Type *unknownYields(const FuncSymbol *fn, llvm::ArrayRef<YieldExpr *> yields,
-                            const YieldJoin &join, bool report);
-  std::optional<const Type *> joinedReturns(const FuncSymbol *fn,
-                                            llvm::ArrayRef<ReturnStmt *> returns, bool fallsOff,
-                                            bool async, bool report);
+  YieldJoin joinYields(const FuncSymbol *function, llvm::ArrayRef<YieldExpr *> yields, bool async,
+                       ReturnErrors errors);
+  const Type *yieldedValueType(const YieldExpr *yield, bool async) const;
+  const Type *unknownYields(const FuncSymbol *function, llvm::ArrayRef<YieldExpr *> yields,
+                            const YieldJoin &join, ReturnErrors errors);
+  std::optional<const Type *> joinedReturns(const FuncSymbol *function,
+                                            llvm::ArrayRef<ReturnStmt *> returns, bool isFallingOff,
+                                            bool async, ReturnErrors errors);
   void walkYieldValue(YieldExpr *yield, const YieldShape &shape);
   void walkAsyncYieldValue(YieldExpr *yield, const YieldShape &shape);
   void walkDelegate(YieldExpr *yield, const YieldShape &shape);
-  static const Type *yieldResultType(const YieldExpr *yield, const YieldShape &shape);
+  const Type *yieldResultType(const YieldExpr *yield, const YieldShape &shape) const;
 
   SemanticState &state;
   DictChecker *dictChecker = nullptr;
@@ -103,6 +106,7 @@ private:
   TypeResolver *typeResolver = nullptr;
   TypeRelations *typeRelations = nullptr;
   IteratorMethods *iteratorMethods = nullptr;
+  IterableChecker *iterableChecker = nullptr;
 };
 
 }

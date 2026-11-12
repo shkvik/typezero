@@ -39,10 +39,10 @@ const MetadataType *ReflectStore::findMetadataType(const void *key) const {
   return &found->second;
 }
 
-void ReflectStore::addMetadataWriter(llvm::StringRef key, FunctionDecl *fn) {
+void ReflectStore::addMetadataWriter(llvm::StringRef key, FunctionDecl *functionDecl) {
   std::vector<FunctionDecl *> &writers = this->metadataWriters[key];
-  if (!llvm::is_contained(writers, fn)) {
-    writers.push_back(fn);
+  if (!llvm::is_contained(writers, functionDecl)) {
+    writers.push_back(functionDecl);
   }
 }
 
@@ -55,8 +55,8 @@ std::vector<FunctionDecl *> ReflectStore::getMetadataWriters(llvm::StringRef key
   return found->second;
 }
 
-void ReflectStore::rememberBuiltinConstructor(llvm::StringRef name, ClassDecl *cls) {
-  this->builtinConstructors[name] = cls;
+void ReflectStore::rememberBuiltinConstructor(llvm::StringRef name, ClassDecl *classDecl) {
+  this->builtinConstructors[name] = classDecl;
 }
 
 ClassDecl *ReflectStore::findBuiltinConstructor(llvm::StringRef name) const {
@@ -75,16 +75,16 @@ std::vector<ReflectedNew> ReflectStore::getReflectedNews() const {
   return this->reflectedNews;
 }
 
-void ReflectStore::rememberConstructorCast(const CastExpr *cast, ClassDecl *cls) {
-  this->constructorCasts[cast] = cls;
+void ReflectStore::rememberConstructorCast(const CastExpr *castExpr, ClassDecl *classDecl) {
+  this->constructorCasts[castExpr] = classDecl;
 }
 
-void ReflectStore::forgetConstructorCast(const CastExpr *cast) {
-  this->constructorCasts.erase(cast);
+void ReflectStore::forgetConstructorCast(const CastExpr *castExpr) {
+  this->constructorCasts.erase(castExpr);
 }
 
 std::vector<ConstructorCast> ReflectStore::getConstructorCasts() const {
-  std::vector<ConstructorCast> casts;
+  auto casts = std::vector<ConstructorCast>();
   for (const auto &[cast, cls] : this->constructorCasts) {
     casts.push_back({cast, cls});
   }
@@ -105,16 +105,16 @@ std::vector<const Type *> ReflectStore::getConstructorWidenings(const Type *from
   return {found->second.begin(), found->second.end()};
 }
 
-void ReflectStore::addEscapedClass(ClassDecl *cls) {
-  this->escapedClasses.insert(cls);
+void ReflectStore::addEscapedClass(ClassDecl *classDecl) {
+  this->escapedClasses.insert(classDecl);
 }
 
 std::vector<ClassDecl *> ReflectStore::getEscapedClasses() const {
   return {this->escapedClasses.begin(), this->escapedClasses.end()};
 }
 
-void ReflectStore::addReflectedObject(ClassDecl *cls) {
-  this->reflectedObjects.insert(cls);
+void ReflectStore::addReflectedObject(ClassDecl *classDecl) {
+  this->reflectedObjects.insert(classDecl);
 }
 
 std::vector<ClassDecl *> ReflectStore::getReflectedObjects() const {

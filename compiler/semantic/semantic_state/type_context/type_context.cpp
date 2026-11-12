@@ -99,12 +99,12 @@ bool TypeContext::isInsideBuiltinModule() const {
   return this->builtinModuleDepth > 0;
 }
 
-void TypeContext::rememberDestinations(const VarSymbol *var, DestinationPlaces places) {
-  this->destinations[var] = std::move(places);
+void TypeContext::rememberDestinations(const VarSymbol *variable, DestinationPlaces places) {
+  this->destinations[variable] = std::move(places);
 }
 
-DestinationPlaces TypeContext::getDestinations(const VarSymbol *var) const {
-  auto found = this->destinations.find(var);
+DestinationPlaces TypeContext::getDestinations(const VarSymbol *variable) const {
+  auto found = this->destinations.find(variable);
   if (found == this->destinations.end()) {
     return {};
   }

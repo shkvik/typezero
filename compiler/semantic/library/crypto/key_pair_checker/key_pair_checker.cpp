@@ -21,15 +21,18 @@ KeyPairChecker::KeyPairChecker(SemanticState &owner, SemanticParts &all)
   this->argumentChecker = &all.argumentChecker;
 }
 
-std::optional<std::string> KeyPairChecker::literalOf(const Expr *e) {
-  if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
-    e = conv->operand;
+std::optional<std::string> KeyPairChecker::literalOf(const Expr *expr) const {
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  if (conversion != nullptr && conversion->isImplicit()) {
+    expr = conversion->operand;
   }
-  if (auto *lit = dyn_cast<StringLitExpr>(e)) {
-    return ToUtf8::toUtf8(lit->value);
+  auto *literal = dyn_cast<StringLitExpr>(expr);
+  if (literal != nullptr) {
+    return ToUtf8::toUtf8(literal->value);
   }
-  if (auto *tmpl = dyn_cast<TemplateExpr>(e); tmpl && tmpl->exprs.empty()) {
-    return ToUtf8::toUtf8(tmpl->quasis[0]);
+  auto *templateExpr = dyn_cast<TemplateExpr>(expr);
+  if (templateExpr != nullptr && templateExpr->exprs.empty()) {
+    return ToUtf8::toUtf8(templateExpr->quasis[0]);
   }
 
   return std::nullopt;
@@ -37,9 +40,9 @@ std::optional<std::string> KeyPairChecker::literalOf(const Expr *e) {
 
 KeyPairChecker::ResultKeyOptionsGiven
 KeyPairChecker::keyOptions(int which, llvm::StringRef type,
-                           const llvm::StringMap<Expr *> &options) {
+                           const llvm::StringMap<Expr *> &options) const {
   if (which >= 0 && which <= 2 && !options.lookup("modulusLength")) {
-    std::string message = ErrorTextKeyPair::modulus(type);
+    auto message = ErrorTextKeyPair::modulus(type);
 
     return err(KeyPairCheckerKeyOptionsError{
         .code = KeyPairCheckerKeyOptionsErrorCode::NO_MODULUS_LENGTH,
@@ -47,7 +50,7 @@ KeyPairChecker::keyOptions(int which, llvm::StringRef type,
     });
   }
   if (which == 3 && !options.lookup("namedCurve")) {
-    std::string message = ErrorTextKeyPair::curve();
+    auto message = ErrorTextKeyPair::curve();
 
     return err(KeyPairCheckerKeyOptionsError{
         .code = KeyPairCheckerKeyOptionsErrorCode::NO_NAMED_CURVE,
@@ -60,7 +63,7 @@ KeyPairChecker::keyOptions(int which, llvm::StringRef type,
 
 Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc,
                                            llvm::StringRef shown) {
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  auto arity = this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
@@ -69,13 +72,13 @@ Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc,
   if (!kind.has_value()) {
     return call;
   }
-  llvm::StringMap<Expr *> options;
+  auto options = llvm::StringMap<Expr *>();
   if (!this->keyPairOptionsRead(call, shown, options)) {
     return call;
   }
   llvm::StringRef typeName =
-      kind->which >= 0 ? KeyPairChecker::pairTypeNames()[kind->which] : llvm::StringRef();
-  ResultKeyOptionsGiven given = KeyPairChecker::keyOptions(kind->which, typeName, options);
+      kind->which >= 0 ? this->pairTypeNames()[kind->which] : llvm::StringRef();
+  auto given = this->keyOptions(kind->which, typeName, options);
   if (given.isErr()) {
     this->state.getDiagnostics().error(loc, given.error().message);
     return call;
@@ -85,25 +88,25 @@ Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc,
     return call;
   }
   std::vector<Expr *> parts = {this->generateKeyCall(call, loc, *kind, *numbers)};
-  const Type *publicKey = this->appendedEncoding(loc, options, false, parts);
+  const auto *publicKey = this->appendedEncoding(loc, options, false, parts);
   if (publicKey == nullptr) {
     return call;
   }
-  const Type *privateKey = this->appendedEncoding(loc, options, true, parts);
+  const auto *privateKey = this->appendedEncoding(loc, options, true, parts);
   if (privateKey == nullptr) {
     return call;
   }
   call->args = std::move(parts);
   call->spread.clear();
   call->target = BuiltinCall{.builtin = Builtin::CryptoKeyPair};
-  const Type *pair =
+  const auto *pair =
       Type::object({{"publicKey", publicKey, false}, {"privateKey", privateKey, false}}, "KeyPair");
   call->type = Type::result(pair, this->cryptoErrors->named("GenerateKeyPairError"));
 
   return call;
 }
 
-llvm::ArrayRef<llvm::StringRef> KeyPairChecker::pairTypeNames() {
+llvm::ArrayRef<llvm::StringRef> KeyPairChecker::pairTypeNames() const {
   static const llvm::StringRef types[] = {"rsa",     "rsa-pss", "dsa",    "ec",
                                           "ed25519", "ed448",   "x25519", "x448"};
 
@@ -116,12 +119,12 @@ std::optional<KeyPairChecker::KeyPairKind> KeyPairChecker::keyPairKind(CallExpr 
       .which = -1,
       .name = this->cryptoArgs->cryptoString(loc, ""),
   };
-  if (!KeyPairChecker::literalOf(call->args[0]).has_value()) {
+  if (!this->literalOf(call->args[0]).has_value()) {
     kind.name = this->argumentChecker->checkArg(call->args[0], Type::string());
     return kind;
   }
-  std::string label = ErrorTextKeyPairLabel::pairType();
-  llvm::ArrayRef<llvm::StringRef> types = KeyPairChecker::pairTypeNames();
+  auto label = ErrorTextKeyPairLabel::pairType();
+  auto types = this->pairTypeNames();
   kind.which = this->cryptoArgs->cryptoChoice(call->args[0], label, types);
   if (kind.which < 0) {
     return std::nullopt;
@@ -143,10 +146,10 @@ bool KeyPairChecker::keyPairOptionsRead(CallExpr *call, llvm::StringRef shown,
     return false;
   }
   for (llvm::StringRef unsupported : {"hashAlgorithm", "mgf1HashAlgorithm", "saltLength"}) {
-    Expr *e = options.lookup(unsupported);
-    if (e != nullptr) {
-      std::string message = ErrorTextKeyPair::option(unsupported);
-      this->state.getDiagnostics().error(e->loc(), message);
+    Expr *expr = options.lookup(unsupported);
+    if (expr != nullptr) {
+      auto message = ErrorTextKeyPair::option(unsupported);
+      this->state.getDiagnostics().error(expr->loc(), message);
       return false;
     }
   }
@@ -165,17 +168,17 @@ KeyPairChecker::keyPairNumbers(llvm::SMLoc loc, int which, const llvm::StringMap
   Expr *m = options.lookup("modulusLength");
   if (m != nullptr) {
     numbers.modulus = this->cryptoArgs->cryptoNumber(m);
-    std::optional<double> bits = this->cryptoArgs->knownNumber(numbers.modulus);
+    auto bits = this->cryptoArgs->knownNumber(numbers.modulus);
     bool isRsa = which == 0 || which == 1;
     if (isRsa && bits.has_value() && *bits < 512) {
-      std::string message = ErrorTextKeyPair::small(CryptoArgs::numberText(*bits));
+      auto message = ErrorTextKeyPair::small(this->cryptoArgs->numberText(*bits));
       this->state.getDiagnostics().error(m->loc(), message);
       return std::nullopt;
     }
   }
-  Expr *e = options.lookup("publicExponent");
-  if (e != nullptr) {
-    numbers.exponent = this->cryptoArgs->cryptoNumber(e);
+  Expr *expr = options.lookup("publicExponent");
+  if (expr != nullptr) {
+    numbers.exponent = this->cryptoArgs->cryptoNumber(expr);
     numbers.has |= 2;
   }
   Expr *d = options.lookup("divisorLength");
@@ -194,8 +197,8 @@ KeyPairChecker::keyPairNumbers(llvm::SMLoc loc, int which, const llvm::StringMap
 Expr *KeyPairChecker::generateKeyCall(CallExpr *call, llvm::SMLoc loc, const KeyPairKind &kind,
                                       const KeyPairNumbers &numbers) {
   auto *generate = this->state.getAst().make<CallExpr>(loc, call->callee, std::vector<Expr *>{});
-  Expr *which = this->cryptoArgs->cryptoInt(loc, kind.which < 0 ? 0xffffffff : kind.which);
-  Expr *has = this->cryptoArgs->cryptoInt(loc, numbers.has);
+  auto *which = this->cryptoArgs->cryptoInt(loc, kind.which < 0 ? 0xffffffff : kind.which);
+  auto *has = this->cryptoArgs->cryptoInt(loc, numbers.has);
   std::vector<Expr *> args = {which, kind.name,    numbers.modulus, numbers.exponent,
                               has,   numbers.curve};
   this->cryptoArgs->cryptoCall(generate, CryptoFn::GenerateKeyPair, std::move(args),
@@ -219,16 +222,16 @@ const Type *KeyPairChecker::appendedEncoding(llvm::SMLoc loc,
   if (encoding != nullptr && !this->encodingRead(encoding, option, isPrivate, chosen)) {
     return nullptr;
   }
-  Expr *format = this->cryptoArgs->cryptoInt(loc, chosen.format < 0 ? 0xffffffff : chosen.format);
-  Expr *flags = this->cryptoArgs->cryptoInt(loc, chosen.flags);
+  auto *format = this->cryptoArgs->cryptoInt(loc, chosen.format < 0 ? 0xffffffff : chosen.format);
+  auto *flags = this->cryptoArgs->cryptoInt(loc, chosen.flags);
   parts.insert(parts.end(), {format, flags, chosen.type, chosen.cipher, chosen.passphrase});
 
-  return KeyPairChecker::encodedKeyType(chosen.format);
+  return this->encodedKeyType(chosen.format);
 }
 
 bool KeyPairChecker::encodingRead(Expr *encoding, llvm::StringRef option, bool isPrivate,
                                   KeyEncoding &chosen) {
-  llvm::StringMap<Expr *> e;
+  auto e = llvm::StringMap<Expr *>();
   llvm::SmallVector<llvm::StringRef, 4> allowed = {"type", "format"};
   if (isPrivate) {
     allowed.append({"cipher", "passphrase"});
@@ -238,11 +241,11 @@ bool KeyPairChecker::encodingRead(Expr *encoding, llvm::StringRef option, bool i
   }
   Expr *format = e.lookup("format");
   if (format == nullptr) {
-    std::string message = ErrorTextKeyPair::noFormat(option);
+    auto message = ErrorTextKeyPair::noFormat(option);
     this->state.getDiagnostics().error(encoding->loc(), message);
     return false;
   }
-  std::string formatLabel = ErrorTextKeyPairLabel::format();
+  auto formatLabel = ErrorTextKeyPairLabel::format();
   chosen.format = this->cryptoArgs->cryptoChoice(format, formatLabel, {"pem", "der", "jwk"});
   if (chosen.format < 0) {
     return false;
@@ -261,11 +264,11 @@ bool KeyPairChecker::encodingTypeRead(const Expr *encoding, llvm::StringRef opti
     return true;
   }
   if (t == nullptr) {
-    std::string message = ErrorTextKeyPair::noType(option, !isPrivate);
+    auto message = ErrorTextKeyPair::noType(option, !isPrivate);
     this->state.getDiagnostics().error(encoding->loc(), message);
     return false;
   }
-  std::string typeLabel = ErrorTextKeyPairLabel::keyType();
+  auto typeLabel = ErrorTextKeyPairLabel::keyType();
   int typeIndex = this->cryptoArgs->cryptoChoice(t, typeLabel, {"pkcs1", "spki", "pkcs8", "sec1"});
   if (typeIndex < 0) {
     return false;
@@ -284,7 +287,7 @@ bool KeyPairChecker::encodingCipherRead(const Expr *encoding, const llvm::String
     chosen.cipher = this->argumentChecker->checkArg(c, Type::string());
     chosen.flags |= 2;
     if (e.lookup("passphrase") == nullptr) {
-      std::string message = ErrorTextKeyPair::passphrase();
+      auto message = ErrorTextKeyPair::passphrase();
       this->state.getDiagnostics().error(encoding->loc(), message);
       return false;
     }
@@ -299,7 +302,7 @@ bool KeyPairChecker::encodingCipherRead(const Expr *encoding, const llvm::String
   return !chosen.passphrase->type->isError();
 }
 
-const Type *KeyPairChecker::encodedKeyType(int format) {
+const Type *KeyPairChecker::encodedKeyType(int format) const {
   if (format < 0) {
     return Type::cryptoType(Crypto::KeyObject);
   }

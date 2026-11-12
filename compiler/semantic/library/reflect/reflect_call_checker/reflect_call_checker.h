@@ -7,11 +7,13 @@
 
 namespace tz {
 
+class ClassLinks;
 class SemanticParts;
 struct MetadataType;
 class CallChecker;
 class ExprChecker;
 class TypeRelations;
+class ClassDeclarer;
 class ReflectChecker;
 class ReturnInferrer;
 class ArgumentChecker;
@@ -22,25 +24,25 @@ public:
   ReflectCallChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkReflectArgs(Expr *args);
-  FunctionDecl *knownReflectMethod(ClassDecl *cls, llvm::StringRef name, bool &several);
+  FunctionDecl *knownReflectMethod(ClassDecl *classDecl, llvm::StringRef name, bool &several);
   const FunctionDecl *heldReflectMethod(const Expr *f);
-  Expr *directReflectApply(CallExpr *call, const FunctionDecl *fn);
+  Expr *directReflectApply(CallExpr *call, const FunctionDecl *functionDecl);
   Expr *checkReflectCall(CallExpr *call, MemberExpr *member, const Type *expected);
-  static bool reflectAccepts(const Type *arg, const Type *param);
+  bool reflectAccepts(const Type *arg, const Type *param) const;
 
 private:
   using ResultKeyOfRecords = Result<const Type *, ReflectCallCheckerKeyOfRecordsError>;
   using ResultTargetObject = Result<const Type *, ReflectCallCheckerTargetObjectError>;
   using ResultArgumentList = Result<const Type *, ReflectCallCheckerArgumentListError>;
 
-  static ResultKeyOfRecords keyOfRecords(const Type *type);
-  static ResultTargetObject targetObject(const Type *type);
-  static ResultArgumentList argumentList(const Type *type);
-  static const Type *designType(const Expr *key);
-  static bool isDesignKey(const Expr *key);
-  static Expr *stripImplicit(Expr *expr);
-  static bool declaredBelow(const ClassDecl *cls, llvm::StringRef name);
-  static bool acceptsPlain(const Type *arg, const Type *param);
+  ResultKeyOfRecords keyOfRecords(const Type *type) const;
+  ResultTargetObject targetObject(const Type *type) const;
+  ResultArgumentList argumentList(const Type *type) const;
+  const Type *designType(const Expr *key) const;
+  bool isDesignKey(const Expr *key) const;
+  Expr *stripImplicit(Expr *expr) const;
+  bool declaredBelow(const ClassDecl *classDecl, llvm::StringRef name) const;
+  bool acceptsPlain(const Type *arg, const Type *param) const;
 
   struct MetadataFunction {
     Builtin builtin = Builtin::None;
@@ -68,9 +70,11 @@ private:
                           MetadataFunction function);
 
   SemanticState &state;
+  ClassLinks *classLinks = nullptr;
   CallChecker *callChecker = nullptr;
   ExprChecker *exprChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
   ReflectChecker *reflectChecker = nullptr;
   ReturnInferrer *returnInferrer = nullptr;
   ArgumentChecker *argumentChecker = nullptr;

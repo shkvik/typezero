@@ -20,16 +20,16 @@ class ArgumentChecker;
 
 class DateFormatChecker {
 public:
-  static bool isLanguageTag(const std::string &tag);
+  bool isLanguageTag(const std::string &tag) const;
   DateFormatChecker(SemanticState &owner, SemanticParts &all);
 
   bool checkLocaleArgs(std::vector<Expr *> &args, int kind);
   Expr *checkDateFormatNew(llvm::SMLoc loc, std::vector<Expr *> &args);
   Expr *checkIntlCall(CallExpr *call, MemberExpr *member);
   Expr *checkDateFormatMethod(CallExpr *call, MemberExpr *member);
-  static const Type *dateFormatPartType();
-  static const Type *resolvedDateOptionsType();
-  static const Type *dateOptionsType();
+  const Type *dateFormatPartType() const;
+  const Type *resolvedDateOptionsType() const;
+  const Type *dateOptionsType() const;
 
 private:
   using ResultOptionsObject = Result<const Type *, DateFormatCheckerOptionsObjectError>;
@@ -49,19 +49,19 @@ private:
   bool optionKindsFit(const Expr *options, int kind);
   bool optionKindFits(const Expr *options, const Field &field,
                       std::optional<DateFormatOption> option, int kind);
-  static const Type *wantedOptionType(DateFormatOption option, const Type *value);
-  static DateOptionRole optionRole(DateFormatOption option);
+  const Type *wantedOptionType(DateFormatOption option, const Type *value) const;
+  DateOptionRole optionRole(DateFormatOption option) const;
   bool styleFitsMethod(const Expr *options, llvm::StringRef name, int kind);
   bool optionValuesFit(const Expr *options);
-  static const Expr *givenProperty(const ObjectLitExpr *literal, llvm::StringRef name);
+  const Expr *givenProperty(const ObjectLitExpr *literal, llvm::StringRef name) const;
   bool digitsFit(const Field &field, const DateOptionPlace &place);
   bool optionTextFits(const Field &field, const DateOptionPlace &place);
 
-  static ResultOptionsObject optionsObject(const Type *type, int kind);
-  static std::optional<std::u16string> literalText(const Expr *e);
-  static std::optional<std::vector<std::string>> textsOf(const Type *type);
-  static std::optional<std::vector<double>> numbersOf(const Type *type);
-  static const char *methodName(int kind);
+  ResultOptionsObject optionsObject(const Type *type, int kind) const;
+  std::optional<std::u16string> literalText(const Expr *expr) const;
+  std::optional<std::vector<std::string>> textsOf(const Type *type) const;
+  std::optional<std::vector<double>> numbersOf(const Type *type) const;
+  const char *methodName(int kind) const;
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

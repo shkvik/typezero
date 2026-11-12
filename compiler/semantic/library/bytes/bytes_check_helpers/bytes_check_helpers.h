@@ -35,15 +35,15 @@ struct NumberMethod {
 class BytesCheckHelpers {
 public:
   static std::optional<int> encodingNamed(llvm::StringRef name);
-  static std::string valueText(const Expr *e);
+  static std::string valueText(const Expr *expr);
   static std::string wrapHint(Bytes kind, const std::string &value);
   static Range operate(BinaryOp op, const Range &a, const Range &b, bool isInt);
   static bool numberMethod(llvm::StringRef name, bool dataView, NumberMethod &m);
   static std::string numberWhat(Bytes kind);
 
 private:
-  static NodeChildren<const Expr *> valueParts(const Expr *e);
-  static std::string nodeValueText(const Expr *e, std::vector<std::string> &answers);
+  static NodeChildren<const Expr *> valueParts(const Expr *expr);
+  static std::string nodeValueText(const Expr *expr, std::vector<std::string> &answers);
   static Range operateWide(BinaryOp op, const Range &a, const Range &b, bool isInt);
   static std::optional<int64_t> exactValue(const Range &r);
   static Range withinBounds(const Range &r, bool isInt);

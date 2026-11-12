@@ -4,8 +4,8 @@
 namespace tz {
 
 std::vector<const TypeRef *> TypeRefParts::collect(const TypeRef &ref) {
-  std::vector<const TypeRef *> parts;
-  std::vector<const TypeRef *> stack = {&ref};
+  auto parts = std::vector<const TypeRef *>();
+  auto stack = std::vector<const TypeRef *>{&ref};
   while (!stack.empty()) {
     const TypeRef *next = stack.back();
     stack.pop_back();
@@ -20,8 +20,8 @@ std::vector<const TypeRef *> TypeRefParts::collect(const TypeRef &ref) {
 
 std::vector<const TypeRef *> TypeRefParts::collect(const TypeRef &ref,
                                                    llvm::ArrayRef<TypeRefKind> route) {
-  std::vector<const TypeRef *> parts;
-  std::vector<const TypeRef *> stack = {&ref};
+  auto parts = std::vector<const TypeRef *>();
+  auto stack = std::vector<const TypeRef *>{&ref};
   while (!stack.empty()) {
     const TypeRef *next = stack.back();
     stack.pop_back();

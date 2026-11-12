@@ -37,24 +37,27 @@ BufferChecker::BufferChecker(SemanticState &owner, SemanticParts &all)
   this->argumentChecker = &all.argumentChecker;
 }
 
-std::optional<std::u16string> BufferChecker::literalText(const Expr *e) {
-  if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
-    e = conv->operand;
+std::optional<std::u16string> BufferChecker::literalText(const Expr *expr) const {
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  if (conversion != nullptr && conversion->isImplicit()) {
+    expr = conversion->operand;
   }
-  if (auto *lit = dyn_cast<StringLitExpr>(e)) {
-    return lit->value;
+  auto *literal = dyn_cast<StringLitExpr>(expr);
+  if (literal != nullptr) {
+    return literal->value;
   }
-  if (auto *tmpl = dyn_cast<TemplateExpr>(e); tmpl && tmpl->exprs.empty()) {
-    return tmpl->quasis[0];
+  auto *templateExpr = dyn_cast<TemplateExpr>(expr);
+  if (templateExpr != nullptr && templateExpr->exprs.empty()) {
+    return templateExpr->quasis[0];
   }
 
   return std::nullopt;
 }
 
 BufferChecker::ResultCountOfBytes BufferChecker::countOfBytes(std::optional<int64_t> count,
-                                                              llvm::StringRef name) {
+                                                              llvm::StringRef name) const {
   if (!count || *count < 1 || *count > 6) {
-    std::string message = ErrorTextBuffer::byteCount(name);
+    auto message = ErrorTextBuffer::byteCount(name);
 
     return err(BufferCheckerCountOfBytesError{
         .code = BufferCheckerCountOfBytesErrorCode::NOT_ONE_TO_SIX,
@@ -65,10 +68,10 @@ BufferChecker::ResultCountOfBytes BufferChecker::countOfBytes(std::optional<int6
   return ok(*count);
 }
 
-BufferChecker::ResultDecodedInput BufferChecker::decodedInput(const Type *type) {
+BufferChecker::ResultDecodedInput BufferChecker::decodedInput(const Type *type) const {
   if (!type->isError() && !type->isUndefined() && !type->isByteView() &&
       type->bytes() != Bytes::ArrayBuffer) {
-    std::string message = ErrorTextBuffer::decode(type->name());
+    auto message = ErrorTextBuffer::decode(type->name());
 
     return err(BufferCheckerDecodedInputError{
         .code = BufferCheckerDecodedInputErrorCode::NOT_BYTES,
@@ -86,7 +89,7 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
       .bufferType = member->object->type,
       .name = member->name,
   };
-  std::optional<BytesMethod> method = BytesMethodTable::findMethod(member->name);
+  auto method = BytesMethodTable::findMethod(member->name);
   const BufferMethodInfo *found = method.has_value() ? BufferMethodTable::find(*method) : nullptr;
   if (found == nullptr) {
     return this->checkNumberMethod(buffer);
@@ -119,7 +122,7 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-Expr *BufferChecker::toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result) {
+Expr *BufferChecker::toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result) const {
   call->target = BuiltinCall{.builtin = builtin};
   call->type = result;
 
@@ -127,7 +130,7 @@ Expr *BufferChecker::toBuiltinCall(CallExpr *call, Builtin builtin, const Type *
 }
 
 Expr *BufferChecker::reportSlice(const BufferCall &buffer) {
-  std::string message = ErrorTextBuffer::slice();
+  auto message = ErrorTextBuffer::slice();
   this->state.getDiagnostics().error(buffer.member->loc(), message);
   this->argumentChecker->walkArgsLoosely(buffer.call);
 
@@ -136,7 +139,7 @@ Expr *BufferChecker::reportSlice(const BufferCall &buffer) {
 
 Expr *BufferChecker::checkToString(const BufferCall &buffer) {
   CallExpr *call = buffer.call;
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 3);
+  auto arity = this->argumentChecker->checkArity(call, 0, 3);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(buffer.member->loc(), arity.error().message);
     return call;
@@ -144,42 +147,42 @@ Expr *BufferChecker::checkToString(const BufferCall &buffer) {
   Expr *encoding = call->args.empty() ? this->makeIntLiteral(call->loc(), Utf8)
                                       : this->bytesChecker->checkBufferEncoding(call->args[0]);
   std::vector<Expr *> args{encoding};
-  for (size_t i = 1; i < call->args.size(); ++i) {
-    args.push_back(this->memberChecker->checkPosition(call->args[i]));
+  for (size_t index = 1; index < call->args.size(); ++index) {
+    args.push_back(this->memberChecker->checkPosition(call->args[index]));
   }
   call->args = std::move(args);
 
-  return BufferChecker::toBuiltinCall(call, Builtin::BufferToString, Type::string());
+  return this->toBuiltinCall(call, Builtin::BufferToString, Type::string());
 }
 
 Expr *BufferChecker::checkToJson(const BufferCall &buffer) {
   CallExpr *call = buffer.call;
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
+  auto arity = this->argumentChecker->checkArity(call, 0, 0);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(buffer.member->loc(), arity.error().message);
     return call;
   }
-  const Type *json =
+  const auto *json =
       Type::object({{"type", Type::string(), false}, {"data", Type::array(Type::intTy()), false}});
 
-  return BufferChecker::toBuiltinCall(call, Builtin::BufferToJSON, json);
+  return this->toBuiltinCall(call, Builtin::BufferToJSON, json);
 }
 
 Expr *BufferChecker::checkEquals(const BufferCall &buffer) {
   CallExpr *call = buffer.call;
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+  auto arity = this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(buffer.member->loc(), arity.error().message);
     return call;
   }
   call->args[0] = this->checkBytesArg(call->args[0]);
 
-  return BufferChecker::toBuiltinCall(call, Builtin::BufferEquals, Type::boolTy());
+  return this->toBuiltinCall(call, Builtin::BufferEquals, Type::boolTy());
 }
 
 Expr *BufferChecker::checkCompare(const BufferCall &buffer) {
   CallExpr *call = buffer.call;
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 5);
+  auto arity = this->argumentChecker->checkArity(call, 1, 5);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(buffer.member->loc(), arity.error().message);
     return call;
@@ -187,27 +190,25 @@ Expr *BufferChecker::checkCompare(const BufferCall &buffer) {
   call->args[0] = this->checkBytesArg(call->args[0]);
   this->walkPositionArgs(call, 1);
   static const char *const names[] = {"", "targetStart", "targetEnd", "sourceStart", "sourceEnd"};
-  for (size_t i = 1; i < call->args.size(); ++i) {
-    std::string what = ErrorTextBuffer::position(names[i]);
-    bool isEnd = i == 2 || i == 4;
+  for (size_t index = 1; index < call->args.size(); ++index) {
+    auto what = ErrorTextBuffer::position(names[index]);
+    bool isEnd = index == 2 || index == 4;
     if (isEnd) {
-      const Expr *array = i == 2 ? call->args[0] : buffer.member->object;
-      IndexProofs::ResultUpToWasProven upTo =
-          this->indexProofs->requireUpTo(call->args[i], array, 0, what);
-      this->reportUnprovenUpTo(upTo, call->args[i]->loc());
+      const Expr *array = index == 2 ? call->args[0] : buffer.member->object;
+      auto upTo = this->indexProofs->requireUpTo(call->args[index], array, 0, what);
+      this->reportUnprovenUpTo(upTo, call->args[index]->loc());
     } else {
-      IndexProofs::ResultBetweenProven between =
-          this->indexProofs->requireBetween(call->args[i], 0, std::nullopt, what);
-      this->reportUnprovenBetween(between, call->args[i]->loc());
+      auto between = this->indexProofs->requireBetween(call->args[index], 0, std::nullopt, what);
+      this->reportUnprovenBetween(between, call->args[index]->loc());
     }
   }
 
-  return BufferChecker::toBuiltinCall(call, Builtin::BufferCompareTo, Type::intTy());
+  return this->toBuiltinCall(call, Builtin::BufferCompareTo, Type::intTy());
 }
 
 Expr *BufferChecker::checkCopy(const BufferCall &buffer) {
   CallExpr *call = buffer.call;
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 4);
+  auto arity = this->argumentChecker->checkArity(call, 1, 4);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(buffer.member->loc(), arity.error().message);
     return call;
@@ -215,34 +216,32 @@ Expr *BufferChecker::checkCopy(const BufferCall &buffer) {
   call->args[0] = this->checkBytesArg(call->args[0]);
   this->walkPositionArgs(call, 1);
   static const char *const names[] = {"", "targetStart", "sourceStart", "sourceEnd"};
-  for (size_t i = 1; i < call->args.size(); ++i) {
-    std::string what = ErrorTextBuffer::position(names[i]);
-    if (i == 2) {
-      IndexProofs::ResultUpToWasProven upTo =
-          this->indexProofs->requireUpTo(call->args[i], buffer.member->object, 0, what);
-      this->reportUnprovenUpTo(upTo, call->args[i]->loc());
+  for (size_t index = 1; index < call->args.size(); ++index) {
+    auto what = ErrorTextBuffer::position(names[index]);
+    if (index == 2) {
+      auto upTo = this->indexProofs->requireUpTo(call->args[index], buffer.member->object, 0, what);
+      this->reportUnprovenUpTo(upTo, call->args[index]->loc());
     } else {
-      IndexProofs::ResultBetweenProven between =
-          this->indexProofs->requireBetween(call->args[i], 0, std::nullopt, what);
-      this->reportUnprovenBetween(between, call->args[i]->loc());
+      auto between = this->indexProofs->requireBetween(call->args[index], 0, std::nullopt, what);
+      this->reportUnprovenBetween(between, call->args[index]->loc());
     }
   }
 
-  return BufferChecker::toBuiltinCall(call, Builtin::BufferCopy, Type::intTy());
+  return this->toBuiltinCall(call, Builtin::BufferCopy, Type::intTy());
 }
 
 Expr *BufferChecker::checkWrite(const BufferCall &buffer) {
   CallExpr *call = buffer.call;
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 4);
+  auto arity = this->argumentChecker->checkArity(call, 1, 4);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(buffer.member->loc(), arity.error().message);
     return call;
   }
-  Expr *text = this->argumentChecker->checkArg(call->args[0], Type::string());
-  EncodingAndPositions rest = this->splitWriteArgs(buffer);
+  auto *text = this->argumentChecker->checkArg(call->args[0], Type::string());
+  auto rest = this->splitWriteArgs(buffer);
   if (!rest.positions.empty()) {
-    std::string offsetWhat = ErrorTextBufferLabel::offset();
-    IndexProofs::ResultUpToWasProven upTo =
+    auto offsetWhat = ErrorTextBufferLabel::offset();
+    auto upTo =
         this->indexProofs->requireUpTo(rest.positions[0], buffer.member->object, 0, offsetWhat);
     this->reportUnprovenUpTo(upTo, rest.positions[0]->loc());
     if (upTo.isOk() && rest.positions.size() > 1) {
@@ -255,26 +254,26 @@ Expr *BufferChecker::checkWrite(const BufferCall &buffer) {
   args.insert(args.end(), rest.positions.begin(), rest.positions.end());
   call->args = std::move(args);
 
-  return BufferChecker::toBuiltinCall(call, Builtin::BufferWrite, Type::intTy());
+  return this->toBuiltinCall(call, Builtin::BufferWrite, Type::intTy());
 }
 
 BufferChecker::EncodingAndPositions BufferChecker::splitWriteArgs(const BufferCall &buffer) {
   CallExpr *call = buffer.call;
   EncodingAndPositions rest;
-  for (size_t i = 1; i < call->args.size(); ++i) {
-    Expr *arg = call->args[i];
-    bool isLast = i + 1 == call->args.size();
-    bool isMayBeEncoding = BufferChecker::literalText(arg).has_value() || isLast;
+  for (size_t index = 1; index < call->args.size(); ++index) {
+    Expr *arg = call->args[index];
+    bool isLast = index + 1 == call->args.size();
+    bool isMayBeEncoding = this->literalText(arg).has_value() || isLast;
     if (!isMayBeEncoding) {
       rest.positions.push_back(this->memberChecker->checkPosition(arg));
       continue;
     }
-    Expr *checked = this->exprChecker->checkExpr(arg);
+    auto *checked = this->exprChecker->checkExpr(arg);
     if (checked->type->isString()) {
       rest.encoding = this->bytesChecker->checkBufferEncoding(checked);
       if (!isLast) {
-        std::string message = ErrorTextBuffer::encoding(buffer.name);
-        this->state.getDiagnostics().error(call->args[i + 1]->loc(), message);
+        auto message = ErrorTextBuffer::encoding(buffer.name);
+        this->state.getDiagnostics().error(call->args[index + 1]->loc(), message);
       }
       break;
     }
@@ -286,30 +285,29 @@ BufferChecker::EncodingAndPositions BufferChecker::splitWriteArgs(const BufferCa
 
 Expr *BufferChecker::checkFill(const BufferCall &buffer) {
   CallExpr *call = buffer.call;
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 4);
+  auto arity = this->argumentChecker->checkArity(call, 1, 4);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(buffer.member->loc(), arity.error().message);
     return call;
   }
-  Expr *value = this->checkValueArg(buffer, call->args[0]);
+  auto *value = this->checkValueArg(buffer, call->args[0]);
   if (value->type->isError()) {
     return call;
   }
   if (value->type->isInt()) {
-    std::string byte = ErrorTextBufferLabel::byte();
-    ByteProofs::ResultValueFitsType fitting =
-        this->byteProofs->valueFits(value, buffer.bufferType, byte);
+    auto byte = ErrorTextBufferLabel::byte();
+    auto fitting = this->byteProofs->valueFits(value, buffer.bufferType, byte);
     if (fitting.isErr()) {
       this->state.getDiagnostics().error(value->loc(), fitting.error().message);
     }
   }
-  EncodingAndPositions rest = this->splitValueArgs(buffer);
+  auto rest = this->splitValueArgs(buffer);
   this->reportEncodingWithoutText(value, rest.encoding);
-  for (size_t i = 0; i < rest.positions.size(); ++i) {
-    std::string what = i == 0 ? ErrorTextBufferLabel::offset() : ErrorTextBufferLabel::end();
-    IndexProofs::ResultUpToWasProven upTo =
-        this->indexProofs->requireUpTo(rest.positions[i], buffer.member->object, 0, what);
-    this->reportUnprovenUpTo(upTo, rest.positions[i]->loc());
+  for (size_t index = 0; index < rest.positions.size(); ++index) {
+    std::string what = index == 0 ? ErrorTextBufferLabel::offset() : ErrorTextBufferLabel::end();
+    auto upTo =
+        this->indexProofs->requireUpTo(rest.positions[index], buffer.member->object, 0, what);
+    this->reportUnprovenUpTo(upTo, rest.positions[index]->loc());
   }
   Expr *encoding =
       rest.encoding != nullptr ? rest.encoding : this->makeIntLiteral(call->loc(), Utf8);
@@ -317,25 +315,25 @@ Expr *BufferChecker::checkFill(const BufferCall &buffer) {
   args.insert(args.end(), rest.positions.begin(), rest.positions.end());
   call->args = std::move(args);
 
-  return BufferChecker::toBuiltinCall(call, Builtin::BufferFill, buffer.bufferType);
+  return this->toBuiltinCall(call, Builtin::BufferFill, buffer.bufferType);
 }
 
 Expr *BufferChecker::checkSearch(const BufferCall &buffer, BytesSearchMode mode) {
   CallExpr *call = buffer.call;
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 3);
+  auto arity = this->argumentChecker->checkArity(call, 1, 3);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(buffer.member->loc(), arity.error().message);
     return call;
   }
-  Expr *value = this->checkValueArg(buffer, call->args[0]);
+  auto *value = this->checkValueArg(buffer, call->args[0]);
   if (value->type->isError()) {
     return call;
   }
-  EncodingAndPositions rest = this->splitValueArgs(buffer);
+  auto rest = this->splitValueArgs(buffer);
   this->reportEncodingWithoutText(value, rest.encoding);
 
   int runtimeMode = 0;
-  const Type *answer = Type::intTy();
+  const auto *answer = Type::intTy();
   switch (mode) {
     case BytesSearchMode::INDEX_OF:
       break;
@@ -348,26 +346,26 @@ Expr *BufferChecker::checkSearch(const BufferCall &buffer, BytesSearchMode mode)
       break;
   }
 
-  IntLitExpr *modeArg = this->makeIntLiteral(call->loc(), runtimeMode);
+  auto *modeArg = this->makeIntLiteral(call->loc(), runtimeMode);
   Expr *encoding =
       rest.encoding != nullptr ? rest.encoding : this->makeIntLiteral(call->loc(), Utf8);
   std::vector<Expr *> args{modeArg, value, encoding};
   args.insert(args.end(), rest.positions.begin(), rest.positions.end());
   call->args = std::move(args);
 
-  return BufferChecker::toBuiltinCall(call, Builtin::BufferIndexOf, answer);
+  return this->toBuiltinCall(call, Builtin::BufferIndexOf, answer);
 }
 
 BufferChecker::EncodingAndPositions BufferChecker::splitValueArgs(const BufferCall &buffer) {
   CallExpr *call = buffer.call;
   EncodingAndPositions rest;
-  for (size_t i = 1; i < call->args.size(); ++i) {
-    Expr *checked = this->exprChecker->checkExpr(call->args[i]);
+  for (size_t index = 1; index < call->args.size(); ++index) {
+    auto *checked = this->exprChecker->checkExpr(call->args[index]);
     if (checked->type->isString()) {
       rest.encoding = this->bytesChecker->checkBufferEncoding(checked);
-      if (i + 1 != call->args.size()) {
-        std::string message = ErrorTextBuffer::encoding(buffer.name);
-        this->state.getDiagnostics().error(call->args[i + 1]->loc(), message);
+      if (index + 1 != call->args.size()) {
+        auto message = ErrorTextBuffer::encoding(buffer.name);
+        this->state.getDiagnostics().error(call->args[index + 1]->loc(), message);
       }
       break;
     }
@@ -378,7 +376,7 @@ BufferChecker::EncodingAndPositions BufferChecker::splitValueArgs(const BufferCa
 }
 
 Expr *BufferChecker::checkValueArg(const BufferCall &buffer, Expr *arg) {
-  Expr *checked = this->exprChecker->checkExpr(arg, nullptr);
+  auto *checked = this->exprChecker->checkExpr(arg, nullptr);
   const Type *type = checked->type;
   if (type->isError() || type->isString()) {
     return checked;
@@ -386,11 +384,11 @@ Expr *BufferChecker::checkValueArg(const BufferCall &buffer, Expr *arg) {
   if (type->isInteger()) {
     return this->typeRelations->convert(checked, Type::intTy());
   }
-  const Type *uint8 = Type::bytesType(Bytes::Uint8);
+  const auto *uint8 = Type::bytesType(Bytes::Uint8);
   if (type->isTypedArray() && TypeRelations::isImplicitlyConvertible(type, uint8)) {
     return this->typeRelations->convert(checked, uint8);
   }
-  std::string message = ErrorTextBuffer::valueArg(buffer.name, type->name());
+  auto message = ErrorTextBuffer::valueArg(buffer.name, type->name());
   this->state.getDiagnostics().error(checked->loc(), message);
   checked->type = Type::error();
 
@@ -399,21 +397,21 @@ Expr *BufferChecker::checkValueArg(const BufferCall &buffer, Expr *arg) {
 
 void BufferChecker::reportEncodingWithoutText(const Expr *value, const Expr *encoding) {
   if (encoding != nullptr && !value->type->isString()) {
-    std::string message = ErrorTextBuffer::withString();
+    auto message = ErrorTextBuffer::withString();
     this->state.getDiagnostics().error(encoding->loc(), message);
   }
 }
 
 Expr *BufferChecker::checkSwap(const BufferCall &buffer, int width) {
   CallExpr *call = buffer.call;
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
+  auto arity = this->argumentChecker->checkArity(call, 0, 0);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(buffer.member->loc(), arity.error().message);
     return call;
   }
   call->args = {this->makeIntLiteral(call->loc(), width)};
 
-  return BufferChecker::toBuiltinCall(call, Builtin::BufferSwap, buffer.bufferType);
+  return this->toBuiltinCall(call, Builtin::BufferSwap, buffer.bufferType);
 }
 
 Expr *BufferChecker::checkNumberMethod(const BufferCall &buffer) {
@@ -422,8 +420,8 @@ Expr *BufferChecker::checkNumberMethod(const BufferCall &buffer) {
     return nullptr;
   }
   if (number.bigint) {
-    std::string quoted = ErrorTextBigInt::quoted(buffer.name);
-    std::string bigint = ErrorTextBigInt::none(quoted);
+    auto quoted = ErrorTextBigInt::quoted(buffer.name);
+    auto bigint = ErrorTextBigInt::none(quoted);
     this->state.getDiagnostics().error(buffer.member->loc(), bigint);
     this->argumentChecker->walkArgsLoosely(buffer.call);
     return buffer.call;
@@ -438,8 +436,7 @@ Expr *BufferChecker::checkNumberMethod(const BufferCall &buffer) {
 Expr *BufferChecker::checkVariableNumber(const BufferCall &buffer, const NumberMethod &number) {
   CallExpr *call = buffer.call;
   unsigned argCount = number.write ? 3 : 2;
-  ArgumentChecker::ResultArityMatches arity =
-      this->argumentChecker->checkArity(call, argCount, argCount);
+  auto arity = this->argumentChecker->checkArity(call, argCount, argCount);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(buffer.member->loc(), arity.error().message);
     return call;
@@ -448,29 +445,28 @@ Expr *BufferChecker::checkVariableNumber(const BufferCall &buffer, const NumberM
                            this->makeBoolLiteral(call->loc(), number.big)};
   size_t at = 0;
   if (number.write) {
-    Expr *value = this->argumentChecker->checkArg(call->args[0], Type::intTy());
+    auto *value = this->argumentChecker->checkArg(call->args[0], Type::intTy());
     args.push_back(value);
     at = 1;
   }
-  Expr *offset = this->memberChecker->checkPosition(call->args[at]);
-  Expr *count = this->memberChecker->checkPosition(call->args[at + 1]);
+  auto *offset = this->memberChecker->checkPosition(call->args[at]);
+  auto *count = this->memberChecker->checkPosition(call->args[at + 1]);
   args.push_back(offset);
   args.push_back(count);
-  std::optional<int64_t> written = this->constantFolder->intConstant(count);
-  ResultCountOfBytes bytes = BufferChecker::countOfBytes(written, buffer.name);
+  auto written = this->constantFolder->intConstant(count);
+  auto bytes = this->countOfBytes(written, buffer.name);
   if (bytes.isErr()) {
     this->state.getDiagnostics().error(count->loc(), bytes.error().message);
     return call;
   }
 
   int64_t width = bytes.value();
-  std::string offsetWhat = ErrorTextBufferLabel::offsetOf(buffer.name);
-  IndexProofs::ResultUpToWasProven upTo =
-      this->indexProofs->requireUpTo(offset, buffer.member->object, width, offsetWhat);
+  auto offsetWhat = ErrorTextBufferLabel::offsetOf(buffer.name);
+  auto upTo = this->indexProofs->requireUpTo(offset, buffer.member->object, width, offsetWhat);
   this->reportUnprovenUpTo(upTo, offset->loc());
   call->mayBeOutOfRange = upTo.isErr();
   if (number.write) {
-    ResultVarValueFits fits = this->varValueFits(args[2], width, number.isSigned);
+    auto fits = this->varValueFits(args[2], width, number.isSigned);
     if (fits.isErr()) {
       this->state.getDiagnostics().error(args[2]->loc(), fits.error().message);
     }
@@ -478,18 +474,18 @@ Expr *BufferChecker::checkVariableNumber(const BufferCall &buffer, const NumberM
   call->args = std::move(args);
   Builtin builtin = number.write ? Builtin::BufferWriteVar : Builtin::BufferReadVar;
 
-  return BufferChecker::toBuiltinCall(call, builtin, Type::intTy());
+  return this->toBuiltinCall(call, builtin, Type::intTy());
 }
 
 BufferChecker::ResultVarValueFits BufferChecker::varValueFits(const Expr *value, int64_t width,
                                                               bool isSigned) {
   int64_t bits = width * 8;
-  int64_t lo = isSigned ? -(int64_t(1) << (bits - 1)) : 0;
-  int64_t hi = isSigned ? (int64_t(1) << (bits - 1)) - 1 : (int64_t(1) << bits) - 1;
-  bool isUnproven = !value->type->isError() && !this->byteProofs->provesFits(value, lo, hi);
+  int64_t low = isSigned ? -(int64_t(1) << (bits - 1)) : 0;
+  int64_t high = isSigned ? (int64_t(1) << (bits - 1)) - 1 : (int64_t(1) << bits) - 1;
+  bool isUnproven = !value->type->isError() && !this->byteProofs->provesFits(value, low, high);
   if (isUnproven) {
-    std::string range = ErrorTextBytes::range(lo, hi);
-    std::string message = ErrorTextBuffer::varFits(width, range);
+    auto range = ErrorTextBytes::range(low, high);
+    auto message = ErrorTextBuffer::varFits(width, range);
 
     return err(BufferCheckerVarValueFitsError{
         .code = BufferCheckerVarValueFitsErrorCode::VALUE_MAY_NOT_FIT,
@@ -503,13 +499,12 @@ BufferChecker::ResultVarValueFits BufferChecker::varValueFits(const Expr *value,
 Expr *BufferChecker::checkFixedNumber(const BufferCall &buffer, const NumberMethod &number) {
   CallExpr *call = buffer.call;
   Bytes kind = number.kind;
-  const Type *kindType = Type::bytesType(kind);
+  const auto *kindType = Type::bytesType(kind);
   const Type *element = kindType->accessType();
   int64_t size = kindType->elementSize();
   unsigned minArgs = number.write ? 1 : 0;
   unsigned maxArgs = number.write ? 2 : 1;
-  ArgumentChecker::ResultArityMatches arity =
-      this->argumentChecker->checkArity(call, minArgs, maxArgs);
+  auto arity = this->argumentChecker->checkArity(call, minArgs, maxArgs);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(buffer.member->loc(), arity.error().message);
     return call;
@@ -518,9 +513,9 @@ Expr *BufferChecker::checkFixedNumber(const BufferCall &buffer, const NumberMeth
                            this->makeBoolLiteral(call->loc(), number.big)};
   size_t at = 0;
   if (number.write) {
-    Expr *value = this->argumentChecker->checkArg(call->args[0], element);
-    std::string what = BytesCheckHelpers::numberWhat(kind);
-    ByteProofs::ResultValueFitsType fitting = this->byteProofs->valueFits(value, kindType, what);
+    auto *value = this->argumentChecker->checkArg(call->args[0], element);
+    auto what = BytesCheckHelpers::numberWhat(kind);
+    auto fitting = this->byteProofs->valueFits(value, kindType, what);
     if (fitting.isErr()) {
       this->state.getDiagnostics().error(value->loc(), fitting.error().message);
     }
@@ -532,35 +527,34 @@ Expr *BufferChecker::checkFixedNumber(const BufferCall &buffer, const NumberMeth
   if (offset != nullptr) {
     args.push_back(offset);
   }
-  std::string offsetWhat = ErrorTextBufferLabel::offsetOf(buffer.name);
-  IndexProofs::ResultUpToWasProven upTo =
-      this->indexProofs->requireUpTo(offset, buffer.member->object, size, offsetWhat);
+  auto offsetWhat = ErrorTextBufferLabel::offsetOf(buffer.name);
+  auto upTo = this->indexProofs->requireUpTo(offset, buffer.member->object, size, offsetWhat);
   llvm::SMLoc place = offset != nullptr ? offset->loc() : buffer.member->object->loc();
   this->reportUnprovenUpTo(upTo, place);
   call->mayBeOutOfRange = upTo.isErr();
   call->args = std::move(args);
 
   if (number.write) {
-    return BufferChecker::toBuiltinCall(call, Builtin::BufferWriteNumber, Type::intTy());
+    return this->toBuiltinCall(call, Builtin::BufferWriteNumber, Type::intTy());
   }
   if (!element->isFloat()) {
-    return BufferChecker::toBuiltinCall(call, Builtin::BufferRead, element);
+    return this->toBuiltinCall(call, Builtin::BufferRead, element);
   }
-  const Type *numberError = this->prelude->builtinType("NumberError");
-  const Type *read = Type::result(Type::doubleTy(), numberError);
+  const auto *numberError = this->prelude->builtinType(PreludeType::NUMBER_ERROR);
+  const auto *read = Type::result(Type::doubleTy(), numberError);
 
-  return BufferChecker::toBuiltinCall(call, Builtin::BufferRead, read);
+  return this->toBuiltinCall(call, Builtin::BufferRead, read);
 }
 
 Expr *BufferChecker::checkBytesArg(Expr *arg) {
-  const Type *uint8 = Type::bytesType(Bytes::Uint8);
+  const auto *uint8 = Type::bytesType(Bytes::Uint8);
 
   return this->argumentChecker->checkArg(arg, uint8);
 }
 
 void BufferChecker::walkPositionArgs(CallExpr *call, size_t from) {
-  for (size_t i = from; i < call->args.size(); ++i) {
-    call->args[i] = this->memberChecker->checkPosition(call->args[i]);
+  for (size_t index = from; index < call->args.size(); ++index) {
+    call->args[index] = this->memberChecker->checkPosition(call->args[index]);
   }
 }
 
@@ -597,7 +591,7 @@ BoolLitExpr *BufferChecker::makeBoolLiteral(llvm::SMLoc loc, bool value) {
 
 Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
   const Type *type = member->object->type;
-  std::optional<BytesMethod> method = BytesMethodTable::findMethod(member->name);
+  auto method = BytesMethodTable::findMethod(member->name);
   bool isEncoder = type->bytes() == Bytes::TextEncoder;
   bool isDecoder = type->bytes() == Bytes::TextDecoder || type->bytes() == Bytes::FatalTextDecoder;
   if (isEncoder && method == BytesMethod::ENCODE) {
@@ -610,14 +604,14 @@ Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
     return this->checkDecode(call, member);
   }
   this->argumentChecker->walkArgsLoosely(call);
-  std::string message = ErrorTextBuffer::noMember(member->name, type->name());
+  auto message = ErrorTextBuffer::noMember(member->name, type->name());
   this->state.getDiagnostics().error(member->loc(), message);
 
   return call;
 }
 
 Expr *BufferChecker::checkEncode(CallExpr *call, MemberExpr *member) {
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
+  auto arity = this->argumentChecker->checkArity(call, 0, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
@@ -625,70 +619,70 @@ Expr *BufferChecker::checkEncode(CallExpr *call, MemberExpr *member) {
   if (!call->args.empty()) {
     call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
   }
-  const Type *uint8 = Type::bytesType(Bytes::Uint8);
+  const auto *uint8 = Type::bytesType(Bytes::Uint8);
 
-  return BufferChecker::toBuiltinCall(call, Builtin::TextEncode, uint8);
+  return this->toBuiltinCall(call, Builtin::TextEncode, uint8);
 }
 
 Expr *BufferChecker::checkEncodeInto(CallExpr *call, MemberExpr *member) {
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 2);
+  auto arity = this->argumentChecker->checkArity(call, 2, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
   call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
   call->args[1] = this->checkBytesArg(call->args[1]);
-  const Type *counts =
+  const auto *counts =
       Type::object({{"read", Type::intTy(), false}, {"written", Type::intTy(), false}});
 
-  return BufferChecker::toBuiltinCall(call, Builtin::TextEncodeInto, counts);
+  return this->toBuiltinCall(call, Builtin::TextEncodeInto, counts);
 }
 
 Expr *BufferChecker::checkDecode(CallExpr *call, MemberExpr *member) {
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 2);
+  auto arity = this->argumentChecker->checkArity(call, 0, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
   if (!call->args.empty()) {
-    Expr *input = this->exprChecker->checkExpr(call->args[0]);
+    auto *input = this->exprChecker->checkExpr(call->args[0]);
     call->args[0] = input;
-    ResultDecodedInput decoded = BufferChecker::decodedInput(input->type);
+    auto decoded = this->decodedInput(input->type);
     if (decoded.isErr()) {
       this->state.getDiagnostics().error(input->loc(), decoded.error().message);
       return call;
     }
   }
   if (call->args.size() == 2) {
-    const Type *options = Type::object({{"stream", Type::optional(Type::boolTy()), false}});
-    Expr *given = this->exprChecker->checkExpr(call->args[1], options);
-    std::string what = ErrorTextBufferLabel::options();
+    const auto *options = Type::object({{"stream", Type::optional(Type::boolTy()), false}});
+    auto *given = this->exprChecker->checkExpr(call->args[1], options);
+    auto what = ErrorTextBufferLabel::options();
     call->args[1] = this->typeRelations->coerce(given, options, what);
   }
   bool isFatal = member->object->type->bytes() == Bytes::FatalTextDecoder;
   if (!isFatal) {
-    return BufferChecker::toBuiltinCall(call, Builtin::TextDecode, Type::string());
+    return this->toBuiltinCall(call, Builtin::TextDecode, Type::string());
   }
-  const Type *decodeError = this->prelude->builtinType("DecodeError");
-  const Type *decoded = Type::result(Type::string(), decodeError);
+  const auto *decodeError = this->prelude->builtinType(PreludeType::DECODE_ERROR);
+  const auto *decoded = Type::result(Type::string(), decodeError);
 
-  return BufferChecker::toBuiltinCall(call, Builtin::TextDecode, decoded);
+  return this->toBuiltinCall(call, Builtin::TextDecode, decoded);
 }
 
 void BufferChecker::walkWriteLength(const Expr *object, const Expr *offset, const Expr *length) {
   IndexProofs &proofs = *this->indexProofs;
-  std::string what = ErrorTextBufferLabel::length();
-  IndexProofs::ResultBetweenProven between = proofs.requireBetween(length, 0, std::nullopt, what);
+  auto what = ErrorTextBufferLabel::length();
+  auto between = proofs.requireBetween(length, 0, std::nullopt, what);
   if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
     this->state.getDiagnostics().error(length->loc(), between.error().message);
   }
-  if (between.isErr() || this->indexProofs->exempt(length->loc(), object)) {
+  if (between.isErr() || this->indexProofs->isExempt(length->loc(), object)) {
     return;
   }
-  if (!proofs.provesSumUpTo(proofs.linear(offset), proofs.linear(length), object)) {
-    std::string message = ErrorTextBuffer::written(BytesCheckHelpers::valueText(offset),
-                                                   BytesCheckHelpers::valueText(length),
-                                                   BytesCheckHelpers::valueText(object));
+  if (!proofs.canProveSumUpTo(proofs.linear(offset), proofs.linear(length), object)) {
+    auto message = ErrorTextBuffer::written(BytesCheckHelpers::valueText(offset),
+                                            BytesCheckHelpers::valueText(length),
+                                            BytesCheckHelpers::valueText(object));
     this->state.getDiagnostics().error(length->loc(), message);
   }
 }

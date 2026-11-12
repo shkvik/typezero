@@ -13,17 +13,24 @@ class CallChecker;
 class ExprChecker;
 class LiteralTypes;
 class TypeRelations;
+class ClassDeclarer;
 class ProcessChecker;
 class ArgumentChecker;
 class TopLevelChecker;
+class DateFormatChecker;
 class IntlOptionsChecker;
+
+enum class IntlCreation {
+  NEW,
+  CALL,
+};
 
 class IntlChecker {
 public:
   IntlChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkIntlNew(llvm::SMLoc loc, llvm::StringRef name, std::vector<Expr *> &args,
-                     bool withNew);
+                     IntlCreation creation);
   Expr *checkIntlFunction(CallExpr *call, MemberExpr *member);
   Expr *checkIntlStatic(CallExpr *call, MemberExpr *member);
   Expr *checkIntlMember(MemberExpr *member, const Type *expected);
@@ -32,30 +39,29 @@ public:
   Expr *checkLocaleStatic(CallExpr *call, MemberExpr *member, const Type *expected);
   bool checkLocaleArg(Expr *&arg, llvm::StringRef what);
   Expr *segmentsArray(Expr *segments);
-  static const Type *segmentDataType();
-  static const Type *resolvedIntlOptionsType(IntlKind kind);
-  static const Type *intlTypeNamed(llvm::StringRef name);
+  const Type *segmentDataType() const;
+  const Type *resolvedIntlOptionsType(IntlKind kind) const;
+  const Type *intlTypeNamed(llvm::StringRef name) const;
 
 private:
-  static Expr *kindArg(AstContext &ctx, llvm::SMLoc loc, int kind);
+  Expr *kindArg(AstContext &context, llvm::SMLoc loc, int kind) const;
   using ResultLanguageTags = Result<std::vector<std::string>, IntlCheckerLanguageTagsError>;
 
-  static std::optional<std::u16string> literalText(const Expr *e);
-  static const IntlService *serviceNamed(llvm::StringRef name);
-  static std::u16string utf16(llvm::StringRef text);
-  static const Type *relativePartType();
-  static const Expr *unconverted(const Expr *expr);
-  static bool isStringLike(const Type *type);
-  static std::vector<Field> resolvedDigitFields();
-  static std::vector<Field> resolvedRoundingFields();
-  static const Type *resolvedNumberOptionsType();
-  static const Type *resolvedCollatorOptionsType();
-  static const Type *resolvedPluralOptionsType();
-  static const Type *resolvedRelativeTimeOptionsType();
-  static const Type *resolvedListOptionsType();
-  static const Type *resolvedDisplayNamesOptionsType();
-  static const Type *resolvedSegmenterOptionsType();
-  static const Type *numberOptionType(llvm::StringRef name);
+  std::optional<std::u16string> literalText(const Expr *expr) const;
+  const IntlService *serviceNamed(llvm::StringRef name) const;
+  const Type *relativePartType() const;
+  const Expr *unconverted(const Expr *expr) const;
+  bool isStringLike(const Type *type) const;
+  std::vector<Field> resolvedDigitFields() const;
+  std::vector<Field> resolvedRoundingFields() const;
+  const Type *resolvedNumberOptionsType() const;
+  const Type *resolvedCollatorOptionsType() const;
+  const Type *resolvedPluralOptionsType() const;
+  const Type *resolvedRelativeTimeOptionsType() const;
+  const Type *resolvedListOptionsType() const;
+  const Type *resolvedDisplayNamesOptionsType() const;
+  const Type *resolvedSegmenterOptionsType() const;
+  const Type *numberOptionType(llvm::StringRef name) const;
 
   ResultLanguageTags languageTags(const Expr *arg, llvm::StringRef what, bool constructor);
 
@@ -65,9 +71,11 @@ private:
   ExprChecker *exprChecker = nullptr;
   LiteralTypes *literalTypes = nullptr;
   TypeRelations *typeRelations = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
   ProcessChecker *processChecker = nullptr;
   ArgumentChecker *argumentChecker = nullptr;
   TopLevelChecker *topLevelChecker = nullptr;
+  DateFormatChecker *dateFormatChecker = nullptr;
   IntlOptionsChecker *intlOptionsChecker = nullptr;
 };
 

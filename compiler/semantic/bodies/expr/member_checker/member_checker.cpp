@@ -1,6 +1,7 @@
 #include "compiler/semantic/bodies/expr/member_checker/member_checker.h"
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/number/number_static_table/number_static_table.h"
 #include "compiler/semantic/bodies/classes/class_member_checker/class_member_checker.h"
 #include "compiler/semantic/bodies/classes/overload_resolver/overload_resolver.h"
 #include "compiler/semantic/bodies/classes/static_checker/static_checker.h"
@@ -12,6 +13,7 @@
 #include "compiler/semantic/bodies/objects/tuple_checker/tuple_checker.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
 #include "compiler/semantic/generics/arg_list_checker/arg_list_checker.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
@@ -40,6 +42,20 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+namespace {
+
+constexpr llvm::StringLiteral kThisName = "this";
+constexpr llvm::StringLiteral kSuperName = "super";
+
+const GlobalName kConstantHolders[] = {
+    GlobalName::CONSOLE,
+    GlobalName::MATH,
+    GlobalName::STRING,
+    GlobalName::NUMBER,
+};
+
+}
 
 MemberChecker::MemberChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -78,7 +94,7 @@ MemberChecker::MemberChecker(SemanticState &owner, SemanticParts &all)
 MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *member,
                                                                const Type *expected) {
   member->type = Type::error();
-  Expr *part = this->argListChecker->listPart(member);
+  auto *part = this->argListChecker->listPart(member);
   if (part != nullptr) {
     return ok(part);
   }
@@ -91,18 +107,18 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
     return *global;
   }
   auto *object = dyn_cast<NameExpr>(member->object);
-  if (object != nullptr && object->name == "this") {
+  if (object != nullptr && object->name == kThisName) {
     this->state.getClassContext().rememberThisMember(member->name);
   }
-  if (object != nullptr && object->name == "super") {
-    std::string message = ErrorTextMemberRead::superField(member->name);
+  if (object != nullptr && object->name == kSuperName) {
+    auto message = ErrorTextMemberRead::superField(member->name);
 
     return err(MemberCheckerCheckMemberError{
         .code = MemberCheckerCheckMemberErrorCode::SUPER_MEMBER,
         .message = message,
     });
   }
-  Expr *checked = this->exprChecker->checkExpr(member->object);
+  auto *checked = this->exprChecker->checkExpr(member->object);
   member->object = this->genericChecker->apparent(checked);
   this->state.getClassContext().forgetThisMember();
   if (member->optional) {
@@ -118,10 +134,9 @@ MemberChecker::scopeObjectMember(MemberExpr *member, const Type *expected) {
   if (name == nullptr) {
     return std::nullopt;
   }
-  ScopeEntry entry = this->scopes->lookup(name->name);
+  auto entry = this->scopes->lookup(name->name);
   if (entry.enumDecl() != nullptr) {
-    TypeDeclarer::ResultEnumMemberRead read =
-        this->typeDeclarer->checkEnumMember(entry.enumDecl(), member, expected);
+    auto read = this->typeDeclarer->checkEnumMember(entry.enumDecl(), member, expected);
     if (read.isOk()) {
       return ok(read.value());
     }
@@ -132,7 +147,7 @@ MemberChecker::scopeObjectMember(MemberExpr *member, const Type *expected) {
     });
   }
   if (entry.cls() != nullptr) {
-    Expr *read = this->staticChecker->checkStaticMember(member, entry.cls(), expected);
+    auto *read = this->staticChecker->checkStaticMember(member, entry.cls(), expected);
     return ok(read);
   }
 
@@ -141,16 +156,16 @@ MemberChecker::scopeObjectMember(MemberExpr *member, const Type *expected) {
 
 std::optional<MemberChecker::ResultMemberReadable>
 MemberChecker::globalObjectMember(MemberExpr *member) {
-  Expr *node = this->builtinModuleChecker->checkNodeMember(member);
+  auto *node = this->builtinModuleChecker->checkNodeMember(member);
   if (node != nullptr) {
     return ok(node);
   }
-  Expr *io = this->processChecker->checkProcessMember(member);
+  auto *io = this->processChecker->checkProcessMember(member);
   if (io != nullptr) {
     return ok(io);
   }
   if (this->callChecker->isGlobalName(member->object, GlobalName::DECIMAL)) {
-    std::string message = ErrorTextMemberRead::decimal(member->name);
+    auto message = ErrorTextMemberRead::decimal(member->name);
 
     return err(MemberCheckerCheckMemberError{
         .code = MemberCheckerCheckMemberErrorCode::DECIMAL_FUNCTION,
@@ -164,20 +179,19 @@ MemberChecker::globalObjectMember(MemberExpr *member) {
     return ok(this->cryptoChecker->checkWebCryptoMember(member));
   }
   if (this->callChecker->isGlobalName(member->object, GlobalName::GLOBAL_THIS)) {
-    std::string message = member->name == "crypto" ? ErrorTextMemberRead::crypto()
-                                                   : ErrorTextMemberRead::globalThis(member->name);
+    auto message = this->globalThisMessage(member->name);
 
     return err(MemberCheckerCheckMemberError{
         .code = MemberCheckerCheckMemberErrorCode::GLOBAL_THIS,
         .message = message,
     });
   }
-  Expr *bytes = this->bytesChecker->checkBytesStaticMember(member);
+  auto *bytes = this->bytesChecker->checkBytesStaticMember(member);
   if (bytes != nullptr) {
     return ok(bytes);
   }
   if (this->callChecker->isGlobalName(member->object, GlobalName::INTL)) {
-    std::string message = ErrorTextMemberRead::intl(member->name);
+    auto message = ErrorTextMemberRead::intl(member->name);
 
     return err(MemberCheckerCheckMemberError{
         .code = MemberCheckerCheckMemberErrorCode::INTL_VALUE,
@@ -188,11 +202,17 @@ MemberChecker::globalObjectMember(MemberExpr *member) {
   return this->constantObjectMember(member);
 }
 
+std::string MemberChecker::globalThisMessage(llvm::StringRef name) const {
+  if (GlobalNameTable::find(name) == GlobalName::CRYPTO) {
+    return ErrorTextMemberRead::crypto();
+  }
+
+  return ErrorTextMemberRead::globalThis(name);
+}
+
 std::optional<MemberChecker::ResultMemberReadable>
 MemberChecker::constantObjectMember(MemberExpr *member) {
-  static const GlobalName withConstants[] = {GlobalName::CONSOLE, GlobalName::MATH,
-                                             GlobalName::STRING, GlobalName::NUMBER};
-  for (GlobalName global : withConstants) {
+  for (GlobalName global : kConstantHolders) {
     if (this->callChecker->isGlobalName(member->object, global)) {
       return this->globalConstantMember(member, global);
     }
@@ -203,22 +223,21 @@ MemberChecker::constantObjectMember(MemberExpr *member) {
 
 MemberChecker::ResultMemberReadable MemberChecker::globalConstantMember(MemberExpr *member,
                                                                         GlobalName global) {
-  Expr *constant = this->constantFolder->globalConstant(global, member->name, member->loc());
+  auto *constant = this->constantFolder->globalConstant(global, member->name, member->loc());
   if (constant != nullptr) {
     return ok(constant);
   }
-  static const llvm::StringLiteral numberFunctions[] = {"parseInt", "parseFloat", "isInteger",
-                                                        "isSafeInteger"};
-  if (global == GlobalName::NUMBER && !llvm::is_contained(numberFunctions, member->name)) {
-    std::string message = ErrorTextMemberRead::numberProp(member->name);
+  bool isNumberFunction = NumberStaticTable::find(member->name).has_value();
+  if (global == GlobalName::NUMBER && !isNumberFunction) {
+    auto message = ErrorTextMemberRead::numberProp(member->name);
 
     return err(MemberCheckerCheckMemberError{
         .code = MemberCheckerCheckMemberErrorCode::NUMBER_PROPERTY,
         .message = message,
     });
   }
-  llvm::StringRef globalName = GlobalNameTable::getName(global);
-  std::string message = ErrorTextMemberRead::asValue(globalName, member->name);
+  auto globalName = GlobalNameTable::getName(global);
+  auto message = ErrorTextMemberRead::asValue(globalName, member->name);
 
   return err(MemberCheckerCheckMemberError{
       .code = MemberCheckerCheckMemberErrorCode::GLOBAL_FUNCTION,
@@ -239,33 +258,40 @@ MemberChecker::ResultMemberReadable MemberChecker::checkTypedMember(MemberExpr *
     return this->unknownObjectMember(member);
   }
   if (type->isUnion()) {
-    const Type *common = this->unionChecker->commonBaseWith(type, member->name);
-    if (common == nullptr) {
-      return this->unionObjectMember(member);
-    }
-    member->object = this->typeRelations->convert(member->object, common);
-    type = common;
+    return this->commonBaseMember(member, type, expected);
   }
 
   return this->memberOfType(member, type, expected);
 }
 
+MemberChecker::ResultMemberReadable
+MemberChecker::commonBaseMember(MemberExpr *member, const Type *type, const Type *expected) {
+  const auto *common = this->unionChecker->commonBaseWith(type, member->name);
+  if (common == nullptr) {
+    return this->unionObjectMember(member);
+  }
+  member->object = this->typeRelations->convert(member->object, common);
+
+  return this->memberOfType(member, common, expected);
+}
+
 MemberChecker::ResultMemberReadable MemberChecker::unknownObjectMember(MemberExpr *member) {
-  UnknownChecker::ResultMemberChecked checked = this->unknownChecker->checkUnknownMember(member);
+  auto checked = this->unknownChecker->checkUnknownMember(member);
   if (checked.isOk()) {
     return ok(checked.value());
   }
   bool isNarrow = checked.error().code == UnknownCheckerCheckUnknownMemberErrorCode::NOT_NARROWED;
+  auto code = isNarrow ? MemberCheckerCheckMemberErrorCode::UNKNOWN_NOT_NARROWED
+                       : MemberCheckerCheckMemberErrorCode::UNKNOWN_MEMBER;
 
   return err(MemberCheckerCheckMemberError{
-      .code = isNarrow ? MemberCheckerCheckMemberErrorCode::UNKNOWN_NOT_NARROWED
-                       : MemberCheckerCheckMemberErrorCode::UNKNOWN_MEMBER,
+      .code = code,
       .message = checked.error().message,
   });
 }
 
 MemberChecker::ResultMemberReadable MemberChecker::unionObjectMember(MemberExpr *member) {
-  UnionChecker::ResultUnionMemberTyped fieldRead = this->unionChecker->checkUnionMember(member);
+  auto fieldRead = this->unionChecker->checkUnionMember(member);
   if (fieldRead.isOk()) {
     return ok(fieldRead.value());
   }
@@ -307,7 +333,7 @@ MemberChecker::memberOfType(MemberExpr *member, const Type *type, const Type *ex
     return ok(this->intlChecker->checkIntlMember(member, expected));
   }
   if (type->isWeakRef()) {
-    std::string message = ErrorTextMemberRead::weakRef(member->name);
+    auto message = ErrorTextMemberRead::weakRef(member->name);
 
     return err(MemberCheckerCheckMemberError{
         .code = MemberCheckerCheckMemberErrorCode::WEAK_REF_MEMBER,
@@ -331,7 +357,7 @@ MemberChecker::memberOfType(MemberExpr *member, const Type *type, const Type *ex
 }
 
 MemberChecker::ResultMemberReadable MemberChecker::tupleObjectMember(MemberExpr *member) {
-  TupleChecker::ResultTupleMember tupleMember = this->tupleChecker->checkTupleMember(member);
+  auto tupleMember = this->tupleChecker->checkTupleMember(member);
   if (tupleMember.isErr()) {
     return err(MemberCheckerCheckMemberError{
         .code = MemberCheckerCheckMemberErrorCode::TUPLE_MEMBER,
@@ -343,7 +369,7 @@ MemberChecker::ResultMemberReadable MemberChecker::tupleObjectMember(MemberExpr 
 }
 
 MemberChecker::ResultMemberReadable MemberChecker::dictObjectMember(MemberExpr *member) {
-  DictChecker::ResultDictMemberAccess dict = this->dictChecker->checkDictMember(member);
+  auto dict = this->dictChecker->checkDictMember(member);
   if (dict.isErr()) {
     return err(MemberCheckerCheckMemberError{
         .code = MemberCheckerCheckMemberErrorCode::DICT_MEMBER,
@@ -355,7 +381,7 @@ MemberChecker::ResultMemberReadable MemberChecker::dictObjectMember(MemberExpr *
 }
 
 MemberChecker::ResultMemberReadable MemberChecker::objectFieldMember(MemberExpr *member) {
-  ObjectChecker::ResultObjectFieldValue field = this->objectChecker->checkField(member);
+  auto field = this->objectChecker->checkField(member);
   if (field.isErr()) {
     return err(MemberCheckerCheckMemberError{
         .code = MemberCheckerCheckMemberErrorCode::OBJECT_FIELD,
@@ -373,20 +399,24 @@ MemberChecker::ResultMemberReadable MemberChecker::builtinValueMember(MemberExpr
     member->type = Type::intTy();
     return ok(member);
   }
-  if (type->isInteger() && type->isWrapping() && member->name == "value") {
-    const Type *plain = Type::integer(type->bitWidth(), true);
-    return ok(this->typeRelations->convert(member->object, plain));
+  bool isWrappedValue = BuiltinPropertyTable::isName(member->name, BuiltinProperty::WRAPPED_VALUE);
+  if (type->isInteger() && type->isWrapping() && isWrappedValue) {
+    const auto *plain = Type::unsignedInteger(type->bitWidth());
+    auto *value = this->typeRelations->convert(member->object, plain);
+
+    return ok(value);
   }
   if (type->isOptional()) {
-    std::string message = ErrorTextMemberRead::undefined(member->name);
+    auto message = ErrorTextMemberRead::undefined(member->name);
 
     return err(MemberCheckerCheckMemberError{
         .code = MemberCheckerCheckMemberErrorCode::MAY_BE_UNDEFINED,
         .message = message,
     });
   }
-  if (type == Type::array(Type::string()) && member->name == "raw") {
-    std::string message = ErrorTextMemberRead::raw();
+  bool isRaw = BuiltinPropertyTable::isName(member->name, BuiltinProperty::RAW_TEXTS);
+  if (type == Type::array(Type::string()) && isRaw) {
+    auto message = ErrorTextMemberRead::raw();
 
     return err(MemberCheckerCheckMemberError{
         .code = MemberCheckerCheckMemberErrorCode::RAW_TEXTS,
@@ -394,14 +424,14 @@ MemberChecker::ResultMemberReadable MemberChecker::builtinValueMember(MemberExpr
     });
   }
   if (type->isArray() || type->isString() || type->isIterator()) {
-    std::string message = ErrorTextMemberRead::mustCall(member->name, type->name());
+    auto message = ErrorTextMemberRead::mustCall(member->name, type->name());
 
     return err(MemberCheckerCheckMemberError{
         .code = MemberCheckerCheckMemberErrorCode::METHOD_NOT_CALLED,
         .message = message,
     });
   }
-  std::string message = ErrorTextMemberRead::noProperty(member->name, type->name());
+  auto message = ErrorTextMemberRead::noProperty(member->name, type->name());
 
   return err(MemberCheckerCheckMemberError{
       .code = MemberCheckerCheckMemberErrorCode::NO_SUCH_PROPERTY,
@@ -409,10 +439,9 @@ MemberChecker::ResultMemberReadable MemberChecker::builtinValueMember(MemberExpr
   });
 }
 
-MemberChecker::ResultIndexIsInteger MemberChecker::positionType(const Type *type) {
+MemberChecker::ResultIndexIsInteger MemberChecker::checkPositionType(const Type *type) const {
   if (!type->isInteger()) {
-    std::string message =
-        ErrorTextPosition::notInt(type->name(), type->isFloat(), type->isOptional());
+    auto message = ErrorTextPosition::notInt(type->name(), type->isFloat(), type->isOptional());
 
     return err(MemberCheckerPositionTypeError{
         .code = MemberCheckerPositionTypeErrorCode::NOT_AN_INTEGER,
@@ -424,35 +453,36 @@ MemberChecker::ResultIndexIsInteger MemberChecker::positionType(const Type *type
 }
 
 Expr *MemberChecker::checkPosition(Expr *expr) {
-  expr = this->genericChecker->apparent(this->exprChecker->checkExpr(expr, Type::intTy()));
-  const Type *type = expr->type;
+  auto *checked = this->exprChecker->checkExpr(expr, Type::intTy());
+  auto *position = this->genericChecker->apparent(checked);
+  const Type *type = position->type;
   if (type->isError()) {
-    return expr;
+    return position;
   }
-  ResultIndexIsInteger integer = MemberChecker::positionType(type);
+  auto integer = this->checkPositionType(type);
   if (integer.isErr()) {
-    this->state.getDiagnostics().error(expr->loc(), integer.error().message);
-    return expr;
+    this->state.getDiagnostics().error(position->loc(), integer.error().message);
+    return position;
   }
 
-  return this->typeRelations->convert(expr, Type::intTy());
+  return this->typeRelations->convert(position, Type::intTy());
 }
 
 MemberChecker::ResultIndexedElement MemberChecker::checkIndex(IndexExpr *index) {
-  Expr *part = this->argListChecker->listPart(index);
+  auto *part = this->argListChecker->listPart(index);
   if (part != nullptr) {
     return ok(part);
   }
-  EnumDecl *decl = this->indexedEnum(index);
-  if (decl != nullptr) {
-    return this->enumIndex(index, decl);
+  auto *enumDecl = this->indexedEnum(index);
+  if (enumDecl != nullptr) {
+    return this->enumIndex(index, enumDecl);
   }
   index->object = this->builtinModuleChecker->processAlias(index->object);
-  Expr *variable = this->processChecker->checkProcessEnvIndex(index);
+  auto *variable = this->processChecker->checkProcessEnvIndex(index);
   if (variable != nullptr) {
     return ok(variable);
   }
-  Expr *checked = this->exprChecker->checkExpr(index->object);
+  auto *checked = this->exprChecker->checkExpr(index->object);
   index->object = this->genericChecker->apparent(checked);
   if (index->optional) {
     index->object = this->exprChecker->chainLink(index->object);
@@ -471,23 +501,12 @@ EnumDecl *MemberChecker::indexedEnum(const IndexExpr *index) {
   return this->scopes->lookup(name->name).enumDecl();
 }
 
-MemberChecker::ResultIndexedElement MemberChecker::enumIndex(IndexExpr *index, EnumDecl *decl) {
-  TypeDeclarer::ResultEnumIndexValue read = this->typeDeclarer->checkEnumIndex(decl, index);
+MemberChecker::ResultIndexedElement MemberChecker::enumIndex(IndexExpr *index, EnumDecl *enumDecl) {
+  auto read = this->typeDeclarer->checkEnumIndex(enumDecl, index);
   if (read.isOk()) {
     return ok(read.value());
   }
-  MemberCheckerCheckIndexErrorCode code = MemberCheckerCheckIndexErrorCode::ALREADY_REPORTED;
-  switch (read.error().code) {
-    case TypeDeclarerCheckEnumIndexErrorCode::ALREADY_REPORTED:
-      code = MemberCheckerCheckIndexErrorCode::ALREADY_REPORTED;
-      break;
-    case TypeDeclarerCheckEnumIndexErrorCode::STRING_ENUM:
-      code = MemberCheckerCheckIndexErrorCode::ENUM_STRING;
-      break;
-    case TypeDeclarerCheckEnumIndexErrorCode::NOT_AN_INTEGER:
-      code = MemberCheckerCheckIndexErrorCode::ENUM_NOT_INTEGER;
-      break;
-  }
+  auto code = this->enumIndexCode(read.error().code);
 
   return err(MemberCheckerCheckIndexError{
       .code = code,
@@ -495,8 +514,22 @@ MemberChecker::ResultIndexedElement MemberChecker::enumIndex(IndexExpr *index, E
   });
 }
 
+MemberCheckerCheckIndexErrorCode
+MemberChecker::enumIndexCode(TypeDeclarerCheckEnumIndexErrorCode code) const {
+  switch (code) {
+    case TypeDeclarerCheckEnumIndexErrorCode::ALREADY_REPORTED:
+      return MemberCheckerCheckIndexErrorCode::ALREADY_REPORTED;
+    case TypeDeclarerCheckEnumIndexErrorCode::STRING_ENUM:
+      return MemberCheckerCheckIndexErrorCode::ENUM_STRING;
+    case TypeDeclarerCheckEnumIndexErrorCode::NOT_AN_INTEGER:
+      return MemberCheckerCheckIndexErrorCode::ENUM_NOT_INTEGER;
+  }
+
+  return MemberCheckerCheckIndexErrorCode::ALREADY_REPORTED;
+}
+
 MemberChecker::ResultIndexedElement MemberChecker::checkTypedIndex(IndexExpr *index) {
-  UtilityTypes::ResultGenericIndexed generic = this->utilityTypes->checkGenericIndex(index);
+  auto generic = this->utilityTypes->checkGenericIndex(index);
   bool isGenericIndex =
       generic.isOk() ||
       generic.error().code != UtilityTypesCheckGenericIndexErrorCode::NOT_A_GENERIC_INDEX;
@@ -530,7 +563,7 @@ MemberChecker::ResultIndexedElement MemberChecker::checkTypedIndex(IndexExpr *in
   }
   if (type->isOptional() && type->inner()->isObject()) {
     index->index = this->exprChecker->checkExpr(index->index);
-    std::string message = ErrorTextIndexRead::undefined();
+    auto message = ErrorTextIndexRead::undefined();
 
     return err(MemberCheckerCheckIndexError{
         .code = MemberCheckerCheckIndexErrorCode::VALUE_MAY_BE_UNDEFINED,
@@ -543,7 +576,7 @@ MemberChecker::ResultIndexedElement MemberChecker::checkTypedIndex(IndexExpr *in
 
 MemberChecker::ResultIndexedElement MemberChecker::unknownIndex(IndexExpr *index) {
   index->index = this->exprChecker->checkExpr(index->index);
-  UnknownChecker::ResultValueNarrowed narrowed = UnknownChecker::unknownUse(index->object, "");
+  auto narrowed = this->unknownChecker->unknownUse(index->object, "");
   if (narrowed.isErr()) {
     return err(MemberCheckerCheckIndexError{
         .code = MemberCheckerCheckIndexErrorCode::UNKNOWN_NOT_NARROWED,
@@ -555,19 +588,11 @@ MemberChecker::ResultIndexedElement MemberChecker::unknownIndex(IndexExpr *index
 }
 
 MemberChecker::ResultIndexedElement MemberChecker::keyedIndex(IndexExpr *index) {
-  KeyedFieldChecker::ResultKeyedFieldRead keyed =
-      this->keyedFieldChecker->checkKeyedField(index, false);
+  auto keyed = this->keyedFieldChecker->checkKeyedField(index, KeyedAccess::READ);
   if (keyed.isOk()) {
     return ok(keyed.value());
   }
-  KeyedFieldCheckerCheckKeyedFieldErrorCode keyedCode = keyed.error().code;
-  bool isReported = keyedCode == KeyedFieldCheckerCheckKeyedFieldErrorCode::ALREADY_REPORTED;
-  MemberCheckerCheckIndexErrorCode code = MemberCheckerCheckIndexErrorCode::FIELD_REJECTED;
-  if (isReported) {
-    code = MemberCheckerCheckIndexErrorCode::ALREADY_REPORTED;
-  } else if (KeyedFieldChecker::wrongKey(keyedCode)) {
-    code = MemberCheckerCheckIndexErrorCode::KEY_REJECTED;
-  }
+  auto code = this->keyedIndexCode(keyed.error().code);
 
   return err(MemberCheckerCheckIndexError{
       .code = code,
@@ -575,8 +600,20 @@ MemberChecker::ResultIndexedElement MemberChecker::keyedIndex(IndexExpr *index) 
   });
 }
 
+MemberCheckerCheckIndexErrorCode
+MemberChecker::keyedIndexCode(KeyedFieldCheckerCheckKeyedFieldErrorCode code) const {
+  if (code == KeyedFieldCheckerCheckKeyedFieldErrorCode::ALREADY_REPORTED) {
+    return MemberCheckerCheckIndexErrorCode::ALREADY_REPORTED;
+  }
+  if (this->keyedFieldChecker->wrongKey(code)) {
+    return MemberCheckerCheckIndexErrorCode::KEY_REJECTED;
+  }
+
+  return MemberCheckerCheckIndexErrorCode::FIELD_REJECTED;
+}
+
 MemberChecker::ResultIndexedElement MemberChecker::dictIndex(IndexExpr *index) {
-  DictChecker::ResultDictIndexedValue dict = this->dictChecker->checkDictIndex(index);
+  auto dict = this->dictChecker->checkDictIndex(index);
   if (dict.isErr()) {
     return err(MemberCheckerCheckIndexError{
         .code = MemberCheckerCheckIndexErrorCode::DICT_INDEX,
@@ -596,11 +633,11 @@ MemberChecker::ResultIndexedElement MemberChecker::positionIndex(IndexExpr *inde
   if (type->isListParam()) {
     return this->listParamIndex(index, type);
   }
-  const Type *element = type->isString() ? type : type->isArray() ? type->inner() : nullptr;
+  const auto *element = this->indexedElement(type);
   bool isOptionalList =
       type->isOptional() && (type->inner()->isArray() || type->inner()->isString());
   if (element == nullptr && isOptionalList) {
-    std::string message = ErrorTextIndexRead::undefined();
+    auto message = ErrorTextIndexRead::undefined();
 
     return err(MemberCheckerCheckIndexError{
         .code = MemberCheckerCheckIndexErrorCode::VALUE_MAY_BE_UNDEFINED,
@@ -608,14 +645,14 @@ MemberChecker::ResultIndexedElement MemberChecker::positionIndex(IndexExpr *inde
     });
   }
   if (element == nullptr) {
-    std::string message = ErrorTextIndexRead::notIndexed(type->name());
+    auto message = ErrorTextIndexRead::notIndexed(type->name());
 
     return err(MemberCheckerCheckIndexError{
         .code = MemberCheckerCheckIndexErrorCode::NOT_INDEXABLE,
         .message = message,
     });
   }
-  bool isInRange = this->indexProofs->provesInBounds(index->object, index->index, false);
+  bool isInRange = this->indexProofs->canProveInBounds(index->object, index->index);
   ElementIndex *access = index->form.as<ElementIndex>();
   if (access != nullptr) {
     access->mayBeOutOfRange = !isInRange;
@@ -625,21 +662,28 @@ MemberChecker::ResultIndexedElement MemberChecker::positionIndex(IndexExpr *inde
   return ok(index);
 }
 
+const Type *MemberChecker::indexedElement(const Type *type) const {
+  if (type->isString()) {
+    return type;
+  }
+  if (type->isArray()) {
+    return type->inner();
+  }
+
+  return nullptr;
+}
+
 MemberChecker::ResultIndexedElement MemberChecker::listParamIndex(IndexExpr *index,
                                                                   const Type *type) {
-  const Expr *at = index->index;
-  auto *cast = dyn_cast<CastExpr>(at);
-  while (cast != nullptr && cast->isImplicit()) {
-    at = cast->operand;
-    cast = dyn_cast<CastExpr>(at);
-  }
+  const auto *at = ExprParts::withoutImplicitCasts(index->index);
   auto *literal = dyn_cast<IntLitExpr>(at);
-  if (literal != nullptr) {
-    const Type *position = Type::numberLiteral(double(literal->value), Type::intTy());
-    index->type = Type::indexedAccess(type, position);
-  } else {
-    index->type = Type::optional(this->argListChecker->listElement(type));
+  if (literal == nullptr) {
+    const auto *element = this->argListChecker->listElement(type);
+    index->type = Type::optional(element);
+    return ok(index);
   }
+  const auto *position = Type::numberLiteral(double(literal->value), Type::intTy());
+  index->type = Type::indexedAccess(type, position);
 
   return ok(index);
 }

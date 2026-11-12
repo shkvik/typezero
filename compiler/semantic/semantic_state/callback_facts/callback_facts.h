@@ -22,12 +22,12 @@ struct ElementCallback {
 
 class CallbackFacts {
 public:
-  void rememberByteCallback(const FunctionDecl *fn, const ByteCallback &callback);
-  const ByteCallback *findByteCallback(const FunctionDecl *fn) const;
-  void rememberIndexCallback(const FunctionDecl *fn, unsigned param);
-  std::optional<unsigned> findIndexParam(const FunctionDecl *fn) const;
-  void rememberElementCallback(const FunctionDecl *fn, const ElementCallback &callback);
-  const ElementCallback *findElementCallback(const FunctionDecl *fn) const;
+  void rememberByteCallback(const FunctionDecl *functionDecl, const ByteCallback &callback);
+  const ByteCallback *findByteCallback(const FunctionDecl *functionDecl) const;
+  void rememberIndexCallback(const FunctionDecl *functionDecl, unsigned param);
+  std::optional<unsigned> findIndexParam(const FunctionDecl *functionDecl) const;
+  void rememberElementCallback(const FunctionDecl *functionDecl, const ElementCallback &callback);
+  const ElementCallback *findElementCallback(const FunctionDecl *functionDecl) const;
 
 private:
   llvm::DenseMap<const FunctionDecl *, ByteCallback> byteCallbacks;

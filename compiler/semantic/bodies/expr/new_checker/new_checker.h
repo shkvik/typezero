@@ -7,6 +7,7 @@
 
 namespace tz {
 
+class BytesChecker;
 class SemanticParts;
 class Scopes;
 class UrlChecker;
@@ -47,22 +48,23 @@ private:
   using ResultArrayArgsFit = Result<const NewExpr *, NewCheckerArrayArgsError>;
   using ResultHasZeroValue = Result<const Type *, NewCheckerZeroValueError>;
 
-  static ResultNamespaceNew namespaceNew(const NewExpr *expr);
-  ResultCryptoMadeOk cryptoNew(const NewExpr *expr, const ClassDecl *cls) const;
-  static ResultSupportedNew supportedNew(const NewExpr *expr);
-  static ResultNoTypeArgsOk noTypeArgs(const NewExpr *expr);
-  static ResultClassIsFound classFound(const NewExpr *expr);
-  ResultArrayElement arrayElement(const NewExpr *expr, const Type *expected);
-  static ResultArrayArgsFit arrayArgs(const NewExpr *expr);
-  static ResultHasZeroValue zeroValue(const Type *element);
+  ResultNamespaceNew checkNotNamespaced(const NewExpr *expr) const;
+  ResultCryptoMadeOk checkCryptoClassNew(const NewExpr *expr, const ClassDecl *classDecl) const;
+  bool isCryptoClass(const ClassDecl *classDecl) const;
+  ResultSupportedNew checkSupportedNew(const NewExpr *expr) const;
+  ResultNoTypeArgsOk checkNoTypeArgs(const NewExpr *expr) const;
+  ResultClassIsFound checkClassFound(const NewExpr *expr) const;
+  ResultArrayElement checkArrayElement(const NewExpr *expr, const Type *expected);
+  ResultArrayArgsFit checkArrayArgs(const NewExpr *expr) const;
+  ResultHasZeroValue checkZeroValue(const Type *element) const;
 
   void bindValueCallee(NewExpr *expr);
   Expr *checkArgsLoosely(NewExpr *expr);
   void rejectTypeArgs(const NewExpr *expr);
   void walkArrayLength(NewExpr *expr, const Type *element);
   Expr *checkArrayNew(NewExpr *expr, const Type *expected);
-  void noteLibraryInstance(NewExpr *made, const ClassDecl *cls);
-  Expr *checkClassInstanceNew(NewExpr *expr, ClassDecl *cls, const Type *expected);
+  void noteLibraryInstance(NewExpr *made, const ClassDecl *classDecl);
+  Expr *checkClassInstanceNew(NewExpr *expr, ClassDecl *classDecl, const Type *expected);
   Expr *checkBuiltinNew(NewExpr *expr, const Type *expected, std::optional<GlobalName> global);
   Expr *checkNamespaceNew(NewExpr *expr, const Type *expected, std::optional<GlobalName> global);
 
@@ -77,6 +79,7 @@ private:
   LibraryCalls *libraryCalls = nullptr;
   RegexChecker *regexChecker = nullptr;
   TypeResolver *typeResolver = nullptr;
+  BytesChecker *bytesChecker = nullptr;
   CryptoChecker *cryptoChecker = nullptr;
   MemberChecker *memberChecker = nullptr;
   DictNewChecker *dictNewChecker = nullptr;

@@ -6,12 +6,14 @@
 
 namespace tz {
 
+class ClassLinks;
 class SemanticParts;
 class ExprChecker;
 class FlowChecker;
 class TypeResolver;
 class StaticChecker;
 class TypeRelations;
+class ClassDeclarer;
 class ReflectChecker;
 class MethodCallChecker;
 
@@ -24,10 +26,10 @@ public:
   ClassValueChecker(SemanticState &owner, SemanticParts &all);
 
   ResultConstructorArgs constructorArgs();
-  const Type *classValueType(ClassDecl *cls);
-  static ClassDecl *finalClass(ClassDecl *cls);
-  Expr *classValueAt(ClassDecl *cls, llvm::SMLoc loc);
-  Expr *checkClassValue(NameExpr *name, ClassDecl *cls);
+  const Type *classValueType(ClassDecl *classDecl);
+  ClassDecl *finalClass(ClassDecl *classDecl) const;
+  Expr *classValueAt(ClassDecl *classDecl, llvm::SMLoc loc);
+  Expr *checkClassValue(NameExpr *name, ClassDecl *classDecl);
   Expr *checkValueNew(NewExpr *expr, const Type *expected);
   static const Type *constructedBy(const Type *classValue);
   ResultClassMemberRead checkClassRefMember(MemberExpr *member);
@@ -41,18 +43,20 @@ private:
   using ResultNoTypeArguments = Result<const NewExpr *, ClassValueCheckerRuntimeTypeArgsError>;
 
   Expr *afterClassValue(Expr *object, Expr *result);
-  static ResultClassHasItsType typedClass(ClassDecl *cls);
-  static ResultArgumentNotVoid argumentValue(const Expr *arg);
-  static ResultNewOfClassValue valueNewClass(const Type *type);
-  ResultClassIsDeclared classDeclared(const ClassDecl *cls) const;
-  static ResultNoTypeArguments runtimeTypeArgs(const NewExpr *expr);
+  ResultClassHasItsType typedClass(ClassDecl *classDecl) const;
+  ResultArgumentNotVoid argumentValue(const Expr *arg) const;
+  ResultNewOfClassValue valueNewClass(const Type *type) const;
+  ResultClassIsDeclared classDeclared(const ClassDecl *classDecl) const;
+  ResultNoTypeArguments runtimeTypeArgs(const NewExpr *expr) const;
 
   SemanticState &state;
+  ClassLinks *classLinks = nullptr;
   ExprChecker *exprChecker = nullptr;
   FlowChecker *flowChecker = nullptr;
   TypeResolver *typeResolver = nullptr;
   StaticChecker *staticChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
   ReflectChecker *reflectChecker = nullptr;
   MethodCallChecker *methodCallChecker = nullptr;
 };

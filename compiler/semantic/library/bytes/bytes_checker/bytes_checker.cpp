@@ -63,24 +63,27 @@ BytesChecker::BytesChecker(SemanticState &owner, SemanticParts &all)
   this->typedArrayChecker = &all.typedArrayChecker;
 }
 
-std::optional<std::u16string> BytesChecker::literalText(const Expr *e) {
-  if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
-    e = conv->operand;
+std::optional<std::u16string> BytesChecker::literalText(const Expr *expr) const {
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  if (conversion != nullptr && conversion->isImplicit()) {
+    expr = conversion->operand;
   }
-  if (auto *lit = dyn_cast<StringLitExpr>(e)) {
-    return lit->value;
+  auto *literal = dyn_cast<StringLitExpr>(expr);
+  if (literal != nullptr) {
+    return literal->value;
   }
-  if (auto *tmpl = dyn_cast<TemplateExpr>(e); tmpl && tmpl->exprs.empty()) {
-    return tmpl->quasis[0];
+  auto *templateExpr = dyn_cast<TemplateExpr>(expr);
+  if (templateExpr != nullptr && templateExpr->exprs.empty()) {
+    return templateExpr->quasis[0];
   }
 
   return std::nullopt;
 }
 
-BytesChecker::ResultKnownEncoding BytesChecker::knownEncoding(llvm::StringRef name) {
-  std::optional<int> encoding = BytesCheckHelpers::encodingNamed(name);
+BytesChecker::ResultKnownEncoding BytesChecker::knownEncoding(llvm::StringRef name) const {
+  auto encoding = BytesCheckHelpers::encodingNamed(name);
   if (!encoding) {
-    std::string message = ErrorTextBufferEncoding::unknown(name);
+    auto message = ErrorTextBufferEncoding::unknown(name);
 
     return err(BytesCheckerKnownEncodingError{
         .code = BytesCheckerKnownEncodingErrorCode::UNKNOWN_ENCODING,
@@ -91,9 +94,9 @@ BytesChecker::ResultKnownEncoding BytesChecker::knownEncoding(llvm::StringRef na
   return ok(*encoding);
 }
 
-BytesChecker::ResultBytesIndexing BytesChecker::bytesIndexing(const Type *type) {
+BytesChecker::ResultBytesIndexing BytesChecker::bytesIndexing(const Type *type) const {
   if (!type->isTypedArray()) {
-    std::string message = ErrorTextBytesIndex::notIndexed(type);
+    auto message = ErrorTextBytesIndex::notIndexed(type);
 
     return err(BytesCheckerBytesIndexingError{
         .code = BytesCheckerBytesIndexingErrorCode::NOT_INDEXED,
@@ -104,7 +107,7 @@ BytesChecker::ResultBytesIndexing BytesChecker::bytesIndexing(const Type *type) 
   return ok(type);
 }
 
-const Type *BytesChecker::bytesTypeNamed(llvm::StringRef name) {
+const Type *BytesChecker::bytesTypeNamed(llvm::StringRef name) const {
   for (const auto &[n, kind] : kNames) {
     if (n == name) {
       return Type::bytesType(kind);
@@ -117,7 +120,7 @@ const Type *BytesChecker::bytesTypeNamed(llvm::StringRef name) {
 Expr *BytesChecker::checkBytesIndex(IndexExpr *index) {
   const Type *type = index->object->type;
   index->index = this->memberChecker->checkPosition(index->index);
-  ResultBytesIndexing indexing = BytesChecker::bytesIndexing(type);
+  auto indexing = this->bytesIndexing(type);
   if (indexing.isErr()) {
     this->state.getDiagnostics().error(index->loc(), indexing.error().message);
     return index;
@@ -125,8 +128,9 @@ Expr *BytesChecker::checkBytesIndex(IndexExpr *index) {
   if (index->index->type->isError()) {
     return index;
   }
-  bool isInRange = this->indexProofs->provesInBounds(index->object, index->index, false);
-  if (ElementIndex *element = index->form.as<ElementIndex>()) {
+  bool isInRange = this->indexProofs->canProveInBounds(index->object, index->index);
+  ElementIndex *element = index->form.as<ElementIndex>();
+  if (element != nullptr) {
     element->mayBeOutOfRange = !isInRange;
   }
   index->type = isInRange ? type->elementType() : Type::optional(type->elementType());
@@ -136,21 +140,21 @@ Expr *BytesChecker::checkBytesIndex(IndexExpr *index) {
 
 void BytesChecker::walkBytesStore(IndexExpr *index, const Expr *value) {
   const Type *target = index->object->type;
-  if (index->index->type->isError() || (value && value->type->isError())) {
+  if (index->index->type->isError() || (value != nullptr && value->type->isError())) {
     return;
   }
-  std::string object = BytesCheckHelpers::valueText(index->object);
-  std::string position = BytesCheckHelpers::valueText(index->index);
-  if (!this->indexProofs->provesInBounds(index->object, index->index, false)) {
-    std::optional<int64_t> at = this->constantFolder->intConstant(index->index);
-    std::string message = ErrorTextBytesIndex::store(target->name(), object, position, at);
+  auto object = BytesCheckHelpers::valueText(index->object);
+  auto position = BytesCheckHelpers::valueText(index->index);
+  if (!this->indexProofs->canProveInBounds(index->object, index->index)) {
+    auto at = this->constantFolder->intConstant(index->index);
+    auto message = ErrorTextBytesIndex::store(target->name(), object, position, at);
     this->state.getDiagnostics().error(index->loc(), message);
     return;
   }
 }
 
 Expr *BytesChecker::checkBytesMember(MemberExpr *member) {
-  std::optional<BuiltinProperty> property = BuiltinPropertyTable::find(member->name);
+  auto property = BuiltinPropertyTable::find(member->name);
   switch (member->object->type->bytes()) {
     case Bytes::ArrayBuffer:
       return this->checkArrayBufferMember(member, property);
@@ -205,7 +209,7 @@ Expr *BytesChecker::checkDataViewMember(MemberExpr *member,
     return this->readBuiltin(member, Builtin::BytesByteOffset, Type::intTy());
   }
   if (property == BuiltinProperty::BUFFER) {
-    const Type *arrayBuffer = Type::bytesType(Bytes::ArrayBuffer);
+    const auto *arrayBuffer = Type::bytesType(Bytes::ArrayBuffer);
     return this->readBuiltin(member, Builtin::BytesBuffer, arrayBuffer);
   }
 
@@ -226,12 +230,12 @@ Expr *BytesChecker::checkTextEncoderMember(MemberExpr *member,
 Expr *BytesChecker::checkTextDecoderMember(MemberExpr *member,
                                            std::optional<BuiltinProperty> property) {
   if (property == BuiltinProperty::ENCODING) {
-    IntLitExpr *which = this->makeIntLiteral(member->loc(), 0);
+    auto *which = this->makeIntLiteral(member->loc(), 0);
     return this->readBuiltin(member, Builtin::TextDecoderInfo, Type::string(), {which});
   }
   if (property == BuiltinProperty::FATAL || property == BuiltinProperty::IGNORE_BOM) {
     int64_t index = property == BuiltinProperty::FATAL ? 1 : 2;
-    IntLitExpr *which = this->makeIntLiteral(member->loc(), index);
+    auto *which = this->makeIntLiteral(member->loc(), index);
     return this->readBuiltin(member, Builtin::TextDecoderInfo, Type::boolTy(), {which});
   }
 
@@ -251,24 +255,24 @@ Expr *BytesChecker::checkViewMember(MemberExpr *member, std::optional<BuiltinPro
     return this->readBuiltin(member, Builtin::BytesByteOffset, Type::intTy());
   }
   if (property == BuiltinProperty::BUFFER) {
-    const Type *arrayBuffer = Type::bytesType(Bytes::ArrayBuffer);
+    const auto *arrayBuffer = Type::bytesType(Bytes::ArrayBuffer);
     return this->readBuiltin(member, Builtin::BytesBuffer, arrayBuffer);
   }
   if (property == BuiltinProperty::BYTES_PER_ELEMENT) {
-    IntLitExpr *size = this->makeIntLiteral(member->loc(), type->elementSize());
+    auto *size = this->makeIntLiteral(member->loc(), type->elementSize());
     return this->keepObject(member, size);
   }
   bool isDeprecated = type->isBuffer() &&
                       (property == BuiltinProperty::PARENT || property == BuiltinProperty::OFFSET);
   if (isDeprecated) {
-    std::string message = ErrorTextBytesMember::deprecated(member->name);
+    auto message = ErrorTextBytesMember::deprecated(member->name);
     this->state.getDiagnostics().error(member->loc(), message);
     return member;
   }
-  const BytesMethodInfo *typedMethod = BytesMethodTable::find(member->name);
+  const auto *typedMethod = BytesMethodTable::find(member->name);
   bool isMethod = typedMethod != nullptr && !typedMethod->form.is<NotOnTypedArrayMethod>();
   if (isMethod) {
-    std::string message = ErrorTextBytesMember::notCalled(member->name, type->name());
+    auto message = ErrorTextBytesMember::notCalled(member->name, type->name());
     this->state.getDiagnostics().error(member->loc(), message);
     return member;
   }
@@ -277,7 +281,7 @@ Expr *BytesChecker::checkViewMember(MemberExpr *member, std::optional<BuiltinPro
 }
 
 Expr *BytesChecker::reportNoMember(MemberExpr *member) {
-  std::string message = ErrorTextBytesMember::noMember(member->name, member->object->type->name());
+  auto message = ErrorTextBytesMember::noMember(member->name, member->object->type->name());
   this->state.getDiagnostics().error(member->loc(), message);
 
   return member;
@@ -316,16 +320,16 @@ BoolLitExpr *BytesChecker::makeBoolLiteral(llvm::SMLoc loc, bool value) {
 Expr *BytesChecker::checkBytesUnionMember(MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
-  std::optional<BuiltinProperty> property = BuiltinPropertyTable::find(name);
-  auto has = [&](const Type *m) {
+  auto property = BuiltinPropertyTable::find(name);
+  auto has = [&](const Type *memberType) {
     if (property == BuiltinProperty::BYTE_LENGTH) {
-      return m->isByteView() || m->bytes() == Bytes::ArrayBuffer;
+      return memberType->isByteView() || memberType->bytes() == Bytes::ArrayBuffer;
     }
     if (property == BuiltinProperty::BYTE_OFFSET || property == BuiltinProperty::BUFFER) {
-      return m->isByteView();
+      return memberType->isByteView();
     }
 
-    return property == BuiltinProperty::LENGTH && m->isTypedArray();
+    return property == BuiltinProperty::LENGTH && memberType->isTypedArray();
   };
   static const BuiltinProperty others[] = {
       BuiltinProperty::BYTES_PER_ELEMENT, BuiltinProperty::MAX_BYTE_LENGTH,
@@ -333,7 +337,7 @@ Expr *BytesChecker::checkBytesUnionMember(MemberExpr *member) {
       BuiltinProperty::ENCODING,          BuiltinProperty::FATAL,
       BuiltinProperty::IGNORE_BOM};
   if (property.has_value() && llvm::is_contained(others, *property)) {
-    std::string message = ErrorTextBytesMember::narrow(name, type->name());
+    auto message = ErrorTextBytesMember::narrow(name, type->name());
     this->state.getDiagnostics().error(member->loc(), message);
     return member;
   }
@@ -341,8 +345,7 @@ Expr *BytesChecker::checkBytesUnionMember(MemberExpr *member) {
   if (const Type *const *lacking = llvm::find_if_not(members, has); lacking != members.end()) {
     const Type *const *with = llvm::find_if(members, has);
     llvm::StringRef withName = with != members.end() ? (*with)->name() : llvm::StringRef();
-    std::string message =
-        ErrorTextBytesMember::lacking(name, (*lacking)->name(), type->name(), withName);
+    auto message = ErrorTextBytesMember::lacking(name, (*lacking)->name(), type->name(), withName);
     this->state.getDiagnostics().error(member->loc(), message);
     return member;
   }
@@ -364,26 +367,26 @@ Expr *BytesChecker::checkBytesUnionMember(MemberExpr *member) {
 
 Expr *BytesChecker::checkBytesStaticMember(MemberExpr *member) {
   auto *object = dyn_cast<NameExpr>(member->object);
-  if (!object || !this->callChecker->isUnshadowedGlobal(object)) {
+  if (object == nullptr || !this->callChecker->isUnshadowedGlobal(object)) {
     return nullptr;
   }
-  const Type *type = BytesChecker::bytesTypeNamed(object->name);
-  if (!type) {
+  const auto *type = this->bytesTypeNamed(object->name);
+  if (type == nullptr) {
     return nullptr;
   }
   member->type = Type::error();
-  std::optional<BuiltinProperty> property = BuiltinPropertyTable::find(member->name);
+  auto property = BuiltinPropertyTable::find(member->name);
   if (type->isTypedArray() && property == BuiltinProperty::BYTES_PER_ELEMENT) {
-    auto *lit = this->state.getAst().make<IntLitExpr>(member->loc(), type->elementSize());
-    lit->type = Type::intTy();
-    return lit;
+    auto *literal = this->state.getAst().make<IntLitExpr>(member->loc(), type->elementSize());
+    literal->type = Type::intTy();
+    return literal;
   }
   if (type->isBuffer() && property == BuiltinProperty::POOL_SIZE) {
-    auto *lit = this->state.getAst().make<IntLitExpr>(member->loc(), 8192);
-    lit->type = Type::intTy();
-    return lit;
+    auto *literal = this->state.getAst().make<IntLitExpr>(member->loc(), 8192);
+    literal->type = Type::intTy();
+    return literal;
   }
-  std::string message = ErrorTextBytesMember::callOnly(object->name, member->name);
+  auto message = ErrorTextBytesMember::callOnly(object->name, member->name);
   this->state.getDiagnostics().error(member->loc(), message);
 
   return member;
@@ -392,7 +395,7 @@ Expr *BytesChecker::checkBytesStaticMember(MemberExpr *member) {
 Expr *BytesChecker::bytesToString(Expr *expr) {
   const Type *type = expr->type;
   if (type->isTypedArray()) {
-    llvm::StringRef toStringName = BytesMethodTable::getName(BytesMethod::TO_STRING);
+    auto toStringName = BytesMethodTable::getName(BytesMethod::TO_STRING);
     auto *callee = this->state.getAst().make<MemberExpr>(expr->loc(), expr, toStringName);
     if (type->isBuffer()) {
       auto *encoding = this->state.getAst().make<IntLitExpr>(expr->loc(), Utf8);
@@ -403,38 +406,37 @@ Expr *BytesChecker::bytesToString(Expr *expr) {
     return this->processChecker->builtinCall(expr->loc(), callee, Builtin::BytesJoin, {},
                                              Type::string());
   }
-  std::string message =
-      ErrorTextBytesString::noText(type->name(), type->bytes() == Bytes::ArrayBuffer);
+  auto message = ErrorTextBytesString::noText(type->name(), type->bytes() == Bytes::ArrayBuffer);
   this->state.getDiagnostics().error(expr->loc(), message);
 
   return expr;
 }
 
 Expr *BytesChecker::checkBufferEncoding(Expr *arg) {
-  if (std::optional<std::u16string> text = BytesChecker::literalText(arg)) {
-    std::string written = ToUtf8::toUtf8(*text);
-    ResultKnownEncoding encoding = BytesChecker::knownEncoding(written);
+  if (std::optional<std::u16string> text = this->literalText(arg)) {
+    auto written = ToUtf8::toUtf8(*text);
+    auto encoding = this->knownEncoding(written);
     if (encoding.isErr()) {
       this->state.getDiagnostics().error(arg->loc(), encoding.error().message);
       arg->type = Type::error();
       return arg;
     }
-    auto *lit = this->state.getAst().make<IntLitExpr>(arg->loc(), uint64_t(encoding.value()));
-    lit->type = Type::intTy();
-    return lit;
+    auto *literal = this->state.getAst().make<IntLitExpr>(arg->loc(), uint64_t(encoding.value()));
+    literal->type = Type::intTy();
+    return literal;
   }
   arg = this->argumentChecker->checkArg(arg, Type::string());
-  if (arg->type->isError() || this->indexProofs->exempt(arg->loc())) {
+  if (arg->type->isError() || this->indexProofs->isExempt(arg->loc())) {
     return arg;
   }
-  std::optional<std::vector<std::string>> names = this->literalTypes->knownTexts(arg);
+  auto names = this->literalTypes->knownTexts(arg);
   if (!names) {
-    std::string message = ErrorTextBufferEncoding::notKnown();
+    auto message = ErrorTextBufferEncoding::notKnown();
     this->state.getDiagnostics().error(arg->loc(), message);
     return arg;
   }
   for (const std::string &name : *names) {
-    ResultKnownEncoding encoding = BytesChecker::knownEncoding(name);
+    auto encoding = this->knownEncoding(name);
     if (encoding.isErr()) {
       this->state.getDiagnostics().error(arg->loc(), encoding.error().message);
       break;
@@ -453,9 +455,9 @@ Expr *BytesChecker::checkBytesMethod(CallExpr *call, MemberExpr *member, const T
   switch (type->bytes()) {
   case Bytes::ArrayBuffer: {
     llvm::StringRef name = member->name;
-    std::optional<BytesMethod> method = BytesMethodTable::findMethod(name);
+    auto method = BytesMethodTable::findMethod(name);
     if (method == BytesMethod::SLICE) {
-      ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 2);
+      auto arity = this->argumentChecker->checkArity(call, 0, 2);
       if (arity.isErr()) {
         this->state.getDiagnostics().error(member->loc(), arity.error().message);
         return call;
@@ -487,7 +489,8 @@ Expr *BytesChecker::checkBytesMethod(CallExpr *call, MemberExpr *member, const T
     break;
   }
   if (type->isBuffer()) {
-    if (Expr *result = this->bufferChecker->checkBufferMethod(call, member)) {
+    auto *result = this->bufferChecker->checkBufferMethod(call, member);
+    if (result != nullptr) {
       return result;
     }
   }

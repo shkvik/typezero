@@ -30,6 +30,7 @@ StmtChecker::StmtChecker(SemanticState &owner, SemanticParts &all)
   this->exprChecker = &all.exprChecker;
   this->jumpChecker = &all.jumpChecker;
   this->loopChecker = &all.loopChecker;
+  this->flowChecker = &all.flowChecker;
   this->classChecker = &all.classChecker;
   this->truthChecker = &all.truthChecker;
   this->resultChecker = &all.resultChecker;
@@ -98,42 +99,41 @@ void StmtChecker::walkBlock(BlockStmt *block) {
   this->scopes->closeScope();
 }
 
-void StmtChecker::walkClassStmt(ClassDecl *cls) {
-  ClassChecker::ResultClassDeclared declared = this->classChecker->checkClassStmt(cls);
+void StmtChecker::walkClassStmt(ClassDecl *classDecl) {
+  auto declared = this->classChecker->checkClassStmt(classDecl);
   if (declared.isErr()) {
-    this->state.getDiagnostics().error(cls->loc(), declared.error().message);
+    this->state.getDiagnostics().error(classDecl->loc(), declared.error().message);
   }
 }
 
-void StmtChecker::walkFunctionStmt(FunctionDecl *fn) {
-  ResultFunctionInBlock placed = this->checkFunctionStmt(fn);
+void StmtChecker::walkFunctionStmt(FunctionDecl *functionDecl) {
+  auto placed = this->checkFunctionStmt(functionDecl);
   if (placed.isErr()) {
-    this->state.getDiagnostics().error(fn->loc(), placed.error().message);
+    this->state.getDiagnostics().error(functionDecl->loc(), placed.error().message);
   }
 }
 
-void StmtChecker::walkExprStmt(ExprStmt *s) {
-  auto *yield = dyn_cast<YieldExpr>(s->expr);
+void StmtChecker::walkExprStmt(ExprStmt *statement) {
+  auto *yield = dyn_cast<YieldExpr>(statement->expr);
   if (yield != nullptr) {
     yield->discarded = true;
   }
-  s->expr = this->exprChecker->checkExpr(s->expr);
-  ResultChecker::ResultValueGetsUsed used =
-      this->resultChecker->usedValue(s->expr, false, s->loc());
+  statement->expr = this->exprChecker->checkExpr(statement->expr);
+  auto used = this->resultChecker->usedValue(statement->expr, statement->loc());
   if (used.isErr()) {
-    this->state.getDiagnostics().error(s->expr->loc(), used.error().message);
+    this->state.getDiagnostics().error(statement->expr->loc(), used.error().message);
   }
-  auto *made = dyn_cast<NewExpr>(s->expr);
+  auto *made = dyn_cast<NewExpr>(statement->expr);
   if (made != nullptr && made->cls() != nullptr) {
     this->state.getEventStore().addDroppedNew(made->cls(), made->loc());
   }
-  if (ReturnChecker::isExit(s)) {
+  if (this->returnChecker->isExit(statement)) {
     this->state.getFlowState().markUnreachable();
   }
 }
 
 void StmtChecker::walkJump(Stmt *stmt) {
-  JumpChecker::ResultJumpTargeted jumped = this->jumpChecker->checkJump(stmt);
+  auto jumped = this->jumpChecker->checkJump(stmt);
   if (jumped.isErr()) {
     this->state.getDiagnostics().error(stmt->loc(), jumped.error().message);
   }
@@ -141,53 +141,55 @@ void StmtChecker::walkJump(Stmt *stmt) {
 }
 
 void StmtChecker::walkIf(IfStmt *stmt) {
-  Flow whenTrue, whenFalse;
+  auto whenTrue = Flow();
+  auto whenFalse = Flow();
   stmt->cond = this->truthChecker->checkCondition(stmt->cond, whenTrue, whenFalse);
-  if (std::optional<bool> constant = this->state.getGenericStore().isCheckingInstance()
-                                         ? this->genericChecker->constantCondition(stmt->cond)
-                                         : std::nullopt) {
-    auto *lit = this->state.getAst().make<BoolLitExpr>(stmt->cond->loc(), *constant);
-    lit->type = Type::boolTy();
-    stmt->cond = lit;
-    if (*constant) {
-      this->state.getFlowState().replaceFlow(whenTrue);
-      ResultBodyIsStatement thenBody = this->checkBody(stmt->thenStmt);
-      if (thenBody.isErr()) {
-        this->state.getDiagnostics().error(stmt->thenStmt->loc(), thenBody.error().message);
-      }
-      stmt->elseStmt = nullptr;
-    } else {
-      stmt->thenStmt = this->state.getAst().make<EmptyStmt>(stmt->thenStmt->loc());
-      this->state.getFlowState().replaceFlow(whenFalse);
-      if (stmt->elseStmt) {
-        ResultBodyIsStatement elseBody = this->checkBody(stmt->elseStmt);
-        if (elseBody.isErr()) {
-          this->state.getDiagnostics().error(stmt->elseStmt->loc(), elseBody.error().message);
-        }
-      }
-    }
+  auto constant = this->genericChecker->instanceConstant(stmt->cond);
+  if (constant.has_value()) {
+    this->walkConstantIf(stmt, *constant, whenTrue, whenFalse);
     return;
   }
   this->state.getFlowState().replaceFlow(whenTrue);
-  ResultBodyIsStatement thenBody = this->checkBody(stmt->thenStmt);
-  if (thenBody.isErr()) {
-    this->state.getDiagnostics().error(stmt->thenStmt->loc(), thenBody.error().message);
-  }
-  Flow afterThen = this->state.getFlowState().getFlow();
+  this->walkBody(stmt->thenStmt);
+  auto afterThen = this->state.getFlowState().getFlow();
   this->state.getFlowState().replaceFlow(whenFalse);
-  if (stmt->elseStmt) {
-    ResultBodyIsStatement elseBody = this->checkBody(stmt->elseStmt);
-    if (elseBody.isErr()) {
-      this->state.getDiagnostics().error(stmt->elseStmt->loc(), elseBody.error().message);
-    }
+  if (stmt->elseStmt != nullptr) {
+    this->walkBody(stmt->elseStmt);
   }
-  this->state.getFlowState().replaceFlow(
-      FlowChecker::join(afterThen, this->state.getFlowState().getFlow()));
+  auto afterElse = this->state.getFlowState().getFlow();
+  auto joined = this->flowChecker->join(afterThen, afterElse);
+  this->state.getFlowState().replaceFlow(joined);
 }
 
-StmtChecker::ResultFunctionInBlock StmtChecker::checkFunctionStmt(FunctionDecl *fn) const {
-  if (!fn->group) {
-    std::string message = ErrorTextFunctionStmt::nested();
+void StmtChecker::walkConstantIf(IfStmt *stmt, bool constant, const Flow &whenTrue,
+                                 const Flow &whenFalse) {
+  auto *literal = this->state.getAst().make<BoolLitExpr>(stmt->cond->loc(), constant);
+  literal->type = Type::boolTy();
+  stmt->cond = literal;
+  if (constant) {
+    this->state.getFlowState().replaceFlow(whenTrue);
+    this->walkBody(stmt->thenStmt);
+    stmt->elseStmt = nullptr;
+    return;
+  }
+  stmt->thenStmt = this->state.getAst().make<EmptyStmt>(stmt->thenStmt->loc());
+  this->state.getFlowState().replaceFlow(whenFalse);
+  if (stmt->elseStmt != nullptr) {
+    this->walkBody(stmt->elseStmt);
+  }
+}
+
+void StmtChecker::walkBody(Stmt *body) {
+  auto checked = this->checkBody(body);
+  if (checked.isErr()) {
+    this->state.getDiagnostics().error(body->loc(), checked.error().message);
+  }
+}
+
+StmtChecker::ResultFunctionInBlock
+StmtChecker::checkFunctionStmt(FunctionDecl *functionDecl) const {
+  if (functionDecl->group == nullptr) {
+    auto message = ErrorTextFunctionStmt::nested();
 
     return err(StmtCheckerCheckFunctionStmtError{
         .code = StmtCheckerCheckFunctionStmtErrorCode::NOT_IN_BLOCK,
@@ -195,14 +197,14 @@ StmtChecker::ResultFunctionInBlock StmtChecker::checkFunctionStmt(FunctionDecl *
     });
   }
 
-  return ok(fn);
+  return ok(functionDecl);
 }
 
 StmtChecker::ResultBodyIsStatement StmtChecker::checkBody(Stmt *body) {
   bool isDeclaration = isa<VarDeclStmt>(body) || isa<TypeAliasDecl>(body) || isa<EnumDecl>(body) ||
                        isa<FunctionDecl>(body);
   if (isDeclaration) {
-    std::string message = ErrorTextBody::declared();
+    auto message = ErrorTextBody::declared();
 
     return err(StmtCheckerCheckBodyError{
         .code = StmtCheckerCheckBodyErrorCode::DECLARATION_AS_BODY,

@@ -16,7 +16,7 @@ std::string ErrorTextIntlOptions::notObject(llvm::StringRef what, llvm::StringRe
 }
 
 std::string ErrorTextIntlField::values(const std::vector<llvm::StringLiteral> &values) {
-  std::string out;
+  auto out = std::string();
   for (size_t i = 0; i < values.size(); ++i) {
     out += (i == 0 ? "'" : i + 1 == values.size() ? " or '" : ", '") + values[i].str() + "'";
   }
@@ -26,7 +26,7 @@ std::string ErrorTextIntlField::values(const std::vector<llvm::StringLiteral> &v
 
 std::string ErrorTextIntlField::unknown(llvm::StringRef name, llvm::StringRef what,
                                         const IntlService *service) {
-  std::string names;
+  auto names = std::string();
   for (size_t i = 0; i < service->options.size(); ++i) {
     names += (i == 0                             ? ""
               : i + 1 == service->options.size() ? " and "
@@ -54,7 +54,7 @@ std::string ErrorTextIntlField::badValue(llvm::StringRef text, llvm::StringRef n
 
 std::string ErrorTextIntlField::open(llvm::StringRef name,
                                      const std::vector<llvm::StringLiteral> &values) {
-  std::string example;
+  auto example = std::string();
   for (size_t i = 0; i < values.size() && i < 2; ++i) {
     example += (example.empty() ? "" : " || ") + std::string("x == \"") + values[i].str() + "\"";
   }

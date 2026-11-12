@@ -15,17 +15,18 @@ FsPromisesChecker::FsPromisesChecker(SemanticState &owner, SemanticParts &all)
   this->exprChecker = &all.exprChecker;
 }
 
-FsPromisesChecker::ResultPromiseFunction FsPromisesChecker::promiseFunction(llvm::StringRef fn) {
-  if (fn == "constants") {
-    std::string message = ErrorTextFsPromises::constants();
+FsPromisesChecker::ResultPromiseFunction
+FsPromisesChecker::promiseFunction(llvm::StringRef functionName) const {
+  if (functionName == "constants") {
+    auto message = ErrorTextFsPromises::constants();
 
     return err(FsPromisesCheckerPromiseFunctionError{
         .code = FsPromisesCheckerPromiseFunctionErrorCode::NOT_A_FUNCTION,
         .message = message,
     });
   }
-  if (fn == "open") {
-    std::string message = ErrorTextFsPromises::open();
+  if (functionName == "open") {
+    auto message = ErrorTextFsPromises::open();
 
     return err(FsPromisesCheckerPromiseFunctionError{
         .code = FsPromisesCheckerPromiseFunctionErrorCode::NO_FILE_HANDLE,
@@ -33,13 +34,14 @@ FsPromisesChecker::ResultPromiseFunction FsPromisesChecker::promiseFunction(llvm
     });
   }
 
-  return ok(fn);
+  return ok(functionName);
 }
 
-Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
+Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef functionName,
+                                             llvm::SMLoc loc) {
   this->state.getInventoryStore().markUsesAsync();
   call->type = Type::error();
-  ResultPromiseFunction function = FsPromisesChecker::promiseFunction(fn);
+  auto function = this->promiseFunction(functionName);
   if (function.isErr()) {
     this->state.getDiagnostics().error(loc, function.error().message);
     for (Expr *&arg : call->args) {
@@ -47,9 +49,9 @@ Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef fn,
     }
     return call;
   }
-  FileSystemStore &files = this->state.getFileSystemStore();
+  auto &files = this->state.getFileSystemStore();
   files.enterPromiseCall();
-  this->fsChecker->checkFsCall(call, fn, loc);
+  this->fsChecker->checkFsCall(call, functionName, loc);
   files.leavePromiseCall();
   if (call->type->isError()) {
     return call;
@@ -65,13 +67,13 @@ Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef fn,
       {Builtin::FsReplace, Builtin::FspReplace},   {Builtin::FsRealpath, Builtin::FspRealpath}};
   for (const auto &[sync, async] : waiting) {
     if (call->builtin() == sync) {
-      const Type *error = this->fsErrors->ofCall(call);
+      const auto *error = this->fsErrors->ofCall(call);
       call->target = BuiltinCall{.builtin = async};
       call->type = Type::promise(Type::result(call->type, error));
       return call;
     }
   }
-  std::string message = ErrorTextFsPromises::notYet(fn);
+  auto message = ErrorTextFsPromises::notYet(functionName);
   this->state.getDiagnostics().error(loc, message);
   call->type = Type::error();
 

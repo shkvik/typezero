@@ -7,6 +7,7 @@
 
 namespace tz {
 
+class ClassLinks;
 class SemanticParts;
 class Scopes;
 class ClassBases;
@@ -16,7 +17,7 @@ class GenericClassChecker;
 
 enum class DefaultStepKind {
   VALUE,
-  CHECK_EMPTY,
+  ENTER_EMPTY,
   RESOLVE_FAMILY,
   LEAVE_EMPTY,
   MAKE_NEW,
@@ -29,24 +30,24 @@ struct DefaultFor {
   const TypeRef *ref;
 };
 
-struct CheckEmpty {
-  static constexpr DefaultStepKind kind = DefaultStepKind::CHECK_EMPTY;
-  const ClassDecl *cls;
+struct EnterEmpty {
+  static constexpr DefaultStepKind kind = DefaultStepKind::ENTER_EMPTY;
+  ClassDecl *classDecl;
 };
 
 struct ResolveFamily {
   static constexpr DefaultStepKind kind = DefaultStepKind::RESOLVE_FAMILY;
-  const ClassDecl *cls;
+  ClassDecl *classDecl;
 };
 
 struct LeaveEmpty {
   static constexpr DefaultStepKind kind = DefaultStepKind::LEAVE_EMPTY;
-  const ClassDecl *cls;
+  ClassDecl *classDecl;
 };
 
 struct MakeNew {
   static constexpr DefaultStepKind kind = DefaultStepKind::MAKE_NEW;
-  const ClassDecl *cls;
+  ClassDecl *classDecl;
 };
 
 struct FillObject {
@@ -55,18 +56,18 @@ struct FillObject {
   std::vector<const Field *> fields;
 };
 
-using DefaultStep = Union<DefaultFor, CheckEmpty, ResolveFamily, LeaveEmpty, MakeNew, FillObject>;
+using DefaultStep = Union<DefaultFor, EnterEmpty, ResolveFamily, LeaveEmpty, MakeNew, FillObject>;
 
 enum class CompletionStepKind { START, FINISH };
 
 struct StartCompletion {
   static constexpr CompletionStepKind kind = CompletionStepKind::START;
-  ClassDecl *cls;
+  ClassDecl *classDecl;
 };
 
 struct FinishCompletion {
   static constexpr CompletionStepKind kind = CompletionStepKind::FINISH;
-  ClassDecl *cls;
+  ClassDecl *classDecl;
 };
 
 using CompletionStep = Union<StartCompletion, FinishCompletion>;
@@ -76,23 +77,28 @@ struct DefaultRun {
   llvm::SMLoc loc;
   std::vector<DefaultStep> steps;
   std::vector<Expr *> values;
+  bool hasNoDefault;
 };
 
 class ClassDeclarer {
 public:
   ClassDeclarer(SemanticState &owner, SemanticParts &all);
 
-  static ClassDecl *classOf(const Type *type);
-  static std::vector<FunctionDecl *> methodsNamed(const ClassDecl *cls, llvm::StringRef name,
-                                                  bool isStatic);
+  ClassDecl *classOf(const Type *type) const;
+  std::vector<FunctionDecl *> methodsNamed(const ClassDecl *classDecl, llvm::StringRef name) const;
+  std::vector<FunctionDecl *> staticMethodsNamed(const ClassDecl *classDecl,
+                                                 llvm::StringRef name) const;
+  std::vector<FunctionDecl *> memberFunctions(const ClassDecl *classDecl) const;
 
-  void declareClass(ClassDecl *cls);
-  void resolveClass(ClassDecl *cls);
-  void walkVariants(ClassDecl *cls);
-  void completeClass(ClassDecl *cls);
-  void declareMethods(ClassDecl *cls);
-  void reportVariantPair(FunctionDecl *a, FunctionDecl *b);
-  void declareTyped(FunctionDecl *fn, const Type *declared);
+  void declareClass(ClassDecl *classDecl);
+  void resolveClass(ClassDecl *classDecl);
+  void walkVariants(ClassDecl *classDecl);
+  void completeClass(ClassDecl *classDecl);
+  void declareMethods(ClassDecl *classDecl);
+  std::vector<Stmt *> fieldSets(const ClassDecl *classDecl);
+  void reportVariantPair(FunctionDecl *first, FunctionDecl *second);
+  void declareTyped(FunctionDecl *functionDecl, const Type *declared);
+  FunctionDecl *makeInitDecl(ClassDecl *classDecl, std::vector<Stmt *> sets);
 
 private:
   using ResultStaticTypeFixed = Result<const Type *, ClassDeclarerStaticTypeParamsError>;
@@ -110,51 +116,86 @@ private:
   using ResultGenericIsDirect = Result<const FunctionDecl *, ClassDeclarerGenericMethodError>;
   using ResultAbstractReturns = Result<const FunctionDecl *, ClassDeclarerAbstractReturnError>;
 
-  void declareClassMethod(const ClassDecl *cls, FunctionDecl *fn);
-  void declareFieldMethod(ClassDecl *cls, const ClassField &f);
-  void fillDefaultValues(ClassDecl *cls);
-  void makeFieldInit(ClassDecl *cls);
-  static ResultFieldNotLateSet setLater(const ClassField &f);
-  static ResultFieldTypeIsSeen typeSeen(const ClassField &f);
-  static ResultGenericIsDirect genericMethod(const FunctionDecl *fn);
-  static void numberVariants(llvm::ArrayRef<FunctionDecl *> functions);
-  static int ambiguousCount(const FuncSymbol *x, const FuncSymbol *y);
-  static ResultStaticGetsValue staticValue(const ClassField &f, const Type *type);
-  static const ClassField *earlierField(const ClassDecl *cls, size_t index);
-  static const Param *propertyParam(const ClassDecl *cls, llvm::StringRef name);
-  static ResultNotParentMethod parentMethod(const ClassDecl *cls, const ClassField &f);
-  static ResultFieldTypeSource typedField(const ClassDecl *cls, const ClassField &f);
-  static ResultFieldHasNoValue fieldValue(const ClassDecl *cls, const ClassField &f);
-  static ResultVariantsUnequal variantPair(const FunctionDecl *a, const FunctionDecl *b);
-  static ResultAbstractReturns abstractReturn(const ClassDecl *cls, const FunctionDecl *fn);
-  static ResultParamTypePassed paramType(const Param &param, const Type *type,
-                                         const Type *declared);
-  static ResultFieldNameIsFree fieldOrMethod(const ClassDecl *cls, const ClassField &f,
-                                             const FunctionDecl *fn);
-  static ResultFieldNameUnique uniqueField(const ClassDecl *cls, const ClassField &f,
-                                           const ClassField *earlier);
-  static ResultStaticTypeFixed staticTypeParams(const ClassDecl *cls, const ClassField &f,
-                                                const Type *type);
-  static ResultNarrowingLayout narrowedField(const ClassDecl *cls, const ClassField &f,
-                                             const Field &inherited, const ClassDecl *owner);
+  ResultFieldNotLateSet setLater(const ClassField &field) const;
+  ResultFieldTypeIsSeen typeSeen(const ClassField &field) const;
+  ResultGenericIsDirect genericMethod(const FunctionDecl *method) const;
+  ResultStaticGetsValue staticValue(const ClassField &field, const Type *type) const;
+  ResultNotParentMethod parentMethod(const ClassDecl *classDecl, const ClassField &field) const;
+  ResultFieldTypeSource typedField(const ClassDecl *classDecl, const ClassField &field) const;
+  ResultFieldHasNoValue fieldValue(const ClassDecl *classDecl, const ClassField &field) const;
+  ResultVariantsUnequal variantPair(const FunctionDecl *first, const FunctionDecl *second) const;
+  ResultAbstractReturns abstractReturn(const ClassDecl *classDecl,
+                                       const FunctionDecl *method) const;
+  ResultParamTypePassed paramType(const Param &param, const Type *type, const Type *declared) const;
+  ResultFieldNameIsFree fieldOrMethod(const ClassDecl *classDecl, const ClassField &field,
+                                      const FunctionDecl *method) const;
+  ResultFieldNameUnique uniqueField(const ClassDecl *classDecl, const ClassField &field,
+                                    const ClassField *earlier) const;
+  ResultStaticTypeFixed staticTypeParams(const ClassDecl *classDecl, const ClassField &field,
+                                         const Type *type) const;
+  ResultNarrowingLayout narrowedField(const ClassDecl *classDecl, const ClassField &field,
+                                      const Field &inherited, const ClassDecl *owner) const;
 
+  Stmt *fieldSet(const ClassField &field);
+  void makeFieldInit(ClassDecl *classDecl);
+  void fillDefaultValues(ClassDecl *classDecl);
+  void finishCompletion(ClassDecl *classDecl);
+  bool isPlainObject(const Type *type) const;
+  bool isLiteralUnion(const Type *type) const;
+  bool hasInternalField(const Type *type) const;
+  bool isMethodField(const ClassField &field) const;
+  bool isFullyTyped(const FuncSymbol *function) const;
+  bool isNeedingDefault(const ClassField &field) const;
   Expr *literalValue(const Type *literal, llvm::SMLoc loc);
-  void resolveField(ClassDecl *cls, ClassField &f);
-  void walkMemberName(const ClassDecl *cls, size_t index);
-  void arrowMethod(ClassDecl *cls, ClassField &f, const Type *type);
+  ClassDecl *defaultedClass(const ClassField &field) const;
+  void resolveFamily(ClassDecl *classDecl, DefaultRun &run);
+  void resolveField(ClassDecl *classDecl, ClassField &field);
+  bool isMadeByConstructor(const ClassDecl *classDecl) const;
+  void defaultFor(const DefaultFor &wanted, DefaultRun &run);
+  void planObjectDefault(const Type *type, DefaultRun &run);
+  void makeEmptyNew(const ClassDecl *classDecl, DefaultRun &run);
+  void walkMemberName(const ClassDecl *classDecl, size_t index);
   void walkVariantList(llvm::ArrayRef<FunctionDecl *> functions);
-  const Type *declaredFieldType(const ClassDecl *cls, ClassField &f);
-  static bool checkEmpty(const ClassDecl *cls, DefaultRun &run);
-  void startCompletion(ClassDecl *cls, std::vector<CompletionStep> &steps);
-  void finishCompletion(ClassDecl *cls);
-  static bool isPlainObject(const Type *type);
-  static void fillObject(const FillObject &fill, DefaultRun &run);
-  bool applyDefaultStep(const DefaultStep &step, DefaultRun &run);
-  bool defaultFor(const DefaultFor &wanted, DefaultRun &run);
+  void fillObject(const FillObject &fill, DefaultRun &run) const;
+  void applyDefaultStep(const DefaultStep &step, DefaultRun &run);
+  Expr *sizeLiteral(const Type *base, double size, llvm::SMLoc loc);
+  void addHiddenParam(FunctionDecl *functionDecl, const Type *type);
+  void enterEmptyClass(ClassDecl *classDecl, DefaultRun &run) const;
+  void planClassDefault(ClassDecl *classDecl, DefaultRun &run) const;
+  void numberVariants(llvm::ArrayRef<FunctionDecl *> functions) const;
+  std::vector<const Field *> requiredFields(const Type *type) const;
+  std::vector<Field> inheritedFields(const ClassDecl *classDecl) const;
+  bool isWrittenCollection(const Type *type, const TypeRef *ref) const;
+  void leaveEmptyClass(const ClassDecl *classDecl, DefaultRun &run) const;
+  Field *fieldNamed(std::vector<Field> &fields, llvm::StringRef name) const;
   Expr *simpleDefault(const Type *type, const TypeRef *ref, llvm::SMLoc loc);
-  void resolveFamily(const ClassDecl *c, DefaultRun &run);
-  void makeEmptyNew(const ClassDecl *cls, DefaultRun &run);
-  void declareStaticVar(const ClassDecl *cls, const ClassField &f, StaticField *shared,
+  void declareFieldMethod(ClassDecl *classDecl, const ClassField &field);
+  void declareClassMethod(const ClassDecl *classDecl, FunctionDecl *method);
+  void resolveInstanceFields(ClassDecl *instance, const ClassDecl *generic);
+  void arrowMethod(ClassDecl *classDecl, ClassField &field, const Type *type);
+  const Type *writtenFieldType(const ClassDecl *classDecl, ClassField &field);
+  const Type *resolvedFieldType(const ClassDecl *classDecl, ClassField &field);
+  const Type *declaredFieldType(const ClassDecl *classDecl, ClassField &field);
+  bool hasOtherReturn(const FuncSymbol *first, const FuncSymbol *second) const;
+  const Type *instanceFieldType(const ClassDecl *instance, const Type *original);
+  bool hasSameSignature(const FuncSymbol *first, const FuncSymbol *second) const;
+  bool isVariantOf(const FunctionDecl *earlier, const FunctionDecl *later) const;
+  void startCompletion(ClassDecl *classDecl, std::vector<CompletionStep> &steps);
+  const ClassField *earlierField(const ClassDecl *classDecl, size_t index) const;
+  const Type *typedParam(const Param &param, const Type *given, const Type *declared);
+  const Param *propertyParam(const ClassDecl *classDecl, llvm::StringRef name) const;
+  std::optional<int> ambiguousCount(const FuncSymbol *first, const FuncSymbol *second) const;
+  std::vector<FunctionDecl *> ownMethodsNamed(const ClassDecl *classDecl,
+                                              llvm::StringRef name) const;
+  bool isHiddenByAny(llvm::ArrayRef<FunctionDecl *> found, const FunctionDecl *method) const;
+  bool isOverriddenByAny(llvm::ArrayRef<FunctionDecl *> found, const FunctionDecl *method) const;
+  void addOwnField(const ClassDecl *classDecl, const ClassField &field, std::vector<Field> &fields);
+  std::vector<FunctionDecl *> ownStaticMethodsNamed(const ClassDecl *classDecl,
+                                                    llvm::StringRef name) const;
+  void completeField(const ClassDecl *classDecl, ClassField &field, std::vector<Field> &fields);
+  void narrowInheritedField(const ClassDecl *classDecl, const ClassField &field,
+                            std::vector<Field> &fields);
+  void declareStaticVar(const ClassDecl *classDecl, const ClassField &field, StaticField *shared,
                         const Type *type);
   Expr *defaultValue(const Type *type, const TypeRef *ref, llvm::SMLoc loc,
                      llvm::SmallPtrSetImpl<const ClassDecl *> &visiting);
@@ -162,6 +203,7 @@ private:
   SemanticState &state;
   Scopes *scopes = nullptr;
   ClassBases *classBases = nullptr;
+  ClassLinks *classLinks = nullptr;
   TypeResolver *typeResolver = nullptr;
   FunctionChecker *functionChecker = nullptr;
   GenericClassChecker *genericClassChecker = nullptr;

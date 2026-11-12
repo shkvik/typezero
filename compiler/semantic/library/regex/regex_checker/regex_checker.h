@@ -6,6 +6,7 @@
 
 namespace tz {
 
+class VarChecker;
 class SemanticParts;
 class Prelude;
 class CallChecker;
@@ -19,10 +20,10 @@ class RegexChecker {
 public:
   RegexChecker(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkRegexLit(RegexLitExpr *lit);
-  static const RegexLitExpr *knownRegex(const Expr *expr);
+  Expr *checkRegexLit(RegexLitExpr *literal);
+  const RegexLitExpr *knownRegex(const Expr *expr) const;
   const Type *matchType(const RegexLitExpr *regex);
-  void noteRegexVariable(VarSymbol *var, const Expr *init, bool isConst,
+  void noteRegexVariable(VarSymbol *variable, const Expr *init, bool isConst,
                          llvm::ArrayRef<Stmt *> block, size_t index);
   Expr *checkRegexMethod(CallExpr *call, MemberExpr *member);
   Expr *checkRegexMember(MemberExpr *member);
@@ -34,13 +35,14 @@ public:
 private:
   using ResultParsedFlags = Result<uint32_t, RegexCheckerParsedFlagsError>;
 
-  static bool assignsName(llvm::ArrayRef<const Stmt *> stmts, llvm::StringRef name);
-  static ResultParsedFlags parsedFlags(const std::u16string &flags);
-  static std::u16string units(const uint32_t *program, uint32_t start, uint32_t length);
-  static bool isFlag(llvm::StringRef name, uint32_t &flag);
+  bool assignsName(llvm::ArrayRef<const Stmt *> stmts, llvm::StringRef name) const;
+  ResultParsedFlags parsedFlags(const std::u16string &flags) const;
+  std::u16string units(const uint32_t *program, uint32_t start, uint32_t length) const;
+  bool isFlag(llvm::StringRef name, uint32_t &flag) const;
 
   SemanticState &state;
   Prelude *prelude = nullptr;
+  VarChecker *varChecker = nullptr;
   CallChecker *callChecker = nullptr;
   ExprChecker *exprChecker = nullptr;
   ObjectChecker *objectChecker = nullptr;

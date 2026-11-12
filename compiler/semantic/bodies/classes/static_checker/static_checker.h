@@ -7,10 +7,12 @@
 
 namespace tz {
 
+class ClassBases;
 class SemanticParts;
 class CallChecker;
 class StreamSources;
 class TypeRelations;
+class ClassDeclarer;
 class ReturnInferrer;
 class ArgumentChecker;
 class TypeArgInferrer;
@@ -23,9 +25,9 @@ class StaticChecker {
 public:
   StaticChecker(SemanticState &owner, SemanticParts &all);
 
-  const Type *checkStaticTarget(Expr *&target, ClassDecl *cls);
-  Expr *checkStaticMember(MemberExpr *member, ClassDecl *cls, const Type *expected);
-  Expr *checkClassStaticCall(CallExpr *call, MemberExpr *member, ClassDecl *cls,
+  const Type *checkStaticTarget(Expr *&target, ClassDecl *classDecl);
+  Expr *checkStaticMember(MemberExpr *member, ClassDecl *classDecl, const Type *expected);
+  Expr *checkClassStaticCall(CallExpr *call, MemberExpr *member, ClassDecl *classDecl,
                              const Type *expected = nullptr);
 
 private:
@@ -39,32 +41,34 @@ private:
   using ResultStaticFunctions =
       Result<std::vector<FunctionDecl *>, StaticCheckerStaticMethodsError>;
 
-  Expr *checkStaticFieldRead(MemberExpr *member, ClassDecl *cls, const ClassField &f,
+  Expr *checkStaticFieldRead(MemberExpr *member, ClassDecl *classDecl, const ClassField &field,
                              const ClassDecl *owner);
-  Expr *checkStaticMethodValue(MemberExpr *member, ClassDecl *cls, const Type *expected);
-  Expr *checkClassValueMember(MemberExpr *member, ClassDecl *cls);
-  Expr *checkLibraryStaticCall(CallExpr *call, MemberExpr *member, const ClassDecl *cls,
+  Expr *checkStaticMethodValue(MemberExpr *member, ClassDecl *classDecl, const Type *expected);
+  Expr *checkClassValueMember(MemberExpr *member, ClassDecl *classDecl);
+  Expr *checkLibraryStaticCall(CallExpr *call, MemberExpr *member, const ClassDecl *classDecl,
                                const Type *expected);
-  Expr *checkStaticFieldCall(CallExpr *call, MemberExpr *member, ClassDecl *cls);
+  Expr *checkStaticFieldCall(CallExpr *call, MemberExpr *member, ClassDecl *classDecl);
   Expr *checkStaticMethodCall(CallExpr *call, MemberExpr *member,
                               const std::vector<FunctionDecl *> &methods, const Type *expected);
-  static ResultFieldIsWritable fieldWritable(const VarSymbol *var);
-  ResultFieldValueIsSet fieldReady(const ClassDecl *owner, const VarSymbol *var) const;
-  static ResultFieldTypeStated typeDeclared(const VarSymbol *var, llvm::StringRef name);
-  static ResultStaticFunctions staticMethods(const ClassDecl *cls, llvm::StringRef name);
-  static ClassField *staticField(ClassDecl *cls, llvm::StringRef name, ClassDecl **owner);
-  static ResultTypeArgsAllowed methodTypeArgs(const FuncSymbol *sym, const MemberExpr *member);
-  static ResultFieldIsCallable staticCallable(const Type *type, const ClassDecl *cls,
-                                              llvm::StringRef name);
-  ResultStaticFieldType fieldTyped(const ClassDecl *owner, const VarSymbol *var,
+  ResultFieldIsWritable fieldWritable(const VarSymbol *variable) const;
+  ResultFieldValueIsSet fieldReady(const ClassDecl *owner, const VarSymbol *variable) const;
+  ResultFieldTypeStated typeDeclared(const VarSymbol *variable, llvm::StringRef name) const;
+  ResultStaticFunctions staticMethods(const ClassDecl *classDecl, llvm::StringRef name) const;
+  ClassField *staticField(ClassDecl *classDecl, llvm::StringRef name, ClassDecl **owner) const;
+  ResultTypeArgsAllowed methodTypeArgs(const FuncSymbol *function, const MemberExpr *member) const;
+  ResultFieldIsCallable staticCallable(const Type *type, const ClassDecl *classDecl,
+                                       llvm::StringRef name) const;
+  ResultStaticFieldType fieldTyped(const ClassDecl *owner, const VarSymbol *variable,
                                    llvm::StringRef name) const;
-  static ResultFieldOfTheClass fieldFound(const ClassField *found, const ClassDecl *cls,
-                                          llvm::StringRef name);
+  ResultFieldOfTheClass fieldFound(const ClassField *found, const ClassDecl *classDecl,
+                                   llvm::StringRef name) const;
 
   SemanticState &state;
+  ClassBases *classBases = nullptr;
   CallChecker *callChecker = nullptr;
   StreamSources *streamSources = nullptr;
   TypeRelations *typeRelations = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
   ReturnInferrer *returnInferrer = nullptr;
   ArgumentChecker *argumentChecker = nullptr;
   TypeArgInferrer *typeArgInferrer = nullptr;

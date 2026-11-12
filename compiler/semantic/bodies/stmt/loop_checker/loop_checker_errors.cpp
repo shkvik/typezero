@@ -34,6 +34,10 @@ std::string ErrorTextForOf::cannot(llvm::StringRef type) {
   return (llvm::Twine("cannot iterate over a value of type '") + type + "'").str();
 }
 
+std::string ErrorTextForOf::loop() {
+  return "'for...of'";
+}
+
 std::string ErrorTextLoopBinding::forIn() {
   return "a 'for...in' variable cannot have a type annotation";
 }

@@ -28,12 +28,12 @@ std::optional<uint64_t> ConstantStore::findBigUnsigned(const Expr *expr) const {
   return found->second;
 }
 
-void ConstantStore::rememberBigUnsignedVar(const VarSymbol *var, uint64_t value) {
-  this->bigUnsignedVars[var] = value;
+void ConstantStore::rememberBigUnsignedVar(const VarSymbol *variable, uint64_t value) {
+  this->bigUnsignedVars[variable] = value;
 }
 
-std::optional<uint64_t> ConstantStore::findBigUnsignedVar(const VarSymbol *var) const {
-  auto found = this->bigUnsignedVars.find(var);
+std::optional<uint64_t> ConstantStore::findBigUnsignedVar(const VarSymbol *variable) const {
+  auto found = this->bigUnsignedVars.find(variable);
   if (found == this->bigUnsignedVars.end()) {
     return std::nullopt;
   }
@@ -41,12 +41,12 @@ std::optional<uint64_t> ConstantStore::findBigUnsignedVar(const VarSymbol *var) 
   return found->second;
 }
 
-void ConstantStore::rememberConstVar(const VarSymbol *var, int64_t value) {
-  this->constVars[var] = value;
+void ConstantStore::rememberConstVar(const VarSymbol *variable, int64_t value) {
+  this->constVars[variable] = value;
 }
 
-std::optional<int64_t> ConstantStore::findConstVar(const VarSymbol *var) const {
-  auto found = this->constVars.find(var);
+std::optional<int64_t> ConstantStore::findConstVar(const VarSymbol *variable) const {
+  auto found = this->constVars.find(variable);
   if (found == this->constVars.end()) {
     return std::nullopt;
   }
@@ -54,12 +54,12 @@ std::optional<int64_t> ConstantStore::findConstVar(const VarSymbol *var) const {
   return found->second;
 }
 
-void ConstantStore::rememberConstKey(const VarSymbol *var, std::string key) {
-  this->constKeys[var] = std::move(key);
+void ConstantStore::rememberConstKey(const VarSymbol *variable, std::string key) {
+  this->constKeys[variable] = std::move(key);
 }
 
-std::optional<std::string> ConstantStore::findConstKey(const VarSymbol *var) const {
-  auto found = this->constKeys.find(var);
+std::optional<std::string> ConstantStore::findConstKey(const VarSymbol *variable) const {
+  auto found = this->constKeys.find(variable);
   if (found == this->constKeys.end()) {
     return std::nullopt;
   }
@@ -67,12 +67,12 @@ std::optional<std::string> ConstantStore::findConstKey(const VarSymbol *var) con
   return found->second;
 }
 
-void ConstantStore::rememberConstPrefix(const VarSymbol *var, std::string prefix) {
-  this->constPrefixes[var] = std::move(prefix);
+void ConstantStore::rememberConstPrefix(const VarSymbol *variable, std::string prefix) {
+  this->constPrefixes[variable] = std::move(prefix);
 }
 
-std::string ConstantStore::findConstPrefix(const VarSymbol *var) const {
-  auto found = this->constPrefixes.find(var);
+std::string ConstantStore::findConstPrefix(const VarSymbol *variable) const {
+  auto found = this->constPrefixes.find(variable);
   if (found == this->constPrefixes.end()) {
     return std::string();
   }
@@ -80,12 +80,12 @@ std::string ConstantStore::findConstPrefix(const VarSymbol *var) const {
   return found->second;
 }
 
-void ConstantStore::rememberConstLiteral(const VarSymbol *var, const Expr *literal) {
-  this->constLiterals[var] = literal;
+void ConstantStore::rememberConstLiteral(const VarSymbol *variable, const Expr *literal) {
+  this->constLiterals[variable] = literal;
 }
 
-const Expr *ConstantStore::findConstLiteral(const VarSymbol *var) const {
-  return this->constLiterals.lookup(var);
+const Expr *ConstantStore::findConstLiteral(const VarSymbol *variable) const {
+  return this->constLiterals.lookup(variable);
 }
 
 }

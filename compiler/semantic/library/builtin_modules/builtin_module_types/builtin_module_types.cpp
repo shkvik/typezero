@@ -25,9 +25,9 @@ void BuiltinModuleTypes::declareErrorTypes() {
 }
 
 void BuiltinModuleTypes::declare(BuiltinText builtin) {
-  llvm::ArrayRef<Stmt *> items = this->state.getLibraryDeclarations().getBuiltinItems(builtin);
+  auto items = this->state.getLibraryDeclarations().getBuiltinItems(builtin);
   for (Stmt *item : items) {
-    TypeAliasDecl *alias = dyn_cast<TypeAliasDecl>(item);
+    auto *alias = dyn_cast<TypeAliasDecl>(item);
     if (alias != nullptr) {
       this->state.getLibraryDeclarations().rememberModuleAlias(alias);
     }
@@ -51,8 +51,8 @@ TypeAliasDecl *BuiltinModuleTypes::exported(NodeModule module, llvm::StringRef n
 }
 
 const Type *BuiltinModuleTypes::named(llvm::StringRef name) {
-  TypeAliasDecl *found = this->alias(name);
-  assert(found && "a built-in module declares the type");
+  auto *found = this->alias(name);
+  assert(found != nullptr && "a built-in module declares the type");
 
   return this->typeDeclarer->resolveAlias(found);
 }

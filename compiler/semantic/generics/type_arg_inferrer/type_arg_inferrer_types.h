@@ -8,6 +8,11 @@
 
 namespace tz {
 
+enum class TypeArgUse {
+  CALL,
+  VALUE,
+};
+
 struct GenericCallBinding {
   CallExpr *call = nullptr;
   FuncSymbol *generic = nullptr;

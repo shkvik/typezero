@@ -24,7 +24,7 @@ EventSite *EventStore::findSiteOfMap(const Type *map) {
 }
 
 std::vector<EventSite *> EventStore::getSites() {
-  std::vector<EventSite *> all;
+  auto all = std::vector<EventSite *>();
   for (auto &entry : this->sites) {
     all.push_back(&entry.second);
   }
@@ -73,21 +73,21 @@ bool EventStore::isErrorListened(const Type *events) const {
   return this->errorListenedMaps.contains(events);
 }
 
-void EventStore::addSelfListener(const ClassDecl *cls) {
-  this->selfListeners.insert(cls);
+void EventStore::addSelfListener(const ClassDecl *classDecl) {
+  this->selfListeners.insert(classDecl);
 }
 
-bool EventStore::isSelfListener(const ClassDecl *cls) const {
-  return this->selfListeners.contains(cls);
+bool EventStore::isSelfListener(const ClassDecl *classDecl) const {
+  return this->selfListeners.contains(classDecl);
 }
 
-void EventStore::addDroppedNew(const ClassDecl *cls, llvm::SMLoc loc) {
+void EventStore::addDroppedNew(const ClassDecl *classDecl, llvm::SMLoc loc) {
   for (const DroppedNew &known : this->droppedNews) {
     if (known.loc == loc) {
       return;
     }
   }
-  this->droppedNews.push_back({cls, loc});
+  this->droppedNews.push_back({classDecl, loc});
 }
 
 std::vector<DroppedNew> EventStore::getDroppedNews() const {

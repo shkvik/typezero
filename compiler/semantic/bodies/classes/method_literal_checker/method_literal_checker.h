@@ -20,7 +20,7 @@ class MethodLiteralChecker {
 public:
   MethodLiteralChecker(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkMethodLiteral(ObjectLitExpr *lit, const Type *target);
+  Expr *checkMethodLiteral(ObjectLitExpr *literal, const Type *target);
 
 private:
   using ResultSpreadAbsent = Result<const ObjectLitExpr *, MethodLiteralCheckerNoSpreadError>;
@@ -30,21 +30,22 @@ private:
       Result<const ObjectLitExpr::Property *, MethodLiteralCheckerPropertyFitsError>;
   using ResultMembersMatch = Result<const ObjectLitExpr *, MethodLiteralCheckerMembersMatchError>;
 
-  static ResultSpreadAbsent noSpread(const ObjectLitExpr *lit);
-  static ResultMethodSimple plainMethod(const FunctionDecl *fn);
-  static ResultValueIsTyped fieldValue(const Type *valueType, llvm::StringRef label);
-  static ResultMembersMatch membersMatch(const ObjectLitExpr *lit, const Type *target);
-  ResultPropertyFits propertyFits(const ObjectLitExpr::Property &prop, const Type *target) const;
-  Type *makeLiteralClass(ObjectLitExpr *lit);
-  void addLiteralMethod(ClassDecl *cls, const ObjectLitExpr::Property &prop);
-  bool addLiteralField(ClassDecl *cls, ObjectLitExpr::Property &prop, const Type *target,
+  ResultSpreadAbsent noSpread(const ObjectLitExpr *literal) const;
+  ResultMethodSimple plainMethod(const FunctionDecl *functionDecl) const;
+  ResultValueIsTyped fieldValue(const Type *valueType, llvm::StringRef label) const;
+  ResultMembersMatch membersMatch(const ObjectLitExpr *literal, const Type *target) const;
+  ResultPropertyFits propertyFits(const ObjectLitExpr::Property &property,
+                                  const Type *target) const;
+  Type *makeLiteralClass(ObjectLitExpr *literal);
+  void addLiteralMethod(ClassDecl *classDecl, const ObjectLitExpr::Property &property);
+  bool addLiteralField(ClassDecl *classDecl, ObjectLitExpr::Property &property, const Type *target,
                        std::vector<Field> &fields);
-  static std::string literalTypeName(const std::vector<Field> &fields,
-                                     llvm::ArrayRef<FunctionDecl *> methods);
-  void declareLiteralMethods(ClassDecl *cls, const Type *target);
-  void declareLiteralMethod(FunctionDecl *fn, const Type *target);
-  void walkLiteralMethods(ClassDecl *cls);
-  Expr *matchLiteralTarget(ObjectLitExpr *lit, const Type *target, const Type *type);
+  std::string literalTypeName(const std::vector<Field> &fields,
+                              llvm::ArrayRef<FunctionDecl *> methods) const;
+  void declareLiteralMethods(ClassDecl *classDecl, const Type *target);
+  void declareLiteralMethod(FunctionDecl *functionDecl, const Type *target);
+  void walkLiteralMethods(ClassDecl *classDecl);
+  Expr *matchLiteralTarget(ObjectLitExpr *literal, const Type *target, const Type *type);
 
   SemanticState &state;
   CallCycles *callCycles = nullptr;

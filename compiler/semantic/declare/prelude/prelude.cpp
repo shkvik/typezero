@@ -16,26 +16,26 @@ Prelude::Prelude(SemanticState &owner, SemanticParts &all)
 }
 
 void Prelude::declarePrelude() {
-  llvm::ArrayRef<Stmt *> items =
-      this->state.getLibraryDeclarations().getBuiltinItems(BuiltinText::PRELUDE);
+  auto items = this->state.getLibraryDeclarations().getBuiltinItems(BuiltinText::PRELUDE);
   for (Stmt *item : items) {
-    TypeAliasDecl *alias = dyn_cast<TypeAliasDecl>(item);
+    auto *alias = dyn_cast<TypeAliasDecl>(item);
     if (alias != nullptr) {
       this->state.getAliasStore().rememberBuiltinAlias(alias);
     }
   }
 }
 
-const Type *Prelude::builtinType(llvm::StringRef name) {
-  TypeAliasDecl *alias = this->state.getAliasStore().findBuiltinAlias(name);
-  assert(alias && "the prelude declares the type");
+const Type *Prelude::builtinType(PreludeType type) {
+  auto name = PreludeTypeTable::getName(type);
+  auto *alias = this->state.getAliasStore().findBuiltinAlias(name);
+  assert(alias != nullptr && "the prelude declares the type");
 
   return this->typeDeclarer->resolveAlias(alias);
 }
 
 const Type *Prelude::builtinType(llvm::StringRef name, std::vector<const Type *> args) {
-  TypeAliasDecl *alias = this->state.getAliasStore().findBuiltinAlias(name);
-  assert(alias && "the prelude declares the type");
+  auto *alias = this->state.getAliasStore().findBuiltinAlias(name);
+  assert(alias != nullptr && "the prelude declares the type");
 
   return this->aliasInstantiator->instantiateAlias(alias, std::move(args), alias->loc());
 }

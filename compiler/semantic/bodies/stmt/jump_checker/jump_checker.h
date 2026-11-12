@@ -6,6 +6,7 @@
 
 namespace tz {
 
+class FlowChecker;
 class SemanticParts;
 class StmtChecker;
 
@@ -22,14 +23,22 @@ public:
 private:
   using ResultLabelIsFresh = Result<const LabeledStmt *, JumpCheckerLabelFreshError>;
   using ResultBodyCanLabel = Result<const Stmt *, JumpCheckerLabelBodyError>;
+  using ResultTargetFound = Result<const JumpTarget *, JumpCheckerCheckJumpError>;
 
-  static bool isLoop(const Stmt *stmt);
-  static ResultBodyCanLabel labelBody(const Stmt *body);
-  ResultLabelIsFresh labelFresh(llvm::ArrayRef<llvm::StringRef> labels,
-                                const LabeledStmt *labeled) const;
+  bool isLoop(const Stmt *stmt) const;
+  llvm::StringRef jumpLabel(const Stmt *stmt) const;
+  ResultTargetFound checkTargetFound(const JumpTarget *target, llvm::StringRef label,
+                                     bool isBreak) const;
+  ResultTargetFound checkContinueTarget(const JumpTarget &target, llvm::StringRef label,
+                                        bool isBreak) const;
+  ResultLabelIsFresh checkLabelFresh(llvm::ArrayRef<llvm::StringRef> labels,
+                                     const LabeledStmt *labeled) const;
+  ResultBodyCanLabel checkLabelBody(const Stmt *body) const;
+  void walkLabeledBlock(Stmt *body, llvm::ArrayRef<llvm::StringRef> labels);
 
   SemanticState &state;
   StmtChecker *stmtChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
 };
 
 }

@@ -21,11 +21,11 @@ std::string ErrorTextConstructible::unknown() {
 }
 
 std::string ErrorTextConstructible::takes(llvm::ArrayRef<const FuncSymbol *> constructors) {
-  std::string takes;
+  auto takes = std::string();
   for (const FuncSymbol *sym : constructors) {
-    std::string shown;
+    auto shown = std::string();
     for (const Type *param : sym->params) {
-      shown += (shown.empty() ? "" : ", ") + (param ? param->name().str() : "?");
+      shown += (shown.empty() ? "" : ", ") + (param != nullptr ? param->name().str() : "?");
     }
     takes += (takes.empty() ? "(" : " or (") + shown + ")";
   }

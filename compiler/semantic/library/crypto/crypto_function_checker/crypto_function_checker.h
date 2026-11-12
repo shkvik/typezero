@@ -23,16 +23,16 @@ class CryptoFunctionChecker {
 public:
   CryptoFunctionChecker(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkCryptoCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
+  Expr *checkCryptoCall(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc);
 
 private:
   using ResultFilledTarget = Result<const Type *, CryptoFunctionCheckerFilledTargetError>;
   using ResultCurveIsKnown = Result<llvm::StringRef, CryptoFunctionCheckerCurveIsKnownError>;
 
-  static ResultFilledTarget filledTarget(const Type *type, llvm::StringRef fn,
-                                         llvm::StringRef shown);
-  static ResultCurveIsKnown curveIsKnown(llvm::StringRef curve);
-  static std::optional<std::string> literalOf(const Expr *e);
+  ResultFilledTarget filledTarget(const Type *type, llvm::StringRef functionName,
+                                  llvm::StringRef shown) const;
+  ResultCurveIsKnown curveIsKnown(llvm::StringRef curve) const;
+  std::optional<std::string> literalOf(const Expr *expr) const;
 
   struct SyncCall {
     CallExpr *call = nullptr;
@@ -52,9 +52,10 @@ private:
     int has = 0;
   };
 
-  static bool isPresent(const std::vector<Expr *> &args, size_t i);
+  bool isPresent(const std::vector<Expr *> &args, size_t index) const;
 
-  Expr *checkSyncCall(CallExpr *call, llvm::StringRef fn, llvm::StringRef shown, llvm::SMLoc loc);
+  Expr *checkSyncCall(CallExpr *call, llvm::StringRef functionName, llvm::StringRef shown,
+                      llvm::SMLoc loc);
   Expr *asyncOf(Expr *checked);
   Expr *toDouble(Expr *number);
   Expr *checkLoosely(CallExpr *call);
@@ -65,8 +66,8 @@ private:
   bool keyOptionsRead(SyncCall &sync, bool priv, KeyInput &input);
   bool keyDetailsRead(llvm::StringMap<Expr *> &options, KeyInput &input);
   Expr *reportUnknownFunction(CallExpr *call, llvm::StringRef shown, llvm::SMLoc loc);
-  bool optionsReadAt(SyncCall &sync, size_t i, llvm::ArrayRef<llvm::StringRef> allowed);
-  Expr *provenNumber(Expr *arg, int64_t lo, std::optional<int64_t> hi, llvm::StringRef what);
+  bool optionsReadAt(SyncCall &sync, size_t index, llvm::ArrayRef<llvm::StringRef> allowed);
+  Expr *provenNumber(Expr *arg, int64_t low, std::optional<int64_t> high, llvm::StringRef what);
   Expr *checkCreateHash(SyncCall &sync);
   Expr *checkCreateHmac(SyncCall &sync);
   Expr *checkHashOnce(SyncCall &sync);

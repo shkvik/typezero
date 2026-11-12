@@ -9,8 +9,8 @@ const Type *SemanticTypes::awaitedType(const Type *type) {
   return AsyncChecker::awaitedType(type);
 }
 
-bool SemanticTypes::copiesIntoRecord(const Type *from, const Type *to) {
-  return TypeRelations::copiesIntoRecord(from, to);
+bool SemanticTypes::isCopyingIntoRecord(const Type *from, const Type *to) {
+  return TypeRelations::isCopyingIntoRecord(from, to);
 }
 
 bool SemanticTypes::isImplicitlyConvertible(const Type *from, const Type *to) {

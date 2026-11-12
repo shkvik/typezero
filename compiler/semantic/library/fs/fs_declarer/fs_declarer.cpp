@@ -16,7 +16,7 @@ FsDeclarer::FsDeclarer(SemanticState &owner, SemanticParts &all)
   this->argumentChecker = &all.argumentChecker;
 }
 
-std::optional<int> FsDeclarer::fileKind(llvm::StringRef method) {
+std::optional<int> FsDeclarer::fileKind(llvm::StringRef method) const {
   if (method == "isFile") {
     return 0100000;
   }
@@ -46,28 +46,28 @@ void FsDeclarer::declareFsClasses() {
   auto declare = [&](llvm::StringRef name,
                      llvm::ArrayRef<std::pair<llvm::StringRef, const Type *>> fields,
                      size_t privateFrom) {
-    auto *cls = this->state.getAst().make<ClassDecl>(llvm::SMLoc(), name);
-    cls->origin = ClassOrigin::BUILTIN;
-    cls->stage = ClassStage::RESOLVED;
-    cls->declared = true;
-    this->state.getClassStore().addClass(cls);
-    Type *type = Type::classType(name, cls);
-    cls->type = type;
-    std::vector<Field> typeFields;
+    auto *classDecl = this->state.getAst().make<ClassDecl>(llvm::SMLoc(), name);
+    classDecl->origin = ClassOrigin::BUILTIN;
+    classDecl->stage = ClassStage::RESOLVED;
+    classDecl->declared = true;
+    this->state.getClassStore().addClass(classDecl);
+    auto *type = Type::classType(name, classDecl);
+    classDecl->type = type;
+    auto typeFields = std::vector<Field>();
     for (const auto &[fieldName, fieldType] : fields) {
-      ClassField f;
-      f.name = fieldName;
-      f.resolved = fieldType;
-      f.access = cls->fields.size() < privateFrom ? Access::Public : Access::Private;
-      cls->fields.push_back(f);
+      ClassField field;
+      field.name = fieldName;
+      field.resolved = fieldType;
+      field.access = classDecl->fields.size() < privateFrom ? Access::Public : Access::Private;
+      classDecl->fields.push_back(field);
       typeFields.push_back({fieldName.str(), fieldType, false});
     }
     type->defineFields(std::move(typeFields));
 
-    return cls;
+    return classDecl;
   };
-  const Type *d = Type::doubleTy();
-  const Type *i = Type::intTy();
+  const auto *d = Type::doubleTy();
+  const auto *i = Type::intTy();
   ClassDecl *stats = declare("Stats",
                              {{"dev", i},
                               {"mode", i},
@@ -92,9 +92,9 @@ void FsDeclarer::declareFsClasses() {
   this->state.getFileSystemStore().rememberDirentClass(dirent);
 }
 
-Expr *FsDeclarer::checkStatsDate(MemberExpr *member, ClassDecl *cls) {
+Expr *FsDeclarer::checkStatsDate(MemberExpr *member, ClassDecl *classDecl) {
   static const llvm::StringLiteral dates[] = {"atime", "mtime", "ctime", "birthtime"};
-  if (!this->state.getFileSystemStore().isStatsClass(cls) ||
+  if (!this->state.getFileSystemStore().isStatsClass(classDecl) ||
       !llvm::is_contained(dates, member->name)) {
     return nullptr;
   }
@@ -103,30 +103,29 @@ Expr *FsDeclarer::checkStatsDate(MemberExpr *member, ClassDecl *cls) {
                                            Type::date());
 }
 
-bool FsDeclarer::isRuntimeClass(const ClassDecl *cls) const {
-  return this->state.getFileSystemStore().isFileClass(cls);
+bool FsDeclarer::isRuntimeClass(const ClassDecl *classDecl) const {
+  return this->state.getFileSystemStore().isFileClass(classDecl);
 }
 
-Expr *FsDeclarer::checkFsClassMethod(CallExpr *call, MemberExpr *member, ClassDecl *cls) {
-  if (!this->state.getFileSystemStore().isFileClass(cls)) {
+Expr *FsDeclarer::checkFsClassMethod(CallExpr *call, MemberExpr *member, ClassDecl *classDecl) {
+  if (!this->state.getFileSystemStore().isFileClass(classDecl)) {
     return nullptr;
   }
-  std::optional<int> kind = FsDeclarer::fileKind(member->name);
+  auto kind = this->fileKind(member->name);
   if (!kind) {
     return nullptr;
   }
   bool isRejected = this->callChecker->rejectSpread(call);
-  ArgumentChecker::ResultArityMatches arity =
-      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 0);
+  auto arity = isRejected ? ok(call) : this->argumentChecker->checkArity(call, 0, 0);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
   if (isRejected || arity.isErr()) {
     return call;
   }
-  auto *lit = this->state.getAst().make<IntLitExpr>(member->loc(), uint64_t(*kind));
-  lit->type = Type::intTy();
-  call->args = {lit};
+  auto *literal = this->state.getAst().make<IntLitExpr>(member->loc(), uint64_t(*kind));
+  literal->type = Type::intTy();
+  call->args = {literal};
   call->target = BuiltinCall{.builtin = Builtin::FsIsKind};
   call->type = Type::boolTy();
   member->type = Type::function({}, 0, false, Type::boolTy());

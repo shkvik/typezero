@@ -18,7 +18,7 @@ public:
 
   Expr *checkRuntimeMember(MemberExpr *member);
   Expr *checkRuntimeMethod(CallExpr *call, MemberExpr *member, const Type *expected);
-  const Type *checkRuntimeTarget(MemberExpr *member, bool compound);
+  const Type *checkRuntimeTarget(MemberExpr *member);
 
 private:
   Expr *checkArgsLoosely(CallExpr *call);

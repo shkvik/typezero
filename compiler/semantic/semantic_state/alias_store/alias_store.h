@@ -48,7 +48,7 @@ public:
   llvm::SMLoc getAliasUse() const;
   void rememberBuiltinAlias(TypeAliasDecl *alias);
   TypeAliasDecl *findBuiltinAlias(llvm::StringRef name) const;
-  void rememberDescriptorOrigin(const Type *type, const Type *args, const Type *ret);
+  void rememberDescriptorOrigin(const Type *type, const Type *args, const Type *returnType);
   const DescriptorOrigin *findDescriptorOrigin(const Type *type) const;
 
 private:

@@ -59,7 +59,7 @@ std::string ErrorTextEventName::unknown(llvm::StringRef method) {
 }
 
 std::string ErrorTextEventName::list(const Type *events) {
-  std::string out;
+  auto out = std::string();
   llvm::ArrayRef<Field> fields = events->fields();
   for (size_t i = 0; i < fields.size(); ++i) {
     out += (i == 0 ? "" : i + 1 == fields.size() ? " and " : ", ") + ("'" + fields[i].name + "'");

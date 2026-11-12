@@ -26,6 +26,13 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+constexpr size_t kMaxShownStatement = 60;
+constexpr llvm::StringLiteral kPromisePlaceholder = "p";
+
+}
+
 AsyncChecker::AsyncChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->scopes = &all.scopes;
@@ -45,33 +52,45 @@ AsyncChecker::AsyncChecker(SemanticState &owner, SemanticParts &all)
   this->generatorChecker = &all.generatorChecker;
 }
 
-const Type *AsyncChecker::awaited(const Type *type) {
+const Type *AsyncChecker::withoutPromise(const Type *type) const {
   return type->isPromise() ? type->promised() : type;
 }
 
-std::string AsyncChecker::statementText(llvm::SMLoc at) {
+std::string AsyncChecker::statementText(llvm::SMLoc at) const {
   if (!at.isValid()) {
     return "";
   }
   const char *start = at.getPointer();
   const char *end = start;
   int depth = 0;
-  for (; *end && *end != '\n' && *end != '\r'; ++end) {
-    if (*end == '(' || *end == '[' || *end == '{') {
-      ++depth;
-    } else if (*end == ')' || *end == ']' || *end == '}') {
-      --depth;
-    } else if (depth == 0 && (*end == ';' || (end[0] == '/' && end[1] == '/'))) {
+  for (; *end != '\0' && *end != '\n' && *end != '\r'; ++end) {
+    bool isComment = end[0] == '/' && end[1] == '/';
+    if (depth == 0 && (*end == ';' || isComment)) {
       break;
     }
+    depth += this->depthChange(*end);
   }
   llvm::StringRef text = llvm::StringRef(start, size_t(end - start)).rtrim();
+  if (depth != 0 || text.size() > kMaxShownStatement) {
+    return "";
+  }
 
-  return depth == 0 && text.size() <= 60 ? text.str() : "";
+  return text.str();
+}
+
+int AsyncChecker::depthChange(char symbol) const {
+  if (symbol == '(' || symbol == '[' || symbol == '{') {
+    return 1;
+  }
+  if (symbol == ')' || symbol == ']' || symbol == '}') {
+    return -1;
+  }
+
+  return 0;
 }
 
 AsyncChecker::ResultPromiseTypeRef AsyncChecker::resolvePromiseType(const TypeRef &ref) {
-  const TypeNameInfo *builtin = TypeNameTable::find(ref.name);
+  const auto *builtin = TypeNameTable::find(ref.name);
   bool isPromiseName = builtin != nullptr && builtin->form.is<PromiseTypeName>();
   if (!isPromiseName) {
     return err(AsyncCheckerResolvePromiseTypeError{
@@ -80,24 +99,25 @@ AsyncChecker::ResultPromiseTypeRef AsyncChecker::resolvePromiseType(const TypeRe
     });
   }
   if (ref.args.size() != 1) {
-    std::string message = ErrorTextPromiseType::typeArgs(ref.name);
+    auto message = ErrorTextPromiseType::typeArgs(ref.name);
 
     return err(AsyncCheckerResolvePromiseTypeError{
         .code = AsyncCheckerResolvePromiseTypeErrorCode::WRONG_TYPE_ARGUMENTS,
         .message = message,
     });
   }
-  const Type *value = this->typeResolver->resolveType(ref.args[0], true);
-  const Type *promise = Type::promise(AsyncChecker::awaited(value));
+  const auto *written = this->typeResolver->resolveTypeOrVoid(ref.args[0]);
+  const auto *value = this->withoutPromise(written);
+  const auto *promise = Type::promise(value);
 
   return ok(promise);
 }
 
-AsyncChecker::ResultReturnsPromise AsyncChecker::promiseDeclared(const FunctionDecl *fn,
-                                                                 const Type *declared) {
-  bool isPlain = fn->isAsync && !fn->isGenerator && !declared->isError() && !declared->isPromise();
-  if (isPlain) {
-    std::string message = ErrorTextPromiseType::notPromise(declared->name());
+AsyncChecker::ResultReturnsPromise AsyncChecker::promiseDeclared(const FunctionDecl *functionDecl,
+                                                                 const Type *declared) const {
+  bool isPlainAsync = functionDecl->isAsync && !functionDecl->isGenerator;
+  if (isPlainAsync && !declared->isError() && !declared->isPromise()) {
+    auto message = ErrorTextPromiseType::notPromise(declared->name());
 
     return err(AsyncCheckerPromiseDeclaredError{
         .code = AsyncCheckerPromiseDeclaredErrorCode::NOT_A_PROMISE,
@@ -108,22 +128,23 @@ AsyncChecker::ResultReturnsPromise AsyncChecker::promiseDeclared(const FunctionD
   return ok(declared);
 }
 
-const Type *AsyncChecker::asyncReturnType(const FunctionDecl *fn, const Type *declared) {
-  ResultReturnsPromise promise = AsyncChecker::promiseDeclared(fn, declared);
+const Type *AsyncChecker::asyncReturnType(const FunctionDecl *functionDecl, const Type *declared) {
+  auto promise = this->promiseDeclared(functionDecl, declared);
   if (promise.isOk()) {
     return declared;
   }
-  this->state.getDiagnostics().error(fn->returnType->loc, promise.error().message);
+  this->state.getDiagnostics().error(functionDecl->returnType->loc, promise.error().message);
 
   return Type::promise(declared);
 }
 
-AsyncChecker::ResultReturnsOneType AsyncChecker::returnsJoin(const Type *type, const Type *t,
-                                                             const FuncSymbol *fn) {
-  const Type *common = type ? TypeRelations::unify(type, t) : t;
-  if (!common || common->isError()) {
-    std::string name = ErrorTextFunctionName::quoted(fn->name);
-    std::string message = ErrorTextAsyncReturns::differ(name, t->name(), type->name());
+AsyncChecker::ResultReturnsOneType AsyncChecker::returnsJoin(const Type *type,
+                                                             const Type *candidate,
+                                                             const FuncSymbol *function) const {
+  const Type *common = type != nullptr ? this->typeRelations->unify(type, candidate) : candidate;
+  if (common == nullptr || common->isError()) {
+    auto name = ErrorTextFunctionName::quoted(function->name);
+    auto message = ErrorTextAsyncReturns::differ(name, candidate->name(), type->name());
 
     return err(AsyncCheckerReturnsJoinError{
         .code = AsyncCheckerReturnsJoinErrorCode::TYPES_DIFFER,
@@ -134,52 +155,76 @@ AsyncChecker::ResultReturnsOneType AsyncChecker::returnsJoin(const Type *type, c
   return ok(common);
 }
 
-const Type *AsyncChecker::inferAsyncType(const FuncSymbol *fn, llvm::ArrayRef<ReturnStmt *> returns,
-                                         bool fallsOff, bool report) {
+const Type *AsyncChecker::inferAsyncType(const FuncSymbol *function,
+                                         llvm::ArrayRef<ReturnStmt *> returns, bool isFallingOff,
+                                         ReturnErrors errors) {
+  auto sorted = this->sortedReturns(returns);
   const Type *type = nullptr;
-  bool isUndefined = fallsOff;
-  bool isUnknown = false;
-  for (ReturnStmt *ret : returns) {
-    if (!ret->value) {
-      isUndefined = true;
-      continue;
+  for (const ReturnStmt *returnStmt : sorted.valued) {
+    const auto *candidate = this->withoutPromise(returnStmt->value->type);
+    auto joined = this->returnsJoin(type, candidate, function);
+    if (joined.isErr() && errors == ReturnErrors::REPORTED) {
+      this->state.getDiagnostics().error(returnStmt->value->loc(), joined.error().message);
     }
-    const Type *t = AsyncChecker::awaited(ret->value->type);
-    if (t->isError()) {
-      isUnknown = true;
-      continue;
-    }
-    if (t->isUndefined() || t->isVoid()) {
-      isUndefined = true;
-      continue;
-    }
-    ResultReturnsOneType joined = AsyncChecker::returnsJoin(type, t, fn);
     if (joined.isErr()) {
-      if (report) {
-        this->state.getDiagnostics().error(ret->value->loc(), joined.error().message);
-      }
       return Type::error();
     }
     type = joined.value();
   }
-  if (!type) {
-    if (isUnknown) {
-      return report ? Type::error() : nullptr;
-    }
+  if (type != nullptr) {
+    bool isOptional = isFallingOff || sorted.hasNothing;
+    const Type *value = isOptional ? Type::optional(type) : type;
+
+    return Type::promise(value);
+  }
+  if (!sorted.hasUnknown) {
     return Type::promise(Type::voidTy());
   }
-  if (isUndefined) {
-    type = Type::optional(type);
-  }
 
-  return Type::promise(type);
+  return errors == ReturnErrors::REPORTED ? Type::error() : nullptr;
 }
 
-AsyncChecker::ResultPromiseMatches
-AsyncChecker::promiseMatches(const Type *given, const Type *value, const FuncSymbol *fn) {
+AsyncChecker::SortedReturns
+AsyncChecker::sortedReturns(llvm::ArrayRef<ReturnStmt *> returns) const {
+  auto sorted = SortedReturns{.valued = {}, .hasNothing = false, .hasUnknown = false};
+  for (const ReturnStmt *returnStmt : returns) {
+    switch (this->returnedKind(returnStmt)) {
+      case Returned::NOTHING:
+        sorted.hasNothing = true;
+        break;
+      case Returned::UNKNOWN:
+        sorted.hasUnknown = true;
+        break;
+      case Returned::VALUE:
+        sorted.valued.push_back(returnStmt);
+        break;
+    }
+  }
+
+  return sorted;
+}
+
+AsyncChecker::Returned AsyncChecker::returnedKind(const ReturnStmt *returnStmt) const {
+  if (returnStmt->value == nullptr) {
+    return Returned::NOTHING;
+  }
+  const auto *settled = this->withoutPromise(returnStmt->value->type);
+  if (settled->isError()) {
+    return Returned::UNKNOWN;
+  }
+  if (settled->isUndefined() || settled->isVoid()) {
+    return Returned::NOTHING;
+  }
+
+  return Returned::VALUE;
+}
+
+AsyncChecker::ResultPromiseMatches AsyncChecker::promiseMatches(const Type *given,
+                                                                const Type *value,
+                                                                const FuncSymbol *function) const {
   if (given != value && !given->isNever()) {
-    std::string name = ErrorTextFunctionName::quoted(fn->name);
-    std::string message = ErrorTextAsyncReturns::promise(given->name(), name, value->name());
+    auto name = ErrorTextFunctionName::quoted(function->name);
+    auto message = ErrorTextAsyncReturns::promise(given->name(), name, value->name());
 
     return err(AsyncCheckerPromiseMatchesError{
         .code = AsyncCheckerPromiseMatchesErrorCode::OTHER_PROMISE_TYPE,
@@ -190,48 +235,43 @@ AsyncChecker::promiseMatches(const Type *given, const Type *value, const FuncSym
   return ok(given);
 }
 
-void AsyncChecker::finishAsyncReturns(FuncSymbol *fn, llvm::ArrayRef<ReturnStmt *> returns) {
-  const Type *value =
-      fn->getKnownReturnType()->isPromise() ? fn->getKnownReturnType()->promised() : nullptr;
-  if (!value || value->isError()) {
+void AsyncChecker::finishAsyncReturns(FuncSymbol *function, llvm::ArrayRef<ReturnStmt *> returns) {
+  const Type *returned = function->getKnownReturnType();
+  if (!returned->isPromise()) {
     return;
   }
-  for (ReturnStmt *ret : returns) {
-    if (!ret->value || ret->value->type->isError()) {
-      continue;
-    }
-    const Type *t = ret->value->type;
-    if (t->isPromise()) {
-      ResultPromiseMatches matches = AsyncChecker::promiseMatches(t->promised(), value, fn);
-      if (matches.isErr()) {
-        this->state.getDiagnostics().error(ret->value->loc(), matches.error().message);
-      }
-      continue;
-    }
-    if (!value->isVoid()) {
-      ret->value = this->typeRelations->convert(ret->value, value);
+  const Type *value = returned->promised();
+  if (value == nullptr || value->isError()) {
+    return;
+  }
+  for (ReturnStmt *returnStmt : returns) {
+    bool isTyped = returnStmt->value != nullptr && !returnStmt->value->type->isError();
+    if (isTyped) {
+      this->finishAsyncReturn(function, returnStmt, value);
     }
   }
 }
 
-AsyncChecker::ResultInAsyncContext AsyncChecker::asyncContext(bool loop) const {
-  FuncSymbol *fn = this->state.getFunctionStack().getCurrentFunction();
-  bool isPlain = fn && !(fn->decl && fn->decl->isAsync);
-  if (isPlain && loop) {
-    std::string message = ErrorTextAsyncContext::forAwait();
-
-    return err(AsyncCheckerAsyncContextError{
-        .code = AsyncCheckerAsyncContextErrorCode::FOR_AWAIT_NOT_ASYNC,
-        .message = message,
-    });
+void AsyncChecker::finishAsyncReturn(const FuncSymbol *function, ReturnStmt *returnStmt,
+                                     const Type *value) {
+  const Type *type = returnStmt->value->type;
+  if (type->isPromise()) {
+    auto matches = this->promiseMatches(type->promised(), value, function);
+    if (matches.isErr()) {
+      this->state.getDiagnostics().error(returnStmt->value->loc(), matches.error().message);
+    }
+    return;
   }
-  if (isPlain) {
-    FunctionDecl *decl = fn->decl;
-    std::string hint = decl && decl->isArrow()       ? ErrorTextAsyncContext::arrowHint()
-                       : decl && decl->cls()         ? ErrorTextAsyncContext::methodHint(decl->name)
-                       : decl && !decl->name.empty() ? ErrorTextAsyncContext::namedHint(decl->name)
-                                                     : ErrorTextAsyncContext::plainHint();
-    std::string message = ErrorTextAsyncContext::await(hint);
+  if (!value->isVoid()) {
+    returnStmt->value = this->typeRelations->convert(returnStmt->value, value);
+  }
+}
+
+AsyncChecker::ResultInAsyncContext AsyncChecker::awaitContext() const {
+  auto *function = this->state.getFunctionStack().getCurrentFunction();
+  if (this->isPlainFunction(function)) {
+    auto hint = this->asyncHint(function->decl);
+    auto message = ErrorTextAsyncContext::await(hint);
 
     return err(AsyncCheckerAsyncContextError{
         .code = AsyncCheckerAsyncContextErrorCode::AWAIT_NOT_ASYNC,
@@ -239,13 +279,63 @@ AsyncChecker::ResultInAsyncContext AsyncChecker::asyncContext(bool loop) const {
     });
   }
 
-  return ok(fn);
+  return ok(function);
 }
 
-AsyncChecker::ResultAwaitedOneType AsyncChecker::awaitable(const Type *type) {
-  const Type *result = AsyncChecker::awaitedType(type);
-  if (!result) {
-    std::string message = ErrorTextAwaited::mixed(type->name());
+AsyncChecker::ResultInAsyncContext AsyncChecker::forAwaitContext() const {
+  auto *function = this->state.getFunctionStack().getCurrentFunction();
+  if (this->isPlainFunction(function)) {
+    auto message = ErrorTextAsyncContext::forAwait();
+
+    return err(AsyncCheckerAsyncContextError{
+        .code = AsyncCheckerAsyncContextErrorCode::FOR_AWAIT_NOT_ASYNC,
+        .message = message,
+    });
+  }
+
+  return ok(function);
+}
+
+bool AsyncChecker::isPlainFunction(const FuncSymbol *function) const {
+  if (function == nullptr) {
+    return false;
+  }
+  bool isAsync = function->decl != nullptr && function->decl->isAsync;
+
+  return !isAsync;
+}
+
+std::string AsyncChecker::asyncHint(const FunctionDecl *functionDecl) const {
+  if (functionDecl == nullptr) {
+    return ErrorTextAsyncContext::plainHint();
+  }
+  if (functionDecl->isArrow()) {
+    return ErrorTextAsyncContext::arrowHint();
+  }
+  if (functionDecl->cls() != nullptr) {
+    return ErrorTextAsyncContext::methodHint(functionDecl->name);
+  }
+  if (!functionDecl->name.empty()) {
+    return ErrorTextAsyncContext::namedHint(functionDecl->name);
+  }
+
+  return ErrorTextAsyncContext::plainHint();
+}
+
+void AsyncChecker::walkContext(ResultInAsyncContext context, llvm::SMLoc loc) {
+  if (context.isErr()) {
+    this->state.getDiagnostics().error(loc, context.error().message);
+    return;
+  }
+  if (context.value() == nullptr) {
+    this->state.getInventoryStore().markTopLevelAwait();
+  }
+}
+
+AsyncChecker::ResultAwaitedOneType AsyncChecker::awaitable(const Type *type) const {
+  const auto *result = AsyncChecker::awaitedType(type);
+  if (result == nullptr) {
+    auto message = ErrorTextAwaited::mixed(type->name());
 
     return err(AsyncCheckerAwaitableError{
         .code = AsyncCheckerAwaitableErrorCode::MIXED_PROMISE,
@@ -259,31 +349,34 @@ AsyncChecker::ResultAwaitedOneType AsyncChecker::awaitable(const Type *type) {
 Expr *AsyncChecker::checkAwait(AwaitExpr *await, const Type *expected) {
   await->type = Type::error();
   this->state.getInventoryStore().markUsesAsync();
-  ResultInAsyncContext context = this->asyncContext(false);
-  if (context.isErr()) {
-    this->state.getDiagnostics().error(await->loc(), context.error().message);
-  } else if (!context.value()) {
-    this->state.getInventoryStore().markTopLevelAwait();
-  }
-  const Type *hint = nullptr;
-  if (expected && !expected->isError() && !expected->isVoid() &&
-      (isa<NewExpr>(await->value) || isa<CallExpr>(await->value))) {
-    hint = Type::promise(expected);
-  }
+  auto context = this->awaitContext();
+  this->walkContext(context, await->loc());
+  const Type *hint = this->promiseHint(await->value, expected);
   await->value = this->exprChecker->checkExpr(await->value, hint);
   const Type *type = await->value->type;
   this->flowChecker->calledFunction();
   if (type->isError()) {
     return await;
   }
-  ResultAwaitedOneType result = AsyncChecker::awaitable(type);
+  auto result = this->awaitable(type);
   if (result.isErr()) {
     this->state.getDiagnostics().error(await->value->loc(), result.error().message);
+
     return await;
   }
   await->type = result.value();
 
   return await;
+}
+
+const Type *AsyncChecker::promiseHint(const Expr *value, const Type *expected) const {
+  bool isExpected = expected != nullptr && !expected->isError() && !expected->isVoid();
+  bool isMaking = isa<NewExpr>(value) || isa<CallExpr>(value);
+  if (isExpected && isMaking) {
+    return Type::promise(expected);
+  }
+
+  return nullptr;
 }
 
 const Type *AsyncChecker::awaitedType(const Type *type) {
@@ -293,8 +386,8 @@ const Type *AsyncChecker::awaitedType(const Type *type) {
     optionals += 1;
     inner = inner->inner();
   }
-  const Type *awaited = AsyncChecker::awaitedPlain(inner);
-  for (int i = 0; i < optionals; ++i) {
+  const auto *awaited = AsyncChecker::awaitedPlain(inner);
+  for (int index = 0; index < optionals; ++index) {
     if (awaited == nullptr || awaited->isVoid()) {
       return awaited;
     }
@@ -308,15 +401,14 @@ const Type *AsyncChecker::awaitedPlain(const Type *type) {
   if (type->isPromise()) {
     return type->promised();
   }
-  if (!type->isUnion() ||
-      llvm::none_of(type->members(), [](const Type *m) { return m->isPromise(); })) {
+  if (!type->isUnion() || !AsyncChecker::hasPromiseMember(type)) {
     return type;
   }
   const Type *result = nullptr;
-  for (const Type *m : type->members()) {
-    const Type *t = m->isPromise() ? m->promised() : m;
-    result = result ? LiteralTypes::unionUnify(result, t) : t;
-    if (!result || result->isError()) {
+  for (const Type *member : type->members()) {
+    const Type *candidate = member->isPromise() ? member->promised() : member;
+    result = result != nullptr ? LiteralTypes::unionUnify(result, candidate) : candidate;
+    if (result == nullptr || result->isError()) {
       return nullptr;
     }
   }
@@ -324,47 +416,64 @@ const Type *AsyncChecker::awaitedPlain(const Type *type) {
   return result;
 }
 
+bool AsyncChecker::hasPromiseMember(const Type *type) {
+  for (const Type *member : type->members()) {
+    if (member->isPromise()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 AsyncChecker::ResultAwaitedElement AsyncChecker::awaitedElement(const Type *type) const {
-  const Type *element = this->generatorChecker->asyncIteratedType(type);
-  bool isOptional = !element && type->isOptional() &&
-                    this->generatorChecker->asyncIteratedType(type->inner()) != nullptr;
-  if (isOptional) {
-    std::string message = ErrorTextAwaitedElement::undefined(type->name());
+  const auto *element = this->generatorChecker->asyncIteratedType(type);
+  if (element != nullptr) {
+    return ok(element);
+  }
+  if (this->isOptionalAsyncIterable(type)) {
+    auto message = ErrorTextAwaitedElement::undefined(type->name());
 
     return err(AsyncCheckerAwaitedElementError{
         .code = AsyncCheckerAwaitedElementErrorCode::MAY_BE_UNDEFINED,
         .message = message,
     });
   }
-  if (!element && type->isRecord()) {
-    std::string message = ErrorTextAwaitedElement::record();
+  if (type->isRecord()) {
+    auto message = ErrorTextAwaitedElement::record();
 
     return err(AsyncCheckerAwaitedElementError{
         .code = AsyncCheckerAwaitedElementErrorCode::RECORD_NOT_ITERABLE,
         .message = message,
     });
   }
-  if (!element && !type->isError()) {
-    std::string message = ErrorTextAwaitedElement::notAsync(type->name());
+  if (!type->isError()) {
+    auto message = ErrorTextAwaitedElement::notAsync(type->name());
 
     return err(AsyncCheckerAwaitedElementError{
         .code = AsyncCheckerAwaitedElementErrorCode::NOT_ASYNC_ITERABLE,
         .message = message,
     });
   }
-  if (!element) {
-    return err(AsyncCheckerAwaitedElementError{
-        .code = AsyncCheckerAwaitedElementErrorCode::ALREADY_REPORTED,
-        .message = "",
-    });
-  }
 
-  return ok(element);
+  return err(AsyncCheckerAwaitedElementError{
+      .code = AsyncCheckerAwaitedElementErrorCode::ALREADY_REPORTED,
+      .message = "",
+  });
 }
 
-AsyncChecker::ResultBindingUntyped AsyncChecker::bindingType(const VarDeclarator &binding) {
-  if (binding.typeAnn) {
-    std::string message = ErrorTextBindingType::annotated();
+bool AsyncChecker::isOptionalAsyncIterable(const Type *type) const {
+  if (!type->isOptional()) {
+    return false;
+  }
+  const auto *element = this->generatorChecker->asyncIteratedType(type->inner());
+
+  return element != nullptr;
+}
+
+AsyncChecker::ResultBindingUntyped AsyncChecker::bindingType(const VarDeclarator &binding) const {
+  if (binding.typeAnn.has_value()) {
+    auto message = ErrorTextBindingType::annotated();
 
     return err(AsyncCheckerBindingTypeError{
         .code = AsyncCheckerBindingTypeErrorCode::HAS_TYPE_ANNOTATION,
@@ -376,11 +485,12 @@ AsyncChecker::ResultBindingUntyped AsyncChecker::bindingType(const VarDeclarator
 }
 
 AsyncChecker::ResultBindingPattern AsyncChecker::bindingShape(const VarDeclarator &binding,
-                                                              const Type *element) {
-  bool isFitting = !binding.destructured() || binding.objectPattern() || element->isArray() ||
-                   element->isTuple() || element->isMatch() || element->isError();
+                                                              const Type *element) const {
+  bool isListLike =
+      element->isArray() || element->isTuple() || element->isMatch() || element->isError();
+  bool isFitting = !binding.destructured() || binding.objectPattern() || isListLike;
   if (!isFitting) {
-    std::string message = ErrorTextBindingShape::notArray(element->name());
+    auto message = ErrorTextBindingShape::notArray(element->name());
 
     return err(AsyncCheckerBindingShapeError{
         .code = AsyncCheckerBindingShapeErrorCode::NOT_AN_ARRAY,
@@ -391,104 +501,125 @@ AsyncChecker::ResultBindingPattern AsyncChecker::bindingShape(const VarDeclarato
   return ok(element);
 }
 
-// TODO: говнокод
 void AsyncChecker::walkForAwait(ForOfStmt *stmt) {
   this->state.getInventoryStore().markUsesAsync();
-  ResultInAsyncContext context = this->asyncContext(true);
-  if (context.isErr()) {
-    this->state.getDiagnostics().error(stmt->loc(), context.error().message);
-  } else if (!context.value()) {
-    this->state.getInventoryStore().markTopLevelAwait();
+  auto context = this->forAwaitContext();
+  this->walkContext(context, stmt->loc());
+  stmt->iterable = this->checkedIterable(stmt->iterable);
+  const Type *element = this->loopElement(stmt->iterable);
+  const Type *bound = this->boundElement(stmt->binding, element);
+  this->walkAwaitBody(stmt, bound);
+}
+
+Expr *AsyncChecker::checkedIterable(Expr *iterable) {
+  this->iteratorMethods->markFused(iterable);
+  auto *checked = this->exprChecker->checkExpr(iterable);
+  auto *apparent = this->genericChecker->apparent(checked);
+  auto *joined = this->genericWidening->joined(apparent);
+  auto *source = this->asyncSource(joined);
+  if (source->type->isMatch()) {
+    return this->matchChecker->matchItems(source);
   }
-  this->iteratorMethods->markFused(stmt->iterable);
-  stmt->iterable = this->genericChecker->apparent(this->exprChecker->checkExpr(stmt->iterable));
-  stmt->iterable = this->genericWidening->joined(stmt->iterable);
-  if (Expr *iterator = this->iterableChecker->asyncUserIterator(stmt->iterable)) {
-    stmt->iterable = iterator;
-  } else {
-    stmt->iterable = this->dictChecker->iterableOf(stmt->iterable);
+
+  return source;
+}
+
+Expr *AsyncChecker::asyncSource(Expr *iterable) {
+  auto *iterator = this->iterableChecker->asyncUserIterator(iterable);
+  if (iterator != nullptr) {
+    return iterator;
   }
-  if (stmt->iterable->type->isMatch()) {
-    stmt->iterable = this->matchChecker->matchItems(stmt->iterable);
-  }
-  const Type *type = stmt->iterable->type;
-  const Type *element = Type::error();
-  ResultAwaitedElement awaited = this->awaitedElement(type);
-  bool isReported = awaited.isErr() &&
-                    awaited.error().code == AsyncCheckerAwaitedElementErrorCode::ALREADY_REPORTED;
+
+  return this->dictChecker->iterableOf(iterable);
+}
+
+const Type *AsyncChecker::loopElement(const Expr *iterable) {
+  auto awaited = this->awaitedElement(iterable->type);
   if (awaited.isOk()) {
-    element = awaited.value();
-  } else if (!isReported) {
-    this->state.getDiagnostics().error(stmt->iterable->loc(), awaited.error().message);
+    this->walkSendsNothing(iterable);
+
+    return awaited.value();
   }
-  if (awaited.isOk() && type->isIterator()) {
-    std::string label = ErrorTextAsyncContext::awaitLoop();
-    GeneratorChecker::ResultNextNeedsNoValue nothing =
-        this->generatorChecker->checkSendsNothing(type, label);
-    if (nothing.isErr()) {
-      this->state.getDiagnostics().error(stmt->iterable->loc(), nothing.error().message);
-    }
+  if (awaited.error().code != AsyncCheckerAwaitedElementErrorCode::ALREADY_REPORTED) {
+    this->state.getDiagnostics().error(iterable->loc(), awaited.error().message);
   }
-  ResultBindingUntyped typed = AsyncChecker::bindingType(stmt->binding);
+
+  return Type::error();
+}
+
+void AsyncChecker::walkSendsNothing(const Expr *iterable) {
+  const Type *type = iterable->type;
+  if (!type->isIterator()) {
+    return;
+  }
+  auto label = ErrorTextAsyncContext::awaitLoop();
+  auto nothing = this->generatorChecker->checkSendsNothing(type, label);
+  if (nothing.isErr()) {
+    this->state.getDiagnostics().error(iterable->loc(), nothing.error().message);
+  }
+}
+
+const Type *AsyncChecker::boundElement(const VarDeclarator &binding, const Type *element) {
+  auto typed = this->bindingType(binding);
   if (typed.isErr()) {
-    this->state.getDiagnostics().error(stmt->binding.typeAnn->loc, typed.error().message);
+    this->state.getDiagnostics().error(binding.typeAnn->loc, typed.error().message);
   }
-  ResultBindingPattern shape = AsyncChecker::bindingShape(stmt->binding, element);
+  auto shape = this->bindingShape(binding, element);
   if (shape.isErr()) {
-    this->state.getDiagnostics().error(stmt->binding.loc, shape.error().message);
-    element = Type::error();
+    this->state.getDiagnostics().error(binding.loc, shape.error().message);
+
+    return Type::error();
   }
+
+  return element;
+}
+
+void AsyncChecker::walkAwaitBody(ForOfStmt *stmt, const Type *element) {
   this->flowChecker->calledFunction();
-  LoopScan scan = this->loopScanner->scanForOfLoop(stmt);
-  scan.callsFunctions = true;
+  auto scan = this->loopScanner->scanForOfLoop(stmt);
+  scan.isCallingFunctions = true;
   stmt->borrowElements = false;
-  Flow head = this->loopBounds->loopHead(scan, nullptr, false);
+  auto head = this->loopBounds->loopHead(scan);
   this->state.getFlowState().replaceFlow(head);
   this->state.getScopeStack().openScope();
-  stmt->binding.sym =
-      this->scopes->declareVar(stmt->binding.name, stmt->binding.loc, element, stmt->isConst);
-  this->loopChecker->walkLoopBody(stmt->body, true);
+  VarDeclarator &binding = stmt->binding;
+  binding.sym = this->scopes->declareVar(binding.name, binding.loc, element, stmt->isConst);
+  this->loopChecker->walkAwaitLoopBody(stmt->body);
   this->scopes->closeScope();
   this->state.getFlowState().replaceFlow(head);
   this->flowChecker->calledFunction();
 }
 
 AsyncChecker::ResultPromiseHandled
-AsyncChecker::checkDiscardedPromise(const Expr *expr, bool callback, llvm::SMLoc at) {
+AsyncChecker::checkDiscardedPromise(const Expr *expr, bool isCallback, llvm::SMLoc at) {
+  if (isa<AssignExpr>(expr) || this->isTakingElement(expr)) {
+    return ok(expr);
+  }
   const Type *type = expr->type;
-  if (isa<AssignExpr>(expr)) {
-    return ok(expr);
-  }
-  auto *call = dyn_cast<CallExpr>(expr);
-  if (call && (call->builtin() == Builtin::ArrPop || call->builtin() == Builtin::ArrShift ||
-               call->builtin() == Builtin::ArrSplice)) {
-    return ok(expr);
-  }
-  bool isMapped =
-      call && (call->builtin() == Builtin::ArrMap || call->builtin() == Builtin::ArrFlatMap);
-  if (!type->nonOptional()->isPromise() && isMapped) {
-    std::string message = ErrorTextDiscarded::mapped();
+  bool isPromise = type->nonOptional()->isPromise();
+  if (!isPromise && this->isMappingCall(expr)) {
+    auto message = ErrorTextDiscarded::mapped();
 
     return err(AsyncCheckerCheckDiscardedPromiseError{
         .code = AsyncCheckerCheckDiscardedPromiseErrorCode::PROMISES_DROPPED,
         .message = message,
     });
   }
-  if (!type->nonOptional()->isPromise()) {
+  if (!isPromise) {
     return ok(expr);
   }
-  if (callback) {
-    std::string message = ErrorTextDiscarded::callback();
+  if (isCallback) {
+    auto message = ErrorTextDiscarded::callback();
 
     return err(AsyncCheckerCheckDiscardedPromiseError{
         .code = AsyncCheckerCheckDiscardedPromiseErrorCode::CALLBACK_DROPS,
         .message = message,
     });
   }
-  std::string text = AsyncChecker::statementText(at);
-  if (expr->type && expr->type->isPromise() && expr->type->promised()->holdsResults()) {
-    std::string shown = text.empty() ? std::string("p") : text;
-    std::string message = ErrorTextDiscarded::result(shown);
+  auto text = this->statementText(at);
+  if (type->isPromise() && type->promised()->holdsResults()) {
+    std::string shown = text.empty() ? kPromisePlaceholder.str() : text;
+    auto message = ErrorTextDiscarded::result(shown);
 
     return err(AsyncCheckerCheckDiscardedPromiseError{
         .code = AsyncCheckerCheckDiscardedPromiseErrorCode::RESULT_UNCHECKED,
@@ -502,6 +633,27 @@ AsyncChecker::checkDiscardedPromise(const Expr *expr, bool callback, llvm::SMLoc
       .code = AsyncCheckerCheckDiscardedPromiseErrorCode::NOT_AWAITED,
       .message = message,
   });
+}
+
+bool AsyncChecker::isTakingElement(const Expr *expr) const {
+  auto *call = dyn_cast<CallExpr>(expr);
+  if (call == nullptr) {
+    return false;
+  }
+  Builtin builtin = call->builtin();
+
+  return builtin == Builtin::ArrPop || builtin == Builtin::ArrShift ||
+         builtin == Builtin::ArrSplice;
+}
+
+bool AsyncChecker::isMappingCall(const Expr *expr) const {
+  auto *call = dyn_cast<CallExpr>(expr);
+  if (call == nullptr) {
+    return false;
+  }
+  Builtin builtin = call->builtin();
+
+  return builtin == Builtin::ArrMap || builtin == Builtin::ArrFlatMap;
 }
 
 }

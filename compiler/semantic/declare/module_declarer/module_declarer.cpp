@@ -1,4 +1,5 @@
 #include "compiler/semantic/declare/module_declarer/module_declarer.h"
+#include "compiler/program/library/library_module_names/library_module_names.h"
 #include "compiler/semantic/bodies/classes/class_links/class_links.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
@@ -28,33 +29,32 @@ ModuleDeclarer::ModuleDeclarer(SemanticState &owner, SemanticParts &all)
 }
 
 void ModuleDeclarer::useModule(Module *module) {
-  if (module == this->state.getModuleStates().getCurrentModule()) {
+  auto &modules = this->state.getModuleStates();
+  auto &scopes = this->state.getScopeStack();
+  auto *current = modules.getCurrentModule();
+  if (module == current) {
     return;
   }
-  assert(this->state.getScopeStack().isTopLevel() &&
-         this->state.getScopeStack().isTopLevelTypes() && "a file changes only at the top level");
-  if (this->state.getModuleStates().getCurrentModule()) {
-    ModuleState &old = this->state.getModuleStates().getModuleState(
-        this->state.getModuleStates().getCurrentModule());
-    old.values = this->state.getScopeStack().getTopValues();
-    old.types = this->state.getScopeStack().getTopTypes();
+  assert(scopes.isTopLevel() && scopes.isTopLevelTypes() && "a file changes only at the top level");
+  if (current != nullptr) {
+    auto &left = modules.getModuleState(current);
+    left.values = scopes.getTopValues();
+    left.types = scopes.getTopTypes();
   }
-  this->state.getModuleStates().rememberCurrentModule(module);
-  this->state.getScopeStack().replaceTopValues(
-      this->state.getModuleStates().getModuleState(module).values);
-  this->state.getScopeStack().replaceTopTypes(
-      this->state.getModuleStates().getModuleState(module).types);
+  modules.rememberCurrentModule(module);
+  scopes.replaceTopValues(modules.getModuleState(module).values);
+  scopes.replaceTopTypes(modules.getModuleState(module).types);
 }
 
 void ModuleDeclarer::declareModules(SourceFile &program) {
   this->state.getModuleStates().prepareModules(int(program.modules.size()));
   for (Module *module : program.modules) {
-    ModuleState &here = this->state.getModuleStates().getModuleState(module);
+    auto &here = this->state.getModuleStates().getModuleState(module);
     for (Stmt *item : module->file.items) {
-      ModuleDeclarer::addDeclaredItem(here, item);
+      this->addDeclaredItem(here, item);
     }
   }
-  std::vector<std::vector<Stmt *>> types = this->declareModuleTypes(program);
+  auto types = this->declareModuleTypes(program);
   for (Module *module : program.modules) {
     this->importBinder->resolveImports(module);
   }
@@ -66,7 +66,7 @@ void ModuleDeclarer::declareModules(SourceFile &program) {
     this->useModule(module);
     this->typeDeclarer->resolveTypes(types[module->order]);
   }
-  std::vector<FunctionDecl *> functions;
+  auto functions = std::vector<FunctionDecl *>();
   for (Module *module : program.modules) {
     this->useModule(module);
     this->declareModuleFunctions(module, functions);
@@ -82,43 +82,43 @@ void ModuleDeclarer::declareModules(SourceFile &program) {
   this->state.getReturnInference().rememberDeclaredFunctions(std::move(functions));
 }
 
-void ModuleDeclarer::addDeclaredItem(ModuleState &here, const Stmt *item) {
-  auto *decl = dyn_cast<VarDeclStmt>(item);
-  if (decl != nullptr) {
-    for (const VarDeclarator &d : decl->decls) {
-      ModuleDeclarer::addDeclared(here, d.name, d.loc);
-      here.topLevelNames.insert(d.name);
+void ModuleDeclarer::addDeclaredItem(ModuleState &here, const Stmt *item) const {
+  auto *varDecl = dyn_cast<VarDeclStmt>(item);
+  if (varDecl != nullptr) {
+    for (const VarDeclarator &declarator : varDecl->decls) {
+      this->addDeclared(here, declarator.name, declarator.loc);
+      here.topLevelNames.insert(declarator.name);
     }
     return;
   }
-  std::optional<llvm::StringRef> name = ModuleDeclarer::itemName(item);
+  auto name = this->itemName(item);
   if (name.has_value()) {
-    ModuleDeclarer::addDeclared(here, *name, item->loc());
+    this->addDeclared(here, *name, item->loc());
   }
 }
 
-void ModuleDeclarer::addDeclared(ModuleState &here, llvm::StringRef name, llvm::SMLoc loc) {
+void ModuleDeclarer::addDeclared(ModuleState &here, llvm::StringRef name, llvm::SMLoc loc) const {
   if (!name.empty()) {
     here.declared.try_emplace(name, loc);
   }
 }
 
-std::optional<llvm::StringRef> ModuleDeclarer::itemName(const Stmt *item) {
-  auto *fn = dyn_cast<FunctionDecl>(item);
-  if (fn != nullptr) {
-    return llvm::StringRef(fn->name);
+std::optional<llvm::StringRef> ModuleDeclarer::itemName(const Stmt *item) const {
+  auto *functionDecl = dyn_cast<FunctionDecl>(item);
+  if (functionDecl != nullptr) {
+    return llvm::StringRef(functionDecl->name);
   }
   auto *alias = dyn_cast<TypeAliasDecl>(item);
   if (alias != nullptr) {
     return llvm::StringRef(alias->name);
   }
-  auto *e = dyn_cast<EnumDecl>(item);
-  if (e != nullptr) {
-    return llvm::StringRef(e->name);
+  auto *enumDecl = dyn_cast<EnumDecl>(item);
+  if (enumDecl != nullptr) {
+    return llvm::StringRef(enumDecl->name);
   }
-  auto *cls = dyn_cast<ClassDecl>(item);
-  if (cls != nullptr) {
-    return llvm::StringRef(cls->name);
+  auto *classDecl = dyn_cast<ClassDecl>(item);
+  if (classDecl != nullptr) {
+    return llvm::StringRef(classDecl->name);
   }
 
   return std::nullopt;
@@ -128,7 +128,7 @@ std::vector<std::vector<Stmt *>> ModuleDeclarer::declareModuleTypes(SourceFile &
   std::vector<std::vector<Stmt *>> types(program.modules.size());
   for (Module *module : program.modules) {
     this->useModule(module);
-    types[module->order] = this->typeDeclarer->declareTypes(module->file.items, false);
+    types[module->order] = this->typeDeclarer->declareTypeNames(module->file.items);
     for (Stmt *type : types[module->order]) {
       this->state.getModuleStates().rememberDeclModule(type, module);
     }
@@ -140,41 +140,34 @@ std::vector<std::vector<Stmt *>> ModuleDeclarer::declareModuleTypes(SourceFile &
 void ModuleDeclarer::declareModuleFunctions(Module *module,
                                             std::vector<FunctionDecl *> &functions) {
   for (Stmt *item : module->file.items) {
-    auto *fn = dyn_cast<FunctionDecl>(item);
-    if (fn != nullptr) {
-      this->functionChecker->declareFunction(fn);
-      this->state.getModuleStates().rememberDeclModule(fn, module);
-      functions.push_back(fn);
+    auto *functionDecl = dyn_cast<FunctionDecl>(item);
+    auto *classDecl = dyn_cast<ClassDecl>(item);
+    if (functionDecl != nullptr) {
+      this->functionChecker->declareFunction(functionDecl);
+      this->state.getModuleStates().rememberDeclModule(functionDecl, module);
+      functions.push_back(functionDecl);
     }
-    auto *cls = dyn_cast<ClassDecl>(item);
-    if (cls == nullptr || cls->type == nullptr || cls->baseExpr) {
-      continue;
-    }
-    this->classDeclarer->declareMethods(cls);
-    for (FunctionDecl *method : ModuleDeclarer::classFunctions(cls)) {
-      this->state.getModuleStates().rememberDeclModule(method, module);
-      functions.push_back(method);
+    if (classDecl != nullptr && this->isDeclaredClass(classDecl)) {
+      this->declareClassFunctions(module, classDecl, functions);
     }
   }
 }
 
-std::vector<FunctionDecl *> ModuleDeclarer::classFunctions(const ClassDecl *cls) {
-  std::vector<FunctionDecl *> methods = cls->methods;
-  methods.insert(methods.end(), cls->constructors.begin(), cls->constructors.end());
-  if (cls->init != nullptr) {
-    methods.push_back(cls->init);
-  }
-  for (const ClassField &f : cls->fields) {
-    if (f.method()) {
-      methods.push_back(f.method());
-    }
-  }
+bool ModuleDeclarer::isDeclaredClass(const ClassDecl *classDecl) const {
+  return classDecl->type != nullptr && classDecl->baseExpr == nullptr;
+}
 
-  return methods;
+void ModuleDeclarer::declareClassFunctions(Module *module, ClassDecl *classDecl,
+                                           std::vector<FunctionDecl *> &functions) {
+  this->classDeclarer->declareMethods(classDecl);
+  for (FunctionDecl *method : this->classDeclarer->memberFunctions(classDecl)) {
+    this->state.getModuleStates().rememberDeclModule(method, module);
+    functions.push_back(method);
+  }
 }
 
 void ModuleDeclarer::fillUnfilledInstances() {
-  GenericStore &generics = this->state.getGenericStore();
+  auto &generics = this->state.getGenericStore();
   for (ClassDecl *instance : generics.takeUnfilledClasses()) {
     generics.enterFilling(instance);
     this->genericClassInstantiator->fillInstance(instance);
@@ -182,17 +175,17 @@ void ModuleDeclarer::fillUnfilledInstances() {
   }
 }
 
-ModuleDeclarer::ResultSourceUsable ModuleDeclarer::exportSource(const ExportSource *source) {
-  if (source && source->path == "neverthrow") {
-    std::string message = ErrorTextExportSource::neverthrow();
+ModuleDeclarer::ResultSourceUsable ModuleDeclarer::exportSource(const ExportSource *source) const {
+  if (source != nullptr && source->path == LibraryModuleNames::kNeverthrowPath) {
+    auto message = ErrorTextExportSource::neverthrow();
 
     return err(ModuleDeclarerExportSourceError{
         .code = ModuleDeclarerExportSourceErrorCode::NEVERTHROW,
         .message = message,
     });
   }
-  if (source && BuiltinModulePaths::isBuiltinModule(source->path)) {
-    std::string message = ErrorTextExportSource::builtin(source->path);
+  if (source != nullptr && BuiltinModulePaths::isBuiltinModule(source->path)) {
+    auto message = ErrorTextExportSource::builtin(source->path);
 
     return err(ModuleDeclarerExportSourceError{
         .code = ModuleDeclarerExportSourceErrorCode::BUILTIN_MODULE,
@@ -203,46 +196,69 @@ ModuleDeclarer::ResultSourceUsable ModuleDeclarer::exportSource(const ExportSour
   return ok(source);
 }
 
-ModuleDeclarer::ResultLocalIsKnown ModuleDeclarer::localExport(const Module *module,
-                                                               const ModuleName &name, bool found) {
-  auto sameAlias = [&](const ModuleName &n) { return n.as == name.name; };
-  auto fromBuiltin = [&](const ImportDecl &i) {
-    return BuiltinModulePaths::isBuiltinModule(i.path) &&
-           (i.whole == name.name || llvm::any_of(i.names, sameAlias));
-  };
-  auto importsName = [&](const ImportDecl &i) { return llvm::any_of(i.names, sameAlias); };
-  bool isBuiltin = llvm::any_of(module->file.imports, fromBuiltin);
-  if (!found && isBuiltin) {
-    std::string message = ErrorTextLocalExport::builtin(name.name);
+ModuleDeclarer::ResultLocalIsKnown
+ModuleDeclarer::localExport(const Module *module, const ModuleName &name, bool isFound) const {
+  if (isFound) {
+    return ok(&name);
+  }
+  if (this->isFromBuiltinModule(module, name.name)) {
+    auto message = ErrorTextLocalExport::builtin(name.name);
 
     return err(ModuleDeclarerLocalExportError{
         .code = ModuleDeclarerLocalExportErrorCode::FROM_BUILTIN_MODULE,
         .message = message,
     });
   }
-  bool isImported = llvm::any_of(module->file.imports, importsName);
-  if (!found && !isImported) {
-    std::string message = ErrorTextLocalExport::notFound(name.name);
+  if (!this->isImportedByName(module, name.name)) {
+    auto message = ErrorTextLocalExport::notFound(name.name);
 
     return err(ModuleDeclarerLocalExportError{
         .code = ModuleDeclarerLocalExportErrorCode::NOT_FOUND,
         .message = message,
     });
   }
-  if (!found) {
-    return err(ModuleDeclarerLocalExportError{
-        .code = ModuleDeclarerLocalExportErrorCode::ALREADY_REPORTED,
-        .message = "",
-    });
+
+  return err(ModuleDeclarerLocalExportError{
+      .code = ModuleDeclarerLocalExportErrorCode::ALREADY_REPORTED,
+      .message = "",
+  });
+}
+
+bool ModuleDeclarer::isNamedIn(const ImportDecl &importDecl, llvm::StringRef alias) const {
+  for (const ModuleName &imported : importDecl.names) {
+    if (imported.as == alias) {
+      return true;
+    }
   }
 
-  return ok(&name);
+  return false;
+}
+
+bool ModuleDeclarer::isImportedByName(const Module *module, llvm::StringRef alias) const {
+  for (const ImportDecl &importDecl : module->file.imports) {
+    if (this->isNamedIn(importDecl, alias)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool ModuleDeclarer::isFromBuiltinModule(const Module *module, llvm::StringRef alias) const {
+  for (const ImportDecl &importDecl : module->file.imports) {
+    bool isBringing = importDecl.whole == alias || this->isNamedIn(importDecl, alias);
+    if (isBringing && BuiltinModulePaths::isBuiltinModule(importDecl.path)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 ModuleDeclarer::ResultExportUnique ModuleDeclarer::freeExport(const ModuleState &here,
-                                                              const ModuleName &name) {
-  if (here.exports.count(name.as)) {
-    std::string message = ErrorTextFreeExport::duplicate(name.as);
+                                                              const ModuleName &name) const {
+  if (here.exports.contains(name.as)) {
+    auto message = ErrorTextFreeExport::duplicate(name.as);
 
     return err(ModuleDeclarerFreeExportError{
         .code = ModuleDeclarerFreeExportErrorCode::DUPLICATE_EXPORT,
@@ -254,52 +270,62 @@ ModuleDeclarer::ResultExportUnique ModuleDeclarer::freeExport(const ModuleState 
 }
 
 void ModuleDeclarer::exportName(Module *module, const NamedExportStep &step) {
-  ModuleState &here = this->state.getModuleStates().getModuleState(module);
+  auto &here = this->state.getModuleStates().getModuleState(module);
   const ExportSource *source = step.source;
   const ModuleName &name = *step.name;
-  if (source && !source->from) {
+  if (source != nullptr && source->from == nullptr) {
     return;
   }
-  std::optional<ModuleBinding> target;
-  if (source) {
-    const llvm::StringMap<ModuleExport> &theirs = this->readyExports(source->from);
-    ResultExportTarget found = this->exportNamed(theirs, source->from, source->path, name);
-    if (found.isErr()) {
-      this->state.getDiagnostics().error(name.loc, found.error().message);
-      return;
-    }
-    target = found.value();
-  } else {
-    target = this->readyLocal(module, name.name);
-    ResultLocalIsKnown known = ModuleDeclarer::localExport(module, name, target.has_value());
-    bool isReported =
-        known.isErr() && known.error().code == ModuleDeclarerLocalExportErrorCode::ALREADY_REPORTED;
-    if (known.isErr() && !isReported) {
-      this->state.getDiagnostics().error(name.loc, known.error().message);
-    }
-    if (known.isErr()) {
-      return;
-    }
+  auto target =
+      source != nullptr ? this->reexportedTarget(*source, name) : this->localTarget(module, name);
+  if (!target.has_value()) {
+    return;
   }
-  ResultExportUnique unique = ModuleDeclarer::freeExport(here, name);
+  auto unique = this->freeExport(here, name);
   if (unique.isErr()) {
     llvm::SMLoc exportedAt = here.exports.find(name.as)->second.loc;
-    std::string previous = ErrorTextFreeExport::previous();
+    auto previous = ErrorTextFreeExport::previous();
     this->state.getDiagnostics().error(name.asLoc, unique.error().message);
     this->state.getDiagnostics().note(exportedAt, previous);
     return;
   }
-  here.exports.try_emplace(name.as, ModuleExport{*target, name.asLoc, nullptr});
+  auto exported = ModuleExport{.target = *target, .loc = name.asLoc, .all = nullptr};
+  here.exports.try_emplace(name.as, exported);
+}
+
+std::optional<ModuleBinding> ModuleDeclarer::reexportedTarget(const ExportSource &source,
+                                                              const ModuleName &name) {
+  const auto &theirs = this->readyExports(source.from);
+  auto found = this->exportNamed(theirs, source.from, source.path, name);
+  if (found.isErr()) {
+    this->state.getDiagnostics().error(name.loc, found.error().message);
+
+    return std::nullopt;
+  }
+
+  return found.value();
+}
+
+std::optional<ModuleBinding> ModuleDeclarer::localTarget(Module *module, const ModuleName &name) {
+  auto target = this->readyLocal(module, name.name);
+  auto known = this->localExport(module, name, target.has_value());
+  if (known.isOk()) {
+    return target;
+  }
+  if (known.error().code != ModuleDeclarerLocalExportErrorCode::ALREADY_REPORTED) {
+    this->state.getDiagnostics().error(name.loc, known.error().message);
+  }
+
+  return std::nullopt;
 }
 
 ModuleDeclarer::ResultStarIsUnique ModuleDeclarer::starExport(llvm::StringRef name,
                                                               const ModuleExport *ours,
                                                               const ExportAll *all,
-                                                              const ModuleBinding &target) {
-  bool isClash = ours && ours->all && !(ours->target == target);
+                                                              const ModuleBinding &target) const {
+  bool isClash = ours != nullptr && ours->all != nullptr && !(ours->target == target);
   if (isClash) {
-    std::string message =
-        ErrorTextStarExport::twice(name, ours->all->source.path, all->source.path);
+    auto message = ErrorTextStarExport::twice(name, ours->all->source.path, all->source.path);
 
     return err(ModuleDeclarerStarExportError{
         .code = ModuleDeclarerStarExportErrorCode::EXPORTED_BY_TWO,
@@ -311,14 +337,14 @@ ModuleDeclarer::ResultStarIsUnique ModuleDeclarer::starExport(llvm::StringRef na
 }
 
 const llvm::StringMap<ModuleExport> &ModuleDeclarer::exportsOf(Module *module) {
-  ModuleState &asked = this->state.getModuleStates().getModuleState(module);
+  auto &asked = this->state.getModuleStates().getModuleState(module);
   if (asked.exportsDone || asked.exportsBusy) {
     return asked.exports;
   }
-  std::vector<ExportsFrame> frames;
+  auto frames = std::vector<ExportsFrame>();
   this->startExports(frames, module);
   while (!frames.empty()) {
-    Module *needed = this->unreadyModule(frames.back());
+    auto *needed = this->unreadyModule(frames.back());
     if (needed != nullptr) {
       this->startExports(frames, needed);
     } else {
@@ -331,34 +357,37 @@ const llvm::StringMap<ModuleExport> &ModuleDeclarer::exportsOf(Module *module) {
 
 void ModuleDeclarer::startExports(std::vector<ExportsFrame> &frames, Module *module) {
   this->state.getModuleStates().getModuleState(module).exportsBusy = true;
-  std::vector<ExportStep> steps = ModuleDeclarer::exportSteps(module);
-  frames.push_back(ExportsFrame{module, std::move(steps), 0});
+  auto steps = this->exportSteps(module);
+  auto frame = ExportsFrame{.module = module, .steps = std::move(steps), .nextStep = 0};
+  frames.push_back(std::move(frame));
 }
 
-std::vector<ExportStep> ModuleDeclarer::exportSteps(Module *module) {
-  std::vector<ExportStep> steps;
-  for (const ExportDecl &decl : module->file.exports) {
-    ResultSourceUsable usable = ModuleDeclarer::exportSource(decl.source());
+std::vector<ExportStep> ModuleDeclarer::exportSteps(Module *module) const {
+  auto steps = std::vector<ExportStep>();
+  for (const ExportDecl &exportDecl : module->file.exports) {
+    auto usable = this->exportSource(exportDecl.source());
     if (usable.isOk()) {
-      ModuleDeclarer::addNameSteps(decl, steps);
+      this->addNameSteps(exportDecl, steps);
     } else {
-      steps.push_back(BadSourceStep{decl.source()->pathLoc, usable.error().message});
+      llvm::SMLoc loc = exportDecl.source()->pathLoc;
+      steps.push_back(BadSourceStep{.loc = loc, .message = usable.error().message});
     }
   }
-  for (const ExportDecl &decl : module->file.exports) {
-    const ExportAll *all = decl.form.as<ExportAll>();
+  for (const ExportDecl &exportDecl : module->file.exports) {
+    const ExportAll *all = exportDecl.form.as<ExportAll>();
     bool isFromOther = all != nullptr && all->source.from != nullptr && all->source.from != module;
     if (isFromOther) {
-      steps.push_back(StarExportStep{&decl, all->source.from});
+      steps.push_back(StarExportStep{.exportDecl = &exportDecl, .from = all->source.from});
     }
   }
 
   return steps;
 }
 
-void ModuleDeclarer::addNameSteps(const ExportDecl &decl, std::vector<ExportStep> &steps) {
-  for (const ModuleName &name : decl.names()) {
-    steps.push_back(NamedExportStep{decl.source(), &name});
+void ModuleDeclarer::addNameSteps(const ExportDecl &exportDecl,
+                                  std::vector<ExportStep> &steps) const {
+  for (const ModuleName &name : exportDecl.names()) {
+    steps.push_back(NamedExportStep{.source = exportDecl.source(), .name = &name});
   }
 }
 
@@ -366,11 +395,11 @@ Module *ModuleDeclarer::unreadyModule(const ExportsFrame &frame) {
   if (frame.nextStep == frame.steps.size()) {
     return nullptr;
   }
-  Module *needed = this->stepNeeds(frame.module, frame.steps[frame.nextStep]);
+  auto *needed = this->stepNeeds(frame.module, frame.steps[frame.nextStep]);
   if (needed == nullptr) {
     return nullptr;
   }
-  const ModuleState &neededState = this->state.getModuleStates().getModuleState(needed);
+  const auto &neededState = this->state.getModuleStates().getModuleState(needed);
   bool isWaiting = !neededState.exportsDone && !neededState.exportsBusy;
 
   return isWaiting ? needed : nullptr;
@@ -392,12 +421,11 @@ Module *ModuleDeclarer::namedExportNeeds(Module *module, const NamedExportStep &
   if (step.source != nullptr) {
     return step.source->from;
   }
-  bool isDeclared =
-      this->state.getModuleStates().getModuleState(module).declared.count(step.name->name);
-  if (isDeclared) {
+  const auto &here = this->state.getModuleStates().getModuleState(module);
+  if (here.declared.contains(step.name->name)) {
     return nullptr;
   }
-  std::optional<ImportedName> imported = ModuleDeclarer::findImport(module, step.name->name);
+  auto imported = this->findImport(module, step.name->name);
 
   return imported.has_value() ? imported->from : nullptr;
 }
@@ -405,25 +433,22 @@ Module *ModuleDeclarer::namedExportNeeds(Module *module, const NamedExportStep &
 void ModuleDeclarer::runExportStep(std::vector<ExportsFrame> &frames) {
   ExportsFrame &frame = frames.back();
   if (frame.nextStep == frame.steps.size()) {
-    this->finishExports(frames);
-  } else {
-    const ExportStep &step = frame.steps[frame.nextStep];
-    frame.nextStep += 1;
-    this->applyExportStep(frame.module, step);
+    return this->finishExports(frames);
   }
+  const ExportStep &step = frame.steps[frame.nextStep];
+  frame.nextStep += 1;
+
+  return this->applyExportStep(frame.module, step);
 }
 
 void ModuleDeclarer::applyExportStep(Module *module, const ExportStep &step) {
   switch (step.kind()) {
     case ExportStepKind::BAD_SOURCE:
-      this->reportBadSource(*step.as<BadSourceStep>());
-      break;
+      return this->reportBadSource(*step.as<BadSourceStep>());
     case ExportStepKind::NAMED:
-      this->exportName(module, *step.as<NamedExportStep>());
-      break;
+      return this->exportName(module, *step.as<NamedExportStep>());
     case ExportStepKind::STAR:
-      this->mergeStarExport(module, *step.as<StarExportStep>());
-      break;
+      return this->mergeStarExport(module, *step.as<StarExportStep>());
   }
 }
 
@@ -432,24 +457,34 @@ void ModuleDeclarer::reportBadSource(const BadSourceStep &step) {
 }
 
 void ModuleDeclarer::mergeStarExport(Module *module, const StarExportStep &star) {
-  ModuleState &here = this->state.getModuleStates().getModuleState(module);
-  const ExportDecl &decl = *star.decl;
-  const ExportAll *all = decl.form.as<ExportAll>();
+  auto &here = this->state.getModuleStates().getModuleState(module);
+  const ExportDecl &exportDecl = *star.exportDecl;
+  const ExportAll *all = exportDecl.form.as<ExportAll>();
   for (const auto &entry : this->readyExports(star.from)) {
     llvm::StringRef name = entry.getKey();
     const ModuleBinding &target = entry.getValue().target;
-    auto existing = here.exports.find(name);
-    const ModuleExport *ours = existing != here.exports.end() ? &existing->second : nullptr;
-    ResultStarIsUnique unique = ModuleDeclarer::starExport(name, ours, all, target);
+    const ModuleExport *ours = this->exportedAs(here, name);
+    auto unique = this->starExport(name, ours, all, target);
     if (unique.isErr()) {
-      this->state.getDiagnostics().error(decl.loc, unique.error().message);
+      this->state.getDiagnostics().error(exportDecl.loc, unique.error().message);
     }
-    here.exports.try_emplace(name, ModuleExport{target, decl.loc, all});
+    auto exported = ModuleExport{.target = target, .loc = exportDecl.loc, .all = all};
+    here.exports.try_emplace(name, exported);
   }
 }
 
+const ModuleExport *ModuleDeclarer::exportedAs(const ModuleState &here,
+                                               llvm::StringRef name) const {
+  auto existing = here.exports.find(name);
+  if (existing == here.exports.end()) {
+    return nullptr;
+  }
+
+  return &existing->second;
+}
+
 void ModuleDeclarer::finishExports(std::vector<ExportsFrame> &frames) {
-  ModuleState &done = this->state.getModuleStates().getModuleState(frames.back().module);
+  auto &done = this->state.getModuleStates().getModuleState(frames.back().module);
   done.exportsBusy = false;
   done.exportsDone = true;
   frames.pop_back();
@@ -457,7 +492,7 @@ void ModuleDeclarer::finishExports(std::vector<ExportsFrame> &frames) {
 
 ModuleDeclarer::ResultExportTarget ModuleDeclarer::findExport(Module *from, llvm::StringRef path,
                                                               const ModuleName &name) {
-  const llvm::StringMap<ModuleExport> &theirs = this->exportsOf(from);
+  const auto &theirs = this->exportsOf(from);
 
   return this->exportNamed(theirs, from, path, name);
 }
@@ -472,18 +507,17 @@ ModuleDeclarer::exportNamed(const llvm::StringMap<ModuleExport> &theirs, Module 
   auto found = theirs.find(name.name);
   bool isMissing = found == theirs.end();
   if (isMissing && from->builtin) {
-    std::string hint = ErrorTextEventsExport::hint(name.name);
-    std::string message = ErrorTextFindExport::library(path, name.name, hint);
+    auto hint = ErrorTextEventsExport::hint(name.name);
+    auto message = ErrorTextFindExport::library(path, name.name, hint);
 
     return err(ModuleDeclarerFindExportError{
         .code = ModuleDeclarerFindExportErrorCode::NOT_EXPORTED_BY_LIBRARY,
         .message = message,
     });
   }
-  bool isDeclared =
-      isMissing && this->state.getModuleStates().getModuleState(from).declared.count(name.name);
-  if (isDeclared) {
-    std::string message = ErrorTextFindExport::unmarked(path, name.name, from->name);
+  const auto &theirState = this->state.getModuleStates().getModuleState(from);
+  if (isMissing && theirState.declared.contains(name.name)) {
+    auto message = ErrorTextFindExport::unmarked(path, name.name, from->name);
 
     return err(ModuleDeclarerFindExportError{
         .code = ModuleDeclarerFindExportErrorCode::DECLARED_WITHOUT_EXPORT,
@@ -491,7 +525,7 @@ ModuleDeclarer::exportNamed(const llvm::StringMap<ModuleExport> &theirs, Module 
     });
   }
   if (isMissing) {
-    std::string message = ErrorTextFindExport::missing(path, name.name);
+    auto message = ErrorTextFindExport::missing(path, name.name);
 
     return err(ModuleDeclarerFindExportError{
         .code = ModuleDeclarerFindExportErrorCode::NOT_EXPORTED,
@@ -503,14 +537,14 @@ ModuleDeclarer::exportNamed(const llvm::StringMap<ModuleExport> &theirs, Module 
 }
 
 std::optional<ModuleBinding> ModuleDeclarer::readyLocal(Module *module, llvm::StringRef name) {
-  if (this->state.getModuleStates().getModuleState(module).declared.count(name)) {
-    return ModuleBinding{module, name};
+  if (this->state.getModuleStates().getModuleState(module).declared.contains(name)) {
+    return ModuleBinding{.module = module, .name = name};
   }
-  std::optional<ImportedName> imported = ModuleDeclarer::findImport(module, name);
+  auto imported = this->findImport(module, name);
   if (!imported.has_value() || imported->from == nullptr) {
     return std::nullopt;
   }
-  const llvm::StringMap<ModuleExport> &theirs = this->readyExports(imported->from);
+  const auto &theirs = this->readyExports(imported->from);
   auto found = theirs.find(imported->name);
   if (found == theirs.end()) {
     return std::nullopt;
@@ -519,11 +553,12 @@ std::optional<ModuleBinding> ModuleDeclarer::readyLocal(Module *module, llvm::St
   return found->second.target;
 }
 
-std::optional<ImportedName> ModuleDeclarer::findImport(const Module *module, llvm::StringRef name) {
-  for (const ImportDecl &decl : module->file.imports) {
-    for (const ModuleName &imported : decl.names) {
+std::optional<ImportedName> ModuleDeclarer::findImport(const Module *module,
+                                                       llvm::StringRef name) const {
+  for (const ImportDecl &importDecl : module->file.imports) {
+    for (const ModuleName &imported : importDecl.names) {
       if (imported.as == name) {
-        return ImportedName{decl.from, imported.name};
+        return ImportedName{.from = importDecl.from, .name = imported.name};
       }
     }
   }

@@ -11,53 +11,96 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+constexpr const char *kContinueKeyword = "continue";
+
+}
+
 JumpChecker::JumpChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->stmtChecker = &all.stmtChecker;
+  this->flowChecker = &all.flowChecker;
 }
 
-bool JumpChecker::isLoop(const Stmt *stmt) {
+bool JumpChecker::isLoop(const Stmt *stmt) const {
   return isa<WhileStmt>(stmt) || isa<DoWhileStmt>(stmt) || isa<ForStmt>(stmt) ||
          isa<ForOfStmt>(stmt);
 }
 
 void JumpChecker::pushTarget(JumpTarget::Kind kind) {
-  JumpTarget target{kind, this->state.getBlockPosition().takePendingLabels(), Flow()};
-  target.breaks.unreachable = true;
+  auto labels = this->state.getBlockPosition().takePendingLabels();
+  auto breaks = Flow();
+  breaks.unreachable = true;
+  auto target = JumpTarget{.kind = kind, .labels = std::move(labels), .breaks = std::move(breaks)};
   this->state.getBlockPosition().enterJumpTarget(std::move(target));
+}
+
+llvm::StringRef JumpChecker::jumpLabel(const Stmt *stmt) const {
+  auto *exit = dyn_cast<BreakStmt>(stmt);
+  if (exit != nullptr) {
+    return exit->label;
+  }
+
+  return cast<ContinueStmt>(stmt)->label;
 }
 
 JumpChecker::ResultJumpTargeted JumpChecker::checkJump(Stmt *stmt) {
   bool isBreak = isa<BreakStmt>(stmt);
-  llvm::StringRef label = isBreak ? cast<BreakStmt>(stmt)->label : cast<ContinueStmt>(stmt)->label;
-  const char *keyword = isBreak ? "break" : "continue";
-  JumpTarget *target = this->state.getBlockPosition().findJumpTarget(label, isBreak);
-  if (!target && !label.empty()) {
-    std::string message = ErrorTextJump::noLabel(label);
+  auto label = this->jumpLabel(stmt);
+  auto *target = this->state.getBlockPosition().findJumpTarget(label, isBreak);
+  auto found = this->checkTargetFound(target, label, isBreak);
+  if (found.isErr()) {
+    return err(found.error());
+  }
+  auto looped = this->checkContinueTarget(*target, label, isBreak);
+  if (looped.isErr()) {
+    return err(looped.error());
+  }
+
+  if (isBreak && target->kind != JumpTarget::Kind::Loop) {
+    const auto &here = this->state.getFlowState().getFlow();
+    target->breaks = this->flowChecker->join(target->breaks, here);
+  }
+
+  return ok(stmt);
+}
+
+JumpChecker::ResultTargetFound
+JumpChecker::checkTargetFound(const JumpTarget *target, llvm::StringRef label, bool isBreak) const {
+  if (target == nullptr && !label.empty()) {
+    auto message = ErrorTextJump::noLabel(label);
 
     return err(JumpCheckerCheckJumpError{
         .code = JumpCheckerCheckJumpErrorCode::LABEL_NOT_FOUND,
         .message = message,
     });
   }
-  if (!target && isBreak) {
-    std::string message = ErrorTextJump::breakOut();
+  if (target == nullptr && isBreak) {
+    auto message = ErrorTextJump::breakOut();
 
     return err(JumpCheckerCheckJumpError{
         .code = JumpCheckerCheckJumpErrorCode::BREAK_OUTSIDE,
         .message = message,
     });
   }
-  if (!target) {
-    std::string message = ErrorTextJump::continueOut();
+  if (target == nullptr) {
+    auto message = ErrorTextJump::continueOut();
 
     return err(JumpCheckerCheckJumpError{
         .code = JumpCheckerCheckJumpErrorCode::CONTINUE_OUTSIDE,
         .message = message,
     });
   }
-  if (!isBreak && target->kind != JumpTarget::Kind::Loop) {
-    std::string message = ErrorTextJump::notLoop(keyword, label);
+
+  return ok(target);
+}
+
+JumpChecker::ResultTargetFound JumpChecker::checkContinueTarget(const JumpTarget &target,
+                                                                llvm::StringRef label,
+                                                                bool isBreak) const {
+  if (!isBreak && target.kind != JumpTarget::Kind::Loop) {
+    auto message = ErrorTextJump::notLoop(kContinueKeyword, label);
 
     return err(JumpCheckerCheckJumpError{
         .code = JumpCheckerCheckJumpErrorCode::CONTINUE_NOT_LOOP,
@@ -65,19 +108,15 @@ JumpChecker::ResultJumpTargeted JumpChecker::checkJump(Stmt *stmt) {
     });
   }
 
-  if (isBreak && target->kind != JumpTarget::Kind::Loop) {
-    target->breaks = FlowChecker::join(target->breaks, this->state.getFlowState().getFlow());
-  }
-
-  return ok(stmt);
+  return ok(&target);
 }
 
-JumpChecker::ResultLabelIsFresh JumpChecker::labelFresh(llvm::ArrayRef<llvm::StringRef> labels,
-                                                        const LabeledStmt *labeled) const {
+JumpChecker::ResultLabelIsFresh JumpChecker::checkLabelFresh(llvm::ArrayRef<llvm::StringRef> labels,
+                                                             const LabeledStmt *labeled) const {
   bool isDuplicate = llvm::is_contained(labels, labeled->label) ||
                      this->state.getBlockPosition().hasLabel(labeled->label);
   if (isDuplicate) {
-    std::string message = ErrorTextLabel::duplicate(labeled->label);
+    auto message = ErrorTextLabel::duplicate(labeled->label);
 
     return err(JumpCheckerLabelFreshError{
         .code = JumpCheckerLabelFreshErrorCode::DUPLICATE_LABEL,
@@ -88,10 +127,11 @@ JumpChecker::ResultLabelIsFresh JumpChecker::labelFresh(llvm::ArrayRef<llvm::Str
   return ok(labeled);
 }
 
-JumpChecker::ResultBodyCanLabel JumpChecker::labelBody(const Stmt *body) {
-  if (isa<VarDeclStmt>(body) || isa<FunctionDecl>(body) || isa<TypeAliasDecl>(body) ||
-      isa<EnumDecl>(body)) {
-    std::string message = ErrorTextLabelBody::declared();
+JumpChecker::ResultBodyCanLabel JumpChecker::checkLabelBody(const Stmt *body) const {
+  bool isDeclaration = isa<VarDeclStmt>(body) || isa<FunctionDecl>(body) ||
+                       isa<TypeAliasDecl>(body) || isa<EnumDecl>(body);
+  if (isDeclaration) {
+    auto message = ErrorTextLabelBody::declared();
 
     return err(JumpCheckerLabelBodyError{
         .code = JumpCheckerLabelBodyErrorCode::DECLARATION_LABELED,
@@ -103,32 +143,39 @@ JumpChecker::ResultBodyCanLabel JumpChecker::labelBody(const Stmt *body) {
 }
 
 void JumpChecker::walkLabeled(LabeledStmt *stmt) {
-  llvm::SmallVector<llvm::StringRef, 1> labels;
+  auto labels = llvm::SmallVector<llvm::StringRef, 1>();
   Stmt *body = stmt;
-  while (auto *labeled = dyn_cast<LabeledStmt>(body)) {
-    ResultLabelIsFresh fresh = this->labelFresh(labels, labeled);
+  auto *labeled = dyn_cast<LabeledStmt>(body);
+  while (labeled != nullptr) {
+    auto fresh = this->checkLabelFresh(labels, labeled);
     if (fresh.isErr()) {
       this->state.getDiagnostics().error(labeled->loc(), fresh.error().message);
     }
     labels.push_back(labeled->label);
     body = labeled->body;
+    labeled = dyn_cast<LabeledStmt>(body);
   }
-  if (JumpChecker::isLoop(body) || isa<SwitchStmt>(body)) {
+  if (this->isLoop(body) || isa<SwitchStmt>(body)) {
     this->state.getBlockPosition().rememberPendingLabels(labels);
     this->stmtChecker->walkStmt(body);
     return;
   }
-  ResultBodyCanLabel labelable = JumpChecker::labelBody(body);
+  auto labelable = this->checkLabelBody(body);
   if (labelable.isErr()) {
     this->state.getDiagnostics().error(body->loc(), labelable.error().message);
     return;
   }
+  this->walkLabeledBlock(body, labels);
+}
+
+void JumpChecker::walkLabeledBlock(Stmt *body, llvm::ArrayRef<llvm::StringRef> labels) {
   this->state.getBlockPosition().rememberPendingLabels(labels);
   this->pushTarget(JumpTarget::Kind::Block);
   this->stmtChecker->walkStmt(body);
-  Flow breaks = this->state.getBlockPosition().leaveJumpTarget().breaks;
-  this->state.getFlowState().replaceFlow(
-      FlowChecker::join(this->state.getFlowState().getFlow(), breaks));
+  auto breaks = this->state.getBlockPosition().leaveJumpTarget().breaks;
+  const auto &after = this->state.getFlowState().getFlow();
+  auto joined = this->flowChecker->join(after, breaks);
+  this->state.getFlowState().replaceFlow(joined);
 }
 
 }

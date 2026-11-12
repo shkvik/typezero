@@ -16,7 +16,7 @@ ProcessExports::ResultExportFound ProcessExports::processExport(llvm::StringRef 
   if (llvm::is_contained(kProcessNames, name)) {
     return ok(name);
   }
-  std::string message = ErrorTextProcessExport::notYet(name, path);
+  auto message = ErrorTextProcessExport::notYet(name, path);
 
   return err(ModuleExportFoundError{
       .code = ModuleExportFoundErrorCode::NOT_YET,

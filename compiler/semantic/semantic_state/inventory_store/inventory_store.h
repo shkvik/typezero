@@ -20,8 +20,8 @@ public:
   bool isUsingTls() const;
   void markTopLevelAwait();
   void markComparesFunctions();
-  void addLateClass(ClassDecl *cls);
-  void addInstance(FunctionDecl *fn);
+  void addLateClass(ClassDecl *classDecl);
+  void addInstance(FunctionDecl *functionDecl);
   void addSubtype(const Type *type);
   ProgramInventory takeInventory();
   void addFieldName(llvm::StringRef name);

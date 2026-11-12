@@ -25,6 +25,12 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+constexpr llvm::StringLiteral kAnonymousClassName = "(anonymous class)";
+
+}
+
 LateClasses::LateClasses(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->classBases = &all.classBases;
@@ -44,35 +50,39 @@ LateClasses::LateClasses(SemanticState &owner, SemanticParts &all)
   this->genericInstantiator = &all.genericInstantiator;
 }
 
-bool LateClasses::holdsType(const Type *type, const Type *target) {
-  TypeParts parts = TypeParts::collect(type, kHoldsRoute);
+bool LateClasses::isHoldingType(const Type *type, const Type *target) const {
+  auto parts = TypeParts::collect(type, kHoldsRoute);
 
   return llvm::is_contained(parts.getTypes(), target);
 }
 
-Expr *LateClasses::checkClassExpr(ClassExpr *expr, const Type *expected) {
-  (void)expected;
-  ClassDecl *cls = expr->decl;
-  if (!cls->type) {
-    this->makeLateClass(cls);
+Expr *LateClasses::checkClassExpr(ClassExpr *expr) {
+  ClassDecl *classDecl = expr->decl;
+  if (classDecl->type == nullptr) {
+    this->makeLateClass(classDecl);
   }
-  cls->usedAsValue = true;
-  if (!cls->declared) {
-    this->walkStaticFields(cls);
-    ClassChecker::ResultHasDecorators decorated = this->classChecker->hasDecorators(cls);
-    if (decorated.isOk()) {
-      this->state.getClassContext().enterClass(cls);
-      this->decoratorChecker->decorateClass(cls);
-      this->state.getClassContext().leaveClass();
-    }
+  classDecl->usedAsValue = true;
+  if (!classDecl->declared) {
+    this->walkStaticFields(classDecl);
+    this->walkClassDecorators(classDecl);
   }
-  expr->type = this->classValueChecker->classValueType(cls);
+  expr->type = this->classValueChecker->classValueType(classDecl);
 
   return expr;
 }
 
+void LateClasses::walkClassDecorators(ClassDecl *classDecl) {
+  auto decorated = this->classChecker->hasDecorators(classDecl);
+  if (decorated.isErr()) {
+    return;
+  }
+  this->state.getClassContext().enterClass(classDecl);
+  this->decoratorChecker->decorateClass(classDecl);
+  this->state.getClassContext().leaveClass();
+}
+
 LateClasses::ResultBaseClassUsable LateClasses::baseClass(const Type *type) const {
-  ClassDecl *parent = const_cast<ClassDecl *>(type->classRef());
+  auto *parent = const_cast<ClassDecl *>(type->classRef());
   if (type->isError()) {
     return err(LateClassesBaseClassError{
         .code = LateClassesBaseClassErrorCode::ALREADY_REPORTED,
@@ -80,7 +90,7 @@ LateClasses::ResultBaseClassUsable LateClasses::baseClass(const Type *type) cons
     });
   }
   if (type->isConstructor()) {
-    std::string message = ErrorTextBaseClass::atRun(type->name());
+    auto message = ErrorTextBaseClass::atRun(type->name());
 
     return err(LateClassesBaseClassError{
         .code = LateClassesBaseClassErrorCode::KNOWN_ONLY_AT_RUN,
@@ -88,15 +98,15 @@ LateClasses::ResultBaseClassUsable LateClasses::baseClass(const Type *type) cons
     });
   }
   if (!type->isClassRef()) {
-    std::string message = ErrorTextBaseClass::notClass(type->name());
+    auto message = ErrorTextBaseClass::notClass(type->name());
 
     return err(LateClassesBaseClassError{
         .code = LateClassesBaseClassErrorCode::NOT_A_CLASS,
         .message = message,
     });
   }
-  if (!parent->type) {
-    std::string message = ErrorTextBaseClass::javascript(parent->name);
+  if (parent->type == nullptr) {
+    auto message = ErrorTextBaseClass::javascript(parent->name);
 
     return err(LateClassesBaseClassError{
         .code = LateClassesBaseClassErrorCode::JAVASCRIPT_CLASS,
@@ -104,7 +114,7 @@ LateClasses::ResultBaseClassUsable LateClasses::baseClass(const Type *type) cons
     });
   }
   if (parent->isGeneric()) {
-    std::string message = ErrorTextBaseClass::generic(parent->name);
+    auto message = ErrorTextBaseClass::generic(parent->name);
 
     return err(LateClassesBaseClassError{
         .code = LateClassesBaseClassErrorCode::GENERIC_CLASS,
@@ -112,7 +122,7 @@ LateClasses::ResultBaseClassUsable LateClasses::baseClass(const Type *type) cons
     });
   }
   if (this->fsDeclarer->isRuntimeClass(parent)) {
-    std::string message = ErrorTextBaseClass::madeByFs(parent->name);
+    auto message = ErrorTextBaseClass::madeByFs(parent->name);
 
     return err(LateClassesBaseClassError{
         .code = LateClassesBaseClassErrorCode::MADE_BY_FS,
@@ -123,118 +133,120 @@ LateClasses::ResultBaseClassUsable LateClasses::baseClass(const Type *type) cons
   return ok(parent);
 }
 
-void LateClasses::makeLateClass(ClassDecl *cls) {
-  cls->checkOnly = this->reflectChecker->onlyChecked();
-  this->registerLateClass(cls);
-  this->rememberLateScope(cls);
-  this->linkLateBase(cls);
-  LateClasses::nameAnonymousClass(cls);
-  this->declareLateMembers(cls);
-  this->rememberMethodModules(cls);
-  this->markLateOverrides(cls);
+void LateClasses::makeLateClass(ClassDecl *classDecl) {
+  classDecl->checkOnly = this->reflectChecker->onlyChecked();
+  this->registerLateClass(classDecl);
+  this->rememberLateScope(classDecl);
+  this->linkLateBase(classDecl);
+  this->nameAnonymousClass(classDecl);
+  this->declareLateMembers(classDecl);
+  this->rememberMethodModules(classDecl);
+  this->markClassOverrides(classDecl);
   if (this->state.getClassStore().hasLinkedClasses()) {
-    this->classLinks->linkOverrides(cls);
-    this->classLinks->buildVtable(cls);
+    this->classLinks->linkOverrides(classDecl);
+    this->classLinks->buildVtable(classDecl);
   }
-  LateClassStore &late = this->state.getLateClassStore();
-  InstanceRecord *instance = this->state.getGenericStore().getCheckingInstance();
+  auto &late = this->state.getLateClassStore();
+  auto *instance = this->state.getGenericStore().getCheckingInstance();
   if (instance != nullptr && instance->generic != nullptr) {
-    late.rememberLateOwner(cls, instance);
+    late.rememberLateOwner(classDecl, instance);
   }
-  late.addLateClass(cls);
+  late.addLateClass(classDecl);
 }
 
-void LateClasses::registerLateClass(ClassDecl *cls) {
-  if (cls->type == nullptr) {
-    cls->id = this->state.getClassStore().takeClassId();
-    llvm::StringRef typeName = cls->name.empty() ? "(anonymous class)" : cls->name;
-    cls->type = Type::classType(typeName, cls);
-    this->state.getClassStore().addClass(cls);
+void LateClasses::registerLateClass(ClassDecl *classDecl) {
+  if (classDecl->type == nullptr) {
+    classDecl->id = this->state.getClassStore().takeClassId();
+    llvm::StringRef typeName = classDecl->name.empty() ? kAnonymousClassName : classDecl->name;
+    classDecl->type = Type::classType(typeName, classDecl);
+    this->state.getClassStore().addClass(classDecl);
   }
-  Module *current = this->state.getModuleStates().getCurrentModule();
-  if (current != nullptr && !this->state.getModuleStates().hasDeclModule(cls)) {
-    this->state.getModuleStates().rememberDeclModule(cls, current);
+  auto *current = this->state.getModuleStates().getCurrentModule();
+  if (current != nullptr && !this->state.getModuleStates().hasDeclModule(classDecl)) {
+    this->state.getModuleStates().rememberDeclModule(classDecl, current);
   }
 }
 
-void LateClasses::rememberLateScope(ClassDecl *cls) {
-  std::vector<FunctionDecl *> functions = this->state.getFunctionStack().getFunctions();
-  for (FunctionDecl *fn : llvm::reverse(functions)) {
-    if (fn->isInstance && !fn->typeArgs.empty()) {
-      cls->outer = fn;
-      break;
-    }
+void LateClasses::rememberLateScope(ClassDecl *classDecl) {
+  const auto *outer = this->innerGenericCopy();
+  if (outer != nullptr) {
+    classDecl->outer = outer;
   }
   for (llvm::StringRef local : this->state.getScopeStack().getLocalVarNames()) {
-    cls->locals.push_back(local);
+    classDecl->locals.push_back(local);
   }
 }
 
-void LateClasses::linkLateBase(ClassDecl *cls) {
-  if (cls->baseExpr == nullptr) {
+const FunctionDecl *LateClasses::innerGenericCopy() const {
+  auto functions = this->state.getFunctionStack().getFunctions();
+  for (const FunctionDecl *functionDecl : llvm::reverse(functions)) {
+    if (functionDecl->isInstance && !functionDecl->typeArgs.empty()) {
+      return functionDecl;
+    }
+  }
+
+  return nullptr;
+}
+
+void LateClasses::linkLateBase(ClassDecl *classDecl) {
+  if (classDecl->baseExpr == nullptr) {
     return;
   }
-  cls->baseExpr = this->exprChecker->checkExpr(cls->baseExpr);
-  ResultBaseClassUsable base = this->baseClass(cls->baseExpr->type);
+  classDecl->baseExpr = this->exprChecker->checkExpr(classDecl->baseExpr);
+  auto base = this->baseClass(classDecl->baseExpr->type);
   bool isReported =
       base.isErr() && base.error().code == LateClassesBaseClassErrorCode::ALREADY_REPORTED;
   if (base.isErr() && !isReported) {
-    this->state.getDiagnostics().error(cls->baseExpr->loc(), base.error().message);
+    this->state.getDiagnostics().error(classDecl->baseExpr->loc(), base.error().message);
   }
-  ClassDecl *parent = base.isOk() ? base.value() : nullptr;
-  if (parent != nullptr && cls->checkOnly) {
-    cls->parent = parent;
-    const_cast<Type *>(cls->type)->addBase(parent->type);
-  } else if (parent != nullptr) {
-    cls->parent = parent;
-    parent->children.push_back(cls);
-    this->classBases->addBase(cls->type, parent->type);
+  if (base.isOk() && base.value() != nullptr) {
+    this->attachLateParent(classDecl, base.value());
   }
-  cls->base.reset();
+  classDecl->base.reset();
 }
 
-void LateClasses::nameAnonymousClass(ClassDecl *cls) {
-  if (!cls->name.empty() || cls->parent == nullptr) {
+void LateClasses::attachLateParent(ClassDecl *classDecl, ClassDecl *parent) {
+  classDecl->parent = parent;
+  if (classDecl->checkOnly) {
+    const_cast<Type *>(classDecl->type)->addBase(parent->type);
     return;
   }
-  std::string extendsName = "(class extends " + cls->parent->type->name().str() + ")";
-  const_cast<Type *>(cls->type)->rename(extendsName);
+  parent->children.push_back(classDecl);
+  this->classBases->addBase(classDecl->type, parent->type);
 }
 
-void LateClasses::declareLateMembers(ClassDecl *cls) {
-  LateClassStore &late = this->state.getLateClassStore();
-  late.enterDeclaringClass(cls);
-  this->state.getClassContext().enterClass(cls);
-  this->classDeclarer->resolveClass(cls);
-  this->classDeclarer->declareMethods(cls);
+void LateClasses::nameAnonymousClass(ClassDecl *classDecl) const {
+  if (!classDecl->name.empty() || classDecl->parent == nullptr) {
+    return;
+  }
+  std::string extendsName = "(class extends " + classDecl->parent->type->name().str() + ")";
+  const_cast<Type *>(classDecl->type)->rename(extendsName);
+}
+
+void LateClasses::declareLateMembers(ClassDecl *classDecl) {
+  auto &late = this->state.getLateClassStore();
+  late.enterDeclaringClass(classDecl);
+  this->state.getClassContext().enterClass(classDecl);
+  this->classDeclarer->resolveClass(classDecl);
+  this->classDeclarer->declareMethods(classDecl);
   this->state.getClassContext().leaveClass();
   late.leaveDeclaringClass();
 }
 
-void LateClasses::rememberMethodModules(const ClassDecl *cls) {
-  Module *home = this->state.getModuleStates().findDeclModule(cls);
+void LateClasses::rememberMethodModules(const ClassDecl *classDecl) {
+  auto *home = this->state.getModuleStates().findDeclModule(classDecl);
   if (home == nullptr) {
     return;
   }
-  std::vector<FunctionDecl *> methods = cls->methods;
-  methods.insert(methods.end(), cls->constructors.begin(), cls->constructors.end());
-  if (cls->init != nullptr) {
-    methods.push_back(cls->init);
-  }
-  for (const ClassField &f : cls->fields) {
-    if (f.method() != nullptr) {
-      methods.push_back(f.method());
-    }
-  }
-  for (FunctionDecl *fn : methods) {
-    this->state.getModuleStates().rememberDeclModule(fn, home);
+  for (FunctionDecl *functionDecl : this->classDeclarer->memberFunctions(classDecl)) {
+    this->state.getModuleStates().rememberDeclModule(functionDecl, home);
   }
 }
 
 LateClasses::ResultStaticTypeKnown LateClasses::staticType(const ClassField &field,
-                                                           const Type *type) {
+                                                           const Type *type) const {
   if (type->isVoid() || type->isUndefined()) {
-    std::string message = ErrorTextStaticType::unknown(field.name);
+    auto message = ErrorTextStaticType::unknown(field.name);
 
     return err(LateClassesStaticTypeError{
         .code = LateClassesStaticTypeErrorCode::UNKNOWN_FROM_VALUE,
@@ -245,165 +257,188 @@ LateClasses::ResultStaticTypeKnown LateClasses::staticType(const ClassField &fie
   return ok(type);
 }
 
-void LateClasses::walkStaticFields(ClassDecl *cls) {
-  ClassContext &classContext = this->state.getClassContext();
-  classContext.enterClass(cls);
+void LateClasses::walkStaticFields(ClassDecl *classDecl) {
+  auto &classContext = this->state.getClassContext();
+  classContext.enterClass(classDecl);
   classContext.enterStaticInit();
-  cls->declared = true;
+  classDecl->declared = true;
   classContext.forgetSetStatics();
-  for (ClassField &f : cls->fields) {
-    if (!f.isStatic() || !f.var()) {
-      continue;
+  for (ClassField &field : classDecl->fields) {
+    if (field.isStatic() && field.var() != nullptr) {
+      this->walkStaticField(field);
     }
-    if (!f.init) {
-      if (!f.var()->type) {
-        f.var()->type = Type::error();
-      }
-      classContext.markStaticSet(f.var());
-      continue;
-    }
-    const Type *declared = f.var()->type;
-    if (declared && f.resolved && !f.type && !f.optional()) {
-      declared = nullptr;
-    }
-    const Type *expected = declared && !declared->isError() ? declared : nullptr;
-    f.init = this->exprChecker->checkExpr(f.init, expected);
-    classContext.markStaticSet(f.var());
-    if (declared) {
-      std::string label = ErrorTextStaticType::fieldLabel(f.name);
-      f.init = this->typeRelations->coerce(f.init, declared, label);
-      continue;
-    }
-    ResultStaticTypeKnown known = LateClasses::staticType(f, f.init->type);
-    if (known.isErr()) {
-      this->state.getDiagnostics().error(f.init->loc(), known.error().message);
-    }
-    const Type *type = known.isOk() ? known.value() : Type::error();
-    f.resolved = type;
-    f.var()->type = type;
   }
   classContext.leaveStaticInit();
   classContext.leaveClass();
 }
 
+void LateClasses::walkStaticField(ClassField &field) {
+  VarSymbol *variable = field.var();
+  if (field.init == nullptr) {
+    if (variable->type == nullptr) {
+      variable->type = Type::error();
+    }
+    this->state.getClassContext().markStaticSet(variable);
+    return;
+  }
+  const Type *declared = this->declaredStaticType(field);
+  const Type *expected = declared != nullptr && !declared->isError() ? declared : nullptr;
+  field.init = this->exprChecker->checkExpr(field.init, expected);
+  this->state.getClassContext().markStaticSet(variable);
+  if (declared != nullptr) {
+    auto label = ErrorTextStaticType::fieldLabel(field.name);
+    field.init = this->typeRelations->coerce(field.init, declared, label);
+    return;
+  }
+  auto known = this->staticType(field, field.init->type);
+  if (known.isErr()) {
+    this->state.getDiagnostics().error(field.init->loc(), known.error().message);
+  }
+  const Type *type = known.isOk() ? known.value() : Type::error();
+  field.resolved = type;
+  variable->type = type;
+}
+
+const Type *LateClasses::declaredStaticType(const ClassField &field) const {
+  const Type *declared = field.var()->type;
+  bool isFromValue = field.resolved != nullptr && !field.type.has_value() && !field.optional();
+  if (declared != nullptr && isFromValue) {
+    return nullptr;
+  }
+
+  return declared;
+}
+
 void LateClasses::walkLateClasses() {
-  LateClassStore &late = this->state.getLateClassStore();
+  auto &late = this->state.getLateClassStore();
   while (late.hasUncheckedLateClasses()) {
-    ClassDecl *cls = late.takeUncheckedLateClass();
-    if (cls->checkOnly) {
-      continue;
-    }
-    Module *home = this->state.getModuleStates().findDeclModule(cls);
-    if (home && this->state.getScopeStack().isTopLevel()) {
-      this->moduleDeclarer->useModule(home);
-    }
-    InstanceRecord *owner = late.findLateOwner(cls);
-    InstanceRecord *outerInstance = this->state.getGenericStore().getCheckingInstance();
-    Diagnostics &diagnostics = this->state.getDiagnostics();
-    if (owner) {
-      this->state.getGenericStore().rememberCheckingInstance(owner);
-      diagnostics.pushList(DiagnosticRoute::OWNER);
-    }
-    this->state.getFlowState().replaceFlow(Flow());
-    this->classChecker->walkClassBodies(cls);
-    this->state.getGenericStore().rememberCheckingInstance(outerInstance);
-    if (owner) {
-      auto classDiagnostics = diagnostics.popList();
-      late.addLateErrors(owner, classDiagnostics);
+    auto *classDecl = late.takeUncheckedLateClass();
+    if (!classDecl->checkOnly) {
+      this->walkLateClass(classDecl);
     }
   }
   for (const LateError &error : late.getFirstLateErrors()) {
-    InstanceRecord *instance = error.instance;
-    if (instance->failed) {
-      continue;
+    if (!error.instance->failed) {
+      this->reportLateError(error);
     }
-    instance->failed = true;
-    instance->message = error.first.message;
-    instance->errorLoc = error.first.loc;
-    this->genericInstantiator->reportInstance(instance, instance->callLoc, instance->concrete);
   }
+}
+
+void LateClasses::walkLateClass(ClassDecl *classDecl) {
+  auto &late = this->state.getLateClassStore();
+  auto *home = this->state.getModuleStates().findDeclModule(classDecl);
+  if (home != nullptr && this->state.getScopeStack().isTopLevel()) {
+    this->moduleDeclarer->useModule(home);
+  }
+  auto *owner = late.findLateOwner(classDecl);
+  auto *outerInstance = this->state.getGenericStore().getCheckingInstance();
+  auto &diagnostics = this->state.getDiagnostics();
+  if (owner != nullptr) {
+    this->state.getGenericStore().rememberCheckingInstance(owner);
+    diagnostics.pushList(DiagnosticRoute::OWNER);
+  }
+  this->state.getFlowState().replaceFlow(Flow());
+  this->classChecker->walkClassBodies(classDecl);
+  this->state.getGenericStore().rememberCheckingInstance(outerInstance);
+  if (owner != nullptr) {
+    auto classDiagnostics = diagnostics.popList();
+    late.addLateErrors(owner, classDiagnostics);
+  }
+}
+
+void LateClasses::reportLateError(const LateError &error) {
+  InstanceRecord *instance = error.instance;
+  instance->failed = true;
+  instance->message = error.first.message;
+  instance->errorLoc = error.first.loc;
+  this->genericInstantiator->reportInstance(instance, instance->callLoc, instance->concrete);
 }
 
 void LateClasses::rememberEmittedLateClasses() {
-  for (ClassDecl *cls : this->state.getClassStore().getClasses()) {
-    bool isLate = cls->generic() || (cls->expression() && cls->type != nullptr);
-    if (isLate && cls->isEmitted()) {
-      this->state.getInventoryStore().addLateClass(cls);
+  for (ClassDecl *classDecl : this->state.getClassStore().getClasses()) {
+    bool isMadeLate = classDecl->expression() && classDecl->type != nullptr;
+    bool isLate = classDecl->generic() != nullptr || isMadeLate;
+    if (isLate && classDecl->isEmitted()) {
+      this->state.getInventoryStore().addLateClass(classDecl);
     }
   }
 }
 
-void LateClasses::noteMethodNames(const ClassDecl *cls) {
-  for (const FunctionDecl *fn : cls->methods) {
-    if (!fn->isStatic()) {
-      this->state.getLateClassStore().addLateMethodName(fn->name);
+void LateClasses::noteMethodNames(const ClassDecl *classDecl) {
+  for (const FunctionDecl *functionDecl : classDecl->methods) {
+    if (!functionDecl->isStatic()) {
+      this->state.getLateClassStore().addLateMethodName(functionDecl->name);
     }
   }
-  for (const ClassField &f : cls->fields) {
-    bool isArrowMethod = !f.isStatic() && f.init && isa<FunctionExpr>(f.init);
+  for (const ClassField &field : classDecl->fields) {
+    bool isArrowMethod =
+        !field.isStatic() && field.init != nullptr && isa<FunctionExpr>(field.init);
     if (isArrowMethod) {
-      this->state.getLateClassStore().addLateMethodName(f.name);
+      this->state.getLateClassStore().addLateMethodName(field.name);
     }
   }
 }
 
 void LateClasses::markLateOverrides(SourceFile &program) {
   for (Stmt *item : program.items) {
-    auto *cls = dyn_cast<ClassDecl>(item);
-    if (cls && cls->baseExpr) {
-      this->noteMethodNames(cls);
+    auto *classDecl = dyn_cast<ClassDecl>(item);
+    if (classDecl != nullptr && classDecl->baseExpr != nullptr) {
+      this->noteMethodNames(classDecl);
     }
   }
-  PlacedNodes nodes = PlacedNodes::collect(program.items, {});
+  auto nodes = PlacedNodes::collect(program.items, {});
   for (const PlacedExpr &placed : nodes.getExprs()) {
     auto *classExpr = dyn_cast<ClassExpr>(placed.expr);
-    bool isExtending = classExpr && (classExpr->decl->baseExpr || classExpr->decl->base);
-    if (isExtending) {
+    if (classExpr != nullptr && this->isExtending(classExpr->decl)) {
       this->noteMethodNames(classExpr->decl);
     }
   }
-  for (ClassDecl *cls : this->state.getClassStore().getClasses()) {
-    this->markLateOverrides(cls);
+  for (ClassDecl *classDecl : this->state.getClassStore().getClasses()) {
+    this->markClassOverrides(classDecl);
   }
 }
 
-void LateClasses::markLateOverrides(ClassDecl *cls) {
-  LateClassStore &late = this->state.getLateClassStore();
-  if (!late.hasLateMethodNames() || cls->literal()) {
+bool LateClasses::isExtending(const ClassDecl *classDecl) const {
+  return classDecl->baseExpr != nullptr || classDecl->base.has_value();
+}
+
+void LateClasses::markClassOverrides(ClassDecl *classDecl) {
+  auto &late = this->state.getLateClassStore();
+  if (!late.hasLateMethodNames() || classDecl->literal() != nullptr) {
     return;
   }
-  for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
-    Overriding *overriding = fn->overriding();
-    if (late.isLateMethodName(fn->name) && overriding) {
+  for (FunctionDecl *functionDecl : this->classLinks->ownMethods(classDecl)) {
+    Overriding *overriding = functionDecl->overriding();
+    if (late.isLateMethodName(functionDecl->name) && overriding != nullptr) {
       overriding->overridden = true;
       overriding->openToLate = true;
     }
   }
 }
 
-void LateClasses::bindOuterTypeParams(const ClassDecl *cls) {
-  const FunctionDecl *outer = cls ? cls->outer : nullptr;
-  if (outer) {
+void LateClasses::bindOuterTypeParams(const ClassDecl *classDecl) {
+  const FunctionDecl *outer = classDecl != nullptr ? classDecl->outer : nullptr;
+  if (outer != nullptr) {
     this->typeParams->bindTypeParams(outer->typeParams, outer->typeArgs);
   }
 }
 
-bool LateClasses::hasClassExpr(const FunctionDecl *fn) {
-  if (!fn || !fn->body) {
+bool LateClasses::hasClassExpr(const FunctionDecl *functionDecl) {
+  if (functionDecl == nullptr || functionDecl->body == nullptr) {
     return false;
   }
-  LateClassStore &late = this->state.getLateClassStore();
-  if (late.isClassExprKnown(fn)) {
-    return late.hasClassExpr(fn);
+  auto &late = this->state.getLateClassStore();
+  if (late.isClassExprKnown(functionDecl)) {
+    return late.hasClassExpr(functionDecl);
   }
-  PlacedNodes nodes = PlacedNodes::collect({fn->body}, {});
-  bool has = LateClasses::hasClassExprIn(nodes);
-  late.rememberClassExpr(fn, has);
+  auto nodes = PlacedNodes::collect({functionDecl->body}, {});
+  bool hasClass = this->hasClassExprIn(nodes);
+  late.rememberClassExpr(functionDecl, hasClass);
 
-  return has;
+  return hasClass;
 }
 
-bool LateClasses::hasClassExprIn(const PlacedNodes &nodes) {
+bool LateClasses::hasClassExprIn(const PlacedNodes &nodes) const {
   for (const PlacedExpr &placed : nodes.getExprs()) {
     if (isa<ClassExpr>(placed.expr)) {
       return true;
@@ -414,31 +449,34 @@ bool LateClasses::hasClassExprIn(const PlacedNodes &nodes) {
 }
 
 bool LateClasses::isTemplate(const FuncSymbol *generic) {
-  return generic && generic->isGeneric() && generic->decl && !generic->decl->isInstance &&
-         this->hasClassExpr(generic->decl);
+  if (generic == nullptr || !generic->isGeneric() || generic->decl == nullptr) {
+    return false;
+  }
+
+  return !generic->decl->isInstance && this->hasClassExpr(generic->decl);
 }
 
 void LateClasses::walkTemplateInstance(InstanceRecord *instance) {
   instance->checking = true;
-  Diagnostics &diagnostics = this->state.getDiagnostics();
-  FunctionDecl *decl = instance->decl;
-  BodyState saved = this->returnInferrer->enterBody(decl);
+  auto &diagnostics = this->state.getDiagnostics();
+  FunctionDecl *functionDecl = instance->decl;
+  auto saved = this->returnInferrer->enterBody(functionDecl);
   this->state.getGenericStore().rememberCheckingInstance(instance);
   diagnostics.pushList(DiagnosticRoute::OWNER);
   if (!this->state.getModuleStates().isTopLevelDone()) {
-    this->state.getFunctionStack().rememberEarlyFunction(decl->sym);
+    this->state.getFunctionStack().rememberEarlyFunction(functionDecl->sym);
   }
   this->state.getFlowState().replaceFlow(Flow());
-  if (decl->sym->hasReturnType()) {
-    this->functionChecker->walkFunctionBody(decl);
+  if (functionDecl->sym->hasReturnType()) {
+    this->functionChecker->walkFunctionBody(functionDecl);
   } else {
-    this->returnInferrer->inferFromBody(decl);
+    this->returnInferrer->inferFromBody(functionDecl);
   }
   auto instanceDiagnostics = diagnostics.popList();
   this->returnInferrer->leaveBody(saved);
   instance->checking = false;
   instance->checked = true;
-  const Diagnostic *firstError = diagnostics.findFirstError(instanceDiagnostics);
+  const auto *firstError = diagnostics.findFirstError(instanceDiagnostics);
   if (firstError == nullptr) {
     return;
   }
@@ -447,12 +485,12 @@ void LateClasses::walkTemplateInstance(InstanceRecord *instance) {
   instance->errorLoc = firstError->loc;
 }
 
-LateClasses::ResultNoOldObjectHeld LateClasses::oldObject(const ClassDecl *cls,
-                                                          const ClassField &field) {
-  bool isTyped = field.isStatic() && field.var() && field.var()->type;
-  bool isHolding = isTyped && LateClasses::holdsType(field.var()->type, cls->type);
+LateClasses::ResultNoOldObjectHeld LateClasses::oldObject(const ClassDecl *classDecl,
+                                                          const ClassField &field) const {
+  bool isTyped = field.isStatic() && field.var() != nullptr && field.var()->type != nullptr;
+  bool isHolding = isTyped && this->isHoldingType(field.var()->type, classDecl->type);
   if (isHolding) {
-    std::string message = ErrorTextOldObject::held(cls->name, field.name);
+    auto message = ErrorTextOldObject::held(classDecl->name, field.name);
 
     return err(LateClassesOldObjectError{
         .code = LateClassesOldObjectErrorCode::HOLDS_OLD_OBJECT,
@@ -463,13 +501,13 @@ LateClasses::ResultNoOldObjectHeld LateClasses::oldObject(const ClassDecl *cls,
   return ok(&field);
 }
 
-LateClasses::ResultFieldNameIsFree LateClasses::replacedField(const ClassDecl *cls,
+LateClasses::ResultFieldNameIsFree LateClasses::replacedField(const ClassDecl *classDecl,
                                                               const ClassDecl *replacement,
                                                               const ClassDecl *child,
-                                                              const ClassField &field) {
-  bool isClash = !field.isStatic() && replacement->field(field.name);
+                                                              const ClassField &field) const {
+  bool isClash = !field.isStatic() && replacement->field(field.name) != nullptr;
   if (isClash) {
-    std::string message = ErrorTextReplacedField::clash(child->name, cls->name, field.name);
+    auto message = ErrorTextReplacedField::clash(child->name, classDecl->name, field.name);
 
     return err(LateClassesReplacedFieldError{
         .code = LateClassesReplacedFieldErrorCode::FIELD_IN_REPLACEMENT,
@@ -480,66 +518,83 @@ LateClasses::ResultFieldNameIsFree LateClasses::replacedField(const ClassDecl *c
   return ok(&field);
 }
 
-void LateClasses::relink(ClassDecl *cls) {
-  this->relinkClass(cls);
-  for (ClassDecl *below : ClassTree::descendants(cls)) {
+void LateClasses::relink(ClassDecl *classDecl) {
+  this->relinkClass(classDecl);
+  for (ClassDecl *below : ClassTree::descendants(classDecl)) {
     this->relinkClass(below);
   }
 }
 
-void LateClasses::relinkClass(ClassDecl *cls) {
-  const_cast<Type *>(cls->type)->forgetFields();
+void LateClasses::relinkClass(ClassDecl *classDecl) {
+  const_cast<Type *>(classDecl->type)->forgetFields();
   this->state.getDiagnostics().pushList(DiagnosticRoute::DISCARD);
-  this->classLinks->linkOverrides(cls);
+  this->classLinks->linkOverrides(classDecl);
   this->state.getDiagnostics().popList();
-  this->classLinks->buildVtable(cls);
+  this->classLinks->buildVtable(classDecl);
 }
 
-void LateClasses::replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SMLoc loc) {
-  for (const ClassField &f : cls->fields) {
-    ResultNoOldObjectHeld kept = LateClasses::oldObject(cls, f);
+void LateClasses::replaceClass(ClassDecl *classDecl, ClassDecl *replacement, llvm::SMLoc loc) {
+  for (const ClassField &field : classDecl->fields) {
+    auto kept = this->oldObject(classDecl, field);
     if (kept.isErr()) {
-      std::string here = ErrorTextOldObject::decorator();
-      this->state.getDiagnostics().error(f.loc, kept.error().message);
+      auto here = ErrorTextOldObject::decorator();
+      this->state.getDiagnostics().error(field.loc, kept.error().message);
       this->state.getDiagnostics().note(loc, here);
       return;
     }
   }
 
-  Type *mine = const_cast<Type *>(cls->type);
-  Type *theirs = const_cast<Type *>(replacement->type);
+  this->swapTypes(classDecl, replacement);
+  auto declared = this->declaredChildren(classDecl, replacement);
+  for (ClassDecl *child : declared) {
+    for (const ClassField &field : child->fields) {
+      auto unique = this->replacedField(classDecl, replacement, child, field);
+      if (unique.isErr()) {
+        this->state.getDiagnostics().error(field.loc, unique.error().message);
+        return;
+      }
+    }
+    this->moveChild(classDecl, replacement, child);
+  }
+  classDecl->replacement = replacement;
+  replacement->usedAsValue = true;
+}
+
+void LateClasses::swapTypes(ClassDecl *classDecl, ClassDecl *replacement) {
+  auto *mine = const_cast<Type *>(classDecl->type);
+  auto *theirs = const_cast<Type *>(replacement->type);
   std::string name = mine->name().str();
   Type::swapClasses(mine, theirs);
-  cls->type = theirs;
+  classDecl->type = theirs;
   replacement->type = mine;
   theirs->rename(name + " (as declared)");
   this->state.getInventoryStore().addSubtype(mine);
-  std::vector<ClassDecl *> declared;
-  for (ClassDecl *child : cls->children) {
+}
+
+std::vector<ClassDecl *> LateClasses::declaredChildren(const ClassDecl *classDecl,
+                                                       const ClassDecl *replacement) {
+  auto *declaredType = const_cast<Type *>(classDecl->type);
+  auto *replacementType = const_cast<Type *>(replacement->type);
+  auto declared = std::vector<ClassDecl *>();
+  for (ClassDecl *child : classDecl->children) {
     if (child == replacement) {
       continue;
     }
     if (replacement->derivesFrom(child)) {
-      const_cast<Type *>(child->type)->replaceBase(mine, theirs);
+      const_cast<Type *>(child->type)->replaceBase(replacementType, declaredType);
       continue;
     }
     declared.push_back(child);
   }
-  for (ClassDecl *child : declared) {
-    for (const ClassField &f : child->fields) {
-      ResultFieldNameIsFree unique = LateClasses::replacedField(cls, replacement, child, f);
-      if (unique.isErr()) {
-        this->state.getDiagnostics().error(f.loc, unique.error().message);
-        return;
-      }
-    }
-    llvm::erase(cls->children, child);
-    replacement->children.push_back(child);
-    child->parent = replacement;
-    this->relink(child);
-  }
-  cls->replacement = replacement;
-  replacement->usedAsValue = true;
+
+  return declared;
+}
+
+void LateClasses::moveChild(ClassDecl *classDecl, ClassDecl *replacement, ClassDecl *child) {
+  llvm::erase(classDecl->children, child);
+  replacement->children.push_back(child);
+  child->parent = replacement;
+  this->relink(child);
 }
 
 }

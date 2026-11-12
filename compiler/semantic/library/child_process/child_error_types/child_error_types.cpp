@@ -9,10 +9,10 @@ ChildErrorTypes::ChildErrorTypes(SemanticState &owner, SemanticParts &all)
   this->builtinModuleTypes = &all.builtinModuleTypes;
 }
 
-const Type *ChildErrorTypes::errorOf(llvm::StringRef fn, bool text, bool shell) {
-  std::string name = fn == "execSync"       ? "Exec"
-                     : fn == "execFileSync" ? (shell ? "ExecFileShell" : "ExecFile")
-                                            : (shell ? "SpawnShell" : "Spawn");
+const Type *ChildErrorTypes::errorOf(llvm::StringRef functionName, bool text, bool shell) {
+  std::string name = functionName == "execSync"       ? "Exec"
+                     : functionName == "execFileSync" ? (shell ? "ExecFileShell" : "ExecFile")
+                                                      : (shell ? "SpawnShell" : "Spawn");
   name += text ? "TextError" : "BytesError";
 
   return this->builtinModuleTypes->named(name);

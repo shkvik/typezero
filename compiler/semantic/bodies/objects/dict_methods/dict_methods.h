@@ -30,7 +30,7 @@ public:
   ResultMapFunctionTyped checkMapStatic(CallExpr *call, MemberExpr *member);
   ResultDictMethodCalled checkDictMethod(CallExpr *call, MemberExpr *member);
   ResultFromEntriesTyped checkFromEntries(CallExpr *call, const Type *expected);
-  ResultDictObjectCalled checkDictObjectCall(CallExpr *call, llvm::StringRef fn);
+  ResultDictObjectCalled checkDictObjectCall(CallExpr *call, llvm::StringRef functionName);
 
 private:
   struct DictCall {
@@ -43,8 +43,8 @@ private:
     bool isMap = false;
   };
 
-  static const Type *iteratedType(const DictCall &dict, DictMethod method);
-  static ResultDictMethodCalled toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result);
+  const Type *iteratedType(const DictCall &dict, DictMethod method) const;
+  ResultDictMethodCalled toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result) const;
 
   ResultDictMethodCalled checkGet(const DictCall &dict);
   ResultDictMethodCalled checkSet(const DictCall &dict);

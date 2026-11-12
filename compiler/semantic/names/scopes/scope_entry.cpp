@@ -6,68 +6,75 @@
 
 namespace tz {
 
-bool ScopeEntry::found() const {
+bool ScopeEntry::isFound() const {
   return !this->form.is<NoEntry>();
 }
 
 VarSymbol *ScopeEntry::var() const {
-  VarSymbol *symbol = nullptr;
   switch (this->form.kind()) {
     case ScopeEntryKind::NO_ENTRY:
     case ScopeEntryKind::ENUM_ENTRY:
     case ScopeEntryKind::CLASS_ENTRY:
-      break;
+      return nullptr;
     case ScopeEntryKind::VAR_ENTRY:
-      symbol = this->form.as<VarEntry>()->var;
-      break;
+      return this->form.as<VarEntry>()->var;
     case ScopeEntryKind::FUNCTION_ENTRY:
-      symbol = this->form.as<FunctionEntry>()->var;
-      break;
+      return this->form.as<FunctionEntry>()->var;
   }
 
-  return symbol;
+  return nullptr;
 }
 
 FuncSymbol *ScopeEntry::func() const {
   const FunctionEntry *function = this->form.as<FunctionEntry>();
+  if (function == nullptr) {
+    return nullptr;
+  }
 
-  return function ? function->func : nullptr;
+  return function->func;
 }
 
 EnumDecl *ScopeEntry::enumDecl() const {
   const EnumEntry *enumEntry = this->form.as<EnumEntry>();
+  if (enumEntry == nullptr) {
+    return nullptr;
+  }
 
-  return enumEntry ? enumEntry->enumDecl : nullptr;
+  return enumEntry->enumDecl;
 }
 
 ClassDecl *ScopeEntry::cls() const {
   const ClassEntry *classEntry = this->form.as<ClassEntry>();
+  if (classEntry == nullptr) {
+    return nullptr;
+  }
 
-  return classEntry ? classEntry->cls : nullptr;
+  return classEntry->cls;
 }
 
 llvm::SMLoc ScopeEntry::loc() const {
-  llvm::SMLoc at;
   switch (this->form.kind()) {
     case ScopeEntryKind::NO_ENTRY:
-      break;
+      return llvm::SMLoc();
     case ScopeEntryKind::VAR_ENTRY:
-      at = this->form.as<VarEntry>()->var->loc;
-      break;
-    case ScopeEntryKind::FUNCTION_ENTRY: {
-      const FunctionEntry *function = this->form.as<FunctionEntry>();
-      at = function->var ? function->var->loc : function->func->loc;
-      break;
-    }
+      return this->form.as<VarEntry>()->var->loc;
+    case ScopeEntryKind::FUNCTION_ENTRY:
+      return this->functionLoc(*this->form.as<FunctionEntry>());
     case ScopeEntryKind::ENUM_ENTRY:
-      at = this->form.as<EnumEntry>()->enumDecl->loc();
-      break;
+      return this->form.as<EnumEntry>()->enumDecl->loc();
     case ScopeEntryKind::CLASS_ENTRY:
-      at = this->form.as<ClassEntry>()->cls->loc();
-      break;
+      return this->form.as<ClassEntry>()->cls->loc();
   }
 
-  return at;
+  return llvm::SMLoc();
+}
+
+llvm::SMLoc ScopeEntry::functionLoc(const FunctionEntry &function) const {
+  if (function.var != nullptr) {
+    return function.var->loc;
+  }
+
+  return function.func->loc;
 }
 
 }

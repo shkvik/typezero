@@ -5,6 +5,7 @@
 
 namespace tz {
 
+class ResultTypes;
 class SemanticParts;
 class CallChecker;
 class ExprChecker;
@@ -20,8 +21,8 @@ public:
   Expr *checkResultMethod(CallExpr *call, MemberExpr *member, const Type *expected);
 
 private:
-  static const Type *halfParam(const Type *half);
-  static bool givesType(const Type *half);
+  const Type *halfParam(const Type *half) const;
+  bool givesType(const Type *half) const;
 
   struct ResultCall {
     CallExpr *call = nullptr;
@@ -33,23 +34,24 @@ private:
     llvm::StringRef name;
   };
 
-  static ResultCall resultCall(CallExpr *call, MemberExpr *member);
+  ResultCall resultCall(CallExpr *call, MemberExpr *member) const;
   void walkArgsPlainly(CallExpr *call);
-  static const Type *wantedType(const Type *expected);
+  const Type *wantedType(const Type *expected) const;
   Expr *checkUnwrapOr(const ResultCall &run);
   const Type *halfCallbackReturn(const ResultCall &run, Expr *&arg, const Type *half,
-                                 const Type *ret);
+                                 const Type *returnType);
   Expr *checkResultMatch(const ResultCall &run, const Type *expected);
   const Type *callbackReturn(const ResultCall &run, const Type *expected);
-  void typeResultCall(const ResultCall &run, const Type *ret);
-  bool returnsResult(const ResultCall &run, const Type *ret);
-  void typeChainedCall(const ResultCall &run, const Type *ret);
-  void typeOrElseCall(const ResultCall &run, const Type *ret);
+  void typeResultCall(const ResultCall &run, const Type *returnType);
+  bool returnsResult(const ResultCall &run, const Type *returnType);
+  void typeChainedCall(const ResultCall &run, const Type *returnType);
+  void typeOrElseCall(const ResultCall &run, const Type *returnType);
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;
   ExprChecker *exprChecker = nullptr;
   FlowChecker *flowChecker = nullptr;
+  ResultTypes *resultTypes = nullptr;
   TypeRelations *typeRelations = nullptr;
   ArgumentChecker *argumentChecker = nullptr;
   CallbackChecker *callbackChecker = nullptr;

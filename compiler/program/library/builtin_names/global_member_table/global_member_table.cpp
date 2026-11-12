@@ -66,6 +66,21 @@ const GlobalMemberInfo kGlobalMembers[] = {
         .name = "asyncIterator",
         .member = GlobalMember::SYMBOL_ASYNC_ITERATOR,
     },
+    {
+        .owner = GlobalName::CRYPTO,
+        .name = "subtle",
+        .member = GlobalMember::CRYPTO_SUBTLE,
+    },
+    {
+        .owner = GlobalName::DATE,
+        .name = "now",
+        .member = GlobalMember::DATE_NOW,
+    },
+    {
+        .owner = GlobalName::PERFORMANCE,
+        .name = "now",
+        .member = GlobalMember::PERFORMANCE_NOW,
+    },
 };
 
 }

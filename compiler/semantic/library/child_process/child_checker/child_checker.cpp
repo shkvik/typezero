@@ -29,11 +29,11 @@ ChildChecker::ChildChecker(SemanticState &owner, SemanticParts &all)
   this->childErrorTypes = &all.childErrorTypes;
 }
 
-const Type *ChildChecker::bufferType() {
+const Type *ChildChecker::bufferType() const {
   return Type::bytesType(Type::Bytes::Buffer);
 }
 
-bool ChildChecker::knownSignal(llvm::StringRef name) {
+bool ChildChecker::knownSignal(llvm::StringRef name) const {
   static const llvm::StringLiteral windows[] = {"SIGHUP",  "SIGINT",   "SIGQUIT", "SIGILL",
                                                 "SIGABRT", "SIGFPE",   "SIGKILL", "SIGSEGV",
                                                 "SIGTERM", "SIGBREAK", "SIGWINCH"};
@@ -50,10 +50,10 @@ bool ChildChecker::knownSignal(llvm::StringRef name) {
   return llvm::is_contained(posix, name);
 }
 
-bool ChildChecker::hasZero(const Expr *expr) {
-  auto *lit = llvm::dyn_cast_or_null<StringLitExpr>(expr);
+bool ChildChecker::hasZero(const Expr *expr) const {
+  auto *literal = llvm::dyn_cast_or_null<StringLitExpr>(expr);
 
-  return lit && lit->value.find(u'\0') != std::u16string::npos;
+  return literal != nullptr && literal->value.find(u'\0') != std::u16string::npos;
 }
 
 namespace {
@@ -76,9 +76,9 @@ const llvm::StringRef kChildOptions[] = {"cwd",
 
 }
 
-Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
+Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc) {
   call->type = Type::error();
-  std::optional<ChildFunction> function = ChildFunctionTable::find(fn);
+  auto function = ChildFunctionTable::find(functionName);
   if (!function.has_value()) {
     for (Expr *&arg : call->args) {
       arg = this->exprChecker->checkExpr(arg);
@@ -87,8 +87,7 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   }
   bool isExec = function == ChildFunction::EXEC_SYNC;
   bool isRejected = this->callChecker->rejectSpread(call);
-  ArgumentChecker::ResultArityMatches arity =
-      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, isExec ? 2 : 3);
+  auto arity = isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, isExec ? 2 : 3);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
@@ -99,7 +98,7 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   ChildRun run{
       .call = call,
       .function = *function,
-      .fn = fn,
+      .fn = functionName,
       .loc = loc,
       .exec = isExec,
       .args = std::vector<Expr *>(ChildArgCount, nullptr),
@@ -108,11 +107,11 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   run.stdio = {ChildPipe, ChildPipe, ChildPipe};
   run.viaShell = isExec;
   this->walkFileArgument(run);
-  std::optional<size_t> optionsAt = this->walkArgumentList(run);
+  auto optionsAt = this->walkArgumentList(run);
   if (!optionsAt.has_value()) {
     return call;
   }
-  if (!this->fsChecker->nodeOptions(call, *optionsAt, fn, kChildOptions, run.options)) {
+  if (!this->fsChecker->nodeOptions(call, *optionsAt, functionName, kChildOptions, run.options)) {
     return call;
   }
   this->walkEncodingOption(run);
@@ -147,15 +146,15 @@ void ChildChecker::walkFileArgument(ChildRun &run) {
   CallExpr *call = run.call;
   call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
   run.args[ChildFile] = call->args[0];
-  if (ChildChecker::hasZero(call->args[0])) {
-    std::string message = ErrorTextChildRun::zeroFile(run.exec);
+  if (this->hasZero(call->args[0])) {
+    auto message = ErrorTextChildRun::zeroFile(run.exec);
     this->state.getDiagnostics().error(call->args[0]->loc(), message);
     run.failed = true;
     return;
   }
   auto *literal = dyn_cast<StringLitExpr>(call->args[0]);
   if (literal != nullptr && literal->value.empty() && !run.exec) {
-    std::string message = ErrorTextChildRun::emptyName();
+    auto message = ErrorTextChildRun::emptyName();
     this->state.getDiagnostics().error(call->args[0]->loc(), message);
     run.failed = true;
   }
@@ -165,7 +164,7 @@ std::optional<size_t> ChildChecker::walkArgumentList(ChildRun &run) {
   CallExpr *call = run.call;
   bool isListGiven = !run.exec && call->args.size() > 1 && !isa<ObjectLitExpr>(call->args[1]);
   if (!run.exec && !isListGiven && call->args.size() > 2) {
-    std::string message = ErrorTextChildRun::optionsAt(run.fn);
+    auto message = ErrorTextChildRun::optionsAt(run.fn);
     this->state.getDiagnostics().error(call->args[2]->loc(), message);
     return std::nullopt;
   }
@@ -188,10 +187,10 @@ void ChildChecker::walkZeroArguments(ChildRun &run, const Expr *given) {
   if (list == nullptr) {
     return;
   }
-  for (size_t i = 0; i < list->elements.size(); ++i) {
-    const ArrayLitExpr::Element &element = list->elements[i];
-    if (!element.spread && ChildChecker::hasZero(element.expr)) {
-      std::string message = ErrorTextChildRun::zeroArg(i);
+  for (size_t index = 0; index < list->elements.size(); ++index) {
+    const ArrayLitExpr::Element &element = list->elements[index];
+    if (!element.spread && this->hasZero(element.expr)) {
+      auto message = ErrorTextChildRun::zeroArg(index);
       this->state.getDiagnostics().error(element.expr->loc(), message);
       run.failed = true;
     }
@@ -205,7 +204,7 @@ void ChildChecker::walkEncodingOption(ChildRun &run) {
   }
   auto *literal = dyn_cast<StringLitExpr>(value);
   if (literal == nullptr) {
-    std::string message = ErrorTextChildOption::encoding(run.fn);
+    auto message = ErrorTextChildOption::encoding(run.fn);
     this->state.getDiagnostics().error(value->loc(), message);
     this->exprChecker->checkExpr(value);
     run.failed = true;
@@ -215,7 +214,7 @@ void ChildChecker::walkEncodingOption(ChildRun &run) {
     return;
   }
   literal->type = Type::string();
-  Expr *number = this->bytesChecker->checkBufferEncoding(literal);
+  auto *number = this->bytesChecker->checkBufferEncoding(literal);
   if (number->type->isError()) {
     run.failed = true;
     return;
@@ -236,7 +235,7 @@ void ChildChecker::walkStdioOption(ChildRun &run) {
   if (isa<StringLitExpr>(value)) {
     return this->walkStdioText(run, value);
   }
-  std::string message = ErrorTextChildOption::stdio(run.fn);
+  auto message = ErrorTextChildOption::stdio(run.fn);
   this->state.getDiagnostics().error(value->loc(), message);
   this->exprChecker->checkExpr(value);
   run.failed = true;
@@ -244,20 +243,20 @@ void ChildChecker::walkStdioOption(ChildRun &run) {
 
 void ChildChecker::walkStdioList(ChildRun &run, const ArrayLitExpr *list) {
   if (list->elements.size() > 3) {
-    std::string message = ErrorTextChildStdio::three();
+    auto message = ErrorTextChildStdio::three();
     this->state.getDiagnostics().error(list->elements[3].expr->loc(), message);
     run.failed = true;
   }
-  for (size_t i = 0; i < list->elements.size() && i < 3; ++i) {
-    const ArrayLitExpr::Element &element = list->elements[i];
+  for (size_t index = 0; index < list->elements.size() && index < 3; ++index) {
+    const ArrayLitExpr::Element &element = list->elements[index];
     std::optional<unsigned> kind =
-        element.spread ? std::nullopt : this->stdioKind(element.expr, unsigned(i));
+        element.spread ? std::nullopt : this->stdioKind(element.expr, unsigned(index));
     if (element.spread) {
-      std::string message = ErrorTextChildStdio::spread();
+      auto message = ErrorTextChildStdio::spread();
       this->state.getDiagnostics().error(element.expr->loc(), message);
     }
     if (kind.has_value()) {
-      run.stdio[i] = *kind;
+      run.stdio[index] = *kind;
     } else {
       run.failed = true;
     }
@@ -265,17 +264,17 @@ void ChildChecker::walkStdioList(ChildRun &run, const ArrayLitExpr *list) {
 }
 
 void ChildChecker::walkStdioText(ChildRun &run, Expr *value) {
-  for (unsigned i = 0; i < 3; ++i) {
-    std::optional<unsigned> kind = this->stdioKind(value, i);
+  for (unsigned index = 0; index < 3; ++index) {
+    auto kind = this->stdioKind(value, index);
     if (!kind.has_value()) {
       run.failed = true;
       return;
     }
-    run.stdio[i] = *kind;
+    run.stdio[index] = *kind;
   }
 }
 
-std::optional<unsigned> ChildChecker::stdioKind(Expr *given, unsigned i) {
+std::optional<unsigned> ChildChecker::stdioKind(Expr *given, unsigned index) {
   if (isa<UndefinedExpr>(given)) {
     return ChildPipe;
   }
@@ -283,7 +282,7 @@ std::optional<unsigned> ChildChecker::stdioKind(Expr *given, unsigned i) {
   if (number != nullptr) {
     number->type = Type::intTy();
     if (number->value > 0x7fffffff) {
-      std::string message = ErrorTextChildStdio::noFd(number->value);
+      auto message = ErrorTextChildStdio::noFd(number->value);
       this->state.getDiagnostics().error(given->loc(), message);
       return std::nullopt;
     }
@@ -291,18 +290,18 @@ std::optional<unsigned> ChildChecker::stdioKind(Expr *given, unsigned i) {
   }
   auto *literal = dyn_cast<StringLitExpr>(given);
   if (literal == nullptr) {
-    std::string message = ErrorTextChildStdio::literal();
+    auto message = ErrorTextChildStdio::literal();
     this->state.getDiagnostics().error(given->loc(), message);
     this->exprChecker->checkExpr(given);
     return std::nullopt;
   }
   literal->type = Type::string();
-  std::string text = ToUtf8::toUtf8(literal->value);
+  auto text = ToUtf8::toUtf8(literal->value);
   if (text == "pipe" || text == "overlapped") {
     return ChildPipe;
   }
   if (text == "inherit") {
-    return ChildInherit + i;
+    return ChildInherit + index;
   }
   if (text == "ignore") {
     return ChildIgnore;
@@ -316,8 +315,8 @@ std::optional<unsigned> ChildChecker::stdioKind(Expr *given, unsigned i) {
 
 void ChildChecker::walkOptionLimits(ChildRun &run) {
   llvm::StringMap<Expr *> &options = run.options;
-  if (ChildChecker::hasZero(options.lookup("cwd"))) {
-    std::string message = ErrorTextChildRun::zeroCwd();
+  if (this->hasZero(options.lookup("cwd"))) {
+    auto message = ErrorTextChildRun::zeroCwd();
     this->state.getDiagnostics().error(options.lookup("cwd")->loc(), message);
     run.failed = true;
   }
@@ -327,7 +326,7 @@ void ChildChecker::walkOptionLimits(ChildRun &run) {
     bool isNegative = unary != nullptr && unary->op == UnaryOp::Neg &&
                       (isa<IntLitExpr>(unary->operand) || isa<FloatLitExpr>(unary->operand));
     if (isNegative) {
-      std::string message = ErrorTextChildRun::negative(limit);
+      auto message = ErrorTextChildRun::negative(limit);
       this->state.getDiagnostics().error(value->loc(), message);
       run.failed = true;
     }
@@ -336,7 +335,7 @@ void ChildChecker::walkOptionLimits(ChildRun &run) {
     for (llvm::StringRef id : {"uid", "gid"}) {
       Expr *value = options.lookup(id);
       if (value != nullptr && !isa<UndefinedExpr>(value)) {
-        std::string message = ErrorTextChildRun::unixId(id);
+        auto message = ErrorTextChildRun::unixId(id);
         this->state.getDiagnostics().error(value->loc(), message);
         run.failed = true;
       }
@@ -344,9 +343,9 @@ void ChildChecker::walkOptionLimits(ChildRun &run) {
   }
   auto *signal = dyn_cast_or_null<StringLitExpr>(options.lookup("killSignal"));
   if (signal != nullptr) {
-    std::string written = ToUtf8::toUtf8(signal->value);
-    if (!ChildChecker::knownSignal(written)) {
-      std::string message = ErrorTextChildRun::noSignal(written);
+    auto written = ToUtf8::toUtf8(signal->value);
+    if (!this->knownSignal(written)) {
+      auto message = ErrorTextChildRun::noSignal(written);
       this->state.getDiagnostics().error(signal->loc(), message);
       run.failed = true;
     }
@@ -363,7 +362,7 @@ Expr *ChildChecker::optionValue(ChildRun &run, llvm::StringRef name, const Type 
 }
 
 void ChildChecker::fillPlainOptions(ChildRun &run) {
-  const Type *string = Type::string();
+  const auto *string = Type::string();
   std::vector<Expr *> &args = run.args;
   args[ChildCwd] = this->optionValue(run, "cwd", string);
   args[ChildEnv] =
@@ -379,13 +378,13 @@ void ChildChecker::fillPlainOptions(ChildRun &run) {
 }
 
 void ChildChecker::walkInputOption(ChildRun &run) {
-  const Type *string = Type::string();
+  const auto *string = Type::string();
   Expr *value = run.options.lookup("input");
   if (value == nullptr) {
     run.args[ChildInput] = this->absentValue(run.loc, string);
     return;
   }
-  Expr *input = this->exprChecker->checkExpr(value, string);
+  auto *input = this->exprChecker->checkExpr(value, string);
   if (input->type->nonOptional()->isStringLiteral()) {
     input = this->typeRelations->coerce(input, string);
   }
@@ -395,7 +394,7 @@ void ChildChecker::walkInputOption(ChildRun &run) {
     return;
   }
   if (!type->isString() && !type->isByteView()) {
-    std::string message = ErrorTextChildOption::input(run.fn, input->type->name());
+    auto message = ErrorTextChildOption::input(run.fn, input->type->name());
     this->state.getDiagnostics().error(input->loc(), message);
     run.failed = true;
     return;
@@ -405,20 +404,20 @@ void ChildChecker::walkInputOption(ChildRun &run) {
   bool isBufferText = type->isString() && run.encoding == ChildBytes && encoding != nullptr &&
                       !isa<UndefinedExpr>(encoding);
   if (isBufferText) {
-    std::string message = ErrorTextChildOption::bufferText();
+    auto message = ErrorTextChildOption::bufferText();
     this->state.getDiagnostics().error(input->loc(), message);
     run.failed = true;
   }
 }
 
 void ChildChecker::walkKillSignalOption(ChildRun &run) {
-  const Type *string = Type::string();
+  const auto *string = Type::string();
   Expr *value = run.options.lookup("killSignal");
   if (value == nullptr) {
     run.args[ChildKillSignal] = this->absentValue(run.loc, string);
     return;
   }
-  Expr *signal = this->exprChecker->checkExpr(value, string);
+  auto *signal = this->exprChecker->checkExpr(value, string);
   const Type *type = signal->type->nonOptional();
   if (type->isStringLiteral() || type->isString()) {
     run.args[ChildKillSignal] = this->typeRelations->coerce(signal, Type::optional(string));
@@ -430,14 +429,14 @@ void ChildChecker::walkKillSignalOption(ChildRun &run) {
     return;
   }
   if (!type->isError()) {
-    std::string message = ErrorTextChildOption::killSignal(signal->type->name());
+    auto message = ErrorTextChildOption::killSignal(signal->type->name());
     this->state.getDiagnostics().error(signal->loc(), message);
   }
   run.failed = true;
 }
 
 void ChildChecker::walkShellOption(ChildRun &run) {
-  const Type *string = Type::string();
+  const auto *string = Type::string();
   Expr *value = run.options.lookup("shell");
   if (value == nullptr) {
     run.args[ChildShell] = this->absentValue(run.loc, string);
@@ -447,7 +446,7 @@ void ChildChecker::walkShellOption(ChildRun &run) {
   if (written != nullptr) {
     run.viaShell = run.viaShell || written->value;
   }
-  Expr *shell = this->exprChecker->checkExpr(value, string);
+  auto *shell = this->exprChecker->checkExpr(value, string);
   const Type *type = shell->type->nonOptional();
   bool isBool = type->isBool() || (type->isLiteral() && type->literalBase()->isBool());
   if (type->isStringLiteral() || type->isString()) {
@@ -459,7 +458,7 @@ void ChildChecker::walkShellOption(ChildRun &run) {
     return this->walkExecShell(run, shell);
   }
   if (isBool && !isa<BoolLitExpr>(value)) {
-    std::string message = ErrorTextChildOption::shellFlag(run.fn);
+    auto message = ErrorTextChildOption::shellFlag(run.fn);
     this->state.getDiagnostics().error(shell->loc(), message);
     run.failed = true;
     return;
@@ -469,7 +468,7 @@ void ChildChecker::walkShellOption(ChildRun &run) {
     return;
   }
   if (!type->isError()) {
-    std::string message = ErrorTextChildOption::shell(shell->type->name());
+    auto message = ErrorTextChildOption::shell(shell->type->name());
     this->state.getDiagnostics().error(shell->loc(), message);
   }
   run.failed = true;
@@ -481,7 +480,7 @@ void ChildChecker::walkExecShell(ChildRun &run, Expr *shell) {
     run.args[ChildShell] = this->absentValue(run.loc, Type::string());
     return;
   }
-  std::string message = ErrorTextChildOption::execShell();
+  auto message = ErrorTextChildOption::execShell();
   this->state.getDiagnostics().error(shell->loc(), message);
   run.failed = true;
 }
@@ -498,10 +497,10 @@ Expr *ChildChecker::finishChildCall(ChildRun &run) {
   call->spread.clear();
 
   bool isTextOutput = run.encoding != ChildBytes;
-  const Type *text = isTextOutput ? Type::string() : ChildChecker::bufferType();
-  const Type *failure = this->childErrorTypes->errorOf(run.fn, isTextOutput, run.viaShell);
+  const Type *text = isTextOutput ? Type::string() : this->bufferType();
+  const auto *failure = this->childErrorTypes->errorOf(run.fn, isTextOutput, run.viaShell);
   if (run.function == ChildFunction::SPAWN_SYNC) {
-    const Type *spawned = this->childErrorTypes->spawnResult(isTextOutput);
+    const auto *spawned = this->childErrorTypes->spawnResult(isTextOutput);
     call->target = BuiltinCall{.builtin = Builtin::ChildSpawnSync};
     call->type = Type::result(spawned, failure);
     return call;

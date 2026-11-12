@@ -20,10 +20,10 @@ public:
 private:
   using ResultKeyOptionsGiven = Result<int, KeyPairCheckerKeyOptionsError>;
 
-  static ResultKeyOptionsGiven keyOptions(int which, llvm::StringRef type,
-                                          const llvm::StringMap<Expr *> &options);
+  ResultKeyOptionsGiven keyOptions(int which, llvm::StringRef type,
+                                   const llvm::StringMap<Expr *> &options) const;
 
-  static std::optional<std::string> literalOf(const Expr *e);
+  std::optional<std::string> literalOf(const Expr *expr) const;
 
   struct KeyPairKind {
     int which;
@@ -45,7 +45,7 @@ private:
     Expr *passphrase;
   };
 
-  static llvm::ArrayRef<llvm::StringRef> pairTypeNames();
+  llvm::ArrayRef<llvm::StringRef> pairTypeNames() const;
   std::optional<KeyPairKind> keyPairKind(CallExpr *call, llvm::SMLoc loc);
   bool keyPairOptionsRead(CallExpr *call, llvm::StringRef shown, llvm::StringMap<Expr *> &options);
   std::optional<KeyPairNumbers> keyPairNumbers(llvm::SMLoc loc, int which,
@@ -59,7 +59,7 @@ private:
                         const llvm::StringMap<Expr *> &e, KeyEncoding &chosen);
   bool encodingCipherRead(const Expr *encoding, const llvm::StringMap<Expr *> &e,
                           KeyEncoding &chosen);
-  static const Type *encodedKeyType(int format);
+  const Type *encodedKeyType(int format) const;
 
   SemanticState &state;
   CryptoArgs *cryptoArgs = nullptr;

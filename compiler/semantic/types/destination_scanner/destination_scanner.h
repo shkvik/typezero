@@ -12,9 +12,12 @@ class Scopes;
 class CallChecker;
 class Destination;
 class TypeResolver;
+class TypeRelations;
+class ClassDeclarer;
 class IterableChecker;
 class PredicateChecker;
 
+struct ScopeEntry;
 class DestinationScan;
 
 enum class ScanStepKind {
@@ -57,7 +60,7 @@ struct ScanExpr {
 
 struct VarDeclare {
   static constexpr ScanStepKind kind = ScanStepKind::VAR_DECLARE;
-  const VarDeclarator *d;
+  const VarDeclarator *declarator;
 };
 
 struct DeclareName {
@@ -82,7 +85,7 @@ struct ForOfRest {
 
 struct ScanFunction {
   static constexpr ScanStepKind kind = ScanStepKind::FUNCTION;
-  const FunctionDecl *fn;
+  const FunctionDecl *functionDecl;
 };
 
 struct ScanParam {
@@ -111,74 +114,97 @@ struct ScanRun {
 
 class DestinationScanner {
 public:
-  static bool isResultLiteral(const CallExpr *call);
   DestinationScanner(SemanticState &owner, SemanticParts &all);
 
+  bool isResultLiteral(const CallExpr *call) const;
   void scanDestinations(const Stmt *stmt, DestinationScan &scan);
-  bool scanDestinations(llvm::ArrayRef<Stmt *> stmts, DestinationScan &scan);
   void scanDestinations(const Expr *expr, const Type *sink, DestinationScan &scan);
-  void scanFunctionDestinations(const FunctionDecl *fn, DestinationScan &scan);
-  const Type *peekType(const Expr *expr, const DestinationScan &scan) const;
-  const Type *peekName(llvm::StringRef name, const DestinationScan &scan) const;
-  std::vector<const Type *> calleeParams(const CallExpr *call, const DestinationScan &scan);
 
 private:
-  static NodeChildren<const Expr *> peekParts(const Expr *expr);
-  static const Type *resultPeekType(const CallExpr *call, std::vector<const Type *> &answers);
+  void runScan(ScanStep first, DestinationScan &scan);
+  void applyStep(const ScanStep &step, ScanRun &run);
+
+  void scanStmt(const Stmt *stmt, ScanRun &run);
+  void scanParam(const Param *param, ScanRun &run);
+  void scanExpr(const ScanExpr &scanned, ScanRun &run);
+  void startList(const StartList &list, ScanRun &run);
+  void listItem(const ListItem &item, ScanRun &run) const;
+  void forRest(const ForStmt *loop, ScanRun &run) const;
+  void assignValue(const AssignExpr *assign, ScanRun &run);
+  void forOfRest(const ForOfStmt *loop, ScanRun &run) const;
+  void pushIfParts(const IfStmt *ifStmt, ScanRun &run) const;
+  void pushForParts(const ForStmt *loop, ScanRun &run) const;
+  void varDeclare(const VarDeclarator *declarator, ScanRun &run);
+  void functionEnd(const Type *outerReturns, ScanRun &run) const;
+  void pushWhileParts(const WhileStmt *loop, ScanRun &run) const;
+  void pushForOfParts(const ForOfStmt *loop, ScanRun &run) const;
+  void scanSwitch(const SwitchStmt *switchStmt, ScanRun &run) const;
+  void scanFunction(const FunctionDecl *functionDecl, ScanRun &run);
+  void pushDoWhileParts(const DoWhileStmt *loop, ScanRun &run) const;
+  void pushDeclarators(const VarDeclStmt *varDecl, ScanRun &run) const;
+  void pushReturnValue(const ReturnStmt *returnStmt, ScanRun &run) const;
+
+  ScanExpr untyped(const Expr *expr) const;
+  std::vector<ScanExpr> newParts(const NewExpr *create, ScanRun &run);
+  std::vector<ScanExpr> callParts(const CallExpr *call, ScanRun &run);
+  std::vector<ScanExpr> assignParts(const AssignExpr *assign, ScanRun &run);
+  std::vector<ScanExpr> templateParts(const TemplateExpr *templateExpr) const;
+  std::vector<ScanExpr> exprParts(const Expr *expr, const Type *sink, ScanRun &run);
+  std::vector<ScanExpr> binaryParts(const BinaryExpr *binary, const Type *sink) const;
+  std::vector<ScanExpr> arrayParts(const ArrayLitExpr *literal, const Type *object) const;
+  std::vector<ScanExpr> objectParts(const ObjectLitExpr *literal, const Type *object) const;
+  std::vector<ScanExpr> sequenceParts(const SequenceExpr *sequence, const Type *sink) const;
+  std::vector<ScanExpr> nameParts(const NameExpr *name, const Type *sink, ScanRun &run) const;
+  std::vector<ScanExpr> conditionalParts(const ConditionalExpr *conditional,
+                                         const Type *sink) const;
+
+  const Type *peekSubtle() const;
+  const Type *writtenParamType(const Param &param);
+  const Type *elementPeekType(const Type *object) const;
+  NodeChildren<const Expr *> peekParts(const Expr *expr) const;
+  const FuncSymbol *calledFunction(const ScopeEntry &entry) const;
+  const Type *writtenReturnType(const FunctionDecl *functionDecl);
+  const Type *choicePeekType(std::vector<const Type *> &answers) const;
+  bool isDeclaringName(const Stmt *stmt, llvm::StringRef name) const;
+  bool hasFunctionField(const Type *object, llvm::StringRef name) const;
+  const Type *peekType(const Expr *expr, const DestinationScan &scan) const;
+  const Type *peekName(llvm::StringRef name, const DestinationScan &scan) const;
+  const Type *memberPeekType(const MemberExpr *member, const Type *object) const;
+  bool hasParamNamed(const FunctionDecl *functionDecl, llvm::StringRef name) const;
+  const Type *namePeekType(const NameExpr *name, const DestinationScan &scan) const;
+  bool isDeclaringFunction(llvm::ArrayRef<Stmt *> stmts, llvm::StringRef name) const;
+  const ClassDecl *namedClass(const Expr *object, const DestinationScan &scan) const;
+  std::vector<const Type *> functionTypeParams(const Type *type, size_t argCount) const;
+  const Type *resultHalf(const CallExpr *call, std::vector<const Type *> &answers) const;
+  std::vector<const Type *> calleeParams(const CallExpr *call, const DestinationScan &scan);
+  const FuncSymbol *soleConstructor(const NewExpr *create, const DestinationScan &scan) const;
+  const Type *resultPeekType(const CallExpr *call, std::vector<const Type *> &answers) const;
+  std::vector<const Type *> dictMethodParams(const Type *object, llvm::StringRef name) const;
+  const Type *propertySink(const ObjectLitExpr::Property &property, const Type *object) const;
+  const Type *plainAssignType(const AssignExpr *assign, const Expr *side,
+                              const DestinationScan &scan) const;
+  const Type *elementSink(const ArrayLitExpr::Element &element, size_t index,
+                          const Type *object) const;
   const Type *nodePeekType(const Expr *expr, const DestinationScan &scan,
                            std::vector<const Type *> &answers) const;
-  const Type *memberPeekType(const MemberExpr *member, const Type *object) const;
-  static void listItem(const ListItem &item, ScanRun &run);
-  static bool declaresName(const Stmt *stmt, llvm::StringRef name);
-  static void scanSwitch(const SwitchStmt *s, ScanRun &run);
-  static void forRest(const ForStmt *loop, ScanRun &run);
-  static void forOfRest(const ForOfStmt *loop, ScanRun &run);
-  static void functionEnd(const Type *outerReturns, ScanRun &run);
-  static std::vector<ScanExpr> arrayParts(const ArrayLitExpr *lit, const Type *object);
-  static void pushIfParts(const IfStmt *s, ScanRun &run);
-  static void pushForParts(const ForStmt *s, ScanRun &run);
-  static void pushWhileParts(const WhileStmt *s, ScanRun &run);
-  static void pushForOfParts(const ForOfStmt *s, ScanRun &run);
-  static void pushReturnValue(const ReturnStmt *s, ScanRun &run);
-  static void pushDoWhileParts(const DoWhileStmt *s, ScanRun &run);
-  static void pushDeclarators(const VarDeclStmt *decl, ScanRun &run);
-  static std::vector<ScanExpr> templateParts(const TemplateExpr *tmpl);
-  static std::vector<ScanExpr> binaryParts(const BinaryExpr *bin, const Type *sink);
-  static std::vector<ScanExpr> objectParts(const ObjectLitExpr *lit, const Type *object);
-  static std::vector<ScanExpr> sequenceParts(const SequenceExpr *seq, const Type *sink);
-  static std::vector<ScanExpr> nameParts(const NameExpr *name, const Type *sink, ScanRun &run);
-  static std::vector<ScanExpr> conditionalParts(const ConditionalExpr *cond, const Type *sink);
-  static std::vector<const Type *> dictMethodParams(const Type *object, llvm::StringRef name);
-  static std::vector<const Type *> arrayMethodParams(const Type *array, llvm::StringRef name,
-                                                     size_t argCount);
-  static std::vector<const Type *> spreadParams(llvm::ArrayRef<const Type *> params, bool hasRest,
-                                                size_t argCount);
-  static std::vector<const Type *> methodParams(const ClassDecl *cls, llvm::StringRef name,
-                                                bool isStatic, size_t argCount);
+  std::vector<const Type *> arrayMethodParams(const Type *array, llvm::StringRef name,
+                                              size_t argCount) const;
+  std::vector<const Type *> spreadParams(llvm::ArrayRef<const Type *> params, bool hasRest,
+                                         size_t argCount) const;
+  std::vector<const Type *> soleMethodParams(llvm::ArrayRef<FunctionDecl *> methods,
+                                             size_t argCount) const;
   std::vector<const Type *> nameCalleeParams(const CallExpr *call, const NameExpr *name,
                                              const DestinationScan &scan);
   std::vector<const Type *> memberCalleeParams(const CallExpr *call, const MemberExpr *member,
                                                const DestinationScan &scan);
-
-  void runScan(ScanStep first, DestinationScan &scan);
-  void applyStep(const ScanStep &step, ScanRun &run);
-  void startList(const StartList &list, ScanRun &run);
-  void scanStmt(const Stmt *stmt, ScanRun &run);
-  void varDeclare(const VarDeclarator *d, ScanRun &run);
-  void scanFunction(const FunctionDecl *fn, ScanRun &run);
-  void scanParam(const Param *param, ScanRun &run);
-  void assignValue(const AssignExpr *assign, ScanRun &run);
-  void scanExpr(const ScanExpr &scanned, ScanRun &run);
-  std::vector<ScanExpr> exprParts(const Expr *expr, const Type *sink, ScanRun &run);
-  std::vector<ScanExpr> assignParts(const AssignExpr *assign, ScanRun &run);
-  std::vector<ScanExpr> callParts(const CallExpr *call, ScanRun &run);
-  std::vector<ScanExpr> newParts(const NewExpr *create, ScanRun &run);
 
   SemanticState &state;
   Scopes *scopes = nullptr;
   CallChecker *callChecker = nullptr;
   Destination *destination = nullptr;
   TypeResolver *typeResolver = nullptr;
+  TypeRelations *typeRelations = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
   IterableChecker *iterableChecker = nullptr;
   PredicateChecker *predicateChecker = nullptr;
 };

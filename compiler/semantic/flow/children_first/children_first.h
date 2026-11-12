@@ -12,15 +12,31 @@ class ChildrenFirst {
 public:
   template <class Node>
   static std::vector<Node> order(Node root, NodeChildren<Node> (*childrenOf)(Node)) {
-    std::vector<Node> nodes;
-    std::vector<Node> stack = {root};
+    auto nodes = std::vector<Node>();
+    auto stack = std::vector<Node>{root};
     while (!stack.empty()) {
       Node next = stack.back();
       stack.pop_back();
       nodes.push_back(next);
-      for (Node child : childrenOf(next)) {
-        stack.push_back(child);
-      }
+      auto children = childrenOf(next);
+      stack.insert(stack.end(), children.begin(), children.end());
+    }
+    std::reverse(nodes.begin(), nodes.end());
+
+    return nodes;
+  }
+
+  template <class Node, class Owner>
+  static std::vector<Node> order(Node root, const Owner *owner,
+                                 NodeChildren<Node> (Owner::*childrenOf)(Node) const) {
+    auto nodes = std::vector<Node>();
+    auto stack = std::vector<Node>{root};
+    while (!stack.empty()) {
+      Node next = stack.back();
+      stack.pop_back();
+      nodes.push_back(next);
+      auto children = (owner->*childrenOf)(next);
+      stack.insert(stack.end(), children.begin(), children.end());
     }
     std::reverse(nodes.begin(), nodes.end());
 
@@ -28,7 +44,7 @@ public:
   }
 
   template <class Answer> static Answer takeAnswer(std::vector<Answer> &answers) {
-    Answer answer = std::move(answers.back());
+    auto answer = std::move(answers.back());
     answers.pop_back();
 
     return answer;
@@ -37,8 +53,8 @@ public:
   template <class Answer>
   static std::vector<Answer> takeAnswers(std::vector<Answer> &answers, size_t count) {
     auto first = answers.end() - static_cast<std::ptrdiff_t>(count);
-    std::vector<Answer> taken(std::make_move_iterator(first),
-                              std::make_move_iterator(answers.end()));
+    auto taken =
+        std::vector<Answer>(std::make_move_iterator(first), std::make_move_iterator(answers.end()));
     answers.erase(first, answers.end());
 
     return taken;

@@ -32,11 +32,11 @@ class VarChecker {
 public:
   VarChecker(SemanticState &owner, SemanticParts &all);
 
-  static std::vector<const Stmt *> followingStatements(llvm::ArrayRef<Stmt *> stmts, size_t i);
+  std::vector<const Stmt *> followingStatements(llvm::ArrayRef<Stmt *> stmts, size_t index) const;
 
-  void walkVarDecl(VarDeclStmt *decl);
-  void noteUntyped(VarSymbol *var, bool initUndefined);
-  void assignedUntyped(const VarSymbol *var, const Type *type);
+  void walkVarDecl(VarDeclStmt *varDecl);
+  void noteUntyped(VarSymbol *variable, bool initUndefined);
+  void assignedUntyped(const VarSymbol *variable, const Type *type);
   void reportUntyped();
   void reportUncheckedResults();
 
@@ -47,27 +47,27 @@ private:
   using ResultResultCheck = Result<const VarSymbol *, VarCheckerResultCheckedError>;
   using ResultVarHasTypes = Result<const Type *, VarCheckerVarTypedError>;
 
-  static ResultInitHasType initHasType(const VarDeclStmt *decl, const VarDeclarator &d,
-                                       const Type *type);
-  static ResultConstValued constValue(const VarDeclStmt *decl, const VarDeclarator &d);
-  static ResultDestructure destructurable(const VarDeclarator &d, const Type *type);
-  static ResultResultCheck resultChecked(const VarSymbol *var);
-  static ResultVarHasTypes varTyped(const Untyped &u, const Type *type);
-  static bool isTextChoice(const Expr *expr);
-
-  static bool isFreshArray(const Expr *value);
-  static void nameFunctionValue(VarDeclarator &d);
-  static const Expr *withoutImplicitCasts(const Expr *expr);
-  static std::vector<std::u16string> literalKeyTexts(const Expr *key);
-  std::vector<llvm::StringRef> reflectedNames(const Expr *key);
+  ResultInitHasType checkInitHasType(const VarDeclStmt *varDecl, const VarDeclarator &declarator,
+                                     const Type *type) const;
+  ResultConstValued checkConstValue(const VarDeclStmt *varDecl,
+                                    const VarDeclarator &declarator) const;
+  ResultDestructure checkDestructurable(const VarDeclarator &declarator, const Type *type) const;
+  ResultResultCheck resultChecked(const VarSymbol *variable) const;
+  ResultVarHasTypes varTyped(const Untyped &untyped, const Type *type) const;
+  std::string typeHint(const Untyped &untyped, const Type *type) const;
+  bool isTextChoice(const Expr *expr) const;
+  const Type *declaredType(const VarDeclarator &declarator);
   void walkDeclarator(const DeclaratorPlace &place);
-  void walkValueDeclarator(const DeclaratorPlace &place);
   DeclaratorForm declaratorForm(const DeclaratorPlace &place);
-  void rememberReflection(VarDeclarator &d, const Expr *value);
-  void liftGenericFunction(const DeclaratorPlace &place, FunctionDecl *fn);
+  FuncSymbol *aliasedGeneric(Expr *init);
   void declareGenericAlias(const DeclaratorPlace &place, FuncSymbol *generic);
-  void declareConstFunction(const DeclaratorPlace &place, FunctionExpr *function);
+  void liftGenericFunction(const DeclaratorPlace &place, FunctionDecl *functionDecl);
+  void declareConstFunction(const DeclaratorPlace &place, FunctionExpr *functionExpr);
+  Expr *checkConstFunction(FunctionExpr *functionExpr, const Type *declared);
+  void nameFunctionValue(VarDeclarator &declarator) const;
+  void walkValueDeclarator(const DeclaratorPlace &place);
   void findDestination(const DeclaratorPlace &place, VariableValue &variable);
+  std::vector<const Stmt *> followingInBlock(const DeclaratorPlace &place) const;
   void declareTimerEarly(const DeclaratorPlace &place, VariableValue &variable);
   void walkVariableValue(const DeclaratorPlace &place, VariableValue &variable);
   void walkInit(const DeclaratorPlace &place, VariableValue &variable);
@@ -78,14 +78,27 @@ private:
   void destructureIterator(const DeclaratorPlace &place, VariableValue &variable);
   void reportPatternShape(const DeclaratorPlace &place, VariableValue &variable);
   void declareVariable(const DeclaratorPlace &place, const VariableValue &variable);
-  void markUnsharedArray(const VarDeclarator &d, const VariableValue &variable);
+  void rememberReflection(VarDeclarator &declarator, const Expr *value);
+  void rememberReflectedNames(VarDeclarator &declarator, const Expr *key);
+  std::vector<llvm::StringRef> reflectedNames(const Expr *key);
+  std::vector<std::u16string> literalKeyTexts(const Expr *key) const;
+  std::vector<const Type *> keyMembers(const Type *keyType) const;
+  void markUnsharedArray(const VarDeclarator &declarator, const VariableValue &variable);
+  bool isFreshArray(const Expr *value) const;
   void rememberConstLiteral(const DeclaratorPlace &place, const VariableValue &variable);
+  bool isLiteralValue(const Expr *value) const;
   void rememberResultVariable(const DeclaratorPlace &place, const VariableValue &variable);
   void rememberFixedLength(const DeclaratorPlace &place, const VariableValue &variable);
   void rememberConstNumber(const DeclaratorPlace &place, const VariableValue &variable);
   void rememberConstText(const DeclaratorPlace &place, const VariableValue &variable);
+  bool isExported(llvm::StringRef name) const;
+  bool isExportingName(const ExportDecl &exportDecl, llvm::StringRef name) const;
+  void reportUncheckedResult(const VarSymbol *variable);
+  bool isUntypedHere(const Untyped &untyped) const;
+  void reportUntypedVariable(const Untyped &untyped);
+  const Type *assignedType(const Untyped &untyped) const;
+  const Type *commonAssigned(const Type *type, const Type *candidate) const;
 
-  bool exported(llvm::StringRef name) const;
   SemanticState &state;
   Scopes *scopes = nullptr;
   CallCycles *callCycles = nullptr;

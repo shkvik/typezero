@@ -9,22 +9,22 @@ namespace tz {
 
 class FunctionStack {
 public:
-  void enterFunction(FunctionDecl *fn);
+  void enterFunction(FunctionDecl *functionDecl);
   void leaveFunction();
   FunctionDecl *getCurrentDecl() const;
   FunctionDecl *getOutermostDecl() const;
   bool isInsideFunction() const;
-  bool isCheckingFunction(const FunctionDecl *fn) const;
+  bool isCheckingFunction(const FunctionDecl *functionDecl) const;
   size_t getFunctionDepth() const;
   std::vector<FunctionDecl *> getFunctions() const;
-  void rememberCurrentFunction(FuncSymbol *fn);
+  void rememberCurrentFunction(FuncSymbol *function);
   FuncSymbol *getCurrentFunction() const;
   void enterGroup(NestedGroup *group);
   void leaveGroup();
   bool isAssignedInGroup(llvm::StringRef name) const;
   void rememberReturnCollector(std::vector<ReturnStmt *> *returns);
   std::vector<ReturnStmt *> *getReturnCollector() const;
-  void addCollectedReturn(ReturnStmt *ret);
+  void addCollectedReturn(ReturnStmt *returnStmt);
   std::vector<ReturnStmt *> getCollectedReturns() const;
   void rememberYieldCollector(std::vector<YieldExpr *> *yields);
   std::vector<YieldExpr *> *getYieldCollector() const;
@@ -33,7 +33,7 @@ public:
   void enterTrial();
   void leaveTrial();
   bool isInsideTrial() const;
-  void rememberEarlyFunction(const FuncSymbol *fn);
+  void rememberEarlyFunction(const FuncSymbol *function);
   void forgetEarlyFunction();
   const FuncSymbol *getEarlyFunction() const;
   void enterCallback(const Signature *expected);

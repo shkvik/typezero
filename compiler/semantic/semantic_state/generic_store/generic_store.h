@@ -42,8 +42,8 @@ public:
                              ClassDecl *instance);
   ClassDecl *findClassInstance(const ClassDecl *generic,
                                const std::vector<const Type *> &args) const;
-  void rememberClassDefaults(const ClassDecl *cls, std::vector<const Type *> defaults);
-  std::vector<const Type *> getClassDefaults(const ClassDecl *cls) const;
+  void rememberClassDefaults(const ClassDecl *classDecl, std::vector<const Type *> defaults);
+  std::vector<const Type *> getClassDefaults(const ClassDecl *classDecl) const;
   void rememberClassCheck(const ClassDecl *instance, InstanceRecord *check);
   InstanceRecord *findClassCheck(const ClassDecl *instance) const;
   void addUnfilledClass(ClassDecl *instance);
@@ -53,9 +53,10 @@ public:
   int countFillingOf(const ClassDecl *generic) const;
   void markEndlessReported(const ClassDecl *generic);
   bool isEndlessReported(const ClassDecl *generic) const;
-  void rememberConstructorFunction(const ClassDecl *generic, const FunctionDecl *ctor,
-                                   FuncSymbol *fn);
-  FuncSymbol *findConstructorFunction(const ClassDecl *generic, const FunctionDecl *ctor) const;
+  void rememberConstructorFunction(const ClassDecl *generic, const FunctionDecl *constructor,
+                                   FuncSymbol *function);
+  FuncSymbol *findConstructorFunction(const ClassDecl *generic,
+                                      const FunctionDecl *constructor) const;
   void enterInstanceLoc(llvm::SMLoc loc);
   void leaveInstanceLoc();
   llvm::SMLoc getInstanceLoc() const;

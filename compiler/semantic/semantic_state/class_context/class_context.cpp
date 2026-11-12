@@ -2,8 +2,8 @@
 
 namespace tz {
 
-void ClassContext::enterClass(ClassDecl *cls) {
-  this->classes.push_back(cls);
+void ClassContext::enterClass(ClassDecl *classDecl) {
+  this->classes.push_back(classDecl);
 }
 
 void ClassContext::leaveClass() {
@@ -14,8 +14,8 @@ ClassDecl *ClassContext::getCurrentClass() const {
   return this->classes.empty() ? nullptr : this->classes.back();
 }
 
-void ClassContext::enterInitializer(FunctionDecl *fn, const VarSymbol *self) {
-  this->initializers.push_back({fn, self});
+void ClassContext::enterInitializer(FunctionDecl *functionDecl, const VarSymbol *self) {
+  this->initializers.push_back({functionDecl, self});
   this->closureThisReady.push_back(true);
 }
 
@@ -60,12 +60,12 @@ void ClassContext::forgetSetStatics() {
   this->setStatics.clear();
 }
 
-void ClassContext::markStaticSet(const VarSymbol *var) {
-  this->setStatics.insert(var);
+void ClassContext::markStaticSet(const VarSymbol *variable) {
+  this->setStatics.insert(variable);
 }
 
-bool ClassContext::isStaticSet(const VarSymbol *var) const {
-  return this->setStatics.contains(var);
+bool ClassContext::isStaticSet(const VarSymbol *variable) const {
+  return this->setStatics.contains(variable);
 }
 
 void ClassContext::rememberThisMember(llvm::StringRef name) {

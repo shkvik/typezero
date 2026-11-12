@@ -19,6 +19,9 @@ enum class GlobalMember {
   OBJECT_GROUP_BY,
   SYMBOL_ITERATOR,
   SYMBOL_ASYNC_ITERATOR,
+  CRYPTO_SUBTLE,
+  DATE_NOW,
+  PERFORMANCE_NOW,
 };
 
 struct GlobalMemberInfo {

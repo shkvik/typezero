@@ -45,10 +45,10 @@ private:
   using ResultDecodedInput = Result<const Type *, BufferCheckerDecodedInputError>;
   using ResultVarValueFits = Result<const Expr *, BufferCheckerVarValueFitsError>;
 
-  static ResultDecodedInput decodedInput(const Type *type);
-  static ResultCountOfBytes countOfBytes(std::optional<int64_t> count, llvm::StringRef name);
-  static std::optional<std::u16string> literalText(const Expr *e);
-  static Expr *toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result);
+  ResultDecodedInput decodedInput(const Type *type) const;
+  ResultCountOfBytes countOfBytes(std::optional<int64_t> count, llvm::StringRef name) const;
+  std::optional<std::u16string> literalText(const Expr *expr) const;
+  Expr *toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result) const;
 
   Expr *checkBytesArg(Expr *arg);
   Expr *checkEncode(CallExpr *call, MemberExpr *member);

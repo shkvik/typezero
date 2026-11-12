@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/builtin_names/prelude_type_table/prelude_type_table.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
@@ -13,7 +14,7 @@ public:
   Prelude(SemanticState &owner, SemanticParts &all);
 
   void declarePrelude();
-  const Type *builtinType(llvm::StringRef name);
+  const Type *builtinType(PreludeType type);
   const Type *builtinType(llvm::StringRef name, std::vector<const Type *> args);
 
 private:

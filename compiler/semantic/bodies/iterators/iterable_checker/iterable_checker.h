@@ -6,6 +6,8 @@
 
 namespace tz {
 
+class ClassBases;
+class IntlChecker;
 class SemanticParts;
 class FlowChecker;
 class TypeDeclarer;
@@ -14,6 +16,7 @@ class ClassDeclarer;
 class TypeRelations;
 class ReturnInferrer;
 class FunctionChecker;
+class GeneratorChecker;
 class MethodCallChecker;
 class GenericInstantiator;
 
@@ -30,25 +33,29 @@ public:
   const Type *nextValueType(const Type *type);
   const Type *elementTypeOf(const Type *type);
   FuncSymbol *iterateFunction();
-  static const Type *iteratorResultType(const Type *value, const Type *returned);
-  ResultIterableParam iterableParam(FunctionDecl *fn, FuncSymbol *sym, const TypeRef &ref);
+  const Type *iteratorResultType(const Type *value, const Type *returned) const;
+  ResultIterableParam iterableParam(FunctionDecl *functionDecl, FuncSymbol *function,
+                                    const TypeRef &ref);
   bool isIterableRef(const TypeRef &ref) const;
 
 private:
   using ResultIteratorGiven = Result<const Expr *, IterableCheckerIteratorGivenError>;
   using ResultAsyncIterator = Result<const Expr *, IterableCheckerAsyncIteratorGivenError>;
 
-  static ResultIteratorGiven iteratorGiven(const Type *type, const Expr *result);
-  static ResultAsyncIterator asyncIteratorGiven(const Type *type, const Expr *result);
+  ResultIteratorGiven iteratorGiven(const Type *type, const Expr *result) const;
+  ResultAsyncIterator asyncIteratorGiven(const Type *type, const Expr *result) const;
 
   SemanticState &state;
+  ClassBases *classBases = nullptr;
   FlowChecker *flowChecker = nullptr;
+  IntlChecker *intlChecker = nullptr;
   TypeDeclarer *typeDeclarer = nullptr;
   TypeResolver *typeResolver = nullptr;
   ClassDeclarer *classDeclarer = nullptr;
   TypeRelations *typeRelations = nullptr;
   ReturnInferrer *returnInferrer = nullptr;
   FunctionChecker *functionChecker = nullptr;
+  GeneratorChecker *generatorChecker = nullptr;
   MethodCallChecker *methodCallChecker = nullptr;
   GenericInstantiator *genericInstantiator = nullptr;
 };

@@ -105,12 +105,13 @@ ClassDecl *GenericStore::findClassInstance(const ClassDecl *generic,
   return found->second;
 }
 
-void GenericStore::rememberClassDefaults(const ClassDecl *cls, std::vector<const Type *> defaults) {
-  this->classDefaults[cls] = std::move(defaults);
+void GenericStore::rememberClassDefaults(const ClassDecl *classDecl,
+                                         std::vector<const Type *> defaults) {
+  this->classDefaults[classDecl] = std::move(defaults);
 }
 
-std::vector<const Type *> GenericStore::getClassDefaults(const ClassDecl *cls) const {
-  return this->classDefaults.lookup(cls);
+std::vector<const Type *> GenericStore::getClassDefaults(const ClassDecl *classDecl) const {
+  return this->classDefaults.lookup(classDecl);
 }
 
 void GenericStore::rememberClassCheck(const ClassDecl *instance, InstanceRecord *check) {
@@ -159,14 +160,15 @@ bool GenericStore::isEndlessReported(const ClassDecl *generic) const {
   return this->endlessReported.contains(generic);
 }
 
-void GenericStore::rememberConstructorFunction(const ClassDecl *generic, const FunctionDecl *ctor,
-                                               FuncSymbol *fn) {
-  this->constructorFunctions[{generic, ctor}] = fn;
+void GenericStore::rememberConstructorFunction(const ClassDecl *generic,
+                                               const FunctionDecl *constructor,
+                                               FuncSymbol *function) {
+  this->constructorFunctions[{generic, constructor}] = function;
 }
 
 FuncSymbol *GenericStore::findConstructorFunction(const ClassDecl *generic,
-                                                  const FunctionDecl *ctor) const {
-  auto found = this->constructorFunctions.find({generic, ctor});
+                                                  const FunctionDecl *constructor) const {
+  auto found = this->constructorFunctions.find({generic, constructor});
   if (found == this->constructorFunctions.end()) {
     return nullptr;
   }

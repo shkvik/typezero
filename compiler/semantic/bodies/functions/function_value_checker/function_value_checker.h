@@ -39,9 +39,8 @@ private:
   std::optional<GlobalName> namedGlobal(const Expr *expr) const;
   FunctionExpr *forwardingFunction(Expr *arg, const FunctionValueShape &shape, size_t count);
 
-  static ResultArgumentsMatch extraArguments(const Expr *arg, llvm::StringRef name,
-                                             llvm::StringRef method, size_t count,
-                                             unsigned primary);
+  ResultArgumentsMatch extraArguments(const Expr *arg, llvm::StringRef name, llvm::StringRef method,
+                                      size_t count, unsigned primary) const;
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

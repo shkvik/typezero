@@ -16,23 +16,23 @@ class OsChecker {
 public:
   OsChecker(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
+  Expr *checkOsCall(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc);
   Expr *checkOsValue(llvm::StringRef name, Expr *expr);
 
 private:
   using ResultOsFunction = Result<llvm::StringRef, OsCheckerOsFunctionError>;
 
-  static ResultOsFunction osFunction(llvm::StringRef fn);
-  static const Type *cpuInfoType();
-  static const Type *userInfoType();
+  ResultOsFunction osFunction(llvm::StringRef functionName) const;
+  const Type *cpuInfoType() const;
+  const Type *userInfoType() const;
   bool hasRejectedArgs(CallExpr *call, llvm::SMLoc loc);
   Expr *checkOsFunction(CallExpr *call, OsFunction function, llvm::SMLoc loc);
   Expr *osStringCall(CallExpr *call, llvm::SMLoc loc, int which);
   Expr *osNumberCall(CallExpr *call, llvm::SMLoc loc, int which);
   void setWhichArg(CallExpr *call, llvm::SMLoc loc, int which);
-  static Expr *builtinOsCall(CallExpr *call, Builtin builtin, const Type *result);
+  Expr *builtinOsCall(CallExpr *call, Builtin builtin, const Type *result) const;
   Expr *endiannessLiteral(llvm::SMLoc loc);
-  Expr *reportNotYet(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
+  Expr *reportNotYet(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc);
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

@@ -35,7 +35,7 @@ namespace tz {
 
 class SemanticState {
 public:
-  SemanticState(AstContext &ctx, Diagnostics &diags, SourceFile &file);
+  SemanticState(AstContext &context, Diagnostics &diags, SourceFile &file);
 
   AstContext &getAst();
   Diagnostics &getDiagnostics();

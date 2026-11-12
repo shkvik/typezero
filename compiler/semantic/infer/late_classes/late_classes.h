@@ -30,16 +30,15 @@ public:
 
   void walkLateClasses();
   void rememberEmittedLateClasses();
-  void makeLateClass(ClassDecl *cls);
-  void walkStaticFields(ClassDecl *cls);
-  void markLateOverrides(ClassDecl *cls);
+  void makeLateClass(ClassDecl *classDecl);
+  void walkStaticFields(ClassDecl *classDecl);
   bool isTemplate(const FuncSymbol *generic);
-  bool hasClassExpr(const FunctionDecl *fn);
+  bool hasClassExpr(const FunctionDecl *functionDecl);
   void markLateOverrides(SourceFile &program);
-  void bindOuterTypeParams(const ClassDecl *cls);
+  void bindOuterTypeParams(const ClassDecl *classDecl);
   void walkTemplateInstance(InstanceRecord *instance);
-  Expr *checkClassExpr(ClassExpr *expr, const Type *expected);
-  void replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SMLoc loc);
+  Expr *checkClassExpr(ClassExpr *expr);
+  void replaceClass(ClassDecl *classDecl, ClassDecl *replacement, llvm::SMLoc loc);
 
 private:
   using ResultBaseClassUsable = Result<ClassDecl *, LateClassesBaseClassError>;
@@ -47,23 +46,36 @@ private:
   using ResultNoOldObjectHeld = Result<const ClassField *, LateClassesOldObjectError>;
   using ResultFieldNameIsFree = Result<const ClassField *, LateClassesReplacedFieldError>;
 
-  static bool hasClassExprIn(const PlacedNodes &nodes);
-  static ResultStaticTypeKnown staticType(const ClassField &field, const Type *type);
-  static ResultNoOldObjectHeld oldObject(const ClassDecl *cls, const ClassField &field);
-  static bool holdsType(const Type *type, const Type *target);
-  static ResultFieldNameIsFree replacedField(const ClassDecl *cls, const ClassDecl *replacement,
-                                             const ClassDecl *child, const ClassField &field);
+  bool hasClassExprIn(const PlacedNodes &nodes) const;
+  ResultStaticTypeKnown staticType(const ClassField &field, const Type *type) const;
+  ResultNoOldObjectHeld oldObject(const ClassDecl *classDecl, const ClassField &field) const;
+  bool isHoldingType(const Type *type, const Type *target) const;
+  ResultFieldNameIsFree replacedField(const ClassDecl *classDecl, const ClassDecl *replacement,
+                                      const ClassDecl *child, const ClassField &field) const;
 
-  void registerLateClass(ClassDecl *cls);
-  void rememberLateScope(ClassDecl *cls);
-  void linkLateBase(ClassDecl *cls);
-  static void nameAnonymousClass(ClassDecl *cls);
-  void declareLateMembers(ClassDecl *cls);
-  void rememberMethodModules(const ClassDecl *cls);
-  void relink(ClassDecl *cls);
-  void relinkClass(ClassDecl *cls);
-  void noteMethodNames(const ClassDecl *cls);
+  void registerLateClass(ClassDecl *classDecl);
+  void rememberLateScope(ClassDecl *classDecl);
+  void linkLateBase(ClassDecl *classDecl);
+  void nameAnonymousClass(ClassDecl *classDecl) const;
+  void declareLateMembers(ClassDecl *classDecl);
+  void rememberMethodModules(const ClassDecl *classDecl);
+  void relink(ClassDecl *classDecl);
+  void relinkClass(ClassDecl *classDecl);
+  void noteMethodNames(const ClassDecl *classDecl);
   ResultBaseClassUsable baseClass(const Type *type) const;
+  void walkStaticField(ClassField &field);
+  void walkLateClass(ClassDecl *classDecl);
+  void reportLateError(const LateError &error);
+  void markClassOverrides(ClassDecl *classDecl);
+  void walkClassDecorators(ClassDecl *classDecl);
+  const FunctionDecl *innerGenericCopy() const;
+  bool isExtending(const ClassDecl *classDecl) const;
+  const Type *declaredStaticType(const ClassField &field) const;
+  void attachLateParent(ClassDecl *classDecl, ClassDecl *parent);
+  void swapTypes(ClassDecl *classDecl, ClassDecl *replacement);
+  void moveChild(ClassDecl *classDecl, ClassDecl *replacement, ClassDecl *child);
+  std::vector<ClassDecl *> declaredChildren(const ClassDecl *classDecl,
+                                            const ClassDecl *replacement);
 
   SemanticState &state;
   ClassBases *classBases = nullptr;

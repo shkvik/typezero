@@ -23,12 +23,12 @@ class ChildChecker {
 public:
   ChildChecker(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
+  Expr *checkChildCall(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc);
 
 private:
-  static const Type *bufferType();
-  static bool knownSignal(llvm::StringRef name);
-  static bool hasZero(const Expr *expr);
+  const Type *bufferType() const;
+  bool knownSignal(llvm::StringRef name) const;
+  bool hasZero(const Expr *expr) const;
 
   struct ChildRun {
     CallExpr *call = nullptr;
@@ -58,7 +58,7 @@ private:
   void walkStdioText(ChildRun &run, Expr *value);
   std::optional<size_t> walkArgumentList(ChildRun &run);
   Expr *absentValue(llvm::SMLoc loc, const Type *type);
-  std::optional<unsigned> stdioKind(Expr *given, unsigned i);
+  std::optional<unsigned> stdioKind(Expr *given, unsigned index);
   IntLitExpr *makeIntLiteral(llvm::SMLoc loc, uint64_t value);
   void walkZeroArguments(ChildRun &run, const Expr *given);
   void walkStdioList(ChildRun &run, const ArrayLitExpr *list);

@@ -14,10 +14,10 @@ struct InitializerFrame {
 
 class ClassContext {
 public:
-  void enterClass(ClassDecl *cls);
+  void enterClass(ClassDecl *classDecl);
   void leaveClass();
   ClassDecl *getCurrentClass() const;
-  void enterInitializer(FunctionDecl *fn, const VarSymbol *self);
+  void enterInitializer(FunctionDecl *functionDecl, const VarSymbol *self);
   void leaveInitializer();
   FunctionDecl *getInitializer() const;
   const VarSymbol *getInitializerThis() const;
@@ -28,8 +28,8 @@ public:
   void leaveStaticInit();
   bool isInsideStaticInit() const;
   void forgetSetStatics();
-  void markStaticSet(const VarSymbol *var);
-  bool isStaticSet(const VarSymbol *var) const;
+  void markStaticSet(const VarSymbol *variable);
+  bool isStaticSet(const VarSymbol *variable) const;
   void rememberThisMember(llvm::StringRef name);
   void forgetThisMember();
   llvm::StringRef getThisMember() const;

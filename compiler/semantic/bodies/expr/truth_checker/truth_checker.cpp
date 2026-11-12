@@ -5,11 +5,13 @@
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/flow/condition_facts/condition_facts.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/library/json/json_checker/json_checker.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
+#include "llvm/ADT/StringExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -17,20 +19,32 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+constexpr llvm::StringLiteral kHiddenPrefix = "%";
+constexpr const char *kEllipsis = "...";
+constexpr const char *kArgumentSeparator = ", ";
+constexpr const char *kAssignSuffix = "=";
+constexpr char16_t kFirstPrintable = 0x20;
+constexpr char16_t kFirstNonAscii = 0x7f;
+
+}
+
 TruthChecker::TruthChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->callChecker = &all.callChecker;
   this->exprChecker = &all.exprChecker;
   this->jsonChecker = &all.jsonChecker;
+  this->flowChecker = &all.flowChecker;
   this->typeRelations = &all.typeRelations;
   this->conditionFacts = &all.conditionFacts;
   this->genericChecker = &all.genericChecker;
 }
 
-std::string TruthChecker::sourceText(const Expr *expr) {
-  std::vector<std::string> answers;
-  for (const Expr *node : ChildrenFirst::order(expr, TruthChecker::sourceParts)) {
-    std::string text = TruthChecker::nodeSource(node, answers);
+std::string TruthChecker::sourceText(const Expr *expr) const {
+  auto answers = std::vector<std::string>();
+  for (const Expr *node : ChildrenFirst::order(expr, this, &TruthChecker::sourceParts)) {
+    auto text = this->nodeSource(node, answers);
     if (text.empty()) {
       return "";
     }
@@ -40,144 +54,190 @@ std::string TruthChecker::sourceText(const Expr *expr) {
   return answers.back();
 }
 
-NodeChildren<const Expr *> TruthChecker::sourceParts(const Expr *expr) {
-  if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit()) {
-    return {conv->operand};
+NodeChildren<const Expr *> TruthChecker::sourceParts(const Expr *expr) const {
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  auto *chain = dyn_cast<OptionalChainExpr>(expr);
+  auto *member = dyn_cast<MemberExpr>(expr);
+  auto *index = dyn_cast<IndexExpr>(expr);
+  auto *call = dyn_cast<CallExpr>(expr);
+  if (conversion != nullptr && conversion->isImplicit()) {
+    return {conversion->operand};
   }
-  if (auto *chain = dyn_cast<OptionalChainExpr>(expr)) {
+  if (chain != nullptr) {
     return {chain->chain};
   }
-  if (auto *member = dyn_cast<MemberExpr>(expr)) {
+  if (member != nullptr) {
     return {member->object};
   }
-  if (auto *index = dyn_cast<IndexExpr>(expr)) {
+  if (index != nullptr) {
     return {index->object, index->index};
   }
-  auto *call = dyn_cast<CallExpr>(expr);
   if (call == nullptr || call->hasSpread()) {
     return {};
   }
-  NodeChildren<const Expr *> parts = {call->callee};
+  auto parts = NodeChildren<const Expr *>{call->callee};
   parts.append(call->args.begin(), call->args.end());
 
   return parts;
 }
 
-std::string TruthChecker::nodeSource(const Expr *expr, std::vector<std::string> &answers) {
-  if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit()) {
+std::string TruthChecker::nodeSource(const Expr *expr, std::vector<std::string> &answers) const {
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  auto *name = dyn_cast<NameExpr>(expr);
+  auto *integer = dyn_cast<IntLitExpr>(expr);
+  auto *boolean = dyn_cast<BoolLitExpr>(expr);
+  auto *text = dyn_cast<StringLitExpr>(expr);
+  auto *list = dyn_cast<ArrayLitExpr>(expr);
+  auto *member = dyn_cast<MemberExpr>(expr);
+  auto *index = dyn_cast<IndexExpr>(expr);
+  auto *call = dyn_cast<CallExpr>(expr);
+  bool isPassing =
+      (conversion != nullptr && conversion->isImplicit()) || isa<OptionalChainExpr>(expr);
+  if (isPassing) {
     return ChildrenFirst::takeAnswer(answers);
   }
-  switch (expr->kind()) {
-  case Expr::Kind::Name: {
-    llvm::StringRef name = cast<NameExpr>(expr)->name;
-    return name.starts_with("%") ? "" : name.str();
+  if (name != nullptr) {
+    return name->name.starts_with(kHiddenPrefix) ? "" : name->name.str();
   }
-  case Expr::Kind::IntLit:
-    return std::to_string(cast<IntLitExpr>(expr)->value);
-  case Expr::Kind::BoolLit:
-    return cast<BoolLitExpr>(expr)->value ? "true" : "false";
-  case Expr::Kind::Undefined:
+  if (integer != nullptr) {
+    return std::to_string(integer->value);
+  }
+  if (boolean != nullptr) {
+    return boolean->value ? "true" : "false";
+  }
+  if (isa<UndefinedExpr>(expr)) {
     return "undefined";
-  case Expr::Kind::StringLit:
-    return TruthChecker::stringSource(cast<StringLitExpr>(expr));
-  case Expr::Kind::ArrayLit:
-    return cast<ArrayLitExpr>(expr)->elements.empty() ? "[]" : "";
-  case Expr::Kind::OptionalChain:
-    return ChildrenFirst::takeAnswer(answers);
-  case Expr::Kind::Member: {
-    auto *member = cast<MemberExpr>(expr);
-    std::string object = ChildrenFirst::takeAnswer(answers);
-    return object + (member->optional ? "?." : ".") + member->name.str();
   }
-  case Expr::Kind::Index: {
-    auto *index = cast<IndexExpr>(expr);
-    std::string position = ChildrenFirst::takeAnswer(answers);
-    std::string object = ChildrenFirst::takeAnswer(answers);
-    return object + (index->optional ? "?.[" : "[") + position + "]";
+  if (text != nullptr) {
+    return this->stringSource(text);
   }
-  case Expr::Kind::Call:
-    return TruthChecker::callSource(cast<CallExpr>(expr), answers);
-  default:
-    return "";
+  if (list != nullptr) {
+    return list->elements.empty() ? "[]" : "";
   }
+  if (member != nullptr) {
+    return this->memberSource(member, answers);
+  }
+  if (index != nullptr) {
+    return this->indexSource(index, answers);
+  }
+  if (call != nullptr) {
+    return this->callSource(call, answers);
+  }
+
+  return "";
 }
 
-std::string TruthChecker::stringSource(const StringLitExpr *lit) {
-  std::string text = "\"";
-  for (char16_t c : lit->value) {
-    if (c < 0x20 || c >= 0x7f || c == '"' || c == '\\') {
+std::string TruthChecker::memberSource(const MemberExpr *member,
+                                       std::vector<std::string> &answers) const {
+  auto object = ChildrenFirst::takeAnswer(answers);
+  const char *dot = member->optional ? "?." : ".";
+
+  return object + dot + member->name.str();
+}
+
+std::string TruthChecker::indexSource(const IndexExpr *index,
+                                      std::vector<std::string> &answers) const {
+  auto position = ChildrenFirst::takeAnswer(answers);
+  auto object = ChildrenFirst::takeAnswer(answers);
+  const char *open = index->optional ? "?.[" : "[";
+
+  return object + open + position + "]";
+}
+
+std::string TruthChecker::stringSource(const StringLitExpr *literal) const {
+  auto text = std::string("\"");
+  for (char16_t unit : literal->value) {
+    bool isPlain = unit >= kFirstPrintable && unit < kFirstNonAscii && unit != '"' && unit != '\\';
+    if (!isPlain) {
       return "";
     }
-    text += static_cast<char>(c);
+    text += static_cast<char>(unit);
   }
 
   return text + "\"";
 }
 
-std::string TruthChecker::callSource(const CallExpr *call, std::vector<std::string> &answers) {
+std::string TruthChecker::callSource(const CallExpr *call,
+                                     std::vector<std::string> &answers) const {
   if (call->hasSpread()) {
     return "";
   }
-  std::vector<std::string> args = ChildrenFirst::takeAnswers(answers, call->args.size());
-  std::string text = ChildrenFirst::takeAnswer(answers);
-  text += call->optional ? "?.(" : "(";
-  for (size_t i = 0; i < args.size(); ++i) {
-    text += (i > 0 ? ", " : "") + args[i];
-  }
+  auto args = ChildrenFirst::takeAnswers(answers, call->args.size());
+  auto callee = ChildrenFirst::takeAnswer(answers);
+  const char *open = call->optional ? "?.(" : "(";
+  auto joined = llvm::join(args, kArgumentSeparator);
 
-  return text + ")";
+  return callee + open + joined + ")";
 }
 
-std::string TruthChecker::hintText(const Expr *expr, const char *placeholder) {
-  std::string text = expr ? TruthChecker::sourceText(expr) : "";
+std::string TruthChecker::hintText(const Expr *expr, const char *placeholder) const {
+  std::string text = expr != nullptr ? this->sourceText(expr) : "";
 
   return text.empty() ? placeholder : text;
 }
 
-const NameExpr *TruthChecker::narrowedVariable(const Expr *expr) {
-  auto *conv = dyn_cast<CastExpr>(expr);
-  if (!conv || !conv->isImplicit() || conv->shortCircuit || !conv->operand->type->isOptional() ||
-      conv->type != conv->operand->type->inner()) {
+const NameExpr *TruthChecker::narrowedVariable(const Expr *expr) const {
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  if (conversion == nullptr) {
+    return nullptr;
+  }
+  const Type *from = conversion->operand->type;
+  bool isUnwrapping = conversion->isImplicit() && !conversion->shortCircuit && from->isOptional() &&
+                      conversion->type == from->inner();
+  if (!isUnwrapping) {
     return nullptr;
   }
 
-  return dyn_cast<NameExpr>(conv->operand);
+  return dyn_cast<NameExpr>(conversion->operand);
 }
 
-bool TruthChecker::isLength(const Expr *expr) {
-  for (;;) {
-    if (auto *conv = dyn_cast<CastExpr>(expr)) {
-      expr = conv->operand;
-    } else if (auto *chain = dyn_cast<OptionalChainExpr>(expr)) {
-      expr = chain->chain;
-    } else {
-      break;
-    }
-  }
-  auto *member = dyn_cast<MemberExpr>(expr);
+bool TruthChecker::isLength(const Expr *expr) const {
+  const auto *inner = this->withoutWrappers(expr);
+  auto *member = dyn_cast<MemberExpr>(inner);
 
-  return member && BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH);
+  return member != nullptr && BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH);
 }
 
-bool TruthChecker::isLiteral(const Expr *expr) {
-  while (auto *conv = dyn_cast<CastExpr>(expr)) {
-    expr = conv->operand;
-  }
-  if (auto *unary = dyn_cast<UnaryExpr>(expr); unary && unary->op == UnaryOp::Neg) {
-    expr = unary->operand;
+const Expr *TruthChecker::withoutWrappers(const Expr *expr) const {
+  const Expr *inner = expr;
+  const auto *next = this->wrappedExpr(inner);
+  while (next != nullptr) {
+    inner = next;
+    next = this->wrappedExpr(inner);
   }
 
-  return isa<IntLitExpr>(expr) || isa<FloatLitExpr>(expr) || isa<StringLitExpr>(expr) ||
-         isa<BoolLitExpr>(expr) || isa<UndefinedExpr>(expr);
+  return inner;
 }
 
-const Type *TruthChecker::falsyType(const Type *type) {
+const Expr *TruthChecker::wrappedExpr(const Expr *expr) const {
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  auto *chain = dyn_cast<OptionalChainExpr>(expr);
+  if (conversion != nullptr) {
+    return conversion->operand;
+  }
+  if (chain != nullptr) {
+    return chain->chain;
+  }
+
+  return nullptr;
+}
+
+bool TruthChecker::isLiteral(const Expr *expr) const {
+  const auto *bare = ExprParts::withoutCasts(expr);
+  auto *unary = dyn_cast<UnaryExpr>(bare);
+  bool isNegated = unary != nullptr && unary->op == UnaryOp::Neg;
+  const Expr *value = isNegated ? unary->operand : bare;
+
+  return isa<IntLitExpr>(value) || isa<FloatLitExpr>(value) || isa<StringLitExpr>(value) ||
+         isa<BoolLitExpr>(value) || isa<UndefinedExpr>(value);
+}
+
+const Type *TruthChecker::falsyType(const Type *type) const {
   const Type *base = type->nonOptional();
+  bool isAlwaysTruthy = base->isArray() || base->isFunction() || base->isObject() ||
+                        base->isIterator() || base->isDict() || base->isClassRef();
 
-  return base->isArray() || base->isFunction() || base->isObject() || base->isIterator() ||
-                 base->isDict() || base->isClassRef()
-             ? Type::undefinedTy()
-             : type;
+  return isAlwaysTruthy ? Type::undefinedTy() : type;
 }
 
 Expr *TruthChecker::checkCondition(Expr *cond, Flow &whenTrue, Flow &whenFalse) {
@@ -185,14 +245,14 @@ Expr *TruthChecker::checkCondition(Expr *cond, Flow &whenTrue, Flow &whenFalse) 
 }
 
 Expr *TruthChecker::checkBranching(Expr *expr, Flow &whenTrue, Flow &whenFalse, TruthUse use) {
-  BranchRun run;
-  run.steps.push_back(BranchExpr{expr, use});
+  auto run = BranchRun();
+  run.steps.push_back(BranchExpr{.expr = expr, .use = use});
   while (!run.steps.empty()) {
     BranchStep step = std::move(run.steps.back());
     run.steps.pop_back();
     this->applyBranchStep(step, run);
   }
-  BranchResult result = std::move(run.results.back());
+  auto result = std::move(run.results.back());
   whenTrue = std::move(result.whenTrue);
   whenFalse = std::move(result.whenFalse);
 
@@ -205,208 +265,263 @@ void TruthChecker::applyBranchStep(BranchStep &step, BranchRun &run) {
       this->enterBranch(*step.as<BranchExpr>(), run);
       break;
     case BranchStepKind::LEFT_DONE:
-      this->leftDone(step.as<LeftDone>()->bin, run);
+      this->leftDone(step.as<LeftDone>()->binary, run);
       break;
     case BranchStepKind::RIGHT_DONE:
       this->rightDone(*step.as<RightDone>(), run);
       break;
     case BranchStepKind::NOT_DONE:
-      TruthChecker::notDone(step.as<NotDone>()->unary, run);
+      this->notDone(step.as<NotDone>()->unary, run);
       break;
   }
 }
 
 void TruthChecker::enterBranch(const BranchExpr &branch, BranchRun &run) {
   Expr *expr = branch.expr;
-  auto *bin = dyn_cast<BinaryExpr>(expr);
-  if (bin && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr)) {
-    run.steps.push_back(LeftDone{bin});
-    run.steps.push_back(BranchExpr{bin->lhs, TruthUse::Condition});
+  auto *binary = dyn_cast<BinaryExpr>(expr);
+  auto *unary = dyn_cast<UnaryExpr>(expr);
+  if (binary != nullptr && (binary->op == BinaryOp::LogAnd || binary->op == BinaryOp::LogOr)) {
+    run.steps.push_back(LeftDone{.binary = binary});
+    run.steps.push_back(BranchExpr{.expr = binary->lhs, .use = TruthUse::Condition});
     return;
   }
-  if (auto *unary = dyn_cast<UnaryExpr>(expr); unary && unary->op == UnaryOp::Not) {
-    run.steps.push_back(NotDone{unary});
-    run.steps.push_back(BranchExpr{unary->operand, TruthUse::Not});
+  if (unary != nullptr && unary->op == UnaryOp::Not) {
+    run.steps.push_back(NotDone{.unary = unary});
+    run.steps.push_back(BranchExpr{.expr = unary->operand, .use = TruthUse::Not});
     return;
   }
-  BranchResult result;
+  auto result = BranchResult();
   result.expr = this->branchLeaf(expr, result.whenTrue, result.whenFalse, branch.use);
   run.results.push_back(std::move(result));
 }
 
-void TruthChecker::leftDone(BinaryExpr *bin, BranchRun &run) {
-  BranchResult left = ChildrenFirst::takeAnswer(run.results);
-  bin->lhs = left.expr;
-  bool isAnd = bin->op == BinaryOp::LogAnd;
-  std::optional<bool> constant = this->state.getGenericStore().isCheckingInstance()
-                                     ? this->genericChecker->constantCondition(bin->lhs)
-                                     : std::nullopt;
-  if (constant && *constant != isAnd) {
-    this->state.getFlowState().replaceFlow(FlowChecker::join(left.whenTrue, left.whenFalse));
+void TruthChecker::leftDone(BinaryExpr *binary, BranchRun &run) {
+  auto left = ChildrenFirst::takeAnswer(run.results);
+  binary->lhs = left.expr;
+  bool isAnd = binary->op == BinaryOp::LogAnd;
+  auto constant = this->genericChecker->instanceConstant(binary->lhs);
+  if (constant.has_value() && *constant != isAnd) {
+    auto joined = this->flowChecker->join(left.whenTrue, left.whenFalse);
+    this->state.getFlowState().replaceFlow(joined);
     run.results.push_back(std::move(left));
     return;
   }
-  this->state.getFlowState().replaceFlow(isAnd ? left.whenTrue : left.whenFalse);
-  run.steps.push_back(RightDone{bin, std::move(left.whenTrue), std::move(left.whenFalse)});
-  run.steps.push_back(BranchExpr{bin->rhs, TruthUse::Condition});
+  const Flow &rightStart = isAnd ? left.whenTrue : left.whenFalse;
+  this->state.getFlowState().replaceFlow(rightStart);
+  run.steps.push_back(RightDone{
+      .binary = binary,
+      .lhsTrue = std::move(left.whenTrue),
+      .lhsFalse = std::move(left.whenFalse),
+  });
+  run.steps.push_back(BranchExpr{.expr = binary->rhs, .use = TruthUse::Condition});
 }
 
 void TruthChecker::rightDone(RightDone &done, BranchRun &run) {
-  BranchResult right = ChildrenFirst::takeAnswer(run.results);
-  BinaryExpr *bin = done.bin;
-  bin->rhs = right.expr;
-  bool isAnd = bin->op == BinaryOp::LogAnd;
-  BranchResult result;
-  result.expr = bin;
-  result.whenTrue = isAnd ? right.whenTrue : FlowChecker::join(done.lhsTrue, right.whenTrue);
-  result.whenFalse = isAnd ? FlowChecker::join(done.lhsFalse, right.whenFalse) : right.whenFalse;
-  this->state.getFlowState().replaceFlow(FlowChecker::join(result.whenTrue, result.whenFalse));
-  this->jsonChecker->walkRedundantTests(bin);
-  bin->type = Type::boolTy();
-  run.results.push_back(std::move(result));
+  auto right = ChildrenFirst::takeAnswer(run.results);
+  BinaryExpr *binary = done.binary;
+  binary->rhs = right.expr;
+  bool isAnd = binary->op == BinaryOp::LogAnd;
+  auto whenTrue = isAnd ? right.whenTrue : this->flowChecker->join(done.lhsTrue, right.whenTrue);
+  auto whenFalse =
+      isAnd ? this->flowChecker->join(done.lhsFalse, right.whenFalse) : right.whenFalse;
+  auto joined = this->flowChecker->join(whenTrue, whenFalse);
+  this->state.getFlowState().replaceFlow(joined);
+  this->jsonChecker->walkRedundantTests(binary);
+  binary->type = Type::boolTy();
+  run.results.push_back(BranchResult{
+      .expr = binary,
+      .whenTrue = std::move(whenTrue),
+      .whenFalse = std::move(whenFalse),
+  });
 }
 
-void TruthChecker::notDone(UnaryExpr *unary, BranchRun &run) {
-  BranchResult operand = ChildrenFirst::takeAnswer(run.results);
+void TruthChecker::notDone(UnaryExpr *unary, BranchRun &run) const {
+  auto operand = ChildrenFirst::takeAnswer(run.results);
   unary->operand = operand.expr;
   unary->type = Type::boolTy();
-  BranchResult result;
-  result.expr = unary;
-  result.whenTrue = std::move(operand.whenFalse);
-  result.whenFalse = std::move(operand.whenTrue);
-  run.results.push_back(std::move(result));
+  run.results.push_back(BranchResult{
+      .expr = unary,
+      .whenTrue = std::move(operand.whenFalse),
+      .whenFalse = std::move(operand.whenTrue),
+  });
 }
 
 Expr *TruthChecker::branchLeaf(Expr *expr, Flow &whenTrue, Flow &whenFalse, TruthUse use) {
+  auto *assign = dyn_cast<AssignExpr>(expr);
   if (this->isBooleanCall(expr)) {
     return this->checkBooleanCall(cast<CallExpr>(expr), whenTrue, whenFalse);
   }
-  if (auto *assign = dyn_cast<AssignExpr>(expr); assign && !assign->op) {
-    expr = this->exprChecker->checkExpr(assign);
-    whenTrue = this->state.getFlowState().getFlow();
-    whenFalse = this->state.getFlowState().getFlow();
-    ResultConditionForm form = TruthChecker::assignmentCondition(assign, use);
-    if (form.isErr()) {
-      this->state.getDiagnostics().error(assign->loc(), form.error().message);
+  if (assign != nullptr && !assign->op.has_value()) {
+    return this->assignedLeaf(assign, whenTrue, whenFalse, use);
+  }
+  auto *checked = this->exprChecker->checkExpr(expr, Type::boolTy());
+  this->addValueFacts(checked, whenTrue, whenFalse);
+  if (!checked->type->isBool()) {
+    auto truthy = this->checkTruthy(checked, use);
+    if (truthy.isErr()) {
+      this->state.getDiagnostics().error(checked->loc(), truthy.error().message);
     }
-    return this->typeRelations->convert(expr, Type::boolTy());
   }
 
-  expr = this->exprChecker->checkExpr(expr, Type::boolTy());
+  return this->typeRelations->convert(checked, Type::boolTy());
+}
+
+Expr *TruthChecker::assignedLeaf(AssignExpr *assign, Flow &whenTrue, Flow &whenFalse,
+                                 TruthUse use) {
+  auto *checked = this->exprChecker->checkExpr(assign);
   whenTrue = this->state.getFlowState().getFlow();
   whenFalse = this->state.getFlowState().getFlow();
-  if (auto *lit = dyn_cast<BoolLitExpr>(expr)) {
-    (lit->value ? whenFalse : whenTrue).unreachable = true;
-  } else {
-    this->conditionFacts->addConditionFacts(expr, whenTrue, whenFalse);
-  }
-  if (!expr->type->isBool()) {
-    ResultTruthIsTested truthy = this->checkTruthy(expr, use);
-    if (truthy.isErr()) {
-      this->state.getDiagnostics().error(expr->loc(), truthy.error().message);
-    }
+  auto form = this->checkAssignmentCondition(assign, use);
+  if (form.isErr()) {
+    this->state.getDiagnostics().error(assign->loc(), form.error().message);
   }
 
-  return this->typeRelations->convert(expr, Type::boolTy());
+  return this->typeRelations->convert(checked, Type::boolTy());
+}
+
+void TruthChecker::addValueFacts(Expr *value, Flow &whenTrue, Flow &whenFalse) {
+  whenTrue = this->state.getFlowState().getFlow();
+  whenFalse = this->state.getFlowState().getFlow();
+  auto *literal = dyn_cast<BoolLitExpr>(value);
+  if (literal == nullptr) {
+    this->conditionFacts->addConditionFacts(value, whenTrue, whenFalse);
+    return;
+  }
+  Flow &impossible = literal->value ? whenFalse : whenTrue;
+  impossible.unreachable = true;
 }
 
 Expr *TruthChecker::checkTestedValue(Expr *expr, const Type *expected, Flow &whenTrue,
                                      Flow &whenFalse, TruthUse use) {
-  if (auto *bin = dyn_cast<BinaryExpr>(expr);
-      bin && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr)) {
-    return this->checkLogical(bin, expected, whenTrue, whenFalse, true,
-                              bin->op == BinaryOp::LogAnd ? TruthUse::And : TruthUse::Or);
+  auto *binary = dyn_cast<BinaryExpr>(expr);
+  auto *unary = dyn_cast<UnaryExpr>(expr);
+  if (binary != nullptr && (binary->op == BinaryOp::LogAnd || binary->op == BinaryOp::LogOr)) {
+    auto logicalUse = binary->op == BinaryOp::LogAnd ? TruthUse::And : TruthUse::Or;
+    return this->checkLogical(binary, expected, whenTrue, whenFalse, RightSide::TESTED, logicalUse);
   }
-  if (auto *unary = dyn_cast<UnaryExpr>(expr);
-      (unary && unary->op == UnaryOp::Not) || this->isBooleanCall(expr)) {
+  bool isNot = unary != nullptr && unary->op == UnaryOp::Not;
+  if (isNot || this->isBooleanCall(expr)) {
     return this->checkBranching(expr, whenTrue, whenFalse, use);
   }
-  expr = this->exprChecker->checkExpr(expr, expected);
-  whenTrue = this->state.getFlowState().getFlow();
-  whenFalse = this->state.getFlowState().getFlow();
-  if (auto *lit = dyn_cast<BoolLitExpr>(expr)) {
-    (lit->value ? whenFalse : whenTrue).unreachable = true;
-  } else {
-    this->conditionFacts->addConditionFacts(expr, whenTrue, whenFalse);
-  }
+  auto *checked = this->exprChecker->checkExpr(expr, expected);
+  this->addValueFacts(checked, whenTrue, whenFalse);
 
-  return expr;
+  return checked;
 }
 
-Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Flow &whenTrue,
-                                 Flow &whenFalse, bool tested, TruthUse use) {
-  bool isAnd = bin->op == BinaryOp::LogAnd;
+Expr *TruthChecker::checkLogical(BinaryExpr *binary, const Type *expected, Flow &whenTrue,
+                                 Flow &whenFalse, RightSide side, TruthUse use) {
+  bool isAnd = binary->op == BinaryOp::LogAnd;
   bool isAssign = use == TruthUse::OrAssign || use == TruthUse::AndAssign;
-  const Expr *other = isAssign ? cast<AssignExpr>(bin->rhs)->value : bin->rhs;
-  Flow lhsTrue;
-  Flow lhsFalse;
-  Flow rhsTrue;
-  Flow rhsFalse;
-  Expr *left = this->checkTestedValue(bin->lhs, expected, lhsTrue, lhsFalse, use);
-  bin->lhs = this->genericChecker->apparent(left);
-  ResultTruthIsTested leftTruthy = this->checkTruthy(bin->lhs, use, other);
+  const Expr *other = isAssign ? cast<AssignExpr>(binary->rhs)->value : binary->rhs;
+  auto lhsTrue = Flow();
+  auto lhsFalse = Flow();
+  auto rhsTrue = Flow();
+  auto rhsFalse = Flow();
+  auto *left = this->checkTestedValue(binary->lhs, expected, lhsTrue, lhsFalse, use);
+  binary->lhs = this->genericChecker->apparent(left);
+  auto leftTruthy = this->checkTruthy(binary->lhs, use, other);
   if (leftTruthy.isErr()) {
-    this->state.getDiagnostics().error(bin->lhs->loc(), leftTruthy.error().message);
+    this->state.getDiagnostics().error(binary->lhs->loc(), leftTruthy.error().message);
   }
   bool isTruthy = leftTruthy.isOk();
-  const Type *l = bin->lhs->type;
-  this->state.getFlowState().replaceFlow(isAnd ? lhsTrue : lhsFalse);
-  const Type *hint = isAnd || l->isError() || l->isUndefined() ? expected : l->nonOptional();
-  if (tested) {
-    bin->rhs = this->checkTestedValue(bin->rhs, hint, rhsTrue, rhsFalse, TruthUse::Condition);
-    ResultTruthIsTested rightTruthy = this->checkTruthy(bin->rhs, TruthUse::Condition);
-    if (rightTruthy.isErr()) {
-      this->state.getDiagnostics().error(bin->rhs->loc(), rightTruthy.error().message);
-    }
-    isTruthy &= rightTruthy.isOk();
+  const Type *leftType = binary->lhs->type;
+  const Flow &rightStart = isAnd ? lhsTrue : lhsFalse;
+  this->state.getFlowState().replaceFlow(rightStart);
+  bool isPlainHint = isAnd || leftType->isError() || leftType->isUndefined();
+  const Type *hint = isPlainHint ? expected : leftType->nonOptional();
+  if (side == RightSide::TESTED) {
+    bool isRightTruthy = this->walkTestedRight(binary, hint, rhsTrue, rhsFalse);
+    isTruthy = isTruthy && isRightTruthy;
   } else {
-    bin->rhs = this->exprChecker->checkExpr(bin->rhs, hint);
+    binary->rhs = this->exprChecker->checkExpr(binary->rhs, hint);
     rhsTrue = this->state.getFlowState().getFlow();
     rhsFalse = this->state.getFlowState().getFlow();
   }
-  whenTrue = isAnd ? rhsTrue : FlowChecker::join(lhsTrue, rhsTrue);
-  whenFalse = isAnd ? FlowChecker::join(lhsFalse, rhsFalse) : rhsFalse;
-  this->state.getFlowState().replaceFlow(FlowChecker::join(whenTrue, whenFalse));
+  whenTrue = isAnd ? rhsTrue : this->flowChecker->join(lhsTrue, rhsTrue);
+  whenFalse = isAnd ? this->flowChecker->join(lhsFalse, rhsFalse) : rhsFalse;
+  auto joined = this->flowChecker->join(whenTrue, whenFalse);
+  this->state.getFlowState().replaceFlow(joined);
   if (!isAssign) {
-    this->jsonChecker->walkRedundantTests(bin);
+    this->jsonChecker->walkRedundantTests(binary);
   }
 
-  return this->checkLogicalType(bin, l, isTruthy, use);
+  return this->checkLogicalType(binary, leftType, isTruthy, use);
 }
 
-Expr *TruthChecker::checkLogicalType(BinaryExpr *bin, const Type *l, bool truthy, TruthUse use) {
-  bool isAnd = bin->op == BinaryOp::LogAnd;
+bool TruthChecker::walkTestedRight(BinaryExpr *binary, const Type *hint, Flow &rhsTrue,
+                                   Flow &rhsFalse) {
+  binary->rhs = this->checkTestedValue(binary->rhs, hint, rhsTrue, rhsFalse, TruthUse::Condition);
+  auto rightTruthy = this->checkTruthy(binary->rhs, TruthUse::Condition);
+  if (rightTruthy.isErr()) {
+    this->state.getDiagnostics().error(binary->rhs->loc(), rightTruthy.error().message);
+  }
+
+  return rightTruthy.isOk();
+}
+
+Expr *TruthChecker::checkLogicalType(BinaryExpr *binary, const Type *leftType, bool isTruthy,
+                                     TruthUse use) {
+  bool isAnd = binary->op == BinaryOp::LogAnd;
   bool isAssign = use == TruthUse::OrAssign || use == TruthUse::AndAssign;
-  const char *op = isAnd ? (isAssign ? "&&=" : "&&") : (isAssign ? "||=" : "||");
-  const Type *r = bin->rhs->type;
-  bin->type = Type::error();
-  if (!truthy) {
-    return bin;
+  auto op = this->logicalSpelling(binary->op, isAssign);
+  const Type *rightType = binary->rhs->type;
+  binary->type = Type::error();
+  if (!isTruthy) {
+    return binary;
   }
-  const Type *kept = l->isError() ? l : isAnd ? TruthChecker::falsyType(l) : l->nonOptional();
-  if (l->isError() || r->isError()) {
-    if (this->state.getFunctionStack().isInsideTrial() && l->isError() != r->isError()) {
-      bin->type = l->isError() ? r : kept;
-    }
-    return bin;
+  const auto *kept = this->keptLeftType(leftType, isAnd);
+  if (leftType->isError() || rightType->isError()) {
+    binary->type = this->failedLogicalType(leftType, rightType, kept);
+    return binary;
   }
-  if (l->isBool() && r->isBool()) {
-    bin->type = l;
-    return bin;
+  if (leftType->isBool() && rightType->isBool()) {
+    binary->type = leftType;
+    return binary;
   }
-  ResultLogicalJoined joined = TruthChecker::logicalValue(bin, op, isAnd, kept);
+  auto joined = this->checkLogicalValue(binary, op, isAnd, kept);
   if (joined.isErr()) {
-    this->state.getDiagnostics().error(bin->loc(), joined.error().message);
-    return bin;
+    this->state.getDiagnostics().error(binary->loc(), joined.error().message);
+    return binary;
   }
   const Type *result = joined.value();
-  bin->rhs = this->typeRelations->convert(bin->rhs, result);
-  bin->type = result;
+  binary->rhs = this->typeRelations->convert(binary->rhs, result);
+  binary->type = result;
 
-  return bin;
+  return binary;
 }
 
-llvm::StringRef TruthChecker::useOperator(TruthUse use) {
+std::string TruthChecker::logicalSpelling(BinaryOp op, bool isAssign) const {
+  auto spelling = std::string(Operators::opSpelling(op));
+  if (!isAssign) {
+    return spelling;
+  }
+
+  return spelling + kAssignSuffix;
+}
+
+const Type *TruthChecker::keptLeftType(const Type *leftType, bool isAnd) const {
+  if (leftType->isError()) {
+    return leftType;
+  }
+  if (isAnd) {
+    return this->falsyType(leftType);
+  }
+
+  return leftType->nonOptional();
+}
+
+const Type *TruthChecker::failedLogicalType(const Type *leftType, const Type *rightType,
+                                            const Type *kept) const {
+  bool isOneFailed = leftType->isError() != rightType->isError();
+  if (!this->state.getFunctionStack().isInsideTrial() || !isOneFailed) {
+    return Type::error();
+  }
+
+  return leftType->isError() ? rightType : kept;
+}
+
+llvm::StringRef TruthChecker::useOperator(TruthUse use) const {
   switch (use) {
     case TruthUse::Condition:
       return "";
@@ -426,137 +541,148 @@ llvm::StringRef TruthChecker::useOperator(TruthUse use) {
 }
 
 std::string TruthChecker::paramMessage(const Type *type, const Type *base, TruthUse use,
-                                       llvm::StringRef x, llvm::StringRef y) {
+                                       llvm::StringRef valueText, llvm::StringRef otherText) const {
   bool isNegated = use == TruthUse::Not;
-  std::string what = ErrorTextTruthy::typeValue(type->name());
-  std::string head = ErrorTextTruthy::cannotTest(TruthChecker::useOperator(use), what) +
-                     ErrorTextTruthy::mayBeNum(base->name());
+  auto what = ErrorTextTruthy::typeValue(type->name());
+  auto head = ErrorTextTruthy::cannotTest(this->useOperator(use), what) +
+              ErrorTextTruthy::mayBeNum(base->name());
   if (use == TruthUse::Or) {
-    return head + ErrorTextTruthy::orDefault(x, y);
+    return head + ErrorTextTruthy::orDefault(valueText, otherText);
   }
   if (use == TruthUse::OrAssign) {
-    return head + ErrorTextTruthy::orAssign(x, y);
+    return head + ErrorTextTruthy::orAssign(valueText, otherText);
   }
   if (use == TruthUse::AndAssign) {
-    return head + ErrorTextTruthy::andAssign(x, y);
+    return head + ErrorTextTruthy::andAssign(valueText, otherText);
   }
 
-  return head + ErrorTextTruthy::undefTest(x, isNegated);
+  return head + ErrorTextTruthy::undefTest(valueText, isNegated);
 }
 
-std::string TruthChecker::jsonMessage(TruthUse use, llvm::StringRef x, llvm::StringRef y) {
+std::string TruthChecker::jsonMessage(TruthUse use, llvm::StringRef valueText,
+                                      llvm::StringRef otherText) const {
   bool isNegated = use == TruthUse::Not;
-  std::string head =
-      ErrorTextTruthy::jsonHead(TruthChecker::useOperator(use)) + ErrorTextTruthy::jsonMay();
+  auto head = ErrorTextTruthy::jsonHead(this->useOperator(use)) + ErrorTextTruthy::jsonMay();
   if (use == TruthUse::Or) {
-    return head + ErrorTextTruthy::jsonOr(x, y);
+    return head + ErrorTextTruthy::jsonOr(valueText, otherText);
   }
   if (use == TruthUse::OrAssign) {
-    return head + ErrorTextTruthy::orAssign(x, y);
+    return head + ErrorTextTruthy::orAssign(valueText, otherText);
   }
 
-  return head + ErrorTextTruthy::jsonTest(x, isNegated);
+  return head + ErrorTextTruthy::jsonTest(valueText, isNegated);
 }
 
-std::string TruthChecker::unknownMessage(TruthUse use, llvm::StringRef x, llvm::StringRef y) {
+std::string TruthChecker::unknownMessage(TruthUse use, llvm::StringRef valueText,
+                                         llvm::StringRef otherText) const {
   bool isNegated = use == TruthUse::Not;
-  std::string head =
-      ErrorTextTruthy::unknownHd(TruthChecker::useOperator(use)) + ErrorTextTruthy::unknownMay();
+  auto head = ErrorTextTruthy::unknownHd(this->useOperator(use)) + ErrorTextTruthy::unknownMay();
   if (use == TruthUse::Or) {
-    return head + ErrorTextTruthy::orDefault(x, y);
+    return head + ErrorTextTruthy::orDefault(valueText, otherText);
   }
   if (use == TruthUse::OrAssign) {
-    return head + ErrorTextTruthy::orAssign(x, y);
+    return head + ErrorTextTruthy::orAssign(valueText, otherText);
   }
 
-  return head + ErrorTextTruthy::unknownTst(x, isNegated);
+  return head + ErrorTextTruthy::unknownTst(valueText, isNegated);
 }
 
 std::string TruthChecker::numberMessage(const Expr *expr, const Type *type, const Type *base,
-                                        TruthUse use, llvm::StringRef x, llvm::StringRef y) {
+                                        TruthUse use, llvm::StringRef valueText,
+                                        llvm::StringRef otherText) const {
   bool isNegated = use == TruthUse::Not;
-  bool isLength = TruthChecker::isLength(expr);
-  std::string what = ErrorTextTruthy::number(base->isDecimal(), type->isOptional());
-  std::string head =
-      ErrorTextTruthy::cannotTest(TruthChecker::useOperator(use), what) + ErrorTextTruthy::zero();
+  bool isLength = this->isLength(expr);
+  auto what = ErrorTextTruthy::number(base->isDecimal(), type->isOptional());
+  auto head = ErrorTextTruthy::cannotTest(this->useOperator(use), what) + ErrorTextTruthy::zero();
   if (type->isOptional()) {
-    head += ErrorTextTruthy::too();
-    bool isLengthUse =
-        isLength && (use == TruthUse::Condition || use == TruthUse::Not || use == TruthUse::And);
-    if (isLengthUse) {
-      return head + ErrorTextTruthy::lengthTest(x, isNegated);
-    }
-    if (use == TruthUse::Or) {
-      return head + ErrorTextTruthy::orDefault(x, y);
-    }
-    if (use == TruthUse::OrAssign) {
-      return head + ErrorTextTruthy::orAssign(x, y);
-    }
-    return head + ErrorTextTruthy::undefTest(x, isNegated);
+    auto advice = this->optionalNumberAdvice(use, isLength, valueText, otherText);
+
+    return head + ErrorTextTruthy::too() + advice;
   }
   if (base->isFloat()) {
-    return head + ErrorTextTruthy::floatTest(x, isNegated);
+    return head + ErrorTextTruthy::floatTest(valueText, isNegated);
   }
 
-  std::string test = ErrorTextTruthy::zeroTest(x, isNegated, isLength);
+  auto test = ErrorTextTruthy::zeroTest(valueText, isNegated, isLength);
   if (use == TruthUse::Or) {
-    return head + ErrorTextTruthy::orCompare(test, x, y);
+    return head + ErrorTextTruthy::orCompare(test, valueText, otherText);
   }
   if (use == TruthUse::OrAssign) {
-    return head + ErrorTextTruthy::orAssignIf(x, y);
+    return head + ErrorTextTruthy::orAssignIf(valueText, otherText);
   }
   if (use == TruthUse::AndAssign) {
-    return head + ErrorTextTruthy::andIf(test, x, y);
+    return head + ErrorTextTruthy::andIf(test, valueText, otherText);
   }
 
   return head + ErrorTextTruthy::compare(test);
 }
 
+std::string TruthChecker::optionalNumberAdvice(TruthUse use, bool isLength,
+                                               llvm::StringRef valueText,
+                                               llvm::StringRef otherText) const {
+  bool isNegated = use == TruthUse::Not;
+  bool isLengthUse =
+      isLength && (use == TruthUse::Condition || use == TruthUse::Not || use == TruthUse::And);
+  if (isLengthUse) {
+    return ErrorTextTruthy::lengthTest(valueText, isNegated);
+  }
+  if (use == TruthUse::Or) {
+    return ErrorTextTruthy::orDefault(valueText, otherText);
+  }
+  if (use == TruthUse::OrAssign) {
+    return ErrorTextTruthy::orAssign(valueText, otherText);
+  }
+
+  return ErrorTextTruthy::undefTest(valueText, isNegated);
+}
+
 std::string TruthChecker::objectMessage(const Expr *expr, const Type *base, TruthUse use,
-                                        llvm::StringRef x, llvm::StringRef y) {
-  ObjectTruth truth = TruthChecker::objectTruth(expr, base);
-  std::string message = TruthChecker::objectHead(truth, use);
-  std::string advice = TruthChecker::objectAdvice(truth, base, use, x, y);
+                                        llvm::StringRef valueText,
+                                        llvm::StringRef otherText) const {
+  auto truth = this->objectTruth(expr, base);
+  auto message = this->objectHead(truth, use);
+  auto advice = this->objectAdvice(truth, base, use, valueText, otherText);
 
   return message + advice;
 }
 
-TruthChecker::ObjectTruth TruthChecker::objectTruth(const Expr *expr, const Type *base) {
-  ObjectTruth truth;
-  truth.narrowed = TruthChecker::narrowedVariable(expr);
-  truth.isArray = base->isArray();
-  truth.isPromise = base->isPromise();
-  truth.isClass = base->isClassRef();
-  truth.isObject =
-      base->isObject() || base->isIterator() || base->isDict() || truth.isClass || truth.isPromise;
-  const Expr *bare = expr;
-  while (isa<CastExpr>(bare) && cast<CastExpr>(bare)->isImplicit()) {
-    bare = cast<CastExpr>(bare)->operand;
-  }
+TruthChecker::ObjectTruth TruthChecker::objectTruth(const Expr *expr, const Type *base) const {
+  bool isClass = base->isClassRef();
+  bool isPromise = base->isPromise();
+  const auto *bare = ExprParts::withoutImplicitCasts(expr);
   auto *name = dyn_cast<NameExpr>(bare);
-  truth.className =
-      truth.isClass && name != nullptr && name->cls() != nullptr && name->var() == nullptr;
+  bool isClassName = isClass && name != nullptr && name->cls() != nullptr && name->var() == nullptr;
 
-  return truth;
+  return ObjectTruth{
+      .narrowed = this->narrowedVariable(expr),
+      .isArray = base->isArray(),
+      .isPromise = isPromise,
+      .isClass = isClass,
+      .isObject = base->isObject() || base->isIterator() || base->isDict() || isClass || isPromise,
+      .isClassName = isClassName,
+  };
 }
 
-std::string TruthChecker::objectHead(const ObjectTruth &truth, TruthUse use) {
-  std::string what =
-      ErrorTextTruthy::kind(truth.isArray, truth.isPromise, truth.isClass, truth.isObject);
-  std::string message;
+std::string TruthChecker::objectHead(const ObjectTruth &truth, TruthUse use) const {
+  auto what = ErrorTextTruthy::kind(truth.isArray, truth.isPromise, truth.isClass, truth.isObject);
+  auto subject = this->objectSubject(truth, what);
+  auto consequence = this->useConsequence(use);
+
+  return subject + consequence;
+}
+
+std::string TruthChecker::objectSubject(const ObjectTruth &truth, llvm::StringRef what) const {
   if (truth.narrowed != nullptr) {
-    message = ErrorTextTruthy::holds(truth.narrowed->name, what);
-  } else if (truth.isArray) {
-    message = ErrorTextTruthy::arrayTrue();
-  } else {
-    message = ErrorTextTruthy::alwaysTrue(what);
+    return ErrorTextTruthy::holds(truth.narrowed->name, what);
   }
-  std::string consequence = TruthChecker::useConsequence(use);
+  if (truth.isArray) {
+    return ErrorTextTruthy::arrayTrue();
+  }
 
-  return message + consequence;
+  return ErrorTextTruthy::alwaysTrue(what);
 }
 
-std::string TruthChecker::useConsequence(TruthUse use) {
+std::string TruthChecker::useConsequence(TruthUse use) const {
   switch (use) {
     case TruthUse::Condition:
       return ErrorTextTruthy::soAlways();
@@ -576,24 +702,25 @@ std::string TruthChecker::useConsequence(TruthUse use) {
 }
 
 std::string TruthChecker::objectAdvice(const ObjectTruth &truth, const Type *base, TruthUse use,
-                                       llvm::StringRef x, llvm::StringRef y) {
+                                       llvm::StringRef valueText, llvm::StringRef otherText) const {
   bool isNegated = use == TruthUse::Not;
-  std::string length = ErrorTextTruthy::lengthCmp(x, isNegated);
-  std::string call =
-      truth.isObject ? "" : ErrorTextTruthy::callOf(x, isNegated, base->minArgs() == 0);
+  auto length = ErrorTextTruthy::lengthCmp(valueText, isNegated);
+  bool isNamedObject = truth.narrowed != nullptr || truth.isObject;
+  bool isKnownHolder = truth.narrowed != nullptr || truth.isClassName;
   if (use == TruthUse::AndAssign) {
     return ErrorTextTruthy::useAssign();
   }
   if (use == TruthUse::Or) {
-    return ErrorTextTruthy::dropOr(y);
+    return ErrorTextTruthy::dropOr(otherText);
   }
   if (use == TruthUse::OrAssign) {
-    return truth.isArray ? ErrorTextTruthy::arrayLen(x, y) : ErrorTextTruthy::dropAssign();
+    return truth.isArray ? ErrorTextTruthy::arrayLen(valueText, otherText)
+                         : ErrorTextTruthy::dropAssign();
   }
-  if ((truth.narrowed != nullptr || truth.isObject) && use == TruthUse::And) {
-    return ErrorTextTruthy::dropAnd(x);
+  if (isNamedObject && use == TruthUse::And) {
+    return ErrorTextTruthy::dropAnd(valueText);
   }
-  if (truth.narrowed != nullptr || truth.className) {
+  if (isKnownHolder) {
     return truth.isArray ? ErrorTextTruthy::dropOrLen(length) : ErrorTextTruthy::dropCheck();
   }
   if (truth.isArray) {
@@ -602,6 +729,8 @@ std::string TruthChecker::objectAdvice(const ObjectTruth &truth, const Type *bas
   if (truth.isObject) {
     return ErrorTextTruthy::allowUndef(base->name());
   }
+  bool isWithoutArgs = base->minArgs() == 0;
+  auto call = ErrorTextTruthy::callOf(valueText, isNegated, isWithoutArgs);
 
   return ErrorTextTruthy::callIt(call);
 }
@@ -609,12 +738,13 @@ std::string TruthChecker::objectAdvice(const ObjectTruth &truth, const Type *bas
 TruthChecker::ResultTruthIsTested TruthChecker::checkTruthy(const Expr *expr, TruthUse use,
                                                             const Expr *other) {
   const Type *type = expr->type;
-  const Type *base = GenericChecker::apparentType(type->nonOptional());
-  std::optional<TruthCheckerCheckTruthyErrorCode> problem = TruthChecker::truthProblem(type, base);
+  const auto *declared = type->nonOptional();
+  const auto *base = this->genericChecker->apparentType(declared);
+  auto problem = this->truthProblem(type, base);
   if (!problem.has_value()) {
     return ok(expr);
   }
-  std::string message = TruthChecker::truthMessage(*problem, expr, use, other, base);
+  auto message = this->truthMessage(*problem, expr, use, other, base);
 
   return err(TruthCheckerCheckTruthyError{
       .code = *problem,
@@ -623,12 +753,12 @@ TruthChecker::ResultTruthIsTested TruthChecker::checkTruthy(const Expr *expr, Tr
 }
 
 std::optional<TruthCheckerCheckTruthyErrorCode> TruthChecker::truthProblem(const Type *type,
-                                                                           const Type *base) {
-  if (TruthChecker::isTestable(type, base)) {
+                                                                           const Type *base) const {
+  if (this->isTestable(type, base)) {
     return std::nullopt;
   }
   if (base->isUnion() || base->isLiteral()) {
-    return TruthChecker::unionProblem(type, base);
+    return this->unionProblem(type, base);
   }
   if (type->isVoid()) {
     return TruthCheckerCheckTruthyErrorCode::VOID_VALUE;
@@ -655,25 +785,24 @@ std::optional<TruthCheckerCheckTruthyErrorCode> TruthChecker::truthProblem(const
   return TruthCheckerCheckTruthyErrorCode::ALWAYS_TRUTHY;
 }
 
-bool TruthChecker::isTestable(const Type *type, const Type *base) {
+bool TruthChecker::isTestable(const Type *type, const Type *base) const {
   if (type->isUndefined() || base->isNever()) {
     return true;
   }
-  bool isOptionalObject =
-      type->isOptional() &&
-      (base->isArray() || base->isFunction() || base->isObject() || base->isResult() ||
-       base->isIterator() || base->isDict() || base->isPromise() || base->isClassRef());
+  bool isHolder = base->isArray() || base->isFunction() || base->isObject() || base->isResult() ||
+                  base->isIterator() || base->isDict() || base->isPromise() || base->isClassRef();
+  bool isOptionalObject = type->isOptional() && isHolder;
   if (type->isError() || base->isBool() || base->isString() || isOptionalObject) {
     return true;
   }
 
   return base->isParam() && !base->alternatives().empty() &&
-         TruthChecker::allBoolOrString(base->alternatives());
+         this->areAllBoolOrString(base->alternatives());
 }
 
-bool TruthChecker::allBoolOrString(llvm::ArrayRef<const Type *> types) {
-  for (const Type *t : types) {
-    if (!t->isBool() && !t->isString()) {
+bool TruthChecker::areAllBoolOrString(llvm::ArrayRef<const Type *> types) const {
+  for (const Type *type : types) {
+    if (!type->isBool() && !type->isString()) {
       return false;
     }
   }
@@ -682,9 +811,9 @@ bool TruthChecker::allBoolOrString(llvm::ArrayRef<const Type *> types) {
 }
 
 std::optional<TruthCheckerCheckTruthyErrorCode> TruthChecker::unionProblem(const Type *type,
-                                                                           const Type *base) {
-  const Type *number = TruthChecker::unionNumber(base);
-  bool isFalsy = type->isOptional() || TruthChecker::hasFalsyMember(base);
+                                                                           const Type *base) const {
+  const auto *number = this->unionNumber(base);
+  bool isFalsy = type->isOptional() || this->hasFalsyMember(base);
   if (number == nullptr && isFalsy) {
     return std::nullopt;
   }
@@ -695,27 +824,35 @@ std::optional<TruthCheckerCheckTruthyErrorCode> TruthChecker::unionProblem(const
   return TruthCheckerCheckTruthyErrorCode::UNION_WITH_NUMBER;
 }
 
-const Type *TruthChecker::unionNumber(const Type *base) {
-  llvm::ArrayRef<const Type *> members =
-      base->isUnion() ? base->members() : llvm::ArrayRef<const Type *>(base);
+std::vector<const Type *> TruthChecker::unionMembers(const Type *base) const {
+  if (!base->isUnion()) {
+    return {base};
+  }
+  auto members = base->members();
+
+  return std::vector<const Type *>(members.begin(), members.end());
+}
+
+const Type *TruthChecker::unionNumber(const Type *base) const {
   const Type *number = nullptr;
-  for (const Type *m : members) {
-    const Type *b = m->isLiteral() ? m->literalBase() : m;
-    if (b->isNumeric() || b->isDecimal() || b->isParam() || b->isJson()) {
-      number = m;
+  for (const Type *member : this->unionMembers(base)) {
+    if (this->isNumberMember(member)) {
+      number = member;
     }
   }
 
   return number;
 }
 
-bool TruthChecker::hasFalsyMember(const Type *base) {
-  llvm::ArrayRef<const Type *> members =
-      base->isUnion() ? base->members() : llvm::ArrayRef<const Type *>(base);
-  for (const Type *m : members) {
-    const Type *b = m->isLiteral() ? m->literalBase() : m;
-    bool isEmpty = m->isStringLiteral() ? m->literalText().empty() : m->literalNumber() == 0;
-    if (m->isLiteral() ? isEmpty : b->isBool() || b->isString()) {
+bool TruthChecker::isNumberMember(const Type *member) const {
+  const Type *plain = member->isLiteral() ? member->literalBase() : member;
+
+  return plain->isNumeric() || plain->isDecimal() || plain->isParam() || plain->isJson();
+}
+
+bool TruthChecker::hasFalsyMember(const Type *base) const {
+  for (const Type *member : this->unionMembers(base)) {
+    if (this->isFalsyMember(member)) {
       return true;
     }
   }
@@ -723,57 +860,68 @@ bool TruthChecker::hasFalsyMember(const Type *base) {
   return false;
 }
 
+bool TruthChecker::isFalsyMember(const Type *member) const {
+  if (!member->isLiteral()) {
+    return member->isBool() || member->isString();
+  }
+  if (member->isStringLiteral()) {
+    return member->literalText().empty();
+  }
+
+  return member->literalNumber() == 0;
+}
+
 std::string TruthChecker::truthMessage(TruthCheckerCheckTruthyErrorCode code, const Expr *expr,
-                                       TruthUse use, const Expr *other, const Type *base) {
+                                       TruthUse use, const Expr *other, const Type *base) const {
   const Type *type = expr->type;
   bool isNegated = use == TruthUse::Not;
-  std::string x = TruthChecker::hintText(expr);
-  std::string y = TruthChecker::hintText(other, "...");
+  auto valueText = this->hintText(expr);
+  auto otherText = this->hintText(other, kEllipsis);
   switch (code) {
     case TruthCheckerCheckTruthyErrorCode::UNION_ALWAYS_TRUTHY:
       return ErrorTextTruthy::unionTrue(type->name());
     case TruthCheckerCheckTruthyErrorCode::UNION_WITH_NUMBER:
-      return TruthChecker::unionNumberMessage(type, base, x);
+      return this->unionNumberMessage(type, base, valueText);
     case TruthCheckerCheckTruthyErrorCode::VOID_VALUE:
       return ErrorTextTruthy::voidValue();
     case TruthCheckerCheckTruthyErrorCode::ALWAYS_UNDEFINED:
       return ErrorTextTruthy::undefined();
     case TruthCheckerCheckTruthyErrorCode::PARAM_MAY_BE_NUMBER:
-      return TruthChecker::paramMessage(type, base, use, x, y);
+      return this->paramMessage(type, base, use, valueText, otherText);
     case TruthCheckerCheckTruthyErrorCode::JSON_VALUE:
-      return TruthChecker::jsonMessage(use, x, y);
+      return this->jsonMessage(use, valueText, otherText);
     case TruthCheckerCheckTruthyErrorCode::UNKNOWN_VALUE:
-      return TruthChecker::unknownMessage(use, x, y);
+      return this->unknownMessage(use, valueText, otherText);
     case TruthCheckerCheckTruthyErrorCode::RESULT_VALUE:
-      return ErrorTextTruthy::result(x, isNegated);
+      return ErrorTextTruthy::result(valueText, isNegated);
     case TruthCheckerCheckTruthyErrorCode::NUMBER_VALUE:
-      return TruthChecker::numberMessage(expr, type, base, use, x, y);
+      return this->numberMessage(expr, type, base, use, valueText, otherText);
     case TruthCheckerCheckTruthyErrorCode::ALWAYS_TRUTHY:
-      return TruthChecker::objectMessage(expr, base, use, x, y);
+      return this->objectMessage(expr, base, use, valueText, otherText);
   }
 
-  return TruthChecker::objectMessage(expr, base, use, x, y);
+  return this->objectMessage(expr, base, use, valueText, otherText);
 }
 
 std::string TruthChecker::unionNumberMessage(const Type *type, const Type *base,
-                                             llvm::StringRef value) {
-  const Type *number = TruthChecker::unionNumber(base);
+                                             llvm::StringRef value) const {
+  const auto *number = this->unionNumber(base);
 
   return ErrorTextTruthy::unionNum(type->name(), number->name(), value);
 }
 
-TruthChecker::ResultConditionForm TruthChecker::assignmentCondition(const AssignExpr *assign,
-                                                                    TruthUse use) {
+TruthChecker::ResultConditionForm TruthChecker::checkAssignmentCondition(const AssignExpr *assign,
+                                                                         TruthUse use) const {
   bool isNegated = use == TruthUse::Not;
-  std::string target = TruthChecker::hintText(assign->target);
-  std::string value = TruthChecker::hintText(assign->value, "...");
+  auto target = this->hintText(assign->target);
+  auto value = this->hintText(assign->value, kEllipsis);
   const Type *type = assign->type;
-  bool isCompareInstead =
-      TruthChecker::isLiteral(assign->value) || type->isError() ||
-      !(type->isOptional() || type->isNumeric() || type->isDecimal() || type->isString());
+  bool isTestable =
+      type->isOptional() || type->isNumeric() || type->isDecimal() || type->isString();
+  bool isCompareInstead = this->isLiteral(assign->value) || type->isError() || !isTestable;
   if (isCompareInstead) {
-    std::string eq = isNegated ? "!=" : "==";
-    std::string message = ErrorTextAssignTest::compare(eq, target, value);
+    const char *equals = Operators::opSpelling(isNegated ? BinaryOp::Ne : BinaryOp::Eq);
+    auto message = ErrorTextAssignTest::compare(equals, target, value);
 
     return err(TruthCheckerAssignmentConditionError{
         .code = TruthCheckerAssignmentConditionErrorCode::COMPARE_INSTEAD,
@@ -781,8 +929,8 @@ TruthChecker::ResultConditionForm TruthChecker::assignmentCondition(const Assign
     });
   }
 
-  std::string message = ErrorTextAssignTest::testValue(target, value, isNegated, type->isOptional(),
-                                                       type->isString());
+  auto message = ErrorTextAssignTest::testValue(target, value, isNegated, type->isOptional(),
+                                                type->isString());
 
   return err(TruthCheckerAssignmentConditionError{
       .code = TruthCheckerAssignmentConditionErrorCode::TEST_ASSIGNED,
@@ -790,14 +938,14 @@ TruthChecker::ResultConditionForm TruthChecker::assignmentCondition(const Assign
   });
 }
 
-TruthChecker::ResultLogicalJoined TruthChecker::logicalValue(const BinaryExpr *bin,
-                                                             llvm::StringRef op, bool isAnd,
-                                                             const Type *kept) {
-  const Type *r = bin->rhs->type;
-  if (r->isVoid()) {
-    std::string test = TruthChecker::hintText(bin->lhs);
-    std::string rhs = TruthChecker::hintText(bin->rhs, "...");
-    std::string message = ErrorTextLogical::rightVoid(op, isAnd, test, rhs);
+TruthChecker::ResultLogicalJoined TruthChecker::checkLogicalValue(const BinaryExpr *binary,
+                                                                  llvm::StringRef op, bool isAnd,
+                                                                  const Type *kept) const {
+  const Type *rightType = binary->rhs->type;
+  if (rightType->isVoid()) {
+    auto test = this->hintText(binary->lhs);
+    auto right = this->hintText(binary->rhs, kEllipsis);
+    auto message = ErrorTextLogical::rightVoid(op, isAnd, test, right);
 
     return err(TruthCheckerLogicalValueError{
         .code = TruthCheckerLogicalValueErrorCode::RIGHT_SIDE_VOID,
@@ -805,9 +953,9 @@ TruthChecker::ResultLogicalJoined TruthChecker::logicalValue(const BinaryExpr *b
     });
   }
 
-  const Type *result = TypeRelations::unify(kept, r);
-  if (!result) {
-    std::string message = ErrorTextLogical::noCommon(op, kept->name(), isAnd, r->name());
+  const auto *result = this->typeRelations->unify(kept, rightType);
+  if (result == nullptr) {
+    auto message = ErrorTextLogical::noCommon(op, kept->name(), isAnd, rightType->name());
 
     return err(TruthCheckerLogicalValueError{
         .code = TruthCheckerLogicalValueErrorCode::NO_COMMON_TYPE,
@@ -820,9 +968,12 @@ TruthChecker::ResultLogicalJoined TruthChecker::logicalValue(const BinaryExpr *b
 
 bool TruthChecker::isBooleanCall(const Expr *expr) const {
   auto *call = dyn_cast<CallExpr>(expr);
+  if (call == nullptr) {
+    return false;
+  }
+  bool isSingleArg = !call->optional && call->args.size() == 1 && !call->hasSpread();
 
-  return call && !call->optional && call->args.size() == 1 && !call->hasSpread() &&
-         this->callChecker->isGlobalName(call->callee, GlobalName::BOOLEAN);
+  return isSingleArg && this->callChecker->isGlobalName(call->callee, GlobalName::BOOLEAN);
 }
 
 Expr *TruthChecker::checkBooleanCall(CallExpr *call, Flow &whenTrue, Flow &whenFalse) {

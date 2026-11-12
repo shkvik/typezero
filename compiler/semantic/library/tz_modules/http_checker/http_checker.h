@@ -19,7 +19,7 @@ public:
   void walkRequestNew(NewExpr *expr);
   void walkHeadersNew(NewExpr *expr);
   void walkHeadersCall(const CallExpr *call, const MemberExpr *member);
-  static bool validReason(const std::u16string &text);
+  bool validReason(const std::u16string &text) const;
 
 private:
   using ResultHeaderName = Result<llvm::StringRef, HttpCheckerHeaderNameError>;
@@ -29,19 +29,19 @@ private:
   using ResultHeaderNameChecked = Result<void, HttpCheckerHeaderNameError>;
   using ResultHeaderValueChecked = Result<void, HttpCheckerHeaderTextError>;
 
-  static ResultHeaderName headerName(llvm::StringRef name);
-  static ResultRequestUrl requestUrl(llvm::StringRef text);
-  static ResultMethodName methodName(llvm::StringRef method);
-  static ResultHeaderText headerText(const std::u16string &text);
-  static bool isTokenChar(unsigned char c);
-  static bool isToken(llvm::StringRef text);
-  static bool isHttpSpace(char16_t c);
-  static bool validValue(const std::u16string &text);
-  static const std::u16string *stringLiteral(const Expr *expr);
-  static bool isLibraryClass(const Type *type, llvm::StringRef name);
-  static const ObjectLitExpr::Property *property(const ObjectLitExpr *lit, llvm::StringRef name);
-  static bool hasBody(const Expr *body);
-  static bool hasCredentials(llvm::StringRef url);
+  ResultHeaderName headerName(llvm::StringRef name) const;
+  ResultRequestUrl requestUrl(llvm::StringRef text) const;
+  ResultMethodName methodName(llvm::StringRef method) const;
+  ResultHeaderText headerText(const std::u16string &text) const;
+  bool isTokenChar(unsigned char c) const;
+  bool isToken(llvm::StringRef text) const;
+  bool isHttpSpace(char16_t c) const;
+  bool validValue(const std::u16string &text) const;
+  const std::u16string *stringLiteral(const Expr *expr) const;
+  bool isLibraryClass(const Type *type, llvm::StringRef name) const;
+  const ObjectLitExpr::Property *property(const ObjectLitExpr *literal, llvm::StringRef name) const;
+  bool hasBody(const Expr *body) const;
+  bool hasCredentials(llvm::StringRef url) const;
 
   void walkHeadersInit(const Expr *init);
   ResultHeaderNameChecked checkHeaderName(const Expr *name);

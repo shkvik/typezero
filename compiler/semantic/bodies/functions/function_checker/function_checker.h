@@ -20,9 +20,11 @@ class AsyncChecker;
 class ClassChecker;
 class TypeResolver;
 class TypeRelations;
+class ReturnChecker;
 class ArgListChecker;
 class ClosureChecker;
 class EmitterChecker;
+class ReturnInferrer;
 class IterableChecker;
 class GeneratorChecker;
 class PredicateChecker;
@@ -33,9 +35,10 @@ class FunctionChecker {
 public:
   FunctionChecker(SemanticState &owner, SemanticParts &all);
 
-  void walkFunctionBody(FunctionDecl *fn);
-  void walkFunctionFromScratch(FunctionDecl *fn);
-  void declareFunction(FunctionDecl *fn, VarSymbol *var = nullptr, bool scoped = true);
+  void walkFunctionBody(FunctionDecl *functionDecl);
+  void walkFunctionFromScratch(FunctionDecl *functionDecl);
+  void declareSignature(FunctionDecl *functionDecl);
+  void declareFunction(FunctionDecl *functionDecl, VarSymbol *variable = nullptr);
 
 private:
   using ResultRestParamIsArray = Result<const Type *, FunctionCheckerRestTypeError>;
@@ -49,38 +52,44 @@ private:
   using ResultEveryPathReturns =
       Result<const FunctionDecl *, FunctionCheckerReturnsEverywhereError>;
 
-  static ResultThisParamAllowed thisParam(const FunctionDecl *fn);
-  static ResultParamTypeIsKnown paramTypeKnown(const Param &param);
-  static ResultTopLevelGenerics topLevelGeneric(const FunctionDecl *fn);
-  static ResultRestParamIsArray restType(const Type *type, const Param &param);
-  static ResultConstructorSuper superCalled(const FunctionDecl *fn, unsigned supers);
-  static ResultParamOrderIsKept requiredOrder(const Param &param, bool afterOptional);
-  static ResultEveryPathReturns returnsEverywhere(const FunctionDecl *fn, const Type *ret);
-  static ResultDecoratorAllowed paramDecorators(const FunctionDecl *fn, const Param &param);
-  static ResultDefaultUsesPrior defaultOrder(const FunctionDecl *fn, size_t i,
-                                             const llvm::StringSet<> &names);
-  bool isGenericDeclaration(const FunctionDecl *fn);
-  void declareFunctionTypeParams(FunctionDecl *fn, FuncSymbol *sym, VarSymbol *var);
-  void padHookParams(FunctionDecl *fn, const std::optional<std::vector<const Type *>> &hook);
-  static bool hasRestParam(const FunctionDecl *fn);
-  void declareFunctionParam(FunctionDecl *fn, FuncSymbol *sym, size_t i, const Type *hooked,
-                            bool &afterOptional);
-  const Type *declaredParamType(FunctionDecl *fn, FuncSymbol *sym, const Param &param,
-                                const Type *hooked);
-  const Type *writtenParamType(FunctionDecl *fn, FuncSymbol *sym, const Param &param,
+  ResultThisParamAllowed thisParam(const FunctionDecl *functionDecl) const;
+  ResultParamTypeIsKnown paramTypeKnown(const Param &param) const;
+  ResultTopLevelGenerics topLevelGeneric(const FunctionDecl *functionDecl) const;
+  ResultRestParamIsArray restType(const Type *type, const Param &param) const;
+  ResultConstructorSuper superCalled(const FunctionDecl *functionDecl, unsigned supers) const;
+  ResultParamOrderIsKept requiredOrder(const Param &param, bool afterOptional) const;
+  ResultEveryPathReturns returnsEverywhere(const FunctionDecl *functionDecl,
+                                           const Type *returnType) const;
+  ResultDecoratorAllowed paramDecorators(const FunctionDecl *functionDecl,
+                                         const Param &param) const;
+  ResultDefaultUsesPrior defaultOrder(const FunctionDecl *functionDecl, size_t index,
+                                      const llvm::StringSet<> &names) const;
+  bool isGenericDeclaration(const FunctionDecl *functionDecl);
+  void declareFunctionTypeParams(FunctionDecl *functionDecl, FuncSymbol *function,
+                                 VarSymbol *variable);
+  void padHookParams(FunctionDecl *functionDecl,
+                     const std::optional<std::vector<const Type *>> &hook);
+  bool hasRestParam(const FunctionDecl *functionDecl) const;
+  void declareFunctionParam(FunctionDecl *functionDecl, FuncSymbol *function, size_t index,
+                            const Type *hooked, bool &afterOptional);
+  const Type *declaredParamType(FunctionDecl *functionDecl, FuncSymbol *function,
+                                const Param &param, const Type *hooked);
+  const Type *writtenParamType(FunctionDecl *functionDecl, FuncSymbol *function, const Param &param,
                                const Type *hooked);
-  void walkThisParam(const FunctionDecl *fn, FuncSymbol *sym, const Param &param);
-  void declareFunctionReturn(FunctionDecl *fn, FuncSymbol *sym);
-  void declareFunctionName(FunctionDecl *fn, FuncSymbol *sym, VarSymbol *var);
-  void bindBodyTypeParams(FunctionDecl *fn);
-  bool entersInitializer(FunctionDecl *fn);
-  static bool isPresetField(const FunctionDecl *fn, const ClassField &f, bool derived);
-  void walkRootSupers(FunctionDecl *fn);
-  static CallExpr *superCallOf(Stmt *stmt);
-  void declareBodyParam(FunctionDecl *fn, size_t i);
-  bool defaultValueChecked(FunctionDecl *fn, size_t i, DefaultedParam *defaulted, const Type *type);
-  void walkBodyStatements(FunctionDecl *fn);
-  static const Type *bodyReturnType(const FunctionDecl *fn);
+  void walkThisParam(const FunctionDecl *functionDecl, FuncSymbol *function, const Param &param);
+  void declareFunctionReturn(FunctionDecl *functionDecl, FuncSymbol *function);
+  void declareSymbol(FunctionDecl *functionDecl, VarSymbol *variable);
+  void declareFunctionName(FunctionDecl *functionDecl, FuncSymbol *function, VarSymbol *variable);
+  void bindBodyTypeParams(FunctionDecl *functionDecl);
+  bool entersInitializer(FunctionDecl *functionDecl);
+  bool isPresetField(const FunctionDecl *functionDecl, const ClassField &field, bool derived) const;
+  void walkRootSupers(FunctionDecl *functionDecl);
+  CallExpr *superCallOf(Stmt *stmt) const;
+  void declareBodyParam(FunctionDecl *functionDecl, size_t index);
+  bool defaultValueChecked(FunctionDecl *functionDecl, size_t index, DefaultedParam *defaulted,
+                           const Type *type);
+  void walkBodyStatements(FunctionDecl *functionDecl);
+  const Type *bodyReturnType(const FunctionDecl *functionDecl) const;
 
   SemanticState &state;
   Scopes *scopes = nullptr;
@@ -95,9 +104,11 @@ private:
   ClassChecker *classChecker = nullptr;
   TypeResolver *typeResolver = nullptr;
   TypeRelations *typeRelations = nullptr;
+  ReturnChecker *returnChecker = nullptr;
   ArgListChecker *argListChecker = nullptr;
   ClosureChecker *closureChecker = nullptr;
   EmitterChecker *emitterChecker = nullptr;
+  ReturnInferrer *returnInferrer = nullptr;
   IterableChecker *iterableChecker = nullptr;
   GeneratorChecker *generatorChecker = nullptr;
   PredicateChecker *predicateChecker = nullptr;

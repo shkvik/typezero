@@ -42,9 +42,9 @@ private:
   using ResultIndexProven = Result<const Expr *, TypedArrayCheckerWithIndexError>;
   using ResultMapFitsType = Result<const Expr *, TypedArrayCheckerMapResultFitsError>;
 
-  static ResultSetSourceOk setSource(const Expr *source);
-  static TypedArrayCall describeCall(CallExpr *call, MemberExpr *member);
-  static Expr *toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result);
+  ResultSetSourceOk setSource(const Expr *source) const;
+  TypedArrayCall describeCall(CallExpr *call, MemberExpr *member) const;
+  Expr *toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result) const;
 
   Expr *checkAt(const TypedArrayCall &typed);
   Expr *checkSet(const TypedArrayCall &typed);

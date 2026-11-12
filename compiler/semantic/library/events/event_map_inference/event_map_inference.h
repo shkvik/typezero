@@ -14,10 +14,10 @@ class EventMapInference {
 public:
   EventMapInference(SemanticState &owner, SemanticParts &all);
 
-  static EventRecord *findEvent(EventSite *site, llvm::StringRef name);
-  static bool isFrozen(const EventRecord *record);
+  EventRecord *findEvent(EventSite *site, llvm::StringRef name) const;
+  bool isFrozen(const EventRecord *record) const;
 
-  Type *classEventMap(const ClassDecl *cls);
+  Type *classEventMap(const ClassDecl *classDecl);
   Type *newEventMap(llvm::SMLoc loc);
   std::string placeOf(llvm::SMLoc loc) const;
   std::string shortPlaceOf(llvm::SMLoc loc) const;
@@ -28,23 +28,23 @@ public:
   void completeSite(EventSite *site);
 
 private:
-  static std::string fileOfPlace(const std::string &place);
-  static std::vector<FunctionDecl *> classMethods(const ClassDecl *cls);
-  static bool holdsClassExpr(const Stmt *where);
-  static bool canTryFunction(const FunctionDecl *fn);
-  static void addCandidates(const Stmt *where, Module *module, FunctionDecl *fn, size_t index,
-                            std::vector<EmitCandidate> &found);
-  static void defineMapFields(EventSite *site);
-  static bool isSubclassEmit(const EventSite *site, const EmitCandidate &candidate);
+  std::string fileOfPlace(const std::string &place) const;
+  std::vector<FunctionDecl *> classMethods(const ClassDecl *classDecl) const;
+  bool holdsClassExpr(const Stmt *where) const;
+  bool canTryFunction(const FunctionDecl *functionDecl) const;
+  void addCandidates(const Stmt *where, Module *module, FunctionDecl *functionDecl, size_t index,
+                     std::vector<EmitCandidate> &found) const;
+  void defineMapFields(EventSite *site) const;
+  bool isSubclassEmit(const EventSite *site, const EmitCandidate &candidate) const;
 
   Type *siteMap(const std::string &key, const std::string &name, Module *owner,
-                const ClassDecl *cls);
+                const ClassDecl *classDecl);
   const std::vector<EmitCandidate> &getModuleCandidates(Module *module);
   std::vector<EmitCandidate> getSiteCandidates(const EventSite *site);
   std::vector<EmitCandidate> getLateCandidates();
   void tryCandidates(EventSite *site, EventRecord *record);
   bool canTryStatement(const EmitCandidate &candidate);
-  void tryFunction(FunctionDecl *fn);
+  void tryFunction(FunctionDecl *functionDecl);
   void tryStatement(Stmt *statement);
 
   SemanticState &state;

@@ -25,21 +25,21 @@ public:
 
   Expr *checkBytesNew(NewExpr *expr, const Type *type);
   Expr *checkTextDecoderParse(CallExpr *call, MemberExpr *member);
-  Expr *checkBytesValues(CallExpr *call, ArrayLitExpr *lit, const Type *type);
+  Expr *checkBytesValues(CallExpr *call, ArrayLitExpr *literal, const Type *type);
   bool checkBytesSource(Expr *source, const Type *target);
 
 private:
   using ResultDecoderLabel = Result<const char *, BytesNewCheckerDecoderLabelError>;
   using ResultViewedBuffer = Result<const Type *, BytesNewCheckerViewedBufferError>;
 
-  static ResultViewedBuffer viewedBuffer(const Type *buffer);
-  static ResultDecoderLabel decoderLabel(llvm::StringRef label);
-  static std::optional<std::u16string> literalText(const Expr *e);
-  static bool mayBeFatal(const Expr *options);
-  static NodeChildren<const Expr *> spreadOptions(const Expr *options);
-  static bool nodeMayBeFatal(const Expr *options, std::vector<bool> &answers);
-  static bool fatalFlag(const Expr *value);
-  static Expr *madeBuiltin(CallExpr *call, Builtin builtin, const Type *result);
+  ResultViewedBuffer viewedBuffer(const Type *buffer) const;
+  ResultDecoderLabel decoderLabel(llvm::StringRef label) const;
+  std::optional<std::u16string> literalText(const Expr *expr) const;
+  bool mayBeFatal(const Expr *options) const;
+  NodeChildren<const Expr *> spreadOptions(const Expr *options) const;
+  bool nodeMayBeFatal(const Expr *options, std::vector<bool> &answers) const;
+  bool fatalFlag(const Expr *value) const;
+  Expr *madeBuiltin(CallExpr *call, Builtin builtin, const Type *result) const;
   Expr *reportBytesNew(NewExpr *expr, const std::string &message);
   void walkArgsLoosely(NewExpr *expr);
   bool hasWrongArity(CallExpr *call, unsigned min, unsigned max);
@@ -49,7 +49,7 @@ private:
   Expr *checkDataViewNew(CallExpr *call, const Type *type);
   Expr *checkTextEncoderNew(CallExpr *call, const Type *type);
   Expr *checkTextDecoderNew(CallExpr *call, const Type *type);
-  static const Type *decoderOptionsType();
+  const Type *decoderOptionsType() const;
   std::optional<Expr *> checkDecoderLabelArg(CallExpr *call, IntLitExpr *resolved);
   std::optional<std::u16string> knownDecoderName(const Expr *label, const std::u16string &text);
   bool decoderLabelsFit(const Expr *checked, llvm::SMLoc at);

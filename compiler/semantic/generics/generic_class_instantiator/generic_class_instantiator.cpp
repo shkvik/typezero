@@ -1,5 +1,8 @@
 #include "compiler/semantic/generics/generic_class_instantiator/generic_class_instantiator.h"
 #include "compiler/program/ast/ast_cloner/ast_cloner.h"
+#include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
+#include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
+#include "compiler/program/library/stream/stream_kind_table/stream_kind_table.h"
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/bodies/classes/class_links/class_links.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
@@ -18,12 +21,12 @@ namespace tz {
 
 namespace {
 
-constexpr unsigned kMaxClassChain = 16;
-
+constexpr int kMaxClassChain = 16;
 }
 
 GenericClassInstantiator::GenericClassInstantiator(SemanticState &owner, SemanticParts &all)
     : state(owner) {
+  this->eventMaps = &all.eventMaps;
   this->chunkTypes = &all.chunkTypes;
   this->classBases = &all.classBases;
   this->classLinks = &all.classLinks;
@@ -32,132 +35,197 @@ GenericClassInstantiator::GenericClassInstantiator(SemanticState &owner, Semanti
   this->genericClassChecker = &all.genericClassChecker;
 }
 
-std::string GenericClassInstantiator::typeNames(llvm::ArrayRef<const Type *> types) {
-  std::string text;
-  for (const Type *t : types) {
-    text += (text.empty() ? "" : ", ") + t->name().str();
-  }
-
-  return text;
-}
-
 GenericClassInstantiator::ResultClassMade
 GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::vector<const Type *> args,
                                            llvm::SMLoc use) {
   this->genericClassChecker->declareClassTypeParams(generic);
   llvm::SMLoc loc = use.isValid() ? use : generic->loc();
-  std::vector<const Type *> params = generic->typeArgs;
-  std::vector<const Type *> defaults = this->state.getGenericStore().getClassDefaults(generic);
-  std::string name = generic->name.str();
-  if (args.size() > params.size()) {
-    std::string message = ErrorTextClassInstance::tooMany(name, params.size(), args.size());
+  auto counted = this->checkArgumentCount(generic, args);
+  if (counted.isErr()) {
+    return err(counted.error());
+  }
+  auto filled = this->argumentsWithDefaults(generic, std::move(args));
+  if (filled.isErr()) {
+    return err(filled.error());
+  }
+  const std::vector<const Type *> &allArgs = filled.value();
+  auto fitting = this->checkArguments(generic, allArgs);
+  if (fitting.isErr()) {
+    return err(fitting.error());
+  }
+  auto mapped = this->checkEventMap(generic, allArgs, loc);
+  if (mapped.isErr()) {
+    return err(mapped.error());
+  }
+  ClassDecl *known = this->state.getGenericStore().findClassInstance(generic, allArgs);
+  if (known != nullptr) {
+    this->reuseInstance(known, use, loc);
+
+    return ok(known);
+  }
+  auto bounded = this->checkChainBounded(generic);
+  if (bounded.isErr()) {
+    return err(bounded.error());
+  }
+  auto *instance = this->makeInstance(generic, allArgs);
+  this->rememberCheck(instance, use);
+  this->fillOrPostpone(instance);
+  this->walkOrPostpone(instance, loc);
+
+  return ok(instance);
+}
+
+GenericClassInstantiator::ResultCanBeMade
+GenericClassInstantiator::checkArgumentCount(const ClassDecl *generic,
+                                             llvm::ArrayRef<const Type *> args) const {
+  size_t count = generic->typeArgs.size();
+  if (args.size() > count) {
+    auto message = ErrorTextClassInstance::tooMany(generic->name, count, args.size());
 
     return err(GenericClassInstantiatorInstantiateClassError{
         .code = GenericClassInstantiatorInstantiateClassErrorCode::TOO_MANY_TYPE_ARGUMENTS,
         .message = message,
     });
   }
-  bool isEmitter = generic->library() && generic->name == "EventEmitter";
-  // TODO: в storage перенести
-  static const llvm::StringLiteral streams[] = {"Readable", "Writable", "Duplex", "Transform",
-                                                "PassThrough"};
-  bool isChunked = generic->library() && llvm::is_contained(streams, generic->name);
-  for (size_t k = args.size(); k < params.size(); ++k) {
-    if (isEmitter) {
-      std::string message = ErrorTextClassInstance::eventMap();
 
-      return err(GenericClassInstantiatorInstantiateClassError{
-          .code = GenericClassInstantiatorInstantiateClassErrorCode::EVENT_MAP_MISSING,
-          .message = message,
-      });
-    }
-    if ((k >= defaults.size() || !defaults[k]) && isChunked) {
-      std::string message = ErrorTextClassInstance::chunks(name);
+  return ok();
+}
 
-      return err(GenericClassInstantiatorInstantiateClassError{
-          .code = GenericClassInstantiatorInstantiateClassErrorCode::CHUNK_TYPE_MISSING,
-          .message = message,
-      });
-    }
-    if (k >= defaults.size() || !defaults[k]) {
-      std::string message = ErrorTextClassInstance::needs(name, params.size());
-
-      return err(GenericClassInstantiatorInstantiateClassError{
-          .code = GenericClassInstantiatorInstantiateClassErrorCode::TYPE_ARGUMENTS_MISSING,
-          .message = message,
-      });
+GenericClassInstantiator::ResultArgsKnown
+GenericClassInstantiator::argumentsWithDefaults(const ClassDecl *generic,
+                                                std::vector<const Type *> args) {
+  const std::vector<const Type *> &params = generic->typeArgs;
+  auto defaults = this->state.getGenericStore().getClassDefaults(generic);
+  for (size_t index = args.size(); index < params.size(); ++index) {
+    const Type *defaultType = index < defaults.size() ? defaults[index] : nullptr;
+    auto present = this->checkDefaultPresent(generic, defaultType);
+    if (present.isErr()) {
+      return err(present.error());
     }
     std::vector<const Type *> known = args;
     known.resize(params.size(), nullptr);
-    args.push_back(this->typeParams->substitute(defaults[k], params, known));
+    const auto *filled = this->typeParams->substitute(defaultType, params, known);
+    args.push_back(filled);
   }
-  for (size_t k = 0; k < params.size(); ++k) {
-    if (args[k]->isError()) {
-      return err(GenericClassInstantiatorInstantiateClassError{
-          .code = GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED,
-          .message = "",
-      });
-    }
-    if (args[k]->isUndefined()) {
-      std::string message = ErrorTextClassInstance::undefinedArg(args[k]->name(), name);
 
-      return err(GenericClassInstantiatorInstantiateClassError{
-          .code = GenericClassInstantiatorInstantiateClassErrorCode::UNDEFINED_TYPE_ARGUMENT,
-          .message = message,
-      });
-    }
-    if (!this->typeParams->satisfies(args[k], params[k], params, args)) {
-      const TypeParamDecl &decl = generic->typeParams[k];
-      std::string constraint = params[k]->constraint() ? params[k]->constraint()->name().str() : "";
-      for (const Type *t : params[k]->alternatives()) {
-        constraint += (constraint.empty() ? "" : " | ") + t->name().str();
-      }
-      if (decl.constraint && decl.constraint->kind() == TypeRefKind::NAME_REF) {
-        constraint = decl.constraint->name.str();
-      }
-      std::string message =
-          ErrorTextClassInstance::unsatisfied(args[k]->name(), constraint, params[k]->name(), name);
+  return ok(std::move(args));
+}
 
-      return err(GenericClassInstantiatorInstantiateClassError{
-          .code = GenericClassInstantiatorInstantiateClassErrorCode::CONSTRAINT_UNSATISFIED,
-          .message = message,
-      });
+GenericClassInstantiator::ResultCanBeMade
+GenericClassInstantiator::checkDefaultPresent(const ClassDecl *generic,
+                                              const Type *defaultType) const {
+  if (this->isEmitterClass(generic)) {
+    auto message = ErrorTextClassInstance::eventMap();
+
+    return err(GenericClassInstantiatorInstantiateClassError{
+        .code = GenericClassInstantiatorInstantiateClassErrorCode::EVENT_MAP_MISSING,
+        .message = message,
+    });
+  }
+  if (defaultType == nullptr && this->isStreamClass(generic)) {
+    auto message = ErrorTextClassInstance::chunks(generic->name);
+
+    return err(GenericClassInstantiatorInstantiateClassError{
+        .code = GenericClassInstantiatorInstantiateClassErrorCode::CHUNK_TYPE_MISSING,
+        .message = message,
+    });
+  }
+  if (defaultType == nullptr) {
+    auto message = ErrorTextClassInstance::needs(generic->name, generic->typeArgs.size());
+
+    return err(GenericClassInstantiatorInstantiateClassError{
+        .code = GenericClassInstantiatorInstantiateClassErrorCode::TYPE_ARGUMENTS_MISSING,
+        .message = message,
+    });
+  }
+
+  return ok();
+}
+
+bool GenericClassInstantiator::isEmitterClass(const ClassDecl *classDecl) const {
+  return classDecl->library() &&
+         LibraryClassTable::isName(classDecl->name, LibraryClass::EVENT_EMITTER);
+}
+
+bool GenericClassInstantiator::isStreamClass(const ClassDecl *classDecl) const {
+  auto streamKind = StreamKindTable::find(classDecl->name);
+
+  return classDecl->library() && streamKind.has_value();
+}
+
+GenericClassInstantiator::ResultCanBeMade
+GenericClassInstantiator::checkArguments(const ClassDecl *generic,
+                                         const std::vector<const Type *> &args) {
+  for (size_t index = 0; index < generic->typeArgs.size(); ++index) {
+    auto fitting = this->checkArgument(generic, args, index);
+    if (fitting.isErr()) {
+      return err(fitting.error());
     }
   }
-  if (isEmitter) {
-    EventMaps::ResultEventMapFits fits = EventMaps::eventMapFits(args[0]);
-    if (fits.isErr()) {
-      this->state.getDiagnostics().error(loc, fits.error().message);
 
-      return err(GenericClassInstantiatorInstantiateClassError{
-          .code = GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED,
-          .message = "",
-      });
-    }
-  }
-  GenericStore &generics = this->state.getGenericStore();
-  if (ClassDecl *known = generics.findClassInstance(generic, args)) {
-    InstanceRecord *check = generics.findClassCheck(known);
-    if (check != nullptr && !check->callLoc.isValid()) {
-      check->callLoc = use;
-    }
-    bool isReportDue = check != nullptr && check->checked && check->failed && !check->isReported;
-    if (isReportDue) {
-      this->genericClassChecker->reportClassInstance(check, loc);
-    }
-    return ok(known);
-  }
-  if (generics.countFillingOf(generic) >= int(kMaxClassChain)) {
-    bool isFirst = !generics.isEndlessReported(generic);
-    generics.markEndlessReported(generic);
-    if (isFirst) {
-      std::string message = ErrorTextClassInstance::endless(name);
+  return ok();
+}
 
-      return err(GenericClassInstantiatorInstantiateClassError{
-          .code = GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES,
-          .message = message,
-      });
-    }
+GenericClassInstantiator::ResultCanBeMade
+GenericClassInstantiator::checkArgument(const ClassDecl *generic,
+                                        const std::vector<const Type *> &args, size_t index) {
+  const std::vector<const Type *> &params = generic->typeArgs;
+  const Type *arg = args[index];
+  const Type *param = params[index];
+  if (arg->isError()) {
+    return err(GenericClassInstantiatorInstantiateClassError{
+        .code = GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
+  }
+  if (arg->isUndefined()) {
+    auto message = ErrorTextClassInstance::undefinedArg(arg->name(), generic->name);
+
+    return err(GenericClassInstantiatorInstantiateClassError{
+        .code = GenericClassInstantiatorInstantiateClassErrorCode::UNDEFINED_TYPE_ARGUMENT,
+        .message = message,
+    });
+  }
+  if (!this->typeParams->isSatisfying(arg, param, params, args)) {
+    auto constraint = this->constraintText(generic, index);
+    auto message =
+        ErrorTextClassInstance::unsatisfied(arg->name(), constraint, param->name(), generic->name);
+
+    return err(GenericClassInstantiatorInstantiateClassError{
+        .code = GenericClassInstantiatorInstantiateClassErrorCode::CONSTRAINT_UNSATISFIED,
+        .message = message,
+    });
+  }
+
+  return ok();
+}
+
+std::string GenericClassInstantiator::constraintText(const ClassDecl *generic, size_t index) const {
+  const TypeParamDecl &typeParam = generic->typeParams[index];
+  bool isNamed =
+      typeParam.constraint.has_value() && typeParam.constraint->kind() == TypeRefKind::NAME_REF;
+  if (isNamed) {
+    return typeParam.constraint->name.str();
+  }
+  const Type *param = generic->typeArgs[index];
+  auto allowed = std::vector<const Type *>();
+  if (param->constraint() != nullptr) {
+    allowed.push_back(param->constraint());
+  }
+  llvm::append_range(allowed, param->alternatives());
+
+  return GenericCheckHelpers::typeNames(allowed, " | ");
+}
+
+GenericClassInstantiator::ResultCanBeMade
+GenericClassInstantiator::checkEventMap(const ClassDecl *generic, llvm::ArrayRef<const Type *> args,
+                                        llvm::SMLoc loc) {
+  if (!this->isEmitterClass(generic)) {
+    return ok();
+  }
+  auto fits = this->eventMaps->eventMapFits(args[0]);
+  if (fits.isErr()) {
+    this->state.getDiagnostics().error(loc, fits.error().message);
 
     return err(GenericClassInstantiatorInstantiateClassError{
         .code = GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED,
@@ -165,295 +233,390 @@ GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::vector<const
     });
   }
 
-  AstCloner cloner(this->state.getAst());
-  ClassDecl *inst = cloner.copyClass(generic);
-  inst->decorators.clear();
-  inst->syntax = StatementClass{};
-  inst->generics = GenericInstance{.generic = generic};
-  inst->typeArgs = args;
-  inst->isAbstract = generic->isAbstract;
-  inst->origin = generic->origin;
-  inst->checkOnly = llvm::any_of(args, [](const Type *t) { return TypeQueries::mentionsParam(t); });
-  inst->stage = ClassStage::RESOLVED;
-  inst->declared = true;
-  inst->id = this->state.getClassStore().takeClassId();
-  size_t shown = args.size();
-  while (shown > 0 && shown - 1 < defaults.size() && defaults[shown - 1] &&
-         (defaults[shown - 1] == args[shown - 1] ||
-          (defaults[shown - 1]->isNever() && args[shown - 1]->isNever()))) {
-    --shown;
-  }
-  std::string display =
-      shown == 0
-          ? name
-          : name + "<" +
-                GenericClassInstantiator::typeNames(llvm::ArrayRef(args).take_front(shown)) + ">";
-  Type *type = Type::classType(display, inst);
-  type->setTypeArgs(args);
-  inst->type = type;
-  this->state.getClassStore().addClass(inst);
-  generic->generics.as<GenericTemplate>()->instances.push_back(inst);
-  generics.rememberClassInstance(generic, args, inst);
-  if (Module *home = this->state.getModuleStates().findDeclModule(generic)) {
-    this->state.getModuleStates().rememberDeclModule(inst, home);
-  }
-
-  InstanceRecord *check = nullptr;
-  if (!inst->checkOnly) {
-    check = generics.addInstanceRecord();
-    check->cls = inst;
-    check->callLoc = use;
-    check->requester = this->state.getGenericStore().getCheckingInstance();
-    generics.rememberClassCheck(inst, check);
-  }
-  if (!this->state.getClassStore().hasDeclaredMethods()) {
-    generics.addUnfilledClass(inst);
-  } else {
-    generics.enterFilling(inst);
-    this->fillInstance(inst);
-    generics.leaveFilling();
-    if (this->state.getClassStore().hasLinkedClasses()) {
-      this->linkInstance(inst);
-    }
-  }
-  if (check) {
-    if (this->state.getGenericStore().isCheckingInstance()) {
-      this->genericClassChecker->walkClassInstance(check);
-      if (check->failed) {
-        this->genericClassChecker->reportClassInstance(check, loc);
-      }
-    } else {
-      generics.addPendingInstance(check);
-    }
-  }
-
-  return ok(inst);
+  return ok();
 }
 
-void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDecl *fn,
-                                                     FunctionDecl *generic) {
-  FuncSymbol *of = generic->sym;
-  FuncSymbol *sym = this->makeInstanceSymbol(fn, generic);
-  if (of == nullptr) {
+void GenericClassInstantiator::reuseInstance(const ClassDecl *known, llvm::SMLoc use,
+                                             llvm::SMLoc loc) {
+  auto *check = this->state.getGenericStore().findClassCheck(known);
+  if (check == nullptr) {
     return;
   }
-  MemberTypes types{
-      .inst = inst,
-      .own = of->typeParams,
-      .mine = this->iteratedParams(inst, of->typeParams),
-  };
-  fn->typeArgs = types.mine;
-  sym->typeParams = types.mine;
-  this->fillInstanceSignature(types, fn, generic, sym);
-  Module *home = this->state.getModuleStates().findDeclModule(generic);
-  if (home != nullptr) {
-    this->state.getModuleStates().rememberDeclModule(fn, home);
+  if (!check->callLoc.isValid()) {
+    check->callLoc = use;
+  }
+  bool isReportDue = check->checked && check->failed && !check->isReported;
+  if (isReportDue) {
+    this->genericClassChecker->reportClassInstance(check, loc);
   }
 }
 
-FuncSymbol *GenericClassInstantiator::makeInstanceSymbol(FunctionDecl *fn, FunctionDecl *generic) {
-  FuncSymbol *sym = this->state.getAst().newFunc();
-  sym->setCompleter(this->state.getCompleter());
-  sym->name = fn->name;
-  sym->loc = fn->loc();
-  sym->decl = fn;
-  fn->sym = sym;
-  fn->generic = generic;
-  ClassMember *member = fn->member();
+GenericClassInstantiator::ResultCanBeMade
+GenericClassInstantiator::checkChainBounded(const ClassDecl *generic) {
+  auto &generics = this->state.getGenericStore();
+  if (generics.countFillingOf(generic) < kMaxClassChain) {
+    return ok();
+  }
+  bool isReported = generics.isEndlessReported(generic);
+  generics.markEndlessReported(generic);
+  if (isReported) {
+    return err(GenericClassInstantiatorInstantiateClassError{
+        .code = GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
+  }
+  auto message = ErrorTextClassInstance::endless(generic->name);
+
+  return err(GenericClassInstantiatorInstantiateClassError{
+      .code = GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES,
+      .message = message,
+  });
+}
+
+ClassDecl *GenericClassInstantiator::makeInstance(ClassDecl *generic,
+                                                  const std::vector<const Type *> &args) {
+  AstCloner cloner(this->state.getAst());
+  ClassDecl *instance = cloner.copyClass(generic);
+  instance->decorators.clear();
+  instance->syntax = StatementClass{};
+  instance->generics = GenericInstance{.generic = generic};
+  instance->typeArgs = args;
+  instance->isAbstract = generic->isAbstract;
+  instance->origin = generic->origin;
+  instance->checkOnly = this->isMentioningParam(args);
+  instance->stage = ClassStage::RESOLVED;
+  instance->declared = true;
+  instance->id = this->state.getClassStore().takeClassId();
+  auto display = this->instanceName(generic, args);
+  auto *type = Type::classType(display, instance);
+  type->setTypeArgs(args);
+  instance->type = type;
+  this->registerInstance(generic, instance);
+
+  return instance;
+}
+
+bool GenericClassInstantiator::isMentioningParam(llvm::ArrayRef<const Type *> args) const {
+  for (const Type *arg : args) {
+    if (TypeQueries::mentionsParam(arg)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+std::string GenericClassInstantiator::instanceName(const ClassDecl *generic,
+                                                   llvm::ArrayRef<const Type *> args) const {
+  auto defaults = this->state.getGenericStore().getClassDefaults(generic);
+  size_t shown = GenericCheckHelpers::shownArgumentCount(defaults, args);
+  if (shown == 0) {
+    return generic->name.str();
+  }
+  auto names = GenericCheckHelpers::typeNames(args.take_front(shown), ", ");
+
+  return generic->name.str() + "<" + names + ">";
+}
+
+void GenericClassInstantiator::registerInstance(ClassDecl *generic, ClassDecl *instance) {
+  this->state.getClassStore().addClass(instance);
+  generic->generics.as<GenericTemplate>()->instances.push_back(instance);
+  this->state.getGenericStore().rememberClassInstance(generic, instance->typeArgs, instance);
+  auto *home = this->state.getModuleStates().findDeclModule(generic);
+  if (home != nullptr) {
+    this->state.getModuleStates().rememberDeclModule(instance, home);
+  }
+}
+
+void GenericClassInstantiator::rememberCheck(ClassDecl *instance, llvm::SMLoc use) {
+  if (instance->checkOnly) {
+    return;
+  }
+  auto &generics = this->state.getGenericStore();
+  auto *check = generics.addInstanceRecord();
+  check->cls = instance;
+  check->callLoc = use;
+  check->requester = generics.getCheckingInstance();
+  generics.rememberClassCheck(instance, check);
+}
+
+void GenericClassInstantiator::fillOrPostpone(ClassDecl *instance) {
+  auto &generics = this->state.getGenericStore();
+  if (!this->state.getClassStore().hasDeclaredMethods()) {
+    generics.addUnfilledClass(instance);
+    return;
+  }
+  generics.enterFilling(instance);
+  this->fillInstance(instance);
+  generics.leaveFilling();
+  if (this->state.getClassStore().hasLinkedClasses()) {
+    this->linkInstance(instance);
+  }
+}
+
+void GenericClassInstantiator::walkOrPostpone(const ClassDecl *instance, llvm::SMLoc loc) {
+  auto &generics = this->state.getGenericStore();
+  auto *check = generics.findClassCheck(instance);
+  if (check == nullptr) {
+    return;
+  }
+  if (!generics.isCheckingInstance()) {
+    generics.addPendingInstance(check);
+    return;
+  }
+  this->genericClassChecker->walkClassInstance(check);
+  if (check->failed) {
+    this->genericClassChecker->reportClassInstance(check, loc);
+  }
+}
+
+void GenericClassInstantiator::declareInstanceMember(ClassDecl *instance,
+                                                     FunctionDecl *functionDecl,
+                                                     FunctionDecl *generic) {
+  FuncSymbol *genericFunction = generic->sym;
+  auto *function = this->makeInstanceSymbol(functionDecl, generic);
+  if (genericFunction == nullptr) {
+    return;
+  }
+  auto instanceParams = this->iteratedParams(instance, genericFunction->typeParams);
+  auto types = MemberTypes{
+      .instance = instance,
+      .genericParams = genericFunction->typeParams,
+      .instanceParams = instanceParams,
+  };
+  functionDecl->typeArgs = instanceParams;
+  function->typeParams = instanceParams;
+  this->fillInstanceSignature(types, functionDecl, generic, function);
+  auto *home = this->state.getModuleStates().findDeclModule(generic);
+  if (home != nullptr) {
+    this->state.getModuleStates().rememberDeclModule(functionDecl, home);
+  }
+}
+
+FuncSymbol *GenericClassInstantiator::makeInstanceSymbol(FunctionDecl *functionDecl,
+                                                         FunctionDecl *generic) {
+  auto *function = this->state.getAst().newFunc();
+  function->setCompleter(this->state.getCompleter());
+  function->name = functionDecl->name;
+  function->loc = functionDecl->loc();
+  function->decl = functionDecl;
+  functionDecl->sym = function;
+  functionDecl->generic = generic;
+  ClassMember *member = functionDecl->member();
   if (member != nullptr) {
     member->variant = generic->variant();
   }
-  Overriding *overriding = fn->overriding();
+  Overriding *overriding = functionDecl->overriding();
   if (overriding != nullptr) {
     overriding->overridden = generic->overridden();
     overriding->openToLate = generic->openToLate();
   }
 
-  return sym;
+  return function;
 }
 
 std::vector<const Type *>
-GenericClassInstantiator::iteratedParams(ClassDecl *inst, llvm::ArrayRef<const Type *> params) {
-  std::vector<const Type *> mine(params.begin(), params.end());
-  for (const Type *&p : mine) {
-    bool isOwn = p->iterated() != nullptr &&
-                 GenericCheckHelpers::mentionsAnyOf(p->iterated(), inst->generic()->typeArgs);
-    if (!isOwn) {
-      continue;
-    }
-    const Type *iterated = this->genericClassChecker->instanceType(inst, p->iterated());
-    Type *param = Type::param("Iterable<" + iterated->name().str() + ">");
-    param->setIterated(iterated);
-    p = param;
+GenericClassInstantiator::iteratedParams(ClassDecl *instance, llvm::ArrayRef<const Type *> params) {
+  auto instanceParams = std::vector<const Type *>();
+  for (const Type *param : params) {
+    const auto *instanceParam = this->iteratedParam(instance, param);
+    instanceParams.push_back(instanceParam);
   }
 
-  return mine;
+  return instanceParams;
 }
 
-const Type *GenericClassInstantiator::substituted(const MemberTypes &types, const Type *t) {
-  if (t == nullptr) {
+const Type *GenericClassInstantiator::iteratedParam(ClassDecl *instance, const Type *param) {
+  const Type *iterated = param->iterated();
+  if (iterated == nullptr) {
+    return param;
+  }
+  if (!GenericCheckHelpers::mentionsAnyOf(iterated, instance->generic()->typeArgs)) {
+    return param;
+  }
+  const auto *instanceIterated = this->genericClassChecker->instanceType(instance, iterated);
+  llvm::StringRef iterable = TypeNameTable::getName(TypeName::ITERABLE);
+  auto *instanceParam = Type::param(iterable.str() + "<" + instanceIterated->name().str() + ">");
+  instanceParam->setIterated(instanceIterated);
+
+  return instanceParam;
+}
+
+const Type *GenericClassInstantiator::substituted(const MemberTypes &types, const Type *type) {
+  if (type == nullptr) {
     return nullptr;
   }
-  const Type *instance = this->genericClassChecker->instanceType(types.inst, t);
+  const auto *instanceType = this->genericClassChecker->instanceType(types.instance, type);
 
-  return this->typeParams->substitute(instance, types.own, types.mine);
+  return this->typeParams->substitute(instanceType, types.genericParams, types.instanceParams);
 }
 
-const Type *GenericClassInstantiator::substitutedValue(const MemberTypes &types, const Type *t) {
-  if (t == nullptr) {
+const Type *GenericClassInstantiator::substitutedValue(const MemberTypes &types, const Type *type) {
+  if (type == nullptr) {
     return nullptr;
   }
-  const Type *instance = this->genericClassChecker->instanceValueType(types.inst, t);
+  const auto *instanceType = this->genericClassChecker->instanceValueType(types.instance, type);
 
-  return this->typeParams->substituteValue(instance, types.own, types.mine);
+  return this->typeParams->substituteValue(instanceType, types.genericParams, types.instanceParams);
 }
 
-void GenericClassInstantiator::fillInstanceSignature(const MemberTypes &types, FunctionDecl *fn,
-                                                     FunctionDecl *generic, FuncSymbol *sym) {
-  FuncSymbol *of = generic->sym;
-  for (const Type *d : of->typeDefaults) {
-    sym->typeDefaults.push_back(this->substituted(types, d));
+void GenericClassInstantiator::fillInstanceSignature(const MemberTypes &types,
+                                                     FunctionDecl *functionDecl,
+                                                     FunctionDecl *generic, FuncSymbol *function) {
+  FuncSymbol *genericFunction = generic->sym;
+  for (const Type *defaultType : genericFunction->typeDefaults) {
+    const auto *instanceDefault = this->substituted(types, defaultType);
+    function->typeDefaults.push_back(instanceDefault);
   }
-  for (const Type *p : of->params) {
-    sym->params.push_back(this->substitutedValue(types, p));
+  for (const Type *param : genericFunction->params) {
+    const auto *instanceParam = this->substitutedValue(types, param);
+    function->params.push_back(instanceParam);
   }
-  this->fillInstanceParams(types, fn, generic);
-  sym->minArgs = of->minArgs;
-  sym->hasRest = of->hasRest;
-  sym->setReturnType(this->substituted(types, of->getKnownReturnType()));
-  sym->discardsResult = of->discardsResult;
-  if (of->predicate.has_value()) {
-    const Type *type = this->substituted(types, of->predicate->type);
-    sym->predicate = TypePredicate{.param = of->predicate->param, .type = type};
+  this->fillInstanceParams(types, functionDecl, generic);
+  function->minArgs = genericFunction->minArgs;
+  function->hasRest = genericFunction->hasRest;
+  const Type *genericReturn = genericFunction->getKnownReturnType();
+  const auto *instanceReturn = this->substituted(types, genericReturn);
+  function->setReturnType(instanceReturn);
+  function->discardsResult = genericFunction->discardsResult;
+  if (genericFunction->predicate.has_value()) {
+    const auto *type = this->substituted(types, genericFunction->predicate->type);
+    function->predicate = TypePredicate{.param = genericFunction->predicate->param, .type = type};
   }
 }
 
-void GenericClassInstantiator::fillInstanceParams(const MemberTypes &types, FunctionDecl *fn,
+void GenericClassInstantiator::fillInstanceParams(const MemberTypes &types,
+                                                  FunctionDecl *functionDecl,
                                                   const FunctionDecl *generic) {
-  for (size_t i = 0; i < fn->params.size() && i < generic->params.size(); ++i) {
-    fn->params[i].declaredType = this->substitutedValue(types, generic->params[i].declaredType);
+  for (size_t index = functionDecl->params.size(); index < generic->params.size(); ++index) {
+    functionDecl->params.push_back(generic->params[index]);
   }
-  for (size_t i = fn->params.size(); i < generic->params.size(); ++i) {
-    fn->params.push_back(generic->params[i]);
-    fn->params.back().declaredType = this->substitutedValue(types, generic->params[i].declaredType);
+  for (size_t index = 0; index < generic->params.size(); ++index) {
+    const Type *genericType = generic->params[index].declaredType;
+    functionDecl->params[index].declaredType = this->substitutedValue(types, genericType);
   }
-  for (size_t i = fn->typeParams.size(); i < generic->typeParams.size(); ++i) {
-    fn->typeParams.push_back(generic->typeParams[i]);
-  }
-}
-
-void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
-  this->linkInstanceBases(inst);
-  this->chunkTypes->addStreamBases(inst, inst->loc());
-  this->fillInstanceFields(inst);
-  this->declareInstanceMembers(inst);
-  if (inst->generic()->init != nullptr) {
-    this->makeInstanceInit(inst);
-  }
-  this->walkInstanceVariants(inst);
-}
-
-void GenericClassInstantiator::addInstanceBase(ClassDecl *inst, const Type *base) {
-  this->classBases->addBase(inst->type, base);
-  if (inst->isEmitted()) {
-    this->state.getInventoryStore().addSubtype(inst->type);
+  for (size_t index = functionDecl->typeParams.size(); index < generic->typeParams.size();
+       ++index) {
+    functionDecl->typeParams.push_back(generic->typeParams[index]);
   }
 }
 
-void GenericClassInstantiator::linkInstanceBases(ClassDecl *inst) {
-  ClassDecl *generic = inst->generic();
-  const ClassDecl *parent = generic->parent;
+void GenericClassInstantiator::fillInstance(ClassDecl *instance) {
+  this->linkInstanceBases(instance);
+  this->chunkTypes->addStreamBases(instance, instance->loc());
+  this->fillInstanceFields(instance);
+  this->declareInstanceMembers(instance);
+  if (instance->generic()->init != nullptr) {
+    this->makeInstanceInit(instance);
+  }
+  this->walkInstanceVariants(instance);
+}
+
+void GenericClassInstantiator::addInstanceBase(ClassDecl *instance, const Type *base) {
+  this->classBases->addBase(instance->type, base);
+  if (instance->isEmitted()) {
+    this->state.getInventoryStore().addSubtype(instance->type);
+  }
+}
+
+void GenericClassInstantiator::linkInstanceBases(ClassDecl *instance) {
+  this->linkInstanceParent(instance);
+  for (const Type *interfaceType : instance->generic()->implemented) {
+    const auto *type = this->genericClassChecker->instanceType(instance, interfaceType);
+    if (!type->isError() && !llvm::is_contained(instance->implemented, type)) {
+      instance->implemented.push_back(type);
+      this->addInstanceBase(instance, type);
+    }
+  }
+}
+
+void GenericClassInstantiator::linkInstanceParent(ClassDecl *instance) {
+  const ClassDecl *genericParent = instance->generic()->parent;
+  if (genericParent == nullptr) {
+    return;
+  }
+  const auto *parentType = this->genericClassChecker->instanceType(instance, genericParent->type);
+  auto *parent = this->classDeclarer->classOf(parentType);
   if (parent != nullptr) {
-    const Type *parentType = this->genericClassChecker->instanceType(inst, parent->type);
-    ClassDecl *cls = ClassDeclarer::classOf(parentType);
-    if (cls != nullptr) {
-      inst->parent = cls;
-      cls->children.push_back(inst);
-      this->addInstanceBase(inst, cls->type);
-    }
-  }
-  for (const Type *iface : generic->implemented) {
-    const Type *type = this->genericClassChecker->instanceType(inst, iface);
-    if (!type->isError() && !llvm::is_contained(inst->implemented, type)) {
-      inst->implemented.push_back(type);
-      this->addInstanceBase(inst, type);
-    }
+    instance->parent = parent;
+    parent->children.push_back(instance);
+    this->addInstanceBase(instance, parent->type);
   }
 }
 
-void GenericClassInstantiator::fillInstanceFields(ClassDecl *inst) {
-  ClassDecl *generic = inst->generic();
-  for (size_t i = 0; i < inst->fields.size() && i < generic->fields.size(); ++i) {
-    ClassField &f = inst->fields[i];
-    const ClassField &g = generic->fields[i];
-    f.presence = g.presence;
-    f.redeclared = g.redeclared;
-    if (f.isStatic()) {
-      continue;
-    }
-    f.resolved = g.method() != nullptr
-                     ? this->genericClassChecker->instanceType(inst, g.resolved)
-                     : this->genericClassChecker->instanceValueType(inst, g.resolved);
-    if (g.method() != nullptr) {
-      FunctionDecl *fn = cast<FunctionExpr>(f.init)->fn;
-      fn->name = g.method()->name;
-      fn->role = ClassMember{
-          .cls = inst, .access = g.method()->access(), .isOverride = g.method()->isOverride()};
-      fn->place = FunctionPlace::DECLARED;
-      f.form = ArrowMethodField{.method = fn};
-    }
+void GenericClassInstantiator::fillInstanceFields(ClassDecl *instance) {
+  ClassDecl *generic = instance->generic();
+  for (size_t index = 0; index < instance->fields.size() && index < generic->fields.size();
+       ++index) {
+    this->fillInstanceField(instance, instance->fields[index], generic->fields[index]);
   }
 }
 
-void GenericClassInstantiator::declareInstanceMembers(ClassDecl *inst) {
-  ClassDecl *generic = inst->generic();
-  for (size_t i = 0; i < inst->methods.size() && i < generic->methods.size(); ++i) {
-    if (!generic->methods[i]->isStatic()) {
-      this->declareInstanceMember(inst, inst->methods[i], generic->methods[i]);
+void GenericClassInstantiator::fillInstanceField(ClassDecl *instance, ClassField &field,
+                                                 const ClassField &genericField) {
+  field.presence = genericField.presence;
+  field.redeclared = genericField.redeclared;
+  if (field.isStatic()) {
+    return;
+  }
+  const FunctionDecl *genericMethod = genericField.method();
+  if (genericMethod == nullptr) {
+    field.resolved = this->genericClassChecker->instanceValueType(instance, genericField.resolved);
+    return;
+  }
+  field.resolved = this->genericClassChecker->instanceType(instance, genericField.resolved);
+  FunctionDecl *functionDecl = cast<FunctionExpr>(field.init)->fn;
+  functionDecl->name = genericMethod->name;
+  functionDecl->role = ClassMember{
+      .cls = instance,
+      .access = genericMethod->access(),
+      .isOverride = genericMethod->isOverride(),
+  };
+  functionDecl->place = FunctionPlace::DECLARED;
+  field.form = ArrowMethodField{.method = functionDecl};
+}
+
+void GenericClassInstantiator::declareInstanceMembers(ClassDecl *instance) {
+  ClassDecl *generic = instance->generic();
+  for (size_t index = 0; index < instance->methods.size() && index < generic->methods.size();
+       ++index) {
+    if (!generic->methods[index]->isStatic()) {
+      this->declareInstanceMember(instance, instance->methods[index], generic->methods[index]);
     }
   }
-  for (size_t i = 0; i < inst->constructors.size() && i < generic->constructors.size(); ++i) {
-    this->declareInstanceMember(inst, inst->constructors[i], generic->constructors[i]);
+  for (size_t index = 0;
+       index < instance->constructors.size() && index < generic->constructors.size(); ++index) {
+    this->declareInstanceMember(instance, instance->constructors[index],
+                                generic->constructors[index]);
   }
-  for (size_t i = 0; i < inst->fields.size() && i < generic->fields.size(); ++i) {
-    FunctionDecl *method = inst->fields[i].method();
-    FunctionDecl *genericMethod = generic->fields[i].method();
+  for (size_t index = 0; index < instance->fields.size() && index < generic->fields.size();
+       ++index) {
+    FunctionDecl *method = instance->fields[index].method();
+    FunctionDecl *genericMethod = generic->fields[index].method();
     if (method != nullptr && genericMethod != nullptr) {
-      this->declareInstanceMember(inst, method, genericMethod);
+      this->declareInstanceMember(instance, method, genericMethod);
     }
   }
 }
 
-void GenericClassInstantiator::makeInstanceInit(ClassDecl *inst) {
-  std::vector<Stmt *> sets;
-  for (const ClassField &f : inst->fields) {
-    if (f.isStatic() || f.init == nullptr || f.method() != nullptr) {
-      continue;
-    }
-    auto *self = this->state.getAst().make<NameExpr>(f.loc, "this");
-    auto *target = this->state.getAst().make<MemberExpr>(f.loc, self, f.name);
-    auto *set = this->state.getAst().make<AssignExpr>(f.loc, std::nullopt, target, f.init);
-    sets.push_back(this->state.getAst().make<ExprStmt>(f.loc, set));
-  }
-  auto *init = this->state.getAst().make<FunctionDecl>(inst->loc(), "init");
-  init->role = ClassMember{.cls = inst};
-  init->body = this->state.getAst().make<BlockStmt>(inst->loc());
-  init->body->body = std::move(sets);
-  this->declareInstanceMember(inst, init, inst->generic()->init);
+void GenericClassInstantiator::makeInstanceInit(ClassDecl *instance) {
+  auto sets = this->classDeclarer->fieldSets(instance);
+  auto *init = this->classDeclarer->makeInitDecl(instance, std::move(sets));
+  this->declareInstanceMember(instance, init, instance->generic()->init);
   init->sym->setReturnType(Type::voidTy());
-  inst->init = init;
+  instance->init = init;
 }
 
-void GenericClassInstantiator::walkInstanceVariants(ClassDecl *inst) {
-  Diagnostics &diagnostics = this->state.getDiagnostics();
+void GenericClassInstantiator::walkInstanceVariants(ClassDecl *instance) {
+  auto &diagnostics = this->state.getDiagnostics();
   diagnostics.pushList(DiagnosticRoute::OWNER);
-  this->classDeclarer->walkVariants(inst);
+  this->classDeclarer->walkVariants(instance);
   auto variantDiagnostics = diagnostics.popList();
-  const Diagnostic *firstError = diagnostics.findFirstError(variantDiagnostics);
+  const auto *firstError = diagnostics.findFirstError(variantDiagnostics);
   if (firstError == nullptr) {
     return;
   }
-  InstanceRecord *check = this->state.getGenericStore().findClassCheck(inst);
+  auto *check = this->state.getGenericStore().findClassCheck(instance);
   if (check != nullptr && !check->failed) {
     check->failed = true;
     check->message = firstError->message;
@@ -461,31 +624,38 @@ void GenericClassInstantiator::walkInstanceVariants(ClassDecl *inst) {
   }
 }
 
-void GenericClassInstantiator::linkInstance(ClassDecl *inst) {
+void GenericClassInstantiator::linkInstance(ClassDecl *instance) {
   this->state.getDiagnostics().pushList(DiagnosticRoute::DISCARD);
-  this->classLinks->linkOverrides(inst);
+  this->classLinks->linkOverrides(instance);
   this->state.getDiagnostics().popList();
-  this->classLinks->buildVtable(inst);
+  this->classLinks->buildVtable(instance);
 }
 
-void GenericClassInstantiator::markOverridden(FunctionDecl *fn) {
-  if (Overriding *overriding = fn->overriding()) {
-    overriding->overridden = true;
-  }
-  FunctionDecl *generic = fn->generic ? fn->generic : fn;
-  ClassDecl *cls = generic->cls();
-  if (!cls || !cls->isGeneric()) {
+void GenericClassInstantiator::markOverridden(FunctionDecl *functionDecl) {
+  this->setOverridden(functionDecl);
+  FunctionDecl *generic = functionDecl->generic != nullptr ? functionDecl->generic : functionDecl;
+  ClassDecl *classDecl = generic->cls();
+  if (classDecl == nullptr || !classDecl->isGeneric()) {
     return;
   }
-  if (Overriding *overriding = generic->overriding()) {
+  this->setOverridden(generic);
+  for (ClassDecl *instance : classDecl->instances()) {
+    this->markInstanceCopies(instance, generic);
+  }
+}
+
+void GenericClassInstantiator::setOverridden(FunctionDecl *functionDecl) const {
+  Overriding *overriding = functionDecl->overriding();
+  if (overriding != nullptr) {
     overriding->overridden = true;
   }
-  for (ClassDecl *inst : cls->instances()) {
-    for (FunctionDecl *m : ClassLinks::ownMethods(inst)) {
-      Overriding *overriding = m->overriding();
-      if (m->generic == generic && overriding) {
-        overriding->overridden = true;
-      }
+}
+
+void GenericClassInstantiator::markInstanceCopies(const ClassDecl *instance,
+                                                  const FunctionDecl *generic) const {
+  for (FunctionDecl *method : this->classLinks->ownMethods(instance)) {
+    if (method->generic == generic) {
+      this->setOverridden(method);
     }
   }
 }

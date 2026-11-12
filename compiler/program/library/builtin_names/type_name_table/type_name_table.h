@@ -142,6 +142,7 @@ class TypeNameTable {
 public:
   static const TypeNameInfo *find(llvm::StringRef name);
   static const UtilityTypeName *findUtility(llvm::StringRef name);
+  static llvm::StringRef getName(TypeName type);
   static bool isName(llvm::StringRef name, TypeName type);
 };
 

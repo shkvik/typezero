@@ -40,26 +40,28 @@ void LibraryCalls::prepareLibraries(SourceFile &program) {
     }
     bool hasIntrinsics = module->name == "tz:intrinsics";
     for (Stmt *item : module->file.items) {
-      if (auto *fn = dyn_cast<FunctionDecl>(item)) {
+      auto *functionDecl = dyn_cast<FunctionDecl>(item);
+      if (functionDecl != nullptr) {
         if (hasIntrinsics) {
-          if (fn->external()) {
-            fn->bodySource = FunctionBodySource::INTRINSIC;
+          if (functionDecl->external()) {
+            functionDecl->bodySource = FunctionBodySource::INTRINSIC;
           }
         } else {
-          this->state.getLibraryDeclarations().rememberLibraryFunction(fn);
+          this->state.getLibraryDeclarations().rememberLibraryFunction(functionDecl);
         }
         continue;
       }
-      if (auto *alias = dyn_cast<TypeAliasDecl>(item)) {
+      auto *alias = dyn_cast<TypeAliasDecl>(item);
+      if (alias != nullptr) {
         this->state.getLibraryDeclarations().rememberLibraryType(alias);
         continue;
       }
-      auto *cls = dyn_cast<ClassDecl>(item);
-      if (!cls) {
+      auto *classDecl = dyn_cast<ClassDecl>(item);
+      if (classDecl == nullptr) {
         continue;
       }
-      cls->origin = ClassOrigin::LIBRARY;
-      this->state.getLibraryDeclarations().rememberLibraryClass(cls);
+      classDecl->origin = ClassOrigin::LIBRARY;
+      this->state.getLibraryDeclarations().rememberLibraryClass(classDecl);
     }
   }
 }
@@ -72,11 +74,11 @@ LibraryCalls::ResultIntrinsicShape LibraryCalls::intrinsicShape(const CallExpr *
                                                                 const NameExpr *name,
                                                                 llvm::StringRef intrinsicName,
                                                                 bool known, unsigned args,
-                                                                unsigned typeArgs) {
+                                                                unsigned typeArgs) const {
   bool isWrong =
       !known || call->args.size() != args || name->typeArgs.size() != typeArgs || call->hasSpread();
   if (isWrong) {
-    std::string message = ErrorTextIntrinsicCall::wrong(intrinsicName);
+    auto message = ErrorTextIntrinsicCall::wrong(intrinsicName);
 
     return err(LibraryCallsIntrinsicShapeError{
         .code = LibraryCallsIntrinsicShapeErrorCode::NOT_AN_INTRINSIC,
@@ -88,21 +90,21 @@ LibraryCalls::ResultIntrinsicShape LibraryCalls::intrinsicShape(const CallExpr *
 }
 
 Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
-  ScopeEntry own = this->scopes->lookup(name->name);
-  const FunctionDecl *decl = own.func() != nullptr ? own.func()->decl : nullptr;
-  if (decl == nullptr || !decl->intrinsic()) {
+  auto own = this->scopes->lookup(name->name);
+  const FunctionDecl *functionDecl = own.func() != nullptr ? own.func()->decl : nullptr;
+  if (functionDecl == nullptr || !functionDecl->intrinsic()) {
     return nullptr;
   }
-  llvm::StringRef intrinsicName = decl->name;
+  llvm::StringRef intrinsicName = functionDecl->name;
   call->type = Type::error();
   if (intrinsicName.starts_with("subtle")) {
     return this->webCryptoChecker->checkSubtleIntrinsic(call, name, intrinsicName);
   }
-  const LibraryIntrinsicInfo *intrinsic = LibraryIntrinsicTable::find(intrinsicName);
+  const auto *intrinsic = LibraryIntrinsicTable::find(intrinsicName);
   bool isKnown = intrinsic != nullptr;
-  ResultIntrinsicShape shape = LibraryCalls::intrinsicShape(call, name, intrinsicName, isKnown,
-                                                            isKnown ? intrinsic->args : 0,
-                                                            isKnown ? intrinsic->typeArgs : 0);
+  auto shape =
+      this->intrinsicShape(call, name, intrinsicName, isKnown, isKnown ? intrinsic->args : 0,
+                           isKnown ? intrinsic->typeArgs : 0);
   if (shape.isErr()) {
     this->state.getDiagnostics().error(name->loc(), shape.error().message);
     for (Expr *&arg : call->args) {
@@ -110,9 +112,8 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     }
     return call;
   }
-  const Type *typeArg = intrinsic->typeArgs != 0
-                            ? this->typeResolver->resolveType(name->typeArgs[0], false)
-                            : nullptr;
+  const Type *typeArg =
+      intrinsic->typeArgs != 0 ? this->typeResolver->resolveType(name->typeArgs[0]) : nullptr;
   call->target = BuiltinCall{.builtin = intrinsic->builtin};
   IntrinsicCall made{
       .call = call,
@@ -170,22 +171,22 @@ Expr *LibraryCalls::checkIntrinsic(const IntrinsicCall &made, LibraryIntrinsic i
 
 Expr *LibraryCalls::checkListenerIntrinsic(const IntrinsicCall &made, bool bound) {
   CallExpr *call = made.call;
-  const Type *fn = LibraryCalls::flatListenerType(made.typeArg);
+  const auto *functionType = this->flatListenerType(made.typeArg);
   call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::unknown());
   if (bound) {
     call->args[1] = this->argumentChecker->checkArg(call->args[1], Type::anyObject());
   }
-  call->type = fn;
-  if (!fn->isFunction() && !fn->isParam() && !fn->isError()) {
-    std::string message = ErrorTextLibraryCall::listener();
+  call->type = functionType;
+  if (!functionType->isFunction() && !functionType->isParam() && !functionType->isError()) {
+    auto message = ErrorTextLibraryCall::listener();
     this->state.getDiagnostics().error(made.name->loc(), message);
   }
 
   return call;
 }
 
-const Type *LibraryCalls::flatListenerType(const Type *typeArg) {
-  std::vector<const Type *> flat;
+const Type *LibraryCalls::flatListenerType(const Type *typeArg) const {
+  auto flat = std::vector<const Type *>();
   size_t minArgs = 0;
   bool hasRest = false;
   bool isFlattened = typeArg->isFunction() &&
@@ -202,7 +203,7 @@ Expr *LibraryCalls::checkAsClass(const IntrinsicCall &made) {
   const Type *typeArg = made.typeArg;
   call->args[0] = this->exprChecker->checkExpr(call->args[0]);
   if (!typeArg->isClass() && !typeArg->isParam() && !typeArg->isError()) {
-    std::string message = ErrorTextLibraryCall::asClass();
+    auto message = ErrorTextLibraryCall::asClass();
     this->state.getDiagnostics().error(made.name->loc(), message);
   }
   call->type = Type::optional(typeArg);
@@ -214,11 +215,11 @@ Expr *LibraryCalls::checkAhead(const IntrinsicCall &made) {
   CallExpr *call = made.call;
   call->args[0] = this->exprChecker->checkExpr(call->args[0]);
   call->type = call->args[0]->type;
-  if (!LibraryCalls::isAwaitable(call->type)) {
-    std::string message = ErrorTextLibraryCall::ahead(made.intrinsicName);
+  if (!this->isAwaitable(call->type)) {
+    auto message = ErrorTextLibraryCall::ahead(made.intrinsicName);
     this->state.getDiagnostics().error(made.name->loc(), message);
   }
-  FuncSymbol *current = this->state.getFunctionStack().getCurrentFunction();
+  auto *current = this->state.getFunctionStack().getCurrentFunction();
   if (current != nullptr && current->decl != nullptr) {
     current->decl->awaitsAhead = true;
   }
@@ -226,7 +227,7 @@ Expr *LibraryCalls::checkAhead(const IntrinsicCall &made) {
   return call;
 }
 
-bool LibraryCalls::isAwaitable(const Type *type) {
+bool LibraryCalls::isAwaitable(const Type *type) const {
   if (type->isError() || type->isPromise()) {
     return true;
   }
@@ -249,7 +250,7 @@ Expr *LibraryCalls::checkWithContext(const IntrinsicCall &made) {
   const Type *body = call->args[1]->type;
   call->type = body->isFunction() && body->params().empty() ? body->ret() : Type::error();
   if (call->type->isError() && !body->isError()) {
-    std::string message = ErrorTextLibraryCall::context();
+    auto message = ErrorTextLibraryCall::context();
     this->state.getDiagnostics().error(made.name->loc(), message);
   }
 

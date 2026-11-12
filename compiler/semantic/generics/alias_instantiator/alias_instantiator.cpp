@@ -23,19 +23,10 @@ AliasInstantiator::AliasInstantiator(SemanticState &owner, SemanticParts &all)
   this->typeResolver = &all.typeResolver;
 }
 
-std::string AliasInstantiator::typeList(llvm::ArrayRef<const Type *> types) {
-  std::string text;
-  for (const Type *t : types) {
-    text += (text.empty() ? "" : ", ") + t->name().str();
-  }
-
-  return text;
-}
-
-AliasInstantiator::ResultArgumentCount AliasInstantiator::argumentCount(const TypeAliasDecl *alias,
-                                                                        size_t count, size_t got) {
+AliasInstantiator::ResultArgumentCount
+AliasInstantiator::argumentCount(const TypeAliasDecl *alias, size_t count, size_t got) const {
   if (got > count) {
-    std::string message = ErrorTextAliasCount::tooMany(alias->name, count, got);
+    auto message = ErrorTextAliasCount::tooMany(alias->name, count, got);
 
     return err(AliasInstantiatorArgumentCountError{
         .code = AliasInstantiatorArgumentCountErrorCode::TOO_MANY_TYPE_ARGUMENTS,
@@ -47,9 +38,10 @@ AliasInstantiator::ResultArgumentCount AliasInstantiator::argumentCount(const Ty
 }
 
 AliasInstantiator::ResultDefaultExists
-AliasInstantiator::defaultExists(const TypeAliasDecl *alias, size_t count, const Type *fallback) {
-  if (!fallback) {
-    std::string message = ErrorTextAliasDefault::needs(alias->name, count);
+AliasInstantiator::defaultExists(const TypeAliasDecl *alias, size_t count,
+                                 const Type *fallback) const {
+  if (fallback == nullptr) {
+    auto message = ErrorTextAliasDefault::needs(alias->name, count);
 
     return err(AliasInstantiatorDefaultExistsError{
         .code = AliasInstantiatorDefaultExistsErrorCode::TYPE_ARGUMENTS_MISSING,
@@ -62,12 +54,13 @@ AliasInstantiator::defaultExists(const TypeAliasDecl *alias, size_t count, const
 
 AliasInstantiator::ResultArgumentMatch
 AliasInstantiator::argumentMatch(const TypeAliasDecl *alias, llvm::ArrayRef<const Type *> params,
-                                 llvm::ArrayRef<const Type *> args, size_t k) {
-  if (!this->typeParams->satisfies(args[k], params[k], params, args)) {
-    std::string constraint =
-        GenericCheckHelpers::constraintSpelling(params[k], &alias->typeParams[k]);
-    std::string message = ErrorTextAliasMatch::unsatisfied(args[k]->name(), constraint,
-                                                           params[k]->name(), alias->name);
+                                 llvm::ArrayRef<const Type *> args, size_t index) {
+  const Type *arg = args[index];
+  const Type *param = params[index];
+  if (!this->typeParams->isSatisfying(arg, param, params, args)) {
+    auto constraint = GenericCheckHelpers::constraintSpelling(param, &alias->typeParams[index]);
+    auto message =
+        ErrorTextAliasMatch::unsatisfied(arg->name(), constraint, param->name(), alias->name);
 
     return err(AliasInstantiatorArgumentMatchError{
         .code = AliasInstantiatorArgumentMatchErrorCode::CONSTRAINT_UNSATISFIED,
@@ -75,13 +68,13 @@ AliasInstantiator::argumentMatch(const TypeAliasDecl *alias, llvm::ArrayRef<cons
     });
   }
 
-  return ok(args[k]);
+  return ok(arg);
 }
 
-AliasInstantiator::ResultAliasDistinct AliasInstantiator::notResolving(const TypeAliasDecl *alias,
-                                                                       const AliasInstance &entry) {
-  if (entry.resolving && !entry.self) {
-    std::string message = ErrorTextAliasSelf::itself(alias->name);
+AliasInstantiator::ResultAliasDistinct
+AliasInstantiator::notResolving(const TypeAliasDecl *alias, const AliasInstance &entry) const {
+  if (entry.resolving && entry.self == nullptr) {
+    auto message = ErrorTextAliasSelf::itself(alias->name);
 
     return err(AliasInstantiatorNotResolvingError{
         .code = AliasInstantiatorNotResolvingErrorCode::REFERS_TO_ITSELF,
@@ -94,11 +87,11 @@ AliasInstantiator::ResultAliasDistinct AliasInstantiator::notResolving(const Typ
 
 AliasInstantiator::ResultDepthInBounds AliasInstantiator::depthInBounds(const TypeAliasDecl *alias,
                                                                         unsigned calls,
-                                                                        bool conditional) const {
+                                                                        bool isConditional) const {
   bool isDeep =
       this->state.getAliasStore().getAliasDepth() >= kMaxAliasDepth || calls > kMaxTailCalls;
-  if (isDeep && !conditional) {
-    std::string message = ErrorTextAliasDepth::endless(alias->name);
+  if (isDeep && !isConditional) {
+    auto message = ErrorTextAliasDepth::endless(alias->name);
 
     return err(AliasInstantiatorDepthInBoundsError{
         .code = AliasInstantiatorDepthInBoundsErrorCode::ENDLESS_ALIAS,
@@ -106,7 +99,7 @@ AliasInstantiator::ResultDepthInBounds AliasInstantiator::depthInBounds(const Ty
     });
   }
   if (isDeep && calls > kMaxTailCalls) {
-    std::string message = ErrorTextAliasDepth::tailCalls(alias->name, kMaxTailCalls);
+    auto message = ErrorTextAliasDepth::tailCalls(alias->name, kMaxTailCalls);
 
     return err(AliasInstantiatorDepthInBoundsError{
         .code = AliasInstantiatorDepthInBoundsErrorCode::TOO_MANY_TAIL_CALLS,
@@ -114,7 +107,7 @@ AliasInstantiator::ResultDepthInBounds AliasInstantiator::depthInBounds(const Ty
     });
   }
   if (isDeep) {
-    std::string message = ErrorTextAliasDepth::nests(alias->name, kMaxAliasDepth, kMaxTailCalls);
+    auto message = ErrorTextAliasDepth::nests(alias->name, kMaxAliasDepth, kMaxTailCalls);
 
     return err(AliasInstantiatorDepthInBoundsError{
         .code = AliasInstantiatorDepthInBoundsErrorCode::TOO_DEEP,
@@ -126,27 +119,29 @@ AliasInstantiator::ResultDepthInBounds AliasInstantiator::depthInBounds(const Ty
 }
 
 std::vector<const Type *> AliasInstantiator::aliasTypeParams(TypeAliasDecl *alias) {
-  AliasStore &aliases = this->state.getAliasStore();
-  if (std::optional<AliasParams> known = aliases.findAliasParams(alias)) {
+  auto &aliases = this->state.getAliasStore();
+  auto known = aliases.findAliasParams(alias);
+  if (known.has_value()) {
     return known->params;
   }
   this->state.getScopeStack().openTypeScope();
-  std::vector<const Type *> defaults;
-  std::vector<const Type *> params =
-      this->typeParams->declareTypeParams(alias->typeParams, &defaults);
+  auto defaults = std::vector<const Type *>();
+  auto params = this->typeParams->declareTypeParams(alias->typeParams, &defaults);
   this->state.getScopeStack().closeTypeScope();
-  aliases.rememberAliasParams(alias, {std::move(params), std::move(defaults)});
+  auto declared = AliasParams{.params = std::move(params), .defaults = std::move(defaults)};
+  aliases.rememberAliasParams(alias, std::move(declared));
 
   return aliases.findAliasParams(alias)->params;
 }
 
 const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
                                                 std::vector<const Type *> args, llvm::SMLoc loc) {
-  AliasStore &aliases = this->state.getAliasStore();
+  auto &aliases = this->state.getAliasStore();
   if (aliases.getAliasDepth() == 0) {
     aliases.rememberAliasUse(loc);
   }
-  AliasRun run{.alias = alias, .args = std::move(args), .loc = loc, .defaults = {}, .chain = {}};
+  auto run =
+      AliasRun{.alias = alias, .args = std::move(args), .loc = loc, .defaults = {}, .chain = {}};
   const Type *type = nullptr;
   for (unsigned calls = 0; type == nullptr; ++calls) {
     type = this->aliasStep(run, calls);
@@ -160,24 +155,24 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
 }
 
 const Type *AliasInstantiator::aliasStep(AliasRun &run, unsigned calls) {
-  const Type *failed = this->failedAliasArgs(run);
+  const auto *failed = this->failedAliasArgs(run);
   if (failed != nullptr) {
     return failed;
   }
   AliasInstance &entry = *this->state.getAliasStore().recordAliasInstance(run.alias, run.args);
-  const Type *reused = AliasInstantiator::reusedInstance(entry);
+  const auto *reused = this->reusedInstance(entry);
   if (reused != nullptr) {
     return reused;
   }
-  if (!this->aliasDepthFits(run.alias, entry, calls)) {
+  if (!this->isAliasDepthFitting(run.alias, entry, calls)) {
     return Type::error();
   }
-  std::string display = AliasInstantiator::aliasDisplay(run);
+  auto display = this->aliasDisplay(run);
   entry.resolving = true;
   run.chain.push_back(&entry);
-  const Type *type = this->resolveAliasBody(run, entry, display);
+  const auto *type = this->resolveAliasBody(run, entry, display);
   if (type == nullptr && this->state.getTypeContext().hasTailCall()) {
-    TailCall tail = this->state.getTypeContext().takeTailCall();
+    auto tail = this->state.getTypeContext().takeTailCall();
     run.alias = tail.alias;
     run.args = std::move(tail.args);
     run.loc = run.alias->loc();
@@ -196,28 +191,30 @@ const Type *AliasInstantiator::failedAliasArgs(AliasRun &run) {
   AliasParams declared = *this->state.getAliasStore().findAliasParams(run.alias);
   std::vector<const Type *> params = declared.params;
   run.defaults = declared.defaults;
-  ResultArgumentCount counted =
-      AliasInstantiator::argumentCount(run.alias, params.size(), run.args.size());
+  auto counted = this->argumentCount(run.alias, params.size(), run.args.size());
   if (counted.isErr()) {
     this->state.getDiagnostics().error(run.loc, counted.error().message);
+
     return Type::error();
   }
-  for (size_t k = run.args.size(); k < params.size(); ++k) {
-    ResultDefaultExists exists =
-        AliasInstantiator::defaultExists(run.alias, params.size(), run.defaults[k]);
+  for (size_t index = run.args.size(); index < params.size(); ++index) {
+    auto exists = this->defaultExists(run.alias, params.size(), run.defaults[index]);
     if (exists.isErr()) {
       this->state.getDiagnostics().error(run.loc, exists.error().message);
+
       return Type::error();
     }
-    run.args.push_back(this->typeParams->substitute(run.defaults[k], params, run.args));
+    const auto *filled = this->typeParams->substitute(run.defaults[index], params, run.args);
+    run.args.push_back(filled);
   }
-  for (size_t k = 0; k < params.size(); ++k) {
-    if (run.args[k]->isError()) {
-      return run.args[k];
+  for (size_t index = 0; index < params.size(); ++index) {
+    if (run.args[index]->isError()) {
+      return run.args[index];
     }
-    ResultArgumentMatch matched = this->argumentMatch(run.alias, params, run.args, k);
+    auto matched = this->argumentMatch(run.alias, params, run.args, index);
     if (matched.isErr()) {
       this->state.getDiagnostics().error(run.loc, matched.error().message);
+
       return Type::error();
     }
   }
@@ -225,33 +222,35 @@ const Type *AliasInstantiator::failedAliasArgs(AliasRun &run) {
   return nullptr;
 }
 
-const Type *AliasInstantiator::reusedInstance(AliasInstance &entry) {
+const Type *AliasInstantiator::reusedInstance(AliasInstance &entry) const {
   if (entry.type != nullptr) {
     return entry.type;
   }
   if (entry.resolving && entry.self != nullptr) {
     entry.recursive = true;
+
     return entry.self;
   }
 
   return nullptr;
 }
 
-bool AliasInstantiator::aliasDepthFits(const TypeAliasDecl *alias, const AliasInstance &entry,
-                                       unsigned calls) {
-  ResultAliasDistinct distinct = AliasInstantiator::notResolving(alias, entry);
+bool AliasInstantiator::isAliasDepthFitting(const TypeAliasDecl *alias, const AliasInstance &entry,
+                                            unsigned calls) {
+  auto distinct = this->notResolving(alias, entry);
   if (distinct.isErr()) {
     this->state.getDiagnostics().error(alias->loc(), distinct.error().message);
+
     return false;
   }
   bool isConditional = alias->type.kind() == TypeRefKind::CONDITIONAL_REF;
-  ResultDepthInBounds bounded = this->depthInBounds(alias, calls, isConditional);
+  auto bounded = this->depthInBounds(alias, calls, isConditional);
   if (bounded.isOk()) {
     return true;
   }
-  std::string neededHere = ErrorTextAliasDepth::neededHere();
+  auto neededHere = ErrorTextAliasDepth::neededHere();
   this->state.getDiagnostics().error(alias->loc(), bounded.error().message);
-  llvm::SMLoc use = this->state.getAliasStore().getAliasUse();
+  auto use = this->state.getAliasStore().getAliasUse();
   if (isConditional && use.isValid() && use != alias->loc()) {
     this->state.getDiagnostics().note(use, neededHere);
   }
@@ -259,19 +258,13 @@ bool AliasInstantiator::aliasDepthFits(const TypeAliasDecl *alias, const AliasIn
   return false;
 }
 
-std::string AliasInstantiator::aliasDisplay(const AliasRun &run) {
-  const std::vector<const Type *> &args = run.args;
-  const std::vector<const Type *> &defaults = run.defaults;
-  size_t shown = args.size();
-  while (shown > 0 && defaults[shown - 1] != nullptr &&
-         (defaults[shown - 1] == args[shown - 1] ||
-          (defaults[shown - 1]->isNever() && args[shown - 1]->isNever()))) {
-    --shown;
-  }
+std::string AliasInstantiator::aliasDisplay(const AliasRun &run) const {
+  size_t shown = GenericCheckHelpers::shownArgumentCount(run.defaults, run.args);
   if (shown == 0) {
     return run.alias->name.str();
   }
-  std::string list = AliasInstantiator::typeList(llvm::ArrayRef(args).take_front(shown));
+  auto shownArgs = llvm::ArrayRef<const Type *>(run.args).take_front(shown);
+  auto list = GenericCheckHelpers::typeNames(shownArgs, ", ");
 
   return run.alias->name.str() + "<" + list + ">";
 }
@@ -280,11 +273,11 @@ const Type *AliasInstantiator::resolveAliasBody(const AliasRun &run, AliasInstan
                                                 const std::string &display) {
   TypeAliasDecl *alias = run.alias;
   this->state.getAliasStore().enterAlias();
-  Module *home = this->state.getModuleStates().findDeclModule(alias);
+  auto *home = this->state.getModuleStates().findDeclModule(alias);
   bool isMoved = home != nullptr && home != this->state.getModuleStates().getCurrentModule();
   if (isMoved) {
-    this->state.getScopeStack().enterOnlyTypes(
-        this->state.getModuleStates().getModuleState(home).types);
+    const auto &homeTypes = this->state.getModuleStates().getModuleState(home).types;
+    this->state.getScopeStack().enterOnlyTypes(homeTypes);
   }
   this->state.getScopeStack().openTypeScope();
   this->typeParams->bindTypeParams(alias->typeParams, run.args);
@@ -303,18 +296,12 @@ const Type *AliasInstantiator::resolveAliasBody(const AliasRun &run, AliasInstan
 const Type *AliasInstantiator::objectAliasType(TypeAliasDecl *alias, AliasInstance &entry,
                                                const std::string &display) {
   entry.self = Type::declareObject(display);
-  std::vector<const Type *> bases;
-  std::vector<Overload> overloads;
+  auto bases = std::vector<const Type *>();
+  auto overloads = std::vector<Overload>();
   std::vector<Field> fields = alias->bases.empty()
                                   ? this->typeResolver->resolveFields(alias->type, &overloads)
                                   : this->classBases->interfaceFields(alias, bases, overloads);
-  const Type *type = nullptr;
-  if (entry.recursive) {
-    entry.self->defineFields(std::move(fields), std::move(overloads));
-    type = entry.self;
-  } else {
-    type = Type::object(std::move(fields), display, std::move(overloads));
-  }
+  const Type *type = this->definedObject(entry, std::move(fields), std::move(overloads), display);
   for (const Type *base : bases) {
     if (!type->isError()) {
       this->classBases->addBase(type, base);
@@ -324,6 +311,18 @@ const Type *AliasInstantiator::objectAliasType(TypeAliasDecl *alias, AliasInstan
   return type;
 }
 
+const Type *AliasInstantiator::definedObject(const AliasInstance &entry, std::vector<Field> fields,
+                                             std::vector<Overload> overloads,
+                                             const std::string &display) const {
+  if (entry.recursive) {
+    entry.self->defineFields(std::move(fields), std::move(overloads));
+
+    return entry.self;
+  }
+
+  return Type::object(std::move(fields), display, std::move(overloads));
+}
+
 const Type *AliasInstantiator::aliasTypeInner(const TypeAliasDecl *alias) {
   bool isConditional = alias->type.kind() == TypeRefKind::CONDITIONAL_REF;
   if (isConditional) {
@@ -331,7 +330,7 @@ const Type *AliasInstantiator::aliasTypeInner(const TypeAliasDecl *alias) {
   } else {
     this->state.getTypeContext().forbidTailCall();
   }
-  const Type *type = this->typeResolver->resolveTypeInner(alias->type);
+  const auto *type = this->typeResolver->resolveTypeInner(alias->type);
   this->state.getTypeContext().forbidTailCall();
 
   return type;
@@ -339,7 +338,7 @@ const Type *AliasInstantiator::aliasTypeInner(const TypeAliasDecl *alias) {
 
 void AliasInstantiator::rememberAliasType(const AliasRun &run, const Type *type,
                                           const std::string &display) {
-  AliasStore &aliases = this->state.getAliasStore();
+  auto &aliases = this->state.getAliasStore();
   if (type->isObject() && !type->isError() && aliases.findAliasOrigin(type) == nullptr) {
     aliases.rememberAliasOrigin(type, run.alias, run.args);
   }

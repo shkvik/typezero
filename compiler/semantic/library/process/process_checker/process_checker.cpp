@@ -1,5 +1,9 @@
 #include "compiler/semantic/library/process/process_checker/process_checker.h"
+#include "compiler/program/library/builtin_names/global_member_table/global_member_table.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/process/process_event_table/process_event_table.h"
+#include "compiler/program/library/process/process_function_table/process_function_table.h"
+#include "compiler/program/to_utf16/to_utf16.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -12,12 +16,18 @@
 #include "compiler/semantic/library/stream/stream_sources/stream_sources.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
-#include "llvm/Support/ConvertUTF.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
 
 namespace tz {
+
+namespace {
+
+constexpr uint64_t kStdoutDescriptor = 1;
+constexpr uint64_t kStderrDescriptor = 2;
+
+}
 
 ProcessChecker::ProcessChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -32,18 +42,39 @@ ProcessChecker::ProcessChecker(SemanticState &owner, SemanticParts &all)
   this->eventTargetChecker = &all.eventTargetChecker;
 }
 
-std::u16string ProcessChecker::toUtf16(llvm::StringRef text) {
-  llvm::SmallVector<llvm::UTF16, 32> units;
-  llvm::convertUTF8ToUTF16String(text, units);
+bool ProcessChecker::isProcessMember(const Expr *expr, ProcessMember which) const {
+  auto *member = dyn_cast<MemberExpr>(expr);
+  if (member == nullptr || member->optional) {
+    return false;
+  }
+  if (member->name != ProcessMemberTable::getName(which)) {
+    return false;
+  }
 
-  return std::u16string(units.begin(), units.end());
+  return this->callChecker->isGlobalName(member->object, GlobalName::PROCESS);
 }
 
-bool ProcessChecker::isProcessMember(const Expr *expr, llvm::StringRef name) const {
-  auto *member = dyn_cast<MemberExpr>(expr);
+std::optional<ProcessMember> ProcessChecker::outputStream(const Expr *expr) const {
+  if (this->isProcessMember(expr, ProcessMember::STDOUT)) {
+    return ProcessMember::STDOUT;
+  }
+  if (this->isProcessMember(expr, ProcessMember::STDERR)) {
+    return ProcessMember::STDERR;
+  }
 
-  return member && !member->optional && member->name == name &&
-         this->callChecker->isGlobalName(member->object, GlobalName::PROCESS);
+  return std::nullopt;
+}
+
+bool ProcessChecker::hasStreamLibrary() const {
+  llvm::StringRef name = ProcessFunctionTable::getName(ProcessFunction::STDOUT);
+
+  return this->state.getLibraryDeclarations().findLibraryFunction(name) != nullptr;
+}
+
+bool ProcessChecker::hasSignalLibrary() const {
+  llvm::StringRef name = ProcessFunctionTable::getName(ProcessFunction::ON);
+
+  return this->state.getLibraryDeclarations().findLibraryFunction(name) != nullptr;
 }
 
 Expr *ProcessChecker::builtinCall(llvm::SMLoc loc, Expr *callee, Builtin builtin,
@@ -56,27 +87,32 @@ Expr *ProcessChecker::builtinCall(llvm::SMLoc loc, Expr *callee, Builtin builtin
 }
 
 Expr *ProcessChecker::checkExitCode(Expr *code) {
-  const Type *optionalInt = Type::optional(Type::intTy());
-  code = this->exprChecker->checkExpr(code, Type::intTy());
-  if (code->type->isOptional() || code->type->isUndefined()) {
-    return this->typeRelations->coerce(code, optionalInt);
+  const auto *optionalInt = Type::optional(Type::intTy());
+  auto *checked = this->exprChecker->checkExpr(code, Type::intTy());
+  if (checked->type->isOptional() || checked->type->isUndefined()) {
+    return this->typeRelations->coerce(checked, optionalInt);
   }
+  auto *whole = this->typeRelations->coerce(checked, Type::intTy());
 
-  return this->typeRelations->convert(this->typeRelations->coerce(code, Type::intTy()),
-                                      optionalInt);
+  return this->typeRelations->convert(whole, optionalInt);
 }
 
 Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
-  bool isDate = this->callChecker->isGlobalName(member->object, GlobalName::DATE);
-  if (isDate && member->name != "now") {
+  if (this->callChecker->isGlobalMember(member, GlobalMember::DATE_NOW)) {
+    return this->checkClockNow(call, member, Builtin::DateNow, Type::intTy());
+  }
+  if (this->callChecker->isGlobalName(member->object, GlobalName::DATE)) {
     return this->dateChecker->checkDateStatic(call, member);
   }
-  if (isDate || this->callChecker->isGlobalName(member->object, GlobalName::PERFORMANCE)) {
-    return this->checkClockNow(call, member, isDate);
+  if (this->callChecker->isGlobalMember(member, GlobalMember::PERFORMANCE_NOW)) {
+    return this->checkClockNow(call, member, Builtin::PerformanceNow, Type::doubleTy());
   }
-  bool isStdout = this->isProcessMember(member->object, "stdout");
-  if (isStdout || this->isProcessMember(member->object, "stderr")) {
-    return this->checkStdStreamCall(call, member, isStdout);
+  if (this->callChecker->isGlobalName(member->object, GlobalName::PERFORMANCE)) {
+    return this->rejectPerformanceCall(call, member);
+  }
+  auto stream = this->outputStream(member->object);
+  if (stream.has_value()) {
+    return this->checkStdStreamCall(call, member, *stream);
   }
   if (!this->callChecker->isGlobalName(member->object, GlobalName::PROCESS)) {
     return nullptr;
@@ -84,7 +120,7 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  std::optional<ProcessMember> found = ProcessMemberTable::find(member->name);
+  auto found = ProcessMemberTable::find(member->name);
   if (found == ProcessMember::NEXT_TICK) {
     return this->checkNextTick(call, member);
   }
@@ -107,57 +143,58 @@ void ProcessChecker::walkArgsLoosely(CallExpr *call) {
   }
 }
 
-bool ProcessChecker::hasRejectedArgs(CallExpr *call, MemberExpr *member, unsigned count) {
-  bool isRejected = this->callChecker->rejectSpread(call);
-  ArgumentChecker::ResultArityMatches arity =
-      isRejected ? ok(call) : this->argumentChecker->checkArity(call, count, count);
+bool ProcessChecker::hasRejectedArgs(CallExpr *call, const MemberExpr *member, unsigned count) {
+  if (this->callChecker->rejectSpread(call)) {
+    return true;
+  }
+  auto arity = this->argumentChecker->checkArity(call, count, count);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
 
-  return isRejected || arity.isErr();
+  return arity.isErr();
 }
 
-Expr *ProcessChecker::checkClockNow(CallExpr *call, MemberExpr *member, bool isDate) {
-  if (member->name != "now") {
-    llvm::StringRef object = isDate ? "Date" : "performance";
-    std::string message = ErrorTextProcessCall::onlyNow(object, member->name);
-    this->state.getDiagnostics().error(member->loc(), message);
-    this->walkArgsLoosely(call);
+Expr *ProcessChecker::checkClockNow(CallExpr *call, const MemberExpr *member, Builtin builtin,
+                                    const Type *result) {
+  if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  if (this->hasRejectedArgs(call, member, 0)) {
-    return call;
-  }
-  call->target = BuiltinCall{.builtin = isDate ? Builtin::DateNow : Builtin::PerformanceNow};
-  call->type = isDate ? Type::intTy() : Type::doubleTy();
+
+  return this->checkNoArgCall(call, member, builtin, result);
+}
+
+Expr *ProcessChecker::rejectPerformanceCall(CallExpr *call, const MemberExpr *member) {
+  llvm::StringRef object = GlobalNameTable::getName(GlobalName::PERFORMANCE);
+  auto message = ErrorTextProcessCall::onlyNow(object, member->name);
+  this->state.getDiagnostics().error(member->loc(), message);
+  this->walkArgsLoosely(call);
 
   return call;
 }
 
-Expr *ProcessChecker::checkStdStreamCall(CallExpr *call, MemberExpr *member, bool isStdout) {
-  std::optional<StdStreamMember> found = StdStreamMemberTable::find(member->name);
+Expr *ProcessChecker::checkStdStreamCall(CallExpr *call, const MemberExpr *member,
+                                         ProcessMember stream) {
+  bool isStdout = stream == ProcessMember::STDOUT;
+  auto found = StdStreamMemberTable::find(member->name);
   bool isTty = found == StdStreamMember::IS_TTY;
-  if (!isTty && this->state.getLibraryDeclarations().findLibraryFunction("processStdout")) {
+  if (!isTty && this->hasStreamLibrary()) {
     return nullptr;
   }
   if (found != StdStreamMember::WRITE) {
-    std::string stream = ErrorTextProcessStream::name(isStdout);
-    std::string message = isTty ? ErrorTextProcessCall::ttyValue(stream)
-                                : ErrorTextProcessCall::streamCall(stream, member->name);
+    auto shown = ErrorTextProcessStream::name(isStdout);
+    std::string message = isTty ? ErrorTextProcessCall::ttyValue(shown)
+                                : ErrorTextProcessCall::streamCall(shown, member->name);
     this->state.getDiagnostics().error(member->loc(), message);
     this->walkArgsLoosely(call);
+
     return call;
   }
   if (this->hasRejectedArgs(call, member, 1)) {
     return call;
   }
-  Expr *chunk = this->exprChecker->checkExpr(call->args[0], Type::string());
-  const Type *type = chunk->type;
-  if (!type->isBuffer() && type->bytes() != Type::Bytes::Uint8) {
-    chunk = this->typeRelations->coerce(chunk, Type::string());
-  }
-  call->args[0] = chunk;
+  auto *checked = this->exprChecker->checkExpr(call->args[0], Type::string());
+  call->args[0] = this->writtenChunk(checked);
   Builtin builtin = isStdout ? Builtin::ProcessStdoutWrite : Builtin::ProcessStderrWrite;
   call->target = BuiltinCall{.builtin = builtin};
   call->type = Type::boolTy();
@@ -165,28 +202,37 @@ Expr *ProcessChecker::checkStdStreamCall(CallExpr *call, MemberExpr *member, boo
   return call;
 }
 
-Expr *ProcessChecker::checkNextTick(CallExpr *call, MemberExpr *member) {
-  TimerChecker::ResultNextTickQueued queued = this->timerChecker->checkNextTick(call);
+Expr *ProcessChecker::writtenChunk(Expr *chunk) {
+  const Type *type = chunk->type;
+  if (type->isBuffer() || type->bytes() == Type::Bytes::Uint8) {
+    return chunk;
+  }
+
+  return this->typeRelations->coerce(chunk, Type::string());
+}
+
+Expr *ProcessChecker::checkNextTick(CallExpr *call, const MemberExpr *member) {
+  auto queued = this->timerChecker->checkNextTick(call);
   if (queued.isOk()) {
     return queued.value();
   }
-  llvm::SMLoc at = member->loc();
   switch (queued.error().code) {
     case TimerCheckerCheckNextTickErrorCode::CALLBACK_ARGUMENTS:
-      at = call->args[1]->loc();
+      this->state.getDiagnostics().error(call->args[1]->loc(), queued.error().message);
       break;
     case TimerCheckerCheckNextTickErrorCode::WRONG_ARITY:
+      this->state.getDiagnostics().error(member->loc(), queued.error().message);
       break;
   }
-  this->state.getDiagnostics().error(at, queued.error().message);
 
   return call;
 }
 
-Expr *ProcessChecker::checkExit(CallExpr *call, MemberExpr *member) {
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
+Expr *ProcessChecker::checkExit(CallExpr *call, const MemberExpr *member) {
+  auto arity = this->argumentChecker->checkArity(call, 0, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
+
     return call;
   }
   if (!call->args.empty()) {
@@ -198,11 +244,12 @@ Expr *ProcessChecker::checkExit(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-Expr *ProcessChecker::checkNoArgCall(CallExpr *call, MemberExpr *member, Builtin builtin,
+Expr *ProcessChecker::checkNoArgCall(CallExpr *call, const MemberExpr *member, Builtin builtin,
                                      const Type *result) {
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
+  auto arity = this->argumentChecker->checkArity(call, 0, 0);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
+
     return call;
   }
   call->target = BuiltinCall{.builtin = builtin};
@@ -213,40 +260,65 @@ Expr *ProcessChecker::checkNoArgCall(CallExpr *call, MemberExpr *member, Builtin
 
 Expr *ProcessChecker::checkProcessListenerCall(CallExpr *call, MemberExpr *member,
                                                std::optional<ProcessMember> found) {
-  bool isSubscribing = found == ProcessMember::ON || found == ProcessMember::ONCE ||
-                       found == ProcessMember::ADD_LISTENER ||
-                       found == ProcessMember::PREPEND_LISTENER;
-  auto *event = call->args.empty() ? nullptr : dyn_cast<StringLitExpr>(call->args[0]);
-  bool isThrown = event != nullptr &&
-                  (event->value == u"uncaughtException" || event->value == u"unhandledRejection");
-  if (isThrown && isSubscribing) {
-    std::string message = ErrorTextProcessEvent::noThrown();
+  if (this->isSubscribing(found) && this->isThrownEvent(call)) {
+    auto message = ErrorTextProcessEvent::noThrown();
     this->state.getDiagnostics().error(call->args[0]->loc(), message);
+
     return this->resultChecker->markCallFailed(call);
   }
-  bool isSignaling =
-      found == ProcessMember::ON || found == ProcessMember::ONCE || found == ProcessMember::OFF;
-  if (isSignaling && this->state.getLibraryDeclarations().findLibraryFunction("processOn")) {
-    return this->checkSignalCall(call, member);
+  if (this->isSignalMethod(found) && this->hasSignalLibrary()) {
+    return this->checkSignalCall(call, member, *found);
   }
-  bool isProperty = found == ProcessMember::ARGV || found == ProcessMember::ENV ||
-                    found == ProcessMember::EXIT_CODE || found == ProcessMember::EXEC_PATH ||
-                    found == ProcessMember::PLATFORM || found == ProcessMember::STDOUT ||
-                    found == ProcessMember::STDERR;
-  std::string message = isProperty ? ErrorTextProcessCall::notFunc(member->name)
-                                   : ErrorTextProcessCall::notYet(member->name);
+  std::string message = this->isProperty(found) ? ErrorTextProcessCall::notFunc(member->name)
+                                                : ErrorTextProcessCall::notYet(member->name);
   this->state.getDiagnostics().error(member->loc(), message);
   this->walkArgsLoosely(call);
 
   return call;
 }
 
+bool ProcessChecker::isSubscribing(std::optional<ProcessMember> found) const {
+  return found == ProcessMember::ON || found == ProcessMember::ONCE ||
+         found == ProcessMember::ADD_LISTENER || found == ProcessMember::PREPEND_LISTENER;
+}
+
+bool ProcessChecker::isSignalMethod(std::optional<ProcessMember> found) const {
+  return found == ProcessMember::ON || found == ProcessMember::ONCE || found == ProcessMember::OFF;
+}
+
+bool ProcessChecker::isProperty(std::optional<ProcessMember> found) const {
+  bool isValue = found == ProcessMember::ARGV || found == ProcessMember::ENV ||
+                 found == ProcessMember::EXIT_CODE || found == ProcessMember::EXEC_PATH ||
+                 found == ProcessMember::PLATFORM;
+
+  return isValue || found == ProcessMember::STDOUT || found == ProcessMember::STDERR;
+}
+
+bool ProcessChecker::isThrownEvent(const CallExpr *call) const {
+  if (call->args.empty()) {
+    return false;
+  }
+  auto *event = dyn_cast<StringLitExpr>(call->args[0]);
+  if (event == nullptr) {
+    return false;
+  }
+  auto written = ToUtf8::toUtf8(event->value);
+  const auto *known = ProcessEventTable::find(written);
+
+  return known != nullptr && known->kind == ProcessEventKind::THROWN;
+}
+
 ProcessChecker::ResultListenedSignal ProcessChecker::listenedSignal(llvm::StringRef name,
-                                                                    const std::u16string &event) {
-  static const char16_t *const signals[] = {u"SIGINT", u"SIGTERM", u"SIGHUP", u"SIGBREAK"};
-  if (llvm::none_of(signals, [&](const char16_t *s) { return event == s; })) {
-    std::string written = ToUtf8::toUtf8(event);
-    std::string message = ErrorTextProcessCall::signal(name, written);
+                                                                    const Expr *event) const {
+  auto *literal = dyn_cast<StringLitExpr>(event);
+  if (literal == nullptr) {
+    return ok(name);
+  }
+  auto written = ToUtf8::toUtf8(literal->value);
+  const auto *known = ProcessEventTable::find(written);
+  bool isSignal = known != nullptr && known->kind == ProcessEventKind::SIGNAL;
+  if (!isSignal) {
+    auto message = ErrorTextProcessCall::signal(name, written);
 
     return err(ProcessCheckerListenedSignalError{
         .code = ProcessCheckerListenedSignalErrorCode::NOT_A_SIGNAL,
@@ -257,104 +329,131 @@ ProcessChecker::ResultListenedSignal ProcessChecker::listenedSignal(llvm::String
   return ok(name);
 }
 
-Expr *ProcessChecker::checkSignalCall(CallExpr *call, MemberExpr *member) {
-  llvm::StringRef name = member->name;
+Expr *ProcessChecker::checkSignalCall(CallExpr *call, MemberExpr *member, ProcessMember method) {
   call->type = Type::error();
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 2);
+  auto arity = this->argumentChecker->checkArity(call, 2, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
+
     return call;
   }
-  auto *event = dyn_cast<StringLitExpr>(call->args[0]);
-  ResultListenedSignal listened =
-      event ? ProcessChecker::listenedSignal(name, event->value) : ok(name);
+  auto listened = this->listenedSignal(member->name, call->args[0]);
   if (listened.isErr()) {
-    this->state.getDiagnostics().error(event->loc(), listened.error().message);
+    this->state.getDiagnostics().error(call->args[0]->loc(), listened.error().message);
     call->args[1] = this->exprChecker->checkExpr(call->args[1]);
+
     return call;
   }
-  Expr *listener = this->exprChecker->checkExpr(call->args[1]);
+  auto *listener = this->exprChecker->checkExpr(call->args[1]);
   call->args[1] = listener;
   if (listener->type->isError()) {
     return call;
   }
-  bool isWaiting = listener->type->isFunction() && listener->type->ret()->isPromise();
-  // TODO: говнокод
-  llvm::StringRef fn = name == "off" ? (isWaiting ? "processOffAsync" : "processOff")
-                                     : (isWaiting ? "processOnAsync" : "processOn");
-  if (name != "off") {
-    auto *once = this->state.getAst().make<BoolLitExpr>(call->loc(), name == "once");
+  auto function = this->signalFunction(method, listener->type);
+  if (method != ProcessMember::OFF) {
+    bool isOnce = method == ProcessMember::ONCE;
+    auto *once = this->state.getAst().make<BoolLitExpr>(call->loc(), isOnce);
     once->type = Type::boolTy();
     call->args.push_back(once);
   }
   std::vector<bool> given(call->args.size(), true);
   given[0] = false;
+  llvm::StringRef functionName = ProcessFunctionTable::getName(function);
 
-  return this->eventTargetChecker->callLibraryFunction(call, fn, {}, given, member->loc());
+  return this->eventTargetChecker->callLibraryFunction(call, functionName, {}, given,
+                                                       member->loc());
+}
+
+ProcessFunction ProcessChecker::signalFunction(ProcessMember method, const Type *listener) const {
+  bool isWaiting = listener->isFunction() && listener->ret()->isPromise();
+  if (method == ProcessMember::OFF) {
+    return isWaiting ? ProcessFunction::OFF_ASYNC : ProcessFunction::OFF;
+  }
+
+  return isWaiting ? ProcessFunction::ON_ASYNC : ProcessFunction::ON;
 }
 
 Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
-  if (this->isProcessMember(member->object, "env")) {
-    std::u16string name = ProcessChecker::toUtf16(member->name);
-    auto *key = this->state.getAst().make<StringLitExpr>(member->loc(), name);
-    key->type = Type::string();
-    return this->builtinCall(member->loc(), member, Builtin::ProcessEnv, {key},
-                             Type::optional(Type::string()));
+  if (this->isProcessMember(member->object, ProcessMember::ENV)) {
+    return this->envValue(member);
   }
-  bool isStdout = this->isProcessMember(member->object, "stdout");
-  if (isStdout || this->isProcessMember(member->object, "stderr")) {
-    return this->checkStdStreamMember(member, isStdout);
+  auto stream = this->outputStream(member->object);
+  if (stream.has_value()) {
+    return this->checkStdStreamMember(member, *stream);
   }
   if (this->callChecker->isGlobalName(member->object, GlobalName::DATE)) {
     return this->dateChecker->checkDateStaticMember(member);
   }
   if (this->callChecker->isGlobalName(member->object, GlobalName::PERFORMANCE)) {
-    std::string message = member->name == "now" ? ErrorTextProcessMember::perfNow()
-                                                : ErrorTextProcessMember::perfOther(member->name);
-    this->state.getDiagnostics().error(member->loc(), message);
-    member->type = Type::error();
-    return member;
+    return this->rejectPerformanceMember(member);
   }
   if (!this->callChecker->isGlobalName(member->object, GlobalName::PROCESS)) {
     return nullptr;
   }
 
-  std::optional<ProcessMember> found = ProcessMemberTable::find(member->name);
-  bool isStream = found == ProcessMember::STDIN || found == ProcessMember::STDOUT ||
-                  found == ProcessMember::STDERR;
-  if (isStream) {
-    Expr *source = this->streamSources->processStream(member);
-    if (source != nullptr) {
-      return source;
-    }
+  return this->checkProcessField(member);
+}
+
+Expr *ProcessChecker::envValue(MemberExpr *member) {
+  auto name = ToUtf16::toUtf16(member->name);
+  auto *key = this->state.getAst().make<StringLitExpr>(member->loc(), name);
+  key->type = Type::string();
+  const auto *value = Type::optional(Type::string());
+
+  return this->builtinCall(member->loc(), member, Builtin::ProcessEnv, {key}, value);
+}
+
+Expr *ProcessChecker::rejectPerformanceMember(MemberExpr *member) {
+  bool isNow = this->callChecker->isGlobalMember(member, GlobalMember::PERFORMANCE_NOW);
+  std::string message =
+      isNow ? ErrorTextProcessMember::perfNow() : ErrorTextProcessMember::perfOther(member->name);
+  this->state.getDiagnostics().error(member->loc(), message);
+  member->type = Type::error();
+
+  return member;
+}
+
+Expr *ProcessChecker::checkProcessField(MemberExpr *member) {
+  auto found = ProcessMemberTable::find(member->name);
+  auto *source = this->isStream(found) ? this->streamSources->processStream(member) : nullptr;
+  if (source != nullptr) {
+    return source;
   }
   Expr *value = found.has_value() ? this->processValue(member, *found) : nullptr;
   if (value != nullptr) {
     return value;
   }
   member->type = Type::error();
-  std::string message = ProcessChecker::processMemberMessage(member->name, found);
+  auto message = this->processMemberMessage(member->name, found);
   this->state.getDiagnostics().error(member->loc(), message);
 
   return member;
 }
 
-Expr *ProcessChecker::checkStdStreamMember(MemberExpr *member, bool isStdout) {
-  std::optional<StdStreamMember> found = StdStreamMemberTable::find(member->name);
+bool ProcessChecker::isStream(std::optional<ProcessMember> found) const {
+  return found == ProcessMember::STDIN || found == ProcessMember::STDOUT ||
+         found == ProcessMember::STDERR;
+}
+
+Expr *ProcessChecker::checkStdStreamMember(MemberExpr *member, ProcessMember stream) {
+  bool isStdout = stream == ProcessMember::STDOUT;
+  auto found = StdStreamMemberTable::find(member->name);
   bool isKnown = found == StdStreamMember::IS_TTY || found == StdStreamMember::COLUMNS ||
                  found == StdStreamMember::ROWS;
-  if (!isKnown && this->state.getLibraryDeclarations().findLibraryFunction("processStdout")) {
+  if (!isKnown && this->hasStreamLibrary()) {
     return nullptr;
   }
   if (found == StdStreamMember::IS_TTY) {
-    auto *fd = this->state.getAst().make<IntLitExpr>(member->loc(), isStdout ? 1 : 2);
+    uint64_t descriptor = isStdout ? kStdoutDescriptor : kStderrDescriptor;
+    auto *fd = this->state.getAst().make<IntLitExpr>(member->loc(), descriptor);
     fd->type = Type::intTy();
+
     return this->builtinCall(member->loc(), member, Builtin::ProcessIsTTY, {fd}, Type::boolTy());
   }
-  std::string stream = ErrorTextProcessStream::name(isStdout);
+  auto shown = ErrorTextProcessStream::name(isStdout);
   std::string message = found == StdStreamMember::WRITE
-                            ? ErrorTextProcessMember::writeCall(stream)
-                            : ErrorTextProcessMember::streamPart(stream, member->name);
+                            ? ErrorTextProcessMember::writeCall(shown)
+                            : ErrorTextProcessMember::streamPart(shown, member->name);
   this->state.getDiagnostics().error(member->loc(), message);
   member->type = Type::error();
 
@@ -397,7 +496,7 @@ Expr *ProcessChecker::processValue(MemberExpr *member, ProcessMember found) {
 }
 
 std::string ProcessChecker::processMemberMessage(llvm::StringRef name,
-                                                 std::optional<ProcessMember> found) {
+                                                 std::optional<ProcessMember> found) const {
   bool isFunction =
       found == ProcessMember::EXIT || found == ProcessMember::CWD || found == ProcessMember::UPTIME;
   if (isFunction) {
@@ -411,53 +510,69 @@ std::string ProcessChecker::processMemberMessage(llvm::StringRef name,
 }
 
 Expr *ProcessChecker::checkProcessEnvIndex(IndexExpr *index) {
-  if (!this->isProcessMember(index->object, "env")) {
+  if (!this->isProcessMember(index->object, ProcessMember::ENV)) {
     return nullptr;
   }
-  Expr *key = this->argumentChecker->checkArg(index->index, Type::string());
+  auto *key = this->argumentChecker->checkArg(index->index, Type::string());
+  const auto *value = Type::optional(Type::string());
 
-  return this->builtinCall(index->loc(), index->object, Builtin::ProcessEnv, {key},
-                           Type::optional(Type::string()));
+  return this->builtinCall(index->loc(), index->object, Builtin::ProcessEnv, {key}, value);
 }
 
-// TODO: говнокод
 Expr *ProcessChecker::checkProcessAssign(AssignExpr *assign) {
-  Expr *object = nullptr;
-  llvm::StringRef name;
-  if (auto *member = dyn_cast<MemberExpr>(assign->target)) {
-    object = member->object;
-    name = member->name;
-  } else if (auto *index = dyn_cast<IndexExpr>(assign->target)) {
-    object = index->object;
+  auto *member = dyn_cast<MemberExpr>(assign->target);
+  if (member != nullptr && this->callChecker->isGlobalName(member->object, GlobalName::PROCESS)) {
+    return this->checkFieldAssign(assign, member);
   }
-  if (!object) {
-    return nullptr;
-  }
-  bool isEnv = this->isProcessMember(object, "env");
-  bool isProcess = this->callChecker->isGlobalName(object, GlobalName::PROCESS) && !name.empty();
-  bool isStream =
-      this->isProcessMember(object, "stdout") || this->isProcessMember(object, "stderr");
-  if (!isEnv && !isProcess && !isStream) {
-    return nullptr;
+  Expr *object = this->targetObject(assign->target);
+  if (object != nullptr && this->outputStream(object).has_value()) {
+    return this->rejectStreamAssign(assign, cast<MemberExpr>(object));
   }
 
-  if (isProcess && name == "exitCode" && !assign->op) {
-    Expr *code = this->checkExitCode(assign->value);
-    return this->builtinCall(assign->loc(), assign->target, Builtin::ProcessSetExitCode, {code},
-                             Type::voidTy());
+  return nullptr;
+}
+
+Expr *ProcessChecker::targetObject(const Expr *target) const {
+  auto *member = dyn_cast<MemberExpr>(target);
+  auto *index = dyn_cast<IndexExpr>(target);
+  if (member != nullptr) {
+    return member->object;
   }
-  if (isEnv) {
-    return nullptr;
+  if (index != nullptr) {
+    return index->object;
   }
-  if (isProcess && name == "exitCode") {
-    std::string message = ErrorTextProcessAssign::exitCode();
-    this->state.getDiagnostics().error(assign->loc(), message);
-  } else {
-    std::string message = isProcess
-                              ? ErrorTextProcessAssign::assigned(name)
-                              : ErrorTextProcessAssign::changed(cast<MemberExpr>(object)->name);
+
+  return nullptr;
+}
+
+Expr *ProcessChecker::checkFieldAssign(AssignExpr *assign, const MemberExpr *member) {
+  auto found = ProcessMemberTable::find(member->name);
+  if (found != ProcessMember::EXIT_CODE) {
+    auto message = ErrorTextProcessAssign::assigned(member->name);
     this->state.getDiagnostics().error(assign->target->loc(), message);
+
+    return this->failedAssign(assign);
   }
+  if (assign->op.has_value()) {
+    auto message = ErrorTextProcessAssign::exitCode();
+    this->state.getDiagnostics().error(assign->loc(), message);
+
+    return this->failedAssign(assign);
+  }
+  auto *code = this->checkExitCode(assign->value);
+
+  return this->builtinCall(assign->loc(), assign->target, Builtin::ProcessSetExitCode, {code},
+                           Type::voidTy());
+}
+
+Expr *ProcessChecker::rejectStreamAssign(AssignExpr *assign, const MemberExpr *stream) {
+  auto message = ErrorTextProcessAssign::changed(stream->name);
+  this->state.getDiagnostics().error(assign->target->loc(), message);
+
+  return this->failedAssign(assign);
+}
+
+Expr *ProcessChecker::failedAssign(AssignExpr *assign) {
   assign->value = this->exprChecker->checkExpr(assign->value);
   assign->type = Type::error();
 

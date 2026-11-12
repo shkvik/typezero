@@ -57,22 +57,27 @@ private:
     UNKNOWN_NAME,
   };
 
-  ResultResolvedNameUse unknownName(NameExpr *name, const ScopeEntry &entry);
-  ResultVariableVisible notCaptured(const NameExpr *name, const ScopeEntry &entry) const;
-  static ResultNoTypeArguments typeArgsAbsent(const NameExpr *name, const ScopeEntry &entry);
+  ResultResolvedNameUse checkUnknownName(NameExpr *name, const ScopeEntry &entry);
+  ResultVariableVisible checkNotCaptured(const NameExpr *name, const ScopeEntry &entry) const;
+  ResultNoTypeArguments checkTypeArgsAbsent(const NameExpr *name, const ScopeEntry &entry) const;
 
-  static bool isUriName(std::optional<GlobalName> global);
-  static bool isConversionName(std::optional<GlobalName> global);
-  static std::optional<llvm::StringRef> objectExample(std::optional<GlobalName> global);
-  static std::string builtinValueText(llvm::StringRef text, std::optional<GlobalName> global);
-  static ResultResolvedNameUse unknownError(NameCheckerUnknownNameErrorCode code,
-                                            const std::string &message);
+  bool isUriName(std::optional<GlobalName> global) const;
+  bool isConversionName(std::optional<GlobalName> global) const;
+  std::optional<llvm::StringRef> objectExample(std::optional<GlobalName> global) const;
+  std::string builtinValueText(llvm::StringRef text, std::optional<GlobalName> global) const;
+  ResultResolvedNameUse unknownError(NameCheckerUnknownNameErrorCode code,
+                                     const std::string &message) const;
   Expr *checkThisName(NameExpr *name);
   bool isDeclaredAfterCall(llvm::StringRef text) const;
   std::string typeOnlyText(const NameExpr *name) const;
   std::string afterCallText(const NameExpr *name) const;
-  Expr *narrowedName(NameExpr *name, VarSymbol *var);
-  Expr *checkFunctionName(NameExpr *name, FuncSymbol *func);
+  Expr *narrowedName(NameExpr *name, VarSymbol *variable);
+  const Type *streamView(VarSymbol *variable, llvm::SMLoc loc) const;
+  const Type *definedType(const Type *narrowed, const VarSymbol *variable) const;
+  const Type *knownResultType(const Type *type, const VarSymbol *variable) const;
+  ClassDecl *builtinClass(const NameExpr *name, const ScopeEntry &entry) const;
+  std::optional<GlobalName> resultNameOf(llvm::StringRef text, const ScopeEntry &entry) const;
+  Expr *checkFunctionName(NameExpr *name, FuncSymbol *function);
   ResultResolvedNameUse notLoadedError(const NameExpr *name);
   ResultResolvedNameUse reportBigIntName(const NameExpr *name);
   Expr *checkVariableName(NameExpr *name, const ScopeEntry &entry);

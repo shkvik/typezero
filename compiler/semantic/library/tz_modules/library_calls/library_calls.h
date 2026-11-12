@@ -26,9 +26,9 @@ public:
 private:
   using ResultIntrinsicShape = Result<const CallExpr *, LibraryCallsIntrinsicShapeError>;
 
-  static ResultIntrinsicShape intrinsicShape(const CallExpr *call, const NameExpr *name,
-                                             llvm::StringRef intrinsicName, bool known,
-                                             unsigned args, unsigned typeArgs);
+  ResultIntrinsicShape intrinsicShape(const CallExpr *call, const NameExpr *name,
+                                      llvm::StringRef intrinsicName, bool known, unsigned args,
+                                      unsigned typeArgs) const;
 
   struct IntrinsicCall {
     CallExpr *call;
@@ -39,10 +39,10 @@ private:
 
   Expr *checkIntrinsic(const IntrinsicCall &made, LibraryIntrinsic intrinsic);
   Expr *checkListenerIntrinsic(const IntrinsicCall &made, bool bound);
-  static const Type *flatListenerType(const Type *typeArg);
+  const Type *flatListenerType(const Type *typeArg) const;
   Expr *checkAsClass(const IntrinsicCall &made);
   Expr *checkAhead(const IntrinsicCall &made);
-  static bool isAwaitable(const Type *type);
+  bool isAwaitable(const Type *type) const;
   Expr *checkWithContext(const IntrinsicCall &made);
 
   SemanticState &state;

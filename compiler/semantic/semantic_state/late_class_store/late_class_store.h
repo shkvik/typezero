@@ -17,23 +17,23 @@ struct LateError {
 
 class LateClassStore {
 public:
-  void addLateClass(ClassDecl *cls);
+  void addLateClass(ClassDecl *classDecl);
   bool hasUncheckedLateClasses() const;
   ClassDecl *takeUncheckedLateClass();
   std::vector<ClassDecl *> getUncheckedLateClasses() const;
-  void enterDeclaringClass(ClassDecl *cls);
+  void enterDeclaringClass(ClassDecl *classDecl);
   void leaveDeclaringClass();
   ClassDecl *getDeclaringClass() const;
-  void rememberLateOwner(const ClassDecl *cls, InstanceRecord *owner);
-  InstanceRecord *findLateOwner(const ClassDecl *cls) const;
+  void rememberLateOwner(const ClassDecl *classDecl, InstanceRecord *owner);
+  InstanceRecord *findLateOwner(const ClassDecl *classDecl) const;
   void addLateErrors(InstanceRecord *owner, const std::vector<Diagnostic> &found);
   std::vector<LateError> getFirstLateErrors() const;
   void addLateMethodName(llvm::StringRef name);
   bool hasLateMethodNames() const;
   bool isLateMethodName(llvm::StringRef name) const;
-  void rememberClassExpr(const FunctionDecl *fn, bool has);
-  bool isClassExprKnown(const FunctionDecl *fn) const;
-  bool hasClassExpr(const FunctionDecl *fn) const;
+  void rememberClassExpr(const FunctionDecl *functionDecl, bool has);
+  bool isClassExprKnown(const FunctionDecl *functionDecl) const;
+  bool hasClassExpr(const FunctionDecl *functionDecl) const;
 
 private:
   std::vector<ClassDecl *> lateClasses;

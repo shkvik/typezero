@@ -3,6 +3,8 @@
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/expr/member_checker/member_checker_errors.h"
+#include "compiler/semantic/bodies/objects/keyed_field_checker/keyed_field_checker_errors.h"
+#include "compiler/semantic/declare/type_declarer/type_declarer_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
@@ -53,7 +55,13 @@ public:
 private:
   using ResultIndexIsInteger = Result<const Type *, MemberCheckerPositionTypeError>;
 
-  static ResultIndexIsInteger positionType(const Type *type);
+  ResultIndexIsInteger checkPositionType(const Type *type) const;
+  std::string globalThisMessage(llvm::StringRef name) const;
+  ResultMemberReadable commonBaseMember(MemberExpr *member, const Type *type, const Type *expected);
+  MemberCheckerCheckIndexErrorCode enumIndexCode(TypeDeclarerCheckEnumIndexErrorCode code) const;
+  MemberCheckerCheckIndexErrorCode
+  keyedIndexCode(KeyedFieldCheckerCheckKeyedFieldErrorCode code) const;
+  const Type *indexedElement(const Type *type) const;
 
   EnumDecl *indexedEnum(const IndexExpr *index);
   ResultIndexedElement dictIndex(IndexExpr *index);
@@ -61,7 +69,7 @@ private:
   ResultIndexedElement unknownIndex(IndexExpr *index);
   ResultIndexedElement positionIndex(IndexExpr *index);
   ResultIndexedElement checkTypedIndex(IndexExpr *index);
-  ResultIndexedElement enumIndex(IndexExpr *index, EnumDecl *decl);
+  ResultIndexedElement enumIndex(IndexExpr *index, EnumDecl *enumDecl);
   ResultIndexedElement listParamIndex(IndexExpr *index, const Type *type);
   ResultMemberReadable dictObjectMember(MemberExpr *member);
   ResultMemberReadable unionObjectMember(MemberExpr *member);

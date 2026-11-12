@@ -78,9 +78,9 @@ public:
   std::vector<ErrorEmit> getErrorEmits() const;
   void markErrorListened(const Type *events);
   bool isErrorListened(const Type *events) const;
-  void addSelfListener(const ClassDecl *cls);
-  bool isSelfListener(const ClassDecl *cls) const;
-  void addDroppedNew(const ClassDecl *cls, llvm::SMLoc loc);
+  void addSelfListener(const ClassDecl *classDecl);
+  bool isSelfListener(const ClassDecl *classDecl) const;
+  void addDroppedNew(const ClassDecl *classDecl, llvm::SMLoc loc);
   std::vector<DroppedNew> getDroppedNews() const;
   void markErrorSubscriptionReported(llvm::SMLoc loc);
   bool isErrorSubscriptionReported(llvm::SMLoc loc) const;

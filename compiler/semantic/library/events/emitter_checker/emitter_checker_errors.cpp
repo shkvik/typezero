@@ -16,7 +16,7 @@ std::string ErrorTextListenerLife::section(bool timer) {
 }
 
 std::string ErrorTextListenerLife::list(const std::vector<const VarSymbol *> &vars) {
-  std::string out;
+  auto out = std::string();
   for (size_t i = 0; i < vars.size(); ++i) {
     out += (i == 0                 ? ""
             : i + 1 == vars.size() ? " and "

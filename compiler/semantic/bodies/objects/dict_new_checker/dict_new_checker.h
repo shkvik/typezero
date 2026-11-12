@@ -11,6 +11,7 @@ class DictChecker;
 class ExprChecker;
 class FlowChecker;
 class TypeRelations;
+class DecimalChecker;
 class IteratorMethods;
 class GeneratorChecker;
 
@@ -32,18 +33,18 @@ private:
   using ResultPairsShaped = Result<const Type *, DictNewCheckerPairShapeError>;
   using ResultDefinedType = Result<const Type *, DictNewCheckerElementsKnownError>;
 
-  static ResultPartsJoined partsJoin(bool keys, const Type *common, const Type *type);
-  static std::vector<const ReturnStmt *> branchReturns(const Stmt *body);
-  static bool returnsPair(const ReturnStmt *ret);
-  static ResultPairTypesOk pairsKnown(const Type *key, const Type *value);
-  static ResultSourceShape sourceShape(const Type *type, const Type *given, const Type *wanted,
-                                       bool pairs, llvm::StringRef what);
-  static ResultOneArgument argumentCount(const NewExpr *expr, bool isMap);
-  static ResultTypesStated typesGiven(const NewExpr *expr, const Type *type, bool isMap,
-                                      bool undefinedArg);
-  static ResultPairsShaped pairShape(const Type *element);
-  static ResultDefinedType elementsKnown(const NewExpr *expr, const Type *key, const Type *element,
-                                         bool isMap);
+  ResultPartsJoined partsJoin(bool keys, const Type *common, const Type *type) const;
+  std::vector<const ReturnStmt *> branchReturns(const Stmt *body) const;
+  static bool returnsPair(const ReturnStmt *returnStmt);
+  ResultPairTypesOk pairsKnown(const Type *key, const Type *value) const;
+  ResultSourceShape sourceShape(const Type *type, const Type *given, const Type *wanted, bool pairs,
+                                llvm::StringRef what) const;
+  ResultOneArgument argumentCount(const NewExpr *expr, bool isMap) const;
+  ResultTypesStated typesGiven(const NewExpr *expr, const Type *type, bool isMap,
+                               bool undefinedArg) const;
+  ResultPairsShaped pairShape(const Type *element) const;
+  ResultDefinedType elementsKnown(const NewExpr *expr, const Type *key, const Type *element,
+                                  bool isMap) const;
 
   struct DictSource {
     const Type *type;
@@ -53,8 +54,8 @@ private:
   Expr *failDictNew(NewExpr *expr);
   Expr *reportWeakDict(NewExpr *expr);
   std::optional<const Type *> statedDictType(NewExpr *expr, const Type *expected, bool isMap);
-  static const Type *wantedDict(const Type *expected, bool isMap);
-  static const Type *onlyDictMember(const Type *expected, bool isMap);
+  const Type *wantedDict(const Type *expected, bool isMap) const;
+  const Type *onlyDictMember(const Type *expected, bool isMap) const;
   std::optional<DictSource> sourcedDict(NewExpr *expr, const Type *type, bool isMap);
   std::optional<DictSource> inferredPairsDict(Expr *arg, const Type *key, const Type *value);
   std::optional<DictSource> checkedSourceDict(NewExpr *expr, Expr *arg, const Type *type,
@@ -67,6 +68,7 @@ private:
   ExprChecker *exprChecker = nullptr;
   FlowChecker *flowChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
+  DecimalChecker *decimalChecker = nullptr;
   IteratorMethods *iteratorMethods = nullptr;
   GeneratorChecker *generatorChecker = nullptr;
 };

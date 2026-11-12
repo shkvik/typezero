@@ -63,7 +63,7 @@ std::string ErrorTextDateOptions::unknownVal(llvm::StringRef name, llvm::StringR
 
 std::string ErrorTextDateOptions::badValue(llvm::StringRef text, llvm::StringRef name,
                                            llvm::ArrayRef<llvm::StringLiteral> allowed) {
-  std::string values;
+  auto values = std::string();
   for (size_t i = 0; i < allowed.size(); ++i) {
     values += (i == 0 ? "'" : i + 1 == allowed.size() ? " or '" : ", '") + allowed[i].str() + "'";
   }

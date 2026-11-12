@@ -20,8 +20,8 @@ const Type *StreamStore::findStreamView(const FieldPath &path, llvm::SMLoc loc) 
   return nullptr;
 }
 
-void StreamStore::rememberProcessStdin(VarSymbol *var) {
-  this->processStdin = var;
+void StreamStore::rememberProcessStdin(VarSymbol *variable) {
+  this->processStdin = variable;
 }
 
 VarSymbol *StreamStore::getProcessStdin() const {

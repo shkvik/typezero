@@ -15,6 +15,7 @@ class FlowChecker;
 class IndexProofs;
 class MemberChecker;
 class TypeRelations;
+class GenericChecker;
 class ArgumentChecker;
 class CallbackChecker;
 class GeneratorChecker;
@@ -44,15 +45,15 @@ private:
   using ResultKnownHelperFound = Result<Builtin, IteratorMethodsIteratorHelperError>;
   using ResultArrayStaticKnown = Result<const MemberExpr *, IteratorMethodsArrayStaticError>;
 
-  static ResultNextValueOneType nextValue(const Type *iterator);
-  static ResultFlatMapInnerType flatMapInner(const Type *result);
-  static ResultNotThrowOrReturn plainMethod(llvm::StringRef name);
-  static ResultInitialValueType initialValue(const Type *accumulator);
-  static ResultArrayStaticKnown arrayStatic(const MemberExpr *member);
-  static ResultSourceIsIterable iteratedSource(const Type *type, llvm::StringRef fn);
-  static ResultCallbackHasValue callbackValue(const Type *result, llvm::StringRef fn);
-  static ResultKnownHelperFound iteratorHelper(llvm::StringRef name, const Type *iterator);
-  static ResultCallbackIsPassed callbackGiven(size_t count, llvm::StringRef name, bool reduce);
+  ResultNextValueOneType nextValue(const Type *iterator) const;
+  ResultFlatMapInnerType flatMapInner(const Type *result) const;
+  ResultNotThrowOrReturn plainMethod(llvm::StringRef name) const;
+  ResultInitialValueType initialValue(const Type *accumulator) const;
+  ResultArrayStaticKnown arrayStatic(const MemberExpr *member) const;
+  ResultSourceIsIterable iteratedSource(const Type *type, llvm::StringRef functionName) const;
+  ResultCallbackHasValue callbackValue(const Type *result, llvm::StringRef functionName) const;
+  ResultKnownHelperFound iteratorHelper(llvm::StringRef name, const Type *iterator) const;
+  ResultCallbackIsPassed callbackGiven(size_t count, llvm::StringRef name, bool reduce) const;
 
   struct IteratorCallback {
     CallExpr *call;
@@ -71,8 +72,8 @@ private:
   Expr *checkIteratorCallback(CallExpr *call, MemberExpr *member, IteratorMethod method,
                               Builtin builtin);
   const Type *reduceInitType(CallExpr *call, const Type *element);
-  static Signature callbackSignature(IteratorMethod method, const Type *element,
-                                     const Type *accumulator);
+  Signature callbackSignature(IteratorMethod method, const Type *element,
+                              const Type *accumulator) const;
   Expr *checkCallbackResult(const IteratorCallback &callback, IteratorMethod method);
   Expr *checkMapResult(const IteratorCallback &callback, const Type *result);
   Expr *checkFlatMapResult(CallExpr *call, const Type *result);
@@ -87,6 +88,7 @@ private:
   IndexProofs *indexProofs = nullptr;
   MemberChecker *memberChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
+  GenericChecker *genericChecker = nullptr;
   ArgumentChecker *argumentChecker = nullptr;
   CallbackChecker *callbackChecker = nullptr;
   GeneratorChecker *generatorChecker = nullptr;

@@ -17,6 +17,7 @@ public:
 
 private:
   void rememberTarget(const Expr *expr);
+  const Expr *changedTarget(const Expr *expr) const;
 
   SemanticState &state;
   KeyedFieldChecker *keyedFieldChecker = nullptr;

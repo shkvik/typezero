@@ -6,6 +6,7 @@
 
 namespace tz {
 
+class ClassLinks;
 class SemanticParts;
 class ChunkTypes;
 class TypeParams;
@@ -28,10 +29,10 @@ public:
   static const ClassDecl *genericInstanceOf(const Type *type, const ClassDecl *generic);
   GenericClassChecker(SemanticState &owner, SemanticParts &all);
 
-  void declareClassTypeParams(ClassDecl *cls);
-  void bindClassTypeParams(const ClassDecl *cls);
-  const Type *instanceType(const ClassDecl *inst, const Type *type);
-  const Type *instanceValueType(const ClassDecl *inst, const Type *type);
+  void declareClassTypeParams(ClassDecl *classDecl);
+  void bindClassTypeParams(const ClassDecl *classDecl);
+  const Type *instanceType(const ClassDecl *instance, const Type *type);
+  const Type *instanceValueType(const ClassDecl *instance, const Type *type);
   void walkClassInstance(InstanceRecord *instance);
   void reportClassInstance(InstanceRecord *instance, llvm::SMLoc loc);
   Expr *checkGenericNew(NewExpr *expr, ClassDecl *generic, const Type *expected);
@@ -41,30 +42,35 @@ private:
   using ResultClassConcrete = Result<const ClassDecl *, GenericClassCheckerConcreteError>;
   using ResultCtorWasPicked = Result<FunctionDecl *, GenericClassCheckerConstructorFitError>;
 
-  static ResultClassConcrete concrete(const ClassDecl *generic);
+  ResultClassConcrete concrete(const ClassDecl *generic) const;
   ResultClassDeclared declaredFirst(const ClassDecl *generic) const;
   ResultCtorWasPicked constructorFit(const NewExpr *expr, const ClassDecl *generic,
-                                     llvm::ArrayRef<FunctionDecl *> ctors);
-  static std::string typeNames(llvm::ArrayRef<const Type *> types);
-  static std::string bindings(llvm::ArrayRef<const Type *> params,
-                              llvm::ArrayRef<const Type *> args);
+                                     llvm::ArrayRef<FunctionDecl *> constructors);
+  void noteFailedChain(const InstanceRecord *start);
+  bool isTakingCount(const FuncSymbol *function, size_t count) const;
+  std::vector<Diagnostic> walkInstanceBodies(InstanceRecord *instance);
+  std::vector<FunctionDecl *> instanceBodies(const ClassDecl *classDecl) const;
+  std::vector<Diagnostic> walkInstanceBody(InstanceRecord *instance, FunctionDecl *functionDecl);
+  std::string failedCallNote(const InstanceRecord *at, const InstanceRecord *next) const;
   void walkArgsLoosely(std::vector<Expr *> &args);
   Expr *checkLibraryGenericNew(NewExpr *expr, ClassDecl *generic, const Type *expected);
   Expr *checkExplicitGenericNew(NewExpr *expr, ClassDecl *generic, const Type *expected);
   ClassDecl *instantiatedClass(const NewExpr *expr, ClassDecl *generic,
                                std::vector<const Type *> args);
   std::optional<FunctionDecl *> pickedConstructor(const NewExpr *expr, const ClassDecl *generic,
-                                                  llvm::ArrayRef<FunctionDecl *> ctors);
-  FuncSymbol *constructorFunction(ClassDecl *generic, FunctionDecl *ctor);
-  Expr *finishGenericNew(NewExpr *expr, ClassDecl *inst, CallExpr *call, FunctionDecl *ctor,
-                         llvm::ArrayRef<FunctionDecl *> ctors);
-  void linkInstanceConstructor(const NewExpr *expr, ClassDecl *inst, CallExpr *call,
-                               FunctionDecl *ctor, llvm::ArrayRef<FunctionDecl *> ctors);
-  static bool hasInitializer(const ClassDecl *inst);
+                                                  llvm::ArrayRef<FunctionDecl *> constructors);
+  FuncSymbol *constructorFunction(ClassDecl *generic, FunctionDecl *constructor);
+  Expr *finishGenericNew(NewExpr *expr, ClassDecl *instance, CallExpr *call,
+                         FunctionDecl *constructor, llvm::ArrayRef<FunctionDecl *> constructors);
+  void linkInstanceConstructor(const NewExpr *expr, ClassDecl *instance, CallExpr *call,
+                               FunctionDecl *constructor,
+                               llvm::ArrayRef<FunctionDecl *> constructors);
+  bool hasInitializer(const ClassDecl *instance) const;
 
   SemanticState &state;
   ChunkTypes *chunkTypes = nullptr;
   TypeParams *typeParams = nullptr;
+  ClassLinks *classLinks = nullptr;
   ExprChecker *exprChecker = nullptr;
   FlowChecker *flowChecker = nullptr;
   TypeResolver *typeResolver = nullptr;

@@ -7,6 +7,7 @@
 
 namespace tz {
 
+class IntlChecker;
 class SemanticParts;
 class CallChecker;
 class ExprChecker;
@@ -15,6 +16,7 @@ class LiteralTypes;
 class TypeRelations;
 class GenericChecker;
 class ArgumentChecker;
+class DateFormatChecker;
 class IntlOptionsChecker;
 
 class IntlMethodChecker {
@@ -27,17 +29,16 @@ public:
   Expr *checkIntlNumber(Expr *arg, llvm::StringRef method);
 
 private:
-  static std::optional<std::u16string> literalText(const Expr *e);
-  static const Type *relativePartType();
+  std::optional<std::u16string> literalText(const Expr *expr) const;
+  const Type *relativePartType() const;
   using ResultClosedText = Result<const Expr *, IntlMethodCheckerClosedArgError>;
   using ResultIntlNumber = Result<const Type *, IntlMethodCheckerIntlNumberError>;
 
-  static ResultIntlNumber intlNumber(const Type *type, llvm::StringRef method);
-  static ResultClosedText closedArg(const Expr *arg,
-                                    const std::optional<std::vector<std::string>> &texts,
-                                    llvm::ArrayRef<llvm::StringLiteral> allowed,
-                                    llvm::StringRef what);
-  static Expr *toBuiltinCall(CallExpr *call, Builtin builtin, const Type *type);
+  ResultIntlNumber intlNumber(const Type *type, llvm::StringRef method) const;
+  ResultClosedText closedArg(const Expr *arg, const std::optional<std::vector<std::string>> &texts,
+                             llvm::ArrayRef<llvm::StringLiteral> allowed,
+                             llvm::StringRef what) const;
+  Expr *toBuiltinCall(CallExpr *call, Builtin builtin, const Type *type) const;
 
   Expr *checkLoosely(CallExpr *call);
   void walkRelativeUnit(CallExpr *call);
@@ -56,10 +57,12 @@ private:
   CallChecker *callChecker = nullptr;
   ExprChecker *exprChecker = nullptr;
   MathChecker *mathChecker = nullptr;
+  IntlChecker *intlChecker = nullptr;
   LiteralTypes *literalTypes = nullptr;
   TypeRelations *typeRelations = nullptr;
   GenericChecker *genericChecker = nullptr;
   ArgumentChecker *argumentChecker = nullptr;
+  DateFormatChecker *dateFormatChecker = nullptr;
   IntlOptionsChecker *intlOptionsChecker = nullptr;
 };
 

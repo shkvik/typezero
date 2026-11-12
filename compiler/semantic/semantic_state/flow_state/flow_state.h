@@ -32,16 +32,16 @@ public:
   void addSetField(llvm::StringRef name);
   void forgetSetFields();
   bool isFieldSet(llvm::StringRef name) const;
-  void markDefined(const VarSymbol *var);
-  void forgetDefined(const VarSymbol *var);
-  bool isDefined(const VarSymbol *var) const;
-  void addNarrowed(const VarSymbol *var, const Type *type);
-  const Type *findNarrowed(const VarSymbol *var) const;
-  void markOkResult(const VarSymbol *var);
-  void markErrResult(const VarSymbol *var);
-  void forgetResultState(const VarSymbol *var);
-  bool isOkResult(const VarSymbol *var) const;
-  bool isErrResult(const VarSymbol *var) const;
+  void markDefined(const VarSymbol *variable);
+  void forgetDefined(const VarSymbol *variable);
+  bool isDefined(const VarSymbol *variable) const;
+  void addNarrowed(const VarSymbol *variable, const Type *type);
+  const Type *findNarrowed(const VarSymbol *variable) const;
+  void markOkResult(const VarSymbol *variable);
+  void markErrResult(const VarSymbol *variable);
+  void forgetResultState(const VarSymbol *variable);
+  bool isOkResult(const VarSymbol *variable) const;
+  bool isErrResult(const VarSymbol *variable) const;
   void defineField(const FieldPath &path);
   bool isFieldDefined(const FieldPath &path) const;
   void forgetFieldsNamed(llvm::StringRef name);
@@ -54,8 +54,8 @@ public:
   std::vector<std::pair<EmitterKey, llvm::SMLoc>> takePendingErrors();
   void markFieldAssigned(llvm::StringRef name);
   bool isFieldAssigned(llvm::StringRef name) const;
-  void rememberFixedLength(const VarSymbol *var, int64_t length);
-  std::optional<int64_t> findFixedLength(const VarSymbol *var) const;
+  void rememberFixedLength(const VarSymbol *variable, int64_t length);
+  std::optional<int64_t> findFixedLength(const VarSymbol *variable) const;
 
 private:
   Flow flow;

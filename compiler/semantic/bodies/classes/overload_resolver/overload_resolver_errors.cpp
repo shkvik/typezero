@@ -74,11 +74,12 @@ std::string ErrorTextVariant::text(const FunctionDecl *fn) {
     }
     const Param &param = fn->params[i];
     text += (param.rest() ? "..." : "") + param.label().str();
-    const Type *type = sym && i < sym->params.size() ? sym->params[i] : nullptr;
-    if (!type) {
+    const Type *type = sym != nullptr && i < sym->params.size() ? sym->params[i] : nullptr;
+    if (type == nullptr) {
       continue;
     }
-    if (type->isOptional() && !param.rest() && (param.optional() || param.defaultValue())) {
+    if (type->isOptional() && !param.rest() &&
+        (param.optional() || param.defaultValue() != nullptr)) {
       text += "?: " + type->inner()->name().str();
     } else {
       text += ": " + type->name().str();
@@ -89,7 +90,7 @@ std::string ErrorTextVariant::text(const FunctionDecl *fn) {
 }
 
 std::string ErrorTextVariant::list(llvm::ArrayRef<FunctionDecl *> variants) {
-  std::string text;
+  auto text = std::string();
   for (size_t i = 0; i < variants.size(); ++i) {
     text += (i == 0                     ? ""
              : i + 1 == variants.size() ? " and "

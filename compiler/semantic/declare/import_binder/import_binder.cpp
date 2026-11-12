@@ -1,4 +1,5 @@
 #include "compiler/semantic/declare/import_binder/import_binder.h"
+#include "compiler/program/library/fs/fs_function_table/fs_function_table.h"
 #include "compiler/semantic/declare/module_declarer/module_declarer.h"
 #include "compiler/semantic/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
 #include "compiler/semantic/library/result/result_types/result_types.h"
@@ -9,14 +10,16 @@ namespace tz {
 
 ImportBinder::ImportBinder(SemanticState &owner, SemanticParts &all)
     : state(owner) {
+  this->resultTypes = &all.resultTypes;
   this->moduleDeclarer = &all.moduleDeclarer;
   this->builtinModuleChecker = &all.builtinModuleChecker;
 }
 
-ImportBinder::ResultWholeImportOk ImportBinder::wholeImport(const ImportDecl &decl) {
-  bool isWhole = !decl.whole.empty() && decl.from && decl.from->builtin;
-  if (isWhole && decl.wholeIsDefault) {
-    std::string message = ErrorTextWholeImport::byDefault(decl.path);
+ImportBinder::ResultWholeImportOk ImportBinder::wholeImport(const ImportDecl &importDecl) const {
+  bool isWhole =
+      !importDecl.whole.empty() && importDecl.from != nullptr && importDecl.from->builtin;
+  if (isWhole && importDecl.wholeIsDefault) {
+    auto message = ErrorTextWholeImport::byDefault(importDecl.path);
 
     return err(ImportBinderWholeImportError{
         .code = ImportBinderWholeImportErrorCode::DEFAULT_IMPORT,
@@ -24,7 +27,7 @@ ImportBinder::ResultWholeImportOk ImportBinder::wholeImport(const ImportDecl &de
     });
   }
   if (isWhole) {
-    std::string message = ErrorTextWholeImport::star(decl.path);
+    auto message = ErrorTextWholeImport::star(importDecl.path);
 
     return err(ImportBinderWholeImportError{
         .code = ImportBinderWholeImportErrorCode::STAR_IMPORT,
@@ -32,29 +35,30 @@ ImportBinder::ResultWholeImportOk ImportBinder::wholeImport(const ImportDecl &de
     });
   }
 
-  return ok(&decl);
+  return ok(&importDecl);
 }
 
-ImportBinder::ResultAliasIsUnused
-ImportBinder::freeName(const ModuleState &here, const ImportDecl &decl, const ModuleName &name) {
-  if (here.declared.count(name.as)) {
-    std::string message = ErrorTextFreeName::conflicts(name.as, name.name, decl.path);
+ImportBinder::ResultAliasIsUnused ImportBinder::freeName(const ModuleState &here,
+                                                         const ImportDecl &importDecl,
+                                                         const ModuleName &name) const {
+  if (here.declared.contains(name.as)) {
+    auto message = ErrorTextFreeName::conflicts(name.as, name.name, importDecl.path);
 
     return err(ImportBinderFreeNameError{
         .code = ImportBinderFreeNameErrorCode::DECLARED_IN_FILE,
         .message = message,
     });
   }
-  if (here.nodeNames.count(name.as)) {
-    std::string message = ErrorTextFreeName::duplicate(name.as);
+  if (here.nodeNames.contains(name.as)) {
+    auto message = ErrorTextFreeName::duplicate(name.as);
 
     return err(ImportBinderFreeNameError{
         .code = ImportBinderFreeNameErrorCode::IMPORTED_FROM_NODE,
         .message = message,
     });
   }
-  if (here.imports.count(name.as)) {
-    std::string message = ErrorTextFreeName::duplicate(name.as);
+  if (here.imports.contains(name.as)) {
+    auto message = ErrorTextFreeName::duplicate(name.as);
 
     return err(ImportBinderFreeNameError{
         .code = ImportBinderFreeNameErrorCode::IMPORTED_TWICE,
@@ -71,7 +75,7 @@ void ImportBinder::reportTaken(const ModuleState &here, const ModuleName &name,
   switch (error.code) {
     case ImportBinderFreeNameErrorCode::DECLARED_IN_FILE: {
       llvm::SMLoc declaredAt = here.declared.find(name.as)->second;
-      std::string declared = ErrorTextFreeName::declared(name.as);
+      auto declared = ErrorTextFreeName::declared(name.as);
       this->state.getDiagnostics().note(declaredAt, declared);
       break;
     }
@@ -79,103 +83,121 @@ void ImportBinder::reportTaken(const ModuleState &here, const ModuleName &name,
       break;
     case ImportBinderFreeNameErrorCode::IMPORTED_TWICE: {
       llvm::SMLoc importedAt = here.imports.find(name.as)->second.loc;
-      std::string previous = ErrorTextFreeName::previous();
+      auto previous = ErrorTextFreeName::previous();
       this->state.getDiagnostics().note(importedAt, previous);
       break;
     }
   }
 }
 
-void ImportBinder::importName(ModuleState &here, const ImportDecl &decl, const ModuleName &name) {
-  if (!decl.from) {
+void ImportBinder::importName(ModuleState &here, const ImportDecl &importDecl,
+                              const ModuleName &name) {
+  if (importDecl.from == nullptr) {
     here.badImports.insert(name.as);
     return;
   }
-  ModuleDeclarer::ResultExportTarget target =
-      this->moduleDeclarer->findExport(decl.from, decl.path, name);
+  auto target = this->moduleDeclarer->findExport(importDecl.from, importDecl.path, name);
   if (target.isErr()) {
     this->state.getDiagnostics().error(name.loc, target.error().message);
     here.badImports.insert(name.as);
     return;
   }
-  ResultAliasIsUnused unused = ImportBinder::freeName(here, decl, name);
+  auto unused = this->freeName(here, importDecl, name);
   if (unused.isErr()) {
     this->reportTaken(here, name, unused.error());
     return;
   }
-  here.imports.try_emplace(name.as, ModuleImport{target.value(), name.asLoc});
+  auto imported = ModuleImport{.target = target.value(), .loc = name.asLoc};
+  here.imports.try_emplace(name.as, imported);
 }
 
 void ImportBinder::resolveImports(Module *module) {
-  ModuleState &here = this->state.getModuleStates().getModuleState(module);
-  for (const ImportDecl &decl : module->file.imports) {
-    ResultTypes::ResultImportSource source = ResultTypes::importSource(decl);
-    if (source.isErr()) {
-      this->state.getDiagnostics().error(decl.pathLoc, source.error().message);
-      for (const ModuleName &name : decl.names) {
-        here.badImports.insert(name.as);
-      }
-      continue;
+  for (const ImportDecl &importDecl : module->file.imports) {
+    this->resolveImport(module, importDecl);
+  }
+}
+
+void ImportBinder::resolveImport(Module *module, const ImportDecl &importDecl) {
+  auto &here = this->state.getModuleStates().getModuleState(module);
+  auto source = this->resultTypes->importSource(importDecl);
+  if (source.isErr()) {
+    this->state.getDiagnostics().error(importDecl.pathLoc, source.error().message);
+    for (const ModuleName &name : importDecl.names) {
+      here.badImports.insert(name.as);
     }
-    if (BuiltinModulePaths::isBuiltinModule(decl.path) && !decl.from) {
-      this->builtinModuleChecker->importBuiltinModule(module, decl);
-      continue;
-    }
-    ResultWholeImportOk whole = ImportBinder::wholeImport(decl);
-    if (whole.isErr()) {
-      this->state.getDiagnostics().error(decl.wholeLoc, whole.error().message);
-      here.badImports.insert(decl.whole);
-    }
-    for (const ModuleName &name : decl.names) {
-      this->importName(here, decl, name);
-    }
+    return;
+  }
+  if (BuiltinModulePaths::isBuiltinModule(importDecl.path) && importDecl.from == nullptr) {
+    this->builtinModuleChecker->importBuiltinModule(module, importDecl);
+    return;
+  }
+  auto whole = this->wholeImport(importDecl);
+  if (whole.isErr()) {
+    this->state.getDiagnostics().error(importDecl.wholeLoc, whole.error().message);
+    here.badImports.insert(importDecl.whole);
+  }
+  for (const ModuleName &name : importDecl.names) {
+    this->importName(here, importDecl, name);
   }
 }
 
 void ImportBinder::bindImports() {
-  ModuleState &here = this->state.getModuleStates().getModuleState(
-      this->state.getModuleStates().getCurrentModule());
+  auto *current = this->state.getModuleStates().getCurrentModule();
+  auto &here = this->state.getModuleStates().getModuleState(current);
   for (const auto &entry : here.nodeNames) {
-    const NodeName &n = entry.getValue();
-    ClassDecl *cls = nullptr;
-    if (n.module == NodeModule::Fs && n.name == "Stats") {
-      cls = this->state.getFileSystemStore().getStatsClass();
-    } else if (n.module == NodeModule::Fs && n.name == "Dirent") {
-      cls = this->state.getFileSystemStore().getDirentClass();
+    auto *classDecl = this->nodeClass(entry.getValue());
+    if (classDecl != nullptr) {
+      auto value = ScopeEntry{ClassEntry{.cls = classDecl}};
+      this->state.getScopeStack().addTopType(entry.getKey(), classDecl);
+      this->state.getScopeStack().addTopValue(entry.getKey(), value);
     }
-    if (!cls) {
-      continue;
-    }
-    this->state.getScopeStack().addTopType(entry.getKey(), cls);
-    this->state.getScopeStack().addTopValue(entry.getKey(), ScopeEntry{ClassEntry{.cls = cls}});
   }
   for (const auto &entry : here.imports) {
-    llvm::StringRef alias = entry.getKey();
-    const ModuleBinding &target = entry.getValue().target;
-    Module *source = target.module;
-    bool isOwn = source == this->state.getModuleStates().getCurrentModule();
-    ScopeStack &scopes = this->state.getScopeStack();
-    if (!scopes.hasTopType(alias)) {
-      Stmt *type = this->exportedType(source, target.name);
-      if (type) {
-        scopes.addTopType(alias, type);
-      }
-    }
-    if (scopes.hasTopValue(alias)) {
-      continue;
-    }
-    std::optional<ScopeEntry> found = this->exportedValue(source, target.name);
-    if (!found) {
-      continue;
-    }
-    ScopeEntry value = *found;
-    if (!value.found()) {
-      continue;
-    }
-    scopes.addTopValue(alias, value);
-    if (value.var() && !isOwn) {
-      here.importedVars.insert(value.var());
-    }
+    this->bindImportedType(entry.getKey(), entry.getValue().target);
+    this->bindImportedValue(here, entry.getKey(), entry.getValue().target);
+  }
+}
+
+ClassDecl *ImportBinder::nodeClass(const NodeName &nodeName) const {
+  if (nodeName.module != NodeModule::Fs) {
+    return nullptr;
+  }
+  auto found = FsFunctionTable::find(nodeName.name);
+  if (found == FsFunction::STATS) {
+    return this->state.getFileSystemStore().getStatsClass();
+  }
+  if (found == FsFunction::DIRENT) {
+    return this->state.getFileSystemStore().getDirentClass();
+  }
+
+  return nullptr;
+}
+
+void ImportBinder::bindImportedType(llvm::StringRef alias, const ModuleBinding &target) {
+  auto &scopes = this->state.getScopeStack();
+  if (scopes.hasTopType(alias)) {
+    return;
+  }
+  auto *type = this->exportedType(target.module, target.name);
+  if (type != nullptr) {
+    scopes.addTopType(alias, type);
+  }
+}
+
+void ImportBinder::bindImportedValue(ModuleState &here, llvm::StringRef alias,
+                                     const ModuleBinding &target) {
+  auto &scopes = this->state.getScopeStack();
+  if (scopes.hasTopValue(alias)) {
+    return;
+  }
+  auto found = this->exportedValue(target.module, target.name);
+  if (!found.has_value() || !found->isFound()) {
+    return;
+  }
+  scopes.addTopValue(alias, *found);
+  bool isOwn = target.module == this->state.getModuleStates().getCurrentModule();
+  if (found->var() != nullptr && !isOwn) {
+    here.importedVars.insert(found->var());
   }
 }
 
@@ -184,8 +206,8 @@ void ImportBinder::enterModule(Module *module) {
   this->bindImports();
 }
 
-void ImportBinder::enterHomeModule(const FunctionDecl *fn) {
-  Module *home = this->state.getModuleStates().findDeclModule(fn);
+void ImportBinder::enterHomeModule(const FunctionDecl *functionDecl) {
+  auto *home = this->state.getModuleStates().findDeclModule(functionDecl);
   if (home != nullptr) {
     this->enterModule(home);
   }
@@ -229,13 +251,13 @@ void ImportBinder::noteImportsInFunctions(SourceFile &program) {
   }
 }
 
-FunctionDecl *ImportBinder::cycleCallee(FunctionDecl *fn, llvm::StringRef name) {
-  Module *home = this->state.getModuleStates().findDeclModule(fn);
-  if (!home) {
+FunctionDecl *ImportBinder::cycleCallee(FunctionDecl *functionDecl, llvm::StringRef name) {
+  auto *home = this->state.getModuleStates().findDeclModule(functionDecl);
+  if (home == nullptr) {
     return nullptr;
   }
-  std::optional<ScopeEntry> found = this->exportedValue(home, name);
-  if (!found || !found->func()) {
+  auto found = this->exportedValue(home, name);
+  if (!found.has_value() || found->func() == nullptr) {
     return nullptr;
   }
 

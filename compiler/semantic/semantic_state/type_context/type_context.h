@@ -55,8 +55,8 @@ public:
   void enterBuiltinModule();
   void leaveBuiltinModule();
   bool isInsideBuiltinModule() const;
-  void rememberDestinations(const VarSymbol *var, DestinationPlaces places);
-  DestinationPlaces getDestinations(const VarSymbol *var) const;
+  void rememberDestinations(const VarSymbol *variable, DestinationPlaces places);
+  DestinationPlaces getDestinations(const VarSymbol *variable) const;
   void rememberDestinationConflict(DestinationPlaces places);
   DestinationPlaces takeDestinationConflict();
 

@@ -21,14 +21,14 @@ class FsChecker {
 public:
   FsChecker(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
-  Expr *checkFsModuleCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
+  Expr *checkFsCall(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc);
+  Expr *checkFsModuleCall(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc);
   Expr *checkTzIoCall(CallExpr *call, llvm::SMLoc loc);
   Expr *checkFsValue(llvm::StringRef name, Expr *expr);
   Expr *checkFsConstant(MemberExpr *member);
-  bool nodeOptions(CallExpr *call, size_t index, llvm::StringRef fn,
+  bool nodeOptions(CallExpr *call, size_t index, llvm::StringRef functionName,
                    llvm::ArrayRef<llvm::StringRef> allowed, llvm::StringMap<Expr *> &options);
-  Expr *checkEncoding(Expr *encoding, llvm::StringRef fn, bool any);
+  Expr *checkEncoding(Expr *encoding, llvm::StringRef functionName, bool any);
   const Type *nativeError() const;
   void rememberNativeError();
 
@@ -43,8 +43,7 @@ private:
     llvm::StringMap<Expr *> options;
   };
 
-  static ResultOctalMode octalMode(llvm::StringRef text);
-  static std::u16string utf16(llvm::StringRef text);
+  ResultOctalMode octalMode(llvm::StringRef text) const;
 
   Expr *checkLoosely(CallExpr *call);
   Expr *checkPath(Expr *arg, bool fd);
@@ -52,8 +51,8 @@ private:
   IntLitExpr *makeIntLiteral(llvm::SMLoc loc, uint64_t value);
   StringLitExpr *makeStringLiteral(llvm::SMLoc loc, llvm::StringRef text);
   Expr *openFlag(FsCall &fs, Expr *flag, llvm::StringRef fallback);
-  Expr *reportNotFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
-  Expr *reportUnknownFsFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
+  Expr *reportNotFunction(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc);
+  Expr *reportUnknownFsFunction(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc);
   bool literalFlag(FsCall &fs, Expr *value, llvm::StringRef option, bool &out);
   bool encodingOrOptions(FsCall &fs, size_t index, llvm::ArrayRef<llvm::StringRef> allowed);
   Expr *checkReadFile(FsCall &fs);

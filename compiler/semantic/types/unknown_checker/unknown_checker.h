@@ -19,18 +19,34 @@ public:
 
   UnknownChecker(SemanticState &owner, SemanticParts &all);
 
-  static bool holdsUnknown(const Type *type);
+  bool isHoldingUnknown(const Type *type) const;
   static bool isObjectReference(const Type *type);
-  std::string unknownHint(const Expr *expr, const Type *to);
-  static const Type *typeOfNarrowed(const std::u16string &name);
   ResultMemberChecked checkUnknownMember(MemberExpr *member);
+  std::string unknownHint(const Expr *expr, const Type *to) const;
   ResultMethodChecked checkUnknownMethod(CallExpr *call, MemberExpr *member);
-  static ResultValueNarrowed unknownUse(const Expr *object, llvm::StringRef what);
+  ResultValueNarrowed unknownUse(const Expr *object, llvm::StringRef what) const;
   void addUnknownFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) const;
 
 private:
-  static const VarSymbol *checkedVariable(const Expr *expr);
-  static std::string hintName(const Expr *expr);
+  using ResultMemberAllowed = Result<void, UnknownCheckerCheckUnknownMemberError>;
+  using ResultMethodAllowed = Result<void, UnknownCheckerCheckUnknownMethodError>;
+
+  bool isNamedClass(const Type *to) const;
+  std::string hintName(const Expr *expr) const;
+  const Type *instanceType(const Type *classValue) const;
+  ResultMemberChecked checkClassMember(MemberExpr *member);
+  const VarSymbol *checkedVariable(const Expr *expr) const;
+  ResultMethodAllowed checkNotClassValue(const Type *receiver) const;
+  ResultMethodAllowed checkNotRuntimeClass(const Type *receiver) const;
+  void narrowByTypeOf(const BinaryExpr *binary, Flow &equal) const;
+  ResultMemberAllowed checkNotConstructor(const MemberExpr *member) const;
+  void narrowByInstanceOf(const BinaryExpr *binary, Flow &whenTrue) const;
+  std::string typeOfCheck(llvm::StringRef shown, const Type *target) const;
+  void narrowChecked(const Expr *checked, const Type *type, Flow &flow) const;
+  void narrowTypeOfSide(const Expr *side, const Expr *other, Flow &equal) const;
+  Expr *checkClassStaticCall(CallExpr *call, MemberExpr *member, ClassDecl *classDecl);
+  void replaceNarrowing(Flow &flow, const VarSymbol *variable, const Type *type) const;
+  std::string narrowingCheck(llvm::StringRef shown, const Expr *expr, const Type *to) const;
 
   SemanticState &state;
   StaticChecker *staticChecker = nullptr;

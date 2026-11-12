@@ -55,25 +55,25 @@ bool FlowState::isFieldSet(llvm::StringRef name) const {
   return llvm::is_contained(this->flow.setFields, name);
 }
 
-void FlowState::markDefined(const VarSymbol *var) {
-  this->flow.defined.insert(var);
+void FlowState::markDefined(const VarSymbol *variable) {
+  this->flow.defined.insert(variable);
 }
 
-void FlowState::forgetDefined(const VarSymbol *var) {
-  this->flow.defined.erase(var);
+void FlowState::forgetDefined(const VarSymbol *variable) {
+  this->flow.defined.erase(variable);
 }
 
-bool FlowState::isDefined(const VarSymbol *var) const {
-  return this->flow.defined.contains(var);
+bool FlowState::isDefined(const VarSymbol *variable) const {
+  return this->flow.defined.contains(variable);
 }
 
-void FlowState::addNarrowed(const VarSymbol *var, const Type *type) {
-  this->flow.narrowed.push_back({var, type});
+void FlowState::addNarrowed(const VarSymbol *variable, const Type *type) {
+  this->flow.narrowed.push_back({variable, type});
 }
 
-const Type *FlowState::findNarrowed(const VarSymbol *var) const {
+const Type *FlowState::findNarrowed(const VarSymbol *variable) const {
   for (const auto &[narrowed, type] : this->flow.narrowed) {
-    if (narrowed == var) {
+    if (narrowed == variable) {
       return type;
     }
   }
@@ -81,25 +81,25 @@ const Type *FlowState::findNarrowed(const VarSymbol *var) const {
   return nullptr;
 }
 
-void FlowState::markOkResult(const VarSymbol *var) {
-  this->flow.okResults.insert(var);
+void FlowState::markOkResult(const VarSymbol *variable) {
+  this->flow.okResults.insert(variable);
 }
 
-void FlowState::markErrResult(const VarSymbol *var) {
-  this->flow.errResults.insert(var);
+void FlowState::markErrResult(const VarSymbol *variable) {
+  this->flow.errResults.insert(variable);
 }
 
-void FlowState::forgetResultState(const VarSymbol *var) {
-  this->flow.okResults.erase(var);
-  this->flow.errResults.erase(var);
+void FlowState::forgetResultState(const VarSymbol *variable) {
+  this->flow.okResults.erase(variable);
+  this->flow.errResults.erase(variable);
 }
 
-bool FlowState::isOkResult(const VarSymbol *var) const {
-  return this->flow.okResults.contains(var);
+bool FlowState::isOkResult(const VarSymbol *variable) const {
+  return this->flow.okResults.contains(variable);
 }
 
-bool FlowState::isErrResult(const VarSymbol *var) const {
-  return this->flow.errResults.contains(var);
+bool FlowState::isErrResult(const VarSymbol *variable) const {
+  return this->flow.errResults.contains(variable);
 }
 
 void FlowState::defineField(const FieldPath &path) {
@@ -180,12 +180,12 @@ bool FlowState::isFieldAssigned(llvm::StringRef name) const {
   return this->assignedFields.contains(name);
 }
 
-void FlowState::rememberFixedLength(const VarSymbol *var, int64_t length) {
-  this->fixedLengths[var] = length;
+void FlowState::rememberFixedLength(const VarSymbol *variable, int64_t length) {
+  this->fixedLengths[variable] = length;
 }
 
-std::optional<int64_t> FlowState::findFixedLength(const VarSymbol *var) const {
-  auto found = this->fixedLengths.find(var);
+std::optional<int64_t> FlowState::findFixedLength(const VarSymbol *variable) const {
+  auto found = this->fixedLengths.find(variable);
   if (found == this->fixedLengths.end()) {
     return std::nullopt;
   }

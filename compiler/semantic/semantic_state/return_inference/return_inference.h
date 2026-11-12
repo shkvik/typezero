@@ -8,20 +8,25 @@
 
 namespace tz {
 
+enum class ReturnErrors {
+  REPORTED,
+  IGNORED,
+};
+
 class ReturnInference {
 public:
-  void enterInference(const FuncSymbol *fn);
+  void enterInference(const FuncSymbol *function);
   void leaveInference();
   void enterModuleLoad();
   void leaveModuleLoad();
-  bool isSuspended(const FuncSymbol *fn) const;
-  void forgetSuspended(const FuncSymbol *fn);
+  bool isSuspended(const FuncSymbol *function) const;
+  void forgetSuspended(const FuncSymbol *function);
   void addCycle(std::vector<FuncSymbol *> cycle);
-  bool isInCycle(const FuncSymbol *fn) const;
-  std::vector<FuncSymbol *> getCycleOf(const FuncSymbol *fn) const;
+  bool isInCycle(const FuncSymbol *function) const;
+  std::vector<FuncSymbol *> getCycleOf(const FuncSymbol *function) const;
   void rememberDeclaredFunctions(std::vector<FunctionDecl *> functions);
   std::vector<FunctionDecl *> getDeclaredFunctions() const;
-  void addLiftedFunction(FunctionDecl *fn);
+  void addLiftedFunction(FunctionDecl *functionDecl);
   std::vector<FunctionDecl *> getLiftedFunctions() const;
   unsigned takeSequenceNumber();
   unsigned getSequenceNumber() const;

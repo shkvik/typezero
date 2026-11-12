@@ -26,13 +26,13 @@ TupleChecker::TupleChecker(SemanticState &owner, SemanticParts &all)
 
 Expr *TupleChecker::arrayCopy(Expr *tuple) {
   const Type *type = tuple->type;
-  if (!type || !type->isTuple() || type->tupleRest() || type->fields().empty() ||
-      type->tupleMin() != type->fields().size()) {
+  if (type == nullptr || !type->isTuple() || type->tupleRest() != nullptr ||
+      type->fields().empty() || type->tupleMin() != type->fields().size()) {
     return nullptr;
   }
   const Type *element = type->fields().front().type;
-  for (const Field &f : type->fields()) {
-    if (f.type != element) {
+  for (const Field &field : type->fields()) {
+    if (field.type != element) {
       return nullptr;
     }
   }
@@ -51,7 +51,7 @@ TupleChecker::ResultTupleJoined TupleChecker::checkTupleJoin(CallExpr *call, Mem
         .message = "",
     });
   }
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
+  auto arity = this->argumentChecker->checkArity(call, 0, 1);
   if (arity.isErr()) {
     return err(TupleCheckerCheckTupleJoinError{
         .code = TupleCheckerCheckTupleJoinErrorCode::WRONG_ARITY,
@@ -62,13 +62,13 @@ TupleChecker::ResultTupleJoined TupleChecker::checkTupleJoin(CallExpr *call, Mem
     call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
   }
   const Type *tuple = member->object->type;
-  for (size_t i = 0; i < tuple->fields().size(); ++i) {
-    const Type *element = tuple->fields()[i].type->nonOptional();
+  for (size_t index = 0; index < tuple->fields().size(); ++index) {
+    const Type *element = tuple->fields()[index].type->nonOptional();
     if (element->isNumeric() || element->isDecimal() || element->isBool() || element->isString() ||
         element->isUndefined()) {
       continue;
     }
-    std::string message = ErrorTextTupleJoin::notText(i, tuple->name(), element->name());
+    auto message = ErrorTextTupleJoin::notText(index, tuple->name(), element->name());
 
     return err(TupleCheckerCheckTupleJoinError{
         .code = TupleCheckerCheckTupleJoinErrorCode::ELEMENT_NOT_TEXT,
@@ -81,11 +81,11 @@ TupleChecker::ResultTupleJoined TupleChecker::checkTupleJoin(CallExpr *call, Mem
   return ok(call);
 }
 
-const Type *TupleChecker::tupleElement(const Type *tuple) {
+const Type *TupleChecker::tupleElement(const Type *tuple) const {
   const Type *element = nullptr;
-  for (const Field &f : tuple->fields()) {
-    element = element ? LiteralTypes::unionUnify(element, f.type) : f.type;
-    if (!element || element->isError()) {
+  for (const Field &field : tuple->fields()) {
+    element = element != nullptr ? LiteralTypes::unionUnify(element, field.type) : field.type;
+    if (element == nullptr || element->isError()) {
       return nullptr;
     }
   }
@@ -97,7 +97,7 @@ TupleChecker::ResultTupleMember TupleChecker::checkTupleMember(MemberExpr *membe
   const Type *type = member->object->type;
   if (!BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)) {
     member->type = Type::error();
-    std::string message = ErrorTextTupleMember::noProperty(member->name, type->name());
+    auto message = ErrorTextTupleMember::noProperty(member->name, type->name());
 
     return err(TupleCheckerCheckTupleMemberError{
         .code = TupleCheckerCheckTupleMemberErrorCode::NO_SUCH_PROPERTY,
@@ -109,25 +109,26 @@ TupleChecker::ResultTupleMember TupleChecker::checkTupleMember(MemberExpr *membe
   if (isa<NameExpr>(member->object)) {
     return ok(length);
   }
-  auto *seq = this->state.getAst().make<SequenceExpr>(member->loc(),
-                                                      std::vector<Expr *>{member->object, length});
-  seq->type = Type::intTy();
+  auto *sequence = this->state.getAst().make<SequenceExpr>(
+      member->loc(), std::vector<Expr *>{member->object, length});
+  sequence->type = Type::intTy();
 
-  return ok(seq);
+  return ok(sequence);
 }
 
 TupleChecker::ResultTupleMethod TupleChecker::checkTupleMethod(CallExpr *call, MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
   std::string text = "t";
-  if (auto *object = dyn_cast<NameExpr>(ObjectCheckHelpers::unnarrowed(member->object))) {
+  auto *object = dyn_cast<NameExpr>(ObjectCheckHelpers::unnarrowed(member->object));
+  if (object != nullptr) {
     text = object->name.str();
   }
-  const ArrayMethodInfo *method = ArrayMethodTable::find(name);
+  const auto *method = ArrayMethodTable::find(name);
   bool isJoining = method != nullptr && method->method == ArrayMethod::JOIN;
   bool isResizing = method != nullptr && method->form.is<ResizingArrayMethod>();
   if (isJoining) {
-    ResultTupleJoined joined = this->checkTupleJoin(call, member);
+    auto joined = this->checkTupleJoin(call, member);
     bool isReported = joined.isErr() &&
                       joined.error().code == TupleCheckerCheckTupleJoinErrorCode::ALREADY_REPORTED;
     if (isReported) {
@@ -147,15 +148,15 @@ TupleChecker::ResultTupleMethod TupleChecker::checkTupleMethod(CallExpr *call, M
   this->argumentChecker->walkArgsLoosely(call);
   call->type = Type::error();
   if (isResizing) {
-    std::string message = ErrorTextTupleMethod::fixedLen(name, text);
+    auto message = ErrorTextTupleMethod::fixedLen(name, text);
 
     return err(TupleCheckerCheckTupleMethodError{
         .code = TupleCheckerCheckTupleMethodErrorCode::FIXED_LENGTH,
         .message = message,
     });
   }
-  if (TupleChecker::tupleElement(type)) {
-    std::string message = ErrorTextTupleMethod::copyFirst(name, text);
+  if (this->tupleElement(type) != nullptr) {
+    auto message = ErrorTextTupleMethod::copyFirst(name, text);
 
     return err(TupleCheckerCheckTupleMethodError{
         .code = TupleCheckerCheckTupleMethodErrorCode::COPY_FIRST,
@@ -163,7 +164,7 @@ TupleChecker::ResultTupleMethod TupleChecker::checkTupleMethod(CallExpr *call, M
     });
   }
 
-  std::string message = ErrorTextTupleMethod::destruct(name, text);
+  auto message = ErrorTextTupleMethod::destruct(name, text);
 
   return err(TupleCheckerCheckTupleMethodError{
       .code = TupleCheckerCheckTupleMethodErrorCode::DESTRUCTURE_INSTEAD,
@@ -171,27 +172,28 @@ TupleChecker::ResultTupleMethod TupleChecker::checkTupleMethod(CallExpr *call, M
   });
 }
 
-TupleChecker::ResultTupleFilled TupleChecker::checkTupleLit(ArrayLitExpr *lit, const Type *tuple) {
+TupleChecker::ResultTupleFilled TupleChecker::checkTupleLit(ArrayLitExpr *literal,
+                                                            const Type *tuple) {
   llvm::ArrayRef<Field> fields = tuple->fields();
-  lit->type = Type::error();
-  auto spreads = [](const ArrayLitExpr::Element &e) { return e.spread; };
-  bool isSpread = llvm::any_of(lit->elements, spreads);
-  if (isSpread || lit->elements.size() != fields.size()) {
-    for (ArrayLitExpr::Element &e : lit->elements) {
-      e.expr = this->exprChecker->checkExpr(e.expr);
+  literal->type = Type::error();
+  auto spreads = [](const ArrayLitExpr::Element &element) { return element.spread; };
+  bool isSpread = llvm::any_of(literal->elements, spreads);
+  if (isSpread || literal->elements.size() != fields.size()) {
+    for (ArrayLitExpr::Element &element : literal->elements) {
+      element.expr = this->exprChecker->checkExpr(element.expr);
     }
   }
   if (isSpread) {
-    std::string message = ErrorTextTupleLit::spread(tuple->name());
+    auto message = ErrorTextTupleLit::spread(tuple->name());
 
     return err(TupleCheckerCheckTupleLitError{
         .code = TupleCheckerCheckTupleLitErrorCode::SPREAD_IN_TUPLE,
         .message = message,
     });
   }
-  if (lit->elements.size() != fields.size()) {
-    std::string message =
-        ErrorTextTupleLit::length(tuple->name(), fields.size(), lit->elements.size());
+  if (literal->elements.size() != fields.size()) {
+    auto message =
+        ErrorTextTupleLit::length(tuple->name(), fields.size(), literal->elements.size());
 
     return err(TupleCheckerCheckTupleLitError{
         .code = TupleCheckerCheckTupleLitErrorCode::WRONG_LENGTH,
@@ -199,15 +201,15 @@ TupleChecker::ResultTupleFilled TupleChecker::checkTupleLit(ArrayLitExpr *lit, c
     });
   }
 
-  for (size_t i = 0; i < fields.size(); ++i) {
-    Expr *&e = lit->elements[i].expr;
-    std::string what = ErrorTextTupleLit::element(i);
-    e = this->typeRelations->coerce(this->exprChecker->checkExpr(e, fields[i].type), fields[i].type,
-                                    what);
+  for (size_t index = 0; index < fields.size(); ++index) {
+    Expr *&expr = literal->elements[index].expr;
+    auto what = ErrorTextTupleLit::element(index);
+    expr = this->typeRelations->coerce(this->exprChecker->checkExpr(expr, fields[index].type),
+                                       fields[index].type, what);
   }
-  lit->type = tuple;
+  literal->type = tuple;
 
-  return ok(lit);
+  return ok(literal);
 }
 
 }

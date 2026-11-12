@@ -14,7 +14,7 @@ inline const llvm::StringLiteral kUsages[] = {"encrypt",   "decrypt",    "sign",
 
 class SubtleAlgorithms {
 public:
-  static std::optional<std::string> stringLiteral(const Expr *e);
+  static std::optional<std::string> stringLiteral(const Expr *expr);
   static const std::vector<llvm::StringLiteral> &algorithmsOf(llvm::StringRef op);
   static bool experimentalAlgorithm(llvm::StringRef upper);
   static std::string quotedList(llvm::ArrayRef<llvm::StringLiteral> names, llvm::StringRef last);

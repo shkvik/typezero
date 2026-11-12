@@ -38,30 +38,60 @@ class ExtendsRelation {
 public:
   ExtendsRelation(SemanticState &owner, SemanticParts &all);
 
-  bool extendsType(const Type *type, const Type *pattern, InferMatch *inference = nullptr);
-  bool extendsTuple(const Type *type, const Type *pattern, InferMatch *inference);
-  bool extendsFunction(const Type *type, const Type *pattern, InferMatch *inference);
-  bool extendsObject(const Type *type, const Type *pattern, InferMatch *inference);
+  bool isExtendingType(const Type *type, const Type *pattern);
+  bool isExtendingType(const Type *type, const Type *pattern, InferMatch *inference);
 
 private:
-  static std::vector<const Type *> distributed(const Type *type);
-  static bool retryChoice(std::vector<ExtendsStep> &steps, InferMatch *inference);
-  static bool tryAlternative(ExtendsChoice choice, std::vector<ExtendsStep> &steps);
-  static void bindInfer(const BindInfer &bind, InferMatch *inference);
-  static void pushGoals(llvm::ArrayRef<const Type *> types, const Type *pattern,
-                        std::vector<ExtendsStep> &steps);
-  static bool pushPairs(llvm::ArrayRef<ExtendsGoal> goals, std::vector<ExtendsStep> &steps);
+  using Steps = std::vector<ExtendsStep>;
 
-  bool applyExtendsStep(const ExtendsStep &step, InferMatch *inference,
-                        std::vector<ExtendsStep> &steps);
-  bool extendsStep(const Type *type, const Type *pattern, InferMatch *inference,
-                   std::vector<ExtendsStep> &steps);
-  static bool bindsInferred(const Type *type, const Type *pattern, InferMatch *inference,
-                            std::vector<ExtendsStep> &steps);
-  bool leafStep(const Type *type, const Type *pattern, InferMatch *inference,
-                std::vector<ExtendsStep> &steps);
-  bool structureStep(const Type *type, const Type *pattern, InferMatch *inference,
-                     std::vector<ExtendsStep> &steps);
+  void bindInfer(const BindInfer &bind, InferMatch *inference) const;
+  bool canRetryChoice(Steps &steps, InferMatch *inference) const;
+  bool canTryAlternative(ExtendsChoice choice, Steps &steps) const;
+  bool isStepHolding(const ExtendsStep &step, InferMatch *inference, Steps &steps);
+  bool isGoalHolding(const ExtendsGoal &goal, InferMatch *inference, Steps &steps);
+  void pushDefinedGoal(const Type *type, const Type *pattern, Steps &steps) const;
+  bool canTryNext(const ExtendsChoice &choice, InferMatch *inference, Steps &steps) const;
+  void pushMemberGoals(llvm::ArrayRef<const Type *> types, const Type *pattern, Steps &steps) const;
+  bool canStartChoice(const Type *type, const Type *pattern, InferMatch *inference,
+                      Steps &steps) const;
+  bool isBindingInferred(const Type *type, const Type *pattern, InferMatch *inference,
+                         Steps &steps) const;
+
+  bool isDictHolding(const Type *type, const Type *pattern, Steps &steps) const;
+  bool isArrayHolding(const Type *type, const Type *pattern, Steps &steps) const;
+  bool isResultHolding(const Type *type, const Type *pattern, Steps &steps) const;
+  bool isPromiseHolding(const Type *type, const Type *pattern, Steps &steps) const;
+  bool isIteratorHolding(const Type *type, const Type *pattern, Steps &steps) const;
+  bool isLeafHolding(const Type *type, const Type *pattern, InferMatch *inference, Steps &steps);
+  bool isTupleHolding(const Type *type, const Type *pattern, InferMatch *inference, Steps &steps);
+  bool isStructureHolding(const Type *type, const Type *pattern, InferMatch *inference,
+                          Steps &steps);
+
+  size_t fixedParamCount(const Type *function) const;
+  std::vector<const Type *> fieldTypes(const Type *object) const;
+  const Type *paramAt(const Type *function, size_t index) const;
+  const ClassDecl *genericOrigin(const ClassDecl *classDecl) const;
+  const Type *restArguments(const Type *function, size_t from) const;
+  std::optional<size_t> soleSpread(llvm::ArrayRef<const Type *> elements) const;
+  bool isParamFitting(const Type *my, const Type *their, InferMatch *inference);
+  bool isExtendingRest(const Type *type, const Type *pattern, InferMatch *inference);
+  bool isExtendingClass(const Type *type, const Type *pattern, InferMatch *inference);
+  bool isExtendingTuple(const Type *type, const Type *pattern, InferMatch *inference);
+  bool isExtendingObject(const Type *type, const Type *pattern, InferMatch *inference);
+  bool isExtendingFunction(const Type *type, const Type *pattern, InferMatch *inference);
+  bool isInstanceOf(const Type *candidate, const ClassDecl *generic, size_t typeArgCount) const;
+  const Type *memberType(const Type *type, const ClassDecl *classDecl, llvm::StringRef name) const;
+  bool isExtendingEach(llvm::ArrayRef<const Type *> types, llvm::ArrayRef<const Type *> patterns,
+                       InferMatch *inference);
+  bool isExtendingPlainTuple(llvm::ArrayRef<const Type *> mine, const Type *pattern,
+                             InferMatch *inference);
+  bool isExtendingField(const Type *type, const ClassDecl *classDecl, const Field &field,
+                        InferMatch *inference);
+  bool isExtendingRestTuple(llvm::ArrayRef<const Type *> mine, llvm::ArrayRef<const Type *> theirs,
+                            const Type *restElement, InferMatch *inference);
+  bool isExtendingSpreadTuple(llvm::ArrayRef<const Type *> mine,
+                              llvm::ArrayRef<const Type *> theirs, size_t spread,
+                              InferMatch *inference);
 
   SemanticState &state;
   ClassDeclarer *classDeclarer = nullptr;

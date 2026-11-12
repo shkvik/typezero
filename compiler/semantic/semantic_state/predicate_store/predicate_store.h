@@ -15,10 +15,10 @@ public:
   bool isBuildingPredicate() const;
   const PredicateBuild &getPredicateBuild() const;
   void updatePredicateBuild(Flow whenTrue, Flow whenFalse);
-  void rememberPredicate(const FuncSymbol *fn, Predicate predicate);
-  const Predicate *findPredicate(const FuncSymbol *fn) const;
-  void markSummarizing(const FuncSymbol *fn);
-  bool isSummarizing(const FuncSymbol *fn) const;
+  void rememberPredicate(const FuncSymbol *function, Predicate predicate);
+  const Predicate *findPredicate(const FuncSymbol *function) const;
+  void markSummarizing(const FuncSymbol *function);
+  bool isSummarizing(const FuncSymbol *function) const;
 
 private:
   std::vector<PredicateBuild> builds;

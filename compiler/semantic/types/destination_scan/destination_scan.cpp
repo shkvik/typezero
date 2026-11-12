@@ -32,9 +32,13 @@ llvm::ArrayRef<DestinationScan::Place> DestinationScan::getFound() const {
 }
 
 bool DestinationScan::isHidden(llvm::StringRef other) const {
-  return llvm::any_of(this->locals, [&](const llvm::StringMap<const Type *> &scope) {
-    return scope.contains(other);
-  });
+  for (const llvm::StringMap<const Type *> &scope : this->locals) {
+    if (scope.contains(other)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 void DestinationScan::addFound(const Type *type, llvm::SMLoc loc) {
@@ -53,7 +57,7 @@ void DestinationScan::declare(llvm::StringRef local, const Type *type) {
 
 std::optional<const Type *> DestinationScan::findLocal(llvm::StringRef local) const {
   for (const llvm::StringMap<const Type *> &scope : llvm::reverse(this->locals)) {
-    llvm::StringMap<const Type *>::const_iterator entry = scope.find(local);
+    auto entry = scope.find(local);
     if (entry != scope.end()) {
       return entry->second;
     }

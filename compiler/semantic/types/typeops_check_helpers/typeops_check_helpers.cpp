@@ -12,8 +12,8 @@ using llvm::isa;
 namespace tz {
 
 std::vector<const Type *> TypeopsCheckHelpers::distributedMembers(const Type *type) {
-  std::vector<const Type *> out;
-  std::vector<const Type *> stack = {type};
+  auto members = std::vector<const Type *>();
+  auto stack = std::vector<const Type *>{type};
   while (!stack.empty()) {
     const Type *next = stack.back();
     stack.pop_back();
@@ -25,14 +25,14 @@ std::vector<const Type *> TypeopsCheckHelpers::distributedMembers(const Type *ty
         stack.push_back(member);
       }
     } else if (next->isBool()) {
-      out.push_back(Type::boolLiteral(false));
-      out.push_back(Type::boolLiteral(true));
+      members.push_back(Type::boolLiteral(false));
+      members.push_back(Type::boolLiteral(true));
     } else if (!next->isNever()) {
-      out.push_back(next);
+      members.push_back(next);
     }
   }
 
-  return out;
+  return members;
 }
 
 }

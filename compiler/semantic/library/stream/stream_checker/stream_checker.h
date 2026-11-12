@@ -17,6 +17,7 @@ class ExprChecker;
 class FlowChecker;
 class ResultChecker;
 class TypeRelations;
+class ClassDeclarer;
 class EmitterChecker;
 class ArgumentChecker;
 class SetEncodingChecker;
@@ -29,7 +30,7 @@ public:
   const Type *streamCallbackType();
   Expr *streamChunkArg(Expr *arg, const Type *chunk, bool eof, bool writing, llvm::StringRef method,
                        bool checked);
-  Expr *checkStreamCall(CallExpr *call, MemberExpr *member, ClassDecl *cls);
+  Expr *checkStreamCall(CallExpr *call, MemberExpr *member, ClassDecl *classDecl);
 
 private:
   using ResultStreamSideOk = Result<const Type *, StreamCheckerStreamSideError>;
@@ -37,15 +38,15 @@ private:
   using ResultOverrideArgs = Result<const ClassDecl *, StreamCheckerOverridesArgsError>;
   using ResultMethodExists = Result<const FunctionDecl *, StreamCheckerOverriddenMethodError>;
 
-  static ResultOverrideArgs overridesArgs(const ClassDecl *cls, const StringLitExpr *lit);
-  static ResultMethodExists overriddenMethod(const ClassDecl *cls,
-                                             llvm::ArrayRef<FunctionDecl *> methods,
-                                             llvm::StringRef method);
-  static ResultChunkIsGiven chunkNotUndefined(const Expr *arg, bool eof, llvm::StringRef method);
-  static ResultStreamSideOk streamSide(const Type *chunk, const Type *receiver,
-                                       llvm::StringRef name, bool reading);
+  ResultOverrideArgs overridesArgs(const ClassDecl *classDecl, const StringLitExpr *literal) const;
+  ResultMethodExists overriddenMethod(const ClassDecl *classDecl,
+                                      llvm::ArrayRef<FunctionDecl *> methods,
+                                      llvm::StringRef method) const;
+  ResultChunkIsGiven chunkNotUndefined(const Expr *arg, bool eof, llvm::StringRef method) const;
+  ResultStreamSideOk streamSide(const Type *chunk, const Type *receiver, llvm::StringRef name,
+                                bool reading) const;
 
-  static bool isByteChunk(const Type *type);
+  bool isByteChunk(const Type *type) const;
 
   struct StreamCall {
     CallExpr *call = nullptr;
@@ -61,7 +62,7 @@ private:
     const Type *result = nullptr;
   };
 
-  static bool isNativeIo(Builtin builtin);
+  bool isNativeIo(Builtin builtin) const;
   void walkArgsFrom(CallExpr *call, size_t from);
   Expr *checkStreamEnd(StreamCall &stream);
   Expr *checkStreamRead(StreamCall &stream);
@@ -70,15 +71,17 @@ private:
   bool isCallbackArg(StreamCall &stream, Expr *&arg);
   Expr *undefinedOf(llvm::SMLoc loc, const Type *type);
   Expr *typeNameLiteral(CallExpr *call, const Type *typeArg);
-  const Type *writtenCallbackType(const ClassDecl *cls);
+  const Type *writtenCallbackType(const ClassDecl *classDecl);
   Expr *checkOverridesIntrinsic(CallExpr *call, NameExpr *name);
   Expr *checkChunkIntrinsic(CallExpr *call, const Type *typeArg);
   Expr *encodingArg(const StreamCall &stream, Expr *arg);
   Expr *checkNativeIoIntrinsic(CallExpr *call, const Type *typeArg);
   NativeIoSignature nativeIoSignature(Builtin builtin, const Type *typeArg);
   Expr *checkedAs(const StreamCall &stream, Expr *arg, const Type *type);
-  Expr *finishStreamCall(StreamCall &stream, std::vector<Expr *> args, llvm::StringRef impl);
-  Expr *checkStreamData(CallExpr *call, MemberExpr *member, ClassDecl *cls, StreamMethod method);
+  Expr *finishStreamCall(StreamCall &stream, std::vector<Expr *> args,
+                         llvm::StringRef implementation);
+  Expr *checkStreamData(CallExpr *call, MemberExpr *member, ClassDecl *classDecl,
+                        StreamMethod method);
 
   SemanticState &state;
   Prelude *prelude = nullptr;
@@ -89,6 +92,7 @@ private:
   FlowChecker *flowChecker = nullptr;
   ResultChecker *resultChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
   EmitterChecker *emitterChecker = nullptr;
   ArgumentChecker *argumentChecker = nullptr;
   SetEncodingChecker *setEncodingChecker = nullptr;

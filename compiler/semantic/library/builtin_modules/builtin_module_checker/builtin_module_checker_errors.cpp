@@ -19,7 +19,7 @@ std::string ErrorTextNodeImport::duplicate(llvm::StringRef alias) {
 }
 
 std::string ErrorTextNodeImport::list(llvm::ArrayRef<llvm::StringRef> used) {
-  std::string names;
+  auto names = std::string();
   for (llvm::StringRef name : used) {
     names += (names.empty() ? "" : ", ") + name.str();
   }

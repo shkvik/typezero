@@ -21,10 +21,10 @@ ReadlineChecker::ReadlineChecker(SemanticState &owner, SemanticParts &all)
   this->argumentChecker = &all.argumentChecker;
 }
 
-ReadlineChecker::ResultReadlineUsed ReadlineChecker::readlineFunction(llvm::StringRef fn,
-                                                                      NodeModule module) {
-  if (fn != "createInterface") {
-    std::string message = ErrorTextReadline::typeOnly(fn, module != NodeModule::Readline);
+ReadlineChecker::ResultReadlineUsed ReadlineChecker::readlineFunction(llvm::StringRef functionName,
+                                                                      NodeModule module) const {
+  if (functionName != "createInterface") {
+    auto message = ErrorTextReadline::typeOnly(functionName, module != NodeModule::Readline);
 
     return err(ReadlineCheckerReadlineFunctionError{
         .code = ReadlineCheckerReadlineFunctionErrorCode::TYPE_ONLY,
@@ -32,12 +32,12 @@ ReadlineChecker::ResultReadlineUsed ReadlineChecker::readlineFunction(llvm::Stri
     });
   }
 
-  return ok(fn);
+  return ok(functionName);
 }
 
 ReadlineChecker::ResultInputIsStdin ReadlineChecker::stdinInput(const Expr *input) {
-  if (!this->processChecker->isProcessMember(input, "stdin")) {
-    std::string message = ErrorTextReadline::notStdin();
+  if (!this->processChecker->isProcessMember(input, ProcessMember::STDIN)) {
+    auto message = ErrorTextReadline::notStdin();
 
     return err(ReadlineCheckerStdinInputError{
         .code = ReadlineCheckerStdinInputErrorCode::NOT_STDIN,
@@ -48,11 +48,11 @@ ReadlineChecker::ResultInputIsStdin ReadlineChecker::stdinInput(const Expr *inpu
   return ok(input);
 }
 
-Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module, llvm::StringRef fn,
-                                         llvm::SMLoc loc) {
+Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module,
+                                         llvm::StringRef functionName, llvm::SMLoc loc) {
   this->state.getInventoryStore().markUsesAsync();
   call->type = Type::error();
-  ResultReadlineUsed function = ReadlineChecker::readlineFunction(fn, module);
+  auto function = this->readlineFunction(functionName, module);
   if (function.isErr()) {
     this->state.getDiagnostics().error(loc, function.error().message);
     return this->checkArgsLoosely(call);
@@ -60,16 +60,16 @@ Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module, llvm
   if (this->hasRejectedArgs(call, loc)) {
     return call;
   }
-  std::optional<ReadlineStreams> streams = this->readlineStreams(call, fn);
+  std::optional<ReadlineStreams> streams = this->readlineStreams(call, functionName);
   if (!streams.has_value()) {
     return call;
   }
-  ResultInputIsStdin stdinInput = this->stdinInput(streams->input);
+  auto stdinInput = this->stdinInput(streams->input);
   if (stdinInput.isErr()) {
     this->state.getDiagnostics().error(streams->input->loc(), stdinInput.error().message);
     return call;
   }
-  std::optional<int> written = this->outputStream(streams->output);
+  auto written = this->outputStream(streams->output);
   if (!written.has_value()) {
     return call;
   }
@@ -86,9 +86,9 @@ Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module, llvm
 
 Expr *ReadlineChecker::checkArgsLoosely(CallExpr *call) {
   for (Expr *&arg : call->args) {
-    bool isStream = this->processChecker->isProcessMember(arg, "stdin") ||
-                    this->processChecker->isProcessMember(arg, "stdout") ||
-                    this->processChecker->isProcessMember(arg, "stderr");
+    bool isStream = this->processChecker->isProcessMember(arg, ProcessMember::STDIN) ||
+                    this->processChecker->isProcessMember(arg, ProcessMember::STDOUT) ||
+                    this->processChecker->isProcessMember(arg, ProcessMember::STDERR);
     if (!isStream) {
       arg = this->exprChecker->checkExpr(arg);
     }
@@ -99,8 +99,7 @@ Expr *ReadlineChecker::checkArgsLoosely(CallExpr *call) {
 
 bool ReadlineChecker::hasRejectedArgs(CallExpr *call, llvm::SMLoc loc) {
   bool isRejected = this->callChecker->rejectSpread(call);
-  ArgumentChecker::ResultArityMatches arity =
-      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
+  auto arity = isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
@@ -109,9 +108,9 @@ bool ReadlineChecker::hasRejectedArgs(CallExpr *call, llvm::SMLoc loc) {
 }
 
 std::optional<ReadlineChecker::ReadlineStreams>
-ReadlineChecker::readlineStreams(CallExpr *call, llvm::StringRef fn) {
+ReadlineChecker::readlineStreams(CallExpr *call, llvm::StringRef functionName) {
   if (isa<ObjectLitExpr>(call->args[0])) {
-    return this->optionStreams(call, fn);
+    return this->optionStreams(call, functionName);
   }
 
   return ReadlineStreams{
@@ -120,11 +119,11 @@ ReadlineChecker::readlineStreams(CallExpr *call, llvm::StringRef fn) {
   };
 }
 
-std::optional<ReadlineChecker::ReadlineStreams> ReadlineChecker::optionStreams(CallExpr *call,
-                                                                               llvm::StringRef fn) {
-  llvm::StringMap<Expr *> options;
+std::optional<ReadlineChecker::ReadlineStreams>
+ReadlineChecker::optionStreams(CallExpr *call, llvm::StringRef functionName) {
+  auto options = llvm::StringMap<Expr *>();
   bool isRead = this->fsChecker->nodeOptions(
-      call, 0, fn,
+      call, 0, functionName,
       {"input", "output", "terminal", "crlfDelay", "historySize", "removeHistoryDuplicates",
        "prompt", "tabSize", "completer", "escapeCodeTimeout", "history"},
       options);
@@ -145,13 +144,13 @@ std::optional<ReadlineChecker::ReadlineStreams> ReadlineChecker::optionStreams(C
   for (llvm::StringRef unsupported : {"prompt", "completer", "history"}) {
     Expr *value = options.lookup(unsupported);
     if (value != nullptr) {
-      std::string message = ErrorTextReadline::option(unsupported);
+      auto message = ErrorTextReadline::option(unsupported);
       this->state.getDiagnostics().error(value->loc(), message);
       return std::nullopt;
     }
   }
   if (streams.input == nullptr) {
-    std::string message = ErrorTextReadline::noInput();
+    auto message = ErrorTextReadline::noInput();
     this->state.getDiagnostics().error(call->args[0]->loc(), message);
     return std::nullopt;
   }
@@ -163,13 +162,13 @@ std::optional<int> ReadlineChecker::outputStream(const Expr *output) {
   if (output == nullptr || isa<UndefinedExpr>(output)) {
     return 0;
   }
-  if (this->processChecker->isProcessMember(output, "stdout")) {
+  if (this->processChecker->isProcessMember(output, ProcessMember::STDOUT)) {
     return 1;
   }
-  if (this->processChecker->isProcessMember(output, "stderr")) {
+  if (this->processChecker->isProcessMember(output, ProcessMember::STDERR)) {
     return 2;
   }
-  std::string message = ErrorTextReadline::output();
+  auto message = ErrorTextReadline::output();
   this->state.getDiagnostics().error(output->loc(), message);
 
   return std::nullopt;

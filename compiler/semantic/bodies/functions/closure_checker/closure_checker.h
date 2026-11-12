@@ -25,10 +25,10 @@ class ClosureChecker {
 public:
   ClosureChecker(SemanticState &owner, SemanticParts &all);
 
-  static Signature signatureOf(const Type *fnType);
-  Expr *checkFunctionExpr(FunctionExpr *fe, const Signature *expected);
-  void walkClosureBody(FunctionDecl *fn);
-  void declareOwnName(FunctionDecl *fn);
+  Signature signatureOf(const Type *functionType) const;
+  Expr *checkFunctionExpr(FunctionExpr *functionExpr, const Signature *expected);
+  void walkClosureBody(FunctionDecl *functionDecl);
+  void declareOwnName(FunctionDecl *functionDecl);
   void walkStatements(BlockStmt *block);
 
 private:
@@ -41,15 +41,14 @@ private:
   using ResultParamOrderGood = Result<const Param *, ClosureCheckerParamOrderError>;
   using ResultPromiseAwaited = Result<const Signature *, ClosureCheckerPromiseAwaitedError>;
 
-  static ResultExprNotGeneric notGeneric(const FunctionDecl *fn);
-  static ResultParamTypeAgree paramAgrees(const Param &param, const Type *passed,
-                                          const Type *given);
-  static ResultDefaultMatters defaultMatters(const Param &param, const Type *given);
-  static ResultParamTypeKnown paramTypeKnown(const Param &param);
-  static ResultThisParamValid thisParam(const FunctionDecl *fn, const Param &param);
-  static ResultRestParamArray restParam(const Param &param, const Type *type);
-  static ResultParamOrderGood paramOrder(const Param &param, bool afterOptional);
-  static ResultPromiseAwaited promiseAwaited(const Signature *sig);
+  ResultExprNotGeneric notGeneric(const FunctionDecl *functionDecl) const;
+  ResultParamTypeAgree paramAgrees(const Param &param, const Type *passed, const Type *given) const;
+  ResultDefaultMatters defaultMatters(const Param &param, const Type *given) const;
+  ResultParamTypeKnown paramTypeKnown(const Param &param) const;
+  ResultThisParamValid thisParam(const FunctionDecl *functionDecl, const Param &param) const;
+  ResultRestParamArray restParam(const Param &param, const Type *type) const;
+  ResultParamOrderGood paramOrder(const Param &param, bool afterOptional) const;
+  ResultPromiseAwaited promiseAwaited(const Signature *signature) const;
 
   struct ClosureParams {
     FuncSymbol *sym;
@@ -62,22 +61,28 @@ private:
     const Type *passed;
   };
 
-  FuncSymbol *makeClosureSymbol(FunctionDecl *fn);
-  bool reportsGenericClosure(FunctionExpr *fe);
-  bool addsContextThis(FunctionExpr *fe, const Signature *sig);
-  void walkClosureParam(FunctionDecl *fn, size_t i, const Signature *sig, ClosureParams &params);
+  FuncSymbol *makeClosureSymbol(FunctionDecl *functionDecl);
+  bool reportsGenericClosure(FunctionExpr *functionExpr);
+  bool addsContextThis(FunctionExpr *functionExpr, const Signature *signature);
+  void walkClosureParam(FunctionDecl *functionDecl, size_t index, const Signature *signature,
+                        ClosureParams &params);
   ParamTypes closureParamTypes(const Param &param, const Type *given);
   ParamTypes writtenParamTypes(const Param &param, const Type *given);
-  void walkClosureThis(const FunctionDecl *fn, const Param &param, bool mayOmit,
+  void walkClosureThis(const FunctionDecl *functionDecl, const Param &param, bool mayOmit,
                        ClosureParams &params);
-  void padHiddenParams(FunctionExpr *fe, FuncSymbol *sym, const Signature *sig);
-  void walkClosureReturn(FunctionExpr *fe, FuncSymbol *sym, const Signature *sig);
-  void walkGeneratorReturn(FunctionDecl *fn, FuncSymbol *sym, const Signature *sig);
-  void walkAsyncReturn(FunctionExpr *fe, FuncSymbol *sym, const Signature *sig);
-  void walkPlainReturn(FunctionDecl *fn, FuncSymbol *sym, const Signature *sig);
-  void inferRecursiveReturn(FunctionDecl *fn, FuncSymbol *sym);
-  bool isRecursiveClosure(FunctionDecl *fn);
-  void walkInitializerBody(FunctionDecl *fn);
+  void padHiddenParams(FunctionExpr *functionExpr, FuncSymbol *function,
+                       const Signature *signature);
+  void walkClosureReturn(FunctionExpr *functionExpr, FuncSymbol *function,
+                         const Signature *signature);
+  void walkGeneratorReturn(FunctionDecl *functionDecl, FuncSymbol *function,
+                           const Signature *signature);
+  void walkAsyncReturn(FunctionExpr *functionExpr, FuncSymbol *function,
+                       const Signature *signature);
+  void walkPlainReturn(FunctionDecl *functionDecl, FuncSymbol *function,
+                       const Signature *signature);
+  void inferRecursiveReturn(FunctionDecl *functionDecl, FuncSymbol *function);
+  bool isRecursiveClosure(FunctionDecl *functionDecl);
+  void walkInitializerBody(FunctionDecl *functionDecl);
 
   SemanticState &state;
   Scopes *scopes = nullptr;

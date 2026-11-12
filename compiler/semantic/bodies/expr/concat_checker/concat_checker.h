@@ -6,45 +6,61 @@
 
 namespace tz {
 
+class JsonChecker;
 class SemanticParts;
 class DateChecker;
 class BytesChecker;
 class RegexChecker;
 class TypeRelations;
+class ClassDeclarer;
 class GenericChecker;
+class UnknownChecker;
 
 class ConcatChecker {
 public:
   ConcatChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *toStringOperand(Expr *expr);
-  static std::string mixedConcatText(const BinaryExpr *root, const BinaryExpr *mixed);
+  std::string mixedConcatText(const BinaryExpr *root, const BinaryExpr *mixed) const;
 
 private:
   using Parts = std::vector<std::pair<const Expr *, llvm::StringRef>>;
   using ResultConvertsToText = Result<const Expr *, ConcatCheckerConvertibleError>;
 
-  static const Expr *unconverted(const Expr *expr);
-  static ResultConvertsToText convertible(const Expr *expr);
-  static std::optional<ConcatCheckerConvertibleErrorCode> textProblem(const Expr *expr);
-  static bool hasOwnToString(const Type *base);
-  static const Type *heldUnionMember(const Type *base);
-  static std::string textProblemMessage(const Expr *expr,
-                                        ConcatCheckerConvertibleErrorCode problem);
-  static std::string ownStringMessage(const Expr *expr);
-  static std::string dictMessage(const Type *base);
-  static void concatParts(const BinaryExpr *bin, Parts &parts);
-  static const BinaryExpr *leftConcat(const BinaryExpr *bin);
-  static std::string concatTemplate(const Parts &parts, llvm::StringRef &only);
-  static std::pair<llvm::StringRef, llvm::StringRef> operandTexts(llvm::StringRef source,
-                                                                  llvm::SMLoc op, size_t length);
+  struct TemplateText {
+    std::string text;
+    llvm::StringRef only;
+  };
+
+  const Expr *unconverted(const Expr *expr) const;
+  Parts concatParts(const BinaryExpr *binary) const;
+  const BinaryExpr *leftConcat(const BinaryExpr *binary) const;
+  TemplateText concatTemplate(const Parts &parts) const;
+  std::string escapedBody(llvm::StringRef text) const;
+  std::string templateChar(llvm::StringRef body, size_t index) const;
+  ResultConvertsToText checkConvertible(const Expr *expr) const;
+  std::optional<ConcatCheckerConvertibleErrorCode> textProblem(const Expr *expr) const;
+  bool hasOwnToString(const Type *base) const;
+  const Type *heldUnionMember(const Type *base) const;
+  bool isHeldMember(const Type *member) const;
+  std::string textProblemMessage(const Expr *expr, ConcatCheckerConvertibleErrorCode problem) const;
+  std::string unionMemberMessage(const Type *type, const Type *base) const;
+  std::string ownStringMessage(const Expr *expr) const;
+  std::string dictMessage(const Type *base) const;
+  llvm::StringRef dictKind(const Type *base) const;
+  Expr *taggedText(Expr *expr);
+  std::string sumHint(const Parts &parts) const;
+  bool isTextValue(const Expr *expr) const;
 
   SemanticState &state;
   DateChecker *dateChecker = nullptr;
+  JsonChecker *jsonChecker = nullptr;
   BytesChecker *bytesChecker = nullptr;
   RegexChecker *regexChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
   GenericChecker *genericChecker = nullptr;
+  UnknownChecker *unknownChecker = nullptr;
 };
 
 }

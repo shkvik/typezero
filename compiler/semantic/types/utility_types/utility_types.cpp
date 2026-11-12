@@ -102,7 +102,7 @@ bool UtilityTypes::hasDeclarator(const VarDeclStmt *varDecl, llvm::StringRef nam
 }
 
 const Type *UtilityTypes::varDeclType(const VarDeclStmt *varDecl, llvm::StringRef name) const {
-  const VarDeclarator *declarator = this->declaratorNamed(varDecl, name);
+  const auto *declarator = this->declaratorNamed(varDecl, name);
   if (declarator == nullptr || declarator->sym == nullptr) {
     return nullptr;
   }
@@ -214,7 +214,7 @@ UtilityTypes::ResultUtilityAllowed UtilityTypes::checkFunctionOperand(const Type
 
 UtilityTypes::ResultUtilityAllowed UtilityTypes::checkTextOperand(const TypeRef &ref,
                                                                   const Type *operand) const {
-  const Type *nonString = this->firstNonString(operand);
+  const auto *nonString = this->firstNonString(operand);
   if (nonString != nullptr) {
     auto message = ErrorTextUtility::notString(ref.name, nonString->name());
 
@@ -253,7 +253,7 @@ bool UtilityTypes::isGenericKeyName(const NameExpr *keyName) const {
 
 UtilityTypes::ResultGenericIndexed UtilityTypes::checkGenericIndex(IndexExpr *index) {
   const Type *object = index->object->type;
-  bool isOpenObject = object->isParam() && !object->isListParam() && !object->iterated();
+  bool isOpenObject = object->isParam() && !object->isListParam() && object->iterated() == nullptr;
   bool isNamedKey = object->isObject() && isa<NameExpr>(index->index);
   if (!isOpenObject && !isNamedKey) {
     return err(UtilityTypesCheckGenericIndexError{

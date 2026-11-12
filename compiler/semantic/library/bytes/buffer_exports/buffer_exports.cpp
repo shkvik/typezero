@@ -26,14 +26,14 @@ BufferExports::ResultExportFound BufferExports::bufferExport(llvm::StringRef nam
     return ok(name);
   }
   if (llvm::is_contained(kBufferExports, name)) {
-    std::string message = ErrorTextBufferExport::notYet(name, path);
+    auto message = ErrorTextBufferExport::notYet(name, path);
 
     return err(ModuleExportFoundError{
         .code = ModuleExportFoundErrorCode::NOT_YET,
         .message = message,
     });
   }
-  std::string message = ErrorTextModuleExport::none(path, name);
+  auto message = ErrorTextModuleExport::none(path, name);
 
   return err(ModuleExportFoundError{
       .code = ModuleExportFoundErrorCode::NO_EXPORT,

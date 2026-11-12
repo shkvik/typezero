@@ -52,11 +52,11 @@ void ScopeStack::addToCurrentScope(llvm::StringRef name, ScopeEntry entry) {
   this->scopes.back().try_emplace(name, entry);
 }
 
-std::optional<size_t> ScopeStack::findDeclaringScope(const VarSymbol *var) const {
-  for (size_t i = this->scopes.size(); i-- > 0;) {
-    auto found = this->scopes[i].find(var->name);
-    if (found != this->scopes[i].end() && found->second.var() == var) {
-      return i;
+std::optional<size_t> ScopeStack::findDeclaringScope(const VarSymbol *variable) const {
+  for (size_t index = this->scopes.size(); index-- > 0;) {
+    auto found = this->scopes[index].find(variable->name);
+    if (found != this->scopes[index].end() && found->second.var() == variable) {
+      return index;
     }
   }
 
@@ -64,9 +64,9 @@ std::optional<size_t> ScopeStack::findDeclaringScope(const VarSymbol *var) const
 }
 
 std::vector<llvm::StringRef> ScopeStack::getLocalVarNames() const {
-  std::vector<llvm::StringRef> names;
-  for (size_t i = 1; i < this->scopes.size(); ++i) {
-    for (const auto &entry : this->scopes[i]) {
+  auto names = std::vector<llvm::StringRef>();
+  for (size_t index = 1; index < this->scopes.size(); ++index) {
+    for (const auto &entry : this->scopes[index]) {
       if (entry.second.var()) {
         names.push_back(entry.second.var()->name);
       }

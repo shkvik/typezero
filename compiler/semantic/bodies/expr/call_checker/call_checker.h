@@ -83,7 +83,7 @@ public:
   bool isGlobalName(const Expr *expr, GlobalName global) const;
   bool isGlobalMember(const MemberExpr *member, GlobalMember which) const;
   ResultValueCallTyped checkValueCall(CallExpr *call, const Type *fnType);
-  Expr *checkDirectCall(CallExpr *call, FuncSymbol *func, llvm::SMLoc loc,
+  Expr *checkDirectCall(CallExpr *call, FuncSymbol *function, llvm::SMLoc loc,
                         const Type *expected = nullptr);
 
 private:
@@ -94,11 +94,11 @@ private:
 
   bool namesGlobal(const Expr *expr, GlobalName global) const;
   bool isGlobalThisMember(const Expr *expr, GlobalName global) const;
-  static ResultTypeArgsAbsent noTypeArgs(const MemberExpr *member);
-  static ResultNoSpreadPassed spreadFree(const CallExpr *call, size_t i);
-  static ResultCalleeCallable calleeCallable(const Type *type, const NameExpr *calleeName);
-  static ResultTypeArgsUsable directTypeArgs(const FuncSymbol *func,
-                                             llvm::ArrayRef<TypeRef> typeArgs);
+  ResultTypeArgsAbsent noTypeArgs(const MemberExpr *member) const;
+  ResultNoSpreadPassed spreadFree(const CallExpr *call, size_t index) const;
+  ResultCalleeCallable calleeCallable(const Type *type, const NameExpr *calleeName) const;
+  ResultTypeArgsUsable directTypeArgs(const FuncSymbol *function,
+                                      llvm::ArrayRef<TypeRef> typeArgs) const;
 
   void rewriteSymbolCallee(CallExpr *call);
   void rejectTypeArgs(MemberExpr *member);
@@ -130,7 +130,7 @@ private:
   Expr *checkLibraryReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
   Expr *checkPromiseReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
   Expr *checkCallableReceiverCall(CallExpr *call, MemberExpr *member, const Type *expected);
-  Expr *checkFunctionNameCall(CallExpr *call, NameExpr *name, FuncSymbol *func,
+  Expr *checkFunctionNameCall(CallExpr *call, NameExpr *name, FuncSymbol *function,
                               const Type *expected);
   Expr *checkValueReceiverCall(CallExpr *call, MemberExpr *member, const Type *receiver,
                                const Type *expected);

@@ -23,6 +23,8 @@ enum class BuiltinProperty {
   SIZE,
   RESULT_VALUE,
   RESULT_ERROR,
+  WRAPPED_VALUE,
+  RAW_TEXTS,
 };
 
 struct BuiltinPropertyInfo {

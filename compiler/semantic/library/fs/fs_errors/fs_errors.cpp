@@ -24,7 +24,7 @@ const Type *FsErrors::ofCall(const CallExpr *call) {
     case Builtin::FsReadFile:
       return this->named("ReadFileError");
     case Builtin::FsWriteFile: {
-      std::string flag = FsErrors::textOf(arg(2));
+      auto flag = this->textOf(arg(2));
       bool isAppend = flag.find('a') != std::string::npos;
       bool isFresh = flag.find('x') != std::string::npos;
       if (isAppend) {
@@ -39,8 +39,8 @@ const Type *FsErrors::ofCall(const CallExpr *call) {
     case Builtin::FsTruncate:
       return this->named("TruncateError");
     case Builtin::FsStat: {
-      bool isFollow = FsErrors::literalTrue(arg(1));
-      bool isThrowIfMissing = FsErrors::literalTrue(arg(2));
+      bool isFollow = this->literalTrue(arg(1));
+      bool isThrowIfMissing = this->literalTrue(arg(2));
       if (isFollow) {
         return this->named(isThrowIfMissing ? "StatusError" : "StatusIfExistsError");
       }
@@ -57,7 +57,7 @@ const Type *FsErrors::ofCall(const CallExpr *call) {
     case Builtin::FsUnlink:
       return this->named("UnlinkError");
     case Builtin::FsRm:
-      return this->named(FsErrors::literalTrue(arg(2)) ? "ForceRemoveError" : "RemoveError");
+      return this->named(this->literalTrue(arg(2)) ? "ForceRemoveError" : "RemoveError");
     case Builtin::FsRename:
       return this->named("RenameError");
     case Builtin::FsReplace:
@@ -71,7 +71,7 @@ const Type *FsErrors::ofCall(const CallExpr *call) {
   }
 }
 
-std::string FsErrors::textOf(const Expr *expr) {
+std::string FsErrors::textOf(const Expr *expr) const {
   const StringLitExpr *literal = expr != nullptr ? dyn_cast<StringLitExpr>(expr) : nullptr;
   if (literal == nullptr) {
     return "";
@@ -80,7 +80,7 @@ std::string FsErrors::textOf(const Expr *expr) {
   return ToUtf8::toUtf8(literal->value);
 }
 
-bool FsErrors::literalTrue(const Expr *expr) {
+bool FsErrors::literalTrue(const Expr *expr) const {
   const BoolLitExpr *literal = expr != nullptr ? dyn_cast<BoolLitExpr>(expr) : nullptr;
 
   return literal != nullptr && literal->value;

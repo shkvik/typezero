@@ -2,6 +2,7 @@
 
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/expr/assign_checker/assign_checker_errors.h"
+#include "compiler/semantic/bodies/expr/target_checker/target_checker_types.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
@@ -21,6 +22,7 @@ class BinaryChecker;
 class ConcatChecker;
 class TargetChecker;
 class TypeRelations;
+class ClassDeclarer;
 class ConstantFolder;
 class DecimalChecker;
 class GenericChecker;
@@ -54,57 +56,67 @@ private:
     IndexExpr *index;
     MemberExpr *member;
     NameExpr *name;
-    const VarSymbol *var;
-    bool compound;
-    bool reportedRange;
-    bool definite;
+    const VarSymbol *variable;
+    AssignForm form;
+    bool hasReportedRange;
+    bool isDefinite;
   };
 
+  Expr *copyChain(const Expr *expr);
+  Expr *copyRoot(const Expr *expr);
+  ResultNameIsAssignable checkNotImported(const NameExpr *name);
+  ResultTargetIsVariable checkVariableTarget(const Expr *target) const;
+  ResultVariableOptional checkNullishOptional(const NameExpr *name, const Type *type) const;
+  ResultIndexWithinArray checkIndexProven(const IndexExpr *index) const;
+  ResultFieldTypeIsFound checkFieldTypeFrom(const MemberExpr *member, const Type *type) const;
+  ResultStringAssignable checkStringAssign(BinaryOp op, llvm::StringRef spelling, const Type *type,
+                                           const AssignExpr *assign) const;
+  std::string joinHint(const AssignExpr *assign) const;
+  ResultCompoundOperands checkCompoundOperands(BinaryOp op, llvm::StringRef spelling,
+                                               const Type *type, const Expr *value,
+                                               bool isSettled) const;
+  ResultElementWriteSafe checkElementWritable(const IndexExpr *index, bool isInRange,
+                                              AssignForm form) const;
+  ResultLengthIsInBounds checkLengthProven(const MemberExpr *member, const Expr *value) const;
   void walkTargetAlias(AssignExpr *assign);
   Expr *reportImportedTarget(AssignExpr *assign);
   Expr *checkLogicalAssignValue(AssignExpr *assign);
   Expr *checkNullishAssign(AssignExpr *assign);
   Expr *checkRecordFieldNullish(AssignExpr *assign);
+  bool isRecordHolder(const Expr *object) const;
   Expr *checkVariableNullish(AssignExpr *assign);
-  bool unfoldsNarrowedCompound(AssignExpr *assign, BinaryOp op);
-  Expr *checkPlainAssign(AssignExpr *assign, BinaryOp op, bool compound);
-  bool reportsCompoundRange(const AssignPlace &place);
+  void walkNullishValue(AssignExpr *assign, const Type *type);
+  bool unfoldNarrowedCompound(AssignExpr *assign, BinaryOp op);
+  Expr *checkPlainAssign(AssignExpr *assign, BinaryOp op, AssignForm form);
+  bool reportCompoundRange(const AssignPlace &place);
   void walkInferredField(AssignExpr *assign, AssignPlace &place);
   void walkPlainValue(AssignExpr *assign, const Type *type, AssignPlace &place);
   void walkCompoundValue(AssignExpr *assign, BinaryOp op, const Type *type,
                          const AssignPlace &place);
   void walkStringCompound(AssignExpr *assign, BinaryOp op, const std::string &spelling,
-                          const Type *type, const VarSymbol *var);
+                          const Type *type, const VarSymbol *variable);
   void walkNumericCompound(AssignExpr *assign, BinaryOp op, const std::string &spelling,
                            const Type *type);
   void walkCompoundOperands(AssignExpr *assign, BinaryOp op, const std::string &spelling,
-                            const Type *type, bool shift);
+                            const Type *type, bool isShift);
   void walkDivisor(AssignExpr *assign, BinaryOp op);
-  void walkCompoundFacts(AssignExpr *assign, BinaryOp op, const VarSymbol *var);
+  void walkCompoundFacts(AssignExpr *assign, BinaryOp op, const VarSymbol *variable);
   void walkAssignedElement(AssignExpr *assign, const AssignPlace &place);
   void walkAssignedLength(AssignExpr *assign, const AssignPlace &place);
   void walkLengthValue(const MemberExpr *member, const Expr *value);
+  void walkFilledLength(const MemberExpr *member, const Expr *value);
   void walkAssignedField(const AssignPlace &place);
-  Expr *copyRoot(const Expr *e);
-  Expr *copyChain(const Expr *e);
-  Expr *checkFieldLogicalAssign(AssignExpr *assign);
-  static ResultFieldChainCopied fieldChain(Expr *read);
-  ResultNameIsAssignable notImported(const NameExpr *name);
   ResultLogicalTargetSet checkLogicalAssign(AssignExpr *assign);
-  static ResultTargetIsVariable variableTarget(const Expr *target);
-  ResultIndexWithinArray indexProven(const IndexExpr *index) const;
-  static ResultIncrementedValue updatable(const UpdateExpr *update, const Type *type);
-  static ResultVariableOptional nullishOptional(const NameExpr *name, const Type *type);
-  ResultLengthIsInBounds lengthProven(const MemberExpr *member, const Expr *value) const;
-  static ResultFieldMayBeAbsent fieldOptional(const MemberExpr *member, const Type *type);
-  static ResultFieldTypeIsFound fieldTypeFrom(const MemberExpr *member, const Type *type);
-  ResultElementWriteSafe elementWritable(const IndexExpr *index, bool inRange, bool compound) const;
-  static std::pair<llvm::StringRef, llvm::StringRef> operandTexts(llvm::StringRef source,
-                                                                  llvm::SMLoc op, size_t length);
-  static ResultStringAssignable stringAssign(BinaryOp op, llvm::StringRef spelling,
-                                             const Type *type, const AssignExpr *assign);
-  static ResultCompoundOperands compoundOperands(BinaryOp op, llvm::StringRef spelling,
-                                                 const Type *type, const Expr *value, bool settled);
+  Expr *logicalRead(const Expr *target);
+  Expr *indexRead(const IndexExpr *index);
+  ResultFieldChainCopied checkFieldChain(Expr *read) const;
+  ResultFieldMayBeAbsent checkFieldOptional(const MemberExpr *member, const Type *type) const;
+  Expr *checkFieldLogicalAssign(AssignExpr *assign);
+  const Type *assignedValueType(const Expr *value) const;
+  void defineFieldOf(const MemberExpr *member);
+  ResultIncrementedValue checkUpdatable(const UpdateExpr *update, const Type *type) const;
+  void walkUpdatedName(const NameExpr *name, const UpdateExpr *update);
+  void walkUpdatedElement(IndexExpr *index);
 
   SemanticState &state;
   Scopes *scopes = nullptr;
@@ -121,6 +133,7 @@ private:
   ConcatChecker *concatChecker = nullptr;
   TargetChecker *targetChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
   ConstantFolder *constantFolder = nullptr;
   DecimalChecker *decimalChecker = nullptr;
   GenericChecker *genericChecker = nullptr;

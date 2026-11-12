@@ -18,13 +18,13 @@ public:
 
   ChunkTypes(SemanticState &owner, SemanticParts &all);
 
-  bool isStreamClass(const ClassDecl *cls) const;
-  StreamChunks streamChunksOf(const ClassDecl *cls) const;
-  std::optional<std::vector<const Type *>> streamHookParams(const FunctionDecl *fn);
-  bool isStreamHook(const FunctionDecl *fn, bool linked) const;
-  ResultHookParamsMatch hookParams(const FunctionDecl *fn,
+  bool isStreamClass(const ClassDecl *classDecl) const;
+  StreamChunks streamChunksOf(const ClassDecl *classDecl) const;
+  std::optional<std::vector<const Type *>> streamHookParams(const FunctionDecl *functionDecl);
+  bool isStreamHook(const FunctionDecl *functionDecl, bool linked) const;
+  ResultHookParamsMatch hookParams(const FunctionDecl *functionDecl,
                                    llvm::ArrayRef<FunctionDecl *> inherited) const;
-  void addStreamBases(ClassDecl *inst, llvm::SMLoc loc);
+  void addStreamBases(ClassDecl *instance, llvm::SMLoc loc);
 
 private:
   struct StreamSides {
@@ -34,12 +34,13 @@ private:
     bool transform;
   };
 
-  static const ClassDecl *libraryBase(const ClassDecl *cls);
+  const ClassDecl *libraryBase(const ClassDecl *classDecl) const;
   std::optional<StreamSides> streamSides(const ClassDecl *lib);
-  std::vector<const Type *> hookParamTypes(const FunctionDecl *fn, const StreamSides &sides);
+  std::vector<const Type *> hookParamTypes(const FunctionDecl *functionDecl,
+                                           const StreamSides &sides);
   std::vector<const Type *> destroyParamTypes();
-  std::vector<const Type *> writevParamTypes(const FunctionDecl *fn, const StreamSides &sides,
-                                             const Type *callback);
+  std::vector<const Type *> writevParamTypes(const FunctionDecl *functionDecl,
+                                             const StreamSides &sides, const Type *callback);
   const Type *libraryAliasOf(llvm::StringRef name, const Type *arg, llvm::SMLoc loc);
 
   SemanticState &state;

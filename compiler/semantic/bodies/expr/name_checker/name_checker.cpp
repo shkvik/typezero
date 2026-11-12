@@ -23,6 +23,31 @@
 
 namespace tz {
 
+namespace {
+
+const GlobalName kConversionNames[] = {
+    GlobalName::STRING,      GlobalName::NUMBER,  GlobalName::PARSE_INT,
+    GlobalName::PARSE_FLOAT, GlobalName::BOOLEAN,
+};
+
+const GlobalName kUriNames[] = {
+    GlobalName::ENCODE_URI_COMPONENT,
+    GlobalName::ENCODE_URI,
+    GlobalName::DECODE_URI_COMPONENT,
+    GlobalName::DECODE_URI,
+};
+
+const std::pair<GlobalName, llvm::StringLiteral> kObjectExamples[] = {
+    {GlobalName::PROCESS, "process.argv"},
+    {GlobalName::CONSOLE, "console.log(x)"},
+    {GlobalName::DATE, "Date.now()"},
+    {GlobalName::PERFORMANCE, "performance.now()"},
+    {GlobalName::REG_EXP, "new RegExp(pattern)"},
+    {GlobalName::JSON, "JSON.parse(text)"},
+};
+
+}
+
 NameChecker::NameChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->scopes = &all.scopes;
@@ -39,10 +64,10 @@ NameChecker::NameChecker(SemanticState &owner, SemanticParts &all)
   this->builtinModuleChecker = &all.builtinModuleChecker;
 }
 
-NameChecker::ResultNoTypeArguments NameChecker::typeArgsAbsent(const NameExpr *name,
-                                                               const ScopeEntry &entry) {
-  if (!name->typeArgs.empty() && (entry.var() || entry.func())) {
-    std::string message = ErrorTextCallTypeArgs::notGeneric(name->name);
+NameChecker::ResultNoTypeArguments NameChecker::checkTypeArgsAbsent(const NameExpr *name,
+                                                                    const ScopeEntry &entry) const {
+  if (!name->typeArgs.empty() && (entry.var() != nullptr || entry.func() != nullptr)) {
+    auto message = ErrorTextCallTypeArgs::notGeneric(name->name);
 
     return err(NameCheckerTypeArgsAbsentError{
         .code = NameCheckerTypeArgsAbsentErrorCode::NOT_GENERIC,
@@ -53,14 +78,14 @@ NameChecker::ResultNoTypeArguments NameChecker::typeArgsAbsent(const NameExpr *n
   return ok(name);
 }
 
-NameChecker::ResultVariableVisible NameChecker::notCaptured(const NameExpr *name,
-                                                            const ScopeEntry &entry) const {
-  const ClassDecl *current = this->state.getClassContext().getCurrentClass();
-  bool isCaptured = this->state.getClassContext().isInsideStaticInit() && current &&
+NameChecker::ResultVariableVisible NameChecker::checkNotCaptured(const NameExpr *name,
+                                                                 const ScopeEntry &entry) const {
+  const auto *current = this->state.getClassContext().getCurrentClass();
+  bool isCaptured = this->state.getClassContext().isInsideStaticInit() && current != nullptr &&
                     current->expression() && !entry.var()->isGlobal() &&
                     llvm::is_contained(current->locals, name->name);
   if (isCaptured) {
-    std::string message = ErrorTextNameUse::staticUse(name->name);
+    auto message = ErrorTextNameUse::staticUse(name->name);
 
     return err(NameCheckerNotCapturedError{
         .code = NameCheckerNotCapturedErrorCode::CAPTURED_LOCAL,
@@ -71,91 +96,87 @@ NameChecker::ResultVariableVisible NameChecker::notCaptured(const NameExpr *name
   return ok(name);
 }
 
-NameChecker::ResultResolvedNameUse NameChecker::unknownName(NameExpr *name,
-                                                            const ScopeEntry &entry) {
-  UnknownNameKind kind = this->unknownNameKind(name, entry);
-  std::optional<GlobalName> global = GlobalNameTable::find(name->name);
+NameChecker::ResultResolvedNameUse NameChecker::checkUnknownName(NameExpr *name,
+                                                                 const ScopeEntry &entry) {
+  auto kind = this->unknownNameKind(name, entry);
+  auto global = GlobalNameTable::find(name->name);
   llvm::StringRef text = name->name;
   switch (kind) {
     case UnknownNameKind::OK_AS_VALUE:
-      return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::OK_AS_VALUE,
-                                       ErrorTextNameUse::okValue(text));
+      return this->unknownError(NameCheckerUnknownNameErrorCode::OK_AS_VALUE,
+                                ErrorTextNameUse::okValue(text));
     case UnknownNameKind::RESULT_VALUE:
-      return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::RESULT_VALUE,
-                                       ErrorTextNameUse::resultUse(text));
+      return this->unknownError(NameCheckerUnknownNameErrorCode::RESULT_VALUE,
+                                ErrorTextNameUse::resultUse(text));
     case UnknownNameKind::TYPE_ONLY:
-      return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::TYPE_ONLY,
-                                       this->typeOnlyText(name));
+      return this->unknownError(NameCheckerUnknownNameErrorCode::TYPE_ONLY,
+                                this->typeOnlyText(name));
     case UnknownNameKind::THIS_OUTSIDE:
-      return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::THIS_OUTSIDE,
-                                       ErrorTextNameUse::noThis());
+      return this->unknownError(NameCheckerUnknownNameErrorCode::THIS_OUTSIDE,
+                                ErrorTextNameUse::noThis());
     case UnknownNameKind::BUILTIN_VALUE:
-      return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::BUILTIN_VALUE,
-                                       NameChecker::builtinValueText(text, global));
+      return this->unknownError(NameCheckerUnknownNameErrorCode::BUILTIN_VALUE,
+                                this->builtinValueText(text, global));
     case UnknownNameKind::SUPER_VALUE:
-      return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::SUPER_VALUE,
-                                       ErrorTextNameUse::superUse());
+      return this->unknownError(NameCheckerUnknownNameErrorCode::SUPER_VALUE,
+                                ErrorTextNameUse::superUse());
     case UnknownNameKind::ARGUMENTS:
-      return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::ARGUMENTS,
-                                       ErrorTextNameUse::arguments());
+      return this->unknownError(NameCheckerUnknownNameErrorCode::ARGUMENTS,
+                                ErrorTextNameUse::arguments());
     case UnknownNameKind::BIG_INT_VALUE:
       return this->reportBigIntName(name);
     case UnknownNameKind::DECIMAL_VALUE:
-      return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::DECIMAL_VALUE,
-                                       ErrorTextNameUse::decimal());
+      return this->unknownError(NameCheckerUnknownNameErrorCode::DECIMAL_VALUE,
+                                ErrorTextNameUse::decimal());
     case UnknownNameKind::NULL_VALUE:
-      return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::NULL_VALUE,
-                                       ErrorTextNameUse::nullUse());
+      return this->unknownError(NameCheckerUnknownNameErrorCode::NULL_VALUE,
+                                ErrorTextNameUse::nullUse());
     case UnknownNameKind::UNSUPPORTED:
-      return NameChecker::unknownError(
+      return this->unknownError(
           NameCheckerUnknownNameErrorCode::UNSUPPORTED,
           ErrorTextCallName::noSupport(text, ErrorTextUnsupported::why(text)));
     case UnknownNameKind::ENUM_VALUE:
-      return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::ENUM_VALUE,
-                                       ErrorTextNameUse::enumUse(text));
+      return this->unknownError(NameCheckerUnknownNameErrorCode::ENUM_VALUE,
+                                ErrorTextNameUse::enumUse(text));
     case UnknownNameKind::CLASS_VALUE:
       return ok(this->classValueChecker->checkClassValue(name, entry.cls()));
     case UnknownNameKind::OWN_CLASS_EXPRESSION:
       return ok(this->classValueChecker->checkClassValue(
           name, this->state.getClassContext().getCurrentClass()));
     case UnknownNameKind::CAPTURED_LOCAL:
-      return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::CAPTURED_LOCAL,
-                                       ErrorTextNameUse::laterUse(text));
+      return this->unknownError(NameCheckerUnknownNameErrorCode::CAPTURED_LOCAL,
+                                ErrorTextNameUse::laterUse(text));
     case UnknownNameKind::NOT_LOADED:
       return this->notLoadedError(name);
     case UnknownNameKind::DECLARED_AFTER_CALL:
-      return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::DECLARED_AFTER_CALL,
-                                       this->afterCallText(name));
+      return this->unknownError(NameCheckerUnknownNameErrorCode::DECLARED_AFTER_CALL,
+                                this->afterCallText(name));
     case UnknownNameKind::DECLARED_LATER_IN_BLOCK:
-      return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::DECLARED_LATER_IN_BLOCK,
-                                       ErrorTextNameUse::laterBlock(text));
+      return this->unknownError(NameCheckerUnknownNameErrorCode::DECLARED_LATER_IN_BLOCK,
+                                ErrorTextNameUse::laterBlock(text));
     case UnknownNameKind::USED_BEFORE_DECLARED:
-      return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::USED_BEFORE_DECLARED,
-                                       ErrorTextNameUse::beforeDecl(text));
+      return this->unknownError(NameCheckerUnknownNameErrorCode::USED_BEFORE_DECLARED,
+                                ErrorTextNameUse::beforeDecl(text));
     case UnknownNameKind::OWN_INITIALIZER:
-      return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::OWN_INITIALIZER,
-                                       ErrorTextNameUse::ownInit(text));
+      return this->unknownError(NameCheckerUnknownNameErrorCode::OWN_INITIALIZER,
+                                ErrorTextNameUse::ownInit(text));
     case UnknownNameKind::OBJECT_VALUE:
-      return NameChecker::unknownError(
-          NameCheckerUnknownNameErrorCode::OBJECT_VALUE,
-          ErrorTextNameUse::objectUse(text, *NameChecker::objectExample(global)));
+      return this->unknownError(NameCheckerUnknownNameErrorCode::OBJECT_VALUE,
+                                ErrorTextNameUse::objectUse(text, *this->objectExample(global)));
     case UnknownNameKind::UNKNOWN_NAME:
-      return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::UNKNOWN_NAME,
-                                       ErrorTextNameUse::notFound(text));
+      return this->unknownError(NameCheckerUnknownNameErrorCode::UNKNOWN_NAME,
+                                ErrorTextNameUse::notFound(text));
   }
 
-  return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::UNKNOWN_NAME,
-                                   ErrorTextNameUse::notFound(text));
+  return this->unknownError(NameCheckerUnknownNameErrorCode::UNKNOWN_NAME,
+                            ErrorTextNameUse::notFound(text));
 }
 
 NameChecker::UnknownNameKind NameChecker::unknownNameKind(const NameExpr *name,
                                                           const ScopeEntry &entry) const {
   llvm::StringRef text = name->name;
-  std::optional<GlobalName> global = GlobalNameTable::find(text);
-  std::optional<GlobalName> result = std::nullopt;
-  if (entry.enumDecl() == nullptr) {
-    result = this->resultTypes->resultName(text);
-  }
+  auto global = GlobalNameTable::find(text);
+  auto result = this->resultNameOf(text, entry);
   if (result == GlobalName::OK || result == GlobalName::ERR) {
     return UnknownNameKind::OK_AS_VALUE;
   }
@@ -168,7 +189,7 @@ NameChecker::UnknownNameKind NameChecker::unknownNameKind(const NameExpr *name,
   if (text == "this") {
     return UnknownNameKind::THIS_OUTSIDE;
   }
-  if (NameChecker::isConversionName(global) || NameChecker::isUriName(global)) {
+  if (this->isConversionName(global) || this->isUriName(global)) {
     return UnknownNameKind::BUILTIN_VALUE;
   }
   if (text == "super") {
@@ -198,10 +219,19 @@ NameChecker::UnknownNameKind NameChecker::unknownNameKind(const NameExpr *name,
   return this->laterNameKind(name, global);
 }
 
+std::optional<GlobalName> NameChecker::resultNameOf(llvm::StringRef text,
+                                                    const ScopeEntry &entry) const {
+  if (entry.enumDecl() != nullptr) {
+    return std::nullopt;
+  }
+
+  return this->resultTypes->resultName(text);
+}
+
 NameChecker::UnknownNameKind NameChecker::laterNameKind(const NameExpr *name,
                                                         std::optional<GlobalName> global) const {
   llvm::StringRef text = name->name;
-  const ClassDecl *current = this->state.getClassContext().getCurrentClass();
+  const auto *current = this->state.getClassContext().getCurrentClass();
   bool isExpression = current != nullptr && current->expression();
   if (isExpression && !current->name.empty() && current->name == text) {
     return UnknownNameKind::OWN_CLASS_EXPRESSION;
@@ -215,7 +245,7 @@ NameChecker::UnknownNameKind NameChecker::laterNameKind(const NameExpr *name,
   if (this->isDeclaredAfterCall(text)) {
     return UnknownNameKind::DECLARED_AFTER_CALL;
   }
-  const BlockNames *later = this->state.getScopeStack().findDeclaredLater(text);
+  const auto *later = this->state.getScopeStack().findDeclaredLater(text);
   if (later != nullptr && this->state.getFunctionStack().getFunctionDepth() > later->functions) {
     return UnknownNameKind::DECLARED_LATER_IN_BLOCK;
   }
@@ -225,7 +255,7 @@ NameChecker::UnknownNameKind NameChecker::laterNameKind(const NameExpr *name,
   if (this->state.getExpressionMarks().isInitializing(text)) {
     return UnknownNameKind::OWN_INITIALIZER;
   }
-  if (NameChecker::objectExample(global).has_value()) {
+  if (this->objectExample(global).has_value()) {
     return UnknownNameKind::OBJECT_VALUE;
   }
 
@@ -236,38 +266,24 @@ bool NameChecker::isDeclaredAfterCall(llvm::StringRef text) const {
   if (this->state.getFunctionStack().getEarlyFunction() == nullptr) {
     return false;
   }
-  ModuleStates &modules = this->state.getModuleStates();
+  auto &modules = this->state.getModuleStates();
   bool isTopLevel = modules.getModuleState(modules.getCurrentModule()).topLevelNames.contains(text);
 
   return isTopLevel || this->state.getScopeStack().findDeclaredLater(text) != nullptr;
 }
 
-bool NameChecker::isConversionName(std::optional<GlobalName> global) {
-  static const GlobalName conversions[] = {GlobalName::STRING, GlobalName::NUMBER,
-                                           GlobalName::PARSE_INT, GlobalName::PARSE_FLOAT,
-                                           GlobalName::BOOLEAN};
-
-  return global.has_value() && llvm::is_contained(conversions, *global);
+bool NameChecker::isConversionName(std::optional<GlobalName> global) const {
+  return global.has_value() && llvm::is_contained(kConversionNames, *global);
 }
 
-bool NameChecker::isUriName(std::optional<GlobalName> global) {
-  static const GlobalName uris[] = {GlobalName::ENCODE_URI_COMPONENT, GlobalName::ENCODE_URI,
-                                    GlobalName::DECODE_URI_COMPONENT, GlobalName::DECODE_URI};
-
-  return global.has_value() && llvm::is_contained(uris, *global);
+bool NameChecker::isUriName(std::optional<GlobalName> global) const {
+  return global.has_value() && llvm::is_contained(kUriNames, *global);
 }
 
-std::optional<llvm::StringRef> NameChecker::objectExample(std::optional<GlobalName> global) {
-  static const std::pair<GlobalName, llvm::StringLiteral> objects[] = {
-      {GlobalName::PROCESS, "process.argv"},
-      {GlobalName::CONSOLE, "console.log(x)"},
-      {GlobalName::DATE, "Date.now()"},
-      {GlobalName::PERFORMANCE, "performance.now()"},
-      {GlobalName::REG_EXP, "new RegExp(pattern)"},
-      {GlobalName::JSON, "JSON.parse(text)"}};
-  for (const std::pair<GlobalName, llvm::StringLiteral> &object : objects) {
-    if (object.first == global) {
-      return object.second;
+std::optional<llvm::StringRef> NameChecker::objectExample(std::optional<GlobalName> global) const {
+  for (const auto &[object, example] : kObjectExamples) {
+    if (object == global) {
+      return example;
     }
   }
 
@@ -275,7 +291,7 @@ std::optional<llvm::StringRef> NameChecker::objectExample(std::optional<GlobalNa
 }
 
 NameChecker::ResultResolvedNameUse NameChecker::unknownError(NameCheckerUnknownNameErrorCode code,
-                                                             const std::string &message) {
+                                                             const std::string &message) const {
   return err(NameCheckerUnknownNameError{
       .code = code,
       .message = message,
@@ -283,7 +299,7 @@ NameChecker::ResultResolvedNameUse NameChecker::unknownError(NameCheckerUnknownN
 }
 
 std::string NameChecker::typeOnlyText(const NameExpr *name) const {
-  std::optional<GlobalName> result = this->resultTypes->resultName(name->name);
+  auto result = this->resultTypes->resultName(name->name);
   bool isOkType = result == GlobalName::OK_TYPE;
   llvm::StringRef make = isOkType ? "ok(value)" : "err(error)";
   llvm::StringRef test = isOkType ? "isOk()" : "isErr()";
@@ -291,32 +307,34 @@ std::string NameChecker::typeOnlyText(const NameExpr *name) const {
   return ErrorTextNameUse::typeOnly(name->name, make, test);
 }
 
-std::string NameChecker::builtinValueText(llvm::StringRef text, std::optional<GlobalName> global) {
-  llvm::StringRef returns = NameChecker::isUriName(global) ? "string" : "double";
+std::string NameChecker::builtinValueText(llvm::StringRef text,
+                                          std::optional<GlobalName> global) const {
+  const Type *returned = this->isUriName(global) ? Type::string() : Type::doubleTy();
+  llvm::StringRef returns = returned->name();
 
   return ErrorTextNameUse::builtin(text, returns);
 }
 
 NameChecker::ResultResolvedNameUse NameChecker::reportBigIntName(const NameExpr *name) {
-  std::string quoted = ErrorTextBigInt::quoted(name->name);
-  std::string bigint = ErrorTextBigInt::none(quoted);
+  auto quoted = ErrorTextBigInt::quoted(name->name);
+  auto bigint = ErrorTextBigInt::none(quoted);
   this->state.getDiagnostics().error(name->loc(), bigint);
 
-  return NameChecker::unknownError(NameCheckerUnknownNameErrorCode::ALREADY_REPORTED, "");
+  return this->unknownError(NameCheckerUnknownNameErrorCode::ALREADY_REPORTED, "");
 }
 
 NameChecker::ResultResolvedNameUse NameChecker::notLoadedError(const NameExpr *name) {
-  TopLevelChecker::ResultSourceIsLoaded loaded = this->topLevelChecker->checkLoaded(name);
+  auto loaded = this->topLevelChecker->checkLoaded(name);
   bool isReported = loaded.error().code == TopLevelCheckerCheckLoadedErrorCode::ALREADY_REPORTED;
   NameCheckerUnknownNameErrorCode code = isReported
                                              ? NameCheckerUnknownNameErrorCode::ALREADY_REPORTED
                                              : NameCheckerUnknownNameErrorCode::NOT_LOADED;
 
-  return NameChecker::unknownError(code, loaded.error().message);
+  return this->unknownError(code, loaded.error().message);
 }
 
 std::string NameChecker::afterCallText(const NameExpr *name) const {
-  const FuncSymbol *early = this->state.getFunctionStack().getEarlyFunction();
+  const auto *early = this->state.getFunctionStack().getEarlyFunction();
 
   return ErrorTextNameUse::afterCall(name->name, early->name);
 }
@@ -328,12 +346,12 @@ Expr *NameChecker::checkName(NameExpr *name) {
   if (name->cls() != nullptr && name->type != nullptr) {
     return name;
   }
-  Expr *node = this->builtinModuleChecker->checkNodeName(name);
+  auto *node = this->builtinModuleChecker->checkNodeName(name);
   if (node != nullptr) {
     return node;
   }
-  ScopeEntry entry = this->topLevelChecker->lookupValue(name->name);
-  ResultNoTypeArguments plain = NameChecker::typeArgsAbsent(name, entry);
+  auto entry = this->topLevelChecker->lookupValue(name->name);
+  auto plain = this->checkTypeArgsAbsent(name, entry);
   if (plain.isErr()) {
     this->state.getDiagnostics().error(name->loc(), plain.error().message);
   }
@@ -343,18 +361,24 @@ Expr *NameChecker::checkName(NameExpr *name) {
   if (entry.func() != nullptr) {
     return this->checkFunctionName(name, entry.func());
   }
-  if (!entry.found()) {
-    ClassDecl *cls = this->metadataChecker->builtinConstructor(name->name);
-    if (cls != nullptr) {
-      return this->classValueChecker->checkClassValue(name, cls);
-    }
+  auto *classDecl = this->builtinClass(name, entry);
+  if (classDecl != nullptr) {
+    return this->classValueChecker->checkClassValue(name, classDecl);
   }
 
   return this->reportUnknownName(name, entry);
 }
 
+ClassDecl *NameChecker::builtinClass(const NameExpr *name, const ScopeEntry &entry) const {
+  if (entry.isFound()) {
+    return nullptr;
+  }
+
+  return this->metadataChecker->builtinConstructorNamed(name->name);
+}
+
 Expr *NameChecker::checkThisName(NameExpr *name) {
-  ClassChecker::ResultThisReference reference = this->classChecker->checkThis(name);
+  auto reference = this->classChecker->checkThis(name);
   if (reference.isErr()) {
     this->state.getDiagnostics().error(name->loc(), reference.error().message);
     return name;
@@ -364,48 +388,39 @@ Expr *NameChecker::checkThisName(NameExpr *name) {
 }
 
 Expr *NameChecker::checkVariableName(NameExpr *name, const ScopeEntry &entry) {
-  VarSymbol *var = entry.var();
-  ResultVariableVisible visibleHere = this->notCaptured(name, entry);
+  VarSymbol *variable = entry.var();
+  auto visibleHere = this->checkNotCaptured(name, entry);
   if (visibleHere.isErr()) {
     this->state.getDiagnostics().error(name->loc(), visibleHere.error().message);
   }
-  name->binding = NamedVar{.var = var};
-  var->read = true;
-  this->nestedFunctions->noteUse(var, name->loc());
-  name->type = this->scopes->varType(var);
-  Scopes::ResultNameIsVisible visible = this->scopes->checkVisible(name, var);
+  name->binding = NamedVar{.var = variable};
+  variable->read = true;
+  this->nestedFunctions->noteUse(variable, name->loc());
+  name->type = this->scopes->varType(variable);
+  auto visible = this->scopes->checkVisible(name, variable);
   if (visible.isErr()) {
     this->state.getDiagnostics().error(name->loc(), visible.error().message);
   }
 
-  return this->narrowedName(name, var);
+  return this->narrowedName(name, variable);
 }
 
-Expr *NameChecker::narrowedName(NameExpr *name, VarSymbol *var) {
-  if (this->state.getStreamStore().hasStreamViews()) {
-    FieldPath path;
-    path.var = var;
-    const Type *view = this->state.getStreamStore().findStreamView(path, name->loc());
-    if (view != nullptr) {
-      return this->typeRelations->convert(name, view);
-    }
+Expr *NameChecker::narrowedName(NameExpr *name, VarSymbol *variable) {
+  const auto *view = this->streamView(variable, name->loc());
+  if (view != nullptr) {
+    return this->typeRelations->convert(name, view);
   }
-  const Type *narrowed = this->genericChecker->narrowedType(var);
+  const auto *narrowed = this->genericChecker->narrowedType(variable);
   if (narrowed != nullptr) {
-    bool isDefined = narrowed->isOptional() && this->state.getFlowState().isDefined(var);
-    return this->typeRelations->convert(name, isDefined ? narrowed->inner() : narrowed);
+    const auto *shown = this->definedType(narrowed, variable);
+
+    return this->typeRelations->convert(name, shown);
   }
-  bool isDefined = name->type->isOptional() && this->state.getFlowState().isDefined(var);
+  bool isDefined = name->type->isOptional() && this->state.getFlowState().isDefined(variable);
   const Type *type = isDefined ? name->type->inner() : name->type;
-  if (type->isResult()) {
-    bool isOkKnown = this->state.getFlowState().isOkResult(var) && !type->errType()->isNever();
-    if (isOkKnown) {
-      return this->typeRelations->convert(name, Type::result(type->okType(), Type::never()));
-    }
-    bool isErrKnown = this->state.getFlowState().isErrResult(var) && !type->okType()->isNever();
-    if (isErrKnown) {
-      return this->typeRelations->convert(name, Type::result(Type::never(), type->errType()));
-    }
+  const auto *known = this->knownResultType(type, variable);
+  if (known != nullptr) {
+    return this->typeRelations->convert(name, known);
   }
   if (isDefined) {
     return this->typeRelations->convert(name, type);
@@ -414,16 +429,49 @@ Expr *NameChecker::narrowedName(NameExpr *name, VarSymbol *var) {
   return name;
 }
 
-Expr *NameChecker::checkFunctionName(NameExpr *name, FuncSymbol *func) {
-  name->binding = NamedFunction{.func = func};
-  name->type = this->returnInferrer->functionType(func);
-  this->tzModulesChecker->noteHttpsValue(func->decl, name->loc());
+const Type *NameChecker::streamView(VarSymbol *variable, llvm::SMLoc loc) const {
+  const auto &streams = this->state.getStreamStore();
+  if (!streams.hasStreamViews()) {
+    return nullptr;
+  }
+  auto path = FieldPath{.var = variable};
+
+  return streams.findStreamView(path, loc);
+}
+
+const Type *NameChecker::definedType(const Type *narrowed, const VarSymbol *variable) const {
+  bool isDefined = narrowed->isOptional() && this->state.getFlowState().isDefined(variable);
+
+  return isDefined ? narrowed->inner() : narrowed;
+}
+
+const Type *NameChecker::knownResultType(const Type *type, const VarSymbol *variable) const {
+  if (!type->isResult()) {
+    return nullptr;
+  }
+  auto &flow = this->state.getFlowState();
+  bool isOkKnown = flow.isOkResult(variable) && !type->errType()->isNever();
+  if (isOkKnown) {
+    return Type::result(type->okType(), Type::never());
+  }
+  bool isErrKnown = flow.isErrResult(variable) && !type->okType()->isNever();
+  if (isErrKnown) {
+    return Type::result(Type::never(), type->errType());
+  }
+
+  return nullptr;
+}
+
+Expr *NameChecker::checkFunctionName(NameExpr *name, FuncSymbol *function) {
+  name->binding = NamedFunction{.func = function};
+  name->type = this->returnInferrer->functionType(function);
+  this->tzModulesChecker->noteHttpsValue(function->decl, name->loc());
 
   return name;
 }
 
 Expr *NameChecker::reportUnknownName(NameExpr *name, const ScopeEntry &entry) {
-  ResultResolvedNameUse resolved = this->unknownName(name, entry);
+  auto resolved = this->checkUnknownName(name, entry);
   if (resolved.isOk()) {
     return resolved.value();
   }

@@ -2,12 +2,13 @@
 
 namespace tz {
 
-void CallbackFacts::rememberByteCallback(const FunctionDecl *fn, const ByteCallback &callback) {
-  this->byteCallbacks[fn] = callback;
+void CallbackFacts::rememberByteCallback(const FunctionDecl *functionDecl,
+                                         const ByteCallback &callback) {
+  this->byteCallbacks[functionDecl] = callback;
 }
 
-const ByteCallback *CallbackFacts::findByteCallback(const FunctionDecl *fn) const {
-  auto found = this->byteCallbacks.find(fn);
+const ByteCallback *CallbackFacts::findByteCallback(const FunctionDecl *functionDecl) const {
+  auto found = this->byteCallbacks.find(functionDecl);
   if (found == this->byteCallbacks.end()) {
     return nullptr;
   }
@@ -15,12 +16,12 @@ const ByteCallback *CallbackFacts::findByteCallback(const FunctionDecl *fn) cons
   return &found->second;
 }
 
-void CallbackFacts::rememberIndexCallback(const FunctionDecl *fn, unsigned param) {
-  this->indexCallbacks[fn] = param;
+void CallbackFacts::rememberIndexCallback(const FunctionDecl *functionDecl, unsigned param) {
+  this->indexCallbacks[functionDecl] = param;
 }
 
-std::optional<unsigned> CallbackFacts::findIndexParam(const FunctionDecl *fn) const {
-  auto found = this->indexCallbacks.find(fn);
+std::optional<unsigned> CallbackFacts::findIndexParam(const FunctionDecl *functionDecl) const {
+  auto found = this->indexCallbacks.find(functionDecl);
   if (found == this->indexCallbacks.end()) {
     return std::nullopt;
   }
@@ -28,13 +29,13 @@ std::optional<unsigned> CallbackFacts::findIndexParam(const FunctionDecl *fn) co
   return found->second;
 }
 
-void CallbackFacts::rememberElementCallback(const FunctionDecl *fn,
+void CallbackFacts::rememberElementCallback(const FunctionDecl *functionDecl,
                                             const ElementCallback &callback) {
-  this->elementCallbacks[fn] = callback;
+  this->elementCallbacks[functionDecl] = callback;
 }
 
-const ElementCallback *CallbackFacts::findElementCallback(const FunctionDecl *fn) const {
-  auto found = this->elementCallbacks.find(fn);
+const ElementCallback *CallbackFacts::findElementCallback(const FunctionDecl *functionDecl) const {
+  auto found = this->elementCallbacks.find(functionDecl);
   if (found == this->elementCallbacks.end()) {
     return nullptr;
   }

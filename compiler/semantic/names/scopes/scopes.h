@@ -17,15 +17,24 @@ public:
 
   Scopes(SemanticState &owner, SemanticParts &all);
 
-  const Type *varType(VarSymbol *var);
-  ScopeEntry lookup(llvm::StringRef name) const;
-  void closeScope();
   void openScope();
-  ResultNameIsVisible checkVisible(NameExpr *name, const VarSymbol *var) const;
+  void closeScope();
+  const Type *varType(VarSymbol *variable);
+  ScopeEntry lookup(llvm::StringRef name) const;
   ResultEntryDeclared declare(llvm::StringRef name, ScopeEntry entry);
+  VarSymbol *declareLet(llvm::StringRef name, llvm::SMLoc loc, const Type *type);
+  VarSymbol *declareConst(llvm::StringRef name, llvm::SMLoc loc, const Type *type);
+  ResultNameIsVisible checkVisible(NameExpr *name, const VarSymbol *variable) const;
   VarSymbol *declareVar(llvm::StringRef name, llvm::SMLoc loc, const Type *type, bool isConst);
 
 private:
+  using ResultNameIsAllowed = Result<void, ScopesDeclareError>;
+
+  void placeVariable(VarSymbol *variable);
+  ResultNameIsAllowed checkNotDeclared(llvm::StringRef name) const;
+  ResultNameIsAllowed checkNameAllowed(llvm::StringRef name) const;
+  ResultNameIsAllowed checkFunctionOnce(llvm::StringRef name, const ScopeEntry &entry) const;
+
   SemanticState &state;
   VarChecker *varChecker = nullptr;
   ReturnInferrer *returnInferrer = nullptr;

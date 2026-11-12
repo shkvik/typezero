@@ -1,4 +1,6 @@
 #include "compiler/semantic/library/reflect/metadata_checker/metadata_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/to_utf16/to_utf16.h"
 #include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
@@ -11,7 +13,6 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-// TODO: значения в мапы
 MetadataChecker::MetadataChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->scopes = &all.scopes;
@@ -21,121 +22,136 @@ MetadataChecker::MetadataChecker(SemanticState &owner, SemanticParts &all)
   this->classValueChecker = &all.classValueChecker;
 }
 
-ClassDecl *MetadataChecker::builtinConstructor(llvm::StringRef name) {
-  static const llvm::StringLiteral names[] = {"Number",       "String",
-                                              "Boolean",      "Object",
-                                              "Array",        "Function",
-                                              "Date",         "RegExp",
-                                              "Map",          "Set",
-                                              "Promise",      "Uint8Array",
-                                              "Int8Array",    "Uint8ClampedArray",
-                                              "Int16Array",   "Uint16Array",
-                                              "Int32Array",   "Uint32Array",
-                                              "Float16Array", "Float32Array",
-                                              "Float64Array", "Buffer",
-                                              "ArrayBuffer",  "DataView",
-                                              "TextEncoder",  "TextDecoder"};
-  auto found = llvm::find(names, name);
-  if (found == std::end(names)) {
+ClassDecl *MetadataChecker::builtinConstructorNamed(llvm::StringRef name) {
+  auto found = BuiltinConstructorTable::find(name);
+  if (!found.has_value()) {
     return nullptr;
   }
-  ReflectStore &reflect = this->state.getReflectStore();
-  if (ClassDecl *known = reflect.findBuiltinConstructor(name)) {
-    return known;
-  }
-  auto *cls = this->state.getAst().make<ClassDecl>(llvm::SMLoc(), *found);
-  cls->origin = ClassOrigin::BUILTIN;
-  cls->stage = ClassStage::RESOLVED;
-  cls->declared = true;
-  reflect.rememberBuiltinConstructor(name, cls);
 
-  return cls;
+  return this->builtinConstructor(*found);
 }
 
-const void *MetadataChecker::metadataKey(const Expr *key, std::string &label) {
+ClassDecl *MetadataChecker::builtinConstructor(BuiltinConstructor which) {
+  llvm::StringRef name = BuiltinConstructorTable::getName(which);
+  auto &reflect = this->state.getReflectStore();
+  auto *known = reflect.findBuiltinConstructor(name);
+  if (known != nullptr) {
+    return known;
+  }
+  auto *classDecl = this->state.getAst().make<ClassDecl>(llvm::SMLoc(), name);
+  classDecl->origin = ClassOrigin::BUILTIN;
+  classDecl->stage = ClassStage::RESOLVED;
+  classDecl->declared = true;
+  reflect.rememberBuiltinConstructor(name, classDecl);
+
+  return classDecl;
+}
+
+MetadataChecker::NamedKey MetadataChecker::metadataKey(const Expr *key) const {
   auto *name = dyn_cast<NameExpr>(key);
-  if (!name) {
-    return nullptr;
+  if (name == nullptr) {
+    return NamedKey{.key = nullptr, .label = ""};
   }
-  ScopeEntry entry = this->scopes->lookup(name->name);
-  label = name->name.str();
-  if (entry.var()) {
-    return entry.var()->isConst && entry.var()->type && !entry.var()->type->isString() ? entry.var()
-                                                                                       : nullptr;
+  auto entry = this->scopes->lookup(name->name);
+
+  return NamedKey{.key = this->entryKey(entry), .label = name->name.str()};
+}
+
+const void *MetadataChecker::entryKey(const ScopeEntry &entry) const {
+  const VarSymbol *variable = entry.var();
+  if (variable != nullptr) {
+    bool isKeyConst = variable->isConst && variable->type != nullptr && !variable->type->isString();
+
+    return isKeyConst ? variable : nullptr;
   }
-  if (entry.func()) {
+  if (entry.func() != nullptr) {
     return entry.func();
   }
 
   return entry.cls();
 }
 
-void MetadataChecker::walkBodyEarly(FunctionDecl *fn) {
-  if (!fn->sym || fn->checked || fn->sym->isGeneric() ||
-      this->state.getFunctionStack().isCheckingFunction(fn)) {
+void MetadataChecker::walkBodyEarly(FunctionDecl *functionDecl) {
+  FuncSymbol *function = functionDecl->sym;
+  bool isSettled = function == nullptr || functionDecl->checked || function->isGeneric();
+  if (isSettled || this->state.getFunctionStack().isCheckingFunction(functionDecl)) {
     return;
   }
-  if (!fn->sym->hasReturnType()) {
-    this->returnInferrer->inferReturnType(fn->sym);
+  if (!function->hasReturnType()) {
+    this->returnInferrer->inferReturnType(function);
     return;
   }
-  if (fn->cls()) {
-    return;
+  if (functionDecl->cls() == nullptr) {
+    this->returnInferrer->walkBodyNow(functionDecl);
   }
-  this->returnInferrer->walkBodyNow(fn);
 }
 
 MetadataChecker::ResultMetadataTyped MetadataChecker::metadataType(const void *key,
                                                                    llvm::StringRef label,
                                                                    llvm::SMLoc loc,
                                                                    const Type *expected) {
-  ReflectStore &reflect = this->state.getReflectStore();
-  if (const MetadataType *known = reflect.findMetadataType(key)) {
+  const auto *known = this->recordedType(key, label);
+  if (known != nullptr) {
     return ok(known->type);
   }
-  for (FunctionDecl *fn : reflect.getMetadataWriters(label)) {
-    this->walkBodyEarly(fn);
-    if (const MetadataType *known = reflect.findMetadataType(key)) {
-      return ok(known->type);
-    }
-  }
-  bool isWritten =
-      expected && !expected->nonOptional()->isUnknown() && !TypeQueries::mentionsParam(expected);
+  bool isWritten = expected != nullptr && !expected->nonOptional()->isUnknown() &&
+                   !TypeQueries::mentionsParam(expected);
   if (!isWritten) {
-    std::string message = ErrorTextMetadataType::unknown(label);
+    auto message = ErrorTextMetadataType::unknown(label);
 
     return err(MetadataCheckerMetadataTypeError{
         .code = MetadataCheckerMetadataTypeErrorCode::NO_RECORD_TYPE,
         .message = message,
     });
   }
-  reflect.rememberMetadataType(key, expected->nonOptional(), loc);
+  const Type *written = expected->nonOptional();
+  this->state.getReflectStore().rememberMetadataType(key, written, loc);
 
-  return ok(expected->nonOptional());
+  return ok(written);
+}
+
+const MetadataType *MetadataChecker::recordedType(const void *key, llvm::StringRef label) {
+  auto &reflect = this->state.getReflectStore();
+  const MetadataType *known = reflect.findMetadataType(key);
+  if (known != nullptr) {
+    return known;
+  }
+  for (FunctionDecl *writer : reflect.getMetadataWriters(label)) {
+    this->walkBodyEarly(writer);
+    const MetadataType *written = reflect.findMetadataType(key);
+    if (written != nullptr) {
+      return written;
+    }
+  }
+
+  return nullptr;
 }
 
 Expr *MetadataChecker::designClass(const Type *type, llvm::SMLoc loc) {
-  return this->classValueChecker->classValueAt(this->designConstructor(type), loc);
+  auto *constructor = this->designConstructor(type);
+
+  return this->classValueChecker->classValueAt(constructor, loc);
 }
 
 ClassDecl *MetadataChecker::designConstructor(const Type *type) {
-  const Type *plain = MetadataChecker::designPlain(type);
+  const auto *plain = this->designPlain(type);
   if (!plain->isUnion()) {
     return this->plainConstructor(plain);
   }
-  const Type *first = MetadataChecker::designPlain(plain->members().front());
-  ClassDecl *common = this->plainConstructor(first);
+  const auto *first = this->designPlain(plain->members().front());
+  auto *common = this->plainConstructor(first);
   for (const Type *member : plain->members()) {
-    ClassDecl *own = this->plainConstructor(MetadataChecker::designPlain(member));
+    const auto *memberPlain = this->designPlain(member);
+    auto *own = this->plainConstructor(memberPlain);
     if (own != common) {
-      return this->builtinConstructor("Object");
+      return this->builtinConstructor(BuiltinConstructor::OBJECT);
     }
   }
 
   return common;
 }
 
-const Type *MetadataChecker::designPlain(const Type *type) {
+const Type *MetadataChecker::designPlain(const Type *type) const {
   const Type *plain = type->nonOptional();
 
   return plain->isLiteral() ? plain->literalBase() : plain;
@@ -143,104 +159,157 @@ const Type *MetadataChecker::designPlain(const Type *type) {
 
 ClassDecl *MetadataChecker::plainConstructor(const Type *type) {
   if (type->isBytes()) {
-    return this->builtinConstructor(type->name());
+    return this->builtinConstructorNamed(type->name());
   }
-  llvm::StringRef name = "Object";
-  if (type->isPromise()) {
-    name = "Promise";
-  } else if (type->isNumeric()) {
-    name = "Number";
-  } else if (type->isString()) {
-    name = "String";
-  } else if (type->isBool()) {
-    name = "Boolean";
-  } else if (type->isArray() || type->isTuple() || type->isMatch()) {
-    name = "Array";
-  } else if (type->isFunction() || type->isClassRef()) {
-    name = "Function";
-  } else if (type->isDate()) {
-    name = "Date";
-  } else if (type->isRegExp()) {
-    name = "RegExp";
-  } else if (type->isMap()) {
-    name = "Map";
-  } else if (type->isSet()) {
-    name = "Set";
-  } else if (ClassDecl *cls = ClassDeclarer::classOf(type); cls && !cls->literal()) {
-    return cls;
+  auto builtin = this->builtinDesign(type);
+  if (builtin.has_value()) {
+    return this->builtinConstructor(*builtin);
+  }
+  auto *classDecl = this->classDeclarer->classOf(type);
+  if (classDecl != nullptr && classDecl->literal() == nullptr) {
+    return classDecl;
   }
 
-  return this->builtinConstructor(name);
+  return this->builtinConstructor(BuiltinConstructor::OBJECT);
 }
 
-void MetadataChecker::writeDesignRecord(ClassDecl *cls, const char16_t *key, Expr *value,
+std::optional<BuiltinConstructor> MetadataChecker::builtinDesign(const Type *type) const {
+  if (type->isPromise()) {
+    return BuiltinConstructor::PROMISE;
+  }
+  if (type->isNumeric()) {
+    return BuiltinConstructor::NUMBER;
+  }
+  if (type->isString()) {
+    return BuiltinConstructor::STRING;
+  }
+  if (type->isBool()) {
+    return BuiltinConstructor::BOOLEAN;
+  }
+  if (type->isArray() || type->isTuple() || type->isMatch()) {
+    return BuiltinConstructor::ARRAY;
+  }
+  if (type->isFunction() || type->isClassRef()) {
+    return BuiltinConstructor::FUNCTION;
+  }
+  if (type->isDate()) {
+    return BuiltinConstructor::DATE;
+  }
+  if (type->isRegExp()) {
+    return BuiltinConstructor::REG_EXP;
+  }
+  if (type->isMap()) {
+    return BuiltinConstructor::MAP;
+  }
+  if (type->isSet()) {
+    return BuiltinConstructor::SET;
+  }
+
+  return std::nullopt;
+}
+
+void MetadataChecker::writeDesignRecord(ClassDecl *classDecl, DesignKey key, Expr *value,
                                         llvm::StringRef member, llvm::SMLoc loc) {
-  auto *callee = this->state.getAst().make<NameExpr>(loc, "Reflect");
+  auto &ast = this->state.getAst();
+  llvm::StringRef reflect = GlobalNameTable::getName(GlobalName::REFLECT);
+  auto *callee = ast.make<NameExpr>(loc, reflect);
   callee->type = Type::error();
-  auto *keyLit = this->state.getAst().make<StringLitExpr>(loc, key);
-  keyLit->type = Type::string();
-  Expr *property;
-  if (member.empty()) {
-    property = this->state.getAst().make<UndefinedExpr>(loc);
-    property->type = Type::undefinedTy();
-  } else {
-    property =
-        this->state.getAst().make<StringLitExpr>(loc, std::u16string(member.begin(), member.end()));
-    property->type = Type::string();
-  }
-  if (value->type->isClassRef()) {
-    value = this->typeRelations->convert(value, Type::constructorOf(Type::anyObject()));
-  }
-  std::vector<Expr *> args{keyLit, this->typeRelations->convert(value, Type::unknown()),
-                           this->typeRelations->convert(
-                               this->classValueChecker->classValueAt(cls, loc), Type::anyObject()),
-                           this->typeRelations->convert(property, Type::optional(Type::string()))};
-  auto *call = this->state.getAst().make<CallExpr>(loc, callee, std::move(args));
+  auto keyText = ToUtf16::toUtf16(DesignKeyTable::getName(key));
+  auto *keyLiteral = ast.make<StringLitExpr>(loc, keyText);
+  keyLiteral->type = Type::string();
+  Expr *property = this->memberProperty(member, loc);
+  Expr *plainValue = this->withoutClassRef(value);
+  auto *recorded = this->typeRelations->convert(plainValue, Type::unknown());
+  auto *owner = this->classValueChecker->classValueAt(classDecl, loc);
+  auto *target = this->typeRelations->convert(owner, Type::anyObject());
+  auto *name = this->typeRelations->convert(property, Type::optional(Type::string()));
+  auto args = std::vector<Expr *>{keyLiteral, recorded, target, name};
+  auto *call = ast.make<CallExpr>(loc, callee, std::move(args));
   call->target = BuiltinCall{.builtin = Builtin::MetaDefine};
   call->designRecord = true;
   call->type = Type::voidTy();
-  cls->decorations.push_back(this->state.getAst().make<ExprStmt>(loc, call));
+  auto *record = ast.make<ExprStmt>(loc, call);
+  classDecl->decorations.push_back(record);
 }
 
-void MetadataChecker::writeDesignRecords(ClassDecl *cls, ClassField *field, FunctionDecl *method,
-                                         const FunctionDecl *ctor, llvm::SMLoc loc) {
-  auto paramTypes = [&](const FunctionDecl *fn) {
-    auto *list = this->state.getAst().make<ArrayLitExpr>(loc);
-    const Type *any = Type::constructorOf(Type::anyObject());
-    for (const Type *param : fn->sym->params) {
-      if (param) {
-        list->elements.push_back(
-            {this->typeRelations->convert(this->designClass(param, loc), any), false});
-      }
-    }
-    list->type = Type::array(any);
+Expr *MetadataChecker::memberProperty(llvm::StringRef member, llvm::SMLoc loc) {
+  auto &ast = this->state.getAst();
+  if (member.empty()) {
+    Expr *nothing = ast.make<UndefinedExpr>(loc);
+    nothing->type = Type::undefinedTy();
 
-    return list;
-  };
-  if (field) {
-    this->classDeclarer->completeClass(cls);
-    if (field->resolved && !field->resolved->isError()) {
-      this->writeDesignRecord(cls, u"design:type", this->designClass(field->resolved, loc),
-                              field->name, loc);
+    return nothing;
+  }
+  auto text = std::u16string(member.begin(), member.end());
+  Expr *property = ast.make<StringLitExpr>(loc, text);
+  property->type = Type::string();
+
+  return property;
+}
+
+Expr *MetadataChecker::withoutClassRef(Expr *value) {
+  if (!value->type->isClassRef()) {
+    return value;
+  }
+
+  return this->typeRelations->convert(value, Type::constructorOf(Type::anyObject()));
+}
+
+Expr *MetadataChecker::paramClasses(const FunctionDecl *functionDecl, llvm::SMLoc loc) {
+  auto *list = this->state.getAst().make<ArrayLitExpr>(loc);
+  const auto *any = Type::constructorOf(Type::anyObject());
+  for (const Type *param : functionDecl->sym->params) {
+    if (param != nullptr) {
+      auto *paramClass = this->designClass(param, loc);
+      auto *erased = this->typeRelations->convert(paramClass, any);
+      auto element = ArrayLitExpr::Element{.expr = erased, .spread = false};
+      list->elements.push_back(element);
     }
+  }
+  list->type = Type::array(any);
+
+  return list;
+}
+
+void MetadataChecker::writeDesignRecords(ClassDecl *classDecl, ClassField *field,
+                                         FunctionDecl *method, const FunctionDecl *constructor,
+                                         llvm::SMLoc loc) {
+  if (field != nullptr) {
+    this->writeFieldRecord(classDecl, field, loc);
     return;
   }
-  if (method) {
-    const Type *ret = method->sym->getReturnType();
-    if (ret && !ret->isVoid() && !ret->isError()) {
-      this->writeDesignRecord(cls, u"design:returntype", this->designClass(ret, loc), method->name,
-                              loc);
-    }
-    this->writeDesignRecord(cls, u"design:paramtypes", paramTypes(method), method->name, loc);
-    this->writeDesignRecord(
-        cls, u"design:type",
-        this->classValueChecker->classValueAt(this->builtinConstructor("Function"), loc),
-        method->name, loc);
+  if (method != nullptr) {
+    this->writeMethodRecords(classDecl, method, loc);
     return;
   }
-  if (ctor) {
-    this->writeDesignRecord(cls, u"design:paramtypes", paramTypes(ctor), {}, loc);
+  if (constructor != nullptr) {
+    auto *params = this->paramClasses(constructor, loc);
+    this->writeDesignRecord(classDecl, DesignKey::PARAM_TYPES, params, {}, loc);
   }
+}
+
+void MetadataChecker::writeFieldRecord(ClassDecl *classDecl, const ClassField *field,
+                                       llvm::SMLoc loc) {
+  this->classDeclarer->completeClass(classDecl);
+  if (field->resolved == nullptr || field->resolved->isError()) {
+    return;
+  }
+  auto *fieldClass = this->designClass(field->resolved, loc);
+  this->writeDesignRecord(classDecl, DesignKey::TYPE, fieldClass, field->name, loc);
+}
+
+void MetadataChecker::writeMethodRecords(ClassDecl *classDecl, const FunctionDecl *method,
+                                         llvm::SMLoc loc) {
+  const auto *returnType = method->sym->getReturnType();
+  if (returnType != nullptr && !returnType->isVoid() && !returnType->isError()) {
+    auto *returnClass = this->designClass(returnType, loc);
+    this->writeDesignRecord(classDecl, DesignKey::RETURN_TYPE, returnClass, method->name, loc);
+  }
+  auto *params = this->paramClasses(method, loc);
+  this->writeDesignRecord(classDecl, DesignKey::PARAM_TYPES, params, method->name, loc);
+  auto *functionConstructor = this->builtinConstructor(BuiltinConstructor::FUNCTION);
+  auto *functionClass = this->classValueChecker->classValueAt(functionConstructor, loc);
+  this->writeDesignRecord(classDecl, DesignKey::TYPE, functionClass, method->name, loc);
 }
 
 }

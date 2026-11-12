@@ -20,16 +20,16 @@ public:
   std::optional<int64_t> findIntConstant(const Expr *expr) const;
   void rememberBigUnsigned(const Expr *expr, uint64_t value);
   std::optional<uint64_t> findBigUnsigned(const Expr *expr) const;
-  void rememberBigUnsignedVar(const VarSymbol *var, uint64_t value);
-  std::optional<uint64_t> findBigUnsignedVar(const VarSymbol *var) const;
-  void rememberConstVar(const VarSymbol *var, int64_t value);
-  std::optional<int64_t> findConstVar(const VarSymbol *var) const;
-  void rememberConstKey(const VarSymbol *var, std::string key);
-  std::optional<std::string> findConstKey(const VarSymbol *var) const;
-  void rememberConstPrefix(const VarSymbol *var, std::string prefix);
-  std::string findConstPrefix(const VarSymbol *var) const;
-  void rememberConstLiteral(const VarSymbol *var, const Expr *literal);
-  const Expr *findConstLiteral(const VarSymbol *var) const;
+  void rememberBigUnsignedVar(const VarSymbol *variable, uint64_t value);
+  std::optional<uint64_t> findBigUnsignedVar(const VarSymbol *variable) const;
+  void rememberConstVar(const VarSymbol *variable, int64_t value);
+  std::optional<int64_t> findConstVar(const VarSymbol *variable) const;
+  void rememberConstKey(const VarSymbol *variable, std::string key);
+  std::optional<std::string> findConstKey(const VarSymbol *variable) const;
+  void rememberConstPrefix(const VarSymbol *variable, std::string prefix);
+  std::string findConstPrefix(const VarSymbol *variable) const;
+  void rememberConstLiteral(const VarSymbol *variable, const Expr *literal);
+  const Expr *findConstLiteral(const VarSymbol *variable) const;
 
 private:
   llvm::DenseMap<const Expr *, int64_t> intConstants;

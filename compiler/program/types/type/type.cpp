@@ -172,7 +172,17 @@ const Type *Type::boolTy() {
   return &t;
 }
 
-const Type *Type::intTy() { return integer(64, false); }
+const Type *Type::intTy() {
+  return signedInteger(64);
+}
+
+const Type *Type::signedInteger(unsigned bits) {
+  return integer(bits, false);
+}
+
+const Type *Type::unsignedInteger(unsigned bits) {
+  return integer(bits, true);
+}
 
 const Type *Type::integer(unsigned bits, bool isUnsigned) {
   llvm::ArrayRef<const Type *> all = integers();

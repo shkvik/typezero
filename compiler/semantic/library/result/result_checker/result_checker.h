@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/result/result_static_table/result_static_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/result/result_checker/result_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -23,43 +24,67 @@ public:
 
   ResultChecker(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkResultCall(CallExpr *call, NameExpr *name, const Type *expected);
-  Expr *checkResultStatic(CallExpr *call, MemberExpr *member);
-  Expr *checkResultMember(MemberExpr *member);
-  Expr *checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const Type *expected);
-  ResultValueGetsUsed usedValue(const Expr *expr, bool callback = false, llvm::SMLoc at = {});
-  void addResultFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) const;
   Expr *markCallFailed(CallExpr *call);
-  void walkArgsLoosely(CallExpr *call);
+  Expr *checkResultMember(MemberExpr *member);
+  ResultValueGetsUsed usedValue(const Expr *expr);
+  ResultValueGetsUsed usedCallbackValue(const Expr *expr);
+  Expr *checkResultStatic(CallExpr *call, MemberExpr *member);
+  ResultValueGetsUsed usedValue(const Expr *expr, llvm::SMLoc at);
+  Expr *checkResultCall(CallExpr *call, NameExpr *name, const Type *expected);
+  void addResultFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) const;
 
 private:
-  using ResultStaticIsKnown = Result<llvm::StringRef, ResultCheckerStaticMethodError>;
-  using ResultOkErrTypeArgs = Result<const NameExpr *, ResultCheckerOkErrTypeArgsError>;
-
-  static ResultOkErrTypeArgs okErrTypeArgs(const NameExpr *name);
-  static ResultStaticIsKnown staticMethod(const NameExpr *name, llvm::StringRef method);
-
-  struct CombineCall {
-    CallExpr *call = nullptr;
-    std::string what;
-    bool all = false;
+  enum class Half {
+    OK,
+    ERR,
   };
 
-  bool combineArityFits(CallExpr *call, const MemberExpr *member);
-  static bool isPlainList(const ArrayLitExpr *lit);
-  bool holdsValues(const CombineCall &combine, const Type *result, const Expr *at);
-  static const Type *errorsOf(const CombineCall &combine, const Type *error);
-  Expr *checkCombineList(const CombineCall &combine, ArrayLitExpr *lit);
-  static const Type *sameValues(const Type *a, const Type *b);
-  static const Type *commonResult(llvm::ArrayRef<const Type *> results);
-  Expr *checkSameCombine(const CombineCall &combine, ArrayLitExpr *lit, const Type *common);
-  Expr *checkTupleCombine(const CombineCall &combine, ArrayLitExpr *lit,
-                          const std::vector<const Type *> &results);
+  enum class Discarded {
+    BY_STATEMENT,
+    BY_CALLBACK,
+  };
+
+  struct CombineCall {
+    CallExpr *call;
+    std::string what;
+    bool isAll;
+  };
+
+  using ResultStaticIsKnown = Result<ResultStatic, ResultCheckerStaticMethodError>;
+  using ResultOkErrTypeArgs = Result<const Type *, ResultCheckerOkErrTypeArgsError>;
+
+  ResultOkErrTypeArgs writtenResult(const NameExpr *name);
+  ResultValueGetsUsed checkUsed(const Expr *expr, Discarded how, llvm::SMLoc at);
+  ResultStaticIsKnown staticMethod(const NameExpr *name, llvm::StringRef method) const;
+  ResultValueGetsUsed checkPromiseUsed(const Expr *expr, Discarded how, llvm::SMLoc at);
+
+  Expr *looselyChecked(Expr *arg);
+  void walkArgsLoosely(CallExpr *call);
+  Expr *definedHalf(MemberExpr *half);
+  bool isGivingType(const Type *half) const;
+  const Type *halfParam(const Type *half) const;
+  bool isPlainList(const ArrayLitExpr *literal) const;
+  std::string receiverText(const Expr *expr) const;
+  Expr *checkHalfMember(MemberExpr *member, Half half);
   Expr *checkCombineArray(const CombineCall &combine);
-  static const Type *halfParam(const Type *half);
-  static bool givesType(const Type *half);
-  static std::string receiverText(const Expr *expr);
-  static const Expr *unconverted(const Expr *expr);
+  const Type *expectedResult(const Type *expected) const;
+  const Type *halfType(const Type *result, Half half) const;
+  const VarSymbol *testedResult(const CallExpr *test) const;
+  const Type *otherHalfType(const Type *result, Half half) const;
+  const Type *sameValues(const Type *first, const Type *second) const;
+  const Type *joinedValue(const Type *first, const Type *second) const;
+  const Type *commonResult(llvm::ArrayRef<const Type *> results) const;
+  Expr *checkCombineList(const CombineCall &combine, ArrayLitExpr *literal);
+  bool isHoldingValues(const CombineCall &combine, const Type *result) const;
+  const Type *errorsOf(const CombineCall &combine, const Type *error) const;
+  bool hasFittingArgs(CallExpr *call, llvm::SMLoc loc, unsigned min, unsigned max);
+  Expr *checkOkErr(CallExpr *call, NameExpr *name, Half half, const Type *expected);
+  void reportNoValues(const CombineCall &combine, const Type *result, const Expr *at);
+  void splitResultFlows(const VarSymbol *tested, Flow &whenOk, Flow &whenErr) const;
+  const Type *checkHalfValue(CallExpr *call, const NameExpr *name, const Type *wantedHalf);
+  Expr *checkSameCombine(const CombineCall &combine, ArrayLitExpr *literal, const Type *common);
+  Expr *checkTupleCombine(const CombineCall &combine, ArrayLitExpr *literal,
+                          const std::vector<const Type *> &results);
 
   SemanticState &state;
   FieldFacts *fieldFacts = nullptr;

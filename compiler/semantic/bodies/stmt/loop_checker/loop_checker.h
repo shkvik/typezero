@@ -7,6 +7,7 @@
 
 namespace tz {
 
+class FlowChecker;
 class SemanticParts;
 class Scopes;
 class LoopBounds;
@@ -31,29 +32,43 @@ class LoopChecker {
 public:
   LoopChecker(SemanticState &owner, SemanticParts &all);
 
-  void walkWhile(WhileStmt *stmt);
-  void walkDoWhile(DoWhileStmt *stmt);
   void walkFor(ForStmt *stmt);
+  void walkWhile(WhileStmt *stmt);
   void walkForOf(ForOfStmt *stmt);
-  void walkLoopBody(Stmt *body, bool awaits);
+  void walkDoWhile(DoWhileStmt *stmt);
+  void walkAwaitLoopBody(Stmt *body);
 
 private:
-  static bool continuesTo(const Stmt *body, llvm::ArrayRef<llvm::StringRef> labels);
-  static bool continuesLoop(const ContinueStmt *next, const TreePlace &place,
-                            llvm::ArrayRef<llvm::StringRef> labels);
   using ResultIterableType = Result<const Type *, LoopCheckerIterableTypeError>;
-  using ResultBindingTyped = Result<const VarDeclarator *, LoopCheckerBindingTypeError>;
   using ResultBindingShape = Result<const Type *, LoopCheckerBindingShapeError>;
+  using ResultBindingTyped = Result<const VarDeclarator *, LoopCheckerBindingTypeError>;
 
   ResultIterableType iterableType(const Type *type) const;
-  static ResultBindingTyped bindingType(const ForOfStmt *stmt);
-  static ResultBindingShape bindingShape(const ForOfStmt *stmt, const Type *element);
+  ResultBindingTyped bindingType(const ForOfStmt *stmt) const;
+  ResultBindingShape bindingShape(const ForOfStmt *stmt, const Type *element) const;
+
+  void walkBody(Stmt *body);
+  void walkLoopBody(Stmt *body);
+  void walkForStep(ForStmt *stmt);
+  void walkSource(ForOfStmt *stmt);
   void walkIterable(ForOfStmt *stmt);
   bool isListParam(const NameExpr *name);
+  bool isAsyncOnly(const Type *type) const;
   Expr *listElements(const NameExpr *name);
+  bool isConcurrentMap(const Type *type) const;
   const Type *iteratedElement(ForOfStmt *stmt);
+  bool isOptionalIterable(const Type *type) const;
+  void walkScannedBody(Stmt *body, const LoopScan &scan);
+  IntegerRange literalRange(const ArrayLitExpr *literal) const;
   void addLiteralBounds(const ForOfStmt *stmt, const Type *element);
-  IntegerRange literalRange(const ArrayLitExpr *lit) const;
+  const Type *boundElement(const ForOfStmt *stmt, const Type *element);
+  bool isContinuingTo(const Stmt *body, llvm::ArrayRef<llvm::StringRef> labels) const;
+  Flow flowAfter(const LoopScan &scan, const Flow &whenFalse, const Flow &head) const;
+  std::optional<int64_t> elementConstant(const ArrayLitExpr::Element &element) const;
+  bool isContinuingLoop(const ContinueStmt *next, const TreePlace &place,
+                        llvm::ArrayRef<llvm::StringRef> labels) const;
+  void enterStepFlow(const Stmt *body, llvm::ArrayRef<llvm::StringRef> labels, const Flow &head,
+                     const Flow &whenTrue);
 
   SemanticState &state;
   Scopes *scopes = nullptr;
@@ -63,6 +78,7 @@ private:
   JumpChecker *jumpChecker = nullptr;
   LoopScanner *loopScanner = nullptr;
   StmtChecker *stmtChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
   AsyncChecker *asyncChecker = nullptr;
   MatchChecker *matchChecker = nullptr;
   TruthChecker *truthChecker = nullptr;

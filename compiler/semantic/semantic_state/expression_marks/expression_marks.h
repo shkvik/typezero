@@ -44,16 +44,16 @@ public:
   void forgetPairLiteral(const Expr *literal);
   void markSeveralVariants(const CallExpr *call);
   bool hasSeveralVariants(const CallExpr *call) const;
-  void rememberArgumentList(const VarSymbol *var, std::vector<llvm::StringRef> parts);
-  std::optional<std::vector<llvm::StringRef>> findArgumentList(const VarSymbol *var) const;
-  void rememberIterateSymbol(FuncSymbol *fn);
+  void rememberArgumentList(const VarSymbol *variable, std::vector<llvm::StringRef> parts);
+  std::optional<std::vector<llvm::StringRef>> findArgumentList(const VarSymbol *variable) const;
+  void rememberIterateSymbol(FuncSymbol *function);
   FuncSymbol *getIterateSymbol() const;
-  void addUntyped(VarSymbol *var, bool initUndefined);
+  void addUntyped(VarSymbol *variable, bool initUndefined);
   bool hasUntyped() const;
-  void addUntypedAssignment(const VarSymbol *var, const Type *type);
+  void addUntypedAssignment(const VarSymbol *variable, const Type *type);
   std::vector<Untyped> getUntyped() const;
-  void forgetUntyped(const VarSymbol *var);
-  void addResultVar(VarSymbol *var);
+  void forgetUntyped(const VarSymbol *variable);
+  void addResultVar(VarSymbol *variable);
   std::vector<VarSymbol *> getResultVars() const;
   void forgetResultVars();
 

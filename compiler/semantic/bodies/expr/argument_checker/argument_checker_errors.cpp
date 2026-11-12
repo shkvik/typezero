@@ -5,14 +5,14 @@
 namespace tz {
 
 std::string ErrorTextArity::count(unsigned min, unsigned max, size_t got) {
-  std::string expected = ErrorTextArity::wanted(min, max);
+  auto expected = ErrorTextArity::wanted(min, max);
 
   return (llvm::Twine("expected ") + expected + ", but got " + llvm::Twine(got)).str();
 }
 
 std::string ErrorTextArity::tagged(unsigned min, unsigned max, size_t got) {
-  std::string expected = ErrorTextArity::wanted(min, max);
-  std::string values;
+  auto expected = ErrorTextArity::wanted(min, max);
+  auto values = std::string();
   if (got == 2) {
     values = " and 1 value";
   } else if (got != 1) {

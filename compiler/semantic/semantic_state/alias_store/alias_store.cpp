@@ -62,8 +62,9 @@ TypeAliasDecl *AliasStore::findBuiltinAlias(llvm::StringRef name) const {
   return this->builtinAliases.lookup(name);
 }
 
-void AliasStore::rememberDescriptorOrigin(const Type *type, const Type *args, const Type *ret) {
-  this->descriptorOrigins.try_emplace(type, DescriptorOrigin{args, ret});
+void AliasStore::rememberDescriptorOrigin(const Type *type, const Type *args,
+                                          const Type *returnType) {
+  this->descriptorOrigins.try_emplace(type, DescriptorOrigin{args, returnType});
 }
 
 const DescriptorOrigin *AliasStore::findDescriptorOrigin(const Type *type) const {

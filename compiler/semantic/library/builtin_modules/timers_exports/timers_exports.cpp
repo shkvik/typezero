@@ -8,7 +8,7 @@ TimersExports::ResultExportFound TimersExports::timersExport(llvm::StringRef nam
       name == "scheduler") {
     return ok(name);
   }
-  std::string message = ErrorTextTimersExport::none(path, name);
+  auto message = ErrorTextTimersExport::none(path, name);
 
   return err(ModuleExportFoundError{
       .code = ModuleExportFoundErrorCode::NO_EXPORT,

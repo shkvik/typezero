@@ -69,7 +69,7 @@ using ReferenceTask = Union<SameReferenceGoal, ObjectsShareGoal, WidensGoal, Ref
                             FitsWideGoal, WideMemberChoice>;
 
 struct ReferenceStep {
-  bool possible;
+  bool isPossible;
   std::vector<ReferenceTask> needs;
 };
 
@@ -77,9 +77,9 @@ class WideningRelations {
 public:
   explicit WideningRelations(SemanticState &owner);
 
-  bool widensWrites(const Type *from, const Type *to);
-  static bool sameReference(const Type *from, const Type *to);
-  static bool referenceHolds(ReferenceTask goal);
+  bool isWideningWrites(const Type *from, const Type *to);
+  static bool isSameReference(const Type *from, const Type *to);
+  static bool isReferenceHolding(ReferenceTask goal);
   static std::vector<NarrowedPart> narrowingsOf(const Type *from, const Type *to);
 
 private:
@@ -93,15 +93,22 @@ private:
                              TypePairs &seen, std::vector<NarrowingStep> &steps);
   static void pushFieldNarrowings(const Type *from, const Type *to, int depth,
                                   std::vector<NarrowingStep> &steps);
-  static ReferenceStep referenceStep(const ReferenceTask &task);
-  static ReferenceStep sameStep(const Type *from, const Type *to);
-  static ReferenceStep membersStep(const Type *own, const Type *wide);
-  static ReferenceStep objectsStep(const Type *from, const Type *to);
-  static bool sameShapeFields(const Type *from, const Type *to);
-  static ReferenceStep widensStep(const Type *from, const Type *to);
-  static ReferenceStep fitsStep(const Type *own, const Type *wide);
-  static ReferenceStep fitsWideStep(const Type *own, const Type *wide);
+  static void addFieldSteps(const Type *owner, const Field &own, const Field &wide, int depth,
+                            std::vector<NarrowingStep> &steps);
+  static ReferenceStep failedStep();
+  static bool isReference(const Type *type);
+  static bool isSpecialShape(const Type *type);
+  static bool areObjects(const Type *from, const Type *to);
+  static bool isSameShape(const Type *from, const Type *to);
+  static ReferenceStep widensStep(const WidensGoal &goal);
+  static ReferenceStep fitsStep(const ReferenceFitsGoal &goal);
+  static ReferenceStep fitsWideStep(const FitsWideGoal &goal);
+  static ReferenceStep sameStep(const SameReferenceGoal &goal);
+  static ReferenceStep objectsStep(const ObjectsShareGoal &goal);
   static ReferenceStep wideMemberTrial(WideMemberChoice choice);
+  static ReferenceStep referenceStep(const ReferenceTask &task);
+  static ReferenceStep plannedStep(std::vector<ReferenceTask> needs);
+  static ReferenceStep membersStep(const Type *own, const Type *wide);
   static bool retryWideMember(std::vector<ReferenceTask> &tasks);
 
   SemanticState &state;

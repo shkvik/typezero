@@ -25,6 +25,7 @@ SwitchChecker::SwitchChecker(SemanticState &owner, SemanticParts &all)
   this->exprChecker = &all.exprChecker;
   this->jumpChecker = &all.jumpChecker;
   this->stmtChecker = &all.stmtChecker;
+  this->flowChecker = &all.flowChecker;
   this->typeDeclarer = &all.typeDeclarer;
   this->unionChecker = &all.unionChecker;
   this->binaryChecker = &all.binaryChecker;
@@ -32,18 +33,18 @@ SwitchChecker::SwitchChecker(SemanticState &owner, SemanticParts &all)
   this->conditionFacts = &all.conditionFacts;
 }
 
-bool SwitchChecker::isConstantTest(const Expr *test) {
-  if (auto *unary = dyn_cast<UnaryExpr>(test); unary && unary->op == UnaryOp::Neg) {
-    test = unary->operand;
-  }
+bool SwitchChecker::isConstantTest(const Expr *test) const {
+  auto *unary = dyn_cast<UnaryExpr>(test);
+  bool isNegated = unary != nullptr && unary->op == UnaryOp::Neg;
+  const Expr *value = isNegated ? unary->operand : test;
 
-  return isa<IntLitExpr>(test) || isa<FloatLitExpr>(test) || isa<StringLitExpr>(test) ||
-         isa<BoolLitExpr>(test) || isa<UndefinedExpr>(test);
+  return isa<IntLitExpr>(value) || isa<FloatLitExpr>(value) || isa<StringLitExpr>(value) ||
+         isa<BoolLitExpr>(value) || isa<UndefinedExpr>(value);
 }
 
-SwitchChecker::ResultValueComparable SwitchChecker::valueType(const Type *type) {
+SwitchChecker::ResultValueComparable SwitchChecker::checkValueType(const Type *type) const {
   if (type->isVoid()) {
-    std::string message = ErrorTextValueType::isVoid();
+    auto message = ErrorTextValueType::isVoid();
 
     return err(SwitchCheckerValueTypeError{
         .code = SwitchCheckerValueTypeErrorCode::VOID_VALUE,
@@ -54,20 +55,20 @@ SwitchChecker::ResultValueComparable SwitchChecker::valueType(const Type *type) 
   return ok(type);
 }
 
-SwitchChecker::ResultTestsComparable SwitchChecker::caseType(const Type *type,
-                                                             const Type *testType) {
-  const Type *common = TypeRelations::comparisonType(type, testType);
+SwitchChecker::ResultTestsComparable SwitchChecker::checkCaseType(const Type *type,
+                                                                  const Type *testType) const {
+  const auto *common = this->typeRelations->comparisonType(type, testType);
   bool hasResults = type->holdsResults() || testType->holdsResults();
-  if (!common && hasResults) {
-    std::string message = ErrorTextCaseType::results(testType->name(), type->name());
+  if (common == nullptr && hasResults) {
+    auto message = ErrorTextCaseType::results(testType->name(), type->name());
 
     return err(SwitchCheckerCaseTypeError{
         .code = SwitchCheckerCaseTypeErrorCode::RESULTS_COMPARED,
         .message = message,
     });
   }
-  if (!common) {
-    std::string message = ErrorTextCaseType::mismatch(testType->name(), type->name());
+  if (common == nullptr) {
+    auto message = ErrorTextCaseType::mismatch(testType->name(), type->name());
 
     return err(SwitchCheckerCaseTypeError{
         .code = SwitchCheckerCaseTypeErrorCode::NOT_COMPARABLE,
@@ -79,60 +80,77 @@ SwitchChecker::ResultTestsComparable SwitchChecker::caseType(const Type *type,
 }
 
 SwitchChecker::ResultCasesAllHandled
-SwitchChecker::casesHandled(const SwitchStmt *stmt, llvm::ArrayRef<const Type *> left) {
-  if (!left.empty()) {
-    std::string names;
-    for (size_t i = 0; i < left.size(); ++i) {
-      names += (i == 0 ? "" : i + 1 == left.size() ? " and " : ", ") + left[i]->name().str();
-    }
-    std::string message = ErrorTextCasesLeft::unhandled(names, left.front()->name());
-
-    return err(SwitchCheckerCasesHandledError{
-        .code = SwitchCheckerCasesHandledErrorCode::CASES_LEFT,
-        .message = message,
-    });
+SwitchChecker::checkCasesHandled(const SwitchStmt *stmt, llvm::ArrayRef<const Type *> left) const {
+  if (left.empty()) {
+    return ok(stmt);
   }
 
-  return ok(stmt);
+  auto names = this->caseNames(left);
+  auto message = ErrorTextCasesLeft::unhandled(names, left.front()->name());
+
+  return err(SwitchCheckerCasesHandledError{
+      .code = SwitchCheckerCasesHandledErrorCode::CASES_LEFT,
+      .message = message,
+  });
+}
+
+std::string SwitchChecker::caseNames(llvm::ArrayRef<const Type *> left) const {
+  auto names = std::string();
+  for (size_t index = 0; index < left.size(); ++index) {
+    names += this->nameSeparator(index, left.size());
+    names += left[index]->name().str();
+  }
+
+  return names;
+}
+
+const char *SwitchChecker::nameSeparator(size_t index, size_t count) const {
+  if (index == 0) {
+    return "";
+  }
+  if (index + 1 == count) {
+    return " and ";
+  }
+
+  return ", ";
 }
 
 void SwitchChecker::walkSwitch(SwitchStmt *stmt) {
   stmt->discriminant = this->exprChecker->checkExpr(stmt->discriminant);
-  const Type *type = stmt->discriminant->type;
-  ResultValueComparable comparable = SwitchChecker::valueType(type);
+  auto comparable = this->checkValueType(stmt->discriminant->type);
   if (comparable.isErr()) {
     this->state.getDiagnostics().error(stmt->discriminant->loc(), comparable.error().message);
-    type = Type::error();
   }
+  const Type *type = comparable.isOk() ? comparable.value() : Type::error();
   this->state.getScopeStack().openScope();
-  std::vector<Stmt *> all = SwitchChecker::caseStatements(stmt);
+  auto all = this->caseStatements(stmt);
   this->typeDeclarer->declareTypes(all);
-  SwitchFlows flows{
+  auto flows = SwitchFlows{
       .type = type,
-      .hint = SwitchChecker::switchHint(type),
+      .hint = this->switchHint(type),
       .tests = this->state.getFlowState().getFlow(),
       .matched = std::vector<Flow>(stmt->cases.size()),
   };
-  for (size_t i = 0; i < stmt->cases.size(); ++i) {
-    this->walkCaseTest(stmt, i, flows);
+  for (size_t index = 0; index < stmt->cases.size(); ++index) {
+    this->walkCaseTest(stmt, index, flows);
   }
   this->walkExhaustive(stmt, flows);
-  Flow exit = this->caseBodiesExit(stmt, flows, all);
+  auto exit = this->caseBodiesExit(stmt, flows, all);
   this->forgetCaseVars(stmt);
   this->scopes->closeScope();
   this->state.getFlowState().replaceFlow(exit);
 }
 
-std::vector<Stmt *> SwitchChecker::caseStatements(const SwitchStmt *stmt) {
-  std::vector<Stmt *> all;
-  for (const SwitchCase &c : stmt->cases) {
-    all.insert(all.end(), c.body.begin(), c.body.end());
+std::vector<Stmt *> SwitchChecker::caseStatements(const SwitchStmt *stmt) const {
+  auto all = std::vector<Stmt *>();
+  for (const SwitchCase &switchCase : stmt->cases) {
+    all.insert(all.end(), switchCase.body.begin(), switchCase.body.end());
   }
 
   return all;
 }
 
-const Type *SwitchChecker::switchHint(const Type *type) {
+const Type *SwitchChecker::switchHint(const Type *type) const {
   const Type *base = type->nonOptional();
   if (base->isNumeric() || base->isDecimal() || base->isJson()) {
     return base;
@@ -144,60 +162,59 @@ const Type *SwitchChecker::switchHint(const Type *type) {
   return nullptr;
 }
 
-void SwitchChecker::walkCaseTest(SwitchStmt *stmt, size_t i, SwitchFlows &flows) {
-  SwitchCase &c = stmt->cases[i];
-  if (!c.test) {
+void SwitchChecker::walkCaseTest(SwitchStmt *stmt, size_t index, SwitchFlows &flows) {
+  SwitchCase &switchCase = stmt->cases[index];
+  if (switchCase.test == nullptr) {
     return;
   }
   this->state.getFlowState().replaceFlow(flows.tests);
-  c.test = this->exprChecker->checkExpr(c.test, flows.hint);
-  this->walkTypeOfCase(stmt, c);
-  Flow whenTrue = this->state.getFlowState().getFlow();
-  Flow whenFalse = this->state.getFlowState().getFlow();
-  this->addCaseFacts(stmt, c, flows.type, whenTrue, whenFalse);
-  flows.matched[i] = whenTrue;
+  switchCase.test = this->exprChecker->checkExpr(switchCase.test, flows.hint);
+  this->walkTypeOfCase(stmt, switchCase);
+  auto whenTrue = this->state.getFlowState().getFlow();
+  auto whenFalse = this->state.getFlowState().getFlow();
+  this->addCaseFacts(stmt, switchCase, flows.type, whenTrue, whenFalse);
+  flows.matched[index] = whenTrue;
   flows.tests = whenFalse;
 }
 
-void SwitchChecker::walkTypeOfCase(const SwitchStmt *stmt, const SwitchCase &c) {
+void SwitchChecker::walkTypeOfCase(const SwitchStmt *stmt, const SwitchCase &switchCase) {
   auto *typeOf = dyn_cast<UnaryExpr>(stmt->discriminant);
   if (typeOf == nullptr || typeOf->op != UnaryOp::TypeOf) {
     return;
   }
-  auto *name = dyn_cast<StringLitExpr>(c.test);
+  auto *name = dyn_cast<StringLitExpr>(switchCase.test);
   if (name == nullptr) {
     return;
   }
-  BinaryChecker::ResultTypeOfNameKnown known =
-      this->binaryChecker->checkTypeOfName(typeOf->operand, name);
+  auto known = this->binaryChecker->checkTypeOfName(typeOf->operand, name);
   if (known.isErr() &&
       known.error().code != BinaryCheckerCheckTypeOfNameErrorCode::ALREADY_REPORTED) {
-    this->state.getDiagnostics().error(c.test->loc(), known.error().message);
+    this->state.getDiagnostics().error(switchCase.test->loc(), known.error().message);
   }
 }
 
-void SwitchChecker::addCaseFacts(SwitchStmt *stmt, SwitchCase &c, const Type *type, Flow &whenTrue,
-                                 Flow &whenFalse) {
-  const Type *testType = c.test->type;
+void SwitchChecker::addCaseFacts(SwitchStmt *stmt, SwitchCase &switchCase, const Type *type,
+                                 Flow &whenTrue, Flow &whenFalse) {
+  const Type *testType = switchCase.test->type;
   bool isGeneric = type->nonOptional()->isParam() || testType->nonOptional()->isParam();
   bool isComparable =
       !isGeneric && !type->isError() && !testType->isError() && !testType->isUndefined();
   if (isComparable) {
-    return this->addComparedFacts(stmt, c, type, whenTrue, whenFalse);
+    return this->addComparedFacts(stmt, switchCase, type, whenTrue, whenFalse);
   }
-  if (!testType->isUndefined() || !isa<UndefinedExpr>(c.test)) {
+  if (!testType->isUndefined() || !isa<UndefinedExpr>(switchCase.test)) {
     return;
   }
-  BinaryExpr equal(c.loc, BinaryOp::Eq, stmt->discriminant, c.test);
+  BinaryExpr equal(switchCase.loc, BinaryOp::Eq, stmt->discriminant, switchCase.test);
   equal.type = Type::boolTy();
   this->conditionFacts->addConditionFacts(&equal, whenTrue, whenFalse);
 }
 
-void SwitchChecker::addComparedFacts(SwitchStmt *stmt, SwitchCase &c, const Type *type,
+void SwitchChecker::addComparedFacts(SwitchStmt *stmt, SwitchCase &switchCase, const Type *type,
                                      Flow &whenTrue, Flow &whenFalse) {
-  ResultTestsComparable compared = SwitchChecker::caseType(type, c.test->type);
+  auto compared = this->checkCaseType(type, switchCase.test->type);
   if (compared.isErr()) {
-    this->state.getDiagnostics().error(c.test->loc(), compared.error().message);
+    this->state.getDiagnostics().error(switchCase.test->loc(), compared.error().message);
     return;
   }
   const Type *common = compared.value();
@@ -208,24 +225,24 @@ void SwitchChecker::addComparedFacts(SwitchStmt *stmt, SwitchCase &c, const Type
     this->state.getInventoryStore().markComparesFunctions();
   }
   bool isConstant =
-      SwitchChecker::isConstantTest(c.test) && !SwitchChecker::isConstantTest(stmt->discriminant);
-  c.test = this->typeRelations->convert(c.test, common);
-  c.compareType = common;
+      this->isConstantTest(switchCase.test) && !this->isConstantTest(stmt->discriminant);
+  switchCase.test = this->typeRelations->convert(switchCase.test, common);
+  switchCase.compareType = common;
   if (!isConstant) {
     return;
   }
-  Expr *discriminant = this->typeRelations->convert(stmt->discriminant, common);
-  BinaryExpr equal(c.loc, BinaryOp::Eq, discriminant, c.test);
+  auto *discriminant = this->typeRelations->convert(stmt->discriminant, common);
+  BinaryExpr equal(switchCase.loc, BinaryOp::Eq, discriminant, switchCase.test);
   equal.type = Type::boolTy();
   this->conditionFacts->addConditionFacts(&equal, whenTrue, whenFalse);
 }
 
 void SwitchChecker::walkExhaustive(SwitchStmt *stmt, SwitchFlows &flows) {
-  std::optional<std::vector<const Type *>> left = this->unionChecker->unhandledCases(stmt);
+  auto left = this->unionChecker->unhandledCases(stmt);
   if (!left.has_value()) {
     return;
   }
-  ResultCasesAllHandled handled = SwitchChecker::casesHandled(stmt, *left);
+  auto handled = this->checkCasesHandled(stmt, *left);
   if (handled.isErr()) {
     this->state.getDiagnostics().error(stmt->discriminant->loc(), handled.error().message);
     return;
@@ -238,54 +255,73 @@ Flow SwitchChecker::caseBodiesExit(SwitchStmt *stmt, const SwitchFlows &flows,
                                    const std::vector<Stmt *> &all) {
   this->jumpChecker->pushTarget(JumpTarget::Kind::Switch);
   size_t position = 0;
-  Flow fallthrough;
+  auto fallthrough = Flow();
   fallthrough.unreachable = true;
   bool hasDefault = false;
-  for (size_t i = 0; i < stmt->cases.size(); ++i) {
-    SwitchCase &c = stmt->cases[i];
-    hasDefault |= !c.test;
-    const Flow &entry = c.test ? flows.matched[i] : flows.tests;
-    this->state.getFlowState().replaceFlow(FlowChecker::join(fallthrough, entry));
-    for (Stmt *s : c.body) {
-      this->state.getBlockPosition().rememberBlockPosition(all, position++);
-      this->stmtChecker->walkStmt(s);
-    }
+  for (size_t index = 0; index < stmt->cases.size(); ++index) {
+    SwitchCase &switchCase = stmt->cases[index];
+    bool isDefault = switchCase.test == nullptr;
+    const Flow &entry = isDefault ? flows.tests : flows.matched[index];
+    hasDefault = hasDefault || isDefault;
+    auto start = this->flowChecker->join(fallthrough, entry);
+    this->state.getFlowState().replaceFlow(start);
+    position = this->walkCaseBody(switchCase, all, position);
     fallthrough = this->state.getFlowState().getFlow();
-    this->rememberCaseVars(c);
+    this->rememberCaseVars(switchCase);
   }
-  Flow exit = fallthrough;
-  if (!hasDefault) {
-    exit = FlowChecker::join(exit, flows.tests);
-  }
+  auto exit = hasDefault ? fallthrough : this->flowChecker->join(fallthrough, flows.tests);
+  auto breaks = this->state.getBlockPosition().leaveJumpTarget().breaks;
 
-  return FlowChecker::join(exit, this->state.getBlockPosition().leaveJumpTarget().breaks);
+  return this->flowChecker->join(exit, breaks);
 }
 
-void SwitchChecker::rememberCaseVars(const SwitchCase &c) {
-  for (Stmt *s : c.body) {
-    auto *decl = dyn_cast<VarDeclStmt>(s);
-    if (decl == nullptr) {
-      continue;
+size_t SwitchChecker::walkCaseBody(const SwitchCase &switchCase, const std::vector<Stmt *> &all,
+                                   size_t position) {
+  size_t next = position;
+  for (Stmt *statement : switchCase.body) {
+    this->state.getBlockPosition().rememberBlockPosition(all, next);
+    next += 1;
+    this->stmtChecker->walkStmt(statement);
+  }
+
+  return next;
+}
+
+void SwitchChecker::rememberCaseVars(const SwitchCase &switchCase) {
+  for (Stmt *statement : switchCase.body) {
+    auto *varDecl = dyn_cast<VarDeclStmt>(statement);
+    if (varDecl != nullptr) {
+      this->rememberOtherCaseVars(varDecl);
     }
-    for (const VarDeclarator &d : decl->decls) {
-      if (d.sym != nullptr) {
-        this->state.getBlockPosition().addOtherCaseVar(d.sym);
-      }
+  }
+}
+
+void SwitchChecker::rememberOtherCaseVars(const VarDeclStmt *varDecl) {
+  for (const VarDeclarator &declarator : varDecl->decls) {
+    if (declarator.sym != nullptr) {
+      this->state.getBlockPosition().addOtherCaseVar(declarator.sym);
     }
   }
 }
 
 void SwitchChecker::forgetCaseVars(const SwitchStmt *stmt) {
-  for (const SwitchCase &c : stmt->cases) {
-    for (Stmt *s : c.body) {
-      auto *decl = dyn_cast<VarDeclStmt>(s);
-      if (decl == nullptr) {
-        continue;
-      }
-      for (const VarDeclarator &d : decl->decls) {
-        this->state.getBlockPosition().forgetOtherCaseVar(d.sym);
-      }
+  for (const SwitchCase &switchCase : stmt->cases) {
+    this->forgetCaseBodyVars(switchCase);
+  }
+}
+
+void SwitchChecker::forgetCaseBodyVars(const SwitchCase &switchCase) {
+  for (Stmt *statement : switchCase.body) {
+    auto *varDecl = dyn_cast<VarDeclStmt>(statement);
+    if (varDecl != nullptr) {
+      this->forgetOtherCaseVars(varDecl);
     }
+  }
+}
+
+void SwitchChecker::forgetOtherCaseVars(const VarDeclStmt *varDecl) {
+  for (const VarDeclarator &declarator : varDecl->decls) {
+    this->state.getBlockPosition().forgetOtherCaseVar(declarator.sym);
   }
 }
 

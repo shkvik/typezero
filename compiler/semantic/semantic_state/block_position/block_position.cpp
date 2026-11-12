@@ -79,16 +79,16 @@ bool BlockPosition::hasLabel(llvm::StringRef label) const {
   return false;
 }
 
-void BlockPosition::addOtherCaseVar(const VarSymbol *var) {
-  this->otherCaseVars.insert(var);
+void BlockPosition::addOtherCaseVar(const VarSymbol *variable) {
+  this->otherCaseVars.insert(variable);
 }
 
-void BlockPosition::forgetOtherCaseVar(const VarSymbol *var) {
-  this->otherCaseVars.erase(var);
+void BlockPosition::forgetOtherCaseVar(const VarSymbol *variable) {
+  this->otherCaseVars.erase(variable);
 }
 
-bool BlockPosition::isOtherCaseVar(const VarSymbol *var) const {
-  return this->otherCaseVars.contains(var);
+bool BlockPosition::isOtherCaseVar(const VarSymbol *variable) const {
+  return this->otherCaseVars.contains(variable);
 }
 
 void BlockPosition::forgetOtherCaseVars() {

@@ -17,10 +17,10 @@ llvm::StringRef SharedHelpers::withoutParens(llvm::StringRef text) {
          text.find_first_of("\"'`") == llvm::StringRef::npos) {
     int depth = 0;
     size_t close = 0;
-    for (size_t i = 0; i < text.size() && !close; ++i) {
-      depth += text[i] == '(' ? 1 : text[i] == ')' ? -1 : 0;
+    for (size_t index = 0; index < text.size() && !close; ++index) {
+      depth += text[index] == '(' ? 1 : text[index] == ')' ? -1 : 0;
       if (depth == 0) {
-        close = i;
+        close = index;
       }
     }
     if (close != text.size() - 1) {
@@ -32,12 +32,26 @@ llvm::StringRef SharedHelpers::withoutParens(llvm::StringRef text) {
   return text;
 }
 
+std::pair<llvm::StringRef, llvm::StringRef>
+SharedHelpers::operandTexts(llvm::StringRef source, llvm::SMLoc op, size_t length) {
+  const char *at = op.getPointer();
+  if (source.empty() || at < source.begin() || at + length > source.end()) {
+    return {};
+  }
+  auto before = llvm::StringRef(source.begin(), static_cast<size_t>(at - source.begin()));
+  auto after = llvm::StringRef(at + length, static_cast<size_t>(source.end() - at - length));
+
+  return {before.trim(), after.trim()};
+}
+
 const Type *SharedHelpers::literalType(const Expr *value) {
-  if (auto *unary = dyn_cast<UnaryExpr>(value); unary && unary->op == UnaryOp::Neg) {
+  auto *unary = dyn_cast<UnaryExpr>(value);
+  if (unary != nullptr && unary->op == UnaryOp::Neg) {
     value = unary->operand;
   }
-  if (auto *lit = dyn_cast<IntLitExpr>(value)) {
-    return lit->value < (uint64_t(1) << 63) ? Type::intTy() : Type::doubleTy();
+  auto *literal = dyn_cast<IntLitExpr>(value);
+  if (literal != nullptr) {
+    return literal->value < (uint64_t(1) << 63) ? Type::intTy() : Type::doubleTy();
   }
   if (isa<FloatLitExpr>(value)) {
     return Type::doubleTy();

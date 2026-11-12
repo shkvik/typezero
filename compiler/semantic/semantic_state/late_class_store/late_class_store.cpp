@@ -2,8 +2,8 @@
 
 namespace tz {
 
-void LateClassStore::addLateClass(ClassDecl *cls) {
-  this->lateClasses.push_back(cls);
+void LateClassStore::addLateClass(ClassDecl *classDecl) {
+  this->lateClasses.push_back(classDecl);
 }
 
 bool LateClassStore::hasUncheckedLateClasses() const {
@@ -11,10 +11,10 @@ bool LateClassStore::hasUncheckedLateClasses() const {
 }
 
 ClassDecl *LateClassStore::takeUncheckedLateClass() {
-  ClassDecl *cls = this->lateClasses[this->checkedCount];
+  ClassDecl *classDecl = this->lateClasses[this->checkedCount];
   this->checkedCount += 1;
 
-  return cls;
+  return classDecl;
 }
 
 std::vector<ClassDecl *> LateClassStore::getUncheckedLateClasses() const {
@@ -24,8 +24,8 @@ std::vector<ClassDecl *> LateClassStore::getUncheckedLateClasses() const {
   return unchecked;
 }
 
-void LateClassStore::enterDeclaringClass(ClassDecl *cls) {
-  this->declaringClasses.push_back(cls);
+void LateClassStore::enterDeclaringClass(ClassDecl *classDecl) {
+  this->declaringClasses.push_back(classDecl);
 }
 
 void LateClassStore::leaveDeclaringClass() {
@@ -36,12 +36,12 @@ ClassDecl *LateClassStore::getDeclaringClass() const {
   return this->declaringClasses.empty() ? nullptr : this->declaringClasses.back();
 }
 
-void LateClassStore::rememberLateOwner(const ClassDecl *cls, InstanceRecord *owner) {
-  this->lateOwners[cls] = owner;
+void LateClassStore::rememberLateOwner(const ClassDecl *classDecl, InstanceRecord *owner) {
+  this->lateOwners[classDecl] = owner;
 }
 
-InstanceRecord *LateClassStore::findLateOwner(const ClassDecl *cls) const {
-  return this->lateOwners.lookup(cls);
+InstanceRecord *LateClassStore::findLateOwner(const ClassDecl *classDecl) const {
+  return this->lateOwners.lookup(classDecl);
 }
 
 void LateClassStore::addLateErrors(InstanceRecord *owner, const std::vector<Diagnostic> &found) {
@@ -54,7 +54,7 @@ void LateClassStore::addLateErrors(InstanceRecord *owner, const std::vector<Diag
 }
 
 std::vector<LateError> LateClassStore::getFirstLateErrors() const {
-  std::vector<LateError> errors;
+  auto errors = std::vector<LateError>();
   for (const auto &[instance, captured] : this->lateErrors) {
     if (!captured.empty()) {
       errors.push_back({instance, captured.front()});
@@ -76,16 +76,16 @@ bool LateClassStore::isLateMethodName(llvm::StringRef name) const {
   return this->lateMethodNames.contains(name);
 }
 
-void LateClassStore::rememberClassExpr(const FunctionDecl *fn, bool has) {
-  this->classExprHolders[fn] = has;
+void LateClassStore::rememberClassExpr(const FunctionDecl *functionDecl, bool has) {
+  this->classExprHolders[functionDecl] = has;
 }
 
-bool LateClassStore::isClassExprKnown(const FunctionDecl *fn) const {
-  return this->classExprHolders.count(fn) > 0;
+bool LateClassStore::isClassExprKnown(const FunctionDecl *functionDecl) const {
+  return this->classExprHolders.count(functionDecl) > 0;
 }
 
-bool LateClassStore::hasClassExpr(const FunctionDecl *fn) const {
-  return this->classExprHolders.lookup(fn);
+bool LateClassStore::hasClassExpr(const FunctionDecl *functionDecl) const {
+  return this->classExprHolders.lookup(functionDecl);
 }
 
 }

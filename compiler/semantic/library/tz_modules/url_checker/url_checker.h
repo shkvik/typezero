@@ -15,9 +15,9 @@ public:
 
   void walkUrlNew(NewExpr *expr);
   bool checkUrlSetter(MemberExpr *member, const CallExpr *call);
-  static bool validUrlText(llvm::StringRef text, bool relative);
-  static std::optional<std::string> literalText(const Expr *expr);
-  static const Expr *unconverted(const Expr *expr);
+  bool validUrlText(llvm::StringRef text, bool relative) const;
+  std::optional<std::string> literalText(const Expr *expr) const;
+  const Expr *unconverted(const Expr *expr) const;
   bool knownAbsolute(const Expr *expr) const;
 
 private:
@@ -28,11 +28,11 @@ private:
 
   ResultKnownBaseUrl knownBase(const Expr *base) const;
   ResultInputIsKnown knownInput(const Expr *input, bool based) const;
-  static ResultUrlTextValid urlText(llvm::StringRef text, bool based);
-  static ResultSettableText setterValue(llvm::StringRef name, llvm::StringRef value);
-  static bool validHost(llvm::StringRef host);
+  ResultUrlTextValid urlText(llvm::StringRef text, bool based) const;
+  ResultSettableText setterValue(llvm::StringRef name, llvm::StringRef value) const;
+  bool validHost(llvm::StringRef host) const;
 
-  static bool isLibraryClass(const Type *type, llvm::StringRef name);
+  bool isLibraryClass(const Type *type, llvm::StringRef name) const;
 
   SemanticState &state;
   LibraryCalls *libraryCalls = nullptr;

@@ -24,8 +24,8 @@ public:
 private:
   using ResultGroupIndex = Result<int64_t, MatchCheckerGroupIndexError>;
 
-  static ResultGroupIndex groupIndex(int64_t index, int groups);
-  static const Type *itemsType();
+  ResultGroupIndex groupIndex(int64_t index, int groups) const;
+  const Type *itemsType() const;
   Expr *itemsMember(Expr *match);
   Expr *optionalItems(Expr *match, Expr *items);
 

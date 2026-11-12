@@ -16,7 +16,7 @@ NamesInFunctions::NamesInFunctions(SemanticState &owner, SemanticParts &all)
 }
 
 void NamesInFunctions::rememberNames(SourceFile &program) {
-  llvm::StringSet<> names;
+  auto names = llvm::StringSet<>();
   for (Stmt *item : program.items) {
     AstWalker::collectNames(item, names, isa<FunctionDecl>(item));
   }

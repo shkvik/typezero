@@ -7,6 +7,7 @@
 
 namespace tz {
 
+class BytesChecker;
 class SemanticParts;
 class Scopes;
 class CallChecker;
@@ -19,31 +20,32 @@ public:
 
   InstanceOfChecker(SemanticState &owner, SemanticParts &all);
 
-  ResultInstanceTested checkInstanceOf(BinaryExpr *bin);
+  ResultInstanceTested checkInstanceOf(BinaryExpr *binary);
 
 private:
   using ResultBytesKindTested = Result<Expr *, InstanceOfCheckerCheckBytesInstanceOfError>;
 
-  ResultBytesKindTested checkBytesInstanceOf(BinaryExpr *bin, const Type *bytes);
+  ResultBytesKindTested checkBytesInstanceOf(BinaryExpr *binary, const Type *bytes);
   std::optional<GlobalName> collectionGlobal(const Expr *rhs) const;
-  static bool isCollection(GlobalName global, const Type *t);
-  static ResultInstanceTested checkCollectionInstanceOf(BinaryExpr *bin, GlobalName global);
-  static ResultInstanceTested checkCollectionUnion(BinaryExpr *bin, GlobalName global);
+  bool isCollection(GlobalName global, const Type *type) const;
+  ResultInstanceTested checkCollectionInstanceOf(BinaryExpr *binary, GlobalName global) const;
+  ResultInstanceTested checkCollectionUnion(BinaryExpr *binary, GlobalName global) const;
   const Type *namedBytesType(const NameExpr *name) const;
-  static ClassDecl *knownClassOf(const Type *rhs);
-  static ResultInstanceTested checkUnknownRight(BinaryExpr *bin);
-  static ResultInstanceTested checkGenericInstanceOf(BinaryExpr *bin, const ClassDecl *cls);
-  static ResultInstanceTested
-  genericMismatch(const Type *base, llvm::ArrayRef<const Type *> members, const ClassDecl *cls);
-  static bool mayHoldClass(const Type *base, const ClassDecl *cls);
-  static ResultInstanceTested checkClassInstanceOf(BinaryExpr *bin, const ClassDecl *cls);
-  static ResultInstanceTested checkRelatedClass(BinaryExpr *bin, const Type *base,
-                                                const ClassDecl *cls);
+  ClassDecl *knownClassOf(const Type *rhs) const;
+  ResultInstanceTested checkUnknownRight(BinaryExpr *binary) const;
+  ResultInstanceTested checkGenericInstanceOf(BinaryExpr *binary, const ClassDecl *classDecl) const;
+  ResultInstanceTested genericMismatch(const Type *base, llvm::ArrayRef<const Type *> members,
+                                       const ClassDecl *classDecl) const;
+  bool mayHoldClass(const Type *base, const ClassDecl *classDecl) const;
+  ResultInstanceTested checkClassInstanceOf(BinaryExpr *binary, const ClassDecl *classDecl) const;
+  ResultInstanceTested checkRelatedClass(BinaryExpr *binary, const Type *base,
+                                         const ClassDecl *classDecl) const;
 
   SemanticState &state;
   Scopes *scopes = nullptr;
   CallChecker *callChecker = nullptr;
   ExprChecker *exprChecker = nullptr;
+  BytesChecker *bytesChecker = nullptr;
   TopLevelChecker *topLevelChecker = nullptr;
 };
 

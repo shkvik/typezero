@@ -34,6 +34,7 @@ EventTargetChecker::EventTargetChecker(SemanticState &owner, SemanticParts &all)
   this->typeDeclarer = &all.typeDeclarer;
   this->typeResolver = &all.typeResolver;
   this->typeRelations = &all.typeRelations;
+  this->classDeclarer = &all.classDeclarer;
   this->closureChecker = &all.closureChecker;
   this->emitterChecker = &all.emitterChecker;
   this->argumentChecker = &all.argumentChecker;
@@ -41,10 +42,10 @@ EventTargetChecker::EventTargetChecker(SemanticState &owner, SemanticParts &all)
 }
 
 EventTargetChecker::ResultListenerEvent
-EventTargetChecker::listenerEvent(const Type *type, const ClassDecl *eventClass) {
-  const ClassDecl *declared = ClassDeclarer::classOf(type);
-  if (!declared || !declared->derivesFrom(eventClass) || type->isOptional()) {
-    std::string message = ErrorTextEventTarget::listener(type->name());
+EventTargetChecker::listenerEvent(const Type *type, const ClassDecl *eventClass) const {
+  const auto *declared = this->classDeclarer->classOf(type);
+  if (declared == nullptr || !declared->derivesFrom(eventClass) || type->isOptional()) {
+    auto message = ErrorTextEventTarget::listener(type->name());
 
     return err(EventTargetCheckerListenerEventError{
         .code = EventTargetCheckerListenerEventErrorCode::NOT_AN_EVENT,
@@ -55,10 +56,10 @@ EventTargetChecker::listenerEvent(const Type *type, const ClassDecl *eventClass)
   return ok(type);
 }
 
-EventTargetChecker::ResultOneErrorValue EventTargetChecker::oneErrorValue(const Type *errors,
-                                                                          llvm::StringRef fn) {
+EventTargetChecker::ResultOneErrorValue
+EventTargetChecker::oneErrorValue(const Type *errors, llvm::StringRef functionName) const {
   if (!errors->isTuple() || errors->fields().size() != 1) {
-    std::string message = ErrorTextEventsFunction::errorValue(fn, errors->name());
+    auto message = ErrorTextEventsFunction::errorValue(functionName, errors->name());
 
     return err(EventTargetCheckerOneErrorValueError{
         .code = EventTargetCheckerOneErrorValueErrorCode::SEVERAL_VALUES,
@@ -70,10 +71,10 @@ EventTargetChecker::ResultOneErrorValue EventTargetChecker::oneErrorValue(const 
 }
 
 EventTargetChecker::ResultEmitterEvents
-EventTargetChecker::emitterEvents(const Type *type, llvm::StringRef fn, bool target) {
-  const Type *events = this->eventMaps->eventMapOf(type);
-  if (!events) {
-    std::string message = ErrorTextEventsFunction::notEmitter(fn, target, type->name());
+EventTargetChecker::emitterEvents(const Type *type, llvm::StringRef functionName, bool target) {
+  const auto *events = this->eventMaps->eventMapOf(type);
+  if (events == nullptr) {
+    auto message = ErrorTextEventsFunction::notEmitter(functionName, target, type->name());
 
     return err(EventTargetCheckerEmitterEventsError{
         .code = EventTargetCheckerEmitterEventsErrorCode::NOT_AN_EMITTER,
@@ -84,13 +85,14 @@ EventTargetChecker::emitterEvents(const Type *type, llvm::StringRef fn, bool tar
   return ok(events);
 }
 
-Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *member, ClassDecl *cls) {
+Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *member,
+                                               ClassDecl *classDecl) {
   bool isAdd = member->name == "addEventListener";
   if (!isAdd && member->name != "removeEventListener") {
     return nullptr;
   }
-  ClassDecl *eventClass = this->state.getLibraryDeclarations().findLibraryClass("Event");
-  TypeAliasDecl *objectListener =
+  auto *eventClass = this->state.getLibraryDeclarations().findLibraryClass("Event");
+  auto *objectListener =
       this->state.getLibraryDeclarations().findLibraryType("EventListenerObject");
   if (eventClass == nullptr || objectListener == nullptr) {
     return nullptr;
@@ -98,8 +100,7 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
   call->type = Type::error();
   member->type = Type::error();
   bool isRejected = this->callChecker->rejectSpread(call);
-  ArgumentChecker::ResultArityMatches arity =
-      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 2, 3);
+  auto arity = isRejected ? ok(call) : this->argumentChecker->checkArity(call, 2, 3);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
@@ -107,8 +108,8 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
     return call;
   }
   call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
-  const Type *object = this->typeDeclarer->resolveAlias(objectListener);
-  std::optional<const Type *> kind = this->typedListener(call, eventClass, object);
+  const auto *object = this->typeDeclarer->resolveAlias(objectListener);
+  auto kind = this->typedListener(call, eventClass, object);
   if (!kind.has_value() || call->args[1]->type->isError()) {
     return call;
   }
@@ -118,16 +119,16 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
   if (!isAdd) {
     call->args[1] = this->typeRelations->convert(call->args[1], Type::unknown());
     this->state.getInventoryStore().markComparesFunctions();
-    return this->emitterChecker->callLibraryMethod(call, member, cls, "removeListenerWith", {},
-                                                   &given, false);
+    return this->emitterChecker->callLibraryMethod(call, member, classDecl, "removeListenerWith",
+                                                   {}, &given, false);
   }
   if (*kind != nullptr) {
-    return this->emitterChecker->callLibraryMethod(call, member, cls, "addFunctionListener",
+    return this->emitterChecker->callLibraryMethod(call, member, classDecl, "addFunctionListener",
                                                    {*kind}, &given, false);
   }
 
-  return this->emitterChecker->callLibraryMethod(call, member, cls, "addObjectListener", {}, &given,
-                                                 false);
+  return this->emitterChecker->callLibraryMethod(call, member, classDecl, "addObjectListener", {},
+                                                 &given, false);
 }
 
 std::optional<const Type *> EventTargetChecker::typedListener(CallExpr *call, ClassDecl *eventClass,
@@ -153,7 +154,7 @@ std::optional<const Type *> EventTargetChecker::typedFunctionListener(CallExpr *
   std::vector<Param> &params = function->fn->params;
   bool isTypedParam = !params.empty() && params[0].type && !params[0].rest();
   if (isTypedParam) {
-    const Type *written = this->typeResolver->resolveType(*params[0].type, false);
+    const auto *written = this->typeResolver->resolveType(*params[0].type);
     kind = this->listenedEvent(written, params[0].loc, eventClass);
   }
   if (kind == nullptr) {
@@ -186,7 +187,7 @@ EventTargetChecker::typedValueListener(CallExpr *call, ClassDecl *eventClass, co
       isNoParams ? event : this->listenedEvent(type->params()[0], listener->loc(), eventClass);
   if (kind != nullptr) {
     const Type *heard = isNoParams ? event : kind;
-    const Type *handler = Type::function({heard}, 1, false, Type::voidTy());
+    const auto *handler = Type::function({heard}, 1, false, Type::voidTy());
     listener = this->typeRelations->coerce(listener, handler);
   }
 
@@ -198,7 +199,7 @@ const Type *EventTargetChecker::listenedEvent(const Type *type, llvm::SMLoc loc,
   if (type->isError()) {
     return nullptr;
   }
-  ResultListenerEvent listened = EventTargetChecker::listenerEvent(type, eventClass);
+  auto listened = this->listenerEvent(type, eventClass);
   if (listened.isErr()) {
     this->state.getDiagnostics().error(loc, listened.error().message);
     return nullptr;
@@ -210,38 +211,43 @@ const Type *EventTargetChecker::listenedEvent(const Type *type, llvm::SMLoc loc,
 Expr *EventTargetChecker::callLibraryFunction(CallExpr *call, llvm::StringRef name,
                                               llvm::ArrayRef<const Type *> bound,
                                               const std::vector<bool> &given, llvm::SMLoc loc) {
-  FunctionDecl *fn = this->state.getLibraryDeclarations().findLibraryFunction(name);
-  assert(fn && fn->sym && "a function of the emitter's code");
+  auto *functionDecl = this->state.getLibraryDeclarations().findLibraryFunction(name);
+  assert(functionDecl != nullptr && functionDecl->sym != nullptr &&
+         "a function of the emitter's code");
 
-  return this->callLibrarySymbol(call, fn->sym, bound, given, loc);
+  return this->callLibrarySymbol(call, functionDecl->sym, bound, given, loc);
 }
 
-Expr *EventTargetChecker::callLibraryStatic(CallExpr *call, ClassDecl *cls, llvm::StringRef name,
+Expr *EventTargetChecker::callLibraryStatic(CallExpr *call, ClassDecl *classDecl,
+                                            llvm::StringRef name,
                                             llvm::ArrayRef<const Type *> bound,
                                             const std::vector<bool> &given, llvm::SMLoc loc) {
-  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, true);
-  assert(!methods.empty() && methods[0]->sym && "a static method of the library");
+  auto methods = this->classDeclarer->staticMethodsNamed(classDecl, name);
+  assert(!methods.empty() && methods[0]->sym != nullptr && "a static method of the library");
 
   return this->callLibrarySymbol(call, methods[0]->sym, bound, given, loc);
 }
 
-Expr *EventTargetChecker::callLibrarySymbol(CallExpr *call, FuncSymbol *sym,
+Expr *EventTargetChecker::callLibrarySymbol(CallExpr *call, FuncSymbol *function,
                                             llvm::ArrayRef<const Type *> bound,
                                             const std::vector<bool> &given, llvm::SMLoc loc) {
-  const Type *ret = sym->getReturnType();
-  FuncSymbol *callee = sym;
-  if (sym->isGeneric() && !this->state.getFunctionStack().isInsideTrial() &&
-      llvm::none_of(bound, [](const Type *t) { return TypeQueries::mentionsParam(t); })) {
-    if (FuncSymbol *instance = this->genericInstantiator->instantiate(sym, bound, loc)) {
+  const auto *returnType = function->getReturnType();
+  FuncSymbol *callee = function;
+  if (function->isGeneric() && !this->state.getFunctionStack().isInsideTrial() &&
+      llvm::none_of(bound, [](const Type *type) { return TypeQueries::mentionsParam(type); })) {
+    auto *instance = this->genericInstantiator->instantiate(function, bound, loc);
+    if (instance != nullptr) {
       callee = instance;
     }
   }
   call->target = FunctionCall{.func = callee};
-  call->type = ret ? this->typeParams->substitute(ret, sym->typeParams, bound) : Type::error();
+  call->type = returnType != nullptr
+                   ? this->typeParams->substitute(returnType, function->typeParams, bound)
+                   : Type::error();
   std::vector<const Type *> params = callee->params;
-  if (callee == sym) {
+  if (callee == function) {
     for (const Type *&p : params) {
-      p = this->typeParams->substitute(p, sym->typeParams, bound);
+      p = this->typeParams->substitute(p, function->typeParams, bound);
     }
   }
 
@@ -249,53 +255,53 @@ Expr *EventTargetChecker::callLibrarySymbol(CallExpr *call, FuncSymbol *sym,
                                                &given);
 }
 
-Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
+Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef functionName,
+                                              llvm::SMLoc loc) {
   if (this->libraryCalls->inLibrary(call->loc())) {
     return nullptr;
   }
   call->type = Type::error();
-  std::optional<EventsFunction> function = EventsFunctionTable::find(fn);
+  auto function = EventsFunctionTable::find(functionName);
   if (!function.has_value()) {
     return nullptr;
   }
   switch (*function) {
     case EventsFunction::GET_EVENT_LISTENERS:
-      return this->checkListenersFunction(call, fn, loc, true);
+      return this->checkListenersFunction(call, functionName, loc, true);
     case EventsFunction::LISTENER_COUNT:
-      return this->checkListenersFunction(call, fn, loc, false);
+      return this->checkListenersFunction(call, functionName, loc, false);
     case EventsFunction::ONCE:
     case EventsFunction::ON:
-      return this->checkWaitFunction(call, fn, loc, *function == EventsFunction::ONCE);
+      return this->checkWaitFunction(call, functionName, loc, *function == EventsFunction::ONCE);
   }
 
   return nullptr;
 }
 
 void EventTargetChecker::walkArgsFrom(CallExpr *call, size_t from) {
-  for (size_t i = from; i < call->args.size(); ++i) {
-    call->args[i] = this->exprChecker->checkExpr(call->args[i]);
+  for (size_t index = from; index < call->args.size(); ++index) {
+    call->args[index] = this->exprChecker->checkExpr(call->args[index]);
   }
 }
 
 bool EventTargetChecker::isEventTarget(const Type *type) const {
-  const ClassDecl *target = this->state.getLibraryDeclarations().findLibraryClass("EventTarget");
-  const ClassDecl *cls = ClassDeclarer::classOf(type);
+  const auto *target = this->state.getLibraryDeclarations().findLibraryClass("EventTarget");
+  const auto *classDecl = this->classDeclarer->classOf(type);
 
-  return target != nullptr && cls != nullptr && cls->derivesFrom(target);
+  return target != nullptr && classDecl != nullptr && classDecl->derivesFrom(target);
 }
 
-Expr *EventTargetChecker::checkListenersFunction(CallExpr *call, llvm::StringRef fn,
+Expr *EventTargetChecker::checkListenersFunction(CallExpr *call, llvm::StringRef functionName,
                                                  llvm::SMLoc loc, bool listeners) {
   bool isRejected = this->callChecker->rejectSpread(call);
-  ArgumentChecker::ResultArityMatches arity =
-      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 2, 2);
+  auto arity = isRejected ? ok(call) : this->argumentChecker->checkArity(call, 2, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
   if (isRejected || arity.isErr()) {
     return call;
   }
-  Expr *object = this->exprChecker->checkExpr(call->args[0]);
+  auto *object = this->exprChecker->checkExpr(call->args[0]);
   if (listeners && this->isEventTarget(object->type)) {
     return this->targetListeners(call, object);
   }
@@ -303,7 +309,7 @@ Expr *EventTargetChecker::checkListenersFunction(CallExpr *call, llvm::StringRef
     this->walkArgsFrom(call, 1);
     return call;
   }
-  ResultEmitterEvents emitter = this->emitterEvents(object->type, fn, listeners);
+  auto emitter = this->emitterEvents(object->type, functionName, listeners);
   if (emitter.isErr()) {
     this->state.getDiagnostics().error(object->loc(), emitter.error().message);
     this->walkArgsFrom(call, 1);
@@ -314,8 +320,8 @@ Expr *EventTargetChecker::checkListenersFunction(CallExpr *call, llvm::StringRef
   member->type = Type::error();
   auto *method =
       this->state.getAst().make<CallExpr>(call->loc(), member, std::vector<Expr *>{call->args[1]});
-  Expr *checked = this->emitterChecker->checkEmitterCall(
-      method, member, ClassDeclarer::classOf(object->type), false);
+  auto *checked = this->emitterChecker->checkEmitterCall(
+      method, member, this->classDeclarer->classOf(object->type), false);
 
   return checked != nullptr ? checked : method;
 }
@@ -326,13 +332,13 @@ Expr *EventTargetChecker::targetListeners(CallExpr *call, Expr *object) {
       this->state.getAst().make<CallExpr>(call->loc(), member, std::vector<Expr *>{call->args[1]});
   method->type = Type::error();
   std::vector<bool> given{false};
-  this->emitterChecker->callLibraryMethod(method, member, ClassDeclarer::classOf(object->type),
-                                          "listenersOf", {}, &given, false);
+  this->emitterChecker->callLibraryMethod(
+      method, member, this->classDeclarer->classOf(object->type), "listenersOf", {}, &given, false);
 
   return method;
 }
 
-bool EventTargetChecker::hasTimeoutOption(const CallExpr *call) {
+bool EventTargetChecker::hasTimeoutOption(const CallExpr *call) const {
   if (call->args.size() != 3) {
     return false;
   }
@@ -349,18 +355,17 @@ bool EventTargetChecker::hasTimeoutOption(const CallExpr *call) {
   return false;
 }
 
-Expr *EventTargetChecker::checkWaitFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
-                                            bool once) {
+Expr *EventTargetChecker::checkWaitFunction(CallExpr *call, llvm::StringRef functionName,
+                                            llvm::SMLoc loc, bool once) {
   WaitCall wait{
       .call = call,
-      .fn = fn,
+      .fn = functionName,
       .loc = loc,
       .once = once,
-      .timed = EventTargetChecker::hasTimeoutOption(call),
+      .timed = this->hasTimeoutOption(call),
   };
   bool isRejected = this->callChecker->rejectSpread(call);
-  ArgumentChecker::ResultArityMatches arity =
-      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 2, 3);
+  auto arity = isRejected ? ok(call) : this->argumentChecker->checkArity(call, 2, 3);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
@@ -379,7 +384,7 @@ Expr *EventTargetChecker::checkWaitFunction(CallExpr *call, llvm::StringRef fn, 
   if (this->isEventTarget(type)) {
     return this->checkTargetWait(wait);
   }
-  ResultEmitterEvents emitter = this->emitterEvents(type, fn, once);
+  auto emitter = this->emitterEvents(type, functionName, once);
   if (emitter.isErr()) {
     this->state.getDiagnostics().error(call->args[0]->loc(), emitter.error().message);
     this->walkArgsFrom(call, 1);
@@ -392,7 +397,7 @@ Expr *EventTargetChecker::checkWaitFunction(CallExpr *call, llvm::StringRef fn, 
 Expr *EventTargetChecker::checkTargetWait(WaitCall &wait) {
   CallExpr *call = wait.call;
   if (!wait.once) {
-    std::string message = ErrorTextEventsFunction::targetOn();
+    auto message = ErrorTextEventsFunction::targetOn();
     this->state.getDiagnostics().error(call->args[0]->loc(), message);
     this->walkArgsFrom(call, 1);
     return call;
@@ -404,7 +409,7 @@ Expr *EventTargetChecker::checkTargetWait(WaitCall &wait) {
 
 Expr *EventTargetChecker::checkEmitterWait(WaitCall &wait, const Type *events) {
   CallExpr *call = wait.call;
-  const Type *args = this->eventMaps->eventArgs(events, call->args[1], wait.fn);
+  const auto *args = this->eventMaps->eventArgs(events, call->args[1], wait.fn);
   if (args == nullptr) {
     this->walkArgsFrom(call, 2);
     return call;
@@ -413,13 +418,13 @@ Expr *EventTargetChecker::checkEmitterWait(WaitCall &wait, const Type *events) {
   if (!wait.timed && !isEnding) {
     auto *name = dyn_cast<NameExpr>(call->args[0]);
     llvm::StringRef shown = name != nullptr ? name->name : llvm::StringRef();
-    std::string message = ErrorTextEventsFunction::endless(shown, wait.fn);
+    auto message = ErrorTextEventsFunction::endless(shown, wait.fn);
     this->state.getDiagnostics().error(call->args[0]->loc(), message);
     this->walkArgsFrom(call, 2);
     return call;
   }
   if (wait.once && call->args.size() == 3 && !wait.timed) {
-    std::string message = ErrorTextEventsFunction::options();
+    auto message = ErrorTextEventsFunction::options();
     this->state.getDiagnostics().error(call->args[2]->loc(), message);
     this->walkArgsFrom(call, 2);
     return call;
@@ -434,7 +439,7 @@ Expr *EventTargetChecker::checkEmitterWait(WaitCall &wait, const Type *events) {
 }
 
 bool EventTargetChecker::waitEnds(const CallExpr *call) const {
-  const ClassDecl *source = ClassDeclarer::classOf(call->args[0]->type);
+  const auto *source = this->classDeclarer->classOf(call->args[0]->type);
   const ClassDecl *root =
       source != nullptr && source->generic() != nullptr ? source->generic() : source;
   bool isEnding = root != nullptr && root->library() && root->name != "EventEmitter" &&
@@ -449,10 +454,10 @@ bool EventTargetChecker::waitEnds(const CallExpr *call) const {
 Expr *EventTargetChecker::checkTimedWait(WaitCall &wait, const Type *events, const Type *args,
                                          const Type *errors) {
   CallExpr *call = wait.call;
-  const Type *failure = Type::never();
+  const auto *failure = Type::never();
   if (errors != nullptr) {
     this->state.getEventStore().markErrorListened(events);
-    ResultOneErrorValue value = EventTargetChecker::oneErrorValue(errors, wait.fn);
+    auto value = this->oneErrorValue(errors, wait.fn);
     if (value.isErr()) {
       this->state.getDiagnostics().error(call->args[1]->loc(), value.error().message);
       return call;
@@ -477,7 +482,7 @@ Expr *EventTargetChecker::checkPlainWait(WaitCall &wait, const Type *events, con
     return this->callLibraryFunction(call, wait.fn, {args, Type::tuple({})}, wait.given, wait.loc);
   }
   this->state.getEventStore().markErrorListened(events);
-  ResultOneErrorValue value = EventTargetChecker::oneErrorValue(errors, wait.fn);
+  auto value = this->oneErrorValue(errors, wait.fn);
   if (value.isErr()) {
     this->state.getDiagnostics().error(call->args[1]->loc(), value.error().message);
     return call;
@@ -495,13 +500,13 @@ void EventTargetChecker::appendErrorsFlag(WaitCall &wait, bool listensErrors) {
   wait.given.back() = true;
 }
 
-Expr *EventTargetChecker::checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *func) {
-  if (!func->decl ||
-      this->state.getLibraryDeclarations().findLibraryFunction(func->decl->name) != func->decl) {
+Expr *EventTargetChecker::checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *function) {
+  if (function->decl == nullptr || this->state.getLibraryDeclarations().findLibraryFunction(
+                                       function->decl->name) != function->decl) {
     return nullptr;
   }
 
-  return this->checkEventsFunction(call, func->decl->name, name->loc());
+  return this->checkEventsFunction(call, function->decl->name, name->loc());
 }
 
 }

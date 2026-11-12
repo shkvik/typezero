@@ -269,7 +269,8 @@ public:
   static const Type *undefinedTy();
   static const Type *boolTy();
   static const Type *intTy();
-  static const Type *integer(unsigned bits, bool isUnsigned);
+  static const Type *signedInteger(unsigned bits);
+  static const Type *unsignedInteger(unsigned bits);
   static const Type *wrapping(unsigned bits);
   static llvm::ArrayRef<const Type *> integers();
   static const Type *doubleTy();
@@ -348,6 +349,7 @@ private:
   using ObjectKey = std::vector<std::tuple<std::string, const Type *, int>>;
 
   static Interned &interned();
+  static const Type *integer(unsigned bits, bool isUnsigned);
   static ObjectKey objectKey(llvm::ArrayRef<Field> fields, llvm::ArrayRef<Overload> overloads);
   static std::string quotedText(const std::u16string &text);
   static std::string numberText(double value);

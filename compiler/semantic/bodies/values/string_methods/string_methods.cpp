@@ -8,9 +8,15 @@
 #include "compiler/semantic/library/regex/string_regex_checker/string_regex_checker.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ErrorHandling.h"
 
 namespace tz {
+
+namespace {
+
+constexpr char kStringArg = 's';
+constexpr char kPositionArg = 'p';
+
+}
 
 StringMethods::StringMethods(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -22,7 +28,7 @@ StringMethods::StringMethods(SemanticState &owner, SemanticParts &all)
   this->stringRegexChecker = &all.stringRegexChecker;
 }
 
-const Type *StringMethods::resultType(StringResult result) {
+const Type *StringMethods::resultType(StringResult result) const {
   switch (result) {
     case StringResult::INT:
       return Type::intTy();
@@ -33,17 +39,15 @@ const Type *StringMethods::resultType(StringResult result) {
     case StringResult::STRINGS:
       return Type::array(Type::string());
   }
-  llvm_unreachable("unknown string result");
+
+  return Type::error();
 }
 
-StringMethods::ResultStringMethod StringMethods::stringMethod(llvm::StringRef name) {
-  const StringMethodInfo *method = StringMethodTable::find(name);
-  const StringCall *stringCall = nullptr;
-  if (method != nullptr) {
-    stringCall = StringMethodTable::findCall(*method);
-  }
-  if (stringCall == nullptr) {
-    std::string message = ErrorTextStringMethod::missing(name);
+StringMethods::ResultStringMethod StringMethods::checkMethodName(llvm::StringRef name) const {
+  const auto *method = StringMethodTable::find(name);
+  bool isCallable = method != nullptr && StringMethodTable::findCall(*method) != nullptr;
+  if (!isCallable) {
+    auto message = ErrorTextStringMethod::missing(name);
 
     return err(StringMethodsStringMethodError{
         .code = StringMethodsStringMethodErrorCode::NO_SUCH_METHOD,
@@ -55,64 +59,75 @@ StringMethods::ResultStringMethod StringMethods::stringMethod(llvm::StringRef na
 }
 
 Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
-  if (Expr *regex = this->stringRegexChecker->checkStringRegexMethod(call, member)) {
+  auto *regex = this->stringRegexChecker->checkStringRegexMethod(call, member);
+  if (regex != nullptr) {
     return regex;
   }
-  ResultStringMethod found = StringMethods::stringMethod(member->name);
+  auto found = this->checkMethodName(member->name);
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
     this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
   const StringMethodInfo *method = found.value();
-  const StringCall *stringCall = StringMethodTable::findCall(*method);
-  ArgumentChecker::ResultArityMatches arity =
-      this->argumentChecker->checkArity(call, stringCall->minArgs, stringCall->maxArgs);
+  const auto *stringCall = StringMethodTable::findCall(*method);
+  auto arity = this->argumentChecker->checkArity(call, stringCall->minArgs, stringCall->maxArgs);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
 
-  llvm::StringRef argKinds = stringCall->args;
-  size_t kinds = argKinds.size();
-  for (size_t i = 0; i < call->args.size(); ++i) {
-    Expr *&arg = call->args[i];
-    switch (argKinds[std::min(i, kinds - 1)]) {
-      case 's':
-        arg = this->argumentChecker->checkArg(arg, Type::string());
-        break;
-      case 'p':
-        arg = this->memberChecker->checkPosition(arg);
-        break;
-      default:
-        arg = this->concatChecker->toStringOperand(this->exprChecker->checkExpr(arg));
-        break;
-    }
-  }
+  this->walkStringArgs(call, stringCall->args);
   call->target = BuiltinCall{.builtin = stringCall->builtin};
-  call->type = StringMethods::resultType(stringCall->result);
-
-  if (method->method == StringMethod::REPEAT) {
-    std::string counted = ErrorTextStringMethod::repeatOf();
-    IndexProofs::ResultBetweenProven between =
-        this->indexProofs->requireBetween(call->args[0], 0, std::nullopt, counted);
-    if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
-      this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
-    }
-  } else if (method->method == StringMethod::CHAR_CODE_AT) {
-    call->mayBeOutOfRange =
-        !this->indexProofs->provesInBounds(member->object, call->args[0], false);
-    call->type = call->mayBeOutOfRange ? Type::optional(Type::intTy()) : Type::intTy();
-  } else if (method->method == StringMethod::CODE_POINT_AT) {
-    call->mayBeOutOfRange =
-        !this->indexProofs->provesInBounds(member->object, call->args[0], false);
-    call->type = call->mayBeOutOfRange ? Type::optional(Type::intTy()) : Type::intTy();
-  } else if (method->method == StringMethod::AT) {
-    call->mayBeOutOfRange = !this->indexProofs->provesAtInBounds(member->object, call->args[0]);
-    call->type = call->mayBeOutOfRange ? Type::optional(Type::string()) : Type::string();
-  }
+  call->type = this->resultType(stringCall->result);
+  this->walkMethodRange(call, member, method->method);
 
   return call;
+}
+
+void StringMethods::walkStringArgs(CallExpr *call, llvm::StringRef argKinds) {
+  size_t lastKind = argKinds.size() - 1;
+  for (size_t index = 0; index < call->args.size(); ++index) {
+    char kind = argKinds[std::min(index, lastKind)];
+    call->args[index] = this->checkStringArg(call->args[index], kind);
+  }
+}
+
+Expr *StringMethods::checkStringArg(Expr *arg, char kind) {
+  if (kind == kStringArg) {
+    return this->argumentChecker->checkArg(arg, Type::string());
+  }
+  if (kind == kPositionArg) {
+    return this->memberChecker->checkPosition(arg);
+  }
+  auto *checked = this->exprChecker->checkExpr(arg);
+
+  return this->concatChecker->toStringOperand(checked);
+}
+
+void StringMethods::walkMethodRange(CallExpr *call, const MemberExpr *member, StringMethod method) {
+  bool isCodeAt = method == StringMethod::CHAR_CODE_AT || method == StringMethod::CODE_POINT_AT;
+  if (method == StringMethod::REPEAT) {
+    this->walkRepeatCount(call);
+    return;
+  }
+  if (isCodeAt) {
+    call->mayBeOutOfRange = !this->indexProofs->canProveInBounds(member->object, call->args[0]);
+    call->type = call->mayBeOutOfRange ? Type::optional(Type::intTy()) : Type::intTy();
+    return;
+  }
+  if (method == StringMethod::AT) {
+    call->mayBeOutOfRange = !this->indexProofs->canProveAtInBounds(member->object, call->args[0]);
+    call->type = call->mayBeOutOfRange ? Type::optional(Type::string()) : Type::string();
+  }
+}
+
+void StringMethods::walkRepeatCount(const CallExpr *call) {
+  auto counted = ErrorTextStringMethod::repeatOf();
+  auto between = this->indexProofs->requireBetween(call->args[0], 0, std::nullopt, counted);
+  if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+    this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
+  }
 }
 
 }

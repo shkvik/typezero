@@ -9,6 +9,7 @@
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/declare/prelude/prelude.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
 #include "compiler/semantic/library/fs/fs_declarer/fs_declarer.h"
@@ -27,29 +28,33 @@ namespace tz {
 ReflectChecker::ReflectChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->prelude = &all.prelude;
+  this->classLinks = &all.classLinks;
+  this->classBases = &all.classBases;
   this->callChecker = &all.callChecker;
   this->exprChecker = &all.exprChecker;
   this->flowChecker = &all.flowChecker;
   this->classDeclarer = &all.classDeclarer;
   this->typeRelations = &all.typeRelations;
+  this->genericChecker = &all.genericChecker;
   this->argumentChecker = &all.argumentChecker;
   this->classValueChecker = &all.classValueChecker;
   this->classMemberChecker = &all.classMemberChecker;
   this->reflectCallChecker = &all.reflectCallChecker;
 }
 
-void ReflectChecker::classesIn(const Type *type, llvm::SmallPtrSetImpl<ClassDecl *> &out) {
-  TypeParts parts = TypeParts::collect(type, kReflectClassesRoute);
+void ReflectChecker::classesIn(const Type *type, llvm::SmallPtrSetImpl<ClassDecl *> &out) const {
+  auto parts = TypeParts::collect(type, kReflectClassesRoute);
   for (const Type *part : parts.getTypes()) {
-    auto *cls = const_cast<ClassDecl *>(part->classDecl());
-    if (cls != nullptr && !cls->literal()) {
-      out.insert(cls);
+    auto *classDecl = const_cast<ClassDecl *>(part->classDecl());
+    if (classDecl != nullptr && classDecl->literal() == nullptr) {
+      out.insert(classDecl);
     }
   }
 }
 
-void ReflectChecker::constructorsIn(const Type *type, llvm::SmallVectorImpl<const Type *> &out) {
-  TypeParts parts = TypeParts::collect(type, kReflectConstructorsRoute);
+void ReflectChecker::constructorsIn(const Type *type,
+                                    llvm::SmallVectorImpl<const Type *> &out) const {
+  auto parts = TypeParts::collect(type, kReflectConstructorsRoute);
   for (const Type *part : parts.getTypes()) {
     if (part->isConstructor()) {
       out.push_back(part->constructed());
@@ -57,62 +62,59 @@ void ReflectChecker::constructorsIn(const Type *type, llvm::SmallVectorImpl<cons
   }
 }
 
-bool ReflectChecker::instanceOf(const Type *made, const Type *of) {
+bool ReflectChecker::instanceOf(const Type *made, const Type *of) const {
   return made == of || of->isAnyObject() || made->isSubtypeOf(of);
 }
 
-Expr *ReflectChecker::stripImplicit(Expr *expr) {
-  while (auto *conv = dyn_cast<CastExpr>(expr)) {
-    if (!conv->isImplicit()) {
-      break;
-    }
-    expr = conv->operand;
-  }
+Expr *ReflectChecker::stripImplicit(Expr *expr) const {
+  expr = ExprParts::withoutImplicitCasts(expr);
 
   return expr;
 }
 
 bool ReflectChecker::onlyChecked() const {
   return this->state.getFunctionStack().isInsideTrial() ||
-         llvm::any_of(this->state.getFunctionStack().getFunctions(), [](const FunctionDecl *fn) {
-           return (!fn->typeParams.empty() && !fn->isInstance) ||
-                  (fn->cls() && (fn->cls()->isGeneric() || fn->cls()->checkOnly));
-         });
+         llvm::any_of(
+             this->state.getFunctionStack().getFunctions(), [](const FunctionDecl *functionDecl) {
+               return (!functionDecl->typeParams.empty() && !functionDecl->isInstance) ||
+                      (functionDecl->cls() != nullptr &&
+                       (functionDecl->cls()->isGeneric() || functionDecl->cls()->checkOnly));
+             });
 }
 
 void ReflectChecker::noteReflectedConversion(const Type *from, const Type *to,
-                                             const CastExpr *cast) {
+                                             const CastExpr *castExpr) {
   if (this->onlyChecked()) {
     return;
   }
   if (to->nonOptional()->isConstructor()) {
-    if (ClassDecl *cls = const_cast<ClassDecl *>(from->nonOptional()->classRef())) {
-      this->state.getReflectStore().rememberConstructorCast(cast, cls);
+    if (ClassDecl *classDecl = const_cast<ClassDecl *>(from->nonOptional()->classRef())) {
+      this->state.getReflectStore().rememberConstructorCast(castExpr, classDecl);
     }
     return;
   }
   if (to->nonOptional()->isAnyObject() || to->isUnknown() ||
       (to->nonOptional()->isArray() && to->nonOptional()->inner()->isUnknown())) {
-    llvm::SmallPtrSet<ClassDecl *, 8> escaped;
-    ReflectChecker::classesIn(from, escaped);
-    for (ClassDecl *cls : escaped) {
-      this->state.getReflectStore().addEscapedClass(cls);
+    auto escaped = llvm::SmallPtrSet<ClassDecl *, 8>();
+    this->classesIn(from, escaped);
+    for (ClassDecl *classDecl : escaped) {
+      this->state.getReflectStore().addEscapedClass(classDecl);
     }
   }
 }
 
 void ReflectChecker::noteConstructorFlow(const Type *from, const Type *to) {
   llvm::SmallVector<const Type *, 4> sources, targets;
-  ReflectChecker::constructorsIn(to, targets);
+  this->constructorsIn(to, targets);
   if (targets.empty()) {
     return;
   }
-  ReflectChecker::constructorsIn(from, sources);
+  this->constructorsIn(from, sources);
   for (const Type *x : sources) {
     for (const Type *y : targets) {
-      if (x != y && ReflectChecker::instanceOf(x, y)) {
+      if (x != y && this->instanceOf(x, y)) {
         this->state.getReflectStore().addConstructorWidening(x, y);
-      } else if (x != y && ReflectChecker::instanceOf(y, x)) {
+      } else if (x != y && this->instanceOf(y, x)) {
         this->state.getReflectStore().addConstructorWidening(y, x);
       }
     }
@@ -120,39 +122,39 @@ void ReflectChecker::noteConstructorFlow(const Type *from, const Type *to) {
 }
 
 void ReflectChecker::finishReflection() {
-  ReflectStore &reflect = this->state.getReflectStore();
+  auto &reflect = this->state.getReflectStore();
   for (const ConstructorCast &entry : reflect.getConstructorCasts()) {
     entry.cls->reflectNew = true;
   }
   if (reflect.isAnyObjectFilled()) {
-    for (ClassDecl *cls : this->state.getClassStore().getClasses()) {
-      cls->reflectFill = !cls->builtin();
+    for (ClassDecl *classDecl : this->state.getClassStore().getClasses()) {
+      classDecl->reflectFill = !classDecl->builtin();
     }
   }
   if (!reflect.isReflectionUsed()) {
-    for (ClassDecl *cls : this->state.getClassStore().getClasses()) {
-      cls->reflectNew = cls->reflectMethods = false;
+    for (ClassDecl *classDecl : this->state.getClassStore().getClasses()) {
+      classDecl->reflectNew = classDecl->reflectMethods = false;
     }
     return;
   }
   if (reflect.isAnyObjectRead()) {
-    for (ClassDecl *cls : reflect.getEscapedClasses()) {
-      ReflectChecker::markReflectMethods(cls);
+    for (ClassDecl *classDecl : reflect.getEscapedClasses()) {
+      this->markReflectMethods(classDecl);
     }
-    for (ClassDecl *cls : this->state.getClassStore().getClasses()) {
-      if (cls->reflectNew) {
-        ReflectChecker::markReflectMethods(cls);
+    for (ClassDecl *classDecl : this->state.getClassStore().getClasses()) {
+      if (classDecl->reflectNew) {
+        this->markReflectMethods(classDecl);
       }
     }
   }
-  for (ClassDecl *cls : reflect.getReflectedObjects()) {
-    ReflectChecker::markReflectMethods(cls);
+  for (ClassDecl *classDecl : reflect.getReflectedObjects()) {
+    this->markReflectMethods(classDecl);
   }
   this->walkReflectNews();
 }
 
-void ReflectChecker::markReflectMethods(ClassDecl *cls) {
-  std::vector<ClassDecl *> stack = {cls};
+void ReflectChecker::markReflectMethods(ClassDecl *classDecl) const {
+  std::vector<ClassDecl *> stack = {classDecl};
   while (!stack.empty()) {
     ClassDecl *next = stack.back();
     stack.pop_back();
@@ -164,7 +166,7 @@ void ReflectChecker::markReflectMethods(ClassDecl *cls) {
 }
 
 const Type *ReflectChecker::reflectError() {
-  return this->prelude->builtinType("ReflectError");
+  return this->prelude->builtinType(PreludeType::REFLECT_ERROR);
 }
 
 Expr *ReflectChecker::okOf(Expr *value) {
@@ -181,58 +183,60 @@ Expr *ReflectChecker::okOf(Expr *value) {
 }
 
 ReflectChecker::ResultConstructible
-ReflectChecker::constructible(ClassDecl *cls, llvm::ArrayRef<const Type *> args) {
-  if (cls->builtin()) {
-    std::string message = ErrorTextConstructible::builtin();
+ReflectChecker::constructible(ClassDecl *classDecl, llvm::ArrayRef<const Type *> args) {
+  if (classDecl->builtin()) {
+    auto message = ErrorTextConstructible::builtin();
 
     return err(ReflectCheckerConstructibleError{
         .code = ReflectCheckerConstructibleErrorCode::BUILTIN_CLASS,
         .message = message,
     });
   }
-  if (cls->isAbstract) {
-    std::string message = ErrorTextConstructible::abstract();
+  if (classDecl->isAbstract) {
+    auto message = ErrorTextConstructible::abstract();
 
     return err(ReflectCheckerConstructibleError{
         .code = ReflectCheckerConstructibleErrorCode::ABSTRACT,
         .message = message,
     });
   }
-  std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(cls);
-  if (ctors.empty() && !args.empty()) {
-    std::string message = ErrorTextConstructible::noArgs();
+  auto constructors = this->classLinks->constructorsOf(classDecl);
+  if (constructors.empty() && !args.empty()) {
+    auto message = ErrorTextConstructible::noArgs();
 
     return err(ReflectCheckerConstructibleError{
         .code = ReflectCheckerConstructibleErrorCode::NO_ARGUMENTS,
         .message = message,
     });
   }
-  if (ctors.empty()) {
-    return ok(cls);
+  if (constructors.empty()) {
+    return ok(classDecl);
   }
   size_t fitting = 0;
-  std::vector<const FuncSymbol *> symbols;
-  for (FunctionDecl *ctor : ctors) {
-    FuncSymbol *sym = ctor->sym;
-    if (!sym) {
-      std::string message = ErrorTextConstructible::unknown();
+  auto symbols = std::vector<const FuncSymbol *>();
+  for (FunctionDecl *constructor : constructors) {
+    FuncSymbol *function = constructor->sym;
+    if (function == nullptr) {
+      auto message = ErrorTextConstructible::unknown();
 
       return err(ReflectCheckerConstructibleError{
           .code = ReflectCheckerConstructibleErrorCode::UNKNOWN_CONSTRUCTOR,
           .message = message,
       });
     }
-    symbols.push_back(sym);
-    size_t fixed = sym->hasRest ? sym->params.size() - 1 : sym->params.size();
-    bool isFitting = args.size() >= sym->minArgs && (sym->hasRest || args.size() <= fixed);
-    for (size_t i = 0; i < args.size() && isFitting; ++i) {
-      const Type *param = i < fixed ? sym->params[i] : sym->params.back()->inner();
-      isFitting = param && ReflectCallChecker::reflectAccepts(args[i], param);
+    symbols.push_back(function);
+    size_t fixed = function->hasRest ? function->params.size() - 1 : function->params.size();
+    bool isFitting =
+        args.size() >= function->minArgs && (function->hasRest || args.size() <= fixed);
+    for (size_t index = 0; index < args.size() && isFitting; ++index) {
+      const Type *param =
+          index < fixed ? function->params[index] : function->params.back()->inner();
+      isFitting = param != nullptr && this->reflectCallChecker->reflectAccepts(args[index], param);
     }
     fitting += isFitting;
   }
   if (fitting == 0) {
-    std::string message = ErrorTextConstructible::takes(symbols);
+    auto message = ErrorTextConstructible::takes(symbols);
 
     return err(ReflectCheckerConstructibleError{
         .code = ReflectCheckerConstructibleErrorCode::NO_FIT,
@@ -240,7 +244,7 @@ ReflectChecker::constructible(ClassDecl *cls, llvm::ArrayRef<const Type *> args)
     });
   }
   if (fitting > 1) {
-    std::string message = ErrorTextConstructible::several();
+    auto message = ErrorTextConstructible::several();
 
     return err(ReflectCheckerConstructibleError{
         .code = ReflectCheckerConstructibleErrorCode::SEVERAL_FIT,
@@ -248,13 +252,13 @@ ReflectChecker::constructible(ClassDecl *cls, llvm::ArrayRef<const Type *> args)
     });
   }
 
-  return ok(cls);
+  return ok(classDecl);
 }
 
-ReflectChecker::ResultFillableClass ReflectChecker::fillableClass(ClassDecl *made) {
-  if (!made->type || made->builtin()) {
-    std::string why = ErrorTextReflectFill::javascript();
-    std::string message = ErrorTextReflectFill::cannot(made->name, why);
+ReflectChecker::ResultFillableClass ReflectChecker::fillableClass(ClassDecl *made) const {
+  if (made->type == nullptr || made->builtin()) {
+    auto why = ErrorTextReflectFill::javascript();
+    auto message = ErrorTextReflectFill::cannot(made->name, why);
 
     return err(ReflectCheckerFillableClassError{
         .code = ReflectCheckerFillableClassErrorCode::JAVASCRIPT_CLASS,
@@ -262,17 +266,17 @@ ReflectChecker::ResultFillableClass ReflectChecker::fillableClass(ClassDecl *mad
     });
   }
   if (made->isAbstract) {
-    std::string why = ErrorTextReflectFill::abstract();
-    std::string message = ErrorTextReflectFill::cannot(made->name, why);
+    auto why = ErrorTextReflectFill::abstract();
+    auto message = ErrorTextReflectFill::cannot(made->name, why);
 
     return err(ReflectCheckerFillableClassError{
         .code = ReflectCheckerFillableClassErrorCode::ABSTRACT,
         .message = message,
     });
   }
-  if (!ClassLinks::constructorsOf(made).empty()) {
-    std::string why = ErrorTextReflectFill::ownCtor(made->name);
-    std::string message = ErrorTextReflectFill::cannot(made->name, why);
+  if (!this->classLinks->constructorsOf(made).empty()) {
+    auto why = ErrorTextReflectFill::ownCtor(made->name);
+    auto message = ErrorTextReflectFill::cannot(made->name, why);
 
     return err(ReflectCheckerFillableClassError{
         .code = ReflectCheckerFillableClassErrorCode::HAS_CONSTRUCTOR,
@@ -284,11 +288,11 @@ ReflectChecker::ResultFillableClass ReflectChecker::fillableClass(ClassDecl *mad
 }
 
 void ReflectChecker::walkReflectNews() {
-  ReflectStore &reflect = this->state.getReflectStore();
+  auto &reflect = this->state.getReflectStore();
   if (!reflect.hasReflectedNews()) {
     return;
   }
-  llvm::DenseMap<const Type *, llvm::SmallPtrSet<const Type *, 8>> reach;
+  auto reach = llvm::DenseMap<const Type *, llvm::SmallPtrSet<const Type *, 8>>();
   auto reachable = [&](const Type *start) -> const llvm::SmallPtrSet<const Type *, 8> & {
     auto [it, fresh] = reach.try_emplace(start);
     if (fresh) {
@@ -307,10 +311,10 @@ void ReflectChecker::walkReflectNews() {
     }
     return it->second;
   };
-  std::vector<std::pair<ClassDecl *, const Type *>> entries;
+  auto entries = std::vector<std::pair<ClassDecl *, const Type *>>();
   for (const ConstructorCast &entry : reflect.getConstructorCasts()) {
-    const Type *target = entry.cast->type ? entry.cast->type->nonOptional() : nullptr;
-    if (target && target->isConstructor()) {
+    const Type *target = entry.cast->type != nullptr ? entry.cast->type->nonOptional() : nullptr;
+    if (target != nullptr && target->isConstructor()) {
       entries.push_back({entry.cls, target->constructed()});
     }
   }
@@ -318,10 +322,10 @@ void ReflectChecker::walkReflectNews() {
     const NewExpr *expr = reflected.expr;
     const std::vector<const Type *> &args = reflected.args;
     const Type *made = expr->type;
-    if (!made || made->isError()) {
+    if (made == nullptr || made->isError()) {
       continue;
     }
-    llvm::SmallPtrSet<ClassDecl *, 8> checked;
+    auto checked = llvm::SmallPtrSet<ClassDecl *, 8>();
     for (const auto &[cls, entry] : entries) {
       if (!cls->type || !reachable(entry).contains(made)) {
         continue;
@@ -330,10 +334,9 @@ void ReflectChecker::walkReflectNews() {
       if (!isFirstCheck) {
         continue;
       }
-      ResultConstructible constructed = this->constructible(cls, args);
+      auto constructed = this->constructible(cls, args);
       if (constructed.isErr()) {
-        std::string message =
-            ErrorTextReflectNew::mayFail(cls->type->name(), constructed.error().message);
+        auto message = ErrorTextReflectNew::mayFail(cls->type->name(), constructed.error().message);
         this->state.getDiagnostics().error(expr->loc(), message);
         break;
       }
@@ -346,7 +349,7 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  std::optional<ReflectFunction> function = ReflectFunctionTable::find(member->name);
+  auto function = ReflectFunctionTable::find(member->name);
   if (function == ReflectFunction::GET) {
     return this->checkReflectGet(call, member);
   }
@@ -367,7 +370,7 @@ void ReflectChecker::walkArgsLoosely(CallExpr *call) {
 }
 
 bool ReflectChecker::hasWrongArity(CallExpr *call, MemberExpr *member, unsigned min, unsigned max) {
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, min, max);
+  auto arity = this->argumentChecker->checkArity(call, min, max);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
@@ -388,15 +391,15 @@ Expr *ReflectChecker::checkReflectGet(CallExpr *call, MemberExpr *member) {
     call->args[1] = this->exprChecker->checkExpr(call->args[1]);
     return call;
   }
-  const Type *base = GenericChecker::apparentType(type->nonOptional());
+  const auto *base = this->genericChecker->apparentType(type->nonOptional());
   if (base->isJson()) {
-    std::string message = ErrorTextReflectGet::json();
+    auto message = ErrorTextReflectGet::json();
     this->state.getDiagnostics().error(target->loc(), message);
     this->walkArgsLoosely(call);
     return call;
   }
   if (!type->isUnknown() && !UnknownChecker::isObjectReference(base) && !base->isAnyObject()) {
-    std::string message = ErrorTextReflectGet::notObject(type->name());
+    auto message = ErrorTextReflectGet::notObject(type->name());
     this->state.getDiagnostics().error(target->loc(), message);
     call->args[1] = this->exprChecker->checkExpr(call->args[1]);
     return call;
@@ -415,8 +418,8 @@ Expr *ReflectChecker::checkReflectGet(CallExpr *call, MemberExpr *member) {
   return this->checkDynamicGet(call, get);
 }
 
-std::optional<std::string> ReflectChecker::asciiName(const std::u16string &text) {
-  std::string name;
+std::optional<std::string> ReflectChecker::asciiName(const std::u16string &text) const {
+  auto name = std::string();
   for (char16_t c : text) {
     if (c >= 128) {
       return std::nullopt;
@@ -428,36 +431,38 @@ std::optional<std::string> ReflectChecker::asciiName(const std::u16string &text)
 }
 
 Expr *ReflectChecker::checkKnownGet(CallExpr *call, const ReflectGet &get) {
-  Expr *seen = ReflectChecker::stripImplicit(call->args[0]);
+  auto *seen = this->stripImplicit(call->args[0]);
   const Type *seenType = seen->type;
-  ClassDecl *cls =
-      seenType->isObject() && !seenType->isAnyObject() ? ClassDeclarer::classOf(seenType) : nullptr;
-  std::optional<std::string> ascii = ReflectChecker::asciiName(get.key->value);
+  ClassDecl *classDecl = seenType->isObject() && !seenType->isAnyObject()
+                             ? this->classDeclarer->classOf(seenType)
+                             : nullptr;
+  auto ascii = this->asciiName(get.key->value);
   if (seenType->isOptional() || !ascii.has_value()) {
     return nullptr;
   }
   const std::string &name = *ascii;
-  if (cls != nullptr) {
-    this->classDeclarer->completeClass(cls);
+  if (classDecl != nullptr) {
+    this->classDeclarer->completeClass(classDecl);
   }
-  const ClassField *declared = cls != nullptr ? ClassBases::findField(cls, name) : nullptr;
-  bool isOpen = cls == nullptr || (declared != nullptr && declared->access == Access::Public);
+  const ClassField *declared =
+      classDecl != nullptr ? this->classBases->findField(classDecl, name) : nullptr;
+  bool isOpen = classDecl == nullptr || (declared != nullptr && declared->access == Access::Public);
   const Type *base = get.base;
   bool isNamed = get.object != nullptr && !get.type->isOptional() && base->isObject() &&
                  !base->isAnyObject() && base->field(name) != nullptr && isOpen;
   if (isNamed) {
     return this->readNamedField(get.object, get.key, name);
   }
-  bool isClassField =
-      cls != nullptr && !cls->literal() && seenType->field(name) != nullptr && isOpen;
+  bool isClassField = classDecl != nullptr && classDecl->literal() == nullptr &&
+                      seenType->field(name) != nullptr && isOpen;
   if (isClassField) {
     return this->readClassField(seen, get.key, name);
   }
-  if (cls == nullptr || cls->literal() || seenType->field(name) != nullptr) {
+  if (classDecl == nullptr || classDecl->literal() != nullptr || seenType->field(name) != nullptr) {
     return nullptr;
   }
 
-  return this->checkReflectMethodGet(call, seen, cls, name);
+  return this->checkReflectMethodGet(call, seen, classDecl, name);
 }
 
 Expr *ReflectChecker::readNamedField(const NameExpr *object, const StringLitExpr *key,
@@ -465,7 +470,7 @@ Expr *ReflectChecker::readNamedField(const NameExpr *object, const StringLitExpr
   auto *root = this->state.getAst().make<NameExpr>(object->loc(), object->name);
   auto *read =
       this->state.getAst().make<MemberExpr>(key->loc(), root, this->state.getAst().keepName(name));
-  Expr *checked = this->exprChecker->checkExpr(read);
+  auto *checked = this->exprChecker->checkExpr(read);
 
   return this->typeRelations->convert(checked, Type::unknown());
 }
@@ -474,15 +479,15 @@ Expr *ReflectChecker::readClassField(Expr *seen, const StringLitExpr *key,
                                      const std::string &name) {
   auto *read =
       this->state.getAst().make<MemberExpr>(key->loc(), seen, this->state.getAst().keepName(name));
-  Expr *checked = this->classMemberChecker->checkClassMember(read, nullptr);
+  auto *checked = this->classMemberChecker->checkClassMember(read, nullptr);
 
   return this->typeRelations->convert(checked, Type::unknown());
 }
 
-Expr *ReflectChecker::checkReflectMethodGet(CallExpr *call, Expr *seen, ClassDecl *cls,
+Expr *ReflectChecker::checkReflectMethodGet(CallExpr *call, Expr *seen, ClassDecl *classDecl,
                                             const std::string &name) {
   bool isSeveral = false;
-  FunctionDecl *method = this->reflectCallChecker->knownReflectMethod(cls, name, isSeveral);
+  auto *method = this->reflectCallChecker->knownReflectMethod(classDecl, name, isSeveral);
   if (method == nullptr) {
     return nullptr;
   }
@@ -518,8 +523,8 @@ void ReflectChecker::noteReflectedRead(const Type *type, const Type *base) {
     this->state.getReflectStore().markAnyObjectRead();
     return;
   }
-  llvm::SmallPtrSet<ClassDecl *, 8> reflected;
-  ReflectChecker::classesIn(base, reflected);
+  auto reflected = llvm::SmallPtrSet<ClassDecl *, 8>();
+  this->classesIn(base, reflected);
   for (ClassDecl *reflectedClass : reflected) {
     this->state.getReflectStore().addReflectedObject(reflectedClass);
   }
@@ -538,11 +543,11 @@ Expr *ReflectChecker::checkReflectFill(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (!type->isClassRef()) {
-    std::string message = ErrorTextReflectFill::notClass(type->name());
+    auto message = ErrorTextReflectFill::notClass(type->name());
     this->state.getDiagnostics().error(cls->loc(), message);
     return call;
   }
-  std::optional<const Type *> fails = this->fillFailure(cls, type);
+  auto fails = this->fillFailure(cls, type);
   if (!fails.has_value()) {
     return call;
   }
@@ -554,7 +559,7 @@ Expr *ReflectChecker::checkReflectFill(CallExpr *call, MemberExpr *member) {
 }
 
 std::optional<const Type *> ReflectChecker::fillFailure(const Expr *cls, const Type *type) {
-  const Type *fails = this->prelude->builtinType("ReflectFillError");
+  const auto *fails = this->prelude->builtinType(PreludeType::REFLECT_FILL_ERROR);
   auto *made = const_cast<ClassDecl *>(type->classRef());
   if (made == nullptr) {
     if (!this->onlyChecked()) {
@@ -563,14 +568,14 @@ std::optional<const Type *> ReflectChecker::fillFailure(const Expr *cls, const T
     }
     return fails;
   }
-  ResultFillableClass fillable = ReflectChecker::fillableClass(made);
+  auto fillable = this->fillableClass(made);
   if (fillable.isErr()) {
     this->state.getDiagnostics().error(cls->loc(), fillable.error().message);
     return std::nullopt;
   }
   made->reflectFill = true;
 
-  return this->prelude->builtinType("ReflectFillValueError");
+  return this->prelude->builtinType(PreludeType::REFLECT_FILL_VALUE_ERROR);
 }
 
 Expr *ReflectChecker::checkReflectApply(CallExpr *call, MemberExpr *member) {
@@ -578,8 +583,8 @@ Expr *ReflectChecker::checkReflectApply(CallExpr *call, MemberExpr *member) {
     return call;
   }
   call->args[0] = this->exprChecker->checkExpr(call->args[0]);
-  const FunctionDecl *held = this->reflectCallChecker->heldReflectMethod(call->args[0]);
-  const Type *gives = ReflectChecker::appliedResult(call->args[0]->type);
+  const auto *held = this->reflectCallChecker->heldReflectMethod(call->args[0]);
+  const auto *gives = this->appliedResult(call->args[0]->type);
   this->walkAppliedFunction(call);
   this->walkAppliedThis(call);
   call->args[2] = this->reflectCallChecker->checkReflectArgs(call->args[2]);
@@ -600,7 +605,7 @@ Expr *ReflectChecker::checkReflectApply(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-const Type *ReflectChecker::appliedResult(const Type *type) {
+const Type *ReflectChecker::appliedResult(const Type *type) const {
   bool isReturning = type->isFunction() && type->ret() != nullptr && !type->ret()->isError();
 
   return isReturning ? type->ret() : Type::unknown();
@@ -609,7 +614,7 @@ const Type *ReflectChecker::appliedResult(const Type *type) {
 void ReflectChecker::walkAppliedFunction(CallExpr *call) {
   const Type *type = call->args[0]->type;
   if (!type->isError() && !type->isUnknown() && !type->isFunction()) {
-    std::string message = ErrorTextReflectApply::notFunc(type->name());
+    auto message = ErrorTextReflectApply::notFunc(type->name());
     this->state.getDiagnostics().error(call->args[0]->loc(), message);
     return;
   }
@@ -619,7 +624,7 @@ void ReflectChecker::walkAppliedFunction(CallExpr *call) {
 void ReflectChecker::walkAppliedThis(CallExpr *call) {
   call->args[1] = this->exprChecker->checkExpr(call->args[1]);
   if (call->args[1]->type->isVoid()) {
-    std::string message = ErrorTextReflectApply::voidThis();
+    auto message = ErrorTextReflectApply::voidThis();
     this->state.getDiagnostics().error(call->args[1]->loc(), message);
     return;
   }
@@ -629,7 +634,7 @@ void ReflectChecker::walkAppliedThis(CallExpr *call) {
 Expr *ReflectChecker::checkReflectConstruct(CallExpr *call, MemberExpr *member,
                                             const Type *expected) {
   if (call->args.size() == 3) {
-    std::string message = ErrorTextReflectNew::third();
+    auto message = ErrorTextReflectNew::third();
     this->state.getDiagnostics().error(call->args[2]->loc(), message);
     this->walkArgsLoosely(call);
     return call;
@@ -646,13 +651,13 @@ Expr *ReflectChecker::checkReflectConstruct(CallExpr *call, MemberExpr *member,
     return call;
   }
   if (!type->isClassRef()) {
-    std::string message = ErrorTextReflectNew::notClass(type->name());
+    auto message = ErrorTextReflectNew::notClass(type->name());
     this->state.getDiagnostics().error(call->args[0]->loc(), message);
     call->args[1] = this->reflectCallChecker->checkReflectArgs(call->args[1]);
     return call;
   }
-  bool isLiteral = name != nullptr && list != nullptr && type->classRef() != nullptr &&
-                   !ReflectChecker::hasSpread(list);
+  bool isLiteral =
+      name != nullptr && list != nullptr && type->classRef() != nullptr && !this->hasSpread(list);
   if (isLiteral) {
     return this->checkLiteralConstruct(call, name, list, expected);
   }
@@ -660,9 +665,9 @@ Expr *ReflectChecker::checkReflectConstruct(CallExpr *call, MemberExpr *member,
   return this->checkDynamicConstruct(call, type);
 }
 
-bool ReflectChecker::hasSpread(const ArrayLitExpr *list) {
-  for (const ArrayLitExpr::Element &e : list->elements) {
-    if (e.spread) {
+bool ReflectChecker::hasSpread(const ArrayLitExpr *list) const {
+  for (const ArrayLitExpr::Element &element : list->elements) {
+    if (element.spread) {
       return true;
     }
   }
@@ -672,9 +677,9 @@ bool ReflectChecker::hasSpread(const ArrayLitExpr *list) {
 
 Expr *ReflectChecker::checkLiteralConstruct(CallExpr *call, const NameExpr *name,
                                             const ArrayLitExpr *list, const Type *expected) {
-  std::vector<Expr *> args;
-  for (const ArrayLitExpr::Element &e : list->elements) {
-    args.push_back(e.expr);
+  auto args = std::vector<Expr *>();
+  for (const ArrayLitExpr::Element &element : list->elements) {
+    args.push_back(element.expr);
   }
   auto *create =
       this->state.getAst().make<NewExpr>(call->loc(), "", std::vector<TypeRef>(), std::move(args));
@@ -682,7 +687,7 @@ Expr *ReflectChecker::checkLiteralConstruct(CallExpr *call, const NameExpr *name
   const Type *wanted = expected != nullptr && expected->nonOptional()->isResult()
                            ? expected->nonOptional()->okType()
                            : nullptr;
-  Expr *made = this->classValueChecker->checkValueNew(create, wanted);
+  auto *made = this->classValueChecker->checkValueNew(create, wanted);
 
   return this->okOf(made);
 }
@@ -692,7 +697,7 @@ Expr *ReflectChecker::checkDynamicConstruct(CallExpr *call, const Type *type) {
   const ClassDecl *made = type->classRef();
   if (made != nullptr) {
     if (made->type == nullptr) {
-      std::string message = ErrorTextReflectNew::javascript(made->name);
+      auto message = ErrorTextReflectNew::javascript(made->name);
       this->state.getDiagnostics().error(call->args[0]->loc(), message);
       call->args[1] = this->reflectCallChecker->checkReflectArgs(call->args[1]);
       return call;
@@ -708,7 +713,7 @@ Expr *ReflectChecker::checkDynamicConstruct(CallExpr *call, const Type *type) {
     this->state.getReflectStore().markReflectionUsed();
   }
   call->target = BuiltinCall{.builtin = Builtin::ReflectConstruct};
-  const Type *constructed = ClassValueChecker::constructedBy(call->args[0]->type);
+  const auto *constructed = ClassValueChecker::constructedBy(call->args[0]->type);
   call->type = Type::result(constructed, this->reflectError());
 
   return call;

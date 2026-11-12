@@ -33,6 +33,15 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+constexpr size_t kCompoundOperatorLength = 2;
+constexpr const char *kAssignSuffix = "=";
+constexpr const char *kIncrementSpelling = "++";
+constexpr const char *kDecrementSpelling = "--";
+
+}
+
 AssignChecker::AssignChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->scopes = &all.scopes;
@@ -49,6 +58,7 @@ AssignChecker::AssignChecker(SemanticState &owner, SemanticParts &all)
   this->concatChecker = &all.concatChecker;
   this->targetChecker = &all.targetChecker;
   this->typeRelations = &all.typeRelations;
+  this->classDeclarer = &all.classDeclarer;
   this->constantFolder = &all.constantFolder;
   this->decimalChecker = &all.decimalChecker;
   this->genericChecker = &all.genericChecker;
@@ -57,55 +67,49 @@ AssignChecker::AssignChecker(SemanticState &owner, SemanticParts &all)
   this->builtinModuleChecker = &all.builtinModuleChecker;
 }
 
-std::pair<llvm::StringRef, llvm::StringRef>
-AssignChecker::operandTexts(llvm::StringRef source, llvm::SMLoc op, size_t length) {
-  const char *at = op.getPointer();
-  if (source.empty() || at < source.begin() || at + length > source.end()) {
-    return {};
-  }
-
-  return {llvm::StringRef(source.begin(), static_cast<size_t>(at - source.begin())).trim(),
-          llvm::StringRef(at + length, static_cast<size_t>(source.end() - at - length)).trim()};
-}
-
-Expr *AssignChecker::copyChain(const Expr *e) {
-  std::vector<const MemberExpr *> members;
-  const Expr *link = e;
-  while (auto *member = dyn_cast<MemberExpr>(link)) {
+Expr *AssignChecker::copyChain(const Expr *expr) {
+  auto members = std::vector<const MemberExpr *>();
+  const Expr *link = expr;
+  auto *member = dyn_cast<MemberExpr>(link);
+  while (member != nullptr) {
     if (member->optional) {
       return nullptr;
     }
     members.push_back(member);
     link = member->object;
+    member = dyn_cast<MemberExpr>(link);
   }
-  Expr *copy = this->copyRoot(link);
+  auto *copy = this->copyRoot(link);
   if (copy == nullptr) {
     return nullptr;
   }
-  for (const MemberExpr *member : llvm::reverse(members)) {
-    copy = this->state.getAst().make<MemberExpr>(member->loc(), copy, member->name);
+  for (const MemberExpr *step : llvm::reverse(members)) {
+    copy = this->state.getAst().make<MemberExpr>(step->loc(), copy, step->name);
   }
 
   return copy;
 }
 
-Expr *AssignChecker::copyRoot(const Expr *e) {
-  if (auto *name = dyn_cast<NameExpr>(e)) {
+Expr *AssignChecker::copyRoot(const Expr *expr) {
+  auto *name = dyn_cast<NameExpr>(expr);
+  auto *integer = dyn_cast<IntLitExpr>(expr);
+  auto *text = dyn_cast<StringLitExpr>(expr);
+  if (name != nullptr) {
     return this->state.getAst().make<NameExpr>(name->loc(), name->name);
   }
-  if (auto *lit = dyn_cast<IntLitExpr>(e)) {
-    return this->state.getAst().make<IntLitExpr>(lit->loc(), lit->value);
+  if (integer != nullptr) {
+    return this->state.getAst().make<IntLitExpr>(integer->loc(), integer->value);
   }
-  if (auto *lit = dyn_cast<StringLitExpr>(e)) {
-    return this->state.getAst().make<StringLitExpr>(lit->loc(), lit->value);
+  if (text != nullptr) {
+    return this->state.getAst().make<StringLitExpr>(text->loc(), text->value);
   }
 
   return nullptr;
 }
 
-AssignChecker::ResultNameIsAssignable AssignChecker::notImported(const NameExpr *name) {
-  if (this->builtinModuleChecker->nodeName(name->name)) {
-    std::string message = ErrorTextAssign::imported(name->name);
+AssignChecker::ResultNameIsAssignable AssignChecker::checkNotImported(const NameExpr *name) {
+  if (this->builtinModuleChecker->nodeName(name->name) != nullptr) {
+    auto message = ErrorTextAssign::imported(name->name);
 
     return err(AssignCheckerNotImportedError{
         .code = AssignCheckerNotImportedErrorCode::IMPORTED,
@@ -116,9 +120,9 @@ AssignChecker::ResultNameIsAssignable AssignChecker::notImported(const NameExpr 
   return ok(name);
 }
 
-AssignChecker::ResultTargetIsVariable AssignChecker::variableTarget(const Expr *target) {
+AssignChecker::ResultTargetIsVariable AssignChecker::checkVariableTarget(const Expr *target) const {
   if (!isa<NameExpr>(target)) {
-    std::string message = ErrorTextAssign::nullishVar();
+    auto message = ErrorTextAssign::nullishVar();
 
     return err(AssignCheckerVariableTargetError{
         .code = AssignCheckerVariableTargetErrorCode::NOT_A_VARIABLE,
@@ -129,10 +133,10 @@ AssignChecker::ResultTargetIsVariable AssignChecker::variableTarget(const Expr *
   return ok(target);
 }
 
-AssignChecker::ResultVariableOptional AssignChecker::nullishOptional(const NameExpr *name,
-                                                                     const Type *type) {
+AssignChecker::ResultVariableOptional AssignChecker::checkNullishOptional(const NameExpr *name,
+                                                                          const Type *type) const {
   if (!type->isOptional() && !type->isError()) {
-    std::string message = ErrorTextAssign::notOptional(name->name, type->name());
+    auto message = ErrorTextAssign::notOptional(name->name, type->name());
 
     return err(AssignCheckerNullishOptionalError{
         .code = AssignCheckerNullishOptionalErrorCode::NOT_OPTIONAL,
@@ -143,9 +147,10 @@ AssignChecker::ResultVariableOptional AssignChecker::nullishOptional(const NameE
   return ok(type);
 }
 
-AssignChecker::ResultIndexWithinArray AssignChecker::indexProven(const IndexExpr *index) const {
-  if (!this->indexProofs->provesInBounds(index->object, index->index, false)) {
-    std::string message = ErrorTextAssign::indexRange();
+AssignChecker::ResultIndexWithinArray
+AssignChecker::checkIndexProven(const IndexExpr *index) const {
+  if (!this->indexProofs->canProveInBounds(index->object, index->index)) {
+    auto message = ErrorTextAssign::indexRange();
 
     return err(AssignCheckerIndexProvenError{
         .code = AssignCheckerIndexProvenErrorCode::INDEX_NOT_PROVEN,
@@ -156,10 +161,10 @@ AssignChecker::ResultIndexWithinArray AssignChecker::indexProven(const IndexExpr
   return ok(index);
 }
 
-AssignChecker::ResultFieldTypeIsFound AssignChecker::fieldTypeFrom(const MemberExpr *member,
-                                                                   const Type *type) {
+AssignChecker::ResultFieldTypeIsFound AssignChecker::checkFieldTypeFrom(const MemberExpr *member,
+                                                                        const Type *type) const {
   if (type->isVoid() || type->isUndefined()) {
-    std::string message = ErrorTextAssign::untyped(member->name);
+    auto message = ErrorTextAssign::untyped(member->name);
 
     return err(AssignCheckerFieldTypeFromError{
         .code = AssignCheckerFieldTypeFromErrorCode::UNTYPED_VALUE,
@@ -170,13 +175,12 @@ AssignChecker::ResultFieldTypeIsFound AssignChecker::fieldTypeFrom(const MemberE
   return ok(type);
 }
 
-AssignChecker::ResultStringAssignable AssignChecker::stringAssign(BinaryOp op,
-                                                                  llvm::StringRef spelling,
-                                                                  const Type *type,
-                                                                  const AssignExpr *assign) {
+AssignChecker::ResultStringAssignable
+AssignChecker::checkStringAssign(BinaryOp op, llvm::StringRef spelling, const Type *type,
+                                 const AssignExpr *assign) const {
   const Type *valueType = assign->value->type;
   if (op != BinaryOp::Add && !valueType->isError()) {
-    std::string message = BinaryChecker::operandTypesText(spelling, type, valueType);
+    auto message = this->binaryChecker->operandTypesText(spelling, type, valueType);
 
     return err(AssignCheckerStringAssignError{
         .code = AssignCheckerStringAssignErrorCode::OPERAND_TYPES,
@@ -185,11 +189,8 @@ AssignChecker::ResultStringAssignable AssignChecker::stringAssign(BinaryOp op,
   }
   bool isJoining = valueType->nonOptional()->isNumeric() || valueType->nonOptional()->isBool();
   if (op == BinaryOp::Add && isJoining) {
-    auto [target, value] = AssignChecker::operandTexts(assign->source, assign->loc(), 2);
-    std::string hint =
-        target.empty() ? ErrorTextCompound::convertTo()
-                       : ErrorTextCompound::writeAs(target, SharedHelpers::withoutParens(value));
-    std::string message = ErrorTextCompound::joinsText(valueType->name(), hint);
+    auto hint = this->joinHint(assign);
+    auto message = ErrorTextCompound::joinsText(valueType->name(), hint);
 
     return err(AssignCheckerStringAssignError{
         .code = AssignCheckerStringAssignErrorCode::JOINS_AS_TEXT,
@@ -200,34 +201,46 @@ AssignChecker::ResultStringAssignable AssignChecker::stringAssign(BinaryOp op,
   return ok(type);
 }
 
+std::string AssignChecker::joinHint(const AssignExpr *assign) const {
+  auto [target, value] =
+      SharedHelpers::operandTexts(assign->source, assign->loc(), kCompoundOperatorLength);
+  if (target.empty()) {
+    return ErrorTextCompound::convertTo();
+  }
+  auto shown = SharedHelpers::withoutParens(value);
+
+  return ErrorTextCompound::writeAs(target, shown);
+}
+
 AssignChecker::ResultCompoundOperands
-AssignChecker::compoundOperands(BinaryOp op, llvm::StringRef spelling, const Type *type,
-                                const Expr *value, bool settled) {
+AssignChecker::checkCompoundOperands(BinaryOp op, llvm::StringRef spelling, const Type *type,
+                                     const Expr *value, bool isSettled) const {
   const Type *valueType = value->type;
   bool isShift = op == BinaryOp::Shl || op == BinaryOp::Shr || op == BinaryOp::UShr;
   bool isBitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor;
   bool isIntegerOnly = isShift || isBitwise;
   auto *zero = dyn_cast<IntLitExpr>(value);
   if (isIntegerOnly && (type->isFloat() || valueType->isFloat())) {
-    std::string message = ErrorTextCompound::bitsDouble(spelling);
+    auto message = ErrorTextCompound::bitsDouble(spelling);
 
     return err(AssignCheckerCompoundOperandsError{
         .code = AssignCheckerCompoundOperandsErrorCode::DOUBLE_BITS,
         .message = message,
     });
   }
-  if (isIntegerOnly ? !type->isInteger() : !type->isNumeric()) {
-    std::string message = BinaryChecker::operandTypesText(spelling, type, valueType);
+  bool isWrongType = isIntegerOnly ? !type->isInteger() : !type->isNumeric();
+  if (isWrongType) {
+    auto message = this->binaryChecker->operandTypesText(spelling, type, valueType);
 
     return err(AssignCheckerCompoundOperandsError{
         .code = AssignCheckerCompoundOperandsErrorCode::OPERAND_TYPES,
         .message = message,
     });
   }
-  bool isOrZero = (op == BinaryOp::BitOr || op == BinaryOp::UShr) && zero && zero->value == 0 &&
-                  !type->isWrapping();
+  bool isOrZero = (op == BinaryOp::BitOr || op == BinaryOp::UShr) && zero != nullptr &&
+                  zero->value == 0 && !type->isWrapping();
   if (isOrZero) {
-    std::string message = ErrorTextCompound::nothing(spelling);
+    auto message = ErrorTextCompound::nothing(spelling);
 
     return err(AssignCheckerCompoundOperandsError{
         .code = AssignCheckerCompoundOperandsErrorCode::NOTHING_CHANGES,
@@ -235,16 +248,16 @@ AssignChecker::compoundOperands(BinaryOp op, llvm::StringRef spelling, const Typ
     });
   }
   if (op == BinaryOp::UShr && !type->isUnsigned()) {
-    std::string message = ErrorTextCompound::signedTo(type->name());
+    auto message = ErrorTextCompound::signedTo(type->name());
 
     return err(AssignCheckerCompoundOperandsError{
         .code = AssignCheckerCompoundOperandsErrorCode::SIGNED_SHIFT,
         .message = message,
     });
   }
-  if (!settled && isBitwise && valueType->isInteger() && valueType != type) {
-    std::string hint = TypeRelations::conversionHint(value, type);
-    std::string message = ErrorTextCompound::mixed(spelling, type->name(), valueType->name(), hint);
+  if (!isSettled && isBitwise && valueType->isInteger() && valueType != type) {
+    auto hint = this->typeRelations->conversionHint(value, type);
+    auto message = ErrorTextCompound::mixed(spelling, type->name(), valueType->name(), hint);
 
     return err(AssignCheckerCompoundOperandsError{
         .code = AssignCheckerCompoundOperandsErrorCode::MIXED_NUMBERS,
@@ -256,11 +269,12 @@ AssignChecker::compoundOperands(BinaryOp op, llvm::StringRef spelling, const Typ
 }
 
 AssignChecker::ResultElementWriteSafe
-AssignChecker::elementWritable(const IndexExpr *index, bool inRange, bool compound) const {
-  bool isUnsafe = !inRange && (compound || !this->indexProofs->provesInBounds(index->object,
-                                                                              index->index, true));
+AssignChecker::checkElementWritable(const IndexExpr *index, bool isInRange, AssignForm form) const {
+  bool isUnsafe =
+      !isInRange && (form == AssignForm::COMPOUND ||
+                     !this->indexProofs->canProveInBoundsOrEnd(index->object, index->index));
   if (isUnsafe) {
-    std::string message = ErrorTextAssign::outOfRange();
+    auto message = ErrorTextAssign::outOfRange();
 
     return err(AssignCheckerElementWritableError{
         .code = AssignCheckerElementWritableErrorCode::OUT_OF_RANGE,
@@ -271,14 +285,13 @@ AssignChecker::elementWritable(const IndexExpr *index, bool inRange, bool compou
   return ok(index);
 }
 
-AssignChecker::ResultLengthIsInBounds AssignChecker::lengthProven(const MemberExpr *member,
-                                                                  const Expr *value) const {
-  bool isProven = this->indexProofs->provesInBounds(member->object, value, true) ||
-                  this->indexProofs->exempt(value->loc(), member->object);
+AssignChecker::ResultLengthIsInBounds AssignChecker::checkLengthProven(const MemberExpr *member,
+                                                                       const Expr *value) const {
+  bool isProven = this->indexProofs->canProveInBoundsOrEnd(member->object, value) ||
+                  this->indexProofs->isExempt(value->loc(), member->object);
   if (!isProven) {
-    std::string array = BytesCheckHelpers::valueText(member->object);
-    std::string message =
-        ErrorTextAssign::lengthRange(member->object->type->inner()->name(), array);
+    auto array = BytesCheckHelpers::valueText(member->object);
+    auto message = ErrorTextAssign::lengthRange(member->object->type->inner()->name(), array);
 
     return err(AssignCheckerLengthProvenError{
         .code = AssignCheckerLengthProvenErrorCode::LENGTH_NOT_PROVEN,
@@ -291,7 +304,7 @@ AssignChecker::ResultLengthIsInBounds AssignChecker::lengthProven(const MemberEx
 
 Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   this->walkTargetAlias(assign);
-  Expr *imported = this->reportImportedTarget(assign);
+  auto *imported = this->reportImportedTarget(assign);
   if (imported != nullptr) {
     return imported;
   }
@@ -307,20 +320,20 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   if (isCompound && op == BinaryOp::Nullish) {
     return this->checkNullishAssign(assign);
   }
-  if (isCompound && this->unfoldsNarrowedCompound(assign, op)) {
-    isCompound = false;
-  }
+  bool isUnfolded = isCompound && this->unfoldNarrowedCompound(assign, op);
+  bool isStillCompound = isCompound && !isUnfolded;
+  auto form = isStillCompound ? AssignForm::COMPOUND : AssignForm::PLAIN;
 
-  return this->checkPlainAssign(assign, op, isCompound);
+  return this->checkPlainAssign(assign, op, form);
 }
 
 void AssignChecker::walkTargetAlias(AssignExpr *assign) {
   auto *member = dyn_cast<MemberExpr>(assign->target);
+  auto *index = dyn_cast<IndexExpr>(assign->target);
   if (member != nullptr) {
     member->object = this->builtinModuleChecker->processAlias(member->object);
     return;
   }
-  auto *index = dyn_cast<IndexExpr>(assign->target);
   if (index != nullptr) {
     index->object = this->builtinModuleChecker->processAlias(index->object);
   }
@@ -331,7 +344,7 @@ Expr *AssignChecker::reportImportedTarget(AssignExpr *assign) {
   if (name == nullptr) {
     return nullptr;
   }
-  ResultNameIsAssignable assignable = this->notImported(name);
+  auto assignable = this->checkNotImported(name);
   if (assignable.isOk()) {
     return nullptr;
   }
@@ -343,7 +356,7 @@ Expr *AssignChecker::reportImportedTarget(AssignExpr *assign) {
 }
 
 Expr *AssignChecker::checkLogicalAssignValue(AssignExpr *assign) {
-  ResultLogicalTargetSet logical = this->checkLogicalAssign(assign);
+  auto logical = this->checkLogicalAssign(assign);
   if (logical.isErr()) {
     this->state.getDiagnostics().error(assign->target->loc(), logical.error().message);
     return assign;
@@ -353,7 +366,7 @@ Expr *AssignChecker::checkLogicalAssignValue(AssignExpr *assign) {
 }
 
 Expr *AssignChecker::checkNullishAssign(AssignExpr *assign) {
-  Expr *record = this->checkRecordFieldNullish(assign);
+  auto *record = this->checkRecordFieldNullish(assign);
   if (record != nullptr) {
     return record;
   }
@@ -361,8 +374,10 @@ Expr *AssignChecker::checkNullishAssign(AssignExpr *assign) {
     return this->checkFieldLogicalAssign(assign);
   }
   auto *index = dyn_cast<IndexExpr>(assign->target);
-  Expr *set =
-      index != nullptr ? this->dictChecker->checkRecordNullishAssign(assign, index) : nullptr;
+  if (index == nullptr) {
+    return this->checkVariableNullish(assign);
+  }
+  auto *set = this->dictChecker->checkRecordNullishAssign(assign, index);
   if (set != nullptr) {
     return set;
   }
@@ -375,64 +390,77 @@ Expr *AssignChecker::checkRecordFieldNullish(AssignExpr *assign) {
   if (member == nullptr || member->optional) {
     return nullptr;
   }
-  auto *name = dyn_cast<NameExpr>(member->object);
-  VarSymbol *var = name != nullptr ? this->topLevelChecker->lookupValue(name->name).var() : nullptr;
-  bool isRecord = (var != nullptr && var->type != nullptr && var->type->isRecord()) ||
-                  this->processChecker->isProcessMember(member->object, "env");
-  if (!isRecord) {
+  if (!this->isRecordHolder(member->object)) {
     return nullptr;
   }
-  Expr *key = this->dictChecker->keyLiteral(member->loc(), member->name);
+  auto *key = this->dictChecker->keyLiteral(member->loc(), member->name);
   auto *index = this->state.getAst().make<IndexExpr>(member->loc(), member->object, key);
   assign->target = index;
 
   return this->dictChecker->checkRecordNullishAssign(assign, index);
 }
 
+bool AssignChecker::isRecordHolder(const Expr *object) const {
+  auto *name = dyn_cast<NameExpr>(object);
+  VarSymbol *variable =
+      name != nullptr ? this->topLevelChecker->lookupValue(name->name).var() : nullptr;
+  bool isRecordVariable =
+      variable != nullptr && variable->type != nullptr && variable->type->isRecord();
+
+  return isRecordVariable || this->processChecker->isProcessMember(object, ProcessMember::ENV);
+}
+
 Expr *AssignChecker::checkVariableNullish(AssignExpr *assign) {
   auto *name = dyn_cast<NameExpr>(assign->target);
-  VarSymbol *var = name != nullptr ? this->targetChecker->checkVarTarget(name) : nullptr;
-  ResultTargetIsVariable variable = AssignChecker::variableTarget(assign->target);
-  if (variable.isErr()) {
-    this->state.getDiagnostics().error(assign->target->loc(), variable.error().message);
+  VarSymbol *variable = name != nullptr ? this->targetChecker->checkVarTarget(name) : nullptr;
+  auto target = this->checkVariableTarget(assign->target);
+  if (target.isErr()) {
+    this->state.getDiagnostics().error(assign->target->loc(), target.error().message);
   }
-  const Type *type = var != nullptr ? var->type : Type::error();
-  assign->type = type;
-  ResultVariableOptional optional = AssignChecker::nullishOptional(name, type);
+  const Type *declared = variable != nullptr ? variable->type : Type::error();
+  assign->type = declared;
+  auto optional = this->checkNullishOptional(name, declared);
   if (optional.isErr()) {
     this->state.getDiagnostics().error(assign->loc(), optional.error().message);
-    type = Type::error();
   }
-  Flow before = this->state.getFlowState().getFlow();
-  assign->value =
-      this->exprChecker->checkExpr(assign->value, type->isError() ? nullptr : type->inner());
-  const Type *valueType = assign->value->type;
-  this->state.getFlowState().replaceFlow(
-      FlowChecker::join(before, this->state.getFlowState().getFlow()));
+  const Type *type = optional.isOk() ? declared : Type::error();
+  this->walkNullishValue(assign, type);
   if (type->isError()) {
     return assign;
   }
+  const Type *valueType = assign->value->type;
   bool isDefinite = !valueType->isOptional() && !valueType->isUndefined();
-  assign->value = this->typeRelations->coerce(assign->value, isDefinite ? type->inner() : type);
-  if (var == nullptr) {
+  const Type *stored = isDefinite ? type->inner() : type;
+  assign->value = this->typeRelations->coerce(assign->value, stored);
+  if (variable == nullptr) {
     return assign;
   }
   if (isDefinite) {
-    this->flowChecker->setDefined(var, true);
+    this->flowChecker->markDefined(variable);
   }
-  assign->type = isDefinite ? type->inner() : type;
+  assign->type = stored;
 
   return assign;
 }
 
-bool AssignChecker::unfoldsNarrowedCompound(AssignExpr *assign, BinaryOp op) {
+void AssignChecker::walkNullishValue(AssignExpr *assign, const Type *type) {
+  auto before = this->state.getFlowState().getFlow();
+  const Type *hint = type->isError() ? nullptr : type->inner();
+  assign->value = this->exprChecker->checkExpr(assign->value, hint);
+  const auto &after = this->state.getFlowState().getFlow();
+  auto joined = this->flowChecker->join(before, after);
+  this->state.getFlowState().replaceFlow(joined);
+}
+
+bool AssignChecker::unfoldNarrowedCompound(AssignExpr *assign, BinaryOp op) {
   auto *target = dyn_cast<NameExpr>(assign->target);
   if (target == nullptr) {
     return false;
   }
-  const VarSymbol *var = this->scopes->lookup(target->name).var();
-  bool isNarrowed = var != nullptr && var->type != nullptr && var->type->nonOptional()->isUnion() &&
-                    this->genericChecker->narrowedType(var) != nullptr;
+  const VarSymbol *variable = this->scopes->lookup(target->name).var();
+  bool isNarrowed = variable != nullptr && variable->type != nullptr &&
+                    variable->type->nonOptional()->isUnion() &&
+                    this->genericChecker->narrowedType(variable) != nullptr;
   if (!isNarrowed) {
     return false;
   }
@@ -443,28 +471,28 @@ bool AssignChecker::unfoldsNarrowedCompound(AssignExpr *assign, BinaryOp op) {
   return true;
 }
 
-Expr *AssignChecker::checkPlainAssign(AssignExpr *assign, BinaryOp op, bool compound) {
-  const Type *type = this->targetChecker->checkAssignTarget(assign->target, compound);
+Expr *AssignChecker::checkPlainAssign(AssignExpr *assign, BinaryOp op, AssignForm form) {
+  const auto *type = this->targetChecker->checkAssignTarget(assign->target, form);
   assign->type = type;
   auto *name = dyn_cast<NameExpr>(assign->target);
-  AssignPlace place{
+  auto place = AssignPlace{
       .index = dyn_cast<IndexExpr>(assign->target),
       .member = dyn_cast<MemberExpr>(assign->target),
       .name = name,
-      .var = name != nullptr ? name->var() : nullptr,
-      .compound = compound,
-      .reportedRange = false,
-      .definite = false,
+      .variable = name != nullptr ? name->var() : nullptr,
+      .form = form,
+      .hasReportedRange = false,
+      .isDefinite = false,
   };
-  place.reportedRange = this->reportsCompoundRange(place);
+  place.hasReportedRange = this->reportCompoundRange(place);
   if (type == nullptr) {
     this->walkInferredField(assign, place);
-  } else if (!compound) {
+  } else if (form == AssignForm::PLAIN) {
     this->walkPlainValue(assign, type, place);
   } else {
     this->walkCompoundValue(assign, op, type, place);
   }
-  Expr *set = this->dictChecker->recordAssign(assign);
+  auto *set = this->dictChecker->recordAssign(assign);
   if (set != nullptr) {
     return set;
   }
@@ -475,12 +503,14 @@ Expr *AssignChecker::checkPlainAssign(AssignExpr *assign, BinaryOp op, bool comp
   return assign;
 }
 
-bool AssignChecker::reportsCompoundRange(const AssignPlace &place) {
+bool AssignChecker::reportCompoundRange(const AssignPlace &place) {
   IndexExpr *index = place.index;
-  if (index == nullptr || !place.compound || !index->object->type->isArray()) {
+  bool isCompoundElement =
+      index != nullptr && place.form == AssignForm::COMPOUND && index->object->type->isArray();
+  if (!isCompoundElement) {
     return false;
   }
-  ResultIndexWithinArray within = this->indexProven(index);
+  auto within = this->checkIndexProven(index);
   if (within.isOk()) {
     return false;
   }
@@ -491,65 +521,65 @@ bool AssignChecker::reportsCompoundRange(const AssignPlace &place) {
 
 void AssignChecker::walkInferredField(AssignExpr *assign, AssignPlace &place) {
   MemberExpr *member = place.member;
-  Expr *value = this->exprChecker->checkExpr(assign->value);
-  const Type *type = value->type;
-  ResultFieldTypeIsFound found = AssignChecker::fieldTypeFrom(member, type);
+  auto *value = this->exprChecker->checkExpr(assign->value);
+  auto found = this->checkFieldTypeFrom(member, value->type);
   if (found.isErr()) {
     this->state.getDiagnostics().error(value->loc(), found.error().message);
-    type = Type::error();
   }
-  ClassDecl *cls = ClassDeclarer::classOf(member->object->type);
-  for (ClassField &f : cls->fields) {
-    if (f.name == member->name && !f.isStatic()) {
-      f.resolved = type;
+  const Type *type = found.isOk() ? value->type : Type::error();
+  auto *classDecl = this->classDeclarer->classOf(member->object->type);
+  for (ClassField &field : classDecl->fields) {
+    if (field.name == member->name && !field.isStatic()) {
+      field.resolved = type;
     }
   }
   assign->value = value;
   member->type = type;
   assign->type = type;
-  place.definite = !type->isOptional() && !type->isUndefined();
+  place.isDefinite = !type->isOptional() && !type->isUndefined();
 }
 
 void AssignChecker::walkPlainValue(AssignExpr *assign, const Type *type, AssignPlace &place) {
-  auto *fe = dyn_cast<FunctionExpr>(assign->value);
-  if (fe != nullptr && place.name != nullptr && fe->fn->name.empty()) {
-    fe->fn->name = place.name->name;
+  auto *functionExpr = dyn_cast<FunctionExpr>(assign->value);
+  if (functionExpr != nullptr && place.name != nullptr && functionExpr->fn->name.empty()) {
+    functionExpr->fn->name = place.name->name;
   }
-  Expr *value = this->exprChecker->checkExpr(assign->value, type->isError() ? nullptr : type);
+  const Type *hint = type->isError() ? nullptr : type;
+  auto *value = this->exprChecker->checkExpr(assign->value, hint);
   assign->value = this->typeRelations->coerce(value, type);
-  place.definite = !value->type->isOptional() && !value->type->isUndefined();
-  if (place.var == nullptr) {
+  place.isDefinite = !value->type->isOptional() && !value->type->isUndefined();
+  if (place.variable == nullptr) {
     return;
   }
-  this->flowChecker->assigned(place.var, value);
+  this->flowChecker->assigned(place.variable, value);
   if (type->isError() && this->state.getExpressionMarks().hasUntyped()) {
-    this->varChecker->assignedUntyped(place.var, value->type);
+    this->varChecker->assignedUntyped(place.variable, value->type);
   }
 }
 
 void AssignChecker::walkCompoundValue(AssignExpr *assign, BinaryOp op, const Type *type,
                                       const AssignPlace &place) {
-  std::string spelling = std::string(Operators::opSpelling(op)) + "=";
+  auto spelling = std::string(Operators::opSpelling(op)) + kAssignSuffix;
   if (type->isString()) {
-    return this->walkStringCompound(assign, op, spelling, type, place.var);
+    return this->walkStringCompound(assign, op, spelling, type, place.variable);
   }
   this->walkNumericCompound(assign, op, spelling, type);
-  if (place.var != nullptr) {
-    this->walkCompoundFacts(assign, op, place.var);
+  if (place.variable != nullptr) {
+    this->walkCompoundFacts(assign, op, place.variable);
   }
 }
 
 void AssignChecker::walkStringCompound(AssignExpr *assign, BinaryOp op, const std::string &spelling,
-                                       const Type *type, const VarSymbol *var) {
+                                       const Type *type, const VarSymbol *variable) {
   assign->value = this->exprChecker->checkExpr(assign->value);
-  ResultStringAssignable text = AssignChecker::stringAssign(op, spelling, type, assign);
+  auto text = this->checkStringAssign(op, spelling, type, assign);
   if (text.isErr()) {
     this->state.getDiagnostics().error(assign->loc(), text.error().message);
   } else if (op == BinaryOp::Add) {
     assign->value = this->concatChecker->toStringOperand(assign->value);
   }
-  if (var != nullptr) {
-    this->state.getFlowState().getFacts().forget(var);
+  if (variable != nullptr) {
+    this->state.getFlowState().getFacts().forget(variable);
   }
 }
 
@@ -559,12 +589,10 @@ void AssignChecker::walkNumericCompound(AssignExpr *assign, BinaryOp op,
   bool isBitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor;
   bool isIntegerOnly = isShift || isBitwise;
   bool isDecimalPow = type->isDecimal() && op == BinaryOp::Pow;
-  const Type *valueHint = isDecimalPow ? nullptr : type;
-  if (isIntegerOnly && !type->isInteger()) {
-    valueHint = nullptr;
-  }
-  bool isUnhinted = isShift && !TypeRelations::isIntLiteralTree(assign->value);
-  assign->value = this->exprChecker->checkExpr(assign->value, isUnhinted ? nullptr : valueHint);
+  bool isHintless = isDecimalPow || (isIntegerOnly && !type->isInteger());
+  bool isUnhinted = isShift && !this->typeRelations->isIntLiteralTree(assign->value);
+  const Type *hint = isHintless || isUnhinted ? nullptr : type;
+  assign->value = this->exprChecker->checkExpr(assign->value, hint);
   const Type *valueType = assign->value->type;
   if (type->isDecimal() && !isIntegerOnly && !valueType->isError()) {
     return this->decimalChecker->walkDecimalAssign(assign, op);
@@ -578,14 +606,14 @@ void AssignChecker::walkNumericCompound(AssignExpr *assign, BinaryOp op,
 
 void AssignChecker::walkCompoundOperands(AssignExpr *assign, BinaryOp op,
                                          const std::string &spelling, const Type *type,
-                                         bool shift) {
+                                         bool isShift) {
   const Type *valueType = assign->value->type;
-  bool isAdapting = !shift && valueType->isInteger() && valueType != type &&
-                    this->typeRelations->literalAdapts(assign->value, type);
-  bool isWrapping = !shift && type->isWrapping() && valueType->isInteger() &&
+  bool isAdapting = !isShift && valueType->isInteger() && valueType != type &&
+                    this->typeRelations->isLiteralAdapting(assign->value, type);
+  bool isWrapping = !isShift && type->isWrapping() && valueType->isInteger() &&
                     (!valueType->isWrapping() || valueType == type);
-  ResultCompoundOperands operands =
-      AssignChecker::compoundOperands(op, spelling, type, assign->value, isAdapting || isWrapping);
+  bool isSettled = isAdapting || isWrapping;
+  auto operands = this->checkCompoundOperands(op, spelling, type, assign->value, isSettled);
   if (operands.isErr()) {
     this->state.getDiagnostics().error(assign->loc(), operands.error().message);
     return;
@@ -598,30 +626,33 @@ void AssignChecker::walkCompoundOperands(AssignExpr *assign, BinaryOp op,
     assign->value = this->typeRelations->convert(assign->value, type);
     return this->walkDivisor(assign, op);
   }
-  assign->value = shift ? this->typeRelations->convert(assign->value, type)
-                        : this->typeRelations->coerce(assign->value, type);
+  if (isShift) {
+    assign->value = this->typeRelations->convert(assign->value, type);
+  } else {
+    assign->value = this->typeRelations->coerce(assign->value, type);
+  }
   if (type->isInteger()) {
     this->walkDivisor(assign, op);
   }
 }
 
 void AssignChecker::walkDivisor(AssignExpr *assign, BinaryOp op) {
-  ConstantFolder::ResultDivisorNotZero divisor =
-      this->constantFolder->checkDivisor(op, assign->value);
+  auto divisor = this->constantFolder->checkDivisor(op, assign->value);
   if (divisor.isErr()) {
     this->state.getDiagnostics().error(assign->value->loc(), divisor.error().message);
   }
 }
 
-void AssignChecker::walkCompoundFacts(AssignExpr *assign, BinaryOp op, const VarSymbol *var) {
-  std::optional<Linear> delta = this->indexProofs->linear(assign->value);
+void AssignChecker::walkCompoundFacts(AssignExpr *assign, BinaryOp op, const VarSymbol *variable) {
+  auto delta = this->indexProofs->linear(assign->value);
   bool isStep =
       (op == BinaryOp::Add || op == BinaryOp::Sub) && delta.has_value() && delta->term.isZero();
   if (!isStep) {
-    this->state.getFlowState().getFacts().forget(var);
+    this->state.getFlowState().getFacts().forget(variable);
     return;
   }
-  this->flowChecker->incremented(var, op == BinaryOp::Add ? delta->offset : -delta->offset);
+  int64_t step = op == BinaryOp::Add ? delta->offset : -delta->offset;
+  this->flowChecker->incremented(variable, step);
 }
 
 void AssignChecker::walkAssignedElement(AssignExpr *assign, const AssignPlace &place) {
@@ -635,9 +666,9 @@ void AssignChecker::walkAssignedElement(AssignExpr *assign, const AssignPlace &p
   if (!index->object->type->isArray()) {
     return;
   }
-  bool isInRange = this->indexProofs->provesInBounds(index->object, index->index, false);
-  ResultElementWriteSafe safe = this->elementWritable(index, isInRange, place.compound);
-  if (safe.isErr() && !place.reportedRange) {
+  bool isInRange = this->indexProofs->canProveInBounds(index->object, index->index);
+  auto safe = this->checkElementWritable(index, isInRange, place.form);
+  if (safe.isErr() && !place.hasReportedRange) {
     this->state.getDiagnostics().error(index->loc(), safe.error().message);
   }
   ElementIndex *element = index->form.as<ElementIndex>();
@@ -645,7 +676,7 @@ void AssignChecker::walkAssignedElement(AssignExpr *assign, const AssignPlace &p
     element->mayAppend = !isInRange;
   }
   if (!isInRange) {
-    this->flowChecker->arrayResized(index->object->type, true, false);
+    this->flowChecker->arrayResized(index->object->type, Resize::GROWS);
   }
 }
 
@@ -657,12 +688,12 @@ void AssignChecker::walkAssignedLength(AssignExpr *assign, const AssignPlace &pl
     return;
   }
   this->walkLengthValue(member, assign->value);
-  this->flowChecker->arrayResized(member->object->type, true, true);
-  std::optional<Linear> self = this->indexProofs->lengthOf(member->object);
+  this->flowChecker->arrayResized(member->object->type, Resize::CHANGES);
+  auto self = this->indexProofs->lengthOf(member->object);
   if (!self.has_value() || self->term.isZero()) {
     return;
   }
-  std::optional<Linear> given = this->indexProofs->linear(assign->value);
+  auto given = this->indexProofs->linear(assign->value);
   if (given.has_value()) {
     this->state.getFlowState().getFacts().addEqual(self->term, given->term, given->offset);
   }
@@ -671,17 +702,19 @@ void AssignChecker::walkAssignedLength(AssignExpr *assign, const AssignPlace &pl
 void AssignChecker::walkLengthValue(const MemberExpr *member, const Expr *value) {
   const Type *element = member->object->type->inner();
   if (!element->hasZeroValue()) {
-    ResultLengthIsInBounds length = this->lengthProven(member, value);
-    if (length.isErr()) {
-      this->state.getDiagnostics().error(value->loc(), length.error().message);
-    }
-    return;
+    return this->walkFilledLength(member, value);
   }
-  std::string what = ErrorTextAssign::length();
-  IndexProofs::ResultBetweenProven between =
-      this->indexProofs->requireBetween(value, 0, std::nullopt, what);
+  auto what = ErrorTextAssign::length();
+  auto between = this->indexProofs->requireBetween(value, 0, std::nullopt, what);
   if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
     this->state.getDiagnostics().error(value->loc(), between.error().message);
+  }
+}
+
+void AssignChecker::walkFilledLength(const MemberExpr *member, const Expr *value) {
+  auto length = this->checkLengthProven(member, value);
+  if (length.isErr()) {
+    this->state.getDiagnostics().error(value->loc(), length.error().message);
   }
 }
 
@@ -691,8 +724,8 @@ void AssignChecker::walkAssignedField(const AssignPlace &place) {
     return;
   }
   this->fieldFacts->fieldsAssigned(member->name);
-  std::optional<FieldPath> path = this->fieldFacts->fieldPath(member);
-  if (path.has_value() && place.definite) {
+  auto path = this->fieldFacts->fieldPath(member);
+  if (path.has_value() && place.isDefinite) {
     this->state.getFlowState().defineField(*path);
   }
   if (this->classChecker->isInitThis(member->object).isOk()) {
@@ -701,21 +734,12 @@ void AssignChecker::walkAssignedField(const AssignPlace &place) {
 }
 
 AssignChecker::ResultLogicalTargetSet AssignChecker::checkLogicalAssign(AssignExpr *assign) {
-  const char *op = assign->op == BinaryOp::LogOr ? "||=" : "&&=";
-  Expr *read = nullptr;
-  if (isa<NameExpr>(assign->target) || isa<MemberExpr>(assign->target)) {
-    read = this->copyChain(assign->target);
-  } else if (auto *index = dyn_cast<IndexExpr>(assign->target); index && !index->optional) {
-    Expr *object = this->copyChain(index->object);
-    Expr *position = this->copyChain(index->index);
-    if (object && position) {
-      read = this->state.getAst().make<IndexExpr>(index->loc(), object, position);
-    }
-  }
-  if (!read) {
+  auto *read = this->logicalRead(assign->target);
+  if (read == nullptr) {
     assign->value = this->exprChecker->checkExpr(assign->value);
     assign->type = Type::error();
-    std::string message = ErrorTextLogicalAssign::simple(op);
+    auto spelling = std::string(Operators::opSpelling(*assign->op)) + kAssignSuffix;
+    auto message = ErrorTextLogicalAssign::simple(spelling);
 
     return err(AssignCheckerCheckLogicalAssignError{
         .code = AssignCheckerCheckLogicalAssignErrorCode::NOT_A_SIMPLE_TARGET,
@@ -724,19 +748,43 @@ AssignChecker::ResultLogicalTargetSet AssignChecker::checkLogicalAssign(AssignEx
   }
   auto *set = this->state.getAst().make<AssignExpr>(assign->loc(), std::nullopt, assign->target,
                                                     assign->value);
-  auto *bin = this->state.getAst().make<BinaryExpr>(assign->loc(), *assign->op, read, set);
-  Flow whenTrue, whenFalse;
-  this->truthChecker->checkLogical(bin, nullptr, whenTrue, whenFalse, false,
-                                   bin->op == BinaryOp::LogAnd ? TruthUse::AndAssign
-                                                               : TruthUse::OrAssign);
-  this->state.getFlowState().replaceFlow(FlowChecker::join(whenTrue, whenFalse));
+  auto *binary = this->state.getAst().make<BinaryExpr>(assign->loc(), *assign->op, read, set);
+  auto whenTrue = Flow();
+  auto whenFalse = Flow();
+  bool isAnd = binary->op == BinaryOp::LogAnd;
+  auto use = isAnd ? TruthUse::AndAssign : TruthUse::OrAssign;
+  this->truthChecker->checkLogical(binary, nullptr, whenTrue, whenFalse, RightSide::VALUE, use);
+  auto joined = this->flowChecker->join(whenTrue, whenFalse);
+  this->state.getFlowState().replaceFlow(joined);
 
-  return ok(bin);
+  return ok(binary);
 }
 
-AssignChecker::ResultFieldChainCopied AssignChecker::fieldChain(Expr *read) {
-  if (!read) {
-    std::string message = ErrorTextLogicalAssign::field();
+Expr *AssignChecker::logicalRead(const Expr *target) {
+  auto *index = dyn_cast<IndexExpr>(target);
+  if (isa<NameExpr>(target) || isa<MemberExpr>(target)) {
+    return this->copyChain(target);
+  }
+  if (index != nullptr && !index->optional) {
+    return this->indexRead(index);
+  }
+
+  return nullptr;
+}
+
+Expr *AssignChecker::indexRead(const IndexExpr *index) {
+  auto *object = this->copyChain(index->object);
+  auto *position = this->copyChain(index->index);
+  if (object == nullptr || position == nullptr) {
+    return nullptr;
+  }
+
+  return this->state.getAst().make<IndexExpr>(index->loc(), object, position);
+}
+
+AssignChecker::ResultFieldChainCopied AssignChecker::checkFieldChain(Expr *read) const {
+  if (read == nullptr) {
+    auto message = ErrorTextLogicalAssign::field();
 
     return err(AssignCheckerFieldChainError{
         .code = AssignCheckerFieldChainErrorCode::NOT_A_FIELD_CHAIN,
@@ -747,10 +795,10 @@ AssignChecker::ResultFieldChainCopied AssignChecker::fieldChain(Expr *read) {
   return ok(read);
 }
 
-AssignChecker::ResultFieldMayBeAbsent AssignChecker::fieldOptional(const MemberExpr *member,
-                                                                   const Type *type) {
-  if (type && !type->isOptional() && !type->isError()) {
-    std::string message = ErrorTextLogicalAssign::fieldOpt(member->name, type->name());
+AssignChecker::ResultFieldMayBeAbsent AssignChecker::checkFieldOptional(const MemberExpr *member,
+                                                                        const Type *type) const {
+  if (type != nullptr && !type->isOptional() && !type->isError()) {
+    auto message = ErrorTextLogicalAssign::fieldOpt(member->name, type->name());
 
     return err(AssignCheckerFieldOptionalError{
         .code = AssignCheckerFieldOptionalErrorCode::NOT_OPTIONAL,
@@ -762,7 +810,8 @@ AssignChecker::ResultFieldMayBeAbsent AssignChecker::fieldOptional(const MemberE
 }
 
 Expr *AssignChecker::checkFieldLogicalAssign(AssignExpr *assign) {
-  ResultFieldChainCopied chain = AssignChecker::fieldChain(this->copyChain(assign->target));
+  auto *copied = this->copyChain(assign->target);
+  auto chain = this->checkFieldChain(copied);
   if (chain.isErr()) {
     this->state.getDiagnostics().error(assign->target->loc(), chain.error().message);
     assign->value = this->exprChecker->checkExpr(assign->value);
@@ -772,36 +821,47 @@ Expr *AssignChecker::checkFieldLogicalAssign(AssignExpr *assign) {
   Expr *read = chain.value();
   auto *set = this->state.getAst().make<AssignExpr>(assign->loc(), std::nullopt, assign->target,
                                                     assign->value);
-  auto *bin = this->state.getAst().make<BinaryExpr>(assign->loc(), BinaryOp::Nullish, read, set);
-  BinaryChecker::ResultNullishResolved nullish = this->binaryChecker->checkNullish(bin, nullptr);
+  auto *binary = this->state.getAst().make<BinaryExpr>(assign->loc(), BinaryOp::Nullish, read, set);
+  auto nullish = this->binaryChecker->checkNullish(binary, nullptr);
   if (nullish.isErr()) {
-    this->state.getDiagnostics().error(bin->loc(), nullish.error().message);
+    this->state.getDiagnostics().error(binary->loc(), nullish.error().message);
   }
-  Expr *result = nullish.isOk() ? nullish.value() : bin;
+  Expr *result = nullish.isOk() ? nullish.value() : binary;
   auto *member = cast<MemberExpr>(set->target);
-  ResultFieldMayBeAbsent absent = AssignChecker::fieldOptional(member, member->type);
+  auto absent = this->checkFieldOptional(member, member->type);
   if (absent.isErr()) {
     this->state.getDiagnostics().error(assign->loc(), absent.error().message);
     return result;
   }
-  const Type *valueType = set->value->type;
-  if (auto *conv = dyn_cast<CastExpr>(set->value); conv && conv->isImplicit()) {
-    valueType = conv->operand->type;
-  }
+  const auto *valueType = this->assignedValueType(set->value);
   if (!valueType->isOptional() && !valueType->isUndefined()) {
-    if (std::optional<FieldPath> path = this->fieldFacts->fieldPath(member)) {
-      this->state.getFlowState().defineField(*path);
-    }
+    this->defineFieldOf(member);
   }
 
   return result;
 }
 
-AssignChecker::ResultIncrementedValue AssignChecker::updatable(const UpdateExpr *update,
-                                                               const Type *type) {
+const Type *AssignChecker::assignedValueType(const Expr *value) const {
+  auto *conversion = dyn_cast<CastExpr>(value);
+  if (conversion != nullptr && conversion->isImplicit()) {
+    return conversion->operand->type;
+  }
+
+  return value->type;
+}
+
+void AssignChecker::defineFieldOf(const MemberExpr *member) {
+  auto path = this->fieldFacts->fieldPath(member);
+  if (path.has_value()) {
+    this->state.getFlowState().defineField(*path);
+  }
+}
+
+AssignChecker::ResultIncrementedValue AssignChecker::checkUpdatable(const UpdateExpr *update,
+                                                                    const Type *type) const {
   if (!type->isNumeric() && !type->isDecimal()) {
-    const char *op = update->increment ? "++" : "--";
-    std::string message = ErrorTextUpdate::notNumber(op, type->name());
+    const char *op = update->increment ? kIncrementSpelling : kDecrementSpelling;
+    auto message = ErrorTextUpdate::notNumber(op, type->name());
 
     return err(AssignCheckerUpdatableError{
         .code = AssignCheckerUpdatableErrorCode::NOT_NUMERIC,
@@ -814,34 +874,51 @@ AssignChecker::ResultIncrementedValue AssignChecker::updatable(const UpdateExpr 
 
 Expr *AssignChecker::checkUpdate(UpdateExpr *update) {
   update->type = Type::error();
-  const Type *type = this->targetChecker->checkAssignTarget(update->target, true);
+  const auto *type = this->targetChecker->checkAssignTarget(update->target, AssignForm::COMPOUND);
   if (type->isError()) {
     return update;
   }
-  ResultIncrementedValue numeric = AssignChecker::updatable(update, type);
+  auto numeric = this->checkUpdatable(update, type);
   if (numeric.isErr()) {
     this->state.getDiagnostics().error(update->loc(), numeric.error().message);
     return update;
   }
   update->type = type;
-  if (auto *name = dyn_cast<NameExpr>(update->target)) {
-    if (name->var()) {
-      this->flowChecker->incremented(name->var(), update->increment ? 1 : -1);
-    }
-  } else if (auto *index = dyn_cast<IndexExpr>(update->target); index && !index->keyed()) {
-    if (index->object->type->isTypedArray()) {
-      this->bytesChecker->walkBytesStore(index, nullptr);
-    } else {
-      ResultIndexWithinArray within = this->indexProven(index);
-      if (within.isErr()) {
-        this->state.getDiagnostics().error(index->loc(), within.error().message);
-      }
-    }
-  } else if (auto *member = dyn_cast<MemberExpr>(update->target)) {
+  auto *name = dyn_cast<NameExpr>(update->target);
+  auto *index = dyn_cast<IndexExpr>(update->target);
+  auto *member = dyn_cast<MemberExpr>(update->target);
+  if (name != nullptr) {
+    this->walkUpdatedName(name, update);
+    return update;
+  }
+  if (index != nullptr && !index->keyed()) {
+    this->walkUpdatedElement(index);
+    return update;
+  }
+  if (member != nullptr) {
     this->fieldFacts->fieldsAssigned(member->name);
   }
 
   return update;
+}
+
+void AssignChecker::walkUpdatedName(const NameExpr *name, const UpdateExpr *update) {
+  if (name->var() == nullptr) {
+    return;
+  }
+  int64_t step = update->increment ? 1 : -1;
+  this->flowChecker->incremented(name->var(), step);
+}
+
+void AssignChecker::walkUpdatedElement(IndexExpr *index) {
+  if (index->object->type->isTypedArray()) {
+    this->bytesChecker->walkBytesStore(index, nullptr);
+    return;
+  }
+  auto within = this->checkIndexProven(index);
+  if (within.isErr()) {
+    this->state.getDiagnostics().error(index->loc(), within.error().message);
+  }
 }
 
 }

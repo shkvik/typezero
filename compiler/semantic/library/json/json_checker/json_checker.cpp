@@ -27,51 +27,56 @@ JsonChecker::JsonChecker(SemanticState &owner, SemanticParts &all)
   this->callChecker = &all.callChecker;
   this->exprChecker = &all.exprChecker;
   this->typeRelations = &all.typeRelations;
+  this->binaryChecker = &all.binaryChecker;
   this->argumentChecker = &all.argumentChecker;
   this->arrayLiteralChecker = &all.arrayLiteralChecker;
 }
 
-const VarSymbol *JsonChecker::jsonVariable(const Expr *expr) {
-  if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit()) {
-    expr = conv->operand;
+const VarSymbol *JsonChecker::jsonVariable(const Expr *expr) const {
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  if (conversion != nullptr && conversion->isImplicit()) {
+    expr = conversion->operand;
   }
   auto *name = dyn_cast<NameExpr>(expr);
 
-  return name && name->var() && name->var()->type->nonOptional()->isJson() ? name->var() : nullptr;
+  return name != nullptr && name->var() != nullptr && name->var()->type->nonOptional()->isJson()
+             ? name->var()
+             : nullptr;
 }
 
-bool JsonChecker::nullName(const Expr *expr) {
+bool JsonChecker::nullName(const Expr *expr) const {
   auto *name = dyn_cast<NameExpr>(expr);
 
-  return name && name->name == "null" && !name->var() && !name->func();
+  return name != nullptr && name->name == "null" && name->var() == nullptr &&
+         name->func() == nullptr;
 }
 
-bool JsonChecker::isNothing(const Expr *expr) {
-  return JsonChecker::nullName(expr) || (expr->type && expr->type->isUndefined());
+bool JsonChecker::isNothing(const Expr *expr) const {
+  return this->nullName(expr) || (expr->type != nullptr && expr->type->isUndefined());
 }
 
-const Expr *JsonChecker::bare(const Expr *expr) {
-  while (auto *conv = dyn_cast_or_null<CastExpr>(expr)) {
-    if (!conv->isImplicit()) {
+const Expr *JsonChecker::bare(const Expr *expr) const {
+  while (auto *conversion = dyn_cast_or_null<CastExpr>(expr)) {
+    if (!conversion->isImplicit()) {
       break;
     }
-    expr = conv->operand;
+    expr = conversion->operand;
   }
 
   return expr;
 }
 
-bool JsonChecker::sameRef(const Expr *a, const Expr *b) {
-  const Expr *left = JsonChecker::bare(a);
-  const Expr *right = JsonChecker::bare(b);
+bool JsonChecker::sameRef(const Expr *a, const Expr *b) const {
+  const auto *left = this->bare(a);
+  const auto *right = this->bare(b);
   auto *leftMember = dyn_cast_or_null<MemberExpr>(left);
   auto *rightMember = dyn_cast_or_null<MemberExpr>(right);
   while (leftMember != nullptr && rightMember != nullptr) {
     if (leftMember->name != rightMember->name) {
       return false;
     }
-    left = JsonChecker::bare(leftMember->object);
-    right = JsonChecker::bare(rightMember->object);
+    left = this->bare(leftMember->object);
+    right = this->bare(rightMember->object);
     leftMember = dyn_cast_or_null<MemberExpr>(left);
     rightMember = dyn_cast_or_null<MemberExpr>(right);
   }
@@ -84,12 +89,12 @@ bool JsonChecker::sameRef(const Expr *a, const Expr *b) {
   return leftName->var() != nullptr && leftName->var() == rightName->var();
 }
 
-std::string JsonChecker::refText(const Expr *expr) {
-  std::vector<llvm::StringRef> names;
-  const Expr *link = JsonChecker::bare(expr);
+std::string JsonChecker::refText(const Expr *expr) const {
+  auto names = std::vector<llvm::StringRef>();
+  const auto *link = this->bare(expr);
   while (auto *member = dyn_cast<MemberExpr>(link)) {
     names.push_back(member->name);
-    link = JsonChecker::bare(member->object);
+    link = this->bare(member->object);
   }
   auto *root = dyn_cast<NameExpr>(link);
   std::string text = root != nullptr ? root->name.str() : "x";
@@ -100,48 +105,49 @@ std::string JsonChecker::refText(const Expr *expr) {
   return text;
 }
 
-void JsonChecker::walkRedundantTests(const BinaryExpr *bin) {
-  bool isAnd = bin->op == BinaryOp::LogAnd;
-  std::vector<const Expr *> terms = ExprParts::sameOperatorParts(bin->lhs, bin->op);
+void JsonChecker::walkRedundantTests(const BinaryExpr *binary) {
+  bool isAnd = binary->op == BinaryOp::LogAnd;
+  auto terms = ExprParts::sameOperatorParts(binary->lhs, binary->op);
   const Expr *tested = nullptr;
   bool isNullTest = false;
-  const Expr *rhs = JsonChecker::bare(bin->rhs);
-  if (auto *eq = dyn_cast<BinaryExpr>(rhs); eq &&
-                                            (eq->op == BinaryOp::Eq || eq->op == BinaryOp::Ne) &&
-                                            (JsonChecker::nullName(JsonChecker::bare(eq->lhs)) ||
-                                             JsonChecker::nullName(JsonChecker::bare(eq->rhs)))) {
-    tested = JsonChecker::nullName(JsonChecker::bare(eq->lhs)) ? eq->rhs : eq->lhs;
+  const auto *rhs = this->bare(binary->rhs);
+  auto *eq = dyn_cast<BinaryExpr>(rhs);
+  if (eq != nullptr && (eq->op == BinaryOp::Eq || eq->op == BinaryOp::Ne) &&
+      (this->nullName(this->bare(eq->lhs)) || this->nullName(this->bare(eq->rhs)))) {
+    tested = this->nullName(this->bare(eq->lhs)) ? eq->rhs : eq->lhs;
     isNullTest = true;
   } else {
     const Expr *inner = rhs;
-    if (auto *unary = dyn_cast<UnaryExpr>(rhs); unary && unary->op == UnaryOp::Not) {
-      inner = JsonChecker::bare(unary->operand);
+    auto *unary = dyn_cast<UnaryExpr>(rhs);
+    if (unary != nullptr && unary->op == UnaryOp::Not) {
+      inner = this->bare(unary->operand);
     }
-    if (auto *call = dyn_cast<CallExpr>(inner); call && call->builtin() == Builtin::ArrayIsArray) {
+    auto *call = dyn_cast<CallExpr>(inner);
+    if (call != nullptr && call->builtin() == Builtin::ArrayIsArray) {
       tested = call->args[0];
     }
   }
-  if (!tested || !JsonChecker::bare(tested)->type ||
-      !JsonChecker::bare(tested)->type->nonOptional()->isJson()) {
+  if (tested == nullptr || this->bare(tested)->type == nullptr ||
+      !this->bare(tested)->type->nonOptional()->isJson()) {
     return;
   }
   for (const Expr *term : terms) {
-    auto *cmp = dyn_cast<BinaryExpr>(JsonChecker::bare(term));
-    if (!cmp || cmp->op != (isAnd ? BinaryOp::Eq : BinaryOp::Ne)) {
+    auto *cmp = dyn_cast<BinaryExpr>(this->bare(term));
+    if (cmp == nullptr || cmp->op != (isAnd ? BinaryOp::Eq : BinaryOp::Ne)) {
       continue;
     }
-    auto *typeOf = dyn_cast<UnaryExpr>(JsonChecker::bare(cmp->lhs));
-    auto *text = dyn_cast<StringLitExpr>(JsonChecker::bare(cmp->rhs));
-    if (!typeOf || !text) {
-      typeOf = dyn_cast<UnaryExpr>(JsonChecker::bare(cmp->rhs));
-      text = dyn_cast<StringLitExpr>(JsonChecker::bare(cmp->lhs));
+    auto *typeOf = dyn_cast<UnaryExpr>(this->bare(cmp->lhs));
+    auto *text = dyn_cast<StringLitExpr>(this->bare(cmp->rhs));
+    if (typeOf == nullptr || text == nullptr) {
+      typeOf = dyn_cast<UnaryExpr>(this->bare(cmp->rhs));
+      text = dyn_cast<StringLitExpr>(this->bare(cmp->lhs));
     }
-    if (!typeOf || typeOf->op != UnaryOp::TypeOf || !text ||
-        !JsonChecker::sameRef(typeOf->operand, tested)) {
+    if (typeOf == nullptr || typeOf->op != UnaryOp::TypeOf || text == nullptr ||
+        !this->sameRef(typeOf->operand, tested)) {
       continue;
     }
-    std::string name = ToUtf8::toUtf8(text->value);
-    ResultTypeOfAgrees agrees = JsonChecker::typeOfAgrees(tested, name, isNullTest, isAnd);
+    auto name = ToUtf8::toUtf8(text->value);
+    auto agrees = this->typeOfAgrees(tested, name, isNullTest, isAnd);
     if (agrees.isErr()) {
       this->state.getDiagnostics().error(rhs->loc(), agrees.error().message);
       return;
@@ -150,9 +156,9 @@ void JsonChecker::walkRedundantTests(const BinaryExpr *bin) {
 }
 
 JsonChecker::ResultTypeOfAgrees JsonChecker::typeOfAgrees(const Expr *tested, llvm::StringRef name,
-                                                          bool nullTest, bool isAnd) {
+                                                          bool nullTest, bool isAnd) const {
   if (nullTest && name != "null" && name != "undefined") {
-    std::string message = ErrorTextJsonTest::neverNull(JsonChecker::refText(tested), isAnd, name);
+    auto message = ErrorTextJsonTest::neverNull(this->refText(tested), isAnd, name);
 
     return err(JsonCheckerTypeOfAgreesError{
         .code = JsonCheckerTypeOfAgreesErrorCode::NEVER_NULL,
@@ -160,7 +166,7 @@ JsonChecker::ResultTypeOfAgrees JsonChecker::typeOfAgrees(const Expr *tested, ll
     });
   }
   if (!nullTest && name != "array") {
-    std::string message = ErrorTextJsonTest::neverArray(JsonChecker::refText(tested), isAnd, name);
+    auto message = ErrorTextJsonTest::neverArray(this->refText(tested), isAnd, name);
 
     return err(JsonCheckerTypeOfAgreesError{
         .code = JsonCheckerTypeOfAgreesErrorCode::NEVER_ARRAY,
@@ -171,9 +177,10 @@ JsonChecker::ResultTypeOfAgrees JsonChecker::typeOfAgrees(const Expr *tested, ll
   return ok(tested);
 }
 
-JsonChecker::ResultNullPossible JsonChecker::nullPossible(const Type *type, llvm::StringRef op) {
+JsonChecker::ResultNullPossible JsonChecker::nullPossible(const Type *type,
+                                                          llvm::StringRef op) const {
   if (!type->isError() && !type->nonOptional()->isJson()) {
-    std::string message = ErrorTextJsonNull::never(type->name(), op);
+    auto message = ErrorTextJsonNull::never(type->name(), op);
 
     return err(JsonCheckerNullPossibleError{
         .code = JsonCheckerNullPossibleErrorCode::NEVER_NULL,
@@ -187,7 +194,7 @@ JsonChecker::ResultNullPossible JsonChecker::nullPossible(const Type *type, llvm
 JsonChecker::ResultTestsUnknown JsonChecker::testsUnknown(const Type *type) {
   if (!type->isUnknown() && !type->nonOptional()->isParam() &&
       !this->state.getGenericStore().isCheckingInstance()) {
-    std::string message = ErrorTextJsonIsJson::known(type->name(), type->nonOptional()->isJson());
+    auto message = ErrorTextJsonIsJson::known(type->name(), type->nonOptional()->isJson());
 
     return err(JsonCheckerTestsUnknownError{
         .code = JsonCheckerTestsUnknownErrorCode::KNOWN_TYPE,
@@ -198,7 +205,7 @@ JsonChecker::ResultTestsUnknown JsonChecker::testsUnknown(const Type *type) {
   return ok(type);
 }
 
-bool JsonChecker::holdsJson(const Type *type) {
+bool JsonChecker::holdsJson(const Type *type) const {
   while (type->isOptional() || type->isArray()) {
     type = type->inner();
   }
@@ -206,12 +213,12 @@ bool JsonChecker::holdsJson(const Type *type) {
   return type->isJson();
 }
 
-bool JsonChecker::isNullName(const Expr *expr) {
-  return JsonChecker::nullName(expr);
+bool JsonChecker::isNullName(const Expr *expr) const {
+  return this->nullName(expr);
 }
 
 Expr *JsonChecker::checkNull(NameExpr *name, const Type *expected) {
-  if (!JsonChecker::isNullName(name) || !expected || !expected->nonOptional()->isJson()) {
+  if (!this->isNullName(name) || expected == nullptr || !expected->nonOptional()->isJson()) {
     return nullptr;
   }
   name->type = Type::json();
@@ -221,11 +228,12 @@ Expr *JsonChecker::checkNull(NameExpr *name, const Type *expected) {
 
 Expr *JsonChecker::checkJsonMember(MemberExpr *member) {
   member->type = Type::optional(Type::json());
-  if (Expr *narrowed = this->fieldFacts->narrowedField(member); narrowed != member) {
+  auto *narrowed = this->fieldFacts->narrowedField(member);
+  if (narrowed != member) {
     return narrowed;
   }
-  if (std::optional<FieldPath> path = this->fieldFacts->fieldPath(member);
-      path && this->fieldFacts->isFieldDefined(*path)) {
+  auto path = this->fieldFacts->fieldPath(member);
+  if (path && this->fieldFacts->isFieldDefined(*path)) {
     return this->typeRelations->convert(member, Type::json());
   }
 
@@ -243,7 +251,7 @@ Expr *JsonChecker::checkJsonIndex(IndexExpr *index) {
     index->index = this->typeRelations->convert(index->index, Type::doubleTy());
     return index;
   }
-  std::string message = ErrorTextJsonKey::index(key->name());
+  auto message = ErrorTextJsonKey::index(key->name());
   this->state.getDiagnostics().error(index->index->loc(), message);
   index->type = Type::error();
 
@@ -251,7 +259,8 @@ Expr *JsonChecker::checkJsonIndex(IndexExpr *index) {
 }
 
 const Type *JsonChecker::checkJsonTarget(Expr *target) {
-  if (auto *index = dyn_cast<IndexExpr>(target)) {
+  auto *index = dyn_cast<IndexExpr>(target);
+  if (index != nullptr) {
     if (this->checkJsonIndex(index)->type->isError()) {
       return Type::error();
     }
@@ -264,14 +273,16 @@ const Type *JsonChecker::checkJsonTarget(Expr *target) {
 
 Expr *JsonChecker::reportJsonMethod(CallExpr *call, MemberExpr *member) {
   const Expr *object = member->object;
-  if (auto *conv = dyn_cast<CastExpr>(object); conv && conv->isImplicit()) {
-    object = conv->operand;
+  auto *conversion = dyn_cast<CastExpr>(object);
+  if (conversion != nullptr && conversion->isImplicit()) {
+    object = conversion->operand;
   }
   llvm::StringRef variable;
-  if (auto *name = dyn_cast<NameExpr>(object); name && name->var()) {
+  auto *name = dyn_cast<NameExpr>(object);
+  if (name != nullptr && name->var() != nullptr) {
     variable = name->name;
   }
-  std::string message = ErrorTextJsonMethod::none(member->name, variable);
+  auto message = ErrorTextJsonMethod::none(member->name, variable);
   this->state.getDiagnostics().error(member->loc(), message);
   for (Expr *&arg : call->args) {
     arg = this->exprChecker->checkExpr(arg);
@@ -280,43 +291,44 @@ Expr *JsonChecker::reportJsonMethod(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-Expr *JsonChecker::checkJsonObjectLit(ObjectLitExpr *lit) {
-  const Type *json = Type::json();
-  for (ObjectLitExpr::Property &prop : lit->props) {
-    if (prop.spread() || prop.method()) {
+Expr *JsonChecker::checkJsonObjectLit(ObjectLitExpr *literal) {
+  const auto *json = Type::json();
+  for (ObjectLitExpr::Property &property : literal->props) {
+    if (property.spread() || property.method()) {
       std::string message =
-          prop.spread() ? ErrorTextJsonLiteral::spread() : ErrorTextJsonLiteral::function();
-      this->state.getDiagnostics().error(prop.loc, message);
-      prop.value = this->exprChecker->checkExpr(prop.value);
+          property.spread() ? ErrorTextJsonLiteral::spread() : ErrorTextJsonLiteral::function();
+      this->state.getDiagnostics().error(property.loc, message);
+      property.value = this->exprChecker->checkExpr(property.value);
       continue;
     }
-    if (prop.defaulted()) {
-      std::string message = ErrorTextJsonLiteral::defaulted(prop.name);
-      this->state.getDiagnostics().error(prop.loc, message);
-      prop.value = this->exprChecker->checkExpr(cast<AssignExpr>(prop.value)->value);
-      prop.form = ValueProperty{};
+    if (property.defaulted()) {
+      auto message = ErrorTextJsonLiteral::defaulted(property.name);
+      this->state.getDiagnostics().error(property.loc, message);
+      property.value = this->exprChecker->checkExpr(cast<AssignExpr>(property.value)->value);
+      property.form = ValueProperty{};
       continue;
     }
-    if (ComputedProperty *computed = prop.form.as<ComputedProperty>()) {
+    ComputedProperty *computed = property.form.as<ComputedProperty>();
+    if (computed != nullptr) {
       computed->key = this->exprChecker->checkExpr(computed->key);
-      if (!prop.key()->type->isString() && !prop.key()->type->isError()) {
-        std::string message = ErrorTextJsonKey::literal(prop.key()->type->name());
-        this->state.getDiagnostics().error(prop.key()->loc(), message);
+      if (!property.key()->type->isString() && !property.key()->type->isError()) {
+        auto message = ErrorTextJsonKey::literal(property.key()->type->name());
+        this->state.getDiagnostics().error(property.key()->loc(), message);
       }
     }
-    Expr *value = this->exprChecker->checkExpr(prop.value, json);
+    auto *value = this->exprChecker->checkExpr(property.value, json);
     const Type *type = value->type;
-    std::string label = ErrorTextJsonKey::label(prop.name);
-    prop.value = this->typeRelations->coerce(
+    auto label = ErrorTextJsonKey::label(property.name);
+    property.value = this->typeRelations->coerce(
         value, type->isOptional() || type->isUndefined() ? Type::optional(json) : json, label);
   }
-  lit->type = json;
+  literal->type = json;
 
-  return lit;
+  return literal;
 }
 
-Expr *JsonChecker::checkJsonArrayLit(ArrayLitExpr *lit) {
-  Expr *array = this->arrayLiteralChecker->checkArrayLit(lit, Type::array(Type::json()));
+Expr *JsonChecker::checkJsonArrayLit(ArrayLitExpr *literal) {
+  auto *array = this->arrayLiteralChecker->checkArrayLit(literal, Type::array(Type::json()));
   if (array->type->isError()) {
     return array;
   }
@@ -324,79 +336,81 @@ Expr *JsonChecker::checkJsonArrayLit(ArrayLitExpr *lit) {
   return this->typeRelations->coerce(array, Type::json());
 }
 
-Expr *JsonChecker::checkNullEquality(BinaryExpr *bin) {
-  bool isLhsNull = JsonChecker::isNullName(bin->lhs);
-  bool isRhsNull = JsonChecker::isNullName(bin->rhs);
+Expr *JsonChecker::checkNullEquality(BinaryExpr *binary) {
+  bool isLhsNull = this->isNullName(binary->lhs);
+  bool isRhsNull = this->isNullName(binary->rhs);
   if (!isLhsNull && !isRhsNull) {
     return nullptr;
   }
-  bin->type = Type::boolTy();
-  Expr *&null = isLhsNull ? bin->lhs : bin->rhs;
-  Expr *&other = isLhsNull ? bin->rhs : bin->lhs;
-  const Type *type = Type::undefinedTy();
+  binary->type = Type::boolTy();
+  Expr *&null = isLhsNull ? binary->lhs : binary->rhs;
+  Expr *&other = isLhsNull ? binary->rhs : binary->lhs;
+  const auto *type = Type::undefinedTy();
   if (!(isLhsNull && isRhsNull)) {
     other = this->exprChecker->checkExpr(other);
     type = other->type;
   }
   null->type = Type::json();
-  ResultNullPossible possible = JsonChecker::nullPossible(type, Operators::opSpelling(bin->op));
+  auto possible = this->nullPossible(type, Operators::opSpelling(binary->op));
   if (possible.isOk()) {
-    return bin;
+    return binary;
   }
   this->state.getDiagnostics().error(null->loc(), possible.error().message);
   null->type = Type::error();
 
-  return bin;
+  return binary;
 }
 
-Expr *JsonChecker::checkJsonEquality(BinaryExpr *bin) {
-  const Type *l = bin->lhs->type;
-  const Type *r = bin->rhs->type;
+Expr *JsonChecker::checkJsonEquality(BinaryExpr *binary) {
+  const Type *l = binary->lhs->type;
+  const Type *r = binary->rhs->type;
   bool isLhsJson = l->nonOptional()->isJson();
   bool isRhsJson = r->nonOptional()->isJson();
   const Type *json =
       l->isOptional() || r->isOptional() ? Type::optional(Type::json()) : Type::json();
   if (isLhsJson && isRhsJson) {
-    bin->lhs = this->typeRelations->convert(bin->lhs, json);
-    bin->rhs = this->typeRelations->convert(bin->rhs, json);
-    return bin;
+    binary->lhs = this->typeRelations->convert(binary->lhs, json);
+    binary->rhs = this->typeRelations->convert(binary->rhs, json);
+    return binary;
   }
-  Expr *&other = isLhsJson ? bin->rhs : bin->lhs;
+  Expr *&other = isLhsJson ? binary->rhs : binary->lhs;
   const Type *type = other->type;
   if (type->isString() || type->isBool()) {
-    return bin;
+    return binary;
   }
   if (type->isNumeric()) {
     other = this->typeRelations->convert(other, Type::doubleTy());
-    return bin;
+    return binary;
   }
   if (type->isOptional() && TypeRelations::isImplicitlyConvertible(type->inner(), Type::json())) {
-    bin->lhs = this->typeRelations->convert(bin->lhs, json);
-    bin->rhs = this->typeRelations->convert(bin->rhs, json);
-    return bin;
+    binary->lhs = this->typeRelations->convert(binary->lhs, json);
+    binary->rhs = this->typeRelations->convert(binary->rhs, json);
+    return binary;
   }
-  std::string message = BinaryChecker::operandTypesText(Operators::opSpelling(bin->op), l, r);
-  this->state.getDiagnostics().error(bin->loc(), message);
+  auto message = this->binaryChecker->operandTypesText(Operators::opSpelling(binary->op), l, r);
+  this->state.getDiagnostics().error(binary->loc(), message);
 
-  return bin;
+  return binary;
 }
 
 std::optional<FieldPath> JsonChecker::jsonField(const Expr *expr) const {
-  if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit()) {
-    expr = conv->operand;
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  if (conversion != nullptr && conversion->isImplicit()) {
+    expr = conversion->operand;
   }
   auto *member = dyn_cast<MemberExpr>(expr);
-  if (!member || !member->object->type || !member->object->type->nonOptional()->isJson()) {
+  if (member == nullptr || member->object->type == nullptr ||
+      !member->object->type->nonOptional()->isJson()) {
     return std::nullopt;
   }
 
   return this->fieldFacts->fieldPath(member);
 }
 
-void JsonChecker::narrowJsonField(Flow &flow, const FieldPath &path, const Type *type) {
+void JsonChecker::narrowJsonField(Flow &flow, const FieldPath &path, const Type *type) const {
   llvm::erase_if(flow.narrowedFields, [&](const auto &entry) { return entry.first == path; });
   flow.narrowedFields.push_back({path, type});
-  FieldFacts::defineField(flow, path);
+  this->fieldFacts->defineField(flow, path);
 }
 
 void JsonChecker::addJsonFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) const {
@@ -405,14 +419,15 @@ void JsonChecker::addJsonFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse
     this->addArrayFacts(call->args[0], whenTrue);
     return;
   }
-  auto *bin = dyn_cast<BinaryExpr>(cond);
-  if (bin == nullptr || (bin->op != BinaryOp::Eq && bin->op != BinaryOp::Ne)) {
+  auto *binary = dyn_cast<BinaryExpr>(cond);
+  if (binary == nullptr || (binary->op != BinaryOp::Eq && binary->op != BinaryOp::Ne)) {
     return;
   }
-  Flow &equal = bin->op == BinaryOp::Eq ? whenTrue : whenFalse;
-  Flow &different = bin->op == BinaryOp::Eq ? whenFalse : whenTrue;
-  for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
-    if (JsonChecker::isNothing(other)) {
+  Flow &equal = binary->op == BinaryOp::Eq ? whenTrue : whenFalse;
+  Flow &different = binary->op == BinaryOp::Eq ? whenFalse : whenTrue;
+  for (auto [side, other] :
+       {std::pair{binary->lhs, binary->rhs}, std::pair{binary->rhs, binary->lhs}}) {
+    if (this->isNothing(other)) {
       this->addNothingFacts(side, other, equal, different);
       continue;
     }
@@ -425,68 +440,68 @@ void JsonChecker::addJsonFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse
 }
 
 void JsonChecker::addArrayFacts(const Expr *arg, Flow &whenTrue) const {
-  const VarSymbol *var = JsonChecker::jsonVariable(arg);
-  if (var != nullptr) {
-    whenTrue.narrowed.push_back({var, Type::array(Type::json())});
-    if (var->type->isOptional()) {
-      whenTrue.defined.insert(var);
+  const auto *variable = this->jsonVariable(arg);
+  if (variable != nullptr) {
+    whenTrue.narrowed.push_back({variable, Type::array(Type::json())});
+    if (variable->type->isOptional()) {
+      whenTrue.defined.insert(variable);
     }
     return;
   }
-  std::optional<FieldPath> path = this->jsonField(arg);
+  auto path = this->jsonField(arg);
   if (path.has_value()) {
-    JsonChecker::narrowJsonField(whenTrue, *path, Type::array(Type::json()));
+    this->narrowJsonField(whenTrue, *path, Type::array(Type::json()));
   }
 }
 
 void JsonChecker::addNothingFacts(const Expr *side, const Expr *other, Flow &equal,
                                   Flow &different) const {
-  bool isNull = JsonChecker::nullName(other);
+  bool isNull = this->nullName(other);
   Flow &defined = isNull ? equal : different;
-  const VarSymbol *var = JsonChecker::jsonVariable(side);
-  if (var != nullptr && var->type->isOptional()) {
-    defined.defined.insert(var);
+  const auto *variable = this->jsonVariable(side);
+  if (variable != nullptr && variable->type->isOptional()) {
+    defined.defined.insert(variable);
     return;
   }
-  std::optional<FieldPath> path = this->jsonField(side);
+  auto path = this->jsonField(side);
   if (path.has_value()) {
-    FieldFacts::defineField(defined, *path);
+    this->fieldFacts->defineField(defined, *path);
   }
 }
 
 void JsonChecker::addTypeOfFacts(const Expr *operand, const std::u16string &text, Flow &equal,
                                  Flow &different) const {
-  const Type *narrowed = JsonChecker::typeOfJson(text);
+  const auto *narrowed = this->typeOfJson(text);
   bool isPresent = narrowed != nullptr || text == u"object" || text == u"null";
-  const VarSymbol *var = JsonChecker::jsonVariable(operand);
-  if (var == nullptr) {
-    std::optional<FieldPath> path = this->jsonField(operand);
+  const auto *variable = this->jsonVariable(operand);
+  if (variable == nullptr) {
+    auto path = this->jsonField(operand);
     if (!path.has_value()) {
       return;
     }
     if (narrowed != nullptr) {
-      JsonChecker::narrowJsonField(equal, *path, narrowed);
+      this->narrowJsonField(equal, *path, narrowed);
     } else if (isPresent) {
-      FieldFacts::defineField(equal, *path);
+      this->fieldFacts->defineField(equal, *path);
     } else if (text == u"undefined") {
-      FieldFacts::defineField(different, *path);
+      this->fieldFacts->defineField(different, *path);
     }
     return;
   }
   if (narrowed != nullptr) {
-    equal.narrowed.push_back({var, narrowed});
+    equal.narrowed.push_back({variable, narrowed});
   }
-  if (!var->type->isOptional()) {
+  if (!variable->type->isOptional()) {
     return;
   }
   if (isPresent) {
-    equal.defined.insert(var);
+    equal.defined.insert(variable);
   } else if (text == u"undefined") {
-    different.defined.insert(var);
+    different.defined.insert(variable);
   }
 }
 
-const Type *JsonChecker::typeOfJson(const std::u16string &text) {
+const Type *JsonChecker::typeOfJson(const std::u16string &text) const {
   if (text == u"string") {
     return Type::string();
   }
@@ -506,8 +521,7 @@ const Type *JsonChecker::typeOfJson(const std::u16string &text) {
 Expr *JsonChecker::checkJsonIsJson(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   bool isRejected = this->callChecker->rejectSpread(call);
-  ArgumentChecker::ResultArityMatches arity =
-      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
+  auto arity = isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
@@ -519,7 +533,7 @@ Expr *JsonChecker::checkJsonIsJson(CallExpr *call, MemberExpr *member) {
   if (type->isError()) {
     return call;
   }
-  ResultTestsUnknown tests = this->testsUnknown(type);
+  auto tests = this->testsUnknown(type);
   if (tests.isErr()) {
     this->state.getDiagnostics().error(call->args[0]->loc(), tests.error().message);
     return call;
@@ -533,8 +547,7 @@ Expr *JsonChecker::checkJsonIsJson(CallExpr *call, MemberExpr *member) {
 Expr *JsonChecker::checkArrayIsArray(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   bool isRejected = this->callChecker->rejectSpread(call);
-  ArgumentChecker::ResultArityMatches arity =
-      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
+  auto arity = isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
@@ -543,7 +556,7 @@ Expr *JsonChecker::checkArrayIsArray(CallExpr *call, MemberExpr *member) {
   }
   call->args[0] = this->exprChecker->checkExpr(call->args[0]);
   if (call->args[0]->type->isVoid()) {
-    std::string message = ErrorTextTruthy::voidValue();
+    auto message = ErrorTextTruthy::voidValue();
     this->state.getDiagnostics().error(call->args[0]->loc(), message);
     return call;
   }

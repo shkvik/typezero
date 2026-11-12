@@ -6,6 +6,7 @@
 
 namespace tz {
 
+class ResultTypes;
 class SemanticParts;
 class ModuleDeclarer;
 class BuiltinModuleChecker;
@@ -16,27 +17,32 @@ public:
 
   void bindImports();
   void enterModule(Module *module);
-  void enterHomeModule(const FunctionDecl *fn);
+  void enterHomeModule(const FunctionDecl *functionDecl);
   void bindAllImports(const std::vector<Module *> &modules);
   void resolveImports(Module *module);
   void noteImportsInFunctions(SourceFile &program);
-  FunctionDecl *cycleCallee(FunctionDecl *fn, llvm::StringRef name);
+  FunctionDecl *cycleCallee(FunctionDecl *functionDecl, llvm::StringRef name);
 
 private:
-  Stmt *exportedType(Module *source, llvm::StringRef name);
-  std::optional<ScopeEntry> exportedValue(Module *source, llvm::StringRef name);
   using ResultWholeImportOk = Result<const ImportDecl *, ImportBinderWholeImportError>;
   using ResultAliasIsUnused = Result<const ModuleName *, ImportBinderFreeNameError>;
 
-  static ResultWholeImportOk wholeImport(const ImportDecl &decl);
-  static ResultAliasIsUnused freeName(const ModuleState &here, const ImportDecl &decl,
-                                      const ModuleName &name);
+  ResultWholeImportOk wholeImport(const ImportDecl &importDecl) const;
+  ResultAliasIsUnused freeName(const ModuleState &here, const ImportDecl &importDecl,
+                               const ModuleName &name) const;
 
+  ClassDecl *nodeClass(const NodeName &nodeName) const;
+  Stmt *exportedType(Module *source, llvm::StringRef name);
+  void resolveImport(Module *module, const ImportDecl &importDecl);
+  void bindImportedType(llvm::StringRef alias, const ModuleBinding &target);
+  std::optional<ScopeEntry> exportedValue(Module *source, llvm::StringRef name);
+  void importName(ModuleState &here, const ImportDecl &importDecl, const ModuleName &name);
   void reportTaken(const ModuleState &here, const ModuleName &name,
                    const ImportBinderFreeNameError &error);
-  void importName(ModuleState &here, const ImportDecl &decl, const ModuleName &name);
+  void bindImportedValue(ModuleState &here, llvm::StringRef alias, const ModuleBinding &target);
 
   SemanticState &state;
+  ResultTypes *resultTypes = nullptr;
   ModuleDeclarer *moduleDeclarer = nullptr;
   BuiltinModuleChecker *builtinModuleChecker = nullptr;
 };

@@ -1,5 +1,7 @@
 #include "compiler/semantic/generics/generic_class_checker/generic_class_checker.h"
 #include "compiler/program/ast/ast.h"
+#include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
+#include "compiler/program/library/object/object_member_table/object_member_table.h"
 #include "compiler/semantic/bodies/classes/class_links/class_links.h"
 #include "compiler/semantic/bodies/classes/class_member_checker/class_member_checker.h"
 #include "compiler/semantic/bodies/classes/method_call_checker/method_call_checker.h"
@@ -8,6 +10,7 @@
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/declare/module_declarer/module_declarer.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
+#include "compiler/semantic/generics/generic_check_helpers/generic_check_helpers.h"
 #include "compiler/semantic/generics/generic_class_instantiator/generic_class_instantiator.h"
 #include "compiler/semantic/generics/type_arg_inferrer/type_arg_inferrer.h"
 #include "compiler/semantic/generics/type_params/type_params.h"
@@ -25,6 +28,7 @@ GenericClassChecker::GenericClassChecker(SemanticState &owner, SemanticParts &al
     : state(owner) {
   this->chunkTypes = &all.chunkTypes;
   this->typeParams = &all.typeParams;
+  this->classLinks = &all.classLinks;
   this->exprChecker = &all.exprChecker;
   this->flowChecker = &all.flowChecker;
   this->typeResolver = &all.typeResolver;
@@ -40,124 +44,86 @@ GenericClassChecker::GenericClassChecker(SemanticState &owner, SemanticParts &al
   this->genericClassInstantiator = &all.genericClassInstantiator;
 }
 
-std::string GenericClassChecker::typeNames(llvm::ArrayRef<const Type *> types) {
-  std::string text;
-  for (const Type *t : types) {
-    text += (text.empty() ? "" : ", ") + t->name().str();
-  }
-
-  return text;
-}
-
-std::string GenericClassChecker::bindings(llvm::ArrayRef<const Type *> params,
-                                          llvm::ArrayRef<const Type *> args) {
-  std::string text;
-  for (size_t i = 0; i < params.size() && i < args.size(); ++i) {
-    text += (text.empty() ? "" : ", ") + params[i]->name().str() + " = " + args[i]->name().str();
-  }
-
-  return text;
-}
-
 const ClassDecl *GenericClassChecker::genericInstanceOf(const Type *type,
                                                         const ClassDecl *generic) {
-  for (const ClassDecl *c = type ? type->classDecl() : nullptr; c; c = c->parent) {
-    if (c == generic || c->generic() == generic) {
-      return c;
+  const ClassDecl *classDecl = type != nullptr ? type->classDecl() : nullptr;
+  while (classDecl != nullptr) {
+    if (classDecl == generic || classDecl->generic() == generic) {
+      return classDecl;
     }
+    classDecl = classDecl->parent;
   }
 
   return nullptr;
 }
 
-void GenericClassChecker::declareClassTypeParams(ClassDecl *cls) {
-  if (!cls->isGeneric() || !cls->typeArgs.empty()) {
+void GenericClassChecker::declareClassTypeParams(ClassDecl *classDecl) {
+  if (!classDecl->isGeneric() || !classDecl->typeArgs.empty()) {
     return;
   }
-  this->state.getScopeStack().enterOnlyTypes(this->state.getScopeStack().getTopTypes());
-  Module *here = this->state.getModuleStates().getCurrentModule();
-  Module *home = this->state.getModuleStates().findDeclModule(cls);
-  bool isMoved = home && home != this->state.getModuleStates().getCurrentModule() &&
-                 this->state.getScopeStack().isTopLevel();
+  auto topTypes = this->state.getScopeStack().getTopTypes();
+  this->state.getScopeStack().enterOnlyTypes(topTypes);
+  auto *here = this->state.getModuleStates().getCurrentModule();
+  auto *home = this->state.getModuleStates().findDeclModule(classDecl);
+  bool isMoved = home != nullptr && home != here && this->state.getScopeStack().isTopLevel();
   if (isMoved) {
     this->moduleDeclarer->useModule(home);
   }
   this->state.getScopeStack().openTypeScope();
-  std::vector<const Type *> defaults;
-  cls->typeArgs = this->typeParams->declareTypeParams(cls->typeParams, &defaults);
+  auto defaults = std::vector<const Type *>();
+  classDecl->typeArgs = this->typeParams->declareTypeParams(classDecl->typeParams, &defaults);
   this->state.getScopeStack().closeTypeScope();
   if (isMoved) {
     this->moduleDeclarer->useModule(here);
   }
   this->state.getScopeStack().leaveOnlyTypes();
-  this->state.getGenericStore().rememberClassDefaults(cls, std::move(defaults));
-  auto *type = const_cast<Type *>(cls->type);
-  type->setTypeArgs(cls->typeArgs);
-  type->rename(cls->name.str() + "<" + GenericClassChecker::typeNames(cls->typeArgs) + ">");
-  this->state.getGenericStore().rememberClassInstance(cls, cls->typeArgs, cls);
+  this->state.getGenericStore().rememberClassDefaults(classDecl, std::move(defaults));
+  auto *type = const_cast<Type *>(classDecl->type);
+  type->setTypeArgs(classDecl->typeArgs);
+  auto params = GenericCheckHelpers::typeNames(classDecl->typeArgs, ", ");
+  type->rename(classDecl->name.str() + "<" + params + ">");
+  this->state.getGenericStore().rememberClassInstance(classDecl, classDecl->typeArgs, classDecl);
 }
 
-void GenericClassChecker::bindClassTypeParams(const ClassDecl *cls) {
-  if (cls && !cls->typeParams.empty() && cls->typeParams.size() == cls->typeArgs.size()) {
-    this->typeParams->bindTypeParams(cls->typeParams, cls->typeArgs);
+void GenericClassChecker::bindClassTypeParams(const ClassDecl *classDecl) {
+  if (classDecl == nullptr || classDecl->typeParams.empty()) {
+    return;
+  }
+  if (classDecl->typeParams.size() == classDecl->typeArgs.size()) {
+    this->typeParams->bindTypeParams(classDecl->typeParams, classDecl->typeArgs);
   }
 }
 
-const Type *GenericClassChecker::instanceType(const ClassDecl *inst, const Type *type) {
-  if (!type || !inst->generic()) {
+const Type *GenericClassChecker::instanceType(const ClassDecl *instance, const Type *type) {
+  if (type == nullptr || instance->generic() == nullptr) {
     return type;
   }
 
-  return this->typeParams->substitute(type, inst->generic()->typeArgs, inst->typeArgs);
+  return this->typeParams->substitute(type, instance->generic()->typeArgs, instance->typeArgs);
 }
 
-const Type *GenericClassChecker::instanceValueType(const ClassDecl *inst, const Type *type) {
-  if (!type || !inst->generic()) {
+const Type *GenericClassChecker::instanceValueType(const ClassDecl *instance, const Type *type) {
+  if (type == nullptr || instance->generic() == nullptr) {
     return type;
   }
 
-  return this->typeParams->substituteValue(type, inst->generic()->typeArgs, inst->typeArgs);
+  return this->typeParams->substituteValue(type, instance->generic()->typeArgs, instance->typeArgs);
 }
 
 void GenericClassChecker::walkClassInstance(InstanceRecord *instance) {
-  ClassDecl *inst = instance->cls;
   if (instance->checked) {
     return;
   }
   instance->checking = true;
-  Diagnostics &diagnostics = this->state.getDiagnostics();
   auto instanceDiagnostics = std::vector<Diagnostic>();
-  if (!this->state.getClassStore().isBrokenClass(inst->generic())) {
-    this->classDeclarer->completeClass(inst);
-    std::vector<FunctionDecl *> bodies;
-    if (inst->init) {
-      bodies.push_back(inst->init);
-    }
-    bodies.insert(bodies.end(), inst->constructors.begin(), inst->constructors.end());
-    for (FunctionDecl *fn : ClassLinks::ownMethods(inst)) {
-      if (!fn->isAbstract() && fn->typeParams.empty()) {
-        bodies.push_back(fn);
-      }
-    }
-    for (FunctionDecl *fn : bodies) {
-      if (fn->checked || !fn->sym) {
-        continue;
-      }
-      if (!fn->sym->hasReturnType()) {
-        this->returnInferrer->inferReturnType(fn->sym);
-      }
-      BodyState saved = this->returnInferrer->enterBody(fn);
-      this->state.getGenericStore().rememberCheckingInstance(instance);
-      diagnostics.pushList(DiagnosticRoute::OWNER);
-      this->functionChecker->walkFunctionFromScratch(fn);
-      auto bodyDiagnostics = diagnostics.popList();
-      llvm::append_range(instanceDiagnostics, bodyDiagnostics);
-      this->returnInferrer->leaveBody(saved);
-    }
+  ClassDecl *classDecl = instance->cls;
+  if (!this->state.getClassStore().isBrokenClass(classDecl->generic())) {
+    this->classDeclarer->completeClass(classDecl);
+    instanceDiagnostics = this->walkInstanceBodies(instance);
   }
   instance->checking = false;
   instance->checked = true;
-  const Diagnostic *firstError = diagnostics.findFirstError(instanceDiagnostics);
+  const auto *firstError = this->state.getDiagnostics().findFirstError(instanceDiagnostics);
   if (firstError == nullptr || instance->failed) {
     return;
   }
@@ -166,43 +132,100 @@ void GenericClassChecker::walkClassInstance(InstanceRecord *instance) {
   instance->errorLoc = firstError->loc;
 }
 
+std::vector<FunctionDecl *> GenericClassChecker::instanceBodies(const ClassDecl *classDecl) const {
+  auto bodies = std::vector<FunctionDecl *>();
+  if (classDecl->init != nullptr) {
+    bodies.push_back(classDecl->init);
+  }
+  bodies.insert(bodies.end(), classDecl->constructors.begin(), classDecl->constructors.end());
+  for (FunctionDecl *method : this->classLinks->ownMethods(classDecl)) {
+    if (!method->isAbstract() && method->typeParams.empty()) {
+      bodies.push_back(method);
+    }
+  }
+
+  return bodies;
+}
+
+std::vector<Diagnostic> GenericClassChecker::walkInstanceBodies(InstanceRecord *instance) {
+  auto instanceDiagnostics = std::vector<Diagnostic>();
+  for (FunctionDecl *functionDecl : this->instanceBodies(instance->cls)) {
+    if (!functionDecl->checked && functionDecl->sym != nullptr) {
+      auto bodyDiagnostics = this->walkInstanceBody(instance, functionDecl);
+      llvm::append_range(instanceDiagnostics, bodyDiagnostics);
+    }
+  }
+
+  return instanceDiagnostics;
+}
+
+std::vector<Diagnostic> GenericClassChecker::walkInstanceBody(InstanceRecord *instance,
+                                                              FunctionDecl *functionDecl) {
+  auto &diagnostics = this->state.getDiagnostics();
+  if (!functionDecl->sym->hasReturnType()) {
+    this->returnInferrer->inferReturnType(functionDecl->sym);
+  }
+  auto saved = this->returnInferrer->enterBody(functionDecl);
+  this->state.getGenericStore().rememberCheckingInstance(instance);
+  diagnostics.pushList(DiagnosticRoute::OWNER);
+  this->functionChecker->walkFunctionFromScratch(functionDecl);
+  auto bodyDiagnostics = diagnostics.popList();
+  this->returnInferrer->leaveBody(saved);
+
+  return bodyDiagnostics;
+}
+
 void GenericClassChecker::reportClassInstance(InstanceRecord *instance, llvm::SMLoc use) {
   llvm::SMLoc loc = use.isValid() ? use : instance->cls->generic()->loc();
-  DiagnosticRoute destination = this->state.getDiagnostics().getCurrentDestination();
+  auto destination = this->state.getDiagnostics().getCurrentDestination();
   instance->isReported = destination != DiagnosticRoute::DISCARD;
   if (destination == DiagnosticRoute::OWNER) {
     this->state.getGenericStore().rememberFailedCall(loc, instance);
     this->state.getDiagnostics().error(loc, instance->message);
     return;
   }
-  const ClassDecl *inst = instance->cls;
-  std::string bindings = GenericClassChecker::bindings(inst->generic()->typeArgs, inst->typeArgs);
-  std::string message = ErrorTextInstanceUse::cannotUse(inst->name, bindings, instance->message);
+  const ClassDecl *classDecl = instance->cls;
+  auto bindings =
+      GenericCheckHelpers::bindingNames(classDecl->generic()->typeArgs, classDecl->typeArgs);
+  auto message = ErrorTextInstanceUse::cannotUse(classDecl->name, bindings, instance->message);
   this->state.getDiagnostics().error(loc, message);
-  const InstanceRecord *at = instance;
-  llvm::SmallPtrSet<const char *, 8> shown;
-  auto nameOf = [](const InstanceRecord *i) { return i->cls ? i->cls->name : i->generic->name; };
+  this->noteFailedChain(instance);
+}
+
+void GenericClassChecker::noteFailedChain(const InstanceRecord *start) {
+  auto shown = llvm::SmallPtrSet<const char *, 8>();
+  const InstanceRecord *at = start;
   while (at != nullptr && at->errorLoc.isValid()) {
-    auto [_, isFirstShown] = shown.insert(at->errorLoc.getPointer());
+    bool isFirstShown = shown.insert(at->errorLoc.getPointer()).second;
     if (!isFirstShown) {
-      break;
+      return;
     }
-    const InstanceRecord *next = this->state.getGenericStore().findFailedCall(at->errorLoc);
-    std::string where = next ? ErrorTextInstanceUse::usesHere(nameOf(at), nameOf(next))
-                             : ErrorTextInstanceUse::here(nameOf(at));
+    const auto *next = this->state.getGenericStore().findFailedCall(at->errorLoc);
+    auto where = this->failedCallNote(at, next);
     this->state.getDiagnostics().note(at->errorLoc, where);
     at = next;
   }
 }
 
+std::string GenericClassChecker::failedCallNote(const InstanceRecord *at,
+                                                const InstanceRecord *next) const {
+  llvm::StringRef name = GenericCheckHelpers::recordName(at);
+  if (next == nullptr) {
+    return ErrorTextInstanceUse::here(name);
+  }
+
+  return ErrorTextInstanceUse::usesHere(name, GenericCheckHelpers::recordName(next));
+}
+
 GenericClassChecker::ResultClassDeclared
 GenericClassChecker::declaredFirst(const ClassDecl *generic) const {
-  bool isEarly = !generic->declared && this->state.getModuleStates().getLoadingModule() &&
-                 !this->state.getFunctionStack().isInsideFunction() &&
-                 this->state.getModuleStates().findDeclModule(generic) ==
-                     this->state.getModuleStates().getLoadingModule();
+  const auto &modules = this->state.getModuleStates();
+  auto *loading = modules.getLoadingModule();
+  bool isLoadingHome = loading != nullptr && modules.findDeclModule(generic) == loading;
+  bool isEarly =
+      !generic->declared && isLoadingHome && !this->state.getFunctionStack().isInsideFunction();
   if (isEarly) {
-    std::string message = ErrorTextDeclaredFirst::before(generic->name);
+    auto message = ErrorTextDeclaredFirst::before(generic->name);
 
     return err(GenericClassCheckerDeclaredFirstError{
         .code = GenericClassCheckerDeclaredFirstErrorCode::USED_BEFORE_DECLARATION,
@@ -213,9 +236,10 @@ GenericClassChecker::declaredFirst(const ClassDecl *generic) const {
   return ok(generic);
 }
 
-GenericClassChecker::ResultClassConcrete GenericClassChecker::concrete(const ClassDecl *generic) {
+GenericClassChecker::ResultClassConcrete
+GenericClassChecker::concrete(const ClassDecl *generic) const {
   if (generic->isAbstract) {
-    std::string message = ErrorTextConcrete::abstract(generic->name);
+    auto message = ErrorTextConcrete::abstract(generic->name);
 
     return err(GenericClassCheckerConcreteError{
         .code = GenericClassCheckerConcreteErrorCode::ABSTRACT_CLASS,
@@ -228,18 +252,15 @@ GenericClassChecker::ResultClassConcrete GenericClassChecker::concrete(const Cla
 
 GenericClassChecker::ResultCtorWasPicked
 GenericClassChecker::constructorFit(const NewExpr *expr, const ClassDecl *generic,
-                                    llvm::ArrayRef<FunctionDecl *> ctors) {
-  std::vector<FunctionDecl *> fit;
-  for (FunctionDecl *c : ctors) {
-    const FuncSymbol *sym = c->sym;
-    if (expr->args.size() >= sym->minArgs &&
-        (sym->hasRest || expr->args.size() <= sym->params.size())) {
-      fit.push_back(c);
+                                    llvm::ArrayRef<FunctionDecl *> constructors) {
+  auto fit = std::vector<FunctionDecl *>();
+  for (FunctionDecl *constructor : constructors) {
+    if (this->isTakingCount(constructor->sym, expr->args.size())) {
+      fit.push_back(constructor);
     }
   }
   if (fit.empty()) {
-    std::string message =
-        ErrorTextConstructorFit::inferArgs(generic->name, true, expr->args.size());
+    auto message = ErrorTextConstructorFit::inferArgs(generic->name, true, expr->args.size());
 
     return err(GenericClassCheckerConstructorFitError{
         .code = GenericClassCheckerConstructorFitErrorCode::NO_CONSTRUCTOR_FITS,
@@ -247,8 +268,7 @@ GenericClassChecker::constructorFit(const NewExpr *expr, const ClassDecl *generi
     });
   }
   if (fit.size() > 1) {
-    std::string message =
-        ErrorTextConstructorFit::inferArgs(generic->name, false, expr->args.size());
+    auto message = ErrorTextConstructorFit::inferArgs(generic->name, false, expr->args.size());
 
     return err(GenericClassCheckerConstructorFitError{
         .code = GenericClassCheckerConstructorFitErrorCode::SEVERAL_CONSTRUCTORS_FIT,
@@ -259,43 +279,54 @@ GenericClassChecker::constructorFit(const NewExpr *expr, const ClassDecl *generi
   return ok(fit[0]);
 }
 
+bool GenericClassChecker::isTakingCount(const FuncSymbol *function, size_t count) const {
+  if (count < function->minArgs) {
+    return false;
+  }
+
+  return function->hasRest || count <= function->params.size();
+}
+
 Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
                                            const Type *expected) {
   expr->type = Type::error();
-  Expr *library = this->checkLibraryGenericNew(expr, generic, expected);
+  auto *library = this->checkLibraryGenericNew(expr, generic, expected);
   if (library != nullptr) {
     return library;
   }
   if (!expr->typeArgs.empty()) {
     return this->checkExplicitGenericNew(expr, generic, expected);
   }
-  ResultClassDeclared declared = this->declaredFirst(generic);
+  auto declared = this->declaredFirst(generic);
   if (declared.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), declared.error().message);
   }
-  ResultClassConcrete concreteClass = GenericClassChecker::concrete(generic);
+  auto concreteClass = this->concrete(generic);
   if (concreteClass.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), concreteClass.error().message);
   }
-  std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(generic);
-  std::optional<FunctionDecl *> ctor = this->pickedConstructor(expr, generic, ctors);
-  if (!ctor.has_value()) {
+  auto constructors = this->classLinks->constructorsOf(generic);
+  auto constructor = this->pickedConstructor(expr, generic, constructors);
+  if (!constructor.has_value()) {
     this->walkArgsLoosely(expr->args);
+
     return expr;
   }
-  FuncSymbol *fn = this->constructorFunction(generic, *ctor);
+  auto *function = this->constructorFunction(generic, *constructor);
   auto *call = this->state.getAst().make<CallExpr>(expr->loc(), nullptr, std::move(expr->args));
   expr->form = ClassNew{.ctor = call};
-  std::vector<const Type *> bound;
-  if (!this->typeArgInferrer->bindGenericCall(call, fn, expr->loc(), expected, {}, bound)) {
+  auto bound = std::vector<const Type *>();
+  bool isBound =
+      this->typeArgInferrer->bindGenericCall(call, function, expr->loc(), expected, {}, bound);
+  if (!isBound) {
     return expr;
   }
-  ClassDecl *inst = this->instantiatedClass(expr, generic, bound);
-  if (inst == nullptr) {
+  auto *instance = this->instantiatedClass(expr, generic, bound);
+  if (instance == nullptr) {
     return expr;
   }
 
-  return this->finishGenericNew(expr, inst, call, *ctor, ctors);
+  return this->finishGenericNew(expr, instance, call, *constructor, constructors);
 }
 
 void GenericClassChecker::walkArgsLoosely(std::vector<Expr *> &args) {
@@ -311,11 +342,11 @@ Expr *GenericClassChecker::checkLibraryGenericNew(NewExpr *expr, ClassDecl *gene
   if (!generic->library()) {
     return nullptr;
   }
-  if (generic->name == "EventEmitter") {
-    Expr *emitter = this->emitterChecker->checkEmitterNew(expr, generic, expected);
-    if (emitter != nullptr) {
-      return emitter;
-    }
+  bool isEmitter = LibraryClassTable::isName(generic->name, LibraryClass::EVENT_EMITTER);
+  auto *emitter =
+      isEmitter ? this->emitterChecker->checkEmitterNew(expr, generic, expected) : nullptr;
+  if (emitter != nullptr) {
+    return emitter;
   }
   if (!this->chunkTypes->isStreamClass(generic)) {
     return nullptr;
@@ -326,117 +357,131 @@ Expr *GenericClassChecker::checkLibraryGenericNew(NewExpr *expr, ClassDecl *gene
 
 Expr *GenericClassChecker::checkExplicitGenericNew(NewExpr *expr, ClassDecl *generic,
                                                    const Type *expected) {
-  std::vector<const Type *> args;
+  auto args = std::vector<const Type *>();
   for (const TypeRef &ref : expr->typeArgs) {
-    args.push_back(this->typeResolver->resolveType(ref, true));
-    if (args.back()->isError()) {
+    const auto *arg = this->typeResolver->resolveTypeOrVoid(ref);
+    if (arg->isError()) {
       this->walkArgsLoosely(expr->args);
+
       return expr;
     }
+    args.push_back(arg);
   }
-  ClassDecl *inst = this->instantiatedClass(expr, generic, std::move(args));
-  if (inst == nullptr) {
+  auto *instance = this->instantiatedClass(expr, generic, std::move(args));
+  if (instance == nullptr) {
     this->walkArgsLoosely(expr->args);
+
     return expr;
   }
   expr->typeArgs.clear();
 
-  return this->methodCallChecker->checkClassNew(expr, inst, expected);
+  return this->methodCallChecker->checkClassNew(expr, instance, expected);
 }
 
 ClassDecl *GenericClassChecker::instantiatedClass(const NewExpr *expr, ClassDecl *generic,
                                                   std::vector<const Type *> args) {
-  GenericClassInstantiator::ResultClassMade made =
+  auto made =
       this->genericClassInstantiator->instantiateClass(generic, std::move(args), expr->loc());
-  if (made.isErr() &&
-      made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
-    bool isEndless =
-        made.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES;
-    llvm::SMLoc at = isEndless ? generic->loc() : expr->loc();
-    this->state.getDiagnostics().error(at, made.error().message);
+  if (made.isOk()) {
+    return made.value();
   }
+  auto code = made.error().code;
+  if (code == GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+    return nullptr;
+  }
+  bool isEndless = code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES;
+  llvm::SMLoc at = isEndless ? generic->loc() : expr->loc();
+  this->state.getDiagnostics().error(at, made.error().message);
 
-  return made.isOk() ? made.value() : nullptr;
+  return nullptr;
 }
 
 std::optional<FunctionDecl *>
 GenericClassChecker::pickedConstructor(const NewExpr *expr, const ClassDecl *generic,
-                                       llvm::ArrayRef<FunctionDecl *> ctors) {
-  if (ctors.size() <= 1) {
-    return ctors.size() == 1 ? ctors[0] : nullptr;
+                                       llvm::ArrayRef<FunctionDecl *> constructors) {
+  if (constructors.empty()) {
+    return nullptr;
   }
-  ResultCtorWasPicked picked = this->constructorFit(expr, generic, ctors);
+  if (constructors.size() == 1) {
+    return constructors[0];
+  }
+  auto picked = this->constructorFit(expr, generic, constructors);
   if (picked.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), picked.error().message);
+
     return std::nullopt;
   }
 
   return picked.value();
 }
 
-FuncSymbol *GenericClassChecker::constructorFunction(ClassDecl *generic, FunctionDecl *ctor) {
-  FuncSymbol *known = this->state.getGenericStore().findConstructorFunction(generic, ctor);
+FuncSymbol *GenericClassChecker::constructorFunction(ClassDecl *generic,
+                                                     FunctionDecl *constructor) {
+  auto *known = this->state.getGenericStore().findConstructorFunction(generic, constructor);
   if (known != nullptr) {
     return known;
   }
-  FuncSymbol *fn = this->state.getAst().newFunc();
-  fn->setCompleter(this->state.getCompleter());
-  this->state.getGenericStore().rememberConstructorFunction(generic, ctor, fn);
-  fn->name = this->state.getAst().keepName("new " + generic->name.str());
-  fn->loc = generic->loc();
-  auto *decl = this->state.getAst().make<FunctionDecl>(generic->loc(), fn->name);
-  decl->typeParams = generic->typeParams;
-  decl->sym = fn;
-  fn->decl = decl;
-  fn->typeParams = generic->typeArgs;
-  fn->typeDefaults = this->state.getGenericStore().getClassDefaults(generic);
-  if (ctor != nullptr) {
-    fn->params = ctor->sym->params;
-    fn->minArgs = ctor->sym->minArgs;
-    fn->hasRest = ctor->sym->hasRest;
+  auto *function = this->state.getAst().newFunc();
+  function->setCompleter(this->state.getCompleter());
+  this->state.getGenericStore().rememberConstructorFunction(generic, constructor, function);
+  function->name = this->state.getAst().keepName("new " + generic->name.str());
+  function->loc = generic->loc();
+  auto *functionDecl = this->state.getAst().make<FunctionDecl>(generic->loc(), function->name);
+  functionDecl->typeParams = generic->typeParams;
+  functionDecl->sym = function;
+  function->decl = functionDecl;
+  function->typeParams = generic->typeArgs;
+  function->typeDefaults = this->state.getGenericStore().getClassDefaults(generic);
+  if (constructor != nullptr) {
+    function->params = constructor->sym->params;
+    function->minArgs = constructor->sym->minArgs;
+    function->hasRest = constructor->sym->hasRest;
   }
-  fn->setReturnType(generic->type);
+  function->setReturnType(generic->type);
 
-  return fn;
+  return function;
 }
 
-Expr *GenericClassChecker::finishGenericNew(NewExpr *expr, ClassDecl *inst, CallExpr *call,
-                                            FunctionDecl *ctor,
-                                            llvm::ArrayRef<FunctionDecl *> ctors) {
-  this->classDeclarer->completeClass(inst);
-  expr->form = ClassNew{.cls = inst, .ctor = call};
+Expr *GenericClassChecker::finishGenericNew(NewExpr *expr, ClassDecl *instance, CallExpr *call,
+                                            FunctionDecl *constructor,
+                                            llvm::ArrayRef<FunctionDecl *> constructors) {
+  this->classDeclarer->completeClass(instance);
+  expr->form = ClassNew{.cls = instance, .ctor = call};
   call->type = Type::voidTy();
-  if (ctor != nullptr) {
-    this->linkInstanceConstructor(expr, inst, call, ctor, ctors);
+  if (constructor != nullptr) {
+    this->linkInstanceConstructor(expr, instance, call, constructor, constructors);
   }
-  if (GenericClassChecker::hasInitializer(inst)) {
+  if (this->hasInitializer(instance)) {
     this->flowChecker->calledFunction();
   }
-  expr->type = inst->type;
+  expr->type = instance->type;
 
   return expr;
 }
 
-void GenericClassChecker::linkInstanceConstructor(const NewExpr *expr, ClassDecl *inst,
-                                                  CallExpr *call, FunctionDecl *ctor,
-                                                  llvm::ArrayRef<FunctionDecl *> ctors) {
-  std::vector<FunctionDecl *> mine = ClassLinks::constructorsOf(inst);
-  auto at = size_t(llvm::find(ctors, ctor) - ctors.begin());
-  if (at < mine.size()) {
-    call->target = FunctionCall{.func = mine[at]->sym};
+void GenericClassChecker::linkInstanceConstructor(const NewExpr *expr, ClassDecl *instance,
+                                                  CallExpr *call, FunctionDecl *constructor,
+                                                  llvm::ArrayRef<FunctionDecl *> constructors) {
+  auto own = this->classLinks->constructorsOf(instance);
+  auto position = size_t(llvm::find(constructors, constructor) - constructors.begin());
+  if (position < own.size()) {
+    call->target = FunctionCall{.func = own[position]->sym};
   }
-  ClassMemberChecker::ResultMemberAccessible accessible =
-      this->classMemberChecker->checkAccess(ctor->cls(), ctor->access(), "constructor");
+  llvm::StringRef what = ObjectMemberTable::getName(ObjectMember::CONSTRUCTOR);
+  auto accessible =
+      this->classMemberChecker->checkAccess(constructor->cls(), constructor->access(), what);
   if (accessible.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), accessible.error().message);
   }
 }
 
-bool GenericClassChecker::hasInitializer(const ClassDecl *inst) {
-  for (const ClassDecl *c = inst; c != nullptr; c = c->parent) {
-    if (c->init != nullptr || !c->constructors.empty()) {
+bool GenericClassChecker::hasInitializer(const ClassDecl *instance) const {
+  const ClassDecl *classDecl = instance;
+  while (classDecl != nullptr) {
+    if (classDecl->init != nullptr || !classDecl->constructors.empty()) {
       return true;
     }
+    classDecl = classDecl->parent;
   }
 
   return false;

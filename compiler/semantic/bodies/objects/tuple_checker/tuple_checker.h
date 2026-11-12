@@ -21,9 +21,9 @@ public:
   TupleChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *arrayCopy(Expr *tuple);
-  static const Type *tupleElement(const Type *tuple);
+  const Type *tupleElement(const Type *tuple) const;
   ResultTupleMember checkTupleMember(MemberExpr *member);
-  ResultTupleFilled checkTupleLit(ArrayLitExpr *lit, const Type *tuple);
+  ResultTupleFilled checkTupleLit(ArrayLitExpr *literal, const Type *tuple);
   ResultTupleMethod checkTupleMethod(CallExpr *call, MemberExpr *member);
 
 private:

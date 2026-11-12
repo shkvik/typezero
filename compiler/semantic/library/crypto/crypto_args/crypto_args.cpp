@@ -1,5 +1,6 @@
 #include "compiler/semantic/library/crypto/crypto_args/crypto_args.h"
 #include "compiler/program/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/program/to_utf16/to_utf16.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -37,22 +38,18 @@ CryptoArgs::CryptoArgs(SemanticState &owner, SemanticParts &all)
   this->argumentChecker = &all.argumentChecker;
 }
 
-std::u16string CryptoArgs::utf16Of(llvm::StringRef text) {
-  llvm::SmallVector<llvm::UTF16, 32> units;
-  llvm::convertUTF8ToUTF16String(text, units);
-
-  return std::u16string(units.begin(), units.end());
-}
-
-std::optional<std::string> CryptoArgs::literalOf(const Expr *e) {
-  if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
-    e = conv->operand;
+std::optional<std::string> CryptoArgs::literalOf(const Expr *expr) const {
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  if (conversion != nullptr && conversion->isImplicit()) {
+    expr = conversion->operand;
   }
-  if (auto *lit = dyn_cast<StringLitExpr>(e)) {
-    return ToUtf8::toUtf8(lit->value);
+  auto *literal = dyn_cast<StringLitExpr>(expr);
+  if (literal != nullptr) {
+    return ToUtf8::toUtf8(literal->value);
   }
-  if (auto *tmpl = dyn_cast<TemplateExpr>(e); tmpl && tmpl->exprs.empty()) {
-    return ToUtf8::toUtf8(tmpl->quasis[0]);
+  auto *templateExpr = dyn_cast<TemplateExpr>(expr);
+  if (templateExpr != nullptr && templateExpr->exprs.empty()) {
+    return ToUtf8::toUtf8(templateExpr->quasis[0]);
   }
 
   return std::nullopt;
@@ -73,37 +70,37 @@ Expr *CryptoArgs::cryptoCall(CallExpr *call, CryptoFn fn, std::vector<Expr *> ar
 
 Expr *CryptoArgs::cryptoResult(CallExpr *call, CryptoFn fn, std::vector<Expr *> args,
                                const Type *type) {
-  const Type *error = this->cryptoErrors->ofCall(fn, args);
+  const auto *error = this->cryptoErrors->ofCall(fn, args);
 
   return this->cryptoCall(call, fn, std::move(args), Type::result(type, error));
 }
 
 Expr *CryptoArgs::cryptoInt(llvm::SMLoc loc, int64_t value) {
-  auto *lit = this->state.getAst().make<IntLitExpr>(loc, uint64_t(value));
-  lit->type = Type::intTy();
+  auto *literal = this->state.getAst().make<IntLitExpr>(loc, uint64_t(value));
+  literal->type = Type::intTy();
 
-  return lit;
+  return literal;
 }
 
 Expr *CryptoArgs::cryptoDouble(llvm::SMLoc loc, double value) {
-  auto *lit = this->state.getAst().make<FloatLitExpr>(loc, value);
-  lit->type = Type::doubleTy();
+  auto *literal = this->state.getAst().make<FloatLitExpr>(loc, value);
+  literal->type = Type::doubleTy();
 
-  return lit;
+  return literal;
 }
 
 Expr *CryptoArgs::cryptoBool(llvm::SMLoc loc, bool value) {
-  auto *lit = this->state.getAst().make<BoolLitExpr>(loc, value);
-  lit->type = Type::boolTy();
+  auto *literal = this->state.getAst().make<BoolLitExpr>(loc, value);
+  literal->type = Type::boolTy();
 
-  return lit;
+  return literal;
 }
 
 Expr *CryptoArgs::cryptoString(llvm::SMLoc loc, llvm::StringRef text) {
-  auto *lit = this->state.getAst().make<StringLitExpr>(loc, CryptoArgs::utf16Of(text));
-  lit->type = Type::string();
+  auto *literal = this->state.getAst().make<StringLitExpr>(loc, ToUtf16::toUtf16(text));
+  literal->type = Type::string();
 
-  return lit;
+  return literal;
 }
 
 Expr *CryptoArgs::cryptoUndefined(llvm::SMLoc loc) {
@@ -116,10 +113,10 @@ Expr *CryptoArgs::cryptoUndefined(llvm::SMLoc loc) {
 Expr *CryptoArgs::cryptoData(Expr *arg, llvm::StringRef what, bool strings, bool keys,
                              bool buffers) {
   arg = this->exprChecker->checkExpr(arg, Type::string());
-  auto fits = [&](const Type *t) {
-    return (strings && (t->isString() || t->isStringLiteral())) || t->isByteView() ||
-           (buffers && t->bytes() == Type::Bytes::ArrayBuffer) ||
-           (keys && t->crypto() == Crypto::KeyObject);
+  auto fits = [&](const Type *candidate) {
+    return (strings && (candidate->isString() || candidate->isStringLiteral())) ||
+           candidate->isByteView() || (buffers && candidate->bytes() == Type::Bytes::ArrayBuffer) ||
+           (keys && candidate->crypto() == Crypto::KeyObject);
   };
   const Type *type = arg->type;
   if (type->isError()) {
@@ -127,7 +124,7 @@ Expr *CryptoArgs::cryptoData(Expr *arg, llvm::StringRef what, bool strings, bool
   }
   bool isOk = fits(type) || (type->isUnion() && llvm::all_of(type->members(), fits));
   if (!isOk) {
-    std::string message = ErrorTextCryptoData::notData(what, strings, buffers, keys, type);
+    auto message = ErrorTextCryptoData::notData(what, strings, buffers, keys, type);
     this->state.getDiagnostics().error(arg->loc(), message);
     arg->type = Type::error();
   }
@@ -138,22 +135,23 @@ Expr *CryptoArgs::cryptoData(Expr *arg, llvm::StringRef what, bool strings, bool
   return arg;
 }
 
-Expr *CryptoArgs::cryptoEncoding(CallExpr *call, size_t index, llvm::StringRef fn, int fallback) {
+Expr *CryptoArgs::cryptoEncoding(CallExpr *call, size_t index, llvm::StringRef functionName,
+                                 int fallback) {
   if (index >= call->args.size() || isa<UndefinedExpr>(call->args[index])) {
     return this->cryptoInt(call->loc(), fallback);
   }
   Expr *arg = call->args[index];
-  std::optional<std::string> text = CryptoArgs::literalOf(arg);
+  auto text = this->literalOf(arg);
   if (!text) {
     this->exprChecker->checkExpr(arg);
-    std::string message = ErrorTextCryptoData::encoding(fn);
+    auto message = ErrorTextCryptoData::encoding(functionName);
     this->state.getDiagnostics().error(arg->loc(), message);
     return nullptr;
   }
   if (*text == "buffer") {
     return this->cryptoInt(call->loc(), -1);
   }
-  Expr *number = this->bytesChecker->checkBufferEncoding(arg);
+  auto *number = this->bytesChecker->checkBufferEncoding(arg);
   if (number->type->isError()) {
     return nullptr;
   }
@@ -178,28 +176,28 @@ Expr *CryptoArgs::cryptoText(Expr *made, Expr *encoding) {
                                            Type::string());
 }
 
-bool CryptoArgs::cryptoOptions(Expr *arg, llvm::StringRef fn,
+bool CryptoArgs::cryptoOptions(Expr *arg, llvm::StringRef functionName,
                                llvm::ArrayRef<llvm::StringRef> allowed,
                                llvm::StringMap<Expr *> &options) {
-  auto *lit = dyn_cast<ObjectLitExpr>(arg);
-  if (!lit) {
+  auto *literal = dyn_cast<ObjectLitExpr>(arg);
+  if (literal == nullptr) {
     this->exprChecker->checkExpr(arg);
-    std::string message = ErrorTextCryptoOptions::literal(fn, allowed[0]);
+    auto message = ErrorTextCryptoOptions::literal(functionName, allowed[0]);
     this->state.getDiagnostics().error(arg->loc(), message);
     return false;
   }
-  for (const ObjectLitExpr::Property &prop : lit->props) {
-    if (prop.spread() || prop.key() || prop.method() || prop.name.empty()) {
-      std::string message = ErrorTextCryptoOptions::byName(fn, allowed[0]);
-      this->state.getDiagnostics().error(prop.loc, message);
+  for (const ObjectLitExpr::Property &property : literal->props) {
+    if (property.spread() || property.key() || property.method() || property.name.empty()) {
+      auto message = ErrorTextCryptoOptions::byName(functionName, allowed[0]);
+      this->state.getDiagnostics().error(property.loc, message);
       return false;
     }
-    if (!llvm::is_contained(allowed, prop.name)) {
-      std::string message = ErrorTextCryptoOptions::unknown(fn, prop.name, allowed);
-      this->state.getDiagnostics().error(prop.loc, message);
+    if (!llvm::is_contained(allowed, property.name)) {
+      auto message = ErrorTextCryptoOptions::unknown(functionName, property.name, allowed);
+      this->state.getDiagnostics().error(property.loc, message);
       return false;
     }
-    options[prop.name] = prop.value;
+    options[property.name] = property.value;
   }
 
   return true;
@@ -207,26 +205,26 @@ bool CryptoArgs::cryptoOptions(Expr *arg, llvm::StringRef fn,
 
 int CryptoArgs::cryptoChoice(Expr *arg, llvm::StringRef what,
                              llvm::ArrayRef<llvm::StringRef> values) {
-  std::optional<std::string> text = CryptoArgs::literalOf(arg);
+  auto text = this->literalOf(arg);
   if (!text) {
     this->exprChecker->checkExpr(arg);
-    std::string message = ErrorTextCryptoChoice::literal(what, values);
+    auto message = ErrorTextCryptoChoice::literal(what, values);
     this->state.getDiagnostics().error(arg->loc(), message);
     return -1;
   }
-  for (size_t i = 0; i < values.size(); ++i) {
-    if (values[i] == *text) {
-      return int(i);
+  for (size_t index = 0; index < values.size(); ++index) {
+    if (values[index] == *text) {
+      return int(index);
     }
   }
-  std::string message = ErrorTextCryptoChoice::unknown(what, *text, values);
+  auto message = ErrorTextCryptoChoice::unknown(what, *text, values);
   this->state.getDiagnostics().error(arg->loc(), message);
 
   return -1;
 }
 
 Expr *CryptoArgs::cryptoMd(Expr *arg, bool hmac) {
-  std::optional<std::string> text = CryptoArgs::literalOf(arg);
+  auto text = this->literalOf(arg);
   if (!text) {
     return this->argumentChecker->checkArg(arg, Type::string());
   }
@@ -236,29 +234,29 @@ Expr *CryptoArgs::cryptoMd(Expr *arg, bool hmac) {
       continue;
     }
     if (hmac && (h.name == "shake128" || h.name == "shake256")) {
-      std::string message = ErrorTextCryptoHash::anyLength(*text);
+      auto message = ErrorTextCryptoHash::anyLength(*text);
       this->state.getDiagnostics().error(arg->loc(), message);
       return nullptr;
     }
-    for (size_t i = 0; i < std::size(kDirectMds); ++i) {
-      if (kDirectMds[i].name == h.name) {
-        return this->cryptoInt(arg->loc(), int64_t(i));
+    for (size_t index = 0; index < std::size(kDirectMds); ++index) {
+      if (kDirectMds[index].name == h.name) {
+        return this->cryptoInt(arg->loc(), int64_t(index));
       }
     }
   }
   if (CryptoNames::turnedOffHash(name)) {
-    std::string message = ErrorTextCryptoHash::turnedOff(*text);
+    auto message = ErrorTextCryptoHash::turnedOff(*text);
     this->state.getDiagnostics().error(arg->loc(), message);
     return nullptr;
   }
-  std::string message = ErrorTextCryptoHash::unknown(*text);
+  auto message = ErrorTextCryptoHash::unknown(*text);
   this->state.getDiagnostics().error(arg->loc(), message);
 
   return nullptr;
 }
 
 Expr *CryptoArgs::cryptoCipher(Expr *arg) {
-  std::optional<std::string> text = CryptoArgs::literalOf(arg);
+  auto text = this->literalOf(arg);
   if (!text) {
     return this->argumentChecker->checkArg(arg, Type::string());
   }
@@ -270,35 +268,35 @@ Expr *CryptoArgs::cryptoCipher(Expr *arg) {
                           : name == "id-aes192-gcm" ? "aes-192-gcm"
                           : name == "id-aes256-gcm" ? "aes-256-gcm"
                                                     : name;
-  for (size_t i = 0; i < std::size(kDirectCiphers); ++i) {
-    if (kDirectCiphers[i].name == canonical) {
-      return this->cryptoInt(arg->loc(), int64_t(i));
+  for (size_t index = 0; index < std::size(kDirectCiphers); ++index) {
+    if (kDirectCiphers[index].name == canonical) {
+      return this->cryptoInt(arg->loc(), int64_t(index));
     }
   }
   if (llvm::is_contained(kCipherNames, name)) {
     return this->cryptoString(arg->loc(), name);
   }
   if (CryptoNames::turnedOffCipher(name)) {
-    std::string message = ErrorTextCryptoCipher::turnedOff(*text);
+    auto message = ErrorTextCryptoCipher::turnedOff(*text);
     this->state.getDiagnostics().error(arg->loc(), message);
     return nullptr;
   }
-  std::string message = ErrorTextCryptoCipher::unknown(*text);
+  auto message = ErrorTextCryptoCipher::unknown(*text);
   this->state.getDiagnostics().error(arg->loc(), message);
 
   return nullptr;
 }
 
 Expr *CryptoArgs::cryptoNumber(Expr *arg) {
-  Expr *checked = this->argumentChecker->checkArg(arg, Type::intTy());
-  if (!checked || checked->type->isError() || checked->type->isFloat()) {
+  auto *checked = this->argumentChecker->checkArg(arg, Type::intTy());
+  if (checked == nullptr || checked->type->isError() || checked->type->isFloat()) {
     return checked;
   }
 
   return this->typeRelations->convert(checked, Type::doubleTy());
 }
 
-std::string CryptoArgs::numberText(double value) {
+std::string CryptoArgs::numberText(double value) const {
   if (value == std::floor(value) && std::fabs(value) < 1e15) {
     return std::to_string(int64_t(value));
   }
@@ -307,7 +305,7 @@ std::string CryptoArgs::numberText(double value) {
 }
 
 std::optional<double> CryptoArgs::knownNumber(const Expr *arg) const {
-  std::vector<const Expr *> negations;
+  auto negations = std::vector<const Expr *>();
   const Expr *inner = arg;
   auto *negation = dyn_cast<UnaryExpr>(inner);
   while (negation != nullptr && negation->op == UnaryOp::Neg) {
@@ -315,7 +313,7 @@ std::optional<double> CryptoArgs::knownNumber(const Expr *arg) const {
     inner = negation->operand;
     negation = dyn_cast<UnaryExpr>(inner);
   }
-  std::optional<double> value = this->plainNumber(inner);
+  auto value = this->plainNumber(inner);
   for (const Expr *negated : llvm::reverse(negations)) {
     if (value.has_value()) {
       value = -*value;
@@ -328,18 +326,19 @@ std::optional<double> CryptoArgs::knownNumber(const Expr *arg) const {
 }
 
 std::optional<double> CryptoArgs::plainNumber(const Expr *arg) const {
-  if (auto *lit = dyn_cast<FloatLitExpr>(arg)) {
-    return lit->value;
+  if (auto *literal = dyn_cast<FloatLitExpr>(arg)) {
+    return literal->value;
   }
-  if (auto *lit = dyn_cast<IntLitExpr>(arg)) {
-    return double(lit->value);
+  if (auto *literal = dyn_cast<IntLitExpr>(arg)) {
+    return double(literal->value);
   }
-  if (auto *conversion = dyn_cast<CastExpr>(arg)) {
+  auto *conversion = dyn_cast<CastExpr>(arg);
+  if (conversion != nullptr) {
     if (std::optional<int64_t> value = this->constantFolder->intConstant(conversion->operand)) {
       return double(*value);
     }
   }
-  std::optional<int64_t> value = this->constantFolder->intConstant(arg);
+  auto value = this->constantFolder->intConstant(arg);
   if (!value) {
     return std::nullopt;
   }
@@ -348,13 +347,13 @@ std::optional<double> CryptoArgs::plainNumber(const Expr *arg) const {
 }
 
 bool CryptoArgs::checkWhole(const Expr *arg, llvm::StringRef name, double least) {
-  std::optional<double> value = this->knownNumber(arg);
+  auto value = this->knownNumber(arg);
   if (!value || (*value == std::floor(*value) && *value >= least)) {
     return true;
   }
-  std::string leastShown = CryptoArgs::numberText(least);
-  std::string valueShown = CryptoArgs::numberText(*value);
-  std::string message = ErrorTextCryptoNumber::whole(name, leastShown, valueShown);
+  auto leastShown = this->numberText(least);
+  auto valueShown = this->numberText(*value);
+  auto message = ErrorTextCryptoNumber::whole(name, leastShown, valueShown);
   this->state.getDiagnostics().error(arg->loc(), message);
 
   return false;
@@ -362,34 +361,35 @@ bool CryptoArgs::checkWhole(const Expr *arg, llvm::StringRef name, double least)
 
 bool CryptoArgs::checkCipherLengths(const Expr *cipher, const Expr *key, const Expr *iv) {
   auto *index = dyn_cast<IntLitExpr>(cipher);
-  if (!index) {
+  if (index == nullptr) {
     return true;
   }
   llvm::StringRef name = kDirectCiphers[index->value].name;
   int64_t keyBytes = name.contains("128") ? 16 : name.contains("192") ? 24 : 32;
   bool isAnyIv = name.ends_with("gcm");
   int64_t ivBytes = name.starts_with("chacha") ? 12 : 16;
-  auto bytesOf = [&](const Expr *e) -> std::optional<int64_t> {
-    Type::Bytes kind = e->type->bytes();
+  auto bytesOf = [&](const Expr *expr) -> std::optional<int64_t> {
+    Type::Bytes kind = expr->type->bytes();
     if (kind != Type::Bytes::Buffer && kind != Type::Bytes::Uint8) {
       return std::nullopt;
     }
 
-    return this->indexProofs->exactLength(e);
+    return this->indexProofs->exactLength(expr);
   };
   bool isOk = true;
-  if (std::optional<int64_t> have = bytesOf(key); have && *have != keyBytes) {
-    std::string message = ErrorTextCryptoCipher::keyBytes(name, keyBytes, *have);
+  std::optional<int64_t> have = bytesOf(key);
+  if (have && *have != keyBytes) {
+    auto message = ErrorTextCryptoCipher::keyBytes(name, keyBytes, *have);
     this->state.getDiagnostics().error(key->loc(), message);
     isOk = false;
   }
   std::optional<int64_t> ivHave = bytesOf(iv);
   if (ivHave && isAnyIv && *ivHave == 0) {
-    std::string message = ErrorTextCryptoCipher::emptyIv(name);
+    auto message = ErrorTextCryptoCipher::emptyIv(name);
     this->state.getDiagnostics().error(iv->loc(), message);
     isOk = false;
   } else if (ivHave && !isAnyIv && *ivHave != ivBytes) {
-    std::string message = ErrorTextCryptoCipher::ivBytes(name, ivBytes, *ivHave);
+    auto message = ErrorTextCryptoCipher::ivBytes(name, ivBytes, *ivHave);
     this->state.getDiagnostics().error(iv->loc(), message);
     isOk = false;
   }
@@ -401,9 +401,10 @@ Expr *CryptoArgs::cryptoKey(Expr *arg, llvm::StringRef what) {
   return this->cryptoData(arg, what, true, true, true);
 }
 
-CryptoArgs::ResultKeyObjectType CryptoArgs::keyObjectType(const Type *type, llvm::StringRef what) {
+CryptoArgs::ResultKeyObjectType CryptoArgs::keyObjectType(const Type *type,
+                                                          llvm::StringRef what) const {
   if (!type->isError() && type->crypto() != Crypto::KeyObject) {
-    std::string message = ErrorTextCryptoKey::keyObject(what, type->name());
+    auto message = ErrorTextCryptoKey::keyObject(what, type->name());
 
     return err(CryptoArgsKeyObjectTypeError{
         .code = CryptoArgsKeyObjectTypeErrorCode::NOT_A_KEY_OBJECT,
@@ -416,7 +417,7 @@ CryptoArgs::ResultKeyObjectType CryptoArgs::keyObjectType(const Type *type, llvm
 
 Expr *CryptoArgs::cryptoKeyObject(Expr *arg, llvm::StringRef what) {
   arg = this->exprChecker->checkExpr(arg);
-  ResultKeyObjectType key = CryptoArgs::keyObjectType(arg->type, what);
+  auto key = this->keyObjectType(arg->type, what);
   if (key.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), key.error().message);
     arg->type = Type::error();
@@ -425,16 +426,16 @@ Expr *CryptoArgs::cryptoKeyObject(Expr *arg, llvm::StringRef what) {
   return arg;
 }
 
-bool CryptoArgs::rejectCryptoCallback(CallExpr *call, size_t index, llvm::StringRef fn,
+bool CryptoArgs::rejectCryptoCallback(CallExpr *call, size_t index, llvm::StringRef functionName,
                                       llvm::StringRef hint) {
   if (index >= call->args.size()) {
     return false;
   }
-  Expr *arg = this->exprChecker->checkExpr(call->args[index]);
+  auto *arg = this->exprChecker->checkExpr(call->args[index]);
   if (!arg->type->nonOptional()->isFunction()) {
     return false;
   }
-  std::string message = ErrorTextCryptoKey::callback(fn, hint);
+  auto message = ErrorTextCryptoKey::callback(functionName, hint);
   this->state.getDiagnostics().error(arg->loc(), message);
   for (Expr *&a : call->args) {
     if (a != call->args[index]) {
@@ -446,36 +447,40 @@ bool CryptoArgs::rejectCryptoCallback(CallExpr *call, size_t index, llvm::String
   return true;
 }
 
-bool CryptoArgs::cryptoSignKey(Expr *arg, llvm::StringRef fn, bool priv,
+bool CryptoArgs::cryptoSignKey(Expr *arg, llvm::StringRef functionName, bool priv,
                                std::vector<Expr *> &args) {
   llvm::SMLoc loc = arg->loc();
-  Expr *padding = this->cryptoInt(loc, 0);
-  Expr *salt = this->cryptoInt(loc, 0);
+  auto *padding = this->cryptoInt(loc, 0);
+  auto *salt = this->cryptoInt(loc, 0);
   int p1363 = 0;
   int has = 0;
   Expr *key;
   if (isa<ObjectLitExpr>(arg)) {
-    llvm::StringMap<Expr *> options;
-    if (!this->cryptoOptions(arg, fn, {"key", "padding", "saltLength", "dsaEncoding"}, options)) {
+    auto options = llvm::StringMap<Expr *>();
+    if (!this->cryptoOptions(arg, functionName, {"key", "padding", "saltLength", "dsaEncoding"},
+                             options)) {
       return false;
     }
     if (!options.lookup("key")) {
-      std::string message = ErrorTextCryptoOptions::needsKey(fn);
+      auto message = ErrorTextCryptoOptions::needsKey(functionName);
       this->state.getDiagnostics().error(arg->loc(), message);
       return false;
     }
-    std::string keyWhat = ErrorTextCryptoLabel::key();
+    auto keyWhat = ErrorTextCryptoLabel::key();
     key = this->cryptoKey(options["key"], keyWhat);
-    if (Expr *p = options.lookup("padding")) {
+    Expr *p = options.lookup("padding");
+    if (p != nullptr) {
       padding = this->argumentChecker->checkArg(p, Type::intTy());
       has |= 1;
     }
-    if (Expr *s = options.lookup("saltLength")) {
+    Expr *s = options.lookup("saltLength");
+    if (s != nullptr) {
       salt = this->argumentChecker->checkArg(s, Type::intTy());
       has |= 2;
     }
-    if (Expr *d = options.lookup("dsaEncoding")) {
-      std::string signature = ErrorTextCryptoLabel::signature();
+    Expr *d = options.lookup("dsaEncoding");
+    if (d != nullptr) {
+      auto signature = ErrorTextCryptoLabel::signature();
       int which = this->cryptoChoice(d, signature, {"der", "ieee-p1363"});
       if (which < 0) {
         return false;

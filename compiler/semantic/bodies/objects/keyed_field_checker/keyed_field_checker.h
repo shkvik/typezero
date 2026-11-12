@@ -6,13 +6,20 @@
 
 namespace tz {
 
+class ClassBases;
 class SemanticParts;
 class FieldFacts;
 class ExprChecker;
 class LiteralTypes;
 class ObjectChecker;
 class TypeRelations;
+class ClassDeclarer;
 class ConstantFolder;
+
+enum class KeyedAccess {
+  READ,
+  WRITE,
+};
 
 class KeyedFieldChecker {
 public:
@@ -21,33 +28,36 @@ public:
   KeyedFieldChecker(SemanticState &owner, SemanticParts &all);
 
   std::optional<std::string> constantKey(const Expr *key) const;
-  void keyNames(const Expr *key, llvm::function_ref<void(llvm::StringRef)> each) const;
-  ResultKeyedFieldRead checkKeyedField(IndexExpr *index, bool write);
-  static const Type *keyedFieldType(const Type *type, const Type *keyType);
-  static bool wrongKey(KeyedFieldCheckerCheckKeyedFieldErrorCode code);
+  std::vector<std::string> keyNames(const Expr *key) const;
+  ResultKeyedFieldRead checkKeyedField(IndexExpr *index, KeyedAccess access);
+  const Type *keyedFieldType(const Type *type, const Type *keyType) const;
+  bool wrongKey(KeyedFieldCheckerCheckKeyedFieldErrorCode code) const;
 
 private:
   using ResultKeyedFieldName = Result<std::string, KeyedFieldCheckerCheckKeyedFieldError>;
 
-  static bool isInherited(llvm::StringRef name);
+  bool isInherited(llvm::StringRef name) const;
+  std::vector<std::string> memberConstants(const MemberExpr *member) const;
   ResultKeyedFieldName tupleKeyName(IndexExpr *index, const Type *type);
-  static ResultKeyedFieldName objectKeyName(const Type *type, const Type *keyType,
-                                            const std::optional<std::string> &key);
+  ResultKeyedFieldName objectKeyName(const Type *type, const Type *keyType,
+                                     const std::optional<std::string> &key) const;
   ResultKeyedFieldRead checkKeySetField(IndexExpr *index, const Type *type, const Type *keyType,
                                         const Type *field, bool write);
   ResultKeyedFieldRead checkKeySetWrite(IndexExpr *index, const Type *type, const Type *keyType,
                                         const Type *field);
   bool allAssigned(llvm::ArrayRef<const Type *> names) const;
-  static bool anyReadonly(const Type *type, llvm::ArrayRef<const Type *> names);
+  bool anyReadonly(const Type *type, llvm::ArrayRef<const Type *> names) const;
   ResultKeyedFieldRead checkNamedField(IndexExpr *index, const Type *type, const std::string &name,
                                        bool write);
 
   SemanticState &state;
   FieldFacts *fieldFacts = nullptr;
+  ClassBases *classBases = nullptr;
   ExprChecker *exprChecker = nullptr;
   LiteralTypes *literalTypes = nullptr;
   ObjectChecker *objectChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
   ConstantFolder *constantFolder = nullptr;
 };
 

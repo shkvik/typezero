@@ -2,6 +2,7 @@
 
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/expr/target_checker/target_checker_errors.h"
+#include "compiler/semantic/bodies/expr/target_checker/target_checker_types.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
@@ -28,7 +29,7 @@ public:
   TargetChecker(SemanticState &owner, SemanticParts &all);
 
   VarSymbol *checkVarTarget(NameExpr *name);
-  const Type *checkAssignTarget(Expr *&target, bool compound);
+  const Type *checkAssignTarget(Expr *&target, AssignForm form);
 
 private:
   using ResultDefinedDictType = Result<const Type *, TargetCheckerDictDefinedError>;
@@ -40,24 +41,26 @@ private:
   using ResultFieldIsWritable = Result<const Type *, TargetCheckerMemberWritableError>;
   using ResultVariableMutable = Result<const VarSymbol *, TargetCheckerVariableMutableError>;
 
-  static ResultTargetIsNotThis notThis(const NameExpr *name);
-  static ResultIndexIsNotBytes indexNotBytes(const Type *type);
-  static ResultObjectIsDefined objectDefined(const Type *type);
-  static ResultIndexIsWritable indexWritable(const Type *type);
-  static ResultDefinedDictType dictDefined(const Type *type, const MemberExpr *member);
-  static ResultNoBytesProperty bytesMember(const Type *type, const MemberExpr *member);
-  static ResultVariableMutable variableMutable(const NameExpr *name, const VarSymbol *var);
-  static ResultFieldIsWritable memberWritable(const Type *type, const MemberExpr *member,
-                                              bool compound);
-  static std::string wrongTargetMessage(const Expr *target);
-  const Type *dictTargetType(Expr *target, bool compound);
-  const Type *indexTargetType(Expr *&target, IndexExpr *index, bool compound);
+  ResultTargetIsNotThis checkNotThis(const NameExpr *name) const;
+  ResultIndexIsNotBytes checkIndexNotBytes(const Type *type) const;
+  ResultObjectIsDefined checkObjectDefined(const Type *type) const;
+  ResultIndexIsWritable checkIndexWritable(const Type *type) const;
+  ResultDefinedDictType checkDictDefined(const Type *type, const MemberExpr *member) const;
+  ResultNoBytesProperty checkBytesMember(const Type *type, const MemberExpr *member) const;
+  ResultVariableMutable checkVariableMutable(const NameExpr *name, const VarSymbol *variable) const;
+  ResultFieldIsWritable checkMemberWritable(const Type *type, const MemberExpr *member,
+                                            AssignForm form) const;
+  std::string wrongTargetMessage(const Expr *target) const;
+  const Type *dictTargetType(Expr *target, AssignForm form);
+  const Type *indexTargetType(Expr *&target, IndexExpr *index, AssignForm form);
+  const Type *typedArrayTargetType(IndexExpr *index, const Type *type);
   std::optional<const Type *> genericIndexType(IndexExpr *index);
-  const Type *keyedTargetType(Expr *&target, IndexExpr *index, bool compound);
+  const Type *keyedTargetType(Expr *&target, IndexExpr *index, AssignForm form);
   const Type *arrayTargetType(IndexExpr *index);
-  const Type *memberTargetType(Expr *&target, MemberExpr *member, bool compound);
-  const Type *unionTargetType(MemberExpr *member, const Type *type, bool compound);
-  const Type *plainMemberTargetType(MemberExpr *member, const Type *type, bool compound);
+  const Type *memberTargetType(Expr *&target, MemberExpr *member, AssignForm form);
+  const Type *unionTargetType(MemberExpr *member, const Type *type, AssignForm form);
+  const Type *plainMemberTargetType(MemberExpr *member, const Type *type, AssignForm form);
+  void walkVariableWritable(const NameExpr *name, VarSymbol *variable);
 
   SemanticState &state;
   Scopes *scopes = nullptr;

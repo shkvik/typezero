@@ -10,14 +10,19 @@ class ImportBinder;
 
 class CallCycles {
 public:
-  using ResolveCall = llvm::function_ref<FunctionDecl *(FunctionDecl *, llvm::StringRef)>;
-
   CallCycles(SemanticState &owner, SemanticParts &all);
 
-  void findCycles(llvm::ArrayRef<FunctionDecl *> functions, ResolveCall resolve = nullptr);
   void findProgramCycles();
+  void findCycles(llvm::ArrayRef<FunctionDecl *> functions);
+  void findMethodCycles(llvm::ArrayRef<FunctionDecl *> methods);
 
 private:
+  enum class CallLinks {
+    BY_NAME,
+    THROUGH_IMPORTS,
+    MEMBERS_ONLY,
+  };
+
   struct TarjanFrame {
     int node;
     size_t nextCall;
@@ -33,19 +38,33 @@ private:
     std::vector<std::vector<int>> calls;
   };
 
-  static llvm::StringSet<> namesUsed(const FunctionDecl *fn);
-  static llvm::StringSet<> memberCallsIn(const FunctionDecl *fn);
-  static std::vector<FuncSymbol *> popCycle(int node, CycleSearch &search);
-  static std::optional<int> takeNextCall(TarjanFrame &frame, const CycleSearch &search);
-  static void enter(int node, CycleSearch &search, std::vector<TarjanFrame> &frames);
-  static void followCall(int from, int to, CycleSearch &search, std::vector<TarjanFrame> &frames);
+  struct NodeIndex {
+    llvm::StringMap<int> byName;
+    llvm::DenseMap<const FunctionDecl *, int> byDecl;
+  };
 
   void tarjanSearch(int start, CycleSearch &search);
-  void finishTop(CycleSearch &search, std::vector<TarjanFrame> &frames);
   void closeIfRoot(int node, CycleSearch &search);
+  bool isReturnUnknown(const FunctionDecl *functionDecl) const;
+  llvm::StringSet<> namesUsed(const FunctionDecl *functionDecl) const;
+  NodeIndex indexNodes(llvm::ArrayRef<FunctionDecl *> nodes) const;
+  void finishTop(CycleSearch &search, std::vector<TarjanFrame> &frames);
+  llvm::StringSet<> memberCallsIn(const FunctionDecl *functionDecl) const;
+  std::vector<FuncSymbol *> popCycle(int node, CycleSearch &search) const;
+  void searchCycles(llvm::ArrayRef<FunctionDecl *> functions, CallLinks links);
+  std::optional<int> nodeNamed(const NodeIndex &index, llvm::StringRef name) const;
+  std::optional<int> takeNextCall(TarjanFrame &frame, const CycleSearch &search) const;
+  void enter(int node, CycleSearch &search, std::vector<TarjanFrame> &frames) const;
   std::vector<FunctionDecl *> unknownReturns(llvm::ArrayRef<FunctionDecl *> functions) const;
+  void followCall(int from, int to, CycleSearch &search, std::vector<TarjanFrame> &frames) const;
   std::vector<std::vector<int>> callsBetween(llvm::ArrayRef<FunctionDecl *> nodes,
-                                             ResolveCall resolve) const;
+                                             CallLinks links) const;
+  std::optional<int> importedNode(const NodeIndex &index, FunctionDecl *functionDecl,
+                                  llvm::StringRef name) const;
+  std::optional<int> calledNode(const NodeIndex &index, FunctionDecl *functionDecl,
+                                llvm::StringRef name, CallLinks links) const;
+  std::vector<int> callsFrom(llvm::ArrayRef<FunctionDecl *> nodes, const NodeIndex &index,
+                             FunctionDecl *functionDecl, CallLinks links) const;
 
   SemanticState &state;
   ImportBinder *importBinder = nullptr;

@@ -15,9 +15,9 @@ ConsoleChecker::ConsoleChecker(SemanticState &owner, SemanticParts &all)
   this->exprChecker = &all.exprChecker;
 }
 
-ConsoleChecker::ResultPrintableItem ConsoleChecker::printable(const Expr *arg) {
+ConsoleChecker::ResultPrintableItem ConsoleChecker::printable(const Expr *arg) const {
   if (arg->type->isVoid()) {
-    std::string message = ErrorTextConsole::voidValue();
+    auto message = ErrorTextConsole::voidValue();
 
     return err(ConsoleCheckerPrintableError{
         .code = ConsoleCheckerPrintableErrorCode::VOID_VALUE,
@@ -28,12 +28,13 @@ ConsoleChecker::ResultPrintableItem ConsoleChecker::printable(const Expr *arg) {
   return ok(arg);
 }
 
-ConsoleChecker::ResultSpreadableArg ConsoleChecker::spreadable(const CallExpr *call, size_t i) {
-  const Type *type = call->args[i]->type;
-  bool isSpreadingArray = !call->spreads(i) || type->isArray() || type->isListParam() ||
-                          ArgListChecker::spreadsLists(type) || type->isError();
+ConsoleChecker::ResultSpreadableArg ConsoleChecker::spreadable(const CallExpr *call,
+                                                               size_t index) const {
+  const Type *type = call->args[index]->type;
+  bool isSpreadingArray = !call->spreads(index) || type->isArray() || type->isListParam() ||
+                          ArgListChecker::isSpreadingLists(type) || type->isError();
   if (!isSpreadingArray) {
-    std::string message = ErrorTextConsole::spread(type->name());
+    auto message = ErrorTextConsole::spread(type->name());
 
     return err(ConsoleCheckerSpreadableError{
         .code = ConsoleCheckerSpreadableErrorCode::NOT_AN_ARRAY,
@@ -41,15 +42,15 @@ ConsoleChecker::ResultSpreadableArg ConsoleChecker::spreadable(const CallExpr *c
     });
   }
 
-  return ok(call->args[i]);
+  return ok(call->args[index]);
 }
 
-ConsoleChecker::ResultConsoleMethod ConsoleChecker::consoleMethod(const MemberExpr *member) {
+ConsoleChecker::ResultConsoleMethod ConsoleChecker::consoleMethod(const MemberExpr *member) const {
   llvm::StringRef name = member->name;
   bool isPrinting =
       name == "error" || name == "warn" || name == "log" || name == "info" || name == "debug";
   if (!isPrinting) {
-    std::string message = ErrorTextConsole::notYet(member->name);
+    auto message = ErrorTextConsole::notYet(member->name);
 
     return err(ConsoleCheckerConsoleMethodError{
         .code = ConsoleCheckerConsoleMethodErrorCode::NOT_SUPPORTED_YET,
@@ -63,14 +64,14 @@ ConsoleChecker::ResultConsoleMethod ConsoleChecker::consoleMethod(const MemberEx
 Expr *ConsoleChecker::checkConsoleLog(CallExpr *call) {
   call->target = BuiltinCall{.builtin = Builtin::ConsoleLog};
   call->type = Type::voidTy();
-  for (size_t i = 0; i < call->args.size(); ++i) {
-    Expr *&arg = call->args[i];
+  for (size_t index = 0; index < call->args.size(); ++index) {
+    Expr *&arg = call->args[index];
     arg = this->exprChecker->checkExpr(arg);
-    ResultPrintableItem printable = ConsoleChecker::printable(arg);
+    auto printable = this->printable(arg);
     if (printable.isErr()) {
       this->state.getDiagnostics().error(arg->loc(), printable.error().message);
     }
-    ResultSpreadableArg spreadable = ConsoleChecker::spreadable(call, i);
+    auto spreadable = this->spreadable(call, index);
     if (spreadable.isErr()) {
       this->state.getDiagnostics().error(arg->loc(), spreadable.error().message);
     }
@@ -83,7 +84,7 @@ Expr *ConsoleChecker::checkConsoleCall(CallExpr *call, MemberExpr *member) {
   if (!this->callChecker->isGlobalName(member->object, GlobalName::CONSOLE)) {
     return nullptr;
   }
-  ResultConsoleMethod method = ConsoleChecker::consoleMethod(member);
+  auto method = this->consoleMethod(member);
   if (method.isErr()) {
     this->state.getDiagnostics().error(member->loc(), method.error().message);
     for (Expr *&arg : call->args) {

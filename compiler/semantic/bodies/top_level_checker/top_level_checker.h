@@ -27,7 +27,7 @@ public:
   void loadTopLevel(Module *module, llvm::StringRef until = {});
   void loadAllTopLevels(const std::vector<Module *> &modules);
   Module *laterSource(llvm::StringRef name, llvm::StringRef &declared);
-  ResultVarNotImported checkImportAssign(const NameExpr *name, const VarSymbol *var) const;
+  ResultVarNotImported checkImportAssign(const NameExpr *name, const VarSymbol *variable) const;
 
 private:
   std::string loadLabel(llvm::StringRef name, llvm::StringRef declared, const Module *source) const;

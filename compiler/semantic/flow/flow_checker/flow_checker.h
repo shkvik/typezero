@@ -4,57 +4,81 @@
 
 namespace tz {
 
+class FieldFacts;
 class SemanticParts;
 class ByteProofs;
 class IndexProofs;
 class PlacedNodes;
+class UnionNarrowing;
+
+enum class Resize {
+  GROWS,
+  SHRINKS,
+  CHANGES,
+};
 
 class FlowChecker {
 public:
   FlowChecker(SemanticState &owner, SemanticParts &all);
 
-  static Flow join(const Flow &a, const Flow &b);
-  void assigned(const VarSymbol *var, const Expr *value);
-  void incremented(const VarSymbol *var, int64_t delta);
   void calledFunction();
+  void markDefined(const VarSymbol *variable);
   void forgetCallEffects(Flow &flow) const;
-  bool changedByCalls(const VarSymbol *var) const;
-  static bool staysLocal(const FunctionDecl *fn, llvm::StringRef name);
-  void arrayResized(const Type *type, bool grew, bool shrank, const VarSymbol *except = nullptr);
-  void setDefined(const VarSymbol *var, bool defined);
+  bool isChangedByCalls(const VarSymbol *variable) const;
+  Flow join(const Flow &left, const Flow &right) const;
+  void assigned(const VarSymbol *variable, const Expr *value);
+  void incremented(const VarSymbol *variable, int64_t delta);
+  bool isStayingLocal(const FunctionDecl *functionDecl, llvm::StringRef name) const;
+  void arrayResized(const Type *type, Resize resize, const VarSymbol *except = nullptr);
 
 private:
-  static bool isArrayLength(const Term &t);
-  static const Expr *unwrapResult(const Expr *value);
-  static bool isName(const Expr *expr, llvm::StringRef name);
-  static bool returnsName(const Stmt *stmt, llvm::StringRef name);
-  static bool readsElement(const Expr *expr, llvm::StringRef name);
-  static bool iteratesOver(const Stmt *stmt, llvm::StringRef name);
-  static size_t countSpreads(const Expr *expr, llvm::StringRef name);
-  static bool callsArrayMethod(const Expr *expr, llvm::StringRef name);
-  static size_t countUses(const PlacedNodes &nodes, llvm::StringRef name);
-  static bool callbacksSkipArray(const CallExpr *call, size_t arrayParam);
-  static size_t countLocalUses(const PlacedNodes &nodes, llvm::StringRef name);
-  static void addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual);
-
   using NarrowedVar = std::pair<const VarSymbol *, const Type *>;
 
-  static void joinDefined(const Flow &a, const Flow &b, Flow &result);
-  static const NarrowedVar *narrowedIn(const Flow &flow, const VarSymbol *var);
-  static std::optional<NarrowedVar> narrowedOnBoth(const NarrowedVar &narrowed, const Flow &b);
-  static void widenWithUndefined(const Flow &empty, const Flow &other, Flow &result);
-  static void joinMarks(const Flow &a, const Flow &b, Flow &result);
-  static bool hasPending(llvm::ArrayRef<std::pair<EmitterKey, llvm::SMLoc>> pending,
-                         const EmitterKey &key);
-  void resetAssignedFlow(const VarSymbol *var, const Expr *value);
-  void rememberResultState(const VarSymbol *var, const Type *given);
-  void assignedInteger(const VarSymbol *var, const Expr *value);
-  void addMinMaxBounds(const VarSymbol *var, const Expr *value);
-  void assignedLength(const VarSymbol *var, const Expr *value);
+  bool isArrayLength(const Term &term) const;
+  bool isCallChangedPart(const Term &term) const;
+  bool isCallChangedTerm(const Term &term) const;
+  const Expr *unwrapResult(const Expr *value) const;
+  bool isCallChangedPath(const FieldPath &path) const;
+  bool isCallChangedFact(const Facts::Fact &fact) const;
+  bool isShiftSafe(const Term &term, int64_t delta) const;
+  bool isName(const Expr *expr, llvm::StringRef name) const;
+  bool isReturningName(const Stmt *stmt, llvm::StringRef name) const;
+  bool isIteratingOver(const Stmt *stmt, llvm::StringRef name) const;
+  size_t countSpreads(const Expr *expr, llvm::StringRef name) const;
+  bool isReadingElement(const Expr *expr, llvm::StringRef name) const;
+  size_t localExprUses(const Expr *expr, llvm::StringRef name) const;
+  size_t localStmtUses(const Stmt *stmt, llvm::StringRef name) const;
+  void rememberResultState(const VarSymbol *variable, const Type *given);
+  bool isCallingArrayMethod(const Expr *expr, llvm::StringRef name) const;
+  size_t countUses(const PlacedNodes &nodes, llvm::StringRef name) const;
+  void resetAssignedFlow(const VarSymbol *variable, const Expr *value);
+  void assignedInteger(const VarSymbol *variable, const Expr *value);
+  void addMinMaxBounds(const VarSymbol *variable, const Expr *value);
+  void assignedLength(const VarSymbol *variable, const Expr *value);
+  bool isPlainUnion(const Type *either, const VarSymbol *variable) const;
+  size_t countLocalUses(const PlacedNodes &nodes, llvm::StringRef name) const;
+  bool isArrayHiddenFromCallbacks(const CallExpr *call, size_t arrayParam) const;
+  void joinMarks(const Flow &left, const Flow &right, Flow &result) const;
+  void joinDefined(const Flow &left, const Flow &right, Flow &result) const;
+  void forgetCallChanged(llvm::SmallPtrSetImpl<const VarSymbol *> &variables) const;
+  const NarrowedVar *narrowedIn(const Flow &flow, const VarSymbol *variable) const;
+  void addAtMost(Facts &facts, const Linear &smaller, const Linear &larger) const;
+  void widenWithUndefined(const Flow &empty, const Flow &other, Flow &result) const;
+  std::optional<NarrowedVar> narrowedOnBoth(const NarrowedVar &narrowed, const Flow &other) const;
+  bool isResizedPart(const Term &term, const Type *array, const VarSymbol *except) const;
+  bool isResizedTerm(const Term &term, const Type *array, const VarSymbol *except) const;
+  bool hasPending(llvm::ArrayRef<std::pair<EmitterKey, llvm::SMLoc>> pending,
+                  const EmitterKey &key) const;
+  std::optional<NarrowedVar> widenedWithUndefined(const VarSymbol *variable, const Flow &other,
+                                                  const Flow &result) const;
+  bool isResizedFact(const Type *array, Resize resize, const VarSymbol *except,
+                     const Facts::Fact &fact) const;
 
   SemanticState &state;
   ByteProofs *byteProofs = nullptr;
+  FieldFacts *fieldFacts = nullptr;
   IndexProofs *indexProofs = nullptr;
+  UnionNarrowing *unionNarrowing = nullptr;
 };
 
 }

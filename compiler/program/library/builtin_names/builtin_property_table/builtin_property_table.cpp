@@ -74,6 +74,14 @@ const BuiltinPropertyInfo kBuiltinProperties[] = {
         .name = "error",
         .property = BuiltinProperty::RESULT_ERROR,
     },
+    {
+        .name = "value",
+        .property = BuiltinProperty::WRAPPED_VALUE,
+    },
+    {
+        .name = "raw",
+        .property = BuiltinProperty::RAW_TEXTS,
+    },
 };
 
 }

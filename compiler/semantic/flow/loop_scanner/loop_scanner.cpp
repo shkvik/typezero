@@ -26,6 +26,9 @@ const GlobalName kGlobalFunctions[] = {GlobalName::STRING,     GlobalName::NUMBE
                                        GlobalName::ENCODE_URI, GlobalName::DECODE_URI_COMPONENT,
                                        GlobalName::DECODE_URI, GlobalName::OK,
                                        GlobalName::ERR};
+
+constexpr int kArrayCallbackArgs = 1;
+
 }
 
 LoopScanner::LoopScanner(SemanticState &owner, SemanticParts &all)
@@ -36,43 +39,42 @@ LoopScanner::LoopScanner(SemanticState &owner, SemanticParts &all)
 }
 
 LoopScan LoopScanner::scanForOfLoop(const ForOfStmt *loop) const {
-  PlacedNodes nodes = PlacedNodes::collect({loop->body}, {});
-  llvm::StringSet<> declared = LoopScanner::declaredNames(nodes);
+  auto nodes = PlacedNodes::collect({loop->body}, {});
+  auto declared = this->declaredNames(nodes);
   declared.insert(loop->binding.name);
-  LoopScan scan = this->scanNodes(nodes, declared);
+  auto scan = this->scanNodes(nodes, declared);
 
   return scan;
 }
 
 LoopScan LoopScanner::scanLoop(llvm::ArrayRef<const Stmt *> stmts,
                                llvm::ArrayRef<const Expr *> exprs) const {
-  PlacedNodes nodes = PlacedNodes::collect(stmts, exprs);
-  llvm::StringSet<> declared = LoopScanner::declaredNames(nodes);
-  LoopScan scan = this->scanNodes(nodes, declared);
+  auto nodes = PlacedNodes::collect(stmts, exprs);
+  auto declared = this->declaredNames(nodes);
+  auto scan = this->scanNodes(nodes, declared);
 
   return scan;
 }
 
 LoopScan LoopScanner::scanNodes(const PlacedNodes &nodes, const llvm::StringSet<> &declared) const {
-  ArrayEffects arrays = this->arrayEffects(nodes, declared);
+  auto arrays = this->arrayEffects(nodes, declared);
 
-  LoopScan scan;
-  scan.breaks = LoopScanner::breaksOut(nodes);
-  scan.awaits = LoopScanner::awaitsInside(nodes);
-  scan.changes = LoopScanner::changedVariables(nodes);
-  scan.fieldWrites = this->writtenFields(nodes);
-  scan.callsFunctions = this->callsFunctions(nodes, declared);
-  scan.growsArrays = arrays.grows;
-  scan.shrinksArrays = arrays.shrinks;
-  scan.releasesElements = arrays.releases;
-
-  return scan;
+  return LoopScan{
+      .changes = this->changedVariables(nodes),
+      .isCallingFunctions = this->isCallingFunctions(nodes, declared),
+      .isGrowingArrays = arrays.isGrowing,
+      .isShrinkingArrays = arrays.isShrinking,
+      .fieldWrites = this->writtenFields(nodes),
+      .isReleasingElements = arrays.isReleasing,
+      .isBreakingOut = this->isBreakingOut(nodes),
+      .hasAwait = this->isAwaitingInside(nodes),
+  };
 }
 
-bool LoopScanner::breaksOut(const PlacedNodes &nodes) {
+bool LoopScanner::isBreakingOut(const PlacedNodes &nodes) const {
   for (const PlacedStmt &placed : nodes.getStmts()) {
     auto *exit = dyn_cast<BreakStmt>(placed.stmt);
-    if (exit != nullptr && LoopScanner::leavesLoop(exit, placed.place)) {
+    if (exit != nullptr && this->isLeavingLoop(exit, placed.place)) {
       return true;
     }
   }
@@ -80,7 +82,7 @@ bool LoopScanner::breaksOut(const PlacedNodes &nodes) {
   return false;
 }
 
-bool LoopScanner::leavesLoop(const BreakStmt *exit, const TreePlace &place) {
+bool LoopScanner::isLeavingLoop(const BreakStmt *exit, const TreePlace &place) const {
   if (!exit->label.empty()) {
     return !place.hasLabel(exit->label);
   }
@@ -88,7 +90,7 @@ bool LoopScanner::leavesLoop(const BreakStmt *exit, const TreePlace &place) {
   return !place.isInsideLoop() && !place.isInsideFunction() && !place.isInsideSwitch();
 }
 
-bool LoopScanner::awaitsInside(const PlacedNodes &nodes) {
+bool LoopScanner::isAwaitingInside(const PlacedNodes &nodes) const {
   for (const PlacedExpr &placed : nodes.getExprs()) {
     if (isa<AwaitExpr>(placed.expr) && !placed.place.isInsideFunction()) {
       return true;
@@ -104,99 +106,127 @@ bool LoopScanner::awaitsInside(const PlacedNodes &nodes) {
   return false;
 }
 
-llvm::StringSet<> LoopScanner::declaredNames(const PlacedNodes &nodes) {
-  llvm::StringSet<> names;
+llvm::StringSet<> LoopScanner::declaredNames(const PlacedNodes &nodes) const {
+  auto names = llvm::StringSet<>();
   for (const PlacedStmt &placed : nodes.getStmts()) {
-    const Stmt *stmt = placed.stmt;
-    if (auto *declaration = dyn_cast<VarDeclStmt>(stmt)) {
-      for (const VarDeclarator &declarator : declaration->decls) {
-        names.insert(declarator.name);
-      }
-    }
-    if (auto *fn = dyn_cast<FunctionDecl>(stmt)) {
-      if (!fn->isExpression() && fn->member() == nullptr) {
-        names.insert(fn->name);
-      }
-      for (const Param &param : fn->params) {
-        names.insert(param.name);
-      }
-    }
-    if (auto *loop = dyn_cast<ForOfStmt>(stmt)) {
-      names.insert(loop->binding.name);
-    }
-    if (auto *enumeration = dyn_cast<EnumDecl>(stmt)) {
-      names.insert(enumeration->name);
-    }
-    if (auto *cls = dyn_cast<ClassDecl>(stmt)) {
-      names.insert(cls->name);
-    }
+    this->addDeclaredNames(placed.stmt, names);
   }
 
   return names;
 }
 
-llvm::StringMap<LoopScan::Change> LoopScanner::changedVariables(const PlacedNodes &nodes) {
-  llvm::StringMap<LoopScan::Change> changes;
+void LoopScanner::addDeclaredNames(const Stmt *stmt, llvm::StringSet<> &names) const {
+  auto *declaration = dyn_cast<VarDeclStmt>(stmt);
+  auto *functionDecl = dyn_cast<FunctionDecl>(stmt);
+  auto *loop = dyn_cast<ForOfStmt>(stmt);
+  auto *enumeration = dyn_cast<EnumDecl>(stmt);
+  auto *classDecl = dyn_cast<ClassDecl>(stmt);
+  if (declaration != nullptr) {
+    this->addDeclaratorNames(declaration, names);
+    return;
+  }
+  if (functionDecl != nullptr) {
+    this->addFunctionNames(functionDecl, names);
+    return;
+  }
+  if (loop != nullptr) {
+    names.insert(loop->binding.name);
+    return;
+  }
+  if (enumeration != nullptr) {
+    names.insert(enumeration->name);
+    return;
+  }
+  if (classDecl != nullptr) {
+    names.insert(classDecl->name);
+  }
+}
+
+void LoopScanner::addDeclaratorNames(const VarDeclStmt *declaration,
+                                     llvm::StringSet<> &names) const {
+  for (const VarDeclarator &declarator : declaration->decls) {
+    names.insert(declarator.name);
+  }
+}
+
+void LoopScanner::addFunctionNames(const FunctionDecl *functionDecl,
+                                   llvm::StringSet<> &names) const {
+  if (!functionDecl->isExpression() && functionDecl->member() == nullptr) {
+    names.insert(functionDecl->name);
+  }
+  for (const Param &param : functionDecl->params) {
+    names.insert(param.name);
+  }
+}
+
+llvm::StringMap<LoopScan::Change> LoopScanner::changedVariables(const PlacedNodes &nodes) const {
+  auto changes = llvm::StringMap<LoopScan::Change>();
   for (const PlacedExpr &placed : nodes.getExprs()) {
-    const Expr *target = LoopScanner::changedTarget(placed.expr);
+    const auto *target = this->changedTarget(placed.expr);
     auto *name = dyn_cast_or_null<NameExpr>(target);
-    if (name == nullptr) {
-      continue;
+    if (name != nullptr) {
+      LoopScan::Change &change = changes[name->name];
+      this->addChange(change, placed);
     }
-    int64_t delta = LoopScanner::changeDelta(placed.expr);
-    LoopScan::Change &change = changes[name->name];
-    change.count += 1;
-    change.delta = change.count == 1 ? delta : 0;
-    change.nested = change.nested || placed.place.isNested();
   }
 
   return changes;
 }
 
-const Expr *LoopScanner::changedTarget(const Expr *expr) {
-  if (auto *assign = dyn_cast<AssignExpr>(expr)) {
+void LoopScanner::addChange(LoopScan::Change &change, const PlacedExpr &placed) const {
+  int64_t delta = this->changeDelta(placed.expr);
+  change.count += 1;
+  change.delta = change.count == 1 ? delta : 0;
+  change.isNested = change.isNested || placed.place.isNested();
+}
+
+const Expr *LoopScanner::changedTarget(const Expr *expr) const {
+  auto *assign = dyn_cast<AssignExpr>(expr);
+  auto *update = dyn_cast<UpdateExpr>(expr);
+  if (assign != nullptr) {
     return assign->target;
   }
-  if (auto *update = dyn_cast<UpdateExpr>(expr)) {
+  if (update != nullptr) {
     return update->target;
   }
 
   return nullptr;
 }
 
-int64_t LoopScanner::changeDelta(const Expr *expr) {
-  if (auto *update = dyn_cast<UpdateExpr>(expr)) {
+int64_t LoopScanner::changeDelta(const Expr *expr) const {
+  auto *update = dyn_cast<UpdateExpr>(expr);
+  if (update != nullptr) {
     return update->increment ? 1 : -1;
   }
 
-  return LoopScanner::assignDelta(cast<AssignExpr>(expr));
+  return this->assignDelta(cast<AssignExpr>(expr));
 }
 
-int64_t LoopScanner::assignDelta(const AssignExpr *assign) {
+int64_t LoopScanner::assignDelta(const AssignExpr *assign) const {
   if (assign->op == BinaryOp::Add) {
-    return LoopScanner::literalStep(assign->value);
+    return this->literalStep(assign->value);
   }
   if (assign->op == BinaryOp::Sub) {
-    return -LoopScanner::literalStep(assign->value);
+    return -this->literalStep(assign->value);
   }
   auto *sum = dyn_cast<BinaryExpr>(assign->value);
   if (assign->op.has_value() || sum == nullptr) {
     return 0;
   }
-  if (sum->op == BinaryOp::Add && LoopScanner::sameName(sum->lhs, assign->target)) {
-    return LoopScanner::literalStep(sum->rhs);
+  if (sum->op == BinaryOp::Add && this->isSameName(sum->lhs, assign->target)) {
+    return this->literalStep(sum->rhs);
   }
-  if (sum->op == BinaryOp::Add && LoopScanner::sameName(sum->rhs, assign->target)) {
-    return LoopScanner::literalStep(sum->lhs);
+  if (sum->op == BinaryOp::Add && this->isSameName(sum->rhs, assign->target)) {
+    return this->literalStep(sum->lhs);
   }
-  if (sum->op == BinaryOp::Sub && LoopScanner::sameName(sum->lhs, assign->target)) {
-    return -LoopScanner::literalStep(sum->rhs);
+  if (sum->op == BinaryOp::Sub && this->isSameName(sum->lhs, assign->target)) {
+    return -this->literalStep(sum->rhs);
   }
 
   return 0;
 }
 
-int64_t LoopScanner::literalStep(const Expr *expr) {
+int64_t LoopScanner::literalStep(const Expr *expr) const {
   auto *literal = dyn_cast<IntLitExpr>(expr);
   if (literal == nullptr || literal->value < 1 || literal->value > uint64_t(Type::kMaxLength)) {
     return 0;
@@ -205,7 +235,7 @@ int64_t LoopScanner::literalStep(const Expr *expr) {
   return int64_t(literal->value);
 }
 
-bool LoopScanner::sameName(const Expr *expr, const Expr *target) {
+bool LoopScanner::isSameName(const Expr *expr, const Expr *target) const {
   auto *name = dyn_cast<NameExpr>(expr);
   auto *targetName = dyn_cast<NameExpr>(target);
 
@@ -213,30 +243,46 @@ bool LoopScanner::sameName(const Expr *expr, const Expr *target) {
 }
 
 llvm::StringSet<> LoopScanner::writtenFields(const PlacedNodes &nodes) const {
-  llvm::StringSet<> fields;
-  auto addField = [&](llvm::StringRef name) { fields.insert(name); };
+  auto fields = llvm::StringSet<>();
   for (const PlacedExpr &placed : nodes.getExprs()) {
-    const Expr *target = LoopScanner::changedTarget(placed.expr);
-    if (auto *index = dyn_cast_or_null<IndexExpr>(target)) {
-      this->keyedFieldChecker->keyNames(index->index, addField);
-    }
-    if (auto *member = dyn_cast_or_null<MemberExpr>(target)) {
-      fields.insert(member->name);
+    const auto *target = this->changedTarget(placed.expr);
+    if (target != nullptr) {
+      this->addWrittenFields(target, fields);
     }
   }
 
   return fields;
 }
 
+void LoopScanner::addWrittenFields(const Expr *target, llvm::StringSet<> &fields) const {
+  auto *index = dyn_cast<IndexExpr>(target);
+  auto *member = dyn_cast<MemberExpr>(target);
+  if (index != nullptr) {
+    this->addKeyNames(index, fields);
+    return;
+  }
+  if (member != nullptr) {
+    fields.insert(member->name);
+  }
+}
+
+void LoopScanner::addKeyNames(const IndexExpr *index, llvm::StringSet<> &fields) const {
+  auto names = this->keyedFieldChecker->keyNames(index->index);
+  for (const std::string &name : names) {
+    fields.insert(name);
+  }
+}
+
 LoopScanner::ArrayEffects LoopScanner::arrayEffects(const PlacedNodes &nodes,
                                                     const llvm::StringSet<> &declared) const {
-  ArrayEffects effects;
+  auto effects = ArrayEffects{};
   for (const PlacedExpr &placed : nodes.getExprs()) {
-    const Expr *target = LoopScanner::changedTarget(placed.expr);
+    const auto *target = this->changedTarget(placed.expr);
+    auto *call = dyn_cast<CallExpr>(placed.expr);
     if (target != nullptr) {
-      LoopScanner::addTargetEffects(target, effects);
+      this->addTargetEffects(target, effects);
     }
-    if (auto *call = dyn_cast<CallExpr>(placed.expr)) {
+    if (call != nullptr) {
       this->addCallEffects(call, declared, effects);
     }
   }
@@ -244,17 +290,19 @@ LoopScanner::ArrayEffects LoopScanner::arrayEffects(const PlacedNodes &nodes,
   return effects;
 }
 
-void LoopScanner::addTargetEffects(const Expr *target, ArrayEffects &effects) {
+void LoopScanner::addTargetEffects(const Expr *target, ArrayEffects &effects) const {
+  auto *member = dyn_cast<MemberExpr>(target);
+  bool isLength =
+      member != nullptr && BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH);
   if (isa<IndexExpr>(target)) {
-    effects.grows = true;
-    effects.releases = true;
+    effects.isGrowing = true;
+    effects.isReleasing = true;
     return;
   }
-  auto *member = dyn_cast<MemberExpr>(target);
-  if (member != nullptr && BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH)) {
-    effects.grows = true;
-    effects.shrinks = true;
-    effects.releases = true;
+  if (isLength) {
+    effects.isGrowing = true;
+    effects.isShrinking = true;
+    effects.isReleasing = true;
   }
 }
 
@@ -264,41 +312,41 @@ void LoopScanner::addCallEffects(const CallExpr *call, const llvm::StringSet<> &
   if (member == nullptr || this->isConsoleOrMath(member)) {
     return;
   }
-  const Type *receiver = this->getTypeBeforeLoop(member->object, declared);
+  const auto *receiver = this->getTypeBeforeLoop(member->object, declared);
   if (receiver != nullptr && receiver->isResult()) {
     return;
   }
-  LoopScanner::addArrayMethodEffects(member->name, effects);
+  this->addArrayMethodEffects(member->name, effects);
 }
 
-void LoopScanner::addArrayMethodEffects(llvm::StringRef name, ArrayEffects &effects) {
-  const ArrayMethodInfo *method = ArrayMethodTable::find(name);
+void LoopScanner::addArrayMethodEffects(llvm::StringRef name, ArrayEffects &effects) const {
+  const auto *method = ArrayMethodTable::find(name);
   if (method == nullptr) {
     return;
   }
   const ResizingArrayMethod *resizing = method->form.as<ResizingArrayMethod>();
   const RewritingArrayMethod *rewriting = method->form.as<RewritingArrayMethod>();
   if (resizing != nullptr && resizing->change != LengthChange::SHRINKS) {
-    effects.grows = true;
+    effects.isGrowing = true;
   }
   if (resizing != nullptr && resizing->change != LengthChange::GROWS) {
-    effects.shrinks = true;
-    effects.releases = true;
+    effects.isShrinking = true;
+    effects.isReleasing = true;
   }
   if (rewriting != nullptr && rewriting->releasesElements) {
-    effects.releases = true;
+    effects.isReleasing = true;
   }
 }
 
-bool LoopScanner::callsFunctions(const PlacedNodes &nodes,
-                                 const llvm::StringSet<> &declared) const {
+bool LoopScanner::isCallingFunctions(const PlacedNodes &nodes,
+                                     const llvm::StringSet<> &declared) const {
   for (const PlacedStmt &placed : nodes.getStmts()) {
-    if (this->iteratesInStmt(placed.stmt)) {
+    if (this->isIteratingInStmt(placed.stmt)) {
       return true;
     }
   }
   for (const PlacedExpr &placed : nodes.getExprs()) {
-    if (this->runsOtherCode(placed.expr, declared)) {
+    if (this->isRunningOtherCode(placed.expr, declared)) {
       return true;
     }
   }
@@ -306,46 +354,69 @@ bool LoopScanner::callsFunctions(const PlacedNodes &nodes,
   return false;
 }
 
-bool LoopScanner::iteratesInStmt(const Stmt *stmt) const {
-  if (auto *declaration = dyn_cast<VarDeclStmt>(stmt)) {
-    for (const VarDeclarator &declarator : declaration->decls) {
-      bool isUnpacking = declarator.destructured() && declarator.init != nullptr;
-      if (isUnpacking && this->namesIterator(declarator.init)) {
-        return true;
-      }
-    }
+bool LoopScanner::isIteratingInStmt(const Stmt *stmt) const {
+  auto *declaration = dyn_cast<VarDeclStmt>(stmt);
+  auto *loop = dyn_cast<ForOfStmt>(stmt);
+  if (declaration != nullptr) {
+    return this->isUnpackingIterator(declaration);
   }
-  if (auto *loop = dyn_cast<ForOfStmt>(stmt)) {
-    return this->namesIterator(loop->iterable);
+  if (loop != nullptr) {
+    return this->isNamingIterator(loop->iterable);
   }
 
   return false;
 }
 
-bool LoopScanner::runsOtherCode(const Expr *expr, const llvm::StringSet<> &declared) const {
-  if (isa<YieldExpr>(expr) || isa<AwaitExpr>(expr) || isa<ClassExpr>(expr)) {
+bool LoopScanner::isUnpackingIterator(const VarDeclStmt *declaration) const {
+  for (const VarDeclarator &declarator : declaration->decls) {
+    bool isUnpacking = declarator.destructured() && declarator.init != nullptr;
+    if (isUnpacking && this->isNamingIterator(declarator.init)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool LoopScanner::isRunningOtherCode(const Expr *expr, const llvm::StringSet<> &declared) const {
+  auto *made = dyn_cast<NewExpr>(expr);
+  auto *list = dyn_cast<ArrayLitExpr>(expr);
+  auto *call = dyn_cast<CallExpr>(expr);
+  bool isOpaque = isa<YieldExpr>(expr) || isa<AwaitExpr>(expr) || isa<ClassExpr>(expr);
+  if (isOpaque) {
     return true;
   }
-  if (auto *made = dyn_cast<NewExpr>(expr)) {
-    std::optional<GlobalName> global = GlobalNameTable::find(made->name);
-    return global != GlobalName::ARRAY;
+  if (made != nullptr) {
+    return this->isMakingNonArray(made);
   }
-  if (auto *list = dyn_cast<ArrayLitExpr>(expr)) {
-    for (const ArrayLitExpr::Element &element : list->elements) {
-      if (element.spread && this->namesIterator(element.expr)) {
-        return true;
-      }
-    }
-    return false;
+  if (list != nullptr) {
+    return this->isSpreadingIterator(list);
   }
-  if (auto *call = dyn_cast<CallExpr>(expr)) {
-    return this->callRunsOtherCode(call, declared);
+  if (call != nullptr) {
+    return this->isCallRunningOtherCode(call, declared);
   }
 
   return false;
 }
 
-bool LoopScanner::callRunsOtherCode(const CallExpr *call, const llvm::StringSet<> &declared) const {
+bool LoopScanner::isMakingNonArray(const NewExpr *made) const {
+  auto global = GlobalNameTable::find(made->name);
+
+  return global != GlobalName::ARRAY;
+}
+
+bool LoopScanner::isSpreadingIterator(const ArrayLitExpr *list) const {
+  for (const ArrayLitExpr::Element &element : list->elements) {
+    if (element.spread && this->isNamingIterator(element.expr)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool LoopScanner::isCallRunningOtherCode(const CallExpr *call,
+                                         const llvm::StringSet<> &declared) const {
   auto *member = dyn_cast<MemberExpr>(call->callee);
   if (member == nullptr) {
     return !this->isPlainGlobalFunction(call->callee);
@@ -353,28 +424,28 @@ bool LoopScanner::callRunsOtherCode(const CallExpr *call, const llvm::StringSet<
   if (this->isConsoleOrMath(member)) {
     return false;
   }
-  const Type *receiver = this->getTypeBeforeLoop(member->object, declared);
+  const auto *receiver = this->getTypeBeforeLoop(member->object, declared);
   if (receiver != nullptr && receiver->isArray()) {
-    return LoopScanner::arrayMethodRunsCode(call, member->name);
+    return this->isArrayMethodRunningCode(call, member->name);
   }
   if (receiver != nullptr && receiver->isResult()) {
-    return LoopScanner::resultMethodRunsCode(call, member->name);
+    return this->isResultMethodRunningCode(call, member->name);
   }
 
-  return this->methodByNameRunsCode(call, member);
+  return this->isMethodByNameRunningCode(call, member);
 }
 
-bool LoopScanner::methodByNameRunsCode(const CallExpr *call, const MemberExpr *member) const {
+bool LoopScanner::isMethodByNameRunningCode(const CallExpr *call, const MemberExpr *member) const {
   llvm::StringRef name = member->name;
   if (this->state.getInventoryStore().hasFieldName(name)) {
     return true;
   }
   bool isKnown =
-      LoopScanner::arrayMethodRunsCode(call, name) || LoopScanner::resultMethodRunsCode(call, name);
+      this->isArrayMethodRunningCode(call, name) || this->isResultMethodRunningCode(call, name);
   if (isKnown) {
     return true;
   }
-  const IteratorMethodInfo *iteratorMethod = IteratorMethodTable::find(name);
+  const auto *iteratorMethod = IteratorMethodTable::find(name);
   bool isDrivingIterator =
       iteratorMethod != nullptr && (iteratorMethod->method == IteratorMethod::NEXT ||
                                     iteratorMethod->method == IteratorMethod::TO_ARRAY);
@@ -384,31 +455,31 @@ bool LoopScanner::methodByNameRunsCode(const CallExpr *call, const MemberExpr *m
   return isDrivingIterator || isFromIterable;
 }
 
-bool LoopScanner::arrayMethodRunsCode(const CallExpr *call, llvm::StringRef name) {
-  const ArrayMethodInfo *method = ArrayMethodTable::find(name);
+bool LoopScanner::isArrayMethodRunningCode(const CallExpr *call, llvm::StringRef name) const {
+  const auto *method = ArrayMethodTable::find(name);
   if (method == nullptr) {
     return false;
   }
   bool isTakingFunction =
       method->form.is<CallbackArrayMethod>() || method->form.is<SortingArrayMethod>();
 
-  return isTakingFunction && LoopScanner::passesNamedFunction(call, 1);
+  return isTakingFunction && this->isPassingNamedFunction(call, kArrayCallbackArgs);
 }
 
-bool LoopScanner::resultMethodRunsCode(const CallExpr *call, llvm::StringRef name) {
-  const ResultMethodInfo *method = ResultMethodTable::find(name);
+bool LoopScanner::isResultMethodRunningCode(const CallExpr *call, llvm::StringRef name) const {
+  const auto *method = ResultMethodTable::find(name);
   if (method == nullptr) {
     return false;
   }
   int callbackArgs = ResultMethodTable::countCallbacks(*method);
 
-  return LoopScanner::passesNamedFunction(call, callbackArgs);
+  return this->isPassingNamedFunction(call, callbackArgs);
 }
 
-bool LoopScanner::passesNamedFunction(const CallExpr *call, int callbackArgs) {
+bool LoopScanner::isPassingNamedFunction(const CallExpr *call, int callbackArgs) const {
   size_t checked = std::min(size_t(callbackArgs), call->args.size());
-  for (size_t i = 0; i < checked; ++i) {
-    if (!isa<FunctionExpr>(call->args[i])) {
+  for (size_t index = 0; index < checked; ++index) {
+    if (!isa<FunctionExpr>(call->args[index])) {
       return true;
     }
   }
@@ -422,19 +493,24 @@ bool LoopScanner::isConsoleOrMath(const MemberExpr *member) const {
 }
 
 bool LoopScanner::isPlainGlobalFunction(const Expr *callee) const {
-  auto named = [&](GlobalName global) { return this->callChecker->isGlobalName(callee, global); };
+  for (GlobalName global : kGlobalFunctions) {
+    if (this->callChecker->isGlobalName(callee, global)) {
+      return true;
+    }
+  }
 
-  return llvm::any_of(kGlobalFunctions, named);
+  return false;
 }
 
-bool LoopScanner::namesIterator(const Expr *expr) const {
+bool LoopScanner::isNamingIterator(const Expr *expr) const {
   auto *name = dyn_cast<NameExpr>(expr);
   if (name == nullptr) {
     return false;
   }
-  const VarSymbol *var = this->scopes->lookup(name->name).var();
+  const VarSymbol *variable = this->scopes->lookup(name->name).var();
 
-  return var != nullptr && var->type != nullptr && var->type->nonOptional()->isIterator();
+  return variable != nullptr && variable->type != nullptr &&
+         variable->type->nonOptional()->isIterator();
 }
 
 const Type *LoopScanner::getTypeBeforeLoop(const Expr *expr,
@@ -443,12 +519,12 @@ const Type *LoopScanner::getTypeBeforeLoop(const Expr *expr,
   if (name == nullptr || declared.contains(name->name)) {
     return nullptr;
   }
-  const VarSymbol *var = this->scopes->lookup(name->name).var();
-  if (var == nullptr || var->type == nullptr) {
+  const VarSymbol *variable = this->scopes->lookup(name->name).var();
+  if (variable == nullptr || variable->type == nullptr) {
     return nullptr;
   }
 
-  return var->type->nonOptional();
+  return variable->type->nonOptional();
 }
 
 }

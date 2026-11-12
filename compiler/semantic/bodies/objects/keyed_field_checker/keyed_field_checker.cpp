@@ -6,6 +6,7 @@
 #include "compiler/semantic/bodies/objects/object_checker/object_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/flow/field_facts/field_facts.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/literal_types/literal_types.h"
@@ -21,20 +22,22 @@ namespace tz {
 KeyedFieldChecker::KeyedFieldChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->fieldFacts = &all.fieldFacts;
+  this->classBases = &all.classBases;
   this->exprChecker = &all.exprChecker;
   this->literalTypes = &all.literalTypes;
   this->objectChecker = &all.objectChecker;
   this->typeRelations = &all.typeRelations;
+  this->classDeclarer = &all.classDeclarer;
   this->constantFolder = &all.constantFolder;
 }
 
-bool KeyedFieldChecker::isInherited(llvm::StringRef name) {
-  std::optional<ObjectMember> member = ObjectMemberTable::find(name);
+bool KeyedFieldChecker::isInherited(llvm::StringRef name) const {
+  auto member = ObjectMemberTable::find(name);
 
   return member.has_value();
 }
 
-bool KeyedFieldChecker::wrongKey(KeyedFieldCheckerCheckKeyedFieldErrorCode code) {
+bool KeyedFieldChecker::wrongKey(KeyedFieldCheckerCheckKeyedFieldErrorCode code) const {
   switch (code) {
     case KeyedFieldCheckerCheckKeyedFieldErrorCode::TUPLE_KEY_NOT_NUMBER:
     case KeyedFieldCheckerCheckKeyedFieldErrorCode::TUPLE_KEY_OUT_OF_RANGE:
@@ -57,19 +60,17 @@ bool KeyedFieldChecker::wrongKey(KeyedFieldCheckerCheckKeyedFieldErrorCode code)
 }
 
 std::optional<std::string> KeyedFieldChecker::constantKey(const Expr *key) const {
-  while (auto *conv = dyn_cast<CastExpr>(key)) {
-    if (!conv->isImplicit()) {
-      break;
-    }
-    key = conv->operand;
+  key = ExprParts::withoutImplicitCasts(key);
+  auto *literal = dyn_cast<StringLitExpr>(key);
+  if (literal != nullptr) {
+    return ToUtf8::toUtf8(literal->value);
   }
-  if (auto *lit = dyn_cast<StringLitExpr>(key)) {
-    return ToUtf8::toUtf8(lit->value);
+  auto *templateExpr = dyn_cast<TemplateExpr>(key);
+  if (templateExpr != nullptr && templateExpr->exprs.empty()) {
+    return ToUtf8::toUtf8(templateExpr->quasis[0]);
   }
-  if (auto *tmpl = dyn_cast<TemplateExpr>(key); tmpl && tmpl->exprs.empty()) {
-    return ToUtf8::toUtf8(tmpl->quasis[0]);
-  }
-  if (auto *name = dyn_cast<NameExpr>(key); name && name->var()) {
+  auto *name = dyn_cast<NameExpr>(key);
+  if (name != nullptr && name->var() != nullptr) {
     if (std::optional<std::string> known =
             this->state.getConstantStore().findConstKey(name->var())) {
       return known;
@@ -79,34 +80,47 @@ std::optional<std::string> KeyedFieldChecker::constantKey(const Expr *key) const
   return std::nullopt;
 }
 
-void KeyedFieldChecker::keyNames(const Expr *key,
-                                 llvm::function_ref<void(llvm::StringRef)> each) const {
-  if (auto *lit = dyn_cast<StringLitExpr>(key)) {
-    each(ToUtf8::toUtf8(lit->value));
-  } else if (auto *tmpl = dyn_cast<TemplateExpr>(key); tmpl && tmpl->exprs.empty()) {
-    each(ToUtf8::toUtf8(tmpl->quasis[0]));
-  } else if (auto *number = dyn_cast<IntLitExpr>(key)) {
-    each(std::to_string(number->value));
-  } else if (auto *name = dyn_cast<NameExpr>(key)) {
-    for (const std::string &text : this->state.getInventoryStore().getStringConstants(name->name)) {
-      each(text);
-    }
-  } else if (auto *member = dyn_cast<MemberExpr>(key)) {
-    if (auto *object = dyn_cast<NameExpr>(member->object)) {
-      for (const std::string &text : this->state.getInventoryStore().getStringConstants(
-               (object->name + "." + member->name).str())) {
-        each(text);
-      }
-    }
+std::vector<std::string> KeyedFieldChecker::keyNames(const Expr *key) const {
+  auto *literal = dyn_cast<StringLitExpr>(key);
+  auto *templateExpr = dyn_cast<TemplateExpr>(key);
+  auto *number = dyn_cast<IntLitExpr>(key);
+  auto *name = dyn_cast<NameExpr>(key);
+  auto *member = dyn_cast<MemberExpr>(key);
+  if (literal != nullptr) {
+    return {ToUtf8::toUtf8(literal->value)};
   }
+  if (templateExpr != nullptr && templateExpr->exprs.empty()) {
+    return {ToUtf8::toUtf8(templateExpr->quasis[0])};
+  }
+  if (number != nullptr) {
+    return {std::to_string(number->value)};
+  }
+  if (name != nullptr) {
+    return this->state.getInventoryStore().getStringConstants(name->name);
+  }
+  if (member != nullptr) {
+    return this->memberConstants(member);
+  }
+
+  return {};
 }
 
-const Type *KeyedFieldChecker::keyedFieldType(const Type *type, const Type *keyType) {
+std::vector<std::string> KeyedFieldChecker::memberConstants(const MemberExpr *member) const {
+  auto *object = dyn_cast<NameExpr>(member->object);
+  if (object == nullptr) {
+    return {};
+  }
+  std::string path = (object->name + "." + member->name).str();
+
+  return this->state.getInventoryStore().getStringConstants(path);
+}
+
+const Type *KeyedFieldChecker::keyedFieldType(const Type *type, const Type *keyType) const {
   if (type->isTuple() || !type->isObject()) {
     return nullptr;
   }
-  const ClassDecl *cls = type->isClass() ? ClassDeclarer::classOf(type) : nullptr;
-  if (type->isClass() && !cls) {
+  const ClassDecl *classDecl = type->isClass() ? this->classDeclarer->classOf(type) : nullptr;
+  if (type->isClass() && classDecl == nullptr) {
     return nullptr;
   }
   llvm::ArrayRef<const Type *> names =
@@ -116,15 +130,15 @@ const Type *KeyedFieldChecker::keyedFieldType(const Type *type, const Type *keyT
     if (!n->isStringLiteral()) {
       return nullptr;
     }
-    std::string text = ToUtf8::toUtf8(n->literalText());
-    const Field *f = type->field(text);
-    if (cls) {
-      const ClassField *field = ClassBases::findField(cls, text, nullptr);
-      if (!field || field->isStatic() || field->access != Access::Public) {
+    auto text = ToUtf8::toUtf8(n->literalText());
+    const auto *f = type->field(text);
+    if (classDecl != nullptr) {
+      const auto *field = this->classBases->findField(classDecl, text, nullptr);
+      if (field == nullptr || field->isStatic() || field->access != Access::Public) {
         return nullptr;
       }
     }
-    if (!f || (common && f->type != common)) {
+    if (f == nullptr || (common != nullptr && f->type != common)) {
       return nullptr;
     }
     common = f->type;
@@ -134,21 +148,22 @@ const Type *KeyedFieldChecker::keyedFieldType(const Type *type, const Type *keyT
 }
 
 KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkKeyedField(IndexExpr *index,
-                                                                           bool write) {
+                                                                           KeyedAccess access) {
+  bool write = access == KeyedAccess::WRITE;
   const Type *type = index->object->type;
   index->type = Type::error();
   if (type->isTuple()) {
-    ResultKeyedFieldName position = this->tupleKeyName(index, type);
+    auto position = this->tupleKeyName(index, type);
     if (position.isErr()) {
       return err(position.error());
     }
     return this->checkNamedField(index, type, position.value(), write);
   }
   index->index = this->exprChecker->checkExpr(index->index);
-  std::optional<std::string> key = this->constantKey(index->index);
+  auto key = this->constantKey(index->index);
   const Type *texts =
       key.has_value() ? nullptr : this->literalTypes->constTextType(index->index, nullptr);
-  if (texts != nullptr && KeyedFieldChecker::keyedFieldType(type, texts) != nullptr) {
+  if (texts != nullptr && this->keyedFieldType(type, texts) != nullptr) {
     index->index = this->typeRelations->convert(index->index, texts);
   }
   const Type *keyType = index->index->type;
@@ -158,11 +173,11 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkKeyedField(Index
         .message = "",
     });
   }
-  const Type *field = key.has_value() ? nullptr : KeyedFieldChecker::keyedFieldType(type, keyType);
+  const Type *field = key.has_value() ? nullptr : this->keyedFieldType(type, keyType);
   if (field != nullptr) {
     return this->checkKeySetField(index, type, keyType, field, write);
   }
-  ResultKeyedFieldName named = KeyedFieldChecker::objectKeyName(type, keyType, key);
+  auto named = this->objectKeyName(type, keyType, key);
   if (named.isErr()) {
     return err(named.error());
   }
@@ -184,7 +199,7 @@ KeyedFieldChecker::ResultKeyedFieldName KeyedFieldChecker::tupleKeyName(IndexExp
       keyType->isInteger() ? this->constantFolder->intConstant(index->index) : std::nullopt;
   size_t count = type->fields().size();
   if (!keyType->isInteger()) {
-    std::string message = ErrorTextKeyedField::tupleKey(keyType->name());
+    auto message = ErrorTextKeyedField::tupleKey(keyType->name());
 
     return err(KeyedFieldCheckerCheckKeyedFieldError{
         .code = KeyedFieldCheckerCheckKeyedFieldErrorCode::TUPLE_KEY_NOT_NUMBER,
@@ -192,7 +207,7 @@ KeyedFieldChecker::ResultKeyedFieldName KeyedFieldChecker::tupleKeyName(IndexExp
     });
   }
   if (!position.has_value()) {
-    std::string message = ErrorTextKeyedField::tupleConst();
+    auto message = ErrorTextKeyedField::tupleConst();
 
     return err(KeyedFieldCheckerCheckKeyedFieldError{
         .code = KeyedFieldCheckerCheckKeyedFieldErrorCode::TUPLE_KEY_NOT_CONSTANT,
@@ -200,7 +215,7 @@ KeyedFieldChecker::ResultKeyedFieldName KeyedFieldChecker::tupleKeyName(IndexExp
     });
   }
   if (*position < 0 || uint64_t(*position) >= count) {
-    std::string message = ErrorTextKeyedField::tupleRange(type->name(), count, *position);
+    auto message = ErrorTextKeyedField::tupleRange(type->name(), count, *position);
 
     return err(KeyedFieldCheckerCheckKeyedFieldError{
         .code = KeyedFieldCheckerCheckKeyedFieldErrorCode::TUPLE_KEY_OUT_OF_RANGE,
@@ -213,9 +228,9 @@ KeyedFieldChecker::ResultKeyedFieldName KeyedFieldChecker::tupleKeyName(IndexExp
 
 KeyedFieldChecker::ResultKeyedFieldName
 KeyedFieldChecker::objectKeyName(const Type *type, const Type *keyType,
-                                 const std::optional<std::string> &key) {
+                                 const std::optional<std::string> &key) const {
   if (!key.has_value() && keyType->nonOptional()->isNumeric()) {
-    std::string message = ErrorTextKeyedField::numbered(type->name());
+    auto message = ErrorTextKeyedField::numbered(type->name());
 
     return err(KeyedFieldCheckerCheckKeyedFieldError{
         .code = KeyedFieldCheckerCheckKeyedFieldErrorCode::NO_NUMBERED_FIELDS,
@@ -223,7 +238,7 @@ KeyedFieldChecker::objectKeyName(const Type *type, const Type *keyType,
     });
   }
   if (!key.has_value() && keyType->isString()) {
-    std::string message = ErrorTextKeyedField::runtimeKey(type->name());
+    auto message = ErrorTextKeyedField::runtimeKey(type->name());
 
     return err(KeyedFieldCheckerCheckKeyedFieldError{
         .code = KeyedFieldCheckerCheckKeyedFieldErrorCode::KEY_NOT_CONSTANT,
@@ -231,7 +246,7 @@ KeyedFieldChecker::objectKeyName(const Type *type, const Type *keyType,
     });
   }
   if (!key.has_value()) {
-    std::string message = ErrorTextKeyedField::keyString(keyType->name());
+    auto message = ErrorTextKeyedField::keyString(keyType->name());
 
     return err(KeyedFieldCheckerCheckKeyedFieldError{
         .code = KeyedFieldCheckerCheckKeyedFieldErrorCode::KEY_NOT_STRING,
@@ -239,8 +254,8 @@ KeyedFieldChecker::objectKeyName(const Type *type, const Type *keyType,
     });
   }
   if (!type->isClass() && type->field(*key) == nullptr) {
-    bool isInherited = KeyedFieldChecker::isInherited(*key);
-    std::string message = ErrorTextKeyedField::noField(*key, type->name(), isInherited);
+    bool isInherited = this->isInherited(*key);
+    auto message = ErrorTextKeyedField::noField(*key, type->name(), isInherited);
 
     return err(KeyedFieldCheckerCheckKeyedFieldError{
         .code = KeyedFieldCheckerCheckKeyedFieldErrorCode::NO_SUCH_FIELD,
@@ -255,7 +270,7 @@ KeyedFieldChecker::ResultKeyedFieldRead
 KeyedFieldChecker::checkKeySetField(IndexExpr *index, const Type *type, const Type *keyType,
                                     const Type *field, bool write) {
   if (write) {
-    ResultKeyedFieldRead written = this->checkKeySetWrite(index, type, keyType, field);
+    auto written = this->checkKeySetWrite(index, type, keyType, field);
     if (written.isErr()) {
       return written;
     }
@@ -273,8 +288,8 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkKeySetWrite(Inde
   llvm::ArrayRef<const Type *> names =
       keyType->isUnion() ? keyType->members() : llvm::ArrayRef<const Type *>(keyType);
   bool isKnown = this->allAssigned(names);
-  if (KeyedFieldChecker::anyReadonly(type, names)) {
-    std::string message = ErrorTextKeyedField::readonly();
+  if (this->anyReadonly(type, names)) {
+    auto message = ErrorTextKeyedField::readonly();
 
     return err(KeyedFieldCheckerCheckKeyedFieldError{
         .code = KeyedFieldCheckerCheckKeyedFieldErrorCode::READONLY_THROUGH_KEY,
@@ -282,7 +297,7 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkKeySetWrite(Inde
     });
   }
   if ((field->isOptional() || field->isUnion() || field->isLiteral()) && !isKnown) {
-    std::string message = ErrorTextKeyedField::byName(field->name());
+    auto message = ErrorTextKeyedField::byName(field->name());
 
     return err(KeyedFieldCheckerCheckKeyedFieldError{
         .code = KeyedFieldCheckerCheckKeyedFieldErrorCode::ASSIGNED_BY_NAME,
@@ -290,7 +305,7 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkKeySetWrite(Inde
     });
   }
   for (const Type *n : names) {
-    std::string text = ToUtf8::toUtf8(n->literalText());
+    auto text = ToUtf8::toUtf8(n->literalText());
     this->fieldFacts->fieldsAssigned(this->state.getAst().keepName(text));
   }
 
@@ -299,7 +314,7 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkKeySetWrite(Inde
 
 bool KeyedFieldChecker::allAssigned(llvm::ArrayRef<const Type *> names) const {
   for (const Type *n : names) {
-    std::string text = ToUtf8::toUtf8(n->literalText());
+    auto text = ToUtf8::toUtf8(n->literalText());
     if (!this->state.getFlowState().isFieldAssigned(text)) {
       return false;
     }
@@ -308,9 +323,9 @@ bool KeyedFieldChecker::allAssigned(llvm::ArrayRef<const Type *> names) const {
   return true;
 }
 
-bool KeyedFieldChecker::anyReadonly(const Type *type, llvm::ArrayRef<const Type *> names) {
+bool KeyedFieldChecker::anyReadonly(const Type *type, llvm::ArrayRef<const Type *> names) const {
   for (const Type *n : names) {
-    std::string text = ToUtf8::toUtf8(n->literalText());
+    auto text = ToUtf8::toUtf8(n->literalText());
     if (type->field(text)->readonly) {
       return true;
     }
@@ -325,7 +340,7 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkNamedField(Index
                                                                            bool write) {
   bool isAssigned = this->state.getFlowState().isFieldAssigned(name);
   if (write && !isAssigned && type->isTuple()) {
-    std::string message = ErrorTextKeyedField::tupleSet();
+    auto message = ErrorTextKeyedField::tupleSet();
 
     return err(KeyedFieldCheckerCheckKeyedFieldError{
         .code = KeyedFieldCheckerCheckKeyedFieldErrorCode::TUPLE_ELEMENT_BY_NUMBER,
@@ -333,20 +348,20 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkNamedField(Index
     });
   }
   if (write && !isAssigned) {
-    std::string message = ErrorTextKeyedField::keySet();
+    auto message = ErrorTextKeyedField::keySet();
 
     return err(KeyedFieldCheckerCheckKeyedFieldError{
         .code = KeyedFieldCheckerCheckKeyedFieldErrorCode::FIELD_KEY_NOT_LITERAL,
         .message = message,
     });
   }
-  llvm::StringRef field = this->state.getAst().keepName(name);
+  auto field = this->state.getAst().keepName(name);
   index->form = NamedFieldIndex{.field = field};
   auto *member = this->state.getAst().make<MemberExpr>(index->loc(), index->object, field);
   if (write) {
     return ok(member);
   }
-  ObjectChecker::ResultObjectFieldValue read = this->objectChecker->checkField(member);
+  auto read = this->objectChecker->checkField(member);
   if (read.isErr()) {
     return err(KeyedFieldCheckerCheckKeyedFieldError{
         .code = KeyedFieldCheckerCheckKeyedFieldErrorCode::FIELD_NOT_FOUND,

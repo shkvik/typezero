@@ -22,11 +22,11 @@ public:
   explicit LibraryDeclarations(const BuiltinDeclarations &loaded);
 
   llvm::ArrayRef<Stmt *> getBuiltinItems(BuiltinText text) const;
-  void rememberLibraryFunction(FunctionDecl *fn);
+  void rememberLibraryFunction(FunctionDecl *functionDecl);
   FunctionDecl *findLibraryFunction(llvm::StringRef name) const;
   void rememberLibraryType(TypeAliasDecl *alias);
   TypeAliasDecl *findLibraryType(llvm::StringRef name) const;
-  void rememberLibraryClass(ClassDecl *cls);
+  void rememberLibraryClass(ClassDecl *classDecl);
   ClassDecl *findLibraryClass(llvm::StringRef name) const;
   void addLibraryRange(const char *begin, const char *end);
   bool isInsideLibrary(llvm::SMLoc loc) const;

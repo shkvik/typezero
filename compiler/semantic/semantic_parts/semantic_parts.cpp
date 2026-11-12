@@ -120,7 +120,7 @@ SemanticParts::SemanticParts(SemanticState &state)
       topLevelChecker(state, *this),
       typeArgInferrer(state, *this),
       conditionalTypes(state, *this),
-      constructorCalls(state),
+      constructorCalls(state, *this),
       decoratorChecker(state, *this),
       generatorChecker(state, *this),
       namesInFunctions(state, *this),

@@ -23,7 +23,7 @@ FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(C
   llvm::StringRef name = member->name;
   if (name == "bind") {
     this->argumentChecker->walkArgsLoosely(call);
-    std::string message = ErrorTextThisCall::noBind();
+    auto message = ErrorTextThisCall::noBind();
 
     return err(FunctionMethodCheckerCheckThisCallError{
         .code = FunctionMethodCheckerCheckThisCallErrorCode::NO_BIND,
@@ -32,7 +32,7 @@ FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(C
   }
   if (name != "call" && name != "apply") {
     this->argumentChecker->walkArgsLoosely(call);
-    std::string message = ErrorTextThisCall::noProperty(name);
+    auto message = ErrorTextThisCall::noProperty(name);
 
     return err(FunctionMethodCheckerCheckThisCallError{
         .code = FunctionMethodCheckerCheckThisCallErrorCode::NO_SUCH_PROPERTY,
@@ -40,7 +40,7 @@ FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(C
     });
   }
   if (call->args.empty()) {
-    std::string message = ErrorTextThisCall::thisFirst(name);
+    auto message = ErrorTextThisCall::thisFirst(name);
 
     return err(FunctionMethodCheckerCheckThisCallError{
         .code = FunctionMethodCheckerCheckThisCallErrorCode::NO_THIS_ARGUMENT,
@@ -49,7 +49,7 @@ FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(C
   }
   if (name == "apply" && (call->args.size() != 2 || call->hasSpread())) {
     this->argumentChecker->walkArgsLoosely(call);
-    std::string message = ErrorTextThisCall::applyArgs();
+    auto message = ErrorTextThisCall::applyArgs();
 
     return err(FunctionMethodCheckerCheckThisCallError{
         .code = FunctionMethodCheckerCheckThisCallErrorCode::APPLY_ARGUMENTS,
@@ -63,7 +63,7 @@ FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(C
   }
   call->callee = member->object;
   call->type = type->ret();
-  Expr *checked = this->argumentChecker->checkArguments(call, type->params(), type->minArgs(),
+  auto *checked = this->argumentChecker->checkArguments(call, type->params(), type->minArgs(),
                                                         type->hasRest(), member->loc());
 
   return ok(checked);
@@ -72,11 +72,11 @@ FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(C
 FunctionMethodChecker::ResultParamsJoined
 FunctionMethodChecker::checkListMethod(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
+  const auto *method = ArrayMethodTable::find(member->name);
   bool isJoining = method != nullptr && method->method == ArrayMethod::JOIN;
   if (!isJoining) {
     this->argumentChecker->walkArgsLoosely(call);
-    std::string message = ErrorTextListMethod::noMethod(member->name);
+    auto message = ErrorTextListMethod::noMethod(member->name);
 
     return err(FunctionMethodCheckerCheckListMethodError{
         .code = FunctionMethodCheckerCheckListMethodErrorCode::NO_SUCH_METHOD,
@@ -89,7 +89,7 @@ FunctionMethodChecker::checkListMethod(CallExpr *call, MemberExpr *member) {
         .message = "",
     });
   }
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 1);
+  auto arity = this->argumentChecker->checkArity(call, 0, 1);
   if (arity.isErr()) {
     return err(FunctionMethodCheckerCheckListMethodError{
         .code = FunctionMethodCheckerCheckListMethodErrorCode::WRONG_ARITY,

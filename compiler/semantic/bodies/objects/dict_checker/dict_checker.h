@@ -2,11 +2,13 @@
 
 #include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/result/result/result.h"
+#include "compiler/semantic/bodies/expr/target_checker/target_checker_types.h"
 #include "compiler/semantic/bodies/objects/dict_checker/dict_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 
+class FlowChecker;
 class SemanticParts;
 class ExprChecker;
 class IntlChecker;
@@ -31,14 +33,14 @@ public:
   Expr *iterableOf(Expr *expr);
   Expr *checkRecordKey(Expr *key);
   Expr *recordAssign(AssignExpr *assign);
-  ResultRecordKeyChecked checkDictIn(BinaryExpr *bin);
+  ResultRecordKeyChecked checkDictIn(BinaryExpr *binary);
   ResultKeyTypeIsAllowed checkKeyType(const Type *type);
   Expr *keyLiteral(llvm::SMLoc loc, llvm::StringRef name);
   ResultDictIndexedValue checkDictIndex(IndexExpr *index);
   ResultDictMemberAccess checkDictMember(MemberExpr *member);
   ResultDictTypeResolved resolveDictType(const TypeRef &ref);
-  static bool keyArgument(DictCheckerResolveDictTypeErrorCode code);
-  ResultRecordTargetType checkDictTarget(Expr *target, bool compound);
+  bool keyArgument(DictCheckerResolveDictTypeErrorCode code) const;
+  ResultRecordTargetType checkDictTarget(Expr *target, AssignForm form);
   Expr *checkRecordNullishAssign(AssignExpr *assign, IndexExpr *index);
   ResultRecordKeyDeleted checkDictDelete(UnaryExpr *unary, Expr *object, Expr *keyExpr,
                                          llvm::StringRef name);
@@ -48,16 +50,16 @@ public:
 private:
   using ResultTextKeyForRecord = Result<const Type *, DictCheckerStringKeyError>;
 
-  static std::u16string toUtf16(llvm::StringRef text);
-  static ResultTextKeyForRecord stringKey(const Type *type);
+  ResultTextKeyForRecord stringKey(const Type *type) const;
   ResultDictTypeResolved resolveCollectionType(const TypeRef &ref, Collection collection);
-  static ResultDictTypeResolved recordType(const Type *key, const Type *value);
-  static bool isLiteralKeys(const Type *key);
-  static const Type *literalKeysObject(const Type *key, const Type *value);
+  ResultDictTypeResolved recordType(const Type *key, const Type *value) const;
+  bool isLiteralKeys(const Type *key) const;
+  const Type *literalKeysObject(const Type *key, const Type *value) const;
 
   SemanticState &state;
   ExprChecker *exprChecker = nullptr;
   IntlChecker *intlChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
   TypeResolver *typeResolver = nullptr;
   TypeRelations *typeRelations = nullptr;
   ArgListChecker *argListChecker = nullptr;

@@ -389,4 +389,14 @@ bool TypeNameTable::isName(llvm::StringRef name, TypeName type) {
   return info != nullptr && info->type == type;
 }
 
+llvm::StringRef TypeNameTable::getName(TypeName type) {
+  for (const TypeNameInfo &info : kTypeNames) {
+    if (info.type == type) {
+      return info.name;
+    }
+  }
+
+  return "";
+}
+
 }

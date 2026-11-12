@@ -32,7 +32,7 @@ struct NamedExportStep {
 
 struct StarExportStep {
   static constexpr ExportStepKind kind = ExportStepKind::STAR;
-  const ExportDecl *decl;
+  const ExportDecl *exportDecl;
   Module *from;
 };
 
@@ -66,15 +66,15 @@ private:
   using ResultLocalIsKnown = Result<const ModuleName *, ModuleDeclarerLocalExportError>;
   using ResultSourceUsable = Result<const ExportSource *, ModuleDeclarerExportSourceError>;
 
-  static ResultSourceUsable exportSource(const ExportSource *source);
-  static ResultExportUnique freeExport(const ModuleState &here, const ModuleName &name);
-  static ResultLocalIsKnown localExport(const Module *module, const ModuleName &name, bool found);
-  static ResultStarIsUnique starExport(llvm::StringRef name, const ModuleExport *ours,
-                                       const ExportAll *all, const ModuleBinding &target);
+  ResultSourceUsable exportSource(const ExportSource *source) const;
+  ResultExportUnique freeExport(const ModuleState &here, const ModuleName &name) const;
+  ResultLocalIsKnown localExport(const Module *module, const ModuleName &name, bool isFound) const;
+  ResultStarIsUnique starExport(llvm::StringRef name, const ModuleExport *ours,
+                                const ExportAll *all, const ModuleBinding &target) const;
 
-  static std::vector<ExportStep> exportSteps(Module *module);
-  static void addNameSteps(const ExportDecl &decl, std::vector<ExportStep> &steps);
-  static std::optional<ImportedName> findImport(const Module *module, llvm::StringRef name);
+  std::vector<ExportStep> exportSteps(Module *module) const;
+  void addNameSteps(const ExportDecl &exportDecl, std::vector<ExportStep> &steps) const;
+  std::optional<ImportedName> findImport(const Module *module, llvm::StringRef name) const;
 
   void startExports(std::vector<ExportsFrame> &frames, Module *module);
   Module *unreadyModule(const ExportsFrame &frame);
@@ -90,13 +90,21 @@ private:
   ResultExportTarget exportNamed(const llvm::StringMap<ModuleExport> &theirs, Module *from,
                                  llvm::StringRef path, const ModuleName &name);
   std::optional<ModuleBinding> readyLocal(Module *module, llvm::StringRef name);
-  static void addDeclaredItem(ModuleState &here, const Stmt *item);
-  static void addDeclared(ModuleState &here, llvm::StringRef name, llvm::SMLoc loc);
-  static std::optional<llvm::StringRef> itemName(const Stmt *item);
+  void addDeclaredItem(ModuleState &here, const Stmt *item) const;
+  void addDeclared(ModuleState &here, llvm::StringRef name, llvm::SMLoc loc) const;
+  std::optional<llvm::StringRef> itemName(const Stmt *item) const;
   std::vector<std::vector<Stmt *>> declareModuleTypes(SourceFile &program);
   void declareModuleFunctions(Module *module, std::vector<FunctionDecl *> &functions);
-  static std::vector<FunctionDecl *> classFunctions(const ClassDecl *cls);
   void fillUnfilledInstances();
+  bool isDeclaredClass(const ClassDecl *classDecl) const;
+  bool isNamedIn(const ImportDecl &importDecl, llvm::StringRef alias) const;
+  bool isImportedByName(const Module *module, llvm::StringRef alias) const;
+  bool isFromBuiltinModule(const Module *module, llvm::StringRef alias) const;
+  const ModuleExport *exportedAs(const ModuleState &here, llvm::StringRef name) const;
+  std::optional<ModuleBinding> localTarget(Module *module, const ModuleName &name);
+  std::optional<ModuleBinding> reexportedTarget(const ExportSource &source, const ModuleName &name);
+  void declareClassFunctions(Module *module, ClassDecl *classDecl,
+                             std::vector<FunctionDecl *> &functions);
 
   SemanticState &state;
   ClassLinks *classLinks = nullptr;

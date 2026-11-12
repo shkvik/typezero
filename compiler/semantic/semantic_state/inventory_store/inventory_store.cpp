@@ -26,12 +26,12 @@ void InventoryStore::markComparesFunctions() {
   this->inventory.comparesFunctions = true;
 }
 
-void InventoryStore::addLateClass(ClassDecl *cls) {
-  this->inventory.lateClasses.push_back(cls);
+void InventoryStore::addLateClass(ClassDecl *classDecl) {
+  this->inventory.lateClasses.push_back(classDecl);
 }
 
-void InventoryStore::addInstance(FunctionDecl *fn) {
-  this->inventory.instances.push_back(fn);
+void InventoryStore::addInstance(FunctionDecl *functionDecl) {
+  this->inventory.instances.push_back(functionDecl);
 }
 
 void InventoryStore::addSubtype(const Type *type) {

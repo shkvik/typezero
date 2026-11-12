@@ -13,13 +13,17 @@ public:
 
   std::optional<FieldPath> fieldPath(const Expr *expr) const;
   bool isFieldDefined(const FieldPath &path) const;
-  static void defineField(Flow &flow, const FieldPath &path);
+  void defineField(Flow &flow, const FieldPath &path) const;
   void fieldsAssigned(llvm::StringRef name);
-  static void forgetFieldsOf(Flow &flow, const VarSymbol *var);
+  void forgetFieldsOf(Flow &flow, const VarSymbol *variable) const;
   Expr *narrowedField(MemberExpr *member);
 
 private:
-  static bool holdsField(const MemberExpr *member);
+  bool isHoldingField(const MemberExpr *member) const;
+  bool isPathOf(const VarSymbol *variable, const FieldPath &path) const;
+  bool isNarrowedPathOf(const VarSymbol *variable,
+                        const std::pair<FieldPath, const Type *> &entry) const;
+  const Type *streamView(const MemberExpr *member) const;
 
   SemanticState &state;
   TypeRelations *typeRelations = nullptr;

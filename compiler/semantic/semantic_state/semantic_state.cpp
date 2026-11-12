@@ -2,8 +2,8 @@
 
 namespace tz {
 
-SemanticState::SemanticState(AstContext &ctx, Diagnostics &diags, SourceFile &file)
-    : ast(ctx),
+SemanticState::SemanticState(AstContext &context, Diagnostics &diags, SourceFile &file)
+    : ast(context),
       diagnostics(diags),
       inventoryStore(file),
       libraryDeclarations(file.builtins) {}

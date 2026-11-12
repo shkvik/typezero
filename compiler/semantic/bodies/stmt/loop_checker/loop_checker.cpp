@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/stmt/loop_checker/loop_checker.h"
+#include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/expr/truth_checker/truth_checker.h"
 #include "compiler/semantic/bodies/iterators/generator_checker/generator_checker.h"
@@ -37,6 +38,7 @@ LoopChecker::LoopChecker(SemanticState &owner, SemanticParts &all)
   this->jumpChecker = &all.jumpChecker;
   this->loopScanner = &all.loopScanner;
   this->stmtChecker = &all.stmtChecker;
+  this->flowChecker = &all.flowChecker;
   this->asyncChecker = &all.asyncChecker;
   this->matchChecker = &all.matchChecker;
   this->truthChecker = &all.truthChecker;
@@ -50,14 +52,12 @@ LoopChecker::LoopChecker(SemanticState &owner, SemanticParts &all)
   this->generatorChecker = &all.generatorChecker;
 }
 
-bool LoopChecker::continuesTo(const Stmt *body, llvm::ArrayRef<llvm::StringRef> labels) {
-  PlacedNodes nodes = PlacedNodes::collect({body}, {});
+bool LoopChecker::isContinuingTo(const Stmt *body, llvm::ArrayRef<llvm::StringRef> labels) const {
+  auto nodes = PlacedNodes::collect({body}, {});
   for (const PlacedStmt &placed : nodes.getStmts()) {
-    if (placed.place.isInsideFunction()) {
-      continue;
-    }
     auto *next = dyn_cast<ContinueStmt>(placed.stmt);
-    if (next != nullptr && LoopChecker::continuesLoop(next, placed.place, labels)) {
+    bool isOwn = next != nullptr && !placed.place.isInsideFunction();
+    if (isOwn && this->isContinuingLoop(next, placed.place, labels)) {
       return true;
     }
   }
@@ -65,8 +65,8 @@ bool LoopChecker::continuesTo(const Stmt *body, llvm::ArrayRef<llvm::StringRef> 
   return false;
 }
 
-bool LoopChecker::continuesLoop(const ContinueStmt *next, const TreePlace &place,
-                                llvm::ArrayRef<llvm::StringRef> labels) {
+bool LoopChecker::isContinuingLoop(const ContinueStmt *next, const TreePlace &place,
+                                   llvm::ArrayRef<llvm::StringRef> labels) const {
   if (!next->label.empty()) {
     return llvm::is_contained(labels, next->label);
   }
@@ -74,67 +74,90 @@ bool LoopChecker::continuesLoop(const ContinueStmt *next, const TreePlace &place
   return !place.isInsideLoop();
 }
 
+Flow LoopChecker::flowAfter(const LoopScan &scan, const Flow &whenFalse, const Flow &head) const {
+  if (scan.isBreakingOut) {
+    return this->flowChecker->join(whenFalse, head);
+  }
+
+  return whenFalse;
+}
+
 void LoopChecker::walkWhile(WhileStmt *stmt) {
-  LoopScan scan = this->loopScanner->scanLoop({stmt->body}, {stmt->cond});
-  Flow head = this->loopBounds->loopHead(scan, stmt->cond, true);
+  auto scan = this->loopScanner->scanLoop({stmt->body}, {stmt->cond});
+  auto head = this->loopBounds->countedLoopHead(scan, stmt->cond);
   this->state.getFlowState().replaceFlow(head);
-  Flow whenTrue, whenFalse;
+  auto whenTrue = Flow();
+  auto whenFalse = Flow();
   stmt->cond = this->truthChecker->checkCondition(stmt->cond, whenTrue, whenFalse);
   this->state.getFlowState().replaceFlow(whenTrue);
-  this->walkLoopBody(stmt->body, scan.awaits);
-  this->state.getFlowState().replaceFlow(scan.breaks ? FlowChecker::join(whenFalse, head)
-                                                     : whenFalse);
+  this->walkScannedBody(stmt->body, scan);
+  auto after = this->flowAfter(scan, whenFalse, head);
+  this->state.getFlowState().replaceFlow(after);
 }
 
 void LoopChecker::walkDoWhile(DoWhileStmt *stmt) {
-  LoopScan scan = this->loopScanner->scanLoop({stmt->body}, {stmt->cond});
-  Flow head = this->loopBounds->loopHead(scan, nullptr, false);
+  auto scan = this->loopScanner->scanLoop({stmt->body}, {stmt->cond});
+  auto head = this->loopBounds->loopHead(scan);
   this->state.getFlowState().replaceFlow(head);
-  this->walkLoopBody(stmt->body, scan.awaits);
-  this->state.getFlowState().replaceFlow(
-      FlowChecker::join(this->state.getFlowState().getFlow(), head));
-  Flow whenTrue, whenFalse;
+  this->walkScannedBody(stmt->body, scan);
+  const Flow &bodyEnd = this->state.getFlowState().getFlow();
+  auto beforeCond = this->flowChecker->join(bodyEnd, head);
+  this->state.getFlowState().replaceFlow(beforeCond);
+  auto whenTrue = Flow();
+  auto whenFalse = Flow();
   stmt->cond = this->truthChecker->checkCondition(stmt->cond, whenTrue, whenFalse);
-  this->state.getFlowState().replaceFlow(scan.breaks ? FlowChecker::join(whenFalse, head)
-                                                     : whenFalse);
+  auto after = this->flowAfter(scan, whenFalse, head);
+  this->state.getFlowState().replaceFlow(after);
 }
 
 void LoopChecker::walkFor(ForStmt *stmt) {
-  llvm::SmallVector<llvm::StringRef, 1> labels = this->state.getBlockPosition().getPendingLabels();
+  auto labels = this->state.getBlockPosition().getPendingLabels();
   this->state.getScopeStack().openScope();
   this->state.getBlockPosition().forgetBlock();
-  if (stmt->init) {
+  if (stmt->init != nullptr) {
     this->stmtChecker->walkStmt(stmt->init);
   }
-  LoopScan scan = this->loopScanner->scanLoop({stmt->body}, {stmt->cond, stmt->step});
-  Flow head = this->loopBounds->loopHead(scan, stmt->cond, true);
+  auto scan = this->loopScanner->scanLoop({stmt->body}, {stmt->cond, stmt->step});
+  auto head = this->loopBounds->countedLoopHead(scan, stmt->cond);
   this->state.getFlowState().replaceFlow(head);
-  Flow whenTrue = head;
-  Flow whenFalse = head;
+  auto whenTrue = head;
+  auto whenFalse = head;
   whenFalse.unreachable = true;
-  if (stmt->cond) {
+  if (stmt->cond != nullptr) {
     stmt->cond = this->truthChecker->checkCondition(stmt->cond, whenTrue, whenFalse);
   }
   this->state.getFlowState().replaceFlow(whenTrue);
-  this->walkLoopBody(stmt->body, scan.awaits);
-  if (stmt->step) {
-    if (LoopChecker::continuesTo(stmt->body, labels)) {
-      this->state.getFlowState().replaceFlow(head);
-    } else if (this->state.getFlowState().isUnreachable()) {
-      this->state.getFlowState().replaceFlow(whenTrue);
-    }
-    if (auto *yield = dyn_cast<YieldExpr>(stmt->step)) {
-      yield->discarded = true;
-    }
-    stmt->step = this->exprChecker->checkExpr(stmt->step);
-    ResultChecker::ResultValueGetsUsed used = this->resultChecker->usedValue(stmt->step);
-    if (used.isErr()) {
-      this->state.getDiagnostics().error(stmt->step->loc(), used.error().message);
-    }
+  this->walkScannedBody(stmt->body, scan);
+  if (stmt->step != nullptr) {
+    this->enterStepFlow(stmt->body, labels, head, whenTrue);
+    this->walkForStep(stmt);
   }
-  this->state.getFlowState().replaceFlow(scan.breaks ? FlowChecker::join(whenFalse, head)
-                                                     : whenFalse);
+  auto after = this->flowAfter(scan, whenFalse, head);
+  this->state.getFlowState().replaceFlow(after);
   this->scopes->closeScope();
+}
+
+void LoopChecker::enterStepFlow(const Stmt *body, llvm::ArrayRef<llvm::StringRef> labels,
+                                const Flow &head, const Flow &whenTrue) {
+  if (this->isContinuingTo(body, labels)) {
+    this->state.getFlowState().replaceFlow(head);
+    return;
+  }
+  if (this->state.getFlowState().isUnreachable()) {
+    this->state.getFlowState().replaceFlow(whenTrue);
+  }
+}
+
+void LoopChecker::walkForStep(ForStmt *stmt) {
+  auto *yield = dyn_cast<YieldExpr>(stmt->step);
+  if (yield != nullptr) {
+    yield->discarded = true;
+  }
+  stmt->step = this->exprChecker->checkExpr(stmt->step);
+  auto used = this->resultChecker->usedValue(stmt->step);
+  if (used.isErr()) {
+    this->state.getDiagnostics().error(stmt->step->loc(), used.error().message);
+  }
 }
 
 void LoopChecker::walkForOf(ForOfStmt *stmt) {
@@ -143,6 +166,28 @@ void LoopChecker::walkForOf(ForOfStmt *stmt) {
     this->emitterChecker->noteErrorsHandled(stmt->iterable);
     return;
   }
+  this->walkSource(stmt);
+  const Type *type = stmt->iterable->type;
+  const auto *iterated = this->iteratedElement(stmt);
+  const Type *element = this->boundElement(stmt, iterated);
+  auto scan = this->loopScanner->scanForOfLoop(stmt);
+  if (type->isIterator()) {
+    scan.isCallingFunctions = true;
+  }
+  bool isOwnedList = stmt->isConst && type->isArray() && element->isManaged();
+  stmt->borrowElements = isOwnedList && !scan.isCallingFunctions && !scan.isReleasingElements;
+  auto head = this->loopBounds->loopHead(scan);
+  this->state.getFlowState().replaceFlow(head);
+  this->state.getScopeStack().openScope();
+  VarDeclarator &binding = stmt->binding;
+  binding.sym = this->scopes->declareVar(binding.name, binding.loc, element, stmt->isConst);
+  this->addLiteralBounds(stmt, element);
+  this->walkScannedBody(stmt->body, scan);
+  this->scopes->closeScope();
+  this->state.getFlowState().replaceFlow(head);
+}
+
+void LoopChecker::walkSource(ForOfStmt *stmt) {
   if (stmt->keys) {
     this->objectChecker->walkForIn(stmt);
   } else {
@@ -151,56 +196,46 @@ void LoopChecker::walkForOf(ForOfStmt *stmt) {
   if (stmt->iterable->type->isMatch()) {
     stmt->iterable = this->matchChecker->matchItems(stmt->iterable);
   }
-  const Type *type = stmt->iterable->type;
-  const Type *element = this->iteratedElement(stmt);
-  ResultBindingTyped typed = LoopChecker::bindingType(stmt);
+}
+
+const Type *LoopChecker::boundElement(const ForOfStmt *stmt, const Type *element) {
+  auto typed = this->bindingType(stmt);
   if (typed.isErr()) {
     this->state.getDiagnostics().error(stmt->binding.typeAnn->loc, typed.error().message);
   }
-  ResultBindingShape shape = LoopChecker::bindingShape(stmt, element);
+  auto shape = this->bindingShape(stmt, element);
   if (shape.isErr()) {
     this->state.getDiagnostics().error(stmt->binding.loc, shape.error().message);
-    element = Type::error();
+
+    return Type::error();
   }
-  LoopScan scan = this->loopScanner->scanForOfLoop(stmt);
-  if (type->isIterator()) {
-    scan.callsFunctions = true;
-  }
-  stmt->borrowElements = stmt->isConst && type->isArray() && element->isManaged() &&
-                         !scan.callsFunctions && !scan.releasesElements;
-  Flow head = this->loopBounds->loopHead(scan, nullptr, false);
-  this->state.getFlowState().replaceFlow(head);
-  this->state.getScopeStack().openScope();
-  stmt->binding.sym =
-      this->scopes->declareVar(stmt->binding.name, stmt->binding.loc, element, stmt->isConst);
-  this->addLiteralBounds(stmt, element);
-  this->walkLoopBody(stmt->body, scan.awaits);
-  this->scopes->closeScope();
-  this->state.getFlowState().replaceFlow(head);
+
+  return element;
 }
 
 void LoopChecker::walkIterable(ForOfStmt *stmt) {
   this->iteratorMethods->markFused(stmt->iterable);
-  Expr *checked = this->exprChecker->checkExpr(stmt->iterable);
-  Expr *apparent = this->genericChecker->apparent(checked);
+  auto *checked = this->exprChecker->checkExpr(stmt->iterable);
+  auto *apparent = this->genericChecker->apparent(checked);
   stmt->iterable = this->dictChecker->iterableOf(apparent);
   auto *name = dyn_cast<NameExpr>(stmt->iterable);
   if (name == nullptr || !this->isListParam(name)) {
     return;
   }
-  Expr *elements = this->listElements(name);
+  auto *elements = this->listElements(name);
   if (elements != nullptr) {
     stmt->iterable = elements;
   }
 }
 
 bool LoopChecker::isListParam(const NameExpr *name) {
-  bool isTuple = name->var() != nullptr && name->type->isTuple() && !name->type->tupleRest();
+  bool isTuple =
+      name->var() != nullptr && name->type->isTuple() && name->type->tupleRest() == nullptr;
   if (!isTuple) {
     return false;
   }
-  for (const FunctionDecl *fn : this->state.getFunctionStack().getFunctions()) {
-    if (fn->listName == name->name && name->var()->owner() == fn) {
+  for (const FunctionDecl *functionDecl : this->state.getFunctionStack().getFunctions()) {
+    if (functionDecl->listName == name->name && name->var()->owner() == functionDecl) {
       return true;
     }
   }
@@ -209,25 +244,28 @@ bool LoopChecker::isListParam(const NameExpr *name) {
 }
 
 Expr *LoopChecker::listElements(const NameExpr *name) {
+  auto &ast = this->state.getAst();
   llvm::SMLoc loc = name->loc();
-  auto *elements = this->state.getAst().make<ArrayLitExpr>(loc);
-  std::vector<const Type *> kinds;
-  for (const Field &f : name->type->fields()) {
-    kinds.push_back(f.type);
+  auto *elements = ast.make<ArrayLitExpr>(loc);
+  auto kinds = std::vector<const Type *>();
+  for (const Field &field : name->type->fields()) {
+    kinds.push_back(field.type);
   }
-  for (size_t k = 0; k < name->type->fields().size(); ++k) {
-    auto *root = this->state.getAst().make<NameExpr>(loc, name->name);
-    auto *position = this->state.getAst().make<IntLitExpr>(loc, k);
-    auto *item = this->state.getAst().make<IndexExpr>(loc, root, position);
-    elements->elements.push_back({item, false});
+  for (size_t index = 0; index < kinds.size(); ++index) {
+    auto *root = ast.make<NameExpr>(loc, name->name);
+    auto *position = ast.make<IntLitExpr>(loc, index);
+    auto *item = ast.make<IndexExpr>(loc, root, position);
+    auto element = ArrayLitExpr::Element{.expr = item, .spread = false};
+    elements->elements.push_back(element);
   }
-  if (elements->elements.empty()) {
+  if (kinds.empty()) {
     return nullptr;
   }
-  const Type *element = kinds.empty() ? nullptr : Type::unionOf(kinds);
+  const Type *element = Type::unionOf(kinds);
   bool isTyped = element != nullptr && UnionSlots::unionProblem(element).empty();
+  const Type *expected = isTyped ? Type::array(element) : nullptr;
 
-  return this->exprChecker->checkExpr(elements, isTyped ? Type::array(element) : nullptr);
+  return this->exprChecker->checkExpr(elements, expected);
 }
 
 const Type *LoopChecker::iteratedElement(ForOfStmt *stmt) {
@@ -242,19 +280,21 @@ const Type *LoopChecker::iteratedElement(ForOfStmt *stmt) {
     return type->elementType();
   }
   if (type->isIterator()) {
-    GeneratorChecker::ResultNextNeedsNoValue nothing =
-        this->generatorChecker->checkSendsNothing(type, "'for...of'");
+    auto label = ErrorTextForOf::loop();
+    auto nothing = this->generatorChecker->checkSendsNothing(type, label);
     if (nothing.isErr()) {
       this->state.getDiagnostics().error(stmt->iterable->loc(), nothing.error().message);
     }
+
     return type->yielded();
   }
-  Expr *copy = this->tupleChecker->arrayCopy(stmt->iterable);
+  auto *copy = this->tupleChecker->arrayCopy(stmt->iterable);
   if (copy != nullptr) {
     stmt->iterable = copy;
+
     return copy->type->inner();
   }
-  ResultIterableType iterable = this->iterableType(type);
+  auto iterable = this->iterableType(type);
   if (iterable.isErr()) {
     this->state.getDiagnostics().error(stmt->iterable->loc(), iterable.error().message);
   }
@@ -263,39 +303,49 @@ const Type *LoopChecker::iteratedElement(ForOfStmt *stmt) {
 }
 
 void LoopChecker::addLiteralBounds(const ForOfStmt *stmt, const Type *element) {
-  auto *lit = dyn_cast<ArrayLitExpr>(stmt->iterable);
-  bool isBounded = lit != nullptr && element->isInt() && stmt->binding.sym != nullptr &&
-                   !stmt->binding.destructured() && !lit->elements.empty();
+  auto *literal = dyn_cast<ArrayLitExpr>(stmt->iterable);
+  bool isBounded = literal != nullptr && element->isInt() && stmt->binding.sym != nullptr &&
+                   !stmt->binding.destructured() && !literal->elements.empty();
   if (!isBounded) {
     return;
   }
-  IntegerRange range = this->literalRange(lit);
+  auto range = this->literalRange(literal);
   if (!range.lo.has_value()) {
     return;
   }
-  Term self = Term::of(stmt->binding.sym);
-  this->state.getFlowState().getFacts().add(Term::zero(), self, Facts::saturatingSub(1, *range.lo));
-  this->state.getFlowState().getFacts().add(self, Term::zero(), Facts::saturatingAdd(*range.hi, 1));
+  auto &facts = this->state.getFlowState().getFacts();
+  auto self = Term::of(stmt->binding.sym);
+  auto belowLowest = Facts::saturatingSub(1, *range.lo);
+  auto aboveHighest = Facts::saturatingAdd(*range.hi, 1);
+  facts.add(Term::zero(), self, belowLowest);
+  facts.add(self, Term::zero(), aboveHighest);
 }
 
-IntegerRange LoopChecker::literalRange(const ArrayLitExpr *lit) const {
+IntegerRange LoopChecker::literalRange(const ArrayLitExpr *literal) const {
   IntegerRange range;
-  for (const ArrayLitExpr::Element &e : lit->elements) {
-    std::optional<int64_t> c =
-        e.spread || e.hole ? std::nullopt : this->constantFolder->intConstant(e.expr);
-    if (!c.has_value()) {
+  for (const ArrayLitExpr::Element &element : literal->elements) {
+    auto value = this->elementConstant(element);
+    if (!value.has_value()) {
       return {};
     }
-    range.lo = range.lo.has_value() ? std::min(*range.lo, *c) : *c;
-    range.hi = range.hi.has_value() ? std::max(*range.hi, *c) : *c;
+    range.lo = range.lo.has_value() ? std::min(*range.lo, *value) : *value;
+    range.hi = range.hi.has_value() ? std::max(*range.hi, *value) : *value;
   }
 
   return range;
 }
 
+std::optional<int64_t> LoopChecker::elementConstant(const ArrayLitExpr::Element &element) const {
+  if (element.spread || element.hole) {
+    return std::nullopt;
+  }
+
+  return this->constantFolder->intConstant(element.expr);
+}
+
 LoopChecker::ResultIterableType LoopChecker::iterableType(const Type *type) const {
-  if (type->isOptional() && GeneratorChecker::iteratedType(type->inner())) {
-    std::string message = ErrorTextForOf::mayBeUndef(type->name());
+  if (this->isOptionalIterable(type)) {
+    auto message = ErrorTextForOf::mayBeUndef(type->name());
 
     return err(LoopCheckerIterableTypeError{
         .code = LoopCheckerIterableTypeErrorCode::MAY_BE_UNDEFINED,
@@ -303,7 +353,7 @@ LoopChecker::ResultIterableType LoopChecker::iterableType(const Type *type) cons
     });
   }
   if (type->isTuple()) {
-    std::string message = ErrorTextForOf::tuple();
+    auto message = ErrorTextForOf::tuple();
 
     return err(LoopCheckerIterableTypeError{
         .code = LoopCheckerIterableTypeErrorCode::TUPLE_NOT_ITERABLE,
@@ -311,24 +361,23 @@ LoopChecker::ResultIterableType LoopChecker::iterableType(const Type *type) cons
     });
   }
   if (type->isRecord()) {
-    std::string message = ErrorTextForOf::record();
+    auto message = ErrorTextForOf::record();
 
     return err(LoopCheckerIterableTypeError{
         .code = LoopCheckerIterableTypeErrorCode::RECORD_NOT_ITERABLE,
         .message = message,
     });
   }
-  if (type->isRuntimeObject() && this->generatorChecker->asyncIteratedType(type)) {
-    std::string message = ErrorTextForOf::later(type->name());
+  if (this->isAsyncOnly(type)) {
+    auto message = ErrorTextForOf::later(type->name());
 
     return err(LoopCheckerIterableTypeError{
         .code = LoopCheckerIterableTypeErrorCode::ASYNC_ONLY,
         .message = message,
     });
   }
-  const ClassDecl *cls = type->classDecl();
-  if (cls && cls->library() && cls->generic() && cls->generic()->name == "ConcurrentMap") {
-    std::string message = ErrorTextForOf::concurrent();
+  if (this->isConcurrentMap(type)) {
+    auto message = ErrorTextForOf::concurrent();
 
     return err(LoopCheckerIterableTypeError{
         .code = LoopCheckerIterableTypeErrorCode::CONCURRENT_MAP,
@@ -336,7 +385,7 @@ LoopChecker::ResultIterableType LoopChecker::iterableType(const Type *type) cons
     });
   }
   if (!type->isError()) {
-    std::string message = ErrorTextForOf::cannot(type->name());
+    auto message = ErrorTextForOf::cannot(type->name());
 
     return err(LoopCheckerIterableTypeError{
         .code = LoopCheckerIterableTypeErrorCode::NOT_ITERABLE,
@@ -347,17 +396,45 @@ LoopChecker::ResultIterableType LoopChecker::iterableType(const Type *type) cons
   return ok(type);
 }
 
-LoopChecker::ResultBindingTyped LoopChecker::bindingType(const ForOfStmt *stmt) {
-  if (stmt->binding.typeAnn && stmt->keys) {
-    std::string message = ErrorTextLoopBinding::forIn();
+bool LoopChecker::isOptionalIterable(const Type *type) const {
+  if (!type->isOptional()) {
+    return false;
+  }
+  const auto *element = this->generatorChecker->iteratedType(type->inner());
+
+  return element != nullptr;
+}
+
+bool LoopChecker::isAsyncOnly(const Type *type) const {
+  if (!type->isRuntimeObject()) {
+    return false;
+  }
+  const auto *element = this->generatorChecker->asyncIteratedType(type);
+
+  return element != nullptr;
+}
+
+bool LoopChecker::isConcurrentMap(const Type *type) const {
+  const ClassDecl *classDecl = type->classDecl();
+  if (classDecl == nullptr || !classDecl->library() || classDecl->generic() == nullptr) {
+    return false;
+  }
+
+  return LibraryClassTable::isName(classDecl->generic()->name, LibraryClass::CONCURRENT_MAP);
+}
+
+LoopChecker::ResultBindingTyped LoopChecker::bindingType(const ForOfStmt *stmt) const {
+  bool isAnnotated = stmt->binding.typeAnn.has_value();
+  if (isAnnotated && stmt->keys) {
+    auto message = ErrorTextLoopBinding::forIn();
 
     return err(LoopCheckerBindingTypeError{
         .code = LoopCheckerBindingTypeErrorCode::FOR_IN_ANNOTATED,
         .message = message,
     });
   }
-  if (stmt->binding.typeAnn) {
-    std::string message = ErrorTextLoopBinding::forOf();
+  if (isAnnotated) {
+    auto message = ErrorTextLoopBinding::forOf();
 
     return err(LoopCheckerBindingTypeError{
         .code = LoopCheckerBindingTypeErrorCode::FOR_OF_ANNOTATED,
@@ -369,12 +446,12 @@ LoopChecker::ResultBindingTyped LoopChecker::bindingType(const ForOfStmt *stmt) 
 }
 
 LoopChecker::ResultBindingShape LoopChecker::bindingShape(const ForOfStmt *stmt,
-                                                          const Type *element) {
-  bool isFitting = !stmt->binding.destructured() || stmt->binding.objectPattern() ||
-                   element->isArray() || element->isTuple() || element->isMatch() ||
-                   element->isError();
+                                                          const Type *element) const {
+  bool isListLike =
+      element->isArray() || element->isTuple() || element->isMatch() || element->isError();
+  bool isFitting = !stmt->binding.destructured() || stmt->binding.objectPattern() || isListLike;
   if (!isFitting) {
-    std::string message = ErrorTextLoopShape::notArray(element->name());
+    auto message = ErrorTextLoopShape::notArray(element->name());
 
     return err(LoopCheckerBindingShapeError{
         .code = LoopCheckerBindingShapeErrorCode::NOT_AN_ARRAY,
@@ -385,19 +462,33 @@ LoopChecker::ResultBindingShape LoopChecker::bindingShape(const ForOfStmt *stmt,
   return ok(element);
 }
 
-void LoopChecker::walkLoopBody(Stmt *body, bool awaits) {
-  this->jumpChecker->pushTarget(JumpTarget::Kind::Loop);
-  if (awaits) {
-    this->state.getFunctionStack().enterAwaitLoop();
+void LoopChecker::walkScannedBody(Stmt *body, const LoopScan &scan) {
+  if (scan.hasAwait) {
+    return this->walkAwaitLoopBody(body);
   }
-  StmtChecker::ResultBodyIsStatement checked = this->stmtChecker->checkBody(body);
+
+  return this->walkLoopBody(body);
+}
+
+void LoopChecker::walkLoopBody(Stmt *body) {
+  this->jumpChecker->pushTarget(JumpTarget::Kind::Loop);
+  this->walkBody(body);
+  this->state.getBlockPosition().leaveJumpTarget();
+}
+
+void LoopChecker::walkAwaitLoopBody(Stmt *body) {
+  this->jumpChecker->pushTarget(JumpTarget::Kind::Loop);
+  this->state.getFunctionStack().enterAwaitLoop();
+  this->walkBody(body);
+  this->state.getFunctionStack().leaveAwaitLoop();
+  this->state.getBlockPosition().leaveJumpTarget();
+}
+
+void LoopChecker::walkBody(Stmt *body) {
+  auto checked = this->stmtChecker->checkBody(body);
   if (checked.isErr()) {
     this->state.getDiagnostics().error(body->loc(), checked.error().message);
   }
-  if (awaits) {
-    this->state.getFunctionStack().leaveAwaitLoop();
-  }
-  this->state.getBlockPosition().leaveJumpTarget();
 }
 
 }

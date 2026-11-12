@@ -7,10 +7,13 @@
 
 namespace tz {
 
+class ClassLinks;
+class ClassBases;
 class SemanticParts;
 class EventMaps;
 class FlowChecker;
 class ClassChecker;
+class ClassDeclarer;
 class EmitterChecker;
 class ReturnInferrer;
 class ArgumentChecker;
@@ -22,8 +25,8 @@ class InheritChecker {
 public:
   InheritChecker(SemanticState &owner, SemanticParts &all);
 
-  void walkAbstract(ClassDecl *cls);
-  void walkImplements(ClassDecl *cls);
+  void walkAbstract(ClassDecl *classDecl);
+  void walkImplements(ClassDecl *classDecl);
   Expr *checkSuperCall(CallExpr *call);
   Expr *checkSuperMethodCall(CallExpr *call, MemberExpr *member);
 
@@ -50,58 +53,61 @@ private:
   using ResultParentHasMethods =
       Result<std::vector<FunctionDecl *>, InheritCheckerParentMethodsError>;
 
-  static bool isArrowMethod(const FunctionDecl *fn);
-  static ResultParentClassFound parentClass(ClassDecl *cls);
+  static bool isArrowMethod(const FunctionDecl *functionDecl);
+  ResultParentClassFound parentClass(ClassDecl *classDecl) const;
   ResultSuperIsStatement rootSuper(const CallExpr *call) const;
-  ResultSuperNotRepeated superOnce(const ClassDecl *cls) const;
-  static ResultConstructorScope superAllowed(FunctionDecl *ctor);
-  static ResultSuperMethodScope superContext(FunctionDecl *method);
-  static bool takesParams(const Type *fnType, const FuncSymbol *sym);
+  ResultSuperNotRepeated superOnce(const ClassDecl *classDecl) const;
+  ResultConstructorScope superAllowed(FunctionDecl *constructor) const;
+  ResultSuperMethodScope superContext(FunctionDecl *method) const;
+  bool takesParams(const Type *functionType, const FuncSymbol *function) const;
   ResultObjectIsComplete objectComplete(const MemberExpr *member) const;
-  static void interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out);
-  static ResultMethodHasItsBody methodBody(FuncSymbol *sym, llvm::StringRef name);
-  static ResultParentHasMethods parentMethods(const ClassDecl *parent, llvm::StringRef name);
-  static ResultNoSuperArguments superArguments(const CallExpr *call, const ClassDecl *parent);
-  static ResultAbstractHasClass abstractNeedsClass(const ClassDecl *cls, const FunctionDecl *fn);
-  static ResultAbstractOverride abstractImplemented(const ClassDecl *cls,
-                                                    const FunctionDecl *found);
-  static ResultMemberIsFunction methodForField(const Field &member, const Type *iface,
-                                               const ClassDecl *cls);
-  static ResultSignatureVariant signatureVariant(llvm::StringRef prefix, llvm::StringRef name,
-                                                 const Type *signature, bool found);
-  static ResultMemberIsDeclared memberDeclared(llvm::StringRef prefix, const Field &member,
-                                               llvm::ArrayRef<FunctionDecl *> methods);
-  static ResultFieldTypeMatches fieldMatches(llvm::StringRef prefix, const Field &member,
-                                             const Field *actual, const ClassDecl *cls);
-  static ResultReplaceableField replaceable(const Field &member,
-                                            llvm::ArrayRef<FunctionDecl *> methods,
-                                            const Type *iface, const ClassDecl *cls);
-  static ResultReturnTypeAgrees returnMatches(llvm::StringRef name, const Type *ret,
-                                              const Type *expected, const Type *iface,
-                                              const ClassDecl *cls);
-  static ResultVariantForParams variantFound(llvm::StringRef prefix, const Field &member,
-                                             llvm::ArrayRef<FunctionDecl *> methods,
-                                             const ClassDecl *cls, bool found);
+  void interfacesOf(const ClassDecl *classDecl, std::vector<const Type *> &out) const;
+  ResultMethodHasItsBody methodBody(FuncSymbol *function, llvm::StringRef name) const;
+  ResultParentHasMethods parentMethods(const ClassDecl *parent, llvm::StringRef name) const;
+  ResultNoSuperArguments superArguments(const CallExpr *call, const ClassDecl *parent) const;
+  ResultAbstractHasClass abstractNeedsClass(const ClassDecl *classDecl,
+                                            const FunctionDecl *functionDecl) const;
+  ResultAbstractOverride abstractImplemented(const ClassDecl *classDecl,
+                                             const FunctionDecl *found) const;
+  ResultMemberIsFunction methodForField(const Field &member, const Type *interfaceType,
+                                        const ClassDecl *classDecl) const;
+  ResultSignatureVariant signatureVariant(llvm::StringRef prefix, llvm::StringRef name,
+                                          const Type *signature, bool found) const;
+  ResultMemberIsDeclared memberDeclared(llvm::StringRef prefix, const Field &member,
+                                        llvm::ArrayRef<FunctionDecl *> methods) const;
+  ResultFieldTypeMatches fieldMatches(llvm::StringRef prefix, const Field &member,
+                                      const Field *actual, const ClassDecl *classDecl) const;
+  ResultReplaceableField replaceable(const Field &member, llvm::ArrayRef<FunctionDecl *> methods,
+                                     const Type *interfaceType, const ClassDecl *classDecl) const;
+  ResultReturnTypeAgrees returnMatches(llvm::StringRef name, const Type *returnType,
+                                       const Type *expected, const Type *interfaceType,
+                                       const ClassDecl *classDecl) const;
+  ResultVariantForParams variantFound(llvm::StringRef prefix, const Field &member,
+                                      llvm::ArrayRef<FunctionDecl *> methods,
+                                      const ClassDecl *classDecl, bool found) const;
   FunctionDecl *enclosingMethod();
   bool superObjectReady(MemberExpr *member);
   Expr *callSuperMethod(CallExpr *call, MemberExpr *member, llvm::ArrayRef<FunctionDecl *> methods);
-  Expr *checkGenericSuperCall(CallExpr *call, MemberExpr *member, FuncSymbol *sym);
+  Expr *checkGenericSuperCall(CallExpr *call, MemberExpr *member, FuncSymbol *function);
   ClassDecl *superCallClass(const CallExpr *call);
-  void walkParentConstructor(CallExpr *call, llvm::ArrayRef<FunctionDecl *> ctors);
-  void walkImplementedMember(ClassDecl *cls, const Type *iface, const Field &member,
+  void walkParentConstructor(CallExpr *call, llvm::ArrayRef<FunctionDecl *> constructors);
+  void walkImplementedMember(ClassDecl *classDecl, const Type *interfaceType, const Field &member,
                              const std::string &prefix);
-  void walkImplementedField(const ClassDecl *cls, const Field &member, const ClassField *field,
-                            const std::string &prefix);
-  bool hasMatchingVariant(const ClassDecl *cls, const Type *iface, const Field &member,
-                          llvm::ArrayRef<FunctionDecl *> methods);
-  void walkImplementedOverload(ClassDecl *cls, const Type *iface, const Overload &overload,
-                               const std::string &prefix);
-  static FunctionDecl *methodTaking(llvm::ArrayRef<FunctionDecl *> methods, const Type *signature);
+  void walkImplementedField(const ClassDecl *classDecl, const Field &member,
+                            const ClassField *field, const std::string &prefix);
+  bool hasMatchingVariant(const ClassDecl *classDecl, const Type *interfaceType,
+                          const Field &member, llvm::ArrayRef<FunctionDecl *> methods);
+  void walkImplementedOverload(ClassDecl *classDecl, const Type *interfaceType,
+                               const Overload &overload, const std::string &prefix);
+  FunctionDecl *methodTaking(llvm::ArrayRef<FunctionDecl *> methods, const Type *signature) const;
 
   SemanticState &state;
   EventMaps *eventMaps = nullptr;
+  ClassLinks *classLinks = nullptr;
+  ClassBases *classBases = nullptr;
   FlowChecker *flowChecker = nullptr;
   ClassChecker *classChecker = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
   EmitterChecker *emitterChecker = nullptr;
   ReturnInferrer *returnInferrer = nullptr;
   ArgumentChecker *argumentChecker = nullptr;

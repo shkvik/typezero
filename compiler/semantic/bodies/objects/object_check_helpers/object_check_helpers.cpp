@@ -11,20 +11,21 @@ using llvm::isa;
 namespace tz {
 
 const Expr *ObjectCheckHelpers::unnarrowed(const Expr *expr) {
-  auto *conv = dyn_cast<CastExpr>(expr);
-  if (!conv || !conv->isImplicit() || conv->shortCircuit) {
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  if (conversion == nullptr || !conversion->isImplicit() || conversion->shortCircuit) {
     return expr;
   }
-  const Type *from = conv->operand->type;
-  if (from->isOptional() && conv->type == from->inner()) {
-    return conv->operand;
+  const Type *from = conversion->operand->type;
+  if (from->isOptional() && conversion->type == from->inner()) {
+    return conversion->operand;
   }
-  if (isa<NameExpr>(conv->operand) && from->isResult() && conv->type->isResult()) {
-    return conv->operand;
+  if (isa<NameExpr>(conversion->operand) && from->isResult() && conversion->type->isResult()) {
+    return conversion->operand;
   }
-  if (isa<NameExpr>(conv->operand) && conv->type->isClass() && conv->type != from->nonOptional() &&
-      conv->type->isSubtypeOf(from->nonOptional())) {
-    return conv->operand;
+  if (isa<NameExpr>(conversion->operand) && conversion->type->isClass() &&
+      conversion->type != from->nonOptional() &&
+      conversion->type->isSubtypeOf(from->nonOptional())) {
+    return conversion->operand;
   }
 
   return expr;

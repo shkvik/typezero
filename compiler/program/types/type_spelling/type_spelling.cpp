@@ -59,6 +59,73 @@ bool TypeSpelling::isTypeOfName(llvm::StringRef name) {
   return llvm::is_contained(kTypeOfNames, name);
 }
 
+bool TypeSpelling::isNumberTypeOfName(llvm::StringRef name) {
+  return name.starts_with("int") || name.starts_with("uint") || name == "double" ||
+         name == "decimal";
+}
+
+const Type *TypeSpelling::narrowedByTypeOf(const std::u16string &name) {
+  static const TypeOfNarrowingInfo narrowings[] = {
+      {u"string", TypeOfNarrowing::STRING},
+      {u"double", TypeOfNarrowing::DOUBLE},
+      {u"boolean", TypeOfNarrowing::BOOLEAN},
+      {u"object", TypeOfNarrowing::ANY_OBJECT},
+      {u"class", TypeOfNarrowing::ANY_OBJECT},
+      {u"decimal", TypeOfNarrowing::DECIMAL},
+      {u"int", TypeOfNarrowing::INT},
+      {u"int8", TypeOfNarrowing::INT8},
+      {u"int16", TypeOfNarrowing::INT16},
+      {u"int32", TypeOfNarrowing::INT32},
+      {u"uint8", TypeOfNarrowing::UINT8},
+      {u"uint16", TypeOfNarrowing::UINT16},
+      {u"uint32", TypeOfNarrowing::UINT32},
+      {u"uint64", TypeOfNarrowing::UINT64},
+      {u"array", TypeOfNarrowing::UNKNOWN_ARRAY},
+  };
+  for (const TypeOfNarrowingInfo &info : narrowings) {
+    if (name == info.name) {
+      return TypeSpelling::narrowedType(info.narrowing);
+    }
+  }
+
+  return nullptr;
+}
+
+const Type *TypeSpelling::narrowedType(TypeOfNarrowing narrowing) {
+  switch (narrowing) {
+    case TypeOfNarrowing::STRING:
+      return Type::string();
+    case TypeOfNarrowing::DOUBLE:
+      return Type::doubleTy();
+    case TypeOfNarrowing::BOOLEAN:
+      return Type::boolTy();
+    case TypeOfNarrowing::ANY_OBJECT:
+      return Type::anyObject();
+    case TypeOfNarrowing::DECIMAL:
+      return Type::decimalTy();
+    case TypeOfNarrowing::INT:
+      return Type::intTy();
+    case TypeOfNarrowing::INT8:
+      return Type::signedInteger(8);
+    case TypeOfNarrowing::INT16:
+      return Type::signedInteger(16);
+    case TypeOfNarrowing::INT32:
+      return Type::signedInteger(32);
+    case TypeOfNarrowing::UINT8:
+      return Type::unsignedInteger(8);
+    case TypeOfNarrowing::UINT16:
+      return Type::unsignedInteger(16);
+    case TypeOfNarrowing::UINT32:
+      return Type::unsignedInteger(32);
+    case TypeOfNarrowing::UINT64:
+      return Type::unsignedInteger(64);
+    case TypeOfNarrowing::UNKNOWN_ARRAY:
+      return Type::array(Type::unknown());
+  }
+
+  return nullptr;
+}
+
 std::vector<llvm::StringRef> TypeSpelling::typeOfNames(const Type *type) {
   std::vector<llvm::StringRef> names;
   auto add = [&](llvm::StringRef name) {

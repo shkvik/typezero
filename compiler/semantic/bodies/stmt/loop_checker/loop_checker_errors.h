@@ -27,6 +27,7 @@ public:
   static std::string later(llvm::StringRef type);
   static std::string concurrent();
   static std::string cannot(llvm::StringRef type);
+  static std::string loop();
 };
 
 enum class LoopCheckerBindingTypeErrorCode {

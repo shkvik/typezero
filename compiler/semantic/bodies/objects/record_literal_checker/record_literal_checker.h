@@ -16,8 +16,8 @@ class RecordLiteralChecker {
 public:
   RecordLiteralChecker(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkRecordLit(ObjectLitExpr *lit, const Type *record);
-  Expr *recordFromSpreads(ObjectLitExpr *lit);
+  Expr *checkRecordLit(ObjectLitExpr *literal, const Type *record);
+  Expr *recordFromSpreads(ObjectLitExpr *literal);
 
 private:
   using ResultPlainProperty =
@@ -26,11 +26,11 @@ private:
   using ResultValueTypeJoin = Result<const Type *, RecordLiteralCheckerValuesJoinError>;
   using ResultValueTypeKnow = Result<const Type *, RecordLiteralCheckerValueKnownError>;
 
-  static ResultPlainProperty plainProperty(const ObjectLitExpr::Property &prop);
-  static ResultValueTypeJoin valuesJoin(const Type *value, const Type *type);
-  static ResultValueTypeKnow valueKnown(const Type *value);
-  ResultSpreadIntoMap checkRecordSpread(ObjectLitExpr::Property &prop, const Type *value);
-  void reportSpread(const ObjectLitExpr::Property &prop, const ResultSpreadIntoMap &spread);
+  ResultPlainProperty plainProperty(const ObjectLitExpr::Property &property) const;
+  ResultValueTypeJoin valuesJoin(const Type *value, const Type *type) const;
+  ResultValueTypeKnow valueKnown(const Type *value) const;
+  ResultSpreadIntoMap checkRecordSpread(ObjectLitExpr::Property &property, const Type *value);
+  void reportSpread(const ObjectLitExpr::Property &property, const ResultSpreadIntoMap &spread);
 
   SemanticState &state;
   DictChecker *dictChecker = nullptr;

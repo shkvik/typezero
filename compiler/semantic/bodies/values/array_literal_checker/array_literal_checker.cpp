@@ -5,6 +5,7 @@
 #include "compiler/semantic/bodies/objects/dict_checker/dict_checker.h"
 #include "compiler/semantic/bodies/objects/tuple_checker/tuple_checker.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
+#include "compiler/semantic/generics/generic_check_helpers/generic_check_helpers.h"
 #include "compiler/semantic/library/decimal/decimal_checker/decimal_checker.h"
 #include "compiler/semantic/library/json/json_checker/json_checker.h"
 #include "compiler/semantic/library/regex/match_checker/match_checker.h"
@@ -18,23 +19,31 @@
 
 namespace tz {
 
+namespace {
+
+constexpr const char *kTupleSeparator = ", ";
+
+}
+
 ArrayLiteralChecker::ArrayLiteralChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->dictChecker = &all.dictChecker;
   this->exprChecker = &all.exprChecker;
   this->flowChecker = &all.flowChecker;
   this->jsonChecker = &all.jsonChecker;
+  this->destination = &all.destination;
   this->matchChecker = &all.matchChecker;
   this->tupleChecker = &all.tupleChecker;
   this->typeRelations = &all.typeRelations;
+  this->decimalChecker = &all.decimalChecker;
   this->iteratorMethods = &all.iteratorMethods;
   this->generatorChecker = &all.generatorChecker;
 }
 
 ArrayLiteralChecker::ResultElementGiven
-ArrayLiteralChecker::elementGiven(const ArrayLitExpr::Element &e) {
-  if (e.hole) {
-    std::string message = ErrorTextArrayHole::hole();
+ArrayLiteralChecker::checkElementGiven(const ArrayLitExpr::Element &element) const {
+  if (element.hole) {
+    auto message = ErrorTextArrayHole::hole();
 
     return err(ArrayLiteralCheckerElementGivenError{
         .code = ArrayLiteralCheckerElementGivenErrorCode::HOLE_IN_ARRAY,
@@ -42,13 +51,14 @@ ArrayLiteralChecker::elementGiven(const ArrayLitExpr::Element &e) {
     });
   }
 
-  return ok(e.expr);
+  return ok(element.expr);
 }
 
-ArrayLiteralChecker::ResultTupleElement ArrayLiteralChecker::tupleSpread(const Type *type) {
-  const Type *element = TupleChecker::tupleElement(type);
-  if (!element) {
-    std::string message = ErrorTextTupleSpread::differ(type->name());
+ArrayLiteralChecker::ResultTupleElement
+ArrayLiteralChecker::checkTupleSpread(const Type *type) const {
+  const auto *element = this->tupleChecker->tupleElement(type);
+  if (element == nullptr) {
+    auto message = ErrorTextTupleSpread::differ(type->name());
 
     return err(ArrayLiteralCheckerTupleSpreadError{
         .code = ArrayLiteralCheckerTupleSpreadErrorCode::ELEMENTS_DIFFER,
@@ -59,9 +69,10 @@ ArrayLiteralChecker::ResultTupleElement ArrayLiteralChecker::tupleSpread(const T
   return ok(element);
 }
 
-ArrayLiteralChecker::ResultSpreadSource ArrayLiteralChecker::spreadable(const Type *type) {
+ArrayLiteralChecker::ResultSpreadSource
+ArrayLiteralChecker::checkSpreadable(const Type *type) const {
   if (!type->isArray() && !type->isError()) {
-    std::string message = ErrorTextSpreadable::notSpread(type->name(), type->isRecord());
+    auto message = ErrorTextSpreadable::notSpread(type->name(), type->isRecord());
 
     return err(ArrayLiteralCheckerSpreadableError{
         .code = ArrayLiteralCheckerSpreadableErrorCode::NOT_SPREADABLE,
@@ -72,9 +83,10 @@ ArrayLiteralChecker::ResultSpreadSource ArrayLiteralChecker::spreadable(const Ty
   return ok(type);
 }
 
-ArrayLiteralChecker::ResultArrayHasItem ArrayLiteralChecker::notEmpty(const ArrayLitExpr *lit) {
-  if (lit->elements.empty()) {
-    std::string message = ErrorTextArrayEmpty::empty();
+ArrayLiteralChecker::ResultArrayHasItem
+ArrayLiteralChecker::checkNotEmpty(const ArrayLitExpr *literal) const {
+  if (literal->elements.empty()) {
+    auto message = ErrorTextArrayEmpty::empty();
 
     return err(ArrayLiteralCheckerNotEmptyError{
         .code = ArrayLiteralCheckerNotEmptyErrorCode::EMPTY_ARRAY,
@@ -82,45 +94,70 @@ ArrayLiteralChecker::ResultArrayHasItem ArrayLiteralChecker::notEmpty(const Arra
     });
   }
 
-  return ok(lit);
+  return ok(literal);
 }
 
 ArrayLiteralChecker::ResultElementsJoin
-ArrayLiteralChecker::typesJoin(const ArrayLitExpr *lit, llvm::ArrayRef<const Type *> types,
-                               const Type *element, const Type *type) {
-  const Type *next = element ? LiteralTypes::unionUnify(element, type) : type;
-  if (!next) {
-    std::string message = ErrorTextArrayTypes::differ(element->name(), type->name());
-    auto spread = [](const ArrayLitExpr::Element &e) { return e.spread; };
-    auto literalClass = [](const Type *t) {
-      const ClassDecl *cls = t->nonOptional()->classDecl();
-
-      return cls && cls->literal();
-    };
-    auto failed = [](const Type *t) { return t->isError(); };
-    bool isSpreading = llvm::any_of(lit->elements, spread);
-    if (literalClass(element) && literalClass(type)) {
-      message += ErrorTextArrayTypes::literals();
-    } else if (!isSpreading && llvm::none_of(types, failed)) {
-      std::string tuple;
-      for (const Type *t : types) {
-        tuple += (tuple.empty() ? "" : ", ") + t->name().str();
-      }
-      message += ErrorTextArrayTypes::tuple(tuple);
-    }
-
-    return err(ArrayLiteralCheckerTypesJoinError{
-        .code = ArrayLiteralCheckerTypesJoinErrorCode::ELEMENT_TYPES_DIFFER,
-        .message = message,
-    });
+ArrayLiteralChecker::checkTypesJoin(const ArrayLitExpr *literal, llvm::ArrayRef<const Type *> types,
+                                    const Type *element, const Type *type) const {
+  const Type *next = element != nullptr ? LiteralTypes::unionUnify(element, type) : type;
+  if (next != nullptr) {
+    return ok(next);
   }
 
-  return ok(next);
+  auto message = ErrorTextArrayTypes::differ(element->name(), type->name());
+  message += this->joinHint(literal, types, element, type);
+
+  return err(ArrayLiteralCheckerTypesJoinError{
+      .code = ArrayLiteralCheckerTypesJoinErrorCode::ELEMENT_TYPES_DIFFER,
+      .message = message,
+  });
 }
 
-ArrayLiteralChecker::ResultElementKnown ArrayLiteralChecker::elementKnown(const Type *element) {
+std::string ArrayLiteralChecker::joinHint(const ArrayLitExpr *literal,
+                                          llvm::ArrayRef<const Type *> types, const Type *element,
+                                          const Type *type) const {
+  if (this->isLiteralClass(element) && this->isLiteralClass(type)) {
+    return ErrorTextArrayTypes::literals();
+  }
+  if (this->hasSpread(literal) || this->hasFailedType(types)) {
+    return "";
+  }
+  auto tuple = GenericCheckHelpers::typeNames(types, kTupleSeparator);
+
+  return ErrorTextArrayTypes::tuple(tuple);
+}
+
+bool ArrayLiteralChecker::isLiteralClass(const Type *type) const {
+  const ClassDecl *classDecl = type->nonOptional()->classDecl();
+
+  return classDecl != nullptr && classDecl->literal() != nullptr;
+}
+
+bool ArrayLiteralChecker::hasSpread(const ArrayLitExpr *literal) const {
+  for (const ArrayLitExpr::Element &element : literal->elements) {
+    if (element.spread) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool ArrayLiteralChecker::hasFailedType(llvm::ArrayRef<const Type *> types) const {
+  for (const Type *type : types) {
+    if (type->isError()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+ArrayLiteralChecker::ResultElementKnown
+ArrayLiteralChecker::checkElementKnown(const Type *element) const {
   if (element->isUndefined() || element->isVoid()) {
-    std::string message = ErrorTextArrayElement::alone(element->name());
+    auto message = ErrorTextArrayElement::alone(element->name());
 
     return err(ArrayLiteralCheckerElementKnownError{
         .code = ArrayLiteralCheckerElementKnownErrorCode::ONLY_UNDEFINED,
@@ -132,22 +169,10 @@ ArrayLiteralChecker::ResultElementKnown ArrayLiteralChecker::elementKnown(const 
 }
 
 ArrayLiteralChecker::ResultSpreadFitsIn
-ArrayLiteralChecker::spreadFits(const Type *type, const Type *element, const Type *arrayType) {
-  auto convertible = [&](const Field &f) {
-    return TypeRelations::isImplicitlyConvertible(f.type, element);
-  };
-  bool isFitting =
-      type == arrayType || type->isError() || (type->isString() && element->isString()) ||
-      (type->isArray() && UnknownChecker::isObjectReference(type->inner()->nonOptional()) &&
-       element->nonOptional()->isObject() &&
-       (type->inner()->isOptional() == element->isOptional() || element->isOptional()) &&
-       TypeRelations::isImplicitlyConvertible(type->inner(), element)) ||
-      (type->isIterator() && TypeRelations::isImplicitlyConvertible(type->yielded(), element)) ||
-      (type->isTypedArray() &&
-       TypeRelations::isImplicitlyConvertible(type->elementType(), element)) ||
-      (type->isTuple() && llvm::all_of(type->fields(), convertible));
-  if (!isFitting) {
-    std::string message = ErrorTextSpreadFits::into(type->name(), arrayType->name());
+ArrayLiteralChecker::checkSpreadFits(const Type *type, const Type *element,
+                                     const Type *arrayType) const {
+  if (!this->isSpreadFitting(type, element, arrayType)) {
+    auto message = ErrorTextSpreadFits::into(type->name(), arrayType->name());
 
     return err(ArrayLiteralCheckerSpreadFitsError{
         .code = ArrayLiteralCheckerSpreadFitsErrorCode::SPREAD_MISMATCH,
@@ -158,68 +183,124 @@ ArrayLiteralChecker::spreadFits(const Type *type, const Type *element, const Typ
   return ok(type);
 }
 
-Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected) {
-  bool isPairLiteral = this->state.getExpressionMarks().isPairLiteral(lit);
-  this->state.getExpressionMarks().forgetPairLiteral(lit);
+bool ArrayLiteralChecker::isSpreadFitting(const Type *type, const Type *element,
+                                          const Type *arrayType) const {
+  if (type == arrayType || type->isError()) {
+    return true;
+  }
+  if (type->isString() && element->isString()) {
+    return true;
+  }
+  if (type->isArray() && this->isFittingObjectArray(type, element)) {
+    return true;
+  }
+  if (type->isIterator() && TypeRelations::isImplicitlyConvertible(type->yielded(), element)) {
+    return true;
+  }
+  if (type->isTypedArray() &&
+      TypeRelations::isImplicitlyConvertible(type->elementType(), element)) {
+    return true;
+  }
+
+  return type->isTuple() && this->areFieldsConvertible(type, element);
+}
+
+bool ArrayLiteralChecker::isFittingObjectArray(const Type *type, const Type *element) const {
+  const Type *inner = type->inner();
+  bool isObjects =
+      UnknownChecker::isObjectReference(inner->nonOptional()) && element->nonOptional()->isObject();
+  bool isOptionalFitting = inner->isOptional() == element->isOptional() || element->isOptional();
+
+  return isObjects && isOptionalFitting && TypeRelations::isImplicitlyConvertible(inner, element);
+}
+
+bool ArrayLiteralChecker::areFieldsConvertible(const Type *tuple, const Type *element) const {
+  for (const Field &field : tuple->fields()) {
+    if (!TypeRelations::isImplicitlyConvertible(field.type, element)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *literal, const Type *expected) {
+  bool isPairLiteral = this->state.getExpressionMarks().isPairLiteral(literal);
+  this->state.getExpressionMarks().forgetPairLiteral(literal);
   if (isPairLiteral && expected == nullptr) {
-    return this->checkPairLiteral(lit);
+    return this->checkPairLiteral(literal);
   }
   if (expected != nullptr && expected->nonOptional()->isJson()) {
-    return this->jsonChecker->checkJsonArrayLit(lit);
+    return this->jsonChecker->checkJsonArrayLit(literal);
   }
-  const Type *wanted = ArrayLiteralChecker::wantedArray(expected);
-  const Type *expectedElement = wanted != nullptr && wanted->nonOptional()->isArray()
-                                    ? wanted->nonOptional()->inner()
-                                    : nullptr;
-  Expr *holes = this->reportHoles(lit);
+  const auto *wanted = this->wantedArray(expected);
+  const auto *expectedElement = this->wantedElement(wanted);
+  auto *holes = this->reportHoles(literal);
   if (holes != nullptr) {
     return holes;
   }
   if (wanted != nullptr && wanted->nonOptional()->isTuple()) {
-    return this->checkTupleValue(lit, wanted->nonOptional());
+    return this->checkTupleValue(literal, wanted->nonOptional());
   }
-  ArrayElements elements{
-      .types = std::vector<const Type *>(lit->elements.size()),
-      .someDecimal = false,
+  auto elements = ArrayElements{
+      .types = std::vector<const Type *>(literal->elements.size()),
+      .hasDecimal = false,
       .seen = nullptr,
   };
-  for (size_t i = 0; i < lit->elements.size(); ++i) {
-    this->walkArrayElement(lit, i, expectedElement, elements);
+  for (size_t index = 0; index < literal->elements.size(); ++index) {
+    this->walkArrayElement(literal, index, expectedElement, elements);
   }
-  const Type *literalHint = ArrayLiteralChecker::literalHint(lit, elements);
-  for (size_t i = 0; i < lit->elements.size(); ++i) {
-    if (elements.types[i] != nullptr) {
-      continue;
-    }
-    ArrayLitExpr::Element &e = lit->elements[i];
-    e.expr = this->exprChecker->checkExpr(e.expr, literalHint);
-    elements.types[i] = e.expr->type;
+  const auto *literalHint = this->literalHint(literal, elements);
+  for (size_t index = 0; index < literal->elements.size(); ++index) {
+    this->walkUnseenElement(literal, index, literalHint, elements);
   }
-  lit->type = Type::error();
+  literal->type = Type::error();
   const Type *element =
-      expectedElement != nullptr ? expectedElement : this->joinedElement(lit, elements.types);
+      expectedElement != nullptr ? expectedElement : this->joinedElement(literal, elements.types);
   if (element == nullptr || element->isError()) {
-    return lit;
+    return literal;
   }
 
-  return this->finishArrayLit(lit, element);
+  return this->finishArrayLit(literal, element);
 }
 
-Expr *ArrayLiteralChecker::checkPairLiteral(ArrayLitExpr *lit) {
-  std::vector<const Type *> parts;
+const Type *ArrayLiteralChecker::wantedElement(const Type *wanted) const {
+  if (wanted == nullptr || !wanted->nonOptional()->isArray()) {
+    return nullptr;
+  }
+
+  return wanted->nonOptional()->inner();
+}
+
+void ArrayLiteralChecker::walkUnseenElement(ArrayLitExpr *literal, size_t index,
+                                            const Type *literalHint, ArrayElements &elements) {
+  if (elements.types[index] != nullptr) {
+    return;
+  }
+  ArrayLitExpr::Element &element = literal->elements[index];
+  element.expr = this->exprChecker->checkExpr(element.expr, literalHint);
+  elements.types[index] = element.expr->type;
+}
+
+Expr *ArrayLiteralChecker::checkPairLiteral(ArrayLitExpr *literal) {
+  auto parts = std::vector<const Type *>();
   bool isBad = false;
-  for (ArrayLitExpr::Element &e : lit->elements) {
-    e.expr = this->exprChecker->checkExpr(e.expr);
-    const Type *part = e.expr->type;
+  for (ArrayLitExpr::Element &element : literal->elements) {
+    element.expr = this->exprChecker->checkExpr(element.expr);
+    const Type *part = element.expr->type;
     parts.push_back(part);
-    isBad |= part->isError() || part->isVoid() || part->isUndefined();
+    isBad = isBad || this->isBadPart(part);
   }
-  lit->type = isBad ? Type::error() : Type::tuple(parts);
+  literal->type = isBad ? Type::error() : Type::tuple(parts);
 
-  return lit;
+  return literal;
 }
 
-const Type *ArrayLiteralChecker::wantedArray(const Type *expected) {
+bool ArrayLiteralChecker::isBadPart(const Type *part) const {
+  return part->isError() || part->isVoid() || part->isUndefined();
+}
+
+const Type *ArrayLiteralChecker::wantedArray(const Type *expected) const {
   if (expected == nullptr) {
     return nullptr;
   }
@@ -229,7 +310,7 @@ const Type *ArrayLiteralChecker::wantedArray(const Type *expected) {
   if (!expected->nonOptional()->isUnion()) {
     return expected;
   }
-  const Type *array = expected->nonOptional()->slotPart(UnionSlot::Array);
+  const auto *array = expected->nonOptional()->slotPart(UnionSlot::Array);
   if (array != nullptr && array->isArray()) {
     return array;
   }
@@ -237,114 +318,131 @@ const Type *ArrayLiteralChecker::wantedArray(const Type *expected) {
   return expected;
 }
 
-Expr *ArrayLiteralChecker::reportHoles(ArrayLitExpr *lit) {
-  for (const ArrayLitExpr::Element &hole : lit->elements) {
-    ResultElementGiven given = ArrayLiteralChecker::elementGiven(hole);
-    if (given.isOk()) {
-      continue;
+Expr *ArrayLiteralChecker::reportHoles(ArrayLitExpr *literal) {
+  for (const ArrayLitExpr::Element &hole : literal->elements) {
+    auto given = this->checkElementGiven(hole);
+    if (given.isErr()) {
+      return this->reportHole(literal, hole, given.error().message);
     }
-    this->state.getDiagnostics().error(hole.expr->loc(), given.error().message);
-    for (ArrayLitExpr::Element &e : lit->elements) {
-      e.expr = this->exprChecker->checkExpr(e.expr);
-    }
-    lit->type = Type::error();
-    return lit;
   }
 
   return nullptr;
 }
 
-Expr *ArrayLiteralChecker::checkTupleValue(ArrayLitExpr *lit, const Type *tupleType) {
-  TupleChecker::ResultTupleFilled tuple = this->tupleChecker->checkTupleLit(lit, tupleType);
+Expr *ArrayLiteralChecker::reportHole(ArrayLitExpr *literal, const ArrayLitExpr::Element &hole,
+                                      const std::string &message) {
+  this->state.getDiagnostics().error(hole.expr->loc(), message);
+  for (ArrayLitExpr::Element &element : literal->elements) {
+    element.expr = this->exprChecker->checkExpr(element.expr);
+  }
+  literal->type = Type::error();
+
+  return literal;
+}
+
+Expr *ArrayLiteralChecker::checkTupleValue(ArrayLitExpr *literal, const Type *tupleType) {
+  auto tuple = this->tupleChecker->checkTupleLit(literal, tupleType);
   if (tuple.isOk()) {
     return tuple.value();
   }
   bool isSpread = tuple.error().code == TupleCheckerCheckTupleLitErrorCode::SPREAD_IN_TUPLE;
-  llvm::SMLoc at = isSpread ? ArrayLiteralChecker::firstSpread(lit)->loc() : lit->loc();
+  llvm::SMLoc at = isSpread ? this->firstSpread(literal)->loc() : literal->loc();
   this->state.getDiagnostics().error(at, tuple.error().message);
 
-  return lit;
+  return literal;
 }
 
-const Expr *ArrayLiteralChecker::firstSpread(const ArrayLitExpr *lit) {
-  for (const ArrayLitExpr::Element &e : lit->elements) {
-    if (e.spread) {
-      return e.expr;
+const Expr *ArrayLiteralChecker::firstSpread(const ArrayLitExpr *literal) const {
+  for (const ArrayLitExpr::Element &element : literal->elements) {
+    if (element.spread) {
+      return element.expr;
     }
   }
 
-  return lit;
+  return literal;
 }
 
-void ArrayLiteralChecker::walkArrayElement(ArrayLitExpr *lit, size_t i, const Type *expectedElement,
-                                           ArrayElements &elements) {
-  ArrayLitExpr::Element &e = lit->elements[i];
-  if (!e.spread && expectedElement == nullptr && DecimalChecker::isLiteralTree(e.expr)) {
+void ArrayLiteralChecker::walkArrayElement(ArrayLitExpr *literal, size_t index,
+                                           const Type *expectedElement, ArrayElements &elements) {
+  ArrayLitExpr::Element &element = literal->elements[index];
+  bool isDecimalLater = !element.spread && expectedElement == nullptr &&
+                        this->decimalChecker->isLiteralTree(element.expr);
+  if (isDecimalLater) {
     return;
   }
-  if (!e.spread) {
-    return this->walkPlainElement(e, i, expectedElement, elements);
+  if (!element.spread) {
+    return this->walkPlainElement(element, index, expectedElement, elements);
   }
 
-  return this->walkSpreadElement(e, i, expectedElement, elements);
+  return this->walkSpreadElement(element, index, expectedElement, elements);
 }
 
-void ArrayLiteralChecker::walkPlainElement(ArrayLitExpr::Element &e, size_t i,
+void ArrayLiteralChecker::walkPlainElement(ArrayLitExpr::Element &element, size_t index,
                                            const Type *expectedElement, ArrayElements &elements) {
-  const Type *hint = expectedElement;
-  bool isShaped = hint == nullptr && elements.seen != nullptr && elements.seen->holdsObjects() &&
-                  Destination::literalShaped(e.expr);
-  if (isShaped) {
-    hint = elements.seen;
-  }
-  e.expr = this->exprChecker->checkExpr(e.expr, hint);
-  const Type *type = e.expr->type;
-  elements.types[i] = type;
-  elements.someDecimal |= type->nonOptional()->isDecimal();
+  bool isShaped = expectedElement == nullptr && elements.seen != nullptr &&
+                  elements.seen->holdsObjects() && this->destination->isLiteralShaped(element.expr);
+  const Type *hint = isShaped ? elements.seen : expectedElement;
+  element.expr = this->exprChecker->checkExpr(element.expr, hint);
+  const Type *type = element.expr->type;
+  elements.types[index] = type;
+  elements.hasDecimal = elements.hasDecimal || type->nonOptional()->isDecimal();
   if (!type->isError() && elements.seen != Type::error()) {
-    elements.seen = elements.seen != nullptr ? TypeRelations::unify(elements.seen, type) : type;
+    elements.seen = this->seenJoined(elements.seen, type);
   }
   if (elements.seen == nullptr) {
     elements.seen = Type::error();
   }
 }
 
-void ArrayLiteralChecker::walkSpreadElement(ArrayLitExpr::Element &e, size_t i,
-                                            const Type *expectedElement, ArrayElements &elements) {
-  this->iteratorMethods->markFused(e.expr);
-  const Type *hint = expectedElement != nullptr ? Type::array(expectedElement) : nullptr;
-  Expr *checked = this->exprChecker->checkExpr(e.expr, hint);
-  e.expr = this->dictChecker->iterableOf(checked);
-  if (e.expr->type->isMatch()) {
-    e.expr = this->matchChecker->matchItems(e.expr);
+const Type *ArrayLiteralChecker::seenJoined(const Type *seen, const Type *type) const {
+  if (seen == nullptr) {
+    return type;
   }
-  const Type *type = e.expr->type;
+
+  return this->typeRelations->unify(seen, type);
+}
+
+void ArrayLiteralChecker::walkSpreadElement(ArrayLitExpr::Element &element, size_t index,
+                                            const Type *expectedElement, ArrayElements &elements) {
+  this->iteratorMethods->markFused(element.expr);
+  const Type *hint = expectedElement != nullptr ? Type::array(expectedElement) : nullptr;
+  auto *checked = this->exprChecker->checkExpr(element.expr, hint);
+  element.expr = this->dictChecker->iterableOf(checked);
+  if (element.expr->type->isMatch()) {
+    element.expr = this->matchChecker->matchItems(element.expr);
+  }
+  const Type *type = element.expr->type;
   if (type->isString()) {
-    elements.types[i] = type;
+    elements.types[index] = type;
     return;
   }
   if (type->isIterator()) {
-    elements.types[i] = this->iteratedSpread(e.expr);
-    elements.someDecimal |= elements.types[i]->nonOptional()->isDecimal();
-    return;
+    const auto *yielded = this->iteratedSpread(element.expr);
+    return this->addSpreadType(elements, index, yielded);
   }
   if (type->isTuple()) {
-    elements.types[i] = this->tupleSpreadType(e.expr);
+    elements.types[index] = this->tupleSpreadType(element.expr);
     return;
   }
   if (type->isTypedArray()) {
-    elements.types[i] = type->elementType();
+    elements.types[index] = type->elementType();
     return;
   }
-  elements.types[i] = this->arraySpreadType(e.expr);
-  elements.someDecimal |= elements.types[i]->nonOptional()->isDecimal();
+
+  const auto *spreadElement = this->arraySpreadType(element.expr);
+
+  return this->addSpreadType(elements, index, spreadElement);
+}
+
+void ArrayLiteralChecker::addSpreadType(ArrayElements &elements, size_t index, const Type *type) {
+  elements.types[index] = type;
+  elements.hasDecimal = elements.hasDecimal || type->nonOptional()->isDecimal();
 }
 
 const Type *ArrayLiteralChecker::iteratedSpread(const Expr *spread) {
   const Type *type = spread->type;
-  std::string what = ErrorTextSpreadable::spread();
-  GeneratorChecker::ResultNextNeedsNoValue nothing =
-      this->generatorChecker->checkSendsNothing(type, what);
+  auto what = ErrorTextSpreadable::spread();
+  auto nothing = this->generatorChecker->checkSendsNothing(type, what);
   if (nothing.isErr()) {
     this->state.getDiagnostics().error(spread->loc(), nothing.error().message);
   }
@@ -354,7 +452,7 @@ const Type *ArrayLiteralChecker::iteratedSpread(const Expr *spread) {
 }
 
 const Type *ArrayLiteralChecker::tupleSpreadType(const Expr *spread) {
-  ResultTupleElement element = ArrayLiteralChecker::tupleSpread(spread->type);
+  auto element = this->checkTupleSpread(spread->type);
   if (element.isErr()) {
     this->state.getDiagnostics().error(spread->loc(), element.error().message);
     return Type::error();
@@ -365,7 +463,7 @@ const Type *ArrayLiteralChecker::tupleSpreadType(const Expr *spread) {
 
 const Type *ArrayLiteralChecker::arraySpreadType(const Expr *spread) {
   const Type *type = spread->type;
-  ResultSpreadSource spreadableTo = ArrayLiteralChecker::spreadable(type);
+  auto spreadableTo = this->checkSpreadable(type);
   if (spreadableTo.isErr()) {
     this->state.getDiagnostics().error(spread->loc(), spreadableTo.error().message);
     return Type::error();
@@ -374,23 +472,23 @@ const Type *ArrayLiteralChecker::arraySpreadType(const Expr *spread) {
   return type->isError() ? type : type->inner();
 }
 
-const Type *ArrayLiteralChecker::literalHint(const ArrayLitExpr *lit,
-                                             const ArrayElements &elements) {
-  if (elements.someDecimal) {
+const Type *ArrayLiteralChecker::literalHint(const ArrayLitExpr *literal,
+                                             const ArrayElements &elements) const {
+  if (elements.hasDecimal) {
     return Type::decimalTy();
   }
   if (elements.seen != nullptr && elements.seen->isNumeric()) {
     return elements.seen;
   }
-  for (size_t i = 0; i < lit->elements.size(); ++i) {
-    const Type *type = elements.types[i];
-    if (lit->elements[i].spread && type != nullptr && type->isNumeric()) {
+  for (size_t index = 0; index < literal->elements.size(); ++index) {
+    const Type *type = elements.types[index];
+    if (literal->elements[index].spread && type != nullptr && type->isNumeric()) {
       return type;
     }
   }
-  for (size_t i = 0; i < lit->elements.size(); ++i) {
-    bool isFractional =
-        elements.types[i] == nullptr && !TypeRelations::isIntLiteralTree(lit->elements[i].expr);
+  for (size_t index = 0; index < literal->elements.size(); ++index) {
+    bool isFractional = elements.types[index] == nullptr &&
+                        !this->typeRelations->isIntLiteralTree(literal->elements[index].expr);
     if (isFractional) {
       return Type::doubleTy();
     }
@@ -399,49 +497,55 @@ const Type *ArrayLiteralChecker::literalHint(const ArrayLitExpr *lit,
   return nullptr;
 }
 
-const Type *ArrayLiteralChecker::joinedElement(const ArrayLitExpr *lit,
+const Type *ArrayLiteralChecker::joinedElement(const ArrayLitExpr *literal,
                                                llvm::ArrayRef<const Type *> types) {
-  ResultArrayHasItem filled = ArrayLiteralChecker::notEmpty(lit);
+  auto filled = this->checkNotEmpty(literal);
   if (filled.isErr()) {
-    this->state.getDiagnostics().error(lit->loc(), filled.error().message);
+    this->state.getDiagnostics().error(literal->loc(), filled.error().message);
     return nullptr;
   }
   const Type *element = nullptr;
-  for (size_t i = 0; i < types.size(); ++i) {
-    if (types[i]->isError()) {
+  for (size_t index = 0; index < types.size(); ++index) {
+    if (types[index]->isError()) {
       return nullptr;
     }
-    ResultElementsJoin joined = ArrayLiteralChecker::typesJoin(lit, types, element, types[i]);
+    auto joined = this->checkTypesJoin(literal, types, element, types[index]);
     if (joined.isErr()) {
-      this->state.getDiagnostics().error(lit->elements[i].expr->loc(), joined.error().message);
+      this->state.getDiagnostics().error(literal->elements[index].expr->loc(),
+                                         joined.error().message);
       return nullptr;
     }
     element = joined.value();
   }
-  ResultElementKnown known = ArrayLiteralChecker::elementKnown(element);
+  auto known = this->checkElementKnown(element);
   if (known.isErr()) {
-    this->state.getDiagnostics().error(lit->loc(), known.error().message);
+    this->state.getDiagnostics().error(literal->loc(), known.error().message);
     return nullptr;
   }
 
   return element;
 }
 
-Expr *ArrayLiteralChecker::finishArrayLit(ArrayLitExpr *lit, const Type *element) {
-  const Type *arrayType = Type::array(element);
-  for (ArrayLitExpr::Element &e : lit->elements) {
-    if (!e.spread) {
-      e.expr = this->typeRelations->coerce(e.expr, element);
-      continue;
-    }
-    ResultSpreadFitsIn goes = ArrayLiteralChecker::spreadFits(e.expr->type, element, arrayType);
-    if (goes.isErr()) {
-      this->state.getDiagnostics().error(e.expr->loc(), goes.error().message);
-    }
+Expr *ArrayLiteralChecker::finishArrayLit(ArrayLitExpr *literal, const Type *element) {
+  const auto *arrayType = Type::array(element);
+  for (ArrayLitExpr::Element &item : literal->elements) {
+    this->finishElement(item, element, arrayType);
   }
-  lit->type = arrayType;
+  literal->type = arrayType;
 
-  return lit;
+  return literal;
+}
+
+void ArrayLiteralChecker::finishElement(ArrayLitExpr::Element &item, const Type *element,
+                                        const Type *arrayType) {
+  if (!item.spread) {
+    item.expr = this->typeRelations->coerce(item.expr, element);
+    return;
+  }
+  auto goes = this->checkSpreadFits(item.expr->type, element, arrayType);
+  if (goes.isErr()) {
+    this->state.getDiagnostics().error(item.expr->loc(), goes.error().message);
+  }
 }
 
 }

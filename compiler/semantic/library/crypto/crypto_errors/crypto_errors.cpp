@@ -17,25 +17,25 @@ const Type *CryptoErrors::named(llvm::StringRef name) {
 }
 
 const Type *CryptoErrors::ofCall(CryptoFn fn, llvm::ArrayRef<Expr *> args) {
-  llvm::StringRef name = CryptoErrors::errorNameOf(fn, args);
+  auto name = this->errorNameOf(fn, args);
 
   return this->named(name);
 }
 
-llvm::StringRef CryptoErrors::errorNameOf(CryptoFn fn, llvm::ArrayRef<Expr *> args) {
+llvm::StringRef CryptoErrors::errorNameOf(CryptoFn fn, llvm::ArrayRef<Expr *> args) const {
   if (fn == CryptoFn::CipherNew) {
-    return CryptoErrors::flag(args, 4) ? "CreateDecipherError" : "CreateCipherError";
+    return this->flag(args, 4) ? "CreateDecipherError" : "CreateCipherError";
   }
   if (fn == CryptoFn::CipherFinal) {
-    return CryptoErrors::isDecipher(args) ? "DecipherFinalError" : "CipherFinalError";
+    return this->isDecipher(args) ? "DecipherFinalError" : "CipherFinalError";
   }
   if (fn == CryptoFn::CreateKey) {
-    return CryptoErrors::flag(args, 0) ? "CreatePrivateKeyError" : "CreatePublicKeyError";
+    return this->flag(args, 0) ? "CreatePrivateKeyError" : "CreatePublicKeyError";
   }
   if (fn == CryptoFn::SignNew) {
-    return CryptoErrors::flag(args, 1) ? "CreateVerifyError" : "CreateSignError";
+    return this->flag(args, 1) ? "CreateVerifyError" : "CreateSignError";
   }
-  std::optional<llvm::StringRef> plain = CryptoErrorTypes::callErrorName(fn);
+  auto plain = CryptoErrorTypes::callErrorName(fn);
   if (!plain.has_value()) {
     return "CreateHashError";
   }
@@ -43,13 +43,13 @@ llvm::StringRef CryptoErrors::errorNameOf(CryptoFn fn, llvm::ArrayRef<Expr *> ar
   return *plain;
 }
 
-bool CryptoErrors::isDecipher(llvm::ArrayRef<Expr *> args) {
+bool CryptoErrors::isDecipher(llvm::ArrayRef<Expr *> args) const {
   const Type *self = args.empty() ? nullptr : args[0]->type;
 
   return self != nullptr && self->crypto() == Type::Crypto::Decipheriv;
 }
 
-bool CryptoErrors::flag(llvm::ArrayRef<Expr *> args, size_t i) {
+bool CryptoErrors::flag(llvm::ArrayRef<Expr *> args, size_t i) const {
   const BoolLitExpr *literal = i < args.size() ? dyn_cast<BoolLitExpr>(args[i]) : nullptr;
 
   return literal != nullptr && literal->value;

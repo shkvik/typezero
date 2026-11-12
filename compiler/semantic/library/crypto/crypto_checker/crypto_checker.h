@@ -18,7 +18,7 @@ public:
   CryptoChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkCryptoMember(MemberExpr *member);
-  Expr *checkCryptoNew(NewExpr *expr, llvm::StringRef cls);
+  Expr *checkCryptoNew(NewExpr *expr, llvm::StringRef className);
   Expr *checkX509Parse(CallExpr *call, MemberExpr *member);
   bool isX509Class(Expr *object) const;
   Expr *checkWebCryptoCall(CallExpr *call, MemberExpr *member);

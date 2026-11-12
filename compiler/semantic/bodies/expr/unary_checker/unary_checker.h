@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/result/result/result.h"
+#include "compiler/semantic/bodies/expr/literal_checker/literal_checker.h"
 #include "compiler/semantic/bodies/expr/unary_checker/unary_checker_errors.h"
 #include "compiler/semantic/bodies/objects/dict_checker/dict_checker_errors.h"
 #include "compiler/semantic/flow/children_first/children_first.h"
@@ -18,6 +19,8 @@ class LibraryCalls;
 class LiteralTypes;
 class TruthChecker;
 class TypeRelations;
+class BinaryChecker;
+class ObjectChecker;
 class ConstantFolder;
 class GenericChecker;
 class LiteralChecker;
@@ -29,8 +32,8 @@ public:
 
   UnaryChecker(SemanticState &owner, SemanticParts &all);
 
-  ResultInOperatorSuited checkIn(BinaryExpr *bin);
-  Expr *checkUnary(UnaryExpr *unary, const Type *expected, bool wraps);
+  ResultInOperatorSuited checkIn(BinaryExpr *binary);
+  Expr *checkUnary(UnaryExpr *unary, const Type *expected);
 
 private:
   using ResultDeleteIsPossible = Result<Expr *, UnaryCheckerCheckDeleteError>;
@@ -40,42 +43,57 @@ private:
   using ResultResultNotDropped = Result<const Type *, UnaryCheckerResultKeptError>;
   using ResultNonNullAssertion = Result<const Type *, UnaryCheckerNonNullOperandError>;
 
+  std::optional<std::string> simpleText(const Expr *expr) const;
+  std::optional<std::string> assertedText(const Expr *expr) const;
+  NodeChildren<const Expr *> textParts(const Expr *expr) const;
+  std::optional<std::string> nodeText(const Expr *expr, std::vector<std::string> &answers) const;
+  std::string memberText(const MemberExpr *member, std::vector<std::string> &answers) const;
+  std::string indexText(std::vector<std::string> &answers) const;
+  ResultNumberForTheSign checkSignOperand(llvm::StringRef op, const Type *type) const;
+  ResultOperandIsNumeric checkNumberOperand(const UnaryExpr *unary, llvm::StringRef op,
+                                            const Type *type, bool isLiteral) const;
+  ResultOperandIsInteger checkBitsOperand(const Type *type) const;
+  ResultResultNotDropped checkResultKept(const UnaryExpr *unary, const Type *dropped,
+                                         bool isPromised) const;
+  ResultNonNullAssertion checkNonNullOperand(const Type *type, llvm::StringRef text) const;
+  Expr *checkTypeOf(UnaryExpr *unary);
+  Expr *foldedUnary(UnaryExpr *unary);
+  Expr *checkSign(UnaryExpr *unary, const Type *expected);
+  void walkSignOperand(UnaryExpr *unary, const Type *hint);
+  const Type *signOperandType(UnaryExpr *unary);
+  Expr *checkNegativeLiteral(UnaryExpr *unary, const Type *expected);
+  Expr *checkNegativeInteger(UnaryExpr *unary, IntLitExpr *integer, const Type *expected);
+  Expr *checkNegativeFraction(UnaryExpr *unary, FloatLitExpr *real, const Type *expected);
+  Expr *checkIntLiteral(IntLitExpr *literal, const Type *hint, LiteralSign sign);
+  const Type *signHint(const UnaryExpr *unary, const Type *expected) const;
+  Expr *checkNot(UnaryExpr *unary);
+  Expr *checkBitNot(UnaryExpr *unary, const Type *expected);
+  Expr *checkVoid(UnaryExpr *unary);
+  Expr *checkDeleteValue(UnaryExpr *unary);
+  Expr *checkNonNull(UnaryExpr *unary, const Type *expected);
+  ResultDeleteIsPossible checkFieldDelete(const Expr *object, const Field *field) const;
   ResultDeleteIsPossible checkDelete(UnaryExpr *unary);
-  static ResultDeleteIsPossible
-  dictDeleted(Result<Expr *, DictCheckerCheckDictDeleteError> deleted);
+  ResultDeleteIsPossible
+  dictDeleteResult(Result<Expr *, DictCheckerCheckDictDeleteError> deleted) const;
   ResultDeleteIsPossible checkMemberDelete(UnaryExpr *unary, MemberExpr *member);
+  const Field *ownField(const Type *object, llvm::StringRef name) const;
   ResultDeleteIsPossible checkOtherDelete(UnaryExpr *unary);
   ResultDeleteIsPossible checkIndexDelete(UnaryExpr *unary, IndexExpr *index);
   ResultDeleteIsPossible checkKeyDelete(UnaryExpr *unary, const IndexExpr *index,
                                         const std::string &array, const std::string &position);
-  Expr *foldedUnary(UnaryExpr *unary, bool wraps);
-  Expr *checkSign(UnaryExpr *unary, const Type *expected, bool wraps);
-  Expr *checkNegativeLiteral(UnaryExpr *unary, const Type *expected);
-  Expr *checkIntLiteral(IntLitExpr *lit, const Type *hint, bool negative);
-  static const Type *signHint(const UnaryExpr *unary, const Type *expected);
-  Expr *checkNot(UnaryExpr *unary, bool wraps);
-  Expr *checkBitNot(UnaryExpr *unary, const Type *expected, bool wraps);
-  Expr *checkVoid(UnaryExpr *unary, bool wraps);
-  Expr *checkDeleteValue(UnaryExpr *unary);
-  Expr *checkNonNull(UnaryExpr *unary, const Type *expected);
-  ResultInOperatorSuited checkDictKeyIn(BinaryExpr *bin);
-  static UnaryCheckerCheckInErrorCode dictInCode(DictCheckerCheckDictInErrorCode code);
-  ResultInOperatorSuited checkUnionIn(BinaryExpr *bin, const Type *r);
-  static ResultInOperatorSuited unionKeyIn(BinaryExpr *bin, const Type *u, const Type *objects,
-                                           const std::string &name);
-  ResultInOperatorSuited checkObjectIn(BinaryExpr *bin, const Type *object);
-  static ResultOperandIsInteger bitsOperand(const Type *type);
-  static std::optional<std::string> simpleText(const Expr *expr);
-  static std::optional<std::string> assertedText(const Expr *expr);
-  static NodeChildren<const Expr *> textParts(const Expr *expr);
-  static std::optional<std::string> nodeText(const Expr *expr, std::vector<std::string> &answers);
-  static ResultNumberForTheSign signOperand(llvm::StringRef op, const Type *type);
-  static ResultNonNullAssertion nonNullOperand(const Type *type, llvm::StringRef text);
-  static ResultDeleteIsPossible fieldDeleted(const Expr *object, const Field *field);
-  ResultResultNotDropped resultKept(const UnaryExpr *unary, const Type *dropped,
-                                    bool promised) const;
-  static ResultOperandIsNumeric numberOperand(const UnaryExpr *unary, llvm::StringRef op,
-                                              const Type *type, bool literal);
+  const Field *keyedField(const Type *type, const IndexExpr *index) const;
+  std::string inBoundsText(const std::string &indexText, const std::string &array,
+                           bool isLiteralKey) const;
+  ResultInOperatorSuited checkDictKeyIn(BinaryExpr *binary);
+  UnaryCheckerCheckInErrorCode dictInCode(DictCheckerCheckDictInErrorCode code) const;
+  ResultInOperatorSuited checkUnionIn(BinaryExpr *binary, const Type *rightType);
+  std::vector<const Type *> objectMembers(const Type *objects) const;
+  ResultInOperatorSuited checkUnionKeyIn(BinaryExpr *binary, const Type *options,
+                                         const Type *objects, const std::string &name) const;
+  ResultInOperatorSuited checkFieldRequired(BinaryExpr *binary, const Type *member,
+                                            const std::string &name) const;
+  size_t countWithField(llvm::ArrayRef<const Type *> members, const std::string &name) const;
+  ResultInOperatorSuited checkObjectIn(BinaryExpr *binary, const Type *object);
 
   SemanticState &state;
   DateChecker *dateChecker = nullptr;
@@ -86,6 +104,8 @@ private:
   LiteralTypes *literalTypes = nullptr;
   TruthChecker *truthChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
+  BinaryChecker *binaryChecker = nullptr;
+  ObjectChecker *objectChecker = nullptr;
   ConstantFolder *constantFolder = nullptr;
   GenericChecker *genericChecker = nullptr;
   LiteralChecker *literalChecker = nullptr;

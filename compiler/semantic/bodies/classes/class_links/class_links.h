@@ -6,6 +6,7 @@
 
 namespace tz {
 
+class ClassBases;
 class SemanticParts;
 class ChunkTypes;
 class ClassDeclarer;
@@ -16,15 +17,15 @@ public:
   ClassLinks(SemanticState &owner, SemanticParts &all);
 
   void numberClasses();
-  void buildVtable(ClassDecl *cls);
+  void buildVtable(ClassDecl *classDecl);
   void linkClasses();
-  void linkOverrides(ClassDecl *cls);
-  static std::vector<FunctionDecl *> constructorsOf(const ClassDecl *cls);
-  static std::vector<FunctionDecl *> ownMethods(const ClassDecl *cls);
-  static bool overridesTransitively(const FunctionDecl *fn, const FunctionDecl *base);
-  static FunctionDecl *soleImplementation(const ClassDecl *cls, FunctionDecl *variant);
-  const Type *inheritedReturnType(FuncSymbol *fn);
-  void noteInheritedReturn(const FunctionDecl *fn);
+  void linkOverrides(ClassDecl *classDecl);
+  std::vector<FunctionDecl *> constructorsOf(const ClassDecl *classDecl) const;
+  std::vector<FunctionDecl *> ownMethods(const ClassDecl *classDecl) const;
+  bool overridesTransitively(const FunctionDecl *functionDecl, const FunctionDecl *base) const;
+  FunctionDecl *soleImplementation(const ClassDecl *classDecl, FunctionDecl *variant) const;
+  const Type *inheritedReturnType(FuncSymbol *function);
+  void noteInheritedReturn(const FunctionDecl *functionDecl);
   static const Type *commonClass(const Type *a, const Type *b);
 
 private:
@@ -36,33 +37,40 @@ private:
   using ResultBodyIsRetained = Result<const FunctionDecl *, ClassLinksBodyKeptError>;
   using ResultSameTypeParams = Result<const FunctionDecl *, ClassLinksSameTypeArgsError>;
 
-  void linkOverride(ClassDecl *cls, FunctionDecl *fn);
-  static FunctionDecl *sameParamsBase(llvm::ArrayRef<FunctionDecl *> inherited,
-                                      const FunctionDecl *fn);
-  void walkNewMethod(const ClassDecl *cls, FunctionDecl *fn,
+  void linkOverride(ClassDecl *classDecl, FunctionDecl *functionDecl);
+  FunctionDecl *sameParamsBase(llvm::ArrayRef<FunctionDecl *> inherited,
+                               const FunctionDecl *functionDecl) const;
+  void walkNewMethod(const ClassDecl *classDecl, FunctionDecl *functionDecl,
                      llvm::ArrayRef<FunctionDecl *> inherited);
-  bool overrideFits(const ClassDecl *cls, const FunctionDecl *fn, const FunctionDecl *base);
-  void walkOverrideChain(const ClassDecl *cls, const FunctionDecl *fn, FunctionDecl *base);
-  static ResultMethodNotField notAField(const ClassDecl *cls, const FunctionDecl *fn);
-  static ResultOverrideTarget overrideTarget(const ClassDecl *cls, const FunctionDecl *fn,
-                                             llvm::ArrayRef<FunctionDecl *> inherited);
-  static ResultBaseIsNotArrow arrowOverride(const FunctionDecl *fn, const FunctionDecl *base);
-  static ResultBaseNotPrivate baseVisible(const FunctionDecl *fn, const FunctionDecl *base);
-  static ResultAccessNotLower accessKept(const FunctionDecl *fn, const FunctionDecl *base);
-  static ResultBodyIsRetained bodyKept(const ClassDecl *cls, const FunctionDecl *fn,
-                                       const FunctionDecl *base);
-  ResultSameTypeParams sameTypeArgs(const ClassDecl *cls, const FunctionDecl *fn,
+  bool overrideFits(const ClassDecl *classDecl, const FunctionDecl *functionDecl,
+                    const FunctionDecl *base);
+  void walkOverrideChain(const ClassDecl *classDecl, const FunctionDecl *functionDecl,
+                         FunctionDecl *base);
+  ResultMethodNotField notAField(const ClassDecl *classDecl,
+                                 const FunctionDecl *functionDecl) const;
+  ResultOverrideTarget overrideTarget(const ClassDecl *classDecl, const FunctionDecl *functionDecl,
+                                      llvm::ArrayRef<FunctionDecl *> inherited) const;
+  ResultBaseIsNotArrow arrowOverride(const FunctionDecl *functionDecl,
+                                     const FunctionDecl *base) const;
+  ResultBaseNotPrivate baseVisible(const FunctionDecl *functionDecl,
+                                   const FunctionDecl *base) const;
+  ResultAccessNotLower accessKept(const FunctionDecl *functionDecl, const FunctionDecl *base) const;
+  ResultBodyIsRetained bodyKept(const ClassDecl *classDecl, const FunctionDecl *functionDecl,
+                                const FunctionDecl *base) const;
+  ResultSameTypeParams sameTypeArgs(const ClassDecl *classDecl, const FunctionDecl *functionDecl,
                                     const FunctionDecl *base) const;
-  static bool sameParams(const FuncSymbol *a, const FuncSymbol *b);
-  static bool takesParams(const Type *fnType, const FuncSymbol *sym);
-  static const char *accessName(Access access);
-  static bool isArrowMethod(const FunctionDecl *fn);
-  static bool declaresReturn(const FunctionDecl *fn);
-  static FunctionDecl *firstImplementation(const ClassDecl *cls, const FunctionDecl *fn);
-  static void interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out);
+  bool sameParams(const FuncSymbol *a, const FuncSymbol *b) const;
+  bool takesParams(const Type *functionType, const FuncSymbol *function) const;
+  const char *accessName(Access access) const;
+  bool isArrowMethod(const FunctionDecl *functionDecl) const;
+  bool declaresReturn(const FunctionDecl *functionDecl) const;
+  FunctionDecl *firstImplementation(const ClassDecl *classDecl,
+                                    const FunctionDecl *functionDecl) const;
+  void interfacesOf(const ClassDecl *classDecl, std::vector<const Type *> &out) const;
 
   SemanticState &state;
   ChunkTypes *chunkTypes = nullptr;
+  ClassBases *classBases = nullptr;
   ClassDeclarer *classDeclarer = nullptr;
   GenericClassInstantiator *genericClassInstantiator = nullptr;
 };

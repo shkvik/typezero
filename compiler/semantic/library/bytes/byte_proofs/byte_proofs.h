@@ -20,50 +20,51 @@ public:
   ByteProofs(SemanticState &owner, SemanticParts &all);
 
   IntegerRange valueRange(const Expr *expr) const;
-  bool provesFits(const Expr *expr, int64_t lo, int64_t hi) const;
+  bool provesFits(const Expr *expr, int64_t low, int64_t high) const;
   ResultValueFitsType valueFits(const Expr *value, const Type *target, llvm::StringRef what);
   bool provesWithin(const Expr *object, const Expr *offset, int64_t size) const;
   void walkView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size,
                 llvm::StringRef what);
-  void addByteCallbackFacts(const FunctionDecl *fn);
+  void addByteCallbackFacts(const FunctionDecl *functionDecl);
   using ResultByteCallbackChecked = Result<void, ByteProofsValueFitsError>;
 
-  ResultByteCallbackChecked checkByteCallbackResult(const FunctionDecl *fn, const Expr *value);
+  ResultByteCallbackChecked checkByteCallbackResult(const FunctionDecl *functionDecl,
+                                                    const Expr *value);
 
 private:
-  static const VarSymbol *viewOwner(const Expr *expr, BuiltinProperty field,
-                                    const Type **type = nullptr);
-  static const Expr *withoutCasts(const Expr *expr);
-  static bool sameView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size);
+  const VarSymbol *viewOwner(const Expr *expr, BuiltinProperty field,
+                             const Type **type = nullptr) const;
+  const Expr *withoutCasts(const Expr *expr) const;
+  bool sameView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size) const;
   using ResultOffsetAligned = Result<int64_t, ByteProofsOffsetAlignedError>;
   using ResultBufferAligned = Result<int64_t, ByteProofsBufferAlignedError>;
 
-  static ResultOffsetAligned offsetAligned(std::optional<int64_t> start, int64_t size,
-                                           llvm::StringRef what);
-  static ResultBufferAligned bufferAligned(std::optional<int64_t> whole, int64_t size,
-                                           llvm::StringRef what);
-  static int64_t wrapped(Type::Bytes kind, int64_t v);
-  static IntegerRange exact(int64_t v);
-  static bool known(const IntegerRange &r);
-  static IntegerRange unite(const IntegerRange &a, const IntegerRange &b);
-  static int64_t allOnes(int64_t v);
-  static int64_t floorShift(int64_t v, int64_t n);
+  ResultOffsetAligned offsetAligned(std::optional<int64_t> start, int64_t size,
+                                    llvm::StringRef what) const;
+  ResultBufferAligned bufferAligned(std::optional<int64_t> whole, int64_t size,
+                                    llvm::StringRef what) const;
+  int64_t wrapped(Type::Bytes kind, int64_t v) const;
+  IntegerRange exact(int64_t v) const;
+  bool known(const IntegerRange &r) const;
+  IntegerRange unite(const IntegerRange &a, const IntegerRange &b) const;
+  int64_t allOnes(int64_t v) const;
+  int64_t floorShift(int64_t v, int64_t n) const;
 
-  static NodeChildren<const Expr *> rangeParts(const Expr *e);
-  static NodeChildren<const Expr *> callRangeParts(const CallExpr *call);
-  static IntegerRange clampToType(const Expr *e, IntegerRange r);
-  IntegerRange nodeRange(const Expr *e, std::vector<IntegerRange> &answers) const;
-  IntegerRange computedRange(const Expr *e, llvm::ArrayRef<IntegerRange> parts) const;
-  static IntegerRange castRange(const CastExpr *conv, const IntegerRange &operand);
+  NodeChildren<const Expr *> rangeParts(const Expr *expr) const;
+  NodeChildren<const Expr *> callRangeParts(const CallExpr *call) const;
+  IntegerRange clampToType(const Expr *expr, IntegerRange r) const;
+  IntegerRange nodeRange(const Expr *expr, std::vector<IntegerRange> &answers) const;
+  IntegerRange computedRange(const Expr *expr, llvm::ArrayRef<IntegerRange> parts) const;
+  IntegerRange castRange(const CastExpr *conversion, const IntegerRange &operand) const;
   IntegerRange nameRange(const NameExpr *name) const;
-  static IntegerRange memberRange(const MemberExpr *member);
-  static IntegerRange elementRangeOf(const Type *type);
-  static IntegerRange callRange(const CallExpr *call, llvm::ArrayRef<IntegerRange> parts);
-  static IntegerRange minMaxRange(const CallExpr *call, llvm::ArrayRef<IntegerRange> parts);
-  static IntegerRange lowerOf(const IntegerRange &a, const IntegerRange &b);
-  static IntegerRange upperOf(const IntegerRange &a, const IntegerRange &b);
-  static IntegerRange unaryRange(const UnaryExpr *unary, const IntegerRange &operand);
-  static IntegerRange binaryRange(const BinaryExpr *bin, llvm::ArrayRef<IntegerRange> parts);
+  IntegerRange memberRange(const MemberExpr *member) const;
+  IntegerRange elementRangeOf(const Type *type) const;
+  IntegerRange callRange(const CallExpr *call, llvm::ArrayRef<IntegerRange> parts) const;
+  IntegerRange minMaxRange(const CallExpr *call, llvm::ArrayRef<IntegerRange> parts) const;
+  IntegerRange lowerOf(const IntegerRange &a, const IntegerRange &b) const;
+  IntegerRange upperOf(const IntegerRange &a, const IntegerRange &b) const;
+  IntegerRange unaryRange(const UnaryExpr *unary, const IntegerRange &operand) const;
+  IntegerRange binaryRange(const BinaryExpr *binary, llvm::ArrayRef<IntegerRange> parts) const;
 
   SemanticState &state;
   IndexProofs *indexProofs = nullptr;

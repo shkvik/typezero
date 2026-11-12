@@ -33,10 +33,11 @@ StreamSources::StreamSources(SemanticState &owner, SemanticParts &all)
   this->eventTargetChecker = &all.eventTargetChecker;
 }
 
-Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, llvm::SMLoc loc) {
-  llvm::StringRef fn = decl->name;
-  bool isReading = fn == "createReadStream";
-  if (!isReading && fn != "createWriteStream") {
+Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *functionDecl,
+                                           llvm::SMLoc loc) {
+  llvm::StringRef functionName = functionDecl->name;
+  bool isReading = functionName == "createReadStream";
+  if (!isReading && functionName != "createWriteStream") {
     return nullptr;
   }
   if (this->libraryCalls->inLibrary(call->loc())) {
@@ -46,15 +47,15 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, l
   if (!this->fsStreamArityFits(call, loc)) {
     return call;
   }
-  TypeAliasDecl *alias = this->state.getLibraryDeclarations().findLibraryType(
+  auto *alias = this->state.getLibraryDeclarations().findLibraryType(
       isReading ? "ReadStreamOptions" : "WriteStreamOptions");
   if (alias == nullptr) {
     return call;
   }
   FsStreamArgs args;
   args.options = Type::optional(this->typeDeclarer->resolveAlias(alias));
-  args.encodingType = Type::optional(this->prelude->builtinType("BufferEncoding"));
-  Expr *path = this->argumentChecker->checkArg(call->args[0], Type::string());
+  args.encodingType = Type::optional(this->prelude->builtinType(PreludeType::BUFFER_ENCODING));
+  auto *path = this->argumentChecker->checkArg(call->args[0], Type::string());
   if (call->args.size() == 2) {
     this->walkFsStreamOptions(call->args[1], args);
   }
@@ -74,8 +75,7 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, l
 
 bool StreamSources::fsStreamArityFits(CallExpr *call, llvm::SMLoc loc) {
   bool isRejected = this->callChecker->rejectSpread(call);
-  ArgumentChecker::ResultArityMatches arity =
-      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
+  auto arity = isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
@@ -85,7 +85,7 @@ bool StreamSources::fsStreamArityFits(CallExpr *call, llvm::SMLoc loc) {
 
 void StreamSources::walkFsStreamOptions(Expr *arg, FsStreamArgs &args) {
   if (isa<ObjectLitExpr>(arg)) {
-    StreamSources::scanOptionsLiteral(cast<ObjectLitExpr>(arg), args);
+    this->scanOptionsLiteral(cast<ObjectLitExpr>(arg), args);
     args.opts = this->argumentChecker->checkArg(arg, args.options);
     return;
   }
@@ -94,7 +94,7 @@ void StreamSources::walkFsStreamOptions(Expr *arg, FsStreamArgs &args) {
     args.text = true;
     return;
   }
-  Expr *checked = this->exprChecker->checkExpr(arg);
+  auto *checked = this->exprChecker->checkExpr(arg);
   if (checked->type->isSubtypeOf(Type::string())) {
     args.encoding = this->typeRelations->coerce(checked, args.encodingType);
     args.text = true;
@@ -103,13 +103,14 @@ void StreamSources::walkFsStreamOptions(Expr *arg, FsStreamArgs &args) {
   args.opts = this->typeRelations->coerce(checked, args.options);
 }
 
-void StreamSources::scanOptionsLiteral(const ObjectLitExpr *lit, FsStreamArgs &args) {
-  for (const ObjectLitExpr::Property &prop : lit->props) {
-    if (!prop.spread() && prop.name == "encoding" && !isa<UndefinedExpr>(prop.value)) {
+void StreamSources::scanOptionsLiteral(const ObjectLitExpr *literal, FsStreamArgs &args) const {
+  for (const ObjectLitExpr::Property &property : literal->props) {
+    if (!property.spread() && property.name == "encoding" && !isa<UndefinedExpr>(property.value)) {
       args.text = true;
     }
-    auto *flags =
-        prop.spread() || prop.name != "flags" ? nullptr : dyn_cast<StringLitExpr>(prop.value);
+    auto *flags = property.spread() || property.name != "flags"
+                      ? nullptr
+                      : dyn_cast<StringLitExpr>(property.value);
     if (flags != nullptr && flags->value.find(u'x') != std::u16string::npos) {
       args.fresh = true;
     }
@@ -118,7 +119,7 @@ void StreamSources::scanOptionsLiteral(const ObjectLitExpr *lit, FsStreamArgs &a
 
 Expr *StreamSources::undefinedArg(const Type *type, llvm::SMLoc loc) {
   Expr *undefined = this->state.getAst().make<UndefinedExpr>(loc);
-  Expr *checked = this->exprChecker->checkExpr(undefined);
+  auto *checked = this->exprChecker->checkExpr(undefined);
 
   return this->typeRelations->convert(checked, type);
 }
@@ -139,25 +140,26 @@ Expr *StreamSources::callFsStream(CallExpr *call, const FsStreamArgs &args, bool
 Expr *StreamSources::processStream(MemberExpr *member) {
   llvm::StringRef name = member->name;
   bool isIn = name == "stdin";
-  llvm::StringRef fn = isIn ? "processStdin" : "processStdout";
-  if (!this->state.getLibraryDeclarations().findLibraryFunction(fn)) {
+  llvm::StringRef functionName = isIn ? "processStdin" : "processStdout";
+  if (this->state.getLibraryDeclarations().findLibraryFunction(functionName) == nullptr) {
     return nullptr;
   }
   llvm::SMLoc loc = member->loc();
-  std::vector<Expr *> args;
+  auto args = std::vector<Expr *>();
   if (!isIn) {
     args.push_back(this->exprChecker->checkExpr(
         this->state.getAst().make<IntLitExpr>(loc, name == "stdout" ? 1 : 2), Type::intTy()));
   }
-  auto *callee = this->state.getAst().make<NameExpr>(loc, fn);
+  auto *callee = this->state.getAst().make<NameExpr>(loc, functionName);
   auto *call = this->state.getAst().make<CallExpr>(loc, callee, std::move(args));
   call->type = Type::error();
   std::vector<bool> given(call->args.size(), true);
-  Expr *stream = this->eventTargetChecker->callLibraryFunction(call, fn, {}, given, loc);
+  auto *stream = this->eventTargetChecker->callLibraryFunction(call, functionName, {}, given, loc);
   if (isIn && this->state.getStreamStore().hasStreamViews()) {
     FieldPath path;
     path.var = this->processStdinVar();
-    if (const Type *view = this->state.getStreamStore().findStreamView(path, loc)) {
+    const auto *view = this->state.getStreamStore().findStreamView(path, loc);
+    if (view != nullptr) {
       return this->typeRelations->convert(stream, view);
     }
   }
@@ -166,9 +168,9 @@ Expr *StreamSources::processStream(MemberExpr *member) {
 }
 
 VarSymbol *StreamSources::processStdinVar() {
-  StreamStore &streams = this->state.getStreamStore();
-  if (!streams.getProcessStdin()) {
-    VarSymbol *stdinVar = this->state.getAst().newVar();
+  auto &streams = this->state.getStreamStore();
+  if (streams.getProcessStdin() == nullptr) {
+    auto *stdinVar = this->state.getAst().newVar();
     stdinVar->name = "process.stdin";
     stdinVar->isConst = true;
     streams.rememberProcessStdin(stdinVar);
@@ -178,16 +180,15 @@ VarSymbol *StreamSources::processStdinVar() {
 }
 
 const Type *StreamSources::streamFromOptionsType() {
-  TypeAliasDecl *alias =
-      this->state.getLibraryDeclarations().findLibraryType("ReadableFromOptions");
+  auto *alias = this->state.getLibraryDeclarations().findLibraryType("ReadableFromOptions");
 
-  return alias ? this->typeDeclarer->resolveAlias(alias) : nullptr;
+  return alias != nullptr ? this->typeDeclarer->resolveAlias(alias) : nullptr;
 }
 
 StreamSources::ResultValuesIterator StreamSources::valuesIterator(Expr *source) {
-  Expr *iterator = this->streamPipeline->valuesIteratorOf(source);
-  if (!iterator) {
-    std::string message = ErrorTextStreamFrom::source(source->type->name());
+  auto *iterator = this->streamPipeline->valuesIteratorOf(source);
+  if (iterator == nullptr) {
+    auto message = ErrorTextStreamFrom::source(source->type->name());
 
     return err(StreamSourcesValuesIteratorError{
         .code = StreamSourcesValuesIteratorErrorCode::NOT_ITERABLE,
@@ -201,8 +202,7 @@ StreamSources::ResultValuesIterator StreamSources::valuesIterator(Expr *source) 
 Expr *StreamSources::checkStreamFrom(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   bool isRejected = this->callChecker->rejectSpread(call);
-  ArgumentChecker::ResultArityMatches arity =
-      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
+  auto arity = isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
@@ -210,13 +210,13 @@ Expr *StreamSources::checkStreamFrom(CallExpr *call, MemberExpr *member) {
     return call;
   }
   llvm::SMLoc loc = member->loc();
-  Expr *source = this->exprChecker->checkExpr(call->args[0]);
+  auto *source = this->exprChecker->checkExpr(call->args[0]);
   const Type *type = source->type;
   if (type->isError()) {
     return call;
   }
-  const Type *optionsType = this->streamFromOptionsType();
-  if (!optionsType) {
+  const auto *optionsType = this->streamFromOptionsType();
+  if (optionsType == nullptr) {
     return call;
   }
   Expr *options =
@@ -240,13 +240,13 @@ Expr *StreamSources::checkStreamFrom(CallExpr *call, MemberExpr *member) {
     return this->eventTargetChecker->callLibraryFunction(call, "streamFromAsyncIterator",
                                                          {type->yielded()}, given, loc);
   }
-  if (Expr *async = this->iterableChecker->asyncUserIterator(source);
-      async && async->type->isAsyncIterator()) {
+  auto *async = this->iterableChecker->asyncUserIterator(source);
+  if (async != nullptr && async->type->isAsyncIterator()) {
     call->args = {async, options};
     return this->eventTargetChecker->callLibraryFunction(call, "streamFromAsyncIterator",
                                                          {async->type->yielded()}, given, loc);
   }
-  ResultValuesIterator values = this->valuesIterator(source);
+  auto values = this->valuesIterator(source);
   if (values.isErr()) {
     this->state.getDiagnostics().error(source->loc(), values.error().message);
     return call;

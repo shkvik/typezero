@@ -14,7 +14,7 @@ std::string ErrorTextFsOptions::byName(llvm::StringRef fn, llvm::StringRef first
 
 std::string ErrorTextFsOptions::unknown(llvm::StringRef fn, llvm::StringRef name,
                                         llvm::ArrayRef<llvm::StringRef> allowed) {
-  std::string list;
+  auto list = std::string();
   for (size_t i = 0; i < allowed.size(); ++i) {
     list += (i == 0 ? "" : i + 1 == allowed.size() ? " and " : ", ") + allowed[i].str();
   }

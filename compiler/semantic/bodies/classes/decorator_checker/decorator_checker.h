@@ -13,6 +13,7 @@ class ExprChecker;
 class LateClasses;
 class StmtChecker;
 class TypeRelations;
+class ClassDeclarer;
 class MetadataChecker;
 class ClassValueChecker;
 
@@ -26,8 +27,8 @@ class DecoratorChecker {
 public:
   DecoratorChecker(SemanticState &owner, SemanticParts &all);
 
-  void decorateClass(ClassDecl *cls);
-  const Type *methodDescriptorType(const Type *args, const Type *ret);
+  void decorateClass(ClassDecl *classDecl);
+  const Type *methodDescriptorType(const Type *args, const Type *returnType);
 
 private:
   enum class Place { Class, Field, Method, Parameter };
@@ -48,23 +49,24 @@ private:
   using ResultPlainMemberFound =
       Result<const FunctionDecl *, DecoratorCheckerMemberDecoratableError>;
 
-  static size_t argumentsOf(Place place);
-  void walkDecoratedNames(ClassDecl *cls);
-  static std::string placeText(Place place);
-  static std::string argumentsText(Place place);
-  static bool isPlainReference(const Expr *expr);
-  static std::string decoratorName(const Expr *expr);
-  static const Expr *withoutCalls(const Expr *expr);
-  static bool decoratedParams(const FunctionDecl *fn);
-  static ResultMetadataArgsPair metadataArgs(const CallExpr *metadata);
-  static ResultDescriptorUsable genericDescriptor(const ClassDecl *cls, bool descriptor);
+  size_t argumentsOf(Place place) const;
+  void walkDecoratedNames(ClassDecl *classDecl);
+  std::string placeText(Place place) const;
+  std::string argumentsText(Place place) const;
+  bool isPlainReference(const Expr *expr) const;
+  std::string decoratorName(const Expr *expr) const;
+  const Expr *withoutCalls(const Expr *expr) const;
+  bool decoratedParams(const FunctionDecl *functionDecl) const;
+  ResultMetadataArgsPair metadataArgs(const CallExpr *metadata) const;
+  ResultDescriptorUsable genericDescriptor(const ClassDecl *classDecl, bool descriptor) const;
   bool decoratorParams(Expr *callee, std::vector<const Type *> &params, size_t &required);
-  static ResultFirstConstructor secondConstructor(const ClassDecl *cls, const FunctionDecl *first);
-  static ResultPlainMemberFound memberDecoratable(const ClassField *field,
-                                                  const FunctionDecl *method);
-  static ResultNamesAreDistinct namesDistinct(const DecoratedName &a, const DecoratedName &b,
-                                              llvm::StringRef cls);
-  void decorate(ClassDecl *cls, ClassField *field, FunctionDecl *method,
+  ResultFirstConstructor secondConstructor(const ClassDecl *classDecl,
+                                           const FunctionDecl *first) const;
+  ResultPlainMemberFound memberDecoratable(const ClassField *field,
+                                           const FunctionDecl *method) const;
+  ResultNamesAreDistinct namesDistinct(const DecoratedName &a, const DecoratedName &b,
+                                       llvm::StringRef className) const;
+  void decorate(ClassDecl *classDecl, ClassField *field, FunctionDecl *method,
                 llvm::ArrayRef<DecoratorUse> uses);
   struct DecorateRun {
     ClassDecl *cls = nullptr;
@@ -83,29 +85,28 @@ private:
     ClassDecl *current = nullptr;
   };
 
-  static bool hasKnownSignature(FuncSymbol *sym);
+  bool hasKnownSignature(FuncSymbol *function) const;
   bool isMetadataCall(const Expr *expr) const;
   const Type *methodDescriptor(DecorateRun &run);
   const Type *factoryHint(DecorateRun &run, const Expr *expr);
   void hoistDecorators(DecorateRun &run);
   Expr *hoistDecorator(DecorateRun &run, const DecoratorUse &use);
   bool decoratorsFit(DecorateRun &run);
-  bool decoratorFitsAt(DecorateRun &run, size_t i);
+  bool decoratorFitsAt(DecorateRun &run, size_t index);
   void declareDescriptor(DecorateRun &run);
   VarSymbol *declareMethodImpl(const DecorateRun &run);
-  Expr *descriptorInit(const DecorateRun &run, const VarSymbol *impl);
-  static void addProperty(ObjectLitExpr *lit, llvm::StringRef name, Expr *value, llvm::SMLoc at);
-  static const FunctionDecl *designConstructor(const DecorateRun &run);
-  void applyDecorator(DecorateRun &run, size_t i);
+  Expr *descriptorInit(const DecorateRun &run, const VarSymbol *implementation);
+  void addProperty(ObjectLitExpr *literal, llvm::StringRef name, Expr *value, llvm::SMLoc at) const;
+  const FunctionDecl *designConstructor(const DecorateRun &run) const;
+  void applyDecorator(DecorateRun &run, size_t index);
   void applyMetadata(DecorateRun &run, const DecoratorUse &use);
   std::vector<Expr *> decoratorArgs(const DecorateRun &run, const DecoratorUse &use, Place place);
   Expr *decoratorOutcome(DecorateRun &run, const DecoratorUse &use, Place place, Expr *applied);
   void storeDescriptorValue(const DecorateRun &run);
-  static ResultDecoratorArgsFit decoratorFits(llvm::StringRef label, Place place, size_t needs,
-                                              size_t given, const Type *third);
-  static ResultDecoratorReturns decoratorResult(llvm::StringRef label, const Type *result,
-                                                Place place, bool descriptor,
-                                                const ClassDecl *current);
+  ResultDecoratorArgsFit decoratorFits(llvm::StringRef label, Place place, size_t needs,
+                                       size_t given, const Type *third) const;
+  ResultDecoratorReturns decoratorResult(llvm::StringRef label, const Type *result, Place place,
+                                         bool descriptor, const ClassDecl *current) const;
 
   SemanticState &state;
   Scopes *scopes = nullptr;
@@ -114,6 +115,7 @@ private:
   LateClasses *lateClasses = nullptr;
   StmtChecker *stmtChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
   MetadataChecker *metadataChecker = nullptr;
   ClassValueChecker *classValueChecker = nullptr;
 };

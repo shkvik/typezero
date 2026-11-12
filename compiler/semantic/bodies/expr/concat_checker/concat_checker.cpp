@@ -1,4 +1,6 @@
 #include "compiler/semantic/bodies/expr/concat_checker/concat_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/program/library/object/object_member_table/object_member_table.h"
 #include "compiler/semantic/bodies/shared_helpers/shared_helpers.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
@@ -19,80 +21,76 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+constexpr const char *kUnnamedObject = "o";
+constexpr size_t kOperatorLength = 1;
+constexpr size_t kTemplateFrame = 4;
+
+}
+
 ConcatChecker::ConcatChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->dateChecker = &all.dateChecker;
+  this->jsonChecker = &all.jsonChecker;
   this->bytesChecker = &all.bytesChecker;
   this->regexChecker = &all.regexChecker;
   this->typeRelations = &all.typeRelations;
+  this->classDeclarer = &all.classDeclarer;
   this->genericChecker = &all.genericChecker;
+  this->unknownChecker = &all.unknownChecker;
 }
 
-std::pair<llvm::StringRef, llvm::StringRef>
-ConcatChecker::operandTexts(llvm::StringRef source, llvm::SMLoc op, size_t length) {
-  const char *at = op.getPointer();
-  if (source.empty() || at < source.begin() || at + length > source.end()) {
-    return {};
-  }
+const Expr *ConcatChecker::unconverted(const Expr *expr) const {
+  auto *castExpr = dyn_cast<CastExpr>(expr);
+  bool isTextCast = castExpr != nullptr && castExpr->isImplicit() && castExpr->type->isString();
 
-  return {llvm::StringRef(source.begin(), static_cast<size_t>(at - source.begin())).trim(),
-          llvm::StringRef(at + length, static_cast<size_t>(source.end() - at - length)).trim()};
+  return isTextCast ? castExpr->operand : expr;
 }
 
-const Expr *ConcatChecker::unconverted(const Expr *expr) {
-  auto *cast = dyn_cast<CastExpr>(expr);
-
-  return cast && cast->isImplicit() && cast->type->isString() ? cast->operand : expr;
-}
-
-void ConcatChecker::concatParts(const BinaryExpr *bin, Parts &parts) {
-  std::vector<const BinaryExpr *> chain;
-  const BinaryExpr *link = bin;
+ConcatChecker::Parts ConcatChecker::concatParts(const BinaryExpr *binary) const {
+  auto chain = std::vector<const BinaryExpr *>();
+  const BinaryExpr *link = binary;
   while (link != nullptr) {
     chain.push_back(link);
-    link = ConcatChecker::leftConcat(link);
+    link = this->leftConcat(link);
   }
+  auto parts = Parts();
   const BinaryExpr *first = chain.back();
-  std::pair<llvm::StringRef, llvm::StringRef> firstTexts =
-      ConcatChecker::operandTexts(first->source, first->loc(), 1);
-  parts.push_back({ConcatChecker::unconverted(first->lhs), firstTexts.first});
+  auto firstTexts = SharedHelpers::operandTexts(first->source, first->loc(), kOperatorLength);
+  parts.push_back({this->unconverted(first->lhs), firstTexts.first});
   for (const BinaryExpr *step : llvm::reverse(chain)) {
-    std::pair<llvm::StringRef, llvm::StringRef> texts =
-        ConcatChecker::operandTexts(step->source, step->loc(), 1);
-    parts.push_back({ConcatChecker::unconverted(step->rhs), texts.second});
+    auto texts = SharedHelpers::operandTexts(step->source, step->loc(), kOperatorLength);
+    parts.push_back({this->unconverted(step->rhs), texts.second});
   }
+
+  return parts;
 }
 
-const BinaryExpr *ConcatChecker::leftConcat(const BinaryExpr *bin) {
-  auto *left = dyn_cast<BinaryExpr>(ConcatChecker::unconverted(bin->lhs));
+const BinaryExpr *ConcatChecker::leftConcat(const BinaryExpr *binary) const {
+  const auto *inner = this->unconverted(binary->lhs);
+  auto *left = dyn_cast<BinaryExpr>(inner);
   bool isConcat = left != nullptr && left->op == BinaryOp::Add && left->type != nullptr &&
                   left->type->isString();
 
   return isConcat ? left : nullptr;
 }
 
-std::string ConcatChecker::concatTemplate(const Parts &parts, llvm::StringRef &only) {
-  std::string result = "`";
+ConcatChecker::TemplateText ConcatChecker::concatTemplate(const Parts &parts) const {
+  auto result = std::string("`");
   unsigned values = 0;
+  llvm::StringRef only;
   for (auto [expr, text] : parts) {
     if (text.empty()) {
-      return "";
+      return TemplateText{};
     }
     bool isQuoted = text.size() >= 2 && text.back() == text.front();
-    if (isa<StringLitExpr>(expr) && isQuoted && (text.front() == '"' || text.front() == '\'')) {
-      llvm::StringRef body = text.drop_front().drop_back();
-      for (size_t i = 0; i < body.size(); ++i) {
-        if (body[i] == '\\' && i + 1 < body.size()) {
-          result += body.substr(i, 2);
-          ++i;
-          continue;
-        }
-        if (body[i] == '`' || (body[i] == '$' && body.substr(i + 1).starts_with("{"))) {
-          result += '\\';
-        }
-        result += body[i];
-      }
-    } else if (isa<TemplateExpr>(expr) && isQuoted && text.front() == '`') {
+    bool isQuotedString =
+        isa<StringLitExpr>(expr) && isQuoted && (text.front() == '"' || text.front() == '\'');
+    bool isQuotedTemplate = isa<TemplateExpr>(expr) && isQuoted && text.front() == '`';
+    if (isQuotedString) {
+      result += this->escapedBody(text);
+    } else if (isQuotedTemplate) {
       result += text.drop_front().drop_back();
     } else {
       only = SharedHelpers::withoutParens(text);
@@ -100,19 +98,47 @@ std::string ConcatChecker::concatTemplate(const Parts &parts, llvm::StringRef &o
       result += ("${" + only + "}").str();
     }
   }
-  if (values != 1 || result.size() != only.size() + 4) {
-    only = "";
-  }
+  bool isSingleValue = values == 1 && result.size() == only.size() + kTemplateFrame;
 
-  return result + "`";
+  return TemplateText{
+      .text = result + "`",
+      .only = isSingleValue ? only : llvm::StringRef(),
+  };
 }
 
-ConcatChecker::ResultConvertsToText ConcatChecker::convertible(const Expr *expr) {
-  std::optional<ConcatCheckerConvertibleErrorCode> problem = ConcatChecker::textProblem(expr);
+std::string ConcatChecker::escapedBody(llvm::StringRef text) const {
+  llvm::StringRef body = text.drop_front().drop_back();
+  auto escaped = std::string();
+  size_t index = 0;
+  while (index < body.size()) {
+    bool isEscape = body[index] == '\\' && index + 1 < body.size();
+    if (isEscape) {
+      escaped += body.substr(index, 2);
+      index += 2;
+    } else {
+      escaped += this->templateChar(body, index);
+      index += 1;
+    }
+  }
+
+  return escaped;
+}
+
+std::string ConcatChecker::templateChar(llvm::StringRef body, size_t index) const {
+  char letter = body[index];
+  bool isOpening = letter == '$' && body.substr(index + 1).starts_with("{");
+  bool isSpecial = letter == '`' || isOpening;
+  auto shown = std::string(1, letter);
+
+  return isSpecial ? "\\" + shown : shown;
+}
+
+ConcatChecker::ResultConvertsToText ConcatChecker::checkConvertible(const Expr *expr) const {
+  auto problem = this->textProblem(expr);
   if (!problem.has_value()) {
     return ok(expr);
   }
-  std::string message = ConcatChecker::textProblemMessage(expr, *problem);
+  auto message = this->textProblemMessage(expr, *problem);
 
   return err(ConcatCheckerConvertibleError{
       .code = *problem,
@@ -120,7 +146,8 @@ ConcatChecker::ResultConvertsToText ConcatChecker::convertible(const Expr *expr)
   });
 }
 
-std::optional<ConcatCheckerConvertibleErrorCode> ConcatChecker::textProblem(const Expr *expr) {
+std::optional<ConcatCheckerConvertibleErrorCode>
+ConcatChecker::textProblem(const Expr *expr) const {
   const Type *type = expr->type;
   const Type *base = type->nonOptional();
   if (type->isVoid()) {
@@ -135,7 +162,7 @@ std::optional<ConcatCheckerConvertibleErrorCode> ConcatChecker::textProblem(cons
   if (type->holdsResults()) {
     return ConcatCheckerConvertibleErrorCode::RESULT_VALUE;
   }
-  if (ConcatChecker::hasOwnToString(base)) {
+  if (this->hasOwnToString(base)) {
     return ConcatCheckerConvertibleErrorCode::OBJECT_TO_STRING;
   }
   if (base->isDict()) {
@@ -144,49 +171,53 @@ std::optional<ConcatCheckerConvertibleErrorCode> ConcatChecker::textProblem(cons
   if (base->isIterator()) {
     return ConcatCheckerConvertibleErrorCode::ITERATOR_VALUE;
   }
-  if (UnknownChecker::holdsUnknown(type)) {
+  if (this->unknownChecker->isHoldingUnknown(type)) {
     return ConcatCheckerConvertibleErrorCode::UNKNOWN_VALUE;
   }
-  if (JsonChecker::holdsJson(type)) {
+  if (this->jsonChecker->holdsJson(type)) {
     return ConcatCheckerConvertibleErrorCode::JSON_VALUE;
   }
   if (type->holdsObjects()) {
     return ConcatCheckerConvertibleErrorCode::OBJECT_VALUE;
   }
-  if (ConcatChecker::heldUnionMember(base) != nullptr) {
+  if (this->heldUnionMember(base) != nullptr) {
     return ConcatCheckerConvertibleErrorCode::UNION_MEMBER;
   }
 
   return std::nullopt;
 }
 
-bool ConcatChecker::hasOwnToString(const Type *base) {
-  ClassDecl *cls = ClassDeclarer::classOf(base);
-  if (cls == nullptr) {
+bool ConcatChecker::hasOwnToString(const Type *base) const {
+  auto *classDecl = this->classDeclarer->classOf(base);
+  if (classDecl == nullptr) {
     return false;
   }
-  llvm::StringRef toStringName = ObjectMemberTable::getName(ObjectMember::TO_STRING);
+  auto toStringName = ObjectMemberTable::getName(ObjectMember::TO_STRING);
 
-  return !ClassDeclarer::methodsNamed(cls, toStringName, false).empty();
+  return !this->classDeclarer->methodsNamed(classDecl, toStringName).empty();
 }
 
-const Type *ConcatChecker::heldUnionMember(const Type *base) {
+const Type *ConcatChecker::heldUnionMember(const Type *base) const {
   if (!base->isUnion() || !base->isTagged()) {
     return nullptr;
   }
-  for (const Type *m : base->members()) {
-    bool isHeld = (m->isObject() && !m->isDate() && !m->isRegExp()) || m->isDict() ||
-                  m->isFunction() || m->isIterator();
-    if (isHeld) {
-      return m;
+  for (const Type *member : base->members()) {
+    if (this->isHeldMember(member)) {
+      return member;
     }
   }
 
   return nullptr;
 }
 
+bool ConcatChecker::isHeldMember(const Type *member) const {
+  bool isPlainObject = member->isObject() && !member->isDate() && !member->isRegExp();
+
+  return isPlainObject || member->isDict() || member->isFunction() || member->isIterator();
+}
+
 std::string ConcatChecker::textProblemMessage(const Expr *expr,
-                                              ConcatCheckerConvertibleErrorCode problem) {
+                                              ConcatCheckerConvertibleErrorCode problem) const {
   const Type *type = expr->type;
   const Type *base = type->nonOptional();
   switch (problem) {
@@ -199,9 +230,9 @@ std::string ConcatChecker::textProblemMessage(const Expr *expr,
     case ConcatCheckerConvertibleErrorCode::RESULT_VALUE:
       return ErrorTextToString::result();
     case ConcatCheckerConvertibleErrorCode::OBJECT_TO_STRING:
-      return ConcatChecker::ownStringMessage(expr);
+      return this->ownStringMessage(expr);
     case ConcatCheckerConvertibleErrorCode::DICT_VALUE:
-      return ConcatChecker::dictMessage(base);
+      return this->dictMessage(base);
     case ConcatCheckerConvertibleErrorCode::ITERATOR_VALUE:
       return ErrorTextToString::iterator();
     case ConcatCheckerConvertibleErrorCode::UNKNOWN_VALUE:
@@ -211,24 +242,41 @@ std::string ConcatChecker::textProblemMessage(const Expr *expr,
     case ConcatCheckerConvertibleErrorCode::OBJECT_VALUE:
       return ErrorTextToString::object();
     case ConcatCheckerConvertibleErrorCode::UNION_MEMBER:
-      return ErrorTextToString::member(type->name(), ConcatChecker::heldUnionMember(base)->name());
+      return this->unionMemberMessage(type, base);
   }
 
   return ErrorTextToString::object();
 }
 
-std::string ConcatChecker::ownStringMessage(const Expr *expr) {
+std::string ConcatChecker::unionMemberMessage(const Type *type, const Type *base) const {
+  const auto *member = this->heldUnionMember(base);
+
+  return ErrorTextToString::member(type->name(), member->name());
+}
+
+std::string ConcatChecker::ownStringMessage(const Expr *expr) const {
   auto *name = dyn_cast<NameExpr>(expr);
-  std::string text = name != nullptr ? name->name.str() : "o";
+  std::string text = name != nullptr ? name->name.str() : kUnnamedObject;
 
   return ErrorTextToString::ownString(text);
 }
 
-std::string ConcatChecker::dictMessage(const Type *base) {
-  const char *kind = base->isRecord() ? "Record" : base->isMap() ? "Map" : "Set";
-  const char *shown = base->isRecord() ? "Object" : kind;
+std::string ConcatChecker::dictMessage(const Type *base) const {
+  auto kind = this->dictKind(base);
+  auto shown = base->isRecord() ? GlobalNameTable::getName(GlobalName::OBJECT) : kind;
 
   return ErrorTextToString::dict(kind, shown);
+}
+
+llvm::StringRef ConcatChecker::dictKind(const Type *base) const {
+  if (base->isRecord()) {
+    return TypeNameTable::getName(TypeName::RECORD);
+  }
+  if (base->isMap()) {
+    return TypeNameTable::getName(TypeName::MAP);
+  }
+
+  return TypeNameTable::getName(TypeName::SET);
 }
 
 Expr *ConcatChecker::toStringOperand(Expr *expr) {
@@ -249,54 +297,68 @@ Expr *ConcatChecker::toStringOperand(Expr *expr) {
     this->genericChecker->noteForced(expr, Type::string());
     return this->typeRelations->convert(expr, Type::string());
   }
-  ResultConvertsToText convertible = ConcatChecker::convertible(expr);
+  auto convertible = this->checkConvertible(expr);
   if (convertible.isErr()) {
     this->state.getDiagnostics().error(expr->loc(), convertible.error().message);
     return expr;
   }
-  if (const Type *u = type->nonOptional(); u->isUnion() && u->isTagged()) {
-    auto *cast = dyn_cast<CastExpr>(this->typeRelations->convert(expr, Type::string()));
-    if (cast) {
-      cast->text = true;
-    }
-    return cast ? cast : expr;
+  const Type *base = type->nonOptional();
+  if (base->isUnion() && base->isTagged()) {
+    return this->taggedText(expr);
   }
 
   return this->typeRelations->convert(expr, Type::string());
 }
 
-std::string ConcatChecker::mixedConcatText(const BinaryExpr *root, const BinaryExpr *mixed) {
-  const Type *l = ConcatChecker::unconverted(mixed->lhs)->type;
-  const Type *r = ConcatChecker::unconverted(mixed->rhs)->type;
-  std::string operands = ErrorTextMixedConcat::operands(l->name(), r->name());
-  Parts parts;
-  ConcatChecker::concatParts(root, parts);
-  llvm::StringRef only;
-  std::string joined = ConcatChecker::concatTemplate(parts, only);
-  if (joined.empty()) {
+Expr *ConcatChecker::taggedText(Expr *expr) {
+  auto *converted = this->typeRelations->convert(expr, Type::string());
+  auto *castExpr = dyn_cast<CastExpr>(converted);
+  if (castExpr == nullptr) {
+    return expr;
+  }
+  castExpr->text = true;
+
+  return castExpr;
+}
+
+std::string ConcatChecker::mixedConcatText(const BinaryExpr *root, const BinaryExpr *mixed) const {
+  const Type *leftType = this->unconverted(mixed->lhs)->type;
+  const Type *rightType = this->unconverted(mixed->rhs)->type;
+  auto operands = ErrorTextMixedConcat::operands(leftType->name(), rightType->name());
+  auto parts = this->concatParts(root);
+  auto joined = this->concatTemplate(parts);
+  if (joined.text.empty()) {
     return operands + ErrorTextMixedConcat::literal();
   }
-  if (!only.empty()) {
-    return operands + ErrorTextMixedConcat::convert(only);
+  if (!joined.only.empty()) {
+    return operands + ErrorTextMixedConcat::convert(joined.only);
   }
-  if (parts.size() == 2) {
-    auto [first, firstText] = parts[0];
-    auto [second, secondText] = parts[1];
-    auto isText = [](const Expr *e) {
-      return e->type->isString() && !isa<StringLitExpr>(e) && !isa<TemplateExpr>(e);
-    };
-    std::string sum;
-    if (first->type->isNumeric() && isText(second)) {
-      sum = ErrorTextMixedConcat::addRight(firstText, secondText);
-    } else if (isText(first) && second->type->isNumeric()) {
-      sum = ErrorTextMixedConcat::addLeft(firstText, secondText);
-    }
-    if (!sum.empty()) {
-      return operands + ErrorTextMixedConcat::addOrJoin(sum, joined);
-    }
+  auto sum = this->sumHint(parts);
+  if (!sum.empty()) {
+    return operands + ErrorTextMixedConcat::addOrJoin(sum, joined.text);
   }
 
-  return operands + ErrorTextMixedConcat::asTemplate(joined);
+  return operands + ErrorTextMixedConcat::asTemplate(joined.text);
+}
+
+std::string ConcatChecker::sumHint(const Parts &parts) const {
+  if (parts.size() != 2) {
+    return "";
+  }
+  auto [first, firstText] = parts[0];
+  auto [second, secondText] = parts[1];
+  if (first->type->isNumeric() && this->isTextValue(second)) {
+    return ErrorTextMixedConcat::addRight(firstText, secondText);
+  }
+  if (this->isTextValue(first) && second->type->isNumeric()) {
+    return ErrorTextMixedConcat::addLeft(firstText, secondText);
+  }
+
+  return "";
+}
+
+bool ConcatChecker::isTextValue(const Expr *expr) const {
+  return expr->type->isString() && !isa<StringLitExpr>(expr) && !isa<TemplateExpr>(expr);
 }
 
 }

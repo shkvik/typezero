@@ -22,7 +22,7 @@ class StreamSources {
 public:
   StreamSources(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, llvm::SMLoc loc);
+  Expr *checkFsStreamFunction(CallExpr *call, FunctionDecl *functionDecl, llvm::SMLoc loc);
   Expr *processStream(MemberExpr *member);
   VarSymbol *processStdinVar();
   const Type *streamFromOptionsType();
@@ -42,7 +42,7 @@ private:
 
   bool fsStreamArityFits(CallExpr *call, llvm::SMLoc loc);
   void walkFsStreamOptions(Expr *arg, FsStreamArgs &args);
-  static void scanOptionsLiteral(const ObjectLitExpr *lit, FsStreamArgs &args);
+  void scanOptionsLiteral(const ObjectLitExpr *literal, FsStreamArgs &args) const;
   Expr *undefinedArg(const Type *type, llvm::SMLoc loc);
   Expr *callFsStream(CallExpr *call, const FsStreamArgs &args, bool reading, llvm::SMLoc loc);
   ResultValuesIterator valuesIterator(Expr *source);

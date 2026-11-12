@@ -46,17 +46,18 @@ WebCryptoChecker::WebCryptoChecker(SemanticState &owner, SemanticParts &all)
   this->scopes = &all.scopes;
   this->cryptoArgs = &all.cryptoArgs;
   this->exprChecker = &all.exprChecker;
+  this->classDeclarer = &all.classDeclarer;
   this->argumentChecker = &all.argumentChecker;
 }
 
 WebCryptoChecker::ResultSubtleCallShape
-WebCryptoChecker::subtleShape(const CallExpr *call, llvm::StringRef intrinsicName) {
+WebCryptoChecker::subtleShape(const CallExpr *call, llvm::StringRef intrinsicName) const {
   auto named = [&](const SubtleIntrinsic &i) { return i.name == intrinsicName; };
   const SubtleIntrinsic *intrinsic = llvm::find_if(kSubtleIntrinsics, named);
   bool isWrong = intrinsic == std::end(kSubtleIntrinsics) ||
                  call->args.size() != intrinsic->params.size() || call->hasSpread();
   if (isWrong) {
-    std::string message = ErrorTextIntrinsicCall::wrong(intrinsicName);
+    auto message = ErrorTextIntrinsicCall::wrong(intrinsicName);
 
     return err(WebCryptoCheckerSubtleShapeError{
         .code = WebCryptoCheckerSubtleShapeErrorCode::NOT_AN_INTRINSIC,
@@ -68,9 +69,10 @@ WebCryptoChecker::subtleShape(const CallExpr *call, llvm::StringRef intrinsicNam
 }
 
 WebCryptoChecker::ResultAlgorithmChosen
-WebCryptoChecker::literalAlgorithm(const Expr *checked, char kind, llvm::StringRef intrinsicName) {
-  if (checked && (kind == 'm' || kind == 'c') && !isa<IntLitExpr>(checked)) {
-    std::string message = ErrorTextSubtle::literal(intrinsicName);
+WebCryptoChecker::literalAlgorithm(const Expr *checked, char kind,
+                                   llvm::StringRef intrinsicName) const {
+  if (checked != nullptr && (kind == 'm' || kind == 'c') && !isa<IntLitExpr>(checked)) {
+    auto message = ErrorTextSubtle::literal(intrinsicName);
 
     return err(WebCryptoCheckerLiteralAlgorithmError{
         .code = WebCryptoCheckerLiteralAlgorithmErrorCode::NOT_A_LITERAL,
@@ -83,8 +85,8 @@ WebCryptoChecker::literalAlgorithm(const Expr *checked, char kind, llvm::StringR
 
 WebCryptoChecker::ResultSubtleAvailable WebCryptoChecker::subtleAvailable() const {
   VarSymbol *subtle = this->scopes->lookup(LibraryModuleNames::kSubtleName).var();
-  if (!subtle) {
-    std::string message = ErrorTextSubtle::noSubtle();
+  if (subtle == nullptr) {
+    auto message = ErrorTextSubtle::noSubtle();
 
     return err(WebCryptoCheckerSubtleAvailableError{
         .code = WebCryptoCheckerSubtleAvailableErrorCode::NO_SUBTLE,
@@ -98,7 +100,7 @@ WebCryptoChecker::ResultSubtleAvailable WebCryptoChecker::subtleAvailable() cons
 Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name,
                                              llvm::StringRef intrinsicName) {
   call->type = Type::error();
-  ResultSubtleCallShape shape = WebCryptoChecker::subtleShape(call, intrinsicName);
+  auto shape = this->subtleShape(call, intrinsicName);
   if (shape.isErr()) {
     this->state.getDiagnostics().error(name->loc(), shape.error().message);
     for (Expr *&arg : call->args) {
@@ -107,26 +109,26 @@ Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name,
     return call;
   }
   const SubtleIntrinsic *intrinsic = shape.value();
-  std::vector<Expr *> args;
+  auto args = std::vector<Expr *>();
   bool isAllChecked = true;
-  for (size_t i = 0; i < call->args.size(); ++i) {
-    Expr *arg = call->args[i];
-    Expr *checked = this->checkSubtleArg(arg, intrinsic->params[i], intrinsicName);
+  for (size_t index = 0; index < call->args.size(); ++index) {
+    Expr *arg = call->args[index];
+    auto *checked = this->checkSubtleArg(arg, intrinsic->params[index], intrinsicName);
     isAllChecked &= checked != nullptr && !checked->type->isError();
     args.push_back(checked != nullptr ? checked : arg);
   }
   if (!isAllChecked) {
     return call;
   }
-  const Type *value = WebCryptoChecker::subtleResult(intrinsic->result);
-  const Type *promise = Type::promise(value);
+  const auto *value = this->subtleResult(intrinsic->result);
+  const auto *promise = Type::promise(value);
 
   return this->cryptoArgs->cryptoCall(call, intrinsic->fn, std::move(args), promise);
 }
 
 Expr *WebCryptoChecker::checkSubtleArg(Expr *arg, char kind, llvm::StringRef intrinsicName) {
-  Expr *checked = this->checkSubtleArgKind(arg, kind);
-  ResultAlgorithmChosen literal = WebCryptoChecker::literalAlgorithm(checked, kind, intrinsicName);
+  auto *checked = this->checkSubtleArgKind(arg, kind);
+  auto literal = this->literalAlgorithm(checked, kind, intrinsicName);
   if (literal.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), literal.error().message);
     return nullptr;
@@ -156,8 +158,8 @@ Expr *WebCryptoChecker::checkSubtleArgKind(Expr *arg, char kind) {
   return this->argumentChecker->checkArg(arg, Type::string());
 }
 
-const Type *WebCryptoChecker::subtleResult(char result) {
-  const Type *buffer = Type::bytesType(Type::Bytes::ArrayBuffer);
+const Type *WebCryptoChecker::subtleResult(char result) const {
+  const auto *buffer = Type::bytesType(Type::Bytes::ArrayBuffer);
   switch (result) {
     case 'B':
       return buffer;
@@ -167,20 +169,20 @@ const Type *WebCryptoChecker::subtleResult(char result) {
       return Type::intTy();
   }
 
-  const Type *keyObject = Type::cryptoType(Type::Crypto::KeyObject);
+  const auto *keyObject = Type::cryptoType(Type::Crypto::KeyObject);
 
   return Type::optional(keyObject);
 }
 
 bool WebCryptoChecker::isSubtleClass(const Type *type, llvm::StringRef name) const {
-  const ClassDecl *cls = type ? ClassDeclarer::classOf(type) : nullptr;
+  const ClassDecl *classDecl = type != nullptr ? this->classDeclarer->classOf(type) : nullptr;
 
-  return cls && cls->library() && cls->name == name &&
-         cls == this->state.getLibraryDeclarations().findLibraryClass(name);
+  return classDecl != nullptr && classDecl->library() && classDecl->name == name &&
+         classDecl == this->state.getLibraryDeclarations().findLibraryClass(name);
 }
 
 Expr *WebCryptoChecker::subtleObject(MemberExpr *member) {
-  ResultSubtleAvailable subtle = this->subtleAvailable();
+  auto subtle = this->subtleAvailable();
   if (subtle.isErr()) {
     this->state.getDiagnostics().error(member->loc(), subtle.error().message);
     member->type = Type::error();

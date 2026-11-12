@@ -23,7 +23,7 @@ class BytesChecker {
 public:
   BytesChecker(SemanticState &owner, SemanticParts &all);
 
-  static const Type *bytesTypeNamed(llvm::StringRef name);
+  const Type *bytesTypeNamed(llvm::StringRef name) const;
   Expr *checkBufferEncoding(Expr *arg);
   Expr *checkBytesIndex(IndexExpr *index);
   void walkBytesStore(IndexExpr *index, const Expr *value);
@@ -37,9 +37,9 @@ private:
   using ResultKnownEncoding = Result<int, BytesCheckerKnownEncodingError>;
   using ResultBytesIndexing = Result<const Type *, BytesCheckerBytesIndexingError>;
 
-  static ResultBytesIndexing bytesIndexing(const Type *type);
-  static ResultKnownEncoding knownEncoding(llvm::StringRef name);
-  static std::optional<std::u16string> literalText(const Expr *e);
+  ResultBytesIndexing bytesIndexing(const Type *type) const;
+  ResultKnownEncoding knownEncoding(llvm::StringRef name) const;
+  std::optional<std::u16string> literalText(const Expr *expr) const;
 
   Expr *reportNoMember(MemberExpr *member);
   Expr *keepObject(MemberExpr *member, Expr *value);

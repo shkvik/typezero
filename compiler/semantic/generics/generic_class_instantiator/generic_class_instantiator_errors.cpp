@@ -16,7 +16,7 @@ std::string ErrorTextClassInstance::eventMap() {
 }
 
 std::string ErrorTextClassInstance::needs(llvm::StringRef name, size_t count) {
-  std::string ints;
+  auto ints = std::string();
   for (size_t i = 0; i < count; ++i) {
     ints += i == 0 ? "int" : ", int";
   }

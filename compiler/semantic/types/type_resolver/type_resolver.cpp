@@ -32,13 +32,25 @@ using llvm::dyn_cast_or_null;
 
 namespace tz {
 
+namespace {
+
+constexpr double kMaxWholeNumber = 9007199254740992.0;
+constexpr llvm::StringLiteral kIntlPrefix = "Intl.";
+constexpr llvm::StringLiteral kIntlLocaleType = "Intl.Locale";
+constexpr llvm::StringLiteral kReadlineInterface = "Interface";
+constexpr llvm::StringLiteral kThisParam = "this";
+
+}
+
 TypeResolver::TypeResolver(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->dictChecker = &all.dictChecker;
   this->resultTypes = &all.resultTypes;
+  this->intlChecker = &all.intlChecker;
   this->asyncChecker = &all.asyncChecker;
   this->typeDeclarer = &all.typeDeclarer;
   this->utilityTypes = &all.utilityTypes;
+  this->bytesChecker = &all.bytesChecker;
   this->cryptoChecker = &all.cryptoChecker;
   this->templateTypes = &all.templateTypes;
   this->typeOperators = &all.typeOperators;
@@ -51,54 +63,61 @@ TypeResolver::TypeResolver(SemanticState &owner, SemanticParts &all)
   this->genericClassInstantiator = &all.genericClassInstantiator;
 }
 
-const Type *TypeResolver::literalType(const TypeRef &ref) {
+const Type *TypeResolver::literalType(const TypeRef &ref) const {
   if (TypeNameTable::isName(ref.name, TypeName::STRING)) {
     return Type::stringLiteral(ref.text());
   }
   if (TypeNameTable::isName(ref.name, TypeName::BOOLEAN)) {
     return Type::boolLiteral(ref.number() != 0);
   }
-  bool isWhole = ref.number() == std::trunc(ref.number()) &&
-                 std::fabs(ref.number()) <= 9007199254740992.0 &&
-                 !(ref.number() == 0 && std::signbit(ref.number()));
-  const Type *kind = isWhole ? Type::intTy() : Type::doubleTy();
+  double value = ref.number();
+  bool isNegativeZero = value == 0 && std::signbit(value);
+  bool isWhole = value == std::trunc(value) && std::fabs(value) <= kMaxWholeNumber;
+  if (isWhole && !isNegativeZero) {
+    return Type::numberLiteral(value, Type::intTy());
+  }
 
-  return Type::numberLiteral(ref.number(), kind);
+  return Type::numberLiteral(value, Type::doubleTy());
 }
 
-bool TypeResolver::isMethodAt(const TypeRef &ref, size_t index) {
+bool TypeResolver::isMethodAt(const TypeRef &ref, size_t index) const {
   return index < ref.methods().size() && ref.methods()[index];
 }
 
-bool TypeResolver::overloaded(const TypeRef &ref, size_t index) {
-  if (!TypeResolver::isMethodAt(ref, index)) {
+bool TypeResolver::isOverloaded(const TypeRef &ref, size_t index) const {
+  if (!this->isMethodAt(ref, index)) {
     return false;
   }
-  bool isSeveral = false;
+  size_t sameNamed = 0;
   for (size_t other = 0; other < ref.args.size(); ++other) {
-    if (other == index || ref.names()[other] != ref.names()[index]) {
-      continue;
-    }
-    if (!TypeResolver::isMethodAt(ref, other)) {
+    bool isSameName = other != index && ref.names()[other] == ref.names()[index];
+    if (isSameName && !this->isMethodAt(ref, other)) {
       return false;
     }
-    isSeveral = true;
+    if (isSameName) {
+      sameNamed += 1;
+    }
   }
 
-  return isSeveral;
+  return sameNamed > 0;
 }
 
-TypeResolver::ResultStandaloneUsable TypeResolver::standalone(const Type *type, bool allowVoid) {
-  if (type->isVoid() && !allowVoid) {
-    std::string message = ErrorTextTypeUse::voidType();
+TypeResolver::ResultStandaloneUsable TypeResolver::checkNotVoid(const Type *type) const {
+  if (type->isVoid()) {
+    auto message = ErrorTextTypeUse::voidType();
 
     return err(TypeResolverStandaloneError{
         .code = TypeResolverStandaloneErrorCode::VOID_TYPE,
         .message = message,
     });
   }
+
+  return ok(type);
+}
+
+TypeResolver::ResultStandaloneUsable TypeResolver::checkNotUndefined(const Type *type) const {
   if (type->isUndefined()) {
-    std::string message = ErrorTextTypeUse::undefined();
+    auto message = ErrorTextTypeUse::undefined();
 
     return err(TypeResolverStandaloneError{
         .code = TypeResolverStandaloneErrorCode::UNDEFINED_ALONE,
@@ -111,10 +130,10 @@ TypeResolver::ResultStandaloneUsable TypeResolver::standalone(const Type *type, 
 
 TypeResolver::ResultEnumMemberExists TypeResolver::enumMember(const EnumDecl *declaredEnum,
                                                               llvm::StringRef owner,
-                                                              llvm::StringRef member) {
-  const EnumMember *found = declaredEnum->find(member);
-  if (!found) {
-    std::string message = ErrorTextTypeName::enumMember(owner, member);
+                                                              llvm::StringRef member) const {
+  const auto *found = declaredEnum->find(member);
+  if (found == nullptr) {
+    auto message = ErrorTextTypeName::enumMember(owner, member);
 
     return err(TypeResolverEnumMemberError{
         .code = TypeResolverEnumMemberErrorCode::NO_SUCH_MEMBER,
@@ -126,13 +145,13 @@ TypeResolver::ResultEnumMemberExists TypeResolver::enumMember(const EnumDecl *de
 }
 
 TypeResolver::ResultArrayBufferGiven TypeResolver::bufferArgument(const TypeRef &ref,
-                                                                  const Type *bytes) {
+                                                                  const Type *bytes) const {
   bool isSingle = ref.args.size() == 1 && ref.args[0].kind() == TypeRefKind::NAME_REF;
   bool isBuffer =
       isSingle && (TypeNameTable::isName(ref.args[0].name, TypeName::ARRAY_BUFFER) ||
                    TypeNameTable::isName(ref.args[0].name, TypeName::ARRAY_BUFFER_LIKE));
   if (!isBuffer) {
-    std::string message = ErrorTextGenericRef::bufferArg(ref.name);
+    auto message = ErrorTextGenericRef::bufferArg(ref.name);
 
     return err(TypeResolverBufferArgumentError{
         .code = TypeResolverBufferArgumentErrorCode::NOT_ARRAY_BUFFER,
@@ -143,9 +162,9 @@ TypeResolver::ResultArrayBufferGiven TypeResolver::bufferArgument(const TypeRef 
   return ok(bytes);
 }
 
-TypeResolver::ResultElementTypeGiven TypeResolver::arrayArgument(const TypeRef &ref) {
+TypeResolver::ResultElementTypeGiven TypeResolver::arrayArgument(const TypeRef &ref) const {
   if (ref.args.size() != 1) {
-    std::string message = ErrorTextGenericRef::oneArg(ref.name);
+    auto message = ErrorTextGenericRef::oneArg(ref.name);
 
     return err(TypeResolverArrayArgumentError{
         .code = TypeResolverArrayArgumentErrorCode::NOT_ONE_ARGUMENT,
@@ -156,10 +175,10 @@ TypeResolver::ResultElementTypeGiven TypeResolver::arrayArgument(const TypeRef &
   return ok(&ref.args[0]);
 }
 
-TypeResolver::ResultGenericClassUsed TypeResolver::classGeneric(const ClassDecl *cls,
-                                                                llvm::StringRef name) {
-  if (!cls->isGeneric()) {
-    std::string message = ErrorTextGenericRef::plainClass(name);
+TypeResolver::ResultGenericClassUsed TypeResolver::classGeneric(const ClassDecl *classDecl,
+                                                                llvm::StringRef name) const {
+  if (!classDecl->isGeneric()) {
+    auto message = ErrorTextGenericRef::plainClass(name);
 
     return err(TypeResolverClassGenericError{
         .code = TypeResolverClassGenericErrorCode::NOT_GENERIC,
@@ -167,13 +186,13 @@ TypeResolver::ResultGenericClassUsed TypeResolver::classGeneric(const ClassDecl 
     });
   }
 
-  return ok(cls);
+  return ok(classDecl);
 }
 
 TypeResolver::ResultGenericAliasUsed TypeResolver::aliasGeneric(const TypeAliasDecl *alias,
-                                                                llvm::StringRef name) {
+                                                                llvm::StringRef name) const {
   if (alias->typeParams.empty()) {
-    std::string message = ErrorTextGenericRef::plainAlias(name);
+    auto message = ErrorTextGenericRef::plainAlias(name);
 
     return err(TypeResolverAliasGenericError{
         .code = TypeResolverAliasGenericErrorCode::NOT_GENERIC,
@@ -184,9 +203,9 @@ TypeResolver::ResultGenericAliasUsed TypeResolver::aliasGeneric(const TypeAliasD
   return ok(alias);
 }
 
-TypeResolver::ResultTwoTypeArguments TypeResolver::descriptorArity(const TypeRef &ref) {
+TypeResolver::ResultTwoTypeArguments TypeResolver::descriptorArity(const TypeRef &ref) const {
   if (ref.args.size() != 2) {
-    std::string message = ErrorTextGenericRef::descriptor();
+    auto message = ErrorTextGenericRef::descriptor();
 
     return err(TypeResolverDescriptorArityError{
         .code = TypeResolverDescriptorArityErrorCode::NOT_TWO_ARGUMENTS,
@@ -197,9 +216,9 @@ TypeResolver::ResultTwoTypeArguments TypeResolver::descriptorArity(const TypeRef
   return ok(&ref);
 }
 
-TypeResolver::ResultParamTypesAsList TypeResolver::descriptorParams(const Type *params) {
+TypeResolver::ResultParamTypesAsList TypeResolver::descriptorParams(const Type *params) const {
   if (!params->isTuple() && !params->isListParam()) {
-    std::string message = ErrorTextGenericRef::paramList();
+    auto message = ErrorTextGenericRef::paramList();
 
     return err(TypeResolverDescriptorParamsError{
         .code = TypeResolverDescriptorParamsErrorCode::NOT_A_LIST,
@@ -210,10 +229,11 @@ TypeResolver::ResultParamTypesAsList TypeResolver::descriptorParams(const Type *
   return ok(params);
 }
 
-TypeResolver::ResultInstanceOfAClass TypeResolver::classInstance(const Type *cls) {
-  const Type *made = cls->isClassRef() ? ClassValueChecker::constructedBy(cls) : nullptr;
-  if (!made) {
-    std::string message = ErrorTextGenericRef::instanceOf(cls->name());
+TypeResolver::ResultInstanceOfAClass TypeResolver::classInstance(const Type *classType) const {
+  const Type *made =
+      classType->isClassRef() ? ClassValueChecker::constructedBy(classType) : nullptr;
+  if (made == nullptr) {
+    auto message = ErrorTextGenericRef::instanceOf(classType->name());
 
     return err(TypeResolverClassInstanceError{
         .code = TypeResolverClassInstanceErrorCode::NOT_A_CLASS,
@@ -224,9 +244,9 @@ TypeResolver::ResultInstanceOfAClass TypeResolver::classInstance(const Type *cls
   return ok(made);
 }
 
-TypeResolver::ResultArrayElementType TypeResolver::arrayElement(const Type *element) {
+TypeResolver::ResultArrayElementType TypeResolver::arrayElement(const Type *element) const {
   if (element->isVoid() || element->isUndefined()) {
-    std::string message = ErrorTextTypeShape::arrayOf(element->name());
+    auto message = ErrorTextTypeShape::arrayOf(element->name());
 
     return err(TypeResolverArrayElementError{
         .code = TypeResolverArrayElementErrorCode::NOT_SUPPORTED,
@@ -237,9 +257,9 @@ TypeResolver::ResultArrayElementType TypeResolver::arrayElement(const Type *elem
   return ok(element);
 }
 
-TypeResolver::ResultNonVoidUnionPart TypeResolver::unionPart(const Type *type) {
+TypeResolver::ResultNonVoidUnionPart TypeResolver::unionPart(const Type *type) const {
   if (type->isVoid()) {
-    std::string message = ErrorTextTypeShape::voidUnion();
+    auto message = ErrorTextTypeShape::voidUnion();
 
     return err(TypeResolverUnionPartError{
         .code = TypeResolverUnionPartErrorCode::VOID_MEMBER,
@@ -250,18 +270,19 @@ TypeResolver::ResultNonVoidUnionPart TypeResolver::unionPart(const Type *type) {
   return ok(type);
 }
 
-TypeResolver::ResultUnionIsSupported TypeResolver::unionAllowed(const Type *type, bool withNull) {
+TypeResolver::ResultUnionIsSupported TypeResolver::unionAllowed(const Type *type,
+                                                                bool withNull) const {
   if (withNull && !type->nonOptional()->isJson()) {
-    std::string message = ErrorTextTypeShape::nullUnion();
+    auto message = ErrorTextTypeShape::nullUnion();
 
     return err(TypeResolverUnionAllowedError{
         .code = TypeResolverUnionAllowedErrorCode::NULL_MEMBER,
         .message = message,
     });
   }
-  std::string problem = UnionSlots::unionProblem(type);
+  auto problem = UnionSlots::unionProblem(type);
   if (!problem.empty()) {
-    std::string message = ErrorTextTypeShape::noUnion(type->name(), problem);
+    auto message = ErrorTextTypeShape::noUnion(type->name(), problem);
 
     return err(TypeResolverUnionAllowedError{
         .code = TypeResolverUnionAllowedErrorCode::NOT_SUPPORTED,
@@ -272,9 +293,9 @@ TypeResolver::ResultUnionIsSupported TypeResolver::unionAllowed(const Type *type
   return ok(type);
 }
 
-TypeResolver::ResultRestParamIsArray TypeResolver::restParam(const Type *type) {
+TypeResolver::ResultRestParamIsArray TypeResolver::restParam(const Type *type) const {
   if (!type->isArray() && !type->isListParam() && !type->isTuple() && !type->isError()) {
-    std::string message = ErrorTextTypeShape::restArray();
+    auto message = ErrorTextTypeShape::restArray();
 
     return err(TypeResolverRestParamError{
         .code = TypeResolverRestParamErrorCode::NOT_AN_ARRAY,
@@ -285,9 +306,9 @@ TypeResolver::ResultRestParamIsArray TypeResolver::restParam(const Type *type) {
   return ok(type);
 }
 
-TypeResolver::ResultParamOrderIsKept TypeResolver::paramOrder(bool optionalBefore) {
+TypeResolver::ResultParamOrderIsKept TypeResolver::paramOrder(bool optionalBefore) const {
   if (optionalBefore) {
-    std::string message = ErrorTextTypeShape::paramOrder();
+    auto message = ErrorTextTypeShape::paramOrder();
 
     return err(TypeResolverParamOrderError{
         .code = TypeResolverParamOrderErrorCode::REQUIRED_AFTER_OPTIONAL,
@@ -298,9 +319,9 @@ TypeResolver::ResultParamOrderIsKept TypeResolver::paramOrder(bool optionalBefor
   return ok(optionalBefore);
 }
 
-TypeResolver::ResultTupleElementType TypeResolver::tupleElement(const Type *element) {
+TypeResolver::ResultTupleElementType TypeResolver::tupleElement(const Type *element) const {
   if (element->isListParam()) {
-    std::string message = ErrorTextTypeShape::typeList(element->name());
+    auto message = ErrorTextTypeShape::typeList(element->name());
 
     return err(TypeResolverTupleElementError{
         .code = TypeResolverTupleElementErrorCode::TYPE_LIST,
@@ -312,10 +333,11 @@ TypeResolver::ResultTupleElementType TypeResolver::tupleElement(const Type *elem
 }
 
 TypeResolver::ResultTupleSpreadJoins
-TypeResolver::spreadJoined(llvm::ArrayRef<const Type *> elements, const std::vector<bool> &spread) {
-  std::string why;
-  const Type *list = ArgumentLists::spreadTuple(elements, spread, why);
-  if (!list) {
+TypeResolver::spreadJoined(llvm::ArrayRef<const Type *> elements,
+                           const std::vector<bool> &spread) const {
+  auto why = std::string();
+  const auto *list = ArgumentLists::spreadTuple(elements, spread, why);
+  if (list == nullptr) {
     return err(TypeResolverSpreadJoinedError{
         .code = TypeResolverSpreadJoinedErrorCode::NOT_JOINED,
         .message = why,
@@ -326,9 +348,9 @@ TypeResolver::spreadJoined(llvm::ArrayRef<const Type *> elements, const std::vec
 }
 
 TypeResolver::ResultOverloadsAllowed
-TypeResolver::overloadAllowed(const std::vector<Overload> *overloads, llvm::StringRef name) {
-  if (!overloads) {
-    std::string message = ErrorTextTypeFields::signatures(name);
+TypeResolver::overloadAllowed(const std::vector<Overload> *overloads, llvm::StringRef name) const {
+  if (overloads == nullptr) {
+    auto message = ErrorTextTypeFields::signatures(name);
 
     return err(TypeResolverOverloadAllowedError{
         .code = TypeResolverOverloadAllowedErrorCode::NOT_AN_INTERFACE,
@@ -340,9 +362,9 @@ TypeResolver::overloadAllowed(const std::vector<Overload> *overloads, llvm::Stri
 }
 
 TypeResolver::ResultUniqueSignatures
-TypeResolver::newSignature(const Overload &overload, const Type *type, llvm::StringRef name) {
+TypeResolver::newSignature(const Overload &overload, const Type *type, llvm::StringRef name) const {
   if (llvm::is_contained(overload.signatures, type)) {
-    std::string message = ErrorTextTypeFields::duplicate(type->name(), name);
+    auto message = ErrorTextTypeFields::duplicate(type->name(), name);
 
     return err(TypeResolverNewSignatureError{
         .code = TypeResolverNewSignatureErrorCode::DUPLICATE_SIGNATURE,
@@ -354,10 +376,9 @@ TypeResolver::newSignature(const Overload &overload, const Type *type, llvm::Str
 }
 
 TypeResolver::ResultUniqueFieldNames TypeResolver::newField(llvm::ArrayRef<Field> fields,
-                                                            llvm::StringRef name) {
-  bool isTaken = llvm::any_of(fields, [&](const Field &field) { return field.name == name; });
-  if (isTaken) {
-    std::string message = ErrorTextTypeFields::sameField(name);
+                                                            llvm::StringRef name) const {
+  if (this->hasFieldNamed(fields, name)) {
+    auto message = ErrorTextTypeFields::sameField(name);
 
     return err(TypeResolverNewFieldError{
         .code = TypeResolverNewFieldErrorCode::DUPLICATE_FIELD,
@@ -368,23 +389,51 @@ TypeResolver::ResultUniqueFieldNames TypeResolver::newField(llvm::ArrayRef<Field
   return ok(name);
 }
 
-bool TypeResolver::boundParam(const TypeRef &ref) const {
+bool TypeResolver::hasFieldNamed(llvm::ArrayRef<Field> fields, llvm::StringRef name) const {
+  for (const Field &field : fields) {
+    if (field.name == name) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool TypeResolver::isBoundParam(const TypeRef &ref) const {
   if (ref.kind() != TypeRefKind::NAME_REF) {
     return false;
   }
   auto *bound = dyn_cast_or_null<TypeAliasDecl>(this->typeDeclarer->lookupType(ref.name));
 
-  return bound && bound->boundParam;
+  return bound != nullptr && bound->boundParam;
 }
 
-const Type *TypeResolver::resolveType(const TypeRef &ref, bool allowVoid) {
-  const Type *type = this->resolveTypeInner(ref);
-  if (type->isVoid() && !allowVoid && this->boundParam(ref)) {
+const Type *TypeResolver::resolveType(const TypeRef &ref) {
+  const auto *type = this->resolveTypeInner(ref);
+  if (type->isVoid() && this->isBoundParam(ref)) {
     return Type::undefinedTy();
   }
-  ResultStandaloneUsable usable = TypeResolver::standalone(type, allowVoid);
-  if (usable.isErr()) {
-    this->state.getDiagnostics().error(ref.loc, usable.error().message);
+  auto nonVoid = this->checkNotVoid(type);
+  if (nonVoid.isErr()) {
+    this->state.getDiagnostics().error(ref.loc, nonVoid.error().message);
+
+    return Type::error();
+  }
+
+  return this->standaloneType(ref, type);
+}
+
+const Type *TypeResolver::resolveTypeOrVoid(const TypeRef &ref) {
+  const auto *type = this->resolveTypeInner(ref);
+
+  return this->standaloneType(ref, type);
+}
+
+const Type *TypeResolver::standaloneType(const TypeRef &ref, const Type *type) {
+  auto defined = this->checkNotUndefined(type);
+  if (defined.isErr()) {
+    this->state.getDiagnostics().error(ref.loc, defined.error().message);
+
     return Type::error();
   }
 
@@ -402,12 +451,9 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
     case TypeRefKind::UNION_REF:
       return this->resolveUnion(ref);
     case TypeRefKind::LITERAL_REF:
-      return TypeResolver::literalType(ref);
-    case TypeRefKind::PREDICATE_REF: {
-      std::string message = ErrorTextTypeShape::predicate(ref.name);
-      this->state.getDiagnostics().error(ref.loc, message);
-      return Type::error();
-    }
+      return this->literalType(ref);
+    case TypeRefKind::PREDICATE_REF:
+      return this->rejectPredicate(ref);
     case TypeRefKind::KEY_OF_REF:
     case TypeRefKind::INDEXED_REF:
     case TypeRefKind::TYPE_OF_REF:
@@ -423,27 +469,37 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
       return this->resolveInfer(ref);
     case TypeRefKind::FUNCTION_REF:
       return this->resolveFunctionType(ref);
-    case TypeRefKind::OBJECT_REF: {
-      std::vector<Field> fields = this->resolveFields(ref);
-      return Type::object(fields);
-    }
+    case TypeRefKind::OBJECT_REF:
+      return this->resolveObject(ref);
     case TypeRefKind::TUPLE_REF:
       return this->resolveTuple(ref);
   }
   llvm_unreachable("unknown type reference");
 }
 
-const Type *TypeResolver::instantiate(ClassDecl *cls, std::vector<const Type *> args,
+const Type *TypeResolver::rejectPredicate(const TypeRef &ref) {
+  auto message = ErrorTextTypeShape::predicate(ref.name);
+  this->state.getDiagnostics().error(ref.loc, message);
+
+  return Type::error();
+}
+
+const Type *TypeResolver::resolveObject(const TypeRef &ref) {
+  auto fields = this->resolveFields(ref);
+
+  return Type::object(fields);
+}
+
+const Type *TypeResolver::instantiate(ClassDecl *classDecl, std::vector<const Type *> args,
                                       llvm::SMLoc loc) {
-  GenericClassInstantiator::ResultClassMade made =
-      this->genericClassInstantiator->instantiateClass(cls, std::move(args), loc);
+  auto made = this->genericClassInstantiator->instantiateClass(classDecl, std::move(args), loc);
   if (made.isOk()) {
     return made.value()->type;
   }
   GenericClassInstantiatorInstantiateClassErrorCode code = made.error().code;
   if (code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
     bool isEndless = code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES;
-    llvm::SMLoc at = isEndless ? cls->loc() : loc;
+    llvm::SMLoc at = isEndless ? classDecl->loc() : loc;
     this->state.getDiagnostics().error(at, made.error().message);
   }
 
@@ -451,32 +507,34 @@ const Type *TypeResolver::instantiate(ClassDecl *cls, std::vector<const Type *> 
 }
 
 const Type *TypeResolver::resolveDeclared(const TypeRef &ref, Stmt *decl) {
-  if (auto *alias = dyn_cast<TypeAliasDecl>(decl)) {
-    if (alias->typeParams.empty()) {
-      return this->typeDeclarer->resolveAlias(alias);
-    }
+  auto *alias = dyn_cast<TypeAliasDecl>(decl);
+  auto *classDecl = dyn_cast<ClassDecl>(decl);
+
+  if (alias != nullptr && alias->typeParams.empty()) {
+    return this->typeDeclarer->resolveAlias(alias);
+  }
+  if (alias != nullptr) {
     return this->aliasInstantiator->instantiateAlias(alias, {}, ref.loc);
   }
-  if (auto *cls = dyn_cast<ClassDecl>(decl)) {
-    if (cls->isGeneric()) {
-      return this->instantiate(cls, {}, ref.loc);
-    }
-    return ClassValueChecker::finalClass(cls)->type;
+  if (classDecl != nullptr && classDecl->isGeneric()) {
+    return this->instantiate(classDecl, {}, ref.loc);
+  }
+  if (classDecl != nullptr) {
+    return this->classValueChecker->finalClass(classDecl)->type;
   }
 
   return this->typeDeclarer->enumType(cast<EnumDecl>(decl));
 }
 
 TypeResolver::ResultIntlTypeResolved TypeResolver::intlType(llvm::StringRef name) const {
-  auto *locale = name == "Intl.Locale" ? dyn_cast_or_null<ClassDecl>(this->typeDeclarer->lookupType(
-                                             LibraryModuleNames::kIntlLocaleName))
-                                       : nullptr;
-  if (locale) {
-    return ok(ClassValueChecker::finalClass(locale)->type);
+  ClassDecl *locale = this->localeClass(name);
+  if (locale != nullptr) {
+    return ok(this->classValueChecker->finalClass(locale)->type);
   }
-  const Type *intl = IntlChecker::intlTypeNamed(name.drop_front(5));
-  if (!intl) {
-    std::string message = ErrorTextTypeName::notFound(name);
+  auto shortName = name.drop_front(kIntlPrefix.size());
+  const auto *intl = this->intlChecker->intlTypeNamed(shortName);
+  if (intl == nullptr) {
+    auto message = ErrorTextTypeName::notFound(name);
 
     return err(TypeResolverIntlTypeError{
         .code = TypeResolverIntlTypeErrorCode::NOT_FOUND,
@@ -487,9 +545,18 @@ TypeResolver::ResultIntlTypeResolved TypeResolver::intlType(llvm::StringRef name
   return ok(intl);
 }
 
+ClassDecl *TypeResolver::localeClass(llvm::StringRef name) const {
+  if (name != kIntlLocaleType) {
+    return nullptr;
+  }
+  auto *decl = this->typeDeclarer->lookupType(LibraryModuleNames::kIntlLocaleName);
+
+  return dyn_cast_or_null<ClassDecl>(decl);
+}
+
 const Type *TypeResolver::builtinNamed(llvm::StringRef name) const {
   if (TypeNameTable::isName(name, TypeName::TEMPLATE_STRINGS_ARRAY)) {
-    const Type *text = Type::string();
+    const auto *text = Type::string();
     return Type::array(text);
   }
   if (TypeNameTable::isName(name, TypeName::REG_EXP)) {
@@ -504,20 +571,20 @@ const Type *TypeResolver::builtinNamed(llvm::StringRef name) const {
   if (TypeNameTable::isName(name, TypeName::IMMEDIATE)) {
     return Type::immediate();
   }
-  if (const Type *bytes = BytesChecker::bytesTypeNamed(name)) {
+  const auto *bytes = this->bytesChecker->bytesTypeNamed(name);
+  if (bytes != nullptr) {
     return bytes;
   }
-  const NodeName *node = this->builtinModuleChecker->nodeName(name);
-  bool isReadline =
-      node &&
-      (node->module == NodeModule::Readline || node->module == NodeModule::ReadlinePromises) &&
-      node->name == "Interface";
-  if (isReadline) {
-    Type::Runtime runtime = node->module == NodeModule::Readline ? Type::Runtime::Readline
-                                                                 : Type::Runtime::ReadlinePromises;
-    return Type::runtimeObject(runtime);
+  const auto *node = this->builtinModuleChecker->nodeName(name);
+  bool isInterface = node != nullptr && node->name == kReadlineInterface;
+  if (isInterface && node->module == NodeModule::Readline) {
+    return Type::runtimeObject(Type::Runtime::Readline);
   }
-  if (const Type *crypto = this->cryptoChecker->cryptoTypeNamed(name)) {
+  if (isInterface && node->module == NodeModule::ReadlinePromises) {
+    return Type::runtimeObject(Type::Runtime::ReadlinePromises);
+  }
+  const auto *crypto = this->cryptoChecker->cryptoTypeNamed(name);
+  if (crypto != nullptr) {
     return crypto;
   }
   if (TypeNameTable::isName(name, TypeName::REG_EXP_MATCH_ARRAY)) {
@@ -528,14 +595,14 @@ const Type *TypeResolver::builtinNamed(llvm::StringRef name) const {
 }
 
 const Type *TypeResolver::resolveDict(const TypeRef &ref) {
-  DictChecker::ResultDictTypeResolved dict = this->dictChecker->resolveDictType(ref);
+  auto dict = this->dictChecker->resolveDictType(ref);
   if (dict.isOk()) {
     return dict.value();
   }
   if (dict.error().code == DictCheckerResolveDictTypeErrorCode::NOT_A_DICT) {
     return nullptr;
   }
-  bool isOnKey = DictChecker::keyArgument(dict.error().code);
+  bool isOnKey = this->dictChecker->keyArgument(dict.error().code);
   llvm::SMLoc at = isOnKey ? ref.args[0].loc : ref.loc;
   this->state.getDiagnostics().error(at, dict.error().message);
 
@@ -546,7 +613,7 @@ std::string TypeResolver::missingText(llvm::StringRef name) const {
   if (TypeNameTable::isName(name, TypeName::ARRAY)) {
     return ErrorTextTypeName::arrayArg();
   }
-  std::optional<TypeName> result = this->resultTypes->findResultType(name);
+  auto result = this->resultTypes->findResultType(name);
   if (result.has_value()) {
     return ErrorTextTypeName::resultArgs(name);
   }
@@ -573,20 +640,20 @@ std::string TypeResolver::missingText(llvm::StringRef name) const {
 
 const Type *TypeResolver::missingType(const TypeRef &ref) {
   if (TypeNameTable::isName(ref.name, TypeName::BIGINT)) {
-    std::string what = ErrorTextTypeName::bigintType();
-    std::string bigint = ErrorTextBigInt::none(what);
+    auto what = ErrorTextTypeName::bigintType();
+    auto bigint = ErrorTextBigInt::none(what);
     this->state.getDiagnostics().error(ref.loc, bigint);
     return Type::error();
   }
   bool isBigintArray = TypeNameTable::isName(ref.name, TypeName::BIG_INT64_ARRAY) ||
                        TypeNameTable::isName(ref.name, TypeName::BIG_UINT64_ARRAY);
   if (isBigintArray) {
-    std::string what = ErrorTextTypeName::bigintName(ref.name);
-    std::string bigint = ErrorTextBigInt::none(what);
+    auto what = ErrorTextTypeName::bigintName(ref.name);
+    auto bigint = ErrorTextBigInt::none(what);
     this->state.getDiagnostics().error(ref.loc, bigint);
     return Type::error();
   }
-  std::string message = this->missingText(ref.name);
+  auto message = this->missingText(ref.name);
   this->state.getDiagnostics().error(ref.loc, message);
 
   return Type::error();
@@ -596,64 +663,94 @@ const Type *TypeResolver::resolveName(const TypeRef &ref) {
   if (ref.name.empty()) {
     return Type::error();
   }
-  if (const Type *type = Type::fromName(ref.name)) {
+  const auto *type = Type::fromName(ref.name);
+  if (type != nullptr) {
     return type;
   }
   if (TypeNameTable::isName(ref.name, TypeName::NEVER) &&
-      !this->typeDeclarer->lookupType(ref.name)) {
+      this->typeDeclarer->lookupType(ref.name) == nullptr) {
     return Type::never();
   }
-  if (Stmt *decl = this->typeDeclarer->lookupType(ref.name)) {
+  auto *decl = this->typeDeclarer->lookupType(ref.name);
+  if (decl != nullptr) {
     return this->resolveDeclared(ref, decl);
   }
   auto [owner, member] = ref.name.split('.');
-  auto *declaredEnum =
-      member.empty() ? nullptr : dyn_cast_or_null<EnumDecl>(this->typeDeclarer->lookupType(owner));
-  if (declaredEnum) {
-    this->typeDeclarer->resolveEnum(declaredEnum);
-    ResultEnumMemberExists found = TypeResolver::enumMember(declaredEnum, owner, member);
-    if (found.isErr()) {
-      this->state.getDiagnostics().error(ref.loc, found.error().message);
-      return Type::error();
-    }
-    const EnumMember *value = found.value();
-    if (value->isString) {
-      return Type::stringLiteral(value->text);
-    }
-    return Type::numberLiteral(double(value->number), Type::intTy());
+  EnumDecl *declaredEnum = this->enumOwning(owner, member);
+  if (declaredEnum != nullptr) {
+    return this->resolveEnumMember(ref, declaredEnum);
   }
-  if (ref.name.starts_with("Intl.")) {
-    ResultIntlTypeResolved intl = this->intlType(ref.name);
-    if (intl.isErr()) {
-      this->state.getDiagnostics().error(ref.loc, intl.error().message);
-      return Type::error();
-    }
-    return intl.value();
+  if (ref.name.starts_with(kIntlPrefix)) {
+    return this->resolveIntl(ref);
   }
-  if (const Type *builtin = this->builtinNamed(ref.name)) {
+  const auto *builtin = this->builtinNamed(ref.name);
+  if (builtin != nullptr) {
     return builtin;
   }
-  if (const Type *dict = this->resolveDict(ref)) {
+  const auto *dict = this->resolveDict(ref);
+  if (dict != nullptr) {
     return dict;
   }
   if (TypeNameTable::isName(ref.name, TypeName::CONSTRUCTOR)) {
-    const Type *object = Type::anyObject();
+    const auto *object = Type::anyObject();
     return Type::constructorOf(object);
   }
   if (TypeNameTable::isName(ref.name, TypeName::CONSTRUCTOR_ARGS)) {
-    ClassValueChecker::ResultConstructorArgs args = this->classValueChecker->constructorArgs();
-    if (args.isErr()) {
-      this->state.getDiagnostics().error(ref.loc, args.error().message);
-      return Type::error();
-    }
-    return args.value();
+    return this->resolveConstructorArgs(ref);
   }
 
   return this->missingType(ref);
 }
 
+EnumDecl *TypeResolver::enumOwning(llvm::StringRef owner, llvm::StringRef member) const {
+  if (member.empty()) {
+    return nullptr;
+  }
+
+  return dyn_cast_or_null<EnumDecl>(this->typeDeclarer->lookupType(owner));
+}
+
+const Type *TypeResolver::resolveEnumMember(const TypeRef &ref, EnumDecl *declaredEnum) {
+  auto [owner, member] = ref.name.split('.');
+  this->typeDeclarer->resolveEnum(declaredEnum);
+  auto found = this->enumMember(declaredEnum, owner, member);
+  if (found.isErr()) {
+    this->state.getDiagnostics().error(ref.loc, found.error().message);
+
+    return Type::error();
+  }
+  const EnumMember *value = found.value();
+  if (value->isString) {
+    return Type::stringLiteral(value->text);
+  }
+
+  return Type::numberLiteral(double(value->number), Type::intTy());
+}
+
+const Type *TypeResolver::resolveIntl(const TypeRef &ref) {
+  auto intl = this->intlType(ref.name);
+  if (intl.isErr()) {
+    this->state.getDiagnostics().error(ref.loc, intl.error().message);
+
+    return Type::error();
+  }
+
+  return intl.value();
+}
+
+const Type *TypeResolver::resolveConstructorArgs(const TypeRef &ref) {
+  auto args = this->classValueChecker->constructorArgs();
+  if (args.isErr()) {
+    this->state.getDiagnostics().error(ref.loc, args.error().message);
+
+    return Type::error();
+  }
+
+  return args.value();
+}
+
 const Type *TypeResolver::resolveArrayGeneric(const TypeRef &ref) {
-  ResultElementTypeGiven given = TypeResolver::arrayArgument(ref);
+  auto given = this->arrayArgument(ref);
   if (given.isErr()) {
     this->state.getDiagnostics().error(ref.loc, given.error().message);
     return Type::error();
@@ -666,34 +763,34 @@ const Type *TypeResolver::resolveArrayGeneric(const TypeRef &ref) {
   return this->resolveTypeInner(array);
 }
 
-const Type *TypeResolver::resolveGenericClass(const TypeRef &ref, ClassDecl *cls) {
-  std::vector<const Type *> args;
+const Type *TypeResolver::resolveGenericClass(const TypeRef &ref, ClassDecl *classDecl) {
+  auto args = std::vector<const Type *>();
   for (const TypeRef &arg : ref.args) {
-    const Type *type = this->resolveType(arg, true);
+    const auto *type = this->resolveTypeOrVoid(arg);
     if (type->isError()) {
       return type;
     }
     args.push_back(type);
   }
-  ResultGenericClassUsed generic = TypeResolver::classGeneric(cls, ref.name);
+  auto generic = this->classGeneric(classDecl, ref.name);
   if (generic.isErr()) {
     this->state.getDiagnostics().error(ref.loc, generic.error().message);
     return Type::error();
   }
 
-  return this->instantiate(cls, std::move(args), ref.loc);
+  return this->instantiate(classDecl, std::move(args), ref.loc);
 }
 
 const Type *TypeResolver::resolveGenericAlias(const TypeRef &ref, TypeAliasDecl *alias) {
-  std::vector<const Type *> args;
+  auto args = std::vector<const Type *>();
   for (const TypeRef &arg : ref.args) {
-    const Type *type = this->conditionalTypes->resolveTypeArgument(arg);
+    const auto *type = this->conditionalTypes->resolveTypeArgument(arg);
     if (type->isError()) {
       return type;
     }
     args.push_back(type);
   }
-  ResultGenericAliasUsed generic = TypeResolver::aliasGeneric(alias, ref.name);
+  auto generic = this->aliasGeneric(alias, ref.name);
   if (generic.isErr()) {
     this->state.getDiagnostics().error(ref.loc, generic.error().message);
     return Type::error();
@@ -703,8 +800,7 @@ const Type *TypeResolver::resolveGenericAlias(const TypeRef &ref, TypeAliasDecl 
 }
 
 const Type *TypeResolver::resolveIterator(const TypeRef &ref) {
-  GeneratorChecker::ResultResolvedIterator iterator =
-      this->generatorChecker->resolveIteratorType(ref);
+  auto iterator = this->generatorChecker->resolveIteratorType(ref);
   if (iterator.isOk()) {
     return iterator.value();
   }
@@ -717,7 +813,7 @@ const Type *TypeResolver::resolveIterator(const TypeRef &ref) {
 }
 
 const Type *TypeResolver::resolvePromise(const TypeRef &ref) {
-  AsyncChecker::ResultPromiseTypeRef promise = this->asyncChecker->resolvePromiseType(ref);
+  auto promise = this->asyncChecker->resolvePromiseType(ref);
   if (promise.isOk()) {
     return promise.value();
   }
@@ -730,7 +826,7 @@ const Type *TypeResolver::resolvePromise(const TypeRef &ref) {
 }
 
 const Type *TypeResolver::resolveUtility(const TypeRef &ref) {
-  UtilityTypes::ResultUtilityApplied utility = this->utilityTypes->resolveUtilityType(ref);
+  auto utility = this->utilityTypes->resolveUtilityType(ref);
   if (utility.isOk()) {
     return utility.value();
   }
@@ -743,17 +839,17 @@ const Type *TypeResolver::resolveUtility(const TypeRef &ref) {
 }
 
 const Type *TypeResolver::resolveDescriptor(const TypeRef &ref) {
-  ResultTwoTypeArguments arity = TypeResolver::descriptorArity(ref);
+  auto arity = this->descriptorArity(ref);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(ref.loc, arity.error().message);
     return Type::error();
   }
-  const Type *params = this->resolveType(ref.args[0], false);
-  const Type *returned = this->resolveType(ref.args[1], true);
+  const auto *params = this->resolveType(ref.args[0]);
+  const auto *returned = this->resolveTypeOrVoid(ref.args[1]);
   if (params->isError() || returned->isError()) {
     return Type::error();
   }
-  ResultParamTypesAsList list = TypeResolver::descriptorParams(params);
+  auto list = this->descriptorParams(params);
   if (list.isErr()) {
     this->state.getDiagnostics().error(ref.args[0].loc, list.error().message);
     return Type::error();
@@ -763,8 +859,7 @@ const Type *TypeResolver::resolveDescriptor(const TypeRef &ref) {
 }
 
 const Type *TypeResolver::resolveConstructor(const TypeRef &ref) {
-  ClassValueChecker::ResultConstructorType constructor =
-      this->classValueChecker->resolveConstructorType(ref);
+  auto constructor = this->classValueChecker->resolveConstructorType(ref);
   if (constructor.isOk()) {
     return constructor.value();
   }
@@ -777,11 +872,11 @@ const Type *TypeResolver::resolveConstructor(const TypeRef &ref) {
 }
 
 const Type *TypeResolver::resolveInstanceType(const TypeRef &ref) {
-  const Type *cls = this->resolveType(ref.args[0], false);
-  if (cls->isError()) {
-    return cls;
+  const auto *classType = this->resolveType(ref.args[0]);
+  if (classType->isError()) {
+    return classType;
   }
-  ResultInstanceOfAClass made = TypeResolver::classInstance(cls);
+  auto made = this->classInstance(classType);
   if (made.isErr()) {
     this->state.getDiagnostics().error(ref.args[0].loc, made.error().message);
     return Type::error();
@@ -791,43 +886,46 @@ const Type *TypeResolver::resolveInstanceType(const TypeRef &ref) {
 }
 
 const Type *TypeResolver::resolveGeneric(const TypeRef &ref) {
-  const Type *bytes = BytesChecker::bytesTypeNamed(ref.name);
-  if (bytes && bytes->isTypedArray() && !this->typeDeclarer->lookupType(ref.name)) {
-    ResultArrayBufferGiven buffer = TypeResolver::bufferArgument(ref, bytes);
-    if (buffer.isErr()) {
-      this->state.getDiagnostics().error(ref.loc, buffer.error().message);
-      return Type::error();
-    }
-    return buffer.value();
+  auto *decl = this->typeDeclarer->lookupType(ref.name);
+  auto *classDecl = dyn_cast_or_null<ClassDecl>(decl);
+  auto *alias = dyn_cast_or_null<TypeAliasDecl>(decl);
+  const auto *bytes = this->bytesChecker->bytesTypeNamed(ref.name);
+  bool isTypedArray = bytes != nullptr && bytes->isTypedArray() && decl == nullptr;
+  if (isTypedArray) {
+    return this->resolveTypedArray(ref, bytes);
   }
-  std::optional<TypeName> result = this->resultTypes->findResultType(ref.name);
+  auto result = this->resultTypes->findResultType(ref.name);
   if (result.has_value()) {
     return this->resultTypes->resolveResultType(ref, *result);
   }
-  const TypeNameInfo *builtin = TypeNameTable::find(ref.name);
+  const auto *builtin = TypeNameTable::find(ref.name);
   bool isArray = builtin != nullptr && builtin->form.is<ArrayTypeName>();
   if (isArray) {
     return this->resolveArrayGeneric(ref);
   }
-  if (auto *cls = dyn_cast_or_null<ClassDecl>(this->typeDeclarer->lookupType(ref.name))) {
-    return this->resolveGenericClass(ref, cls);
+  if (classDecl != nullptr) {
+    return this->resolveGenericClass(ref, classDecl);
   }
-  if (auto *alias = dyn_cast_or_null<TypeAliasDecl>(this->typeDeclarer->lookupType(ref.name))) {
+  if (alias != nullptr) {
     return this->resolveGenericAlias(ref, alias);
   }
-  if (const Type *iterator = this->resolveIterator(ref)) {
+  const auto *iterator = this->resolveIterator(ref);
+  if (iterator != nullptr) {
     return iterator;
   }
-  if (const Type *dict = this->resolveDict(ref)) {
+  const auto *dict = this->resolveDict(ref);
+  if (dict != nullptr) {
     return dict;
   }
-  if (const Type *promise = this->resolvePromise(ref)) {
+  const auto *promise = this->resolvePromise(ref);
+  if (promise != nullptr) {
     return promise;
   }
   if (TypeNameTable::isName(ref.name, TypeName::METHOD_DESCRIPTOR)) {
     return this->resolveDescriptor(ref);
   }
-  if (const Type *utility = this->resolveUtility(ref)) {
+  const auto *utility = this->resolveUtility(ref);
+  if (utility != nullptr) {
     return utility;
   }
   if (TypeNameTable::isName(ref.name, TypeName::CONSTRUCTOR)) {
@@ -836,15 +934,26 @@ const Type *TypeResolver::resolveGeneric(const TypeRef &ref) {
   if (TypeNameTable::isName(ref.name, TypeName::INSTANCE_TYPE) && ref.args.size() == 1) {
     return this->resolveInstanceType(ref);
   }
-  std::string message = ErrorTextGenericRef::noSupport(ref.name);
+  auto message = ErrorTextGenericRef::noSupport(ref.name);
   this->state.getDiagnostics().error(ref.loc, message);
 
   return Type::error();
 }
 
+const Type *TypeResolver::resolveTypedArray(const TypeRef &ref, const Type *bytes) {
+  auto buffer = this->bufferArgument(ref, bytes);
+  if (buffer.isErr()) {
+    this->state.getDiagnostics().error(ref.loc, buffer.error().message);
+
+    return Type::error();
+  }
+
+  return buffer.value();
+}
+
 const Type *TypeResolver::resolveArray(const TypeRef &ref) {
-  const Type *element = this->resolveTypeInner(ref.args[0]);
-  ResultArrayElementType allowed = TypeResolver::arrayElement(element);
+  const auto *element = this->resolveTypeInner(ref.args[0]);
+  auto allowed = this->arrayElement(element);
   if (allowed.isErr()) {
     this->state.getDiagnostics().error(ref.loc, allowed.error().message);
     return Type::error();
@@ -855,26 +964,20 @@ const Type *TypeResolver::resolveArray(const TypeRef &ref) {
 
 const Type *TypeResolver::resolveUnion(const TypeRef &ref) {
   bool isWithNull = false;
-  std::vector<const Type *> members;
+  auto members = std::vector<const Type *>();
   for (const TypeRef &member : ref.args) {
-    if (member.kind() == TypeRefKind::NAME_REF &&
-        TypeNameTable::isName(member.name, TypeName::NULL_TYPE)) {
+    if (this->isNullRef(member)) {
       isWithNull = true;
-      continue;
+    } else {
+      const Type *type = this->resolveUnionMember(ref, member);
+      if (type->isError()) {
+        return type;
+      }
+      members.push_back(type);
     }
-    const Type *type = this->resolveTypeInner(member);
-    if (type->isError()) {
-      return type;
-    }
-    ResultNonVoidUnionPart part = TypeResolver::unionPart(type);
-    if (part.isErr()) {
-      this->state.getDiagnostics().error(ref.loc, part.error().message);
-      return Type::error();
-    }
-    members.push_back(type);
   }
-  const Type *type = Type::unionOf(members);
-  ResultUnionIsSupported supported = TypeResolver::unionAllowed(type, isWithNull);
+  const auto *type = Type::unionOf(members);
+  auto supported = this->unionAllowed(type, isWithNull);
   if (supported.isErr()) {
     this->state.getDiagnostics().error(ref.loc, supported.error().message);
     return Type::error();
@@ -883,33 +986,56 @@ const Type *TypeResolver::resolveUnion(const TypeRef &ref) {
   return type;
 }
 
+bool TypeResolver::isNullRef(const TypeRef &ref) const {
+  return ref.kind() == TypeRefKind::NAME_REF &&
+         TypeNameTable::isName(ref.name, TypeName::NULL_TYPE);
+}
+
+const Type *TypeResolver::resolveUnionMember(const TypeRef &ref, const TypeRef &member) {
+  const auto *type = this->resolveTypeInner(member);
+  if (type->isError()) {
+    return type;
+  }
+  auto part = this->unionPart(type);
+  if (part.isErr()) {
+    this->state.getDiagnostics().error(ref.loc, part.error().message);
+
+    return Type::error();
+  }
+
+  return type;
+}
+
 const Type *TypeResolver::resolveOperator(const TypeRef &ref) {
-  TypeOperators::ResultTypeOpResolved resolved = this->typeOperators->resolveTypeOp(ref);
+  auto resolved = this->typeOperators->resolveTypeOp(ref);
   if (resolved.isOk()) {
     return resolved.value();
   }
-  llvm::SMLoc at = ref.loc;
-  switch (resolved.error().code) {
-    case TypeOperatorsResolveTypeOpErrorCode::RENAME_NOT_STRING:
-      at = ref.args[2].loc;
-      break;
-    case TypeOperatorsResolveTypeOpErrorCode::KEYS_NOT_STRINGS:
-      at = ref.args[0].loc;
-      break;
-    case TypeOperatorsResolveTypeOpErrorCode::NOT_AN_OBJECT_TYPE:
-    case TypeOperatorsResolveTypeOpErrorCode::NO_SUCH_MEMBER:
-    case TypeOperatorsResolveTypeOpErrorCode::TYPE_OF_UNKNOWN:
-    case TypeOperatorsResolveTypeOpErrorCode::NO_SUCH_FIELD:
-      break;
-  }
+  auto at = this->operatorErrorLoc(ref, resolved.error().code);
   this->state.getDiagnostics().error(at, resolved.error().message);
 
   return Type::error();
 }
 
+llvm::SMLoc TypeResolver::operatorErrorLoc(const TypeRef &ref,
+                                           TypeOperatorsResolveTypeOpErrorCode code) const {
+  switch (code) {
+    case TypeOperatorsResolveTypeOpErrorCode::RENAME_NOT_STRING:
+      return ref.args[2].loc;
+    case TypeOperatorsResolveTypeOpErrorCode::KEYS_NOT_STRINGS:
+      return ref.args[0].loc;
+    case TypeOperatorsResolveTypeOpErrorCode::NOT_AN_OBJECT_TYPE:
+    case TypeOperatorsResolveTypeOpErrorCode::NO_SUCH_MEMBER:
+    case TypeOperatorsResolveTypeOpErrorCode::TYPE_OF_UNKNOWN:
+    case TypeOperatorsResolveTypeOpErrorCode::NO_SUCH_FIELD:
+      return ref.loc;
+  }
+
+  return ref.loc;
+}
+
 const Type *TypeResolver::resolveIntersection(const TypeRef &ref) {
-  ConditionalTypes::ResultIntersectionJoined joined =
-      this->conditionalTypes->resolveIntersection(ref);
+  auto joined = this->conditionalTypes->resolveIntersection(ref);
   if (joined.isErr()) {
     this->state.getDiagnostics().error(ref.loc, joined.error().message);
     return Type::error();
@@ -920,8 +1046,9 @@ const Type *TypeResolver::resolveIntersection(const TypeRef &ref) {
 
 TypeResolver::ResultInferTypeBinding TypeResolver::inferBinding(const TypeRef &ref) const {
   auto *binding = dyn_cast_or_null<TypeAliasDecl>(this->typeDeclarer->lookupType(ref.name));
-  if (!this->state.getTypeContext().isInsideExtendsClause() || !binding || !binding->resolved) {
-    std::string message = ErrorTextTypeShape::inferOnly();
+  if (!this->state.getTypeContext().isInsideExtendsClause() || binding == nullptr ||
+      binding->resolved == nullptr) {
+    auto message = ErrorTextTypeShape::inferOnly();
 
     return err(TypeResolverInferBindingError{
         .code = TypeResolverInferBindingErrorCode::OUTSIDE_EXTENDS,
@@ -933,7 +1060,7 @@ TypeResolver::ResultInferTypeBinding TypeResolver::inferBinding(const TypeRef &r
 }
 
 const Type *TypeResolver::resolveInfer(const TypeRef &ref) {
-  ResultInferTypeBinding binding = this->inferBinding(ref);
+  auto binding = this->inferBinding(ref);
   if (binding.isErr()) {
     this->state.getDiagnostics().error(ref.loc, binding.error().message);
     return Type::error();
@@ -943,59 +1070,105 @@ const Type *TypeResolver::resolveInfer(const TypeRef &ref) {
 }
 
 const Type *TypeResolver::resolveFunctionType(const TypeRef &ref) {
-  std::vector<const Type *> params;
-  size_t minArgs = 0;
-  bool isOptional = false;
-  bool isValid = true;
-  size_t count = ref.args.size() - 1;
-  bool hasThis = count > 0 && !ref.names().empty() && ref.names()[0] == "this" &&
-                 !ref.optional()[0] && !(ref.rest() && count == 1);
-  for (size_t index = 0; index < count; ++index) {
-    bool hasRest = ref.rest() && index + 1 == count;
-    this->state.getTypeContext().enterListContext(hasRest);
-    const Type *type = this->resolveType(ref.args[index], false);
-    this->state.getTypeContext().leaveListContext();
-    isValid &= !type->isError();
-    if (hasRest) {
-      ResultRestParamIsArray list = TypeResolver::restParam(type);
-      if (list.isErr()) {
-        this->state.getDiagnostics().error(ref.args[index].loc, list.error().message);
-        isValid = false;
-      }
-    } else if (ref.optional()[index]) {
-      type = Type::optional(type);
-      isOptional = true;
-    } else {
-      ResultParamOrderIsKept order = TypeResolver::paramOrder(isOptional);
-      if (order.isErr()) {
-        this->state.getDiagnostics().error(ref.args[index].loc, order.error().message);
-        isValid = false;
-      }
-      minArgs = index + 1;
-    }
-    params.push_back(type);
-  }
-  const TypeRef &returned = ref.args.back();
-  bool isPredicate = returned.kind() == TypeRefKind::PREDICATE_REF;
-  const Type *returnType = isPredicate ? Type::boolTy() : this->resolveType(returned, true);
-  if (isPredicate && returned.asserts()) {
-    const Type *type = returned.args.empty() ? nullptr : this->resolveType(returned.args[0], false);
-    std::string shown = returned.name.str() + (type ? " is " + type->name().str() : "");
-    std::string message = ErrorTextAsserts::notAllowed(shown, type != nullptr, "");
-    this->state.getDiagnostics().error(returned.loc, message);
-    returnType = Type::error();
-  }
-  if (!isValid || returnType->isError()) {
+  auto params = this->resolveParams(ref);
+  const Type *returnType = this->resolveReturned(ref.args.back());
+  if (!params.isValid || returnType->isError()) {
     return Type::error();
   }
+  bool hasThis = this->hasThisParam(ref);
 
-  return Type::function(params, minArgs, ref.rest(), returnType, hasThis);
+  return Type::function(params.types, params.minArgs, ref.rest(), returnType, hasThis);
+}
+
+bool TypeResolver::hasThisParam(const TypeRef &ref) const {
+  size_t count = ref.args.size() - 1;
+  bool isNamedThis = count > 0 && !ref.names().empty() && ref.names()[0] == kThisParam;
+  bool isOnlyRest = ref.rest() && count == 1;
+
+  return isNamedThis && !ref.optional()[0] && !isOnlyRest;
+}
+
+TypeResolver::FunctionParams TypeResolver::resolveParams(const TypeRef &ref) {
+  auto params = FunctionParams{.types = {}, .minArgs = 0, .hasOptional = false, .isValid = true};
+  size_t count = ref.args.size() - 1;
+  for (size_t index = 0; index < count; ++index) {
+    bool isRest = ref.rest() && index + 1 == count;
+    const Type *type = this->resolveParam(ref.args[index], isRest);
+    params.isValid = params.isValid && !type->isError();
+    if (isRest) {
+      this->addRestParam(params, ref.args[index], type);
+    } else if (ref.optional()[index]) {
+      this->addOptionalParam(params, type);
+    } else {
+      this->addRequiredParam(params, ref.args[index], type);
+    }
+  }
+
+  return params;
+}
+
+const Type *TypeResolver::resolveParam(const TypeRef &param, bool isRest) {
+  this->state.getTypeContext().enterListContext(isRest);
+  const auto *type = this->resolveType(param);
+  this->state.getTypeContext().leaveListContext();
+
+  return type;
+}
+
+void TypeResolver::addRestParam(FunctionParams &params, const TypeRef &param, const Type *type) {
+  auto list = this->restParam(type);
+  if (list.isErr()) {
+    this->state.getDiagnostics().error(param.loc, list.error().message);
+    params.isValid = false;
+  }
+  params.types.push_back(type);
+}
+
+void TypeResolver::addOptionalParam(FunctionParams &params, const Type *type) const {
+  params.hasOptional = true;
+  params.types.push_back(Type::optional(type));
+}
+
+void TypeResolver::addRequiredParam(FunctionParams &params, const TypeRef &param,
+                                    const Type *type) {
+  auto order = this->paramOrder(params.hasOptional);
+  if (order.isErr()) {
+    this->state.getDiagnostics().error(param.loc, order.error().message);
+    params.isValid = false;
+  }
+  params.types.push_back(type);
+  params.minArgs = params.types.size();
+}
+
+const Type *TypeResolver::resolveReturned(const TypeRef &returned) {
+  if (returned.kind() != TypeRefKind::PREDICATE_REF) {
+    return this->resolveTypeOrVoid(returned);
+  }
+  if (!returned.asserts()) {
+    return Type::boolTy();
+  }
+
+  return this->rejectAsserts(returned);
+}
+
+const Type *TypeResolver::rejectAsserts(const TypeRef &returned) {
+  auto shown = returned.name.str();
+  bool hasType = !returned.args.empty();
+  if (hasType) {
+    const auto *type = this->resolveType(returned.args[0]);
+    shown += " is " + type->name().str();
+  }
+  auto message = ErrorTextAsserts::notAllowed(shown, hasType, "");
+  this->state.getDiagnostics().error(returned.loc, message);
+
+  return Type::error();
 }
 
 TypeResolver::ResultTupleLengthFixed TypeResolver::fixedLength(const Type *list) const {
-  if (list->isTuple() && list->tupleRest() && !this->state.getTypeContext().isInsideListContext() &&
+  if (list->isTuple() && list->tupleRest() != nullptr &&
+      !this->state.getTypeContext().isInsideListContext() &&
       !this->state.getTypeContext().isInsideExtendsClause()) {
-    std::string message = ErrorTextTypeShape::tupleRest();
+    auto message = ErrorTextTypeShape::tupleRest();
 
     return err(TypeResolverFixedLengthError{
         .code = TypeResolverFixedLengthErrorCode::REST_ELEMENT,
@@ -1008,28 +1181,16 @@ TypeResolver::ResultTupleLengthFixed TypeResolver::fixedLength(const Type *list)
 
 const Type *TypeResolver::resolveSpreadTuple(const TypeRef &ref,
                                              const std::vector<const Type *> &elements) {
-  bool isWaiting = false;
-  for (size_t index = 0; index < elements.size(); ++index) {
-    isWaiting |= ref.spread()[index] && elements[index]->typeOp() != TypeOp::None &&
-                 !elements[index]->isListParam();
+  if (this->isSpreadWaiting(ref, elements) && !this->hasErrorType(elements)) {
+    return this->deferredSpread(ref, elements);
   }
-  bool isKnown = llvm::none_of(elements, [](const Type *type) { return type->isError(); });
-  if (isWaiting && isKnown) {
-    std::vector<const Type *> operands;
-    for (size_t index = 0; index < elements.size(); ++index) {
-      operands.push_back(Type::boolLiteral(ref.spread()[index]));
-      operands.push_back(elements[index]);
-    }
-    const Type *spread = Type::typeOp(TypeOp::Spread, operands);
-    return this->typeOperators->evalTypeOp(spread, operands);
-  }
-  ResultTupleSpreadJoins joined = TypeResolver::spreadJoined(elements, ref.spread());
+  auto joined = this->spreadJoined(elements, ref.spread());
   if (joined.isErr()) {
     this->state.getDiagnostics().error(ref.loc, joined.error().message);
     return Type::error();
   }
   const Type *list = joined.value();
-  ResultTupleLengthFixed fixed = this->fixedLength(list);
+  auto fixed = this->fixedLength(list);
   if (fixed.isErr()) {
     this->state.getDiagnostics().error(ref.loc, fixed.error().message);
     return Type::error();
@@ -1038,16 +1199,51 @@ const Type *TypeResolver::resolveSpreadTuple(const TypeRef &ref,
   return list;
 }
 
+bool TypeResolver::isSpreadWaiting(const TypeRef &ref,
+                                   llvm::ArrayRef<const Type *> elements) const {
+  for (size_t index = 0; index < elements.size(); ++index) {
+    bool isOpen = elements[index]->typeOp() != TypeOp::None && !elements[index]->isListParam();
+    if (ref.spread()[index] && isOpen) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool TypeResolver::hasErrorType(llvm::ArrayRef<const Type *> types) const {
+  for (const Type *type : types) {
+    if (type->isError()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+const Type *TypeResolver::deferredSpread(const TypeRef &ref,
+                                         llvm::ArrayRef<const Type *> elements) {
+  auto operands = std::vector<const Type *>();
+  for (size_t index = 0; index < elements.size(); ++index) {
+    operands.push_back(Type::boolLiteral(ref.spread()[index]));
+    operands.push_back(elements[index]);
+  }
+  const auto *spread = Type::typeOp(TypeOp::Spread, operands);
+
+  return this->typeOperators->evalTypeOp(spread, operands);
+}
+
 const Type *TypeResolver::resolveTuple(const TypeRef &ref) {
-  std::vector<const Type *> elements;
+  auto elements = std::vector<const Type *>();
   for (const TypeRef &element : ref.args) {
-    elements.push_back(this->resolveType(element, false));
+    const auto *type = this->resolveType(element);
+    elements.push_back(type);
   }
   if (llvm::is_contained(ref.spread(), true)) {
     return this->resolveSpreadTuple(ref, elements);
   }
   for (size_t index = 0; index < elements.size(); ++index) {
-    ResultTupleElementType element = TypeResolver::tupleElement(elements[index]);
+    auto element = this->tupleElement(elements[index]);
     if (element.isErr()) {
       this->state.getDiagnostics().error(ref.args[index].loc, element.error().message);
       return Type::error();
@@ -1060,42 +1256,60 @@ const Type *TypeResolver::resolveTuple(const TypeRef &ref) {
 
 std::vector<Field> TypeResolver::resolveFields(const TypeRef &ref,
                                                std::vector<Overload> *overloads) {
-  std::vector<Field> fields;
+  auto fields = std::vector<Field>();
   for (size_t index = 0; index < ref.args.size(); ++index) {
-    llvm::StringRef name = ref.names()[index];
-    if (TypeResolver::overloaded(ref, index)) {
-      ResultOverloadsAllowed allowed = TypeResolver::overloadAllowed(overloads, name);
-      if (allowed.isErr()) {
-        this->state.getDiagnostics().error(ref.locs()[index], allowed.error().message);
-        continue;
-      }
-      const Type *type = this->resolveType(ref.args[index], false);
-      auto found = llvm::find_if(*overloads,
-                                 [&](const Overload &overload) { return overload.name == name; });
-      if (found == overloads->end()) {
-        found = overloads->insert(overloads->end(), Overload{name.str(), {}});
-      }
-      ResultUniqueSignatures unique = TypeResolver::newSignature(*found, type, name);
-      if (unique.isErr()) {
-        this->state.getDiagnostics().error(ref.locs()[index], unique.error().message);
-      } else if (!type->isError()) {
-        found->signatures.push_back(type);
-      }
-      continue;
+    if (this->isOverloaded(ref, index)) {
+      this->addSignature(ref, index, overloads);
+    } else {
+      this->addField(ref, index, fields);
     }
-    ResultUniqueFieldNames unique = TypeResolver::newField(fields, name);
-    if (unique.isErr()) {
-      this->state.getDiagnostics().error(ref.locs()[index], unique.error().message);
-      continue;
-    }
-    const Type *type = this->resolveType(ref.args[index], false);
-    if (ref.optional()[index]) {
-      type = Type::optional(type);
-    }
-    fields.push_back({name.str(), type, ref.readonly()[index]});
   }
 
   return fields;
+}
+
+void TypeResolver::addSignature(const TypeRef &ref, size_t index,
+                                std::vector<Overload> *overloads) {
+  llvm::StringRef name = ref.names()[index];
+  auto allowed = this->overloadAllowed(overloads, name);
+  if (allowed.isErr()) {
+    this->state.getDiagnostics().error(ref.locs()[index], allowed.error().message);
+    return;
+  }
+  const auto *type = this->resolveType(ref.args[index]);
+  Overload &overload = this->overloadNamed(*overloads, name);
+  auto unique = this->newSignature(overload, type, name);
+  if (unique.isErr()) {
+    this->state.getDiagnostics().error(ref.locs()[index], unique.error().message);
+    return;
+  }
+  if (!type->isError()) {
+    overload.signatures.push_back(type);
+  }
+}
+
+Overload &TypeResolver::overloadNamed(std::vector<Overload> &overloads,
+                                      llvm::StringRef name) const {
+  for (Overload &overload : overloads) {
+    if (overload.name == name) {
+      return overload;
+    }
+  }
+  overloads.push_back(Overload{name.str(), {}});
+
+  return overloads.back();
+}
+
+void TypeResolver::addField(const TypeRef &ref, size_t index, std::vector<Field> &fields) {
+  llvm::StringRef name = ref.names()[index];
+  auto unique = this->newField(fields, name);
+  if (unique.isErr()) {
+    this->state.getDiagnostics().error(ref.locs()[index], unique.error().message);
+    return;
+  }
+  const auto *written = this->resolveType(ref.args[index]);
+  const Type *type = ref.optional()[index] ? Type::optional(written) : written;
+  fields.push_back({name.str(), type, ref.readonly()[index]});
 }
 
 }

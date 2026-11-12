@@ -86,7 +86,7 @@ std::string ErrorTextCallbackMethod::notNumber(llvm::StringRef type) {
 }
 
 std::string ErrorTextCallbackArg::argsShape(llvm::StringRef method) {
-  std::optional<ArrayCallback> callback = ArrayMethodTable::findCallback(method);
+  auto callback = ArrayMethodTable::findCallback(method);
   if (callback == ArrayCallback::REDUCE) {
     return "(accumulator, value, index, array)";
   }
@@ -104,7 +104,7 @@ std::string ErrorTextCallbackArg::position(size_t index) {
 }
 
 std::string ErrorTextCallbackArg::argName(llvm::StringRef method, size_t index) {
-  std::optional<ArrayCallback> callback = ArrayMethodTable::findCallback(method);
+  auto callback = ArrayMethodTable::findCallback(method);
   if (callback == ArrayCallback::REDUCE) {
     return index == 0 ? "accumulator" : index == 1 ? "value" : index == 2 ? "index" : "array";
   }

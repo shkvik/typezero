@@ -1,21 +1,20 @@
 #include "compiler/semantic/generics/generic_check_helpers/generic_check_helpers.h"
 #include "compiler/semantic/types/type_parts/type_routes.h"
 #include "llvm/ADT/STLExtras.h"
-#include <functional>
-#include <set>
-
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
+
+namespace {
+
+constexpr llvm::StringLiteral kUnionSeparator = " | ";
+
+}
 
 bool GenericCheckHelpers::mentionsAnyOf(const Type *type, llvm::ArrayRef<const Type *> params) {
   if (params.empty() || !TypeQueries::mentionsParam(type)) {
     return false;
   }
-  TypeParts parts = TypeParts::collect(type, kMentionsRoute);
+  auto parts = TypeParts::collect(type, kMentionsRoute);
   for (const Type *part : parts.getTypes()) {
     if (GenericCheckHelpers::isParamOf(part, params)) {
       return true;
@@ -31,28 +30,103 @@ bool GenericCheckHelpers::isParamOf(const Type *type, llvm::ArrayRef<const Type 
   return isPlainParam && llvm::is_contained(params, type);
 }
 
-std::string GenericCheckHelpers::constraintSpelling(const Type *param, const TypeParamDecl *decl) {
-  if (decl && decl->constraint && decl->constraint->kind() == TypeRefKind::NAME_REF) {
-    return decl->constraint->name.str();
-  }
-  if (decl && decl->constraint && decl->constraint->kind() == TypeRefKind::UNION_REF &&
-      llvm::all_of(decl->constraint->args,
-                   [](const TypeRef &t) { return t.kind() == TypeRefKind::NAME_REF; })) {
-    std::string text;
-    for (const TypeRef &t : decl->constraint->args) {
-      text += (text.empty() ? "" : " | ") + t.name.str();
+std::string GenericCheckHelpers::typeNames(llvm::ArrayRef<const Type *> types,
+                                           llvm::StringRef separator) {
+  auto text = std::string();
+  for (const Type *type : types) {
+    if (!text.empty()) {
+      text += separator.str();
     }
-    return text;
-  }
-  if (const Type *c = param->constraint()) {
-    return c->name().str();
-  }
-  std::string text;
-  for (const Type *t : param->alternatives()) {
-    text += (text.empty() ? "" : " | ") + t->name().str();
+    text += type->name().str();
   }
 
   return text;
+}
+
+std::string GenericCheckHelpers::bindingNames(llvm::ArrayRef<const Type *> params,
+                                              llvm::ArrayRef<const Type *> args) {
+  auto text = std::string();
+  size_t count = std::min(params.size(), args.size());
+  for (size_t index = 0; index < count; ++index) {
+    if (!text.empty()) {
+      text += ", ";
+    }
+    text += params[index]->name().str() + " = " + args[index]->name().str();
+  }
+
+  return text;
+}
+
+llvm::StringRef GenericCheckHelpers::recordName(const InstanceRecord *record) {
+  if (record->cls != nullptr) {
+    return record->cls->name;
+  }
+
+  return record->generic->name;
+}
+
+bool GenericCheckHelpers::isDefaultArgument(llvm::ArrayRef<const Type *> defaults,
+                                            llvm::ArrayRef<const Type *> args, size_t index) {
+  if (index >= defaults.size() || defaults[index] == nullptr) {
+    return false;
+  }
+  const Type *defaultType = defaults[index];
+  const Type *arg = args[index];
+  bool isBothNever = defaultType->isNever() && arg->isNever();
+
+  return defaultType == arg || isBothNever;
+}
+
+size_t GenericCheckHelpers::shownArgumentCount(llvm::ArrayRef<const Type *> defaults,
+                                               llvm::ArrayRef<const Type *> args) {
+  size_t shown = args.size();
+  while (shown > 0 && GenericCheckHelpers::isDefaultArgument(defaults, args, shown - 1)) {
+    --shown;
+  }
+
+  return shown;
+}
+
+bool GenericCheckHelpers::isUnionOfNames(const TypeRef &ref) {
+  if (ref.kind() != TypeRefKind::UNION_REF) {
+    return false;
+  }
+  for (const TypeRef &member : ref.args) {
+    if (member.kind() != TypeRefKind::NAME_REF) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+std::string GenericCheckHelpers::refNames(llvm::ArrayRef<TypeRef> refs) {
+  auto text = std::string();
+  for (const TypeRef &ref : refs) {
+    if (!text.empty()) {
+      text += kUnionSeparator.str();
+    }
+    text += ref.name.str();
+  }
+
+  return text;
+}
+
+std::string GenericCheckHelpers::constraintSpelling(const Type *param,
+                                                    const TypeParamDecl *typeParam) {
+  bool isWritten = typeParam != nullptr && typeParam->constraint.has_value();
+  if (isWritten && typeParam->constraint->kind() == TypeRefKind::NAME_REF) {
+    return typeParam->constraint->name.str();
+  }
+  if (isWritten && GenericCheckHelpers::isUnionOfNames(*typeParam->constraint)) {
+    return GenericCheckHelpers::refNames(typeParam->constraint->args);
+  }
+  const Type *constraint = param->constraint();
+  if (constraint != nullptr) {
+    return constraint->name().str();
+  }
+
+  return GenericCheckHelpers::typeNames(param->alternatives(), kUnionSeparator);
 }
 
 }

@@ -1,6 +1,7 @@
 #include "compiler/semantic/types/type_operators/type_operators.h"
 #include "compiler/program/ast/ast.h"
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
+#include "compiler/program/to_utf16/to_utf16.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
@@ -26,30 +27,31 @@ using llvm::dyn_cast;
 
 namespace tz {
 
+namespace {
+
+constexpr const char *kHiddenFieldPrefix = "%";
+
+}
+
 TypeOperators::TypeOperators(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->eventMaps = &all.eventMaps;
   this->typeParams = &all.typeParams;
+  this->classBases = &all.classBases;
   this->typeResolver = &all.typeResolver;
   this->utilityTypes = &all.utilityTypes;
   this->classDeclarer = &all.classDeclarer;
   this->templateTypes = &all.templateTypes;
   this->argListChecker = &all.argListChecker;
   this->returnInferrer = &all.returnInferrer;
+  this->genericChecker = &all.genericChecker;
   this->extendsRelation = &all.extendsRelation;
   this->topLevelChecker = &all.topLevelChecker;
   this->conditionalTypes = &all.conditionalTypes;
   this->classValueChecker = &all.classValueChecker;
 }
 
-std::u16string TypeOperators::utf16(llvm::StringRef text) {
-  llvm::SmallVector<llvm::UTF16, 32> units;
-  llvm::convertUTF8ToUTF16String(text, units);
-
-  return std::u16string(units.begin(), units.end());
-}
-
-llvm::ArrayRef<const Type *> TypeOperators::membersOf(const Type *&type) {
+llvm::ArrayRef<const Type *> TypeOperators::membersOf(const Type *&type) const {
   return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
 }
 
@@ -58,24 +60,33 @@ const Type *TypeOperators::keysOf(const Type *type) {
   if (!plain->isUnion()) {
     return this->ownKeys(plain);
   }
-  std::vector<const Type *> common;
+  auto common = std::vector<const Type *>();
   bool isFirst = true;
-  for (const Type *m : plain->members()) {
-    const Type *keys = this->ownKeys(m->nonOptional());
-    if (!keys) {
+  for (const Type *member : plain->members()) {
+    const Type *keys = this->ownKeys(member->nonOptional());
+    if (keys == nullptr) {
       return nullptr;
     }
-    std::vector<const Type *> mine;
-    for (const Type *k : TypeOperators::membersOf(keys)) {
-      if (isFirst || llvm::is_contained(common, k)) {
-        mine.push_back(k);
-      }
-    }
-    common = std::move(mine);
+    common = this->sharedKeys(common, keys, isFirst);
     isFirst = false;
   }
+  if (common.empty()) {
+    return Type::never();
+  }
 
-  return common.empty() ? Type::never() : Type::unionOf(common);
+  return Type::unionOf(common);
+}
+
+std::vector<const Type *> TypeOperators::sharedKeys(llvm::ArrayRef<const Type *> common,
+                                                    const Type *keys, bool isFirst) const {
+  auto shared = std::vector<const Type *>();
+  for (const Type *key : this->membersOf(keys)) {
+    if (isFirst || llvm::is_contained(common, key)) {
+      shared.push_back(key);
+    }
+  }
+
+  return shared;
 }
 
 const Type *TypeOperators::ownKeys(const Type *type) {
@@ -85,23 +96,34 @@ const Type *TypeOperators::ownKeys(const Type *type) {
   if (!type->isObject() || type->isTuple() || type->isAnyObject()) {
     return nullptr;
   }
-  ClassDecl *cls = ClassDeclarer::classOf(type);
-  if (cls) {
-    this->classDeclarer->completeClass(cls);
+  auto *classDecl = this->classDeclarer->classOf(type);
+  if (classDecl != nullptr) {
+    this->classDeclarer->completeClass(classDecl);
   }
-  std::vector<const Type *> keys;
-  for (const Field &f : type->fields()) {
-    if (llvm::StringRef(f.name).starts_with("%")) {
-      continue;
+  auto keys = std::vector<const Type *>();
+  for (const Field &field : type->fields()) {
+    if (this->isPublicKey(classDecl, field.name)) {
+      auto text = ToUtf16::toUtf16(field.name);
+      keys.push_back(Type::stringLiteral(text));
     }
-    if (const ClassField *field = cls ? ClassBases::findField(cls, f.name) : nullptr;
-        field && field->access != Access::Public) {
-      continue;
-    }
-    keys.push_back(Type::stringLiteral(TypeOperators::utf16(f.name)));
+  }
+  if (keys.empty()) {
+    return Type::never();
   }
 
-  return keys.empty() ? Type::never() : Type::unionOf(keys);
+  return Type::unionOf(keys);
+}
+
+bool TypeOperators::isPublicKey(const ClassDecl *classDecl, llvm::StringRef name) const {
+  if (name.starts_with(kHiddenFieldPrefix)) {
+    return false;
+  }
+  if (classDecl == nullptr) {
+    return true;
+  }
+  const ClassField *declared = this->classBases->findField(classDecl, name);
+
+  return declared == nullptr || declared->access == Access::Public;
 }
 
 const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type *> operands) {
@@ -112,10 +134,10 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
   if (kind == TypeOp::Mapped) {
     return this->evalMapped(op, operands);
   }
-  if (TypeOperators::mentionsAnyParam(operands)) {
+  if (this->isMentioningAnyParam(operands)) {
     return Type::typeOp(kind, operands);
   }
-  const Type *failed = TypeOperators::firstError(operands);
+  const auto *failed = this->firstError(operands);
   if (failed != nullptr) {
     return failed;
   }
@@ -123,9 +145,9 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
   return this->evalReadyTypeOp(kind, operands);
 }
 
-bool TypeOperators::mentionsAnyParam(llvm::ArrayRef<const Type *> operands) {
-  for (const Type *t : operands) {
-    if (t != nullptr && TypeQueries::mentionsParam(t)) {
+bool TypeOperators::isMentioningAnyParam(llvm::ArrayRef<const Type *> operands) const {
+  for (const Type *type : operands) {
+    if (type != nullptr && TypeQueries::mentionsParam(type)) {
       return true;
     }
   }
@@ -133,10 +155,10 @@ bool TypeOperators::mentionsAnyParam(llvm::ArrayRef<const Type *> operands) {
   return false;
 }
 
-const Type *TypeOperators::firstError(llvm::ArrayRef<const Type *> operands) {
-  for (const Type *t : operands) {
-    if (t != nullptr && t->isError()) {
-      return t;
+const Type *TypeOperators::firstError(llvm::ArrayRef<const Type *> operands) const {
+  for (const Type *type : operands) {
+    if (type != nullptr && type->isError()) {
+      return type;
     }
   }
 
@@ -155,7 +177,7 @@ const Type *TypeOperators::evalReadyTypeOp(TypeOp kind, llvm::ArrayRef<const Typ
     case TypeOp::Template:
       return this->templateTypes->evalTemplate(operands);
     case TypeOp::Spread:
-      return TypeOperators::evalSpread(operands);
+      return this->evalSpread(operands);
     case TypeOp::Uppercase:
     case TypeOp::Lowercase:
     case TypeOp::Capitalize:
@@ -165,7 +187,7 @@ const Type *TypeOperators::evalReadyTypeOp(TypeOp kind, llvm::ArrayRef<const Typ
       return operands[0]->nonOptional();
     case TypeOp::ReturnType:
     case TypeOp::Parameters:
-      return TypeOperators::evalFunctionPart(kind, operands[0]);
+      return this->evalFunctionPart(kind, operands[0]);
     case TypeOp::None:
     case TypeOp::Mapped:
     case TypeOp::Conditional:
@@ -177,25 +199,38 @@ const Type *TypeOperators::evalReadyTypeOp(TypeOp kind, llvm::ArrayRef<const Typ
 
 const Type *TypeOperators::evalKeyOf(const Type *operand) {
   const Type *keys = this->keysOf(operand);
+  if (keys == nullptr) {
+    return Type::error();
+  }
 
-  return keys != nullptr ? keys : Type::error();
+  return keys;
 }
 
 const Type *TypeOperators::evalIndexed(const Type *object, const Type *key) {
-  bool isLengthKey =
-      key->isStringLiteral() &&
-      BuiltinPropertyTable::isName(ToUtf8::toUtf8(key->literalText()), BuiltinProperty::LENGTH);
-  if (isLengthKey && (object->isTuple() || object->isArray())) {
-    return TypeOperators::lengthType(object);
+  bool isList = object->isTuple() || object->isArray();
+  if (isList && this->isLengthKey(key)) {
+    return this->lengthType(object);
   }
-  const Type *member = this->argListChecker->memberType(object, key);
+  const auto *member = this->argListChecker->memberType(object, key);
+  if (member == nullptr) {
+    return Type::error();
+  }
 
-  return member != nullptr ? member : Type::error();
+  return member;
 }
 
-const Type *TypeOperators::lengthType(const Type *object) {
-  bool isFixed =
-      object->isTuple() && !object->tupleRest() && object->tupleMin() == object->fields().size();
+bool TypeOperators::isLengthKey(const Type *key) const {
+  if (!key->isStringLiteral()) {
+    return false;
+  }
+  auto text = ToUtf8::toUtf8(key->literalText());
+
+  return BuiltinPropertyTable::isName(text, BuiltinProperty::LENGTH);
+}
+
+const Type *TypeOperators::lengthType(const Type *object) const {
+  bool isFixed = object->isTuple() && object->tupleRest() == nullptr &&
+                 object->tupleMin() == object->fields().size();
   if (isFixed) {
     return Type::numberLiteral(double(object->fields().size()), Type::intTy());
   }
@@ -204,46 +239,55 @@ const Type *TypeOperators::lengthType(const Type *object) {
 }
 
 const Type *TypeOperators::evalFiltered(TypeOp kind, const Type *members, const Type *filter) {
-  std::vector<const Type *> kept;
-  for (const Type *m : TypeopsCheckHelpers::distributedMembers(members)) {
-    if (this->extendsRelation->extendsType(m, filter) == (kind == TypeOp::Extract)) {
-      kept.push_back(m);
+  bool isKeepingMatches = kind == TypeOp::Extract;
+  auto kept = std::vector<const Type *>();
+  for (const Type *member : TypeopsCheckHelpers::distributedMembers(members)) {
+    bool isMatching = this->extendsRelation->isExtendingType(member, filter);
+    if (isMatching == isKeepingMatches) {
+      kept.push_back(member);
     }
   }
-
-  return kept.empty() ? Type::never() : Type::unionOf(kept);
-}
-
-const Type *TypeOperators::evalSpread(llvm::ArrayRef<const Type *> operands) {
-  std::vector<const Type *> elements;
-  std::vector<bool> spread;
-  for (size_t i = 0; i + 1 < operands.size(); i += 2) {
-    spread.push_back(operands[i]->literalNumber() != 0);
-    elements.push_back(operands[i + 1]);
+  if (kept.empty()) {
+    return Type::never();
   }
-  std::string why;
-  const Type *tuple = ArgumentLists::spreadTuple(elements, spread, why);
 
-  return tuple != nullptr ? tuple : Type::error();
+  return Type::unionOf(kept);
 }
 
-const Type *TypeOperators::evalFunctionPart(TypeOp kind, const Type *operand) {
-  const Type *fn = operand->nonOptional();
-  if (!fn->isFunction()) {
+const Type *TypeOperators::evalSpread(llvm::ArrayRef<const Type *> operands) const {
+  auto elements = std::vector<const Type *>();
+  auto spread = std::vector<bool>();
+  for (size_t index = 0; index + 1 < operands.size(); index += 2) {
+    spread.push_back(operands[index]->literalNumber() != 0);
+    elements.push_back(operands[index + 1]);
+  }
+  auto why = std::string();
+  const auto *tuple = ArgumentLists::spreadTuple(elements, spread, why);
+  if (tuple == nullptr) {
+    return Type::error();
+  }
+
+  return tuple;
+}
+
+const Type *TypeOperators::evalFunctionPart(TypeOp kind, const Type *operand) const {
+  const Type *functionType = operand->nonOptional();
+  if (!functionType->isFunction()) {
     return Type::error();
   }
   if (kind == TypeOp::ReturnType) {
-    return fn->ret();
+    return functionType->ret();
   }
-  std::vector<const Type *> params(fn->params().begin(),
-                                   fn->params().end() - (fn->hasRest() ? 1 : 0));
-  const Type *rest = fn->hasRest() ? fn->params().back() : nullptr;
+  llvm::ArrayRef<const Type *> all = functionType->params();
+  llvm::ArrayRef<const Type *> fixed = functionType->hasRest() ? all.drop_back() : all;
+  const Type *rest = functionType->hasRest() ? all.back() : nullptr;
+  size_t required = std::min(functionType->minArgs(), fixed.size());
 
-  return Type::argumentList(params, std::min(fn->minArgs(), params.size()), rest);
+  return Type::argumentList(fixed, required, rest);
 }
 
 const Type *TypeOperators::evalMapped(const Type *op, llvm::ArrayRef<const Type *> operands) {
-  MappedOperands mapped{
+  auto mapped = MappedOperands{
       .key = operands[0],
       .keys = operands[1],
       .value = operands[2],
@@ -252,7 +296,7 @@ const Type *TypeOperators::evalMapped(const Type *op, llvm::ArrayRef<const Type 
       .optional = op->mappedOptional(),
       .readonly = op->mappedReadonly(),
   };
-  if (TypeOperators::isOpenMapped(mapped)) {
+  if (this->isOpenMapped(mapped)) {
     return Type::mapped(mapped.key, mapped.keys, mapped.value, mapped.optional, mapped.readonly,
                         mapped.source, mapped.rename);
   }
@@ -260,9 +304,9 @@ const Type *TypeOperators::evalMapped(const Type *op, llvm::ArrayRef<const Type 
   if (keys->isNever()) {
     return Type::object({});
   }
-  std::vector<Field> fields;
-  for (const Type *name : TypeOperators::membersOf(keys)) {
-    const Type *failed = this->addMappedField(mapped, name, fields);
+  auto fields = std::vector<Field>();
+  for (const Type *name : this->membersOf(keys)) {
+    const auto *failed = this->addMappedField(mapped, name, fields);
     if (failed != nullptr) {
       return failed;
     }
@@ -271,12 +315,12 @@ const Type *TypeOperators::evalMapped(const Type *op, llvm::ArrayRef<const Type 
   return Type::object(std::move(fields));
 }
 
-bool TypeOperators::isOpenMapped(const MappedOperands &mapped) {
+bool TypeOperators::isOpenMapped(const MappedOperands &mapped) const {
   return TypeQueries::mentionsParam(mapped.keys) ||
          (mapped.source != nullptr && TypeQueries::mentionsParam(mapped.source)) ||
-         ConditionalTypes::mentionsParamBesides(mapped.value, {mapped.key}) ||
+         this->conditionalTypes->isMentioningParamBesides(mapped.value, {mapped.key}) ||
          (mapped.rename != nullptr &&
-          ConditionalTypes::mentionsParamBesides(mapped.rename, {mapped.key}));
+          this->conditionalTypes->isMentioningParamBesides(mapped.rename, {mapped.key}));
 }
 
 const Type *TypeOperators::addMappedField(const MappedOperands &mapped, const Type *name,
@@ -284,29 +328,46 @@ const Type *TypeOperators::addMappedField(const MappedOperands &mapped, const Ty
   if (!name->isStringLiteral()) {
     return Type::error();
   }
-  std::string text = ToUtf8::toUtf8(name->literalText());
-  const Type *type = this->typeParams->substitute(mapped.value, {mapped.key}, {name});
-  if (type->isError()) {
-    return type;
+  auto text = ToUtf8::toUtf8(name->literalText());
+  const auto *value = this->typeParams->substitute(mapped.value, {mapped.key}, {name});
+  if (value->isError()) {
+    return value;
   }
-  const Field *from = mapped.source != nullptr ? mapped.source->field(text) : nullptr;
-  if (mapped.optional > 0) {
-    type = Type::optional(type);
-  } else if (mapped.optional < 0) {
-    type = type->nonOptional();
-  }
-  bool isReadonly =
-      mapped.readonly > 0 || (mapped.readonly == 0 && from != nullptr && from->readonly);
-  std::vector<std::string> names{text};
-  const Type *failed = this->renamedFields(mapped, name, names);
+  const Type *type = this->mappedFieldType(mapped, value);
+  bool isReadonly = this->isMappedReadonly(mapped, text);
+  auto names = std::vector<std::string>{text};
+  const auto *failed = this->renamedFields(mapped, name, names);
   if (failed != nullptr) {
     return failed;
   }
   for (const std::string &field : names) {
-    TypeOperators::mergeMappedField(fields, field, type, isReadonly);
+    this->mergeMappedField(fields, field, type, isReadonly);
   }
 
   return nullptr;
+}
+
+const Type *TypeOperators::mappedFieldType(const MappedOperands &mapped, const Type *value) const {
+  if (mapped.optional > 0) {
+    return Type::optional(value);
+  }
+  if (mapped.optional < 0) {
+    return value->nonOptional();
+  }
+
+  return value;
+}
+
+bool TypeOperators::isMappedReadonly(const MappedOperands &mapped, llvm::StringRef name) const {
+  if (mapped.readonly != 0) {
+    return mapped.readonly > 0;
+  }
+  if (mapped.source == nullptr) {
+    return false;
+  }
+  const Field *from = mapped.source->field(name);
+
+  return from != nullptr && from->readonly;
 }
 
 const Type *TypeOperators::renamedFields(const MappedOperands &mapped, const Type *name,
@@ -314,30 +375,30 @@ const Type *TypeOperators::renamedFields(const MappedOperands &mapped, const Typ
   if (mapped.rename == nullptr) {
     return nullptr;
   }
-  const Type *renamed = this->typeParams->substitute(mapped.rename, {mapped.key}, {name});
+  const auto *renamed = this->typeParams->substitute(mapped.rename, {mapped.key}, {name});
   if (renamed->isError()) {
     return renamed;
   }
   names.clear();
-  for (const Type *n : TypeopsCheckHelpers::distributedMembers(renamed)) {
-    if (!n->isStringLiteral()) {
+  for (const Type *renamedTo : TypeopsCheckHelpers::distributedMembers(renamed)) {
+    if (!renamedTo->isStringLiteral()) {
       return Type::error();
     }
-    names.push_back(ToUtf8::toUtf8(n->literalText()));
+    names.push_back(ToUtf8::toUtf8(renamedTo->literalText()));
   }
 
   return nullptr;
 }
 
-void TypeOperators::mergeMappedField(std::vector<Field> &fields, const std::string &field,
-                                     const Type *type, bool readonly) {
-  for (Field &f : fields) {
-    if (f.name == field) {
-      f.type = Type::unionOf({f.type, type});
+void TypeOperators::mergeMappedField(std::vector<Field> &fields, const std::string &name,
+                                     const Type *type, bool isReadonly) const {
+  for (Field &field : fields) {
+    if (field.name == name) {
+      field.type = Type::unionOf({field.type, type});
       return;
     }
   }
-  fields.push_back({field, type, readonly});
+  fields.push_back({name, type, isReadonly});
 }
 
 TypeOperators::ResultTypeOpResolved TypeOperators::resolveTypeOp(const TypeRef &ref) {
@@ -370,13 +431,14 @@ TypeOperators::ResultTypeOpResolved TypeOperators::resolveTypeOp(const TypeRef &
 }
 
 TypeOperators::ResultTypeOpResolved TypeOperators::resolveKeyOf(const TypeRef &ref) {
-  const Type *type = this->typeResolver->resolveType(ref.args[0], false);
+  const auto *type = this->typeResolver->resolveType(ref.args[0]);
   if (type->isError()) {
     return ok(type);
   }
-  const Type *keys = this->evalTypeOp(Type::typeOp(TypeOp::KeyOf, {type}), {type});
+  const auto *unevaluated = Type::typeOp(TypeOp::KeyOf, {type});
+  const auto *keys = this->evalTypeOp(unevaluated, {type});
   if (keys->isError()) {
-    std::string message = ErrorTextTypeOp::keyOf(type->name());
+    auto message = ErrorTextTypeOp::keyOf(type->name());
 
     return err(TypeOperatorsResolveTypeOpError{
         .code = TypeOperatorsResolveTypeOpErrorCode::NOT_AN_OBJECT_TYPE,
@@ -388,14 +450,15 @@ TypeOperators::ResultTypeOpResolved TypeOperators::resolveKeyOf(const TypeRef &r
 }
 
 TypeOperators::ResultTypeOpResolved TypeOperators::resolveIndexed(const TypeRef &ref) {
-  const Type *object = this->typeResolver->resolveType(ref.args[0], false);
-  const Type *key = this->typeResolver->resolveType(ref.args[1], false);
+  const auto *object = this->typeResolver->resolveType(ref.args[0]);
+  const auto *key = this->typeResolver->resolveType(ref.args[1]);
   if (object->isError() || key->isError()) {
     return ok(Type::error());
   }
-  const Type *member = this->evalTypeOp(Type::indexedAccess(object, key), {object, key});
+  const auto *unevaluated = Type::indexedAccess(object, key);
+  const auto *member = this->evalTypeOp(unevaluated, {object, key});
   if (member->isError()) {
-    std::string message = ErrorTextTypeOp::noMember(object->name(), key->name());
+    auto message = ErrorTextTypeOp::noMember(object->name(), key->name());
 
     return err(TypeOperatorsResolveTypeOpError{
         .code = TypeOperatorsResolveTypeOpErrorCode::NO_SUCH_MEMBER,
@@ -410,46 +473,50 @@ TypeOperators::ResultTypeOpResolved TypeOperators::resolveTypeOf(const TypeRef &
   llvm::StringRef name = ref.names().front();
   const Type *type = this->typeOfName(name);
   if (type == nullptr) {
-    std::string message = ErrorTextTypeOp::typeOf(name);
+    auto message = ErrorTextTypeOp::typeOf(name);
 
     return err(TypeOperatorsResolveTypeOpError{
         .code = TypeOperatorsResolveTypeOpErrorCode::TYPE_OF_UNKNOWN,
         .message = message,
     });
   }
-  for (size_t i = 1; i < ref.names().size(); ++i) {
-    llvm::StringRef part = ref.names()[i];
-    const Field *field = type->isObject() ? type->field(part) : nullptr;
-    const Type *method = field != nullptr ? nullptr : this->singleMethodType(type, part);
-    if (method != nullptr) {
-      type = method;
-      continue;
-    }
-    if (field == nullptr) {
-      std::string message = ErrorTextTypeOp::noField(type->name(), part);
+  auto parts = llvm::ArrayRef<llvm::StringRef>(ref.names()).drop_front();
+  for (llvm::StringRef part : parts) {
+    const Type *member = this->memberValueType(type, part);
+    if (member == nullptr) {
+      auto message = ErrorTextTypeOp::noField(type->name(), part);
 
       return err(TypeOperatorsResolveTypeOpError{
           .code = TypeOperatorsResolveTypeOpErrorCode::NO_SUCH_FIELD,
           .message = message,
       });
     }
-    type = field->type;
+    type = member;
   }
 
   return ok(type);
 }
 
+const Type *TypeOperators::memberValueType(const Type *type, llvm::StringRef name) {
+  const Field *field = type->isObject() ? type->field(name) : nullptr;
+  if (field != nullptr) {
+    return field->type;
+  }
+
+  return this->singleMethodType(type, name);
+}
+
 const Type *TypeOperators::typeOfName(llvm::StringRef name) {
-  const Type *scoped = this->scopedValueType(name);
+  const auto *scoped = this->scopedValueType(name);
   if (scoped != nullptr) {
     return scoped;
   }
-  Module *module = this->state.getModuleStates().getCurrentModule();
+  auto *module = this->state.getModuleStates().getCurrentModule();
   if (module == nullptr) {
     return nullptr;
   }
   for (Stmt *item : module->file.items) {
-    const Type *declared = this->declaredValueType(item, name);
+    const auto *declared = this->declaredValueType(item, name);
     if (declared != nullptr) {
       return declared;
     }
@@ -459,90 +526,113 @@ const Type *TypeOperators::typeOfName(llvm::StringRef name) {
 }
 
 const Type *TypeOperators::scopedValueType(llvm::StringRef name) {
-  ScopeEntry entry = this->topLevelChecker->lookupValue(name);
-  VarSymbol *var = entry.var();
-  if (var != nullptr) {
-    return var->type;
+  auto entry = this->topLevelChecker->lookupValue(name);
+  VarSymbol *variable = entry.var();
+  ClassDecl *classDecl = entry.cls();
+  FuncSymbol *function = entry.func();
+
+  if (variable != nullptr) {
+    return variable->type;
   }
-  ClassDecl *cls = entry.cls();
-  if (cls != nullptr && !cls->isGeneric()) {
-    return this->classValueChecker->classValueType(cls);
+  if (classDecl != nullptr && !classDecl->isGeneric()) {
+    return this->classValueChecker->classValueType(classDecl);
   }
-  if (entry.func() != nullptr) {
-    return this->utilityTypes->functionValueType(entry.func());
+  if (function != nullptr) {
+    return this->utilityTypes->functionValueType(function);
   }
 
   return nullptr;
 }
 
 const Type *TypeOperators::declaredValueType(Stmt *item, llvm::StringRef name) {
-  auto *decl = dyn_cast<VarDeclStmt>(item);
-  if (decl != nullptr) {
-    return this->declaredVarType(decl, name);
+  auto *varDecl = dyn_cast<VarDeclStmt>(item);
+  auto *functionDecl = dyn_cast<FunctionDecl>(item);
+
+  if (varDecl != nullptr) {
+    return this->declaredVarType(varDecl, name);
   }
-  auto *fn = dyn_cast<FunctionDecl>(item);
-  if (fn != nullptr) {
-    return this->declaredFunctionType(fn, name);
+  if (functionDecl != nullptr) {
+    return this->declaredFunctionType(functionDecl, name);
   }
 
   return nullptr;
 }
 
-const Type *TypeOperators::declaredVarType(const VarDeclStmt *decl, llvm::StringRef name) {
-  const Type *type = nullptr;
-  for (const VarDeclarator &d : decl->decls) {
-    if (d.name != name || type != nullptr) {
-      continue;
-    }
-    if (d.typeAnn.has_value()) {
-      type = this->typeResolver->resolveType(*d.typeAnn, false);
-    } else if (d.init != nullptr) {
-      type = GenericChecker::literalShape(d.init);
+const Type *TypeOperators::declaredVarType(const VarDeclStmt *varDecl, llvm::StringRef name) {
+  for (const VarDeclarator &declarator : varDecl->decls) {
+    const Type *written = this->writtenVarType(declarator, name);
+    if (written != nullptr) {
+      return written;
     }
   }
-  if (type != nullptr) {
-    return type;
-  }
-  for (const VarDeclarator &d : decl->decls) {
-    auto *create = d.name == name ? llvm::dyn_cast_or_null<NewExpr>(d.init) : nullptr;
-    if (create != nullptr) {
-      type = this->eventMaps->createdType(create);
+  for (const VarDeclarator &declarator : llvm::reverse(varDecl->decls)) {
+    auto *create = llvm::dyn_cast_or_null<NewExpr>(declarator.init);
+    if (declarator.name == name && create != nullptr) {
+      return this->eventMaps->createdType(create);
     }
   }
 
-  return type;
+  return nullptr;
 }
 
-const Type *TypeOperators::declaredFunctionType(const FunctionDecl *fn, llvm::StringRef name) {
-  if (fn->name != name || !fn->typeParams.empty() || !fn->returnType.has_value()) {
+const Type *TypeOperators::writtenVarType(const VarDeclarator &declarator, llvm::StringRef name) {
+  if (declarator.name != name) {
     return nullptr;
   }
-  std::vector<const Type *> params;
+  if (declarator.typeAnn.has_value()) {
+    return this->typeResolver->resolveType(*declarator.typeAnn);
+  }
+  if (declarator.init != nullptr) {
+    return this->genericChecker->literalShape(declarator.init);
+  }
+
+  return nullptr;
+}
+
+const Type *TypeOperators::declaredFunctionType(const FunctionDecl *functionDecl,
+                                                llvm::StringRef name) {
+  if (functionDecl->name != name || !functionDecl->typeParams.empty() ||
+      !functionDecl->returnType.has_value()) {
+    return nullptr;
+  }
+  auto params = std::vector<const Type *>();
   size_t minArgs = 0;
-  for (const Param &p : fn->params) {
-    if (!p.type.has_value()) {
+  for (const Param &param : functionDecl->params) {
+    if (!param.type.has_value()) {
       return nullptr;
     }
-    const Type *t = this->typeResolver->resolveType(*p.type, false);
-    params.push_back(p.optional() || p.defaultValue() ? Type::optional(t) : t);
-    if (!p.optional() && !p.defaultValue() && !p.rest()) {
+    const auto *type = this->typeResolver->resolveType(*param.type);
+    bool isOptional = param.optional() || param.defaultValue() != nullptr;
+    params.push_back(isOptional ? Type::optional(type) : type);
+    if (!isOptional && !param.rest()) {
       minArgs = params.size();
     }
   }
-  bool hasRest = !fn->params.empty() && fn->params.back().rest();
-  const Type *returned = this->typeResolver->resolveType(*fn->returnType, true);
+  bool hasRest = !functionDecl->params.empty() && functionDecl->params.back().rest();
+  const auto *returned = this->typeResolver->resolveTypeOrVoid(*functionDecl->returnType);
 
   return Type::function(params, minArgs, hasRest, returned);
 }
 
 const Type *TypeOperators::importedNameType(const std::vector<ImportDecl> &imports,
                                             llvm::StringRef name) {
-  for (const ImportDecl &decl : imports) {
-    for (const ModuleName &imported : decl.names) {
-      if (imported.as != name || decl.from == nullptr) {
-        continue;
-      }
-      const Type *type = this->utilityTypes->importedValueType(decl.from, imported.name);
+  for (const ImportDecl &importDecl : imports) {
+    const Type *type = this->importedFrom(importDecl, name);
+    if (type != nullptr) {
+      return type;
+    }
+  }
+
+  return nullptr;
+}
+
+const Type *TypeOperators::importedFrom(const ImportDecl &importDecl, llvm::StringRef name) {
+  if (importDecl.from == nullptr) {
+    return nullptr;
+  }
+  for (const ModuleName &imported : importDecl.names) {
+    if (imported.as == name) {
+      const Type *type = this->utilityTypes->importedValueType(importDecl.from, imported.name);
       if (type != nullptr) {
         return type;
       }
@@ -553,12 +643,12 @@ const Type *TypeOperators::importedNameType(const std::vector<ImportDecl> &impor
 }
 
 const Type *TypeOperators::singleMethodType(const Type *type, llvm::StringRef name) {
-  ClassDecl *cls = ClassDeclarer::classOf(type);
-  if (cls == nullptr) {
+  auto *classDecl = this->classDeclarer->classOf(type);
+  if (classDecl == nullptr) {
     return nullptr;
   }
-  this->classDeclarer->completeClass(cls);
-  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
+  this->classDeclarer->completeClass(classDecl);
+  auto methods = this->classDeclarer->methodsNamed(classDecl, name);
   bool isSingle =
       methods.size() == 1 && methods[0]->sym != nullptr && methods[0]->typeParams.empty();
   if (!isSingle) {
@@ -569,77 +659,99 @@ const Type *TypeOperators::singleMethodType(const Type *type, llvm::StringRef na
 }
 
 TypeOperators::ResultTypeOpResolved TypeOperators::resolveMapped(const TypeRef &ref) {
-  const Type *keys = this->typeResolver->resolveType(ref.args[0], false);
+  const auto *keys = this->typeResolver->resolveType(ref.args[0]);
   if (keys->isError()) {
     return ok(keys);
   }
-  const Type *source = this->mappedSource(ref, keys);
-  MappedParts parts = this->resolveMappedParts(ref, keys);
+  const auto *source = this->mappedSource(ref, keys);
+  auto parts = this->resolveMappedParts(ref, keys);
   if (parts.value->isError()) {
     return ok(parts.value);
   }
   if (parts.rename != nullptr && parts.rename->isError()) {
     return ok(parts.rename);
   }
-  const Type *badName = TypeOperators::nonStringRename(parts.rename);
+  auto rename = this->checkRenameIsString(parts.rename);
+  if (rename.isErr()) {
+    return err(rename.error());
+  }
+  auto stringKeys = this->checkKeysAreStrings(keys);
+  if (stringKeys.isErr()) {
+    return err(stringKeys.error());
+  }
+  const auto *mapped = Type::mapped(parts.key, keys, parts.value, ref.mappedOptional(),
+                                    ref.mappedReadonly(), source, parts.rename);
+  const auto *evaluated = this->evalTypeOp(mapped, mapped->operands());
+
+  return ok(evaluated);
+}
+
+TypeOperators::ResultTypeOpAllowed TypeOperators::checkRenameIsString(const Type *rename) const {
+  const Type *badName = this->nonStringRename(rename);
   if (badName != nullptr) {
-    std::string message = ErrorTextTypeOp::rename(badName->name());
+    auto message = ErrorTextTypeOp::rename(badName->name());
 
     return err(TypeOperatorsResolveTypeOpError{
         .code = TypeOperatorsResolveTypeOpErrorCode::RENAME_NOT_STRING,
         .message = message,
     });
   }
-  const Type *badKey = TypeOperators::nonStringKey(keys);
+
+  return ok();
+}
+
+TypeOperators::ResultTypeOpAllowed TypeOperators::checkKeysAreStrings(const Type *keys) const {
+  const Type *badKey = this->nonStringKey(keys);
   if (badKey != nullptr) {
-    std::string message = ErrorTextTypeOp::keys(badKey->name());
+    auto message = ErrorTextTypeOp::keys(badKey->name());
 
     return err(TypeOperatorsResolveTypeOpError{
         .code = TypeOperatorsResolveTypeOpErrorCode::KEYS_NOT_STRINGS,
         .message = message,
     });
   }
-  const Type *mapped = Type::mapped(parts.key, keys, parts.value, ref.mappedOptional(),
-                                    ref.mappedReadonly(), source, parts.rename);
-  const Type *evaluated = this->evalTypeOp(mapped, mapped->operands());
 
-  return ok(evaluated);
+  return ok();
 }
 
 const Type *TypeOperators::mappedSource(const TypeRef &ref, const Type *keys) {
   if (ref.args[0].kind() == TypeRefKind::KEY_OF_REF) {
-    const Type *source = this->typeResolver->resolveType(ref.args[0].args[0], false);
+    const auto *source = this->typeResolver->resolveType(ref.args[0].args[0]);
     if (source != nullptr) {
       return source;
     }
   }
-  const Type *k = keys;
-  while (k != nullptr) {
-    if (k->typeOp() == TypeOp::KeyOf) {
-      return k->operands()[0];
+  const Type *wider = keys;
+  while (wider != nullptr) {
+    if (wider->typeOp() == TypeOp::KeyOf) {
+      return wider->operands()[0];
     }
-    if (k->typeOp() == TypeOp::Exclude || k->typeOp() == TypeOp::Extract) {
-      k = k->operands()[0];
-    } else if (k->isParam() && k->constraint()) {
-      k = k->constraint();
-    } else {
-      k = nullptr;
-    }
+    wider = this->widerKeys(wider);
+  }
+
+  return nullptr;
+}
+
+const Type *TypeOperators::widerKeys(const Type *keys) const {
+  if (keys->typeOp() == TypeOp::Exclude || keys->typeOp() == TypeOp::Extract) {
+    return keys->operands()[0];
+  }
+  if (keys->isParam()) {
+    return keys->constraint();
   }
 
   return nullptr;
 }
 
 TypeOperators::MappedParts TypeOperators::resolveMappedParts(const TypeRef &ref, const Type *keys) {
-  Type *key = Type::param(ref.name);
+  auto *key = Type::param(ref.name);
   key->setConstraint(keys, {});
   this->state.getScopeStack().openTypeScope();
   auto *alias = this->state.getAst().make<TypeAliasDecl>(ref.loc, ref.name, TypeRef());
   alias->resolved = key;
   this->state.getScopeStack().setType(ref.name, alias);
-  const Type *value = this->typeResolver->resolveType(ref.args[1], false);
-  const Type *rename =
-      ref.args.size() > 2 ? this->conditionalTypes->resolveTypeArgument(ref.args[2]) : nullptr;
+  const auto *value = this->typeResolver->resolveType(ref.args[1]);
+  const Type *rename = this->writtenRename(ref);
   this->state.getScopeStack().closeTypeScope();
 
   return MappedParts{
@@ -649,27 +761,35 @@ TypeOperators::MappedParts TypeOperators::resolveMappedParts(const TypeRef &ref,
   };
 }
 
-const Type *TypeOperators::nonStringRename(const Type *rename) {
+const Type *TypeOperators::writtenRename(const TypeRef &ref) {
+  if (ref.args.size() <= 2) {
+    return nullptr;
+  }
+
+  return this->conditionalTypes->resolveTypeArgument(ref.args[2]);
+}
+
+const Type *TypeOperators::nonStringRename(const Type *rename) const {
   if (rename == nullptr || TypeQueries::mentionsParam(rename)) {
     return nullptr;
   }
-  for (const Type *n : TypeopsCheckHelpers::distributedMembers(rename)) {
-    if (!n->isStringLiteral()) {
-      return n;
+  for (const Type *renamedTo : TypeopsCheckHelpers::distributedMembers(rename)) {
+    if (!renamedTo->isStringLiteral()) {
+      return renamedTo;
     }
   }
 
   return nullptr;
 }
 
-const Type *TypeOperators::nonStringKey(const Type *keys) {
+const Type *TypeOperators::nonStringKey(const Type *keys) const {
   if (TypeQueries::mentionsParam(keys)) {
     return nullptr;
   }
   const Type *each = keys;
-  for (const Type *k : TypeOperators::membersOf(each)) {
-    if (!k->isStringLiteral() && !k->isNever()) {
-      return k;
+  for (const Type *key : this->membersOf(each)) {
+    if (!key->isStringLiteral() && !key->isNever()) {
+      return key;
     }
   }
 

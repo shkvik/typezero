@@ -24,8 +24,12 @@ public:
 private:
   using ResultStringMethod = Result<const StringMethodInfo *, StringMethodsStringMethodError>;
 
-  static const Type *resultType(StringResult result);
-  static ResultStringMethod stringMethod(llvm::StringRef name);
+  const Type *resultType(StringResult result) const;
+  ResultStringMethod checkMethodName(llvm::StringRef name) const;
+  void walkStringArgs(CallExpr *call, llvm::StringRef argKinds);
+  Expr *checkStringArg(Expr *arg, char kind);
+  void walkMethodRange(CallExpr *call, const MemberExpr *member, StringMethod method);
+  void walkRepeatCount(const CallExpr *call);
 
   SemanticState &state;
   ExprChecker *exprChecker = nullptr;

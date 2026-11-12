@@ -16,9 +16,9 @@ public:
   const Type *ofCall(CryptoFn fn, llvm::ArrayRef<Expr *> args);
 
 private:
-  static bool flag(llvm::ArrayRef<Expr *> args, size_t i);
-  static llvm::StringRef errorNameOf(CryptoFn fn, llvm::ArrayRef<Expr *> args);
-  static bool isDecipher(llvm::ArrayRef<Expr *> args);
+  bool flag(llvm::ArrayRef<Expr *> args, size_t i) const;
+  llvm::StringRef errorNameOf(CryptoFn fn, llvm::ArrayRef<Expr *> args) const;
+  bool isDecipher(llvm::ArrayRef<Expr *> args) const;
 
   SemanticState &state;
   BuiltinModuleTypes *builtinModuleTypes = nullptr;

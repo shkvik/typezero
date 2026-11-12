@@ -17,14 +17,15 @@ class ReadlineChecker {
 public:
   ReadlineChecker(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkReadlineCall(CallExpr *call, NodeModule module, llvm::StringRef fn, llvm::SMLoc loc);
+  Expr *checkReadlineCall(CallExpr *call, NodeModule module, llvm::StringRef functionName,
+                          llvm::SMLoc loc);
 
 private:
   using ResultInputIsStdin = Result<const Expr *, ReadlineCheckerStdinInputError>;
   using ResultReadlineUsed = Result<llvm::StringRef, ReadlineCheckerReadlineFunctionError>;
 
   ResultInputIsStdin stdinInput(const Expr *input);
-  static ResultReadlineUsed readlineFunction(llvm::StringRef fn, NodeModule module);
+  ResultReadlineUsed readlineFunction(llvm::StringRef functionName, NodeModule module) const;
 
   struct ReadlineStreams {
     Expr *input;
@@ -33,8 +34,8 @@ private:
 
   Expr *checkArgsLoosely(CallExpr *call);
   bool hasRejectedArgs(CallExpr *call, llvm::SMLoc loc);
-  std::optional<ReadlineStreams> readlineStreams(CallExpr *call, llvm::StringRef fn);
-  std::optional<ReadlineStreams> optionStreams(CallExpr *call, llvm::StringRef fn);
+  std::optional<ReadlineStreams> readlineStreams(CallExpr *call, llvm::StringRef functionName);
+  std::optional<ReadlineStreams> optionStreams(CallExpr *call, llvm::StringRef functionName);
   std::optional<int> outputStream(const Expr *output);
 
   SemanticState &state;

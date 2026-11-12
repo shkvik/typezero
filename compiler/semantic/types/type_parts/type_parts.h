@@ -38,7 +38,7 @@ public:
 private:
   explicit TypeParts(llvm::ArrayRef<TypeEdge> edges);
 
-  bool follows(TypeEdge edge) const;
+  bool isFollowing(TypeEdge edge) const;
   void addPart(const Type *type, std::vector<const Type *> &stack);
   std::vector<const Type *> childrenOf(const Type *type) const;
   void addDictParts(std::vector<const Type *> &children, const Type *type) const;

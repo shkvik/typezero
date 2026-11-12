@@ -23,14 +23,15 @@ FunctionValueChecker::FunctionValueChecker(SemanticState &owner, SemanticParts &
 
 Expr *FunctionValueChecker::adaptFunction(Expr *expr, const Type *to) {
   const Type *from = expr->type;
-  if (!this->nestedFunctions->namedFunction(expr) || from->hasRest() || to->hasRest()) {
+  if (this->nestedFunctions->namedFunction(expr) == nullptr || from->hasRest() || to->hasRest()) {
     return nullptr;
   }
   llvm::ArrayRef<const Type *> params = from->params();
   llvm::ArrayRef<const Type *> wanted = to->params();
-  for (size_t i = 0; i < wanted.size() && i < params.size(); ++i) {
-    if (params[i] != wanted[i] && !(params[i]->isOptional() && params[i]->inner() == wanted[i]) &&
-        !(params[i]->nonOptional()->isUnknown() && !wanted[i]->isVoid())) {
+  for (size_t index = 0; index < wanted.size() && index < params.size(); ++index) {
+    if (params[index] != wanted[index] &&
+        !(params[index]->isOptional() && params[index]->inner() == wanted[index]) &&
+        !(params[index]->nonOptional()->isUnknown() && !wanted[index]->isVoid())) {
       return nullptr;
     }
   }
@@ -40,10 +41,10 @@ Expr *FunctionValueChecker::adaptFunction(Expr *expr, const Type *to) {
   if (!to->ret()->isVoid() && from->ret() != to->ret()) {
     return nullptr;
   }
-  auto *cast = this->state.getAst().make<CastExpr>(expr->loc(), expr, std::nullopt);
-  cast->type = to;
+  auto *castExpr = this->state.getAst().make<CastExpr>(expr->loc(), expr, std::nullopt);
+  castExpr->type = to;
 
-  return cast;
+  return castExpr;
 }
 
 FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg, const Signature &expected,
@@ -53,8 +54,7 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg, const Signat
     return nullptr;
   }
   size_t count = std::min<size_t>(shape->maxArgs, expected.params.size());
-  ResultArgumentsMatch matched =
-      FunctionValueChecker::extraArguments(arg, shape->name, method, count, primary);
+  auto matched = this->extraArguments(arg, shape->name, method, count, primary);
   if (matched.isErr()) {
     this->state.getDiagnostics().error(arg->loc(), matched.error().message);
     count = primary;
@@ -79,7 +79,7 @@ FunctionValueChecker::functionValueShape(const Expr *arg) const {
 
 std::optional<FunctionValueChecker::FunctionValueShape>
 FunctionValueChecker::globalFunctionShape(const NameExpr *named) const {
-  std::optional<GlobalName> result = this->resultTypes->resultName(named->name);
+  auto result = this->resultTypes->resultName(named->name);
   if (result == GlobalName::OK || result == GlobalName::ERR) {
     return FunctionValueShape{
         .name = named->name,
@@ -87,7 +87,7 @@ FunctionValueChecker::globalFunctionShape(const NameExpr *named) const {
         .returnsNothing = false,
     };
   }
-  std::optional<GlobalName> global = this->namedGlobal(named);
+  auto global = this->namedGlobal(named);
   const FunctionValueGlobalInfo *info =
       global.has_value() ? FunctionValueTable::findGlobal(*global) : nullptr;
   if (info == nullptr) {
@@ -103,7 +103,7 @@ FunctionValueChecker::globalFunctionShape(const NameExpr *named) const {
 
 std::optional<FunctionValueChecker::FunctionValueShape>
 FunctionValueChecker::staticFunctionShape(const MemberExpr *member) const {
-  std::optional<GlobalName> owner = this->namedGlobal(member->object);
+  auto owner = this->namedGlobal(member->object);
   const FunctionValueStaticInfo *info =
       owner.has_value() ? FunctionValueTable::findStatic(*owner, member->name) : nullptr;
   if (info == nullptr) {
@@ -122,7 +122,7 @@ std::optional<GlobalName> FunctionValueChecker::namedGlobal(const Expr *expr) co
   if (named == nullptr) {
     return std::nullopt;
   }
-  std::optional<GlobalName> global = GlobalNameTable::find(named->name);
+  auto global = GlobalNameTable::find(named->name);
   if (!global.has_value() || !this->callChecker->isGlobalName(named, *global)) {
     return std::nullopt;
   }
@@ -132,42 +132,41 @@ std::optional<GlobalName> FunctionValueChecker::namedGlobal(const Expr *expr) co
 
 FunctionExpr *FunctionValueChecker::forwardingFunction(Expr *arg, const FunctionValueShape &shape,
                                                        size_t count) {
-  auto *fn = this->state.getAst().make<FunctionDecl>(arg->loc(), shape.name);
-  fn->place = FunctionPlace::EXPRESSION;
-  fn->syntax = ArrowFunction{.concise = true};
-  std::vector<Expr *> args;
-  for (size_t i = 0; i < count; ++i) {
+  auto *functionDecl = this->state.getAst().make<FunctionDecl>(arg->loc(), shape.name);
+  functionDecl->place = FunctionPlace::EXPRESSION;
+  functionDecl->syntax = ArrowFunction{.concise = true};
+  auto args = std::vector<Expr *>();
+  for (size_t index = 0; index < count; ++index) {
     Param param;
     param.name = this->state.getAst().hiddenName();
     param.loc = arg->loc();
-    fn->params.push_back(param);
+    functionDecl->params.push_back(param);
     args.push_back(this->state.getAst().make<NameExpr>(arg->loc(), param.name));
   }
   auto *call = this->state.getAst().make<CallExpr>(arg->loc(), arg, std::move(args));
-  fn->body = this->state.getAst().make<BlockStmt>(arg->loc());
+  functionDecl->body = this->state.getAst().make<BlockStmt>(arg->loc());
   if (shape.returnsNothing) {
-    fn->body->body.push_back(this->state.getAst().make<ExprStmt>(arg->loc(), call));
+    functionDecl->body->body.push_back(this->state.getAst().make<ExprStmt>(arg->loc(), call));
   } else {
-    fn->body->body.push_back(this->state.getAst().make<ReturnStmt>(arg->loc(), call));
+    functionDecl->body->body.push_back(this->state.getAst().make<ReturnStmt>(arg->loc(), call));
   }
 
-  return this->state.getAst().make<FunctionExpr>(arg->loc(), fn);
+  return this->state.getAst().make<FunctionExpr>(arg->loc(), functionDecl);
 }
 
 FunctionValueChecker::ResultArgumentsMatch
 FunctionValueChecker::extraArguments(const Expr *arg, llvm::StringRef name, llvm::StringRef method,
-                                     size_t count, unsigned primary) {
+                                     size_t count, unsigned primary) const {
   if (count > primary) {
     std::string qualified = name.str();
-    auto *m = dyn_cast<MemberExpr>(arg);
-    if (m) {
-      qualified = cast<NameExpr>(m->object)->name.str() + "." + qualified;
+    auto *member = dyn_cast<MemberExpr>(arg);
+    if (member != nullptr) {
+      qualified = cast<NameExpr>(member->object)->name.str() + "." + qualified;
     }
-    std::string argument = ErrorTextCallbackArg::argName(method, primary);
-    std::string ordinal = ErrorTextCallbackArg::position(primary);
-    std::string passes = ErrorTextCallbackArg::argsShape(method);
-    std::string message =
-        ErrorTextExtraArguments::passed(qualified, argument, ordinal, method, passes);
+    auto argument = ErrorTextCallbackArg::argName(method, primary);
+    auto ordinal = ErrorTextCallbackArg::position(primary);
+    auto passes = ErrorTextCallbackArg::argsShape(method);
+    auto message = ErrorTextExtraArguments::passed(qualified, argument, ordinal, method, passes);
 
     return err(FunctionValueCheckerExtraArgumentsError{
         .code = FunctionValueCheckerExtraArgumentsErrorCode::MORE_ARGUMENTS,
@@ -182,13 +181,13 @@ FunctionValueChecker::ResultAsyncCallbackOk
 FunctionValueChecker::asyncCallback(const Expr *arg, const Signature &expected,
                                     llvm::StringRef method) const {
   const Type *type = arg->type;
-  bool isPromised = type->isFunction() && type->ret()->isPromise() && expected.ret &&
+  bool isPromised = type->isFunction() && type->ret()->isPromise() && expected.ret != nullptr &&
                     !expected.ret->isPromise() && !expected.voidResult && !expected.ret->isError();
-  const StringMethodInfo *stringMethod = StringMethodTable::find(method);
+  const auto *stringMethod = StringMethodTable::find(method);
   bool isReplacing = stringMethod != nullptr && (stringMethod->method == StringMethod::REPLACE ||
                                                  stringMethod->method == StringMethod::REPLACE_ALL);
   if (isPromised && isReplacing) {
-    std::string message = ErrorTextAsyncCallback::replace(method, expected.ret->name());
+    auto message = ErrorTextAsyncCallback::replace(method, expected.ret->name());
 
     return err(FunctionValueCheckerAsyncCallbackError{
         .code = FunctionValueCheckerAsyncCallbackErrorCode::REPLACE_GETS_PROMISE,
@@ -196,7 +195,7 @@ FunctionValueChecker::asyncCallback(const Expr *arg, const Signature &expected,
     });
   }
   if (isPromised && expected.ret->isBool()) {
-    std::string message = ErrorTextAsyncCallback::test(method, expected.ret->name());
+    auto message = ErrorTextAsyncCallback::test(method, expected.ret->name());
 
     return err(FunctionValueCheckerAsyncCallbackError{
         .code = FunctionValueCheckerAsyncCallbackErrorCode::TEST_GETS_PROMISE,
@@ -204,7 +203,7 @@ FunctionValueChecker::asyncCallback(const Expr *arg, const Signature &expected,
     });
   }
   if (isPromised) {
-    std::string message = ErrorTextAsyncCallback::value(method, expected.ret->name());
+    auto message = ErrorTextAsyncCallback::value(method, expected.ret->name());
 
     return err(FunctionValueCheckerAsyncCallbackError{
         .code = FunctionValueCheckerAsyncCallbackErrorCode::VALUE_GETS_PROMISE,

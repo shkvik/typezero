@@ -4,7 +4,7 @@
 namespace tz {
 
 std::string ErrorTextRange::holds(llvm::ArrayRef<std::pair<int64_t, int64_t>> intervals) {
-  std::string holds;
+  auto holds = std::string();
   for (const std::pair<int64_t, int64_t> &interval : intervals) {
     holds += holds.empty() ? "" : " or ";
     holds += std::to_string(interval.first);

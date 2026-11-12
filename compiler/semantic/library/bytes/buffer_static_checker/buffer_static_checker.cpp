@@ -54,25 +54,28 @@ BufferStaticChecker::BufferStaticChecker(SemanticState &owner, SemanticParts &al
   this->jsonStaticChecker = &all.jsonStaticChecker;
 }
 
-std::optional<std::u16string> BufferStaticChecker::literalText(const Expr *e) {
-  if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
-    e = conv->operand;
+std::optional<std::u16string> BufferStaticChecker::literalText(const Expr *expr) const {
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  if (conversion != nullptr && conversion->isImplicit()) {
+    expr = conversion->operand;
   }
-  if (auto *lit = dyn_cast<StringLitExpr>(e)) {
-    return lit->value;
+  auto *literal = dyn_cast<StringLitExpr>(expr);
+  if (literal != nullptr) {
+    return literal->value;
   }
-  if (auto *tmpl = dyn_cast<TemplateExpr>(e); tmpl && tmpl->exprs.empty()) {
-    return tmpl->quasis[0];
+  auto *templateExpr = dyn_cast<TemplateExpr>(expr);
+  if (templateExpr != nullptr && templateExpr->exprs.empty()) {
+    return templateExpr->quasis[0];
   }
 
   return std::nullopt;
 }
 
-BufferStaticChecker::ResultSourceElement BufferStaticChecker::sourceElement(const Type *from,
-                                                                            llvm::StringRef what) {
-  const Type *element = GeneratorChecker::iteratedType(from);
-  if (!element || from->isString()) {
-    std::string message = ErrorTextBytesStatic::source(what, from->name());
+BufferStaticChecker::ResultSourceElement
+BufferStaticChecker::sourceElement(const Type *from, llvm::StringRef what) const {
+  const auto *element = this->generatorChecker->iteratedType(from);
+  if (element == nullptr || from->isString()) {
+    auto message = ErrorTextBytesStatic::source(what, from->name());
 
     return err(BufferStaticCheckerSourceElementError{
         .code = BufferStaticCheckerSourceElementErrorCode::NOT_ITERABLE,
@@ -83,11 +86,11 @@ BufferStaticChecker::ResultSourceElement BufferStaticChecker::sourceElement(cons
   return ok(element);
 }
 
-BufferStaticChecker::ResultConcatSources BufferStaticChecker::concatSources(const Type *list,
-                                                                            const Type *buffer) {
-  const Type *uint8 = Type::bytesType(Bytes::Uint8);
+BufferStaticChecker::ResultConcatSources
+BufferStaticChecker::concatSources(const Type *list, const Type *buffer) const {
+  const auto *uint8 = Type::bytesType(Bytes::Uint8);
   if (!list->isArray() || (list->inner() != uint8 && list->inner() != buffer)) {
-    std::string message = ErrorTextBufferStatic::concat(list->name());
+    auto message = ErrorTextBufferStatic::concat(list->name());
 
     return err(BufferStaticCheckerConcatSourcesError{
         .code = BufferStaticCheckerConcatSourcesErrorCode::NOT_BYTES_LIST,
@@ -104,13 +107,13 @@ Expr *BufferStaticChecker::checkBytesStatic(CallExpr *call, MemberExpr *member) 
   if (!isGlobal) {
     return nullptr;
   }
-  std::optional<GlobalName> globalName = GlobalNameTable::find(object->name);
+  auto globalName = GlobalNameTable::find(object->name);
   bool isBigint =
       globalName == GlobalName::BIG_INT64_ARRAY || globalName == GlobalName::BIG_UINT64_ARRAY;
   if (isBigint) {
     return this->reportBigIntArray(call, object);
   }
-  const Type *type = BytesChecker::bytesTypeNamed(object->name);
+  const auto *type = this->bytesChecker->bytesTypeNamed(object->name);
   if (type == nullptr) {
     return nullptr;
   }
@@ -125,7 +128,7 @@ Expr *BufferStaticChecker::checkBytesStatic(CallExpr *call, MemberExpr *member) 
       .object = object,
       .type = type,
   };
-  std::optional<BytesMethod> method = BytesMethodTable::findMethod(member->name);
+  auto method = BytesMethodTable::findMethod(member->name);
   if (type->bytes() == Bytes::ArrayBuffer && method == BytesMethod::IS_VIEW) {
     return this->checkIsView(bytes);
   }
@@ -136,14 +139,14 @@ Expr *BufferStaticChecker::checkBytesStatic(CallExpr *call, MemberExpr *member) 
     return this->bytesNewChecker->checkTextDecoderParse(call, member);
   }
   if (!type->isTypedArray()) {
-    std::string message = ErrorTextBytesStatic::missing(object->name, member->name);
+    auto message = ErrorTextBytesStatic::missing(object->name, member->name);
     return this->reportStatic(call, member, message);
   }
   if (method == BytesMethod::OF) {
     return this->checkTypedArrayOf(bytes);
   }
   if (method != BytesMethod::FROM) {
-    std::string message = ErrorTextBytesStatic::notYet(object->name, member->name);
+    auto message = ErrorTextBytesStatic::notYet(object->name, member->name);
     return this->reportStatic(call, member, message);
   }
 
@@ -151,8 +154,8 @@ Expr *BufferStaticChecker::checkBytesStatic(CallExpr *call, MemberExpr *member) 
 }
 
 Expr *BufferStaticChecker::reportBigIntArray(CallExpr *call, NameExpr *object) {
-  std::string quoted = ErrorTextBigInt::quoted(object->name);
-  std::string bigint = ErrorTextBigInt::none(quoted);
+  auto quoted = ErrorTextBigInt::quoted(object->name);
+  auto bigint = ErrorTextBigInt::none(quoted);
   this->state.getDiagnostics().error(object->loc(), bigint);
   this->argumentChecker->walkArgsLoosely(call);
   call->type = Type::error();
@@ -170,14 +173,14 @@ Expr *BufferStaticChecker::reportStatic(CallExpr *call, MemberExpr *member,
 
 Expr *BufferStaticChecker::checkIsView(const StaticCall &bytes) {
   CallExpr *call = bytes.call;
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+  auto arity = this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(bytes.member->loc(), arity.error().message);
     return call;
   }
   call->args[0] = this->exprChecker->checkExpr(call->args[0]);
 
-  return BufferStaticChecker::toBuiltinCall(call, Builtin::ArrayBufferIsView, Type::boolTy());
+  return this->toBuiltinCall(call, Builtin::ArrayBufferIsView, Type::boolTy());
 }
 
 Expr *BufferStaticChecker::checkTypedArrayOf(const StaticCall &bytes) {
@@ -192,13 +195,13 @@ Expr *BufferStaticChecker::checkTypedArrayOf(const StaticCall &bytes) {
 
 Expr *BufferStaticChecker::checkTypedArrayFrom(const StaticCall &bytes) {
   CallExpr *call = bytes.call;
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  auto arity = this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(bytes.member->loc(), arity.error().message);
     return call;
   }
   if (call->args.size() != 1) {
-    std::string what = ErrorTextBytesStatic::from(bytes.object->name);
+    auto what = ErrorTextBytesStatic::from(bytes.object->name);
     return this->checkBytesFromWith(call, bytes.type, what);
   }
   Expr *&source = call->args[0];
@@ -214,7 +217,7 @@ Expr *BufferStaticChecker::checkTypedArrayFrom(const StaticCall &bytes) {
   Builtin builtin =
       source->type->isTypedArray() ? Builtin::BytesFromBytes : Builtin::BytesFromArray;
 
-  return BufferStaticChecker::toBuiltinCall(call, builtin, bytes.type);
+  return this->toBuiltinCall(call, builtin, bytes.type);
 }
 
 Expr *BufferStaticChecker::checkBytesFromWith(CallExpr *call, const Type *type,
@@ -226,39 +229,38 @@ Expr *BufferStaticChecker::checkBytesFromWith(CallExpr *call, const Type *type,
   if (from->isError()) {
     return call;
   }
-  ResultSourceElement iterated = BufferStaticChecker::sourceElement(from, what);
+  auto iterated = this->sourceElement(from, what);
   if (iterated.isErr()) {
     this->state.getDiagnostics().error(source->loc(), iterated.error().message);
     return call;
   }
   if (from->isIterator()) {
-    GeneratorChecker::ResultNextNeedsNoValue nothing =
-        this->generatorChecker->checkSendsNothing(from, what);
+    auto nothing = this->generatorChecker->checkSendsNothing(from, what);
     if (nothing.isErr()) {
       this->state.getDiagnostics().error(source->loc(), nothing.error().message);
     }
   }
 
-  Signature signature = BufferStaticChecker::mapperSignature(iterated.value(), type);
+  auto signature = this->mapperSignature(iterated.value(), type);
   this->rememberByteCallback(call->args[1], from, type);
   bool isArrow = isa<FunctionExpr>(call->args[1]);
   call->args[1] = this->callbackChecker->checkFunctionArg(call->args[1], signature, 1, what);
   if (!call->args[1]->type->isFunction()) {
     return call;
   }
-  ResultMapResultFits fits = BufferStaticChecker::mapResultFits(type, isArrow);
+  auto fits = this->mapResultFits(type, isArrow);
   if (fits.isErr()) {
     this->state.getDiagnostics().error(call->args[1]->loc(), fits.error().message);
     return call;
   }
   this->flowChecker->calledFunction();
-  CallExpr *arrayFrom = this->makeArrayFrom(call, source, type);
+  auto *arrayFrom = this->makeArrayFrom(call, source, type);
   call->args = {arrayFrom};
 
-  return BufferStaticChecker::toBuiltinCall(call, Builtin::BytesFromArray, type);
+  return this->toBuiltinCall(call, Builtin::BytesFromArray, type);
 }
 
-Signature BufferStaticChecker::mapperSignature(const Type *element, const Type *type) {
+Signature BufferStaticChecker::mapperSignature(const Type *element, const Type *type) const {
   Signature signature;
   signature.pad = false;
   signature.params = {element, Type::intTy()};
@@ -282,15 +284,15 @@ void BufferStaticChecker::rememberByteCallback(const Expr *arg, const Type *from
 }
 
 BufferStaticChecker::ResultMapResultFits BufferStaticChecker::mapResultFits(const Type *type,
-                                                                            bool arrow) {
-  int64_t lo = 0;
-  int64_t hi = 0;
-  bool isBounded = !arrow && type->elementRange(lo, hi) && type->bytes() != Bytes::Uint8Clamped;
+                                                                            bool arrow) const {
+  int64_t low = 0;
+  int64_t high = 0;
+  bool isBounded = !arrow && type->elementRange(low, high) && type->bytes() != Bytes::Uint8Clamped;
   if (isBounded) {
-    std::string elementWhat = ErrorTextByteView::element(type->name());
-    std::string range = ErrorTextBytes::range(lo, hi);
-    std::string hint = BytesCheckHelpers::wrapHint(type->bytes(), "f(x)");
-    std::string message = ErrorTextTypedArray::mapFits(elementWhat, range, hint);
+    auto elementWhat = ErrorTextByteView::element(type->name());
+    auto range = ErrorTextBytes::range(low, high);
+    auto hint = BytesCheckHelpers::wrapHint(type->bytes(), "f(x)");
+    auto message = ErrorTextTypedArray::mapFits(elementWhat, range, hint);
 
     return err(BufferStaticCheckerMapResultFitsError{
         .code = BufferStaticCheckerMapResultFitsErrorCode::RESULT_MAY_NOT_FIT,
@@ -302,8 +304,8 @@ BufferStaticChecker::ResultMapResultFits BufferStaticChecker::mapResultFits(cons
 }
 
 CallExpr *BufferStaticChecker::makeArrayFrom(CallExpr *call, Expr *source, const Type *type) {
-  llvm::StringRef arrayGlobal = GlobalNameTable::getName(GlobalName::ARRAY);
-  llvm::StringRef fromName = GlobalMemberTable::getName(GlobalMember::ARRAY_FROM);
+  auto arrayGlobal = GlobalNameTable::getName(GlobalName::ARRAY);
+  auto fromName = GlobalMemberTable::getName(GlobalMember::ARRAY_FROM);
   auto *arrayName = this->state.getAst().make<NameExpr>(call->loc(), arrayGlobal);
   auto *callee = this->state.getAst().make<MemberExpr>(call->loc(), arrayName, fromName);
   std::vector<Expr *> args{source, call->args[1]};
@@ -315,10 +317,10 @@ CallExpr *BufferStaticChecker::makeArrayFrom(CallExpr *call, Expr *source, const
 }
 
 Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member) {
-  std::optional<BytesMethod> method = BytesMethodTable::findMethod(member->name);
+  auto method = BytesMethodTable::findMethod(member->name);
   const BufferStaticInfo *found = method.has_value() ? BufferStaticTable::find(*method) : nullptr;
   if (found == nullptr) {
-    std::string message = ErrorTextBufferStatic::unknown(member->name);
+    auto message = ErrorTextBufferStatic::unknown(member->name);
     return this->reportStatic(call, member, message);
   }
 
@@ -345,8 +347,8 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
 }
 
 Expr *BufferStaticChecker::checkBufferFrom(CallExpr *call, MemberExpr *member) {
-  const Type *buffer = Type::bytesType(Bytes::Buffer);
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 3);
+  const auto *buffer = Type::bytesType(Bytes::Buffer);
+  auto arity = this->argumentChecker->checkArity(call, 1, 3);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
@@ -369,7 +371,7 @@ Expr *BufferStaticChecker::checkBufferFrom(CallExpr *call, MemberExpr *member) {
     return this->checkBufferView(call);
   }
   if (call->args.size() > 1) {
-    std::string message = ErrorTextBufferStatic::offsetOnly(from->name());
+    auto message = ErrorTextBufferStatic::offsetOnly(from->name());
     this->state.getDiagnostics().error(call->args[1]->loc(), message);
     return call;
   }
@@ -378,12 +380,12 @@ Expr *BufferStaticChecker::checkBufferFrom(CallExpr *call, MemberExpr *member) {
   }
   Builtin builtin = from->isTypedArray() ? Builtin::BytesFromBytes : Builtin::BytesFromArray;
 
-  return BufferStaticChecker::toBuiltinCall(call, builtin, buffer);
+  return this->toBuiltinCall(call, builtin, buffer);
 }
 
 Expr *BufferStaticChecker::checkBufferFromString(CallExpr *call, MemberExpr *member) {
   if (call->args.size() > 2) {
-    ArgumentChecker::ResultArityMatches encoded = this->argumentChecker->checkArity(call, 1, 2);
+    auto encoded = this->argumentChecker->checkArity(call, 1, 2);
     if (encoded.isErr()) {
       this->state.getDiagnostics().error(member->loc(), encoded.error().message);
     }
@@ -391,27 +393,27 @@ Expr *BufferStaticChecker::checkBufferFromString(CallExpr *call, MemberExpr *mem
   }
   call->args.resize(2, nullptr);
   call->args[1] = this->encodingOrUtf8(call, call->args[1]);
-  const Type *buffer = Type::bytesType(Bytes::Buffer);
+  const auto *buffer = Type::bytesType(Bytes::Buffer);
 
-  return BufferStaticChecker::toBuiltinCall(call, Builtin::BufferFromString, buffer);
+  return this->toBuiltinCall(call, Builtin::BufferFromString, buffer);
 }
 
 Expr *BufferStaticChecker::checkBufferView(CallExpr *call) {
-  for (size_t i = 1; i < call->args.size(); ++i) {
-    call->args[i] = this->memberChecker->checkPosition(call->args[i]);
+  for (size_t index = 1; index < call->args.size(); ++index) {
+    call->args[index] = this->memberChecker->checkPosition(call->args[index]);
   }
-  std::string what = ErrorTextBufferStatic::buffer();
+  auto what = ErrorTextBufferStatic::buffer();
   Expr *offset = call->args.size() > 1 ? call->args[1] : nullptr;
   Expr *length = call->args.size() > 2 ? call->args[2] : nullptr;
   this->byteProofs->walkView(call->args[0], offset, length, 1, what);
-  const Type *buffer = Type::bytesType(Bytes::Buffer);
+  const auto *buffer = Type::bytesType(Bytes::Buffer);
 
-  return BufferStaticChecker::toBuiltinCall(call, Builtin::BytesView, buffer);
+  return this->toBuiltinCall(call, Builtin::BytesView, buffer);
 }
 
 Expr *BufferStaticChecker::checkAlloc(CallExpr *call, MemberExpr *member) {
-  const Type *buffer = Type::bytesType(Bytes::Buffer);
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 3);
+  const auto *buffer = Type::bytesType(Bytes::Buffer);
+  auto arity = this->argumentChecker->checkArity(call, 1, 3);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
@@ -419,35 +421,35 @@ Expr *BufferStaticChecker::checkAlloc(CallExpr *call, MemberExpr *member) {
   this->walkAllocSize(call);
   if (call->args.size() == 1) {
     call->args.push_back(this->makeBoolLiteral(call->loc(), true));
-    return BufferStaticChecker::toBuiltinCall(call, Builtin::BytesNew, buffer);
+    return this->toBuiltinCall(call, Builtin::BytesNew, buffer);
   }
 
-  Expr *fill = this->exprChecker->checkExpr(call->args[1]);
+  auto *fill = this->exprChecker->checkExpr(call->args[1]);
   const Type *fillType = fill->type;
   if (fillType->isError()) {
     return call;
   }
-  const Type *uint8 = Type::bytesType(Bytes::Uint8);
+  const auto *uint8 = Type::bytesType(Bytes::Uint8);
   if (fillType->isInteger()) {
     fill = this->convertByteFill(fill);
   } else if (fillType->isTypedArray() && TypeRelations::isImplicitlyConvertible(fillType, uint8)) {
     fill = this->typeRelations->convert(fill, uint8);
   } else if (!fillType->isString()) {
-    std::string message = ErrorTextBufferStatic::allocFill(fillType->name());
+    auto message = ErrorTextBufferStatic::allocFill(fillType->name());
     this->state.getDiagnostics().error(fill->loc(), message);
     return call;
   }
-  Expr *encoding = this->allocEncoding(call, fillType);
+  auto *encoding = this->allocEncoding(call, fillType);
   call->args = {call->args[0], fill, encoding};
 
-  return BufferStaticChecker::toBuiltinCall(call, Builtin::BufferAllocFill, buffer);
+  return this->toBuiltinCall(call, Builtin::BufferAllocFill, buffer);
 }
 
 Expr *BufferStaticChecker::convertByteFill(Expr *fill) {
-  const Type *buffer = Type::bytesType(Bytes::Buffer);
-  Expr *converted = this->typeRelations->convert(fill, Type::intTy());
-  std::string byte = ErrorTextBufferLabel::byte();
-  ByteProofs::ResultValueFitsType fitting = this->byteProofs->valueFits(converted, buffer, byte);
+  const auto *buffer = Type::bytesType(Bytes::Buffer);
+  auto *converted = this->typeRelations->convert(fill, Type::intTy());
+  auto byte = ErrorTextBufferLabel::byte();
+  auto fitting = this->byteProofs->valueFits(converted, buffer, byte);
   if (fitting.isErr()) {
     this->state.getDiagnostics().error(converted->loc(), fitting.error().message);
   }
@@ -459,9 +461,9 @@ Expr *BufferStaticChecker::allocEncoding(CallExpr *call, const Type *fillType) {
   if (call->args.size() != 3) {
     return this->makeUtf8Literal(call->loc());
   }
-  Expr *encoding = this->bytesChecker->checkBufferEncoding(call->args[2]);
+  auto *encoding = this->bytesChecker->checkBufferEncoding(call->args[2]);
   if (!fillType->isString()) {
-    std::string message = ErrorTextBufferStatic::fillCoding();
+    auto message = ErrorTextBufferStatic::fillCoding();
     this->state.getDiagnostics().error(encoding->loc(), message);
   }
 
@@ -469,57 +471,55 @@ Expr *BufferStaticChecker::allocEncoding(CallExpr *call, const Type *fillType) {
 }
 
 Expr *BufferStaticChecker::checkAllocUnsafe(CallExpr *call, MemberExpr *member) {
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+  auto arity = this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
   this->walkAllocSize(call);
   call->args.push_back(this->makeBoolLiteral(call->loc(), false));
-  const Type *buffer = Type::bytesType(Bytes::Buffer);
+  const auto *buffer = Type::bytesType(Bytes::Buffer);
 
-  return BufferStaticChecker::toBuiltinCall(call, Builtin::BytesNew, buffer);
+  return this->toBuiltinCall(call, Builtin::BytesNew, buffer);
 }
 
 void BufferStaticChecker::walkAllocSize(CallExpr *call) {
   call->args[0] = this->memberChecker->checkPosition(call->args[0]);
-  std::string size = ErrorTextBufferStatic::size();
-  IndexProofs::ResultBetweenProven between =
-      this->indexProofs->requireBetween(call->args[0], 0, std::nullopt, size);
+  auto size = ErrorTextBufferStatic::size();
+  auto between = this->indexProofs->requireBetween(call->args[0], 0, std::nullopt, size);
   this->reportUnprovenBetween(between, call->args[0]->loc());
 }
 
 Expr *BufferStaticChecker::checkConcat(CallExpr *call, MemberExpr *member) {
-  const Type *buffer = Type::bytesType(Bytes::Buffer);
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  const auto *buffer = Type::bytesType(Bytes::Buffer);
+  auto arity = this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
   Expr *&list = call->args[0];
-  const Type *uint8 = Type::bytesType(Bytes::Uint8);
+  const auto *uint8 = Type::bytesType(Bytes::Uint8);
   list = this->exprChecker->checkExpr(list, Type::array(uint8));
   if (list->type->isError()) {
     return call;
   }
-  ResultConcatSources sources = BufferStaticChecker::concatSources(list->type, buffer);
+  auto sources = this->concatSources(list->type, buffer);
   if (sources.isErr()) {
     this->state.getDiagnostics().error(list->loc(), sources.error().message);
     return call;
   }
   if (call->args.size() == 2) {
     call->args[1] = this->memberChecker->checkPosition(call->args[1]);
-    std::string total = ErrorTextBufferStatic::total();
-    IndexProofs::ResultBetweenProven between =
-        this->indexProofs->requireBetween(call->args[1], 0, std::nullopt, total);
+    auto total = ErrorTextBufferStatic::total();
+    auto between = this->indexProofs->requireBetween(call->args[1], 0, std::nullopt, total);
     this->reportUnprovenBetween(between, call->args[1]->loc());
   }
 
-  return BufferStaticChecker::toBuiltinCall(call, Builtin::BufferConcat, buffer);
+  return this->toBuiltinCall(call, Builtin::BufferConcat, buffer);
 }
 
 Expr *BufferStaticChecker::checkByteLength(CallExpr *call, MemberExpr *member) {
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  auto arity = this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
@@ -534,30 +534,30 @@ Expr *BufferStaticChecker::checkByteLength(CallExpr *call, MemberExpr *member) {
     call->args.resize(2, nullptr);
     call->args[1] = this->encodingOrUtf8(call, call->args[1]);
   } else if (!hasBytes) {
-    std::string message = ErrorTextBufferStatic::byteLength(measured->name());
+    auto message = ErrorTextBufferStatic::byteLength(measured->name());
     this->state.getDiagnostics().error(call->args[0]->loc(), message);
     return call;
   }
 
-  return BufferStaticChecker::toBuiltinCall(call, Builtin::BufferByteLength, Type::intTy());
+  return this->toBuiltinCall(call, Builtin::BufferByteLength, Type::intTy());
 }
 
 Expr *BufferStaticChecker::checkBufferCompare(CallExpr *call, MemberExpr *member) {
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 2);
+  auto arity = this->argumentChecker->checkArity(call, 2, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
-  const Type *uint8 = Type::bytesType(Bytes::Uint8);
+  const auto *uint8 = Type::bytesType(Bytes::Uint8);
   for (Expr *&arg : call->args) {
     arg = this->argumentChecker->checkArg(arg, uint8);
   }
 
-  return BufferStaticChecker::toBuiltinCall(call, Builtin::BufferCompare, Type::intTy());
+  return this->toBuiltinCall(call, Builtin::BufferCompare, Type::intTy());
 }
 
 Expr *BufferStaticChecker::checkIsBuffer(CallExpr *call, MemberExpr *member) {
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+  auto arity = this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
@@ -574,7 +574,7 @@ Expr *BufferStaticChecker::checkIsBuffer(CallExpr *call, MemberExpr *member) {
     return this->makeBufferTest(call, member);
   }
 
-  return BufferStaticChecker::toBuiltinCall(call, Builtin::BufferIsBuffer, Type::boolTy());
+  return this->toBuiltinCall(call, Builtin::BufferIsBuffer, Type::boolTy());
 }
 
 bool BufferStaticChecker::mayBeBuffer(const Type *type) {
@@ -586,7 +586,7 @@ bool BufferStaticChecker::isBuffer(const Type *type) {
 }
 
 Expr *BufferStaticChecker::makeBufferTest(CallExpr *call, MemberExpr *member) {
-  llvm::StringRef bufferName = GlobalNameTable::getName(GlobalName::BUFFER);
+  auto bufferName = GlobalNameTable::getName(GlobalName::BUFFER);
   auto *rhs = this->state.getAst().make<NameExpr>(member->loc(), bufferName);
   rhs->type = Type::bytesType(Bytes::Buffer);
   auto *test =
@@ -597,20 +597,20 @@ Expr *BufferStaticChecker::makeBufferTest(CallExpr *call, MemberExpr *member) {
 }
 
 Expr *BufferStaticChecker::checkIsEncoding(CallExpr *call, MemberExpr *member) {
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+  auto arity = this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
-  std::optional<std::u16string> text = BufferStaticChecker::literalText(call->args[0]);
+  auto text = this->literalText(call->args[0]);
   if (text.has_value()) {
-    std::string utf8 = ToUtf8::toUtf8(*text);
+    auto utf8 = ToUtf8::toUtf8(*text);
     bool isKnown = BytesCheckHelpers::encodingNamed(utf8).has_value();
     return this->makeBoolLiteral(call->loc(), isKnown);
   }
   call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
 
-  return BufferStaticChecker::toBuiltinCall(call, Builtin::BufferIsEncoding, Type::boolTy());
+  return this->toBuiltinCall(call, Builtin::BufferIsEncoding, Type::boolTy());
 }
 
 Expr *BufferStaticChecker::encodingOrUtf8(CallExpr *call, Expr *encoding) {
@@ -621,7 +621,8 @@ Expr *BufferStaticChecker::encodingOrUtf8(CallExpr *call, Expr *encoding) {
   return this->makeUtf8Literal(call->loc());
 }
 
-Expr *BufferStaticChecker::toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result) {
+Expr *BufferStaticChecker::toBuiltinCall(CallExpr *call, Builtin builtin,
+                                         const Type *result) const {
   call->target = BuiltinCall{.builtin = builtin};
   call->type = result;
 
@@ -653,34 +654,34 @@ IntLitExpr *BufferStaticChecker::makeUtf8Literal(llvm::SMLoc loc) {
 
 Expr *BufferStaticChecker::checkEmbedBytes(CallExpr *call, NameExpr *name) {
   call->type = Type::error();
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+  auto arity = this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(name->loc(), arity.error().message);
     return call;
   }
   std::string bytes, shown, full;
-  llvm::StringRef fn = GlobalNameTable::getName(GlobalName::EMBED_BYTES);
-  if (!this->jsonStaticChecker->readEmbedded(call, fn, bytes, shown, full)) {
+  auto functionName = GlobalNameTable::getName(GlobalName::EMBED_BYTES);
+  if (!this->jsonStaticChecker->readEmbedded(call, functionName, bytes, shown, full)) {
     return call;
   }
   if (int64_t(bytes.size()) > Type::kMaxLength) {
-    std::string message = ErrorTextBufferStatic::embedSize(shown);
+    auto message = ErrorTextBufferStatic::embedSize(shown);
     this->state.getDiagnostics().error(call->args[0]->loc(), message);
     return call;
   }
   llvm::SMLoc loc = call->args[0]->loc();
   std::u16string units(bytes.size(), u'\0');
-  for (size_t i = 0; i < bytes.size(); ++i) {
-    units[i] = char16_t(static_cast<unsigned char>(bytes[i]));
+  for (size_t index = 0; index < bytes.size(); ++index) {
+    units[index] = char16_t(static_cast<unsigned char>(bytes[index]));
   }
-  auto *lit = this->state.getAst().make<StringLitExpr>(loc, std::move(units));
-  lit->type = Type::string();
-  llvm::SmallVector<llvm::UTF16, 64> path;
+  auto *literal = this->state.getAst().make<StringLitExpr>(loc, std::move(units));
+  literal->type = Type::string();
+  auto path = llvm::SmallVector<llvm::UTF16, 64>();
   llvm::convertUTF8ToUTF16String(full, path);
   auto *file =
       this->state.getAst().make<StringLitExpr>(loc, std::u16string(path.begin(), path.end()));
   file->type = Type::string();
-  call->args = {lit, file};
+  call->args = {literal, file};
   call->target = BuiltinCall{.builtin = Builtin::EmbedBytes};
   call->type = Type::bytesType(Bytes::Uint8);
 

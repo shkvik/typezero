@@ -13,7 +13,7 @@ std::string ErrorTextDateDay::month(int64_t month) {
 
 std::string ErrorTextDateDay::missing(std::optional<int64_t> year, int64_t month, int64_t day,
                                       int64_t toMonth, int64_t toDay) {
-  std::string text = ErrorTextDateDay::month(month);
+  auto text = ErrorTextDateDay::month(month);
   if (year) {
     text += " " + std::to_string(*year);
   }

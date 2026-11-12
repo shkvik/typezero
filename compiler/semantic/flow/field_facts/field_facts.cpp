@@ -6,6 +6,7 @@
 #include "compiler/semantic/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
+#include <functional>
 
 using llvm::dyn_cast;
 
@@ -17,14 +18,14 @@ FieldFacts::FieldFacts(SemanticState &owner, SemanticParts &all)
 }
 
 std::optional<FieldPath> FieldFacts::fieldPath(const Expr *expr) const {
-  std::vector<llvm::StringRef> names;
-  const Expr *link = ObjectCheckHelpers::unnarrowed(expr);
+  auto names = std::vector<llvm::StringRef>();
+  const auto *link = ObjectCheckHelpers::unnarrowed(expr);
   auto *member = dyn_cast<MemberExpr>(link);
   if (member == nullptr) {
     return std::nullopt;
   }
   while (member != nullptr) {
-    if (!FieldFacts::holdsField(member)) {
+    if (!this->isHoldingField(member)) {
       return std::nullopt;
     }
     names.push_back(member->name);
@@ -35,8 +36,7 @@ std::optional<FieldPath> FieldFacts::fieldPath(const Expr *expr) const {
   if (root == nullptr || root->var() == nullptr) {
     return std::nullopt;
   }
-  FieldPath path;
-  path.var = root->var();
+  auto path = FieldPath{.var = root->var()};
   for (llvm::StringRef name : llvm::reverse(names)) {
     path.names.push_back(name);
   }
@@ -44,7 +44,7 @@ std::optional<FieldPath> FieldFacts::fieldPath(const Expr *expr) const {
   return path;
 }
 
-bool FieldFacts::holdsField(const MemberExpr *member) {
+bool FieldFacts::isHoldingField(const MemberExpr *member) const {
   if (member->optional || member->object->type == nullptr) {
     return false;
   }
@@ -60,7 +60,7 @@ bool FieldFacts::isFieldDefined(const FieldPath &path) const {
   return this->state.getFlowState().isFieldDefined(path);
 }
 
-void FieldFacts::defineField(Flow &flow, const FieldPath &path) {
+void FieldFacts::defineField(Flow &flow, const FieldPath &path) const {
   if (!llvm::is_contained(flow.definedFields, path)) {
     flow.definedFields.push_back(path);
   }
@@ -70,31 +70,53 @@ void FieldFacts::fieldsAssigned(llvm::StringRef name) {
   this->state.getFlowState().forgetFieldsNamed(name);
 }
 
-void FieldFacts::forgetFieldsOf(Flow &flow, const VarSymbol *var) {
-  llvm::erase_if(flow.definedFields, [&](const FieldPath &path) { return path.var == var; });
-  llvm::erase_if(flow.narrowedFields, [&](const auto &entry) { return entry.first.var == var; });
+bool FieldFacts::isPathOf(const VarSymbol *variable, const FieldPath &path) const {
+  return path.var == variable;
+}
+
+bool FieldFacts::isNarrowedPathOf(const VarSymbol *variable,
+                                  const std::pair<FieldPath, const Type *> &entry) const {
+  return entry.first.var == variable;
+}
+
+void FieldFacts::forgetFieldsOf(Flow &flow, const VarSymbol *variable) const {
+  auto isOwned = std::bind_front(&FieldFacts::isPathOf, this, variable);
+  auto isNarrowedOwned = std::bind_front(&FieldFacts::isNarrowedPathOf, this, variable);
+  llvm::erase_if(flow.definedFields, isOwned);
+  llvm::erase_if(flow.narrowedFields, isNarrowedOwned);
 }
 
 Expr *FieldFacts::narrowedField(MemberExpr *member) {
-  if (this->state.getStreamStore().hasStreamViews()) {
-    if (std::optional<FieldPath> path = this->fieldPath(member)) {
-      if (const Type *view = this->state.getStreamStore().findStreamView(*path, member->loc())) {
-        return this->typeRelations->convert(member, view);
-      }
-    }
+  const auto *view = this->streamView(member);
+  if (view != nullptr) {
+    return this->typeRelations->convert(member, view);
   }
   if (!this->state.getFlowState().hasNarrowedFields()) {
     return member;
   }
-  std::optional<FieldPath> path = this->fieldPath(member);
-  if (!path) {
+  auto path = this->fieldPath(member);
+  if (!path.has_value()) {
     return member;
   }
-  if (const Type *type = this->state.getFlowState().findNarrowedField(*path)) {
-    return this->typeRelations->convert(member, type);
+  const auto *type = this->state.getFlowState().findNarrowedField(*path);
+  if (type == nullptr) {
+    return member;
   }
 
-  return member;
+  return this->typeRelations->convert(member, type);
+}
+
+const Type *FieldFacts::streamView(const MemberExpr *member) const {
+  const auto &streams = this->state.getStreamStore();
+  if (!streams.hasStreamViews()) {
+    return nullptr;
+  }
+  auto path = this->fieldPath(member);
+  if (!path.has_value()) {
+    return nullptr;
+  }
+
+  return streams.findStreamView(*path, member->loc());
 }
 
 }

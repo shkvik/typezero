@@ -19,6 +19,12 @@ using llvm::dyn_cast;
 
 namespace tz {
 
+namespace {
+
+constexpr int kMaxCycleRounds = 8;
+
+}
+
 ReturnInferrer::ReturnInferrer(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->classLinks = &all.classLinks;
@@ -27,19 +33,18 @@ ReturnInferrer::ReturnInferrer(SemanticState &owner, SemanticParts &all)
   this->asyncChecker = &all.asyncChecker;
   this->importBinder = &all.importBinder;
   this->typeRelations = &all.typeRelations;
+  this->returnChecker = &all.returnChecker;
   this->functionChecker = &all.functionChecker;
   this->generatorChecker = &all.generatorChecker;
   this->genericClassChecker = &all.genericClassChecker;
 }
 
-bool ReturnInferrer::returnsValue(const Stmt *body) {
-  PlacedNodes nodes = PlacedNodes::collect({body}, {});
+bool ReturnInferrer::isReturningValue(const Stmt *body) const {
+  auto nodes = PlacedNodes::collect({body}, {});
   for (const PlacedStmt &placed : nodes.getStmts()) {
-    if (placed.place.isInsideFunction()) {
-      continue;
-    }
-    auto *result = dyn_cast<ReturnStmt>(placed.stmt);
-    if (result != nullptr && ReturnInferrer::givesValue(result)) {
+    auto *returnStmt = dyn_cast<ReturnStmt>(placed.stmt);
+    bool isOwn = returnStmt != nullptr && !placed.place.isInsideFunction();
+    if (isOwn && this->isGivingValue(returnStmt)) {
       return true;
     }
   }
@@ -47,20 +52,21 @@ bool ReturnInferrer::returnsValue(const Stmt *body) {
   return false;
 }
 
-bool ReturnInferrer::givesValue(const ReturnStmt *result) {
-  if (result->value == nullptr) {
+bool ReturnInferrer::isGivingValue(const ReturnStmt *returnStmt) const {
+  if (returnStmt->value == nullptr) {
     return false;
   }
-  auto *unary = dyn_cast<UnaryExpr>(result->value);
+  auto *unary = dyn_cast<UnaryExpr>(returnStmt->value);
   bool isDiscarded = unary != nullptr && unary->op == UnaryOp::Void;
 
   return !isDiscarded;
 }
 
-ReturnInferrer::ResultNotCalledEarly ReturnInferrer::earlyCall(const FuncSymbol *fn) const {
-  bool isCalledWhileLoading = fn->inferring && this->state.getReturnInference().isSuspended(fn);
+ReturnInferrer::ResultNotCalledEarly ReturnInferrer::earlyCall(const FuncSymbol *function) const {
+  bool isCalledWhileLoading =
+      function->inferring && this->state.getReturnInference().isSuspended(function);
   if (isCalledWhileLoading) {
-    std::string message = ErrorTextEarlyCall::importBack(fn->name);
+    auto message = ErrorTextEarlyCall::importBack(function->name);
 
     return err(ReturnInferrerEarlyCallError{
         .code = ReturnInferrerEarlyCallErrorCode::CALLED_WHILE_LOADING,
@@ -68,67 +74,80 @@ ReturnInferrer::ResultNotCalledEarly ReturnInferrer::earlyCall(const FuncSymbol 
     });
   }
 
-  return ok(fn);
+  return ok(function);
 }
 
-const Type *ReturnInferrer::returnType(FuncSymbol *fn) {
-  if (fn->hasReturnType()) {
-    return fn->getKnownReturnType();
+const Type *ReturnInferrer::returnType(FuncSymbol *function) {
+  if (function->hasReturnType()) {
+    return function->getKnownReturnType();
   }
-  if (this->lateClasses->isTemplate(fn)) {
+  if (this->lateClasses->isTemplate(function)) {
     return Type::unknown();
   }
-  ResultNotCalledEarly early = this->earlyCall(fn);
+  auto early = this->earlyCall(function);
   if (early.isErr()) {
-    this->state.getDiagnostics().error(fn->loc, early.error().message);
-    this->state.getReturnInference().forgetSuspended(fn);
+    this->state.getDiagnostics().error(function->loc, early.error().message);
+    this->state.getReturnInference().forgetSuspended(function);
+
     return Type::error();
   }
-  if (fn->inferring) {
-    return fn->assumed ? fn->assumed : Type::error();
+  if (function->inferring) {
+    return function->assumed != nullptr ? function->assumed : Type::error();
   }
-  this->inferReturnType(fn);
+  this->inferReturnType(function);
 
-  return fn->getKnownReturnType();
+  return function->getKnownReturnType();
 }
 
-const Type *ReturnInferrer::functionType(FuncSymbol *fn) {
-  const Type *ret = this->returnType(fn);
-  const Type *returned = ret ? ret : Type::error();
+const Type *ReturnInferrer::functionType(FuncSymbol *function) {
+  const auto *returnType = this->returnType(function);
+  const Type *returned = returnType != nullptr ? returnType : Type::error();
 
-  return Type::function(fn->params, fn->minArgs, fn->hasRest, returned, fn->hasThis);
+  return Type::function(function->params, function->minArgs, function->hasRest, returned,
+                        function->hasThis);
 }
 
-BodyState ReturnInferrer::enterBody(const FunctionDecl *fn) {
-  BodyState saved;
-  saved.flow = this->state.getFlowState().takeFlow();
-  saved.scopeStack = this->state.getScopeStack().saveBody();
-  saved.functionStack = this->state.getFunctionStack().saveBody();
-  saved.blockPosition = this->state.getBlockPosition().saveBody();
-  saved.module = this->state.getModuleStates().getCurrentModule();
-  saved.instance = this->state.getGenericStore().getCheckingInstance();
-  NestedGroup *group = fn ? fn->group : nullptr;
-  if (group) {
+BodyState ReturnInferrer::enterBody(const FunctionDecl *functionDecl) {
+  auto saved = BodyState{
+      .flow = this->state.getFlowState().takeFlow(),
+      .scopeStack = this->state.getScopeStack().saveBody(),
+      .functionStack = this->state.getFunctionStack().saveBody(),
+      .blockPosition = this->state.getBlockPosition().saveBody(),
+      .module = this->state.getModuleStates().getCurrentModule(),
+      .instance = this->state.getGenericStore().getCheckingInstance(),
+  };
+  NestedGroup *group = functionDecl != nullptr ? functionDecl->group : nullptr;
+  if (group != nullptr) {
     this->state.getScopeStack().keepGroupScopes(group);
     this->state.getFunctionStack().keepGroupFunctions(group);
-  } else if (!fn || !fn->isExpression()) {
-    this->state.getScopeStack().keepTopScopes();
-    this->state.getFunctionStack().forgetOuterFunctions();
-    this->state.getBlockPosition().forgetOtherCaseVars();
-    Module *home = fn ? this->state.getModuleStates().findDeclModule(fn) : nullptr;
-    if (home) {
-      this->importBinder->enterModule(home);
-    }
-    this->state.getGenericStore().forgetCheckingInstance();
-    InstanceRecord *owner =
-        fn && fn->cls() ? this->state.getLateClassStore().findLateOwner(fn->cls()) : nullptr;
-    if (owner) {
-      this->state.getGenericStore().rememberCheckingInstance(owner);
-    }
+  } else if (functionDecl == nullptr || !functionDecl->isExpression()) {
+    this->enterTopLevelBody(functionDecl);
   }
   this->state.getScopeStack().alignBranchesWithScopes();
 
   return saved;
+}
+
+void ReturnInferrer::enterTopLevelBody(const FunctionDecl *functionDecl) {
+  this->state.getScopeStack().keepTopScopes();
+  this->state.getFunctionStack().forgetOuterFunctions();
+  this->state.getBlockPosition().forgetOtherCaseVars();
+  if (functionDecl != nullptr) {
+    this->importBinder->enterHomeModule(functionDecl);
+  }
+  this->state.getGenericStore().forgetCheckingInstance();
+  auto *owner = this->lateOwnerOf(functionDecl);
+  if (owner != nullptr) {
+    this->state.getGenericStore().rememberCheckingInstance(owner);
+  }
+}
+
+InstanceRecord *ReturnInferrer::lateOwnerOf(const FunctionDecl *functionDecl) const {
+  if (functionDecl == nullptr || functionDecl->cls() == nullptr) {
+    return nullptr;
+  }
+
+  return this->state.getLateClassStore().findLateOwner(functionDecl->cls());
 }
 
 void ReturnInferrer::leaveBody(BodyState &saved) {
@@ -140,76 +159,90 @@ void ReturnInferrer::leaveBody(BodyState &saved) {
   this->state.getGenericStore().rememberCheckingInstance(saved.instance);
 }
 
-const Type *ReturnInferrer::templateReturn(FuncSymbol *fn) {
-  FunctionDecl *decl = fn->decl;
-  FuncSymbol *generic = decl->generic->sym;
-  const Type *ret = this->returnType(generic);
-  if (!ret) {
+const Type *ReturnInferrer::templateReturn(FuncSymbol *function) {
+  FunctionDecl *functionDecl = function->decl;
+  FuncSymbol *generic = functionDecl->generic->sym;
+  const auto *returnType = this->returnType(generic);
+  if (returnType == nullptr) {
     return Type::error();
   }
-  const Type *instance = this->genericClassChecker->instanceType(decl->cls(), ret);
+  const auto *instance = this->genericClassChecker->instanceType(functionDecl->cls(), returnType);
 
-  return this->typeParams->substitute(instance, generic->typeParams, fn->typeParams);
+  return this->typeParams->substitute(instance, generic->typeParams, function->typeParams);
 }
 
-void ReturnInferrer::inferReturnType(FuncSymbol *fn) {
-  FunctionDecl *decl = fn->decl;
-  bool isFromTemplate = decl && decl->generic && decl->cls() && decl->cls()->generic() &&
-                        !this->lateClasses->hasClassExpr(decl->generic);
-  if (isFromTemplate) {
-    fn->setReturnType(this->templateReturn(fn));
-    return;
+bool ReturnInferrer::isTemplateCopy(const FunctionDecl *functionDecl) {
+  if (functionDecl == nullptr || functionDecl->generic == nullptr) {
+    return false;
   }
-  const Type *inherited = this->classLinks->inheritedReturnType(fn);
-  if (inherited) {
-    fn->setReturnType(inherited);
-    return;
+  const ClassDecl *classDecl = functionDecl->cls();
+  if (classDecl == nullptr || classDecl->generic() == nullptr) {
+    return false;
   }
 
-  auto check = this->startBodyCheck(fn);
-  ReturnInference &inference = this->state.getReturnInference();
-  if (inference.isInCycle(fn)) {
-    this->inferCycle(inference.getCycleOf(fn));
+  return !this->lateClasses->hasClassExpr(functionDecl->generic);
+}
+
+void ReturnInferrer::inferReturnType(FuncSymbol *function) {
+  FunctionDecl *functionDecl = function->decl;
+  if (this->isTemplateCopy(functionDecl)) {
+    const auto *fromTemplate = this->templateReturn(function);
+    function->setReturnType(fromTemplate);
+    return;
+  }
+  const auto *inherited = this->classLinks->inheritedReturnType(function);
+  if (inherited != nullptr) {
+    function->setReturnType(inherited);
+    return;
+  }
+  auto check = this->startBodyCheck(function);
+  auto &inference = this->state.getReturnInference();
+  if (inference.isInCycle(function)) {
+    auto cycle = inference.getCycleOf(function);
+    this->inferCycle(cycle);
   } else {
-    this->inferFromBody(decl);
+    this->inferFromBody(functionDecl);
   }
   this->finishBodyCheck(check);
 }
 
-void ReturnInferrer::walkBodyNow(FunctionDecl *decl) {
-  if (!decl->sym->hasReturnType()) {
-    this->inferReturnType(decl->sym);
+void ReturnInferrer::walkBodyNow(FunctionDecl *functionDecl) {
+  if (!functionDecl->sym->hasReturnType()) {
+    this->inferReturnType(functionDecl->sym);
   }
-  if (decl->checked) {
+  if (functionDecl->checked) {
     return;
   }
-  auto check = this->startBodyCheck(decl->sym);
-  this->functionChecker->walkFunctionFromScratch(decl);
+  auto check = this->startBodyCheck(functionDecl->sym);
+  this->functionChecker->walkFunctionFromScratch(functionDecl);
   this->finishBodyCheck(check);
 }
 
-BodyCheck ReturnInferrer::startBodyCheck(FuncSymbol *fn) {
-  FunctionDecl *decl = fn->decl;
-  BodyState saved = this->enterBody(decl);
-  bool isClosure = decl->isClosure();
-  InstanceRecord *lateOwner = nullptr;
-  if (!isClosure && decl->cls() != nullptr) {
-    lateOwner = this->state.getLateClassStore().findLateOwner(decl->cls());
-  }
-  DiagnosticRoute route = DiagnosticRoute::PROGRAM;
-  if (isClosure) {
-    route = DiagnosticRoute::PARENT;
-  } else if (lateOwner != nullptr) {
-    route = DiagnosticRoute::OWNER;
-  }
+BodyCheck ReturnInferrer::startBodyCheck(FuncSymbol *function) {
+  FunctionDecl *functionDecl = function->decl;
+  auto saved = this->enterBody(functionDecl);
+  bool isClosure = functionDecl->isClosure();
+  InstanceRecord *lateOwner = isClosure ? nullptr : this->lateOwnerOf(functionDecl);
+  auto route = this->bodyRoute(isClosure, lateOwner);
   this->state.getDiagnostics().pushList(route);
   bool isTopLevelEarly = !isClosure && !this->state.getModuleStates().isTopLevelDone();
-  bool isGroupEarly = decl->group != nullptr && !decl->group->finished;
+  bool isGroupEarly = functionDecl->group != nullptr && !functionDecl->group->finished;
   if (isTopLevelEarly || isGroupEarly) {
-    this->state.getFunctionStack().rememberEarlyFunction(fn);
+    this->state.getFunctionStack().rememberEarlyFunction(function);
   }
 
   return BodyCheck{.saved = std::move(saved), .lateOwner = lateOwner};
+}
+
+DiagnosticRoute ReturnInferrer::bodyRoute(bool isClosure, const InstanceRecord *lateOwner) const {
+  if (isClosure) {
+    return DiagnosticRoute::PARENT;
+  }
+  if (lateOwner != nullptr) {
+    return DiagnosticRoute::OWNER;
+  }
+
+  return DiagnosticRoute::PROGRAM;
 }
 
 void ReturnInferrer::finishBodyCheck(BodyCheck &check) {
@@ -220,103 +253,123 @@ void ReturnInferrer::finishBodyCheck(BodyCheck &check) {
   this->leaveBody(check.saved);
 }
 
-void ReturnInferrer::inferFromBody(FunctionDecl *decl) {
-  FuncSymbol *fn = decl->sym;
-  std::vector<ReturnStmt *> returns;
-  std::vector<YieldExpr *> yields;
-  FunctionStack &functions = this->state.getFunctionStack();
-  std::vector<YieldExpr *> *outerYields = functions.getYieldCollector();
-  std::vector<ReturnStmt *> *outerReturns = functions.getReturnCollector();
-  functions.rememberReturnCollector(&returns);
-  functions.rememberYieldCollector(&yields);
-  fn->inferring = true;
-  this->state.getReturnInference().enterInference(fn);
-  this->functionChecker->walkFunctionBody(decl);
+void ReturnInferrer::inferFromBody(FunctionDecl *functionDecl) {
+  FuncSymbol *function = functionDecl->sym;
+  auto collected = CollectedReturns{.returns = {}, .yields = {}};
+  auto &functions = this->state.getFunctionStack();
+  auto *outerYields = functions.getYieldCollector();
+  auto *outerReturns = functions.getReturnCollector();
+  functions.rememberReturnCollector(&collected.returns);
+  functions.rememberYieldCollector(&collected.yields);
+  function->inferring = true;
+  this->state.getReturnInference().enterInference(function);
+  this->functionChecker->walkFunctionBody(functionDecl);
   this->state.getReturnInference().leaveInference();
-  fn->inferring = false;
+  function->inferring = false;
   functions.rememberReturnCollector(outerReturns);
   functions.rememberYieldCollector(outerYields);
-
-  bool isFallingOff = !ReturnChecker::alwaysReturns(decl->body);
-  const Type *type = nullptr;
-  if (decl->isGenerator) {
-    type = this->generatorChecker->inferGeneratorType(fn, yields, returns, isFallingOff, true);
-  } else if (decl->isAsync) {
-    type = this->asyncChecker->inferAsyncType(fn, returns, isFallingOff, true);
-  } else {
-    type = this->unifyReturns(fn, returns, isFallingOff, true);
+  bool isFallingOff = !this->returnChecker->alwaysReturns(functionDecl->body);
+  const auto *type =
+      this->collectedType(functionDecl, function, collected, isFallingOff, ReturnErrors::REPORTED);
+  function->setReturnType(type != nullptr ? type : Type::error());
+  if (functionDecl->isAsync && !functionDecl->isGenerator) {
+    return this->asyncChecker->finishAsyncReturns(function, collected.returns);
   }
-  fn->setReturnType(type ? type : Type::error());
-  if (decl->isAsync && !decl->isGenerator) {
-    this->asyncChecker->finishAsyncReturns(fn, returns);
+
+  return this->convertReturns(functionDecl, collected.returns, collected.yields);
+}
+
+const Type *ReturnInferrer::collectedType(const FunctionDecl *functionDecl,
+                                          const FuncSymbol *function,
+                                          const CollectedReturns &collected, bool isFallingOff,
+                                          ReturnErrors errors) {
+  if (functionDecl->isGenerator) {
+    return this->generatorChecker->inferGeneratorType(function, collected.yields, collected.returns,
+                                                      isFallingOff, errors);
+  }
+  if (functionDecl->isAsync) {
+    return this->asyncChecker->inferAsyncType(function, collected.returns, isFallingOff, errors);
+  }
+
+  return this->unifyReturns(function, collected.returns, isFallingOff, errors);
+}
+
+void ReturnInferrer::convertReturns(const FunctionDecl *functionDecl,
+                                    llvm::ArrayRef<ReturnStmt *> returns,
+                                    llvm::ArrayRef<YieldExpr *> yields) {
+  const Type *known = functionDecl->sym->getKnownReturnType();
+  bool isAsync = functionDecl->isAsync;
+  bool isIterating = known->isIterator() || known->isAsyncIterator();
+  const Type *returned = functionDecl->isGenerator && isIterating ? known->returned() : known;
+  if (!returned->isError() && !returned->isVoid()) {
+    for (ReturnStmt *returnStmt : returns) {
+      if (this->isConvertibleReturn(returnStmt, isAsync)) {
+        returnStmt->value = this->typeRelations->convert(returnStmt->value, returned);
+      }
+    }
+  }
+  if (!isIterating) {
     return;
   }
-  this->convertReturns(decl, returns, yields);
-}
-
-void ReturnInferrer::convertReturns(const FunctionDecl *decl, llvm::ArrayRef<ReturnStmt *> returns,
-                                    llvm::ArrayRef<YieldExpr *> yields) {
-  FuncSymbol *fn = decl->sym;
-  bool isAsync = decl->isAsync;
-  bool isIterating =
-      fn->getKnownReturnType()->isIterator() || fn->getKnownReturnType()->isAsyncIterator();
-  const Type *returned = decl->isGenerator && isIterating ? fn->getKnownReturnType()->returned()
-                                                          : fn->getKnownReturnType();
-  if (!returned->isError() && !returned->isVoid()) {
-    for (ReturnStmt *ret : returns) {
-      bool isTyped = ret->value && !ret->value->type->isError();
-      bool isSettled = isTyped && isAsync &&
-                       AsyncChecker::awaitedType(ret->value->type) == ret->value->type &&
-                       !ret->value->type->isUndefined();
-      if (isTyped && (!isAsync || isSettled)) {
-        ret->value = this->typeRelations->convert(ret->value, returned);
-      }
-    }
-  }
-  if (isIterating) {
-    const Type *yielded = fn->getKnownReturnType()->yielded();
-    for (YieldExpr *yield : yields) {
-      bool isTyped = !yield->delegate && yield->value && !yield->value->type->isError();
-      bool isSettled =
-          isTyped && isAsync && AsyncChecker::awaitedType(yield->value->type) == yield->value->type;
-      if (isTyped && (!isAsync || isSettled)) {
-        yield->value = this->typeRelations->convert(yield->value, yielded);
-      }
+  const Type *yielded = known->yielded();
+  for (YieldExpr *yield : yields) {
+    if (this->isConvertibleYield(yield, isAsync)) {
+      yield->value = this->typeRelations->convert(yield->value, yielded);
     }
   }
 }
 
-const Type *ReturnInferrer::trialReturn(FuncSymbol *fn) {
-  FunctionDecl *copy = this->freshCopy(fn->decl);
-  std::vector<ReturnStmt *> returns;
-  std::vector<YieldExpr *> yields;
-  FunctionStack &functions = this->state.getFunctionStack();
-  functions.rememberReturnCollector(&returns);
-  functions.rememberYieldCollector(&yields);
+bool ReturnInferrer::isSettled(const Type *type) const {
+  const auto *awaited = AsyncChecker::awaitedType(type);
+
+  return awaited == type;
+}
+
+bool ReturnInferrer::isConvertibleReturn(const ReturnStmt *returnStmt, bool isAsync) const {
+  const Expr *value = returnStmt->value;
+  if (value == nullptr || value->type->isError()) {
+    return false;
+  }
+  if (!isAsync) {
+    return true;
+  }
+
+  return this->isSettled(value->type) && !value->type->isUndefined();
+}
+
+bool ReturnInferrer::isConvertibleYield(const YieldExpr *yield, bool isAsync) const {
+  if (yield->delegate || yield->value == nullptr || yield->value->type->isError()) {
+    return false;
+  }
+  if (!isAsync) {
+    return true;
+  }
+
+  return this->isSettled(yield->value->type);
+}
+
+const Type *ReturnInferrer::trialReturn(FuncSymbol *function) {
+  auto *copy = this->freshCopy(function->decl);
+  auto collected = CollectedReturns{.returns = {}, .yields = {}};
+  auto &functions = this->state.getFunctionStack();
+  functions.rememberReturnCollector(&collected.returns);
+  functions.rememberYieldCollector(&collected.yields);
   functions.enterTrial();
   this->functionChecker->walkFunctionFromScratch(copy);
   functions.leaveTrial();
   functions.rememberReturnCollector(nullptr);
   functions.rememberYieldCollector(nullptr);
+  bool isFallingOff = !this->returnChecker->alwaysReturns(copy->body);
 
-  bool isFallingOff = !ReturnChecker::alwaysReturns(copy->body);
-  const Type *found = nullptr;
-  if (fn->decl->isGenerator) {
-    found = this->generatorChecker->inferGeneratorType(fn, yields, returns, isFallingOff, false);
-  } else if (fn->decl->isAsync) {
-    found = this->asyncChecker->inferAsyncType(fn, returns, isFallingOff, false);
-  } else {
-    found = this->unifyReturns(fn, returns, isFallingOff, false);
-  }
-
-  return found;
+  return this->collectedType(function->decl, function, collected, isFallingOff,
+                             ReturnErrors::IGNORED);
 }
 
-ReturnInferrer::ResultCycleTypeKnown ReturnInferrer::cycleType(const FuncSymbol *fn, int cycleSize,
-                                                               bool failed) const {
-  bool isUnknown = fn->getKnownReturnType()->isError();
-  if (isUnknown && failed) {
-    std::string message = ErrorTextCycleType::differ(fn->name);
+ReturnInferrer::ResultCycleTypeKnown ReturnInferrer::cycleType(const FuncSymbol *function,
+                                                               int cycleSize, bool isFailed) const {
+  bool isUnknown = function->getKnownReturnType()->isError();
+  if (isUnknown && isFailed) {
+    auto message = ErrorTextCycleType::differ(function->name);
 
     return err(ReturnInferrerCycleTypeError{
         .code = ReturnInferrerCycleTypeErrorCode::DIFFERENT_TYPES,
@@ -324,7 +377,7 @@ ReturnInferrer::ResultCycleTypeKnown ReturnInferrer::cycleType(const FuncSymbol 
     });
   }
   if (isUnknown && cycleSize == 1) {
-    std::string message = ErrorTextCycleType::selfOnly(fn->name);
+    auto message = ErrorTextCycleType::selfOnly(function->name);
 
     return err(ReturnInferrerCycleTypeError{
         .code = ReturnInferrerCycleTypeErrorCode::ONLY_SELF_CALLS,
@@ -332,7 +385,7 @@ ReturnInferrer::ResultCycleTypeKnown ReturnInferrer::cycleType(const FuncSymbol 
     });
   }
   if (isUnknown) {
-    std::string message = ErrorTextCycleType::calledBack(fn->name);
+    auto message = ErrorTextCycleType::calledBack(function->name);
 
     return err(ReturnInferrerCycleTypeError{
         .code = ReturnInferrerCycleTypeErrorCode::ONLY_CALLED_BACK,
@@ -340,68 +393,103 @@ ReturnInferrer::ResultCycleTypeKnown ReturnInferrer::cycleType(const FuncSymbol 
     });
   }
 
-  return ok(fn->getKnownReturnType());
+  return ok(function->getKnownReturnType());
 }
 
 void ReturnInferrer::inferCycle(llvm::ArrayRef<FuncSymbol *> cycle) {
-  for (FuncSymbol *fn : cycle) {
-    fn->inferring = true;
+  for (FuncSymbol *function : cycle) {
+    function->inferring = true;
   }
-  for (FuncSymbol *fn : cycle) {
-    this->state.getReturnInference().enterInference(fn);
+  for (FuncSymbol *function : cycle) {
+    this->state.getReturnInference().enterInference(function);
   }
   this->state.getDiagnostics().pushList(DiagnosticRoute::DISCARD);
-  bool isFailed = false;
-  for (int round = 0; round < 8 && !isFailed; ++round) {
-    bool hasChanged = false;
-    for (FuncSymbol *fn : cycle) {
-      const Type *found = this->trialReturn(fn);
-      if (!found) {
-        continue;
-      }
-      const Type *next = fn->assumed ? LiteralTypes::unionUnify(fn->assumed, found) : found;
-      if (!next || next->isError()) {
-        isFailed = true;
-        break;
-      }
-      if (next != fn->assumed) {
-        fn->assumed = next;
-        hasChanged = true;
-      }
-    }
-    if (!hasChanged) {
-      break;
-    }
-  }
+  auto settled = this->settleCycle(cycle);
   this->state.getDiagnostics().popList();
-  for (size_t i = 0; i < cycle.size(); ++i) {
+  for (size_t index = 0; index < cycle.size(); ++index) {
     this->state.getReturnInference().leaveInference();
   }
-
-  for (FuncSymbol *fn : cycle) {
-    fn->inferring = false;
-    fn->setReturnType(fn->assumed && !isFailed ? fn->assumed : Type::error());
-    fn->assumed = nullptr;
+  bool isFailed = settled == CycleStep::FAILED;
+  for (FuncSymbol *function : cycle) {
+    function->inferring = false;
+    bool isAssumed = function->assumed != nullptr && !isFailed;
+    function->setReturnType(isAssumed ? function->assumed : Type::error());
+    function->assumed = nullptr;
   }
+  this->reportCycleTypes(cycle, isFailed);
+}
+
+ReturnInferrer::CycleStep ReturnInferrer::settleCycle(llvm::ArrayRef<FuncSymbol *> cycle) {
+  for (int round = 0; round < kMaxCycleRounds; ++round) {
+    auto step = this->cycleRound(cycle);
+    if (step != CycleStep::CHANGED) {
+      return step;
+    }
+  }
+
+  return CycleStep::CHANGED;
+}
+
+ReturnInferrer::CycleStep ReturnInferrer::cycleRound(llvm::ArrayRef<FuncSymbol *> cycle) {
+  auto round = CycleStep::KEPT;
+  for (FuncSymbol *function : cycle) {
+    auto step = this->nextAssumption(function);
+    if (step == CycleStep::FAILED) {
+      return step;
+    }
+    if (step == CycleStep::CHANGED) {
+      round = step;
+    }
+  }
+
+  return round;
+}
+
+ReturnInferrer::CycleStep ReturnInferrer::nextAssumption(FuncSymbol *function) {
+  const auto *found = this->trialReturn(function);
+  if (found == nullptr) {
+    return CycleStep::KEPT;
+  }
+  const Type *assumed = function->assumed;
+  const Type *next = assumed != nullptr ? LiteralTypes::unionUnify(assumed, found) : found;
+  if (next == nullptr || next->isError()) {
+    return CycleStep::FAILED;
+  }
+  if (next == assumed) {
+    return CycleStep::KEPT;
+  }
+  function->assumed = next;
+
+  return CycleStep::CHANGED;
+}
+
+void ReturnInferrer::reportCycleTypes(llvm::ArrayRef<FuncSymbol *> cycle, bool isFailed) {
   int cycleSize = int(cycle.size());
-  for (FuncSymbol *fn : cycle) {
-    ResultCycleTypeKnown known = this->cycleType(fn, cycleSize, isFailed);
+  for (FuncSymbol *function : cycle) {
+    auto known = this->cycleType(function, cycleSize, isFailed);
     if (known.isErr()) {
-      this->state.getDiagnostics().error(fn->loc, known.error().message);
+      this->state.getDiagnostics().error(function->loc, known.error().message);
     }
   }
 }
 
-std::vector<ReturnStmt *> ReturnInferrer::literalsLast(llvm::ArrayRef<ReturnStmt *> returns) {
-  std::vector<ReturnStmt *> ordered;
-  std::vector<ReturnStmt *> literals;
-  for (ReturnStmt *ret : returns) {
-    bool isLiteral = ret->value && ret->value->type && ret->value->type->isInteger() &&
-                     TypeRelations::isIntLiteralTree(ret->value);
-    if (isLiteral) {
-      literals.push_back(ret);
+bool ReturnInferrer::isIntLiteralReturn(const ReturnStmt *returnStmt) const {
+  const Expr *value = returnStmt->value;
+  if (value == nullptr || value->type == nullptr || !value->type->isInteger()) {
+    return false;
+  }
+
+  return this->typeRelations->isIntLiteralTree(value);
+}
+
+std::vector<ReturnStmt *> ReturnInferrer::literalsLast(llvm::ArrayRef<ReturnStmt *> returns) const {
+  auto ordered = std::vector<ReturnStmt *>();
+  auto literals = std::vector<ReturnStmt *>();
+  for (ReturnStmt *returnStmt : returns) {
+    if (this->isIntLiteralReturn(returnStmt)) {
+      literals.push_back(returnStmt);
     } else {
-      ordered.push_back(ret);
+      ordered.push_back(returnStmt);
     }
   }
   ordered.insert(ordered.end(), literals.begin(), literals.end());
@@ -409,13 +497,21 @@ std::vector<ReturnStmt *> ReturnInferrer::literalsLast(llvm::ArrayRef<ReturnStmt
   return ordered;
 }
 
-ReturnInferrer::ResultReturnsUnified ReturnInferrer::commonReturn(const FuncSymbol *fn,
-                                                                  const Type *before,
-                                                                  const ReturnStmt *ret) const {
-  const Type *found = ret->value->type;
-  const Type *common = LiteralTypes::unionUnify(before, found);
-  if (!common || common->isError()) {
-    std::string message = ErrorTextCommonReturn::differ(fn->name, found->name(), before->name());
+ReturnInferrer::ResultReturnsUnified
+ReturnInferrer::commonReturn(const FuncSymbol *function, const Type *before,
+                             const ReturnStmt *returnStmt) const {
+  const Type *found = returnStmt->value->type;
+  if (before == nullptr) {
+    return ok(found);
+  }
+  bool isAdapting =
+      before != found && this->typeRelations->isLiteralAdapting(returnStmt->value, before);
+  if (isAdapting) {
+    return ok(before);
+  }
+  const auto *common = LiteralTypes::unionUnify(before, found);
+  if (common == nullptr || common->isError()) {
+    auto message = ErrorTextCommonReturn::differ(function->name, found->name(), before->name());
 
     return err(ReturnInferrerCommonReturnError{
         .code = ReturnInferrerCommonReturnErrorCode::DIFFERENT_TYPES,
@@ -426,13 +522,21 @@ ReturnInferrer::ResultReturnsUnified ReturnInferrer::commonReturn(const FuncSymb
   return ok(common);
 }
 
+bool ReturnInferrer::hasValuedReturn(llvm::ArrayRef<ReturnStmt *> returns) const {
+  for (const ReturnStmt *returnStmt : returns) {
+    if (returnStmt->value != nullptr) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 ReturnInferrer::ResultReturnsDefined
-ReturnInferrer::definedReturn(const FuncSymbol *fn, llvm::ArrayRef<ReturnStmt *> returns,
-                              bool undefined) const {
-  auto withValue = [](const ReturnStmt *ret) { return ret->value != nullptr; };
-  bool isOnlyUndefined = undefined && llvm::any_of(returns, withValue);
-  if (isOnlyUndefined) {
-    std::string message = ErrorTextDefinedReturn::undefined(fn->name);
+ReturnInferrer::definedReturn(const FuncSymbol *function, llvm::ArrayRef<ReturnStmt *> returns,
+                              bool isUndefined) const {
+  if (isUndefined && this->hasValuedReturn(returns)) {
+    auto message = ErrorTextDefinedReturn::undefined(function->name);
 
     return err(ReturnInferrerDefinedReturnError{
         .code = ReturnInferrerDefinedReturnErrorCode::ONLY_UNDEFINED,
@@ -440,95 +544,113 @@ ReturnInferrer::definedReturn(const FuncSymbol *fn, llvm::ArrayRef<ReturnStmt *>
     });
   }
 
-  return ok(fn);
+  return ok(function);
 }
 
-const Type *ReturnInferrer::unifyReturns(const FuncSymbol *fn, llvm::ArrayRef<ReturnStmt *> returns,
-                                         bool fallsOff, bool report) {
+bool ReturnInferrer::isUndefinedReturn(const ReturnStmt *returnStmt) const {
+  return returnStmt->value == nullptr || returnStmt->value->type->isUndefined();
+}
+
+bool ReturnInferrer::hasUndefinedReturn(llvm::ArrayRef<ReturnStmt *> returns) const {
+  for (const ReturnStmt *returnStmt : returns) {
+    if (this->isUndefinedReturn(returnStmt)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+std::vector<const ReturnStmt *>
+ReturnInferrer::typedReturns(llvm::ArrayRef<ReturnStmt *> returns) const {
+  auto typed = std::vector<const ReturnStmt *>();
+  for (const ReturnStmt *returnStmt : this->literalsLast(returns)) {
+    bool isTyped = !this->isUndefinedReturn(returnStmt) && !returnStmt->value->type->isError();
+    if (isTyped) {
+      typed.push_back(returnStmt);
+    }
+  }
+
+  return typed;
+}
+
+const Type *ReturnInferrer::unifyReturns(const FuncSymbol *function,
+                                         llvm::ArrayRef<ReturnStmt *> returns, bool isFallingOff,
+                                         ReturnErrors errors) {
   const Type *type = nullptr;
-  bool isUndefined = fallsOff;
-  std::vector<ReturnStmt *> ordered = ReturnInferrer::literalsLast(returns);
-  for (ReturnStmt *ret : ordered) {
-    if (!ret->value) {
-      isUndefined = true;
-      continue;
-    }
-    const Type *found = ret->value->type;
-    if (found->isError()) {
-      continue;
-    }
-    if (found->isUndefined()) {
-      isUndefined = true;
-      continue;
-    }
-    if (!type) {
-      type = found;
-      continue;
-    }
-    bool isAdapting = type != found && this->typeRelations->literalAdapts(ret->value, type);
-    if (isAdapting) {
-      continue;
-    }
-    ResultReturnsUnified common = this->commonReturn(fn, type, ret);
-    if (common.isErr() && report) {
-      this->state.getDiagnostics().error(ret->value->loc(), common.error().message);
+  for (const ReturnStmt *returnStmt : this->typedReturns(returns)) {
+    auto common = this->commonReturn(function, type, returnStmt);
+    if (common.isErr() && errors == ReturnErrors::REPORTED) {
+      this->state.getDiagnostics().error(returnStmt->value->loc(), common.error().message);
     }
     if (common.isErr()) {
       return Type::error();
     }
     type = common.value();
   }
-  if (!type) {
-    ResultReturnsDefined defined = this->definedReturn(fn, returns, isUndefined);
-    if (defined.isErr() && report) {
-      this->state.getDiagnostics().error(fn->loc, defined.error().message);
-    }
-    return report ? Type::error() : nullptr;
+  bool isUndefined = isFallingOff || this->hasUndefinedReturn(returns);
+  if (type != nullptr && isUndefined && !type->isVoid()) {
+    return Type::optional(type);
   }
-  if (isUndefined && !type->isVoid()) {
-    type = Type::optional(type);
+  if (type != nullptr) {
+    return type;
+  }
+  auto defined = this->definedReturn(function, returns, isUndefined);
+  if (defined.isErr() && errors == ReturnErrors::REPORTED) {
+    this->state.getDiagnostics().error(function->loc, defined.error().message);
   }
 
-  return type;
+  return errors == ReturnErrors::REPORTED ? Type::error() : nullptr;
 }
 
-FunctionDecl *ReturnInferrer::freshCopy(const FunctionDecl *fn) {
+FunctionDecl *ReturnInferrer::freshCopy(const FunctionDecl *functionDecl) {
   AstCloner cloner(this->state.getAst());
-  FunctionDecl *copy = cloner.copyFunction(fn);
-  copy->place = fn->place;
-  copy->isAsync = fn->isAsync;
-  const ClassMember *original = fn->member();
-  if (original) {
-    ClassMember copied{.cls = original->cls, .access = original->access};
-    if (fn->isStatic()) {
-      copied.method = StaticMethod{};
-    } else if (fn->isConstructor()) {
-      copied.method = Constructor{};
-    }
-    copy->role = std::move(copied);
-  }
-  copy->sym = fn->sym;
-  copy->name = fn->name;
-  copy->typeArgs = fn->typeArgs;
-  copy->isInstance = fn->isInstance;
-  copy->parent = fn->parent;
-  copy->group = fn->group;
-  copy->var = fn->var;
-  copy->creationSeq = fn->creationSeq;
-  if (!fn->listName.empty() && copy->params.size() > fn->listStart) {
-    copy->params.resize(fn->listStart);
-    copy->listName = fn->listName;
-    copy->listStart = fn->listStart;
-    copy->listType = fn->listType;
-  }
-  for (size_t i = 0; i < copy->params.size() && i < fn->params.size(); ++i) {
-    copy->params[i].declaredType = fn->params[i].declaredType;
-  }
-  for (size_t i = copy->params.size(); i < fn->params.size(); ++i) {
-    copy->params.push_back(fn->params[i]);
-  }
+  FunctionDecl *copy = cloner.copyFunction(functionDecl);
+  copy->place = functionDecl->place;
+  copy->isAsync = functionDecl->isAsync;
+  this->copyMemberRole(functionDecl, copy);
+  copy->sym = functionDecl->sym;
+  copy->name = functionDecl->name;
+  copy->typeArgs = functionDecl->typeArgs;
+  copy->isInstance = functionDecl->isInstance;
+  copy->parent = functionDecl->parent;
+  copy->group = functionDecl->group;
+  copy->var = functionDecl->var;
+  copy->creationSeq = functionDecl->creationSeq;
+  this->copyParams(functionDecl, copy);
 
   return copy;
+}
+
+void ReturnInferrer::copyMemberRole(const FunctionDecl *functionDecl, FunctionDecl *copy) const {
+  const ClassMember *original = functionDecl->member();
+  if (original == nullptr) {
+    return;
+  }
+  auto copied = ClassMember{.cls = original->cls, .access = original->access};
+  if (functionDecl->isStatic()) {
+    copied.method = StaticMethod{};
+  } else if (functionDecl->isConstructor()) {
+    copied.method = Constructor{};
+  }
+  copy->role = std::move(copied);
+}
+
+void ReturnInferrer::copyParams(const FunctionDecl *functionDecl, FunctionDecl *copy) const {
+  bool hasList = !functionDecl->listName.empty() && copy->params.size() > functionDecl->listStart;
+  if (hasList) {
+    copy->params.resize(functionDecl->listStart);
+    copy->listName = functionDecl->listName;
+    copy->listStart = functionDecl->listStart;
+    copy->listType = functionDecl->listType;
+  }
+  size_t shared = std::min(copy->params.size(), functionDecl->params.size());
+  for (size_t index = 0; index < shared; ++index) {
+    copy->params[index].declaredType = functionDecl->params[index].declaredType;
+  }
+  for (size_t index = copy->params.size(); index < functionDecl->params.size(); ++index) {
+    copy->params.push_back(functionDecl->params[index]);
+  }
 }
 
 }

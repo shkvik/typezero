@@ -49,16 +49,16 @@ struct LoopScan {
   struct Change {
     unsigned count = 0;
     int64_t delta = 0;
-    bool nested = false;
+    bool isNested = false;
   };
   llvm::StringMap<Change> changes;
-  bool callsFunctions = false;
-  bool growsArrays = false;
-  bool shrinksArrays = false;
+  bool isCallingFunctions = false;
+  bool isGrowingArrays = false;
+  bool isShrinkingArrays = false;
   llvm::StringSet<> fieldWrites;
-  bool releasesElements = false;
-  bool breaks = false;
-  bool awaits = false;
+  bool isReleasingElements = false;
+  bool isBreakingOut = false;
+  bool hasAwait = false;
 };
 
 enum class TruthUse { Condition, Not, Or, And, OrAssign, AndAssign };

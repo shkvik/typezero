@@ -1,6 +1,7 @@
 #include "compiler/semantic/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
 #include "compiler/semantic/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -20,66 +21,61 @@ ByteProofs::ByteProofs(SemanticState &owner, SemanticParts &all)
   this->constantFolder = &all.constantFolder;
 }
 
-const VarSymbol *ByteProofs::viewOwner(const Expr *expr, BuiltinProperty field, const Type **type) {
-  if (auto *call = dyn_cast<CallExpr>(expr);
-      call &&
+const VarSymbol *ByteProofs::viewOwner(const Expr *expr, BuiltinProperty field,
+                                       const Type **type) const {
+  auto *call = dyn_cast<CallExpr>(expr);
+  if (call != nullptr &&
       (call->builtin() == Builtin::BytesBuffer || call->builtin() == Builtin::BytesByteOffset ||
        call->builtin() == Builtin::BytesByteLength)) {
     expr = call->callee;
   }
   auto *member = dyn_cast<MemberExpr>(expr);
-  if (!member || !BuiltinPropertyTable::isName(member->name, field) || !member->object->type ||
-      !member->object->type->isByteView()) {
+  if (member == nullptr || !BuiltinPropertyTable::isName(member->name, field) ||
+      member->object->type == nullptr || !member->object->type->isByteView()) {
     return nullptr;
   }
   const Expr *object = member->object;
-  while (auto *conv = dyn_cast<CastExpr>(object)) {
-    if (!conv->isImplicit()) {
+  while (auto *conversion = dyn_cast<CastExpr>(object)) {
+    if (!conversion->isImplicit()) {
       return nullptr;
     }
-    object = conv->operand;
+    object = conversion->operand;
   }
   auto *name = dyn_cast<NameExpr>(object);
-  if (type) {
+  if (type != nullptr) {
     *type = member->object->type;
   }
 
-  return name ? name->var() : nullptr;
+  return name != nullptr ? name->var() : nullptr;
 }
 
-const Expr *ByteProofs::withoutCasts(const Expr *expr) {
-  while (auto *conv = dyn_cast<CastExpr>(expr)) {
-    if (!conv->isImplicit()) {
-      break;
-    }
-    expr = conv->operand;
-  }
+const Expr *ByteProofs::withoutCasts(const Expr *expr) const {
+  expr = ExprParts::withoutImplicitCasts(expr);
 
   return expr;
 }
 
 bool ByteProofs::sameView(const Expr *buffer, const Expr *offset, const Expr *length,
-                          int64_t size) {
+                          int64_t size) const {
   const Type *ownerType = nullptr;
-  const VarSymbol *owner = ByteProofs::viewOwner(buffer, BuiltinProperty::BUFFER, &ownerType);
-  if (!owner || !offset ||
-      ByteProofs::viewOwner(ByteProofs::withoutCasts(offset), BuiltinProperty::BYTE_OFFSET) !=
-          owner) {
+  const auto *owner = this->viewOwner(buffer, BuiltinProperty::BUFFER, &ownerType);
+  if (owner == nullptr || offset == nullptr ||
+      this->viewOwner(this->withoutCasts(offset), BuiltinProperty::BYTE_OFFSET) != owner) {
     return false;
   }
-  if (!length) {
+  if (length == nullptr) {
     return size == 1;
   }
-  length = ByteProofs::withoutCasts(length);
-  if (ByteProofs::viewOwner(length, BuiltinProperty::BYTE_LENGTH) == owner) {
+  length = this->withoutCasts(length);
+  if (this->viewOwner(length, BuiltinProperty::BYTE_LENGTH) == owner) {
     return size == 1;
   }
 
-  return ByteProofs::viewOwner(length, BuiltinProperty::LENGTH) == owner &&
+  return this->viewOwner(length, BuiltinProperty::LENGTH) == owner &&
          ownerType->elementSize() == uint64_t(size);
 }
 
-int64_t ByteProofs::wrapped(Bytes kind, int64_t v) {
+int64_t ByteProofs::wrapped(Bytes kind, int64_t v) const {
   switch (kind) {
   case Bytes::Int8:
     return int8_t(uint8_t(v));
@@ -96,15 +92,15 @@ int64_t ByteProofs::wrapped(Bytes kind, int64_t v) {
   }
 }
 
-Range ByteProofs::exact(int64_t v) {
+Range ByteProofs::exact(int64_t v) const {
   return {v, v};
 }
 
-bool ByteProofs::known(const Range &r) {
+bool ByteProofs::known(const Range &r) const {
   return r.lo && r.hi;
 }
 
-Range ByteProofs::unite(const Range &a, const Range &b) {
+Range ByteProofs::unite(const Range &a, const Range &b) const {
   Range r;
   if (a.lo && b.lo) {
     r.lo = std::min(*a.lo, *b.lo);
@@ -116,7 +112,7 @@ Range ByteProofs::unite(const Range &a, const Range &b) {
   return r;
 }
 
-int64_t ByteProofs::allOnes(int64_t v) {
+int64_t ByteProofs::allOnes(int64_t v) const {
   int64_t m = 0;
   while (m < v) {
     m = m * 2 + 1;
@@ -125,13 +121,13 @@ int64_t ByteProofs::allOnes(int64_t v) {
   return m;
 }
 
-int64_t ByteProofs::floorShift(int64_t v, int64_t n) {
+int64_t ByteProofs::floorShift(int64_t v, int64_t n) const {
   return v >= 0 ? v >> n : -((-v + (int64_t(1) << n) - 1) >> n);
 }
 
 IntegerRange ByteProofs::valueRange(const Expr *expr) const {
-  std::vector<Range> answers;
-  for (const Expr *node : ChildrenFirst::order(expr, ByteProofs::rangeParts)) {
+  auto answers = std::vector<Range>();
+  for (const Expr *node : ChildrenFirst::order(expr, this, &ByteProofs::rangeParts)) {
     Range range = this->nodeRange(node, answers);
     answers.push_back(range);
   }
@@ -139,35 +135,36 @@ IntegerRange ByteProofs::valueRange(const Expr *expr) const {
   return answers.back();
 }
 
-NodeChildren<const Expr *> ByteProofs::rangeParts(const Expr *e) {
-  if (!e->type || !e->type->nonOptional()->isInteger()) {
+NodeChildren<const Expr *> ByteProofs::rangeParts(const Expr *expr) const {
+  if (expr->type == nullptr || !expr->type->nonOptional()->isInteger()) {
     return {};
   }
-  switch (e->kind()) {
+  switch (expr->kind()) {
     case Expr::Kind::Cast: {
-      auto *conv = cast<CastExpr>(e);
-      bool isInteger = conv->operand->type && conv->operand->type->isInteger();
-      if (!conv->isImplicit() || !isInteger) {
+      auto *conversion = cast<CastExpr>(expr);
+      bool isInteger =
+          conversion->operand->type != nullptr && conversion->operand->type->isInteger();
+      if (!conversion->isImplicit() || !isInteger) {
         return {};
       }
-      return {conv->operand};
+      return {conversion->operand};
     }
     case Expr::Kind::Call:
-      return ByteProofs::callRangeParts(cast<CallExpr>(e));
+      return this->callRangeParts(cast<CallExpr>(expr));
     case Expr::Kind::Unary:
-      return {cast<UnaryExpr>(e)->operand};
+      return {cast<UnaryExpr>(expr)->operand};
     case Expr::Kind::Binary:
-      return {cast<BinaryExpr>(e)->lhs, cast<BinaryExpr>(e)->rhs};
+      return {cast<BinaryExpr>(expr)->lhs, cast<BinaryExpr>(expr)->rhs};
     case Expr::Kind::Conditional:
-      return {cast<ConditionalExpr>(e)->thenExpr, cast<ConditionalExpr>(e)->elseExpr};
+      return {cast<ConditionalExpr>(expr)->thenExpr, cast<ConditionalExpr>(expr)->elseExpr};
     case Expr::Kind::Sequence:
-      return {cast<SequenceExpr>(e)->exprs.back()};
+      return {cast<SequenceExpr>(expr)->exprs.back()};
     default:
       return {};
   }
 }
 
-NodeChildren<const Expr *> ByteProofs::callRangeParts(const CallExpr *call) {
+NodeChildren<const Expr *> ByteProofs::callRangeParts(const CallExpr *call) const {
   switch (call->builtin()) {
     case Builtin::NumConvert:
       return {cast<MemberExpr>(call->callee)->object};
@@ -184,19 +181,19 @@ NodeChildren<const Expr *> ByteProofs::callRangeParts(const CallExpr *call) {
   }
 }
 
-Range ByteProofs::nodeRange(const Expr *e, std::vector<Range> &answers) const {
-  size_t count = ByteProofs::rangeParts(e).size();
+Range ByteProofs::nodeRange(const Expr *expr, std::vector<Range> &answers) const {
+  size_t count = this->rangeParts(expr).size();
   std::vector<Range> parts = ChildrenFirst::takeAnswers(answers, count);
-  Range computed = this->computedRange(e, parts);
+  Range computed = this->computedRange(expr, parts);
 
-  return ByteProofs::clampToType(e, computed);
+  return this->clampToType(expr, computed);
 }
 
-Range ByteProofs::clampToType(const Expr *e, Range r) {
-  if (!e->type || !e->type->nonOptional()->isInteger()) {
+Range ByteProofs::clampToType(const Expr *expr, Range r) const {
+  if (expr->type == nullptr || !expr->type->nonOptional()->isInteger()) {
     return r;
   }
-  const Type *type = e->type->nonOptional();
+  const Type *type = expr->type->nonOptional();
   if (type->bitWidth() < 64 || type->isUnsigned()) {
     r.lo = r.lo ? std::max(*r.lo, type->intMin()) : type->intMin();
   }
@@ -207,31 +204,31 @@ Range ByteProofs::clampToType(const Expr *e, Range r) {
   return r;
 }
 
-IntegerRange ByteProofs::computedRange(const Expr *e, llvm::ArrayRef<Range> parts) const {
-  if (e->type == nullptr || !e->type->nonOptional()->isInteger()) {
+IntegerRange ByteProofs::computedRange(const Expr *expr, llvm::ArrayRef<Range> parts) const {
+  if (expr->type == nullptr || !expr->type->nonOptional()->isInteger()) {
     return {};
   }
-  std::optional<int64_t> constant = this->constantFolder->intConstant(e);
+  auto constant = this->constantFolder->intConstant(expr);
   if (constant.has_value()) {
-    return ByteProofs::exact(*constant);
+    return this->exact(*constant);
   }
-  switch (e->kind()) {
+  switch (expr->kind()) {
     case Expr::Kind::Cast:
-      return ByteProofs::castRange(cast<CastExpr>(e), parts[0]);
+      return this->castRange(cast<CastExpr>(expr), parts[0]);
     case Expr::Kind::Name:
-      return this->nameRange(cast<NameExpr>(e));
+      return this->nameRange(cast<NameExpr>(expr));
     case Expr::Kind::Member:
-      return ByteProofs::memberRange(cast<MemberExpr>(e));
+      return this->memberRange(cast<MemberExpr>(expr));
     case Expr::Kind::Index:
-      return ByteProofs::elementRangeOf(cast<IndexExpr>(e)->object->type);
+      return this->elementRangeOf(cast<IndexExpr>(expr)->object->type);
     case Expr::Kind::Call:
-      return ByteProofs::callRange(cast<CallExpr>(e), parts);
+      return this->callRange(cast<CallExpr>(expr), parts);
     case Expr::Kind::Unary:
-      return ByteProofs::unaryRange(cast<UnaryExpr>(e), parts[0]);
+      return this->unaryRange(cast<UnaryExpr>(expr), parts[0]);
     case Expr::Kind::Binary:
-      return ByteProofs::binaryRange(cast<BinaryExpr>(e), parts);
+      return this->binaryRange(cast<BinaryExpr>(expr), parts);
     case Expr::Kind::Conditional:
-      return ByteProofs::unite(parts[0], parts[1]);
+      return this->unite(parts[0], parts[1]);
     case Expr::Kind::Sequence:
       return parts[0];
     case Expr::Kind::IntLit:
@@ -257,13 +254,13 @@ IntegerRange ByteProofs::computedRange(const Expr *e, llvm::ArrayRef<Range> part
   return {};
 }
 
-IntegerRange ByteProofs::castRange(const CastExpr *conv, const IntegerRange &operand) {
-  const Type *from = conv->operand->type;
-  if (!conv->isImplicit() || from == nullptr || !from->isInteger()) {
+IntegerRange ByteProofs::castRange(const CastExpr *conversion, const IntegerRange &operand) const {
+  const Type *from = conversion->operand->type;
+  if (!conversion->isImplicit() || from == nullptr || !from->isInteger()) {
     return {};
   }
-  const Type *to = conv->type->nonOptional();
-  bool isInside = ByteProofs::known(operand) && *operand.lo >= to->intMin() &&
+  const Type *to = conversion->type->nonOptional();
+  bool isInside = this->known(operand) && *operand.lo >= to->intMin() &&
                   (*operand.hi < 0 || uint64_t(*operand.hi) <= to->intMax());
   if (!to->holds(from->nonOptional()) && !isInside) {
     return {};
@@ -273,17 +270,17 @@ IntegerRange ByteProofs::castRange(const CastExpr *conv, const IntegerRange &ope
 }
 
 IntegerRange ByteProofs::nameRange(const NameExpr *name) const {
-  const VarSymbol *var = name->var();
-  if (var == nullptr || !var->type->isInteger() || var->type->isWrapping()) {
+  const VarSymbol *variable = name->var();
+  if (variable == nullptr || !variable->type->isInteger() || variable->type->isWrapping()) {
     return {};
   }
   IntegerRange r;
-  Term self = Term::of(var);
-  std::optional<int64_t> above = this->state.getFlowState().getFacts().bound(self, Term::zero());
+  auto self = Term::of(variable);
+  auto above = this->state.getFlowState().getFacts().bound(self, Term::zero());
   if (above.has_value()) {
     r.hi = std::min(*above - 1, kIntMax);
   }
-  std::optional<int64_t> below = this->state.getFlowState().getFacts().bound(Term::zero(), self);
+  auto below = this->state.getFlowState().getFacts().bound(Term::zero(), self);
   if (below.has_value()) {
     r.lo = std::max(1 - *below, kIntMin);
   }
@@ -291,7 +288,7 @@ IntegerRange ByteProofs::nameRange(const NameExpr *name) const {
   return r;
 }
 
-IntegerRange ByteProofs::memberRange(const MemberExpr *member) {
+IntegerRange ByteProofs::memberRange(const MemberExpr *member) const {
   bool isLength = BuiltinPropertyTable::isName(member->name, BuiltinProperty::LENGTH) ||
                   BuiltinPropertyTable::isName(member->name, BuiltinProperty::BYTE_LENGTH);
   if (!isLength) {
@@ -301,17 +298,17 @@ IntegerRange ByteProofs::memberRange(const MemberExpr *member) {
   return {0, Type::kMaxLength};
 }
 
-IntegerRange ByteProofs::elementRangeOf(const Type *type) {
-  int64_t lo = 0;
-  int64_t hi = 0;
-  if (type == nullptr || !type->elementRange(lo, hi)) {
+IntegerRange ByteProofs::elementRangeOf(const Type *type) const {
+  int64_t low = 0;
+  int64_t high = 0;
+  if (type == nullptr || !type->elementRange(low, high)) {
     return {};
   }
 
-  return {lo, hi};
+  return {low, high};
 }
 
-IntegerRange ByteProofs::callRange(const CallExpr *call, llvm::ArrayRef<IntegerRange> parts) {
+IntegerRange ByteProofs::callRange(const CallExpr *call, llvm::ArrayRef<IntegerRange> parts) const {
   Builtin builtin = call->builtin();
   if (builtin == Builtin::StrCharCodeAt) {
     return {0, 0xFFFF};
@@ -320,36 +317,37 @@ IntegerRange ByteProofs::callRange(const CallExpr *call, llvm::ArrayRef<IntegerR
     return {0, 0x10FFFF};
   }
   if (builtin == Builtin::BytesAt) {
-    return ByteProofs::elementRangeOf(cast<MemberExpr>(call->callee)->object->type);
+    return this->elementRangeOf(cast<MemberExpr>(call->callee)->object->type);
   }
   if (builtin == Builtin::NumConvert) {
     return parts[0];
   }
   if (builtin == Builtin::DataViewGet || builtin == Builtin::BufferRead) {
     auto *kind = cast<IntLitExpr>(call->args[0]);
-    return ByteProofs::elementRangeOf(Type::bytesType(Bytes(kind->value)));
+    return this->elementRangeOf(Type::bytesType(Bytes(kind->value)));
   }
   if (builtin == Builtin::MathMin || builtin == Builtin::MathMax) {
-    return ByteProofs::minMaxRange(call, parts);
+    return this->minMaxRange(call, parts);
   }
 
   return {};
 }
 
-IntegerRange ByteProofs::minMaxRange(const CallExpr *call, llvm::ArrayRef<IntegerRange> parts) {
+IntegerRange ByteProofs::minMaxRange(const CallExpr *call,
+                                     llvm::ArrayRef<IntegerRange> parts) const {
   if (call->hasSpread() || call->args.empty()) {
     return {};
   }
   bool isMin = call->builtin() == Builtin::MathMin;
   IntegerRange r = parts[0];
-  for (size_t i = 1; i < call->args.size(); ++i) {
-    r = isMin ? ByteProofs::lowerOf(r, parts[i]) : ByteProofs::upperOf(r, parts[i]);
+  for (size_t index = 1; index < call->args.size(); ++index) {
+    r = isMin ? this->lowerOf(r, parts[index]) : this->upperOf(r, parts[index]);
   }
 
   return r;
 }
 
-IntegerRange ByteProofs::lowerOf(const IntegerRange &a, const IntegerRange &b) {
+IntegerRange ByteProofs::lowerOf(const IntegerRange &a, const IntegerRange &b) const {
   IntegerRange both;
   if (a.hi.has_value() && b.hi.has_value()) {
     both.hi = std::min(*a.hi, *b.hi);
@@ -363,7 +361,7 @@ IntegerRange ByteProofs::lowerOf(const IntegerRange &a, const IntegerRange &b) {
   return both;
 }
 
-IntegerRange ByteProofs::upperOf(const IntegerRange &a, const IntegerRange &b) {
+IntegerRange ByteProofs::upperOf(const IntegerRange &a, const IntegerRange &b) const {
   IntegerRange both;
   if (a.lo.has_value() && b.lo.has_value()) {
     both.lo = std::max(*a.lo, *b.lo);
@@ -377,15 +375,15 @@ IntegerRange ByteProofs::upperOf(const IntegerRange &a, const IntegerRange &b) {
   return both;
 }
 
-IntegerRange ByteProofs::unaryRange(const UnaryExpr *unary, const IntegerRange &operand) {
+IntegerRange ByteProofs::unaryRange(const UnaryExpr *unary, const IntegerRange &operand) const {
   if (unary->op == UnaryOp::Plus) {
     return operand;
   }
-  if (!ByteProofs::known(operand)) {
+  if (!this->known(operand)) {
     return {};
   }
   if (unary->op == UnaryOp::Neg) {
-    return BytesCheckHelpers::operate(BinaryOp::Sub, ByteProofs::exact(0), operand, false);
+    return BytesCheckHelpers::operate(BinaryOp::Sub, this->exact(0), operand, false);
   }
   if (unary->op == UnaryOp::BitNot) {
     return {-*operand.hi - 1, -*operand.lo - 1};
@@ -394,44 +392,45 @@ IntegerRange ByteProofs::unaryRange(const UnaryExpr *unary, const IntegerRange &
   return {};
 }
 
-IntegerRange ByteProofs::binaryRange(const BinaryExpr *bin, llvm::ArrayRef<IntegerRange> parts) {
-  if (bin->op == BinaryOp::Nullish) {
-    return ByteProofs::unite(parts[0], parts[1]);
+IntegerRange ByteProofs::binaryRange(const BinaryExpr *binary,
+                                     llvm::ArrayRef<IntegerRange> parts) const {
+  if (binary->op == BinaryOp::Nullish) {
+    return this->unite(parts[0], parts[1]);
   }
 
-  return BytesCheckHelpers::operate(bin->op, parts[0], parts[1], false);
+  return BytesCheckHelpers::operate(binary->op, parts[0], parts[1], false);
 }
 
-bool ByteProofs::provesFits(const Expr *expr, int64_t lo, int64_t hi) const {
-  return this->indexProofs->provesBetween(expr, lo, hi);
+bool ByteProofs::provesFits(const Expr *expr, int64_t low, int64_t high) const {
+  return this->indexProofs->canProveBetween(expr, low, high);
 }
 
 ByteProofs::ResultValueFitsType ByteProofs::valueFits(const Expr *value, const Type *target,
                                                       llvm::StringRef what) {
-  int64_t lo, hi;
-  if (!value->type->isInteger() || !target->elementRange(lo, hi)) {
+  int64_t low, hi;
+  if (!value->type->isInteger() || !target->elementRange(low, hi)) {
     return ok(value);
   }
   Bytes kind = target->bytes();
-  bool isFitting = kind == Bytes::Uint8Clamped || this->provesFits(value, lo, hi) ||
-                   (lo >= value->type->intMin() && uint64_t(hi) >= value->type->intMax());
+  bool isFitting = kind == Bytes::Uint8Clamped || this->provesFits(value, low, hi) ||
+                   (low >= value->type->intMin() && uint64_t(hi) >= value->type->intMax());
   if (isFitting) {
     return ok(value);
   }
-  std::string range = ErrorTextBytes::range(lo, hi);
+  auto range = ErrorTextBytes::range(low, hi);
   if (std::optional<int64_t> c = this->constantFolder->intConstant(value)) {
-    std::string hint = BytesCheckHelpers::wrapHint(kind, std::to_string(*c));
-    int64_t stored = ByteProofs::wrapped(kind, *c);
-    std::string message = ErrorTextByteFit::constant(*c, what, range, stored, hint);
+    auto hint = BytesCheckHelpers::wrapHint(kind, std::to_string(*c));
+    int64_t stored = this->wrapped(kind, *c);
+    auto message = ErrorTextByteFit::constant(*c, what, range, stored, hint);
 
     return err(ByteProofsValueFitsError{
         .code = ByteProofsValueFitsErrorCode::CONSTANT_DOES_NOT_FIT,
         .message = message,
     });
   }
-  std::string text = BytesCheckHelpers::valueText(value);
-  std::string hint = BytesCheckHelpers::wrapHint(kind, text);
-  std::string message = ErrorTextByteFit::unproven(what, range, text, lo, hi, hint);
+  auto text = BytesCheckHelpers::valueText(value);
+  auto hint = BytesCheckHelpers::wrapHint(kind, text);
+  auto message = ErrorTextByteFit::unproven(what, range, text, low, hi, hint);
 
   return err(ByteProofsValueFitsError{
       .code = ByteProofsValueFitsErrorCode::FIT_NOT_PROVEN,
@@ -439,10 +438,10 @@ ByteProofs::ResultValueFitsType ByteProofs::valueFits(const Expr *value, const T
   });
 }
 
-ByteProofs::ResultOffsetAligned ByteProofs::offsetAligned(std::optional<int64_t> start,
-                                                          int64_t size, llvm::StringRef what) {
+ByteProofs::ResultOffsetAligned
+ByteProofs::offsetAligned(std::optional<int64_t> start, int64_t size, llvm::StringRef what) const {
   if (size > 1 && (!start || *start % size != 0)) {
-    std::string message = ErrorTextByteView::offset(what, size);
+    auto message = ErrorTextByteView::offset(what, size);
 
     return err(ByteProofsOffsetAlignedError{
         .code = ByteProofsOffsetAlignedErrorCode::MISALIGNED_OFFSET,
@@ -453,10 +452,10 @@ ByteProofs::ResultOffsetAligned ByteProofs::offsetAligned(std::optional<int64_t>
   return ok(start.value_or(0));
 }
 
-ByteProofs::ResultBufferAligned ByteProofs::bufferAligned(std::optional<int64_t> whole,
-                                                          int64_t size, llvm::StringRef what) {
+ByteProofs::ResultBufferAligned
+ByteProofs::bufferAligned(std::optional<int64_t> whole, int64_t size, llvm::StringRef what) const {
   if (size > 1 && (!whole || *whole % size != 0)) {
-    std::string message = ErrorTextByteView::size(what, size);
+    auto message = ErrorTextByteView::size(what, size);
 
     return err(ByteProofsBufferAlignedError{
         .code = ByteProofsBufferAlignedErrorCode::SIZE_NOT_PROVEN,
@@ -469,14 +468,14 @@ ByteProofs::ResultBufferAligned ByteProofs::bufferAligned(std::optional<int64_t>
 
 void ByteProofs::walkView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size,
                           llvm::StringRef what) {
-  if (ByteProofs::sameView(buffer, offset, length, size) ||
-      this->indexProofs->exempt(buffer->loc(), buffer)) {
+  if (this->sameView(buffer, offset, length, size) ||
+      this->indexProofs->isExempt(buffer->loc(), buffer)) {
     return;
   }
   IndexProofs &proofs = *this->indexProofs;
-  if (offset) {
-    std::string offsetWhat = ErrorTextByteView::offsetOf(what);
-    IndexProofs::ResultUpToWasProven upTo = proofs.requireUpTo(offset, buffer, 0, offsetWhat);
+  if (offset != nullptr) {
+    auto offsetWhat = ErrorTextByteView::offsetOf(what);
+    auto upTo = proofs.requireUpTo(offset, buffer, 0, offsetWhat);
     if (upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT) {
       this->state.getDiagnostics().error(offset->loc(), upTo.error().message);
     }
@@ -485,82 +484,82 @@ void ByteProofs::walkView(const Expr *buffer, const Expr *offset, const Expr *le
     }
   }
   std::optional<int64_t> start =
-      offset ? this->constantFolder->intConstant(offset) : std::optional<int64_t>(0);
-  ResultOffsetAligned aligned = ByteProofs::offsetAligned(start, size, what);
+      offset != nullptr ? this->constantFolder->intConstant(offset) : std::optional<int64_t>(0);
+  auto aligned = this->offsetAligned(start, size, what);
   if (aligned.isErr()) {
     this->state.getDiagnostics().error(offset->loc(), aligned.error().message);
     return;
   }
-  if (!length) {
-    std::optional<int64_t> whole = proofs.exactLength(buffer);
-    ResultBufferAligned sized = ByteProofs::bufferAligned(whole, size, what);
+  if (length == nullptr) {
+    auto whole = proofs.exactLength(buffer);
+    auto sized = this->bufferAligned(whole, size, what);
     if (sized.isErr()) {
       this->state.getDiagnostics().error(buffer->loc(), sized.error().message);
     }
     return;
   }
-  std::string lengthWhat = ErrorTextByteView::lengthOf(what);
-  IndexProofs::ResultBetweenProven between =
-      proofs.requireBetween(length, 0, std::nullopt, lengthWhat);
+  auto lengthWhat = ErrorTextByteView::lengthOf(what);
+  auto between = proofs.requireBetween(length, 0, std::nullopt, lengthWhat);
   if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
     this->state.getDiagnostics().error(length->loc(), between.error().message);
   }
   if (between.isErr()) {
     return;
   }
-  std::optional<Linear> count = proofs.linear(length);
-  std::optional<Linear> from = offset ? proofs.linear(offset) : Linear{Term::zero(), 0};
+  auto count = proofs.linear(length);
+  std::optional<Linear> from = offset != nullptr ? proofs.linear(offset) : Linear{Term::zero(), 0};
   if (count && size > 1) {
-    Linear known = proofs.settled(*count);
+    auto known = proofs.settled(*count);
     count = known.term.isZero() ? std::optional<Linear>(Linear{Term::zero(), known.offset * size})
                                 : std::nullopt;
   }
-  if (!proofs.provesSumUpTo(from, count, buffer)) {
-    std::string offsetText = offset ? BytesCheckHelpers::valueText(offset) : std::string();
-    std::string end =
-        ErrorTextByteView::end(offsetText, BytesCheckHelpers::valueText(length), size);
-    std::string message =
-        ErrorTextByteView::notFits(what, end, BytesCheckHelpers::valueText(buffer));
+  if (!proofs.canProveSumUpTo(from, count, buffer)) {
+    std::string offsetText =
+        offset != nullptr ? BytesCheckHelpers::valueText(offset) : std::string();
+    auto end = ErrorTextByteView::end(offsetText, BytesCheckHelpers::valueText(length), size);
+    auto message = ErrorTextByteView::notFits(what, end, BytesCheckHelpers::valueText(buffer));
     this->state.getDiagnostics().error(length->loc(), message);
   }
 }
 
 bool ByteProofs::provesWithin(const Expr *object, const Expr *offset, int64_t size) const {
-  std::optional<Linear> at = offset ? this->indexProofs->linear(offset) : Linear{Term::zero(), 0};
-  std::optional<Linear> length = this->indexProofs->lengthOf(object);
+  std::optional<Linear> at =
+      offset != nullptr ? this->indexProofs->linear(offset) : Linear{Term::zero(), 0};
+  auto length = this->indexProofs->lengthOf(object);
   if (!at || !length) {
     return false;
   }
 
-  return this->state.getFlowState().getFacts().proves(Term::zero(), at->term, at->offset + 1) &&
-         this->state.getFlowState().getFacts().proves(at->term, length->term,
-                                                      length->offset - size + 1 - at->offset);
+  return this->state.getFlowState().getFacts().canProve(Term::zero(), at->term, at->offset + 1) &&
+         this->state.getFlowState().getFacts().canProve(at->term, length->term,
+                                                        length->offset - size + 1 - at->offset);
 }
 
-void ByteProofs::addByteCallbackFacts(const FunctionDecl *fn) {
-  const ByteCallback *found = this->state.getCallbackFacts().findByteCallback(fn);
-  if (!found || found->param >= fn->params.size()) {
+void ByteProofs::addByteCallbackFacts(const FunctionDecl *functionDecl) {
+  const auto *found = this->state.getCallbackFacts().findByteCallback(functionDecl);
+  if (found == nullptr || found->param >= functionDecl->params.size()) {
     return;
   }
   const ByteCallback &info = *found;
-  const VarSymbol *var = fn->params[info.param].sym;
-  if (!var || !var->type->isInt() || (info.lo <= kIntMin && info.hi >= kIntMax)) {
+  const VarSymbol *variable = functionDecl->params[info.param].sym;
+  if (variable == nullptr || !variable->type->isInt() ||
+      (info.lo <= kIntMin && info.hi >= kIntMax)) {
     return;
   }
-  this->state.getFlowState().getFacts().add(Term::zero(), Term::of(var),
+  this->state.getFlowState().getFacts().add(Term::zero(), Term::of(variable),
                                             Facts::saturatingSub(1, info.lo));
-  this->state.getFlowState().getFacts().add(Term::of(var), Term::zero(),
+  this->state.getFlowState().getFacts().add(Term::of(variable), Term::zero(),
                                             Facts::saturatingAdd(info.hi, 1));
 }
 
-ByteProofs::ResultByteCallbackChecked ByteProofs::checkByteCallbackResult(const FunctionDecl *fn,
-                                                                          const Expr *value) {
-  const ByteCallback *found = this->state.getCallbackFacts().findByteCallback(fn);
-  if (!found || !found->target) {
+ByteProofs::ResultByteCallbackChecked
+ByteProofs::checkByteCallbackResult(const FunctionDecl *functionDecl, const Expr *value) {
+  const auto *found = this->state.getCallbackFacts().findByteCallback(functionDecl);
+  if (found == nullptr || found->target == nullptr) {
     return ok();
   }
-  std::string what = ErrorTextByteView::element(found->target->name());
-  ByteProofs::ResultValueFitsType fitting = this->valueFits(value, found->target, what);
+  auto what = ErrorTextByteView::element(found->target->name());
+  auto fitting = this->valueFits(value, found->target, what);
   if (fitting.isErr()) {
     return err(fitting.error());
   }

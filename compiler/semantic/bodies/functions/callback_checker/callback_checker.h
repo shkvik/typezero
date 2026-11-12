@@ -18,6 +18,7 @@ class ClosureChecker;
 class ConditionFacts;
 class ConstantFolder;
 class GenericChecker;
+class DecimalChecker;
 class NestedFunctions;
 class PredicateChecker;
 class GenericInstantiator;
@@ -50,7 +51,8 @@ private:
   using ResultReturnedTypeFits = Result<const Type *, CallbackCheckerReturnMatchesError>;
   using ResultArgumentsSuffice = Result<const Type *, CallbackCheckerArgumentsEnoughError>;
 
-  Expr *checkLiteralCallback(FunctionExpr *fe, const Signature &expected, llvm::StringRef method);
+  Expr *checkLiteralCallback(FunctionExpr *functionExpr, const Signature &expected,
+                             llvm::StringRef method);
   Expr *checkCallbackValue(Expr *arg, const Signature &expected);
   Expr *checkPassedFunction(Expr *arg, const Signature &expected, unsigned primary,
                             llvm::StringRef method);
@@ -58,30 +60,30 @@ private:
                          const FunctionDecl *known, llvm::StringRef name, llvm::StringRef method);
   Expr *checkCallbackResult(Expr *arg, const Signature &expected, llvm::StringRef name,
                             llvm::StringRef method);
-  static ResultComparisonNumber comparison(const Type *result);
-  static ResultCallbackIsPassed callbackGiven(size_t count, llvm::StringRef name);
-  static ResultWithoutRestParam fixedParams(const Type *type, llvm::StringRef name);
-  static ResultCallbackHasValue mappedValue(const Type *result, llvm::StringRef name);
-  static ResultFunctionIsPassed functionGiven(const Type *type, llvm::StringRef method);
-  static ResultInitialValueType initialValue(const Type *accumulator, llvm::StringRef name);
-  static ResultNoExtraArguments extraArguments(size_t count, size_t maxArgs, llvm::StringRef name,
-                                               bool reduce);
-  static ResultNothingIsDropped resultKept(const Type *type, const Signature &expected,
-                                           llvm::StringRef name, llvm::StringRef method);
-  static ResultReturnedTypeFits returnMatches(const Type *type, const Signature &expected,
-                                              llvm::StringRef name, llvm::StringRef method);
-  static ResultArgumentsSuffice argumentsEnough(const Type *type, const Signature &expected,
-                                                llvm::StringRef name, llvm::StringRef method);
+  ResultComparisonNumber comparison(const Type *result) const;
+  ResultCallbackIsPassed callbackGiven(size_t count, llvm::StringRef name) const;
+  ResultWithoutRestParam fixedParams(const Type *type, llvm::StringRef name) const;
+  ResultCallbackHasValue mappedValue(const Type *result, llvm::StringRef name) const;
+  ResultFunctionIsPassed functionGiven(const Type *type, llvm::StringRef method) const;
+  ResultInitialValueType initialValue(const Type *accumulator, llvm::StringRef name) const;
+  ResultNoExtraArguments extraArguments(size_t count, size_t maxArgs, llvm::StringRef name,
+                                        bool reduce) const;
+  ResultNothingIsDropped resultKept(const Type *type, const Signature &expected,
+                                    llvm::StringRef name, llvm::StringRef method) const;
+  ResultReturnedTypeFits returnMatches(const Type *type, const Signature &expected,
+                                       llvm::StringRef name, llvm::StringRef method) const;
+  ResultArgumentsSuffice argumentsEnough(const Type *type, const Signature &expected,
+                                         llvm::StringRef name, llvm::StringRef method) const;
   using DefinedVars = llvm::SmallPtrSet<const VarSymbol *, 4>;
 
-  static NodeChildren<SignedCondition> signedParts(SignedCondition part);
-  static DefinedVars joinDefined(bool isAnd, bool whenTrue, DefinedVars left,
-                                 const DefinedVars &right);
+  NodeChildren<SignedCondition> signedParts(SignedCondition part) const;
+  DefinedVars joinDefined(bool isAnd, bool whenTrue, DefinedVars left,
+                          const DefinedVars &right) const;
   DefinedVars definedBy(SignedCondition part, std::vector<DefinedVars> &answers) const;
 
-  static ResultParameterMatches callbackParam(const Type *type, const Signature &expected, size_t i,
-                                              unsigned primary, const FunctionDecl *known,
-                                              llvm::StringRef name, llvm::StringRef method);
+  ResultParameterMatches callbackParam(const Type *type, const Signature &expected, size_t index,
+                                       unsigned primary, const FunctionDecl *known,
+                                       llvm::StringRef name, llvm::StringRef method) const;
 
   struct ArrayCallbackShape {
     CallExpr *call;
@@ -98,11 +100,11 @@ private:
 
   void walkExtraCallbackArgs(ArrayCallbackShape &shape);
   const Type *reduceInitType(const ArrayCallbackShape &shape);
-  static Signature callbackSignature(const ArrayCallbackShape &shape, const Type *expected);
-  static const Type *mappedReturn(const ArrayCallbackShape &shape, const Type *expected);
-  static std::vector<const Type *> callbackParams(const ArrayCallbackShape &shape);
+  Signature callbackSignature(const ArrayCallbackShape &shape, const Type *expected) const;
+  const Type *mappedReturn(const ArrayCallbackShape &shape, const Type *expected) const;
+  std::vector<const Type *> callbackParams(const ArrayCallbackShape &shape) const;
   void rememberCallbackFacts(const ArrayCallbackShape &shape);
-  std::optional<ElementCallback> literalElements(const ArrayLitExpr *lit, unsigned param);
+  std::optional<ElementCallback> literalElements(const ArrayLitExpr *literal, unsigned param);
   Expr *checkArrayCallbackResult(const ArrayCallbackShape &shape);
   Expr *checkMappedResult(const ArrayCallbackShape &shape, const Type *result);
   const Type *filteredArray(const ArrayCallbackShape &shape);
@@ -119,6 +121,7 @@ private:
   ConditionFacts *conditionFacts = nullptr;
   ConstantFolder *constantFolder = nullptr;
   GenericChecker *genericChecker = nullptr;
+  DecimalChecker *decimalChecker = nullptr;
   NestedFunctions *nestedFunctions = nullptr;
   PredicateChecker *predicateChecker = nullptr;
   GenericInstantiator *genericInstantiator = nullptr;

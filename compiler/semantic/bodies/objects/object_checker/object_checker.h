@@ -23,7 +23,7 @@ class ClassMemberChecker;
 
 class ObjectChecker {
 public:
-  static std::string fieldText(const Expr *object, llvm::StringRef field);
+  std::string fieldText(const Expr *object, llvm::StringRef field) const;
   using ResultObjectFieldValue = Result<Expr *, ObjectCheckerCheckFieldError>;
   using ResultFieldCallIsTyped = Result<Expr *, ObjectCheckerCheckFieldCallError>;
   using ResultObjectStaticCall = Result<Expr *, ObjectCheckerCheckObjectCallError>;
@@ -39,7 +39,7 @@ public:
   ResultObjectStaticCall checkObjectCall(CallExpr *call, MemberExpr *member, const Type *expected);
 
 private:
-  static std::optional<std::string> chainText(const Expr *expr);
+  std::optional<std::string> chainText(const Expr *expr) const;
   using ResultEnumMemberValues = Result<Expr *, ObjectCheckerEnumMembersError>;
   using ResultForInKeysAllowed = Result<const Type *, ObjectCheckerWalkableError>;
   using ResultLengthIsNotFixed = Result<const Type *, ObjectCheckerFixedLengthError>;
@@ -47,17 +47,17 @@ private:
   using ResultTargetObjectType = Result<const Type *, ObjectCheckerObjectDefinedError>;
   using ResultTargetIsWritable = Result<const Field *, ObjectCheckerFieldWritableError>;
 
-  static bool isInherited(llvm::StringRef name);
-  static std::u16string utf16(llvm::StringRef text);
-  static bool hasMethodFields(const ClassDecl *cls);
-  static std::string noFieldText(const Type *type, llvm::StringRef name);
-  static ResultForInKeysAllowed walkable(const Type *type, llvm::StringRef text);
-  static ResultLengthIsNotFixed fixedLength(const Type *type, const MemberExpr *member);
-  static ResultTargetFieldFound fieldExists(const Type *type, const MemberExpr *member);
-  ResultEnumMemberValues enumMembers(CallExpr *call, EnumDecl *decl, llvm::StringRef fn);
-  static ResultTargetObjectType objectDefined(const Type *type, const MemberExpr *member);
-  static ResultTargetIsWritable fieldWritable(const Field *field, const Type *type,
-                                              const MemberExpr *member);
+  bool isInherited(llvm::StringRef name) const;
+  bool hasMethodFields(const ClassDecl *classDecl) const;
+  std::string noFieldText(const Type *type, llvm::StringRef name) const;
+  ResultForInKeysAllowed walkable(const Type *type, llvm::StringRef text) const;
+  ResultLengthIsNotFixed fixedLength(const Type *type, const MemberExpr *member) const;
+  ResultTargetFieldFound fieldExists(const Type *type, const MemberExpr *member) const;
+  ResultEnumMemberValues enumMembers(CallExpr *call, EnumDecl *enumDecl,
+                                     llvm::StringRef functionName);
+  ResultTargetObjectType objectDefined(const Type *type, const MemberExpr *member) const;
+  ResultTargetIsWritable fieldWritable(const Field *field, const Type *type,
+                                       const MemberExpr *member) const;
 
   SemanticState &state;
   Scopes *scopes = nullptr;

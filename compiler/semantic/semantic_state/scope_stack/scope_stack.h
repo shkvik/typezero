@@ -29,7 +29,7 @@ public:
   ScopeEntry findName(llvm::StringRef name) const;
   std::optional<ScopeEntry> findInCurrentScope(llvm::StringRef name) const;
   void addToCurrentScope(llvm::StringRef name, ScopeEntry entry);
-  std::optional<size_t> findDeclaringScope(const VarSymbol *var) const;
+  std::optional<size_t> findDeclaringScope(const VarSymbol *variable) const;
   std::vector<llvm::StringRef> getLocalVarNames() const;
   llvm::StringMap<ScopeEntry> getTopValues() const;
   void replaceTopValues(llvm::StringMap<ScopeEntry> values);

@@ -34,6 +34,7 @@ StreamPipeline::StreamPipeline(SemanticState &owner, SemanticParts &all)
   this->streamChecker = &all.streamChecker;
   this->streamSources = &all.streamSources;
   this->typeRelations = &all.typeRelations;
+  this->classDeclarer = &all.classDeclarer;
   this->closureChecker = &all.closureChecker;
   this->emitterChecker = &all.emitterChecker;
   this->processChecker = &all.processChecker;
@@ -42,16 +43,16 @@ StreamPipeline::StreamPipeline(SemanticState &owner, SemanticParts &all)
   this->eventTargetChecker = &all.eventTargetChecker;
 }
 
-bool StreamPipeline::inModule(const std::string &place, llvm::StringRef module) {
+bool StreamPipeline::inModule(const std::string &place, llvm::StringRef module) const {
   llvm::StringRef at(place);
 
   return at.consume_front(module) && at.consume_front(":");
 }
 
 StreamPipeline::ResultWritableEnd StreamPipeline::writableEnd(const StreamChunks &chunks,
-                                                              const Type *type) {
-  if (!chunks.writable) {
-    std::string message = ErrorTextPipeline::notWritten(type->name());
+                                                              const Type *type) const {
+  if (chunks.writable == nullptr) {
+    auto message = ErrorTextPipeline::notWritten(type->name());
 
     return err(StreamPipelineWritableEndError{
         .code = StreamPipelineWritableEndErrorCode::NOT_WRITABLE,
@@ -63,9 +64,9 @@ StreamPipeline::ResultWritableEnd StreamPipeline::writableEnd(const StreamChunks
 }
 
 StreamPipeline::ResultReadableEnd StreamPipeline::readableEnd(const StreamChunks &chunks,
-                                                              const Type *type) {
-  if (!chunks.readable) {
-    std::string message = ErrorTextPipeline::notRead(type->name());
+                                                              const Type *type) const {
+  if (chunks.readable == nullptr) {
+    auto message = ErrorTextPipeline::notRead(type->name());
 
     return err(StreamPipelineReadableEndError{
         .code = StreamPipelineReadableEndErrorCode::NOT_READABLE,
@@ -78,7 +79,7 @@ StreamPipeline::ResultReadableEnd StreamPipeline::readableEnd(const StreamChunks
 
 Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bool last,
                                   bool &stream, const Type **sinkValue) {
-  ClassDecl *stageClass = this->state.getLibraryDeclarations().findLibraryClass("PipelineStage");
+  auto *stageClass = this->state.getLibraryDeclarations().findLibraryClass("PipelineStage");
   StageShape stage{
       .loc = arg->loc(),
       .stageType = stageClass != nullptr ? stageClass->type : Type::error(),
@@ -91,10 +92,10 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
   if (type->isError()) {
     return arg;
   }
-  ClassDecl *cls = ClassDeclarer::classOf(type);
-  if (cls != nullptr && this->chunkTypes->isStreamClass(cls) && !type->isOptional()) {
+  auto *classDecl = this->classDeclarer->classOf(type);
+  if (classDecl != nullptr && this->chunkTypes->isStreamClass(classDecl) && !type->isOptional()) {
     stream = true;
-    return this->streamClassStage(arg, chunk, stage, cls);
+    return this->streamClassStage(arg, chunk, stage, classDecl);
   }
   if (type->isFunction()) {
     return this->functionStage(arg, chunk, stage, sinkValue);
@@ -103,7 +104,7 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
   if (source != nullptr) {
     return source;
   }
-  std::string message = ErrorTextPipeline::stage(type->name());
+  auto message = ErrorTextPipeline::stage(type->name());
   this->state.getDiagnostics().error(stage.loc, message);
   arg->type = Type::error();
 
@@ -111,26 +112,27 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
 }
 
 Expr *StreamPipeline::checkStageValue(Expr *arg, const Type *chunk, bool first) {
-  auto *fe = dyn_cast<FunctionExpr>(arg);
-  if (fe == nullptr) {
+  auto *functionExpr = dyn_cast<FunctionExpr>(arg);
+  if (functionExpr == nullptr) {
     return this->exprChecker->checkExpr(arg);
   }
-  Signature sig;
+  Signature signature;
   if (!first) {
-    sig.params = {Type::asyncIterator(chunk)};
-    sig.minArgs = 1;
+    signature.params = {Type::asyncIterator(chunk)};
+    signature.minArgs = 1;
   }
 
-  return this->closureChecker->checkFunctionExpr(fe, &sig);
+  return this->closureChecker->checkFunctionExpr(functionExpr, &signature);
 }
 
-Expr *StreamPipeline::stageCall(const StageShape &stage, llvm::StringRef fn,
+Expr *StreamPipeline::stageCall(const StageShape &stage, llvm::StringRef functionName,
                                 std::vector<const Type *> bound, Expr *value) {
-  auto *callee = this->state.getAst().make<NameExpr>(stage.loc, fn);
+  auto *callee = this->state.getAst().make<NameExpr>(stage.loc, functionName);
   auto *call = this->state.getAst().make<CallExpr>(stage.loc, callee, std::vector<Expr *>{value});
   call->type = Type::error();
   std::vector<bool> given{true};
-  Expr *made = this->eventTargetChecker->callLibraryFunction(call, fn, bound, given, stage.loc);
+  auto *made =
+      this->eventTargetChecker->callLibraryFunction(call, functionName, bound, given, stage.loc);
 
   return made->type->isError() ? made : this->typeRelations->convert(made, stage.stageType);
 }
@@ -145,24 +147,24 @@ Expr *StreamPipeline::asPipelineStage(const StageShape &stage, Expr *made) {
 }
 
 Expr *StreamPipeline::streamClassStage(Expr *arg, const Type *&chunk, const StageShape &stage,
-                                       ClassDecl *cls) {
+                                       ClassDecl *classDecl) {
   const Type *type = arg->type;
-  StreamChunks chunks = this->chunkTypes->streamChunksOf(cls);
+  auto chunks = this->chunkTypes->streamChunksOf(classDecl);
   if (!stage.first) {
-    ResultWritableEnd writable = StreamPipeline::writableEnd(chunks, type);
+    auto writable = this->writableEnd(chunks, type);
     if (writable.isErr()) {
       this->state.getDiagnostics().error(stage.loc, writable.error().message);
       return arg;
     }
     if (chunk != nullptr && !this->streamTakes(chunks.writable, chunk)) {
-      std::string message = ErrorTextPipeline::chunkKind("pipeline", chunk->name(), type->name(),
-                                                         chunks.writable->name());
+      auto message = ErrorTextPipeline::chunkKind("pipeline", chunk->name(), type->name(),
+                                                  chunks.writable->name());
       this->state.getDiagnostics().error(stage.loc, message);
       return arg;
     }
   }
   if (!stage.last) {
-    ResultReadableEnd readable = StreamPipeline::readableEnd(chunks, type);
+    auto readable = this->readableEnd(chunks, type);
     if (readable.isErr()) {
       this->state.getDiagnostics().error(stage.loc, readable.error().message);
       return arg;
@@ -175,48 +177,49 @@ Expr *StreamPipeline::streamClassStage(Expr *arg, const Type *&chunk, const Stag
 
 Expr *StreamPipeline::functionStage(Expr *arg, const Type *&chunk, const StageShape &stage,
                                     const Type **sinkValue) {
-  const Type *ret = arg->type->ret();
+  const Type *returnType = arg->type->ret();
   if (stage.first) {
     return this->sourceFunctionStage(arg, chunk, stage);
   }
-  const Type *source = Type::asyncIterator(chunk);
-  const Type *fn = Type::function({source}, 1, false, ret);
-  if (ret->isAsyncIterator()) {
-    Expr *coerced = this->typeRelations->coerce(arg, fn);
-    Expr *made = this->stageCall(stage, "streamTransformStage", {chunk, ret->yielded()}, coerced);
-    chunk = ret->yielded();
+  const auto *source = Type::asyncIterator(chunk);
+  const auto *functionType = Type::function({source}, 1, false, returnType);
+  if (returnType->isAsyncIterator()) {
+    auto *coerced = this->typeRelations->coerce(arg, functionType);
+    auto *made =
+        this->stageCall(stage, "streamTransformStage", {chunk, returnType->yielded()}, coerced);
+    chunk = returnType->yielded();
     return this->asPipelineStage(stage, made);
   }
-  if (ret->isPromise() && stage.last) {
-    return this->sinkFunctionStage(arg, chunk, stage, fn, sinkValue);
+  if (returnType->isPromise() && stage.last) {
+    return this->sinkFunctionStage(arg, chunk, stage, functionType, sinkValue);
   }
-  std::string message = ErrorTextPipeline::function(stage.last);
+  auto message = ErrorTextPipeline::function(stage.last);
   this->state.getDiagnostics().error(stage.loc, message);
 
   return arg;
 }
 
 Expr *StreamPipeline::sourceFunctionStage(Expr *arg, const Type *&chunk, const StageShape &stage) {
-  const Type *ret = arg->type->ret();
-  if (!ret->isAsyncIterator()) {
-    std::string message = ErrorTextPipeline::source();
+  const Type *returnType = arg->type->ret();
+  if (!returnType->isAsyncIterator()) {
+    auto message = ErrorTextPipeline::source();
     this->state.getDiagnostics().error(stage.loc, message);
     return arg;
   }
-  chunk = ret->yielded();
-  Expr *coerced = this->typeRelations->coerce(arg, Type::function({}, 0, false, ret));
-  Expr *made = this->stageCall(stage, "streamSourceStage", {chunk}, coerced);
+  chunk = returnType->yielded();
+  auto *coerced = this->typeRelations->coerce(arg, Type::function({}, 0, false, returnType));
+  auto *made = this->stageCall(stage, "streamSourceStage", {chunk}, coerced);
 
   return this->asPipelineStage(stage, made);
 }
 
 Expr *StreamPipeline::sinkFunctionStage(Expr *arg, const Type *chunk, const StageShape &stage,
-                                        const Type *fn, const Type **sinkValue) {
+                                        const Type *functionType, const Type **sinkValue) {
   const Type *value = arg->type->ret()->promised();
   if (sinkValue != nullptr) {
     *sinkValue = value;
   }
-  Expr *coerced = this->typeRelations->coerce(arg, fn);
+  auto *coerced = this->typeRelations->coerce(arg, functionType);
   Expr *made = value->isVoid() ? this->stageCall(stage, "streamVoidSinkStage", {chunk}, coerced)
                                : this->stageCall(stage, "streamSinkStage", {chunk, value}, coerced);
 
@@ -227,15 +230,15 @@ Expr *StreamPipeline::iterableSourceStage(Expr *arg, const Type *&chunk, const S
   const Type *type = arg->type;
   if (type->isAsyncIterator()) {
     chunk = type->yielded();
-    Expr *made = this->stageCall(stage, "streamAsyncIterableStage", {chunk}, arg);
+    auto *made = this->stageCall(stage, "streamAsyncIterableStage", {chunk}, arg);
     return this->asPipelineStage(stage, made);
   }
-  Expr *iterator = this->valuesIteratorOf(arg);
+  auto *iterator = this->valuesIteratorOf(arg);
   if (iterator == nullptr) {
     return nullptr;
   }
   chunk = iterator->type->yielded();
-  Expr *made = this->stageCall(stage, "streamIterableStage", {chunk}, iterator);
+  auto *made = this->stageCall(stage, "streamIterableStage", {chunk}, iterator);
 
   return this->asPipelineStage(stage, made);
 }
@@ -247,12 +250,12 @@ Expr *StreamPipeline::valuesIteratorOf(Expr *collection) {
   }
   llvm::SMLoc loc = collection->loc();
   if (type->isArray()) {
-    const Type *iterator = Type::iterator(type->inner());
+    const auto *iterator = Type::iterator(type->inner());
     auto *member = this->state.getAst().make<MemberExpr>(loc, collection, "values");
     member->type = Type::function({}, 0, false, iterator);
     return this->processChecker->builtinCall(loc, member, Builtin::ArrValues, {}, iterator);
   }
-  Expr *iterator = this->dictChecker->iterableOf(collection);
+  auto *iterator = this->dictChecker->iterableOf(collection);
 
   return iterator != collection && iterator->type->isIterator() ? iterator : nullptr;
 }
@@ -268,16 +271,17 @@ bool StreamPipeline::streamTakes(const Type *writable, const Type *chunk) {
   return TypeRelations::isImplicitlyConvertible(chunk, writable);
 }
 
-Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, llvm::SMLoc loc) {
-  std::string place = this->eventMapInference->placeOf(decl->loc());
-  if (StreamPipeline::inModule(place, "node:internal/fs/streams")) {
-    return this->streamSources->checkFsStreamFunction(call, decl, loc);
+Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *functionDecl,
+                                          llvm::SMLoc loc) {
+  auto place = this->eventMapInference->placeOf(functionDecl->loc());
+  if (this->inModule(place, "node:internal/fs/streams")) {
+    return this->streamSources->checkFsStreamFunction(call, functionDecl, loc);
   }
-  bool hasPromises = StreamPipeline::inModule(place, "node:stream/promises");
-  if (!hasPromises && !StreamPipeline::inModule(place, "node:stream")) {
+  bool hasPromises = this->inModule(place, "node:stream/promises");
+  if (!hasPromises && !this->inModule(place, "node:stream")) {
     return nullptr;
   }
-  std::optional<StreamFunction> function = StreamFunctionTable::find(decl->name);
+  auto function = StreamFunctionTable::find(functionDecl->name);
   if (!function.has_value()) {
     return nullptr;
   }
@@ -285,7 +289,7 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  ClassDecl *streamClass = this->state.getLibraryDeclarations().findLibraryClass("Stream");
+  auto *streamClass = this->state.getLibraryDeclarations().findLibraryClass("Stream");
   if (streamClass == nullptr) {
     return nullptr;
   }
@@ -310,14 +314,14 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
 }
 
 void StreamPipeline::walkArgsLoosely(CallExpr *call, size_t from) {
-  for (size_t i = from; i < call->args.size(); ++i) {
-    call->args[i] = this->exprChecker->checkExpr(call->args[i]);
+  for (size_t index = from; index < call->args.size(); ++index) {
+    call->args[index] = this->exprChecker->checkExpr(call->args[index]);
   }
 }
 
 Expr *StreamPipeline::undefinedOf(llvm::SMLoc loc, const Type *type) {
   auto *nothing = this->state.getAst().make<UndefinedExpr>(loc);
-  Expr *checked = this->exprChecker->checkExpr(nothing);
+  auto *checked = this->exprChecker->checkExpr(nothing);
 
   return this->typeRelations->convert(checked, type);
 }
@@ -325,16 +329,15 @@ Expr *StreamPipeline::undefinedOf(llvm::SMLoc loc, const Type *type) {
 Expr *StreamPipeline::checkFinished(const StreamCall &stream) {
   CallExpr *call = stream.call;
   unsigned most = stream.promises ? 2 : 3;
-  ArgumentChecker::ResultArityMatches arity =
-      this->argumentChecker->checkArity(call, most - 1, most);
+  auto arity = this->argumentChecker->checkArity(call, most - 1, most);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(stream.loc, arity.error().message);
     return call;
   }
-  TypeAliasDecl *alias = this->state.getLibraryDeclarations().findLibraryType("FinishedOptions");
+  auto *alias = this->state.getLibraryDeclarations().findLibraryType("FinishedOptions");
   const Type *options =
       alias != nullptr ? Type::optional(this->typeDeclarer->resolveAlias(alias)) : Type::error();
-  Expr *target = this->argumentChecker->checkArg(call->args[0], stream.streamType);
+  auto *target = this->argumentChecker->checkArg(call->args[0], stream.streamType);
   this->emitterChecker->noteErrorsHandled(target);
   Expr *opts = call->args.size() == most ? this->argumentChecker->checkArg(call->args[1], options)
                                          : this->undefinedOf(stream.loc, options);
@@ -344,8 +347,8 @@ Expr *StreamPipeline::checkFinished(const StreamCall &stream) {
     return this->eventTargetChecker->callLibraryStatic(call, stream.streamClass, "finishedResult",
                                                        {}, given, stream.loc);
   }
-  Expr *cb = this->argumentChecker->checkArg(call->args.back(), stream.callback);
-  call->args = {target, opts, cb};
+  auto *callback = this->argumentChecker->checkArg(call->args.back(), stream.callback);
+  call->args = {target, opts, callback};
   std::vector<bool> given(3, true);
 
   return this->eventTargetChecker->callLibraryStatic(call, stream.streamClass, "eosFor", {}, given,
@@ -355,20 +358,20 @@ Expr *StreamPipeline::checkFinished(const StreamCall &stream) {
 Expr *StreamPipeline::checkCompose(const StreamCall &stream) {
   CallExpr *call = stream.call;
   if (call->args.empty()) {
-    std::string message = ErrorTextCompose::streams();
+    auto message = ErrorTextCompose::streams();
     this->state.getDiagnostics().error(stream.loc, message);
     return call;
   }
-  std::vector<Expr *> streams;
+  auto streams = std::vector<Expr *>();
   const Type *chunk = nullptr;
   StreamChunks head;
   StreamChunks tail;
-  for (size_t i = 0; i < call->args.size(); ++i) {
-    std::optional<StreamChunks> chunks = this->composedPart(stream, i, chunk, streams);
+  for (size_t index = 0; index < call->args.size(); ++index) {
+    auto chunks = this->composedPart(stream, index, chunk, streams);
     if (!chunks.has_value()) {
       return call;
     }
-    if (i == 0) {
+    if (index == 0) {
       head = *chunks;
     }
     tail = *chunks;
@@ -379,7 +382,7 @@ Expr *StreamPipeline::checkCompose(const StreamCall &stream) {
     list->elements.push_back({s, false});
   }
   list->type = Type::array(stream.streamType);
-  const Type *buffer = Type::bytesType(Type::Bytes::Buffer);
+  const auto *buffer = Type::bytesType(Type::Bytes::Buffer);
   const Type *w = head.writable != nullptr ? head.writable : buffer;
   const Type *r = tail.readable != nullptr ? tail.readable : buffer;
   call->args = {list};
@@ -389,29 +392,29 @@ Expr *StreamPipeline::checkCompose(const StreamCall &stream) {
                                                      given, stream.loc);
 }
 
-std::optional<StreamChunks> StreamPipeline::composedPart(const StreamCall &stream, size_t i,
+std::optional<StreamChunks> StreamPipeline::composedPart(const StreamCall &stream, size_t index,
                                                          const Type *chunk,
                                                          std::vector<Expr *> &streams) {
   CallExpr *call = stream.call;
-  Expr *arg = this->exprChecker->checkExpr(call->args[i]);
-  ClassDecl *cls = ClassDeclarer::classOf(arg->type);
+  auto *arg = this->exprChecker->checkExpr(call->args[index]);
+  auto *classDecl = this->classDeclarer->classOf(arg->type);
   if (arg->type->isError()) {
     return std::nullopt;
   }
-  bool isStreamed =
-      cls != nullptr && this->chunkTypes->isStreamClass(cls) && !arg->type->isOptional();
+  bool isStreamed = classDecl != nullptr && this->chunkTypes->isStreamClass(classDecl) &&
+                    !arg->type->isOptional();
   if (!isStreamed) {
-    std::string message = ErrorTextCompose::notStream(arg->type->name());
+    auto message = ErrorTextCompose::notStream(arg->type->name());
     this->state.getDiagnostics().error(arg->loc(), message);
-    this->walkArgsLoosely(call, i + 1);
+    this->walkArgsLoosely(call, index + 1);
     return std::nullopt;
   }
-  StreamChunks chunks = this->chunkTypes->streamChunksOf(cls);
-  bool isFitting = i == 0 || chunk == nullptr || chunks.writable == nullptr ||
+  auto chunks = this->chunkTypes->streamChunksOf(classDecl);
+  bool isFitting = index == 0 || chunk == nullptr || chunks.writable == nullptr ||
                    this->streamTakes(chunks.writable, chunk);
   if (!isFitting) {
-    std::string message = ErrorTextPipeline::chunkKind("compose", chunk->name(), arg->type->name(),
-                                                       chunks.writable->name());
+    auto message = ErrorTextPipeline::chunkKind("compose", chunk->name(), arg->type->name(),
+                                                chunks.writable->name());
     this->state.getDiagnostics().error(arg->loc(), message);
     return std::nullopt;
   }
@@ -430,7 +433,7 @@ Expr *StreamPipeline::checkPipeline(const StreamCall &stream) {
   if (!stages.has_value()) {
     return call;
   }
-  ArrayLitExpr *list = this->stageList(stream, *stages);
+  auto *list = this->stageList(stream, *stages);
   if (!stream.promises) {
     return this->finishCallbackPipeline(stream, list, stages->lastStream, args->callback);
   }
@@ -447,7 +450,7 @@ std::optional<StreamPipeline::PipelineArgs> StreamPipeline::pipelineArgs(const S
   };
   if (!stream.promises) {
     if (args.count < 3) {
-      std::string message = ErrorTextPipeline::callback();
+      auto message = ErrorTextPipeline::callback();
       this->state.getDiagnostics().error(stream.loc, message);
       this->walkArgsLoosely(call, 0);
       return std::nullopt;
@@ -459,7 +462,7 @@ std::optional<StreamPipeline::PipelineArgs> StreamPipeline::pipelineArgs(const S
     --args.count;
   }
   if (args.count < 2) {
-    std::string message = ErrorTextPipeline::streams();
+    auto message = ErrorTextPipeline::streams();
     this->state.getDiagnostics().error(stream.loc, message);
     this->walkArgsLoosely(call, 0);
     return std::nullopt;
@@ -478,13 +481,13 @@ StreamPipeline::pipelineStages(const StreamCall &stream, size_t count) {
       .sinkValue = nullptr,
   };
   const Type *chunk = nullptr;
-  for (size_t i = 0; i < count; ++i) {
+  for (size_t index = 0; index < count; ++index) {
     bool isStream = false;
-    bool isLast = i + 1 == count;
-    Expr *stage =
-        this->streamStage(call->args[i], chunk, i == 0, isLast, isStream, &result.sinkValue);
+    bool isLast = index + 1 == count;
+    auto *stage = this->streamStage(call->args[index], chunk, index == 0, isLast, isStream,
+                                    &result.sinkValue);
     if (stage->type->isError()) {
-      this->walkArgsLoosely(call, i + 1);
+      this->walkArgsLoosely(call, index + 1);
       return std::nullopt;
     }
     result.stages.push_back(stage);
@@ -500,15 +503,15 @@ StreamPipeline::pipelineStages(const StreamCall &stream, size_t count) {
 }
 
 ArrayLitExpr *StreamPipeline::stageList(const StreamCall &stream, PipelineStages &stages) {
-  ClassDecl *stageClass = this->state.getLibraryDeclarations().findLibraryClass("PipelineStage");
-  const Type *element = Type::unionOf({stream.streamType, stageClass->type});
+  auto *stageClass = this->state.getLibraryDeclarations().findLibraryClass("PipelineStage");
+  const auto *element = Type::unionOf({stream.streamType, stageClass->type});
   auto *list = this->state.getAst().make<ArrayLitExpr>(stream.loc);
-  for (size_t i = 0; i < stages.stages.size(); ++i) {
-    Expr *stage = stages.stages[i];
-    bool isTail = i + 1 == stages.stages.size() && stages.lastIsStream && !stream.promises;
+  for (size_t index = 0; index < stages.stages.size(); ++index) {
+    Expr *stage = stages.stages[index];
+    bool isTail = index + 1 == stages.stages.size() && stages.lastIsStream && !stream.promises;
     if (isTail) {
-      auto *conv = dyn_cast<CastExpr>(stage);
-      stages.lastStream = conv != nullptr ? conv->operand : stage;
+      auto *conversion = dyn_cast<CastExpr>(stage);
+      stages.lastStream = conversion != nullptr ? conversion->operand : stage;
       continue;
     }
     list->elements.push_back({stage, false});
@@ -521,18 +524,18 @@ ArrayLitExpr *StreamPipeline::stageList(const StreamCall &stream, PipelineStages
 Expr *StreamPipeline::finishCallbackPipeline(const StreamCall &stream, ArrayLitExpr *list,
                                              Expr *lastStream, Expr *callbackArg) {
   CallExpr *call = stream.call;
-  Expr *cb = this->argumentChecker->checkArg(callbackArg, stream.callback);
-  if (cb->type->isError()) {
+  auto *callback = this->argumentChecker->checkArg(callbackArg, stream.callback);
+  if (callback->type->isError()) {
     return call;
   }
-  std::vector<bool> given;
+  auto given = std::vector<bool>();
   if (lastStream != nullptr) {
-    call->args = {list, lastStream, cb};
+    call->args = {list, lastStream, callback};
     given.assign(3, true);
     return this->eventTargetChecker->callLibraryStatic(call, stream.streamClass, "pipelineTo",
                                                        {lastStream->type}, given, stream.loc);
   }
-  call->args = {list, cb};
+  call->args = {list, callback};
   given.assign(2, true);
 
   return this->eventTargetChecker->callLibraryStatic(call, stream.streamClass, "pipelineOut", {},
@@ -542,7 +545,7 @@ Expr *StreamPipeline::finishCallbackPipeline(const StreamCall &stream, ArrayLitE
 Expr *StreamPipeline::finishPromisePipeline(const StreamCall &stream, ArrayLitExpr *list,
                                             Expr *optionsArg, const Type *sinkValue) {
   CallExpr *call = stream.call;
-  const Type *optionsType =
+  const auto *optionsType =
       Type::optional(Type::object({Field{"end", Type::optional(Type::boolTy()), false}}));
   Expr *options = optionsArg != nullptr ? this->argumentChecker->checkArg(optionsArg, optionsType)
                                         : this->undefinedOf(stream.loc, optionsType);
@@ -560,12 +563,12 @@ Expr *StreamPipeline::finishPromisePipeline(const StreamCall &stream, ArrayLitEx
                                                      given, stream.loc);
 }
 
-Expr *StreamPipeline::checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *func) {
-  if (!func->decl || !isa<FunctionDecl>(func->decl)) {
+Expr *StreamPipeline::checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *function) {
+  if (function->decl == nullptr || !isa<FunctionDecl>(function->decl)) {
     return nullptr;
   }
 
-  return this->checkStreamFunction(call, func->decl, name->loc());
+  return this->checkStreamFunction(call, function->decl, name->loc());
 }
 
 }

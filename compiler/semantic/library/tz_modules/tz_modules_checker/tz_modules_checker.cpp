@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
@@ -15,60 +16,59 @@ TzModulesChecker::TzModulesChecker(SemanticState &owner, SemanticParts &all)
   this->libraryCalls = &all.libraryCalls;
 }
 
-const Expr *TzModulesChecker::uncast(const Expr *expr) {
-  while (auto *cast = dyn_cast<CastExpr>(expr)) {
-    expr = cast->operand;
-  }
+const Expr *TzModulesChecker::uncast(const Expr *expr) const {
+  expr = ExprParts::withoutCasts(expr);
 
   return expr;
 }
 
-bool TzModulesChecker::plainTransport(const Expr *transport) {
-  auto *lit = dyn_cast<ObjectLitExpr>(TzModulesChecker::uncast(transport));
-  if (!lit) {
+bool TzModulesChecker::plainTransport(const Expr *transport) const {
+  auto *literal = dyn_cast<ObjectLitExpr>(this->uncast(transport));
+  if (literal == nullptr) {
     return false;
   }
-  for (const ObjectLitExpr::Property &p : lit->props) {
-    if (p.spread()) {
+  for (const ObjectLitExpr::Property &property : literal->props) {
+    if (property.spread()) {
       return false;
     }
-    if (p.name == "secure") {
-      auto *secure =
-          dyn_cast_or_null<BoolLitExpr>(p.value ? TzModulesChecker::uncast(p.value) : nullptr);
-      return secure && !secure->value;
+    if (property.name == "secure") {
+      auto *secure = dyn_cast_or_null<BoolLitExpr>(
+          property.value != nullptr ? this->uncast(property.value) : nullptr);
+      return secure != nullptr && !secure->value;
     }
   }
 
   return false;
 }
 
-bool TzModulesChecker::isExternalReference(const Type *type) {
+bool TzModulesChecker::isExternalReference(const Type *type) const {
   return type->isObject() || type->isArray() || type->isIterator() || type->isJson() ||
          type->isDict() || type->isPromise() || type->isUnknown();
 }
 
-bool TzModulesChecker::isExternalCallback(const Type *type) {
+bool TzModulesChecker::isExternalCallback(const Type *type) const {
   return type->isFunction() && !type->hasRest() && type->ret()->isVoid() &&
          llvm::all_of(type->params(), [](const Type *param) {
            return param->isInteger() || param->isFloat() || param->isBool();
          });
 }
 
-bool TzModulesChecker::isExternalValue(const Type *type) {
+bool TzModulesChecker::isExternalValue(const Type *type) const {
   if (type->isInteger() || type->isFloat() || type->isBool() || type->isString() ||
-      TzModulesChecker::isExternalCallback(type)) {
+      this->isExternalCallback(type)) {
     return true;
   }
   if (type->isOptional()) {
-    return TzModulesChecker::isExternalReference(type->inner()) && !type->inner()->isArray();
+    return this->isExternalReference(type->inner()) && !type->inner()->isArray();
   }
 
-  return TzModulesChecker::isExternalReference(type);
+  return this->isExternalReference(type);
 }
 
-TzModulesChecker::ResultPlainSignature TzModulesChecker::plainSignature(const FunctionDecl *fn) {
-  if (!fn->typeParams.empty() || fn->sym->hasRest) {
-    std::string message = ErrorTextIntrinsic::plain();
+TzModulesChecker::ResultPlainSignature
+TzModulesChecker::plainSignature(const FunctionDecl *functionDecl) const {
+  if (!functionDecl->typeParams.empty() || functionDecl->sym->hasRest) {
+    auto message = ErrorTextIntrinsic::plain();
 
     return err(TzModulesCheckerPlainSignatureError{
         .code = TzModulesCheckerPlainSignatureErrorCode::TYPE_PARAMS_OR_REST,
@@ -76,21 +76,21 @@ TzModulesChecker::ResultPlainSignature TzModulesChecker::plainSignature(const Fu
     });
   }
 
-  return ok(fn);
+  return ok(functionDecl);
 }
 
 TzModulesChecker::ResultExternalParams TzModulesChecker::externalParam(const Param &param,
-                                                                       const Type *type) {
-  if (param.defaultValue() || param.optional()) {
-    std::string message = ErrorTextIntrinsic::optional();
+                                                                       const Type *type) const {
+  if (param.defaultValue() != nullptr || param.optional()) {
+    auto message = ErrorTextIntrinsic::optional();
 
     return err(TzModulesCheckerExternalParamError{
         .code = TzModulesCheckerExternalParamErrorCode::OPTIONAL_PARAM,
         .message = message,
     });
   }
-  if (!type->isError() && !TzModulesChecker::isExternalValue(type)) {
-    std::string message = ErrorTextIntrinsic::takes(type->name());
+  if (!type->isError() && !this->isExternalValue(type)) {
+    auto message = ErrorTextIntrinsic::takes(type->name());
 
     return err(TzModulesCheckerExternalParamError{
         .code = TzModulesCheckerExternalParamErrorCode::PARAM_TYPE,
@@ -101,10 +101,10 @@ TzModulesChecker::ResultExternalParams TzModulesChecker::externalParam(const Par
   return ok(type);
 }
 
-TzModulesChecker::ResultExternalReturn TzModulesChecker::externalReturn(const Type *ret,
-                                                                        const Type *declared) {
-  if (!ret->isVoid() && !ret->isError() && !TzModulesChecker::isExternalValue(ret)) {
-    std::string message = ErrorTextIntrinsic::gives(declared->name());
+TzModulesChecker::ResultExternalReturn
+TzModulesChecker::externalReturn(const Type *returnType, const Type *declared) const {
+  if (!returnType->isVoid() && !returnType->isError() && !this->isExternalValue(returnType)) {
+    auto message = ErrorTextIntrinsic::gives(declared->name());
 
     return err(TzModulesCheckerExternalReturnError{
         .code = TzModulesCheckerExternalReturnErrorCode::RETURN_TYPE,
@@ -112,37 +112,37 @@ TzModulesChecker::ResultExternalReturn TzModulesChecker::externalReturn(const Ty
     });
   }
 
-  return ok(ret);
+  return ok(returnType);
 }
 
-void TzModulesChecker::walkExternal(FunctionDecl *fn) {
-  FuncSymbol *sym = fn->sym;
-  fn->checked = true;
-  ResultPlainSignature plain = TzModulesChecker::plainSignature(fn);
+void TzModulesChecker::walkExternal(FunctionDecl *functionDecl) {
+  FuncSymbol *function = functionDecl->sym;
+  functionDecl->checked = true;
+  auto plain = this->plainSignature(functionDecl);
   if (plain.isErr()) {
-    this->state.getDiagnostics().error(fn->loc(), plain.error().message);
+    this->state.getDiagnostics().error(functionDecl->loc(), plain.error().message);
     return;
   }
-  for (size_t i = 0; i < fn->params.size(); ++i) {
-    ResultExternalParams param = TzModulesChecker::externalParam(fn->params[i], sym->params[i]);
+  for (size_t index = 0; index < functionDecl->params.size(); ++index) {
+    auto param = this->externalParam(functionDecl->params[index], function->params[index]);
     if (param.isErr()) {
-      this->state.getDiagnostics().error(fn->params[i].loc, param.error().message);
+      this->state.getDiagnostics().error(functionDecl->params[index].loc, param.error().message);
     }
   }
-  const Type *ret = sym->getKnownReturnType();
-  if (!ret) {
+  const auto *returnType = function->getKnownReturnType();
+  if (returnType == nullptr) {
     return;
   }
-  if (ret->isPromise()) {
+  if (returnType->isPromise()) {
     this->state.getInventoryStore().markUsesAsync();
-    ret = ret->promised();
+    returnType = returnType->promised();
   }
-  if (ret->isResult()) {
-    ret = ret->okType();
+  if (returnType->isResult()) {
+    returnType = returnType->okType();
   }
-  ResultExternalReturn given = TzModulesChecker::externalReturn(ret, sym->getKnownReturnType());
+  auto given = this->externalReturn(returnType, function->getKnownReturnType());
   if (given.isErr()) {
-    this->state.getDiagnostics().error(fn->loc(), given.error().message);
+    this->state.getDiagnostics().error(functionDecl->loc(), given.error().message);
   }
 }
 
@@ -155,11 +155,11 @@ Expr *TzModulesChecker::adaptResult(Expr *expr, const Type *to) {
     return nullptr;
   }
   bool isConverting = false;
-  for (size_t i = 0; i < given.size(); ++i) {
-    if (mine[i] == given[i]) {
+  for (size_t index = 0; index < given.size(); ++index) {
+    if (mine[index] == given[index]) {
       continue;
     }
-    if (!mine[i]->nonOptional()->isUnknown() || given[i]->isVoid()) {
+    if (!mine[index]->nonOptional()->isUnknown() || given[index]->isVoid()) {
       return nullptr;
     }
     isConverting = true;
@@ -172,69 +172,75 @@ Expr *TzModulesChecker::adaptResult(Expr *expr, const Type *to) {
       (got != wanted && !TypeRelations::isImplicitlyConvertible(got, wanted))) {
     return nullptr;
   }
-  auto *cast = this->state.getAst().make<CastExpr>(expr->loc(), expr, std::nullopt);
-  cast->type = to;
-  cast->adaptsResult = true;
+  auto *castExpr = this->state.getAst().make<CastExpr>(expr->loc(), expr, std::nullopt);
+  castExpr->type = to;
+  castExpr->adaptsResult = true;
 
-  return cast;
+  return castExpr;
 }
 
 std::string TzModulesChecker::knownPrefix(const Expr *expr) const {
   const Expr *source = expr;
-  const Expr *inner = TzModulesChecker::prefixInner(source);
+  const auto *inner = this->prefixInner(source);
   while (inner != nullptr) {
     source = inner;
-    inner = TzModulesChecker::prefixInner(source);
+    inner = this->prefixInner(source);
   }
 
   return this->ownPrefix(source);
 }
 
-const Expr *TzModulesChecker::prefixInner(const Expr *expr) {
-  if (auto *conv = dyn_cast<CastExpr>(expr)) {
-    return conv->operand;
+const Expr *TzModulesChecker::prefixInner(const Expr *expr) const {
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  if (conversion != nullptr) {
+    return conversion->operand;
   }
-  if (auto *tmpl = dyn_cast<TemplateExpr>(expr)) {
-    bool isStartingWithValue = tmpl->quasis[0].empty() && !tmpl->exprs.empty();
-    return isStartingWithValue ? tmpl->exprs[0] : nullptr;
+  auto *templateExpr = dyn_cast<TemplateExpr>(expr);
+  if (templateExpr != nullptr) {
+    bool isStartingWithValue = templateExpr->quasis[0].empty() && !templateExpr->exprs.empty();
+    return isStartingWithValue ? templateExpr->exprs[0] : nullptr;
   }
-  if (auto *bin = dyn_cast<BinaryExpr>(expr)) {
-    return bin->op == BinaryOp::Add ? bin->lhs : nullptr;
+  auto *binary = dyn_cast<BinaryExpr>(expr);
+  if (binary != nullptr) {
+    return binary->op == BinaryOp::Add ? binary->lhs : nullptr;
   }
   auto *made = dyn_cast<NewExpr>(expr);
 
-  return made != nullptr ? TzModulesChecker::addressArgument(made) : nullptr;
+  return made != nullptr ? this->addressArgument(made) : nullptr;
 }
 
-const Expr *TzModulesChecker::addressArgument(const NewExpr *made) {
-  const ClassDecl *cls = made->cls();
-  bool isRequest = cls != nullptr && cls->library() && cls->name == "Request";
-  bool isUrl = cls != nullptr && cls->library() && cls->name == "URL";
+const Expr *TzModulesChecker::addressArgument(const NewExpr *made) const {
+  const ClassDecl *classDecl = made->cls();
+  bool isRequest = classDecl != nullptr && classDecl->library() && classDecl->name == "Request";
+  bool isUrl = classDecl != nullptr && classDecl->library() && classDecl->name == "URL";
   if (!isRequest && !isUrl) {
     return nullptr;
   }
-  const std::vector<Expr *> &args = made->ctor() ? made->ctor()->args : made->args;
+  const std::vector<Expr *> &args = made->ctor() != nullptr ? made->ctor()->args : made->args;
   bool isGiven = !args.empty() && (isRequest || args.size() == 1);
 
   return isGiven ? args[0] : nullptr;
 }
 
 std::string TzModulesChecker::ownPrefix(const Expr *expr) const {
-  if (auto *lit = dyn_cast<StringLitExpr>(expr)) {
-    return TzModulesChecker::asciiPrefix(lit->value);
+  auto *literal = dyn_cast<StringLitExpr>(expr);
+  if (literal != nullptr) {
+    return this->asciiPrefix(literal->value);
   }
-  if (auto *tmpl = dyn_cast<TemplateExpr>(expr)) {
-    return TzModulesChecker::asciiPrefix(tmpl->quasis[0]);
+  auto *templateExpr = dyn_cast<TemplateExpr>(expr);
+  if (templateExpr != nullptr) {
+    return this->asciiPrefix(templateExpr->quasis[0]);
   }
-  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var()) {
+  auto *name = dyn_cast<NameExpr>(expr);
+  if (name != nullptr && name->var() != nullptr) {
     return this->state.getConstantStore().findConstPrefix(name->var());
   }
 
   return std::string();
 }
 
-std::string TzModulesChecker::asciiPrefix(const std::u16string &text) {
-  std::string out;
+std::string TzModulesChecker::asciiPrefix(const std::u16string &text) const {
+  auto out = std::string();
   for (char16_t c : text) {
     if (c >= 0x80) {
       break;
@@ -245,12 +251,12 @@ std::string TzModulesChecker::asciiPrefix(const std::u16string &text) {
   return out;
 }
 
-void TzModulesChecker::noteHttpsCall(CallExpr *call, const FunctionDecl *fn) {
-  if (!fn || this->state.getInventoryStore().isUsingTls() || call->args.empty() ||
-      this->libraryCalls->inLibrary(call->loc())) {
+void TzModulesChecker::noteHttpsCall(CallExpr *call, const FunctionDecl *functionDecl) {
+  if (functionDecl == nullptr || this->state.getInventoryStore().isUsingTls() ||
+      call->args.empty() || this->libraryCalls->inLibrary(call->loc())) {
     return;
   }
-  if (fn == this->state.getLibraryDeclarations().findLibraryFunction("fetch")) {
+  if (functionDecl == this->state.getLibraryDeclarations().findLibraryFunction("fetch")) {
     std::string prefix = llvm::StringRef(this->knownPrefix(call->args[0])).lower();
     if (!llvm::StringRef(prefix).starts_with("http://") &&
         !llvm::StringRef(prefix).starts_with("data:")) {
@@ -260,7 +266,7 @@ void TzModulesChecker::noteHttpsCall(CallExpr *call, const FunctionDecl *fn) {
 }
 
 void TzModulesChecker::noteServer(const NewExpr *made) {
-  const std::vector<Expr *> &args = made->ctor() ? made->ctor()->args : made->args;
+  const std::vector<Expr *> &args = made->ctor() != nullptr ? made->ctor()->args : made->args;
   if (this->state.getInventoryStore().isUsingTls() || args.empty() ||
       this->libraryCalls->inLibrary(made->loc())) {
     return;
@@ -269,16 +275,18 @@ void TzModulesChecker::noteServer(const NewExpr *made) {
 }
 
 void TzModulesChecker::noteServeOptions(const Expr *options) {
-  options = TzModulesChecker::uncast(options);
-  if (auto *lit = dyn_cast<ObjectLitExpr>(options)) {
-    auto secured = [](const ObjectLitExpr::Property &p) {
-      return p.spread() || (p.name == "transport" && !TzModulesChecker::plainTransport(p.value));
+  options = this->uncast(options);
+  auto *literal = dyn_cast<ObjectLitExpr>(options);
+  if (literal != nullptr) {
+    auto secured = [this](const ObjectLitExpr::Property &property) {
+      return property.spread() ||
+             (property.name == "transport" && !this->plainTransport(property.value));
     };
-    if (llvm::any_of(lit->props, secured)) {
+    if (llvm::any_of(literal->props, secured)) {
       this->state.getInventoryStore().markUsesTls();
     }
   } else {
-    bool isSecured = !options->type || !options->type->isObject() ||
+    bool isSecured = options->type == nullptr || !options->type->isObject() ||
                      options->type->field("transport") != nullptr;
     if (isSecured) {
       this->state.getInventoryStore().markUsesTls();
@@ -286,22 +294,22 @@ void TzModulesChecker::noteServeOptions(const Expr *options) {
   }
 }
 
-void TzModulesChecker::noteTlsMethod(const MemberExpr *member, const ClassDecl *cls) {
+void TzModulesChecker::noteTlsMethod(const MemberExpr *member, const ClassDecl *classDecl) {
   if (this->state.getInventoryStore().isUsingTls() || member->name != "startTls" ||
       this->libraryCalls->inLibrary(member->loc())) {
     return;
   }
-  for (; cls; cls = cls->parent) {
-    if (cls->library() && cls->name == "Socket") {
+  for (; classDecl != nullptr; classDecl = classDecl->parent) {
+    if (classDecl->library() && classDecl->name == "Socket") {
       this->state.getInventoryStore().markUsesTls();
       return;
     }
   }
 }
 
-void TzModulesChecker::noteHttpsValue(const FunctionDecl *fn, llvm::SMLoc loc) {
-  if (fn && !this->libraryCalls->inLibrary(loc) &&
-      fn == this->state.getLibraryDeclarations().findLibraryFunction("fetch")) {
+void TzModulesChecker::noteHttpsValue(const FunctionDecl *functionDecl, llvm::SMLoc loc) {
+  if (functionDecl != nullptr && !this->libraryCalls->inLibrary(loc) &&
+      functionDecl == this->state.getLibraryDeclarations().findLibraryFunction("fetch")) {
     this->state.getInventoryStore().markUsesTls();
   }
 }

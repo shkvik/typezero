@@ -16,8 +16,8 @@ public:
   const Type *ofCall(const CallExpr *call);
 
 private:
-  static std::string textOf(const Expr *expr);
-  static bool literalTrue(const Expr *expr);
+  std::string textOf(const Expr *expr) const;
+  bool literalTrue(const Expr *expr) const;
 
   SemanticState &state;
   BuiltinModuleTypes *builtinModuleTypes = nullptr;

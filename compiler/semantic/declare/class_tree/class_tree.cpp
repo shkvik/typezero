@@ -3,9 +3,9 @@
 
 namespace tz {
 
-std::vector<ClassDecl *> ClassTree::descendants(const ClassDecl *cls) {
-  std::vector<ClassDecl *> order;
-  std::vector<ClassDecl *> stack(cls->children.rbegin(), cls->children.rend());
+std::vector<ClassDecl *> ClassTree::descendants(const ClassDecl *classDecl) {
+  auto order = std::vector<ClassDecl *>();
+  std::vector<ClassDecl *> stack(classDecl->children.rbegin(), classDecl->children.rend());
   while (!stack.empty()) {
     ClassDecl *next = stack.back();
     stack.pop_back();
@@ -19,12 +19,12 @@ std::vector<ClassDecl *> ClassTree::descendants(const ClassDecl *cls) {
 }
 
 std::vector<ClassDecl *> ClassTree::treeOrder(const std::vector<ClassDecl *> &classes) {
-  std::vector<ClassDecl *> order;
-  for (ClassDecl *cls : classes) {
-    bool isRoot = cls->parent == nullptr && !cls->literal();
+  auto order = std::vector<ClassDecl *>();
+  for (ClassDecl *classDecl : classes) {
+    bool isRoot = classDecl->parent == nullptr && classDecl->literal() == nullptr;
     if (isRoot) {
-      std::vector<ClassDecl *> below = ClassTree::descendants(cls);
-      order.push_back(cls);
+      auto below = ClassTree::descendants(classDecl);
+      order.push_back(classDecl);
       order.insert(order.end(), below.begin(), below.end());
     }
   }

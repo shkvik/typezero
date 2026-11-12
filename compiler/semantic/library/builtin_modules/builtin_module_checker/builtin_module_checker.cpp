@@ -46,7 +46,7 @@ BuiltinModuleChecker::BuiltinModuleChecker(SemanticState &owner, SemanticParts &
   this->cryptoFunctionChecker = &all.cryptoFunctionChecker;
 }
 
-llvm::StringRef BuiltinModuleChecker::typicalName(NodeModule module) {
+llvm::StringRef BuiltinModuleChecker::typicalName(NodeModule module) const {
   switch (module) {
   case NodeModule::Fs:
     return "readFileSync";
@@ -82,25 +82,25 @@ llvm::StringRef BuiltinModuleChecker::typicalName(NodeModule module) {
   return "x";
 }
 
-bool BuiltinModuleChecker::isPathModule(NodeModule module) {
+bool BuiltinModuleChecker::isPathModule(NodeModule module) const {
   return module == NodeModule::Path || module == NodeModule::PathPosix ||
          module == NodeModule::PathWin32;
 }
 
-MemberExpr *BuiltinModuleChecker::processMember(AstContext &ctx, llvm::SMLoc loc,
-                                                llvm::StringRef name) {
-  auto *process = ctx.make<NameExpr>(loc, "process");
+MemberExpr *BuiltinModuleChecker::processMember(AstContext &context, llvm::SMLoc loc,
+                                                llvm::StringRef name) const {
+  auto *process = context.make<NameExpr>(loc, "process");
 
-  return ctx.make<MemberExpr>(loc, process, name);
+  return context.make<MemberExpr>(loc, process, name);
 }
 
 BuiltinModuleChecker::ResultExportFound
 BuiltinModuleChecker::exportFound(NodeModule module, llvm::StringRef name,
                                   llvm::StringRef path) const {
-  if (this->builtinModuleTypes->exported(module, name)) {
+  if (this->builtinModuleTypes->exported(module, name) != nullptr) {
     return ok(module);
   }
-  ResultModuleExport found = BuiltinModuleChecker::moduleExport(module, name, path);
+  auto found = this->moduleExport(module, name, path);
   if (found.isErr()) {
     std::string message = found.error().message;
 
@@ -114,7 +114,8 @@ BuiltinModuleChecker::exportFound(NodeModule module, llvm::StringRef name,
 }
 
 BuiltinModuleChecker::ResultModuleExport
-BuiltinModuleChecker::moduleExport(NodeModule module, llvm::StringRef name, llvm::StringRef path) {
+BuiltinModuleChecker::moduleExport(NodeModule module, llvm::StringRef name,
+                                   llvm::StringRef path) const {
   switch (module) {
     case NodeModule::Fs:
       return FsExports::fsExport(name, path);
@@ -153,7 +154,7 @@ Expr *BuiltinModuleChecker::moduleValue(NodeModule module, llvm::StringRef name,
   if (module == NodeModule::Crypto) {
     return this->cryptoChecker->checkCryptoValue(name, expr);
   }
-  if (BuiltinModuleChecker::isPathModule(module)) {
+  if (this->isPathModule(module)) {
     return this->pathChecker->checkPathValue(module, name, expr);
   }
   if (module == NodeModule::Os) {
@@ -166,33 +167,33 @@ Expr *BuiltinModuleChecker::moduleValue(NodeModule module, llvm::StringRef name,
   return nullptr;
 }
 
-void BuiltinModuleChecker::importBuiltinModule(Module *module, const ImportDecl &decl) {
-  ModuleState &here = this->state.getModuleStates().getModuleState(module);
-  std::optional<NodeModule> which = KnownModules::moduleOf(decl.path);
+void BuiltinModuleChecker::importBuiltinModule(Module *module, const ImportDecl &importDecl) {
+  auto &here = this->state.getModuleStates().getModuleState(module);
+  auto which = KnownModules::moduleOf(importDecl.path);
   if (!which.has_value()) {
-    for (const ModuleName &name : decl.names) {
+    for (const ModuleName &name : importDecl.names) {
       here.badImports.insert(name.as);
     }
-    if (!decl.whole.empty()) {
-      here.badImports.insert(decl.whole);
+    if (!importDecl.whole.empty()) {
+      here.badImports.insert(importDecl.whole);
     }
     return;
   }
-  if (!decl.whole.empty()) {
-    this->reportWholeImport(module, decl, *which, here);
+  if (!importDecl.whole.empty()) {
+    this->reportWholeImport(module, importDecl, *which, here);
   }
-  for (const ModuleName &name : decl.names) {
-    this->bindNamedImport(decl, name, *which, here);
+  for (const ModuleName &name : importDecl.names) {
+    this->bindNamedImport(importDecl, name, *which, here);
   }
 }
 
-void BuiltinModuleChecker::bindNodeName(ModuleState &here, const ImportDecl &decl,
+void BuiltinModuleChecker::bindNodeName(ModuleState &here, const ImportDecl &importDecl,
                                         const NodeBinding &binding) {
   auto own = here.declared.find(binding.alias);
   if (own != here.declared.end()) {
-    std::string message = ErrorTextNodeImport::conflict(binding.alias, binding.name, decl.path);
+    auto message = ErrorTextNodeImport::conflict(binding.alias, binding.name, importDecl.path);
     this->state.getDiagnostics().error(binding.loc, message);
-    std::string declared = ErrorTextNodeImport::declared(binding.alias);
+    auto declared = ErrorTextNodeImport::declared(binding.alias);
     this->state.getDiagnostics().note(own->second, declared);
     return;
   }
@@ -202,33 +203,33 @@ void BuiltinModuleChecker::bindNodeName(ModuleState &here, const ImportDecl &dec
     isTaken = !isEmplaced;
   }
   if (isTaken) {
-    std::string message = ErrorTextNodeImport::duplicate(binding.alias);
+    auto message = ErrorTextNodeImport::duplicate(binding.alias);
     this->state.getDiagnostics().error(binding.loc, message);
   }
 }
 
-void BuiltinModuleChecker::reportWholeImport(Module *module, const ImportDecl &decl,
+void BuiltinModuleChecker::reportWholeImport(Module *module, const ImportDecl &importDecl,
                                              NodeModule which, ModuleState &here) {
-  std::vector<llvm::StringRef> used = BuiltinModuleChecker::wholeImportUses(module, decl.whole);
-  std::string names = ErrorTextNodeImport::list(used);
-  std::string form = ErrorTextNodeImport::form(decl.wholeIsDefault);
-  std::string message = BuiltinModuleChecker::wholeImportMessage(decl, which, names, form);
-  this->state.getDiagnostics().error(decl.wholeLoc, message);
+  auto used = this->wholeImportUses(module, importDecl.whole);
+  auto names = ErrorTextNodeImport::list(used);
+  auto form = ErrorTextNodeImport::form(importDecl.wholeIsDefault);
+  auto message = this->wholeImportMessage(importDecl, which, names, form);
+  this->state.getDiagnostics().error(importDecl.wholeLoc, message);
   NodeBinding binding{
-      .alias = decl.whole,
-      .loc = decl.wholeLoc,
+      .alias = importDecl.whole,
+      .loc = importDecl.wholeLoc,
       .node = NodeName{which, {}},
-      .name = BuiltinModuleChecker::typicalName(which),
+      .name = this->typicalName(which),
   };
-  this->bindNodeName(here, decl, binding);
+  this->bindNodeName(here, importDecl, binding);
 }
 
 std::vector<llvm::StringRef> BuiltinModuleChecker::wholeImportUses(Module *module,
-                                                                   llvm::StringRef whole) {
-  std::vector<llvm::StringRef> used;
+                                                                   llvm::StringRef whole) const {
+  auto used = std::vector<llvm::StringRef>();
   for (Stmt *item : module->file.items) {
-    for (const Expr *e : AstWalker::exprsIn(item, true)) {
-      auto *member = dyn_cast<MemberExpr>(e);
+    for (const Expr *expr : AstWalker::exprsIn(item, true)) {
+      auto *member = dyn_cast<MemberExpr>(expr);
       auto *object = member != nullptr ? dyn_cast<NameExpr>(member->object) : nullptr;
       if (object != nullptr && object->name == whole && !llvm::is_contained(used, member->name)) {
         used.push_back(member->name);
@@ -239,26 +240,26 @@ std::vector<llvm::StringRef> BuiltinModuleChecker::wholeImportUses(Module *modul
   return used;
 }
 
-std::string BuiltinModuleChecker::wholeImportMessage(const ImportDecl &decl, NodeModule which,
+std::string BuiltinModuleChecker::wholeImportMessage(const ImportDecl &importDecl, NodeModule which,
                                                      const std::string &names,
-                                                     const std::string &form) {
-  if (which == NodeModule::Process && decl.whole == "process") {
+                                                     const std::string &form) const {
+  if (which == NodeModule::Process && importDecl.whole == "process") {
     return ErrorTextNodeImport::process(form);
   }
   if (which == NodeModule::Buffer) {
-    return ErrorTextNodeImport::buffer(form, decl.path);
+    return ErrorTextNodeImport::buffer(form, importDecl.path);
   }
   if (!names.empty()) {
-    return ErrorTextNodeImport::uses(form, names, decl.path);
+    return ErrorTextNodeImport::uses(form, names, importDecl.path);
   }
-  llvm::StringRef typical = BuiltinModuleChecker::typicalName(which);
+  auto typical = this->typicalName(which);
 
-  return ErrorTextNodeImport::typical(form, typical, decl.path);
+  return ErrorTextNodeImport::typical(form, typical, importDecl.path);
 }
 
-void BuiltinModuleChecker::bindNamedImport(const ImportDecl &decl, const ModuleName &name,
+void BuiltinModuleChecker::bindNamedImport(const ImportDecl &importDecl, const ModuleName &name,
                                            NodeModule which, ModuleState &here) {
-  ResultExportFound found = this->exportFound(which, name.name, decl.path);
+  auto found = this->exportFound(which, name.name, importDecl.path);
   if (found.isErr()) {
     this->state.getDiagnostics().error(name.loc, found.error().message);
     here.badImports.insert(name.as);
@@ -267,14 +268,14 @@ void BuiltinModuleChecker::bindNamedImport(const ImportDecl &decl, const ModuleN
   NodeBinding binding{
       .alias = name.as,
       .loc = name.asLoc,
-      .node = BuiltinModuleChecker::importedNode(which, name.name),
+      .node = this->importedNode(which, name.name),
       .name = name.name,
   };
-  this->bindNodeName(here, decl, binding);
+  this->bindNodeName(here, importDecl, binding);
 }
 
-NodeName BuiltinModuleChecker::importedNode(NodeModule which, llvm::StringRef name) {
-  if (BuiltinModuleChecker::isPathModule(which) && (name == "posix" || name == "win32")) {
+NodeName BuiltinModuleChecker::importedNode(NodeModule which, llvm::StringRef name) const {
+  if (this->isPathModule(which) && (name == "posix" || name == "win32")) {
     return NodeName{name == "posix" ? NodeModule::PathPosix : NodeModule::PathWin32, {}};
   }
   if (which == NodeModule::Fs && name == "promises") {
@@ -285,9 +286,9 @@ NodeName BuiltinModuleChecker::importedNode(NodeModule which, llvm::StringRef na
 }
 
 const NodeName *BuiltinModuleChecker::nodeName(llvm::StringRef name) const {
-  ModuleStates &modules = this->state.getModuleStates();
-  Module *current = modules.getCurrentModule();
-  if (!current || !modules.hasModuleState(current)) {
+  auto &modules = this->state.getModuleStates();
+  auto *current = modules.getCurrentModule();
+  if (current == nullptr || !modules.hasModuleState(current)) {
     return nullptr;
   }
   const llvm::StringMap<NodeName> &names = modules.getModuleState(current).nodeNames;
@@ -298,8 +299,8 @@ const NodeName *BuiltinModuleChecker::nodeName(llvm::StringRef name) const {
   if (found->second.module == NodeModule::Buffer && name == "Buffer") {
     return nullptr;
   }
-  ScopeEntry entry = this->scopes->lookup(name);
-  if (entry.found()) {
+  auto entry = this->scopes->lookup(name);
+  if (entry.isFound()) {
     return nullptr;
   }
 
@@ -308,86 +309,87 @@ const NodeName *BuiltinModuleChecker::nodeName(llvm::StringRef name) const {
 
 Expr *BuiltinModuleChecker::processAlias(Expr *expr) {
   auto *name = dyn_cast<NameExpr>(expr);
-  const NodeName *n = name ? this->nodeName(name->name) : nullptr;
-  if (n && n->module == NodeModule::Buffer && n->name == "Buffer") {
+  const NodeName *nodeName = name != nullptr ? this->nodeName(name->name) : nullptr;
+  if (nodeName != nullptr && nodeName->module == NodeModule::Buffer && nodeName->name == "Buffer") {
     return this->state.getAst().make<NameExpr>(name->loc(), "Buffer");
   }
-  if (!n || n->module != NodeModule::Process) {
+  if (nodeName == nullptr || nodeName->module != NodeModule::Process) {
     return expr;
   }
-  if (n->name.empty()) {
+  if (nodeName->name.empty()) {
     return this->state.getAst().make<NameExpr>(name->loc(), "process");
   }
 
-  return BuiltinModuleChecker::processMember(this->state.getAst(), name->loc(), n->name);
+  return this->processMember(this->state.getAst(), name->loc(), nodeName->name);
 }
 
-Expr *BuiltinModuleChecker::nodeValue(const NodeName &n, Expr *expr) {
+Expr *BuiltinModuleChecker::nodeValue(const NodeName &nodeName, Expr *expr) {
   expr->type = Type::error();
-  std::string label = NodeCheckHelpers::moduleLabel(n.module);
-  if (n.name.empty()) {
-    std::string message =
-        ErrorTextNodeValue::notValue(label, BuiltinModuleChecker::isPathModule(n.module),
-                                     BuiltinModuleChecker::typicalName(n.module));
+  auto label = NodeCheckHelpers::moduleLabel(nodeName.module);
+  if (nodeName.name.empty()) {
+    auto message = ErrorTextNodeValue::notValue(label, this->isPathModule(nodeName.module),
+                                                this->typicalName(nodeName.module));
     this->state.getDiagnostics().error(expr->loc(), message);
     return expr;
   }
-  Expr *value = this->moduleValue(n.module, n.name, expr);
+  auto *value = this->moduleValue(nodeName.module, nodeName.name, expr);
   if (value != nullptr) {
     return value;
   }
-  std::string message = ErrorTextNodeValue::onlyCalled(n.name, label);
+  auto message = ErrorTextNodeValue::onlyCalled(nodeName.name, label);
   this->state.getDiagnostics().error(expr->loc(), message);
 
   return expr;
 }
 
 Expr *BuiltinModuleChecker::checkNodeName(NameExpr *name) {
-  const NodeName *n = this->nodeName(name->name);
-  if (!n) {
+  const auto *nodeName = this->nodeName(name->name);
+  if (nodeName == nullptr) {
     return nullptr;
   }
-  if (n->module == NodeModule::Process || (n->module == NodeModule::Buffer && !n->name.empty())) {
+  if (nodeName->module == NodeModule::Process ||
+      (nodeName->module == NodeModule::Buffer && !nodeName->name.empty())) {
     return this->exprChecker->checkExpr(this->processAlias(name));
   }
 
-  return this->nodeValue(*n, name);
+  return this->nodeValue(*nodeName, name);
 }
 
 Expr *BuiltinModuleChecker::checkNodeMember(MemberExpr *member) {
-  Expr *cryptoMember = this->cryptoChecker->checkCryptoModuleMember(member);
+  auto *cryptoMember = this->cryptoChecker->checkCryptoModuleMember(member);
   if (cryptoMember != nullptr) {
     return cryptoMember;
   }
-  Expr *fsConstant = this->fsChecker->checkFsConstant(member);
+  auto *fsConstant = this->fsChecker->checkFsConstant(member);
   if (fsConstant != nullptr) {
     return fsConstant;
   }
   auto *object = dyn_cast<NameExpr>(member->object);
-  const NodeName *n = object ? this->nodeName(object->name) : nullptr;
-  if (!n) {
+  const NodeName *nodeName = object != nullptr ? this->nodeName(object->name) : nullptr;
+  if (nodeName == nullptr) {
     return nullptr;
   }
-  if (n->module == NodeModule::Process || (n->module == NodeModule::Buffer && !n->name.empty())) {
+  if (nodeName->module == NodeModule::Process ||
+      (nodeName->module == NodeModule::Buffer && !nodeName->name.empty())) {
     member->object = this->processAlias(object);
     return nullptr;
   }
-  if (!n->name.empty()) {
+  if (!nodeName->name.empty()) {
     return nullptr;
   }
-  ResultExportFound found =
-      this->exportFound(n->module, member->name, NodeCheckHelpers::moduleLabel(n->module));
+  auto found = this->exportFound(nodeName->module, member->name,
+                                 NodeCheckHelpers::moduleLabel(nodeName->module));
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
     member->type = Type::error();
     return member;
   }
-  NodeName inner{n->module, member->name};
-  if (BuiltinModuleChecker::isPathModule(n->module) &&
+  NodeName inner{nodeName->module, member->name};
+  if (this->isPathModule(nodeName->module) &&
       (member->name == "posix" || member->name == "win32")) {
     inner = {member->name == "posix" ? NodeModule::PathPosix : NodeModule::PathWin32, {}};
   }
-  if (n->module == NodeModule::Fs && member->name == "promises") {
+  if (nodeName->module == NodeModule::Fs && member->name == "promises") {
     inner = {NodeModule::FsPromises, {}};
   }
 
@@ -410,8 +412,9 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
   return this->checkNodeMemberCall(call, member, expected);
 }
 
-bool BuiltinModuleChecker::isProcessAlias(const NodeName &n) {
-  return n.module == NodeModule::Process || (n.module == NodeModule::Buffer && !n.name.empty());
+bool BuiltinModuleChecker::isProcessAlias(const NodeName &nodeName) const {
+  return nodeName.module == NodeModule::Process ||
+         (nodeName.module == NodeModule::Buffer && !nodeName.name.empty());
 }
 
 Expr *BuiltinModuleChecker::failNodeCall(CallExpr *call) {
@@ -425,54 +428,54 @@ Expr *BuiltinModuleChecker::failNodeCall(CallExpr *call) {
 
 Expr *BuiltinModuleChecker::checkNodeNameCall(CallExpr *call, NameExpr *name,
                                               const Type *expected) {
-  const NodeName *n = this->nodeName(name->name);
-  if (n == nullptr) {
+  const auto *nodeName = this->nodeName(name->name);
+  if (nodeName == nullptr) {
     return nullptr;
   }
-  if (BuiltinModuleChecker::isProcessAlias(*n)) {
+  if (this->isProcessAlias(*nodeName)) {
     call->callee = this->processAlias(name);
     return nullptr;
   }
-  if (n->name.empty()) {
-    std::string message =
-        ErrorTextNodeValue::notFunc(name->name, NodeCheckHelpers::moduleLabel(n->module));
+  if (nodeName->name.empty()) {
+    auto message =
+        ErrorTextNodeValue::notFunc(name->name, NodeCheckHelpers::moduleLabel(nodeName->module));
     this->state.getDiagnostics().error(name->loc(), message);
     return this->failNodeCall(call);
   }
 
-  return this->dispatchNodeCall(call, *n, name->loc(), expected);
+  return this->dispatchNodeCall(call, *nodeName, name->loc(), expected);
 }
 
 Expr *BuiltinModuleChecker::checkNodeMemberCall(CallExpr *call, MemberExpr *member,
                                                 const Type *expected) {
   auto *object = dyn_cast<NameExpr>(member->object);
-  const NodeName *n = object != nullptr ? this->nodeName(object->name) : nullptr;
-  if (n == nullptr) {
+  const NodeName *nodeName = object != nullptr ? this->nodeName(object->name) : nullptr;
+  if (nodeName == nullptr) {
     return nullptr;
   }
-  if (BuiltinModuleChecker::isProcessAlias(*n)) {
+  if (this->isProcessAlias(*nodeName)) {
     member->object = this->processAlias(object);
     return nullptr;
   }
-  if (n->module == NodeModule::TimersPromises && n->name == "scheduler") {
+  if (nodeName->module == NodeModule::TimersPromises && nodeName->name == "scheduler") {
     return this->checkSchedulerCall(call, member);
   }
-  if (!n->name.empty()) {
+  if (!nodeName->name.empty()) {
     return nullptr;
   }
-  ResultExportFound found =
-      this->exportFound(n->module, member->name, NodeCheckHelpers::moduleLabel(n->module));
+  auto found = this->exportFound(nodeName->module, member->name,
+                                 NodeCheckHelpers::moduleLabel(nodeName->module));
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
     return this->failNodeCall(call);
   }
-  NodeName target{n->module, member->name};
+  NodeName target{nodeName->module, member->name};
 
   return this->dispatchNodeCall(call, target, member->loc(), expected);
 }
 
 Expr *BuiltinModuleChecker::checkSchedulerCall(CallExpr *call, MemberExpr *member) {
-  TimerChecker::ResultSchedulerAwait awaited = this->timerChecker->checkSchedulerCall(call, member);
+  auto awaited = this->timerChecker->checkSchedulerCall(call, member);
   bool isReported =
       awaited.isErr() &&
       awaited.error().code == TimerCheckerCheckSchedulerCallErrorCode::ALREADY_REPORTED;
@@ -486,42 +489,42 @@ Expr *BuiltinModuleChecker::checkSchedulerCall(CallExpr *call, MemberExpr *membe
 Expr *BuiltinModuleChecker::dispatchNodeCall(CallExpr *call, const NodeName &target,
                                              llvm::SMLoc loc, const Type *expected) {
   NodeModule module = target.module;
-  llvm::StringRef fn = target.name;
+  llvm::StringRef functionName = target.name;
   if (module == NodeModule::TimersPromises) {
-    return this->checkTimersPromises(call, fn, loc, expected);
+    return this->checkTimersPromises(call, functionName, loc, expected);
   }
   if (module == NodeModule::Crypto || module == NodeModule::TzCrypto) {
-    return this->cryptoFunctionChecker->checkCryptoCall(call, fn, loc);
+    return this->cryptoFunctionChecker->checkCryptoCall(call, functionName, loc);
   }
-  if (BuiltinModuleChecker::isPathModule(module)) {
-    return this->pathChecker->checkPathCall(call, module, fn, loc);
+  if (this->isPathModule(module)) {
+    return this->pathChecker->checkPathCall(call, module, functionName, loc);
   }
   if (module == NodeModule::Os) {
-    return this->osChecker->checkOsCall(call, fn, loc);
+    return this->osChecker->checkOsCall(call, functionName, loc);
   }
-  if (module == NodeModule::Fs || (module == NodeModule::TzFs && fn == "replaceSync")) {
-    return this->fsChecker->checkFsModuleCall(call, fn, loc);
+  if (module == NodeModule::Fs || (module == NodeModule::TzFs && functionName == "replaceSync")) {
+    return this->fsChecker->checkFsModuleCall(call, functionName, loc);
   }
-  if (module == NodeModule::FsPromises || (module == NodeModule::TzFs && fn == "replace")) {
-    return this->fsPromisesChecker->checkFsPromisesCall(call, fn, loc);
+  if (module == NodeModule::FsPromises ||
+      (module == NodeModule::TzFs && functionName == "replace")) {
+    return this->fsPromisesChecker->checkFsPromisesCall(call, functionName, loc);
   }
   if (module == NodeModule::Readline || module == NodeModule::ReadlinePromises) {
-    return this->readlineChecker->checkReadlineCall(call, module, fn, loc);
+    return this->readlineChecker->checkReadlineCall(call, module, functionName, loc);
   }
   if (module == NodeModule::TzIo) {
     return this->fsChecker->checkTzIoCall(call, loc);
   }
   if (module == NodeModule::ChildProcess) {
-    return this->childChecker->checkChildCall(call, fn, loc);
+    return this->childChecker->checkChildCall(call, functionName, loc);
   }
 
   return nullptr;
 }
 
-Expr *BuiltinModuleChecker::checkTimersPromises(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
-                                                const Type *expected) {
-  TimerChecker::ResultPromiseOfTimer promised =
-      this->timerChecker->checkTimersPromisesCall(call, fn, loc, expected);
+Expr *BuiltinModuleChecker::checkTimersPromises(CallExpr *call, llvm::StringRef functionName,
+                                                llvm::SMLoc loc, const Type *expected) {
+  auto promised = this->timerChecker->checkTimersPromisesCall(call, functionName, loc, expected);
   if (promised.isOk()) {
     return promised.value();
   }
@@ -529,7 +532,7 @@ Expr *BuiltinModuleChecker::checkTimersPromises(CallExpr *call, llvm::StringRef 
     case TimerCheckerCheckTimersPromisesCallErrorCode::ALREADY_REPORTED:
       break;
     case TimerCheckerCheckTimersPromisesCallErrorCode::VOID_VALUE:
-      this->state.getDiagnostics().error(call->args[fn == "setImmediate" ? 0 : 1]->loc(),
+      this->state.getDiagnostics().error(call->args[functionName == "setImmediate" ? 0 : 1]->loc(),
                                          promised.error().message);
       break;
     case TimerCheckerCheckTimersPromisesCallErrorCode::SCHEDULER_ITSELF:

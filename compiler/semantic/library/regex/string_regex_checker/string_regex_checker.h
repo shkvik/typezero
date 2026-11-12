@@ -34,18 +34,18 @@ private:
   using ResultGroupsReferenced =
       Result<const std::u16string *, StringRegexCheckerReplacementGroupsError>;
 
-  static std::u16string units(const uint32_t *program, uint32_t start, uint32_t length);
-  static std::string escapedLiteral(const std::u16string &text);
-  static std::string argumentText(const Expr *arg);
-  static bool lacksGlobalFlag(const RegexLitExpr *regex);
-  static Expr *toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result);
-  static std::string groupNameAt(const std::u16string &value, size_t at);
-  static bool hasNamedGroups(const uint32_t *program, uint32_t groups);
-  static bool numberedGroupKnown(const std::u16string &value, size_t at, uint32_t groups);
-  static bool hasNamedGroup(const uint32_t *program, uint32_t groups, const std::string &groupName);
-  static Signature replacerSignature(const RegexLitExpr *regex, const Type *match);
-  static ResultGroupsReferenced replacementGroups(const RegexLitExpr *regex,
-                                                  const std::u16string &value);
+  std::u16string units(const uint32_t *program, uint32_t start, uint32_t length) const;
+  std::string escapedLiteral(const std::u16string &text) const;
+  std::string argumentText(const Expr *arg) const;
+  bool lacksGlobalFlag(const RegexLitExpr *regex) const;
+  Expr *toBuiltinCall(CallExpr *call, Builtin builtin, const Type *result) const;
+  std::string groupNameAt(const std::u16string &value, size_t at) const;
+  bool hasNamedGroups(const uint32_t *program, uint32_t groups) const;
+  bool numberedGroupKnown(const std::u16string &value, size_t at, uint32_t groups) const;
+  bool hasNamedGroup(const uint32_t *program, uint32_t groups, const std::string &groupName) const;
+  Signature replacerSignature(const RegexLitExpr *regex, const Type *match) const;
+  ResultGroupsReferenced replacementGroups(const RegexLitExpr *regex,
+                                           const std::u16string &value) const;
 
   Expr *checkRestLoosely(CallExpr *call);
   Expr *checkTextPattern(const PatternCall &pattern);

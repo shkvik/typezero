@@ -9,6 +9,7 @@ namespace tz {
 class SemanticParts;
 class ExprChecker;
 class LibraryCalls;
+class ClassDeclarer;
 
 class StreamNewChecker {
 public:
@@ -20,15 +21,16 @@ private:
   using ResultConcreteStream = Result<llvm::StringRef, StreamNewCheckerConcreteStreamError>;
   using ResultChunkTypeGiven = Result<const NewExpr *, StreamNewCheckerChunksGivenError>;
 
-  static ResultConcreteStream concreteStream(llvm::StringRef name, bool readable, bool writable);
-  static ResultChunkTypeGiven chunksGiven(const NewExpr *expr, const ClassDecl *generic,
-                                          const Type *expected);
+  ResultConcreteStream concreteStream(llvm::StringRef name, bool readable, bool writable) const;
+  ResultChunkTypeGiven chunksGiven(const NewExpr *expr, const ClassDecl *generic,
+                                   const Type *expected) const;
 
   Expr *failedNew(NewExpr *expr, const std::string &message);
 
   SemanticState &state;
   ExprChecker *exprChecker = nullptr;
   LibraryCalls *libraryCalls = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
 };
 
 }

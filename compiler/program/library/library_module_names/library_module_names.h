@@ -8,6 +8,7 @@ class LibraryModuleNames {
 public:
   static constexpr llvm::StringLiteral kSubtleName = "%subtle";
   static constexpr llvm::StringLiteral kIntlLocaleName = "%IntlLocale";
+  static constexpr llvm::StringLiteral kNeverthrowPath = "neverthrow";
 };
 
 }

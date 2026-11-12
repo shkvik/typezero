@@ -6,6 +6,7 @@
 
 namespace tz {
 
+class FlowChecker;
 class SemanticParts;
 class Scopes;
 class VarChecker;
@@ -33,12 +34,14 @@ public:
 private:
   using ResultFunctionInBlock = Result<FunctionDecl *, StmtCheckerCheckFunctionStmtError>;
 
-  ResultFunctionInBlock checkFunctionStmt(FunctionDecl *fn) const;
+  ResultFunctionInBlock checkFunctionStmt(FunctionDecl *functionDecl) const;
   void walkBlock(BlockStmt *block);
-  void walkClassStmt(ClassDecl *cls);
-  void walkFunctionStmt(FunctionDecl *fn);
-  void walkExprStmt(ExprStmt *s);
+  void walkClassStmt(ClassDecl *classDecl);
+  void walkFunctionStmt(FunctionDecl *functionDecl);
+  void walkExprStmt(ExprStmt *statement);
   void walkJump(Stmt *stmt);
+  void walkConstantIf(IfStmt *stmt, bool constant, const Flow &whenTrue, const Flow &whenFalse);
+  void walkBody(Stmt *body);
 
   SemanticState &state;
   Scopes *scopes = nullptr;
@@ -46,6 +49,7 @@ private:
   ExprChecker *exprChecker = nullptr;
   JumpChecker *jumpChecker = nullptr;
   LoopChecker *loopChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
   ClassChecker *classChecker = nullptr;
   TruthChecker *truthChecker = nullptr;
   ResultChecker *resultChecker = nullptr;

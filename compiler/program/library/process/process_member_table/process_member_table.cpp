@@ -81,6 +81,16 @@ const ProcessMemberInfo kRows[] = {
 
 }
 
+llvm::StringRef ProcessMemberTable::getName(ProcessMember value) {
+  for (const ProcessMemberInfo &info : kRows) {
+    if (info.value == value) {
+      return info.name;
+    }
+  }
+
+  return "";
+}
+
 std::optional<ProcessMember> ProcessMemberTable::find(llvm::StringRef name) {
   for (const ProcessMemberInfo &info : kRows) {
     if (info.name == name) {

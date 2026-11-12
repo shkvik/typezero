@@ -120,21 +120,21 @@ void SemanticExternalFacade::walkModuleItems() {
   for (Module *module : this->file.modules) {
     this->parts->moduleDeclarer.useModule(module);
     for (Stmt *item : module->file.items) {
-      ClassDecl *cls = dyn_cast<ClassDecl>(item);
-      if (cls != nullptr) {
-        this->walkClass(cls);
+      auto *classDecl = dyn_cast<ClassDecl>(item);
+      if (classDecl != nullptr) {
+        this->walkClass(classDecl);
       }
-      FunctionDecl *fn = dyn_cast<FunctionDecl>(item);
-      if (fn != nullptr) {
-        this->walkFunction(fn);
+      auto *functionDecl = dyn_cast<FunctionDecl>(item);
+      if (functionDecl != nullptr) {
+        this->walkFunction(functionDecl);
       }
     }
   }
 }
 
 void SemanticExternalFacade::walkLiftedFunctions() {
-  for (FunctionDecl *fn : this->state->getReturnInference().getLiftedFunctions()) {
-    this->walkLiftedFunction(fn);
+  for (FunctionDecl *functionDecl : this->state->getReturnInference().getLiftedFunctions()) {
+    this->walkLiftedFunction(functionDecl);
   }
 }
 
@@ -146,32 +146,32 @@ void SemanticExternalFacade::walkDeclarationFiles() {
   }
 }
 
-void SemanticExternalFacade::walkClass(ClassDecl *cls) {
-  if (cls->type == nullptr || cls->baseExpr != nullptr) {
+void SemanticExternalFacade::walkClass(ClassDecl *classDecl) {
+  if (classDecl->type == nullptr || classDecl->baseExpr != nullptr) {
     return;
   }
-  this->parts->classChecker.walkClassBodies(cls);
+  this->parts->classChecker.walkClassBodies(classDecl);
 }
 
-void SemanticExternalFacade::walkFunction(FunctionDecl *fn) {
-  if (this->parts->lateClasses.isTemplate(fn->sym)) {
+void SemanticExternalFacade::walkFunction(FunctionDecl *functionDecl) {
+  if (this->parts->lateClasses.isTemplate(functionDecl->sym)) {
     return;
   }
-  if (!fn->sym->hasReturnType()) {
-    this->parts->returnInferrer.inferReturnType(fn->sym);
+  if (!functionDecl->sym->hasReturnType()) {
+    this->parts->returnInferrer.inferReturnType(functionDecl->sym);
   }
-  if (fn->checked) {
+  if (functionDecl->checked) {
     return;
   }
-  this->parts->functionChecker.walkFunctionFromScratch(fn);
+  this->parts->functionChecker.walkFunctionFromScratch(functionDecl);
 }
 
-void SemanticExternalFacade::walkLiftedFunction(FunctionDecl *fn) {
-  if (this->parts->lateClasses.isTemplate(fn->sym)) {
+void SemanticExternalFacade::walkLiftedFunction(FunctionDecl *functionDecl) {
+  if (this->parts->lateClasses.isTemplate(functionDecl->sym)) {
     return;
   }
-  this->parts->importBinder.enterHomeModule(fn);
-  this->walkFunction(fn);
+  this->parts->importBinder.enterHomeModule(functionDecl);
+  this->walkFunction(functionDecl);
 }
 
 }

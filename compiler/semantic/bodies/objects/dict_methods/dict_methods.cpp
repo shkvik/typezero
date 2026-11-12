@@ -31,19 +31,19 @@ DictMethods::DictMethods(SemanticState &owner, SemanticParts &all)
 DictMethods::ResultDictMethodCalled DictMethods::checkDictMethod(CallExpr *call,
                                                                  MemberExpr *member) {
   const Type *type = member->object->type;
-  std::string text = DictCheckHelpers::dictText(member->object, type);
+  auto text = DictCheckHelpers::dictText(member->object, type);
   call->type = Type::error();
   if (type->isRecord()) {
     return this->recordMethod(call, member, text);
   }
 
   bool isMap = type->isMap();
-  const DictMethodInfo *found = DictMethodTable::find(member->name);
+  const auto *found = DictMethodTable::find(member->name);
   bool isKnown = found != nullptr &&
                  (isMap ? DictMethodTable::isOnMap(*found) : DictMethodTable::isOnSet(*found));
   if (!isKnown) {
     this->argumentChecker->walkArgsLoosely(call);
-    std::string message = ErrorTextDictMethod::noProperty(member->name, type->name(), text, isMap);
+    auto message = ErrorTextDictMethod::noProperty(member->name, type->name(), text, isMap);
 
     return err(DictMethodsCheckDictMethodError{
         .code = DictMethodsCheckDictMethodErrorCode::NO_SUCH_PROPERTY,
@@ -96,10 +96,10 @@ DictMethods::ResultDictMethodCalled DictMethods::recordMethod(CallExpr *call, Me
   const Type *type = member->object->type;
   std::string key = text + "." + member->name.str();
   this->argumentChecker->walkArgsLoosely(call);
-  std::optional<ObjectMember> inherited = ObjectMemberTable::find(member->name);
+  auto inherited = ObjectMemberTable::find(member->name);
   bool hasOwn = inherited == ObjectMember::HAS_OWN_PROPERTY && call->args.size() == 1;
   if (hasOwn) {
-    std::string message = ErrorTextRecordMethod::hasOwn(key, text);
+    auto message = ErrorTextRecordMethod::hasOwn(key, text);
 
     return err(DictMethodsCheckDictMethodError{
         .code = DictMethodsCheckDictMethodErrorCode::HAS_OWN_PROPERTY,
@@ -107,14 +107,14 @@ DictMethods::ResultDictMethodCalled DictMethods::recordMethod(CallExpr *call, Me
     });
   }
   if (type->valueType()->isFunction()) {
-    std::string message = ErrorTextRecordMethod::undefined(key);
+    auto message = ErrorTextRecordMethod::undefined(key);
 
     return err(DictMethodsCheckDictMethodError{
         .code = DictMethodsCheckDictMethodErrorCode::MAY_BE_UNDEFINED,
         .message = message,
     });
   }
-  std::string message = ErrorTextRecordMethod::noMethods(key, type->valueType()->name(), text);
+  auto message = ErrorTextRecordMethod::noMethods(key, type->valueType()->name(), text);
 
   return err(DictMethodsCheckDictMethodError{
       .code = DictMethodsCheckDictMethodErrorCode::NO_RECORD_METHODS,
@@ -124,7 +124,7 @@ DictMethods::ResultDictMethodCalled DictMethods::recordMethod(CallExpr *call, Me
 
 DictMethods::ResultDictMethodCalled DictMethods::checkDictArity(CallExpr *call, unsigned min,
                                                                 unsigned max) {
-  ArgumentChecker::ResultArityMatches matches = this->argumentChecker->checkArity(call, min, max);
+  auto matches = this->argumentChecker->checkArity(call, min, max);
   if (matches.isErr()) {
     return err(DictMethodsCheckDictMethodError{
         .code = DictMethodsCheckDictMethodErrorCode::WRONG_ARITY,
@@ -136,7 +136,7 @@ DictMethods::ResultDictMethodCalled DictMethods::checkDictArity(CallExpr *call, 
 }
 
 DictMethods::ResultDictMethodCalled DictMethods::toBuiltinCall(CallExpr *call, Builtin builtin,
-                                                               const Type *result) {
+                                                               const Type *result) const {
   call->target = BuiltinCall{.builtin = builtin};
   call->type = result;
 
@@ -145,70 +145,70 @@ DictMethods::ResultDictMethodCalled DictMethods::toBuiltinCall(CallExpr *call, B
 
 DictMethods::ResultDictMethodCalled DictMethods::checkGet(const DictCall &dict) {
   CallExpr *call = dict.call;
-  ResultDictMethodCalled counted = this->checkDictArity(call, 1, 1);
+  auto counted = this->checkDictArity(call, 1, 1);
   if (counted.isErr()) {
     return counted;
   }
   call->args[0] = this->argumentChecker->checkArg(call->args[0], dict.key);
 
-  return DictMethods::toBuiltinCall(call, dict.builtin, Type::optional(dict.value));
+  return this->toBuiltinCall(call, dict.builtin, Type::optional(dict.value));
 }
 
 DictMethods::ResultDictMethodCalled DictMethods::checkSet(const DictCall &dict) {
   CallExpr *call = dict.call;
-  ResultDictMethodCalled counted = this->checkDictArity(call, 2, 2);
+  auto counted = this->checkDictArity(call, 2, 2);
   if (counted.isErr()) {
     return counted;
   }
   call->args[0] = this->argumentChecker->checkArg(call->args[0], dict.key);
   call->args[1] = this->argumentChecker->checkArg(call->args[1], dict.value);
 
-  return DictMethods::toBuiltinCall(call, dict.builtin, dict.type);
+  return this->toBuiltinCall(call, dict.builtin, dict.type);
 }
 
 DictMethods::ResultDictMethodCalled DictMethods::checkAdd(const DictCall &dict) {
   CallExpr *call = dict.call;
-  ResultDictMethodCalled counted = this->checkDictArity(call, 1, 1);
+  auto counted = this->checkDictArity(call, 1, 1);
   if (counted.isErr()) {
     return counted;
   }
   call->args[0] = this->argumentChecker->checkArg(call->args[0], dict.key);
 
-  return DictMethods::toBuiltinCall(call, dict.builtin, dict.type);
+  return this->toBuiltinCall(call, dict.builtin, dict.type);
 }
 
 DictMethods::ResultDictMethodCalled DictMethods::checkKeyTest(const DictCall &dict) {
   CallExpr *call = dict.call;
-  ResultDictMethodCalled counted = this->checkDictArity(call, 1, 1);
+  auto counted = this->checkDictArity(call, 1, 1);
   if (counted.isErr()) {
     return counted;
   }
   call->args[0] = this->argumentChecker->checkArg(call->args[0], dict.key);
 
-  return DictMethods::toBuiltinCall(call, dict.builtin, Type::boolTy());
+  return this->toBuiltinCall(call, dict.builtin, Type::boolTy());
 }
 
 DictMethods::ResultDictMethodCalled DictMethods::checkClear(const DictCall &dict) {
-  ResultDictMethodCalled counted = this->checkDictArity(dict.call, 0, 0);
+  auto counted = this->checkDictArity(dict.call, 0, 0);
   if (counted.isErr()) {
     return counted;
   }
 
-  return DictMethods::toBuiltinCall(dict.call, dict.builtin, Type::voidTy());
+  return this->toBuiltinCall(dict.call, dict.builtin, Type::voidTy());
 }
 
 DictMethods::ResultDictMethodCalled DictMethods::checkIterating(const DictCall &dict,
                                                                 DictMethod method) {
-  ResultDictMethodCalled counted = this->checkDictArity(dict.call, 0, 0);
+  auto counted = this->checkDictArity(dict.call, 0, 0);
   if (counted.isErr()) {
     return counted;
   }
-  const Type *iterated = DictMethods::iteratedType(dict, method);
+  const auto *iterated = this->iteratedType(dict, method);
 
-  return DictMethods::toBuiltinCall(dict.call, dict.builtin, iterated);
+  return this->toBuiltinCall(dict.call, dict.builtin, iterated);
 }
 
-const Type *DictMethods::iteratedType(const DictCall &dict, DictMethod method) {
+const Type *DictMethods::iteratedType(const DictCall &dict, DictMethod method) const {
   if (method == DictMethod::ENTRIES) {
     const Type *second = dict.isMap ? dict.value : dict.key;
     return Type::iterator(Type::tuple({dict.key, second}));
@@ -225,14 +225,14 @@ DictMethods::ResultDictMethodCalled DictMethods::checkForEach(const DictCall &di
   bool isThisArg = call->args.size() == 2;
   if (isThisArg) {
     this->argumentChecker->walkArgsLoosely(call);
-    std::string message = ErrorTextDictForEach::thisArg();
+    auto message = ErrorTextDictForEach::thisArg();
 
     return err(DictMethodsCheckDictMethodError{
         .code = DictMethodsCheckDictMethodErrorCode::FOR_EACH_THIS,
         .message = message,
     });
   }
-  ResultDictMethodCalled counted = this->checkDictArity(call, 1, 1);
+  auto counted = this->checkDictArity(call, 1, 1);
   if (counted.isErr()) {
     return counted;
   }
@@ -245,17 +245,17 @@ DictMethods::ResultDictMethodCalled DictMethods::checkForEach(const DictCall &di
       this->callbackChecker->checkFunctionArg(call->args[0], signature, paramCount, dict.name);
   this->flowChecker->calledFunction();
 
-  return DictMethods::toBuiltinCall(call, dict.builtin, Type::voidTy());
+  return this->toBuiltinCall(call, dict.builtin, Type::voidTy());
 }
 
 DictMethods::ResultDictMethodCalled DictMethods::checkSetCombine(const DictCall &dict,
                                                                  const DictMethodInfo &found) {
   CallExpr *call = dict.call;
-  ResultDictMethodCalled counted = this->checkDictArity(call, 1, 1);
+  auto counted = this->checkDictArity(call, 1, 1);
   if (counted.isErr()) {
     return counted;
   }
-  Expr *other = this->exprChecker->checkExpr(call->args[0], dict.type);
+  auto *other = this->exprChecker->checkExpr(call->args[0], dict.type);
   call->args[0] = other;
   const Type *otherType = other->type;
   if (otherType->isError()) {
@@ -266,8 +266,7 @@ DictMethods::ResultDictMethodCalled DictMethods::checkSetCombine(const DictCall 
   }
   bool isSet = otherType->isDict() && !otherType->isRecord() && otherType->keyType() == dict.key;
   if (!isSet) {
-    std::string message =
-        ErrorTextSetCombine::notSet(dict.name, dict.key->name(), otherType->name());
+    auto message = ErrorTextSetCombine::notSet(dict.name, dict.key->name(), otherType->name());
 
     return err(DictMethodsCheckDictMethodError{
         .code = DictMethodsCheckDictMethodErrorCode::NOT_A_SET,
@@ -276,7 +275,7 @@ DictMethods::ResultDictMethodCalled DictMethods::checkSetCombine(const DictCall 
   }
   bool isTesting = found.form.is<SetTestDictMethod>();
 
-  return DictMethods::toBuiltinCall(call, dict.builtin, isTesting ? Type::boolTy() : dict.type);
+  return this->toBuiltinCall(call, dict.builtin, isTesting ? Type::boolTy() : dict.type);
 }
 
 DictMethods::ResultFromEntriesTyped DictMethods::checkFromEntries(CallExpr *call,
@@ -287,19 +286,20 @@ DictMethods::ResultFromEntriesTyped DictMethods::checkFromEntries(CallExpr *call
         .message = "",
     });
   }
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+  auto arity = this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     return err(DictMethodsCheckFromEntriesError{
         .code = DictMethodsCheckFromEntriesErrorCode::WRONG_ARITY,
         .message = arity.error().message,
     });
   }
-  const Type *wanted = expected ? expected->nonOptional() : nullptr;
-  const Type *type = wanted && wanted->isRecord() ? wanted : nullptr;
-  const Type *element = type ? Type::tuple({Type::string(), type->valueType()}) : nullptr;
+  const Type *wanted = expected != nullptr ? expected->nonOptional() : nullptr;
+  const Type *type = wanted != nullptr && wanted->isRecord() ? wanted : nullptr;
+  const Type *element =
+      type != nullptr ? Type::tuple({Type::string(), type->valueType()}) : nullptr;
   const Type *key = nullptr;
   const Type *value = nullptr;
-  bool isInferred = !type && this->dictNewChecker->inferPairs(call->args[0], key, value);
+  bool isInferred = type == nullptr && this->dictNewChecker->inferPairs(call->args[0], key, value);
   if (isInferred && key->isError()) {
     return err(DictMethodsCheckFromEntriesError{
         .code = DictMethodsCheckFromEntriesErrorCode::ALREADY_REPORTED,
@@ -331,7 +331,7 @@ DictMethods::ResultFromEntriesTyped DictMethods::recordFromEntries(CallExpr *cal
                                                                    const Type *element) {
   const Type *keys = element->fields()[0].type;
   if (!keys->isString()) {
-    std::string message = ErrorTextFromEntries::keys(keys->name());
+    auto message = ErrorTextFromEntries::keys(keys->name());
 
     return err(DictMethodsCheckFromEntriesError{
         .code = DictMethodsCheckFromEntriesErrorCode::KEYS_NOT_STRINGS,
@@ -340,7 +340,7 @@ DictMethods::ResultFromEntriesTyped DictMethods::recordFromEntries(CallExpr *cal
   }
   const Type *values = element->fields()[1].type;
   if (values->isUndefined()) {
-    std::string message = ErrorTextFromEntries::undefined();
+    auto message = ErrorTextFromEntries::undefined();
 
     return err(DictMethodsCheckFromEntriesError{
         .code = DictMethodsCheckFromEntriesErrorCode::VALUES_UNDEFINED,
@@ -361,7 +361,7 @@ DictMethods::ResultGroupByCallTyped DictMethods::checkGroupBy(CallExpr *call, bo
         .message = "",
     });
   }
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 2, 2);
+  auto arity = this->argumentChecker->checkArity(call, 2, 2);
   if (arity.isErr()) {
     return err(DictMethodsCheckGroupByError{
         .code = DictMethodsCheckGroupByErrorCode::WRONG_ARITY,
@@ -369,7 +369,7 @@ DictMethods::ResultGroupByCallTyped DictMethods::checkGroupBy(CallExpr *call, bo
     });
   }
   const Type *element = nullptr;
-  std::string what = ErrorTextFunctionName::quoted(fn);
+  auto what = ErrorTextFunctionName::quoted(fn);
   call->args[0] = this->dictNewChecker->checkDictSource(call->args[0], false, element, what);
   if (element->isError()) {
     call->args[1] = this->exprChecker->checkExpr(call->args[1]);
@@ -379,10 +379,10 @@ DictMethods::ResultGroupByCallTyped DictMethods::checkGroupBy(CallExpr *call, bo
         .message = "",
     });
   }
-  Signature sig;
-  sig.pad = false;
-  sig.params = {element, Type::intTy()};
-  call->args[1] = this->callbackChecker->checkFunctionArg(call->args[1], sig, 1, fn);
+  Signature signature;
+  signature.pad = false;
+  signature.params = {element, Type::intTy()};
+  call->args[1] = this->callbackChecker->checkFunctionArg(call->args[1], signature, 1, fn);
   this->flowChecker->calledFunction();
   const Type *callback = call->args[1]->type;
   if (!callback->isFunction()) {
@@ -399,7 +399,7 @@ DictMethods::ResultGroupByCallTyped DictMethods::groupByKey(CallExpr *call, cons
                                                             bool map, const std::string &fn) {
   const Type *key = call->args[1]->type->ret();
   if (key->isVoid() || key->isUndefined()) {
-    std::string message = ErrorTextGroupBy::noKey(fn);
+    auto message = ErrorTextGroupBy::noKey(fn);
 
     return err(DictMethodsCheckGroupByError{
         .code = DictMethodsCheckGroupByErrorCode::NO_GROUP_KEY,
@@ -407,14 +407,14 @@ DictMethods::ResultGroupByCallTyped DictMethods::groupByKey(CallExpr *call, cons
     });
   }
   if (!map && !key->isString()) {
-    std::string message = ErrorTextGroupBy::keys(key->name());
+    auto message = ErrorTextGroupBy::keys(key->name());
 
     return err(DictMethodsCheckGroupByError{
         .code = DictMethodsCheckGroupByErrorCode::KEYS_NOT_STRINGS,
         .message = message,
     });
   }
-  DictChecker::ResultKeyTypeIsAllowed allowed = this->dictChecker->checkKeyType(key);
+  auto allowed = this->dictChecker->checkKeyType(key);
   if (allowed.isErr()) {
     return err(DictMethodsCheckGroupByError{
         .code = DictMethodsCheckGroupByErrorCode::BAD_KEY_TYPE,
@@ -430,9 +430,9 @@ DictMethods::ResultGroupByCallTyped DictMethods::groupByKey(CallExpr *call, cons
 
 DictMethods::ResultMapFunctionTyped DictMethods::checkMapStatic(CallExpr *call,
                                                                 MemberExpr *member) {
-  std::optional<GlobalMember> found = GlobalMemberTable::find(GlobalName::MAP, member->name);
+  auto found = GlobalMemberTable::find(GlobalName::MAP, member->name);
   if (found == GlobalMember::MAP_GROUP_BY) {
-    ResultGroupByCallTyped grouped = this->checkGroupBy(call, true);
+    auto grouped = this->checkGroupBy(call, true);
     if (grouped.isOk()) {
       return ok(grouped.value());
     }
@@ -457,7 +457,7 @@ DictMethods::ResultMapFunctionTyped DictMethods::checkMapStatic(CallExpr *call,
     });
   }
   this->argumentChecker->walkArgsLoosely(call);
-  std::string message = ErrorTextMapStatic::unknown(member->name);
+  auto message = ErrorTextMapStatic::unknown(member->name);
 
   return err(DictMethodsCheckMapStaticError{
       .code = DictMethodsCheckMapStaticErrorCode::NOT_SUPPORTED,
@@ -466,16 +466,17 @@ DictMethods::ResultMapFunctionTyped DictMethods::checkMapStatic(CallExpr *call,
 }
 
 DictMethods::ResultDictObjectCalled DictMethods::checkDictObjectCall(CallExpr *call,
-                                                                     llvm::StringRef fn) {
+                                                                     llvm::StringRef functionName) {
   Expr *arg = call->args[0];
   const Type *type = arg->type;
   if (!type->isRecord()) {
-    std::string text = DictCheckHelpers::dictText(arg, type);
+    auto text = DictCheckHelpers::dictText(arg, type);
     llvm::StringRef kind = type->isMap() ? "Map" : "Set";
-    std::optional<GlobalMember> objectMember = GlobalMemberTable::find(GlobalName::OBJECT, fn);
+    auto objectMember = GlobalMemberTable::find(GlobalName::OBJECT, functionName);
     bool isSetEntries = objectMember == GlobalMember::OBJECT_ENTRIES && type->isSet();
-    llvm::StringRef method = isSetEntries ? DictMethodTable::getName(DictMethod::VALUES) : fn;
-    std::string message = ErrorTextDictObject::empty(fn, kind, text, method);
+    llvm::StringRef method =
+        isSetEntries ? DictMethodTable::getName(DictMethod::VALUES) : functionName;
+    auto message = ErrorTextDictObject::empty(functionName, kind, text, method);
 
     return err(DictMethodsCheckDictObjectCallError{
         .code = DictMethodsCheckDictObjectCallErrorCode::ALWAYS_EMPTY,
@@ -483,7 +484,7 @@ DictMethods::ResultDictObjectCalled DictMethods::checkDictObjectCall(CallExpr *c
     });
   }
   const Type *value = type->valueType();
-  std::optional<GlobalMember> objectMember = GlobalMemberTable::find(GlobalName::OBJECT, fn);
+  auto objectMember = GlobalMemberTable::find(GlobalName::OBJECT, functionName);
   bool hasKeys = objectMember == GlobalMember::OBJECT_KEYS;
   bool hasValues = objectMember == GlobalMember::OBJECT_VALUES;
   call->target = BuiltinCall{.builtin = hasKeys     ? Builtin::ObjectKeys

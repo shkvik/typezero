@@ -2,8 +2,8 @@
 
 namespace tz {
 
-void ReturnInference::enterInference(const FuncSymbol *fn) {
-  this->inferring.push_back(fn);
+void ReturnInference::enterInference(const FuncSymbol *function) {
+  this->inferring.push_back(function);
 }
 
 void ReturnInference::leaveInference() {
@@ -20,28 +20,28 @@ void ReturnInference::leaveModuleLoad() {
   this->suspendedBeforeLoads.pop_back();
 }
 
-bool ReturnInference::isSuspended(const FuncSymbol *fn) const {
-  return this->suspended.contains(fn);
+bool ReturnInference::isSuspended(const FuncSymbol *function) const {
+  return this->suspended.contains(function);
 }
 
-void ReturnInference::forgetSuspended(const FuncSymbol *fn) {
-  this->suspended.erase(fn);
+void ReturnInference::forgetSuspended(const FuncSymbol *function) {
+  this->suspended.erase(function);
 }
 
 void ReturnInference::addCycle(std::vector<FuncSymbol *> cycle) {
   int id = int(this->cycles.size());
-  for (FuncSymbol *fn : cycle) {
-    this->cycleOf[fn] = id;
+  for (FuncSymbol *function : cycle) {
+    this->cycleOf[function] = id;
   }
   this->cycles.push_back(std::move(cycle));
 }
 
-bool ReturnInference::isInCycle(const FuncSymbol *fn) const {
-  return this->cycleOf.count(fn) > 0;
+bool ReturnInference::isInCycle(const FuncSymbol *function) const {
+  return this->cycleOf.count(function) > 0;
 }
 
-std::vector<FuncSymbol *> ReturnInference::getCycleOf(const FuncSymbol *fn) const {
-  auto found = this->cycleOf.find(fn);
+std::vector<FuncSymbol *> ReturnInference::getCycleOf(const FuncSymbol *function) const {
+  auto found = this->cycleOf.find(function);
   if (found == this->cycleOf.end()) {
     return {};
   }
@@ -57,8 +57,8 @@ std::vector<FunctionDecl *> ReturnInference::getDeclaredFunctions() const {
   return this->declaredFunctions;
 }
 
-void ReturnInference::addLiftedFunction(FunctionDecl *fn) {
-  this->liftedFunctions.push_back(fn);
+void ReturnInference::addLiftedFunction(FunctionDecl *functionDecl) {
+  this->liftedFunctions.push_back(functionDecl);
 }
 
 std::vector<FunctionDecl *> ReturnInference::getLiftedFunctions() const {

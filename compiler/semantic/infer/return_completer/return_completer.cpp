@@ -9,8 +9,8 @@ ReturnCompleter::ReturnCompleter(SemanticState &owner, SemanticParts &all)
   this->returnInferrer = &all.returnInferrer;
 }
 
-const Type *ReturnCompleter::completeReturnType(FuncSymbol *fn) {
-  return this->returnInferrer->returnType(fn);
+const Type *ReturnCompleter::completeReturnType(FuncSymbol *function) {
+  return this->returnInferrer->returnType(function);
 }
 
 }

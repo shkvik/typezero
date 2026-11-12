@@ -17,23 +17,24 @@ class PathChecker {
 public:
   PathChecker(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkPathCall(CallExpr *call, NodeModule module, llvm::StringRef fn, llvm::SMLoc loc);
+  Expr *checkPathCall(CallExpr *call, NodeModule module, llvm::StringRef functionName,
+                      llvm::SMLoc loc);
   Expr *checkPathValue(NodeModule module, llvm::StringRef name, Expr *expr);
 
 private:
   using ResultPathProperty = Result<llvm::StringRef, PathCheckerPathValueError>;
   using ResultPathFunction = Result<llvm::StringRef, PathCheckerPathFunctionError>;
 
-  static ResultPathFunction pathFunction(llvm::StringRef fn);
-  static ResultPathProperty pathValue(llvm::StringRef name, NodeModule module);
-  static const Type *parsedPathType();
-  static const Type *formatInputType();
+  ResultPathFunction pathFunction(llvm::StringRef functionName) const;
+  ResultPathProperty pathValue(llvm::StringRef name, NodeModule module) const;
+  const Type *parsedPathType() const;
+  const Type *formatInputType() const;
   Expr *checkArgsLoosely(CallExpr *call);
   Expr *checkJoinedPath(CallExpr *call, Expr *style, Builtin builtin, llvm::SMLoc loc);
   Expr *checkFormatPath(CallExpr *call, Expr *style);
-  static bool fitsFormatInput(const Type *type);
+  bool fitsFormatInput(const Type *type) const;
   Expr *checkTextPath(CallExpr *call, Expr *style, const PathFunctionInfo &path);
-  static const Type *pathResultType(PathFunctionForm form);
+  const Type *pathResultType(PathFunctionForm form) const;
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

@@ -31,44 +31,65 @@ struct TextLookup {
   const ConditionalExpr *choice;
 };
 
+enum class NumberSpelling {
+  WHOLE,
+  FRACTION,
+};
+
 class LiteralTypes {
 public:
   LiteralTypes(SemanticState &owner, SemanticParts &all);
 
+  static const Type *unionUnify(const Type *first, const Type *second);
   static const Type *exactMemberFor(const Type *from, const Type *to);
-  static const Type *unionFallback(const Type *a, const Type *b);
-  static const Type *unionUnify(const Type *a, const Type *b);
-  const Type *stringLiteralFor(const Type *expected, const std::u16string &text);
-  const Type *boolLiteralFor(const Type *expected, bool value);
-  const Type *numberLiteralFor(const Type *expected, double value, bool fraction);
-  static const Type *numberMemberOf(const Type *expected, bool fraction);
-  static std::optional<std::pair<int64_t, int64_t>> intRange(const Type *type);
-  static std::vector<std::pair<int64_t, int64_t>> intIntervals(const Type *type);
-  const Type *literalMember(const ObjectLitExpr *lit, const Type *target) const;
-  const Type *enumTag(const Expr *e) const;
-  const Type *typeIn(const Flow &flow, const VarSymbol *var) const;
-  std::optional<std::vector<std::string>> knownTexts(const Expr *arg);
-  const Type *constTextType(const Expr *checked, const Type *expected);
+  static const Type *unionFallback(const Type *first, const Type *second);
+
+  const Type *enumTag(const Expr *expr) const;
   Expr *constText(Expr *checked, const Type *expected);
+  const Type *boolLiteralFor(const Type *expected, bool value);
+  const Type *constTextType(const Expr *checked, const Type *expected);
+  std::optional<std::vector<std::string>> knownTexts(const Expr *arg);
+  const Type *typeIn(const Flow &flow, const VarSymbol *variable) const;
   const Type *literalExpectation(const Type *expected, unsigned depth = 0);
+  std::optional<std::pair<int64_t, int64_t>> intRange(const Type *type) const;
+  std::vector<std::pair<int64_t, int64_t>> intIntervals(const Type *type) const;
+  const Type *numberMemberOf(const Type *expected, NumberSpelling spelling) const;
+  const Type *stringLiteralFor(const Type *expected, const std::u16string &text);
+  const Type *literalMember(const ObjectLitExpr *literal, const Type *target) const;
+  const Type *numberLiteralFor(const Type *expected, double value, NumberSpelling spelling);
 
 private:
-  static llvm::ArrayRef<const Type *> membersOf(const Type *&type);
-  static bool isLiteralSet(const Type *type);
-  static bool hasSpread(const ObjectLitExpr *lit);
-  static bool isPlainObjectMember(const Type *m);
-  static bool namesFit(const ObjectLitExpr *lit, const Type *m);
-  static bool hasProperty(const ObjectLitExpr *lit, llvm::StringRef name);
-  std::optional<int> memberScore(const ObjectLitExpr *lit, const Type *m) const;
-  const Type *propertyTag(const ObjectLitExpr::Property &p, const Field *f) const;
-  static const Type *literalPart(const Type *expected, UnionSlot slot);
-  static std::optional<std::u16string> writtenText(const Expr *e);
-  static std::optional<std::vector<std::string>> typeTexts(const Type *type);
-  static void joinBranches(const JoinBranches &join, std::vector<const Type *> &answers);
+  static bool isNumberLike(const Type *type);
+
+  bool isLiteralSet(const Type *type) const;
+  TextLookup lookupTexts(const Expr *arg);
+  bool hasSpread(const ObjectLitExpr *literal) const;
+  bool hasPatternMember(const Type *expected) const;
+  bool isPlainObjectMember(const Type *member) const;
+  const Expr *writtenValue(const Expr *bare) const;
+  const Type *knownLiteralSet(const Expr *value) const;
+  const VarSymbol *namedVariable(const Expr *expr) const;
+  bool isTagConvertible(const Type *tag, const Type *fieldType) const;
+  const Type *literalPart(const Type *expected, UnionSlot slot) const;
+  bool isIntLiteralExpected(const Type *expected, double value) const;
+  std::optional<std::u16string> writtenText(const Expr *expr) const;
+  llvm::ArrayRef<const Type *> membersOf(const Type *&type) const;
+  std::vector<const Type *> expectedBranches(const EnterExpectation &enter);
+  std::optional<std::vector<std::string>> typeTexts(const Type *type) const;
+  std::optional<std::vector<std::string>> typedTexts(const Expr *arg) const;
+  bool hasProperty(const ObjectLitExpr *literal, llvm::StringRef name) const;
+  const Type *textLiteralFor(const Type *expected, const std::u16string &text);
+  bool hasFittingNames(const ObjectLitExpr *literal, const Type *member) const;
+  std::optional<std::vector<std::string>> narrowedTexts(const Expr *bare) const;
+  std::optional<std::vector<std::u16string>> choiceTexts(const Expr *expr) const;
+  void joinBranches(const JoinBranches &join, std::vector<const Type *> &answers) const;
+  std::optional<int> memberScore(const ObjectLitExpr *literal, const Type *member) const;
+  std::optional<int> candidateScore(const ObjectLitExpr *literal, const Type *member) const;
+  const Type *propertyTag(const ObjectLitExpr::Property &property, const Field *field) const;
+  std::optional<int> propertyScore(const ObjectLitExpr::Property &property,
+                                   const Type *member) const;
   void enterExpectation(const EnterExpectation &enter, std::vector<ExpectationStep> &steps,
                         std::vector<const Type *> &answers);
-  TextLookup lookupTexts(const Expr *arg);
-  static bool choiceTexts(const Expr *e, std::vector<std::u16string> &texts);
 
   SemanticState &state;
   Scopes *scopes = nullptr;

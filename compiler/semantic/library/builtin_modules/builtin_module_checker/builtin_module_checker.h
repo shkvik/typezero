@@ -29,28 +29,28 @@ public:
 
   BuiltinModuleChecker(SemanticState &owner, SemanticParts &all);
 
-  void importBuiltinModule(Module *module, const ImportDecl &decl);
+  void importBuiltinModule(Module *module, const ImportDecl &importDecl);
   const NodeName *nodeName(llvm::StringRef name) const;
   Expr *checkNodeCall(CallExpr *call, const Type *expected = nullptr);
   Expr *checkNodeName(NameExpr *name);
   Expr *checkNodeMember(MemberExpr *member);
   Expr *processAlias(Expr *expr);
-  Expr *nodeValue(const NodeName &n, Expr *expr);
-  Expr *checkTimersPromises(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
+  Expr *nodeValue(const NodeName &nodeName, Expr *expr);
+  Expr *checkTimersPromises(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc,
                             const Type *expected);
 
 private:
-  static MemberExpr *processMember(AstContext &ctx, llvm::SMLoc loc, llvm::StringRef name);
+  MemberExpr *processMember(AstContext &context, llvm::SMLoc loc, llvm::StringRef name) const;
 
-  static llvm::StringRef typicalName(NodeModule module);
-  static bool isPathModule(NodeModule module);
-  static ResultModuleExport moduleExport(NodeModule module, llvm::StringRef name,
-                                         llvm::StringRef path);
+  llvm::StringRef typicalName(NodeModule module) const;
+  bool isPathModule(NodeModule module) const;
+  ResultModuleExport moduleExport(NodeModule module, llvm::StringRef name,
+                                  llvm::StringRef path) const;
 
   Expr *moduleValue(NodeModule module, llvm::StringRef name, Expr *expr);
   ResultExportFound exportFound(NodeModule module, llvm::StringRef name,
                                 llvm::StringRef path) const;
-  static bool isProcessAlias(const NodeName &n);
+  bool isProcessAlias(const NodeName &nodeName) const;
 
   struct NodeBinding {
     llvm::StringRef alias;
@@ -59,15 +59,15 @@ private:
     llvm::StringRef name;
   };
 
-  void bindNodeName(ModuleState &here, const ImportDecl &decl, const NodeBinding &binding);
-  void reportWholeImport(Module *module, const ImportDecl &decl, NodeModule which,
+  void bindNodeName(ModuleState &here, const ImportDecl &importDecl, const NodeBinding &binding);
+  void reportWholeImport(Module *module, const ImportDecl &importDecl, NodeModule which,
                          ModuleState &here);
-  static std::vector<llvm::StringRef> wholeImportUses(Module *module, llvm::StringRef whole);
-  static std::string wholeImportMessage(const ImportDecl &decl, NodeModule which,
-                                        const std::string &names, const std::string &form);
-  void bindNamedImport(const ImportDecl &decl, const ModuleName &name, NodeModule which,
+  std::vector<llvm::StringRef> wholeImportUses(Module *module, llvm::StringRef whole) const;
+  std::string wholeImportMessage(const ImportDecl &importDecl, NodeModule which,
+                                 const std::string &names, const std::string &form) const;
+  void bindNamedImport(const ImportDecl &importDecl, const ModuleName &name, NodeModule which,
                        ModuleState &here);
-  static NodeName importedNode(NodeModule which, llvm::StringRef name);
+  NodeName importedNode(NodeModule which, llvm::StringRef name) const;
   Expr *failNodeCall(CallExpr *call);
   Expr *checkNodeNameCall(CallExpr *call, NameExpr *name, const Type *expected);
   Expr *checkNodeMemberCall(CallExpr *call, MemberExpr *member, const Type *expected);

@@ -367,7 +367,7 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
       from->nonOptional() != to->nonOptional()) {
     return this->lowering.jsonLowerer().emitJsonConversion(value, from, to);
   }
-  if (SemanticTypes::copiesIntoRecord(from, to)) {
+  if (SemanticTypes::isCopyingIntoRecord(from, to)) {
     return this->lowering.dictLowerer().emitRecordFromObject(value, from, to);
   }
   if (from->isResult() && to->isResult()) {
@@ -450,7 +450,7 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
   if (from->isFloat() && to->isInteger()) {
     return this->lowering.numberLowerer().intCast(
         this->lowering.builder.CreateCall(this->lowering.rt_.toInt32, {value}),
-        Type::integer(32, false), to);
+        Type::signedInteger(32), to);
   }
   llvm_unreachable("Checker rejects this conversion");
 }

@@ -13,18 +13,20 @@ using llvm::isa;
 
 namespace tz {
 
-std::optional<std::string> SubtleAlgorithms::stringLiteral(const Expr *e) {
-  while (auto *conv = dyn_cast_or_null<CastExpr>(e)) {
-    if (!conv->isImplicit()) {
+std::optional<std::string> SubtleAlgorithms::stringLiteral(const Expr *expr) {
+  while (auto *conversion = dyn_cast_or_null<CastExpr>(expr)) {
+    if (!conversion->isImplicit()) {
       break;
     }
-    e = conv->operand;
+    expr = conversion->operand;
   }
-  if (auto *lit = dyn_cast_or_null<StringLitExpr>(e)) {
-    return ToUtf8::toUtf8(lit->value);
+  auto *literal = dyn_cast_or_null<StringLitExpr>(expr);
+  if (literal != nullptr) {
+    return ToUtf8::toUtf8(literal->value);
   }
-  if (auto *tmpl = dyn_cast_or_null<TemplateExpr>(e); tmpl && tmpl->exprs.empty()) {
-    return ToUtf8::toUtf8(tmpl->quasis[0]);
+  auto *templateExpr = dyn_cast_or_null<TemplateExpr>(expr);
+  if (templateExpr != nullptr && templateExpr->exprs.empty()) {
+    return ToUtf8::toUtf8(templateExpr->quasis[0]);
   }
 
   return std::nullopt;
@@ -88,12 +90,12 @@ bool SubtleAlgorithms::experimentalAlgorithm(llvm::StringRef upper) {
 
 std::string SubtleAlgorithms::quotedList(llvm::ArrayRef<llvm::StringLiteral> names,
                                          llvm::StringRef last) {
-  std::string out;
-  for (size_t i = 0; i < names.size(); ++i) {
-    out += (i == 0                  ? "'"
-            : i + 1 == names.size() ? "' " + last.str() + " '"
-                                    : "', '") +
-           names[i].str();
+  auto out = std::string();
+  for (size_t index = 0; index < names.size(); ++index) {
+    out += (index == 0                  ? "'"
+            : index + 1 == names.size() ? "' " + last.str() + " '"
+                                        : "', '") +
+           names[index].str();
   }
 
   return out + "'";
@@ -160,7 +162,7 @@ std::vector<llvm::StringLiteral> SubtleAlgorithms::formatsOf(llvm::StringRef fam
 }
 
 Dictionary SubtleAlgorithms::dictionaryOf(llvm::StringRef op, llvm::StringRef name) {
-  const SubtleDictionaryInfo *info = SubtleDictionaryTable::find(op, name);
+  const auto *info = SubtleDictionaryTable::find(op, name);
   if (info == nullptr) {
     return {"", {}};
   }

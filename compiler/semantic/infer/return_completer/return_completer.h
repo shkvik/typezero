@@ -13,7 +13,7 @@ class ReturnCompleter : public Completer {
 public:
   ReturnCompleter(SemanticState &owner, SemanticParts &all);
 
-  const Type *completeReturnType(FuncSymbol *fn) override;
+  const Type *completeReturnType(FuncSymbol *function) override;
 
 private:
   SemanticState &state;

@@ -16,7 +16,6 @@ class FlowChecker;
 class IndexProofs;
 class BinaryChecker;
 class TypeRelations;
-class ConstantFolder;
 class GenericChecker;
 class ArgumentChecker;
 class IteratorMethods;
@@ -38,11 +37,11 @@ private:
   using ResultWrapBitsWidth = Result<unsigned, MathCheckerWrapBitsWidthError>;
   using ResultRoundedDouble = Result<const Type *, MathCheckerRoundedDoubleError>;
 
-  static ResultWrapBitsWidth wrapBitsWidth(llvm::StringRef name);
-  static ResultRoundedDouble roundedDouble(llvm::StringRef name, const Type *type);
+  ResultWrapBitsWidth wrapBitsWidth(llvm::StringRef name) const;
+  ResultRoundedDouble roundedDouble(llvm::StringRef name, const Type *type) const;
   Expr *reportMathMember(CallExpr *call, MemberExpr *member);
   bool mathArgsNumeric(CallExpr *call, MathFunctionForm form, const Type *hint);
-  static const Type *mathArgHint(MathFunctionForm form, const Type *hint);
+  const Type *mathArgHint(MathFunctionForm form, const Type *hint) const;
   Expr *checkMathResult(CallExpr *call, MemberExpr *member, const MathFunctionInfo &fn);
   Expr *checkRounding(CallExpr *call, MemberExpr *member);
   Expr *checkSharedResult(CallExpr *call);
@@ -59,8 +58,9 @@ private:
     bool numeric;
   };
 
-  bool minMaxArgFits(CallExpr *call, size_t i, const Type *hint, SpreadValues &values);
-  const Type *spreadElementType(CallExpr *call, size_t i, const Type *hint, SpreadValues &values);
+  bool minMaxArgFits(CallExpr *call, size_t index, const Type *hint, SpreadValues &values);
+  const Type *spreadElementType(CallExpr *call, size_t index, const Type *hint,
+                                SpreadValues &values);
   Expr *spreadIteratorValues(Expr *arg);
 
   SemanticState &state;
@@ -71,7 +71,6 @@ private:
   IndexProofs *indexProofs = nullptr;
   BinaryChecker *binaryChecker = nullptr;
   TypeRelations *typeRelations = nullptr;
-  ConstantFolder *constantFolder = nullptr;
   GenericChecker *genericChecker = nullptr;
   ArgumentChecker *argumentChecker = nullptr;
   IteratorMethods *iteratorMethods = nullptr;

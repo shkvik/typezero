@@ -10,6 +10,7 @@ class SemanticParts;
 class Scopes;
 class CryptoArgs;
 class ExprChecker;
+class ClassDeclarer;
 class ArgumentChecker;
 
 struct SubtleIntrinsic;
@@ -27,18 +28,19 @@ private:
   using ResultAlgorithmChosen = Result<const Expr *, WebCryptoCheckerLiteralAlgorithmError>;
   using ResultSubtleCallShape = Result<const SubtleIntrinsic *, WebCryptoCheckerSubtleShapeError>;
 
-  static ResultSubtleCallShape subtleShape(const CallExpr *call, llvm::StringRef intrinsicName);
-  static ResultAlgorithmChosen literalAlgorithm(const Expr *checked, char kind,
-                                                llvm::StringRef intrinsicName);
+  ResultSubtleCallShape subtleShape(const CallExpr *call, llvm::StringRef intrinsicName) const;
+  ResultAlgorithmChosen literalAlgorithm(const Expr *checked, char kind,
+                                         llvm::StringRef intrinsicName) const;
   Expr *checkSubtleArg(Expr *arg, char kind, llvm::StringRef intrinsicName);
   Expr *checkSubtleArgKind(Expr *arg, char kind);
-  static const Type *subtleResult(char result);
+  const Type *subtleResult(char result) const;
   ResultSubtleAvailable subtleAvailable() const;
 
   SemanticState &state;
   Scopes *scopes = nullptr;
   CryptoArgs *cryptoArgs = nullptr;
   ExprChecker *exprChecker = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
   ArgumentChecker *argumentChecker = nullptr;
 };
 

@@ -2,6 +2,7 @@
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/STLExtras.h"
 #include <algorithm>
+#include <functional>
 #include <limits>
 
 namespace tz {
@@ -9,77 +10,98 @@ namespace tz {
 namespace {
 
 constexpr size_t kMaxFacts = 64;
-
 constexpr int64_t kInf = std::numeric_limits<int64_t>::max();
+constexpr int64_t kLowest = std::numeric_limits<int64_t>::min();
+constexpr size_t kZeroNode = 0;
 
 }
 
-std::optional<Term> Term::sum(Term a, Term b) {
-  if (a.isZero() || b.isZero() || a.isSum() || b.isSum()) {
+std::pair<uintptr_t, bool> Term::sortKey() const {
+  return std::pair(reinterpret_cast<uintptr_t>(this->var), this->length);
+}
+
+std::optional<Term> Term::sum(Term left, Term right) {
+  if (left.isZero() || right.isZero() || left.isSum() || right.isSum()) {
     return std::nullopt;
   }
-  auto key = [](Term t) { return std::pair(reinterpret_cast<uintptr_t>(t.var), t.length); };
-  if (key(b) < key(a)) {
-    std::swap(a, b);
-  }
+  bool isSwapped = right.sortKey() < left.sortKey();
+  const Term &low = isSwapped ? right : left;
+  const Term &high = isSwapped ? left : right;
 
-  return Term{a.var, a.length, b.var, b.length};
+  return Term{.var = low.var, .length = low.length, .var2 = high.var, .length2 = high.length};
 }
 
-int64_t Facts::saturatingAdd(int64_t a, int64_t b) {
-  if (b > 0 && a > INT64_MAX - b) {
+int64_t Facts::saturatingAdd(int64_t left, int64_t right) {
+  if (right > 0 && left > INT64_MAX - right) {
     return INT64_MAX;
   }
-  if (b < 0 && a < INT64_MIN - b) {
+  if (right < 0 && left < INT64_MIN - right) {
     return INT64_MIN;
   }
-  return a + b;
+
+  return left + right;
 }
 
-int64_t Facts::saturatingSub(int64_t a, int64_t b) {
-  if (b < 0 && a > INT64_MAX + b) {
+int64_t Facts::saturatingSub(int64_t left, int64_t right) {
+  if (right < 0 && left > INT64_MAX + right) {
     return INT64_MAX;
   }
-  if (b > 0 && a < INT64_MIN + b) {
+  if (right > 0 && left < INT64_MIN + right) {
     return INT64_MIN;
   }
-  return a - b;
+
+  return left - right;
 }
 
-std::optional<int64_t> Facts::lower(Term t) {
-  if (t.length) {
+const Type *Facts::integerType(Term term) const {
+  if (term.var == nullptr || term.var->type == nullptr) {
+    return nullptr;
+  }
+  const Type *type = term.var->type->nonOptional();
+
+  return type->isInteger() ? type : nullptr;
+}
+
+std::optional<int64_t> Facts::lower(Term term) const {
+  if (term.length) {
     return 0;
   }
-  const Type *type = t.var && t.var->type ? t.var->type->nonOptional() : nullptr;
-  if (type && type->isInteger() && type->intMin() > std::numeric_limits<int64_t>::min()) {
-    return type->intMin();
-  }
-
-  return std::nullopt;
-}
-
-std::optional<int64_t> Facts::plus(std::optional<int64_t> a, std::optional<int64_t> b) {
-  if (!a || !b || (*b > 0 && *a > kInf - 1 - *b) || (*b < 0 && *a < -kInf + 1 - *b)) {
+  const auto *type = this->integerType(term);
+  if (type == nullptr || type->intMin() <= kLowest) {
     return std::nullopt;
   }
 
-  return *a + *b;
+  return type->intMin();
 }
 
-std::optional<int64_t> Facts::upper(Term t) {
-  if (t.length) {
+std::optional<int64_t> Facts::upper(Term term) const {
+  if (term.length) {
     return Type::kMaxLength;
   }
-  const Type *type = t.var && t.var->type ? t.var->type->nonOptional() : nullptr;
-  if (type && type->isInteger() && type->intMax() <= uint64_t(kInf)) {
-    return int64_t(type->intMax());
+  const auto *type = this->integerType(term);
+  if (type == nullptr || type->intMax() > uint64_t(kInf)) {
+    return std::nullopt;
   }
 
-  return std::nullopt;
+  return int64_t(type->intMax());
+}
+
+std::optional<int64_t> Facts::plus(std::optional<int64_t> left,
+                                   std::optional<int64_t> right) const {
+  if (!left.has_value() || !right.has_value()) {
+    return std::nullopt;
+  }
+  bool isTooHigh = *right > 0 && *left > kInf - 1 - *right;
+  bool isTooLow = *right < 0 && *left < -kInf + 1 - *right;
+  if (isTooHigh || isTooLow) {
+    return std::nullopt;
+  }
+
+  return *left + *right;
 }
 
 void Facts::add(Term lhs, Term rhs, int64_t offset) {
-  if (lhs == rhs || offset <= std::numeric_limits<int64_t>::min() + 1) {
+  if (lhs == rhs || offset <= kLowest + 1) {
     return;
   }
   for (Fact &fact : this->facts) {
@@ -91,29 +113,31 @@ void Facts::add(Term lhs, Term rhs, int64_t offset) {
   if (this->facts.size() == kMaxFacts) {
     this->facts.erase(this->facts.begin());
   }
-  this->facts.push_back({lhs, rhs, offset});
+  this->facts.push_back(Fact{.lhs = lhs, .rhs = rhs, .offset = offset});
 }
 
-void Facts::addEqual(Term a, Term b, int64_t offset) {
-  add(a, b, Facts::saturatingAdd(offset, 1));
-  add(b, a, Facts::saturatingSub(1, offset));
+void Facts::addEqual(Term left, Term right, int64_t offset) {
+  int64_t above = Facts::saturatingAdd(offset, 1);
+  int64_t below = Facts::saturatingSub(1, offset);
+  this->add(left, right, above);
+  this->add(right, left, below);
 }
 
-bool Facts::proves(Term lhs, Term rhs, int64_t offset) const {
+bool Facts::canProve(Term lhs, Term rhs, int64_t offset) const {
   if (lhs == rhs) {
     return offset >= 1;
   }
-  std::optional<int64_t> least = bound(lhs, rhs);
+  auto least = this->bound(lhs, rhs);
 
-  return least && *least <= offset;
+  return least.has_value() && *least <= offset;
 }
 
 std::optional<int64_t> Facts::bound(Term lhs, Term rhs) const {
   if (lhs == rhs) {
     return 1;
   }
-  std::vector<Term> nodes = this->boundNodes(lhs, rhs);
-  std::vector<PartLimit> limits = this->partLimits(nodes);
+  auto nodes = this->boundNodes(lhs, rhs);
+  auto limits = this->partLimits(nodes);
 
   return this->shortestBound(nodes, lhs, rhs, &limits);
 }
@@ -122,180 +146,253 @@ std::optional<int64_t> Facts::plainBound(Term lhs, Term rhs) const {
   if (lhs == rhs) {
     return 1;
   }
-  std::vector<Term> nodes = this->boundNodes(lhs, rhs);
+  auto nodes = this->boundNodes(lhs, rhs);
 
   return this->shortestBound(nodes, lhs, rhs, nullptr);
 }
 
 std::vector<Term> Facts::boundNodes(Term lhs, Term rhs) const {
-  std::vector<Term> nodes{Term::zero()};
+  auto nodes = std::vector<Term>{Term::zero()};
   for (const Fact &fact : this->facts) {
-    Facts::addNode(nodes, fact.lhs);
-    Facts::addNode(nodes, fact.rhs);
+    this->addNode(nodes, fact.lhs);
+    this->addNode(nodes, fact.rhs);
   }
-  Facts::addNode(nodes, lhs);
-  Facts::addNode(nodes, rhs);
-  for (size_t i = 1; i < nodes.size(); ++i) {
-    if (nodes[i].isSum()) {
-      Term first = nodes[i].first();
-      Term second = nodes[i].second();
-      Facts::addNode(nodes, first);
-      Facts::addNode(nodes, second);
+  this->addNode(nodes, lhs);
+  this->addNode(nodes, rhs);
+  for (size_t index = 1; index < nodes.size(); ++index) {
+    if (nodes[index].isSum()) {
+      Term first = nodes[index].first();
+      Term second = nodes[index].second();
+      this->addNode(nodes, first);
+      this->addNode(nodes, second);
     }
   }
 
   return nodes;
 }
 
-void Facts::addNode(std::vector<Term> &nodes, Term term) {
+void Facts::addNode(std::vector<Term> &nodes, Term term) const {
   if (!llvm::is_contained(nodes, term)) {
     nodes.push_back(term);
   }
 }
 
-size_t Facts::nodeIndex(const std::vector<Term> &nodes, Term term) {
+size_t Facts::nodeIndex(const std::vector<Term> &nodes, Term term) const {
   return size_t(llvm::find(nodes, term) - nodes.begin());
 }
 
 std::vector<Facts::PartLimit> Facts::partLimits(const std::vector<Term> &nodes) const {
-  std::vector<PartLimit> limits;
-  for (size_t i = 1; i < nodes.size(); ++i) {
-    if (nodes[i].isSum()) {
-      for (Term part : {nodes[i].second(), nodes[i].first()}) {
-        std::optional<int64_t> above = this->plainBound(part, Term::zero());
-        std::optional<int64_t> below = this->plainBound(Term::zero(), part);
-        limits.push_back(PartLimit{part, above, below});
-      }
+  auto limits = std::vector<PartLimit>();
+  for (size_t index = 1; index < nodes.size(); ++index) {
+    if (nodes[index].isSum()) {
+      this->addPartLimit(limits, nodes[index].second());
+      this->addPartLimit(limits, nodes[index].first());
     }
   }
 
   return limits;
 }
 
+void Facts::addPartLimit(std::vector<PartLimit> &limits, Term part) const {
+  auto above = this->plainBound(part, Term::zero());
+  auto below = this->plainBound(Term::zero(), part);
+  limits.push_back(PartLimit{.term = part, .above = above, .below = below});
+}
+
+std::vector<Facts::Edge> Facts::factEdges(const std::vector<Term> &nodes) const {
+  auto edges = std::vector<Edge>();
+  for (const Fact &fact : this->facts) {
+    size_t from = this->nodeIndex(nodes, fact.lhs);
+    size_t to = this->nodeIndex(nodes, fact.rhs);
+    edges.push_back(Edge{.from = from, .to = to, .weight = fact.offset - 1});
+  }
+
+  return edges;
+}
+
 std::optional<int64_t> Facts::shortestBound(const std::vector<Term> &nodes, Term lhs, Term rhs,
                                             const std::vector<PartLimit> *limits) const {
-  std::vector<Edge> edges;
-  for (const Fact &fact : this->facts) {
-    edges.push_back(
-        {Facts::nodeIndex(nodes, fact.lhs), Facts::nodeIndex(nodes, fact.rhs), fact.offset - 1});
-  }
-  size_t source = Facts::nodeIndex(nodes, lhs);
-  size_t target = Facts::nodeIndex(nodes, rhs);
-  for (size_t i = 1; i < nodes.size(); ++i) {
-    if (!nodes[i].isSum()) {
-      continue;
-    }
-    Term parts[2] = {nodes[i].first(), nodes[i].second()};
-    for (int k = 0; k < 2; ++k) {
-      Term other = parts[1 - k];
-      size_t self = Facts::nodeIndex(nodes, parts[k]);
-      std::optional<int64_t> hi = Facts::upper(other), lo = Facts::lower(other);
-      if (limits != nullptr) {
-        const PartLimit &limit = Facts::limitOf(*limits, other);
-        if (limit.above) {
-          hi = hi ? std::min(*hi, *limit.above - 1) : *limit.above - 1;
-        }
-        if (limit.below) {
-          lo = lo ? std::max(*lo, 1 - *limit.below) : 1 - *limit.below;
-        }
-      }
-      if (hi) {
-        edges.push_back({i, self, *hi});
-      }
-      if (lo && *lo > -kInf) {
-        edges.push_back({self, i, -*lo});
-      }
+  auto edges = this->factEdges(nodes);
+  size_t source = this->nodeIndex(nodes, lhs);
+  size_t target = this->nodeIndex(nodes, rhs);
+  for (size_t index = 1; index < nodes.size(); ++index) {
+    if (nodes[index].isSum()) {
+      this->addSumEdges(nodes, index, limits, edges);
     }
   }
-  Facts::addZeroEdges(nodes, edges);
+  this->addZeroEdges(nodes, edges);
 
-  return Facts::shortestDistance(nodes.size(), edges, source, target);
+  return this->shortestDistance(nodes.size(), edges, source, target);
 }
 
-const Facts::PartLimit &Facts::limitOf(const std::vector<PartLimit> &limits, Term term) {
-  return *llvm::find_if(limits, [&](const PartLimit &limit) { return limit.term == term; });
+void Facts::addSumEdges(const std::vector<Term> &nodes, size_t sumIndex,
+                        const std::vector<PartLimit> *limits, std::vector<Edge> &edges) const {
+  Term first = nodes[sumIndex].first();
+  Term second = nodes[sumIndex].second();
+  this->addPartEdges(nodes, sumIndex, SumParts{.part = first, .other = second}, limits, edges);
+  this->addPartEdges(nodes, sumIndex, SumParts{.part = second, .other = first}, limits, edges);
 }
 
-void Facts::addZeroEdges(const std::vector<Term> &nodes, std::vector<Edge> &edges) {
-  for (size_t i = 1; i < nodes.size(); ++i) {
-    std::optional<int64_t> hi, lo;
-    if (nodes[i].isSum()) {
-      hi = Facts::plus(Facts::upper(nodes[i].first()), Facts::upper(nodes[i].second()));
-      lo = Facts::plus(Facts::lower(nodes[i].first()), Facts::lower(nodes[i].second()));
-    } else {
-      hi = Facts::upper(nodes[i]);
-      lo = Facts::lower(nodes[i]);
+void Facts::addPartEdges(const std::vector<Term> &nodes, size_t sumIndex, const SumParts &parts,
+                         const std::vector<PartLimit> *limits, std::vector<Edge> &edges) const {
+  size_t self = this->nodeIndex(nodes, parts.part);
+  auto high = this->limitedUpper(parts.other, limits);
+  auto low = this->limitedLower(parts.other, limits);
+  if (high.has_value()) {
+    edges.push_back(Edge{.from = sumIndex, .to = self, .weight = *high});
+  }
+  if (low.has_value() && *low > -kInf) {
+    edges.push_back(Edge{.from = self, .to = sumIndex, .weight = -*low});
+  }
+}
+
+std::optional<int64_t> Facts::limitedUpper(Term other, const std::vector<PartLimit> *limits) const {
+  auto high = this->upper(other);
+  if (limits == nullptr) {
+    return high;
+  }
+  const PartLimit &limit = this->limitOf(*limits, other);
+  if (!limit.above.has_value()) {
+    return high;
+  }
+  int64_t known = *limit.above - 1;
+
+  return high.has_value() ? std::min(*high, known) : known;
+}
+
+std::optional<int64_t> Facts::limitedLower(Term other, const std::vector<PartLimit> *limits) const {
+  auto low = this->lower(other);
+  if (limits == nullptr) {
+    return low;
+  }
+  const PartLimit &limit = this->limitOf(*limits, other);
+  if (!limit.below.has_value()) {
+    return low;
+  }
+  int64_t known = 1 - *limit.below;
+
+  return low.has_value() ? std::max(*low, known) : known;
+}
+
+bool Facts::isLimitOf(Term term, const PartLimit &limit) const {
+  return limit.term == term;
+}
+
+const Facts::PartLimit &Facts::limitOf(const std::vector<PartLimit> &limits, Term term) const {
+  return *llvm::find_if(limits, std::bind_front(&Facts::isLimitOf, this, term));
+}
+
+std::optional<int64_t> Facts::nodeUpper(Term node) const {
+  if (!node.isSum()) {
+    return this->upper(node);
+  }
+  auto first = this->upper(node.first());
+  auto second = this->upper(node.second());
+
+  return this->plus(first, second);
+}
+
+std::optional<int64_t> Facts::nodeLower(Term node) const {
+  if (!node.isSum()) {
+    return this->lower(node);
+  }
+  auto first = this->lower(node.first());
+  auto second = this->lower(node.second());
+
+  return this->plus(first, second);
+}
+
+void Facts::addZeroEdges(const std::vector<Term> &nodes, std::vector<Edge> &edges) const {
+  for (size_t index = 1; index < nodes.size(); ++index) {
+    auto high = this->nodeUpper(nodes[index]);
+    auto low = this->nodeLower(nodes[index]);
+    if (high.has_value()) {
+      edges.push_back(Edge{.from = index, .to = kZeroNode, .weight = *high});
     }
-    if (hi) {
-      edges.push_back({i, 0, *hi});
-    }
-    if (lo && *lo > -kInf) {
-      edges.push_back({0, i, -*lo});
+    if (low.has_value() && *low > -kInf) {
+      edges.push_back(Edge{.from = kZeroNode, .to = index, .weight = -*low});
     }
   }
 }
 
 std::optional<int64_t> Facts::shortestDistance(size_t count, const std::vector<Edge> &edges,
-                                               size_t source, size_t target) {
-  std::vector<int64_t> dist(count, kInf);
-  dist[source] = 0;
-  for (size_t round = 0; round + 1 < count; ++round) {
-    bool hasChanged = false;
-    for (const Edge &e : edges) {
-      if (dist[e.from] == kInf) {
-        continue;
-      }
-      std::optional<int64_t> sum = Facts::plus(dist[e.from], e.weight);
-      if (!sum) {
-        continue;
-      }
-      int64_t d = *sum;
-      if (d < dist[e.to]) {
-        dist[e.to] = d;
-        hasChanged = true;
-      }
-    }
-    if (!hasChanged) {
-      break;
-    }
+                                               size_t source, size_t target) const {
+  auto distances = std::vector<int64_t>(count, kInf);
+  distances[source] = 0;
+  bool hasChanged = true;
+  for (size_t round = 0; round + 1 < count && hasChanged; ++round) {
+    hasChanged = this->relaxEdges(edges, distances);
   }
-  if (dist[target] == kInf) {
+  if (distances[target] == kInf) {
     return std::nullopt;
   }
 
-  return dist[target] + 1;
+  return distances[target] + 1;
 }
 
-void Facts::forgetIf(llvm::function_ref<bool(const Fact &)> pred) {
-  this->facts.erase(std::remove_if(this->facts.begin(), this->facts.end(), pred),
-                    this->facts.end());
+bool Facts::relaxEdges(const std::vector<Edge> &edges, std::vector<int64_t> &distances) const {
+  bool hasChanged = false;
+  for (const Edge &edge : edges) {
+    bool isRelaxed = this->relaxEdge(edge, distances);
+    hasChanged = hasChanged || isRelaxed;
+  }
+
+  return hasChanged;
 }
 
-void Facts::forget(const VarSymbol *var) {
-  forgetIf([&](const Fact &f) { return f.lhs.mentions(var) || f.rhs.mentions(var); });
+bool Facts::relaxEdge(const Edge &edge, std::vector<int64_t> &distances) const {
+  if (distances[edge.from] == kInf) {
+    return false;
+  }
+  auto sum = this->plus(distances[edge.from], edge.weight);
+  if (!sum.has_value() || *sum >= distances[edge.to]) {
+    return false;
+  }
+  distances[edge.to] = *sum;
+
+  return true;
+}
+
+void Facts::forgetIf(llvm::function_ref<bool(const Fact &)> isForgotten) {
+  llvm::erase_if(this->facts, isForgotten);
+}
+
+bool Facts::isMentioning(const VarSymbol *variable, const Fact &fact) const {
+  return fact.lhs.mentions(variable) || fact.rhs.mentions(variable);
+}
+
+void Facts::forget(const VarSymbol *variable) {
+  auto isMentioning = std::bind_front(&Facts::isMentioning, this, variable);
+  this->forgetIf(isMentioning);
+}
+
+bool Facts::isVanishing(const Fact &fact) const {
+  return fact.offset <= kLowest + 1;
 }
 
 void Facts::shift(Term term, int64_t delta) {
   for (Fact &fact : this->facts) {
-    bool isLhs = fact.lhs.contains(term), rhs = fact.rhs.contains(term);
-    if (isLhs && !rhs) {
+    bool isLeft = fact.lhs.contains(term);
+    bool isRight = fact.rhs.contains(term);
+    if (isLeft && !isRight) {
       fact.offset = Facts::saturatingAdd(fact.offset, delta);
-    } else if (rhs && !isLhs) {
+    } else if (isRight && !isLeft) {
       fact.offset = Facts::saturatingSub(fact.offset, delta);
     }
   }
-  forgetIf([](const Fact &f) { return f.offset <= std::numeric_limits<int64_t>::min() + 1; });
+  auto isVanishing = std::bind_front(&Facts::isVanishing, this);
+  this->forgetIf(isVanishing);
 }
 
-Facts Facts::meet(const Facts &a, const Facts &b) {
-  Facts result;
-  for (const Fact &fact : a.facts) {
-    if (b.proves(fact.lhs, fact.rhs, fact.offset)) {
+Facts Facts::meet(const Facts &other) const {
+  auto result = Facts();
+  for (const Fact &fact : this->facts) {
+    if (other.canProve(fact.lhs, fact.rhs, fact.offset)) {
       result.add(fact.lhs, fact.rhs, fact.offset);
     }
   }
-  for (const Fact &fact : b.facts) {
-    if (a.proves(fact.lhs, fact.rhs, fact.offset)) {
+  for (const Fact &fact : other.facts) {
+    if (this->canProve(fact.lhs, fact.rhs, fact.offset)) {
       result.add(fact.lhs, fact.rhs, fact.offset);
     }
   }

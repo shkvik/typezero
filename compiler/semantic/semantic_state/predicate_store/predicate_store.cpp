@@ -14,7 +14,7 @@ PredicateBuild PredicateStore::leavePredicateBuild() {
 }
 
 bool PredicateStore::isBuildingPredicate() const {
-  return !this->builds.empty() && this->builds.back().fn;
+  return !this->builds.empty() && this->builds.back().fn != nullptr;
 }
 
 const PredicateBuild &PredicateStore::getPredicateBuild() const {
@@ -26,12 +26,12 @@ void PredicateStore::updatePredicateBuild(Flow whenTrue, Flow whenFalse) {
   this->builds.back().whenFalse = std::move(whenFalse);
 }
 
-void PredicateStore::rememberPredicate(const FuncSymbol *fn, Predicate predicate) {
-  this->predicates[fn] = std::move(predicate);
+void PredicateStore::rememberPredicate(const FuncSymbol *function, Predicate predicate) {
+  this->predicates[function] = std::move(predicate);
 }
 
-const Predicate *PredicateStore::findPredicate(const FuncSymbol *fn) const {
-  auto found = this->predicates.find(fn);
+const Predicate *PredicateStore::findPredicate(const FuncSymbol *function) const {
+  auto found = this->predicates.find(function);
   if (found == this->predicates.end()) {
     return nullptr;
   }
@@ -39,12 +39,12 @@ const Predicate *PredicateStore::findPredicate(const FuncSymbol *fn) const {
   return &found->second;
 }
 
-void PredicateStore::markSummarizing(const FuncSymbol *fn) {
-  this->summarizing.insert(fn);
+void PredicateStore::markSummarizing(const FuncSymbol *function) {
+  this->summarizing.insert(function);
 }
 
-bool PredicateStore::isSummarizing(const FuncSymbol *fn) const {
-  return this->summarizing.contains(fn);
+bool PredicateStore::isSummarizing(const FuncSymbol *function) const {
+  return this->summarizing.contains(function);
 }
 
 }

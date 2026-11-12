@@ -4,13 +4,14 @@
 namespace tz {
 
 std::string ErrorTextStreamHook::params(const FuncSymbol *hook) {
-  std::string params;
+  auto params = std::string();
   for (size_t i = 0; i < hook->params.size(); ++i) {
     if (i) {
       params += ", ";
     }
-    llvm::StringRef name = hook->decl && i < hook->decl->params.size() ? hook->decl->params[i].name
-                                                                       : llvm::StringRef("arg");
+    llvm::StringRef name = hook->decl != nullptr && i < hook->decl->params.size()
+                               ? hook->decl->params[i].name
+                               : llvm::StringRef("arg");
     params += name.str() + ": " + hook->params[i]->name().str();
   }
 
@@ -18,7 +19,7 @@ std::string ErrorTextStreamHook::params(const FuncSymbol *hook) {
 }
 
 std::string ErrorTextStreamHook::other(llvm::StringRef name, llvm::StringRef params, bool chunks) {
-  std::string tail;
+  auto tail = std::string();
   if (chunks) {
     tail = "; for chunks of another type, give the class it extends type arguments, e.g. "
            "'extends Writable<string>'";

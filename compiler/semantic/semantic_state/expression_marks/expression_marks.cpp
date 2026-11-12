@@ -95,14 +95,14 @@ bool ExpressionMarks::hasSeveralVariants(const CallExpr *call) const {
   return this->severalVariants.contains(call);
 }
 
-void ExpressionMarks::rememberArgumentList(const VarSymbol *var,
+void ExpressionMarks::rememberArgumentList(const VarSymbol *variable,
                                            std::vector<llvm::StringRef> parts) {
-  this->argumentLists[var] = std::move(parts);
+  this->argumentLists[variable] = std::move(parts);
 }
 
 std::optional<std::vector<llvm::StringRef>>
-ExpressionMarks::findArgumentList(const VarSymbol *var) const {
-  auto found = this->argumentLists.find(var);
+ExpressionMarks::findArgumentList(const VarSymbol *variable) const {
+  auto found = this->argumentLists.find(variable);
   if (found == this->argumentLists.end()) {
     return std::nullopt;
   }
@@ -110,25 +110,25 @@ ExpressionMarks::findArgumentList(const VarSymbol *var) const {
   return found->second;
 }
 
-void ExpressionMarks::rememberIterateSymbol(FuncSymbol *fn) {
-  this->iterateSymbol = fn;
+void ExpressionMarks::rememberIterateSymbol(FuncSymbol *function) {
+  this->iterateSymbol = function;
 }
 
 FuncSymbol *ExpressionMarks::getIterateSymbol() const {
   return this->iterateSymbol;
 }
 
-void ExpressionMarks::addUntyped(VarSymbol *var, bool initUndefined) {
-  this->untyped.push_back({var, initUndefined, {}});
+void ExpressionMarks::addUntyped(VarSymbol *variable, bool initUndefined) {
+  this->untyped.push_back({variable, initUndefined, {}});
 }
 
 bool ExpressionMarks::hasUntyped() const {
   return !this->untyped.empty();
 }
 
-void ExpressionMarks::addUntypedAssignment(const VarSymbol *var, const Type *type) {
+void ExpressionMarks::addUntypedAssignment(const VarSymbol *variable, const Type *type) {
   for (Untyped &entry : this->untyped) {
-    if (entry.var == var) {
+    if (entry.var == variable) {
       entry.assigned.push_back(type);
     }
   }
@@ -138,12 +138,12 @@ std::vector<Untyped> ExpressionMarks::getUntyped() const {
   return this->untyped;
 }
 
-void ExpressionMarks::forgetUntyped(const VarSymbol *var) {
-  llvm::erase_if(this->untyped, [&](const Untyped &entry) { return entry.var == var; });
+void ExpressionMarks::forgetUntyped(const VarSymbol *variable) {
+  llvm::erase_if(this->untyped, [&](const Untyped &entry) { return entry.var == variable; });
 }
 
-void ExpressionMarks::addResultVar(VarSymbol *var) {
-  this->resultVars.push_back(var);
+void ExpressionMarks::addResultVar(VarSymbol *variable) {
+  this->resultVars.push_back(variable);
 }
 
 std::vector<VarSymbol *> ExpressionMarks::getResultVars() const {

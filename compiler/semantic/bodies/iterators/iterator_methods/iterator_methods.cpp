@@ -33,6 +33,7 @@ IteratorMethods::IteratorMethods(SemanticState &owner, SemanticParts &all)
   this->indexProofs = &all.indexProofs;
   this->memberChecker = &all.memberChecker;
   this->typeRelations = &all.typeRelations;
+  this->genericChecker = &all.genericChecker;
   this->argumentChecker = &all.argumentChecker;
   this->callbackChecker = &all.callbackChecker;
   this->generatorChecker = &all.generatorChecker;
@@ -42,7 +43,7 @@ IteratorMethods::IteratorMethods(SemanticState &owner, SemanticParts &all)
 void IteratorMethods::markFused(Expr *expr) const {
   while (auto *call = dyn_cast<CallExpr>(expr)) {
     auto *member = dyn_cast<MemberExpr>(call->callee);
-    if (!member || member->optional || call->optional) {
+    if (member == nullptr || member->optional || call->optional) {
       return;
     }
     if (this->callChecker->isGlobalMember(member, GlobalMember::ITERATOR_FROM) &&
@@ -50,7 +51,7 @@ void IteratorMethods::markFused(Expr *expr) const {
       expr = call->args[0];
       continue;
     }
-    const IteratorMethodInfo *stage = IteratorMethodTable::find(member->name);
+    const auto *stage = IteratorMethodTable::find(member->name);
     if (stage == nullptr || !stage->form.is<IteratorStageMethod>()) {
       return;
     }
@@ -62,14 +63,14 @@ void IteratorMethods::markFused(Expr *expr) const {
 IteratorMethods::ResultArrayIterateCall IteratorMethods::checkArrayIterator(CallExpr *call,
                                                                             MemberExpr *member) {
   const Type *element = member->object->type->inner();
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
+  auto arity = this->argumentChecker->checkArity(call, 0, 0);
   if (arity.isErr()) {
     return err(IteratorMethodsCheckArrayIteratorError{
         .code = IteratorMethodsCheckArrayIteratorErrorCode::WRONG_ARITY,
         .message = arity.error().message,
     });
   }
-  const ArrayMethodInfo *method = ArrayMethodTable::find(member->name);
+  const auto *method = ArrayMethodTable::find(member->name);
   bool hasKeys = method != nullptr && method->method == ArrayMethod::KEYS;
   bool hasValues = method != nullptr && method->method == ArrayMethod::VALUES;
   if (hasKeys) {
@@ -86,17 +87,17 @@ IteratorMethods::ResultArrayIterateCall IteratorMethods::checkArrayIterator(Call
   return ok(call);
 }
 
-IteratorMethods::ResultSourceIsIterable IteratorMethods::iteratedSource(const Type *type,
-                                                                        llvm::StringRef fn) {
-  const Type *element = GeneratorChecker::iteratedType(type);
-  if (!element && type->isError()) {
+IteratorMethods::ResultSourceIsIterable
+IteratorMethods::iteratedSource(const Type *type, llvm::StringRef functionName) const {
+  const auto *element = this->generatorChecker->iteratedType(type);
+  if (element == nullptr && type->isError()) {
     return err(IteratorMethodsIteratedSourceError{
         .code = IteratorMethodsIteratedSourceErrorCode::ALREADY_REPORTED,
         .message = "",
     });
   }
-  if (!element) {
-    std::string message = ErrorTextIterSource::notIter(fn, type->name());
+  if (element == nullptr) {
+    auto message = ErrorTextIterSource::notIter(functionName, type->name());
 
     return err(IteratorMethodsIteratedSourceError{
         .code = IteratorMethodsIteratedSourceErrorCode::NOT_ITERABLE,
@@ -115,17 +116,17 @@ IteratorMethods::ResultIteratorFromCall IteratorMethods::checkIteratorFrom(CallE
         .message = "",
     });
   }
-  std::optional<GlobalMember> found = GlobalMemberTable::find(GlobalName::ITERATOR, member->name);
+  auto found = GlobalMemberTable::find(GlobalName::ITERATOR, member->name);
   if (found != GlobalMember::ITERATOR_FROM) {
     this->argumentChecker->walkArgsLoosely(call);
-    std::string message = ErrorTextStaticFrom::iterator(member->name);
+    auto message = ErrorTextStaticFrom::iterator(member->name);
 
     return err(IteratorMethodsCheckIteratorFromError{
         .code = IteratorMethodsCheckIteratorFromErrorCode::NOT_SUPPORTED,
         .message = message,
     });
   }
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+  auto arity = this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     return err(IteratorMethodsCheckIteratorFromError{
         .code = IteratorMethodsCheckIteratorFromErrorCode::WRONG_ARITY,
@@ -134,7 +135,7 @@ IteratorMethods::ResultIteratorFromCall IteratorMethods::checkIteratorFrom(CallE
   }
   call->args[0] = this->dictChecker->iterableOf(this->exprChecker->checkExpr(call->args[0]));
   const Type *type = call->args[0]->type;
-  ResultSourceIsIterable source = IteratorMethods::iteratedSource(type, "Iterator.from");
+  auto source = this->iteratedSource(type, "Iterator.from");
   if (source.isErr()) {
     bool isReported =
         source.error().code == IteratorMethodsIteratedSourceErrorCode::ALREADY_REPORTED;
@@ -151,10 +152,11 @@ IteratorMethods::ResultIteratorFromCall IteratorMethods::checkIteratorFrom(CallE
   return ok(call);
 }
 
-IteratorMethods::ResultArrayStaticKnown IteratorMethods::arrayStatic(const MemberExpr *member) {
-  std::optional<GlobalMember> found = GlobalMemberTable::find(GlobalName::ARRAY, member->name);
+IteratorMethods::ResultArrayStaticKnown
+IteratorMethods::arrayStatic(const MemberExpr *member) const {
+  auto found = GlobalMemberTable::find(GlobalName::ARRAY, member->name);
   if (found != GlobalMember::ARRAY_FROM) {
-    std::string message = ErrorTextStaticFrom::array(member->name);
+    auto message = ErrorTextStaticFrom::array(member->name);
 
     return err(IteratorMethodsArrayStaticError{
         .code = IteratorMethodsArrayStaticErrorCode::NOT_SUPPORTED,
@@ -165,10 +167,10 @@ IteratorMethods::ResultArrayStaticKnown IteratorMethods::arrayStatic(const Membe
   return ok(member);
 }
 
-IteratorMethods::ResultCallbackHasValue IteratorMethods::callbackValue(const Type *result,
-                                                                       llvm::StringRef fn) {
+IteratorMethods::ResultCallbackHasValue
+IteratorMethods::callbackValue(const Type *result, llvm::StringRef functionName) const {
   if (result->isVoid() || result->isUndefined()) {
-    std::string message = ErrorTextCallbackValue::missing(fn);
+    auto message = ErrorTextCallbackValue::missing(functionName);
 
     return err(IteratorMethodsCallbackValueError{
         .code = IteratorMethodsCallbackValueErrorCode::NO_VALUE,
@@ -183,13 +185,13 @@ Expr *IteratorMethods::checkArrayFrom(CallExpr *call, MemberExpr *member) {
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  ResultArrayStaticKnown known = IteratorMethods::arrayStatic(member);
+  auto known = this->arrayStatic(member);
   if (known.isErr()) {
     this->state.getDiagnostics().error(member->loc(), known.error().message);
     this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 2);
+  auto arity = this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
@@ -197,7 +199,7 @@ Expr *IteratorMethods::checkArrayFrom(CallExpr *call, MemberExpr *member) {
   this->markFused(call->args[0]);
   call->args[0] = this->dictChecker->iterableOf(this->exprChecker->checkExpr(call->args[0]));
   const Type *type = call->args[0]->type;
-  ResultSourceIsIterable source = IteratorMethods::iteratedSource(type, "Array.from");
+  auto source = this->iteratedSource(type, "Array.from");
   if (source.isErr()) {
     if (source.error().code != IteratorMethodsIteratedSourceErrorCode::ALREADY_REPORTED) {
       this->state.getDiagnostics().error(call->args[0]->loc(), source.error().message);
@@ -209,8 +211,7 @@ Expr *IteratorMethods::checkArrayFrom(CallExpr *call, MemberExpr *member) {
   }
   const Type *element = source.value();
   if (type->isIterator()) {
-    GeneratorChecker::ResultNextNeedsNoValue nothing =
-        this->generatorChecker->checkSendsNothing(type, "'Array.from'");
+    auto nothing = this->generatorChecker->checkSendsNothing(type, "'Array.from'");
     if (nothing.isErr()) {
       this->state.getDiagnostics().error(call->args[0]->loc(), nothing.error().message);
     }
@@ -218,15 +219,16 @@ Expr *IteratorMethods::checkArrayFrom(CallExpr *call, MemberExpr *member) {
   call->target = BuiltinCall{.builtin = Builtin::ArrayFrom};
   call->type = Type::array(element);
   if (call->args.size() == 2) {
-    Signature sig;
-    sig.pad = false;
-    sig.params = {element, Type::intTy()};
-    call->args[1] = this->callbackChecker->checkFunctionArg(call->args[1], sig, 1, "Array.from");
+    Signature signature;
+    signature.pad = false;
+    signature.params = {element, Type::intTy()};
+    call->args[1] =
+        this->callbackChecker->checkFunctionArg(call->args[1], signature, 1, "Array.from");
     const Type *callback = call->args[1]->type;
     if (!callback->isFunction()) {
       return call;
     }
-    ResultCallbackHasValue value = IteratorMethods::callbackValue(callback->ret(), "Array.from");
+    auto value = this->callbackValue(callback->ret(), "Array.from");
     if (value.isErr()) {
       this->state.getDiagnostics().error(call->args[1]->loc(), value.error().message);
       call->type = Type::error();
@@ -239,13 +241,13 @@ Expr *IteratorMethods::checkArrayFrom(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-IteratorMethods::ResultNextValueOneType IteratorMethods::nextValue(const Type *iterator) {
+IteratorMethods::ResultNextValueOneType IteratorMethods::nextValue(const Type *iterator) const {
   const Type *element = iterator->yielded();
   const Type *returned = iterator->returned();
   const Type *value = returned->isVoid() ? element : Type::unionOf({element, returned});
-  std::string problem = UnionSlots::unionProblem(value);
+  auto problem = UnionSlots::unionProblem(value);
   if (!problem.empty()) {
-    std::string message =
+    auto message =
         ErrorTextNextValue::noUnion(iterator->name(), element->name(), returned->name(), problem);
 
     return err(IteratorMethodsNextValueError{
@@ -257,10 +259,10 @@ IteratorMethods::ResultNextValueOneType IteratorMethods::nextValue(const Type *i
   return ok(value);
 }
 
-IteratorMethods::ResultNotThrowOrReturn IteratorMethods::plainMethod(llvm::StringRef name) {
-  const IteratorMethodInfo *method = IteratorMethodTable::find(name);
+IteratorMethods::ResultNotThrowOrReturn IteratorMethods::plainMethod(llvm::StringRef name) const {
+  const auto *method = IteratorMethodTable::find(name);
   if (method != nullptr && method->method == IteratorMethod::THROW) {
-    std::string message = ErrorTextIteratorMethod::noThrow();
+    auto message = ErrorTextIteratorMethod::noThrow();
 
     return err(IteratorMethodsPlainMethodError{
         .code = IteratorMethodsPlainMethodErrorCode::NO_THROW,
@@ -268,7 +270,7 @@ IteratorMethods::ResultNotThrowOrReturn IteratorMethods::plainMethod(llvm::Strin
     });
   }
   if (method != nullptr && method->method == IteratorMethod::RETURN) {
-    std::string message = ErrorTextIteratorMethod::noReturn();
+    auto message = ErrorTextIteratorMethod::noReturn();
 
     return err(IteratorMethodsPlainMethodError{
         .code = IteratorMethodsPlainMethodErrorCode::NO_RETURN,
@@ -279,9 +281,9 @@ IteratorMethods::ResultNotThrowOrReturn IteratorMethods::plainMethod(llvm::Strin
   return ok(name);
 }
 
-IteratorMethods::ResultKnownHelperFound IteratorMethods::iteratorHelper(llvm::StringRef name,
-                                                                        const Type *iterator) {
-  const IteratorMethodInfo *helper = IteratorMethodTable::find(name);
+IteratorMethods::ResultKnownHelperFound
+IteratorMethods::iteratorHelper(llvm::StringRef name, const Type *iterator) const {
+  const auto *helper = IteratorMethodTable::find(name);
   const IteratorStageMethod *stage = nullptr;
   const IteratorConsumerMethod *consumer = nullptr;
   if (helper != nullptr) {
@@ -289,7 +291,7 @@ IteratorMethods::ResultKnownHelperFound IteratorMethods::iteratorHelper(llvm::St
     consumer = helper->form.as<IteratorConsumerMethod>();
   }
   if (stage == nullptr && consumer == nullptr) {
-    std::string message = ErrorTextIteratorMethod::noProperty(name, iterator->name());
+    auto message = ErrorTextIteratorMethod::noProperty(name, iterator->name());
 
     return err(IteratorMethodsIteratorHelperError{
         .code = IteratorMethodsIteratorHelperErrorCode::NO_SUCH_PROPERTY,
@@ -302,9 +304,9 @@ IteratorMethods::ResultKnownHelperFound IteratorMethods::iteratorHelper(llvm::St
 }
 
 IteratorMethods::ResultCallbackIsPassed
-IteratorMethods::callbackGiven(size_t count, llvm::StringRef name, bool reduce) {
+IteratorMethods::callbackGiven(size_t count, llvm::StringRef name, bool reduce) const {
   if (count == 0) {
-    std::string message = ErrorTextIteratorMethod::noFunction(name);
+    auto message = ErrorTextIteratorMethod::noFunction(name);
 
     return err(IteratorMethodsCallbackGivenError{
         .code = IteratorMethodsCallbackGivenErrorCode::NO_FUNCTION,
@@ -313,7 +315,7 @@ IteratorMethods::callbackGiven(size_t count, llvm::StringRef name, bool reduce) 
   }
   unsigned most = reduce ? 2u : 1u;
   if (count > most) {
-    std::string message = ErrorTextArity::count(1, most, count);
+    auto message = ErrorTextArity::count(1, most, count);
 
     return err(IteratorMethodsCallbackGivenError{
         .code = IteratorMethodsCallbackGivenErrorCode::TOO_MANY_ARGUMENTS,
@@ -324,9 +326,10 @@ IteratorMethods::callbackGiven(size_t count, llvm::StringRef name, bool reduce) 
   return ok(count);
 }
 
-IteratorMethods::ResultInitialValueType IteratorMethods::initialValue(const Type *accumulator) {
+IteratorMethods::ResultInitialValueType
+IteratorMethods::initialValue(const Type *accumulator) const {
   if (accumulator->isUndefined() || accumulator->isVoid()) {
-    std::string message = ErrorTextReduceInit::untyped();
+    auto message = ErrorTextReduceInit::untyped();
 
     return err(IteratorMethodsInitialValueError{
         .code = IteratorMethodsInitialValueErrorCode::UNTYPED_INITIAL,
@@ -337,10 +340,10 @@ IteratorMethods::ResultInitialValueType IteratorMethods::initialValue(const Type
   return ok(accumulator);
 }
 
-IteratorMethods::ResultFlatMapInnerType IteratorMethods::flatMapInner(const Type *result) {
-  const Type *inner = result->isString() ? nullptr : GeneratorChecker::iteratedType(result);
-  if (!inner) {
-    std::string message = ErrorTextFlatMap::notIter(result->name());
+IteratorMethods::ResultFlatMapInnerType IteratorMethods::flatMapInner(const Type *result) const {
+  const Type *inner = result->isString() ? nullptr : this->generatorChecker->iteratedType(result);
+  if (inner == nullptr) {
+    auto message = ErrorTextFlatMap::notIter(result->name());
 
     return err(IteratorMethodsFlatMapInnerError{
         .code = IteratorMethodsFlatMapInnerErrorCode::NOT_ITERABLE,
@@ -352,13 +355,13 @@ IteratorMethods::ResultFlatMapInnerType IteratorMethods::flatMapInner(const Type
 }
 
 Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
-  const IteratorMethodInfo *method = IteratorMethodTable::find(member->name);
+  const auto *method = IteratorMethodTable::find(member->name);
   const IteratorStepMethod *step =
       method != nullptr ? method->form.as<IteratorStepMethod>() : nullptr;
   if (step != nullptr) {
     return this->checkIteratorStep(call, member, step->builtin);
   }
-  std::optional<Builtin> helper = this->helperBuiltin(call, member);
+  auto helper = this->helperBuiltin(call, member);
   if (!helper.has_value()) {
     return call;
   }
@@ -388,7 +391,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
 
 bool IteratorMethods::hasWrongArity(CallExpr *call, MemberExpr *member, unsigned min,
                                     unsigned max) {
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, min, max);
+  auto arity = this->argumentChecker->checkArity(call, min, max);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
@@ -401,7 +404,7 @@ Expr *IteratorMethods::checkIteratorStep(CallExpr *call, MemberExpr *member, Bui
   if (this->hasWrongArity(call, member, 0, 1)) {
     return call;
   }
-  ResultNextValueOneType next = IteratorMethods::nextValue(iterator);
+  auto next = this->nextValue(iterator);
   if (next.isErr()) {
     this->state.getDiagnostics().error(member->loc(), next.error().message);
     this->argumentChecker->walkArgsLoosely(call);
@@ -425,21 +428,20 @@ Expr *IteratorMethods::checkIteratorStep(CallExpr *call, MemberExpr *member, Bui
 std::optional<Builtin> IteratorMethods::helperBuiltin(CallExpr *call, MemberExpr *member) {
   const Type *iterator = member->object->type;
   llvm::StringRef name = member->name;
-  ResultNotThrowOrReturn plain = IteratorMethods::plainMethod(name);
+  auto plain = this->plainMethod(name);
   if (plain.isErr()) {
     this->state.getDiagnostics().error(member->loc(), plain.error().message);
     this->argumentChecker->walkArgsLoosely(call);
     return std::nullopt;
   }
-  ResultKnownHelperFound found = IteratorMethods::iteratorHelper(name, iterator);
+  auto found = this->iteratorHelper(name, iterator);
   if (found.isErr()) {
     this->state.getDiagnostics().error(member->loc(), found.error().message);
     this->argumentChecker->walkArgsLoosely(call);
     return std::nullopt;
   }
-  std::string what = ErrorTextFunctionName::quoted(name);
-  GeneratorChecker::ResultNextNeedsNoValue nothing =
-      this->generatorChecker->checkSendsNothing(iterator, what);
+  auto what = ErrorTextFunctionName::quoted(name);
+  auto nothing = this->generatorChecker->checkSendsNothing(iterator, what);
   if (nothing.isErr()) {
     this->state.getDiagnostics().error(member->loc(), nothing.error().message);
     this->argumentChecker->walkArgsLoosely(call);
@@ -454,9 +456,8 @@ Expr *IteratorMethods::checkTakeDrop(CallExpr *call, MemberExpr *member, Builtin
     return call;
   }
   call->args[0] = this->memberChecker->checkPosition(call->args[0]);
-  std::string counted = ErrorTextIteratorMethod::countOf(member->name);
-  IndexProofs::ResultBetweenProven between =
-      this->indexProofs->requireBetween(call->args[0], 0, std::nullopt, counted);
+  auto counted = ErrorTextIteratorMethod::countOf(member->name);
+  auto between = this->indexProofs->requireBetween(call->args[0], 0, std::nullopt, counted);
   if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
     this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
   }
@@ -483,7 +484,7 @@ Expr *IteratorMethods::checkIteratorCallback(CallExpr *call, MemberExpr *member,
   llvm::StringRef name = member->name;
   size_t count = call->args.size();
   bool isReduce = method == IteratorMethod::REDUCE;
-  ResultCallbackIsPassed passed = IteratorMethods::callbackGiven(count, name, isReduce);
+  auto passed = this->callbackGiven(count, name, isReduce);
   if (passed.isErr()) {
     this->state.getDiagnostics().error(member->loc(), passed.error().message);
     this->argumentChecker->walkArgsLoosely(call);
@@ -494,14 +495,14 @@ Expr *IteratorMethods::checkIteratorCallback(CallExpr *call, MemberExpr *member,
     call->args[0] = this->exprChecker->checkExpr(call->args[0]);
     return call;
   }
-  Signature sig = IteratorMethods::callbackSignature(method, element, accumulator);
+  auto signature = this->callbackSignature(method, element, accumulator);
   bool isBoolean = this->callChecker->isGlobalName(call->args[0], GlobalName::BOOLEAN);
   auto *given = dyn_cast<FunctionExpr>(call->args[0]);
   if (given != nullptr) {
     this->state.getCallbackFacts().rememberIndexCallback(given->fn, isReduce ? 2 : 1);
   }
   unsigned primary = isReduce ? 2 : 1;
-  call->args[0] = this->callbackChecker->checkFunctionArg(call->args[0], sig, primary, name);
+  call->args[0] = this->callbackChecker->checkFunctionArg(call->args[0], signature, primary, name);
   auto *checked = dyn_cast<FunctionExpr>(call->args[0]);
   if (BuiltinGroups::isIteratorStage(builtin) && checked != nullptr) {
     checked->fn->nonEscaping = call->fused;
@@ -531,11 +532,11 @@ const Type *IteratorMethods::reduceInitType(CallExpr *call, const Type *element)
   bool isNegative =
       unary != nullptr && unary->op == UnaryOp::Neg && isa<IntLitExpr>(unary->operand);
   bool isLiteral = isa<IntLitExpr>(init) || isNegative;
-  const Type *apparent = GenericChecker::apparentType(element);
+  const auto *apparent = this->genericChecker->apparentType(element);
   const Type *hint = isLiteral && apparent->isNumeric() ? apparent : nullptr;
   call->args[1] = this->exprChecker->checkExpr(init, hint);
   const Type *accumulator = call->args[1]->type;
-  ResultInitialValueType initial = IteratorMethods::initialValue(accumulator);
+  auto initial = this->initialValue(accumulator);
   if (initial.isErr()) {
     this->state.getDiagnostics().error(call->args[1]->loc(), initial.error().message);
     return Type::error();
@@ -545,25 +546,25 @@ const Type *IteratorMethods::reduceInitType(CallExpr *call, const Type *element)
 }
 
 Signature IteratorMethods::callbackSignature(IteratorMethod method, const Type *element,
-                                             const Type *accumulator) {
-  Signature sig;
-  sig.pad = false;
+                                             const Type *accumulator) const {
+  Signature signature;
+  signature.pad = false;
   if (method == IteratorMethod::FOR_EACH) {
-    sig.voidResult = true;
+    signature.voidResult = true;
   }
   bool isPredicate = method == IteratorMethod::FILTER || method == IteratorMethod::SOME ||
                      method == IteratorMethod::EVERY || method == IteratorMethod::FIND;
   if (isPredicate) {
-    sig.ret = Type::boolTy();
+    signature.ret = Type::boolTy();
   }
   bool isReduce = method == IteratorMethod::REDUCE;
   if (isReduce) {
-    sig.ret = accumulator;
+    signature.ret = accumulator;
   }
-  sig.params = isReduce ? std::vector<const Type *>{accumulator, element, Type::intTy()}
-                        : std::vector<const Type *>{element, Type::intTy()};
+  signature.params = isReduce ? std::vector<const Type *>{accumulator, element, Type::intTy()}
+                              : std::vector<const Type *>{element, Type::intTy()};
 
-  return sig;
+  return signature;
 }
 
 Expr *IteratorMethods::checkCallbackResult(const IteratorCallback &callback,
@@ -605,7 +606,7 @@ Expr *IteratorMethods::checkCallbackResult(const IteratorCallback &callback,
 
 Expr *IteratorMethods::checkMapResult(const IteratorCallback &callback, const Type *result) {
   CallExpr *call = callback.call;
-  ResultCallbackHasValue value = IteratorMethods::callbackValue(result, callback.name);
+  auto value = this->callbackValue(result, callback.name);
   if (value.isErr()) {
     this->state.getDiagnostics().error(call->args[0]->loc(), value.error().message);
     return call;
@@ -616,14 +617,13 @@ Expr *IteratorMethods::checkMapResult(const IteratorCallback &callback, const Ty
 }
 
 Expr *IteratorMethods::checkFlatMapResult(CallExpr *call, const Type *result) {
-  ResultFlatMapInnerType inner = IteratorMethods::flatMapInner(result);
+  auto inner = this->flatMapInner(result);
   if (inner.isErr()) {
     this->state.getDiagnostics().error(call->args[0]->loc(), inner.error().message);
     return call;
   }
   if (result->isIterator()) {
-    GeneratorChecker::ResultNextNeedsNoValue flatSends =
-        this->generatorChecker->checkSendsNothing(result, "'flatMap'");
+    auto flatSends = this->generatorChecker->checkSendsNothing(result, "'flatMap'");
     if (flatSends.isErr()) {
       this->state.getDiagnostics().error(call->args[0]->loc(), flatSends.error().message);
       return call;
@@ -637,7 +637,7 @@ Expr *IteratorMethods::checkFlatMapResult(CallExpr *call, const Type *result) {
 const Type *IteratorMethods::filteredElement(const IteratorCallback &callback) {
   const Expr *predicate = callback.call->args[0];
   const Type *element = callback.element;
-  const Type *kept = this->predicateChecker->filteredType(predicate, element);
+  const auto *kept = this->predicateChecker->filteredType(predicate, element);
   if (kept != nullptr) {
     return kept;
   }

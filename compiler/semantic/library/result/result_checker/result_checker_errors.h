@@ -8,6 +8,7 @@ namespace tz {
 
 enum class ResultCheckerOkErrTypeArgsErrorCode {
   NOT_TWO_TYPE_ARGUMENTS,
+  ALREADY_REPORTED,
 };
 
 struct ResultCheckerOkErrTypeArgsError {

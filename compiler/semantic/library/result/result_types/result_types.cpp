@@ -20,13 +20,13 @@ ResultTypes::ResultTypes(SemanticState &owner, SemanticParts &all)
 }
 
 std::optional<GlobalName> ResultTypes::resultName(llvm::StringRef name) const {
-  ScopeEntry entry = this->scopes->lookup(name);
-  if (entry.found()) {
+  auto entry = this->scopes->lookup(name);
+  if (entry.isFound()) {
     return std::nullopt;
   }
   static const GlobalName resultNames[] = {GlobalName::OK, GlobalName::ERR, GlobalName::RESULT,
                                            GlobalName::OK_TYPE, GlobalName::ERR_TYPE};
-  std::optional<GlobalName> global = GlobalNameTable::find(name);
+  auto global = GlobalNameTable::find(name);
   if (!global.has_value() || !llvm::is_contained(resultNames, *global)) {
     return std::nullopt;
   }
@@ -35,10 +35,10 @@ std::optional<GlobalName> ResultTypes::resultName(llvm::StringRef name) const {
 }
 
 std::optional<TypeName> ResultTypes::findResultType(llvm::StringRef name) const {
-  if (this->typeDeclarer->lookupType(name)) {
+  if (this->typeDeclarer->lookupType(name) != nullptr) {
     return std::nullopt;
   }
-  const TypeNameInfo *builtin = TypeNameTable::find(name);
+  const auto *builtin = TypeNameTable::find(name);
   if (builtin == nullptr || !builtin->form.is<ResultTypeName>()) {
     return std::nullopt;
   }
@@ -46,9 +46,9 @@ std::optional<TypeName> ResultTypes::findResultType(llvm::StringRef name) const 
   return builtin->type;
 }
 
-ResultTypes::ResultImportSource ResultTypes::importSource(const ImportDecl &decl) {
-  if (decl.path == "neverthrow") {
-    std::string message = ErrorTextResultType::neverthrow();
+ResultTypes::ResultImportSource ResultTypes::importSource(const ImportDecl &importDecl) const {
+  if (importDecl.path == "neverthrow") {
+    auto message = ErrorTextResultType::neverthrow();
 
     return err(ResultTypesImportSourceError{
         .code = ResultTypesImportSourceErrorCode::NEVERTHROW_IMPORT,
@@ -56,12 +56,12 @@ ResultTypes::ResultImportSource ResultTypes::importSource(const ImportDecl &decl
     });
   }
 
-  return ok(&decl);
+  return ok(&importDecl);
 }
 
-ResultTypes::ResultTypeArgsPair ResultTypes::resultTypeArgs(const TypeRef &ref) {
+ResultTypes::ResultTypeArgsPair ResultTypes::resultTypeArgs(const TypeRef &ref) const {
   if (ref.args.size() != 2) {
-    std::string message = ErrorTextResultType::typeArgs(ref.name);
+    auto message = ErrorTextResultType::typeArgs(ref.name);
 
     return err(ResultTypesResultTypeArgsError{
         .code = ResultTypesResultTypeArgsErrorCode::NOT_TWO_TYPE_ARGUMENTS,
@@ -73,7 +73,7 @@ ResultTypes::ResultTypeArgsPair ResultTypes::resultTypeArgs(const TypeRef &ref) 
 }
 
 const Type *ResultTypes::resolveResultType(const TypeRef &ref, TypeName result) {
-  ResultTypeArgsPair args = ResultTypes::resultTypeArgs(ref);
+  auto args = this->resultTypeArgs(ref);
   if (args.isErr()) {
     this->state.getDiagnostics().error(ref.loc, args.error().message);
     return Type::error();
@@ -95,7 +95,7 @@ const Type *ResultTypes::resolveResultType(const TypeRef &ref, TypeName result) 
   return Type::result(value, error);
 }
 
-const Type *ResultTypes::unifyHalf(const Type *a, const Type *b) {
+const Type *ResultTypes::unifyHalf(const Type *a, const Type *b) const {
   return TypeRelations::unifyAs(UnifyForm::HALF, a, b);
 }
 
@@ -113,16 +113,16 @@ UnifyShortcut ResultTypes::halfShortcut(const Type *a, const Type *b) {
   return {false, nullptr};
 }
 
-void ResultTypes::neverOperands(BinaryExpr *bin) {
-  const Type *l = bin->lhs->type;
-  const Type *r = bin->rhs->type;
+void ResultTypes::neverOperands(BinaryExpr *binary) {
+  const Type *l = binary->lhs->type;
+  const Type *r = binary->rhs->type;
   if (l->isNever() && r->isNever()) {
-    bin->lhs = this->typeRelations->convert(bin->lhs, Type::doubleTy());
-    bin->rhs = this->typeRelations->convert(bin->rhs, Type::doubleTy());
+    binary->lhs = this->typeRelations->convert(binary->lhs, Type::doubleTy());
+    binary->rhs = this->typeRelations->convert(binary->rhs, Type::doubleTy());
   } else if (l->isNever() && !r->isError() && !r->isVoid()) {
-    bin->lhs = this->typeRelations->convert(bin->lhs, r);
+    binary->lhs = this->typeRelations->convert(binary->lhs, r);
   } else if (r->isNever() && !l->isError() && !l->isVoid()) {
-    bin->rhs = this->typeRelations->convert(bin->rhs, l);
+    binary->rhs = this->typeRelations->convert(binary->rhs, l);
   }
 }
 

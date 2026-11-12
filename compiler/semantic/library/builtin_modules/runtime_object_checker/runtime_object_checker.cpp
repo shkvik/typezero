@@ -27,7 +27,7 @@ RuntimeObjectChecker::RuntimeObjectChecker(SemanticState &owner, SemanticParts &
 Expr *RuntimeObjectChecker::checkRuntimeMember(MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
-  std::string message = ErrorTextRuntimeObject::noMember(name, type->name(), type->runtimeKind());
+  auto message = ErrorTextRuntimeObject::noMember(name, type->name(), type->runtimeKind());
   this->state.getDiagnostics().error(member->loc(), message);
 
   return member;
@@ -64,8 +64,7 @@ Expr *RuntimeObjectChecker::checkArgsLoosely(CallExpr *call) {
 
 Expr *RuntimeObjectChecker::reportNoMember(CallExpr *call, MemberExpr *member) {
   const Type *type = member->object->type;
-  std::string message =
-      ErrorTextRuntimeObject::noMember(member->name, type->name(), type->runtimeKind());
+  auto message = ErrorTextRuntimeObject::noMember(member->name, type->name(), type->runtimeKind());
   this->state.getDiagnostics().error(member->loc(), message);
 
   return this->checkArgsLoosely(call);
@@ -73,7 +72,7 @@ Expr *RuntimeObjectChecker::reportNoMember(CallExpr *call, MemberExpr *member) {
 
 bool RuntimeObjectChecker::hasWrongArity(CallExpr *call, MemberExpr *member, unsigned min,
                                          unsigned max) {
-  ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, min, max);
+  auto arity = this->argumentChecker->checkArity(call, min, max);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }
@@ -82,7 +81,7 @@ bool RuntimeObjectChecker::hasWrongArity(CallExpr *call, MemberExpr *member, uns
 }
 
 Expr *RuntimeObjectChecker::checkReadlineMethod(CallExpr *call, MemberExpr *member) {
-  std::optional<ReadlineMethod> method = ReadlineMethodTable::find(member->name);
+  auto method = ReadlineMethodTable::find(member->name);
   if (!method.has_value()) {
     return this->reportNoMember(call, member);
   }
@@ -112,7 +111,7 @@ Expr *RuntimeObjectChecker::checkReadlineMethod(CallExpr *call, MemberExpr *memb
 }
 
 Expr *RuntimeObjectChecker::reportReadlineEvents(CallExpr *call, MemberExpr *member) {
-  std::string message = ErrorTextReadlineMethod::events(member->name);
+  auto message = ErrorTextReadlineMethod::events(member->name);
   this->state.getDiagnostics().error(member->loc(), message);
 
   return this->checkArgsLoosely(call);
@@ -133,13 +132,13 @@ Expr *RuntimeObjectChecker::checkQuestion(CallExpr *call, MemberExpr *member) {
   if (this->hasWrongArity(call, member, 1, hasPromises ? 1 : 3)) {
     return call;
   }
-  Expr *query = this->argumentChecker->checkArg(call->args[0], Type::string());
+  auto *query = this->argumentChecker->checkArg(call->args[0], Type::string());
   if (!hasPromises) {
     return this->checkQuestionCallback(call, member, query);
   }
   call->args = {query};
   call->target = BuiltinCall{.builtin = Builtin::RlQuestion};
-  const Type *failure = this->prelude->builtinType("QuestionError");
+  const auto *failure = this->prelude->builtinType(PreludeType::QUESTION_ERROR);
   call->type = Type::promise(Type::result(Type::string(), failure));
 
   return call;
@@ -147,27 +146,27 @@ Expr *RuntimeObjectChecker::checkQuestion(CallExpr *call, MemberExpr *member) {
 
 Expr *RuntimeObjectChecker::checkQuestionCallback(CallExpr *call, MemberExpr *member, Expr *query) {
   if (call->args.size() < 2) {
-    std::string message = ErrorTextReadlineMethod::callback();
+    auto message = ErrorTextReadlineMethod::callback();
     this->state.getDiagnostics().error(member->loc(), message);
     return call;
   }
   if (call->args.size() == 3) {
-    std::string message = ErrorTextReadlineMethod::options();
+    auto message = ErrorTextReadlineMethod::options();
     this->state.getDiagnostics().error(call->args[1]->loc(), message);
     return this->checkArgsLoosely(call);
   }
-  Signature sig;
-  sig.params = {Type::string()};
-  sig.ret = Type::voidTy();
-  sig.voidResult = true;
-  sig.asyncVoid = true;
-  Expr *callback = this->callbackChecker->checkFunctionArg(call->args[1], sig, 1, "question");
+  Signature signature;
+  signature.params = {Type::string()};
+  signature.ret = Type::voidTy();
+  signature.voidResult = true;
+  signature.asyncVoid = true;
+  auto *callback = this->callbackChecker->checkFunctionArg(call->args[1], signature, 1, "question");
   if (!callback->type->isFunction()) {
     return call;
   }
-  auto *fe = dyn_cast<FunctionExpr>(callback);
-  if (fe != nullptr) {
-    fe->fn->nonEscaping = false;
+  auto *functionExpr = dyn_cast<FunctionExpr>(callback);
+  if (functionExpr != nullptr) {
+    functionExpr->fn->nonEscaping = false;
   }
   call->args = {query, callback};
   call->target = BuiltinCall{.builtin = Builtin::RlQuestionCallback};
@@ -177,16 +176,16 @@ Expr *RuntimeObjectChecker::checkQuestionCallback(CallExpr *call, MemberExpr *me
 }
 
 Expr *RuntimeObjectChecker::checkAsyncIteratorMethod(CallExpr *call, MemberExpr *member) {
-  const IteratorMethodInfo *method = IteratorMethodTable::find(member->name);
+  const auto *method = IteratorMethodTable::find(member->name);
   std::optional<IteratorMethod> which =
       method != nullptr ? std::optional<IteratorMethod>(method->method) : std::nullopt;
   if (which == IteratorMethod::THROW) {
-    std::string message = ErrorTextAsyncIterator::noThrow();
+    auto message = ErrorTextAsyncIterator::noThrow();
     this->state.getDiagnostics().error(member->loc(), message);
     return this->checkArgsLoosely(call);
   }
   if (which == IteratorMethod::NEXT || which == IteratorMethod::RETURN) {
-    std::string message = ErrorTextAsyncIterator::notYet(member->name);
+    auto message = ErrorTextAsyncIterator::notYet(member->name);
     this->state.getDiagnostics().error(member->loc(), message);
     return this->checkArgsLoosely(call);
   }
@@ -194,11 +193,9 @@ Expr *RuntimeObjectChecker::checkAsyncIteratorMethod(CallExpr *call, MemberExpr 
   return this->reportNoMember(call, member);
 }
 
-const Type *RuntimeObjectChecker::checkRuntimeTarget(MemberExpr *member, bool compound) {
-  (void)compound;
+const Type *RuntimeObjectChecker::checkRuntimeTarget(MemberExpr *member) {
   const Type *type = member->object->type;
-  std::string message =
-      ErrorTextRuntimeObject::assigned(member->name, type->name(), type->runtimeKind());
+  auto message = ErrorTextRuntimeObject::assigned(member->name, type->name(), type->runtimeKind());
   this->state.getDiagnostics().error(member->loc(), message);
 
   return Type::error();

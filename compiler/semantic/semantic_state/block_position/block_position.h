@@ -31,9 +31,9 @@ public:
   JumpTarget leaveJumpTarget();
   JumpTarget *findJumpTarget(llvm::StringRef label, bool isBreak);
   bool hasLabel(llvm::StringRef label) const;
-  void addOtherCaseVar(const VarSymbol *var);
-  void forgetOtherCaseVar(const VarSymbol *var);
-  bool isOtherCaseVar(const VarSymbol *var) const;
+  void addOtherCaseVar(const VarSymbol *variable);
+  void forgetOtherCaseVar(const VarSymbol *variable);
+  bool isOtherCaseVar(const VarSymbol *variable) const;
   void forgetOtherCaseVars();
   BlockSnapshot saveBody();
   void restoreBody(BlockSnapshot saved);

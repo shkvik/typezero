@@ -18,32 +18,32 @@ HttpChecker::HttpChecker(SemanticState &owner, SemanticParts &all)
   this->constantFolder = &all.constantFolder;
 }
 
-bool HttpChecker::isTokenChar(unsigned char c) {
+bool HttpChecker::isTokenChar(unsigned char c) const {
   return c < 0x80 &&
          (llvm::isAlnum(char(c)) || llvm::StringRef("!#$%&'*+-.^_`|~").contains(char(c)));
 }
 
-bool HttpChecker::isToken(llvm::StringRef text) {
-  return !text.empty() && llvm::all_of(text, [](char c) {
-    return HttpChecker::isTokenChar(static_cast<unsigned char>(c));
+bool HttpChecker::isToken(llvm::StringRef text) const {
+  return !text.empty() && llvm::all_of(text, [this](char c) {
+    return this->isTokenChar(static_cast<unsigned char>(c));
   });
 }
 
-bool HttpChecker::isHttpSpace(char16_t c) {
+bool HttpChecker::isHttpSpace(char16_t c) const {
   return c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D;
 }
 
-bool HttpChecker::validValue(const std::u16string &text) {
+bool HttpChecker::validValue(const std::u16string &text) const {
   size_t start = 0;
   size_t end = text.size();
-  while (start < end && HttpChecker::isHttpSpace(text[start])) {
+  while (start < end && this->isHttpSpace(text[start])) {
     ++start;
   }
-  while (end > start && HttpChecker::isHttpSpace(text[end - 1])) {
+  while (end > start && this->isHttpSpace(text[end - 1])) {
     --end;
   }
-  for (size_t i = start; i < end; ++i) {
-    if (text[i] == 0 || text[i] == 0x0A || text[i] == 0x0D) {
+  for (size_t index = start; index < end; ++index) {
+    if (text[index] == 0 || text[index] == 0x0A || text[index] == 0x0D) {
       return false;
     }
   }
@@ -51,42 +51,44 @@ bool HttpChecker::validValue(const std::u16string &text) {
   return true;
 }
 
-const std::u16string *HttpChecker::stringLiteral(const Expr *expr) {
-  if (auto *lit = dyn_cast<StringLitExpr>(UrlChecker::unconverted(expr))) {
-    return &lit->value;
+const std::u16string *HttpChecker::stringLiteral(const Expr *expr) const {
+  auto *literal = dyn_cast<StringLitExpr>(this->urlChecker->unconverted(expr));
+  if (literal != nullptr) {
+    return &literal->value;
   }
-  if (auto *tmpl = dyn_cast<TemplateExpr>(UrlChecker::unconverted(expr));
-      tmpl && tmpl->exprs.empty()) {
-    return &tmpl->quasis[0];
+  auto *templateExpr = dyn_cast<TemplateExpr>(this->urlChecker->unconverted(expr));
+  if (templateExpr != nullptr && templateExpr->exprs.empty()) {
+    return &templateExpr->quasis[0];
   }
 
   return nullptr;
 }
 
-bool HttpChecker::isLibraryClass(const Type *type, llvm::StringRef name) {
-  const ClassDecl *cls = type ? type->nonOptional()->classDecl() : nullptr;
+bool HttpChecker::isLibraryClass(const Type *type, llvm::StringRef name) const {
+  const ClassDecl *classDecl = type != nullptr ? type->nonOptional()->classDecl() : nullptr;
 
-  return cls && cls->library() && cls->name == name;
+  return classDecl != nullptr && classDecl->library() && classDecl->name == name;
 }
 
-const ObjectLitExpr::Property *HttpChecker::property(const ObjectLitExpr *lit,
-                                                     llvm::StringRef name) {
-  for (const ObjectLitExpr::Property &p : lit->props) {
-    if (!p.spread() && !p.key() && p.value && p.name == name) {
-      return &p;
+const ObjectLitExpr::Property *HttpChecker::property(const ObjectLitExpr *literal,
+                                                     llvm::StringRef name) const {
+  for (const ObjectLitExpr::Property &property : literal->props) {
+    if (!property.spread() && !property.key() && property.value != nullptr &&
+        property.name == name) {
+      return &property;
     }
   }
 
   return nullptr;
 }
 
-bool HttpChecker::hasBody(const Expr *body) {
-  const Type *type = UrlChecker::unconverted(body)->type;
+bool HttpChecker::hasBody(const Expr *body) const {
+  const Type *type = this->urlChecker->unconverted(body)->type;
 
   return !type->isError() && !type->isUndefined() && !type->isOptional();
 }
 
-bool HttpChecker::hasCredentials(llvm::StringRef url) {
+bool HttpChecker::hasCredentials(llvm::StringRef url) const {
   size_t scheme = url.find("://");
   if (scheme == llvm::StringRef::npos) {
     return false;
@@ -98,9 +100,9 @@ bool HttpChecker::hasCredentials(llvm::StringRef url) {
   return authority.contains('@');
 }
 
-HttpChecker::ResultHeaderName HttpChecker::headerName(llvm::StringRef name) {
-  if (!HttpChecker::isToken(name)) {
-    std::string message = ErrorTextHeader::name(name);
+HttpChecker::ResultHeaderName HttpChecker::headerName(llvm::StringRef name) const {
+  if (!this->isToken(name)) {
+    auto message = ErrorTextHeader::name(name);
 
     return err(HttpCheckerHeaderNameError{
         .code = HttpCheckerHeaderNameErrorCode::NOT_A_TOKEN,
@@ -111,9 +113,9 @@ HttpChecker::ResultHeaderName HttpChecker::headerName(llvm::StringRef name) {
   return ok(name);
 }
 
-HttpChecker::ResultHeaderText HttpChecker::headerText(const std::u16string &text) {
-  if (!HttpChecker::validValue(text)) {
-    std::string message = ErrorTextHeader::value();
+HttpChecker::ResultHeaderText HttpChecker::headerText(const std::u16string &text) const {
+  if (!this->validValue(text)) {
+    auto message = ErrorTextHeader::value();
 
     return err(HttpCheckerHeaderTextError{
         .code = HttpCheckerHeaderTextErrorCode::LINE_BREAK,
@@ -124,17 +126,17 @@ HttpChecker::ResultHeaderText HttpChecker::headerText(const std::u16string &text
   return ok(&text);
 }
 
-HttpChecker::ResultRequestUrl HttpChecker::requestUrl(llvm::StringRef text) {
-  if (!UrlChecker::validUrlText(text.str(), false)) {
-    std::string message = ErrorTextHttpRequest::badUrl(text);
+HttpChecker::ResultRequestUrl HttpChecker::requestUrl(llvm::StringRef text) const {
+  if (!this->urlChecker->validUrlText(text.str(), false)) {
+    auto message = ErrorTextHttpRequest::badUrl(text);
 
     return err(HttpCheckerRequestUrlError{
         .code = HttpCheckerRequestUrlErrorCode::INVALID_URL,
         .message = message,
     });
   }
-  if (HttpChecker::hasCredentials(text)) {
-    std::string message = ErrorTextHttpRequest::userInUrl();
+  if (this->hasCredentials(text)) {
+    auto message = ErrorTextHttpRequest::userInUrl();
 
     return err(HttpCheckerRequestUrlError{
         .code = HttpCheckerRequestUrlErrorCode::CREDENTIALS,
@@ -145,10 +147,10 @@ HttpChecker::ResultRequestUrl HttpChecker::requestUrl(llvm::StringRef text) {
   return ok(text);
 }
 
-HttpChecker::ResultMethodName HttpChecker::methodName(llvm::StringRef method) {
+HttpChecker::ResultMethodName HttpChecker::methodName(llvm::StringRef method) const {
   std::string upper = method.upper();
-  if (!HttpChecker::isToken(method)) {
-    std::string message = ErrorTextHttpRequest::badMethod(method);
+  if (!this->isToken(method)) {
+    auto message = ErrorTextHttpRequest::badMethod(method);
 
     return err(HttpCheckerMethodNameError{
         .code = HttpCheckerMethodNameErrorCode::NOT_A_TOKEN,
@@ -156,7 +158,7 @@ HttpChecker::ResultMethodName HttpChecker::methodName(llvm::StringRef method) {
     });
   }
   if (upper == "CONNECT" || upper == "TRACE" || upper == "TRACK") {
-    std::string message = ErrorTextHttpRequest::forbidden(method);
+    auto message = ErrorTextHttpRequest::forbidden(method);
 
     return err(HttpCheckerMethodNameError{
         .code = HttpCheckerMethodNameErrorCode::FORBIDDEN,
@@ -167,7 +169,7 @@ HttpChecker::ResultMethodName HttpChecker::methodName(llvm::StringRef method) {
   return ok(method);
 }
 
-bool HttpChecker::validReason(const std::u16string &text) {
+bool HttpChecker::validReason(const std::u16string &text) const {
   return llvm::all_of(text, [](char16_t c) {
     return c == 0x09 || (c >= 0x20 && c <= 0x7E) || (c >= 0x80 && c <= 0xFF);
   });
@@ -178,12 +180,12 @@ bool HttpChecker::inProgram(const Expr *expr) const {
 }
 
 HttpChecker::ResultHeaderNameChecked HttpChecker::checkHeaderName(const Expr *name) {
-  const std::u16string *text = HttpChecker::stringLiteral(name);
-  if (!text) {
+  const auto *text = this->stringLiteral(name);
+  if (text == nullptr) {
     return ok();
   }
-  std::string written = ToUtf8::toUtf8(*text);
-  ResultHeaderName header = HttpChecker::headerName(written);
+  auto written = ToUtf8::toUtf8(*text);
+  auto header = this->headerName(written);
   if (header.isErr()) {
     return err(header.error());
   }
@@ -192,11 +194,11 @@ HttpChecker::ResultHeaderNameChecked HttpChecker::checkHeaderName(const Expr *na
 }
 
 HttpChecker::ResultHeaderValueChecked HttpChecker::checkHeaderValue(const Expr *value) {
-  const std::u16string *text = HttpChecker::stringLiteral(value);
-  if (!text) {
+  const auto *text = this->stringLiteral(value);
+  if (text == nullptr) {
     return ok();
   }
-  ResultHeaderText header = HttpChecker::headerText(*text);
+  auto header = this->headerText(*text);
   if (header.isErr()) {
     return err(header.error());
   }
@@ -205,36 +207,39 @@ HttpChecker::ResultHeaderValueChecked HttpChecker::checkHeaderValue(const Expr *
 }
 
 void HttpChecker::walkHeadersInit(const Expr *init) {
-  init = UrlChecker::unconverted(init);
-  if (auto *lit = dyn_cast<ObjectLitExpr>(init)) {
-    for (const ObjectLitExpr::Property &p : lit->props) {
-      if (p.spread() || p.key() || !p.value) {
+  init = this->urlChecker->unconverted(init);
+  auto *literal = dyn_cast<ObjectLitExpr>(init);
+  if (literal != nullptr) {
+    for (const ObjectLitExpr::Property &property : literal->props) {
+      if (property.spread() || property.key() || property.value == nullptr) {
         continue;
       }
-      ResultHeaderName header = HttpChecker::headerName(p.name);
+      auto header = this->headerName(property.name);
       if (header.isErr()) {
-        this->state.getDiagnostics().error(p.loc, header.error().message);
+        this->state.getDiagnostics().error(property.loc, header.error().message);
       }
-      ResultHeaderValueChecked value = this->checkHeaderValue(p.value);
+      auto value = this->checkHeaderValue(property.value);
       if (value.isErr()) {
-        this->state.getDiagnostics().error(p.value->loc(), value.error().message);
+        this->state.getDiagnostics().error(property.value->loc(), value.error().message);
       }
     }
     return;
   }
-  if (auto *list = dyn_cast<ArrayLitExpr>(init)) {
-    for (const ArrayLitExpr::Element &e : list->elements) {
-      auto *pair =
-          e.spread || !e.expr ? nullptr : dyn_cast<ArrayLitExpr>(UrlChecker::unconverted(e.expr));
-      if (pair && pair->elements.size() == 2 && !pair->elements[0].spread &&
+  auto *list = dyn_cast<ArrayLitExpr>(init);
+  if (list != nullptr) {
+    for (const ArrayLitExpr::Element &element : list->elements) {
+      auto *pair = element.spread || element.expr == nullptr
+                       ? nullptr
+                       : dyn_cast<ArrayLitExpr>(this->urlChecker->unconverted(element.expr));
+      if (pair != nullptr && pair->elements.size() == 2 && !pair->elements[0].spread &&
           !pair->elements[1].spread) {
         const Expr *nameExpr = pair->elements[0].expr;
         const Expr *valueExpr = pair->elements[1].expr;
-        ResultHeaderNameChecked name = this->checkHeaderName(nameExpr);
+        auto name = this->checkHeaderName(nameExpr);
         if (name.isErr()) {
           this->state.getDiagnostics().error(nameExpr->loc(), name.error().message);
         }
-        ResultHeaderValueChecked value = this->checkHeaderValue(valueExpr);
+        auto value = this->checkHeaderValue(valueExpr);
         if (value.isErr()) {
           this->state.getDiagnostics().error(valueExpr->loc(), value.error().message);
         }
@@ -244,26 +249,26 @@ void HttpChecker::walkHeadersInit(const Expr *init) {
 }
 
 void HttpChecker::walkHeadersNew(NewExpr *expr) {
-  const std::vector<Expr *> &args = expr->ctor() ? expr->ctor()->args : expr->args;
+  const std::vector<Expr *> &args = expr->ctor() != nullptr ? expr->ctor()->args : expr->args;
   if (this->inProgram(expr) && !args.empty()) {
     this->walkHeadersInit(args[0]);
   }
 }
 
 void HttpChecker::walkHeadersCall(const CallExpr *call, const MemberExpr *member) {
-  if (!HttpChecker::isLibraryClass(member->object->type, "Headers") || !this->inProgram(call) ||
+  if (!this->isLibraryClass(member->object->type, "Headers") || !this->inProgram(call) ||
       call->args.empty()) {
     return;
   }
   llvm::StringRef name = member->name;
   if (name == "append" || name == "set" || name == "get" || name == "has" || name == "delete") {
-    ResultHeaderNameChecked header = this->checkHeaderName(call->args[0]);
+    auto header = this->checkHeaderName(call->args[0]);
     if (header.isErr()) {
       this->state.getDiagnostics().error(call->args[0]->loc(), header.error().message);
     }
   }
   if ((name == "append" || name == "set") && call->args.size() > 1) {
-    ResultHeaderValueChecked value = this->checkHeaderValue(call->args[1]);
+    auto value = this->checkHeaderValue(call->args[1]);
     if (value.isErr()) {
       this->state.getDiagnostics().error(call->args[1]->loc(), value.error().message);
     }
@@ -274,36 +279,36 @@ void HttpChecker::walkResponseNew(NewExpr *expr) {
   if (!this->inProgram(expr)) {
     return;
   }
-  const std::vector<Expr *> &args = expr->ctor() ? expr->ctor()->args : expr->args;
+  const std::vector<Expr *> &args = expr->ctor() != nullptr ? expr->ctor()->args : expr->args;
   if (args.size() < 2) {
     return;
   }
-  auto *init = dyn_cast<ObjectLitExpr>(UrlChecker::unconverted(args[1]));
-  if (!init) {
+  auto *init = dyn_cast<ObjectLitExpr>(this->urlChecker->unconverted(args[1]));
+  if (init == nullptr) {
     return;
   }
-  for (const ObjectLitExpr::Property &p : init->props) {
-    if (p.spread() || p.key() || !p.value) {
+  for (const ObjectLitExpr::Property &property : init->props) {
+    if (property.spread() || property.key() || property.value == nullptr) {
       continue;
     }
-    const Expr *value = UrlChecker::unconverted(p.value);
-    if (p.name == "status") {
+    const auto *value = this->urlChecker->unconverted(property.value);
+    if (property.name == "status") {
       std::optional<int64_t> status =
-          value->type && value->type->isLiteral() && value->type->literalBase()->isInt()
+          value->type != nullptr && value->type->isLiteral() && value->type->literalBase()->isInt()
               ? std::optional<int64_t>(int64_t(value->type->literalNumber()))
               : this->constantFolder->intConstant(value);
       if (status && (*status == 204 || *status == 205 || *status == 304) &&
-          HttpChecker::hasBody(args[0])) {
-        std::string message = ErrorTextHttpResponse::noBody(*status);
+          this->hasBody(args[0])) {
+        auto message = ErrorTextHttpResponse::noBody(*status);
         this->state.getDiagnostics().error(args[0]->loc(), message);
       }
-    } else if (p.name == "statusText") {
-      if (const std::u16string *text = HttpChecker::stringLiteral(value);
-          text && !HttpChecker::validReason(*text)) {
-        std::string message = ErrorTextHttpResponse::statusText();
+    } else if (property.name == "statusText") {
+      const auto *text = this->stringLiteral(value);
+      if (text != nullptr && !this->validReason(*text)) {
+        auto message = ErrorTextHttpResponse::statusText();
         this->state.getDiagnostics().error(value->loc(), message);
       }
-    } else if (p.name == "headers") {
+    } else if (property.name == "headers") {
       this->walkHeadersInit(value);
     }
   }
@@ -313,53 +318,53 @@ void HttpChecker::walkRequestNew(NewExpr *expr) {
   if (!this->inProgram(expr)) {
     return;
   }
-  const std::vector<Expr *> &args = expr->ctor() ? expr->ctor()->args : expr->args;
+  const std::vector<Expr *> &args = expr->ctor() != nullptr ? expr->ctor()->args : expr->args;
   if (args.empty() || llvm::any_of(args, [](const Expr *a) { return a->type->isError(); })) {
     return;
   }
-  const Expr *input = UrlChecker::unconverted(args[0]);
-  if (!HttpChecker::isLibraryClass(input->type, "Request") &&
-      !HttpChecker::isLibraryClass(input->type, "URL")) {
-    if (std::optional<std::string> text = UrlChecker::literalText(input)) {
-      ResultRequestUrl url = HttpChecker::requestUrl(*text);
+  const auto *input = this->urlChecker->unconverted(args[0]);
+  if (!this->isLibraryClass(input->type, "Request") && !this->isLibraryClass(input->type, "URL")) {
+    if (std::optional<std::string> text = this->urlChecker->literalText(input)) {
+      auto url = this->requestUrl(*text);
       if (url.isErr()) {
         this->state.getDiagnostics().error(input->loc(), url.error().message);
       }
     } else if (!this->urlChecker->knownAbsolute(input)) {
-      std::string message = ErrorTextHttpRequest::unknown();
+      auto message = ErrorTextHttpRequest::unknown();
       this->state.getDiagnostics().error(input->loc(), message);
     }
   }
   if (args.size() < 2) {
     return;
   }
-  auto *init = dyn_cast<ObjectLitExpr>(UrlChecker::unconverted(args[1]));
-  if (!init) {
+  auto *init = dyn_cast<ObjectLitExpr>(this->urlChecker->unconverted(args[1]));
+  if (init == nullptr) {
     return;
   }
   std::string method = "GET";
-  bool isKnownMethod = !HttpChecker::isLibraryClass(input->type, "Request");
-  if (const ObjectLitExpr::Property *p = HttpChecker::property(init, "method")) {
+  bool isKnownMethod = !this->isLibraryClass(input->type, "Request");
+  if (const ObjectLitExpr::Property *property = this->property(init, "method")) {
     isKnownMethod = false;
-    if (const std::u16string *text = HttpChecker::stringLiteral(p->value)) {
+    if (const std::u16string *text = this->stringLiteral(property->value)) {
       method = ToUtf8::toUtf8(*text);
       std::string upper = llvm::StringRef(method).upper();
       isKnownMethod = true;
-      ResultMethodName made = HttpChecker::methodName(method);
+      auto made = this->methodName(method);
       if (made.isErr()) {
-        this->state.getDiagnostics().error(p->value->loc(), made.error().message);
+        this->state.getDiagnostics().error(property->value->loc(), made.error().message);
       }
       method = upper;
     }
   }
-  const ObjectLitExpr::Property *body = HttpChecker::property(init, "body");
-  if (body && isKnownMethod && (method == "GET" || method == "HEAD") &&
-      HttpChecker::hasBody(body->value)) {
-    bool isGiven = HttpChecker::property(init, "method") != nullptr;
-    std::string message = ErrorTextHttpRequest::getBody(method, isGiven);
+  const auto *body = this->property(init, "body");
+  if (body != nullptr && isKnownMethod && (method == "GET" || method == "HEAD") &&
+      this->hasBody(body->value)) {
+    bool isGiven = this->property(init, "method") != nullptr;
+    auto message = ErrorTextHttpRequest::getBody(method, isGiven);
     this->state.getDiagnostics().error(body->value->loc(), message);
   }
-  if (const ObjectLitExpr::Property *headers = HttpChecker::property(init, "headers")) {
+  const auto *headers = this->property(init, "headers");
+  if (headers != nullptr) {
     this->walkHeadersInit(headers->value);
   }
 }

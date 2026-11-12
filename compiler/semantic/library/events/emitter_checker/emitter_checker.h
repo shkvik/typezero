@@ -5,6 +5,7 @@
 
 namespace tz {
 
+class ClassLinks;
 class SemanticParts;
 class Scopes;
 class EventMaps;
@@ -15,6 +16,7 @@ class ExprChecker;
 class LibraryCalls;
 class TypeResolver;
 class TypeRelations;
+class ClassDeclarer;
 class ReturnInferrer;
 class ArgumentChecker;
 class EventMapInference;
@@ -26,10 +28,10 @@ class EmitterChecker {
 public:
   EmitterChecker(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkEmitterCall(CallExpr *call, MemberExpr *member, ClassDecl *cls, bool super);
-  Expr *callLibraryMethod(CallExpr *call, MemberExpr *member, ClassDecl *cls, llvm::StringRef name,
-                          llvm::ArrayRef<const Type *> bound, const std::vector<bool> *given,
-                          bool super);
+  Expr *checkEmitterCall(CallExpr *call, MemberExpr *member, ClassDecl *classDecl, bool super);
+  Expr *callLibraryMethod(CallExpr *call, MemberExpr *member, ClassDecl *classDecl,
+                          llvm::StringRef name, llvm::ArrayRef<const Type *> bound,
+                          const std::vector<bool> *given, bool super);
   void reportEmitterMethodValue(MemberExpr *member);
   Expr *checkEmitterNew(NewExpr *expr, ClassDecl *generic, const Type *expected);
   void finishSentEmits();
@@ -39,7 +41,7 @@ public:
   void noteErrorsHandled(const Expr *emitter);
   bool classifyListener(Expr *arg, const Expr *emitter, int &bits, bool timer = false);
   bool ownsEmitter(const Expr *emitter) const;
-  static bool canReceive(const Type *type);
+  bool canReceive(const Type *type) const;
 
 private:
   enum class EmitterMethod {
@@ -78,16 +80,16 @@ private:
     std::vector<const VarSymbol *> captured;
   };
 
-  static ListenerShape listenerShape(Expr *e);
-  static ListenerShape closureShape(FunctionDecl *fn);
-  static ListenerShape functionShape(FunctionDecl *fn);
+  ListenerShape listenerShape(Expr *expr) const;
+  ListenerShape closureShape(FunctionDecl *functionDecl) const;
+  ListenerShape functionShape(FunctionDecl *functionDecl) const;
   bool addListenerReceiver(const ListenerShape &shape, bool topLevel, int &bits);
   bool reportsUnknownListener(const Expr *arg, bool timer);
   bool reportsCapturesKept(const Expr *arg, const std::vector<const VarSymbol *> &captured,
                            bool timer);
-  static EmitterMethod emitterMethod(llvm::StringRef name);
-  static std::optional<std::string> chainText(const Expr *expr);
-  static std::optional<std::string> rootText(const Expr *expr);
+  EmitterMethod emitterMethod(llvm::StringRef name) const;
+  std::optional<std::string> chainText(const Expr *expr) const;
+  std::optional<std::string> rootText(const Expr *expr) const;
 
   void noteListener(MemberExpr *member, const Type *events, llvm::StringRef event);
   void walkLooseArgs(CallExpr *call, size_t from);
@@ -117,11 +119,13 @@ private:
   EventMaps *eventMaps = nullptr;
   FieldFacts *fieldFacts = nullptr;
   TypeParams *typeParams = nullptr;
+  ClassLinks *classLinks = nullptr;
   CallChecker *callChecker = nullptr;
   ExprChecker *exprChecker = nullptr;
   LibraryCalls *libraryCalls = nullptr;
   TypeResolver *typeResolver = nullptr;
   TypeRelations *typeRelations = nullptr;
+  ClassDeclarer *classDeclarer = nullptr;
   ReturnInferrer *returnInferrer = nullptr;
   ArgumentChecker *argumentChecker = nullptr;
   EventMapInference *eventMapInference = nullptr;

@@ -5,7 +5,6 @@
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 
 namespace tz {
 
@@ -15,27 +14,40 @@ AssignedFields::AssignedFields(SemanticState &owner, SemanticParts &all)
 }
 
 void AssignedFields::rememberAssigned(SourceFile &program) {
-  PlacedNodes nodes = PlacedNodes::collect(program.items, {});
+  auto nodes = PlacedNodes::collect(program.items, {});
   for (const PlacedExpr &placed : nodes.getExprs()) {
     this->rememberTarget(placed.expr);
   }
 }
 
 void AssignedFields::rememberTarget(const Expr *expr) {
-  const Expr *target = nullptr;
-  if (auto *assign = dyn_cast<AssignExpr>(expr)) {
-    target = assign->target;
-  } else if (auto *update = dyn_cast<UpdateExpr>(expr)) {
-    target = update->target;
+  const Expr *target = this->changedTarget(expr);
+  if (target == nullptr) {
+    return;
   }
-  auto markAssigned = [&](llvm::StringRef name) {
-    this->state.getFlowState().markFieldAssigned(name);
-  };
-  if (auto *member = dyn_cast_or_null<MemberExpr>(target)) {
-    markAssigned(member->name);
-  } else if (auto *index = dyn_cast_or_null<IndexExpr>(target)) {
-    this->keyedFieldChecker->keyNames(index->index, markAssigned);
+  auto *member = dyn_cast<MemberExpr>(target);
+  auto *index = dyn_cast<IndexExpr>(target);
+  if (member != nullptr) {
+    this->state.getFlowState().markFieldAssigned(member->name);
   }
+  if (index != nullptr) {
+    for (const std::string &name : this->keyedFieldChecker->keyNames(index->index)) {
+      this->state.getFlowState().markFieldAssigned(name);
+    }
+  }
+}
+
+const Expr *AssignedFields::changedTarget(const Expr *expr) const {
+  auto *assign = dyn_cast<AssignExpr>(expr);
+  auto *update = dyn_cast<UpdateExpr>(expr);
+  if (assign != nullptr) {
+    return assign->target;
+  }
+  if (update != nullptr) {
+    return update->target;
+  }
+
+  return nullptr;
 }
 
 }

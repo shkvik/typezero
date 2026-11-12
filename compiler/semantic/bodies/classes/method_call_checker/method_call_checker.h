@@ -7,6 +7,8 @@
 
 namespace tz {
 
+class ClassLinks;
+class ClassBases;
 class SemanticParts;
 class EventMaps;
 class FsDeclarer;
@@ -30,7 +32,7 @@ class MethodCallChecker {
 public:
   MethodCallChecker(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkClassNew(NewExpr *expr, ClassDecl *cls, const Type *expected = nullptr);
+  Expr *checkClassNew(NewExpr *expr, ClassDecl *classDecl, const Type *expected = nullptr);
   Expr *checkMethodCall(CallExpr *call, MemberExpr *member, const Type *expected = nullptr);
 
 private:
@@ -45,30 +47,33 @@ private:
   using ResultMethodsAreFound =
       Result<std::vector<FunctionDecl *>, MethodCallCheckerInstanceMethodsError>;
 
-  ResultClassNotRuntime notRuntime(const ClassDecl *cls) const;
-  ResultClassIsDeclared classDeclared(const ClassDecl *cls) const;
+  ResultClassNotRuntime notRuntime(const ClassDecl *classDecl) const;
+  ResultClassIsDeclared classDeclared(const ClassDecl *classDecl) const;
   ResultFieldsAreAllSet fieldsSet(const MemberExpr *member) const;
-  static ResultClassIsConcrete classConcrete(const ClassDecl *cls);
-  static ResultFieldIsCallable fieldCallable(const Type *type, llvm::StringRef name);
-  static ResultNoTypeArguments classTypeArgs(const NewExpr *expr, const ClassDecl *cls);
-  static ResultArgumentsAbsent argumentsAbsent(const CallExpr *call, const ClassDecl *cls);
-  static ResultMethodsAreFound instanceMethods(const ClassDecl *cls, llvm::StringRef name);
-  static ResultTypeArgsAllowed methodTypeArgs(const FuncSymbol *sym, const MemberExpr *member);
-  Expr *checkLibraryMethodCall(CallExpr *call, MemberExpr *member, ClassDecl *cls);
+  ResultClassIsConcrete classConcrete(const ClassDecl *classDecl) const;
+  ResultFieldIsCallable fieldCallable(const Type *type, llvm::StringRef name) const;
+  ResultNoTypeArguments classTypeArgs(const NewExpr *expr, const ClassDecl *classDecl) const;
+  ResultArgumentsAbsent argumentsAbsent(const CallExpr *call, const ClassDecl *classDecl) const;
+  ResultMethodsAreFound instanceMethods(const ClassDecl *classDecl, llvm::StringRef name) const;
+  ResultTypeArgsAllowed methodTypeArgs(const FuncSymbol *function, const MemberExpr *member) const;
+  Expr *checkLibraryMethodCall(CallExpr *call, MemberExpr *member, ClassDecl *classDecl);
   Expr *checkFieldCall(CallExpr *call, MemberExpr *member);
   void walkMethodAccess(MemberExpr *member, FunctionDecl *method);
-  Expr *checkGenericMethodCall(CallExpr *call, MemberExpr *member, FuncSymbol *sym,
+  Expr *checkGenericMethodCall(CallExpr *call, MemberExpr *member, FuncSymbol *function,
                                const Type *expected);
-  Expr *checkPlainMethodCall(CallExpr *call, MemberExpr *member, ClassDecl *cls, FuncSymbol *sym,
-                             bool checked);
-  void walkNewClass(const NewExpr *expr, const ClassDecl *cls);
-  bool noArgumentsFit(const NewExpr *expr, CallExpr *call, const ClassDecl *cls);
-  bool constructorChosen(const NewExpr *expr, CallExpr *call, llvm::ArrayRef<FunctionDecl *> ctors);
-  static bool hasInitializer(const ClassDecl *cls);
+  Expr *checkPlainMethodCall(CallExpr *call, MemberExpr *member, ClassDecl *classDecl,
+                             FuncSymbol *function, bool checked);
+  void walkNewClass(const NewExpr *expr, const ClassDecl *classDecl);
+  bool noArgumentsFit(const NewExpr *expr, CallExpr *call, const ClassDecl *classDecl);
+  bool constructorChosen(const NewExpr *expr, CallExpr *call,
+                         llvm::ArrayRef<FunctionDecl *> constructors);
+  bool hasInitializer(const ClassDecl *classDecl) const;
 
   SemanticState &state;
   EventMaps *eventMaps = nullptr;
   FsDeclarer *fsDeclarer = nullptr;
+  ClassLinks *classLinks = nullptr;
+  ClassBases *classBases = nullptr;
   CallChecker *callChecker = nullptr;
   ExprChecker *exprChecker = nullptr;
   FlowChecker *flowChecker = nullptr;

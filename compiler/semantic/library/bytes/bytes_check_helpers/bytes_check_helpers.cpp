@@ -14,7 +14,7 @@ using llvm::isa;
 namespace tz {
 
 Range BytesCheckHelpers::operateWide(BinaryOp op, const Range &a, const Range &b, bool isInt) {
-  std::optional<int64_t> count = BytesCheckHelpers::exactValue(b);
+  auto count = BytesCheckHelpers::exactValue(b);
   switch (op) {
     case BinaryOp::BitAnd:
       return BytesCheckHelpers::bitAndRange(a, b);
@@ -92,9 +92,9 @@ Range BytesCheckHelpers::bitOrRange(BinaryOp op, const Range &a, const Range &b)
   if (!isNatural) {
     return {};
   }
-  int64_t lo = op == BinaryOp::BitOr ? std::max(*a.lo, *b.lo) : 0;
+  int64_t low = op == BinaryOp::BitOr ? std::max(*a.lo, *b.lo) : 0;
 
-  return {lo, BytesCheckHelpers::allOnes(std::max(*a.hi, *b.hi))};
+  return {low, BytesCheckHelpers::allOnes(std::max(*a.hi, *b.hi))};
 }
 
 Range BytesCheckHelpers::shiftLeftRange(const Range &a, std::optional<int64_t> count, bool isInt) {
@@ -200,8 +200,8 @@ Range BytesCheckHelpers::openSumRange(BinaryOp op, const Range &a, const Range &
 Range BytesCheckHelpers::cornersRange(BinaryOp op, const Range &a, const Range &b) {
   int64_t xs[2] = {*a.lo, *a.hi};
   int64_t ys[2] = {*b.lo, *b.hi};
-  int64_t lo = std::numeric_limits<int64_t>::max();
-  int64_t hi = std::numeric_limits<int64_t>::min();
+  int64_t low = std::numeric_limits<int64_t>::max();
+  int64_t high = std::numeric_limits<int64_t>::min();
   for (int64_t x : xs) {
     for (int64_t y : ys) {
       int64_t v = 0;
@@ -211,12 +211,12 @@ Range BytesCheckHelpers::cornersRange(BinaryOp op, const Range &a, const Range &
       if (isOverflow) {
         return {};
       }
-      lo = std::min(lo, v);
-      hi = std::max(hi, v);
+      low = std::min(low, v);
+      high = std::max(high, v);
     }
   }
 
-  return Range{lo, hi};
+  return Range{low, high};
 }
 
 bool BytesCheckHelpers::known(const Range &r) {
@@ -252,10 +252,10 @@ std::optional<int> BytesCheckHelpers::encodingNamed(llvm::StringRef name) {
   return std::nullopt;
 }
 
-std::string BytesCheckHelpers::valueText(const Expr *e) {
-  std::vector<std::string> answers;
-  for (const Expr *node : ChildrenFirst::order(e, BytesCheckHelpers::valueParts)) {
-    std::string text = BytesCheckHelpers::nodeValueText(node, answers);
+std::string BytesCheckHelpers::valueText(const Expr *expr) {
+  auto answers = std::vector<std::string>();
+  for (const Expr *node : ChildrenFirst::order(expr, BytesCheckHelpers::valueParts)) {
+    auto text = BytesCheckHelpers::nodeValueText(node, answers);
     if (text == "x") {
       return text;
     }
@@ -265,31 +265,37 @@ std::string BytesCheckHelpers::valueText(const Expr *e) {
   return answers.back();
 }
 
-NodeChildren<const Expr *> BytesCheckHelpers::valueParts(const Expr *e) {
-  if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
-    return {conv->operand};
+NodeChildren<const Expr *> BytesCheckHelpers::valueParts(const Expr *expr) {
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  if (conversion != nullptr && conversion->isImplicit()) {
+    return {conversion->operand};
   }
-  if (auto *index = dyn_cast<IndexExpr>(e)) {
+  auto *index = dyn_cast<IndexExpr>(expr);
+  if (index != nullptr) {
     return {index->object, index->index};
   }
 
   return {};
 }
 
-std::string BytesCheckHelpers::nodeValueText(const Expr *e, std::vector<std::string> &answers) {
-  if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
+std::string BytesCheckHelpers::nodeValueText(const Expr *expr, std::vector<std::string> &answers) {
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  if (conversion != nullptr && conversion->isImplicit()) {
     return ChildrenFirst::takeAnswer(answers);
   }
-  if (auto *name = dyn_cast<NameExpr>(e)) {
+  auto *name = dyn_cast<NameExpr>(expr);
+  if (name != nullptr) {
     return name->name.str();
   }
-  if (auto *lit = dyn_cast<IntLitExpr>(e)) {
-    return std::to_string(lit->value);
+  auto *literal = dyn_cast<IntLitExpr>(expr);
+  if (literal != nullptr) {
+    return std::to_string(literal->value);
   }
-  if (auto *bin = dyn_cast<BinaryExpr>(e); bin && !bin->source.empty()) {
-    return "(" + bin->source.str() + ")";
+  auto *binary = dyn_cast<BinaryExpr>(expr);
+  if (binary != nullptr && !binary->source.empty()) {
+    return "(" + binary->source.str() + ")";
   }
-  if (llvm::isa<IndexExpr>(e)) {
+  if (llvm::isa<IndexExpr>(expr)) {
     std::string position = ChildrenFirst::takeAnswer(answers);
     std::string object = ChildrenFirst::takeAnswer(answers);
     return object + "[" + position + "]";
@@ -316,7 +322,7 @@ std::string BytesCheckHelpers::wrapHint(Bytes kind, const std::string &value) {
 }
 
 Range BytesCheckHelpers::operate(BinaryOp op, const Range &a, const Range &b, bool isInt) {
-  Range r = BytesCheckHelpers::operateWide(op, a, b, isInt);
+  auto r = BytesCheckHelpers::operateWide(op, a, b, isInt);
   bool isBitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor ||
                    op == BinaryOp::Shl || op == BinaryOp::Shr;
   if (isInt && isBitwise && !BytesCheckHelpers::known(r)) {

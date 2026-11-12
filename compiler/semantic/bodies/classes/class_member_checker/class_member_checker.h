@@ -2,11 +2,14 @@
 
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/bodies/classes/class_member_checker/class_member_checker_errors.h"
+#include "compiler/semantic/bodies/expr/target_checker/target_checker_types.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 #include <vector>
 
 namespace tz {
 
+class ClassLinks;
+class ClassBases;
 class SemanticParts;
 class EventMaps;
 class FieldFacts;
@@ -28,9 +31,9 @@ public:
   ClassMemberChecker(SemanticState &owner, SemanticParts &all);
 
   Expr *checkClassMember(MemberExpr *member, const Type *expected);
-  const Type *checkFieldTarget(MemberExpr *member, bool compound = false);
-  ResultMemberAccessible checkAccess(const ClassDecl *cls, Access access, llvm::StringRef name,
-                                     const Expr *receiver = nullptr);
+  const Type *checkFieldTarget(MemberExpr *member, AssignForm form = AssignForm::PLAIN);
+  ResultMemberAccessible checkAccess(const ClassDecl *classDecl, Access access,
+                                     llvm::StringRef name, const Expr *receiver = nullptr);
 
 private:
   using ResultFieldTypeIsKnown = Result<const Type *, ClassMemberCheckerFieldTypedError>;
@@ -45,24 +48,27 @@ private:
 
   Expr *checkFieldMember(MemberExpr *member, const ClassField *field, const ClassDecl *owner,
                          bool viaThis);
-  Expr *checkMethodMember(MemberExpr *member, ClassDecl *cls, const Type *expected, bool viaThis);
-  static const char *accessWord(Access access);
-  static bool sameClass(const ClassDecl *a, const ClassDecl *b);
-  ResultStoredFieldValue statsDate(ClassDecl *cls, MemberExpr *member);
+  Expr *checkMethodMember(MemberExpr *member, ClassDecl *classDecl, const Type *expected,
+                          bool viaThis);
+  const char *accessWord(Access access) const;
+  bool sameClass(const ClassDecl *a, const ClassDecl *b) const;
+  ResultStoredFieldValue statsDate(ClassDecl *classDecl, MemberExpr *member);
   ResultObjectReadyToUse objectReady(bool viaThis, llvm::StringRef name) const;
-  static ResultPlainMethodValue methodValue(const FuncSymbol *sym, llvm::StringRef name);
-  static ResultFieldTypeIsKnown fieldTyped(const ClassField *field, llvm::StringRef name);
-  static ResultMethodsOfObjects instanceMethods(const ClassDecl *cls, llvm::StringRef name);
+  ResultPlainMethodValue methodValue(const FuncSymbol *function, llvm::StringRef name) const;
+  ResultFieldTypeIsKnown fieldTyped(const ClassField *field, llvm::StringRef name) const;
+  ResultMethodsOfObjects instanceMethods(const ClassDecl *classDecl, llvm::StringRef name) const;
   ResultFieldIsSetBefore fieldSet(const ClassDecl *owner, llvm::StringRef name, bool viaThis) const;
   ResultFieldNotReadOnly fieldWritable(const ClassField *field, const ClassDecl *owner,
                                        bool viaThis, const Type *type) const;
-  static ResultAssignableMember assignableField(const ClassField *field, const ClassDecl *cls,
-                                                llvm::StringRef name, const Type *type);
+  ResultAssignableMember assignableField(const ClassField *field, const ClassDecl *classDecl,
+                                         llvm::StringRef name, const Type *type) const;
 
   SemanticState &state;
   EventMaps *eventMaps = nullptr;
   FieldFacts *fieldFacts = nullptr;
   FsDeclarer *fsDeclarer = nullptr;
+  ClassLinks *classLinks = nullptr;
+  ClassBases *classBases = nullptr;
   ClassChecker *classChecker = nullptr;
   LibraryCalls *libraryCalls = nullptr;
   ClassDeclarer *classDeclarer = nullptr;

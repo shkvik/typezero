@@ -30,9 +30,9 @@ private:
   using ResultSpreadRestFits = Result<const Expr *, ArgumentCheckerSpreadRestError>;
   using ResultTupleRestCount = Result<const Expr *, ArgumentCheckerTupleRestError>;
 
-  static ResultSpreadRestFits spreadRest(const Expr *arg, const Type *to);
-  static ResultTupleRestCount tupleRest(const ArrayLitExpr *rest, const Type *listRest,
-                                        size_t fixed, size_t count);
+  ResultSpreadRestFits checkRestType(const Expr *arg, const Type *to) const;
+  ResultTupleRestCount checkTupleRestCount(const ArrayLitExpr *rest, const Type *listRest,
+                                           size_t fixed, size_t count) const;
 
   struct ArgumentShape {
     llvm::ArrayRef<const Type *> params;
@@ -41,14 +41,17 @@ private:
     const std::vector<bool> *checked;
   };
 
-  static bool isChecked(const ArgumentShape &shape, size_t i);
+  Expr *typedArgument(const ArgumentShape &shape, Expr *arg, size_t index);
+  bool isChecked(const ArgumentShape &shape, size_t index) const;
   bool rejectsSpreadBefore(CallExpr *call, size_t limit);
   Expr *checkListParamArguments(CallExpr *call, const ArgumentShape &shape, unsigned least);
   Expr *packRestArgs(CallExpr *call, const ArgumentShape &shape);
   Expr *checkSpreadRest(CallExpr *call, const ArgumentShape &shape, const Type *listRest);
   Expr *packRestElements(CallExpr *call, const ArgumentShape &shape, const Type *listRest);
-  Expr *checkedRestElement(CallExpr *call, size_t i, const ArgumentShape &shape,
+  void replaceRestArgs(CallExpr *call, size_t fixed, ArrayLitExpr *rest);
+  Expr *checkedRestElement(CallExpr *call, size_t index, const ArgumentShape &shape,
                            const Type *listRest);
+  const Type *restElementType(size_t index, const ArgumentShape &shape, const Type *listRest) const;
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

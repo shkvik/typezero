@@ -22,9 +22,9 @@ private:
   using ResultSpreadableArg = Result<const Expr *, ConsoleCheckerSpreadableError>;
   using ResultConsoleMethod = Result<const MemberExpr *, ConsoleCheckerConsoleMethodError>;
 
-  static ResultPrintableItem printable(const Expr *arg);
-  static ResultConsoleMethod consoleMethod(const MemberExpr *member);
-  static ResultSpreadableArg spreadable(const CallExpr *call, size_t i);
+  ResultPrintableItem printable(const Expr *arg) const;
+  ResultConsoleMethod consoleMethod(const MemberExpr *member) const;
+  ResultSpreadableArg spreadable(const CallExpr *call, size_t index) const;
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

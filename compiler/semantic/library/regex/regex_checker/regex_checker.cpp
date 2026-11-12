@@ -7,6 +7,7 @@
 #include "compiler/semantic/bodies/objects/object_checker/object_checker.h"
 #include "compiler/semantic/bodies/stmt/var_checker/var_checker.h"
 #include "compiler/semantic/declare/prelude/prelude.h"
+#include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
 #include "compiler/semantic/library/process/process_checker/process_checker.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -23,6 +24,7 @@ namespace tz {
 RegexChecker::RegexChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->prelude = &all.prelude;
+  this->varChecker = &all.varChecker;
   this->callChecker = &all.callChecker;
   this->exprChecker = &all.exprChecker;
   this->objectChecker = &all.objectChecker;
@@ -31,8 +33,8 @@ RegexChecker::RegexChecker(SemanticState &owner, SemanticParts &all)
   this->argumentChecker = &all.argumentChecker;
 }
 
-std::u16string RegexChecker::units(const uint32_t *program, uint32_t start, uint32_t length) {
-  std::u16string text;
+std::u16string RegexChecker::units(const uint32_t *program, uint32_t start, uint32_t length) const {
+  auto text = std::u16string();
   for (uint32_t i = 0; i < length; ++i) {
     text += static_cast<char16_t>(tz_re_name_unit(program, start, i));
   }
@@ -40,7 +42,7 @@ std::u16string RegexChecker::units(const uint32_t *program, uint32_t start, uint
   return text;
 }
 
-bool RegexChecker::isFlag(llvm::StringRef name, uint32_t &flag) {
+bool RegexChecker::isFlag(llvm::StringRef name, uint32_t &flag) const {
   static const std::pair<llvm::StringLiteral, uint32_t> flags[] = {
       {"hasIndices", TZ_RE_HAS_INDICES},   {"global", TZ_RE_GLOBAL},
       {"ignoreCase", TZ_RE_IGNORE_CASE},   {"multiline", TZ_RE_MULTILINE},
@@ -57,12 +59,12 @@ bool RegexChecker::isFlag(llvm::StringRef name, uint32_t &flag) {
   return false;
 }
 
-RegexChecker::ResultParsedFlags RegexChecker::parsedFlags(const std::u16string &flags) {
+RegexChecker::ResultParsedFlags RegexChecker::parsedFlags(const std::u16string &flags) const {
   std::vector<uint16_t> flagUnits(flags.begin(), flags.end());
   uint32_t parsed = 0;
   if (!tz_re_parse_flags(flagUnits.data(), flagUnits.size(), &parsed)) {
-    std::string written = ToUtf8::toUtf8(flags);
-    std::string message = ErrorTextRegexFlags::invalid(written);
+    auto written = ToUtf8::toUtf8(flags);
+    auto message = ErrorTextRegexFlags::invalid(written);
 
     return err(RegexCheckerParsedFlagsError{
         .code = RegexCheckerParsedFlagsErrorCode::INVALID_FLAGS,
@@ -73,26 +75,27 @@ RegexChecker::ResultParsedFlags RegexChecker::parsedFlags(const std::u16string &
   return ok(parsed);
 }
 
-Expr *RegexChecker::checkRegexLit(RegexLitExpr *lit) {
-  lit->type = Type::regExp();
-  llvm::StringRef source(lit->loc().getPointer(), lit->written);
-  ResultParsedFlags parsed = RegexChecker::parsedFlags(lit->flags);
+Expr *RegexChecker::checkRegexLit(RegexLitExpr *literal) {
+  literal->type = Type::regExp();
+  llvm::StringRef source(literal->loc().getPointer(), literal->written);
+  auto parsed = this->parsedFlags(literal->flags);
   if (parsed.isErr()) {
     llvm::SMLoc at =
-        lit->written ? llvm::SMLoc::getFromPointer(source.end() - ToUtf8::toUtf8(lit->flags).size())
-                     : lit->loc();
+        literal->written
+            ? llvm::SMLoc::getFromPointer(source.end() - ToUtf8::toUtf8(literal->flags).size())
+            : literal->loc();
     this->state.getDiagnostics().error(at, parsed.error().message);
-    return lit;
+    return literal;
   }
   uint32_t flags = parsed.value();
-  std::vector<uint16_t> pattern(lit->pattern.begin(), lit->pattern.end());
+  std::vector<uint16_t> pattern(literal->pattern.begin(), literal->pattern.end());
   const char *error = nullptr;
   size_t errorAt = 0;
   uint32_t *program =
       tz_re_compile(pattern.data(), pattern.size(), flags | TZ_RE_STRICT, &error, &errorAt);
-  if (!program) {
-    llvm::SMLoc at = lit->loc();
-    if (lit->written) {
+  if (program == nullptr) {
+    llvm::SMLoc at = literal->loc();
+    if (literal->written) {
       const char *p = source.begin() + 1;
       for (size_t units = 0; units < errorAt && p < source.end();) {
         unsigned char lead = static_cast<unsigned char>(*p);
@@ -102,54 +105,51 @@ Expr *RegexChecker::checkRegexLit(RegexLitExpr *lit) {
       }
       at = llvm::SMLoc::getFromPointer(p);
     }
-    std::string message = ErrorTextRegexLit::invalid(error);
+    auto message = ErrorTextRegexLit::invalid(error);
     this->state.getDiagnostics().error(at, message);
-    return lit;
+    return literal;
   }
-  lit->program.assign(program, program + program[TZ_RE_H_SIZE]);
+  literal->program.assign(program, program + program[TZ_RE_H_SIZE]);
   tz_re_free(program);
 
-  return lit;
+  return literal;
 }
 
-const RegexLitExpr *RegexChecker::knownRegex(const Expr *expr) {
-  while (auto *conv = dyn_cast<CastExpr>(expr)) {
-    if (!conv->isImplicit()) {
-      break;
-    }
-    expr = conv->operand;
+const RegexLitExpr *RegexChecker::knownRegex(const Expr *expr) const {
+  expr = ExprParts::withoutImplicitCasts(expr);
+  auto *literal = dyn_cast<RegexLitExpr>(expr);
+  if (literal != nullptr) {
+    return literal->program.empty() ? nullptr : literal;
   }
-  if (auto *lit = dyn_cast<RegexLitExpr>(expr)) {
-    return lit->program.empty() ? nullptr : lit;
-  }
-  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var()) {
+  auto *name = dyn_cast<NameExpr>(expr);
+  if (name != nullptr && name->var() != nullptr) {
     return name->var()->regex();
   }
 
   return nullptr;
 }
 
-void RegexChecker::noteRegexVariable(VarSymbol *var, const Expr *init, bool isConst,
+void RegexChecker::noteRegexVariable(VarSymbol *variable, const Expr *init, bool isConst,
                                      llvm::ArrayRef<Stmt *> block, size_t index) {
-  auto *lit = llvm::dyn_cast_or_null<RegexLitExpr>(init);
-  if (!lit || lit->program.empty()) {
+  auto *literal = llvm::dyn_cast_or_null<RegexLitExpr>(init);
+  if (literal == nullptr || literal->program.empty()) {
     return;
   }
   if (!isConst) {
     if (block.empty()) {
       return;
     }
-    std::vector<const Stmt *> following = VarChecker::followingStatements(block, index);
-    bool isAssigned = RegexChecker::assignsName(following, var->name);
+    auto following = this->varChecker->followingStatements(block, index);
+    bool isAssigned = this->assignsName(following, variable->name);
     if (isAssigned) {
       return;
     }
   }
-  var->holds = RegexLiteral{.regex = lit};
+  variable->holds = RegexLiteral{.regex = literal};
 }
 
-bool RegexChecker::assignsName(llvm::ArrayRef<const Stmt *> stmts, llvm::StringRef name) {
-  PlacedNodes nodes = PlacedNodes::collect(stmts, {});
+bool RegexChecker::assignsName(llvm::ArrayRef<const Stmt *> stmts, llvm::StringRef name) const {
+  auto nodes = PlacedNodes::collect(stmts, {});
   for (const PlacedExpr &placed : nodes.getExprs()) {
     auto *assign = dyn_cast<AssignExpr>(placed.expr);
     auto *target = assign != nullptr ? dyn_cast<NameExpr>(assign->target) : nullptr;
@@ -162,7 +162,7 @@ bool RegexChecker::assignsName(llvm::ArrayRef<const Stmt *> stmts, llvm::StringR
 }
 
 const Type *RegexChecker::matchType(const RegexLitExpr *regex) {
-  if (!regex) {
+  if (regex == nullptr) {
     return Type::match(-1, {}, nullptr, false);
   }
   const uint32_t *program = regex->program.data();
@@ -171,14 +171,14 @@ const Type *RegexChecker::matchType(const RegexLitExpr *regex) {
   for (uint32_t k = 0; k < captures; ++k) {
     mandatory[k] = tz_re_mandatory(program, k);
   }
-  std::vector<Field> fields;
+  auto fields = std::vector<Field>();
   for (uint32_t k = 1; k < captures; ++k) {
     uint32_t start, length = tz_re_name(program, k, &start);
     if (!length) {
       continue;
     }
-    std::string name = ToUtf8::toUtf8(RegexChecker::units(program, start, length));
-    if (llvm::any_of(fields, [&](const Field &f) { return f.name == name; })) {
+    auto name = ToUtf8::toUtf8(this->units(program, start, length));
+    if (llvm::any_of(fields, [&](const Field &field) { return field.name == name; })) {
       continue;
     }
     const Type *type =
@@ -200,22 +200,22 @@ Expr *RegexChecker::regexToString(Expr *regex) {
 
 Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
-  const RegexLitExpr *regex = RegexChecker::knownRegex(member->object);
+  const auto *regex = this->knownRegex(member->object);
   call->regex = regex;
   call->type = Type::error();
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
   if (name == "test" || name == "exec") {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 1, 1);
+    auto arity = this->argumentChecker->checkArity(call, 1, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
     }
     call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
-    uint32_t flags = regex ? tz_re_flags(regex->program.data()) : 0;
+    uint32_t flags = regex != nullptr ? tz_re_flags(regex->program.data()) : 0;
     if (name == "test" && (flags & TZ_RE_GLOBAL)) {
-      std::string message = ErrorTextRegexMethod::testG();
+      auto message = ErrorTextRegexMethod::testG();
       this->state.getDiagnostics().error(member->loc(), message);
       return call;
     }
@@ -225,7 +225,7 @@ Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "toString") {
-    ArgumentChecker::ResultArityMatches arity = this->argumentChecker->checkArity(call, 0, 0);
+    auto arity = this->argumentChecker->checkArity(call, 0, 0);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
       return call;
@@ -248,7 +248,7 @@ Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
 Expr *RegexChecker::checkRegexMember(MemberExpr *member) {
   llvm::StringRef name = member->name;
   if (name == "lastIndex") {
-    ObjectChecker::ResultObjectFieldValue field = this->objectChecker->checkField(member);
+    auto field = this->objectChecker->checkField(member);
     if (field.isErr()) {
       this->state.getDiagnostics().error(member->loc(), field.error().message);
       return member;
@@ -264,13 +264,13 @@ Expr *RegexChecker::checkRegexMember(MemberExpr *member) {
                                              Type::string());
   }
   uint32_t flag;
-  if (RegexChecker::isFlag(name, flag)) {
+  if (this->isFlag(name, flag)) {
     auto *bit = this->state.getAst().make<IntLitExpr>(member->loc(), flag);
     bit->type = Type::intTy();
     return this->processChecker->builtinCall(member->loc(), member, Builtin::RegExpFlag, {bit},
                                              Type::boolTy());
   }
-  std::string message = ErrorTextRegexMethod::notCalled(name, name == "test" || name == "exec");
+  auto message = ErrorTextRegexMethod::notCalled(name, name == "test" || name == "exec");
   this->state.getDiagnostics().error(member->loc(), message);
   member->type = Type::error();
 
@@ -288,16 +288,17 @@ Expr *RegexChecker::checkRegExpConstructor(llvm::SMLoc loc, std::vector<Expr *> 
     return error;
   };
   if (args.empty() || args.size() > 2) {
-    std::string message = ErrorTextRegExpNew::arity(args.size());
+    auto message = ErrorTextRegExpNew::arity(args.size());
     this->state.getDiagnostics().error(loc, message);
     return loosely();
   }
-  auto literal = [](const Expr *e) -> std::optional<std::u16string> {
-    if (auto *lit = dyn_cast<StringLitExpr>(e)) {
-      return lit->value;
+  auto literal = [](const Expr *expr) -> std::optional<std::u16string> {
+    if (auto *literalExpr = dyn_cast<StringLitExpr>(expr)) {
+      return literalExpr->value;
     }
-    if (auto *tmpl = dyn_cast<TemplateExpr>(e); tmpl && tmpl->exprs.empty()) {
-      return tmpl->quasis[0];
+    auto *templateExpr = dyn_cast<TemplateExpr>(expr);
+    if (templateExpr != nullptr && templateExpr->exprs.empty()) {
+      return templateExpr->quasis[0];
     }
 
     return std::nullopt;
@@ -305,19 +306,19 @@ Expr *RegexChecker::checkRegExpConstructor(llvm::SMLoc loc, std::vector<Expr *> 
   std::optional<std::u16string> pattern = literal(args[0]);
   std::optional<std::u16string> flags = args.size() > 1 ? literal(args[1]) : std::u16string();
   if (pattern && flags) {
-    auto *lit = this->state.getAst().make<RegexLitExpr>(loc, *pattern, *flags);
-    return this->checkRegexLit(lit);
+    auto *literalExpr = this->state.getAst().make<RegexLitExpr>(loc, *pattern, *flags);
+    return this->checkRegexLit(literalExpr);
   }
   auto *escaped = dyn_cast<CallExpr>(args[0]);
-  auto *escape = escaped ? dyn_cast<MemberExpr>(escaped->callee) : nullptr;
-  bool isFromEscape = escape && escape->name == "escape" &&
+  auto *escape = escaped != nullptr ? dyn_cast<MemberExpr>(escaped->callee) : nullptr;
+  bool isFromEscape = escape != nullptr && escape->name == "escape" &&
                       this->callChecker->isGlobalName(escape->object, GlobalName::REG_EXP);
   if (!isFromEscape || !flags) {
-    std::string message = ErrorTextRegExpNew::unknown(args.size() > 1);
+    auto message = ErrorTextRegExpNew::unknown(args.size() > 1);
     this->state.getDiagnostics().error(loc, message);
     return loosely();
   }
-  ResultParsedFlags parsed = RegexChecker::parsedFlags(*flags);
+  auto parsed = this->parsedFlags(*flags);
   if (parsed.isErr()) {
     this->state.getDiagnostics().error(args[1]->loc(), parsed.error().message);
     return loosely();
@@ -336,8 +337,7 @@ Expr *RegexChecker::checkRegExpStatic(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   if (member->name == "parse") {
     bool isRejected = this->callChecker->rejectSpread(call);
-    ArgumentChecker::ResultArityMatches arity =
-        isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
+    auto arity = isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 2);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
     }
@@ -348,7 +348,7 @@ Expr *RegexChecker::checkRegExpStatic(CallExpr *call, MemberExpr *member) {
       arg = this->argumentChecker->checkArg(arg, Type::string());
     }
     call->target = BuiltinCall{.builtin = Builtin::RegExpParse};
-    call->type = Type::result(Type::regExp(), this->prelude->builtinType("RegexError"));
+    call->type = Type::result(Type::regExp(), this->prelude->builtinType(PreludeType::REGEX_ERROR));
     return call;
   }
   if (member->name != "escape") {
@@ -359,8 +359,7 @@ Expr *RegexChecker::checkRegExpStatic(CallExpr *call, MemberExpr *member) {
     return call;
   }
   bool isRejected = this->callChecker->rejectSpread(call);
-  ArgumentChecker::ResultArityMatches arity =
-      isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
+  auto arity = isRejected ? ok(call) : this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
   }

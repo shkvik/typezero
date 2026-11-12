@@ -7,6 +7,8 @@
 
 namespace tz {
 
+class FlowChecker;
+class Destination;
 class SemanticParts;
 class NewChecker;
 class CallChecker;
@@ -39,48 +41,53 @@ class ExprChecker {
 public:
   ExprChecker(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkExpr(Expr *expr, const Type *expected = nullptr, bool wraps = false);
-  Expr *checkExprKind(Expr *expr, const Type *expected, bool wraps);
-  Expr *checkSequence(SequenceExpr *seq, const Type *expected, bool wraps);
+  Expr *checkExpr(Expr *expr, const Type *expected = nullptr);
+  Expr *checkExprKind(Expr *expr, const Type *expected);
+  Expr *checkSequence(SequenceExpr *sequence, const Type *expected);
   Expr *checkOptionalChain(OptionalChainExpr *chain);
   Expr *chainLink(Expr *object);
+  Expr *shortCircuitLink(Expr *object, const Type *type);
 
 private:
   using ResultBranchesMatch = Result<Expr *, ExprCheckerCheckConditionalError>;
   using ResultCastSupported = Result<Expr *, ExprCheckerCheckCastError>;
 
-  ResultCastSupported checkCast(CastExpr *cast);
-  static ExprCheckerCheckCastErrorCode castProblem(const Expr *operand, const Type *to,
-                                                   bool arrayLiteral);
-  static std::string castMessage(ExprCheckerCheckCastErrorCode code, const Expr *operand,
-                                 const Type *to);
-  static std::string hintedCastMessage(const Expr *operand, const Type *to);
-  ResultBranchesMatch checkConditional(ConditionalExpr *cond, const Type *expected);
-  static std::optional<Signature> expectedSignature(const Type *expected);
+  ResultCastSupported checkCast(CastExpr *castExpr);
+  ExprCheckerCheckCastErrorCode castProblem(const Expr *operand, const Type *to,
+                                            bool isArrayLiteral) const;
+  std::string castMessage(ExprCheckerCheckCastErrorCode code, const Expr *operand,
+                          const Type *to) const;
+  std::string hintedCastMessage(const Expr *operand, const Type *to) const;
+  ResultBranchesMatch checkConditional(ConditionalExpr *conditional, const Type *expected);
+  std::optional<Signature> expectedSignature(const Type *expected) const;
   Expr *checkFunctionValue(Expr *expr, const Type *expected);
-  Expr *checkIntLiteral(IntLitExpr *lit, const Type *expected);
-  Expr *checkFloatLiteral(FloatLitExpr *lit, const Type *expected);
-  Expr *checkBoolLiteral(BoolLitExpr *lit, const Type *expected);
-  Expr *checkStringLiteral(StringLitExpr *lit, const Type *expected);
+  Expr *checkIntLiteral(IntLitExpr *literal, const Type *expected);
+  Expr *checkFloatLiteral(FloatLitExpr *literalExpr, const Type *expected);
+  Expr *checkBoolLiteral(BoolLitExpr *literalExpr, const Type *expected);
+  Expr *checkStringLiteral(StringLitExpr *literalExpr, const Type *expected);
   Expr *checkNameValue(NameExpr *name, const Type *expected);
   Expr *checkMemberValue(MemberExpr *member, const Type *expected);
   Expr *checkIndexValue(IndexExpr *index);
-  static llvm::SMLoc indexErrorLoc(const IndexExpr *index, MemberCheckerCheckIndexErrorCode code);
+  llvm::SMLoc indexErrorLoc(const IndexExpr *index, MemberCheckerCheckIndexErrorCode code) const;
   Expr *checkConditionalValue(ConditionalExpr *conditional, const Type *expected);
   Expr *checkCastValue(CastExpr *castExpr);
-  Expr *checkFunctionLiteral(FunctionExpr *fn, const Type *expected);
+  Expr *checkFunctionLiteral(FunctionExpr *functionExpr, const Type *expected);
 
   struct ConditionFlows {
     Flow whenTrue;
     Flow whenFalse;
   };
 
-  static bool waitsForOther(const Expr *branch);
-  static const Type *branchHint(const Expr *literal, const Expr *other, const Type *expected);
-  void walkElseFirst(ConditionalExpr *cond, const Type *expected, const ConditionFlows &flows);
-  void walkThenFirst(ConditionalExpr *cond, const Type *expected, const ConditionFlows &flows,
-                     bool elseWaitsOnly);
-  ResultBranchesMatch joinBranches(ConditionalExpr *cond);
+  bool isWaitingForOther(const Expr *branch) const;
+  const Type *elseHint(const ConditionalExpr *conditional, const Type *expected,
+                       bool isElseWaitingOnly) const;
+  const Type *failedBranchesType(const Type *thenType, const Type *elseType) const;
+  const Type *branchHint(const Expr *literal, const Expr *other, const Type *expected) const;
+  void walkElseFirst(ConditionalExpr *conditional, const Type *expected,
+                     const ConditionFlows &flows);
+  void walkThenFirst(ConditionalExpr *conditional, const Type *expected,
+                     const ConditionFlows &flows, bool isElseWaitingOnly);
+  ResultBranchesMatch joinBranches(ConditionalExpr *conditional);
 
   SemanticState &state;
   NewChecker *newChecker = nullptr;
@@ -88,6 +95,8 @@ private:
   JsonChecker *jsonChecker = nullptr;
   LateClasses *lateClasses = nullptr;
   NameChecker *nameChecker = nullptr;
+  FlowChecker *flowChecker = nullptr;
+  Destination *destination = nullptr;
   AsyncChecker *asyncChecker = nullptr;
   LiteralTypes *literalTypes = nullptr;
   RegexChecker *regexChecker = nullptr;

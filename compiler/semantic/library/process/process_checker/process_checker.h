@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/process/process_function_table/process_function_table.h"
 #include "compiler/program/library/process/process_member_table/process_member_table.h"
 #include "compiler/program/library/process/std_stream_member_table/std_stream_member_table.h"
 #include "compiler/result/result/result.h"
@@ -23,35 +24,53 @@ class ProcessChecker {
 public:
   ProcessChecker(SemanticState &owner, SemanticParts &all);
 
-  Expr *checkProcessCall(CallExpr *call, MemberExpr *member);
-  Expr *checkProcessMember(MemberExpr *member);
-  Expr *checkProcessEnvIndex(IndexExpr *index);
-  Expr *checkProcessAssign(AssignExpr *assign);
-  bool isProcessMember(const Expr *expr, llvm::StringRef name) const;
   Expr *checkExitCode(Expr *code);
+  Expr *checkProcessMember(MemberExpr *member);
+  Expr *checkProcessAssign(AssignExpr *assign);
+  Expr *checkProcessEnvIndex(IndexExpr *index);
+  Expr *checkProcessCall(CallExpr *call, MemberExpr *member);
+  bool isProcessMember(const Expr *expr, ProcessMember which) const;
   Expr *builtinCall(llvm::SMLoc loc, Expr *callee, Builtin builtin, std::vector<Expr *> args,
                     const Type *type);
 
 private:
   using ResultListenedSignal = Result<llvm::StringRef, ProcessCheckerListenedSignalError>;
 
-  static ResultListenedSignal listenedSignal(llvm::StringRef name, const std::u16string &event);
-  static std::u16string toUtf16(llvm::StringRef text);
+  ResultListenedSignal listenedSignal(llvm::StringRef name, const Expr *event) const;
 
-  Expr *checkSignalCall(CallExpr *call, MemberExpr *member);
-
-  static std::string processMemberMessage(llvm::StringRef name, std::optional<ProcessMember> found);
+  bool hasStreamLibrary() const;
+  bool hasSignalLibrary() const;
+  Expr *writtenChunk(Expr *chunk);
+  Expr *envValue(MemberExpr *member);
   void walkArgsLoosely(CallExpr *call);
-  Expr *checkExit(CallExpr *call, MemberExpr *member);
-  Expr *checkNextTick(CallExpr *call, MemberExpr *member);
-  Expr *checkStdStreamMember(MemberExpr *member, bool isStdout);
+  Expr *failedAssign(AssignExpr *assign);
+  Expr *checkProcessField(MemberExpr *member);
+  Expr *targetObject(const Expr *target) const;
+  bool isThrownEvent(const CallExpr *call) const;
+  Expr *rejectPerformanceMember(MemberExpr *member);
+  bool isStream(std::optional<ProcessMember> found) const;
+  bool isProperty(std::optional<ProcessMember> found) const;
+  Expr *checkExit(CallExpr *call, const MemberExpr *member);
   Expr *processValue(MemberExpr *member, ProcessMember found);
-  Expr *checkClockNow(CallExpr *call, MemberExpr *member, bool isDate);
-  bool hasRejectedArgs(CallExpr *call, MemberExpr *member, unsigned count);
-  Expr *checkStdStreamCall(CallExpr *call, MemberExpr *member, bool isStdout);
-  Expr *checkNoArgCall(CallExpr *call, MemberExpr *member, Builtin builtin, const Type *result);
+  bool isSubscribing(std::optional<ProcessMember> found) const;
+  bool isSignalMethod(std::optional<ProcessMember> found) const;
+  Expr *checkNextTick(CallExpr *call, const MemberExpr *member);
+  std::optional<ProcessMember> outputStream(const Expr *expr) const;
+  Expr *checkStdStreamMember(MemberExpr *member, ProcessMember stream);
+  Expr *checkFieldAssign(AssignExpr *assign, const MemberExpr *member);
+  Expr *rejectStreamAssign(AssignExpr *assign, const MemberExpr *stream);
+  Expr *rejectPerformanceCall(CallExpr *call, const MemberExpr *member);
+  bool hasRejectedArgs(CallExpr *call, const MemberExpr *member, unsigned count);
+  Expr *checkSignalCall(CallExpr *call, MemberExpr *member, ProcessMember method);
+  ProcessFunction signalFunction(ProcessMember method, const Type *listener) const;
+  Expr *checkStdStreamCall(CallExpr *call, const MemberExpr *member, ProcessMember stream);
+  std::string processMemberMessage(llvm::StringRef name, std::optional<ProcessMember> found) const;
   Expr *checkProcessListenerCall(CallExpr *call, MemberExpr *member,
                                  std::optional<ProcessMember> found);
+  Expr *checkClockNow(CallExpr *call, const MemberExpr *member, Builtin builtin,
+                      const Type *result);
+  Expr *checkNoArgCall(CallExpr *call, const MemberExpr *member, Builtin builtin,
+                       const Type *result);
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

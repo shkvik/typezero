@@ -11,7 +11,7 @@ CryptoExports::ResultExportFound CryptoExports::cryptoExport(llvm::StringRef nam
     return ok(name);
   }
   if (name == "webcrypto") {
-    std::string message = ErrorTextCryptoExport::webcrypto(name, path);
+    auto message = ErrorTextCryptoExport::webcrypto(name, path);
 
     return err(ModuleExportFoundError{
         .code = ModuleExportFoundErrorCode::ELSEWHERE,
@@ -19,7 +19,7 @@ CryptoExports::ResultExportFound CryptoExports::cryptoExport(llvm::StringRef nam
     });
   }
   if (name == "subtle") {
-    std::string message = ErrorTextCryptoExport::subtle(name, path);
+    auto message = ErrorTextCryptoExport::subtle(name, path);
 
     return err(ModuleExportFoundError{
         .code = ModuleExportFoundErrorCode::ELSEWHERE,
@@ -27,14 +27,14 @@ CryptoExports::ResultExportFound CryptoExports::cryptoExport(llvm::StringRef nam
     });
   }
   if (llvm::is_contained(kExports, name)) {
-    std::string message = ErrorTextModuleExport::notYet(name, path);
+    auto message = ErrorTextModuleExport::notYet(name, path);
 
     return err(ModuleExportFoundError{
         .code = ModuleExportFoundErrorCode::NOT_YET,
         .message = message,
     });
   }
-  std::string message = ErrorTextModuleExport::none(path, name);
+  auto message = ErrorTextModuleExport::none(path, name);
 
   return err(ModuleExportFoundError{
       .code = ModuleExportFoundErrorCode::NO_EXPORT,
@@ -49,7 +49,7 @@ CryptoExports::ResultExportFound CryptoExports::tzCryptoExport(llvm::StringRef n
       return ok(name);
     }
   }
-  std::string message = ErrorTextModuleExport::none(path, name);
+  auto message = ErrorTextModuleExport::none(path, name);
 
   return err(ModuleExportFoundError{
       .code = ModuleExportFoundErrorCode::NO_EXPORT,

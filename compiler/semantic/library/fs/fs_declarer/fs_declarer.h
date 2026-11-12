@@ -14,12 +14,12 @@ public:
   FsDeclarer(SemanticState &owner, SemanticParts &all);
 
   void declareFsClasses();
-  Expr *checkFsClassMethod(CallExpr *call, MemberExpr *member, ClassDecl *cls);
-  Expr *checkStatsDate(MemberExpr *member, ClassDecl *cls);
-  bool isRuntimeClass(const ClassDecl *cls) const;
+  Expr *checkFsClassMethod(CallExpr *call, MemberExpr *member, ClassDecl *classDecl);
+  Expr *checkStatsDate(MemberExpr *member, ClassDecl *classDecl);
+  bool isRuntimeClass(const ClassDecl *classDecl) const;
 
 private:
-  static std::optional<int> fileKind(llvm::StringRef method);
+  std::optional<int> fileKind(llvm::StringRef method) const;
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

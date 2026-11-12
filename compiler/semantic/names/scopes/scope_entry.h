@@ -48,12 +48,13 @@ using ScopeEntryForm = Union<NoEntry, VarEntry, FunctionEntry, EnumEntry, ClassE
 struct ScopeEntry {
   ScopeEntryForm form = NoEntry{};
 
-  bool found() const;
+  bool isFound() const;
   VarSymbol *var() const;
-  FuncSymbol *func() const;
-  EnumDecl *enumDecl() const;
   ClassDecl *cls() const;
+  FuncSymbol *func() const;
   llvm::SMLoc loc() const;
+  EnumDecl *enumDecl() const;
+  llvm::SMLoc functionLoc(const FunctionEntry &function) const;
 };
 
 }

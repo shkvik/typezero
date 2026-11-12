@@ -33,6 +33,7 @@ struct ProcessMemberInfo {
 
 class ProcessMemberTable {
 public:
+  static llvm::StringRef getName(ProcessMember value);
   static std::optional<ProcessMember> find(llvm::StringRef name);
 };
 

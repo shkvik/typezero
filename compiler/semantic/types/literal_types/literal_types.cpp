@@ -11,9 +11,14 @@
 #include "llvm/Support/ConvertUTF.h"
 
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 
 namespace tz {
+
+namespace {
+
+constexpr unsigned kMaxExpectationDepth = 8;
+
+}
 
 LiteralTypes::LiteralTypes(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -23,85 +28,112 @@ LiteralTypes::LiteralTypes(SemanticState &owner, SemanticParts &all)
   this->conditionalTypes = &all.conditionalTypes;
 }
 
-llvm::ArrayRef<const Type *> LiteralTypes::membersOf(const Type *&type) {
+llvm::ArrayRef<const Type *> LiteralTypes::membersOf(const Type *&type) const {
   return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
 }
 
-bool LiteralTypes::isLiteralSet(const Type *type) {
+bool LiteralTypes::isLiteralSet(const Type *type) const {
   if (type->isLiteral()) {
     return true;
   }
-
-  return type->isUnion() &&
-         llvm::all_of(type->members(), [](const Type *m) { return m->isLiteral(); });
-}
-
-const Type *LiteralTypes::literalPart(const Type *expected, UnionSlot slot) {
-  if (!expected) {
-    return nullptr;
+  if (!type->isUnion()) {
+    return false;
   }
-  const Type *part = expected->nonOptional()->slotPart(slot);
-
-  return part && LiteralTypes::isLiteralSet(part) ? part : nullptr;
-}
-
-std::optional<std::u16string> LiteralTypes::writtenText(const Expr *e) {
-  if (auto *lit = dyn_cast<StringLitExpr>(e)) {
-    return lit->value;
-  }
-  if (auto *tmpl = dyn_cast<TemplateExpr>(e); tmpl && tmpl->exprs.empty()) {
-    return tmpl->quasis[0];
-  }
-
-  return std::nullopt;
-}
-
-bool LiteralTypes::choiceTexts(const Expr *e, std::vector<std::u16string> &texts) {
-  for (const Expr *branch : ExprParts::choiceBranches(e)) {
-    std::optional<std::u16string> text = LiteralTypes::writtenText(branch);
-    if (!text.has_value()) {
+  for (const Type *member : type->members()) {
+    if (!member->isLiteral()) {
       return false;
-    }
-    if (!llvm::is_contained(texts, *text)) {
-      texts.push_back(*text);
     }
   }
 
   return true;
 }
 
-const Type *LiteralTypes::enumTag(const Expr *e) const {
-  auto *member = dyn_cast<MemberExpr>(e);
-  auto *owner = member ? dyn_cast<NameExpr>(member->object) : nullptr;
-  EnumDecl *decl = owner ? this->scopes->lookup(owner->name).enumDecl() : nullptr;
-  if (!decl) {
+const Type *LiteralTypes::literalPart(const Type *expected, UnionSlot slot) const {
+  if (expected == nullptr) {
     return nullptr;
   }
-  this->typeDeclarer->resolveEnum(decl);
-  const EnumMember *m = decl->find(member->name);
-  if (!m) {
+  const Type *part = expected->nonOptional()->slotPart(slot);
+  if (part == nullptr || !this->isLiteralSet(part)) {
     return nullptr;
   }
 
-  return m->isString ? Type::stringLiteral(m->text)
-                     : Type::numberLiteral(double(m->number), Type::intTy());
+  return part;
+}
+
+std::optional<std::u16string> LiteralTypes::writtenText(const Expr *expr) const {
+  auto *literal = dyn_cast<StringLitExpr>(expr);
+  auto *templateExpr = dyn_cast<TemplateExpr>(expr);
+
+  if (literal != nullptr) {
+    return literal->value;
+  }
+  if (templateExpr != nullptr && templateExpr->exprs.empty()) {
+    return templateExpr->quasis[0];
+  }
+
+  return std::nullopt;
+}
+
+std::optional<std::vector<std::u16string>> LiteralTypes::choiceTexts(const Expr *expr) const {
+  auto texts = std::vector<std::u16string>();
+  for (const Expr *branch : ExprParts::choiceBranches(expr)) {
+    auto text = this->writtenText(branch);
+    if (!text.has_value()) {
+      return std::nullopt;
+    }
+    if (!llvm::is_contained(texts, *text)) {
+      texts.push_back(*text);
+    }
+  }
+
+  return texts;
+}
+
+const Type *LiteralTypes::enumTag(const Expr *expr) const {
+  auto *member = dyn_cast<MemberExpr>(expr);
+  if (member == nullptr) {
+    return nullptr;
+  }
+  auto *owner = dyn_cast<NameExpr>(member->object);
+  if (owner == nullptr) {
+    return nullptr;
+  }
+  auto entry = this->scopes->lookup(owner->name);
+  EnumDecl *enumDecl = entry.enumDecl();
+  if (enumDecl == nullptr) {
+    return nullptr;
+  }
+  this->typeDeclarer->resolveEnum(enumDecl);
+  const auto *enumMember = enumDecl->find(member->name);
+  if (enumMember == nullptr) {
+    return nullptr;
+  }
+  if (enumMember->isString) {
+    return Type::stringLiteral(enumMember->text);
+  }
+
+  return Type::numberLiteral(double(enumMember->number), Type::intTy());
 }
 
 const Type *LiteralTypes::constTextType(const Expr *checked, const Type *expected) {
   auto *name = dyn_cast<NameExpr>(checked);
-  if (!name || !name->var() || !name->var()->literalConst || !checked->type->isString()) {
+  bool isTextConstant = name != nullptr && name->var() != nullptr && name->var()->literalConst &&
+                        checked->type->isString();
+  if (!isTextConstant) {
     return nullptr;
   }
-  const Expr *written = this->state.getConstantStore().findConstLiteral(name->var());
-  std::vector<std::u16string> texts;
-  if (!written || !LiteralTypes::choiceTexts(written, texts)) {
+  const auto *written = this->state.getConstantStore().findConstLiteral(name->var());
+  if (written == nullptr) {
     return nullptr;
   }
-  std::vector<const Type *> literals;
-  for (const std::u16string &text : texts) {
-    const Type *literal =
-        expected ? this->stringLiteralFor(expected, text) : Type::stringLiteral(text);
-    if (!literal) {
+  auto texts = this->choiceTexts(written);
+  if (!texts.has_value()) {
+    return nullptr;
+  }
+  auto literals = std::vector<const Type *>();
+  for (const std::u16string &text : *texts) {
+    const Type *literal = this->textLiteralFor(expected, text);
+    if (literal == nullptr) {
       return nullptr;
     }
     literals.push_back(literal);
@@ -110,52 +142,59 @@ const Type *LiteralTypes::constTextType(const Expr *checked, const Type *expecte
   return Type::unionOf(literals);
 }
 
+const Type *LiteralTypes::textLiteralFor(const Type *expected, const std::u16string &text) {
+  if (expected == nullptr) {
+    return Type::stringLiteral(text);
+  }
+
+  return this->stringLiteralFor(expected, text);
+}
+
 Expr *LiteralTypes::constText(Expr *checked, const Type *expected) {
-  if (!expected) {
+  if (expected == nullptr) {
     return checked;
   }
-  const Type *type = this->constTextType(checked, expected);
+  const auto *type = this->constTextType(checked, expected);
+  if (type == nullptr) {
+    return checked;
+  }
 
-  return type ? this->typeRelations->convert(checked, type) : checked;
+  return this->typeRelations->convert(checked, type);
 }
 
 const Type *LiteralTypes::exactMemberFor(const Type *from, const Type *to) {
-  for (const Type *m : to->members()) {
-    if (m == from) {
-      return m;
+  for (const Type *member : to->members()) {
+    if (member == from) {
+      return member;
     }
   }
-  if (from->isLiteral()) {
-    for (const Type *m : to->members()) {
-      if (m == from->literalBase()) {
-        return m;
-      }
+  if (!from->isLiteral()) {
+    return nullptr;
+  }
+  for (const Type *member : to->members()) {
+    if (member == from->literalBase()) {
+      return member;
     }
   }
 
   return nullptr;
 }
 
-const Type *LiteralTypes::unionUnify(const Type *a, const Type *b) {
-  return TypeRelations::unifyAs(UnifyForm::UNION, a, b);
+const Type *LiteralTypes::unionUnify(const Type *first, const Type *second) {
+  return TypeRelations::unifyAs(UnifyForm::UNION, first, second);
 }
 
-const Type *LiteralTypes::unionFallback(const Type *a, const Type *b) {
-  if (a->isError() || b->isError()) {
+const Type *LiteralTypes::unionFallback(const Type *first, const Type *second) {
+  if (first->isError() || second->isError()) {
     return Type::error();
   }
-  if (a->isVoid() || b->isVoid()) {
+  if (first->isVoid() || second->isVoid()) {
     return nullptr;
   }
-  auto number = [](const Type *t) {
-    t = t->nonOptional();
-
-    return t->isNumeric() || t->isDecimal();
-  };
-  if (number(a) && number(b)) {
+  if (LiteralTypes::isNumberLike(first) && LiteralTypes::isNumberLike(second)) {
     return nullptr;
   }
-  const Type *joined = Type::unionOf({a, b});
+  const auto *joined = Type::unionOf({first, second});
   if (joined->isError() || !UnionSlots::unionProblem(joined).empty()) {
     return nullptr;
   }
@@ -163,16 +202,26 @@ const Type *LiteralTypes::unionFallback(const Type *a, const Type *b) {
   return joined;
 }
 
+bool LiteralTypes::isNumberLike(const Type *type) {
+  const Type *plain = type->nonOptional();
+
+  return plain->isNumeric() || plain->isDecimal();
+}
+
 const Type *LiteralTypes::literalExpectation(const Type *expected, unsigned depth) {
-  std::vector<ExpectationStep> steps = {EnterExpectation{expected, depth}};
-  std::vector<const Type *> answers;
+  auto first = EnterExpectation{.type = expected, .depth = depth};
+  auto steps = std::vector<ExpectationStep>{first};
+  auto answers = std::vector<const Type *>();
   while (!steps.empty()) {
     ExpectationStep step = steps.back();
     steps.pop_back();
-    if (const EnterExpectation *enter = step.as<EnterExpectation>()) {
-      this->enterExpectation(*enter, steps, answers);
-    } else {
-      LiteralTypes::joinBranches(*step.as<JoinBranches>(), answers);
+    switch (step.kind()) {
+      case ExpectationStepKind::ENTER:
+        this->enterExpectation(*step.as<EnterExpectation>(), steps, answers);
+        break;
+      case ExpectationStepKind::JOIN:
+        this->joinBranches(*step.as<JoinBranches>(), answers);
+        break;
     }
   }
 
@@ -182,158 +231,55 @@ const Type *LiteralTypes::literalExpectation(const Type *expected, unsigned dept
 void LiteralTypes::enterExpectation(const EnterExpectation &enter,
                                     std::vector<ExpectationStep> &steps,
                                     std::vector<const Type *> &answers) {
-  const Type *expected = enter.type;
-  bool isConditional =
-      expected && enter.depth <= 8 && expected->nonOptional()->typeOp() == TypeOp::Conditional;
-  std::vector<const Type *> branches =
-      isConditional ? this->conditionalTypes->conditionalBranches(expected->nonOptional())
-                    : std::vector<const Type *>();
+  auto branches = this->expectedBranches(enter);
   if (branches.empty()) {
-    answers.push_back(expected);
-  } else {
-    steps.push_back(JoinBranches{branches.size()});
-    for (const Type *branch : llvm::reverse(branches)) {
-      steps.push_back(EnterExpectation{branch, enter.depth + 1});
-    }
+    answers.push_back(enter.type);
+    return;
+  }
+  steps.push_back(JoinBranches{.count = branches.size()});
+  for (const Type *branch : llvm::reverse(branches)) {
+    steps.push_back(EnterExpectation{.type = branch, .depth = enter.depth + 1});
   }
 }
 
-void LiteralTypes::joinBranches(const JoinBranches &join, std::vector<const Type *> &answers) {
-  std::vector<const Type *> members = ChildrenFirst::takeAnswers(answers, join.count);
-  answers.push_back(Type::unionOf(members));
+std::vector<const Type *> LiteralTypes::expectedBranches(const EnterExpectation &enter) {
+  const Type *expected = enter.type;
+  bool isConditional = expected != nullptr && enter.depth <= kMaxExpectationDepth &&
+                       expected->nonOptional()->typeOp() == TypeOp::Conditional;
+  if (!isConditional) {
+    return {};
+  }
+
+  return this->conditionalTypes->conditionalBranches(expected->nonOptional());
+}
+
+void LiteralTypes::joinBranches(const JoinBranches &join,
+                                std::vector<const Type *> &answers) const {
+  auto members = ChildrenFirst::takeAnswers(answers, join.count);
+  const auto *joined = Type::unionOf(members);
+  answers.push_back(joined);
 }
 
 const Type *LiteralTypes::stringLiteralFor(const Type *expected, const std::u16string &text) {
-  expected = this->literalExpectation(expected);
-  if (LiteralTypes::literalPart(expected, UnionSlot::Atom)) {
-    return Type::stringLiteral(text);
-  }
-  const Type *strings = expected ? expected->nonOptional()->slotPart(UnionSlot::String) : nullptr;
-  if (strings &&
-      llvm::any_of(strings->isUnion() ? strings->members() : llvm::ArrayRef<const Type *>(strings),
-                   [](const Type *m) { return m->isPattern(); })) {
+  const Type *plain = this->literalExpectation(expected);
+  bool isAtomExpected = this->literalPart(plain, UnionSlot::Atom) != nullptr;
+  if (isAtomExpected || this->hasPatternMember(plain)) {
     return Type::stringLiteral(text);
   }
 
   return nullptr;
 }
 
-const Type *LiteralTypes::boolLiteralFor(const Type *expected, bool value) {
-  expected = this->literalExpectation(expected);
-
-  return LiteralTypes::literalPart(expected, UnionSlot::Bool) ? Type::boolLiteral(value) : nullptr;
-}
-
-const Type *LiteralTypes::numberLiteralFor(const Type *expected, double value, bool fraction) {
-  expected = this->literalExpectation(expected);
-  if (!fraction) {
-    if (const Type *part = LiteralTypes::literalPart(expected, UnionSlot::Int)) {
-      if (llvm::is_contained(LiteralTypes::membersOf(part),
-                             Type::numberLiteral(value, Type::intTy())) ||
-          !LiteralTypes::literalPart(expected, UnionSlot::Double)) {
-        return Type::numberLiteral(value, Type::intTy());
-      }
-    }
+bool LiteralTypes::hasPatternMember(const Type *expected) const {
+  if (expected == nullptr) {
+    return false;
   }
-  if (LiteralTypes::literalPart(expected, UnionSlot::Double)) {
-    return Type::numberLiteral(value, Type::doubleTy());
+  const Type *strings = expected->nonOptional()->slotPart(UnionSlot::String);
+  if (strings == nullptr) {
+    return false;
   }
-
-  return nullptr;
-}
-
-std::optional<std::pair<int64_t, int64_t>> LiteralTypes::intRange(const Type *type) {
-  if (!type->isUnion()) {
-    return std::nullopt;
-  }
-  int64_t lo = INT64_MAX;
-  int64_t hi = INT64_MIN;
-  for (const Type *m : type->members()) {
-    if (!m->isLiteral() || !m->literalBase()->isInt()) {
-      return std::nullopt;
-    }
-    int64_t value = int64_t(m->literalNumber());
-    lo = std::min(lo, value);
-    hi = std::max(hi, value);
-  }
-  if (hi - lo + 1 != int64_t(type->members().size())) {
-    return std::nullopt;
-  }
-
-  return std::pair(lo, hi);
-}
-
-std::vector<std::pair<int64_t, int64_t>> LiteralTypes::intIntervals(const Type *type) {
-  std::vector<std::pair<int64_t, int64_t>> intervals;
-  if (!type->isUnion()) {
-    return intervals;
-  }
-  std::vector<int64_t> values;
-  for (const Type *m : type->members()) {
-    if (!m->isLiteral() || !m->literalBase()->isInt()) {
-      return intervals;
-    }
-    values.push_back(int64_t(m->literalNumber()));
-  }
-  llvm::sort(values);
-  for (int64_t value : values) {
-    if (!intervals.empty() && intervals.back().second + 1 >= value) {
-      intervals.back().second = std::max(intervals.back().second, value);
-      continue;
-    }
-    intervals.emplace_back(value, value);
-  }
-
-  return intervals;
-}
-
-const Type *LiteralTypes::numberMemberOf(const Type *expected, bool fraction) {
-  if (!expected) {
-    return nullptr;
-  }
-  const Type *type = expected->nonOptional();
-  if (!type->isUnion()) {
-    return nullptr;
-  }
-  for (const Type *t : type->members()) {
-    if ((t->isInteger() || t->isFloat() || t->isDecimal()) && (!fraction || !t->isInteger())) {
-      return t;
-    }
-  }
-
-  return nullptr;
-}
-
-const Type *LiteralTypes::literalMember(const ObjectLitExpr *lit, const Type *target) const {
-  if (LiteralTypes::hasSpread(lit)) {
-    return nullptr;
-  }
-  const Type *best = nullptr;
-  int bestScore = -1;
-  bool isAmbiguous = false;
-  for (const Type *m : target->members()) {
-    if (!LiteralTypes::isPlainObjectMember(m) || !LiteralTypes::namesFit(lit, m)) {
-      continue;
-    }
-    std::optional<int> score = this->memberScore(lit, m);
-    if (!score.has_value()) {
-      continue;
-    }
-    if (*score > bestScore) {
-      best = m;
-      bestScore = *score;
-      isAmbiguous = false;
-    } else if (*score == bestScore) {
-      isAmbiguous = true;
-    }
-  }
-
-  return isAmbiguous ? nullptr : best;
-}
-
-bool LiteralTypes::hasSpread(const ObjectLitExpr *lit) {
-  for (const ObjectLitExpr::Property &p : lit->props) {
-    if (p.spread()) {
+  for (const Type *member : this->membersOf(strings)) {
+    if (member->isPattern()) {
       return true;
     }
   }
@@ -341,19 +287,164 @@ bool LiteralTypes::hasSpread(const ObjectLitExpr *lit) {
   return false;
 }
 
-bool LiteralTypes::isPlainObjectMember(const Type *m) {
-  return m->isObject() && !m->isClass() && !m->isTuple() && !m->isRegExp() && !m->isMatch() &&
-         !m->isAnyObject() && !m->isIncomplete();
+const Type *LiteralTypes::boolLiteralFor(const Type *expected, bool value) {
+  const Type *plain = this->literalExpectation(expected);
+  if (this->literalPart(plain, UnionSlot::Bool) == nullptr) {
+    return nullptr;
+  }
+
+  return Type::boolLiteral(value);
 }
 
-bool LiteralTypes::namesFit(const ObjectLitExpr *lit, const Type *m) {
-  for (const ObjectLitExpr::Property &p : lit->props) {
-    if (m->field(p.name) == nullptr && m->overload(p.name) == nullptr) {
+const Type *LiteralTypes::numberLiteralFor(const Type *expected, double value,
+                                           NumberSpelling spelling) {
+  const Type *plain = this->literalExpectation(expected);
+  bool hasDoubles = this->literalPart(plain, UnionSlot::Double) != nullptr;
+  bool isWhole = spelling == NumberSpelling::WHOLE;
+  if (isWhole && this->isIntLiteralExpected(plain, value)) {
+    return Type::numberLiteral(value, Type::intTy());
+  }
+  if (hasDoubles) {
+    return Type::numberLiteral(value, Type::doubleTy());
+  }
+
+  return nullptr;
+}
+
+bool LiteralTypes::isIntLiteralExpected(const Type *expected, double value) const {
+  const Type *ints = this->literalPart(expected, UnionSlot::Int);
+  if (ints == nullptr) {
+    return false;
+  }
+  const auto *literal = Type::numberLiteral(value, Type::intTy());
+  bool isListed = llvm::is_contained(this->membersOf(ints), literal);
+  bool hasDoubles = this->literalPart(expected, UnionSlot::Double) != nullptr;
+
+  return isListed || !hasDoubles;
+}
+
+std::optional<std::pair<int64_t, int64_t>> LiteralTypes::intRange(const Type *type) const {
+  if (!type->isUnion()) {
+    return std::nullopt;
+  }
+  int64_t low = INT64_MAX;
+  int64_t high = INT64_MIN;
+  for (const Type *member : type->members()) {
+    if (!member->isLiteral() || !member->literalBase()->isInt()) {
+      return std::nullopt;
+    }
+    int64_t value = int64_t(member->literalNumber());
+    low = std::min(low, value);
+    high = std::max(high, value);
+  }
+  bool isDense = high - low + 1 == int64_t(type->members().size());
+  if (!isDense) {
+    return std::nullopt;
+  }
+
+  return std::pair(low, high);
+}
+
+std::vector<std::pair<int64_t, int64_t>> LiteralTypes::intIntervals(const Type *type) const {
+  auto intervals = std::vector<std::pair<int64_t, int64_t>>();
+  if (!type->isUnion()) {
+    return intervals;
+  }
+  auto values = std::vector<int64_t>();
+  for (const Type *member : type->members()) {
+    if (!member->isLiteral() || !member->literalBase()->isInt()) {
+      return intervals;
+    }
+    values.push_back(int64_t(member->literalNumber()));
+  }
+  llvm::sort(values);
+  for (int64_t value : values) {
+    bool isJoining = !intervals.empty() && intervals.back().second + 1 >= value;
+    if (isJoining) {
+      intervals.back().second = std::max(intervals.back().second, value);
+    } else {
+      intervals.emplace_back(value, value);
+    }
+  }
+
+  return intervals;
+}
+
+const Type *LiteralTypes::numberMemberOf(const Type *expected, NumberSpelling spelling) const {
+  if (expected == nullptr) {
+    return nullptr;
+  }
+  const Type *type = expected->nonOptional();
+  if (!type->isUnion()) {
+    return nullptr;
+  }
+  for (const Type *candidate : type->members()) {
+    bool isNumber = candidate->isInteger() || candidate->isFloat() || candidate->isDecimal();
+    bool isFitting = spelling == NumberSpelling::WHOLE || !candidate->isInteger();
+    if (isNumber && isFitting) {
+      return candidate;
+    }
+  }
+
+  return nullptr;
+}
+
+const Type *LiteralTypes::literalMember(const ObjectLitExpr *literal, const Type *target) const {
+  if (this->hasSpread(literal)) {
+    return nullptr;
+  }
+  const Type *best = nullptr;
+  int bestScore = -1;
+  bool isAmbiguous = false;
+  for (const Type *member : target->members()) {
+    auto score = this->candidateScore(literal, member);
+    if (score.has_value() && *score > bestScore) {
+      best = member;
+      bestScore = *score;
+      isAmbiguous = false;
+    } else if (score.has_value() && *score == bestScore) {
+      isAmbiguous = true;
+    }
+  }
+  if (isAmbiguous) {
+    return nullptr;
+  }
+
+  return best;
+}
+
+std::optional<int> LiteralTypes::candidateScore(const ObjectLitExpr *literal,
+                                                const Type *member) const {
+  if (!this->isPlainObjectMember(member) || !this->hasFittingNames(literal, member)) {
+    return std::nullopt;
+  }
+
+  return this->memberScore(literal, member);
+}
+
+bool LiteralTypes::hasSpread(const ObjectLitExpr *literal) const {
+  for (const ObjectLitExpr::Property &property : literal->props) {
+    if (property.spread()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool LiteralTypes::isPlainObjectMember(const Type *member) const {
+  return member->isObject() && !member->isClass() && !member->isTuple() && !member->isRegExp() &&
+         !member->isMatch() && !member->isAnyObject() && !member->isIncomplete();
+}
+
+bool LiteralTypes::hasFittingNames(const ObjectLitExpr *literal, const Type *member) const {
+  for (const ObjectLitExpr::Property &property : literal->props) {
+    if (member->field(property.name) == nullptr && member->overload(property.name) == nullptr) {
       return false;
     }
   }
-  for (const Field &f : m->fields()) {
-    if (!f.type->isOptional() && !LiteralTypes::hasProperty(lit, f.name)) {
+  for (const Field &field : member->fields()) {
+    if (!field.type->isOptional() && !this->hasProperty(literal, field.name)) {
       return false;
     }
   }
@@ -361,9 +452,9 @@ bool LiteralTypes::namesFit(const ObjectLitExpr *lit, const Type *m) {
   return true;
 }
 
-bool LiteralTypes::hasProperty(const ObjectLitExpr *lit, llvm::StringRef name) {
-  for (const ObjectLitExpr::Property &p : lit->props) {
-    if (p.name == name) {
+bool LiteralTypes::hasProperty(const ObjectLitExpr *literal, llvm::StringRef name) const {
+  for (const ObjectLitExpr::Property &property : literal->props) {
+    if (property.name == name) {
       return true;
     }
   }
@@ -371,73 +462,111 @@ bool LiteralTypes::hasProperty(const ObjectLitExpr *lit, llvm::StringRef name) {
   return false;
 }
 
-std::optional<int> LiteralTypes::memberScore(const ObjectLitExpr *lit, const Type *m) const {
+std::optional<int> LiteralTypes::memberScore(const ObjectLitExpr *literal,
+                                             const Type *member) const {
   int score = 0;
-  for (const ObjectLitExpr::Property &p : lit->props) {
-    const Field *f = m->field(p.name);
-    const Type *tag = this->propertyTag(p, f);
-    if (tag == nullptr) {
-      continue;
-    }
-    const Type *field = f->type->nonOptional();
-    bool isConvertible = TypeRelations::isImplicitlyConvertible(tag, field) ||
-                         (tag->isLiteral() && tag->literalBase()->isInt() &&
-                          TypeRelations::isImplicitlyConvertible(tag->literalBase(), field));
-    if (isConvertible) {
-      bool isTagged = LiteralTypes::isLiteralSet(field) ||
-                      (field->isUnion() && field->slotPart(UnionSlot::Atom) != nullptr);
-      score += isTagged ? 1 : 0;
-    } else if (LiteralTypes::isLiteralSet(field) || field->isUnion()) {
+  for (const ObjectLitExpr::Property &property : literal->props) {
+    auto gained = this->propertyScore(property, member);
+    if (!gained.has_value()) {
       return std::nullopt;
     }
+    score += *gained;
   }
 
   return score;
 }
 
-const Type *LiteralTypes::propertyTag(const ObjectLitExpr::Property &p, const Field *f) const {
-  if (f == nullptr || p.value == nullptr) {
-    return nullptr;
-  }
-  const Type *tag = UnionCheckHelpers::writtenLiteral(p.value);
+std::optional<int> LiteralTypes::propertyScore(const ObjectLitExpr::Property &property,
+                                               const Type *member) const {
+  const Field *field = member->field(property.name);
+  const Type *tag = this->propertyTag(property, field);
   if (tag == nullptr) {
-    tag = this->enumTag(p.value);
+    return 0;
   }
-  if (tag != nullptr) {
-    return tag;
+  const Type *fieldType = field->type->nonOptional();
+  bool isChoice = this->isLiteralSet(fieldType) || fieldType->isUnion();
+  bool isConvertible = this->isTagConvertible(tag, fieldType);
+  if (!isConvertible && isChoice) {
+    return std::nullopt;
   }
-  auto *named = dyn_cast<NameExpr>(p.value);
-  if (named == nullptr) {
-    return nullptr;
+  if (!isConvertible) {
+    return 0;
   }
-  const VarSymbol *var = this->scopes->lookup(named->name).var();
-  const Type *known = var != nullptr && var->type != nullptr
-                          ? this->typeIn(this->state.getFlowState().getFlow(), var)
-                          : nullptr;
+  bool hasAtoms = fieldType->isUnion() && fieldType->slotPart(UnionSlot::Atom) != nullptr;
+  bool isTagged = this->isLiteralSet(fieldType) || hasAtoms;
 
-  return known != nullptr && LiteralTypes::isLiteralSet(known) ? known : nullptr;
+  return isTagged ? 1 : 0;
 }
 
-const Type *LiteralTypes::typeIn(const Flow &flow, const VarSymbol *var) const {
+bool LiteralTypes::isTagConvertible(const Type *tag, const Type *fieldType) const {
+  if (TypeRelations::isImplicitlyConvertible(tag, fieldType)) {
+    return true;
+  }
+  bool isIntLiteral = tag->isLiteral() && tag->literalBase()->isInt();
+
+  return isIntLiteral && TypeRelations::isImplicitlyConvertible(tag->literalBase(), fieldType);
+}
+
+const Type *LiteralTypes::propertyTag(const ObjectLitExpr::Property &property,
+                                      const Field *field) const {
+  if (field == nullptr || property.value == nullptr) {
+    return nullptr;
+  }
+  const Type *written = UnionCheckHelpers::writtenLiteral(property.value);
+  if (written != nullptr) {
+    return written;
+  }
+  const Type *enumTag = this->enumTag(property.value);
+  if (enumTag != nullptr) {
+    return enumTag;
+  }
+
+  return this->knownLiteralSet(property.value);
+}
+
+const Type *LiteralTypes::knownLiteralSet(const Expr *value) const {
+  const VarSymbol *variable = this->namedVariable(value);
+  if (variable == nullptr || variable->type == nullptr) {
+    return nullptr;
+  }
+  const Type *known = this->typeIn(this->state.getFlowState().getFlow(), variable);
+  if (known == nullptr || !this->isLiteralSet(known)) {
+    return nullptr;
+  }
+
+  return known;
+}
+
+const VarSymbol *LiteralTypes::namedVariable(const Expr *expr) const {
+  auto *name = dyn_cast<NameExpr>(expr);
+  if (name == nullptr) {
+    return nullptr;
+  }
+  auto entry = this->scopes->lookup(name->name);
+
+  return entry.var();
+}
+
+const Type *LiteralTypes::typeIn(const Flow &flow, const VarSymbol *variable) const {
   for (const auto &[narrowed, type] : flow.narrowed) {
-    if (narrowed == var) {
+    if (narrowed == variable) {
       return type;
     }
   }
-  if (var->type->isOptional() && flow.defined.contains(var)) {
-    return var->type->inner();
+  if (variable->type->isOptional() && flow.defined.contains(variable)) {
+    return variable->type->inner();
   }
 
-  return var->type;
+  return variable->type;
 }
 
 std::optional<std::vector<std::string>> LiteralTypes::knownTexts(const Expr *arg) {
-  std::vector<std::string> texts;
-  std::vector<const Expr *> stack = {arg};
+  auto texts = std::vector<std::string>();
+  auto stack = std::vector<const Expr *>{arg};
   while (!stack.empty()) {
     const Expr *next = stack.back();
     stack.pop_back();
-    TextLookup lookup = this->lookupTexts(next);
+    auto lookup = this->lookupTexts(next);
     if (lookup.choice != nullptr) {
       stack.push_back(lookup.choice->elseExpr);
       stack.push_back(lookup.choice->thenExpr);
@@ -452,51 +581,77 @@ std::optional<std::vector<std::string>> LiteralTypes::knownTexts(const Expr *arg
 }
 
 TextLookup LiteralTypes::lookupTexts(const Expr *arg) {
-  const Expr *e = arg;
-  while (true) {
-    if (std::optional<std::vector<std::string>> texts = LiteralTypes::typeTexts(e->type)) {
-      return TextLookup{texts, nullptr};
-    }
-    auto *conv = dyn_cast<CastExpr>(e);
-    if (!conv || !conv->isImplicit()) {
-      break;
-    }
-    e = conv->operand;
+  auto typed = this->typedTexts(arg);
+  if (typed.has_value()) {
+    return TextLookup{.texts = typed, .choice = nullptr};
   }
-  if (auto *name = dyn_cast<NameExpr>(e)) {
-    if (VarSymbol *var = this->scopes->lookup(name->name).var()) {
-      const Type *flowType = this->typeIn(this->state.getFlowState().getFlow(), var);
-      if (std::optional<std::vector<std::string>> texts = LiteralTypes::typeTexts(flowType)) {
-        return TextLookup{texts, nullptr};
-      }
-      if (const Expr *lit = this->state.getConstantStore().findConstLiteral(var)) {
-        e = lit;
-      }
-    }
+  const Expr *bare = ExprParts::withoutImplicitCasts(arg);
+  auto narrowed = this->narrowedTexts(bare);
+  if (narrowed.has_value()) {
+    return TextLookup{.texts = narrowed, .choice = nullptr};
   }
-  if (auto *choice = dyn_cast<ConditionalExpr>(e)) {
-    return TextLookup{std::nullopt, choice};
+  const Expr *written = this->writtenValue(bare);
+  auto *choice = dyn_cast<ConditionalExpr>(written);
+  if (choice != nullptr) {
+    return TextLookup{.texts = std::nullopt, .choice = choice};
   }
-  if (std::optional<std::u16string> text = LiteralTypes::writtenText(e)) {
-    return TextLookup{std::vector<std::string>{ToUtf8::toUtf8(*text)}, nullptr};
+  auto text = this->writtenText(written);
+  if (text.has_value()) {
+    auto texts = std::vector<std::string>{ToUtf8::toUtf8(*text)};
+
+    return TextLookup{.texts = texts, .choice = nullptr};
   }
 
-  return TextLookup{LiteralTypes::typeTexts(e->type), nullptr};
+  return TextLookup{.texts = this->typeTexts(written->type), .choice = nullptr};
 }
 
-std::optional<std::vector<std::string>> LiteralTypes::typeTexts(const Type *type) {
-  if (!type) {
+std::optional<std::vector<std::string>> LiteralTypes::typedTexts(const Expr *arg) const {
+  const Expr *expr = arg;
+  auto texts = this->typeTexts(expr->type);
+  auto *conversion = dyn_cast<CastExpr>(expr);
+  while (!texts.has_value() && conversion != nullptr && conversion->isImplicit()) {
+    expr = conversion->operand;
+    texts = this->typeTexts(expr->type);
+    conversion = dyn_cast<CastExpr>(expr);
+  }
+
+  return texts;
+}
+
+std::optional<std::vector<std::string>> LiteralTypes::narrowedTexts(const Expr *bare) const {
+  const VarSymbol *variable = this->namedVariable(bare);
+  if (variable == nullptr) {
+    return std::nullopt;
+  }
+  const Type *flowType = this->typeIn(this->state.getFlowState().getFlow(), variable);
+
+  return this->typeTexts(flowType);
+}
+
+const Expr *LiteralTypes::writtenValue(const Expr *bare) const {
+  const VarSymbol *variable = this->namedVariable(bare);
+  if (variable == nullptr) {
+    return bare;
+  }
+  const auto *literal = this->state.getConstantStore().findConstLiteral(variable);
+  if (literal == nullptr) {
+    return bare;
+  }
+
+  return literal;
+}
+
+std::optional<std::vector<std::string>> LiteralTypes::typeTexts(const Type *type) const {
+  if (type == nullptr) {
     return std::nullopt;
   }
   const Type *plain = type->nonOptional();
-  llvm::ArrayRef<const Type *> members =
-      plain->isUnion() ? plain->members() : llvm::ArrayRef<const Type *>(plain);
-  std::vector<std::string> texts;
-  for (const Type *m : members) {
-    if (!m->isStringLiteral()) {
+  auto texts = std::vector<std::string>();
+  for (const Type *member : this->membersOf(plain)) {
+    if (!member->isStringLiteral()) {
       return std::nullopt;
     }
-    texts.push_back(ToUtf8::toUtf8(m->literalText()));
+    texts.push_back(ToUtf8::toUtf8(member->literalText()));
   }
 
   return texts;

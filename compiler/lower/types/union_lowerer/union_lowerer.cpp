@@ -186,7 +186,7 @@ llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *f
   }
   if (!from->isUnion() && to->isUnion() && !llvm::is_contained(to->members(), from)) {
     for (const Type *member : to->members()) {
-      if (SemanticTypes::copiesIntoRecord(from, member)) {
+      if (SemanticTypes::isCopyingIntoRecord(from, member)) {
         return this->lowering.dictLowerer().emitRecordFromObject(value, from, member);
       }
     }

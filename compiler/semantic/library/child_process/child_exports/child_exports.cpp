@@ -17,7 +17,7 @@ ChildExports::ResultExportFound ChildExports::childExport(llvm::StringRef name,
     return ok(name);
   }
   if (name == "spawn" || name == "exec" || name == "execFile") {
-    std::string message = ErrorTextChildExport::async(name, path);
+    auto message = ErrorTextChildExport::async(name, path);
 
     return err(ModuleExportFoundError{
         .code = ModuleExportFoundErrorCode::NOT_YET,
@@ -25,7 +25,7 @@ ChildExports::ResultExportFound ChildExports::childExport(llvm::StringRef name,
     });
   }
   if (name == "fork") {
-    std::string message = ErrorTextChildExport::fork(name, path);
+    auto message = ErrorTextChildExport::fork(name, path);
 
     return err(ModuleExportFoundError{
         .code = ModuleExportFoundErrorCode::NOT_POSSIBLE,
@@ -33,14 +33,14 @@ ChildExports::ResultExportFound ChildExports::childExport(llvm::StringRef name,
     });
   }
   if (llvm::is_contained(kChildExports, name)) {
-    std::string message = ErrorTextChildExport::notYet(name, path);
+    auto message = ErrorTextChildExport::notYet(name, path);
 
     return err(ModuleExportFoundError{
         .code = ModuleExportFoundErrorCode::NOT_YET,
         .message = message,
     });
   }
-  std::string message = ErrorTextModuleExport::none(path, name);
+  auto message = ErrorTextModuleExport::none(path, name);
 
   return err(ModuleExportFoundError{
       .code = ModuleExportFoundErrorCode::NO_EXPORT,

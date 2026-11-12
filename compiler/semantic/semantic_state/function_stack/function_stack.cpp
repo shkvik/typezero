@@ -2,8 +2,8 @@
 
 namespace tz {
 
-void FunctionStack::enterFunction(FunctionDecl *fn) {
-  this->functions.push_back(fn);
+void FunctionStack::enterFunction(FunctionDecl *functionDecl) {
+  this->functions.push_back(functionDecl);
 }
 
 void FunctionStack::leaveFunction() {
@@ -22,8 +22,8 @@ bool FunctionStack::isInsideFunction() const {
   return !this->functions.empty();
 }
 
-bool FunctionStack::isCheckingFunction(const FunctionDecl *fn) const {
-  return llvm::is_contained(this->functions, fn);
+bool FunctionStack::isCheckingFunction(const FunctionDecl *functionDecl) const {
+  return llvm::is_contained(this->functions, functionDecl);
 }
 
 size_t FunctionStack::getFunctionDepth() const {
@@ -34,8 +34,8 @@ std::vector<FunctionDecl *> FunctionStack::getFunctions() const {
   return this->functions;
 }
 
-void FunctionStack::rememberCurrentFunction(FuncSymbol *fn) {
-  this->currentFunction = fn;
+void FunctionStack::rememberCurrentFunction(FuncSymbol *function) {
+  this->currentFunction = function;
 }
 
 FuncSymbol *FunctionStack::getCurrentFunction() const {
@@ -68,8 +68,8 @@ std::vector<ReturnStmt *> *FunctionStack::getReturnCollector() const {
   return this->returns;
 }
 
-void FunctionStack::addCollectedReturn(ReturnStmt *ret) {
-  this->returns->push_back(ret);
+void FunctionStack::addCollectedReturn(ReturnStmt *returnStmt) {
+  this->returns->push_back(returnStmt);
 }
 
 std::vector<ReturnStmt *> FunctionStack::getCollectedReturns() const {
@@ -104,8 +104,8 @@ bool FunctionStack::isInsideTrial() const {
   return this->trial;
 }
 
-void FunctionStack::rememberEarlyFunction(const FuncSymbol *fn) {
-  this->early = fn;
+void FunctionStack::rememberEarlyFunction(const FuncSymbol *function) {
+  this->early = function;
 }
 
 void FunctionStack::forgetEarlyFunction() {
