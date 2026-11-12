@@ -38,6 +38,7 @@ public:
 
 class ErrorTextDateFields {
 public:
+  static std::string timeField(size_t index);
   static std::string shortYear(int64_t year);
   static std::string month12();
   static std::string month(int64_t month);

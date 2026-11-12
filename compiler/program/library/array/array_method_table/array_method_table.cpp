@@ -228,4 +228,13 @@ llvm::ArrayRef<ArrayMethodInfo> ArrayMethodTable::getMethods() {
   return kArrayMethods;
 }
 
+llvm::StringRef ArrayMethodTable::getName(ArrayMethod method) {
+  for (const ArrayMethodInfo &info : kArrayMethods) {
+    if (info.method == method) {
+      return info.name;
+    }
+  }
+  llvm_unreachable("array method missing from the table");
+}
+
 }

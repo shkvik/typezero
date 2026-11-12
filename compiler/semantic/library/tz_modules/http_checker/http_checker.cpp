@@ -1,6 +1,7 @@
 #include "compiler/semantic/library/tz_modules/http_checker/http_checker.h"
 #include "compiler/program/library/http/fetch_init_table/fetch_init_table.h"
 #include "compiler/program/library/http/headers_method_table/headers_method_table.h"
+#include "compiler/program/library/http/http_method_table/http_method_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
@@ -16,8 +17,6 @@ namespace tz {
 namespace {
 
 constexpr llvm::StringLiteral kTokenSymbols = "!#$%&'*+-.^_`|~";
-constexpr llvm::StringLiteral kGetMethod = "GET";
-constexpr llvm::StringLiteral kHeadMethod = "HEAD";
 
 }
 
@@ -176,7 +175,8 @@ HttpChecker::ResultMethodName HttpChecker::checkMethodName(llvm::StringRef metho
         .message = message,
     });
   }
-  if (upper == "CONNECT" || upper == "TRACE" || upper == "TRACK") {
+  const auto *known = HttpMethodTable::find(upper);
+  if (known != nullptr && known->isForbidden) {
     auto message = ErrorTextHttpRequest::forbidden(method);
 
     return err(HttpCheckerMethodNameError{
@@ -395,7 +395,8 @@ void HttpChecker::walkRequestNew(NewExpr *expr) {
   auto method = this->requestMethod(init, input);
   auto bodyName = FetchInitTable::getName(FetchInit::BODY);
   const auto *body = this->property(init, bodyName);
-  bool isBodiless = method.name == kGetMethod || method.name == kHeadMethod;
+  const auto *known = HttpMethodTable::find(method.name);
+  bool isBodiless = known != nullptr && known->isBodiless;
   if (body != nullptr && method.isKnown && isBodiless && this->hasBody(body->value)) {
     auto methodName = FetchInitTable::getName(FetchInit::METHOD);
     bool isGiven = this->property(init, methodName) != nullptr;
@@ -434,11 +435,13 @@ HttpChecker::RequestMethod HttpChecker::requestMethod(const ObjectLitExpr *init,
   auto methodName = FetchInitTable::getName(FetchInit::METHOD);
   const auto *property = this->property(init, methodName);
   if (property == nullptr) {
-    return RequestMethod{.name = kGetMethod.str(), .isKnown = isPlainInput};
+    auto get = HttpMethodTable::getName(HttpMethod::GET);
+    return RequestMethod{.name = get.str(), .isKnown = isPlainInput};
   }
   const auto *text = this->stringLiteral(property->value);
   if (text == nullptr) {
-    return RequestMethod{.name = kGetMethod.str(), .isKnown = false};
+    auto get = HttpMethodTable::getName(HttpMethod::GET);
+    return RequestMethod{.name = get.str(), .isKnown = false};
   }
   auto written = ToUtf8::toUtf8(*text);
   std::string upper = llvm::StringRef(written).upper();

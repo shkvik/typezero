@@ -1,5 +1,6 @@
 #include "compiler/semantic/bodies/iterators/generator_checker/generator_checker.h"
 #include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
+#include "compiler/program/library/iterator/iterator_method_table/iterator_method_table.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker_errors.h"
 #include "compiler/semantic/bodies/iterators/iterable_checker/iterable_checker.h"
@@ -15,13 +16,6 @@
 #include "llvm/ADT/STLExtras.h"
 
 namespace tz {
-
-namespace {
-
-constexpr const char *kTakeMethod = "take";
-constexpr const char *kDestructuringLabel = "destructuring";
-
-}
 
 GeneratorChecker::GeneratorChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -758,7 +752,8 @@ const Type *GeneratorChecker::delegateResultType(const YieldExpr *yield,
 
 Expr *GeneratorChecker::destructuredIterator(Expr *init, const VarDeclarator &declarator) {
   const Type *iterator = init->type;
-  auto nothing = this->checkSendsNothing(iterator, kDestructuringLabel);
+  auto destructuring = ErrorTextSendsNothing::destructuring();
+  auto nothing = this->checkSendsNothing(iterator, destructuring);
   if (nothing.isErr()) {
     this->state.getDiagnostics().error(init->loc(), nothing.error().message);
   }
@@ -772,7 +767,8 @@ Expr *GeneratorChecker::destructuredIterator(Expr *init, const VarDeclarator &de
 }
 
 Expr *GeneratorChecker::takeCall(Expr *init, const VarDeclarator &declarator) {
-  auto *member = this->state.getAst().make<MemberExpr>(init->loc(), init, kTakeMethod);
+  auto takeName = IteratorMethodTable::getName(IteratorMethod::TAKE);
+  auto *member = this->state.getAst().make<MemberExpr>(init->loc(), init, takeName);
   auto *count = this->state.getAst().make<IntLitExpr>(init->loc(), declarator.patternLength());
   count->type = Type::intTy();
   auto *take = this->state.getAst().make<CallExpr>(init->loc(), member, std::vector<Expr *>{count});

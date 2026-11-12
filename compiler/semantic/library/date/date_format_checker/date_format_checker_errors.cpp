@@ -1,7 +1,22 @@
 #include "compiler/semantic/library/date/date_format_checker/date_format_checker_errors.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker_errors.h"
+#include "runtime/library/date/date/date.h"
 
 namespace tz {
+
+std::string ErrorTextDateOptions::method(int kind) {
+  if (kind == TZ_DATE_LOCALE_DATE) {
+    return "toLocaleDateString";
+  }
+  if (kind == TZ_DATE_LOCALE_TIME) {
+    return "toLocaleTimeString";
+  }
+  if (kind == TZ_DATE_LOCALE_FORMAT) {
+    return "Intl.DateTimeFormat";
+  }
+
+  return "toLocaleString";
+}
 
 std::string ErrorTextDateOptions::notObject(llvm::StringRef method, llvm::StringRef type) {
   return method.str() +

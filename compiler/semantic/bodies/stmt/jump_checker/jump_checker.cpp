@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/stmt/jump_checker/jump_checker.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
 #include "compiler/semantic/bodies/stmt/stmt_checker/stmt_checker.h"
 #include "compiler/semantic/flow/flow_checker/flow_checker.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -10,12 +11,6 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
-
-namespace {
-
-constexpr const char *kContinueKeyword = "continue";
-
-}
 
 JumpChecker::JumpChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -100,7 +95,7 @@ JumpChecker::ResultTargetFound JumpChecker::checkContinueTarget(const JumpTarget
                                                                 llvm::StringRef label,
                                                                 bool isBreak) const {
   if (!isBreak && target.kind != JumpTarget::Kind::Loop) {
-    auto message = ErrorTextJump::notLoop(kContinueKeyword, label);
+    auto message = ErrorTextJump::notLoop(KeywordTable::getName(Keyword::CONTINUE_KEYWORD), label);
 
     return err(JumpCheckerCheckJumpError{
         .code = JumpCheckerCheckJumpErrorCode::CONTINUE_NOT_LOOP,

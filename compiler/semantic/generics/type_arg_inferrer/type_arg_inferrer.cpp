@@ -33,8 +33,6 @@ namespace tz {
 namespace {
 
 constexpr unsigned kAnyArgs = ~0u;
-constexpr llvm::StringLiteral kIntSample = "int";
-constexpr llvm::StringLiteral kListSample = "[int]";
 
 const GlobalName kContextFunctions[] = {
     GlobalName::STRING,     GlobalName::NUMBER,
@@ -197,7 +195,8 @@ std::string TypeArgInferrer::sampleArgs(llvm::ArrayRef<const Type *> params) con
     if (!text.empty()) {
       text += ", ";
     }
-    text += param->isListParam() ? kListSample.str() : kIntSample.str();
+    text +=
+        param->isListParam() ? ErrorTextTypeArgSample::list() : ErrorTextTypeArgSample::single();
   }
 
   return text;

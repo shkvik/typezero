@@ -63,7 +63,6 @@ private:
 
   bool isUriName(std::optional<GlobalName> global) const;
   bool isConversionName(std::optional<GlobalName> global) const;
-  std::optional<llvm::StringRef> objectExample(std::optional<GlobalName> global) const;
   std::string builtinValueText(llvm::StringRef text, std::optional<GlobalName> global) const;
   ResultResolvedNameUse unknownError(NameCheckerUnknownNameErrorCode code,
                                      const std::string &message) const;

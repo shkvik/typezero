@@ -23,6 +23,7 @@ public:
   Expr *checkPathValue(NodeModule module, llvm::StringRef name, Expr *expr);
 
 private:
+  const Type *pathObjectType(const Type *part, llvm::StringRef typeName) const;
   using ResultPathProperty = Result<llvm::StringRef, PathCheckerPathValueError>;
   using ResultPathFunction = Result<llvm::StringRef, PathCheckerPathFunctionError>;
 

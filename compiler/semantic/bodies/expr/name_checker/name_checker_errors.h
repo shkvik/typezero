@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "llvm/ADT/StringRef.h"
 #include <string>
 
@@ -25,6 +26,7 @@ struct NameCheckerNotCapturedError {
 
 class ErrorTextNameUse {
 public:
+  static std::optional<llvm::StringRef> objectExample(std::optional<GlobalName> global);
   static std::string staticUse(llvm::StringRef name);
   static std::string laterUse(llvm::StringRef name);
   static std::string okValue(llvm::StringRef name);

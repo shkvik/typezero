@@ -1,5 +1,7 @@
 #include "compiler/semantic/bodies/iterators/iterable_checker/iterable_checker.h"
 #include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
+#include "compiler/program/library/iterator/iterator_method_table/iterator_method_table.h"
+#include "compiler/program/library/iterator/iterator_result_field_table/iterator_result_field_table.h"
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/bodies/classes/method_call_checker/method_call_checker.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker.h"
@@ -22,11 +24,6 @@ constexpr llvm::StringLiteral kIteratorMethod = "[Symbol.iterator]";
 
 constexpr llvm::StringLiteral kAsyncIteratorMethod = "[Symbol.asyncIterator]";
 
-constexpr const char *kNextMethod = "next";
-
-constexpr const char *kDoneField = "done";
-
-constexpr const char *kValueField = "value";
 }
 
 IterableChecker::IterableChecker(SemanticState &owner, SemanticParts &all)
@@ -65,10 +62,14 @@ FuncSymbol *IterableChecker::iterateFunction() {
 const Type *IterableChecker::iteratorResultType(const Type *value, const Type *returned) const {
   bool isNothingReturned = returned == nullptr || returned->isVoid();
   const Type *ending = isNothingReturned ? Type::undefinedTy() : returned;
-  const auto *going =
-      Type::object({{kDoneField, Type::boolLiteral(false), false}, {kValueField, value, false}});
-  const auto *finished =
-      Type::object({{kDoneField, Type::boolLiteral(true), false}, {kValueField, ending, false}});
+  const auto *going = Type::object(
+      {{IteratorResultFieldTable::getName(IteratorResultField::DONE).str(),
+        Type::boolLiteral(false), false},
+       {IteratorResultFieldTable::getName(IteratorResultField::VALUE).str(), value, false}});
+  const auto *finished = Type::object(
+      {{IteratorResultFieldTable::getName(IteratorResultField::DONE).str(), Type::boolLiteral(true),
+        false},
+       {IteratorResultFieldTable::getName(IteratorResultField::VALUE).str(), ending, false}});
 
   return Type::unionOf({going, finished});
 }
@@ -91,7 +92,7 @@ const Type *IterableChecker::nextFunctionType(const Type *object) {
   if (method != nullptr) {
     return method;
   }
-  const auto *field = object->field(kNextMethod);
+  const auto *field = object->field(IteratorMethodTable::getName(IteratorMethod::NEXT));
   if (field != nullptr && field->type->isFunction()) {
     return field->type;
   }
@@ -105,7 +106,8 @@ const Type *IterableChecker::nextMethodType(const Type *object) {
     return nullptr;
   }
   this->classDeclarer->completeClass(classDecl);
-  auto methods = this->classDeclarer->methodsNamed(classDecl, kNextMethod);
+  auto methods = this->classDeclarer->methodsNamed(
+      classDecl, IteratorMethodTable::getName(IteratorMethod::NEXT));
   auto methodTypes = std::vector<const Type *>();
   for (FunctionDecl *functionDecl : methods) {
     if (this->isPlainNext(functionDecl)) {
@@ -133,7 +135,8 @@ const Type *IterableChecker::nextResultValue(const Type *result) const {
   auto values = std::vector<const Type *>();
   for (const Type *member : members) {
     if (!this->isFinishedResult(member)) {
-      values.push_back(member->field(kValueField)->type);
+      values.push_back(
+          member->field(IteratorResultFieldTable::getName(IteratorResultField::VALUE))->type);
     }
   }
   if (values.empty()) {
@@ -148,8 +151,8 @@ bool IterableChecker::isIteratorResultShape(const Type *member) const {
   if (!member->isObject()) {
     return false;
   }
-  const Field *done = member->field(kDoneField);
-  const Field *value = member->field(kValueField);
+  const Field *done = member->field(IteratorResultFieldTable::getName(IteratorResultField::DONE));
+  const Field *value = member->field(IteratorResultFieldTable::getName(IteratorResultField::VALUE));
   if (done == nullptr || value == nullptr) {
     return false;
   }
@@ -159,7 +162,7 @@ bool IterableChecker::isIteratorResultShape(const Type *member) const {
 }
 
 bool IterableChecker::isFinishedResult(const Type *member) const {
-  const Field *done = member->field(kDoneField);
+  const Field *done = member->field(IteratorResultFieldTable::getName(IteratorResultField::DONE));
 
   return done->type->isLiteral() && done->type->literalNumber() != 0;
 }

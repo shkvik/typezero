@@ -30,6 +30,7 @@ public:
   void completeSite(EventSite *site);
 
 private:
+  bool isReceiverKeyword(llvm::StringRef name) const;
   std::string fileOfPlace(const std::string &place) const;
   std::vector<FunctionDecl *> classMethods(const ClassDecl *classDecl) const;
   bool isHoldingClassExpr(const Stmt *where) const;

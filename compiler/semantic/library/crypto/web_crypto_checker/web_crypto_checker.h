@@ -24,7 +24,6 @@ public:
   bool isSubtleClass(const Type *type) const;
 
 private:
-  bool isIntrinsicNamed(llvm::StringRef name, const SubtleIntrinsic &intrinsic) const;
   using ResultSubtleAvailable = Result<VarSymbol *, WebCryptoCheckerSubtleAvailableError>;
   using ResultAlgorithmChosen = Result<const Expr *, WebCryptoCheckerLiteralAlgorithmError>;
   using ResultSubtleCallShape = Result<const SubtleIntrinsic *, WebCryptoCheckerSubtleShapeError>;

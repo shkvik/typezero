@@ -1,6 +1,7 @@
 #include "compiler/semantic/library/result/result_types/result_types.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
+#include "compiler/program/library/library_module_names/library_module_names.h"
 #include "compiler/semantic/declare/type_declarer/type_declarer.h"
 #include "compiler/semantic/names/scopes/scopes.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -47,7 +48,7 @@ std::optional<TypeName> ResultTypes::findResultType(llvm::StringRef name) const 
 }
 
 ResultTypes::ResultImportSource ResultTypes::checkImportSource(const ImportDecl &importDecl) const {
-  if (importDecl.path == "neverthrow") {
+  if (importDecl.path == LibraryModuleNames::kNeverthrowPath) {
     auto message = ErrorTextResultType::neverthrow();
 
     return err(ResultTypesImportSourceError{

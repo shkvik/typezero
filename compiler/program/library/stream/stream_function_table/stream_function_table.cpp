@@ -1,4 +1,5 @@
 #include "compiler/program/library/stream/stream_function_table/stream_function_table.h"
+#include "llvm/Support/ErrorHandling.h"
 
 namespace tz {
 
@@ -29,6 +30,15 @@ std::optional<StreamFunction> StreamFunctionTable::find(llvm::StringRef name) {
   }
 
   return std::nullopt;
+}
+
+llvm::StringRef StreamFunctionTable::getName(StreamFunction value) {
+  for (const StreamFunctionInfo &info : kRows) {
+    if (info.value == value) {
+      return info.name;
+    }
+  }
+  llvm_unreachable("stream function missing from the table");
 }
 
 }

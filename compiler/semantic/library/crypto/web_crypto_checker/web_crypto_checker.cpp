@@ -1,6 +1,7 @@
 #include "compiler/semantic/library/crypto/web_crypto_checker/web_crypto_checker.h"
 #include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
 #include "compiler/program/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/program/library/crypto/subtle_intrinsic_table/subtle_intrinsic_table.h"
 #include "compiler/program/library/library_module_names/library_module_names.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -16,32 +17,6 @@ using llvm::isa;
 
 namespace tz {
 
-struct SubtleIntrinsic {
-  llvm::StringLiteral name;
-  CryptoFn fn;
-  llvm::StringLiteral params;
-  char result;
-};
-
-namespace {
-
-const SubtleIntrinsic kSubtleIntrinsics[] = {
-    {"subtleDigest", CryptoFn::SubtleDigest, "md", 'B'},
-    {"subtleHmac", CryptoFn::SubtleHmac, "mdd", 'B'},
-    {"subtleHmacVerify", CryptoFn::SubtleHmacVerify, "mddd", 'I'},
-    {"subtlePbkdf2", CryptoFn::SubtlePbkdf2, "mddff", 'B'},
-    {"subtleHkdf", CryptoFn::SubtleHkdf, "mdddf", 'U'},
-    {"subtleAes", CryptoFn::SubtleAes, "cdbddiid", 'U'},
-    {"subtleAesKw", CryptoFn::SubtleAesKw, "dbd", 'U'},
-    {"subtleSign", CryptoFn::SubtleSign, "oisid", 'U'},
-    {"subtleVerify", CryptoFn::SubtleVerify, "oisidd", 'I'},
-    {"subtleRsaOaep", CryptoFn::SubtleRsaOaep, "osdbd", 'U'},
-    {"subtleDerive", CryptoFn::SubtleDerive, "oo", 'U'},
-    {"subtleGenerate", CryptoFn::SubtleGenerate, "iffs", 'K'},
-};
-
-}
-
 WebCryptoChecker::WebCryptoChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->scopes = &all.scopes;
@@ -53,10 +28,9 @@ WebCryptoChecker::WebCryptoChecker(SemanticState &owner, SemanticParts &all)
 
 WebCryptoChecker::ResultSubtleCallShape
 WebCryptoChecker::checkSubtleShape(const CallExpr *call, llvm::StringRef intrinsicName) const {
-  auto isNamed = std::bind_front(&WebCryptoChecker::isIntrinsicNamed, this, intrinsicName);
-  const SubtleIntrinsic *intrinsic = llvm::find_if(kSubtleIntrinsics, isNamed);
-  bool isWrong = intrinsic == std::end(kSubtleIntrinsics) ||
-                 call->args.size() != intrinsic->params.size() || call->hasSpread();
+  const SubtleIntrinsic *intrinsic = SubtleIntrinsicTable::find(intrinsicName);
+  bool isWrong =
+      intrinsic == nullptr || call->args.size() != intrinsic->params.size() || call->hasSpread();
   if (isWrong) {
     auto message = ErrorTextIntrinsicCall::wrong(intrinsicName);
 
@@ -144,10 +118,14 @@ Expr *WebCryptoChecker::checkSubtleArgKind(Expr *arg, char kind) {
       return this->cryptoArgs->cryptoMd(arg, DigestUse::HMAC);
     case 'c':
       return this->cryptoArgs->cryptoCipher(arg);
-    case 'd':
-      return this->cryptoArgs->cryptoData(arg, "data", kKeysOrBuffers);
-    case 'o':
-      return this->cryptoArgs->cryptoKeyObject(arg, "key");
+    case 'd': {
+      auto dataWhat = ErrorTextCryptoLabel::data();
+      return this->cryptoArgs->cryptoData(arg, dataWhat, kKeysOrBuffers);
+    }
+    case 'o': {
+      auto keyWhat = ErrorTextCryptoLabel::key();
+      return this->cryptoArgs->cryptoKeyObject(arg, keyWhat);
+    }
     case 'b':
       return this->argumentChecker->checkArg(arg, Type::boolTy());
     case 'i':
@@ -193,12 +171,6 @@ Expr *WebCryptoChecker::subtleObject(MemberExpr *member) {
   auto *name = this->state.getAst().make<NameExpr>(member->loc(), LibraryModuleNames::kSubtleName);
 
   return this->exprChecker->checkExpr(name);
-}
-
-
-bool WebCryptoChecker::isIntrinsicNamed(llvm::StringRef name,
-                                        const SubtleIntrinsic &intrinsic) const {
-  return intrinsic.name == name;
 }
 
 }

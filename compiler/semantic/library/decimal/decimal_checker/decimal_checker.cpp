@@ -26,52 +26,11 @@ namespace tz {
 
 namespace {
 
-struct Replacement {
-  llvm::StringLiteral name, use;
-};
-
 constexpr int64_t kCountLimit = 1000000000;
 constexpr int64_t kLowestBase = 2;
 constexpr int64_t kHighestBase = 36;
 constexpr int64_t kSafeIntegerLimit = 9007199254740991;
 
-const Replacement kReplacements[] = {
-    {"plus", "the operator: 'a + b'"},
-    {"minus", "the operator: 'a - b'"},
-    {"times", "the operator: 'a * b'"},
-    {"multipliedBy", "the operator: 'a * b'"},
-    {"dividedBy", "the operator 'a / b', or 'a.div(b, places, mode)'"},
-    {"dividedToIntegerBy", "'a.div(b, 0, \"down\")'"},
-    {"idiv", "'a.div(b, 0, \"down\")'"},
-    {"modulo", "the operator: 'a % b'"},
-    {"mod", "the operator: 'a % b'"},
-    {"exponentiatedBy", "the operator: 'a ** n'"},
-    {"pow", "the operator: 'a ** n'"},
-    {"negated", "the operator: '-a'"},
-    {"comparedTo", "the operators: 'a < b', 'a == b', 'a > b'"},
-    {"isEqualTo", "the operator: 'a == b'"},
-    {"eq", "the operator: 'a == b'"},
-    {"isGreaterThan", "the operator: 'a > b'"},
-    {"gt", "the operator: 'a > b'"},
-    {"isGreaterThanOrEqualTo", "the operator: 'a >= b'"},
-    {"gte", "the operator: 'a >= b'"},
-    {"isLessThan", "the operator: 'a < b'"},
-    {"lt", "the operator: 'a < b'"},
-    {"isLessThanOrEqualTo", "the operator: 'a <= b'"},
-    {"lte", "the operator: 'a <= b'"},
-    {"isZero", "a comparison: 'a == 0'"},
-    {"isNegative", "a comparison: 'a < 0'"},
-    {"isPositive", "a comparison: 'a > 0'"},
-    {"absoluteValue", "'a.abs()'"},
-    {"squareRoot", "'a.sqrt()'"},
-    {"integerValue", "'a.round(0, mode)'"},
-    {"dp", "'a.decimalPlaces()', or 'a.round(places, mode)' to round"},
-    {"precision", "'a.toPrecision(digits)'"},
-    {"sd", "'a.toPrecision(digits)'"},
-    {"toNumber", "'Number(a)'"},
-    {"valueOf", "'String(a)'"},
-    {"toJSON", "'String(a)'"},
-};
 
 }
 
@@ -590,22 +549,12 @@ Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
 }
 
 Expr *DecimalChecker::reportDecimalMember(CallExpr *call, MemberExpr *member) {
-  auto use = this->replacementFor(member->name);
+  auto use = ErrorTextDecimalMethod::replacementFor(member->name);
   auto message = ErrorTextDecimalMethod::noMember(member->name, use);
   this->state.getDiagnostics().error(member->loc(), message);
   this->argumentChecker->walkArgsLoosely(call);
 
   return call;
-}
-
-llvm::StringRef DecimalChecker::replacementFor(llvm::StringRef name) const {
-  for (const Replacement &replacement : llvm::reverse(kReplacements)) {
-    if (replacement.name == name) {
-      return replacement.use;
-    }
-  }
-
-  return llvm::StringRef();
 }
 
 Expr *DecimalChecker::checkDecimalArg(Expr *arg, DecimalArg kind, Builtin builtin) {

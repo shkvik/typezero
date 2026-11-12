@@ -1,5 +1,7 @@
 #pragma once
 
+#include "compiler/program/library/bytes/encoding_name_table/encoding_name_table.h"
+#include "compiler/program/library/bytes/number_method_table/number_method_table.h"
 #include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 #include "llvm/ADT/STLExtras.h"
@@ -22,23 +24,11 @@ inline constexpr int64_t kIntMin = std::numeric_limits<int64_t>::min();
 
 inline constexpr int64_t kIntMax = std::numeric_limits<int64_t>::max();
 
-enum Encoding { Utf8, Utf16le, Latin1, Ascii, Base64, Base64url, Hex };
-
-struct BytesNumberMethod {
-  bool write = false;
-  Bytes kind = Bytes::None;
-  bool big = false;
-  bool variable = false, isSigned = false;
-  bool bigint = false;
-};
-
 class BytesCheckHelpers {
 public:
-  static std::optional<int> encodingNamed(llvm::StringRef name);
   static std::string valueText(const Expr *expr);
   static std::string wrapHint(Bytes kind, const std::string &value);
   static Range operate(BinaryOp op, const Range &a, const Range &b, bool isInt);
-  static bool numberMethod(llvm::StringRef name, bool dataView, BytesNumberMethod &m);
   static std::string numberWhat(Bytes kind);
 
 private:

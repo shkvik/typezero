@@ -2,6 +2,7 @@
 
 #include "llvm/ADT/StringRef.h"
 #include <optional>
+#include <string>
 
 namespace tz {
 
@@ -38,6 +39,7 @@ struct FsFunctionInfo {
 class FsFunctionTable {
 public:
   static std::optional<FsFunction> find(llvm::StringRef name);
+  static std::string getSyncName(llvm::StringRef name);
 };
 
 }

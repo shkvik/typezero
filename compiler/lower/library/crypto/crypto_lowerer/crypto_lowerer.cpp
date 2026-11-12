@@ -346,9 +346,10 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
       params.push_back(ptr);
       bool md = kinds[i] != 'c';
       if (auto *lit = dyn_cast<IntLitExpr>(exprs[i])) {
-        const DirectAlgorithm &alg = md ? kDirectMds[lit->value] : kDirectCiphers[lit->value];
-        args.push_back(this->lowering.module_->getOrInsertGlobal(
-            alg.symbol, this->lowering.builder.getInt8Ty()));
+        llvm::StringRef symbol = md ? llvm::StringRef(kDirectMds[lit->value].symbol)
+                                    : llvm::StringRef(kDirectCiphers[lit->value].symbol);
+        args.push_back(
+            this->lowering.module_->getOrInsertGlobal(symbol, this->lowering.builder.getInt8Ty()));
       } else if (md) {
         int caller = kinds[i] == 'm' ? 0 : kinds[i] == 'n' ? 1 : 2;
         args.push_back(this->lowering.builder.CreateCall(

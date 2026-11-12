@@ -1,7 +1,10 @@
 #include "compiler/semantic/library/intl/intl_checker/intl_checker.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
+#include "compiler/program/library/date/date_format_method_table/date_format_method_table.h"
 #include "compiler/program/library/intl/intl_function_table/intl_function_table.h"
+#include "compiler/program/library/intl/intl_method_table/intl_method_table.h"
+#include "compiler/program/library/intl/intl_type_name_table/intl_type_name_table.h"
 #include "compiler/program/library/library_module_names/library_module_names.h"
 #include "compiler/program/to_utf16/to_utf16.h"
 #include "compiler/program/to_utf8/to_utf8.h"
@@ -14,7 +17,6 @@
 #include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/library/date/date_format_checker/date_format_checker.h"
 #include "compiler/semantic/library/date/date_format_checker/date_format_checker_errors.h"
-#include "compiler/semantic/library/intl/intl_check_helpers/intl_check_helpers.h"
 #include "compiler/semantic/library/intl/intl_options_checker/intl_options_checker.h"
 #include "compiler/semantic/library/process/process_checker/process_checker.h"
 #include "compiler/semantic/names/scopes/scopes.h"
@@ -32,19 +34,6 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
-
-namespace {
-
-constexpr llvm::StringLiteral kRoundingIncrementOption = "roundingIncrement";
-constexpr llvm::StringLiteral kFractionDigitsSuffix = "FractionDigits";
-constexpr llvm::StringLiteral kDateTimeFormatName = "DateTimeFormat";
-constexpr llvm::StringLiteral kLocaleTagField = "tag";
-constexpr llvm::StringLiteral kFormatMethod = "format";
-constexpr llvm::StringLiteral kCompareMethod = "compare";
-constexpr int64_t kRoundingIncrements[] = {1,   2,   5,   10,   20,   25,   50,  100,
-                                           200, 250, 500, 1000, 2000, 2500, 5000};
-
-}
 
 IntlChecker::IntlChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -81,23 +70,6 @@ std::optional<std::u16string> IntlChecker::literalText(const Expr *expr) const {
   return std::nullopt;
 }
 
-const IntlService *IntlChecker::serviceNamed(llvm::StringRef name) const {
-  for (const IntlService &service : IntlCheckHelpers::services()) {
-    if (service.name == name) {
-      return &service;
-    }
-  }
-
-  return nullptr;
-}
-
-const Type *IntlChecker::relativePartType() const {
-  return Type::object({{"type", Type::string(), false},
-                       {"value", Type::string(), false},
-                       {"unit", Type::optional(Type::string()), false}},
-                      "Intl.RelativeTimeFormatPart");
-}
-
 const Expr *IntlChecker::unconverted(const Expr *expr) const {
   return ExprParts::withoutImplicitCasts(expr);
 }
@@ -113,11 +85,11 @@ bool IntlChecker::isStringLiteralMember(const Type *member) const {
   return member->isStringLiteral();
 }
 
-const Type *IntlChecker::numberOptionType(llvm::StringRef name) const {
-  bool isIncrement = name == kRoundingIncrementOption;
-  auto values = isIncrement ? std::vector<int64_t>(std::begin(kRoundingIncrements),
-                                                   std::end(kRoundingIncrements))
-                            : this->digitRange(name);
+const Type *IntlChecker::numberOptionType(IntlOptionKey key) const {
+  bool isIncrement = key == IntlOptionKey::ROUNDING_INCREMENT;
+  auto increments = IntlServiceTable::getRoundingIncrements();
+  auto values = isIncrement ? std::vector<int64_t>(increments.begin(), increments.end())
+                            : this->digitRange(key);
   auto members = std::vector<const Type *>();
   for (int64_t value : values) {
     const auto *literal = Type::numberLiteral(double(value), Type::intTy());
@@ -132,12 +104,10 @@ const Type *IntlChecker::numberOptionType(llvm::StringRef name) const {
   return type;
 }
 
-std::vector<int64_t> IntlChecker::digitRange(llvm::StringRef name) const {
-  bool isFraction = name.ends_with(kFractionDigitsSuffix);
-  int64_t low = isFraction ? 0 : 1;
-  int64_t high = isFraction ? 100 : 21;
+std::vector<int64_t> IntlChecker::digitRange(IntlOptionKey key) const {
+  auto range = IntlServiceTable::findDigitRange(key);
   auto values = std::vector<int64_t>();
-  for (int64_t value = low; value <= high; ++value) {
+  for (int64_t value = range->low; value <= range->high; ++value) {
     values.push_back(value);
   }
 
@@ -145,178 +115,92 @@ std::vector<int64_t> IntlChecker::digitRange(llvm::StringRef name) const {
 }
 
 const Type *IntlChecker::segmentDataType() const {
-  return Type::object({{"segment", Type::string(), false},
-                       {"index", Type::intTy(), false},
-                       {"input", Type::string(), false},
-                       {"isWordLike", Type::optional(Type::boolTy()), false}},
-                      "Intl.SegmentData");
+  return this->shapeType(IntlShape::SEGMENT_DATA);
+}
+
+const Type *IntlChecker::shapeType(IntlShape shape) const {
+  const IntlShapeInfo &info = IntlShapeTable::find(shape);
+  auto fields = std::vector<Field>();
+  for (const IntlShapeField &field : info.fields) {
+    const Type *type = this->shapeValueType(field.type);
+    fields.push_back({field.name.str(), type, false});
+  }
+
+  return Type::object(std::move(fields), info.typeName);
+}
+
+const Type *IntlChecker::shapeValueType(IntlValueType type) const {
+  switch (type) {
+    case IntlValueType::TEXT:
+      return Type::string();
+    case IntlValueType::MAYBE_TEXT:
+      return Type::optional(Type::string());
+    case IntlValueType::FLAG:
+      return Type::boolTy();
+    case IntlValueType::MAYBE_FLAG:
+      return Type::optional(Type::boolTy());
+    case IntlValueType::INT:
+      return Type::intTy();
+    case IntlValueType::MAYBE_INT:
+      return Type::optional(Type::intTy());
+    case IntlValueType::TEXT_OR_FLAG:
+      return Type::unionOf({Type::string(), Type::boolTy()});
+    case IntlValueType::TEXT_LIST:
+      return Type::array(Type::string());
+  }
+
+  return Type::error();
 }
 
 const Type *IntlChecker::resolvedIntlOptionsType(IntlKind kind) const {
-  switch (kind) {
-    case IntlKind::NumberFormat:
-      return this->resolvedNumberOptionsType();
-    case IntlKind::Collator:
-      return this->resolvedCollatorOptionsType();
-    case IntlKind::PluralRules:
-      return this->resolvedPluralOptionsType();
-    case IntlKind::RelativeTimeFormat:
-      return this->resolvedRelativeTimeOptionsType();
-    case IntlKind::ListFormat:
-      return this->resolvedListOptionsType();
-    case IntlKind::DisplayNames:
-      return this->resolvedDisplayNamesOptionsType();
-    case IntlKind::None:
-    case IntlKind::DateTimeFormat:
-    case IntlKind::Segmenter:
-    case IntlKind::Segments:
-      return this->resolvedSegmenterOptionsType();
-  }
-
-  return this->resolvedSegmenterOptionsType();
-}
-
-std::vector<Field> IntlChecker::resolvedDigitFields() const {
-  const auto *maybeInt = Type::optional(Type::intTy());
-
-  return {{"minimumIntegerDigits", Type::intTy(), false},
-          {"minimumFractionDigits", maybeInt, false},
-          {"maximumFractionDigits", maybeInt, false},
-          {"minimumSignificantDigits", maybeInt, false},
-          {"maximumSignificantDigits", maybeInt, false}};
-}
-
-std::vector<Field> IntlChecker::resolvedRoundingFields() const {
-  const auto *text = Type::string();
-
-  return {{"roundingIncrement", Type::intTy(), false},
-          {"roundingMode", text, false},
-          {"roundingPriority", text, false},
-          {"trailingZeroDisplay", text, false}};
-}
-
-const Type *IntlChecker::resolvedNumberOptionsType() const {
-  const auto *text = Type::string();
-  const auto *maybe = Type::optional(Type::string());
-  std::vector<Field> fields = {
-      {"locale", text, false},    {"numberingSystem", text, false},  {"style", text, false},
-      {"currency", maybe, false}, {"currencyDisplay", maybe, false}, {"currencySign", maybe, false},
-      {"unit", maybe, false},     {"unitDisplay", maybe, false}};
-  auto digits = this->resolvedDigitFields();
-  fields.insert(fields.end(), digits.begin(), digits.end());
-  fields.insert(fields.end(),
-                {{"useGrouping", Type::unionOf({Type::string(), Type::boolTy()}), false},
-                 {"notation", text, false},
-                 {"compactDisplay", maybe, false},
-                 {"signDisplay", text, false}});
-  auto rounding = this->resolvedRoundingFields();
-  fields.insert(fields.end(), rounding.begin(), rounding.end());
-
-  return Type::object(std::move(fields), "Intl.ResolvedNumberFormatOptions");
-}
-
-const Type *IntlChecker::resolvedCollatorOptionsType() const {
-  const auto *text = Type::string();
-  const auto *flag = Type::boolTy();
-  std::vector<Field> fields = {{"locale", text, false},      {"usage", text, false},
-                               {"sensitivity", text, false}, {"ignorePunctuation", flag, false},
-                               {"collation", text, false},   {"numeric", flag, false},
-                               {"caseFirst", text, false}};
-
-  return Type::object(std::move(fields), "Intl.ResolvedCollatorOptions");
-}
-
-const Type *IntlChecker::resolvedPluralOptionsType() const {
-  const auto *text = Type::string();
-  std::vector<Field> fields = {{"locale", text, false}, {"type", text, false}};
-  auto digits = this->resolvedDigitFields();
-  fields.insert(fields.end(), digits.begin(), digits.end());
-  fields.push_back({"pluralCategories", Type::array(Type::string()), false});
-  auto rounding = this->resolvedRoundingFields();
-  fields.insert(fields.end(), rounding.begin(), rounding.end());
-
-  return Type::object(std::move(fields), "Intl.ResolvedPluralRulesOptions");
-}
-
-const Type *IntlChecker::resolvedRelativeTimeOptionsType() const {
-  const auto *text = Type::string();
-  std::vector<Field> fields = {{"locale", text, false},
-                               {"style", text, false},
-                               {"numeric", text, false},
-                               {"numberingSystem", text, false}};
-
-  return Type::object(std::move(fields), "Intl.ResolvedRelativeTimeFormatOptions");
-}
-
-const Type *IntlChecker::resolvedListOptionsType() const {
-  const auto *text = Type::string();
-  std::vector<Field> fields = {
-      {"locale", text, false}, {"type", text, false}, {"style", text, false}};
-
-  return Type::object(std::move(fields), "Intl.ResolvedListFormatOptions");
-}
-
-const Type *IntlChecker::resolvedDisplayNamesOptionsType() const {
-  const auto *text = Type::string();
-  const auto *maybe = Type::optional(Type::string());
-  std::vector<Field> fields = {{"locale", text, false},
-                               {"style", text, false},
-                               {"type", text, false},
-                               {"fallback", text, false},
-                               {"languageDisplay", maybe, false}};
-
-  return Type::object(std::move(fields), "Intl.ResolvedDisplayNamesOptions");
-}
-
-const Type *IntlChecker::resolvedSegmenterOptionsType() const {
-  const auto *text = Type::string();
-  std::vector<Field> fields = {{"locale", text, false}, {"granularity", text, false}};
-
-  return Type::object(std::move(fields), "Intl.ResolvedSegmenterOptions");
+  return this->shapeType(IntlShapeTable::resolvedOf(kind));
 }
 
 const Type *IntlChecker::intlTypeNamed(llvm::StringRef name) const {
-  if (name == kDateTimeFormatName) {
-    return Type::dateFormat();
-  }
-  const auto *service = this->serviceNamed(name);
+  const auto *service = IntlServiceTable::find(name);
   if (service != nullptr) {
     return Type::intl(service->kind);
   }
-  if (name == "Segments") {
-    return Type::intl(IntlKind::Segments);
+  auto typeName = IntlTypeNameTable::find(name);
+  if (!typeName.has_value()) {
+    return this->serviceTypeNamed(name);
   }
-  if (name == "SegmentData") {
-    return this->segmentDataType();
-  }
-  if (name == "DateTimeFormatPart" || name == "NumberFormatPart") {
-    return this->dateFormatChecker->dateFormatPartType();
-  }
-  if (name == "RelativeTimeFormatPart") {
-    return this->relativePartType();
-  }
-  if (name == "ResolvedDateTimeFormatOptions") {
-    return this->dateFormatChecker->resolvedDateOptionsType();
-  }
-  if (name == "DateTimeFormatOptions") {
-    return this->dateFormatChecker->dateOptionsType();
-  }
-  if (name == "LDMLPluralRule" || name == "RelativeTimeFormatUnit" ||
-      name == "UnicodeBCP47LocaleIdentifier" || name == "BCP47LanguageTag") {
-    return Type::string();
+  switch (*typeName) {
+    case IntlTypeName::DATE_TIME_FORMAT:
+      return Type::dateFormat();
+    case IntlTypeName::SEGMENTS:
+      return Type::intl(IntlKind::Segments);
+    case IntlTypeName::SEGMENT_DATA:
+      return this->segmentDataType();
+    case IntlTypeName::DATE_TIME_FORMAT_PART:
+    case IntlTypeName::NUMBER_FORMAT_PART:
+      return this->shapeType(IntlShape::DATE_TIME_FORMAT_PART);
+    case IntlTypeName::RELATIVE_TIME_FORMAT_PART:
+      return this->shapeType(IntlShape::RELATIVE_TIME_FORMAT_PART);
+    case IntlTypeName::RESOLVED_DATE_TIME_FORMAT_OPTIONS:
+      return this->shapeType(IntlShape::RESOLVED_DATE_TIME_FORMAT);
+    case IntlTypeName::DATE_TIME_FORMAT_OPTIONS:
+      return this->dateFormatChecker->dateOptionsType();
+    case IntlTypeName::LDML_PLURAL_RULE:
+    case IntlTypeName::RELATIVE_TIME_FORMAT_UNIT:
+    case IntlTypeName::UNICODE_BCP47_LOCALE_IDENTIFIER:
+    case IntlTypeName::BCP47_LANGUAGE_TAG:
+      return Type::string();
+    case IntlTypeName::LOCALE:
+      break;
   }
 
   return this->serviceTypeNamed(name);
 }
 
 const Type *IntlChecker::serviceTypeNamed(llvm::StringRef name) const {
-  for (const IntlService &service : IntlCheckHelpers::services()) {
-    if (name == "Resolved" + service.name.str() + "Options") {
-      return this->resolvedIntlOptionsType(service.kind);
-    }
-    if (name == service.name.str() + "Options") {
-      return this->serviceOptionsType(service);
-    }
+  const auto *resolved = IntlServiceTable::findByResolvedTypeName(name);
+  if (resolved != nullptr) {
+    return this->resolvedIntlOptionsType(resolved->kind);
+  }
+  const auto *options = IntlServiceTable::findByOptionsTypeName(name);
+  if (options != nullptr) {
+    return this->serviceOptionsType(*options);
   }
 
   return nullptr;
@@ -326,25 +210,26 @@ const Type *IntlChecker::serviceOptionsType(const IntlService &service) const {
   auto fields = std::vector<Field>();
   for (const IntlOption &option : service.options) {
     const auto *type = this->optionType(option);
-    fields.push_back({.name = option.name.str(), .type = Type::optional(type)});
+    auto name = IntlOptionKeyTable::getName(option.key);
+    fields.push_back({.name = name.str(), .type = Type::optional(type)});
   }
-  auto typeName = "Intl." + service.name.str() + "Options";
+  auto typeName = IntlServiceTable::getOptionsTypeName(service.name);
 
   return Type::object(std::move(fields), typeName);
 }
 
 const Type *IntlChecker::optionType(const IntlOption &option) const {
-  if (option.kind == 'n') {
-    return this->numberOptionType(option.name);
+  if (option.kind == IntlOptionKind::NUMBER) {
+    return this->numberOptionType(option.key);
   }
-  bool isListed = (option.kind == 's' || option.kind == 'g') && !option.values.empty();
-  if (isListed) {
+  bool isTextual = option.kind == IntlOptionKind::TEXT || option.kind == IntlOptionKind::GROUPING;
+  if (isTextual && !option.values.empty()) {
     return this->listedOptionType(option);
   }
-  if (option.kind == 's') {
+  if (option.kind == IntlOptionKind::TEXT) {
     return Type::string();
   }
-  if (option.kind == 'b') {
+  if (option.kind == IntlOptionKind::FLAG) {
     return Type::boolTy();
   }
 
@@ -357,7 +242,7 @@ const Type *IntlChecker::listedOptionType(const IntlOption &option) const {
     auto text = ToUtf16::toUtf16(value);
     members.push_back(Type::stringLiteral(text));
   }
-  if (option.kind == 'g') {
+  if (option.kind == IntlOptionKind::GROUPING) {
     members.push_back(Type::boolTy());
   }
 
@@ -366,7 +251,7 @@ const Type *IntlChecker::listedOptionType(const IntlOption &option) const {
 
 Expr *IntlChecker::checkIntlNew(llvm::SMLoc loc, llvm::StringRef name, std::vector<Expr *> &args,
                                 IntlCreation creation) {
-  const auto *service = this->serviceNamed(name);
+  const auto *service = IntlServiceTable::find(name);
   if (service == nullptr) {
     auto message = ErrorTextIntlNew::unknown(name);
     this->state.getDiagnostics().error(loc, message);
@@ -447,7 +332,8 @@ bool IntlChecker::prepareLocaleArg(Expr *&arg, llvm::StringRef what) {
   }
   auto *locale = this->state.getLibraryDeclarations().findLibraryClass(LibraryClass::LOCALE);
   if (locale != nullptr && !type->isOptional() && this->classDeclarer->classOf(type) == locale) {
-    auto *tag = this->state.getAst().make<MemberExpr>(arg->loc(), arg, kLocaleTagField);
+    auto tagField = IntlShapeTable::getLocaleTagField();
+    auto *tag = this->state.getAst().make<MemberExpr>(arg->loc(), arg, tagField);
     tag->type = Type::string();
     arg = tag;
     return true;
@@ -622,8 +508,8 @@ Expr *IntlChecker::checkIntlStatic(CallExpr *call, MemberExpr *member) {
     return call;
   }
   auto what = ErrorTextIntlFunction::staticOf(service->name, member->name);
-  bool isService =
-      service->name == kDateTimeFormatName || this->serviceNamed(service->name) != nullptr;
+  bool isDateFormat = IntlTypeNameTable::find(service->name) == IntlTypeName::DATE_TIME_FORMAT;
+  bool isService = isDateFormat || IntlServiceTable::find(service->name) != nullptr;
   bool isLocales = IntlFunctionTable::find(member->name) == IntlFunction::SUPPORTED_LOCALES_OF;
   if (!isService || !isLocales) {
     auto message = ErrorTextIntlFunction::onlyLocale(what);
@@ -699,19 +585,23 @@ IntlChecker::WantedCallback IntlChecker::wantedCallback(const Type *expected) co
 
 const Type *IntlChecker::boundFunctionType(IntlKind kind, llvm::StringRef name,
                                            const WantedCallback &wanted) const {
-  bool isFormat = name == kFormatMethod;
-  if (kind == IntlKind::NumberFormat && isFormat) {
+  const auto *method = IntlMethodTable::find(kind, name);
+  bool isNumberFormat = method != nullptr && method->method == IntlMethod::NUMBER_FORMAT;
+  bool isCompare = method != nullptr && method->method == IntlMethod::COLLATOR_COMPARE;
+  bool isDateFormat = kind == IntlKind::DateTimeFormat &&
+                      DateFormatMethodTable::find(name) == DateFormatMethod::FORMAT;
+  if (isNumberFormat) {
     bool isNumber =
         wanted.param != nullptr && (wanted.param->isNumeric() || wanted.param->isDecimal());
     const Type *param = isNumber ? wanted.param : Type::doubleTy();
     return Type::function({param}, 1, false, Type::string());
   }
-  if (kind == IntlKind::DateTimeFormat && isFormat) {
+  if (isDateFormat) {
     bool isNumber = wanted.param != nullptr && wanted.param->isNumeric();
     const Type *param = isNumber ? wanted.param : Type::date();
     return Type::function({param}, 1, false, Type::string());
   }
-  if (kind == IntlKind::Collator && name == kCompareMethod) {
+  if (isCompare) {
     bool isFloat = wanted.ret != nullptr && wanted.ret->isFloat();
     const Type *returnType = isFloat ? Type::doubleTy() : Type::intTy();
     return Type::function({Type::string(), Type::string()}, 2, false, returnType);

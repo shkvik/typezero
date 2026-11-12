@@ -1,4 +1,6 @@
 #include "compiler/semantic/library/path/path_checker/path_checker.h"
+#include "compiler/program/library/path/path_shape_field_table/path_shape_field_table.h"
+#include "compiler/program/library/path/path_shape_name_table/path_shape_name_table.h"
 #include "compiler/program/library/path/path_value_table/path_value_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -19,25 +21,27 @@ PathChecker::PathChecker(SemanticState &owner, SemanticParts &all)
 }
 
 const Type *PathChecker::parsedPathType() const {
-  const auto *stringType = Type::string();
+  auto typeName = PathShapeNameTable::getName(PathShapeName::PARSED_PATH);
 
-  return Type::object({{"root", stringType, false},
-                       {"dir", stringType, false},
-                       {"base", stringType, false},
-                       {"ext", stringType, false},
-                       {"name", stringType, false}},
-                      "ParsedPath");
+  return this->pathObjectType(Type::string(), typeName);
+}
+
+const Type *PathChecker::pathObjectType(const Type *part, llvm::StringRef typeName) const {
+  auto fields = std::vector<Field>();
+  for (PathShapeField field :
+       {PathShapeField::ROOT, PathShapeField::DIRECTORY, PathShapeField::BASE,
+        PathShapeField::EXTENSION, PathShapeField::NAME}) {
+    auto name = PathShapeFieldTable::getName(field);
+    fields.push_back({name.str(), part, false});
+  }
+
+  return Type::object(std::move(fields), typeName);
 }
 
 const Type *PathChecker::formatInputType() const {
-  const auto *optionalString = Type::optional(Type::string());
+  auto typeName = PathShapeNameTable::getName(PathShapeName::FORMAT_INPUT_PATH_OBJECT);
 
-  return Type::object({{"root", optionalString, false},
-                       {"dir", optionalString, false},
-                       {"base", optionalString, false},
-                       {"ext", optionalString, false},
-                       {"name", optionalString, false}},
-                      "FormatInputPathObject");
+  return this->pathObjectType(Type::optional(Type::string()), typeName);
 }
 
 bool PathChecker::isWin32Style(NodeModule module) const {
@@ -72,7 +76,7 @@ PathChecker::ResultPathProperty PathChecker::checkPathProperty(llvm::StringRef n
                                                                NodeModule module) const {
   auto value = PathValueTable::find(name);
   if (this->isPathModule(value)) {
-    auto label = NodeCheckHelpers::moduleLabel(module);
+    auto label = KnownModules::getPath(module);
     auto message = ErrorTextPath::throughFns(name, label);
 
     return err(PathCheckerPathValueError{
@@ -141,7 +145,7 @@ Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::String
     return call;
   }
   if (path == nullptr) {
-    auto label = NodeCheckHelpers::moduleLabel(module);
+    auto label = KnownModules::getPath(module);
     auto message = ErrorTextPath::notYet(functionName, label);
     this->state.getDiagnostics().error(loc, message);
     this->argumentChecker->walkArgsLoosely(call);

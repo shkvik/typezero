@@ -126,6 +126,7 @@ struct DictCheckerCheckDictDeleteError {
 
 class ErrorTextDictDelete {
 public:
+  static std::string entryPart(bool isMap);
   static std::string property(llvm::StringRef kind, llvm::StringRef text, llvm::StringRef what);
 };
 

@@ -97,6 +97,14 @@ const LibraryClassInfo kRows[] = {
         .name = "PassThrough",
         .value = LibraryClass::PASS_THROUGH,
     },
+    {
+        .name = "ReadableStream",
+        .value = LibraryClass::READABLE_STREAM,
+    },
+    {
+        .name = "FormData",
+        .value = LibraryClass::FORM_DATA,
+    },
 };
 
 }

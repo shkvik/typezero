@@ -1,4 +1,8 @@
 #include "compiler/semantic/library/events/event_maps/event_maps.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
+#include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
+#include "compiler/program/library/events/emitter_event_table/emitter_event_table.h"
+#include "compiler/program/library/events/listener_change_field_table/listener_change_field_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -36,12 +40,18 @@ EventMaps::EventMaps(SemanticState &owner, SemanticParts &all)
 }
 
 bool EventMaps::isServiceEvent(llvm::StringRef name) const {
-  return name == "newListener" || name == "removeListener";
+  auto event = EmitterEventTable::find(name);
+
+  return event == EmitterEvent::NEW_LISTENER || event == EmitterEvent::REMOVE_LISTENER;
 }
 
 const Type *EventMaps::serviceEventArgs() const {
-  return Type::tuple(
-      {Type::object({{"event", Type::string(), false}, {"listener", Type::unknown(), false}})});
+  auto eventName = ListenerChangeFieldTable::getName(ListenerChangeField::EVENT);
+  auto listenerName = ListenerChangeFieldTable::getName(ListenerChangeField::LISTENER);
+  const auto *change = Type::object(
+      {{eventName.str(), Type::string(), false}, {listenerName.str(), Type::unknown(), false}});
+
+  return Type::tuple({change});
 }
 
 bool EventMaps::isCarryingOne(const Type *args) const {
@@ -334,7 +344,8 @@ const Type *EventMaps::withThis(const ListenerWant &want, const Type *self) cons
 Expr *EventMaps::checkListenerLiteral(FunctionExpr *functionExpr, const ListenerWant &want,
                                       ListenerKind &kind) {
   FunctionDecl *functionDecl = functionExpr->fn;
-  bool isExplicitThis = !functionDecl->params.empty() && functionDecl->params[0].name == "this" &&
+  bool isExplicitThis = !functionDecl->params.empty() &&
+                        KeywordTable::find(functionDecl->params[0].name) == Keyword::THIS &&
                         functionDecl->params[0].type.has_value();
   if (isExplicitThis) {
     return this->checkThisListener(functionExpr, want, kind);
@@ -449,7 +460,9 @@ const Type *EventMaps::createdType(const NewExpr *create) {
       return nullptr;
     }
   }
-  if (args.empty() && classDecl->library() && classDecl->name == "EventEmitter") {
+  bool isEmitter = classDecl->library() &&
+                   LibraryClassTable::isName(classDecl->name, LibraryClass::EVENT_EMITTER);
+  if (args.empty() && isEmitter) {
     auto *events = this->eventMapInference->newEventMap(create->loc());
     args.push_back(events);
   }

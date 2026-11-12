@@ -17,6 +17,12 @@ FunctionDecl *LibraryDeclarations::findLibraryFunction(llvm::StringRef name) con
   return this->libraryFunctions.lookup(name);
 }
 
+FunctionDecl *LibraryDeclarations::findLibraryFunction(LibraryFunction libraryFunction) const {
+  auto name = LibraryFunctionTable::getName(libraryFunction);
+
+  return this->libraryFunctions.lookup(name);
+}
+
 void LibraryDeclarations::rememberLibraryType(TypeAliasDecl *alias) {
   this->libraryTypes[alias->name] = alias;
 }

@@ -1,4 +1,6 @@
 #include "compiler/semantic/library/json/json_checker/json_checker.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
+#include "compiler/program/library/builtin_names/type_of_name_table/type_of_name_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/binary_checker/binary_checker.h"
@@ -23,7 +25,6 @@ namespace tz {
 
 namespace {
 
-constexpr llvm::StringLiteral kNullName = "null";
 constexpr llvm::StringLiteral kValuePlaceholder = "x";
 
 }
@@ -54,8 +55,8 @@ const VarSymbol *JsonChecker::jsonVariable(const Expr *expr) const {
 bool JsonChecker::isNullName(const Expr *expr) const {
   const auto *name = dyn_cast<NameExpr>(expr);
 
-  return name != nullptr && name->name == kNullName && name->var() == nullptr &&
-         name->func() == nullptr;
+  return name != nullptr && KeywordTable::find(name->name) == Keyword::NULL_KEYWORD &&
+         name->var() == nullptr && name->func() == nullptr;
 }
 
 bool JsonChecker::isNothing(const Expr *expr) const {
@@ -220,7 +221,9 @@ JsonChecker::TypeOfPair JsonChecker::typeOfPair(const BinaryExpr *comparison) co
 JsonChecker::ResultTypeOfAgrees JsonChecker::checkTypeOfAgrees(const Expr *tested,
                                                                llvm::StringRef name, bool nullTest,
                                                                bool isAnd) const {
-  if (nullTest && name != "null" && name != "undefined") {
+  auto typeOf = TypeOfNameTable::find(name);
+  bool isNullName = typeOf == TypeOfName::NULL_TYPE || typeOf == TypeOfName::UNDEFINED_TYPE;
+  if (nullTest && !isNullName) {
     auto message = ErrorTextJsonTest::neverNull(this->refText(tested), isAnd, name);
 
     return err(JsonCheckerTypeOfAgreesError{
@@ -228,7 +231,7 @@ JsonChecker::ResultTypeOfAgrees JsonChecker::checkTypeOfAgrees(const Expr *teste
         .message = message,
     });
   }
-  if (!nullTest && name != "array") {
+  if (!nullTest && typeOf != TypeOfName::ARRAY) {
     auto message = ErrorTextJsonTest::neverArray(this->refText(tested), isAnd, name);
 
     return err(JsonCheckerTypeOfAgreesError{
@@ -550,7 +553,9 @@ void JsonChecker::addNothingFacts(const Expr *side, const Expr *other, Flow &equ
 void JsonChecker::addTypeOfFacts(const Expr *operand, const std::u16string &text, Flow &equal,
                                  Flow &different) const {
   const auto *narrowed = this->typeOfJson(text);
-  bool isPresent = narrowed != nullptr || text == u"object" || text == u"null";
+  auto typeOf = TypeOfNameTable::find(ToUtf8::toUtf8(text));
+  bool isPresent =
+      narrowed != nullptr || typeOf == TypeOfName::OBJECT || typeOf == TypeOfName::NULL_TYPE;
   const auto *variable = this->jsonVariable(operand);
   if (variable == nullptr) {
     auto path = this->jsonField(operand);
@@ -561,7 +566,7 @@ void JsonChecker::addTypeOfFacts(const Expr *operand, const std::u16string &text
       this->narrowJsonField(equal, *path, narrowed);
     } else if (isPresent) {
       this->fieldFacts->defineField(equal, *path);
-    } else if (text == u"undefined") {
+    } else if (typeOf == TypeOfName::UNDEFINED_TYPE) {
       this->fieldFacts->defineField(different, *path);
     }
     return;
@@ -574,22 +579,23 @@ void JsonChecker::addTypeOfFacts(const Expr *operand, const std::u16string &text
   }
   if (isPresent) {
     equal.defined.insert(variable);
-  } else if (text == u"undefined") {
+  } else if (typeOf == TypeOfName::UNDEFINED_TYPE) {
     different.defined.insert(variable);
   }
 }
 
 const Type *JsonChecker::typeOfJson(const std::u16string &text) const {
-  if (text == u"string") {
+  auto typeOf = TypeOfNameTable::find(ToUtf8::toUtf8(text));
+  if (typeOf == TypeOfName::STRING) {
     return Type::string();
   }
-  if (text == u"double") {
+  if (typeOf == TypeOfName::DOUBLE) {
     return Type::doubleTy();
   }
-  if (text == u"boolean") {
+  if (typeOf == TypeOfName::BOOLEAN) {
     return Type::boolTy();
   }
-  if (text == u"array") {
+  if (typeOf == TypeOfName::ARRAY) {
     return Type::array(Type::json());
   }
 

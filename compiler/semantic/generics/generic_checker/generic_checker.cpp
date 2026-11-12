@@ -1,4 +1,6 @@
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
+#include "compiler/program/library/builtin_names/type_of_name_table/type_of_name_table.h"
+#include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/concat_checker/concat_checker.h"
 #include "compiler/semantic/bodies/shared_helpers/shared_helpers.h"
 #include "compiler/semantic/flow/children_first/children_first.h"
@@ -15,12 +17,6 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
-
-namespace {
-
-constexpr const char16_t *kUndefinedTypeOf = u"undefined";
-
-}
 
 GenericChecker::GenericChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -318,7 +314,8 @@ std::optional<bool> GenericChecker::typeOfAnswer(const BinaryExpr *binary, const
   }
   std::u16string wanted(name.begin(), name.end());
   bool isEqual = text->value == wanted;
-  bool isUndefinedText = text->value == kUndefinedTypeOf;
+  auto typeOf = TypeOfNameTable::find(ToUtf8::toUtf8(text->value));
+  bool isUndefinedText = typeOf == TypeOfName::UNDEFINED_TYPE;
   if (type->isOptional() && (isUndefinedText || isEqual)) {
     return std::nullopt;
   }

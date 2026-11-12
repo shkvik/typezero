@@ -30,7 +30,6 @@ public:
 
 private:
   std::optional<std::u16string> literalText(const Expr *expr) const;
-  const Type *relativePartType() const;
   using ResultClosedText = Result<const Expr *, IntlMethodCheckerClosedArgError>;
   using ResultIntlNumber = Result<const Type *, IntlMethodCheckerIntlNumberError>;
 

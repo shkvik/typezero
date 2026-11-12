@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/builtin_modules/known_modules/known_modules.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/builtin_modules/module_export_errors/module_export_errors.h"
 #include "compiler/semantic/library/fs/fs_exports/fs_exports_errors.h"
@@ -16,7 +17,7 @@ public:
   static ResultExportFound checkTzFsExport(llvm::StringRef name, llvm::StringRef path);
   static ResultExportFound checkPromisesExport(llvm::StringRef name, llvm::StringRef path);
   static ResultExportFound checkReadlineExport(llvm::StringRef name, llvm::StringRef path,
-                                               bool hasPromises);
+                                               NodeModule module);
 };
 
 }

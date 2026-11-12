@@ -1,9 +1,11 @@
 #pragma once
 
+#include "compiler/program/library/builtin_modules/node_option_table/node_option_table.h"
 #include "compiler/program/library/fs/fs_function_table/fs_function_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/fs/fs_checker/fs_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
+#include "llvm/ADT/DenseMap.h"
 
 namespace tz {
 
@@ -17,6 +19,8 @@ class TypeRelations;
 class ArgumentChecker;
 class BuiltinModuleChecker;
 struct NodeName;
+
+using NodeOptions = llvm::SmallDenseMap<NodeOption, Expr *>;
 
 class FsChecker {
 public:
@@ -33,7 +37,7 @@ public:
   };
 
   bool readNodeOptions(CallExpr *call, size_t index, llvm::StringRef functionName,
-                       llvm::ArrayRef<llvm::StringRef> allowed, llvm::StringMap<Expr *> &options);
+                       llvm::ArrayRef<NodeOption> allowed, NodeOptions &options);
   Expr *checkEncoding(Expr *encoding, llvm::StringRef functionName, EncodingSet encodings);
   const Type *nativeError() const;
   void rememberNativeError();
@@ -51,7 +55,7 @@ private:
     FsFunction function = FsFunction::READ_FILE_SYNC;
     llvm::StringRef functionName;
     llvm::SMLoc loc;
-    llvm::StringMap<Expr *> options;
+    NodeOptions options = NodeOptions();
   };
 
   struct FlagRead {
@@ -67,10 +71,11 @@ private:
   Expr *openFlag(FsCall &fs, Expr *flag, llvm::StringRef fallback);
   Expr *reportNotFunction(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc);
   Expr *reportUnknownFsFunction(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc);
-  FlagRead readFlag(FsCall &fs, llvm::StringRef option);
-  bool readEncodingOrOptions(FsCall &fs, size_t index, llvm::ArrayRef<llvm::StringRef> allowed);
+  FlagRead readFlag(FsCall &fs, NodeOption option);
+  bool readEncodingOrOptions(FsCall &fs, size_t index, llvm::ArrayRef<NodeOption> allowed);
+  std::vector<llvm::StringRef> optionNames(llvm::ArrayRef<NodeOption> options) const;
   Expr *givenEncoding(FsCall &fs) const;
-  Expr *boolOption(FsCall &fs, llvm::StringRef option);
+  Expr *boolOption(FsCall &fs, NodeOption option);
   Expr *checkReadFile(FsCall &fs);
   Expr *checkWriteFile(FsCall &fs);
   bool isBytesData(const Type *type) const;

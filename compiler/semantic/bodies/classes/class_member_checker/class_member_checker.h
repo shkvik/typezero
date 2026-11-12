@@ -66,7 +66,6 @@ private:
   ResultStoredFieldValue checkStatsDate(ClassDecl *classDecl, MemberExpr *member);
   ResultAssignableMember checkAssignableField(const ClassField *field, const ClassDecl *classDecl,
                                               llvm::StringRef name, const Type *type) const;
-  std::string setterName(llvm::StringRef name) const;
   ResultFieldNotReadOnly checkFieldWritable(const ClassField *field, const ClassDecl *owner,
                                             bool isViaThis, const Type *type) const;
   bool reportUnsetField(const MemberExpr *member, const ClassDecl *owner, bool isViaThis);

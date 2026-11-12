@@ -160,7 +160,8 @@ Expr *RuntimeObjectChecker::checkQuestionCallback(CallExpr *call, MemberExpr *me
   signature.ret = Type::voidTy();
   signature.voidResult = true;
   signature.asyncVoid = true;
-  auto *callback = this->callbackChecker->checkFunctionArg(call->args[1], signature, 1, "question");
+  auto *callback =
+      this->callbackChecker->checkFunctionArg(call->args[1], signature, 1, member->name);
   if (!callback->type->isFunction()) {
     return call;
   }

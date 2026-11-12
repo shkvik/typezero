@@ -1,9 +1,12 @@
 #pragma once
 
 #include "compiler/program/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/program/library/crypto/crypto_choice_table/crypto_choice_table.h"
+#include "compiler/program/library/crypto/crypto_option_table/crypto_option_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/crypto/crypto_args/crypto_args_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
+#include "llvm/ADT/DenseMap.h"
 
 namespace tz {
 
@@ -49,6 +52,8 @@ inline constexpr CryptoDataKinds kKeysOrBuffers{
     .isArrayBuffer = true,
 };
 
+using CryptoOptions = llvm::SmallDenseMap<CryptoOption, Expr *>;
+
 enum class DigestUse {
   HASH,
   HMAC,
@@ -69,8 +74,9 @@ public:
   Expr *cryptoEncoding(CallExpr *call, size_t index, llvm::StringRef functionName, int fallback);
   Expr *cryptoText(Expr *made, Expr *encoding);
   bool readCryptoOptions(Expr *arg, llvm::StringRef functionName,
-                         llvm::ArrayRef<llvm::StringRef> allowed, llvm::StringMap<Expr *> &options);
-  int cryptoChoice(Expr *arg, llvm::StringRef what, llvm::ArrayRef<llvm::StringRef> values);
+                         llvm::ArrayRef<CryptoOption> allowed, CryptoOptions &options);
+  Expr *cryptoOptionData(const CryptoOptions &options, CryptoOption option, CryptoDataKinds kinds);
+  int cryptoChoice(Expr *arg, llvm::StringRef what, CryptoChoice choice);
   Expr *cryptoMd(Expr *arg, DigestUse use);
   Expr *cryptoCipher(Expr *arg);
   Expr *cryptoNumber(Expr *arg);
@@ -86,8 +92,7 @@ public:
 
 private:
   bool isCryptoData(CryptoDataKinds kinds, const Type *candidate) const;
-  bool isAnyLengthHash(llvm::StringRef name) const;
-  int64_t cipherKeyBytes(llvm::StringRef name) const;
+  std::vector<llvm::StringRef> optionNames(llvm::ArrayRef<CryptoOption> options) const;
   std::optional<int64_t> bytesOf(const Expr *expr) const;
   std::optional<size_t> directMdIndex(llvm::StringRef name) const;
   using ResultKeyObjectType = Result<const Type *, CryptoArgsKeyObjectTypeError>;

@@ -1,6 +1,7 @@
 #include "compiler/semantic/library/events/event_map_inference/event_map_inference.h"
 #include "compiler/program/ast/ast_cloner/ast_cloner.h"
 #include "compiler/program/ast_walker/ast_walker.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
 #include "compiler/program/library/events/emitter_member_table/emitter_member_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker.h"
@@ -19,8 +20,6 @@ namespace tz {
 
 namespace {
 
-constexpr llvm::StringLiteral kThisName = "this";
-constexpr llvm::StringLiteral kSuperName = "super";
 
 }
 
@@ -114,8 +113,7 @@ std::optional<EmitCandidate> EventMapInference::emitCandidate(const Expr *expr) 
     return std::nullopt;
   }
   const auto *receiver = dyn_cast<NameExpr>(member->object);
-  bool isSelf =
-      receiver != nullptr && (receiver->name == kThisName || receiver->name == kSuperName);
+  bool isSelf = receiver != nullptr && this->isReceiverKeyword(receiver->name);
   EmitCandidate candidate;
   candidate.call = call;
   candidate.event = ToUtf8::toUtf8(name->value);
@@ -403,6 +401,12 @@ void EventMapInference::tryStatement(Stmt *statement) {
   functions.leaveTrial();
   this->state.getDiagnostics().popList();
   this->returnInferrer->leaveBody(saved);
+}
+
+bool EventMapInference::isReceiverKeyword(llvm::StringRef name) const {
+  auto keyword = KeywordTable::find(name);
+
+  return keyword == Keyword::THIS || keyword == Keyword::SUPER;
 }
 
 }

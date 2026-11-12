@@ -1,4 +1,11 @@
 #include "compiler/semantic/library/events/emitter_checker/emitter_checker.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
+#include "compiler/program/library/builtin_names/library_method_table/library_method_table.h"
+#include "compiler/program/library/events/emitter_event_table/emitter_event_table.h"
+#include "compiler/program/library/events/emitter_member_table/emitter_member_table.h"
+#include "compiler/program/library/process/process_function_table/process_function_table.h"
+#include "compiler/program/library/process/process_member_table/process_member_table.h"
+#include "compiler/program/library/process/process_qualified_name_table/process_qualified_name_table.h"
 #include "compiler/semantic/bodies/classes/class_links/class_links.h"
 #include "compiler/semantic/bodies/classes/method_call_checker/method_call_checker.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
@@ -92,52 +99,62 @@ std::optional<std::string> EmitterChecker::rootText(const Expr *expr) const {
     return std::nullopt;
   }
   auto *fd = call->args.size() == 1 ? dyn_cast<IntLitExpr>(call->args[0]) : nullptr;
-  if (callee->name == "processStdin" && call->args.empty()) {
-    return "process.stdin";
+  bool isStdin = callee->name == ProcessFunctionTable::getName(ProcessFunction::STDIN);
+  bool isStdout = callee->name == ProcessFunctionTable::getName(ProcessFunction::STDOUT);
+  if (isStdin && call->args.empty()) {
+    return ProcessQualifiedNameTable::getQualifiedName(ProcessMember::STDIN).str();
   }
-  if (callee->name == "processStdout" && fd != nullptr) {
-    return fd->value == 2 ? "process.stderr" : "process.stdout";
+  if (isStdout && fd != nullptr) {
+    ProcessMember stream = fd->value == 2 ? ProcessMember::STDERR : ProcessMember::STDOUT;
+    return ProcessQualifiedNameTable::getQualifiedName(stream).str();
   }
 
   return std::nullopt;
 }
 
 EmitterChecker::EmitterMethod EmitterChecker::emitterMethod(llvm::StringRef name) const {
-  if (name == "on" || name == "addListener" || name == "prependListener" || name == "once" ||
-      name == "prependOnceListener") {
-    return EmitterMethod::Listen;
+  auto member = EmitterMemberTable::find(name);
+  if (!member.has_value()) {
+    return EmitterMethod::None;
   }
-  if (name == "off" || name == "removeListener") {
-    return EmitterMethod::Remove;
-  }
-  if (name == "emit") {
-    return EmitterMethod::Emit;
-  }
-  if (name == "listeners") {
-    return EmitterMethod::Listeners;
-  }
-  if (name == "rawListeners") {
-    return EmitterMethod::RawListeners;
-  }
-  if (name == "listenerCount") {
-    return EmitterMethod::Count;
-  }
-  if (name == "removeAllListeners") {
-    return EmitterMethod::RemoveAll;
+  switch (*member) {
+    case EmitterMember::ON:
+    case EmitterMember::ADD_LISTENER:
+    case EmitterMember::PREPEND_LISTENER:
+    case EmitterMember::ONCE:
+    case EmitterMember::PREPEND_ONCE_LISTENER:
+      return EmitterMethod::Listen;
+    case EmitterMember::OFF:
+    case EmitterMember::REMOVE_LISTENER:
+      return EmitterMethod::Remove;
+    case EmitterMember::EMIT:
+      return EmitterMethod::Emit;
+    case EmitterMember::LISTENERS:
+      return EmitterMethod::Listeners;
+    case EmitterMember::RAW_LISTENERS:
+      return EmitterMethod::RawListeners;
+    case EmitterMember::LISTENER_COUNT:
+      return EmitterMethod::Count;
+    case EmitterMember::REMOVE_ALL_LISTENERS:
+      return EmitterMethod::RemoveAll;
+    case EmitterMember::EVENT_NAMES:
+      break;
   }
 
   return EmitterMethod::None;
 }
 
 void EmitterChecker::noteListener(MemberExpr *member, const Type *events, llvm::StringRef event) {
-  if (event == "error") {
+  bool isErrorEvent = EmitterEventTable::find(event) == EmitterEvent::ERROR_EVENT;
+  if (isErrorEvent) {
     this->state.getEventStore().markErrorListened(events);
   }
   if (events->isRecord()) {
     return;
   }
-  const auto *errors = this->eventMaps->findEventArgs(events, "error");
-  if (event != "error" && errors == nullptr) {
+  auto errorName = EmitterEventTable::getName(EmitterEvent::ERROR_EVENT);
+  const auto *errors = this->eventMaps->findEventArgs(events, errorName);
+  if (!isErrorEvent && errors == nullptr) {
     return;
   }
   const Expr *root = member->object;
@@ -151,7 +168,7 @@ void EmitterChecker::noteListener(MemberExpr *member, const Type *events, llvm::
     root = chained->object;
   }
   auto key = this->keyOf(root);
-  if (event == "error") {
+  if (isErrorEvent) {
     this->state.getFlowState().listenForErrors(key);
     return;
   }
@@ -350,7 +367,7 @@ bool EmitterChecker::reportCapturesKept(const Expr *arg,
   }
   const VarSymbol *kept = captured[0];
   for (const VarSymbol *variable : captured) {
-    if (variable->name == "this") {
+    if (KeywordTable::find(variable->name) == Keyword::THIS) {
       kept = variable;
     }
   }
@@ -522,7 +539,7 @@ bool EmitterChecker::isOwnEmit(const EventSite *site, const SentEmit &emit) cons
   const Expr *object = emit.member->object;
   object = ExprParts::withoutImplicitCasts(object);
   auto *self = dyn_cast<NameExpr>(object);
-  if (self != nullptr && self->name == "this") {
+  if (self != nullptr && KeywordTable::find(self->name) == Keyword::THIS) {
     return true;
   }
   auto *module = this->eventMapInference->findModuleAt(emit.call->loc());
@@ -588,7 +605,7 @@ Expr *EmitterChecker::collectEmitterCall(const SentEmit &emit, EventSite *site,
   if (this->state.getFunctionStack().isInsideTrial()) {
     return call;
   }
-  if (event == "error" && !library) {
+  if (EmitterEventTable::find(event) == EmitterEvent::ERROR_EVENT && !library) {
     this->state.getEventStore().addErrorEmit(site->map, member->loc());
   }
   if (this->state.getEventStore().hasFinishedSentEmits()) {
@@ -636,7 +653,8 @@ void EmitterChecker::finishEmit(const SentEmit &emit, const Type *args) {
     call->args[1] = this->typeRelations->coerce(call->args[1], args->fields()[0].type);
   }
   std::vector<bool> given(call->args.size(), true);
-  this->callLibraryMethod(call, emit.member, emit.cls, "emit", {args}, &given, emit.callReceiver);
+  auto emitName = EmitterMemberTable::getName(EmitterMember::EMIT);
+  this->callLibraryMethod(call, emit.member, emit.cls, emitName, {args}, &given, emit.callReceiver);
 }
 
 void EmitterChecker::finishSentEmits() {
@@ -843,7 +861,7 @@ Expr *EmitterChecker::checkEmitShape(const EmitterCall &emitter, const EmitShape
     this->walkLooseArgs(call, 1);
     return call;
   }
-  if (shape.event == "error" && !library) {
+  if (EmitterEventTable::find(shape.event) == EmitterEvent::ERROR_EVENT && !library) {
     this->state.getEventStore().addErrorEmit(emitter.events, member->loc());
   }
   std::vector<bool> given(call->args.size(), false);
@@ -852,7 +870,9 @@ Expr *EmitterChecker::checkEmitShape(const EmitterCall &emitter, const EmitShape
     return call;
   }
 
-  return this->callLibraryMethod(call, member, emitter.cls, "emit", {shape.args}, &given,
+  auto emitName = EmitterMemberTable::getName(EmitterMember::EMIT);
+
+  return this->callLibraryMethod(call, member, emitter.cls, emitName, {shape.args}, &given,
                                  emitter.callReceiver);
 }
 
@@ -942,7 +962,8 @@ Expr *EmitterChecker::checkListenersCall(const EmitterCall &emitter, EmitterMeth
       this->state.getAst().make<BoolLitExpr>(call->loc(), kind == EmitterMethod::RawListeners);
   call->args.push_back(this->exprChecker->checkExpr(raw));
   std::vector<bool> given(call->args.size(), true);
-  this->callLibraryMethod(call, emitter.member, emitter.cls, "listenersOf", {args}, &given,
+  auto listenersOf = LibraryMethodTable::getName(LibraryMethod::LISTENERS_OF);
+  this->callLibraryMethod(call, emitter.member, emitter.cls, listenersOf, {args}, &given,
                           emitter.callReceiver);
   call->type = Type::array(this->eventMaps->listenerType(args, Type::voidTy()));
 

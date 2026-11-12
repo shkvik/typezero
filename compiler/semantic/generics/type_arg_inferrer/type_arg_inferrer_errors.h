@@ -14,6 +14,12 @@ struct TypeArgInferrerParamInferredError {
   std::string message;
 };
 
+class ErrorTextTypeArgSample {
+public:
+  static std::string single();
+  static std::string list();
+};
+
 class ErrorTextParamInferred {
 public:
   static std::string cannot(llvm::StringRef param, llvm::StringRef name, bool call,

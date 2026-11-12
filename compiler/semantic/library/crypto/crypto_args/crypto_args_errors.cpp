@@ -128,8 +128,109 @@ std::string ErrorTextCryptoLabel::key() {
   return "key";
 }
 
-std::string ErrorTextCryptoLabel::signature() {
+std::string ErrorTextCryptoLabel::signatureEncoding() {
   return "encoding of the signature";
+}
+
+std::string ErrorTextCryptoLabel::privateKey() {
+  return "private key";
+}
+
+std::string ErrorTextCryptoLabel::publicKey() {
+  return "public key";
+}
+
+std::string ErrorTextCryptoLabel::otherKey() {
+  return "other key";
+}
+
+std::string ErrorTextCryptoLabel::signature() {
+  return "signature";
+}
+
+std::string ErrorTextCryptoLabel::data() {
+  return "data";
+}
+
+std::string ErrorTextCryptoLabel::password() {
+  return "password";
+}
+
+std::string ErrorTextCryptoLabel::salt() {
+  return "salt";
+}
+
+std::string ErrorTextCryptoLabel::iterations() {
+  return "iterations";
+}
+
+std::string ErrorTextCryptoLabel::keylen() {
+  return "keylen";
+}
+
+std::string ErrorTextCryptoLabel::ikm() {
+  return "ikm";
+}
+
+std::string ErrorTextCryptoLabel::info() {
+  return "info";
+}
+
+std::string ErrorTextCryptoLabel::iv() {
+  return "iv";
+}
+
+std::string ErrorTextCryptoLabel::candidate() {
+  return "candidate";
+}
+
+std::string ErrorTextCryptoLabel::size() {
+  return "size";
+}
+
+std::string ErrorTextCryptoLabel::aad() {
+  return "AAD";
+}
+
+std::string ErrorTextCryptoLabel::tag() {
+  return "tag";
+}
+
+std::string ErrorTextCryptoLabel::subjectOption() {
+  return "subject option";
+}
+
+std::string ErrorTextCryptoMethods::of(Type::Crypto kind) {
+  switch (kind) {
+    case Type::Crypto::Hash:
+      return "'update', 'digest' and 'copy'";
+    case Type::Crypto::Hmac:
+      return "'update' and 'digest'";
+    case Type::Crypto::Cipheriv:
+      return "'update', 'final', 'setAAD', 'getAuthTag' and 'setAutoPadding'";
+    case Type::Crypto::Decipheriv:
+      return "'update', 'final', 'setAAD', 'setAuthTag' and 'setAutoPadding'";
+    case Type::Crypto::KeyObject:
+      return "'export' and 'equals', and the properties 'type', 'asymmetricKeyType' and "
+             "'symmetricKeySize'";
+    case Type::Crypto::Sign:
+      return "'update' and 'sign'";
+    case Type::Crypto::Verify:
+      return "'update' and 'verify'";
+    case Type::Crypto::Ecdh:
+      return "'generateKeys', 'computeSecret', 'getPublicKey', 'getPrivateKey' and "
+             "'setPrivateKey'";
+    case Type::Crypto::X509:
+      return "'checkHost', 'checkEmail', 'checkIP', 'checkIssued', 'checkPrivateKey', 'verify', "
+             "'toString' and 'toJSON', and the properties 'subject', 'issuer', 'subjectAltName', "
+             "'infoAccess', 'validFrom', 'validTo', 'validFromDate', 'validToDate', "
+             "'serialNumber', 'fingerprint', 'fingerprint256', 'fingerprint512', 'keyUsage', "
+             "'ca', 'raw' and 'publicKey'";
+    case Type::Crypto::None:
+      break;
+  }
+
+  return "";
 }
 
 }

@@ -16,6 +16,9 @@ enum class LibraryType {
   WRITE_CHUNK,
   READ_STREAM_OPTIONS,
   WRITE_STREAM_OPTIONS,
+  HTTP_STATUS,
+  REQUEST_INIT,
+  REQUEST_OPTIONS,
 };
 
 struct LibraryTypeInfo {

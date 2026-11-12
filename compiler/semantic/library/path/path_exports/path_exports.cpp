@@ -1,26 +1,19 @@
 #include "compiler/semantic/library/path/path_exports/path_exports.h"
-#include "llvm/ADT/STLExtras.h"
+#include "compiler/program/library/builtin_modules/pending_export_table/pending_export_table.h"
+#include "compiler/program/library/path/path_function_table/path_function_table.h"
+#include "compiler/program/library/path/path_value_table/path_value_table.h"
 
 namespace tz {
 
-namespace {
-
-const llvm::StringLiteral kPathFunctions[] = {
-    "join",    "resolve",  "normalize", "isAbsolute", "dirname",         "basename",
-    "extname", "relative", "parse",     "format",     "toNamespacedPath"};
-
-const llvm::StringLiteral kPathExports[] = {"sep",   "delimiter",   "posix",
-                                            "win32", "matchesGlob", "_makeLong"};
-
-}
-
 PathExports::ResultExportFound PathExports::checkPathExport(llvm::StringRef name,
                                                             llvm::StringRef path) {
-  if (llvm::is_contained(kPathFunctions, name) || name == "sep" || name == "delimiter" ||
-      name == "posix" || name == "win32") {
+  bool isExported = PathFunctionTable::find(name) != nullptr ||
+                    PathValueTable::find(name).has_value() ||
+                    KnownModules::findSubmodule(NodeModule::Path, name).has_value();
+  if (isExported) {
     return ok(name);
   }
-  if (llvm::is_contained(kPathExports, name)) {
+  if (PendingExportTable::isListed(NodeModule::Path, name)) {
     auto message = ErrorTextModuleExport::notYet(name, path);
 
     return err(ModuleExportFoundError{

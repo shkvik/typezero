@@ -4,6 +4,7 @@
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/program/library/iterator/iterator_method_table/iterator_method_table.h"
+#include "compiler/program/library/iterator/iterator_result_field_table/iterator_result_field_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -24,13 +25,6 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
-
-namespace {
-
-constexpr const char *kDoneField = "done";
-constexpr const char *kValueField = "value";
-
-}
 
 IteratorMethods::IteratorMethods(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -499,7 +493,10 @@ const Type *IteratorMethods::stepResultType(const Type *value) const {
   auto name = resultName.str() + "<" + value->name().str() + ">";
 
   return Type::object(
-      {{kValueField, Type::optional(value), false}, {kDoneField, Type::boolTy(), false}}, name);
+      {{IteratorResultFieldTable::getName(IteratorResultField::VALUE).str(), Type::optional(value),
+        false},
+       {IteratorResultFieldTable::getName(IteratorResultField::DONE).str(), Type::boolTy(), false}},
+      name);
 }
 
 std::optional<Builtin> IteratorMethods::helperBuiltin(CallExpr *call, MemberExpr *member) {

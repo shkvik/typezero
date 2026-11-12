@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/classes/class_checker/class_checker.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
 #include "compiler/semantic/bodies/classes/class_links/class_links.h"
 #include "compiler/semantic/bodies/classes/decorator_checker/decorator_checker.h"
 #include "compiler/semantic/bodies/classes/inherit_checker/inherit_checker.h"
@@ -22,7 +23,6 @@ namespace tz {
 
 namespace {
 
-constexpr const char *kThisName = "this";
 constexpr const char *kMemberPlaceholder = "x";
 
 }
@@ -224,7 +224,7 @@ ClassChecker::ResultNewThisSymbol ClassChecker::declareThis(FunctionDecl *functi
     });
   }
   auto *self = this->state.getAst().newVar();
-  self->name = kThisName;
+  self->name = KeywordTable::getName(Keyword::THIS);
   self->loc = functionDecl->loc();
   self->type = functionDecl->cls()->type;
   self->isConst = true;

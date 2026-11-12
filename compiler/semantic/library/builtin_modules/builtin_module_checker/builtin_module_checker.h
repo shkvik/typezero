@@ -42,7 +42,6 @@ public:
 private:
   MemberExpr *processMember(AstContext &context, llvm::SMLoc loc, llvm::StringRef name) const;
 
-  llvm::StringRef typicalName(NodeModule module) const;
   bool isPathModule(NodeModule module) const;
   ResultModuleExport checkModuleExport(NodeModule module, llvm::StringRef name,
                                        llvm::StringRef path) const;

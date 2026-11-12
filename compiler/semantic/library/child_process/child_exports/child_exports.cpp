@@ -1,22 +1,15 @@
 #include "compiler/semantic/library/child_process/child_exports/child_exports.h"
-#include "llvm/ADT/STLExtras.h"
+#include "compiler/program/library/child_process/child_export_table/child_export_table.h"
 
 namespace tz {
 
-namespace {
-
-const llvm::StringLiteral kChildExports[] = {"ChildProcess", "_forkChild",   "exec",
-                                             "execFile",     "execFileSync", "execSync",
-                                             "fork",         "spawn",        "spawnSync"};
-
-}
-
 ChildExports::ResultExportFound ChildExports::checkChildExport(llvm::StringRef name,
                                                                llvm::StringRef path) {
-  if (name == "spawnSync" || name == "execFileSync" || name == "execSync") {
+  auto exported = ChildExportTable::find(name);
+  if (exported == ChildExport::SYNC_FUNCTION) {
     return ok(name);
   }
-  if (name == "spawn" || name == "exec" || name == "execFile") {
+  if (exported == ChildExport::ASYNC_FUNCTION) {
     auto message = ErrorTextChildExport::async(name, path);
 
     return err(ModuleExportFoundError{
@@ -24,7 +17,7 @@ ChildExports::ResultExportFound ChildExports::checkChildExport(llvm::StringRef n
         .message = message,
     });
   }
-  if (name == "fork") {
+  if (exported == ChildExport::FORK) {
     auto message = ErrorTextChildExport::fork(name, path);
 
     return err(ModuleExportFoundError{
@@ -32,7 +25,7 @@ ChildExports::ResultExportFound ChildExports::checkChildExport(llvm::StringRef n
         .message = message,
     });
   }
-  if (llvm::is_contained(kChildExports, name)) {
+  if (exported == ChildExport::NOT_YET) {
     auto message = ErrorTextChildExport::notYet(name, path);
 
     return err(ModuleExportFoundError{

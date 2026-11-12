@@ -16,7 +16,6 @@ public:
   const Type *spawnResult(bool isText);
 
 private:
-  std::string errorBaseName(ChildFunction function, bool isShell) const;
 
   SemanticState &state;
   BuiltinModuleTypes *builtinModuleTypes = nullptr;

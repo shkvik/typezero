@@ -46,6 +46,18 @@ const LibraryTypeInfo kRows[] = {
         .name = "WriteStreamOptions",
         .value = LibraryType::WRITE_STREAM_OPTIONS,
     },
+    {
+        .name = "HttpStatus",
+        .value = LibraryType::HTTP_STATUS,
+    },
+    {
+        .name = "RequestInit",
+        .value = LibraryType::REQUEST_INIT,
+    },
+    {
+        .name = "RequestOptions",
+        .value = LibraryType::REQUEST_OPTIONS,
+    },
 };
 
 }

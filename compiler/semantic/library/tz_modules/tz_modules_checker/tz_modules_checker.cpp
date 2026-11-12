@@ -1,4 +1,7 @@
 #include "compiler/semantic/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
+#include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
+#include "compiler/program/library/builtin_names/library_method_table/library_method_table.h"
+#include "compiler/program/library/http/connect_option_table/connect_option_table.h"
 #include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
@@ -10,13 +13,6 @@ using llvm::dyn_cast;
 using llvm::dyn_cast_or_null;
 
 namespace tz {
-
-namespace {
-
-constexpr llvm::StringLiteral kSecureOption = "secure";
-constexpr llvm::StringLiteral kTransportOption = "transport";
-
-}
 
 TzModulesChecker::TzModulesChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -36,7 +32,7 @@ bool TzModulesChecker::isPlainTransport(const Expr *transport) const {
     if (property.spread()) {
       return false;
     }
-    if (property.name == kSecureOption) {
+    if (ConnectOptionTable::find(property.name) == ConnectOption::SECURE) {
       return this->isInsecureValue(property.value);
     }
   }
@@ -225,8 +221,9 @@ const Expr *TzModulesChecker::prefixInner(const Expr *expr) const {
 
 const Expr *TzModulesChecker::addressArgument(const NewExpr *made) const {
   const ClassDecl *classDecl = made->cls();
-  bool isRequest = classDecl != nullptr && classDecl->library() && classDecl->name == "Request";
-  bool isUrl = classDecl != nullptr && classDecl->library() && classDecl->name == "URL";
+  bool isLibrary = classDecl != nullptr && classDecl->library();
+  bool isRequest = isLibrary && LibraryClassTable::isName(classDecl->name, LibraryClass::REQUEST);
+  bool isUrl = isLibrary && LibraryClassTable::isName(classDecl->name, LibraryClass::URL);
   if (!isRequest && !isUrl) {
     return nullptr;
   }
@@ -270,7 +267,8 @@ void TzModulesChecker::noteHttpsCall(CallExpr *call, const FunctionDecl *functio
       call->args.empty() || this->libraryCalls->isInLibrary(call->loc())) {
     return;
   }
-  if (functionDecl == this->state.getLibraryDeclarations().findLibraryFunction("fetch")) {
+  if (functionDecl ==
+      this->state.getLibraryDeclarations().findLibraryFunction(LibraryFunction::FETCH)) {
     std::string prefix = llvm::StringRef(this->knownPrefix(call->args[0])).lower();
     if (!llvm::StringRef(prefix).starts_with("http://") &&
         !llvm::StringRef(prefix).starts_with("data:")) {
@@ -297,8 +295,9 @@ void TzModulesChecker::noteServeOptions(const Expr *options) {
       this->state.getInventoryStore().markUsesTls();
     }
   } else {
-    bool isSecured = bare->type == nullptr || !bare->type->isObject() ||
-                     bare->type->field(kTransportOption) != nullptr;
+    bool isSecured =
+        bare->type == nullptr || !bare->type->isObject() ||
+        bare->type->field(ConnectOptionTable::getName(ConnectOption::TRANSPORT)) != nullptr;
     if (isSecured) {
       this->state.getInventoryStore().markUsesTls();
     }
@@ -307,16 +306,18 @@ void TzModulesChecker::noteServeOptions(const Expr *options) {
 
 bool TzModulesChecker::isSecuredProperty(const ObjectLitExpr::Property &property) const {
   return property.spread() ||
-         (property.name == kTransportOption && !this->isPlainTransport(property.value));
+         (ConnectOptionTable::find(property.name) == ConnectOption::TRANSPORT &&
+          !this->isPlainTransport(property.value));
 }
 
 void TzModulesChecker::noteTlsMethod(const MemberExpr *member, const ClassDecl *classDecl) {
-  if (this->state.getInventoryStore().isUsingTls() || member->name != "startTls" ||
+  auto startTls = LibraryMethodTable::getName(LibraryMethod::START_TLS);
+  if (this->state.getInventoryStore().isUsingTls() || member->name != startTls ||
       this->libraryCalls->isInLibrary(member->loc())) {
     return;
   }
   for (; classDecl != nullptr; classDecl = classDecl->parent) {
-    if (classDecl->library() && classDecl->name == "Socket") {
+    if (classDecl->library() && LibraryClassTable::isName(classDecl->name, LibraryClass::SOCKET)) {
       this->state.getInventoryStore().markUsesTls();
       return;
     }
@@ -325,7 +326,8 @@ void TzModulesChecker::noteTlsMethod(const MemberExpr *member, const ClassDecl *
 
 void TzModulesChecker::noteHttpsValue(const FunctionDecl *functionDecl, llvm::SMLoc loc) {
   if (functionDecl != nullptr && !this->libraryCalls->isInLibrary(loc) &&
-      functionDecl == this->state.getLibraryDeclarations().findLibraryFunction("fetch")) {
+      functionDecl ==
+          this->state.getLibraryDeclarations().findLibraryFunction(LibraryFunction::FETCH)) {
     this->state.getInventoryStore().markUsesTls();
   }
 }

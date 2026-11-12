@@ -1,6 +1,10 @@
 #include "compiler/semantic/library/stream/set_encoding_checker/set_encoding_checker.h"
 #include "compiler/program/ast_walker/ast_walker.h"
 #include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
+#include "compiler/program/library/builtin_names/library_method_table/library_method_table.h"
+#include "compiler/program/library/events/emitter_member_table/emitter_member_table.h"
+#include "compiler/program/library/process/process_function_table/process_function_table.h"
+#include "compiler/program/library/stream/stream_method_table/stream_method_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
@@ -171,7 +175,8 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member,
 
 Expr *SetEncodingChecker::plainSetEncoding(CallExpr *call, MemberExpr *member, ClassDecl *classDecl,
                                            const Type *receiver) {
-  this->emitterChecker->callLibraryMethod(call, member, classDecl, "setEncoding", {}, nullptr,
+  auto setEncoding = LibraryMethodTable::getName(LibraryMethod::SET_ENCODING);
+  this->emitterChecker->callLibraryMethod(call, member, classDecl, setEncoding, {}, nullptr,
                                           CallReceiver::OWN);
   if (!call->type->isError()) {
     call->type = receiver;
@@ -194,7 +199,9 @@ const Expr *SetEncodingChecker::withoutImplicit(const Expr *expr) const {
 bool SetEncodingChecker::isStdinCall(const Expr *expr) const {
   auto *call = dyn_cast<CallExpr>(expr);
 
-  return call != nullptr && call->func() != nullptr && call->func()->name == "processStdin";
+  auto stdinName = ProcessFunctionTable::getName(ProcessFunction::STDIN);
+
+  return call != nullptr && call->func() != nullptr && call->func()->name == stdinName;
 }
 
 std::optional<FieldPath> SetEncodingChecker::encodingPath(const Expr *object, bool stdinStream) {
@@ -340,8 +347,6 @@ std::vector<const Stmt *> SetEncodingChecker::encodingBody(const EncodingRun &ru
 }
 
 void SetEncodingChecker::classifyUse(EncodingRun &run, const Expr *expr) const {
-  static const llvm::StringLiteral listening[] = {
-      "on", "once", "addListener", "prependListener", "prependOnceListener", "pipe"};
   if (!this->isBefore(run, expr)) {
     return;
   }
@@ -351,7 +356,7 @@ void SetEncodingChecker::classifyUse(EncodingRun &run, const Expr *expr) const {
     if (member == nullptr || !this->isEncodingPath(run, member->object)) {
       return;
     }
-    if (llvm::is_contained(listening, member->name)) {
+    if (this->isListeningMethod(member->name)) {
       run.escapes.push_back({member->loc(), ErrorTextEncodingUse::listeners(member->name)});
     } else {
       run.safe.insert(this->withoutImplicit(member->object));
@@ -389,6 +394,16 @@ void SetEncodingChecker::reportFirstEscape(const EncodingRun &run, llvm::SMLoc l
   auto usedHere = ErrorTextSetEncoding::usedHere();
   this->state.getDiagnostics().error(loc, message);
   this->state.getDiagnostics().note(first->loc, usedHere);
+}
+
+bool SetEncodingChecker::isListeningMethod(llvm::StringRef name) const {
+  auto member = EmitterMemberTable::find(name);
+  bool isListen = member == EmitterMember::ON || member == EmitterMember::ONCE ||
+                  member == EmitterMember::ADD_LISTENER ||
+                  member == EmitterMember::PREPEND_LISTENER ||
+                  member == EmitterMember::PREPEND_ONCE_LISTENER;
+
+  return isListen || StreamMethodTable::find(name) == StreamMethod::PIPE;
 }
 
 }

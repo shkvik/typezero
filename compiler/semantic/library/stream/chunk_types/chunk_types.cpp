@@ -284,8 +284,9 @@ ChunkTypes::checkHookParams(const FunctionDecl *functionDecl,
         .message = "",
     });
   }
-  bool hasChunks = functionDecl->name == "onWrite" || functionDecl->name == "onWritev" ||
-                   functionDecl->name == "onTransform";
+  auto named = StreamHookTable::find(functionDecl->name);
+  bool hasChunks = named == StreamHook::ON_WRITE || named == StreamHook::ON_WRITEV ||
+                   named == StreamHook::ON_TRANSFORM;
   auto params = ErrorTextStreamHook::params(hook);
   auto message = ErrorTextStreamHook::other(functionDecl->name, params, hasChunks);
 

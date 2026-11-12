@@ -1,16 +1,22 @@
 #include "compiler/semantic/library/crypto/crypto_exports/crypto_exports.h"
-#include "compiler/semantic/library/crypto/crypto_names/crypto_names.h"
+#include "compiler/program/library/crypto/crypto_async_function_table/crypto_async_function_table.h"
+#include "compiler/program/library/crypto/crypto_class_table/crypto_class_table.h"
+#include "compiler/program/library/crypto/crypto_export_table/crypto_export_table.h"
+#include "compiler/program/library/crypto/crypto_sync_function_table/crypto_sync_function_table.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace tz {
 
 CryptoExports::ResultExportFound CryptoExports::checkCryptoExport(llvm::StringRef name,
                                                                   llvm::StringRef path) {
-  if (llvm::is_contained(kFunctions, name) || llvm::is_contained(kClasses, name) ||
-      name == "constants") {
+  const CryptoAsyncFunctionInfo *async = CryptoAsyncFunctionTable::find(name);
+  bool isFunction = CryptoSyncFunctionTable::find(name).has_value() ||
+                    (async != nullptr && async->module == NodeModule::Crypto);
+  if (isFunction || CryptoClassTable::find(name).has_value()) {
     return ok(name);
   }
-  if (name == "webcrypto") {
+  auto exported = CryptoExportTable::find(name);
+  if (exported == CryptoExport::WEBCRYPTO) {
     auto message = ErrorTextCryptoExport::webcrypto(name, path);
 
     return err(ModuleExportFoundError{
@@ -18,7 +24,7 @@ CryptoExports::ResultExportFound CryptoExports::checkCryptoExport(llvm::StringRe
         .message = message,
     });
   }
-  if (name == "subtle") {
+  if (exported == CryptoExport::SUBTLE) {
     auto message = ErrorTextCryptoExport::subtle(name, path);
 
     return err(ModuleExportFoundError{
@@ -26,7 +32,7 @@ CryptoExports::ResultExportFound CryptoExports::checkCryptoExport(llvm::StringRe
         .message = message,
     });
   }
-  if (llvm::is_contained(kExports, name)) {
+  if (exported == CryptoExport::NOT_YET) {
     auto message = ErrorTextModuleExport::notYet(name, path);
 
     return err(ModuleExportFoundError{
@@ -44,10 +50,9 @@ CryptoExports::ResultExportFound CryptoExports::checkCryptoExport(llvm::StringRe
 
 CryptoExports::ResultExportFound CryptoExports::checkTzCryptoExport(llvm::StringRef name,
                                                                     llvm::StringRef path) {
-  for (const auto &form : kTzCryptoAsyncForms) {
-    if (name == form.first) {
-      return ok(name);
-    }
+  const CryptoAsyncFunctionInfo *async = CryptoAsyncFunctionTable::find(name);
+  if (async != nullptr && async->module == NodeModule::TzCrypto) {
+    return ok(name);
   }
   auto message = ErrorTextModuleExport::none(path, name);
 

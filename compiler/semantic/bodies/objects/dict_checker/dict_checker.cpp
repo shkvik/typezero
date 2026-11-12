@@ -482,7 +482,7 @@ DictChecker::checkDictDelete(UnaryExpr *unary, Expr *object, Expr *keyExpr, llvm
       this->exprChecker->checkExpr(keyExpr);
     }
     auto kind = this->collectionName(type);
-    const char *what = type->isMap() ? "key" : "value";
+    auto what = ErrorTextDictDelete::entryPart(type->isMap());
     auto message = ErrorTextDictDelete::property(kind, text, what);
 
     return err(DictCheckerCheckDictDeleteError{
@@ -525,7 +525,7 @@ DictChecker::ResultRecordKeyChecked DictChecker::checkDictIn(BinaryExpr *binary)
   if (!type->isRecord()) {
     auto text = DictCheckHelpers::dictText(binary->rhs, type);
     auto kind = this->collectionName(type);
-    const char *what = type->isMap() ? "key" : "value";
+    auto what = ErrorTextDictDelete::entryPart(type->isMap());
     auto message = ErrorTextDictIn::property(kind, text, what);
 
     return err(DictCheckerCheckDictInError{

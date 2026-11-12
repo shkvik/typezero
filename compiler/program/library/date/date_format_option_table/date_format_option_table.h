@@ -1,7 +1,9 @@
 #pragma once
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
 #include <optional>
+#include <vector>
 
 namespace tz {
 
@@ -31,11 +33,14 @@ enum class DateFormatOption {
 struct DateFormatOptionInfo {
   llvm::StringLiteral name;
   DateFormatOption value;
+  std::vector<llvm::StringLiteral> values;
 };
 
 class DateFormatOptionTable {
 public:
   static std::optional<DateFormatOption> find(llvm::StringRef name);
+  static llvm::ArrayRef<DateFormatOptionInfo> getOptions();
+  static llvm::ArrayRef<llvm::StringLiteral> getValues(llvm::StringRef name);
 };
 
 }

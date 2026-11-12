@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/classes/inherit_checker/inherit_checker.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
 #include "compiler/program/library/object/object_member_table/object_member_table.h"
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/bodies/classes/class_checker/class_checker.h"
@@ -19,12 +20,6 @@
 #include "llvm/ADT/STLExtras.h"
 
 namespace tz {
-
-namespace {
-
-constexpr const char *kThisName = "this";
-
-}
 
 InheritChecker::InheritChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -683,7 +678,8 @@ FunctionDecl *InheritChecker::methodWithThis(FunctionDecl *functionDecl) const {
 }
 
 bool InheritChecker::prepareSuperObject(MemberExpr *member) {
-  auto *self = this->state.getAst().make<NameExpr>(member->object->loc(), kThisName);
+  auto *self = this->state.getAst().make<NameExpr>(member->object->loc(),
+                                                   KeywordTable::getName(Keyword::THIS));
   this->state.getClassContext().rememberThisMember(member->name);
   auto reference = this->classChecker->checkThis(self);
   this->state.getClassContext().forgetThisMember();

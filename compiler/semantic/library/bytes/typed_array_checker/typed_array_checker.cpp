@@ -445,15 +445,17 @@ IntLitExpr *TypedArrayChecker::makeIntLiteral(llvm::SMLoc loc, int value) {
 
 Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
-  BytesNumberMethod m;
-  if (!BytesCheckHelpers::numberMethod(name, true, m)) {
+  auto parsed = NumberMethodTable::parse(name, true);
+  if (!parsed.has_value()) {
     for (Expr *&arg : call->args) {
       arg = this->exprChecker->checkExpr(arg);
     }
-    auto message = ErrorTextTypedArray::noMember(name, "DataView");
+    auto viewName = Type::bytesType(Type::Bytes::DataView)->name();
+    auto message = ErrorTextTypedArray::noMember(name, viewName);
     this->state.getDiagnostics().error(member->loc(), message);
     return call;
   }
+  BytesNumberMethod m = *parsed;
   if (m.bigint) {
     auto quoted = ErrorTextBigInt::quoted(name);
     auto bigint = ErrorTextBigInt::none(quoted);

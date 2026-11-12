@@ -50,7 +50,7 @@ private:
   };
 
   Expr *checkStageValue(Expr *arg, const Type *chunk, bool first);
-  Expr *stageCall(const StageShape &stage, llvm::StringRef functionName,
+  Expr *stageCall(const StageShape &stage, LibraryFunction function,
                   std::vector<const Type *> bound, Expr *value);
   Expr *asPipelineStage(const StageShape &stage, Expr *made);
   Expr *streamClassStage(Expr *arg, const Type *&chunk, const StageShape &stage,

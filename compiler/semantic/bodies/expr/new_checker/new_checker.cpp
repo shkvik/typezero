@@ -1,6 +1,7 @@
 #include "compiler/semantic/bodies/expr/new_checker/new_checker.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
+#include "compiler/program/library/intl/intl_type_name_table/intl_type_name_table.h"
 #include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
 #include "compiler/semantic/bodies/classes/method_call_checker/method_call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -34,12 +35,6 @@
 using llvm::dyn_cast;
 
 namespace tz {
-
-namespace {
-
-constexpr llvm::StringLiteral kDateTimeFormatName = "DateTimeFormat";
-
-}
 
 NewChecker::NewChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -276,7 +271,7 @@ Expr *NewChecker::checkNamespaceNew(NewExpr *expr, const Type *expected,
   if (isGlobalIntl && isLocale) {
     return this->intlChecker->checkLocaleNew(expr, expected);
   }
-  if (isGlobalIntl && expr->member == kDateTimeFormatName) {
+  if (isGlobalIntl && IntlTypeNameTable::find(expr->member) == IntlTypeName::DATE_TIME_FORMAT) {
     return this->dateFormatChecker->checkDateFormatNew(expr->loc(), expr->args);
   }
   if (isGlobalIntl) {

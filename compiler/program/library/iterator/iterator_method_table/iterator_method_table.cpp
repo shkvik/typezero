@@ -1,4 +1,5 @@
 #include "compiler/program/library/iterator/iterator_method_table/iterator_method_table.h"
+#include "llvm/Support/ErrorHandling.h"
 
 namespace tz {
 
@@ -87,6 +88,15 @@ const IteratorMethodInfo *IteratorMethodTable::find(llvm::StringRef name) {
   }
 
   return nullptr;
+}
+
+llvm::StringRef IteratorMethodTable::getName(IteratorMethod method) {
+  for (const IteratorMethodInfo &info : kIteratorMethods) {
+    if (info.method == method) {
+      return info.name;
+    }
+  }
+  llvm_unreachable("iterator method missing from the table");
 }
 
 }

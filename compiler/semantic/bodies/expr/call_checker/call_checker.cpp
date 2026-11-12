@@ -2,6 +2,7 @@
 #include "compiler/program/library/array/array_method_table/array_method_table.h"
 #include "compiler/program/library/builtin_names/global_member_table/global_member_table.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
 #include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
 #include "compiler/program/library/function/function_method_table/function_method_table.h"
 #include "compiler/program/library/iterator/iterator_method_table/iterator_method_table.h"
@@ -78,8 +79,6 @@ namespace tz {
 
 namespace {
 
-constexpr const char *kThisName = "this";
-constexpr const char *kSuperName = "super";
 constexpr const char *kIteratorMethod = "[Symbol.iterator]";
 constexpr const char *kAsyncIteratorMethod = "[Symbol.asyncIterator]";
 
@@ -209,7 +208,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
   this->argListChecker->expandListSpreads(call->args, call->spread);
   this->rewriteSymbolCallee(call);
   auto *superName = dyn_cast<NameExpr>(call->callee);
-  if (superName != nullptr && superName->name == kSuperName) {
+  if (superName != nullptr && superName->name == KeywordTable::getName(Keyword::SUPER)) {
     return this->inheritChecker->checkSuperCall(call);
   }
   auto *nodeCall = this->builtinModuleChecker->checkNodeCall(call, expected);
@@ -276,7 +275,7 @@ Expr *CallChecker::checkMemberCall(CallExpr *call, MemberExpr *member, const Typ
   }
   this->rejectGlobalTypeArgs(member);
   auto *superObject = dyn_cast<NameExpr>(member->object);
-  if (superObject != nullptr && superObject->name == kSuperName) {
+  if (superObject != nullptr && superObject->name == KeywordTable::getName(Keyword::SUPER)) {
     return this->inheritChecker->checkSuperMethodCall(call, member);
   }
   auto *language = this->checkLanguageStaticCall(call, member, expected);
@@ -292,7 +291,7 @@ Expr *CallChecker::checkMemberCall(CallExpr *call, MemberExpr *member, const Typ
   if (classDecl != nullptr) {
     return this->staticChecker->checkClassStaticCall(call, member, classDecl, expected);
   }
-  if (object != nullptr && object->name == kThisName) {
+  if (object != nullptr && object->name == KeywordTable::getName(Keyword::THIS)) {
     this->state.getClassContext().rememberThisMember(member->name);
   }
   auto *collection = this->checkCollectionStaticCall(call, member);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "llvm/ADT/StringRef.h"
+#include <string>
 
 namespace tz {
 
@@ -28,6 +29,7 @@ struct NumberMethodInfo {
 class NumberMethodTable {
 public:
   static const NumberMethodInfo *find(llvm::StringRef name);
+  static std::string getConversionName(llvm::StringRef typeName);
 };
 
 }

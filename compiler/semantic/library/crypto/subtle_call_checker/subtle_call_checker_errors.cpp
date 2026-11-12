@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/crypto/subtle_call_checker/subtle_call_checker_errors.h"
+#include "compiler/program/library/crypto/subtle_key_usage_table/subtle_key_usage_table.h"
 #include "compiler/semantic/library/crypto/subtle_algorithms/subtle_algorithms.h"
 
 namespace tz {
@@ -9,31 +10,28 @@ std::string ErrorTextKeyFormat::unknown(llvm::StringRef format) {
 
 std::string ErrorTextSubtleUsage::unknown(llvm::StringRef usage) {
   return "usage '" + usage.str() + "' does not exist; the usages are " +
-         SubtleAlgorithms::quotedList(kUsages, "and");
+         SubtleAlgorithms::quotedList(SubtleKeyUsageTable::getNames(), "and");
 }
 
 std::string ErrorTextSubtleUsage::notOf(llvm::StringRef usage, llvm::StringRef name, int isPublic,
-                                        llvm::ArrayRef<llvm::StringLiteral> allowed) {
+                                        bool isSecret, llvm::ArrayRef<llvm::StringRef> allowed) {
   std::string an = llvm::StringRef("EHRAX").contains(name.front()) ? "an " : "a ";
-  std::string what = isPublic == 1 ? "a public " + name.str() + " key"
-                     : isPublic == 0 && name != "HMAC" &&
-                             SubtleAlgorithms::familyOf(name) != "Aes" &&
-                             SubtleAlgorithms::familyOf(name) != "Kdf"
-                         ? "a private " + name.str() + " key"
-                         : an + name.str() + " key";
+  std::string what = isPublic == 1                ? "a public " + name.str() + " key"
+                     : isPublic == 0 && !isSecret ? "a private " + name.str() + " key"
+                                                  : an + name.str() + " key";
   std::string takes = allowed.empty() ? std::string("it takes none: pass []")
                                       : "it takes " + SubtleAlgorithms::quotedList(allowed, "and");
 
   return "'" + usage.str() + "' is no usage of " + what + "; " + takes;
 }
 
-std::string ErrorTextSubtleUsage::empty(llvm::ArrayRef<llvm::StringLiteral> own) {
+std::string ErrorTextSubtleUsage::empty(llvm::ArrayRef<llvm::StringRef> own) {
   return "a key without usages can do nothing, and node rejects it "
          "('Usages cannot be empty'); give its usages, e.g. " +
          SubtleAlgorithms::quotedList(own, "and");
 }
 
-std::string ErrorTextSubtleUsage::pairEmpty(llvm::ArrayRef<llvm::StringLiteral> own) {
+std::string ErrorTextSubtleUsage::pairEmpty(llvm::ArrayRef<llvm::StringRef> own) {
   return "the private key of the pair would have no usages, which node "
          "rejects ('Usages cannot be empty'); add " +
          SubtleAlgorithms::quotedList(own, "or");
@@ -49,20 +47,53 @@ std::string ErrorTextSubtleKeyData::bytes(llvm::StringRef format, llvm::StringRe
 }
 
 std::string ErrorTextSubtleImport::format(llvm::StringRef name, llvm::StringRef format,
-                                          llvm::ArrayRef<llvm::StringLiteral> formats) {
+                                          llvm::ArrayRef<llvm::StringRef> formats) {
   return "'" + name.str() + "' keys are not imported as '" + format.str() +
          "' (node: 'Unable to import " + name.str() + " using " + format.str() +
          " format'); it takes " + SubtleAlgorithms::quotedList(formats, "or");
 }
 
 std::string ErrorTextSubtleImport::unwrap(llvm::StringRef name, llvm::StringRef format,
-                                          llvm::ArrayRef<llvm::StringLiteral> formats) {
+                                          llvm::ArrayRef<llvm::StringRef> formats) {
   return "'" + name.str() + "' keys are not imported as '" + format.str() + "'; it takes " +
          SubtleAlgorithms::quotedList(formats, "or");
 }
 
 std::string ErrorTextSubtleImport::derived(llvm::StringRef name) {
   return "deriveKey makes secret keys: AES, HMAC, HKDF or PBKDF2, not '" + name.str() + "'";
+}
+
+std::string ErrorTextAlgorithm::verb(SubtleOperation operation) {
+  switch (operation) {
+    case SubtleOperation::DIGEST:
+      return "hashes";
+    case SubtleOperation::GENERATE_KEY:
+      return "makes keys";
+    case SubtleOperation::IMPORT_KEY:
+      return "imports keys";
+    case SubtleOperation::ENCRYPT:
+      return "encrypts";
+    case SubtleOperation::DECRYPT:
+      return "decrypts";
+    case SubtleOperation::SIGN:
+      return "signs";
+    case SubtleOperation::VERIFY:
+      return "verifies";
+    case SubtleOperation::DERIVE_BITS:
+      return "derives";
+    case SubtleOperation::WRAP_KEY:
+      return "wraps keys";
+    case SubtleOperation::UNWRAP_KEY:
+      return "unwraps keys";
+    case SubtleOperation::KEY_LENGTH:
+      break;
+  }
+
+  return "derives keys";
+}
+
+std::string ErrorTextAlgorithm::choices(llvm::ArrayRef<llvm::StringRef> names) {
+  return SubtleAlgorithms::quotedList(names, "or");
 }
 
 std::string ErrorTextAlgorithm::experiment(llvm::StringRef written, llvm::StringRef verb,

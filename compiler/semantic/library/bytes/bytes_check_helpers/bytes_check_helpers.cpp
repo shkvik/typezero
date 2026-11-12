@@ -236,22 +236,6 @@ int64_t BytesCheckHelpers::floorShift(int64_t v, int64_t n) {
   return v >= 0 ? v >> n : -((-v + (int64_t(1) << n) - 1) >> n);
 }
 
-std::optional<int> BytesCheckHelpers::encodingNamed(llvm::StringRef name) {
-  static const std::pair<llvm::StringLiteral, Encoding> names[] = {
-      {"utf8", Utf8},    {"utf-8", Utf8},    {"utf16le", Utf16le},     {"utf-16le", Utf16le},
-      {"ucs2", Utf16le}, {"ucs-2", Utf16le}, {"latin1", Latin1},       {"binary", Latin1},
-      {"ascii", Ascii},  {"base64", Base64}, {"base64url", Base64url}, {"hex", Hex},
-  };
-  std::string lower = name.lower();
-  for (const auto &[n, e] : names) {
-    if (n == lower) {
-      return int(e);
-    }
-  }
-
-  return std::nullopt;
-}
-
 std::string BytesCheckHelpers::valueText(const Expr *expr) {
   auto answers = std::vector<std::string>();
   for (const Expr *node : ChildrenFirst::order(expr, BytesCheckHelpers::valueParts)) {
@@ -330,56 +314,6 @@ Range BytesCheckHelpers::operate(BinaryOp op, const Range &a, const Range &b, bo
   }
 
   return r;
-}
-
-bool BytesCheckHelpers::numberMethod(llvm::StringRef name, bool dataView, BytesNumberMethod &m) {
-  llvm::StringRef rest = name;
-  if (dataView) {
-    if (!rest.consume_front("get") && !(m.write = rest.consume_front("set"))) {
-      return false;
-    }
-  } else {
-    if (!rest.consume_front("read") && !(m.write = rest.consume_front("write"))) {
-      return false;
-    }
-    if (rest.consume_back("LE")) {
-      m.big = false;
-    } else if (rest.consume_back("BE")) {
-      m.big = true;
-    } else if (!rest.ends_with("8")) {
-      return false;
-    }
-  }
-  static const std::pair<llvm::StringLiteral, Bytes> kinds[] = {
-      {"Int8", Bytes::Int8},       {"Uint8", Bytes::Uint8},     {"UInt8", Bytes::Uint8},
-      {"Int16", Bytes::Int16},     {"Uint16", Bytes::Uint16},   {"UInt16", Bytes::Uint16},
-      {"Int32", Bytes::Int32},     {"Uint32", Bytes::Uint32},   {"UInt32", Bytes::Uint32},
-      {"Float16", Bytes::Float16}, {"Float32", Bytes::Float32}, {"Float64", Bytes::Float64},
-      {"Float", Bytes::Float32},   {"Double", Bytes::Float64}};
-  for (const auto &[n, kind] : kinds) {
-    if (rest != n) {
-      continue;
-    }
-    bool isFloatName = n == "Float" || n == "Double";
-    bool isDataViewName = n.starts_with("Float") && !isFloatName;
-    if ((dataView && (isFloatName || n.starts_with("UInt"))) || (!dataView && isDataViewName)) {
-      return false;
-    }
-    m.kind = kind;
-    return true;
-  }
-  if (rest.starts_with("BigInt64") || rest.starts_with("BigUint64") ||
-      rest.starts_with("BigUInt64")) {
-    m.bigint = true;
-    return true;
-  }
-  if (!dataView && (rest == "Int" || rest == "UInt" || rest == "Uint")) {
-    m.variable = true;
-    m.isSigned = rest == "Int";
-    return true;
-  }
-
-  return false;
 }
 
 std::string BytesCheckHelpers::numberWhat(Bytes kind) {

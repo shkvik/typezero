@@ -1,5 +1,6 @@
 #include "compiler/semantic/library/regex/regex_checker/regex_checker.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/regex/regex_flag_table/regex_flag_table.h"
 #include "compiler/program/library/regex/regex_member_table/regex_member_table.h"
 #include "compiler/program/library/regex/regex_static_table/regex_static_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
@@ -23,29 +24,6 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-namespace {
-
-struct RegexFlag {
-  llvm::StringLiteral name;
-  uint32_t bit;
-};
-
-const RegexFlag kFlags[] = {
-    {.name = "hasIndices", .bit = TZ_RE_HAS_INDICES},
-    {.name = "global", .bit = TZ_RE_GLOBAL},
-    {.name = "ignoreCase", .bit = TZ_RE_IGNORE_CASE},
-    {.name = "multiline", .bit = TZ_RE_MULTILINE},
-    {.name = "dotAll", .bit = TZ_RE_DOT_ALL},
-    {.name = "unicode", .bit = TZ_RE_UNICODE},
-    {.name = "unicodeSets", .bit = TZ_RE_UNICODE_SETS},
-    {.name = "sticky", .bit = TZ_RE_STICKY},
-};
-
-const llvm::StringLiteral kLegacyStatics[] = {"input", "lastMatch", "lastParen", "leftContext",
-                                              "rightContext"};
-
-}
-
 RegexChecker::RegexChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->prelude = &all.prelude;
@@ -68,13 +46,7 @@ std::u16string RegexChecker::units(const uint32_t *program, uint32_t start, uint
 }
 
 std::optional<uint32_t> RegexChecker::flagBit(llvm::StringRef name) const {
-  for (const RegexFlag &flag : kFlags) {
-    if (flag.name == name) {
-      return flag.bit;
-    }
-  }
-
-  return std::nullopt;
+  return RegexFlagTable::findBit(name);
 }
 
 RegexChecker::ResultParsedFlags RegexChecker::checkParsedFlags(const std::u16string &flags) const {
@@ -456,7 +428,7 @@ std::string RegexChecker::staticMemberText(llvm::StringRef name) const {
   if (RegexStaticTable::find(name) == RegexStatic::ESCAPE) {
     return ErrorTextRegExpStatic::escape();
   }
-  bool isLegacy = name.starts_with("$") || llvm::is_contained(kLegacyStatics, name);
+  bool isLegacy = RegexFlagTable::isLegacyStatic(name);
   if (isLegacy) {
     return ErrorTextRegExpStatic::legacy(name);
   }

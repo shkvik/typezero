@@ -1,5 +1,6 @@
 #include "compiler/semantic/bodies/functions/function_checker/function_checker.h"
 #include "compiler/program/ast_walker/ast_walker.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
 #include "compiler/semantic/bodies/classes/class_checker/class_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/functions/closure_checker/closure_checker.h"
@@ -31,13 +32,6 @@
 using llvm::dyn_cast;
 
 namespace tz {
-
-namespace {
-
-constexpr const char *kThisName = "this";
-constexpr const char *kSuperName = "super";
-
-}
 
 FunctionChecker::FunctionChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -365,7 +359,8 @@ const Type *FunctionChecker::resolvedParamType(FunctionDecl *functionDecl, FuncS
 
 void FunctionChecker::walkThisParam(const FunctionDecl *functionDecl, FuncSymbol *function,
                                     const Param &param) {
-  if (param.name != kThisName || param.rest() || !param.type.has_value()) {
+  if (param.name != KeywordTable::getName(Keyword::THIS) || param.rest() ||
+      !param.type.has_value()) {
     return;
   }
   auto thisAllowed = this->checkThisParam(functionDecl);
@@ -596,7 +591,7 @@ CallExpr *FunctionChecker::superCallOf(Stmt *stmt) const {
   auto *expr = dyn_cast<ExprStmt>(stmt);
   auto *call = expr != nullptr ? dyn_cast<CallExpr>(expr->expr) : nullptr;
   auto *callee = call != nullptr ? dyn_cast<NameExpr>(call->callee) : nullptr;
-  if (callee == nullptr || callee->name != kSuperName) {
+  if (callee == nullptr || callee->name != KeywordTable::getName(Keyword::SUPER)) {
     return nullptr;
   }
 

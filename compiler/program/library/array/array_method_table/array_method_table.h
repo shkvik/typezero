@@ -106,6 +106,7 @@ public:
   static const ArrayMethodInfo *find(llvm::StringRef name);
   static std::optional<ArrayCallback> findCallback(llvm::StringRef name);
   static llvm::ArrayRef<ArrayMethodInfo> getMethods();
+  static llvm::StringRef getName(ArrayMethod method);
 };
 
 }

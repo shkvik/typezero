@@ -1,31 +1,15 @@
 #include "compiler/semantic/library/bytes/buffer_exports/buffer_exports.h"
-#include "llvm/ADT/STLExtras.h"
+#include "compiler/program/library/bytes/buffer_export_table/buffer_export_table.h"
 
 namespace tz {
 
-namespace {
-
-const llvm::StringLiteral kBufferExports[] = {"Blob",
-                                              "File",
-                                              "SlowBuffer",
-                                              "atob",
-                                              "btoa",
-                                              "constants",
-                                              "isAscii",
-                                              "isUtf8",
-                                              "kMaxLength",
-                                              "kStringMaxLength",
-                                              "resolveObjectURL",
-                                              "transcode",
-                                              "INSPECT_MAX_BYTES"};
-}
-
 BufferExports::ResultExportFound BufferExports::checkBufferExport(llvm::StringRef name,
                                                                   llvm::StringRef path) {
-  if (name == "Buffer") {
+  auto exported = BufferExportTable::find(name);
+  if (exported == BufferExport::BUFFER) {
     return ok(name);
   }
-  if (llvm::is_contained(kBufferExports, name)) {
+  if (exported == BufferExport::NOT_YET) {
     auto message = ErrorTextBufferExport::notYet(name, path);
 
     return err(ModuleExportFoundError{

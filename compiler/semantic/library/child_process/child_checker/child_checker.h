@@ -2,8 +2,8 @@
 
 #include "compiler/program/library/child_process/child_function_table/child_function_table.h"
 #include "compiler/semantic/library/child_process/child_checker/child_checker_errors.h"
+#include "compiler/semantic/library/fs/fs_checker/fs_checker.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
-#include "llvm/ADT/StringMap.h"
 #include <array>
 #include <optional>
 #include <vector>
@@ -27,7 +27,6 @@ public:
 
 private:
   const Type *bufferType() const;
-  bool isKnownSignal(llvm::StringRef name) const;
   bool hasZero(const Expr *expr) const;
 
   struct ChildRun {
@@ -38,7 +37,7 @@ private:
     bool isExec = false;
     bool isFailed = false;
     std::vector<Expr *> args;
-    llvm::StringMap<Expr *> options;
+    NodeOptions options = NodeOptions();
     unsigned encoding = 0;
     std::array<unsigned, 3> stdio{};
     bool isStdioGiven = false;
@@ -62,7 +61,7 @@ private:
   IntLitExpr *makeIntLiteral(llvm::SMLoc loc, uint64_t value);
   void walkZeroArguments(ChildRun &run, const Expr *given);
   void walkStdioList(ChildRun &run, const ArrayLitExpr *list);
-  Expr *optionValue(ChildRun &run, llvm::StringRef name, const Type *type);
+  Expr *optionValue(ChildRun &run, NodeOption option, const Type *type);
 
   SemanticState &state;
   FsChecker *fsChecker = nullptr;

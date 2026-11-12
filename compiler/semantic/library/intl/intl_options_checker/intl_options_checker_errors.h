@@ -1,6 +1,6 @@
 #pragma once
 
-#include "compiler/semantic/library/intl/intl_check_helpers/intl_check_helpers.h"
+#include "compiler/program/library/intl/intl_service_table/intl_service_table.h"
 #include "llvm/ADT/StringRef.h"
 #include <string>
 
@@ -27,7 +27,8 @@ public:
   static std::string values(const std::vector<llvm::StringLiteral> &values);
   static std::string unknown(llvm::StringRef name, llvm::StringRef what,
                              const IntlService *service);
-  static std::string kind(llvm::StringRef name, char kind, llvm::StringRef type);
+  static std::string kind(llvm::StringRef name, IntlOptionKind kind, llvm::StringRef type);
+  static std::string kindName(IntlOptionKind kind);
   static std::string badValue(llvm::StringRef text, llvm::StringRef name,
                               const std::vector<llvm::StringLiteral> &values);
   static std::string open(llvm::StringRef name, const std::vector<llvm::StringLiteral> &values);

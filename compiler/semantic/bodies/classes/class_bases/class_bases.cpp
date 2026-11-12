@@ -1,5 +1,6 @@
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/program/library/builtin_names/access_keyword_table/access_keyword_table.h"
+#include "compiler/program/library/builtin_names/error_class_table/error_class_table.h"
 #include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
 #include "compiler/semantic/declare/module_declarer/module_declarer.h"
@@ -16,14 +17,6 @@ using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-constexpr llvm::StringLiteral kErrorClassNames[] = {"Error",       "TypeError",      "RangeError",
-                                                    "SyntaxError", "ReferenceError", "EvalError",
-                                                    "URIError",    "AggregateError"};
-
-}
-
 ClassBases::ClassBases(SemanticState &owner, SemanticParts &all)
     : state(owner) {
   this->fsDeclarer = &all.fsDeclarer;
@@ -36,7 +29,7 @@ ClassBases::ClassBases(SemanticState &owner, SemanticParts &all)
 }
 
 bool ClassBases::isErrorClass(llvm::StringRef name) const {
-  return llvm::is_contained(kErrorClassNames, name);
+  return ErrorClassTable::isErrorClass(name);
 }
 
 void ClassBases::addBase(const Type *type, const Type *base) {

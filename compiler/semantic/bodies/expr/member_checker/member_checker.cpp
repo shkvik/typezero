@@ -1,6 +1,7 @@
 #include "compiler/semantic/bodies/expr/member_checker/member_checker.h"
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
 #include "compiler/program/library/number/number_static_table/number_static_table.h"
 #include "compiler/semantic/bodies/classes/class_member_checker/class_member_checker.h"
 #include "compiler/semantic/bodies/classes/overload_resolver/overload_resolver.h"
@@ -45,8 +46,6 @@ namespace tz {
 
 namespace {
 
-constexpr llvm::StringLiteral kThisName = "this";
-constexpr llvm::StringLiteral kSuperName = "super";
 
 const GlobalName kConstantHolders[] = {
     GlobalName::CONSOLE,
@@ -107,10 +106,10 @@ MemberChecker::ResultMemberReadable MemberChecker::checkMember(MemberExpr *membe
     return *global;
   }
   auto *object = dyn_cast<NameExpr>(member->object);
-  if (object != nullptr && object->name == kThisName) {
+  if (object != nullptr && object->name == KeywordTable::getName(Keyword::THIS)) {
     this->state.getClassContext().rememberThisMember(member->name);
   }
-  if (object != nullptr && object->name == kSuperName) {
+  if (object != nullptr && object->name == KeywordTable::getName(Keyword::SUPER)) {
     auto message = ErrorTextMemberRead::superField(member->name);
 
     return err(MemberCheckerCheckMemberError{

@@ -73,6 +73,18 @@ std::string ErrorTextBufferLabel::offsetOf(llvm::StringRef name) {
   return "the offset of '" + name.str() + "'";
 }
 
+std::string ErrorTextBufferLabel::comparePosition(size_t index) {
+  static const char *const names[] = {"", "targetStart", "targetEnd", "sourceStart", "sourceEnd"};
+
+  return names[index];
+}
+
+std::string ErrorTextBufferLabel::copyPosition(size_t index) {
+  static const char *const names[] = {"", "targetStart", "sourceStart", "sourceEnd"};
+
+  return names[index];
+}
+
 std::string ErrorTextBufferLabel::options() {
   return "the options of 'decode'";
 }

@@ -1,4 +1,5 @@
 #include "compiler/semantic/types/unknown_checker/unknown_checker.h"
+#include "compiler/program/library/builtin_names/type_of_name_table/type_of_name_table.h"
 #include "compiler/program/library/object/object_member_table/object_member_table.h"
 #include "compiler/program/types/type_spelling/type_spelling.h"
 #include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
@@ -81,7 +82,7 @@ std::string UnknownChecker::narrowingCheck(llvm::StringRef shown, const Expr *ex
     return ErrorTextUnknownHint::instanceOf(shown, "C");
   }
   if (to == nullptr) {
-    return ErrorTextUnknownHint::typeOf(shown, "string");
+    return ErrorTextUnknownHint::typeOf(shown, TypeOfNameTable::getName(TypeOfName::STRING));
   }
 
   return this->typeOfCheck(shown, to->nonOptional());
@@ -97,22 +98,22 @@ bool UnknownChecker::isNamedClass(const Type *to) const {
 
 std::string UnknownChecker::typeOfCheck(llvm::StringRef shown, const Type *target) const {
   if (target->isString()) {
-    return ErrorTextUnknownHint::typeOf(shown, "string");
+    return ErrorTextUnknownHint::typeOf(shown, TypeOfNameTable::getName(TypeOfName::STRING));
   }
   if (target->isNumeric()) {
-    return ErrorTextUnknownHint::typeOf(shown, "number");
+    return ErrorTextUnknownHint::typeOf(shown, TypeOfNameTable::getName(TypeOfName::NUMBER));
   }
   if (target->isBool()) {
-    return ErrorTextUnknownHint::typeOf(shown, "boolean");
+    return ErrorTextUnknownHint::typeOf(shown, TypeOfNameTable::getName(TypeOfName::BOOLEAN));
   }
   if (target->isArray()) {
     return ErrorTextUnknownHint::isArray(shown);
   }
   if (target->isAnyObject()) {
-    return ErrorTextUnknownHint::typeOf(shown, "object");
+    return ErrorTextUnknownHint::typeOf(shown, TypeOfNameTable::getName(TypeOfName::OBJECT));
   }
 
-  return ErrorTextUnknownHint::typeOf(shown, "string");
+  return ErrorTextUnknownHint::typeOf(shown, TypeOfNameTable::getName(TypeOfName::STRING));
 }
 
 UnknownChecker::ResultValueNarrowed UnknownChecker::unknownUse(const Expr *object,

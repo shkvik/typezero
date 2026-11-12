@@ -48,6 +48,12 @@ std::string ErrorTextDateLiteral::outside(llvm::StringRef shown) {
          "1970), and would be an Invalid Date";
 }
 
+std::string ErrorTextDateFields::timeField(size_t index) {
+  static const char *const names[] = {"hours", "minutes", "seconds", "milliseconds"};
+
+  return names[index];
+}
+
 std::string ErrorTextDateFields::shortYear(int64_t year) {
   return "the year " + std::to_string(year) + " is " + std::to_string(1900 + year) +
          " in JavaScript, which reads the years 0 to 99 as 1900 to 1999; write the year "

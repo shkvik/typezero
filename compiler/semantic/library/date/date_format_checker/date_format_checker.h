@@ -30,6 +30,7 @@ public:
   const Type *dateFormatPartType() const;
   const Type *resolvedDateOptionsType() const;
   const Type *dateOptionsType() const;
+  const Type *dateOptionValueType(const DateFormatOptionInfo &option) const;
 
 private:
   using ResultOptionsObject = Result<const Type *, DateFormatCheckerOptionsObjectError>;
@@ -64,7 +65,6 @@ private:
   bool matchDigits(const Field &field, const DateOptionPlace &place);
   bool isOutsideDigits(double digits) const;
   bool matchOptionText(const Field &field, const DateOptionPlace &place);
-  llvm::ArrayRef<llvm::StringLiteral> optionValues(llvm::StringRef name) const;
   std::optional<std::vector<std::string>> optionTexts(const Field &field,
                                                       const DateOptionPlace &place);
 
@@ -72,7 +72,6 @@ private:
   std::optional<std::u16string> literalText(const Expr *expr) const;
   std::optional<std::vector<std::string>> textsOf(const Type *type) const;
   std::optional<std::vector<double>> numbersOf(const Type *type) const;
-  const char *methodName(int kind) const;
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

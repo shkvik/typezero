@@ -1,8 +1,11 @@
 #include "compiler/program/library/number/number_method_table/number_method_table.h"
+#include <cctype>
 
 namespace tz {
 
 namespace {
+
+constexpr llvm::StringLiteral kConversionPrefix = "to";
 
 const NumberMethodInfo kRows[] = {
     {
@@ -77,6 +80,18 @@ const NumberMethodInfo *NumberMethodTable::find(llvm::StringRef name) {
   }
 
   return nullptr;
+}
+
+std::string NumberMethodTable::getConversionName(llvm::StringRef typeName) {
+  for (const NumberMethodInfo &info : kRows) {
+    if (!info.convertsTo.empty() && info.convertsTo == typeName) {
+      return info.name.str();
+    }
+  }
+  std::string name = typeName.str();
+  name[0] = char(std::toupper(name[0]));
+
+  return kConversionPrefix.str() + name;
 }
 
 }

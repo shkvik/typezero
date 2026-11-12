@@ -1,4 +1,8 @@
 #include "compiler/semantic/types/type_relations/type_relations.h"
+#include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
+#include "compiler/program/library/builtin_names/library_type_table/library_type_table.h"
+#include "compiler/program/library/number/number_method_table/number_method_table.h"
+#include "compiler/program/library/regex/match_member_table/match_member_table.h"
 #include "compiler/semantic/bodies/classes/class_links/class_links.h"
 #include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
 #include "compiler/semantic/bodies/functions/function_value_checker/function_value_checker.h"
@@ -33,13 +37,7 @@ namespace {
 
 constexpr double kMaxExactInteger = 9007199254740992.0;
 constexpr size_t kManyLiteralMembers = 64;
-constexpr llvm::StringLiteral kMatchIndices = "indices";
 constexpr llvm::StringLiteral kHiddenNamePrefix = "%";
-constexpr llvm::StringLiteral kHttpStatusType = "HttpStatus";
-constexpr llvm::StringLiteral kWebStreamClass = "ReadableStream";
-constexpr llvm::StringLiteral kFormDataClass = "FormData";
-constexpr llvm::StringLiteral kRequestInitType = "RequestInit";
-constexpr llvm::StringLiteral kRequestOptionsType = "RequestOptions";
 
 }
 
@@ -395,7 +393,7 @@ std::optional<bool> TypeRelations::plainConvertible(const Type *from, const Type
   }
   if (TypeRelations::isRuntimeObject(from) || TypeRelations::isRuntimeObject(to)) {
     return from->isMatch() && to->isMatch() && to->matchGroups() < 0 &&
-           from->field(kMatchIndices) == nullptr;
+           from->field(MatchMemberTable::getName(MatchMember::INDICES)) == nullptr;
   }
   if (from->isObject() && to->isObject() && from->isSubtypeOf(to)) {
     return true;
@@ -643,19 +641,7 @@ std::string TypeRelations::shownMember(const MemberExpr *member) const {
 }
 
 std::string TypeRelations::conversionMethod(const Type *to) const {
-  if (to->isFloat()) {
-    return "toDouble";
-  }
-  if (to->isDecimal()) {
-    return "toDecimal";
-  }
-  if (to->isInt()) {
-    return "toInt";
-  }
-  std::string name = to->name().str();
-  name[0] = char(std::toupper(name[0]));
-
-  return "to" + name;
+  return NumberMethodTable::getConversionName(to->name());
 }
 
 const Type *TypeRelations::unify(const Type *first, const Type *second) const {
@@ -1220,7 +1206,7 @@ std::string TypeRelations::rangeCheck(const Expr *expr, const Type *target,
   auto high = std::to_string(widest.second);
   auto *name = dyn_cast<NameExpr>(expr);
   auto text = name != nullptr ? name->name.str() : std::string("x");
-  if (target->name() == kHttpStatusType) {
+  if (target->name() == LibraryTypeTable::getName(LibraryType::HTTP_STATUS)) {
     return ErrorTextRange::status(text);
   }
 
@@ -1434,20 +1420,25 @@ bool TypeRelations::isWebStream(const Type *type) const {
   bool isLibraryGeneric =
       classDecl != nullptr && classDecl->library() && classDecl->generic() != nullptr;
 
-  return isLibraryGeneric && classDecl->generic()->name == kWebStreamClass &&
+  return isLibraryGeneric &&
+         LibraryClassTable::isName(classDecl->generic()->name, LibraryClass::READABLE_STREAM) &&
          classDecl->typeArgs.size() == 2;
 }
 
 bool TypeRelations::isFormData(const Type *type) const {
   const ClassDecl *classDecl = type->classDecl();
 
-  return classDecl != nullptr && classDecl->library() && classDecl->name == kFormDataClass;
+  return classDecl != nullptr && classDecl->library() &&
+         LibraryClassTable::isName(classDecl->name, LibraryClass::FORM_DATA);
 }
 
 bool TypeRelations::isRequestInit(const AssignAttempt &attempt) const {
   llvm::StringRef fromName = attempt.fromObject->name();
 
-  return fromName.starts_with(kRequestInitType) && attempt.toObject->name() == kRequestOptionsType;
+  auto requestInit = LibraryTypeTable::getName(LibraryType::REQUEST_INIT);
+  auto requestOptions = LibraryTypeTable::getName(LibraryType::REQUEST_OPTIONS);
+
+  return fromName.starts_with(requestInit) && attempt.toObject->name() == requestOptions;
 }
 
 std::string TypeRelations::mismatchReason(const AssignAttempt &attempt,

@@ -1,4 +1,9 @@
 #include "compiler/semantic/library/stream/stream_pipeline/stream_pipeline.h"
+#include "compiler/program/library/array/array_method_table/array_method_table.h"
+#include "compiler/program/library/builtin_modules/node_option_table/node_option_table.h"
+#include "compiler/program/library/builtin_names/library_function_table/library_function_table.h"
+#include "compiler/program/library/builtin_names/library_method_table/library_method_table.h"
+#include "compiler/program/library/library_module_names/library_module_names.h"
 #include "compiler/program/library/stream/stream_function_table/stream_function_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -126,8 +131,9 @@ Expr *StreamPipeline::checkStageValue(Expr *arg, const Type *chunk, bool first) 
   return this->closureChecker->checkFunctionExpr(functionExpr, &signature);
 }
 
-Expr *StreamPipeline::stageCall(const StageShape &stage, llvm::StringRef functionName,
+Expr *StreamPipeline::stageCall(const StageShape &stage, LibraryFunction function,
                                 std::vector<const Type *> bound, Expr *value) {
+  auto functionName = LibraryFunctionTable::getName(function);
   auto *callee = this->state.getAst().make<NameExpr>(stage.loc, functionName);
   auto *call = this->state.getAst().make<CallExpr>(stage.loc, callee, std::vector<Expr *>{value});
   call->type = Type::error();
@@ -159,7 +165,8 @@ Expr *StreamPipeline::streamClassStage(Expr *arg, const Type *&chunk, const Stag
       return arg;
     }
     if (chunk != nullptr && !this->isStreamTaking(chunks.writable, chunk)) {
-      auto message = ErrorTextPipeline::chunkKind("pipeline", chunk->name(), type->name(),
+      auto pipeline = StreamFunctionTable::getName(StreamFunction::PIPELINE);
+      auto message = ErrorTextPipeline::chunkKind(pipeline, chunk->name(), type->name(),
                                                   chunks.writable->name());
       this->state.getDiagnostics().error(stage.loc, message);
       return arg;
@@ -187,8 +194,8 @@ Expr *StreamPipeline::functionStage(Expr *arg, const Type *&chunk, const StageSh
   const auto *functionType = Type::function({source}, 1, false, returnType);
   if (returnType->isAsyncIterator()) {
     auto *coerced = this->typeRelations->coerce(arg, functionType);
-    auto *made =
-        this->stageCall(stage, "streamTransformStage", {chunk, returnType->yielded()}, coerced);
+    auto *made = this->stageCall(stage, LibraryFunction::STREAM_TRANSFORM_STAGE,
+                                 {chunk, returnType->yielded()}, coerced);
     chunk = returnType->yielded();
     return this->asPipelineStage(stage, made);
   }
@@ -210,7 +217,7 @@ Expr *StreamPipeline::sourceFunctionStage(Expr *arg, const Type *&chunk, const S
   }
   chunk = returnType->yielded();
   auto *coerced = this->typeRelations->coerce(arg, Type::function({}, 0, false, returnType));
-  auto *made = this->stageCall(stage, "streamSourceStage", {chunk}, coerced);
+  auto *made = this->stageCall(stage, LibraryFunction::STREAM_SOURCE_STAGE, {chunk}, coerced);
 
   return this->asPipelineStage(stage, made);
 }
@@ -222,8 +229,10 @@ Expr *StreamPipeline::sinkFunctionStage(Expr *arg, const Type *chunk, const Stag
     *sinkValue = value;
   }
   auto *coerced = this->typeRelations->coerce(arg, functionType);
-  Expr *made = value->isVoid() ? this->stageCall(stage, "streamVoidSinkStage", {chunk}, coerced)
-                               : this->stageCall(stage, "streamSinkStage", {chunk, value}, coerced);
+  Expr *made =
+      value->isVoid()
+          ? this->stageCall(stage, LibraryFunction::STREAM_VOID_SINK_STAGE, {chunk}, coerced)
+          : this->stageCall(stage, LibraryFunction::STREAM_SINK_STAGE, {chunk, value}, coerced);
 
   return this->asPipelineStage(stage, made);
 }
@@ -232,7 +241,7 @@ Expr *StreamPipeline::iterableSourceStage(Expr *arg, const Type *&chunk, const S
   const Type *type = arg->type;
   if (type->isAsyncIterator()) {
     chunk = type->yielded();
-    auto *made = this->stageCall(stage, "streamAsyncIterableStage", {chunk}, arg);
+    auto *made = this->stageCall(stage, LibraryFunction::STREAM_ASYNC_ITERABLE_STAGE, {chunk}, arg);
     return this->asPipelineStage(stage, made);
   }
   auto *iterator = this->valuesIteratorOf(arg);
@@ -240,7 +249,7 @@ Expr *StreamPipeline::iterableSourceStage(Expr *arg, const Type *&chunk, const S
     return nullptr;
   }
   chunk = iterator->type->yielded();
-  auto *made = this->stageCall(stage, "streamIterableStage", {chunk}, iterator);
+  auto *made = this->stageCall(stage, LibraryFunction::STREAM_ITERABLE_STAGE, {chunk}, iterator);
 
   return this->asPipelineStage(stage, made);
 }
@@ -253,7 +262,8 @@ Expr *StreamPipeline::valuesIteratorOf(Expr *collection) {
   llvm::SMLoc loc = collection->loc();
   if (type->isArray()) {
     const auto *iterator = Type::iterator(type->inner());
-    auto *member = this->state.getAst().make<MemberExpr>(loc, collection, "values");
+    auto values = ArrayMethodTable::getName(ArrayMethod::VALUES);
+    auto *member = this->state.getAst().make<MemberExpr>(loc, collection, values);
     member->type = Type::function({}, 0, false, iterator);
     return this->processChecker->builtinCall(loc, member, Builtin::ArrValues, {}, iterator);
   }
@@ -276,11 +286,11 @@ bool StreamPipeline::isStreamTaking(const Type *writable, const Type *chunk) {
 Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *functionDecl,
                                           llvm::SMLoc loc) {
   auto place = this->eventMapInference->placeOf(functionDecl->loc());
-  if (this->isInModule(place, "node:internal/fs/streams")) {
+  if (this->isInModule(place, LibraryModuleNames::kFsStreamsPath)) {
     return this->streamSources->checkFsStreamFunction(call, functionDecl, loc);
   }
-  bool hasPromises = this->isInModule(place, "node:stream/promises");
-  if (!hasPromises && !this->isInModule(place, "node:stream")) {
+  bool hasPromises = this->isInModule(place, LibraryModuleNames::kStreamPromisesPath);
+  if (!hasPromises && !this->isInModule(place, LibraryModuleNames::kStreamPath)) {
     return nullptr;
   }
   auto function = StreamFunctionTable::find(functionDecl->name);
@@ -346,15 +356,17 @@ Expr *StreamPipeline::checkFinished(const StreamCall &stream) {
   if (stream.promises) {
     call->args = {target, opts};
     std::vector<bool> given(2, true);
-    return this->eventTargetChecker->callLibraryStatic(call, stream.streamClass, "finishedResult",
-                                                       {}, given, stream.loc);
+    return this->eventTargetChecker->callLibraryStatic(
+        call, stream.streamClass, LibraryMethodTable::getName(LibraryMethod::FINISHED_RESULT), {},
+        given, stream.loc);
   }
   auto *callback = this->argumentChecker->checkArg(call->args.back(), stream.callback);
   call->args = {target, opts, callback};
   std::vector<bool> given(3, true);
 
-  return this->eventTargetChecker->callLibraryStatic(call, stream.streamClass, "eosFor", {}, given,
-                                                     stream.loc);
+  return this->eventTargetChecker->callLibraryStatic(
+      call, stream.streamClass, LibraryMethodTable::getName(LibraryMethod::EOS_FOR), {}, given,
+      stream.loc);
 }
 
 Expr *StreamPipeline::checkCompose(const StreamCall &stream) {
@@ -390,8 +402,9 @@ Expr *StreamPipeline::checkCompose(const StreamCall &stream) {
   call->args = {list};
   std::vector<bool> given{true};
 
-  return this->eventTargetChecker->callLibraryStatic(call, stream.streamClass, "composeAll",
-                                                     {writable, readable}, given, stream.loc);
+  return this->eventTargetChecker->callLibraryStatic(
+      call, stream.streamClass, LibraryMethodTable::getName(LibraryMethod::COMPOSE_ALL),
+      {writable, readable}, given, stream.loc);
 }
 
 std::optional<StreamChunks> StreamPipeline::composedPart(const StreamCall &stream, size_t index,
@@ -415,7 +428,8 @@ std::optional<StreamChunks> StreamPipeline::composedPart(const StreamCall &strea
   bool isFitting = index == 0 || chunk == nullptr || chunks.writable == nullptr ||
                    this->isStreamTaking(chunks.writable, chunk);
   if (!isFitting) {
-    auto message = ErrorTextPipeline::chunkKind("compose", chunk->name(), arg->type->name(),
+    auto compose = StreamFunctionTable::getName(StreamFunction::COMPOSE);
+    auto message = ErrorTextPipeline::chunkKind(compose, chunk->name(), arg->type->name(),
                                                 chunks.writable->name());
     this->state.getDiagnostics().error(arg->loc(), message);
     return std::nullopt;
@@ -535,21 +549,23 @@ Expr *StreamPipeline::finishCallbackPipeline(const StreamCall &stream, ArrayLitE
   if (lastStream != nullptr) {
     call->args = {list, lastStream, callback};
     given.assign(3, true);
-    return this->eventTargetChecker->callLibraryStatic(call, stream.streamClass, "pipelineTo",
-                                                       {lastStream->type}, given, stream.loc);
+    return this->eventTargetChecker->callLibraryStatic(
+        call, stream.streamClass, LibraryMethodTable::getName(LibraryMethod::PIPELINE_TO),
+        {lastStream->type}, given, stream.loc);
   }
   call->args = {list, callback};
   given.assign(2, true);
 
-  return this->eventTargetChecker->callLibraryStatic(call, stream.streamClass, "pipelineOut", {},
-                                                     given, stream.loc);
+  return this->eventTargetChecker->callLibraryStatic(
+      call, stream.streamClass, LibraryMethodTable::getName(LibraryMethod::PIPELINE_OUT), {}, given,
+      stream.loc);
 }
 
 Expr *StreamPipeline::finishPromisePipeline(const StreamCall &stream, ArrayLitExpr *list,
                                             Expr *optionsArg, const Type *sinkValue) {
   CallExpr *call = stream.call;
-  const auto *optionsType =
-      Type::optional(Type::object({Field{"end", Type::optional(Type::boolTy()), false}}));
+  const auto *optionsType = Type::optional(Type::object({Field{
+      NodeOptionTable::getName(NodeOption::END).str(), Type::optional(Type::boolTy()), false}}));
   Expr *options = optionsArg != nullptr ? this->argumentChecker->checkArg(optionsArg, optionsType)
                                         : this->undefinedOf(stream.loc, optionsType);
   if (options->type->isError()) {
@@ -558,12 +574,14 @@ Expr *StreamPipeline::finishPromisePipeline(const StreamCall &stream, ArrayLitEx
   call->args = {list, options};
   std::vector<bool> given(2, true);
   if (sinkValue != nullptr && !sinkValue->isVoid()) {
-    return this->eventTargetChecker->callLibraryStatic(call, stream.streamClass, "pipelineValue",
-                                                       {sinkValue}, given, stream.loc);
+    return this->eventTargetChecker->callLibraryStatic(
+        call, stream.streamClass, LibraryMethodTable::getName(LibraryMethod::PIPELINE_VALUE),
+        {sinkValue}, given, stream.loc);
   }
 
-  return this->eventTargetChecker->callLibraryStatic(call, stream.streamClass, "pipelineResult", {},
-                                                     given, stream.loc);
+  return this->eventTargetChecker->callLibraryStatic(
+      call, stream.streamClass, LibraryMethodTable::getName(LibraryMethod::PIPELINE_RESULT), {},
+      given, stream.loc);
 }
 
 Expr *StreamPipeline::checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *function) {

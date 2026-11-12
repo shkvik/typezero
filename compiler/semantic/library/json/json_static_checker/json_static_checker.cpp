@@ -1,6 +1,7 @@
 #include "compiler/semantic/library/json/json_static_checker/json_static_checker.h"
 #include "compiler/packages/json_text/json_text.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/json/json_member_table/json_member_table.h"
 #include "compiler/program/library/json/json_static_table/json_static_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
@@ -26,12 +27,6 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
-
-namespace {
-
-constexpr llvm::StringLiteral kToJsonMethod = "toJSON";
-
-}
 
 JsonStaticChecker::JsonStaticChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -144,7 +139,8 @@ const ClassDecl *JsonStaticChecker::classWithToJson(const Type *type) const {
 
 bool JsonStaticChecker::hasToJson(const ClassDecl *classDecl) const {
   for (const FunctionDecl *functionDecl : classDecl->methods) {
-    if (functionDecl->name == kToJsonMethod && !functionDecl->isStatic()) {
+    if (JsonMemberTable::find(functionDecl->name) == JsonMember::TO_JSON &&
+        !functionDecl->isStatic()) {
       return true;
     }
   }

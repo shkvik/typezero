@@ -1,4 +1,6 @@
 #include "compiler/semantic/library/bytes/bytes_new_checker/bytes_new_checker.h"
+#include "compiler/program/library/bytes/bytes_shape_field_table/bytes_shape_field_table.h"
+#include "compiler/program/to_utf16/to_utf16.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -29,7 +31,6 @@ namespace tz {
 
 namespace {
 
-constexpr llvm::StringLiteral kFatalOption = "fatal";
 constexpr llvm::StringLiteral kValuePlaceholder = "x";
 
 }
@@ -96,7 +97,8 @@ bool BytesNewChecker::canNodeBeFatal(const Expr *options, std::vector<bool> &ans
   }
   auto *literal = dyn_cast<ObjectLitExpr>(options);
   if (literal == nullptr) {
-    const auto *field = options->type->field(kFatalOption);
+    auto fatal = BytesShapeFieldTable::getName(BytesShapeField::DECODER_FATAL);
+    const auto *field = options->type->field(fatal);
     return field != nullptr && !field->type->isUndefined();
   }
   size_t spreadCount = this->spreadOptions(options).size();
@@ -107,7 +109,7 @@ bool BytesNewChecker::canNodeBeFatal(const Expr *options, std::vector<bool> &ans
     if (property.spread()) {
       isFatal = isFatal || spreads[nextSpread];
       nextSpread += 1;
-    } else if (property.name == kFatalOption) {
+    } else if (BytesShapeFieldTable::find(property.name) == BytesShapeField::DECODER_FATAL) {
       isFatal = this->isFatalFlag(property.value);
     }
   }
@@ -152,8 +154,9 @@ BytesNewChecker::ResultViewedBuffer BytesNewChecker::checkViewedBuffer(const Typ
 }
 
 Expr *BytesNewChecker::checkTextDecoderParse(CallExpr *call, MemberExpr *member) {
-  auto *expr = this->state.getAst().make<NewExpr>(call->loc(), "TextDecoder",
-                                                  std::vector<TypeRef>{}, call->args);
+  auto decoderName = Type::bytesType(Bytes::TextDecoder)->name();
+  auto *expr = this->state.getAst().make<NewExpr>(call->loc(), decoderName, std::vector<TypeRef>{},
+                                                  call->args);
   auto &bytes = this->state.getBytesStore();
   bytes.enterDecoderParse();
   auto *made = this->checkBytesNew(expr, Type::bytesType(Bytes::TextDecoder));
@@ -321,8 +324,11 @@ Expr *BytesNewChecker::checkTextDecoderNew(CallExpr *call, const Type *type) {
 }
 
 const Type *BytesNewChecker::decoderOptionsType() const {
-  return Type::object({{"fatal", Type::optional(Type::boolTy()), false},
-                       {"ignoreBOM", Type::optional(Type::boolTy()), false}});
+  auto fatal = BytesShapeFieldTable::getName(BytesShapeField::DECODER_FATAL);
+  auto ignoreBom = BytesShapeFieldTable::getName(BytesShapeField::DECODER_IGNORE_BOM);
+  const auto *flag = Type::optional(Type::boolTy());
+
+  return Type::object({{fatal.str(), flag, false}, {ignoreBom.str(), flag, false}});
 }
 
 std::optional<Expr *> BytesNewChecker::checkDecoderLabelArg(CallExpr *call, IntLitExpr *resolved) {
@@ -331,7 +337,8 @@ std::optional<Expr *> BytesNewChecker::checkDecoderLabelArg(CallExpr *call, IntL
     if (!call->args.empty()) {
       call->args[0] = this->exprChecker->checkExpr(call->args[0]);
     }
-    return this->decoderNameLiteral(call->loc(), u"utf-8");
+    auto label = ToUtf16::toUtf16(EncodingNameTable::getUtf8Label());
+    return this->decoderNameLiteral(call->loc(), label);
   }
   Expr *label = call->args[0];
   auto text = this->literalText(label);

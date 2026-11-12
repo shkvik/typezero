@@ -1,4 +1,7 @@
 #include "compiler/semantic/library/child_process/child_checker/child_checker.h"
+#include "compiler/program/library/bytes/encoding_name_table/encoding_name_table.h"
+#include "compiler/program/library/child_process/child_signal_table/child_signal_table.h"
+#include "compiler/program/library/child_process/child_stdio_table/child_stdio_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -33,23 +36,6 @@ const Type *ChildChecker::bufferType() const {
   return Type::bytesType(Type::Bytes::Buffer);
 }
 
-bool ChildChecker::isKnownSignal(llvm::StringRef name) const {
-  static const llvm::StringLiteral windows[] = {"SIGHUP",  "SIGINT",   "SIGQUIT", "SIGILL",
-                                                "SIGABRT", "SIGFPE",   "SIGKILL", "SIGSEGV",
-                                                "SIGTERM", "SIGBREAK", "SIGWINCH"};
-  static const llvm::StringLiteral posix[] = {
-      "SIGHUP",   "SIGINT",  "SIGQUIT", "SIGILL",    "SIGTRAP", "SIGABRT",   "SIGIOT",
-      "SIGBUS",   "SIGFPE",  "SIGKILL", "SIGUSR1",   "SIGSEGV", "SIGUSR2",   "SIGPIPE",
-      "SIGALRM",  "SIGTERM", "SIGCHLD", "SIGSTKFLT", "SIGCONT", "SIGSTOP",   "SIGTSTP",
-      "SIGTTIN",  "SIGTTOU", "SIGURG",  "SIGXCPU",   "SIGXFSZ", "SIGVTALRM", "SIGPROF",
-      "SIGWINCH", "SIGIO",   "SIGPOLL", "SIGPWR",    "SIGSYS"};
-  if (NodeCheckHelpers::isTargetWindows()) {
-    return llvm::is_contained(windows, name);
-  }
-
-  return llvm::is_contained(posix, name);
-}
-
 bool ChildChecker::hasZero(const Expr *expr) const {
   auto *literal = llvm::dyn_cast_or_null<StringLitExpr>(expr);
 
@@ -58,21 +44,21 @@ bool ChildChecker::hasZero(const Expr *expr) const {
 
 namespace {
 
-const llvm::StringRef kChildOptions[] = {"cwd",
-                                         "env",
-                                         "input",
-                                         "stdio",
-                                         "encoding",
-                                         "timeout",
-                                         "killSignal",
-                                         "maxBuffer",
-                                         "shell",
-                                         "windowsHide",
-                                         "windowsVerbatimArguments",
-                                         "detached",
-                                         "argv0",
-                                         "uid",
-                                         "gid"};
+const NodeOption kChildOptions[] = {NodeOption::WORKING_DIRECTORY,
+                                    NodeOption::ENVIRONMENT,
+                                    NodeOption::INPUT,
+                                    NodeOption::STDIO,
+                                    NodeOption::ENCODING,
+                                    NodeOption::TIMEOUT,
+                                    NodeOption::KILL_SIGNAL,
+                                    NodeOption::MAX_BUFFER,
+                                    NodeOption::SHELL,
+                                    NodeOption::WINDOWS_HIDE,
+                                    NodeOption::WINDOWS_VERBATIM_ARGUMENTS,
+                                    NodeOption::DETACHED,
+                                    NodeOption::ARGV0,
+                                    NodeOption::USER_ID,
+                                    NodeOption::GROUP_ID};
 
 }
 
@@ -198,7 +184,7 @@ void ChildChecker::walkZeroArguments(ChildRun &run, const Expr *given) {
 }
 
 void ChildChecker::walkEncodingOption(ChildRun &run) {
-  Expr *value = run.options.lookup("encoding");
+  Expr *value = run.options.lookup(NodeOption::ENCODING);
   if (value == nullptr || isa<UndefinedExpr>(value)) {
     return;
   }
@@ -210,7 +196,8 @@ void ChildChecker::walkEncodingOption(ChildRun &run) {
     run.isFailed = true;
     return;
   }
-  if (literal->value == u"buffer") {
+  auto written = ToUtf8::toUtf8(literal->value);
+  if (EncodingNameTable::isBufferMarker(written)) {
     return;
   }
   literal->type = Type::string();
@@ -223,7 +210,7 @@ void ChildChecker::walkEncodingOption(ChildRun &run) {
 }
 
 void ChildChecker::walkStdioOption(ChildRun &run) {
-  Expr *value = run.options.lookup("stdio");
+  Expr *value = run.options.lookup(NodeOption::STDIO);
   if (value == nullptr || isa<UndefinedExpr>(value)) {
     return;
   }
@@ -297,54 +284,59 @@ std::optional<unsigned> ChildChecker::stdioKind(Expr *given, unsigned index) {
   }
   literal->type = Type::string();
   auto text = ToUtf8::toUtf8(literal->value);
-  if (text == "pipe" || text == "overlapped") {
+  auto stdio = ChildStdioTable::find(text);
+  if (stdio == ChildStdio::PIPE) {
     return ChildPipe;
   }
-  if (text == "inherit") {
+  if (stdio == ChildStdio::INHERIT) {
     return ChildInherit + index;
   }
-  if (text == "ignore") {
+  if (stdio == ChildStdio::IGNORED) {
     return ChildIgnore;
   }
   std::string message =
-      text == "ipc" ? ErrorTextChildStdio::ipc() : ErrorTextChildStdio::unknown(text);
+      stdio == ChildStdio::IPC ? ErrorTextChildStdio::ipc() : ErrorTextChildStdio::unknown(text);
   this->state.getDiagnostics().error(given->loc(), message);
 
   return std::nullopt;
 }
 
 void ChildChecker::walkOptionLimits(ChildRun &run) {
-  llvm::StringMap<Expr *> &options = run.options;
-  if (this->hasZero(options.lookup("cwd"))) {
+  NodeOptions &options = run.options;
+  Expr *directory = options.lookup(NodeOption::WORKING_DIRECTORY);
+  if (this->hasZero(directory)) {
     auto message = ErrorTextChildRun::zeroCwd();
-    this->state.getDiagnostics().error(options.lookup("cwd")->loc(), message);
+    this->state.getDiagnostics().error(directory->loc(), message);
     run.isFailed = true;
   }
-  for (llvm::StringRef limit : {"timeout", "maxBuffer"}) {
+  for (NodeOption limit : {NodeOption::TIMEOUT, NodeOption::MAX_BUFFER}) {
     Expr *value = options.lookup(limit);
     auto *unary = value != nullptr ? dyn_cast<UnaryExpr>(value) : nullptr;
     bool isNegative = unary != nullptr && unary->op == UnaryOp::Neg &&
                       (isa<IntLitExpr>(unary->operand) || isa<FloatLitExpr>(unary->operand));
     if (isNegative) {
-      auto message = ErrorTextChildRun::negative(limit);
+      auto name = NodeOptionTable::getName(limit);
+      auto message = ErrorTextChildRun::negative(name);
       this->state.getDiagnostics().error(value->loc(), message);
       run.isFailed = true;
     }
   }
-  if (NodeCheckHelpers::isTargetWindows()) {
-    for (llvm::StringRef id : {"uid", "gid"}) {
+  bool isWindows = NodeCheckHelpers::isTargetWindows();
+  if (isWindows) {
+    for (NodeOption id : {NodeOption::USER_ID, NodeOption::GROUP_ID}) {
       Expr *value = options.lookup(id);
       if (value != nullptr && !isa<UndefinedExpr>(value)) {
-        auto message = ErrorTextChildRun::unixId(id);
+        auto name = NodeOptionTable::getName(id);
+        auto message = ErrorTextChildRun::unixId(name);
         this->state.getDiagnostics().error(value->loc(), message);
         run.isFailed = true;
       }
     }
   }
-  auto *signal = dyn_cast_or_null<StringLitExpr>(options.lookup("killSignal"));
+  auto *signal = dyn_cast_or_null<StringLitExpr>(options.lookup(NodeOption::KILL_SIGNAL));
   if (signal != nullptr) {
     auto written = ToUtf8::toUtf8(signal->value);
-    if (!this->isKnownSignal(written)) {
+    if (!ChildSignalTable::isKnown(written, isWindows)) {
       auto message = ErrorTextChildRun::noSignal(written);
       this->state.getDiagnostics().error(signal->loc(), message);
       run.isFailed = true;
@@ -352,8 +344,8 @@ void ChildChecker::walkOptionLimits(ChildRun &run) {
   }
 }
 
-Expr *ChildChecker::optionValue(ChildRun &run, llvm::StringRef name, const Type *type) {
-  Expr *value = run.options.lookup(name);
+Expr *ChildChecker::optionValue(ChildRun &run, NodeOption option, const Type *type) {
+  Expr *value = run.options.lookup(option);
   if (value != nullptr) {
     return this->argumentChecker->checkArg(value, Type::optional(type));
   }
@@ -363,23 +355,24 @@ Expr *ChildChecker::optionValue(ChildRun &run, llvm::StringRef name, const Type 
 
 void ChildChecker::fillPlainOptions(ChildRun &run) {
   const auto *string = Type::string();
+  const auto *environment = Type::dict(Type::DictKind::Record, string, string);
   std::vector<Expr *> &args = run.args;
-  args[ChildCwd] = this->optionValue(run, "cwd", string);
-  args[ChildEnv] =
-      this->optionValue(run, "env", Type::dict(Type::DictKind::Record, string, string));
-  args[ChildTimeout] = this->optionValue(run, "timeout", Type::doubleTy());
-  args[ChildMaxBuffer] = this->optionValue(run, "maxBuffer", Type::doubleTy());
-  args[ChildWindowsHide] = this->optionValue(run, "windowsHide", Type::boolTy());
-  args[ChildVerbatim] = this->optionValue(run, "windowsVerbatimArguments", Type::boolTy());
-  args[ChildDetached] = this->optionValue(run, "detached", Type::boolTy());
-  args[ChildArgv0] = this->optionValue(run, "argv0", string);
-  args[ChildUid] = this->optionValue(run, "uid", Type::intTy());
-  args[ChildGid] = this->optionValue(run, "gid", Type::intTy());
+  args[ChildCwd] = this->optionValue(run, NodeOption::WORKING_DIRECTORY, string);
+  args[ChildEnv] = this->optionValue(run, NodeOption::ENVIRONMENT, environment);
+  args[ChildTimeout] = this->optionValue(run, NodeOption::TIMEOUT, Type::doubleTy());
+  args[ChildMaxBuffer] = this->optionValue(run, NodeOption::MAX_BUFFER, Type::doubleTy());
+  args[ChildWindowsHide] = this->optionValue(run, NodeOption::WINDOWS_HIDE, Type::boolTy());
+  args[ChildVerbatim] =
+      this->optionValue(run, NodeOption::WINDOWS_VERBATIM_ARGUMENTS, Type::boolTy());
+  args[ChildDetached] = this->optionValue(run, NodeOption::DETACHED, Type::boolTy());
+  args[ChildArgv0] = this->optionValue(run, NodeOption::ARGV0, string);
+  args[ChildUid] = this->optionValue(run, NodeOption::USER_ID, Type::intTy());
+  args[ChildGid] = this->optionValue(run, NodeOption::GROUP_ID, Type::intTy());
 }
 
 void ChildChecker::walkInputOption(ChildRun &run) {
   const auto *string = Type::string();
-  Expr *value = run.options.lookup("input");
+  Expr *value = run.options.lookup(NodeOption::INPUT);
   if (value == nullptr) {
     run.args[ChildInput] = this->absentValue(run.loc, string);
     return;
@@ -400,7 +393,7 @@ void ChildChecker::walkInputOption(ChildRun &run) {
     return;
   }
   run.args[ChildInput] = this->typeRelations->coerce(input, Type::optional(type));
-  Expr *encoding = run.options.lookup("encoding");
+  Expr *encoding = run.options.lookup(NodeOption::ENCODING);
   bool isBufferText = type->isString() && run.encoding == ChildBytes && encoding != nullptr &&
                       !isa<UndefinedExpr>(encoding);
   if (isBufferText) {
@@ -412,7 +405,7 @@ void ChildChecker::walkInputOption(ChildRun &run) {
 
 void ChildChecker::walkKillSignalOption(ChildRun &run) {
   const auto *string = Type::string();
-  Expr *value = run.options.lookup("killSignal");
+  Expr *value = run.options.lookup(NodeOption::KILL_SIGNAL);
   if (value == nullptr) {
     run.args[ChildKillSignal] = this->absentValue(run.loc, string);
     return;
@@ -437,7 +430,7 @@ void ChildChecker::walkKillSignalOption(ChildRun &run) {
 
 void ChildChecker::walkShellOption(ChildRun &run) {
   const auto *string = Type::string();
-  Expr *value = run.options.lookup("shell");
+  Expr *value = run.options.lookup(NodeOption::SHELL);
   if (value == nullptr) {
     run.args[ChildShell] = this->absentValue(run.loc, string);
     return;

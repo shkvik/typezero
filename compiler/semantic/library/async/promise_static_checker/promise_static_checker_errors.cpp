@@ -37,6 +37,10 @@ std::string ErrorTextAllValues::voidValue() {
          "Promise<void> has none; await it on its own";
 }
 
+std::string ErrorTextPromiseList::valuesLabel() {
+  return "values";
+}
+
 std::string ErrorTextPromiseList::noType(llvm::StringRef fn) {
   return (llvm::Twine("'") + fn +
           "' of no promises needs the type of their values; "

@@ -1,5 +1,8 @@
 #include "compiler/semantic/types/type_resolver/type_resolver.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
 #include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
+#include "compiler/program/library/intl/intl_service_table/intl_service_table.h"
+#include "compiler/program/library/intl/intl_type_name_table/intl_type_name_table.h"
 #include "compiler/program/library/library_module_names/library_module_names.h"
 #include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
 #include "compiler/semantic/bodies/classes/decorator_checker/decorator_checker.h"
@@ -36,9 +39,6 @@ namespace {
 
 constexpr double kMaxWholeNumber = 9007199254740992.0;
 constexpr llvm::StringLiteral kIntlPrefix = "Intl.";
-constexpr llvm::StringLiteral kIntlLocaleType = "Intl.Locale";
-constexpr llvm::StringLiteral kReadlineInterface = "Interface";
-constexpr llvm::StringLiteral kThisParam = "this";
 
 }
 
@@ -546,7 +546,8 @@ TypeResolver::ResultIntlTypeResolved TypeResolver::intlType(llvm::StringRef name
 }
 
 ClassDecl *TypeResolver::localeClass(llvm::StringRef name) const {
-  if (name != kIntlLocaleType) {
+  auto localeName = IntlTypeNameTable::getName(IntlTypeName::LOCALE);
+  if (name != IntlServiceTable::getQualifiedName(localeName)) {
     return nullptr;
   }
   auto *decl = this->typeDeclarer->lookupType(LibraryModuleNames::kIntlLocaleName);
@@ -576,7 +577,8 @@ const Type *TypeResolver::builtinNamed(llvm::StringRef name) const {
     return bytes;
   }
   const auto *node = this->builtinModuleChecker->nodeName(name);
-  bool isInterface = node != nullptr && node->name == kReadlineInterface;
+  auto interfaceName = Type::runtimeObject(Type::Runtime::Readline)->name();
+  bool isInterface = node != nullptr && node->name == interfaceName;
   if (isInterface && node->module == NodeModule::Readline) {
     return Type::runtimeObject(Type::Runtime::Readline);
   }
@@ -1082,7 +1084,8 @@ const Type *TypeResolver::resolveFunctionType(const TypeRef &ref) {
 
 bool TypeResolver::hasThisParam(const TypeRef &ref) const {
   size_t count = ref.args.size() - 1;
-  bool isNamedThis = count > 0 && !ref.names().empty() && ref.names()[0] == kThisParam;
+  bool isNamedThis =
+      count > 0 && !ref.names().empty() && ref.names()[0] == KeywordTable::getName(Keyword::THIS);
   bool isOnlyRest = ref.rest() && count == 1;
 
   return isNamedThis && !ref.optional()[0] && !isOnlyRest;

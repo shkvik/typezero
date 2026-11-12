@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/classes/overload_resolver/overload_resolver.h"
+#include "compiler/program/library/regex/match_member_table/match_member_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/flow/children_first/children_first.h"
@@ -27,7 +28,6 @@ constexpr int kExactRank = 0;
 constexpr int kDirectRank = 1;
 constexpr int kFieldsRank = 2;
 constexpr int kJsonRank = 3;
-constexpr llvm::StringLiteral kMatchIndices = "indices";
 constexpr llvm::StringLiteral kObjectPlaceholder = "o";
 }
 
@@ -150,7 +150,7 @@ int OverloadResolver::bytesRank(const Type *from, const Type *to) const {
 
 int OverloadResolver::matchRank(const Type *from, const Type *to) const {
   bool isPlainMatch = from->isMatch() && to->isMatch() && to->matchGroups() < 0 &&
-                      from->field(kMatchIndices) == nullptr;
+                      from->field(MatchMemberTable::getName(MatchMember::INDICES)) == nullptr;
   if (!isPlainMatch) {
     return kNoRank;
   }

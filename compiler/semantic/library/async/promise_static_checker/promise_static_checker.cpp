@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/async/promise_static_checker/promise_static_checker.h"
+#include "compiler/program/library/async/promise_resolvers_field_table/promise_resolvers_field_table.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -85,7 +86,7 @@ PromiseStaticChecker::checkPromiseArray(const Expr *arg, llvm::StringRef functio
   if (!type->isArray() && !type->isTuple()) {
     const auto *name = dyn_cast<NameExpr>(arg);
     bool isIterable = type->isIterator() || type->isDict();
-    llvm::StringRef values = name != nullptr ? name->name : llvm::StringRef("values");
+    std::string values = name != nullptr ? name->name.str() : ErrorTextPromiseList::valuesLabel();
     auto message = ErrorTextPromiseList::notArray(functionName, type->name(), isIterable, values);
 
     return err(PromiseStaticCheckerPromiseArrayError{
@@ -450,8 +451,11 @@ Expr *PromiseStaticChecker::checkWithResolvers(CallExpr *call, MemberExpr *membe
   if (known.isErr()) {
     return call;
   }
-  call->type = Type::object({{"promise", Type::promise(value), false},
-                             {"resolve", this->promiseChecker->resolverType(value), false}});
+  auto promiseName = PromiseResolversFieldTable::getName(PromiseResolversField::PROMISE);
+  auto resolveName = PromiseResolversFieldTable::getName(PromiseResolversField::RESOLVE);
+  const auto *resolver = this->promiseChecker->resolverType(value);
+  call->type = Type::object(
+      {{promiseName.str(), Type::promise(value), false}, {resolveName.str(), resolver, false}});
 
   return call;
 }
@@ -465,7 +469,8 @@ const Type *PromiseStaticChecker::resolverValueType(const MemberExpr *member,
   if (expected == nullptr || !expected->isObject()) {
     return nullptr;
   }
-  const auto *promise = expected->field("promise");
+  auto promiseName = PromiseResolversFieldTable::getName(PromiseResolversField::PROMISE);
+  const auto *promise = expected->field(promiseName);
   if (promise == nullptr || !promise->type->isPromise()) {
     return nullptr;
   }

@@ -3,6 +3,7 @@
 #include "compiler/program/library/async/timer_method_table/timer_method_table.h"
 #include "compiler/program/library/async/timers_promises_function_table/timers_promises_function_table.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/process/process_qualified_name_table/process_qualified_name_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -313,7 +314,8 @@ TimerChecker::ResultNextTickQueued TimerChecker::checkNextTick(CallExpr *call) {
     });
   }
   call->target = BuiltinCall{.builtin = Builtin::NextTick};
-  call->args[0] = this->checkTaskCallback(call->args[0], "process.nextTick");
+  auto nextTick = ProcessQualifiedNameTable::getQualifiedName(ProcessMember::NEXT_TICK);
+  call->args[0] = this->checkTaskCallback(call->args[0], nextTick);
   call->type = Type::voidTy();
 
   return ok(call);
@@ -418,14 +420,16 @@ TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef functionNa
   if (kept.value().argument != nullptr) {
     args.push_back(kept.value().argument);
   }
-  auto options = llvm::StringMap<Expr *>();
-  if (!this->fsChecker->readNodeOptions(call, valueAt + 1, functionName, {"ref"}, options)) {
+  auto options = NodeOptions();
+  bool isRead =
+      this->fsChecker->readNodeOptions(call, valueAt + 1, functionName, {NodeOption::REF}, options);
+  if (!isRead) {
     return err(TimerCheckerCheckTimersPromisesCallError{
         .code = TimerCheckerCheckTimersPromisesCallErrorCode::ALREADY_REPORTED,
         .message = "",
     });
   }
-  auto *ref = this->checkRefOption(options.lookup("ref"), loc);
+  auto *ref = this->checkRefOption(options.lookup(NodeOption::REF), loc);
   args.push_back(ref);
   call->args = std::move(args);
   call->spread.clear();

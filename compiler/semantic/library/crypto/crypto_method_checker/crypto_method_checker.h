@@ -3,6 +3,7 @@
 #include "compiler/program/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/program/library/crypto/crypto_method_table/crypto_method_table.h"
 #include "compiler/result/result/result.h"
+#include "compiler/semantic/library/crypto/crypto_args/crypto_args.h"
 #include "compiler/semantic/library/crypto/crypto_method_checker/crypto_method_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
@@ -57,8 +58,7 @@ private:
   Expr *checkX509Pem(const CryptoMethodCall &crypto);
   Expr *checkX509Name(const CryptoMethodCall &crypto);
   Expr *checkX509Verify(const CryptoMethodCall &crypto);
-  Expr *checkEncodedKeyExport(const CryptoMethodCall &crypto, llvm::StringMap<Expr *> &options,
-                              bool pem);
+  Expr *checkEncodedKeyExport(const CryptoMethodCall &crypto, CryptoOptions &options, bool pem);
 
   SemanticState &state;
   CryptoArgs *cryptoArgs = nullptr;

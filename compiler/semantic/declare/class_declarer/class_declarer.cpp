@@ -1,4 +1,6 @@
 #include "compiler/semantic/declare/class_declarer/class_declarer.h"
+#include "compiler/program/library/builtin_names/internal_name_table/internal_name_table.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
 #include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/bodies/classes/class_links/class_links.h"
@@ -18,8 +20,6 @@ namespace tz {
 
 namespace {
 
-constexpr llvm::StringLiteral kThisName = "this";
-constexpr llvm::StringLiteral kInitName = "init";
 constexpr llvm::StringLiteral kInternalPrefix = "%";
 
 }
@@ -719,7 +719,7 @@ std::vector<Stmt *> ClassDeclarer::fieldSets(const ClassDecl *classDecl) {
 
 Stmt *ClassDeclarer::fieldSet(const ClassField &field) {
   auto &ast = this->state.getAst();
-  auto *self = ast.make<NameExpr>(field.loc, kThisName);
+  auto *self = ast.make<NameExpr>(field.loc, KeywordTable::getName(Keyword::THIS));
   auto *target = ast.make<MemberExpr>(field.loc, self, field.name);
   auto *set = ast.make<AssignExpr>(field.loc, std::nullopt, target, field.init);
 
@@ -728,7 +728,8 @@ Stmt *ClassDeclarer::fieldSet(const ClassField &field) {
 
 FunctionDecl *ClassDeclarer::makeInitDecl(ClassDecl *classDecl, std::vector<Stmt *> sets) {
   auto &ast = this->state.getAst();
-  auto *init = ast.make<FunctionDecl>(classDecl->loc(), kInitName);
+  auto initName = InternalNameTable::getName(InternalName::FIELD_INIT);
+  auto *init = ast.make<FunctionDecl>(classDecl->loc(), initName);
   init->role = ClassMember{.cls = classDecl};
   init->body = ast.make<BlockStmt>(classDecl->loc());
   init->body->body = std::move(sets);

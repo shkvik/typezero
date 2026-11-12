@@ -51,6 +51,7 @@ struct GeneratorCheckerCheckSendsNothingError {
 
 class ErrorTextSendsNothing {
 public:
+  static std::string destructuring();
   static std::string expects(llvm::StringRef what, llvm::StringRef iterator, llvm::StringRef sent);
 };
 

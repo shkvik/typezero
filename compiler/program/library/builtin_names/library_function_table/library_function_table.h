@@ -1,0 +1,61 @@
+#pragma once
+
+#include "llvm/ADT/StringRef.h"
+#include <optional>
+
+namespace tz {
+
+enum class LibraryFunction {
+  SUBTLE_GENERATE_HMAC,
+  SUBTLE_GENERATE_AES,
+  SUBTLE_GENERATE_EC,
+  SUBTLE_GENERATE_RSA,
+  SUBTLE_GENERATE_OKP,
+  SUBTLE_IMPORT_HMAC,
+  SUBTLE_IMPORT_AES,
+  SUBTLE_IMPORT_KDF,
+  SUBTLE_IMPORT_EC,
+  SUBTLE_IMPORT_RSA,
+  SUBTLE_IMPORT_OKP,
+  SUBTLE_IMPORT_ANY,
+  SUBTLE_UNWRAP_HMAC,
+  SUBTLE_UNWRAP_AES,
+  SUBTLE_UNWRAP_KDF,
+  SUBTLE_UNWRAP_EC,
+  SUBTLE_UNWRAP_RSA,
+  SUBTLE_UNWRAP_OKP,
+  SUBTLE_EXPORT_JWK,
+  SUBTLE_EXPORT_BYTES,
+  SUBTLE_JWK_OF,
+  FETCH,
+  ONCE_TARGET,
+  ONCE_WITHIN,
+  ONCE_RESULT,
+  ON_WITHIN,
+  ON_RESULT,
+  STREAM_TRANSFORM_STAGE,
+  STREAM_SOURCE_STAGE,
+  STREAM_VOID_SINK_STAGE,
+  STREAM_SINK_STAGE,
+  STREAM_ASYNC_ITERABLE_STAGE,
+  STREAM_ITERABLE_STAGE,
+  STREAM_WRITE_NEW_FILE,
+  STREAM_WRITE_FILE,
+  STREAM_READ_FILE,
+  STREAM_FROM_VALUE,
+  STREAM_FROM_ASYNC_ITERATOR,
+  STREAM_FROM_ITERATOR,
+};
+
+struct LibraryFunctionInfo {
+  llvm::StringLiteral name;
+  LibraryFunction value;
+};
+
+class LibraryFunctionTable {
+public:
+  static std::optional<LibraryFunction> find(llvm::StringRef name);
+  static llvm::StringRef getName(LibraryFunction value);
+};
+
+}

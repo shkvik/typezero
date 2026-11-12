@@ -1,5 +1,10 @@
 #include "compiler/semantic/library/events/event_target_checker/event_target_checker.h"
+#include "compiler/program/library/builtin_modules/node_option_table/node_option_table.h"
+#include "compiler/program/library/builtin_names/library_function_table/library_function_table.h"
+#include "compiler/program/library/builtin_names/library_method_table/library_method_table.h"
+#include "compiler/program/library/events/emitter_event_table/emitter_event_table.h"
 #include "compiler/program/library/events/emitter_member_table/emitter_member_table.h"
+#include "compiler/program/library/events/event_target_method_table/event_target_method_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -89,8 +94,9 @@ EventTargetChecker::checkEmitterEvents(const Type *type, llvm::StringRef functio
 
 Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *member,
                                                ClassDecl *classDecl) {
-  bool isAdd = member->name == "addEventListener";
-  if (!isAdd && member->name != "removeEventListener") {
+  auto method = EventTargetMethodTable::find(member->name);
+  bool isAdd = method == EventTargetMethod::ADD_EVENT_LISTENER;
+  if (!method.has_value()) {
     return nullptr;
   }
   auto *eventClass = this->state.getLibraryDeclarations().findLibraryClass(LibraryClass::EVENT);
@@ -121,16 +127,20 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
   if (!isAdd) {
     call->args[1] = this->typeRelations->convert(call->args[1], Type::unknown());
     this->state.getInventoryStore().markComparesFunctions();
-    return this->emitterChecker->callLibraryMethod(call, member, classDecl, "removeListenerWith",
-                                                   {}, &given, CallReceiver::OWN);
+    auto removeName = LibraryMethodTable::getName(LibraryMethod::REMOVE_LISTENER_WITH);
+    return this->emitterChecker->callLibraryMethod(call, member, classDecl, removeName, {}, &given,
+                                                   CallReceiver::OWN);
   }
   if (*kind != nullptr) {
-    return this->emitterChecker->callLibraryMethod(call, member, classDecl, "addFunctionListener",
-                                                   {*kind}, &given, CallReceiver::OWN);
+    auto addName = LibraryMethodTable::getName(LibraryMethod::ADD_FUNCTION_LISTENER);
+    return this->emitterChecker->callLibraryMethod(call, member, classDecl, addName, {*kind},
+                                                   &given, CallReceiver::OWN);
   }
 
-  return this->emitterChecker->callLibraryMethod(call, member, classDecl, "addObjectListener", {},
-                                                 &given, CallReceiver::OWN);
+  auto addName = LibraryMethodTable::getName(LibraryMethod::ADD_OBJECT_LISTENER);
+
+  return this->emitterChecker->callLibraryMethod(call, member, classDecl, addName, {}, &given,
+                                                 CallReceiver::OWN);
 }
 
 std::optional<const Type *> EventTargetChecker::typedListener(CallExpr *call, ClassDecl *eventClass,
@@ -333,13 +343,14 @@ Expr *EventTargetChecker::checkListenersFunction(CallExpr *call, llvm::StringRef
 }
 
 Expr *EventTargetChecker::targetListeners(CallExpr *call, Expr *object) {
-  auto *member = this->state.getAst().make<MemberExpr>(call->loc(), object, "listenersOf");
+  auto listenersOf = LibraryMethodTable::getName(LibraryMethod::LISTENERS_OF);
+  auto *member = this->state.getAst().make<MemberExpr>(call->loc(), object, listenersOf);
   auto *method =
       this->state.getAst().make<CallExpr>(call->loc(), member, std::vector<Expr *>{call->args[1]});
   method->type = Type::error();
   std::vector<bool> given{false};
   auto *targetClass = this->classDeclarer->classOf(object->type);
-  this->emitterChecker->callLibraryMethod(method, member, targetClass, "listenersOf", {}, &given,
+  this->emitterChecker->callLibraryMethod(method, member, targetClass, listenersOf, {}, &given,
                                           CallReceiver::OWN);
 
   return method;
@@ -354,7 +365,7 @@ bool EventTargetChecker::hasTimeoutOption(const CallExpr *call) const {
     return false;
   }
   for (const ObjectLitExpr::Property &property : options->props) {
-    if (!property.spread() && property.name == "timeout") {
+    if (!property.spread() && NodeOptionTable::find(property.name) == NodeOption::TIMEOUT) {
       return true;
     }
   }
@@ -411,7 +422,9 @@ Expr *EventTargetChecker::checkTargetWait(WaitCall &wait) {
   }
   call->args[1] = this->argumentChecker->checkArg(call->args[1], Type::string());
 
-  return this->callLibraryFunction(call, "onceTarget", {}, wait.given, wait.loc);
+  auto onceTarget = LibraryFunctionTable::getName(LibraryFunction::ONCE_TARGET);
+
+  return this->callLibraryFunction(call, onceTarget, {}, wait.given, wait.loc);
 }
 
 Expr *EventTargetChecker::checkEmitterWait(WaitCall &wait, const Type *events) {
@@ -436,8 +449,9 @@ Expr *EventTargetChecker::checkEmitterWait(WaitCall &wait, const Type *events) {
     this->walkArgsFrom(call, 2);
     return call;
   }
+  auto errorName = EmitterEventTable::getName(EmitterEvent::ERROR_EVENT);
   const Type *errors =
-      events->isRecord() ? events->valueType() : this->eventMaps->findEventArgs(events, "error");
+      events->isRecord() ? events->valueType() : this->eventMaps->findEventArgs(events, errorName);
   if (wait.timed) {
     return this->checkTimedWait(wait, events, args, errors);
   }
@@ -449,8 +463,10 @@ bool EventTargetChecker::isWaitEnding(const CallExpr *call) const {
   const auto *source = this->classDeclarer->classOf(call->args[0]->type);
   const ClassDecl *root =
       source != nullptr && source->generic() != nullptr ? source->generic() : source;
-  bool isEnding = root != nullptr && root->library() && root->name != "EventEmitter" &&
-                  root->name != "EventEmitterBase";
+  bool isEmitterRoot =
+      root != nullptr && (LibraryClassTable::isName(root->name, LibraryClass::EVENT_EMITTER) ||
+                          LibraryClassTable::isName(root->name, LibraryClass::EVENT_EMITTER_BASE));
+  bool isEnding = root != nullptr && root->library() && !isEmitterRoot;
   bool isTopLevel = this->state.getFunctionStack().getCurrentDecl() == nullptr &&
                     !this->state.getFunctionStack().isInsideAwaitLoop();
   bool isRunningOnce = isTopLevel || this->emitterChecker->isOwningEmitter(call->args[0]);
@@ -472,7 +488,8 @@ Expr *EventTargetChecker::checkTimedWait(WaitCall &wait, const Type *events, con
     failure = value.value();
   }
   this->appendErrorsFlag(wait, errors != nullptr);
-  std::string variant = wait.fn.str() + "Within";
+  auto within = wait.once ? LibraryFunction::ONCE_WITHIN : LibraryFunction::ON_WITHIN;
+  auto variant = LibraryFunctionTable::getName(within);
 
   return this->callLibraryFunction(call, variant, {args, failure}, wait.given, wait.loc);
 }
@@ -494,7 +511,8 @@ Expr *EventTargetChecker::checkPlainWait(WaitCall &wait, const Type *events, con
     this->state.getDiagnostics().error(call->args[1]->loc(), value.error().message);
     return call;
   }
-  std::string variant = wait.fn.str() + "Result";
+  auto result = wait.once ? LibraryFunction::ONCE_RESULT : LibraryFunction::ON_RESULT;
+  auto variant = LibraryFunctionTable::getName(result);
 
   return this->callLibraryFunction(call, variant, {args, value.value()}, wait.given, wait.loc);
 }

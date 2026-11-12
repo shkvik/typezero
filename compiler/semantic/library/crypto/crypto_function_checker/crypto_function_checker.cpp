@@ -1,5 +1,9 @@
 #include "compiler/semantic/library/crypto/crypto_function_checker/crypto_function_checker.h"
+#include "compiler/program/library/crypto/cipher_name_table/cipher_name_table.h"
 #include "compiler/program/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/program/library/crypto/crypto_async_function_table/crypto_async_function_table.h"
+#include "compiler/program/library/crypto/crypto_class_table/crypto_class_table.h"
+#include "compiler/program/library/crypto/curve_name_table/curve_name_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -13,7 +17,6 @@
 #include "compiler/semantic/library/crypto/crypto_check_helpers/crypto_check_helpers.h"
 #include "compiler/semantic/library/crypto/crypto_checker/crypto_checker_errors.h"
 #include "compiler/semantic/library/crypto/crypto_exports/crypto_exports.h"
-#include "compiler/semantic/library/crypto/crypto_names/crypto_names.h"
 #include "compiler/semantic/library/crypto/key_pair_checker/key_pair_checker.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_relations/type_relations.h"
@@ -59,20 +62,9 @@ std::optional<std::string> CryptoFunctionChecker::literalOf(const Expr *expr) co
 
 Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef functionName,
                                              llvm::SMLoc loc) {
-  llvm::StringRef sync = functionName;
-  bool isAsync = false;
-  for (const auto &[form, syncName] : kAsyncForms) {
-    if (functionName == form) {
-      isAsync = true;
-      sync = syncName;
-    }
-  }
-  for (const auto &[form, syncName] : kTzCryptoAsyncForms) {
-    if (functionName == form) {
-      isAsync = true;
-      sync = syncName;
-    }
-  }
+  const CryptoAsyncFunctionInfo *async = CryptoAsyncFunctionTable::find(functionName);
+  bool isAsync = async != nullptr;
+  llvm::StringRef sync = isAsync ? llvm::StringRef(async->syncName) : functionName;
   if (isAsync && !call->args.empty() && isa<FunctionExpr>(call->args.back())) {
     auto message = ErrorTextCryptoFunction::callback(functionName);
     this->state.getDiagnostics().error(call->args.back()->loc(), message);
@@ -88,9 +80,9 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fun
 }
 
 CryptoFunctionChecker::ResultFilledTarget
-CryptoFunctionChecker::checkFilledTarget(const Type *type, llvm::StringRef functionName,
+CryptoFunctionChecker::checkFilledTarget(const Type *type, CryptoSyncFunction function,
                                          llvm::StringRef shown) const {
-  if (functionName == "getRandomValues") {
+  if (function == CryptoSyncFunction::GET_RANDOM_VALUES) {
     static const Type::Bytes floats[] = {Type::Bytes::Float16, Type::Bytes::Float32,
                                          Type::Bytes::Float64};
     if (!type->isTypedArray() || llvm::is_contained(floats, type->bytes())) {
@@ -118,7 +110,7 @@ CryptoFunctionChecker::checkFilledTarget(const Type *type, llvm::StringRef funct
 
 CryptoFunctionChecker::ResultCurveIsKnown
 CryptoFunctionChecker::checkCurveIsKnown(llvm::StringRef curve) const {
-  if (!llvm::is_contained(kCurveNames, curve)) {
+  if (!CurveNameTable::isKnown(curve)) {
     auto message = ErrorTextCryptoFunction::curve(curve);
 
     return err(CryptoFunctionCheckerCurveIsKnownError{
@@ -158,7 +150,7 @@ Expr *CryptoFunctionChecker::asyncOf(Expr *checked) {
 Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef functionName,
                                            llvm::StringRef shown, llvm::SMLoc loc) {
   call->type = Type::error();
-  if (llvm::is_contained(kClasses, functionName)) {
+  if (CryptoClassTable::find(functionName).has_value()) {
     auto message = ErrorTextCryptoFunction::isClass(functionName);
     this->state.getDiagnostics().error(loc, message);
     return this->checkLoosely(call);
@@ -258,7 +250,8 @@ Expr *CryptoFunctionChecker::reportConstants(CallExpr *call, llvm::SMLoc loc) {
 
 Expr *CryptoFunctionChecker::reportUnknownFunction(CallExpr *call, llvm::StringRef shown,
                                                    llvm::SMLoc loc) {
-  auto found = CryptoExports::checkCryptoExport(shown, "node:crypto");
+  auto path = KnownModules::getPath(NodeModule::Crypto);
+  auto found = CryptoExports::checkCryptoExport(shown, path);
   std::string message = found.isErr() ? found.error().message : std::string();
   this->state.getDiagnostics().error(loc, message);
 
@@ -278,7 +271,7 @@ bool CryptoFunctionChecker::isPresent(const std::vector<Expr *> &args, size_t in
 }
 
 bool CryptoFunctionChecker::readOptionsAt(SyncCall &sync, size_t index,
-                                          llvm::ArrayRef<llvm::StringRef> allowed) {
+                                          llvm::ArrayRef<CryptoOption> allowed) {
   std::vector<Expr *> &args = sync.call->args;
   if (!this->isPresent(args, index)) {
     return true;
@@ -313,17 +306,17 @@ Expr *CryptoFunctionChecker::checkCreateHash(SyncCall &sync) {
   CallExpr *call = sync.call;
   std::vector<Expr *> &args = call->args;
   llvm::SMLoc loc = sync.loc;
-  llvm::StringMap<Expr *> &options = sync.options;
+  CryptoOptions &options = sync.options;
   auto arity = this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
   auto *md = this->cryptoArgs->cryptoMd(args[0], DigestUse::HASH);
-  if (!this->readOptionsAt(sync, 1, {"outputLength"}) || md == nullptr) {
+  if (!this->readOptionsAt(sync, 1, {CryptoOption::OUTPUT_LENGTH}) || md == nullptr) {
     return call;
   }
-  Expr *length = options.lookup("outputLength");
+  Expr *length = options.lookup(CryptoOption::OUTPUT_LENGTH);
   std::vector<Expr *> hashArgs = {md, length != nullptr ? this->cryptoArgs->cryptoNumber(length)
                                                         : this->cryptoArgs->cryptoDouble(loc, -1)};
   return this->cryptoArgs->cryptoResult(call, CryptoFn::HashNew, std::move(hashArgs),
@@ -340,7 +333,8 @@ Expr *CryptoFunctionChecker::checkCreateHmac(SyncCall &sync) {
     return call;
   }
   auto *md = this->cryptoArgs->cryptoMd(args[0], DigestUse::HMAC);
-  auto *key = this->cryptoArgs->cryptoData(args[1], "key", kAnyCryptoData);
+  auto keyWhat = ErrorTextCryptoLabel::key();
+  auto *key = this->cryptoArgs->cryptoData(args[1], keyWhat, kAnyCryptoData);
   if (md == nullptr || key->type->isError()) {
     return call;
   }
@@ -361,7 +355,8 @@ Expr *CryptoFunctionChecker::checkHashOnce(SyncCall &sync) {
     return call;
   }
   auto *md = this->cryptoArgs->cryptoMd(args[0], DigestUse::HASH);
-  auto *data = this->cryptoArgs->cryptoData(args[1], "data", kTextOrViews);
+  auto dataWhat = ErrorTextCryptoLabel::data();
+  auto *data = this->cryptoArgs->cryptoData(args[1], dataWhat, kTextOrViews);
   auto *encoding = this->cryptoArgs->cryptoEncoding(call, 2, functionName, 6);
   if (md == nullptr || data->type->isError() || encoding == nullptr) {
     return call;
@@ -397,15 +392,15 @@ Expr *CryptoFunctionChecker::checkRandomBytes(SyncCall &sync) {
 Expr *CryptoFunctionChecker::checkRandomUuid(SyncCall &sync) {
   CallExpr *call = sync.call;
   llvm::SMLoc loc = sync.loc;
-  llvm::StringMap<Expr *> &options = sync.options;
+  CryptoOptions &options = sync.options;
   auto arity = this->argumentChecker->checkArity(call, 0, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
-  if (arity.isErr() || !this->readOptionsAt(sync, 0, {"disableEntropyCache"})) {
+  if (arity.isErr() || !this->readOptionsAt(sync, 0, {CryptoOption::DISABLE_ENTROPY_CACHE})) {
     return call;
   }
-  Expr *cache = options.lookup("disableEntropyCache");
+  Expr *cache = options.lookup(CryptoOption::DISABLE_ENTROPY_CACHE);
   if (cache != nullptr) {
     this->argumentChecker->checkArg(cache, Type::boolTy());
   }
@@ -469,7 +464,7 @@ Expr *CryptoFunctionChecker::checkRandomFill(SyncCall &sync) {
   if (type->isError()) {
     return call;
   }
-  auto filled = this->checkFilledTarget(type, sync.fn, sync.shown);
+  auto filled = this->checkFilledTarget(type, sync.function, sync.shown);
   if (filled.isErr()) {
     this->state.getDiagnostics().error(target->loc(), filled.error().message);
     return call;
@@ -598,14 +593,18 @@ Expr *CryptoFunctionChecker::checkPbkdf2(SyncCall &sync) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  auto *password = this->cryptoArgs->cryptoData(args[0], "password", kAnyCryptoData);
-  auto *salt = this->cryptoArgs->cryptoData(args[1], "salt", kTextOrBuffers);
+  auto passwordWhat = ErrorTextCryptoLabel::password();
+  auto saltWhat = ErrorTextCryptoLabel::salt();
+  auto iterationsWhat = ErrorTextCryptoLabel::iterations();
+  auto keylenWhat = ErrorTextCryptoLabel::keylen();
+  auto *password = this->cryptoArgs->cryptoData(args[0], passwordWhat, kAnyCryptoData);
+  auto *salt = this->cryptoArgs->cryptoData(args[1], saltWhat, kTextOrBuffers);
   Expr *iterations = this->cryptoArgs->cryptoNumber(args[2]),
        *keylen = this->cryptoArgs->cryptoNumber(args[3]);
   auto *md = this->cryptoArgs->cryptoMd(args[4], DigestUse::HMAC);
   if (md == nullptr || password->type->isError() || salt->type->isError() ||
-      !this->cryptoArgs->matchWhole(iterations, "iterations", 1) ||
-      !this->cryptoArgs->matchWhole(keylen, "keylen", 1)) {
+      !this->cryptoArgs->matchWhole(iterations, iterationsWhat, 1) ||
+      !this->cryptoArgs->matchWhole(keylen, keylenWhat, 1)) {
     return call;
   }
   return this->cryptoArgs->cryptoResult(call, CryptoFn::Pbkdf2,
@@ -621,13 +620,17 @@ Expr *CryptoFunctionChecker::checkHkdf(SyncCall &sync) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
+  auto ikmWhat = ErrorTextCryptoLabel::ikm();
+  auto saltWhat = ErrorTextCryptoLabel::salt();
+  auto infoWhat = ErrorTextCryptoLabel::info();
+  auto keylenWhat = ErrorTextCryptoLabel::keylen();
   auto *md = this->cryptoArgs->cryptoMd(args[0], DigestUse::HMAC);
-  auto *key = this->cryptoArgs->cryptoData(args[1], "ikm", kAnyCryptoData);
-  auto *salt = this->cryptoArgs->cryptoData(args[2], "salt", kTextOrBuffers);
-  auto *info = this->cryptoArgs->cryptoData(args[3], "info", kTextOrBuffers);
+  auto *key = this->cryptoArgs->cryptoData(args[1], ikmWhat, kAnyCryptoData);
+  auto *salt = this->cryptoArgs->cryptoData(args[2], saltWhat, kTextOrBuffers);
+  auto *info = this->cryptoArgs->cryptoData(args[3], infoWhat, kTextOrBuffers);
   auto *keylen = this->cryptoArgs->cryptoNumber(args[4]);
   if (md == nullptr || key->type->isError() || salt->type->isError() || info->type->isError() ||
-      !this->cryptoArgs->matchWhole(keylen, "keylen", 1)) {
+      !this->cryptoArgs->matchWhole(keylen, keylenWhat, 1)) {
     return call;
   }
   return this->cryptoArgs->cryptoResult(call, CryptoFn::Hkdf, {md, key, salt, info, keylen},
@@ -638,28 +641,38 @@ Expr *CryptoFunctionChecker::checkScrypt(SyncCall &sync) {
   CallExpr *call = sync.call;
   std::vector<Expr *> &args = call->args;
   llvm::SMLoc loc = sync.loc;
-  llvm::StringMap<Expr *> &options = sync.options;
+  CryptoOptions &options = sync.options;
   const auto *buffer = Type::bytesType(Type::Bytes::Buffer);
   auto arity = this->argumentChecker->checkArity(call, 3, 4);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  auto *password = this->cryptoArgs->cryptoData(args[0], "password", kAnyCryptoData);
-  auto *salt = this->cryptoArgs->cryptoData(args[1], "salt", kTextOrBuffers);
+  auto passwordWhat = ErrorTextCryptoLabel::password();
+  auto saltWhat = ErrorTextCryptoLabel::salt();
+  auto *password = this->cryptoArgs->cryptoData(args[0], passwordWhat, kAnyCryptoData);
+  auto *salt = this->cryptoArgs->cryptoData(args[1], saltWhat, kTextOrBuffers);
   auto *keylen = this->cryptoArgs->cryptoNumber(args[2]);
-  if (!this->readOptionsAt(sync, 3,
-                           {"N", "r", "p", "maxmem", "cost", "blockSize", "parallelization"})) {
+  bool isRead =
+      this->readOptionsAt(sync, 3,
+                          {CryptoOption::SCRYPT_N, CryptoOption::SCRYPT_R, CryptoOption::SCRYPT_P,
+                           CryptoOption::MAX_MEMORY, CryptoOption::COST, CryptoOption::BLOCK_SIZE,
+                           CryptoOption::PARALLELIZATION});
+  if (!isRead) {
     return call;
   }
-  static const std::pair<llvm::StringLiteral, llvm::StringLiteral> pairs[] = {
-      {"N", "cost"}, {"r", "blockSize"}, {"p", "parallelization"}};
+  static const std::pair<CryptoOption, CryptoOption> pairs[] = {
+      {CryptoOption::SCRYPT_N, CryptoOption::COST},
+      {CryptoOption::SCRYPT_R, CryptoOption::BLOCK_SIZE},
+      {CryptoOption::SCRYPT_P, CryptoOption::PARALLELIZATION}};
   Expr *values[3];
   for (int index = 0; index < 3; ++index) {
     Expr *a = options.lookup(pairs[index].first);
     Expr *b = options.lookup(pairs[index].second);
     if (a != nullptr && b) {
-      auto message = ErrorTextCryptoFunction::together(pairs[index].first, pairs[index].second);
+      auto first = CryptoOptionTable::getName(pairs[index].first);
+      auto second = CryptoOptionTable::getName(pairs[index].second);
+      auto message = ErrorTextCryptoFunction::together(first, second);
       this->state.getDiagnostics().error(b->loc(), message);
       return call;
     }
@@ -675,7 +688,7 @@ Expr *CryptoFunctionChecker::checkScrypt(SyncCall &sync) {
       return call;
     }
   }
-  Expr *maxmem = options.lookup("maxmem");
+  Expr *maxmem = options.lookup(CryptoOption::MAX_MEMORY);
   if (password->type->isError() || salt->type->isError()) {
     return call;
   }
@@ -689,18 +702,21 @@ Expr *CryptoFunctionChecker::checkScrypt(SyncCall &sync) {
 
 bool CryptoFunctionChecker::readArgonOptions(SyncCall &sync) {
   std::vector<Expr *> &args = sync.call->args;
-  bool isRead =
-      this->cryptoArgs->readCryptoOptions(args[1], sync.shown,
-                                          {"message", "nonce", "parallelism", "tagLength", "memory",
-                                           "passes", "secret", "associatedData"},
-                                          sync.options);
+  bool isRead = this->cryptoArgs->readCryptoOptions(
+      args[1], sync.shown,
+      {CryptoOption::MESSAGE, CryptoOption::NONCE, CryptoOption::PARALLELISM,
+       CryptoOption::TAG_LENGTH, CryptoOption::MEMORY, CryptoOption::PASSES, CryptoOption::SECRET,
+       CryptoOption::ASSOCIATED_DATA},
+      sync.options);
   if (!isRead) {
     return false;
   }
-  for (llvm::StringRef required :
-       {"message", "nonce", "parallelism", "tagLength", "memory", "passes"}) {
+  for (CryptoOption required :
+       {CryptoOption::MESSAGE, CryptoOption::NONCE, CryptoOption::PARALLELISM,
+        CryptoOption::TAG_LENGTH, CryptoOption::MEMORY, CryptoOption::PASSES}) {
     if (sync.options.lookup(required) == nullptr) {
-      auto message = ErrorTextCryptoFunction::needs(sync.shown, required);
+      auto name = CryptoOptionTable::getName(required);
+      auto message = ErrorTextCryptoFunction::needs(sync.shown, name);
       this->state.getDiagnostics().error(args[1]->loc(), message);
       return false;
     }
@@ -713,7 +729,7 @@ Expr *CryptoFunctionChecker::checkArgon2(SyncCall &sync) {
   CallExpr *call = sync.call;
   std::vector<Expr *> &args = call->args;
   llvm::SMLoc loc = sync.loc;
-  llvm::StringMap<Expr *> &options = sync.options;
+  CryptoOptions &options = sync.options;
   const auto *buffer = Type::bytesType(Type::Bytes::Buffer);
   auto arity = this->argumentChecker->checkArity(call, 2, 2);
   if (arity.isErr()) {
@@ -723,7 +739,7 @@ Expr *CryptoFunctionChecker::checkArgon2(SyncCall &sync) {
   Expr *type, *name;
   if (this->literalOf(args[0])) {
     auto argon = ErrorTextCryptoFnLabel::argon();
-    int which = this->cryptoArgs->cryptoChoice(args[0], argon, {"argon2d", "argon2i", "argon2id"});
+    int which = this->cryptoArgs->cryptoChoice(args[0], argon, CryptoChoice::ARGON2_ALGORITHM);
     if (which < 0) {
       return call;
     }
@@ -736,18 +752,20 @@ Expr *CryptoFunctionChecker::checkArgon2(SyncCall &sync) {
   if (!this->readArgonOptions(sync)) {
     return call;
   }
-  auto *message = this->cryptoArgs->cryptoData(options["message"], "message", kTextOrBuffers);
-  auto *nonce = this->cryptoArgs->cryptoData(options["nonce"], "nonce", kTextOrBuffers);
-  auto *parallelism = this->cryptoArgs->cryptoNumber(options["parallelism"]);
-  auto *tagLength = this->cryptoArgs->cryptoNumber(options["tagLength"]);
-  auto *memory = this->cryptoArgs->cryptoNumber(options["memory"]);
-  auto *passes = this->cryptoArgs->cryptoNumber(options["passes"]);
-  Expr *secret = options.lookup("secret")
-                     ? this->cryptoArgs->cryptoData(options["secret"], "secret", kTextOrBuffers)
-                     : this->cryptoArgs->cryptoUndefined(loc);
-  Expr *data = options.lookup("associatedData")
-                   ? this->cryptoArgs->cryptoData(options["associatedData"], "associatedData",
-                                                  kTextOrBuffers)
+  auto *message =
+      this->cryptoArgs->cryptoOptionData(options, CryptoOption::MESSAGE, kTextOrBuffers);
+  auto *nonce = this->cryptoArgs->cryptoOptionData(options, CryptoOption::NONCE, kTextOrBuffers);
+  auto *parallelism = this->cryptoArgs->cryptoNumber(options[CryptoOption::PARALLELISM]);
+  auto *tagLength = this->cryptoArgs->cryptoNumber(options[CryptoOption::TAG_LENGTH]);
+  auto *memory = this->cryptoArgs->cryptoNumber(options[CryptoOption::MEMORY]);
+  auto *passes = this->cryptoArgs->cryptoNumber(options[CryptoOption::PASSES]);
+  Expr *secret =
+      options.lookup(CryptoOption::SECRET)
+          ? this->cryptoArgs->cryptoOptionData(options, CryptoOption::SECRET, kTextOrBuffers)
+          : this->cryptoArgs->cryptoUndefined(loc);
+  Expr *data = options.lookup(CryptoOption::ASSOCIATED_DATA)
+                   ? this->cryptoArgs->cryptoOptionData(options, CryptoOption::ASSOCIATED_DATA,
+                                                        kTextOrBuffers)
                    : this->cryptoArgs->cryptoUndefined(loc);
   for (Expr *expr : {message, nonce, secret, data}) {
     if (expr->type->isError()) {
@@ -763,23 +781,25 @@ Expr *CryptoFunctionChecker::checkCreateCipher(SyncCall &sync) {
   CallExpr *call = sync.call;
   std::vector<Expr *> &args = call->args;
   llvm::SMLoc loc = sync.loc;
-  llvm::StringMap<Expr *> &options = sync.options;
+  CryptoOptions &options = sync.options;
   auto arity = this->argumentChecker->checkArity(call, 3, 4);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
   auto name = this->literalOf(args[0]);
+  auto keyWhat = ErrorTextCryptoLabel::key();
+  auto ivWhat = ErrorTextCryptoLabel::iv();
   auto *cipher = this->cryptoArgs->cryptoCipher(args[0]);
-  auto *key = this->cryptoArgs->cryptoData(args[1], "key", kAnyCryptoData);
-  auto *iv = this->cryptoArgs->cryptoData(args[2], "iv", kTextOrBuffers);
-  if (!this->readOptionsAt(sync, 3, {"authTagLength"}) || cipher == nullptr ||
+  auto *key = this->cryptoArgs->cryptoData(args[1], keyWhat, kAnyCryptoData);
+  auto *iv = this->cryptoArgs->cryptoData(args[2], ivWhat, kTextOrBuffers);
+  if (!this->readOptionsAt(sync, 3, {CryptoOption::AUTH_TAG_LENGTH}) || cipher == nullptr ||
       key->type->isError() || iv->type->isError() ||
       !this->cryptoArgs->matchCipherLengths(cipher, key, iv)) {
     return call;
   }
-  Expr *tag = options.lookup("authTagLength");
-  if (tag == nullptr && name && llvm::StringRef(*name).lower().find("ccm") != std::string::npos) {
+  Expr *tag = options.lookup(CryptoOption::AUTH_TAG_LENGTH);
+  if (tag == nullptr && name && CipherNameTable::needsAuthTagLength(*name)) {
     auto message = ErrorTextCryptoFunction::tagLength(*name);
     this->state.getDiagnostics().error(args[0]->loc(), message);
     return call;
@@ -821,7 +841,8 @@ Expr *CryptoFunctionChecker::checkCreateSecretKey(SyncCall &sync) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  auto *key = this->cryptoArgs->cryptoData(args[0], "key", kTextOrBuffers);
+  auto keyWhat = ErrorTextCryptoLabel::key();
+  auto *key = this->cryptoArgs->cryptoData(args[0], keyWhat, kTextOrBuffers);
   auto *encoding = this->cryptoArgs->cryptoEncoding(call, 1, functionName, 0);
   if (key->type->isError() || encoding == nullptr) {
     return call;
@@ -855,8 +876,9 @@ Expr *CryptoFunctionChecker::checkCreateKey(SyncCall &sync) {
       return call;
     }
   } else {
+    auto keyWhat = ErrorTextCryptoLabel::key();
     input.key =
-        this->cryptoArgs->cryptoData(args[0], "key", isPriv ? kTextOrBuffers : kAnyCryptoData);
+        this->cryptoArgs->cryptoData(args[0], keyWhat, isPriv ? kTextOrBuffers : kAnyCryptoData);
   }
   if (input.key->type->isError() || input.passphrase->type->isError()) {
     return call;
@@ -875,52 +897,57 @@ Expr *CryptoFunctionChecker::checkCreateKey(SyncCall &sync) {
 
 bool CryptoFunctionChecker::readKeyOptions(SyncCall &sync, bool priv, KeyInput &input) {
   Expr *given = sync.call->args[0];
-  llvm::StringMap<Expr *> &options = sync.options;
-  bool isRead = this->cryptoArgs->readCryptoOptions(
-      given, sync.fn, {"key", "format", "type", "passphrase", "encoding"}, options);
+  CryptoOptions &options = sync.options;
+  bool isRead = this->cryptoArgs->readCryptoOptions(given, sync.fn,
+                                                    {CryptoOption::KEY, CryptoOption::FORMAT,
+                                                     CryptoOption::TYPE, CryptoOption::PASSPHRASE,
+                                                     CryptoOption::ENCODING},
+                                                    options);
   if (!isRead) {
     return false;
   }
-  Expr *format = options.lookup("format");
+  Expr *format = options.lookup(CryptoOption::FORMAT);
   if (format != nullptr) {
     auto keyFormat = ErrorTextCryptoFnLabel::keyFormat();
-    input.format = this->cryptoArgs->cryptoChoice(format, keyFormat, {"pem", "der", "jwk"});
+    input.format = this->cryptoArgs->cryptoChoice(format, keyFormat, CryptoChoice::KEY_FORMAT);
     if (input.format < 0) {
       return false;
     }
   }
-  Expr *key = options.lookup("key");
+  Expr *key = options.lookup(CryptoOption::KEY);
   if (key == nullptr) {
     auto message = ErrorTextCryptoOptions::needsKey(sync.fn);
     this->state.getDiagnostics().error(given->loc(), message);
     return false;
   }
+  bool isJwk = input.format == int(CryptoKeyFormat::JWK);
+  auto keyWhat = CryptoOptionTable::getName(CryptoOption::KEY);
   input.key =
-      input.format == 2
-          ? this->argumentChecker->checkArg(key, Type::json())
-          : this->cryptoArgs->cryptoData(key, "key", priv ? kTextOrBuffers : kAnyCryptoData);
+      isJwk ? this->argumentChecker->checkArg(key, Type::json())
+            : this->cryptoArgs->cryptoData(key, keyWhat, priv ? kTextOrBuffers : kAnyCryptoData);
 
   return this->readKeyDetails(options, input);
 }
 
-bool CryptoFunctionChecker::readKeyDetails(llvm::StringMap<Expr *> &options, KeyInput &input) {
-  Expr *type = options.lookup("type");
+bool CryptoFunctionChecker::readKeyDetails(CryptoOptions &options, KeyInput &input) {
+  Expr *type = options.lookup(CryptoOption::TYPE);
   if (type != nullptr) {
     auto keyType = ErrorTextCryptoFnLabel::keyType();
-    int which = this->cryptoArgs->cryptoChoice(type, keyType, {"pkcs1", "spki", "pkcs8", "sec1"});
+    int which = this->cryptoArgs->cryptoChoice(type, keyType, CryptoChoice::KEY_ENCODING_TYPE);
     if (which < 0) {
       return false;
     }
-    static const char *const types[] = {"pkcs1", "spki", "pkcs8", "sec1"};
+    auto types = CryptoChoiceTable::getValues(CryptoChoice::KEY_ENCODING_TYPE);
     input.type = this->cryptoArgs->cryptoString(type->loc(), types[which]);
     input.has |= 1;
   }
-  Expr *passphrase = options.lookup("passphrase");
+  Expr *passphrase = options.lookup(CryptoOption::PASSPHRASE);
   if (passphrase != nullptr) {
-    input.passphrase = this->cryptoArgs->cryptoData(passphrase, "passphrase", kTextOrBuffers);
+    input.passphrase =
+        this->cryptoArgs->cryptoOptionData(options, CryptoOption::PASSPHRASE, kTextOrBuffers);
     input.has |= 2;
   }
-  Expr *encoding = options.lookup("encoding");
+  Expr *encoding = options.lookup(CryptoOption::ENCODING);
   if (encoding == nullptr) {
     return true;
   }
@@ -948,7 +975,7 @@ Expr *CryptoFunctionChecker::checkGenerateKey(SyncCall &sync) {
   std::vector<Expr *> &args = call->args;
   llvm::StringRef shown = sync.shown;
   llvm::SMLoc loc = sync.loc;
-  llvm::StringMap<Expr *> &options = sync.options;
+  CryptoOptions &options = sync.options;
   const auto *keyObject = Type::cryptoType(Crypto::KeyObject);
   auto arity = this->argumentChecker->checkArity(call, 2, 2);
   if (arity.isErr()) {
@@ -956,20 +983,22 @@ Expr *CryptoFunctionChecker::checkGenerateKey(SyncCall &sync) {
     return call;
   }
   auto keyType = ErrorTextCryptoFnLabel::keyType();
-  int which = this->cryptoArgs->cryptoChoice(args[0], keyType, {"hmac", "aes"});
-  if (which < 0 || !this->cryptoArgs->readCryptoOptions(args[1], shown, {"length"}, options)) {
+  int which = this->cryptoArgs->cryptoChoice(args[0], keyType, CryptoChoice::SECRET_KEY_TYPE);
+  if (which < 0 ||
+      !this->cryptoArgs->readCryptoOptions(args[1], shown, {CryptoOption::LENGTH}, options)) {
     return call;
   }
-  if (!options.lookup("length")) {
+  if (!options.lookup(CryptoOption::LENGTH)) {
     auto message = ErrorTextCryptoFunction::keyLength(shown);
     this->state.getDiagnostics().error(args[1]->loc(), message);
     return call;
   }
-  auto *bits = this->exprChecker->checkExpr(options["length"], Type::intTy());
+  auto *bits = this->exprChecker->checkExpr(options[CryptoOption::LENGTH], Type::intTy());
   if (bits->type->isError()) {
     return call;
   }
-  if (which == 1) {
+  bool isAes = which == int(SecretKeyType::AES);
+  if (isAes) {
     auto known = this->constantFolder->intConstant(bits);
     if (!known || (*known != 128 && *known != 192 && *known != 256)) {
       auto message = ErrorTextCryptoFunction::aesLength();
@@ -988,7 +1017,7 @@ Expr *CryptoFunctionChecker::checkGenerateKey(SyncCall &sync) {
   }
   return this->cryptoArgs->cryptoCall(
       call, CryptoFn::GenerateSecretKey,
-      {this->cryptoArgs->cryptoBool(loc, which == 1),
+      {this->cryptoArgs->cryptoBool(loc, isAes),
        bits->type->isFloat() ? bits : this->typeRelations->convert(bits, Type::doubleTy())},
       keyObject);
 }
@@ -1014,13 +1043,15 @@ Expr *CryptoFunctionChecker::checkSignOnce(SyncCall &sync) {
   Expr *algorithm = isa<UndefinedExpr>(args[0])
                         ? this->cryptoArgs->cryptoUndefined(loc)
                         : this->argumentChecker->checkArg(args[0], Type::string());
-  auto *data = this->cryptoArgs->cryptoData(args[1], "data", kTextOrBuffers);
+  auto dataWhat = ErrorTextCryptoLabel::data();
+  auto *data = this->cryptoArgs->cryptoData(args[1], dataWhat, kTextOrBuffers);
   std::vector<Expr *> signArgs = {algorithm, data};
   if (!this->cryptoArgs->appendSignKey(args[2], functionName, !isVerify, signArgs)) {
     return call;
   }
   if (isVerify) {
-    auto *signature = this->cryptoArgs->cryptoData(args[3], "signature", kTextOrBuffers);
+    auto signatureWhat = ErrorTextCryptoLabel::signature();
+    auto *signature = this->cryptoArgs->cryptoData(args[3], signatureWhat, kTextOrBuffers);
     if (signature->type->isError()) {
       return call;
     }
@@ -1079,25 +1110,26 @@ Expr *CryptoFunctionChecker::checkDiffieHellman(SyncCall &sync) {
   std::vector<Expr *> &args = call->args;
   llvm::StringRef functionName = sync.fn;
   llvm::SMLoc loc = sync.loc;
-  llvm::StringMap<Expr *> &options = sync.options;
+  CryptoOptions &options = sync.options;
   const auto *buffer = Type::bytesType(Type::Bytes::Buffer);
   auto arity = this->argumentChecker->checkArity(call, 1, 1);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
-  if (arity.isErr() || !this->cryptoArgs->readCryptoOptions(args[0], functionName,
-                                                            {"privateKey", "publicKey"}, options)) {
+  if (arity.isErr() ||
+      !this->cryptoArgs->readCryptoOptions(
+          args[0], functionName, {CryptoOption::PRIVATE_KEY, CryptoOption::PUBLIC_KEY}, options)) {
     return call;
   }
-  if (!options.lookup("privateKey") || !options.lookup("publicKey")) {
+  if (!options.lookup(CryptoOption::PRIVATE_KEY) || !options.lookup(CryptoOption::PUBLIC_KEY)) {
     auto message = ErrorTextCryptoFunction::dhKeys();
     this->state.getDiagnostics().error(args[0]->loc(), message);
     return call;
   }
   auto privateWhat = ErrorTextCryptoFnLabel::privateKey();
   auto publicWhat = ErrorTextCryptoFnLabel::publicKey();
-  auto *priv = this->cryptoArgs->cryptoKeyObject(options["privateKey"], privateWhat);
-  auto *pub = this->cryptoArgs->cryptoKeyObject(options["publicKey"], publicWhat);
+  auto *priv = this->cryptoArgs->cryptoKeyObject(options[CryptoOption::PRIVATE_KEY], privateWhat);
+  auto *pub = this->cryptoArgs->cryptoKeyObject(options[CryptoOption::PUBLIC_KEY], publicWhat);
   if (priv->type->isError() || pub->type->isError()) {
     return call;
   }
@@ -1108,32 +1140,36 @@ Expr *CryptoFunctionChecker::checkGeneratePrime(SyncCall &sync) {
   CallExpr *call = sync.call;
   std::vector<Expr *> &args = call->args;
   llvm::SMLoc loc = sync.loc;
-  llvm::StringMap<Expr *> &options = sync.options;
+  CryptoOptions &options = sync.options;
   auto arity = this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
-  if (arity.isErr() || !this->readOptionsAt(sync, 1, {"add", "rem", "safe", "bigint"})) {
+  if (arity.isErr() || !this->readOptionsAt(sync, 1,
+                                            {CryptoOption::ADDEND, CryptoOption::REMAINDER,
+                                             CryptoOption::SAFE, CryptoOption::BIGINT})) {
     return call;
   }
-  Expr *big = options.lookup("bigint");
+  Expr *big = options.lookup(CryptoOption::BIGINT);
   if (big != nullptr) {
     auto message = ErrorTextCryptoFunction::bigint();
     this->state.getDiagnostics().error(big->loc(), message);
     return call;
   }
   auto *size = this->cryptoArgs->cryptoNumber(args[0]);
-  Expr *safe = options.lookup("safe")
-                   ? this->argumentChecker->checkArg(options["safe"], Type::boolTy())
+  Expr *safe = options.lookup(CryptoOption::SAFE)
+                   ? this->argumentChecker->checkArg(options[CryptoOption::SAFE], Type::boolTy())
                    : this->cryptoArgs->cryptoBool(loc, false);
-  Expr *add = options.lookup("add")
-                  ? this->cryptoArgs->cryptoData(options["add"], "add", kBuffersOnly)
+  Expr *add = options.lookup(CryptoOption::ADDEND)
+                  ? this->cryptoArgs->cryptoOptionData(options, CryptoOption::ADDEND, kBuffersOnly)
                   : this->cryptoArgs->cryptoUndefined(loc);
-  Expr *rem = options.lookup("rem")
-                  ? this->cryptoArgs->cryptoData(options["rem"], "rem", kBuffersOnly)
-                  : this->cryptoArgs->cryptoUndefined(loc);
+  Expr *rem =
+      options.lookup(CryptoOption::REMAINDER)
+          ? this->cryptoArgs->cryptoOptionData(options, CryptoOption::REMAINDER, kBuffersOnly)
+          : this->cryptoArgs->cryptoUndefined(loc);
+  auto sizeWhat = ErrorTextCryptoLabel::size();
   if (size->type->isError() || safe->type->isError() || add->type->isError() ||
-      rem->type->isError() || !this->cryptoArgs->matchWhole(size, "size", 1)) {
+      rem->type->isError() || !this->cryptoArgs->matchWhole(size, sizeWhat, 1)) {
     return call;
   }
   return this->cryptoArgs->cryptoResult(call, CryptoFn::GeneratePrime, {size, safe, add, rem},
@@ -1144,19 +1180,22 @@ Expr *CryptoFunctionChecker::checkCheckPrime(SyncCall &sync) {
   CallExpr *call = sync.call;
   std::vector<Expr *> &args = call->args;
   llvm::SMLoc loc = sync.loc;
-  llvm::StringMap<Expr *> &options = sync.options;
+  CryptoOptions &options = sync.options;
   auto arity = this->argumentChecker->checkArity(call, 1, 2);
   if (arity.isErr()) {
     this->state.getDiagnostics().error(loc, arity.error().message);
   }
-  if (arity.isErr() || !this->readOptionsAt(sync, 1, {"checks"})) {
+  if (arity.isErr() || !this->readOptionsAt(sync, 1, {CryptoOption::CHECKS})) {
     return call;
   }
-  auto *candidate = this->cryptoArgs->cryptoData(args[0], "candidate", kBuffersOnly);
-  Expr *checks = options.lookup("checks") ? this->cryptoArgs->cryptoNumber(options["checks"])
-                                          : this->cryptoArgs->cryptoDouble(loc, 0);
+  auto candidateWhat = ErrorTextCryptoLabel::candidate();
+  auto *candidate = this->cryptoArgs->cryptoData(args[0], candidateWhat, kBuffersOnly);
+  Expr *checks = options.lookup(CryptoOption::CHECKS)
+                     ? this->cryptoArgs->cryptoNumber(options[CryptoOption::CHECKS])
+                     : this->cryptoArgs->cryptoDouble(loc, 0);
+  auto checksWhat = CryptoOptionTable::getName(CryptoOption::CHECKS);
   if (candidate->type->isError() || checks->type->isError() ||
-      !this->cryptoArgs->matchWhole(checks, "checks", 0)) {
+      !this->cryptoArgs->matchWhole(checks, checksWhat, 0)) {
     return call;
   }
   return this->cryptoArgs->cryptoResult(call, CryptoFn::CheckPrime, {candidate, checks},

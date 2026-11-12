@@ -64,7 +64,6 @@ private:
   bool takeDecimalSpread(Expr *&arg);
   void walkKnownModes(llvm::ArrayRef<std::string> modes, const Expr *arg);
   Expr *reportDecimalMember(CallExpr *call, MemberExpr *member);
-  llvm::StringRef replacementFor(llvm::StringRef name) const;
   Expr *checkDecimalArg(Expr *arg, DecimalArg kind, Builtin builtin);
   const Type *decimalResultType(DecimalResult result) const;
 

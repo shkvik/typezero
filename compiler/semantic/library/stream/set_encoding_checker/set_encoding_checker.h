@@ -23,6 +23,7 @@ public:
   const Type *encodedStreamType(ClassDecl *classDecl, llvm::SMLoc loc);
 
 private:
+  bool isListeningMethod(llvm::StringRef name) const;
   using ResultStdinIsPlaced = Result<const Module *, SetEncodingCheckerStdinPlaceError>;
   using ResultDecodedChunks = Result<const Type *, SetEncodingCheckerDecodedChunksError>;
 

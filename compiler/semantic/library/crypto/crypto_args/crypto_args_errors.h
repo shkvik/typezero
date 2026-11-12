@@ -71,7 +71,29 @@ public:
 class ErrorTextCryptoLabel {
 public:
   static std::string key();
+  static std::string privateKey();
+  static std::string publicKey();
+  static std::string otherKey();
+  static std::string signatureEncoding();
   static std::string signature();
+  static std::string data();
+  static std::string password();
+  static std::string salt();
+  static std::string iterations();
+  static std::string keylen();
+  static std::string ikm();
+  static std::string info();
+  static std::string iv();
+  static std::string candidate();
+  static std::string size();
+  static std::string aad();
+  static std::string tag();
+  static std::string subjectOption();
+};
+
+class ErrorTextCryptoMethods {
+public:
+  static std::string of(Type::Crypto kind);
 };
 
 }

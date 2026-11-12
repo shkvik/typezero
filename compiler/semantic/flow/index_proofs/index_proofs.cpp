@@ -1,6 +1,8 @@
 #include "compiler/semantic/flow/index_proofs/index_proofs.h"
 #include "compiler/program/ast/await_expr/await_expr.h"
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
+#include "compiler/program/library/bytes/encoding_name_table/encoding_name_table.h"
+#include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/declare/constant_folder/constant_folder.h"
 #include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/generics/generic_checker/generic_checker.h"
@@ -466,7 +468,8 @@ std::optional<Linear> IndexProofs::utf8Length(const CallExpr *call) const {
   auto *text = dyn_cast<StringLitExpr>(call->args[0]);
   const Expr *encodingArgument = call->args.size() > 1 ? call->args[1] : nullptr;
   auto *encoding = dyn_cast_or_null<StringLitExpr>(encodingArgument);
-  bool isUtf8 = encoding == nullptr || encoding->value == u"utf8" || encoding->value == u"utf-8";
+  bool isUtf8 =
+      encoding == nullptr || EncodingNameTable::isExactUtf8Name(ToUtf8::toUtf8(encoding->value));
   if (text == nullptr || !isUtf8) {
     return std::nullopt;
   }

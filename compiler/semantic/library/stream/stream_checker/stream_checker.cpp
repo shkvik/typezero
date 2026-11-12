@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/stream/stream_checker/stream_checker.h"
+#include "compiler/program/library/builtin_names/library_method_table/library_method_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -422,8 +423,9 @@ Expr *StreamChecker::checkStreamRead(StreamCall &stream) {
   const auto *encodingType = Type::optional(Type::string());
   args.push_back(call->args.size() > 1 ? this->encodingArg(stream, call->args[1])
                                        : this->undefinedOf(call->loc(), encodingType));
-  llvm::StringRef implementation =
-      stream.method == StreamMethod::PUSH ? "pushTyped" : "unshiftTyped";
+  LibraryMethod typed = stream.method == StreamMethod::PUSH ? LibraryMethod::PUSH_TYPED
+                                                            : LibraryMethod::UNSHIFT_TYPED;
+  auto implementation = LibraryMethodTable::getName(typed);
 
   return this->finishStreamCall(stream, std::move(args), implementation);
 }
@@ -459,11 +461,14 @@ Expr *StreamChecker::checkStreamWrite(StreamCall &stream) {
   args.push_back(callback != nullptr ? this->checkedAs(stream, callback, written)
                                      : this->undefinedOf(call->loc(), written));
 
-  return this->finishStreamCall(stream, std::move(args), "writeTyped");
+  auto writeTyped = LibraryMethodTable::getName(LibraryMethod::WRITE_TYPED);
+
+  return this->finishStreamCall(stream, std::move(args), writeTyped);
 }
 
 const Type *StreamChecker::writtenCallbackType(const ClassDecl *classDecl) {
-  for (FunctionDecl *typed : this->classDeclarer->methodsNamed(classDecl, "writeTyped")) {
+  auto writeTyped = LibraryMethodTable::getName(LibraryMethod::WRITE_TYPED);
+  for (FunctionDecl *typed : this->classDeclarer->methodsNamed(classDecl, writeTyped)) {
     if (typed->sym != nullptr && typed->params.size() == 3) {
       return typed->sym->params[2];
     }
@@ -513,7 +518,9 @@ Expr *StreamChecker::checkStreamEnd(StreamCall &stream) {
   args.push_back(encoding != nullptr ? this->encodingArg(stream, encoding)
                                      : this->undefinedOf(loc, encodingType));
 
-  return this->finishStreamCall(stream, std::move(args), "endTyped");
+  auto endTyped = LibraryMethodTable::getName(LibraryMethod::END_TYPED);
+
+  return this->finishStreamCall(stream, std::move(args), endTyped);
 }
 
 Expr *StreamChecker::finishStreamCall(StreamCall &stream, std::vector<Expr *> args,

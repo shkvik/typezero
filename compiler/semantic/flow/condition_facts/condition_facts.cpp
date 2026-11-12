@@ -1,4 +1,5 @@
 #include "compiler/semantic/flow/condition_facts/condition_facts.h"
+#include "compiler/program/library/builtin_names/type_of_name_table/type_of_name_table.h"
 #include "compiler/program/to_utf16/to_utf16.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/flow/expr_parts/expr_parts.h"
@@ -18,14 +19,6 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
-
-namespace {
-
-constexpr llvm::StringLiteral kStringTypeOf = "string";
-constexpr llvm::StringLiteral kBooleanTypeOf = "boolean";
-constexpr llvm::StringLiteral kUndefinedTypeOf = "undefined";
-
-}
 
 ConditionFacts::ConditionFacts(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -354,7 +347,8 @@ void ConditionFacts::addSideTypeOfFacts(const Expr *side, const Expr *other, Flo
     return;
   }
   auto wanted = ToUtf8::toUtf8(text->value);
-  if (wanted == kUndefinedTypeOf) {
+  auto wantedName = TypeOfNameTable::find(wanted);
+  if (wantedName == TypeOfName::UNDEFINED_TYPE) {
     whenUnequal.defined.insert(name->var());
     whenEqual.undefinedVars.insert(name->var());
     return;
@@ -385,10 +379,11 @@ void ConditionFacts::addParamTypeOfFacts(const VarSymbol *variable, const std::u
 const Type *ConditionFacts::paramTypeOfNarrowed(const Type *param,
                                                 const std::u16string &text) const {
   auto wanted = ToUtf8::toUtf8(text);
-  if (wanted == kStringTypeOf && this->canBe(param, &Type::isString)) {
+  auto wantedName = TypeOfNameTable::find(wanted);
+  if (wantedName == TypeOfName::STRING && this->canBe(param, &Type::isString)) {
     return Type::string();
   }
-  if (wanted == kBooleanTypeOf && this->canBe(param, &Type::isBool)) {
+  if (wantedName == TypeOfName::BOOLEAN && this->canBe(param, &Type::isBool)) {
     return Type::boolTy();
   }
   if (param->constraint() == nullptr) {
@@ -444,10 +439,11 @@ const Type *ConditionFacts::otherAlternatives(const Type *param, const std::u16s
   if (!this->areAllNamed(others, kind)) {
     return nullptr;
   }
-  if (kind == kStringTypeOf) {
+  auto kindName = TypeOfNameTable::find(kind);
+  if (kindName == TypeOfName::STRING) {
     return Type::string();
   }
-  if (kind == kBooleanTypeOf) {
+  if (kindName == TypeOfName::BOOLEAN) {
     return Type::boolTy();
   }
 

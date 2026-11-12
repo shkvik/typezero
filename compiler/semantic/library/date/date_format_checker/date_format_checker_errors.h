@@ -18,6 +18,7 @@ struct DateFormatCheckerOptionsObjectError {
 
 class ErrorTextDateOptions {
 public:
+  static std::string method(int kind);
   static std::string notObject(llvm::StringRef method, llvm::StringRef type);
   static std::string unknown(llvm::StringRef name, llvm::StringRef method);
   static std::string kind(llvm::StringRef name, bool boolean, bool number, llvm::StringRef type);

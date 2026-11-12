@@ -61,6 +61,7 @@ struct IteratorMethodInfo {
 class IteratorMethodTable {
 public:
   static const IteratorMethodInfo *find(llvm::StringRef name);
+  static llvm::StringRef getName(IteratorMethod method);
 };
 
 }

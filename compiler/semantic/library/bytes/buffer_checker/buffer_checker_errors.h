@@ -51,6 +51,8 @@ public:
 
 class ErrorTextBufferLabel {
 public:
+  static std::string comparePosition(size_t index);
+  static std::string copyPosition(size_t index);
   static std::string offset();
   static std::string end();
   static std::string length();

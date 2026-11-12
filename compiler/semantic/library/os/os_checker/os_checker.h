@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/program/library/os/os_function_table/os_function_table.h"
+#include "compiler/program/library/os/os_shape_field_table/os_shape_field_table.h"
 #include "compiler/program/library/os/os_value_table/os_value_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/library/os/os_checker/os_checker_errors.h"
@@ -21,6 +22,7 @@ public:
   Expr *checkOsValue(llvm::StringRef name, Expr *expr);
 
 private:
+  std::string shapeFieldName(OsShapeField field) const;
   using ResultOsFunction = Result<llvm::StringRef, OsCheckerOsFunctionError>;
 
   ResultOsFunction checkKnownOsFunction(llvm::StringRef functionName) const;

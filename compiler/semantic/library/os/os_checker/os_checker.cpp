@@ -1,6 +1,10 @@
 #include "compiler/semantic/library/os/os_checker/os_checker.h"
+#include "compiler/program/library/os/endianness_table/endianness_table.h"
 #include "compiler/program/library/os/os_function_table/os_function_table.h"
+#include "compiler/program/library/os/os_shape_field_table/os_shape_field_table.h"
+#include "compiler/program/library/os/os_shape_name_table/os_shape_name_table.h"
 #include "compiler/program/library/os/os_value_table/os_value_table.h"
+#include "compiler/program/to_utf16/to_utf16.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -18,24 +22,34 @@ OsChecker::OsChecker(SemanticState &owner, SemanticParts &all)
 
 const Type *OsChecker::cpuInfoType() const {
   const auto *doubleType = Type::doubleTy();
-  const auto *times = Type::object({{"user", doubleType, false},
-                                    {"nice", doubleType, false},
-                                    {"sys", doubleType, false},
-                                    {"idle", doubleType, false},
-                                    {"irq", doubleType, false}});
+  auto field = std::bind_front(&OsChecker::shapeFieldName, this);
+  const auto *times = Type::object({{field(OsShapeField::CPU_USER), doubleType, false},
+                                    {field(OsShapeField::CPU_NICE), doubleType, false},
+                                    {field(OsShapeField::CPU_SYS), doubleType, false},
+                                    {field(OsShapeField::CPU_IDLE), doubleType, false},
+                                    {field(OsShapeField::CPU_IRQ), doubleType, false}});
+  auto typeName = OsShapeNameTable::getName(OsShapeName::CPU_INFO);
 
-  return Type::object(
-      {{"model", Type::string(), false}, {"speed", doubleType, false}, {"times", times, false}},
-      "CpuInfo");
+  return Type::object({{field(OsShapeField::CPU_MODEL), Type::string(), false},
+                       {field(OsShapeField::CPU_SPEED), doubleType, false},
+                       {field(OsShapeField::CPU_TIMES), times, false}},
+                      typeName);
+}
+
+std::string OsChecker::shapeFieldName(OsShapeField field) const {
+  return OsShapeFieldTable::getName(field).str();
 }
 
 const Type *OsChecker::userInfoType() const {
-  return Type::object({{"uid", Type::intTy(), false},
-                       {"gid", Type::intTy(), false},
-                       {"username", Type::string(), false},
-                       {"homedir", Type::string(), false},
-                       {"shell", Type::optional(Type::string()), false}},
-                      "UserInfo");
+  auto field = std::bind_front(&OsChecker::shapeFieldName, this);
+  auto typeName = OsShapeNameTable::getName(OsShapeName::USER_INFO);
+
+  return Type::object({{field(OsShapeField::USER_ID), Type::intTy(), false},
+                       {field(OsShapeField::GROUP_ID), Type::intTy(), false},
+                       {field(OsShapeField::USER_NAME), Type::string(), false},
+                       {field(OsShapeField::HOME_DIRECTORY), Type::string(), false},
+                       {field(OsShapeField::SHELL), Type::optional(Type::string()), false}},
+                      typeName);
 }
 
 Expr *OsChecker::checkOsValue(llvm::StringRef name, Expr *expr) {
@@ -170,7 +184,8 @@ Expr *OsChecker::builtinOsCall(CallExpr *call, Builtin builtin, const Type *resu
 }
 
 Expr *OsChecker::endiannessLiteral(llvm::SMLoc loc) {
-  auto *literal = this->state.getAst().make<StringLitExpr>(loc, u"LE");
+  auto little = ToUtf16::toUtf16(EndiannessTable::getName(Endianness::LITTLE));
+  auto *literal = this->state.getAst().make<StringLitExpr>(loc, little);
   literal->type = Type::string();
 
   return literal;

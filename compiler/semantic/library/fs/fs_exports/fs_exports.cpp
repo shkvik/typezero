@@ -1,142 +1,15 @@
 #include "compiler/semantic/library/fs/fs_exports/fs_exports.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/Twine.h"
+#include "compiler/program/library/fs/fs_export_table/fs_export_table.h"
+#include "compiler/program/library/fs/fs_function_table/fs_function_table.h"
 
 namespace tz {
 
-namespace {
-
-const llvm::StringLiteral kFsFunctions[] = {
-    "readFileSync", "writeFileSync", "appendFileSync", "existsSync", "accessSync",
-    "chmodSync",    "truncateSync",  "statSync",       "lstatSync",  "readdirSync",
-    "mkdirSync",    "mkdtempSync",   "rmdirSync",      "unlinkSync", "rmSync",
-    "renameSync",   "copyFileSync",  "realpathSync"};
-
-const llvm::StringLiteral kFsExports[] = {"Dir",
-                                          "Dirent",
-                                          "FileReadStream",
-                                          "FileWriteStream",
-                                          "ReadStream",
-                                          "Stats",
-                                          "Utf8Stream",
-                                          "WriteStream",
-                                          "_toUnixTimestamp",
-                                          "access",
-                                          "accessSync",
-                                          "appendFile",
-                                          "appendFileSync",
-                                          "chmod",
-                                          "chmodSync",
-                                          "chown",
-                                          "chownSync",
-                                          "close",
-                                          "closeSync",
-                                          "constants",
-                                          "copyFile",
-                                          "copyFileSync",
-                                          "cp",
-                                          "cpSync",
-                                          "createReadStream",
-                                          "createWriteStream",
-                                          "exists",
-                                          "existsSync",
-                                          "fchmod",
-                                          "fchmodSync",
-                                          "fchown",
-                                          "fchownSync",
-                                          "fdatasync",
-                                          "fdatasyncSync",
-                                          "fstat",
-                                          "fstatSync",
-                                          "fsync",
-                                          "fsyncSync",
-                                          "ftruncate",
-                                          "ftruncateSync",
-                                          "futimes",
-                                          "futimesSync",
-                                          "glob",
-                                          "globSync",
-                                          "lchmod",
-                                          "lchmodSync",
-                                          "lchown",
-                                          "lchownSync",
-                                          "link",
-                                          "linkSync",
-                                          "lstat",
-                                          "lstatSync",
-                                          "lutimes",
-                                          "lutimesSync",
-                                          "mkdir",
-                                          "mkdirSync",
-                                          "mkdtemp",
-                                          "mkdtempDisposableSync",
-                                          "mkdtempSync",
-                                          "open",
-                                          "openAsBlob",
-                                          "openSync",
-                                          "opendir",
-                                          "opendirSync",
-                                          "promises",
-                                          "read",
-                                          "readFile",
-                                          "readFileSync",
-                                          "readSync",
-                                          "readdir",
-                                          "readdirSync",
-                                          "readlink",
-                                          "readlinkSync",
-                                          "readv",
-                                          "readvSync",
-                                          "realpath",
-                                          "realpathSync",
-                                          "rename",
-                                          "renameSync",
-                                          "rm",
-                                          "rmSync",
-                                          "rmdir",
-                                          "rmdirSync",
-                                          "stat",
-                                          "statSync",
-                                          "statfs",
-                                          "statfsSync",
-                                          "symlink",
-                                          "symlinkSync",
-                                          "truncate",
-                                          "truncateSync",
-                                          "unlink",
-                                          "unlinkSync",
-                                          "unwatchFile",
-                                          "utimes",
-                                          "utimesSync",
-                                          "watch",
-                                          "watchFile",
-                                          "write",
-                                          "writeFile",
-                                          "writeFileSync",
-                                          "writeSync",
-                                          "writev",
-                                          "writevSync"};
-
-const llvm::StringLiteral kFspFunctions[] = {
-    "readFile", "writeFile", "appendFile", "access",   "chmod",    "truncate",
-    "stat",     "lstat",     "readdir",    "mkdir",    "mkdtemp",  "rmdir",
-    "unlink",   "rm",        "rename",     "copyFile", "realpath", "open"};
-
-const llvm::StringLiteral kFspExports[] = {
-    "access",    "copyFile",   "cp",       "glob",    "open",     "opendir",  "rename",
-    "truncate",  "rm",         "rmdir",    "mkdir",   "readdir",  "readlink", "symlink",
-    "lstat",     "stat",       "statfs",   "link",    "unlink",   "chmod",    "lchmod",
-    "lchown",    "chown",      "utimes",   "lutimes", "realpath", "mkdtemp",  "mkdtempDisposable",
-    "writeFile", "appendFile", "readFile", "watch",   "constants"};
-
-}
-
 FsExports::ResultExportFound FsExports::checkFsExport(llvm::StringRef name, llvm::StringRef path) {
-  if (llvm::is_contained(kFsFunctions, name) || name == "constants" || name == "Stats" ||
-      name == "Dirent" || name == "promises") {
+  auto kind = FsExportTable::find(NodeModule::Fs, name);
+  if (kind == FsExport::FUNCTION || kind == FsExport::VALUE) {
     return ok(name);
   }
-  if (name == "replaceSync" || name == "ReplaceError") {
+  if (kind == FsExport::IN_TZ_FS) {
     auto message = ErrorTextFsExport::inTzFs(path, name);
 
     return err(ModuleExportFoundError{
@@ -144,8 +17,9 @@ FsExports::ResultExportFound FsExports::checkFsExport(llvm::StringRef name, llvm
         .message = message,
     });
   }
-  std::string sync = (name + "Sync").str();
-  if (llvm::is_contained(kFsFunctions, sync) && llvm::is_contained(kFspFunctions, name)) {
+  std::string sync = FsFunctionTable::getSyncName(name);
+  bool hasSyncForm = FsExportTable::find(NodeModule::Fs, sync) == FsExport::FUNCTION;
+  if (hasSyncForm && FsExportTable::isFunction(NodeModule::FsPromises, name)) {
     auto message = ErrorTextFsExport::callback(name, path, sync);
 
     return err(ModuleExportFoundError{
@@ -153,7 +27,7 @@ FsExports::ResultExportFound FsExports::checkFsExport(llvm::StringRef name, llvm
         .message = message,
     });
   }
-  if (llvm::is_contained(kFsFunctions, sync)) {
+  if (hasSyncForm) {
     auto message = ErrorTextFsExport::syncOnly(name, path, sync);
 
     return err(ModuleExportFoundError{
@@ -161,7 +35,7 @@ FsExports::ResultExportFound FsExports::checkFsExport(llvm::StringRef name, llvm
         .message = message,
     });
   }
-  if (llvm::is_contained(kFsExports, name)) {
+  if (kind == FsExport::NOT_YET) {
     auto message = ErrorTextModuleExport::notYet(name, path);
 
     return err(ModuleExportFoundError{
@@ -179,10 +53,11 @@ FsExports::ResultExportFound FsExports::checkFsExport(llvm::StringRef name, llvm
 
 FsExports::ResultExportFound FsExports::checkPromisesExport(llvm::StringRef name,
                                                             llvm::StringRef path) {
-  if (llvm::is_contained(kFspFunctions, name) || name == "constants") {
+  auto kind = FsExportTable::find(NodeModule::FsPromises, name);
+  if (FsExportTable::isFunction(NodeModule::FsPromises, name) || kind == FsExport::VALUE) {
     return ok(name);
   }
-  if (name == "replace" || name == "ReplaceError") {
+  if (kind == FsExport::IN_TZ_FS) {
     auto message = ErrorTextFsExport::inTzFs(path, name);
 
     return err(ModuleExportFoundError{
@@ -190,7 +65,7 @@ FsExports::ResultExportFound FsExports::checkPromisesExport(llvm::StringRef name
         .message = message,
     });
   }
-  if (llvm::is_contained(kFspExports, name)) {
+  if (kind == FsExport::NOT_YET) {
     auto message = ErrorTextModuleExport::notYet(name, path);
 
     return err(ModuleExportFoundError{
@@ -198,7 +73,7 @@ FsExports::ResultExportFound FsExports::checkPromisesExport(llvm::StringRef name
         .message = message,
     });
   }
-  if (llvm::is_contained(kFsFunctions, name)) {
+  if (FsExportTable::find(NodeModule::Fs, name) == FsExport::FUNCTION) {
     auto message = ErrorTextFsExport::waiting(path, name);
 
     return err(ModuleExportFoundError{
@@ -215,13 +90,12 @@ FsExports::ResultExportFound FsExports::checkPromisesExport(llvm::StringRef name
 }
 
 FsExports::ResultExportFound
-FsExports::checkReadlineExport(llvm::StringRef name, llvm::StringRef path, bool hasPromises) {
-  if (name == "createInterface" || name == "Interface") {
+FsExports::checkReadlineExport(llvm::StringRef name, llvm::StringRef path, NodeModule module) {
+  auto kind = FsExportTable::find(module, name);
+  if (kind == FsExport::FUNCTION || kind == FsExport::VALUE) {
     return ok(name);
   }
-  if (name == "clearLine" || name == "clearScreenDown" || name == "cursorTo" ||
-      name == "emitKeypressEvents" || name == "moveCursor" || name == "Readline" ||
-      (hasPromises && name == "promises")) {
+  if (kind == FsExport::NOT_YET) {
     auto message = ErrorTextFsExport::readline(name, path);
 
     return err(ModuleExportFoundError{
@@ -239,11 +113,11 @@ FsExports::checkReadlineExport(llvm::StringRef name, llvm::StringRef path, bool 
 
 FsExports::ResultExportFound FsExports::checkTzFsExport(llvm::StringRef name,
                                                         llvm::StringRef path) {
-  if (name == "replaceSync" || name == "replace") {
+  if (FsExportTable::isFunction(NodeModule::TzFs, name)) {
     return ok(name);
   }
-  bool isInNodeFs =
-      llvm::is_contained(kFsFunctions, name) || llvm::is_contained(kFspFunctions, name);
+  bool isInNodeFs = FsExportTable::find(NodeModule::Fs, name) == FsExport::FUNCTION ||
+                    FsExportTable::isFunction(NodeModule::FsPromises, name);
   auto message = ErrorTextFsExport::tzFs(path, name, isInNodeFs);
 
   return err(ModuleExportFoundError{
@@ -254,7 +128,7 @@ FsExports::ResultExportFound FsExports::checkTzFsExport(llvm::StringRef name,
 
 FsExports::ResultExportFound FsExports::checkTzIoExport(llvm::StringRef name,
                                                         llvm::StringRef path) {
-  if (name == "readLine") {
+  if (FsExportTable::isFunction(NodeModule::TzIo, name)) {
     return ok(name);
   }
   auto message = ErrorTextFsExport::tzIo(path, name);

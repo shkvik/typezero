@@ -1,7 +1,8 @@
 #pragma once
 
+#include "compiler/program/library/intl/intl_service_table/intl_service_table.h"
+#include "compiler/program/library/intl/intl_shape_table/intl_shape_table.h"
 #include "compiler/result/result/result.h"
-#include "compiler/semantic/library/intl/intl_check_helpers/intl_check_helpers.h"
 #include "compiler/semantic/library/intl/intl_checker/intl_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
@@ -40,6 +41,7 @@ public:
   bool prepareLocaleArg(Expr *&arg, llvm::StringRef what);
   Expr *segmentsArray(Expr *segments);
   const Type *segmentDataType() const;
+  const Type *shapeType(IntlShape shape) const;
   const Type *resolvedIntlOptionsType(IntlKind kind) const;
   const Type *intlTypeNamed(llvm::StringRef name) const;
 
@@ -48,20 +50,10 @@ private:
   using ResultLanguageTags = Result<std::vector<std::string>, IntlCheckerLanguageTagsError>;
 
   std::optional<std::u16string> literalText(const Expr *expr) const;
-  const IntlService *serviceNamed(llvm::StringRef name) const;
-  const Type *relativePartType() const;
   const Expr *unconverted(const Expr *expr) const;
   bool isStringLike(const Type *type) const;
-  std::vector<Field> resolvedDigitFields() const;
-  std::vector<Field> resolvedRoundingFields() const;
-  const Type *resolvedNumberOptionsType() const;
-  const Type *resolvedCollatorOptionsType() const;
-  const Type *resolvedPluralOptionsType() const;
-  const Type *resolvedRelativeTimeOptionsType() const;
-  const Type *resolvedListOptionsType() const;
-  const Type *resolvedDisplayNamesOptionsType() const;
-  const Type *resolvedSegmenterOptionsType() const;
-  const Type *numberOptionType(llvm::StringRef name) const;
+  const Type *shapeValueType(IntlValueType type) const;
+  const Type *numberOptionType(IntlOptionKey key) const;
 
   enum class LanguageTagUse {
     LOCALE_CONSTRUCTOR,
@@ -75,7 +67,7 @@ private:
 
   ResultLanguageTags checkLanguageTags(const Expr *arg, llvm::StringRef what, LanguageTagUse use);
   bool isStringLiteralMember(const Type *member) const;
-  std::vector<int64_t> digitRange(llvm::StringRef name) const;
+  std::vector<int64_t> digitRange(IntlOptionKey key) const;
   const Type *serviceTypeNamed(llvm::StringRef name) const;
   const Type *serviceOptionsType(const IntlService &service) const;
   const Type *optionType(const IntlOption &option) const;

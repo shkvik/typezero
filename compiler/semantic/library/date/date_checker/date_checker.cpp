@@ -1,6 +1,8 @@
 #include "compiler/semantic/library/date/date_checker/date_checker.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/date/date_legacy_method_table/date_legacy_method_table.h"
 #include "compiler/program/library/date/date_method_table/date_method_table.h"
+#include "compiler/program/library/date/date_static_table/date_static_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/binary_checker/binary_checker.h"
@@ -143,14 +145,16 @@ DateChecker::ResultLiteralDate DateChecker::checkLiteralDate(const std::u16strin
 }
 
 Expr *DateChecker::dateTime(Expr *date) {
-  auto *callee = this->state.getAst().make<MemberExpr>(date->loc(), date, "getTime");
+  auto getTime = DateMethodTable::getName(Builtin::DateGetTime, 0);
+  auto *callee = this->state.getAst().make<MemberExpr>(date->loc(), date, getTime);
 
   return this->processChecker->builtinCall(date->loc(), callee, Builtin::DateGetTime, {},
                                            Type::intTy());
 }
 
 Expr *DateChecker::dateToString(Expr *date) {
-  auto *callee = this->state.getAst().make<MemberExpr>(date->loc(), date, "toString");
+  auto toString = DateMethodTable::getName(Builtin::DateToLocalString, TZ_DATE_TEXT_FULL);
+  auto *callee = this->state.getAst().make<MemberExpr>(date->loc(), date, toString);
   auto *mode = this->state.getAst().make<IntLitExpr>(date->loc(), TZ_DATE_TEXT_FULL);
   mode->type = Type::intTy();
 
@@ -284,16 +288,14 @@ std::optional<int64_t> DateChecker::nextMonthYear(std::optional<int64_t> year,
 }
 
 void DateChecker::walkTimeFields(llvm::ArrayRef<Expr *> args, const DateFieldValues &fields) {
-  static const struct {
-    const char *what;
-    int64_t max;
-  } limits[] = {{"hours", 23}, {"minutes", 59}, {"seconds", 59}, {"milliseconds", 999}};
+  static const int64_t maxima[] = {23, 59, 59, 999};
   size_t end = fields.first + args.size();
   for (size_t index = std::max<size_t>(fields.first, 3); index < end; ++index) {
     std::optional<int64_t> value = fields.constant[index];
-    if (value.has_value() && (*value < 0 || *value > limits[index - 3].max)) {
-      auto message =
-          ErrorTextDateFields::range(*value, limits[index - 3].what, limits[index - 3].max);
+    int64_t max = maxima[index - 3];
+    if (value.has_value() && (*value < 0 || *value > max)) {
+      auto what = ErrorTextDateFields::timeField(index - 3);
+      auto message = ErrorTextDateFields::range(*value, what, max);
       this->reportField(args, fields, index, message);
     }
   }
@@ -403,7 +405,8 @@ Expr *DateChecker::checkDateStatic(CallExpr *call, MemberExpr *member) {
     return call;
   }
   llvm::StringRef name = member->name;
-  if (name == "UTC") {
+  auto dateStatic = DateStaticTable::find(name);
+  if (dateStatic == DateStatic::UTC) {
     auto arity = this->argumentChecker->checkArity(call, 1, 7);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -414,7 +417,7 @@ Expr *DateChecker::checkDateStatic(CallExpr *call, MemberExpr *member) {
     call->type = Type::intTy();
     return call;
   }
-  if (name == "parse") {
+  if (dateStatic == DateStatic::PARSE) {
     auto arity = this->argumentChecker->checkArity(call, 1, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -440,9 +443,9 @@ Expr *DateChecker::checkDateStatic(CallExpr *call, MemberExpr *member) {
 Expr *DateChecker::checkDateStaticMember(MemberExpr *member) {
   member->type = Type::error();
   llvm::StringRef name = member->name;
-  std::string message = name == "now" || name == "UTC" || name == "parse"
-                            ? ErrorTextDateStatic::onlyCalled(name)
-                            : ErrorTextDateStatic::noMember(name);
+  bool isStatic = DateStaticTable::find(name).has_value();
+  std::string message =
+      isStatic ? ErrorTextDateStatic::onlyCalled(name) : ErrorTextDateStatic::noMember(name);
   this->state.getDiagnostics().error(member->loc(), message);
 
   return member;
@@ -473,13 +476,14 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
 }
 
 std::string DateChecker::unknownMethodMessage(llvm::StringRef name) const {
-  if (name == "getYear") {
+  auto legacy = DateLegacyMethodTable::find(name);
+  if (legacy == DateLegacyMethod::GET_YEAR) {
     return ErrorTextDateMethod::getYear();
   }
-  if (name == "setYear") {
+  if (legacy == DateLegacyMethod::SET_YEAR) {
     return ErrorTextDateMethod::setYear();
   }
-  if (name == "toGMTString") {
+  if (legacy == DateLegacyMethod::TO_GMT_STRING) {
     return ErrorTextDateMethod::gmt();
   }
 
@@ -556,9 +560,10 @@ Expr *DateChecker::checkDateMember(MemberExpr *member) {
   member->type = Type::error();
   llvm::StringRef name = member->name;
   bool isMethod = DateMethodTable::find(name) != nullptr;
-  std::string message = isMethod            ? ErrorTextDateMethod::onlyCalled(name)
-                        : name == "getYear" ? ErrorTextDateMethod::getYearVal()
-                                            : ErrorTextDateMethod::noMember(name);
+  bool isGetYear = DateLegacyMethodTable::find(name) == DateLegacyMethod::GET_YEAR;
+  std::string message = isMethod    ? ErrorTextDateMethod::onlyCalled(name)
+                        : isGetYear ? ErrorTextDateMethod::getYearVal()
+                                    : ErrorTextDateMethod::noMember(name);
   this->state.getDiagnostics().error(member->loc(), message);
 
   return member;

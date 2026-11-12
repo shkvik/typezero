@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/fs/readline_checker/readline_checker.h"
+#include "compiler/program/library/fs/fs_export_table/fs_export_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -23,7 +24,7 @@ ReadlineChecker::ReadlineChecker(SemanticState &owner, SemanticParts &all)
 
 ReadlineChecker::ResultReadlineUsed
 ReadlineChecker::checkReadlineFunction(llvm::StringRef functionName, NodeModule module) const {
-  if (functionName != "createInterface") {
+  if (FsExportTable::find(module, functionName) != FsExport::FUNCTION) {
     auto message = ErrorTextReadline::typeOnly(functionName, module != NodeModule::Readline);
 
     return err(ReadlineCheckerReadlineFunctionError{
@@ -121,30 +122,34 @@ ReadlineChecker::readlineStreams(CallExpr *call, llvm::StringRef functionName) {
 
 std::optional<ReadlineChecker::ReadlineStreams>
 ReadlineChecker::optionStreams(CallExpr *call, llvm::StringRef functionName) {
-  auto options = llvm::StringMap<Expr *>();
+  auto options = NodeOptions();
   bool isRead = this->fsChecker->readNodeOptions(
       call, 0, functionName,
-      {"input", "output", "terminal", "crlfDelay", "historySize", "removeHistoryDuplicates",
-       "prompt", "tabSize", "completer", "escapeCodeTimeout", "history"},
+      {NodeOption::INPUT, NodeOption::OUTPUT, NodeOption::TERMINAL, NodeOption::CRLF_DELAY,
+       NodeOption::HISTORY_SIZE, NodeOption::REMOVE_HISTORY_DUPLICATES, NodeOption::PROMPT,
+       NodeOption::TAB_SIZE, NodeOption::COMPLETER, NodeOption::ESCAPE_CODE_TIMEOUT,
+       NodeOption::HISTORY},
       options);
   if (!isRead) {
     return std::nullopt;
   }
   ReadlineStreams streams{
-      .input = options.lookup("input"),
-      .output = options.lookup("output"),
+      .input = options.lookup(NodeOption::INPUT),
+      .output = options.lookup(NodeOption::OUTPUT),
   };
-  for (llvm::StringRef ignored : {"terminal", "crlfDelay", "historySize", "removeHistoryDuplicates",
-                                  "tabSize", "escapeCodeTimeout"}) {
+  for (NodeOption ignored : {NodeOption::TERMINAL, NodeOption::CRLF_DELAY, NodeOption::HISTORY_SIZE,
+                             NodeOption::REMOVE_HISTORY_DUPLICATES, NodeOption::TAB_SIZE,
+                             NodeOption::ESCAPE_CODE_TIMEOUT}) {
     Expr *value = options.lookup(ignored);
     if (value != nullptr) {
       this->exprChecker->checkExpr(value);
     }
   }
-  for (llvm::StringRef unsupported : {"prompt", "completer", "history"}) {
+  for (NodeOption unsupported : {NodeOption::PROMPT, NodeOption::COMPLETER, NodeOption::HISTORY}) {
     Expr *value = options.lookup(unsupported);
     if (value != nullptr) {
-      auto message = ErrorTextReadline::option(unsupported);
+      auto name = NodeOptionTable::getName(unsupported);
+      auto message = ErrorTextReadline::option(name);
       this->state.getDiagnostics().error(value->loc(), message);
       return std::nullopt;
     }

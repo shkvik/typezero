@@ -1,5 +1,6 @@
 #include "compiler/semantic/bodies/expr/target_checker/target_checker.h"
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
 #include "compiler/semantic/bodies/classes/class_member_checker/class_member_checker.h"
 #include "compiler/semantic/bodies/classes/static_checker/static_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
@@ -23,12 +24,6 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
-
-namespace {
-
-constexpr llvm::StringLiteral kThisName = "this";
-
-}
 
 TargetChecker::TargetChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -179,7 +174,7 @@ TargetChecker::ResultFieldIsWritable TargetChecker::checkMemberWritable(const Ty
 }
 
 TargetChecker::ResultTargetIsNotThis TargetChecker::checkNotThis(const NameExpr *name) const {
-  if (name->name == kThisName) {
+  if (name->name == KeywordTable::getName(Keyword::THIS)) {
     auto message = ErrorTextVarTarget::toThis();
 
     return err(TargetCheckerNotThisError{
@@ -354,7 +349,7 @@ const Type *TargetChecker::memberTargetType(Expr *&target, MemberExpr *member, A
   if (named != nullptr) {
     return this->staticChecker->checkStaticTarget(target, named);
   }
-  if (name != nullptr && name->name == kThisName) {
+  if (name != nullptr && name->name == KeywordTable::getName(Keyword::THIS)) {
     this->state.getClassContext().rememberThisMember(member->name);
   }
   member->object = this->exprChecker->checkExpr(member->object);

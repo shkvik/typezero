@@ -1,5 +1,7 @@
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
+#include "compiler/program/library/crypto/subtle_intrinsic_table/subtle_intrinsic_table.h"
 #include "compiler/program/library/intrinsic/library_intrinsic_table/library_intrinsic_table.h"
+#include "compiler/program/library/library_module_names/library_module_names.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/library/crypto/web_crypto_checker/web_crypto_checker.h"
@@ -14,12 +16,6 @@
 using llvm::dyn_cast;
 
 namespace tz {
-
-namespace {
-
-constexpr llvm::StringLiteral kIntrinsicsModule = "tz:intrinsics";
-
-}
 
 LibraryCalls::LibraryCalls(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -48,7 +44,7 @@ void LibraryCalls::prepareLibrary(Module *module) {
                                                          buffer->getBufferEnd());
     this->state.getDiagnostics().quietRange(buffer->getBufferStart(), buffer->getBufferEnd());
   }
-  bool hasIntrinsics = module->name == kIntrinsicsModule;
+  bool hasIntrinsics = module->name == LibraryModuleNames::kIntrinsicsPath;
   for (Stmt *item : module->file.items) {
     this->rememberLibraryItem(item, hasIntrinsics);
   }
@@ -110,7 +106,7 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
   }
   llvm::StringRef intrinsicName = functionDecl->name;
   call->type = Type::error();
-  if (intrinsicName.starts_with("subtle")) {
+  if (SubtleIntrinsicTable::isSubtleName(intrinsicName)) {
     return this->webCryptoChecker->checkSubtleIntrinsic(call, name, intrinsicName);
   }
   const auto *intrinsic = LibraryIntrinsicTable::find(intrinsicName);

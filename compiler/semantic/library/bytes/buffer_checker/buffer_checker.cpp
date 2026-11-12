@@ -1,6 +1,7 @@
 #include "compiler/semantic/library/bytes/buffer_checker/buffer_checker.h"
 #include "compiler/program/library/bytes/buffer_method_table/buffer_method_table.h"
 #include "compiler/program/library/bytes/bytes_method_table/bytes_method_table.h"
+#include "compiler/program/library/bytes/bytes_shape_field_table/bytes_shape_field_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/bodies/expr/member_checker/member_checker.h"
@@ -162,8 +163,10 @@ Expr *BufferChecker::checkToJson(const BufferCall &buffer) {
     this->state.getDiagnostics().error(buffer.member->loc(), arity.error().message);
     return call;
   }
-  const auto *json =
-      Type::object({{"type", Type::string(), false}, {"data", Type::array(Type::intTy()), false}});
+  auto typeName = BytesShapeFieldTable::getName(BytesShapeField::JSON_TYPE);
+  auto dataName = BytesShapeFieldTable::getName(BytesShapeField::JSON_DATA);
+  const auto *json = Type::object({{typeName.str(), Type::string(), false},
+                                   {dataName.str(), Type::array(Type::intTy()), false}});
 
   return this->toBuiltinCall(call, Builtin::BufferToJSON, json);
 }
@@ -189,9 +192,9 @@ Expr *BufferChecker::checkCompare(const BufferCall &buffer) {
   }
   call->args[0] = this->checkBytesArg(call->args[0]);
   this->walkPositionArgs(call, 1);
-  static const char *const names[] = {"", "targetStart", "targetEnd", "sourceStart", "sourceEnd"};
   for (size_t index = 1; index < call->args.size(); ++index) {
-    auto what = ErrorTextBuffer::position(names[index]);
+    auto name = ErrorTextBufferLabel::comparePosition(index);
+    auto what = ErrorTextBuffer::position(name);
     bool isEnd = index == 2 || index == 4;
     if (isEnd) {
       const Expr *array = index == 2 ? call->args[0] : buffer.member->object;
@@ -215,9 +218,9 @@ Expr *BufferChecker::checkCopy(const BufferCall &buffer) {
   }
   call->args[0] = this->checkBytesArg(call->args[0]);
   this->walkPositionArgs(call, 1);
-  static const char *const names[] = {"", "targetStart", "sourceStart", "sourceEnd"};
   for (size_t index = 1; index < call->args.size(); ++index) {
-    auto what = ErrorTextBuffer::position(names[index]);
+    auto name = ErrorTextBufferLabel::copyPosition(index);
+    auto what = ErrorTextBuffer::position(name);
     if (index == 2) {
       auto upTo = this->indexProofs->requireUpTo(call->args[index], buffer.member->object, 0, what);
       this->reportUnprovenUpTo(upTo, call->args[index]->loc());
@@ -415,10 +418,11 @@ Expr *BufferChecker::checkSwap(const BufferCall &buffer, int width) {
 }
 
 Expr *BufferChecker::checkNumberMethod(const BufferCall &buffer) {
-  BytesNumberMethod number;
-  if (!BytesCheckHelpers::numberMethod(buffer.name, false, number)) {
+  auto parsed = NumberMethodTable::parse(buffer.name, false);
+  if (!parsed.has_value()) {
     return nullptr;
   }
+  BytesNumberMethod number = *parsed;
   if (number.bigint) {
     auto quoted = ErrorTextBigInt::quoted(buffer.name);
     auto bigint = ErrorTextBigInt::none(quoted);
@@ -633,8 +637,10 @@ Expr *BufferChecker::checkEncodeInto(CallExpr *call, MemberExpr *member) {
   }
   call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
   call->args[1] = this->checkBytesArg(call->args[1]);
-  const auto *counts =
-      Type::object({{"read", Type::intTy(), false}, {"written", Type::intTy(), false}});
+  auto readName = BytesShapeFieldTable::getName(BytesShapeField::ENCODE_READ);
+  auto writtenName = BytesShapeFieldTable::getName(BytesShapeField::ENCODE_WRITTEN);
+  const auto *counts = Type::object(
+      {{readName.str(), Type::intTy(), false}, {writtenName.str(), Type::intTy(), false}});
 
   return this->toBuiltinCall(call, Builtin::TextEncodeInto, counts);
 }
@@ -655,7 +661,8 @@ Expr *BufferChecker::checkDecode(CallExpr *call, MemberExpr *member) {
     }
   }
   if (call->args.size() == 2) {
-    const auto *options = Type::object({{"stream", Type::optional(Type::boolTy()), false}});
+    auto streamName = BytesShapeFieldTable::getName(BytesShapeField::DECODE_STREAM);
+    const auto *options = Type::object({{streamName.str(), Type::optional(Type::boolTy()), false}});
     auto *given = this->exprChecker->checkExpr(call->args[1], options);
     auto what = ErrorTextBufferLabel::options();
     call->args[1] = this->typeRelations->coerce(given, options, what);

@@ -1,8 +1,11 @@
 #include "compiler/program/library/fs/fs_function_table/fs_function_table.h"
+#include "llvm/ADT/Twine.h"
 
 namespace tz {
 
 namespace {
+
+constexpr llvm::StringLiteral kSyncSuffix = "Sync";
 
 const FsFunctionInfo kRows[] = {
     {
@@ -105,6 +108,10 @@ std::optional<FsFunction> FsFunctionTable::find(llvm::StringRef name) {
   }
 
   return std::nullopt;
+}
+
+std::string FsFunctionTable::getSyncName(llvm::StringRef name) {
+  return (name + kSyncSuffix).str();
 }
 
 }

@@ -16,63 +16,15 @@ FsDeclarer::FsDeclarer(SemanticState &owner, SemanticParts &all)
   this->argumentChecker = &all.argumentChecker;
 }
 
-std::optional<int> FsDeclarer::fileKind(llvm::StringRef method) const {
-  if (method == "isFile") {
-    return 0100000;
-  }
-  if (method == "isDirectory") {
-    return 0040000;
-  }
-  if (method == "isSymbolicLink") {
-    return 0120000;
-  }
-  if (method == "isFIFO") {
-    return 0010000;
-  }
-  if (method == "isSocket") {
-    return 0140000;
-  }
-  if (method == "isBlockDevice") {
-    return 0060000;
-  }
-  if (method == "isCharacterDevice") {
-    return 0020000;
-  }
-
-  return std::nullopt;
-}
-
 void FsDeclarer::declareFsClasses() {
-  const auto *doubleType = Type::doubleTy();
-  const auto *intType = Type::intTy();
-  ClassDecl *stats = this->declareFsClass("Stats",
-                                          {{"dev", intType},
-                                           {"mode", intType},
-                                           {"nlink", intType},
-                                           {"uid", intType},
-                                           {"gid", intType},
-                                           {"rdev", intType},
-                                           {"blksize", intType},
-                                           {"ino", intType},
-                                           {"size", intType},
-                                           {"blocks", intType},
-                                           {"atimeMs", doubleType},
-                                           {"mtimeMs", doubleType},
-                                           {"ctimeMs", doubleType},
-                                           {"birthtimeMs", doubleType}},
-                                          14);
+  ClassDecl *stats = this->declareFsClass(FsClassShape::find(FsClass::STATS));
   this->state.getFileSystemStore().rememberStatsClass(stats);
-  ClassDecl *dirent = this->declareFsClass(
-      "Dirent",
-      {{"name", Type::string()}, {"parentPath", Type::string()}, {"Symbol(type)", Type::intTy()}},
-      2);
+  ClassDecl *dirent = this->declareFsClass(FsClassShape::find(FsClass::DIRENT));
   this->state.getFileSystemStore().rememberDirentClass(dirent);
 }
 
-ClassDecl *
-FsDeclarer::declareFsClass(llvm::StringRef name,
-                           llvm::ArrayRef<std::pair<llvm::StringRef, const Type *>> fields,
-                           size_t privateFrom) {
+ClassDecl *FsDeclarer::declareFsClass(const FsClassInfo &shape) {
+  llvm::StringRef name = shape.name;
   auto *classDecl = this->state.getAst().make<ClassDecl>(llvm::SMLoc(), name);
   classDecl->origin = ClassOrigin::BUILTIN;
   classDecl->stage = ClassStage::RESOLVED;
@@ -81,23 +33,36 @@ FsDeclarer::declareFsClass(llvm::StringRef name,
   auto *type = Type::classType(name, classDecl);
   classDecl->type = type;
   auto typeFields = std::vector<Field>();
-  for (const auto &[fieldName, fieldType] : fields) {
+  for (const FsFieldInfo &shapeField : shape.fields) {
+    const Type *fieldType = this->fieldType(shapeField.type);
     ClassField field;
-    field.name = fieldName;
+    field.name = shapeField.name;
     field.resolved = fieldType;
-    field.access = classDecl->fields.size() < privateFrom ? Access::Public : Access::Private;
+    field.access = classDecl->fields.size() < shape.privateFrom ? Access::Public : Access::Private;
     classDecl->fields.push_back(field);
-    typeFields.push_back({.name = fieldName.str(), .type = fieldType});
+    typeFields.push_back({.name = shapeField.name.str(), .type = fieldType});
   }
   type->defineFields(std::move(typeFields));
 
   return classDecl;
 }
 
+const Type *FsDeclarer::fieldType(FsFieldType type) const {
+  switch (type) {
+    case FsFieldType::INT:
+      return Type::intTy();
+    case FsFieldType::DOUBLE:
+      return Type::doubleTy();
+    case FsFieldType::STRING:
+      return Type::string();
+  }
+
+  return Type::error();
+}
+
 Expr *FsDeclarer::checkStatsDate(MemberExpr *member, ClassDecl *classDecl) {
-  static const llvm::StringLiteral dates[] = {"atime", "mtime", "ctime", "birthtime"};
   if (!this->state.getFileSystemStore().isStatsClass(classDecl) ||
-      !llvm::is_contained(dates, member->name)) {
+      !FsClassShape::isStatsDate(member->name)) {
     return nullptr;
   }
 
@@ -113,7 +78,7 @@ Expr *FsDeclarer::checkFsClassMethod(CallExpr *call, MemberExpr *member, ClassDe
   if (!this->state.getFileSystemStore().isFileClass(classDecl)) {
     return nullptr;
   }
-  auto kind = this->fileKind(member->name);
+  auto kind = FsClassShape::fileKindOf(member->name);
   if (!kind) {
     return nullptr;
   }

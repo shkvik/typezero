@@ -2,9 +2,9 @@
 
 #include "compiler/program/library/crypto/crypto_sync_function_table/crypto_sync_function_table.h"
 #include "compiler/result/result/result.h"
+#include "compiler/semantic/library/crypto/crypto_args/crypto_args.h"
 #include "compiler/semantic/library/crypto/crypto_function_checker/crypto_function_checker_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
-#include "llvm/ADT/StringMap.h"
 
 namespace tz {
 
@@ -29,7 +29,7 @@ private:
   using ResultFilledTarget = Result<const Type *, CryptoFunctionCheckerFilledTargetError>;
   using ResultCurveIsKnown = Result<llvm::StringRef, CryptoFunctionCheckerCurveIsKnownError>;
 
-  ResultFilledTarget checkFilledTarget(const Type *type, llvm::StringRef functionName,
+  ResultFilledTarget checkFilledTarget(const Type *type, CryptoSyncFunction function,
                                        llvm::StringRef shown) const;
   ResultCurveIsKnown checkCurveIsKnown(llvm::StringRef curve) const;
   std::optional<std::string> literalOf(const Expr *expr) const;
@@ -40,7 +40,7 @@ private:
     llvm::StringRef fn;
     llvm::StringRef shown;
     llvm::SMLoc loc;
-    llvm::StringMap<Expr *> options;
+    CryptoOptions options = CryptoOptions();
   };
 
   struct KeyInput {
@@ -64,9 +64,9 @@ private:
   Expr *provenFillOffset(Expr *arg, const Expr *target);
   Expr *provenFillSize(Expr *arg, Expr *at, const Expr *target);
   bool readKeyOptions(SyncCall &sync, bool priv, KeyInput &input);
-  bool readKeyDetails(llvm::StringMap<Expr *> &options, KeyInput &input);
+  bool readKeyDetails(CryptoOptions &options, KeyInput &input);
   Expr *reportUnknownFunction(CallExpr *call, llvm::StringRef shown, llvm::SMLoc loc);
-  bool readOptionsAt(SyncCall &sync, size_t index, llvm::ArrayRef<llvm::StringRef> allowed);
+  bool readOptionsAt(SyncCall &sync, size_t index, llvm::ArrayRef<CryptoOption> allowed);
   Expr *provenNumber(Expr *arg, int64_t low, std::optional<int64_t> high, llvm::StringRef what);
   Expr *checkCreateHash(SyncCall &sync);
   Expr *checkCreateHmac(SyncCall &sync);

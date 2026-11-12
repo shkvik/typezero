@@ -1,5 +1,7 @@
 #include "compiler/semantic/bodies/classes/class_member_checker/class_member_checker.h"
 #include "compiler/program/library/builtin_names/access_keyword_table/access_keyword_table.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
+#include "compiler/program/library/builtin_names/library_method_table/library_method_table.h"
 #include "compiler/program/library/events/emitter_member_table/emitter_member_table.h"
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/bodies/classes/class_checker/class_checker.h"
@@ -24,14 +26,6 @@ using llvm::cast;
 using llvm::dyn_cast_or_null;
 
 namespace tz {
-
-namespace {
-
-constexpr const char *kThisName = "this";
-constexpr const char *kSuperName = "super";
-constexpr const char *kSetterPrefix = "set";
-
-}
 
 ClassMemberChecker::ClassMemberChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -101,7 +95,8 @@ ClassMemberChecker::checkProtectedReceiver(const ClassDecl *classDecl, llvm::Str
   const ClassDecl *other = uncast != nullptr && uncast->type != nullptr
                                ? this->classDeclarer->classOf(uncast->type)
                                : nullptr;
-  bool isSelf = self != nullptr && (self->name == kThisName || self->name == kSuperName);
+  bool isSelf = self != nullptr && (self->name == KeywordTable::getName(Keyword::THIS) ||
+                                    self->name == KeywordTable::getName(Keyword::SUPER));
   bool isReachable =
       uncast == nullptr || isSelf || other == nullptr || this->isDerivedFrom(other, currentClass);
   if (isReachable) {
@@ -342,7 +337,7 @@ ClassMemberChecker::checkAssignableField(const ClassField *field, const ClassDec
   if (isAssignable) {
     return ok(field);
   }
-  auto setter = this->setterName(name);
+  auto setter = LibraryMethodTable::getSetterName(name);
   auto methods = this->classDeclarer->methodsNamed(classDecl, name);
   bool isMethod = field != nullptr || !methods.empty();
   auto setters = this->classDeclarer->methodsNamed(classDecl, setter);
@@ -377,12 +372,6 @@ ClassMemberChecker::checkAssignableField(const ClassField *field, const ClassDec
       .code = ClassMemberCheckerAssignableFieldErrorCode::NO_SUCH_PROPERTY,
       .message = message,
   });
-}
-
-std::string ClassMemberChecker::setterName(llvm::StringRef name) const {
-  std::string first(1, llvm::toUpper(name[0]));
-
-  return kSetterPrefix + first + name.drop_front().str();
 }
 
 ClassMemberChecker::ResultFieldNotReadOnly

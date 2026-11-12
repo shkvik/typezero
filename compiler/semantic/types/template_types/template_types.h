@@ -35,8 +35,6 @@ private:
 
   bool isTemplateHole(const Type *type) const;
   const Type *resolveHole(const TypeRef &arg);
-  std::u16string upperCase(char16_t unit) const;
-  std::u16string lowerCase(char16_t unit) const;
   const Type *numberLiteral(double value) const;
   void reportTooManyStrings(llvm::StringRef message);
   const Type *firstNonHole(const Type *hole) const;

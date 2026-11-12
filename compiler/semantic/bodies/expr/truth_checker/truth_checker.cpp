@@ -1,6 +1,7 @@
 #include "compiler/semantic/bodies/expr/truth_checker/truth_checker.h"
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/flow/children_first/children_first.h"
@@ -103,10 +104,11 @@ std::string TruthChecker::nodeSource(const Expr *expr, std::vector<std::string> 
     return std::to_string(integer->value);
   }
   if (boolean != nullptr) {
-    return boolean->value ? "true" : "false";
+    Keyword written = boolean->value ? Keyword::TRUE_KEYWORD : Keyword::FALSE_KEYWORD;
+    return KeywordTable::getName(written).str();
   }
   if (isa<UndefinedExpr>(expr)) {
-    return "undefined";
+    return KeywordTable::getName(Keyword::UNDEFINED_KEYWORD).str();
   }
   if (text != nullptr) {
     return this->stringSource(text);

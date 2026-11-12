@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/fs/fs_promises_checker/fs_promises_checker.h"
+#include "compiler/program/library/fs/fs_export_table/fs_export_table.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/library/fs/fs_checker/fs_checker.h"
 #include "compiler/semantic/library/fs/fs_errors/fs_errors.h"
@@ -17,7 +18,7 @@ FsPromisesChecker::FsPromisesChecker(SemanticState &owner, SemanticParts &all)
 
 FsPromisesChecker::ResultPromiseFunction
 FsPromisesChecker::checkPromiseFunction(llvm::StringRef functionName) const {
-  if (functionName == "constants") {
+  if (FsFunctionTable::find(functionName) == FsFunction::CONSTANTS) {
     auto message = ErrorTextFsPromises::constants();
 
     return err(FsPromisesCheckerPromiseFunctionError{
@@ -25,7 +26,8 @@ FsPromisesChecker::checkPromiseFunction(llvm::StringRef functionName) const {
         .message = message,
     });
   }
-  if (functionName == "open") {
+  auto exported = FsExportTable::find(NodeModule::FsPromises, functionName);
+  if (exported == FsExport::HANDLE_FUNCTION) {
     auto message = ErrorTextFsPromises::open();
 
     return err(FsPromisesCheckerPromiseFunctionError{

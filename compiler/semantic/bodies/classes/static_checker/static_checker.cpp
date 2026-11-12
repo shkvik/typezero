@@ -2,6 +2,7 @@
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
 #include "compiler/program/library/events/events_function_table/events_function_table.h"
+#include "compiler/program/library/stream/stream_static_table/stream_static_table.h"
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/bodies/classes/class_member_checker/class_member_checker.h"
 #include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
@@ -22,12 +23,6 @@
 using llvm::cast;
 
 namespace tz {
-
-namespace {
-
-constexpr const char *kFromMethod = "from";
-
-}
 
 StaticChecker::StaticChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -382,7 +377,7 @@ Expr *StaticChecker::checkLibraryStaticCall(CallExpr *call, MemberExpr *member,
   }
   bool isReadableFrom = classDecl->library() &&
                         LibraryClassTable::isName(classDecl->name, LibraryClass::READABLE) &&
-                        member->name == kFromMethod;
+                        StreamStaticTable::find(member->name) == StreamStatic::FROM;
   if (isReadableFrom) {
     return this->streamSources->checkStreamFrom(call, member);
   }

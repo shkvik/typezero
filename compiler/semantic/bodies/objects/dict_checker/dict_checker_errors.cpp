@@ -131,6 +131,10 @@ std::string ErrorTextDictTarget::textHint(llvm::StringRef key) {
   return (llvm::Twine(", e.g. '") + key + " = (" + key + " ?? \"\") + s'").str();
 }
 
+std::string ErrorTextDictDelete::entryPart(bool isMap) {
+  return isMap ? "key" : "value";
+}
+
 std::string ErrorTextDictDelete::property(llvm::StringRef kind, llvm::StringRef text,
                                           llvm::StringRef what) {
   return (llvm::Twine("'delete' removes a property of the ") + kind +

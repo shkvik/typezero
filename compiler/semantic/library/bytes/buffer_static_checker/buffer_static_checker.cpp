@@ -605,7 +605,7 @@ Expr *BufferStaticChecker::checkIsEncoding(CallExpr *call, MemberExpr *member) {
   auto text = this->literalText(call->args[0]);
   if (text.has_value()) {
     auto utf8 = ToUtf8::toUtf8(*text);
-    bool isKnown = BytesCheckHelpers::encodingNamed(utf8).has_value();
+    bool isKnown = EncodingNameTable::find(utf8).has_value();
     return this->makeBoolLiteral(call->loc(), isKnown);
   }
   call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());

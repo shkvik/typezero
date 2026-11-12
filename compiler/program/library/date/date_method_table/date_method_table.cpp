@@ -1,5 +1,6 @@
 #include "compiler/program/library/date/date_method_table/date_method_table.h"
 #include "runtime/library/date/date/date.h"
+#include "llvm/Support/ErrorHandling.h"
 
 namespace tz {
 
@@ -362,6 +363,15 @@ const DateMethodInfo *DateMethodTable::find(llvm::StringRef name) {
   }
 
   return nullptr;
+}
+
+llvm::StringRef DateMethodTable::getName(Builtin builtin, int field) {
+  for (const DateMethodInfo &info : kDateMethods) {
+    if (info.builtin == builtin && info.field == field) {
+      return info.name;
+    }
+  }
+  llvm_unreachable("date method missing from the table");
 }
 
 }

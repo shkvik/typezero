@@ -19,6 +19,7 @@ struct StreamFunctionInfo {
 class StreamFunctionTable {
 public:
   static std::optional<StreamFunction> find(llvm::StringRef name);
+  static llvm::StringRef getName(StreamFunction value);
 };
 
 }

@@ -115,6 +115,7 @@ struct PromiseStaticCheckerPromiseArrayError {
 
 class ErrorTextPromiseList {
 public:
+  static std::string valuesLabel();
   static std::string noType(llvm::StringRef fn);
   static std::string mayBe(llvm::StringRef fn, llvm::StringRef type);
   static std::string notArray(llvm::StringRef fn, llvm::StringRef type, bool iterable,

@@ -28,6 +28,7 @@ struct DateMethodInfo {
 class DateMethodTable {
 public:
   static const DateMethodInfo *find(llvm::StringRef name);
+  static llvm::StringRef getName(Builtin builtin, int field);
 };
 
 }

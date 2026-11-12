@@ -36,6 +36,10 @@ std::string ErrorTextGeneratorType::sync(llvm::StringRef declared) {
       .str();
 }
 
+std::string ErrorTextSendsNothing::destructuring() {
+  return "destructuring";
+}
+
 std::string ErrorTextSendsNothing::expects(llvm::StringRef what, llvm::StringRef iterator,
                                            llvm::StringRef sent) {
   return (llvm::Twine(what) + " resumes each 'yield' of '" + iterator +

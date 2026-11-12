@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/fs/fs_class_shape/fs_class_shape.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
@@ -19,10 +20,8 @@ public:
   bool isRuntimeClass(const ClassDecl *classDecl) const;
 
 private:
-  ClassDecl *declareFsClass(llvm::StringRef name,
-                            llvm::ArrayRef<std::pair<llvm::StringRef, const Type *>> fields,
-                            size_t privateFrom);
-  std::optional<int> fileKind(llvm::StringRef method) const;
+  ClassDecl *declareFsClass(const FsClassInfo &shape);
+  const Type *fieldType(FsFieldType type) const;
 
   SemanticState &state;
   CallChecker *callChecker = nullptr;

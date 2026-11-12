@@ -1,4 +1,8 @@
 #include "compiler/semantic/library/date/date_format_checker/date_format_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/date/date_format_method_table/date_format_method_table.h"
+#include "compiler/program/library/date/date_format_option_table/date_format_option_table.h"
+#include "compiler/program/library/intl/intl_type_name_table/intl_type_name_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -24,34 +28,9 @@ namespace tz {
 
 namespace {
 
-struct DateOption {
-  llvm::StringLiteral name;
-  std::vector<llvm::StringLiteral> values;
-};
-
 constexpr int64_t kFewestDigits = 1;
 constexpr int64_t kMostDigits = 3;
 
-const DateOption kOptions[TZ_DTO_COUNT] = {
-    {"localeMatcher", {"lookup", "best fit"}},
-    {"calendar", {}},
-    {"numberingSystem", {}},
-    {"hourCycle", {"h11", "h12", "h23", "h24"}},
-    {"timeZone", {}},
-    {"weekday", {"narrow", "short", "long"}},
-    {"era", {"narrow", "short", "long"}},
-    {"year", {"2-digit", "numeric"}},
-    {"month", {"2-digit", "numeric", "narrow", "short", "long"}},
-    {"day", {"2-digit", "numeric"}},
-    {"dayPeriod", {"narrow", "short", "long"}},
-    {"hour", {"2-digit", "numeric"}},
-    {"minute", {"2-digit", "numeric"}},
-    {"second", {"2-digit", "numeric"}},
-    {"timeZoneName", {"short", "long", "shortOffset", "longOffset", "shortGeneric", "longGeneric"}},
-    {"formatMatcher", {"basic", "best fit"}},
-    {"dateStyle", {"full", "long", "medium", "short"}},
-    {"timeStyle", {"full", "long", "medium", "short"}},
-};
 
 }
 
@@ -109,20 +88,6 @@ std::optional<std::vector<double>> DateFormatChecker::numbersOf(const Type *type
   return numbers;
 }
 
-const char *DateFormatChecker::methodName(int kind) const {
-  if (kind == TZ_DATE_LOCALE_DATE) {
-    return "toLocaleDateString";
-  }
-  if (kind == TZ_DATE_LOCALE_TIME) {
-    return "toLocaleTimeString";
-  }
-  if (kind == TZ_DATE_LOCALE_FORMAT) {
-    return "Intl.DateTimeFormat";
-  }
-
-  return "toLocaleString";
-}
-
 bool DateFormatChecker::isLanguageTag(const std::string &tag) const {
   auto parts = llvm::SmallVector<llvm::StringRef, 4>();
   llvm::StringRef(tag).split(parts, '-');
@@ -142,7 +107,8 @@ DateFormatChecker::ResultOptionsObject DateFormatChecker::checkOptionsObject(con
                                                                              int kind) const {
   if (!type->isObject() || type->isTuple() || type->isClass() || type->isRegExp() ||
       type->isMatch() || type->isDate() || type->isIntl() || type->isCrypto() || type->isBytes()) {
-    auto message = ErrorTextDateOptions::notObject(this->methodName(kind), type->name());
+    auto message =
+        ErrorTextDateOptions::notObject(ErrorTextDateOptions::method(kind), type->name());
 
     return err(DateFormatCheckerOptionsObjectError{
         .code = DateFormatCheckerOptionsObjectErrorCode::NOT_AN_OBJECT,
@@ -157,7 +123,7 @@ bool DateFormatChecker::prepareLocaleArgs(std::vector<Expr *> &args, int kind) {
   bool isOk = true;
   if (!args.empty()) {
     args[0] = this->exprChecker->checkExpr(args[0]);
-    isOk = this->intlChecker->prepareLocaleArg(args[0], this->methodName(kind));
+    isOk = this->intlChecker->prepareLocaleArg(args[0], ErrorTextDateOptions::method(kind));
   }
   if (args.size() < 2) {
     return isOk;
@@ -221,7 +187,7 @@ bool DateFormatChecker::matchOptionRole(const Expr *options, const Field &field,
 bool DateFormatChecker::matchOptionKind(const Expr *options, const Field &field,
                                         std::optional<DateFormatOption> option, int kind) {
   if (!option.has_value()) {
-    auto message = ErrorTextDateOptions::unknown(field.name, this->methodName(kind));
+    auto message = ErrorTextDateOptions::unknown(field.name, ErrorTextDateOptions::method(kind));
     this->state.getDiagnostics().error(options->loc(), message);
     return false;
   }
@@ -289,7 +255,7 @@ bool DateFormatChecker::matchStyleMethod(const Expr *options, llvm::StringRef na
   if (!isForeign) {
     return true;
   }
-  auto message = ErrorTextDateOptions::styleOnly(name, this->methodName(kind));
+  auto message = ErrorTextDateOptions::styleOnly(name, ErrorTextDateOptions::method(kind));
   this->state.getDiagnostics().error(options->loc(), message);
 
   return false;
@@ -357,7 +323,7 @@ bool DateFormatChecker::isOutsideDigits(double digits) const {
 }
 
 bool DateFormatChecker::matchOptionText(const Field &field, const DateOptionPlace &place) {
-  auto values = this->optionValues(field.name);
+  auto values = DateFormatOptionTable::getValues(field.name);
   if (values.empty() || place.isExempt) {
     return true;
   }
@@ -380,16 +346,6 @@ bool DateFormatChecker::matchOptionText(const Field &field, const DateOptionPlac
   return true;
 }
 
-llvm::ArrayRef<llvm::StringLiteral> DateFormatChecker::optionValues(llvm::StringRef name) const {
-  for (const DateOption &option : kOptions) {
-    if (option.name == name) {
-      return option.values;
-    }
-  }
-
-  return {};
-}
-
 std::optional<std::vector<std::string>>
 DateFormatChecker::optionTexts(const Field &field, const DateOptionPlace &place) {
   if (place.given != nullptr) {
@@ -404,60 +360,49 @@ DateFormatChecker::optionTexts(const Field &field, const DateOptionPlace &place)
 
 const Type *DateFormatChecker::dateOptionsType() const {
   auto fields = std::vector<Field>();
-  for (const DateOption &option : kOptions) {
-    const auto *value = Type::string();
-    if (!option.values.empty()) {
-      auto literals = std::vector<const Type *>();
-      for (llvm::StringLiteral text : option.values) {
-        literals.push_back(Type::stringLiteral(std::u16string(text.begin(), text.end())));
-      }
-      value = Type::unionOf(literals);
-    }
+  for (const DateFormatOptionInfo &option : DateFormatOptionTable::getOptions()) {
+    const Type *value = this->dateOptionValueType(option);
     fields.push_back({option.name.str(), Type::optional(value), false});
   }
-  fields.push_back({"hour12", Type::optional(Type::boolTy()), false});
-  fields.push_back({"fractionalSecondDigits",
-                    Type::optional(Type::unionOf({Type::numberLiteral(1, Type::intTy()),
-                                                  Type::numberLiteral(2, Type::intTy()),
-                                                  Type::numberLiteral(3, Type::intTy())})),
-                    false});
+  auto serviceName = IntlTypeNameTable::getName(IntlTypeName::DATE_TIME_FORMAT);
+  auto typeName = IntlServiceTable::getOptionsTypeName(serviceName);
 
-  return Type::object(std::move(fields), "Intl.DateTimeFormatOptions");
+  return Type::object(std::move(fields), typeName);
+}
+
+const Type *DateFormatChecker::dateOptionValueType(const DateFormatOptionInfo &option) const {
+  if (option.value == DateFormatOption::HOUR12) {
+    return Type::boolTy();
+  }
+  if (option.value == DateFormatOption::FRACTIONAL_SECOND_DIGITS) {
+    auto digits = std::vector<const Type *>();
+    for (int64_t count = kFewestDigits; count <= kMostDigits; ++count) {
+      digits.push_back(Type::numberLiteral(double(count), Type::intTy()));
+    }
+    return Type::unionOf(digits);
+  }
+  if (option.values.empty()) {
+    return Type::string();
+  }
+  auto literals = std::vector<const Type *>();
+  for (llvm::StringLiteral text : option.values) {
+    literals.push_back(Type::stringLiteral(std::u16string(text.begin(), text.end())));
+  }
+
+  return Type::unionOf(literals);
 }
 
 const Type *DateFormatChecker::dateFormatPartType() const {
-  return Type::object({{"type", Type::string(), false}, {"value", Type::string(), false}},
-                      "Intl.DateTimeFormatPart");
+  return this->intlChecker->shapeType(IntlShape::DATE_TIME_FORMAT_PART);
 }
 
 const Type *DateFormatChecker::resolvedDateOptionsType() const {
-  const auto *text = Type::string();
-  const auto *maybe = Type::optional(Type::string());
-
-  return Type::object({{"locale", text, false},
-                       {"calendar", text, false},
-                       {"numberingSystem", text, false},
-                       {"timeZone", text, false},
-                       {"hourCycle", maybe, false},
-                       {"hour12", Type::optional(Type::boolTy()), false},
-                       {"weekday", maybe, false},
-                       {"era", maybe, false},
-                       {"year", maybe, false},
-                       {"month", maybe, false},
-                       {"day", maybe, false},
-                       {"dayPeriod", maybe, false},
-                       {"hour", maybe, false},
-                       {"minute", maybe, false},
-                       {"second", maybe, false},
-                       {"fractionalSecondDigits", Type::optional(Type::intTy()), false},
-                       {"timeZoneName", maybe, false},
-                       {"dateStyle", maybe, false},
-                       {"timeStyle", maybe, false}},
-                      "Intl.ResolvedDateTimeFormatOptions");
+  return this->intlChecker->shapeType(IntlShape::RESOLVED_DATE_TIME_FORMAT);
 }
 
 Expr *DateFormatChecker::checkDateFormatNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
-  auto *callee = this->state.getAst().make<NameExpr>(loc, "Intl");
+  auto intlName = GlobalNameTable::getName(GlobalName::INTL);
+  auto *callee = this->state.getAst().make<NameExpr>(loc, intlName);
   if (args.size() > 2) {
     auto message = ErrorTextDateFormat::arity(args.size());
     this->state.getDiagnostics().error(loc, message);
@@ -478,7 +423,7 @@ Expr *DateFormatChecker::checkDateFormatNew(llvm::SMLoc loc, std::vector<Expr *>
 }
 
 Expr *DateFormatChecker::checkIntlCall(CallExpr *call, MemberExpr *member) {
-  if (member->name == "DateTimeFormat") {
+  if (IntlTypeNameTable::find(member->name) == IntlTypeName::DATE_TIME_FORMAT) {
     if (this->callChecker->rejectSpread(call)) {
       return call;
     }
@@ -494,7 +439,9 @@ Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *membe
   if (this->callChecker->rejectSpread(call)) {
     return call;
   }
-  if (name == "format" || name == "formatToParts") {
+  auto method = DateFormatMethodTable::find(name);
+  bool isFormat = method == DateFormatMethod::FORMAT;
+  if (isFormat || method == DateFormatMethod::FORMAT_TO_PARTS) {
     auto arity = this->argumentChecker->checkArity(call, 0, 1);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -512,11 +459,11 @@ Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *membe
       }
     }
     call->target =
-        BuiltinCall{.builtin = name == "format" ? Builtin::DtfFormat : Builtin::DtfFormatToParts};
-    call->type = name == "format" ? Type::string() : Type::array(this->dateFormatPartType());
+        BuiltinCall{.builtin = isFormat ? Builtin::DtfFormat : Builtin::DtfFormatToParts};
+    call->type = isFormat ? Type::string() : Type::array(this->dateFormatPartType());
     return call;
   }
-  if (name == "resolvedOptions") {
+  if (method == DateFormatMethod::RESOLVED_OPTIONS) {
     auto arity = this->argumentChecker->checkArity(call, 0, 0);
     if (arity.isErr()) {
       this->state.getDiagnostics().error(member->loc(), arity.error().message);
@@ -526,9 +473,10 @@ Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *membe
     call->type = this->resolvedDateOptionsType();
     return call;
   }
-  std::string message = name == "formatRange" || name == "formatRangeToParts"
-                            ? ErrorTextDateFormat::range(name)
-                            : ErrorTextDateFormat::noMember(name);
+  bool isRange =
+      method == DateFormatMethod::FORMAT_RANGE || method == DateFormatMethod::FORMAT_RANGE_TO_PARTS;
+  std::string message =
+      isRange ? ErrorTextDateFormat::range(name) : ErrorTextDateFormat::noMember(name);
   this->state.getDiagnostics().error(member->loc(), message);
   for (Expr *&arg : call->args) {
     arg = this->exprChecker->checkExpr(arg);

@@ -1,12 +1,12 @@
 #include "compiler/semantic/library/crypto/crypto_method_checker/crypto_method_checker.h"
 #include "compiler/program/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/program/library/crypto/crypto_stream_method_table/crypto_stream_method_table.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/library/crypto/crypto_args/crypto_args.h"
 #include "compiler/semantic/library/crypto/crypto_check_helpers/crypto_check_helpers.h"
 #include "compiler/semantic/library/crypto/crypto_function_checker/crypto_function_checker_errors.h"
-#include "compiler/semantic/library/crypto/crypto_names/crypto_names.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -112,16 +112,13 @@ Expr *CryptoMethodChecker::reportNoMethod(CallExpr *call, MemberExpr *member) {
   bool isHash = kind == Crypto::Hash || kind == Crypto::Hmac || kind == Crypto::Sign ||
                 kind == Crypto::Verify;
   bool isCipher = kind == Crypto::Cipheriv || kind == Crypto::Decipheriv;
-  static const llvm::StringLiteral streamMethods[] = {
-      "write",   "end",         "pipe", "unpipe", "read",           "on",
-      "once",    "off",         "emit", "pause",  "resume",         "setEncoding",
-      "destroy", "addListener", "cork", "uncork", "removeListener", "setDefaultEncoding"};
-  if ((isHash || isCipher) && llvm::is_contained(streamMethods, name)) {
+  if ((isHash || isCipher) && CryptoStreamMethodTable::isStreamMethod(name)) {
     auto message = ErrorTextCryptoMethod::stream(name, type->name(), kind, isCipher);
     this->state.getDiagnostics().error(loc, message);
     return this->checkLoosely(call);
   }
-  auto message = ErrorTextCryptoMethod::noMethod(name, type->name(), CryptoNames::methodsOf(kind));
+  auto methods = ErrorTextCryptoMethods::of(kind);
+  auto message = ErrorTextCryptoMethod::noMethod(name, type->name(), methods);
   this->state.getDiagnostics().error(loc, message);
 
   return this->checkLoosely(call);
@@ -165,8 +162,7 @@ Expr *CryptoMethodChecker::pointFormat(const CryptoMethodCall &crypto, size_t in
     return this->cryptoArgs->cryptoInt(loc, 0);
   }
   auto point = ErrorTextCryptoPoint::format();
-  int which =
-      this->cryptoArgs->cryptoChoice(args[index], point, {"uncompressed", "compressed", "hybrid"});
+  int which = this->cryptoArgs->cryptoChoice(args[index], point, CryptoChoice::POINT_CONVERSION);
   if (which < 0) {
     return nullptr;
   }
@@ -186,7 +182,8 @@ Expr *CryptoMethodChecker::checkHashUpdate(const CryptoMethodCall &crypto) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  auto *data = this->cryptoArgs->cryptoData(args[0], "data", kTextOrViews);
+  auto dataWhat = ErrorTextCryptoLabel::data();
+  auto *data = this->cryptoArgs->cryptoData(args[0], dataWhat, kTextOrViews);
   auto *encoding = this->cryptoArgs->cryptoEncoding(call, 1, name, 0);
   if (data->type->isError() || encoding == nullptr) {
     return call;
@@ -231,12 +228,12 @@ Expr *CryptoMethodChecker::checkHashCopy(const CryptoMethodCall &crypto) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  auto options = llvm::StringMap<Expr *>();
+  auto options = CryptoOptions();
   if (this->isPresent(args, 0) &&
-      !this->cryptoArgs->readCryptoOptions(args[0], name, {"outputLength"}, options)) {
+      !this->cryptoArgs->readCryptoOptions(args[0], name, {CryptoOption::OUTPUT_LENGTH}, options)) {
     return call;
   }
-  Expr *length = options.lookup("outputLength");
+  Expr *length = options.lookup(CryptoOption::OUTPUT_LENGTH);
   if (length != nullptr) {
     return this->cryptoArgs->cryptoResult(call, CryptoFn::HashCopy,
                                           {self, this->cryptoArgs->cryptoNumber(length)}, type);
@@ -278,7 +275,8 @@ Expr *CryptoMethodChecker::checkVerify(const CryptoMethodCall &crypto) {
   if (!this->cryptoArgs->appendSignKey(args[0], name, false, verifyArgs)) {
     return call;
   }
-  auto *signature = this->cryptoArgs->cryptoData(args[1], "signature", kTextOrBuffers);
+  auto signatureWhat = ErrorTextCryptoLabel::signature();
+  auto *signature = this->cryptoArgs->cryptoData(args[1], signatureWhat, kTextOrBuffers);
   auto *encoding = this->cryptoArgs->cryptoEncoding(call, 2, name, 0);
   if (signature->type->isError() || encoding == nullptr) {
     return call;
@@ -302,7 +300,8 @@ Expr *CryptoMethodChecker::checkCipherUpdate(const CryptoMethodCall &crypto) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  auto *data = this->cryptoArgs->cryptoData(args[0], "data", kTextOrBuffers);
+  auto dataWhat = ErrorTextCryptoLabel::data();
+  auto *data = this->cryptoArgs->cryptoData(args[0], dataWhat, kTextOrBuffers);
   auto *encoding = this->cryptoArgs->cryptoEncoding(call, 1, name, 0);
   if (data->type->isError() || encoding == nullptr) {
     return call;
@@ -337,16 +336,17 @@ Expr *CryptoMethodChecker::checkSetAad(const CryptoMethodCall &crypto) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  auto *data = this->cryptoArgs->cryptoData(args[0], "AAD", kBuffersOnly);
-  auto options = llvm::StringMap<Expr *>();
-  if (this->isPresent(args, 1) &&
-      !this->cryptoArgs->readCryptoOptions(args[1], name, {"plaintextLength"}, options)) {
+  auto aadWhat = ErrorTextCryptoLabel::aad();
+  auto *data = this->cryptoArgs->cryptoData(args[0], aadWhat, kBuffersOnly);
+  auto options = CryptoOptions();
+  if (this->isPresent(args, 1) && !this->cryptoArgs->readCryptoOptions(
+                                      args[1], name, {CryptoOption::PLAINTEXT_LENGTH}, options)) {
     return call;
   }
   if (data->type->isError()) {
     return call;
   }
-  Expr *length = options.lookup("plaintextLength");
+  Expr *length = options.lookup(CryptoOption::PLAINTEXT_LENGTH);
   return this->cryptoArgs->cryptoCall(call, CryptoFn::CipherSetAad,
                                       {self, data,
                                        length != nullptr ? this->cryptoArgs->cryptoNumber(length)
@@ -379,7 +379,8 @@ Expr *CryptoMethodChecker::checkSetAuthTag(const CryptoMethodCall &crypto) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  auto *tag = this->cryptoArgs->cryptoData(args[0], "tag", kTextOrBuffers);
+  auto tagWhat = ErrorTextCryptoLabel::tag();
+  auto *tag = this->cryptoArgs->cryptoData(args[0], tagWhat, kTextOrBuffers);
   auto *encoding = this->cryptoArgs->cryptoEncoding(call, 1, name, 0);
   if (tag->type->isError() || encoding == nullptr) {
     return call;
@@ -423,60 +424,62 @@ Expr *CryptoMethodChecker::checkKeyExport(const CryptoMethodCall &crypto) {
   if (!this->isPresent(args, 0)) {
     return this->cryptoArgs->cryptoResult(call, CryptoFn::KeyExportSecret, {self}, buffer);
   }
-  auto options = llvm::StringMap<Expr *>();
+  auto options = CryptoOptions();
   bool isRead = this->cryptoArgs->readCryptoOptions(
-      args[0], name, {"format", "type", "cipher", "passphrase"}, options);
+      args[0], name,
+      {CryptoOption::FORMAT, CryptoOption::TYPE, CryptoOption::CIPHER, CryptoOption::PASSPHRASE},
+      options);
   if (!isRead) {
     return call;
   }
-  int format = 3;
-  Expr *formatOption = options.lookup("format");
+  int format = int(CryptoKeyFormat::BUFFER);
+  Expr *formatOption = options.lookup(CryptoOption::FORMAT);
   if (formatOption != nullptr) {
     auto keyFormat = ErrorTextCryptoFnLabel::keyFormat();
-    format =
-        this->cryptoArgs->cryptoChoice(formatOption, keyFormat, {"pem", "der", "jwk", "buffer"});
+    format = this->cryptoArgs->cryptoChoice(formatOption, keyFormat, CryptoChoice::EXPORT_FORMAT);
     if (format < 0) {
       return call;
     }
   }
-  if (format == 2) {
+  if (format == int(CryptoKeyFormat::JWK)) {
     return this->cryptoArgs->cryptoResult(call, CryptoFn::KeyExportJwk, {self}, Type::json());
   }
-  if (format == 3) {
+  if (format == int(CryptoKeyFormat::BUFFER)) {
     return this->cryptoArgs->cryptoResult(call, CryptoFn::KeyExportSecret, {self}, buffer);
   }
 
-  return this->checkEncodedKeyExport(crypto, options, format == 0);
+  return this->checkEncodedKeyExport(crypto, options, format == int(CryptoKeyFormat::PEM));
 }
 
 Expr *CryptoMethodChecker::checkEncodedKeyExport(const CryptoMethodCall &crypto,
-                                                 llvm::StringMap<Expr *> &options, bool pem) {
+                                                 CryptoOptions &options, bool pem) {
   CallExpr *call = crypto.call;
   llvm::SMLoc loc = crypto.member->loc();
   int has = 0;
   auto *keyType = this->cryptoArgs->cryptoString(loc, "");
   auto *cipherName = this->cryptoArgs->cryptoString(loc, "");
   auto *passphrase = this->cryptoArgs->cryptoUndefined(loc);
-  Expr *typeOption = options.lookup("type");
+  Expr *typeOption = options.lookup(CryptoOption::TYPE);
   if (typeOption != nullptr) {
     auto typeWhat = ErrorTextCryptoFnLabel::keyType();
     int which =
-        this->cryptoArgs->cryptoChoice(typeOption, typeWhat, {"pkcs1", "spki", "pkcs8", "sec1"});
+        this->cryptoArgs->cryptoChoice(typeOption, typeWhat, CryptoChoice::KEY_ENCODING_TYPE);
     if (which < 0) {
       return call;
     }
-    static const char *const types[] = {"pkcs1", "spki", "pkcs8", "sec1"};
+    auto types = CryptoChoiceTable::getValues(CryptoChoice::KEY_ENCODING_TYPE);
     keyType = this->cryptoArgs->cryptoString(typeOption->loc(), types[which]);
     has |= 1;
   }
-  Expr *cipherOption = options.lookup("cipher");
+  Expr *cipherOption = options.lookup(CryptoOption::CIPHER);
   if (cipherOption != nullptr) {
     cipherName = this->argumentChecker->checkArg(cipherOption, Type::string());
     has |= 2;
   }
-  Expr *passphraseOption = options.lookup("passphrase");
+  Expr *passphraseOption = options.lookup(CryptoOption::PASSPHRASE);
   if (passphraseOption != nullptr) {
-    passphrase = this->cryptoArgs->cryptoData(passphraseOption, "passphrase", kTextOrBuffers);
+    passphrase =
+        this->cryptoArgs->cryptoOptionData(options, CryptoOption::PASSPHRASE, kTextOrBuffers);
     has |= 4;
     if (passphrase->type->isError()) {
       return call;
@@ -500,7 +503,8 @@ Expr *CryptoMethodChecker::checkKeyEquals(const CryptoMethodCall &crypto) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  auto *other = this->cryptoArgs->cryptoKeyObject(args[0], "other key");
+  auto otherWhat = ErrorTextCryptoLabel::otherKey();
+  auto *other = this->cryptoArgs->cryptoKeyObject(args[0], otherWhat);
   if (other->type->isError()) {
     return call;
   }
@@ -550,7 +554,8 @@ Expr *CryptoMethodChecker::checkEcdhSetPrivateKey(const CryptoMethodCall &crypto
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  auto *key = this->cryptoArgs->cryptoData(args[0], "private key", kTextOrBuffers);
+  auto keyWhat = ErrorTextCryptoLabel::privateKey();
+  auto *key = this->cryptoArgs->cryptoData(args[0], keyWhat, kTextOrBuffers);
   auto *encoding = this->cryptoArgs->cryptoEncoding(call, 1, name, 0);
   if (key->type->isError() || encoding == nullptr) {
     return call;
@@ -573,7 +578,8 @@ Expr *CryptoMethodChecker::checkEcdhComputeSecret(const CryptoMethodCall &crypto
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
-  auto *key = this->cryptoArgs->cryptoData(args[0], "public key", kTextOrBuffers);
+  auto keyWhat = ErrorTextCryptoLabel::publicKey();
+  auto *key = this->cryptoArgs->cryptoData(args[0], keyWhat, kTextOrBuffers);
   auto *encoding = this->cryptoArgs->cryptoEncoding(call, 1, name, 0);
   if (key->type->isError() || encoding == nullptr) {
     return call;
@@ -609,21 +615,24 @@ Expr *CryptoMethodChecker::checkX509Name(const CryptoMethodCall &crypto) {
     return call;
   }
   auto *value = this->argumentChecker->checkArg(args[0], Type::string());
-  auto options = llvm::StringMap<Expr *>();
-  std::vector<llvm::StringRef> allowed = {"subject"};
+  auto options = CryptoOptions();
+  static const CryptoOption hostFlags[] = {CryptoOption::WILDCARDS, CryptoOption::PARTIAL_WILDCARDS,
+                                           CryptoOption::MULTI_LABEL_WILDCARDS,
+                                           CryptoOption::SINGLE_LABEL_SUBDOMAINS};
+  std::vector<CryptoOption> allowed = {CryptoOption::SUBJECT};
   if (crypto.method == CryptoMethod::X509_CHECK_HOST) {
-    allowed.insert(allowed.end(), {"wildcards", "partialWildcards", "multiLabelWildcards",
-                                   "singleLabelSubdomains"});
+    allowed.insert(allowed.end(), std::begin(hostFlags), std::end(hostFlags));
   }
   if (this->isPresent(args, 1) &&
       !this->cryptoArgs->readCryptoOptions(args[1], name, allowed, options)) {
     return call;
   }
   int subject = 0;
-  Expr *s = options.lookup("subject");
+  Expr *s = options.lookup(CryptoOption::SUBJECT);
   if (s != nullptr) {
-    if ((subject = this->cryptoArgs->cryptoChoice(s, "subject option",
-                                                  {"default", "always", "never"})) < 0) {
+    auto subjectWhat = ErrorTextCryptoLabel::subjectOption();
+    subject = this->cryptoArgs->cryptoChoice(s, subjectWhat, CryptoChoice::CHECK_SUBJECT);
+    if (subject < 0) {
       return call;
     }
   }
@@ -639,10 +648,8 @@ Expr *CryptoMethodChecker::checkX509Name(const CryptoMethodCall &crypto) {
   std::vector<Expr *> hostArgs = {self, value, this->cryptoArgs->cryptoInt(loc, subject)};
   int has = 0;
   auto flags = std::vector<Expr *>();
-  llvm::StringRef names[] = {"wildcards", "partialWildcards", "multiLabelWildcards",
-                             "singleLabelSubdomains"};
   for (int index = 0; index < 4; ++index) {
-    Expr *flag = options.lookup(names[index]);
+    Expr *flag = options.lookup(hostFlags[index]);
     has |= flag != nullptr ? 1 << index : 0;
     flags.push_back(flag != nullptr ? this->argumentChecker->checkArg(flag, Type::boolTy())
                                     : this->cryptoArgs->cryptoBool(loc, false));
@@ -662,9 +669,10 @@ Expr *CryptoMethodChecker::checkX509Verify(const CryptoMethodCall &crypto) {
     this->state.getDiagnostics().error(loc, arity.error().message);
     return call;
   }
+  auto keyWhat = ErrorTextCryptoLabel::key();
   Expr *other = crypto.method == CryptoMethod::X509_CHECK_ISSUED
                     ? this->exprChecker->checkExpr(args[0])
-                    : this->cryptoArgs->cryptoKeyObject(args[0], "key");
+                    : this->cryptoArgs->cryptoKeyObject(args[0], keyWhat);
   auto issued =
       crypto.method == CryptoMethod::X509_CHECK_ISSUED ? this->checkIssuer(other) : ok(other);
   if (issued.isErr()) {

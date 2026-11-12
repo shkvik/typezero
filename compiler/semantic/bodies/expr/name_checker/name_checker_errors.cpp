@@ -3,6 +3,29 @@
 
 namespace tz {
 
+namespace {
+
+const std::pair<GlobalName, llvm::StringLiteral> kObjectExamples[] = {
+    {GlobalName::PROCESS, "process.argv"},
+    {GlobalName::CONSOLE, "console.log(x)"},
+    {GlobalName::DATE, "Date.now()"},
+    {GlobalName::PERFORMANCE, "performance.now()"},
+    {GlobalName::REG_EXP, "new RegExp(pattern)"},
+    {GlobalName::JSON, "JSON.parse(text)"},
+};
+
+}
+
+std::optional<llvm::StringRef> ErrorTextNameUse::objectExample(std::optional<GlobalName> global) {
+  for (const auto &[object, example] : kObjectExamples) {
+    if (object == global) {
+      return example;
+    }
+  }
+
+  return std::nullopt;
+}
+
 std::string ErrorTextNameUse::staticUse(llvm::StringRef name) {
   return (llvm::Twine("a class expression cannot use '") + name +
           "', a variable of the function around it: the class is made "

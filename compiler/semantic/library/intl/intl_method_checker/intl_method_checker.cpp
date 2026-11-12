@@ -1,4 +1,6 @@
 #include "compiler/semantic/library/intl/intl_method_checker/intl_method_checker.h"
+#include "compiler/program/library/intl/intl_unit_table/intl_unit_table.h"
+#include "compiler/program/library/string/normalization_form_table/normalization_form_table.h"
 #include "compiler/program/library/string/string_method_table/string_method_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
@@ -47,13 +49,6 @@ std::optional<std::u16string> IntlMethodChecker::literalText(const Expr *expr) c
   }
 
   return std::nullopt;
-}
-
-const Type *IntlMethodChecker::relativePartType() const {
-  return Type::object({{"type", Type::string(), false},
-                       {"value", Type::string(), false},
-                       {"unit", Type::optional(Type::string()), false}},
-                      "Intl.RelativeTimeFormatPart");
 }
 
 IntlMethodChecker::ResultIntlNumber
@@ -244,7 +239,8 @@ Expr *IntlMethodChecker::checkRelativeFormat(CallExpr *call, MemberExpr *member,
   if (output == FormatOutput::TEXT) {
     return this->toBuiltinCall(call, Builtin::RtfFormat, Type::string());
   }
-  const auto *parts = Type::array(this->relativePartType());
+  const auto *part = this->intlChecker->shapeType(IntlShape::RELATIVE_TIME_FORMAT_PART);
+  const auto *parts = Type::array(part);
 
   return this->toBuiltinCall(call, Builtin::RtfFormatToParts, parts);
 }
@@ -252,9 +248,7 @@ Expr *IntlMethodChecker::checkRelativeFormat(CallExpr *call, MemberExpr *member,
 void IntlMethodChecker::walkRelativeUnit(CallExpr *call) {
   auto unit = this->literalText(call->args[1]);
   call->args[1] = this->argumentChecker->checkArg(call->args[1], Type::string());
-  static const llvm::StringLiteral units[] = {
-      "year", "years", "quarter", "quarters", "month",  "months",  "week",   "weeks",
-      "day",  "days",  "hour",    "hours",    "minute", "minutes", "second", "seconds"};
+  auto units = IntlUnitTable::getRelativeUnits();
   if (unit.has_value()) {
     auto written = ToUtf8::toUtf8(*unit);
     if (!llvm::is_contained(units, written)) {
@@ -338,7 +332,7 @@ Expr *IntlMethodChecker::checkNumberLocale(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (!this->intlOptionsChecker->prepareIntlArgs(call->args, 0, IntlKind::NumberFormat,
-                                                 "toLocaleString")) {
+                                                 member->name)) {
     return call;
   }
   call->target = BuiltinCall{.builtin = Builtin::NumToLocale};
@@ -361,9 +355,9 @@ Expr *IntlMethodChecker::checkStringLocale(CallExpr *call, MemberExpr *member) {
     }
     if (!call->args.empty()) {
       auto form = this->literalText(call->args[0]);
-      static const llvm::StringLiteral forms[] = {"NFC", "NFD", "NFKC", "NFKD"};
+      auto forms = NormalizationFormTable::getForms();
       call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
-      if (form && !llvm::is_contained(forms, ToUtf8::toUtf8(*form))) {
+      if (form && !NormalizationFormTable::isKnown(ToUtf8::toUtf8(*form))) {
         auto message = ErrorTextIntlMethod::badForm(ToUtf8::toUtf8(*form));
         this->state.getDiagnostics().error(call->args[0]->loc(), message);
       } else if (!form) {
@@ -386,7 +380,7 @@ Expr *IntlMethodChecker::checkStringLocale(CallExpr *call, MemberExpr *member) {
   }
   call->args[0] = this->argumentChecker->checkArg(call->args[0], Type::string());
   std::vector<Expr *> rest(call->args.begin() + 1, call->args.end());
-  if (!this->intlOptionsChecker->prepareIntlArgs(rest, 0, IntlKind::Collator, "localeCompare")) {
+  if (!this->intlOptionsChecker->prepareIntlArgs(rest, 0, IntlKind::Collator, member->name)) {
     return call;
   }
   std::copy(rest.begin(), rest.end(), call->args.begin() + 1);

@@ -1,4 +1,5 @@
 #include "compiler/semantic/flow/predicate_checker/predicate_checker.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker_errors.h"
 #include "compiler/semantic/flow/expr_parts/expr_parts.h"
@@ -24,7 +25,6 @@ constexpr int kThisPosition = -1;
 constexpr int kNoPosition = -2;
 constexpr int kFirstParam = 0;
 constexpr uint64_t kMaxTermLiteral = uint64_t(1) << 31;
-constexpr llvm::StringLiteral kThisName = "this";
 
 }
 
@@ -147,7 +147,7 @@ std::string PredicateChecker::shownPredicate(const TypeRef &ref, const Type *typ
 
 PredicateChecker::ResultPredicateArg
 PredicateChecker::predicateArg(const FunctionDecl *functionDecl, const TypeRef &ref) const {
-  bool isThis = ref.name == kThisName;
+  bool isThis = ref.name == KeywordTable::getName(Keyword::THIS);
   bool isMethod =
       functionDecl->cls() != nullptr && !functionDecl->isStatic() && !functionDecl->isConstructor();
   if (isThis && !isMethod) {

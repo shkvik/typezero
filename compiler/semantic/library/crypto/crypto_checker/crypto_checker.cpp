@@ -1,12 +1,16 @@
 #include "compiler/semantic/library/crypto/crypto_checker/crypto_checker.h"
 #include "compiler/program/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/program/library/crypto/crypto_class_table/crypto_class_table.h"
+#include "compiler/program/library/crypto/crypto_constant_table/crypto_constant_table.h"
 #include "compiler/program/library/crypto/crypto_property_table/crypto_property_table.h"
+#include "compiler/program/library/crypto/crypto_sync_function_table/crypto_sync_function_table.h"
+#include "compiler/program/library/crypto/web_crypto_member_table/web_crypto_member_table.h"
+#include "compiler/program/library/crypto/x509_static_table/x509_static_table.h"
 #include "compiler/semantic/bodies/expr/expr_checker/expr_checker.h"
 #include "compiler/semantic/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
 #include "compiler/semantic/library/crypto/crypto_args/crypto_args.h"
 #include "compiler/semantic/library/crypto/crypto_check_helpers/crypto_check_helpers.h"
 #include "compiler/semantic/library/crypto/crypto_function_checker/crypto_function_checker.h"
-#include "compiler/semantic/library/crypto/crypto_names/crypto_names.h"
 #include "compiler/semantic/library/crypto/web_crypto_checker/web_crypto_checker.h"
 #include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
@@ -26,7 +30,7 @@ CryptoChecker::CryptoChecker(SemanticState &owner, SemanticParts &all)
 }
 
 Expr *CryptoChecker::checkCryptoValue(llvm::StringRef name, Expr *expr) {
-  if (name == "constants") {
+  if (CryptoSyncFunctionTable::find(name) == CryptoSyncFunction::CONSTANTS) {
     auto message = ErrorTextCryptoValue::constants();
     this->state.getDiagnostics().error(expr->loc(), message);
     return expr;
@@ -45,7 +49,7 @@ Expr *CryptoChecker::checkCryptoModuleMember(MemberExpr *member) {
   const NodeName *nodeName =
       object != nullptr ? this->builtinModuleChecker->nodeName(object->name) : nullptr;
   if (nodeName == nullptr || nodeName->module != NodeModule::Crypto ||
-      nodeName->name != "constants") {
+      CryptoSyncFunctionTable::find(nodeName->name) != CryptoSyncFunction::CONSTANTS) {
     return nullptr;
   }
 
@@ -57,46 +61,31 @@ const Type *CryptoChecker::cryptoTypeNamed(llvm::StringRef name) const {
   if (nodeName == nullptr || nodeName->module != NodeModule::Crypto) {
     return nullptr;
   }
-  static const std::pair<llvm::StringLiteral, Crypto> classes[] = {
-      {"Hash", Crypto::Hash},           {"Hmac", Crypto::Hmac},
-      {"Cipheriv", Crypto::Cipheriv},   {"Decipheriv", Crypto::Decipheriv},
-      {"KeyObject", Crypto::KeyObject}, {"Sign", Crypto::Sign},
-      {"Verify", Crypto::Verify},       {"ECDH", Crypto::Ecdh},
-      {"X509Certificate", Crypto::X509}};
-  for (const auto &[className, kind] : classes) {
-    if (className == nodeName->name) {
-      return Type::cryptoType(kind);
-    }
+  auto kind = CryptoClassTable::find(nodeName->name);
+  if (!kind.has_value()) {
+    return nullptr;
   }
 
-  return nullptr;
+  return Type::cryptoType(*kind);
 }
 
 Expr *CryptoChecker::cryptoConstant(MemberExpr *member) {
-  static const std::pair<llvm::StringLiteral, int> constants[] = {
-      {"RSA_PKCS1_PADDING", 1},           {"RSA_NO_PADDING", 3},
-      {"RSA_PKCS1_OAEP_PADDING", 4},      {"RSA_X931_PADDING", 5},
-      {"RSA_PKCS1_PSS_PADDING", 6},       {"RSA_PSS_SALTLEN_DIGEST", -1},
-      {"RSA_PSS_SALTLEN_MAX_SIGN", -2},   {"RSA_PSS_SALTLEN_AUTO", -2},
-      {"POINT_CONVERSION_COMPRESSED", 2}, {"POINT_CONVERSION_UNCOMPRESSED", 4},
-      {"POINT_CONVERSION_HYBRID", 6}};
-  for (const auto &[name, value] : constants) {
-    if (name == member->name) {
-      Expr *literal = this->state.getAst().make<IntLitExpr>(member->loc(),
-                                                            uint64_t(value < 0 ? -value : value));
-      literal->type = Type::intTy();
-      if (value >= 0) {
-        return literal;
-      }
-      auto *negated = this->state.getAst().make<UnaryExpr>(member->loc(), UnaryOp::Neg, literal);
-      return this->exprChecker->checkExpr(negated);
-    }
+  auto value = CryptoConstantTable::find(member->name);
+  if (!value.has_value()) {
+    auto message = ErrorTextCryptoValue::constant(member->name);
+    this->state.getDiagnostics().error(member->loc(), message);
+    member->type = Type::error();
+    return member;
   }
-  auto message = ErrorTextCryptoValue::constant(member->name);
-  this->state.getDiagnostics().error(member->loc(), message);
-  member->type = Type::error();
+  int64_t magnitude = *value < 0 ? -*value : *value;
+  Expr *literal = this->state.getAst().make<IntLitExpr>(member->loc(), uint64_t(magnitude));
+  literal->type = Type::intTy();
+  if (*value >= 0) {
+    return literal;
+  }
+  auto *negated = this->state.getAst().make<UnaryExpr>(member->loc(), UnaryOp::Neg, literal);
 
-  return member;
+  return this->exprChecker->checkExpr(negated);
 }
 
 Expr *CryptoChecker::checkCryptoMember(MemberExpr *member) {
@@ -185,15 +174,15 @@ Expr *CryptoChecker::reportCryptoMember(MemberExpr *member, const std::string &m
 Expr *CryptoChecker::reportOnlyCalled(MemberExpr *member) {
   const Type *type = member->object->type;
   Type::Crypto kind = type->crypto();
-  auto message =
-      ErrorTextCryptoMember::onlyCalled(member->name, type->name(), CryptoNames::methodsOf(kind));
+  auto methods = ErrorTextCryptoMethods::of(kind);
+  auto message = ErrorTextCryptoMember::onlyCalled(member->name, type->name(), methods);
 
   return this->reportCryptoMember(member, message);
 }
 
 Expr *CryptoChecker::checkCryptoNew(NewExpr *expr, llvm::StringRef className) {
   expr->type = Type::error();
-  if (className != "X509Certificate") {
+  if (CryptoClassTable::find(className) != Crypto::X509) {
     auto message = ErrorTextCryptoMake::notNode(className);
     this->state.getDiagnostics().error(expr->loc(), message);
     for (Expr *&arg : expr->args) {
@@ -212,7 +201,7 @@ Expr *CryptoChecker::checkCryptoNew(NewExpr *expr, llvm::StringRef className) {
 
 Expr *CryptoChecker::checkX509Parse(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  if (member->name != "parse") {
+  if (X509StaticTable::find(member->name) != X509Static::PARSE) {
     auto message = ErrorTextX509::noStatic(member->name);
     this->state.getDiagnostics().error(member->loc(), message);
     for (Expr *&arg : call->args) {
@@ -244,20 +233,24 @@ bool CryptoChecker::isX509Class(Expr *object) const {
       name != nullptr ? this->builtinModuleChecker->nodeName(name->name) : nullptr;
 
   return nodeName != nullptr && nodeName->module == NodeModule::Crypto &&
-         nodeName->name == "X509Certificate";
+         CryptoClassTable::find(nodeName->name) == Crypto::X509;
 }
 
 Expr *CryptoChecker::checkWebCryptoCall(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
-  if (name == "randomUUID" || name == "getRandomValues") {
+  auto webMember = WebCryptoMemberTable::find(name);
+  bool isFunction =
+      webMember == WebCryptoMember::RANDOM_UUID || webMember == WebCryptoMember::GET_RANDOM_VALUES;
+  if (isFunction) {
     return this->cryptoFunctionChecker->checkCryptoCall(call, name, member->loc());
   }
   call->type = Type::error();
   for (Expr *&arg : call->args) {
     arg = this->exprChecker->checkExpr(arg);
   }
-  std::string message = name == "subtle" ? ErrorTextGlobalCrypto::subtleCall()
-                                         : ErrorTextGlobalCrypto::noMember(name);
+  std::string message = webMember == WebCryptoMember::SUBTLE
+                            ? ErrorTextGlobalCrypto::subtleCall()
+                            : ErrorTextGlobalCrypto::noMember(name);
   this->state.getDiagnostics().error(member->loc(), message);
 
   return call;
@@ -265,12 +258,14 @@ Expr *CryptoChecker::checkWebCryptoCall(CallExpr *call, MemberExpr *member) {
 
 Expr *CryptoChecker::checkWebCryptoMember(MemberExpr *member) {
   member->type = Type::error();
-  if (member->name == "subtle") {
+  auto webMember = WebCryptoMemberTable::find(member->name);
+  if (webMember == WebCryptoMember::SUBTLE) {
     return this->webCryptoChecker->subtleObject(member);
   }
-  std::string message = member->name == "randomUUID" || member->name == "getRandomValues"
-                            ? ErrorTextGlobalCrypto::onlyCalled(member->name)
-                            : ErrorTextGlobalCrypto::noMember(member->name);
+  bool isFunction =
+      webMember == WebCryptoMember::RANDOM_UUID || webMember == WebCryptoMember::GET_RANDOM_VALUES;
+  std::string message = isFunction ? ErrorTextGlobalCrypto::onlyCalled(member->name)
+                                   : ErrorTextGlobalCrypto::noMember(member->name);
   this->state.getDiagnostics().error(member->loc(), message);
 
   return member;

@@ -4,6 +4,7 @@
 #include "compiler/program/builtin_declarations/builtin_declarations.h"
 #include "compiler/program/library/builtin_modules/known_modules/known_modules.h"
 #include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
+#include "compiler/program/library/builtin_names/library_function_table/library_function_table.h"
 #include "compiler/program/library/builtin_names/library_type_table/library_type_table.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/SMLoc.h"
@@ -26,6 +27,7 @@ public:
   llvm::ArrayRef<Stmt *> getBuiltinItems(BuiltinText text) const;
   void rememberLibraryFunction(FunctionDecl *functionDecl);
   FunctionDecl *findLibraryFunction(llvm::StringRef name) const;
+  FunctionDecl *findLibraryFunction(LibraryFunction libraryFunction) const;
   void rememberLibraryType(TypeAliasDecl *alias);
   TypeAliasDecl *findLibraryType(llvm::StringRef name) const;
   TypeAliasDecl *findLibraryType(LibraryType libraryType) const;

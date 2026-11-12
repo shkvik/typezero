@@ -1,5 +1,6 @@
 #include "compiler/semantic/bodies/expr/name_checker/name_checker.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
 #include "compiler/semantic/bodies/classes/class_checker/class_checker.h"
 #include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker_errors.h"
@@ -35,15 +36,6 @@ const GlobalName kUriNames[] = {
     GlobalName::ENCODE_URI,
     GlobalName::DECODE_URI_COMPONENT,
     GlobalName::DECODE_URI,
-};
-
-const std::pair<GlobalName, llvm::StringLiteral> kObjectExamples[] = {
-    {GlobalName::PROCESS, "process.argv"},
-    {GlobalName::CONSOLE, "console.log(x)"},
-    {GlobalName::DATE, "Date.now()"},
-    {GlobalName::PERFORMANCE, "performance.now()"},
-    {GlobalName::REG_EXP, "new RegExp(pattern)"},
-    {GlobalName::JSON, "JSON.parse(text)"},
 };
 
 }
@@ -161,8 +153,9 @@ NameChecker::ResultResolvedNameUse NameChecker::checkUnknownName(NameExpr *name,
       return this->unknownError(NameCheckerUnknownNameErrorCode::OWN_INITIALIZER,
                                 ErrorTextNameUse::ownInit(text));
     case UnknownNameKind::OBJECT_VALUE:
-      return this->unknownError(NameCheckerUnknownNameErrorCode::OBJECT_VALUE,
-                                ErrorTextNameUse::objectUse(text, *this->objectExample(global)));
+      return this->unknownError(
+          NameCheckerUnknownNameErrorCode::OBJECT_VALUE,
+          ErrorTextNameUse::objectUse(text, *ErrorTextNameUse::objectExample(global)));
     case UnknownNameKind::UNKNOWN_NAME:
       return this->unknownError(NameCheckerUnknownNameErrorCode::UNKNOWN_NAME,
                                 ErrorTextNameUse::notFound(text));
@@ -186,16 +179,17 @@ NameChecker::UnknownNameKind NameChecker::unknownNameKind(const NameExpr *name,
   if (result == GlobalName::OK_TYPE || result == GlobalName::ERR_TYPE) {
     return UnknownNameKind::TYPE_ONLY;
   }
-  if (text == "this") {
+  auto keyword = KeywordTable::find(text);
+  if (keyword == Keyword::THIS) {
     return UnknownNameKind::THIS_OUTSIDE;
   }
   if (this->isConversionName(global) || this->isUriName(global)) {
     return UnknownNameKind::BUILTIN_VALUE;
   }
-  if (text == "super") {
+  if (keyword == Keyword::SUPER) {
     return UnknownNameKind::SUPER_VALUE;
   }
-  if (text == "arguments") {
+  if (keyword == Keyword::ARGUMENTS) {
     return UnknownNameKind::ARGUMENTS;
   }
   if (global == GlobalName::BIG_INT) {
@@ -204,7 +198,7 @@ NameChecker::UnknownNameKind NameChecker::unknownNameKind(const NameExpr *name,
   if (global == GlobalName::DECIMAL) {
     return UnknownNameKind::DECIMAL_VALUE;
   }
-  if (text == "null") {
+  if (keyword == Keyword::NULL_KEYWORD) {
     return UnknownNameKind::NULL_VALUE;
   }
   if (!ErrorTextUnsupported::why(text).empty()) {
@@ -255,7 +249,7 @@ NameChecker::UnknownNameKind NameChecker::laterNameKind(const NameExpr *name,
   if (this->state.getExpressionMarks().isInitializing(text)) {
     return UnknownNameKind::OWN_INITIALIZER;
   }
-  if (this->objectExample(global).has_value()) {
+  if (ErrorTextNameUse::objectExample(global).has_value()) {
     return UnknownNameKind::OBJECT_VALUE;
   }
 
@@ -278,16 +272,6 @@ bool NameChecker::isConversionName(std::optional<GlobalName> global) const {
 
 bool NameChecker::isUriName(std::optional<GlobalName> global) const {
   return global.has_value() && llvm::is_contained(kUriNames, *global);
-}
-
-std::optional<llvm::StringRef> NameChecker::objectExample(std::optional<GlobalName> global) const {
-  for (const auto &[object, example] : kObjectExamples) {
-    if (object == global) {
-      return example;
-    }
-  }
-
-  return std::nullopt;
 }
 
 NameChecker::ResultResolvedNameUse NameChecker::unknownError(NameCheckerUnknownNameErrorCode code,
@@ -340,7 +324,7 @@ std::string NameChecker::afterCallText(const NameExpr *name) const {
 }
 
 Expr *NameChecker::checkName(NameExpr *name) {
-  if (name->name == "this") {
+  if (KeywordTable::find(name->name) == Keyword::THIS) {
     return this->checkThisName(name);
   }
   if (name->cls() != nullptr && name->type != nullptr) {

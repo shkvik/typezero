@@ -31,19 +31,31 @@ std::string ErrorTextIntlField::unknown(llvm::StringRef name, llvm::StringRef wh
     names += (i == 0                             ? ""
               : i + 1 == service->options.size() ? " and "
                                                  : ", ") +
-             service->options[i].name.str();
+             IntlOptionKeyTable::getName(service->options[i].key).str();
   }
 
   return "'" + name.str() + "' is not an option of " + what.str() + "; the options are " + names;
 }
 
-std::string ErrorTextIntlField::kind(llvm::StringRef name, char kind, llvm::StringRef type) {
-  return "the option '" + name.str() + "' is " +
-         (kind == 's'   ? "a string"
-          : kind == 'n' ? "a number"
-          : kind == 'b' ? "a boolean"
-                        : "a string or a boolean") +
-         ", found '" + type.str() + "'";
+std::string ErrorTextIntlField::kind(llvm::StringRef name, IntlOptionKind kind,
+                                     llvm::StringRef type) {
+  return "the option '" + name.str() + "' is " + ErrorTextIntlField::kindName(kind) + ", found '" +
+         type.str() + "'";
+}
+
+std::string ErrorTextIntlField::kindName(IntlOptionKind kind) {
+  switch (kind) {
+    case IntlOptionKind::TEXT:
+      return "a string";
+    case IntlOptionKind::NUMBER:
+      return "a number";
+    case IntlOptionKind::FLAG:
+      return "a boolean";
+    case IntlOptionKind::GROUPING:
+      break;
+  }
+
+  return "a string or a boolean";
 }
 
 std::string ErrorTextIntlField::badValue(llvm::StringRef text, llvm::StringRef name,

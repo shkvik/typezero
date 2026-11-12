@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/library/crypto/subtle_operation_table/subtle_operation_table.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
 #include <string>
@@ -23,10 +24,10 @@ public:
 class ErrorTextSubtleUsage {
 public:
   static std::string unknown(llvm::StringRef usage);
-  static std::string notOf(llvm::StringRef usage, llvm::StringRef name, int isPublic,
-                           llvm::ArrayRef<llvm::StringLiteral> allowed);
-  static std::string empty(llvm::ArrayRef<llvm::StringLiteral> own);
-  static std::string pairEmpty(llvm::ArrayRef<llvm::StringLiteral> own);
+  static std::string notOf(llvm::StringRef usage, llvm::StringRef name, int isPublic, bool isSecret,
+                           llvm::ArrayRef<llvm::StringRef> allowed);
+  static std::string empty(llvm::ArrayRef<llvm::StringRef> own);
+  static std::string pairEmpty(llvm::ArrayRef<llvm::StringRef> own);
 };
 
 class ErrorTextSubtleKeyData {
@@ -38,9 +39,9 @@ public:
 class ErrorTextSubtleImport {
 public:
   static std::string format(llvm::StringRef name, llvm::StringRef format,
-                            llvm::ArrayRef<llvm::StringLiteral> formats);
+                            llvm::ArrayRef<llvm::StringRef> formats);
   static std::string unwrap(llvm::StringRef name, llvm::StringRef format,
-                            llvm::ArrayRef<llvm::StringLiteral> formats);
+                            llvm::ArrayRef<llvm::StringRef> formats);
   static std::string derived(llvm::StringRef name);
 };
 
@@ -112,6 +113,8 @@ struct SubtleCallCheckerGcmTagLengthError {
 
 class ErrorTextAlgorithm {
 public:
+  static std::string verb(SubtleOperation operation);
+  static std::string choices(llvm::ArrayRef<llvm::StringRef> names);
   static std::string experiment(llvm::StringRef written, llvm::StringRef verb,
                                 llvm::StringRef list);
   static std::string otherOp(llvm::StringRef written, llvm::StringRef op, llvm::StringRef verb,

@@ -1,4 +1,5 @@
 #include "compiler/semantic/library/reflect/reflect_checker/reflect_checker.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/program/library/reflect/reflect_function_table/reflect_function_table.h"
 #include "compiler/semantic/bodies/classes/class_bases/class_bases.h"
 #include "compiler/semantic/bodies/classes/class_links/class_links.h"
@@ -182,7 +183,8 @@ Expr *ReflectChecker::okOf(Expr *value) {
     return value;
   }
   auto *call = this->state.getAst().make<CallExpr>(
-      value->loc(), this->state.getAst().make<NameExpr>(value->loc(), "ok"),
+      value->loc(),
+      this->state.getAst().make<NameExpr>(value->loc(), GlobalNameTable::getName(GlobalName::OK)),
       std::vector<Expr *>{value});
   call->target = BuiltinCall{.builtin = Builtin::ResultOk};
   call->type = Type::result(value->type, this->reflectError());

@@ -1,5 +1,6 @@
 #include "compiler/semantic/bodies/functions/closure_checker/closure_checker.h"
 #include "compiler/program/ast_walker/ast_walker.h"
+#include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
 #include "compiler/semantic/bodies/classes/class_checker/class_checker.h"
 #include "compiler/semantic/bodies/functions/function_checker/function_checker.h"
 #include "compiler/semantic/bodies/functions/nested_functions/nested_functions.h"
@@ -22,12 +23,6 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
-
-namespace {
-
-constexpr const char *kThisName = "this";
-
-}
 
 ClosureChecker::ClosureChecker(SemanticState &owner, SemanticParts &all)
     : state(owner) {
@@ -224,15 +219,16 @@ bool ClosureChecker::reportGenericClosure(FunctionExpr *functionExpr) {
 
 bool ClosureChecker::addContextThis(FunctionExpr *functionExpr, const Signature *signature) {
   FunctionDecl *functionDecl = functionExpr->fn;
-  bool isThisWritten = !functionDecl->params.empty() && functionDecl->params[0].name == kThisName &&
+  bool isThisWritten = !functionDecl->params.empty() &&
+                       functionDecl->params[0].name == KeywordTable::getName(Keyword::THIS) &&
                        !functionDecl->isArrow();
   bool isWanted =
       signature != nullptr && signature->hasThis && !signature->params.empty() && !isThisWritten;
   if (!isWanted) {
     return false;
   }
-  llvm::StringRef name =
-      functionDecl->isArrow() ? this->state.getAst().hiddenName() : llvm::StringRef(kThisName);
+  llvm::StringRef name = functionDecl->isArrow() ? this->state.getAst().hiddenName()
+                                                 : KeywordTable::getName(Keyword::THIS);
   auto self = Param{
       .name = name,
       .loc = functionExpr->loc(),
@@ -372,7 +368,8 @@ void ClosureChecker::walkClosureThis(const FunctionDecl *functionDecl, const Par
     params.function->hasThis = true;
     return;
   }
-  if (param.name != kThisName || !param.type.has_value() || param.rest()) {
+  if (param.name != KeywordTable::getName(Keyword::THIS) || !param.type.has_value() ||
+      param.rest()) {
     return;
   }
   auto valid = this->checkThisParam(functionDecl, param);

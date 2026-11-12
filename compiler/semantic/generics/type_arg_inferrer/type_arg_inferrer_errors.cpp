@@ -3,6 +3,14 @@
 
 namespace tz {
 
+std::string ErrorTextTypeArgSample::single() {
+  return "int";
+}
+
+std::string ErrorTextTypeArgSample::list() {
+  return "[int]";
+}
+
 std::string ErrorTextParamInferred::cannot(llvm::StringRef param, llvm::StringRef name, bool call,
                                            llvm::StringRef ints) {
   return (llvm::Twine("cannot infer type parameter '") + param + "' of '" + name + "': nothing " +

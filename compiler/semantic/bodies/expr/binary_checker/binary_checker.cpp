@@ -1,4 +1,5 @@
 #include "compiler/semantic/bodies/expr/binary_checker/binary_checker.h"
+#include "compiler/program/library/builtin_names/type_of_name_table/type_of_name_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/program/types/type_spelling/type_spelling.h"
 #include "compiler/semantic/bodies/classes/instance_of_checker/instance_of_checker.h"
@@ -31,9 +32,6 @@ namespace {
 
 constexpr const char *kValuePlaceholder = "x";
 constexpr const char *kCountPlaceholder = "n";
-constexpr const char *kBigIntTypeOf = "bigint";
-constexpr const char *kNumberTypeOf = "number";
-constexpr const char *kSymbolTypeOf = "symbol";
 constexpr size_t kMostShownNumberNames = 3;
 
 }
@@ -854,7 +852,8 @@ const char *BinaryChecker::nameSeparator(size_t index, size_t count) const {
 BinaryChecker::ResultTypeOfNameKnown BinaryChecker::checkTypeOfName(const Expr *operand,
                                                                     const StringLitExpr *text) {
   auto name = ToUtf8::toUtf8(text->value);
-  if (name == kBigIntTypeOf) {
+  auto typeOf = TypeOfNameTable::find(name);
+  if (typeOf == TypeOfName::BIGINT) {
     auto what = ErrorTextTypeOfName::bigint();
     auto bigint = ErrorTextBigInt::none(what);
     this->state.getDiagnostics().error(text->loc(), bigint);
@@ -878,7 +877,8 @@ BinaryChecker::checkKnownTypeOfName(const Expr *operand, const StringLitExpr *te
   if (TypeSpelling::isTypeOfName(name)) {
     return ok(text);
   }
-  if (name == kNumberTypeOf) {
+  auto typeOf = TypeOfNameTable::find(name);
+  if (typeOf == TypeOfName::NUMBER) {
     auto message = this->noNumberText(operand);
 
     return err(BinaryCheckerCheckTypeOfNameError{
@@ -888,7 +888,7 @@ BinaryChecker::checkKnownTypeOfName(const Expr *operand, const StringLitExpr *te
   }
   std::vector<llvm::StringRef> all(std::begin(kTypeOfNames), std::end(kTypeOfNames));
   auto list = this->quotedNames(all);
-  if (name == kSymbolTypeOf) {
+  if (typeOf == TypeOfName::SYMBOL) {
     auto message = ErrorTextTypeOfName::noSymbol(list);
 
     return err(BinaryCheckerCheckTypeOfNameError{

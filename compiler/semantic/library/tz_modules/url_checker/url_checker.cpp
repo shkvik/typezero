@@ -1,4 +1,6 @@
 #include "compiler/semantic/library/tz_modules/url_checker/url_checker.h"
+#include "compiler/program/library/url/url_scheme_table/url_scheme_table.h"
+#include "compiler/program/library/url/web_member_table/web_member_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/library/tz_modules/library_calls/library_calls.h"
@@ -14,10 +16,7 @@ namespace {
 
 constexpr llvm::StringLiteral kUrlSpaces = " \t\n\r\f\v";
 constexpr llvm::StringLiteral kHostForbidden = "#%/:<>?@[\\]^|";
-constexpr llvm::StringLiteral kUrlField = "url";
-constexpr llvm::StringLiteral kHrefMethod = "href";
 constexpr unsigned long long kHighestPort = 65535;
-const llvm::StringLiteral kSpecialSchemes[] = {"http", "https", "ws", "wss", "ftp"};
 
 }
 
@@ -111,7 +110,7 @@ bool UrlChecker::isValidUrlText(llvm::StringRef text, RelativeUrls relative) con
     return relative == RelativeUrls::ALLOWED;
   }
   std::string scheme = trimmed.take_front(colon).lower();
-  if (!llvm::is_contained(kSpecialSchemes, scheme)) {
+  if (!UrlSchemeTable::isSpecial(scheme)) {
     return true;
   }
   llvm::StringRef rest = trimmed.drop_front(colon + 1).ltrim("/\\");
@@ -168,13 +167,13 @@ bool UrlChecker::isKnownAbsolute(const Expr *expr) const {
   }
   const auto *member = dyn_cast<MemberExpr>(bare);
   if (member != nullptr) {
-    return member->name == kUrlField &&
+    return WebMemberTable::find(member->name) == WebMember::URL_FIELD &&
            this->isLibraryClass(member->object->type, LibraryClass::REQUEST);
   }
   const auto *call = dyn_cast<CallExpr>(bare);
   if (call != nullptr && call->args.empty()) {
     const auto *callee = dyn_cast<MemberExpr>(call->callee);
-    return callee != nullptr && callee->name == kHrefMethod &&
+    return callee != nullptr && WebMemberTable::find(callee->name) == WebMember::HREF &&
            this->isLibraryClass(callee->object->type, LibraryClass::URL);
   }
 

@@ -28,6 +28,8 @@ enum class LibraryClass {
   DUPLEX,
   TRANSFORM,
   PASS_THROUGH,
+  READABLE_STREAM,
+  FORM_DATA,
 };
 
 struct LibraryClassInfo {

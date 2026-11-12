@@ -1,5 +1,6 @@
 #include "compiler/semantic/library/fs/fs_checker/fs_checker.h"
 #include "compiler/program/library/fs/fs_constant_table/fs_constant_table.h"
+#include "compiler/program/library/fs/fs_open_flag_table/fs_open_flag_table.h"
 #include "compiler/program/to_utf16/to_utf16.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
@@ -27,25 +28,11 @@ namespace tz {
 
 namespace {
 
-constexpr llvm::StringLiteral kSyncSuffix = "Sync";
-constexpr llvm::StringLiteral kEncodingOption = "encoding";
-constexpr llvm::StringLiteral kFlagOption = "flag";
-constexpr llvm::StringLiteral kModeOption = "mode";
-constexpr llvm::StringLiteral kRecursiveOption = "recursive";
-constexpr llvm::StringLiteral kForceOption = "force";
-constexpr llvm::StringLiteral kWithFileTypesOption = "withFileTypes";
-constexpr llvm::StringLiteral kThrowIfNoEntryOption = "throwIfNoEntry";
-constexpr llvm::StringLiteral kBigIntOption = "bigint";
 constexpr uint64_t kFileMode = 0666;
 constexpr uint64_t kDirectoryMode = 0777;
 
-const llvm::StringRef kStatOptions[] = {"throwIfNoEntry", "bigint"};
-const llvm::StringRef kPromiseStatOptions[] = {"bigint"};
-
-constexpr llvm::StringLiteral kOpenFlags[] = {"r",  "rs", "sr",  "r+",  "rs+", "sr+", "w",  "wx",
-                                              "xw", "w+", "wx+", "xw+", "a",   "ax",  "xa", "as",
-                                              "sa", "a+", "ax+", "xa+", "as+", "sa+"};
-
+const NodeOption kStatOptions[] = {NodeOption::THROW_IF_NO_ENTRY, NodeOption::BIGINT};
+const NodeOption kPromiseStatOptions[] = {NodeOption::BIGINT};
 }
 
 FsChecker::FsChecker(SemanticState &owner, SemanticParts &all)
@@ -75,34 +62,44 @@ FsChecker::ResultOctalMode FsChecker::checkOctalMode(llvm::StringRef text) const
 }
 
 bool FsChecker::readNodeOptions(CallExpr *call, size_t index, llvm::StringRef functionName,
-                                llvm::ArrayRef<llvm::StringRef> allowed,
-                                llvm::StringMap<Expr *> &options) {
+                                llvm::ArrayRef<NodeOption> allowed, NodeOptions &options) {
   if (index >= call->args.size() || isa<UndefinedExpr>(call->args[index])) {
     return true;
   }
+  auto names = this->optionNames(allowed);
   Expr *arg = call->args[index];
   auto *literal = dyn_cast<ObjectLitExpr>(arg);
   if (literal == nullptr) {
-    auto message = ErrorTextFsOptions::literal(functionName, allowed[0]);
+    auto message = ErrorTextFsOptions::literal(functionName, names[0]);
     this->state.getDiagnostics().error(arg->loc(), message);
     call->args[index] = this->exprChecker->checkExpr(arg);
     return false;
   }
   for (const ObjectLitExpr::Property &property : literal->props) {
     if (property.spread() || property.key() || property.method() || property.name.empty()) {
-      auto message = ErrorTextFsOptions::byName(functionName, allowed[0]);
+      auto message = ErrorTextFsOptions::byName(functionName, names[0]);
       this->state.getDiagnostics().error(property.loc, message);
       return false;
     }
-    if (!llvm::is_contained(allowed, property.name)) {
-      auto message = ErrorTextFsOptions::unknown(functionName, property.name, allowed);
+    auto option = NodeOptionTable::find(property.name);
+    if (!option.has_value() || !llvm::is_contained(allowed, *option)) {
+      auto message = ErrorTextFsOptions::unknown(functionName, property.name, names);
       this->state.getDiagnostics().error(property.loc, message);
       return false;
     }
-    options[property.name] = property.value;
+    options[*option] = property.value;
   }
 
   return true;
+}
+
+std::vector<llvm::StringRef> FsChecker::optionNames(llvm::ArrayRef<NodeOption> options) const {
+  auto names = std::vector<llvm::StringRef>();
+  for (NodeOption option : options) {
+    names.push_back(NodeOptionTable::getName(option));
+  }
+
+  return names;
 }
 
 const Type *FsChecker::nativeError() const {
@@ -145,7 +142,8 @@ Expr *FsChecker::checkEncoding(Expr *encoding, llvm::StringRef functionName,
 Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef functionName, llvm::SMLoc loc) {
   call->type = Type::error();
   bool isPromise = this->state.getFileSystemStore().isInsidePromiseCall();
-  std::string syncName = isPromise ? (functionName + kSyncSuffix).str() : functionName.str();
+  std::string syncName =
+      isPromise ? FsFunctionTable::getSyncName(functionName) : functionName.str();
   auto function = FsFunctionTable::find(syncName);
   bool isValue = function == FsFunction::CONSTANTS || function == FsFunction::STATS ||
                  function == FsFunction::DIRENT;
@@ -214,7 +212,7 @@ Expr *FsChecker::reportNotFunction(CallExpr *call, llvm::StringRef functionName,
 
 Expr *FsChecker::reportUnknownFsFunction(CallExpr *call, llvm::StringRef functionName,
                                          llvm::SMLoc loc) {
-  auto moduleName = NodeCheckHelpers::moduleLabel(NodeModule::Fs);
+  auto moduleName = KnownModules::getPath(NodeModule::Fs);
   auto found = FsExports::checkFsExport(functionName, moduleName);
   std::string message = found.isErr() ? found.error().message : std::string();
   this->state.getDiagnostics().error(loc, message);
@@ -263,7 +261,7 @@ Expr *FsChecker::checkPath(Expr *arg, PathForm form) {
   return this->typeRelations->coerce(checked, string);
 }
 
-FsChecker::FlagRead FsChecker::readFlag(FsCall &fs, llvm::StringRef option) {
+FsChecker::FlagRead FsChecker::readFlag(FsCall &fs, NodeOption option) {
   Expr *value = fs.options.lookup(option);
   if (value == nullptr) {
     return FlagRead{.isFailed = false, .value = std::nullopt};
@@ -273,7 +271,8 @@ FsChecker::FlagRead FsChecker::readFlag(FsCall &fs, llvm::StringRef option) {
     literal->type = Type::boolTy();
     return FlagRead{.isFailed = false, .value = literal->value};
   }
-  auto message = ErrorTextFsOptions::flag(fs.functionName, option);
+  auto optionName = NodeOptionTable::getName(option);
+  auto message = ErrorTextFsOptions::flag(fs.functionName, optionName);
   this->state.getDiagnostics().error(value->loc(), message);
   this->exprChecker->checkExpr(value);
 
@@ -287,7 +286,7 @@ Expr *FsChecker::openFlag(FsCall &fs, Expr *flag, llvm::StringRef fallback) {
   auto *literal = dyn_cast<StringLitExpr>(flag);
   bool isLiteral = literal != nullptr;
   std::string written = isLiteral ? ToUtf8::toUtf8(literal->value) : std::string();
-  if (isLiteral && llvm::is_contained(kOpenFlags, llvm::StringRef(written))) {
+  if (isLiteral && FsOpenFlagTable::isKnown(written)) {
     literal->type = Type::string();
     return literal;
   }
@@ -299,14 +298,14 @@ Expr *FsChecker::openFlag(FsCall &fs, Expr *flag, llvm::StringRef fallback) {
 }
 
 bool FsChecker::readEncodingOrOptions(FsCall &fs, size_t index,
-                                      llvm::ArrayRef<llvm::StringRef> allowed) {
+                                      llvm::ArrayRef<NodeOption> allowed) {
   CallExpr *call = fs.call;
   if (index >= call->args.size()) {
     return true;
   }
   Expr *arg = call->args[index];
   if (isa<StringLitExpr>(arg)) {
-    fs.options[kEncodingOption] = arg;
+    fs.options[NodeOption::ENCODING] = arg;
     return true;
   }
   if (isa<ObjectLitExpr>(arg) || isa<UndefinedExpr>(arg)) {
@@ -317,7 +316,8 @@ bool FsChecker::readEncodingOrOptions(FsCall &fs, size_t index,
     auto message = ErrorTextFsEncoding::dependsOn(fs.functionName);
     this->state.getDiagnostics().error(checked->loc(), message);
   } else if (!checked->type->isError()) {
-    auto message = ErrorTextFsOptions::literal(fs.functionName, allowed[0]);
+    auto first = NodeOptionTable::getName(allowed[0]);
+    auto message = ErrorTextFsOptions::literal(fs.functionName, first);
     this->state.getDiagnostics().error(checked->loc(), message);
   }
 
@@ -325,7 +325,7 @@ bool FsChecker::readEncodingOrOptions(FsCall &fs, size_t index,
 }
 
 Expr *FsChecker::givenEncoding(FsCall &fs) const {
-  Expr *encoding = fs.options.lookup(kEncodingOption);
+  Expr *encoding = fs.options.lookup(NodeOption::ENCODING);
   bool isGiven = encoding != nullptr && !isa<UndefinedExpr>(encoding);
 
   return isGiven ? encoding : nullptr;
@@ -339,7 +339,7 @@ Expr *FsChecker::checkReadFile(FsCall &fs) {
     return call;
   }
   auto *file = this->checkPath(call->args[0], PathForm::PATH_OR_DESCRIPTOR);
-  if (!this->readEncodingOrOptions(fs, 1, {"encoding", "flag"})) {
+  if (!this->readEncodingOrOptions(fs, 1, {NodeOption::ENCODING, NodeOption::FLAG})) {
     return call;
   }
   Expr *encoding = this->givenEncoding(fs);
@@ -349,8 +349,8 @@ Expr *FsChecker::checkReadFile(FsCall &fs) {
   if (encoding != nullptr && number == nullptr) {
     return call;
   }
-  Expr *flagOption = fs.options.lookup(kFlagOption);
-  auto *flag = this->openFlag(fs, flagOption, "r");
+  Expr *flagOption = fs.options.lookup(NodeOption::FLAG);
+  auto *flag = this->openFlag(fs, flagOption, FsOpenFlagTable::getDefault(fs.function));
   if (flag == nullptr) {
     return call;
   }
@@ -381,7 +381,8 @@ Expr *FsChecker::checkWriteFile(FsCall &fs) {
     this->argumentChecker->walkArgsLoosely(call);
     return call;
   }
-  if (!this->readEncodingOrOptions(fs, 2, {"encoding", "flag", "mode"})) {
+  if (!this->readEncodingOrOptions(fs, 2,
+                                   {NodeOption::ENCODING, NodeOption::FLAG, NodeOption::MODE})) {
     return call;
   }
   Expr *encoding = this->givenEncoding(fs);
@@ -396,13 +397,12 @@ Expr *FsChecker::checkWriteFile(FsCall &fs) {
   if (encoding != nullptr && number == nullptr) {
     return call;
   }
-  llvm::StringRef fallback = fs.function == FsFunction::WRITE_FILE_SYNC ? "w" : "a";
-  Expr *flagOption = fs.options.lookup(kFlagOption);
-  auto *flag = this->openFlag(fs, flagOption, fallback);
+  Expr *flagOption = fs.options.lookup(NodeOption::FLAG);
+  auto *flag = this->openFlag(fs, flagOption, FsOpenFlagTable::getDefault(fs.function));
   if (flag == nullptr) {
     return call;
   }
-  Expr *mode = fs.options.lookup(kModeOption);
+  Expr *mode = fs.options.lookup(NodeOption::MODE);
   auto *checkedMode = mode != nullptr ? this->argumentChecker->checkArg(mode, Type::intTy())
                                       : this->makeIntLiteral(loc, kFileMode);
   call->args = {file, data, flag, checkedMode};
@@ -436,7 +436,7 @@ Expr *FsChecker::checkPathCall(FsCall &fs) {
     return call;
   }
   auto *file = this->checkPath(call->args[0], PathForm::PATH_ONLY);
-  if (max == 2 && !this->readEncodingOrOptions(fs, 1, {"encoding"})) {
+  if (max == 2 && !this->readEncodingOrOptions(fs, 1, {NodeOption::ENCODING})) {
     return call;
   }
   Expr *encoding = this->givenEncoding(fs);
@@ -549,22 +549,22 @@ Expr *FsChecker::checkStat(FsCall &fs) {
   }
   auto *file = this->checkPath(call->args[0], PathForm::PATH_ONLY);
   bool isPromise = this->state.getFileSystemStore().isInsidePromiseCall();
-  llvm::ArrayRef<llvm::StringRef> allowed =
+  llvm::ArrayRef<NodeOption> allowed =
       isPromise ? llvm::ArrayRef(kPromiseStatOptions) : llvm::ArrayRef(kStatOptions);
   if (!this->readNodeOptions(call, 1, fs.functionName, allowed, fs.options)) {
     return call;
   }
-  auto throwIfMissing = this->readFlag(fs, kThrowIfNoEntryOption);
+  auto throwIfMissing = this->readFlag(fs, NodeOption::THROW_IF_NO_ENTRY);
   if (throwIfMissing.isFailed) {
     return call;
   }
-  auto bigint = this->readFlag(fs, kBigIntOption);
+  auto bigint = this->readFlag(fs, NodeOption::BIGINT);
   if (bigint.isFailed) {
     return call;
   }
   if (bigint.value.value_or(false)) {
     auto message = ErrorTextFsCall::bigint();
-    this->state.getDiagnostics().error(fs.options.lookup(kBigIntOption)->loc(), message);
+    this->state.getDiagnostics().error(fs.options.lookup(NodeOption::BIGINT)->loc(), message);
     return call;
   }
   bool isThrowIfMissing = throwIfMissing.value.value_or(true);
@@ -586,7 +586,9 @@ Expr *FsChecker::checkReaddir(FsCall &fs) {
     return call;
   }
   auto *dir = this->checkPath(call->args[0], PathForm::PATH_ONLY);
-  if (!this->readEncodingOrOptions(fs, 1, {"encoding", "withFileTypes", "recursive"})) {
+  bool isRead = this->readEncodingOrOptions(
+      fs, 1, {NodeOption::ENCODING, NodeOption::WITH_FILE_TYPES, NodeOption::RECURSIVE});
+  if (!isRead) {
     return call;
   }
   Expr *encoding = this->givenEncoding(fs);
@@ -596,11 +598,11 @@ Expr *FsChecker::checkReaddir(FsCall &fs) {
   if (isEncodingFailed) {
     return call;
   }
-  auto withTypes = this->readFlag(fs, kWithFileTypesOption);
+  auto withTypes = this->readFlag(fs, NodeOption::WITH_FILE_TYPES);
   if (withTypes.isFailed) {
     return call;
   }
-  auto *recursive = this->boolOption(fs, kRecursiveOption);
+  auto *recursive = this->boolOption(fs, NodeOption::RECURSIVE);
   call->args = {dir, recursive};
   call->target = BuiltinCall{.builtin = Builtin::FsReaddir};
   const Type *dirent = this->state.getFileSystemStore().getDirentClass()->type;
@@ -610,7 +612,7 @@ Expr *FsChecker::checkReaddir(FsCall &fs) {
   return call;
 }
 
-Expr *FsChecker::boolOption(FsCall &fs, llvm::StringRef option) {
+Expr *FsChecker::boolOption(FsCall &fs, NodeOption option) {
   Expr *value = fs.options.lookup(option);
   if (value != nullptr) {
     return this->argumentChecker->checkArg(value, Type::boolTy());
@@ -629,14 +631,16 @@ Expr *FsChecker::checkMkdir(FsCall &fs) {
   auto *dir = this->checkPath(call->args[0], PathForm::PATH_ONLY);
   bool isModeGiven = call->args.size() > 1 && !isa<ObjectLitExpr>(call->args[1]) &&
                      !isa<UndefinedExpr>(call->args[1]);
-  if (!isModeGiven &&
-      !this->readNodeOptions(call, 1, fs.functionName, {"recursive", "mode"}, fs.options)) {
+  bool isRead =
+      isModeGiven || this->readNodeOptions(call, 1, fs.functionName,
+                                           {NodeOption::RECURSIVE, NodeOption::MODE}, fs.options);
+  if (!isRead) {
     return call;
   }
-  Expr *mode = isModeGiven ? call->args[1] : fs.options.lookup(kModeOption);
+  Expr *mode = isModeGiven ? call->args[1] : fs.options.lookup(NodeOption::MODE);
   auto *checkedMode = mode != nullptr ? this->argumentChecker->checkArg(mode, Type::intTy())
                                       : this->makeIntLiteral(fs.loc, kDirectoryMode);
-  auto *recursive = this->boolOption(fs, kRecursiveOption);
+  auto *recursive = this->boolOption(fs, NodeOption::RECURSIVE);
   call->args = {dir, recursive, checkedMode};
   call->target = BuiltinCall{.builtin = Builtin::FsMkdir};
   call->type = Type::optional(Type::string());
@@ -674,18 +678,20 @@ Expr *FsChecker::checkRm(FsCall &fs) {
   }
   auto *target = this->checkPath(call->args[0], PathForm::PATH_ONLY);
   bool isRead = this->readNodeOptions(
-      call, 1, fs.functionName, {"recursive", "force", "maxRetries", "retryDelay"}, fs.options);
+      call, 1, fs.functionName,
+      {NodeOption::RECURSIVE, NodeOption::FORCE, NodeOption::MAX_RETRIES, NodeOption::RETRY_DELAY},
+      fs.options);
   if (!isRead) {
     return call;
   }
-  for (llvm::StringRef retry : {"maxRetries", "retryDelay"}) {
+  for (NodeOption retry : {NodeOption::MAX_RETRIES, NodeOption::RETRY_DELAY}) {
     Expr *value = fs.options.lookup(retry);
     if (value != nullptr) {
       this->argumentChecker->checkArg(value, Type::intTy());
     }
   }
-  auto *recursive = this->boolOption(fs, kRecursiveOption);
-  auto *force = this->boolOption(fs, kForceOption);
+  auto *recursive = this->boolOption(fs, NodeOption::RECURSIVE);
+  auto *force = this->boolOption(fs, NodeOption::FORCE);
   call->args = {target, recursive, force};
   call->target = BuiltinCall{.builtin = Builtin::FsRm};
   call->type = Type::voidTy();

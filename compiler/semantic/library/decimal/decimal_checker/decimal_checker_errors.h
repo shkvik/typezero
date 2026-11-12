@@ -82,6 +82,7 @@ public:
 
 class ErrorTextDecimalMethod {
 public:
+  static llvm::StringRef replacementFor(llvm::StringRef name);
   static std::string noMember(llvm::StringRef name, llvm::StringRef use);
   static std::string places();
 };

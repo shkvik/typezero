@@ -1,6 +1,7 @@
 #include "compiler/semantic/library/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/library/bytes/bytes_method_table/bytes_method_table.h"
+#include "compiler/program/to_utf16/to_utf16.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/semantic/bodies/expr/argument_checker/argument_checker.h"
 #include "compiler/semantic/bodies/expr/call_checker/call_checker.h"
@@ -28,25 +29,12 @@ namespace tz {
 
 namespace {
 
-const std::pair<llvm::StringLiteral, Bytes> kNames[] = {
-    {"Uint8Array", Bytes::Uint8},
-    {"Int8Array", Bytes::Int8},
-    {"Uint8ClampedArray", Bytes::Uint8Clamped},
-    {"Int16Array", Bytes::Int16},
-    {"Uint16Array", Bytes::Uint16},
-    {"Int32Array", Bytes::Int32},
-    {"Uint32Array", Bytes::Uint32},
-    {"Float16Array", Bytes::Float16},
-    {"Float32Array", Bytes::Float32},
-    {"Float64Array", Bytes::Float64},
-    {"Buffer", Bytes::Buffer},
-    {"ArrayBuffer", Bytes::ArrayBuffer},
-    {"DataView", Bytes::DataView},
-    {"TextEncoder", Bytes::TextEncoder},
-    {"TextDecoder", Bytes::TextDecoder},
-    {"FatalTextDecoder", Bytes::FatalTextDecoder},
+const Bytes kNamedKinds[] = {
+    Bytes::Uint8,    Bytes::Int8,        Bytes::Uint8Clamped, Bytes::Int16,
+    Bytes::Uint16,   Bytes::Int32,       Bytes::Uint32,       Bytes::Float16,
+    Bytes::Float32,  Bytes::Float64,     Bytes::Buffer,       Bytes::ArrayBuffer,
+    Bytes::DataView, Bytes::TextEncoder, Bytes::TextDecoder,  Bytes::FatalTextDecoder,
 };
-
 }
 
 BytesChecker::BytesChecker(SemanticState &owner, SemanticParts &all)
@@ -81,7 +69,7 @@ std::optional<std::u16string> BytesChecker::literalText(const Expr *expr) const 
 }
 
 BytesChecker::ResultKnownEncoding BytesChecker::checkKnownEncoding(llvm::StringRef name) const {
-  auto encoding = BytesCheckHelpers::encodingNamed(name);
+  auto encoding = EncodingNameTable::find(name);
   if (!encoding) {
     auto message = ErrorTextBufferEncoding::unknown(name);
 
@@ -91,7 +79,7 @@ BytesChecker::ResultKnownEncoding BytesChecker::checkKnownEncoding(llvm::StringR
     });
   }
 
-  return ok(*encoding);
+  return ok(int(*encoding));
 }
 
 BytesChecker::ResultBytesIndexing BytesChecker::checkBytesIndexing(const Type *type) const {
@@ -108,9 +96,10 @@ BytesChecker::ResultBytesIndexing BytesChecker::checkBytesIndexing(const Type *t
 }
 
 const Type *BytesChecker::bytesTypeNamed(llvm::StringRef name) const {
-  for (const auto &[n, kind] : kNames) {
-    if (n == name) {
-      return Type::bytesType(kind);
+  for (Bytes kind : kNamedKinds) {
+    const Type *type = Type::bytesType(kind);
+    if (type->name() == name) {
+      return type;
     }
   }
 
@@ -219,7 +208,8 @@ Expr *BytesChecker::checkDataViewMember(MemberExpr *member,
 Expr *BytesChecker::checkTextEncoderMember(MemberExpr *member,
                                            std::optional<BuiltinProperty> property) {
   if (property == BuiltinProperty::ENCODING) {
-    auto *literal = this->state.getAst().make<StringLitExpr>(member->loc(), u"utf-8");
+    auto label = ToUtf16::toUtf16(EncodingNameTable::getUtf8Label());
+    auto *literal = this->state.getAst().make<StringLitExpr>(member->loc(), label);
     literal->type = Type::string();
     return this->keepObject(member, literal);
   }

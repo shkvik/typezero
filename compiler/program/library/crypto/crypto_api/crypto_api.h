@@ -2,6 +2,7 @@
 
 #include "llvm/ADT/StringRef.h"
 #include <cstddef>
+#include <cstdint>
 #include <utility>
 
 namespace tz {
@@ -267,17 +268,85 @@ inline constexpr DirectAlgorithm kDirectMds[] = {
     {"blake2s256", "tz_crypto_md_blake2s256"},
 };
 
-inline constexpr DirectAlgorithm kDirectCiphers[] = {
-    {"aes-128-gcm", "tz_crypto_cipher_aes_128_gcm"},
-    {"aes-192-gcm", "tz_crypto_cipher_aes_192_gcm"},
-    {"aes-256-gcm", "tz_crypto_cipher_aes_256_gcm"},
-    {"aes-128-cbc", "tz_crypto_cipher_aes_128_cbc"},
-    {"aes-192-cbc", "tz_crypto_cipher_aes_192_cbc"},
-    {"aes-256-cbc", "tz_crypto_cipher_aes_256_cbc"},
-    {"aes-128-ctr", "tz_crypto_cipher_aes_128_ctr"},
-    {"aes-192-ctr", "tz_crypto_cipher_aes_192_ctr"},
-    {"aes-256-ctr", "tz_crypto_cipher_aes_256_ctr"},
-    {"chacha20-poly1305", "tz_crypto_cipher_chacha20_poly1305"},
+struct DirectCipher {
+  llvm::StringLiteral name;
+  llvm::StringLiteral symbol;
+  int64_t keyBytes;
+  int64_t ivBytes;
+  bool isAnyIv;
+};
+
+inline constexpr DirectCipher kDirectCiphers[] = {
+    {
+        .name = "aes-128-gcm",
+        .symbol = "tz_crypto_cipher_aes_128_gcm",
+        .keyBytes = 16,
+        .ivBytes = 16,
+        .isAnyIv = true,
+    },
+    {
+        .name = "aes-192-gcm",
+        .symbol = "tz_crypto_cipher_aes_192_gcm",
+        .keyBytes = 24,
+        .ivBytes = 16,
+        .isAnyIv = true,
+    },
+    {
+        .name = "aes-256-gcm",
+        .symbol = "tz_crypto_cipher_aes_256_gcm",
+        .keyBytes = 32,
+        .ivBytes = 16,
+        .isAnyIv = true,
+    },
+    {
+        .name = "aes-128-cbc",
+        .symbol = "tz_crypto_cipher_aes_128_cbc",
+        .keyBytes = 16,
+        .ivBytes = 16,
+        .isAnyIv = false,
+    },
+    {
+        .name = "aes-192-cbc",
+        .symbol = "tz_crypto_cipher_aes_192_cbc",
+        .keyBytes = 24,
+        .ivBytes = 16,
+        .isAnyIv = false,
+    },
+    {
+        .name = "aes-256-cbc",
+        .symbol = "tz_crypto_cipher_aes_256_cbc",
+        .keyBytes = 32,
+        .ivBytes = 16,
+        .isAnyIv = false,
+    },
+    {
+        .name = "aes-128-ctr",
+        .symbol = "tz_crypto_cipher_aes_128_ctr",
+        .keyBytes = 16,
+        .ivBytes = 16,
+        .isAnyIv = false,
+    },
+    {
+        .name = "aes-192-ctr",
+        .symbol = "tz_crypto_cipher_aes_192_ctr",
+        .keyBytes = 24,
+        .ivBytes = 16,
+        .isAnyIv = false,
+    },
+    {
+        .name = "aes-256-ctr",
+        .symbol = "tz_crypto_cipher_aes_256_ctr",
+        .keyBytes = 32,
+        .ivBytes = 16,
+        .isAnyIv = false,
+    },
+    {
+        .name = "chacha20-poly1305",
+        .symbol = "tz_crypto_cipher_chacha20_poly1305",
+        .keyBytes = 32,
+        .ivBytes = 12,
+        .isAnyIv = false,
+    },
 };
 
 class CryptoApi {
