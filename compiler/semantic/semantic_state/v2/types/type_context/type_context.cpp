@@ -75,6 +75,24 @@ const ConditionalInfo *TypeContext::findConditionalByTag(const Type *tag) const 
   return this->conditionalTags.lookup(tag);
 }
 
+void TypeContext::rememberConditionalBranches(const Type *conditional,
+                                              std::vector<const Type *> branches) {
+  this->conditionalBranches[conditional] = std::move(branches);
+}
+
+bool TypeContext::hasConditionalBranches(const Type *conditional) const {
+  return this->conditionalBranches.contains(conditional);
+}
+
+std::vector<const Type *> TypeContext::findConditionalBranches(const Type *conditional) const {
+  auto found = this->conditionalBranches.find(conditional);
+  if (found == this->conditionalBranches.end()) {
+    return {};
+  }
+
+  return found->second;
+}
+
 void TypeContext::rememberTemplateLoc(llvm::SMLoc loc) {
   this->templateLoc = loc;
 }

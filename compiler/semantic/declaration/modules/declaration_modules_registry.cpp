@@ -800,51 +800,6 @@ void DeclarationModulesRegistry::closeTopLevel(const CloseTopLevel &task) {
   }
 }
 
-Module *DeclarationModulesRegistry::laterSource(llvm::StringRef name,
-                                                llvm::StringRef &declared) const {
-  auto &here = this->state.declaration.modules.getModuleState(
-      this->state.declaration.modules.getCurrentModule());
-  declared = name;
-  auto found = here.imports.find(name);
-  if (found != here.imports.end()) {
-    declared = found->second.target.name;
-    Module *source = found->second.target.module;
-    return this->state.declaration.modules.getModuleState(source).loaded ? nullptr : source;
-  }
-  if (this->state.declaration.modules.getLoadingModule() != nullptr &&
-      this->state.declaration.modules.getCurrentModule() !=
-          this->state.declaration.modules.getLoadingModule() &&
-      !here.loaded && here.topLevelNames.contains(name)) {
-    return this->state.declaration.modules.getCurrentModule();
-  }
-
-  return nullptr;
-}
-
-std::optional<StartLoadEarly>
-DeclarationModulesRegistry::findEarlyLoad(llvm::StringRef name) const {
-  auto entry = this->state.walk.scopes.findName(name);
-  auto *loading = this->state.declaration.modules.getLoadingModule();
-  if (entry.isFound() || loading == nullptr) {
-    return std::nullopt;
-  }
-  llvm::StringRef declared;
-  auto *source = this->laterSource(name, declared);
-  bool isLoadingHere = !this->state.walk.functions.isInsideFunction() &&
-                       this->state.declaration.modules.getCurrentModule() == loading;
-  if (source == nullptr || isLoadingHere || !this->isLoadable(source, declared)) {
-    return std::nullopt;
-  }
-
-  return StartLoadEarly{.source = source, .name = declared};
-}
-
-bool DeclarationModulesRegistry::isLoadable(Module *source, llvm::StringRef name) const {
-  const auto &there = this->state.declaration.modules.getModuleState(source);
-
-  return !there.loaded && !there.busy && there.topLevelNames.contains(name);
-}
-
 void DeclarationModulesRegistry::startLoadEarly(const StartLoadEarly &task) {
   this->state.walk.tasks.pushTask(LoadEarlyBody{.source = task.source, .name = task.name});
   this->state.walk.tasks.pushTask(EnterLoadBody{});
@@ -903,7 +858,7 @@ DeclarationModulesRegistry::checkLoaded(const NameExpr *name) {
   }
 
   llvm::StringRef declared;
-  auto *source = this->laterSource(name->name, declared);
+  auto *source = this->state.findLaterSource(name->name, declared);
   Module *reader = this->state.declaration.modules.getLoadingModule() != nullptr
                        ? this->state.declaration.modules.getLoadingModule()
                        : this->state.declaration.modules.getCurrentModule();

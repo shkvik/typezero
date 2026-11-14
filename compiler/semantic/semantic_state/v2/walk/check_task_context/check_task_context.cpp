@@ -17,4 +17,15 @@ CheckTask CheckTaskContext::takeTask() {
   return task;
 }
 
+void CheckTaskContext::pushAnswer(const Type *type) {
+  this->answers.push_back(type);
+}
+
+const Type *CheckTaskContext::takeAnswer() {
+  const Type *answer = this->answers.back();
+  this->answers.pop_back();
+
+  return answer;
+}
+
 }

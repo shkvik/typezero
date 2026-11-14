@@ -34,6 +34,8 @@ public:
   Checkpoint saveBody();
   Stmt *findTypeDeclaration(llvm::StringRef name) const;
   const NodeName *findNodeName(llvm::StringRef name) const;
+  std::optional<StartLoadEarly> findEarlyLoad(llvm::StringRef name) const;
+  Module *findLaterSource(llvm::StringRef name, llvm::StringRef &declared) const;
 
   AstContext &ast;
   CodeStorage code;
@@ -51,6 +53,7 @@ public:
 
 private:
   bool isNamingGlobal(const Expr *expr, GlobalName global) const;
+  bool isLoadable(Module *source, llvm::StringRef name) const;
   bool isGlobalThisMember(const Expr *expr, GlobalName global) const;
 
 

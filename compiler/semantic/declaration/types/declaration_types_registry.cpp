@@ -733,25 +733,6 @@ void DeclarationTypesRegistry::markTextsAssigned(const EnumDecl *enumDecl) {
   }
 }
 
-const Type *DeclarationTypesRegistry::enumType(const EnumDecl *enumDecl) const {
-  if (!enumDecl->isString) {
-    return Type::intTy();
-  }
-  auto values = std::vector<const Type *>();
-  for (const EnumMember &member : enumDecl->members) {
-    if (member.isString) {
-      values.push_back(Type::stringLiteral(member.text));
-    }
-  }
-  if (values.empty()) {
-    return Type::string();
-  }
-  const auto *type = Type::unionOf(values);
-  Type::nameUnion(type, enumDecl->name);
-
-  return type;
-}
-
 int32_t DeclarationTypesRegistry::jsToInt32(double number) const {
   if (!std::isfinite(number)) {
     return 0;

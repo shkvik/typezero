@@ -157,8 +157,12 @@ struct ClassDecl : Stmt {
   std::vector<FunctionDecl *> findStaticMethodsNamed(llvm::StringRef name) const;
 
 
-  const ClassField *findInheritedField(llvm::StringRef name) const;
+  const ClassDecl *findFinalClass() const;
   const ClassDecl *findInheritedFieldOwner(llvm::StringRef name) const;
+
+
+  const ClassField *findField(llvm::StringRef name) const;
+  const ClassField *findInheritedField(llvm::StringRef name) const;
 
 private:
   void addNotHidden(std::vector<FunctionDecl *> &found,

@@ -145,4 +145,47 @@ bool SemanticState::isGlobalMember(const MemberExpr *member, GlobalMember which)
   return this->isGlobalName(member->object, owner);
 }
 
+Module *SemanticState::findLaterSource(llvm::StringRef name, llvm::StringRef &declared) const {
+  auto &here =
+      this->declaration.modules.getModuleState(this->declaration.modules.getCurrentModule());
+  declared = name;
+  auto found = here.imports.find(name);
+  if (found != here.imports.end()) {
+    declared = found->second.target.name;
+    Module *source = found->second.target.module;
+    return this->declaration.modules.getModuleState(source).loaded ? nullptr : source;
+  }
+  if (this->declaration.modules.getLoadingModule() != nullptr &&
+      this->declaration.modules.getCurrentModule() !=
+          this->declaration.modules.getLoadingModule() &&
+      !here.loaded && here.topLevelNames.contains(name)) {
+    return this->declaration.modules.getCurrentModule();
+  }
+
+  return nullptr;
+}
+
+std::optional<StartLoadEarly> SemanticState::findEarlyLoad(llvm::StringRef name) const {
+  auto entry = this->walk.scopes.findName(name);
+  auto *loading = this->declaration.modules.getLoadingModule();
+  if (entry.isFound() || loading == nullptr) {
+    return std::nullopt;
+  }
+  llvm::StringRef declared;
+  auto *source = this->findLaterSource(name, declared);
+  bool isLoadingHere = !this->walk.functions.isInsideFunction() &&
+                       this->declaration.modules.getCurrentModule() == loading;
+  if (source == nullptr || isLoadingHere || !this->isLoadable(source, declared)) {
+    return std::nullopt;
+  }
+
+  return StartLoadEarly{.source = source, .name = declared};
+}
+
+bool SemanticState::isLoadable(Module *source, llvm::StringRef name) const {
+  const auto &there = this->declaration.modules.getModuleState(source);
+
+  return !there.loaded && !there.busy && there.topLevelNames.contains(name);
+}
+
 }

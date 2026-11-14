@@ -27,9 +27,6 @@ public:
   std::vector<Stmt *> declareTypes(llvm::ArrayRef<Stmt *> stmts);
   std::vector<Stmt *> declareTypeNames(llvm::ArrayRef<Stmt *> stmts);
 
-
-  const Type *enumType(const EnumDecl *enumDecl) const;
-
 private:
   using ResultMemberIntValue = Result<double, DeclarationTypesRegistryWholeMemberError>;
   using ResultEnumIsResolved = Result<const EnumDecl *, DeclarationTypesRegistryEnumCycleError>;

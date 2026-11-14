@@ -67,7 +67,6 @@ public:
 
   ResultSourceIsLoaded checkLoaded(const NameExpr *name);
   const llvm::StringMap<ModuleExport> &exportsOf(Module *module);
-  std::optional<StartLoadEarly> findEarlyLoad(llvm::StringRef name) const;
   FunctionDecl *cycleCallee(FunctionDecl *functionDecl, llvm::StringRef name);
 
 private:
@@ -100,7 +99,6 @@ private:
                    const DeclarationModulesRegistryFreeNameError &error);
 
 
-  bool isLoadable(Module *source, llvm::StringRef name) const;
   bool isDeclaringName(const Stmt *item, llvm::StringRef name) const;
   bool isImportedByName(const Module *module, llvm::StringRef alias) const;
   bool isNamedIn(const ImportDecl &importDecl, llvm::StringRef alias) const;
@@ -110,7 +108,6 @@ private:
   Module *unreadyModule(const ExportsFrame &frame);
   Module *stepNeeds(Module *module, const ExportStep &step);
   Module *namedExportNeeds(Module *module, const NamedExportStep &step);
-  Module *laterSource(llvm::StringRef name, llvm::StringRef &declared) const;
 
 
   ResultExportTarget findExport(Module *from, llvm::StringRef path, const ModuleName &name);

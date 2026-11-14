@@ -8,15 +8,18 @@ namespace tz {
 class CheckTaskContext {
 public:
   void pushTask(CheckTask task);
+  void pushAnswer(const Type *type);
 
 
   bool hasTasks() const;
 
 
   CheckTask takeTask();
+  const Type *takeAnswer();
 
 private:
   std::vector<CheckTask> tasks;
+  std::vector<const Type *> answers;
 };
 
 }

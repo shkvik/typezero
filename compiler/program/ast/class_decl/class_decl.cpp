@@ -101,6 +101,24 @@ std::vector<FunctionDecl *> ClassDecl::collectMemberFunctions() const {
   return members;
 }
 
+const ClassDecl *ClassDecl::findFinalClass() const {
+  const ClassDecl *current = this;
+  while (current->replacement != nullptr) {
+    current = current->replacement;
+  }
+
+  return current;
+}
+
+const ClassField *ClassDecl::findField(llvm::StringRef name) const {
+  const auto *own = this->field(name);
+  if (own != nullptr) {
+    return own;
+  }
+
+  return this->findInheritedField(name);
+}
+
 const ClassField *ClassDecl::findInheritedField(llvm::StringRef name) const {
   for (const ClassDecl *current = this->parent; current != nullptr; current = current->parent) {
     const auto *field = current->field(name);

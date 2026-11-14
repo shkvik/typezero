@@ -5,6 +5,8 @@
 
 namespace tz {
 
+class Type;
+
 enum class EnumStage {
   UNRESOLVED,
   RESOLVING,
@@ -12,8 +14,12 @@ enum class EnumStage {
 };
 
 struct EnumDecl : Stmt {
-  EnumDecl(llvm::SMLoc loc, llvm::StringRef name) : Stmt(Kind::Enum, loc), name(name) {}
-  static bool classof(const Stmt *s) { return s->kind() == Kind::Enum; }
+  EnumDecl(llvm::SMLoc loc, llvm::StringRef name)
+      : Stmt(Kind::Enum, loc),
+        name(name) {}
+  static bool classof(const Stmt *s) {
+    return s->kind() == Kind::Enum;
+  }
 
   const EnumMember *find(llvm::StringRef member) const {
     for (const EnumMember &m : members) {
@@ -24,6 +30,8 @@ struct EnumDecl : Stmt {
 
     return nullptr;
   }
+
+  const Type *valuesType() const;
 
   llvm::StringRef name;
   std::vector<EnumMember> members;
