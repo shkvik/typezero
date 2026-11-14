@@ -2,7 +2,7 @@
 
 Каталог приёмов, которыми рекурсию в компиляторе заменяем циклом. Каждый приём: по какому
 признаку узнать, как было, как стало, на что смотреть. Пополняется по мере работы; короткие
-правила — в `code_style.md`, раздел «Обходы без рекурсии»; ход работы — `tmp/recursion_plan.md`.
+правила — в `code_style.md`, раздел «Обходы без рекурсии»; ход работы — `tmp/refactor/recursion/recursion_plan.md`.
 
 Перед любым переводом сверить пять вещей — поведение не должно поменяться:
 
@@ -268,7 +268,7 @@ while (at < tape.size()) {
 следующего шага на входе, номер шага, с которого продолжать, на выходе. «Дальше не смотрим» —
 вернуть номер после парного «выйти».
 
-**Где (пример):** `tmp/destination_events_example.cpp` для `DestinationScanner::scanDestinations`.
+**Где (пример):** `tmp/refactor/recursion/destination_events_example.cpp` для `DestinationScanner::scanDestinations`.
 
 **Когда шаги зависят от хода:** в `DestinationScanner` «куда кладём» (тип из `peekType`,
 параметры вызова) и «дальше не смотрим» (`for`: имя объявлено в init) узнаются только по ходу,
@@ -358,13 +358,13 @@ void CheckMachine::pushCallArgs(const CallArgs &task) {
   переопределения, экземпляр внутри экземпляра), — очередь на конец (`walkLateChecks`).
   «Уже выводится выше» — не нужно (берётся `assumed`, как сейчас). Порядок заранее (граф
   вызовов) не подходит: какой метод вызван, известно только по типу объекта. Разбор мест —
-  `tmp/need_sites_table.md`, пример — `tmp/no_ready_example.cpp`;
+  `tmp/refactor/recursion/need_sites_table.md`, пример — `tmp/refactor/recursion/no_ready_example.cpp`;
 - задачи маленькие (указатели и флаги), `Flow` — на своём стеке; листья проверяются сразу.
 
 **Переход:** по видам узлов; ещё не переведённый вид машина выполняет старой функцией внутри
-задачи. Примеры — `tmp/check_machine_layers_example.cpp` (сдвиг: было / стало, ход машины,
-стек в отладчике), `tmp/check_machine_inference_example.cpp` (тип результата функции по
-требованию), `tmp/check_machine_example.cpp` (вызов, `&&`, `while`, проба).
+задачи. Примеры — `tmp/refactor/recursion/check_machine_layers_example.cpp` (сдвиг: было / стало, ход машины,
+стек в отладчике), `tmp/refactor/recursion/check_machine_inference_example.cpp` (тип результата функции по
+требованию), `tmp/refactor/recursion/check_machine_example.cpp` (вызов, `&&`, `while`, проба).
 
 ## 12. Наследники класса — список и `for`
 
@@ -428,8 +428,8 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
 на первой ошибке, а нужное уже собрано); посторонняя работа тела (экземпляры обобщённых классов)
 идёт после нужных псевдонимов, а не между ними. Зависимости, не видные по именам (`typeof C.m`,
 тело обобщённого псевдонима, условные типы, значения по умолчанию, тела `init`), остаются
-вложенным вызовом до машины проверки (11). Примеры — `tmp/alias_frames_example.cpp` (тело целиком),
-`tmp/exports_frames_example.cpp` и `tmp/enum_frames_example.cpp` (тело по шагам — порядок и
+вложенным вызовом до машины проверки (11). Примеры — `tmp/refactor/recursion/alias_frames_example.cpp` (тело целиком),
+`tmp/refactor/recursion/exports_frames_example.cpp` и `tmp/refactor/recursion/enum_frames_example.cpp` (тело по шагам — порядок и
 результаты те же и в программе с ошибками).
 
 ## 14. «Хотя бы один» из нескольких спусков — поиск с возвратом и фиксацией выбора
@@ -486,7 +486,7 @@ ResultExportTarget found = this->exportNamed(theirs, source->from, source->path,
 **Где:** экспорты (`readyExports` вместо `exportsOf` в шагах), члены enum'ов
 (`reportNeededCycles` перед счётом, `evalConstant` не зовёт `resolveEnum`), `covariant`
 (таблица ответов: по аргументу за шаг — дождаться `covariant(родитель, номер)`, потом читать
-таблицу). Пример — `tmp/ready_state_example.cpp`.
+таблицу). Пример — `tmp/refactor/recursion/ready_state_example.cpp`.
 
 **Не подходит**, если готового нет: обратный вызов считает новый кусок (другое выражение, другую
 пару типов) — тогда машина (7, 10, 14) или цепочка (3).
@@ -501,7 +501,7 @@ ResultExportTarget found = this->exportNamed(theirs, source->from, source->path,
 - общий обход со списком пропусков в каждой функции;
 - словарь «узел → ответ»;
 - кадры с тремя функциями на вид узла;
-- индекс узлов (номера + бинарный поиск) — спроектирован (`tmp/ast_index_example.cpp`), пока не
+- индекс узлов (номера + бинарный поиск) — спроектирован (`tmp/refactor/recursion/ast_index_example.cpp`), пока не
   нужен: дерево меняется проверкой.
 
 ## Ещё не решено

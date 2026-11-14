@@ -2,50 +2,52 @@
 #include "compiler/program/ast/ast.h"
 #include "compiler/program/ast_walker/ast_walker.h"
 #include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
+#include "compiler/program/library/bytes/buffer_export_table/buffer_export_table.h"
 #include "compiler/program/library/library_module_names/library_module_names.h"
-#include "compiler/semantic/bodies/classes/class_links/class_links.h"
-#include "compiler/semantic/bodies/stmt/var_checker/var_checker.h"
-#include "compiler/semantic/declare/import_binder/import_binder.h"
-#include "compiler/semantic/declare/type_declarer/type_declarer.h"
-#include "compiler/semantic/generics/alias_instantiator/alias_instantiator.h"
-#include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
-#include "compiler/semantic/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
-#include "compiler/semantic/library/builtin_modules/builtin_module_types/builtin_module_types.h"
-#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/StringSet.h"
-#include <cassert>
-#include <utility>
 
 using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
 
-DeclarationNamesRegistry::DeclarationNamesRegistry(SemanticState &owner, SemanticParts &all)
-    : state(owner) {
-  this->classLinks = &all.classLinks;
-  this->varChecker = &all.varChecker;
-  this->importBinder = &all.importBinder;
-  this->typeDeclarer = &all.typeDeclarer;
-  this->returnInferrer = &all.returnInferrer;
-  this->aliasInstantiator = &all.aliasInstantiator;
-  this->builtinModuleTypes = &all.builtinModuleTypes;
-  this->builtinModuleChecker = &all.builtinModuleChecker;
-}
+DeclarationNamesRegistry::DeclarationNamesRegistry(SemanticState &owner)
+    : state(owner) {}
 
 void DeclarationNamesRegistry::openScope() {
   this->state.getScopeStack().openScope();
 }
 
 void DeclarationNamesRegistry::closeScope() {
-  if (this->state.getExpressionMarks().hasUntyped()) {
-    this->varChecker->reportUntyped();
-  }
   this->state.getScopeStack().closeScope();
 }
 
 ScopeEntry DeclarationNamesRegistry::findName(llvm::StringRef name) const {
   return this->state.getScopeStack().findName(name);
+}
+
+const NodeName *DeclarationNamesRegistry::findNodeName(llvm::StringRef name) const {
+  auto &modules = this->state.getModuleStates();
+  auto *current = modules.getCurrentModule();
+  if (current == nullptr || !modules.hasModuleState(current)) {
+    return nullptr;
+  }
+  const auto &names = modules.getModuleState(current).nodeNames;
+  auto found = names.find(name);
+  if (found == names.end()) {
+    return nullptr;
+  }
+  bool isBufferName = BufferExportTable::find(name) == BufferExport::BUFFER;
+  bool isGlobalBuffer = found->second.module == NodeModule::Buffer && isBufferName;
+  if (isGlobalBuffer) {
+    return nullptr;
+  }
+  auto entry = this->findName(name);
+  if (entry.isFound()) {
+    return nullptr;
+  }
+
+  return &found->second;
 }
 
 ClassDecl *DeclarationNamesRegistry::findClassOf(const Type *type) const {
@@ -55,14 +57,6 @@ ClassDecl *DeclarationNamesRegistry::findClassOf(const Type *type) const {
   const auto *classDecl = type->classDecl();
 
   return const_cast<ClassDecl *>(classDecl);
-}
-
-const Type *DeclarationNamesRegistry::findPreludeType(PreludeType type) {
-  auto name = PreludeTypeTable::getName(type);
-  auto *alias = this->state.getAliasStore().findBuiltinAlias(name);
-  assert(alias != nullptr && "the prelude declares the type");
-
-  return this->typeDeclarer->resolveAlias(alias);
 }
 
 bool DeclarationNamesRegistry::hasMethodFields(const ClassDecl *classDecl) const {
@@ -89,7 +83,7 @@ bool DeclarationNamesRegistry::hasOwnMethodField(const ClassDecl *classDecl) con
 }
 
 bool DeclarationNamesRegistry::isUnshadowedGlobal(const NameExpr *name) const {
-  const auto *nodeName = this->builtinModuleChecker->nodeName(name->name);
+  const auto *nodeName = this->findNodeName(name->name);
   if (nodeName != nullptr) {
     return false;
   }
@@ -108,32 +102,6 @@ void DeclarationNamesRegistry::rememberNamesInFunctions(SourceFile &program) {
     this->state.getScopeStack().markUsedInFunction(name.getKey());
   }
   this->state.getScopeStack().markUsedInFunction(LibraryModuleNames::kSubtleName);
-  this->importBinder->noteImportsInFunctions(program);
-}
-
-const Type *DeclarationNamesRegistry::resolveVariableType(VarSymbol *variable) {
-  if (variable->type != nullptr) {
-    return variable->type;
-  }
-  auto *functionDecl = this->functionOf(variable);
-  if (functionDecl == nullptr || functionDecl->sym == nullptr) {
-    return Type::error();
-  }
-  const auto *type = this->returnInferrer->functionType(functionDecl->sym);
-  bool isFinalType = variable->function() != nullptr && functionDecl->sym->hasReturnType();
-  if (isFinalType) {
-    variable->type = type;
-  }
-
-  return type;
-}
-
-FunctionDecl *DeclarationNamesRegistry::functionOf(VarSymbol *variable) const {
-  if (variable->function() != nullptr) {
-    return variable->function();
-  }
-
-  return variable->lambda();
 }
 
 Stmt *DeclarationNamesRegistry::findTypeDeclaration(llvm::StringRef name) const {
@@ -145,15 +113,24 @@ Stmt *DeclarationNamesRegistry::findTypeDeclaration(llvm::StringRef name) const 
   if (alias != nullptr) {
     return alias;
   }
-  const auto *nodeName = this->builtinModuleChecker->nodeName(name);
+  const auto *nodeName = this->findNodeName(name);
   if (nodeName != nullptr) {
-    return this->builtinModuleTypes->exported(nodeName->module, nodeName->name);
+    return this->findModuleExport(*nodeName);
   }
   if (this->state.getTypeContext().isInsideBuiltinModule()) {
-    return this->builtinModuleTypes->alias(name);
+    return this->state.getLibraryDeclarations().findModuleAlias(name);
   }
 
   return nullptr;
+}
+
+TypeAliasDecl *DeclarationNamesRegistry::findModuleExport(const NodeName &nodeName) const {
+  auto &declarations = this->state.getLibraryDeclarations();
+  if (!declarations.isModuleExport(nodeName.module, nodeName.name)) {
+    return nullptr;
+  }
+
+  return declarations.findModuleAlias(nodeName.name);
 }
 
 FuncSymbol *DeclarationNamesRegistry::findGenericFunction(const NameExpr *name) const {
@@ -339,14 +316,6 @@ const ClassDecl *DeclarationNamesRegistry::findFieldOwner(const ClassDecl *class
   return nullptr;
 }
 
-const Type *DeclarationNamesRegistry::instantiatePreludeType(llvm::StringRef name,
-                                                             std::vector<const Type *> args) {
-  auto *alias = this->state.getAliasStore().findBuiltinAlias(name);
-  assert(alias != nullptr && "the prelude declares the type");
-
-  return this->aliasInstantiator->instantiateAlias(alias, std::move(args), alias->loc());
-}
-
 VarSymbol *DeclarationNamesRegistry::declareVar(llvm::StringRef name, llvm::SMLoc loc,
                                                 const Type *type, bool isConst) {
   auto *variable = this->state.getAst().newVar();
@@ -433,7 +402,18 @@ void DeclarationNamesRegistry::addNotOverridden(std::vector<FunctionDecl *> &fou
 bool DeclarationNamesRegistry::isOverriddenByAny(const std::vector<FunctionDecl *> &found,
                                                  const FunctionDecl *method) const {
   for (const FunctionDecl *lower : found) {
-    if (this->classLinks->isOverridingTransitively(lower, method)) {
+    if (this->isOverriding(lower, method)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool DeclarationNamesRegistry::isOverriding(const FunctionDecl *method,
+                                            const FunctionDecl *base) const {
+  for (const FunctionDecl *current = method; current != nullptr; current = current->overrides()) {
+    if (current == base) {
       return true;
     }
   }

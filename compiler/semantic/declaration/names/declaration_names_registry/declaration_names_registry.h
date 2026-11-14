@@ -1,7 +1,6 @@
 #pragma once
 
 #include "compiler/program/library/builtin_names/global_member_table/global_member_table.h"
-#include "compiler/program/library/builtin_names/prelude_type_table/prelude_type_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/declaration/names/declaration_names_registry/declaration_names_registry_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -9,22 +8,12 @@
 
 namespace tz {
 
-class SemanticParts;
-class ClassLinks;
-class VarChecker;
-class ImportBinder;
-class TypeDeclarer;
-class ReturnInferrer;
-class AliasInstantiator;
-class BuiltinModuleTypes;
-class BuiltinModuleChecker;
-
 class DeclarationNamesRegistry {
 public:
   using ResultEntryDeclared = Result<ScopeEntry, DeclarationNamesRegistryDeclareError>;
   using ResultNameIsVisible = Result<const VarSymbol *, DeclarationNamesRegistryCheckVisibleError>;
 
-  DeclarationNamesRegistry(SemanticState &owner, SemanticParts &all);
+  explicit DeclarationNamesRegistry(SemanticState &owner);
 
   void openScope();
   void closeScope();
@@ -35,11 +24,6 @@ public:
   bool hasMethodFields(const ClassDecl *classDecl) const;
   bool isGlobalName(const Expr *expr, GlobalName global) const;
   bool isGlobalMember(const MemberExpr *member, GlobalMember which) const;
-
-
-  const Type *findPreludeType(PreludeType type);
-  const Type *resolveVariableType(VarSymbol *variable);
-  const Type *instantiatePreludeType(llvm::StringRef name, std::vector<const Type *> args);
 
 
   VarSymbol *declareLet(llvm::StringRef name, llvm::SMLoc loc, const Type *type);
@@ -57,6 +41,7 @@ public:
   ClassDecl *findClassOf(const Type *type) const;
   ScopeEntry findName(llvm::StringRef name) const;
   Stmt *findTypeDeclaration(llvm::StringRef name) const;
+  const NodeName *findNodeName(llvm::StringRef name) const;
   FuncSymbol *findGenericFunction(const NameExpr *name) const;
   ResultEntryDeclared declare(llvm::StringRef name, ScopeEntry entry);
   ResultNameIsVisible checkVisible(NameExpr *name, const VarSymbol *variable) const;
@@ -79,6 +64,7 @@ private:
   bool hasOwnMethodField(const ClassDecl *classDecl) const;
   bool isNamingGlobal(const Expr *expr, GlobalName global) const;
   bool isGlobalThisMember(const Expr *expr, GlobalName global) const;
+  bool isOverriding(const FunctionDecl *method, const FunctionDecl *base) const;
   bool hasSameSignature(const FuncSymbol *first, const FuncSymbol *second) const;
   bool isHiddenByAny(const std::vector<FunctionDecl *> &found, const FunctionDecl *method) const;
   bool isOverriddenByAny(const std::vector<FunctionDecl *> &found,
@@ -96,17 +82,9 @@ private:
                                                     llvm::StringRef name) const;
 
 
-  FunctionDecl *functionOf(VarSymbol *variable) const;
+  TypeAliasDecl *findModuleExport(const NodeName &nodeName) const;
 
   SemanticState &state;
-  ClassLinks *classLinks = nullptr;
-  VarChecker *varChecker = nullptr;
-  ImportBinder *importBinder = nullptr;
-  TypeDeclarer *typeDeclarer = nullptr;
-  ReturnInferrer *returnInferrer = nullptr;
-  AliasInstantiator *aliasInstantiator = nullptr;
-  BuiltinModuleTypes *builtinModuleTypes = nullptr;
-  BuiltinModuleChecker *builtinModuleChecker = nullptr;
 };
 
 }
