@@ -4,6 +4,7 @@
 /.vs/
 /.cache/
 CMakeUserPresets.json
+.playwright-mcp
 
 # Programs compiled while trying things out
 *.exe
